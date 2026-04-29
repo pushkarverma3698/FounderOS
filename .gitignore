@@ -1,0 +1,45 @@
+# FounderOS Git Ignore
+
+# ── Environment & Secrets ──────────────────────────────────
+.env
+.c-suite/.env
+*.key
+*.pem
+
+# ── Python ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+env/
+venv/
+ENV/
+
+# ── OS Specific ─────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ── Temporary & Logs ────────────────────────────────────────
+.scratchpad/
+*.jsonl
+*.log
+.tmp/
+tmp/
+
+# ── Tooling ────────────────────────────────────────────────
+.vscode/
+.idea/
+.claude/
+.gemini/
+
+# ── Application Data ───────────────────────────────────────
+docs/memories/
+chroma_db/
+sqlite_states.db
+sqlite_jobs.db
