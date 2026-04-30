@@ -14,7 +14,7 @@ V8 Fixes:
      lifecycle, the CEO response is returned immediately.
 """
 
-import asyncio, sys, os, logging, time
+import asyncio, sys, os, logging, time, re
 from typing import Callable, Awaitable, Any
 sys.path.insert(0, str(os.path.dirname(__file__)))
 
@@ -29,6 +29,10 @@ from core.config import (
 import os as _os
 TOPIC_REVENUE = int(_os.getenv("TOPIC_REVENUE", "214"))
 from core.orchestrator import graph
+from core.grounding import build_grounded_system, TOPIC_COLLECTIONS
+from core.smart_router import route as smart_route
+from core.tools import agent_write_and_run, execute_python
+from core.registry import get_agent
 
 logging.basicConfig(
     level=logging.INFO,
@@ -88,27 +92,56 @@ dp.message.middleware(LoggingMiddleware())
 def get_thread_config(thread_id: str) -> dict:
     return {"configurable": {"thread_id": thread_id}}
 
+def _safe_md(text: str) -> str:
+    """
+    Convert LLM output into Telegram-safe MarkdownV1.
+    Strips unclosed bold/italic/code markers that cause entity parse errors.
+    Strategy: keep only *word* and `code` patterns that are clearly closed;
+    everything else is rendered as plain text.
+    """
+    import re
+    s = str(text)
+    # Replace MarkdownV2-only escapes (Telegram v1 doesn't need them)
+    s = re.sub(r'\\([_*\[\]()~`>#+\-=|{}.!])', r'\1', s)
+    # Remove triple-backtick code blocks (often malformed from LLM output)
+    s = re.sub(r'```[\w]*\n?([\s\S]*?)```', lambda m: m.group(1).strip(), s)
+    # Remove ** bold (Telegram Markdown v1 only supports single *)
+    s = re.sub(r'\*\*(.+?)\*\*', r'*\1*', s, flags=re.S)
+    # Remove any remaining unclosed * or _ that span multiple lines (these break Telegram)
+    # Keep only *word* patterns where open+close are on the same line
+    def fix_stars(line):
+        count = line.count('*')
+        if count % 2 != 0:
+            line = line.replace('*', '')
+        return line
+    s = '\n'.join(fix_stars(line) for line in s.split('\n'))
+    # Remove [ without matching ] (link syntax crashes parser)
+    s = re.sub(r'\[([^\]]*?)(?!\])', r'\1', s)
+    return s[:4090]
+
+
 async def send_to_topic(topic_id: int, text: str):
-    """Send a message into a specific Telegram topic. Truncates at Telegram's 4096 char limit."""
+    """Send a message into a specific Telegram topic. Always succeeds — never drops silently."""
+    safe_text = _safe_md(text)
     try:
-        text_to_send = str(text)[:4090]
         await bot.send_message(
             chat_id=NORMALISED_CHAT_ID,
-            text=text_to_send,
+            text=safe_text,
             message_thread_id=topic_id,
             parse_mode="Markdown"
         )
     except Exception as e:
-        log.error(f"[Gateway] Failed to send to topic {topic_id}: {e}")
-        # Fallback: try without markdown if formatting caused error
+        log.error(f"[Gateway] Markdown send failed to topic {topic_id}: {e}")
+        # Final fallback: strip all formatting and send plain text
+        plain = re.sub(r'[*_`]', '', str(text))[:4090]
         try:
             await bot.send_message(
                 chat_id=NORMALISED_CHAT_ID,
-                text=str(text)[:4090],
+                text=plain,
                 message_thread_id=topic_id,
             )
         except Exception as e2:
-            log.error(f"[Gateway] Fallback send also failed: {e2}")
+            log.error(f"[Gateway] Plain fallback also failed: {e2}")
 
 
 from core.registry import (
@@ -117,141 +150,195 @@ from core.registry import (
 
 async def quick_reply(msg: Message, text_input: str):
     """
-    Fast path: For quick informational queries that don't need the full
-    4-phase orchestrator lifecycle (e.g. 'what time is it?', 'summarise X').
-    Uses call_md directly and replies in ~2 seconds.
+    Production smart-router path:
+      1. Smart-router LLM classifies the task → {mode, agent, company, needs_code}
+      2. ANSWER mode  → grounded reply from ChromaDB (zero hallucination)
+      3. EXECUTE mode → agent writes Python script, executes, posts result
+      4. ORCHESTRATE mode → full LangGraph 4-phase pipeline
     """
+    decision = smart_route(text_input)
+    mode = decision["mode"]
+
+    # ── ORCHESTRATE: lean direct-agent execution (no approval gates) ─────
+    if mode == "orchestrate":
+        log.info(f"[Gateway] Orchestrate path → {decision['agent']}")
+        return False  # let caller run process_orchestrator_reply
+
     all_agents = get_all_agents()
     agent_names = ", ".join([a.name for a in all_agents])
-    
-    # ── Quick-Routing Decision — Bypass Kai for complex work ─────────────
-    # Standardised complex patterns that MUST go to LangGraph
-    complex_triggers = ["code", "create", "proposal", "submit", "audit", "research", "scrap", "write a", "implement"]
-    input_lower = text_input.lower()
-    
-    if any(trigger in input_lower for trigger in complex_triggers) and len(text_input) > 15:
-        log.info(f"[Gateway] Complex task detected: '{text_input[:50]}...'. Routing to full pipeline.")
-        return False
 
-    system = f"""You are Kai, the AI Chief of Staff for Pushkar Verma's autonomous business empire.
+    # ── EXECUTE: agent writes & runs a real Python script ─────────────────
+    # If execute mode but no code needed, do a focused grounded reply from that agent's voice.
+    if mode == "execute" and not decision["needs_code"]:
+        agent_name = decision["agent"]
+        agent = get_agent(agent_name)
+        cols = list(agent.allowed_collections) if agent else ["social_mem"]
+        sysp = build_grounded_system(
+            role_prompt=f"You are the '{agent_name}' agent in FounderOS. Produce a real deliverable from FACTS.",
+            collections=cols, query=text_input,
+        )
+        response = (call_md(text_input, system=sysp) or "").strip()
+        await send_to_topic(TOPIC_BOARDROOM, f"📝 *{agent_name}:* {response[:3500]}")
+        return True
 
-You manage TWO companies:
-  1. TURICKS — AI/software agency.
-  2. NAGGAR RETREAT — Himalayan farm + homestay.
+    if mode == "execute" and decision["needs_code"]:
+        agent_name = decision["agent"]
+        await send_to_topic(
+            TOPIC_BOARDROOM,
+            f"🛠️ *Kai:* Dispatching `{agent_name}` to write & execute a script...",
+        )
+        # Build a grounded brief for the script-writer
+        agent = get_agent(agent_name)
+        cols = list(agent.allowed_collections) if agent else ["social_mem"]
+        grounded_brief = build_grounded_system(
+            role_prompt=f"You are the '{agent_name}' agent. Goal: {text_input}",
+            collections=cols,
+            query=text_input,
+        )
+        try:
+            result = agent_write_and_run(agent_name, text_input + "\n\nContext:\n" + grounded_brief, call_md)
+        except Exception as e:
+            log.exception("agent_write_and_run failed")
+            await send_to_topic(TOPIC_BOARDROOM, f"❌ *Execution error:* `{type(e).__name__}: {e}`")
+            return True
 
-You also manage a swarm of {len(all_agents)} specialist agents:
-{agent_names}
+        status = "✅" if result.get("success") else "⚠️"
+        out = (result.get("stdout") or "").strip()[:1500]
+        err = (result.get("stderr") or "").strip()[:600]
+        body = f"{status} *{agent_name}* exit={result.get('exit_code')}"
+        if out: body += f"\n\n*stdout:*\n```\n{out}\n```"
+        if err: body += f"\n\n*stderr:*\n```\n{err}\n```"
+        await send_to_topic(TOPIC_BOARDROOM, body)
+        return True
 
-Follow these STRICT rules:
-1. Answer concisely in 2-4 lines.
-2. If the Chairman asks to "list agents", provide them categorized by company.
-3. If the request is a complex business command (coding, proposals, audits), reply EXACTLY: 'Routing to full orchestration pipeline...'
-4. NEVER invent a plan. Never generate numbered lists of future actions."""
-    
-    response = call_md(text_input, system=system)
-    
-    # Second gate: Ensure we don't return a hallucinated plan from a small model
-    if "Routing to full orchestration pipeline" in response or len(response.split("\n")) > 10:
-        return False  # Force to orchestrator
-    
-    await send_to_topic(TOPIC_BOARDROOM, f"🤖 *Kai:* {response}")
+    # ── ANSWER: grounded reply ────────────────────────────────────────────
+    # For Naggar-specific queries, pull directly from naggar_mem
+    from core.grounding import recall_facts
+    tl = text_input.lower()
+    extra_facts = ""
+    if any(w in tl for w in ["naggar", "retreat", "farm", "homestay", "booking", "raspberry"]):
+        nfacts = recall_facts("naggar_mem", text_input, n=3)
+        if nfacts:
+            extra_facts = "NAGGAR FACTS:\n" + "\n---\n".join(nfacts[:3])
+    if any(w in tl for w in ["career", "job", "role", "salary", "experience", "resume", "cv", "work"]):
+        cfacts = recall_facts("career_mem", text_input, n=3)
+        if cfacts:
+            extra_facts += "\nCAREER FACTS:\n" + "\n---\n".join(cfacts[:3])
+
+    role = (
+        "You are Kai, AI Chief of Staff for Pushkar Verma.\n"
+        f"COMPANIES: Turicks (AI agency, turicks.com) | Naggar Retreat (Himalayan farm + homestay)\n"
+        f"FULL AGENT ROSTER ({len(all_agents)} agents): {agent_names}\n"
+        "When asked to list agents, list them all from the roster above — they are real."
+    )
+    system = build_grounded_system(
+        role_prompt=role,
+        collections=TOPIC_COLLECTIONS["boardroom"],
+        query=text_input,
+        extra_facts=extra_facts,
+    )
+    response = call_md(text_input, system=system) or ""
+    response = response.strip()
+    if not response or len(response) < 3:
+        response = "No data in memory for this. Should I dispatch a research agent?"
+    await send_to_topic(TOPIC_BOARDROOM, f"🤖 *Kai:* {response[:3500]}")
     return True
 
 
 async def process_orchestrator_reply(msg: Message, text_input: str):
-    """Pass input through the full 4-phase LangGraph orchestrator with real-time status updates."""
-    user_thread = f"boardroom_{msg.from_user.id}"
-    config = get_thread_config(user_thread)
-    
-    # 1. Start with a "Live Status" message
-    status_msg = await bot.send_message(
-        chat_id=NORMALISED_CHAT_ID,
-        text="⚙️ *Kai: Initialising FounderOS Swarm...*",
-        message_thread_id=TOPIC_BOARDROOM,
-        parse_mode="Markdown"
-    )
+    """
+    Lean orchestration: research → synthesise → deliver.
+    Replaces the broken 4-phase LangGraph pipeline for real tasks.
+    No approval gates. Works entirely on local Qwen.
+    """
+    decision = smart_route(text_input)
+    agent_name = decision.get("agent", "scrum_pm")
+    company    = decision.get("company", "cross")
 
-    async def update_status(new_text: str):
-        try:
-            await bot.edit_message_text(
-                chat_id=NORMALISED_CHAT_ID,
-                message_id=status_msg.message_id,
-                text=f"⚙️ *Kai:* {new_text}",
-                parse_mode="Markdown"
-            )
-        except Exception:
-            pass # Ignore if duplicate text or rate limit
-
-    node_labels = {
-        "ceo": "🔍 Classifying request & identifying companies...",
-        "research_node": "🌐 Dispatching parallel research agents...",
-        "gate_research": "📊 Collating research findings...",
-        "synthesis_node": "🧠 Synthesizing execution plan...",
-        "gate_synthesis": "📝 Finalising implementation spec...",
-        "implementation_node": "🛠️ Executing specialist implementation...",
-        "gate_implementation": "🧪 Preparing verification suite...",
-        "verification_node": "⚖️ Performing gatekeeper quality audit...",
-        "finalize": "✅ Task processing complete."
-    }
+    # Show typing indicator
+    await send_to_topic(TOPIC_BOARDROOM,
+        f"⚙️ Kai dispatching *{agent_name}* — working on it...")
 
     try:
-        current_state = {
-            "messages": [text_input],
-            "approved": False,
-            "pending_action": "",
-            "result": "",
-            "company": "",
-            "task": "",
-            "research_results": "",
-            "synthesis_result": "",
-            "implementation_result": "",
-            "verification_result": "",
-            "research_approved": False,
-            "synthesis_approved": False,
-            "implementation_approved": False,
-            "refined_once": False,
-            "gatekeeper_critique": "",
-            "denial_count": 0,
-            "denial_triggered": False
-        }
+        agent_obj = get_agent(agent_name)
+        cols = list(agent_obj.allowed_collections) if agent_obj else ["social_mem", "turicks_mem"]
 
-        last_node = ""
-        # We use stream() to get intermediate node transitions
-        for event in graph.stream(current_state, config):
-            for node_name, state_delta in event.items():
-                if node_name in node_labels:
-                    await update_status(node_labels[node_name])
-                last_node = node_name
-                current_state.update(state_delta)
+        # Always add career_mem for job/cover-letter agents
+        JOB_AGENTS = {"cover_letter_writer", "resume_tailor", "ats_optimizer", "job_coordinator",
+                      "outreach_agent_personal", "interview_researcher", "liaison_agent"}
+        if agent_name in JOB_AGENTS and "career_mem" not in cols:
+            cols = cols + ["career_mem"]
 
-        reply = current_state.get("result", "✅ Done.")
+        # ── Phase 1: Recall relevant context ──────────────────────────────────
+        from core.grounding import recall_facts
+        facts_parts = []
+        for col in cols:
+            for doc in recall_facts(col, text_input, n=3):
+                facts_parts.append(f"[{col}] {doc.strip()[:800]}")
+        facts_block = "\n---\n".join(facts_parts) if facts_parts else "(no relevant memories)"
 
-        if "APPROVAL REQUIRED" in reply:
-            PENDING_APPROVALS[user_thread] = {
-                "thread_id": user_thread,
-                "timestamp": time.time(),
-                "details": reply,
-                "config": config,
-            }
-            # Remove status message and send fresh approval request
-            await bot.delete_message(NORMALISED_CHAT_ID, status_msg.message_id)
-            await send_to_topic(TOPIC_BOARDROOM, reply)
+        # ── Phase 2: Research if needed ───────────────────────────────────────
+        extra_research = ""
+        if decision.get("needs_research"):
+            research_prompt = (
+                f"TASK: {text_input}\n\n"
+                f"You have access to these memory facts:\n{facts_block[:3000]}\n\n"
+                "Summarise the key data points and gaps relevant to this task in 150 words."
+            )
+            extra_research = call_md(research_prompt, max_tokens=300) or ""
+
+        # ── Phase 3: Execute / generate deliverable ───────────────────────────
+        # Detect if this is an analytics/audit task that needs real live data
+        needs_live_data = any(w in text_input.lower() for w in
+                              ["analytics", "engagement", "impressions", "metrics", "performance",
+                               "views", "followers", "reach", "click", "conversion"])
+
+        live_data_note = (
+            "\nIMPORTANT: You do NOT have live analytics data. "
+            "State this clearly upfront, then use the content strategy in <MEMORY> to give "
+            "concrete, specific recommendations based on what you know about the content plan, "
+            "brand voice, and posting schedule. Make recommendations specific, not generic.\n"
+            if needs_live_data else ""
+        )
+
+        system = (
+            f"You are the '{agent_name}' agent in FounderOS — Pushkar Verma's autonomous business OS.\n"
+            "Deliver CONCRETE, SPECIFIC, ACTIONABLE output. No generic advice. No padding.\n"
+            + live_data_note
+            + "\nRULES:\n"
+            "- Use ONLY facts from <MEMORY> below for specific claims.\n"
+            "- If a number/date/name is not in <MEMORY>, flag it as 'not in memory' — never invent it.\n"
+            "- If you have no relevant memory at all, say so directly and suggest what data to collect.\n\n"
+            "<MEMORY>\n" + facts_block[:5000] + "\n</MEMORY>\n"
+            + (f"\n<RESEARCH>\n{extra_research}\n</RESEARCH>" if extra_research else "")
+            + "\n\nStart directly with your deliverable. No preamble."
+        )
+
+        result = call_md(text_input, system=system, max_tokens=600) or ""
+        result = result.strip()
+
+        if not result or len(result) < 10:
+            result = f"I completed the {agent_name} analysis but the model returned empty output. Please retry or check model availability."
+
+        # ── Phase 4: Route to the right topic ────────────────────────────────
+        header = f"📋 *{agent_name}* result:\n\n"
+        full_reply = header + result
+        if company == "turicks":
+            await send_to_topic(TOPIC_TURICKS, full_reply[:4000])
+            await send_to_topic(TOPIC_BOARDROOM,
+                f"✅ Done — full result in *#Turicks_Floor*")
+        elif company == "naggar":
+            await send_to_topic(TOPIC_NAGGAR, full_reply[:4000])
+            await send_to_topic(TOPIC_BOARDROOM,
+                f"✅ Done — full result in *#Naggar_HQ*")
         else:
-            company = current_state.get("company", "")
-            await update_status("🏁 Transferring results to specialized floor...")
-            
-            if company == "turicks":
-                await send_to_topic(TOPIC_TURICKS, f"📋 *Turicks Task Result*\n\n{reply}")
-                await update_status("✅ Task complete → result sent to *#Turicks_Floor*.")
-            elif company == "naggar":
-                await send_to_topic(TOPIC_NAGGAR, f"🌿 *Naggar Task Result*\n\n{reply}")
-                await update_status("✅ Task complete → result sent to *#Naggar_HQ*.")
-            else:
-                await update_status(f"✅ *Task Complete:*\n\n{reply}")
+            # cross-company or general — reply directly in Boardroom
+            await send_to_topic(TOPIC_BOARDROOM, full_reply[:4000])
 
     except Exception as e:
-        log.exception("Graph stream failed")
-        await update_status(f"❌ *Orchestrator Error:* `{type(e).__name__}`")
+        log.exception("process_orchestrator_reply failed")
+        await send_to_topic(TOPIC_BOARDROOM,
+            f"❌ {agent_name} failed: {type(e).__name__}: {str(e)[:200]}")
 
 
 # ─── Message Handlers ─────────────────────────────────────────────────────────
@@ -274,75 +361,69 @@ async def handle_message(msg: Message):
     if topic_id == TOPIC_BOARDROOM:
         user_thread = f"boardroom_{msg.from_user.id}"
 
-        # Approval YES handler
-        if text.strip().upper() == "YES" and user_thread in PENDING_APPROVALS:
+        # Approval YES handler — re-run the pending task
+        if text.strip().upper() in ("YES", "Y", "GO", "OK", "PROCEED") and user_thread in PENDING_APPROVALS:
             pending = PENDING_APPROVALS.pop(user_thread)
-            config  = pending["config"]
-            details = pending.get("details", "")
-            # Infer which phase gate is pending from the message body and set only
-            # the relevant approval flag. Setting them all at once caused later
-            # phases to auto-skip on their own approval prompts.
-            update: dict = {"approved": True}
-            if "Synthesis" in details or "Synthesize" in details:
-                update["research_approved"] = True
-            elif "Implementation" in details or "Implement" in details:
-                update["synthesis_approved"] = True
-            elif "Verification" in details or "Verify" in details:
-                update["implementation_approved"] = True
-            else:
-                update["research_approved"] = True
-            graph.update_state(config, update)
-            await send_to_topic(TOPIC_BOARDROOM, "✅ Approved! Resuming pipeline...")
-            try:
-                result_state = graph.invoke(None, config)
-                reply = result_state.get("result", "✅ Action executed successfully.")
-                await send_to_topic(TOPIC_BOARDROOM, reply)
-            except Exception as e:
-                await send_to_topic(TOPIC_BOARDROOM, f"❌ Resume failed: `{e}`")
+            original_task = pending.get("task", "")
+            await send_to_topic(TOPIC_BOARDROOM, f"✅ Approved — re-executing: _{original_task[:80]}_")
+            await process_orchestrator_reply(msg, original_task)
             return
 
-        # Normal command — try quick path first, then full orchestrator
-        await send_to_topic(TOPIC_BOARDROOM, "⚙️ *Kai is processing...*")
+        # Normal command — try quick path first, then lean orchestrator
         handled = await quick_reply(msg, text)
         if not handled:
+            # Store task so "YES" handler can re-run it if needed
+            PENDING_APPROVALS[user_thread] = {"task": text, "timestamp": time.time()}
             await process_orchestrator_reply(msg, text)
 
-    # ── THINK TANK: Research queries ──────────────────────────────────────────
+    # ── THINK TANK: Research queries (grounded) ──────────────────────────────
     elif topic_id == TOPIC_THINK_TANK:
         await send_to_topic(TOPIC_THINK_TANK, "⚙️ *Kai is researching...*")
-        response = call_md(text, system="You are a deep research analyst for FounderOS. Provide a thorough, structured analysis.")
+        sys_p = build_grounded_system(
+            role_prompt="You are the FounderOS Deep Research analyst. Provide structured, fact-grounded analysis.",
+            collections=TOPIC_COLLECTIONS["think_tank"], query=text,
+        )
+        response = call_md(text, system=sys_p)
         await send_to_topic(TOPIC_THINK_TANK, f"🔬 *Research Result:*\n\n{response}")
 
-    # ── TURICKS FLOOR: Direct agent queries ───────────────────────────────────
+    # ── TURICKS FLOOR: Grounded MD ────────────────────────────────────────────
     elif topic_id == TOPIC_TURICKS:
         await send_to_topic(TOPIC_TURICKS, "⚙️ *Turicks MD is processing...*")
-        system = "You are the Managing Director of Turicks, an AI software agency. Answer questions about projects, bids, and strategy."
-        response = call_md(text, system=system)
+        sys_p = build_grounded_system(
+            role_prompt="You are the MD of Turicks (AI software agency). Answer using ONLY the FACTS block.",
+            collections=TOPIC_COLLECTIONS["turicks"], query=text,
+        )
+        response = call_md(text, system=sys_p)
         await send_to_topic(TOPIC_TURICKS, f"💼 *Turicks MD:*\n\n{response}")
 
-    # ── NAGGAR HQ: Direct agent queries ───────────────────────────────────────
+    # ── NAGGAR HQ: Grounded MD ────────────────────────────────────────────────
     elif topic_id == TOPIC_NAGGAR:
         await send_to_topic(TOPIC_NAGGAR, "⚙️ *Naggar MD is processing...*")
-        system = "You are the Managing Director of Naggar Retreat, a Himalayan raspberry farm and homestay. Answer questions about bookings, farming, and strategy."
-        response = call_md(text, system=system)
+        sys_p = build_grounded_system(
+            role_prompt="You are the MD of Naggar Retreat (Himalayan farm + homestay). Use ONLY the FACTS block.",
+            collections=TOPIC_COLLECTIONS["naggar"], query=text,
+        )
+        response = call_md(text, system=sys_p)
         await send_to_topic(TOPIC_NAGGAR, f"🌿 *Naggar MD:*\n\n{response}")
 
-    # ── SOCIAL COMMAND: Social media tasks ────────────────────────────────────
+    # ── SOCIAL COMMAND: Grounded social handler ───────────────────────────────
     elif topic_id == TOPIC_SOCIAL:
         await send_to_topic(TOPIC_SOCIAL, "⚙️ *Social team is processing...*")
-        system = "You are the FounderOS Social Media Handler. Draft engaging posts, captions, and social strategy."
-        response = call_md(text, system=system)
+        sys_p = build_grounded_system(
+            role_prompt="You are the FounderOS Social Handler. Draft posts that match the brand voice in FACTS.",
+            collections=TOPIC_COLLECTIONS["social"], query=text,
+        )
+        response = call_md(text, system=sys_p)
         await send_to_topic(TOPIC_SOCIAL, f"📱 *Social Team:*\n\n{response}")
 
-    # ── REVENUE COMMAND CENTRE: Pipeline + Upwork + Outreach ─────────────────
+    # ── REVENUE COMMAND CENTRE: Grounded revenue MD ──────────────────────────
     elif topic_id == TOPIC_REVENUE:
         await send_to_topic(TOPIC_REVENUE, "⚙️ *Revenue team is processing...*")
-        system = (
-            "You are the FounderOS Revenue MD for Turicks AI Agency. "
-            "You manage the Upwork pipeline, LinkedIn outreach, and CRM. "
-            "Answer questions about leads, proposals, revenue, and client acquisition strategy."
+        sys_p = build_grounded_system(
+            role_prompt="You are the FounderOS Revenue MD (Turicks pipeline, LinkedIn outreach, CRM). Ground answers in FACTS.",
+            collections=TOPIC_COLLECTIONS["revenue"], query=text,
         )
-        response = call_md(text, system=system)
+        response = call_md(text, system=sys_p)
         await send_to_topic(TOPIC_REVENUE, f"💰 *Revenue MD:*\n\n{response}")
 
     # ── UNKNOWN TOPIC: Catch-all redirect ─────────────────────────────────────
