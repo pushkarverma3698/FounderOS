@@ -76,9 +76,11 @@ ALWAYS_ALLOW_PATTERNS = [
     r"^echo\s+",
     r"^python\s+-m\s+pytest",
     r"^python\s+-c\s+['\"]print",
-    r"^pip\s+(list|show|freeze)",          # package listing
-    r"^\S+/pip\s+(list|show|freeze)",      # venv pip list
-    r"^file\s+",                           # file type check
+    r"^pip\s+(list|show|freeze)",                  # package listing
+    r"^\S+/pip\s+(list|show|freeze)",              # venv pip list
+    r"^\S+/python\s+/tmp/founderos_agent_scripts", # agent sandbox scripts
+    r"^\S+/python\s+-c\s+",                        # inline python
+    r"^file\s+",                                   # file type check
 ]
 
 # Dynamically loaded via registry now

@@ -98,26 +98,67 @@ def execute_bash(cmd: str, agent_name: str = "agent", timeout: int = 30) -> dict
         return {"success": False, "stdout": "", "stderr": f"{type(e).__name__}: {e}", "exit_code": -3}
 
 
-SYSTEM_TEMPLATE = (
-    "You are a Python automation engineer agent in FounderOS. Write ONE complete script.\n\n"
-    "ENVIRONMENT (already set up — just use it):\n"
-    "  • PYTHONPATH includes .c-suite (so `from core.config import call_md` works)\n"
-    "  • Available: chromadb, httpx, dotenv, openai, langchain, aiogram\n\n"
-    "REQUIRED BOILERPLATE — start every script with:\n"
-    "  import sys, os\n"
-    "  from dotenv import load_dotenv\n"
-    "  load_dotenv('/Users/pushkarverma/Documents/Coding stuff/FounderOS/.c-suite/.env', override=True)\n"
-    "  import chromadb\n"
-    "  client = chromadb.PersistentClient(path='/Users/pushkarverma/Documents/Coding stuff/FounderOS/.c-suite/memory/chroma_data')\n\n"
-    "OUTPUT RULES:\n"
-    "  • Output ONLY Python code. No markdown fences. No ```python. No prose before or after.\n"
-    "  • Print results to stdout with print(). Do not swallow errors.\n"
-    "  • Use `client.list_collections()` to enumerate (NOT get_collections — that does not exist).\n"
-    "  • Each Collection has .name and .count() — use them.\n"
+_SCRIPT_PREAMBLE = """\
+import sys, os
+sys.path.insert(0, '/Users/pushkarverma/Documents/Coding stuff/FounderOS/.c-suite')
+from dotenv import load_dotenv
+load_dotenv('/Users/pushkarverma/Documents/Coding stuff/FounderOS/.c-suite/.env', override=True)
+from core.agent_toolkit import (
+    web_search, fetch_page,
+    linkedin_get_my_posts, linkedin_get_profile, linkedin_post,
+    store_memory, recall_memory, list_all_collections,
 )
+import chromadb, httpx
+CHROMA_PATH = '/Users/pushkarverma/Documents/Coding stuff/FounderOS/.c-suite/memory/chroma_data'
+"""
+
+SYSTEM_TEMPLATE = """\
+You are a Python automation engineer for FounderOS. Write a COMPLETE, SELF-CONTAINED Python script.
+
+COPY THIS EXACT HEADER at the start of your script (do not modify it):
+```
+import sys, os
+sys.path.insert(0, '/Users/pushkarverma/Documents/Coding stuff/FounderOS/.c-suite')
+from dotenv import load_dotenv
+load_dotenv('/Users/pushkarverma/Documents/Coding stuff/FounderOS/.c-suite/.env', override=True)
+from core.agent_toolkit import (
+    web_search, fetch_page, linkedin_get_my_posts, linkedin_get_profile,
+    linkedin_post, store_memory, recall_memory, list_all_collections,
+)
+import chromadb, httpx
+CHROMA_PATH = '/Users/pushkarverma/Documents/Coding stuff/FounderOS/.c-suite/memory/chroma_data'
+```
+
+AVAILABLE FUNCTIONS (from core.agent_toolkit):
+- web_search(query, n=5)          → list[{title, url, snippet}]
+- fetch_page(url)                  → str (clean page text)
+- linkedin_get_my_posts(count=10)  → list[{text, source, likes}]  (reads social_mem, API read unavailable)
+- linkedin_get_profile()           → dict (from memory)
+- linkedin_post(text)              → {success, post_id, url}  (POSTS to LinkedIn — requires confirmation)
+- store_memory(col, doc_id, text)  → bool
+- recall_memory(col, query, n=5)   → list[str]
+- list_all_collections()           → list[{name, count}]
+
+RULES:
+1. Start with the exact header above, then write your task logic.
+2. NEVER use selenium, playwright, requests, pandas, torch, openai.
+3. print() every result so output appears in stdout.
+4. LinkedIn API read is unavailable — use linkedin_get_my_posts() which reads memory.
+5. Output ONLY Python code. No markdown fences. No prose before or after.
+
+EXAMPLE:
+import sys, os
+sys.path.insert(0, '/Users/pushkarverma/Documents/Coding stuff/FounderOS/.c-suite')
+from dotenv import load_dotenv
+load_dotenv('/Users/pushkarverma/Documents/Coding stuff/FounderOS/.c-suite/.env', override=True)
+from core.agent_toolkit import web_search
+results = web_search('AI agents LangGraph', n=3)
+for r in results:
+    print(r['title'], '|', r['snippet'][:100])
+"""
 
 
-def agent_write_and_run(agent_name: str, task: str, llm_caller, max_retries: int = 2) -> dict:
+def agent_write_and_run(agent_name: str, task: str, llm_caller, max_retries: int = 1) -> dict:
     """
     Self-correcting loop:
       1. Ask LLM to write a Python script.
@@ -139,7 +180,10 @@ def agent_write_and_run(agent_name: str, task: str, llm_caller, max_retries: int
             )
         raw = llm_caller(user_prompt, system=SYSTEM_TEMPLATE) or ""
         code = _extract_python_code(raw)
-        result = execute_python(code, agent_name=agent_name, timeout=120)
+        # If the model forgot the preamble, inject it
+        if "from core.agent_toolkit" not in code and "sys.path.insert" not in code:
+            code = _SCRIPT_PREAMBLE + "\n" + code
+        result = execute_python(code, agent_name=agent_name, timeout=45)
         result["generated_code"] = code
         result["attempt"] = attempt + 1
         history.append({"code": code, "stderr": result.get("stderr", "")})
