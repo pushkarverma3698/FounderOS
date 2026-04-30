@@ -48,6 +48,7 @@ class FounderState(TypedDict):
     # Approval Gates
     approved: bool            # Generic approval flag from Telegram gateway
     pending_action: str       # Holds pending action details
+    auto_approve: bool        # V8.3: Skip gates for simple/safe tasks
     research_approved: bool
     synthesis_approved: bool
     implementation_approved: bool
@@ -80,20 +81,31 @@ CRITICAL: You MUST classify the company as EXACTLY one of these lowercase string
 Assign the most relevant agent (e.g., 'seo_specialist' for website SEO, 'senior_dev' for code, etc.)
 
 Output ONLY valid JSON, no markdown fences:
-{"company": "turicks|naggar|cross", "task": "...", "agent": "seo_specialist|...", "direct_answer": null}"""
+{
+  "company": "turicks|naggar|cross", 
+  "task": "...", 
+  "agent": "...", 
+  "auto_approve": true/false,
+  "direct_answer": null
+}
+
+NOTE: Set "auto_approve": true for informational queries, simple research, or status checks. 
+Set "auto_approve": false for code changes, financial tasks, or complex implementations.
+"""
 
     raw = call_ceo(prompt=str(user_msg), system=ceo_system)
     try:
         parsed = repair_json(raw, return_objects=True) if repair_json else json.loads(raw)
         company = parsed.get("company", "cross")
-        # Normalise: only allow valid company identifiers
         if company not in ("turicks", "naggar", "cross"):
             company = "cross"
-        state["company"] = company
-        state["task"]    = parsed.get("task", str(user_msg))
+        state["company"]      = company
+        state["task"]         = parsed.get("task", str(user_msg))
+        state["auto_approve"] = parsed.get("auto_approve", False)
     except Exception:
-        state["company"] = "cross"
-        state["task"]    = str(user_msg)
+        state["company"]      = "cross"
+        state["task"]         = str(user_msg)
+        state["auto_approve"] = False
         
     state["refined_once"] = False
     state["gatekeeper_critique"] = ""
@@ -131,6 +143,10 @@ Return ONLY a valid JSON list of strings."""
 
 
 def gate_research(state: FounderState) -> FounderState:
+    if state.get("auto_approve"):
+        state["research_approved"] = True
+        return state
+
     if not state.get("research_approved"):
         state["result"] = "⏸️ APPROVAL REQUIRED: Research complete. Reply YES to proceed to Synthesis."
     return state
@@ -159,6 +175,10 @@ Synthesize the research and create a strict, highly detailed Implementation Spec
 
 
 def gate_synthesis(state: FounderState) -> FounderState:
+    if state.get("auto_approve"):
+        state["synthesis_approved"] = True
+        return state
+
     if not state.get("synthesis_approved"):
         state["result"] = "⏸️ APPROVAL REQUIRED: Synthesis complete. Reply YES to proceed to Implementation:\n\n" + state["synthesis_result"][:500] + "..."
     return state

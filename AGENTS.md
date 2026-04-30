@@ -8,6 +8,7 @@ FounderOS is an **autonomous AI empire architecture** orchestrating a 27-agent m
 - **Chairman:** Pushkar Verma
 - **Core Architecture:** Hierarchical Coordinator Swarms (V8 Engine).
 - **Stack:** LangGraph + MCP + Claude 4.5 / Gemini 2.5 / **M4-Native MLX Qwen 2.5 (4-bit)**
+- **Status:** 🚀 **FORCED LOCAL MODE ACTIVE** — All agents prioritized to local hardware.
 
 ## Project Root
 ```

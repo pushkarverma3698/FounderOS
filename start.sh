@@ -73,11 +73,15 @@ python -c "import apscheduler" 2>/dev/null || {
 # Qwen3-8B: best JSON/tool-calling on M4 16GB (4.1 GB weights, 9.4 GB headroom)
 LOCAL_MODEL_ID="mlx-community/Qwen2.5-7B-Instruct-4bit"
 QWEN3_SNAP=~/.cache/huggingface/hub/models--mlx-community--Qwen3-8B-4bit/snapshots
-if [ -d "$QWEN3_SNAP" ] && [ "$(ls -A $QWEN3_SNAP 2>/dev/null)" ]; then
-  LOCAL_MODEL_ID="mlx-community/Qwen3-8B-4bit"
-  echo "🧠  Qwen3-8B detected — using best local model."
+# V8.3: Favor standard Instruct model for high-speed Telegram UX
+# Only use Qwen3 if specifically requested or if 7B is missing.
+if [ ! -d ~/.cache/huggingface/hub/models--mlx-community--Qwen2.5-7B-Instruct-4bit/snapshots ]; then
+  if [ -d "$QWEN3_SNAP" ]; then
+    LOCAL_MODEL_ID="mlx-community/Qwen3-8B-4bit"
+    echo "🧠  7B missing — using Qwen3-8B (Reasoning model, may be slow)."
+  fi
 else
-  echo "🧠  Qwen3-8B not ready — falling back to Qwen2.5-7B."
+  echo "🚀  Using high-speed Qwen2.5-7B Instruct."
 fi
 echo "    Model: $LOCAL_MODEL_ID"
 python -m mlx_lm.server \
@@ -92,7 +96,7 @@ sleep 3
 # ── PROCESS 2: Telegram Gateway ───────────────────────────────────────────────
 echo ""
 echo "📱  Starting Telegram Gateway..."
-cd ~/Documents/Coding stuff/FounderOS/.c-suite
+cd "$HOME/Documents/Coding stuff/FounderOS/.c-suite"
 python -m bridges.telegram_gateway &
 TELEGRAM_PID=$!
 echo "   Telegram Gateway PID: $TELEGRAM_PID"

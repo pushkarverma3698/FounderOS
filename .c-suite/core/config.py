@@ -88,59 +88,57 @@ TOPIC_NAGGAR       = int(os.getenv("TOPIC_NAGGAR",     "0"))  # #Naggar_HQ      
 TOPIC_SOCIAL       = int(os.getenv("TOPIC_SOCIAL",     "6"))  # #Social_Command (thread 6 — confirmed)
 
 # ════════════════════════════════════════════════════════════════════════════════
+# LOCAL MODEL CONFIG (M4 Optimized)
+# ════════════════════════════════════════════════════════════════════════════════
+# Qwen3-8B: best JSON/tool-calling on M4 16GB (4.1GB weights, 9.4GB headroom).
+# Falls back to 7B if 8B not yet downloaded.
+import os as _os
+_qwen2_5_7b_path = _os.path.expanduser("~/.cache/huggingface/hub/models--mlx-community--Qwen2.5-7B-Instruct-4bit/snapshots")
+LOCAL_MODEL  = (
+    "mlx-community/Qwen2.5-7B-Instruct-4bit"
+    if _os.path.isdir(_qwen2_5_7b_path) and any(_os.scandir(_qwen2_5_7b_path))
+    else "mlx-community/Qwen3-8B-4bit"
+)
+LOCAL_URL    = "http://127.0.0.1:8000"
+VIDEO_MODEL  = "veo-2.0-generate-001"
+
+# ════════════════════════════════════════════════════════════════════════════════
 # MODEL REGISTRY — CASCADE CHAINS
 # ════════════════════════════════════════════════════════════════════════════════
 
 CEO_CASCADE = [
-    ("anthropic",    "claude-sonnet-4-6"),                          # Claude Sonnet 4.6 (latest stable)
-    ("google",       "gemini-2.5-pro"),                             # Gemini 2.5 Pro (50 RPD free)
-    ("google",       "gemini-2.0-flash"),                           # Free-tier flash fallback (1500 RPD)
-    ("openrouter",   "meta-llama/llama-3.3-70b-instruct:free"),     # FREE OpenRouter — JSON-capable
-    ("local",        "qwen2.5-7b"),                                 # Last resort (limited JSON ability)
+    ("local",        LOCAL_MODEL),                                  # Forced Local First (M4 Mastery)
+    ("anthropic",    "claude-sonnet-4-6"),
+    ("google",       "gemini-2.5-pro"),
+    ("google",       "gemini-2.0-flash"),
+    ("openrouter",   "meta-llama/llama-3.3-70b-instruct:free"),
 ]
 
 DEEP_RESEARCH_CASCADE = [
-    ("google",       "gemini-2.5-pro"),                               # Primary: Gemini 2.5 Pro (best for research)
-    ("google",       "gemini-2.0-flash"),                             # Flash fallback (faster, still good)
-    ("openrouter",   "deepseek/deepseek-r1:free"),                    # DeepSeek R1 FREE — strong reasoning
-    ("openrouter",   "meta-llama/llama-3.3-70b-instruct:free"),       # LLaMA 70B FREE — solid fallback
-    ("local",        "qwen2.5-7b"),                                   # Last resort — always free
+    ("local",        LOCAL_MODEL),                                  # Forced Local First
+    ("google",       "gemini-2.5-pro"),
+    ("google",       "gemini-2.0-flash"),
+    ("openrouter",   "deepseek/deepseek-r1:free"),
 ]
 
 MD_CASCADE = [
-    ("google",       "gemini-2.0-flash"),                             # Primary: Gemini Flash (FREE — 1500 RPD)
-    ("google",       "gemini-2.0-flash-lite"),                        # Gemini Flash Lite fallback (FREE — 1500 RPD)
-    ("openrouter",   "meta-llama/llama-3.3-70b-instruct:free"),       # OpenRouter FREE — quota-exhaustion fallback
-    ("openrouter",   "google/gemma-3-27b-it:free"),                   # OpenRouter Gemma FREE fallback
-    ("local",        "qwen2.5-7b"),                                   # M4 MLX — always available, always free
+    ("local",        LOCAL_MODEL),                                  # Forced Local First
+    ("google",       "gemini-2.0-flash"),
+    ("google",       "gemini-2.0-flash-lite"),
+    ("openrouter",   "meta-llama/llama-3.3-70b-instruct:free"),
 ]
 
 NANO_CASCADE = [
-    ("google",       "gemini-2.0-flash-lite"),                   # Primary: Flash Lite (fast + free)
-    ("google",       "gemini-2.0-flash"),                        # Flash as nano fallback
-    ("openrouter",   "google/gemma-3-12b-it:free"),              # OpenRouter small free model
-    ("local",        "qwen2.5-7b"),                              # M4 MLX fallback
+    ("local",        LOCAL_MODEL),                                  # Forced Local First
+    ("google",       "gemini-2.0-flash-lite"),
+    ("google",       "gemini-2.0-flash"),
 ]
 
 CODE_CASCADE = [
-    # All FREE — zero cost for coding tasks
-    ("openrouter",   "qwen/qwen3-coder:free"),                        # Best free coding model (verified 2026)
-    ("openrouter",   "openai/gpt-oss-120b:free"),                     # GPT-class free fallback
-    ("openrouter",   "meta-llama/llama-3.3-70b-instruct:free"),       # LLaMA 70B free fallback
-    ("local",        "qwen2.5-7b"),                                   # M4 MLX — always free
+    ("local",        LOCAL_MODEL),                                  # Forced Local First
+    ("openrouter",   "qwen/qwen3-coder:free"),
+    ("openrouter",   "openai/gpt-oss-120b:free"),
 ]
-
-# Qwen3-8B: best JSON/tool-calling on M4 16GB (4.1GB weights, 9.4GB headroom).
-# Falls back to 7B if 8B not yet downloaded.
-import os as _os
-_qwen3_path = _os.path.expanduser("~/.cache/huggingface/hub/models--mlx-community--Qwen3-8B-4bit/snapshots")
-LOCAL_MODEL  = (
-    "mlx-community/Qwen3-8B-4bit"
-    if _os.path.isdir(_qwen3_path) and any(_os.scandir(_qwen3_path))
-    else "mlx-community/Qwen2.5-7B-Instruct-4bit"
-)
-LOCAL_URL    = "http://127.0.0.1:8000"
-VIDEO_MODEL  = "veo-2.0-generate-001"
 
 MODELS = {
     "ceo":               CEO_CASCADE[0][1],
@@ -482,22 +480,29 @@ def call_with_fallback(
                 return r.json()["choices"][0]["message"]["content"]
 
             elif provider == "local":
-                # V7 M4 Mastery: Try Native MLX first, then fallback to HTTP server
+                # V8 FIXED: Try local HTTP server first to avoid double-loading model into RAM.
+                import httpx
                 try:
-                    return call_mlx_native(prompt, system, max_tokens)
-                except Exception as mlx_err:
-                    log.warning(f"[MLX] Native call failed ({mlx_err}). Falling back to local HTTP server...")
-                    import httpx
                     body = {
                         "model":      LOCAL_MODEL,
-                        "prompt":     prompt,
+                        "messages":   [{"role": "user", "content": prompt}],
                         "max_tokens": max_tokens,
                     }
-                    r = httpx.post(f"{LOCAL_URL}/v1/completions", json=body, timeout=120)
+                    if system:
+                        body["messages"].insert(0, {"role": "system", "content": system})
+                    
+                    r = httpx.post(f"{LOCAL_URL}/v1/chat/completions", json=body, timeout=120)
                     r.raise_for_status()
-                    log.debug(f"[Cascade] Used local HTTP fallback/{model_id}")
+                    log.debug(f"[Cascade] Used local HTTP server/{model_id}")
                     _cb_failures[cb_key] = 0
-                    return r.json()["choices"][0]["text"]
+                    return r.json()["choices"][0]["message"]["content"]
+                except Exception as http_err:
+                    log.warning(f"[MLX] HTTP server failed or not available ({http_err}). Trying native MLX...")
+                    try:
+                        return call_mlx_native(prompt, system, max_tokens)
+                    except Exception as mlx_err:
+                        log.error(f"[MLX] Both HTTP and Native failed: {mlx_err}")
+                        raise mlx_err
 
             elif provider == "apple_intel":
                 # V7.1: Apple Intelligence Tier (Shortcut Bridge)
