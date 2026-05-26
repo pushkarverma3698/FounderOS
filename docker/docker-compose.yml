@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: founderos
+      POSTGRES_PASSWORD: founderos
+      POSTGRES_DB: founderos
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U founderos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FounderOS App ──────────────────────────────────────────────────────────
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://founderos:founderos@postgres:5432/founderos
+      NODE_ENV: production
+      # All other vars come from .env file (never commit secrets)
+    env_file:
+      - ../.env
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist scratchpad files (agent drafts)
+      - ./scratchpad:/app/.scratchpad
+
+volumes:
+  postgres_data:

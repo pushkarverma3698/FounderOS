@@ -1,0 +1,53 @@
+{
+  "name": "founderos",
+  "version": "0.1.0",
+  "description": "FounderOS — Multi-agent AI operating system for Turicks",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "setup": "tsx scripts/setup-db.ts",
+    "inspect": "tsx scripts/inspect-thread.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^1.0.5",
+    "@ai-sdk/google": "^1.0.5",
+    "@ai-sdk/openai": "^1.0.5",
+    "@langchain/core": "^0.3.50",
+    "@langchain/langgraph": "^0.2.60",
+    "@langchain/langgraph-checkpoint-postgres": "^0.1.0",
+    "ai": "^4.3.0",
+    "bottleneck": "^2.19.5",
+    "drizzle-orm": "^0.38.0",
+    "grammy": "^1.31.0",
+    "hono": "^4.6.0",
+    "langsmith": "^0.2.0",
+    "node-cron": "^3.0.3",
+    "opossum": "^8.1.4",
+    "pg": "^8.13.1",
+    "pino": "^9.5.0",
+    "pino-pretty": "^13.0.0",
+    "postgres": "^3.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/opossum": "^8.1.8",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.30.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.8"
+  }
+}
