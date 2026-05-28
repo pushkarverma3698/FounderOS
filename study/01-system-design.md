@@ -6,33 +6,72 @@
 
 ## The 30-Second Version (for the opener)
 
-> "FounderOS is a multi-agent AI operating system I built to run two real businesses — a TypeScript AI agency and a Himalayan farm + retreat. A founder types a task in Telegram; a supervisor agent routes it to the right department; specialist agents generate the output; a critic checks quality using a different model family to prevent sycophancy; and nothing leaves the system without human approval. Every state transition is persisted to PostgreSQL so the system survives crashes and is always resumable."
+> "FounderOS is a multi-agent AI operating system I built to run two real businesses — a TypeScript AI agency and a Himalayan farm + retreat. A founder types `/prospect acme.com` in Telegram; a ProspectingPod qualifies the lead using web research and ICP scoring; if it scores well, a SalesPod drafts a personalised email; a critic using a different model family checks quality; and nothing leaves the system without human approval. Redis caches research results and enforces daily send quotas atomically. Every state transition is persisted to PostgreSQL so the system survives crashes and is always resumable."
 
 This covers: what it does, why it exists, the interesting technical parts, and the reliability guarantee. Lead with this, then go deeper on whatever the interviewer asks about.
 
 ---
 
-## The 4-Layer Architecture
+## The 6-Layer Architecture (Phase 2)
 
-When drawing the architecture, always draw it as 4 layers:
+When drawing the architecture, draw it as 6 layers:
 
 ```
 ┌─────────────────────────┐
-│     GATEWAY LAYER       │  ← Telegram bot (grammy)
+│     GATEWAY LAYER       │  ← Telegram (grammy) + Admin HTTP (Hono)
 ├─────────────────────────┤
-│      BRAIN LAYER        │  ← LangGraph state machines
+│      BRAIN LAYER        │  ← LangGraph: Supervisor + 4 Department Pods
 ├─────────────────────────┤
-│      TOOLS LAYER        │  ← Web search, email, GitHub
+│      TOOLS LAYER        │  ← Web search, Gmail, GitHub, LinkedIn + node-cron
 ├─────────────────────────┤
-│     MEMORY LAYER        │  ← PostgreSQL (checkpoints + app tables)
+│     CACHING LAYER       │  ← Redis: research cache, send quotas, LLM cache
+├─────────────────────────┤
+│     MEMORY LAYER        │  ← PostgreSQL: checkpoints + 7 application tables
 └─────────────────────────┘
+         ↕ (both layers)
+    OBSERVABILITY          ← LangSmith traces + Pino logs (PII scrubbed)
 ```
 
 **Talking points for each:**
-- **Gateway:** "grammy handles Telegram messages; inline keyboards give us native approve/reject buttons on mobile with zero frontend code"
-- **Brain:** "LangGraph StateGraph gives us durable checkpointing — every node transition is saved; a crash mid-workflow just resumes from the last checkpoint"
-- **Tools:** "Unified interface over Composio, Firecrawl, GitHub API — agents declare which tools they're allowed to use in the registry"
-- **Memory:** "One PostgreSQL instance for everything — LangGraph checkpoint tables, our HITL state, LLM cost tracking, and idempotency audit log"
+- **Gateway:** "grammy handles Telegram messages; inline keyboards give us native approve/reject buttons on mobile with zero frontend code. `/prospect <url>` triggers the outbound pipeline."
+- **Brain:** "LangGraph StateGraph gives us durable checkpointing — every node transition is saved; a crash mid-workflow just resumes from the last checkpoint. ProspectingPod qualifies leads before SalesPod handles outreach."
+- **Tools:** "Unified interface over Composio, Firecrawl, GitHub API. Scheduler runs three cron jobs — never inside graph nodes, which would waste checkpoint storage."
+- **Caching:** "Redis handles data that self-destructs: research blobs (TTL 7d), daily send counters (atomic INCR, expires at midnight), LLM prompt responses (tier-specific TTL). CEO tier is never cached — decisions must be fresh."
+- **Memory:** "PostgreSQL is the only source of truth for durable state. 7 application tables + LangGraph checkpoint tables. Separate from Redis by rule: if you need to query it later, it goes in Postgres."
+
+---
+
+## Outbound Prospecting Flow (ProspectingPod)
+
+This is the most technically rich part to explain since it shows multiple systems working together:
+
+```
+/prospect acme.com
+       │
+       ▼
+disambiguate_node (NANO tier)
+  → Normalises URL, writes outbound_leads row (stage: researching)
+
+research_node (NANO tier)
+  → Check Redis research:{md5(url)}
+  → Hit? return cached blob (saves $0.002 per re-research)
+  → Miss? Tavily search → extract pain_points, tech_stack, team_size, funding
+  → Write to Redis TTL=7d
+  → Writes research blob to state
+
+icp_score_node (MD tier)
+  → Scores 0.0–1.0 against Turicks ICP criteria
+  → Turicks ICP: AI-forward, 10-200 employees, B2B SaaS, tech-enabled teams
+  → Writes icp_score + icp_rationale to outbound_leads row
+
+route_by_score (pure function — no LLM)
+  → < 0.4  : disqualified — Telegram notification, stop
+  → 0.4–0.69: SalesPod with tier="md" (Gemini Flash handles)
+  → ≥ 0.70 : SalesPod with tier="ceo" (Claude Sonnet handles)
+```
+
+**Why banded thresholds matter for the interview:**
+> "The threshold isn't binary. Low-fit leads get a lighter outreach model (cheaper, faster). High-fit leads get our best model. This means the system automatically allocates LLM spend proportional to lead quality."
 
 ---
 
@@ -98,26 +137,47 @@ Interviewers often probe "how does this scale?" Have clear answers:
 
 ---
 
-## The Data Model — Three Key Tables
+## The Data Model — Key Tables
 
 ```
-interrupt_registry
+hitl_approvals             (old name: interrupt_registry)
 ├── interrupt_id (PK)
 ├── thread_id       ← links to LangGraph checkpoint
 ├── status          ← pending | approved | rejected | expired
-├── telegram_msg_id ← so we can update the message after resolution
-└── expires_at      ← 24h expiry; cron job cleans up stale approvals
+├── telegram_msg_id ← update the button message after resolution
+└── expires_at      ← 48h expiry; hourly cron sweeper cleans stale rows
 
-llm_costs
+ai_call_costs              (old name: llm_costs)
 ├── tenant_id, agent, tier, model
 ├── tokens_in, tokens_out
-└── cost_usd        ← lets cost_watchdog alert when spend approaches $5/day budget
+├── cost_usd
+└── lead_id         ← FK → outbound_leads: enables per-lead cost attribution
 
-audit_log
-├── action          ← "email_sent" | "github_pr" | "telegram_send"
-├── idempotency_key ← UNIQUE constraint — the heart of idempotency
-└── payload         ← full action context for debugging
+action_log                 (old name: audit_log)
+├── action          ← "email_sent" | "linkedin_post" | "github_pr"
+├── idempotency_key ← UNIQUE constraint — prevents duplicate external actions
+└── payload         ← full context for debugging
+
+outbound_leads             (new Phase 2)
+├── company_url, company_name
+├── stage           ← researching → drafting → sent → replied → won/lost
+├── icp_score       ← 0.0–1.0 from icp_score_node
+└── outreach_tier   ← "md" | "ceo" — banded by score
+
+do_not_contact             (new Phase 2)
+├── email_or_domain ← supports "@acme.com" domain-level suppression
+└── reason          ← unsubscribed | bounced | competitor | do_not_contact
 ```
+
+**Per-lead cost attribution query (Phase 2D):**
+```sql
+SELECT ol.company_name, SUM(acc.cost_usd) as total_cost, COUNT(*) as llm_calls
+FROM ai_call_costs acc
+JOIN outbound_leads ol ON acc.lead_id = ol.id
+GROUP BY ol.company_name
+ORDER BY total_cost DESC;
+```
+This tells you which prospects cost the most to research and draft — directly actionable for tuning ICP thresholds.
 
 ---
 

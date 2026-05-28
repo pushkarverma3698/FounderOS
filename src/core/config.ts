@@ -5,16 +5,59 @@
  * All env vars are validated at startup via Zod — the app fails fast if
  * required keys are missing rather than failing mid-request.
  *
- * Model Cascade Philosophy
- * ─────────────────────────
- * Each tier has a primary → fallback chain, tried in order.
- * Circuit breaker (opossum) + rate limiter (bottleneck) wrap each call.
+ * ═══════════════════════════════════════════════════════════════
+ * MODEL ROUTING STRATEGY — Local vs Cloud
+ * ═══════════════════════════════════════════════════════════════
  *
- * CEO:           claude-sonnet-4-5 → gemini-2.5-pro → gemini-flash
- * Deep Research: gemini-2.5-pro → gemini-flash → openrouter/deepseek-r1
- * MD:            gemini-flash → claude-haiku → openrouter/llama-70b
- * Code:          lmstudio/qwen-coder → gemini-flash → openrouter/qwen-coder
- * Nano:          gemini-flash-lite → claude-haiku
+ * LOCAL (LM Studio / Ollama) — use when:
+ *   • Task is deterministic or short (code generation, JSON extraction)
+ *   • Privacy matters (internal Turicks data)
+ *   • latency is acceptable (streaming, not real-time chat)
+ *   • We want zero API cost on high-frequency tasks
+ *   Tiers:  `code`, `local`
+ *
+ * CLOUD — use when:
+ *   • Complex reasoning or nuanced judgement is required (CEO routing,
+ *     ICP scoring, outreach strategy, content critique)
+ *   • Multi-step chain-of-thought quality matters (deep research)
+ *   • Speed and reliability are paramount (HITL approvals)
+ *   Tiers:  `ceo`, `deep_research`, `md`, `nano`, `critic`
+ *
+ * COST-OPTIMISED CLOUD MODEL RECOMMENDATIONS
+ * ───────────────────────────────────────────
+ *
+ * Gemini 2.0 Flash ($0.075/1M in, $0.30/1M out)
+ *   → THE daily workhorse for FounderOS.
+ *     Use for: BDR email drafts, marketing briefs, engineer planning,
+ *     ICP scoring, disambiguate, most `md` and `nano` tier tasks.
+ *     Excellent instruction following, 1M context, no reasoning overhead.
+ *
+ * Claude Haiku 4.5 ($0.25/1M in, $1.25/1M out)
+ *   → Critic-tier primary and MD fallback.
+ *     Use when you need different model family from generator (anti-sycophancy).
+ *     Better at structured JSON critique than Flash; still cheap.
+ *
+ * Gemini 2.5 Pro ($1.25/1M in, $10/1M out)
+ *   → Deep research ONLY. Its extended thinking shines on lead intelligence.
+ *     Do NOT use for drafting or classification — overpriced for that.
+ *
+ * Claude Sonnet 4.5 ($3.00/1M in, $15/1M out)
+ *   → CEO supervisor routing ONLY. You need a different model family from
+ *     Gemini for the top-level router (Gemini would route to itself).
+ *     If costs spike, replace with claude-haiku — routing doesn't need Sonnet.
+ *
+ * AVOID: Do NOT use Gemini 2.5 Pro or Sonnet for BDR, critic, or planning.
+ *         Those tasks are solved by Flash + Haiku at 1/10th the price.
+ *
+ * ═══════════════════════════════════════════════════════════════
+ * Cascade Tiers
+ * ═══════════════════════════════════════════════════════════════
+ * CEO:           claude-sonnet-4-5 → gemini-2.5-pro → gemini-2.0-flash
+ * Deep Research: gemini-2.5-pro → gemini-2.0-flash → openrouter/deepseek-r1
+ * MD:            gemini-2.0-flash → claude-haiku-4-5 → openrouter/llama-70b
+ * Code:          lmstudio/qwen-coder → openrouter/qwen3-coder → gemini-2.0-flash
+ * Nano:          gemini-2.0-flash-lite → claude-haiku-4-5
+ * Critic:        claude-haiku-4-5 → gemini-2.0-flash  (Claude first — anti-sycophancy)
  */
 
 import { z } from "zod";
@@ -54,6 +97,12 @@ const envSchema = z.object({
   // Local model (LM Studio)
   LM_STUDIO_URL: z.string().url().default("http://localhost:1234"),
   LM_STUDIO_MODEL: z.string().default("qwen2.5-coder-7b-instruct"),
+
+  // Redis (caching: research results, quota counters, LLM prompt cache)
+  REDIS_URL: z.string().url().default("redis://localhost:6379"),
+
+  // Daily send quota (enforced via Redis INCR per tenant per day)
+  DAILY_SEND_LIMIT: z.coerce.number().positive().default(10),
 
   // Budget controls
   BUDGET_DAILY_USD: z.coerce.number().positive().default(5.0),
@@ -180,3 +229,23 @@ export const RATE_LIMITER_OPTIONS = {
   maxConcurrent: 5,
   minTime: 200, // ms between requests (global across all providers)
 } as const;
+
+// ── Redis Cache TTLs (seconds) ────────────────────────────────────────────────
+
+/**
+ * LLM prompt response cache TTLs per tier.
+ * CEO = 0 (never cache — decisions must always be fresh).
+ * MD = 1 hour, NANO = 24 hours (stable outputs, significant cost saving).
+ */
+export const LLM_CACHE_TTL: Partial<Record<CascadeTier, number>> = {
+  ceo:           0,      // never cache — decisions must be fresh
+  deep_research: 3600,   // 1 hour
+  md:            3600,   // 1 hour
+  code:          1800,   // 30 min (code changes fast)
+  nano:          86400,  // 24 hours
+  local:         0,      // local model — no caching
+  critic:        0,      // critic must evaluate fresh content
+} as const;
+
+/** Research cache TTL: 7 days (company data is stable at this timescale). */
+export const RESEARCH_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;

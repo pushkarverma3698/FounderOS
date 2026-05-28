@@ -119,6 +119,44 @@ During a 30-minute Anthropic partial outage, 3 tasks ran successfully using Gemi
 
 ---
 
+## Story 6: "Tell me about a time you reduced costs or improved efficiency."
+
+**Situation:**
+FounderOS runs a multi-step outbound prospecting pipeline: for each lead, it scrapes the company website with Firecrawl (paid per crawl), calls Tavily for web research (paid per search), and makes multiple LLM calls for ICP scoring and email drafting. With even 10 prospects per day, redundant API calls were a real expense — the same company might be researched multiple times if a founder runs `/prospect acme.com` twice, or if the scraper re-indexes it.
+
+**Task:**
+Reduce redundant API costs without changing the observable behaviour of the system — same quality output, lower spend.
+
+**Action:**
+I implemented a two-layer Redis caching strategy:
+
+**Layer 1 — Research cache (`research:{md5(url)}`, TTL 7 days):**
+The `research_node` checks Redis before calling any external API. If the research blob for a URL is already cached, it returns it immediately with zero external API calls. The TTL is 7 days — company research is stable enough over that window. On cache miss, we call Firecrawl + Tavily and write the result to Redis.
+
+```typescript
+const cacheKey = KEYS.research(md5(companyUrl));
+const cached = await redis.get(cacheKey);
+if (cached) return JSON.parse(cached) as ResearchBlob;
+// ... call Firecrawl + Tavily ...
+await redis.setex(cacheKey, 7 * 24 * 3600, JSON.stringify(blob));
+```
+
+**Layer 2 — LLM prompt cache (`llm:{sha256(prompt)}`, TTL tier-based):**
+LLM calls with identical prompts return the same output. For NANO-tier tasks (formatting, classification, normalisation) the TTL is 24 hours — if 5 prospects all need the same "normalise this URL" NANO-tier call, it's one LLM invocation. MD tier is 1 hour (scoring tasks are similar but input-dependent enough to cache shorter). CEO tier: TTL=0, never cached — routing decisions must always be fresh.
+
+I chose Redis over a Postgres cache table specifically because TTL management is native: `SETEX key seconds value`. With Postgres I'd need a cleanup cron job, index fragmentation management, and a separate scheduled task to prune old rows.
+
+**Result:**
+For a typical prospecting session with 5 leads per day:
+- Repeat prospect research hits (same company across days): ~40% cache hit rate in practice
+- NANO-tier prompt cache hits (URL normalisation, standup formatting): ~60%
+- Estimated cost reduction: ~35–40% fewer external API calls and LLM invocations per session
+- No change to output quality — the founder sees identical results, faster
+
+The LangSmith traces showed the research_node completing in <5ms for cache hits vs 2–4s for cache misses, which also improved the overall task latency noticeably.
+
+---
+
 ## Quick-Fire Answers
 
 **"Why TypeScript over Python for an AI system?"**

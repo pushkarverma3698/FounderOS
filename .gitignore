@@ -33,6 +33,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Claude local settings (machine-specific)
+.claude/settings.local.json
+
 # TypeScript
 *.tsbuildinfo
 

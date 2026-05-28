@@ -96,13 +96,25 @@ export async function requestHITL(req: HITLRequest): Promise<HITLRecord> {
   const lgConfig = getConfig();
   const threadId = (lgConfig?.configurable?.["thread_id"] as string | undefined) ?? req.thread_id;
 
-  // 1. Write to DB BEFORE calling interrupt() — crash-safe
-  const interrupt_id = await createInterrupt({
-    thread_id: threadId,
-    tenant_id: req.tenant_id,
-    callback_data: JSON.stringify({ summary: req.summary, draft: req.draft }),
-    expires_at: expiresAt,
-  });
+  // 1. Write to DB BEFORE calling interrupt() — crash-safe, fail-open if DB is down
+  let interrupt_id: string;
+  try {
+    interrupt_id = await createInterrupt({
+      thread_id: threadId,
+      tenant_id: req.tenant_id,
+      callback_data: JSON.stringify({ summary: req.summary, draft: req.draft }),
+      expires_at: expiresAt,
+    });
+  } catch (dbErr) {
+    // DB is down — use an in-memory UUID so interrupt() can still suspend the graph.
+    // The interrupt won't be resumable via Telegram (no DB record), but the graph
+    // suspends correctly and the founder can resume via CLI / manual invoke.
+    interrupt_id = crypto.randomUUID();
+    log.warn(
+      { err: (dbErr as NodeJS.ErrnoException).code ?? String(dbErr), interrupt_id, agent: req.agent },
+      "HITL DB write failed — using ephemeral interrupt_id (no Telegram resume available)",
+    );
+  }
 
   // 2. Send Telegram message with inline keyboard
   let telegram_message_id: number | undefined;

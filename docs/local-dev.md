@@ -10,6 +10,8 @@
 | pnpm | latest | `npm i -g pnpm` |
 | Docker | 24+ | [docker.com](https://docker.com) |
 | PostgreSQL | via Docker | see below |
+| Redis | via Docker | see below |
+| Ollama | latest | [ollama.com](https://ollama.com) (for local model) |
 
 ---
 
@@ -60,18 +62,24 @@ LANGCHAIN_TRACING_V2=true
 
 ---
 
-## 3 — Start PostgreSQL
+## 3 — Start PostgreSQL + Redis
 
 ```bash
-docker compose -f docker/docker-compose.yml up postgres -d
+docker compose -f docker/docker-compose.yml up postgres redis -d
 ```
 
-Wait for it to be healthy:
+Wait for both to be healthy:
 
 ```bash
 docker compose -f docker/docker-compose.yml ps
-# postgres should show "(healthy)"
+# postgres → "(healthy)"
+# redis   → "(healthy)"
 ```
+
+Redis is used for:
+- `research:{url_hash}` — cached company research (TTL 7 days, avoids re-scraping)
+- `quota:{tenant}:{date}` — daily send quota counter (atomic INCR)
+- `llm:{prompt_hash}` — LLM response cache for MD/NANO tiers
 
 ---
 
@@ -149,6 +157,45 @@ getCostBreakdown('turicks', 7).then(r => console.table(r));
 "
 ```
 
+### Check Cost Per Lead
+
+```bash
+npx tsx -e "
+import { getDb } from './src/db/client.js';
+import { aiCallCosts, outboundLeads } from './src/db/schema.js';
+import { sql, eq } from 'drizzle-orm';
+const db = getDb();
+const rows = await db
+  .select({
+    company: outboundLeads.company_name,
+    total_cost: sql\`SUM(\${aiCallCosts.cost_usd})\`.mapWith(Number),
+    calls: sql\`COUNT(*)\`.mapWith(Number),
+  })
+  .from(aiCallCosts)
+  .innerJoin(outboundLeads, eq(aiCallCosts.lead_id, outboundLeads.id))
+  .groupBy(outboundLeads.company_name)
+  .orderBy(sql\`SUM(\${aiCallCosts.cost_usd}) DESC\`);
+console.table(rows);
+"
+```
+
+### Set Up Local Model (Ollama)
+
+```bash
+# Pull the base model (4.7GB — one-time download)
+ollama pull qwen2.5:7b
+
+# Build the FounderOS custom model (deterministic, JSON-focused)
+ollama create founderos -f docker/Modelfile.founderos
+
+# Verify it works
+ollama run founderos '{"task":"ping"}'
+# Expected: {"status":"pong","model":"founderos"}
+
+# Run E2E journey tests against local model
+npx vitest run tests/e2e/founderos-journey.test.ts
+```
+
 ---
 
 ## Full Docker Stack
@@ -179,6 +226,10 @@ The `code` tier tries LM Studio first. Either:
 ### LangGraph checkpointer "table does not exist"
 Run `npx tsx scripts/setup-db.ts` again. The PostgresSaver tables need explicit setup.
 
+### "Redis connection refused" / "ECONNREFUSED 6379"
+Redis isn't running. Start it: `docker compose -f docker/docker-compose.yml up redis -d`
+The app runs without Redis (caching degrades gracefully) but quota checks and research caching won't work.
+
 ### Telegram bot not receiving messages
 - Check bot is admin in the group
 - Check `TELEGRAM_CHAT_ID` matches the group (not a user)
@@ -207,3 +258,5 @@ Run `npx tsx scripts/setup-db.ts` again. The PostgresSaver tables need explicit 
 | `LM_STUDIO_URL` | Optional | Local model server (default: localhost:1234) |
 | `BUDGET_DAILY_USD` | Optional | Daily LLM spend cap (default: $5.00) |
 | `LOG_LEVEL` | Optional | `debug`/`info`/`warn` (default: `info`) |
+| `REDIS_URL` | Optional | Redis connection (default: `redis://localhost:6379`) |
+| `OLLAMA_URL` | Optional | Ollama local model server (default: `http://localhost:11434`) |

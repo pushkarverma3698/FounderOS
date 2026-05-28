@@ -14,10 +14,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mocks — must be hoisted before any imports that trigger the module graph ──
 
-vi.mock("../../src/infra/llm.js", () => ({
-  callCascade: vi.fn(),
-  checkBudget: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("../../src/infra/llm.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/infra/llm.js")>();
+  return {
+    callCascade: vi.fn(),
+    checkBudget: vi.fn().mockResolvedValue(undefined),
+    safeParseJson: actual.safeParseJson,
+  };
+});
 
 vi.mock("../../src/db/queries.js", () => ({
   hasBeenAudited: vi.fn().mockResolvedValue(false),
@@ -25,6 +29,19 @@ vi.mock("../../src/db/queries.js", () => ({
   createInterrupt: vi.fn().mockResolvedValue("test-interrupt-id-123"),
   resolveInterrupt: vi.fn().mockResolvedValue(true),
   logCost: vi.fn().mockResolvedValue(undefined),
+  isSuppressed: vi.fn().mockResolvedValue(false),
+  // Phase 3B: self-improvement loop (non-blocking, return empty arrays/void)
+  writeTaskOutcome: vi.fn().mockResolvedValue(undefined),
+  getRecentOutcomes: vi.fn().mockResolvedValue([]),
+  // Phase 3C: cross-dept signals (non-blocking fire-and-forget)
+  publishDeptEvent: vi.fn().mockResolvedValue("mock-event-id"),
+}));
+
+vi.mock("../../src/infra/redis.js", () => ({
+  incrQuota: vi.fn().mockResolvedValue(1),
+  getRedis: vi.fn(),
+  closeRedis: vi.fn().mockResolvedValue(undefined),
+  KEYS: { research: vi.fn(), quota: vi.fn(), llmCache: vi.fn() },
 }));
 
 vi.mock("../../src/gateway/hitl.js", () => ({
@@ -37,7 +54,7 @@ vi.mock("../../src/gateway/hitl.js", () => ({
 
 // ── Actual imports (after mocks are registered) ───────────────────────────────
 
-import { callCascade, checkBudget } from "../../src/infra/llm.js";
+import { callCascade, checkBudget, safeParseJson } from "../../src/infra/llm.js";
 import { hasBeenAudited, writeAuditEntry } from "../../src/db/queries.js";
 import { requestHITL } from "../../src/gateway/hitl.js";
 import { salesSubgraph } from "../../src/agents/pods/sales.js";
@@ -104,6 +121,15 @@ const BDR_EMAIL_REVISED_RESPONSE = JSON.stringify({
   body: "John,\n\nYour post about the data entry bottleneck caught my attention — we solved the same problem for a manufacturing team in 3 days.\n\nWould 20 minutes this week work?\n\nPushkar",
 });
 
+const SALES_ENGINEER_RESPONSE = JSON.stringify({
+  angle: "ops_cost",
+  hook: "Your post about Excel chaos caught my attention",
+  value_prop: "We build AI automation that eliminates manual data entry in 3–5 days",
+  proof_point: "12 hours/week saved for a similar manufacturing ops team",
+  cta: "20-minute call this week?",
+  tier_rationale: "Strong ICP fit at 0.85 — CEO tier engagement appropriate",
+});
+
 // ── Test suite ────────────────────────────────────────────────────────────────
 
 describe("Sales Pod — happy path (APPROVED on first critique)", () => {
@@ -120,9 +146,10 @@ describe("Sales Pod — happy path (APPROVED on first critique)", () => {
   });
 
   it("flows lead_intel → bdr → critic(APPROVED) → hitl → finalize", async () => {
-    // Three callCascade calls: lead_intel, bdr, critic
+    // Four callCascade calls: lead_intel, sales_engineer, bdr, critic
     mockCallCascade
       .mockResolvedValueOnce(mockCascadeResponse(LEAD_INTEL_RESPONSE, "gemini-2.5-pro"))
+      .mockResolvedValueOnce(mockCascadeResponse(SALES_ENGINEER_RESPONSE, "gemini-1.5-flash"))
       .mockResolvedValueOnce(mockCascadeResponse(BDR_EMAIL_RESPONSE, "gemini-1.5-flash"))
       .mockResolvedValueOnce(mockCascadeResponse(CRITIC_APPROVED_RESPONSE, "claude-haiku-4-5"));
 
@@ -159,32 +186,38 @@ describe("Sales Pod — happy path (APPROVED on first critique)", () => {
     expect(mockWriteAuditEntry).toHaveBeenCalledTimes(1);
   });
 
-  it("callCascade is called exactly 3 times (lead_intel + bdr + critic)", async () => {
+  it("callCascade is called exactly 4 times (lead_intel + sales_engineer + bdr + critic)", async () => {
     mockCallCascade
       .mockResolvedValueOnce(mockCascadeResponse(LEAD_INTEL_RESPONSE))
+      .mockResolvedValueOnce(mockCascadeResponse(SALES_ENGINEER_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(BDR_EMAIL_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(CRITIC_APPROVED_RESPONSE));
 
     await salesSubgraph.invoke(makeInitialState());
 
-    expect(mockCallCascade).toHaveBeenCalledTimes(3);
+    expect(mockCallCascade).toHaveBeenCalledTimes(4);
 
     // First call: lead_intel agent on deep_research tier
     expect(mockCallCascade.mock.calls[0]?.[0]).toBe("deep_research");
     expect(mockCallCascade.mock.calls[0]?.[2]).toMatchObject({ agent: "lead_intel" });
 
-    // Second call: bdr agent on md tier
+    // Second call: sales_engineer agent on md tier
     expect(mockCallCascade.mock.calls[1]?.[0]).toBe("md");
-    expect(mockCallCascade.mock.calls[1]?.[2]).toMatchObject({ agent: "bdr" });
+    expect(mockCallCascade.mock.calls[1]?.[2]).toMatchObject({ agent: "sales_engineer" });
 
-    // Third call: critic agent
-    expect(mockCallCascade.mock.calls[2]?.[0]).toBe("critic");
-    expect(mockCallCascade.mock.calls[2]?.[2]).toMatchObject({ agent: "critic" });
+    // Third call: bdr agent on md tier
+    expect(mockCallCascade.mock.calls[2]?.[0]).toBe("md");
+    expect(mockCallCascade.mock.calls[2]?.[2]).toMatchObject({ agent: "bdr" });
+
+    // Fourth call: critic agent
+    expect(mockCallCascade.mock.calls[3]?.[0]).toBe("critic");
+    expect(mockCallCascade.mock.calls[3]?.[2]).toMatchObject({ agent: "critic" });
   });
 
   it("critic uses a different model family (claude) than generators", async () => {
     mockCallCascade
       .mockResolvedValueOnce(mockCascadeResponse(LEAD_INTEL_RESPONSE, "gemini-2.5-pro"))
+      .mockResolvedValueOnce(mockCascadeResponse(SALES_ENGINEER_RESPONSE, "gemini-1.5-flash"))
       .mockResolvedValueOnce(mockCascadeResponse(BDR_EMAIL_RESPONSE, "gemini-1.5-flash"))
       .mockResolvedValueOnce(mockCascadeResponse(CRITIC_APPROVED_RESPONSE, "claude-haiku-4-5"));
 
@@ -209,9 +242,10 @@ describe("Sales Pod — revision loop (NEEDS_REVISION then APPROVED)", () => {
   });
 
   it("retries bdr when first critique is NEEDS_REVISION, approves on second", async () => {
-    // 5 callCascade calls: lead_intel, bdr1, critic1(reject), bdr2, critic2(approve)
+    // 6 callCascade calls: lead_intel, sales_engineer, bdr1, critic1(reject), bdr2, critic2(approve)
     mockCallCascade
       .mockResolvedValueOnce(mockCascadeResponse(LEAD_INTEL_RESPONSE))            // lead_intel
+      .mockResolvedValueOnce(mockCascadeResponse(SALES_ENGINEER_RESPONSE))        // sales_engineer
       .mockResolvedValueOnce(mockCascadeResponse(BDR_EMAIL_RESPONSE))             // bdr draft 1
       .mockResolvedValueOnce(mockCascadeResponse(CRITIC_NEEDS_REVISION_RESPONSE)) // critic 1: reject
       .mockResolvedValueOnce(mockCascadeResponse(BDR_EMAIL_REVISED_RESPONSE))     // bdr draft 2
@@ -233,13 +267,14 @@ describe("Sales Pod — revision loop (NEEDS_REVISION then APPROVED)", () => {
     // HITL called once (after final APPROVED)
     expect(mockRequestHITL).toHaveBeenCalledTimes(1);
 
-    // callCascade: 1 (lead) + 2 (bdr) + 2 (critic) = 5
-    expect(mockCallCascade).toHaveBeenCalledTimes(5);
+    // callCascade: 1 (lead) + 1 (sales_engineer) + 2 (bdr) + 2 (critic) = 6
+    expect(mockCallCascade).toHaveBeenCalledTimes(6);
   });
 
   it("bdr revision includes critique feedback in its prompt", async () => {
     mockCallCascade
       .mockResolvedValueOnce(mockCascadeResponse(LEAD_INTEL_RESPONSE))
+      .mockResolvedValueOnce(mockCascadeResponse(SALES_ENGINEER_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(BDR_EMAIL_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(CRITIC_NEEDS_REVISION_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(BDR_EMAIL_REVISED_RESPONSE))
@@ -247,13 +282,23 @@ describe("Sales Pod — revision loop (NEEDS_REVISION then APPROVED)", () => {
 
     await salesSubgraph.invoke(makeInitialState());
 
-    // The 4th call is bdr's second attempt — its user message should include critique feedback
-    const bdrRevisionMessages = mockCallCascade.mock.calls[3]?.[1];
+    // The 5th call (index 4) is bdr's second attempt — its user message should include critique feedback
+    const bdrRevisionMessages = mockCallCascade.mock.calls[4]?.[1];
     expect(bdrRevisionMessages).toBeDefined();
 
-    const userMsg = bdrRevisionMessages?.find((m: { role: string }) => m.role === "user");
-    expect(userMsg?.content).toContain("PREVIOUS CRITIQUE FEEDBACK");
-    expect(userMsg?.content).toContain("banned_phrase");
+    // LangChain BaseMessage uses getType() === "human", not .role === "user"
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const userMsg = bdrRevisionMessages?.find((m: any) =>
+      typeof m.getType === "function" ? m.getType() === "human" : m.role === "user",
+    );
+    // Content may be string | MessageContentComplex[] — normalise to string
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawContent = (userMsg as any)?.content;
+    const contentStr = Array.isArray(rawContent)
+      ? rawContent.map((c: unknown) => (typeof c === "string" ? c : JSON.stringify(c))).join("")
+      : String(rawContent ?? "");
+    expect(contentStr).toContain("PREVIOUS CRITIQUE FEEDBACK");
+    expect(contentStr).toContain("banned_phrase");
   });
 });
 
@@ -274,6 +319,7 @@ describe("Sales Pod — escalation path (max revisions reached)", () => {
     // max_revisions=1: bdr → critic(reject, count=1 = max) → hitl (escalated)
     mockCallCascade
       .mockResolvedValueOnce(mockCascadeResponse(LEAD_INTEL_RESPONSE))
+      .mockResolvedValueOnce(mockCascadeResponse(SALES_ENGINEER_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(BDR_EMAIL_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(CRITIC_NEEDS_REVISION_RESPONSE));
 
@@ -289,13 +335,14 @@ describe("Sales Pod — escalation path (max revisions reached)", () => {
     // HITL was still called (escalation path)
     expect(mockRequestHITL).toHaveBeenCalledTimes(1);
 
-    // callCascade: 1 (lead) + 1 (bdr) + 1 (critic) = 3 only
-    expect(mockCallCascade).toHaveBeenCalledTimes(3);
+    // callCascade: 1 (lead) + 1 (sales_engineer) + 1 (bdr) + 1 (critic) = 4
+    expect(mockCallCascade).toHaveBeenCalledTimes(4);
   });
 
   it("escalates with a note in HITL summary when revision limit hit", async () => {
     mockCallCascade
       .mockResolvedValueOnce(mockCascadeResponse(LEAD_INTEL_RESPONSE))
+      .mockResolvedValueOnce(mockCascadeResponse(SALES_ENGINEER_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(BDR_EMAIL_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(CRITIC_NEEDS_REVISION_RESPONSE));
 
@@ -321,6 +368,7 @@ describe("Sales Pod — idempotency guard", () => {
 
     mockCallCascade
       .mockResolvedValueOnce(mockCascadeResponse(LEAD_INTEL_RESPONSE))
+      .mockResolvedValueOnce(mockCascadeResponse(SALES_ENGINEER_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(BDR_EMAIL_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(CRITIC_APPROVED_RESPONSE));
 
@@ -347,6 +395,7 @@ describe("Sales Pod — graceful degradation on LLM parse failure", () => {
   it("handles lead_intel JSON parse failure gracefully (uses fallback lead)", async () => {
     mockCallCascade
       .mockResolvedValueOnce(mockCascadeResponse("Not JSON at all — raw text report"))
+      .mockResolvedValueOnce(mockCascadeResponse(SALES_ENGINEER_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(BDR_EMAIL_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(CRITIC_APPROVED_RESPONSE));
 
@@ -365,6 +414,7 @@ describe("Sales Pod — graceful degradation on LLM parse failure", () => {
   it("handles bdr JSON parse failure gracefully (wraps raw text)", async () => {
     mockCallCascade
       .mockResolvedValueOnce(mockCascadeResponse(LEAD_INTEL_RESPONSE))
+      .mockResolvedValueOnce(mockCascadeResponse(SALES_ENGINEER_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse("Here is your email: blah blah blah"))
       .mockResolvedValueOnce(mockCascadeResponse(CRITIC_APPROVED_RESPONSE));
 
@@ -375,20 +425,22 @@ describe("Sales Pod — graceful degradation on LLM parse failure", () => {
     expect(result.email_draft?.body).toContain("blah blah blah");
   });
 
-  it("handles critic JSON parse failure as NEEDS_REVISION (conservative escalation)", async () => {
-    // max_revisions=1 so after parse failure → escalation → hitl
+  it("handles critic JSON parse failure as APPROVED-with-warning (flows to HITL)", async () => {
+    // Critic parse failure → APPROVED with critic_parse_error violation → flows straight to HITL
+    // Design intent: parse failure must never cause infinite revision loops
     mockCallCascade
       .mockResolvedValueOnce(mockCascadeResponse(LEAD_INTEL_RESPONSE))
+      .mockResolvedValueOnce(mockCascadeResponse(SALES_ENGINEER_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse(BDR_EMAIL_RESPONSE))
       .mockResolvedValueOnce(mockCascadeResponse("I cannot evaluate this properly")); // bad critic JSON
 
     const result = await salesSubgraph.invoke(makeInitialState({ max_revisions: 1 }));
 
-    // Critique created as NEEDS_REVISION with parse error violation
-    expect(result.critiques[0]?.result).toBe("NEEDS_REVISION");
+    // Critique created as APPROVED (not NEEDS_REVISION) to prevent infinite loops
+    expect(result.critiques[0]?.result).toBe("APPROVED");
     expect(result.critiques[0]?.rule_violations).toContain("critic_parse_error");
 
-    // Still escalates to hitl (doesn't crash)
+    // Flows to HITL for human review (doesn't crash)
     expect(mockRequestHITL).toHaveBeenCalledTimes(1);
   });
 });

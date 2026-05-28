@@ -19,7 +19,7 @@ export type CascadeTier =
   | "video"
   | "critic";
 
-export type Department = "sales" | "engineering" | "marketing" | "social";
+export type Department = "sales" | "engineering" | "marketing" | "social" | "prospecting";
 
 export interface TuricksProfile {
   services: string[];
@@ -75,12 +75,12 @@ const _companies: Record<string, Company> = {
     telegram_topic_id: parseInt(process.env["TOPIC_TURICKS"] ?? "0"),
     agents: [],
     profile: {
-      services: ["LangGraph agentic systems", "Next.js", "MERN", "AI automation"],
+      services: ["AI agents", "LangGraph agentic systems", "UI/UX design", "full-stack software", "business automation"],
       website: "https://turicks.com",
       pricing: "$500 starter → $5,000 retainer",
       target_geo: ["EU", "US"],
-      icp: "SME founders $50K–500K ARR who need AI/automation",
-      differentiator: "3–5 day delivery, working code not prototypes, value-driven",
+      icp: "SME founders $50K–500K ARR who need AI/automation or a design-conscious software team",
+      differentiator: "AI-native agency that builds what others only prototype — 3–5 day delivery, design-conscious, working code not decks",
     } satisfies TuricksProfile,
   },
 
@@ -283,6 +283,76 @@ const _agentList: Agent[] = [
     cascade_tier: "video",
     allowed_collections: ["naggar_mem"],
     allowed_tools: ["bash", "read_file", "chromadb_read", "ffmpeg"],
+  },
+
+  // ── Engineer Agents (one per department — autonomous decision-makers) ─────
+  {
+    /**
+     * Sales engineer — owns technical decisions in the sales pod.
+     * Runs BEFORE bdr to plan the outreach strategy.
+     * HITL gating only for external sends, not for internal decisions.
+     */
+    name: "sales_engineer",
+    company_assignment: "turicks",
+    cascade_tier: "md",
+    department: "sales",
+    allowed_collections: ["turicks_mem"],
+    allowed_tools: [...BASE_TOOLS, "write_file", "chromadb_read", "chromadb_write", "pipeline_add_lead"],
+  },
+  {
+    /**
+     * Engineering engineer — responsible for all engineering pod decisions.
+     * Plans technical approach, assigns tasks to senior_dev or vibe_coder.
+     * Full responsibility for delivery quality; HITL only for external pushes.
+     */
+    name: "eng_engineer",
+    company_assignment: "turicks",
+    cascade_tier: "md",
+    department: "engineering",
+    allowed_collections: ["turicks_mem"],
+    allowed_tools: [...BASE_TOOLS, "write_file", "chromadb_read", "chromadb_write", "github_mcp"],
+  },
+  {
+    /**
+     * Marketing engineer — owns marketing pod decisions and content strategy.
+     * Decides which channels + formats to use for each campaign.
+     * HITL only for external posts/publishes.
+     */
+    name: "mktg_engineer",
+    company_assignment: "turicks",
+    cascade_tier: "md",
+    department: "marketing",
+    allowed_collections: ["turicks_mem"],
+    allowed_tools: [...BASE_TOOLS, "write_file", "chromadb_read", "chromadb_write"],
+  },
+
+  // ── Prospecting Agents (Phase 2 — ProspectingPod subgraph) ────────────────
+  {
+    /** Resolves raw URL/company name to canonical URL, writes lead_pipeline row */
+    name: "disambiguate",
+    company_assignment: "turicks",
+    cascade_tier: "nano",
+    department: "prospecting",
+    allowed_collections: ["turicks_mem"],
+    allowed_tools: [...BASE_TOOLS, "chromadb_read"],
+  },
+  {
+    /** Researches company via Tavily + Firecrawl, caches result in Redis (TTL 7d) */
+    name: "prospecting_researcher",
+    company_assignment: "turicks",
+    cascade_tier: "nano",
+    department: "prospecting",
+    allowed_collections: ["turicks_mem"],
+    allowed_tools: [...BASE_TOOLS, "chromadb_read", "firecrawl"],
+  },
+  {
+    /** Scores ICP fit 0.0–1.0, bands into md (<0.7) or ceo (>=0.7) tier */
+    name: "icp_scorer",
+    company_assignment: "turicks",
+    cascade_tier: "md",
+    department: "prospecting",
+    allowed_collections: ["turicks_mem"],
+    allowed_tools: [...BASE_TOOLS, "chromadb_read"],
   },
 
   // ── Cross-Company Agents ──────────────────────────────────────────────────

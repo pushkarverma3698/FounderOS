@@ -16,14 +16,23 @@ export interface ToolResult {
   error?: string;
 }
 
+export interface ToolInputSchema {
+  type: "object";
+  properties: Record<string, { type: string; description?: string; enum?: string[] }>;
+  required?: string[];
+}
+
 export interface UnifiedTool {
   name: string;
   description: string;
+  /** JSON Schema for agent parameter validation + LangChain tool binding. */
+  input_schema?: ToolInputSchema;
   execute(args: Record<string, unknown>): Promise<ToolResult>;
 }
 
 // ── Tool Imports ──────────────────────────────────────────────────────────────
 import { webSearchTool } from "./web-search.js";
+import { linkedinPostTool, linkedinAnalyticsTool, linkedinConnectTool } from "./linkedin.js";
 // Phase 1C+: import { emailTool } from "./email.js";
 // Phase 1C+: import { githubTool } from "./github.js";
 
@@ -36,6 +45,9 @@ function registerTool(tool: UnifiedTool): void {
 }
 
 registerTool(webSearchTool);
+registerTool(linkedinPostTool);
+registerTool(linkedinAnalyticsTool);
+registerTool(linkedinConnectTool);
 
 /** Get a tool by name. Returns undefined if not registered. */
 export function getTool(name: string): UnifiedTool | undefined {

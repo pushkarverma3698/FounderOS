@@ -66,8 +66,11 @@ async function routeToGraph(ctx: Context): Promise<void> {
 
   log.info({ userId, tenantId, threadId, task: task.slice(0, 80) }, "Routing to FounderGraph");
 
-  // Immediate typing indicator
+  // Send typing indicator and refresh every 4s (graph.invoke can take 60–120s)
   await ctx.replyWithChatAction("typing");
+  const typingInterval = setInterval(() => {
+    ctx.replyWithChatAction("typing").catch(() => {/* ignore — non-fatal */});
+  }, 4000);
 
   try {
     const graph = await getGraph();
@@ -77,6 +80,8 @@ async function routeToGraph(ctx: Context): Promise<void> {
       { task, tenant_id: tenantId },
       { configurable: { thread_id: threadId } },
     );
+
+    clearInterval(typingInterval);
 
     const raw = result.result ? String(result.result) : null;
     const output = raw
@@ -88,6 +93,7 @@ async function routeToGraph(ctx: Context): Promise<void> {
       ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
     });
   } catch (err) {
+    clearInterval(typingInterval);
     const msg = err instanceof Error ? err.message : String(err);
     log.error({ err: msg, threadId }, "Graph execution failed");
     await ctx.reply(
@@ -133,16 +139,133 @@ export async function sendHITLMessage(
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
+// ── /prospect command handler ─────────────────────────────────────────────────
+
+/**
+ * Handle /prospect <url|company-name> command.
+ * Routes straight to the prospecting department — bypasses supervisor classification.
+ * The prospecting pod will disambiguate, research, and score the lead.
+ *
+ * Example: /prospect https://acme.com
+ *          /prospect Acme Corp
+ */
+async function handleProspectCommand(ctx: Context): Promise<void> {
+  const text = ctx.message?.text ?? "";
+  const threadTopicId = ctx.message?.message_thread_id;
+  const userId = String(ctx.from?.id ?? "unknown");
+  const tenantId = topicToTenant(threadTopicId);
+
+  // Extract the raw input after "/prospect "
+  const rawInput = text.replace(/^\/prospect\s*/i, "").trim();
+  if (!rawInput) {
+    await ctx.reply(
+      "❓ Usage: <code>/prospect &lt;url or company name&gt;</code>\n\nExample: <code>/prospect acme.com</code>",
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const threadId = `${tenantId}:${userId}:${crypto.randomUUID()}`;
+  log.info({ userId, tenantId, threadId, rawInput }, "Prospect command received");
+
+  await ctx.reply(
+    `🔍 Researching <b>${safeHtml(rawInput)}</b>…\n<i>This takes ~30s. I'll score it against our ICP and let you know if it's worth pursuing.</i>`,
+    {
+      parse_mode: "HTML",
+      ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
+    },
+  );
+
+  // Keep typing indicator alive during long graph execution
+  const prospectTypingInterval = setInterval(() => {
+    ctx.replyWithChatAction("typing").catch(() => {/* ignore */});
+  }, 4000);
+
+  try {
+    const graph = await getGraph();
+    if (!graph) throw new Error("Graph not initialized");
+
+    const result = await graph.invoke(
+      {
+        task: rawInput,
+        tenant_id: tenantId,
+        department: "prospecting",
+      },
+      { configurable: { thread_id: threadId } },
+    );
+
+    clearInterval(prospectTypingInterval);
+
+    // Parse the JSON summary written by prospectingNode
+    let summary: Record<string, unknown> = {};
+    try {
+      summary = JSON.parse(result.result ?? "{}") as Record<string, unknown>;
+    } catch {
+      // fallback — show raw
+    }
+
+    const tier = summary.outreach_tier as string | null ?? null;
+    const score = typeof summary.icp_score === "number"
+      ? `${Math.round((summary.icp_score as number) * 100)}%`
+      : "—";
+    const rationale = summary.icp_rationale as string ?? "";
+    const company = (summary.company_name as string | null) ?? rawInput;
+
+    let output: string;
+    if (tier) {
+      const tierLabel = tier === "ceo" ? "🏆 CEO-tier" : "👔 MD-tier";
+      output =
+        `✅ <b>${safeHtml(company)}</b> — <b>Qualified</b> ${tierLabel}\n` +
+        `ICP score: <b>${score}</b>\n\n` +
+        `<i>${safeHtml(rationale.slice(0, 400))}</i>\n\n` +
+        `📬 Routing to Sales pod for outreach draft…`;
+    } else {
+      output =
+        `❌ <b>${safeHtml(company)}</b> — <b>Disqualified</b>\n` +
+        `ICP score: <b>${score}</b>\n\n` +
+        `<i>${safeHtml(rationale.slice(0, 400))}</i>`;
+    }
+
+    await ctx.reply(output, {
+      parse_mode: "HTML",
+      ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
+    });
+  } catch (err) {
+    clearInterval(prospectTypingInterval);
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error({ err: msg, rawInput, threadId }, "Prospect command failed");
+    await ctx.reply(
+      `❌ <b>Prospecting failed</b>\n\n<code>${safeHtml(msg.slice(0, 500))}</code>`,
+      {
+        parse_mode: "HTML",
+        ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
+      },
+    );
+  }
+}
+
+// ── Handlers ──────────────────────────────────────────────────────────────────
+
 /**
  * Register all bot handlers.
  * Called once at startup before bot.start().
  */
 export function registerHandlers(bot: Bot): void {
+  // ── /prospect command ────────────────────────────────────────────────────
+
+  bot.command("prospect", async (ctx: Context) => {
+    await handleProspectCommand(ctx);
+  });
+
   // ── Incoming messages ────────────────────────────────────────────────────
 
   bot.on("message:text", async (ctx: Context) => {
     const threadTopicId = ctx.message?.message_thread_id;
     const text = ctx.message?.text ?? "";
+
+    // Don't double-handle /prospect commands (grammy routes commands first)
+    if (text.startsWith("/prospect")) return;
+
     log.info({ from: ctx.from?.id, topic: threadTopicId, text: text.slice(0, 80) }, "Message received");
     await routeToGraph(ctx);
   });

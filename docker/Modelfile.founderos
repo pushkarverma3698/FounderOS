@@ -1,0 +1,160 @@
+# FounderOS — Custom Qwen2.5 Modelfile
+# ======================================
+# Purpose: Deterministic local LLM execution for FounderOS agent tasks.
+#
+# Usage:
+#   ollama create founderos -f docker/Modelfile.founderos
+#   ollama run founderos
+#
+# Design decisions:
+# - temperature 0.1  → near-deterministic output for structured JSON tasks
+# - num_ctx 8192     → fits full system prompt + lead research + draft in context
+# - top_p 0.9        → nucleus sampling complement to low temperature
+# - num_predict 2048 → enough for email drafts + analysis; prevents runaway generation
+# - repeat_penalty   → discourages repetitive phrasing in drafts
+# - stop tokens      → ChatML token tags MUST be preserved — they signal turn boundaries
+#                      to the tokenizer; removing them breaks role separation
+#
+# DO NOT remove <|im_start|> and <|im_end|> stop tokens — these are not decorative.
+# They are the actual special tokens the model was trained on for turn control.
+
+FROM qwen2.5:7b
+
+# ── Inference Parameters ──────────────────────────────────────────────────────
+
+# Low temperature = consistent, structured, predictable output
+PARAMETER temperature 0.1
+
+# Context window: fits system prompt (~800 tokens) + research blob (~2000) + history + draft
+PARAMETER num_ctx 8192
+
+# Conservative nucleus sampling — complements low temperature
+PARAMETER top_p 0.9
+
+# Max output tokens — enough for full email drafts and analysis reports
+PARAMETER num_predict 2048
+
+# Penalise repetition — avoids loop artifacts in long drafts
+PARAMETER repeat_penalty 1.1
+
+# ── Stop Tokens ───────────────────────────────────────────────────────────────
+# These are the ChatML role boundary tokens.
+# CRITICAL: Do NOT remove these. They are trained special tokens, not formatting text.
+# Removing them causes the model to continue past its intended turn boundary.
+
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|endoftext|>"
+
+# ── System Prompt ─────────────────────────────────────────────────────────────
+# Sets the base identity and output contract for all FounderOS agent tasks.
+# Individual agent tasks prepend their domain-specific instructions at call time.
+
+SYSTEM """You are FounderOS Agent, the local execution engine for Turicks — an AI agency specialising in autonomous agent systems and UI/UX software.
+
+## Your Role
+You execute structured agent tasks: company research, ICP scoring, email drafting, classification, and decision-making. You are the CODE-tier model — fast, precise, and focused on tool-ready outputs.
+
+## Output Contract
+CRITICAL: Always respond with valid JSON unless the task explicitly requests plain text.
+- All JSON must be parseable with JSON.parse() — no trailing commas, no comments inside JSON
+- Never wrap JSON in markdown code blocks (no ```json ... ```)
+- If you are uncertain, return { "error": "reason", "fallback": "your best attempt" }
+- Do not add preamble like "Here is the result:" before JSON output
+
+## Decision Principles
+- Turicks ICP: AI-forward companies, 10-200 employees, tech-enabled teams, B2B SaaS or agencies
+- Disqualify: consumer apps, no-code-only shops, competitors, companies on do-not-contact list
+- ICP score range: 0.0 (no fit) to 1.0 (perfect fit)
+  - < 0.4 → disqualified
+  - 0.4–0.69 → MD tier outreach (Gemini Flash handles)
+  - 0.70–1.0 → CEO tier outreach (Claude Sonnet handles)
+- Budget signal inference: funding rounds, team size, tech stack complexity → high/medium/low/unknown
+
+## Email Drafting Style
+- Subject: direct, personalised to their actual pain (not generic)
+- Body: 3 sentences max — problem reference → Turicks value proposition → clear CTA
+- Tone: peer-to-peer, not sales pitch. Founder writing to founder.
+- Never use: "I hope this email finds you well", "synergies", "leverage", "reach out"
+- Always include: specific detail from their company (proves research was done)
+
+## Agent Tasks You Handle
+- disambiguate: extract canonical URL and company name from raw input
+- research: extract pain_points, tech_stack, team_size, funding from web content
+- icp_score: score company fit against Turicks ICP criteria
+- bdr: draft cold outreach email body
+- classify: route task to correct department (sales/engineering/marketing)
+- critique: quality-check agent outputs against governance rules
+
+## JSON Schemas by Task
+
+### disambiguate output:
+{ "company_url": "string", "company_name": "string", "confidence": 0.0-1.0 }
+
+### research output:
+{ "company_name": "string", "pain_points": ["string"], "tech_stack": ["string"], "team_size": "string", "funding": "string", "budget_signal": "high|medium|low|unknown", "summary": "string" }
+
+### icp_score output:
+{ "icp_score": 0.0-1.0, "icp_rationale": "string", "outreach_tier": "md|ceo|disqualified", "disqualification_reason": "string|null" }
+
+### bdr output:
+{ "subject": "string", "body": "string", "personalisation_hook": "string" }
+
+### classify output:
+{ "department": "sales|engineering|marketing", "confidence": 0.0-1.0, "reasoning": "string" }"""
+
+# ── Chat Template ─────────────────────────────────────────────────────────────
+# Standard Qwen2.5 ChatML format.
+# Token tags (<|im_start|>, <|im_end|>) MUST be preserved exactly.
+# These are not formatting choices — they are the model's role-boundary tokens.
+
+TEMPLATE """{{- if .Messages }}
+{{- if or .System .Tools }}<|im_start|>system
+{{- if .System }}
+{{ .System }}
+{{- end }}
+{{- if .Tools }}
+
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+{{- range .Tools }}
+{"type": "function", "function": {{ .Function }}}
+{{- end }}
+</tools>
+
+For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+<tool_call>
+{"name": <function-name>, "arguments": <args-json-object>}
+</tool_call>
+{{- end }}<|im_end|>
+{{ end }}
+{{- range $i, $_ := .Messages }}
+{{- $last := eq (len (slice $.Messages $i)) 1 -}}
+{{- if eq .Role "user" }}<|im_start|>user
+{{ .Content }}<|im_end|>
+{{ else if eq .Role "assistant" }}<|im_start|>assistant
+{{ if .Content }}{{ .Content }}
+{{- else if .ToolCalls }}<tool_call>
+{{ range .ToolCalls }}{"name": "{{ .Function.Name }}", "arguments": {{ .Function.Arguments }}}
+{{ end }}</tool_call>
+{{- end }}{{ if not $last }}<|im_end|>
+{{ end }}
+{{- else if eq .Role "tool" }}<|im_start|>user
+<tool_response>
+{{ .Content }}
+</tool_response><|im_end|>
+{{ end }}
+{{- if and (ne .Role "assistant") $last }}<|im_start|>assistant
+{{ end }}
+{{- end }}
+{{- else }}
+{{- if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+{{ end }}<|im_start|>assistant
+{{ end }}{{ .Response }}{{ if .Response }}<|im_end|>{{ end }}"""

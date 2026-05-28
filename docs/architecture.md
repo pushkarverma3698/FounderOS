@@ -11,9 +11,9 @@
 │                         GATEWAY LAYER                               │
 │                                                                     │
 │   Telegram (grammy)  ──────────────────────────────────────────     │
-│   • Receive tasks in department topics                              │
-│   • Send HITL approve/reject inline keyboards                       │
-│   • Route callback_query back to interrupt resolver                 │
+│   • /prospect <url>  → ProspectingPod                              │
+│   • free-form tasks  → Supervisor → dept routing                   │
+│   • HITL callbacks   → inline [Approve] [Reject] [Edit] buttons    │
 │                                                                     │
 │   Admin HTTP (Hono)  ──── /health  /metrics  /threads               │
 └──────────────────────────────────┬──────────────────────────────────┘
@@ -28,57 +28,85 @@
 │  │   START → [supervisor_node] ─────────────────────────────   │   │
 │  │                │                                           │   │
 │  │       Command({ goto: dept })                              │   │
-│  │         ╱        │        ╲                               │   │
-│  │  [sales pod] [eng pod] [mktg pod]                          │   │
-│  │         ╲        │        ╱                               │   │
-│  │          └────────────────┘                               │   │
+│  │      ╱     │      │      ╲                                │   │
+│  │ [prospect] [sales] [eng] [mktg]                            │   │
+│  │      ╲     │      │      ╱                                │   │
+│  │          └──────────────┘                                 │   │
 │  │                 ▼                                         │   │
 │  │               END                                         │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                                                                     │
-│  ┌─────────────────────────┐  ┌─────────────────────────────────┐  │
-│  │  Sales Pod (subgraph)   │  │  Engineering Pod (subgraph)     │  │
-│  │                         │  │                                 │  │
-│  │  lead_intel             │  │  senior_dev                     │  │
-│  │      ↓                  │  │      ↓                          │  │
-│  │  bdr (email draft)      │  │  vibe_coder                     │  │
-│  │      ↓                  │  │      ↓                          │  │
-│  │  critic ────────┐       │  │  qa_tester                      │  │
-│  │      ↓          │ needs │  │      ↓                          │  │
-│  │  hitl_node    revision  │  │  critic → hitl → finalize       │  │
-│  │      ↓          │       │  │                                 │  │
-│  │  finalize ◄─────┘       │  └─────────────────────────────────┘  │
-│  └─────────────────────────┘                                       │
-│                                                                     │
-│  Marketing Pod: researcher → content_writer → critic → hitl        │
+│  ┌─────────────────────────────┐  ┌──────────────────────────────┐  │
+│  │  ProspectingPod (subgraph)  │  │  Sales Pod (subgraph)        │  │
+│  │                             │  │                              │  │
+│  │  disambiguate               │  │  lead_intel                  │  │
+│  │      ↓                      │  │      ↓                       │  │
+│  │  research (Redis-first)     │  │  suppression_check (edge)    │  │
+│  │      ↓                      │  │      ↓                       │  │
+│  │  icp_score                  │  │  quota_check (edge)          │  │
+│  │      ↓                      │  │      ↓                       │  │
+│  │  route_by_score ────────────┼─▶│  bdr (email draft)           │  │
+│  │   < 0.4 → disqualified      │  │      ↓                       │  │
+│  │   0.4–0.69 → md tier        │  │  critic ────────────┐        │  │
+│  │   ≥ 0.70 → ceo tier         │  │      ↓        needs revision │  │
+│  └─────────────────────────────┘  │  hitl_node ◄────────┘        │  │
+│                                   │      ↓                       │  │
+│  Engineering: senior_dev →        │  finalize                    │  │
+│    vibe_coder → qa → critic →     └──────────────────────────────┘  │
+│    hitl → finalize                                                  │
+│  Marketing: researcher →                                            │
+│    content_writer → critic → hitl → finalize                        │
 └──────────────────────────────────┬──────────────────────────────────┘
                                    │  callCascade()
                                    ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          TOOLS LAYER                                │
 │                                                                     │
-│   Web Search (Firecrawl)   Email (Composio/Gmail)                  │
-│   GitHub (REST + MCP)      LinkedIn (Composio)                     │
-│   Telegram Send            Bash execution                           │
-│   OpenWeatherMap           FFmpeg (Naggar video)                    │
+│   Web Search (Firecrawl/Tavily)   Email (Composio/Gmail)           │
+│   GitHub (REST + MCP)             LinkedIn (Composio)              │
+│   Telegram Send                   Bash execution                   │
+│                                                                     │
+│   Scheduler (node-cron — NOT graph nodes):                         │
+│   • LinkedIn posts Mon/Wed/Fri 9am                                 │
+│   • Gmail reply poller every 15 min                                │
+│   • HITL sweeper hourly (expires stale pending approvals)          │
 └──────────────────────────────────┬──────────────────────────────────┘
                                    │
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                         MEMORY LAYER                                │
-│                                                                     │
-│   PostgreSQL 16                                                     │
-│   ├── LangGraph checkpoints    (every node transition, resumable)  │
-│   ├── interrupt_registry       (HITL state — pending/approved/etc) │
-│   ├── llm_costs                (per-call token tracking)           │
-│   └── audit_log                (idempotency keys for ext. actions) │
-│                                                                     │
-│   Future: ChromaDB             (vector memory per company)         │
-└─────────────────────────────────────────────────────────────────────┘
+                   ┌───────────────┴───────────────┐
+                   ▼                               ▼
+┌─────────────────────────────┐   ┌───────────────────────────────────┐
+│       CACHING LAYER         │   │         MEMORY LAYER              │
+│       (Redis 7)             │   │         (PostgreSQL 16)           │
+│                             │   │                                   │
+│  research:{url_hash}        │   │  LangGraph checkpoints            │
+│    TTL 7 days               │   │    every node transition          │
+│    avoids re-scraping       │   │    fully resumable after crash    │
+│                             │   │                                   │
+│  quota:{tenant}:{date}      │   │  hitl_approvals                   │
+│    INCR atomic counter      │   │    HITL queue → Telegram buttons  │
+│    auto-expires midnight    │   │                                   │
+│                             │   │  ai_call_costs + lead_id          │
+│  llm:{prompt_hash}          │   │    per-call cost + per-lead view  │
+│    TTL: 0 (CEO) /           │   │                                   │
+│          3600 (MD) /        │   │  action_log                       │
+│          86400 (NANO)       │   │    idempotency guard (ext. sends) │
+│                             │   │                                   │
+└─────────────────────────────┘   │  outbound_leads                   │
+                                   │    prospect state machine        │
+                                   │                                   │
+                                   │  do_not_contact                   │
+                                   │    GDPR/CAN-SPAM suppression     │
+                                   │                                   │
+                                   │  agent_results (Phase 3)         │
+                                   │    few-shot training data        │
+                                   │                                   │
+                                   │  dept_signals (Phase 3)          │
+                                   │    cross-department events       │
+                                   └───────────────────────────────────┘
 
          Cross-cutting: Observability
-         LangSmith traces (LANGCHAIN_TRACING_V2=true)
-         Pino structured JSON logs (PII redacted before any sink)
+         LangSmith traces (LANGCHAIN_TRACING_V2=true) — PII scrubbed
+         Pino structured JSON logs
 ```
 
 ---
@@ -86,29 +114,52 @@
 ## Layer Responsibilities
 
 ### Gateway Layer (`src/gateway/`)
-Humans talk to FounderOS through Telegram. This layer has exactly two jobs:
-1. **Receive** — parse incoming Telegram messages and route them into the graph
-2. **Respond** — send HITL approval messages with inline keyboards, update on completion
+Humans talk to FounderOS through Telegram. Two jobs:
+1. **Receive** — parse messages, route into the graph
+2. **Respond** — send HITL inline keyboards, send completion notifications
 
-All grammy handlers are `async` and respond immediately (no blocking). Long-running work happens in the graph.
+All grammy handlers are `async` and respond immediately. Long-running work happens in the graph.
+
+Special command: `/prospect <url>` — kicks off the full outbound pipeline (disambiguate → research → ICP score → BDR → HITL).
 
 ### Brain Layer (`src/agents/`)
-The "thinking" part. Built on LangGraph `StateGraph`:
-- **Supervisor node** (`supervisor.ts`) — CEO-tier LLM that reads the task and emits `Command({ goto: dept })` to route to the correct department pod
-- **Department pods** (`pods/`) — each is a compiled `StateGraph` subgraph with specialist nodes for that domain
-- **Critic node** (`critic.ts`) — runs after every generator node; uses a *different model family* from the generator to prevent sycophancy
-- **HITL node** — calls LangGraph `interrupt()` to pause execution; DB-backed so it survives restarts
+LangGraph `StateGraph`:
+- **Supervisor** (`supervisor.ts`) — CEO-tier LLM, emits `Command({ goto: dept })`
+- **ProspectingPod** (`pods/prospecting.ts`) — qualifies inbound leads before SalesPod
+- **Department pods** (`pods/`) — Sales, Engineering, Marketing — each a compiled subgraph
+- **Critic** (`critic.ts`) — runs after generators; uses *different model family* to prevent sycophancy
 
-The entire graph is compiled **once at startup** (`graph.ts`) and reused for every request. Never compile per-request.
+Graph compiled **once at startup**. Never compile per-request.
+
+### Caching Layer (`src/infra/redis.ts`)
+Redis is exclusively for ephemeral data with natural TTLs:
+
+| Key pattern | TTL | Purpose |
+|-------------|-----|---------|
+| `research:{md5(url)}` | 7 days | Research results — avoids re-scraping same company |
+| `quota:{tenant}:{YYYY-MM-DD}` | Until midnight | Daily send quota — atomic INCR, race-condition safe |
+| `llm:{sha256(prompt)}` | 0 / 3600 / 86400 | LLM response cache by tier (CEO never cached) |
+
+**Rule:** Redis for data that self-destructs. Postgres for data you query later.
 
 ### Tools Layer (`src/tools/`)
-Implements the `UnifiedTool` interface. Agents declare `allowed_tools` in `registry.ts`. The runtime calls `getToolsForAgent()` to get only the tools an agent is allowed to use.
+Implements `UnifiedTool` interface. Agents declare `allowed_tools` in `registry.ts`.
+
+**Scheduler** lives here conceptually — `src/infra/scheduler.ts` runs three `node-cron` jobs at startup. NOT graph nodes (sleeping nodes are an antipattern in LangGraph — waste checkpointer storage).
 
 ### Memory Layer (`src/db/`)
-PostgreSQL is the single source of truth for all state:
-- **LangGraph checkpoints** — every node transition is checkpointed; any crash is recoverable
-- **interrupt_registry** — maps a HITL interrupt to its Telegram message; enables "approve" button to resume the right thread
-- **audit_log** — idempotency guard; before any external action (email/GitHub), check this table
+PostgreSQL is the single source of truth for durable state:
+
+| Table | Purpose |
+|-------|---------|
+| `langgraph_checkpoints` | Every node transition — process-crash recovery |
+| `hitl_approvals` | Links LangGraph interrupt → Telegram message_id |
+| `ai_call_costs` | Per-call token + USD cost, tagged with `lead_id` |
+| `action_log` | Idempotency key guard before any external action |
+| `outbound_leads` | Prospect state machine (researching → won/lost) |
+| `do_not_contact` | GDPR/CAN-SPAM suppression — checked before every send |
+| `agent_results` | Phase 3: few-shot examples for self-improving agents |
+| `dept_signals` | Phase 3: durable cross-department event log |
 
 ---
 
@@ -121,75 +172,89 @@ PostgreSQL is the single source of truth for all state:
 | Telegram | grammy | TypeScript-first, inline keyboards for HITL, topic groups = departments |
 | ORM | drizzle-orm | Schema IS TypeScript types — no codegen, SQL-like API |
 | Multi-model critique | Gemini → Claude | Different families prevent sycophancy in quality gate |
-| State persistence | PostgreSQL | One DB for app tables + checkpoints; no additional infra |
+| Ephemeral data | Redis | TTL-native, atomic INCR for quota — Postgres would need cleanup jobs |
+| Scheduling | node-cron | Sleeping graph nodes waste checkpointer storage; cron is purpose-built |
+| Local model | Ollama (qwen2.5:7b) | Deterministic JSON output at temp=0.1 — cost-free for structured tasks |
 
 See `docs/decisions/` for full ADR write-ups.
 
 ---
 
-## State Flow (Sales Example)
+## Outbound Sales Pipeline (Phase 2)
 
 ```
-User: "Draft cold email to Acme Corp CEO"
+Telegram: /prospect acme.com
   │
   ▼
-Telegram handler receives message
-  │  writes thread_id: "turicks:telegram:456:run-xyz"
+ProspectingPod
+  │
+  ├─ disambiguate_node (NANO tier)
+  │    "acme.com" → { company_url: "https://acme.com", company_name: "Acme Corp" }
+  │    Writes outbound_leads row (stage: "researching")
+  │
+  ├─ research_node (NANO tier, Redis-first)
+  │    1. Check Redis research:{md5("https://acme.com")} → cache hit? return blob
+  │    2. Cache miss → Tavily search → extract pain_points, tech_stack, funding
+  │    3. Cache in Redis TTL=7d
+  │
+  ├─ icp_score_node (MD tier)
+  │    Input: research blob
+  │    Output: { icp_score: 0.82, outreach_tier: "ceo", icp_rationale: "..." }
+  │    Updates outbound_leads (stage: "drafting", icp_score: 0.82)
+  │
+  └─ route_by_score (pure function — NO LLM)
+       score < 0.4  → Telegram: "Disqualified — [reason]". Stop.
+       score 0.4-0.69 → SalesPod with tier: "md"
+       score ≥ 0.70  → SalesPod with tier: "ceo"
+         │
+         ▼
+     SalesPod
+       │
+       ├─ lead_intel_node — additional context enrichment
+       ├─ suppression_check — pure edge: SELECT from do_not_contact
+       ├─ quota_check — pure edge: Redis INCR quota:{tenant}:{today}
+       ├─ bdr_node (md/ceo tier based on score) — draft email
+       ├─ critic_node — quality check (different model family)
+       ├─ hitl_node — pause, send Telegram [Approve][Reject][Edit]
+       └─ finalize_node — send email, write action_log, update outbound_leads stage
+```
+
+---
+
+## State Flow (Direct Task Example)
+
+```
+User: "Review our GitHub PR #42"
+  │
   ▼
-Supervisor node (CEO tier: Claude Sonnet)
-  │  classifies task → department: "sales"
-  │  emits: Command({ goto: "sales" })
+Supervisor (CEO tier: Claude Sonnet)
+  → classifies: department = "engineering"
+  → Command({ goto: "engineering" })
   ▼
-Sales pod starts
-  │
-  ├─ lead_intel node (local tier: LM Studio)
-  │    scrapes Acme Corp, builds LeadProfile
-  │
-  ├─ bdr node (md tier: Gemini Flash)
-  │    drafts email using LeadProfile + company profile from registry
-  │
-  ├─ critic node (ceo tier: Claude Sonnet)
-  │    checks against governance/critique-rules.md (Sales rules)
-  │    if NEEDS_REVISION → back to bdr (max 2 retries)
-  │    if APPROVED → hitl_node
-  │
-  ├─ hitl_node
-  │    writes interrupt_registry row (status: pending)
-  │    calls LangGraph interrupt()  ← execution pauses here
-  │    sends Telegram message with [Approve] [Reject] [Edit] buttons
-  │
-  ▼ (founder taps Approve in Telegram)
-  │
-  ├─ Telegram callback_query handler
-  │    resolves interrupt_registry (status: approved)
-  │    resumes graph from checkpoint
-  │
-  ├─ finalize node
-  │    writes audit_log (idempotency_key = interrupt_id)
-  │    sends email via Gmail/Composio
-  │
-  ▼
-Done — Telegram confirmation sent to founder
+Engineering Pod
+  ├─ senior_dev — reads PR diff, generates review
+  ├─ critic — checks against engineering quality rules
+  ├─ hitl_node — pauses, sends Telegram approval
+  └─ finalize — posts GitHub review comment
 ```
 
 ---
 
 ## Multi-Tenant Design
 
-Every state schema, DB table, and thread ID includes `tenant_id`. Today it's always `"turicks"`. Adding Naggar Retreat or a third company requires:
+Every state schema, DB table, and thread ID includes `tenant_id`. Today: `"turicks"`. Adding Naggar Retreat:
 1. Add company to `src/core/registry.ts`
-2. Zero schema changes
-3. Zero code changes — routing works by `tenant_id` convention
+2. Zero schema changes, zero code changes
+
+Thread ID format: `{tenant}:{user}:{run}` — e.g. `turicks:telegram:456:run-abc123`
 
 ---
 
 ## Scalability Notes
 
-The system is intentionally **single-process** for Phase 1 — one Node.js process, one PostgreSQL instance. This is sufficient for a two-person founding team. When it needs to scale:
+Intentionally **single-process** for Phase 1/2 — one Node.js process, one PostgreSQL, one Redis. Sufficient for a two-person team. When it needs to scale:
 
-- **Horizontal**: Each company becomes its own process (already tenant-isolated in DB)
-- **Queue**: Replace in-process execution with BullMQ + Redis (single graph.ts → queue consumer swap)
-- **Vector memory**: Add ChromaDB collections per company (collections already named in registry)
-- **Streaming**: LangGraph supports streaming — gateway layer already handles async; just pipe `streamEvents()` to Telegram
-
-None of these require architecture changes — they're slot-in upgrades to existing seams.
+- **Horizontal**: Each company becomes its own process (already tenant-isolated)
+- **Queue**: Replace in-process with BullMQ + Redis workers (graph.ts → queue consumer swap)
+- **Vector memory**: Add ChromaDB per company when `agent_results` > 10k rows (Phase 3+)
+- **Streaming**: LangGraph supports `streamEvents()` — pipe to Telegram with no architecture change

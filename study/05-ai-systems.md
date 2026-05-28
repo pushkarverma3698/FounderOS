@@ -12,7 +12,7 @@
 
 **Agentic workflow (FounderOS approach):** Fixed graph of specialized nodes, not a free-roaming agent. The supervisor routes to a department, nodes run in a defined sequence, and the critic enforces quality. More predictable than pure agents, more flexible than chains.
 
-**RAG (Retrieval-Augmented Generation):** Retrieve relevant documents from a vector store before generating. Reduces hallucination for domain-specific knowledge. FounderOS will use ChromaDB collections per company for context injection (Phase 2).
+**RAG (Retrieval-Augmented Generation):** Retrieve relevant documents from a vector store before generating. Reduces hallucination for domain-specific knowledge. FounderOS uses SQL few-shot from `agent_results` table at Phase 2 scale (< 10k rows); will add ChromaDB per company when that threshold is crossed (Phase 3).
 
 ---
 
@@ -194,3 +194,147 @@ npx tsx scripts/run-evals.ts --dataset sales-email-v1
 **"What is context window management for long-running agents?"**
 
 > "In our generator-critic loop, the messages array grows with each revision cycle. For long-running tasks, we manage this by: (1) keeping only the last N messages in the messages array using LangGraph's `messagesStateReducer` which deduplicates by message ID; (2) the generator receives only the current draft and the latest critique, not the entire history; (3) for truly long tasks, we summarise previous steps into a `summary` field and pass that instead of raw messages. This prevents context window exhaustion on the LLM side."
+
+---
+
+## ICP Scoring with Banded Thresholds
+
+### What ICP Scoring Is
+
+ICP = Ideal Customer Profile. The `icp_score_node` in ProspectingPod scores a prospect on a 0.0–1.0 scale based on fit criteria:
+
+**Turicks ICP:**
+- AI-forward company (they value AI tooling)
+- 10–200 employees (big enough to pay, small enough to move fast)
+- B2B SaaS or tech-enabled services
+- Has a software team (they can evaluate technical proposals)
+
+### Why Banded Thresholds, Not Binary
+
+Binary approach (≥ 0.5 = qualify, < 0.5 = reject):
+- Wastes money sending CEO-tier model calls to marginal leads
+- No middle ground between "yes" and "no"
+
+**Banded approach:**
+```
+score < 0.4   → Disqualified — Telegram notification only, stop
+score 0.4–0.69 → MD tier (Gemini Flash) — lighter model for lower-value lead
+score ≥ 0.70  → CEO tier (Claude Sonnet) — best model for hot prospect
+```
+
+**What this achieves:**
+1. Cost proportional to lead quality — warm leads cost ~$0.002, hot leads ~$0.04
+2. Quality proportional to lead quality — best writing for the best prospects
+3. No wasted human review for clearly poor fits
+
+**Interview framing:**
+> "The system automatically allocates LLM spend based on signal quality. A borderline lead gets Gemini Flash — fast, cheap, good enough. A high-fit lead gets Claude Sonnet — our best model for the highest-value outreach. This is resource allocation baked into the graph topology."
+
+### `route_by_score` is a Pure Function
+
+Critical implementation detail: `route_by_score` is a LangGraph conditional edge (pure function), not a node.
+
+```typescript
+// Conditional edge — pure function, no side effects
+function routeByScore(state: ProspectingState): string {
+  const score = state.icp_score ?? 0;
+  if (score < 0.4) return "disqualified";
+  if (score < 0.70) return "sales_md";
+  return "sales_ceo";
+}
+```
+
+It reads state, returns a routing string. **No LLM calls, no DB writes, no tool invocations.** Those belong in nodes. This keeps the graph deterministic and testable.
+
+---
+
+## Prompt Response Caching Strategy
+
+### What We Cache
+
+The `callCascade` function in `src/infra/llm.ts` has an optional Redis cache layer:
+
+```typescript
+// Before calling the LLM:
+if (tier !== "ceo") {
+  const hash = sha256(JSON.stringify({ tier, systemPrompt, userPrompt }));
+  const cached = await redis.get(KEYS.llmCache(hash));
+  if (cached) return JSON.parse(cached) as LLMResult;
+}
+
+// After calling the LLM:
+if (tier !== "ceo") {
+  await redis.setex(KEYS.llmCache(hash), TTL[tier], JSON.stringify(result));
+}
+```
+
+### TTL Rationale per Tier
+
+| Tier | TTL | Reasoning |
+|------|-----|-----------|
+| CEO | 0 (never cached) | Supervisor routing decisions must be fresh — stale routing = wrong department |
+| MD | 3600 (1 hour) | Research and scoring prompts are stable enough to cache short-term |
+| NANO | 86400 (24 hours) | Formatting tasks (standup summaries, date normalisation) rarely change |
+
+**Why CEO is never cached:**
+The CEO tier runs the supervisor node which classifies tasks and routes to departments. If a user sends "fix the auth bug" and then "prepare the sales deck" — the second request must not get the routing decision from the first. Caching supervisor decisions would corrupt the graph execution.
+
+**When caching saves money:**
+```
+/prospect acme.com (first run)
+  → research_node NANO tier — cache miss — calls Gemini Flash Lite — cost: $0.0002
+  → Result cached in Redis for 24h
+
+/prospect acme.com (second run, same day)
+  → research_node NANO tier — cache HIT — cost: $0.00
+```
+
+For repeat prospects (founder runs the command twice, or scrape worker re-indexes), the cache eliminates redundant LLM calls entirely.
+
+---
+
+## Per-Lead Cost Attribution
+
+### The Pattern
+
+Every `callCascade()` call accepts an optional `leadId` parameter:
+
+```typescript
+const result = await callCascade({
+  tier: "md",
+  agent: "icp_scorer",
+  tenantId: "turicks",
+  leadId: state.lead_id,   // ← FK to outbound_leads row
+  systemPrompt: SYSTEM.ICP_SCORER,
+  userPrompt: buildIcpPrompt(state.research),
+});
+```
+
+This gets written to `ai_call_costs`:
+
+```typescript
+await db.insert(aiCallCosts).values({
+  tenant_id, agent, tier, model,
+  tokens_in, tokens_out, cost_usd,
+  lead_id: opts.leadId ?? null,   // ← nullable FK
+});
+```
+
+### What It Enables
+
+```sql
+-- Which prospects are most expensive to qualify?
+SELECT ol.company_name,
+       SUM(acc.cost_usd)  AS total_cost_usd,
+       COUNT(*)           AS llm_calls,
+       MAX(ol.icp_score)  AS icp_score
+FROM ai_call_costs acc
+JOIN outbound_leads ol ON acc.lead_id = ol.id
+GROUP BY ol.company_name
+ORDER BY total_cost_usd DESC;
+```
+
+**Practical insight:** If a disqualified lead costs as much as a won lead, your ICP scoring is wrong. The cost-per-lead view reveals this.
+
+**Interview framing:**
+> "We tag every LLM call with a lead_id at the time of the call — not after the fact. This gives us a cost accounting system per prospect. We can answer 'how much did it cost to qualify Acme Corp and ultimately win them?' That attribution data feeds back into ICP threshold tuning."

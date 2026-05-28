@@ -20,7 +20,8 @@
  */
 
 import { StateGraph, END, START } from "@langchain/langgraph";
-import type { CoreMessage } from "ai";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import type { BaseMessage } from "@langchain/core/messages";
 import { SocialState } from "../state.js";
 import type { SocialStateType, AccountWarmingConfig } from "../state.js";
 import { callCascade } from "../../infra/llm.js";
@@ -79,9 +80,9 @@ Return a concise research brief (max 400 words) with:
 
 Be specific. No generic advice.`;
 
-  const messages: CoreMessage[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: `Research social content for:\n\n${state.task}\nPlatform: ${state.target_platform}` },
+  const messages: BaseMessage[] = [
+    new SystemMessage(systemPrompt),
+    new HumanMessage(`Research social content for:\n\n${state.task}\nPlatform: ${state.target_platform}`),
   ];
 
   const result = await callCascade("deep_research", messages, {
@@ -127,9 +128,9 @@ Return ONLY the post text. No intro, no explanation.`;
 
   const userContent = `Research brief:\n${state.trend_report ?? "No research available"}\n\nOriginal task: ${state.task}${revisionContext}`;
 
-  const messages: CoreMessage[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userContent },
+  const messages: BaseMessage[] = [
+    new SystemMessage(systemPrompt),
+    new HumanMessage(userContent),
   ];
 
   const result = await callCascade("md", messages, {

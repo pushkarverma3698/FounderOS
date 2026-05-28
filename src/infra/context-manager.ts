@@ -12,7 +12,7 @@
  * Apply these BEFORE calling callCascade() in any agent node.
  */
 
-import type { CoreMessage } from "ai";
+import type { BaseMessage } from "@langchain/core/messages";
 import { estimateTokens, truncateToTokenBudget } from "./token-optimizer.js";
 
 // ── Message history trimming ───────────────────────────────────────────────────
@@ -41,9 +41,9 @@ export interface TrimOptions {
  *   });
  */
 export function trimMessageHistory(
-  messages: CoreMessage[],
+  messages: BaseMessage[],
   opts: TrimOptions,
-): CoreMessage[] {
+): BaseMessage[] {
   const keepRecent = opts.keepRecent ?? 4;
   const keepFirst = opts.keepFirst !== false;
 
@@ -62,7 +62,7 @@ export function trimMessageHistory(
   const middle = rest.slice(0, rest.length - keepRecent);
 
   // Build from recent backwards; add first if room
-  const result: CoreMessage[] = [...recent];
+  const result: BaseMessage[] = [...recent];
   let usedTokens = result.reduce(
     (sum, m) => sum + estimateTokens(typeof m.content === "string" ? m.content : JSON.stringify(m.content)),
     0,

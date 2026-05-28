@@ -15,6 +15,8 @@ import { closeDatabaseConnections } from "./db/client.js";
 import { getGraph } from "./agents/graph.js";
 import { initHITL } from "./gateway/hitl.js";
 import { sendHITLMessage, startBot, stopBot } from "./gateway/telegram.js";
+import { initScheduler, stopScheduler } from "./infra/scheduler.js";
+import { closeRedis } from "./infra/redis.js";
 import { logger } from "./infra/logger.js";
 
 const log = logger.child({ module: "main" });
@@ -48,7 +50,11 @@ async function main(): Promise<void> {
   );
   log.info("HITL wired");
 
-  // 4. Start Telegram bot (long polling — runs in background)
+  // 4. Start background scheduler (LinkedIn poster, reply poller, HITL sweeper)
+  initScheduler();
+  log.info("Scheduler ready");
+
+  // 5. Start Telegram bot (long polling — runs in background)
   await startBot();
 
   log.info("FounderOS running 🚀");
@@ -58,8 +64,10 @@ async function main(): Promise<void> {
 
 async function shutdown(signal: string): Promise<void> {
   log.info({ signal }, "Shutdown signal received — draining…");
+  stopScheduler();
   await stopBot();
   await closeDatabaseConnections();
+  await closeRedis();
   log.info("FounderOS stopped cleanly");
   process.exit(0);
 }

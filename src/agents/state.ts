@@ -21,6 +21,23 @@ import type { BaseMessage } from "@langchain/core/messages";
 
 // ── Shared Interfaces ─────────────────────────────────────────────────────────
 
+/**
+ * Cross-department signal — ephemeral per-run (bounded append in FounderState).
+ * For durable cross-session signals → write to dept_events table instead.
+ */
+export interface DeptSignal {
+  /** Originating department */
+  from: "sales" | "engineering" | "marketing" | "social" | "prospecting";
+  /** Event name e.g. "proposal_approved", "lead_replied", "demo_ready" */
+  event: string;
+  /** Arbitrary payload — convention defined per event_type */
+  payload: Record<string, unknown>;
+  /** LangGraph thread that emitted this signal */
+  thread_id: string;
+  /** ISO timestamp */
+  ts: string;
+}
+
 /** ICP-enriched lead profile built by lead_intel agent. */
 export interface LeadProfile {
   name: string;
@@ -93,7 +110,7 @@ export const FounderState = Annotation.Root({
   }),
 
   /** CEO classification output → routes to pod. */
-  department: Annotation<"sales" | "engineering" | "marketing" | "social" | "">({
+  department: Annotation<"sales" | "engineering" | "marketing" | "social" | "prospecting" | "">({
     value: (_x, y) => y,
     default: () => "",
   }),
@@ -104,10 +121,31 @@ export const FounderState = Annotation.Root({
     default: () => "",
   }),
 
+  /**
+   * ICP outreach tier — set by the prospecting pod after qualification.
+   * null = disqualified (don't route to sales)
+   * "md" = mid-level decision maker (icp_score 0.4–0.69)
+   * "ceo" = CEO/founder direct (icp_score >= 0.7)
+   */
+  outreach_tier: Annotation<"md" | "ceo" | null>({
+    value: (_x, y) => y,
+    default: () => null,
+  }),
+
   /** Skip HITL and send directly — set true only for low-stakes nano tasks. */
   auto_approve: Annotation<boolean>({
     value: (_x, y) => y,
     default: () => false,
+  }),
+
+  /**
+   * Cross-department signals — append-only, bounded to 50 entries.
+   * Ephemeral: lives only for the duration of this LangGraph run.
+   * Durable equivalent: dept_events Postgres table (written by publishDeptEvent).
+   */
+  departmentSignals: Annotation<DeptSignal[]>({
+    reducer: (a, b) => [...a, ...b].slice(-50),
+    default: () => [],
   }),
 
   /** Accumulated errors — append-only so we never lose context. */
@@ -118,6 +156,92 @@ export const FounderState = Annotation.Root({
 });
 
 export type FounderStateType = typeof FounderState.State;
+
+// ── Prospecting Pod State ─────────────────────────────────────────────────────
+
+/**
+ * Research blob stored in Redis + passed through the prospecting subgraph.
+ * Populated by prospecting_researcher node via Tavily search + Firecrawl.
+ */
+export interface CompanyResearch {
+  pain_points: string[];
+  tech_stack: string[];
+  team_size: string;
+  funding: string;
+  recent_news: string[];
+  raw_summary: string;
+  cached: boolean;
+}
+
+export const ProspectingState = Annotation.Root({
+  schema_version: Annotation<number>({
+    value: (_x, y) => y,
+    default: () => 1,
+  }),
+  trace_id: Annotation<string>({
+    value: (_x, y) => y,
+    default: () => "",
+  }),
+  tenant_id: Annotation<string>({
+    value: (_x, y) => y,
+    default: () => "turicks",
+  }),
+
+  /** Raw URL or company name from Telegram /prospect command */
+  raw_input: Annotation<string>({
+    value: (_x, y) => y,
+    default: () => "",
+  }),
+
+  /** Canonical URL after disambiguation */
+  company_url: Annotation<string | null>({
+    value: (_x, y) => y,
+    default: () => null,
+  }),
+
+  /** Resolved company name */
+  company_name: Annotation<string | null>({
+    value: (_x, y) => y,
+    default: () => null,
+  }),
+
+  /** FK → lead_pipeline.id — created by disambiguate_node */
+  lead_id: Annotation<string | null>({
+    value: (_x, y) => y,
+    default: () => null,
+  }),
+
+  /** Research blob — populated by research_node (Redis-first) */
+  research: Annotation<CompanyResearch | null>({
+    value: (_x, y) => y,
+    default: () => null,
+  }),
+
+  /** ICP score 0.0–1.0 from icp_score_node */
+  icp_score: Annotation<number | null>({
+    value: (_x, y) => y,
+    default: () => null,
+  }),
+
+  /** One-line rationale from scoring LLM */
+  icp_rationale: Annotation<string | null>({
+    value: (_x, y) => y,
+    default: () => null,
+  }),
+
+  /** "md" | "ceo" — determined by route_by_score edge */
+  outreach_tier: Annotation<"md" | "ceo" | null>({
+    value: (_x, y) => y,
+    default: () => null,
+  }),
+
+  errors: Annotation<Record<string, unknown>[]>({
+    reducer: (a, b) => [...a, ...b],
+    default: () => [],
+  }),
+});
+
+export type ProspectingStateType = typeof ProspectingState.State;
 
 // ── Sales Pod State ───────────────────────────────────────────────────────────
 
@@ -155,6 +279,22 @@ export const SalesState = Annotation.Root({
 
   /** Full intelligence report from lead_intel agent. */
   intel_report: Annotation<string | null>({
+    value: (_x, y) => y,
+    default: () => null,
+  }),
+
+  /**
+   * Strategic brief produced by sales_engineer.
+   * Guides BDR on angle, hook, value prop, and CTA for this specific lead.
+   */
+  sales_engineer_brief: Annotation<{
+    angle: string;
+    hook: string;
+    value_prop: string;
+    proof_point: string;
+    cta: string;
+    tier_rationale: string;
+  } | null>({
     value: (_x, y) => y,
     default: () => null,
   }),
@@ -227,6 +367,21 @@ export const EngineeringState = Annotation.Root({
     default: () => "",
   }),
 
+  /**
+   * Engineering plan produced by eng_engineer.
+   * Contains task decomposition, risks, and step-by-step execution plan.
+   */
+  eng_engineer_plan: Annotation<{
+    summary: string;
+    risks: string[];
+    steps: Array<{ step: number; action: string; tier: string; tool: string | null; hitl_required: boolean }>;
+    estimated_hours: number;
+    first_deliverable: string;
+  } | null>({
+    value: (_x, y) => y,
+    default: () => null,
+  }),
+
   /** Problem spec from task + any context gathered. */
   spec: Annotation<string | null>({
     value: (_x, y) => y,
@@ -297,6 +452,23 @@ export const MarketingState = Annotation.Root({
   company: Annotation<string>({
     value: (_x, y) => y,
     default: () => "",
+  }),
+
+  /**
+   * Marketing strategy brief produced by mktg_engineer.
+   * Specifies goal, pillar, platform, format, and content creator instructions.
+   */
+  mktg_engineer_brief: Annotation<{
+    goal: string;
+    pillar: string;
+    platform: string;
+    hook_strategy: string;
+    target_emotion: string;
+    format: string;
+    content_brief: string;
+  } | null>({
+    value: (_x, y) => y,
+    default: () => null,
   }),
 
   /** Raw trend intelligence from social_researcher. */

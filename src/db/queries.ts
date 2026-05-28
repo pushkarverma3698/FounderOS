@@ -10,25 +10,33 @@
 import { and, desc, eq, gt, lt, sql } from "drizzle-orm";
 import { getDb } from "./client.js";
 import {
-  auditLog,
-  interruptRegistry,
-  llmCosts,
-  type NewAuditLog,
-  type NewInterruptRegistry,
-  type NewLlmCost,
+  actionLog,
+  deptSignals,
+  hitlApprovals,
+  outboundLeads,
+  aiCallCosts,
+  doNotContact,
+  agentResults,
+  type NewActionLog,
+  type NewDeptSignal,
+  type NewHitlApproval,
+  type NewOutboundLead,
+  type NewAiCallCost,
+  type NewDoNotContact,
+  type NewAgentResult,
 } from "./schema.js";
 
-// ── Interrupt Registry ────────────────────────────────────────────────────────
+// ── HITL Approvals (hitl_approvals) ──────────────────────────────────────────
 
-/** Write an interrupt record BEFORE calling LangGraph interrupt(). */
+/** Write a HITL approval request BEFORE calling LangGraph interrupt(). */
 export async function createInterrupt(
-  data: Omit<NewInterruptRegistry, "interrupt_id" | "created_at">,
+  data: Omit<NewHitlApproval, "interrupt_id" | "created_at">,
 ): Promise<string> {
   const db = getDb();
   const [row] = await db
-    .insert(interruptRegistry)
+    .insert(hitlApprovals)
     .values(data)
-    .returning({ interrupt_id: interruptRegistry.interrupt_id });
+    .returning({ interrupt_id: hitlApprovals.interrupt_id });
   if (!row) throw new Error("createInterrupt: insert returned no rows");
   return row.interrupt_id;
 }
@@ -41,7 +49,7 @@ export async function resolveInterrupt(
 ): Promise<boolean> {
   const db = getDb();
   const result = await db
-    .update(interruptRegistry)
+    .update(hitlApprovals)
     .set({
       status,
       resolved_at: new Date(),
@@ -50,11 +58,11 @@ export async function resolveInterrupt(
     })
     .where(
       and(
-        eq(interruptRegistry.interrupt_id, interruptId),
-        eq(interruptRegistry.status, "pending"),
+        eq(hitlApprovals.interrupt_id, interruptId),
+        eq(hitlApprovals.status, "pending"),
       ),
     )
-    .returning({ interrupt_id: interruptRegistry.interrupt_id });
+    .returning({ interrupt_id: hitlApprovals.interrupt_id });
 
   return result.length > 0;
 }
@@ -64,11 +72,11 @@ export async function getPendingInterrupt(threadId: string) {
   const db = getDb();
   const [row] = await db
     .select()
-    .from(interruptRegistry)
+    .from(hitlApprovals)
     .where(
       and(
-        eq(interruptRegistry.thread_id, threadId),
-        eq(interruptRegistry.status, "pending"),
+        eq(hitlApprovals.thread_id, threadId),
+        eq(hitlApprovals.status, "pending"),
       ),
     )
     .limit(1);
@@ -80,8 +88,8 @@ export async function getInterruptById(interruptId: string) {
   const db = getDb();
   const [row] = await db
     .select()
-    .from(interruptRegistry)
-    .where(eq(interruptRegistry.interrupt_id, interruptId))
+    .from(hitlApprovals)
+    .where(eq(hitlApprovals.interrupt_id, interruptId))
     .limit(1);
   return row ?? null;
 }
@@ -93,33 +101,33 @@ export async function setInterruptTelegramMsg(
 ): Promise<void> {
   const db = getDb();
   await db
-    .update(interruptRegistry)
+    .update(hitlApprovals)
     .set({ telegram_msg_id: telegramMsgId })
-    .where(eq(interruptRegistry.interrupt_id, interruptId));
+    .where(eq(hitlApprovals.interrupt_id, interruptId));
 }
 
 /** Expire interrupts past their deadline (run periodically). */
 export async function expireStaleInterrupts(): Promise<number> {
   const db = getDb();
   const result = await db
-    .update(interruptRegistry)
+    .update(hitlApprovals)
     .set({ status: "expired", resolved_at: new Date() })
     .where(
       and(
-        eq(interruptRegistry.status, "pending"),
-        lt(interruptRegistry.expires_at, new Date()),
+        eq(hitlApprovals.status, "pending"),
+        lt(hitlApprovals.expires_at, new Date()),
       ),
     )
-    .returning({ interrupt_id: interruptRegistry.interrupt_id });
+    .returning({ interrupt_id: hitlApprovals.interrupt_id });
   return result.length;
 }
 
-// ── LLM Costs ─────────────────────────────────────────────────────────────────
+// ── AI Call Costs (ai_call_costs) ─────────────────────────────────────────────
 
 /** Record a single LLM call's token usage + cost. */
-export async function logLlmCost(data: Omit<NewLlmCost, "id" | "created_at">): Promise<void> {
+export async function logLlmCost(data: Omit<NewAiCallCost, "id" | "created_at">): Promise<void> {
   const db = getDb();
-  await db.insert(llmCosts).values(data);
+  await db.insert(aiCallCosts).values(data);
 }
 
 /** Daily total cost for a tenant. Used by cost_watchdog budget guard. */
@@ -129,12 +137,12 @@ export async function getTodayCostUsd(tenantId: string): Promise<number> {
   today.setHours(0, 0, 0, 0);
 
   const [row] = await db
-    .select({ total: sql<string>`COALESCE(SUM(${llmCosts.cost_usd}), 0)` })
-    .from(llmCosts)
+    .select({ total: sql<string>`COALESCE(SUM(${aiCallCosts.cost_usd}), 0)` })
+    .from(aiCallCosts)
     .where(
       and(
-        eq(llmCosts.tenant_id, tenantId),
-        gt(llmCosts.created_at, today),
+        eq(aiCallCosts.tenant_id, tenantId),
+        gt(aiCallCosts.created_at, today),
       ),
     );
 
@@ -148,25 +156,25 @@ export async function getCostBreakdown(tenantId: string, days = 7) {
 
   return db
     .select({
-      model: llmCosts.model,
-      agent: llmCosts.agent,
+      model: aiCallCosts.model,
+      agent: aiCallCosts.agent,
       calls: sql<number>`COUNT(*)`,
-      total_tokens_in: sql<number>`SUM(${llmCosts.tokens_in})`,
-      total_tokens_out: sql<number>`SUM(${llmCosts.tokens_out})`,
-      total_cost_usd: sql<string>`SUM(${llmCosts.cost_usd})`,
+      total_tokens_in: sql<number>`SUM(${aiCallCosts.tokens_in})`,
+      total_tokens_out: sql<number>`SUM(${aiCallCosts.tokens_out})`,
+      total_cost_usd: sql<string>`SUM(${aiCallCosts.cost_usd})`,
     })
-    .from(llmCosts)
+    .from(aiCallCosts)
     .where(
       and(
-        eq(llmCosts.tenant_id, tenantId),
-        gt(llmCosts.created_at, since),
+        eq(aiCallCosts.tenant_id, tenantId),
+        gt(aiCallCosts.created_at, since),
       ),
     )
-    .groupBy(llmCosts.model, llmCosts.agent)
-    .orderBy(desc(sql`SUM(${llmCosts.cost_usd})`));
+    .groupBy(aiCallCosts.model, aiCallCosts.agent)
+    .orderBy(desc(sql`SUM(${aiCallCosts.cost_usd})`));
 }
 
-// ── Audit Log ─────────────────────────────────────────────────────────────────
+// ── Action Log (action_log) ───────────────────────────────────────────────────
 
 /**
  * Idempotency check. Returns true if the action has already been performed.
@@ -175,31 +183,186 @@ export async function getCostBreakdown(tenantId: string, days = 7) {
 export async function hasBeenAudited(idempotencyKey: string): Promise<boolean> {
   const db = getDb();
   const [row] = await db
-    .select({ id: auditLog.id })
-    .from(auditLog)
-    .where(eq(auditLog.idempotency_key, idempotencyKey))
+    .select({ id: actionLog.id })
+    .from(actionLog)
+    .where(eq(actionLog.idempotency_key, idempotencyKey))
     .limit(1);
   return row !== undefined;
 }
 
 /**
- * Write an audit entry AFTER a successful external action.
- * Silently ignores duplicate key violations (already audited).
+ * Write an action log entry AFTER a successful external action.
+ * Silently ignores duplicate key violations (already performed).
  */
 export async function writeAuditEntry(
-  data: Omit<NewAuditLog, "id" | "created_at">,
+  data: Omit<NewActionLog, "id" | "created_at">,
 ): Promise<void> {
   const db = getDb();
-  await db.insert(auditLog).values(data).onConflictDoNothing();
+  await db.insert(actionLog).values(data).onConflictDoNothing();
 }
 
-/** Recent audit entries for a tenant (admin/debug). */
+/** Recent action log entries for a tenant (admin/debug). */
 export async function getRecentAuditEntries(tenantId: string, limit = 50) {
   const db = getDb();
   return db
     .select()
-    .from(auditLog)
-    .where(eq(auditLog.tenant_id, tenantId))
-    .orderBy(desc(auditLog.created_at))
+    .from(actionLog)
+    .where(eq(actionLog.tenant_id, tenantId))
+    .orderBy(desc(actionLog.created_at))
     .limit(limit);
+}
+
+// ── Outbound Leads (outbound_leads) ──────────────────────────────────────────
+
+/** Create a new outbound lead entry (called by disambiguate_node on /prospect). */
+export async function createLead(
+  data: Omit<NewOutboundLead, "id" | "created_at" | "updated_at">,
+): Promise<string> {
+  const db = getDb();
+  const [row] = await db
+    .insert(outboundLeads)
+    .values(data)
+    .returning({ id: outboundLeads.id });
+  if (!row) throw new Error("createLead: insert returned no rows");
+  return row.id;
+}
+
+/** Update lead stage + optional metadata. */
+export async function updateLeadStage(
+  leadId: string,
+  stage: string,
+  updates: Partial<Omit<NewOutboundLead, "id" | "tenant_id" | "created_at">> = {},
+): Promise<void> {
+  const db = getDb();
+  await db
+    .update(outboundLeads)
+    .set({ stage, updated_at: new Date(), ...updates })
+    .where(eq(outboundLeads.id, leadId));
+}
+
+/** Fetch a lead by ID. */
+export async function getLeadById(leadId: string) {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(outboundLeads)
+    .where(eq(outboundLeads.id, leadId))
+    .limit(1);
+  return row ?? null;
+}
+
+/** Check if a URL is already in the pipeline for this tenant (deduplication). */
+export async function getLeadByUrl(tenantId: string, companyUrl: string) {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(outboundLeads)
+    .where(and(eq(outboundLeads.tenant_id, tenantId), eq(outboundLeads.company_url, companyUrl)))
+    .limit(1);
+  return row ?? null;
+}
+
+/** All leads in a given stage for a tenant. */
+export async function getLeadsByStage(tenantId: string, stage: string) {
+  const db = getDb();
+  return db
+    .select()
+    .from(outboundLeads)
+    .where(and(eq(outboundLeads.tenant_id, tenantId), eq(outboundLeads.stage, stage)))
+    .orderBy(desc(outboundLeads.created_at));
+}
+
+// ── Do Not Contact (do_not_contact) ──────────────────────────────────────────
+
+/** Add an address/domain to the do-not-contact list. */
+export async function addSuppression(
+  data: Omit<NewDoNotContact, "id" | "added_at">,
+): Promise<void> {
+  const db = getDb();
+  await db.insert(doNotContact).values(data).onConflictDoNothing();
+}
+
+/**
+ * Check if an email or its domain is on the do-not-contact list.
+ * Checks both exact match and domain-prefix match (e.g. "@acme.com").
+ */
+export async function isSuppressed(tenantId: string, email: string): Promise<boolean> {
+  const domain = "@" + email.split("@")[1];
+  const db = getDb();
+  const [row] = await db
+    .select({ id: doNotContact.id })
+    .from(doNotContact)
+    .where(
+      and(
+        eq(doNotContact.tenant_id, tenantId),
+        sql`${doNotContact.email_or_domain} IN (${email}, ${domain})`,
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
+// ── Agent Results (agent_results) — Self-Improvement ─────────────────────────
+
+/** Write an agent result after every agent task completes. */
+export async function writeTaskOutcome(
+  data: Omit<NewAgentResult, "id" | "created_at">,
+): Promise<void> {
+  const db = getDb();
+  await db.insert(agentResults).values(data);
+}
+
+/**
+ * Fetch recent results for an agent — used for few-shot injection at execution time.
+ * Returns top 3 succeeded + 1 failed, ordered by recency.
+ */
+export async function getRecentOutcomes(agentId: string, limit = 4) {
+  const db = getDb();
+  return db
+    .select()
+    .from(agentResults)
+    .where(eq(agentResults.agent_id, agentId))
+    .orderBy(desc(agentResults.created_at))
+    .limit(limit);
+}
+
+// ── Dept Signals (dept_signals) — Cross-Department ───────────────────────────
+
+/** Publish a cross-department signal. */
+export async function publishDeptEvent(
+  data: Omit<NewDeptSignal, "id" | "created_at">,
+): Promise<string> {
+  const db = getDb();
+  const [row] = await db
+    .insert(deptSignals)
+    .values(data)
+    .returning({ id: deptSignals.id });
+  if (!row) throw new Error("publishDeptEvent: insert returned no rows");
+  return row.id;
+}
+
+/** Fetch unconsumed signals for a target department. */
+export async function consumePendingEvents(tenantId: string, toDept: string) {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(deptSignals)
+    .where(
+      and(
+        eq(deptSignals.tenant_id, tenantId),
+        eq(deptSignals.consumed, false),
+        eq(deptSignals.to_dept, toDept),
+      ),
+    )
+    .orderBy(deptSignals.created_at);
+
+  if (rows.length > 0) {
+    const ids = rows.map((r) => r.id);
+    await db
+      .update(deptSignals)
+      .set({ consumed: true })
+      .where(sql`${deptSignals.id} = ANY(ARRAY[${sql.join(ids.map(id => sql`${id}::uuid`), sql`, `)}])`);
+  }
+
+  return rows;
 }

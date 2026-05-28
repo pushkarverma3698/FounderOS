@@ -15,9 +15,15 @@ Stack: Node.js 22 + TypeScript 5.5 (strict) + LangGraph JS + Vercel AI SDK + gra
 
 ## Current Phase Status
 - ✅ Phase 1A: Foundation — config, types, DB schema, infra layer (COMPLETE)
-- 🔄 Phase 1B: Brain — supervisor, sales pod, critic (NEXT)
-- ⏳ Phase 1C: Gateway — Telegram bot, HITL callbacks
-- ⏳ Phase 1D: Tests + evals
+- ✅ Phase 1B: Brain — supervisor, sales pod, critic (COMPLETE)
+- ✅ Phase 1C: Gateway — Telegram bot, HITL callbacks (COMPLETE)
+- ✅ Phase 1D: Tests + evals (COMPLETE)
+- ✅ Phase 2A: Redis + caching layer (COMPLETE)
+- ✅ Phase 2B: ProspectingPod + `/prospect` command (COMPLETE)
+- ✅ Phase 2C: Suppression + quota safety rails, LinkedIn tools, scheduler (COMPLETE)
+- ✅ Phase 2D: Observability + docs update (COMPLETE)
+- ⏳ Phase 2E: Engineer agents per department
+- ⏳ Phase 3: Self-improvement + cross-department + scale
 
 ## Key Rules (Non-Negotiable)
 
@@ -115,15 +121,44 @@ Defined in `src/core/config.ts`. Each tier tries providers in order:
 
 ## File Locations Quick Reference
 ```
-src/core/registry.ts    — All agent + company definitions
-src/core/config.ts      — Env vars + model cascade + budget limits
-src/core/prompts.ts     — All system + task prompts
-src/agents/state.ts     — All LangGraph Annotation schemas + interfaces
-src/agents/graph.ts     — Main FounderGraph (compiled once)
-src/db/schema.ts        — All Drizzle table definitions
-src/db/queries.ts       — Named query functions (no raw SQL elsewhere)
-src/infra/llm.ts        — LLM cascade executor + budget guard
-src/infra/checkpointer.ts — TenantAwareCheckpointer + thread ID builder
-src/gateway/telegram.ts — grammy bot + topic routing
-src/gateway/hitl.ts     — HITL interrupt lifecycle
+src/core/registry.ts       — All agent + company definitions
+src/core/config.ts         — Env vars + model cascade + budget limits
+src/core/prompts.ts        — All system + task prompts
+src/agents/state.ts        — All LangGraph Annotation schemas + interfaces
+src/agents/graph.ts        — Main FounderGraph (compiled once)
+src/agents/pods/prospecting.ts — ProspectingPod (disambiguate → research → ICP score → route)
+src/db/schema.ts           — All Drizzle table definitions (7 tables)
+src/db/queries.ts          — Named query functions (no raw SQL elsewhere)
+src/infra/llm.ts           — LLM cascade executor + budget guard
+src/infra/redis.ts         — Redis singleton + key helpers (research, quota, llmCache)
+src/infra/scheduler.ts     — Cron jobs: LinkedIn posts, reply poller, HITL sweeper
+src/infra/checkpointer.ts  — TenantAwareCheckpointer + thread ID builder
+src/gateway/telegram.ts    — grammy bot + topic routing + /prospect command
+src/gateway/hitl.ts        — HITL interrupt lifecycle
+src/tools/linkedin.ts      — LinkedIn post + reply tools (Composio)
+drizzle/                   — Generated migration SQL (run: npx drizzle-kit migrate)
 ```
+
+## Phase 3E Rules (Testing + Engineer Responsibility)
+
+### 11. Test before done
+`pnpm test` must be green before any task is marked complete.
+If a change touches existing files, run affected tests first.
+If tests fail, fix them — never skip or disable unless they were already failing (confirm with `git stash`).
+
+### 12. Self-critique before architectural plans
+Write 3 critique points of your own approach before finalising any design.
+Answer each critique point explicitly. This prevents obvious failure modes from shipping.
+
+### 13. Engineer agents own their department
+`eng_engineer`, `sales_engineer`, `mktg_engineer` make autonomous technical decisions within their pod.
+HITL gates guard only external sends (email, LinkedIn, GitHub push).
+Never route to HITL for internal analysis, draft generation, or code review steps.
+
+### 14. Safety rails order is non-negotiable
+Sales pod flow: `lead_intel → suppression_check → quota_check → bdr → critic → [HITL] → finalize`
+Never bypass suppression_check or quota_check, even in testing (mock them instead).
+
+### 15. Redis for ephemeral, Postgres for durable (see ADR-005)
+- Research cache, send quotas, LLM prompt cache → Redis (TTL, atomic INCR)
+- Lead pipeline, suppressions, HITL registry, audit log → Postgres (durable, queryable)

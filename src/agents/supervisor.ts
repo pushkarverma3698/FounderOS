@@ -12,7 +12,8 @@
  * with keyword fallback for agents that don't have explicit department.
  */
 
-import type { CoreMessage } from "ai";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import type { BaseMessage } from "@langchain/core/messages";
 import { callCascade, checkBudget } from "../infra/llm.js";
 import { getSystem } from "../core/prompts.js";
 import { getAgent } from "../core/registry.js";
@@ -37,7 +38,7 @@ function getCeoPrompt(): string {
  */
 export function _resolveDepartment(
   agentName: string,
-): "sales" | "engineering" | "marketing" | "social" | null {
+): "sales" | "engineering" | "marketing" | "social" | "prospecting" | null {
   // 1. Registry lookup (most reliable)
   const agent = getAgent(agentName);
   if (agent?.department) return agent.department;
@@ -46,6 +47,10 @@ export function _resolveDepartment(
   // NOTE: order matters — check more specific keywords first to avoid false matches.
   // e.g. "linkedin_outreach" → "outreach" is a sales keyword, check sales BEFORE social.
   const name = agentName.toLowerCase();
+
+  // Prospecting is checked FIRST — /prospect commands and research tasks go here
+  const prospectingKeywords = ["prospect", "disambiguate", "icp_scor", "icp_scorer", "lead_qualify", "lead_research"];
+  if (prospectingKeywords.some((k) => name.includes(k))) return "prospecting";
 
   const salesKeywords = ["bdr", "lead_intel", "bidding", "proposal", "outreach", "pipeline_md", "sales"];
   if (salesKeywords.some((k) => name.includes(k))) return "sales";
@@ -84,11 +89,19 @@ export async function supervisorNode(
   // Budget guard — CEO calls are expensive (Sonnet tier)
   await checkBudget(tenantId);
 
+  // Phase 3C: log any pending cross-dept signals in state (durable signals are in dept_signals DB table)
+  if (state.departmentSignals && state.departmentSignals.length > 0) {
+    log.info(
+      { signal_count: state.departmentSignals.length, signals: state.departmentSignals.map((s) => `${s.from}:${s.event}`) },
+      "CEO: cross-department signals observed",
+    );
+  }
+
   log.info({ tenant_id: tenantId, task: state.task.slice(0, 80) }, "CEO classifying task");
 
-  const messages: CoreMessage[] = [
-    { role: "system", content: getCeoPrompt() },
-    { role: "user",   content: state.task },
+  const messages: BaseMessage[] = [
+    new SystemMessage(getCeoPrompt()),
+    new HumanMessage(state.task),
   ];
 
   const result = await callCascade("ceo", messages, {

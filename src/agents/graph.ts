@@ -21,12 +21,14 @@
 import { StateGraph, END, START } from "@langchain/langgraph";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { FounderState } from "./state.js";
-import type { FounderStateType } from "./state.js";
+import type { FounderStateType, DeptSignal } from "./state.js";
 import { supervisorNode } from "./supervisor.js";
 import { salesSubgraph } from "./pods/sales.js";
 import { engineeringSubgraph } from "./pods/engineering.js";
 import { marketingSubgraph } from "./pods/marketing.js";
 import { socialSubgraph } from "./pods/social.js";
+import { prospectingSubgraph } from "./pods/prospecting.js";
+import type { ProspectingResult } from "./pods/prospecting.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
 import { childLogger } from "../infra/logger.js";
 
@@ -36,13 +38,32 @@ const log = childLogger({ module: "graph" });
 
 function routeDepartment(
   state: FounderStateType,
-): "sales" | "engineering" | "marketing" | "social" | typeof END {
+): "sales" | "engineering" | "marketing" | "social" | "prospecting" | typeof END {
   if (state.department === "sales") return "sales";
   if (state.department === "engineering") return "engineering";
   if (state.department === "marketing") return "marketing";
   if (state.department === "social") return "social";
+  if (state.department === "prospecting") return "prospecting";
   // Unknown department — end gracefully (supervisor logged warning)
   log.warn({ department: state.department }, "Unknown department — routing to END");
+  return END;
+}
+
+// ── Post-prospecting router ────────────────────────────────────────────────────
+
+/**
+ * Pure function — routes after ProspectingPod completes.
+ * Qualified lead (outreach_tier set) → sales pod.
+ * Disqualified (outreach_tier null)  → END (Telegram daily digest picks it up).
+ */
+function routeAfterProspecting(
+  state: FounderStateType,
+): "sales" | typeof END {
+  if (state.outreach_tier !== null) {
+    log.info({ outreach_tier: state.outreach_tier }, "Lead qualified — routing to sales");
+    return "sales";
+  }
+  log.info("Lead disqualified — routing to END");
   return END;
 }
 
@@ -109,6 +130,60 @@ const socialNode = makePodNode(
   "social",
 );
 
+// ── Prospecting node (custom — needs to surface outreach_tier into FounderState) ─
+
+/**
+ * Custom wrapper for ProspectingPod.
+ * Unlike other pods (which only write `result`), this also writes `outreach_tier`
+ * so that `routeAfterProspecting` can decide whether to hand off to SalesPod.
+ *
+ * The task field for prospecting contains the raw company URL or name, e.g.:
+ *   { task: "https://acme.com", department: "prospecting" }
+ */
+async function prospectingNode(
+  state: FounderStateType,
+  config?: RunnableConfig,
+): Promise<Partial<FounderStateType>> {
+  log.info({ tenant_id: state.tenant_id }, "Invoking prospecting subgraph");
+
+  const input = {
+    raw_input: state.task,
+    tenant_id: state.tenant_id,
+    trace_id: state.trace_id,
+  };
+
+  const result = await prospectingSubgraph.invoke(input, config);
+
+  const summary = {
+    company_url: result.company_url,
+    company_name: result.company_name,
+    icp_score: result.icp_score,
+    icp_rationale: result.icp_rationale,
+    outreach_tier: result.outreach_tier,
+    lead_id: result.lead_id,
+  };
+
+  // Phase 3C: emit in-process DeptSignal so supervisor/subsequent nodes can observe it
+  const signal: DeptSignal = {
+    from: "prospecting",
+    event: result.outreach_tier ? "lead_qualified" : "lead_disqualified",
+    payload: {
+      company: result.company_name ?? result.company_url,
+      icp_score: result.icp_score,
+      outreach_tier: result.outreach_tier ?? null,
+      lead_id: result.lead_id,
+    },
+    thread_id: `${state.tenant_id}:prospecting:${state.trace_id}`,
+    ts: new Date().toISOString(),
+  };
+
+  return {
+    result: JSON.stringify(summary, null, 2),
+    outreach_tier: result.outreach_tier ?? null,
+    departmentSignals: [signal],
+  };
+}
+
 // ── Graph Definition ──────────────────────────────────────────────────────────
 
 const graphBuilder = new StateGraph(FounderState)
@@ -117,6 +192,7 @@ const graphBuilder = new StateGraph(FounderState)
   .addNode("engineering", engineeringNode)
   .addNode("marketing", marketingNode)
   .addNode("social", socialNode)
+  .addNode("prospecting", prospectingNode)
 
   .addEdge(START, "supervisor")
 
@@ -125,6 +201,13 @@ const graphBuilder = new StateGraph(FounderState)
     engineering: "engineering",
     marketing: "marketing",
     social: "social",
+    prospecting: "prospecting",
+  })
+
+  // After prospecting: qualified → sales, disqualified → END
+  .addConditionalEdges("prospecting", routeAfterProspecting, {
+    sales: "sales",
+    [END]: END,
   })
 
   .addEdge("sales", END)
@@ -139,7 +222,7 @@ let _graph: Awaited<ReturnType<typeof buildGraph>> | undefined;
 async function buildGraph() {
   const checkpointer = await getCheckpointer();
   const compiled = graphBuilder.compile({ checkpointer });
-  log.info("FounderGraph compiled with 4 departments: sales, engineering, marketing, social");
+  log.info("FounderGraph compiled with 5 departments: prospecting, sales, engineering, marketing, social");
   return compiled;
 }
 

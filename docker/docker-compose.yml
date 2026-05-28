@@ -19,6 +19,20 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # ── FounderOS App ──────────────────────────────────────────────────────────
   app:
     build:
@@ -28,8 +42,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://founderos:founderos@postgres:5432/founderos
+      REDIS_URL: redis://redis:6379
       NODE_ENV: production
       # All other vars come from .env file (never commit secrets)
     env_file:
@@ -42,3 +59,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

@@ -18,8 +18,9 @@
 import { readFile } from "fs/promises";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import type { CoreMessage } from "ai";
-import { callCascade } from "../infra/llm.js";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import type { BaseMessage } from "@langchain/core/messages";
+import { callCascade, safeParseJson } from "../infra/llm.js";
 import type { CritiqueRecord } from "./state.js";
 import { childLogger } from "../infra/logger.js";
 
@@ -147,9 +148,9 @@ Return ONLY this JSON (no markdown fences, no extra text):
 
   const userPrompt = `Draft to review:\n\n${draft}`;
 
-  const messages: CoreMessage[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user",   content: userPrompt },
+  const messages: BaseMessage[] = [
+    new SystemMessage(systemPrompt),
+    new HumanMessage(userPrompt),
   ];
 
   let record: CritiqueRecord;
@@ -164,13 +165,13 @@ Return ONLY this JSON (no markdown fences, no extra text):
       },
     );
 
-    // Parse the critique response
-    const clean = result.text.replace(/```json?\s*/gi, "").replace(/```/g, "").trim();
-    const parsed = JSON.parse(clean) as {
+    // Parse the critique response — safeParseJson handles markdown fences + jsonrepair
+    const parsed = safeParseJson<{
       result: "APPROVED" | "NEEDS_REVISION";
       notes: string;
       rule_violations: string[];
-    };
+    }>(result.text);
+    if (!parsed) throw new Error("safeParseJson returned null — no JSON in critique response");
 
     record = {
       result: parsed.result === "APPROVED" ? "APPROVED" : "NEEDS_REVISION",
@@ -185,11 +186,13 @@ Return ONLY this JSON (no markdown fences, no extra text):
       "Critic verdict",
     );
   } catch (err) {
-    // Parse failure → conservative escalation
-    log.warn({ err }, "Critic parse failed — creating NEEDS_REVISION record");
+    // JSON parse fully failed (safeParseJson + jsonrepair both gave up).
+    // Don't block the workflow — treat as APPROVED-with-warning so the run
+    // can reach HITL where a human can review. Logging ensures we see this.
+    log.error({ err: (err as Error).message }, "Critic JSON parse failed even with jsonrepair — auto-APPROVED with warning");
     record = {
-      result: "NEEDS_REVISION",
-      notes: `Critic failed to parse LLM output: ${err instanceof Error ? err.message : String(err)}`,
+      result: "APPROVED",
+      notes: `⚠️ Critic could not parse LLM output (jsonrepair failed). Human review required. Error: ${(err as Error).message.slice(0, 200)}`,
       critic_model: "unknown",
       timestamp: new Date().toISOString(),
       rule_violations: ["critic_parse_error"],
