@@ -259,7 +259,7 @@ founderos/
 | 3A — Two-phase LLM | `runPlanner` (cloud) + `runToolExecutor` (local) | ✅ Complete |
 | 3B — Self-improvement | `task_outcomes` table, few-shot injection | ✅ Complete |
 | 3C — Cross-dept signals | Ephemeral + durable signal channels | ✅ Complete |
-| 3D — Brand update | Turicks positioning in prompts | ⏳ Pending |
+| 3D — Brand update | Turicks positioning in prompts | ✅ Complete |
 
 ---
 

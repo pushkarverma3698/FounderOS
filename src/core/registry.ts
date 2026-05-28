@@ -23,6 +23,10 @@ export type Department = "sales" | "engineering" | "marketing" | "social" | "pro
 
 export interface TuricksProfile {
   services: string[];
+  /** Primary capability areas — used in prompts and pitch materials */
+  specializations: string[];
+  /** One-line market positioning */
+  positioning: string;
   website: string;
   pricing: string;
   target_geo: string[];
@@ -76,6 +80,8 @@ const _companies: Record<string, Company> = {
     agents: [],
     profile: {
       services: ["AI agents", "LangGraph agentic systems", "UI/UX design", "full-stack software", "business automation"],
+      specializations: ["AI agents", "UI/UX design", "full-stack software", "business automation"],
+      positioning: "AI-native agency that builds what other agencies only prototype",
       website: "https://turicks.com",
       pricing: "$500 starter → $5,000 retainer",
       target_geo: ["EU", "US"],

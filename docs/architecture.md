@@ -1,6 +1,6 @@
 # FounderOS — Architecture
 
-> **One-paragraph pitch:** FounderOS is a multi-agent AI operating system that runs two real businesses (Turicks AI agency + Naggar Retreat farm) via a Telegram bot. A founder types a task; a supervisor routes it to the right department pod; specialists generate output; a critic checks quality; and nothing leaves the system without human approval. Every state transition is persisted to PostgreSQL so the system is resumable after any crash.
+> **One-paragraph pitch:** FounderOS is a multi-agent AI operating system that runs two real businesses — Turicks (AI agency specialising in autonomous agents + UI/UX design + full-stack software) and Naggar Retreat (Himalayan farm homestay) — via a Telegram bot. A founder types a task; a supervisor routes it to the right department pod; specialists generate output; a cross-model critic checks quality; and nothing leaves the system without human approval. Every state transition is persisted to PostgreSQL so the system is resumable after any crash.
 
 ---
 
