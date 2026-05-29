@@ -37,7 +37,7 @@ import type { BaseMessage } from "@langchain/core/messages";
 import { createHash } from "crypto";
 import { ProspectingState } from "../state.js";
 import type { ProspectingStateType, CompanyResearch } from "../state.js";
-import { callCascade, checkBudget, runToolExecutor } from "../../infra/llm.js";
+import { callCascade, checkBudget, runToolExecutor, safeParseJson } from "../../infra/llm.js";
 import { cacheGet, cacheSet, KEYS } from "../../infra/redis.js";
 import {
   createLead,
@@ -325,12 +325,12 @@ ${research.raw_summary}`;
       { agent: "icp_scorer", tenant_id: tenantId },
     );
 
-    const clean = result.text.replace(/```json?\s*/gi, "").replace(/```/g, "").trim();
-    const parsed = JSON.parse(clean) as {
+    const parsed = safeParseJson<{
       icp_score: number;
       icp_rationale: string;
       outreach_tier: "md" | "ceo" | "disqualified";
-    };
+    }>(result.text);
+    if (!parsed) throw new Error("safeParseJson returned null — no valid JSON in ICP scoring response");
 
     icp_score = Math.min(1.0, Math.max(0.0, Number(parsed.icp_score) || 0));
     icp_rationale = parsed.icp_rationale ?? "";

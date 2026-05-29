@@ -75,6 +75,19 @@ const SYSTEM: Record<SystemKey, string> = {
 Companies: {{companies_list}}
 Agents: {{agent_names}}
 Silo rule: turicks.com→turicks, naggar/farm→naggar. Never mix ChromaDB.
+
+ROUTING RULES (pick agent from the list above):
+- BUILD/CODE/DEVELOP/ARCHITECT/REVIEW PR → senior_dev or eng_engineer (engineering dept)
+- PROSPECT/RESEARCH COMPANY/ICP → prospecting_researcher (prospecting dept)
+- COLD EMAIL/OUTREACH/PITCH/PROPOSAL/BDR → bdr or sales_engineer (sales dept)
+- LINKEDIN POST/CONTENT/SOCIAL MEDIA → social_handler (social dept)
+- SEO/WEBSITE/MARKETING COPY → seo_specialist or mktg_engineer (marketing dept)
+
+KEY DISAMBIGUATION:
+- "build an AI agent FOR a client" → senior_dev (we are delivering, not selling)
+- "write an email TO a client" → bdr (we are selling / outreaching)
+- "prospect/research a company" → prospecting_researcher (we are qualifying)
+
 Reply ONLY as JSON (no fences): {"company":"...","task":"...","agent":"...","direct_answer":null}`,
 
   // ── Managing Director (Dynamic) ───────────────────────────────────────────
