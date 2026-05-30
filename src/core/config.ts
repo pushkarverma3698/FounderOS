@@ -180,9 +180,11 @@ export const CASCADE: Record<CascadeTier, CascadeEntry[]> = {
   ],
 
   // Critic tier: Claude-FIRST to prevent sycophancy (generators use Gemini)
+  // Fallback order: Claude → Gemini Flash → OpenRouter Llama (any non-Gemini satisfies anti-sycophancy)
   critic: [
-    { provider: "anthropic", modelId: "claude-haiku-4-5" },
-    { provider: "google",    modelId: "gemini-2.5-flash" },
+    { provider: "anthropic",  modelId: "claude-haiku-4-5" },
+    { provider: "google",     modelId: "gemini-2.5-flash" },
+    { provider: "openrouter", modelId: "meta-llama/llama-3.3-70b-instruct:free" },
   ],
 };
 
