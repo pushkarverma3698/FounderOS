@@ -207,7 +207,9 @@ ${state.task}${revisionContext}`;
 
   try {
     email_draft = safeParseJson<{ subject: string; body: string }>(result.text);
-    if (!email_draft) throw new Error("safeParseJson returned null — no JSON in BDR draft");
+    if (!email_draft || !email_draft.subject || !email_draft.body) {
+      throw new Error("safeParseJson returned incomplete draft — missing subject or body");
+    }
     log.info({ subject: email_draft.subject }, "BDR draft generated");
   } catch {
     log.warn({ raw: result.text.slice(0, 200) }, "BDR parse failed — wrapping raw text");

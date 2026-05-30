@@ -86,33 +86,47 @@ async function engEngineerNode(state: EngineeringStateType): Promise<Partial<Eng
 
 /**
  * senior_dev — executes the engineering plan produced by eng_engineer.
- * Phase 3: will use two-phase runPlanner + runToolExecutor.
- * Phase 2E: stub that acknowledges the plan and returns placeholder code.
+ * Calls CODE-tier LLM to produce actual TypeScript code for the first deliverable.
  */
 async function seniorDevNode(state: EngineeringStateType): Promise<Partial<EngineeringStateType>> {
+  const tenantId = state.tenant_id;
+  await checkBudget(tenantId);
+
   const plan = state.eng_engineer_plan;
+  const planContext = plan
+    ? `ENGINEERING PLAN:
+Summary: ${plan.summary}
+First Deliverable: ${plan.first_deliverable}
+Steps:
+${plan.steps.map((s, i) => `  ${i + 1}. ${s.action} (tier: ${s.tier}${s.tool ? `, tool: ${s.tool}` : ""})`).join("\n")}
+Risks: ${plan.risks.join("; ") || "none identified"}
+Estimated Hours: ${plan.estimated_hours}h`
+    : `TASK (no structured plan): ${state.task}`;
 
-  if (plan) {
-    log.info(
-      { summary: plan.summary, steps: plan.steps.length },
-      "Engineering pod: senior_dev executing plan",
-    );
-    return {
-      code_draft: `// Engineering pod — plan acknowledged
-// Task: ${plan.summary}
-// Risks: ${plan.risks.join(", ") || "none identified"}
-// Steps: ${plan.steps.length} total
-// First deliverable: ${plan.first_deliverable}
-//
-// Phase 3: two-phase LLM execution (runPlanner + runToolExecutor) will be implemented here.
-// For now: plan is structured and ready for execution.`,
-    };
-  }
+  const messages = [
+    new SystemMessage(getSystem("SENIOR_DEV")),
+    new HumanMessage(
+      `${planContext}\n\nORIGINAL TASK:\n${state.task}\n\nImplement the first deliverable. Write complete, working TypeScript code.`,
+    ),
+  ];
 
-  log.info({ task: state.task.slice(0, 60) }, "Engineering pod: senior_dev (no plan — raw task)");
-  return {
-    code_draft: `// Engineering pod stub\n// Task: ${state.task}\n// Phase 3: full implementation`,
-  };
+  log.info(
+    { summary: plan?.summary ?? state.task.slice(0, 60), steps: plan?.steps.length ?? 0 },
+    "Engineering pod: senior_dev generating code",
+  );
+
+  const result = await callCascade(
+    "code",
+    messages,
+    { agent: "senior_dev", tenant_id: tenantId },
+  );
+
+  log.info(
+    { lines: result.text.split("\n").length, model: result.model },
+    "senior_dev code draft ready",
+  );
+
+  return { code_draft: result.text };
 }
 
 // ── QA Tester Node ────────────────────────────────────────────────────────────

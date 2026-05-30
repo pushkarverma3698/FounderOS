@@ -549,7 +549,10 @@ export async function runPlanner(
  *
  * Strategy:
  *  1. Strip markdown fences (```json ... ```)
- *  2. Extract first {...} block (models sometimes prepend explanation)
+ *  2. Extract FIRST balanced {...} block using bracket-counting.
+ *     Greedy regex (/\{[\s\S]*\}/) captures from first { to LAST }, which
+ *     incorrectly merges two consecutive JSON objects into invalid JSON.
+ *     Bracket-counting stops at the closing brace that balances the first {.
  *  3. Try JSON.parse — fast path
  *  4. Try jsonrepair — fixes common issues: trailing commas, single quotes,
  *     unquoted keys, truncated strings
@@ -562,9 +565,35 @@ export function safeParseJson<T = Record<string, unknown>>(text: string): T | nu
   // Step 1: strip markdown fences
   let clean = text.replace(/```json?\s*/gi, "").replace(/```/g, "").trim();
 
-  // Step 2: extract first {...} block (prefer the tightest valid JSON object)
-  const match = clean.match(/\{[\s\S]*\}/);
-  if (match) clean = match[0];
+  // Step 2: extract first BALANCED {...} block using bracket-counting.
+  // This prevents the greedy-regex bug where two consecutive JSON objects
+  // (common Ollama output) are merged into one invalid string.
+  const start = clean.indexOf("{");
+  if (start !== -1) {
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    let end = -1;
+
+    for (let i = start; i < clean.length; i++) {
+      const ch = clean[i]!;
+
+      if (escape) { escape = false; continue; }
+      if (ch === "\\" && inString) { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) { end = i; break; }
+      }
+    }
+
+    if (end !== -1) {
+      clean = clean.slice(start, end + 1);
+    }
+  }
 
   // Step 3: fast path
   try {
@@ -582,7 +611,7 @@ export function safeParseJson<T = Record<string, unknown>>(text: string): T | nu
       log.debug({ originalLength: clean.length }, "safeParseJson: used jsonrepair to fix malformed JSON");
       return JSON.parse(repaired) as T;
     } catch {
-      // fall through to throw
+      // fall through
     }
   }
 

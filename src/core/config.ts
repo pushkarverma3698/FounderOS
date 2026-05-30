@@ -52,12 +52,12 @@
  * ═══════════════════════════════════════════════════════════════
  * Cascade Tiers
  * ═══════════════════════════════════════════════════════════════
- * CEO:           claude-sonnet-4-5 → gemini-2.5-pro → gemini-2.0-flash
- * Deep Research: gemini-2.5-pro → gemini-2.0-flash → openrouter/deepseek-r1
- * MD:            gemini-2.0-flash → claude-haiku-4-5 → openrouter/llama-70b
- * Code:          lmstudio/qwen-coder → openrouter/qwen3-coder → gemini-2.0-flash
- * Nano:          gemini-2.0-flash-lite → claude-haiku-4-5
- * Critic:        claude-haiku-4-5 → gemini-2.0-flash  (Claude first — anti-sycophancy)
+ * CEO:           claude-sonnet-4-5 → gemini-2.5-pro → gemini-2.5-flash
+ * Deep Research: gemini-2.5-pro → gemini-2.5-flash → openrouter/deepseek-r1
+ * MD:            gemini-2.5-flash → claude-haiku-4-5 → openrouter/llama-70b
+ * Code:          lmstudio/qwen-coder → openrouter/qwen3-coder → gemini-2.5-flash
+ * Nano:          gemini-2.5-flash-lite → claude-haiku-4-5
+ * Critic:        claude-haiku-4-5 → gemini-2.5-flash  (Claude first — anti-sycophancy)
  */
 
 import { z } from "zod";
@@ -143,18 +143,18 @@ export const CASCADE: Record<CascadeTier, CascadeEntry[]> = {
   ceo: [
     { provider: "anthropic", modelId: "claude-sonnet-4-5" },
     { provider: "google",    modelId: "gemini-2.5-pro" },
-    { provider: "google",    modelId: "gemini-2.0-flash" },
+    { provider: "google",    modelId: "gemini-2.5-flash" },
     { provider: "openrouter", modelId: "meta-llama/llama-3.3-70b-instruct:free" },
   ],
 
   deep_research: [
     { provider: "google",     modelId: "gemini-2.5-pro" },
-    { provider: "google",     modelId: "gemini-2.0-flash" },
-    { provider: "openrouter", modelId: "deepseek/deepseek-r1:free" },
+    { provider: "google",     modelId: "gemini-2.5-flash" },
+    { provider: "openrouter", modelId: "deepseek/deepseek-v4-flash:free" },
   ],
 
   md: [
-    { provider: "google",     modelId: "gemini-2.0-flash" },
+    { provider: "google",     modelId: "gemini-2.5-flash" },
     { provider: "anthropic",  modelId: "claude-haiku-4-5" },
     { provider: "openrouter", modelId: "meta-llama/llama-3.3-70b-instruct:free" },
   ],
@@ -162,17 +162,17 @@ export const CASCADE: Record<CascadeTier, CascadeEntry[]> = {
   code: [
     { provider: "lmstudio",   modelId: env.LM_STUDIO_MODEL },
     { provider: "openrouter", modelId: "qwen/qwen3-coder:free" },
-    { provider: "google",     modelId: "gemini-2.0-flash" },
+    { provider: "google",     modelId: "gemini-2.5-flash" },
   ],
 
   nano: [
-    { provider: "google",    modelId: "gemini-2.0-flash-lite" },
+    { provider: "google",    modelId: "gemini-2.5-flash-lite" },
     { provider: "anthropic", modelId: "claude-haiku-4-5" },
   ],
 
   local: [
     { provider: "lmstudio",  modelId: env.LM_STUDIO_MODEL },
-    { provider: "google",    modelId: "gemini-2.0-flash-lite" },
+    { provider: "google",    modelId: "gemini-2.5-flash-lite" },
   ],
 
   video: [
@@ -182,7 +182,7 @@ export const CASCADE: Record<CascadeTier, CascadeEntry[]> = {
   // Critic tier: Claude-FIRST to prevent sycophancy (generators use Gemini)
   critic: [
     { provider: "anthropic", modelId: "claude-haiku-4-5" },
-    { provider: "google",    modelId: "gemini-2.0-flash" },
+    { provider: "google",    modelId: "gemini-2.5-flash" },
   ],
 };
 
@@ -206,8 +206,8 @@ export const MODEL_COST_PER_1M: Record<string, { input: number; output: number }
   "claude-sonnet-4-5":          { input: 3.00,  output: 15.00 },
   "claude-haiku-4-5":           { input: 0.25,  output: 1.25 },
   "gemini-2.5-pro":             { input: 1.25,  output: 10.00 },
-  "gemini-2.0-flash":           { input: 0.075, output: 0.30 },
-  "gemini-2.0-flash-lite":      { input: 0.0375, output: 0.15 },
+  "gemini-2.5-flash":           { input: 0.075, output: 0.30 },
+  "gemini-2.5-flash-lite":      { input: 0.0375, output: 0.15 },
   // Free models
   "meta-llama/llama-3.3-70b-instruct:free": { input: 0, output: 0 },
   "deepseek/deepseek-r1:free":              { input: 0, output: 0 },

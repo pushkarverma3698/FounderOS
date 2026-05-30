@@ -22,7 +22,7 @@ Stack: Node.js 22 + TypeScript 5.5 (strict) + LangGraph JS + Vercel AI SDK + gra
 - ✅ Phase 2B: ProspectingPod + `/prospect` command (COMPLETE)
 - ✅ Phase 2C: Suppression + quota safety rails, LinkedIn tools, scheduler (COMPLETE)
 - ✅ Phase 2D: Observability + docs update (COMPLETE)
-- ⏳ Phase 2E: Engineer agents per department
+- ✅ Phase 2E: Engineer agents per department (eng_engineer, sales_engineer, mktg_engineer — all live)
 - ⏳ Phase 3: Self-improvement + cross-department + scale
 
 ## Key Rules (Non-Negotiable)
