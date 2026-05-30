@@ -54,15 +54,14 @@ async function mktgEngineerNode(state: MarketingStateType): Promise<Partial<Mark
     new HumanMessage(`MARKETING TASK:\n${state.task}\n\nPlan the campaign strategy. Return your JSON brief.`),
   ];
 
-  const result = await callCascade(
-    "md",
-    messages,
-    { agent: "mktg_engineer", tenant_id: tenantId },
-  );
-
   let mktg_engineer_brief: MarketingStateType["mktg_engineer_brief"] = null;
 
   try {
+    const result = await callCascade(
+      "md",
+      messages,
+      { agent: "mktg_engineer", tenant_id: tenantId },
+    );
     mktg_engineer_brief = safeParseJson<NonNullable<MarketingStateType["mktg_engineer_brief"]>>(result.text);
     log.info(
       {
@@ -73,8 +72,15 @@ async function mktgEngineerNode(state: MarketingStateType): Promise<Partial<Mark
       },
       "Marketing strategy brief ready",
     );
-  } catch {
-    log.warn({ raw: result.text.slice(0, 200) }, "Mktg engineer parse failed — proceeding without brief");
+  } catch (err) {
+    if (err instanceof AggregateError) {
+      log.error({ err: String(err), agent: "mktg_engineer" }, "All LLM providers failed — returning error state");
+      return {
+        ...state,
+        errors: [...(state.errors ?? []), { agent: "mktg_engineer", err: String(err) }],
+      };
+    }
+    log.warn({ raw: String(err) }, "Mktg engineer parse failed — proceeding without brief");
   }
 
   return { mktg_engineer_brief };
@@ -140,18 +146,30 @@ Content Brief: ${brief.content_brief}`
     new HumanMessage(`${briefSection}${trendSection}\n\nWrite the content now. Output the post directly — no preamble, no JSON.`),
   ];
 
-  const result = await callCascade(
-    "md",
-    messages,
-    { agent: "content_writer", tenant_id: tenantId },
-  );
+  let content_draft: string;
 
-  const content_draft = result.text.trim() ||
-    (brief
-      ? `[Content draft for ${brief.platform} — ${brief.format} — Goal: ${brief.goal}]`
-      : `[Content draft for task: ${state.task.slice(0, 80)}]`);
-
-  log.info({ chars: content_draft.length, platform: brief?.platform }, "Content draft ready");
+  try {
+    const result = await callCascade(
+      "md",
+      messages,
+      { agent: "content_writer", tenant_id: tenantId },
+    );
+    content_draft = result.text.trim() ||
+      (brief
+        ? `[Content draft for ${brief.platform} — ${brief.format} — Goal: ${brief.goal}]`
+        : `[Content draft for task: ${state.task.slice(0, 80)}]`);
+    log.info({ chars: content_draft.length, platform: brief?.platform }, "Content draft ready");
+  } catch (err) {
+    if (err instanceof AggregateError) {
+      log.error({ err: String(err), agent: "content_writer" }, "All LLM providers failed — returning error state");
+      return {
+        ...state,
+        errors: [...(state.errors ?? []), { agent: "content_writer", err: String(err) }],
+      };
+    }
+    log.warn({ raw: String(err) }, "Content writer cascade failed — using placeholder");
+    content_draft = `[Content unavailable — LLM error. Task: ${state.task.slice(0, 60)}]`;
+  }
 
   return { content_draft };
 }

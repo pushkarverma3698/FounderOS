@@ -54,16 +54,15 @@ async function engEngineerNode(state: EngineeringStateType): Promise<Partial<Eng
     new HumanMessage(`ENGINEERING TASK:\n${state.task}\n\nPlan the execution. Return your JSON plan.`),
   ];
 
-  const result = await callCascade(
-    "md",
-    messages,
-    { agent: "eng_engineer", tenant_id: tenantId },
-  );
-
   let eng_engineer_plan: EngineeringStateType["eng_engineer_plan"] = null;
   let spec: string | null = null;
 
   try {
+    const result = await callCascade(
+      "md",
+      messages,
+      { agent: "eng_engineer", tenant_id: tenantId },
+    );
     eng_engineer_plan = safeParseJson<NonNullable<EngineeringStateType["eng_engineer_plan"]>>(result.text);
     spec = eng_engineer_plan?.summary ?? state.task;
     log.info(
@@ -74,9 +73,16 @@ async function engEngineerNode(state: EngineeringStateType): Promise<Partial<Eng
       },
       "Engineering plan ready",
     );
-  } catch {
-    log.warn({ raw: result.text.slice(0, 200) }, "Eng engineer parse failed — using raw as spec");
-    spec = result.text;
+  } catch (err) {
+    if (err instanceof AggregateError) {
+      log.error({ err: String(err), agent: "eng_engineer" }, "All LLM providers failed — returning error state");
+      return {
+        ...state,
+        errors: [...(state.errors ?? []), { agent: "eng_engineer", err: String(err) }],
+      };
+    }
+    log.warn({ raw: String(err) }, "Eng engineer parse failed — using task as spec");
+    spec = state.task;
   }
 
   return { eng_engineer_plan, spec };
@@ -115,18 +121,32 @@ Estimated Hours: ${plan.estimated_hours}h`
     "Engineering pod: senior_dev generating code",
   );
 
-  const result = await callCascade(
-    "code",
-    messages,
-    { agent: "senior_dev", tenant_id: tenantId },
-  );
+  let code_draft: string | null = null;
 
-  log.info(
-    { lines: result.text.split("\n").length, model: result.model },
-    "senior_dev code draft ready",
-  );
+  try {
+    const result = await callCascade(
+      "code",
+      messages,
+      { agent: "senior_dev", tenant_id: tenantId },
+    );
+    log.info(
+      { lines: result.text.split("\n").length, model: result.model },
+      "senior_dev code draft ready",
+    );
+    code_draft = result.text;
+  } catch (err) {
+    if (err instanceof AggregateError) {
+      log.error({ err: String(err), agent: "senior_dev" }, "All LLM providers failed — returning error state");
+      return {
+        ...state,
+        errors: [...(state.errors ?? []), { agent: "senior_dev", err: String(err) }],
+      };
+    }
+    log.warn({ raw: String(err) }, "Senior dev cascade failed — empty draft");
+    code_draft = "// Code generation unavailable — LLM error";
+  }
 
-  return { code_draft: result.text };
+  return { code_draft };
 }
 
 // ── QA Tester Node ────────────────────────────────────────────────────────────

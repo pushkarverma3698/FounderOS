@@ -116,13 +116,30 @@ export function tomorrowMidnightUtc(): number {
 
 // ── Cache Helpers ─────────────────────────────────────────────────────────────
 
+/** Timeout for individual Redis operations (3 seconds). Prevents slow Redis from hanging callers. */
+const REDIS_OP_TIMEOUT_MS = 3_000;
+
+/**
+ * Wraps a Redis promise with a hard timeout.
+ * On timeout: rejects with a descriptive error, triggering the caller's catch → fail-open.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Redis ${label} timed out after ${ms}ms`)), ms),
+    ),
+  ]);
+}
+
 /**
  * Get a cached value as parsed JSON.
  * Returns null on miss OR if Redis is unavailable (fail-open).
+ * Times out after 3s to prevent slow Redis from blocking callers.
  */
 export async function cacheGet<T>(key: string): Promise<T | null> {
   try {
-    const raw = await getRedis().get(key);
+    const raw = await withTimeout(getRedis().get(key), REDIS_OP_TIMEOUT_MS, "GET");
     return raw ? (JSON.parse(raw) as T) : null;
   } catch (err) {
     log.warn({ key, err: (err as Error).message }, "Redis cacheGet failed — cache miss");
@@ -134,11 +151,16 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
  * Set a value as JSON with TTL.
  * Silently fails if Redis is unavailable (fail-open).
  * Skips write if ttlSeconds is 0 (e.g. CEO tier — never cache).
+ * Times out after 3s.
  */
 export async function cacheSet(key: string, value: unknown, ttlSeconds: number): Promise<void> {
   if (ttlSeconds <= 0) return; // CEO tier: never cache
   try {
-    await getRedis().setex(key, ttlSeconds, JSON.stringify(value));
+    await withTimeout(
+      getRedis().setex(key, ttlSeconds, JSON.stringify(value)),
+      REDIS_OP_TIMEOUT_MS,
+      "SETEX",
+    );
   } catch (err) {
     log.warn({ key, err: (err as Error).message }, "Redis cacheSet failed — skipping");
   }
@@ -147,16 +169,19 @@ export async function cacheSet(key: string, value: unknown, ttlSeconds: number):
 /**
  * Increment a daily quota counter.
  * Sets expiry to tomorrow midnight UTC on first increment (EXPIREAT).
- * Returns current count. Returns Infinity if Redis is unavailable (fail-open → allow).
+ * Returns current count. Returns 0 if Redis is unavailable (fail-open → allow send).
+ * Times out after 3s.
  */
 export async function incrQuota(tenantId: string): Promise<number> {
   const key = KEYS.quota(tenantId, todayUtc());
   try {
     const redis = getRedis();
-    const count = await redis.incr(key);
+    const count = await withTimeout(redis.incr(key), REDIS_OP_TIMEOUT_MS, "INCR");
     if (count === 1) {
-      // First increment today — set expiry to midnight UTC
-      await redis.expireat(key, tomorrowMidnightUtc());
+      // First increment today — set expiry to midnight UTC (fire-and-forget, non-critical)
+      redis.expireat(key, tomorrowMidnightUtc()).catch((e: Error) =>
+        log.warn({ tenantId, err: e.message }, "Redis EXPIREAT failed — quota key may not auto-expire"),
+      );
     }
     return count;
   } catch (err) {

@@ -104,25 +104,31 @@ export async function supervisorNode(
     new HumanMessage(state.task),
   ];
 
-  const result = await callCascade("ceo", messages, {
-    agent: "supervisor",
-    tenant_id: tenantId,
-  });
-
   // Parse CEO JSON response
   let parsed: CeoResponse;
   try {
+    const result = await callCascade("ceo", messages, {
+      agent: "supervisor",
+      tenant_id: tenantId,
+    });
     // Strip any markdown fences the model may have added despite instructions
     const clean = result.text.replace(/```json?\s*/gi, "").replace(/```/g, "").trim();
-    parsed = JSON.parse(clean) as CeoResponse;
-  } catch {
-    log.warn({ raw: result.text }, "CEO returned non-JSON — falling back to direct_answer path");
-    parsed = {
-      company: tenantId,
-      task: state.task,
-      agent: "",
-      direct_answer: result.text,
-    };
+    try {
+      parsed = JSON.parse(clean) as CeoResponse;
+    } catch {
+      log.warn({ raw: result.text }, "CEO returned non-JSON — falling back to direct_answer path");
+      parsed = { company: tenantId, task: state.task, agent: "", direct_answer: result.text };
+    }
+  } catch (err) {
+    if (err instanceof AggregateError) {
+      log.error({ err: String(err), agent: "supervisor" }, "All LLM providers failed — returning error state");
+      return {
+        ...state,
+        errors: [...(state.errors ?? []), { agent: "supervisor", err: String(err) }],
+      };
+    }
+    log.warn({ raw: String(err) }, "Supervisor cascade failed — falling back to direct_answer");
+    parsed = { company: tenantId, task: state.task, agent: "", direct_answer: null };
   }
 
   // Resolve department from agent name

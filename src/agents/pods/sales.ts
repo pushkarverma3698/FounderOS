@@ -66,24 +66,33 @@ Return ONLY valid JSON (no fences):
     new HumanMessage(`Research this prospect and build an intelligence profile:\n\n${state.task}`),
   ];
 
-  const result = await callCascade(
-    "deep_research",
-    messages,
-    { agent: "lead_intel", tenant_id: tenantId },
-  );
-
   let lead: LeadProfile | null = null;
   let intel_report: string | null = null;
 
   try {
+    const result = await callCascade(
+      "deep_research",
+      messages,
+      { agent: "lead_intel", tenant_id: tenantId },
+    );
+
     const parsed = safeParseJson<{ lead: LeadProfile; intel_report: string }>(result.text);
     if (!parsed) throw new Error("safeParseJson returned null — no JSON in lead intel response");
     lead = parsed.lead;
     intel_report = parsed.intel_report;
     log.info({ company: lead.company, icp_score: lead.icp_score }, "Lead intel complete");
-  } catch {
-    log.warn({ raw: result.text.slice(0, 200) }, "Lead intel parse failed — using raw report");
-    intel_report = result.text;
+  } catch (err) {
+    const isAggregate = err instanceof AggregateError;
+    if (isAggregate) {
+      log.error({ err: String(err), agent: "lead_intel" }, "All LLM providers failed — returning error state");
+      return {
+        ...state,
+        errors: [...(state.errors ?? []), { agent: "lead_intel", err: String(err) }],
+      };
+    }
+    // JSON parse failure — degrade gracefully with defaults
+    log.warn({ raw: String(err) }, "Lead intel parse failed — using defaults");
+    intel_report = "Research unavailable — proceeding with minimal profile";
     lead = {
       name: "Unknown",
       company: "Unknown",
@@ -126,19 +135,25 @@ Choose the optimal outreach angle and return your strategy brief.`;
     new HumanMessage(userContent),
   ];
 
-  const result = await callCascade(
-    "md",
-    lcMessages,
-    { agent: "sales_engineer", tenant_id: tenantId },
-  );
-
   let sales_engineer_brief: SalesStateType["sales_engineer_brief"] = null;
 
   try {
+    const result = await callCascade(
+      "md",
+      lcMessages,
+      { agent: "sales_engineer", tenant_id: tenantId },
+    );
     sales_engineer_brief = safeParseJson<NonNullable<SalesStateType["sales_engineer_brief"]>>(result.text);
     log.info({ angle: sales_engineer_brief?.angle }, "Sales engineer brief ready");
-  } catch {
-    log.warn({ raw: result.text.slice(0, 200) }, "Sales engineer parse failed — proceeding without brief");
+  } catch (err) {
+    if (err instanceof AggregateError) {
+      log.error({ err: String(err), agent: "sales_engineer" }, "All LLM providers failed — returning error state");
+      return {
+        ...state,
+        errors: [...(state.errors ?? []), { agent: "sales_engineer", err: String(err) }],
+      };
+    }
+    log.warn({ raw: String(err) }, "Sales engineer parse failed — proceeding without brief");
   }
 
   return { sales_engineer_brief };
@@ -197,26 +212,29 @@ ${state.task}${revisionContext}`;
     new HumanMessage(userContent),
   ];
 
-  const result = await callCascade(
-    "md",
-    messages,
-    { agent: "bdr", tenant_id: tenantId },
-  );
-
   let email_draft: { subject: string; body: string } | null = null;
 
   try {
+    const result = await callCascade(
+      "md",
+      messages,
+      { agent: "bdr", tenant_id: tenantId },
+    );
     email_draft = safeParseJson<{ subject: string; body: string }>(result.text);
     if (!email_draft || !email_draft.subject || !email_draft.body) {
-      throw new Error("safeParseJson returned incomplete draft — missing subject or body");
+      email_draft = { subject: "Following up on your project", body: result.text };
     }
     log.info({ subject: email_draft.subject }, "BDR draft generated");
-  } catch {
-    log.warn({ raw: result.text.slice(0, 200) }, "BDR parse failed — wrapping raw text");
-    email_draft = {
-      subject: "Following up on your project",
-      body: result.text,
-    };
+  } catch (err) {
+    if (err instanceof AggregateError) {
+      log.error({ err: String(err), agent: "bdr" }, "All LLM providers failed — returning error state");
+      return {
+        ...state,
+        errors: [...(state.errors ?? []), { agent: "bdr", err: String(err) }],
+      };
+    }
+    log.warn({ raw: String(err) }, "BDR parse failed — wrapping error");
+    email_draft = { subject: "Following up on your project", body: "Draft unavailable — LLM error" };
   }
 
   return { email_draft };

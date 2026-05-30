@@ -42,8 +42,14 @@ const log = childLogger({ module: "social_pod" });
  * Source: LinkedIn automation community consensus (Phantombuster, Expandi guidelines).
  * Conservative by design: better to under-post early than risk account flag.
  */
-export function calculateWeeklyLimit(warmingStartedAt: string): number {
+export function calculateWeeklyLimit(warmingStartedAt: string | null | undefined): number {
+  // P4-HARD-4: Guard against null/undefined warming_started_at — new accounts that
+  // haven't started warming yet should use the most conservative limit (1/week).
+  if (!warmingStartedAt) return 1;
+
   const startDate = new Date(warmingStartedAt);
+  if (isNaN(startDate.getTime())) return 1; // Invalid date → safe minimum
+
   const now = new Date();
   const diffDays = Math.floor((now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
   const weeksOld = Math.floor(diffDays / 7);

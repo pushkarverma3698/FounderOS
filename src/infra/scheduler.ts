@@ -112,7 +112,33 @@ async function runReplyPoller(): Promise<void> {
     return;
   }
 
+  const tenant = "turicks";
+  // Idempotency: rate-limit to one run per 10-minute window
+  // Prevents double-execution on process restart (P4-HARD-5)
+  const windowMin = Math.floor(Date.now() / (10 * 60 * 1000));
+  const idempKey = `reply_poller:${tenant}:${windowMin}`;
+
   try {
+    const db = getDb();
+
+    const existing = await db
+      .select({ id: actionLog.id })
+      .from(actionLog)
+      .where(eq(actionLog.idempotency_key, idempKey))
+      .limit(1);
+
+    if (existing.length > 0) {
+      log.debug({ idempKey }, "Reply poller already ran this window — skipping");
+      return;
+    }
+
+    await db.insert(actionLog).values({
+      tenant_id: tenant,
+      action: "reply_poller_run",
+      idempotency_key: idempKey,
+      payload: { window_min: windowMin },
+    });
+
     // TODO Phase 2C: fetch unread Gmail threads matching sent thread IDs
     // const sentThreadIds = await db.select(...).from(leadPipeline).where(...)
     // for each thread: if reply found → updateLeadStage(leadId, 'replied')
@@ -193,7 +219,32 @@ const DEPARTMENTS = ["sales", "engineering", "marketing", "social", "prospecting
 async function runDeptEventsPoller(): Promise<void> {
   const tenant = "turicks";
 
+  // Idempotency: rate-limit to one sweep per 2-minute window (P4-HARD-5)
+  // Prevents double-execution if process restarts during a sweep.
+  const windowMin = Math.floor(Date.now() / (2 * 60 * 1000));
+  const idempKey = `dept_events_sweep:${tenant}:${windowMin}`;
+
   try {
+    const db = getDb();
+
+    const existing = await db
+      .select({ id: actionLog.id })
+      .from(actionLog)
+      .where(eq(actionLog.idempotency_key, idempKey))
+      .limit(1);
+
+    if (existing.length > 0) {
+      log.debug({ idempKey }, "Dept events poller already ran this window — skipping");
+      return;
+    }
+
+    await db.insert(actionLog).values({
+      tenant_id: tenant,
+      action: "dept_events_sweep",
+      idempotency_key: idempKey,
+      payload: { window_min: windowMin },
+    });
+
     let totalConsumed = 0;
 
     for (const dept of DEPARTMENTS) {

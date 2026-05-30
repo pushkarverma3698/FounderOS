@@ -247,6 +247,13 @@ async function researchNode(
       "Research extraction complete",
     );
   } catch (err) {
+    if (err instanceof AggregateError) {
+      log.error({ err: String(err), agent: "prospecting_researcher" }, "All LLM providers failed — returning error state");
+      return {
+        ...state,
+        errors: [...(state.errors ?? []), { agent: "prospecting_researcher", err: String(err) }],
+      };
+    }
     log.warn({ err: (err as Error).message, url }, "Research LLM failed — using minimal stub");
     research = {
       pain_points: [],
@@ -349,6 +356,13 @@ ${research.raw_summary}`;
       "ICP scoring complete",
     );
   } catch (err) {
+    if (err instanceof AggregateError) {
+      log.error({ err: String(err), agent: "icp_scorer" }, "All LLM providers failed — returning error state");
+      return {
+        ...state,
+        errors: [...(state.errors ?? []), { agent: "icp_scorer", err: String(err) }],
+      };
+    }
     log.warn({ err: (err as Error).message }, "ICP scoring failed — defaulting to disqualified");
     icp_score = 0;
     icp_rationale = `Scoring failed: ${(err as Error).message}`;
