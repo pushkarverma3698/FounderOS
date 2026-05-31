@@ -12,7 +12,7 @@
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
-import { db } from "../src/db/index.js";
+import { getDb } from "../src/db/client.js";
 import { knowledgeEntries } from "../src/db/schema.js";
 import { eq, and } from "drizzle-orm";
 
@@ -142,6 +142,7 @@ function collectDocs(rootDir: string): DocEntry[] {
 // ── Upsert logic ──────────────────────────────────────────────────────────────
 
 async function upsertEntry(entry: DocEntry): Promise<{ action: "inserted" | "updated" | "skipped" }> {
+  const db = getDb();
   const existing = await db
     .select()
     .from(knowledgeEntries)
