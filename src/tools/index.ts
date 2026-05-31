@@ -33,8 +33,8 @@ export interface UnifiedTool {
 // ── Tool Imports ──────────────────────────────────────────────────────────────
 import { webSearchTool } from "./web-search.js";
 import { linkedinPostTool, linkedinAnalyticsTool, linkedinConnectTool } from "./linkedin.js";
-// Phase 1C+: import { emailTool } from "./email.js";
-// Phase 1C+: import { githubTool } from "./github.js";
+import { emailTool } from "./email.js";
+import { githubTool } from "./github.js";
 
 // ── Registry ──────────────────────────────────────────────────────────────────
 
@@ -48,6 +48,8 @@ registerTool(webSearchTool);
 registerTool(linkedinPostTool);
 registerTool(linkedinAnalyticsTool);
 registerTool(linkedinConnectTool);
+registerTool(emailTool);
+registerTool(githubTool);
 
 /** Get a tool by name. Returns undefined if not registered. */
 export function getTool(name: string): UnifiedTool | undefined {

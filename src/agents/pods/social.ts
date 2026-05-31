@@ -28,6 +28,7 @@ import { callCascade } from "../../infra/llm.js";
 import { requestHITL } from "../../gateway/hitl.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
 import { criticNode, afterCriticEdge } from "../critic.js";
+import { linkedinPostTool } from "../../tools/linkedin.js";
 import { prepareForLlm } from "../../infra/token-optimizer.js";
 import { childLogger } from "../../infra/logger.js";
 
@@ -235,38 +236,58 @@ async function publisherNode(
     };
   }
 
-  // ── Phase 1B stub — real Composio integration is Phase 1C ─────────────────
-  // TODO Phase 1C: replace with Composio LinkedIn publish
-  // const composioClient = new OpenAIToolSet({ apiKey: env.COMPOSIO_API_KEY });
-  // await composioClient.executeAction("LINKEDIN_CREATE_LINKEDIN_POST", { text: state.post_draft });
+  // ── Real LinkedIn publish via Composio ────────────────────────────────────
   log.info(
     { platform: state.target_platform, preview: state.post_draft?.slice(0, 80) },
-    "Social pod: publisher (Phase 1B stub — Composio integration in Phase 1C)",
+    "Social pod: publishing via Composio LinkedIn tool",
   );
 
+  const platform = state.target_platform === "multi" ? "linkedin" : (state.target_platform ?? "linkedin");
+  let postId: string | undefined;
+
+  if (platform === "linkedin" && state.post_draft) {
+    const result = await linkedinPostTool.execute({
+      text: state.post_draft,
+      visibility: "PUBLIC",
+      idempotency_key: idempotencyKey,
+      tenant_id: state.tenant_id,
+    });
+    if (result.success) {
+      const data = result.data as Record<string, unknown> | undefined;
+      postId = data?.["post_id"] as string | undefined;
+      log.info({ post_id: postId }, "LinkedIn post published");
+    } else {
+      log.warn({ error: result.error }, "LinkedIn publish failed — recording dry-run");
+    }
+  }
+
   const published_post = {
-    platform: state.target_platform === "multi" ? "linkedin" : state.target_platform,
+    platform,
     content: state.post_draft ?? "",
     published_at: new Date().toISOString(),
-    post_id: `stub-${Date.now()}`,
+    post_id: postId ?? `dry-run-${Date.now()}`,
   } as const;
 
-  await writeAuditEntry({
-    tenant_id: state.tenant_id,
-    action: "social_publish",
-    idempotency_key: idempotencyKey,
-    payload: {
-      platform: published_post.platform,
-      post_preview: state.post_draft?.slice(0, 120),
-      hitl_interrupt_id: state.hitl?.interrupt_id,
-      revision_count: state.revision_count,
-    },
-  });
+  // Audit entry only written if we reach here (linkedinPostTool handles its own audit on success)
+  if (!postId) {
+    await writeAuditEntry({
+      tenant_id: state.tenant_id,
+      action: "social_publish",
+      idempotency_key: idempotencyKey,
+      payload: {
+        platform: published_post.platform,
+        post_preview: state.post_draft?.slice(0, 120),
+        hitl_interrupt_id: state.hitl?.interrupt_id,
+        revision_count: state.revision_count,
+        dry_run: true,
+      },
+    });
+  }
 
   const final = {
     published_post,
     finalized_at: new Date().toISOString(),
-    phase: "1B_stub",
+    phase: "live",
   };
 
   log.info({ platform: published_post.platform }, "Social post finalized");

@@ -23,11 +23,38 @@
 import cron from "node-cron";
 import { getDb } from "../db/client.js";
 import { hitlApprovals, actionLog } from "../db/schema.js";
-import { resolveInterrupt, consumePendingEvents } from "../db/queries.js";
+import { resolveInterrupt, consumePendingEvents, publishDeptEvent } from "../db/queries.js";
 import { childLogger } from "./logger.js";
 import { env } from "../core/config.js";
 import { and, eq, lt } from "drizzle-orm";
 import { nextContentTopic } from "../core/prompts.js";
+
+/**
+ * Send a plain-text Telegram message via Bot API (no grammy dependency — avoids circular import).
+ * Used by scheduler for maintenance alerts.
+ */
+async function sendTelegramAlert(text: string, topicId?: number): Promise<void> {
+  const token = env.TELEGRAM_BOT_TOKEN;
+  const chatId = env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+
+  try {
+    const body: Record<string, unknown> = {
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+    };
+    if (topicId) body["message_thread_id"] = topicId;
+
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    log.warn({ err: (err as Error).message }, "sendTelegramAlert failed");
+  }
+}
 
 const log = childLogger({ module: "scheduler" });
 
@@ -88,9 +115,18 @@ async function runLinkedInPoster(): Promise<void> {
     // Advance topic cursor for next run
     _topicIndex = (_topicIndex + 1) % 12;
 
-    // TODO Phase 2B: invoke marketing pod graph with { task: `LinkedIn post about: ${topic}` }
-    // This stub logs intent — graph invocation wired when marketing pod is complete
-    log.info({ topic }, "LinkedIn poster: audit entry written — graph invocation pending Phase 2B");
+    // Publish a dept event → dept_events_poller routes to marketing pod graph
+    await publishDeptEvent({
+      tenant_id: tenant,
+      from_dept: "social",
+      to_dept: "marketing",
+      event_type: "linkedin_post_requested",
+      thread_id: idempKey,
+      payload: { topic, week, topic_index: topicIdx },
+      consumed: false,
+    });
+
+    log.info({ topic }, "LinkedIn poster: dept event published → marketing pod will handle");
 
   } catch (err) {
     log.error({ err: (err as Error).message, idempKey }, "LinkedIn poster failed");
@@ -187,12 +223,15 @@ async function runHitlSweeper(): Promise<void> {
 
     for (const row of stale) {
       await resolveInterrupt(row.interrupt_id, "expired");
-      // TODO Phase 2C: update lead_pipeline stage = 'abandoned_hitl' where thread_id matches
       log.info({ interrupt_id: row.interrupt_id, thread_id: row.thread_id }, "HITL expired");
     }
 
-    // TODO Phase 1C: send Telegram summary to Boardroom topic
-    // await sendTelegramMessage(env.TOPIC_BOARDROOM, `⏰ HITL sweeper: ${stale.length} interrupt(s) expired`)
+    // Telegram boardroom alert
+    const boardroomTopic = parseInt(process.env["TOPIC_BOARDROOM"] ?? "0") || undefined;
+    await sendTelegramAlert(
+      `⏰ <b>HITL Sweeper</b>: ${stale.length} interrupt(s) expired and marked abandoned.\n\nCheck pending leads in the pipeline.`,
+      boardroomTopic,
+    );
 
   } catch (err) {
     log.error({ err: (err as Error).message }, "HITL sweeper failed");
@@ -266,15 +305,23 @@ async function runDeptEventsPoller(): Promise<void> {
           "Dept event consumed",
         );
 
-        // TODO Phase 3C+: route consumed event to the target pod.
-        // Example:
-        //   if (dept === "marketing" && ev.event_type === "email_queued") {
-        //     const graph = await getGraph();
-        //     void graph.invoke(
-        //       { task: `Follow up marketing for: ${(ev.payload as { company?: string }).company ?? "unknown"}`, tenant_id: tenant },
-        //       { configurable: { thread_id: `${tenant}:mktg_followup:${ev.id}` } },
-        //     );
-        //   }
+        // Route to target pod via dynamic import (avoids circular infra → agents dep)
+        if (ev.event_type === "linkedin_post_requested" && dept === "marketing") {
+          const topic = (ev.payload as { topic?: string }).topic ?? "AI agent OS";
+          // Dynamic import avoids circular dep (infra → agents is not allowed statically)
+          const { getGraph } = await import("../agents/graph.js");
+          const graph = await getGraph();
+          if (graph) {
+            void graph.invoke(
+              {
+                task: `Draft and publish a LinkedIn post about: ${topic}`,
+                tenant_id: tenant,
+                trace_id: ev.thread_id ?? ev.id,
+              },
+              { configurable: { thread_id: `${tenant}:social:${ev.id}` } },
+            ).catch((err: Error) => log.error({ err: err.message, event_id: ev.id }, "Graph invoke failed for linkedin_post_requested"));
+          }
+        }
       }
     }
 

@@ -36,6 +36,7 @@
     "jsonrepair": "^3.14.0",
     "langsmith": "^0.2.0",
     "node-cron": "^3.0.3",
+    "octokit": "^5.0.5",
     "opossum": "^8.1.4",
     "pg": "^8.13.1",
     "pino": "^9.5.0",
