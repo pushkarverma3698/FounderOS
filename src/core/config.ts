@@ -69,11 +69,11 @@ const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().url().describe("PostgreSQL connection string"),
 
-  // LLM Providers (at least one is required)
-  ANTHROPIC_API_KEY: z.string().min(1).optional(),
-  GOOGLE_GENERATIVE_AI_API_KEY: z.string().min(1).optional(),
-  OPENROUTER_API_KEY: z.string().min(1).optional(),
-  OPENAI_API_KEY: z.string().min(1).optional(),
+  // LLM Providers (at least one is required — empty string treated as not set)
+  ANTHROPIC_API_KEY: z.string().transform(v => v || undefined).optional(),
+  GOOGLE_GENERATIVE_AI_API_KEY: z.string().transform(v => v || undefined).optional(),
+  OPENROUTER_API_KEY: z.string().transform(v => v || undefined).optional(),
+  OPENAI_API_KEY: z.string().transform(v => v || undefined).optional(),
 
   // Telegram
   TELEGRAM_BOT_TOKEN: z.string().min(1),

@@ -141,9 +141,17 @@ export async function supervisorNode(
     "CEO routing decision",
   );
 
+  // When no department resolved but CEO gave a direct answer — surface it as result
+  // This handles: general chat, /start, unclear tasks, conversational Q&A
+  const directResult =
+    !department && parsed.direct_answer
+      ? parsed.direct_answer
+      : undefined;
+
   return {
     department: department ?? "",
     tenant_id: parsed.company || tenantId,
     task: parsed.task || state.task,
+    ...(directResult ? { result: directResult } : {}),
   };
 }

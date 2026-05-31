@@ -84,9 +84,17 @@ async function routeToGraph(ctx: Context): Promise<void> {
     clearInterval(typingInterval);
 
     const raw = result.result ? String(result.result) : null;
-    const output = raw
-      ? `✅ <b>Done</b>\n\n<pre>${safeHtml(raw.slice(0, 3000))}</pre>`
-      : "✅ Task processed (no output)";
+
+    // Detect if result is JSON (pod output) vs plain text (direct_answer / CEO chat)
+    let output: string;
+    if (!raw) {
+      output = "✅ Task processed (no output)";
+    } else {
+      const isJson = raw.trimStart().startsWith("{") || raw.trimStart().startsWith("[");
+      output = isJson
+        ? `✅ <b>Done</b>\n\n<pre>${safeHtml(raw.slice(0, 3000))}</pre>`
+        : `💬 ${safeHtml(raw.slice(0, 3000))}`;
+    }
 
     await ctx.reply(output, {
       parse_mode: "HTML",
@@ -251,6 +259,28 @@ async function handleProspectCommand(ctx: Context): Promise<void> {
  * Called once at startup before bot.start().
  */
 export function registerHandlers(bot: Bot): void {
+  // ── /start command ────────────────────────────────────────────────────────
+
+  bot.command("start", async (ctx: Context) => {
+    const name = ctx.from?.first_name ? ` ${ctx.from.first_name}` : "";
+    await ctx.reply(
+      `👋 <b>FounderOS${name}</b> — your AI operating system is live.\n\n` +
+      `<b>Commands:</b>\n` +
+      `• <code>/prospect &lt;url or company&gt;</code> — ICP score + sales routing\n` +
+      `• <code>/task &lt;description&gt;</code> — any task → correct department\n\n` +
+      `<b>Or just message me:</b>\n` +
+      `• <i>"Draft a LinkedIn post about AI agents"</i>\n` +
+      `• <i>"Research Stripe and write a cold email"</i>\n` +
+      `• <i>"Build a webhook handler for Stripe"</i>\n\n` +
+      `All tasks go through the CEO supervisor → routed to Sales, Engineering, Marketing, Social, or Prospecting pods.\n\n` +
+      `💡 <i>Tip: HITL gates protect every outbound action — you approve before anything is sent.</i>`,
+      {
+        parse_mode: "HTML",
+        ...(ctx.message?.message_thread_id ? { message_thread_id: ctx.message.message_thread_id } : {}),
+      },
+    );
+  });
+
   // ── /prospect command ────────────────────────────────────────────────────
 
   bot.command("prospect", async (ctx: Context) => {

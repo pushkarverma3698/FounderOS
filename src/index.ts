@@ -18,6 +18,7 @@ import { sendHITLMessage, startBot, stopBot } from "./gateway/telegram.js";
 import { initScheduler, stopScheduler } from "./infra/scheduler.js";
 import { closeRedis } from "./infra/redis.js";
 import { startHealthServer } from "./infra/health.js";
+import { startLogObserver, stopLogObserver } from "./infra/log-observer.js";
 import { logger } from "./infra/logger.js";
 import type { Server } from "node:http";
 
@@ -61,6 +62,12 @@ async function main(): Promise<void> {
   // 4b. Health/metrics server for uptime monitors + load balancers
   healthServer = startHealthServer();
 
+  // 4c. Log observer — real-time reliability tracking, digest → Telegram Boardroom
+  const logFile = process.env["LOG_FILE"] ?? "/tmp/founderos.log";
+  const boardroomTopic = parseInt(process.env["TOPIC_BOARDROOM"] ?? "0") || undefined;
+  startLogObserver(logFile, 30, boardroomTopic);
+  log.info({ logFile, boardroomTopic }, "Log observer ready");
+
   // 5. Start Telegram bot (long polling — runs in background)
   await startBot();
 
@@ -72,6 +79,7 @@ async function main(): Promise<void> {
 async function shutdown(signal: string): Promise<void> {
   log.info({ signal }, "Shutdown signal received — draining…");
   stopScheduler();
+  stopLogObserver();
   healthServer?.close();
   await stopBot();
   await closeDatabaseConnections();

@@ -23,6 +23,7 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 import { FounderState } from "./state.js";
 import type { FounderStateType, DeptSignal } from "./state.js";
 import { supervisorNode } from "./supervisor.js";
+import { preRouterNode } from "./pre-router.js";
 import { salesSubgraph } from "./pods/sales.js";
 import { engineeringSubgraph } from "./pods/engineering.js";
 import { marketingSubgraph } from "./pods/marketing.js";
@@ -33,6 +34,34 @@ import { getCheckpointer } from "../infra/checkpointer.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "graph" });
+
+// ── Pre-router edge: after preRouterNode ──────────────────────────────────────
+
+/**
+ * After the pre-router:
+ *  - If department already set AND result is set (direct answer) → END (no pod needed)
+ *  - If department is set but no result → go directly to that pod (skip CEO)
+ *  - If department is empty → escalate to CEO supervisor
+ */
+function routeAfterPreRouter(
+  state: FounderStateType,
+): "supervisor" | "sales" | "engineering" | "marketing" | "social" | "prospecting" | typeof END {
+  // Direct answer (small-talk / Q&A) — result already written, no pod needed
+  const dept = state.department as string;
+  if (state.result && !dept) {
+    log.info("Pre-router: direct answer, routing to END");
+    return END;
+  }
+
+  if (state.department === "sales") return "sales";
+  if (state.department === "engineering") return "engineering";
+  if (state.department === "marketing") return "marketing";
+  if (state.department === "social") return "social";
+  if (state.department === "prospecting") return "prospecting";
+
+  // Ambiguous — escalate to CEO supervisor
+  return "supervisor";
+}
 
 // ── Department router (pure function — used as conditional edge) ───────────────
 
@@ -187,6 +216,7 @@ async function prospectingNode(
 // ── Graph Definition ──────────────────────────────────────────────────────────
 
 const graphBuilder = new StateGraph(FounderState)
+  .addNode("pre_router", preRouterNode)
   .addNode("supervisor", supervisorNode)
   .addNode("sales", salesNode)
   .addNode("engineering", engineeringNode)
@@ -194,18 +224,27 @@ const graphBuilder = new StateGraph(FounderState)
   .addNode("social", socialNode)
   .addNode("prospecting", prospectingNode)
 
-  .addEdge(START, "supervisor")
+  // All tasks enter pre_router first (3-layer cheap classifier)
+  .addEdge(START, "pre_router")
 
+  // Pre-router decides: direct answer → END, confident dept → pod, ambiguous → CEO
+  .addConditionalEdges("pre_router", routeAfterPreRouter, {
+    supervisor: "supervisor",
+    sales: "sales",
+    engineering: "engineering",
+    marketing: "marketing",
+    social: "social",
+    prospecting: "prospecting",
+    [END]: END,
+  })
+
+  // CEO supervisor only runs for genuinely ambiguous tasks
   .addConditionalEdges("supervisor", routeDepartment, {
     sales: "sales",
     engineering: "engineering",
     marketing: "marketing",
     social: "social",
     prospecting: "prospecting",
-    // routeDepartment returns END when the supervisor cannot resolve a
-    // department. Without this mapping LangGraph throws "Branch condition
-    // returned unknown or null destination" and crashes the whole invocation
-    // instead of ending gracefully (CEO live battery, 2026-05-31).
     [END]: END,
   })
 
