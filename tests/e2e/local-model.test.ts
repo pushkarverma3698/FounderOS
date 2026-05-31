@@ -21,6 +21,7 @@
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
+import { HumanMessage, SystemMessage, AIMessage } from "@langchain/core/messages";
 
 // ── LM Studio availability check ──────────────────────────────────────────────
 
@@ -284,12 +285,7 @@ describe("LM Studio cascade — callCascade('local', ...) integration", () => {
 
       const result = await callCascade(
         "local",
-        [
-          {
-            role: "user",
-            content: "Reply with exactly the word 'PONG' and nothing else.",
-          },
-        ],
+        [new HumanMessage("Reply with exactly the word 'PONG' and nothing else.")],
         { agent: "e2e_test", tenant_id: "test" },
       );
 
@@ -312,14 +308,8 @@ describe("LM Studio cascade — callCascade('local', ...) integration", () => {
       const result = await callCascade(
         "local",
         [
-          {
-            role: "system",
-            content: "You are a JSON-only responder. Always respond with valid JSON, nothing else.",
-          },
-          {
-            role: "user",
-            content: 'Return a JSON object with key "status" set to "ok" and "count" set to 42.',
-          },
+          new SystemMessage("You are a JSON-only responder. Always respond with valid JSON, nothing else."),
+          new HumanMessage('Return a JSON object with key "status" set to "ok" and "count" set to 42.'),
         ],
         { agent: "e2e_test_json", tenant_id: "test" },
       );
@@ -374,12 +364,7 @@ The result is that the system needs attention.
 
       const result = await callCascade(
         "local",
-        [
-          {
-            role: "user",
-            content: `Summarize in one sentence: ${optimized}`,
-          },
-        ],
+        [new HumanMessage(`Summarize in one sentence: ${optimized}`)],
         { agent: "e2e_test_optimizer", tenant_id: "test" },
       );
 
@@ -393,25 +378,31 @@ The result is that the system needs attention.
     "context manager + cascade — trimmed message history goes to LLM",
     skipIfNoLmStudio(async () => {
       // Build a long conversation history (simulates a multi-turn agent)
-      const fullHistory = Array.from({ length: 30 }, (_, i) => ({
-        role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
-        content: `Turn ${i}: This is a conversation turn that takes some tokens for budget pressure.`,
-      }));
+      const fullHistory = Array.from({ length: 30 }, (_, i) =>
+        i % 2 === 0
+          ? new HumanMessage(`Turn ${i}: This is a conversation turn that takes some tokens for budget pressure.`)
+          : new AIMessage(`Turn ${i}: This is a conversation turn that takes some tokens for budget pressure.`),
+      );
 
-      // Trim: tight budget forces dropping middle; keepRecent: 6 = keep last 6
+      // Trim: tight budget forces dropping the middle. keepRecent is a FLOOR
+      // ("always keep ≥ this many recent"), not a ceiling — the function may add
+      // middle messages back while the total still fits the token budget.
       const trimmed = trimMessageHistory(fullHistory, {
         maxTokens: 200,
         keepRecent: 6,
         keepFirst: false,
       });
 
-      expect(trimmed.length).toBeLessThanOrEqual(6);
+      // Contract: middle dropped (shorter than original), recent tail preserved.
+      expect(trimmed.length).toBeLessThan(fullHistory.length);
+      expect(trimmed.length).toBeGreaterThanOrEqual(6);
+      expect(trimmed.slice(-6)).toEqual(fullHistory.slice(-6));
 
       const result = await callCascade(
         "local",
         [
           ...trimmed,
-          { role: "user", content: "What turn number was the last message you saw?" },
+          new HumanMessage("What turn number was the last message you saw?"),
         ],
         { agent: "e2e_test_context", tenant_id: "test" },
       );

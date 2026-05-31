@@ -170,10 +170,6 @@ describe("_resolveDepartment — null fallback", () => {
     expect(_resolveDepartment("ops_agent")).toBeNull();
   });
 
-  it("returns null for 'farm_weather' (naggar agent, no department + no keyword)", () => {
-    expect(_resolveDepartment("farm_weather")).toBeNull();
-  });
-
   it("returns null for 'cost_watchdog' (cross-company, no department + no keyword)", () => {
     expect(_resolveDepartment("cost_watchdog")).toBeNull();
   });

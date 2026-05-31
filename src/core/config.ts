@@ -81,7 +81,6 @@ const envSchema = z.object({
   TOPIC_BOARDROOM: z.coerce.number().default(0),
   TOPIC_THINK_TANK: z.coerce.number().default(0),
   TOPIC_TURICKS: z.coerce.number().default(0),
-  TOPIC_NAGGAR: z.coerce.number().default(0),
   TOPIC_SOCIAL: z.coerce.number().default(0),
 
   // Observability (optional — degrades gracefully)
@@ -140,9 +139,12 @@ export interface CascadeEntry {
 // ── Cascade Definitions ───────────────────────────────────────────────────────
 
 export const CASCADE: Record<CascadeTier, CascadeEntry[]> = {
+  // CEO = task routing (classification). Must NOT use a reasoning model:
+  // gemini-2.5-pro spends its tight 512-token budget on thinking and returns
+  // EMPTY text, which broke routing for Gemini-only users (CEO live battery,
+  // 2026-05-31). gemini-2.5-flash is non-reasoning, fast, cheap, and reliable.
   ceo: [
     { provider: "anthropic", modelId: "claude-sonnet-4-5" },
-    { provider: "google",    modelId: "gemini-2.5-pro" },
     { provider: "google",    modelId: "gemini-2.5-flash" },
     { provider: "openrouter", modelId: "meta-llama/llama-3.3-70b-instruct:free" },
   ],
@@ -150,7 +152,7 @@ export const CASCADE: Record<CascadeTier, CascadeEntry[]> = {
   deep_research: [
     { provider: "google",     modelId: "gemini-2.5-pro" },
     { provider: "google",     modelId: "gemini-2.5-flash" },
-    { provider: "openrouter", modelId: "deepseek/deepseek-v4-flash:free" },
+    { provider: "openrouter", modelId: "deepseek/deepseek-r1:free" },
   ],
 
   md: [
@@ -179,19 +181,22 @@ export const CASCADE: Record<CascadeTier, CascadeEntry[]> = {
     { provider: "google", modelId: "veo-2.0-generate-001" },
   ],
 
-  // Critic tier: Claude-FIRST to prevent sycophancy (generators use Gemini)
-  // Fallback order: Claude → Gemini Flash → OpenRouter Llama (any non-Gemini satisfies anti-sycophancy)
+  // Critic tier: Claude-FIRST to prevent sycophancy (generators use Gemini).
+  // Fallback order puts the NON-Gemini free model (Llama) AHEAD of Gemini Flash
+  // so that — when no Anthropic key is configured — the critic is still a
+  // different model family from the Gemini generators. Falling straight to
+  // Gemini Flash would make the generator critique itself (R1, 2026-05-31).
   critic: [
     { provider: "anthropic",  modelId: "claude-haiku-4-5" },
-    { provider: "google",     modelId: "gemini-2.5-flash" },
     { provider: "openrouter", modelId: "meta-llama/llama-3.3-70b-instruct:free" },
+    { provider: "google",     modelId: "gemini-2.5-flash" },
   ],
 };
 
 // ── Token Limits Per Tier ─────────────────────────────────────────────────────
 
 export const TIER_MAX_TOKENS: Record<CascadeTier, number> = {
-  ceo:           512,   // CEO only classifies/routes — keep it tight
+  ceo:           1024,  // Classify/route only — headroom so the JSON verdict is never truncated mid-string
   deep_research: 4096,  // Research needs synthesis space
   md:            2048,  // Business outputs: proposals, reports, emails
   code:          4096,  // Code generation needs room

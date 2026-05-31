@@ -202,6 +202,11 @@ const graphBuilder = new StateGraph(FounderState)
     marketing: "marketing",
     social: "social",
     prospecting: "prospecting",
+    // routeDepartment returns END when the supervisor cannot resolve a
+    // department. Without this mapping LangGraph throws "Branch condition
+    // returned unknown or null destination" and crashes the whole invocation
+    // instead of ending gracefully (CEO live battery, 2026-05-31).
+    [END]: END,
   })
 
   // After prospecting: qualified → sales, disqualified → END

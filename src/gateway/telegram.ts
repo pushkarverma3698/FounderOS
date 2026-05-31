@@ -2,7 +2,7 @@
  * FounderOS — Telegram Bot Gateway
  * ==================================
  * grammy-based bot with:
- *  - Topic-group routing (Boardroom / Turicks / Naggar / Social → CEO supervisor)
+ *  - Topic-group routing (Boardroom / Turicks / Social → CEO supervisor)
  *  - HITL callback handler (inline keyboard approve/reject)
  *  - Safe HTML escaping (prevent injection in bot replies)
  *  - Immediate ACK on every callback_query (no spinner left on buttons)
@@ -43,10 +43,10 @@ export function getBot(): Bot {
 /**
  * Resolve which company tenant owns a given Telegram topic.
  * Falls back to "turicks" for unknown/boardroom topics.
+ * All topics (Boardroom, Turicks, Social, Think Tank) route to turicks —
+ * the CEO supervisor picks the department from there.
  */
-function topicToTenant(threadTopicId: number | undefined): string {
-  if (threadTopicId === env.TOPIC_NAGGAR) return "naggar";
-  // Boardroom, Turicks, Social, Think Tank → turicks (CEO supervisor picks department)
+function topicToTenant(_threadTopicId: number | undefined): string {
   return "turicks";
 }
 

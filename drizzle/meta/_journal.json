@@ -8,6 +8,13 @@
       "when": 1779879937272,
       "tag": "0000_happy_quicksilver",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779880000000,
+      "tag": "0001_rename_tables",
+      "breakpoints": true
     }
   ]
 }

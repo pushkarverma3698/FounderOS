@@ -1,0 +1,253 @@
+{
+  "generated_at": "2026-05-31T12:31:23.432Z",
+  "budget_cap_usd": 0.5,
+  "kill_switch_usd": 0.45,
+  "grand_total_usd": 0.036311,
+  "under_cap": true,
+  "scenarios": [
+    {
+      "id": "prospecting",
+      "tenant": "turicks",
+      "task": "https://gymshark.com",
+      "expectedDept": "prospecting (→ sales if qualified)",
+      "routedDept": "prospecting",
+      "reachedHitl": false,
+      "pendingNodes": [],
+      "outreachTier": null,
+      "latencyMs": 10003,
+      "costDeltaUsd": 0.000247,
+      "ok": true,
+      "outputPreview": "{\n  \"company_url\": \"https://gymshark.com\",\n  \"company_name\": \"Gymshark\",\n  \"icp_score\": 0,\n  \"icp_rationale\": \"Gymshark is a hard disqualifier due to having 900 employees, which is significantly over the 500 employee limit. Additionally, it is a B2C company, selling directly to consumers, which is another hard disqualifier for Turicks' B2B focus.\",\n  \"outreach_tier\": null,\n  \"lead_id\": \"7a798ba7-5f6b-4a54-9470-93f95c33b14a\"\n}"
+    },
+    {
+      "id": "sales",
+      "tenant": "turicks",
+      "task": "Research stripe.com and draft a personalized cold email to their Head of Partnerships pitching our AI automation services.",
+      "expectedDept": "sales",
+      "routedDept": "sales",
+      "reachedHitl": true,
+      "pendingNodes": [
+        "sales"
+      ],
+      "outreachTier": null,
+      "latencyMs": 47231,
+      "costDeltaUsd": 0.005736,
+      "ok": false,
+      "outputPreview": ""
+    },
+    {
+      "id": "engineering",
+      "tenant": "turicks",
+      "task": "Build a TypeScript Hono webhook endpoint that verifies a Stripe webhook signature and returns HTTP 200.",
+      "expectedDept": "engineering",
+      "routedDept": "engineering",
+      "reachedHitl": false,
+      "pendingNodes": [],
+      "outreachTier": null,
+      "latencyMs": 62081,
+      "costDeltaUsd": 0.00114,
+      "ok": true,
+      "outputPreview": "{\n  \"plan\": {\n    \"summary\": \"Build a TypeScript Hono webhook endpoint that verifies a Stripe webhook signature and returns HTTP 200.\",\n    \"risks\": [\n      \"Correctly obtaining the raw request body from Hono before it's parsed, which is crucial for Stripe signature verification.\",\n      \"Securely loading and accessing the Stripe webhook secret from environment variables.\",\n      \"Robust error handling for invalid signatures and other potential issues during webhook processing.\",\n      \"Setting up a reliable local testing environment for Stripe webhooks (e.g., using Stripe CLI or ngrok).\"\n    …"
+    },
+    {
+      "id": "marketing_seo",
+      "tenant": "turicks",
+      "task": "Audit the SEO of turicks.com and list the top 5 highest-impact fixes.",
+      "expectedDept": "marketing",
+      "routedDept": "marketing",
+      "reachedHitl": true,
+      "pendingNodes": [
+        "marketing"
+      ],
+      "outreachTier": null,
+      "latencyMs": 17611,
+      "costDeltaUsd": 0.000179,
+      "ok": false,
+      "outputPreview": ""
+    },
+    {
+      "id": "social",
+      "tenant": "turicks",
+      "task": "Draft a LinkedIn post announcing we shipped an AI agent operating system for one-person agencies.",
+      "expectedDept": "social",
+      "routedDept": "social",
+      "reachedHitl": true,
+      "pendingNodes": [
+        "social"
+      ],
+      "outreachTier": null,
+      "latencyMs": 33303,
+      "costDeltaUsd": 0.008569,
+      "ok": false,
+      "outputPreview": ""
+    },
+    {
+      "id": "naggar_multitenant",
+      "tenant": "naggar",
+      "task": "Draft a warm booking confirmation message for a guest arriving next week at the Himalayan retreat.",
+      "expectedDept": "any (multi-tenant proof)",
+      "routedDept": "",
+      "reachedHitl": false,
+      "pendingNodes": [],
+      "outreachTier": null,
+      "latencyMs": 1130,
+      "costDeltaUsd": 0.000047,
+      "ok": false,
+      "outputPreview": ""
+    }
+  ],
+  "dedup_spotcheck": {
+    "ok": true,
+    "detail": "5 concurrent runs of https://linear.app → departments=[prospecting, , prospecting, , ] errors=0"
+  },
+  "cost_breakdown": {
+    "turicks": [
+      {
+        "model": "gemini-2.5-pro",
+        "agent": "lead_intel",
+        "calls": "3",
+        "total_tokens_in": "1354",
+        "total_tokens_out": "1580",
+        "total_cost_usd": "0.017493"
+      },
+      {
+        "model": "gemini-2.5-pro",
+        "agent": "social_researcher",
+        "calls": "1",
+        "total_tokens_in": "112",
+        "total_tokens_out": "825",
+        "total_cost_usd": "0.008390"
+      },
+      {
+        "model": "gemini-2.5-pro",
+        "agent": "supervisor",
+        "calls": "10",
+        "total_tokens_in": "5040",
+        "total_tokens_out": "0",
+        "total_cost_usd": "0.006302"
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "agent": "senior_dev",
+        "calls": "2",
+        "total_tokens_in": "1892",
+        "total_tokens_out": "2905",
+        "total_cost_usd": "0.001014"
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "agent": "supervisor",
+        "calls": "20",
+        "total_tokens_in": "10550",
+        "total_tokens_out": "528",
+        "total_cost_usd": "0.000949"
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "agent": "icp_scorer",
+        "calls": "3",
+        "total_tokens_in": "4268",
+        "total_tokens_out": "436",
+        "total_cost_usd": "0.000451"
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "agent": "eng_engineer",
+        "calls": "2",
+        "total_tokens_in": "707",
+        "total_tokens_out": "1102",
+        "total_cost_usd": "0.000384"
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "agent": "bdr",
+        "calls": "1",
+        "total_tokens_in": "773",
+        "total_tokens_out": "151",
+        "total_cost_usd": "0.000103"
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "agent": "social_handler",
+        "calls": "1",
+        "total_tokens_in": "545",
+        "total_tokens_out": "184",
+        "total_cost_usd": "0.000096"
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "agent": "sales_engineer",
+        "calls": "1",
+        "total_tokens_in": "873",
+        "total_tokens_out": "79",
+        "total_cost_usd": "0.000089"
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "agent": "critic",
+        "calls": "2",
+        "total_tokens_in": "830",
+        "total_tokens_out": "77",
+        "total_cost_usd": "0.000085"
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "agent": "mktg_engineer",
+        "calls": "1",
+        "total_tokens_in": "412",
+        "total_tokens_out": "136",
+        "total_cost_usd": "0.000072"
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "agent": "content_writer",
+        "calls": "1",
+        "total_tokens_in": "472",
+        "total_tokens_out": "79",
+        "total_cost_usd": "0.000059"
+      },
+      {
+        "model": "gemini-2.5-flash-lite",
+        "agent": "disambiguate",
+        "calls": "5",
+        "total_tokens_in": "753",
+        "total_tokens_out": "127",
+        "total_cost_usd": "0.000046"
+      },
+      {
+        "model": "gemini-2.5-flash-lite",
+        "agent": "prospecting_researcher",
+        "calls": "1",
+        "total_tokens_in": "765",
+        "total_tokens_out": "103",
+        "total_cost_usd": "0.000044"
+      },
+      {
+        "model": "founderos:latest",
+        "agent": "prospecting_researcher",
+        "calls": "1",
+        "total_tokens_in": "141",
+        "total_tokens_out": "25",
+        "total_cost_usd": "0.000000"
+      }
+    ],
+    "naggar": [
+      {
+        "model": "gemini-2.5-pro",
+        "agent": "supervisor",
+        "calls": "1",
+        "total_tokens_in": "510",
+        "total_tokens_out": "0",
+        "total_cost_usd": "0.000638"
+      },
+      {
+        "model": "gemini-2.5-flash",
+        "agent": "supervisor",
+        "calls": "2",
+        "total_tokens_in": "1067",
+        "total_tokens_out": "55",
+        "total_cost_usd": "0.000096"
+      }
+    ]
+  }
+}

@@ -73,7 +73,9 @@ export function _resolveDepartment(
 
 interface CeoResponse {
   company: string;
-  task: string;
+  /** Optional — the CEO no longer echoes the task (kept compact to avoid
+   *  truncation). The supervisor falls back to state.task when absent. */
+  task?: string;
   agent: string;
   direct_answer: string | null;
 }

@@ -1137,12 +1137,19 @@ async function main() {
   console.log(c.dim(`\n  Total QA run time: ${totalElapsed}s\n`));
 }
 
-main().catch((err: unknown) => {
-  // AggregateError (pg driver on ECONNREFUSED) has an empty .message — use .code fallback
-  const e    = err instanceof Error ? err : new Error(String(err));
-  const code = (e as NodeJS.ErrnoException).code;
-  const msg  = e.message || (code ? `[${code}]` : String(err));
-  console.error(c.red(`\n  FATAL: ${msg}`));
-  if (e.stack) console.error(c.dim(e.stack.split("\n").slice(1, 4).join("\n")));
-  process.exit(1);
-});
+main()
+  .then(() => {
+    // Force a clean exit: the reliability section opens Redis + scheduler handles
+    // that would otherwise keep the event loop alive and make the script hang
+    // after printing its verdict.
+    process.exit(0);
+  })
+  .catch((err: unknown) => {
+    // AggregateError (pg driver on ECONNREFUSED) has an empty .message — use .code fallback
+    const e    = err instanceof Error ? err : new Error(String(err));
+    const code = (e as NodeJS.ErrnoException).code;
+    const msg  = e.message || (code ? `[${code}]` : String(err));
+    console.error(c.red(`\n  FATAL: ${msg}`));
+    if (e.stack) console.error(c.dim(e.stack.split("\n").slice(1, 4).join("\n")));
+    process.exit(1);
+  });

@@ -1,7 +1,9 @@
 # FounderOS — Progress & Journey Document
 
-> **Last updated:** 2026-05-27  
-> **Status:** Phases 1A–2C complete · Phase 2D in progress · Phases 2E + 3 pending
+> **Last updated:** 2026-05-31  
+> **Status:** Phases 1–4 complete · **Phase 5 (live test + reliability hardening) complete** — see [`docs/PRODUCTION-READINESS.md`](PRODUCTION-READINESS.md) and [`docs/phases/PHASE-5-LIVE-TEST-HARDENING.md`](phases/PHASE-5-LIVE-TEST-HARDENING.md)
+>
+> **Phase 5 headline:** drove the live cloud cascade with real CEO tasks for <$0.04 and fixed ship-blockers — a fresh `setup-db.ts` was producing a broken DB (migration journal drift → dead cost tracking), and Gemini-only CEO routing returned empty (reasoning model + tight token cap). Both fixed; routing now reliable, graph degrades instead of crashing, anti-sycophancy restored. Non-live tests: **210 passing**. Added `/health`+`/metrics`, `LICENSE` (MIT), `CONTRIBUTING.md`.
 
 ---
 

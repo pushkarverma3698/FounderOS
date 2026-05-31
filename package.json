@@ -2,6 +2,7 @@
   "name": "founderos",
   "version": "0.1.0",
   "description": "FounderOS — Multi-agent AI operating system for Turicks",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22"

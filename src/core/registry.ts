@@ -4,7 +4,7 @@
  * Single source of truth for Companies, Agents, and Routing.
  *
  * Adding a new company or agent requires modifying ONLY this file.
- * No hardcoded "turicks" / "naggar" strings anywhere else in the codebase.
+ * No hardcoded "turicks" strings anywhere else in the codebase.
  */
 
 // ── Data Models ────────────────────────────────────────────────────────────────
@@ -34,21 +34,12 @@ export interface TuricksProfile {
   differentiator: string;
 }
 
-export interface NaggarProfile {
-  type: string;
-  location: string;
-  produce: string[];
-  base_rate: string;
-  booking_platforms: string[];
-  brand: string;
-}
-
 export interface CrossProfile {
   type: string;
   mission: string;
 }
 
-export type CompanyProfile = TuricksProfile | NaggarProfile | CrossProfile;
+export type CompanyProfile = TuricksProfile | CrossProfile;
 
 export interface Company {
   readonly name: string;
@@ -61,7 +52,7 @@ export interface Company {
 
 export interface Agent {
   readonly name: string;
-  readonly company_assignment: string; // "turicks" | "naggar" | "cross"
+  readonly company_assignment: string; // "turicks" | "cross"
   readonly cascade_tier: CascadeTier;
   readonly allowed_collections: string[];
   readonly allowed_tools: string[];
@@ -88,22 +79,6 @@ const _companies: Record<string, Company> = {
       icp: "SME founders $50K–500K ARR who need AI/automation or a design-conscious software team",
       differentiator: "AI-native agency that builds what others only prototype — 3–5 day delivery, design-conscious, working code not decks",
     } satisfies TuricksProfile,
-  },
-
-  naggar: {
-    name: "naggar",
-    readable_name: "Naggar Retreat (Himalayan Farm)",
-    memory_collection: "naggar_mem",
-    telegram_topic_id: parseInt(process.env["TOPIC_NAGGAR"] ?? "0"),
-    agents: [],
-    profile: {
-      type: "Himalayan farm + premium homestay",
-      location: "Naggar, HP | Alt: 1768m | Lat: 31.99, Lon: 77.17",
-      produce: ["raspberries", "apples", "walnuts"],
-      base_rate: "₹6,000/night",
-      booking_platforms: ["Airbnb", "Booking.com", "Direct"],
-      brand: "Ahata — farm-to-table culinary experiences",
-    } satisfies NaggarProfile,
   },
 
   cross: {
@@ -226,71 +201,6 @@ const _agentList: Agent[] = [
     ],
   },
 
-  // ── Naggar Agents ─────────────────────────────────────────────────────────
-  {
-    name: "farm_weather",
-    company_assignment: "naggar",
-    cascade_tier: "local",
-    allowed_collections: ["naggar_mem"],
-    allowed_tools: [...BASE_TOOLS, "chromadb_read", "chromadb_write", "openweathermap"],
-  },
-  {
-    name: "yield_scout",
-    company_assignment: "naggar",
-    cascade_tier: "local",
-    allowed_collections: ["naggar_mem"],
-    allowed_tools: [...BASE_TOOLS, "chromadb_read", "chromadb_write"],
-  },
-  {
-    name: "booking_concierge",
-    company_assignment: "naggar",
-    cascade_tier: "nano",
-    allowed_collections: ["naggar_mem"],
-    allowed_tools: ["bash", "read_file", "chromadb_read", "chromadb_write", "telegram_send"],
-  },
-  {
-    name: "vibe_designer",
-    company_assignment: "naggar",
-    cascade_tier: "md",
-    allowed_collections: ["naggar_mem"],
-    allowed_tools: [...BASE_TOOLS, "write_file", "chromadb_read", "chromadb_write"],
-  },
-  {
-    name: "culinary_agent",
-    company_assignment: "naggar",
-    cascade_tier: "local",
-    allowed_collections: ["naggar_mem"],
-    allowed_tools: [...BASE_TOOLS, "chromadb_read", "chromadb_write"],
-  },
-  {
-    name: "market_scout",
-    company_assignment: "naggar",
-    cascade_tier: "deep_research",
-    allowed_collections: ["naggar_mem", "social_mem"],
-    allowed_tools: [...BASE_TOOLS, "chromadb_read", "chromadb_write", "firecrawl"],
-  },
-  {
-    name: "guest_crm",
-    company_assignment: "naggar",
-    cascade_tier: "local",
-    allowed_collections: ["naggar_mem"],
-    allowed_tools: ["bash", "read_file", "write_file", "chromadb_read", "chromadb_write"],
-  },
-  {
-    name: "naggar_kb",
-    company_assignment: "naggar",
-    cascade_tier: "local",
-    allowed_collections: ["naggar_mem"],
-    allowed_tools: ["bash", "read_file", "write_file", "chromadb_read", "chromadb_write"],
-  },
-  {
-    name: "video_editor",
-    company_assignment: "naggar",
-    cascade_tier: "video",
-    allowed_collections: ["naggar_mem"],
-    allowed_tools: ["bash", "read_file", "chromadb_read", "ffmpeg"],
-  },
-
   // ── Engineer Agents (one per department — autonomous decision-makers) ─────
   {
     /**
@@ -400,21 +310,21 @@ const _agentList: Agent[] = [
     name: "cost_watchdog",
     company_assignment: "cross",
     cascade_tier: "md",
-    allowed_collections: ["turicks_mem", "naggar_mem", "social_mem"],
+    allowed_collections: ["turicks_mem", "social_mem"],
     allowed_tools: ["bash", "read_file", "chromadb_read", "chromadb_write"],
   },
   {
     name: "team_therapist",
     company_assignment: "cross",
     cascade_tier: "md",
-    allowed_collections: ["turicks_mem", "naggar_mem", "social_mem"],
+    allowed_collections: ["turicks_mem", "social_mem"],
     allowed_tools: ["bash", "read_file", "chromadb_read", "chromadb_write", "telegram_send"],
   },
   {
     name: "hr_agent",
     company_assignment: "cross",
     cascade_tier: "deep_research",
-    allowed_collections: ["turicks_mem", "naggar_mem", "social_mem"],
+    allowed_collections: ["turicks_mem", "social_mem"],
     allowed_tools: [...BASE_TOOLS, "chromadb_read", "chromadb_write"],
   },
   {
@@ -442,14 +352,14 @@ const _agentList: Agent[] = [
     name: "scrum_engine",
     company_assignment: "cross",
     cascade_tier: "nano",
-    allowed_collections: ["turicks_mem", "naggar_mem", "social_mem"],
+    allowed_collections: ["turicks_mem", "social_mem"],
     allowed_tools: ["bash", "read_file", "chromadb_read", "chromadb_write", "telegram_send"],
   },
   {
     name: "scrum_pm",
     company_assignment: "cross",
     cascade_tier: "md",
-    allowed_collections: ["turicks_mem", "naggar_mem", "social_mem"],
+    allowed_collections: ["turicks_mem", "social_mem"],
     allowed_tools: ["bash", "read_file", "chromadb_read", "chromadb_write", "telegram_send"],
   },
 ];

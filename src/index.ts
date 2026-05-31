@@ -17,9 +17,13 @@ import { initHITL } from "./gateway/hitl.js";
 import { sendHITLMessage, startBot, stopBot } from "./gateway/telegram.js";
 import { initScheduler, stopScheduler } from "./infra/scheduler.js";
 import { closeRedis } from "./infra/redis.js";
+import { startHealthServer } from "./infra/health.js";
 import { logger } from "./infra/logger.js";
+import type { Server } from "node:http";
 
 const log = logger.child({ module: "main" });
+
+let healthServer: Server | undefined;
 
 async function main(): Promise<void> {
   log.info("FounderOS starting…");
@@ -54,6 +58,9 @@ async function main(): Promise<void> {
   initScheduler();
   log.info("Scheduler ready");
 
+  // 4b. Health/metrics server for uptime monitors + load balancers
+  healthServer = startHealthServer();
+
   // 5. Start Telegram bot (long polling — runs in background)
   await startBot();
 
@@ -65,6 +72,7 @@ async function main(): Promise<void> {
 async function shutdown(signal: string): Promise<void> {
   log.info({ signal }, "Shutdown signal received — draining…");
   stopScheduler();
+  healthServer?.close();
   await stopBot();
   await closeDatabaseConnections();
   await closeRedis();

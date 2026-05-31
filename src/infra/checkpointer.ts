@@ -52,7 +52,7 @@ export async function getCheckpointer(): Promise<PostgresSaver> {
  *
  * Examples:
  *   "turicks:telegram:1234567890:run-abc123"  ← Telegram user
- *   "naggar:scheduler:farm_weather:run-xyz"   ← Cron-triggered run
+ *   "turicks:scheduler:social_handler:run-xyz" ← Cron-triggered run
  */
 export function buildThreadId(
   tenantId: string,
