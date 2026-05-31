@@ -247,7 +247,7 @@ export const RATE_LIMITER_OPTIONS = {
 export const LLM_CACHE_TTL: Partial<Record<CascadeTier, number>> = {
   ceo:           0,      // never cache — decisions must be fresh
   deep_research: 3600,   // 1 hour
-  md:            3600,   // 1 hour
+  md:            21600,  // 6 hours (increased from 1h — drafts are stable at this timescale)
   code:          1800,   // 30 min (code changes fast)
   nano:          86400,  // 24 hours
   local:         0,      // local model — no caching
@@ -256,3 +256,6 @@ export const LLM_CACHE_TTL: Partial<Record<CascadeTier, number>> = {
 
 /** Research cache TTL: 7 days (company data is stable at this timescale). */
 export const RESEARCH_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/** Content template cache TTL: 7 days (weekly social post batches, reusable templates). */
+export const CONTENT_TEMPLATE_CACHE_TTL = 7 * 24 * 60 * 60;

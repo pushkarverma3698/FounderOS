@@ -23,7 +23,30 @@ Stack: Node.js 22 + TypeScript 5.5 (strict) + LangGraph JS + Vercel AI SDK + gra
 - ✅ Phase 2C: Suppression + quota safety rails, LinkedIn tools, scheduler (COMPLETE)
 - ✅ Phase 2D: Observability + docs update (COMPLETE)
 - ✅ Phase 2E: Engineer agents per department (eng_engineer, sales_engineer, mktg_engineer — all live)
-- ⏳ Phase 3: Self-improvement + cross-department + scale
+- 🔄 Phase 3A: Brand guidelines, social pod, senior_engineer, token economy, turicks-brain sync (IN PROGRESS — branch: phase3/brand-guidelines-social-pod-token-economy)
+- ⏳ Phase 3B: Social pod graph + batch content pipeline
+- ⏳ Phase 3C: senior_engineer live GitHub integration
+- ⏳ Phase 3D: turicks-brain full sync + web app gateway (Next.js)
+
+## Git Workflow (Non-Negotiable)
+
+### Branch Rules
+- **NEVER commit directly to `main`** — all work happens on feature branches
+- Branch naming: `phase{N}/{short-description}` for phase work, `fix/{issue}` for bugs, `feat/{name}` for standalone features
+- Every branch gets a PR before merging to main — human approves merge
+- Current working branch: `phase3/brand-guidelines-social-pod-token-economy`
+
+### After Completing Work
+1. `pnpm test` must be green
+2. `pnpm brain:sync` — sync docs/decisions to turicks-brain (run after DB is up)
+3. Push branch + open PR via `gh pr create`
+4. senior_engineer agent can create PRs autonomously; **only humans merge**
+
+### Decision Sync Rule
+Every architectural decision, brand update, phase completion, or strategy change must be:
+1. Written to `docs/decisions/` (as ADR) or `docs/study/CASE-STUDY-LOG.md`
+2. Synced to turicks-brain via `pnpm brain:sync`
+3. Committed on a feature branch + merged via PR
 
 ## Key Rules (Non-Negotiable)
 

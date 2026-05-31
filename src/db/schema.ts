@@ -315,6 +315,59 @@ export const deptSignals = pgTable(
   }),
 );
 
+// ── knowledge_entries (turicks-brain — Phase 3) ───────────────────────────────
+
+/**
+ * turicks-brain knowledge store.
+ * Stores brand decisions, ADRs, case study milestones, strategic pillars,
+ * and any structured knowledge produced by agents or humans.
+ *
+ * This is the single source of truth for cross-session context and self-optimization.
+ * All architectural decisions, phase completions, and brand updates write here.
+ *
+ * Sync script: scripts/sync-turicks-brain.ts
+ */
+export const knowledgeEntries = pgTable(
+  "knowledge_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull().default("turicks"),
+
+    /** Category: "adr" | "brand" | "case_study" | "strategic_pillar" | "phase" | "decision" | "agent_output" */
+    entry_type: text("entry_type").notNull(),
+
+    /** Human-readable title for the entry */
+    title: text("title").notNull(),
+
+    /** Full content (markdown or plain text) */
+    content: text("content").notNull(),
+
+    /** Source file or system that generated this entry */
+    source: text("source"),
+
+    /** Semantic tags for retrieval (e.g. ["brand", "voice", "linkedin"]) */
+    tags: jsonb("tags").$type<string[]>().default([]),
+
+    /** Version counter — bump when content is updated, never delete rows */
+    version: integer("version").notNull().default(1),
+
+    /** Whether this is the current active version (old versions set to false) */
+    is_current: boolean("is_current").notNull().default(true),
+
+    /** Free-form metadata (phase number, pillar index, ADR number, etc.) */
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    /** Fast lookup by type + tenant */
+    typeIdx: index("ke_type_idx").on(t.tenant_id, t.entry_type, t.is_current),
+    /** Tag search (JSONB contains) */
+    titleIdx: index("ke_title_idx").on(t.title),
+  }),
+);
+
 // ── Type exports ──────────────────────────────────────────────────────────────
 
 export type HitlApproval = typeof hitlApprovals.$inferSelect;
@@ -337,6 +390,9 @@ export type NewAgentResult = typeof agentResults.$inferInsert;
 
 export type DeptSignal = typeof deptSignals.$inferSelect;
 export type NewDeptSignal = typeof deptSignals.$inferInsert;
+
+export type KnowledgeEntry = typeof knowledgeEntries.$inferSelect;
+export type NewKnowledgeEntry = typeof knowledgeEntries.$inferInsert;
 
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them

@@ -242,6 +242,37 @@ const _agentList: Agent[] = [
     allowed_tools: [...BASE_TOOLS, "write_file", "chromadb_read", "chromadb_write"],
   },
 
+  // ── Social Department (Phase 3 — Turicks social automation) ─────────────
+  {
+    name: "social_linkedin",
+    company_assignment: "turicks",
+    cascade_tier: "md",
+    department: "social",
+    allowed_collections: ["turicks_mem"],
+    allowed_tools: [...BASE_TOOLS, "composio_linkedin_post", "composio_linkedin_reply", "content_scheduler", "chromadb_read"],
+  },
+  {
+    name: "social_instagram",
+    company_assignment: "turicks",
+    cascade_tier: "nano",
+    department: "social",
+    allowed_collections: ["turicks_mem"],
+    allowed_tools: [...BASE_TOOLS, "composio_instagram_post", "media_formatter", "chromadb_read"],
+  },
+  {
+    /**
+     * Senior engineering agent — autonomous GitHub access for founderOS repo.
+     * Creates PRs autonomously; HITL gate required before merge.
+     * Cascade tier ceo: needs architectural reasoning for code review decisions.
+     */
+    name: "senior_engineer",
+    company_assignment: "turicks",
+    cascade_tier: "ceo",
+    department: "engineering",
+    allowed_collections: ["turicks_mem"],
+    allowed_tools: [...BASE_TOOLS, "github_create_pr", "github_push_files", "github_read", "code_review", "run_tests", "chromadb_read"],
+  },
+
   // ── Prospecting Agents (Phase 2 — ProspectingPod subgraph) ────────────────
   {
     /** Resolves raw URL/company name to canonical URL, writes lead_pipeline row */

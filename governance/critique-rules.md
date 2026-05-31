@@ -8,6 +8,13 @@
 4. **Length appropriate** — respect the max_tokens guidance for the tier
 5. **Tone: direct and specific** — one concrete example beats three vague ones
 
+## Brand Voice (all departments)
+- Positioning context: "AI-native agency. 3–5 day delivery. Working code not decks."
+- Never position as a vendor — always as a technical partner
+- Banned phrases (zero tolerance): "excited to share", "game-changer", "synergy", "circle back", "excited to announce", "thrilled to share", "innovative solution", "I wanted to reach out", "Hope this finds you well", "Just following up", "Quick question", "Touch base", "We help companies like yours", "disruptive", "bleeding edge", "leverage", "paradigm shift"
+- Social media outputs must pass mobile-first formatting check (1–3 line paragraphs) before APPROVED
+- Full brand guidelines: `~/.claude/brand-guidelines/TURICKS.md` and `docs/BRAND.md`
+
 ## Sales Department
 Rules for email/DM drafts reviewed by criticNode in sales pod:
 
