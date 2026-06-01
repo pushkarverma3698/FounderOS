@@ -126,7 +126,8 @@ async function routeToOffice(ctx: Context): Promise<void> {
   const config = { configurable: { thread_id: threadIdFor(chatId) } };
 
   log.info({ chatId, task: text.slice(0, 80) }, "Routing to office");
-  await ctx.replyWithChatAction("typing");
+  // Typing indicator is best-effort — don't let it crash the handler
+  ctx.replyWithChatAction("typing").catch(() => {});
   const typing = setInterval(() => {
     ctx.replyWithChatAction("typing").catch(() => {});
   }, 4000);
