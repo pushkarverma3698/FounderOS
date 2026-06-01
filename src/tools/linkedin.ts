@@ -22,6 +22,7 @@
 
 import { childLogger } from "../infra/logger.js";
 import { writeAuditEntry, hasBeenAudited } from "../db/queries.js";
+import { executeComposioAction, getComposioApiKey, getLinkedInConnectionId, getLinkedInUserId } from "../infra/composio.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:linkedin" });
@@ -108,30 +109,24 @@ export const linkedinPostTool: UnifiedTool = {
       return { success: true, data: { skipped: true, reason: "idempotency_key already used" } };
     }
 
-    if (!process.env["COMPOSIO_API_KEY"]) {
+    if (!getComposioApiKey()) {
       log.warn("COMPOSIO_API_KEY not set — LinkedIn post skipped");
       return {
         success: false,
-        error: "COMPOSIO_API_KEY not configured. Set it in .env to enable LinkedIn posting.",
+        error: "COMPOSIO_API_KEY not configured. Add it to .env to enable LinkedIn posting.",
       };
     }
 
     try {
-      // Composio SDK call — lazy import to avoid hard dep when Composio not configured
-      const { OpenAIToolSet } = await import("composio-core");
-      const toolset = new OpenAIToolSet({ apiKey: process.env["COMPOSIO_API_KEY"] });
+      const result = await executeComposioAction(
+        "LINKEDIN_CREATE_SHARE_POST",
+        { text, ...(image_url ? { image_url } : {}), visibility },
+        getLinkedInConnectionId(),
+        getLinkedInUserId(),
+      );
 
-      const result = await toolset.executeAction({
-        action: "LINKEDIN_CREATE_POST",
-        params: {
-          text,
-          image_url,
-          visibility,
-        },
-        entityId: tenant_id,
-      });
-
-      const postId = (result as Record<string, unknown>)["post_id"] as string | undefined;
+      const data = result["data"] as Record<string, unknown> | undefined;
+      const postId = (data?.["id"] ?? result["post_id"]) as string | undefined;
       const postUrl = postId ? `https://www.linkedin.com/feed/update/${postId}` : undefined;
 
       // Audit log — prevents duplicate posts
@@ -176,19 +171,17 @@ export const linkedinAnalyticsTool: UnifiedTool = {
   async execute(input: Record<string, unknown>): Promise<ToolResult> {
     const { post_id, tenant_id } = input as { post_id: string; tenant_id: string };
 
-    if (!process.env["COMPOSIO_API_KEY"]) {
+    if (!getComposioApiKey()) {
       return { success: false, error: "COMPOSIO_API_KEY not configured." };
     }
 
     try {
-      const { OpenAIToolSet } = await import("composio-core");
-      const toolset = new OpenAIToolSet({ apiKey: process.env["COMPOSIO_API_KEY"] });
-
-      const result = await toolset.executeAction({
-        action: "LINKEDIN_GET_POST_ANALYTICS",
-        params: { post_id },
-        entityId: tenant_id,
-      });
+      const result = await executeComposioAction(
+        "LINKEDIN_GET_POST_ANALYTICS",
+        { post_id },
+        getLinkedInConnectionId(),
+        getLinkedInUserId(),
+      );
 
       return { success: true, data: result as unknown as LinkedInAnalyticsResult };
 
@@ -238,19 +231,17 @@ export const linkedinConnectTool: UnifiedTool = {
       return { success: true, data: { skipped: true } };
     }
 
-    if (!process.env["COMPOSIO_API_KEY"]) {
+    if (!getComposioApiKey()) {
       return { success: false, error: "COMPOSIO_API_KEY not configured." };
     }
 
     try {
-      const { OpenAIToolSet } = await import("composio-core");
-      const toolset = new OpenAIToolSet({ apiKey: process.env["COMPOSIO_API_KEY"] });
-
-      const result = await toolset.executeAction({
-        action: "LINKEDIN_SEND_CONNECTION_REQUEST",
-        params: { profile_urn, message },
-        entityId: tenant_id,
-      });
+      const result = await executeComposioAction(
+        "LINKEDIN_SEND_CONNECTION_REQUEST",
+        { profile_urn, message },
+        getLinkedInConnectionId(),
+        getLinkedInUserId(),
+      );
 
       await writeAuditEntry({
         tenant_id,

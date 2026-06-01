@@ -16,6 +16,7 @@
 
 import { childLogger } from "../infra/logger.js";
 import { writeAuditEntry, hasBeenAudited } from "../db/queries.js";
+import { executeComposioAction, getComposioApiKey, getGmailConnectionId, getGmailUserId } from "../infra/composio.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:email" });
@@ -84,30 +85,25 @@ export const emailTool: UnifiedTool = {
       return { success: true, data: { skipped: true, reason: "idempotency_key already used" } };
     }
 
-    if (!process.env["COMPOSIO_API_KEY"]) {
+    if (!getComposioApiKey()) {
       log.warn("COMPOSIO_API_KEY not set — email send skipped");
-      return { success: false, error: "COMPOSIO_API_KEY not configured." };
+      return { success: false, error: "COMPOSIO_API_KEY not configured. Add it to .env." };
     }
 
     try {
-      const { OpenAIToolSet } = await import("composio-core");
-      const toolset = new OpenAIToolSet({ apiKey: process.env["COMPOSIO_API_KEY"] });
+      const args: Record<string, unknown> = { recipient_email: to, subject, body };
+      if (cc) args["cc"] = cc;
+      if (reply_to) args["reply_to"] = reply_to;
 
-      const params: Record<string, unknown> = {
-        recipient_email: to,
-        subject,
-        body,
-      };
-      if (cc) params["cc"] = cc;
-      if (reply_to) params["reply_to"] = reply_to;
+      const result = await executeComposioAction(
+        "GMAIL_SEND_EMAIL",
+        args,
+        getGmailConnectionId(),
+        getGmailUserId(),
+      );
 
-      const result = await toolset.executeAction({
-        action: "GMAIL_SEND_EMAIL",
-        params,
-        entityId: tenant_id,
-      });
-
-      const messageId = (result as Record<string, unknown>)["message_id"] as string | undefined;
+      const data = result["data"] as Record<string, unknown> | undefined;
+      const messageId = (data?.["id"] ?? result["message_id"]) as string | undefined;
 
       // Audit log — prevents duplicate sends
       await writeAuditEntry({
