@@ -1,32 +1,29 @@
 # FounderOS — Claude Instructions
 
 ## What This Is
-FounderOS is a multi-agent AI operating system for two purposes simultaneously:
-- **Operational**: Run Turicks (AI agency) + Naggar Retreat business operations via Telegram
-- **Portfolio**: Demonstrate production-grade TypeScript + LangGraph architecture to hiring managers
+FounderOS is a multi-agent AI operating system for two purposes:
+- **Operational**: Run Turicks (AI agency) + Naggar Retreat via Telegram
+- **Portfolio**: Production-grade TypeScript + LangGraph architecture
 
-Stack: Node.js 22 + TypeScript 5.5 (strict) + LangGraph JS + Vercel AI SDK + grammy + drizzle-orm
+**v2 Stack (current):** Node.js 22 + TypeScript 5.5 strict + LangGraph JS (`createSupervisor` + `createReactAgent`) + grammy + drizzle-orm + Gemini Flash
 
 ## Before Touching Code
-1. Read `docs/architecture.md` — system overview and layer responsibilities
-2. Read `src/agents/state.ts` — ALL state types live here
-3. Read `src/core/registry.ts` — ALL agent + company definitions live here
-4. Read `src/core/config.ts` — model cascade tiers + env validation
+1. Read `src/agents/office.ts` — the entire multi-agent system
+2. Read `src/agents/agent-tools.ts` — tools + HITL interrupt() logic
+3. Read `src/agents/system-prompts.ts` — all 4 prompts
+4. Read `docs/OPERATIONS.md` — how it runs day-to-day
+5. Read `docs/ROADMAP.md` — what's next and what NOT to build
 
 ## Current Phase Status
-- ✅ Phase 1A: Foundation — config, types, DB schema, infra layer (COMPLETE)
-- ✅ Phase 1B: Brain — supervisor, sales pod, critic (COMPLETE)
-- ✅ Phase 1C: Gateway — Telegram bot, HITL callbacks (COMPLETE)
-- ✅ Phase 1D: Tests + evals (COMPLETE)
-- ✅ Phase 2A: Redis + caching layer (COMPLETE)
-- ✅ Phase 2B: ProspectingPod + `/prospect` command (COMPLETE)
-- ✅ Phase 2C: Suppression + quota safety rails, LinkedIn tools, scheduler (COMPLETE)
-- ✅ Phase 2D: Observability + docs update (COMPLETE)
-- ✅ Phase 2E: Engineer agents per department (eng_engineer, sales_engineer, mktg_engineer — all live)
-- 🔄 Phase 3A: Brand guidelines, social pod, senior_engineer, token economy, turicks-brain sync (IN PROGRESS — branch: phase3/brand-guidelines-social-pod-token-economy)
-- ⏳ Phase 3B: Social pod graph + batch content pipeline
-- ⏳ Phase 3C: senior_engineer live GitHub integration
-- ⏳ Phase 3D: turicks-brain full sync + web app gateway (Next.js)
+- ✅ Phases 1–3 (v1): Foundation, pods, gateway, tests, observability (SUPERSEDED by v2)
+- ✅ **v2 Rebuild (2026-06-01)**: Prebuilt supervisor + 3 ReAct departments — LIVE ON MAIN
+  - research [search_web] · comms [email*, linkedin*] · engineering [github_r, github_w*]
+  - (* = HITL-gated via native interrupt())
+  - 10,678 LOC → ~500 LOC · 8 test files · 40 tests green · tsc clean
+- 🔄 **Phase A** (now): Composio setup, daily use, prompt tuning
+- ⏳ **Phase B** (2–4 weeks): Sales + Marketing + Prospecting departments
+- ⏳ **Phase C** (1–2 months): Scheduling, turicks-brain RAG
+- ⏳ **Phase D** (3–6 months): Multi-tenant SaaS
 
 ## Git Workflow (Non-Negotiable)
 
@@ -34,7 +31,7 @@ Stack: Node.js 22 + TypeScript 5.5 (strict) + LangGraph JS + Vercel AI SDK + gra
 - **NEVER commit directly to `main`** — all work happens on feature branches
 - Branch naming: `phase{N}/{short-description}` for phase work, `fix/{issue}` for bugs, `feat/{name}` for standalone features
 - Every branch gets a PR before merging to main — human approves merge
-- Current working branch: `phase3/brand-guidelines-social-pod-token-economy`
+- Current working branch: `main` (v2 merged 2026-06-01)
 
 ### After Completing Work
 1. `pnpm test` must be green
