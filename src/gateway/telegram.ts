@@ -23,6 +23,13 @@ import { env } from "../core/config.js";
 import { logger } from "../infra/logger.js";
 import { getOffice, getPendingApproval } from "../agents/office.js";
 import type { ApprovalRequest } from "../agents/agent-tools.js";
+import {
+  getOutboundTargets,
+  addOutboundTargets,
+  removeOutboundTarget,
+  clearOutboundTargets,
+} from "../outbound/targets.js";
+import { buildBatchPrompt, splitBatch, parseCompanyArgs } from "../outbound/batch.js";
 
 const log = logger.child({ module: "telegram" });
 
@@ -120,8 +127,16 @@ async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promis
 
 // ── Route an incoming message into the office ──────────────────────────────────
 
+/** Route the literal text of the incoming message into the office. */
 async function routeToOffice(ctx: Context): Promise<void> {
-  const text = ctx.message?.text ?? "";
+  await runOfficeText(ctx, ctx.message?.text ?? "");
+}
+
+/**
+ * Run an arbitrary prompt through the office on this chat's thread.
+ * Shared by plain messages and commands (e.g. /outbound builds its own prompt).
+ */
+async function runOfficeText(ctx: Context, text: string): Promise<void> {
   const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
   const config = { configurable: { thread_id: threadIdFor(chatId) } };
 
@@ -196,9 +211,87 @@ export function registerHandlers(bot: Bot): void {
         `• <b>Research</b> — <i>"Research Stripe and summarise what they do"</i>\n` +
         `• <b>Comms</b> — <i>"Email alex@acme.com a short intro"</i> (you approve before it sends)\n` +
         `• <b>Engineering</b> — <i>"Write a TS function to validate emails"</i> / <i>"Open a GitHub issue on …"</i>\n\n` +
+        `🎯 <b>Weekly outbound</b>\n` +
+        `• <code>/target Acme Corp, Beta Ltd</code> — add prospects to this week's list\n` +
+        `• <code>/targets</code> — show the list (<code>/targets clear</code> to empty it)\n` +
+        `• <code>/outbound</code> — ICP-score the list (or <code>/outbound stripe.com</code> ad-hoc)\n` +
+        `  then <i>"draft outreach to &lt;winner&gt;"</i> to send (you approve first)\n\n` +
         `🔒 Anything that leaves the building (email, LinkedIn, GitHub writes) asks for your approval first.`,
       { parse_mode: "HTML" },
     );
+  });
+
+  // ── Weekly outbound rhythm (Phase D) ──────────────────────────────────────
+  // Deterministic list management (no LLM); /outbound routes a batched
+  // prospecting prompt through the office (read-only ICP scoring, no HITL).
+
+  bot.command("target", async (ctx: Context) => {
+    const arg = (ctx.match ?? "").toString().trim();
+    if (!arg) {
+      await ctx.reply("Usage: <code>/target Acme Corp, Beta Ltd</code>", { parse_mode: "HTML" });
+      return;
+    }
+    const { added, targets } = await addOutboundTargets(TENANT, parseCompanyArgs(arg));
+    const msg =
+      added.length > 0
+        ? `🎯 Added: ${safeHtml(added.join(", "))}\nList now has <b>${targets.length}</b> target${targets.length === 1 ? "" : "s"}.`
+        : `Nothing new to add (already on the list). List has <b>${targets.length}</b> target${targets.length === 1 ? "" : "s"}.`;
+    await ctx.reply(msg, { parse_mode: "HTML" });
+  });
+
+  bot.command("targets", async (ctx: Context) => {
+    const arg = (ctx.match ?? "").toString().trim().toLowerCase();
+    if (arg === "clear") {
+      await clearOutboundTargets(TENANT);
+      await ctx.reply("🧹 Outbound target list cleared.");
+      return;
+    }
+    const targets = await getOutboundTargets(TENANT);
+    if (targets.length === 0) {
+      await ctx.reply("No outbound targets yet. Add some: <code>/target Acme Corp</code>", { parse_mode: "HTML" });
+      return;
+    }
+    const list = targets.map((t, i) => `${i + 1}. ${safeHtml(t)}`).join("\n");
+    await ctx.reply(`🎯 <b>Outbound targets (${targets.length})</b>\n${list}\n\nScore them: <code>/outbound</code>`, {
+      parse_mode: "HTML",
+    });
+  });
+
+  bot.command("untarget", async (ctx: Context) => {
+    const arg = (ctx.match ?? "").toString().trim();
+    if (!arg) {
+      await ctx.reply("Usage: <code>/untarget Acme Corp</code>", { parse_mode: "HTML" });
+      return;
+    }
+    const { removed, targets } = await removeOutboundTarget(TENANT, arg);
+    await ctx.reply(
+      removed
+        ? `✅ Removed ${safeHtml(arg)}. ${targets.length} target${targets.length === 1 ? "" : "s"} left.`
+        : `"${safeHtml(arg)}" wasn't on the list.`,
+      { parse_mode: "HTML" },
+    );
+  });
+
+  bot.command("outbound", async (ctx: Context) => {
+    const arg = (ctx.match ?? "").toString().trim();
+    const targets = arg ? parseCompanyArgs(arg) : await getOutboundTargets(TENANT);
+
+    if (targets.length === 0) {
+      await ctx.reply(
+        "No targets to score. Add some with <code>/target Acme Corp</code>, then <code>/outbound</code> — or score ad-hoc: <code>/outbound stripe.com</code>.",
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
+    const { batch, overflow } = splitBatch(targets);
+    if (overflow.length > 0) {
+      await ctx.reply(
+        `🎯 Scoring the first <b>${batch.length}</b> of ${targets.length}. Run <code>/outbound</code> again later for the remaining ${overflow.length}.`,
+        { parse_mode: "HTML" },
+      );
+    }
+    await runOfficeText(ctx, buildBatchPrompt(batch));
   });
 
   bot.on("message:text", async (ctx: Context) => {

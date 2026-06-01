@@ -19,6 +19,7 @@ import cron from "node-cron";
 import { HumanMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
 import { getFounderContext, getPendingInterrupt } from "../db/queries.js";
+import { getOutboundTargets } from "../outbound/targets.js";
 import { sendToChat } from "../gateway/telegram.js";
 import { buildOffice } from "../agents/office.js";
 import { SCHEDULER_BRIEF_PROMPT } from "../agents/system-prompts.js";
@@ -131,6 +132,19 @@ async function sendStaleApprovalReminder(): Promise<void> {
   log.info({ count: stale.length }, "Stale approval reminder sent");
 }
 
+// ── Weekly outbound nudge ─────────────────────────────────────────────────────
+
+/** Monday nudge to run the weekly outbound batch (no LLM — reads founder_context). */
+async function sendOutboundNudge(): Promise<void> {
+  const targets = await getOutboundTargets(TENANT);
+  const msg =
+    targets.length > 0
+      ? `🎯 <b>Outbound — new week</b>\n\nYou have <b>${targets.length}</b> target${targets.length === 1 ? "" : "s"} queued. Send <code>/outbound</code> to ICP-score them, then draft the winners.`
+      : `🎯 <b>Outbound — new week</b>\n\nNo prospects queued yet. Add some as you spot them: <code>/target Acme Corp</code> — then <code>/outbound</code> Monday to score the batch.`;
+  await sendToChat(msg, "HTML");
+  log.info({ targets: targets.length }, "Outbound nudge sent");
+}
+
 // ── Scheduler boot ────────────────────────────────────────────────────────────
 
 export function startScheduler(): void {
@@ -149,5 +163,12 @@ export function startScheduler(): void {
     });
   });
 
-  log.info("Scheduler started — Monday brief (Mon 8am), stale approval check (daily 9am)");
+  // Monday 8:05am — outbound nudge (just after the brief)
+  cron.schedule("5 8 * * 1", () => {
+    sendOutboundNudge().catch((err) => {
+      log.error({ err: (err as Error).message }, "Outbound nudge failed");
+    });
+  });
+
+  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), stale approval check (daily 9am)");
 }
