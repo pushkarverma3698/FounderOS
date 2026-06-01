@@ -14,16 +14,28 @@ FounderOS is a multi-agent AI operating system for two purposes:
 4. Read `docs/OPERATIONS.md` — how it runs day-to-day
 5. Read `docs/ROADMAP.md` — what's next and what NOT to build
 
+## Content & Asset Delivery Rules
+
+**Always present content inline — never reference .md files only.**
+When listing copy, prompts, product descriptions, or any user-facing content exists in .md files:
+1. Print the content directly in the response (copy-paste ready)
+2. Organise it with clear headers and visual separators
+3. Never say "see file X" or "open X.md" as the only instruction — the user may not be able to open it
+
+This applies to: Gumroad listings, LinkedIn posts, email templates, brand guidelines, product descriptions, prompt packs.
+
+---
+
 ## Current Phase Status
 - ✅ Phases 1–3 (v1): Foundation, pods, gateway, tests, observability (SUPERSEDED by v2)
 - ✅ **v2 Rebuild (2026-06-01)**: Prebuilt supervisor + 3 ReAct departments — LIVE ON MAIN
   - research [search_web] · comms [email*, linkedin*] · engineering [github_r, github_w*]
   - (* = HITL-gated via native interrupt())
   - 10,678 LOC → ~500 LOC · 8 test files · 40 tests green · tsc clean
-- 🔄 **Phase A** (now): Composio setup, daily use, prompt tuning
-- ⏳ **Phase B** (2–4 weeks): Sales + Marketing + Prospecting departments
-- ⏳ **Phase C** (1–2 months): Scheduling, turicks-brain RAG
-- ⏳ **Phase D** (3–6 months): Multi-tenant SaaS
+- ✅ **Phase B (2026-06-01)**: Marketing + Sales + Prospecting departments — MERGED (PR #5)
+- 🔄 **Phase C (2026-06-01)**: Context memory + knowledge search + proactive scheduler — code complete, 47 tests green (branch `feat/phase-c-memory-scheduler`). Followups: populate turicks-brain (`brain:sync`), live Telegram verify. See `docs/phases/PHASE-C-INTELLIGENCE.md`.
+- 🔄 **Phase D (now)**: Revenue Flywheel — Gumroad live + LinkedIn launch sequence + cinematic-web done-for-you tier + weekly outbound rhythm
+- ⏳ **Phase E (gated, 4–6 wks reliable use)**: SaaS pivot — web gateway, multi-tenancy, billing (FounderOS SaaS *or* Cinematic Cloud — pick one)
 
 ## Git Workflow (Non-Negotiable)
 
