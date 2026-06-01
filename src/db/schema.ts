@@ -17,6 +17,9 @@
  *  - agent_results    Agent self-improvement data + few-shot examples
  *  - dept_signals     Durable cross-department signals
  *
+ * Tables (Phase C):
+ *  - founder_context  Live business state — active clients, deals, priorities (1 row / tenant)
+ *
  * Multi-tenant: tenant_id on every table — zero schema changes to add tenant 3+.
  */
 
@@ -393,6 +396,31 @@ export type NewDeptSignal = typeof deptSignals.$inferInsert;
 
 export type KnowledgeEntry = typeof knowledgeEntries.$inferSelect;
 export type NewKnowledgeEntry = typeof knowledgeEntries.$inferInsert;
+
+// ── founder_context ───────────────────────────────────────────────────────────
+
+/**
+ * Live business state for the founder — one row per tenant.
+ * Agents read this at session start to understand current priorities.
+ * The supervisor writes to it when the founder updates context.
+ *
+ * Data shape (enforced by convention, not DB constraint):
+ *   active_clients:     string[]  — current paying clients
+ *   open_deals:         string[]  — prospects in progress
+ *   current_priorities: string[]  — this week's focus areas (reset every Monday)
+ *   next_actions:       string[]  — pending follow-ups
+ *   notes:              string    — freeform scratchpad
+ *   last_updated:       string    — ISO timestamp of last write
+ */
+export const founderContext = pgTable("founder_context", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenant_id: text("tenant_id").notNull().unique(),
+  data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+  updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export type FounderContext = typeof founderContext.$inferSelect;
+export type NewFounderContext = typeof founderContext.$inferInsert;
 
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them

@@ -7,7 +7,7 @@
  * Pattern: verbs + domain — createInterrupt, resolveInterrupt, logCost, checkIdempotency
  */
 
-import { and, desc, eq, gt, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, lt, or, sql } from "drizzle-orm";
 import { getDb } from "./client.js";
 import {
   actionLog,
@@ -17,6 +17,8 @@ import {
   aiCallCosts,
   doNotContact,
   agentResults,
+  founderContext,
+  knowledgeEntries,
   type NewActionLog,
   type NewDeptSignal,
   type NewHitlApproval,
@@ -365,4 +367,98 @@ export async function consumePendingEvents(tenantId: string, toDept: string) {
   }
 
   return rows;
+}
+
+// ── Founder Context (founder_context) ─────────────────────────────────────────
+
+/** Read the founder's current business context (returns {} if not yet set). */
+export async function getFounderContext(tenantId: string): Promise<Record<string, unknown>> {
+  const db = getDb();
+  const [row] = await db
+    .select({ data: founderContext.data })
+    .from(founderContext)
+    .where(eq(founderContext.tenant_id, tenantId))
+    .limit(1);
+  return row?.data ?? {};
+}
+
+/**
+ * Merge updates into the founder's context (upsert).
+ * Preserves existing keys unless overwritten.
+ */
+export async function upsertFounderContext(
+  tenantId: string,
+  updates: Record<string, unknown>,
+): Promise<void> {
+  const db = getDb();
+  const current = await getFounderContext(tenantId);
+  const merged = { ...current, ...updates, last_updated: new Date().toISOString() };
+  await db
+    .insert(founderContext)
+    .values({ tenant_id: tenantId, data: merged })
+    .onConflictDoUpdate({
+      target: founderContext.tenant_id,
+      set: { data: merged, updated_at: new Date() },
+    });
+}
+
+// ── Knowledge Entries (knowledge_entries / turicks-brain) ─────────────────────
+
+/**
+ * Full-text keyword search over turicks-brain knowledge entries.
+ * Searches title + content case-insensitively.
+ * Returns top N current entries ordered by recency.
+ */
+export async function searchKnowledgeEntries(
+  tenantId: string,
+  query: string,
+  limit = 5,
+): Promise<Array<{ title: string; content: string; entry_type: string; tags: string[] | null }>> {
+  const db = getDb();
+  const pattern = `%${query}%`;
+  return db
+    .select({
+      title: knowledgeEntries.title,
+      content: knowledgeEntries.content,
+      entry_type: knowledgeEntries.entry_type,
+      tags: knowledgeEntries.tags,
+    })
+    .from(knowledgeEntries)
+    .where(
+      and(
+        eq(knowledgeEntries.tenant_id, tenantId),
+        eq(knowledgeEntries.is_current, true),
+        or(
+          sql`${knowledgeEntries.title} ILIKE ${pattern}`,
+          sql`${knowledgeEntries.content} ILIKE ${pattern}`,
+        ),
+      ),
+    )
+    .orderBy(desc(knowledgeEntries.updated_at))
+    .limit(limit);
+}
+
+/** Fetch all current entries of a specific type (e.g. "adr", "brand", "case_study"). */
+export async function getKnowledgeByType(
+  tenantId: string,
+  entryType: string,
+  limit = 10,
+): Promise<Array<{ title: string; content: string; tags: string[] | null }>> {
+  const db = getDb();
+  return db
+    .select({
+      title: knowledgeEntries.title,
+      content: knowledgeEntries.content,
+      tags: knowledgeEntries.tags,
+    })
+    .from(knowledgeEntries)
+    .where(
+      and(
+        eq(knowledgeEntries.tenant_id, tenantId),
+        eq(knowledgeEntries.entry_type, entryType),
+        eq(knowledgeEntries.is_current, true),
+      ),
+    )
+    .orderBy(desc(knowledgeEntries.updated_at))
+    .limit(limit);
 }
