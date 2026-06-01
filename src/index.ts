@@ -17,6 +17,7 @@ import { closeDatabaseConnections } from "./db/client.js";
 import { getOffice } from "./agents/office.js";
 import { startBot, stopBot } from "./gateway/telegram.js";
 import { startHealthServer } from "./infra/health.js";
+import { startScheduler } from "./infra/scheduler.js";
 import { logger } from "./infra/logger.js";
 import type { Server } from "node:http";
 
@@ -39,6 +40,9 @@ async function main(): Promise<void> {
 
   // 4. Telegram bot (long polling — runs in background).
   await startBot();
+
+  // 5. Proactive scheduler (Monday brief + stale approval reminders).
+  startScheduler();
 
   log.info("FounderOS running 🚀");
 }

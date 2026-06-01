@@ -28,6 +28,8 @@ import {
   githubRead,
   githubWrite,
 } from "./agent-tools.js";
+import { readContext, updateContext } from "../tools/context.js";
+import { searchKnowledge } from "../tools/knowledge.js";
 import {
   SUPERVISOR_PROMPT,
   RESEARCH_PROMPT,
@@ -36,6 +38,7 @@ import {
   MARKETING_PROMPT,
   SALES_PROMPT,
   PROSPECTING_PROMPT,
+  SCHEDULER_BRIEF_PROMPT,
 } from "./system-prompts.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { ApprovalRequest } from "./agent-tools.js";
@@ -53,9 +56,13 @@ let _office: CompiledStateGraph<any, any, any> | undefined;
 export function buildOffice(checkpointer: BaseCheckpointSaver) {
   const llm = getModel();
 
+  // ── Phase C tools (available across departments) ──────────────────────────
+  // search_knowledge: turicks-brain keyword search (no LLM cost)
+  // read_context / update_context: supervisor-only business state
+
   const research = createReactAgent({
     llm,
-    tools: [searchWeb],
+    tools: [searchWeb, searchKnowledge],
     name: "research",
     prompt: RESEARCH_PROMPT,
   });
@@ -79,7 +86,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   /** Marketing: LinkedIn content in Turicks brand voice. */
   const marketing = createReactAgent({
     llm,
-    tools: [searchWeb, linkedinPost],
+    tools: [searchWeb, linkedinPost, searchKnowledge],
     name: "marketing",
     prompt: MARKETING_PROMPT,
   });
@@ -87,7 +94,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   /** Sales: researches prospects + writes cold outreach emails (HITL-gated). */
   const sales = createReactAgent({
     llm,
-    tools: [searchWeb, sendEmail],
+    tools: [searchWeb, sendEmail, searchKnowledge],
     name: "sales",
     prompt: SALES_PROMPT,
   });
@@ -95,7 +102,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   /** Prospecting: ICP scoring — research-only, no write tools. */
   const prospecting = createReactAgent({
     llm,
-    tools: [searchWeb],
+    tools: [searchWeb, searchKnowledge],
     name: "prospecting",
     prompt: PROSPECTING_PROMPT,
   });
@@ -104,6 +111,8 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     agents: [research, comms, engineering, marketing, sales, prospecting],
     llm,
     prompt: SUPERVISOR_PROMPT,
+    // Supervisor-level tools: context read/write (not delegated to departments)
+    tools: [readContext, updateContext],
     // Gemini (and most non-OpenAI providers) can't accept the agent name as a
     // message `name` attribute — the google-genai adapter maps name→author and
     // throws "Unknown author: supervisor". "inline" embeds the name in the
