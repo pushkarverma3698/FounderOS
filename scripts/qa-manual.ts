@@ -60,7 +60,7 @@ for (const key of ["ANTHROPIC_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "OPENROU
 
 // ── Imports ───────────────────────────────────────────────────────────────────
 
-import chalk from "chalk";
+// chalk import removed — using ANSI fallback (c) defined below
 
 // ── Types & helpers ───────────────────────────────────────────────────────────
 
@@ -925,9 +925,9 @@ function runReadinessAssessment(services: Record<string, boolean>): void {
     severity: "critical" | "important" | "nice-to-have";
   }> = [
     // Infrastructure
-    { category: "Infrastructure",   item: "Ollama (local LLM)",           ready: services.ollama,   notes: "✅ Required — qwen2.5:7b running",                                 severity: "critical"       },
-    { category: "Infrastructure",   item: "PostgreSQL",                    ready: services.postgres, notes: "❌ Down — LangGraph checkpoints disabled, agent state not persisted", severity: "critical"       },
-    { category: "Infrastructure",   item: "Redis",                         ready: services.redis,    notes: services.redis ? "✅ Up" : "⚠️ Down — quota/cache disabled (fail-open)", severity: "important"  },
+    { category: "Infrastructure",   item: "Ollama (local LLM)",           ready: services.ollama ?? false,   notes: "✅ Required — qwen2.5:7b running",                                 severity: "critical"       },
+    { category: "Infrastructure",   item: "PostgreSQL",                    ready: services.postgres ?? false, notes: "❌ Down — LangGraph checkpoints disabled, agent state not persisted", severity: "critical"       },
+    { category: "Infrastructure",   item: "Redis",                         ready: services.redis ?? false,    notes: services.redis ? "✅ Up" : "⚠️ Down — quota/cache disabled (fail-open)", severity: "important"  },
     { category: "Infrastructure",   item: "Process supervisor (pm2/systemd)", ready: false,           notes: "⏳ Not configured — process will die on crash",                     severity: "critical"       },
     { category: "Infrastructure",   item: "Telegram bot token",            ready: Boolean(process.env["BOT_TOKEN"] && process.env["BOT_TOKEN"] !== "placeholder:qa-test"),
                                     notes: process.env["BOT_TOKEN"] && process.env["BOT_TOKEN"] !== "placeholder:qa-test" ? "✅ Set" : "⏳ Placeholder only",                     severity: "critical"       },
@@ -965,9 +965,9 @@ function runReadinessAssessment(services: Record<string, boolean>): void {
                                     notes: "All agents log with module context",                                                                                                    severity: "important"      },
     { category: "Observability",    item: "LangSmith tracing",             ready: Boolean(process.env["LANGCHAIN_API_KEY"]),
                                     notes: process.env["LANGCHAIN_API_KEY"] ? "✅ API key set" : "⏳ No API key — traces not sent",                                                severity: "nice-to-have"   },
-    { category: "Observability",    item: "Cost tracking per call",        ready: services.postgres,
+    { category: "Observability",    item: "Cost tracking per call",        ready: services.postgres ?? false,
                                     notes: services.postgres ? "✅ Writing to ai_call_costs" : "⚠️ DB down — costs not tracked",                                                   severity: "nice-to-have"   },
-    { category: "Observability",    item: "Self-improvement loop",         ready: services.postgres,
+    { category: "Observability",    item: "Self-improvement loop",         ready: services.postgres ?? false,
                                     notes: services.postgres ? "✅ Writing to agent_results" : "⚠️ DB down — outcomes not stored",                                                severity: "nice-to-have"   },
 
     // Production gaps
@@ -982,9 +982,9 @@ function runReadinessAssessment(services: Record<string, boolean>): void {
   ];
 
   const byCategory: Record<string, typeof checks> = {};
-  for (const c of checks) {
-    if (!byCategory[c.category]) byCategory[c.category] = [];
-    byCategory[c.category].push(c);
+  for (const chk of checks) {
+    if (!byCategory[chk.category]) byCategory[chk.category] = [];
+    (byCategory[chk.category] as typeof checks).push(chk);
   }
 
   for (const [category, items] of Object.entries(byCategory)) {

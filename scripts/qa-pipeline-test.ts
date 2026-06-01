@@ -62,6 +62,8 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let callCascade: (tier: string, messages: any[], opts?: any) => Promise<any>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+let getGraph: () => Promise<any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _resolveDepartment: (agent: string) => string | null;
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
@@ -368,6 +370,7 @@ async function suiteSupervior(): Promise<void> {
         auto_approve: false,
         errors: [],
         outreach_tier: null,
+        departmentSignals: [],
       });
 
       const actualDept = result.department ?? "null";
@@ -628,7 +631,12 @@ async function main(): Promise<void> {
   console.log("⏳ Loading FounderOS modules...");
   try {
     const llmMod = await import("../src/infra/llm.js");
-    callCascade = llmMod.callCascade;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+    callCascade = llmMod.callCascade as any;
+
+    const graphMod = await import("../src/agents/graph.js");
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any
+    getGraph = graphMod.getGraph as any;
 
     const supervisorMod = await import("../src/agents/supervisor.js");
     _resolveDepartment = supervisorMod._resolveDepartment;
