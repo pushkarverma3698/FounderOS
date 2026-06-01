@@ -8,18 +8,18 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "dev": "node --env-file=.env --import tsx/esm --watch src/index.ts",
+    "start": "node --env-file=.env dist/index.js",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio",
-    "setup": "tsx scripts/setup-db.ts",
-    "inspect": "tsx scripts/inspect-thread.ts",
-    "brain:sync": "tsx scripts/sync-turicks-brain.ts",
+    "db:migrate": "node --env-file=.env node_modules/drizzle-kit/bin.cjs migrate",
+    "db:studio": "node --env-file=.env node_modules/drizzle-kit/bin.cjs studio",
+    "setup": "node --env-file=.env --import tsx/esm scripts/setup-db.ts",
+    "inspect": "node --env-file=.env --import tsx/esm scripts/inspect-thread.ts",
+    "brain:sync": "node --env-file=.env --import tsx/esm scripts/sync-turicks-brain.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
