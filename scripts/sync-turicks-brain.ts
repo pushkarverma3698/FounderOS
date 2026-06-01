@@ -112,16 +112,21 @@ function collectDocs(rootDir: string): DocEntry[] {
     }
   }
 
-  // ── Case Study Log ──────────────────────────────────────────────────────────
-  const caseStudy = join(root, "docs/study/CASE-STUDY-LOG.md");
-  if (existsSync(caseStudy)) {
-    docs.push({
-      entry_type: "case_study",
-      title: "Turicks / FounderOS Case Study Log",
-      content: readFile(caseStudy),
-      source: "docs/study/CASE-STUDY-LOG.md",
-      tags: ["case-study", "milestones", "metrics", "timeline"],
-    });
+  // ── Study docs (case study, strategy, research) — all .md ────────────────────
+  const studyDir = join(root, "docs/study");
+  if (existsSync(studyDir)) {
+    for (const f of readdirSync(studyDir).filter((f) => f.endsWith(".md"))) {
+      const isCaseStudy = /CASE-STUDY/i.test(f);
+      docs.push({
+        entry_type: isCaseStudy ? "case_study" : "strategy",
+        title: isCaseStudy ? "Turicks / FounderOS Case Study Log" : titleFromFilename(f),
+        content: readFile(join(studyDir, f)),
+        source: `docs/study/${f}`,
+        tags: isCaseStudy
+          ? ["case-study", "milestones", "metrics", "timeline"]
+          : ["strategy", "study", "research"],
+      });
+    }
   }
 
   // ── Architecture Doc ────────────────────────────────────────────────────────

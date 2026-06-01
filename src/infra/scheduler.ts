@@ -392,9 +392,20 @@ function collectBrainDocs(): BrainDoc[] {
     }
   }
 
-  // Case study
-  const cs = join(root, "docs/study/CASE-STUDY-LOG.md");
-  if (existsSync(cs)) docs.push({ entry_type: "case_study", title: "Turicks / FounderOS Case Study Log", content: readSafe(cs), source: "docs/study/CASE-STUDY-LOG.md", tags: ["case-study", "milestones"] });
+  // Study docs (case study, strategy, research) — all .md
+  const studyDir = join(root, "docs/study");
+  if (existsSync(studyDir)) {
+    for (const f of readdirSync(studyDir).filter((f) => f.endsWith(".md"))) {
+      const isCaseStudy = /CASE-STUDY/i.test(f);
+      docs.push({
+        entry_type: isCaseStudy ? "case_study" : "strategy",
+        title: isCaseStudy ? "Turicks / FounderOS Case Study Log" : titleFromFile(f),
+        content: readSafe(join(studyDir, f)),
+        source: `docs/study/${f}`,
+        tags: isCaseStudy ? ["case-study", "milestones"] : ["strategy", "study", "research"],
+      });
+    }
+  }
 
   return docs;
 }
