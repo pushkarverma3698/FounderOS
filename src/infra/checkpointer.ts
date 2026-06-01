@@ -29,16 +29,38 @@ let _saver: PostgresSaver | undefined;
 export async function getCheckpointer(): Promise<PostgresSaver> {
   if (_saver) return _saver;
 
-  const pool = getPgPool();
-  _saver = PostgresSaver.fromConnString(
-    // Pass the pool via a fake connection string override — PostgresSaver
-    // accepts an existing Pool instance when constructed directly.
-    // We use fromConnString here for compatibility; the pool is passed separately
-    // in the actual LangGraph config below.
-    process.env["DATABASE_URL"]!,
-  );
+  const dbUrl = process.env["DATABASE_URL"];
+  if (!dbUrl) {
+    throw new Error(
+      "DATABASE_URL is not set.\n" +
+      "Fix: add DATABASE_URL=postgresql://turicks:turicks@localhost:5432/turicks to .env"
+    );
+  }
 
-  await _saver.setup();
+  // Detect common misconfiguration: postgres user doesn't exist in the Docker container.
+  // The container only has the 'turicks' user.
+  if (dbUrl.includes("://postgres:") || dbUrl.startsWith("postgresql://postgres@")) {
+    throw new Error(
+      "DATABASE_URL uses 'postgres' user which does not exist in the FounderOS container.\n" +
+      "Fix: change DATABASE_URL in .env to:\n" +
+      "  DATABASE_URL=postgresql://turicks:turicks@localhost:5432/turicks"
+    );
+  }
+
+  void getPgPool(); // ensure pool is warmed — not used by PostgresSaver directly
+  _saver = PostgresSaver.fromConnString(dbUrl);
+
+  try {
+    await _saver.setup();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `LangGraph checkpointer setup failed: ${msg}\n` +
+      "Check that PostgreSQL is running and DATABASE_URL credentials are correct.\n" +
+      "Expected: DATABASE_URL=postgresql://turicks:turicks@localhost:5432/turicks"
+    );
+  }
+
   log.info("LangGraph checkpointer ready");
   return _saver;
 }

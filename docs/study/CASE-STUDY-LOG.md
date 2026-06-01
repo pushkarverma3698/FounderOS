@@ -6,6 +6,26 @@
 
 ---
 
+## 2026-06-01 — One-Week Sprint: All 4 Gumroad Products Assembled + turicks-web Updated
+
+**Milestone**: Sprint complete — 4 revenue-ready digital products packaged + live website updated.
+
+**Products shipped (ready for Gumroad listing):**
+- `cinematic-web` Cinematic Premium Pack ($29) — 3 exclusive presets + AI build prompts + launch guide
+- Prospecting & ICP Scoring Pack ($19) — 4 prompts, ICP rubric, n8n + LangGraph workflow guide
+- Brand-Voice Critique Kit ($14) — TS + Python validators (zero deps) + LLM critique prompt + channel rules
+- LangGraph Multi-Agent Starter ($34) — sanitized FounderOS skeleton, 13 tests, all architecture decisions documented
+
+**turicks-web**: Digital Products section added to `/products` page — 4 cards with pricing, buy buttons (placeholder URLs, replace with live Gumroad after listing).
+
+**ADR-009**: LinkedIn automation deferred — ban risk analysis complete, criteria defined for re-evaluation.
+
+**FounderOS**: `gumroad-packs/` dir gitignored; 3 individual zips ready at project root.
+
+**Next step (yours):** Create 4 Gumroad products, upload the 4 zip files, set prices, replace `turicks.com` placeholder URLs in `app/products/page.tsx` with real Gumroad links.
+
+---
+
 ## 2026-06-01 — One-Week Ship Sprint Kicked Off (agency → SaaS start)
 
 **Milestone**: First revenue motion decided + foundation bug fixed.

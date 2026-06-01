@@ -1,20 +1,32 @@
 /**
- * FounderOS — Telegram Bot Gateway
- * ==================================
- * grammy-based bot with:
- *  - Topic-group routing (Boardroom / Turicks / Social → CEO supervisor)
- *  - HITL callback handler (inline keyboard approve/reject)
- *  - Safe HTML escaping (prevent injection in bot replies)
- *  - Immediate ACK on every callback_query (no spinner left on buttons)
+ * FounderOS v2 — Telegram Gateway
+ * ================================
+ * Drives the office (supervisor + department sub-agents) from Telegram.
+ *
+ * Flow:
+ *   message → office.invoke({ messages }) on a per-chat thread
+ *     → if the office paused for approval (a write tool called interrupt())
+ *          → send an Approve/Reject card; STOP
+ *          → on button tap → office.invoke(Command({ resume })) on the same thread
+ *              → chained approvals are re-rendered; otherwise the final answer is sent
+ *     → else → send the office's final reply
+ *
+ * Thread id = `turicks:{chatId}` — stable per chat so:
+ *   - conversation memory persists across messages (checkpointer), and
+ *   - the approval button can resume the exact paused run by rebuilding the id.
  */
 
 import { Bot, InlineKeyboard, type Context } from "grammy";
+import { Command } from "@langchain/langgraph";
+import { HumanMessage } from "@langchain/core/messages";
 import { env } from "../core/config.js";
 import { logger } from "../infra/logger.js";
-import { resolveHITL, formatHITLMessage } from "./hitl.js";
-import { getGraph } from "../agents/graph.js";
+import { getOffice, getPendingApproval } from "../agents/office.js";
+import type { ApprovalRequest } from "../agents/agent-tools.js";
 
 const log = logger.child({ module: "telegram" });
+
+const TENANT = process.env["FOUNDER_TENANT"] ?? "turicks";
 
 // ── Safe HTML ─────────────────────────────────────────────────────────────────
 
@@ -27,363 +39,208 @@ export function safeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-// ── Bot Instance ──────────────────────────────────────────────────────────────
+// ── Bot singleton ──────────────────────────────────────────────────────────────
 
 let _bot: Bot | undefined;
 
 export function getBot(): Bot {
-  if (!_bot) {
-    _bot = new Bot(env.TELEGRAM_BOT_TOKEN);
-  }
+  if (!_bot) _bot = new Bot(env.TELEGRAM_BOT_TOKEN);
   return _bot;
 }
 
-// ── Topic → Tenant mapping ────────────────────────────────────────────────────
-
-/**
- * Resolve which company tenant owns a given Telegram topic.
- * Falls back to "turicks" for unknown/boardroom topics.
- * All topics (Boardroom, Turicks, Social, Think Tank) route to turicks —
- * the CEO supervisor picks the department from there.
- */
-function topicToTenant(_threadTopicId: number | undefined): string {
-  return "turicks";
+function threadIdFor(chatId: number | string): string {
+  return `${TENANT}:${chatId}`;
 }
 
-// ── Route message to FounderGraph ─────────────────────────────────────────────
+// ── Result extraction ──────────────────────────────────────────────────────────
 
-/**
- * Invoke the FounderGraph with the incoming message as the task.
- * Generates a fresh thread_id per message (stateless for now).
- * Replies with the graph's result or an error message.
- */
-async function routeToGraph(ctx: Context): Promise<void> {
-  const task = ctx.message?.text ?? "";
-  const userId = String(ctx.from?.id ?? "unknown");
-  const threadTopicId = ctx.message?.message_thread_id;
-  const tenantId = topicToTenant(threadTopicId);
-  const threadId = `${tenantId}:${userId}:${crypto.randomUUID()}`;
+interface OfficeMessage {
+  content: unknown;
+  _getType?: () => string;
+  tool_calls?: unknown[];
+}
 
-  log.info({ userId, tenantId, threadId, task: task.slice(0, 80) }, "Routing to FounderGraph");
-
-  // Send typing indicator and refresh every 4s (graph.invoke can take 60–120s)
-  await ctx.replyWithChatAction("typing");
-  const typingInterval = setInterval(() => {
-    ctx.replyWithChatAction("typing").catch(() => {/* ignore — non-fatal */});
-  }, 4000);
-
-  try {
-    const graph = await getGraph();
-    if (!graph) throw new Error("Graph not initialized");
-
-    const result = await graph.invoke(
-      { task, tenant_id: tenantId },
-      { configurable: { thread_id: threadId } },
-    );
-
-    clearInterval(typingInterval);
-
-    const raw = result.result ? String(result.result) : null;
-
-    // Detect if result is JSON (pod output) vs plain text (direct_answer / CEO chat)
-    let output: string;
-    if (!raw) {
-      output = "✅ Task processed (no output)";
-    } else {
-      const isJson = raw.trimStart().startsWith("{") || raw.trimStart().startsWith("[");
-      output = isJson
-        ? `✅ <b>Done</b>\n\n<pre>${safeHtml(raw.slice(0, 3000))}</pre>`
-        : `💬 ${safeHtml(raw.slice(0, 3000))}`;
+/** Pull the office's final human-readable reply (last AI message with text). */
+function finalReply(res: { messages?: OfficeMessage[] }): string {
+  const msgs = res.messages ?? [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]!;
+    const type = m._getType?.() ?? "";
+    const text = typeof m.content === "string" ? m.content : "";
+    if (type === "ai" && text.trim() && !(m.tool_calls && m.tool_calls.length > 0)) {
+      return text.trim();
     }
-
-    await ctx.reply(output, {
-      parse_mode: "HTML",
-      ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
-    });
-  } catch (err) {
-    clearInterval(typingInterval);
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error({ err: msg, threadId }, "Graph execution failed");
-    await ctx.reply(
-      `❌ <b>Error</b>\n\n<code>${safeHtml(msg.slice(0, 500))}</code>`,
-      {
-        parse_mode: "HTML",
-        ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
-      },
-    );
   }
+  return "✅ Done.";
 }
 
-// ── HITL Message Sender ───────────────────────────────────────────────────────
-
 /**
- * Send an approval-request message with Approve / Reject inline keyboard.
- * Called from hitl.ts via the injected sendFn.
- * Returns the Telegram message_id (stored in interrupt_registry for later edits).
+ * Scan the message trail for tool results that indicate a failure. Tools return
+ * errors as their result string (they don't throw), so these never hit the
+ * gateway's catch — we surface them explicitly so the founder always sees them.
  */
-export async function sendHITLMessage(
-  topicId: number,
-  interruptId: string,
-  summary: string,
-  draft: string,
-  agent: string,
-): Promise<number> {
-  const bot = getBot();
-  const text = formatHITLMessage(summary, draft, interruptId, agent);
+function collectToolErrors(res: { messages?: OfficeMessage[] }): string[] {
+  const errs: string[] = [];
+  for (const m of res.messages ?? []) {
+    if ((m._getType?.() ?? "") !== "tool") continue;
+    const c = typeof m.content === "string" ? m.content : "";
+    if (/\b(fail|error|not set|not configured|cannot find|blocked|unauthor|invalid|denied)\b/i.test(c)) {
+      errs.push(c.trim().slice(0, 300));
+    }
+  }
+  return errs;
+}
 
+/** Send the office's result to Telegram — final reply plus any tool failures. */
+async function sendResult(ctx: Context, res: { messages?: OfficeMessage[] }, chatId: number | string): Promise<void> {
+  const reply = finalReply(res);
+  const errs = collectToolErrors(res);
+
+  let out = `💬 ${safeHtml(reply.slice(0, 3500))}`;
+  if (errs.length > 0) {
+    out += `\n\n⚠️ <b>Tool issue${errs.length > 1 ? "s" : ""}:</b>\n<code>${safeHtml(errs.join("\n").slice(0, 800))}</code>`;
+  }
+  await ctx.reply(out, { parse_mode: "HTML" });
+  log.info({ chatId, replyPreview: reply.slice(0, 80), toolErrors: errs.length }, "Replied to Telegram");
+}
+
+// ── Approval card ──────────────────────────────────────────────────────────────
+
+async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promise<void> {
   const keyboard = new InlineKeyboard()
-    .text("✅ Approve", `approve:${interruptId}`)
-    .text("❌ Reject", `reject:${interruptId}`);
+    .text("✅ Approve", "approve")
+    .text("❌ Reject", "reject");
 
-  const msg = await bot.api.sendMessage(env.TELEGRAM_CHAT_ID, text, {
-    parse_mode: "HTML",
-    ...(topicId ? { message_thread_id: topicId } : {}),
-    reply_markup: keyboard,
-  });
-
-  log.info({ interrupt_id: interruptId, message_id: msg.message_id, agent }, "HITL message sent");
-  return msg.message_id;
+  const preview = approval.preview ? `\n\n<i>${safeHtml(approval.preview.slice(0, 1500))}</i>` : "";
+  await ctx.reply(
+    `${safeHtml(approval.title)}\n${safeHtml(approval.summary)}${preview}`,
+    { parse_mode: "HTML", reply_markup: keyboard },
+  );
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
+// ── Route an incoming message into the office ──────────────────────────────────
 
-// ── /prospect command handler ─────────────────────────────────────────────────
-
-/**
- * Handle /prospect <url|company-name> command.
- * Routes straight to the prospecting department — bypasses supervisor classification.
- * The prospecting pod will disambiguate, research, and score the lead.
- *
- * Example: /prospect https://acme.com
- *          /prospect Acme Corp
- */
-async function handleProspectCommand(ctx: Context): Promise<void> {
+async function routeToOffice(ctx: Context): Promise<void> {
   const text = ctx.message?.text ?? "";
-  const threadTopicId = ctx.message?.message_thread_id;
-  const userId = String(ctx.from?.id ?? "unknown");
-  const tenantId = topicToTenant(threadTopicId);
+  const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
+  const config = { configurable: { thread_id: threadIdFor(chatId) } };
 
-  // Extract the raw input after "/prospect "
-  const rawInput = text.replace(/^\/prospect\s*/i, "").trim();
-  if (!rawInput) {
-    await ctx.reply(
-      "❓ Usage: <code>/prospect &lt;url or company name&gt;</code>\n\nExample: <code>/prospect acme.com</code>",
-      { parse_mode: "HTML" },
-    );
-    return;
-  }
-
-  const threadId = `${tenantId}:${userId}:${crypto.randomUUID()}`;
-  log.info({ userId, tenantId, threadId, rawInput }, "Prospect command received");
-
-  await ctx.reply(
-    `🔍 Researching <b>${safeHtml(rawInput)}</b>…\n<i>This takes ~30s. I'll score it against our ICP and let you know if it's worth pursuing.</i>`,
-    {
-      parse_mode: "HTML",
-      ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
-    },
-  );
-
-  // Keep typing indicator alive during long graph execution
-  const prospectTypingInterval = setInterval(() => {
-    ctx.replyWithChatAction("typing").catch(() => {/* ignore */});
+  log.info({ chatId, task: text.slice(0, 80) }, "Routing to office");
+  await ctx.replyWithChatAction("typing");
+  const typing = setInterval(() => {
+    ctx.replyWithChatAction("typing").catch(() => {});
   }, 4000);
 
   try {
-    const graph = await getGraph();
-    if (!graph) throw new Error("Graph not initialized");
+    const office = await getOffice();
+    const res = (await office.invoke(
+      { messages: [new HumanMessage(text)] },
+      config,
+    )) as { messages?: OfficeMessage[] };
+    clearInterval(typing);
 
-    const result = await graph.invoke(
-      {
-        task: rawInput,
-        tenant_id: tenantId,
-        department: "prospecting",
-      },
-      { configurable: { thread_id: threadId } },
-    );
-
-    clearInterval(prospectTypingInterval);
-
-    // Parse the JSON summary written by prospectingNode
-    let summary: Record<string, unknown> = {};
-    try {
-      summary = JSON.parse(result.result ?? "{}") as Record<string, unknown>;
-    } catch {
-      // fallback — show raw
+    const approval = await getPendingApproval(office, config);
+    if (approval) {
+      await sendApprovalCard(ctx, approval);
+      return;
     }
-
-    const tier = summary.outreach_tier as string | null ?? null;
-    const score = typeof summary.icp_score === "number"
-      ? `${Math.round((summary.icp_score as number) * 100)}%`
-      : "—";
-    const rationale = summary.icp_rationale as string ?? "";
-    const company = (summary.company_name as string | null) ?? rawInput;
-
-    let output: string;
-    if (tier) {
-      const tierLabel = tier === "ceo" ? "🏆 CEO-tier" : "👔 MD-tier";
-      output =
-        `✅ <b>${safeHtml(company)}</b> — <b>Qualified</b> ${tierLabel}\n` +
-        `ICP score: <b>${score}</b>\n\n` +
-        `<i>${safeHtml(rationale.slice(0, 400))}</i>\n\n` +
-        `📬 Routing to Sales pod for outreach draft…`;
-    } else {
-      output =
-        `❌ <b>${safeHtml(company)}</b> — <b>Disqualified</b>\n` +
-        `ICP score: <b>${score}</b>\n\n` +
-        `<i>${safeHtml(rationale.slice(0, 400))}</i>`;
-    }
-
-    await ctx.reply(output, {
-      parse_mode: "HTML",
-      ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
-    });
+    await sendResult(ctx, res, chatId);
   } catch (err) {
-    clearInterval(prospectTypingInterval);
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error({ err: msg, rawInput, threadId }, "Prospect command failed");
-    await ctx.reply(
-      `❌ <b>Prospecting failed</b>\n\n<code>${safeHtml(msg.slice(0, 500))}</code>`,
-      {
-        parse_mode: "HTML",
-        ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
-      },
-    );
+    clearInterval(typing);
+    const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    log.error({ err: msg, chatId }, "Office run failed");
+    await ctx.reply(`❌ <b>Error</b>\n<code>${safeHtml(msg.slice(0, 1200))}</code>`, {
+      parse_mode: "HTML",
+    });
   }
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
+// ── Resume a paused run after an approval decision ─────────────────────────────
 
-/**
- * Register all bot handlers.
- * Called once at startup before bot.start().
- */
+async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Promise<void> {
+  const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
+  const config = { configurable: { thread_id: threadIdFor(chatId) } };
+
+  try {
+    const office = await getOffice();
+    const res = (await office.invoke(
+      new Command({ resume: decision }),
+      config,
+    )) as { messages?: OfficeMessage[] };
+
+    // A run may pause again (e.g. research → then email approval).
+    const next = await getPendingApproval(office, config);
+    if (next) {
+      await sendApprovalCard(ctx, next);
+      return;
+    }
+    await sendResult(ctx, res, chatId);
+  } catch (err) {
+    const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    log.error({ err: msg, chatId }, "Office resume failed");
+    await ctx.reply(`❌ <b>Resume failed</b>\n<code>${safeHtml(msg.slice(0, 1200))}</code>`, {
+      parse_mode: "HTML",
+    });
+  }
+}
+
+// ── Handlers ───────────────────────────────────────────────────────────────────
+
 export function registerHandlers(bot: Bot): void {
-  // ── /start command ────────────────────────────────────────────────────────
-
   bot.command("start", async (ctx: Context) => {
     const name = ctx.from?.first_name ? ` ${ctx.from.first_name}` : "";
     await ctx.reply(
-      `👋 <b>FounderOS${name}</b> — your AI operating system is live.\n\n` +
-      `<b>Commands:</b>\n` +
-      `• <code>/prospect &lt;url or company&gt;</code> — ICP score + sales routing\n` +
-      `• <code>/task &lt;description&gt;</code> — any task → correct department\n\n` +
-      `<b>Or just message me:</b>\n` +
-      `• <i>"Draft a LinkedIn post about AI agents"</i>\n` +
-      `• <i>"Research Stripe and write a cold email"</i>\n` +
-      `• <i>"Build a webhook handler for Stripe"</i>\n\n` +
-      `All tasks go through the CEO supervisor → routed to Sales, Engineering, Marketing, Social, or Prospecting pods.\n\n` +
-      `💡 <i>Tip: HITL gates protect every outbound action — you approve before anything is sent.</i>`,
-      {
-        parse_mode: "HTML",
-        ...(ctx.message?.message_thread_id ? { message_thread_id: ctx.message.message_thread_id } : {}),
-      },
+      `👋 <b>FounderOS${name}</b> — your AI chief of staff is live.\n\n` +
+        `Just tell me what you need. I route it to the right department:\n` +
+        `• <b>Research</b> — <i>"Research Stripe and summarise what they do"</i>\n` +
+        `• <b>Comms</b> — <i>"Email alex@acme.com a short intro"</i> (you approve before it sends)\n` +
+        `• <b>Engineering</b> — <i>"Write a TS function to validate emails"</i> / <i>"Open a GitHub issue on …"</i>\n\n` +
+        `🔒 Anything that leaves the building (email, LinkedIn, GitHub writes) asks for your approval first.`,
+      { parse_mode: "HTML" },
     );
   });
 
-  // ── /prospect command ────────────────────────────────────────────────────
-
-  bot.command("prospect", async (ctx: Context) => {
-    await handleProspectCommand(ctx);
-  });
-
-  // ── Incoming messages ────────────────────────────────────────────────────
-
   bot.on("message:text", async (ctx: Context) => {
-    const threadTopicId = ctx.message?.message_thread_id;
     const text = ctx.message?.text ?? "";
-
-    // Don't double-handle /prospect commands (grammy routes commands first)
-    if (text.startsWith("/prospect")) return;
-
-    log.info({ from: ctx.from?.id, topic: threadTopicId, text: text.slice(0, 80) }, "Message received");
-    await routeToGraph(ctx);
+    if (text.startsWith("/")) return; // ignore other slash commands for now
+    log.info({ from: ctx.from?.id, text: text.slice(0, 80) }, "Message received");
+    await routeToOffice(ctx);
   });
-
-  // ── HITL callbacks ───────────────────────────────────────────────────────
 
   bot.on("callback_query:data", async (ctx: Context) => {
     const data = ctx.callbackQuery?.data ?? "";
-
-    if (data.startsWith("approve:") || data.startsWith("reject:")) {
-      const colonIdx = data.indexOf(":");
-      const action = data.slice(0, colonIdx);
-      const interruptId = data.slice(colonIdx + 1);
-      const decision = action === "approve" ? "approved" : "rejected";
-      const emoji = decision === "approved" ? "✅" : "❌";
-
-      // 1. Immediate ACK — removes the spinner on the user's phone
-      await ctx.answerCallbackQuery({ text: `${emoji} ${decision}` });
-
-      // 2. Remove inline keyboard right away (prevents double-tap race)
-      try {
-        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
-      } catch {
-        // Non-fatal — message may already have been edited
-      }
-
-      // 3. Resume the suspended graph
-      const resolved = await resolveHITL(interruptId, decision);
-
-      // 4. Update message with final status
-      const statusLine = resolved
-        ? `\n\n${emoji} <b>${decision === "approved" ? "Approved" : "Rejected"}</b> — graph resumed`
-        : `\n\n⚠️ <b>Already resolved or expired</b>`;
-
-      try {
-        const original = ctx.callbackQuery?.message?.text ?? "";
-        await ctx.editMessageText(
-          safeHtml(original) + statusLine,
-          { parse_mode: "HTML" },
-        );
-      } catch {
-        // Non-fatal — best-effort update
-      }
-
+    if (data !== "approve" && data !== "reject") {
+      await ctx.answerCallbackQuery({ text: "Unknown action" });
       return;
     }
-
-    // Unknown callback — ack to clear spinner
-    await ctx.answerCallbackQuery({ text: "Unknown action" });
+    const decision = data === "approve" ? "approved" : "rejected";
+    await ctx.answerCallbackQuery({ text: decision === "approved" ? "✅ Approved" : "❌ Rejected" });
+    try {
+      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
+    } catch {
+      /* best-effort */
+    }
+    await resumeOffice(ctx, decision);
   });
-
-  // ── Error handler ────────────────────────────────────────────────────────
 
   bot.catch((err) => {
     log.error({ err: err.message }, "Unhandled bot error");
   });
 }
 
-// ── Send helpers ──────────────────────────────────────────────────────────────
+// ── Plain sender (used by schedulers/agents to push a message) ─────────────────
 
-/**
- * Send a plain message to a specific Telegram topic.
- * Used by agents to report results outside the normal request/reply flow.
- */
-export async function sendToTopic(
-  topicId: number,
-  text: string,
-  parseMode: "HTML" | "Markdown" = "HTML",
-): Promise<void> {
+export async function sendToChat(text: string, parseMode: "HTML" | "Markdown" = "HTML"): Promise<void> {
   const bot = getBot();
-  try {
-    await bot.api.sendMessage(env.TELEGRAM_CHAT_ID, text, {
-      message_thread_id: topicId || undefined,
-      parse_mode: parseMode,
-    });
-  } catch (err) {
-    log.error({ topicId, err }, "Failed to send Telegram message");
-    throw err;
-  }
+  await bot.api.sendMessage(env.TELEGRAM_CHAT_ID, text, { parse_mode: parseMode });
 }
 
-// ── Lifecycle ─────────────────────────────────────────────────────────────────
+// ── Lifecycle ───────────────────────────────────────────────────────────────────
 
 export async function startBot(): Promise<void> {
   const bot = getBot();
   registerHandlers(bot);
   log.info("Telegram bot starting (long polling)…");
-  // Fire-and-forget — runs until process exits or bot.stop() is called
   bot.start().catch((err) => {
     log.error({ err: (err as Error).message }, "Bot polling crashed");
     process.exit(1);

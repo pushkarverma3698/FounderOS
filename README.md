@@ -1,286 +1,239 @@
 # FounderOS
 
-**A multi-agent AI operating system that runs a one-man company — and documents every decision for engineering interviews.**
+**Your AI operating system — message it in Telegram, it does the real work.**
 
-Built with: Node.js 22 · TypeScript 5.5 (strict) · LangGraph JS · Native fetch (no SDK bloat) · grammy · drizzle-orm · PostgreSQL · Redis
+FounderOS is a multi-agent system that runs your business via Telegram. A prebuilt LangGraph supervisor routes each request to the right department; specialists use real tools to take real actions; nothing leaves without your approval.
 
-> **Status:** Production-grade. 128 tests across unit, integration, and live suites. Running against Ollama locally and OpenRouter free tier in the cloud.
+Built by [Pushkar Verma](https://turicks.com) to run Turicks (AI agency) and Naggar Retreat.
 
 ---
 
-## What It Does
-
-A founder types a task in Telegram. FounderOS handles the rest:
-
-1. **Supervisor** (CEO tier) classifies the task and routes to the right department — Sales, Engineering, Marketing, or Prospecting
-2. **Specialist agents** generate the output (cold email, technical plan, LinkedIn post)
-3. **Critic** (different model family — prevents sycophancy) gates quality against department rules
-4. **Human approval** via Telegram inline keyboard — nothing leaves the system without sign-off
-5. **Finalize** executes the action, writes to audit log (idempotency guard), and records the outcome for self-improvement
-
-Every state transition is checkpointed to PostgreSQL. A crash mid-workflow resumes from the last saved point.
+## What it does
 
 ```
-Telegram message
-      │
-      ▼
-┌─────────────────┐
-│   Supervisor    │  classifies task type
-└────────┬────────┘
-    ┌────┴─────┬──────────┬──────────┐
-    ▼          ▼          ▼          ▼
-ProspectingPod  SalesPod  EngPod  MktgPod
-    │
-    ▼
-ICP Score
- < 0.4 → disqualified
-0.4–0.7 → MD tier outreach
- ≥ 0.7 → CEO tier outreach
+You:  "Research what Linear does and send them an intro email"
+
+Bot:  [research agent searches web → returns summary]
+      [comms agent drafts the email]
+
+      📧 Send email to contact@linear.app?
+      Subject: Turicks × Linear — AI workflow automation
+      [full email preview]
+
+      ✅ Approve    ❌ Reject
+
+You:  ✅ Approve
+
+Bot:  ✅ Email sent to contact@linear.app
 ```
+
+Every write action — emails, LinkedIn posts, GitHub writes — pauses and shows you the content first. You approve or reject. No surprises, nothing sent by accident.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      GATEWAY LAYER                          │
-│   grammy Telegram bot — /prospect, HITL inline keyboards    │
-│   Topic routing (Sales/Eng/Mktg/Boardroom)                  │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────┐
-│                       BRAIN LAYER                           │
-│   LangGraph StateGraph — Supervisor + 4 Department Pods     │
-│   Generator → Critic loop (cross-model, no sycophancy)      │
-│   interrupt() for durable HITL · PostgreSQL checkpointing   │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────┐
-│                      LLM EXECUTION                          │
-│   callCascade(): native fetch — no SDK layer                │
-│   Tier-based fallback: CEO→MD→nano→code→local               │
-│   Key-skip guard: zero HTTP calls when provider key absent  │
-│   opossum circuit breakers · bottleneck rate limiters       │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-┌──────────────┬──────────────▼──────────────┬────────────────┐
-│  TOOLS LAYER │     CACHING LAYER (Redis)    │  MEMORY LAYER  │
-│  Firecrawl   │  research: TTL 7d            │  PostgreSQL 16 │
-│  Gmail/Drive │  quota: INCR + auto-expire   │  7 tables      │
-│  LinkedIn    │  llmCache: tier-based TTL    │  Checkpoints   │
-│  GitHub      │                              │  task_outcomes │
-└──────────────┴──────────────────────────────┴────────────────┘
+Telegram message
+   ↓
+Supervisor (Chief of Staff — Gemini Flash)
+   ├── research      → search_web                         (read-only, instant)
+   ├── comms         → send_email*, linkedin_post*        (approval required)
+   └── engineering   → github_read, github_write*         (approval required)
+         (* write tools call interrupt() — graph pauses, you approve, tool runs)
 ```
 
----
-
-## Key Design Decisions
-
-| Problem | Solution | Where |
-|---------|----------|-------|
-| Agent hallucination / quality drift | Cross-model critic: generator (Gemini family) vs critic (Claude family) | [ADR-003](docs/decisions/003-critic-pattern.md) |
-| HITL crash recovery | `interrupt_registry` DB row written BEFORE calling LangGraph `interrupt()` | [ADR-004](docs/decisions/004-why-telegram-hitl.md) |
-| Wasted LLM calls on missing keys | `hasProviderKey()` skips providers before circuit breaker check — zero 401s | `src/infra/llm.ts` |
-| Duplicate external actions | `audit_log` idempotency key with `UNIQUE` constraint — checked before every send | `src/db/queries.ts` |
-| LLM outage resilience | Provider cascade + opossum circuit breakers (50% error threshold → 10s cooldown) | `src/infra/llm.ts` |
-| Cold email cost per lead | `llm_costs.lead_id` FK — every token billed to the lead that caused it | `src/db/schema.ts` |
-| Repeated research on same domain | Redis `research:{md5(url)}` TTL 7d — Firecrawl hit once per week per domain | `src/infra/redis.ts` |
-| Agent self-improvement | `task_outcomes` table + few-shot injection into system prompts at execution time | `src/db/queries.ts` |
-| Cross-department coordination | `departmentSignals` in LangGraph state (ephemeral) + `dept_signals` table (durable) | `src/agents/state.ts` |
-| SDK abstraction overhead | Native fetch `callAnthropic()` / `callGoogle()` / `callOpenAICompat()` — 30 MB lighter | `src/infra/llm.ts` |
+Built with:
+- **LangGraph JS** — `createSupervisor` + `createReactAgent` prebuilts
+- **Native HITL** — `interrupt()` + `Command({ resume })`, crash-safe via Postgres checkpointer
+- **Gemini 2.5 Flash** — single model for all agents (fast, cheap, strong tool-calling)
+- **Node 22 + TypeScript strict** — ES modules throughout
 
 ---
 
-## Tech Stack
-
-| Concern | Package | Why |
-|---------|---------|-----|
-| Agent orchestration | `@langchain/langgraph@^0.2` | Durable `interrupt()`, PostgreSQL checkpointing, `Command({ goto })` routing |
-| LLM execution | Native `fetch` (no SDK) | Direct REST — eliminated 8× `as unknown as BaseChatModel` casts, ~30 MB deps |
-| Telegram bot | `grammy@^1` | TypeScript-first, inline keyboards, excellent DX |
-| ORM | `drizzle-orm@^0.38` | Schema IS TypeScript types — zero codegen |
-| Circuit breaker | `opossum@^8` | Per-model fault isolation |
-| Rate limiting | `bottleneck@^2` | Separate cloud (5 concurrent) vs local (1 concurrent, 500ms) limiters |
-| Redis | `ioredis@^5` | Research cache, send quotas, LLM prompt cache |
-| Logging | `pino@^9` | Structured JSON + PII redaction |
-| Observability | `langsmith@^0.2` | Per-node trace, token counts, latency |
-| Validation | `zod@^3` | Type-safe env vars + external API responses |
-| Web search | Firecrawl REST API | Fail-open, 5 search results, Redis-cached |
-| Testing | `vitest@^3` | 128 tests across unit / integration / live suites |
-
----
-
-## Model Cascade
-
-| Tier | Use case | Primary | Fallback 1 | Fallback 2 |
-|------|----------|---------|------------|------------|
-| CEO | Supervisor routing, critical decisions | claude-sonnet-4-5 | gemini-2.5-pro | llama-70b (free) |
-| deep_research | Market research, ICP rationale | deepseek-r1 (free) | gemini-flash | — |
-| md | Draft generation, analysis | gemini-2.0-flash | claude-haiku-4-5 | llama-70b (free) |
-| code | Technical plans, code generation | LM Studio (local) | qwen3-coder (free) | gemini-flash |
-| nano | Quick classifications, summaries | gemini-flash-lite | claude-haiku-4-5 | — |
-| local | Offline-first tasks | LM Studio (Ollama) | — | — |
-| critic | Quality gating | claude-haiku-4-5 | llama-70b (free) | — |
-
-**Key-skip guard:** if `ANTHROPIC_API_KEY` is absent, all `anthropic` entries are skipped before any HTTP call — cascade jumps straight to the next provider. No wasted 401s.
-
----
-
-## Agents
-
-All definitions in `src/core/registry.ts`. Each declares cascade tier, allowed tools, and memory collections.
-
-**Turicks (AI Agency):**
-`supervisor` · `lead_intel` · `sales_engineer` · `bdr` · `critic` · `eng_engineer` · `senior_dev` · `vibe_coder` · `qa_tester` · `mktg_engineer` · `seo_specialist` · `web_designer` · `content_writer` · `social_handler` · `ops_agent`
-
-**ProspectingPod:**
-`disambiguate` · `prospecting_researcher` · `icp_scorer`
-
-**ICP Scoring bands:**
-- `< 0.4` → disqualified (daily digest, no outreach)
-- `0.4–0.7` → MD tier outreach (Gemini Flash)
-- `≥ 0.7` → CEO tier outreach (Claude Sonnet)
-
----
-
-## Self-Improvement Loop
-
-After every completed task, all pod finalize nodes:
-1. Write to `task_outcomes` table: agent_id, outcome, decision_summary, tools_used, cost_usd, latency_ms
-2. At next execution: top 3 successful + 1 failed outcome injected as few-shot examples into system prompt
-
-This means the BDR agent learns from past cold emails that got approved vs rejected. The ICP scorer learns from which companies converted. No manual prompt tweaking.
-
----
-
-## Running Locally
-
-**Prerequisites:** Node.js 22, pnpm, Docker, Ollama (optional for local LLM)
+## Quick Start
 
 ```bash
-# 1. Clone and install
-git clone https://github.com/pushkarverma3698/FounderOS.git
-cd founderos
+# 1. Install
 pnpm install
 
 # 2. Configure
 cp .env.example .env
-# Minimum: TELEGRAM_BOT_TOKEN + OPENROUTER_API_KEY (free tier works)
+# Fill in: DATABASE_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+#          GOOGLE_GENERATIVE_AI_API_KEY, COMPOSIO_API_KEY, FIRECRAWL_API_KEY
 
-# 3. Start infrastructure
-docker compose -f docker/docker-compose.yml up postgres redis -d
+# 3. Start Postgres
+docker compose up -d postgres
 
-# 4. Run migrations
-npx tsx scripts/setup-db.ts
+# 4. Set up DB
+node --env-file=.env --import tsx/esm scripts/setup-db.ts
 
-# 5. Start
-npx tsx src/index.ts
+# 5. Run
+pnpm dev
+
+# 6. Test
+pnpm test
 ```
 
-**Run tests:**
+---
+
+## Environment Variables
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `DATABASE_URL` | ✅ | Postgres — state + audit log (`postgresql://turicks:turicks@localhost:5432/turicks`) |
+| `TELEGRAM_BOT_TOKEN` | ✅ | Bot polling |
+| `TELEGRAM_CHAT_ID` | ✅ | Your Telegram chat/DM ID |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | ✅ | Gemini Flash — all agents use this |
+| `COMPOSIO_API_KEY` | Email + LinkedIn | Composio action execution |
+| `FIRECRAWL_API_KEY` | Web search | Firecrawl search API |
+| `GITHUB_TOKEN` | GitHub writes | Classic PAT with `repo` scope |
+| `AGENT_MODEL` | Optional | Override model (default: `gemini-2.5-flash`) |
+| `FOUNDER_TENANT` | Optional | Tenant name (default: `turicks`) |
+| `LANGCHAIN_API_KEY` | Optional | LangSmith tracing |
+| `LANGCHAIN_TRACING_V2` | Optional | Set `true` to enable LangSmith |
+
+---
+
+## Commands
+
 ```bash
-# Fast — unit + integration (no Ollama needed, ~3s)
-npx vitest run --exclude "tests/e2e/**" --exclude "tests/live/**"
-
-# Live — full one-man-company test (needs Ollama, ~13 min)
-pnpm test tests/live/one-man-company.test.ts --reporter=verbose
+pnpm dev          # Start with hot reload (tsx watch)
+pnpm test         # Run full test suite (210 tests)
+pnpm lint         # TypeScript type check (npx tsc --noEmit)
+pnpm build        # Compile to dist/
+pnpm db:generate  # Generate Drizzle migrations after schema changes
+pnpm db:migrate   # Apply migrations to DB
 ```
-
-**[Full setup guide →](docs/local-dev.md)**
 
 ---
 
 ## Project Structure
 
 ```
-founderos/
-├── src/
-│   ├── core/          # registry.ts + prompts.ts + config.ts — single source of truth
-│   ├── agents/        # LangGraph StateGraph: supervisor, critic, 4 department pods
-│   │   └── pods/      # sales.ts, engineering.ts, marketing.ts, prospecting.ts
-│   ├── gateway/       # grammy Telegram bot + HITL interrupt lifecycle
-│   ├── tools/         # Firecrawl search, LinkedIn, email, GitHub
-│   ├── db/            # drizzle schema (7 tables) + client + named queries
-│   ├── infra/         # LLM cascade, Redis, scheduler (cron), checkpointer, logger
-│   └── index.ts       # entry point: compile graph once, start bot, init scheduler
-├── tests/
-│   ├── unit/          # 60+ tests — pure logic, cascade, state reducers
-│   ├── integration/   # 6 tests — full pod flows with mocked LLM
-│   └── live/          # 10 tests — real LLM calls (Ollama), 128 assertions
-├── docs/
-│   ├── architecture.md
-│   ├── decisions/     # 5 ADRs explaining each major choice
-│   └── diagrams/      # Mermaid system + pipeline flow diagrams
-├── governance/
-│   └── critique-rules.md   # per-department quality criteria (loaded at runtime)
-├── study/             # interview prep: LangGraph internals, TS patterns, STAR stories
-└── scripts/           # setup-db.ts, inspect-thread.ts, qa-pipeline-test.ts
+src/
+  index.ts                   Boot: telemetry → office → health → Telegram
+  agents/
+    office.ts                The entire multi-agent system (80 lines)
+    agent-tools.ts           LangChain tools with HITL interrupt() gates
+    model.ts                 Single Gemini Flash model factory
+    system-prompts.ts        One prompt per role (4 prompts total)
+  tools/
+    web-search.ts            Firecrawl search (read-only, no approval)
+    email.ts                 Composio Gmail (approval-gated)
+    github.ts                Octokit — read instant, write approval-gated
+    linkedin.ts              Composio LinkedIn (approval-gated)
+  gateway/
+    telegram.ts              grammy bot: route → approval cards → resume
+  db/
+    schema.ts                action_log, do_not_contact + LangGraph tables
+    queries.ts               Named query functions (no raw SQL elsewhere)
+  infra/
+    checkpointer.ts          Postgres saver singleton (crash-safe HITL)
+    telemetry.ts             LangSmith tracing init
+    health.ts                /health + /metrics endpoints
+    logger.ts                pino structured logging
+
+docs/
+  study/                     Learn how multi-agent systems work (start here ↓)
+    01-what-is-multi-agent-orchestration.md
+    02-langgraph-patterns.md
+    03-v1-to-v2-migration.md
+    04-how-founderos-works.md
+  decisions/                 Architecture Decision Records
+  ROADMAP.md                 Future departments, SaaS pivot plan
+  OPERATIONS.md              Day-to-day usage guide
+
+tests/
+  integration/
+    office-hitl.test.ts      Key test: approve→send, reject→no-send
+  unit/                      Component unit tests
 ```
 
 ---
 
-## Build Status
+## How Approvals Work
 
-| Suite | Tests | Status |
-|-------|-------|--------|
-| Unit (pure logic, cascade, state) | 60+ | ✅ Green |
-| Integration (full pod flows, mocked LLM) | 6 | ✅ Green |
-| Live (real Ollama, one-man-company) | 10 tests, 128 assertions | ✅ Green |
-| TypeScript strict | 0 errors | ✅ Clean |
+```
+1. Agent decides to call a write tool (send_email, github_write, linkedin_post)
+2. Tool calls interrupt({ title, preview, args }) → graph PAUSES
+3. State saved to Postgres — survives a process restart
+4. Telegram shows Approve/Reject card with full preview
+5. Tap Approve → graph.invoke(Command({ resume: "approved" }))
+6. Same tool continues from interrupt() → executes the real action
+7. Tap Reject → tool returns rejection message, nothing sent
+```
 
-**Live test results (Ollama `qwen2.5:7b`, single run):**
-
-| Test | Latency | Result |
-|------|---------|--------|
-| Supervisor routing (4 tasks) | 3–14s each | ✅ All correct |
-| ProspectingPod — Notion.so research + ICP | 48s | ✅ Scored + routed |
-| SalesPod — cold email for Linear.app VP Eng | 76s | ✅ APPROVED on first critique |
-| EngineeringPod — AI cost dashboard spec | 56s | ✅ 9-step plan, code stub |
-| MarketingPod — LinkedIn post on AI ROI | 84s | ✅ Draft + strategy brief |
-| Cross-dept — Prospecting → Sales handoff | 157s | ✅ State transferred correctly |
-| Company capacity — 4 parallel department tasks | 303s | ✅ All completed |
+The key guarantee: the tool runs after approval — not a separate finalize step. "Approve → nothing happens" is structurally impossible.
 
 ---
 
-## Phase Status
+## Adding a Department
 
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 1A — Foundation | Config, types, DB schema, infra, Docker | ✅ Complete |
-| 1B — Brain | Supervisor, sales pod, critic | ✅ Complete |
-| 1C — Gateway | Telegram bot, HITL interrupt | ✅ Complete |
-| 1D — Quality | Unit + integration tests | ✅ Complete |
-| 2A — Redis layer | Research cache, quota counters, prompt cache | ✅ Complete |
-| 2B — ProspectingPod | ICP scoring, banded routing | ✅ Complete |
-| 2C — Safety rails | Suppression check, quota check, LinkedIn tools, scheduler | ✅ Complete |
-| 2D — Observability | Mermaid diagrams, docs update | ✅ Complete |
-| 2E — Engineer agents | `{dept}_engineer` nodes, autonomous dept decisions | ✅ Complete |
-| 3A — Two-phase LLM | `runPlanner` (cloud) + `runToolExecutor` (local) | ✅ Complete |
-| 3B — Self-improvement | `task_outcomes` table, few-shot injection | ✅ Complete |
-| 3C — Cross-dept signals | Ephemeral + durable signal channels | ✅ Complete |
-| 3D — Brand update | Turicks positioning in prompts | ✅ Complete |
+Three files, ~15 lines:
+
+**1. `src/agents/agent-tools.ts`** — add tools with `tool()` + `interrupt()` for write actions
+
+**2. `src/agents/system-prompts.ts`** — add `export const SALES_PROMPT = \`...\``
+
+**3. `src/agents/office.ts`** — four lines:
+```typescript
+const sales = createReactAgent({ llm, tools: [searchWeb, sendEmail], name: "sales", prompt: SALES_PROMPT });
+// add `sales` to agents: [..., sales] in createSupervisor
+```
+
+**4.** Update `SUPERVISOR_PROMPT` to mention the new department.
 
 ---
 
-## For Hiring Managers
+## Key Design Decisions
 
-This is a real operational system, not a portfolio toy. It runs actual business tasks for Turicks (AI agency). Every design decision is documented because the process of making + justifying those decisions is what the project is actually demonstrating.
+| Decision | Why |
+|----------|-----|
+| Single Gemini Flash model | One model with good tool-calling > 8 tiers with routing overhead |
+| `createSupervisor` prebuilt | LangGraph ships this — no custom routing needed |
+| `interrupt()` for HITL | Native, crash-safe, no extra DB table needed |
+| Tools do the sending | Approval gates the tool — not a separate finalize node |
+| One thread per chat | Conversation memory persists; approvals go to the right run |
+| `includeAgentName: "inline"` | Gemini rejects `name` attribute on messages; inline embeds it in content |
 
-**Navigate by concern:**
+Full history: `docs/study/03-v1-to-v2-migration.md` — how we went from 10,678 LOC that couldn't send an email to ~500 LOC that can.
 
-| "Tell me about..." | Start here |
-|---|---|
-| System design | `docs/architecture.md` → `src/agents/graph.ts` |
-| LangGraph patterns | `study/02-langgraph-patterns.md` → `src/agents/pods/sales.ts` |
-| TypeScript patterns | `study/03-typescript-advanced.md` → `src/core/config.ts` |
-| Database design | `docs/decisions/002-why-drizzle.md` → `src/db/schema.ts` |
-| AI/agent patterns | `study/05-ai-systems.md` → `src/agents/critic.ts` |
-| Why these choices | `docs/decisions/` — 5 ADRs with explicit trade-off analysis |
-| Behavioral stories | `study/06-behavioral-stories.md` — STAR format, specific to this build |
+---
 
-**The patterns I'd highlight in an interview:**
-- **Critic cross-model**: generator uses Gemini, critic uses Claude. Different provider families = genuine adversarial critique, not the model agreeing with itself. This is in production code, not theoretical.
-- **Native fetch over SDK**: removed 4 LangChain provider packages in favour of direct REST calls. Eliminated ~30 MB of transitive deps and 8 type-cast workarounds. The trade-off: more lines in `llm.ts`, but those lines are readable and I own them.
-- **HITL durability**: write to `interrupt_registry` (Postgres) BEFORE calling LangGraph's `interrupt()`. If the process crashes in the 5ms gap, the DB row survives. On restart, the sweeper cron picks it up. This is crash-safe human-in-the-loop.
-- **Self-improvement without RAG**: `task_outcomes` table feeds few-shot examples into system prompts at execution time. No vector DB needed at <10k rows. SQL + Drizzle is faster to reason about and explain in interviews than ChromaDB.
+## Tests
+
+```bash
+pnpm test                                                          # all 210 tests
+npx vitest run tests/integration/office-hitl.test.ts               # core HITL proof
+npx vitest run tests/live/                                         # real API round-trips
+```
+
+---
+
+## Stack
+
+- **Runtime:** Node 22, TypeScript 5.5 strict, ES modules
+- **AI:** LangGraph JS 0.2.74, langgraph-supervisor 0.0.20, Google GenAI (Gemini), LangChain
+- **Bot:** grammy (Telegram long-polling)
+- **DB:** Drizzle ORM + PostgreSQL (via Docker in dev)
+- **Tools:** Composio (email + LinkedIn), Firecrawl (search), Octokit (GitHub)
+- **Infra:** pino logging, LangSmith tracing, Hono health server
+- **Tests:** Vitest
+
+---
+
+## Learn More
+
+| What | Where |
+|------|-------|
+| What is multi-agent orchestration? | `docs/study/01-what-is-multi-agent-orchestration.md` |
+| LangGraph patterns used here | `docs/study/02-langgraph-patterns.md` |
+| Why we rebuilt from v1 | `docs/study/03-v1-to-v2-migration.md` |
+| How to read the codebase | `docs/study/04-how-founderos-works.md` |
+| Future plans | `docs/ROADMAP.md` |
+| Daily usage | `docs/OPERATIONS.md` |
+
+---
+
+*Turicks — AI that actually does things.*

@@ -90,7 +90,7 @@ export const emailTool: UnifiedTool = {
     }
 
     try {
-      const { OpenAIToolSet } = await import("@composio-core/js");
+      const { OpenAIToolSet } = await import("composio-core");
       const toolset = new OpenAIToolSet({ apiKey: process.env["COMPOSIO_API_KEY"] });
 
       const params: Record<string, unknown> = {
