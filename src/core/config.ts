@@ -224,7 +224,7 @@ export const MODEL_COST_PER_1M: Record<string, { input: number; output: number }
 // ── Circuit Breaker Config (passed to opossum) ────────────────────────────────
 
 export const CIRCUIT_BREAKER_OPTIONS = {
-  timeout: 30_000,        // 30s per LLM call
+  timeout: 45_000,        // 45s per LLM call — Ollama/local models can take 30–40s
   errorThresholdPercentage: 50,
   resetTimeout: 300_000,  // 5-minute cooldown
   volumeThreshold: 3,     // Trip after 3 failures
