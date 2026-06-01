@@ -6,6 +6,21 @@
 
 ---
 
+## 2026-06-01 — One-Week Ship Sprint Kicked Off (agency → SaaS start)
+
+**Milestone**: First revenue motion decided + foundation bug fixed.
+
+**Decisions** (ADR-008): Ship `cinematic-web` premium presets + FounderOS automation packs via Gumroad this week. Defer LinkedIn automation (ban risk → ADR-009 research). Defer full Cinematic Cloud SaaS (12-wk phase). Stabilize lightly.
+
+**Done**:
+- Architecture review completed (verdict: stabilize; spine solid; breadth not depth is the issue).
+- Fixed tenant-leaking LLM cache key (`KEYS.llmCache` → `llm:{tenant}:{hash}`), TDD, +6 isolation tests (186 total green).
+- Strategy doc + ADR-008 written; synced to turicks-brain.
+
+**Method note**: brainstorming + architecture review + deep-research (analyst synthesis; live web re-run queued post session-reset).
+
+---
+
 ## 2026-06-01 — Brand Guidelines + Strategic Vision Established
 
 **Milestone**: First formal brand guidelines document created for Turicks.
