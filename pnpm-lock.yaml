@@ -15,7 +15,7 @@ importers:
         specifier: ^0.3.50
         version: 0.3.80(openai@4.104.0(zod@3.25.76))
       '@langchain/google-genai':
-        specifier: ^0.1.0
+        specifier: ^0.1.12
         version: 0.1.12(@langchain/core@0.3.80(openai@4.104.0(zod@3.25.76)))(zod@3.25.76)
       '@langchain/langgraph':
         specifier: ^0.2.60
@@ -23,6 +23,9 @@ importers:
       '@langchain/langgraph-checkpoint-postgres':
         specifier: ^0.1.0
         version: 0.1.2(@langchain/core@0.3.80(openai@4.104.0(zod@3.25.76)))(@langchain/langgraph-checkpoint@0.0.18(@langchain/core@0.3.80(openai@4.104.0(zod@3.25.76))))
+      '@langchain/langgraph-supervisor':
+        specifier: 0.0.20
+        version: 0.0.20(@langchain/core@0.3.80(openai@4.104.0(zod@3.25.76)))(@langchain/langgraph@0.2.74(@langchain/core@0.3.80(openai@4.104.0(zod@3.25.76)))(zod-to-json-schema@3.25.2(zod@3.25.76)))
       '@langchain/openai':
         specifier: ^0.3.0
         version: 0.3.17(@langchain/core@0.3.80(openai@4.104.0(zod@3.25.76)))
@@ -745,6 +748,13 @@ packages:
         optional: true
       react-dom:
         optional: true
+
+  '@langchain/langgraph-supervisor@0.0.20':
+    resolution: {integrity: sha512-Y8K9aht2oYEmfvmAKviK8M+LXIEXqyQAacl+qQrOnmk/5vt86A5RBE/6LncarFNeHLg/gsqUJeeuk7MT5RsgJg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@langchain/core': ^0.3.58
+      '@langchain/langgraph': ^0.2.72 || ^0.3.0 || ^0.4.0
 
   '@langchain/langgraph@0.2.74':
     resolution: {integrity: sha512-oHpEi5sTZTPaeZX1UnzfM2OAJ21QGQrwReTV6+QnX7h8nDCBzhtipAw1cK616S+X8zpcVOjgOtJuaJhXa4mN8w==}
@@ -2306,6 +2316,13 @@ snapshots:
       uuid: 9.0.1
     optionalDependencies:
       '@langchain/core': 0.3.80(openai@4.104.0(zod@3.25.76))
+
+  '@langchain/langgraph-supervisor@0.0.20(@langchain/core@0.3.80(openai@4.104.0(zod@3.25.76)))(@langchain/langgraph@0.2.74(@langchain/core@0.3.80(openai@4.104.0(zod@3.25.76)))(zod-to-json-schema@3.25.2(zod@3.25.76)))':
+    dependencies:
+      '@langchain/core': 0.3.80(openai@4.104.0(zod@3.25.76))
+      '@langchain/langgraph': 0.2.74(@langchain/core@0.3.80(openai@4.104.0(zod@3.25.76)))(zod-to-json-schema@3.25.2(zod@3.25.76))
+      uuid: 10.0.0
+      zod: 3.25.76
 
   '@langchain/langgraph@0.2.74(@langchain/core@0.3.80(openai@4.104.0(zod@3.25.76)))(zod-to-json-schema@3.25.2(zod@3.25.76))':
     dependencies:

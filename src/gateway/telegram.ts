@@ -1,20 +1,32 @@
 /**
- * FounderOS — Telegram Bot Gateway
- * ==================================
- * grammy-based bot with:
- *  - Topic-group routing (Boardroom / Turicks / Social → CEO supervisor)
- *  - HITL callback handler (inline keyboard approve/reject)
- *  - Safe HTML escaping (prevent injection in bot replies)
- *  - Immediate ACK on every callback_query (no spinner left on buttons)
+ * FounderOS v2 — Telegram Gateway
+ * ================================
+ * Drives the office (supervisor + department sub-agents) from Telegram.
+ *
+ * Flow:
+ *   message → office.invoke({ messages }) on a per-chat thread
+ *     → if the office paused for approval (a write tool called interrupt())
+ *          → send an Approve/Reject card; STOP
+ *          → on button tap → office.invoke(Command({ resume })) on the same thread
+ *              → chained approvals are re-rendered; otherwise the final answer is sent
+ *     → else → send the office's final reply
+ *
+ * Thread id = `turicks:{chatId}` — stable per chat so:
+ *   - conversation memory persists across messages (checkpointer), and
+ *   - the approval button can resume the exact paused run by rebuilding the id.
  */
 
 import { Bot, InlineKeyboard, type Context } from "grammy";
+import { Command } from "@langchain/langgraph";
+import { HumanMessage } from "@langchain/core/messages";
 import { env } from "../core/config.js";
 import { logger } from "../infra/logger.js";
-import { resolveHITL, formatHITLMessage } from "./hitl.js";
-import { getGraph } from "../agents/graph.js";
+import { getOffice, getPendingApproval } from "../agents/office.js";
+import type { ApprovalRequest } from "../agents/agent-tools.js";
 
 const log = logger.child({ module: "telegram" });
+
+const TENANT = process.env["FOUNDER_TENANT"] ?? "turicks";
 
 // ── Safe HTML ─────────────────────────────────────────────────────────────────
 
@@ -27,475 +39,178 @@ export function safeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/**
- * Format a pod result (JSON or plain text) into a readable Telegram message.
- *
- * Pod outputs are JSON objects containing code/email/content drafts along with
- * metadata (plan, test_results, hitl_status etc.). We extract the human-readable
- * part and present it cleanly — users should never see a raw JSON dump.
- */
-function formatPodResult(raw: string): string {
-  // Try to parse as JSON (pod output)
-  const trimmed = raw.trimStart();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
-    // Plain text — direct answer or fallback
-    return `💬 ${safeHtml(raw.slice(0, 3800))}`;
-  }
-
-  let data: Record<string, unknown>;
-  try {
-    data = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return `💬 ${safeHtml(raw.slice(0, 3800))}`;
-  }
-
-  // ── Engineering pod ───────────────────────────────────────────────────────
-  // final.code_draft or top-level code_draft
-  const codeDraft = extractStr(data, ["code_draft"]) ??
-    extractStr(data as {final?: Record<string, unknown>}, ["final", "code_draft"]);
-  if (codeDraft) {
-    const planSummary = extractStr(data as {plan?: Record<string, unknown>}, ["plan", "summary"]) ??
-      extractStr(data as {final?: {plan?: Record<string, unknown>}}, ["final", "plan", "summary"]) ?? "";
-    const hours = extractNum(data as {plan?: Record<string, unknown>}, ["plan", "estimated_hours"]) ??
-      extractNum(data as {final?: {plan?: Record<string, unknown>}}, ["final", "plan", "estimated_hours"]);
-    const hitlStatus = extractStr(data, ["hitl_status"]) ??
-      extractStr(data as {final?: Record<string, unknown>}, ["final", "hitl_status"]) ?? "approved";
-
-    let msg = `⚙️ <b>Engineering Output</b>`;
-    if (planSummary) msg += `\n<i>${safeHtml(planSummary.slice(0, 200))}</i>`;
-    if (hours) msg += ` (~${hours}h)`;
-    if (hitlStatus === "rejected") msg += `\n⚠️ <b>HITL rejected</b>`;
-    msg += `\n\n<pre><code>${safeHtml(codeDraft.slice(0, 2800))}</code></pre>`;
-    return msg;
-  }
-
-  // ── Sales / BDR pod ───────────────────────────────────────────────────────
-  const emailDraft = extractStr(data, ["email_draft"]) ??
-    extractStr(data as {final?: Record<string, unknown>}, ["final", "email_draft"]);
-  if (emailDraft) {
-    const subject = extractStr(data, ["subject"]) ?? "";
-    let msg = `📧 <b>Email Draft</b>`;
-    if (subject) msg += ` — <i>${safeHtml(subject)}</i>`;
-    msg += `\n\n${safeHtml(emailDraft.slice(0, 2800))}`;
-    return msg;
-  }
-
-  // ── Marketing pod ─────────────────────────────────────────────────────────
-  const contentDraft = extractStr(data, ["content_draft"]) ??
-    extractStr(data as {final?: Record<string, unknown>}, ["final", "content_draft"]);
-  if (contentDraft) {
-    return `📝 <b>Marketing Content</b>\n\n${safeHtml(contentDraft.slice(0, 2800))}`;
-  }
-
-  // ── Social pod ────────────────────────────────────────────────────────────
-  const postDraft = extractStr(data, ["post_draft", "published_post"]) ??
-    extractStr(data as {final?: Record<string, unknown>}, ["final", "post_draft"]);
-  if (postDraft) {
-    return `📣 <b>Social Post Draft</b>\n\n${safeHtml(postDraft.slice(0, 2800))}`;
-  }
-
-  // ── Prospecting pod ───────────────────────────────────────────────────────
-  if ("icp_score" in data || "outreach_tier" in data) {
-    const company = String(data.company_name ?? data.company_url ?? "Lead");
-    const score = typeof data.icp_score === "number"
-      ? `${Math.round((data.icp_score as number) * 100)}%`
-      : "—";
-    const rationale = String(data.icp_rationale ?? "");
-    const tier = data.outreach_tier as string | null ?? null;
-    const label = tier === "ceo" ? "🏆 CEO-tier" : tier ? "👔 MD-tier" : "❌ Disqualified";
-    return `🔍 <b>${safeHtml(company)}</b> — ${label}\nICP: <b>${score}</b>\n\n<i>${safeHtml(rationale.slice(0, 400))}</i>`;
-  }
-
-  // ── Generic fallback — show compact summary, not raw JSON ─────────────────
-  const keys = Object.keys(data).filter(k => !["trace_id", "tenant_id", "finalized_at"].includes(k));
-  const preview = keys.map(k => `<b>${safeHtml(k)}</b>: ${safeHtml(String(data[k]).slice(0, 100))}`).join("\n");
-  return `✅ <b>Done</b>\n\n${preview.slice(0, 2000)}`;
-}
-
-/** Safely extract a nested string value from an object via a key path. */
-function extractStr(obj: Record<string, unknown>, path: string[]): string | null {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let cur: any = obj;
-  for (const key of path) {
-    if (cur == null || typeof cur !== "object") return null;
-    cur = (cur as Record<string, unknown>)[key];
-  }
-  return typeof cur === "string" && cur.length > 0 ? cur : null;
-}
-
-/** Safely extract a nested number value from an object via a key path. */
-function extractNum(obj: Record<string, unknown>, path: string[]): number | null {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let cur: any = obj;
-  for (const key of path) {
-    if (cur == null || typeof cur !== "object") return null;
-    cur = (cur as Record<string, unknown>)[key];
-  }
-  return typeof cur === "number" ? cur : null;
-}
-
-// ── Bot Instance ──────────────────────────────────────────────────────────────
+// ── Bot singleton ──────────────────────────────────────────────────────────────
 
 let _bot: Bot | undefined;
 
 export function getBot(): Bot {
-  if (!_bot) {
-    _bot = new Bot(env.TELEGRAM_BOT_TOKEN);
-  }
+  if (!_bot) _bot = new Bot(env.TELEGRAM_BOT_TOKEN);
   return _bot;
 }
 
-// ── Topic → Tenant mapping ────────────────────────────────────────────────────
-
-/**
- * Resolve which company tenant owns a given Telegram topic.
- * Falls back to "turicks" for unknown/boardroom topics.
- * All topics (Boardroom, Turicks, Social, Think Tank) route to turicks —
- * the CEO supervisor picks the department from there.
- */
-function topicToTenant(_threadTopicId: number | undefined): string {
-  return "turicks";
+function threadIdFor(chatId: number | string): string {
+  return `${TENANT}:${chatId}`;
 }
 
-// ── Route message to FounderGraph ─────────────────────────────────────────────
+// ── Result extraction ──────────────────────────────────────────────────────────
 
-/**
- * Invoke the FounderGraph with the incoming message as the task.
- * Generates a fresh thread_id per message (stateless for now).
- * Replies with the graph's result or an error message.
- */
-async function routeToGraph(ctx: Context): Promise<void> {
-  const task = ctx.message?.text ?? "";
-  const userId = String(ctx.from?.id ?? "unknown");
-  const threadTopicId = ctx.message?.message_thread_id;
-  const tenantId = topicToTenant(threadTopicId);
-  const threadId = `${tenantId}:${userId}:${crypto.randomUUID()}`;
+interface OfficeMessage {
+  content: unknown;
+  _getType?: () => string;
+  tool_calls?: unknown[];
+}
 
-  log.info({ userId, tenantId, threadId, task: task.slice(0, 80) }, "Routing to FounderGraph");
-
-  // Send typing indicator and refresh every 4s (graph.invoke can take 60–120s)
-  await ctx.replyWithChatAction("typing");
-  const typingInterval = setInterval(() => {
-    ctx.replyWithChatAction("typing").catch(() => {/* ignore — non-fatal */});
-  }, 4000);
-
-  try {
-    const graph = await getGraph();
-    if (!graph) throw new Error("Graph not initialized");
-
-    const result = await graph.invoke(
-      { task, tenant_id: tenantId },
-      { configurable: { thread_id: threadId } },
-    );
-
-    clearInterval(typingInterval);
-
-    const raw = result.result ? String(result.result) : null;
-
-    // Format result for human readability on Telegram.
-    // Pod outputs are JSON objects — extract the meaningful field.
-    // Direct answers and fallbacks are plain text.
-    let output: string;
-    if (!raw) {
-      output =
-        "❓ I couldn't handle that task. Try:\n\n" +
-        "• <code>/prospect stripe.com</code> — research + score a company\n" +
-        "• <i>Write a cold email to [company]</i> — BDR draft\n" +
-        "• <i>Build a TypeScript webhook handler</i> — engineering\n" +
-        "• <i>Draft a LinkedIn post about AI agents</i> — social content\n" +
-        "• <i>SEO audit for turicks.com</i> — marketing";
-    } else {
-      output = formatPodResult(raw);
+/** Pull the office's final human-readable reply (last AI message with text). */
+function finalReply(res: { messages?: OfficeMessage[] }): string {
+  const msgs = res.messages ?? [];
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]!;
+    const type = m._getType?.() ?? "";
+    const text = typeof m.content === "string" ? m.content : "";
+    if (type === "ai" && text.trim() && !(m.tool_calls && m.tool_calls.length > 0)) {
+      return text.trim();
     }
-
-    await ctx.reply(output, {
-      parse_mode: "HTML",
-      ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
-    });
-  } catch (err) {
-    clearInterval(typingInterval);
-    const msg = err instanceof Error ? err.message : String(err);
-    log.error({ err: msg, threadId }, "Graph execution failed");
-    await ctx.reply(
-      `❌ <b>Error</b>\n\n<code>${safeHtml(msg.slice(0, 500))}</code>`,
-      {
-        parse_mode: "HTML",
-        ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
-      },
-    );
   }
+  return "✅ Done.";
 }
 
-// ── HITL Message Sender ───────────────────────────────────────────────────────
+// ── Approval card ──────────────────────────────────────────────────────────────
 
-/**
- * Send an approval-request message with Approve / Reject inline keyboard.
- * Called from hitl.ts via the injected sendFn.
- * Returns the Telegram message_id (stored in interrupt_registry for later edits).
- */
-export async function sendHITLMessage(
-  topicId: number,
-  interruptId: string,
-  summary: string,
-  draft: string,
-  agent: string,
-): Promise<number> {
-  const bot = getBot();
-  const text = formatHITLMessage(summary, draft, interruptId, agent);
-
+async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promise<void> {
   const keyboard = new InlineKeyboard()
-    .text("✅ Approve", `approve:${interruptId}`)
-    .text("❌ Reject", `reject:${interruptId}`);
+    .text("✅ Approve", "approve")
+    .text("❌ Reject", "reject");
 
-  const msg = await bot.api.sendMessage(env.TELEGRAM_CHAT_ID, text, {
-    parse_mode: "HTML",
-    ...(topicId ? { message_thread_id: topicId } : {}),
-    reply_markup: keyboard,
-  });
-
-  log.info({ interrupt_id: interruptId, message_id: msg.message_id, agent }, "HITL message sent");
-  return msg.message_id;
+  const preview = approval.preview ? `\n\n<i>${safeHtml(approval.preview.slice(0, 1500))}</i>` : "";
+  await ctx.reply(
+    `${safeHtml(approval.title)}\n${safeHtml(approval.summary)}${preview}`,
+    { parse_mode: "HTML", reply_markup: keyboard },
+  );
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
+// ── Route an incoming message into the office ──────────────────────────────────
 
-// ── /prospect command handler ─────────────────────────────────────────────────
-
-/**
- * Handle /prospect <url|company-name> command.
- * Routes straight to the prospecting department — bypasses supervisor classification.
- * The prospecting pod will disambiguate, research, and score the lead.
- *
- * Example: /prospect https://acme.com
- *          /prospect Acme Corp
- */
-async function handleProspectCommand(ctx: Context): Promise<void> {
+async function routeToOffice(ctx: Context): Promise<void> {
   const text = ctx.message?.text ?? "";
-  const threadTopicId = ctx.message?.message_thread_id;
-  const userId = String(ctx.from?.id ?? "unknown");
-  const tenantId = topicToTenant(threadTopicId);
+  const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
+  const config = { configurable: { thread_id: threadIdFor(chatId) } };
 
-  // Extract the raw input after "/prospect "
-  const rawInput = text.replace(/^\/prospect\s*/i, "").trim();
-  if (!rawInput) {
-    await ctx.reply(
-      "❓ Usage: <code>/prospect &lt;url or company name&gt;</code>\n\nExample: <code>/prospect acme.com</code>",
-      { parse_mode: "HTML" },
-    );
-    return;
-  }
-
-  const threadId = `${tenantId}:${userId}:${crypto.randomUUID()}`;
-  log.info({ userId, tenantId, threadId, rawInput }, "Prospect command received");
-
-  await ctx.reply(
-    `🔍 Researching <b>${safeHtml(rawInput)}</b>…\n<i>This takes ~30s. I'll score it against our ICP and let you know if it's worth pursuing.</i>`,
-    {
-      parse_mode: "HTML",
-      ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
-    },
-  );
-
-  // Keep typing indicator alive during long graph execution
-  const prospectTypingInterval = setInterval(() => {
-    ctx.replyWithChatAction("typing").catch(() => {/* ignore */});
+  log.info({ chatId, task: text.slice(0, 80) }, "Routing to office");
+  await ctx.replyWithChatAction("typing");
+  const typing = setInterval(() => {
+    ctx.replyWithChatAction("typing").catch(() => {});
   }, 4000);
 
   try {
-    const graph = await getGraph();
-    if (!graph) throw new Error("Graph not initialized");
+    const office = await getOffice();
+    const res = (await office.invoke(
+      { messages: [new HumanMessage(text)] },
+      config,
+    )) as { messages?: OfficeMessage[] };
+    clearInterval(typing);
 
-    const result = await graph.invoke(
-      {
-        task: rawInput,
-        tenant_id: tenantId,
-        department: "prospecting",
-      },
-      { configurable: { thread_id: threadId } },
-    );
-
-    clearInterval(prospectTypingInterval);
-
-    // Parse the JSON summary written by prospectingNode
-    let summary: Record<string, unknown> = {};
-    try {
-      summary = JSON.parse(result.result ?? "{}") as Record<string, unknown>;
-    } catch {
-      // fallback — show raw
+    const approval = await getPendingApproval(office, config);
+    if (approval) {
+      await sendApprovalCard(ctx, approval);
+      return;
     }
-
-    const tier = summary.outreach_tier as string | null ?? null;
-    const score = typeof summary.icp_score === "number"
-      ? `${Math.round((summary.icp_score as number) * 100)}%`
-      : "—";
-    const rationale = summary.icp_rationale as string ?? "";
-    const company = (summary.company_name as string | null) ?? rawInput;
-
-    let output: string;
-    if (tier) {
-      const tierLabel = tier === "ceo" ? "🏆 CEO-tier" : "👔 MD-tier";
-      output =
-        `✅ <b>${safeHtml(company)}</b> — <b>Qualified</b> ${tierLabel}\n` +
-        `ICP score: <b>${score}</b>\n\n` +
-        `<i>${safeHtml(rationale.slice(0, 400))}</i>\n\n` +
-        `📬 Routing to Sales pod for outreach draft…`;
-    } else {
-      output =
-        `❌ <b>${safeHtml(company)}</b> — <b>Disqualified</b>\n` +
-        `ICP score: <b>${score}</b>\n\n` +
-        `<i>${safeHtml(rationale.slice(0, 400))}</i>`;
-    }
-
-    await ctx.reply(output, {
-      parse_mode: "HTML",
-      ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
-    });
+    await ctx.reply(`💬 ${safeHtml(finalReply(res).slice(0, 3800))}`, { parse_mode: "HTML" });
   } catch (err) {
-    clearInterval(prospectTypingInterval);
+    clearInterval(typing);
     const msg = err instanceof Error ? err.message : String(err);
-    log.error({ err: msg, rawInput, threadId }, "Prospect command failed");
-    await ctx.reply(
-      `❌ <b>Prospecting failed</b>\n\n<code>${safeHtml(msg.slice(0, 500))}</code>`,
-      {
-        parse_mode: "HTML",
-        ...(threadTopicId ? { message_thread_id: threadTopicId } : {}),
-      },
-    );
+    log.error({ err: msg, chatId }, "Office run failed");
+    await ctx.reply(`❌ <b>Something went wrong</b>\n<code>${safeHtml(msg.slice(0, 400))}</code>`, {
+      parse_mode: "HTML",
+    });
   }
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
+// ── Resume a paused run after an approval decision ─────────────────────────────
 
-/**
- * Register all bot handlers.
- * Called once at startup before bot.start().
- */
+async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Promise<void> {
+  const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
+  const config = { configurable: { thread_id: threadIdFor(chatId) } };
+
+  try {
+    const office = await getOffice();
+    const res = (await office.invoke(
+      new Command({ resume: decision }),
+      config,
+    )) as { messages?: OfficeMessage[] };
+
+    // A run may pause again (e.g. research → then email approval).
+    const next = await getPendingApproval(office, config);
+    if (next) {
+      await sendApprovalCard(ctx, next);
+      return;
+    }
+    await ctx.reply(`💬 ${safeHtml(finalReply(res).slice(0, 3800))}`, { parse_mode: "HTML" });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error({ err: msg, chatId }, "Office resume failed");
+    await ctx.reply(`❌ <b>Resume failed</b>\n<code>${safeHtml(msg.slice(0, 400))}</code>`, {
+      parse_mode: "HTML",
+    });
+  }
+}
+
+// ── Handlers ───────────────────────────────────────────────────────────────────
+
 export function registerHandlers(bot: Bot): void {
-  // ── /start command ────────────────────────────────────────────────────────
-
   bot.command("start", async (ctx: Context) => {
     const name = ctx.from?.first_name ? ` ${ctx.from.first_name}` : "";
     await ctx.reply(
-      `👋 <b>FounderOS${name}</b> — your AI operating system is live.\n\n` +
-      `<b>Commands:</b>\n` +
-      `• <code>/prospect &lt;url or company&gt;</code> — ICP score + sales routing\n` +
-      `• <code>/task &lt;description&gt;</code> — any task → correct department\n\n` +
-      `<b>Or just message me:</b>\n` +
-      `• <i>"Draft a LinkedIn post about AI agents"</i>\n` +
-      `• <i>"Research Stripe and write a cold email"</i>\n` +
-      `• <i>"Build a webhook handler for Stripe"</i>\n\n` +
-      `All tasks go through the CEO supervisor → routed to Sales, Engineering, Marketing, Social, or Prospecting pods.\n\n` +
-      `💡 <i>Tip: HITL gates protect every outbound action — you approve before anything is sent.</i>`,
-      {
-        parse_mode: "HTML",
-        ...(ctx.message?.message_thread_id ? { message_thread_id: ctx.message.message_thread_id } : {}),
-      },
+      `👋 <b>FounderOS${name}</b> — your AI chief of staff is live.\n\n` +
+        `Just tell me what you need. I route it to the right department:\n` +
+        `• <b>Research</b> — <i>"Research Stripe and summarise what they do"</i>\n` +
+        `• <b>Comms</b> — <i>"Email alex@acme.com a short intro"</i> (you approve before it sends)\n` +
+        `• <b>Engineering</b> — <i>"Write a TS function to validate emails"</i> / <i>"Open a GitHub issue on …"</i>\n\n` +
+        `🔒 Anything that leaves the building (email, LinkedIn, GitHub writes) asks for your approval first.`,
+      { parse_mode: "HTML" },
     );
   });
 
-  // ── /prospect command ────────────────────────────────────────────────────
-
-  bot.command("prospect", async (ctx: Context) => {
-    await handleProspectCommand(ctx);
-  });
-
-  // ── Incoming messages ────────────────────────────────────────────────────
-
   bot.on("message:text", async (ctx: Context) => {
-    const threadTopicId = ctx.message?.message_thread_id;
     const text = ctx.message?.text ?? "";
-
-    // Don't double-handle /prospect commands (grammy routes commands first)
-    if (text.startsWith("/prospect")) return;
-
-    log.info({ from: ctx.from?.id, topic: threadTopicId, text: text.slice(0, 80) }, "Message received");
-    await routeToGraph(ctx);
+    if (text.startsWith("/")) return; // ignore other slash commands for now
+    log.info({ from: ctx.from?.id, text: text.slice(0, 80) }, "Message received");
+    await routeToOffice(ctx);
   });
-
-  // ── HITL callbacks ───────────────────────────────────────────────────────
 
   bot.on("callback_query:data", async (ctx: Context) => {
     const data = ctx.callbackQuery?.data ?? "";
-
-    if (data.startsWith("approve:") || data.startsWith("reject:")) {
-      const colonIdx = data.indexOf(":");
-      const action = data.slice(0, colonIdx);
-      const interruptId = data.slice(colonIdx + 1);
-      const decision = action === "approve" ? "approved" : "rejected";
-      const emoji = decision === "approved" ? "✅" : "❌";
-
-      // 1. Immediate ACK — removes the spinner on the user's phone
-      await ctx.answerCallbackQuery({ text: `${emoji} ${decision}` });
-
-      // 2. Remove inline keyboard right away (prevents double-tap race)
-      try {
-        await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
-      } catch {
-        // Non-fatal — message may already have been edited
-      }
-
-      // 3. Resume the suspended graph
-      const resolved = await resolveHITL(interruptId, decision);
-
-      // 4. Update message with final status
-      const statusLine = resolved
-        ? `\n\n${emoji} <b>${decision === "approved" ? "Approved" : "Rejected"}</b> — graph resumed`
-        : `\n\n⚠️ <b>Already resolved or expired</b>`;
-
-      try {
-        const original = ctx.callbackQuery?.message?.text ?? "";
-        await ctx.editMessageText(
-          safeHtml(original) + statusLine,
-          { parse_mode: "HTML" },
-        );
-      } catch {
-        // Non-fatal — best-effort update
-      }
-
+    if (data !== "approve" && data !== "reject") {
+      await ctx.answerCallbackQuery({ text: "Unknown action" });
       return;
     }
-
-    // Unknown callback — ack to clear spinner
-    await ctx.answerCallbackQuery({ text: "Unknown action" });
+    const decision = data === "approve" ? "approved" : "rejected";
+    await ctx.answerCallbackQuery({ text: decision === "approved" ? "✅ Approved" : "❌ Rejected" });
+    try {
+      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
+    } catch {
+      /* best-effort */
+    }
+    await resumeOffice(ctx, decision);
   });
-
-  // ── Error handler ────────────────────────────────────────────────────────
 
   bot.catch((err) => {
     log.error({ err: err.message }, "Unhandled bot error");
   });
 }
 
-// ── Send helpers ──────────────────────────────────────────────────────────────
+// ── Plain sender (used by schedulers/agents to push a message) ─────────────────
 
-/**
- * Send a plain message to a specific Telegram topic.
- * Used by agents to report results outside the normal request/reply flow.
- */
-export async function sendToTopic(
-  topicId: number,
-  text: string,
-  parseMode: "HTML" | "Markdown" = "HTML",
-): Promise<void> {
+export async function sendToChat(text: string, parseMode: "HTML" | "Markdown" = "HTML"): Promise<void> {
   const bot = getBot();
-  try {
-    await bot.api.sendMessage(env.TELEGRAM_CHAT_ID, text, {
-      message_thread_id: topicId || undefined,
-      parse_mode: parseMode,
-    });
-  } catch (err) {
-    log.error({ topicId, err }, "Failed to send Telegram message");
-    throw err;
-  }
+  await bot.api.sendMessage(env.TELEGRAM_CHAT_ID, text, { parse_mode: parseMode });
 }
 
-// ── Lifecycle ─────────────────────────────────────────────────────────────────
+// ── Lifecycle ───────────────────────────────────────────────────────────────────
 
 export async function startBot(): Promise<void> {
   const bot = getBot();
   registerHandlers(bot);
   log.info("Telegram bot starting (long polling)…");
-  // Fire-and-forget — runs until process exits or bot.stop() is called
   bot.start().catch((err) => {
     log.error({ err: (err as Error).message }, "Bot polling crashed");
     process.exit(1);
