@@ -7,7 +7,7 @@
  * Key namespaces:
  *   research:{url_hash}         TTL 7d   — Tavily/Firecrawl company research blob
  *   quota:{tenant}:{YYYY-MM-DD} INCR     — daily outbound send counter (atomic)
- *   llm:{prompt_hash}           TTL cfg  — LLM prompt response cache (tier-gated)
+ *   llm:{tenant}:{prompt_hash}  TTL cfg  — LLM prompt response cache (tier-gated, tenant-isolated)
  *
  * Design decisions:
  * - One connection (not a pool) — Redis is single-threaded, pooling adds overhead
@@ -87,11 +87,14 @@ export const KEYS = {
   quota: (tenantId: string, date: string) => `quota:${tenantId}:${date}`,
 
   /**
-   * LLM prompt response cache.
-   * Hash the full prompt payload (tier + messages) for uniqueness.
+   * LLM prompt response cache — TENANT-NAMESPACED.
+   * Hash the full prompt payload (tier + messages) for uniqueness, then prefix
+   * with tenant_id so two tenants with an identical prompt NEVER share a cached
+   * response (data-isolation requirement at SaaS scale).
+   * Format: llm:{tenantId}:{promptHash}
    * TTL: LLM_CACHE_TTL[tier] seconds (CEO = 0 = no cache).
    */
-  llmCache: (promptHash: string) => `llm:${promptHash}`,
+  llmCache: (tenantId: string, promptHash: string) => `llm:${tenantId}:${promptHash}`,
 } as const;
 
 // ── Key Utilities ─────────────────────────────────────────────────────────────

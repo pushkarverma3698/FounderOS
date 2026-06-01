@@ -1,7 +1,7 @@
 /**
  * FounderOS — Background Scheduler
  * ==================================
- * Four cron jobs registered at startup. These are NOT graph nodes — they are
+ * Five cron jobs registered at startup. These are NOT graph nodes — they are
  * time-triggered entry points that kick off agent runs or perform maintenance.
  *
  * Design decisions:
@@ -16,13 +16,16 @@
  *  2. Gmail reply poller        — every 15 minutes
  *  3. HITL sweeper              — every hour (expires stale pending interrupts)
  *  4. Dept events poller        — every 5 minutes (Phase 3C cross-dept signals)
+ *  5. turicks-brain sync        — every Sunday 3am UTC (ADRs, brand, phase docs → knowledge_entries)
  *
  * See ADR-002 (scheduler-not-graph pattern) in docs/decisions/
  */
 
 import cron from "node-cron";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join, basename } from "node:path";
 import { getDb } from "../db/client.js";
-import { hitlApprovals, actionLog } from "../db/schema.js";
+import { hitlApprovals, actionLog, knowledgeEntries } from "../db/schema.js";
 import { resolveInterrupt, consumePendingEvents, publishDeptEvent } from "../db/queries.js";
 import { childLogger } from "./logger.js";
 import { env } from "../core/config.js";
@@ -340,6 +343,107 @@ async function runDeptEventsPoller(): Promise<void> {
 
 let _initialized = false;
 
+// ── turicks-brain weekly sync ─────────────────────────────────────────────────
+
+interface BrainDoc {
+  entry_type: string;
+  title: string;
+  content: string;
+  source: string;
+  tags: string[];
+  metadata?: Record<string, unknown>;
+}
+
+function readSafe(path: string): string {
+  try { return readFileSync(path, "utf-8"); } catch { return ""; }
+}
+
+function titleFromFile(file: string): string {
+  return basename(file, ".md").replace(/[-_]/g, " ");
+}
+
+function collectBrainDocs(): BrainDoc[] {
+  const root = process.cwd();
+  const docs: BrainDoc[] = [];
+
+  // ADRs
+  const decisionsDir = join(root, "docs/decisions");
+  if (existsSync(decisionsDir)) {
+    for (const f of readdirSync(decisionsDir).filter((f) => f.endsWith(".md"))) {
+      const num = parseInt(f.match(/^(\d+)/)?.[1] ?? "0");
+      docs.push({ entry_type: "adr", title: titleFromFile(f), content: readSafe(join(decisionsDir, f)), source: `docs/decisions/${f}`, tags: ["architecture", "decision", `adr-${num}`], metadata: { adr_number: num } });
+    }
+  }
+
+  // Strategic vision
+  const sv = join(root, "docs/architecture/STRATEGIC-VISION.md");
+  if (existsSync(sv)) docs.push({ entry_type: "strategic_pillar", title: "FounderOS Strategic Vision — 6 Pillars", content: readSafe(sv), source: "docs/architecture/STRATEGIC-VISION.md", tags: ["strategy", "architecture", "pillars"] });
+
+  // Brand
+  const brand = join(root, "docs/BRAND.md");
+  if (existsSync(brand)) docs.push({ entry_type: "brand", title: "Turicks Brand Guidelines (project summary)", content: readSafe(brand), source: "docs/BRAND.md", tags: ["brand", "voice", "guidelines"] });
+
+  // Phase docs
+  const phasesDir = join(root, "docs/phases");
+  if (existsSync(phasesDir)) {
+    for (const f of readdirSync(phasesDir).filter((f) => f.endsWith(".md"))) {
+      const num = parseInt(f.match(/PHASE-(\d+)/i)?.[1] ?? "0");
+      docs.push({ entry_type: "phase", title: titleFromFile(f), content: readSafe(join(phasesDir, f)), source: `docs/phases/${f}`, tags: ["phase", `phase-${num}`], metadata: { phase_number: num } });
+    }
+  }
+
+  // Study docs (case study, strategy, research) — all .md
+  const studyDir = join(root, "docs/study");
+  if (existsSync(studyDir)) {
+    for (const f of readdirSync(studyDir).filter((f) => f.endsWith(".md"))) {
+      const isCaseStudy = /CASE-STUDY/i.test(f);
+      docs.push({
+        entry_type: isCaseStudy ? "case_study" : "strategy",
+        title: isCaseStudy ? "Turicks / FounderOS Case Study Log" : titleFromFile(f),
+        content: readSafe(join(studyDir, f)),
+        source: `docs/study/${f}`,
+        tags: isCaseStudy ? ["case-study", "milestones"] : ["strategy", "study", "research"],
+      });
+    }
+  }
+
+  return docs;
+}
+
+async function runBrainSync(): Promise<void> {
+  const db = getDb();
+  const docs = collectBrainDocs();
+  let inserted = 0, updated = 0, skipped = 0;
+
+  for (const doc of docs) {
+    try {
+      const existing = await db
+        .select()
+        .from(knowledgeEntries)
+        .where(and(eq(knowledgeEntries.tenant_id, "turicks"), eq(knowledgeEntries.title, doc.title), eq(knowledgeEntries.is_current, true)))
+        .limit(1);
+
+      if (existing.length === 0) {
+        await db.insert(knowledgeEntries).values({ tenant_id: "turicks", ...doc, version: 1, is_current: true });
+        inserted++;
+      } else if (existing[0]!.content !== doc.content) {
+        await db.update(knowledgeEntries).set({ is_current: false }).where(eq(knowledgeEntries.id, existing[0]!.id));
+        await db.insert(knowledgeEntries).values({ tenant_id: "turicks", ...doc, version: (existing[0]!.version ?? 1) + 1, is_current: true });
+        updated++;
+      } else {
+        skipped++;
+      }
+    } catch (err) {
+      log.warn({ title: doc.title, err: (err as Error).message }, "brain:sync entry failed");
+    }
+  }
+
+  log.info({ inserted, updated, skipped, total: docs.length }, "turicks-brain sync complete");
+  await sendTelegramAlert(`🧠 <b>turicks-brain synced</b>\n${inserted} new · ${updated} updated · ${skipped} unchanged`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Register all cron jobs. Call once at startup (src/index.ts).
  * Safe to call multiple times — idempotent guard prevents double registration.
@@ -375,7 +479,13 @@ export function initScheduler(): void {
   });
   log.info("Scheduler: Dept events poller registered (*/5 min)");
 
-  log.info("FounderOS scheduler initialized — 4 jobs active");
+  // Job 5: turicks-brain sync — every Sunday 3am UTC
+  cron.schedule("0 3 * * 0", () => {
+    void runBrainSync();
+  });
+  log.info("Scheduler: turicks-brain sync registered (Sun 03:00 UTC)");
+
+  log.info("FounderOS scheduler initialized — 5 jobs active");
 }
 
 /** Stop all scheduled tasks. Call in SIGTERM handler. */

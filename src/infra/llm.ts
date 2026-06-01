@@ -763,6 +763,36 @@ export async function runToolExecutor(
   return { toolResult, finalArgs, model: usedModel };
 }
 
+// ── Token Economy Helpers (Pillar 0) ─────────────────────────────────────────
+
+/**
+ * Returns true if a system prompt is long enough to benefit from Anthropic prompt caching.
+ * Threshold: 4096 characters ≈ 1024 tokens at ~4 chars/token.
+ * When true, the caller should add cache_control: { type: "ephemeral" } to the system block.
+ */
+export function shouldAddPromptCache(systemPrompt: string): boolean {
+  return systemPrompt.length >= 4096;
+}
+
+/** Tasks that should always route to local Ollama model before any cloud LLM call. */
+const LOCAL_TASK_TYPES = new Set([
+  "json_extraction",   // structured data extraction from text
+  "commit_message",    // git commit message from diff
+  "template_fill",     // variable substitution in a template
+  "classification",    // simple category assignment
+  "deduplication",     // semantic similarity check
+  "dependency_parse",  // requirements.txt / pyproject.toml parsing
+]);
+
+/**
+ * Returns true if the task type should be routed to the local Ollama model first.
+ * These tasks are deterministic, cheap, and don't require nuanced reasoning.
+ * If Ollama returns an error, fall back to cloud silently.
+ */
+export function shouldUseLocalModel(taskType: string): boolean {
+  return LOCAL_TASK_TYPES.has(taskType);
+}
+
 // ── Budget Guard ──────────────────────────────────────────────────────────────
 
 /**

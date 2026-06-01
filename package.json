@@ -19,6 +19,7 @@
     "db:studio": "drizzle-kit studio",
     "setup": "tsx scripts/setup-db.ts",
     "inspect": "tsx scripts/inspect-thread.ts",
+    "brain:sync": "tsx scripts/sync-turicks-brain.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
