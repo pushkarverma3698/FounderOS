@@ -33,6 +33,9 @@ import {
   RESEARCH_PROMPT,
   COMMS_PROMPT,
   ENGINEERING_PROMPT,
+  MARKETING_PROMPT,
+  SALES_PROMPT,
+  PROSPECTING_PROMPT,
 } from "./system-prompts.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { ApprovalRequest } from "./agent-tools.js";
@@ -71,8 +74,34 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     prompt: ENGINEERING_PROMPT,
   });
 
+  // ── Phase B departments ───────────────────────────────────────────────────
+
+  /** Marketing: LinkedIn content in Turicks brand voice. */
+  const marketing = createReactAgent({
+    llm,
+    tools: [searchWeb, linkedinPost],
+    name: "marketing",
+    prompt: MARKETING_PROMPT,
+  });
+
+  /** Sales: researches prospects + writes cold outreach emails (HITL-gated). */
+  const sales = createReactAgent({
+    llm,
+    tools: [searchWeb, sendEmail],
+    name: "sales",
+    prompt: SALES_PROMPT,
+  });
+
+  /** Prospecting: ICP scoring — research-only, no write tools. */
+  const prospecting = createReactAgent({
+    llm,
+    tools: [searchWeb],
+    name: "prospecting",
+    prompt: PROSPECTING_PROMPT,
+  });
+
   return createSupervisor({
-    agents: [research, comms, engineering],
+    agents: [research, comms, engineering, marketing, sales, prospecting],
     llm,
     prompt: SUPERVISOR_PROMPT,
     // Gemini (and most non-OpenAI providers) can't accept the agent name as a
@@ -92,7 +121,7 @@ export async function getOffice() {
   if (_office) return _office;
   const checkpointer = await getCheckpointer();
   _office = buildOffice(checkpointer);
-  log.info("Office compiled: supervisor + [research, comms, engineering]");
+  log.info("Office compiled: supervisor + [research, comms, engineering, marketing, sales, prospecting]");
   return _office;
 }
 
