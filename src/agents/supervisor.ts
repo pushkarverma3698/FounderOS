@@ -148,10 +148,25 @@ export async function supervisorNode(
       ? parsed.direct_answer
       : undefined;
 
+  // Hard fallback: CEO returned empty routing AND no direct_answer.
+  // This would produce "Task processed (no output)" — unacceptable.
+  // Give a helpful response with usage examples instead.
+  const fallbackResult =
+    !department && !parsed.direct_answer
+      ? "I'm not sure how to route that task. Here's what I can do:\n\n" +
+        "• <b>Prospect a company</b>: <code>/prospect stripe.com</code>\n" +
+        "• <b>Write a cold email</b>: <i>Draft a cold email to Stripe's Head of BD</i>\n" +
+        "• <b>Build something</b>: <i>Write a TypeScript webhook handler for Stripe</i>\n" +
+        "• <b>LinkedIn content</b>: <i>Write a LinkedIn post about AI agents</i>\n" +
+        "• <b>Marketing</b>: <i>SEO audit for turicks.com</i>\n\n" +
+        "Or ask me anything — I'll answer directly if no department is needed."
+      : undefined;
+
   return {
     department: department ?? "",
     tenant_id: parsed.company || tenantId,
     task: parsed.task || state.task,
     ...(directResult ? { result: directResult } : {}),
+    ...(fallbackResult ? { result: fallbackResult } : {}),
   };
 }

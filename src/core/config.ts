@@ -161,10 +161,15 @@ export const CASCADE: Record<CascadeTier, CascadeEntry[]> = {
     { provider: "openrouter", modelId: "meta-llama/llama-3.3-70b-instruct:free" },
   ],
 
+  // Code tier: Cloud-first for reliable output.
+  // LM Studio (local qwen2.5-coder:7b) consistently returns 3-line stubs — unusable.
+  // OpenRouter qwen3-coder:free is the same model family, free, and cloud-hosted.
+  // Gemini Flash as final fallback — not a code specialist but reliable.
+  // LM Studio demoted to last: only if both cloud providers are down.
   code: [
-    { provider: "lmstudio",   modelId: env.LM_STUDIO_MODEL },
     { provider: "openrouter", modelId: "qwen/qwen3-coder:free" },
     { provider: "google",     modelId: "gemini-2.5-flash" },
+    { provider: "lmstudio",   modelId: env.LM_STUDIO_MODEL },
   ],
 
   nano: [

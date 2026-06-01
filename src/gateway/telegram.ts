@@ -27,6 +27,113 @@ export function safeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * Format a pod result (JSON or plain text) into a readable Telegram message.
+ *
+ * Pod outputs are JSON objects containing code/email/content drafts along with
+ * metadata (plan, test_results, hitl_status etc.). We extract the human-readable
+ * part and present it cleanly — users should never see a raw JSON dump.
+ */
+function formatPodResult(raw: string): string {
+  // Try to parse as JSON (pod output)
+  const trimmed = raw.trimStart();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    // Plain text — direct answer or fallback
+    return `💬 ${safeHtml(raw.slice(0, 3800))}`;
+  }
+
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return `💬 ${safeHtml(raw.slice(0, 3800))}`;
+  }
+
+  // ── Engineering pod ───────────────────────────────────────────────────────
+  // final.code_draft or top-level code_draft
+  const codeDraft = extractStr(data, ["code_draft"]) ??
+    extractStr(data as {final?: Record<string, unknown>}, ["final", "code_draft"]);
+  if (codeDraft) {
+    const planSummary = extractStr(data as {plan?: Record<string, unknown>}, ["plan", "summary"]) ??
+      extractStr(data as {final?: {plan?: Record<string, unknown>}}, ["final", "plan", "summary"]) ?? "";
+    const hours = extractNum(data as {plan?: Record<string, unknown>}, ["plan", "estimated_hours"]) ??
+      extractNum(data as {final?: {plan?: Record<string, unknown>}}, ["final", "plan", "estimated_hours"]);
+    const hitlStatus = extractStr(data, ["hitl_status"]) ??
+      extractStr(data as {final?: Record<string, unknown>}, ["final", "hitl_status"]) ?? "approved";
+
+    let msg = `⚙️ <b>Engineering Output</b>`;
+    if (planSummary) msg += `\n<i>${safeHtml(planSummary.slice(0, 200))}</i>`;
+    if (hours) msg += ` (~${hours}h)`;
+    if (hitlStatus === "rejected") msg += `\n⚠️ <b>HITL rejected</b>`;
+    msg += `\n\n<pre><code>${safeHtml(codeDraft.slice(0, 2800))}</code></pre>`;
+    return msg;
+  }
+
+  // ── Sales / BDR pod ───────────────────────────────────────────────────────
+  const emailDraft = extractStr(data, ["email_draft"]) ??
+    extractStr(data as {final?: Record<string, unknown>}, ["final", "email_draft"]);
+  if (emailDraft) {
+    const subject = extractStr(data, ["subject"]) ?? "";
+    let msg = `📧 <b>Email Draft</b>`;
+    if (subject) msg += ` — <i>${safeHtml(subject)}</i>`;
+    msg += `\n\n${safeHtml(emailDraft.slice(0, 2800))}`;
+    return msg;
+  }
+
+  // ── Marketing pod ─────────────────────────────────────────────────────────
+  const contentDraft = extractStr(data, ["content_draft"]) ??
+    extractStr(data as {final?: Record<string, unknown>}, ["final", "content_draft"]);
+  if (contentDraft) {
+    return `📝 <b>Marketing Content</b>\n\n${safeHtml(contentDraft.slice(0, 2800))}`;
+  }
+
+  // ── Social pod ────────────────────────────────────────────────────────────
+  const postDraft = extractStr(data, ["post_draft", "published_post"]) ??
+    extractStr(data as {final?: Record<string, unknown>}, ["final", "post_draft"]);
+  if (postDraft) {
+    return `📣 <b>Social Post Draft</b>\n\n${safeHtml(postDraft.slice(0, 2800))}`;
+  }
+
+  // ── Prospecting pod ───────────────────────────────────────────────────────
+  if ("icp_score" in data || "outreach_tier" in data) {
+    const company = String(data.company_name ?? data.company_url ?? "Lead");
+    const score = typeof data.icp_score === "number"
+      ? `${Math.round((data.icp_score as number) * 100)}%`
+      : "—";
+    const rationale = String(data.icp_rationale ?? "");
+    const tier = data.outreach_tier as string | null ?? null;
+    const label = tier === "ceo" ? "🏆 CEO-tier" : tier ? "👔 MD-tier" : "❌ Disqualified";
+    return `🔍 <b>${safeHtml(company)}</b> — ${label}\nICP: <b>${score}</b>\n\n<i>${safeHtml(rationale.slice(0, 400))}</i>`;
+  }
+
+  // ── Generic fallback — show compact summary, not raw JSON ─────────────────
+  const keys = Object.keys(data).filter(k => !["trace_id", "tenant_id", "finalized_at"].includes(k));
+  const preview = keys.map(k => `<b>${safeHtml(k)}</b>: ${safeHtml(String(data[k]).slice(0, 100))}`).join("\n");
+  return `✅ <b>Done</b>\n\n${preview.slice(0, 2000)}`;
+}
+
+/** Safely extract a nested string value from an object via a key path. */
+function extractStr(obj: Record<string, unknown>, path: string[]): string | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let cur: any = obj;
+  for (const key of path) {
+    if (cur == null || typeof cur !== "object") return null;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return typeof cur === "string" && cur.length > 0 ? cur : null;
+}
+
+/** Safely extract a nested number value from an object via a key path. */
+function extractNum(obj: Record<string, unknown>, path: string[]): number | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let cur: any = obj;
+  for (const key of path) {
+    if (cur == null || typeof cur !== "object") return null;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return typeof cur === "number" ? cur : null;
+}
+
 // ── Bot Instance ──────────────────────────────────────────────────────────────
 
 let _bot: Bot | undefined;
@@ -85,15 +192,20 @@ async function routeToGraph(ctx: Context): Promise<void> {
 
     const raw = result.result ? String(result.result) : null;
 
-    // Detect if result is JSON (pod output) vs plain text (direct_answer / CEO chat)
+    // Format result for human readability on Telegram.
+    // Pod outputs are JSON objects — extract the meaningful field.
+    // Direct answers and fallbacks are plain text.
     let output: string;
     if (!raw) {
-      output = "✅ Task processed (no output)";
+      output =
+        "❓ I couldn't handle that task. Try:\n\n" +
+        "• <code>/prospect stripe.com</code> — research + score a company\n" +
+        "• <i>Write a cold email to [company]</i> — BDR draft\n" +
+        "• <i>Build a TypeScript webhook handler</i> — engineering\n" +
+        "• <i>Draft a LinkedIn post about AI agents</i> — social content\n" +
+        "• <i>SEO audit for turicks.com</i> — marketing";
     } else {
-      const isJson = raw.trimStart().startsWith("{") || raw.trimStart().startsWith("[");
-      output = isJson
-        ? `✅ <b>Done</b>\n\n<pre>${safeHtml(raw.slice(0, 3000))}</pre>`
-        : `💬 ${safeHtml(raw.slice(0, 3000))}`;
+      output = formatPodResult(raw);
     }
 
     await ctx.reply(output, {
