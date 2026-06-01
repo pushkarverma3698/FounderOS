@@ -74,6 +74,36 @@ function finalReply(res: { messages?: OfficeMessage[] }): string {
   return "✅ Done.";
 }
 
+/**
+ * Scan the message trail for tool results that indicate a failure. Tools return
+ * errors as their result string (they don't throw), so these never hit the
+ * gateway's catch — we surface them explicitly so the founder always sees them.
+ */
+function collectToolErrors(res: { messages?: OfficeMessage[] }): string[] {
+  const errs: string[] = [];
+  for (const m of res.messages ?? []) {
+    if ((m._getType?.() ?? "") !== "tool") continue;
+    const c = typeof m.content === "string" ? m.content : "";
+    if (/\b(fail|error|not set|not configured|cannot find|blocked|unauthor|invalid|denied)\b/i.test(c)) {
+      errs.push(c.trim().slice(0, 300));
+    }
+  }
+  return errs;
+}
+
+/** Send the office's result to Telegram — final reply plus any tool failures. */
+async function sendResult(ctx: Context, res: { messages?: OfficeMessage[] }, chatId: number | string): Promise<void> {
+  const reply = finalReply(res);
+  const errs = collectToolErrors(res);
+
+  let out = `💬 ${safeHtml(reply.slice(0, 3500))}`;
+  if (errs.length > 0) {
+    out += `\n\n⚠️ <b>Tool issue${errs.length > 1 ? "s" : ""}:</b>\n<code>${safeHtml(errs.join("\n").slice(0, 800))}</code>`;
+  }
+  await ctx.reply(out, { parse_mode: "HTML" });
+  log.info({ chatId, replyPreview: reply.slice(0, 80), toolErrors: errs.length }, "Replied to Telegram");
+}
+
 // ── Approval card ──────────────────────────────────────────────────────────────
 
 async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promise<void> {
@@ -114,12 +144,12 @@ async function routeToOffice(ctx: Context): Promise<void> {
       await sendApprovalCard(ctx, approval);
       return;
     }
-    await ctx.reply(`💬 ${safeHtml(finalReply(res).slice(0, 3800))}`, { parse_mode: "HTML" });
+    await sendResult(ctx, res, chatId);
   } catch (err) {
     clearInterval(typing);
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
     log.error({ err: msg, chatId }, "Office run failed");
-    await ctx.reply(`❌ <b>Something went wrong</b>\n<code>${safeHtml(msg.slice(0, 400))}</code>`, {
+    await ctx.reply(`❌ <b>Error</b>\n<code>${safeHtml(msg.slice(0, 1200))}</code>`, {
       parse_mode: "HTML",
     });
   }
@@ -144,11 +174,11 @@ async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Pr
       await sendApprovalCard(ctx, next);
       return;
     }
-    await ctx.reply(`💬 ${safeHtml(finalReply(res).slice(0, 3800))}`, { parse_mode: "HTML" });
+    await sendResult(ctx, res, chatId);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
     log.error({ err: msg, chatId }, "Office resume failed");
-    await ctx.reply(`❌ <b>Resume failed</b>\n<code>${safeHtml(msg.slice(0, 400))}</code>`, {
+    await ctx.reply(`❌ <b>Resume failed</b>\n<code>${safeHtml(msg.slice(0, 1200))}</code>`, {
       parse_mode: "HTML",
     });
   }

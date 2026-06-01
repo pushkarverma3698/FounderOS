@@ -118,7 +118,7 @@ export const linkedinPostTool: UnifiedTool = {
 
     try {
       // Composio SDK call — lazy import to avoid hard dep when Composio not configured
-      const { OpenAIToolSet } = await import("@composio-core/js");
+      const { OpenAIToolSet } = await import("composio-core");
       const toolset = new OpenAIToolSet({ apiKey: process.env["COMPOSIO_API_KEY"] });
 
       const result = await toolset.executeAction({
@@ -181,7 +181,7 @@ export const linkedinAnalyticsTool: UnifiedTool = {
     }
 
     try {
-      const { OpenAIToolSet } = await import("@composio-core/js");
+      const { OpenAIToolSet } = await import("composio-core");
       const toolset = new OpenAIToolSet({ apiKey: process.env["COMPOSIO_API_KEY"] });
 
       const result = await toolset.executeAction({
@@ -190,7 +190,7 @@ export const linkedinAnalyticsTool: UnifiedTool = {
         entityId: tenant_id,
       });
 
-      return { success: true, data: result as LinkedInAnalyticsResult };
+      return { success: true, data: result as unknown as LinkedInAnalyticsResult };
 
     } catch (err) {
       return { success: false, error: (err as Error).message };
@@ -243,7 +243,7 @@ export const linkedinConnectTool: UnifiedTool = {
     }
 
     try {
-      const { OpenAIToolSet } = await import("@composio-core/js");
+      const { OpenAIToolSet } = await import("composio-core");
       const toolset = new OpenAIToolSet({ apiKey: process.env["COMPOSIO_API_KEY"] });
 
       const result = await toolset.executeAction({
