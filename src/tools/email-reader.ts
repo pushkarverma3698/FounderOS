@@ -31,11 +31,13 @@ export interface ReadEmailsArgs {
 }
 
 interface EmailMessage {
-  id?: string;
-  from?: string;
+  messageId?: string;
+  threadId?: string;
+  sender?: string;
   subject?: string;
-  snippet?: string;
-  date?: string;
+  messageText?: string;
+  messageTimestamp?: string;
+  preview?: Record<string, unknown>;
 }
 
 // ── Tool: Read Emails ─────────────────────────────────────────────────────────
@@ -74,8 +76,8 @@ export const readEmailsTool: UnifiedTool = {
 
     try {
       const result = await executeComposioAction(
-        "GMAIL_LIST_EMAILS",
-        { query, max_results },
+        "GMAIL_FETCH_EMAILS",
+        { query, max_results, verbose: false },
         getGmailConnectionId(),
         getGmailUserId(),
       );
@@ -93,11 +95,11 @@ export const readEmailsTool: UnifiedTool = {
       const formatted = messages
         .slice(0, max_results)
         .map((m, i) => {
-          const from = m.from ?? "unknown sender";
+          const from = m.sender ?? "unknown sender";
           const subject = m.subject ?? "(no subject)";
-          const snippet = m.snippet ?? "";
-          const date = m.date ?? "";
-          return `${i + 1}. From: ${from}${date ? ` · ${date}` : ""}\n   Subject: ${subject}\n   ${snippet.slice(0, 150)}`;
+          const body = m.messageText?.slice(0, 200) ?? "";
+          const date = m.messageTimestamp ?? "";
+          return `${i + 1}. From: ${from}${date ? ` · ${date}` : ""}\n   Subject: ${subject}${body ? `\n   ${body}` : ""}`;
         })
         .join("\n\n");
 

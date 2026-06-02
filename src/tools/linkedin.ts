@@ -118,15 +118,18 @@ export const linkedinPostTool: UnifiedTool = {
     }
 
     try {
+      // LINKEDIN_CREATE_LINKED_IN_POST: param is 'commentary' (not 'text'), visibility is an object
+      const visibilityObj = { "com.linkedin.ugc.MemberNetworkVisibility": visibility === "CONNECTIONS" ? "CONNECTIONS" : "PUBLIC" };
       const result = await executeComposioAction(
-        "LINKEDIN_CREATE_SHARE_POST",
-        { text, ...(image_url ? { image_url } : {}), visibility },
+        "LINKEDIN_CREATE_LINKED_IN_POST",
+        { commentary: text, visibility: visibilityObj, ...(image_url ? { images: [{ url: image_url }] } : {}) },
         getLinkedInConnectionId(),
         getLinkedInUserId(),
       );
 
       const data = result["data"] as Record<string, unknown> | undefined;
-      const postId = (data?.["id"] ?? result["post_id"]) as string | undefined;
+      // Response may return id, post_id, or activity URN
+      const postId = (data?.["id"] ?? data?.["post_id"] ?? result["id"]) as string | undefined;
       const postUrl = postId ? `https://www.linkedin.com/feed/update/${postId}` : undefined;
 
       // Audit log — prevents duplicate posts
