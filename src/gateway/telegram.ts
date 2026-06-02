@@ -34,6 +34,7 @@ import { getSystemStatus, formatStatusMessage } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
 import { getFounderContext, upsertFounderContext } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
+import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 
 const log = logger.child({ module: "telegram" });
 
@@ -110,12 +111,39 @@ async function sendResult(ctx: Context, res: { messages?: OfficeMessage[] }, cha
   const reply = finalReply(res);
   const errs = collectToolErrors(res);
 
-  let out = `💬 ${safeHtml(reply.slice(0, 3500))}`;
+  // Convert the model's Markdown → Telegram-safe HTML so bold/bullets/code
+  // render properly instead of leaking raw asterisks.
+  let out = markdownToTelegramHtml(reply);
   if (errs.length > 0) {
     out += `\n\n⚠️ <b>Tool issue${errs.length > 1 ? "s" : ""}:</b>\n<code>${safeHtml(errs.join("\n").slice(0, 800))}</code>`;
   }
-  await ctx.reply(out, { parse_mode: "HTML" });
-  log.info({ chatId, replyPreview: reply.slice(0, 80), toolErrors: errs.length }, "Replied to Telegram");
+
+  // Telegram caps messages at 4096 chars — split long replies across messages.
+  const chunks = splitForTelegram(out, TELEGRAM_MAX);
+  for (const chunk of chunks) {
+    await sendHtmlSafe(ctx, chunk);
+  }
+
+  log.info(
+    { chatId, replyPreview: reply.slice(0, 80), chunks: chunks.length, toolErrors: errs.length },
+    "Replied to Telegram",
+  );
+}
+
+/**
+ * Send an HTML message, falling back to plain text if Telegram rejects the
+ * markup (e.g. a malformed tag the converter didn't catch). A formatting slip
+ * must never swallow the founder's answer.
+ */
+async function sendHtmlSafe(ctx: Context, html: string): Promise<void> {
+  try {
+    await ctx.reply(html, { parse_mode: "HTML" });
+  } catch (err) {
+    log.warn({ err: (err as Error).message }, "HTML send failed — retrying as plain text");
+    // Strip tags for a readable plain-text fallback.
+    const plain = html.replace(/<[^>]+>/g, "");
+    await ctx.reply(plain);
+  }
 }
 
 // ── Approval card ──────────────────────────────────────────────────────────────
