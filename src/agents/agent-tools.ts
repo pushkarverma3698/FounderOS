@@ -29,6 +29,7 @@ import { githubTool } from "../tools/github.js";
 import { linkedinPostTool } from "../tools/linkedin.js";
 import { isSuppressed } from "../db/queries.js";
 import { childLogger } from "../infra/logger.js";
+import { validateBrandVoice } from "../infra/brand-validator.js";
 
 const log = childLogger({ module: "agent-tools" });
 
@@ -80,6 +81,13 @@ export const searchWeb = tool(
 
 export const sendEmail = tool(
   async ({ to, subject, body }) => {
+    // Brand voice check — runs before interrupt() so the HITL card only shows
+    // clean content. If violations found, agent self-corrects and calls again.
+    const brandCheck = validateBrandVoice(body, "outreach");
+    if (!brandCheck.valid) {
+      return `Fix these brand violations before sending:\n${brandCheck.violations.join("\n")}`;
+    }
+
     // Pure summary (may run twice) — request approval.
     const decision = interrupt({
       kind: "approval",
@@ -129,6 +137,13 @@ export const sendEmail = tool(
 
 export const linkedinPost = tool(
   async ({ text }) => {
+    // Brand voice check — runs before interrupt() so the HITL card only shows
+    // clean, brand-compliant content. Violations → agent self-corrects.
+    const brandCheck = validateBrandVoice(text, "linkedin");
+    if (!brandCheck.valid) {
+      return `Fix these brand violations before posting:\n${brandCheck.violations.join("\n")}`;
+    }
+
     const decision = interrupt({
       kind: "approval",
       action: "linkedin_post",
