@@ -65,6 +65,43 @@ export async function getCheckpointer(): Promise<PostgresSaver> {
   return _saver;
 }
 
+// ── Thread Reset ──────────────────────────────────────────────────────────────
+
+/**
+ * Wipe all LangGraph checkpoint history for a single thread.
+ *
+ * Thread IDs are stable per chat, so the checkpointer accumulates the whole
+ * conversation indefinitely — old turns get replayed every message, which both
+ * inflates token cost and can poison behaviour (e.g. the model staying
+ * consistent with a stale earlier refusal). This clears that thread's rows so
+ * the next message starts from a clean slate.
+ *
+ * @returns total number of rows deleted across the checkpoint tables
+ */
+export async function clearThreadCheckpoints(threadId: string): Promise<number> {
+  const pool = getPgPool();
+  // PostgresSaver-managed tables (not Drizzle). Order doesn't matter — all
+  // scoped by thread_id. A missing table is tolerated (skip + continue).
+  const tables = ["checkpoints", "checkpoint_blobs", "checkpoint_writes"];
+  let deleted = 0;
+  for (const table of tables) {
+    try {
+      const res = await pool.query(
+        `DELETE FROM ${table} WHERE thread_id = $1`,
+        [threadId],
+      );
+      deleted += res.rowCount ?? 0;
+    } catch (err) {
+      log.warn(
+        { table, err: err instanceof Error ? err.message : String(err) },
+        "clearThreadCheckpoints: skipping table",
+      );
+    }
+  }
+  log.info({ threadId, deleted }, "Thread checkpoints cleared");
+  return deleted;
+}
+
 // ── Thread Namespace ──────────────────────────────────────────────────────────
 
 /**
