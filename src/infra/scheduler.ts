@@ -19,6 +19,7 @@ import cron from "node-cron";
 import { HumanMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
 import { getFounderContext, getPendingInterrupt } from "../db/queries.js";
+import { getOutboundTargets } from "../outbound/targets.js";
 import { sendToChat } from "../gateway/telegram.js";
 import { buildOffice } from "../agents/office.js";
 import { SCHEDULER_BRIEF_PROMPT } from "../agents/system-prompts.js";
@@ -30,6 +31,24 @@ const log = childLogger({ module: "scheduler" });
 const TENANT = process.env["FOUNDER_TENANT"] ?? "turicks";
 
 // ── Monday brief ──────────────────────────────────────────────────────────────
+
+/**
+ * Build a concise context string for the LLM from the stored founder context.
+ * Pure function — extracted for testability.
+ */
+export function buildContextText(ctx: Record<string, unknown>): string {
+  const contextLines: string[] = [];
+  for (const [key, value] of Object.entries(ctx)) {
+    if (key === "last_updated") continue;
+    const val = Array.isArray(value)
+      ? (value as string[]).join(", ") || "none"
+      : String(value || "none");
+    contextLines.push(`${key}: ${val}`);
+  }
+  return contextLines.length > 0
+    ? contextLines.join("\n")
+    : "No context stored yet. Defaults:\nactive_clients: none\nopen_deals: none\ncurrent_priorities: review pipeline, post on LinkedIn, run outreach\nnext_actions: none";
+}
 
 /** Format the founder context into a monday brief (with an LLM call). */
 async function sendMondayBrief(): Promise<void> {
@@ -43,19 +62,7 @@ async function sendMondayBrief(): Promise<void> {
     year: "numeric",
   });
 
-  // Build a concise context string for the LLM
-  const contextLines: string[] = [];
-  for (const [key, value] of Object.entries(ctx)) {
-    if (key === "last_updated") continue;
-    const val = Array.isArray(value)
-      ? (value as string[]).join(", ") || "none"
-      : String(value || "none");
-    contextLines.push(`${key}: ${val}`);
-  }
-  const contextText =
-    contextLines.length > 0
-      ? contextLines.join("\n")
-      : "No context stored yet. Defaults:\nactive_clients: none\nopen_deals: none\ncurrent_priorities: review pipeline, post on LinkedIn, run outreach\nnext_actions: none";
+  const contextText = buildContextText(ctx);
 
   // Use a fresh MemorySaver office (no checkpoint persistence for scheduler tasks)
   const office = buildOffice(new MemorySaver());
@@ -131,6 +138,19 @@ async function sendStaleApprovalReminder(): Promise<void> {
   log.info({ count: stale.length }, "Stale approval reminder sent");
 }
 
+// ── Weekly outbound nudge ─────────────────────────────────────────────────────
+
+/** Monday nudge to run the weekly outbound batch (no LLM — reads founder_context). */
+async function sendOutboundNudge(): Promise<void> {
+  const targets = await getOutboundTargets(TENANT);
+  const msg =
+    targets.length > 0
+      ? `🎯 <b>Outbound — new week</b>\n\nYou have <b>${targets.length}</b> target${targets.length === 1 ? "" : "s"} queued. Send <code>/outbound</code> to ICP-score them, then draft the winners.`
+      : `🎯 <b>Outbound — new week</b>\n\nNo prospects queued yet. Add some as you spot them: <code>/target Acme Corp</code> — then <code>/outbound</code> Monday to score the batch.`;
+  await sendToChat(msg, "HTML");
+  log.info({ targets: targets.length }, "Outbound nudge sent");
+}
+
 // ── Scheduler boot ────────────────────────────────────────────────────────────
 
 export function startScheduler(): void {
@@ -149,5 +169,12 @@ export function startScheduler(): void {
     });
   });
 
-  log.info("Scheduler started — Monday brief (Mon 8am), stale approval check (daily 9am)");
+  // Monday 8:05am — outbound nudge (just after the brief)
+  cron.schedule("5 8 * * 1", () => {
+    sendOutboundNudge().catch((err) => {
+      log.error({ err: (err as Error).message }, "Outbound nudge failed");
+    });
+  });
+
+  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), stale approval check (daily 9am)");
 }

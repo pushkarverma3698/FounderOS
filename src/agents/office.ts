@@ -24,6 +24,7 @@ import { getCheckpointer } from "../infra/checkpointer.js";
 import {
   searchWeb,
   sendEmail,
+  readEmails,
   linkedinPost,
   githubRead,
   githubWrite,
@@ -62,14 +63,14 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
 
   const research = createReactAgent({
     llm,
-    tools: [searchWeb, searchKnowledge],
+    tools: [searchWeb, searchKnowledge, readEmails],
     name: "research",
     prompt: RESEARCH_PROMPT,
   });
 
   const comms = createReactAgent({
     llm,
-    tools: [sendEmail, linkedinPost],
+    tools: [sendEmail, readEmails, linkedinPost],
     name: "comms",
     prompt: COMMS_PROMPT,
   });

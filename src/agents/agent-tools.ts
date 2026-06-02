@@ -24,6 +24,7 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import { webSearchTool } from "../tools/web-search.js";
 import { emailTool } from "../tools/email.js";
+import { readEmailsTool } from "../tools/email-reader.js";
 import { githubTool } from "../tools/github.js";
 import { linkedinPostTool } from "../tools/linkedin.js";
 import { isSuppressed } from "../db/queries.js";
@@ -222,6 +223,27 @@ export const githubWrite = tool(
       title: z.string().optional(),
       body: z.string().optional(),
       content: z.string().optional(),
+    }),
+  },
+);
+
+// ── Comms: read emails (read-only, NO approval) ────────────────────────────────
+
+export const readEmails = tool(
+  async ({ query, limit }) => {
+    const res = await readEmailsTool.execute({ query, max_results: limit ?? 10 });
+    if (!res.success) {
+      return `Email read failed: ${res.error ?? "unknown error"}. (Check that COMPOSIO_API_KEY is set.)`;
+    }
+    return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
+  },
+  {
+    name: "read_emails",
+    description:
+      "Read emails from Gmail inbox. Use Gmail search syntax: 'is:unread', 'from:alice@example.com', 'subject:invoice'. Read-only — no approval needed.",
+    schema: z.object({
+      query: z.string().optional().describe("Gmail search query (default: 'in:inbox')"),
+      limit: z.number().optional().describe("Max emails to return (default 10)"),
     }),
   },
 );

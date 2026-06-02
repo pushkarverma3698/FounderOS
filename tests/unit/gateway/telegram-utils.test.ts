@@ -1,0 +1,149 @@
+/**
+ * Unit tests for pure Telegram gateway utility functions.
+ * These are stateless helpers — no mocks needed.
+ */
+
+import { describe, it, expect } from "vitest";
+import { safeHtml, finalReply, collectToolErrors } from "../../../src/gateway/telegram.js";
+
+// ── safeHtml ──────────────────────────────────────────────────────────────────
+
+describe("safeHtml", () => {
+  it("escapes ampersands", () => {
+    expect(safeHtml("A & B")).toBe("A &amp; B");
+  });
+
+  it("escapes angle brackets", () => {
+    expect(safeHtml("<script>alert(1)</script>")).toBe("&lt;script&gt;alert(1)&lt;/script&gt;");
+  });
+
+  it("escapes double quotes", () => {
+    expect(safeHtml('say "hello"')).toBe("say &quot;hello&quot;");
+  });
+
+  it("returns plain text unchanged", () => {
+    expect(safeHtml("Hello world")).toBe("Hello world");
+  });
+
+  it("handles empty string", () => {
+    expect(safeHtml("")).toBe("");
+  });
+
+  it("escapes all special chars in one string", () => {
+    expect(safeHtml('<a href="x&y">test</a>')).toBe(
+      '&lt;a href=&quot;x&amp;y&quot;&gt;test&lt;/a&gt;',
+    );
+  });
+});
+
+// ── finalReply ────────────────────────────────────────────────────────────────
+
+function makeMsg(type: string, content: unknown, tool_calls?: unknown[]) {
+  return { content, _getType: () => type, ...(tool_calls ? { tool_calls } : {}) };
+}
+
+describe("finalReply", () => {
+  it("returns the last AI message text", () => {
+    const res = {
+      messages: [
+        makeMsg("human", "hello"),
+        makeMsg("ai", "First response"),
+        makeMsg("ai", "Final response"),
+      ],
+    };
+    expect(finalReply(res)).toBe("Final response");
+  });
+
+  it("skips AI messages that only have tool_calls", () => {
+    const res = {
+      messages: [
+        makeMsg("ai", "", [{ name: "search_web" }]),
+        makeMsg("tool", "search result"),
+        makeMsg("ai", "Based on research: X"),
+      ],
+    };
+    expect(finalReply(res)).toBe("Based on research: X");
+  });
+
+  it("trims whitespace from the reply", () => {
+    const res = { messages: [makeMsg("ai", "  hello  ")] };
+    expect(finalReply(res)).toBe("hello");
+  });
+
+  it("returns fallback when no AI messages", () => {
+    const res = { messages: [makeMsg("human", "hello")] };
+    expect(finalReply(res)).toBe("✅ Done.");
+  });
+
+  it("returns fallback when messages is empty", () => {
+    expect(finalReply({ messages: [] })).toBe("✅ Done.");
+  });
+
+  it("returns fallback when messages is undefined", () => {
+    expect(finalReply({})).toBe("✅ Done.");
+  });
+
+  it("skips AI messages with empty content", () => {
+    const res = {
+      messages: [makeMsg("ai", ""), makeMsg("ai", "Real reply")],
+    };
+    expect(finalReply(res)).toBe("Real reply");
+  });
+});
+
+// ── collectToolErrors ─────────────────────────────────────────────────────────
+
+describe("collectToolErrors", () => {
+  it("returns empty array when no tool messages", () => {
+    const res = { messages: [makeMsg("human", "hi"), makeMsg("ai", "ok")] };
+    expect(collectToolErrors(res)).toEqual([]);
+  });
+
+  it("returns empty array when tool messages have no error keywords", () => {
+    const res = { messages: [makeMsg("tool", "3 results found")] };
+    expect(collectToolErrors(res)).toEqual([]);
+  });
+
+  it("collects 'error' keyword tool messages", () => {
+    const res = { messages: [makeMsg("tool", "Search error: timeout")] };
+    expect(collectToolErrors(res)).toHaveLength(1);
+    expect(collectToolErrors(res)[0]).toContain("Search error");
+  });
+
+  it("collects 'not configured' keyword tool messages", () => {
+    const res = { messages: [makeMsg("tool", "COMPOSIO_API_KEY not configured")] };
+    expect(collectToolErrors(res)).toHaveLength(1);
+  });
+
+  it("collects 'fail' keyword", () => {
+    const res = { messages: [makeMsg("tool", "Email send failed: 401")] };
+    expect(collectToolErrors(res)).toHaveLength(1);
+  });
+
+  it("collects 'blocked' keyword", () => {
+    const res = { messages: [makeMsg("tool", "BLOCKED: address on suppression list")] };
+    expect(collectToolErrors(res)).toHaveLength(1);
+  });
+
+  it("collects multiple tool errors", () => {
+    const res = {
+      messages: [
+        makeMsg("tool", "Web search failed"),
+        makeMsg("ai", "trying another approach"),
+        makeMsg("tool", "Email error: timeout"),
+      ],
+    };
+    expect(collectToolErrors(res)).toHaveLength(2);
+  });
+
+  it("truncates long error messages to 300 chars", () => {
+    const longMsg = "error: " + "x".repeat(400);
+    const res = { messages: [makeMsg("tool", longMsg)] };
+    expect(collectToolErrors(res)[0]!.length).toBeLessThanOrEqual(300);
+  });
+
+  it("ignores non-tool messages even if they contain error keywords", () => {
+    const res = { messages: [makeMsg("ai", "there was an error in the system")] };
+    expect(collectToolErrors(res)).toEqual([]);
+  });
+});
