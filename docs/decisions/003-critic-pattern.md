@@ -1,7 +1,7 @@
 # ADR-003: The Critic Pattern — Cross-Model Quality Gate
 
 **Date:** 2025-05  
-**Status:** Accepted  
+**Status:** Accepted (v1) — quality-gate role **superseded by ADR-011** (eval harness) in v2; the critic node itself was dropped in ADR-010.  
 **Context:** AI agents produce output that goes to real prospects, gets committed to GitHub, or publishes to LinkedIn. We need a quality gate that catches mistakes before human review.
 
 ---
