@@ -33,6 +33,7 @@ import { buildBatchPrompt, splitBatch, parseCompanyArgs } from "../outbound/batc
 import { getSystemStatus, formatStatusMessage } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
 import { getFounderContext, upsertFounderContext } from "../db/queries.js";
+import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 
 const log = logger.child({ module: "telegram" });
 
@@ -315,7 +316,8 @@ export function registerHandlers(bot: Bot): void {
       `<code>/start</code> — welcome message + quick-start guide\n` +
       `<code>/commands</code> — this list\n` +
       `<code>/departments</code> — what each department does\n` +
-      `<code>/status</code> — uptime, pending approvals, emails sent today\n\n` +
+      `<code>/status</code> — uptime, pending approvals, emails sent today\n` +
+      `<code>/reset</code> — wipe this chat's memory (start a fresh conversation)\n\n` +
 
       `<b>📋 Context</b>\n` +
       `<code>/context</code> — view your stored business context (clients, priorities)\n` +
@@ -427,6 +429,26 @@ export function registerHandlers(bot: Bot): void {
       parse_mode: "HTML",
     });
     log.info({ key, value }, "Founder context updated via /context command");
+  });
+
+  // ── /reset — wipe this chat's conversation memory ─────────────────────────
+  // Thread IDs are stable per chat, so the checkpointer keeps the entire
+  // history forever and replays it each turn (cost + behaviour drift). This
+  // clears it so the office starts fresh.
+  bot.command("reset", async (ctx: Context) => {
+    const chatId = ctx.chat?.id;
+    if (chatId === undefined) return;
+    try {
+      const deleted = await clearThreadCheckpoints(threadIdFor(chatId));
+      await ctx.reply(
+        `🧹 <b>Conversation reset.</b> Cleared ${deleted} memory snapshot${deleted === 1 ? "" : "s"}.\n` +
+          `The office now starts fresh — past turns won't influence new replies.`,
+        { parse_mode: "HTML" },
+      );
+      log.info({ chatId, deleted }, "Thread reset via /reset command");
+    } catch (err) {
+      await ctx.reply(`❌ Reset failed: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
+    }
   });
 
   // ── Free-text messages → office ────────────────────────────────────────────
