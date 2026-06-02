@@ -38,15 +38,16 @@ describe("readEmailsTool", () => {
   });
 
   it("returns formatted email list on success", async () => {
+    // Use real Composio GMAIL_FETCH_EMAILS response field names
     mockExecuteComposioAction.mockResolvedValue({
       data: {
         messages: [
           {
-            id: "msg1",
-            from: "alice@example.com",
+            messageId: "msg1",
+            sender: "alice@example.com",
             subject: "Hello there",
-            snippet: "Just checking in...",
-            date: "2026-06-01",
+            messageText: "Just checking in...",
+            messageTimestamp: "2026-06-01T10:00:00Z",
           },
         ],
       },

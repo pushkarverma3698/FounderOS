@@ -113,3 +113,21 @@ export function getLinkedInUserId(): string {
     readKeyFromEnvFile("COMPOSIO_LINKEDIN_USER_ID") ??
     "turicks-internal";
 }
+
+/**
+ * Instagram connected account ID.
+ * Current status: ca_Uolj7XmgVl0L is EXPIRED — reconnect at app.composio.dev
+ * After reconnect: update COMPOSIO_INSTAGRAM_CONN_ID in .env or hardcode new ID here.
+ */
+export function getInstagramConnectionId(): string {
+  return process.env["COMPOSIO_INSTAGRAM_CONN_ID"] ??
+    readKeyFromEnvFile("COMPOSIO_INSTAGRAM_CONN_ID") ??
+    "ca_Uolj7XmgVl0L";  // EXPIRED — reconnect in Composio dashboard
+}
+
+/** Instagram user ID. */
+export function getInstagramUserId(): string {
+  return process.env["COMPOSIO_INSTAGRAM_USER_ID"] ??
+    readKeyFromEnvFile("COMPOSIO_INSTAGRAM_USER_ID") ??
+    "turicks-internal";
+}

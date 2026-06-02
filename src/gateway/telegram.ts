@@ -223,8 +223,10 @@ export function registerHandlers(bot: Bot): void {
         `• <code>/outbound</code> — ICP-score the list (or <code>/outbound stripe.com</code> ad-hoc)\n` +
         `  then <i>"draft outreach to &lt;winner&gt;"</i> to send (you approve first)\n\n` +
         `⚙️ <b>System</b>\n` +
+        `• <code>/commands</code> — full command list\n` +
+        `• <code>/departments</code> — what each department does\n` +
         `• <code>/status</code> — uptime, pending approvals, emails sent today\n` +
-        `• <code>/context</code> — view/update your business context (clients, priorities)\n\n` +
+        `• <code>/context</code> — view/update your business context\n\n` +
         `🔒 Anything that leaves the building (email, LinkedIn, GitHub writes) asks for your approval first.`,
       { parse_mode: "HTML" },
     );
@@ -301,6 +303,87 @@ export function registerHandlers(bot: Bot): void {
       );
     }
     await runOfficeText(ctx, buildBatchPrompt(batch));
+  });
+
+  // ── /commands — full command reference ────────────────────────────────────
+
+  bot.command("commands", async (ctx: Context) => {
+    await ctx.reply(
+      `📋 <b>FounderOS — All Commands</b>\n\n` +
+
+      `<b>💬 General</b>\n` +
+      `<code>/start</code> — welcome message + quick-start guide\n` +
+      `<code>/commands</code> — this list\n` +
+      `<code>/departments</code> — what each department does\n` +
+      `<code>/status</code> — uptime, pending approvals, emails sent today\n\n` +
+
+      `<b>📋 Context</b>\n` +
+      `<code>/context</code> — view your stored business context (clients, priorities)\n` +
+      `<code>/context set &lt;key&gt; &lt;value&gt;</code> — update a key\n` +
+      `  Valid keys: <code>active_clients</code> · <code>current_priorities</code> · <code>open_deals</code> · <code>next_actions</code> · <code>focus</code>\n` +
+      `  Example: <code>/context set active_clients Acme, Beta Ltd</code>\n\n` +
+
+      `<b>🎯 Outbound</b>\n` +
+      `<code>/target &lt;company&gt;</code> — add prospect(s) to this week's list (comma-separated)\n` +
+      `<code>/targets</code> — show the current prospect list\n` +
+      `<code>/targets clear</code> — empty the list\n` +
+      `<code>/untarget &lt;company&gt;</code> — remove a specific prospect\n` +
+      `<code>/outbound</code> — ICP-score the whole list (no approval needed)\n` +
+      `<code>/outbound &lt;company&gt;</code> — score a single company ad-hoc\n\n` +
+
+      `<b>🔒 Approval-gated actions</b> (bot asks before sending)\n` +
+      `<i>"Email alex@acme.com about X"</i> → approval card → ✅/❌\n` +
+      `<i>"Post to LinkedIn about X"</i> → approval card → ✅/❌\n` +
+      `<i>"Create a GitHub issue on X"</i> → approval card → ✅/❌\n\n` +
+
+      `<b>📖 Free-text triggers (no command needed)</b>\n` +
+      `<i>"Research what Stripe does"</i>\n` +
+      `<i>"Check my unread emails"</i>\n` +
+      `<i>"Score Acme Corp as a Turicks prospect"</i>\n` +
+      `<i>"Draft a LinkedIn post about AI automation"</i>`,
+      { parse_mode: "HTML" },
+    );
+  });
+
+  // ── /departments — department directory ───────────────────────────────────
+
+  bot.command("departments", async (ctx: Context) => {
+    await ctx.reply(
+      `🏢 <b>FounderOS — Departments</b>\n\n` +
+
+      `<b>🔍 Research</b>\n` +
+      `Web search + knowledge base lookup + email inbox read\n` +
+      `Tools: <code>search_web</code> · <code>search_knowledge</code> · <code>read_emails</code>\n` +
+      `Triggers: "Research X", "What does Y do?", "Check my inbox"\n\n` +
+
+      `<b>📨 Comms</b>\n` +
+      `Email and LinkedIn comms — all writes are HITL-gated\n` +
+      `Tools: <code>send_email</code>✋ · <code>read_emails</code> · <code>linkedin_post</code>✋\n` +
+      `Triggers: "Email X about Y", "Reply to...", "Message..."\n\n` +
+
+      `<b>⚙️ Engineering</b>\n` +
+      `GitHub read/write — pushes are HITL-gated\n` +
+      `Tools: <code>github_read</code> · <code>github_write</code>✋\n` +
+      `Triggers: "List my repos", "Create an issue on...", "Update README"\n\n` +
+
+      `<b>📣 Marketing</b>\n` +
+      `LinkedIn content in Turicks brand voice — posts are HITL-gated\n` +
+      `Tools: <code>search_web</code> · <code>linkedin_post</code>✋ · <code>search_knowledge</code>\n` +
+      `Triggers: "Draft a LinkedIn post about X", "Write content for..."\n\n` +
+
+      `<b>📈 Sales</b>\n` +
+      `Cold outreach drafting — emails are HITL-gated, ≤150 words\n` +
+      `Tools: <code>search_web</code> · <code>send_email</code>✋ · <code>search_knowledge</code>\n` +
+      `Triggers: "Draft outreach to Acme", "Write a cold email to..."\n\n` +
+
+      `<b>🎯 Prospecting</b>\n` +
+      `ICP scoring (1-10) — research only, no writes\n` +
+      `Tools: <code>search_web</code> · <code>search_knowledge</code>\n` +
+      `Triggers: "Score Acme as a prospect", "/outbound"\n\n` +
+
+      `✋ = requires your approval before action executes`,
+      { parse_mode: "HTML" },
+    );
   });
 
   // ── /status — system health snapshot ──────────────────────────────────────
