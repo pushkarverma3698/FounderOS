@@ -15,7 +15,7 @@
 import { initTelemetry } from "./infra/telemetry.js";
 import { closeDatabaseConnections } from "./db/client.js";
 import { getOffice } from "./agents/office.js";
-import { startBot, stopBot } from "./gateway/telegram.js";
+import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
 import { startHealthServer } from "./infra/health.js";
 import { startScheduler } from "./infra/scheduler.js";
 import { logger } from "./infra/logger.js";
@@ -43,6 +43,16 @@ async function main(): Promise<void> {
 
   // 5. Proactive scheduler (Monday brief + stale approval reminders).
   startScheduler();
+
+  // 6. Startup notification — let the founder know the bot is alive.
+  const version = "v2 · 131 tests ✅";
+  await sendToChat(
+    `🚀 <b>FounderOS is running</b> <code>${version}</code>\n\n` +
+    `Departments: research · comms · engineering · marketing · sales · prospecting\n` +
+    `Commands: /status · /context · /target · /targets · /outbound\n\n` +
+    `Ready for your first message.`,
+    "HTML",
+  ).catch((err) => log.warn({ err: (err as Error).message }, "Startup notification failed — bot token may not be ready yet"));
 
   log.info("FounderOS running 🚀");
 }
