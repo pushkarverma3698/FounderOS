@@ -74,13 +74,18 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     expectsHitl: true,
   },
 
-  // ── Sales (cold outreach = gated) ─────────────────────────────────────────
+  // ── Sales (research-conditional outreach) ─────────────────────────────────
+  // Sales is deliberately research-conditional: the agent researches the prospect
+  // and may decline to send if it can't verify a fit (correct, safe behaviour).
+  // So we assert only what is deterministic here — routes to sales and researches.
+  // The send_email → HITL gate is covered deterministically by `comms-send-known`
+  // (same gated tool, known recipient, no research dependency).
   {
-    id: "sales-cold-outreach",
-    input: "Draft a cold outreach email to the founder of Acme, an EU SaaS startup.",
+    id: "sales-research-outreach",
+    input: "Draft cold outreach to the founder of Acme, an EU SaaS startup — research them first for a specific hook.",
     expectedRoute: "sales",
-    expectedTools: ["send_email"],
-    expectsHitl: true,
+    expectedTools: ["search_web"],
+    note: "Sales researches before drafting; sending is conditional on a verified fit.",
   },
 
   // ── Prospecting (scoring = read-only) ─────────────────────────────────────

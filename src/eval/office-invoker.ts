@@ -1,17 +1,21 @@
 /**
  * FounderOS — Live Office Invoker for the Eval Harness
  * =====================================================
- * Bridges the eval runner to the real office graph. Two parts:
+ * Bridges the eval runner to the real office graph.
  *
- *   extractObservation(messages, hadInterrupt)  — PURE, unit-tested. Reads what
- *     the office did from the message trail: the routed department (from the
- *     supervisor's `transfer_to_<dept>` handoff), the tools that ran, and whether
- *     the run paused for approval.
+ * Observability note (live-test finding, 2026-06-03): langgraph-supervisor
+ * defaults to outputMode "last_message", so a sub-agent's INTERNAL tool calls
+ * never appear in the top-level message trail — only the supervisor's own
+ * handoff does. So we observe the two things from two sources:
+ *   - route: the message trail (the supervisor's `transfer_to_<dept>` call)
+ *   - tools: a LangChain callback (handleToolStart fires for every tool, even
+ *            inside sub-agents) — production behaviour is unchanged, the callback
+ *            is eval-only instrumentation.
  *
- *   makeOfficeInvoker(office, getPending)        — the live wiring. Runs each task
- *     on a throwaway thread and observes the result. It NEVER resumes/approves, so
- *     no external action (email/LinkedIn/GitHub write) ever fires during an eval —
- *     side effects only happen after approval, which the eval never gives.
+ * Pure helpers (routeFromMessages, collectDeptTools, extractObservation) are
+ * unit-tested without an LLM. makeOfficeInvoker is the live wiring; it observes
+ * each run up to the approval pause and NEVER approves, so no external action
+ * (email / LinkedIn / GitHub write) ever fires during an eval.
  */
 
 import { HumanMessage } from "@langchain/core/messages";
@@ -36,37 +40,49 @@ interface TrailMessage {
 }
 
 /**
- * Derive an Observation from the office's returned messages.
- * - route: the LAST `transfer_to_<dept>` handoff that targets a real department
- * - tools: every non-transfer tool call name, de-duplicated, in first-seen order
+ * Derive the routed department from the message trail: the LAST
+ * `transfer_to_<dept>` handoff that targets a real department.
  */
-export function extractObservation(
-  messages: TrailMessage[],
-  hadInterrupt: boolean,
-): Observation {
+export function routeFromMessages(messages: TrailMessage[]): Department | null {
   let route: Department | null = null;
-  const tools: string[] = [];
-  const seen = new Set<string>();
-
   for (const m of messages ?? []) {
     for (const call of m.tool_calls ?? []) {
       const name = call.name;
-      if (!name) continue;
-      if (name.startsWith(TRANSFER_PREFIX)) {
-        const target = name.slice(TRANSFER_PREFIX.length);
-        if (DEPARTMENTS.has(target as Department)) {
-          route = target as Department; // last one wins
-        }
-        continue; // never count the handoff as a department tool
-      }
-      if (!seen.has(name)) {
-        seen.add(name);
-        tools.push(name);
-      }
+      if (!name || !name.startsWith(TRANSFER_PREFIX)) continue;
+      const target = name.slice(TRANSFER_PREFIX.length);
+      if (DEPARTMENTS.has(target as Department)) route = target as Department;
     }
   }
+  return route;
+}
 
-  return { route, tools, hadInterrupt };
+/**
+ * Reduce a stream of observed tool-start names into the department tools used:
+ * de-duplicated, first-seen order, with handoff tools (transfer_*) excluded.
+ */
+export function collectDeptTools(toolNames: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const name of toolNames ?? []) {
+    if (!name || name.startsWith(TRANSFER_PREFIX)) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+/** Assemble an Observation from the trail (route), callback names (tools), and HITL state. */
+export function extractObservation(
+  messages: TrailMessage[],
+  toolNames: string[],
+  hadInterrupt: boolean,
+): Observation {
+  return {
+    route: routeFromMessages(messages),
+    tools: collectDeptTools(toolNames),
+    hadInterrupt,
+  };
 }
 
 /** Office surface the invoker needs (kept narrow for testability). */
@@ -76,7 +92,10 @@ interface OfficeLike {
 
 /**
  * Build a live Invoker. Each task runs on a unique throwaway thread so eval runs
- * never poison each other or the founder's real conversation history.
+ * never poison each other or the founder's real conversation history. A
+ * tool-collecting callback records every tool that starts (including inside
+ * sub-agents), which is the only reliable way to observe tool usage under
+ * outputMode "last_message".
  *
  * @param office     compiled office graph (from getOffice())
  * @param getPending (office, config) => pending approval | null  (getPendingApproval)
@@ -89,8 +108,29 @@ export function makeOfficeInvoker(
     const threadId = `eval:${task.id}:${Date.now()}`;
     const config: RunnableConfig = { configurable: { thread_id: threadId } };
 
-    const res = await office.invoke({ messages: [new HumanMessage(task.input)] }, config);
+    const toolNames: string[] = [];
+    const toolCollector = {
+      name: "eval-tool-collector",
+      // handleToolStart fires before the tool body runs (so even gated tools that
+      // interrupt() are captured). runName is the tool's name (e.g. "send_email").
+      handleToolStart: (
+        _tool: unknown,
+        _input: unknown,
+        _runId: unknown,
+        _parentRunId?: unknown,
+        _tags?: unknown,
+        _metadata?: unknown,
+        runName?: string,
+      ): void => {
+        if (runName) toolNames.push(runName);
+      },
+    };
+
+    const res = await office.invoke(
+      { messages: [new HumanMessage(task.input)] },
+      { configurable: { thread_id: threadId }, callbacks: [toolCollector] },
+    );
     const pending = await getPending(office, config);
-    return extractObservation(res.messages ?? [], pending !== null);
+    return extractObservation(res.messages ?? [], toolNames, pending !== null);
   };
 }
