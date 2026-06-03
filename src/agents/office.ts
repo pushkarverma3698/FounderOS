@@ -21,6 +21,7 @@ import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import type { CompiledStateGraph, BaseCheckpointSaver } from "@langchain/langgraph";
 import { getModel } from "./model.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
+import { createTrimmedPrompt } from "../infra/context-manager.js";
 import {
   searchWeb,
   sendEmail,
@@ -61,25 +62,34 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   // search_knowledge: turicks-brain keyword search (no LLM cost)
   // read_context / update_context: supervisor-only business state
 
+  // Token budgets (trimming happens before each LLM call, not in the checkpointer):
+  //   Sub-agents: 4000 tokens — tool-focused, short working memory is enough
+  //   Supervisor: 6000 tokens — needs routing context across more turns
+  const subAgentBudget = { maxTokens: 4000 };
+  const supervisorBudget = { maxTokens: 6000 };
+
   const research = createReactAgent({
     llm,
     tools: [searchWeb, searchKnowledge, readEmails],
     name: "research",
-    prompt: RESEARCH_PROMPT,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prompt: createTrimmedPrompt(RESEARCH_PROMPT, subAgentBudget) as any,
   });
 
   const comms = createReactAgent({
     llm,
     tools: [sendEmail, readEmails, linkedinPost],
     name: "comms",
-    prompt: COMMS_PROMPT,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prompt: createTrimmedPrompt(COMMS_PROMPT, subAgentBudget) as any,
   });
 
   const engineering = createReactAgent({
     llm,
     tools: [githubRead, githubWrite],
     name: "engineering",
-    prompt: ENGINEERING_PROMPT,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prompt: createTrimmedPrompt(ENGINEERING_PROMPT, subAgentBudget) as any,
   });
 
   // ── Phase B departments ───────────────────────────────────────────────────
@@ -89,7 +99,8 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     llm,
     tools: [searchWeb, linkedinPost, searchKnowledge],
     name: "marketing",
-    prompt: MARKETING_PROMPT,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prompt: createTrimmedPrompt(MARKETING_PROMPT, subAgentBudget) as any,
   });
 
   /** Sales: researches prospects + writes cold outreach emails (HITL-gated). */
@@ -97,7 +108,8 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     llm,
     tools: [searchWeb, sendEmail, searchKnowledge],
     name: "sales",
-    prompt: SALES_PROMPT,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prompt: createTrimmedPrompt(SALES_PROMPT, subAgentBudget) as any,
   });
 
   /** Prospecting: ICP scoring — research-only, no write tools. */
@@ -105,13 +117,15 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     llm,
     tools: [searchWeb, searchKnowledge],
     name: "prospecting",
-    prompt: PROSPECTING_PROMPT,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prompt: createTrimmedPrompt(PROSPECTING_PROMPT, subAgentBudget) as any,
   });
 
   return createSupervisor({
     agents: [research, comms, engineering, marketing, sales, prospecting],
     llm,
-    prompt: SUPERVISOR_PROMPT,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prompt: createTrimmedPrompt(SUPERVISOR_PROMPT, supervisorBudget) as any,
     // Supervisor-level tools: context read/write (not delegated to departments)
     tools: [readContext, updateContext],
     // Gemini (and most non-OpenAI providers) can't accept the agent name as a

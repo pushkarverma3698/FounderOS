@@ -1,0 +1,99 @@
+/**
+ * Unit tests for the context manager (rolling-window message trimmer).
+ *
+ * Why: LangGraph checkpointer stores ALL messages forever. Without trimming,
+ * every LLM call pays O(n) tokens where n = turn count. createTrimmedPrompt()
+ * returns a MessageModifier that prepends the system prompt and trims history
+ * to a token budget before each LLM call — the Claude Code pattern.
+ *
+ * trimMessages from @langchain/core/messages is deterministic, so no mocks needed.
+ * RED: these fail until src/infra/context-manager.ts is implemented.
+ */
+
+import { describe, it, expect } from "vitest";
+import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
+import { createTrimmedPrompt, estimateMessageTokens } from "../../../src/infra/context-manager.js";
+
+function makeHistory(n: number): Array<HumanMessage | AIMessage> {
+  return Array.from({ length: n }, (_, i) =>
+    i % 2 === 0
+      ? new HumanMessage(`user turn ${i}`)
+      : new AIMessage(`assistant turn ${i}`)
+  );
+}
+
+describe("createTrimmedPrompt", () => {
+  it("returns a callable MessageModifier", () => {
+    const modifier = createTrimmedPrompt("You are an assistant.", {});
+    expect(typeof modifier).toBe("function");
+  });
+
+  it("empty history → only the system message is returned", async () => {
+    const modifier = createTrimmedPrompt("You are an assistant.", { maxTokens: 4000 });
+    const result = await modifier([]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toBeInstanceOf(SystemMessage);
+    expect((result[0] as SystemMessage).content).toBe("You are an assistant.");
+  });
+
+  it("short history (under budget) passes through unchanged + system prepended", async () => {
+    const modifier = createTrimmedPrompt("System.", { maxTokens: 4000 });
+    const history = makeHistory(4); // tiny, well under 4000 tokens
+    const result = await modifier(history);
+    // system msg + 4 history messages
+    expect(result[0]).toBeInstanceOf(SystemMessage);
+    expect(result.length).toBe(5);
+  });
+
+  it("large history is trimmed — result stays within token budget", async () => {
+    const modifier = createTrimmedPrompt("System.", { maxTokens: 500 });
+    const history = makeHistory(100); // ~100 * ~15 chars * 0.25 tokens ≈ 375 tokens — but let's be safe
+    // Each message is ~13 chars → ~3-4 tokens. 100 messages = ~350 tokens.
+    // Use very small budget to force trimming.
+    const tinyModifier = createTrimmedPrompt("System.", { maxTokens: 100 });
+    const result = await tinyModifier(history);
+    // All returned messages (excluding system) must sum to <= 100 tokens
+    const totalTokens = estimateMessageTokens(result);
+    expect(totalTokens).toBeLessThanOrEqual(150); // small buffer for system msg overhead
+    // Must have fewer messages than the full 100 history
+    expect(result.length).toBeLessThan(101);
+  });
+
+  it("system prompt is always the first message regardless of trimming", async () => {
+    const modifier = createTrimmedPrompt("Fixed system.", { maxTokens: 50 });
+    const history = makeHistory(50);
+    const result = await modifier(history);
+    expect(result[0]).toBeInstanceOf(SystemMessage);
+    expect((result[0] as SystemMessage).content).toBe("Fixed system.");
+  });
+
+  it("most recent messages are kept when trimming (rolling window)", async () => {
+    const modifier = createTrimmedPrompt("Sys.", { maxTokens: 100 });
+    // Create distinct messages so we can identify which were kept
+    const history = [
+      new HumanMessage("OLDEST message — should be trimmed"),
+      new AIMessage("old reply"),
+      new HumanMessage("middle message"),
+      new AIMessage("middle reply"),
+      new HumanMessage("NEWEST message — must be kept"),
+      new AIMessage("newest reply"),
+    ];
+    const result = await modifier(history);
+    const contents = result.map((m) => (typeof m.content === "string" ? m.content : ""));
+    // The newest message must be present
+    expect(contents.some((c) => c.includes("NEWEST"))).toBe(true);
+  });
+});
+
+describe("estimateMessageTokens", () => {
+  it("returns 0 for empty array", () => {
+    expect(estimateMessageTokens([])).toBe(0);
+  });
+
+  it("estimates ~1 token per 4 chars", () => {
+    const msgs = [new HumanMessage("a".repeat(400))]; // 400 chars → ~100 tokens
+    const estimate = estimateMessageTokens(msgs);
+    expect(estimate).toBeGreaterThanOrEqual(90);
+    expect(estimate).toBeLessThanOrEqual(110);
+  });
+});
