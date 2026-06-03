@@ -228,6 +228,37 @@ docker exec -it turicks-postgres psql -U turicks -d turicks -c \
 | When writing content | Ask: "Draft a LinkedIn post about [what you did this week]" → Approve if good |
 | When prospecting | "Research [company] and tell me if they're a good Turicks prospect" |
 | When closing a deal | "Draft an intro email to [name] at [company] about [specific pain point]" |
+| When working on your Mac | "List the files in ~/Projects/founderos" · "Run `pnpm test` in my founderos folder" · "Open hckrnews.com in Safari" |
+
+---
+
+## Personal Department (your laptop, over Telegram)
+
+The `personal` department is a senior engineer on your own Mac. Ask in plain language and it
+reads files, edits them, runs scripts, and drives Safari — confined to your home directory.
+
+**Safety (non-negotiable, enforced in code — not just the prompt):**
+- **Reads are instant.** Listing or reading a file needs no approval.
+- **Every write, shell command, and browser action stops for your approval** — a Telegram card
+  shows exactly what it will do; nothing runs until you tap **Approve**.
+- **File tools are confined to `$HOME`.** `read_file` / `list_dir` / `write_file` cannot reach
+  outside your home directory (no `/etc`, `/System`, `/tmp`).
+- **Secrets are blocked even for reads** (file tools) — `~/.ssh`, `~/.aws`, `~/.gnupg`, keychains,
+  any `.env` or `*.pem`. A prompt-injected file read can never exfiltrate them.
+- **Shell commands run as you.** `run_shell` confines only the *working directory* to `$HOME` — the
+  command itself runs with your user's full permissions, so it *could* read elsewhere. That's why
+  **every shell command stops at an approval card** showing the exact command. Read it before approving.
+- **Catastrophic commands are flagged** (`rm -rf`, `mkfs`, fork bombs…) right on the approval card.
+
+**Examples that work:**
+- "Read ~/.zshrc and tell me what's in it" → instant
+- "Create a file `notes.md` on my Desktop with my todo list" → approval card → writes on Approve
+- "Run `git status` in ~/Projects/founderos" → approval card → runs on Approve
+- "Open https://news.ycombinator.com in Safari" → approval card → opens on Approve
+
+**Scope note:** browser is an AppleScript MVP (open URL / read page text / run JS). Full Safari-MCP
+integration is deferred (see ADR-012). The `personal` department stays separate from `engineering`
+by design — least privilege, smaller blast radius (see ADR-013).
 
 ---
 

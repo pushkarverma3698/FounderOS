@@ -123,13 +123,28 @@ All grammy handlers are `async` and respond immediately. Long-running work happe
 Special command: `/prospect <url>` — kicks off the full outbound pipeline (disambiguate → research → ICP score → BDR → HITL).
 
 ### Brain Layer (`src/agents/`)
-LangGraph `StateGraph`:
-- **Supervisor** (`supervisor.ts`) — CEO-tier LLM, emits `Command({ goto: dept })`
-- **ProspectingPod** (`pods/prospecting.ts`) — qualifies inbound leads before SalesPod
-- **Department pods** (`pods/`) — Sales, Engineering, Marketing — each a compiled subgraph
-- **Critic** (`critic.ts`) — runs after generators; uses *different model family* to prevent sycophancy
+**v2 (current):** a prebuilt LangGraph supervisor (`office.ts`, `createSupervisor` +
+`createReactAgent`) routes each request to one of **7 scoped department sub-agents**. Each
+department is a ReAct agent holding only its own tools (least privilege, ADR-013):
 
-Graph compiled **once at startup**. Never compile per-request.
+| Department | Tools | Gating |
+|------------|-------|--------|
+| `research` | `search_web`, `search_knowledge`, `read_emails` | read-only |
+| `comms` | `send_email*`, `read_emails`, `linkedin_post*` | HITL on sends |
+| `engineering` | `github_read`, `github_write*` | HITL on write |
+| `marketing` | `search_web`, `linkedin_post*`, `search_knowledge` | HITL on post |
+| `sales` | `search_web`, `send_email*`, `search_knowledge` | HITL on send |
+| `prospecting` | `search_web`, `search_knowledge` | read-only |
+| `personal` | `read_file`, `list_dir`, `write_file*`, `run_shell*`, `browser*` | HITL on write/shell/browser; `path-guard` confines to `$HOME` |
+
+`*` = founder approval via native `interrupt()`. The **supervisor holds no dangerous tools** (only
+`read_context` / `update_context`). Cross-domain tasks are handled by the supervisor sequencing a
+**handoff** between scoped departments — never one agent holding both keys (ADR-013).
+
+Graph compiled **once at startup** (`getOffice()`). Never compile per-request.
+
+> **Note:** the v1 pod/critic design below (`pods/`, `critic.ts`, `supervisor.ts`) is **superseded**
+> by the v2 office (ADR-010). Sections referencing pods describe the historical architecture.
 
 ### Caching Layer (`src/infra/redis.ts`)
 Redis is exclusively for ephemeral data with natural TTLs:
