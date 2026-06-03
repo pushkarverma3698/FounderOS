@@ -30,6 +30,15 @@ import { linkedinPostTool } from "../tools/linkedin.js";
 import { isSuppressed } from "../db/queries.js";
 import { childLogger } from "../infra/logger.js";
 import { validateBrandVoice } from "../infra/brand-validator.js";
+import { flagDangerousCommand, personalRoot } from "../infra/path-guard.js";
+import {
+  readFileSafe,
+  listDirSafe,
+  writeFileSafe,
+  runShellSafe,
+  browserAction,
+  type BrowserAction,
+} from "../tools/personal.js";
 
 const log = childLogger({ module: "agent-tools" });
 
@@ -259,6 +268,145 @@ export const readEmails = tool(
     schema: z.object({
       query: z.string().optional().describe("Gmail search query (default: 'in:inbox')"),
       limit: z.number().optional().describe("Max emails to return (default 10)"),
+    }),
+  },
+);
+
+// ── Personal: read a file (read-only, NO approval) ────────────────────────────
+
+export const readFile = tool(
+  async ({ path: filePath }) => {
+    const r = await readFileSafe(filePath);
+    if (!r.ok) return r.error;
+    return r.content.length ? r.content : "(file is empty)";
+  },
+  {
+    name: "read_file",
+    description:
+      `Read a text file on the founder's laptop (under ${personalRoot()}). Read-only — no approval needed. Secret paths (.ssh, .env, keychains, *.pem) are blocked.`,
+    schema: z.object({
+      path: z.string().describe("File path, e.g. 'Projects/app/README.md' or '~/Desktop/notes.txt'"),
+    }),
+  },
+);
+
+// ── Personal: list a directory (read-only, NO approval) ───────────────────────
+
+export const listDir = tool(
+  async ({ path: dirPath }) => {
+    const r = await listDirSafe(dirPath ?? ".");
+    if (!r.ok) return r.error;
+    return r.entries.length ? r.entries.join("\n") : "(empty directory)";
+  },
+  {
+    name: "list_dir",
+    description:
+      "List the contents of a directory on the founder's laptop (under the personal root). Read-only — no approval needed.",
+    schema: z.object({
+      path: z.string().optional().describe("Directory path (default: personal root)"),
+    }),
+  },
+);
+
+// ── Personal: write a file (WRITE — requires approval) ────────────────────────
+
+export const writeFile = tool(
+  async ({ path: filePath, content }) => {
+    const decision = interrupt({
+      kind: "approval",
+      action: "write_file",
+      title: `💾 Write file ${filePath}?`,
+      summary: `Write ${content.length} chars to ${filePath}`,
+      preview: content.slice(0, 2000),
+      args: { path: filePath, content },
+    } satisfies ApprovalRequest) as string;
+
+    if (decision !== "approved") {
+      return `File ${filePath} was NOT written — the founder rejected it.`;
+    }
+
+    const r = await writeFileSafe(filePath, content);
+    if (!r.ok) return `Write failed: ${r.error}`;
+    log.info({ path: r.path }, "File written via personal agent");
+    return `✅ Wrote ${content.length} chars to ${r.path}.`;
+  },
+  {
+    name: "write_file",
+    description:
+      "Create or overwrite a file on the founder's laptop (under the personal root). The founder is asked to APPROVE before it writes. Provide the path and full file content.",
+    schema: z.object({
+      path: z.string().describe("File path to write"),
+      content: z.string().describe("Full file content"),
+    }),
+  },
+);
+
+// ── Personal: run a shell command / script (WRITE — requires approval) ─────────
+
+export const runShell = tool(
+  async ({ command, cwd }) => {
+    const dangerous = flagDangerousCommand(command);
+    const decision = interrupt({
+      kind: "approval",
+      action: "run_shell",
+      title: `${dangerous ? "⚠️ DANGEROUS " : "🖥️ "}Run shell command?`,
+      summary: `${dangerous ? "⚠️ This looks destructive. " : ""}cwd: ${cwd ?? "(personal root)"}`,
+      preview: command,
+      args: { command, cwd },
+    } satisfies ApprovalRequest) as string;
+
+    if (decision !== "approved") {
+      return `Command was NOT run — the founder rejected it.`;
+    }
+
+    const r = await runShellSafe(command, cwd);
+    if (!r.ok) return `Command failed: ${r.error}`;
+    log.info({ command }, "Shell command run via personal agent");
+    const out = [r.stdout && `stdout:\n${r.stdout}`, r.stderr && `stderr:\n${r.stderr}`]
+      .filter(Boolean)
+      .join("\n\n");
+    return `✅ Command finished.\n${out || "(no output)"}`;
+  },
+  {
+    name: "run_shell",
+    description:
+      "Run a shell command or script on the founder's laptop, with the working directory confined to the personal root. The founder is asked to APPROVE before it runs (destructive patterns are flagged). Use for builds, scripts, git, file ops.",
+    schema: z.object({
+      command: z.string().describe("The shell command to run"),
+      cwd: z.string().optional().describe("Working directory (default: personal root)"),
+    }),
+  },
+);
+
+// ── Personal: drive Safari via AppleScript (WRITE — requires approval) ─────────
+
+export const browser = tool(
+  async ({ action, url, js }) => {
+    const decision = interrupt({
+      kind: "approval",
+      action: "browser",
+      title: `🌐 Browser: ${action}?`,
+      summary: action === "open_url" ? `Open ${url}` : action === "run_js" ? "Run JavaScript in Safari" : "Read the current Safari page",
+      preview: url ?? js ?? "(current page)",
+      args: { action, url, js },
+    } satisfies ApprovalRequest) as string;
+
+    if (decision !== "approved") {
+      return `Browser action was NOT performed — the founder rejected it.`;
+    }
+
+    const r = await browserAction(action as BrowserAction, { ...(url ? { url } : {}), ...(js ? { js } : {}) });
+    if (!r.ok) return `Browser action failed: ${r.error}`;
+    return r.stdout ? `✅ Done.\n${r.stdout}` : `✅ Done.`;
+  },
+  {
+    name: "browser",
+    description:
+      "Drive Safari on the founder's laptop. Actions: open_url (needs url), get_page_text (reads the current page), run_js (needs js). The founder is asked to APPROVE before it runs.",
+    schema: z.object({
+      action: z.enum(["open_url", "get_page_text", "run_js"]),
+      url: z.string().optional().describe("URL for open_url"),
+      js: z.string().optional().describe("JavaScript for run_js"),
     }),
   },
 );
