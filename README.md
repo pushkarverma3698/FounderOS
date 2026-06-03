@@ -99,7 +99,8 @@ pnpm test
 
 ```bash
 pnpm dev          # Start with hot reload (tsx watch)
-pnpm test         # Run full test suite (210 tests)
+pnpm test         # Run full test suite
+pnpm eval         # Run the agent eval harness → writes EVAL.md (live LLM calls)
 pnpm lint         # TypeScript type check (npx tsc --noEmit)
 pnpm build        # Compile to dist/
 pnpm db:generate  # Generate Drizzle migrations after schema changes
@@ -208,6 +209,29 @@ pnpm test                                                          # all 210 tes
 npx vitest run tests/integration/office-hitl.test.ts               # core HITL proof
 npx vitest run tests/live/                                         # real API round-trips
 ```
+
+---
+
+## Evaluation
+
+A deterministic eval harness measures the multi-agent system against a fixed
+golden-task set (`src/eval/golden-tasks.ts`) — the regression baseline for agent
+behaviour. Each task scores three things:
+
+- **Routing accuracy** — did the supervisor hand off to the right department?
+- **Tool selection** — did that department use the expected tools?
+- **HITL coverage** — did every write action pause for approval when required?
+
+```bash
+pnpm eval        # runs the golden set through the live office → writes EVAL.md
+```
+
+The scorer, report renderer, and runner are pure and fully unit-tested with a
+deterministic stub invoker (zero LLM cost); `pnpm eval` swaps in the real office
+graph. The runner observes each run only up to the approval pause and **never
+approves**, so no email / post / GitHub write fires during an eval. See
+`src/eval/` and `docs/decisions/011-portfolio-as-product-and-eval-harness.md`
+(why an eval harness over a critic).
 
 ---
 

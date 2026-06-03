@@ -12,6 +12,7 @@
     "start": "node --env-file=.env dist/index.js",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "db:generate": "drizzle-kit generate",
