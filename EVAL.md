@@ -1,6 +1,6 @@
 # FounderOS — Agent Eval Report
 
-_Generated: 2026-06-03T11:46:42.240Z_
+_Generated: 2026-06-03T22:31:41.149Z_
 
 A deterministic evaluation of the FounderOS multi-agent system against a fixed golden-task set.
 Each task scores routing (did the supervisor pick the right department?), tool selection (did it
