@@ -95,4 +95,27 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     expectedRoute: "prospecting",
     expectsHitl: false,
   },
+
+  // ── Personal (laptop operator: read = no gate, write/shell = gated) ────────
+  {
+    id: "personal-read-file",
+    input: "Read the file ~/.zshrc on my laptop and tell me what's in it.",
+    expectedRoute: "personal",
+    expectedTools: ["read_file"],
+    expectsHitl: false,
+  },
+  {
+    id: "personal-run-script",
+    input: "Run `git status` in my ~/Projects/founderos folder on my Mac.",
+    expectedRoute: "personal",
+    expectedTools: ["run_shell"],
+    expectsHitl: true,
+  },
+  {
+    id: "personal-browser",
+    input: "Open https://news.ycombinator.com in my Safari browser.",
+    expectedRoute: "personal",
+    expectedTools: ["browser"],
+    expectsHitl: true,
+  },
 ];

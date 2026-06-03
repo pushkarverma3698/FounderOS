@@ -1,6 +1,6 @@
 # FounderOS — Agent Eval Report
 
-_Generated: 2026-06-03T10:35:50.792Z_
+_Generated: 2026-06-03T11:46:42.240Z_
 
 A deterministic evaluation of the FounderOS multi-agent system against a fixed golden-task set.
 Each task scores routing (did the supervisor pick the right department?), tool selection (did it
@@ -10,16 +10,16 @@ use the expected tools?), and HITL coverage (did write actions pause for approva
 
 | Metric | Passed | Total | Accuracy |
 |---|---|---|---|
-| Routing accuracy | 10 | 10 | 100% |
-| Tool selection | 7 | 7 | 100% |
-| HITL coverage | 9 | 9 | 100% |
-| **Overall** | **10** | **10** | **100%** |
+| Routing accuracy | 13 | 13 | 100% |
+| Tool selection | 10 | 10 | 100% |
+| HITL coverage | 12 | 12 | 100% |
+| **Overall** | **13** | **13** | **100%** |
 
 ## Failures (0)
 
 All golden tasks passed. ✅
 
-## All tasks (10)
+## All tasks (13)
 
 | id | input | route | tools | hitl | result |
 |---|---|---|---|---|---|
@@ -33,3 +33,6 @@ All golden tasks passed. ✅
 | mktg-linkedin-post | Draft a LinkedIn post about how we built an AI multi-agent system in 3 weeks. | ✅ marketing | ✅ | ✅ | ✅ |
 | sales-research-outreach | Draft cold outreach to the founder of Acme, an EU SaaS startup — research them first for a specific hook. | ✅ sales | ✅ | – | ✅ |
 | prospecting-score | Score Acme Corp as a Turicks prospect against our ICP. | ✅ prospecting | – | ✅ | ✅ |
+| personal-read-file | Read the file ~/.zshrc on my laptop and tell me what's in it. | ✅ personal | ✅ | ✅ | ✅ |
+| personal-run-script | Run `git status` in my ~/Projects/founderos folder on my Mac. | ✅ personal | ✅ | ✅ | ✅ |
+| personal-browser | Open https://news.ycombinator.com in my Safari browser. | ✅ personal | ✅ | ✅ | ✅ |

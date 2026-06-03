@@ -29,6 +29,11 @@ import {
   linkedinPost,
   githubRead,
   githubWrite,
+  readFile,
+  listDir,
+  writeFile,
+  runShell,
+  browser,
 } from "./agent-tools.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
@@ -40,6 +45,7 @@ import {
   MARKETING_PROMPT,
   SALES_PROMPT,
   PROSPECTING_PROMPT,
+  PERSONAL_PROMPT,
   SCHEDULER_BRIEF_PROMPT,
 } from "./system-prompts.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
@@ -121,8 +127,18 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     prompt: createTrimmedPrompt(PROSPECTING_PROMPT, subAgentBudget) as any,
   });
 
+  /** Personal: senior engineer on the founder's laptop — files, shell, browser
+   *  (write/shell/browser HITL-gated; reads are instant). */
+  const personal = createReactAgent({
+    llm,
+    tools: [readFile, listDir, writeFile, runShell, browser],
+    name: "personal",
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prompt: createTrimmedPrompt(PERSONAL_PROMPT, subAgentBudget) as any,
+  });
+
   return createSupervisor({
-    agents: [research, comms, engineering, marketing, sales, prospecting],
+    agents: [research, comms, engineering, marketing, sales, prospecting, personal],
     llm,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(SUPERVISOR_PROMPT, supervisorBudget) as any,
@@ -150,7 +166,7 @@ export async function getOffice() {
   // runtime (tests + production prove it); cast at this single boundary so
   // `pnpm lint` stays clean instead of carrying a permanent known error.
   _office = buildOffice(checkpointer as unknown as BaseCheckpointSaver);
-  log.info("Office compiled: supervisor + [research, comms, engineering, marketing, sales, prospecting]");
+  log.info("Office compiled: supervisor + [research, comms, engineering, marketing, sales, prospecting, personal]");
   return _office;
 }
 
