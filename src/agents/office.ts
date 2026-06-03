@@ -144,7 +144,12 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
 export async function getOffice() {
   if (_office) return _office;
   const checkpointer = await getCheckpointer();
-  _office = buildOffice(checkpointer);
+  // Upstream LangGraph typing bug: PostgresSaver isn't assignable to
+  // BaseCheckpointSaver<number> because serde.dumpsTyped is typed sync on the
+  // base but async on PostgresSaver. PostgresSaver IS a valid checkpointer at
+  // runtime (tests + production prove it); cast at this single boundary so
+  // `pnpm lint` stays clean instead of carrying a permanent known error.
+  _office = buildOffice(checkpointer as unknown as BaseCheckpointSaver);
   log.info("Office compiled: supervisor + [research, comms, engineering, marketing, sales, prospecting]");
   return _office;
 }

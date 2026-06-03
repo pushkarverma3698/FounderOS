@@ -1,16 +1,24 @@
 /**
- * Unit tests for extractObservation — the pure part of the live office invoker.
+ * Unit tests for the pure parts of the live office invoker.
  *
- * It reads what the office actually did from the message trail: which department
- * the supervisor handed off to (transfer_to_<dept> tool call), which tools ran,
- * and whether the run paused for approval. Pure → testable without an LLM.
- * RED until src/eval/office-invoker.ts exists.
+ * Live-test finding (2026-06-03): langgraph-supervisor defaults to
+ * outputMode "last_message", so a sub-agent's internal tool calls never appear
+ * in the top-level message trail — only the supervisor's own handoff does. So:
+ *   - route  comes from the message trail (the supervisor's transfer_to_<dept>)
+ *   - tools  come from a LangChain callback (handleToolStart), passed in as a
+ *            list of tool names
+ *
+ * Both helpers are pure → testable without an LLM. RED until office-invoker.ts
+ * exposes routeFromMessages / collectDeptTools / the 3-arg extractObservation.
  */
 
 import { describe, it, expect } from "vitest";
-import { extractObservation } from "../../../src/eval/office-invoker.js";
+import {
+  routeFromMessages,
+  collectDeptTools,
+  extractObservation,
+} from "../../../src/eval/office-invoker.js";
 
-// Minimal message stand-ins matching what LangGraph returns (tool_calls on AIMessages).
 const ai = (toolCalls: Array<{ name: string }>) => ({
   _getType: () => "ai",
   content: "",
@@ -18,48 +26,58 @@ const ai = (toolCalls: Array<{ name: string }>) => ({
 });
 const human = (text: string) => ({ _getType: () => "human", content: text });
 
-describe("extractObservation", () => {
+describe("routeFromMessages", () => {
   it("reads the routed department from a transfer_to_<dept> handoff", () => {
-    const msgs = [human("email alex"), ai([{ name: "transfer_to_comms" }])];
-    const o = extractObservation(msgs, false);
-    expect(o.route).toBe("comms");
-  });
-
-  it("collects department tool calls but excludes the transfer handoff", () => {
-    const msgs = [
-      human("email alex"),
-      ai([{ name: "transfer_to_comms" }]),
-      ai([{ name: "send_email" }]),
-    ];
-    const o = extractObservation(msgs, true);
-    expect(o.tools).toEqual(["send_email"]);
-    expect(o.tools).not.toContain("transfer_to_comms");
-    expect(o.hadInterrupt).toBe(true);
-  });
-
-  it("dedupes repeated tool calls", () => {
-    const msgs = [ai([{ name: "transfer_to_research" }]), ai([{ name: "search_web" }, { name: "search_web" }])];
-    const o = extractObservation(msgs, false);
-    expect(o.tools).toEqual(["search_web"]);
+    expect(routeFromMessages([human("email alex"), ai([{ name: "transfer_to_comms" }])])).toBe("comms");
   });
 
   it("takes the last department when the supervisor re-routes", () => {
     const msgs = [ai([{ name: "transfer_to_research" }]), ai([{ name: "transfer_to_marketing" }])];
-    expect(extractObservation(msgs, false).route).toBe("marketing");
+    expect(routeFromMessages(msgs)).toBe("marketing");
   });
 
-  it("returns route null when there was no handoff", () => {
-    const msgs = [human("hi"), ai([])];
-    expect(extractObservation(msgs, false).route).toBeNull();
+  it("returns null when there was no handoff", () => {
+    expect(routeFromMessages([human("hi"), ai([])])).toBeNull();
   });
 
-  it("ignores transfer targets that are not real departments (e.g. handoff-back)", () => {
+  it("ignores transfer targets that are not real departments (handoff-back)", () => {
     const msgs = [ai([{ name: "transfer_back_to_supervisor" }]), ai([{ name: "transfer_to_supervisor" }])];
-    expect(extractObservation(msgs, false).route).toBeNull();
+    expect(routeFromMessages(msgs)).toBeNull();
   });
 
-  it("handles an empty trail without throwing", () => {
-    const o = extractObservation([], false);
-    expect(o).toEqual({ route: null, tools: [], hadInterrupt: false });
+  it("handles an empty trail", () => {
+    expect(routeFromMessages([])).toBeNull();
+  });
+});
+
+describe("collectDeptTools", () => {
+  it("keeps department tool names in first-seen order", () => {
+    expect(collectDeptTools(["search_web", "send_email"])).toEqual(["search_web", "send_email"]);
+  });
+
+  it("dedupes repeated tool calls", () => {
+    expect(collectDeptTools(["search_web", "search_web", "read_emails"])).toEqual(["search_web", "read_emails"]);
+  });
+
+  it("excludes handoff tools (transfer_*) that also fire handleToolStart", () => {
+    expect(collectDeptTools(["transfer_to_comms", "send_email"])).toEqual(["send_email"]);
+  });
+
+  it("returns [] for no tools", () => {
+    expect(collectDeptTools([])).toEqual([]);
+  });
+});
+
+describe("extractObservation", () => {
+  it("combines route (from messages) + tools (from callback names) + hadInterrupt", () => {
+    const msgs = [human("email alex"), ai([{ name: "transfer_to_comms" }])];
+    const o = extractObservation(msgs, ["transfer_to_comms", "send_email"], true);
+    expect(o.route).toBe("comms");
+    expect(o.tools).toEqual(["send_email"]); // handoff excluded
+    expect(o.hadInterrupt).toBe(true);
+  });
+
+  it("handles an empty run", () => {
+    expect(extractObservation([], [], false)).toEqual({ route: null, tools: [], hadInterrupt: false });
   });
 });

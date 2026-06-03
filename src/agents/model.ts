@@ -57,6 +57,24 @@ class FounderChatGoogle extends ChatGoogleGenerativeAI {
 }
 
 /**
+ * Resolve the sampling temperature.
+ *
+ * Default 0 — DETERMINISM RULE: routing and tool-calling must be reproducible so
+ * the eval harness scores the same behaviour every run and the founder gets
+ * stable outcomes. A non-zero temperature makes the supervisor pick different
+ * departments for the same input, which is exactly the instability we don't want.
+ *
+ * Override with AGENT_TEMPERATURE only for deliberately creative runs (and even
+ * then, brand voice is enforced deterministically by the brand validator + HITL).
+ */
+function resolveTemperature(): number {
+  const raw = process.env["AGENT_TEMPERATURE"];
+  if (raw === undefined) return 0;
+  const n = Number.parseFloat(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
  * Build the office model. Tool-calling capable.
  * AGENT_MODEL env var swaps the model id without a code change.
  */
@@ -66,7 +84,7 @@ export function getModel(): ChatGoogleGenerativeAI {
 
   return new FounderChatGoogle({
     model,
-    temperature: 0.3,
+    temperature: resolveTemperature(),
     maxRetries: 2,
     ...(apiKey ? { apiKey } : {}),
   });

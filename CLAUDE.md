@@ -194,3 +194,20 @@ Never bypass suppression_check or quota_check, even in testing (mock them instea
 ### 15. Redis for ephemeral, Postgres for durable (see ADR-005)
 - Research cache, send quotas, LLM prompt cache → Redis (TTL, atomic INCR)
 - Lead pipeline, suppressions, HITL registry, audit log → Postgres (durable, queryable)
+
+### 16. Determinism + stability (non-negotiable — think like a founder)
+The founder relies on this daily. Same input must give the same behaviour, and the
+eval harness must be able to prove it.
+- **LLM temperature defaults to 0** (`src/agents/model.ts`). Routing and tool-calling
+  must be reproducible. Only raise it via `AGENT_TEMPERATURE` for a deliberately
+  creative run — never as a default. A non-zero default = unstable routing.
+- **Push logic out of the LLM into deterministic code.** Anything that can be a pure
+  function (routing keywords, scoring, validation, formatting, parsing) is a pure
+  function with unit tests — not a prompt instruction the model may ignore.
+- **Eval-gated changes.** Any change that can affect agent behaviour (prompts, tools,
+  model, routing) must keep `pnpm test` green and should be checked against
+  `pnpm eval` (routing / tool-selection / HITL coverage). Don't regress the golden set.
+- **`pnpm lint` stays clean.** No permanent known tsc errors — fix or cast-with-comment
+  at the boundary. A red typecheck is a stability liability, not a footnote.
+- **Fail loud, fail safe.** External calls surface errors to Telegram; side effects only
+  ever run AFTER `interrupt()` approval (rule #3/#4); idempotency before every send (#5).
