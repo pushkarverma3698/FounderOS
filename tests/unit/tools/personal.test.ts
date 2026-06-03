@@ -48,6 +48,39 @@ describe("readFileSafe", () => {
     const r = await readFileSafe("~/.ssh/id_rsa");
     expect(r.ok).toBe(false);
   });
+
+  // ── Stabilization fix #1: symlink bypass ─────────────────────────────────
+  // A symlink inside ROOT that points to a secret path must be denied.
+  // Before the fix: resolveSafePath was lexical — ROOT/evil → ~/.ssh passes.
+  // After the fix: realpath resolves the symlink, re-checked against denylist.
+  it("refuses a symlink inside root that resolves to a secret path", async () => {
+    const symlinkPath = path.join(ROOT, "evil-link");
+    await fs.symlink(path.join(os.homedir(), ".ssh"), symlinkPath).catch(() => {/* already exists */});
+    const r = await readFileSafe("evil-link", ROOT);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/denied|secret|sensitive/i);
+  });
+
+  it("refuses a symlink inside root that resolves to a path outside home", async () => {
+    const symlinkPath = path.join(ROOT, "etc-link");
+    await fs.symlink("/etc", symlinkPath).catch(() => {/* already exists */});
+    const r = await readFileSafe("etc-link", ROOT);
+    expect(r.ok).toBe(false);
+  });
+
+  // ── Stabilization fix #2: OOM protection (regression spec) ───────────────
+  // readFileSafe must not buffer more than MAX_OUTPUT chars. Output is capped at
+  // 100 000 chars even for files many times larger.
+  it("caps returned content at 100 000 chars for oversized files", async () => {
+    const bigContent = "A".repeat(150_000);
+    await fs.writeFile(path.join(ROOT, "big.txt"), bigContent, "utf8");
+    const r = await readFileSafe("big.txt", ROOT);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.content.length).toBeLessThanOrEqual(100_000);
+      expect(r.content.length).toBeGreaterThan(0);
+    }
+  });
 });
 
 describe("listDirSafe", () => {
@@ -58,6 +91,13 @@ describe("listDirSafe", () => {
       expect(r.entries).toContain("hello.txt");
       expect(r.entries).toContain("sub");
     }
+  });
+
+  it("refuses a symlink dir inside root that resolves outside home", async () => {
+    const symlinkPath = path.join(ROOT, "etc-dir-link");
+    await fs.symlink("/etc", symlinkPath).catch(() => {});
+    const r = await listDirSafe("etc-dir-link", ROOT);
+    expect(r.ok).toBe(false);
   });
 });
 
