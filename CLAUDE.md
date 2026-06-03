@@ -33,6 +33,7 @@ This applies to: Gumroad listings, LinkedIn posts, email templates, brand guidel
   - (* = HITL-gated via native interrupt())
   - 10,678 LOC → ~500 LOC · 8 test files · 40 tests green · tsc clean
 - ✅ **Phase B (2026-06-01)**: Marketing + Sales + Prospecting departments — MERGED (PR #5)
+- ✅ **Personal department (2026-06-03)**: 7th department `personal` — laptop operator (file/shell/browser, HITL-gated, `path-guard` confines to `$HOME`, secrets blocked even on read). MERGED (PR #16). Kept separate from `engineering` by least-privilege (ADR-013); Safari-MCP deferred (ADR-012). 267 tests green · eval 13/13.
 - 🔄 **Phase C (2026-06-01)**: Context memory + knowledge search + proactive scheduler — code complete, 47 tests green (branch `feat/phase-c-memory-scheduler`). Followups: populate turicks-brain (`brain:sync`), live Telegram verify. See `docs/phases/PHASE-C-INTELLIGENCE.md`.
 - 🔄 **Phase D (now)**: Revenue Flywheel — Gumroad live + LinkedIn launch sequence + cinematic-web done-for-you tier + weekly outbound rhythm
 - ⏳ **Phase E (gated, 4–6 wks reliable use)**: SaaS pivot — web gateway, multi-tenancy, billing (FounderOS SaaS *or* Cinematic Cloud — pick one)
