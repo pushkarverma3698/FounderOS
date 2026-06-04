@@ -84,50 +84,71 @@ export async function executeComposioAction(
   return result as Record<string, unknown>;
 }
 
-// ── Known connection IDs (read from env or use defaults found via connectedAccounts.list) ──
+// ── Known connection IDs (configured via env vars — see .env.example) ──
+//
+// How to find your connection IDs:
+//   const client = new Composio({ apiKey: COMPOSIO_API_KEY }).getClient();
+//   const accounts = await client.connectedAccounts.list({ toolkit: "gmail" });
+//   console.log(accounts.items[0].id, accounts.items[0].userId);
 
-/** Gmail connected account ID for FounderOS. Read from env or use the primary known ID. */
+function requireEnv(key: string, hint: string): string {
+  const val = process.env[key] ?? readKeyFromEnvFile(key);
+  if (!val) {
+    throw new Error(
+      `Missing required env var ${key}. ${hint}\n` +
+      `Add it to your .env file — see .env.example for reference.`
+    );
+  }
+  return val;
+}
+
+/** Gmail connected account ID for FounderOS. Set COMPOSIO_GMAIL_CONN_ID in .env. */
 export function getGmailConnectionId(): string {
-  return process.env["COMPOSIO_GMAIL_CONN_ID"] ??
-    readKeyFromEnvFile("COMPOSIO_GMAIL_CONN_ID") ??
-    "ca_nlLqda4MBFaA";  // primary Gmail connection (pushkarai3698@gmail.com)
+  return requireEnv(
+    "COMPOSIO_GMAIL_CONN_ID",
+    "Get your Gmail connection ID from app.composio.dev → Connections → Gmail → copy the account ID."
+  );
 }
 
-/** Gmail user ID (Composio entity/user identifier). */
+/** Gmail user ID (Composio entity/user identifier). Set COMPOSIO_GMAIL_USER_ID in .env. */
 export function getGmailUserId(): string {
-  return process.env["COMPOSIO_GMAIL_USER_ID"] ??
-    readKeyFromEnvFile("COMPOSIO_GMAIL_USER_ID") ??
-    "pg-test-750dbecb-ef9d-4ef7-a76d-d1de1fd0190f";
+  return requireEnv(
+    "COMPOSIO_GMAIL_USER_ID",
+    "Get your Gmail user/entity ID from app.composio.dev → Connections → Gmail → copy the entity ID."
+  );
 }
 
-/** LinkedIn connected account ID. */
+/** LinkedIn connected account ID. Set COMPOSIO_LINKEDIN_CONN_ID in .env. */
 export function getLinkedInConnectionId(): string {
-  return process.env["COMPOSIO_LINKEDIN_CONN_ID"] ??
-    readKeyFromEnvFile("COMPOSIO_LINKEDIN_CONN_ID") ??
-    "ca_CDaqpUfRJ7vl";  // turicks-internal LinkedIn (ACTIVE)
+  return requireEnv(
+    "COMPOSIO_LINKEDIN_CONN_ID",
+    "Get your LinkedIn connection ID from app.composio.dev → Connections → LinkedIn → copy the account ID."
+  );
 }
 
-/** LinkedIn user ID. */
+/** LinkedIn user ID. Set COMPOSIO_LINKEDIN_USER_ID in .env. */
 export function getLinkedInUserId(): string {
-  return process.env["COMPOSIO_LINKEDIN_USER_ID"] ??
-    readKeyFromEnvFile("COMPOSIO_LINKEDIN_USER_ID") ??
-    "turicks-internal";
+  return requireEnv(
+    "COMPOSIO_LINKEDIN_USER_ID",
+    "Get your LinkedIn user/entity ID from app.composio.dev → Connections → LinkedIn → copy the entity ID."
+  );
 }
 
 /**
- * Instagram connected account ID.
- * Current status: ca_Uolj7XmgVl0L is EXPIRED — reconnect at app.composio.dev
- * After reconnect: update COMPOSIO_INSTAGRAM_CONN_ID in .env or hardcode new ID here.
+ * Instagram connected account ID. Set COMPOSIO_INSTAGRAM_CONN_ID in .env.
+ * Note: Instagram connections expire — reconnect at app.composio.dev if you see auth errors.
  */
 export function getInstagramConnectionId(): string {
-  return process.env["COMPOSIO_INSTAGRAM_CONN_ID"] ??
-    readKeyFromEnvFile("COMPOSIO_INSTAGRAM_CONN_ID") ??
-    "ca_Uolj7XmgVl0L";  // EXPIRED — reconnect in Composio dashboard
+  return requireEnv(
+    "COMPOSIO_INSTAGRAM_CONN_ID",
+    "Get your Instagram connection ID from app.composio.dev → Connections → Instagram → copy the account ID."
+  );
 }
 
-/** Instagram user ID. */
+/** Instagram user ID. Set COMPOSIO_INSTAGRAM_USER_ID in .env. */
 export function getInstagramUserId(): string {
-  return process.env["COMPOSIO_INSTAGRAM_USER_ID"] ??
-    readKeyFromEnvFile("COMPOSIO_INSTAGRAM_USER_ID") ??
-    "turicks-internal";
+  return requireEnv(
+    "COMPOSIO_INSTAGRAM_USER_ID",
+    "Get your Instagram user/entity ID from app.composio.dev → Connections → Instagram → copy the entity ID."
+  );
 }

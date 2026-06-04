@@ -1,33 +1,39 @@
 # FounderOS
 
-**Your AI operating system — message it in Telegram, it does the real work.**
+**A production-grade multi-agent AI system that takes real business actions — safely.**
 
-FounderOS is a multi-agent system that runs your business via Telegram. A prebuilt LangGraph supervisor routes each request to the right department; specialists use real tools to take real actions; nothing leaves without your approval.
+FounderOS runs your agency, handles your inbox, posts to LinkedIn, manages GitHub, and operates your laptop — via Telegram. A LangGraph supervisor routes each message to the right department; specialist agents do the real work with real tools; and **nothing leaves without your explicit approval**.
 
-Built by [Pushkar Verma](https://turicks.com) to run Turicks (AI agency) and Naggar Retreat.
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.5_strict-3178c6.svg)](tsconfig.json)
+[![LangGraph](https://img.shields.io/badge/LangGraph-JS_0.2.74-orange.svg)](package.json)
+[![Tests](https://img.shields.io/badge/tests-271_passing-brightgreen.svg)](tests/)
+[![Eval](https://img.shields.io/badge/eval-13%2F13_100%25-brightgreen.svg)](EVAL.md)
 
 ---
 
 ## What it does
 
 ```
-You:  "Research what Linear does and send them an intro email"
+You → Telegram:  "Research what Linear does and draft a cold email to their founder"
 
-Bot:  [research agent searches web → returns summary]
-      [comms agent drafts the email]
+FounderOS:       [sales agent searches web → finds specific hook → drafts email]
 
-      📧 Send email to contact@linear.app?
-      Subject: Turicks × Linear — AI workflow automation
-      [full email preview]
+                 📧 Send email to linear-founder@linear.app?
+                 Subject: Turicks × Linear — 3-day AI workflow build
+                 ─────────────────────────────────────────────
+                 Hey Karri,
+                 Saw Linear's agent API announcement last week...
+                 [full 147-word email, under the 150-word ICP rule]
 
-      ✅ Approve    ❌ Reject
+                 ✅ Approve   ❌ Reject
 
-You:  ✅ Approve
+You:             ✅ Approve
 
-Bot:  ✅ Email sent to contact@linear.app
+FounderOS:       ✅ Email sent (idempotent — won't re-send if you retry)
 ```
 
-Every write action — emails, LinkedIn posts, GitHub writes — pauses and shows you the content first. You approve or reject. No surprises, nothing sent by accident.
+Every write action — email, LinkedIn post, GitHub commit, shell command, file write — pauses and shows you exactly what it's about to do. You approve or reject. If the process crashes mid-approval, the pending action survives a restart (Postgres-checkpointed).
 
 ---
 
@@ -35,37 +41,78 @@ Every write action — emails, LinkedIn posts, GitHub writes — pauses and show
 
 ```
 Telegram message
-   ↓
-Supervisor (Chief of Staff — Gemini Flash)
-   ├── research      → search_web                         (read-only, instant)
-   ├── comms         → send_email*, linkedin_post*        (approval required)
-   └── engineering   → github_read, github_write*         (approval required)
-         (* write tools call interrupt() — graph pauses, you approve, tool runs)
+        │
+        ▼
+┌───────────────────────────────────────────────┐
+│  Supervisor  (Chief of Staff — Gemini Flash)  │
+│  · read_context / update_context              │
+│  · routes to exactly ONE department per turn  │
+└───────────┬───────────────────────────────────┘
+            │
+    ┌───────┴────────────────────────────────────────────────┐
+    │                                                        │
+    ├── research      search_web · search_knowledge          │ read-only
+    │                 read_emails                            │ instant
+    ├── comms         send_email* · linkedin_post*           │
+    ├── engineering   github_read · github_write*            │ * = HITL
+    ├── marketing     search_web · linkedin_post*            │   gated
+    ├── sales         search_web · send_email*               │
+    ├── prospecting   search_web · search_knowledge          │
+    └── personal      read_file · list_dir                   │
+                      write_file* · run_shell*               │
+                      browser*                               │
 ```
 
-Built with:
-- **LangGraph JS** — `createSupervisor` + `createReactAgent` prebuilts
-- **Native HITL** — `interrupt()` + `Command({ resume })`, crash-safe via Postgres checkpointer
-- **Gemini 2.5 Flash** — single model for all agents (fast, cheap, strong tool-calling)
-- **Node 22 + TypeScript strict** — ES modules throughout
+**Production hardening (the layer most agent projects skip):**
+
+| Property | Implementation |
+|---|---|
+| **Crash-safe HITL** | `interrupt()` + Postgres checkpointer — pending approvals survive restarts |
+| **Idempotency** | SHA-1 key before every email/post/push — same action can never fire twice |
+| **Path-guard** | `$HOME`-confined file access; `.ssh`, `.env`, `*.pem`, `/etc` blocked even on read |
+| **Determinism** | Temperature = 0; routing logic in pure code, not prompt instructions |
+| **Eval harness** | 13 golden tasks, reproducible `pnpm eval` → `EVAL.md` with routing/tool/HITL scores |
+| **Brand validator** | Banned-phrase check before every LinkedIn post and outreach email |
+| **Context manager** | Rolling 6K-token window — no context overflow on long conversations |
+| **Audit log** | Every action written to Postgres `audit_log` table with tenant + idempotency key |
 
 ---
 
-## Quick Start
+## Eval results
+
+| Metric | Score | Date |
+|---|---|---|
+| Routing accuracy | **13/13 — 100%** | 2026-06-03 |
+| Tool selection | **10/10 — 100%** | 2026-06-03 |
+| HITL coverage | **12/12 — 100%** | 2026-06-03 |
+| Test suite | **271/271 passing** | 2026-06-04 |
+
+Methodology: golden tasks run at temperature 0 via `pnpm eval` against a live office with a
+MemorySaver checkpointer. No approvals fire (HITL is observed, not executed). See [`EVAL.md`](EVAL.md).
+
+---
+
+## Quick start
 
 ```bash
-# 1. Install
+# 1. Clone and install
+git clone https://github.com/pushkarverma3698/FounderOS.git
+cd FounderOS
 pnpm install
 
 # 2. Configure
 cp .env.example .env
-# Fill in: DATABASE_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-#          GOOGLE_GENERATIVE_AI_API_KEY, COMPOSIO_API_KEY, FIRECRAWL_API_KEY
+# Edit .env — minimum required:
+#   DATABASE_URL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+#   GOOGLE_GENERATIVE_AI_API_KEY (or ANTHROPIC_API_KEY)
+#   COMPOSIO_API_KEY + COMPOSIO_GMAIL_CONN_ID, COMPOSIO_GMAIL_USER_ID
+#   COMPOSIO_LINKEDIN_CONN_ID, COMPOSIO_LINKEDIN_USER_ID
+#   FIRECRAWL_API_KEY
 
-# 3. Start Postgres
-docker compose up -d postgres
+# 3. Start Postgres + Redis
+docker compose up -d postgres redis
 
-# 4. Set up DB
+# 4. Set up database schema
 node --env-file=.env --import tsx/esm scripts/setup-db.ts
 
 # 5. Run
@@ -73,191 +120,150 @@ pnpm dev
 
 # 6. Test
 pnpm test
+
+# 7. Eval (requires live Postgres + LLM API key)
+pnpm eval
 ```
 
 ---
 
-## Environment Variables
+## Tech stack
 
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `DATABASE_URL` | ✅ | Postgres — state + audit log (`postgresql://turicks:turicks@localhost:5432/turicks`) |
-| `TELEGRAM_BOT_TOKEN` | ✅ | Bot polling |
-| `TELEGRAM_CHAT_ID` | ✅ | Your Telegram chat/DM ID |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | ✅ | Gemini Flash — all agents use this |
-| `COMPOSIO_API_KEY` | Email + LinkedIn | Composio action execution |
-| `FIRECRAWL_API_KEY` | Web search | Firecrawl search API |
-| `GITHUB_TOKEN` | GitHub writes | Classic PAT with `repo` scope |
-| `AGENT_MODEL` | Optional | Override model (default: `gemini-2.5-flash`) |
-| `FOUNDER_TENANT` | Optional | Tenant name (default: `turicks`) |
-| `LANGCHAIN_API_KEY` | Optional | LangSmith tracing |
-| `LANGCHAIN_TRACING_V2` | Optional | Set `true` to enable LangSmith |
-
----
-
-## Commands
-
-```bash
-pnpm dev          # Start with hot reload (tsx watch)
-pnpm test         # Run full test suite
-pnpm eval         # Run the agent eval harness → writes EVAL.md (live LLM calls)
-pnpm lint         # TypeScript type check (npx tsc --noEmit)
-pnpm build        # Compile to dist/
-pnpm db:generate  # Generate Drizzle migrations after schema changes
-pnpm db:migrate   # Apply migrations to DB
-```
+| Layer | Choice | Why |
+|---|---|---|
+| Agent orchestration | [LangGraph JS](https://github.com/langchain-ai/langgraphjs) `createSupervisor` + `createReactAgent` | Stateful graphs, native `interrupt()` HITL, Postgres checkpointing |
+| LLM | Gemini 2.5 Flash (primary) | Fast, cheap, excellent tool-calling |
+| Checkpointer | Postgres via `@langchain/langgraph-checkpoint-postgres` | Crash-safe HITL, thread-per-conversation state |
+| Integrations | [Composio](https://composio.dev/) | Managed OAuth for Gmail, LinkedIn, GitHub, Instagram |
+| Web search | [Firecrawl](https://firecrawl.dev/) | Deep scraping beyond Google snippets |
+| Tracing | [LangSmith](https://smith.langchain.com/) | Step-level traces, per-span cost, eval experiments |
+| Database | PostgreSQL + [Drizzle ORM](https://orm.drizzle.team/) | Type-safe queries, migration-based schema |
+| Cache | Redis | Research cache (24h TTL), send quotas, LLM cache (6h TTL) |
+| Gateway | [grammY](https://grammy.dev/) Telegram bot | Async handlers, inline keyboards for Approve/Reject |
+| Language | TypeScript 5.5 strict + Node 22 ESM | End-to-end type safety |
 
 ---
 
-## Project Structure
+## Repository structure
 
 ```
 src/
-  index.ts                   Boot: telemetry → office → health → Telegram
-  agents/
-    office.ts                The entire multi-agent system (80 lines)
-    agent-tools.ts           LangChain tools with HITL interrupt() gates
-    model.ts                 Single Gemini Flash model factory
-    system-prompts.ts        One prompt per role (4 prompts total)
-  tools/
-    web-search.ts            Firecrawl search (read-only, no approval)
-    email.ts                 Composio Gmail (approval-gated)
-    github.ts                Octokit — read instant, write approval-gated
-    linkedin.ts              Composio LinkedIn (approval-gated)
-  gateway/
-    telegram.ts              grammy bot: route → approval cards → resume
-  db/
-    schema.ts                action_log, do_not_contact + LangGraph tables
-    queries.ts               Named query functions (no raw SQL elsewhere)
-  infra/
-    checkpointer.ts          Postgres saver singleton (crash-safe HITL)
-    telemetry.ts             LangSmith tracing init
-    health.ts                /health + /metrics endpoints
-    logger.ts                pino structured logging
-
-docs/
-  study/                     Learn how multi-agent systems work (start here ↓)
-    01-what-is-multi-agent-orchestration.md
-    02-langgraph-patterns.md
-    03-v1-to-v2-migration.md
-    04-how-founderos-works.md
-  decisions/                 Architecture Decision Records
-  ROADMAP.md                 Future departments, SaaS pivot plan
-  OPERATIONS.md              Day-to-day usage guide
-
-tests/
-  integration/
-    office-hitl.test.ts      Key test: approve→send, reject→no-send
-  unit/                      Component unit tests
+├── agents/
+│   ├── office.ts          # Compiled once: supervisor + 7 ReAct departments
+│   ├── agent-tools.ts     # LangChain tool wrappers with HITL interrupt()
+│   ├── system-prompts.ts  # All prompts (supervisor + 7 departments)
+│   └── model.ts           # Model factory — temperature 0, Gemini Flash
+├── tools/
+│   ├── web-search.ts      # Firecrawl wrapper
+│   ├── email.ts           # Composio Gmail send
+│   ├── email-reader.ts    # Composio Gmail read
+│   ├── github.ts          # Octokit GitHub read/write
+│   ├── linkedin.ts        # Composio LinkedIn post
+│   ├── personal.ts        # File / shell / browser (path-guarded)
+│   ├── context.ts         # Persistent business context store
+│   └── knowledge.ts       # Internal knowledge search
+├── infra/
+│   ├── path-guard.ts      # Pure path safety — 19 unit tests, blocks secrets on read
+│   ├── brand-validator.ts # Banned-phrase + channel-spec enforcer
+│   ├── context-manager.ts # Rolling-window token trimmer
+│   ├── checkpointer.ts    # TenantAwareCheckpointer (thread-per-tenant)
+│   ├── composio.ts        # Composio helper (env-only, no hardcoded credentials)
+│   └── telemetry.ts       # LangSmith PII scrubber + tracer
+├── eval/
+│   ├── golden-tasks.ts    # 13 golden tasks (routing · tool · HITL assertions)
+│   ├── runner.ts          # Deterministic runner — never approves, observes via callback
+│   ├── scoring.ts         # Pure scoring functions
+│   └── report.ts          # Markdown report generator → EVAL.md
+├── gateway/
+│   ├── telegram.ts        # grammY bot + topic routing + Approve/Reject callbacks
+│   └── hitl.ts            # HITL interrupt lifecycle
+└── db/
+    ├── schema.ts          # Drizzle table definitions
+    └── queries.ts         # Named query functions (no raw SQL elsewhere)
 ```
 
 ---
 
-## How Approvals Work
+## Architecture decisions
 
-```
-1. Agent decides to call a write tool (send_email, github_write, linkedin_post)
-2. Tool calls interrupt({ title, preview, args }) → graph PAUSES
-3. State saved to Postgres — survives a process restart
-4. Telegram shows Approve/Reject card with full preview
-5. Tap Approve → graph.invoke(Command({ resume: "approved" }))
-6. Same tool continues from interrupt() → executes the real action
-7. Tap Reject → tool returns rejection message, nothing sent
-```
+Key decisions documented as ADRs in [`docs/decisions/`](docs/decisions/):
 
-The key guarantee: the tool runs after approval — not a separate finalize step. "Approve → nothing happens" is structurally impossible.
-
----
-
-## Adding a Department
-
-Three files, ~15 lines:
-
-**1. `src/agents/agent-tools.ts`** — add tools with `tool()` + `interrupt()` for write actions
-
-**2. `src/agents/system-prompts.ts`** — add `export const SALES_PROMPT = \`...\``
-
-**3. `src/agents/office.ts`** — four lines:
-```typescript
-const sales = createReactAgent({ llm, tools: [searchWeb, sendEmail], name: "sales", prompt: SALES_PROMPT });
-// add `sales` to agents: [..., sales] in createSupervisor
-```
-
-**4.** Update `SUPERVISOR_PROMPT` to mention the new department.
+| ADR | Decision |
+|---|---|
+| [001](docs/decisions/001-why-langgraph.md) | LangGraph JS over CrewAI / AutoGen — stateful graphs, native HITL |
+| [002](docs/decisions/002-why-drizzle.md) | Drizzle ORM — type-safe, migration-based, no ORM magic |
+| [004](docs/decisions/004-why-telegram-hitl.md) | Telegram as HITL gateway — inline keyboards, crash-safe via checkpointer |
+| [010](docs/decisions/010-v2-react-agent-rebuild.md) | v2 rebuild: 10,678 LOC → ~500 LOC via prebuilt supervisor + ReAct |
+| [011](docs/decisions/011-portfolio-as-product-and-eval-harness.md) | Eval harness over self-critique node — deterministic, reproducible |
+| [012](docs/decisions/012-personal-department.md) | Personal laptop operator: AppleScript browser, path-guard, HITL on every write |
+| [013](docs/decisions/013-keep-personal-and-engineering-separate.md) | Keep personal ≠ engineering — least privilege, blast radius, OWASP/Sophos/CAF |
 
 ---
 
-## Key Design Decisions
+## How HITL works
 
-| Decision | Why |
-|----------|-----|
-| Single Gemini Flash model | One model with good tool-calling > 8 tiers with routing overhead |
-| `createSupervisor` prebuilt | LangGraph ships this — no custom routing needed |
-| `interrupt()` for HITL | Native, crash-safe, no extra DB table needed |
-| Tools do the sending | Approval gates the tool — not a separate finalize node |
-| One thread per chat | Conversation memory persists; approvals go to the right run |
-| `includeAgentName: "inline"` | Gemini rejects `name` attribute on messages; inline embeds it in content |
+```
+Agent calls tool (e.g. send_email)
+    │
+    ├── [BEFORE interrupt()] Build approval payload: title, summary, preview, args
+    │
+    ├── interrupt({ kind: "approval", ... })
+    │       │
+    │       ▼  LangGraph pauses the graph here.
+    │           State checkpointed to Postgres. Process can crash — no data lost.
+    │
+    │   Telegram delivers an approval card:
+    │       "📧 Send email to alex@acme.com?"
+    │       [Subject + full body preview]
+    │       [✅ Approve] [❌ Reject]
+    │
+    ├── Founder taps ✅ Approve
+    │       │
+    │       ▼  Graph resumes. interrupt() returns "approved".
+    │
+    ├── [AFTER interrupt()] Side effects run:
+    │       - suppression_check (do-not-contact list)
+    │       - emailTool.execute(idempotency_key, ...)
+    │       - audit_log write
+    │
+    └── "✅ Email sent to alex@acme.com"
+```
 
-Full history: `docs/study/03-v1-to-v2-migration.md` — how we went from 10,678 LOC that couldn't send an email to ~500 LOC that can.
+Key invariant: **all side effects run AFTER `interrupt()` returns**. Code before the interrupt runs twice (on pause and on resume) — it must be pure.
 
 ---
 
-## Tests
+## Running tests
 
 ```bash
-pnpm test                                                          # all 210 tests
-npx vitest run tests/integration/office-hitl.test.ts               # core HITL proof
-npx vitest run tests/live/                                         # real API round-trips
+pnpm test           # 271 unit + integration tests
+pnpm eval           # Deterministic golden-task eval → EVAL.md (needs live Postgres + LLM key)
+pnpm lint           # TypeScript typecheck + ESLint
 ```
 
 ---
 
-## Evaluation
+## What's next
 
-A deterministic eval harness measures the multi-agent system against a fixed
-golden-task set (`src/eval/golden-tasks.ts`) — the regression baseline for agent
-behaviour. Each task scores three things:
+Build-in-public roadmap (each on its own branch → PR):
 
-- **Routing accuracy** — did the supervisor hand off to the right department?
-- **Tool selection** — did that department use the expected tools?
-- **HITL coverage** — did every write action pause for approval when required?
+1. **Budget guard** — per-run token/$ cap, breach → Telegram alert, extract as `@founderos/budget-guard` npm
+2. **MCP server** — expose FounderOS tools via Model Context Protocol (Claude Code / Cursor can drive it)
+3. **Job-Hunt department** — reads your CV, researches the company, HITL-drafts tailored applications
+4. **Real RAG** — pgvector + `ts_tsvector` hybrid search over the knowledge base
 
-```bash
-pnpm eval        # runs the golden set through the live office → writes EVAL.md
-```
-
-The scorer, report renderer, and runner are pure and fully unit-tested with a
-deterministic stub invoker (zero LLM cost); `pnpm eval` swaps in the real office
-graph. The runner observes each run only up to the approval pause and **never
-approves**, so no email / post / GitHub write fires during an eval. See
-`src/eval/` and `docs/decisions/011-portfolio-as-product-and-eval-harness.md`
-(why an eval harness over a critic).
+Follow the build at [turicks.com](https://turicks.com) or [LinkedIn](https://www.linkedin.com/in/pushkarverma3698/).
 
 ---
 
-## Stack
+## Built by
 
-- **Runtime:** Node 22, TypeScript 5.5 strict, ES modules
-- **AI:** LangGraph JS 0.2.74, langgraph-supervisor 0.0.20, Google GenAI (Gemini), LangChain
-- **Bot:** grammy (Telegram long-polling)
-- **DB:** Drizzle ORM + PostgreSQL (via Docker in dev)
-- **Tools:** Composio (email + LinkedIn), Firecrawl (search), Octokit (GitHub)
-- **Infra:** pino logging, LangSmith tracing, Hono health server
-- **Tests:** Vitest
+[Pushkar Verma](https://turicks.com) — AI automation engineer. Building FounderOS to run [Turicks](https://turicks.com), an AI-native agency that ships working code (not decks) in 3–5 days.
+
+*"Safe, evaluated, budget-capped agent actions — the production-hardening layer most agent projects skip."*
 
 ---
 
-## Learn More
+## License
 
-| What | Where |
-|------|-------|
-| What is multi-agent orchestration? | `docs/study/01-what-is-multi-agent-orchestration.md` |
-| LangGraph patterns used here | `docs/study/02-langgraph-patterns.md` |
-| Why we rebuilt from v1 | `docs/study/03-v1-to-v2-migration.md` |
-| How to read the codebase | `docs/study/04-how-founderos-works.md` |
-| Future plans | `docs/ROADMAP.md` |
-| Daily usage | `docs/OPERATIONS.md` |
-
----
-
-*Turicks — AI that actually does things.*
+MIT — see [LICENSE](LICENSE)
