@@ -21,7 +21,8 @@
     "setup": "node --env-file=.env --import tsx/esm scripts/setup-db.ts",
     "inspect": "node --env-file=.env --import tsx/esm scripts/inspect-thread.ts",
     "brain:sync": "node --env-file=.env --import tsx/esm scripts/sync-turicks-brain.ts",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "mcp": "node --env-file=.env --import tsx/esm src/mcp/index.ts"
   },
   "dependencies": {
     "@composio/core": "0.10.0",
@@ -32,6 +33,7 @@
     "@langchain/langgraph-checkpoint-postgres": "^0.1.0",
     "@langchain/langgraph-supervisor": "0.0.20",
     "@langchain/openai": "^0.3.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "bottleneck": "^2.19.5",
     "composio-core": "0.5.39",
     "drizzle-orm": "^0.38.0",
