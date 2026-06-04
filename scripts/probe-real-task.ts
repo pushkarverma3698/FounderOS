@@ -8,6 +8,25 @@
 import { MemorySaver } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
 import { buildOffice } from "../src/agents/office.js";
+import { markdownToTelegramHtml } from "../src/gateway/format.js";
+
+/** Validate that rendered HTML uses only Telegram-allowed tags, balanced, no leaked markdown. */
+function validateTelegramHtml(html: string): string[] {
+  const ALLOWED = ["b", "i", "u", "s", "code", "pre", "a", "blockquote", "tg-spoiler"];
+  const issues: string[] = [];
+  const stack: string[] = [];
+  for (const m of html.matchAll(/<(\/?)([a-zA-Z-]+)(?:\s[^>]*)?>/g)) {
+    const close = m[1];
+    const name = m[2] ?? "";
+    if (!ALLOWED.includes(name)) { issues.push(`disallowed <${name}>`); continue; }
+    if (close) { if (stack[stack.length - 1] === name) stack.pop(); else issues.push(`unbalanced </${name}>`); }
+    else stack.push(name);
+  }
+  if (stack.length) issues.push(`unclosed <${stack.join(",")}>`);
+  if (/<b>\s*<b>|<i>\s*<i>/.test(html)) issues.push("nested identical tags (Telegram 400)");
+  if (/\*\*|^\s*#{1,6}\s|^\|.*\|.*\n\|\s*-/m.test(html)) issues.push("leaked markdown");
+  return issues;
+}
 
 const tasks = process.argv.slice(2);
 const TASKS = tasks.length > 0 ? tasks : [
@@ -57,7 +76,12 @@ async function main() {
       console.log(`   [${type}]${tc} ${content.slice(0, 160).replace(/\n/g, " ")}`);
     }
     const lastAi = [...msgs].reverse().find((m) => (m._getType?.() ?? "") === "ai" && typeof m.content === "string" && m.content.trim() && !(m.tool_calls && m.tool_calls.length));
-    console.log(`\n   ✅ FINAL REPLY: ${typeof lastAi?.content === "string" ? lastAi.content.slice(0, 300) : "(none)"}`);
+    const reply = typeof lastAi?.content === "string" ? lastAi.content : "(none)";
+    console.log(`\n   ✅ FINAL REPLY: ${reply.slice(0, 300)}`);
+    // Render through the ACTUAL Telegram formatter and validate it.
+    const html = markdownToTelegramHtml(reply);
+    const fmtIssues = validateTelegramHtml(html);
+    console.log(`   🎨 FORMAT: ${fmtIssues.length === 0 ? "✓ valid Telegram HTML" : "❌ " + fmtIssues.join("; ")}`);
   }
   process.exit(0);
 }

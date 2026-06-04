@@ -21,6 +21,49 @@ describe("markdownToTelegramHtml", () => {
     expect(markdownToTelegramHtml("**Google Security Alerts**")).toBe("<b>Google Security Alerts</b>");
   });
 
+  // ── Regression: defects found by the formatting battery (2026-06-04) ──────────
+
+  it("does NOT nest identical tags when a heading contains bold (Telegram rejects <b><b>)", () => {
+    // The model constantly writes `## **Title**`. Nested <b><b> makes Telegram
+    // 400 and the whole message loses ALL formatting via the plain-text fallback.
+    const out = markdownToTelegramHtml("## **Q2 Results**");
+    expect(out).toBe("<b>Q2 Results</b>");
+    expect(out).not.toContain("<b><b>");
+  });
+
+  it("never emits nested identical formatting tags", () => {
+    const out = markdownToTelegramHtml("### **Stripe** overview\n**bold** then **more**");
+    expect(out).not.toMatch(/<b>\s*<b>/);
+    expect(out).not.toMatch(/<\/b>\s*<\/b>/);
+  });
+
+  it("renders a markdown table as an aligned <pre> block (no raw pipes)", () => {
+    const md = "| Dept | Tool |\n| --- | --- |\n| research | search_web |\n| comms | send_email |";
+    const out = markdownToTelegramHtml(md);
+    expect(out).toContain("<pre>");
+    expect(out).toContain("research");
+    expect(out).toContain("search_web");
+    expect(out).not.toMatch(/\| --- \|/); // separator row gone
+    expect(out).not.toMatch(/\|\s*Dept\s*\|/); // raw header pipes gone
+  });
+
+  it("preserves balanced parentheses inside a link URL", () => {
+    const out = markdownToTelegramHtml("See [the docs](https://en.wikipedia.org/wiki/Agent_(AI)) now.");
+    expect(out).toContain('href="https://en.wikipedia.org/wiki/Agent_(AI)"');
+    expect(out).toContain(">the docs</a>");
+    expect(out).not.toContain('(AI"'); // URL not truncated at the first paren
+  });
+
+  it("does NOT italicise literal asterisks with spaces (math, not markdown)", () => {
+    const out = markdownToTelegramHtml("Compute 2 * 3 * 4 = 24 for the batch.");
+    expect(out).not.toContain("<i>");
+    expect(out).toContain("2 * 3 * 4 = 24");
+  });
+
+  it("still italicises genuine *word* emphasis", () => {
+    expect(markdownToTelegramHtml("that is *all* of them")).toBe("that is <i>all</i> of them");
+  });
+
   it("converts *italic* and _italic_ to <i>", () => {
     expect(markdownToTelegramHtml("_quietly_")).toBe("<i>quietly</i>");
   });
