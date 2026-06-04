@@ -12,19 +12,20 @@
 | # | Date | Pillar | Hook | Status | Outcome |
 |---|---|---|---|---|---|
 | 1 | 2026-06-04 | BUILD_LOG | "I built a 7-department AI agent system that approves its own emails before sending. Here's the architecture." | Pending founder publish | TBD |
+| 2 | 2026-06-04 | BUILD_LOG | "5 Postgres tables make our AI agents fail safely." | Pending founder approval (HITL card in Telegram) | TBD |
 
 ---
 
 ## Coverage so far
 
-- **Topics covered:** FounderOS v2 launch / architecture overview, HITL approval flow, 7-department supervisor
+- **Topics covered:** FounderOS v2 launch / architecture overview, HITL approval flow, 7-department supervisor; own Postgres infra + self-correcting loops
 - **Topics NOT yet covered (queue):**
   - The eval harness: tool-select 0/7 → 7/7 (post-mortem — strong story)
-  - Budget-capped agents (once J3 ships)
   - Path-guarded laptop operator (security angle — "blocking ~/.ssh even on read")
   - LangGraph temperature fix: routing went non-deterministic → fixed to 0 (before/after)
   - The 10,678 LOC → 500 LOC v2 rebuild story
-  - Personal vector DB vs company vector DB: how to keep them separate (for job hunt + agency ops)
+  - Job-hunt department: "FounderOS is now applying for my job"
+  - Engineering department building its own features + opening PRs
 
 ---
 

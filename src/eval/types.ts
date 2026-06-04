@@ -12,7 +12,7 @@
  * real office graph.
  */
 
-/** The six routable departments (mirrors the office sub-agents). */
+/** The eight routable departments (mirrors the office sub-agents). */
 export type Department =
   | "research"
   | "comms"
@@ -20,7 +20,8 @@ export type Department =
   | "marketing"
   | "sales"
   | "prospecting"
-  | "personal";
+  | "personal"
+  | "jobhunt";
 
 /** A single golden evaluation case: the expected behaviour for one input. */
 export interface GoldenTask {

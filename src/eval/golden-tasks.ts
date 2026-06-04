@@ -118,4 +118,30 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     expectedTools: ["browser"],
     expectsHitl: true,
   },
+
+  // ── Job-Hunt (read-only research + HITL-gated send) ───────────────────────
+  {
+    id: "jobhunt-find-roles",
+    input: "Search for LangGraph AI engineer jobs in Amsterdam and tell me what's available.",
+    expectedRoute: "jobhunt",
+    expectedTools: ["search_jobs"],
+    expectsHitl: false,
+  },
+  {
+    id: "jobhunt-draft-application",
+    input: "Find open AI engineer positions at companies using LangGraph and draft a tailored outreach email to the best fit.",
+    expectedRoute: "jobhunt",
+    expectedTools: ["read_cv", "search_jobs"],
+    expectsHitl: true, // send_email fires HITL before sending
+    note: "jobhunt reads CV + searches jobs, then send_email is HITL-gated.",
+  },
+
+  // ── Engineering build workflow (project_workflow) ─────────────────────────
+  {
+    id: "eng-build-feature",
+    input: "Create a new GitHub issue on pushkarverma3698/FounderOS titled 'feat: add job-hunt golden eval tasks' with a body describing the test.",
+    expectedRoute: "engineering",
+    expectedTools: ["github_write"],
+    expectsHitl: true,
+  },
 ];
