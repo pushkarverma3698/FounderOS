@@ -212,3 +212,17 @@ eval harness must be able to prove it.
   at the boundary. A red typecheck is a stability liability, not a footnote.
 - **Fail loud, fail safe.** External calls surface errors to Telegram; side effects only
   ever run AFTER `interrupt()` approval (rule #3/#4); idempotency before every send (#5).
+
+### 17. Reuse & simplicity-first (adopt before build)
+Before writing new code, check: does an existing tool / MCP / agent / pattern already solve this?
+Prefer the simplest external tool or reuse of existing code. One engine, many workflows — never
+fork a parallel product when a new department + prompt will do.
+
+**Feature triple-filter (mandatory before any new feature):** a feature ships only if it
+simultaneously:
+1. **Produces a real outcome** (revenue, an interview, hours saved, a client, a validated story)
+2. **Closes a named 2026 AI/agent engineering hiring gap** (eval harness · HITL · cost control ·
+   MCP · RAG · production observability)
+3. **Is mostly reuse** of existing code, tools, or adopted OSS (not a net-new subsystem)
+
+If a feature doesn't pass all three, defer it. See ADR-014 and `docs/study/IDEATION-AND-MARKET-RESEARCH.md`.

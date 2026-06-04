@@ -1,9 +1,19 @@
 # FounderOS — Strategic Vision
 
-> Last updated: 2026-06-01
-> Status: Active — reference before adding any new feature
+> Last updated: 2026-06-04
+> Status: **Partially superseded by lean v2** — see note below
 
-This document organises the 16 founding strategic instructions into 6 pillars. Every new feature, agent, or workflow must be evaluated against these pillars before implementation.
+> ⚠️ **Superseded sections (2026-06-04):** Pillar 2 references the aspirational 35-agent system
+> (social_linkedin, social_instagram, senior_engineer, self-PR, self-healing crons). The lean v2
+> rebuild intentionally dropped those subsystems (see ADR-010 v2 rebuild, ADR-013 personal/engineering
+> separation, docs/ROADMAP.md "What NOT to Build"). The actual deployed system has 7 departments
+> (research · comms · engineering · marketing · sales · prospecting · personal). Pillar 0 (token
+> economy) and Pillar 1 (personal→SaaS pipeline) remain fully active guidance.
+>
+> New features require the **triple-filter** from CLAUDE.md rule #17 (outcome · hiring signal ·
+> reuse). See `docs/study/IDEATION-AND-MARKET-RESEARCH.md` and ADR-014.
+
+This document organises the founding strategic instructions into 6 pillars.
 
 ---
 
