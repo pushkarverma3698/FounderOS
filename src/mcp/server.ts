@@ -13,9 +13,13 @@
  *   See ADR-013 (separation of concerns) and ADR-004 (why Telegram for HITL).
  *
  * Tools exposed:
- *   - search_web     → Firecrawl web search
- *   - github_read    → GitHub repos / README / stats (read-only)
- *   - read_context   → Founder's current business context
+ *   - search_web      → Firecrawl web search
+ *   - github_read     → GitHub repos / README / stats (read-only)
+ *   - read_context    → Founder's current business context
+ *   — Memory data-source layer (ADR-016) —
+ *   - search_memory   → Unified query across episodic_memory + conversations + knowledge_entries
+ *   - search_knowledge → turicks-brain keyword search (knowledge_entries table)
+ *   - read_cv         → personal-rag CV/career lookup (personal-rag REST API + wiki fallback)
  *
  * Transport: Streamable HTTP (MCP spec Nov 2025+)
  * Start: pnpm mcp  (or: node --env-file=.env --import tsx/esm src/mcp/index.ts)
@@ -29,10 +33,19 @@ import {
 import { webSearchTool } from "../tools/web-search.js";
 import { githubTool } from "../tools/github.js";
 import { getFounderContext } from "../db/queries.js";
+import { searchMemoryTool } from "../tools/memory.js";
+import { searchKnowledge } from "../tools/knowledge.js";
+import { readCvTool } from "../tools/career.js";
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
 
-export type McpToolName = "search_web" | "github_read" | "read_context";
+export type McpToolName =
+  | "search_web"
+  | "github_read"
+  | "read_context"
+  | "search_memory"
+  | "search_knowledge"
+  | "read_cv";
 
 export const FOUNDEROS_MCP_TOOLS = [
   {
@@ -76,6 +89,70 @@ export const FOUNDEROS_MCP_TOOLS = [
     inputSchema: {
       type: "object" as const,
       properties: {},
+    },
+  },
+
+  // ── Memory data-source layer (ADR-016) ────────────────────────────────────
+
+  {
+    name: "search_memory" as const,
+    description:
+      "Search across all FounderOS memory tiers: episodic events (decisions, outcomes, " +
+      "completed tasks), conversation history, turicks-brain knowledge, and founder context. " +
+      "Use this to answer 'what did we decide about X', 'what happened with Y last week', " +
+      "'what is our strategy on Z'. Read-only — no approval needed.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "What to search for, e.g. 'LangGraph HITL decisions' or 'client Naggar status'",
+        },
+        type: {
+          type: "string",
+          enum: ["all", "conversations", "episodic", "context", "knowledge"],
+          description: "Filter to a specific memory tier (default: all)",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "search_knowledge" as const,
+    description:
+      "Search the turicks-brain knowledge base — ADRs, brand guidelines, strategy docs, " +
+      "phase summaries, post-mortems, and case studies. Use for questions about architecture " +
+      "decisions, business strategy, or how FounderOS is designed. Read-only.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "Search query, e.g. 'HITL interrupt design' or 'Turicks brand voice'",
+        },
+        limit: {
+          type: "number",
+          description: "Max results (default 5)",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "read_cv" as const,
+    description:
+      "Read Pushkar Verma's CV, career background, and skills from his personal knowledge base. " +
+      "Use for questions about his experience, technical skills, portfolio projects, or salary expectations. " +
+      "Queries the personal-rag API (localhost:8765) or falls back to wiki.md. Read-only.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "What to look up, e.g. 'LangGraph experience', 'AI agent skills', 'TypeScript projects'",
+        },
+      },
+      required: ["query"],
     },
   },
 ];
@@ -137,6 +214,39 @@ export async function handleMcpToolCall(
           // DB not available in some environments (e.g. Claude Code without Postgres)
           return textResult("Context unavailable — database not connected.");
         }
+      }
+
+      // ── Memory data-source layer ─────────────────────────────────────────────
+
+      case "search_memory": {
+        const query = String(args["query"] ?? "");
+        const type = (args["type"] as "all" | "conversations" | "episodic" | "knowledge" | "context" | undefined) ?? "all";
+        // searchMemoryTool is a LangChain DynamicStructuredTool (.invoke not .execute)
+        try {
+          const text = await searchMemoryTool.invoke({ query, type });
+          return textResult(String(text ?? "No results found."));
+        } catch (err) {
+          return errorResult(`Memory search failed: ${(err as Error).message}`);
+        }
+      }
+
+      case "search_knowledge": {
+        const query = String(args["query"] ?? "");
+        const limit = typeof args["limit"] === "number" ? args["limit"] : 5;
+        // searchKnowledge is a LangChain DynamicStructuredTool (.invoke not .execute)
+        try {
+          const text = await searchKnowledge.invoke({ query, ...(limit !== 5 ? { limit } : {}) });
+          return textResult(String(text ?? "No knowledge entries found."));
+        } catch (err) {
+          return errorResult(`Knowledge search failed: ${(err as Error).message}`);
+        }
+      }
+
+      case "read_cv": {
+        const query = String(args["query"] ?? "skills");
+        const res = await readCvTool.execute({ query });
+        if (!res.success) return errorResult(`CV read failed: ${res.error ?? "unknown"}`);
+        return textResult(String(res.data ?? "No CV data found."));
       }
 
       default:

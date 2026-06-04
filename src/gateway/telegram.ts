@@ -108,6 +108,50 @@ export function collectToolErrors(res: { messages?: OfficeMessage[] }): string[]
   return errs;
 }
 
+/**
+ * Slice only the messages added during the current invoke() turn.
+ * The Postgres checkpointer returns the FULL thread trail on every call.
+ * Passing everything to finalReply/collectToolErrors means stale AI answers
+ * and old tool errors from prior turns keep surfacing (the "identical stale
+ * reply" + "persistent toolErrors:1" bugs). Slicing from baseLen isolates
+ * exactly this turn's output.
+ *
+ * baseLen = messages.length BEFORE invoke(); clamp both edges gracefully.
+ */
+export function sliceFreshMessages(
+  messages: OfficeMessage[],
+  baseLen: number,
+): OfficeMessage[] {
+  const start = Math.max(0, Math.min(baseLen, messages.length));
+  return messages.slice(start);
+}
+
+/**
+ * Detect a pending interrupt() on the thread and drain it with
+ * Command({ resume: "rejected" }) — fail-safe because every HITL wrapper
+ * only executes the side effect on "approved", so a rejection is a clean no-op.
+ *
+ * Called at the START of every new free-text message handler. If a pending
+ * approval exists we cancel it, return the approval (so the gateway can inform
+ * the founder), and leave the thread in a clean resumable state for the
+ * subsequent fresh invoke(). Returns null if no interrupt was pending.
+ *
+ * This fixes the root cause: a new message invoked on a wedged thread
+ * re-served the parked state forever (both finalReply and collectToolErrors
+ * resurrected old content every turn).
+ */
+export async function resolvePendingApproval(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  office: { getState: (c: any) => Promise<unknown>; invoke: (input: any, c?: any) => Promise<unknown> },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  config: any,
+): Promise<ApprovalRequest | null> {
+  const pending = await getPendingApproval(office as Parameters<typeof getPendingApproval>[0], config);
+  if (!pending) return null;
+  await office.invoke(new Command({ resume: "rejected" }), config);
+  return pending;
+}
+
 /** Send the office's result to Telegram — final reply plus any tool failures. */
 async function sendResult(ctx: Context, res: { messages?: OfficeMessage[] }, chatId: number | string): Promise<void> {
   const reply = finalReply(res);
@@ -186,6 +230,37 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
 
   try {
     const office = await getOffice();
+
+    // ── D1: Interrupt guard ───────────────────────────────────────────────────
+    // If the thread is paused on a pending approval, a fresh invoke({messages})
+    // re-serves the parked state and produces a stale reply every turn.
+    // Cancel it first, inform the founder, then proceed with the new request.
+    const stale = await resolvePendingApproval(office, config);
+    if (stale) {
+      clearInterval(typing);
+      log.warn({ chatId, title: stale.title }, "Cancelled stale pending approval — new message arrived");
+      await ctx.reply(
+        `⏸️ <b>Pending approval cancelled</b>\n` +
+        `You had an unanswered approval card (<i>${safeHtml(stale.title)}</i>). ` +
+        `I've cancelled it so your new request runs cleanly. Re-ask if you still want it.`,
+        { parse_mode: "HTML" },
+      );
+      // Restart the typing indicator for the actual new request
+      ctx.replyWithChatAction("typing").catch(() => {});
+      const typing2 = setInterval(() => ctx.replyWithChatAction("typing").catch(() => {}), 4000);
+      // Reassign typing so the catch block clears the right timer
+      clearInterval(typing);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (runOfficeText as any)._typing = typing2;
+    }
+
+    // ── D2/D3: Capture turn boundary before invoke ────────────────────────────
+    // The checkpointer returns the full trail after invoke. Slicing to baseLen
+    // isolates this turn's output so finalReply/collectToolErrors never
+    // surface messages from earlier turns.
+    const beforeState = await office.getState(config).catch(() => null) as { values?: { messages?: OfficeMessage[] } } | null;
+    const baseLen = (beforeState?.values?.messages ?? []).length;
+
     const budget = createRunBudget();
     const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
     const res = (await office.invoke(
@@ -204,10 +279,15 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
       await sendApprovalCard(ctx, approval);
       return;
     }
-    await sendResult(ctx, res, chatId);
-    // Fire-and-forget — record the conversation for episodic memory.
-    // Non-fatal: never block the Telegram response on recording failures.
-    recordConversationEnd(threadIdFor(chatId), res.messages ?? []).catch(() => {});
+
+    // Slice to current turn — prevents stale reply / phantom tool error
+    const freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
+    const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
+    await sendResult(ctx, freshRes, chatId);
+    // Only record episodic memory when run completed cleanly with a fresh answer
+    if (freshMessages.length > 0) {
+      recordConversationEnd(threadIdFor(chatId), res.messages ?? []).catch(() => {});
+    }
   } catch (err) {
     clearInterval(typing);
     if (err instanceof BudgetExceededError) {
@@ -236,6 +316,14 @@ async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Pr
 
   try {
     const office = await getOffice();
+
+    // D5: Idempotency — don't re-invoke if no interrupt exists (double-tap, restart).
+    const pending = await getPendingApproval(office, config);
+    if (!pending) {
+      await ctx.reply("ℹ️ No pending approval found — it may have already been handled.", { parse_mode: "HTML" });
+      return;
+    }
+
     const res = (await office.invoke(
       new Command({ resume: decision }),
       config,

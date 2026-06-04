@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { safeHtml, finalReply, collectToolErrors } from "../../../src/gateway/telegram.js";
+import { safeHtml, finalReply, collectToolErrors, sliceFreshMessages } from "../../../src/gateway/telegram.js";
 
 // ── safeHtml ──────────────────────────────────────────────────────────────────
 
@@ -145,5 +145,48 @@ describe("collectToolErrors", () => {
   it("ignores non-tool messages even if they contain error keywords", () => {
     const res = { messages: [makeMsg("ai", "there was an error in the system")] };
     expect(collectToolErrors(res)).toEqual([]);
+  });
+});
+
+// ── sliceFreshMessages (per-turn isolation) ─────────────────────────────────────
+// The checkpointer returns the FULL thread trail on every invoke. To stop the
+// gateway resurrecting stale replies / old tool errors, we slice to only the
+// messages added during the current turn (everything past baseLen captured
+// before the invoke).
+
+describe("sliceFreshMessages", () => {
+  const trail = [
+    makeMsg("human", "old q"),
+    makeMsg("ai", "old answer"),
+    makeMsg("tool", "old error: boom"),
+  ];
+
+  it("returns only messages added after baseLen", () => {
+    const all = [...trail, makeMsg("human", "new q"), makeMsg("ai", "new answer")];
+    const fresh = sliceFreshMessages(all, trail.length);
+    expect(fresh).toHaveLength(2);
+    expect(finalReply({ messages: fresh })).toBe("new answer");
+  });
+
+  it("excludes a stale tool error from a previous turn", () => {
+    const all = [...trail, makeMsg("human", "new q"), makeMsg("ai", "clean answer")];
+    const fresh = sliceFreshMessages(all, trail.length);
+    expect(collectToolErrors({ messages: fresh })).toEqual([]);
+  });
+
+  it("returns all messages when baseLen is 0", () => {
+    expect(sliceFreshMessages(trail, 0)).toHaveLength(3);
+  });
+
+  it("returns empty when baseLen equals length (no new messages this turn)", () => {
+    expect(sliceFreshMessages(trail, trail.length)).toEqual([]);
+  });
+
+  it("clamps a baseLen larger than the trail to empty (never throws)", () => {
+    expect(sliceFreshMessages(trail, 999)).toEqual([]);
+  });
+
+  it("treats a negative baseLen as 0", () => {
+    expect(sliceFreshMessages(trail, -5)).toHaveLength(3);
   });
 });
