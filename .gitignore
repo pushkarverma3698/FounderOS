@@ -48,3 +48,4 @@ coverage/
 # Gumroad packs — seller-only, never commit product files
 gumroad-packs/
 *.zip
+.claude/worktrees/

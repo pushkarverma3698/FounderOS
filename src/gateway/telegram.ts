@@ -36,6 +36,7 @@ import { getFounderContext, upsertFounderContext } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
+import { recordConversationEnd } from "../infra/conversation-recorder.js";
 
 const log = logger.child({ module: "telegram" });
 
@@ -204,6 +205,9 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
       return;
     }
     await sendResult(ctx, res, chatId);
+    // Fire-and-forget — record the conversation for episodic memory.
+    // Non-fatal: never block the Telegram response on recording failures.
+    recordConversationEnd(threadIdFor(chatId), res.messages ?? []).catch(() => {});
   } catch (err) {
     clearInterval(typing);
     if (err instanceof BudgetExceededError) {

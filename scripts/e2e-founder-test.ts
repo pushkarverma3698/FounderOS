@@ -295,9 +295,23 @@ async function runScenario(
   console.log(`📨 Input: "${scenario.input.slice(0, 80)}..."`);
 
   try {
+    // Use handleToolStart callback — same pattern as eval harness.
+    // This is the ONLY reliable way to observe tools called inside sub-agents
+    // under outputMode "last_message" (sub-agent tool calls don't surface in
+    // the top-level messages array).
+    const observedTools: string[] = [];
+    const toolCollector = {
+      name: "e2e-tool-collector",
+      handleToolStart: (
+        _tool: unknown, _input: unknown, _runId: unknown,
+        _parentRunId?: unknown, _tags?: unknown, _metadata?: unknown,
+        runName?: string,
+      ): void => { if (runName) observedTools.push(runName); },
+    };
+
     const res = await office.invoke(
       { messages: [new HumanMessage(scenario.input)] },
-      config,
+      { configurable: { thread_id: threadId }, callbacks: [toolCollector] },
     ) as { messages?: BaseMessage[] };
 
     const durationMs = Date.now() - start;
@@ -308,7 +322,10 @@ async function runScenario(
       name?: string;
     }>;
 
-    const { route, tools } = extractRouteAndTools(messages);
+    // Route from message trail (transfer_to_* calls)
+    const { route } = extractRouteAndTools(messages);
+    // Tools from callback (accurate for sub-agent tool calls)
+    const tools = observedTools.filter(t => !t.startsWith("transfer_to_"));
     const response = getLastAiText(messages);
 
     // Check for pending HITL

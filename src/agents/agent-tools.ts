@@ -42,6 +42,7 @@ import {
 import { readCvTool, searchJobsTool } from "../tools/career.js";
 import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../tools/project-workflow.js";
 import { claudeCodeTool, findClaudeBinary } from "../tools/claude-code.js";
+import { recordEventTool as rawRecordEvent } from "../tools/memory.js";
 
 const log = childLogger({ module: "agent-tools" });
 
@@ -553,6 +554,45 @@ export const browser = tool(
       action: z.enum(["open_url", "get_page_text", "run_js"]),
       url: z.string().optional().describe("URL for open_url"),
       js: z.string().optional().describe("JavaScript for run_js"),
+    }),
+  },
+);
+
+// ── Memory: record_event (WRITE — requires approval) ─────────────────────────
+
+/**
+ * HITL wrapper around the raw recordEventTool. The approval card lets the founder
+ * review the event before it's committed to episodic_memory.
+ */
+export const recordEvent = tool(
+  async ({ title, summary, tags, event_type, occurred_at }) => {
+    const tagsStr = tags.join(", ") || "(none)";
+    const decision = interrupt({
+      kind: "approval",
+      action: "record_event",
+      title: `📝 Record event: "${title}"?`,
+      summary: `Type: ${event_type} | Tags: ${tagsStr}`,
+      preview: summary,
+      args: { title, summary, tags, event_type, occurred_at },
+    } satisfies ApprovalRequest) as string;
+
+    if (decision !== "approved") {
+      return `Event "${title}" was NOT recorded — the founder rejected it.`;
+    }
+
+    return rawRecordEvent.invoke({ title, summary, tags, event_type, occurred_at });
+  },
+  {
+    name: "record_event",
+    description: rawRecordEvent.description,
+    schema: z.object({
+      title: z.string().describe("Short, searchable title"),
+      summary: z.string().describe("1–3 sentences describing what happened"),
+      tags: z.array(z.string()).describe("Keyword tags for retrieval"),
+      event_type: z
+        .enum(["conversation", "decision", "outcome", "task_completed"])
+        .describe("Category of event"),
+      occurred_at: z.string().optional().describe("ISO 8601 timestamp. Defaults to now."),
     }),
   },
 );

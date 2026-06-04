@@ -180,7 +180,7 @@ export const searchJobsTool: UnifiedTool = {
           Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
         },
         body: JSON.stringify({ query: fullQuery, limit: 8, scrapeOptions: { formats: ["markdown"] } }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(30000),
       });
 
       if (!resp.ok) {
