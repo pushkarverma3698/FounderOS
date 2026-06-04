@@ -34,6 +34,9 @@ import {
   writeFile,
   runShell,
   browser,
+  readCv,
+  searchJobs,
+  projectWorkflow,
 } from "./agent-tools.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
@@ -46,6 +49,7 @@ import {
   SALES_PROMPT,
   PROSPECTING_PROMPT,
   PERSONAL_PROMPT,
+  JOBHUNT_PROMPT,
   SCHEDULER_BRIEF_PROMPT,
 } from "./system-prompts.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
@@ -92,7 +96,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
 
   const engineering = createReactAgent({
     llm,
-    tools: [githubRead, githubWrite],
+    tools: [githubRead, githubWrite, projectWorkflow],
     name: "engineering",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(ENGINEERING_PROMPT, subAgentBudget) as any,
@@ -137,8 +141,18 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     prompt: createTrimmedPrompt(PERSONAL_PROMPT, subAgentBudget) as any,
   });
 
+  /** Job-Hunt: researches roles + reads CV from personal-rag + HITL-drafts applications.
+   *  ADR-015: personal-rag read-only; NEVER auto-submit; send_email HITL-gated. */
+  const jobhunt = createReactAgent({
+    llm,
+    tools: [readCv, searchJobs, sendEmail],
+    name: "jobhunt",
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prompt: createTrimmedPrompt(JOBHUNT_PROMPT, subAgentBudget) as any,
+  });
+
   return createSupervisor({
-    agents: [research, comms, engineering, marketing, sales, prospecting, personal],
+    agents: [research, comms, engineering, marketing, sales, prospecting, personal, jobhunt],
     llm,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(SUPERVISOR_PROMPT, supervisorBudget) as any,
@@ -166,7 +180,7 @@ export async function getOffice() {
   // runtime (tests + production prove it); cast at this single boundary so
   // `pnpm lint` stays clean instead of carrying a permanent known error.
   _office = buildOffice(checkpointer as unknown as BaseCheckpointSaver);
-  log.info("Office compiled: supervisor + [research, comms, engineering, marketing, sales, prospecting, personal]");
+  log.info("Office compiled: supervisor + [research, comms, engineering, marketing, sales, prospecting, personal, jobhunt]");
   return _office;
 }
 

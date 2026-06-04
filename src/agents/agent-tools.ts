@@ -39,6 +39,8 @@ import {
   browserAction,
   type BrowserAction,
 } from "../tools/personal.js";
+import { readCvTool, searchJobsTool } from "../tools/career.js";
+import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../tools/project-workflow.js";
 
 const log = childLogger({ module: "agent-tools" });
 
@@ -379,6 +381,98 @@ export const runShell = tool(
     schema: z.object({
       command: z.string().describe("The shell command to run"),
       cwd: z.string().optional().describe("Working directory (default: personal root)"),
+    }),
+  },
+);
+
+// ── Job-Hunt: read CV from personal-rag (read-only, NO approval) ─────────────
+
+export const readCv = tool(
+  async ({ query }) => {
+    const res = await readCvTool.execute({ query });
+    if (!res.success) return `CV read failed: ${res.error}`;
+    return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
+  },
+  {
+    name: "read_cv",
+    description: readCvTool.description,
+    schema: z.object({
+      query: z.string().describe(
+        "What to look up from the CV/background. E.g. 'LangGraph experience', 'TypeScript projects', 'salary expectations'"
+      ),
+    }),
+  },
+);
+
+// ── Job-Hunt: search for job postings (read-only, NO approval) ───────────────
+
+export const searchJobs = tool(
+  async ({ query, location }) => {
+    const res = await searchJobsTool.execute({ query, ...(location ? { location } : {}) });
+    if (!res.success) return `Job search failed: ${res.error}`;
+    return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
+  },
+  {
+    name: "search_jobs",
+    description: searchJobsTool.description,
+    schema: z.object({
+      query: z.string().describe("Role + keywords, e.g. 'AI engineer LangGraph TypeScript'"),
+      location: z.string().optional().describe("Location, e.g. 'Amsterdam' or 'remote EU'"),
+    }),
+  },
+);
+
+// ── Engineering: project workflow — build + test + commit + PR ────────────────
+// The ONE tool that gives engineering autonomous code-build capability.
+// read_file and list_files: instant (no HITL).
+// run_command: ALWAYS HITL-gated (shows command + cwd before executing).
+
+export const projectWorkflow = tool(
+  async ({ action, command, path: filePath, cwd }) => {
+    // Read actions: instant, no approval
+    if (action === "read_file" || action === "list_files") {
+      const res = await projectWorkflowTool.execute({ action, path: filePath });
+      if (!res.success) return `project_workflow (${action}) failed: ${res.error}`;
+      return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
+    }
+
+    // run_command: ALWAYS HITL-gated
+    if (action === "run_command") {
+      if (!command) return "run_command requires a command argument.";
+      const dangerous = flagDangerousWorkflowCommand(command);
+      const decision = interrupt({
+        kind: "approval",
+        action: "project_workflow",
+        title: `${dangerous ? "⚠️ DANGEROUS " : "🔧 "}Run command in project?`,
+        summary: `${dangerous ? "⚠️ Potentially destructive. " : ""}cwd: ${cwd ?? "founderos"}`,
+        preview: command,
+        args: { action, command, cwd },
+      } satisfies ApprovalRequest) as string;
+
+      if (decision !== "approved") {
+        return `Command was NOT run — the founder rejected it.`;
+      }
+
+      const res = await projectWorkflowTool.execute({ action, command, cwd });
+      if (!res.success) return `Command failed: ${res.error}`;
+      log.info({ command, cwd }, "project_workflow command executed via engineering agent");
+      return typeof res.data === "string" ? res.data : "✅ Command completed.";
+    }
+
+    return `Unknown action: ${action as string}`;
+  },
+  {
+    name: "project_workflow",
+    description: projectWorkflowTool.description,
+    schema: z.object({
+      action: z.enum(["run_command", "read_file", "list_files"]).describe(
+        "read_file / list_files: instant. run_command: always requires founder approval."
+      ),
+      command: z.string().optional().describe(
+        "Shell command for run_command. E.g. 'pnpm test', 'git checkout -b feat/x', 'gh pr create --title ...' "
+      ),
+      path: z.string().optional().describe("File/dir path for read_file or list_files (within ~/Projects)"),
+      cwd: z.string().optional().describe("Working dir for run_command (default: ~/Projects/founderos)"),
     }),
   },
 );
