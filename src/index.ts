@@ -18,6 +18,7 @@ import { getOffice } from "./agents/office.js";
 import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
 import { startHealthServer } from "./infra/health.js";
 import { startScheduler } from "./infra/scheduler.js";
+import { acquireSingleInstanceLock, releaseSingleInstanceLock } from "./infra/single-instance.js";
 import { logger } from "./infra/logger.js";
 import type { Server } from "node:http";
 
@@ -28,12 +29,22 @@ let healthServer: Server | undefined;
 async function main(): Promise<void> {
   log.info("FounderOS starting…");
 
+  // 0. Single-instance lock — two long-polling bots cause Telegram 409 conflicts
+  //    and split updates between processes (the #1 reliability bug). Replace any
+  //    previous live instance so exactly one process owns getUpdates.
+  const { replacedPid } = acquireSingleInstanceLock();
+  if (replacedPid !== null) {
+    log.warn({ replacedPid }, "Terminated a previous FounderOS instance before starting");
+    // Give the old instance a moment to release the Telegram long-poll.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
   // 1. Telemetry — first, so PII scrubbing hooks in before any LLM call.
   initTelemetry();
 
   // 2. Compile the office once (warms the Postgres checkpointer).
   await getOffice();
-  log.info("Office ready (supervisor + research/comms/engineering)");
+  log.info("Office ready (supervisor + 8 departments)");
 
   // 3. Health/metrics server.
   healthServer = startHealthServer();
@@ -45,10 +56,9 @@ async function main(): Promise<void> {
   startScheduler();
 
   // 6. Startup notification — let the founder know the bot is alive.
-  const version = "v2 · 131 tests ✅";
   await sendToChat(
-    `🚀 <b>FounderOS is running</b> <code>${version}</code>\n\n` +
-    `Departments: research · comms · engineering · marketing · sales · prospecting\n` +
+    `🚀 <b>FounderOS is running</b>\n\n` +
+    `Departments: research · comms · engineering · marketing · sales · prospecting · personal · jobhunt\n` +
     `Commands: /status · /context · /target · /targets · /outbound\n\n` +
     `Ready for your first message.`,
     "HTML",
@@ -64,6 +74,7 @@ async function shutdown(signal: string): Promise<void> {
   healthServer?.close();
   await stopBot();
   await closeDatabaseConnections();
+  releaseSingleInstanceLock();
   log.info("FounderOS stopped cleanly");
   process.exit(0);
 }
