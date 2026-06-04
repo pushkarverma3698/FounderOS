@@ -403,6 +403,11 @@ async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Pr
       await ctx.reply(`💰 <b>Run stopped — budget limit reached</b>\n<code>${safeHtml(err.reason)}</code>`, { parse_mode: "HTML" });
       return;
     }
+    if (err instanceof GraphRecursionError) {
+      log.warn({ chatId }, "Resume stopped: recursion limit reached");
+      await ctx.reply(`🔁 <b>That got stuck in a loop</b> and I stopped it. Try breaking it into smaller steps.`, { parse_mode: "HTML" });
+      return;
+    }
     const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
     log.error({ err: msg, chatId }, "Office resume failed");
     await ctx.reply(`❌ <b>Resume failed</b>\n<code>${safeHtml(msg.slice(0, 1200))}</code>`, {
