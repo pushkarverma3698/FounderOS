@@ -14,7 +14,14 @@
 
 ---
 
-## Current State (v2, 2026-06-01)
+## Current State
+
+> **Authoritative snapshot: see [`docs/STATUS-2026-06-04.md`](./STATUS-2026-06-04.md).**
+> As of 2026-06-04: supervisor + **8 departments**, deterministic eval, crash-safe HITL, budget guard,
+> path-guarded laptop operator, Postgres-first memory, single-instance lock (409 fix). 378 tests green.
+> The v2 baseline below is kept for history.
+
+### v2 baseline (2026-06-01)
 
 ✅ **Working:**
 - Supervisor + 3 departments (research, comms, engineering)
