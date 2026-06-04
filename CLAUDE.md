@@ -226,3 +226,26 @@ simultaneously:
 3. **Is mostly reuse** of existing code, tools, or adopted OSS (not a net-new subsystem)
 
 If a feature doesn't pass all three, defer it. See ADR-014 and `docs/study/IDEATION-AND-MARKET-RESEARCH.md`.
+
+### 18. Memory is the single source of truth — always keep it current (non-negotiable)
+FounderOS is the single source of truth for both `turicks-brain` (business/portfolio knowledge)
+and `personal-rag` (career/personal knowledge). Going forward, **every working session, decision,
+and capability change must be written back into the memory tiers** — not left only in chat history
+with the assistant. The chat is ephemeral; the databases are durable. If the next session would
+have to rediscover it, it belongs in the DB.
+
+**Always update, at the end of any session that changed state:**
+1. **`turicks-brain`** — run `pnpm brain:sync` after any new/edited doc (ADR, phase doc, study doc,
+   brand, strategic vision). This upserts `docs/**` into the `knowledge_entries` table.
+2. **Episodic/conversation memory** — significant decisions, outcomes, and session summaries go into
+   the `episodic_memory` / `conversations` tables (via the `record_event` tool in-app, or directly
+   when working through the assistant). This is what makes "what did we decide about X?" answerable.
+3. **`personal-rag`** — when we ship something that is a career/portfolio signal (a new subsystem,
+   a shipped feature, a metric, a launched product), update the FounderOS portfolio brief and
+   re-ingest: `cd ~/Projects/personal-rag && python scripts/ingest_local_docs.py`. **Boundary
+   (ADR-013/015): personal-rag and turicks-brain stay separate stores — never cross-write.**
+4. **`MEMORY.md`** — the fast scannable index for the next session (status, gotchas, file locations).
+
+This rule operationalizes the founder's directive: "everything I do with the assistant must be
+done with FounderOS, so it becomes the single source of truth." See ADR-016 and
+`docs/superpowers/specs/2026-06-04-memory-system-design.md`.
