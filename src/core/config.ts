@@ -47,8 +47,11 @@ const envSchema = z.object({
   // Redis — optional; used only if a tool requires it
   REDIS_URL: z.string().url().default("redis://localhost:6379"),
 
-  // Budget — unused in v2 but kept so tests that stub it don't fail
+  // Budget controls
   BUDGET_DAILY_USD: z.coerce.number().positive().default(5.0),
+  // Per-run caps — applied to each individual office.invoke() call
+  RUN_BUDGET_USD: z.coerce.number().positive().default(0.50),
+  RUN_BUDGET_TOKENS: z.coerce.number().int().positive().default(50_000),
 });
 
 function parseEnv() {
