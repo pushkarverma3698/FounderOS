@@ -20,6 +20,7 @@
  */
 
 import { tool } from "@langchain/core/tools";
+import { TENANT } from "../core/config.js";
 import { z } from "zod";
 import {
   searchEpisodicMemory,
@@ -31,7 +32,6 @@ import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:memory" });
 
-const TENANT = process.env["FOUNDER_TENANT"] ?? "turicks";
 
 // ── search_memory ─────────────────────────────────────────────────────────────
 

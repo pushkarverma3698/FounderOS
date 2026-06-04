@@ -19,6 +19,7 @@
  */
 
 import { tool } from "@langchain/core/tools";
+import { TENANT } from "../core/config.js";
 import { interrupt } from "@langchain/langgraph";
 import { z } from "zod";
 import { createHash } from "node:crypto";
@@ -47,7 +48,6 @@ import { recordEventTool as rawRecordEvent } from "../tools/memory.js";
 const log = childLogger({ module: "agent-tools" });
 
 /** Single-user tenant for now (column preserved for the future SaaS pivot). */
-const TENANT = process.env["FOUNDER_TENANT"] ?? "turicks";
 
 /** Deterministic idempotency key so the same action never fires twice. */
 function idemKey(prefix: string, ...parts: string[]): string {

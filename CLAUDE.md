@@ -249,3 +249,29 @@ have to rediscover it, it belongs in the DB.
 This rule operationalizes the founder's directive: "everything I do with the assistant must be
 done with FounderOS, so it becomes the single source of truth." See ADR-016 and
 `docs/superpowers/specs/2026-06-04-memory-system-design.md`.
+
+### 19. Test the REAL path, reproduce before fixing, verify live (non-negotiable)
+The most damaging bugs this project hit (wedged-interrupt loop, duplicate bot instances, stale-reply
+display) all PASSED the unit/eval suite while FAILING in production — because the tests exercised the
+office invoker directly and never touched the real Telegram gateway run-loop. A green suite is
+necessary, not sufficient. Going forward:
+
+1. **Reproduce before you fix (systematic debugging).** For any reported bug, write a probe or a
+   failing test that reproduces it on the REAL code path (gateway → office → HITL → reply), not a
+   mock. If you can't reproduce it, you don't understand it yet — keep digging. No fix without a
+   red repro first.
+2. **Every bug gets a regression test.** The repro becomes a permanent test so the class of bug can
+   never silently return. Pure logic (slicing, guards, routing, parsing) must be a pure function with
+   a unit test — never a prompt instruction the model may ignore (rule #16).
+3. **Test the gateway loop, not just the invoker.** The run-loop in `telegram.ts` (interrupt guard,
+   per-turn message slicing, resume idempotency, history bounding) is the highest-risk code. It must
+   have direct unit tests with a fake office; do not rely on the eval harness to catch gateway bugs.
+4. **Verify live after every behaviour change.** `pnpm test` green → tsc/lint clean → restart the bot
+   (single-instance lock makes this safe) → exercise the actual change over a real path (probe script
+   or Telegram) → confirm 0× 409 and the expected behaviour in `/tmp/founderos.log`. "Tests pass" is
+   not "it works."
+5. **Fail loud, never silent.** Tool errors surface to the founder; a swallowed error or a generic
+   "Done." that hides a failure is a P0. If a department couldn't complete a task, the reply says so.
+
+Reusable probe: `scripts/probe-real-task.ts` runs arbitrary tasks through a fresh office and dumps the
+full message trail + every tool call — use it to reproduce and to confirm a fix end-to-end.

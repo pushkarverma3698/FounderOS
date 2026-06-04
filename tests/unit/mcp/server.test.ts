@@ -17,8 +17,8 @@ import {
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
 describe("FOUNDEROS_MCP_TOOLS registry", () => {
-  it("exports at least 3 tools", () => {
-    expect(FOUNDEROS_MCP_TOOLS.length).toBeGreaterThanOrEqual(3);
+  it("exports at least 6 tools (3 original + 3 memory data-source tools)", () => {
+    expect(FOUNDEROS_MCP_TOOLS.length).toBeGreaterThanOrEqual(6);
   });
 
   it("includes search_web tool", () => {
@@ -45,6 +45,24 @@ describe("FOUNDEROS_MCP_TOOLS registry", () => {
       expect(tool.description, `${tool.name} missing description`).toBeTruthy();
       expect(tool.inputSchema, `${tool.name} missing inputSchema`).toBeDefined();
     }
+  });
+
+  it("includes search_memory tool", () => {
+    const tool = FOUNDEROS_MCP_TOOLS.find((t) => t.name === "search_memory");
+    expect(tool).toBeDefined();
+    expect(tool?.description).toMatch(/memory|episodic|conversation/i);
+  });
+
+  it("includes search_knowledge tool", () => {
+    const tool = FOUNDEROS_MCP_TOOLS.find((t) => t.name === "search_knowledge");
+    expect(tool).toBeDefined();
+    expect(tool?.description).toMatch(/knowledge|turicks|brain/i);
+  });
+
+  it("includes read_cv tool", () => {
+    const tool = FOUNDEROS_MCP_TOOLS.find((t) => t.name === "read_cv");
+    expect(tool).toBeDefined();
+    expect(tool?.description).toMatch(/cv|career|personal/i);
   });
 
   it("no write/HITL tools exposed (read-only contract)", () => {
@@ -115,6 +133,24 @@ describe("handleMcpToolCall", () => {
     // context.ts reads from Postgres — but should handle missing DB gracefully
     const result = await handleMcpToolCall("read_context", {});
     // Either returns context or an error — must not throw
+    expect(result.content.length).toBeGreaterThan(0);
+    expect(result.content[0]?.type).toBe("text");
+  });
+
+  it("search_memory returns text content without throwing", async () => {
+    const result = await handleMcpToolCall("search_memory", { query: "FounderOS decisions" });
+    expect(result.content.length).toBeGreaterThan(0);
+    expect(result.content[0]?.type).toBe("text");
+  });
+
+  it("search_knowledge returns text content without throwing", async () => {
+    const result = await handleMcpToolCall("search_knowledge", { query: "HITL interrupt" });
+    expect(result.content.length).toBeGreaterThan(0);
+    expect(result.content[0]?.type).toBe("text");
+  });
+
+  it("read_cv returns text content without throwing", async () => {
+    const result = await handleMcpToolCall("read_cv", { query: "LangGraph experience" });
     expect(result.content.length).toBeGreaterThan(0);
     expect(result.content[0]?.type).toBe("text");
   });

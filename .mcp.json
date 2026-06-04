@@ -7,7 +7,7 @@
         "--import", "tsx/esm",
         "src/mcp/index.ts"
       ],
-      "description": "FounderOS read-only tools: search_web, github_read, read_context"
+      "description": "FounderOS read-only tools: search_web, github_read, read_context, search_memory, search_knowledge, read_cv"
     }
   }
 }

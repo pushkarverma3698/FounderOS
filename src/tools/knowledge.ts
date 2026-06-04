@@ -22,13 +22,13 @@
  */
 
 import { tool } from "@langchain/core/tools";
+import { TENANT } from "../core/config.js";
 import { z } from "zod";
 import { searchKnowledgeEntries, getKnowledgeByType } from "../db/queries.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:knowledge" });
 
-const TENANT = process.env["FOUNDER_TENANT"] ?? "turicks";
 
 export const searchKnowledge = tool(
   async ({ query, entry_type }) => {
