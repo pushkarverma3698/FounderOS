@@ -16,7 +16,7 @@ async function main() {
   const office = buildOffice(new MemorySaver());
   const config = { configurable: { thread_id: "linkedin-infra-post-002" } };
 
-  const prompt = `Draft and publish a LinkedIn post for me.
+  const prompt = `Draft and publish a LinkedIn post for me. IMPORTANT: The correct GitHub URL for FounderOS is github.com/pushkarverma3698/FounderOS — use this EXACT URL, no variations.
 
 This is post #2 in the FounderOS build-in-public series.
 Post #1 (already published/pending) covered: architecture overview + HITL approval flow.
