@@ -41,6 +41,8 @@ import {
 } from "../tools/personal.js";
 import { readCvTool, searchJobsTool } from "../tools/career.js";
 import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../tools/project-workflow.js";
+import { claudeCodeTool, findClaudeBinary } from "../tools/claude-code.js";
+import { recordEventTool as rawRecordEvent } from "../tools/memory.js";
 
 const log = childLogger({ module: "agent-tools" });
 
@@ -477,6 +479,52 @@ export const projectWorkflow = tool(
   },
 );
 
+// ── Engineering: Claude Code CLI (HITL-gated) ────────────────────────────────
+// Always requires founder approval before invoking the CLI.
+// The HITL card shows the task so the founder knows exactly what prompt is sent.
+
+export const claudeCode = tool(
+  async ({ task, cwd }) => {
+    // Detect binary before showing the approval card so we fail fast
+    const binary = findClaudeBinary();
+    if (!binary) {
+      return `Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code`;
+    }
+
+    const decision = interrupt({
+      kind: "approval",
+      action: "claude_code",
+      title: "Invoke Claude Code CLI?",
+      summary: `Run: claude -p "..." in ${cwd ?? "~/Projects/founderos"}`,
+      preview: task,
+      args: { task, cwd },
+    } satisfies ApprovalRequest) as string;
+
+    if (decision !== "approved") {
+      return `Claude Code was NOT invoked — the founder rejected it.`;
+    }
+
+    const res = await claudeCodeTool.execute({ task, cwd });
+    if (!res.success) {
+      return `Claude Code failed: ${res.error}`;
+    }
+    log.info({ task: task.slice(0, 80) }, "claude_code executed via engineering agent");
+    return typeof res.data === "string" ? res.data : "Claude Code completed.";
+  },
+  {
+    name: "claude_code",
+    description: claudeCodeTool.description,
+    schema: z.object({
+      task: z.string().describe(
+        "The task/prompt to send to the Claude Code CLI. Be specific and self-contained."
+      ),
+      cwd: z.string().optional().describe(
+        "Working directory within ~/Projects (default: ~/Projects/founderos)"
+      ),
+    }),
+  },
+);
+
 // ── Personal: drive Safari via AppleScript (WRITE — requires approval) ─────────
 
 export const browser = tool(
@@ -506,6 +554,45 @@ export const browser = tool(
       action: z.enum(["open_url", "get_page_text", "run_js"]),
       url: z.string().optional().describe("URL for open_url"),
       js: z.string().optional().describe("JavaScript for run_js"),
+    }),
+  },
+);
+
+// ── Memory: record_event (WRITE — requires approval) ─────────────────────────
+
+/**
+ * HITL wrapper around the raw recordEventTool. The approval card lets the founder
+ * review the event before it's committed to episodic_memory.
+ */
+export const recordEvent = tool(
+  async ({ title, summary, tags, event_type, occurred_at }) => {
+    const tagsStr = tags.join(", ") || "(none)";
+    const decision = interrupt({
+      kind: "approval",
+      action: "record_event",
+      title: `📝 Record event: "${title}"?`,
+      summary: `Type: ${event_type} | Tags: ${tagsStr}`,
+      preview: summary,
+      args: { title, summary, tags, event_type, occurred_at },
+    } satisfies ApprovalRequest) as string;
+
+    if (decision !== "approved") {
+      return `Event "${title}" was NOT recorded — the founder rejected it.`;
+    }
+
+    return rawRecordEvent.invoke({ title, summary, tags, event_type, occurred_at });
+  },
+  {
+    name: "record_event",
+    description: rawRecordEvent.description,
+    schema: z.object({
+      title: z.string().describe("Short, searchable title"),
+      summary: z.string().describe("1–3 sentences describing what happened"),
+      tags: z.array(z.string()).describe("Keyword tags for retrieval"),
+      event_type: z
+        .enum(["conversation", "decision", "outcome", "task_completed"])
+        .describe("Category of event"),
+      occurred_at: z.string().optional().describe("ISO 8601 timestamp. Defaults to now."),
     }),
   },
 );

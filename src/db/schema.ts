@@ -31,6 +31,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  serial,
   text,
   timestamp,
   uuid,
@@ -421,6 +422,104 @@ export const founderContext = pgTable("founder_context", {
 
 export type FounderContext = typeof founderContext.$inferSelect;
 export type NewFounderContext = typeof founderContext.$inferInsert;
+
+// ── conversations ─────────────────────────────────────────────────────────────
+
+/**
+ * Searchable conversation records — written by conversation-recorder after
+ * each Telegram session completes. Provides episodic memory ("what did we
+ * discuss Tuesday?") beyond raw LangGraph checkpoint blobs.
+ *
+ * One row per thread_id. Upserted on each turn so the summary + message_count
+ * stay current without accumulating duplicate rows.
+ */
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: serial("id").primaryKey(),
+
+    /** LangGraph thread id — format: {tenant}:{chatId} */
+    thread_id: text("thread_id").notNull().unique(),
+
+    tenant_id: text("tenant_id").notNull().default("turicks"),
+
+    /** ISO timestamp of first message in this thread */
+    started_at: timestamp("started_at", { withTimezone: true }),
+
+    /** ISO timestamp of most recent message — updated on every turn */
+    last_message_at: timestamp("last_message_at", { withTimezone: true }),
+
+    /** Auto-generated 1–3 sentence summary of the conversation */
+    summary: text("summary"),
+
+    /** Extracted topic tags for keyword search, e.g. ["stripe", "onboarding"] */
+    topics: jsonb("topics").$type<string[]>().default([]),
+
+    /** Total messages seen so far in this thread */
+    message_count: integer("message_count").notNull().default(0),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    /** Lookup conversation by tenant + recency */
+    tenantTimeIdx: index("conv_tenant_time_idx").on(t.tenant_id, t.last_message_at),
+  }),
+);
+
+export type Conversation = typeof conversations.$inferSelect;
+export type NewConversation = typeof conversations.$inferInsert;
+
+// ── episodic_memory ───────────────────────────────────────────────────────────
+
+/**
+ * Time-ordered event log — the founder's episodic memory.
+ * Stores significant events: decisions made, tasks completed, outcomes,
+ * and conversation highlights worth recalling later.
+ *
+ * Agents write to this via the `record_event` tool (HITL-gated).
+ * The `search_memory` tool queries this table alongside knowledge_entries
+ * and founder_context to answer "what happened with X?" questions.
+ */
+export const episodicMemory = pgTable(
+  "episodic_memory",
+  {
+    id: serial("id").primaryKey(),
+
+    tenant_id: text("tenant_id").notNull().default("turicks"),
+
+    /** conversation | decision | outcome | task_completed */
+    event_type: text("event_type").notNull(),
+
+    /** When the event actually happened (not when it was written) */
+    occurred_at: timestamp("occurred_at", { withTimezone: true }).notNull(),
+
+    /** Short, searchable title — e.g. "Discussed Stripe integration with Alex" */
+    title: text("title").notNull(),
+
+    /** 1–3 sentence summary of what happened and why it matters */
+    summary: text("summary"),
+
+    /** Searchable keyword tags — e.g. ["stripe", "alex", "backend"] */
+    tags: jsonb("tags").$type<string[]>().default([]),
+
+    /** Links back to the LangGraph conversation thread if relevant */
+    thread_id: text("thread_id"),
+
+    /** telegram | manual | scheduled */
+    source: text("source").notNull().default("telegram"),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    /** Time-ordered queries: most recent events first */
+    tenantTimeIdx: index("em_tenant_time_idx").on(t.tenant_id, t.occurred_at),
+    /** Keyword search on title */
+    titleIdx: index("em_title_idx").on(t.title),
+  }),
+);
+
+export type EpisodicMemory = typeof episodicMemory.$inferSelect;
+export type NewEpisodicMemory = typeof episodicMemory.$inferInsert;
 
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them

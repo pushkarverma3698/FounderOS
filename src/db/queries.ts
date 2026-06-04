@@ -19,6 +19,8 @@ import {
   agentResults,
   founderContext,
   knowledgeEntries,
+  conversations,
+  episodicMemory,
   type NewActionLog,
   type NewDeptSignal,
   type NewHitlApproval,
@@ -26,6 +28,8 @@ import {
   type NewAiCallCost,
   type NewDoNotContact,
   type NewAgentResult,
+  type NewConversation,
+  type NewEpisodicMemory,
 } from "./schema.js";
 
 // ── HITL Approvals (hitl_approvals) ──────────────────────────────────────────
@@ -460,5 +464,132 @@ export async function getKnowledgeByType(
       ),
     )
     .orderBy(desc(knowledgeEntries.updated_at))
+    .limit(limit);
+}
+
+// ── Conversations (conversations) ─────────────────────────────────────────────
+
+/**
+ * Upsert a conversation record. Called after each Telegram run to keep the
+ * summary + message_count current. Keyed on thread_id (unique).
+ */
+export async function upsertConversation(
+  data: Omit<NewConversation, "id" | "created_at">,
+): Promise<void> {
+  const db = getDb();
+  await db
+    .insert(conversations)
+    .values(data)
+    .onConflictDoUpdate({
+      target: conversations.thread_id,
+      set: {
+        summary: data.summary,
+        topics: data.topics,
+        message_count: data.message_count,
+        last_message_at: data.last_message_at,
+      },
+    });
+}
+
+/**
+ * Keyword search over conversation summaries + topics.
+ * Returns most-recent conversations first.
+ */
+export async function searchConversations(
+  tenantId: string,
+  query: string,
+  limit = 5,
+): Promise<Array<{
+  thread_id: string;
+  summary: string | null;
+  topics: string[] | null;
+  last_message_at: Date | null;
+  message_count: number;
+}>> {
+  const db = getDb();
+  const pattern = `%${query}%`;
+  return db
+    .select({
+      thread_id: conversations.thread_id,
+      summary: conversations.summary,
+      topics: conversations.topics,
+      last_message_at: conversations.last_message_at,
+      message_count: conversations.message_count,
+    })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.tenant_id, tenantId),
+        or(
+          sql`${conversations.summary} ILIKE ${pattern}`,
+          sql`${conversations.topics}::text ILIKE ${pattern}`,
+        ),
+      ),
+    )
+    .orderBy(desc(conversations.last_message_at))
+    .limit(limit);
+}
+
+// ── Episodic Memory (episodic_memory) ─────────────────────────────────────────
+
+/**
+ * Insert a new episodic event. Returns the auto-assigned ID.
+ * Called by the `record_event` tool (HITL-gated in practice).
+ */
+export async function insertEpisodicEvent(
+  data: Omit<NewEpisodicMemory, "id" | "created_at">,
+): Promise<string> {
+  const db = getDb();
+  const [row] = await db
+    .insert(episodicMemory)
+    .values(data)
+    .returning({ id: episodicMemory.id });
+  if (!row) throw new Error("insertEpisodicEvent: insert returned no rows");
+  return String(row.id);
+}
+
+/**
+ * Keyword search over episodic events — title + summary ILIKE match.
+ * Returns most-recent events first.
+ */
+export async function searchEpisodicMemory(
+  tenantId: string,
+  query: string,
+  limit = 5,
+): Promise<Array<{
+  id: number;
+  title: string;
+  summary: string | null;
+  event_type: string;
+  occurred_at: Date;
+  tags: string[] | null;
+  thread_id: string | null;
+  source: string;
+}>> {
+  const db = getDb();
+  const pattern = `%${query}%`;
+  return db
+    .select({
+      id: episodicMemory.id,
+      title: episodicMemory.title,
+      summary: episodicMemory.summary,
+      event_type: episodicMemory.event_type,
+      occurred_at: episodicMemory.occurred_at,
+      tags: episodicMemory.tags,
+      thread_id: episodicMemory.thread_id,
+      source: episodicMemory.source,
+    })
+    .from(episodicMemory)
+    .where(
+      and(
+        eq(episodicMemory.tenant_id, tenantId),
+        or(
+          sql`${episodicMemory.title} ILIKE ${pattern}`,
+          sql`${episodicMemory.summary} ILIKE ${pattern}`,
+          sql`${episodicMemory.tags}::text ILIKE ${pattern}`,
+        ),
+      ),
+    )
+    .orderBy(desc(episodicMemory.occurred_at))
     .limit(limit);
 }

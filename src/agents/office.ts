@@ -37,9 +37,12 @@ import {
   readCv,
   searchJobs,
   projectWorkflow,
+  claudeCode,
+  recordEvent,
 } from "./agent-tools.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
+import { searchMemoryTool } from "../tools/memory.js";
 import {
   SUPERVISOR_PROMPT,
   RESEARCH_PROMPT,
@@ -96,7 +99,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
 
   const engineering = createReactAgent({
     llm,
-    tools: [githubRead, githubWrite, projectWorkflow],
+    tools: [githubRead, githubWrite, projectWorkflow, claudeCode],
     name: "engineering",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(ENGINEERING_PROMPT, subAgentBudget) as any,
@@ -156,8 +159,9 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     llm,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(SUPERVISOR_PROMPT, supervisorBudget) as any,
-    // Supervisor-level tools: context read/write (not delegated to departments)
-    tools: [readContext, updateContext],
+    // Supervisor-level tools: context read/write + unified memory search/record
+    // These are NOT delegated to departments — the supervisor handles them directly.
+    tools: [readContext, updateContext, searchMemoryTool, recordEvent],
     // Gemini (and most non-OpenAI providers) can't accept the agent name as a
     // message `name` attribute — the google-genai adapter maps name→author and
     // throws "Unknown author: supervisor". "inline" embeds the name in the
