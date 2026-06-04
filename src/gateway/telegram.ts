@@ -35,6 +35,7 @@ import { parseContextCommand, formatContextDisplay } from "./context-command.js"
 import { getFounderContext, upsertFounderContext } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
+import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
 
 const log = logger.child({ module: "telegram" });
 
@@ -184,11 +185,18 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
 
   try {
     const office = await getOffice();
+    const budget = createRunBudget();
+    const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
     const res = (await office.invoke(
       { messages: [new HumanMessage(text)] },
-      config,
+      { ...config, callbacks: [new BudgetGuardCallback(budget, agentModel)] },
     )) as { messages?: OfficeMessage[] };
     clearInterval(typing);
+
+    log.debug(
+      { chatId, ...budget.summary },
+      "Run complete — budget summary",
+    );
 
     const approval = await getPendingApproval(office, config);
     if (approval) {
@@ -198,6 +206,16 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
     await sendResult(ctx, res, chatId);
   } catch (err) {
     clearInterval(typing);
+    if (err instanceof BudgetExceededError) {
+      log.warn({ chatId, reason: err.reason }, "Run stopped: budget exceeded");
+      await ctx.reply(
+        `💰 <b>Run stopped — budget limit reached</b>\n` +
+          `<code>${safeHtml(err.reason)}</code>\n\n` +
+          `Adjust <code>RUN_BUDGET_USD</code> or <code>RUN_BUDGET_TOKENS</code> in <code>.env</code> to raise the cap.`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
     const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
     log.error({ err: msg, chatId }, "Office run failed");
     await ctx.reply(`❌ <b>Error</b>\n<code>${safeHtml(msg.slice(0, 1200))}</code>`, {
