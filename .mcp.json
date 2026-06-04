@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "founderos": {
+      "command": "node",
+      "args": [
+        "--env-file=.env",
+        "--import", "tsx/esm",
+        "src/mcp/index.ts"
+      ],
+      "description": "FounderOS read-only tools: search_web, github_read, read_context"
+    }
+  }
+}
