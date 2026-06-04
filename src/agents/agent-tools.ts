@@ -41,6 +41,7 @@ import {
 } from "../tools/personal.js";
 import { readCvTool, searchJobsTool } from "../tools/career.js";
 import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../tools/project-workflow.js";
+import { claudeCodeTool, findClaudeBinary } from "../tools/claude-code.js";
 
 const log = childLogger({ module: "agent-tools" });
 
@@ -473,6 +474,52 @@ export const projectWorkflow = tool(
       ),
       path: z.string().optional().describe("File/dir path for read_file or list_files (within ~/Projects)"),
       cwd: z.string().optional().describe("Working dir for run_command (default: ~/Projects/founderos)"),
+    }),
+  },
+);
+
+// ── Engineering: Claude Code CLI (HITL-gated) ────────────────────────────────
+// Always requires founder approval before invoking the CLI.
+// The HITL card shows the task so the founder knows exactly what prompt is sent.
+
+export const claudeCode = tool(
+  async ({ task, cwd }) => {
+    // Detect binary before showing the approval card so we fail fast
+    const binary = findClaudeBinary();
+    if (!binary) {
+      return `Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code`;
+    }
+
+    const decision = interrupt({
+      kind: "approval",
+      action: "claude_code",
+      title: "Invoke Claude Code CLI?",
+      summary: `Run: claude -p "..." in ${cwd ?? "~/Projects/founderos"}`,
+      preview: task,
+      args: { task, cwd },
+    } satisfies ApprovalRequest) as string;
+
+    if (decision !== "approved") {
+      return `Claude Code was NOT invoked — the founder rejected it.`;
+    }
+
+    const res = await claudeCodeTool.execute({ task, cwd });
+    if (!res.success) {
+      return `Claude Code failed: ${res.error}`;
+    }
+    log.info({ task: task.slice(0, 80) }, "claude_code executed via engineering agent");
+    return typeof res.data === "string" ? res.data : "Claude Code completed.";
+  },
+  {
+    name: "claude_code",
+    description: claudeCodeTool.description,
+    schema: z.object({
+      task: z.string().describe(
+        "The task/prompt to send to the Claude Code CLI. Be specific and self-contained."
+      ),
+      cwd: z.string().optional().describe(
+        "Working directory within ~/Projects (default: ~/Projects/founderos)"
+      ),
     }),
   },
 );

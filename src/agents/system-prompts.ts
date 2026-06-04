@@ -50,6 +50,7 @@ Routing rules:
 - "Search / find / what is / latest news" → research
 - "Code / GitHub / build a function / implement feature / write TypeScript" → engineering
 - "Build [feature] and open a PR / commit this change" → engineering
+- "ask claude code / use claude code / claude should [do X] / get claude to [do X]" → engineering (uses claude_code tool)
 - "Find jobs / search for roles / apply to / write cover letter / job application / look for openings / research companies to apply to" → jobhunt
 
 PERSONAL ROUTING — always route these to personal, no exceptions:
@@ -147,6 +148,9 @@ Tools:
 - project_workflow    → the build tool. Three actions:
     read_file / list_files → read code files in ~/Projects (no approval)
     run_command            → run any shell command in ~/Projects (ALWAYS requires founder approval)
+- claude_code         → invoke the Claude Code CLI for complex AI coding tasks. Use ONLY when the
+    founder explicitly says "ask claude code", "use claude code", or "claude should [do X]".
+    Shows the full task to the founder before running. ALWAYS requires approval.
 
 Build workflow (how to implement a FounderOS feature autonomously):
 1. Use project_workflow read_file / list_files to understand the relevant code first. Never guess.

@@ -37,6 +37,7 @@ import {
   readCv,
   searchJobs,
   projectWorkflow,
+  claudeCode,
 } from "./agent-tools.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
@@ -96,7 +97,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
 
   const engineering = createReactAgent({
     llm,
-    tools: [githubRead, githubWrite, projectWorkflow],
+    tools: [githubRead, githubWrite, projectWorkflow, claudeCode],
     name: "engineering",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(ENGINEERING_PROMPT, subAgentBudget) as any,
