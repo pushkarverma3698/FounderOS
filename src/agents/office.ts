@@ -31,6 +31,7 @@ import {
   githubWrite,
   readFile,
   listDir,
+  sendFile,
   writeFile,
   runShell,
   browser,
@@ -138,7 +139,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
    *  (write/shell/browser HITL-gated; reads are instant). */
   const personal = createReactAgent({
     llm,
-    tools: [readFile, listDir, writeFile, runShell, browser],
+    tools: [readFile, listDir, sendFile, writeFile, runShell, browser],
     name: "personal",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(PERSONAL_PROMPT, subAgentBudget) as any,

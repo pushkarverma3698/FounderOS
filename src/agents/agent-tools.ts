@@ -38,8 +38,10 @@ import {
   writeFileSafe,
   runShellSafe,
   browserAction,
+  resolveSendableFile,
   type BrowserAction,
 } from "../tools/personal.js";
+import { sendDocument } from "../infra/telegram-send.js";
 import { readCvTool, searchJobsTool } from "../tools/career.js";
 import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../tools/project-workflow.js";
 import { claudeCodeTool, findClaudeBinary } from "../tools/claude-code.js";
@@ -313,6 +315,50 @@ export const listDir = tool(
       "List the contents of a directory on the founder's laptop (under the personal root). Read-only — no approval needed. The tool returns a formatted directory listing — relay it verbatim to the founder.",
     schema: z.object({
       path: z.string().optional().describe("Directory path (default: personal root)"),
+    }),
+  },
+);
+
+// ── Personal: send a laptop file to Telegram (OUTBOUND — requires approval) ───
+
+export const sendFile = tool(
+  async ({ path: filePath }) => {
+    // Validate BEFORE interrupt() (read-only stat; safe to re-run on resume).
+    const r = await resolveSendableFile(filePath);
+    if (!r.ok) return `ERROR: ${r.error}`;
+
+    const sizeKb = (r.size / 1024).toFixed(1);
+    const decision = interrupt({
+      kind: "approval",
+      action: "send_file",
+      title: `📎 Send ${r.name} to your Telegram?`,
+      summary: `Attach ${r.name} (${sizeKb} KB) from ${r.path}`,
+      preview: r.path,
+      args: { path: r.path },
+    } satisfies ApprovalRequest) as string;
+
+    if (decision !== "approved") {
+      return `File ${r.name} was NOT sent — the founder rejected it.`;
+    }
+
+    // Side effect AFTER approval only (rule #3). Single-tenant → default chat.
+    try {
+      await sendDocument(r.path, r.name);
+    } catch (e) {
+      return `Send failed: ${(e as Error).message}`;
+    }
+    log.info({ path: r.path, name: r.name }, "File sent to Telegram via personal agent");
+    return `✅ Sent ${r.name} to your Telegram chat as an attachment.`;
+  },
+  {
+    name: "send_file",
+    description:
+      "Attach a file from the founder's laptop and send it INTO this Telegram chat as a downloadable document. " +
+      "Use when the founder says 'send me [file]', 'attach [file]', 'share [file]', 'send the file'. " +
+      "The founder APPROVES before it sends. Secret paths (.ssh, .env, *.pem, keychains) are blocked. " +
+      "This actually delivers the file — unlike read_file which only shows its text contents.",
+    schema: z.object({
+      path: z.string().describe("File path on the laptop, e.g. '~/Desktop/report.pdf' or 'Projects/app/notes.md'"),
     }),
   },
 );
