@@ -277,13 +277,15 @@ export const readEmails = tool(
 export const readFile = tool(
   async ({ path: filePath }) => {
     const r = await readFileSafe(filePath);
-    if (!r.ok) return r.error;
-    return r.content.length ? r.content : "(file is empty)";
+    if (!r.ok) return `ERROR: ${r.error}`;
+    // Return a clearly labelled block so the agent copies it into the reply verbatim.
+    const body = r.content.length ? r.content : "(file is empty)";
+    return `FILE CONTENTS of ${filePath}:\n\`\`\`\n${body}\n\`\`\`\nCopy the above content into your reply to the founder.`;
   },
   {
     name: "read_file",
     description:
-      `Read a text file on the founder's laptop (under ${personalRoot()}). Read-only — no approval needed. Secret paths (.ssh, .env, keychains, *.pem) are blocked.`,
+      `Read a text file on the founder's laptop (under ${personalRoot()}). Read-only — no approval needed. Secret paths (.ssh, .env, keychains, *.pem) are blocked. The tool returns the file contents labelled — relay them verbatim to the founder.`,
     schema: z.object({
       path: z.string().describe("File path, e.g. 'Projects/app/README.md' or '~/Desktop/notes.txt'"),
     }),
@@ -295,13 +297,16 @@ export const readFile = tool(
 export const listDir = tool(
   async ({ path: dirPath }) => {
     const r = await listDirSafe(dirPath ?? ".");
-    if (!r.ok) return r.error;
-    return r.entries.length ? r.entries.join("\n") : "(empty directory)";
+    if (!r.ok) return `ERROR: ${r.error}`;
+    if (!r.entries.length) return `DIRECTORY LISTING of ${dirPath ?? "~"}:\n(empty directory)`;
+    // Return a formatted bullet list so the agent includes it verbatim in the reply.
+    const bullets = r.entries.map((e) => `- ${e}`).join("\n");
+    return `DIRECTORY LISTING of ${dirPath ?? "~"} (${r.entries.length} entries):\n${bullets}\nCopy this listing into your reply to the founder.`;
   },
   {
     name: "list_dir",
     description:
-      "List the contents of a directory on the founder's laptop (under the personal root). Read-only — no approval needed.",
+      "List the contents of a directory on the founder's laptop (under the personal root). Read-only — no approval needed. The tool returns a formatted directory listing — relay it verbatim to the founder.",
     schema: z.object({
       path: z.string().optional().describe("Directory path (default: personal root)"),
     }),
