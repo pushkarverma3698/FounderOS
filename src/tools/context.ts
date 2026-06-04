@@ -15,13 +15,13 @@
  */
 
 import { tool } from "@langchain/core/tools";
+import { TENANT } from "../core/config.js";
 import { z } from "zod";
 import { getFounderContext, upsertFounderContext } from "../db/queries.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:context" });
 
-const TENANT = process.env["FOUNDER_TENANT"] ?? "turicks";
 
 // ── Read context ──────────────────────────────────────────────────────────────
 

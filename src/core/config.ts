@@ -66,3 +66,16 @@ function parseEnv() {
 }
 
 export const env = parseEnv();
+
+/**
+ * The active tenant id. Single source of truth — previously this constant was
+ * re-declared identically in five files (gateway, agent-tools, context, memory,
+ * knowledge). Import this everywhere instead of re-reading the env var.
+ */
+export const TENANT = env.FOUNDER_TENANT;
+
+/** Max recursive supervisor/sub-agent steps before LangGraph aborts a run. */
+export const OFFICE_RECURSION_LIMIT = Number(process.env["OFFICE_RECURSION_LIMIT"] ?? 20);
+
+/** How many human turns of conversation history to persist per thread. */
+export const HISTORY_KEEP_TURNS = Number(process.env["HISTORY_KEEP_TURNS"] ?? 12);

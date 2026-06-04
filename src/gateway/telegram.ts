@@ -17,9 +17,10 @@
  */
 
 import { Bot, InlineKeyboard, type Context } from "grammy";
-import { Command } from "@langchain/langgraph";
-import { HumanMessage } from "@langchain/core/messages";
-import { env } from "../core/config.js";
+import { Command, GraphRecursionError } from "@langchain/langgraph";
+import { HumanMessage, RemoveMessage, type BaseMessage } from "@langchain/core/messages";
+import { env, TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS } from "../core/config.js";
+import { computeHistoryTrim } from "../infra/history-window.js";
 import { logger } from "../infra/logger.js";
 import { getOffice, getPendingApproval } from "../agents/office.js";
 import type { ApprovalRequest } from "../agents/agent-tools.js";
@@ -39,8 +40,6 @@ import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../in
 import { recordConversationEnd } from "../infra/conversation-recorder.js";
 
 const log = logger.child({ module: "telegram" });
-
-const TENANT = process.env["FOUNDER_TENANT"] ?? "turicks";
 
 // ── Safe HTML ─────────────────────────────────────────────────────────────────
 
@@ -206,6 +205,53 @@ async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promis
   );
 }
 
+// ── Office run helpers ─────────────────────────────────────────────────────────
+
+/** Build the LangGraph config for a chat's thread (single source of construction). */
+function officeConfig(chatId: number | string) {
+  return {
+    configurable: { thread_id: threadIdFor(chatId) },
+    recursionLimit: OFFICE_RECURSION_LIMIT,
+  };
+}
+
+/**
+ * Start the Telegram "typing…" indicator and return a stop() closure.
+ * One timer reference, no leaks — replaces the duplicated setInterval boilerplate
+ * (and the function-object side-channel hack from the interrupt-guard branch).
+ */
+function startTyping(ctx: Context): () => void {
+  ctx.replyWithChatAction("typing").catch(() => {});
+  const id = setInterval(() => ctx.replyWithChatAction("typing").catch(() => {}), 4000);
+  return () => clearInterval(id);
+}
+
+/**
+ * Bound the persisted thread to the last N human turns. The PERMANENT fix for
+ * stale-anchoring: without this, the checkpointer replays the whole history
+ * forever and the model loops on old state. Fire-and-forget; never crashes the
+ * handler. Guarded: never trims while an approval is pending (updateState would
+ * clobber the paused interrupt).
+ */
+export async function trimThreadHistory(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  office: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  config: any,
+): Promise<void> {
+  const pending = await getPendingApproval(office, config);
+  if (pending) return; // mid-HITL — do not touch state
+
+  const state = await office.getState(config).catch(() => null);
+  const messages: BaseMessage[] = state?.values?.messages ?? [];
+  const { toRemove } = computeHistoryTrim(messages, { keepTurns: HISTORY_KEEP_TURNS });
+  if (toRemove.length === 0) return;
+
+  const removals = toRemove.map((id) => new RemoveMessage({ id }));
+  await office.updateState(config, { messages: removals });
+  log.debug({ removed: toRemove.length }, "Trimmed thread history to last N turns");
+}
+
 // ── Route an incoming message into the office ──────────────────────────────────
 
 /** Route the literal text of the incoming message into the office. */
@@ -219,25 +265,20 @@ async function routeToOffice(ctx: Context): Promise<void> {
  */
 async function runOfficeText(ctx: Context, text: string): Promise<void> {
   const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
-  const config = { configurable: { thread_id: threadIdFor(chatId) } };
+  const config = officeConfig(chatId);
 
   log.info({ chatId, task: text.slice(0, 80) }, "Routing to office");
-  // Typing indicator is best-effort — don't let it crash the handler
-  ctx.replyWithChatAction("typing").catch(() => {});
-  const typing = setInterval(() => {
-    ctx.replyWithChatAction("typing").catch(() => {});
-  }, 4000);
+  const stopTyping = startTyping(ctx);
 
   try {
     const office = await getOffice();
 
-    // ── D1: Interrupt guard ───────────────────────────────────────────────────
+    // ── Interrupt guard ───────────────────────────────────────────────────────
     // If the thread is paused on a pending approval, a fresh invoke({messages})
-    // re-serves the parked state and produces a stale reply every turn.
-    // Cancel it first, inform the founder, then proceed with the new request.
+    // re-serves the parked state and produces a stale reply every turn. Cancel it
+    // first, inform the founder, then proceed with the new request.
     const stale = await resolvePendingApproval(office, config);
     if (stale) {
-      clearInterval(typing);
       log.warn({ chatId, title: stale.title }, "Cancelled stale pending approval — new message arrived");
       await ctx.reply(
         `⏸️ <b>Pending approval cancelled</b>\n` +
@@ -245,20 +286,16 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
         `I've cancelled it so your new request runs cleanly. Re-ask if you still want it.`,
         { parse_mode: "HTML" },
       );
-      // Restart the typing indicator for the actual new request
-      ctx.replyWithChatAction("typing").catch(() => {});
-      const typing2 = setInterval(() => ctx.replyWithChatAction("typing").catch(() => {}), 4000);
-      // Reassign typing so the catch block clears the right timer
-      clearInterval(typing);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (runOfficeText as any)._typing = typing2;
     }
 
-    // ── D2/D3: Capture turn boundary before invoke ────────────────────────────
+    // ── Capture turn boundary before invoke ───────────────────────────────────
     // The checkpointer returns the full trail after invoke. Slicing to baseLen
-    // isolates this turn's output so finalReply/collectToolErrors never
-    // surface messages from earlier turns.
-    const beforeState = await office.getState(config).catch(() => null) as { values?: { messages?: OfficeMessage[] } } | null;
+    // isolates this turn's output so finalReply/collectToolErrors never surface
+    // messages from earlier turns.
+    const beforeState = await office.getState(config).catch((err) => {
+      log.warn({ chatId, err: (err as Error).message }, "getState failed — baseLen will be 0 (reply may include stale content)");
+      return null;
+    }) as { values?: { messages?: OfficeMessage[] } } | null;
     const baseLen = (beforeState?.values?.messages ?? []).length;
 
     const budget = createRunBudget();
@@ -267,12 +304,9 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
       { messages: [new HumanMessage(text)] },
       { ...config, callbacks: [new BudgetGuardCallback(budget, agentModel)] },
     )) as { messages?: OfficeMessage[] };
-    clearInterval(typing);
+    stopTyping();
 
-    log.debug(
-      { chatId, ...budget.summary },
-      "Run complete — budget summary",
-    );
+    log.debug({ chatId, ...budget.summary }, "Run complete — budget summary");
 
     const approval = await getPendingApproval(office, config);
     if (approval) {
@@ -284,18 +318,33 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
     const freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
     const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
     await sendResult(ctx, freshRes, chatId);
-    // Only record episodic memory when run completed cleanly with a fresh answer
+    // Clean turn → record episodic memory + bound the persisted history so the
+    // thread can never grow unbounded and anchor the model on stale state.
     if (freshMessages.length > 0) {
-      recordConversationEnd(threadIdFor(chatId), res.messages ?? []).catch(() => {});
+      recordConversationEnd(threadIdFor(chatId), res.messages ?? []).catch((err) =>
+        log.warn({ chatId, err: (err as Error).message }, "Conversation recording failed"),
+      );
+      trimThreadHistory(office, config).catch((err) =>
+        log.warn({ chatId, err: (err as Error).message }, "History trim failed — non-fatal"),
+      );
     }
   } catch (err) {
-    clearInterval(typing);
+    stopTyping();
     if (err instanceof BudgetExceededError) {
       log.warn({ chatId, reason: err.reason }, "Run stopped: budget exceeded");
       await ctx.reply(
         `💰 <b>Run stopped — budget limit reached</b>\n` +
           `<code>${safeHtml(err.reason)}</code>\n\n` +
           `Adjust <code>RUN_BUDGET_USD</code> or <code>RUN_BUDGET_TOKENS</code> in <code>.env</code> to raise the cap.`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+    if (err instanceof GraphRecursionError) {
+      log.warn({ chatId }, "Run stopped: recursion limit reached");
+      await ctx.reply(
+        `🔁 <b>I got stuck in a loop on that one</b> and stopped to avoid runaway cost.\n` +
+          `Try rephrasing, or break it into smaller steps.`,
         { parse_mode: "HTML" },
       );
       return;
@@ -312,21 +361,28 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
 
 async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Promise<void> {
   const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
-  const config = { configurable: { thread_id: threadIdFor(chatId) } };
+  const config = officeConfig(chatId);
 
   try {
     const office = await getOffice();
 
-    // D5: Idempotency — don't re-invoke if no interrupt exists (double-tap, restart).
+    // Idempotency — don't re-invoke if no interrupt exists (double-tap, restart).
     const pending = await getPendingApproval(office, config);
     if (!pending) {
       await ctx.reply("ℹ️ No pending approval found — it may have already been handled.", { parse_mode: "HTML" });
       return;
     }
 
+    // Capture turn boundary so the resume reply only shows this turn's output
+    // (otherwise collectToolErrors re-surfaces every prior turn's tool errors).
+    const beforeState = await office.getState(config).catch(() => null) as { values?: { messages?: OfficeMessage[] } } | null;
+    const baseLen = (beforeState?.values?.messages ?? []).length;
+
+    const budget = createRunBudget();
+    const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
     const res = (await office.invoke(
       new Command({ resume: decision }),
-      config,
+      { ...config, callbacks: [new BudgetGuardCallback(budget, agentModel)] },
     )) as { messages?: OfficeMessage[] };
 
     // A run may pause again (e.g. research → then email approval).
@@ -335,8 +391,18 @@ async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Pr
       await sendApprovalCard(ctx, next);
       return;
     }
-    await sendResult(ctx, res, chatId);
+    const freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
+    const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
+    await sendResult(ctx, freshRes, chatId);
+    trimThreadHistory(office, config).catch((err) =>
+      log.warn({ chatId, err: (err as Error).message }, "History trim failed — non-fatal"),
+    );
   } catch (err) {
+    if (err instanceof BudgetExceededError) {
+      log.warn({ chatId, reason: err.reason }, "Resume stopped: budget exceeded");
+      await ctx.reply(`💰 <b>Run stopped — budget limit reached</b>\n<code>${safeHtml(err.reason)}</code>`, { parse_mode: "HTML" });
+      return;
+    }
     const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
     log.error({ err: msg, chatId }, "Office resume failed");
     await ctx.reply(`❌ <b>Resume failed</b>\n<code>${safeHtml(msg.slice(0, 1200))}</code>`, {
@@ -349,24 +415,22 @@ async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Pr
 
 export function registerHandlers(bot: Bot): void {
   bot.command("start", async (ctx: Context) => {
-    const name = ctx.from?.first_name ? ` ${ctx.from.first_name}` : "";
+    const name = ctx.from?.first_name ? `, ${ctx.from.first_name}` : "";
     await ctx.reply(
-      `👋 <b>FounderOS${name}</b> — your AI chief of staff is live.\n\n` +
-        `Just tell me what you need. I route it to the right department:\n` +
-        `• <b>Research</b> — <i>"Research Stripe and summarise what they do"</i>\n` +
-        `• <b>Comms</b> — <i>"Email alex@acme.com a short intro"</i> (you approve before it sends)\n` +
-        `• <b>Engineering</b> — <i>"Write a TS function to validate emails"</i> / <i>"Open a GitHub issue on …"</i>\n\n` +
-        `🎯 <b>Weekly outbound</b>\n` +
-        `• <code>/target Acme Corp, Beta Ltd</code> — add prospects to this week's list\n` +
-        `• <code>/targets</code> — show the list (<code>/targets clear</code> to empty it)\n` +
-        `• <code>/outbound</code> — ICP-score the list (or <code>/outbound stripe.com</code> ad-hoc)\n` +
-        `  then <i>"draft outreach to &lt;winner&gt;"</i> to send (you approve first)\n\n` +
-        `⚙️ <b>System</b>\n` +
-        `• <code>/commands</code> — full command list\n` +
-        `• <code>/departments</code> — what each department does\n` +
-        `• <code>/status</code> — uptime, pending approvals, emails sent today\n` +
-        `• <code>/context</code> — view/update your business context\n\n` +
-        `🔒 Anything that leaves the building (email, LinkedIn, GitHub writes) asks for your approval first.`,
+      `⚡ <b>FounderOS is live${name}.</b>\n` +
+        `Your AI chief of staff — eight departments, one chat. Just tell me what you need in plain English and I'll route it, do the work, and ask before anything leaves the building.\n\n` +
+        `<b>Try me right now:</b>\n` +
+        `🔍 <i>"What's new with Stripe this month?"</i>\n` +
+        `💻 <i>"Write a TypeScript function to debounce a callback"</i>\n` +
+        `📨 <i>"Email alex@acme.com a two-line intro"</i> — I'll draft it, you tap ✅\n` +
+        `🗂 <i>"List the files on my Desktop"</i> — I run it on your Mac\n` +
+        `📣 <i>"Draft a LinkedIn post about shipping an eval harness"</i>\n` +
+        `🎯 <i>"Score Acme Corp as a Turicks prospect"</i>\n` +
+        `🧠 <i>"What did we decide about the memory system?"</i>\n\n` +
+        `<b>The eight departments:</b> research · comms · engineering · marketing · sales · prospecting · personal · jobhunt — <code>/departments</code> for the full rundown.\n\n` +
+        `<b>Handy commands:</b> <code>/commands</code> · <code>/status</code> · <code>/context</code> · <code>/outbound</code> · <code>/reset</code> (fresh start)\n\n` +
+        `🔒 Email, LinkedIn, GitHub pushes and anything on your laptop always wait for your ✅ first. Nothing fires behind your back.\n\n` +
+        `So — what's first?`,
       { parse_mode: "HTML" },
     );
   });

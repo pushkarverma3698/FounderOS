@@ -21,11 +21,11 @@
  */
 
 import { upsertConversation } from "../db/queries.js";
+import { TENANT } from "../core/config.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "conversation-recorder" });
 
-const TENANT = process.env["FOUNDER_TENANT"] ?? "turicks";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

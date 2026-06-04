@@ -21,7 +21,10 @@
  * The personal department keeps $HOME-scoped laptop access. These are distinct.
  */
 
-import { execSync } from "node:child_process";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+
+const execAsync = promisify(exec);
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve, normalize } from "node:path";
 import { childLogger } from "../infra/logger.js";
@@ -201,19 +204,21 @@ export const projectWorkflowTool: UnifiedTool = {
       }
 
       try {
-        const output = execSync(command, {
+        // execAsync (not execSync) — a long `pnpm test` must NOT block the Node
+        // event loop, or the whole Telegram bot freezes for up to 2 minutes.
+        const { stdout: out } = await execAsync(command, {
           cwd: absCwd,
           env: { ...process.env },
           timeout: 120_000, // 2 min max
           maxBuffer: 1024 * 1024 * 2, // 2MB
         });
-        const stdout = output.toString("utf-8").trim();
+        const stdout = out.toString().trim();
         log.info({ command, cwd: absCwd }, "project_workflow command executed");
         return { success: true, data: stdout || "(command completed with no output)" };
       } catch (err) {
-        const execErr = err as { stdout?: Buffer; stderr?: Buffer; message: string };
-        const stdout = execErr.stdout?.toString("utf-8").trim() ?? "";
-        const stderr = execErr.stderr?.toString("utf-8").trim() ?? execErr.message;
+        const execErr = err as { stdout?: string | Buffer; stderr?: string | Buffer; message: string };
+        const stdout = execErr.stdout?.toString().trim() ?? "";
+        const stderr = execErr.stderr?.toString().trim() ?? execErr.message;
         return {
           success: false,
           error: `Command failed.\n${stderr ? `stderr: ${stderr}` : ""}${stdout ? `\nstdout: ${stdout}` : ""}`,

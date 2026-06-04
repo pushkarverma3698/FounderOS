@@ -24,11 +24,10 @@ import { sendToChat } from "../gateway/telegram.js";
 import { buildOffice } from "../agents/office.js";
 import { SCHEDULER_BRIEF_PROMPT } from "../agents/system-prompts.js";
 import { childLogger } from "./logger.js";
-import { env } from "../core/config.js";
+import { env, TENANT } from "../core/config.js";
 
 const log = childLogger({ module: "scheduler" });
 
-const TENANT = process.env["FOUNDER_TENANT"] ?? "turicks";
 
 // ── Monday brief ──────────────────────────────────────────────────────────────
 
