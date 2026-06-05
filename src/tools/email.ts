@@ -105,7 +105,16 @@ export const emailTool: UnifiedTool = {
       const data = result["data"] as Record<string, unknown> | undefined;
       const messageId = (data?.["id"] ?? result["message_id"]) as string | undefined;
 
-      // Audit log — prevents duplicate sends
+      // Soft-failure detection: Composio returns HTTP 200 + error message with no id.
+      // Without this check we would record a phantom "sent" audit entry and suppress
+      // all future retries — the email is never actually sent and can never be retried.
+      if (!messageId) {
+        const msg = (data?.["message"] ?? "Email send failed — no message id returned") as string;
+        log.error({ err: msg, idempotency_key, to }, "Email soft failure");
+        return { success: false, error: msg };
+      }
+
+      // Audit log — written ONLY after confirming the message id exists.
       await writeAuditEntry({
         tenant_id,
         action: "send_email",

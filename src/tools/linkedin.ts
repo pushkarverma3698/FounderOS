@@ -130,9 +130,19 @@ export const linkedinPostTool: UnifiedTool = {
       const data = result["data"] as Record<string, unknown> | undefined;
       // Response may return id, post_id, or activity URN
       const postId = (data?.["id"] ?? data?.["post_id"] ?? result["id"]) as string | undefined;
-      const postUrl = postId ? `https://www.linkedin.com/feed/update/${postId}` : undefined;
 
-      // Audit log — prevents duplicate posts
+      // Soft-failure detection: Composio returns HTTP 200 + error message with no post id.
+      // Without this guard we record a phantom "published" audit entry and suppress all
+      // retries — the post is never actually published and can never be retried.
+      if (!postId) {
+        const msg = (data?.["message"] ?? "LinkedIn post failed — no post id returned") as string;
+        log.error({ err: msg, idempotency_key }, "LinkedIn soft failure");
+        return { success: false, error: msg };
+      }
+
+      const postUrl = `https://www.linkedin.com/feed/update/${postId}`;
+
+      // Audit log — written ONLY after confirming the post id exists.
       await writeAuditEntry({
         tenant_id: tenant_id as string,
         action: "linkedin_post",

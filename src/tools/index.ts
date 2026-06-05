@@ -1,13 +1,22 @@
 /**
- * FounderOS — Tool Registry
- * ==========================
- * Unified interface for all agent tools.
- * Agents receive a filtered subset based on allowed_tools from registry.ts.
+ * FounderOS — Tool Type Definitions
+ * ===================================
+ * Shared interfaces used by all tool implementations.
  *
- * Adding a new tool:
- *  1. Create src/tools/{tool-name}.ts implementing UnifiedTool
- *  2. Import and register here
- *  3. Add to agent's allowed_tools in registry.ts
+ * ARCHITECTURE NOTE: There is NO tool registry here. Tools are wired
+ * directly from src/tools/{name}.ts into src/agents/agent-tools.ts
+ * (LangChain wrappers + HITL gates) and then into src/agents/office.ts
+ * (department createReactAgent calls). The old Map-based registry was
+ * never used by the v2 office and has been removed to avoid misleading
+ * the next engineer.
+ *
+ * Adding a new tool: see docs/TOOL-STANDARDS.md (8-point checklist).
+ * Short version:
+ *  1. Create src/tools/{name}.ts implementing UnifiedTool
+ *  2. Write tests/unit/tools/{name}.test.ts — mock Composio, test soft-failure
+ *  3. Add LangChain wrapper to src/agents/agent-tools.ts
+ *  4. Wire into the right department in src/agents/office.ts
+ *  5. pnpm test green + pnpm lint clean
  */
 
 export interface ToolResult {
@@ -29,43 +38,3 @@ export interface UnifiedTool {
   input_schema?: ToolInputSchema;
   execute(args: Record<string, unknown>): Promise<ToolResult>;
 }
-
-// ── Tool Imports ──────────────────────────────────────────────────────────────
-import { webSearchTool } from "./web-search.js";
-import { linkedinPostTool, linkedinAnalyticsTool, linkedinConnectTool } from "./linkedin.js";
-import { emailTool } from "./email.js";
-import { githubTool } from "./github.js";
-
-// ── Registry ──────────────────────────────────────────────────────────────────
-
-const _tools: Map<string, UnifiedTool> = new Map();
-
-function registerTool(tool: UnifiedTool): void {
-  _tools.set(tool.name, tool);
-}
-
-registerTool(webSearchTool);
-registerTool(linkedinPostTool);
-registerTool(linkedinAnalyticsTool);
-registerTool(linkedinConnectTool);
-registerTool(emailTool);
-registerTool(githubTool);
-
-/** Get a tool by name. Returns undefined if not registered. */
-export function getTool(name: string): UnifiedTool | undefined {
-  return _tools.get(name);
-}
-
-/** Get all tools an agent is allowed to use (filters unregistered names). */
-export function getToolsForAgent(allowedTools: string[]): UnifiedTool[] {
-  return allowedTools.flatMap((name) => {
-    const tool = _tools.get(name);
-    return tool ? [tool] : [];
-  });
-}
-
-/** All registered tool names. */
-export function listTools(): string[] {
-  return [..._tools.keys()];
-}
-
