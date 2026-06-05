@@ -153,4 +153,24 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     expectedTools: ["github_write"],
     expectsHitl: true,
   },
+
+  // ── /q direct routing (Phase 2 power-user) ───────────────────────────────
+  // /q bypasses the supervisor by prepending "[Route directly to X department]"
+  // The supervisor MUST honour the routing hint and go to the named dept.
+  {
+    id: "q-direct-research",
+    input: "[Route directly to research department]: What does Anthropic do?",
+    expectedRoute: "research",
+    expectedTools: ["search_web"],
+    expectsHitl: false,
+    note: "/q research sends this routing-hint prefix; supervisor must honour it.",
+  },
+  {
+    id: "q-direct-personal",
+    input: "[Route directly to personal department]: List files on my Desktop",
+    expectedRoute: "personal",
+    expectedTools: ["list_dir"],
+    expectsHitl: false,
+    note: "/q personal sends this routing-hint prefix.",
+  },
 ];

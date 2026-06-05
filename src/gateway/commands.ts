@@ -23,6 +23,8 @@ import { getSystemStatus, formatStatusMessage } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
 import { getFounderContext, upsertFounderContext } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
+import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
+import { runWorkflow, validateParams } from "../workflows/runner.js";
 
 /** Escape special HTML characters for Telegram HTML parse mode. */
 function safeHtml(text: string): string {
@@ -53,6 +55,12 @@ export async function handleStart(ctx: Context): Promise<void> {
       `• <code>/targets</code> — show the list (<code>/targets clear</code> to empty it)\n` +
       `• <code>/outbound</code> — ICP-score the list (or <code>/outbound stripe.com</code> ad-hoc)\n` +
       `  then <i>"draft outreach to &lt;winner&gt;"</i> to send (you approve first)\n\n` +
+      `🏭 <b>Workflows (multi-step SOPs)</b>\n` +
+      `• <code>/workflows</code> — list all available procedures\n` +
+      `• <code>/run onboarding company=Acme</code> — score → research → email → repo\n` +
+      `• <code>/run outbound company=Stripe</code> — score → hook → cold email\n\n` +
+      `⚡ <b>Power-user</b>\n` +
+      `• <code>/q research what does Anthropic do?</code> — direct to department\n\n` +
       `⚙️ <b>System</b>\n` +
       `• <code>/commands</code> — full command list\n` +
       `• <code>/departments</code> — what each department does\n` +
@@ -230,6 +238,17 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<code>/outbound</code> — ICP-score the whole list (no approval needed)\n` +
     `<code>/outbound &lt;company&gt;</code> — score a single company ad-hoc\n\n` +
 
+    `<b>🏭 Workflows — run a company SOP in one command</b>\n` +
+    `<code>/workflows</code> — list all available procedures\n` +
+    `<code>/run onboarding company=Acme</code> — score → research → welcome email → GitHub repo\n` +
+    `<code>/run outbound company=Stripe</code> — score → find hook → cold email\n` +
+    `<code>/run weekly_digest</code> — review memory + open items + Monday plan\n\n` +
+
+    `<b>⚡ Power-user direct routing</b>\n` +
+    `<code>/q &lt;dept&gt; &lt;task&gt;</code> — skip supervisor, go straight to a department\n` +
+    `  Example: <code>/q research what does Anthropic do?</code>\n` +
+    `  Departments: research · comms · engineering · marketing · sales · prospecting · personal · jobhunt\n\n` +
+
     `<b>🔒 Approval-gated actions</b> (bot asks before sending)\n` +
     `<i>"Email alex@acme.com about X"</i> → approval card → ✅/❌\n` +
     `<i>"Post to LinkedIn about X"</i> → approval card → ✅/❌\n` +
@@ -283,4 +302,127 @@ export async function handleDepartments(ctx: Context): Promise<void> {
     `✋ = requires your approval before action executes`,
     { parse_mode: "HTML" },
   );
+}
+
+// ── /workflows — list available SOPs ──────────────────────────────────────────
+
+export async function handleWorkflows(ctx: Context): Promise<void> {
+  const workflows = listWorkflows();
+  const lines = workflows.map((wf) => {
+    const paramStr = wf.params.length > 0
+      ? wf.params.map((p) => `<code>${p}=…</code>`).join(" ")
+      : "(no params)";
+    return `<b>${wf.id}</b> — ${safeHtml(wf.description)}\n  Params: ${paramStr}\n  Steps: ${wf.steps.map((s) => s.label ?? s.id).join(" → ")}`;
+  }).join("\n\n");
+
+  await ctx.reply(
+    `📋 <b>FounderOS — Workflows</b>\n\n${lines}\n\n` +
+    `Run one: <code>/run onboarding company=Acme</code>`,
+    { parse_mode: "HTML" },
+  );
+}
+
+// ── /run — execute a workflow SOP ─────────────────────────────────────────────
+
+export async function handleRun(
+  ctx: Context,
+  runOfficeText: (ctx: Context, text: string) => Promise<void>,
+): Promise<void> {
+  const arg = (ctx.match ?? "").toString().trim();
+
+  if (!arg) {
+    await ctx.reply(
+      `Usage: <code>/run &lt;workflow&gt; [key=value ...]</code>\n\nExample:\n` +
+      `<code>/run onboarding company=Acme Corp</code>\n` +
+      `<code>/run outbound company=Stripe</code>\n\n` +
+      `See all workflows: <code>/workflows</code>`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const parsed = parseRunArgs(arg);
+  if (!parsed) {
+    await ctx.reply(`❌ Could not parse: <code>${safeHtml(arg)}</code>`, { parse_mode: "HTML" });
+    return;
+  }
+
+  const wf = getWorkflow(parsed.id);
+  if (!wf) {
+    const ids = listWorkflows().map((w) => `<code>${w.id}</code>`).join(" · ");
+    await ctx.reply(
+      `❌ Unknown workflow <b>${safeHtml(parsed.id)}</b>. Available: ${ids}`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const missing = validateParams(wf, parsed.params);
+  if (missing.length > 0) {
+    const needed = missing.map((p) => `<code>${p}=…</code>`).join(", ");
+    await ctx.reply(
+      `❌ Missing required params for <b>${wf.name}</b>: ${needed}\n\nExample: <code>/run ${wf.id} ${wf.params.map((p) => `${p}=value`).join(" ")}</code>`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  await runWorkflow(wf, parsed.params, {
+    async sendStatus(msg) {
+      await ctx.reply(msg, { parse_mode: "HTML" });
+    },
+    async runStep(task) {
+      try {
+        await runOfficeText(ctx, task);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
+}
+
+// ── /q — direct-to-department bypass ─────────────────────────────────────────
+// Power-user shortcut: skip the supervisor and send a task directly to a named
+// department. The routing hint is injected as a prefix — still goes through
+// the office, but the supervisor prompt will force-route it.
+
+export async function handleQ(
+  ctx: Context,
+  runOfficeText: (ctx: Context, text: string) => Promise<void>,
+): Promise<void> {
+  const arg = (ctx.match ?? "").toString().trim();
+  if (!arg) {
+    await ctx.reply(
+      `Usage: <code>/q &lt;department&gt; &lt;task&gt;</code>\n\nExample:\n` +
+      `<code>/q research what does Stripe do?</code>\n` +
+      `<code>/q engineering write a TypeScript debounce function</code>\n` +
+      `<code>/q personal list files on my Desktop</code>`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const spaceIdx = arg.indexOf(" ");
+  if (spaceIdx === -1) {
+    await ctx.reply(`❌ Missing task after department name.`, { parse_mode: "HTML" });
+    return;
+  }
+
+  const dept = arg.slice(0, spaceIdx).toLowerCase();
+  const task = arg.slice(spaceIdx + 1).trim();
+
+  const validDepts = ["research", "comms", "engineering", "marketing", "sales", "prospecting", "personal", "jobhunt"];
+  if (!validDepts.includes(dept)) {
+    await ctx.reply(
+      `❌ Unknown department <b>${safeHtml(dept)}</b>.\nAvailable: ${validDepts.map((d) => `<code>${d}</code>`).join(" · ")}`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  // Inject routing hint into the task — the supervisor prompt forces exact routing
+  const routed = `[Route directly to ${dept} department]: ${task}`;
+  log.info({ dept, task: task.slice(0, 80) }, "/q direct-to-dept");
+  await runOfficeText(ctx, routed);
 }
