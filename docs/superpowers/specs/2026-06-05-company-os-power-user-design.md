@@ -1,6 +1,6 @@
 # FounderOS → Company Operating System (Power-User) — Design & Go-Forward Plan
 
-_Date: 2026-06-05 · Updated: 2026-06-05 · Status: Phase 0 ✅ COMPLETE — Phase 1 ready to build_
+_Date: 2026-06-05 · Updated: 2026-06-05 · Status: Phase 0 ✅ + Phase 1 ✅ COMPLETE — Phase 2 next_
 
 ## The shift (locked from founder input)
 
@@ -46,7 +46,7 @@ Telegram formatting engine · **435 tests green**. The base is production-grade;
 
 ---
 
-## Phase 1 — The Workflow / SOP Engine (the heart of "runs a company")
+## Phase 1 — The Workflow / SOP Engine ✅ COMPLETE (the heart of "runs a company")
 
 **Concept.** A *workflow* is a named, parameterized, ordered list of *steps*. Each step is a
 natural-language task routed through the EXISTING office (so it inherits routing, tools, HITL,
@@ -81,6 +81,8 @@ TDD: registry (pure) → runner step-advance logic (pure, fake office) → durab
 ---
 
 ## Phase 2 — Power-User Command Grammar
+
+_/q direct-to-dept and /run shipped in Phase 1. Remaining Phase 2: /runs (cost history), macros._
 
 A terse, scriptable surface over the office and workflows. All deterministic (no LLM) where possible.
 

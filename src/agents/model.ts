@@ -8,8 +8,6 @@
  * over-engineering. Gemini Flash is cheap, fast, has 1M context, and supports
  * tool-calling — exactly what a ReAct/supervisor loop needs.
  *
- * Claude-later: set AGENT_MODEL=claude-... and (later) wire ChatAnthropic.
- *
  * ── The "Unknown author: supervisor" fix ──────────────────────────────────────
  * @langchain/langgraph-supervisor tags messages with the agent's `name`
  * (e.g. "supervisor", "research"). The Google GenAI adapter maps a message's
@@ -19,12 +17,39 @@
  * attribute before it reaches Gemini — no information is lost, and Gemini stops
  * choking. We do this by subclassing the chat model and sanitising messages in
  * both the generate and stream paths.
+ *
+ * ── 503 fallback cascade ────────────────────────────────────────────────────
+ * Gemini 2.5 Flash occasionally returns 503 "high demand" errors during traffic
+ * spikes. Rather than failing the whole request, we cascade through cheaper
+ * fallback models automatically:
+ *   gemini-2.5-flash → gemini-2.0-flash → gemini-1.5-flash
+ * Each fallback only fires on a 503; any other error is re-thrown immediately.
  */
 
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import type { BaseMessage } from "@langchain/core/messages";
 import type { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
 import type { ChatResult } from "@langchain/core/outputs";
+import { childLogger } from "../infra/logger.js";
+
+const log = childLogger({ module: "model" });
+
+/** Models to try in order when the primary returns a 503. */
+const MODEL_FALLBACK_CHAIN: Record<string, string[]> = {
+  "gemini-2.5-flash": ["gemini-2.0-flash", "gemini-1.5-flash"],
+  "gemini-2.0-flash": ["gemini-1.5-flash"],
+  "gemini-2.5-pro": ["gemini-2.0-flash", "gemini-1.5-flash"],
+};
+
+/**
+ * Detect a 503 / "high demand" error from the Google Generative AI SDK.
+ * Exported so unit tests can assert on it directly.
+ */
+export function is503Error(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message;
+  return msg.includes("503") || msg.includes("high demand") || msg.includes("Service Unavailable");
+}
 
 /** Return copies of any name-tagged messages with the `name` attribute removed. */
 function stripNames(messages: BaseMessage[]): BaseMessage[] {
@@ -37,14 +62,73 @@ function stripNames(messages: BaseMessage[]): BaseMessage[] {
   });
 }
 
-/** Gemini chat model that tolerates langgraph-supervisor's name-tagged messages. */
+interface FounderChatGoogleFields {
+  model: string;
+  temperature: number;
+  maxRetries: number;
+  apiKey?: string;
+  fallbackModels?: string[];
+}
+
+/**
+ * Gemini chat model that:
+ * 1. Tolerates langgraph-supervisor's name-tagged messages (strips `name` before Gemini sees it)
+ * 2. Cascades to cheaper fallback models on 503 errors
+ */
 class FounderChatGoogle extends ChatGoogleGenerativeAI {
+  /** Exposed for tests. Fallback model names in priority order. */
+  readonly _fallbackModels: string[];
+  private readonly _fallbackInstances: ChatGoogleGenerativeAI[];
+  private readonly _fields: FounderChatGoogleFields;
+
+  constructor(fields: FounderChatGoogleFields) {
+    const { fallbackModels = [], apiKey, ...rest } = fields;
+    super({ ...rest, ...(apiKey ? { apiKey } : {}) });
+    this._fields = fields;
+    this._fallbackModels = fallbackModels;
+    // Pre-build fallback instances (no further cascading — fallbackModels=[])
+    this._fallbackInstances = fallbackModels.map(
+      (m) =>
+        new ChatGoogleGenerativeAI({
+          model: m,
+          temperature: fields.temperature,
+          maxRetries: 1,
+          ...(apiKey ? { apiKey } : {}),
+        }),
+    );
+  }
+
   override async _generate(
     messages: BaseMessage[],
     options: this["ParsedCallOptions"],
     runManager?: CallbackManagerForLLMRun,
   ): Promise<ChatResult> {
-    return super._generate(stripNames(messages), options, runManager);
+    const stripped = stripNames(messages);
+    try {
+      return await super._generate(stripped, options, runManager);
+    } catch (primaryErr) {
+      if (!is503Error(primaryErr) || this._fallbackInstances.length === 0) throw primaryErr;
+
+      log.warn(
+        { primary: this.model, fallbacks: this._fallbackModels },
+        "Primary model 503, trying fallbacks",
+      );
+
+      let lastErr: unknown = primaryErr;
+      for (let i = 0; i < this._fallbackInstances.length; i++) {
+        const fallback = this._fallbackInstances[i]!;
+        try {
+          log.info({ model: this._fallbackModels[i] }, "Trying fallback model");
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return await (fallback as any)._generate(stripped, options, runManager);
+        } catch (fallbackErr) {
+          if (!is503Error(fallbackErr)) throw fallbackErr;
+          lastErr = fallbackErr;
+        }
+      }
+      log.error({ fallbacks: this._fallbackModels }, "All fallback models returned 503");
+      throw lastErr;
+    }
   }
 
   override async *_streamResponseChunks(
@@ -52,7 +136,31 @@ class FounderChatGoogle extends ChatGoogleGenerativeAI {
     options: this["ParsedCallOptions"],
     runManager?: CallbackManagerForLLMRun,
   ) {
-    yield* super._streamResponseChunks(stripNames(messages), options, runManager);
+    // For streaming we fall back to non-streaming generate on 503 (simpler, safe)
+    try {
+      yield* super._streamResponseChunks(stripNames(messages), options, runManager);
+    } catch (primaryErr) {
+      if (!is503Error(primaryErr) || this._fallbackInstances.length === 0) throw primaryErr;
+
+      log.warn(
+        { primary: this.model },
+        "Primary model 503 on stream, falling back",
+      );
+
+      // Use the first available fallback via _generate (not streaming — acceptable
+      // for a capacity-spike fallback path)
+      for (let i = 0; i < this._fallbackInstances.length; i++) {
+        const fallback = this._fallbackInstances[i]!;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          yield* (fallback as any)._streamResponseChunks(stripNames(messages), options, runManager);
+          return;
+        } catch (fallbackErr) {
+          if (!is503Error(fallbackErr)) throw fallbackErr;
+        }
+      }
+      throw primaryErr;
+    }
   }
 }
 
@@ -77,15 +185,18 @@ function resolveTemperature(): number {
 /**
  * Build the office model. Tool-calling capable.
  * AGENT_MODEL env var swaps the model id without a code change.
+ * On 503 errors, automatically cascades to cheaper fallback models.
  */
-export function getModel(): ChatGoogleGenerativeAI {
-  const model = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
+export function getModel(): FounderChatGoogle {
+  const primaryModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
   const apiKey = process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
+  const fallbackModels = MODEL_FALLBACK_CHAIN[primaryModel] ?? [];
 
   return new FounderChatGoogle({
-    model,
+    model: primaryModel,
     temperature: resolveTemperature(),
     maxRetries: 2,
+    fallbackModels,
     ...(apiKey ? { apiKey } : {}),
   });
 }

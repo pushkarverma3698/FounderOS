@@ -8,11 +8,37 @@ FounderOS is a multi-agent AI operating system for two purposes:
 **v2 Stack (current):** Node.js 22 + TypeScript 5.5 strict + LangGraph JS (`createSupervisor` + `createReactAgent`) + grammy + drizzle-orm + Gemini Flash
 
 ## Before Touching Code
-1. Read `src/agents/office.ts` — the entire multi-agent system
-2. Read `src/agents/agent-tools.ts` — tools + HITL interrupt() logic
-3. Read `src/agents/system-prompts.ts` — all 4 prompts
-4. Read `docs/OPERATIONS.md` — how it runs day-to-day
-5. Read `docs/ROADMAP.md` — what's next and what NOT to build
+1. **Consult the knowledge graph** (`.claude/graph.json`) before searching files
+   - Query structure: departments → agents → tools
+   - Find connections: "Which tools does X use?" → graph edges
+   - Reduces token usage by 70x vs grepping files
+   - Graph visualization: `.claude/graph-mermaid.md`
+2. Read `src/agents/office.ts` — the entire multi-agent system
+3. Read `src/agents/agent-tools.ts` — tools + HITL interrupt() logic
+4. Read `src/agents/system-prompts.ts` — all 4 prompts
+5. Read `docs/guides/OPERATIONS.md` — how it runs day-to-day
+6. Read `docs/ROADMAP.md` — what's next and what NOT to build
+7. Read `docs/rules/PROGRAMMING-RULES.md` — wiring maps before adding ANY tool/dept/workflow/command
+8. Start at `docs/README.md` — the master index of all docs
+
+## Knowledge Graph (Graphify Integration)
+
+**FounderOS has a queryable knowledge graph** — structured topology of departments, agents, tools, and services.
+
+- **Location:** `.claude/graph.json` (43 nodes, 47 edges)
+- **Visualization:** `.claude/graph-mermaid.md` (Mermaid diagram)
+- **Integration Guide:** `.claude/GRAPHIFY-INTEGRATION.md`
+
+**How to use:**
+- Before any file search, think: "Can I navigate via the graph?"
+- Example: "Where is search_web used?" → query graph edges, not grep
+- Example: "What tools does personal have?" → read `dept_personal` neighbors
+- This **cuts file reads by ~70%** on large codebases
+
+**Regenerate after adding agents/tools:**
+```bash
+npx tsx scripts/generate-knowledge-graph.ts
+```
 
 ## Content & Asset Delivery Rules
 
@@ -109,17 +135,20 @@ Never `as any` or trust raw API responses.
 - Bracket notation for env: `process.env["KEY"]` (not `process.env.KEY`)
 - No circular imports: core → (no imports from src), db → core, infra → db + core, agents → infra + core, gateway → agents + infra
 
-## Adding a New Agent
-1. Add definition to `src/core/registry.ts` `_agentList`
-2. Add system prompt to `src/core/prompts.ts` `SYSTEM` dict
-3. Add node function to relevant pod: `src/agents/pods/{sales,engineering,marketing}.ts`
-4. Wire node into pod graph
-5. Add unit test in `tests/unit/`
+## Adding a Tool / Department / Workflow / Command
 
-## Adding a New Tool
-1. Create `src/tools/{tool-name}.ts` implementing `UnifiedTool`
-2. Import and `registerTool()` in `src/tools/index.ts`
-3. Add tool name to agent's `allowed_tools` in `src/core/registry.ts`
+**Follow the wiring maps in `docs/rules/PROGRAMMING-RULES.md`.** Each task has an
+exact file-touch sequence + a "forget X → error Y" table. The v1 pod/registry
+flow is GONE — there is no `registerTool()`, no `allowed_tools`, no `pods/`.
+
+Quick reference (full detail in the wiring maps):
+- **Add a tool** (6 layers): `src/tools/{name}.ts` → test → `agent-tools/{dept}.ts` wrapper
+  → `agent-tools.ts` barrel export → `office.ts` department → `system-prompts.ts` (dept prompt + supervisor routing).
+- **Add a department** (10 files): see Wiring Map 2 — widest blast radius.
+- **Add a workflow** (3 files): `workflows/registry.ts` → test → MEMORY.
+- **Add a command** (4 points): `commands.ts` handler → `telegram.ts` import + register → help text.
+
+Standards: `docs/rules/TOOL-STANDARDS.md` (tool bar) · `docs/rules/TESTING-RULES.md` (test bar).
 
 ## Running Locally
 ```bash

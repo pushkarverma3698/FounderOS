@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   // 6. Startup notification — let the founder know the bot is alive.
   await sendToChat(
     `🚀 <b>FounderOS is running</b>\n\n` +
-    `Departments: research · comms · engineering · marketing · sales · prospecting · personal · jobhunt\n` +
+    `Departments: research · comms · engineering · marketing · sales · personal · jobhunt\n` +
     `Commands: /status · /context · /target · /targets · /outbound\n\n` +
     `Ready for your first message.`,
     "HTML",

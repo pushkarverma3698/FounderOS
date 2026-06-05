@@ -152,3 +152,15 @@ export function getInstagramUserId(): string {
     "Get your Instagram user/entity ID from app.composio.dev → Connections → Instagram → copy the entity ID."
   );
 }
+
+/** Google Calendar connected account ID. Defaults to the known connection; overridable via COMPOSIO_GCAL_CONN_ID. */
+export function getGCalConnectionId(): string {
+  const val = process.env["COMPOSIO_GCAL_CONN_ID"] ?? readKeyFromEnvFile("COMPOSIO_GCAL_CONN_ID");
+  return val ?? "ca_wbg4nQjAnw9o"; // known active connection, set in env to override
+}
+
+/** Google Calendar user ID. Defaults to the shared entity; overridable via COMPOSIO_GCAL_USER_ID. */
+export function getGCalUserId(): string {
+  const val = process.env["COMPOSIO_GCAL_USER_ID"] ?? readKeyFromEnvFile("COMPOSIO_GCAL_USER_ID");
+  return val ?? "pg-test-750dbecb-ef9d-4ef7-a76d-d1de1fd0190f";
+}

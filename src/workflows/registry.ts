@@ -134,9 +134,10 @@ export function parseRunArgs(
   const params: Record<string, string> = {};
   if (!rest) return { id, params };
 
-  // Find all key= positions (including keys in quoted values — handle quoted first)
-  // Strategy: split on boundaries of the form /\w+=/ to capture multi-word values
-  const keyRe = /(\w+)=/g;
+  // Match key= only when the key starts at ^ or after whitespace.
+  // A plain /(\w+)=/g would also match '=' inside values (e.g. token=abc=def would
+  // incorrectly treat 'abc' as a second key). The lookbehind prevents that.
+  const keyRe = /(?<=^|\s)(\w+)=/g;
   const keyMatches = [...rest.matchAll(keyRe)];
 
   for (let i = 0; i < keyMatches.length; i++) {

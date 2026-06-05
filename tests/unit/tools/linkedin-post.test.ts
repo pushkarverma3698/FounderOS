@@ -1,0 +1,161 @@
+/**
+ * Unit tests for linkedinPostTool (LINKEDIN_CREATE_LINKED_IN_POST via Composio).
+ *
+ * Key scenarios:
+ *  1. Happy path — Composio returns a post id → audit written, success: true
+ *  2. Soft failure — Composio returns 200 + error message, NO id →
+ *     success: false, audit NOT written (retry not suppressed)
+ *  3. Idempotency — already audited → skipped, success: true
+ *  4. Missing API key → success: false early
+ *  5. Thrown error → success: false
+ *  6. Correct action name + field names (commentary not text, visibility object)
+ */
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// ── Mocks ────────────────────────────────────────────────────────────────────
+
+const mockExecuteComposioAction = vi.fn();
+const mockGetComposioApiKey = vi.fn(() => "test-key");
+
+vi.mock("../../../src/infra/composio.js", async (orig) => {
+  const actual = await (orig() as Promise<Record<string, unknown>>);
+  return {
+    ...actual,
+    executeComposioAction: mockExecuteComposioAction,
+    getComposioApiKey: mockGetComposioApiKey,
+    getLinkedInConnectionId: () => "ca_test_li",
+    getLinkedInUserId: () => "turicks-internal",
+  };
+});
+
+const mockHasBeenAudited = vi.fn(async () => false);
+const mockWriteAuditEntry = vi.fn(async () => undefined);
+
+vi.mock("../../../src/db/queries.js", async (orig) => {
+  const actual = await (orig() as Promise<Record<string, unknown>>);
+  return { ...actual, hasBeenAudited: mockHasBeenAudited, writeAuditEntry: mockWriteAuditEntry };
+});
+
+const { linkedinPostTool } = await import("../../../src/tools/linkedin.js");
+
+const BASE_ARGS = {
+  text: "Building FounderOS in public. Thread 🧵",
+  idempotency_key: "linkedin_post:turicks:post_001",
+  tenant_id: "turicks",
+};
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+describe("linkedinPostTool", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetComposioApiKey.mockReturnValue("test-key");
+    mockHasBeenAudited.mockResolvedValue(false);
+    mockWriteAuditEntry.mockResolvedValue(undefined);
+  });
+
+  // ── Happy path ──────────────────────────────────────────────────────────────
+
+  it("returns success and records audit when Composio returns a post id", async () => {
+    mockExecuteComposioAction.mockResolvedValue({
+      data: { id: "urn:li:share:7234567890" },
+    });
+
+    const result = await linkedinPostTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(true);
+    expect((result.data as { post_id: string }).post_id).toBe("urn:li:share:7234567890");
+    expect(mockWriteAuditEntry).toHaveBeenCalledOnce();
+  });
+
+  it("calls Composio with LINKEDIN_CREATE_LINKED_IN_POST and correct field names", async () => {
+    mockExecuteComposioAction.mockResolvedValue({ data: { id: "urn:li:share:1" } });
+
+    await linkedinPostTool.execute(BASE_ARGS);
+
+    const [action, args] = mockExecuteComposioAction.mock.calls[0] as [string, Record<string, unknown>];
+    expect(action).toBe("LINKEDIN_CREATE_LINKED_IN_POST");
+    // Composio wants 'commentary', not 'text'
+    expect(args).toHaveProperty("commentary", BASE_ARGS.text);
+    expect(args).not.toHaveProperty("text");
+    // visibility must be an object, not a bare string
+    expect(typeof args["visibility"]).toBe("object");
+  });
+
+  it("sets PUBLIC visibility by default", async () => {
+    mockExecuteComposioAction.mockResolvedValue({ data: { id: "urn:li:share:2" } });
+
+    await linkedinPostTool.execute(BASE_ARGS);
+
+    const [, args] = mockExecuteComposioAction.mock.calls[0] as [string, Record<string, unknown>];
+    const vis = args["visibility"] as Record<string, string>;
+    expect(Object.values(vis)[0]).toBe("PUBLIC");
+  });
+
+  // ── P0: Soft-failure detection ──────────────────────────────────────────────
+
+  it("returns success: false when Composio returns 200 + error message with no post id", async () => {
+    mockExecuteComposioAction.mockResolvedValue({
+      data: { message: "LinkedIn token expired. Please reconnect." },
+    });
+
+    const result = await linkedinPostTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("LinkedIn token expired");
+  });
+
+  it("does NOT write audit entry on soft failure (so retry is not suppressed)", async () => {
+    mockExecuteComposioAction.mockResolvedValue({
+      data: { message: "Rate limit exceeded" },
+    });
+
+    await linkedinPostTool.execute(BASE_ARGS);
+
+    expect(mockWriteAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("does NOT write audit entry when post id is undefined in response", async () => {
+    mockExecuteComposioAction.mockResolvedValue({ data: {} });
+
+    const result = await linkedinPostTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(false);
+    expect(mockWriteAuditEntry).not.toHaveBeenCalled();
+  });
+
+  // ── Idempotency ─────────────────────────────────────────────────────────────
+
+  it("returns success: true (skipped) without calling Composio when already audited", async () => {
+    mockHasBeenAudited.mockResolvedValue(true);
+
+    const result = await linkedinPostTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(true);
+    expect((result.data as { skipped: boolean }).skipped).toBe(true);
+    expect(mockExecuteComposioAction).not.toHaveBeenCalled();
+  });
+
+  // ── Error handling ──────────────────────────────────────────────────────────
+
+  it("returns success: false when COMPOSIO_API_KEY is missing", async () => {
+    mockGetComposioApiKey.mockReturnValue(undefined);
+
+    const result = await linkedinPostTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("COMPOSIO_API_KEY");
+    expect(mockExecuteComposioAction).not.toHaveBeenCalled();
+  });
+
+  it("returns success: false when Composio throws a network error", async () => {
+    mockExecuteComposioAction.mockRejectedValue(new Error("timeout"));
+
+    const result = await linkedinPostTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("timeout");
+    expect(mockWriteAuditEntry).not.toHaveBeenCalled();
+  });
+});

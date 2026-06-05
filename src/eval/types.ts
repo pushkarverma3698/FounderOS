@@ -12,14 +12,15 @@
  * real office graph.
  */
 
-/** The eight routable departments (mirrors the office sub-agents). */
+/** The seven routable departments (mirrors the office sub-agents).
+ *  Note: prospecting was merged into research (2026-06-05).
+ *  ICP scoring is now a research mode, not a separate routing target. */
 export type Department =
   | "research"
   | "comms"
   | "engineering"
   | "marketing"
   | "sales"
-  | "prospecting"
   | "personal"
   | "jobhunt";
 

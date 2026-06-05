@@ -94,4 +94,10 @@ describe("parseRunArgs", () => {
   it("returns null for empty input", () => {
     expect(parseRunArgs("")).toBeNull();
   });
+
+  it("handles a value containing '=' (e.g. a URL or token with embedded =)", () => {
+    // company=acme=corp should give { company: "acme=corp" }, not split on the second =
+    const result = parseRunArgs("test token=abc=def");
+    expect(result).toEqual({ id: "test", params: { token: "abc=def" } });
+  });
 });

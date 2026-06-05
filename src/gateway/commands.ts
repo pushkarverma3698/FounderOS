@@ -247,7 +247,7 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<b>⚡ Power-user direct routing</b>\n` +
     `<code>/q &lt;dept&gt; &lt;task&gt;</code> — skip supervisor, go straight to a department\n` +
     `  Example: <code>/q research what does Anthropic do?</code>\n` +
-    `  Departments: research · comms · engineering · marketing · sales · prospecting · personal · jobhunt\n\n` +
+    `  Departments: research · comms · engineering · marketing · sales · personal · jobhunt\n\n` +
 
     `<b>🔒 Approval-gated actions</b> (bot asks before sending)\n` +
     `<i>"Email alex@acme.com about X"</i> → approval card → ✅/❌\n` +
@@ -367,19 +367,26 @@ export async function handleRun(
     return;
   }
 
-  await runWorkflow(wf, parsed.params, {
-    async sendStatus(msg) {
-      await ctx.reply(msg, { parse_mode: "HTML" });
-    },
-    async runStep(task) {
-      try {
-        await runOfficeText(ctx, task);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-  });
+  try {
+    await runWorkflow(wf, parsed.params, {
+      async sendStatus(msg) {
+        await ctx.reply(msg, { parse_mode: "HTML" });
+      },
+      async runStep(task) {
+        try {
+          await runOfficeText(ctx, task);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    });
+  } catch (err) {
+    // ctx.reply itself failed (e.g. Telegram API down mid-workflow).
+    // Log and swallow — the founder will see silence rather than a crash, but
+    // the bot stays alive. A further ctx.reply here may also fail, so we skip it.
+    log.error({ err: (err as Error).message, workflow: parsed.id }, "Workflow runner error");
+  }
 }
 
 // ── /q — direct-to-department bypass ─────────────────────────────────────────
@@ -412,7 +419,7 @@ export async function handleQ(
   const dept = arg.slice(0, spaceIdx).toLowerCase();
   const task = arg.slice(spaceIdx + 1).trim();
 
-  const validDepts = ["research", "comms", "engineering", "marketing", "sales", "prospecting", "personal", "jobhunt"];
+  const validDepts = ["research", "comms", "engineering", "marketing", "sales", "personal", "jobhunt"];
   if (!validDepts.includes(dept)) {
     await ctx.reply(
       `❌ Unknown department <b>${safeHtml(dept)}</b>.\nAvailable: ${validDepts.map((d) => `<code>${d}</code>`).join(" · ")}`,
