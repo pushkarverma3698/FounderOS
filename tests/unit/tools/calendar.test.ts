@@ -32,6 +32,14 @@ vi.mock("../../../src/infra/composio.js", async (orig) => {
   };
 });
 
+const mockHasBeenAudited = vi.fn(async () => false);
+const mockWriteAuditEntry = vi.fn(async () => undefined);
+
+vi.mock("../../../src/db/queries.js", async (orig) => {
+  const actual = await (orig() as Promise<Record<string, unknown>>);
+  return { ...actual, hasBeenAudited: mockHasBeenAudited, writeAuditEntry: mockWriteAuditEntry };
+});
+
 /** Build a successful Composio response with a real event id. */
 function successResult(id = "event_abc123") {
   return {
@@ -54,6 +62,8 @@ describe("calendarTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetComposioApiKey.mockReturnValue("test-key");
+    mockHasBeenAudited.mockResolvedValue(false);
+    mockWriteAuditEntry.mockResolvedValue(undefined);
   });
 
   // ── Happy paths ──────────────────────────────────────────────────────────────
@@ -228,5 +238,62 @@ describe("calendarTool", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Network timeout");
+  });
+
+  // ── Idempotency (Rule 4 in TOOL-STANDARDS — same key never creates twice) ─────
+
+  it("skips creation and returns skipped when idempotency_key already audited", async () => {
+    mockHasBeenAudited.mockResolvedValue(true);
+
+    const result = await calendarTool.execute({
+      title: "UK",
+      date: "2026-07-02",
+      idempotency_key: "gcal:turicks:abc123",
+      tenant_id: "turicks",
+    });
+
+    expect(result.success).toBe(true);
+    expect((result.data as { skipped: boolean }).skipped).toBe(true);
+    // The whole point: a duplicate request must NOT hit Composio again
+    expect(mockExecuteComposioAction).not.toHaveBeenCalled();
+  });
+
+  it("writes an audit entry after a successful create when idempotency_key is provided", async () => {
+    mockExecuteComposioAction.mockResolvedValue(successResult("ev_audit"));
+
+    await calendarTool.execute({
+      title: "UK",
+      date: "2026-07-02",
+      idempotency_key: "gcal:turicks:abc123",
+      tenant_id: "turicks",
+    });
+
+    expect(mockWriteAuditEntry).toHaveBeenCalledOnce();
+    expect(mockWriteAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "create_calendar_event", idempotency_key: "gcal:turicks:abc123" }),
+    );
+  });
+
+  it("does NOT write an audit entry on soft failure — so a retry can still create the event", async () => {
+    mockExecuteComposioAction.mockResolvedValue({ data: { message: "rate limited" } });
+
+    await calendarTool.execute({
+      title: "UK",
+      date: "2026-07-02",
+      idempotency_key: "gcal:turicks:abc123",
+      tenant_id: "turicks",
+    });
+
+    expect(mockWriteAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("still works without an idempotency_key (back-compat — no audit, always creates)", async () => {
+    mockExecuteComposioAction.mockResolvedValue(successResult("ev_noidem"));
+
+    const result = await calendarTool.execute({ title: "UK", date: "2026-07-02" });
+
+    expect(result.success).toBe(true);
+    expect(mockHasBeenAudited).not.toHaveBeenCalled();
+    expect(mockWriteAuditEntry).not.toHaveBeenCalled();
   });
 });

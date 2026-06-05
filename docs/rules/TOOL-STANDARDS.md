@@ -193,8 +193,8 @@ Composio abstracts the raw API — field names often differ from vendor docs:
 
 | Gap | Severity | Status |
 |-----|----------|--------|
-| `tools/index.ts` registry is dead code | P2 | Open |
-| `prospecting` has no unique tool vs `research` | P2 | Open |
-| `linkedin_post` lives in both `comms` and `marketing` | P2 | Open |
-| Calendar has no idempotency guard | P1 | Open |
-| `agent-tools.ts` (656 lines) needs splitting | P2 | Open |
+| `tools/index.ts` registry is dead code | P2 | ✅ Fixed 2026-06-05 (registry removed) |
+| `prospecting` has no unique tool vs `research` | P2 | ✅ Fixed 2026-06-05 (merged into research) |
+| `linkedin_post` lives in both `comms` and `marketing` | P2 | ✅ Fixed 2026-06-05 (marketing-only) |
+| Calendar has no idempotency guard | P1 | ✅ Fixed 2026-06-05 (idempotency_key added) |
+| `agent-tools.ts` (656 lines) needs splitting | P2 | ✅ Fixed 2026-06-05 (split into agent-tools/) |

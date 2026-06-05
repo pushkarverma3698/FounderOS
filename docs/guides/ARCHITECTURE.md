@@ -104,7 +104,7 @@ src/agents/agent-tools.ts     ← LangChain wrapper + HITL gate
 - `agent-tools.ts` adapts tools for LangGraph agent use (schema, HITL pattern)
 - If you mock `src/infra/composio.ts` in tests, you exercise real tool logic
 
-**Adding a new tool:** See `docs/TOOL-STANDARDS.md` (8-point checklist).
+**Adding a new tool:** See `../rules/TOOL-STANDARDS.md` (8-point checklist).
 
 ---
 

@@ -136,7 +136,7 @@ pnpm brain:sync
 
 ## Adding a Tool (Quick Reference)
 
-Full checklist: `docs/TOOL-STANDARDS.md`
+Full checklist: `../rules/TOOL-STANDARDS.md`
 
 1. `src/tools/{name}.ts` — implement `UnifiedTool`
 2. `tests/unit/tools/{name}.test.ts` — mock Composio, test soft-failure path

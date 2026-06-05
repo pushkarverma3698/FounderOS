@@ -20,6 +20,7 @@
 
 import { childLogger } from "../infra/logger.js";
 import { executeComposioAction, getComposioApiKey, getGCalConnectionId, getGCalUserId } from "../infra/composio.js";
+import { hasBeenAudited, writeAuditEntry } from "../db/queries.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:calendar" });
@@ -30,6 +31,8 @@ export interface CreateCalendarEventArgs {
   end_date?: string;      // ISO end date/time — defaults to 1h later for timed, same day T23:59:00 for all-day
   description?: string;
   timezone?: string;      // default: Europe/Amsterdam
+  idempotency_key?: string; // when provided, the same key never creates the event twice
+  tenant_id?: string;       // audit-log tenant (defaults to the single tenant)
 }
 
 export const calendarTool: UnifiedTool = {
@@ -66,10 +69,19 @@ export const calendarTool: UnifiedTool = {
       end_date,
       description,
       timezone = "Europe/Amsterdam",
+      idempotency_key,
+      tenant_id = "turicks",
     } = input as unknown as CreateCalendarEventArgs;
 
     if (!getComposioApiKey()) {
       return { success: false, error: "COMPOSIO_API_KEY not configured." };
+    }
+
+    // Idempotency guard — same key never creates the event twice (CLAUDE.md rule #5).
+    // Only enforced when a key is supplied (back-compat: keyless calls always create).
+    if (idempotency_key && (await hasBeenAudited(idempotency_key))) {
+      log.info({ idempotency_key, title }, "Calendar event already created — skipping");
+      return { success: true, data: { skipped: true, reason: "idempotency_key already used" } };
     }
 
     // Composio uses flat start_datetime / end_datetime (YYYY-MM-DDTHH:MM:SS),
@@ -106,10 +118,22 @@ export const calendarTool: UnifiedTool = {
       const htmlLink = (outer?.["display_url"] ?? inner?.["htmlLink"]) as string | undefined;
 
       if (!eventId) {
-        // Soft failure — Composio returned a message instead of a created event
+        // Soft failure — Composio returned a message instead of a created event.
+        // No audit entry is written, so a retry can still create the event.
         const msg = (outer?.["message"] ?? "Event creation failed — no event ID returned") as string;
         log.error({ err: msg, title, startDt }, "Calendar soft failure");
         return { success: false, error: msg };
+      }
+
+      // Audit log — written ONLY after a confirmed event id, and only when a key
+      // was supplied. This is what makes a repeat of the same request a no-op.
+      if (idempotency_key) {
+        await writeAuditEntry({
+          tenant_id,
+          action: "create_calendar_event",
+          idempotency_key,
+          payload: { event_id: eventId, title, start: startDt },
+        });
       }
 
       log.info({ eventId, title, startDt, timezone }, "Calendar event created");
