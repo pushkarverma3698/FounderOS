@@ -15,7 +15,6 @@
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { getPgPool } from "../db/client.js";
-import { getRedis } from "./redis.js";
 import { getTodayCostUsd } from "../db/queries.js";
 import { childLogger } from "./logger.js";
 
@@ -37,15 +36,6 @@ async function pingDb(): Promise<boolean> {
   }
 }
 
-async function pingRedis(): Promise<boolean> {
-  try {
-    const pong = await getRedis().ping();
-    return pong === "PONG";
-  } catch {
-    return false;
-  }
-}
-
 async function spendByTenant(): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   await Promise.all(
@@ -60,20 +50,18 @@ export interface HealthReport {
   status: "ok" | "degraded";
   version: string;
   uptime_s: number;
-  checks: { database: "up" | "down"; redis: "up" | "down" };
+  checks: { database: "up" | "down" };
   spend_today_usd: Record<string, number>;
 }
 
 /** Build the health report (exported for testing without a socket). */
 export async function buildHealthReport(): Promise<HealthReport> {
-  const [db, redis, spend] = await Promise.all([pingDb(), pingRedis(), spendByTenant()]);
+  const [db, spend] = await Promise.all([pingDb(), spendByTenant()]);
   return {
-    // DB is the only CRITICAL dependency (checkpoints, audit log, budget guard).
-    // Redis is a cache → its absence is "degraded", not "down".
     status: db ? "ok" : "degraded",
     version: APP_VERSION,
     uptime_s: Math.round((Date.now() - startedAt) / 1000),
-    checks: { database: db ? "up" : "down", redis: redis ? "up" : "down" },
+    checks: { database: db ? "up" : "down" },
     spend_today_usd: spend,
   };
 }

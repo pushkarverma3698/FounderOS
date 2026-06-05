@@ -1,22 +1,22 @@
 /**
  * FounderOS — Redis Client + Key Helpers
  * =======================================
- * Single ioredis connection, shared across the entire process.
- * Key namespaces are defined here — never inline key strings elsewhere.
+ * SaaS-PHASE: This module is NOT wired into any production send path.
+ * It is kept ready for Phase 2 features:
+ *   - research cache (reduce Firecrawl spend)
+ *   - daily send quota enforcement (currently ungated)
+ *   - LLM prompt cache (multi-tenant, tier-gated)
  *
- * Key namespaces:
+ * Current wiring: NONE — only the unit tests exercise this code.
+ * Redis is NOT in docker-compose (removed 2026-06-05, was a dead boot dep).
+ *
+ * To activate: set REDIS_URL env, add redis service back to docker-compose,
+ * call incrQuota() in comms/send-email before send, cacheGet/cacheSet in search_web.
+ *
+ * Key namespaces (ready for use):
  *   research:{url_hash}         TTL 7d   — Tavily/Firecrawl company research blob
  *   quota:{tenant}:{YYYY-MM-DD} INCR     — daily outbound send counter (atomic)
  *   llm:{tenant}:{prompt_hash}  TTL cfg  — LLM prompt response cache (tier-gated, tenant-isolated)
- *
- * Design decisions:
- * - One connection (not a pool) — Redis is single-threaded, pooling adds overhead
- * - Key helpers as `const` functions — no magic strings scattered in agent files
- * - Graceful degradation: if Redis is down, log and continue (don't crash the app)
- *   Research cache miss → re-scrape. Quota miss → allow send (fail-open).
- *   LLM cache miss → call provider. None of these are fatal.
- *
- * See ADR-005: docs/decisions/005-why-redis-for-caching.md
  */
 
 import { Redis } from "ioredis";
