@@ -175,14 +175,14 @@ async function createRepo(
 export const githubTool: UnifiedTool = {
   name: "github_mcp",
   description:
-    "Interact with GitHub: list repos, read/update README, get profile stats, create issues and repos.",
+    "Interact with GitHub: list repos, read README, get profile stats, list issues/branches/commits, create issues and repos.",
   input_schema: {
     type: "object",
     properties: {
       action: {
         type: "string",
-        enum: ["list_repos", "get_readme", "update_readme", "get_stats", "create_issue", "create_repo"],
-        description: "The GitHub operation to perform.",
+        enum: ["list_repos", "get_readme", "update_readme", "get_stats", "list_issues", "list_branches", "list_commits", "create_issue", "create_repo"],
+        description: "The GitHub operation to perform. list_issues/list_branches/list_commits require owner+repo.",
       },
       owner: {
         type: "string",
@@ -251,6 +251,51 @@ export const githubTool: UnifiedTool = {
 
         case "get_stats": {
           return await getStats(octokit);
+        }
+
+        case "list_issues": {
+          const owner = args["owner"] as string;
+          const repo = args["repo"] as string;
+          if (!owner || !repo) return { success: false, error: "list_issues requires owner and repo" };
+          const { data: issues } = await octokit.rest.issues.listForRepo({
+            owner, repo, state: "open", per_page: 30, sort: "updated",
+          });
+          return {
+            success: true,
+            data: issues.map((i) => ({
+              number: i.number,
+              title: i.title,
+              state: i.state,
+              labels: i.labels.map((l) => (typeof l === "string" ? l : l.name)).filter(Boolean),
+              created_at: i.created_at,
+              updated_at: i.updated_at,
+              url: i.html_url,
+            })),
+          };
+        }
+
+        case "list_branches": {
+          const owner = args["owner"] as string;
+          const repo = args["repo"] as string;
+          if (!owner || !repo) return { success: false, error: "list_branches requires owner and repo" };
+          const { data: branches } = await octokit.rest.repos.listBranches({ owner, repo, per_page: 50 });
+          return { success: true, data: branches.map((b) => ({ name: b.name, sha: b.commit.sha.slice(0, 8) })) };
+        }
+
+        case "list_commits": {
+          const owner = args["owner"] as string;
+          const repo = args["repo"] as string;
+          if (!owner || !repo) return { success: false, error: "list_commits requires owner and repo" };
+          const { data: commits } = await octokit.rest.repos.listCommits({ owner, repo, per_page: 20 });
+          return {
+            success: true,
+            data: commits.map((c) => ({
+              sha: c.sha.slice(0, 8),
+              message: c.commit.message.split("\n")[0],
+              author: c.commit.author?.name ?? "unknown",
+              date: c.commit.author?.date,
+            })),
+          };
         }
 
         case "create_issue": {
