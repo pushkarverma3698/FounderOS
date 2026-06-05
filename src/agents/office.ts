@@ -52,7 +52,6 @@ import {
   ENGINEERING_PROMPT,
   MARKETING_PROMPT,
   SALES_PROMPT,
-  PROSPECTING_PROMPT,
   PERSONAL_PROMPT,
   JOBHUNT_PROMPT,
   SCHEDULER_BRIEF_PROMPT,
@@ -83,17 +82,19 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   const subAgentBudget = { maxTokens: 4000 };
   const supervisorBudget = { maxTokens: 6000 };
 
+  // research: web search + internal knowledge + ICP scoring (no read_emails — inbox stays in comms)
   const research = createReactAgent({
     llm,
-    tools: [searchWeb, searchKnowledge, readEmails],
+    tools: [searchWeb, searchKnowledge],
     name: "research",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(RESEARCH_PROMPT, subAgentBudget) as any,
   });
 
+  // comms: Gmail + Calendar only (linkedin_post moved to marketing — single owner)
   const comms = createReactAgent({
     llm,
-    tools: [sendEmail, readEmails, linkedinPost, createCalendarEvent],
+    tools: [sendEmail, readEmails, createCalendarEvent],
     name: "comms",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(COMMS_PROMPT, subAgentBudget) as any,
@@ -127,15 +128,6 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     prompt: createTrimmedPrompt(SALES_PROMPT, subAgentBudget) as any,
   });
 
-  /** Prospecting: ICP scoring — research-only, no write tools. */
-  const prospecting = createReactAgent({
-    llm,
-    tools: [searchWeb, searchKnowledge],
-    name: "prospecting",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(PROSPECTING_PROMPT, subAgentBudget) as any,
-  });
-
   /** Personal: senior engineer on the founder's laptop — files, shell, browser
    *  (write/shell/browser HITL-gated; reads are instant). */
   const personal = createReactAgent({
@@ -157,7 +149,8 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   });
 
   return createSupervisor({
-    agents: [research, comms, engineering, marketing, sales, prospecting, personal, jobhunt],
+    // 7 departments — prospecting merged into research (ICP scoring is now a research mode)
+    agents: [research, comms, engineering, marketing, sales, personal, jobhunt],
     llm,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(SUPERVISOR_PROMPT, supervisorBudget) as any,
@@ -186,7 +179,7 @@ export async function getOffice() {
   // runtime (tests + production prove it); cast at this single boundary so
   // `pnpm lint` stays clean instead of carrying a permanent known error.
   _office = buildOffice(checkpointer as unknown as BaseCheckpointSaver);
-  log.info("Office compiled: supervisor + [research, comms, engineering, marketing, sales, prospecting, personal, jobhunt]");
+  log.info("Office compiled: supervisor + [research, comms, engineering, marketing, sales, personal, jobhunt]");
   return _office;
 }
 

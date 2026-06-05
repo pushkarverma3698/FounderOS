@@ -88,12 +88,16 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     note: "Sales researches before drafting; sending is conditional on a verified fit.",
   },
 
-  // ── Prospecting (scoring = read-only) ─────────────────────────────────────
+  // ── ICP Scoring (now a research mode, not a separate department) ─────────
+  // Prospecting was merged into research (2026-06-05). ICP scoring uses
+  // search_web + search_knowledge — the exact same tools research has.
   {
     id: "prospecting-score",
     input: "Score Acme Corp as a Turicks prospect against our ICP.",
-    expectedRoute: "prospecting",
+    expectedRoute: "research",
+    expectedTools: ["search_web"],
     expectsHitl: false,
+    note: "ICP scoring is a research mode (prospecting dept merged into research 2026-06-05).",
   },
 
   // ── Personal (laptop operator: read = no gate, write/shell = gated) ────────

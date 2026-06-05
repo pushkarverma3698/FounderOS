@@ -1,289 +1,198 @@
-# FounderOS — Daily Operations Guide
+# FounderOS — Operations Guide
 
-*How to actually use FounderOS every day. Treat this as your manual.*
+> Day-to-day commands, troubleshooting, and runbook for running FounderOS.
 
 ---
 
-## Starting the Bot
+## Starting / Stopping
 
 ```bash
-cd ~/Projects/founderos
-pnpm dev
-```
-
-The bot starts, connects to Postgres, compiles the office (takes ~3 seconds), and begins polling Telegram. You'll see:
-
-```
-Office compiled: supervisor + [research, comms, engineering]
-Telegram bot starting (long polling)…
-FounderOS running 🚀
-Health server listening on /health and /metrics
-```
-
-**Stop:** `Ctrl+C` — cleans up gracefully.
-
-**Restart after a crash:**
-```bash
-pkill -f "src/index.ts"; pnpm dev
-```
-
-**Background (leave running while you work):**
-```bash
+# Start (runs in background, logs to /tmp/founderos.log)
 nohup node --env-file=.env --import tsx/esm src/index.ts > /tmp/founderos.log 2>&1 &
 echo $! > /tmp/founderos.pid
-# stop later: kill $(cat /tmp/founderos.pid)
-```
 
----
+# Stop
+kill $(cat /tmp/founderos.pid)
 
-## Talking to the Bot
+# Restart (single-instance lock kills old process automatically)
+kill $(cat /tmp/founderos.pid) 2>/dev/null; sleep 2
+nohup node --env-file=.env --import tsx/esm src/index.ts > /tmp/founderos.log 2>&1 &
+echo $! > /tmp/founderos.pid
 
-Open Telegram and message **@Raggae3698_bot** (your bot).
-
-### Research
-```
-"What is Linear app and what problems does it solve?"
-"Research the latest trends in AI agents for enterprise in 2025"
-"Find information about [company name] — what do they do and who are their customers?"
-```
-→ Bot searches the web and returns a cited summary. No approval needed.
-
-### Email (via Composio Gmail)
-```
-"Email pushkarai3698@gmail.com with subject 'Test' and body 'Just testing FounderOS'"
-"Draft and send an intro email to alex@acme.com about Turicks"
-"Reply to the last email from [name] saying we're interested"
-```
-→ Bot drafts the email → shows you an Approve/Reject card with the full content → you tap Approve → email lands in the inbox.
-
-### LinkedIn (via Composio)
-```
-"Write and post a LinkedIn post about how I used AI to save 10 hours this week"
-"Draft a LinkedIn post about the FounderOS architecture"
-```
-→ Bot writes the post in your voice → shows Approve/Reject → you tap Approve → published.
-
-### Engineering / GitHub
-```
-"List all my GitHub repositories"
-"What's in the README of my founderos repo?"
-"Open a GitHub issue on pushkarverma/founderos titled 'Add sales department' with a description"
-"Write a TypeScript function that validates email addresses with regex"
-```
-→ Read actions (list, get README) happen immediately.
-→ Write actions (create issue, create repo, update README) show an Approve/Reject card first.
-
-### General Questions
-```
-"What can you do?"
-"How does LangGraph interrupt work?"
-"What's the difference between a ReAct agent and a supervisor?"
-```
-→ Supervisor answers directly without routing to a department.
-
----
-
-## The Approval Flow
-
-When you request a write action, you'll see a card like:
-
-```
-📧 Send email to alex@acme.com?
-Subject: Turicks × Linear — AI workflow automation
-
-Hi Alex,
-
-I noticed Linear recently added AI-powered triage...
-[rest of email]
-
-✅ Approve    ❌ Reject
-```
-
-- **Approve** → email sends immediately, you get a ✅ confirmation
-- **Reject** → nothing happens, bot tells you it was rejected
-
-**Important:** Only one approval can be pending at a time per chat. Approve or reject before sending another message.
-
-**If the bot seems stuck:** check if there's a pending approval card you haven't tapped yet. Scroll up in the chat.
-
----
-
-## What Each Department Does
-
-### Research
-**Trigger words:** research, find, search, look up, what is, what does, latest, news, who is
-
-Uses Firecrawl to search the web. Returns title + URL + summary for each result. **Requires `FIRECRAWL_API_KEY`.**
-
-### Comms
-**Trigger words:** email, send, message, post, LinkedIn, publish, write and send
-
-- **Email:** Composio Gmail. Checks suppression list before sending. Idempotent — same email won't send twice. **Requires `COMPOSIO_API_KEY` + Gmail connection in Composio.**
-- **LinkedIn:** Composio LinkedIn post. **Requires `COMPOSIO_API_KEY` + LinkedIn connection in Composio.**
-
-### Engineering
-**Trigger words:** code, build, write a function, GitHub, create issue, create repo, list repos, README
-
-- **GitHub reads** (list repos, get README, get stats): instant, no approval.
-- **GitHub writes** (create issue, update README, create repo): approval required. **Requires `GITHUB_TOKEN`.**
-- **Code generation:** writes TypeScript (or requested language) directly in the reply. No external service needed.
-
----
-
-## Setup Checklist (Do These Once)
-
-### 1. Composio Gmail
-1. Go to [composio.dev](https://composio.dev) → My Apps → Connect Gmail
-2. Connect with your Google account
-3. Set the entity ID to `turicks` (this is your `FOUNDER_TENANT` value)
-4. Test: `Email myself@gmail.com subject 'test' body 'hi'` → Approve → check inbox
-
-### 2. Composio LinkedIn
-1. Composio → My Apps → Connect LinkedIn
-2. Make sure `w_member_social` permission is granted (for posting)
-3. Entity ID: `turicks`
-4. Test: `Write a LinkedIn post saying "Testing my AI system"` → Approve → check LinkedIn
-
-### 3. GitHub Token
-1. GitHub → Settings → Developer settings → Personal access tokens → Classic
-2. Scopes: `repo` (full) + `read:user`
-3. Add to `.env`: `GITHUB_TOKEN=ghp_...`
-4. Restart bot
-5. Test: `List my GitHub repos`
-
-### 4. Firecrawl
-1. Sign up at [firecrawl.dev](https://firecrawl.dev)
-2. Copy API key
-3. Add to `.env`: `FIRECRAWL_API_KEY=fc-...`
-4. Restart bot
-5. Test: `Research what Stripe does`
-
----
-
-## Error Messages Explained
-
-| You see | What it means | Fix |
-|---------|--------------|-----|
-| `⚠️ Tool issue: FIRECRAWL_API_KEY not set` | Missing env var | Add `FIRECRAWL_API_KEY` to `.env`, restart |
-| `⚠️ Tool issue: COMPOSIO_API_KEY not configured` | Missing env var | Add `COMPOSIO_API_KEY` to `.env`, restart |
-| `⚠️ Tool issue: BLOCKED: on do-not-contact list` | Recipient is suppressed | Remove from `do_not_contact` table in DB or use a different email |
-| `⚠️ Tool issue: Email send failed` | Composio error | Check Composio dashboard, verify Gmail connection for entity `turicks` |
-| `❌ Error [stack trace]` | Unexpected crash | Check `/tmp/founderos.log` for details |
-| `✅ Done.` with no content | Reply extraction issue | The agent replied with tool calls only — check logs |
-
----
-
-## Checking What Happened
-
-### Live logs
-```bash
+# Check if running
+cat /tmp/founderos.pid && ps aux | grep src/index
 tail -f /tmp/founderos.log
 ```
 
-### What emails were actually sent
-```bash
-docker exec -it turicks-postgres psql -U turicks -d turicks -c \
-  "SELECT action, payload->>'to' as to, payload->>'subject' as subject, created_at FROM action_log WHERE action = 'send_email' ORDER BY created_at DESC LIMIT 10;"
-```
+**The single-instance lock** (`src/infra/single-instance.ts`) means restarts are safe —
+the new process kills the old one automatically. No duplicate polling processes.
 
-### All recent actions
-```bash
-docker exec -it turicks-postgres psql -U turicks -d turicks -c \
-  "SELECT action, idempotency_key, created_at FROM action_log ORDER BY created_at DESC LIMIT 20;"
-```
+---
 
-### Conversation history for your chat
+## Required Services
+
 ```bash
-docker exec -it turicks-postgres psql -U turicks -d turicks -c \
-  "SELECT thread_id, checkpoint_id, type, created_at FROM checkpoints ORDER BY created_at DESC LIMIT 10;"
+# PostgreSQL (must be running before starting the bot)
+docker compose up -d postgres
+
+# Redis (optional — bot degrades gracefully if unavailable)
+docker compose up -d redis
+
+# Verify Postgres is up
+docker ps | grep postgres
 ```
 
 ---
 
-## Tuning the Bot
+## Environment Variables (.env)
 
-### Change how the supervisor routes tasks
-Edit `SUPERVISOR_PROMPT` in `src/agents/system-prompts.ts`. Describe the departments more precisely or add examples of what belongs where. Restart the bot.
-
-### Change how an agent behaves
-Edit the relevant prompt (`RESEARCH_PROMPT`, `COMMS_PROMPT`, `ENGINEERING_PROMPT`) in `src/agents/system-prompts.ts`. No code changes needed — the LLM reads the prompt.
-
-### Change the model
-In `.env`: `AGENT_MODEL=gemini-2.5-pro` for higher quality, or `AGENT_MODEL=claude-sonnet-4-5` when you have a valid Anthropic key. Restart the bot.
-
-### Add a domain to the do-not-contact list
 ```bash
-docker exec -it turicks-postgres psql -U turicks -d turicks -c \
-  "INSERT INTO do_not_contact (tenant_id, email_or_domain, reason) VALUES ('turicks', '@competitor.com', 'competitor');"
+# Required
+DATABASE_URL=postgresql://turicks:password@localhost:5432/founderos
+TELEGRAM_BOT_TOKEN=<your bot token>
+TELEGRAM_CHAT_ID=<your numeric chat id>
+GOOGLE_GENERATIVE_AI_API_KEY=<Gemini key>
+
+# Composio connections (Gmail + LinkedIn + Google Calendar)
+COMPOSIO_API_KEY=<key>
+COMPOSIO_GMAIL_CONN_ID=ca_nlLqda4MBFaA
+COMPOSIO_GMAIL_USER_ID=pg-test-750dbecb-ef9d-4ef7-a76d-d1de1fd0190f
+COMPOSIO_LINKEDIN_CONN_ID=ca_CDaqpUfRJ7vl
+COMPOSIO_LINKEDIN_USER_ID=turicks-internal
+# Google Calendar defaults are hardcoded in composio.ts — set to override:
+# COMPOSIO_GCAL_CONN_ID=ca_wbg4nQjAnw9o
+# COMPOSIO_GCAL_USER_ID=pg-test-750dbecb-ef9d-4ef7-a76d-d1de1fd0190f
+
+# Optional
+FIRECRAWL_API_KEY=<key>   # web search
+GITHUB_TOKEN=<PAT>        # GitHub tools
+LANGCHAIN_API_KEY=<key>   # LangSmith tracing
+LANGCHAIN_TRACING_V2=true
 ```
 
 ---
 
-## Weekly Habits
+## Telegram Commands
 
-| When | What to do |
-|------|------------|
-| Monday | Ask: "What should I focus on this week for Turicks?" (research recent news in your niche) |
-| Daily | Use research before any client call: "Research [company] quickly" |
-| When writing content | Ask: "Draft a LinkedIn post about [what you did this week]" → Approve if good |
-| When prospecting | "Research [company] and tell me if they're a good Turicks prospect" |
-| When closing a deal | "Draft an intro email to [name] at [company] about [specific pain point]" |
-| When working on your Mac | "List the files in ~/Projects/founderos" · "Run `pnpm test` in my founderos folder" · "Open hckrnews.com in Safari" |
+| Command | What it does |
+|---------|-------------|
+| `/start` | Welcome message with example tasks |
+| `/commands` | Full command list |
+| `/status` | System health: Postgres, Redis, services |
+| `/reset` | Clear conversation history (fixes stuck context) |
+| `/workflows` | List available SOPs |
+| `/run <workflow> [key=value]` | Run a multi-step workflow |
+| `/q <dept> <task>` | Route directly to a department (bypass supervisor) |
+| `/context` | Show current business context |
+| `/departments` | What each department does |
+
+**Dept shortcuts for /q:**
+```
+/q research What is Anthropic's latest model?
+/q comms check my unread emails
+/q engineering list my GitHub repos
+/q marketing draft a LinkedIn post about shipping FounderOS
+/q sales cold email the founder of Acme Corp
+/q personal list files on my Desktop
+/q jobhunt find AI engineer jobs in Amsterdam
+```
+
+**Workflows:**
+```
+/run onboarding company=Acme Corp
+/run outbound company=Stripe
+/run weekly_digest
+```
 
 ---
 
-## Personal Department (your laptop, over Telegram)
+## Running Tests
 
-The `personal` department is a senior engineer on your own Mac. Ask in plain language and it
-reads files, edits them, runs scripts, and drives Safari — confined to your home directory.
+```bash
+pnpm test                    # full suite (562 tests)
+pnpm test --reporter=verbose # verbose output
+pnpm lint                    # TypeScript type check
+pnpm eval                    # live eval against golden tasks (~75s, real model)
+```
 
-**Safety (non-negotiable, enforced in code — not just the prompt):**
-- **Reads are instant.** Listing or reading a file needs no approval.
-- **Every write, shell command, and browser action stops for your approval** — a Telegram card
-  shows exactly what it will do; nothing runs until you tap **Approve**.
-- **File tools are confined to `$HOME`.** `read_file` / `list_dir` / `write_file` cannot reach
-  outside your home directory (no `/etc`, `/System`, `/tmp`).
-- **Secrets are blocked even for reads** (file tools) — `~/.ssh`, `~/.aws`, `~/.gnupg`, keychains,
-  any `.env` or `*.pem`. A prompt-injected file read can never exfiltrate them.
-- **Shell commands run as you.** `run_shell` confines only the *working directory* to `$HOME` — the
-  command itself runs with your user's full permissions, so it *could* read elsewhere. That's why
-  **every shell command stops at an approval card** showing the exact command. Read it before approving.
-- **Catastrophic commands are flagged** (`rm -rf`, `mkfs`, fork bombs…) right on the approval card.
+**Before every PR:** `pnpm test` + `pnpm lint` must both pass.
 
-**Examples that work:**
-- "Read ~/.zshrc and tell me what's in it" → instant
-- "Create a file `notes.md` on my Desktop with my todo list" → approval card → writes on Approve
-- "Run `git status` in ~/Projects/founderos" → approval card → runs on Approve
-- "Open https://news.ycombinator.com in Safari" → approval card → opens on Approve
+---
 
-**Scope note:** browser is an AppleScript MVP (open URL / read page text / run JS). Full Safari-MCP
-integration is deferred (see ADR-012). The `personal` department stays separate from `engineering`
-by design — least privilege, smaller blast radius (see ADR-013).
+## Database
+
+```bash
+# Run migrations
+npx drizzle-kit migrate
+
+# Reset conversation history for a chat (when bot is stuck)
+psql $DATABASE_URL -c "DELETE FROM checkpoints WHERE thread_id LIKE 'turicks:6775330211%';"
+
+# Sync docs to turicks-brain knowledge base
+pnpm brain:sync
+```
+
+---
+
+## Adding a Tool (Quick Reference)
+
+Full checklist: `docs/TOOL-STANDARDS.md`
+
+1. `src/tools/{name}.ts` — implement `UnifiedTool`
+2. `tests/unit/tools/{name}.test.ts` — mock Composio, test soft-failure path
+3. `src/agents/agent-tools.ts` — add LangChain wrapper with `hitlGate()`
+4. `src/agents/office.ts` — wire into the right department's `tools: []` array
+5. `pnpm test` + `pnpm lint` green
 
 ---
 
 ## Troubleshooting
 
-**Bot doesn't respond:**
+**Bot not responding:**
 ```bash
-ps aux | grep "src/index.ts" | grep -v grep  # is it running?
-cat /tmp/founderos.log | tail -20            # any errors?
+# Should show exactly 1 process
+ps aux | grep "src/index" | grep -v grep | wc -l
+
+# Check for errors
+grep ERROR /tmp/founderos.log | tail -10
 ```
 
-**Bot responds but slowly (>30 seconds):**
-- Gemini Flash rate limits occasionally → bot retries automatically
-- Check LangSmith dashboard if `LANGCHAIN_TRACING_V2=true` is set
+**Bot replies "Hey there!" to everything (context loop):**
+`/reset` — clears thread history. The 12-turn history bound usually prevents this.
 
-**"Routing to office" logged but no reply:**
-- There may be a pending approval you haven't tapped yet
-- Or the model returned an empty response — check logs for Gemini errors
+**HITL approval not working:**
+- Only ONE pending approval per thread. New messages cancel stale ones.
+- If stuck: `/reset` clears the thread including pending approvals.
 
-**Approval card sent but resume doesn't work:**
-- The thread state is in Postgres — as long as the bot is running and `DATABASE_URL` is correct, it will resume
-- Restart the bot with the same `.env` — the pending approval will still be there
+**503 Gemini errors:**
+Handled automatically by the fallback cascade (2.5 → 2.0 → 1.5). If all fail,
+error surfaces to Telegram.
 
-**Email says "BLOCKED: on do-not-contact list":**
-- Check the `do_not_contact` table and remove the entry if it was added by mistake
+**Composio auth expired:**
+`Error: LinkedIn token expired. Please reconnect.`
+Go to app.composio.dev → Connections → reconnect. Connection ID stays the same.
 
-**`Cannot find package '@composio-core/js'`:**
-- This was a bug in v1. v2 uses `composio-core`. Run `pnpm install` and restart.
+**Calendar not creating:**
+```bash
+npx tsx --env-file=.env scripts/probe-gcal.ts
+```
+
+---
+
+## Probe Scripts
+
+```bash
+npx tsx --env-file=.env scripts/probe-gcal.ts    # test Google Calendar
+npx tsx --env-file=.env scripts/probe-real-task.ts  # run task through real office
+npx tsx scripts/generate-knowledge-graph.ts      # regenerate .claude/graph.json
+```
+
+---
+
+## Monitoring
+
+```bash
+tail -f /tmp/founderos.log           # live logs
+curl http://localhost:3001/health    # health check
+curl http://localhost:3001/metrics   # metrics
+```

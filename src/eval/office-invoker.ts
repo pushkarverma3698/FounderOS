@@ -29,8 +29,8 @@ const DEPARTMENTS = new Set<Department>([
   "engineering",
   "marketing",
   "sales",
-  "prospecting",
   "personal",
+  "jobhunt",
 ]);
 
 const TRANSFER_PREFIX = "transfer_to_";

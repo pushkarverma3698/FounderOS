@@ -8,11 +8,35 @@ FounderOS is a multi-agent AI operating system for two purposes:
 **v2 Stack (current):** Node.js 22 + TypeScript 5.5 strict + LangGraph JS (`createSupervisor` + `createReactAgent`) + grammy + drizzle-orm + Gemini Flash
 
 ## Before Touching Code
-1. Read `src/agents/office.ts` — the entire multi-agent system
-2. Read `src/agents/agent-tools.ts` — tools + HITL interrupt() logic
-3. Read `src/agents/system-prompts.ts` — all 4 prompts
-4. Read `docs/OPERATIONS.md` — how it runs day-to-day
-5. Read `docs/ROADMAP.md` — what's next and what NOT to build
+1. **Consult the knowledge graph** (`.claude/graph.json`) before searching files
+   - Query structure: departments → agents → tools
+   - Find connections: "Which tools does X use?" → graph edges
+   - Reduces token usage by 70x vs grepping files
+   - Graph visualization: `.claude/graph-mermaid.md`
+2. Read `src/agents/office.ts` — the entire multi-agent system
+3. Read `src/agents/agent-tools.ts` — tools + HITL interrupt() logic
+4. Read `src/agents/system-prompts.ts` — all 4 prompts
+5. Read `docs/OPERATIONS.md` — how it runs day-to-day
+6. Read `docs/ROADMAP.md` — what's next and what NOT to build
+
+## Knowledge Graph (Graphify Integration)
+
+**FounderOS has a queryable knowledge graph** — structured topology of departments, agents, tools, and services.
+
+- **Location:** `.claude/graph.json` (43 nodes, 47 edges)
+- **Visualization:** `.claude/graph-mermaid.md` (Mermaid diagram)
+- **Integration Guide:** `.claude/GRAPHIFY-INTEGRATION.md`
+
+**How to use:**
+- Before any file search, think: "Can I navigate via the graph?"
+- Example: "Where is search_web used?" → query graph edges, not grep
+- Example: "What tools does personal have?" → read `dept_personal` neighbors
+- This **cuts file reads by ~70%** on large codebases
+
+**Regenerate after adding agents/tools:**
+```bash
+npx tsx scripts/generate-knowledge-graph.ts
+```
 
 ## Content & Asset Delivery Rules
 

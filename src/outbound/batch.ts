@@ -3,7 +3,7 @@
  * ============================================
  * Turns a list of target companies into ONE prospecting prompt for the office.
  *
- * The prompt routes to the `prospecting` department (read-only — no write tools,
+ * The prompt routes to the `research` department (read-only — no write tools,
  * so no HITL and safe to batch). It returns a ranked ICP digest; the founder
  * then drafts the winners via the existing sales flow ("draft outreach to X"),
  * which keeps the one-approval-per-thread HITL contract intact.
@@ -23,7 +23,7 @@ export const MAX_BATCH = 8;
 export function buildBatchPrompt(targets: string[]): string {
   const list = targets.map((t, i) => `${i + 1}. ${t}`).join("\n");
 
-  return `Run our weekly outbound prospecting batch. Use the prospecting department to evaluate each company below against the Turicks ICP:
+  return `Run our weekly outbound prospecting batch. Use the research department to evaluate each company below against the Turicks ICP:
 - SME founders, EU/US, roughly $50K–500K ARR
 - Pain: no technical co-founder; needs AI automation / fast product delivery
 - Disqualify: enterprise (>500 staff), pure B2C, other agencies, no budget signal

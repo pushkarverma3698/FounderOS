@@ -1,0 +1,594 @@
+{
+  "nodes": [
+    {
+      "id": "dept_research",
+      "type": "department",
+      "name": "research",
+      "description": "research department - autonomous agent in the supervisor graph",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "dept_comms",
+      "type": "department",
+      "name": "comms",
+      "description": "comms department - autonomous agent in the supervisor graph",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "dept_engineering",
+      "type": "department",
+      "name": "engineering",
+      "description": "engineering department - autonomous agent in the supervisor graph",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "dept_marketing",
+      "type": "department",
+      "name": "marketing",
+      "description": "marketing department - autonomous agent in the supervisor graph",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "dept_sales",
+      "type": "department",
+      "name": "sales",
+      "description": "sales department - autonomous agent in the supervisor graph",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "dept_prospecting",
+      "type": "department",
+      "name": "prospecting",
+      "description": "prospecting department - autonomous agent in the supervisor graph",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "dept_personal",
+      "type": "department",
+      "name": "personal",
+      "description": "personal department - autonomous agent in the supervisor graph",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "dept_jobhunt",
+      "type": "department",
+      "name": "jobhunt",
+      "description": "jobhunt department - autonomous agent in the supervisor graph",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_lead_intel",
+      "type": "agent",
+      "name": "lead_intel",
+      "description": "Research agent for lead intelligence",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_researcher",
+      "type": "agent",
+      "name": "researcher",
+      "description": "General web research agent",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_email_agent",
+      "type": "agent",
+      "name": "email_agent",
+      "description": "Email composition and sending agent",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_linkedin_agent",
+      "type": "agent",
+      "name": "linkedin_agent",
+      "description": "LinkedIn content agent",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_eng_engineer",
+      "type": "agent",
+      "name": "eng_engineer",
+      "description": "Engineering department coordinator",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_code_reviewer",
+      "type": "agent",
+      "name": "code_reviewer",
+      "description": "Code review agent",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_github_agent",
+      "type": "agent",
+      "name": "github_agent",
+      "description": "GitHub automation agent",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_marketing_engineer",
+      "type": "agent",
+      "name": "marketing_engineer",
+      "description": "Marketing department coordinator",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_content_gen",
+      "type": "agent",
+      "name": "content_gen",
+      "description": "LinkedIn content generator",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_sales_engineer",
+      "type": "agent",
+      "name": "sales_engineer",
+      "description": "Sales department coordinator",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_bdr",
+      "type": "agent",
+      "name": "bdr",
+      "description": "Business development representative",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_outreach",
+      "type": "agent",
+      "name": "outreach",
+      "description": "Cold outreach agent",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_icp_scorer",
+      "type": "agent",
+      "name": "icp_scorer",
+      "description": "ICP (Ideal Customer Profile) scoring agent",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_personal_operator",
+      "type": "agent",
+      "name": "personal_operator",
+      "description": "Personal laptop operator (HITL-gated)",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_job_hunter",
+      "type": "agent",
+      "name": "job_hunter",
+      "description": "Job search and application agent",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "tool_search_web",
+      "type": "tool",
+      "name": "search_web",
+      "description": "Search the web via Firecrawl",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_send_email",
+      "type": "tool",
+      "name": "send_email",
+      "description": "Send emails via Composio Gmail (HITL-gated)",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_linkedin_post",
+      "type": "tool",
+      "name": "linkedin_post",
+      "description": "Post to LinkedIn via Composio (HITL-gated approval)",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_github_read",
+      "type": "tool",
+      "name": "github_read",
+      "description": "Read GitHub repos and issues",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_github_write",
+      "type": "tool",
+      "name": "github_write",
+      "description": "Write to GitHub (PR, commit, push) — HITL-gated approval required",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_read_file",
+      "type": "tool",
+      "name": "read_file",
+      "description": "Read files from laptop",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_write_file",
+      "type": "tool",
+      "name": "write_file",
+      "description": "Write files to laptop (HITL-gated approval)",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_run_shell",
+      "type": "tool",
+      "name": "run_shell",
+      "description": "Run shell commands (HITL-gated approval)",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_send_file",
+      "type": "tool",
+      "name": "send_file",
+      "description": "Send files via Telegram (HITL-gated approval)",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_browser",
+      "type": "tool",
+      "name": "browser",
+      "description": "Control browser via AppleScript (HITL-gated approval)",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_read_cv",
+      "type": "tool",
+      "name": "read_cv",
+      "description": "Read personal CV from personal-rag",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_search_jobs",
+      "type": "tool",
+      "name": "search_jobs",
+      "description": "Search job listings via Firecrawl",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_project_workflow",
+      "type": "tool",
+      "name": "project_workflow",
+      "description": "Run git/npm commands in ~/Projects (HITL-gated for dangerous commands)",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "service_supervisor",
+      "type": "service",
+      "name": "Supervisor",
+      "description": "Multi-agent coordinator (Gemini Flash)",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "service_telegam",
+      "type": "service",
+      "name": "Telegram Gateway",
+      "description": "Telegram bot interface (grammy)",
+      "file": "src/gateway/telegram.ts"
+    },
+    {
+      "id": "service_hitl",
+      "type": "service",
+      "name": "HITL (Human-in-the-loop)",
+      "description": "Approval system for side effects",
+      "file": "src/gateway/hitl.ts"
+    },
+    {
+      "id": "service_postgres",
+      "type": "service",
+      "name": "PostgreSQL",
+      "description": "Durable state: leads, interrupts, audit log",
+      "file": "src/db/schema.ts"
+    },
+    {
+      "id": "service_redis",
+      "type": "service",
+      "name": "Redis",
+      "description": "Ephemeral: cache, quotas, LLM prompt cache",
+      "file": "src/infra/redis.ts"
+    },
+    {
+      "id": "interface_office_state",
+      "type": "interface",
+      "name": "OfficeState",
+      "description": "LangGraph annotation schema for agent state",
+      "file": "src/agents/state.ts"
+    },
+    {
+      "id": "interface_unified_tool",
+      "type": "interface",
+      "name": "UnifiedTool",
+      "description": "Standard tool interface for all agents",
+      "file": "src/tools/*.ts"
+    }
+  ],
+  "edges": [
+    {
+      "from": "agent_lead_intel",
+      "to": "dept_research",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_researcher",
+      "to": "dept_research",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_email_agent",
+      "to": "dept_comms",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_linkedin_agent",
+      "to": "dept_comms",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_eng_engineer",
+      "to": "dept_engineering",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_code_reviewer",
+      "to": "dept_engineering",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_github_agent",
+      "to": "dept_engineering",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_marketing_engineer",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_content_gen",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_sales_engineer",
+      "to": "dept_sales",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_bdr",
+      "to": "dept_sales",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_outreach",
+      "to": "dept_sales",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_icp_scorer",
+      "to": "dept_prospecting",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_personal_operator",
+      "to": "dept_personal",
+      "type": "belongs_to"
+    },
+    {
+      "from": "agent_job_hunter",
+      "to": "dept_jobhunt",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_search_web",
+      "to": "dept_research",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_send_email",
+      "to": "dept_comms",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_linkedin_post",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_github_read",
+      "to": "dept_engineering",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_github_write",
+      "to": "dept_engineering",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_read_file",
+      "to": "dept_personal",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_write_file",
+      "to": "dept_personal",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_run_shell",
+      "to": "dept_personal",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_send_file",
+      "to": "dept_personal",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_browser",
+      "to": "dept_personal",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_read_cv",
+      "to": "dept_jobhunt",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_search_jobs",
+      "to": "dept_jobhunt",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_project_workflow",
+      "to": "dept_engineering",
+      "type": "belongs_to"
+    },
+    {
+      "from": "dept_research",
+      "to": "service_supervisor",
+      "type": "calls"
+    },
+    {
+      "from": "dept_research",
+      "to": "service_telegam",
+      "type": "calls"
+    },
+    {
+      "from": "dept_comms",
+      "to": "service_supervisor",
+      "type": "calls"
+    },
+    {
+      "from": "dept_comms",
+      "to": "service_telegam",
+      "type": "calls"
+    },
+    {
+      "from": "dept_engineering",
+      "to": "service_supervisor",
+      "type": "calls"
+    },
+    {
+      "from": "dept_engineering",
+      "to": "service_telegam",
+      "type": "calls"
+    },
+    {
+      "from": "dept_marketing",
+      "to": "service_supervisor",
+      "type": "calls"
+    },
+    {
+      "from": "dept_marketing",
+      "to": "service_telegam",
+      "type": "calls"
+    },
+    {
+      "from": "dept_sales",
+      "to": "service_supervisor",
+      "type": "calls"
+    },
+    {
+      "from": "dept_sales",
+      "to": "service_telegam",
+      "type": "calls"
+    },
+    {
+      "from": "dept_prospecting",
+      "to": "service_supervisor",
+      "type": "calls"
+    },
+    {
+      "from": "dept_prospecting",
+      "to": "service_telegam",
+      "type": "calls"
+    },
+    {
+      "from": "dept_personal",
+      "to": "service_supervisor",
+      "type": "calls"
+    },
+    {
+      "from": "dept_personal",
+      "to": "service_telegam",
+      "type": "calls"
+    },
+    {
+      "from": "dept_jobhunt",
+      "to": "service_supervisor",
+      "type": "calls"
+    },
+    {
+      "from": "dept_jobhunt",
+      "to": "service_telegam",
+      "type": "calls"
+    },
+    {
+      "from": "service_supervisor",
+      "to": "service_hitl",
+      "type": "calls"
+    },
+    {
+      "from": "service_supervisor",
+      "to": "service_postgres",
+      "type": "depends_on"
+    },
+    {
+      "from": "service_supervisor",
+      "to": "service_redis",
+      "type": "depends_on"
+    }
+  ],
+  "metadata": {
+    "projectName": "FounderOS",
+    "generatedAt": "2026-06-05T10:43:57.287Z",
+    "departments": {
+      "research": [
+        "lead_intel",
+        "researcher"
+      ],
+      "comms": [
+        "email_agent",
+        "linkedin_agent"
+      ],
+      "engineering": [
+        "eng_engineer",
+        "code_reviewer",
+        "github_agent"
+      ],
+      "marketing": [
+        "marketing_engineer",
+        "content_gen"
+      ],
+      "sales": [
+        "sales_engineer",
+        "bdr",
+        "outreach"
+      ],
+      "prospecting": [
+        "icp_scorer"
+      ],
+      "personal": [
+        "personal_operator"
+      ],
+      "jobhunt": [
+        "job_hunter"
+      ]
+    },
+    "tools": {
+      "search_web": "Search the web via Firecrawl",
+      "send_email": "Send emails via Composio Gmail (HITL-gated)",
+      "linkedin_post": "Post to LinkedIn via Composio (HITL-gated approval)",
+      "github_read": "Read GitHub repos and issues",
+      "github_write": "Write to GitHub (PR, commit, push) — HITL-gated approval required",
+      "read_file": "Read files from laptop",
+      "write_file": "Write files to laptop (HITL-gated approval)",
+      "run_shell": "Run shell commands (HITL-gated approval)",
+      "send_file": "Send files via Telegram (HITL-gated approval)",
+      "browser": "Control browser via AppleScript (HITL-gated approval)",
+      "read_cv": "Read personal CV from personal-rag",
+      "search_jobs": "Search job listings via Firecrawl",
+      "project_workflow": "Run git/npm commands in ~/Projects (HITL-gated for dangerous commands)"
+    }
+  }
+}

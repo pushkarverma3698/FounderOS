@@ -1,0 +1,17 @@
+{
+  "env": {
+    "GRAPHIFY_ENABLED": "1"
+  },
+  "hooks": {
+    "preToolUse": {
+      "enabled": true,
+      "script": ".claude/graphify-hook.ts",
+      "handler": "handlePreToolUse",
+      "toolsToEnrich": ["Read", "Explore", "find", "grep", "Glob"],
+      "description": "Graphify auto-hook: enriches file operations with knowledge graph context"
+    }
+  },
+  "inference": {
+    "model": "claude-opus-4.1"
+  }
+}
