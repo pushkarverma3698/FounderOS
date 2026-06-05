@@ -446,7 +446,9 @@ const QA_TASKS: QATask[] = [
     id: "w3",
     dept: "workflow",
     expectHITL: true,
-    input: "/run onboarding company=TestStartupCo",
+    // Note: /run is a Telegram gateway command, not understood by office directly.
+    // Test the SAME behaviour via descriptive task that triggers research + email + GitHub HITL.
+    input: "We just signed a new client called TestStartupCo. Please: (1) score them against our ICP, (2) research what they do, (3) draft a welcome email to their founder, and (4) create a GitHub repo for their project.",
     validate: () => null,
   },
 
@@ -624,9 +626,16 @@ async function runTask(
     }
   } else if (hadInterrupt && task.expectHITL) {
     // Correct: expected HITL and got it
+    // Skip reply validation — fullReply is empty while awaiting approval, that's expected
     status = "HITL";
-    validationError = task.validate?.(fullReply, uniqueTools) ?? undefined;
-    if (validationError) status = "FAIL";
+    // Only run tool-presence validation (not length checks) when HITL fires
+    if (task.expectedTools && task.expectedTools.length > 0) {
+      const missingTool = task.expectedTools.find(t => !uniqueTools.includes(t));
+      if (missingTool) {
+        validationError = `Expected tool '${missingTool}' was not called`;
+        status = "FAIL";
+      }
+    }
   } else if (hadInterrupt && !task.expectHITL) {
     // Unexpected interrupt — flag as FAIL
     status = "FAIL";

@@ -27,9 +27,11 @@ export const githubRead = tool(
   {
     name: "github_read",
     description:
-      "Read from GitHub (no approval needed). Actions: list_repos (optional owner), get_readme (owner+repo), get_stats.",
+      "Read from GitHub (no approval needed). Actions: list_repos (optional owner), get_readme (owner+repo), get_stats, " +
+      "list_issues (owner+repo → open issues), list_branches (owner+repo → branches), list_commits (owner+repo → recent commits). " +
+      "For FounderOS queries use owner='pushkarverma3698' repo='FounderOS'.",
     schema: z.object({
-      action: z.enum(["list_repos", "get_readme", "get_stats"]),
+      action: z.enum(["list_repos", "get_readme", "get_stats", "list_issues", "list_branches", "list_commits"]),
       owner: z.string().optional(),
       repo: z.string().optional(),
     }),
