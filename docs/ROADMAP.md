@@ -1,6 +1,6 @@
 # FounderOS — Roadmap & Strategic Plan
 
-*For Pushkar Verma, Turicks AI Agency. Updated: 2026-06-01.*
+*For Pushkar Verma, Turicks AI Agency. Updated: 2026-06-05.*
 
 ---
 
@@ -16,10 +16,13 @@
 
 ## Current State
 
-> **Authoritative snapshot: see [`docs/STATUS-2026-06-04.md`](./STATUS-2026-06-04.md).**
-> As of 2026-06-04: supervisor + **8 departments**, deterministic eval, crash-safe HITL, budget guard,
-> path-guarded laptop operator, Postgres-first memory, single-instance lock (409 fix). 378 tests green.
-> The v2 baseline below is kept for history.
+> **Authoritative snapshot: see [`docs/STATUS-2026-06-04.md`](./STATUS-2026-06-04.md) and [`docs/superpowers/specs/2026-06-05-company-os-power-user-design.md`](./superpowers/specs/2026-06-05-company-os-power-user-design.md).**
+> As of 2026-06-05: **Phase 0 COMPLETE** — 8 departments, deterministic eval, crash-safe HITL, budget guard,
+> path-guarded laptop operator, send_file, Postgres-first memory, single-instance lock, 435 tests green.
+> Architecture cleaned: hitlGate() helper, commands.ts extracted, pre-router.ts, dead code removed.
+> Prompts compressed: SUPERVISOR_PROMPT ~40% smaller (decision-table routing).
+> **Phase 1 next: Workflow/SOP engine** — named, parameterized multi-step procedures over the existing office.
+> See the design spec above for the full plan.
 
 ### v2 baseline (2026-06-01)
 

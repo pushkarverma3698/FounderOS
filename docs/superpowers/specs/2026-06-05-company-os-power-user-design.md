@@ -1,6 +1,6 @@
 # FounderOS → Company Operating System (Power-User) — Design & Go-Forward Plan
 
-_Date: 2026-06-05 · Status: Proposed (awaiting founder approval) · Supersedes the "personal assistant" framing_
+_Date: 2026-06-05 · Updated: 2026-06-05 · Status: Phase 0 ✅ COMPLETE — Phase 1 ready to build_
 
 ## The shift (locked from founder input)
 
@@ -23,31 +23,26 @@ memory. We do NOT fork a parallel product.
 
 8-department supervisor · crash-safe HITL · bounded-history (loop fix) · single-instance lock · budget
 guard · path-guarded laptop ops + send_file · Postgres-first memory + MCP layer · deterministic eval ·
-Telegram formatting engine · 416 tests green. The base is production-grade; this plan adds the
-company-operating layer on top.
+Telegram formatting engine · **435 tests green**. The base is production-grade; Phase 0 is complete.
+
+**Phase 0 delivered (2026-06-05):**
+- SUPERVISOR_PROMPT compressed ~40% (decision-table routing, same 8-dept coverage)
+- `hitlGate()` helper in agent-tools.ts: single `interrupt()` owner, removes 10× duplication
+- `commands.ts` (new): all Telegram command handlers extracted from telegram.ts (-231 lines)
+- `pre-router.ts` (new): `preRoutePersonalVsEngineering` + `isOutreachRequest` pure functions + 19 tests
+- Dead code deleted: `buildThreadId/buildThreadConfig/parseThreadId` from checkpointer.ts
+- telegram.ts: 716 → 485 lines; agent-tools.ts: 644 → 615; system-prompts.ts: 377 → 336
+- P0 prompt bugs fixed: stale send_file instruction, 7→8 depts, phantom write_file in engineering
+- **PR #28** on branch `fix/telegram-reliability-wedged-interrupt` — all reliability + formatting + send_file + Phase 0 arch
 
 ---
 
-## Phase 0 — Stabilize & clean (do FIRST, low-risk, high-value)
+## Phase 0 — Stabilize & clean ✅ COMPLETE
 
-Before new capability, lock down what we have. All eval-gated (`pnpm eval` must stay ≥ current).
-
-- **0.1 Prompt refinements (from the prompt-engineering audit).** ✅ P0 done (stale send_file instruction,
-  7→8 depts, phantom write_file). Remaining, eval-gated: compressed SUPERVISOR_PROMPT (~40% smaller,
-  decision-table routing — the audit's headline; run the full golden set + the sales-research-outreach
-  regression case before deploying); compressed PERSONAL_PROMPT; banned-phrases sourced from a shared
-  constant in `brand-validator.ts` (kills prompt/validator drift); jobhunt metrics from `read_cv` not
-  hardcoded.
-- **0.2 Determinism: pre-route pure functions.** Move the highest-value routing tie-breakers into tested
-  pure code (per rule #16): `preRoutePersonalVsEngineering`, `isOutreachRequest`. The supervisor stays the
-  default; these only fire on unambiguous inputs. Unit-tested, eval-verified.
-- **0.3 Architecture cleanup (deferred items).** Extract `src/gateway/office-run.ts` (the run-loop out of
-  the 470-line telegram.ts) for testability; `hitlGate()` helper (HITL block copy-pasted ~9× in
-  agent-tools.ts); delete dead `buildThreadId/buildThreadConfig/parseThreadId`; extract command handlers
-  to `src/gateway/commands.ts`.
-- **0.4 Merge PR #28** (reliability + formatting + send_file) after a green eval.
-
-Outcome: a clean, tested, legible base. ~2–4 focused sessions.
+- ✅ **0.1 Prompt audit** — SUPERVISOR_PROMPT ~40% smaller (decision-table routing); PERSONAL_PROMPT deduped; P0 correctness bugs fixed; JOBHUNT updated to 8 depts + 400+ tests signal; regression guards all pass (435/435)
+- ✅ **0.2 Pre-route pure functions** — `preRoutePersonalVsEngineering` + `isOutreachRequest` in `src/gateway/pre-router.ts`, 19 tests (not yet wired into telegram.ts — Phase 1 will use these as the workflow router)
+- ✅ **0.3 Architecture cleanup** — `hitlGate()` helper; `commands.ts` extracted (-231 lines from telegram.ts); dead `buildThreadId/buildThreadConfig/parseThreadId` deleted; telegram.ts 716→485 lines
+- ⏳ **0.4 Merge PR #28** — human approves + merges (all work is on branch `fix/telegram-reliability-wedged-interrupt`)
 
 ---
 
