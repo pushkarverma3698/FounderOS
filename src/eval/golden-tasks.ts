@@ -118,6 +118,15 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     expectedTools: ["browser"],
     expectsHitl: true,
   },
+  {
+    // Regression guard for the stale "can't send attachments" prompt bug:
+    // "send/attach the file" must route to personal → send_file (HITL), NOT read_file.
+    id: "personal-send-file",
+    input: "Send me the file ~/Desktop/report.pdf as an attachment in this chat.",
+    expectedRoute: "personal",
+    expectedTools: ["send_file"],
+    expectsHitl: true,
+  },
 
   // ── Job-Hunt (read-only research + HITL-gated send) ───────────────────────
   {

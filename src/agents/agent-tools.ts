@@ -38,8 +38,10 @@ import {
   writeFileSafe,
   runShellSafe,
   browserAction,
+  resolveSendableFile,
   type BrowserAction,
 } from "../tools/personal.js";
+import { sendDocument } from "../infra/telegram-send.js";
 import { readCvTool, searchJobsTool } from "../tools/career.js";
 import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../tools/project-workflow.js";
 import { claudeCodeTool, findClaudeBinary } from "../tools/claude-code.js";
@@ -63,6 +65,17 @@ export interface ApprovalRequest {
   summary: string;
   preview: string;
   args: Record<string, unknown>;
+}
+
+/**
+ * HITL gate — wraps interrupt() with the approval protocol.
+ * Returns null when approved (execution continues).
+ * Returns a rejection string when rejected — callers must return it immediately.
+ * The `kind: "approval"` field is injected automatically.
+ */
+export function hitlGate(payload: Omit<ApprovalRequest, "kind">): string | null {
+  const decision = interrupt({ kind: "approval", ...payload } satisfies ApprovalRequest) as string;
+  return decision !== "approved" ? "❌ Rejected by founder." : null;
 }
 
 // ── Research: web search (read-only, NO approval) ─────────────────────────────
@@ -102,18 +115,14 @@ export const sendEmail = tool(
     }
 
     // Pure summary (may run twice) — request approval.
-    const decision = interrupt({
-      kind: "approval",
+    const rejected = hitlGate({
       action: "send_email",
       title: `📧 Send email to ${to}?`,
       summary: `Subject: ${subject}`,
       preview: body,
       args: { to, subject, body },
-    } satisfies ApprovalRequest) as string;
-
-    if (decision !== "approved") {
-      return `Email to ${to} was NOT sent — the founder rejected it.`;
-    }
+    });
+    if (rejected) return rejected;
 
     // Side-effects only AFTER approval.
     if (await isSuppressed(TENANT, to)) {
@@ -157,18 +166,14 @@ export const linkedinPost = tool(
       return `Fix these brand violations before posting:\n${brandCheck.violations.join("\n")}`;
     }
 
-    const decision = interrupt({
-      kind: "approval",
+    const rejected = hitlGate({
       action: "linkedin_post",
       title: "📣 Publish this LinkedIn post?",
       summary: "New LinkedIn post",
       preview: text,
       args: { text },
-    } satisfies ApprovalRequest) as string;
-
-    if (decision !== "approved") {
-      return `LinkedIn post was NOT published — the founder rejected it.`;
-    }
+    });
+    if (rejected) return rejected;
 
     const res = await linkedinPostTool.execute({
       text,
@@ -215,18 +220,14 @@ export const githubRead = tool(
 
 export const githubWrite = tool(
   async ({ action, owner, repo, title, body, content }) => {
-    const decision = interrupt({
-      kind: "approval",
+    const rejected = hitlGate({
       action: `github_${action}`,
       title: `🔧 GitHub ${action} — proceed?`,
       summary: `${action} ${owner ?? ""}${repo ? "/" + repo : ""}${title ? " · " + title : ""}`.trim(),
       preview: content ?? body ?? title ?? "",
       args: { action, owner, repo, title, body, content },
-    } satisfies ApprovalRequest) as string;
-
-    if (decision !== "approved") {
-      return `GitHub ${action} was NOT done — the founder rejected it.`;
-    }
+    });
+    if (rejected) return rejected;
 
     const res = await githubTool.execute({
       action,
@@ -317,22 +318,58 @@ export const listDir = tool(
   },
 );
 
+// ── Personal: send a laptop file to Telegram (OUTBOUND — requires approval) ───
+
+export const sendFile = tool(
+  async ({ path: filePath }) => {
+    // Validate BEFORE interrupt() (read-only stat; safe to re-run on resume).
+    const r = await resolveSendableFile(filePath);
+    if (!r.ok) return `ERROR: ${r.error}`;
+
+    const sizeKb = (r.size / 1024).toFixed(1);
+    const rejected = hitlGate({
+      action: "send_file",
+      title: `📎 Send ${r.name} to your Telegram?`,
+      summary: `Attach ${r.name} (${sizeKb} KB) from ${r.path}`,
+      preview: r.path,
+      args: { path: r.path },
+    });
+    if (rejected) return rejected;
+
+    // Side effect AFTER approval only (rule #3). Single-tenant → default chat.
+    try {
+      await sendDocument(r.path, r.name);
+    } catch (e) {
+      return `Send failed: ${(e as Error).message}`;
+    }
+    log.info({ path: r.path, name: r.name }, "File sent to Telegram via personal agent");
+    return `✅ Sent ${r.name} to your Telegram chat as an attachment.`;
+  },
+  {
+    name: "send_file",
+    description:
+      "Attach a file from the founder's laptop and send it INTO this Telegram chat as a downloadable document. " +
+      "Use when the founder says 'send me [file]', 'attach [file]', 'share [file]', 'send the file'. " +
+      "The founder APPROVES before it sends. Secret paths (.ssh, .env, *.pem, keychains) are blocked. " +
+      "This actually delivers the file — unlike read_file which only shows its text contents.",
+    schema: z.object({
+      path: z.string().describe("File path on the laptop, e.g. '~/Desktop/report.pdf' or 'Projects/app/notes.md'"),
+    }),
+  },
+);
+
 // ── Personal: write a file (WRITE — requires approval) ────────────────────────
 
 export const writeFile = tool(
   async ({ path: filePath, content }) => {
-    const decision = interrupt({
-      kind: "approval",
+    const rejected = hitlGate({
       action: "write_file",
       title: `💾 Write file ${filePath}?`,
       summary: `Write ${content.length} chars to ${filePath}`,
       preview: content.slice(0, 2000),
       args: { path: filePath, content },
-    } satisfies ApprovalRequest) as string;
-
-    if (decision !== "approved") {
-      return `File ${filePath} was NOT written — the founder rejected it.`;
-    }
+    });
+    if (rejected) return rejected;
 
     const r = await writeFileSafe(filePath, content);
     if (!r.ok) return `Write failed: ${r.error}`;
@@ -355,18 +392,14 @@ export const writeFile = tool(
 export const runShell = tool(
   async ({ command, cwd }) => {
     const dangerous = flagDangerousCommand(command);
-    const decision = interrupt({
-      kind: "approval",
+    const rejected = hitlGate({
       action: "run_shell",
       title: `${dangerous ? "⚠️ DANGEROUS " : "🖥️ "}Run shell command?`,
       summary: `${dangerous ? "⚠️ This looks destructive. " : ""}cwd: ${cwd ?? "(personal root)"}`,
       preview: command,
       args: { command, cwd },
-    } satisfies ApprovalRequest) as string;
-
-    if (decision !== "approved") {
-      return `Command was NOT run — the founder rejected it.`;
-    }
+    });
+    if (rejected) return rejected;
 
     const r = await runShellSafe(command, cwd);
     if (!r.ok) return `Command failed: ${r.error}`;
@@ -442,18 +475,14 @@ export const projectWorkflow = tool(
     if (action === "run_command") {
       if (!command) return "run_command requires a command argument.";
       const dangerous = flagDangerousWorkflowCommand(command);
-      const decision = interrupt({
-        kind: "approval",
+      const rejected = hitlGate({
         action: "project_workflow",
         title: `${dangerous ? "⚠️ DANGEROUS " : "🔧 "}Run command in project?`,
         summary: `${dangerous ? "⚠️ Potentially destructive. " : ""}cwd: ${cwd ?? "founderos"}`,
         preview: command,
         args: { action, command, cwd },
-      } satisfies ApprovalRequest) as string;
-
-      if (decision !== "approved") {
-        return `Command was NOT run — the founder rejected it.`;
-      }
+      });
+      if (rejected) return rejected;
 
       const res = await projectWorkflowTool.execute({ action, command, cwd });
       if (!res.success) return `Command failed: ${res.error}`;
@@ -491,18 +520,14 @@ export const claudeCode = tool(
       return `Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code`;
     }
 
-    const decision = interrupt({
-      kind: "approval",
+    const rejected = hitlGate({
       action: "claude_code",
       title: "Invoke Claude Code CLI?",
       summary: `Run: claude -p "..." in ${cwd ?? "~/Projects/founderos"}`,
       preview: task,
       args: { task, cwd },
-    } satisfies ApprovalRequest) as string;
-
-    if (decision !== "approved") {
-      return `Claude Code was NOT invoked — the founder rejected it.`;
-    }
+    });
+    if (rejected) return rejected;
 
     const res = await claudeCodeTool.execute({ task, cwd });
     if (!res.success) {
@@ -529,18 +554,14 @@ export const claudeCode = tool(
 
 export const browser = tool(
   async ({ action, url, js }) => {
-    const decision = interrupt({
-      kind: "approval",
+    const rejected = hitlGate({
       action: "browser",
       title: `🌐 Browser: ${action}?`,
       summary: action === "open_url" ? `Open ${url}` : action === "run_js" ? "Run JavaScript in Safari" : "Read the current Safari page",
       preview: url ?? js ?? "(current page)",
       args: { action, url, js },
-    } satisfies ApprovalRequest) as string;
-
-    if (decision !== "approved") {
-      return `Browser action was NOT performed — the founder rejected it.`;
-    }
+    });
+    if (rejected) return rejected;
 
     const r = await browserAction(action as BrowserAction, { ...(url ? { url } : {}), ...(js ? { js } : {}) });
     if (!r.ok) return `Browser action failed: ${r.error}`;
@@ -567,18 +588,14 @@ export const browser = tool(
 export const recordEvent = tool(
   async ({ title, summary, tags, event_type, occurred_at }) => {
     const tagsStr = tags.join(", ") || "(none)";
-    const decision = interrupt({
-      kind: "approval",
+    const rejected = hitlGate({
       action: "record_event",
       title: `📝 Record event: "${title}"?`,
       summary: `Type: ${event_type} | Tags: ${tagsStr}`,
       preview: summary,
       args: { title, summary, tags, event_type, occurred_at },
-    } satisfies ApprovalRequest) as string;
-
-    if (decision !== "approved") {
-      return `Event "${title}" was NOT recorded — the founder rejected it.`;
-    }
+    });
+    if (rejected) return rejected;
 
     return rawRecordEvent.invoke({ title, summary, tags, event_type, occurred_at });
   },

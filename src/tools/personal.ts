@@ -33,8 +33,13 @@ const MAX_OUTPUT = 100_000; // cap captured output / file reads (chars)
 const MAX_READ_BYTES = MAX_OUTPUT * 4; // worst-case UTF-8: 4 bytes per char
 const SHELL_TIMEOUT_MS = 60_000;
 
+const MAX_SEND_BYTES = 50 * 1024 * 1024; // Telegram bot sendDocument hard limit (50 MB)
+
 export type ReadResult = { ok: true; content: string } | { ok: false; error: string };
 export type ListResult = { ok: true; entries: string[] } | { ok: false; error: string };
+export type SendableResult =
+  | { ok: true; path: string; size: number; name: string }
+  | { ok: false; error: string };
 export type WriteResult = { ok: true; path: string } | { ok: false; error: string };
 export type ShellResult =
   | { ok: true; stdout: string; stderr: string }
@@ -124,6 +129,34 @@ export async function readFileSafe(input: string, root?: string): Promise<ReadRe
     return { ok: true, content: content.slice(0, MAX_OUTPUT) };
   } catch (e) {
     return { ok: false, error: `Could not read ${safe.path}: ${(e as Error).message}` };
+  }
+}
+
+/**
+ * Validate that a path points to a real, sendable file inside the personal root.
+ * Reuses the SAME path-guard + symlink check as reads, so secret/system paths
+ * (.ssh, .env, *.pem, keychains) can NEVER be attached and exfiltrated. Rejects
+ * directories, missing files, empty files, and anything over Telegram's 50 MB cap.
+ */
+export async function resolveSendableFile(input: string, root?: string): Promise<SendableResult> {
+  const safe = resolveSafePath(input, root);
+  if (!safe.ok) return { ok: false, error: safe.reason };
+
+  const sym = await checkSymlink(safe.path);
+  if (sym !== null) return { ok: false, error: sym };
+
+  try {
+    const stat = await fs.stat(safe.path);
+    if (stat.isDirectory()) {
+      return { ok: false, error: `${safe.path} is a directory, not a file. Pick a specific file to send.` };
+    }
+    if (stat.size === 0) return { ok: false, error: `${safe.path} is empty — nothing to send.` };
+    if (stat.size > MAX_SEND_BYTES) {
+      return { ok: false, error: `File too large (${(stat.size / 1024 / 1024).toFixed(1)} MB). Telegram's limit is 50 MB.` };
+    }
+    return { ok: true, path: safe.path, size: stat.size, name: path.basename(safe.path) };
+  } catch (e) {
+    return { ok: false, error: `Could not access ${safe.path}: ${(e as Error).message}` };
   }
 }
 
