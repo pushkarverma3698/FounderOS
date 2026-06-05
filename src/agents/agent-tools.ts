@@ -46,6 +46,7 @@ import { readCvTool, searchJobsTool } from "../tools/career.js";
 import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../tools/project-workflow.js";
 import { claudeCodeTool, findClaudeBinary } from "../tools/claude-code.js";
 import { recordEventTool as rawRecordEvent } from "../tools/memory.js";
+import { calendarTool } from "../tools/calendar.js";
 
 const log = childLogger({ module: "agent-tools" });
 
@@ -192,6 +193,46 @@ export const linkedinPost = tool(
       "Publish a post to LinkedIn. The founder is asked to APPROVE before it publishes. Provide the full final post text.",
     schema: z.object({
       text: z.string().describe("The full post text, ready to publish"),
+    }),
+  },
+);
+
+// ── Comms: Google Calendar (WRITE — requires approval) ────────────────────────
+
+export const createCalendarEvent = tool(
+  async ({ title, date, end_date, description, timezone }) => {
+    const rejected = hitlGate({
+      action: "create_calendar_event",
+      title: `📅 Add to Google Calendar: "${title}"?`,
+      summary: `Date: ${date}${end_date ? ` → ${end_date}` : ""}`,
+      preview: description ? `${title}\n${description}` : title,
+      args: { title, date, end_date, description, timezone },
+    });
+    if (rejected) return rejected;
+
+    const res = await calendarTool.execute({
+      title,
+      date,
+      ...(end_date ? { end_date } : {}),
+      ...(description ? { description } : {}),
+      ...(timezone ? { timezone } : {}),
+    });
+
+    if (!res.success) return `Calendar event creation failed: ${res.error}`;
+    const data = res.data as { event_id?: string; title: string; date: string };
+    log.info({ title, date }, "Calendar event created via agent");
+    return `✅ Calendar event created: "${data.title}" on ${data.date}.`;
+  },
+  {
+    name: "create_calendar_event",
+    description:
+      "Add an event or reminder to Google Calendar. The founder is asked to APPROVE before creating. Provide title, date (ISO: YYYY-MM-DD for all-day or YYYY-MM-DDTHH:mm:ss for timed), and optional description.",
+    schema: z.object({
+      title: z.string().describe("Event/reminder title"),
+      date: z.string().describe("Start date/time in ISO format: YYYY-MM-DD (all-day) or YYYY-MM-DDTHH:mm:ss"),
+      end_date: z.string().optional().describe("End date/time (ISO). Defaults to +1 day for all-day or +1h for timed."),
+      description: z.string().optional().describe("Optional description or notes"),
+      timezone: z.string().optional().describe("Timezone (default: Europe/Amsterdam)"),
     }),
   },
 );

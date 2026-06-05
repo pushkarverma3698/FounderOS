@@ -27,6 +27,7 @@ import {
   sendEmail,
   readEmails,
   linkedinPost,
+  createCalendarEvent,
   githubRead,
   githubWrite,
   readFile,
@@ -92,7 +93,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
 
   const comms = createReactAgent({
     llm,
-    tools: [sendEmail, readEmails, linkedinPost],
+    tools: [sendEmail, readEmails, linkedinPost, createCalendarEvent],
     name: "comms",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(COMMS_PROMPT, subAgentBudget) as any,

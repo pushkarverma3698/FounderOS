@@ -152,3 +152,19 @@ export function getInstagramUserId(): string {
     "Get your Instagram user/entity ID from app.composio.dev → Connections → Instagram → copy the entity ID."
   );
 }
+
+/** Google Calendar connected account ID. Set COMPOSIO_GCAL_CONN_ID in .env. */
+export function getGCalConnectionId(): string {
+  return requireEnv(
+    "COMPOSIO_GCAL_CONN_ID",
+    "Get your Google Calendar connection ID from app.composio.dev → Connections → Google Calendar → copy the account ID."
+  );
+}
+
+/** Google Calendar user ID. Set COMPOSIO_GCAL_USER_ID in .env. */
+export function getGCalUserId(): string {
+  return requireEnv(
+    "COMPOSIO_GCAL_USER_ID",
+    "Get your Google Calendar user/entity ID from app.composio.dev → Connections → Google Calendar → copy the entity ID."
+  );
+}
