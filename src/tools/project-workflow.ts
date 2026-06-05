@@ -92,6 +92,29 @@ export function flagDangerousWorkflowCommand(cmd: string): boolean {
   // Fork bomb
   if (lower.includes(":(){ :|:& };:")) return true;
 
+  // sudo — privilege escalation
+  if (/\bsudo\b/.test(lower)) return true;
+
+  // curl/wget piped to shell — supply chain attack vector
+  if (/curl\s+.*\|\s*(ba)?sh/i.test(cmd)) return true;
+  if (/wget\s+.*\|\s*(ba)?sh/i.test(cmd)) return true;
+
+  // Recursive permission/ownership changes
+  if (/chmod\s+-[Rr]/.test(cmd)) return true;
+  if (/chown\s+-[Rr]/.test(cmd)) return true;
+
+  // System-level package managers (linux)
+  if (/\bapt(-get)?\s+install\b/.test(lower)) return true;
+
+  // System-level package managers (mac)
+  if (/\bbrew\s+install\b/.test(lower)) return true;
+
+  // Global pip install (--user installs outside the project venv)
+  if (/\bpip\s+install\s+--user\b/.test(lower)) return true;
+
+  // Global npm install
+  if (/\bnpm\s+install\s+-g\b/.test(lower)) return true;
+
   return false;
 }
 

