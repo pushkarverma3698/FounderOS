@@ -18,7 +18,7 @@
 
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
-import { HumanMessage, RemoveMessage, type BaseMessage } from "@langchain/core/messages";
+import { HumanMessage, RemoveMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
 import { env, TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS } from "../core/config.js";
 import { computeHistoryTrim } from "../infra/history-window.js";
 import { logger } from "../infra/logger.js";
@@ -32,6 +32,8 @@ import {
   handleWorkflows, handleRun, handleQ,
 } from "./commands.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
+import { preRoutePersonalVsEngineering } from "./pre-router.js";
+import { assertNonEmptyMessages } from "../infra/office-guard.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
 import { recordConversationEnd } from "../infra/conversation-recorder.js";
 
@@ -69,14 +71,32 @@ interface OfficeMessage {
   tool_calls?: unknown[];
 }
 
+/** Strip internal LangGraph XML routing markers that sometimes leak into replies. */
+function stripXmlTags(text: string): string {
+  return text
+    .replace(/<name>[^<]*<\/name>/g, "")
+    .replace(/<content>([\s\S]*?)<\/content>/g, "$1")
+    .trim();
+}
+
 /** Pull the office's final human-readable reply (last AI message with text). */
 export function finalReply(res: { messages?: OfficeMessage[] }): string {
   const msgs = res.messages ?? [];
+  // Pass 1: prefer AI text message (strips internal LangGraph XML routing markers)
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i]!;
     const type = m._getType?.() ?? "";
     const text = typeof m.content === "string" ? m.content : "";
     if (type === "ai" && text.trim() && !(m.tool_calls && m.tool_calls.length > 0)) {
+      return stripXmlTags(text.trim());
+    }
+  }
+  // Pass 2: fall back to last tool message so engineering/shell results surface
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]!;
+    const type = m._getType?.() ?? "";
+    const text = typeof m.content === "string" ? m.content : "";
+    if (type === "tool" && text.trim()) {
       return text.trim();
     }
   }
@@ -252,7 +272,12 @@ export async function trimThreadHistory(
 
 /** Route the literal text of the incoming message into the office. */
 async function routeToOffice(ctx: Context): Promise<void> {
-  await runOfficeText(ctx, ctx.message?.text ?? "");
+  const text = ctx.message?.text;
+  if (!text || text.trim().length === 0) {
+    await ctx.reply("❌ I need text to process. Please send a message.");
+    return;
+  }
+  await runOfficeText(ctx, text);
 }
 
 /**
@@ -296,8 +321,21 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
 
     const budget = createRunBudget();
     const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
+
+    // Inject a pre-router hint so the supervisor starts in the right department.
+    const routingHint = preRoutePersonalVsEngineering(text);
+    const invokeMessages: BaseMessage[] = routingHint
+      ? [
+          new SystemMessage(`[ROUTING HINT: This looks like a ${routingHint} request. Start there.]`),
+          new HumanMessage(text),
+        ]
+      : [new HumanMessage(text)];
+
+    // Guard: Gemini returns 400 if contents is empty or last message is blank.
+    assertNonEmptyMessages(invokeMessages, "runOfficeText");
+
     const res = (await office.invoke(
-      { messages: [new HumanMessage(text)] },
+      { messages: invokeMessages },
       { ...config, callbacks: [new BudgetGuardCallback(budget, agentModel)] },
     )) as { messages?: OfficeMessage[] };
     stopTyping();

@@ -48,7 +48,7 @@ import { searchMemoryTool } from "../tools/memory.js";
 import {
   SUPERVISOR_PROMPT,
   RESEARCH_PROMPT,
-  COMMS_PROMPT,
+  buildCommsPrompt,
   ENGINEERING_PROMPT,
   MARKETING_PROMPT,
   SALES_PROMPT,
@@ -97,7 +97,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     tools: [sendEmail, readEmails, createCalendarEvent],
     name: "comms",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(COMMS_PROMPT, subAgentBudget) as any,
+    prompt: createTrimmedPrompt(buildCommsPrompt(), subAgentBudget) as any,
   });
 
   const engineering = createReactAgent({

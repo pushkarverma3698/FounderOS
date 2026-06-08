@@ -22,7 +22,9 @@ import {
 import { flagDangerousCommand, personalRoot } from "../../infra/path-guard.js";
 import { sendDocument } from "../../infra/telegram-send.js";
 import { childLogger } from "../../infra/logger.js";
-import { hitlGate } from "./hitl.js";
+import { hitlGate, idemKey } from "./hitl.js";
+import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
+import { TENANT } from "../../core/config.js";
 
 const log = childLogger({ module: "agent-tools:personal" });
 
@@ -138,6 +140,12 @@ export const writeFile = tool(
 
 export const runShell = tool(
   async ({ command, cwd }) => {
+    // Idempotency: prevent re-execution on HITL resume loop
+    const key = idemKey("shell", cwd ?? "", command);
+    if (await hasBeenAudited(key)) {
+      return `Already executed: ${command.slice(0, 80)}${command.length > 80 ? "…" : ""} (skipped duplicate)`;
+    }
+
     const dangerous = flagDangerousCommand(command);
     const rejected = hitlGate({
       action: "run_shell",
@@ -151,6 +159,10 @@ export const runShell = tool(
     const r = await runShellSafe(command, cwd);
     if (!r.ok) return `Command failed: ${r.error}`;
     log.info({ command }, "Shell command run via personal agent");
+
+    // Record after successful execution
+    await writeAuditEntry({ action: "run_shell", idempotency_key: key, payload: { command, cwd }, tenant_id: TENANT });
+
     const out = [r.stdout && `stdout:\n${r.stdout}`, r.stderr && `stderr:\n${r.stderr}`]
       .filter(Boolean)
       .join("\n\n");

@@ -12,7 +12,9 @@ import { githubTool } from "../../tools/github.js";
 import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../../tools/project-workflow.js";
 import { claudeCodeTool, findClaudeBinary } from "../../tools/claude-code.js";
 import { childLogger } from "../../infra/logger.js";
-import { hitlGate } from "./hitl.js";
+import { hitlGate, idemKey } from "./hitl.js";
+import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
+import { TENANT } from "../../core/config.js";
 
 const log = childLogger({ module: "agent-tools:engineering" });
 
@@ -42,6 +44,12 @@ export const githubRead = tool(
 
 export const githubWrite = tool(
   async ({ action, owner, repo, title, body, content }) => {
+    // Idempotency: prevent duplicate GitHub writes on HITL resume loop
+    const key = idemKey("github", action, owner ?? "", repo ?? "", title ?? "", body ?? "");
+    if (await hasBeenAudited(key)) {
+      return `Already performed: github_${action}${repo ? " on " + repo : ""}${title ? " · " + title : ""} (skipped duplicate)`;
+    }
+
     const rejected = hitlGate({
       action: `github_${action}`,
       title: `🔧 GitHub ${action} — proceed?`,
@@ -61,6 +69,7 @@ export const githubWrite = tool(
     });
 
     if (!res.success) return `GitHub ${action} failed: ${res.error}`;
+    await writeAuditEntry({ action: `github_${action}`, idempotency_key: key, payload: { action, owner, repo, title }, tenant_id: TENANT });
     return `✅ GitHub ${action} done: ${JSON.stringify(res.data)}`;
   },
   {
@@ -93,6 +102,13 @@ export const projectWorkflow = tool(
     // run_command: ALWAYS HITL-gated
     if (action === "run_command") {
       if (!command) return "run_command requires a command argument.";
+
+      // Idempotency: prevent re-running commands on HITL resume loop
+      const key = idemKey("project_cmd", cwd ?? "", command);
+      if (await hasBeenAudited(key)) {
+        return `Already executed: ${command.slice(0, 80)}${command.length > 80 ? "…" : ""} (skipped duplicate)`;
+      }
+
       const dangerous = flagDangerousWorkflowCommand(command);
       const rejected = hitlGate({
         action: "project_workflow",
@@ -106,6 +122,7 @@ export const projectWorkflow = tool(
       const res = await projectWorkflowTool.execute({ action, command, cwd });
       if (!res.success) return `Command failed: ${res.error}`;
       log.info({ command, cwd }, "project_workflow command executed via engineering agent");
+      await writeAuditEntry({ action: "project_workflow_cmd", idempotency_key: key, payload: { command, cwd }, tenant_id: TENANT });
       return typeof res.data === "string" ? res.data : "✅ Command completed.";
     }
 

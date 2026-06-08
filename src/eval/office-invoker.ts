@@ -127,6 +127,10 @@ export function makeOfficeInvoker(
       },
     };
 
+    if (!task.input || (typeof task.input === "string" && task.input.trim().length === 0)) {
+      throw new Error(`Task input is empty: ${JSON.stringify(task)}`);
+    }
+
     const res = await office.invoke(
       { messages: [new HumanMessage(task.input)] },
       { configurable: { thread_id: threadId }, callbacks: [toolCollector] },
