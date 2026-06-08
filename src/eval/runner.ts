@@ -22,10 +22,24 @@ export type Invoker = (task: GoldenTask) => Promise<Observation>;
 /**
  * Run every task through `invoke`, score it, and aggregate.
  * Tasks run sequentially to keep load (and cost) predictable; order is preserved.
+ *
+ * @param options.taskDelayMs  Milliseconds to wait between tasks (default 0).
+ *   Pass 1500 in the live eval script to reduce API hammering during capacity spikes.
+ *   Unit tests leave it at 0 to stay fast.
  */
-export async function runEval(tasks: GoldenTask[], invoke: Invoker): Promise<EvalReport> {
+export async function runEval(
+  tasks: GoldenTask[],
+  invoke: Invoker,
+  options?: { taskDelayMs?: number },
+): Promise<EvalReport> {
+  const taskDelayMs = options?.taskDelayMs ?? 0;
+  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
   const results = [];
-  for (const task of tasks) {
+  for (let i = 0; i < tasks.length; i++) {
+    if (i > 0 && taskDelayMs > 0) await sleep(taskDelayMs);
+
+    const task = tasks[i]!;
     let obs: Observation;
     try {
       obs = await invoke(task);

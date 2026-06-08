@@ -20,10 +20,10 @@
  *
  * ── 503 fallback cascade ────────────────────────────────────────────────────
  * Gemini 2.5 Flash occasionally returns 503 "high demand" errors during traffic
- * spikes. The fallback chain is currently EMPTY because all known cheaper models
- * (gemini-1.5-flash, gemini-2.0-flash, gemini-2.0-flash-001) returned 404 as of
- * June 2026 (deprecated by Google). On a 503 we surface the error immediately.
- * Re-populate MODEL_FALLBACK_CHAIN once a confirmed working fallback is available.
+ * spikes. Fallback chain: gemini-2.5-flash → gemini-2.5-flash-lite.
+ * gemini-2.5-flash-lite confirmed available (4K RPM, unlimited RPD, June 2026).
+ * Deprecated models (gemini-1.5-flash, gemini-2.0-flash, gemini-2.0-flash-001)
+ * are NOT in the chain — all return 404 from Google API as of June 2026.
  */
 
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
@@ -36,24 +36,40 @@ const log = childLogger({ module: "model" });
 
 /**
  * Models to try in order when the primary returns a 503.
- * NOTE: gemini-1.5-flash, gemini-2.0-flash, gemini-2.0-flash-001 all return 404
- * from Google API as of June 2026 (deprecated). Fallback chain is intentionally
- * empty — on 503 we surface the error to the user rather than cascade to a
- * broken model. Re-populate once a stable cheaper fallback is confirmed working.
+ * Chain: gemini-2.5-flash → gemini-2.5-flash-lite (confirmed working, June 2026).
+ * Deprecated models (gemini-1.5-flash, gemini-2.0-flash) are intentionally absent.
  */
 const MODEL_FALLBACK_CHAIN: Record<string, string[]> = {
-  "gemini-2.5-flash": [],
-  "gemini-2.5-pro": [],
+  "gemini-2.5-flash":      ["gemini-2.5-flash-lite"],
+  "gemini-2.5-flash-lite": [],
+  "gemini-2.5-pro":        [],
 };
 
 /**
- * Detect a 503 / "high demand" error from the Google Generative AI SDK.
+ * Exponential backoff delays for the primary model retry loop.
+ * 3 retries: 2s → 4s → 8s. Total max extra wait: 14s.
+ * Exported so tests can assert on the constant and calculate expected call counts.
+ */
+export const RETRY_BACKOFF_MS = [2_000, 4_000, 8_000] as const;
+
+/** Sleep helper used for retry backoff. Uses setTimeout so fake timers work in tests. */
+const sleepMs = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Detect a transient error from the Google Generative AI SDK.
+ * Covers 503 "high demand" (capacity) and 500 "Internal Server Error" (transient infra).
  * Exported so unit tests can assert on it directly.
  */
 export function is503Error(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message;
-  return msg.includes("503") || msg.includes("high demand") || msg.includes("Service Unavailable");
+  return (
+    msg.includes("503") ||
+    msg.includes("500") ||
+    msg.includes("high demand") ||
+    msg.includes("Service Unavailable") ||
+    msg.includes("Internal Server Error")
+  );
 }
 
 /** Return copies of any name-tagged messages with the `name` attribute removed. */
@@ -109,31 +125,44 @@ class FounderChatGoogle extends ChatGoogleGenerativeAI {
     runManager?: CallbackManagerForLLMRun,
   ): Promise<ChatResult> {
     const stripped = stripNames(messages);
-    try {
-      return await super._generate(stripped, options, runManager);
-    } catch (primaryErr) {
-      if (!is503Error(primaryErr) || this._fallbackInstances.length === 0) throw primaryErr;
 
-      log.warn(
-        { primary: this.model, fallbacks: this._fallbackModels },
-        "Primary model 503, trying fallbacks",
-      );
-
-      let lastErr: unknown = primaryErr;
-      for (let i = 0; i < this._fallbackInstances.length; i++) {
-        const fallback = this._fallbackInstances[i]!;
-        try {
-          log.info({ model: this._fallbackModels[i] }, "Trying fallback model");
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return await (fallback as any)._generate(stripped, options, runManager);
-        } catch (fallbackErr) {
-          if (!is503Error(fallbackErr)) throw fallbackErr;
-          lastErr = fallbackErr;
-        }
+    // Retry loop: attempt 0 = initial call; attempts 1..N = retries with backoff
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
+      if (attempt > 0) {
+        const delay = RETRY_BACKOFF_MS[attempt - 1]!;
+        log.warn({ attempt, delayMs: delay }, "Gemini transient error, retrying primary");
+        await sleepMs(delay);
       }
-      log.error({ fallbacks: this._fallbackModels }, "All fallback models returned 503");
-      throw lastErr;
+      try {
+        return await super._generate(stripped, options, runManager);
+      } catch (err) {
+        if (!is503Error(err)) throw err; // non-transient → surface immediately
+        lastErr = err;
+      }
     }
+
+    // All retries exhausted — try fallback chain (intentionally empty in June 2026)
+    if (this._fallbackInstances.length === 0) throw lastErr;
+
+    log.warn(
+      { primary: this.model, fallbacks: this._fallbackModels },
+      "Primary model retries exhausted, trying fallbacks",
+    );
+
+    for (let i = 0; i < this._fallbackInstances.length; i++) {
+      const fallback = this._fallbackInstances[i]!;
+      try {
+        log.info({ model: this._fallbackModels[i] }, "Trying fallback model");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return await (fallback as any)._generate(stripped, options, runManager);
+      } catch (fallbackErr) {
+        if (!is503Error(fallbackErr)) throw fallbackErr;
+        lastErr = fallbackErr;
+      }
+    }
+    log.error({ fallbacks: this._fallbackModels }, "All fallback models returned 503");
+    throw lastErr;
   }
 
   override async *_streamResponseChunks(
@@ -141,31 +170,41 @@ class FounderChatGoogle extends ChatGoogleGenerativeAI {
     options: this["ParsedCallOptions"],
     runManager?: CallbackManagerForLLMRun,
   ) {
-    // For streaming we fall back to non-streaming generate on 503 (simpler, safe)
-    try {
-      yield* super._streamResponseChunks(stripNames(messages), options, runManager);
-    } catch (primaryErr) {
-      if (!is503Error(primaryErr) || this._fallbackInstances.length === 0) throw primaryErr;
+    const stripped = stripNames(messages);
 
-      log.warn(
-        { primary: this.model },
-        "Primary model 503 on stream, falling back",
-      );
-
-      // Use the first available fallback via _generate (not streaming — acceptable
-      // for a capacity-spike fallback path)
-      for (let i = 0; i < this._fallbackInstances.length; i++) {
-        const fallback = this._fallbackInstances[i]!;
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          yield* (fallback as any)._streamResponseChunks(stripNames(messages), options, runManager);
-          return;
-        } catch (fallbackErr) {
-          if (!is503Error(fallbackErr)) throw fallbackErr;
-        }
+    // Retry loop mirrors _generate: backoff on transient errors before falling through
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
+      if (attempt > 0) {
+        const delay = RETRY_BACKOFF_MS[attempt - 1]!;
+        log.warn({ attempt, delayMs: delay }, "Gemini transient error on stream, retrying primary");
+        await sleepMs(delay);
       }
-      throw primaryErr;
+      try {
+        yield* super._streamResponseChunks(stripped, options, runManager);
+        return; // success — exit generator
+      } catch (err) {
+        if (!is503Error(err)) throw err;
+        lastErr = err;
+      }
     }
+
+    // All retries exhausted — try fallback chain (intentionally empty in June 2026)
+    if (this._fallbackInstances.length === 0) throw lastErr;
+
+    log.warn({ primary: this.model }, "Primary model stream retries exhausted, trying fallbacks");
+
+    for (let i = 0; i < this._fallbackInstances.length; i++) {
+      const fallback = this._fallbackInstances[i]!;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        yield* (fallback as any)._streamResponseChunks(stripped, options, runManager);
+        return;
+      } catch (fallbackErr) {
+        if (!is503Error(fallbackErr)) throw fallbackErr;
+      }
+    }
+    throw lastErr;
   }
 }
 
