@@ -33,7 +33,7 @@ async function main(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const invoke = makeOfficeInvoker(office as any, getPendingApproval as any);
 
-  const report = await runEval(GOLDEN_TASKS, invoke);
+  const report = await runEval(GOLDEN_TASKS, invoke, { taskDelayMs: 1500 });
   const md = renderReport(report);
 
   const outPath = resolve(process.cwd(), "EVAL.md");
