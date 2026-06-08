@@ -57,7 +57,7 @@ const WORKFLOWS: WorkflowDef[] = [
       {
         id: "cold_email",
         label: "Draft cold email",
-        task: "Draft a cold outreach email to the founder of {company} using the hook found in the previous step. Max 150 words. Subject ≤8 words. Sign as: Pushkar, Turicks. Then call send_email for approval.",
+        task: "Draft a cold outreach email to the founder of {company} using the hook found in the previous step. Max 150 words. Subject ≤8 words. Sign as: Pushkar, Turicks. IMPORTANT: You MUST call the send_email tool to request approval — do not just write the email as text. The tool call is required.",
       },
     ],
   },

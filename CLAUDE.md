@@ -57,7 +57,7 @@ This applies to: Gumroad listings, LinkedIn posts, email templates, brand guidel
 - ✅ **v2 Rebuild (2026-06-01)**: Prebuilt supervisor + 3 ReAct departments — LIVE ON MAIN
   - research [search_web] · comms [email*, linkedin*] · engineering [github_r, github_w*]
   - (* = HITL-gated via native interrupt())
-  - 10,678 LOC → ~500 LOC · 8 test files · 40 tests green · tsc clean
+  - 10,678 LOC → ~500 LOC core · now 57 test files · 614 tests green · tsc clean
 - ✅ **Phase B (2026-06-01)**: Marketing + Sales + Prospecting departments — MERGED (PR #5)
 - ✅ **Personal department (2026-06-03)**: 7th department `personal` — laptop operator (file/shell/browser, HITL-gated, `path-guard` confines to `$HOME`, secrets blocked even on read). MERGED (PR #16). Kept separate from `engineering` by least-privilege (ADR-013); Safari-MCP deferred (ADR-012). 267 tests green · eval 13/13.
 - 🔄 **Phase C (2026-06-01)**: Context memory + knowledge search + proactive scheduler — code complete, 47 tests green (branch `feat/phase-c-memory-scheduler`). Followups: populate turicks-brain (`brain:sync`), live Telegram verify. See `docs/phases/PHASE-C-INTELLIGENCE.md`.
@@ -169,36 +169,39 @@ npx tsx src/index.ts
 pnpm test
 ```
 
-## Model Cascade Tiers
-Defined in `src/core/config.ts`. Each tier tries providers in order:
+## Model
+**One model for the whole office** (supervisor + all sub-agents): `gemini-2.5-flash` (env: `AGENT_MODEL`).
 
-| Tier | Primary | Fallback 1 | Fallback 2 |
-|------|---------|-----------|-----------|
-| CEO | claude-sonnet-4-5 | gemini-2.5-pro | gemini-flash |
-| deep_research | gemini-2.5-pro | gemini-flash | deepseek-r1:free |
-| md | gemini-flash | claude-haiku-4-5 | llama-70b:free |
-| code | lmstudio/qwen | qwen3-coder:free | gemini-flash |
-| nano | gemini-flash-lite | claude-haiku-4-5 | — |
-| local | lmstudio/qwen | gemini-flash-lite | — |
+The old 6-tier multi-provider cascade was removed in v2. See `src/agents/model.ts` for the current truth.
+
+**503 fallback chain** (capacity spikes only): `gemini-2.5-flash → gemini-2.0-flash → gemini-1.5-flash`.  
+Non-503 errors are re-thrown immediately — not silently swallowed.
+
+Temperature: **0 by default** (determinism rule #16). Override with `AGENT_TEMPERATURE` env for creative runs.
 
 ## File Locations Quick Reference
 ```
-src/core/registry.ts       — All agent + company definitions
-src/core/config.ts         — Env vars + model cascade + budget limits
-src/core/prompts.ts        — All system + task prompts
-src/agents/state.ts        — All LangGraph Annotation schemas + interfaces
-src/agents/graph.ts        — Main FounderGraph (compiled once)
-src/agents/pods/prospecting.ts — ProspectingPod (disambiguate → research → ICP score → route)
-src/db/schema.ts           — All Drizzle table definitions (7 tables)
-src/db/queries.ts          — Named query functions (no raw SQL elsewhere)
-src/infra/llm.ts           — LLM cascade executor + budget guard
-src/infra/redis.ts         — Redis singleton + key helpers (research, quota, llmCache)
-src/infra/scheduler.ts     — Cron jobs: LinkedIn posts, reply poller, HITL sweeper
-src/infra/checkpointer.ts  — TenantAwareCheckpointer + thread ID builder
-src/gateway/telegram.ts    — grammy bot + topic routing + /prospect command
-src/gateway/hitl.ts        — HITL interrupt lifecycle
-src/tools/linkedin.ts      — LinkedIn post + reply tools (Composio)
-drizzle/                   — Generated migration SQL (run: npx drizzle-kit migrate)
+src/core/registry.ts           — Agent + company definitions
+src/core/config.ts             — Env vars + constants
+src/agents/office.ts           — Supervisor + all 7 departments (the whole multi-agent system)
+src/agents/system-prompts.ts   — All department + supervisor prompts
+src/agents/agent-tools.ts      — Barrel re-export (HITL wrappers split into agent-tools/ modules)
+src/agents/agent-tools/        — Per-department tool wrappers (hitl, research, comms, engineering, personal, jobhunt, memory)
+src/agents/state.ts            — LangGraph Annotation schemas
+src/agents/model.ts            — Model factory (one model + 503 fallback)
+src/db/schema.ts               — All Drizzle table definitions (11 tables; 4 are SaaS-phase, not active)
+src/db/queries.ts              — Named query functions (no raw SQL elsewhere)
+src/infra/health.ts            — Health HTTP server (/health, /metrics)
+src/infra/redis.ts             — Redis client [SaaS-PHASE: not wired, no boot dep]
+src/infra/scheduler.ts         — Cron jobs: Monday brief, HITL sweeper
+src/infra/single-instance.ts   — PID-file lock (prevents duplicate bot processes)
+src/infra/history-window.ts    — Thread history bounding (prevents loop-from-stale-state)
+src/gateway/telegram.ts        — grammy bot + message routing + history trim
+src/gateway/commands.ts        — All /command handlers
+src/gateway/format.ts          — markdownToTelegramHtml formatter
+src/workflows/registry.ts      — SOP workflow definitions
+src/workflows/runner.ts        — Pure workflow executor (callback-injected, no grammy)
+drizzle/                       — Generated migration SQL (run: npx drizzle-kit migrate)
 ```
 
 ## Phase 3E Rules (Testing + Engineer Responsibility)
@@ -217,9 +220,14 @@ Answer each critique point explicitly. This prevents obvious failure modes from 
 HITL gates guard only external sends (email, LinkedIn, GitHub push).
 Never route to HITL for internal analysis, draft generation, or code review steps.
 
-### 14. Safety rails order is non-negotiable
-Sales pod flow: `lead_intel → suppression_check → quota_check → bdr → critic → [HITL] → finalize`
-Never bypass suppression_check or quota_check, even in testing (mock them instead).
+### 14. Safety rails (current state — Phase 2 to complete)
+Current send path: `research → draft → [HITL approval] → Composio send → idempotency audit`.
+Idempotency via `action_log` is live and prevents duplicate sends.
+
+**Phase 2 additions (not yet wired):**
+- `suppression_check` — check `do_not_contact` table before every outbound email (GDPR/CAN-SPAM)
+- `quota_check` — call `incrQuota()` from redis.ts to enforce daily send limits
+Until these are wired, do not claim they are active safety rails.
 
 ### 15. Redis for ephemeral, Postgres for durable (see ADR-005)
 - Research cache, send quotas, LLM prompt cache → Redis (TTL, atomic INCR)

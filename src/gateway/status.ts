@@ -20,6 +20,18 @@ export interface StatusData {
   emailsSentToday: number;
 }
 
+export interface RichStatusData {
+  uptimeSeconds: number;
+  pendingApprovals: number;
+  emailsSentToday: number;
+  searchesToday: number;
+  calendarEventsToday: number;
+  activeClients: string[];
+  focus: string | null;
+  lastEventContent: string | null;
+  lastEventRelativeTime: string | null;
+}
+
 /** Format uptime into a human-readable string: "2h 15m", "45s", "10m". */
 function formatUptime(seconds: number): string {
   if (seconds < 60) return `${Math.floor(seconds)}s`;
@@ -30,7 +42,7 @@ function formatUptime(seconds: number): string {
   return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
-/** Format the status data into a Telegram HTML message. */
+/** Format the status data into a Telegram HTML message (basic, backwards-compat). */
 export function formatStatusMessage(data: StatusData): string {
   const { uptimeSeconds, pendingApprovals, emailsSentToday } = data;
   const approvalLine =
@@ -39,11 +51,71 @@ export function formatStatusMessage(data: StatusData): string {
       : `✅ 0 pending approvals`;
 
   return (
-    `📊 <b>FounderOS Status</b>\n\n` +
+    `🟢 <b>FounderOS Status</b>\n\n` +
     `⏱ Uptime: <code>${formatUptime(uptimeSeconds)}</code>\n` +
     `${approvalLine}\n` +
     `📧 Emails sent today: <b>${emailsSentToday}</b>`
   );
+}
+
+/**
+ * Format the rich status data into a detailed Telegram HTML message.
+ * Used by /status command for the enhanced D3 view.
+ */
+export function formatRichStatus(data: RichStatusData): string {
+  const {
+    uptimeSeconds,
+    pendingApprovals,
+    emailsSentToday,
+    searchesToday,
+    calendarEventsToday,
+    activeClients,
+    focus,
+    lastEventContent,
+    lastEventRelativeTime,
+  } = data;
+
+  const clientsStr = activeClients.length > 0 ? activeClients.join(", ") : "none set";
+  const focusStr = focus ?? "none";
+
+  const lastEventStr =
+    lastEventContent !== null
+      ? `${lastEventContent.slice(0, 50)}${lastEventContent.length > 50 ? "…" : ""}` +
+        (lastEventRelativeTime ? ` (${lastEventRelativeTime})` : "")
+      : "no events recorded";
+
+  return (
+    `🟢 <b>FounderOS</b> — Running ${formatUptime(uptimeSeconds)}\n\n` +
+    `📋 Context: ${clientsStr}, Focus: ${focusStr}\n` +
+    `📬 Today: ${emailsSentToday} email${emailsSentToday !== 1 ? "s" : ""} · ${searchesToday} search${searchesToday !== 1 ? "es" : ""} · ${calendarEventsToday} event${calendarEventsToday !== 1 ? "s" : ""}\n` +
+    `⚡ Last: ${lastEventStr}\n` +
+    `🔒 Pending approvals: ${pendingApprovals}`
+  );
+}
+
+// ── Error message formatting ─────────────────────────────────────────────────
+
+const ERROR_PATTERNS: Array<[RegExp, string]> = [
+  [/FIRECRAWL_API_KEY/, "Search temporarily unavailable. Try again in a moment."],
+  [/Firecrawl returned HTTP (\d+)/, "Search unavailable (HTTP $1). Try again."],
+  [/Composio returned no (message_id|event_id|id)/, "Action could not complete — check your Composio connection."],
+  [/403 Forbidden/, "Permission denied. Check your API token has the right scopes."],
+  [/Command timed out after (\d+)s/, "Command timed out ($1s). Break it into smaller steps."],
+  [/ECONNREFUSED/, "Service connection failed. Try again in a moment."],
+  [/Cannot create a calendar event in the past/, "Cannot create a past calendar event. Please provide a future date."],
+];
+
+/**
+ * Convert a raw tool error string into a user-friendly message.
+ * Returns the raw error unchanged when no pattern matches.
+ */
+export function formatToolError(rawError: string): string {
+  for (const [pattern, message] of ERROR_PATTERNS) {
+    if (pattern.test(rawError)) {
+      return rawError.replace(pattern, message);
+    }
+  }
+  return rawError;
 }
 
 // ── Live data query ───────────────────────────────────────────────────────────

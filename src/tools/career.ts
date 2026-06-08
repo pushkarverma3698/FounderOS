@@ -133,7 +133,7 @@ export const readCvTool: UnifiedTool = {
       log.error({ query, err: msg }, "Both personal-rag API and wiki.md failed");
       return {
         success: false,
-        error: `Could not read CV: personal-rag API unavailable and wiki.md not found at ${WIKI_FALLBACK_PATH}. Start personal-rag with: cd ~/Projects/personal-rag && uvicorn src.api:app --port 8765`,
+        error: "CV data unavailable. Start personal-rag with: cd ~/Projects/personal-rag && uvicorn api:app --port 8765 — then try again.",
       };
     }
   },

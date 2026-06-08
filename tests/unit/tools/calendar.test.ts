@@ -12,6 +12,9 @@
  *  8. Timed: end defaults to +1h (pure string arithmetic, no UTC conversion)
  *  9. 23:xx rollover to next day midnight
  * 10. Explicit end_date respected
+ * 11. Past-date validation — date in the past → success: false
+ * 12. Future date proceeds to Composio
+ * 13. Grace window — 30 seconds ago passes through
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -295,5 +298,41 @@ describe("calendarTool", () => {
     expect(result.success).toBe(true);
     expect(mockHasBeenAudited).not.toHaveBeenCalled();
     expect(mockWriteAuditEntry).not.toHaveBeenCalled();
+  });
+
+  // ── Past-date validation ──────────────────────────────────────────────────────
+
+  it("rejects a past date (yesterday) with success: false and an error about 'past'", async () => {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const dateStr = yesterday.toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+    const result = await calendarTool.execute({ title: "Past Event", date: dateStr });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.toLowerCase()).toContain("past");
+    expect(mockExecuteComposioAction).not.toHaveBeenCalled();
+  });
+
+  it("proceeds to Composio when the date is in the future (tomorrow)", async () => {
+    mockExecuteComposioAction.mockResolvedValue(successResult("ev_future"));
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const dateStr = tomorrow.toISOString().slice(0, 10);
+
+    const result = await calendarTool.execute({ title: "Future Event", date: dateStr });
+
+    expect(result.success).toBe(true);
+    expect(mockExecuteComposioAction).toHaveBeenCalledOnce();
+  });
+
+  it("passes through a date exactly 30 seconds ago (within the 60-second grace window)", async () => {
+    mockExecuteComposioAction.mockResolvedValue(successResult("ev_grace"));
+    // 30 seconds ago — still within the 60-second grace window
+    const thirtySecondsAgo = new Date(Date.now() - 30_000);
+    const dateStr = thirtySecondsAgo.toISOString().replace("Z", "").slice(0, 19);
+
+    const result = await calendarTool.execute({ title: "Right Now Event", date: dateStr });
+
+    expect(result.success).toBe(true);
+    expect(mockExecuteComposioAction).toHaveBeenCalledOnce();
   });
 });

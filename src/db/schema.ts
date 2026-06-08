@@ -152,9 +152,11 @@ export const actionLog = pgTable(
 // ── outbound_leads ────────────────────────────────────────────────────────────
 
 /**
+ * SaaS-PHASE: query helpers exist in queries.ts, but no production writer is wired.
+ * Activate when /prospect command writes leads here + sales dept reads stage.
+ *
  * Outbound prospect state machine. One row per company URL being researched.
  * Stages: researching → disqualified | drafting → approved → sent → replied → won | lost
- * Kicked off by /prospect command in Telegram.
  * Old name: lead_pipeline
  */
 export const outboundLeads = pgTable(
@@ -203,8 +205,10 @@ export const outboundLeads = pgTable(
 // ── do_not_contact ────────────────────────────────────────────────────────────
 
 /**
- * GDPR/CAN-SPAM mandatory. Every outbound send must check here FIRST.
- * Supports both exact email addresses and domain-level suppression.
+ * SaaS-PHASE: table defined, NOT checked before sends. Activate in Phase 2:
+ * add isDoNotContact() guard in agent-tools/comms.ts before send_email fires.
+ *
+ * GDPR/CAN-SPAM suppression list. Exact email addresses and domain-level blocks.
  * Old name: suppression_list
  */
 export const doNotContact = pgTable(
@@ -230,10 +234,8 @@ export const doNotContact = pgTable(
 // ── agent_results ─────────────────────────────────────────────────────────────
 
 /**
- * Foundation for agent self-improvement (Phase 3).
- * Written after every task by pod finalize nodes.
- * Queried at execution time to inject few-shot examples into system prompts.
- * NOT compile-time — examples injected fresh per invocation.
+ * SaaS-PHASE (Phase 3): no writer in production src/. Schema and query helpers ready.
+ * Activate when pod finalize nodes start writing outcomes for few-shot injection.
  * Old name: task_outcomes
  */
 export const agentResults = pgTable(
@@ -278,13 +280,9 @@ export const agentResults = pgTable(
 // ── dept_signals ──────────────────────────────────────────────────────────────
 
 /**
- * Durable cross-department signals (Phase 3).
- * ephemeral: departmentSignals channel in FounderState (bounded to 50, per-run)
- * durable:   this table (persists across LangGraph runs, polled by scheduler)
- *
- * Examples:
- *   sales → engineering: "proposal_approved" with { tech_requirements }
- *   engineering → sales: "demo_ready" with { demo_url }
+ * SaaS-PHASE (Phase 3): no writer in production src/. Schema ready.
+ * Intended for durable cross-department event passing (e.g. sales→engineering).
+ * Ephemeral equivalent already works via FounderState.departmentSignals (per-run).
  * Old name: dept_events
  */
 export const deptSignals = pgTable(

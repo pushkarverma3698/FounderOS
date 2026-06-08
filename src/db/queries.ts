@@ -7,7 +7,7 @@
  * Pattern: verbs + domain — createInterrupt, resolveInterrupt, logCost, checkIdempotency
  */
 
-import { and, desc, eq, gt, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, lt, or, sql } from "drizzle-orm";
 import { getDb } from "./client.js";
 import {
   actionLog,
@@ -592,4 +592,64 @@ export async function searchEpisodicMemory(
     )
     .orderBy(desc(episodicMemory.occurred_at))
     .limit(limit);
+}
+
+// ── Activity Summary (action_log) ─────────────────────────────────────────────
+
+/**
+ * Count rows in action_log grouped by action field since a given date.
+ * Returns a Record<action, count> — e.g. { send_email: 2, search_web: 5 }.
+ * Used by the rich /status command to show today's activity.
+ */
+export async function getActivitySummary(
+  tenantId: string,
+  since: Date,
+): Promise<Record<string, number>> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      action: actionLog.action,
+      total: count(),
+    })
+    .from(actionLog)
+    .where(
+      and(
+        eq(actionLog.tenant_id, tenantId),
+        gte(actionLog.created_at, since),
+      ),
+    )
+    .groupBy(actionLog.action);
+
+  return rows.reduce<Record<string, number>>((acc, row) => {
+    return { ...acc, [row.action]: Number(row.total) };
+  }, {});
+}
+
+// ── Last Episodic Event (episodic_memory) ─────────────────────────────────────
+
+/**
+ * Return the most recent episodic event for a tenant.
+ * Returns { content, created_at } where content = summary ?? title.
+ * Returns null if no events exist.
+ */
+export async function getLastEpisodicEvent(
+  tenantId: string,
+): Promise<{ content: string; created_at: Date } | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      title: episodicMemory.title,
+      summary: episodicMemory.summary,
+      created_at: episodicMemory.created_at,
+    })
+    .from(episodicMemory)
+    .where(eq(episodicMemory.tenant_id, tenantId))
+    .orderBy(desc(episodicMemory.created_at))
+    .limit(1);
+
+  if (!row) return null;
+  return {
+    content: row.summary ?? row.title,
+    created_at: row.created_at ?? new Date(),
+  };
 }

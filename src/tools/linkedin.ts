@@ -33,6 +33,7 @@ export interface LinkedInPostInput {
   text: string;
   image_url?: string;
   visibility?: "PUBLIC" | "CONNECTIONS";
+  schedule_time?: string;  // ISO 8601 datetime — schedules post instead of publishing immediately
 }
 
 export interface LinkedInPostResult {
@@ -89,17 +90,22 @@ export const linkedinPostTool: UnifiedTool = {
         type: "string",
         description: "Tenant identifier (e.g. 'turicks').",
       },
+      schedule_time: {
+        type: "string",
+        description: "Optional ISO 8601 datetime to schedule the post (e.g. '2026-07-01T09:00:00Z'). Omit to publish immediately.",
+      },
     },
     required: ["text", "idempotency_key", "tenant_id"],
   },
 
   async execute(input: Record<string, unknown>): Promise<ToolResult> {
-    const { text, image_url, visibility = "PUBLIC", idempotency_key, tenant_id } = input as {
+    const { text, image_url, visibility = "PUBLIC", idempotency_key, tenant_id, schedule_time } = input as {
       text: string;
       image_url?: string;
       visibility?: "PUBLIC" | "CONNECTIONS";
       idempotency_key: string;
       tenant_id: string;
+      schedule_time?: string;
     };
 
     // Idempotency check
@@ -120,9 +126,16 @@ export const linkedinPostTool: UnifiedTool = {
     try {
       // LINKEDIN_CREATE_LINKED_IN_POST: param is 'commentary' (not 'text'), visibility is an object
       const visibilityObj = { "com.linkedin.ugc.MemberNetworkVisibility": visibility === "CONNECTIONS" ? "CONNECTIONS" : "PUBLIC" };
+      const composioArgs: Record<string, unknown> = {
+        commentary: text,
+        visibility: visibilityObj,
+        ...(image_url ? { images: [{ url: image_url }] } : {}),
+        ...(schedule_time ? { scheduled_publish_time: schedule_time } : {}),
+      };
+
       const result = await executeComposioAction(
         "LINKEDIN_CREATE_LINKED_IN_POST",
-        { commentary: text, visibility: visibilityObj, ...(image_url ? { images: [{ url: image_url }] } : {}) },
+        composioArgs,
         getLinkedInConnectionId(),
         getLinkedInUserId(),
       );
@@ -136,8 +149,11 @@ export const linkedinPostTool: UnifiedTool = {
       // retries — the post is never actually published and can never be retried.
       if (!postId) {
         const msg = (data?.["message"] ?? "LinkedIn post failed — no post id returned") as string;
+        const scheduleHint = schedule_time
+          ? " Scheduling may not be supported via this Composio connection. Try posting immediately instead."
+          : "";
         log.error({ err: msg, idempotency_key }, "LinkedIn soft failure");
-        return { success: false, error: msg };
+        return { success: false, error: `${msg}${scheduleHint}` };
       }
 
       const postUrl = `https://www.linkedin.com/feed/update/${postId}`;

@@ -77,6 +77,22 @@ export const calendarTool: UnifiedTool = {
       return { success: false, error: "COMPOSIO_API_KEY not configured." };
     }
 
+    // Past-date guard — reject events whose start time is already in the past.
+    // Append "Z" to treat the datetime string as UTC for consistent comparison.
+    // Allow a 60-second grace window for "right now" / "in a moment" events.
+    {
+      const PAST_DATE_GRACE_MS = 60_000;
+      const isAllDay = /^\d{4}-\d{2}-\d{2}$/.test(date);
+      const parseable = isAllDay ? `${date}T00:00:00Z` : (date.endsWith("Z") ? date : `${date}Z`);
+      const startMs = new Date(parseable).getTime();
+      if (!isNaN(startMs) && startMs < Date.now() - PAST_DATE_GRACE_MS) {
+        return {
+          success: false,
+          error: "Cannot create a calendar event in the past. Please provide a future date/time (e.g. 'tomorrow at 3pm').",
+        };
+      }
+    }
+
     // Idempotency guard — same key never creates the event twice (CLAUDE.md rule #5).
     // Only enforced when a key is supplied (back-compat: keyless calls always create).
     if (idempotency_key && (await hasBeenAudited(idempotency_key))) {

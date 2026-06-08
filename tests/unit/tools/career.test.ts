@@ -8,11 +8,33 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { readCvTool, searchJobsTool } from "../../../src/tools/career.js";
+
+// ── Mocks for node:fs (used by wiki fallback) ──────────────────────────────
+
+const mockReadFileSync = vi.fn();
+
+vi.mock("node:fs", async (orig) => {
+  const actual = await (orig() as Promise<Record<string, unknown>>);
+  return { ...actual, readFileSync: mockReadFileSync };
+});
+
+const { readCvTool, searchJobsTool } = await import("../../../src/tools/career.js");
 
 // ── readCv ───────────────────────────────────────────────────────────────────
 
+const WIKI_CONTENT = "# TypeScript\nPushkar has 3+ years of TypeScript experience building production systems.\n# LangGraph\nPushkar has built LangGraph multi-agent pipelines.";
+
 describe("readCvTool", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: wiki read succeeds with stub content
+    mockReadFileSync.mockReturnValue(WIKI_CONTENT);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("has name 'read_cv'", () => {
     expect(readCvTool.name).toBe("read_cv");
   });
@@ -54,23 +76,34 @@ describe("readCvTool", () => {
     vi.stubGlobal("fetch", mockFetch);
 
     const result = await readCvTool.execute({ query: "TypeScript skills" });
-    // Should still succeed via wiki fallback
+    // Should still succeed via wiki fallback (mockReadFileSync returns WIKI_CONTENT)
     expect(result.success).toBe(true);
     expect(typeof result.data).toBe("string");
-    // Fallback should mention something substantive
     expect((result.data as string).length).toBeGreaterThan(20);
   });
 
   it("returns success:false with descriptive error when both API and wiki fail", async () => {
     const mockFetch = vi.fn().mockRejectedValueOnce(new Error("ECONNREFUSED"));
     vi.stubGlobal("fetch", mockFetch);
+    mockReadFileSync.mockImplementation(() => { throw new Error("ENOENT: no such file"); });
 
-    // Simulate wiki read failure by mocking readFile to fail
     const result = await readCvTool.execute({ query: "nonexistent query xyz" });
-    // Either succeeds (wiki found) or returns success:false with message
-    if (!result.success) {
-      expect(result.error).toBeTruthy();
-    }
+    expect(result.success).toBe(false);
+    expect(result.error).toBeTruthy();
+  });
+
+  // ── L6: Actionable error when both sources fail ───────────────────────────
+
+  it("returns success:false with uvicorn start instructions when both API and wiki fail", async () => {
+    // Force API fetch to fail
+    const mockFetch = vi.fn().mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    vi.stubGlobal("fetch", mockFetch);
+    // Force wiki read to fail
+    mockReadFileSync.mockImplementation(() => { throw new Error("ENOENT: no such file or directory"); });
+
+    const result = await readCvTool.execute({ query: "anything" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("uvicorn");
   });
 
   it("never exposes raw financial or credential data in output", async () => {

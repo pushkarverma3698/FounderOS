@@ -191,6 +191,109 @@ describe("runWorkflow", () => {
 
     expect(result.abortedAt).toBeUndefined();
   });
+
+  // ── Error recovery (step throws) ──────────────────────────────────────────────
+
+  it("sets completed: false and abortedAt when a required step throws an error", async () => {
+    const wf = makeWorkflow({
+      steps: [
+        { id: "s1", label: "Step One", task: "Task one" },
+        { id: "s2", label: "Step Two", task: "Task two" },
+        { id: "s3", label: "Step Three", task: "Task three" },
+      ],
+    });
+    const callbacks = {
+      sendStatus: vi.fn(async () => undefined),
+      runStep: vi.fn()
+        .mockResolvedValueOnce(true)
+        .mockRejectedValueOnce(new Error("Unexpected LLM error")),
+    };
+
+    const result = await runWorkflow(wf, {}, callbacks);
+
+    expect(result.completed).toBe(false);
+    expect(result.abortedAt).toBe("s2");
+  });
+
+  it("calls sendStatus with a 'failed' message when a step throws", async () => {
+    const wf = makeWorkflow({
+      steps: [{ id: "s1", label: "Alpha Step", task: "Do alpha" }],
+    });
+    const statusMessages: string[] = [];
+    const callbacks = {
+      sendStatus: vi.fn(async (msg: string) => { statusMessages.push(msg); }),
+      runStep: vi.fn().mockRejectedValueOnce(new Error("Boom")),
+    };
+
+    await runWorkflow(wf, {}, callbacks);
+
+    const failMsg = statusMessages.find((m) => m.toLowerCase().includes("failed"));
+    expect(failMsg).toBeDefined();
+    expect(failMsg).toContain("Alpha Step");
+  });
+
+  it("sets stepsRun to the index of the failed step (abort at step 2 of 3)", async () => {
+    const wf = makeWorkflow({
+      steps: [
+        { id: "s1", task: "Step 1" },
+        { id: "s2", task: "Step 2" },
+        { id: "s3", task: "Step 3" },
+      ],
+    });
+    const callbacks = {
+      sendStatus: vi.fn(async () => undefined),
+      runStep: vi.fn()
+        .mockResolvedValueOnce(true)
+        .mockRejectedValueOnce(new Error("Error on step 2")),
+    };
+
+    const result = await runWorkflow(wf, {}, callbacks);
+
+    expect(result.stepsRun).toBe(2);
+    expect(callbacks.runStep).toHaveBeenCalledTimes(2);
+  });
+
+  it("continues to the next step when an optional step throws", async () => {
+    const wf = makeWorkflow({
+      steps: [
+        { id: "s1", label: "Required Step", task: "Required" },
+        { id: "s2", label: "Optional Step", task: "Optional", optional: true },
+        { id: "s3", label: "Final Step", task: "Final" },
+      ],
+    });
+    const callbacks = {
+      sendStatus: vi.fn(async () => undefined),
+      runStep: vi.fn()
+        .mockResolvedValueOnce(true)
+        .mockRejectedValueOnce(new Error("Optional failed"))
+        .mockResolvedValueOnce(true),
+    };
+
+    const result = await runWorkflow(wf, {}, callbacks);
+
+    expect(result.completed).toBe(true);
+    expect(callbacks.runStep).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns completed: true with stepsRun count when all optional steps fail", async () => {
+    const wf = makeWorkflow({
+      steps: [
+        { id: "s1", label: "Opt A", task: "Task A", optional: true },
+        { id: "s2", label: "Opt B", task: "Task B", optional: true },
+      ],
+    });
+    const callbacks = {
+      sendStatus: vi.fn(async () => undefined),
+      runStep: vi.fn()
+        .mockRejectedValueOnce(new Error("Opt A failed"))
+        .mockRejectedValueOnce(new Error("Opt B failed")),
+    };
+
+    const result = await runWorkflow(wf, {}, callbacks);
+
+    expect(result.completed).toBe(true);
+    expect(result.stepsRun).toBe(2);
+  });
 });
 
 // ── validateParams ────────────────────────────────────────────────────────────

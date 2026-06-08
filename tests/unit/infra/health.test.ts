@@ -1,6 +1,6 @@
 /**
  * Health server — endpoint contract.
- * DB/Redis are not available in unit tests, so the server must REPORT them as
+ * DB is not available in unit tests, so the server must REPORT it as
  * down (not throw), return the documented JSON shape, and 503 when DB is down.
  */
 
@@ -27,7 +27,6 @@ describe("health server", () => {
     expect(report).toHaveProperty("status");
     expect(report).toHaveProperty("version");
     expect(report.checks).toHaveProperty("database");
-    expect(report.checks).toHaveProperty("redis");
     expect(report).toHaveProperty("spend_today_usd");
   });
 

@@ -17,6 +17,11 @@ export interface WorkflowStep {
   task: string;
   /** Optional label shown to the founder before the step runs. Defaults to id. */
   label?: string;
+  /**
+   * When true, a step failure (thrown error) is logged and skipped rather than
+   * aborting the entire workflow. Defaults to false (required step).
+   */
+  optional?: boolean;
 }
 
 export interface WorkflowDef {
