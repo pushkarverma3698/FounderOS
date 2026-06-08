@@ -81,7 +81,7 @@ function intEnv(key: string, fallback: number): number {
 }
 
 /** Max recursive supervisor/sub-agent steps before LangGraph aborts a run. */
-export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 20);
+export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 40);
 
 /** How many human turns of conversation history to persist per thread. */
 export const HISTORY_KEEP_TURNS = intEnv("HISTORY_KEEP_TURNS", 12);

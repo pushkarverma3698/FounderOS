@@ -69,6 +69,11 @@ async function sendMondayBrief(): Promise<void> {
 
   const prompt = `${SCHEDULER_BRIEF_PROMPT}\n\nToday is: ${today}\n\nFounder context:\n${contextText}`;
 
+  if (!prompt || prompt.trim().length === 0) {
+    log.error({}, "Scheduler prompt is empty, aborting");
+    return;
+  }
+
   const res = (await office.invoke(
     { messages: [new HumanMessage(prompt)] },
     config,

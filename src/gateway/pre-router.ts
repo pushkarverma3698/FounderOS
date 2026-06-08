@@ -1,15 +1,14 @@
 /**
- * FounderOS — Pre-Router (deterministic, LLM-free)
- * ==================================================
- * Pure functions that fire BEFORE the supervisor LLM to force-route certain
- * inputs to the correct department without an LLM call.
+ * FounderOS — Pre-Router
+ * =======================
+ * Fires BEFORE the supervisor LLM to give Gemini a routing hint (or to
+ * force-route deterministic cases without an LLM call at all).
  *
- * Rules:
- *  - Pure functions: no LLM, no I/O, fully testable.
- *  - Return null to let the supervisor decide normally.
- *  - Return a department name to force-route.
+ * Two layers:
+ *  1. Deterministic regex rules (preRoutePersonalVsEngineering) — pure, no I/O
+ *  2. Local Ollama classifier (localClassifyDept) — async, gracefully degrades
  *
- * Wiring into telegram.ts is a separate step (not done in this pass).
+ * Both return null to let the supervisor decide normally.
  */
 
 /**
