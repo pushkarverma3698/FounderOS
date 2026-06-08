@@ -20,10 +20,10 @@
  *
  * ── 503 fallback cascade ────────────────────────────────────────────────────
  * Gemini 2.5 Flash occasionally returns 503 "high demand" errors during traffic
- * spikes. Rather than failing the whole request, we cascade through cheaper
- * fallback models automatically:
- *   gemini-2.5-flash → gemini-1.5-flash
- * Each fallback only fires on a 503; any other error is re-thrown immediately.
+ * spikes. The fallback chain is currently EMPTY because all known cheaper models
+ * (gemini-1.5-flash, gemini-2.0-flash, gemini-2.0-flash-001) returned 404 as of
+ * June 2026 (deprecated by Google). On a 503 we surface the error immediately.
+ * Re-populate MODEL_FALLBACK_CHAIN once a confirmed working fallback is available.
  */
 
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
@@ -34,10 +34,16 @@ import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "model" });
 
-/** Models to try in order when the primary returns a 503. */
+/**
+ * Models to try in order when the primary returns a 503.
+ * NOTE: gemini-1.5-flash, gemini-2.0-flash, gemini-2.0-flash-001 all return 404
+ * from Google API as of June 2026 (deprecated). Fallback chain is intentionally
+ * empty — on 503 we surface the error to the user rather than cascade to a
+ * broken model. Re-populate once a stable cheaper fallback is confirmed working.
+ */
 const MODEL_FALLBACK_CHAIN: Record<string, string[]> = {
-  "gemini-2.5-flash": ["gemini-1.5-flash"],
-  "gemini-2.5-pro": ["gemini-1.5-flash"],
+  "gemini-2.5-flash": [],
+  "gemini-2.5-pro": [],
 };
 
 /**

@@ -6,8 +6,8 @@
  * default. RED until getModel() pins temperature to 0 (it currently uses 0.3).
  *
  * Cascade rule: when the primary model returns a 503, fall back to the next
- * model in the list automatically (gemini-2.5-flash → gemini-2.0-flash →
- * gemini-1.5-flash) so a capacity spike doesn't kill the whole OS.
+ * model in the list. The fallback chain is currently empty (all sub-2.5 Gemini
+ * models returned 404 as of June 2026). On 503 we surface the error directly.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -81,14 +81,14 @@ describe("getModel cascade config", () => {
     expect(m.model).toBe("gemini-1.5-flash");
   });
 
-  it("model instance has fallback models configured", () => {
+  it("fallback chain is empty (all sub-2.5 models deprecated as of June 2026)", () => {
     delete process.env["AGENT_MODEL"];
     const m = getModel();
-    // The model should expose its fallback list so tests can assert on it
+    // gemini-1.5-flash, gemini-2.0-flash, gemini-2.0-flash-001 all return 404.
+    // Fallback chain is intentionally empty; on 503 we surface the error to the user.
+    // Re-populate (and update this test) once a confirmed working fallback is available.
     const fallbacks = (m as unknown as { _fallbackModels: string[] })._fallbackModels;
     expect(Array.isArray(fallbacks)).toBe(true);
-    expect(fallbacks.length).toBeGreaterThan(0);
-    // None of the fallbacks should be the primary model
-    expect(fallbacks).not.toContain("gemini-2.5-flash");
+    expect(fallbacks).toHaveLength(0);
   });
 });
