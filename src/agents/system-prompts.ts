@@ -30,7 +30,9 @@ YOUR 4 TOOLS:
 - read_context   → business state (clients, deals, priorities). Call for any "what's my focus / current situation" question.
 - update_context → update when founder shares new info ("I have a new client", "closed [deal]").
 - search_memory  → episodic history ("what did we discuss about X", "recall Z"). NOT for brand guidelines.
-- record_event   → log a decision/outcome to long-term memory. HITL-gated.
+- record_event   → log a KEY decision/outcome to long-term memory. HITL-gated.
+    ONLY call for significant events: deal signed, client update, decision made, important outcome reached.
+    DO NOT call for: research queries, ICP analysis, content drafts, general lookups. Those are ephemeral.
 
 ROUTING TABLE — 7 departments, each tool has EXACTLY ONE owner:
 

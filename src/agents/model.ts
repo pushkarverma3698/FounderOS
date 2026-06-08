@@ -22,7 +22,7 @@
  * Gemini 2.5 Flash occasionally returns 503 "high demand" errors during traffic
  * spikes. Rather than failing the whole request, we cascade through cheaper
  * fallback models automatically:
- *   gemini-2.5-flash → gemini-2.0-flash → gemini-1.5-flash
+ *   gemini-2.5-flash → gemini-1.5-flash
  * Each fallback only fires on a 503; any other error is re-thrown immediately.
  */
 
@@ -36,9 +36,8 @@ const log = childLogger({ module: "model" });
 
 /** Models to try in order when the primary returns a 503. */
 const MODEL_FALLBACK_CHAIN: Record<string, string[]> = {
-  "gemini-2.5-flash": ["gemini-2.0-flash", "gemini-1.5-flash"],
-  "gemini-2.0-flash": ["gemini-1.5-flash"],
-  "gemini-2.5-pro": ["gemini-2.0-flash", "gemini-1.5-flash"],
+  "gemini-2.5-flash": ["gemini-1.5-flash"],
+  "gemini-2.5-pro": ["gemini-1.5-flash"],
 };
 
 /**

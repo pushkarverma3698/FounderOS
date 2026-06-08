@@ -9,14 +9,15 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir, homedir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveSendableFile } from "../../../src/tools/personal.js";
 
+// Use $HOME as the temp base — /tmp resolves to /private/tmp (macOS) which is blocked by path-guard
 let root: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "founderos-send-"));
+  root = mkdtempSync(join(homedir(), "founderos-send-test-"));
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
