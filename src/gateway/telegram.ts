@@ -412,6 +412,20 @@ async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Pr
     const beforeState = await office.getState(config).catch(() => null) as { values?: { messages?: OfficeMessage[] } } | null;
     const baseLen = (beforeState?.values?.messages ?? []).length;
 
+    // Guard: validate checkpoint messages before resuming to prevent Gemini 400
+    // "contents is not specified" when history trim leaves blank/empty messages.
+    const checkpointMessages = (beforeState?.values?.messages ?? []) as BaseMessage[];
+    try {
+      assertNonEmptyMessages(checkpointMessages, "resumeOffice");
+    } catch (guardErr) {
+      log.error({ chatId, err: (guardErr as Error).message }, "resumeOffice guard: checkpoint invalid — aborting to prevent Gemini 400");
+      await ctx.reply(
+        `❌ <b>Cannot resume — conversation state is invalid.</b>\n\nUse /reset to clear the thread and try again.`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+
     const budget = createRunBudget();
     const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
     const res = (await office.invoke(

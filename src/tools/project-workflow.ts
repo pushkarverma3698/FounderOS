@@ -242,7 +242,10 @@ export const projectWorkflowTool: UnifiedTool = {
           maxBuffer: 1024 * 1024 * 2, // 2MB
         });
         const rawStdout = out.toString().trim();
-        const MAX_TOOL_OUTPUT = 10_000;
+        // Keep tool output small — large outputs in chained HITL chains accumulate and
+        // can overflow Gemini's context window, causing 400 "contents is not specified".
+        // 2 KB per command keeps a 5-step chain under 10 KB total.
+        const MAX_TOOL_OUTPUT = 2_000;
         const stdout =
           rawStdout.length > MAX_TOOL_OUTPUT
             ? rawStdout.slice(0, MAX_TOOL_OUTPUT) +
