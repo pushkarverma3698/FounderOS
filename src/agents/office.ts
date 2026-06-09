@@ -41,6 +41,8 @@ import {
   projectWorkflow,
   claudeCode,
   recordEvent,
+  searchPersonalRag,
+  searchTuricksBrain,
 } from "./agent-tools.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
@@ -132,7 +134,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
    *  (write/shell/browser HITL-gated; reads are instant). */
   const personal = createReactAgent({
     llm,
-    tools: [readFile, listDir, sendFile, writeFile, runShell, browser],
+    tools: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain],
     name: "personal",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(PERSONAL_PROMPT, subAgentBudget) as any,
