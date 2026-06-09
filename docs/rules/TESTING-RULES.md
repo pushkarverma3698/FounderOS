@@ -310,3 +310,62 @@ A tool test suite is complete when you can answer YES to all of these:
 - [ ] Are there separate tests for: happy path, soft failure, thrown error?
 
 If any answer is NO, the test suite has a coverage gap.
+
+---
+
+## Rule 9: LangChain ChatResult Shape (HITL-path critical)
+
+**The bug this catches:** `syntheticResponseFromLastTool` returned `generations: [[{...}]]`
+(double-nested). `_generateUncached` iterates `result.generations` and accesses
+`generation.message.id`. When double-nested, `generation` is an array → `.message` is
+`undefined` → crash.
+
+**Root type:** `ChatResult.generations` is `ChatGeneration[]` — always single-nested.
+
+**The rule:** Any function that builds a synthetic `ChatResult` MUST return:
+
+```typescript
+return {
+  generations: [
+    {
+      text: "content",
+      message: new AIMessage({ content: "content" }),
+      generationInfo: { model: "synthetic-fallback", provider: "founderos" } as Record<string, unknown>,
+    },
+  ],
+  llmOutput: { provider: "founderos-synthetic" },
+};
+```
+
+**Tests:** Always assert `result.generations[0].text`, NEVER `result.generations[0][0].text`.
+A mock that returns `generations: [[{...}]]` will make the test pass while the production
+path crashes.
+
+---
+
+## Rule 10: Zod .optional() Must Always Include .nullable()
+
+**The bug class:** LangChain SDK emits a deprecation warning for `.optional()` without
+`.nullable()` on tool schema fields. This WILL become a hard error in a future SDK version.
+
+**The rule:** Every optional Zod field in any tool schema MUST be:
+
+```typescript
+// ✅ CORRECT
+z.string().optional().nullable()
+z.number().optional().nullable()
+z.enum(["a", "b"]).optional().nullable()
+
+// ❌ WRONG — will break in future LangChain SDK
+z.string().optional()
+```
+
+**Null coercion at call-site:** If the downstream function accepts `T | undefined` (not
+`T | null | undefined`), coerce at the call-site:
+
+```typescript
+const r = await runShellSafe(command, cwd ?? undefined); // cwd is string|null|undefined → string|undefined
+```
+
+**Where to check:** Every `src/agents/agent-tools/{dept}.ts` and `src/tools/*.ts` file.
+Any `tool()` call with an `.optional()` field needs `.nullable()` added.
