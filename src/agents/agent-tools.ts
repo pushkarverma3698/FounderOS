@@ -14,6 +14,7 @@
  *   agent-tools/personal.ts    → readFile, listDir, sendFile, writeFile, runShell, browser
  *   agent-tools/jobhunt.ts     → readCv, searchJobs
  *   agent-tools/memory.ts      → recordEvent
+ *   agent-tools/rag.ts         → searchPersonalRag, searchTuricksBrain
  *
  * HITL contract (read by the Telegram gateway):
  *   interrupt({ kind: "approval", action, title, summary, preview, args })
@@ -28,3 +29,4 @@ export { githubRead, githubWrite, projectWorkflow, claudeCode } from "./agent-to
 export { readFile, listDir, sendFile, writeFile, runShell, browser } from "./agent-tools/personal.js";
 export { readCv, searchJobs } from "./agent-tools/jobhunt.js";
 export { recordEvent } from "./agent-tools/memory.js";
+export { searchPersonalRag, searchTuricksBrain } from "./agent-tools/rag.js";
