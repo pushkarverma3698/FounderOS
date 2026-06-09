@@ -22,7 +22,10 @@
     "inspect": "node --env-file=.env --import tsx/esm scripts/inspect-thread.ts",
     "brain:sync": "node --env-file=.env --import tsx/esm scripts/sync-turicks-brain.ts",
     "lint": "tsc --noEmit",
-    "mcp": "node --env-file=.env --import tsx/esm src/mcp/index.ts"
+    "mcp": "node --env-file=.env --import tsx/esm src/mcp/index.ts",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "update-readme-metrics": "node --import tsx/esm scripts/update-readme-metrics.ts"
   },
   "dependencies": {
     "@composio/core": "0.10.0",
@@ -35,7 +38,6 @@
     "@langchain/openai": "^0.3.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "bottleneck": "^2.19.5",
-    "composio-core": "0.5.39",
     "drizzle-orm": "^0.38.0",
     "grammy": "^1.31.0",
     "hono": "^4.6.0",

@@ -235,8 +235,14 @@ export const projectWorkflowTool: UnifiedTool = {
           timeout: 120_000, // 2 min max
           maxBuffer: 1024 * 1024 * 2, // 2MB
         });
-        const stdout = out.toString().trim();
-        log.info({ command, cwd: absCwd }, "project_workflow command executed");
+        const rawStdout = out.toString().trim();
+        const MAX_TOOL_OUTPUT = 10_000;
+        const stdout =
+          rawStdout.length > MAX_TOOL_OUTPUT
+            ? rawStdout.slice(0, MAX_TOOL_OUTPUT) +
+              `\n\n[...${rawStdout.length - MAX_TOOL_OUTPUT} chars truncated — use targeted commands or pipe to head/tail]`
+            : rawStdout;
+        log.info({ command, cwd: absCwd, outputLen: rawStdout.length }, "project_workflow command executed");
         return { success: true, data: stdout || "(command completed with no output)" };
       } catch (err) {
         const execErr = err as { stdout?: string | Buffer; stderr?: string | Buffer; message: string };

@@ -27,9 +27,13 @@
  */
 
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { ChatOpenAI } from "@langchain/openai";
 import type { BaseMessage } from "@langchain/core/messages";
 import type { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
 import type { ChatResult } from "@langchain/core/outputs";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import type { Runnable } from "@langchain/core/runnables";
+import type { StructuredTool } from "@langchain/core/tools";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "model" });
@@ -72,6 +76,23 @@ export function is503Error(err: unknown): boolean {
   );
 }
 
+/**
+ * Filter out messages with empty content before calling Gemini.
+ * Prevents the 400 "GenerateContentRequest.contents: contents is not specified" error
+ * that fires after HITL resume when a large tool output makes the message list invalid.
+ * AIMessages with tool_calls but empty content string are kept (valid Gemini state).
+ */
+export function sanitizeForGemini(messages: BaseMessage[]): BaseMessage[] {
+  const valid = messages.filter((m) => {
+    const withCalls = m as { tool_calls?: unknown[] };
+    if (withCalls.tool_calls?.length) return true;
+    if (typeof m.content === "string") return m.content.trim().length > 0;
+    if (Array.isArray(m.content)) return m.content.length > 0;
+    return false;
+  });
+  return valid.length > 0 ? valid : messages;
+}
+
 /** Return copies of any name-tagged messages with the `name` attribute removed. */
 function stripNames(messages: BaseMessage[]): BaseMessage[] {
   return messages.map((m) => {
@@ -89,24 +110,29 @@ interface FounderChatGoogleFields {
   maxRetries: number;
   apiKey?: string;
   fallbackModels?: string[];
+  openRouterFallback?: ChatOpenAI;
 }
 
 /**
  * Gemini chat model that:
  * 1. Tolerates langgraph-supervisor's name-tagged messages (strips `name` before Gemini sees it)
- * 2. Cascades to cheaper fallback models on 503 errors
+ * 2. Sanitizes empty messages before calling Gemini (prevents 400 on HITL resume)
+ * 3. Cascades to cheaper fallback models on 503 errors
+ * 4. Escapes to OpenRouter/GPT-4o-mini when all Google infra is down
  */
 class FounderChatGoogle extends ChatGoogleGenerativeAI {
   /** Exposed for tests. Fallback model names in priority order. */
   readonly _fallbackModels: string[];
-  private readonly _fallbackInstances: ChatGoogleGenerativeAI[];
-  private readonly _fields: FounderChatGoogleFields;
+  private readonly _fallbackInstances: BaseChatModel[];
+  /** Exposed for tests. OpenRouter fallback or null if key not set. */
+  readonly _openRouterFallback: ChatOpenAI | null;
+  private _openRouterBound: Runnable<BaseMessage[], BaseMessage> | null = null;
 
   constructor(fields: FounderChatGoogleFields) {
-    const { fallbackModels = [], apiKey, ...rest } = fields;
+    const { fallbackModels = [], apiKey, openRouterFallback, ...rest } = fields;
     super({ ...rest, ...(apiKey ? { apiKey } : {}) });
-    this._fields = fields;
     this._fallbackModels = fallbackModels;
+    this._openRouterFallback = openRouterFallback ?? null;
     // Pre-build fallback instances (no further cascading — fallbackModels=[])
     this._fallbackInstances = fallbackModels.map(
       (m) =>
@@ -119,12 +145,23 @@ class FounderChatGoogle extends ChatGoogleGenerativeAI {
     );
   }
 
+  /** Pre-bind tools on the OpenRouter fallback so it's ready with correct tool format. */
+  override bindTools(tools: StructuredTool[], kwargs?: Record<string, unknown>) {
+    if (this._openRouterFallback) {
+      this._openRouterBound = this._openRouterFallback.bindTools(
+        tools,
+        kwargs,
+      ) as unknown as Runnable<BaseMessage[], BaseMessage>;
+    }
+    return super.bindTools(tools, kwargs);
+  }
+
   override async _generate(
     messages: BaseMessage[],
     options: this["ParsedCallOptions"],
     runManager?: CallbackManagerForLLMRun,
   ): Promise<ChatResult> {
-    const stripped = stripNames(messages);
+    const sanitized = sanitizeForGemini(stripNames(messages));
 
     // Retry loop: attempt 0 = initial call; attempts 1..N = retries with backoff
     let lastErr: unknown;
@@ -135,32 +172,54 @@ class FounderChatGoogle extends ChatGoogleGenerativeAI {
         await sleepMs(delay);
       }
       try {
-        return await super._generate(stripped, options, runManager);
+        return await super._generate(sanitized, options, runManager);
       } catch (err) {
         if (!is503Error(err)) throw err; // non-transient → surface immediately
         lastErr = err;
       }
     }
 
-    // All retries exhausted — try fallback chain (intentionally empty in June 2026)
-    if (this._fallbackInstances.length === 0) throw lastErr;
-
-    log.warn(
-      { primary: this.model, fallbacks: this._fallbackModels },
-      "Primary model retries exhausted, trying fallbacks",
-    );
-
-    for (let i = 0; i < this._fallbackInstances.length; i++) {
-      const fallback = this._fallbackInstances[i]!;
-      try {
-        log.info({ model: this._fallbackModels[i] }, "Trying fallback model");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return await (fallback as any)._generate(stripped, options, runManager);
-      } catch (fallbackErr) {
-        if (!is503Error(fallbackErr)) throw fallbackErr;
-        lastErr = fallbackErr;
+    // All retries exhausted — try Google fallback models
+    if (this._fallbackInstances.length > 0) {
+      log.warn(
+        { primary: this.model, fallbacks: this._fallbackModels },
+        "Primary model retries exhausted, trying fallbacks",
+      );
+      for (let i = 0; i < this._fallbackInstances.length; i++) {
+        const fallback = this._fallbackInstances[i]!;
+        try {
+          log.info({ model: this._fallbackModels[i] }, "Trying fallback model");
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return await (fallback as any)._generate(sanitized, options, runManager);
+        } catch (fallbackErr) {
+          if (!is503Error(fallbackErr)) throw fallbackErr;
+          lastErr = fallbackErr;
+        }
       }
     }
+
+    // Cross-provider escape hatch: OpenRouter/GPT-4o-mini
+    const openRouterRunner = this._openRouterBound ?? this._openRouterFallback;
+    if (openRouterRunner) {
+      log.warn({ primary: this.model }, "All Google models failed, trying OpenRouter/GPT-4o-mini");
+      try {
+        const msg = await openRouterRunner.invoke(sanitized);
+        return {
+          generations: [
+            {
+              text: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+              message: msg,
+              generationInfo: { model: "openai/gpt-4o-mini", provider: "openrouter" },
+            },
+          ],
+          llmOutput: { provider: "openrouter" },
+        };
+      } catch (orErr) {
+        log.error({ err: orErr }, "OpenRouter fallback also failed");
+        throw orErr;
+      }
+    }
+
     log.error({ fallbacks: this._fallbackModels }, "All fallback models returned 503");
     throw lastErr;
   }
@@ -227,20 +286,39 @@ function resolveTemperature(): number {
 }
 
 /**
+ * Build an OpenRouter/GPT-4o-mini fallback if OPENROUTER_API_KEY is set.
+ * Returns null if the key is absent — graceful degradation, not a crash.
+ * Full chain: gemini-2.5-flash → gemini-2.5-flash-lite → openrouter/gpt-4o-mini.
+ */
+function buildOpenRouterFallback(temperature: number): ChatOpenAI | null {
+  const apiKey = process.env["OPENROUTER_API_KEY"];
+  if (!apiKey) return null;
+  return new ChatOpenAI({
+    apiKey,
+    configuration: { baseURL: "https://openrouter.ai/api/v1" },
+    modelName: "openai/gpt-4o-mini",
+    temperature,
+    maxRetries: 1,
+  });
+}
+
+/**
  * Build the office model. Tool-calling capable.
  * AGENT_MODEL env var swaps the model id without a code change.
- * On 503 errors, automatically cascades to cheaper fallback models.
+ * On 503 errors, cascades: gemini-2.5-flash → gemini-2.5-flash-lite → openrouter/gpt-4o-mini.
  */
 export function getModel(): FounderChatGoogle {
   const primaryModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
   const apiKey = process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   const fallbackModels = MODEL_FALLBACK_CHAIN[primaryModel] ?? [];
+  const temperature = resolveTemperature();
 
   return new FounderChatGoogle({
     model: primaryModel,
-    temperature: resolveTemperature(),
+    temperature,
     maxRetries: 2,
     fallbackModels,
+    openRouterFallback: buildOpenRouterFallback(temperature),
     ...(apiKey ? { apiKey } : {}),
   });
 }

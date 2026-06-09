@@ -4,11 +4,11 @@
 
 FounderOS runs your agency, handles your inbox, posts to LinkedIn, manages GitHub, and operates your laptop — via Telegram. A LangGraph supervisor routes each message to the right department; specialist agents do the real work with real tools; and **nothing leaves without your explicit approval**.
 
+[![CI](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml/badge.svg)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5_strict-3178c6.svg)](tsconfig.json)
 [![LangGraph](https://img.shields.io/badge/LangGraph-JS_0.2.74-orange.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-271_passing-brightgreen.svg)](tests/)
-[![Eval](https://img.shields.io/badge/eval-13%2F13_100%25-brightgreen.svg)](EVAL.md)
+[![Tests](https://img.shields.io/badge/tests-730_passing-brightgreen.svg)](tests/)
 
 ---
 
@@ -82,13 +82,15 @@ Telegram message
 
 | Metric | Score | Date |
 |---|---|---|
-| Routing accuracy | **13/13 — 100%** | 2026-06-03 |
-| Tool selection | **10/10 — 100%** | 2026-06-03 |
-| HITL coverage | **12/12 — 100%** | 2026-06-03 |
-| Test suite | **271/271 passing** | 2026-06-04 |
+| Routing accuracy | **23/24 — 96%** | 2026-06-08 |
+| Tool selection | **20/20 — 100%** | 2026-06-08 |
+| HITL coverage | **21/23 — 91%** | 2026-06-08 |
+| **Overall** | **88%** | 2026-06-08 |
 
 Methodology: golden tasks run at temperature 0 via `pnpm eval` against a live office with a
 MemorySaver checkpointer. No approvals fire (HITL is observed, not executed). See [`EVAL.md`](EVAL.md).
+
+> Metrics auto-updated by CI on every merge to main.
 
 ---
 
@@ -236,9 +238,11 @@ Key invariant: **all side effects run AFTER `interrupt()` returns**. Code before
 ## Running tests
 
 ```bash
-pnpm test           # 271 unit + integration tests
+pnpm test:unit      # Unit tests only (no API keys required)
+pnpm test:integration  # Integration tests (needs GOOGLE_GENERATIVE_AI_API_KEY)
+pnpm test           # All 730+ tests
 pnpm eval           # Deterministic golden-task eval → EVAL.md (needs live Postgres + LLM key)
-pnpm lint           # TypeScript typecheck + ESLint
+pnpm lint           # TypeScript typecheck
 ```
 
 ---

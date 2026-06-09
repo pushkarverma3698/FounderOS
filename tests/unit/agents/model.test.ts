@@ -83,11 +83,15 @@ describe("RETRY_BACKOFF_MS constant", () => {
 describe("retry with exponential backoff", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    // Prevent real OpenRouter HTTP calls during retry tests — the fallback
+    // must be null so exhausted-Google errors surface as expected 503s
+    delete process.env["OPENROUTER_API_KEY"];
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    delete process.env["OPENROUTER_API_KEY"];
   });
 
   it("retries on 503 and succeeds on the third attempt", async () => {
