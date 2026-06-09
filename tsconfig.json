@@ -20,5 +20,5 @@
     "emitDecoratorMetadata": false
   },
   "include": ["src/**/*", "scripts/**/*"],
-  "exclude": ["node_modules", "dist", "tests/**/*"]
+  "exclude": ["node_modules", "dist", "tests/**/*", "src/social-media-agent/**/*"]
 }

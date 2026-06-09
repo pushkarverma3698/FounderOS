@@ -29,7 +29,7 @@ function parseEvalMd(content: string): Metrics {
   const overallMatch = content.match(/overall[^|]*\|([^|]+)\|/i);
 
   const extract = (match: RegExpMatchArray | null, fallback: string): string =>
-    match ? match[1].trim() : fallback;
+    match ? (match[1] ?? fallback).trim() : fallback;
 
   return {
     routing: extract(routingMatch, "N/A"),
