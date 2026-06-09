@@ -141,6 +141,22 @@ function collectDocs(rootDir: string): DocEntry[] {
     });
   }
 
+  // ── Founder Profile ──────────────────────────────────────────────────────────
+  // Operational context: who Pushkar is, Turicks/Naggar Retreat, 2026 goals,
+  // working style. Enables agents to answer "who is Pushkar?" via search_knowledge
+  // without asking him — satisfies the SELF-QUERY BEFORE ASKING rule.
+  // Boundary: personal career/portfolio data lives in personal-rag, NOT here (ADR-013/015).
+  const founderProfile = join(root, "docs/FOUNDER-PROFILE.md");
+  if (existsSync(founderProfile)) {
+    docs.push({
+      entry_type: "founder_profile",
+      title: "Founder Profile — Pushkar Verma",
+      content: readFile(founderProfile),
+      source: "docs/FOUNDER-PROFILE.md",
+      tags: ["founder", "profile", "turicks", "naggar", "pushkar", "icp", "goals"],
+    });
+  }
+
   return docs;
 }
 
