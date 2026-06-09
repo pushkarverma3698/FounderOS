@@ -149,9 +149,9 @@ export const createCalendarEvent = tool(
     schema: z.object({
       title: z.string().describe("Event/reminder title"),
       date: z.string().describe("Start date/time in ISO format: YYYY-MM-DD (all-day) or YYYY-MM-DDTHH:mm:ss"),
-      end_date: z.string().optional().describe("End date/time (ISO). Defaults to +1 day for all-day or +1h for timed."),
-      description: z.string().optional().describe("Optional description or notes"),
-      timezone: z.string().optional().describe("Timezone (default: Europe/Amsterdam)"),
+      end_date: z.string().optional().nullable().describe("End date/time (ISO). Defaults to +1 day for all-day or +1h for timed."),
+      description: z.string().optional().nullable().describe("Optional description or notes"),
+      timezone: z.string().optional().nullable().describe("Timezone (default: Europe/Amsterdam)"),
     }),
   },
 );
@@ -171,8 +171,8 @@ export const readEmails = tool(
     description:
       "Read emails from Gmail inbox. Use Gmail search syntax: 'is:unread', 'from:alice@example.com', 'subject:invoice'. Read-only — no approval needed.",
     schema: z.object({
-      query: z.string().optional().describe("Gmail search query (default: 'in:inbox')"),
-      limit: z.number().optional().describe("Max emails to return (default 10)"),
+      query: z.string().optional().nullable().describe("Gmail search query (default: 'in:inbox')"),
+      limit: z.number().optional().nullable().describe("Max emails to return (default 10)"),
     }),
   },
 );

@@ -26,7 +26,7 @@ export const searchWeb = tool(
       "Search the web for current information, news, or company/market research. Returns titles, URLs, and snippets. Read-only — no approval needed.",
     schema: z.object({
       query: z.string().describe("The search query"),
-      limit: z.number().optional().describe("Max results (default 5)"),
+      limit: z.number().optional().nullable().describe("Max results (default 5)"),
     }),
   },
 );

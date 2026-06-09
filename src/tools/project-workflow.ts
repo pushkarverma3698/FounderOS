@@ -175,7 +175,13 @@ export const projectWorkflowTool: UnifiedTool = {
       }
 
       try {
-        const content = readFileSync(abs, "utf-8");
+        const raw = readFileSync(abs, "utf-8");
+        const MAX_FILE_READ_CHARS = 6_000;
+        const content =
+          raw.length > MAX_FILE_READ_CHARS
+            ? raw.slice(0, MAX_FILE_READ_CHARS) +
+              `\n\n[...${raw.length - MAX_FILE_READ_CHARS} chars truncated — use run_command with grep/awk/sed to read specific sections]`
+            : raw;
         return { success: true, data: content || "(empty file)" };
       } catch (err) {
         return { success: false, error: `Read failed: ${(err as Error).message}` };

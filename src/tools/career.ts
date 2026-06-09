@@ -46,14 +46,16 @@ export const readCvTool: UnifiedTool = {
       query: {
         type: "string",
         description:
-          "What to look up. E.g. 'LangGraph experience', 'salary expectations', 'TypeScript projects', 'AI agent skills'",
+          "What to look up. E.g. 'LangGraph experience', 'salary expectations', 'TypeScript projects', 'AI agent skills'. " +
+          "Omit or use 'general overview' to get a full career summary.",
       },
     },
-    required: ["query"],
+    required: [],
   },
 
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
-    const query = (args["query"] as string | undefined) ?? "";
+    const raw = (args["query"] as string | undefined) ?? "";
+    const query = raw.trim().length > 0 ? raw : "general background, skills, and portfolio";
 
     // ── Try personal-rag REST API first ──────────────────────────────────────
     try {

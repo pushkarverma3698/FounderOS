@@ -163,3 +163,43 @@ describe("WorkflowAction type", () => {
     expect([a1, a2, a3]).toHaveLength(3);
   });
 });
+
+// ── read_file truncation (prevents Gemini 400 on large files) ─────────────────
+
+describe("read_file truncation", () => {
+  it("returns full content for files under 6000 chars", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { homedir } = await import("node:os");
+    const { projectWorkflowTool } = await import("../../../src/tools/project-workflow.js");
+
+    const dir = mkdtempSync(join(homedir(), "Projects/founderos-test-"));
+    const small = "x".repeat(100);
+    writeFileSync(join(dir, "small.ts"), small);
+
+    const result = await projectWorkflowTool.execute({ action: "read_file", path: dir + "/small.ts" });
+    expect(result.success).toBe(true);
+    expect(result.data as string).toBe(small);
+  });
+
+  it("truncates files over 6000 chars with a clear notice", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { homedir } = await import("node:os");
+    const { projectWorkflowTool } = await import("../../../src/tools/project-workflow.js");
+
+    const dir = mkdtempSync(join(homedir(), "Projects/founderos-test-"));
+    const large = "y".repeat(8_500);
+    writeFileSync(join(dir, "large.ts"), large);
+
+    const result = await projectWorkflowTool.execute({ action: "read_file", path: dir + "/large.ts" });
+    expect(result.success).toBe(true);
+    const data = result.data as string;
+    // Must be capped at 6000 chars of content + truncation notice
+    expect(data.startsWith("y".repeat(6_000))).toBe(true);
+    expect(data).toContain("chars truncated");
+    expect(data).toContain("grep");
+    // Total output stays well under the Gemini payload limit
+    expect(data.length).toBeLessThan(6_200);
+  });
+});

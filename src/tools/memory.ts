@@ -118,6 +118,7 @@ export const searchMemoryTool = tool(
       type: z
         .enum(["all", "episodic", "knowledge", "context", "conversations"])
         .optional()
+        .nullable()
         .default("all")
         .describe(
           "Which memory source to search. " +
@@ -190,6 +191,7 @@ export const recordEventTool = tool(
       occurred_at: z
         .string()
         .optional()
+        .nullable()
         .describe("ISO 8601 timestamp of when this happened. Defaults to now if omitted."),
     }),
   },

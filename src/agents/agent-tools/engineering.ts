@@ -34,8 +34,8 @@ export const githubRead = tool(
       "For FounderOS queries use owner='pushkarverma3698' repo='FounderOS'.",
     schema: z.object({
       action: z.enum(["list_repos", "get_readme", "get_stats", "list_issues", "list_branches", "list_commits"]),
-      owner: z.string().optional(),
-      repo: z.string().optional(),
+      owner: z.string().optional().nullable(),
+      repo: z.string().optional().nullable(),
     }),
   },
 );
@@ -78,11 +78,11 @@ export const githubWrite = tool(
       "Write to GitHub (requires founder approval). Actions: create_issue (owner, repo, title, body), create_repo (title=name, body=description), update_readme (owner, repo, content).",
     schema: z.object({
       action: z.enum(["create_issue", "create_repo", "update_readme"]),
-      owner: z.string().optional(),
-      repo: z.string().optional(),
-      title: z.string().optional(),
-      body: z.string().optional(),
-      content: z.string().optional(),
+      owner: z.string().optional().nullable(),
+      repo: z.string().optional().nullable(),
+      title: z.string().optional().nullable(),
+      body: z.string().optional().nullable(),
+      content: z.string().optional().nullable(),
     }),
   },
 );
@@ -135,11 +135,11 @@ export const projectWorkflow = tool(
       action: z.enum(["run_command", "read_file", "list_files"]).describe(
         "read_file / list_files: instant. run_command: always requires founder approval."
       ),
-      command: z.string().optional().describe(
+      command: z.string().optional().nullable().describe(
         "Shell command for run_command. E.g. 'pnpm test', 'git checkout -b feat/x', 'gh pr create --title ...' "
       ),
-      path: z.string().optional().describe("File/dir path for read_file or list_files (within ~/Projects)"),
-      cwd: z.string().optional().describe("Working dir for run_command (default: ~/Projects/founderos)"),
+      path: z.string().optional().nullable().describe("File/dir path for read_file or list_files (within ~/Projects)"),
+      cwd: z.string().optional().nullable().describe("Working dir for run_command (default: ~/Projects/founderos)"),
     }),
   },
 );
@@ -177,7 +177,7 @@ export const claudeCode = tool(
       task: z.string().describe(
         "The task/prompt to send to the Claude Code CLI. Be specific and self-contained."
       ),
-      cwd: z.string().optional().describe(
+      cwd: z.string().optional().nullable().describe(
         "Working directory within ~/Projects (default: ~/Projects/founderos)"
       ),
     }),

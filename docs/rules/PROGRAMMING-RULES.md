@@ -11,13 +11,16 @@
 
 ---
 
-## The 5 Iron Rules (apply to everything)
+## The 8 Iron Rules (apply to everything)
 
 1. **TDD always** — no production code without a failing test first (RED → GREEN → REFACTOR).
 2. **HITL before every external action** — any send/post/push/create/delete calls `hitlGate()` and runs the side-effect ONLY after approval.
 3. **Idempotency before every send** — `hasBeenAudited()` before, `writeAuditEntry()` only after a confirmed success id.
 4. **Soft-failure detection** — external APIs return HTTP 200 + error message with no id. Check for the id; return `success: false` if missing. (See `TESTING-RULES.md` Rule 2.)
 5. **Determinism** — model temperature stays 0; push logic into pure functions with unit tests, not prompt instructions.
+6. **LangChain ChatResult shape** — `ChatResult.generations` is `ChatGeneration[]` (single-nested, NOT double-nested). Any function that synthesizes or mocks a `ChatResult` (e.g. `syntheticResponseFromLastTool`) MUST return `generations: [{ text, message, generationInfo }]`. Double-nesting causes `generation.message` to be `undefined` → crash inside `_generateUncached`. Tests: assert `result.generations[0].text`, NOT `result.generations[0][0].text`.
+7. **Zod optional fields always include `.nullable()`** — `z.string().optional()` alone triggers a LangChain SDK deprecation warning that will become a hard error in a future SDK version. Every optional tool schema field MUST be `z.string().optional().nullable()`. If the downstream function signature is `T | undefined` (not `T | null | undefined`), coerce at call-site: `field ?? undefined`.
+8. **Regression test before every commit** — before staging any file, run `pnpm test`. If any test changes to match new code behaviour, first confirm the *test* is correct before updating it. Never update a test to fix a red suite without understanding why the original test was right.
 
 ---
 
