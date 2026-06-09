@@ -35,6 +35,9 @@ const envSchema = z.object({
   GITHUB_TOKEN: z.string().transform(v => v || undefined).optional(),
   OPENAI_API_KEY: z.string().transform(v => v || undefined).optional(),
 
+  // Cross-provider fallback — optional; enables OpenRouter/GPT-4o-mini when all Google models 503
+  OPENROUTER_API_KEY: z.string().transform(v => v || undefined).optional(),
+
   // Observability — optional, degrades gracefully
   LANGCHAIN_API_KEY: z.string().optional(),
   LANGCHAIN_PROJECT: z.string().default("founderos"),
