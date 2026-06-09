@@ -28,7 +28,8 @@
 
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOpenAI } from "@langchain/openai";
-import type { BaseMessage } from "@langchain/core/messages";
+import type { BaseMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage } from "@langchain/core/messages";
 import type { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
 import type { ChatResult } from "@langchain/core/outputs";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -77,6 +78,49 @@ export function is503Error(err: unknown): boolean {
 }
 
 /**
+ * Detect the Gemini SDK crash when a candidate has no content (empty completion).
+ * This happens after HITL resume when Gemini returns a candidate with finishReason=STOP
+ * but no content parts — the SDK checks for missing candidates[] but not for a candidate
+ * with undefined .content, crashing at `candidateContent?.parts.length` (line 222 of
+ * @langchain/google-genai@0.1.12 utils/common.js).
+ * Exported so unit tests can assert on it.
+ */
+export function isNoCandidatesError(err: unknown): boolean {
+  if (!(err instanceof TypeError)) return false;
+  return (
+    err.message.includes("Cannot read properties of undefined") &&
+    err.message.includes("'length'") &&
+    (err.stack?.includes("mapGenerateContentResultToChatResult") ?? false)
+  );
+}
+
+/**
+ * Build a synthetic ChatResult from the last ToolMessage in the conversation.
+ * Used as a last-resort fallback when Gemini returns an empty candidate after a tool call.
+ * The tool result string is surfaced verbatim so nothing is silently swallowed.
+ */
+function syntheticResponseFromLastTool(messages: BaseMessage[]): import("@langchain/core/outputs").ChatResult {
+  const toolMsgs = messages.filter(
+    (m): m is ToolMessage => m._getType() === "tool" && typeof m.content === "string",
+  );
+  const lastToolContent = toolMsgs.length > 0
+    ? (toolMsgs[toolMsgs.length - 1] as ToolMessage).content as string
+    : "Action completed.";
+  // ChatResult.generations is ChatGeneration[] (single-nested).
+  // _generateUncached iterates generations and accesses .message.id directly.
+  return {
+    generations: [
+      {
+        text: lastToolContent,
+        message: new AIMessage({ content: lastToolContent }),
+        generationInfo: { model: "synthetic-fallback", provider: "founderos" } as Record<string, unknown>,
+      },
+    ],
+    llmOutput: { provider: "founderos-synthetic" },
+  };
+}
+
+/**
  * Filter out messages with empty content before calling Gemini.
  * Prevents the 400 "GenerateContentRequest.contents: contents is not specified" error
  * that fires after HITL resume when a large tool output makes the message list invalid.
@@ -87,7 +131,19 @@ export function sanitizeForGemini(messages: BaseMessage[]): BaseMessage[] {
     const withCalls = m as { tool_calls?: unknown[] };
     if (withCalls.tool_calls?.length) return true;
     if (typeof m.content === "string") return m.content.trim().length > 0;
-    if (Array.isArray(m.content)) return m.content.length > 0;
+    if (Array.isArray(m.content)) {
+      if (m.content.length === 0) return false;
+      // Also reject arrays where every text part is empty — Gemini rejects Content with no non-empty parts.
+      return (m.content as Array<unknown>).some((part) => {
+        if (typeof part === "string") return part.trim().length > 0;
+        if (typeof part === "object" && part !== null) {
+          const p = part as { type?: string; text?: string };
+          if (p.type === "text") return (p.text ?? "").trim().length > 0;
+          return true; // non-text parts (images, tool results) are always valid
+        }
+        return false;
+      });
+    }
     return false;
   });
   return valid.length > 0 ? valid : messages;
@@ -174,8 +230,18 @@ class FounderChatGoogle extends ChatGoogleGenerativeAI {
       try {
         return await super._generate(sanitized, options, runManager);
       } catch (err) {
-        if (!is503Error(err)) throw err; // non-transient → surface immediately
-        lastErr = err;
+        if (is503Error(err)) {
+          lastErr = err;
+        } else if (isNoCandidatesError(err)) {
+          // SDK bug: Gemini returns a candidate with finishReason=STOP but no content
+          // after tool execution. Retrying or switching models won't help — the tool
+          // DID run, Gemini just returned an empty completion. Surface the last tool
+          // result verbatim so nothing is silently swallowed.
+          log.warn({ module: "model" }, "Empty Gemini candidates after tool call — synthesizing from last tool result");
+          return syntheticResponseFromLastTool(sanitized);
+        } else {
+          throw err; // non-transient, non-candidates → surface immediately
+        }
       }
     }
 
@@ -318,7 +384,7 @@ export function getModel(): FounderChatGoogle {
     temperature,
     maxRetries: 2,
     fallbackModels,
-    openRouterFallback: buildOpenRouterFallback(temperature),
+    openRouterFallback: buildOpenRouterFallback(temperature) ?? undefined,
     ...(apiKey ? { apiKey } : {}),
   });
 }

@@ -36,7 +36,7 @@ export const recordEvent = tool(
       event_type: z
         .enum(["conversation", "decision", "outcome", "task_completed"])
         .describe("Category of event"),
-      occurred_at: z.string().optional().describe("ISO 8601 timestamp. Defaults to now."),
+      occurred_at: z.string().optional().nullable().describe("ISO 8601 timestamp. Defaults to now."),
     }),
   },
 );

@@ -147,4 +147,46 @@ describe("sanitizeForGemini", () => {
     expect(result).toHaveLength(2);
     expect(result).toEqual(msgs);
   });
+
+  it("filters out array-content messages where all text parts are empty", () => {
+    // Gemini rejects Content with no non-empty parts — this is the T10 bug
+    const emptyArrayMsg = new HumanMessage({ content: [{ type: "text", text: "" }] });
+    const validMsg = new HumanMessage("real question");
+    const result = sanitizeForGemini([emptyArrayMsg, validMsg]);
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe("real question");
+  });
+
+  it("filters out array-content messages where all text parts are whitespace only", () => {
+    const whitespaceMsg = new HumanMessage({ content: [{ type: "text", text: "   " }] });
+    const validMsg = new HumanMessage("real content");
+    const result = sanitizeForGemini([whitespaceMsg, validMsg]);
+    expect(result).toHaveLength(1);
+  });
+
+  it("keeps array-content messages that have at least one non-empty text part", () => {
+    const mixedMsg = new HumanMessage({
+      content: [{ type: "text", text: "" }, { type: "text", text: "actual text" }],
+    });
+    const result = sanitizeForGemini([mixedMsg]);
+    expect(result).toHaveLength(1);
+  });
+
+  it("keeps array-content messages with non-text parts (images, tool results)", () => {
+    const imageMsg = new HumanMessage({
+      content: [{ type: "image_url", image_url: "data:image/png;base64,abc" }],
+    });
+    const result = sanitizeForGemini([imageMsg]);
+    expect(result).toHaveLength(1);
+  });
+
+  it("filters empty array-content but falls back to original when all messages invalid", () => {
+    const allEmpty = [
+      new HumanMessage({ content: [{ type: "text", text: "" }] }),
+      new HumanMessage({ content: [{ type: "text", text: "  " }] }),
+    ];
+    const result = sanitizeForGemini(allEmpty);
+    // Safe fallback — does not return empty array
+    expect(result).toEqual(allEmpty);
+  });
 });

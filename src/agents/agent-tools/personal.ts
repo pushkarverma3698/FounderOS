@@ -62,7 +62,7 @@ export const listDir = tool(
     description:
       "List the contents of a directory on the founder's laptop (under the personal root). Read-only — no approval needed. The tool returns a formatted directory listing — relay it verbatim to the founder.",
     schema: z.object({
-      path: z.string().optional().describe("Directory path (default: personal root)"),
+      path: z.string().optional().nullable().describe("Directory path (default: personal root)"),
     }),
   },
 );
@@ -156,7 +156,7 @@ export const runShell = tool(
     });
     if (rejected) return rejected;
 
-    const r = await runShellSafe(command, cwd);
+    const r = await runShellSafe(command, cwd ?? undefined);
     if (!r.ok) return `Command failed: ${r.error}`;
     log.info({ command }, "Shell command run via personal agent");
 
@@ -174,7 +174,7 @@ export const runShell = tool(
       "Run a shell command or script on the founder's laptop, with the working directory confined to the personal root. The founder is asked to APPROVE before it runs (destructive patterns are flagged). Use for builds, scripts, git, file ops.",
     schema: z.object({
       command: z.string().describe("The shell command to run"),
-      cwd: z.string().optional().describe("Working directory (default: personal root)"),
+      cwd: z.string().optional().nullable().describe("Working directory (default: personal root)"),
     }),
   },
 );
@@ -202,8 +202,8 @@ export const browser = tool(
       "Drive Safari on the founder's laptop. Actions: open_url (needs url), get_page_text (reads the current page), run_js (needs js). The founder is asked to APPROVE before it runs.",
     schema: z.object({
       action: z.enum(["open_url", "get_page_text", "run_js"]),
-      url: z.string().optional().describe("URL for open_url"),
-      js: z.string().optional().describe("JavaScript for run_js"),
+      url: z.string().optional().nullable().describe("URL for open_url"),
+      js: z.string().optional().nullable().describe("JavaScript for run_js"),
     }),
   },
 );

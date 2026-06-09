@@ -40,7 +40,7 @@ export const searchJobs = tool(
     description: searchJobsTool.description,
     schema: z.object({
       query: z.string().describe("Role + keywords, e.g. 'AI engineer LangGraph TypeScript'"),
-      location: z.string().optional().describe("Location, e.g. 'Amsterdam' or 'remote EU'"),
+      location: z.string().optional().nullable().describe("Location, e.g. 'Amsterdam' or 'remote EU'"),
     }),
   },
 );

@@ -59,6 +59,7 @@ export const searchKnowledge = tool(
       entry_type: z
         .enum(["adr", "brand", "case_study", "strategic_pillar", "phase", "decision"])
         .optional()
+        .nullable()
         .describe("Optional: filter by content type"),
     }),
   },
