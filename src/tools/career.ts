@@ -20,6 +20,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { childLogger } from "../infra/logger.js";
+import { webSearchTool, type SearchResult } from "./web-search.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:career" });
@@ -169,9 +170,30 @@ export const searchJobsTool: UnifiedTool = {
     const location = args["location"] as string | undefined;
     const fullQuery = location ? `${query} ${location} jobs hiring` : `${query} jobs hiring`;
 
+    // Any Firecrawl failure (missing key, 402 credits exhausted, network)
+    // falls through to search_web, which carries its own Gemini-grounding
+    // fallback — job search must not share Firecrawl's single point of failure.
+    const fallbackSearch = async (reason: string): Promise<ToolResult> => {
+      log.warn({ reason }, "search_jobs: Firecrawl unavailable — using search_web fallback");
+      const result = await webSearchTool.execute({ query: fullQuery, limit: 8 });
+      if (!result.success) {
+        return { success: false, error: `Job search failed: ${reason}; fallback: ${result.error}` };
+      }
+      const items = (result.data as SearchResult[]) ?? [];
+      if (items.length === 0) {
+        return { success: true, data: `No job listings found for "${fullQuery}". Try broader keywords.` };
+      }
+      const formatted = items
+        .map((r, i) => `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.snippet.slice(0, 300).replace(/\n+/g, " ")}`)
+        .join("\n\n");
+      return {
+        success: true,
+        data: `Job search results for "${fullQuery}" (${items.length} found):\n\n${formatted}`,
+      };
+    };
+
     if (!FIRECRAWL_API_KEY) {
-      log.warn("FIRECRAWL_API_KEY not set — job search unavailable");
-      return { success: false, error: "Job search unavailable: FIRECRAWL_API_KEY not configured." };
+      return fallbackSearch("FIRECRAWL_API_KEY not configured");
     }
 
     try {
@@ -186,10 +208,7 @@ export const searchJobsTool: UnifiedTool = {
       });
 
       if (!resp.ok) {
-        return {
-          success: false,
-          error: `Job search failed: Firecrawl returned ${resp.status}. Check FIRECRAWL_API_KEY.`,
-        };
+        return fallbackSearch(`Firecrawl returned ${resp.status}`);
       }
 
       const body = (await resp.json()) as {
@@ -222,7 +241,7 @@ export const searchJobsTool: UnifiedTool = {
     } catch (err) {
       const msg = (err as Error).message;
       log.error({ query: fullQuery, err: msg }, "Job search failed");
-      return { success: false, error: `Job search failed: ${msg}` };
+      return fallbackSearch(msg);
     }
   },
 };

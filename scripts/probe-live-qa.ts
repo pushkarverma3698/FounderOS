@@ -23,6 +23,7 @@ import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { HumanMessage } from "@langchain/core/messages";
 import { getOffice, getPendingApproval } from "../src/agents/office.js";
+import { OFFICE_RECURSION_LIMIT } from "../src/core/config.js";
 import { markdownToTelegramHtml } from "../src/gateway/format.js";
 import { closeDatabaseConnections } from "../src/db/client.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
@@ -575,7 +576,7 @@ async function runTask(
 
   const config: RunnableConfig = {
     configurable: { thread_id: threadId },
-    recursionLimit: 20,
+    recursionLimit: OFFICE_RECURSION_LIMIT,
     callbacks: [toolCollector],
   };
 

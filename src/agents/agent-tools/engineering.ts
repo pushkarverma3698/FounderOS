@@ -15,6 +15,7 @@ import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
+import { sendStatusText } from "../../infra/telegram-send.js";
 
 const log = childLogger({ module: "agent-tools:engineering" });
 
@@ -154,19 +155,30 @@ export const claudeCode = tool(
       return `Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code`;
     }
 
+    // Idempotency: a HITL resume replay must not launch a second 15-minute run
+    const key = idemKey("claude_code", cwd ?? "", task);
+    if (await hasBeenAudited(key)) {
+      return `Already executed this exact task (skipped duplicate run).`;
+    }
+
     const rejected = hitlGate({
       action: "claude_code",
-      title: "Invoke Claude Code CLI?",
-      summary: `Run: claude -p "..." in ${cwd ?? "~/Projects/founderos"}`,
+      title: "🤖 Run this task with Claude Code?",
+      summary: `One approval covers the whole task. Workspace: ${cwd ?? "~/Projects/agent-workspace"}`,
       preview: task,
       args: { task, cwd },
     });
     if (rejected) return rejected;
 
-    const res = await claudeCodeTool.execute({ task, cwd });
+    const res = await claudeCodeTool.execute({
+      task,
+      cwd,
+      _onProgress: (line: string) => void sendStatusText(`⏳ ${line}`),
+    });
     if (!res.success) {
       return `Claude Code failed: ${res.error}`;
     }
+    await writeAuditEntry({ action: "claude_code", idempotency_key: key, payload: { task: task.slice(0, 400), cwd }, tenant_id: TENANT });
     log.info({ task: task.slice(0, 80) }, "claude_code executed via engineering agent");
     return typeof res.data === "string" ? res.data : "Claude Code completed.";
   },
@@ -175,10 +187,11 @@ export const claudeCode = tool(
     description: claudeCodeTool.description,
     schema: z.object({
       task: z.string().describe(
-        "The task/prompt to send to the Claude Code CLI. Be specific and self-contained."
+        "COMPLETE self-contained task brief: goal, target location, verification steps, " +
+        "and where to push/deliver the result. The whole engineering task goes in here at once."
       ),
       cwd: z.string().optional().nullable().describe(
-        "Working directory within ~/Projects (default: ~/Projects/founderos)"
+        "Working directory within ~/Projects (default: ~/Projects/agent-workspace). The FounderOS repo is not allowed."
       ),
     }),
   },

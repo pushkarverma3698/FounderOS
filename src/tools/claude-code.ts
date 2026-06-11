@@ -1,28 +1,38 @@
 /**
- * FounderOS — Claude Code CLI Tool (Engineering Department)
- * =========================================================
- * Wraps the Claude Code CLI (`claude -p "<task>"`) so the engineering agent
- * can delegate complex AI coding tasks to it via Telegram.
+ * FounderOS — Claude Code Executor (Engineering Department)
+ * ==========================================================
+ * The PRIMARY task executor for multi-step coding/build/repo work. Wraps the
+ * Claude Code CLI headless (`claude -p`) so a whole task — "build a website,
+ * create a repo, push it" — runs inside a real agent harness (strong model,
+ * file tools, verification loop) instead of Gemini improvising one-shot shell
+ * strings.
  *
- * Usage: founder says "ask claude code to X" → engineering routes here →
- *        HITL approval card shown → on approve, runs `claude -p "X"` → returns output.
+ * Flow: founder asks for an engineering task → ONE HITL approval card (the
+ * task brief) → claude -p runs in an isolated workspace → progress streamed
+ * to Telegram → final result returned to the office.
  *
- * SECURITY:
- *   - CWD confined to ~/Projects (reuses isProjectPath from project-workflow)
- *   - Binary path resolved once at import time (or via _binaryOverride for tests)
- *   - Timeout: 120 seconds (same as project-workflow run_command)
- *   - Output capped at 64 KB to avoid flooding Telegram
- *
- * NOTE: This tool is ALWAYS HITL-gated at the LangChain wrapper level in
- * agent-tools.ts. The execute() method runs the real action (after approval).
- *
- * Test seam: pass `_binaryOverride` in args to substitute a different binary
- * path at test time (e.g. /bin/echo, /bin/false, /bin/pwd).
+ * SECURITY / RELIABILITY:
+ *   - CWD confined to ~/Projects, and the bot's OWN repo (~/Projects/founderos)
+ *     is HARD-BLOCKED — the agent must never git-checkout/commit the live
+ *     process's working tree (this caused real production damage on 2026-06-09).
+ *   - Default workspace: ~/Projects/agent-workspace (created on demand).
+ *   - Async spawn — never blocks the bot's event loop (the old execSync froze
+ *     long polling for the entire run).
+ *   - Timeout: 15 minutes (real coding tasks need it; the old 120s killed
+ *     everything non-trivial).
+ *   - ANTHROPIC_* env vars are stripped from the child so the CLI uses its own
+ *     stored login instead of the bot's critic API key (root cause of the
+ *     "Claude Code is not logged in" failure).
+ *   - Permissions: --permission-mode acceptEdits + explicit --allowedTools.
+ *     The founder's upfront HITL approval is the authorization boundary.
+ *   - stream-json output parsed line-by-line; assistant progress is forwarded
+ *     to Telegram via the api-only sender (no gateway import, no 409).
  */
 
-import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { spawn, execSync } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { join, normalize, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { childLogger } from "../infra/logger.js";
 import { isProjectPath } from "./project-workflow.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
@@ -31,26 +41,18 @@ const log = childLogger({ module: "tool:claude-code" });
 
 // ── Binary discovery ──────────────────────────────────────────────────────────
 
-/**
- * Candidate paths where the Claude Code CLI might be installed.
- * The CLAUDE_CODE_BIN env var allows override (useful for CI).
- */
 const CANDIDATE_PATHS = [
   process.env["CLAUDE_CODE_BIN"],
-  "/Users/pushkarverma/.local/bin/claude",
+  join(process.env["HOME"] ?? "/Users/pushkarverma", ".local/bin/claude"),
   "/usr/local/bin/claude",
   "/opt/homebrew/bin/claude",
 ].filter(Boolean) as string[];
 
-/**
- * Returns the first resolvable Claude Code binary path, or null if not found.
- * Exported so tests can assert on it independently.
- */
+/** Returns the first resolvable Claude Code binary path, or null if not found. */
 export function findClaudeBinary(): string | null {
   for (const candidate of CANDIDATE_PATHS) {
     if (existsSync(candidate)) return candidate;
   }
-  // Try PATH-based lookup as a last resort
   try {
     const result = execSync("which claude 2>/dev/null", { encoding: "utf-8", timeout: 3_000 });
     const path = result.trim();
@@ -63,30 +65,159 @@ export function findClaudeBinary(): string | null {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const TIMEOUT_MS = 120_000; // 2 minutes — same as project-workflow run_command
-const MAX_OUTPUT_BYTES = 64 * 1024; // 64 KB — prevents flooding Telegram
+export const TIMEOUT_MS = 15 * 60_000; // 15 minutes — real coding tasks need it
+const MAX_RESULT_CHARS = 16_000; // final answer cap (Telegram-friendly)
+const PROGRESS_MIN_INTERVAL_MS = 20_000; // at most one progress ping per 20s
+
+/** Tools the headless session may use without interactive prompts. */
+const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep WebFetch WebSearch NotebookEdit";
+
+// ── Workspace policy ──────────────────────────────────────────────────────────
+
+function home(): string {
+  return process.env["HOME"] ?? "/Users/pushkarverma";
+}
+
+/** The bot's own repo — git/file mutations here from an agent are forbidden. */
+export function founderosRepoPath(): string {
+  return join(home(), "Projects/founderos");
+}
+
+/** Default isolated workspace for agent tasks. Created on demand. */
+export function defaultWorkspace(): string {
+  return join(home(), "Projects/agent-workspace");
+}
+
+/**
+ * Validate and resolve the working directory for a Claude Code run.
+ * Returns { ok: true, cwd } or { ok: false, error }.
+ */
+export function resolveExecutorCwd(rawCwd?: string | null): { ok: true; cwd: string } | { ok: false; error: string } {
+  const target = rawCwd && rawCwd.trim().length > 0
+    ? (rawCwd.startsWith("/") ? rawCwd : rawCwd.startsWith("~") ? rawCwd.replace("~", home()) : join(home(), "Projects", rawCwd))
+    : defaultWorkspace();
+  const abs = normalize(resolve(target));
+
+  const selfRepo = founderosRepoPath();
+  if (abs === selfRepo || abs.startsWith(selfRepo + "/")) {
+    return {
+      ok: false,
+      error:
+        "Refused: Claude Code may not run inside the FounderOS repo — the bot must never modify its own " +
+        "running code (this corrupted the live process before). FounderOS changes are made by the founder " +
+        "directly. Use a different project under ~/Projects, or omit cwd for the agent workspace.",
+    };
+  }
+
+  if (!isProjectPath(abs) && abs !== join(home(), "Projects")) {
+    return { ok: false, error: `Access denied: cwd ${abs} is outside ~/Projects.` };
+  }
+
+  if (!existsSync(abs)) {
+    mkdirSync(abs, { recursive: true });
+    log.info({ cwd: abs }, "Created executor workspace directory");
+  }
+  return { ok: true, cwd: abs };
+}
+
+// ── stream-json parsing ───────────────────────────────────────────────────────
+
+interface StreamEvent {
+  type?: string;
+  subtype?: string;
+  result?: string;
+  is_error?: boolean;
+  message?: { content?: Array<{ type?: string; text?: string; name?: string }> };
+}
+
+/** Extract a short human-readable progress line from a stream-json event, or null. */
+export function progressLineFromEvent(raw: string): string | null {
+  let evt: StreamEvent;
+  try {
+    evt = JSON.parse(raw) as StreamEvent;
+  } catch {
+    return null;
+  }
+  if (evt.type !== "assistant" || !evt.message?.content) return null;
+  for (const part of evt.message.content) {
+    if (part.type === "text" && part.text && part.text.trim().length > 0) {
+      const line = part.text.trim().split("\n")[0]!;
+      return line.length > 200 ? line.slice(0, 200) + "…" : line;
+    }
+    if (part.type === "tool_use" && part.name) {
+      return `⚙️ ${part.name}…`;
+    }
+  }
+  return null;
+}
+
+/** Extract the final result text from a stream-json "result" event, or null. */
+export function resultFromEvent(raw: string): { text: string; isError: boolean } | null {
+  let evt: StreamEvent;
+  try {
+    evt = JSON.parse(raw) as StreamEvent;
+  } catch {
+    return null;
+  }
+  if (evt.type !== "result") return null;
+  return { text: evt.result ?? "(no result text)", isError: evt.is_error === true };
+}
+
+/**
+ * Build the child environment: inherit everything EXCEPT Anthropic credentials.
+ *
+ * Auth strategy (in priority order):
+ *   1. CLAUDE_EXECUTOR_API_KEY in .env → passed to child as ANTHROPIC_API_KEY.
+ *      Use this when you want API-key auth for the Claude Code executor without
+ *      exposing the bot's own critic key to the child process.
+ *   2. No CLAUDE_EXECUTOR_API_KEY → ANTHROPIC_* stripped from child env so the
+ *      CLI uses its own stored credentials (OAuth or `claude config set apiKey`).
+ *
+ * CLAUDE_* and CLAUDECODE vars are always stripped: they are SDK/session vars (e.g.
+ * CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH) that make a child CLI expect host-injected
+ * auth and report "Not logged in" instead of reading its own stored credentials.
+ */
+export function buildExecutorEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const executorApiKey = base["CLAUDE_EXECUTOR_API_KEY"];
+  const executorBaseUrl = base["CLAUDE_EXECUTOR_BASE_URL"];
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(base)) {
+    if (k.startsWith("ANTHROPIC_") || k.startsWith("CLAUDE") || k === "CLAUDECODE") continue;
+    env[k] = v;
+  }
+  if (executorApiKey) {
+    env["ANTHROPIC_API_KEY"] = executorApiKey;
+  }
+  if (executorBaseUrl) {
+    env["ANTHROPIC_BASE_URL"] = executorBaseUrl;
+  }
+  return env;
+}
 
 // ── Tool definition ───────────────────────────────────────────────────────────
 
 export const claudeCodeTool: UnifiedTool = {
   name: "claude_code",
   description:
-    "Invoke the Claude Code CLI to execute an AI coding task. Use when the founder " +
-    "explicitly asks to 'use claude code' or 'ask claude code' for a specific engineering task. " +
-    "Runs `claude -p \"<task>\"` non-interactively and returns the full output. HITL-gated.",
+    "Execute a complete engineering task (build, code, test, git, repo creation, multi-step work) via the " +
+    "Claude Code CLI agent in an isolated workspace. This is the PRIMARY way to do coding/build work — give it " +
+    "the WHOLE task as one self-contained brief, not individual commands. Streams progress to the founder " +
+    "and returns the final outcome. HITL-gated (one approval per task).",
 
   input_schema: {
     type: "object",
     properties: {
       task: {
         type: "string",
-        description: "The task/prompt to send to the Claude Code CLI. Be specific and self-contained.",
+        description:
+          "Complete, self-contained task brief: goal, constraints, where to put the result (e.g. 'create a " +
+          "new repo under ~/Projects/<name>, build X, run it to verify, push to GitHub as <owner>/<name>').",
       },
       cwd: {
         type: "string",
         description:
-          "Working directory for the Claude Code session (default: ~/Projects/founderos). " +
-          "Must be within ~/Projects.",
+          "Working directory within ~/Projects (default: ~/Projects/agent-workspace). " +
+          "The FounderOS repo itself is not allowed.",
       },
     },
     required: ["task"],
@@ -98,84 +229,115 @@ export const claudeCodeTool: UnifiedTool = {
       return { success: false, error: "claude_code requires a non-empty task argument." };
     }
 
-    // Test seam: allow tests to substitute a different binary without real claude
     const binaryOverride = args["_binaryOverride"] as string | undefined;
-
-    // Resolve binary
     const binary = binaryOverride ?? findClaudeBinary();
     if (!binary || !existsSync(binary)) {
       return {
         success: false,
         error:
-          `Claude Code CLI not found. ` +
-          `Install it via: npm install -g @anthropic-ai/claude-code\n` +
-          `Or set CLAUDE_CODE_BIN env var to its path.\n` +
-          `Checked: ${CANDIDATE_PATHS.join(", ")}`,
+          `Claude Code CLI not found. Install: npm install -g @anthropic-ai/claude-code ` +
+          `or set CLAUDE_CODE_BIN. Checked: ${CANDIDATE_PATHS.join(", ")}`,
       };
     }
 
-    // Resolve CWD
-    const home = process.env["HOME"] ?? "/Users/pushkarverma";
-    const defaultCwd = join(home, "Projects/founderos");
-    const rawCwd = (args["cwd"] as string | undefined) ?? defaultCwd;
-    const absCwd = rawCwd.startsWith("/") ? rawCwd : join(home, "Projects", rawCwd);
+    const cwdResult = resolveExecutorCwd(args["cwd"] as string | undefined);
+    if (!cwdResult.ok) return { success: false, error: cwdResult.error };
+    const cwd = cwdResult.cwd;
 
-    if (!isProjectPath(absCwd) && absCwd !== join(home, "Projects")) {
-      return {
-        success: false,
-        error: `Access denied: cwd ${absCwd} is outside ~/Projects. Claude Code must run within the projects directory.`,
-      };
-    }
+    // Optional progress callback — injected by the agent-tools wrapper so this
+    // module stays free of Telegram imports for tests.
+    const onProgress = args["_onProgress"] as ((line: string) => void) | undefined;
 
-    // Build command — use -p (print/non-interactive) flag
-    // When binary is overridden (test seam), pass the task as a positional arg so
-    // /bin/echo and /bin/pwd work correctly in tests.
-    const command = binaryOverride
-      ? `"${binary}" "${task.replace(/"/g, '\\"')}"`
-      : `"${binary}" -p "${task.replace(/"/g, '\\"')}"`;
+    const cliArgs = binaryOverride
+      ? [] // test seam: /bin/pwd, /bin/false, /bin/echo run argument-free
+      : [
+          "-p", task,
+          "--output-format", "stream-json",
+          "--verbose",
+          "--permission-mode", "acceptEdits",
+          "--allowedTools", ALLOWED_TOOLS,
+        ];
 
-    log.info({ task: task.slice(0, 80), cwd: absCwd }, "claude_code invoked");
+    log.info({ task: task.slice(0, 120), cwd }, "claude_code executor starting");
 
-    try {
-      const output = execSync(command, {
-        cwd: absCwd,
-        env: { ...process.env },
-        timeout: TIMEOUT_MS,
-        maxBuffer: MAX_OUTPUT_BYTES,
+    return await new Promise<ToolResult>((resolvePromise) => {
+      const child = spawn(binary, cliArgs, {
+        cwd,
+        env: buildExecutorEnv(),
+        stdio: ["ignore", "pipe", "pipe"],
       });
 
-      const stdout = output.toString("utf-8").trim();
-      log.info({ outputLength: stdout.length }, "claude_code completed");
+      let finalResult: { text: string; isError: boolean } | null = null;
+      let lastAssistantLine = "";
+      let rawStdout = ""; // fallback for non-stream-json output (test seam)
+      let stderrBuf = "";
+      let lastProgressAt = 0;
+      let settled = false;
 
-      return {
-        success: true,
-        data: stdout || "(Claude Code completed with no output)",
-      };
-    } catch (err) {
-      const execErr = err as {
-        stdout?: Buffer;
-        stderr?: Buffer;
-        message: string;
-        code?: string | number;
-        signal?: string;
+      const settle = (result: ToolResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolvePromise(result);
       };
 
-      // Timeout
-      if (execErr.signal === "SIGTERM" || execErr.message?.includes("ETIMEDOUT") || execErr.message?.includes("timed out")) {
-        return {
+      const timer = setTimeout(() => {
+        log.warn({ task: task.slice(0, 80) }, "claude_code timed out — killing child");
+        child.kill("SIGTERM");
+        setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
+        settle({
           success: false,
-          error: `Claude Code timed out after ${TIMEOUT_MS / 1000}s. Try breaking the task into smaller steps.`,
-        };
-      }
+          error: `Claude Code timed out after ${TIMEOUT_MS / 60_000} minutes. Partial progress may exist in ${cwd}. Last status: ${lastAssistantLine || "n/a"}`,
+        });
+      }, TIMEOUT_MS);
 
-      const stderr = execErr.stderr?.toString("utf-8").trim() ?? "";
-      const stdout = execErr.stdout?.toString("utf-8").trim() ?? "";
-      const details = [stderr, stdout].filter(Boolean).join("\n").trim() || execErr.message;
+      const rl = createInterface({ input: child.stdout });
+      rl.on("line", (line) => {
+        rawStdout += line + "\n";
+        const progress = progressLineFromEvent(line);
+        if (progress) {
+          lastAssistantLine = progress;
+          const now = Date.now();
+          if (onProgress && now - lastProgressAt >= PROGRESS_MIN_INTERVAL_MS) {
+            lastProgressAt = now;
+            onProgress(progress);
+          }
+        }
+        const result = resultFromEvent(line);
+        if (result) finalResult = result;
+      });
 
-      return {
-        success: false,
-        error: `Claude Code execution failed (exit ${execErr.code ?? "unknown"}):\n${details}`,
-      };
-    }
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderrBuf += chunk.toString("utf-8");
+        if (stderrBuf.length > 8_000) stderrBuf = stderrBuf.slice(-8_000);
+      });
+
+      child.on("error", (err) => {
+        settle({ success: false, error: `Claude Code failed to start: ${err.message}` });
+      });
+
+      child.on("close", (code) => {
+        if (finalResult) {
+          const text = finalResult.text.slice(0, MAX_RESULT_CHARS);
+          log.info({ exitCode: code, isError: finalResult.isError, chars: text.length }, "claude_code completed");
+          if (finalResult.isError) {
+            settle({ success: false, error: `Claude Code reported an error:\n${text}` });
+          } else {
+            settle({ success: true, data: text });
+          }
+          return;
+        }
+        // No structured result (test seam binaries, or crash before result event)
+        const fallback = rawStdout.trim().slice(0, MAX_RESULT_CHARS);
+        if (code === 0) {
+          settle({ success: true, data: fallback || "(Claude Code completed with no output)" });
+        } else {
+          settle({
+            success: false,
+            error: `Claude Code exited with code ${code}.\n${stderrBuf.trim() || fallback || "no output"}`,
+          });
+        }
+      });
+    });
   },
 };

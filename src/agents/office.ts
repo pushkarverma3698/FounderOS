@@ -22,31 +22,7 @@ import type { CompiledStateGraph, BaseCheckpointSaver } from "@langchain/langgra
 import { getModel } from "./model.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
 import { createTrimmedPrompt } from "../infra/context-manager.js";
-import {
-  searchWeb,
-  sendEmail,
-  readEmails,
-  linkedinPost,
-  createCalendarEvent,
-  githubRead,
-  githubWrite,
-  readFile,
-  listDir,
-  sendFile,
-  writeFile,
-  runShell,
-  browser,
-  readCv,
-  searchJobs,
-  projectWorkflow,
-  claudeCode,
-  recordEvent,
-  searchPersonalRag,
-  searchTuricksBrain,
-} from "./agent-tools.js";
-import { readContext, updateContext } from "../tools/context.js";
-import { searchKnowledge } from "../tools/knowledge.js";
-import { searchMemoryTool } from "../tools/memory.js";
+import { DEPARTMENT_TOOLS, SUPERVISOR_TOOLS } from "./capabilities.js";
 import {
   SUPERVISOR_PROMPT,
   RESEARCH_PROMPT,
@@ -87,7 +63,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   // research: web search + internal knowledge + ICP scoring (no read_emails — inbox stays in comms)
   const research = createReactAgent({
     llm,
-    tools: [searchWeb, searchKnowledge],
+    tools: DEPARTMENT_TOOLS["research"]!,
     name: "research",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(RESEARCH_PROMPT, subAgentBudget) as any,
@@ -96,7 +72,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   // comms: Gmail + Calendar only (linkedin_post moved to marketing — single owner)
   const comms = createReactAgent({
     llm,
-    tools: [sendEmail, readEmails, createCalendarEvent],
+    tools: DEPARTMENT_TOOLS["comms"]!,
     name: "comms",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(buildCommsPrompt(), subAgentBudget) as any,
@@ -104,7 +80,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
 
   const engineering = createReactAgent({
     llm,
-    tools: [githubRead, githubWrite, projectWorkflow, claudeCode],
+    tools: DEPARTMENT_TOOLS["engineering"]!,
     name: "engineering",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(ENGINEERING_PROMPT, subAgentBudget) as any,
@@ -115,7 +91,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   /** Marketing: LinkedIn content in Turicks brand voice. */
   const marketing = createReactAgent({
     llm,
-    tools: [searchWeb, linkedinPost, searchKnowledge],
+    tools: DEPARTMENT_TOOLS["marketing"]!,
     name: "marketing",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(MARKETING_PROMPT, subAgentBudget) as any,
@@ -124,7 +100,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   /** Sales: researches prospects + writes cold outreach emails (HITL-gated). */
   const sales = createReactAgent({
     llm,
-    tools: [searchWeb, sendEmail, searchKnowledge],
+    tools: DEPARTMENT_TOOLS["sales"]!,
     name: "sales",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(SALES_PROMPT, subAgentBudget) as any,
@@ -134,7 +110,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
    *  (write/shell/browser HITL-gated; reads are instant). */
   const personal = createReactAgent({
     llm,
-    tools: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain],
+    tools: DEPARTMENT_TOOLS["personal"]!,
     name: "personal",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(PERSONAL_PROMPT, subAgentBudget) as any,
@@ -144,7 +120,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
    *  ADR-015: personal-rag read-only; NEVER auto-submit; send_email HITL-gated. */
   const jobhunt = createReactAgent({
     llm,
-    tools: [readCv, searchJobs, sendEmail],
+    tools: DEPARTMENT_TOOLS["jobhunt"]!,
     name: "jobhunt",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(JOBHUNT_PROMPT, subAgentBudget) as any,
@@ -158,7 +134,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     prompt: createTrimmedPrompt(SUPERVISOR_PROMPT, supervisorBudget) as any,
     // Supervisor-level tools: context read/write + unified memory search/record
     // These are NOT delegated to departments — the supervisor handles them directly.
-    tools: [readContext, updateContext, searchMemoryTool, recordEvent],
+    tools: SUPERVISOR_TOOLS,
     // Gemini (and most non-OpenAI providers) can't accept the agent name as a
     // message `name` attribute — the google-genai adapter maps name→author and
     // throws "Unknown author: supervisor". "inline" embeds the name in the

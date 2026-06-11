@@ -178,7 +178,69 @@ describe("isNoCandidatesError", () => {
     expect(isNoCandidatesError(42)).toBe(false);
   });
 
-  it("immediately returns synthetic response (only 1 call) on isNoCandidatesError — no retries", async () => {
+  it("hands off to the fallback model (never fabricates 'Action completed.') on a no-tool empty completion", async () => {
+    // REGRESSION: empty Gemini candidate on the FIRST/routing turn (no tool result
+    // to surface) used to fall back to the literal "Action completed." — a phantom
+    // success that lied the task was done. The primary's empty completion is
+    // DETERMINISTIC at temp 0, so we hand off to the fallback model (which produces
+    // real output) instead of faking success. (Smoke-test 2026-06-11, task 1.)
+    delete process.env["OPENROUTER_API_KEY"];
+
+    const candidatesErr = new TypeError("Cannot read properties of undefined (reading 'length')");
+    Object.defineProperty(candidatesErr, "stack", {
+      value:
+        "TypeError: Cannot read properties of undefined (reading 'length')\n" +
+        "    at mapGenerateContentResultToChatResult (common.js:222:42)",
+    });
+
+    let callCount = 0;
+    vi.spyOn(ChatGoogleGenerativeAI.prototype as any, "_generate").mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) throw candidatesErr; // primary returns empty (no tool result present)
+      // Fallback model (gemini-2.5-flash-lite) produces real output.
+      return {
+        generations: [{ text: "routed to research", message: new AIMessage({ content: "routed to research" }), generationInfo: {} }],
+        llmOutput: {},
+      };
+    });
+
+    const model = getModel();
+    const result = await (model as any)._generate([], {});
+
+    expect(result.generations[0].text).toBe("routed to research"); // recovered, NOT "Action completed."
+    expect(callCount).toBe(2); // 1 primary (empty) + 1 fallback (gemini-2.5-flash-lite)
+
+    vi.restoreAllMocks();
+    delete process.env["OPENROUTER_API_KEY"];
+  });
+
+  it("fails loud (no fabrication) when the fallback model is ALSO empty on a no-tool turn", async () => {
+    delete process.env["OPENROUTER_API_KEY"];
+
+    const candidatesErr = new TypeError("Cannot read properties of undefined (reading 'length')");
+    Object.defineProperty(candidatesErr, "stack", {
+      value:
+        "TypeError: Cannot read properties of undefined (reading 'length')\n" +
+        "    at mapGenerateContentResultToChatResult (common.js:222:42)",
+    });
+
+    let callCount = 0;
+    vi.spyOn(ChatGoogleGenerativeAI.prototype as any, "_generate").mockImplementation(async () => {
+      callCount++;
+      throw candidatesErr; // both primary AND fallback come up empty
+    });
+
+    const model = getModel();
+    await expect((model as any)._generate([], {})).rejects.toThrow(/no fallback model produced output/i);
+    expect(callCount).toBe(2); // 1 primary + 1 fallback, both empty → honest failure
+
+    vi.restoreAllMocks();
+    delete process.env["OPENROUTER_API_KEY"];
+  });
+
+  it("still surfaces the last tool result when an empty completion follows a tool call", async () => {
+    // The legitimate synthetic path: a tool DID run, Gemini returned empty — surface
+    // the tool output verbatim (1 call, no retry, no fabrication).
     vi.useFakeTimers();
     delete process.env["OPENROUTER_API_KEY"];
 
@@ -196,11 +258,17 @@ describe("isNoCandidatesError", () => {
     });
 
     const model = getModel();
-    const result = await (model as any)._generate([], {});
+    const result = await (model as any)._generate(
+      [
+        new HumanMessage("list my files"),
+        new AIMessage({ content: "", tool_calls: [{ name: "list_dir", args: {}, id: "t1", type: "tool_call" }] }),
+        new ToolMessage({ content: "file-a.txt\nfile-b.txt", tool_call_id: "t1" }),
+      ],
+      {},
+    );
 
-    // Exactly 1 primary call — returns synthetic immediately, never retries
-    expect(callCount).toBe(1);
-    // Returns a valid ChatResult with the synthetic fallback provider tag
+    expect(callCount).toBe(1); // surfaced immediately, no retry
+    expect(result.generations[0].text).toBe("file-a.txt\nfile-b.txt");
     expect(result.llmOutput?.provider).toBe("founderos-synthetic");
 
     vi.useRealTimers();
