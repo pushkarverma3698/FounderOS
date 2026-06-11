@@ -68,6 +68,13 @@ export interface TaskResult {
   toolsCorrect: boolean;
   /** True if HITL happened iff expected (or no HITL expectation was declared). */
   hitlCorrect: boolean;
+  /**
+   * True when the run failed for an INFRASTRUCTURE reason (the observation carried
+   * an `error`, e.g. a 503 that escaped the model layer), as opposed to the model
+   * genuinely choosing the wrong route. Infra-errored tasks are set aside in
+   * aggregate() so transient infra flakiness can't masquerade as a capability miss.
+   */
+  infraError: boolean;
   /** True only when all *applicable* checks passed. */
   passed: boolean;
 }
@@ -87,5 +94,12 @@ export interface EvalReport {
   toolSelection: MetricSummary;
   hitlCoverage: MetricSummary;
   overall: MetricSummary;
+  /**
+   * Count of tasks excluded from the capability metrics because they hit an
+   * infrastructure error (transient 503/timeout that escaped the model layer),
+   * not a genuine routing/tool/HITL miss. Reported separately so a flaky run is
+   * legible rather than silently deflating the score.
+   */
+  infraErrors: number;
   results: TaskResult[];
 }

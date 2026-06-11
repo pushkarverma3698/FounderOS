@@ -68,4 +68,34 @@ describe("renderReport", () => {
     const md = renderReport(report);
     expect(md).not.toContain("NaN");
   });
+
+  it("does not falsely advertise bit-for-bit determinism, but states the temp-0 intent", () => {
+    const md = renderReport(sampleReport());
+    // The harness runs at temperature 0, but Gemini is not bit-reproducible, so the
+    // report must not claim 'A deterministic evaluation' (proven false: tasks flip run-to-run).
+    expect(md).not.toContain("A deterministic evaluation");
+    expect(md.toLowerCase()).toContain("temperature 0");
+  });
+
+  it("surfaces infrastructure errors as their own line when present", () => {
+    const tasks: GoldenTask[] = [
+      { id: "ok", input: "check my emails", expectedRoute: "comms" },
+      { id: "boom", input: "research stripe", expectedRoute: "research" },
+    ];
+    const report = aggregate([
+      scoreTask(tasks[0]!, obs({ route: "comms" })),
+      scoreTask(tasks[1]!, obs({ route: null, error: "GoogleGenerativeAI 503" })),
+    ]);
+    const md = renderReport(report);
+    expect(md.toLowerCase()).toContain("infra");
+    expect(md).toMatch(/1/); // the count of infra errors appears
+  });
+
+  it("omits the infra-error line on a fully clean run", () => {
+    const report = aggregate([
+      scoreTask({ id: "ok", input: "hi", expectedRoute: "research" }, obs({ route: "research" })),
+    ]);
+    const md = renderReport(report);
+    expect(md.toLowerCase()).not.toContain("infrastructure error");
+  });
 });

@@ -176,3 +176,56 @@ describe("aggregate", () => {
     expect(report.toolSelection.accuracy).toBe(0);
   });
 });
+
+// ── INFRA_ERROR vs WRONG_ROUTE distinction ───────────────────────────────────────
+// A transient infrastructure error (e.g. a 503 that escapes the model layer and is
+// caught by the runner as `route: null` + `error`) must NOT be scored the same as a
+// genuine routing miss. Otherwise flaky infra silently deflates the capability score
+// and hides the real signal. Infra-errored tasks are set aside, not counted as fails.
+
+describe("INFRA_ERROR handling", () => {
+  const task: GoldenTask = { id: "infra", input: "check my emails", expectedRoute: "comms" };
+
+  it("scoreTask marks a task with an error as infraError (not a routing failure)", () => {
+    const r = scoreTask(task, obs({ route: null, error: "503 Service Unavailable" }));
+    expect(r.infraError).toBe(true);
+    expect(r.passed).toBe(false);
+  });
+
+  it("scoreTask leaves infraError false on a clean observation (even a real misroute)", () => {
+    const r = scoreTask(task, obs({ route: "research" })); // wrong route, but NOT infra
+    expect(r.infraError).toBe(false);
+  });
+
+  it("aggregate excludes infra-errored tasks from every capability denominator", () => {
+    const tasks: GoldenTask[] = [
+      { id: "ok", input: "check emails", expectedRoute: "comms" },
+      { id: "miss", input: "research stripe", expectedRoute: "research" },
+      { id: "boom", input: "email alex", expectedRoute: "comms" },
+    ];
+    const results: TaskResult[] = [
+      scoreTask(tasks[0]!, obs({ route: "comms" })), // pass
+      scoreTask(tasks[1]!, obs({ route: "comms" })), // genuine misroute → counts as fail
+      scoreTask(tasks[2]!, obs({ route: null, error: "GoogleGenerativeAI 503" })), // infra → excluded
+    ];
+    const report = aggregate(results);
+
+    // routing denominator excludes the infra task: 1 pass / 2 scorable
+    expect(report.routing).toEqual({ total: 2, passed: 1, accuracy: 0.5 });
+    // overall likewise excludes infra
+    expect(report.overall.total).toBe(2);
+    expect(report.overall.passed).toBe(1);
+    // infra errors reported as their own count
+    expect(report.infraErrors).toBe(1);
+    // every result (including the infra one) is still retained for the report table
+    expect(report.results).toHaveLength(3);
+  });
+
+  it("aggregate reports zero infraErrors on a fully clean run", () => {
+    const report = aggregate([
+      scoreTask({ id: "a", input: "hi", expectedRoute: "research" }, obs({ route: "research" })),
+    ]);
+    expect(report.infraErrors).toBe(0);
+    expect(report.routing.total).toBe(1);
+  });
+});

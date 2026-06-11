@@ -43,6 +43,15 @@ export function scoreHitl(task: GoldenTask, obs: Observation): boolean {
   return task.expectsHitl === obs.hadInterrupt;
 }
 
+/**
+ * Was this an infrastructure failure (a captured error) rather than a model
+ * decision? The runner sets `obs.error` only when the invoker throws — e.g. a
+ * 503 that exhausted every retry/fallback. Such a task is NOT a routing miss.
+ */
+export function isInfraError(obs: Observation): boolean {
+  return typeof obs.error === "string" && obs.error.trim().length > 0;
+}
+
 /** Score one task across all three dimensions. */
 export function scoreTask(task: GoldenTask, obs: Observation): TaskResult {
   const routeCorrect = scoreRouting(task, obs);
@@ -54,6 +63,7 @@ export function scoreTask(task: GoldenTask, obs: Observation): TaskResult {
     routeCorrect,
     toolsCorrect,
     hitlCorrect,
+    infraError: isInfraError(obs),
     passed: routeCorrect && toolsCorrect && hitlCorrect,
   };
 }
@@ -63,16 +73,29 @@ function summarize(passed: number, total: number): MetricSummary {
   return { total, passed, accuracy: total === 0 ? 0 : passed / total };
 }
 
-/** Aggregate scored task results into per-metric summaries + overall. */
+/**
+ * Aggregate scored task results into per-metric summaries + overall.
+ *
+ * Infra-errored tasks are EXCLUDED from every capability metric (routing / tool /
+ * HITL / overall) and reported separately as `infraErrors`. A transient 503 that
+ * escaped the model layer is an infrastructure fact, not a routing decision —
+ * counting it as a routing miss would silently deflate the capability score and
+ * hide the real signal. All results (infra-errored included) are still returned
+ * so the report can list them transparently.
+ */
 export function aggregate(results: TaskResult[]): EvalReport {
-  // routing: applies to every task
+  // Capability metrics are computed only over tasks that actually ran (no infra error).
+  const scorable = results.filter((r) => !r.infraError);
+  const infraErrors = results.length - scorable.length;
+
+  // routing: applies to every scorable task
   const routing = summarize(
-    results.filter((r) => r.routeCorrect).length,
-    results.length,
+    scorable.filter((r) => r.routeCorrect).length,
+    scorable.length,
   );
 
-  // tool selection: only tasks that declared expected tools
-  const toolTasks = results.filter(
+  // tool selection: only scorable tasks that declared expected tools
+  const toolTasks = scorable.filter(
     (r) => (r.task.expectedTools?.length ?? 0) > 0,
   );
   const toolSelection = summarize(
@@ -80,14 +103,14 @@ export function aggregate(results: TaskResult[]): EvalReport {
     toolTasks.length,
   );
 
-  // hitl coverage: only tasks that declared a HITL expectation
-  const hitlTasks = results.filter((r) => r.task.expectsHitl !== undefined);
+  // hitl coverage: only scorable tasks that declared a HITL expectation
+  const hitlTasks = scorable.filter((r) => r.task.expectsHitl !== undefined);
   const hitlCoverage = summarize(
     hitlTasks.filter((r) => r.hitlCorrect).length,
     hitlTasks.length,
   );
 
-  const overall = summarize(results.filter((r) => r.passed).length, results.length);
+  const overall = summarize(scorable.filter((r) => r.passed).length, scorable.length);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -95,6 +118,7 @@ export function aggregate(results: TaskResult[]): EvalReport {
     toolSelection,
     hitlCoverage,
     overall,
+    infraErrors,
     results,
   };
 }
