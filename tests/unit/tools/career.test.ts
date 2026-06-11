@@ -150,46 +150,47 @@ describe("searchJobsTool", () => {
     expect(props["location"]).toBeDefined();
   });
 
-  it("appends location to search query when provided", async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
+  // search_jobs now delegates to webSearchTool (Gemini grounding → DuckDuckGo
+  // fallback). With no GOOGLE_GENERATIVE_AI_API_KEY in the test env, the keyless
+  // DuckDuckGo path runs — a GET whose results come back as HTML via .text().
+  function ddgResult(title: string, url: string, snippet: string): string {
+    const uddg = encodeURIComponent(url);
+    return (
+      `<a class="result__a" href="//duckduckgo.com/l/?uddg=${uddg}&rut=x">${title}</a>` +
+      `<a class="result__snippet">${snippet}</a>`
+    );
+  }
+
+  // The Gemini grounding primary calls fetch().json(); our mock object exposes
+  // only .text(), so Gemini fails and the search falls through to DuckDuckGo
+  // (which reads .text()). mockResolvedValue (not …Once) serves BOTH attempts.
+  function findDdgCall(mockFetch: ReturnType<typeof vi.fn>): string {
+    const call = mockFetch.mock.calls.find((c) => String(c[0]).includes("duckduckgo"));
+    return String(call?.[0] ?? "");
+  }
+
+  it("appends location to the search query when provided", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        success: true,
-        data: [
-          {
-            title: "AI Engineer — Amsterdam",
-            url: "https://example.com/jobs/1",
-            description: "LangGraph multi-agent engineering role.",
-          },
-        ],
-      }),
+      status: 200,
+      text: async () => ddgResult("AI Engineer — Amsterdam", "https://example.com/jobs/1", "LangGraph role."),
     });
     vi.stubGlobal("fetch", mockFetch);
 
     const result = await searchJobsTool.execute({ query: "AI engineer LangGraph", location: "Amsterdam" });
     expect(result.success).toBe(true);
 
-    // Should have made a fetch call
-    expect(mockFetch).toHaveBeenCalled();
-
-    // The search query sent to Firecrawl should include both query and location
-    const callArg = mockFetch.mock.calls[0]?.[1];
-    const bodyStr = typeof callArg?.body === "string" ? callArg.body : JSON.stringify(callArg?.body ?? {});
-    expect(bodyStr.toLowerCase()).toMatch(/amsterdam|langgraph/);
+    // The query (with location) is carried in the DuckDuckGo GET URL's ?q= param.
+    const q = new URL(findDdgCall(mockFetch)).searchParams.get("q") ?? "";
+    expect(q.toLowerCase()).toContain("amsterdam");
+    expect(q.toLowerCase()).toContain("langgraph");
   });
 
   it("returns formatted job list as string", async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        success: true,
-        data: [
-          { title: "Senior AI Engineer", url: "https://corp.com/job", description: "Build agents." },
-          { title: "LangGraph Developer", url: "https://startup.io/hire", description: "Multi-agent." },
-        ],
-      }),
-    });
-    vi.stubGlobal("fetch", mockFetch);
+    const html =
+      ddgResult("Senior AI Engineer", "https://corp.com/job", "Build agents.") +
+      ddgResult("LangGraph Developer", "https://startup.io/hire", "Multi-agent.");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => html }));
 
     const result = await searchJobsTool.execute({ query: "LangGraph engineer" });
     expect(result.success).toBe(true);
@@ -198,22 +199,21 @@ describe("searchJobsTool", () => {
     expect(data).toContain("https://corp.com/job");
   });
 
-  it("returns success:false with message when Firecrawl fails", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new Error("network timeout")));
+  it("returns success:false with message when the web search fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network timeout")));
     const result = await searchJobsTool.execute({ query: "engineer" });
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/search failed|network|timeout/i);
+    expect(result.error).toMatch(/search failed|network|timeout|duckduckgo/i);
   });
 
-  it("returns empty message (not crash) when no results found", async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true, data: [] }),
-    });
-    vi.stubGlobal("fetch", mockFetch);
+  it("surfaces a soft failure (not a crash) when the search returns nothing", async () => {
+    // DuckDuckGo HTML with no result anchors → webSearchTool treats it as a soft
+    // failure (could be genuine 0 results OR a blocked/changed endpoint — we fail
+    // loud rather than falsely claim 'no jobs exist').
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => "<html></html>" }));
 
     const result = await searchJobsTool.execute({ query: "extremely niche role xyz" });
-    expect(result.success).toBe(true);
-    expect(typeof result.data).toBe("string");
+    expect(result.success).toBe(false);
+    expect(typeof result.error).toBe("string");
   });
 });

@@ -30,8 +30,6 @@ const log = childLogger({ module: "tool:career" });
 const PERSONAL_RAG_URL = process.env["PERSONAL_RAG_URL"] ?? "http://localhost:8765";
 const WIKI_FALLBACK_PATH = process.env["PERSONAL_WIKI_PATH"]
   ?? join(process.env["HOME"] ?? "/Users/pushkarverma", "Projects/personal-rag/data/wiki.md");
-const FIRECRAWL_API_KEY = process.env["FIRECRAWL_API_KEY"] ?? "";
-const FIRECRAWL_SEARCH_URL = "https://api.firecrawl.dev/v1/search";
 
 // ── read_cv ───────────────────────────────────────────────────────────────────
 
@@ -170,78 +168,26 @@ export const searchJobsTool: UnifiedTool = {
     const location = args["location"] as string | undefined;
     const fullQuery = location ? `${query} ${location} jobs hiring` : `${query} jobs hiring`;
 
-    // Any Firecrawl failure (missing key, 402 credits exhausted, network)
-    // falls through to search_web, which carries its own Gemini-grounding
-    // fallback — job search must not share Firecrawl's single point of failure.
-    const fallbackSearch = async (reason: string): Promise<ToolResult> => {
-      log.warn({ reason }, "search_jobs: Firecrawl unavailable — using search_web fallback");
-      const result = await webSearchTool.execute({ query: fullQuery, limit: 8 });
-      if (!result.success) {
-        return { success: false, error: `Job search failed: ${reason}; fallback: ${result.error}` };
-      }
-      const items = (result.data as SearchResult[]) ?? [];
-      if (items.length === 0) {
-        return { success: true, data: `No job listings found for "${fullQuery}". Try broader keywords.` };
-      }
-      const formatted = items
-        .map((r, i) => `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.snippet.slice(0, 300).replace(/\n+/g, " ")}`)
-        .join("\n\n");
-      return {
-        success: true,
-        data: `Job search results for "${fullQuery}" (${items.length} found):\n\n${formatted}`,
-      };
+    // Delegate to search_web, which carries its own Gemini-grounding → DuckDuckGo
+    // fallback chain (both free, keyless). No separate vendor SPOF here.
+    const result = await webSearchTool.execute({ query: fullQuery, limit: 8 });
+    if (!result.success) {
+      return { success: false, error: `Job search failed: ${result.error}` };
+    }
+
+    const items = (result.data as SearchResult[]) ?? [];
+    if (items.length === 0) {
+      return { success: true, data: `No job listings found for "${fullQuery}". Try broader keywords.` };
+    }
+
+    const formatted = items
+      .map((r, i) => `${i + 1}. **${r.title}**\n   ${r.url}\n   ${r.snippet.slice(0, 300).replace(/\n+/g, " ")}`)
+      .join("\n\n");
+
+    log.info({ query: fullQuery, count: items.length }, "Job search completed");
+    return {
+      success: true,
+      data: `Job search results for "${fullQuery}" (${items.length} found):\n\n${formatted}`,
     };
-
-    if (!FIRECRAWL_API_KEY) {
-      return fallbackSearch("FIRECRAWL_API_KEY not configured");
-    }
-
-    try {
-      const resp = await fetch(FIRECRAWL_SEARCH_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
-        },
-        body: JSON.stringify({ query: fullQuery, limit: 8, scrapeOptions: { formats: ["markdown"] } }),
-        signal: AbortSignal.timeout(30000),
-      });
-
-      if (!resp.ok) {
-        return fallbackSearch(`Firecrawl returned ${resp.status}`);
-      }
-
-      const body = (await resp.json()) as {
-        success: boolean;
-        data?: Array<{ title?: string; url?: string; description?: string; markdown?: string }>;
-      };
-
-      const results = body.data ?? [];
-      if (results.length === 0) {
-        return {
-          success: true,
-          data: `No job listings found for "${fullQuery}". Try broader keywords or check different sites.`,
-        };
-      }
-
-      const formatted = results
-        .map((r, i) => {
-          const title = r.title ?? "(no title)";
-          const url = r.url ?? "";
-          const snippet = (r.description ?? r.markdown ?? "").slice(0, 300).replace(/\n+/g, " ");
-          return `${i + 1}. **${title}**\n   ${url}\n   ${snippet}`;
-        })
-        .join("\n\n");
-
-      log.info({ query: fullQuery, count: results.length }, "Job search completed");
-      return {
-        success: true,
-        data: `Job search results for "${fullQuery}" (${results.length} found):\n\n${formatted}`,
-      };
-    } catch (err) {
-      const msg = (err as Error).message;
-      log.error({ query: fullQuery, err: msg }, "Job search failed");
-      return fallbackSearch(msg);
-    }
   },
 };

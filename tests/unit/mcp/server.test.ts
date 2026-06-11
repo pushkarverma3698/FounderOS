@@ -91,15 +91,16 @@ describe("handleMcpToolCall", () => {
   });
 
   it("search_web calls the web search tool and returns text content", async () => {
-    // Mock the underlying Firecrawl call
+    // No GOOGLE_GENERATIVE_AI_API_KEY in the test env, so the primary Gemini
+    // grounding path is skipped and the keyless DuckDuckGo fallback runs. Mock
+    // the DuckDuckGo HTML endpoint (read via .text(), not .json()).
+    const ddgHtml =
+      `<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com&rut=x">Test Result</a>` +
+      `<a class="result__snippet">A test snippet</a>`;
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        success: true,
-        data: [
-          { title: "Test Result", url: "https://example.com", description: "A test snippet" },
-        ],
-      }),
+      status: 200,
+      text: async () => ddgHtml,
     }));
 
     const result = await handleMcpToolCall("search_web", { query: "LangGraph multi-agent" });
@@ -109,7 +110,7 @@ describe("handleMcpToolCall", () => {
     expect(result.content[0]?.text).toBeTruthy();
   });
 
-  it("search_web returns error content (not throw) on Firecrawl failure", async () => {
+  it("search_web returns error content (not throw) on web search failure", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
 
     const result = await handleMcpToolCall("search_web", { query: "test" });

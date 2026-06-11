@@ -12,7 +12,7 @@ export const searchWeb = tool(
   async ({ query, limit }) => {
     const res = await webSearchTool.execute({ query, limit: limit ?? 5 });
     if (!res.success) {
-      return `Web search failed: ${res.error ?? "unknown error"}. (Check that FIRECRAWL_API_KEY is set.)`;
+      return `Web search failed: ${res.error ?? "unknown error"}. (Primary is Gemini grounding via GOOGLE_GENERATIVE_AI_API_KEY; the keyless DuckDuckGo fallback may be rate-limited — retry shortly.)`;
     }
     const results = (res.data as Array<{ title: string; url: string; snippet: string }>) ?? [];
     if (results.length === 0) return `No web results found for "${query}".`;

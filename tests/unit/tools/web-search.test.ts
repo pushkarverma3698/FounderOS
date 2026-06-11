@@ -2,25 +2,16 @@
  * Unit tests for webSearchTool
  * ==========================================================
  * Primary: Gemini google_search grounding (GOOGLE_GENERATIVE_AI_API_KEY).
- * Fallback: Firecrawl POST /v1/search (FIRECRAWL_API_KEY, optional).
+ * Fallback: DuckDuckGo HTML endpoint (html.duckduckgo.com) — free, keyless.
  * Fail-open contract: every error path returns { success:false, data:[], error }
  * — never throws. Callers depend on this guarantee.
  *
- * Edge cases covered:
- *  1. Missing GOOGLE_GENERATIVE_AI_API_KEY (+ no Firecrawl key) → soft failure
- *  2. HTTP 500 → soft failure with status code in error
- *  3. HTTP 404 → soft failure with status code in error
- *  4. Network error (fetch throws) → soft failure, error message propagated
- *  5. Happy path → success:true, correct SearchResult shape
- *  6. json.data is undefined → success:true, data:[] (null-coalescing guard)
- *  7. json.data is null → success:true, data:[]
- *  8. publishedAt present in result → published_date included in SearchResult
- *  9. publishedAt absent → published_date NOT included in SearchResult
- * 10. publishedAt null → published_date NOT included in SearchResult
- * 11. site param → query prepended with "site:{site} {query}"
- * 12. No site param → query sent unchanged
- * 13. limit param passed through to Firecrawl request body
- * 14. Authorization header uses Bearer token format
+ * Coverage:
+ *  - parseDuckDuckGoHtml (pure): title/url decode, snippet pairing, limit, malformed, empty
+ *  - Gemini grounding primary: success without fallback, soft-fail → DuckDuckGo
+ *  - DuckDuckGo fallback: happy path, HTTP error, no results, network throw
+ *  - Query construction: site: prefix, plain query, custom limit
+ *  - groundedResponseToResults (pure): chunk mapping, snippet selection, empty
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -28,75 +19,143 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // ── Mock global fetch ─────────────────────────────────────────────────────────
 
 const mockFetch = vi.fn();
-
-// Dynamic import AFTER mock setup so the module captures our mock
 vi.stubGlobal("fetch", mockFetch);
 
-const { webSearchTool, groundedResponseToResults } = await import("../../../src/tools/web-search.js");
+const { webSearchTool, groundedResponseToResults, parseDuckDuckGoHtml } = await import(
+  "../../../src/tools/web-search.js"
+);
 
-// Suites below the grounding suite pin the Gemini key absent so they exercise
-// Firecrawl as the sole provider (consistent with the fail-open contract).
+// Default: no Gemini key, so suites exercise the DuckDuckGo fallback unless they
+// explicitly set the key (the grounding suite does).
 beforeEach(() => {
   delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
 });
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── DuckDuckGo HTML fixtures ───────────────────────────────────────────────────
 
-function makeOkResponse(data: unknown) {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({ success: true, data }),
-  };
+interface DdgItem {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+/** Build a DuckDuckGo HTML results page (redirect-wrapped URLs, like the real thing). */
+function ddgHtml(items: DdgItem[]): string {
+  return items
+    .map((it) => {
+      const redirect = `//duckduckgo.com/l/?uddg=${encodeURIComponent(it.url)}&amp;rut=abc123`;
+      return (
+        `<div class="result"><a rel="nofollow" class="result__a" href="${redirect}">${it.title}</a>` +
+        `<a class="result__snippet" href="${redirect}">${it.snippet}</a></div>`
+      );
+    })
+    .join("\n");
+}
+
+function makeDdgResponse(items: DdgItem[]) {
+  return { ok: true, status: 200, text: async () => ddgHtml(items) };
+}
+
+function makeDdgRawResponse(html: string) {
+  return { ok: true, status: 200, text: async () => html };
 }
 
 function makeErrorResponse(status: number) {
-  return {
-    ok: false,
-    status,
-    json: async () => ({}),
-  };
+  return { ok: false, status, text: async () => "", json: async () => ({}) };
 }
 
-const MOCK_RESULT = {
-  title: "LangGraph Production Patterns",
-  url: "https://blog.langchain.dev/langgraph",
-  description: "How to run LangGraph in production with checkpointing.",
-  publishedAt: "2026-01-15",
-};
+const DDG_ITEMS: DdgItem[] = [
+  {
+    title: "LangGraph Production Patterns",
+    url: "https://blog.langchain.dev/langgraph",
+    snippet: "How to run LangGraph in production with checkpointing.",
+  },
+];
 
 const BASE_ARGS = { query: "LangGraph production" };
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── parseDuckDuckGoHtml (pure) ──────────────────────────────────────────────────
 
-describe("webSearchTool — API key guard", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+describe("parseDuckDuckGoHtml", () => {
+  it("extracts title, decoded url, and snippet from a result block", () => {
+    const html = ddgHtml(DDG_ITEMS);
+    const results = parseDuckDuckGoHtml(html, 5);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({
+      title: "LangGraph Production Patterns",
+      url: "https://blog.langchain.dev/langgraph",
+      snippet: "How to run LangGraph in production with checkpointing.",
+    });
   });
 
-  it("returns soft failure when FIRECRAWL_API_KEY is missing", async () => {
-    const saved = process.env["FIRECRAWL_API_KEY"];
-    delete process.env["FIRECRAWL_API_KEY"];
+  it("decodes the uddg redirect into the real destination URL", () => {
+    const html = ddgHtml([
+      { title: "T", url: "https://example.com/path?x=1&y=2", snippet: "s" },
+    ]);
+    const results = parseDuckDuckGoHtml(html, 5);
+    expect(results[0]!.url).toBe("https://example.com/path?x=1&y=2");
+  });
 
-    const result = await webSearchTool.execute(BASE_ARGS);
+  it("strips inner HTML tags and decodes entities in title and snippet", () => {
+    const html =
+      `<a class="result__a" href="//duckduckgo.com/l/?uddg=${encodeURIComponent("https://a.com")}">Tom &amp; <b>Jerry</b></a>` +
+      `<a class="result__snippet" href="x">Bold <b>here</b> &amp; clear</a>`;
+    const results = parseDuckDuckGoHtml(html, 5);
+    expect(results[0]!.title).toBe("Tom & Jerry");
+    expect(results[0]!.snippet).toBe("Bold here & clear");
+  });
 
-    expect(result.success).toBe(false);
-    expect(result.data).toEqual([]);
-    expect(result.error).toContain("GOOGLE_GENERATIVE_AI_API_KEY");
-    expect(mockFetch).not.toHaveBeenCalled(); // no Firecrawl key + no Gemini key → no network call
+  it("pairs the Nth snippet with the Nth title in order", () => {
+    const html = ddgHtml([
+      { title: "A", url: "https://a.com", snippet: "snippet a" },
+      { title: "B", url: "https://b.com", snippet: "snippet b" },
+    ]);
+    const results = parseDuckDuckGoHtml(html, 5);
+    expect(results.map((r) => `${r.title}:${r.snippet}`)).toEqual(["A:snippet a", "B:snippet b"]);
+  });
 
-    if (saved !== undefined) process.env["FIRECRAWL_API_KEY"] = saved;
+  it("caps results at the requested limit", () => {
+    const html = ddgHtml(
+      Array.from({ length: 8 }, (_, i) => ({ title: `T${i}`, url: `https://x.com/${i}`, snippet: `s${i}` })),
+    );
+    expect(parseDuckDuckGoHtml(html, 3)).toHaveLength(3);
+  });
+
+  it("returns [] for HTML with no result anchors", () => {
+    expect(parseDuckDuckGoHtml("<html><body>nothing here</body></html>", 5)).toEqual([]);
+  });
+
+  it("handles a protocol-relative direct link without a uddg param", () => {
+    const html = `<a class="result__a" href="//direct.example.com/page">Direct</a>`;
+    const results = parseDuckDuckGoHtml(html, 5);
+    expect(results[0]!.url).toBe("https://direct.example.com/page");
   });
 });
 
-describe("webSearchTool — HTTP error responses", () => {
+// ── DuckDuckGo fallback (Gemini key absent) ─────────────────────────────────────
+
+describe("webSearchTool — DuckDuckGo fallback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env["FIRECRAWL_API_KEY"] = "test-key";
   });
 
-  afterEach(() => {
-    delete process.env["FIRECRAWL_API_KEY"];
+  it("returns success with parsed results when DuckDuckGo responds", async () => {
+    mockFetch.mockResolvedValueOnce(makeDdgResponse(DDG_ITEMS));
+    const result = await webSearchTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(true);
+    const items = result.data as Array<{ title: string; url: string; snippet: string }>;
+    expect(items).toHaveLength(1);
+    expect(items[0].title).toBe("LangGraph Production Patterns");
+    expect(items[0].url).toBe("https://blog.langchain.dev/langgraph");
+    expect(items[0].snippet).toContain("checkpointing");
+    // single GET to the DuckDuckGo HTML endpoint, no auth header
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(String(url)).toContain("html.duckduckgo.com");
+    expect(init.method).toBe("GET");
+    expect((init.headers as Record<string, string>)["Authorization"]).toBeUndefined();
   });
 
   it("returns soft failure on HTTP 500 with status in error message", async () => {
@@ -108,33 +167,13 @@ describe("webSearchTool — HTTP error responses", () => {
     expect(result.error).toContain("500");
   });
 
-  it("returns soft failure on HTTP 404 with status in error message", async () => {
-    mockFetch.mockResolvedValueOnce(makeErrorResponse(404));
+  it("returns soft failure when DuckDuckGo returns no parseable results", async () => {
+    mockFetch.mockResolvedValueOnce(makeDdgRawResponse("<html>no results</html>"));
     const result = await webSearchTool.execute(BASE_ARGS);
 
     expect(result.success).toBe(false);
     expect(result.data).toEqual([]);
-    expect(result.error).toContain("404");
-  });
-
-  it("returns soft failure on HTTP 401 (invalid API key)", async () => {
-    mockFetch.mockResolvedValueOnce(makeErrorResponse(401));
-    const result = await webSearchTool.execute(BASE_ARGS);
-
-    expect(result.success).toBe(false);
-    expect(result.data).toEqual([]);
-    expect(result.error).toContain("401");
-  });
-});
-
-describe("webSearchTool — network errors", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    process.env["FIRECRAWL_API_KEY"] = "test-key";
-  });
-
-  afterEach(() => {
-    delete process.env["FIRECRAWL_API_KEY"];
+    expect(result.error).toContain("no parseable results");
   });
 
   it("returns soft failure when fetch throws a network error", async () => {
@@ -156,141 +195,47 @@ describe("webSearchTool — network errors", () => {
   });
 });
 
-describe("webSearchTool — happy path", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    process.env["FIRECRAWL_API_KEY"] = "test-key";
-  });
-
-  afterEach(() => {
-    delete process.env["FIRECRAWL_API_KEY"];
-  });
-
-  it("returns success:true with correctly shaped SearchResult array", async () => {
-    mockFetch.mockResolvedValueOnce(makeOkResponse([MOCK_RESULT]));
-    const result = await webSearchTool.execute(BASE_ARGS);
-
-    expect(result.success).toBe(true);
-    expect(result.data).toHaveLength(1);
-
-    const item = (result.data as Array<{ title: string; url: string; snippet: string; published_date?: string }>)[0];
-    expect(item.title).toBe("LangGraph Production Patterns");
-    expect(item.url).toBe("https://blog.langchain.dev/langgraph");
-    expect(item.snippet).toBe("How to run LangGraph in production with checkpointing.");
-  });
-
-  it("includes published_date when Firecrawl returns publishedAt", async () => {
-    mockFetch.mockResolvedValueOnce(makeOkResponse([MOCK_RESULT]));
-    const result = await webSearchTool.execute(BASE_ARGS);
-
-    const item = (result.data as Array<{ published_date?: string }>)[0];
-    expect(item.published_date).toBe("2026-01-15");
-  });
-
-  it("omits published_date when Firecrawl result has no publishedAt", async () => {
-    const resultWithoutDate = { ...MOCK_RESULT, publishedAt: undefined };
-    mockFetch.mockResolvedValueOnce(makeOkResponse([resultWithoutDate]));
-    const result = await webSearchTool.execute(BASE_ARGS);
-
-    const item = result.data as Array<Record<string, unknown>>;
-    expect("published_date" in item[0]).toBe(false);
-  });
-
-  it("omits published_date when Firecrawl returns publishedAt:null", async () => {
-    const resultNullDate = { ...MOCK_RESULT, publishedAt: null };
-    mockFetch.mockResolvedValueOnce(makeOkResponse([resultNullDate]));
-    const result = await webSearchTool.execute(BASE_ARGS);
-
-    const item = result.data as Array<Record<string, unknown>>;
-    expect("published_date" in item[0]).toBe(false);
-  });
-
-  it("returns success:true with empty data when json.data is undefined", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ success: true }), // no data field
-    });
-    const result = await webSearchTool.execute(BASE_ARGS);
-
-    expect(result.success).toBe(true);
-    expect(result.data).toEqual([]);
-  });
-
-  it("returns success:true with empty data when json.data is null", async () => {
-    mockFetch.mockResolvedValueOnce(makeOkResponse(null));
-    const result = await webSearchTool.execute(BASE_ARGS);
-
-    expect(result.success).toBe(true);
-    expect(result.data).toEqual([]);
-  });
-
-  it("returns multiple results in order", async () => {
-    const results = [
-      { ...MOCK_RESULT, title: "Result A", publishedAt: undefined },
-      { ...MOCK_RESULT, title: "Result B", publishedAt: undefined },
-      { ...MOCK_RESULT, title: "Result C", publishedAt: undefined },
-    ];
-    mockFetch.mockResolvedValueOnce(makeOkResponse(results));
-    const result = await webSearchTool.execute(BASE_ARGS);
-
-    expect(result.data).toHaveLength(3);
-    expect((result.data as Array<{ title: string }>)[0].title).toBe("Result A");
-    expect((result.data as Array<{ title: string }>)[2].title).toBe("Result C");
-  });
-});
+// ── Query construction ──────────────────────────────────────────────────────────
 
 describe("webSearchTool — query construction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env["FIRECRAWL_API_KEY"] = "test-key";
-    mockFetch.mockResolvedValue(makeOkResponse([]));
-  });
-
-  afterEach(() => {
-    delete process.env["FIRECRAWL_API_KEY"];
+    mockFetch.mockResolvedValue(makeDdgResponse(DDG_ITEMS));
   });
 
   it("prepends 'site:{site}' when site param is provided", async () => {
     await webSearchTool.execute({ query: "typescript tips", site: "stackoverflow.com" });
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
-    expect(body.query).toBe("site:stackoverflow.com typescript tips");
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.searchParams.get("q")).toBe("site:stackoverflow.com typescript tips");
   });
 
   it("sends the query unchanged when site param is absent", async () => {
     await webSearchTool.execute({ query: "typescript tips" });
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
-    expect(body.query).toBe("typescript tips");
+    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    expect(url.searchParams.get("q")).toBe("typescript tips");
   });
 
-  it("passes limit to Firecrawl request body (default 5)", async () => {
-    await webSearchTool.execute({ query: "test" });
-
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
-    expect(body.limit).toBe(5);
-  });
-
-  it("passes custom limit to Firecrawl request body", async () => {
-    await webSearchTool.execute({ query: "test", limit: 10 });
-
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
-    expect(body.limit).toBe(10);
-  });
-
-  it("sends Authorization Bearer header with the API key", async () => {
-    process.env["FIRECRAWL_API_KEY"] = "fc-secret-abc";
-    await webSearchTool.execute({ query: "test" });
-
-    const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
-    expect(headers["Authorization"]).toBe("Bearer fc-secret-abc");
+  it("caps returned results at a custom limit", async () => {
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValueOnce(
+      makeDdgResponse(
+        Array.from({ length: 10 }, (_, i) => ({ title: `T${i}`, url: `https://x.com/${i}`, snippet: `s${i}` })),
+      ),
+    );
+    const result = await webSearchTool.execute({ query: "test", limit: 4 });
+    expect(result.data).toHaveLength(4);
   });
 });
 
-// ── Gemini grounding fallback ─────────────────────────────────────────────────
+// ── Gemini grounding (primary) ──────────────────────────────────────────────────
 
-function makeGroundedResponse(answer: string, chunks: Array<{ uri: string; title: string }>, supports: Array<{ text: string; indices: number[] }> = []) {
+function makeGroundedResponse(
+  answer: string,
+  chunks: Array<{ uri: string; title: string }>,
+  supports: Array<{ text: string; indices: number[] }> = [],
+) {
   return {
     ok: true,
     status: 200,
@@ -314,16 +259,14 @@ function makeGroundedResponse(answer: string, chunks: Array<{ uri: string; title
 describe("webSearchTool — Gemini grounding (primary)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env["FIRECRAWL_API_KEY"] = "test-key";
     process.env["GOOGLE_GENERATIVE_AI_API_KEY"] = "gemini-key";
   });
 
   afterEach(() => {
-    delete process.env["FIRECRAWL_API_KEY"];
     delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   });
 
-  it("tries Gemini first and succeeds without calling Firecrawl", async () => {
+  it("tries Gemini first and succeeds without calling DuckDuckGo", async () => {
     mockFetch.mockResolvedValueOnce(
       makeGroundedResponse(
         "LangGraph 1.0 shipped with durable execution.",
@@ -340,60 +283,38 @@ describe("webSearchTool — Gemini grounding (primary)", () => {
     expect(items[0].title).toBe("LangGraph 1.0");
     expect(items[0].url).toBe("https://blog.langchain.dev/langgraph-1");
     expect(items[0].snippet).toContain("durable execution");
-    expect(mockFetch).toHaveBeenCalledTimes(1); // Firecrawl never called
+    expect(mockFetch).toHaveBeenCalledTimes(1); // DuckDuckGo never called
     const [url, init] = mockFetch.mock.calls[0];
     expect(String(url)).toContain("generativelanguage.googleapis.com");
     expect((init.headers as Record<string, string>)["x-goog-api-key"]).toBe("gemini-key");
   });
 
-  it("falls back when FIRECRAWL_API_KEY is missing entirely", async () => {
-    delete process.env["FIRECRAWL_API_KEY"];
-    mockFetch.mockResolvedValueOnce(
-      makeGroundedResponse("Answer text.", [{ uri: "https://x.com/a", title: "A" }]),
-    );
-
-    const result = await webSearchTool.execute(BASE_ARGS);
-
-    expect(result.success).toBe(true);
-    expect(mockFetch).toHaveBeenCalledTimes(1); // straight to Gemini
-  });
-
-  it("falls back to Firecrawl when Gemini fails with both keys set", async () => {
+  it("falls back to DuckDuckGo when Gemini fails (503 capacity)", async () => {
     mockFetch
       .mockResolvedValueOnce(makeErrorResponse(503)) // Gemini capacity error
-      .mockResolvedValueOnce(makeOkResponse([MOCK_RESULT])); // Firecrawl succeeds
+      .mockResolvedValueOnce(makeDdgResponse(DDG_ITEMS)); // DuckDuckGo succeeds
 
     const result = await webSearchTool.execute(BASE_ARGS);
 
     expect(result.success).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(2);
     const [geminiUrl] = mockFetch.mock.calls[0] as [string, unknown];
-    const [firecrawlUrl] = mockFetch.mock.calls[1] as [string, unknown];
+    const [ddgUrl] = mockFetch.mock.calls[1] as [string, unknown];
     expect(String(geminiUrl)).toContain("generativelanguage.googleapis.com"); // Gemini first
-    expect(String(firecrawlUrl)).toContain("firecrawl.dev"); // Firecrawl second
+    expect(String(ddgUrl)).toContain("html.duckduckgo.com"); // DuckDuckGo second
   });
 
-  it("reports BOTH errors when Firecrawl and Gemini fallback fail", async () => {
+  it("reports BOTH errors when Gemini and DuckDuckGo fallback fail", async () => {
     mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(402))
-      .mockResolvedValueOnce(makeErrorResponse(429));
+      .mockResolvedValueOnce(makeErrorResponse(500)) // Gemini
+      .mockResolvedValueOnce(makeErrorResponse(429)); // DuckDuckGo
 
     const result = await webSearchTool.execute(BASE_ARGS);
 
     expect(result.success).toBe(false);
     expect(result.data).toEqual([]);
-    expect(result.error).toContain("402");
+    expect(result.error).toContain("500");
     expect(result.error).toContain("429");
-  });
-
-  it("Firecrawl 402 fallback includes the credits-exhausted hint", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(500)) // Gemini fails first
-      .mockResolvedValueOnce(makeErrorResponse(402)); // Firecrawl 402
-
-    const result = await webSearchTool.execute(BASE_ARGS);
-
-    expect(result.error).toContain("credits exhausted");
   });
 
   it("returns the bare answer as a single result when Gemini cites no sources", async () => {
@@ -407,16 +328,16 @@ describe("webSearchTool — Gemini grounding (primary)", () => {
     expect(items[0].snippet).toBe("Plain answer with no citations.");
   });
 
-  it("fails soft when Gemini returns an empty candidate, then tries Firecrawl", async () => {
+  it("fails soft when Gemini returns an empty candidate, then tries DuckDuckGo", async () => {
     mockFetch
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ candidates: [] }) }) // Gemini empty
-      .mockResolvedValueOnce(makeErrorResponse(404)); // Firecrawl also fails
+      .mockResolvedValueOnce(makeErrorResponse(404)); // DuckDuckGo also fails
 
     const result = await webSearchTool.execute(BASE_ARGS);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("no content"); // Gemini soft error
-    expect(result.error).toContain("404"); // Firecrawl error surfaced too
+    expect(result.error).toContain("404"); // DuckDuckGo error surfaced too
   });
 });
 
