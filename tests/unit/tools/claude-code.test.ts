@@ -150,7 +150,7 @@ describe("claudeCodeTool — execute()", () => {
 });
 
 describe("buildExecutorEnv — credential isolation", () => {
-  it("strips ANTHROPIC_* vars so the CLI uses its own stored login", async () => {
+  it("strips ANTHROPIC_* vars so the CLI uses its own stored login (no executor key)", async () => {
     const { buildExecutorEnv } = await import("../../../src/tools/claude-code.js");
     const env = buildExecutorEnv({
       PATH: "/usr/bin",
@@ -162,6 +162,34 @@ describe("buildExecutorEnv — credential isolation", () => {
     expect(env["ANTHROPIC_BASE_URL"]).toBeUndefined();
     expect(env["PATH"]).toBe("/usr/bin");
     expect(env["HOME"]).toBe("/Users/test");
+  });
+
+  it("passes CLAUDE_EXECUTOR_API_KEY as ANTHROPIC_API_KEY to child when set", async () => {
+    const { buildExecutorEnv } = await import("../../../src/tools/claude-code.js");
+    const env = buildExecutorEnv({
+      PATH: "/usr/bin",
+      ANTHROPIC_API_KEY: "sk-ant-critic-key",
+      CLAUDE_EXECUTOR_API_KEY: "sk-ant-executor-key",
+      HOME: "/Users/test",
+    });
+    // Executor key is forwarded as ANTHROPIC_API_KEY for the child CLI
+    expect(env["ANTHROPIC_API_KEY"]).toBe("sk-ant-executor-key");
+    // Bot's own critic key never leaks through
+    expect(env["CLAUDE_EXECUTOR_API_KEY"]).toBeUndefined();
+    expect(env["PATH"]).toBe("/usr/bin");
+  });
+
+  it("strips CLAUDE* SDK session vars regardless of executor key", async () => {
+    const { buildExecutorEnv } = await import("../../../src/tools/claude-code.js");
+    const env = buildExecutorEnv({
+      CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH: "1",
+      CLAUDECODE: "1",
+      CLAUDE_EXECUTOR_API_KEY: "sk-ant-executor-key",
+      HOME: "/Users/test",
+    });
+    expect(env["CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH"]).toBeUndefined();
+    expect(env["CLAUDECODE"]).toBeUndefined();
+    expect(env["ANTHROPIC_API_KEY"]).toBe("sk-ant-executor-key");
   });
 });
 

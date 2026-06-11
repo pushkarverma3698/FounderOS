@@ -165,19 +165,27 @@ export function resultFromEvent(raw: string): { text: string; isError: boolean }
 
 /**
  * Build the child environment: inherit everything EXCEPT Anthropic credentials.
- * The bot's .env carries ANTHROPIC_API_KEY for the critic model; if the CLI
- * inherits it, it switches to API-key auth and fails ("not logged in" /
- * billing errors). Stripping it makes the CLI use its own stored OAuth login.
+ *
+ * Auth strategy (in priority order):
+ *   1. CLAUDE_EXECUTOR_API_KEY in .env → passed to child as ANTHROPIC_API_KEY.
+ *      Use this when you want API-key auth for the Claude Code executor without
+ *      exposing the bot's own critic key to the child process.
+ *   2. No CLAUDE_EXECUTOR_API_KEY → ANTHROPIC_* stripped from child env so the
+ *      CLI uses its own stored credentials (OAuth or `claude config set apiKey`).
+ *
+ * CLAUDE_* and CLAUDECODE vars are always stripped: they are SDK/session vars (e.g.
+ * CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH) that make a child CLI expect host-injected
+ * auth and report "Not logged in" instead of reading its own stored credentials.
  */
 export function buildExecutorEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const executorApiKey = base["CLAUDE_EXECUTOR_API_KEY"];
   const env: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(base)) {
-    // ANTHROPIC_*: the bot's critic API key would switch the CLI to API-key auth.
-    // CLAUDE*/CLAUDECODE: SDK/session vars (e.g. CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH)
-    // make a child CLI expect host-injected auth and report "Not logged in"
-    // instead of reading its own stored credentials.
     if (k.startsWith("ANTHROPIC_") || k.startsWith("CLAUDE") || k === "CLAUDECODE") continue;
     env[k] = v;
+  }
+  if (executorApiKey) {
+    env["ANTHROPIC_API_KEY"] = executorApiKey;
   }
   return env;
 }
