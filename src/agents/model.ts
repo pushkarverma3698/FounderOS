@@ -61,9 +61,17 @@ export const RETRY_BACKOFF_MS = [2_000, 4_000, 8_000] as const;
 const sleepMs = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Detect a transient error from the Google Generative AI SDK.
- * Covers 503 "high demand" (capacity) and 500 "Internal Server Error" (transient infra).
- * Exported so unit tests can assert on it directly.
+ * Detect a transient (retryable) error from the Google Generative AI SDK.
+ * Covers capacity, rate-limit, and network blips — everything where retrying the
+ * same request or a fallback model is the right move. Deliberately does NOT match
+ * 400/401/404 (those are caller/auth errors that retrying can never fix).
+ *
+ * Why broad: under a Gemini capacity spike the SDK throws a mix of 503 "high
+ * demand", 429 "rate limit", 500, and raw socket errors (ECONNRESET / fetch
+ * failed). Treating all of them as transient is what keeps the supervisor from
+ * returning an empty route ("none") on a blip instead of retrying.
+ *
+ * Name kept as is503Error for backwards-compat (call sites + tests).
  */
 export function is503Error(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
@@ -71,9 +79,18 @@ export function is503Error(err: unknown): boolean {
   return (
     msg.includes("503") ||
     msg.includes("500") ||
+    msg.includes("429") ||
     msg.includes("high demand") ||
     msg.includes("Service Unavailable") ||
-    msg.includes("Internal Server Error")
+    msg.includes("Internal Server Error") ||
+    /rate.?limit/i.test(msg) ||
+    msg.includes("RESOURCE_EXHAUSTED") ||
+    msg.includes("ECONNRESET") ||
+    msg.includes("ETIMEDOUT") ||
+    msg.includes("EAI_AGAIN") ||
+    msg.includes("socket hang up") ||
+    /fetch failed/i.test(msg) ||
+    /network (error|timeout)/i.test(msg)
   );
 }
 

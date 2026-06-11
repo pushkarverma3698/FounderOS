@@ -62,10 +62,24 @@ describe("is503Error", () => {
     expect(is503Error(new Error("Internal Server Error encountered"))).toBe(true);
   });
 
-  it("returns false for non-503 errors", () => {
+  it("detects 429 rate-limit / RESOURCE_EXHAUSTED (capacity spike)", () => {
+    expect(is503Error(new Error("[429 Too Many Requests] rate limit exceeded"))).toBe(true);
+    expect(is503Error(new Error("RESOURCE_EXHAUSTED: quota"))).toBe(true);
+  });
+
+  it("detects transient network errors (socket / DNS / fetch)", () => {
+    expect(is503Error(new Error("read ECONNRESET"))).toBe(true);
+    expect(is503Error(new Error("connect ETIMEDOUT 142.250.0.0:443"))).toBe(true);
+    expect(is503Error(new Error("getaddrinfo EAI_AGAIN generativelanguage.googleapis.com"))).toBe(true);
+    expect(is503Error(new Error("fetch failed"))).toBe(true);
+    expect(is503Error(new Error("socket hang up"))).toBe(true);
+  });
+
+  it("returns false for non-transient errors (caller/auth — retrying can't fix)", () => {
     expect(is503Error(new Error("404 Not Found"))).toBe(false);
     expect(is503Error(new Error("400 Bad Request: invalid argument"))).toBe(false);
     expect(is503Error(new Error("401 Unauthorized"))).toBe(false);
+    expect(is503Error(new Error("403 Permission denied"))).toBe(false);
   });
 
   it("returns false for non-Error values", () => {
