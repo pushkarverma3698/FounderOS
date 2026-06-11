@@ -84,83 +84,62 @@ export async function executeComposioAction(
   return result as Record<string, unknown>;
 }
 
-// ── Known connection IDs (configured via env vars — see .env.example) ──
+// ── Known connection IDs (live-verified 2026-06-11; env-overridable) ──
 //
-// How to find your connection IDs:
-//   const client = new Composio({ apiKey: COMPOSIO_API_KEY }).getClient();
-//   const accounts = await client.connectedAccounts.list({ toolkit: "gmail" });
-//   console.log(accounts.items[0].id, accounts.items[0].userId);
+// All three Gmail accounts and the LinkedIn account were confirmed ACTIVE via
+// scripts/probe-composio-conns.ts on 2026-06-11. They are connection IDs, NOT
+// secrets — useless without COMPOSIO_API_KEY — so they ship as overridable
+// defaults (same pattern as the calendar connection below), meaning a fresh
+// clone works out of the box. Override any of them in .env to point at a
+// different account.
+//
+// How to find/refresh your connection IDs:
+//   node --env-file=.env --import tsx/esm scripts/probe-composio-conns.ts
 
-function requireEnv(key: string, hint: string): string {
-  const val = process.env[key] ?? readKeyFromEnvFile(key);
-  if (!val) {
-    throw new Error(
-      `Missing required env var ${key}. ${hint}\n` +
-      `Add it to your .env file — see .env.example for reference.`
-    );
-  }
-  return val;
+/** turicks business Gmail (default for comms/sales). */
+export const GMAIL_CONN_TURICKS = "ca_DIQDTHjRcI46";
+/** personal Gmail. */
+export const GMAIL_CONN_PERSONAL = "ca_nlLqda4MBFaA";
+/** pushkar Gmail (e.g. job applications). */
+export const GMAIL_CONN_PUSHKAR = "ca_ZraIg9B3Q8NE";
+/** Shared Composio entity/user id behind all of the above. */
+export const COMPOSIO_USER_ID = "pg-test-750dbecb-ef9d-4ef7-a76d-d1de1fd0190f";
+/** turicks LinkedIn (ACTIVE 2026-06-11). */
+export const LINKEDIN_CONN_TURICKS = "ca_CDaqpUfRJ7vl";
+/** LinkedIn entity id. */
+export const LINKEDIN_USER_TURICKS = "turicks-internal";
+
+/** Read an env override (env first, then .env file), falling back to a default. */
+function envOr(key: string, fallback: string): string {
+  return process.env[key] ?? readKeyFromEnvFile(key) ?? fallback;
 }
 
-/** Gmail connected account ID for FounderOS. Set COMPOSIO_GMAIL_CONN_ID in .env. */
+/** Gmail connected account ID. Defaults to the turicks business Gmail; override with COMPOSIO_GMAIL_CONN_ID. */
 export function getGmailConnectionId(): string {
-  return requireEnv(
-    "COMPOSIO_GMAIL_CONN_ID",
-    "Get your Gmail connection ID from app.composio.dev → Connections → Gmail → copy the account ID."
-  );
+  return envOr("COMPOSIO_GMAIL_CONN_ID", GMAIL_CONN_TURICKS);
 }
 
-/** Gmail user ID (Composio entity/user identifier). Set COMPOSIO_GMAIL_USER_ID in .env. */
+/** Gmail user ID (Composio entity/user identifier). Override with COMPOSIO_GMAIL_USER_ID. */
 export function getGmailUserId(): string {
-  return requireEnv(
-    "COMPOSIO_GMAIL_USER_ID",
-    "Get your Gmail user/entity ID from app.composio.dev → Connections → Gmail → copy the entity ID."
-  );
+  return envOr("COMPOSIO_GMAIL_USER_ID", COMPOSIO_USER_ID);
 }
 
-/** LinkedIn connected account ID. Set COMPOSIO_LINKEDIN_CONN_ID in .env. */
+/** LinkedIn connected account ID. Defaults to the turicks LinkedIn; override with COMPOSIO_LINKEDIN_CONN_ID. */
 export function getLinkedInConnectionId(): string {
-  return requireEnv(
-    "COMPOSIO_LINKEDIN_CONN_ID",
-    "Get your LinkedIn connection ID from app.composio.dev → Connections → LinkedIn → copy the account ID."
-  );
+  return envOr("COMPOSIO_LINKEDIN_CONN_ID", LINKEDIN_CONN_TURICKS);
 }
 
-/** LinkedIn user ID. Set COMPOSIO_LINKEDIN_USER_ID in .env. */
+/** LinkedIn user ID. Override with COMPOSIO_LINKEDIN_USER_ID. */
 export function getLinkedInUserId(): string {
-  return requireEnv(
-    "COMPOSIO_LINKEDIN_USER_ID",
-    "Get your LinkedIn user/entity ID from app.composio.dev → Connections → LinkedIn → copy the entity ID."
-  );
-}
-
-/**
- * Instagram connected account ID. Set COMPOSIO_INSTAGRAM_CONN_ID in .env.
- * Note: Instagram connections expire — reconnect at app.composio.dev if you see auth errors.
- */
-export function getInstagramConnectionId(): string {
-  return requireEnv(
-    "COMPOSIO_INSTAGRAM_CONN_ID",
-    "Get your Instagram connection ID from app.composio.dev → Connections → Instagram → copy the account ID."
-  );
-}
-
-/** Instagram user ID. Set COMPOSIO_INSTAGRAM_USER_ID in .env. */
-export function getInstagramUserId(): string {
-  return requireEnv(
-    "COMPOSIO_INSTAGRAM_USER_ID",
-    "Get your Instagram user/entity ID from app.composio.dev → Connections → Instagram → copy the entity ID."
-  );
+  return envOr("COMPOSIO_LINKEDIN_USER_ID", LINKEDIN_USER_TURICKS);
 }
 
 /** Google Calendar connected account ID. Defaults to the known connection; overridable via COMPOSIO_GCAL_CONN_ID. */
 export function getGCalConnectionId(): string {
-  const val = process.env["COMPOSIO_GCAL_CONN_ID"] ?? readKeyFromEnvFile("COMPOSIO_GCAL_CONN_ID");
-  return val ?? "ca_wbg4nQjAnw9o"; // known active connection, set in env to override
+  return envOr("COMPOSIO_GCAL_CONN_ID", "ca_wbg4nQjAnw9o"); // known active connection
 }
 
 /** Google Calendar user ID. Defaults to the shared entity; overridable via COMPOSIO_GCAL_USER_ID. */
 export function getGCalUserId(): string {
-  const val = process.env["COMPOSIO_GCAL_USER_ID"] ?? readKeyFromEnvFile("COMPOSIO_GCAL_USER_ID");
-  return val ?? "pg-test-750dbecb-ef9d-4ef7-a76d-d1de1fd0190f";
+  return envOr("COMPOSIO_GCAL_USER_ID", COMPOSIO_USER_ID);
 }
