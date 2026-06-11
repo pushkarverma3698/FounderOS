@@ -1,12 +1,10 @@
 /**
  * FounderOS — Web Search Tool
  * ============================
- * Primary: Firecrawl search API (POST /v1/search).
- * Fallback: Gemini google_search grounding (same GOOGLE_GENERATIVE_AI_API_KEY
- * the office already uses — zero extra vendor). Engaged whenever Firecrawl
- * fails for ANY reason (missing key, HTTP 402 credits exhausted, network).
- * Live QA 2026-06-11: Firecrawl 402 degraded 10/40 tasks — search must never
- * have a single point of failure.
+ * Primary: Gemini google_search grounding (same GOOGLE_GENERATIVE_AI_API_KEY
+ * the office already uses — zero extra vendor, free, live-verified 2026-06-11).
+ * Fallback: Firecrawl search API (POST /v1/search) — optional, only used when
+ * FIRECRAWL_API_KEY is set and Gemini fails.
  *
  * Fail-open: any error returns { success: false, data: [] } — never throws.
  */
@@ -51,8 +49,9 @@ const GEMINI_GROUNDING_URL =
 const GROUNDED_SNIPPET_MAX = 300;
 const GROUNDED_ANSWER_MAX = 1_500;
 
-// ── Primary: Firecrawl ────────────────────────────────────────────────────────
+// ── Primary: Gemini grounding ─────────────────────────────────────────────────
 
+// (Firecrawl helper kept below as optional fallback)
 async function firecrawlSearch(query: string, limit: number, apiKey: string): Promise<SearchOutcome> {
   try {
     const response = await fetch(FIRECRAWL_URL, {
@@ -82,7 +81,7 @@ async function firecrawlSearch(query: string, limit: number, apiKey: string): Pr
   }
 }
 
-// ── Fallback: Gemini google_search grounding ─────────────────────────────────
+// ── Gemini grounding ──────────────────────────────────────────────────────────
 
 interface GroundingChunk {
   web?: { uri?: string; title?: string };
@@ -188,27 +187,27 @@ export const webSearchTool: UnifiedTool = {
     const { query, limit = 5, site } = args as unknown as WebSearchArgs;
     const finalQuery = site ? `site:${site} ${query}` : query;
 
-    const firecrawlKey = process.env["FIRECRAWL_API_KEY"];
-    let primaryError = "FIRECRAWL_API_KEY not set";
+    const geminiKey = process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
+    let primaryError = "GOOGLE_GENERATIVE_AI_API_KEY not set";
 
-    if (firecrawlKey) {
-      const primary = await firecrawlSearch(finalQuery, limit, firecrawlKey);
+    if (geminiKey) {
+      const primary = await geminiGroundedSearch(finalQuery, limit, geminiKey);
       if (primary.ok) return { success: true, data: primary.results };
       primaryError = primary.error;
-      log.warn({ query: finalQuery, error: primaryError }, "Firecrawl failed — trying Gemini grounding fallback");
+      log.warn({ query: finalQuery, error: primaryError }, "Gemini grounding failed — trying Firecrawl fallback");
     }
 
-    const geminiKey = process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
-    if (geminiKey) {
-      const fallback = await geminiGroundedSearch(finalQuery, limit, geminiKey);
+    const firecrawlKey = process.env["FIRECRAWL_API_KEY"];
+    if (firecrawlKey) {
+      const fallback = await firecrawlSearch(finalQuery, limit, firecrawlKey);
       if (fallback.ok) {
-        log.info({ query: finalQuery, results: fallback.results.length }, "Gemini grounding fallback succeeded");
+        log.info({ query: finalQuery, results: fallback.results.length }, "Firecrawl fallback succeeded");
         return { success: true, data: fallback.results };
       }
       return {
         success: false,
         data: [],
-        error: `webSearchTool: ${primaryError}; Gemini grounding fallback also failed: ${fallback.error}`,
+        error: `webSearchTool: ${primaryError}; Firecrawl fallback also failed: ${fallback.error}`,
       };
     }
 

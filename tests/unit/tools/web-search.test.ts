@@ -1,11 +1,13 @@
 /**
- * Unit tests for webSearchTool (Firecrawl POST /v1/search)
+ * Unit tests for webSearchTool
  * ==========================================================
+ * Primary: Gemini google_search grounding (GOOGLE_GENERATIVE_AI_API_KEY).
+ * Fallback: Firecrawl POST /v1/search (FIRECRAWL_API_KEY, optional).
  * Fail-open contract: every error path returns { success:false, data:[], error }
  * — never throws. Callers depend on this guarantee.
  *
  * Edge cases covered:
- *  1. Missing FIRECRAWL_API_KEY → soft failure, specific error message
+ *  1. Missing GOOGLE_GENERATIVE_AI_API_KEY (+ no Firecrawl key) → soft failure
  *  2. HTTP 500 → soft failure with status code in error
  *  3. HTTP 404 → soft failure with status code in error
  *  4. Network error (fetch throws) → soft failure, error message propagated
@@ -32,8 +34,8 @@ vi.stubGlobal("fetch", mockFetch);
 
 const { webSearchTool, groundedResponseToResults } = await import("../../../src/tools/web-search.js");
 
-// All non-fallback suites pin the Gemini key absent so the legacy fail-open
-// contract is exercised without the grounding fallback kicking in.
+// Suites below the grounding suite pin the Gemini key absent so they exercise
+// Firecrawl as the sole provider (consistent with the fail-open contract).
 beforeEach(() => {
   delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
 });
@@ -80,7 +82,7 @@ describe("webSearchTool — API key guard", () => {
 
     expect(result.success).toBe(false);
     expect(result.data).toEqual([]);
-    expect(result.error).toContain("FIRECRAWL_API_KEY");
+    expect(result.error).toContain("GOOGLE_GENERATIVE_AI_API_KEY");
     expect(mockFetch).not.toHaveBeenCalled(); // no Firecrawl key + no Gemini key → no network call
 
     if (saved !== undefined) process.env["FIRECRAWL_API_KEY"] = saved;
@@ -309,7 +311,7 @@ function makeGroundedResponse(answer: string, chunks: Array<{ uri: string; title
   };
 }
 
-describe("webSearchTool — Gemini grounding fallback", () => {
+describe("webSearchTool — Gemini grounding (primary)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env["FIRECRAWL_API_KEY"] = "test-key";
@@ -321,16 +323,14 @@ describe("webSearchTool — Gemini grounding fallback", () => {
     delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   });
 
-  it("falls back to Gemini grounding on Firecrawl HTTP 402 and succeeds", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(402))
-      .mockResolvedValueOnce(
-        makeGroundedResponse(
-          "LangGraph 1.0 shipped with durable execution.",
-          [{ uri: "https://blog.langchain.dev/langgraph-1", title: "LangGraph 1.0" }],
-          [{ text: "LangGraph 1.0 shipped with durable execution.", indices: [0] }],
-        ),
-      );
+  it("tries Gemini first and succeeds without calling Firecrawl", async () => {
+    mockFetch.mockResolvedValueOnce(
+      makeGroundedResponse(
+        "LangGraph 1.0 shipped with durable execution.",
+        [{ uri: "https://blog.langchain.dev/langgraph-1", title: "LangGraph 1.0" }],
+        [{ text: "LangGraph 1.0 shipped with durable execution.", indices: [0] }],
+      ),
+    );
 
     const result = await webSearchTool.execute(BASE_ARGS);
 
@@ -340,8 +340,8 @@ describe("webSearchTool — Gemini grounding fallback", () => {
     expect(items[0].title).toBe("LangGraph 1.0");
     expect(items[0].url).toBe("https://blog.langchain.dev/langgraph-1");
     expect(items[0].snippet).toContain("durable execution");
-    // Second call hit the Gemini endpoint with the API key header
-    const [url, init] = mockFetch.mock.calls[1];
+    expect(mockFetch).toHaveBeenCalledTimes(1); // Firecrawl never called
+    const [url, init] = mockFetch.mock.calls[0];
     expect(String(url)).toContain("generativelanguage.googleapis.com");
     expect((init.headers as Record<string, string>)["x-goog-api-key"]).toBe("gemini-key");
   });
@@ -358,6 +358,21 @@ describe("webSearchTool — Gemini grounding fallback", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1); // straight to Gemini
   });
 
+  it("falls back to Firecrawl when Gemini fails with both keys set", async () => {
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(503)) // Gemini capacity error
+      .mockResolvedValueOnce(makeOkResponse([MOCK_RESULT])); // Firecrawl succeeds
+
+    const result = await webSearchTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(true);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const [geminiUrl] = mockFetch.mock.calls[0] as [string, unknown];
+    const [firecrawlUrl] = mockFetch.mock.calls[1] as [string, unknown];
+    expect(String(geminiUrl)).toContain("generativelanguage.googleapis.com"); // Gemini first
+    expect(String(firecrawlUrl)).toContain("firecrawl.dev"); // Firecrawl second
+  });
+
   it("reports BOTH errors when Firecrawl and Gemini fallback fail", async () => {
     mockFetch
       .mockResolvedValueOnce(makeErrorResponse(402))
@@ -371,10 +386,10 @@ describe("webSearchTool — Gemini grounding fallback", () => {
     expect(result.error).toContain("429");
   });
 
-  it("402 error message includes the credits-exhausted hint", async () => {
+  it("Firecrawl 402 fallback includes the credits-exhausted hint", async () => {
     mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(402))
-      .mockResolvedValueOnce(makeErrorResponse(500));
+      .mockResolvedValueOnce(makeErrorResponse(500)) // Gemini fails first
+      .mockResolvedValueOnce(makeErrorResponse(402)); // Firecrawl 402
 
     const result = await webSearchTool.execute(BASE_ARGS);
 
@@ -382,9 +397,7 @@ describe("webSearchTool — Gemini grounding fallback", () => {
   });
 
   it("returns the bare answer as a single result when Gemini cites no sources", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(402))
-      .mockResolvedValueOnce(makeGroundedResponse("Plain answer with no citations.", []));
+    mockFetch.mockResolvedValueOnce(makeGroundedResponse("Plain answer with no citations.", []));
 
     const result = await webSearchTool.execute(BASE_ARGS);
 
@@ -394,15 +407,16 @@ describe("webSearchTool — Gemini grounding fallback", () => {
     expect(items[0].snippet).toBe("Plain answer with no citations.");
   });
 
-  it("fails soft when Gemini returns an empty candidate", async () => {
+  it("fails soft when Gemini returns an empty candidate, then tries Firecrawl", async () => {
     mockFetch
-      .mockResolvedValueOnce(makeErrorResponse(402))
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ candidates: [] }) });
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ candidates: [] }) }) // Gemini empty
+      .mockResolvedValueOnce(makeErrorResponse(404)); // Firecrawl also fails
 
     const result = await webSearchTool.execute(BASE_ARGS);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("no content");
+    expect(result.error).toContain("no content"); // Gemini soft error
+    expect(result.error).toContain("404"); // Firecrawl error surfaced too
   });
 });
 
