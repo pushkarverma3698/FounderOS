@@ -8,7 +8,7 @@ FounderOS runs your agency, handles your inbox, posts to LinkedIn, manages GitHu
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5_strict-3178c6.svg)](tsconfig.json)
 [![LangGraph](https://img.shields.io/badge/LangGraph-JS_0.2.74-orange.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-730_passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-850_passing-brightgreen.svg)](tests/)
 
 ---
 
@@ -52,16 +52,18 @@ Telegram message
     ┌───────┴────────────────────────────────────────────────┐
     │                                                        │
     ├── research      search_web · search_knowledge          │ read-only
-    │                 read_emails                            │ instant
-    ├── comms         send_email* · linkedin_post*           │
-    ├── engineering   github_read · github_write*            │ * = HITL
+    ├── comms         send_email* · read_emails              │ instant
+    ├── engineering   github_read · github_write*            │
+    │                 project_workflow*                      │ * = HITL
     ├── marketing     search_web · linkedin_post*            │   gated
     ├── sales         search_web · send_email*               │
-    ├── prospecting   search_web · search_knowledge          │
-    └── personal      read_file · list_dir                   │
-                      write_file* · run_shell*               │
-                      browser*                               │
+    ├── personal      read_file · list_dir · send_file*      │
+    │                 write_file* · run_shell* · browser*    │
+    └── jobhunt       read_cv · search_jobs · send_email*    │
 ```
+
+_7 departments (prospecting was merged into research, 2026-06-05; ICP scoring is a research mode).
+Each tool has exactly one owning department — no routing collisions._
 
 **Production hardening (the layer most agent projects skip):**
 
@@ -71,26 +73,32 @@ Telegram message
 | **Idempotency** | SHA-1 key before every email/post/push — same action can never fire twice |
 | **Path-guard** | `$HOME`-confined file access; `.ssh`, `.env`, `*.pem`, `/etc` blocked even on read |
 | **Determinism** | Temperature = 0; routing logic in pure code, not prompt instructions |
-| **Eval harness** | 13 golden tasks, reproducible `pnpm eval` → `EVAL.md` with routing/tool/HITL scores |
+| **Eval harness** | 29 golden tasks, `pnpm eval` → `EVAL.md` with routing/tool/HITL scores (infra errors isolated from misroutes) |
 | **Brand validator** | Banned-phrase check before every LinkedIn post and outreach email |
-| **Context manager** | Rolling 6K-token window — no context overflow on long conversations |
-| **Audit log** | Every action written to Postgres `audit_log` table with tenant + idempotency key |
+| **Context manager** | Thread history bounded to the last `HISTORY_KEEP_TURNS` human turns (default 12) — no unbounded-state drift on long conversations |
+| **Audit log** | Every action written to the Postgres `action_log` table with tenant + idempotency key |
 
 ---
 
 ## Eval results
 
+29 golden tasks, run at temperature 0 via `pnpm eval` against the **real compiled office graph**
+with the **Postgres checkpointer**. No approvals fire (HITL is observed up to the pause, not executed). See [`EVAL.md`](EVAL.md).
+
 | Metric | Score | Date |
 |---|---|---|
-| Routing accuracy | **23/24 — 96%** | 2026-06-08 |
-| Tool selection | **20/20 — 100%** | 2026-06-08 |
-| HITL coverage | **21/23 — 91%** | 2026-06-08 |
-| **Overall** | **88%** | 2026-06-08 |
+| Routing accuracy | **26/29 — 90%** | 2026-06-11 |
+| Tool selection | **24/24 — 100%** | 2026-06-11 |
+| HITL coverage | **27/28 — 96%** | 2026-06-11 |
+| **Overall** | **25/29 — 86%** | 2026-06-11 |
 
-Methodology: golden tasks run at temperature 0 via `pnpm eval` against a live office with a
-MemorySaver checkpointer. No approvals fire (HITL is observed, not executed). See [`EVAL.md`](EVAL.md).
-
-> Metrics auto-updated by CI on every merge to main.
+> ⚠️ **Honest caveat:** Gemini is not bit-for-bit deterministic even at temperature 0. Across
+> three runs of identical code this audit measured **83–86% overall** with a varying failure set
+> on genuinely ambiguous routes (sales↔research, comms↔sales). Treat a single number as a point
+> estimate. Consistently weak tasks: ambiguous-department routing and one natural-language
+> workflow phrasing (`workflow-weekly-digest`, which works via `/run weekly_digest`). The eval
+> now isolates infrastructure errors (transient 503s) from genuine misroutes so the capability
+> number isn't deflated by flaky infra. See [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
 
 ---
 
