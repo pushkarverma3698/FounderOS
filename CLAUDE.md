@@ -310,5 +310,43 @@ necessary, not sufficient. Going forward:
 5. **Fail loud, never silent.** Tool errors surface to the founder; a swallowed error or a generic
    "Done." that hides a failure is a P0. If a department couldn't complete a task, the reply says so.
 
-Reusable probe: `scripts/probe-real-task.ts` runs arbitrary tasks through a fresh office and dumps the
-full message trail + every tool call — use it to reproduce and to confirm a fix end-to-end.
+6. **The Bot API is NOT the founder — only MTProto is.** Driving QA with curl + the Telegram Bot
+   API tests nothing for HITL: `sendMessage` posts *as the bot* (never re-ingested), and
+   `answerCallbackQuery` cannot *originate* a button tap. To drive the genuine gateway as the
+   founder — send AND tap Approve/Reject — use the MTProto harnesses. A green unit/eval suite never
+   substitutes for this on any HITL path.
+
+Reusable harnesses (in priority order for real-path verification):
+- `scripts/e2e-telegram-qa.ts` — the full founder-simulation QA suite (22 tasks: read · write ·
+  multi-step · adversarial · crash-recovery) over the REAL gateway via MTProto. Captures the exact
+  bot reply + the real `action_log` row per task. `run [all|groupN|TNN] [--approve]`, `park`/
+  `approve-last` for crash-recovery, `audit`/`read` for evidence. Needs a one-time founder MTProto
+  login (see `telegram-tester.ts login`).
+- `scripts/telegram-tester.ts` — single send/approve/reject/read over the same MTProto path.
+- `scripts/probe-real-task.ts` — runs arbitrary tasks through a fresh office (invoker level) and dumps
+  the full message trail + every tool call. Faster, but bypasses grammy — use for office/tool logic,
+  not for gateway-loop bugs.
+
+Evidence standard for any "it works" claim: the exact bot reply text PLUS the matching `action_log`
+row (or an explicit NO ROW). A friendly "✅ Done." with no audit row is a FAIL. See
+`docs/rules/TESTING-RULES.md` Rules 11–14.
+
+## Engineering Protocol — Verification-First (PERMANENT, applies to every change)
+
+Unit tests are not proof. They are a safety net, not evidence that a feature works.
+For EVERY feature or fix in this repo, the definition of done is:
+
+1. **Build it.**
+2. **Exercise the REAL runtime path end-to-end** — drive it the way the user actually
+   would (through the live Telegram bot, the real graph, real model calls, real Postgres).
+   Never declare something working off the back of a unit test alone.
+3. **Show the real output as evidence** — the actual bot reply, the actual audit-log row,
+   the actual converted file, the actual log lines. No "this should work."
+4. **Test incrementally** — after each meaningful change, re-exercise that path before
+   moving to the next change. Do not stack three untested changes and verify at the end.
+5. **If it fails, fix it and re-run the same test.** Only move on when the live path passes.
+6. **A small integration check after every change is mandatory**, not optional — this was
+   skipped historically and it is the single biggest source of unreliability in this project.
+
+If you cannot verify something live (missing key, no device), say "NOT VERIFIED — reason"
+and do not count it as done.
