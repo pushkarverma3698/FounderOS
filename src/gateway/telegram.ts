@@ -33,6 +33,7 @@ import {
 } from "./commands.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 import { buildOfficeInput } from "./pre-router.js";
+import { registerMediaHandlers } from "./media.js";
 import { assertNonEmptyMessages } from "../infra/office-guard.js";
 import { isWedgedState, type WedgeState } from "../infra/wedge.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
@@ -329,7 +330,7 @@ async function routeToOffice(ctx: Context): Promise<void> {
  * Run an arbitrary prompt through the office on this chat's thread.
  * Shared by plain messages and commands (e.g. /outbound builds its own prompt).
  */
-async function runOfficeText(ctx: Context, text: string): Promise<void> {
+export async function runOfficeText(ctx: Context, text: string): Promise<void> {
   const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
   const config = officeConfig(chatId);
 
@@ -552,6 +553,9 @@ export function registerHandlers(bot: Bot): void {
     log.info({ from: ctx.from?.id, text: text.slice(0, 80) }, "Message received");
     await routeToOffice(ctx);
   });
+
+  // ── Media: photos → image translation; voice/audio → voice commands ────────
+  registerMediaHandlers(bot, runOfficeText);
 
   bot.on("callback_query:data", async (ctx: Context) => {
     const data = ctx.callbackQuery?.data ?? "";
