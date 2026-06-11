@@ -24,7 +24,7 @@ import { getCheckpointer } from "../infra/checkpointer.js";
 import { createTrimmedPrompt } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS, SUPERVISOR_TOOLS } from "./capabilities.js";
 import {
-  SUPERVISOR_PROMPT,
+  buildSupervisorPrompt,
   RESEARCH_PROMPT,
   buildCommsPrompt,
   ENGINEERING_PROMPT,
@@ -131,7 +131,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     agents: [research, comms, engineering, marketing, sales, personal, jobhunt],
     llm,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(SUPERVISOR_PROMPT, supervisorBudget) as any,
+    prompt: createTrimmedPrompt(buildSupervisorPrompt(), supervisorBudget) as any,
     // Supervisor-level tools: context read/write + unified memory search/record
     // These are NOT delegated to departments — the supervisor handles them directly.
     tools: SUPERVISOR_TOOLS,

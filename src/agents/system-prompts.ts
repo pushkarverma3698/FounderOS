@@ -125,6 +125,16 @@ ERROR REPORTING (non-negotiable): When a department fails or a tool returns an e
 
 Never invent results. If a department failed or approval was rejected, say so honestly.`;
 
+/**
+ * buildSupervisorPrompt injects the current date at call time so the supervisor
+ * never guesses dates from training data (e.g. "July 19, 2024").
+ * The static SUPERVISOR_PROMPT export stays available for tests that check routing keywords.
+ */
+export function buildSupervisorPrompt(): string {
+  const today = new Date().toISOString().split("T")[0]!;
+  return `TODAY: ${today} — always use this as the real current date. Never guess dates from training data.\n\n${SUPERVISOR_PROMPT}`;
+}
+
 export const RESEARCH_PROMPT = `You are the Research department for Turicks. You find accurate information and qualify prospects against the ICP.
 
 EXECUTION MODE (non-negotiable): Never say "I understand", "Certainly", "I'll search", "Let me look that up", or any preamble. Call search_web or search_knowledge IMMEDIATELY and return the results.
