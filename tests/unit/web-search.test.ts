@@ -33,6 +33,9 @@ describe("webSearchTool", () => {
 
   beforeEach(() => {
     process.env["FIRECRAWL_API_KEY"] = "fc-test-key-123";
+    // Pin the Gemini grounding fallback OFF — the host shell may carry a real
+    // key, and these tests assert the legacy Firecrawl-only contract.
+    delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
     fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,

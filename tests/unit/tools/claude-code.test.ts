@@ -179,6 +179,21 @@ describe("buildExecutorEnv — credential isolation", () => {
     expect(env["PATH"]).toBe("/usr/bin");
   });
 
+  it("forwards CLAUDE_EXECUTOR_BASE_URL as ANTHROPIC_BASE_URL to child when set", async () => {
+    const { buildExecutorEnv } = await import("../../../src/tools/claude-code.js");
+    const env = buildExecutorEnv({
+      PATH: "/usr/bin",
+      ANTHROPIC_API_KEY: "sk-ant-critic-key",
+      ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+      CLAUDE_EXECUTOR_API_KEY: "sk-or-v1-executor",
+      CLAUDE_EXECUTOR_BASE_URL: "https://openrouter.ai/api/v1",
+    });
+    expect(env["ANTHROPIC_API_KEY"]).toBe("sk-or-v1-executor");
+    expect(env["ANTHROPIC_BASE_URL"]).toBe("https://openrouter.ai/api/v1");
+    // Bot's own base URL never leaks
+    expect(env["CLAUDE_EXECUTOR_BASE_URL"]).toBeUndefined();
+  });
+
   it("strips CLAUDE* SDK session vars regardless of executor key", async () => {
     const { buildExecutorEnv } = await import("../../../src/tools/claude-code.js");
     const env = buildExecutorEnv({

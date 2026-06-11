@@ -179,6 +179,7 @@ export function resultFromEvent(raw: string): { text: string; isError: boolean }
  */
 export function buildExecutorEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const executorApiKey = base["CLAUDE_EXECUTOR_API_KEY"];
+  const executorBaseUrl = base["CLAUDE_EXECUTOR_BASE_URL"];
   const env: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(base)) {
     if (k.startsWith("ANTHROPIC_") || k.startsWith("CLAUDE") || k === "CLAUDECODE") continue;
@@ -186,6 +187,9 @@ export function buildExecutorEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.
   }
   if (executorApiKey) {
     env["ANTHROPIC_API_KEY"] = executorApiKey;
+  }
+  if (executorBaseUrl) {
+    env["ANTHROPIC_BASE_URL"] = executorBaseUrl;
   }
   return env;
 }

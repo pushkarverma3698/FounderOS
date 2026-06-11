@@ -51,7 +51,7 @@ ROUTING TABLE — 7 departments, each tool has EXACTLY ONE owner:
 ROUTING SHORTCUTS (memorise these — they prevent the most common mistakes):
 - "write code / TypeScript / function / script" or "GitHub" → engineering
 - "LinkedIn post / content / publish on LinkedIn" → marketing (marketing is the ONLY LinkedIn owner)
-- "email [known contact]" / "check inbox" / "calendar / reminder" → comms
+- "email [known contact]" / "check inbox" / "calendar / reminder / block time / deep work / focus block" → comms
 - "cold email / outreach to [unknown company]" → sales
 - "score / qualify / ICP / is [company] a good fit" → research (ICP scoring is research mode)
 - "find jobs / apply / cover letter" → jobhunt
@@ -190,7 +190,7 @@ When asked to email someone:
 1. Write a complete, professional email (subject + full body).
 2. Call send_email. The founder approves before it sends.
 
-When asked to add a calendar event, reminder, or meeting:
+When asked to add a calendar event, reminder, meeting, OR block time / focus time / deep work block:
 1. Today's date is ${today}. Use this as the reference for ALL relative date calculations.
    Convert natural language dates to ISO format (YYYY-MM-DD for all-day, YYYY-MM-DDTHH:mm:ss for timed).
    Example (today = ${today}): "2nd July" → "2026-07-02", "3pm tomorrow" → "${today}T15:00:00" + 1 day.

@@ -30,7 +30,13 @@ const mockFetch = vi.fn();
 // Dynamic import AFTER mock setup so the module captures our mock
 vi.stubGlobal("fetch", mockFetch);
 
-const { webSearchTool } = await import("../../../src/tools/web-search.js");
+const { webSearchTool, groundedResponseToResults } = await import("../../../src/tools/web-search.js");
+
+// All non-fallback suites pin the Gemini key absent so the legacy fail-open
+// contract is exercised without the grounding fallback kicking in.
+beforeEach(() => {
+  delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -75,7 +81,7 @@ describe("webSearchTool — API key guard", () => {
     expect(result.success).toBe(false);
     expect(result.data).toEqual([]);
     expect(result.error).toContain("FIRECRAWL_API_KEY");
-    expect(mockFetch).not.toHaveBeenCalled(); // never makes a network call
+    expect(mockFetch).not.toHaveBeenCalled(); // no Firecrawl key + no Gemini key → no network call
 
     if (saved !== undefined) process.env["FIRECRAWL_API_KEY"] = saved;
   });
@@ -277,5 +283,171 @@ describe("webSearchTool — query construction", () => {
 
     const headers = mockFetch.mock.calls[0][1].headers as Record<string, string>;
     expect(headers["Authorization"]).toBe("Bearer fc-secret-abc");
+  });
+});
+
+// ── Gemini grounding fallback ─────────────────────────────────────────────────
+
+function makeGroundedResponse(answer: string, chunks: Array<{ uri: string; title: string }>, supports: Array<{ text: string; indices: number[] }> = []) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [
+        {
+          content: { parts: [{ text: answer }] },
+          groundingMetadata: {
+            groundingChunks: chunks.map((c) => ({ web: c })),
+            groundingSupports: supports.map((s) => ({
+              segment: { text: s.text },
+              groundingChunkIndices: s.indices,
+            })),
+          },
+        },
+      ],
+    }),
+  };
+}
+
+describe("webSearchTool — Gemini grounding fallback", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env["FIRECRAWL_API_KEY"] = "test-key";
+    process.env["GOOGLE_GENERATIVE_AI_API_KEY"] = "gemini-key";
+  });
+
+  afterEach(() => {
+    delete process.env["FIRECRAWL_API_KEY"];
+    delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
+  });
+
+  it("falls back to Gemini grounding on Firecrawl HTTP 402 and succeeds", async () => {
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(402))
+      .mockResolvedValueOnce(
+        makeGroundedResponse(
+          "LangGraph 1.0 shipped with durable execution.",
+          [{ uri: "https://blog.langchain.dev/langgraph-1", title: "LangGraph 1.0" }],
+          [{ text: "LangGraph 1.0 shipped with durable execution.", indices: [0] }],
+        ),
+      );
+
+    const result = await webSearchTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(true);
+    const items = result.data as Array<{ title: string; url: string; snippet: string }>;
+    expect(items).toHaveLength(1);
+    expect(items[0].title).toBe("LangGraph 1.0");
+    expect(items[0].url).toBe("https://blog.langchain.dev/langgraph-1");
+    expect(items[0].snippet).toContain("durable execution");
+    // Second call hit the Gemini endpoint with the API key header
+    const [url, init] = mockFetch.mock.calls[1];
+    expect(String(url)).toContain("generativelanguage.googleapis.com");
+    expect((init.headers as Record<string, string>)["x-goog-api-key"]).toBe("gemini-key");
+  });
+
+  it("falls back when FIRECRAWL_API_KEY is missing entirely", async () => {
+    delete process.env["FIRECRAWL_API_KEY"];
+    mockFetch.mockResolvedValueOnce(
+      makeGroundedResponse("Answer text.", [{ uri: "https://x.com/a", title: "A" }]),
+    );
+
+    const result = await webSearchTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(true);
+    expect(mockFetch).toHaveBeenCalledTimes(1); // straight to Gemini
+  });
+
+  it("reports BOTH errors when Firecrawl and Gemini fallback fail", async () => {
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(402))
+      .mockResolvedValueOnce(makeErrorResponse(429));
+
+    const result = await webSearchTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(false);
+    expect(result.data).toEqual([]);
+    expect(result.error).toContain("402");
+    expect(result.error).toContain("429");
+  });
+
+  it("402 error message includes the credits-exhausted hint", async () => {
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(402))
+      .mockResolvedValueOnce(makeErrorResponse(500));
+
+    const result = await webSearchTool.execute(BASE_ARGS);
+
+    expect(result.error).toContain("credits exhausted");
+  });
+
+  it("returns the bare answer as a single result when Gemini cites no sources", async () => {
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(402))
+      .mockResolvedValueOnce(makeGroundedResponse("Plain answer with no citations.", []));
+
+    const result = await webSearchTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(true);
+    const items = result.data as Array<{ title: string; snippet: string }>;
+    expect(items).toHaveLength(1);
+    expect(items[0].snippet).toBe("Plain answer with no citations.");
+  });
+
+  it("fails soft when Gemini returns an empty candidate", async () => {
+    mockFetch
+      .mockResolvedValueOnce(makeErrorResponse(402))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ candidates: [] }) });
+
+    const result = await webSearchTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("no content");
+  });
+});
+
+describe("groundedResponseToResults — pure mapping", () => {
+  it("maps each grounding chunk to a result, capped at limit", () => {
+    const json = {
+      candidates: [
+        {
+          content: { parts: [{ text: "Full answer." }] },
+          groundingMetadata: {
+            groundingChunks: [
+              { web: { uri: "https://a.com", title: "A" } },
+              { web: { uri: "https://b.com", title: "B" } },
+              { web: { uri: "https://c.com", title: "C" } },
+            ],
+            groundingSupports: [],
+          },
+        },
+      ],
+    };
+    const results = groundedResponseToResults(json, "q", 2);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({ title: "A", url: "https://a.com", snippet: "Full answer." });
+  });
+
+  it("uses citing segments as the chunk snippet when supports exist", () => {
+    const json = {
+      candidates: [
+        {
+          content: { parts: [{ text: "Long answer." }] },
+          groundingMetadata: {
+            groundingChunks: [{ web: { uri: "https://a.com", title: "A" } }],
+            groundingSupports: [
+              { segment: { text: "Cited fact one." }, groundingChunkIndices: [0] },
+              { segment: { text: "Unrelated." }, groundingChunkIndices: [5] },
+            ],
+          },
+        },
+      ],
+    };
+    const results = groundedResponseToResults(json, "q", 5);
+    expect(results[0]!.snippet).toBe("Cited fact one.");
+  });
+
+  it("returns [] for an empty response", () => {
+    expect(groundedResponseToResults({}, "q", 5)).toEqual([]);
   });
 });
