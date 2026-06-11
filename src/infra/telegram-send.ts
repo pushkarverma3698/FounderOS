@@ -30,6 +30,24 @@ export function defaultChatId(): string {
 }
 
 /**
+ * Send a short plain-text status message to a Telegram chat.
+ * Used by long-running tools (claude_code) to stream progress to the founder
+ * while the office run is still in flight. Best-effort: failures are logged,
+ * never thrown — a progress ping must not kill the task it reports on.
+ */
+export async function sendStatusText(
+  text: string,
+  opts: { chatId?: string | number } = {},
+): Promise<void> {
+  const chatId = opts.chatId ?? defaultChatId();
+  try {
+    await api().sendMessage(chatId, text.slice(0, 4000));
+  } catch (err) {
+    log.warn({ chatId, err: (err as Error).message }, "Status text send failed (non-fatal)");
+  }
+}
+
+/**
  * Send a file from disk to a Telegram chat as a document attachment.
  * @param chatId  target chat (defaults to the founder's chat)
  * @param absPath absolute path to the file (already path-guard-validated)

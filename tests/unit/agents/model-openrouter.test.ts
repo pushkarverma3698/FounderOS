@@ -6,7 +6,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOpenAI } from "@langchain/openai";
-import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { getModel, sanitizeForGemini } from "../../../src/agents/model.js";
 
 const FAKE_OR_KEY = "sk-or-v1-test-key-for-unit-tests";
@@ -128,14 +128,28 @@ describe("sanitizeForGemini", () => {
     expect(result[0]).toBe(msgWithCalls);
   });
 
-  it("falls back to original messages when all messages are empty (safe fallback)", () => {
+  it("synthesizes a valid human message when all messages are empty (never returns invalid array)", () => {
+    // Regression: returning the original all-empty array guaranteed the Gemini
+    // 400 "contents is not specified" crash this function exists to prevent.
     const msgs = [
       new HumanMessage(""),
       new HumanMessage("   "),
     ];
     const result = sanitizeForGemini(msgs);
-    // Falls back to original — does not return empty array which would break Gemini
-    expect(result).toEqual(msgs);
+    expect(result).toHaveLength(1);
+    expect(result[0]._getType()).toBe("human");
+    expect((result[0].content as string).trim().length).toBeGreaterThan(0);
+  });
+
+  it("appends a synthetic human message when only system messages survive", () => {
+    // Gemini moves system messages to systemInstruction, so a system-only list
+    // converts to an empty contents array → 400 "contents is not specified".
+    const msgs = [new SystemMessage("You are the supervisor.")];
+    const result = sanitizeForGemini(msgs);
+    expect(result.length).toBe(2);
+    expect(result[0]._getType()).toBe("system");
+    expect(result[1]._getType()).toBe("human");
+    expect((result[1].content as string).trim().length).toBeGreaterThan(0);
   });
 
   it("returns messages unchanged when all have valid content", () => {
@@ -180,13 +194,14 @@ describe("sanitizeForGemini", () => {
     expect(result).toHaveLength(1);
   });
 
-  it("filters empty array-content but falls back to original when all messages invalid", () => {
+  it("synthesizes a valid human message when all array-content messages are invalid", () => {
     const allEmpty = [
       new HumanMessage({ content: [{ type: "text", text: "" }] }),
       new HumanMessage({ content: [{ type: "text", text: "  " }] }),
     ];
     const result = sanitizeForGemini(allEmpty);
-    // Safe fallback — does not return empty array
-    expect(result).toEqual(allEmpty);
+    expect(result).toHaveLength(1);
+    expect(result[0]._getType()).toBe("human");
+    expect((result[0].content as string).trim().length).toBeGreaterThan(0);
   });
 });

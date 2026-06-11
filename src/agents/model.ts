@@ -29,7 +29,7 @@
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOpenAI } from "@langchain/openai";
 import type { BaseMessage, ToolMessage } from "@langchain/core/messages";
-import { AIMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import type { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
 import type { ChatResult } from "@langchain/core/outputs";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -85,6 +85,17 @@ export function is503Error(err: unknown): boolean {
  * @langchain/google-genai@0.1.12 utils/common.js).
  * Exported so unit tests can assert on it.
  */
+/**
+ * Detect Gemini's 400 "GenerateContentRequest.contents: contents is not specified".
+ * This fires when the LangChain→Gemini message conversion produces an empty
+ * contents array — historically the wedged-thread killer on the HITL resume path.
+ * Exported so unit tests can assert on it.
+ */
+export function isEmptyContentsError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.message.includes("contents is not specified");
+}
+
 export function isNoCandidatesError(err: unknown): boolean {
   if (!(err instanceof TypeError)) return false;
   return (
@@ -121,10 +132,33 @@ function syntheticResponseFromLastTool(messages: BaseMessage[]): import("@langch
 }
 
 /**
+ * One-line shape summary of a message list for crash diagnostics:
+ * "human:42 ai+2calls:0 tool:5252 system:1800". Lets us reconstruct what
+ * the thread looked like if Gemini ever rejects a request again.
+ */
+export function describeMessageShapes(messages: BaseMessage[]): string {
+  return messages
+    .map((m) => {
+      const calls = (m as { tool_calls?: unknown[] }).tool_calls?.length ?? 0;
+      const len = typeof m.content === "string" ? m.content.length : JSON.stringify(m.content).length;
+      return `${m._getType()}${calls ? `+${calls}calls` : ""}:${len}`;
+    })
+    .join(" ");
+}
+
+/** Synthetic user turn injected when sanitization leaves Gemini nothing valid to send. */
+const RECOVERY_HUMAN_MESSAGE = "Continue with the current task based on the conversation so far.";
+
+/**
  * Filter out messages with empty content before calling Gemini.
  * Prevents the 400 "GenerateContentRequest.contents: contents is not specified" error
  * that fires after HITL resume when a large tool output makes the message list invalid.
  * AIMessages with tool_calls but empty content string are kept (valid Gemini state).
+ *
+ * Guarantees the result always converts to a non-empty Gemini `contents` array:
+ *  - never returns an empty or all-invalid list (synthesizes a human turn instead);
+ *  - never returns a system-only list (Gemini moves system messages to
+ *    systemInstruction, leaving contents empty → 400).
  */
 export function sanitizeForGemini(messages: BaseMessage[]): BaseMessage[] {
   const valid = messages.filter((m) => {
@@ -146,7 +180,25 @@ export function sanitizeForGemini(messages: BaseMessage[]): BaseMessage[] {
     }
     return false;
   });
-  return valid.length > 0 ? valid : messages;
+
+  if (valid.length === 0) {
+    log.error(
+      { dropped: messages.length, shapes: describeMessageShapes(messages) },
+      "All messages invalid for Gemini — synthesizing recovery turn instead of crashing",
+    );
+    return [new HumanMessage(RECOVERY_HUMAN_MESSAGE)];
+  }
+
+  const hasNonSystem = valid.some((m) => m._getType() !== "system");
+  if (!hasNonSystem) {
+    log.error(
+      { shapes: describeMessageShapes(messages) },
+      "Only system messages survived sanitization — appending synthetic user turn to keep Gemini contents non-empty",
+    );
+    return [...valid, new HumanMessage(RECOVERY_HUMAN_MESSAGE)];
+  }
+
+  return valid;
 }
 
 /** Return copies of any name-tagged messages with the `name` attribute removed. */
@@ -232,6 +284,28 @@ class FounderChatGoogle extends ChatGoogleGenerativeAI {
       } catch (err) {
         if (is503Error(err)) {
           lastErr = err;
+        } else if (isEmptyContentsError(err)) {
+          // The sanitized list still converted to an empty Gemini contents array
+          // (e.g. a converter quirk we haven't seen yet). Log the exact shape so
+          // the next occurrence is diagnosable, then recover deterministically
+          // with a minimal valid request instead of wedging the thread.
+          log.error(
+            { shapes: describeMessageShapes(sanitized) },
+            "Gemini rejected request with empty contents — retrying once with minimal recovery context",
+          );
+          const lastTool = [...sanitized].reverse().find((m) => m._getType() === "tool" && typeof m.content === "string");
+          const lastHuman = [...sanitized].reverse().find((m) => m._getType() === "human" && typeof m.content === "string");
+          const recovery = [
+            ...sanitized.filter((m) => m._getType() === "system").slice(0, 1),
+            new HumanMessage(
+              [
+                lastHuman ? `Original request: ${(lastHuman.content as string).slice(0, 2000)}` : "",
+                lastTool ? `Latest tool result:\n${(lastTool.content as string).slice(0, 4000)}` : "",
+                "Continue the task and report the outcome.",
+              ].filter(Boolean).join("\n\n"),
+            ),
+          ];
+          return await super._generate(recovery, options, runManager);
         } else if (isNoCandidatesError(err)) {
           // SDK bug: Gemini returns a candidate with finishReason=STOP but no content
           // after tool execution. Retrying or switching models won't help — the tool
@@ -295,7 +369,7 @@ class FounderChatGoogle extends ChatGoogleGenerativeAI {
     options: this["ParsedCallOptions"],
     runManager?: CallbackManagerForLLMRun,
   ) {
-    const stripped = stripNames(messages);
+    const stripped = sanitizeForGemini(stripNames(messages));
 
     // Retry loop mirrors _generate: backoff on transient errors before falling through
     let lastErr: unknown;
