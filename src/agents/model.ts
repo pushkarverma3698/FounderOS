@@ -264,6 +264,39 @@ class FounderChatGoogle extends ChatGoogleGenerativeAI {
     return super.bindTools(tools, kwargs);
   }
 
+  /**
+   * When the primary model returns an empty completion on a non-tool turn (a
+   * deterministic gemini-2.5-flash quirk for certain prompts), try each Google
+   * fallback model in order and return the first that produces real output
+   * (non-empty text or a tool call). Returns null if none recover — the caller
+   * then fails loud rather than fabricating a success.
+   */
+  private async _tryFallbacksForEmptyCompletion(
+    messages: BaseMessage[],
+    options: this["ParsedCallOptions"],
+    runManager?: CallbackManagerForLLMRun,
+  ): Promise<ChatResult | null> {
+    for (let i = 0; i < this._fallbackInstances.length; i++) {
+      const fallback = this._fallbackInstances[i]!;
+      try {
+        log.info({ model: this._fallbackModels[i] }, "Trying fallback model for empty completion");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = (await (fallback as any)._generate(messages, options, runManager)) as ChatResult;
+        const gen = result.generations[0];
+        const text = typeof gen?.text === "string" ? gen.text.trim() : "";
+        const toolCalls = (gen?.message as { tool_calls?: unknown[] } | undefined)?.tool_calls?.length ?? 0;
+        if (text.length > 0 || toolCalls > 0) return result;
+        log.warn({ model: this._fallbackModels[i] }, "Fallback model also returned empty — trying next");
+      } catch (fallbackErr) {
+        log.warn(
+          { model: this._fallbackModels[i], err: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr) },
+          "Fallback model threw on empty-completion recovery — trying next",
+        );
+      }
+    }
+    return null;
+  }
+
   override async _generate(
     messages: BaseMessage[],
     options: this["ParsedCallOptions"],
@@ -307,12 +340,33 @@ class FounderChatGoogle extends ChatGoogleGenerativeAI {
           ];
           return await super._generate(recovery, options, runManager);
         } else if (isNoCandidatesError(err)) {
-          // SDK bug: Gemini returns a candidate with finishReason=STOP but no content
-          // after tool execution. Retrying or switching models won't help — the tool
-          // DID run, Gemini just returned an empty completion. Surface the last tool
-          // result verbatim so nothing is silently swallowed.
-          log.warn({ module: "model" }, "Empty Gemini candidates after tool call — synthesizing from last tool result");
-          return syntheticResponseFromLastTool(sanitized);
+          // SDK quirk: Gemini returns a candidate with finishReason=STOP but no content.
+          const hasToolResult = sanitized.some(
+            (m) => m._getType() === "tool" && typeof m.content === "string" && m.content.trim().length > 0,
+          );
+          if (hasToolResult) {
+            // A tool DID run, Gemini just returned an empty completion. Surface the
+            // last tool result verbatim so nothing is silently swallowed.
+            log.warn({ module: "model" }, "Empty Gemini candidates after tool call — synthesizing from last tool result");
+            return syntheticResponseFromLastTool(sanitized);
+          }
+          // Empty completion on a reasoning/routing turn with NO tool result to
+          // surface. Fabricating "Action completed." here is a phantom-success lie
+          // (claims the task is done when nothing happened — the #1 founder-reported
+          // bug). This is DETERMINISTIC for a given prompt at temp 0 (verified
+          // 2026-06-11: gemini-2.5-flash returns empty for certain supervisor routing
+          // prompts that gemini-2.5-flash-lite handles fine), so retrying the SAME
+          // model is futile. Hand off to the fallback model(s), which demonstrably
+          // produce output for these prompts; only fail loud if they also come up empty.
+          log.warn(
+            { module: "model", fallbacks: this._fallbackModels },
+            "Empty Gemini candidate on a non-tool turn — handing off to fallback model instead of faking success",
+          );
+          const recovered = await this._tryFallbacksForEmptyCompletion(sanitized, options, runManager);
+          if (recovered) return recovered;
+          throw new Error(
+            "The model returned an empty response and no fallback model produced output. Please resend your message.",
+          );
         } else {
           throw err; // non-transient, non-candidates → surface immediately
         }
