@@ -41,9 +41,26 @@ const SECRET_SEGMENTS = [
   path.join(".config", "gh"),
   path.join("Library", "Keychains"),
 ];
-const SECRET_SUFFIX = [".pem", ".env"];
+const SECRET_SUFFIX = [".pem", ".env", ".key"];
 const SECRET_BASENAME = /^id_rsa(\.pub)?$|(^|.*\/)\.env(\..+)?$/i;
 const SYSTEM_ROOTS = ["/etc", "/System", "/Library", "/private", "/usr", "/bin", "/sbin", "/var"];
+
+/**
+ * Exact basenames denied even for reads — config/credential files that routinely
+ * hold plaintext secrets via `export KEY=...` or `password=...`. Added 2026-06-11
+ * after an E2E run proved `read_file ~/.zshrc` exfiltrated live OPENAI / OPENROUTER
+ * keys into Telegram. Matched case-insensitively against the resolved basename.
+ */
+const SECRET_BASENAMES = new Set(
+  [
+    // shell rc / profile files (commonly hold `export SECRET=...`)
+    ".zshrc", ".zprofile", ".zshenv", ".zlogin",
+    ".bashrc", ".bash_profile", ".bash_login", ".profile", ".kshrc",
+    // credential / token stores
+    ".netrc", ".npmrc", ".pypirc", ".git-credentials", ".dockercfg",
+    "credentials", "secrets.json", "secrets.yaml", "secrets.yml",
+  ].map((s) => s.toLowerCase()),
+);
 
 function isSecret(abs: string): boolean {
   const lower = abs.toLowerCase();
@@ -52,7 +69,44 @@ function isSecret(abs: string): boolean {
   }
   if (SECRET_SUFFIX.some((s) => lower.endsWith(s))) return true;
   if (SECRET_BASENAME.test(path.basename(abs))) return true;
+  if (SECRET_BASENAMES.has(path.basename(abs).toLowerCase())) return true;
   return false;
+}
+
+/**
+ * High-confidence live-credential token patterns. Near-zero false positives: these
+ * are vendor-prefixed key shapes that should NEVER transit Telegram regardless of
+ * which file they live in. Defense-in-depth for the path-guard denylist — catches
+ * a secret pasted into an arbitrary (non-denylisted) file. Pure + unit-tested.
+ */
+const SECRET_TOKEN_PATTERNS: RegExp[] = [
+  /sk-[A-Za-z0-9_-]{20,}/g,              // OpenAI / OpenRouter (sk-, sk-proj-, sk-or-v1-)
+  /ghp_[A-Za-z0-9]{30,}/g,              // GitHub PAT (classic)
+  /gho_[A-Za-z0-9]{30,}/g,              // GitHub OAuth token
+  /github_pat_[A-Za-z0-9_]{40,}/g,      // GitHub PAT (fine-grained)
+  /xox[baprs]-[A-Za-z0-9-]{10,}/g,      // Slack tokens
+  /AKIA[0-9A-Z]{16}/g,                  // AWS access key id
+  /AIza[0-9A-Za-z_-]{35}/g,             // Google API key
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/g, // PEM private-key block
+];
+
+const SECRET_REDACTION = "«REDACTED-SECRET»";
+
+/**
+ * Replace any high-confidence live-credential tokens in `content` with a redaction
+ * marker. Returns the scrubbed text and how many secrets were redacted, so callers
+ * can warn the founder without ever transmitting the secret bytes.
+ */
+export function redactSecrets(content: string): { redacted: string; count: number } {
+  let count = 0;
+  let out = content;
+  for (const re of SECRET_TOKEN_PATTERNS) {
+    out = out.replace(re, () => {
+      count++;
+      return SECRET_REDACTION;
+    });
+  }
+  return { redacted: out, count };
 }
 
 /**
