@@ -7,8 +7,16 @@
  * Pattern: verbs + domain — createInterrupt, resolveInterrupt, logCost, checkIdempotency
  */
 
-import { and, count, desc, eq, gt, gte, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, lt, or, sql, type SQL } from "drizzle-orm";
 import { getDb } from "./client.js";
+import { tokenizeQuery, rankByTerms } from "./keyword-search.js";
+
+/**
+ * Candidate over-fetch multiple: keyword searches pull `limit * CANDIDATE_FACTOR`
+ * recency-ordered rows from SQL, then re-rank them by term overlap in JS.
+ */
+const CANDIDATE_FACTOR = 6;
+const MAX_CANDIDATES = 60;
 import {
   actionLog,
   deptSignals,
@@ -419,8 +427,24 @@ export async function searchKnowledgeEntries(
   limit = 5,
 ): Promise<Array<{ title: string; content: string; entry_type: string; tags: string[] | null }>> {
   const db = getDb();
-  const pattern = `%${query}%`;
-  return db
+  const terms = tokenizeQuery(query);
+
+  // Match ANY significant term across title + content (OR), not the whole query
+  // as one substring. Empty/all-stopword queries fall back to recent entries.
+  const matchAnyTerm: SQL | undefined =
+    terms.length > 0
+      ? or(
+          ...terms.flatMap((t) => {
+            const p = `%${t}%`;
+            return [
+              sql`${knowledgeEntries.title} ILIKE ${p}`,
+              sql`${knowledgeEntries.content} ILIKE ${p}`,
+            ];
+          }),
+        )
+      : undefined;
+
+  const candidates = await db
     .select({
       title: knowledgeEntries.title,
       content: knowledgeEntries.content,
@@ -432,14 +456,19 @@ export async function searchKnowledgeEntries(
       and(
         eq(knowledgeEntries.tenant_id, tenantId),
         eq(knowledgeEntries.is_current, true),
-        or(
-          sql`${knowledgeEntries.title} ILIKE ${pattern}`,
-          sql`${knowledgeEntries.content} ILIKE ${pattern}`,
-        ),
+        matchAnyTerm,
       ),
     )
     .orderBy(desc(knowledgeEntries.updated_at))
-    .limit(limit);
+    .limit(Math.min(limit * CANDIDATE_FACTOR, MAX_CANDIDATES));
+
+  // Rank by how many distinct terms each row contains (title + content + tags).
+  return rankByTerms(
+    candidates,
+    terms,
+    (r) => `${r.title} ${r.content} ${(r.tags ?? []).join(" ")}`,
+    limit,
+  );
 }
 
 /** Fetch all current entries of a specific type (e.g. "adr", "brand", "case_study"). */
@@ -507,8 +536,22 @@ export async function searchConversations(
   message_count: number;
 }>> {
   const db = getDb();
-  const pattern = `%${query}%`;
-  return db
+  const terms = tokenizeQuery(query);
+
+  const matchAnyTerm: SQL | undefined =
+    terms.length > 0
+      ? or(
+          ...terms.flatMap((t) => {
+            const p = `%${t}%`;
+            return [
+              sql`${conversations.summary} ILIKE ${p}`,
+              sql`${conversations.topics}::text ILIKE ${p}`,
+            ];
+          }),
+        )
+      : undefined;
+
+  const candidates = await db
     .select({
       thread_id: conversations.thread_id,
       summary: conversations.summary,
@@ -517,17 +560,16 @@ export async function searchConversations(
       message_count: conversations.message_count,
     })
     .from(conversations)
-    .where(
-      and(
-        eq(conversations.tenant_id, tenantId),
-        or(
-          sql`${conversations.summary} ILIKE ${pattern}`,
-          sql`${conversations.topics}::text ILIKE ${pattern}`,
-        ),
-      ),
-    )
+    .where(and(eq(conversations.tenant_id, tenantId), matchAnyTerm))
     .orderBy(desc(conversations.last_message_at))
-    .limit(limit);
+    .limit(Math.min(limit * CANDIDATE_FACTOR, MAX_CANDIDATES));
+
+  return rankByTerms(
+    candidates,
+    terms,
+    (r) => `${r.summary ?? ""} ${(r.topics ?? []).join(" ")}`,
+    limit,
+  );
 }
 
 // ── Episodic Memory (episodic_memory) ─────────────────────────────────────────
@@ -567,8 +609,23 @@ export async function searchEpisodicMemory(
   source: string;
 }>> {
   const db = getDb();
-  const pattern = `%${query}%`;
-  return db
+  const terms = tokenizeQuery(query);
+
+  const matchAnyTerm: SQL | undefined =
+    terms.length > 0
+      ? or(
+          ...terms.flatMap((t) => {
+            const p = `%${t}%`;
+            return [
+              sql`${episodicMemory.title} ILIKE ${p}`,
+              sql`${episodicMemory.summary} ILIKE ${p}`,
+              sql`${episodicMemory.tags}::text ILIKE ${p}`,
+            ];
+          }),
+        )
+      : undefined;
+
+  const candidates = await db
     .select({
       id: episodicMemory.id,
       title: episodicMemory.title,
@@ -580,18 +637,16 @@ export async function searchEpisodicMemory(
       source: episodicMemory.source,
     })
     .from(episodicMemory)
-    .where(
-      and(
-        eq(episodicMemory.tenant_id, tenantId),
-        or(
-          sql`${episodicMemory.title} ILIKE ${pattern}`,
-          sql`${episodicMemory.summary} ILIKE ${pattern}`,
-          sql`${episodicMemory.tags}::text ILIKE ${pattern}`,
-        ),
-      ),
-    )
+    .where(and(eq(episodicMemory.tenant_id, tenantId), matchAnyTerm))
     .orderBy(desc(episodicMemory.occurred_at))
-    .limit(limit);
+    .limit(Math.min(limit * CANDIDATE_FACTOR, MAX_CANDIDATES));
+
+  return rankByTerms(
+    candidates,
+    terms,
+    (r) => `${r.title} ${r.summary ?? ""} ${(r.tags ?? []).join(" ")}`,
+    limit,
+  );
 }
 
 // ── Activity Summary (action_log) ─────────────────────────────────────────────
