@@ -10,12 +10,12 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { githubTool } from "../../tools/github.js";
 import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../../tools/project-workflow.js";
-import { claudeCodeTool, findClaudeBinary } from "../../tools/claude-code.js";
+import { claudeCodeTool, findClaudeBinary, frameExecutorResult } from "../../tools/claude-code.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
-import { sendStatusText } from "../../infra/telegram-send.js";
+import { sendStatusText, sendLongText } from "../../infra/telegram-send.js";
 
 const log = childLogger({ module: "agent-tools:engineering" });
 
@@ -210,12 +210,26 @@ export const claudeCode = tool(
     }
     await writeAuditEntry({ action: "claude_code", idempotency_key: key, payload: { task: task.slice(0, 400), cwd }, tenant_id: TENANT });
     log.info({ task: task.slice(0, 80) }, "claude_code executed via engineering agent");
-    // Frame the executor's raw output so the founder gets a clear "it's done +
-    // here's what came back" instead of a bare, context-free result dump
-    // (Telegram-UX fix 2026-06-12). The workspace is included so the founder
-    // knows where the artifacts live.
-    const output = typeof res.data === "string" && res.data.trim().length > 0 ? res.data.trim() : "(no output produced)";
-    return `✅ Done — the engineering agent finished the task in ${cwd}.\n\nResult:\n${output}`;
+
+    // DETERMINISTIC DELIVERY (Telegram-UX fix 2026-06-12): the framed result is
+    // sent DIRECTLY to the founder, bypassing the engineering ReAct agent and the
+    // supervisor — neither LLM layer can drop, mangle, or context-free-dump it.
+    // The agent then only sees a short marker, so it adds a warm one-line close
+    // instead of re-rendering the output. If the direct send fails (network), we
+    // fall back to returning the full framed result through the normal reply path
+    // so the founder never loses content.
+    const output = typeof res.data === "string" ? res.data : "";
+    const cwdLabel = cwd ?? "~/Projects/agent-workspace";
+    const framed = frameExecutorResult({ cwd: cwdLabel, output });
+    const delivered = await sendLongText(framed);
+    if (delivered) {
+      return (
+        `The engineering task is complete and the full result was just delivered to the founder directly. ` +
+        `Reply with ONE short, warm confirmation line (e.g. "Done — your project is ready in ${cwdLabel}.") ` +
+        `and an optional next step. Do NOT repeat the output, code, or result — it is already on the founder's screen.`
+      );
+    }
+    return framed;
   },
   {
     name: "claude_code",

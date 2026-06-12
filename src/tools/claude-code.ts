@@ -176,6 +176,21 @@ export function progressLineFromEvent(raw: string): string | null {
   return null;
 }
 
+/**
+ * Frame the executor's raw output into the deterministic, founder-facing message.
+ *
+ * This is the SINGLE source of truth for how a completed engineering task reads on
+ * Telegram. It is sent DIRECTLY to the founder (bypassing the LLM relay layers) so
+ * the result can never be mangled, summarised away, or dumped context-free by the
+ * engineering ReAct agent or the supervisor (Telegram-UX fix 2026-06-12). Pure +
+ * unit-tested: leads with a clear done-line naming the workspace, then the output
+ * verbatim (code blocks intact).
+ */
+export function frameExecutorResult(opts: { cwd: string; output: string }): string {
+  const body = opts.output.trim().length > 0 ? opts.output.trim() : "(no output produced)";
+  return `✅ Done — finished in ${opts.cwd}.\n\n${body}`;
+}
+
 /** Extract the final result text from a stream-json "result" event, or null. */
 export function resultFromEvent(raw: string): { text: string; isError: boolean } | null {
   let evt: StreamEvent;

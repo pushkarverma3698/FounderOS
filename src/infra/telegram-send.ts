@@ -47,6 +47,58 @@ export async function sendStatusText(
   }
 }
 
+/** Telegram hard-caps a message at 4096 chars; stay under it with headroom. */
+const MAX_TELEGRAM_CHARS = 3800;
+
+/**
+ * Split text into Telegram-sized chunks WITHOUT losing any character. Prefers to
+ * break at the last newline before the limit so code blocks and lists stay
+ * readable; hard-cuts only a single over-long line with no newline. Pure +
+ * unit-tested — the old sendStatusText sliced to 4000 and silently dropped the
+ * rest of a long claude_code result.
+ */
+export function chunkText(text: string, maxLen: number = MAX_TELEGRAM_CHARS): string[] {
+  if (text.length === 0) return [];
+  if (text.length <= maxLen) return [text];
+
+  const chunks: string[] = [];
+  let rest = text;
+  while (rest.length > maxLen) {
+    const newlineCut = rest.lastIndexOf("\n", maxLen);
+    const cut = newlineCut > 0 ? newlineCut : maxLen;
+    chunks.push(rest.slice(0, cut));
+    // Drop the boundary newline we split on (it's re-added by join in tests/render).
+    rest = cut === newlineCut ? rest.slice(cut + 1) : rest.slice(cut);
+  }
+  if (rest.length > 0) chunks.push(rest);
+  return chunks;
+}
+
+/**
+ * Deliver a long message to the founder, split across as many Telegram messages
+ * as needed. Returns true only if EVERY chunk was sent — the caller uses this to
+ * decide whether a deterministic direct-delivery succeeded or whether it must
+ * fall back to the normal (LLM) reply path. Plain text (no parse_mode) so code
+ * blocks and backticks render literally and never break on tag balance.
+ */
+export async function sendLongText(
+  text: string,
+  opts: { chatId?: string | number } = {},
+): Promise<boolean> {
+  const chatId = opts.chatId ?? defaultChatId();
+  const chunks = chunkText(text);
+  if (chunks.length === 0) return false;
+  try {
+    for (const chunk of chunks) {
+      await api().sendMessage(chatId, chunk);
+    }
+    return true;
+  } catch (err) {
+    log.warn({ chatId, err: (err as Error).message }, "sendLongText failed (will fall back to reply path)");
+    return false;
+  }
+}
+
 /**
  * Push a message to the founder's chat (used by the scheduler — Monday brief,
  * HITL sweeper). Api-only: never starts long polling, so it cannot conflict with

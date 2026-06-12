@@ -258,3 +258,27 @@ describe("stream-json parsing", () => {
     expect(resultFromEvent(JSON.stringify({ type: "assistant" }))).toBeNull();
   });
 });
+
+describe("frameExecutorResult — deterministic founder-facing framing", () => {
+  it("leads with a clear done-line naming the workspace, then the output verbatim", async () => {
+    const { frameExecutorResult } = await import("../../../src/tools/claude-code.js");
+    const framed = frameExecutorResult({ cwd: "/Users/x/Projects/agent-workspace", output: "Created primes.py, prints primes under 50." });
+    expect(framed).toContain("/Users/x/Projects/agent-workspace");
+    expect(framed).toContain("Created primes.py, prints primes under 50.");
+    // The done-line must come first so the founder sees the outcome before detail.
+    expect(framed.indexOf("Done")).toBeLessThan(framed.indexOf("Created primes.py"));
+  });
+
+  it("keeps the executor output intact (code blocks, multi-line)", async () => {
+    const { frameExecutorResult } = await import("../../../src/tools/claude-code.js");
+    const out = "```python\ndef primes(n):\n    ...\n```\nVerified: 2 3 5 7";
+    const framed = frameExecutorResult({ cwd: "/w", output: out });
+    expect(framed).toContain(out);
+  });
+
+  it("substitutes a placeholder when the executor produced no output", async () => {
+    const { frameExecutorResult } = await import("../../../src/tools/claude-code.js");
+    const framed = frameExecutorResult({ cwd: "/w", output: "   " });
+    expect(framed).toContain("(no output produced)");
+  });
+});
