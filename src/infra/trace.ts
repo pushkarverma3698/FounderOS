@@ -42,7 +42,7 @@ export interface TurnTrace {
 
 // Test sink — lets the Seam tier capture emitted events. Null in production.
 export type TraceSink = (event: TraceEvent) => void;
-// NOTE: module-level — safe only because tests are sequential (no Vitest workers on this file).
+// NOTE: module-level — safe because vitest isolates each test file in its own worker process; setTraceSink is never called in production.
 let _sink: TraceSink | null = null;
 export function setTraceSink(sink: TraceSink | null): void {
   _sink = sink;

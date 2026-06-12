@@ -34,7 +34,7 @@ import { assertNonEmptyMessages } from "../infra/office-guard.js";
 import { isWedgedState, type WedgeState } from "../infra/wedge.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
 import { recordConversationEnd } from "../infra/conversation-recorder.js";
-import { startTurn, activePromptHash } from "../infra/trace.js";
+import { startTurn, activePromptHash, type TurnTrace } from "../infra/trace.js";
 import { TraceCallback } from "../infra/trace-callback.js";
 import { buildRunMetadata } from "../infra/telemetry.js";
 import { SUPERVISOR_PROMPT } from "../agents/system-prompts.js";
@@ -293,6 +293,7 @@ export async function trimThreadHistory(
   office: any,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   config: any,
+  trace?: TurnTrace,
 ): Promise<void> {
   const pending = await getPendingApproval(office, config);
   if (pending) return; // mid-HITL — do not touch state
@@ -305,6 +306,7 @@ export async function trimThreadHistory(
   const removals = toRemove.map((id) => new RemoveMessage({ id }));
   await office.updateState(config, { messages: removals });
   log.debug({ removed: toRemove.length }, "Trimmed thread history to last N turns");
+  trace?.event("checkpoint.trim", { removed: toRemove.length });
 }
 
 // ── Route an incoming message into the office ──────────────────────────────────
@@ -417,7 +419,7 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
       recordConversationEnd(threadIdFor(chatId), res.messages ?? []).catch((err) =>
         log.warn({ chatId, err: (err as Error).message }, "Conversation recording failed"),
       );
-      trimThreadHistory(office, config).catch((err) =>
+      trimThreadHistory(office, config, trace).catch((err) =>
         log.warn({ chatId, err: (err as Error).message }, "History trim failed — non-fatal"),
       );
     }
@@ -540,7 +542,7 @@ export async function resumeOffice(ctx: Context, decision: "approved" | "rejecte
     const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
     await sendResult(ctx, freshRes, chatId);
     trace.event("turn.out", { resumed: true });
-    trimThreadHistory(office, config).catch((err) =>
+    trimThreadHistory(office, config, trace).catch((err) =>
       log.warn({ chatId, err: (err as Error).message }, "History trim failed — non-fatal"),
     );
   } catch (err) {
