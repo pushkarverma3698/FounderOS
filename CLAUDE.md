@@ -99,7 +99,7 @@ The critic has side effects (writes CritiqueRecord, logs analytics).
 It must be a graph node. Conditional routing happens in a separate pure-function edge.
 
 ### 4. HITL = DB-backed
-Always write to `interrupt_registry` table BEFORE calling LangGraph `interrupt()`.
+Always write to the `hitl_approvals` table BEFORE calling LangGraph `interrupt()`.
 This ensures recoverability if the process crashes between writing and calling.
 
 ### 5. Idempotency before external actions

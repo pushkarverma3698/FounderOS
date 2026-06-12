@@ -20,7 +20,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
 import { getFounderContext, getPendingInterrupt } from "../db/queries.js";
 import { getOutboundTargets } from "../outbound/targets.js";
-import { sendToChat } from "../gateway/telegram.js";
+import { sendToChat } from "./telegram-send.js";
 import { buildOffice } from "../agents/office.js";
 import { SCHEDULER_BRIEF_PROMPT } from "../agents/system-prompts.js";
 import { childLogger } from "./logger.js";

@@ -100,6 +100,18 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
     res.end(JSON.stringify({ error: "not_found" }));
   });
 
+  // Bind failure (e.g. EADDRINUSE during a fast restart, before the previous
+  // instance released the port) must NOT kill the bot — the health/metrics port
+  // is observability, not a core dependency. Log it and carry on; the previous
+  // instance's exit frees the port shortly after.
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      log.warn({ port }, "Health port in use — continuing without health server (non-fatal)");
+    } else {
+      log.warn({ port, err: err.message }, "Health server error (non-fatal)");
+    }
+  });
+
   server.listen(port, () => log.info({ port }, "Health server listening on /health and /metrics"));
   // Don't keep the event loop alive on this socket alone.
   server.unref();
