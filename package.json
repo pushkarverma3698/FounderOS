@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "node --env-file=.env --import tsx/esm --watch src/index.ts",
-    "start": "node --env-file=.env dist/index.js",
+    "start": "node --env-file=.env dist/src/index.js",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
