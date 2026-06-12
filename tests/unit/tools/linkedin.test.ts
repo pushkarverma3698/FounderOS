@@ -31,6 +31,7 @@ vi.mock("../../../src/infra/composio.js", async (orig) => {
     getComposioApiKey: mockGetComposioApiKey,
     getLinkedInConnectionId: () => "ca_li_test",
     getLinkedInUserId: () => "li_user_test",
+    getLinkedInAuthorUrn: () => "urn:li:person:TEST123",
   };
 });
 
@@ -78,17 +79,18 @@ describe("linkedinPostTool", () => {
     expect(fields).not.toHaveProperty("text"); // explicit rejection of wrong field name
   });
 
-  it("sends visibility as an object not a bare string", async () => {
-    // Composio requires { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" }
-    // not the bare string "PUBLIC"
+  it("sends visibility as a plain string enum and includes the required author URN", async () => {
+    // Live contract (verified 2026-06-12): Composio's LINKEDIN_CREATE_LINKED_IN_POST
+    // rejects an object visibility ("Input should be 'PUBLIC', 'CONNECTIONS', ...")
+    // and 400s without 'author' ("fields are missing: {'author'}"). The old object
+    // shape passed this test but failed every real post.
     mockExecuteComposioAction.mockResolvedValue({ data: { id: "urn:li:share:2" } });
 
     await linkedinPostTool.execute(BASE_POST_ARGS);
 
     const [, fields] = mockExecuteComposioAction.mock.calls[0] as [string, Record<string, unknown>];
-    expect(typeof fields["visibility"]).toBe("object");
-    const visObj = fields["visibility"] as Record<string, string>;
-    expect(Object.values(visObj)[0]).toBe("PUBLIC");
+    expect(fields["visibility"]).toBe("PUBLIC");
+    expect(fields["author"]).toBe("urn:li:person:TEST123");
   });
 
   it("writes audit entry only AFTER confirming post_id exists", async () => {

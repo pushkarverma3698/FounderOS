@@ -29,6 +29,7 @@ vi.mock("../../../src/infra/composio.js", async (orig) => {
     getComposioApiKey: mockGetComposioApiKey,
     getLinkedInConnectionId: () => "ca_test_li",
     getLinkedInUserId: () => "turicks-internal",
+    getLinkedInAuthorUrn: () => "urn:li:person:TEST123",
   };
 });
 
@@ -82,18 +83,28 @@ describe("linkedinPostTool", () => {
     // Composio wants 'commentary', not 'text'
     expect(args).toHaveProperty("commentary", BASE_ARGS.text);
     expect(args).not.toHaveProperty("text");
-    // visibility must be an object, not a bare string
-    expect(typeof args["visibility"]).toBe("object");
+    // 'author' member URN is REQUIRED (live contract — Composio 400s without it)
+    expect(args).toHaveProperty("author", "urn:li:person:TEST123");
+    // visibility must be a PLAIN STRING enum, not an object (Composio rejects objects)
+    expect(typeof args["visibility"]).toBe("string");
   });
 
-  it("sets PUBLIC visibility by default", async () => {
+  it("sets PUBLIC visibility (plain string) by default", async () => {
     mockExecuteComposioAction.mockResolvedValue({ data: { id: "urn:li:share:2" } });
 
     await linkedinPostTool.execute(BASE_ARGS);
 
     const [, args] = mockExecuteComposioAction.mock.calls[0] as [string, Record<string, unknown>];
-    const vis = args["visibility"] as Record<string, string>;
-    expect(Object.values(vis)[0]).toBe("PUBLIC");
+    expect(args["visibility"]).toBe("PUBLIC");
+  });
+
+  it("sets CONNECTIONS visibility (plain string) when requested", async () => {
+    mockExecuteComposioAction.mockResolvedValue({ data: { id: "urn:li:share:3" } });
+
+    await linkedinPostTool.execute({ ...BASE_ARGS, visibility: "CONNECTIONS" });
+
+    const [, args] = mockExecuteComposioAction.mock.calls[0] as [string, Record<string, unknown>];
+    expect(args["visibility"]).toBe("CONNECTIONS");
   });
 
   // ── P0: Soft-failure detection ──────────────────────────────────────────────
