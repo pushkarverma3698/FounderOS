@@ -10,32 +10,52 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ── DB query mocks ────────────────────────────────────────────────────────────
 
 const mockSearchEpisodicMemory = vi.fn(async () => []);
-const mockSearchKnowledgeEntries = vi.fn(async () => []);
 const mockGetFounderContext = vi.fn(async () => ({}));
 const mockInsertEpisodicEvent = vi.fn(async () => "test-id-1");
+
+// Knowledge now comes from the Turicks Brain vector store via callRagApi —
+// not the Postgres `knowledge_entries` table.
+const mockCallRagApi = vi.fn();
 
 vi.mock("../../../src/db/queries.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return {
     ...actual,
     searchEpisodicMemory: mockSearchEpisodicMemory,
-    searchKnowledgeEntries: mockSearchKnowledgeEntries,
     getFounderContext: mockGetFounderContext,
     insertEpisodicEvent: mockInsertEpisodicEvent,
   };
+});
+
+vi.mock("../../../src/tools/rag.js", async (orig) => {
+  const actual = await (orig() as Promise<Record<string, unknown>>);
+  return { ...actual, callRagApi: mockCallRagApi };
 });
 
 const { searchMemoryTool, recordEventTool } = await import("../../../src/tools/memory.js");
 
 // ── searchMemoryTool ──────────────────────────────────────────────────────────
 
+/** Build a Turicks Brain vector response with the given chunks. */
+function brainResponse(chunks: Array<{ text: string; source_path?: string; score?: number }>) {
+  return {
+    query: "q",
+    results: chunks.map((c) => ({
+      text: c.text,
+      metadata: { source_path: c.source_path ?? "docs/decisions/002.md" },
+      score: c.score ?? 0.8,
+    })),
+    total: chunks.length,
+  };
+}
+
 describe("searchMemoryTool", () => {
   beforeEach(() => {
     mockSearchEpisodicMemory.mockClear();
-    mockSearchKnowledgeEntries.mockClear();
+    mockCallRagApi.mockClear();
     mockGetFounderContext.mockClear();
     mockSearchEpisodicMemory.mockResolvedValue([]);
-    mockSearchKnowledgeEntries.mockResolvedValue([]);
+    mockCallRagApi.mockResolvedValue(null); // brain empty/unreachable by default
     mockGetFounderContext.mockResolvedValue({});
   });
 
@@ -62,17 +82,16 @@ describe("searchMemoryTool", () => {
     expect(result).toContain("Alex wants a Stripe webhook");
   });
 
-  it("returns knowledge entries when present", async () => {
-    mockSearchKnowledgeEntries.mockResolvedValue([
-      {
-        title: "ADR-002: Use Composio",
-        content: "We chose Composio because it handles OAuth.",
-        entry_type: "adr",
-        tags: ["composio"],
-      },
-    ]);
+  it("returns Turicks Brain knowledge when present", async () => {
+    mockCallRagApi.mockResolvedValue(
+      brainResponse([
+        { text: "We chose Composio because it handles OAuth.", source_path: "docs/decisions/002-composio.md" },
+      ]),
+    );
     const result = await searchMemoryTool.invoke({ query: "composio" });
-    expect(result).toContain("ADR-002: Use Composio");
+    expect(result).toContain("Knowledge Base:");
+    expect(result).toContain("We chose Composio because it handles OAuth.");
+    expect(result).toContain("docs/decisions/002-composio.md");
   });
 
   it("includes context data when present and query matches", async () => {
@@ -99,20 +118,15 @@ describe("searchMemoryTool", () => {
     ]);
     const result = await searchMemoryTool.invoke({ query: "website", type: "episodic" });
     expect(result).toContain("Task completed: website launch");
-    expect(mockSearchKnowledgeEntries).not.toHaveBeenCalled();
+    expect(mockCallRagApi).not.toHaveBeenCalled();
   });
 
   it("filters by type=knowledge — skips episodic", async () => {
-    mockSearchKnowledgeEntries.mockResolvedValue([
-      {
-        title: "Brand Voice Guide",
-        content: "Never say excited to share.",
-        entry_type: "brand",
-        tags: ["brand"],
-      },
-    ]);
+    mockCallRagApi.mockResolvedValue(
+      brainResponse([{ text: "Never say excited to share.", source_path: "docs/brand/voice.md" }]),
+    );
     const result = await searchMemoryTool.invoke({ query: "brand", type: "knowledge" });
-    expect(result).toContain("Brand Voice Guide");
+    expect(result).toContain("Never say excited to share.");
     expect(mockSearchEpisodicMemory).not.toHaveBeenCalled();
   });
 
@@ -121,7 +135,7 @@ describe("searchMemoryTool", () => {
     const result = await searchMemoryTool.invoke({ query: "clients", type: "context" });
     expect(result).toContain("TestCo");
     expect(mockSearchEpisodicMemory).not.toHaveBeenCalled();
-    expect(mockSearchKnowledgeEntries).not.toHaveBeenCalled();
+    expect(mockCallRagApi).not.toHaveBeenCalled();
   });
 
   it("combines results from multiple sources when type=all", async () => {
@@ -137,17 +151,12 @@ describe("searchMemoryTool", () => {
         source: "telegram",
       },
     ]);
-    mockSearchKnowledgeEntries.mockResolvedValue([
-      {
-        title: "LinkedIn Brand Pillar",
-        content: "Hook on line 1, 150–300 words.",
-        entry_type: "brand",
-        tags: ["linkedin"],
-      },
-    ]);
+    mockCallRagApi.mockResolvedValue(
+      brainResponse([{ text: "Hook on line 1, 150–300 words.", source_path: "docs/brand/linkedin-pillar.md" }]),
+    );
     const result = await searchMemoryTool.invoke({ query: "linkedin", type: "all" });
     expect(result).toContain("Met with Alex about LinkedIn");
-    expect(result).toContain("LinkedIn Brand Pillar");
+    expect(result).toContain("Hook on line 1, 150–300 words.");
   });
 });
 

@@ -1,38 +1,31 @@
 /**
- * Unit tests for searchKnowledge tool (turicks-brain ILIKE search)
+ * Unit tests for searchKnowledge tool (Turicks Brain — vector RAG)
  * =================================================================
- * This tool is the memory layer for research/sales/marketing agents.
- * Two search paths:
- *   - With entry_type → getKnowledgeByType (filtered by content category)
- *   - Without entry_type → searchKnowledgeEntries (full-text keyword search)
+ * As of 2026-06-12 this tool no longer queries the Postgres `knowledge_entries`
+ * table. It performs semantic search over the Turicks Brain vector store via the
+ * shared `callRagApi` helper (turicks-brain-rag API on :8766). These tests pin
+ * the new contract:
  *
- * Edge cases covered:
- *  1. entry_type provided → calls getKnowledgeByType, NOT searchKnowledgeEntries
- *  2. No entry_type → calls searchKnowledgeEntries, NOT getKnowledgeByType
- *  3. Empty results → returns the "No knowledge entries found" message with brain:sync hint
- *  4. Empty results with entry_type → message includes the type filter
- *  5. Results are formatted as numbered list with title, tags, and preview
- *  6. Content >400 chars → truncated at 400 with "…" appended
- *  7. Content ≤400 chars → not truncated, no "…"
- *  8. Tags present → shown as "Tags: tag1, tag2"
- *  9. Empty/missing tags → tags line omitted
- * 10. Multiple results → all present, numbered sequentially
- * 11. Throws propagated → error surfaces to caller (tool catches at langchain level)
+ *  1. Empty/whitespace query → "query is required." (no API call)
+ *  2. callRagApi is called with (TURICKS_BRAIN_URL, query, 5, doc_type|undefined)
+ *  3. doc_type omitted → topK 5, no doc filter
+ *  4. API unreachable (null) → honest degraded message with the manual start cmd
+ *  5. Empty results → "No knowledge found" message (includes doc_type when given)
+ *  6. Results → "Turicks Brain results …" header + formatted source/score/preview
+ *  7. Multiple results → all present, numbered, source_path used as the label
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mocks (hoisted, declared before dynamic import) ───────────────────────────
 
-const mockSearchKnowledgeEntries = vi.fn();
-const mockGetKnowledgeByType = vi.fn();
+const mockCallRagApi = vi.fn();
 
-vi.mock("../../../src/db/queries.js", async (orig) => {
+vi.mock("../../../src/tools/rag.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return {
-    ...actual,
-    searchKnowledgeEntries: mockSearchKnowledgeEntries,
-    getKnowledgeByType: mockGetKnowledgeByType,
+    ...actual, // keep the real formatResults + TURICKS_BRAIN_URL
+    callRagApi: mockCallRagApi,
   };
 });
 
@@ -41,58 +34,85 @@ vi.mock("../../../src/infra/logger.js", () => ({
 }));
 
 const { searchKnowledge } = await import("../../../src/tools/knowledge.js");
+const { TURICKS_BRAIN_URL } = await import("../../../src/tools/rag.js");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeEntry(overrides: Partial<{
-  title: string;
-  content: string;
-  tags: string[];
-  entry_type: string;
+function makeResult(overrides: Partial<{
+  text: string;
+  source_path: string;
+  score: number;
 }> = {}) {
   return {
-    title: overrides.title ?? "ADR-002: Use Composio for tool integrations",
-    content: overrides.content ?? "We chose Composio because it handles OAuth flows for Gmail, LinkedIn, and GitHub.",
-    tags: overrides.tags ?? ["adr", "composio", "tooling"],
-    entry_type: overrides.entry_type ?? "adr",
+    text: overrides.text ?? "We chose Composio because it handles OAuth flows for Gmail, LinkedIn, and GitHub.",
+    metadata: { source_path: overrides.source_path ?? "docs/decisions/002-composio.md" },
+    score: overrides.score ?? 0.82,
   };
 }
 
-// ── Routing tests ─────────────────────────────────────────────────────────────
+function ragResponse(results: ReturnType<typeof makeResult>[]) {
+  return { query: "q", results, total: results.length };
+}
 
-describe("searchKnowledge — routing by entry_type", () => {
+// ── Input guard ───────────────────────────────────────────────────────────────
+
+describe("searchKnowledge — input guard", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns 'query is required.' for an empty query without calling the API", async () => {
+    const result = await searchKnowledge.invoke({ query: "" });
+    expect(result).toBe("query is required.");
+    expect(mockCallRagApi).not.toHaveBeenCalled();
+  });
+
+  it("treats a whitespace-only query as empty", async () => {
+    const result = await searchKnowledge.invoke({ query: "   " });
+    expect(result).toBe("query is required.");
+    expect(mockCallRagApi).not.toHaveBeenCalled();
+  });
+});
+
+// ── API call contract ───────────────────────────────────────────────────────
+
+describe("searchKnowledge — calls the vector store correctly", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCallRagApi.mockResolvedValue(ragResponse([]));
   });
 
-  it("calls getKnowledgeByType when entry_type is provided — NOT searchKnowledgeEntries", async () => {
-    mockGetKnowledgeByType.mockResolvedValueOnce([makeEntry()]);
-    await searchKnowledge.invoke({ query: "composio", entry_type: "adr" });
-
-    expect(mockGetKnowledgeByType).toHaveBeenCalledOnce();
-    expect(mockSearchKnowledgeEntries).not.toHaveBeenCalled();
-  });
-
-  it("calls searchKnowledgeEntries when no entry_type — NOT getKnowledgeByType", async () => {
-    mockSearchKnowledgeEntries.mockResolvedValueOnce([makeEntry()]);
+  it("calls callRagApi with the brain URL, query, topK 5 and no doc filter", async () => {
     await searchKnowledge.invoke({ query: "composio" });
-
-    expect(mockSearchKnowledgeEntries).toHaveBeenCalledOnce();
-    expect(mockGetKnowledgeByType).not.toHaveBeenCalled();
+    expect(mockCallRagApi).toHaveBeenCalledWith(TURICKS_BRAIN_URL, "composio", 5, undefined);
   });
 
-  it("passes TENANT and limit:5 to getKnowledgeByType", async () => {
-    mockGetKnowledgeByType.mockResolvedValueOnce([]);
-    await searchKnowledge.invoke({ query: "brand voice", entry_type: "brand" });
-
-    expect(mockGetKnowledgeByType).toHaveBeenCalledWith("turicks", "brand", 5);
+  it("forwards doc_type as the fourth argument when provided", async () => {
+    await searchKnowledge.invoke({ query: "brand voice", doc_type: "decision" });
+    expect(mockCallRagApi).toHaveBeenCalledWith(TURICKS_BRAIN_URL, "brand voice", 5, "decision");
   });
 
-  it("passes TENANT and query and limit:5 to searchKnowledgeEntries", async () => {
-    mockSearchKnowledgeEntries.mockResolvedValueOnce([]);
-    await searchKnowledge.invoke({ query: "LinkedIn positioning" });
+  it("trims the query before searching", async () => {
+    await searchKnowledge.invoke({ query: "  LinkedIn positioning  " });
+    expect(mockCallRagApi).toHaveBeenCalledWith(TURICKS_BRAIN_URL, "LinkedIn positioning", 5, undefined);
+  });
+});
 
-    expect(mockSearchKnowledgeEntries).toHaveBeenCalledWith("turicks", "LinkedIn positioning", 5);
+// ── Degraded / unreachable ──────────────────────────────────────────────────
+
+describe("searchKnowledge — API unreachable", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCallRagApi.mockResolvedValue(null);
+  });
+
+  it("returns an honest degraded message naming the query", async () => {
+    const result = await searchKnowledge.invoke({ query: "uncertainty principle" });
+    expect(result).toContain("not reachable");
+    expect(result).toContain("uncertainty principle");
+  });
+
+  it("includes the manual start command so the founder can recover", async () => {
+    const result = await searchKnowledge.invoke({ query: "test" });
+    expect(result).toContain("uvicorn src.api:app");
   });
 });
 
@@ -101,138 +121,73 @@ describe("searchKnowledge — routing by entry_type", () => {
 describe("searchKnowledge — empty results", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSearchKnowledgeEntries.mockResolvedValue([]);
-    mockGetKnowledgeByType.mockResolvedValue([]);
+    mockCallRagApi.mockResolvedValue(ragResponse([]));
   });
 
-  it("returns a 'No knowledge entries found' message with the query", async () => {
+  it("returns a 'No knowledge found' message with the query", async () => {
     const result = await searchKnowledge.invoke({ query: "unknown topic" });
-
-    expect(result).toContain("No knowledge entries found");
+    expect(result).toContain("No knowledge found");
     expect(result).toContain("unknown topic");
   });
 
-  it("includes brain:sync hint so the founder knows how to populate it", async () => {
-    const result = await searchKnowledge.invoke({ query: "test" });
-    expect(result).toContain("pnpm brain:sync");
-  });
-
-  it("includes the entry_type filter in the empty message when type was specified", async () => {
-    const result = await searchKnowledge.invoke({ query: "fintech", entry_type: "case_study" });
-    expect(result).toContain("case_study");
+  it("includes the doc_type filter in the empty message when type was specified", async () => {
+    const result = await searchKnowledge.invoke({ query: "fintech", doc_type: "decision" });
+    expect(result).toContain("decision");
   });
 });
 
 // ── Result formatting ─────────────────────────────────────────────────────────
 
 describe("searchKnowledge — result formatting", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  beforeEach(() => vi.clearAllMocks());
+
+  it("prefixes results with the 'Turicks Brain results' header and total count", async () => {
+    mockCallRagApi.mockResolvedValueOnce(ragResponse([makeResult()]));
+    const result = await searchKnowledge.invoke({ query: "composio" });
+    expect(result).toContain('Turicks Brain results for "composio" (1)');
   });
 
-  it("numbers results starting from 1", async () => {
-    mockSearchKnowledgeEntries.mockResolvedValueOnce([
-      makeEntry({ title: "First" }),
-      makeEntry({ title: "Second" }),
-    ]);
-
-    const result = await searchKnowledge.invoke({ query: "test" });
-
-    expect(result).toContain("1.");
-    expect(result).toContain("2.");
-  });
-
-  it("includes the entry title in each result", async () => {
-    mockSearchKnowledgeEntries.mockResolvedValueOnce([
-      makeEntry({ title: "ADR-009: LinkedIn ban risk mitigation" }),
-    ]);
-
+  it("labels each result with its source_path and score", async () => {
+    mockCallRagApi.mockResolvedValueOnce(
+      ragResponse([makeResult({ source_path: "docs/decisions/009-linkedin.md", score: 0.91 })]),
+    );
     const result = await searchKnowledge.invoke({ query: "linkedin" });
-
-    expect(result).toContain("ADR-009: LinkedIn ban risk mitigation");
+    expect(result).toContain("docs/decisions/009-linkedin.md");
+    expect(result).toContain("0.91");
   });
 
-  it("shows tags in 'Tags: tag1, tag2' format when tags are present", async () => {
-    mockSearchKnowledgeEntries.mockResolvedValueOnce([
-      makeEntry({ tags: ["composio", "email", "gmail"] }),
-    ]);
-
-    const result = await searchKnowledge.invoke({ query: "email" });
-
-    expect(result).toContain("Tags: composio, email, gmail");
+  it("includes the chunk text in the output", async () => {
+    mockCallRagApi.mockResolvedValueOnce(
+      ragResponse([makeResult({ text: "Hook on line 1, 150–300 words." })]),
+    );
+    const result = await searchKnowledge.invoke({ query: "brand" });
+    expect(result).toContain("Hook on line 1, 150–300 words.");
   });
 
-  it("omits the Tags line when tags array is empty", async () => {
-    mockSearchKnowledgeEntries.mockResolvedValueOnce([
-      makeEntry({ tags: [] }),
-    ]);
-
+  it("numbers multiple results sequentially", async () => {
+    mockCallRagApi.mockResolvedValueOnce(
+      ragResponse([
+        makeResult({ text: "First chunk" }),
+        makeResult({ text: "Second chunk" }),
+      ]),
+    );
     const result = await searchKnowledge.invoke({ query: "test" });
-
-    expect(result).not.toContain("Tags:");
+    expect(result).toContain("1. ");
+    expect(result).toContain("2. ");
+    expect(result).toContain("First chunk");
+    expect(result).toContain("Second chunk");
   });
 
-  it("truncates content preview at 400 chars and appends '…'", async () => {
-    const longContent = "a".repeat(450); // 450 chars — over the 400-char limit
-    mockSearchKnowledgeEntries.mockResolvedValueOnce([
-      makeEntry({ content: longContent }),
-    ]);
-
-    const result = await searchKnowledge.invoke({ query: "test" });
-
+  // Regression (2026-06-12): a single top_k-5 search of large vector chunks blew
+  // the per-run token budget (52,991 ≥ 50,000) because formatResults emitted the
+  // FULL chunk text. Each preview must now be bounded so the output stays small.
+  it("truncates long chunk text and appends an ellipsis", async () => {
+    const longText = "x".repeat(5_000);
+    mockCallRagApi.mockResolvedValueOnce(ragResponse([makeResult({ text: longText })]));
+    const result = await searchKnowledge.invoke({ query: "big" });
+    expect(result).not.toContain(longText); // full text never emitted
     expect(result).toContain("…");
-    // The preview in the output should contain 400 'a's then '…'
-    expect(result).toContain("a".repeat(400) + "…");
-  });
-
-  it("does not append '…' when content is exactly 400 chars", async () => {
-    const exactContent = "b".repeat(400);
-    mockSearchKnowledgeEntries.mockResolvedValueOnce([
-      makeEntry({ content: exactContent }),
-    ]);
-
-    const result = await searchKnowledge.invoke({ query: "test" });
-
-    expect(result).not.toContain("…");
-  });
-
-  it("does not append '…' when content is under 400 chars", async () => {
-    const shortContent = "Short content under the limit.";
-    mockSearchKnowledgeEntries.mockResolvedValueOnce([
-      makeEntry({ content: shortContent }),
-    ]);
-
-    const result = await searchKnowledge.invoke({ query: "test" });
-
-    expect(result).toContain("Short content under the limit.");
-    expect(result).not.toContain("…");
-  });
-
-  it("collapses multiple newlines in content preview to a single space", async () => {
-    const contentWithNewlines = "Line 1\n\nLine 2\n\nLine 3";
-    mockSearchKnowledgeEntries.mockResolvedValueOnce([
-      makeEntry({ content: contentWithNewlines }),
-    ]);
-
-    const result = await searchKnowledge.invoke({ query: "test" });
-
-    // Newlines collapsed → no raw newlines in the preview portion
-    expect(result).toContain("Line 1 Line 2 Line 3");
-  });
-
-  it("formats multiple results separated by blank lines", async () => {
-    mockSearchKnowledgeEntries.mockResolvedValueOnce([
-      makeEntry({ title: "Entry A" }),
-      makeEntry({ title: "Entry B" }),
-      makeEntry({ title: "Entry C" }),
-    ]);
-
-    const result = await searchKnowledge.invoke({ query: "test" });
-
-    expect(result).toContain("Entry A");
-    expect(result).toContain("Entry B");
-    expect(result).toContain("Entry C");
-    // Results joined with double newline
-    expect(result).toContain("\n\n");
+    // 5 chunks of this size used to be ~50k tokens; bounded output must stay tiny.
+    expect(result.length).toBeLessThan(1_500);
   });
 });

@@ -17,6 +17,7 @@ import { closeDatabaseConnections } from "./db/client.js";
 import { getOffice } from "./agents/office.js";
 import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
 import { startHealthServer } from "./infra/health.js";
+import { ensureRagService } from "./infra/rag-service.js";
 import { startScheduler } from "./infra/scheduler.js";
 import { acquireSingleInstanceLock, releaseSingleInstanceLock, waitForProcessExit } from "./infra/single-instance.js";
 import { logger } from "./infra/logger.js";
@@ -51,6 +52,13 @@ async function main(): Promise<void> {
 
   // 3. Health/metrics server.
   healthServer = startHealthServer();
+
+  // 3b. Ensure the Turicks Brain (vector RAG) API is up so knowledge search
+  //     works. Non-blocking and never fatal — a degraded brain must not stop
+  //     the bot from booting.
+  void ensureRagService().catch((err) =>
+    log.warn({ err: (err as Error).message }, "RAG service check failed — knowledge search may be degraded"),
+  );
 
   // 4. Telegram bot (long polling — runs in background).
   await startBot();

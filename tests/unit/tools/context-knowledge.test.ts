@@ -1,10 +1,12 @@
 /**
- * Phase C — context and knowledge tools unit tests
+ * Phase C — context tools unit tests
  *
  * These tests verify that:
  * - read_context returns a sensible empty-state message when no data is stored
  * - update_context merges and persists data
- * - search_knowledge returns a sensible empty-state message when the DB is empty
+ *
+ * search_knowledge has its own dedicated suite (knowledge.test.ts) since it
+ * moved to the Turicks Brain vector store — it is no longer a DB-query tool.
  *
  * All tests mock the DB queries to avoid needing a live Postgres instance.
  */
@@ -14,8 +16,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock DB queries before importing tools
 const mockGetFounderContext = vi.fn(async () => ({}));
 const mockUpsertFounderContext = vi.fn(async () => {});
-const mockSearchKnowledgeEntries = vi.fn(async () => []);
-const mockGetKnowledgeByType = vi.fn(async () => []);
 
 vi.mock("../../../src/db/queries.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
@@ -23,13 +23,10 @@ vi.mock("../../../src/db/queries.js", async (orig) => {
     ...actual,
     getFounderContext: mockGetFounderContext,
     upsertFounderContext: mockUpsertFounderContext,
-    searchKnowledgeEntries: mockSearchKnowledgeEntries,
-    getKnowledgeByType: mockGetKnowledgeByType,
   };
 });
 
 const { readContext, updateContext } = await import("../../../src/tools/context.js");
-const { searchKnowledge } = await import("../../../src/tools/knowledge.js");
 
 describe("readContext tool", () => {
   beforeEach(() => {
@@ -74,40 +71,5 @@ describe("updateContext tool", () => {
     });
     expect(result).toContain("Context updated");
     expect(result).toContain("active_clients");
-  });
-});
-
-describe("searchKnowledge tool", () => {
-  beforeEach(() => {
-    mockSearchKnowledgeEntries.mockClear();
-    mockGetKnowledgeByType.mockClear();
-    mockSearchKnowledgeEntries.mockResolvedValue([]);
-    mockGetKnowledgeByType.mockResolvedValue([]);
-  });
-
-  it("returns an informative empty-state message when nothing is found", async () => {
-    const result = await searchKnowledge.invoke({ query: "nonexistent topic" });
-    expect(result).toContain("No knowledge entries found");
-    expect(result).toContain("pnpm brain:sync");
-  });
-
-  it("formats found entries with type, title and preview", async () => {
-    mockSearchKnowledgeEntries.mockResolvedValue([
-      {
-        title: "ADR-002: Use Composio",
-        content: "We chose Composio because it handles OAuth for Gmail and LinkedIn without us managing tokens.",
-        entry_type: "adr",
-        tags: ["composio", "gmail"],
-      },
-    ]);
-    const result = await searchKnowledge.invoke({ query: "composio" });
-    expect(result).toContain("ADR-002: Use Composio");
-    expect(result).toContain("composio, gmail");
-  });
-
-  it("routes to getKnowledgeByType when entry_type is provided", async () => {
-    await searchKnowledge.invoke({ query: "brand", entry_type: "brand" });
-    expect(mockGetKnowledgeByType).toHaveBeenCalled();
-    expect(mockSearchKnowledgeEntries).not.toHaveBeenCalled();
   });
 });

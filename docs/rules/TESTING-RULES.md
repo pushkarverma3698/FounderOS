@@ -457,3 +457,45 @@ you do NOT batch it for later. In order:
 
 A bot that "passes after the fix" is only proven when step 4's evidence (reply + audit row)
 is in the report — not when the unit test goes green.
+
+---
+
+## Rule 15: The Live Telegram/E2E Suite Is Part of the Definition of Done
+
+**This is the Verification-First protocol, restated as a hard testing gate.** Unit tests
+are a safety net, not proof. EVERY feature or fix in this repo — not just HITL changes —
+must clear a live real-path run before it is called done. New tests we add (and the ones
+we already built) must be exercised the **same way** as the Telegram + E2E harnesses:
+through `grammy → telegram.ts → office → HITL card → button tap → reply`, driven over
+MTProto as the founder — never the office invoker alone, never the Bot API.
+
+**Definition of Done (every change):**
+
+1. **Build it.**
+2. **Exercise the REAL runtime path end-to-end** — drive it the way the founder would
+   (live Telegram bot via MTProto, real graph, real model calls, real Postgres). Never
+   declare something working off the back of a unit test alone.
+3. **Show the real output as evidence** — the actual bot reply text PLUS the matching
+   `action_log` row (or an explicit **NO ROW**). See Rule 12. "This should work" is not
+   evidence.
+4. **Test incrementally** — after each meaningful change, re-exercise that path before
+   moving to the next. Do not stack three untested changes and verify at the end.
+5. **If it fails, fix it and re-run the same task** (Rule 14). Only move on when the live
+   path passes.
+6. **A small integration check after every change is mandatory**, not optional — this was
+   skipped historically and is the single biggest source of unreliability in this project.
+
+**Required harnesses (any new live/integration test MUST use these, like the ones we built):**
+
+| Harness | Use |
+|---|---|
+| `scripts/e2e-telegram-qa.ts` | full 22-task founder-simulation suite over the real gateway (read · write · multi-step · adversarial · crash-recovery); evidence = bot reply + `action_log` row |
+| `scripts/telegram-tester.ts` | single send / approve / reject / read over the same MTProto path |
+| `scripts/probe-real-task.ts` | office/tool-logic only (bypasses grammy) — NOT sufficient for gateway-loop or HITL bugs |
+
+**Gate:** `pnpm test` green → tsc/lint clean → restart bot (single-instance lock makes
+this safe) → drive the change over the REAL path → confirm 0× 409 and the expected
+behaviour + evidence in `/tmp/founderos.log` and `action_log`.
+
+If you cannot verify something live (missing key, no device), write **"NOT VERIFIED —
+reason"** and do not count it as done.

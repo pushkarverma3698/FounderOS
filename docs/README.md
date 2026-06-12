@@ -27,7 +27,7 @@
 |-----|---------------|
 | [PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) | **Wiring maps**: exact files to touch for adding a tool / department / workflow / command, with "forget X → error Y" tables |
 | [TOOL-STANDARDS.md](rules/TOOL-STANDARDS.md) | The 8-point checklist every new tool must pass |
-| [TESTING-RULES.md](rules/TESTING-RULES.md) | 8 testing rules learned from real bugs + a test template |
+| [TESTING-RULES.md](rules/TESTING-RULES.md) | 15 testing rules learned from real bugs + a test template. **Rule 15 = the Verification-First Definition of Done: every change must clear a live MTProto/E2E run (bot reply + `action_log` evidence), not just unit tests.** |
 | [TOOL-INTEGRATION-PLAYBOOK.md](rules/TOOL-INTEGRATION-PLAYBOOK.md) | Verifying external API (Composio) contracts before writing the tool |
 
 ## 🧭 decisions/ — Architecture Decision Records (ADRs)

@@ -24,15 +24,15 @@ const log = childLogger({ module: "tool:rag" });
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const PERSONAL_RAG_URL =
+export const PERSONAL_RAG_URL =
   process.env["PERSONAL_RAG_URL"] ?? "http://localhost:8765";
 
-const TURICKS_BRAIN_URL =
+export const TURICKS_BRAIN_URL =
   process.env["TURICKS_BRAIN_URL"] ?? "http://localhost:8766";
 
 // ── Shared types ──────────────────────────────────────────────────────────────
 
-interface RagSearchResponse {
+export interface RagSearchResponse {
   query: string;
   results: Array<{
     text: string;
@@ -44,7 +44,7 @@ interface RagSearchResponse {
 
 // ── Shared fetch helper ────────────────────────────────────────────────────────
 
-async function callRagApi(
+export async function callRagApi(
   baseUrl: string,
   query: string,
   topK: number,
@@ -73,7 +73,16 @@ async function callRagApi(
   }
 }
 
-function formatResults(
+/**
+ * Max characters of chunk text shown per result. Vector chunks can be several KB
+ * each; with top_k 5 the untruncated full text blew the per-run token budget
+ * (reproduced 2026-06-12: 52,991 ≥ 50,000 on a single search_knowledge call).
+ * Bounding each preview here keeps the tool output in line with the old Postgres
+ * ILIKE path (400-char previews) and with search_memory (300-char previews).
+ */
+export const RAG_PREVIEW_MAX_CHARS = 500;
+
+export function formatResults(
   results: RagSearchResponse["results"],
   query: string,
   sourceField: string,
@@ -84,7 +93,12 @@ function formatResults(
   const lines = results.map((r, i) => {
     const src = (r.metadata[sourceField] as string | undefined) ?? "unknown";
     const score = r.score.toFixed(2);
-    return `${i + 1}. [${src}] (score ${score})\n${r.text.trim()}`;
+    const full = r.text.trim();
+    const preview =
+      full.length > RAG_PREVIEW_MAX_CHARS
+        ? `${full.slice(0, RAG_PREVIEW_MAX_CHARS).trim()}…`
+        : full;
+    return `${i + 1}. [${src}] (score ${score})\n${preview}`;
   });
   return lines.join("\n\n");
 }

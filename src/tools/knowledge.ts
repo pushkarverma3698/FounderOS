@@ -1,66 +1,68 @@
 /**
  * FounderOS — Knowledge Search Tool (turicks-brain)
  * ===================================================
- * Full-text search over the `knowledge_entries` table — the Postgres-backed
- * turicks-brain store synced via `pnpm brain:sync`.
+ * Semantic search over the Turicks Brain — the single business knowledge base,
+ * served as a vector store (ChromaDB) by the turicks-brain-rag API on :8766.
  *
- * Content types stored:
- *   adr            — Architecture Decision Records (e.g. ADR-002: Use Composio)
- *   brand          — Brand guidelines, voice rules, content pillars
- *   case_study     — Past client work and results
- *   strategic_pillar — 6 pillars of the business strategy
- *   phase          — Phase completion notes and outcomes
- *   decision       — Operational and product decisions
+ * History (2026-06-12): this tool used to query a Postgres `knowledge_entries`
+ * table (ILIKE keyword match, ~39 rows synced from docs/** by `brain:sync`).
+ * That was a thin keyword *shadow* of the vector store, which already holds the
+ * same docs and decisions — plus conversation transcripts — as 7k+ semantically
+ * searchable chunks. We deleted the shadow and repointed this tool at the vector
+ * store so the business departments (research / marketing / sales) get real
+ * semantic retrieval. `search_turicks_brain` (personal dept) hits the SAME store
+ * via the same client — one knowledge source, no duplication.
  *
- * Use cases for agents:
- *   research  — "what have we done for FinTech clients?" → case studies
- *   sales     — "what's our positioning against [competitor]?" → ADR / brand
- *   marketing — "what's our brand voice rule for LinkedIn?" → brand entries
- *
- * Search is ILIKE keyword match — no embedding cost. Good for known-term lookup.
- * For semantic ("find content about uncertainty") use search_web instead.
+ * Read-only. If the vector API is down the bot auto-starts it on boot
+ * (src/infra/rag-service.ts); if it is still unreachable we say so honestly.
  */
 
 import { tool } from "@langchain/core/tools";
-import { TENANT } from "../core/config.js";
 import { z } from "zod";
-import { searchKnowledgeEntries, getKnowledgeByType } from "../db/queries.js";
+import { callRagApi, formatResults, TURICKS_BRAIN_URL } from "./rag.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:knowledge" });
 
+/** Vector doc types in the Turicks Brain store (see turicks-brain-rag/src/store.py). */
+const DOC_TYPES = ["decision", "conversation", "doc", "note", "wiki", "website"] as const;
 
 export const searchKnowledge = tool(
-  async ({ query, entry_type }) => {
-    log.debug({ query, entry_type }, "Knowledge search");
+  async ({ query, doc_type }) => {
+    const q = (query ?? "").trim();
+    if (!q) return "query is required.";
 
-    const results = entry_type
-      ? await getKnowledgeByType(TENANT, entry_type, 5)
-      : await searchKnowledgeEntries(TENANT, query, 5);
+    log.debug({ query: q, doc_type }, "Knowledge search (vector)");
+    const data = await callRagApi(TURICKS_BRAIN_URL, q, 5, doc_type ?? undefined);
 
-    if (results.length === 0) {
-      return `No knowledge entries found for "${query}"${entry_type ? ` (type: ${entry_type})` : ""}. The turicks-brain may not have been synced yet — run \`pnpm brain:sync\` to populate it.`;
+    if (!data) {
+      return (
+        `The Turicks Brain knowledge base is not reachable right now, so I couldn't search company ` +
+        `decisions/docs for "${q}". It normally auto-starts with the bot — if this persists, start it with: ` +
+        `cd ~/Projects/turicks-brain-rag && uvicorn src.api:app --port 8766`
+      );
     }
 
-    return results
-      .map((r, i) => {
-        const tags = (r.tags ?? []).join(", ");
-        const preview = r.content.slice(0, 400).replace(/\n+/g, " ");
-        return `${i + 1}. [${("entry_type" in r ? (r as Record<string,string>)["entry_type"] : entry_type) ?? ""}] ${r.title}${tags ? `\n   Tags: ${tags}` : ""}\n   ${preview}${r.content.length > 400 ? "…" : ""}`;
-      })
-      .join("\n\n");
+    if (data.results.length === 0) {
+      return `No knowledge found for "${q}"${doc_type ? ` (type: ${doc_type})` : ""}.`;
+    }
+
+    return `Turicks Brain results for "${q}" (${data.total}):\n\n${formatResults(data.results, q, "source_path")}`;
   },
   {
     name: "search_knowledge",
     description:
-      "Search the turicks-brain knowledge base — architectural decisions (ADRs), brand rules, past case studies, strategic pillars, and phase notes. Use when you need company-specific context that web search can't provide. E.g. 'our LinkedIn brand voice', 'what we decided about Composio', 'FinTech client case studies'.",
+      "Search the Turicks Brain — the company's semantic knowledge base of architectural decisions (ADRs), " +
+      "strategy, brand rules, past case studies, phase notes, and prior conversations. Use when you need " +
+      "company-specific context that web search can't provide. E.g. 'our LinkedIn brand voice', " +
+      "'why we chose LangGraph', 'FinTech client case studies'.",
     schema: z.object({
-      query: z.string().describe("Keyword search query — what to look for"),
-      entry_type: z
-        .enum(["adr", "brand", "case_study", "strategic_pillar", "phase", "decision"])
+      query: z.string().describe("What to look for — phrase it as a question or topic; this is semantic search"),
+      doc_type: z
+        .enum(DOC_TYPES)
         .optional()
         .nullable()
-        .describe("Optional: filter by content type"),
+        .describe("Optional: filter by document type (decision | conversation | doc | note | wiki | website)"),
     }),
   },
 );

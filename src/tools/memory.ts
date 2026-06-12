@@ -4,10 +4,11 @@
  * Two tools:
  *
  *   search_memory  — read-only, no HITL. Routes a query across:
- *                    1. episodic_memory  (time-ordered events)
- *                    2. knowledge_entries (turicks-brain)
- *                    3. founder_context  (JSONB business state)
- *                    Results ranked by recency and formatted for Telegram.
+ *                    1. episodic_memory  (time-ordered events, Postgres)
+ *                    2. Turicks Brain    (vector store @ :8766 — decisions/docs/chats)
+ *                    3. founder_context  (JSONB business state, Postgres)
+ *                    Results formatted for Telegram. Memory = operational recall;
+ *                    deep knowledge retrieval is search_knowledge's job (same store).
  *
  *   record_event   — raw write tool (no interrupt here). The HITL gate is
  *                    applied in the agent-tools.ts wrapper, following the same
@@ -24,10 +25,10 @@ import { TENANT } from "../core/config.js";
 import { z } from "zod";
 import {
   searchEpisodicMemory,
-  searchKnowledgeEntries,
   getFounderContext,
   insertEpisodicEvent,
 } from "../db/queries.js";
+import { callRagApi, TURICKS_BRAIN_URL } from "./rag.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:memory" });
@@ -57,14 +58,14 @@ export const searchMemoryTool = tool(
       }
     }
 
-    // 2. Knowledge entries (turicks-brain)
+    // 2. Turicks Brain (vector store — same source as search_knowledge)
     if (type === "all" || type === "knowledge") {
-      const entries = await searchKnowledgeEntries(TENANT, query, 4);
-      if (entries.length > 0) {
-        const formatted = entries.map((e) => {
-          const tags = (e.tags ?? []).join(", ");
-          const preview = e.content.slice(0, 300).replace(/\n+/g, " ");
-          return `[${("entry_type" in e ? (e as Record<string, unknown>)["entry_type"] ?? "" : "")}] ${e.title}${tags ? `\n   Tags: ${tags}` : ""}\n   ${preview}${e.content.length > 300 ? "…" : ""}`;
+      const brain = await callRagApi(TURICKS_BRAIN_URL, query, 4);
+      if (brain && brain.results.length > 0) {
+        const formatted = brain.results.map((r) => {
+          const src = (r.metadata["source_path"] as string | undefined) ?? "unknown";
+          const preview = r.text.slice(0, 300).replace(/\n+/g, " ").trim();
+          return `[${src}] (score ${r.score.toFixed(2)})\n   ${preview}${r.text.length > 300 ? "…" : ""}`;
         });
         sections.push(`**Knowledge Base:**\n${formatted.join("\n\n")}`);
       }

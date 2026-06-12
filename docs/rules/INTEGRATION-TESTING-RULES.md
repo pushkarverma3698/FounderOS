@@ -1,5 +1,12 @@
 # Integration Testing Rules
 
+> **An integration test is necessary but NOT sufficient.** Per the Verification-First
+> Definition of Done ([TESTING-RULES.md](TESTING-RULES.md) Rule 15 + `CLAUDE.md`), every
+> change must ALSO clear a live real-path run over the Telegram/E2E MTProto harnesses
+> (`scripts/e2e-telegram-qa.ts` / `scripts/telegram-tester.ts`), with the bot reply + the
+> matching `action_log` row as evidence. A green integration suite is a safety net, not
+> proof the feature works.
+
 ## The Rule
 
 Every tool addition or modification **must** include an integration test.
