@@ -108,6 +108,13 @@ export const COMPOSIO_USER_ID = "pg-test-750dbecb-ef9d-4ef7-a76d-d1de1fd0190f";
 export const LINKEDIN_CONN_TURICKS = "ca_CDaqpUfRJ7vl";
 /** LinkedIn entity id. */
 export const LINKEDIN_USER_TURICKS = "turicks-internal";
+/**
+ * LinkedIn author URN — REQUIRED by LINKEDIN_CREATE_LINKED_IN_POST. This is the
+ * member URN of the connected account (resolved live via LINKEDIN_GET_MY_INFO:
+ * person id "d2Vl-gTmK-", account Pushkar verma). It is not a secret. Override
+ * with COMPOSIO_LINKEDIN_AUTHOR_URN to post as a different member/organization.
+ */
+export const LINKEDIN_AUTHOR_URN_TURICKS = "urn:li:person:d2Vl-gTmK-";
 
 /** Read an env override (env first, then .env file), falling back to a default. */
 function envOr(key: string, fallback: string): string {
@@ -132,6 +139,11 @@ export function getLinkedInConnectionId(): string {
 /** LinkedIn user ID. Override with COMPOSIO_LINKEDIN_USER_ID. */
 export function getLinkedInUserId(): string {
   return envOr("COMPOSIO_LINKEDIN_USER_ID", LINKEDIN_USER_TURICKS);
+}
+
+/** LinkedIn author URN (required by LINKEDIN_CREATE_LINKED_IN_POST). Override with COMPOSIO_LINKEDIN_AUTHOR_URN. */
+export function getLinkedInAuthorUrn(): string {
+  return envOr("COMPOSIO_LINKEDIN_AUTHOR_URN", LINKEDIN_AUTHOR_URN_TURICKS);
 }
 
 /** Google Calendar connected account ID. Defaults to the known connection; overridable via COMPOSIO_GCAL_CONN_ID. */

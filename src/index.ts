@@ -18,7 +18,7 @@ import { getOffice } from "./agents/office.js";
 import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
 import { startHealthServer } from "./infra/health.js";
 import { startScheduler } from "./infra/scheduler.js";
-import { acquireSingleInstanceLock, releaseSingleInstanceLock } from "./infra/single-instance.js";
+import { acquireSingleInstanceLock, releaseSingleInstanceLock, waitForProcessExit } from "./infra/single-instance.js";
 import { logger } from "./infra/logger.js";
 import type { Server } from "node:http";
 
@@ -35,8 +35,11 @@ async function main(): Promise<void> {
   const { replacedPid } = acquireSingleInstanceLock();
   if (replacedPid !== null) {
     log.warn({ replacedPid }, "Terminated a previous FounderOS instance before starting");
-    // Give the old instance a moment to release the Telegram long-poll.
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // Wait until the old instance has ACTUALLY exited (SIGKILL on timeout) so it
+    // has released the Telegram long-poll and the health port. A fixed sleep was
+    // not enough — a slow graceful drain left the port held, the new instance
+    // crashed on EADDRINUSE, and the stale old code kept running.
+    await waitForProcessExit(replacedPid);
   }
 
   // 1. Telemetry — first, so PII scrubbing hooks in before any LLM call.
@@ -44,7 +47,7 @@ async function main(): Promise<void> {
 
   // 2. Compile the office once (warms the Postgres checkpointer).
   await getOffice();
-  log.info("Office ready (supervisor + 8 departments)");
+  log.info("Office ready (supervisor + 7 departments)");
 
   // 3. Health/metrics server.
   healthServer = startHealthServer();

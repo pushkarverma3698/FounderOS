@@ -43,8 +43,35 @@ export const githubRead = tool(
 
 // ── Engineering: GitHub write (WRITE — requires approval) ─────────────────────
 
+/**
+ * Per-action required fields for github_write. Returns the names of fields that
+ * are required for the given action but were not supplied. Pure + unit-tested so
+ * an incomplete tool call is rejected with a precise, correctable message rather
+ * than falling through to a vague GitHub 4xx the model then hallucinates around.
+ */
+export function missingGithubWriteFields(
+  action: string,
+  fields: { owner?: string | null; repo?: string | null; title?: string | null; content?: string | null },
+): string[] {
+  const requiredByAction: Record<string, string[]> = {
+    create_issue: ["owner", "repo", "title"],
+    create_repo: ["title"],
+    update_readme: ["owner", "repo", "content"],
+  };
+  const required = requiredByAction[action] ?? [];
+  return required.filter((field) => !(fields as Record<string, unknown>)[field]);
+}
+
 export const githubWrite = tool(
   async ({ action, owner, repo, title, body, content }) => {
+    // Structured-input guard: a github_write call missing fields its action needs
+    // is surfaced to the model as a precise, correctable error — never sent to the
+    // GitHub API to fail opaquely (which previously produced confused retries).
+    const missing = missingGithubWriteFields(action, { owner, repo, title, content });
+    if (missing.length > 0) {
+      return `github_${action} needs these fields: ${missing.join(", ")}. Re-call github_write with all of them.`;
+    }
+
     // Idempotency: prevent duplicate GitHub writes on HITL resume loop
     const key = idemKey("github", action, owner ?? "", repo ?? "", title ?? "", body ?? "");
     if (await hasBeenAudited(key)) {
@@ -76,14 +103,17 @@ export const githubWrite = tool(
   {
     name: "github_write",
     description:
-      "Write to GitHub (requires founder approval). Actions: create_issue (owner, repo, title, body), create_repo (title=name, body=description), update_readme (owner, repo, content).",
+      "Write to GitHub (requires founder approval). Provide ALL fields the chosen action needs. " +
+      "Actions: create_issue (needs owner, repo, title; optional body), " +
+      "create_repo (needs title=repo name; optional body=description), " +
+      "update_readme (needs owner, repo, content).",
     schema: z.object({
       action: z.enum(["create_issue", "create_repo", "update_readme"]),
-      owner: z.string().optional().nullable(),
-      repo: z.string().optional().nullable(),
-      title: z.string().optional().nullable(),
-      body: z.string().optional().nullable(),
-      content: z.string().optional().nullable(),
+      owner: z.string().optional().nullable().describe("Repo owner / GitHub username. Required for create_issue and update_readme."),
+      repo: z.string().optional().nullable().describe("Repository name. Required for create_issue and update_readme."),
+      title: z.string().optional().nullable().describe("Issue title, or the new repo's name for create_repo. Required for create_issue and create_repo."),
+      body: z.string().optional().nullable().describe("Issue body, or repo description for create_repo. Optional."),
+      content: z.string().optional().nullable().describe("Full README markdown. Required for update_readme."),
     }),
   },
 );

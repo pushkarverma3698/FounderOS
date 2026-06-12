@@ -13,7 +13,7 @@
 import { describe, it, expect } from "vitest";
 import os from "node:os";
 import path from "node:path";
-import { resolveSafePath, flagDangerousCommand } from "../../../src/infra/path-guard.js";
+import { resolveSafePath, flagDangerousCommand, redactSecrets } from "../../../src/infra/path-guard.js";
 
 const HOME = os.homedir();
 
@@ -71,6 +71,16 @@ describe("resolveSafePath — secret denylist (blocked even though inside home)"
     "Projects/app/.env",
     "secret.pem",
     "backup/id_rsa.pub",
+    // Secret-bearing config/credential files (added 2026-06-11 after E2E leak).
+    ".zshrc",
+    ".bashrc",
+    ".bash_profile",
+    ".profile",
+    ".zprofile",
+    ".netrc",
+    ".npmrc",
+    ".git-credentials",
+    "Projects/server.key",
   ];
   for (const rel of blocked) {
     it(`denies ${rel}`, () => {
@@ -109,5 +119,32 @@ describe("flagDangerousCommand", () => {
     expect(flagDangerousCommand("ls -la ~/Projects")).toBe(false);
     expect(flagDangerousCommand("node scripts/build.js")).toBe(false);
     expect(flagDangerousCommand("git status")).toBe(false);
+  });
+});
+
+describe("redactSecrets — live-credential token scrubbing", () => {
+  it("redacts an OpenAI/OpenRouter sk- key and counts it", () => {
+    const input = 'export OPENAI_API_KEY="sk-proj-AbC123dEfG456hIjK789lMnO012pQrS"';
+    const { redacted, count } = redactSecrets(input);
+    expect(count).toBe(1);
+    expect(redacted).not.toContain("sk-proj-AbC123");
+    expect(redacted).toContain("«REDACTED-SECRET»");
+  });
+
+  it("redacts GitHub PAT, AWS key, and PEM header in one pass", () => {
+    const input = [
+      "ghp_0123456789abcdef0123456789abcdef0123",
+      "AKIAIOSFODNN7EXAMPLE",
+      "-----BEGIN OPENSSH PRIVATE KEY-----",
+    ].join("\n");
+    const { count } = redactSecrets(input);
+    expect(count).toBe(3);
+  });
+
+  it("leaves ordinary source code untouched (no false positives)", () => {
+    const input = 'const apiKey = process.env["OPENAI_API_KEY"]; // read from env';
+    const { redacted, count } = redactSecrets(input);
+    expect(count).toBe(0);
+    expect(redacted).toBe(input);
   });
 });

@@ -48,6 +48,19 @@ export async function sendStatusText(
 }
 
 /**
+ * Push a message to the founder's chat (used by the scheduler — Monday brief,
+ * HITL sweeper). Api-only: never starts long polling, so it cannot conflict with
+ * the gateway's single poll loop. Keeping it here (infra) lets the scheduler stay
+ * within its layer instead of importing the gateway (infra → gateway is illegal).
+ */
+export async function sendToChat(
+  text: string,
+  parseMode: "HTML" | "Markdown" = "HTML",
+): Promise<void> {
+  await api().sendMessage(defaultChatId(), text, { parse_mode: parseMode });
+}
+
+/**
  * Send a file from disk to a Telegram chat as a document attachment.
  * @param chatId  target chat (defaults to the founder's chat)
  * @param absPath absolute path to the file (already path-guard-validated)

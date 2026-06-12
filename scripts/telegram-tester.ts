@@ -131,21 +131,20 @@ async function cmdRead(limit: number): Promise<void> {
   await client.disconnect();
 }
 
-async function cmdSend(text: string, waitS: number): Promise<void> {
-  const peer = `@${await botUsername()}`;
-  const client = await connect(true);
-
-  const sent = await client.sendMessage(peer, { message: text });
-  console.log(`→ sent #${sent.id}: ${text}`);
-
-  // Poll for bot replies newer than our message until quiet or timeout.
+/** Poll for bot replies newer than sentId until quiet or timeout, printing each. */
+async function waitForReplies(
+  client: TelegramClient,
+  peer: string,
+  sentId: number,
+  waitS: number,
+): Promise<void> {
   const deadline = Date.now() + waitS * 1_000;
   const seen = new Set<number>();
   let lastReplyAt = 0;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     for (const msg of await history(client, peer, 15)) {
-      if (msg.id <= sent.id || msg.out || seen.has(msg.id)) continue;
+      if (msg.id <= sentId || msg.out || seen.has(msg.id)) continue;
       seen.add(msg.id);
       lastReplyAt = Date.now();
       printMessage(toPrintable(msg));
@@ -154,6 +153,41 @@ async function cmdSend(text: string, waitS: number): Promise<void> {
     if (seen.size > 0 && Date.now() - lastReplyAt > POLL_INTERVAL_MS * 3) break;
   }
   if (seen.size === 0) console.log(`(no reply within ${waitS}s)`);
+}
+
+async function cmdSend(text: string, waitS: number): Promise<void> {
+  const peer = `@${await botUsername()}`;
+  const client = await connect(true);
+
+  const sent = await client.sendMessage(peer, { message: text });
+  console.log(`→ sent #${sent.id}: ${text}`);
+  await waitForReplies(client, peer, sent.id, waitS);
+  await client.disconnect();
+}
+
+/**
+ * Send a media file AS THE FOUNDER (photo or voice note) — the only genuine way
+ * to drive the bot's media handlers (Bot API sendPhoto posts as the bot and is
+ * never re-ingested). kind "photo" sends an inline image; "voice" sends an
+ * OGG/Opus voice note (round waveform bubble, exactly like the phone app).
+ */
+async function cmdSendMedia(
+  kind: "photo" | "voice",
+  filePath: string,
+  caption: string,
+  waitS: number,
+): Promise<void> {
+  const peer = `@${await botUsername()}`;
+  const client = await connect(true);
+
+  const sent = await client.sendFile(peer, {
+    file: filePath,
+    ...(caption ? { caption } : {}),
+    ...(kind === "voice" ? { voiceNote: true } : {}),
+    forceDocument: false,
+  });
+  console.log(`→ sent ${kind} #${sent.id}: ${filePath}${caption ? ` (caption: ${caption})` : ""}`);
+  await waitForReplies(client, peer, sent.id, waitS);
   await client.disconnect();
 }
 
@@ -207,11 +241,20 @@ async function main(): Promise<void> {
       if (!text) fail('Usage: send "message" [--wait seconds]');
       return cmdSend(text, waitS);
     }
+    case "sendphoto":
+    case "sendvoice": {
+      const waitFlag = rest.indexOf("--wait");
+      const waitS = waitFlag >= 0 ? parseInt(rest[waitFlag + 1] ?? `${DEFAULT_WAIT_S}`, 10) : DEFAULT_WAIT_S;
+      const args = waitFlag >= 0 ? rest.slice(0, waitFlag) : rest;
+      const [filePath, ...captionParts] = args;
+      if (!filePath) fail(`Usage: ${cmd} <file> [caption…] [--wait seconds]`);
+      return cmdSendMedia(cmd === "sendphoto" ? "photo" : "voice", filePath, captionParts.join(" ").trim(), waitS);
+    }
     case "approve":
     case "reject":
       return cmdClick(cmd);
     default:
-      fail("Usage: telegram-tester.ts <login|send|approve|reject|read>");
+      fail("Usage: telegram-tester.ts <login|send|sendphoto|sendvoice|approve|reject|read>");
   }
 }
 

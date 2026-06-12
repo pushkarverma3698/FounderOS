@@ -304,7 +304,7 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<b>⚡ Power-user direct routing</b>\n` +
     `<code>/q &lt;dept&gt; &lt;task&gt;</code> — skip supervisor, go straight to a department\n` +
     `  Example: <code>/q research what does Anthropic do?</code>\n` +
-    `  Departments: research · comms · engineering · marketing · sales · prospecting · personal · jobhunt\n\n` +
+    `  Departments: research · comms · engineering · marketing · sales · personal · jobhunt\n\n` +
 
     `<b>🔒 Approval-gated actions</b> (bot asks before sending)\n` +
     `<i>"Email alex@acme.com about X"</i> → approval card → ✅/❌\n` +
@@ -469,7 +469,7 @@ export async function handleQ(
   const dept = arg.slice(0, spaceIdx).toLowerCase();
   const task = arg.slice(spaceIdx + 1).trim();
 
-  const validDepts = ["research", "comms", "engineering", "marketing", "sales", "prospecting", "personal", "jobhunt"];
+  const validDepts = ["research", "comms", "engineering", "marketing", "sales", "personal", "jobhunt"];
   if (!validDepts.includes(dept)) {
     await ctx.reply(
       `❌ Unknown department <b>${safeHtml(dept)}</b>.\nAvailable: ${validDepts.map((d) => `<code>${d}</code>`).join(" · ")}`,

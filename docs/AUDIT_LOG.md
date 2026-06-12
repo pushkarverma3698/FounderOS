@@ -199,3 +199,47 @@ A trivial message ("There?") produced ~20×/sec `ERROR: Only system messages sur
 
 ### Gate
 ✅ PASS — the #1 live production failure (every-message loop → silent drop) is root-caused, fixed with a pure predicate + regression tests, and live-verified end to end. Aborted runs are now self-healing instead of permanently wedged.
+
+---
+
+## Telegram-Driven E2E QA — Run #1 — 2026-06-11
+
+> Driven through the REAL gateway as the founder via MTProto (`scripts/e2e-telegram-qa.ts`).
+> Evidence = exact bot reply + `action_log` row. Full verdict: `docs/E2E_TEST_REPORT.md`.
+
+### BUG-01 · T05 · SECURITY (secret exfiltration on read) · FIXED + verified live
+
+**Symptom.** `read_file ~/.zshrc` returned the **full file into Telegram**, including three
+live credentials exported in the rc file: `OPENAI_API_KEY=sk-proj-…`,
+`OPENROUTER_API_KEY=sk-or-v1-…`, `OPENCLAW_GATEWAY_TOKEN=…`. The pasted test predicted
+"path-guard should allow this (read-only)" — and it did, which is the bug.
+
+**Root cause.** `src/infra/path-guard.ts` denied `.ssh`/`.aws`/`.env`/`.pem`/`id_rsa` but
+**not shell rc/profile files** (`.zshrc`, `.bashrc`, `.profile`, …), which routinely hold
+`export SECRET=...`. The "secrets blocked even on read" guarantee was incomplete: T18 (the
+SSH-key probe) passed, yet `.zshrc` held *more* exposed secrets and sailed through.
+
+**Fix (two deterministic, unit-tested layers).**
+1. `path-guard.ts` — `SECRET_BASENAMES` denylist (`.zshrc .zprofile .zshenv .zlogin .bashrc
+   .bash_profile .profile .kshrc .netrc .npmrc .pypirc .git-credentials .dockercfg credentials
+   secrets.{json,yaml,yml}`) + `.key` added to `SECRET_SUFFIX`.
+2. `path-guard.ts redactSecrets()` wired into `personal.ts readFileSafe` — scrubs
+   high-confidence live-credential tokens (`sk-… ghp_… github_pat_… gho_… xox[baprs]-… AKIA…
+   AIza…` + PEM headers) from ANY file's content before it leaves the process.
+
+**Tests.** `tests/unit/infra/path-guard.test.ts` +9 denylist cases +3 `redactSecrets`
+(incl. a no-false-positive case). Affected suites 52/52 green.
+
+**Before:** live reply dumped `~/.zshrc` incl. `sk-proj-…`, `sk-or-v1-…`, gateway token.
+**After (live #2132, post-restart):** *"I am unable to read the file ~/.zshrc because it is a
+sensitive path and access is blocked for security reasons."* — no content, NO ROW. ✅
+
+**Founder follow-up (not code):** rotate `OPENAI_API_KEY`, `OPENROUTER_API_KEY`,
+`OPENCLAW_GATEWAY_TOKEN` — emitted to the Telegram chat + `/tmp` logs before the fix.
+
+### OBS-01 · Bot restart races the health-server port (minor, not a blocker)
+
+On restart the new instance bound `:3001` (health server) before the single-instance lock
+SIGTERM'd the old process → `EADDRINUSE` crash; the stale-code instance survived. Workaround:
+explicit `kill <pid>` before start. Fix-worthy: move the single-instance SIGTERM ahead of
+`startHealthServer()` in `src/index.ts`.

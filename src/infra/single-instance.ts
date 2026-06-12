@@ -89,6 +89,67 @@ export function acquireSingleInstanceLock(opts: AcquireLockOptions = {}): Acquir
   return { replacedPid };
 }
 
+export interface WaitForExitOptions {
+  /** Max time to wait for graceful exit before SIGKILL (default 8000ms). */
+  timeoutMs?: number;
+  /** Poll interval (default 200ms). */
+  pollMs?: number;
+  /** Test seams. */
+  _isAlive?: (pid: number) => boolean;
+  _kill?: (pid: number, sig: NodeJS.Signals) => void;
+  _sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Wait for a SIGTERM'd previous instance to actually exit before we proceed.
+ *
+ * Why this is load-bearing: the old bot's graceful drain (bot.stop() + DB close)
+ * can take several seconds, during which it still holds the Telegram long-poll
+ * AND the health port. If the new instance proceeds on a fixed sleep and the old
+ * one hasn't exited, the health-server bind throws EADDRINUSE and the NEW
+ * instance dies — leaving the STALE old code running and invisible to the lock.
+ * Polling until the PID is truly gone (escalating to SIGKILL on timeout) makes
+ * restarts deterministic.
+ *
+ * Returns true if the process exited (or was killed), false if it somehow
+ * survived even SIGKILL within the timeout window.
+ */
+export async function waitForProcessExit(
+  pid: number,
+  opts: WaitForExitOptions = {},
+): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? 8000;
+  const pollMs = opts.pollMs ?? 200;
+  const isAlive = opts._isAlive ?? isProcessAlive;
+  const kill = opts._kill ?? ((p: number, sig: NodeJS.Signals) => process.kill(p, sig));
+  const sleep = opts._sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+
+  const deadline = Date.now() + timeoutMs;
+  let escalated = false;
+
+  while (isAlive(pid)) {
+    if (Date.now() >= deadline) {
+      if (escalated) {
+        log.error({ pid }, "Previous instance survived SIGKILL — proceeding may risk a 409 conflict");
+        return false;
+      }
+      // Graceful window elapsed — force-kill so the port/long-poll is released.
+      try {
+        kill(pid, "SIGKILL");
+        log.warn({ pid }, "Previous instance did not exit in time — sent SIGKILL");
+      } catch {
+        /* already gone between the alive check and here */
+      }
+      escalated = true;
+      // Give the OS a final moment to reap and release sockets.
+      await sleep(pollMs);
+      continue;
+    }
+    await sleep(pollMs);
+  }
+  return true;
+}
+
 /** Remove the lock file if it still belongs to us. Safe to call on shutdown. */
 export function releaseSingleInstanceLock(pidFile: string = DEFAULT_PID_FILE): void {
   if (readPidFile(pidFile) === process.pid) {

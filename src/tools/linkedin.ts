@@ -22,7 +22,7 @@
 
 import { childLogger } from "../infra/logger.js";
 import { writeAuditEntry, hasBeenAudited } from "../db/queries.js";
-import { executeComposioAction, getComposioApiKey, getLinkedInConnectionId, getLinkedInUserId } from "../infra/composio.js";
+import { executeComposioAction, getComposioApiKey, getLinkedInConnectionId, getLinkedInUserId, getLinkedInAuthorUrn } from "../infra/composio.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:linkedin" });
@@ -124,11 +124,15 @@ export const linkedinPostTool: UnifiedTool = {
     }
 
     try {
-      // LINKEDIN_CREATE_LINKED_IN_POST: param is 'commentary' (not 'text'), visibility is an object
-      const visibilityObj = { "com.linkedin.ugc.MemberNetworkVisibility": visibility === "CONNECTIONS" ? "CONNECTIONS" : "PUBLIC" };
+      // LINKEDIN_CREATE_LINKED_IN_POST contract (live-verified 2026-06-12):
+      //   - param is 'commentary' (not 'text')
+      //   - 'author' member URN is REQUIRED (else: "fields are missing: {'author'}")
+      //   - 'visibility' is a PLAIN STRING enum: PUBLIC | CONNECTIONS | LOGGED_IN | CONTAINER
+      //     (an object value yields: "Input should be 'PUBLIC', 'CONNECTIONS', ...")
       const composioArgs: Record<string, unknown> = {
+        author: getLinkedInAuthorUrn(),
         commentary: text,
-        visibility: visibilityObj,
+        visibility: visibility === "CONNECTIONS" ? "CONNECTIONS" : "PUBLIC",
         ...(image_url ? { images: [{ url: image_url }] } : {}),
         ...(schedule_time ? { scheduled_publish_time: schedule_time } : {}),
       };
@@ -141,8 +145,14 @@ export const linkedinPostTool: UnifiedTool = {
       );
 
       const data = result["data"] as Record<string, unknown> | undefined;
-      // Response may return id, post_id, or activity URN
-      const postId = (data?.["id"] ?? data?.["post_id"] ?? result["id"]) as string | undefined;
+      // Composio returns the published share URN under 'x_restli_id' (live-verified
+      // 2026-06-12: { data: { x_restli_id: "urn:li:share:..." }, successful: true }).
+      // Older/other shapes may use id/post_id — accept all so a real publish is never
+      // misread as a soft failure (which would suppress the audit and trigger a double-post).
+      const postId = (data?.["x_restli_id"] ??
+        data?.["id"] ??
+        data?.["post_id"] ??
+        result["id"]) as string | undefined;
 
       // Soft-failure detection: Composio returns HTTP 200 + error message with no post id.
       // Without this guard we record a phantom "published" audit entry and suppress all

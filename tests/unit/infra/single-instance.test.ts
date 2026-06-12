@@ -19,6 +19,7 @@ import {
   isProcessAlive,
   readPidFile,
   acquireSingleInstanceLock,
+  waitForProcessExit,
 } from "../../../src/infra/single-instance.js";
 
 let dir: string;
@@ -98,5 +99,61 @@ describe("acquireSingleInstanceLock", () => {
     const r = acquireSingleInstanceLock({ pidFile, killSignal: false });
     expect(r.replacedPid).toBeNull();
     expect(readPidFile(pidFile)).toBe(process.pid);
+  });
+});
+
+/**
+ * waitForProcessExit — the fix for restarts silently no-op'ing.
+ *
+ * Before this existed, startup waited a fixed 2s after SIGTERM; a slow graceful
+ * drain meant the old instance still held the health port → the new instance
+ * crashed on EADDRINUSE → the stale old code kept running. This polls until the
+ * old PID is truly gone and SIGKILLs on timeout so restarts are deterministic.
+ */
+describe("waitForProcessExit", () => {
+  const noSleep = async () => {};
+
+  it("returns true immediately when the process is already gone", async () => {
+    const ok = await waitForProcessExit(424242, { _isAlive: () => false, _sleep: noSleep });
+    expect(ok).toBe(true);
+  });
+
+  it("returns true once the process exits gracefully within the timeout", async () => {
+    let alivePolls = 3; // alive for 3 checks, then exits
+    const ok = await waitForProcessExit(424242, {
+      _isAlive: () => alivePolls-- > 0,
+      _sleep: noSleep,
+      timeoutMs: 10_000,
+      pollMs: 1,
+    });
+    expect(ok).toBe(true);
+  });
+
+  it("escalates to SIGKILL when the process refuses to exit, then succeeds", async () => {
+    const signals: NodeJS.Signals[] = [];
+    let alive = true;
+    const ok = await waitForProcessExit(424242, {
+      _isAlive: () => alive,
+      _kill: (_pid, sig) => {
+        signals.push(sig);
+        alive = false; // SIGKILL takes effect
+      },
+      _sleep: noSleep,
+      timeoutMs: 0, // force immediate escalation
+      pollMs: 1,
+    });
+    expect(signals).toContain("SIGKILL");
+    expect(ok).toBe(true);
+  });
+
+  it("returns false when the process survives even SIGKILL", async () => {
+    const ok = await waitForProcessExit(424242, {
+      _isAlive: () => true, // never dies
+      _kill: () => {},
+      _sleep: noSleep,
+      timeoutMs: 0,
+      pollMs: 1,
+    });
+    expect(ok).toBe(false);
   });
 });
