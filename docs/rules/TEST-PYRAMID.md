@@ -28,3 +28,27 @@ commenting a seam emit fails the tier.
 - `pnpm tsx scripts/qa.ts probe <t>` → office-level probe (`scripts/probe-real-task.ts`)
 
 All real-path modes need the one-time founder MTProto login (see `scripts/telegram-tester.ts login`).
+
+## Observability (LangSmith) — founder-provided key
+
+Step-level tracing to LangSmith is **opt-in and requires a founder-supplied API key**.
+The code never provisions or commits it. To enable, set in your local `.env` (NOT in
+`.env.example`, which only carries placeholders):
+
+```bash
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=<your LangSmith key — required from your side>
+LANGCHAIN_PROJECT=founderos
+```
+
+If `LANGCHAIN_API_KEY` is absent, tracing is a graceful no-op (`telemetry.ts`). The
+turn-level **log** trace (`grep <turnId> /tmp/founderos.log`) works regardless of the
+key — only the LangSmith dashboard view needs it.
+
+**Live-verified 2026-06-12** (real gateway via MTProto, branch `obs/turn-tracing`):
+clean turn (`17×23 → 391`) traced `turn.in → route.decided → llm.call → turn.out`
+under one `turnId`; HITL email request paused with `…→ hitl.interrupt` and **no**
+`turn.out` (email not sent); reject traced `hitl.resume → turn.out` with **0**
+`action_log` rows; boot logged "LangSmith tracing enabled"; 0× 409, single instance.
+Confirm spans landed in your LangSmith dashboard (project `founderos`) — that view is
+the one piece that needs your key.
