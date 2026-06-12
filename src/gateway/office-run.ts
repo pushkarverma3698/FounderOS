@@ -471,6 +471,8 @@ export function buildRejectionConfirmation(approval: ApprovalRequest): string {
 export async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Promise<void> {
   const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
   const config = officeConfig(chatId);
+  const trace = startTurn({ chatId, kind: "resume", promptHash: activePromptHash(SUPERVISOR_PROMPT) });
+  trace.event("hitl.resume", { decision });
 
   try {
     const office = await getOffice();
@@ -491,6 +493,7 @@ export async function resumeOffice(ctx: Context, decision: "approved" | "rejecte
     // runs after an "approved" resume, so action_log stays empty (safety holds).
     if (decision === "rejected") {
       await clearThreadCheckpoints(threadIdFor(chatId));
+      trace.event("turn.out", { rejected: true });
       await ctx.reply(buildRejectionConfirmation(pending), { parse_mode: "HTML" });
       log.info({ chatId, action: pending.action }, "Founder rejected — task cancelled, thread cleared (no re-draft)");
       return;
@@ -519,18 +522,24 @@ export async function resumeOffice(ctx: Context, decision: "approved" | "rejecte
     const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
     const res = (await office.invoke(
       new Command({ resume: decision }),
-      { ...config, callbacks: [new BudgetGuardCallback(budget, agentModel)] },
+      {
+        ...config,
+        callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
+        metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
+      },
     )) as { messages?: OfficeMessage[] };
 
     // A run may pause again (e.g. research → then email approval).
     const next = await getPendingApproval(office, config);
     if (next) {
+      trace.event("hitl.interrupt", { title: next.title, rePaused: true });
       await sendApprovalCard(ctx, next);
       return;
     }
     const freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
     const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
     await sendResult(ctx, freshRes, chatId);
+    trace.event("turn.out", { resumed: true });
     trimThreadHistory(office, config).catch((err) =>
       log.warn({ chatId, err: (err as Error).message }, "History trim failed — non-fatal"),
     );
