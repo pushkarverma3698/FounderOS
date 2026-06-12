@@ -146,6 +146,35 @@ describe("collectToolErrors", () => {
     const res = { messages: [makeMsg("ai", "there was an error in the system")] };
     expect(collectToolErrors(res)).toEqual([]);
   });
+
+  // Regression (F1, 2026-06-12): a SUCCESSFUL multi-line tool result whose body
+  // happens to contain an error keyword (e.g. read_context returning the
+  // founder's stored notes that mention "tests fail") was falsely surfaced as a
+  // "⚠️ Tool issue" and its raw 800-char dump appended to the founder's reply,
+  // disfiguring a 100%-correct answer. Errors live on the FIRST line; content
+  // bodies do not.
+  it("does NOT flag a successful multi-line result whose body mentions an error word", () => {
+    const ctx =
+      "Current business context:\n" +
+      "• companies: Turicks (AI automation agency) + Naggar Retreat\n" +
+      "• priorities: ship FounderOS, don't let the tests fail before launch\n" +
+      "• tech stack: LangGraph JS, Gemini 2.5";
+    const res = { messages: [makeMsg("tool", ctx)] };
+    expect(collectToolErrors(res)).toEqual([]);
+  });
+
+  it("does NOT flag a successful research body that discusses failures/errors", () => {
+    const body =
+      "Top findings:\n1. Many startups fail due to poor unit economics.\n" +
+      "2. Error budgets are an SRE best practice.\n3. Invalid assumptions kill roadmaps.";
+    const res = { messages: [makeMsg("tool", body)] };
+    expect(collectToolErrors(res)).toEqual([]);
+  });
+
+  it("flags a structured failure object even if the flag is not on the first visual line", () => {
+    const res = { messages: [makeMsg("tool", '{"success":false,"error":"Email send failed: 401"}')] };
+    expect(collectToolErrors(res)).toHaveLength(1);
+  });
 });
 
 // ── sliceFreshMessages (per-turn isolation) ─────────────────────────────────────

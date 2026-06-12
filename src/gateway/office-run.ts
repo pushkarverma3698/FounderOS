@@ -103,13 +103,32 @@ export function finalReply(res: { messages?: OfficeMessage[] }): string {
  *
  * Bug fix (2026-06-02): removed trailing \b from regex so "failed" matches "fail",
  * "errors" matches "error", etc.
+ *
+ * Bug fix (F1, 2026-06-12): the keyword scan ran over the WHOLE result body, so a
+ * SUCCESSFUL multi-line result that merely mentioned an error word deep inside
+ * (e.g. read_context returning founder notes, or a research summary discussing
+ * "startups that fail") was falsely surfaced as a "⚠️ Tool issue" with a raw dump
+ * appended to the reply. Real tool errors are signalled two ways and only two:
+ *   1. a structured failure flag — `{ success|ok: false }` (how tools soft-fail), or
+ *   2. an error keyword on the FIRST LINE (errors lead their message; content
+ *      bodies do not). Deep-body matches are content, not failures.
  */
+const TOOL_ERROR_KEYWORDS =
+  /(fail|error|not set|not configured|cannot find|blocked|unauthor|invalid|denied)/i;
+const STRUCTURED_FAILURE = /"(?:success|ok)"\s*:\s*false/i;
+
+export function isToolFailure(content: string): boolean {
+  if (STRUCTURED_FAILURE.test(content)) return true;
+  const firstLine = content.split("\n", 1)[0] ?? "";
+  return TOOL_ERROR_KEYWORDS.test(firstLine);
+}
+
 export function collectToolErrors(res: { messages?: OfficeMessage[] }): string[] {
   const errs: string[] = [];
   for (const m of res.messages ?? []) {
     if ((m._getType?.() ?? "") !== "tool") continue;
     const c = typeof m.content === "string" ? m.content : "";
-    if (/\b(fail|error|not set|not configured|cannot find|blocked|unauthor|invalid|denied)/i.test(c)) {
+    if (isToolFailure(c)) {
       errs.push(c.trim().slice(0, 300));
     }
   }
