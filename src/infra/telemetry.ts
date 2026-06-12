@@ -89,11 +89,13 @@ export function buildRunMetadata(opts: {
   tenant_id: string;
   trace_id: string;
   agent?: string;
+  prompt_hash?: string;
 }): Record<string, string> {
   return {
     tenant_id: opts.tenant_id,
     trace_id: opts.trace_id,
     agent: opts.agent ?? "unknown",
+    prompt_hash: opts.prompt_hash ?? "none",
     app_version: process.env["npm_package_version"] ?? "dev",
     node_env: env.NODE_ENV,
   };
