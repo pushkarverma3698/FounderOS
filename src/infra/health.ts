@@ -14,14 +14,36 @@
 
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import { getPgPool } from "../db/client.js";
 import { getTodayCostUsd } from "../db/queries.js";
 import { childLogger } from "./logger.js";
 
 const log = childLogger({ module: "health" });
-const require = createRequire(import.meta.url);
-const pkg = require("../../package.json") as { version?: string };
-const APP_VERSION = pkg.version ?? "0.0.0";
+
+/**
+ * Read the app version from package.json.
+ *
+ * Must work from BOTH run modes — source (`tsx src/index.ts`, this file at
+ * `src/infra/health.ts`) and compiled (`node dist/src/index.js`, this file at
+ * `dist/src/infra/health.js`). A relative `../../package.json` resolves to the
+ * repo root in source but to the missing `dist/package.json` once compiled, so
+ * we anchor on `process.cwd()` (the repo root for both documented commands).
+ *
+ * This is cosmetic (only the /health `version` field) — it must NEVER throw and
+ * crash boot, so resolution is wrapped and falls back to "0.0.0".
+ */
+function readAppVersion(): string {
+  try {
+    const require = createRequire(import.meta.url);
+    const pkg = require(join(process.cwd(), "package.json")) as { version?: string };
+    return pkg.version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
+const APP_VERSION = readAppVersion();
 const startedAt = Date.now();
 
 /** Tenants whose daily spend is surfaced in /health and /metrics. */
