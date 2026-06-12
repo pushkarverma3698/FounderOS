@@ -149,7 +149,7 @@ function buildGraph() {
 
   // **TOOLS**
   const tools = {
-    search_web: { dept: "research", description: "Search the web via Firecrawl" },
+    search_web: { dept: "research", description: "Search the web via Gemini grounding (DuckDuckGo fallback)" },
     send_email: { dept: "comms", description: "Send emails via Composio Gmail (HITL-gated)" },
     linkedin_post: {
       dept: "marketing",
@@ -189,7 +189,7 @@ function buildGraph() {
     },
     search_jobs: {
       dept: "jobhunt",
-      description: "Search job listings via Firecrawl",
+      description: "Search job listings via web search (Gemini grounding / DuckDuckGo)",
     },
     project_workflow: {
       dept: "engineering",

@@ -18,8 +18,8 @@
  * (email / LinkedIn / GitHub write) ever fires during an eval.
  */
 
-import { HumanMessage } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
+import { buildOfficeInput } from "../gateway/pre-router.js";
 import type { Department, Observation, GoldenTask } from "./types.js";
 import type { Invoker } from "./runner.js";
 
@@ -131,8 +131,11 @@ export function makeOfficeInvoker(
       throw new Error(`Task input is empty: ${JSON.stringify(task)}`);
     }
 
+    // Use the SAME input builder as the Telegram gateway so the eval exercises
+    // the real production routing path, including the deterministic pre-router
+    // hint (CLAUDE.md rule #19).
     const res = await office.invoke(
-      { messages: [new HumanMessage(task.input)] },
+      { messages: buildOfficeInput(task.input) },
       { configurable: { thread_id: threadId }, callbacks: [toolCollector] },
     );
     const pending = await getPending(office, config);

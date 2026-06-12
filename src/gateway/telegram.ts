@@ -18,7 +18,7 @@
 
 import { Bot, InlineKeyboard, type Context } from "grammy";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
-import { HumanMessage, RemoveMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
+import { RemoveMessage, type BaseMessage } from "@langchain/core/messages";
 import { env, TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS } from "../core/config.js";
 import { computeHistoryTrim } from "../infra/history-window.js";
 import { logger } from "../infra/logger.js";
@@ -32,8 +32,9 @@ import {
   handleWorkflows, handleRun, handleQ,
 } from "./commands.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
-import { preRoutePersonalVsEngineering } from "./pre-router.js";
+import { buildOfficeInput } from "./pre-router.js";
 import { assertNonEmptyMessages } from "../infra/office-guard.js";
+import { isWedgedState, type WedgeState } from "../infra/wedge.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
 import { recordConversationEnd } from "../infra/conversation-recorder.js";
 
@@ -165,6 +166,50 @@ export async function resolvePendingApproval(
   if (!pending) return null;
   await office.invoke(new Command({ resume: "rejected" }), config);
   return pending;
+}
+
+/**
+ * Detect and clear a thread wedged mid-graph by an aborted run.
+ *
+ * Root cause (observed live on thread turicks:6775330211): a run that stops
+ * abnormally (recursion limit, budget, crash) leaves `state.next` on a
+ * half-executed node with NO interrupt. Every subsequent invoke({messages})
+ * then RESUMES that stuck node instead of starting a fresh turn — the thread
+ * loops to the recursion limit on every message until a manual /reset. This
+ * auto-recovers by wiping the wedged checkpoint so the next message starts
+ * clean.
+ *
+ * MUST run after resolvePendingApproval so a real HITL pause (also next-non-
+ * empty) is served as an approval, not wiped as a wedge.
+ *
+ * @returns true if a wedge was detected and cleared.
+ */
+export async function recoverWedgedThread(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  office: { getState: (c: any) => Promise<unknown> },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  config: any,
+  threadId: string,
+): Promise<boolean> {
+  const state = (await office.getState(config).catch(() => null)) as WedgeState | null;
+  if (!isWedgedState(state)) return false;
+  log.warn({ threadId, next: state?.next }, "Wedged thread detected (pending node, no interrupt) — clearing checkpoint");
+  await clearThreadCheckpoints(threadId);
+  return true;
+}
+
+/**
+ * Best-effort wedge clear used inside catch blocks after an abort. Re-fetches
+ * the office, clears the thread only if genuinely wedged, and never throws
+ * (we're already handling an error — recovery must not mask it).
+ */
+async function clearWedgeQuietly(chatId: number | string): Promise<void> {
+  try {
+    const office = await getOffice();
+    await recoverWedgedThread(office, officeConfig(chatId), threadIdFor(chatId));
+  } catch (err) {
+    log.warn({ chatId, err: (err as Error).message }, "Post-abort wedge clear failed — non-fatal");
+  }
 }
 
 /** Send the office's result to Telegram — final reply plus any tool failures. */
@@ -309,6 +354,19 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
       );
     }
 
+    // ── Wedge guard ───────────────────────────────────────────────────────────
+    // A run that aborted mid-graph (recursion limit/budget/crash) leaves the
+    // thread parked on a pending node with no interrupt; a fresh invoke would
+    // resume the stuck node and loop forever. Clear it so this message runs clean.
+    if (await recoverWedgedThread(office, config, threadIdFor(chatId))) {
+      log.warn({ chatId }, "Recovered wedged thread before new message");
+      await ctx.reply(
+        `🧹 <b>Recovered a stuck task.</b> A previous run didn't finish cleanly, so I cleared it. ` +
+        `Running your new message fresh.`,
+        { parse_mode: "HTML" },
+      );
+    }
+
     // ── Capture turn boundary before invoke ───────────────────────────────────
     // The checkpointer returns the full trail after invoke. Slicing to baseLen
     // isolates this turn's output so finalReply/collectToolErrors never surface
@@ -322,14 +380,9 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
     const budget = createRunBudget();
     const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
 
-    // Inject a pre-router hint so the supervisor starts in the right department.
-    const routingHint = preRoutePersonalVsEngineering(text);
-    const invokeMessages: BaseMessage[] = routingHint
-      ? [
-          new SystemMessage(`[ROUTING HINT: This looks like a ${routingHint} request. Start there.]`),
-          new HumanMessage(text),
-        ]
-      : [new HumanMessage(text)];
+    // Inject a deterministic pre-router hint so the supervisor starts in the
+    // right department. Same builder the eval uses (CLAUDE.md rule #19).
+    const invokeMessages: BaseMessage[] = buildOfficeInput(text);
 
     // Guard: Gemini returns 400 if contents is empty or last message is blank.
     assertNonEmptyMessages(invokeMessages, "runOfficeText");
@@ -366,6 +419,7 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
     stopTyping();
     if (err instanceof BudgetExceededError) {
       log.warn({ chatId, reason: err.reason }, "Run stopped: budget exceeded");
+      await clearWedgeQuietly(chatId);
       await ctx.reply(
         `💰 <b>Run stopped — budget limit reached</b>\n` +
           `<code>${safeHtml(err.reason)}</code>\n\n` +
@@ -376,9 +430,12 @@ async function runOfficeText(ctx: Context, text: string): Promise<void> {
     }
     if (err instanceof GraphRecursionError) {
       log.warn({ chatId }, "Run stopped: recursion limit reached");
+      // Preventive: the aborted run left the thread parked on a pending node.
+      // Clear it now so the founder's NEXT message isn't trapped in the same loop.
+      await clearWedgeQuietly(chatId);
       await ctx.reply(
         `🔁 <b>I got stuck in a loop on that one</b> and stopped to avoid runaway cost.\n` +
-          `Try rephrasing, or break it into smaller steps.`,
+          `I've cleared that task — just send your next message normally.`,
         { parse_mode: "HTML" },
       );
       return;
@@ -448,12 +505,14 @@ async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Pr
   } catch (err) {
     if (err instanceof BudgetExceededError) {
       log.warn({ chatId, reason: err.reason }, "Resume stopped: budget exceeded");
+      await clearWedgeQuietly(chatId);
       await ctx.reply(`💰 <b>Run stopped — budget limit reached</b>\n<code>${safeHtml(err.reason)}</code>`, { parse_mode: "HTML" });
       return;
     }
     if (err instanceof GraphRecursionError) {
       log.warn({ chatId }, "Resume stopped: recursion limit reached");
-      await ctx.reply(`🔁 <b>That got stuck in a loop</b> and I stopped it. Try breaking it into smaller steps.`, { parse_mode: "HTML" });
+      await clearWedgeQuietly(chatId);
+      await ctx.reply(`🔁 <b>That got stuck in a loop</b> and I stopped it. I've cleared that task — send your next message normally.`, { parse_mode: "HTML" });
       return;
     }
     const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);

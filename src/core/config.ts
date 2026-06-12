@@ -31,7 +31,6 @@ const envSchema = z.object({
 
   // Tool keys — optional; tools fail loudly when key is missing
   COMPOSIO_API_KEY: z.string().transform(v => v || undefined).optional(),
-  FIRECRAWL_API_KEY: z.string().transform(v => v || undefined).optional(),
   GITHUB_TOKEN: z.string().transform(v => v || undefined).optional(),
   OPENAI_API_KEY: z.string().transform(v => v || undefined).optional(),
 

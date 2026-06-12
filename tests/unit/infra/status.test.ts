@@ -36,17 +36,16 @@ vi.mock("../../../src/db/client.js", () => ({
 // ── formatToolError tests (D2) ────────────────────────────────────────────────
 
 describe("formatToolError", () => {
-  it("rewrites FIRECRAWL_API_KEY error to friendly message", async () => {
+  it("rewrites a generic webSearchTool error to a friendly message", async () => {
     const { formatToolError } = await import("../../../src/gateway/status.js");
-    const raw = "Error: FIRECRAWL_API_KEY is not set";
+    const raw = "webSearchTool: both Gemini grounding and DuckDuckGo fallback failed";
     const result = formatToolError(raw);
     expect(result).toContain("Search temporarily unavailable");
-    expect(result).not.toContain("FIRECRAWL_API_KEY");
   });
 
-  it("rewrites Firecrawl HTTP error and preserves status code", async () => {
+  it("rewrites a DuckDuckGo HTTP error and preserves status code", async () => {
     const { formatToolError } = await import("../../../src/gateway/status.js");
-    const raw = "Firecrawl returned HTTP 429 Too Many Requests";
+    const raw = "DuckDuckGo returned HTTP 429";
     const result = formatToolError(raw);
     expect(result).toContain("429");
     expect(result).toMatch(/unavailable|unavail/i);

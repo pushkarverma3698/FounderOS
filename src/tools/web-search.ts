@@ -3,8 +3,9 @@
  * ============================
  * Primary: Gemini google_search grounding (same GOOGLE_GENERATIVE_AI_API_KEY
  * the office already uses — zero extra vendor, free, live-verified 2026-06-11).
- * Fallback: Firecrawl search API (POST /v1/search) — optional, only used when
- * FIRECRAWL_API_KEY is set and Gemini fails.
+ * Fallback: DuckDuckGo HTML endpoint (html.duckduckgo.com) — free, keyless,
+ * no billing, scraped + parsed in-process. Replaced Firecrawl (2026-06-11),
+ * which required a paid key and was returning 402 once credits ran out.
  *
  * Fail-open: any error returns { success: false, data: [] } — never throws.
  */
@@ -29,52 +30,93 @@ export interface SearchResult {
   published_date?: string;
 }
 
-interface FirecrawlSearchResult {
-  title: string;
-  url: string;
-  description: string;
-  publishedAt?: string | null;
-}
-
-interface FirecrawlResponse {
-  success: boolean;
-  data: FirecrawlSearchResult[];
-}
-
 type SearchOutcome = { ok: true; results: SearchResult[] } | { ok: false; error: string };
 
-const FIRECRAWL_URL = "https://api.firecrawl.dev/v1/search";
+const DDG_HTML_URL = "https://html.duckduckgo.com/html/";
+const DDG_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+const DDG_TIMEOUT_MS = 12_000;
 const GEMINI_GROUNDING_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 const GROUNDED_SNIPPET_MAX = 300;
 const GROUNDED_ANSWER_MAX = 1_500;
+const DDG_SNIPPET_MAX = 300;
 
-// ── Primary: Gemini grounding ─────────────────────────────────────────────────
+// ── Fallback: DuckDuckGo HTML scrape ──────────────────────────────────────────
 
-// (Firecrawl helper kept below as optional fallback)
-async function firecrawlSearch(query: string, limit: number, apiKey: string): Promise<SearchOutcome> {
+/** Strip HTML tags and decode the handful of entities DDG emits. */
+function stripHtml(raw: string): string {
+  return raw
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;|&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** DDG wraps every result URL in a redirect: //duckduckgo.com/l/?uddg=<encoded>&rut=… */
+function decodeDuckDuckGoUrl(href: string): string {
+  const match = href.match(/[?&]uddg=([^&"]+)/);
+  if (match?.[1]) {
+    try {
+      return decodeURIComponent(match[1]);
+    } catch {
+      return match[1];
+    }
+  }
+  // Direct (non-redirect) link — normalise protocol-relative URLs.
+  return href.startsWith("//") ? `https:${href}` : href;
+}
+
+/**
+ * Parse the DuckDuckGo HTML results page into SearchResult[]. Exported for unit
+ * tests so we never depend on a live network call to assert the parser is correct.
+ */
+export function parseDuckDuckGoHtml(html: string, limit: number): SearchResult[] {
+  const titleRe = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+  const snippetRe = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+
+  const snippets: string[] = [];
+  for (let m = snippetRe.exec(html); m !== null; m = snippetRe.exec(html)) {
+    snippets.push(stripHtml(m[1] ?? "").slice(0, DDG_SNIPPET_MAX));
+  }
+
+  const results: SearchResult[] = [];
+  let i = 0;
+  for (let m = titleRe.exec(html); m !== null && results.length < limit; m = titleRe.exec(html)) {
+    const title = stripHtml(m[2] ?? "");
+    const url = decodeDuckDuckGoUrl(m[1] ?? "");
+    if (!title || !url) {
+      i += 1;
+      continue;
+    }
+    results.push({ title, url, snippet: snippets[i] ?? "" });
+    i += 1;
+  }
+  return results;
+}
+
+async function duckDuckGoSearch(query: string, limit: number): Promise<SearchOutcome> {
   try {
-    const response = await fetch(FIRECRAWL_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({ query, limit }),
+    const response = await fetch(`${DDG_HTML_URL}?q=${encodeURIComponent(query)}`, {
+      method: "GET",
+      headers: { "User-Agent": DDG_USER_AGENT, Accept: "text/html" },
+      signal: AbortSignal.timeout(DDG_TIMEOUT_MS),
     });
 
     if (!response.ok) {
-      const hint = response.status === 402 ? " (payment required — Firecrawl credits exhausted, top up at firecrawl.dev)" : "";
-      return { ok: false, error: `Firecrawl returned HTTP ${response.status}${hint}` };
+      return { ok: false, error: `DuckDuckGo returned HTTP ${response.status}` };
     }
 
-    const json = (await response.json()) as FirecrawlResponse;
-    const results: SearchResult[] = (json.data ?? []).map((item) => ({
-      title: item.title,
-      url: item.url,
-      snippet: item.description,
-      ...(item.publishedAt ? { published_date: item.publishedAt } : {}),
-    }));
+    const html = await response.text();
+    const results = parseDuckDuckGoHtml(html, limit);
+    if (results.length === 0) {
+      return { ok: false, error: "DuckDuckGo returned no parseable results" };
+    }
     return { ok: true, results };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -194,23 +236,20 @@ export const webSearchTool: UnifiedTool = {
       const primary = await geminiGroundedSearch(finalQuery, limit, geminiKey);
       if (primary.ok) return { success: true, data: primary.results };
       primaryError = primary.error;
-      log.warn({ query: finalQuery, error: primaryError }, "Gemini grounding failed — trying Firecrawl fallback");
+      log.warn({ query: finalQuery, error: primaryError }, "Gemini grounding failed — trying DuckDuckGo fallback");
     }
 
-    const firecrawlKey = process.env["FIRECRAWL_API_KEY"];
-    if (firecrawlKey) {
-      const fallback = await firecrawlSearch(finalQuery, limit, firecrawlKey);
-      if (fallback.ok) {
-        log.info({ query: finalQuery, results: fallback.results.length }, "Firecrawl fallback succeeded");
-        return { success: true, data: fallback.results };
-      }
-      return {
-        success: false,
-        data: [],
-        error: `webSearchTool: ${primaryError}; Firecrawl fallback also failed: ${fallback.error}`,
-      };
+    // Free, keyless fallback — always available, no billing.
+    const fallback = await duckDuckGoSearch(finalQuery, limit);
+    if (fallback.ok) {
+      log.info({ query: finalQuery, results: fallback.results.length }, "DuckDuckGo fallback succeeded");
+      return { success: true, data: fallback.results };
     }
 
-    return { success: false, data: [], error: `webSearchTool: ${primaryError}` };
+    return {
+      success: false,
+      data: [],
+      error: `webSearchTool: ${primaryError}; DuckDuckGo fallback also failed: ${fallback.error}`,
+    };
   },
 };

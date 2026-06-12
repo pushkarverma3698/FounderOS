@@ -4,7 +4,14 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { preRoutePersonalVsEngineering, isOutreachRequest } from "../../../src/gateway/pre-router.js";
+import {
+  preRoutePersonalVsEngineering,
+  isOutreachRequest,
+  preRouteDepartment,
+  buildOfficeInput,
+} from "../../../src/gateway/pre-router.js";
+import { SystemMessage } from "@langchain/core/messages";
+import { GOLDEN_TASKS } from "../../../src/eval/golden-tasks.js";
 
 // ── preRoutePersonalVsEngineering ─────────────────────────────────────────────
 
@@ -87,5 +94,109 @@ describe("isOutreachRequest", () => {
 
   it("returns false for LinkedIn post request", () => {
     expect(isOutreachRequest("Draft a LinkedIn post about AI agents")).toBe(false);
+  });
+});
+
+// ── preRouteDepartment (all 7 departments) ────────────────────────────────────
+
+describe("preRouteDepartment", () => {
+  it("returns null for empty / whitespace input", () => {
+    expect(preRouteDepartment("")).toBeNull();
+    expect(preRouteDepartment("   ")).toBeNull();
+  });
+
+  // ── Explicit "[Route directly to X department]" prefix (highest precedence) ──
+  it("honours an explicit research routing prefix", () => {
+    expect(preRouteDepartment("[Route directly to research department]: What does Anthropic do?")).toBe("research");
+  });
+
+  it("honours an explicit personal routing prefix", () => {
+    expect(preRouteDepartment("[Route directly to personal department]: List files on my Desktop")).toBe("personal");
+  });
+
+  it("ignores a prefix that names a non-existent department", () => {
+    // 'wizardry' is not routable → falls through to keyword rules ('files'/'desktop' → personal here)
+    expect(preRouteDepartment("[Route directly to wizardry department]: do magic")).not.toBe("wizardry" as never);
+  });
+
+  // ── Disambiguation cases (the rules that prevent the most common mistakes) ──
+  it("routes a code request with 'email address' to engineering, NOT comms", () => {
+    expect(preRouteDepartment("Write a TypeScript function that validates an email address.")).toBe("engineering");
+  });
+
+  it("routes a job 'outreach email' to jobhunt, NOT sales", () => {
+    expect(
+      preRouteDepartment("Find open AI engineer positions at companies using LangGraph and draft a tailored outreach email to the best fit."),
+    ).toBe("jobhunt");
+  });
+
+  it("routes a GitHub issue mentioning 'job-hunt' to engineering, NOT jobhunt", () => {
+    expect(
+      preRouteDepartment("Create a GitHub issue titled 'feat: add job-hunt golden eval tasks'"),
+    ).toBe("engineering");
+  });
+
+  it("routes a LinkedIn post that says 'build' to marketing, NOT engineering", () => {
+    expect(preRouteDepartment("Write a LinkedIn post about how we build AI apps")).toBe("marketing");
+  });
+
+  it("routes 'git status in ~/Projects on my Mac' to personal, NOT engineering", () => {
+    expect(preRouteDepartment("Run `git status` in my ~/Projects/founderos folder on my Mac.")).toBe("personal");
+  });
+
+  it("routes cold outreach to sales", () => {
+    expect(preRouteDepartment("Draft cold outreach to the founder of Acme")).toBe("sales");
+  });
+
+  it("routes a known-contact email to comms", () => {
+    expect(preRouteDepartment("Email our client alex@acme.com a thank-you note")).toBe("comms");
+  });
+
+  it("routes ICP scoring to research", () => {
+    expect(preRouteDepartment("Score Acme Corp as a Turicks prospect against our ICP.")).toBe("research");
+  });
+
+  // ── Invariant: the pre-router is NEVER wrong on the golden set ──────────────
+  // It may return null (defer to the supervisor) but must never fire a department
+  // that differs from the golden task's expected route.
+  it("never routes a golden task to the WRONG department", () => {
+    for (const task of GOLDEN_TASKS) {
+      const got = preRouteDepartment(task.input);
+      if (got !== null) {
+        expect(got, `task "${task.id}" misrouted`).toBe(task.expectedRoute);
+      }
+    }
+  });
+
+  // ── Coverage: the router actually does work (doesn't just defer everything) ──
+  it("resolves a concrete department for the overwhelming majority of golden tasks", () => {
+    const resolved = GOLDEN_TASKS.filter((t) => preRouteDepartment(t.input) !== null);
+    // All 29 golden tasks currently resolve; assert a high floor so a regression
+    // that silently turns the router into a no-op fails loudly.
+    expect(resolved.length).toBeGreaterThanOrEqual(GOLDEN_TASKS.length - 2);
+  });
+});
+
+// ── buildOfficeInput ──────────────────────────────────────────────────────────
+
+describe("buildOfficeInput", () => {
+  it("prepends a SystemMessage hint when a department is matched", () => {
+    const msgs = buildOfficeInput("List my GitHub repositories.");
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]).toBeInstanceOf(SystemMessage);
+    expect(String(msgs[0]!.content)).toContain("engineering");
+    expect(String(msgs[1]!.content)).toBe("List my GitHub repositories.");
+  });
+
+  it("returns only the HumanMessage when no rule matches", () => {
+    // A vague greeting matches nothing → no hint, supervisor decides.
+    const msgs = buildOfficeInput("hey there");
+    expect(msgs).toHaveLength(1);
+    expect(String(msgs[0]!.content)).toBe("hey there");
+  });
+
+  it("the hint keeps a multi-step escape hatch (LLM may sequence across depts)", () => {
+    const msgs = buildOfficeInput("Research what Stripe does");
+    expect(String(msgs[0]!.content)).toMatch(/multi-step request that clearly spans/i);
   });
 });

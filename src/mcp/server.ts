@@ -13,7 +13,7 @@
  *   See ADR-013 (separation of concerns) and ADR-004 (why Telegram for HITL).
  *
  * Tools exposed:
- *   - search_web      → Firecrawl web search
+ *   - search_web      → Gemini grounding (→ DuckDuckGo fallback) web search
  *   - github_read     → GitHub repos / README / stats (read-only)
  *   - read_context    → Founder's current business context
  *   — Memory data-source layer (ADR-016) —

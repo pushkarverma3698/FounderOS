@@ -1,6 +1,21 @@
+# pnpm build-script policy (pnpm 10+/11).
+# The three `ws` native accelerators are optional — the JS fallback is used when
+# they're absent, so we intentionally skip their build scripts. esbuild +
+# protobufjs DO need their install scripts and pnpm builds them by default.
 allowBuilds:
-  bufferutil: set this to true or false
-  es5-ext: set this to true or false
-  esbuild: set this to true or false
-  protobufjs: set this to true or false
-  utf-8-validate: set this to true or false
+  bufferutil: false
+  es5-ext: false
+  utf-8-validate: false
+  esbuild: true
+  protobufjs: true
+ignoredBuiltDependencies:
+  - bufferutil
+  - es5-ext
+  - utf-8-validate
+onlyBuiltDependencies:
+  - esbuild
+  - protobufjs
+# pnpm 11's pre-run drift check was failing every `pnpm <script>` (test/lint/eval)
+# while the optional builds sat "pending". tsc/vitest verify real correctness;
+# this skips only pnpm's convenience pre-run check.
+verifyDepsBeforeRun: false

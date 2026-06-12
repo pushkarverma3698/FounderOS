@@ -57,6 +57,14 @@ export function renderReport(report: EvalReport): string {
     metricRow("Tool selection", report.toolSelection),
     metricRow("HITL coverage", report.hitlCoverage),
     metricRow("Overall", report.overall, true),
+    ...(report.infraErrors > 0
+      ? [
+          "",
+          `> ⚠️ **${report.infraErrors} task(s) excluded as infrastructure errors** (transient ` +
+            `503/timeout that escaped the model layer) — these are NOT scored as routing/tool ` +
+            `misses, so the capability numbers above reflect runs where infra was healthy.`,
+        ]
+      : []),
   ].join("\n");
 
   const failureSection = [
@@ -88,7 +96,10 @@ export function renderReport(report: EvalReport): string {
     "",
     `_Generated: ${report.generatedAt}_`,
     "",
-    "A deterministic evaluation of the FounderOS multi-agent system against a fixed golden-task set.",
+    "An evaluation of the FounderOS multi-agent system against a fixed golden-task set, run at",
+    "temperature 0 for reproducibility. Note: Gemini is not bit-for-bit deterministic even at",
+    "temperature 0, so individual task results on genuinely ambiguous routes can vary slightly",
+    "between runs — treat a single number as a point estimate, not a guarantee.",
     "Each task scores routing (did the supervisor pick the right department?), tool selection (did it",
     "use the expected tools?), and HITL coverage (did write actions pause for approval when required?).",
     "",

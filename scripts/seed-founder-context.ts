@@ -34,7 +34,7 @@ const context = {
   ],
 
   // ── Tech stack ──────────────────────────────────────────────────────────────
-  tech_stack: "LangGraph JS (createSupervisor + createReactAgent), Gemini 2.5 Flash, TypeScript 5.5 strict, Node 22 ESM, Postgres + Drizzle ORM, Redis, Composio (Gmail/LinkedIn/GitHub OAuth), Firecrawl (web search), grammY (Telegram bot), LangSmith (tracing), Ollama (local models: qwen2.5:7b for JSON extraction + commit messages, nomic-embed-text for embeddings)",
+  tech_stack: "LangGraph JS (createSupervisor + createReactAgent), Gemini 2.5 Flash, TypeScript 5.5 strict, Node 22 ESM, Postgres + Drizzle ORM, Redis, Composio (Gmail/LinkedIn/GitHub OAuth), web search (Gemini grounding + DuckDuckGo fallback), grammY (Telegram bot), LangSmith (tracing), Ollama (local models: qwen2.5:7b for JSON extraction + commit messages, nomic-embed-text for embeddings)",
 
   local_models: "Yes — Ollama running locally with qwen2.5:7b (code/JSON tasks) and nomic-embed-text (embeddings). Saves ~40% of API costs on structured tasks. Configured via mcp__ollama__generate and mcp__ollama__embed tools in Claude Code.",
 
