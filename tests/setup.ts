@@ -57,3 +57,43 @@ process.env["GOOGLE_GENERATIVE_AI_API_KEY"] ||= "test-google-key-for-vitest";
 process.env["LOG_LEVEL"] ||= "error"; // Suppress log noise in tests
 process.env["LANGCHAIN_TRACING_V2"] ||= "false";
 process.env["BUDGET_DAILY_USD"] ||= "999"; // Avoid budget checks blocking tests
+
+// ── 3. Network kill-switch (determinism guarantee) ───────────────────────────
+//
+// THE root cause of the historical flaky suite: unit tests silently reached
+// real services (the live Turicks-Brain RAG server on :8766, Gemini, Composio,
+// Firecrawl, Telegram). When a `vi.mock` leaked under parallel execution, the
+// REAL `fetch` ran and returned LIVE data — so the same commit produced
+// different pass/fail counts run to run (see docs/TESTING_AUDIT.md).
+//
+// Fix: in unit mode, replace global `fetch` with a guard that THROWS on any
+// real network call. A test that legitimately needs `fetch` must stub it
+// (`vi.stubGlobal("fetch", ...)`), which overrides this guard for that file;
+// `unstubGlobals: true` in vitest.config.ts restores THIS guard afterwards.
+// Net effect: no unit test can ever hit a real host. A leaked mock now fails
+// LOUD and DETERMINISTICALLY instead of silently returning live data.
+//
+// Integration / live suites opt out by setting ALLOW_NETWORK=1.
+if (process.env["ALLOW_NETWORK"] !== "1") {
+  // Stash the real fetch so tests that need a genuine loopback call (e.g. the
+  // health server, which fetches the ephemeral HTTP server it just spawned) can
+  // opt back in: vi.stubGlobal("fetch", (globalThis as any).__realFetch).
+  (globalThis as { __realFetch?: typeof fetch }).__realFetch = globalThis.fetch;
+
+  const blockedFetch = (input: unknown): never => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : ((input as { url?: string })?.url ?? String(input));
+    throw new Error(
+      `[test-network-guard] Blocked real fetch to "${url}". ` +
+        `Unit tests must mock network — use vi.stubGlobal("fetch", ...) or mock the ` +
+        `tool/service. Set ALLOW_NETWORK=1 for integration/live suites.`,
+    );
+  };
+  // Reinstalled before every test file (setupFiles runs per file), so every
+  // file starts from a blocked baseline regardless of sibling-file ordering.
+  globalThis.fetch = blockedFetch as unknown as typeof fetch;
+}

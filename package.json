@@ -24,7 +24,13 @@
     "lint": "tsc --noEmit",
     "mcp": "node --env-file=.env --import tsx/esm src/mcp/index.ts",
     "test:unit": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration",
+    "test:regression": "vitest run tests/regression",
+    "test:integration": "ALLOW_NETWORK=1 vitest run --config vitest.integration.config.ts",
+    "test:eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
+    "test:smoke": "ALLOW_NETWORK=1 node --env-file=.env --import tsx/esm scripts/smoke.ts",
+    "test:ci": "vitest run",
+    "test:live": "ALLOW_NETWORK=1 vitest run --config vitest.integration.config.ts && pnpm test:eval",
+    "test:all": "pnpm test:ci && pnpm test:smoke",
     "update-readme-metrics": "node --import tsx/esm scripts/update-readme-metrics.ts"
   },
   "dependencies": {
