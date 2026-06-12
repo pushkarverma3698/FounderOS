@@ -25,7 +25,7 @@ import { promises as fs } from "node:fs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
-import { resolveSafePath } from "../infra/path-guard.js";
+import { resolveSafePath, redactSecrets } from "../infra/path-guard.js";
 
 const execAsync = promisify(exec);
 
@@ -140,7 +140,19 @@ export async function readFileSafe(input: string, root?: string): Promise<ReadRe
     } else {
       content = await fs.readFile(safe.path, "utf8");
     }
-    return { ok: true, content: content.slice(0, MAX_OUTPUT) };
+    // Defense-in-depth: scrub any live-credential tokens before the content can
+    // leave the process (e.g. a key pasted into a non-denylisted notes file).
+    // The path-guard denylist handles known secret files; this catches the rest.
+    const { redacted, count } = redactSecrets(content.slice(0, MAX_OUTPUT));
+    if (count > 0) {
+      return {
+        ok: true,
+        content:
+          redacted +
+          `\n\n⚠️ ${count} secret-looking value(s) were redacted before sending — open the file locally to view them.`,
+      };
+    }
+    return { ok: true, content: redacted };
   } catch (e) {
     return { ok: false, error: `Could not read ${safe.path}: ${(e as Error).message}` };
   }
