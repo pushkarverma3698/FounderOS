@@ -130,6 +130,31 @@ interface StreamEvent {
   message?: { content?: Array<{ type?: string; text?: string; name?: string }> };
 }
 
+/**
+ * Map a raw Claude Code tool name to a plain-English progress phrase the founder
+ * actually understands. Without this, Telegram showed jargon like "⚙️ Write…"
+ * and "⚙️ Bash…" — the internal tool names — so the founder couldn't tell what
+ * the agent was doing. Keep these warm and human, not technical.
+ */
+const TOOL_PROGRESS_PHRASES: Record<string, string> = {
+  Write: "✍️ Writing a file",
+  Edit: "✏️ Editing the code",
+  MultiEdit: "✏️ Editing the code",
+  Read: "📖 Reading the files",
+  Bash: "▶️ Running a command",
+  Glob: "🔎 Finding files",
+  Grep: "🔎 Searching the code",
+  WebFetch: "🌐 Reading a web page",
+  WebSearch: "🌐 Searching the web",
+  NotebookEdit: "📓 Editing a notebook",
+  TodoWrite: "🗂 Planning the steps",
+};
+
+/** Humanise a tool name; unknown tools fall back to a generic working phrase. */
+export function humanizeToolProgress(toolName: string): string {
+  return TOOL_PROGRESS_PHRASES[toolName] ?? "🛠 Working on it";
+}
+
 /** Extract a short human-readable progress line from a stream-json event, or null. */
 export function progressLineFromEvent(raw: string): string | null {
   let evt: StreamEvent;
@@ -145,7 +170,7 @@ export function progressLineFromEvent(raw: string): string | null {
       return line.length > 200 ? line.slice(0, 200) + "…" : line;
     }
     if (part.type === "tool_use" && part.name) {
-      return `⚙️ ${part.name}…`;
+      return `${humanizeToolProgress(part.name)}…`;
     }
   }
   return null;

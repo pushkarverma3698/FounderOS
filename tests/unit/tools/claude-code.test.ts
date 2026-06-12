@@ -218,13 +218,29 @@ describe("stream-json parsing", () => {
     expect(progressLineFromEvent(evt)).toBe("Creating the repo structure now");
   });
 
-  it("extracts tool_use as a progress line", async () => {
+  it("extracts tool_use as a HUMANISED progress line (no raw tool-name jargon)", async () => {
     const { progressLineFromEvent } = await import("../../../src/tools/claude-code.js");
     const evt = JSON.stringify({
       type: "assistant",
       message: { content: [{ type: "tool_use", name: "Bash" }] },
     });
-    expect(progressLineFromEvent(evt)).toBe("⚙️ Bash…");
+    // Regression (2026-06-12): Telegram showed "⚙️ Write…"/"⚙️ Bash…" — internal
+    // tool names — so the founder couldn't tell what the agent was doing. The
+    // progress line must be plain English, never the raw tool name.
+    const line = progressLineFromEvent(evt)!;
+    expect(line).toBe("▶️ Running a command…");
+    expect(line).not.toContain("Bash");
+  });
+
+  it("humanises every known tool name and falls back gracefully", async () => {
+    const { humanizeToolProgress } = await import("../../../src/tools/claude-code.js");
+    expect(humanizeToolProgress("Write")).toBe("✍️ Writing a file");
+    expect(humanizeToolProgress("Edit")).toBe("✏️ Editing the code");
+    expect(humanizeToolProgress("WebSearch")).toBe("🌐 Searching the web");
+    // Unknown tools never leak their raw name
+    const fallback = humanizeToolProgress("SomeInternalTool");
+    expect(fallback).toBe("🛠 Working on it");
+    expect(fallback).not.toContain("SomeInternalTool");
   });
 
   it("returns null for non-assistant events and garbage lines", async () => {

@@ -210,7 +210,12 @@ export const claudeCode = tool(
     }
     await writeAuditEntry({ action: "claude_code", idempotency_key: key, payload: { task: task.slice(0, 400), cwd }, tenant_id: TENANT });
     log.info({ task: task.slice(0, 80) }, "claude_code executed via engineering agent");
-    return typeof res.data === "string" ? res.data : "Claude Code completed.";
+    // Frame the executor's raw output so the founder gets a clear "it's done +
+    // here's what came back" instead of a bare, context-free result dump
+    // (Telegram-UX fix 2026-06-12). The workspace is included so the founder
+    // knows where the artifacts live.
+    const output = typeof res.data === "string" && res.data.trim().length > 0 ? res.data.trim() : "(no output produced)";
+    return `✅ Done — the engineering agent finished the task in ${cwd}.\n\nResult:\n${output}`;
   },
   {
     name: "claude_code",
