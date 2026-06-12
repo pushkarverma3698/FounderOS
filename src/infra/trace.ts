@@ -36,13 +36,13 @@ export interface TurnTrace {
   chatId: string;
   kind: "message" | "resume";
   promptHash: string;
-  t0: number;
-  events: TraceEvent[];
+  events: readonly TraceEvent[];
   event(seam: Seam, data?: Record<string, unknown>): void;
 }
 
 // Test sink — lets the Seam tier capture emitted events. Null in production.
 export type TraceSink = (event: TraceEvent) => void;
+// NOTE: module-level — safe only because tests are sequential (no Vitest workers on this file).
 let _sink: TraceSink | null = null;
 export function setTraceSink(sink: TraceSink | null): void {
   _sink = sink;
@@ -58,20 +58,20 @@ export function startTurn(opts: {
   const turnId = randomUUID();
   const t0 = Date.now();
   const chatId = String(opts.chatId);
+  const events: TraceEvent[] = [];
 
   return {
     turnId,
     chatId,
     kind: opts.kind,
     promptHash: opts.promptHash,
-    t0,
-    events: [],
+    events,
     event(seam, data) {
       try {
         const safe = data ? (scrubObject(data) as Record<string, unknown>) : undefined;
         const ev: TraceEvent = { turnId, seam, ms: Date.now() - t0, data: safe };
-        this.events.push(ev);
-        log.info({ turnId, seam, ms: ev.ms, chatId, kind: opts.kind, ...(safe ?? {}) }, `trace ${seam}`);
+        events.push(ev);
+        log.info({ turnId, seam, ms: ev.ms, chatId, kind: opts.kind, data: safe }, `trace ${seam}`);
         _sink?.(ev);
       } catch {
         /* a trace failure must never break a turn (rule #19.5 fail-safe) */
