@@ -440,6 +440,17 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
 
 // ── Resume a paused run after an approval decision ─────────────────────────────
 
+/**
+ * Plain-text confirmation shown to the founder when they reject an approval.
+ * Pure (no I/O) so the reject behaviour is unit-testable without grammy/office.
+ */
+export function buildRejectionConfirmation(approval: ApprovalRequest): string {
+  // Strip the trailing "?" from the card title ("Send email to X?") so the
+  // confirmation reads as a statement.
+  const what = approval.title.replace(/^[^\w]*/, "").replace(/\?+\s*$/, "").trim();
+  return `❌ <b>Cancelled.</b> I won't proceed with: <i>${safeHtml(what)}</i>\nNothing was sent. Re-ask if you change your mind.`;
+}
+
 export async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Promise<void> {
   const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
   const config = officeConfig(chatId);
@@ -451,6 +462,20 @@ export async function resumeOffice(ctx: Context, decision: "approved" | "rejecte
     const pending = await getPendingApproval(office, config);
     if (!pending) {
       await ctx.reply("ℹ️ No pending approval found — it may have already been handled.", { parse_mode: "HTML" });
+      return;
+    }
+
+    // ── Rejection terminates the turn — NEVER resume into the agent ────────────
+    // A ReAct sub-agent treats the rejection tool-result ("❌ Rejected by
+    // founder.") as feedback and re-drafts, firing interrupt() again → an
+    // endless stream of approval cards the founder can't escape (live repro
+    // 2026-06-12). The founder said no, so we abandon the paused task
+    // deterministically: clear the thread and confirm. The side effect only
+    // runs after an "approved" resume, so action_log stays empty (safety holds).
+    if (decision === "rejected") {
+      await clearThreadCheckpoints(threadIdFor(chatId));
+      await ctx.reply(buildRejectionConfirmation(pending), { parse_mode: "HTML" });
+      log.info({ chatId, action: pending.action }, "Founder rejected — task cancelled, thread cleared (no re-draft)");
       return;
     }
 
