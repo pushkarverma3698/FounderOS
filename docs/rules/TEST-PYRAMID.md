@@ -29,6 +29,36 @@ commenting a seam emit fails the tier.
 
 All real-path modes need the one-time founder MTProto login (see `scripts/telegram-tester.ts login`).
 
+### The founder-simulation suite (`scripts/e2e-telegram-qa.ts`) — 29 tasks, 7 groups
+
+This is the hardest real-path test: it drives the LIVE bot over MTProto exactly as
+the founder would, and grades each task on TWO evidence streams — the exact bot
+reply AND the real `action_log` row (or NO ROW). **Whenever a QA session finds a
+new failure class, add a task here so it can never silently regress** (this is how
+the suite grew from 22 → 29 on 2026-06-12).
+
+| Group | Owns |
+|---|---|
+| group1 | read-only routing (research, comms, engineering, personal, context) |
+| group2 | write + HITL (email, GitHub, LinkedIn, shell) → approve → audit row |
+| group3 | multi-step chains (info must survive between departments, no hallucination) |
+| group4 | adversarial (injection, path-guard, ambiguity, idempotency, brand validator) |
+| group5 | crash recovery (HITL card survives a restart — `park` then `approve-last`) |
+| group6 | capability depth — quantitative reasoning, research synthesis + verdict, table formatting, **HITL-cannot-be-socially-engineered**, **claude_code executor** |
+| group7 | **media translation** — photo (image OCR+translate) and voice note, driven via `sendFile` (Bot API cannot) using committed fixtures in `tests/fixtures/qa/` |
+
+Run: `node --env-file=.env --import tsx/esm scripts/e2e-telegram-qa.ts run <all|groupN|TNN> [--approve]`.
+
+**Auto-graded content checks:** a task may declare `mustContain` / `mustNotContain`
+substrings (case-insensitive, checked across the full reply). These turn an eyeball
+into a signal — e.g. T27 asserts the claude_code reply contains `Fizz`/`Buzz` and
+does NOT contain the old jargon `⚙️ Write`. A `🚨`/`⚠` in the SIGNALS block = look.
+
+**Media fixtures** (`tests/fixtures/qa/menu-fr.png`, `voice-fr.ogg`) are committed so
+T28/T29 are reproducible. To regenerate: image via Chrome headless
+`--screenshot` of an HTML file (PIL here lacks freetype); foreign audio via macOS
+`say -v Thomas …` piped through `ffmpeg -c:a libopus`.
+
 ## Observability (LangSmith) — founder-provided key
 
 Step-level tracing to LangSmith is **opt-in and requires a founder-supplied API key**.
