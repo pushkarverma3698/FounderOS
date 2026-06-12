@@ -4,9 +4,15 @@
  * down (not throw), return the documented JSON shape, and 503 when DB is down.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import type { Server } from "node:http";
 import { startHealthServer, buildHealthReport } from "../../../src/infra/health.js";
+
+// This test fetches the ephemeral HTTP server it spawns on loopback. The global
+// network guard (tests/setup.ts) blocks all real fetch for determinism, so we
+// opt back in to the stashed REAL fetch for this self-contained local-server test.
+const realFetch = (globalThis as { __realFetch?: typeof fetch }).__realFetch;
+if (realFetch) vi.stubGlobal("fetch", realFetch);
 
 let server: Server | undefined;
 

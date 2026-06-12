@@ -34,6 +34,10 @@ import { assertNonEmptyMessages } from "../infra/office-guard.js";
 import { isWedgedState, type WedgeState } from "../infra/wedge.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
 import { recordConversationEnd } from "../infra/conversation-recorder.js";
+import { startTurn, activePromptHash, type TurnTrace } from "../infra/trace.js";
+import { TraceCallback } from "../infra/trace-callback.js";
+import { buildRunMetadata } from "../infra/telemetry.js";
+import { SUPERVISOR_PROMPT } from "../agents/system-prompts.js";
 
 const log = logger.child({ module: "office-run" });
 
@@ -289,6 +293,7 @@ export async function trimThreadHistory(
   office: any,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   config: any,
+  trace?: TurnTrace,
 ): Promise<void> {
   const pending = await getPendingApproval(office, config);
   if (pending) return; // mid-HITL — do not touch state
@@ -301,6 +306,7 @@ export async function trimThreadHistory(
   const removals = toRemove.map((id) => new RemoveMessage({ id }));
   await office.updateState(config, { messages: removals });
   log.debug({ removed: toRemove.length }, "Trimmed thread history to last N turns");
+  trace?.event("checkpoint.trim", { removed: toRemove.length });
 }
 
 // ── Route an incoming message into the office ──────────────────────────────────
@@ -323,6 +329,9 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
   const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
   const config = officeConfig(chatId);
 
+  const trace = startTurn({ chatId, kind: "message", promptHash: activePromptHash(SUPERVISOR_PROMPT) });
+  trace.event("turn.in", { textLen: text.length });
+
   log.info({ chatId, task: text.slice(0, 80) }, "Routing to office");
   const stopTyping = startTyping(ctx);
 
@@ -335,6 +344,7 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
     // first, inform the founder, then proceed with the new request.
     const stale = await resolvePendingApproval(office, config);
     if (stale) {
+      trace.event("hitl.interrupt", { cancelledStale: true, title: stale.title });
       log.warn({ chatId, title: stale.title }, "Cancelled stale pending approval — new message arrived");
       await ctx.reply(
         `⏸️ <b>Pending approval cancelled</b>\n` +
@@ -349,6 +359,7 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
     // thread parked on a pending node with no interrupt; a fresh invoke would
     // resume the stuck node and loop forever. Clear it so this message runs clean.
     if (await recoverWedgedThread(office, config, threadIdFor(chatId))) {
+      trace.event("wedge.recovered", {});
       log.warn({ chatId }, "Recovered wedged thread before new message");
       await ctx.reply(
         `🧹 <b>Recovered a stuck task.</b> A previous run didn't finish cleanly, so I cleared it. ` +
@@ -373,13 +384,18 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
     // Inject a deterministic pre-router hint so the supervisor starts in the
     // right department. Same builder the eval uses (CLAUDE.md rule #19).
     const invokeMessages: BaseMessage[] = buildOfficeInput(text);
+    trace.event("route.decided", { hint: (invokeMessages[0]?.content ?? "").toString().slice(0, 60) });
 
     // Guard: Gemini returns 400 if contents is empty or last message is blank.
     assertNonEmptyMessages(invokeMessages, "runOfficeText");
 
     const res = (await office.invoke(
       { messages: invokeMessages },
-      { ...config, callbacks: [new BudgetGuardCallback(budget, agentModel)] },
+      {
+        ...config,
+        callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
+        metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
+      },
     )) as { messages?: OfficeMessage[] };
     stopTyping();
 
@@ -387,6 +403,7 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
 
     const approval = await getPendingApproval(office, config);
     if (approval) {
+      trace.event("hitl.interrupt", { title: approval.title });
       await sendApprovalCard(ctx, approval);
       return;
     }
@@ -395,18 +412,20 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
     const freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
     const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
     await sendResult(ctx, freshRes, chatId);
+    trace.event("turn.out", { toolErrors: collectToolErrors(freshRes).length });
     // Clean turn → record episodic memory + bound the persisted history so the
     // thread can never grow unbounded and anchor the model on stale state.
     if (freshMessages.length > 0) {
       recordConversationEnd(threadIdFor(chatId), res.messages ?? []).catch((err) =>
         log.warn({ chatId, err: (err as Error).message }, "Conversation recording failed"),
       );
-      trimThreadHistory(office, config).catch((err) =>
+      trimThreadHistory(office, config, trace).catch((err) =>
         log.warn({ chatId, err: (err as Error).message }, "History trim failed — non-fatal"),
       );
     }
   } catch (err) {
     stopTyping();
+    trace.event("turn.error", { kind: err instanceof Error ? err.name : "unknown" });
     if (err instanceof BudgetExceededError) {
       log.warn({ chatId, reason: err.reason }, "Run stopped: budget exceeded");
       await clearWedgeQuietly(chatId);
@@ -454,6 +473,8 @@ export function buildRejectionConfirmation(approval: ApprovalRequest): string {
 export async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Promise<void> {
   const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
   const config = officeConfig(chatId);
+  const trace = startTurn({ chatId, kind: "resume", promptHash: activePromptHash(SUPERVISOR_PROMPT) });
+  trace.event("hitl.resume", { decision });
 
   try {
     const office = await getOffice();
@@ -474,6 +495,7 @@ export async function resumeOffice(ctx: Context, decision: "approved" | "rejecte
     // runs after an "approved" resume, so action_log stays empty (safety holds).
     if (decision === "rejected") {
       await clearThreadCheckpoints(threadIdFor(chatId));
+      trace.event("turn.out", { rejected: true });
       await ctx.reply(buildRejectionConfirmation(pending), { parse_mode: "HTML" });
       log.info({ chatId, action: pending.action }, "Founder rejected — task cancelled, thread cleared (no re-draft)");
       return;
@@ -502,19 +524,25 @@ export async function resumeOffice(ctx: Context, decision: "approved" | "rejecte
     const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
     const res = (await office.invoke(
       new Command({ resume: decision }),
-      { ...config, callbacks: [new BudgetGuardCallback(budget, agentModel)] },
+      {
+        ...config,
+        callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
+        metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
+      },
     )) as { messages?: OfficeMessage[] };
 
     // A run may pause again (e.g. research → then email approval).
     const next = await getPendingApproval(office, config);
     if (next) {
+      trace.event("hitl.interrupt", { title: next.title, rePaused: true });
       await sendApprovalCard(ctx, next);
       return;
     }
     const freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
     const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
     await sendResult(ctx, freshRes, chatId);
-    trimThreadHistory(office, config).catch((err) =>
+    trace.event("turn.out", { resumed: true });
+    trimThreadHistory(office, config, trace).catch((err) =>
       log.warn({ chatId, err: (err as Error).message }, "History trim failed — non-fatal"),
     );
   } catch (err) {
