@@ -145,8 +145,14 @@ export const linkedinPostTool: UnifiedTool = {
       );
 
       const data = result["data"] as Record<string, unknown> | undefined;
-      // Response may return id, post_id, or activity URN
-      const postId = (data?.["id"] ?? data?.["post_id"] ?? result["id"]) as string | undefined;
+      // Composio returns the published share URN under 'x_restli_id' (live-verified
+      // 2026-06-12: { data: { x_restli_id: "urn:li:share:..." }, successful: true }).
+      // Older/other shapes may use id/post_id — accept all so a real publish is never
+      // misread as a soft failure (which would suppress the audit and trigger a double-post).
+      const postId = (data?.["x_restli_id"] ??
+        data?.["id"] ??
+        data?.["post_id"] ??
+        result["id"]) as string | undefined;
 
       // Soft-failure detection: Composio returns HTTP 200 + error message with no post id.
       // Without this guard we record a phantom "published" audit entry and suppress all

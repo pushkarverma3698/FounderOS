@@ -73,6 +73,23 @@ describe("linkedinPostTool", () => {
     expect(mockWriteAuditEntry).toHaveBeenCalledOnce();
   });
 
+  it("reads the post id from x_restli_id (the REAL Composio response shape)", async () => {
+    // Live-captured 2026-06-12: a successful publish returns the share URN under
+    // 'x_restli_id', not 'id'. Reading only 'id'/'post_id' misread a real publish as
+    // a soft failure → no audit row → retry → double-post. This locks the real shape.
+    mockExecuteComposioAction.mockResolvedValue({
+      data: { x_restli_id: "urn:li:share:7471113097139695616" },
+      successful: true,
+      error: null,
+    });
+
+    const result = await linkedinPostTool.execute(BASE_ARGS);
+
+    expect(result.success).toBe(true);
+    expect((result.data as { post_id: string }).post_id).toBe("urn:li:share:7471113097139695616");
+    expect(mockWriteAuditEntry).toHaveBeenCalledOnce();
+  });
+
   it("calls Composio with LINKEDIN_CREATE_LINKED_IN_POST and correct field names", async () => {
     mockExecuteComposioAction.mockResolvedValue({ data: { id: "urn:li:share:1" } });
 
