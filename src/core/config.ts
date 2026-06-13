@@ -67,6 +67,19 @@ export const envSchema = z.object({
   // Per-run caps — applied to each individual office.invoke() call
   RUN_BUDGET_USD: z.coerce.number().positive().default(0.50),
   RUN_BUDGET_TOKENS: z.coerce.number().int().positive().default(50_000),
+}).superRefine((cfg, ctx) => {
+  // Fail-fast in production: without an LLM key the whole office is dead, but the
+  // bot would otherwise boot "fine" and silently fail on the first message. Keys
+  // are still optional in development/test so local + CI unit runs need no real
+  // secrets. Other tool keys (Composio, GitHub) degrade per-tool by design.
+  if (cfg.NODE_ENV === "production" && !cfg.GOOGLE_GENERATIVE_AI_API_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["GOOGLE_GENERATIVE_AI_API_KEY"],
+      message:
+        "required in production — the agent model needs it. Set it in the prod .env (or PROD_DOTENV secret).",
+    });
+  }
 });
 
 function parseEnv() {

@@ -9,7 +9,8 @@
 set -euo pipefail
 
 APP_DIR="/opt/founderos"
-BRANCH="${DEPLOY_BRANCH:-production}"
+# main IS production (single-tenant — ADR-021). Override with DEPLOY_BRANCH if needed.
+BRANCH="${DEPLOY_BRANCH:-main}"
 
 cd "$APP_DIR"
 
@@ -44,10 +45,10 @@ done
 echo "==> Pulling nomic-embed-text (no-op if already cached)"
 docker exec founderos-ollama ollama pull nomic-embed-text
 
-# Remove Mac-style PERSONAL_ROOT placeholder if present.
-# path-guard defaults to os.homedir() when PERSONAL_ROOT is unset, which
-# correctly resolves to /home/founderos on the VPS.  A stale
-# PERSONAL_ROOT=/Users/... from a copied .env.example breaks the personal dept.
+# Defensive: strip a stale Mac-style PERSONAL_ROOT placeholder if one slipped in.
+# The prod .env is normally rendered from the PROD_DOTENV secret (which should
+# omit PERSONAL_ROOT so path-guard falls back to os.homedir() = /home/founderos),
+# but this keeps a hand-edited .env from breaking the personal dept.
 if grep -q '^PERSONAL_ROOT=/Users/' .env 2>/dev/null; then
   sed -i '/^PERSONAL_ROOT=/d' .env
   echo "    patched: removed stale PERSONAL_ROOT placeholder from .env"
