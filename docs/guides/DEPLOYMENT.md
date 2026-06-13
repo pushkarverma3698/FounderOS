@@ -8,19 +8,20 @@ constraints that rule out the obvious "just Dockerize it" / "serverless" paths:
    (`src/infra/single-instance.ts`); the host must run exactly one process.
 2. **The `claude` executor spawns the CLI from PATH.**
    `src/tools/claude-code.ts` runs `claude -p` as a subprocess using the host's
-   stored OAuth credentials. A stock container has neither the binary nor the
-   login, so the app runs **native under systemd**, not in Docker. Only Postgres
-   runs in Docker.
+   stored OAuth credentials (or `CLAUDE_EXECUTOR_API_KEY` as a fallback). A stock
+   container has neither the binary nor the login, so the app runs **native under
+   systemd**, not in Docker. Postgres and Ollama run in Docker.
 
-**Architecture:** `Hetzner CX22 (~€4.5/mo) → systemd(app) + docker(postgres) + claude CLI`.
+**Architecture:** `Hetzner CX32 (~€9/mo) → systemd(app) + docker(postgres+ollama) + claude CLI`.
 No load balancer, no Redis (SaaS-phase), no managed DB. See ADR-021.
 
 ---
 
 ## 1. Provision the VPS
 
-- **Hetzner CX22** — 2 vCPU / 4 GB / 40 GB, Ubuntu 24.04. (4 GB matters: Node +
-  Postgres + a `claude` subprocess + `pnpm build` will OOM a 1 GB box.)
+- **Hetzner CX32** — 4 vCPU / 8 GB / 80 GB, Ubuntu 24.04. (8 GB matters: Node +
+  Postgres + Ollama loading `nomic-embed-text` + a `claude` subprocess + `pnpm build`
+  will OOM a 4 GB box. CX22 is no longer sufficient once Ollama is in the stack.)
 - Add your SSH key during creation. Harden:
 
 ```bash
@@ -31,7 +32,8 @@ usermod -aG sudo founderos
 # Passwordless restart so the deploy script can restart the service:
 echo 'founderos ALL=(ALL) NOPASSWD: /bin/systemctl restart founderos' \
   > /etc/sudoers.d/founderos && chmod 440 /etc/sudoers.d/founderos
-# Firewall: SSH only; the bot is outbound long-poll, /health stays on localhost.
+# Firewall: SSH only. Postgres (5432) and Ollama (11434) bind to 127.0.0.1
+# in deploy/stack.compose.yml — they are NEVER reachable from the internet.
 ufw allow OpenSSH && ufw --force enable
 ```
 
@@ -53,9 +55,16 @@ claude login                                      # one-time interactive OAuth (
 which claude                                       # confirm it resolves on PATH
 ```
 
-> **Verify the executor auth before relying on it.** Run `claude -p "say hi"`
-> as the `founderos` user. If that works headlessly, the in-app executor will
-> too. This is the single riskiest unknown in the deploy.
+> **Executor dual-auth.** Two auth paths for `claude -p`:
+> 1. **OAuth (default):** `claude login` above persists credentials to
+>    `~/.claude/.credentials.json`. Leave `CLAUDE_EXECUTOR_API_KEY` empty in `.env`.
+> 2. **API key fallback:** set `CLAUDE_EXECUTOR_API_KEY=sk-ant-...` in `.env` if
+>    OAuth is impractical (CI, containers, headless). The executor will use the key
+>    directly; no `claude login` needed.
+>
+> **Verify before relying on it.** Run `claude -p "say hi"` as the `founderos`
+> user. If that works headlessly, the in-app executor will too. This is the
+> single riskiest unknown in the deploy.
 
 ## 3. Clone + configure
 
@@ -68,15 +77,36 @@ nano .env   # fill DATABASE_URL, TELEGRAM_BOT_TOKEN/CHAT_ID, GOOGLE_GENERATIVE_A
 #   DATABASE_URL=postgresql://founderos:<STRONG_PW>@127.0.0.1:5432/founderos
 ```
 
-## 4. Bring up Postgres + first build
+## 4. Bring up Postgres + Ollama + first build
 
 ```bash
-POSTGRES_PASSWORD='<STRONG_PW>' docker compose -f deploy/postgres.compose.yml up -d
+# Start Postgres (pgvector/pgvector:pg16) + Ollama — both loopback-only.
+POSTGRES_PASSWORD='<STRONG_PW>' docker compose -f deploy/stack.compose.yml up -d
+
+# Pull the embedding model (no-op if already cached; also runs on every deploy.sh)
+docker exec founderos-ollama ollama pull nomic-embed-text
+
 pnpm install --frozen-lockfile
 pnpm build
-pnpm db:migrate
+pnpm db:migrate       # creates personal_rag, turicks_brain, pgvector extension, etc.
 pnpm setup            # seed/setup-db (idempotent)
 ```
+
+### Knowledge-stores population (first time only)
+
+The pgvector tables start empty. If you have existing Chroma databases
+(`personal-rag` / `turicks-brain-rag`) on the host, migrate them:
+
+```bash
+# Reads from ~/Projects/personal-rag/data/chroma_db/chroma.sqlite3
+# and ~/Projects/turicks-brain-rag/data/chroma_db/chroma.sqlite3,
+# re-embeds via Ollama, inserts into personal_rag + turicks_brain tables.
+# Idempotent: TRUNCATE → embed → insert. Safe to re-run.
+npx tsx --env-file=.env scripts/migrate-chroma-to-pgvector.ts
+```
+
+After migration, the old Chroma HTTP services at :8765/:8766 can be shut down —
+they are no longer used. All RAG queries now go directly to Postgres via pgvector.
 
 ## 5. Install the systemd service
 
@@ -156,11 +186,11 @@ docker exec -it founderos-postgres psql -U founderos
 
 | Item | Monthly |
 |---|---|
-| Hetzner CX22 | ~€4.50 |
+| Hetzner CX32 | ~€9.00 (4 vCPU / 8 GB — required for Ollama) |
 | Hetzner Storage Box (backups, optional) | ~€3.20 (BX11, 1 TB) |
 | Claude Pro (executor) | existing sub |
 | Gemini / Composio | usage-based |
-| **Floor** | **~€5/mo + existing subs** |
+| **Floor** | **~€9/mo + existing subs** |
 
 ## When to revisit (→ EC2 / managed)
 
