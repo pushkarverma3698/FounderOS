@@ -21,6 +21,10 @@ WorkingDirectory=/opt/founderos
 # .bashrc, so shim directories from fnm are never on PATH.
 Environment=NODE_ENV=production
 Environment=PATH=/home/founderos/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Pin HOME so os.homedir() always resolves to the correct VPS path.
+# path-guard's PERSONAL_ROOT defaults to os.homedir() — not setting it here
+# lets the correct default apply even if .env contains a stale Mac placeholder.
+Environment=HOME=/home/founderos
 
 # Secrets live in /opt/founderos/.env (chmod 600, NEVER committed).
 # package.json `start` already passes --env-file=.env, but we also point
