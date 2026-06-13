@@ -40,19 +40,24 @@ ufw allow OpenSSH && ufw --force enable
 ## 2. Install runtime deps (as `founderos`)
 
 ```bash
-# Node 22 (fnm keeps it on PATH for systemd via the unit's Environment=PATH)
-curl -fsSL https://fnm.vercel.app/install | bash && source ~/.bashrc
-fnm install 22 && fnm default 22
-corepack enable && corepack prepare pnpm@9 --activate
+# Node 22 — system-wide via NodeSource (NOT fnm/nvm: systemd doesn't source
+# .bashrc, so fnm shim dirs never appear on the service's PATH).
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs       # puts node+npm at /usr/bin
+sudo npm install -g pnpm@9           # puts pnpm at /usr/bin/pnpm
+node --version && pnpm --version     # confirm
 
-# Docker (for Postgres)
+# sqlite3 — needed by the one-time Chroma→pgvector migration script
+sudo apt-get install -y sqlite3
+
+# Docker (for Postgres + Ollama)
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker founderos   # re-login after this
 
 # Claude Code CLI — REQUIRED for the claude_code executor
-curl -fsSL https://claude.ai/install.sh | bash   # or npm i -g @anthropic-ai/claude-code
-claude login                                      # one-time interactive OAuth (Pro)
-which claude                                       # confirm it resolves on PATH
+sudo npm install -g @anthropic-ai/claude-code   # puts claude at /usr/local/bin
+claude login                                     # one-time interactive OAuth (Pro)
+which claude                                     # confirm it resolves on PATH
 ```
 
 > **Executor dual-auth.** Two auth paths for `claude -p`:

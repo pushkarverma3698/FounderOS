@@ -13,9 +13,12 @@ User=founderos
 Group=founderos
 WorkingDirectory=/opt/founderos
 
-# Node 22 must be on PATH for the founderos user (nvm/fnm/system install).
-# The `claude` executor (src/tools/claude-code.ts) ALSO resolves from PATH —
-# keep ~/.local/bin and /usr/local/bin here or the claude_code tool breaks.
+# Node 22 is installed system-wide via NodeSource (apt), so it lands at
+# /usr/bin/node.  pnpm is installed via `npm i -g pnpm@9` → /usr/bin/pnpm.
+# The `claude` executor (src/tools/claude-code.ts) resolves from PATH too —
+# `npm i -g @anthropic-ai/claude-code` puts it in /usr/local/bin.
+# Do NOT use fnm/nvm for the production server: systemd does not source
+# .bashrc, so shim directories from fnm are never on PATH.
 Environment=NODE_ENV=production
 Environment=PATH=/home/founderos/.local/bin:/usr/local/bin:/usr/bin:/bin
 
