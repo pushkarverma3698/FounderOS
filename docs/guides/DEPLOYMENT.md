@@ -12,16 +12,17 @@ constraints that rule out the obvious "just Dockerize it" / "serverless" paths:
    container has neither the binary nor the login, so the app runs **native under
    systemd**, not in Docker. Postgres and Ollama run in Docker.
 
-**Architecture:** `Hetzner CX32 (~€9/mo) → systemd(app) + docker(postgres+ollama) + claude CLI`.
+**Architecture:** `Hetzner CAX21 (~€7.99/mo, ARM64) → systemd(app) + docker(postgres+ollama) + claude CLI`.
 No load balancer, no Redis (SaaS-phase), no managed DB. See ADR-021.
 
 ---
 
 ## 1. Provision the VPS
 
-- **Hetzner CX32** — 4 vCPU / 8 GB / 80 GB, Ubuntu 24.04. (8 GB matters: Node +
-  Postgres + Ollama loading `nomic-embed-text` + a `claude` subprocess + `pnpm build`
-  will OOM a 4 GB box. CX22 is no longer sufficient once Ollama is in the stack.)
+- **Hetzner CAX21** — 4 vCPU ARM64 (Ampere Altra) / 8 GB / 80 GB NVMe, Ubuntu 24.04 ARM64, ~€7.99/mo.
+  (8 GB matters: Node + Postgres + Ollama loading `nomic-embed-text` + a `claude` subprocess + `pnpm build`
+  will OOM a 4 GB box. The full stack — Node 22, Docker images, Ollama, pgvector — is ARM64-native; no
+  code changes needed vs x86. Docker pulls multi-arch images automatically.)
 - Add your SSH key during creation. Harden:
 
 ```bash
@@ -191,7 +192,7 @@ docker exec -it founderos-postgres psql -U founderos
 
 | Item | Monthly |
 |---|---|
-| Hetzner CX32 | ~€9.00 (4 vCPU / 8 GB — required for Ollama) |
+| Hetzner CAX21 | ~€7.99 (4 vCPU ARM64 / 8 GB — required for Ollama) |
 | Hetzner Storage Box (backups, optional) | ~€3.20 (BX11, 1 TB) |
 | Claude Pro (executor) | existing sub |
 | Gemini / Composio | usage-based |
