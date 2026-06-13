@@ -14,32 +14,88 @@ import { readEmailsTool } from "../../tools/email-reader.js";
 import { linkedinPostTool } from "../../tools/linkedin.js";
 import { calendarTool } from "../../tools/calendar.js";
 import { isSuppressed } from "../../db/queries.js";
-import { validateBrandVoice } from "../../infra/brand-validator.js";
+import { validateBrandVoice, brandFixGuidance, type Channel } from "../../infra/brand-validator.js";
+import {
+  BRAND_MAX_RETRIES,
+  brandRetryKey,
+  recordBrandFailure,
+  clearBrandRetries,
+} from "../../infra/brand-retry.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
+import type { RunnableConfig } from "@langchain/core/runnables";
 
 const log = childLogger({ module: "agent-tools:comms" });
+
+/**
+ * Brand-check with a deterministic convergence cap.
+ *
+ * - valid draft            → { proceed: true }                  (no banner)
+ * - invalid, within cap    → { proceed: false, fix }            (agent re-drafts)
+ * - invalid, cap exceeded  → { proceed: true, warning }         (STOP looping;
+ *                            gate the closest draft so the founder decides)
+ *
+ * Bounding it here (not in the prompt) is what stops the 146↔113 oscillation from
+ * running to the recursion limit. The count is per-thread+channel and TTL-reset.
+ *
+ * NOTE on interrupt() re-execution: tool code before the HITL gate runs twice
+ * (once to raise interrupt(), once on resume). On the cap-exceeded path the count
+ * only ever increases, so the resume re-run still lands on `proceed: true` and the
+ * approved send goes through. We therefore clear the count only AFTER the gate.
+ */
+function brandCheckBounded(
+  text: string,
+  channel: Channel,
+  config: RunnableConfig | undefined,
+): { proceed: boolean; fix?: string; warning?: string; retryKey: string } {
+  const threadId = config?.configurable?.["thread_id"] as string | undefined;
+  const retryKey = brandRetryKey(threadId, channel);
+
+  const brandCheck = validateBrandVoice(text, channel);
+  if (brandCheck.valid) return { proceed: true, retryKey };
+
+  const attempt = recordBrandFailure(retryKey);
+  if (attempt <= BRAND_MAX_RETRIES) {
+    return { proceed: false, retryKey, fix: brandFixGuidance(text, channel) };
+  }
+
+  // Cap exceeded — the model is oscillating. Stop re-drafting; surface the closest
+  // draft to the founder via HITL with the violations noted, instead of looping.
+  log.warn(
+    { retryKey, attempt, violations: brandCheck.violations },
+    "Brand validation did not converge — gating closest draft after cap",
+  );
+  return {
+    proceed: true,
+    retryKey,
+    warning: `⚠️ Brand check still flags this after ${BRAND_MAX_RETRIES} fix attempts — approve to send/post as-is, or reject:\n${brandCheck.violations.join("\n")}`,
+  };
+}
 
 // ── Comms: send email (WRITE — requires approval) ─────────────────────────────
 
 export const sendEmail = tool(
-  async ({ to, subject, body }) => {
-    // Brand voice check — runs before interrupt() so the HITL card only shows
-    // clean content. If violations found, agent self-corrects and calls again.
-    const brandCheck = validateBrandVoice(body, "outreach");
-    if (!brandCheck.valid) {
-      return `Fix these brand violations before sending:\n${brandCheck.violations.join("\n")}`;
-    }
+  async ({ to, subject, body }, config) => {
+    // Brand voice check with a deterministic retry cap — runs before interrupt()
+    // so the HITL card only shows clean content. Within the cap, the agent
+    // self-corrects with exact-delta guidance; past the cap we stop looping and
+    // gate the closest draft (rule #16 — convergence lives in code, not the prompt).
+    const brand = brandCheckBounded(body, "outreach", config);
+    if (!brand.proceed) return `Fix these brand violations before sending:\n${brand.fix}`;
 
     // Pure summary (may run twice) — request approval.
     const rejected = hitlGate({
       action: "send_email",
       title: `📧 Send email to ${to}?`,
-      summary: `Subject: ${subject}`,
+      summary: brand.warning ?? `Subject: ${subject}`,
       preview: body,
       args: { to, subject, body },
     });
-    if (rejected) return rejected;
+    if (rejected) {
+      clearBrandRetries(brand.retryKey);
+      return rejected;
+    }
+    clearBrandRetries(brand.retryKey);
 
     // Side-effects only AFTER approval.
     if (await isSuppressed(TENANT, to)) {
@@ -75,22 +131,27 @@ export const sendEmail = tool(
 // ── Marketing: LinkedIn post (WRITE — requires approval) ──────────────────────
 
 export const linkedinPost = tool(
-  async ({ text }) => {
-    // Brand voice check — runs before interrupt() so the HITL card only shows
-    // clean, brand-compliant content. Violations → agent self-corrects.
-    const brandCheck = validateBrandVoice(text, "linkedin");
-    if (!brandCheck.valid) {
-      return `Fix these brand violations before posting:\n${brandCheck.violations.join("\n")}`;
-    }
+  async ({ text }, config) => {
+    // Brand voice check with a deterministic retry cap — runs before interrupt()
+    // so the HITL card only shows clean content. Within the cap the agent
+    // self-corrects with exact-delta guidance; past the cap we STOP re-drafting
+    // (this is what prevents the 146↔113 word-count oscillation from running to
+    // the recursion limit) and gate the closest draft with violations noted.
+    const brand = brandCheckBounded(text, "linkedin", config);
+    if (!brand.proceed) return `Fix these brand violations before posting:\n${brand.fix}`;
 
     const rejected = hitlGate({
       action: "linkedin_post",
       title: "📣 Publish this LinkedIn post?",
-      summary: "New LinkedIn post",
+      summary: brand.warning ?? "New LinkedIn post",
       preview: text,
       args: { text },
     });
-    if (rejected) return rejected;
+    if (rejected) {
+      clearBrandRetries(brand.retryKey);
+      return rejected;
+    }
+    clearBrandRetries(brand.retryKey);
 
     const res = await linkedinPostTool.execute({
       text,
