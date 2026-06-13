@@ -26,13 +26,23 @@ pnpm lint
 echo "==> Building"
 pnpm build
 
-echo "==> Ensuring Postgres is up"
-docker compose -f deploy/postgres.compose.yml up -d
-# Wait for the DB to accept connections before migrating.
+echo "==> Ensuring Postgres + Ollama are up"
+docker compose -f deploy/stack.compose.yml up -d
+
+# Wait for Postgres to accept connections before migrating.
 for i in {1..30}; do
   if docker exec founderos-postgres pg_isready -U founderos >/dev/null 2>&1; then break; fi
   echo "    waiting for postgres ($i/30)"; sleep 1
 done
+
+# Wait for Ollama API to be ready, then pull the embed model if not cached.
+echo "==> Waiting for Ollama"
+for i in {1..30}; do
+  if curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then break; fi
+  echo "    waiting for ollama ($i/30)"; sleep 2
+done
+echo "==> Pulling nomic-embed-text (no-op if already cached)"
+docker exec founderos-ollama ollama pull nomic-embed-text
 
 echo "==> Running migrations"
 pnpm db:migrate
