@@ -44,6 +44,15 @@ done
 echo "==> Pulling nomic-embed-text (no-op if already cached)"
 docker exec founderos-ollama ollama pull nomic-embed-text
 
+# Remove Mac-style PERSONAL_ROOT placeholder if present.
+# path-guard defaults to os.homedir() when PERSONAL_ROOT is unset, which
+# correctly resolves to /home/founderos on the VPS.  A stale
+# PERSONAL_ROOT=/Users/... from a copied .env.example breaks the personal dept.
+if grep -q '^PERSONAL_ROOT=/Users/' .env 2>/dev/null; then
+  sed -i '/^PERSONAL_ROOT=/d' .env
+  echo "    patched: removed stale PERSONAL_ROOT placeholder from .env"
+fi
+
 echo "==> Running migrations"
 pnpm db:migrate
 
