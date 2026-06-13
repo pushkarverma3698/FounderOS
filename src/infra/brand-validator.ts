@@ -112,6 +112,34 @@ export function validateBrandVoice(text: string, channel: Channel): BrandValidat
   return { valid: violations.length === 0, violations };
 }
 
+/**
+ * Build a deterministic, single-shot correction message for the agent.
+ *
+ * Generic "word count too low" guidance makes the model overshoot and oscillate
+ * (146 → 113 → 146 …). Giving the EXACT word delta — "add at least N more words,
+ * do not remove existing content" — converges far faster. Banned-phrase / hook /
+ * emoji violations are passed through verbatim (they have no numeric delta).
+ */
+export function brandFixGuidance(text: string, channel: Channel): string {
+  const { violations } = validateBrandVoice(text, channel);
+  if (violations.length === 0) return "";
+
+  const limits = WORD_LIMITS[channel];
+  const wordCount = countWords(text);
+  const lines = violations.map((v) => {
+    if (limits !== null && v.startsWith("word count too low")) {
+      const delta = limits.min - wordCount;
+      return `Your draft is ${wordCount} words; ${channel} needs ${limits.min}–${limits.max}. Add at least ${delta} more word${delta === 1 ? "" : "s"} of real substance — do NOT delete existing content.`;
+    }
+    if (limits !== null && v.startsWith("word count too high")) {
+      const delta = wordCount - limits.max;
+      return `Your draft is ${wordCount} words; ${channel} needs ${limits.min}–${limits.max}. Cut at least ${delta} word${delta === 1 ? "" : "s"} — tighten, don't add.`;
+    }
+    return v;
+  });
+  return lines.join("\n");
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function countWords(text: string): number {

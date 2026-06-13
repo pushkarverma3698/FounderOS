@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { validateBrandVoice, BANNED_PHRASES } from "../../../src/infra/brand-validator.js";
+import { validateBrandVoice, brandFixGuidance, BANNED_PHRASES } from "../../../src/infra/brand-validator.js";
 
 // ── Banned phrases ─────────────────────────────────────────────────────────────
 
@@ -179,5 +179,35 @@ describe("outreach channel", () => {
     const followUp = `Hi Alex,\n\nJust following up on my last email.`;
     const result = validateBrandVoice(followUp, "outreach");
     expect(result.valid).toBe(false);
+  });
+});
+
+// ── Deterministic fix guidance ─────────────────────────────────────────────────
+
+describe("brandFixGuidance", () => {
+  it("returns '' for a clean draft", () => {
+    expect(brandFixGuidance(goodLinkedInPost, "linkedin")).toBe("");
+  });
+
+  it("gives the exact word delta for a too-short linkedin post", () => {
+    const short = `${GOOD_HOOK}\n\nShort post body here.`; // well under 150
+    const msg = brandFixGuidance(short, "linkedin");
+    // exact additive delta, not a generic "too low"
+    expect(msg).toMatch(/Add at least \d+ more words/);
+    expect(msg).toMatch(/do NOT delete existing content/);
+    expect(msg).not.toMatch(/word count too low/);
+  });
+
+  it("gives the exact word delta for a too-long outreach email", () => {
+    const long = GOOD_OUTREACH + "\n\n" + "extra word ".repeat(100);
+    const msg = brandFixGuidance(long, "outreach");
+    expect(msg).toMatch(/Cut at least \d+ words/);
+    expect(msg).not.toMatch(/word count too high/);
+  });
+
+  it("passes banned-phrase / hook violations through verbatim (no numeric delta)", () => {
+    const noHook = `We are building something new.\n\n${GOOD_BODY}`;
+    const msg = brandFixGuidance(noHook, "linkedin");
+    expect(msg).toMatch(/hook/);
   });
 });

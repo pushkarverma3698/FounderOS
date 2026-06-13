@@ -213,16 +213,26 @@ export async function recoverWedgedThread(
 }
 
 /**
- * Best-effort wedge clear used inside catch blocks after an abort. Re-fetches
- * the office, clears the thread only if genuinely wedged, and never throws
+ * Unconditionally clear a thread's checkpoint after an IN-PROCESS abort
+ * (recursion limit / budget exceeded). Mirrors what /reset does, and never throws
  * (we're already handling an error — recovery must not mask it).
+ *
+ * Root cause this fixes (P0): the abort catch blocks used to clear via the
+ * isWedgedState()-gated guard (recoverWedgedThread). But a recursion abort
+ * frequently leaves a snapshot whose `next` is empty — the pending *writes* in
+ * checkpoint_writes are what resume-loop, not the snapshot's `next` — so the gate
+ * returned false and the checkpoint survived. The next invoke({messages}) then
+ * resumed the stuck writes and instantly re-hit the limit ("🔁 stuck" on every
+ * message until a manual /reset; one bad task bricked the chat).
+ *
+ * Here we KNOW the run died mid-graph, so gating is wrong: an abort is never a
+ * legitimate HITL pause. Clear unconditionally and deterministically.
  */
-async function clearWedgeQuietly(chatId: number | string): Promise<void> {
+async function clearThreadAfterAbort(chatId: number | string): Promise<void> {
   try {
-    const office = await getOffice();
-    await recoverWedgedThread(office, officeConfig(chatId), threadIdFor(chatId));
+    await clearThreadCheckpoints(threadIdFor(chatId));
   } catch (err) {
-    log.warn({ chatId, err: (err as Error).message }, "Post-abort wedge clear failed — non-fatal");
+    log.warn({ chatId, err: (err as Error).message }, "Post-abort checkpoint clear failed — non-fatal");
   }
 }
 
@@ -460,7 +470,7 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
     trace.event("turn.error", { kind: err instanceof Error ? err.name : "unknown" });
     if (err instanceof BudgetExceededError) {
       log.warn({ chatId, reason: err.reason }, "Run stopped: budget exceeded");
-      await clearWedgeQuietly(chatId);
+      await clearThreadAfterAbort(chatId);
       await ctx.reply(
         `💰 <b>Run stopped — budget limit reached</b>\n` +
           `<code>${safeHtml(err.reason)}</code>\n\n` +
@@ -473,7 +483,7 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
       log.warn({ chatId }, "Run stopped: recursion limit reached");
       // Preventive: the aborted run left the thread parked on a pending node.
       // Clear it now so the founder's NEXT message isn't trapped in the same loop.
-      await clearWedgeQuietly(chatId);
+      await clearThreadAfterAbort(chatId);
       await ctx.reply(
         `🔁 <b>I got stuck in a loop on that one</b> and stopped to avoid runaway cost.\n` +
           `I've cleared that task — just send your next message normally.`,
@@ -592,13 +602,13 @@ export async function resumeOffice(ctx: Context, decision: "approved" | "rejecte
   } catch (err) {
     if (err instanceof BudgetExceededError) {
       log.warn({ chatId, reason: err.reason }, "Resume stopped: budget exceeded");
-      await clearWedgeQuietly(chatId);
+      await clearThreadAfterAbort(chatId);
       await ctx.reply(`💰 <b>Run stopped — budget limit reached</b>\n<code>${safeHtml(err.reason)}</code>`, { parse_mode: "HTML" });
       return;
     }
     if (err instanceof GraphRecursionError) {
       log.warn({ chatId }, "Resume stopped: recursion limit reached");
-      await clearWedgeQuietly(chatId);
+      await clearThreadAfterAbort(chatId);
       await ctx.reply(`🔁 <b>That got stuck in a loop</b> and I stopped it. I've cleared that task — send your next message normally.`, { parse_mode: "HTML" });
       return;
     }
