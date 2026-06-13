@@ -12,7 +12,7 @@ import { z } from "zod";
 
 // ── Environment Schema ────────────────────────────────────────────────────────
 
-const envSchema = z.object({
+export const envSchema = z.object({
   // Database — required for checkpointer + audit log
   DATABASE_URL: z.string().url().describe("PostgreSQL connection string"),
 
@@ -52,6 +52,15 @@ const envSchema = z.object({
   // Global halt (kill switch) — optional flag-file path override.
   // Default: $HOME/.founderos/HALT (resolved in src/infra/halt.ts).
   HALT_FLAG_PATH: z.string().transform(v => v || undefined).optional(),
+
+  // ── Embeddings (local Ollama) ───────────────────────────────────────────
+  OLLAMA_URL: z.string().url().default("http://localhost:11434"),
+  EMBED_MODEL: z.string().default("nomic-embed-text"),
+  EMBED_DIM: z.coerce.number().int().positive().default(768),
+
+  // ── Claude Code executor (optional API-key fallback; OAuth used when unset) ──
+  CLAUDE_EXECUTOR_API_KEY: z.string().transform(v => v || undefined).optional(),
+  CLAUDE_EXECUTOR_BASE_URL: z.string().transform(v => v || undefined).optional(),
 
   // Budget controls
   BUDGET_DAILY_USD: z.coerce.number().positive().default(5.0),

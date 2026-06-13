@@ -1,0 +1,39 @@
+name: Deploy
+
+# Auto-deploy to the production VPS on every push to main, but ONLY after CI
+# (.github/workflows/ci.yml) succeeds for that same commit. The workflow_run
+# gate prevents shipping a commit whose tests/lint are red.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  # Manual escape hatch from the Actions tab.
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    # For workflow_run: only deploy if CI passed. For manual: always allowed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          # Fail the job if the remote script fails.
+          script_stop: true
+          command_timeout: "10m"
+          script: |
+            cd /opt/founderos
+            ./deploy/deploy.sh

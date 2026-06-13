@@ -2,91 +2,53 @@
  * FounderOS — RAG Database Tools
  * ================================
  * Two read-only vector-search tools that let the personal department query
- * the founder's two knowledge bases directly:
+ * the founder's two knowledge bases:
  *
- *   searchPersonalRagTool  — searches personal-rag (ChromaDB at localhost:8765).
+ *   searchPersonalRagTool  — searches personal_rag (pgvector table).
  *                            Career, CV, background, skills, payslips, certs.
  *
- *   searchTuricksBrainTool — searches turicks-brain (ChromaDB at localhost:8766).
+ *   searchTuricksBrainTool — searches turicks_brain (pgvector table).
  *                            Business decisions, strategy, ADRs, chats, notes.
  *
- * Both call REST APIs with a 4-second timeout.
- * Neither writes to the DB (ADR-013/015 boundary: read-only from agent layer).
+ * Embeddings are generated locally via Ollama (nomic-embed-text) — RAG text
+ * never leaves the machine.  Neither tool writes to the DB (ADR-013/015).
  *
- * Fallback: if the target service is down, returns a plain "unavailable" message
- * with the start command so the agent can surface it to the founder.
+ * Fallback: if Ollama is down the tool soft-fails with an actionable message.
  */
 
 import { childLogger } from "../infra/logger.js";
+import { embedText } from "../lib/embed.js";
+import { searchRagTable, type RagTable, type RagHit } from "../db/rag-search.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:rag" });
 
-// ── Config ────────────────────────────────────────────────────────────────────
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
-const PERSONAL_RAG_URL =
-  process.env["PERSONAL_RAG_URL"] ?? "http://localhost:8765";
-
-const TURICKS_BRAIN_URL =
-  process.env["TURICKS_BRAIN_URL"] ?? "http://localhost:8766";
-
-// ── Shared types ──────────────────────────────────────────────────────────────
-
-interface RagSearchResponse {
-  query: string;
-  results: Array<{
-    text: string;
-    metadata: Record<string, unknown>;
-    score: number;
-  }>;
-  total: number;
-}
-
-// ── Shared fetch helper ────────────────────────────────────────────────────────
-
-async function callRagApi(
-  baseUrl: string,
+async function runRagSearch(
+  table: RagTable,
   query: string,
   topK: number,
-  docType?: string,
-): Promise<RagSearchResponse | null> {
+): Promise<RagHit[] | null> {
   try {
-    const body: Record<string, unknown> = { query, top_k: topK };
-    if (docType) body["doc_type"] = docType;
-
-    const resp = await fetch(`${baseUrl}/search`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(4000),
-    });
-
-    if (!resp.ok) {
-      log.warn({ baseUrl, status: resp.status }, "RAG API non-OK response");
-      return null;
-    }
-
-    return (await resp.json()) as RagSearchResponse;
-  } catch {
-    log.debug({ baseUrl, query }, "RAG API unavailable");
+    const embedding = await embedText(query);
+    return await searchRagTable(table, embedding, topK);
+  } catch (err) {
+    log.debug({ table, query, err }, "RAG search unavailable");
     return null;
   }
 }
 
-function formatResults(
-  results: RagSearchResponse["results"],
-  query: string,
-  sourceField: string,
-): string {
-  if (results.length === 0) {
+function formatResults(hits: RagHit[], query: string, sourceField: string): string {
+  if (hits.length === 0) {
     return `No results found for "${query}". The knowledge base may not have this information yet.`;
   }
-  const lines = results.map((r, i) => {
-    const src = (r.metadata[sourceField] as string | undefined) ?? "unknown";
-    const score = r.score.toFixed(2);
-    return `${i + 1}. [${src}] (score ${score})\n${r.text.trim()}`;
-  });
-  return lines.join("\n\n");
+  return hits
+    .map((r, i) => {
+      const src = (r.metadata[sourceField] as string | undefined) ?? "unknown";
+      return `${i + 1}. [${src}] (score ${r.score.toFixed(2)})\n${r.content.trim()}`;
+    })
+    .join("\n\n");
 }
 
 // ── searchPersonalRagTool ──────────────────────────────────────────────────────
@@ -127,24 +89,23 @@ export const searchPersonalRagTool: UnifiedTool = {
       return { success: false, error: "query is required" };
     }
     const topK = Math.min(Math.max(Number(args["top_k"] ?? 5), 1), 10);
-    const docType = args["doc_type"] as string | undefined;
 
-    const data = await callRagApi(PERSONAL_RAG_URL, query, topK, docType);
+    const hits = await runRagSearch("personal_rag", query, topK);
 
-    if (!data) {
+    if (!hits) {
       return {
         success: false,
         error:
-          "personal-rag is not running. Start it with: cd ~/Projects/personal-rag && uvicorn src.api:app --port 8765",
+          "personal-rag search unavailable — check that Ollama is running with 'nomic-embed-text' pulled",
       };
     }
 
-    log.debug({ query, total: data.total }, "personal-rag search");
+    log.debug({ query, count: hits.length }, "personal-rag search");
     return {
       success: true,
       data:
-        `Personal knowledge search for "${query}" (${data.total} results):\n\n` +
-        formatResults(data.results, query, "source_file"),
+        `Personal knowledge search for "${query}" (${hits.length} results):\n\n` +
+        formatResults(hits, query, "source_file"),
     };
   },
 };
@@ -189,24 +150,23 @@ export const searchTuricksBrainTool: UnifiedTool = {
       return { success: false, error: "query is required" };
     }
     const topK = Math.min(Math.max(Number(args["top_k"] ?? 5), 1), 10);
-    const docType = args["doc_type"] as string | undefined;
 
-    const data = await callRagApi(TURICKS_BRAIN_URL, query, topK, docType);
+    const hits = await runRagSearch("turicks_brain", query, topK);
 
-    if (!data) {
+    if (!hits) {
       return {
         success: false,
         error:
-          "turicks-brain is not running. Start it with: cd ~/Projects/turicks-brain-rag && uvicorn src.api:app --port 8766",
+          "turicks-brain search unavailable — check that Ollama is running with 'nomic-embed-text' pulled",
       };
     }
 
-    log.debug({ query, total: data.total }, "turicks-brain search");
+    log.debug({ query, count: hits.length }, "turicks-brain search");
     return {
       success: true,
       data:
-        `Turicks Brain search for "${query}" (${data.total} results):\n\n` +
-        formatResults(data.results, query, "source_path"),
+        `Turicks Brain search for "${query}" (${hits.length} results):\n\n` +
+        formatResults(hits, query, "source_path"),
     };
   },
 };

@@ -1,0 +1,54 @@
+[Unit]
+# FounderOS — Telegram multi-agent bot (single-instance, long-polling).
+# Postgres runs as a Docker container (see deploy/postgres.compose.yml) and is
+# a hard dependency: the bot crashes loudly on boot if the DB is unreachable.
+Description=FounderOS multi-agent Telegram bot
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=founderos
+Group=founderos
+WorkingDirectory=/opt/founderos
+
+# Node 22 is installed system-wide via NodeSource (apt), so it lands at
+# /usr/bin/node.  pnpm is installed via `npm i -g pnpm@9` → /usr/bin/pnpm.
+# The `claude` executor (src/tools/claude-code.ts) resolves from PATH too —
+# `npm i -g @anthropic-ai/claude-code` puts it in /usr/local/bin.
+# Do NOT use fnm/nvm for the production server: systemd does not source
+# .bashrc, so shim directories from fnm are never on PATH.
+Environment=NODE_ENV=production
+Environment=PATH=/home/founderos/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# Secrets live in /opt/founderos/.env (chmod 600, NEVER committed).
+# package.json `start` already passes --env-file=.env, but we also point
+# EnvironmentFile here so systemctl status / journald see non-secret config.
+ExecStart=/usr/bin/env pnpm start
+
+# 24/7 reliability: always restart, but back off so a crash-loop (e.g. bad
+# secret) doesn't hammer the box. StartLimit trips the service to failed after
+# 5 crashes in 60s so UptimeRobot alerts instead of silent flapping.
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Graceful shutdown: give the bot time to drain the Telegram long-poll so the
+# single-instance lock releases cleanly before a redeploy starts a new one.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Hardening (least privilege — the bot only needs its own dir + outbound net).
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+PrivateTmp=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=founderos
+
+[Install]
+WantedBy=multi-user.target

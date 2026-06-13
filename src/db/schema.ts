@@ -35,6 +35,7 @@ import {
   text,
   timestamp,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
 
 // ── hitl_approvals ────────────────────────────────────────────────────────────
@@ -359,6 +360,9 @@ export const knowledgeEntries = pgTable(
     /** Free-form metadata (phase number, pillar index, ADR number, etc.) */
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
 
+    /** Optional 768-dim embedding for hybrid keyword+vector search */
+    embedding: vector("embedding", { dimensions: 768 }),
+
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
@@ -369,6 +373,37 @@ export const knowledgeEntries = pgTable(
     titleIdx: index("ke_title_idx").on(t.title),
   }),
 );
+
+// ── RAG vector stores (consolidated from ChromaDB — ADR-013/015 isolation) ──
+// personal_rag and turicks_brain are SEPARATE tables; the access layer
+// (src/db/rag-search.ts) enforces that one tool can never read the other.
+
+export const personalRag = pgTable(
+  "personal_rag",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    content: text("content").notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+    embedding: vector("embedding", { dimensions: 768 }),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+);
+
+export const turicksBrain = pgTable(
+  "turicks_brain",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    content: text("content").notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+    embedding: vector("embedding", { dimensions: 768 }),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+);
+
+export type PersonalRagRow = typeof personalRag.$inferSelect;
+export type NewPersonalRagRow = typeof personalRag.$inferInsert;
+export type TuricksBrainRow = typeof turicksBrain.$inferSelect;
+export type NewTuricksBrainRow = typeof turicksBrain.$inferInsert;
 
 // ── Type exports ──────────────────────────────────────────────────────────────
 

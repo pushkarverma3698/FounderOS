@@ -1,0 +1,53 @@
+# FounderOS — production stack (Docker), data-only.
+# The APP does NOT run in Docker: the claude_code executor spawns the `claude`
+# CLI from PATH with host OAuth credentials, which are awkward to mount into a
+# container. So: app under systemd on the host, data services here in Docker.
+#
+# Usage on the server:
+#   docker compose -f deploy/stack.compose.yml up -d
+#
+# Both services bind to 127.0.0.1 ONLY — never expose ports to the internet.
+# ufw allows SSH only; app reaches postgres/ollama via loopback.
+#
+# pgvector: uses pgvector/pgvector:pg16 instead of plain postgres:16 so the
+#   vector extension is pre-installed (no apt-get needed at runtime).
+#
+# ollama: runs nomic-embed-text locally so RAG text never leaves the box.
+#   Pull the model after first start: docker exec founderos-ollama ollama pull nomic-embed-text
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: founderos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: founderos
+      # Override via shell env: POSTGRES_PASSWORD=... docker compose -f deploy/stack.compose.yml up -d
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-founderos}
+      POSTGRES_DB: founderos
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - founderos_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U founderos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama
+    container_name: founderos-ollama
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - founderos_ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:11434/api/tags || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  founderos_pgdata:
+  founderos_ollama_models:
