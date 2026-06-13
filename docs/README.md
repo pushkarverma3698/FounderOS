@@ -2,6 +2,10 @@
 
 > Start here. Every doc in the project is linked below, grouped by purpose.
 
+> 🟢 **LIVE in production since 2026-06-14** — `main` auto-deploys to the Hetzner VPS
+> via GitHub Actions (CI → CD → `/health`). Runbook: [guides/DEPLOYMENT.md](guides/DEPLOYMENT.md).
+> What's left to fully wrap production: [PRODUCTION-WRAP-UP.md](PRODUCTION-WRAP-UP.md).
+
 ---
 
 ## 🚀 New here? Read in this order
@@ -10,6 +14,7 @@
 2. [rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) — the wiring maps (where to add what)
 3. [guides/OPERATIONS.md](guides/OPERATIONS.md) — how to run it day-to-day
 4. [guides/LOCAL-DEV.md](guides/LOCAL-DEV.md) — local setup + env vars
+5. [guides/DEPLOYMENT.md](guides/DEPLOYMENT.md) — the production runbook + CI/CD pipeline (we're live)
 
 ---
 
@@ -18,6 +23,7 @@
 | Doc | What it covers |
 |-----|---------------|
 | [ARCHITECTURE.md](guides/ARCHITECTURE.md) | Supervisor + 7 departments, tool layers, HITL pattern, file map |
+| [DEPLOYMENT.md](guides/DEPLOYMENT.md) | **Production runbook + CI/CD pipeline** (Hetzner VPS, systemd, GitHub Actions CD, env-without-SSH, Day-1 gotchas) |
 | [OPERATIONS.md](guides/OPERATIONS.md) | Start/stop, Telegram commands, troubleshooting runbook |
 | [LOCAL-DEV.md](guides/LOCAL-DEV.md) | Local setup, env vars, troubleshooting |
 

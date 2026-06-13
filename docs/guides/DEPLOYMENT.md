@@ -1,5 +1,11 @@
 # FounderOS — Production Deployment (Hetzner VPS + systemd + GitHub Actions CD)
 
+> **STATUS: LIVE in production since 2026-06-14.** `main` auto-deploys to the VPS
+> via GitHub Actions; the bot runs 24/7 under systemd, Postgres + Ollama in Docker,
+> and the full CI → CD → `/health` loop is green. Before touching the pipeline,
+> read [Day-1 live deploy: lessons & gotchas](#day-1-live-deploy-lessons--gotchas)
+> — it captures the exact failures the first deploy hit and will save you those hours.
+
 This is the canonical runbook for running FounderOS 24/7. It reflects two hard
 constraints that rule out the obvious "just Dockerize it" / "serverless" paths:
 
@@ -249,6 +255,76 @@ docker exec -it founderos-postgres psql -U founderos
 | Claude Pro (executor) | existing sub |
 | Gemini / Composio | usage-based |
 | **Floor** | **~€9/mo + existing subs** |
+
+## Day-1 live deploy: lessons & gotchas
+
+The first real CD deploy (2026-06-14) was green in CI but failed three times on the
+box before going live. Every failure was a config/credential drift, not a code bug.
+All are now fixed; documented here so they never cost time again.
+
+### 1. `secrets.*` in a job-level `if:` silently kills the whole workflow
+CI "passed" in 0 s on every run because a job-level `if: ${{ secrets.X != '' }}`
+is **illegal** — GitHub invalidates the entire workflow file, so nothing runs.
+**Rule:** gate on secrets at the *step* level via `env:` (`if: env.X != ''`), and
+keep `lint` + `test:unit` unconditional. (Already encoded in `ci.yml`.)
+
+### 2. DB `28P01` — the Postgres volume password lives nowhere on disk
+`POSTGRES_PASSWORD` only sets the role password the **first time** the data volume
+initializes; later changes to the env are no-ops. So the live role password matched
+neither `.env.production` nor the container env nor the running process
+(`--env-file` loads into the JS runtime, not `/proc/<pid>/environ`). The deploy's
+`.env` render overwrote the only working copy → `password authentication failed`.
+**Fix pattern (no SSH secrets printed):** reset the role to a fresh password with a
+local-superuser `docker exec`, write the matching `DATABASE_URL` into the box `.env`,
+then re-sync `PROD_DOTENV` from the corrected `.env`:
+```bash
+# on the box — docker exec is local superuser, no password prompt
+docker exec founderos-postgres psql -U founderos -d founderos \
+  -c "ALTER USER founderos PASSWORD '<fresh-alnum-pw>';"
+# then update DATABASE_URL in /opt/founderos/.env to match, and:
+base64 -w0 /opt/founderos/.env | gh secret set PROD_DOTENV
+```
+
+### 3. Boot checks key *presence*, not *validity*
+`config.ts` fail-fast requires `GOOGLE_GENERATIVE_AI_API_KEY` to **exist** in prod —
+but a present-yet-invalid key boots fine and then every LLM call returns
+`400 API_KEY_INVALID`. The first deploy shipped a stale key set in `.env.production`
+(Google/GitHub/Firecrawl/Composio all differed from the working dev `.env`).
+**Always validate keys before trusting a deploy:**
+```bash
+# Gemini
+curl -s -o /dev/null -w "%{http_code}\n" \
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$KEY" \
+  -H 'Content-Type: application/json' -d '{"contents":[{"parts":[{"text":"hi"}]}]}'
+# GitHub
+curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOK" https://api.github.com/user
+# Composio
+curl -s -o /dev/null -w "%{http_code}\n" -H "x-api-key: $K" \
+  https://backend.composio.dev/api/v3/connected_accounts
+```
+`200` = good. The `[boot]` capability report (`boot-report.ts`) tells you which
+integrations are LIVE vs MISSING, but it can't catch an invalid-but-present key —
+the curl checks above can.
+
+### 4. The single source of truth for prod env is `PROD_DOTENV` + the box `.env`
+The local `.env.production` on a dev machine can drift (stale passwords/keys).
+After any in-place fix on the box, **re-sync the secret from the box** and refresh
+your local copy — never re-push a stale local `.env.production` over a working
+`PROD_DOTENV`:
+```bash
+# refresh local copy from the source of truth
+scp -i ~/.ssh/<deploy_key> founderos@<host>:/opt/founderos/.env ./.env.production
+```
+
+### 5. Reliability fixes shipped alongside go-live
+Two production reliability bugs found in the live founder-simulation E2E sweep were
+fixed and deployed (PR #60): a persistent **thread-wedge after a recursion abort**
+(now an unconditional checkpoint clear) and an intermittent **brand-validator retry
+loop** (now bounded). Both are live-verified on the real Telegram path. See the QA
+methodology in [rules/TESTING-RULES.md](../rules/TESTING-RULES.md) (rules 11–14) and
+the `scripts/e2e-telegram-qa.ts` harness.
+
+---
 
 ## When to revisit (→ EC2 / managed)
 
