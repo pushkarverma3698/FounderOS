@@ -13,6 +13,8 @@
  */
 
 import { initTelemetry } from "./infra/telemetry.js";
+import { logBootReport } from "./infra/boot-report.js";
+import { env } from "./core/config.js";
 import { closeDatabaseConnections } from "./db/client.js";
 import { getOffice } from "./agents/office.js";
 import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
@@ -44,6 +46,10 @@ async function main(): Promise<void> {
 
   // 1. Telemetry — first, so PII scrubbing hooks in before any LLM call.
   initTelemetry();
+
+  // 1b. Capability self-check — log LIVE/MISSING integrations so config drift
+  //     is visible in journald instead of surfacing as a silent dead department.
+  logBootReport(env);
 
   // 2. Compile the office once (warms the Postgres checkpointer).
   await getOffice();

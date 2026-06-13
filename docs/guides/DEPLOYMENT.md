@@ -82,6 +82,11 @@ nano .env   # fill DATABASE_URL, TELEGRAM_BOT_TOKEN/CHAT_ID, GOOGLE_GENERATIVE_A
 #   DATABASE_URL=postgresql://founderos:<STRONG_PW>@127.0.0.1:5432/founderos
 ```
 
+> This hand-edited `.env` is only the **bootstrap**. From the second deploy on,
+> CD renders `/opt/founderos/.env` from the `PROD_DOTENV` GitHub secret on every
+> run — so you never SSH in to edit prod env again. See
+> [Managing production env without SSH](#managing-production-env-without-ssh).
+
 ## 4. Bring up Postgres + Ollama + first build
 
 ```bash
@@ -143,27 +148,75 @@ killing the process — distinct from a crash.
 
 ## CI/CD pipeline
 
-- **CI** (`.github/workflows/ci.yml`, already present): on every push/PR —
-  `pnpm lint`, `pnpm test:unit`, and integration tests when secrets are set.
-  `pnpm eval` runs **only on main** (live Gemini, non-deterministic — never gate
-  PRs on it).
-- **CD** (`.github/workflows/deploy.yml`, new): `workflow_run` triggers on a
-  **successful CI run on main**, then SSHes in and runs `deploy/deploy.sh`
-  (fetch → install → lint → build → migrate → `systemctl restart` → `/health`
-  check). The old instance keeps running until the very last step, so a failed
-  build never takes prod down.
+**`main` IS production** (single-tenant — there is no separate `production`
+branch). Merge to `main` → CI runs → on success CD deploys. That's the whole loop.
 
-### Required GitHub repo secrets (Settings → Secrets → Actions)
+- **CI** (`.github/workflows/ci.yml`): on every push/PR —
+  `pnpm lint` + `pnpm test:unit` (unconditional, need no secrets), plus
+  integration tests and (on `main` only) `pnpm eval` **when the relevant secret
+  is present**. The skip is done at the *step* level via an `env` check —
+  **never** put `secrets.*` in a job-level `if:`; that is illegal and silently
+  invalidates the entire workflow file (every job fails in 0s).
+- **CD** (`.github/workflows/deploy.yml`): `workflow_run` triggers on a
+  **successful CI run on `main`**, renders the prod `.env` from `PROD_DOTENV`,
+  then SSHes in and runs `deploy/deploy.sh`
+  (fetch → install → lint → build → migrate → `systemctl restart` → `/health`).
+  The old instance keeps running until the very last step, so a failed build
+  never takes prod down. There's also a `workflow_dispatch` button in the
+  Actions tab for manual deploys.
 
-| Secret | Value |
+### Required GitHub repo secrets (Settings → Secrets and variables → Actions)
+
+| Secret | Purpose / value |
 |---|---|
 | `DEPLOY_HOST` | VPS IP / hostname |
 | `DEPLOY_USER` | `founderos` |
 | `DEPLOY_PORT` | `22` |
-| `DEPLOY_SSH_KEY` | private key whose public half is in `founderos`'s `~/.ssh/authorized_keys` (use a **dedicated deploy key**, not your personal one) |
+| `DEPLOY_SSH_KEY` | **dedicated** deploy private key whose public half is in `founderos`'s `~/.ssh/authorized_keys` (not your personal key) |
+| `PROD_DOTENV` | the FULL production `.env`, **base64-encoded** — CD renders it to `/opt/founderos/.env` on every deploy (see below) |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | used by integration tests + the `main`-only eval job |
+| `OPENROUTER_API_KEY` | (optional) 503 fallback, used by integration tests |
+| `DATABASE_URL` · `TELEGRAM_BOT_TOKEN` · `TELEGRAM_CHAT_ID` | used by the `main`-only eval job |
 
-The CI `eval-and-update-readme` job also needs `GOOGLE_GENERATIVE_AI_API_KEY`,
-`DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (already referenced).
+`GITHUB_TOKEN` is provided automatically by Actions — do not create it.
+
+### Managing production env without SSH
+
+The prod `.env` is a **rendered artifact**, not a hand-maintained file. To change
+any production secret or setting:
+
+```bash
+# 1. Keep the real prod env locally (gitignored — NEVER commit it).
+#    Start from .env.example and fill in production values.
+nano .env.production
+
+# 2. Push it as the base64 secret (one line, transport-safe through SSH).
+base64 -w0 .env.production | gh secret set PROD_DOTENV   # Linux
+base64 .env.production | tr -d '\n' | gh secret set PROD_DOTENV   # macOS
+
+# 3. Redeploy: either merge to main, or hit "Run workflow" on the Deploy action.
+gh workflow run deploy.yml
+```
+
+On deploy, CD base64-decodes `PROD_DOTENV` to `/opt/founderos/.env` (chmod 600),
+**aborting if the decoded file has no `DATABASE_URL`** (guards against clobbering
+a good `.env` with a malformed secret). No SSH, fully auditable via the Actions
+run log. *Upgrade path:* when you want version-controlled env history, switch to
+a SOPS-encrypted `.env.production` committed to the repo + an `age` key on the
+VPS — same render-on-deploy idea, but with a git diff per change.
+
+### Fail-fast in production
+
+`NODE_ENV=production` makes `GOOGLE_GENERATIVE_AI_API_KEY` **required** at boot
+(`src/core/config.ts`) — a misconfigured box crashes loudly instead of booting
+"fine" and dying on the first message. On startup the bot logs a capability
+report (`src/infra/boot-report.ts`); check drift with:
+
+```bash
+journalctl -u founderos | grep '\[boot\]'
+# [boot] LLM (Gemini)        LIVE   ...
+# [boot] Composio (...)      MISSING  comms/marketing sends disabled
+```
 
 ---
 

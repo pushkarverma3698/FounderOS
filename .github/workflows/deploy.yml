@@ -3,11 +3,14 @@ name: Deploy
 # Auto-deploy to the production VPS on every push to main, but ONLY after CI
 # (.github/workflows/ci.yml) succeeds for that same commit. The workflow_run
 # gate prevents shipping a commit whose tests/lint are red.
+#
+# main IS production (ADR-021 / single-tenant): there is no separate `production`
+# branch. Merging to main → CI runs → on success this deploy fires.
 on:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
-    branches: [production]
+    branches: [main]
   # Manual escape hatch from the Actions tab.
   workflow_dispatch:
 
@@ -23,6 +26,12 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
+    # PROD_DOTENV holds the FULL production .env, base64-encoded (single line, so
+    # it survives transport through the SSH env without newline corruption).
+    # Edit prod env without SSH:  base64 -w0 .env.production | gh secret set PROD_DOTENV
+    # (or paste the base64 blob into Settings → Secrets → PROD_DOTENV).
+    env:
+      PROD_DOTENV: ${{ secrets.PROD_DOTENV }}
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -34,6 +43,27 @@ jobs:
           # Fail the job if the remote script fails.
           script_stop: true
           command_timeout: "10m"
+          # Forward the base64 env blob into the remote shell.
+          envs: PROD_DOTENV
           script: |
+            set -euo pipefail
             cd /opt/founderos
+            # Render the production .env from the secret (atomic, 0600). Only when
+            # the secret is present — never clobber a good .env with an empty one.
+            if [ -n "${PROD_DOTENV:-}" ]; then
+              umask 077
+              printf '%s' "$PROD_DOTENV" | base64 -d > .env.tmp
+              # Sanity: a valid .env must contain DATABASE_URL, else abort (keep old).
+              if grep -q '^DATABASE_URL=' .env.tmp; then
+                mv .env.tmp .env
+                chmod 600 .env
+                echo "==> Rendered /opt/founderos/.env from PROD_DOTENV secret"
+              else
+                rm -f .env.tmp
+                echo "!! PROD_DOTENV decoded but has no DATABASE_URL — keeping existing .env" >&2
+                exit 1
+              fi
+            else
+              echo "==> PROD_DOTENV not set; using the .env already on the box"
+            fi
             ./deploy/deploy.sh

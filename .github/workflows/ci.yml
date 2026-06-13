@@ -44,7 +44,10 @@ jobs:
   integration-tests:
     name: Integration tests
     runs-on: ubuntu-latest
-    if: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY != '' }}
+    # NOTE: the `secrets` context is NOT allowed in job-level `if:` — using it
+    # invalidates the whole workflow file (every job fails in 0s). Instead we
+    # always start the job and skip the steps when the key is absent (env IS
+    # allowed in step-level `if:`).
     env:
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -53,21 +56,31 @@ jobs:
       TELEGRAM_BOT_TOKEN: "ci:placeholder"
       TELEGRAM_CHAT_ID: "000000000"
     steps:
+      - name: Note when skipped
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY == ''
+        run: echo "GOOGLE_GENERATIVE_AI_API_KEY not set — skipping integration tests."
       - uses: actions/checkout@v4
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
       - uses: pnpm/action-setup@v4
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
         with:
           version: 9
       - uses: actions/setup-node@v4
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
         with:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
       - run: pnpm test:integration
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
 
   eval-and-update-readme:
     name: Eval + update README metrics
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY != '' }}
+    # Only on main. The `secrets` context is illegal in `if:`, so the key check
+    # happens at the step level via env (see steps below).
+    if: github.ref == 'refs/heads/main'
     needs: [quality, unit-tests]
     env:
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
@@ -76,22 +89,32 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
+      - name: Note when skipped
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY == ''
+        run: echo "GOOGLE_GENERATIVE_AI_API_KEY not set — skipping eval/readme update."
       - uses: actions/checkout@v4
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: pnpm/action-setup@v4
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
         with:
           version: 9
       - uses: actions/setup-node@v4
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
         with:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
       - name: Run eval
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
         run: pnpm eval
       - name: Update README metrics
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
         run: pnpm update-readme-metrics
       - name: Commit updated metrics
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
