@@ -49,6 +49,10 @@ const envSchema = z.object({
   // Redis — optional; used only if a tool requires it
   REDIS_URL: z.string().url().default("redis://localhost:6379"),
 
+  // Global halt (kill switch) — optional flag-file path override.
+  // Default: $HOME/.founderos/HALT (resolved in src/infra/halt.ts).
+  HALT_FLAG_PATH: z.string().transform(v => v || undefined).optional(),
+
   // Budget controls
   BUDGET_DAILY_USD: z.coerce.number().positive().default(5.0),
   // Per-run caps — applied to each individual office.invoke() call

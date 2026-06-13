@@ -35,6 +35,7 @@ import { isWedgedState, type WedgeState } from "../infra/wedge.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
 import { recordConversationEnd } from "../infra/conversation-recorder.js";
 import { startTurn, activePromptHash, type TurnTrace } from "../infra/trace.js";
+import { readHalt, formatHaltNotice } from "../infra/halt.js";
 import { TraceCallback } from "../infra/trace-callback.js";
 import { buildRunMetadata } from "../infra/telemetry.js";
 import { SUPERVISOR_PROMPT } from "../agents/system-prompts.js";
@@ -351,6 +352,18 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
   const trace = startTurn({ chatId, kind: "message", promptHash: activePromptHash(SUPERVISOR_PROMPT) });
   trace.event("turn.in", { textLen: text.length });
 
+  // ── Global halt (kill switch) ───────────────────────────────────────────────
+  // A founder-engaged halt (/halt) refuses every NEW turn before any office work
+  // or side effect. Checked at turn entry; an in-flight run is not aborted (turns
+  // are seconds-long and the budget guard caps runaway loops). See docs/PRODUCTION.md.
+  const halt = await readHalt();
+  if (halt) {
+    trace.event("halt.blocked", { reason: halt.reason });
+    log.warn({ chatId, reason: halt.reason }, "Turn refused — global halt engaged");
+    await ctx.reply(formatHaltNotice(halt), { parse_mode: "HTML" });
+    return;
+  }
+
   log.info({ chatId, task: text.slice(0, 80) }, "Routing to office");
   const stopTyping = startTyping(ctx);
 
@@ -494,6 +507,18 @@ export async function resumeOffice(ctx: Context, decision: "approved" | "rejecte
   const config = officeConfig(chatId);
   const trace = startTurn({ chatId, kind: "resume", promptHash: activePromptHash(SUPERVISOR_PROMPT) });
   trace.event("hitl.resume", { decision });
+
+  // ── Global halt (kill switch) ───────────────────────────────────────────────
+  // Freeze approvals too: while halted we never resume into the office, so no
+  // side effect (email/LinkedIn/GitHub/file write) executes. The pending card
+  // stays put until /resume — fail-safe by default. See docs/PRODUCTION.md.
+  const halt = await readHalt();
+  if (halt) {
+    trace.event("halt.blocked", { reason: halt.reason, decision });
+    log.warn({ chatId, reason: halt.reason, decision }, "Resume refused — global halt engaged");
+    await ctx.reply(formatHaltNotice(halt), { parse_mode: "HTML" });
+    return;
+  }
 
   try {
     const office = await getOffice();

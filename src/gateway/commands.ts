@@ -23,6 +23,7 @@ import { getSystemStatus, formatRichStatus } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
 import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
+import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
 import { runWorkflow, validateParams } from "../workflows/runner.js";
 
@@ -67,7 +68,8 @@ export async function handleStart(ctx: Context): Promise<void> {
       `• <code>/commands</code> — full command list\n` +
       `• <code>/departments</code> — what each department does\n` +
       `• <code>/status</code> — uptime, pending approvals, emails sent today\n` +
-      `• <code>/context</code> — view/update your business context\n\n` +
+      `• <code>/context</code> — view/update your business context\n` +
+      `• <code>/halt</code> — 🛑 emergency stop (refuse all tasks) · <code>/resume</code> to lift\n\n` +
       `🔒 Anything that leaves the building (email, LinkedIn, GitHub writes) asks for your approval first.`,
     { parse_mode: "HTML" },
   );
@@ -106,6 +108,57 @@ export async function handleReset(ctx: Context): Promise<void> {
     log.info({ chatId, deleted }, "Thread reset via /reset command");
   } catch (err) {
     await ctx.reply(`❌ Reset failed: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
+  }
+}
+
+// ── /halt — global kill switch ────────────────────────────────────────────────
+
+/**
+ * Why: the founder needs one instant command to stop FounderOS acting — before a
+ * deploy, when something looks wrong, or to freeze all outbound work.
+ * When: typed manually. Optional free-text reason after the command.
+ * What: engages the global halt (src/infra/halt.ts). Every new turn AND every
+ * pending-approval resume is then refused at the gateway until /resume. It does
+ * NOT abort a task already mid-run (turns are seconds-long; the budget guard caps
+ * runaway loops) — this is stated to the founder so the guarantee isn't overclaimed.
+ */
+export async function handleHalt(ctx: Context): Promise<void> {
+  const reason = (ctx.message?.text ?? "").replace(/^\/halt(@\S+)?\s*/i, "").trim();
+  try {
+    const state = await engageHalt(reason || "manual halt", ctx.from?.first_name ?? "founder");
+    await ctx.reply(
+      `🛑 <b>FounderOS halted.</b>\n` +
+        `Reason: <i>${safeHtml(state.reason)}</i>\n\n` +
+        `All new tasks are now refused. Send <code>/resume</code> to re-enable.\n` +
+        `<i>Note: a task already mid-run isn't interrupted — this blocks new turns.</i>`,
+      { parse_mode: "HTML" },
+    );
+    log.warn({ chatId: ctx.chat?.id, reason: state.reason }, "Global halt engaged via /halt");
+  } catch (err) {
+    await ctx.reply(`❌ Could not engage halt: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
+  }
+}
+
+// ── /resume — lift the kill switch ────────────────────────────────────────────
+
+/**
+ * Why: re-enable FounderOS after a /halt.
+ * What: releases the global halt (idempotent). Reports whether it was actually
+ * halted so a stray /resume gives honest feedback rather than a false "resumed".
+ */
+export async function handleResume(ctx: Context): Promise<void> {
+  try {
+    const wasHalted = (await readHalt()) !== null;
+    await releaseHalt();
+    await ctx.reply(
+      wasHalted
+        ? `✅ <b>FounderOS resumed.</b> Tasks will process normally again.`
+        : `ℹ️ FounderOS wasn't halted — nothing to resume. (Tasks are running normally.)`,
+      { parse_mode: "HTML" },
+    );
+    log.info({ chatId: ctx.chat?.id, wasHalted }, "Global halt released via /resume");
+  } catch (err) {
+    await ctx.reply(`❌ Could not resume: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
   }
 }
 
@@ -279,7 +332,9 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<code>/commands</code> — this list\n` +
     `<code>/departments</code> — what each department does\n` +
     `<code>/status</code> — uptime, pending approvals, emails sent today\n` +
-    `<code>/reset</code> — wipe this chat's memory (start a fresh conversation)\n\n` +
+    `<code>/reset</code> — wipe this chat's memory (start a fresh conversation)\n` +
+    `<code>/halt [reason]</code> — 🛑 kill switch: refuse all new tasks until /resume\n` +
+    `<code>/resume</code> — lift the halt and process tasks normally again\n\n` +
 
     `<b>📋 Context</b>\n` +
     `<code>/context</code> — view your stored business context (clients, priorities)\n` +
