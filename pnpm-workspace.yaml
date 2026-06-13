@@ -1,3 +1,6 @@
+packages:
+  - "."
+
 # pnpm build-script policy (pnpm 10+/11).
 # The three `ws` native accelerators are optional — the JS fallback is used when
 # they're absent, so we intentionally skip their build scripts. esbuild +

@@ -9,7 +9,7 @@
 set -euo pipefail
 
 APP_DIR="/opt/founderos"
-BRANCH="${DEPLOY_BRANCH:-main}"
+BRANCH="${DEPLOY_BRANCH:-production}"
 
 cd "$APP_DIR"
 
