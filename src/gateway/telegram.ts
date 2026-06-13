@@ -27,6 +27,7 @@ import {
   handleTarget, handleTargets, handleUntarget,
   handleOutbound, handleCommands, handleDepartments,
   handleWorkflows, handleRun, handleQ,
+  handleHalt, handleResume,
 } from "./commands.js";
 import { registerMediaHandlers } from "./media.js";
 import { routeToOffice, runOfficeText, resumeOffice } from "./office-run.js";
@@ -62,6 +63,9 @@ export function registerHandlers(bot: Bot): void {
   // This file stays focused on bot lifecycle + message/callback routing.
   bot.command("start",       (ctx: Context) => handleStart(ctx));
   bot.command("reset",       (ctx: Context) => handleReset(ctx));
+  // Kill switch — refuse all new turns / approvals until lifted.
+  bot.command("halt",        (ctx: Context) => handleHalt(ctx));
+  bot.command("resume",      (ctx: Context) => handleResume(ctx));
   bot.command("status",      (ctx: Context) => handleStatus(ctx));
   bot.command("context",     (ctx: Context) => handleContext(ctx));
   bot.command("target",      (ctx: Context) => handleTarget(ctx));

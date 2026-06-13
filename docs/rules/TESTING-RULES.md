@@ -4,6 +4,9 @@
 > that was NOT caught in tests and DID reach production.
 >
 > The theme: **tests that always pass are not tests — they are documentation.**
+>
+> See also: [`CODE-REVIEW-CHECKLIST.md`](CODE-REVIEW-CHECKLIST.md) (pre-merge gate) and
+> [`../SEAM-FAILURES.md`](../SEAM-FAILURES.md) (real seam bugs + how each was fixed).
 
 ---
 
