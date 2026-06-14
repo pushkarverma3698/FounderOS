@@ -68,6 +68,17 @@ describe("BudgetTracker", () => {
     expect(tracker.summary.totalTokens).toBe(4_500);
   });
 
+  it("breaks out input vs output tokens (measure-what-we-control: input is the cacheable prefix cost)", () => {
+    const tracker = new BudgetTracker({ maxUsd: 10, maxTokens: 100_000 });
+    tracker.accrue(1_000, 500, "gemini-2.5-flash");
+    tracker.accrue(2_000, 1_000, "gemini-2.5-flash");
+    expect(tracker.summary.totalInputTokens).toBe(3_000);
+    expect(tracker.summary.totalOutputTokens).toBe(1_500);
+    expect(tracker.summary.totalTokens).toBe(
+      tracker.summary.totalInputTokens + tracker.summary.totalOutputTokens,
+    );
+  });
+
   it("accrues total USD cost across multiple calls", () => {
     const tracker = new BudgetTracker({ maxUsd: 10, maxTokens: 100_000 });
     tracker.accrue(1_000, 500, "gemini-2.5-flash");

@@ -135,6 +135,11 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     // Supervisor-level tools: context read/write + unified memory search/record
     // These are NOT delegated to departments — the supervisor handles them directly.
     tools: SUPERVISOR_TOOLS,
+    // Context isolation (CLAUDE rule #20): only a department's FINAL message
+    // crosses back to the supervisor — its internal tool calls/results never
+    // pollute the supervisor's history. "last_message" is the library default;
+    // we pin it explicitly so the isolation guarantee can't silently regress.
+    outputMode: "last_message",
     // Gemini (and most non-OpenAI providers) can't accept the agent name as a
     // message `name` attribute — the google-genai adapter maps name→author and
     // throws "Unknown author: supervisor". "inline" embeds the name in the
