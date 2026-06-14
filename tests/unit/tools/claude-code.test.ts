@@ -208,6 +208,34 @@ describe("buildExecutorEnv — credential isolation", () => {
   });
 });
 
+describe("withExecutionDirective — run-and-report enforcement", () => {
+  it("appends the execution directive to a bare 'create' brief", async () => {
+    const { withExecutionDirective, EXECUTION_DIRECTIVE } = await import("../../../src/tools/claude-code.js");
+    const brief = "Create fizzbuzz.py that prints 1..15 with Fizz/Buzz rules.";
+    const out = withExecutionDirective(brief);
+    expect(out.startsWith(brief)).toBe(true);
+    expect(out).toContain(EXECUTION_DIRECTIVE);
+    // Regression (2026-06-13): a create-only brief must still force run + report
+    expect(out).toMatch(/run it/i);
+    expect(out).toMatch(/actual output/i);
+  });
+
+  it("is idempotent — never double-appends the directive", async () => {
+    const { withExecutionDirective, EXECUTION_DIRECTIVE } = await import("../../../src/tools/claude-code.js");
+    const once = withExecutionDirective("build a thing");
+    const twice = withExecutionDirective(once);
+    expect(twice).toBe(once);
+    // exactly one occurrence
+    expect(twice.split(EXECUTION_DIRECTIVE).length - 1).toBe(1);
+  });
+
+  it("preserves the original brief content verbatim at the start", async () => {
+    const { withExecutionDirective } = await import("../../../src/tools/claude-code.js");
+    const brief = "Create a new repo under ~/Projects/foo and push it.";
+    expect(withExecutionDirective(brief).startsWith(brief)).toBe(true);
+  });
+});
+
 describe("stream-json parsing", () => {
   it("extracts assistant text as a progress line", async () => {
     const { progressLineFromEvent } = await import("../../../src/tools/claude-code.js");
