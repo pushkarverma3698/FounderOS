@@ -95,4 +95,20 @@ describe("finalReply", () => {
     // No clean AI text → falls back to tool message
     expect(finalReply(res)).toBe("actual tool output");
   });
+
+  it("strips orphaned </content> closing tag not part of a matched pair", () => {
+    // Regression: production logs showed replyPreview "Hello from FounderOS</content>"
+    // when LLM emits a closing tag without a matching opening tag
+    const res = {
+      messages: [aiMsg("Hello from FounderOS</content>")],
+    };
+    expect(finalReply(res)).toBe("Hello from FounderOS");
+  });
+
+  it("strips orphaned <content> opening tag without matching close", () => {
+    const res = {
+      messages: [aiMsg("<content>Here is the answer")],
+    };
+    expect(finalReply(res)).toBe("Here is the answer");
+  });
 });
