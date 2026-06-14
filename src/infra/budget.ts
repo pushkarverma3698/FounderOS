@@ -81,11 +81,15 @@ export type BudgetCheckResult = { ok: true } | { ok: false; reason: string };
 export class BudgetTracker {
   private _totalUsd = 0;
   private _totalTokens = 0;
+  private _totalInputTokens = 0;
+  private _totalOutputTokens = 0;
 
   constructor(private readonly caps: BudgetCaps) {}
 
   /** Accrue cost for one LLM call. */
   accrue(inputTokens: number, outputTokens: number, modelId: string): void {
+    this._totalInputTokens += inputTokens;
+    this._totalOutputTokens += outputTokens;
     this._totalTokens += inputTokens + outputTokens;
     this._totalUsd += estimateCost(inputTokens, outputTokens, modelId);
   }
@@ -115,8 +119,18 @@ export class BudgetTracker {
     return { ok: true };
   }
 
-  get summary(): { totalUsd: number; totalTokens: number } {
-    return { totalUsd: this._totalUsd, totalTokens: this._totalTokens };
+  get summary(): {
+    totalUsd: number;
+    totalTokens: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+  } {
+    return {
+      totalUsd: this._totalUsd,
+      totalTokens: this._totalTokens,
+      totalInputTokens: this._totalInputTokens,
+      totalOutputTokens: this._totalOutputTokens,
+    };
   }
 }
 

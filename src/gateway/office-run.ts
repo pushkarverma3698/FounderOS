@@ -454,7 +454,12 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
     const freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
     const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
     await sendResult(ctx, freshRes, chatId);
-    trace.event("turn.out", { toolErrors: collectToolErrors(freshRes).length });
+    trace.event("turn.out", {
+      toolErrors: collectToolErrors(freshRes).length,
+      inputTokens: budget.summary.totalInputTokens,
+      outputTokens: budget.summary.totalOutputTokens,
+      usd: Number(budget.summary.totalUsd.toFixed(6)),
+    });
     // Clean turn → record episodic memory + bound the persisted history so the
     // thread can never grow unbounded and anchor the model on stale state.
     if (freshMessages.length > 0) {
@@ -595,7 +600,12 @@ export async function resumeOffice(ctx: Context, decision: "approved" | "rejecte
     const freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
     const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
     await sendResult(ctx, freshRes, chatId);
-    trace.event("turn.out", { resumed: true });
+    trace.event("turn.out", {
+      resumed: true,
+      inputTokens: budget.summary.totalInputTokens,
+      outputTokens: budget.summary.totalOutputTokens,
+      usd: Number(budget.summary.totalUsd.toFixed(6)),
+    });
     trimThreadHistory(office, config, trace).catch((err) =>
       log.warn({ chatId, err: (err as Error).message }, "History trim failed — non-fatal"),
     );
