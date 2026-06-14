@@ -16,7 +16,7 @@
  * irrelevant here; we test that the validator loop terminates).
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Mocks (hoisted before dynamic import) ────────────────────────────────────
 
@@ -44,17 +44,26 @@ function callWithThread(thread: string) {
 }
 
 describe("linkedin_post brand-retry bounding", () => {
+  // Pin gate 2 (Claude judge) to its no-op fail-open mode so this brand-bounding
+  // regression never makes a live Claude call. Judge behaviour is covered in
+  // judge.test.ts; here we only assert the deterministic brand loop terminates.
+  let savedKey: string | undefined;
   beforeEach(() => {
     vi.clearAllMocks();
     _resetBrandRetries();
+    savedKey = process.env["ANTHROPIC_API_KEY"];
+    delete process.env["ANTHROPIC_API_KEY"];
     mockInterrupt.mockReturnValue("approved");
     mockExecute.mockResolvedValue({ success: true, data: {} });
+  });
+  afterEach(() => {
+    if (savedKey !== undefined) process.env["ANTHROPIC_API_KEY"] = savedKey;
   });
 
   it("returns fix guidance (no gate) for the first BRAND_MAX_RETRIES failures", async () => {
     for (let i = 0; i < BRAND_MAX_RETRIES; i++) {
       const out = await callWithThread("thread-A");
-      expect(out).toMatch(/Fix these brand violations before posting/);
+      expect(out).toMatch(/Revise before posting/);
       // exact-delta guidance, not the raw "word count too low"
       expect(out).toMatch(/Add at least \d+ more words/);
     }
@@ -69,7 +78,7 @@ describe("linkedin_post brand-retry bounding", () => {
       lastOut = (await callWithThread("thread-B")) as string;
     }
     // The capped call did NOT return another fix message — it gated + sent.
-    expect(lastOut).not.toMatch(/Fix these brand violations/);
+    expect(lastOut).not.toMatch(/Revise before posting/);
     expect(mockInterrupt).toHaveBeenCalledTimes(1);
     // The HITL card carries the brand warning so the founder is informed.
     const payload = mockInterrupt.mock.calls[0]?.[0] as { summary: string };
@@ -81,7 +90,7 @@ describe("linkedin_post brand-retry bounding", () => {
     let gateReached = false;
     for (let i = 0; i < 50; i++) {
       const out = (await callWithThread("thread-C")) as string;
-      if (!/Fix these brand violations/.test(out)) {
+      if (!/Revise before posting/.test(out)) {
         gateReached = true;
         expect(i).toBe(BRAND_MAX_RETRIES); // 0-indexed → the (cap+1)th call
         break;
@@ -98,7 +107,7 @@ describe("linkedin_post brand-retry bounding", () => {
     mockExecute.mockResolvedValue({ success: true, data: {} });
     // A fresh thread starts its own count — first call is still a fix message.
     const out = await callWithThread("thread-E");
-    expect(out).toMatch(/Fix these brand violations/);
+    expect(out).toMatch(/Revise before posting/);
     expect(mockInterrupt).not.toHaveBeenCalled();
   });
 });
