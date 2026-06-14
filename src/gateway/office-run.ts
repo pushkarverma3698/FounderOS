@@ -70,6 +70,7 @@ function stripXmlTags(text: string): string {
   return text
     .replace(/<name>[^<]*<\/name>/g, "")
     .replace(/<content>([\s\S]*?)<\/content>/g, "$1")
+    .replace(/<\/?(name|content)>/g, "") // orphaned tags not caught by pair-matcher
     .trim();
 }
 

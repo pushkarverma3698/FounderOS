@@ -42,7 +42,9 @@ export class TraceCallback extends BaseCallbackHandler {
     _parentRunId?: string,
     _tags?: string[],
   ): Promise<void> {
-    this.trace.event("tool.result", { preview: String(output).slice(0, 200) });
+    const preview =
+      typeof output === "string" ? output : JSON.stringify(output) ?? String(output);
+    this.trace.event("tool.result", { preview: preview.slice(0, 200) });
   }
 
   override async handleToolError(
