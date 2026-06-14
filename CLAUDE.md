@@ -332,6 +332,35 @@ Evidence standard for any "it works" claim: the exact bot reply text PLUS the ma
 row (or an explicit NO ROW). A friendly "✅ Done." with no audit row is a FAIL. See
 `docs/rules/TESTING-RULES.md` Rules 11–14.
 
+### 20. Context isolation — no leakage across any graph boundary (non-negotiable)
+The founder's directive ("context leakage shouldn't be from anywhere") is enforced structurally,
+not by hope. See ADRs 021–025.
+- **Only synthesized results cross a boundary.** The supervisor uses `outputMode:"last_message"`
+  (pinned explicitly in `office.ts`) — a department's internal tool calls/results NEVER propagate
+  up to the supervisor's history. Same rule holds for any nested sub-supervisor (`revenue-domain.ts`).
+  Never switch to `"full_history"`.
+- **Trim the suffix, preserve the prefix.** The system+capability-manifest prefix is the
+  cacheable, byte-stable head (Gemini 2.5 Flash implicit caching, ≤75% off ≥1024-tok prefixes).
+  Trimming bounds the history *suffix* (`context-manager.ts`); never inject per-turn volatile data
+  (date, founder_context) ahead of the stable prefix. Implicit caching is the token lever — NO Redis,
+  NO explicit caching (tool-incompatible). ADR-021/024.
+- **Measured, not claimed.** Per-turn `inputTokens`/`outputTokens`/`usd` are logged on the
+  `turn.out` seam (greppable by `turnId`). "Better than openclaw/hermes" = evidence from the budget
+  tracker, not a slogan. (`cached_content_token_count` is unavailable until the google-genai adapter
+  upgrade — deferred; `scripts/probe-implicit-cache.ts` re-measures after.)
+
+### 21. Typed inter-department handoffs — never raw message dumping (non-negotiable)
+- Cross-department handoffs travel as **typed objects validated at the boundary**, not prose the
+  next department re-parses. `src/agents/contracts.ts` = one Zod contract per `dept_signals`
+  `event_type`; `validateSignalPayload` (deterministic, never throws) gates every payload before it
+  is persisted/acted on. Add an event → add its contract (the registry test enforces parity). ADR-022.
+- **Least-context-by-default:** only a contract's declared fields cross a boundary — nothing more.
+- **Generator ≠ critic (rule #6, now real in code).** Outbound copy passes gate 1 (deterministic
+  `brand-validator`) then gate 2 (Claude judge, `src/infra/judge.ts`) — a different model family from
+  the Gemini drafter, so the critic can't rubber-stamp its own output. The judge is **fail-open**
+  (HITL is the final human gate; it can only add a critique, never silently block). Needs
+  `ANTHROPIC_API_KEY`; absent → no-op pass. ADR-023.
+
 ## Engineering Protocol — Verification-First (PERMANENT, applies to every change)
 
 Unit tests are not proof. They are a safety net, not evidence that a feature works.
