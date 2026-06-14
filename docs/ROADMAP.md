@@ -1,6 +1,11 @@
 # FounderOS — Roadmap & Strategic Plan
 
-*For Pushkar Verma, Turicks AI Agency. Updated: 2026-06-05.*
+*For Pushkar Verma, Turicks AI Agency. Updated: 2026-06-14.*
+
+> 🟢 **DEPLOYED — LIVE in production since 2026-06-14.** Running 24/7 on a Hetzner
+> VPS; `main` auto-deploys via GitHub Actions (CI → CD → `/health`). Pipeline +
+> runbook: [guides/DEPLOYMENT.md](guides/DEPLOYMENT.md). The short list to make it
+> fully unattended-trustworthy: [PRODUCTION-WRAP-UP.md](PRODUCTION-WRAP-UP.md).
 
 ---
 

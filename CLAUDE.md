@@ -53,6 +53,7 @@ This applies to: Gumroad listings, LinkedIn posts, email templates, brand guidel
 ---
 
 ## Current Phase Status
+- 🟢 **DEPLOYED — LIVE in production since 2026-06-14**: Hetzner VPS, native systemd + Docker(Postgres+Ollama), `main` auto-deploys via GitHub Actions (CI → CD → `/health`). Full pipeline + Day-1 gotchas: `docs/guides/DEPLOYMENT.md`. Remaining wrap-up checklist: `docs/PRODUCTION-WRAP-UP.md`. Live-verified on the real Telegram path incl. recursion-abort recovery (PR #60).
 - ✅ Phases 1–3 (v1): Foundation, pods, gateway, tests, observability (SUPERSEDED by v2)
 - ✅ **v2 Rebuild (2026-06-01)**: Prebuilt supervisor + 3 ReAct departments — LIVE ON MAIN
   - research [search_web] · comms [email*, linkedin*] · engineering [github_r, github_w*]
