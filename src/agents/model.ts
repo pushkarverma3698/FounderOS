@@ -95,14 +95,6 @@ export function is503Error(err: unknown): boolean {
 }
 
 /**
- * Detect the Gemini SDK crash when a candidate has no content (empty completion).
- * This happens after HITL resume when Gemini returns a candidate with finishReason=STOP
- * but no content parts — the SDK checks for missing candidates[] but not for a candidate
- * with undefined .content, crashing at `candidateContent?.parts.length` (line 222 of
- * @langchain/google-genai@0.1.12 utils/common.js).
- * Exported so unit tests can assert on it.
- */
-/**
  * Detect Gemini's 400 "GenerateContentRequest.contents: contents is not specified".
  * This fires when the LangChain→Gemini message conversion produces an empty
  * contents array — historically the wedged-thread killer on the HITL resume path.
@@ -113,6 +105,14 @@ export function isEmptyContentsError(err: unknown): boolean {
   return err.message.includes("contents is not specified");
 }
 
+/**
+ * Detect the Gemini SDK crash when a candidate has no content (empty completion).
+ * This happens after HITL resume when Gemini returns a candidate with finishReason=STOP
+ * but no content parts — the SDK checks for missing candidates[] but not for a candidate
+ * with undefined .content, crashing at `candidateContent?.parts.length` (line 222 of
+ * @langchain/google-genai@0.1.12 utils/common.js).
+ * Exported so unit tests can assert on it.
+ */
 export function isNoCandidatesError(err: unknown): boolean {
   if (!(err instanceof TypeError)) return false;
   return (

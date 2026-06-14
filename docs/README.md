@@ -10,11 +10,13 @@
 
 ## 🚀 New here? Read in this order
 
-1. [guides/ARCHITECTURE.md](guides/ARCHITECTURE.md) — how the system works (plain English + diagram)
-2. [rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) — the wiring maps (where to add what)
-3. [guides/OPERATIONS.md](guides/OPERATIONS.md) — how to run it day-to-day
-4. [guides/LOCAL-DEV.md](guides/LOCAL-DEV.md) — local setup + env vars
-5. [guides/DEPLOYMENT.md](guides/DEPLOYMENT.md) — the production runbook + CI/CD pipeline (we're live)
+1. [diagrams/](diagrams/) — **8 mermaid flows** (architecture, request lifecycle, HITL, tool map, deploy, data, layering, thread states) — the fastest on-ramp
+2. [guides/ARCHITECTURE.md](guides/ARCHITECTURE.md) — how the system works (plain English + diagram)
+3. [rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) — the wiring maps (where to add what)
+4. [guides/OPERATIONS.md](guides/OPERATIONS.md) — how to run it day-to-day
+5. [guides/LOCAL-DEV.md](guides/LOCAL-DEV.md) — local setup + env vars
+6. [guides/DEPLOYMENT.md](guides/DEPLOYMENT.md) — the production runbook + CI/CD pipeline (we're live)
+7. [LIMITATIONS.md](LIMITATIONS.md) — honest tech-debt, scaling ceilings & deferred work
 
 ---
 
