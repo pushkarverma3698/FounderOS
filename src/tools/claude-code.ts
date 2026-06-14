@@ -72,6 +72,28 @@ const PROGRESS_MIN_INTERVAL_MS = 20_000; // at most one progress ping per 20s
 /** Tools the headless session may use without interactive prompts. */
 const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep WebFetch WebSearch NotebookEdit";
 
+/**
+ * Standing directive appended to EVERY brief so the executor never stops at file
+ * creation when the founder actually wants to see the result.
+ *
+ * Production bug (2026-06-13): "create fizzbuzz.py that prints 1..15" produced a
+ * brief that said only "create the file" — claude_code created it and stopped, so
+ * the founder got no output and a SECOND claude_code run (+ a SECOND HITL approval)
+ * was needed just to run the file. Brief completeness can't depend on the Gemini
+ * agent remembering "run it and report output" — so we enforce it deterministically
+ * here (rule #16: push logic out of the LLM into code), independent of the brief.
+ */
+export const EXECUTION_DIRECTIVE =
+  "\n\n---\nExecution requirement (always): if this task creates or modifies a runnable " +
+  "script or program, after writing it you MUST run it and include the ACTUAL output/result " +
+  "in your final report — never stop at file creation. Deliver the whole task in this one run; " +
+  "do not defer running it to a separate step. Keep the final report concise.";
+
+/** Append the standing execution directive to a brief (idempotent — never double-appends). */
+export function withExecutionDirective(task: string): string {
+  return task.includes(EXECUTION_DIRECTIVE) ? task : task + EXECUTION_DIRECTIVE;
+}
+
 // ── Workspace policy ──────────────────────────────────────────────────────────
 
 function home(): string {
@@ -251,7 +273,7 @@ export const claudeCodeTool: UnifiedTool = {
     const cliArgs = binaryOverride
       ? [] // test seam: /bin/pwd, /bin/false, /bin/echo run argument-free
       : [
-          "-p", task,
+          "-p", withExecutionDirective(task),
           "--output-format", "stream-json",
           "--verbose",
           "--permission-mode", "acceptEdits",
