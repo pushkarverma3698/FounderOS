@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildContextText } from "../../../src/infra/scheduler.js";
+import { buildContextText, formatLeadNudge } from "../../../src/infra/scheduler.js";
 
 describe("buildContextText", () => {
   it("formats a flat string value", () => {
@@ -47,5 +47,52 @@ describe("buildContextText", () => {
     const ctx = { active_clients: ["Acme"], current_priorities: ["ship"] };
     const lines = buildContextText(ctx).split("\n");
     expect(lines).toHaveLength(2);
+  });
+});
+
+describe("formatLeadNudge (dept_signals consumer)", () => {
+  const sig = (payload: unknown) =>
+    ({
+      id: "s1",
+      tenant_id: "t",
+      from_dept: "research",
+      to_dept: "sales",
+      event_type: "lead_discovered",
+      payload,
+      thread_id: null,
+      consumed: true,
+      created_at: new Date(),
+    }) as unknown as import("../../../src/db/schema.js").DeptSignal;
+
+  it("returns empty string when there are no lead_discovered signals", () => {
+    expect(formatLeadNudge([])).toBe("");
+  });
+
+  it("renders company, contact, ICP and source for a lead", () => {
+    const out = formatLeadNudge([
+      sig({ company: "Acme", contactName: "Sam", contactEmail: "sam@acme.com", icpScore: 88, source: "linkedin" }),
+    ]);
+    expect(out).toContain("Acme");
+    expect(out).toContain("Sam");
+    expect(out).toContain("sam@acme.com");
+    expect(out).toContain("ICP 88");
+    expect(out).toContain("via linkedin");
+    // Surfaces work — never auto-sends.
+    expect(out).toMatch(/you approve before anything sends/i);
+  });
+
+  it("pluralises and lists multiple leads", () => {
+    const out = formatLeadNudge([
+      sig({ company: "Acme", icpScore: 80, source: "web" }),
+      sig({ company: "Beta", icpScore: 75, source: "web" }),
+    ]);
+    expect(out).toContain("New qualified leads");
+    expect(out).toContain("Acme");
+    expect(out).toContain("Beta");
+  });
+
+  it("ignores non-lead event types in the batch", () => {
+    const other = { ...sig({ company: "X" }), event_type: "demo_ready" } as never;
+    expect(formatLeadNudge([other])).toBe("");
   });
 });

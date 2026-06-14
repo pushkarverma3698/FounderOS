@@ -29,6 +29,7 @@ import {
   recordEvent,
   searchPersonalRag,
   searchTuricksBrain,
+  publishSignal,
 } from "./agent-tools.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
@@ -42,7 +43,7 @@ type AnyTool = any;
 
 /** Department → tools. office.ts builds each ReAct agent from THESE arrays. */
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  research: [searchWeb, searchKnowledge],
+  research: [searchWeb, searchKnowledge, publishSignal],
   comms: [sendEmail, readEmails, createCalendarEvent],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode],
   marketing: [searchWeb, linkedinPost, searchKnowledge],
