@@ -18,7 +18,9 @@
 import cron from "node-cron";
 import { HumanMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
-import { getFounderContext, getPendingInterrupt } from "../db/queries.js";
+import { getFounderContext, getPendingInterrupt, consumePendingEvents } from "../db/queries.js";
+import type { DeptSignal } from "../db/schema.js";
+import { DEFAULT_TARGET_DEPT } from "../agents/agent-tools/signals.js";
 import { getOutboundTargets } from "../outbound/targets.js";
 import { sendToChat } from "./telegram-send.js";
 import { buildOffice } from "../agents/office.js";
@@ -155,6 +157,51 @@ async function sendOutboundNudge(): Promise<void> {
   log.info({ targets: targets.length }, "Outbound nudge sent");
 }
 
+// ── Revenue signal sweep (dept_signals consumer) ──────────────────────────────
+
+/**
+ * Format consumed lead_discovered signals into a proactive revenue nudge.
+ * Pure — extracted for testability. The nudge SURFACES the lead; it never sends
+ * outreach itself (the founder runs the HITL-gated send via the sales path).
+ */
+export function formatLeadNudge(signals: DeptSignal[]): string {
+  const leads = signals.filter((s) => s.event_type === "lead_discovered");
+  if (leads.length === 0) return "";
+
+  const lines = leads.map((s) => {
+    const p = (s.payload ?? {}) as {
+      company?: string;
+      icpScore?: number;
+      contactName?: string;
+      contactEmail?: string;
+      source?: string;
+    };
+    const who = p.contactName ? ` — ${p.contactName}${p.contactEmail ? ` (${p.contactEmail})` : ""}` : "";
+    const score = typeof p.icpScore === "number" ? ` · ICP ${p.icpScore}` : "";
+    const src = p.source ? ` · via ${p.source}` : "";
+    return `• <b>${p.company ?? "Unknown"}</b>${who}${score}${src}`;
+  });
+
+  return (
+    `🎯 <b>New qualified lead${leads.length > 1 ? "s" : ""}</b> (${leads.length})\n\n` +
+    `${lines.join("\n")}\n\n` +
+    `Run outreach when ready: <code>/q sales draft cold outreach to {company}</code> — you approve before anything sends.`
+  );
+}
+
+/**
+ * Consume pending lead_discovered signals for the revenue dept and push a nudge.
+ * consumePendingEvents marks rows consumed atomically, so a lead surfaces once.
+ */
+export async function sweepDeptSignals(): Promise<void> {
+  const toDept = DEFAULT_TARGET_DEPT["lead_discovered"] ?? "sales";
+  const signals = await consumePendingEvents(TENANT, toDept);
+  const nudge = formatLeadNudge(signals);
+  if (!nudge) return;
+  await sendToChat(nudge, "HTML");
+  log.info({ count: signals.length, toDept }, "Revenue signal sweep — nudge sent");
+}
+
 // ── Scheduler boot ────────────────────────────────────────────────────────────
 
 export function startScheduler(): void {
@@ -180,5 +227,13 @@ export function startScheduler(): void {
     });
   });
 
-  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), stale approval check (daily 9am)");
+  // Hourly — consume durable dept_signals (lead_discovered → revenue nudge).
+  // Rows are marked consumed atomically, so each lead surfaces exactly once.
+  cron.schedule("0 * * * *", () => {
+    sweepDeptSignals().catch((err) => {
+      log.error({ err: (err as Error).message }, "Dept signal sweep failed");
+    });
+  });
+
+  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), stale approval check (daily 9am), dept-signal sweep (hourly)");
 }

@@ -30,3 +30,4 @@ export { readFile, listDir, sendFile, writeFile, runShell, browser } from "./age
 export { readCv, searchJobs } from "./agent-tools/jobhunt.js";
 export { recordEvent } from "./agent-tools/memory.js";
 export { searchPersonalRag, searchTuricksBrain } from "./agent-tools/rag.js";
+export { publishSignal, prepareSignal, DEFAULT_TARGET_DEPT } from "./agent-tools/signals.js";
