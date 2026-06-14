@@ -21,6 +21,7 @@ import {
   recordBrandFailure,
   clearBrandRetries,
 } from "../../infra/brand-retry.js";
+import { judgeOutbound } from "../../infra/judge.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
@@ -72,6 +73,38 @@ function brandCheckBounded(
   };
 }
 
+/**
+ * Outbound quality gate = gate 1 (deterministic brand-validator) + gate 2
+ * (Claude judge, generator≠critic, rule #6). Gate 2 runs only when gate 1 lets
+ * the draft through, and a 'revise' is bounded by the SAME per-thread retry
+ * counter so generator+critic together can't loop past BRAND_MAX_RETRIES. The
+ * judge is fail-open (infra error → pass) and memoized, so the interrupt()
+ * re-execution doesn't fire a second Claude call. Async because gate 2 is an
+ * LLM call; HITL remains the final human gate either way.
+ */
+export async function outboundQualityGate(
+  text: string,
+  channel: Channel,
+  config: RunnableConfig | undefined,
+): Promise<{ proceed: boolean; fix?: string; warning?: string; retryKey: string }> {
+  const brand = brandCheckBounded(text, channel, config);
+  if (!brand.proceed) return brand; // brand fix needed — re-draft before the judge
+
+  const verdict = await judgeOutbound(text, channel);
+  if (verdict.verdict === "pass") return brand; // clean (may still carry a brand warning)
+
+  const attempt = recordBrandFailure(brand.retryKey);
+  if (attempt <= BRAND_MAX_RETRIES) {
+    return { proceed: false, retryKey: brand.retryKey, fix: `2nd-pass editor feedback: ${verdict.critique}` };
+  }
+  // Critic didn't converge either — stop looping, surface the critique on the card.
+  return {
+    proceed: true,
+    retryKey: brand.retryKey,
+    warning: `⚠️ 2nd-pass editor still flags this after ${BRAND_MAX_RETRIES} revisions — approve to send/post as-is, or reject:\n${verdict.critique}`,
+  };
+}
+
 // ── Comms: send email (WRITE — requires approval) ─────────────────────────────
 
 export const sendEmail = tool(
@@ -80,8 +113,8 @@ export const sendEmail = tool(
     // so the HITL card only shows clean content. Within the cap, the agent
     // self-corrects with exact-delta guidance; past the cap we stop looping and
     // gate the closest draft (rule #16 — convergence lives in code, not the prompt).
-    const brand = brandCheckBounded(body, "outreach", config);
-    if (!brand.proceed) return `Fix these brand violations before sending:\n${brand.fix}`;
+    const brand = await outboundQualityGate(body, "outreach", config);
+    if (!brand.proceed) return `Revise before sending:\n${brand.fix}`;
 
     // Pure summary (may run twice) — request approval.
     const rejected = hitlGate({
@@ -137,8 +170,8 @@ export const linkedinPost = tool(
     // self-corrects with exact-delta guidance; past the cap we STOP re-drafting
     // (this is what prevents the 146↔113 word-count oscillation from running to
     // the recursion limit) and gate the closest draft with violations noted.
-    const brand = brandCheckBounded(text, "linkedin", config);
-    if (!brand.proceed) return `Fix these brand violations before posting:\n${brand.fix}`;
+    const brand = await outboundQualityGate(text, "linkedin", config);
+    if (!brand.proceed) return `Revise before posting:\n${brand.fix}`;
 
     const rejected = hitlGate({
       action: "linkedin_post",
