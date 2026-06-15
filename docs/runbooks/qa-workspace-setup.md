@@ -8,7 +8,11 @@ git clone https://github.com/pushkarverma3698/FounderOS.git /opt/founderos-qa
 chown -R founderos-qa:founderos-qa /opt/founderos-qa
 sudo -u founderos-qa bash -c 'cd /opt/founderos-qa && pnpm install --frozen-lockfile'
 # Provide /opt/founderos-qa/.env (DATABASE_URL read-only role preferred, TELEGRAM_BOT_TOKEN,
-# FOUNDER_CHAT_ID, GITHUB_TOKEN with repo scope, ANTHROPIC_API_KEY for the judge gate).
+# FOUNDER_CHAT_ID, GITHUB_TOKEN with repo scope).
+# NOTE: Stage 3 uses the `claude` CLI authenticated via the Pro-plan login (shared quota,
+# same as the claude_code executor) — NO ANTHROPIC_API_KEY. Log in once as the founderos-qa
+# user: `sudo -u founderos-qa claude` (complete the browser/device login), then verify with
+# `sudo -u founderos-qa claude -p "say ok"`.
 ```
 
 ## Cron (replaces the disabled inline version)
