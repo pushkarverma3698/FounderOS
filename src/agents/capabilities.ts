@@ -41,15 +41,26 @@ import { searchMemoryTool } from "../tools/memory.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTool = any;
 
-/** Department → tools. office.ts builds each ReAct agent from THESE arrays. */
+/** Department → tools. office.ts builds each ReAct agent from THESE arrays.
+ *
+ * searchPersonalRag  → personal + jobhunt
+ *   Career/CV data is needed for jobhunt (CV-to-JD semantic matching) as well as
+ *   personal ("what are my skills?"). Kept off research/sales/marketing —
+ *   career data is founder-private, not business-public (ADR-013/015).
+ *
+ * searchTuricksBrain → personal + research + sales + marketing
+ *   Business knowledge (strategy, ADRs, brand, founder profile) is cross-cutting.
+ *   Research needs it for context, sales for ICP/messaging, marketing for brand
+ *   alignment. Engineering and comms don't query business strategy.
+ */
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  research: [searchWeb, searchKnowledge, publishSignal],
+  research: [searchWeb, searchKnowledge, searchTuricksBrain, publishSignal],
   comms: [sendEmail, readEmails, createCalendarEvent],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode],
-  marketing: [searchWeb, linkedinPost, searchKnowledge],
-  sales: [searchWeb, sendEmail, searchKnowledge],
+  marketing: [searchWeb, linkedinPost, searchKnowledge, searchTuricksBrain],
+  sales: [searchWeb, sendEmail, searchKnowledge, searchTuricksBrain],
   personal: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain],
-  jobhunt: [readCv, searchJobs, sendEmail],
+  jobhunt: [readCv, searchJobs, sendEmail, searchPersonalRag],
 };
 
 /** Supervisor-level tools (not delegated to departments). */

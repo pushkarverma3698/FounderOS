@@ -57,6 +57,17 @@ fi
 echo "==> Running migrations"
 pnpm db:migrate
 
+# Populate the turicks_brain pgvector store from docs/ (embeds via local Ollama).
+# Non-fatal: a transient Ollama hiccup must not block a deploy — the vector
+# store can be re-synced by hand (pnpm brain:sync). Without this step the store
+# stays empty and search_turicks_brain returns nothing (the 2026-06-15 prod bug).
+echo "==> Syncing turicks-brain vector store (brain:sync)"
+if pnpm brain:sync; then
+  echo "    brain:sync OK"
+else
+  echo "!! brain:sync FAILED (non-fatal) — run it manually once Ollama is healthy" >&2
+fi
+
 echo "==> Restarting service (single-instance lock makes this safe)"
 sudo systemctl restart founderos
 

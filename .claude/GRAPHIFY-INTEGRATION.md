@@ -1,34 +1,45 @@
 # Graphify Knowledge Graph Integration
 
 ## Graph Overview
-- **Nodes:** 43 (8 depts, 13 tools, 5 services)
-- **Edges:** 47
-- **Generated:** 2026-06-05T10:43:57.287Z
+- **Nodes:** 50 (7 depts, 25 tools, 9 services)
+- **Edges:** 64
+- **Generated:** 2026-06-15T08:13:52.696Z
 
-## Departments (8)
-- **research**: lead_intel, researcher
-- **comms**: email_agent, linkedin_agent
-- **engineering**: eng_engineer, code_reviewer, github_agent
-- **marketing**: marketing_engineer, content_gen
-- **sales**: sales_engineer, bdr, outreach
-- **prospecting**: icp_scorer
-- **personal**: personal_operator
-- **jobhunt**: job_hunter
+## Departments (7)
+- **research**: research_agent
+- **comms**: comms_agent
+- **engineering**: engineering_agent
+- **marketing**: marketing_agent
+- **sales**: sales_agent
+- **personal**: personal_agent
+- **jobhunt**: jobhunt_agent
 
-## Tools (13)
-- **search_web**: Search the web via Firecrawl
-- **send_email**: Send emails via Composio Gmail (HITL-gated)
-- **linkedin_post**: Post to LinkedIn via Composio (HITL-gated approval)
-- **github_read**: Read GitHub repos and issues
-- **github_write**: Write to GitHub (PR, commit, push) — HITL-gated approval required
-- **read_file**: Read files from laptop
-- **write_file**: Write files to laptop (HITL-gated approval)
-- **run_shell**: Run shell commands (HITL-gated approval)
-- **send_file**: Send files via Telegram (HITL-gated approval)
-- **browser**: Control browser via AppleScript (HITL-gated approval)
-- **read_cv**: Read personal CV from personal-rag
-- **search_jobs**: Search job listings via Firecrawl
-- **project_workflow**: Run git/npm commands in ~/Projects (HITL-gated for dangerous commands)
+## Tools (25)
+- **search_web**: Search the web via Gemini grounding (DuckDuckGo fallback)
+- **search_knowledge**: Keyword search over turicks-brain knowledge_entries (no LLM cost)
+- **publish_signal**: Publish a typed cross-department signal to dept_signals (Postgres, async sweep)
+- **send_email**: Send email via Composio Gmail (HITL-gated) [HITL]
+- **read_emails**: Read the founder's Gmail inbox (read-only, no approval)
+- **create_calendar_event**: Create a Google Calendar event via Composio (HITL-gated) [HITL]
+- **github_read**: Read GitHub repos, issues, and PRs
+- **github_write**: Write to GitHub (PR, commit, push) — HITL-gated [HITL]
+- **project_workflow**: Run git/npm workflows in ~/Projects — HITL-gated [HITL]
+- **claude_code**: Full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — HITL-gated [HITL]
+- **linkedin_post**: Post to LinkedIn via Composio — brand-validator + Claude judge then HITL-gated [HITL]
+- **read_file**: Read files from the founder's laptop (path-guarded, secrets blocked)
+- **list_dir**: List a single directory level on the founder's laptop (path-guarded)
+- **send_file**: Attach a laptop file into Telegram — HITL-gated [HITL]
+- **write_file**: Write files to the laptop — HITL-gated [HITL]
+- **run_shell**: Run shell commands on the laptop — HITL-gated [HITL]
+- **browser**: Safari automation on the founder's Mac — HITL-gated [HITL]
+- **search_personal_rag**: Semantic vector search over personal-rag (CV/career) via Ollama + pgvector
+- **search_turicks_brain**: Semantic vector search over turicks_brain (business/strategy) via Ollama + pgvector
+- **read_cv**: Read the founder's CV from personal-rag (read-only)
+- **search_jobs**: Search job listings via web search (Gemini grounding / DuckDuckGo)
+- **read_context**: Read durable business state (founder_context table) — supervisor only
+- **update_context**: Update durable business state (founder_context table) — supervisor only
+- **search_memory**: Unified memory search across knowledge + episodic stores — supervisor only
+- **record_event**: Record a durable episodic-memory event — HITL-gated, supervisor only [HITL]
 
 ## How Claude Code Uses This Graph
 

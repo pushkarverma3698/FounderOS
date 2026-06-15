@@ -54,6 +54,12 @@ function mockEmbedFail() {
   );
 }
 
+/** Embed succeeds but the pgvector query throws (e.g. missing table / DB down). */
+function mockQueryFail(message: string) {
+  mockEmbedText.mockResolvedValueOnce(DUMMY_VEC);
+  mockSearchRagTable.mockRejectedValueOnce(new Error(message));
+}
+
 // ── searchPersonalRagTool ─────────────────────────────────────────────────────
 
 describe("searchPersonalRagTool", () => {
@@ -224,5 +230,29 @@ describe("searchTuricksBrainTool", () => {
 
     expect(result.success).toBe(true);
     expect(result.data).toContain("No results found");
+  });
+
+  // ── Regression: the production bug (CLAUDE.md rule #22) ──────────────────────
+  // A DB/pgvector failure (missing table, empty store, DB down) was mislabeled
+  // as "Ollama unavailable", sending every debugger down the wrong path.
+  // A query-stage failure must blame the vector store, NOT Ollama, and point at
+  // the real fix (pgvector + brain:sync).
+  it("blames the vector store (NOT Ollama) when the pgvector query fails", async () => {
+    mockQueryFail('relation "turicks_brain" does not exist');
+    const result = await searchTuricksBrainTool.execute({ query: "ICP" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/pgvector|vector store/i);
+    expect(result.error).toMatch(/brain:sync/i);
+    // Must NOT misattribute a DB error to Ollama.
+    expect(result.error).not.toMatch(/ollama is unavailable/i);
+  });
+
+  it("embed-stage failure DOES name Ollama (correct attribution)", async () => {
+    mockEmbedFail();
+    const result = await searchTuricksBrainTool.execute({ query: "ICP" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/ollama/i);
   });
 });

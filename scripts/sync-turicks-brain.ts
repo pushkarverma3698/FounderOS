@@ -2,19 +2,35 @@
  * sync-turicks-brain.ts
  * =====================
  * Reads all docs (ADRs, brand guidelines, phase docs, strategic vision, case study)
- * and upserts them into the turicks-brain knowledge_entries table.
+ * and upserts them into the turicks-brain stores:
+ *   1. knowledge_entries — keyword/title search (one versioned row per doc) +
+ *      a doc-level embedding for hybrid search.
+ *   2. turicks_brain     — the pgvector store the agents query via
+ *      search_turicks_brain. Each doc is CHUNKED and every chunk embedded via
+ *      local Ollama (nomic-embed-text, 768-dim). RAG text never leaves the box.
  *
  * Run after any architectural decision, brand update, or phase completion:
- *   npx tsx scripts/sync-turicks-brain.ts
+ *   pnpm brain:sync
  *
- * Idempotent — uses title as upsert key; increments version on content change.
+ * Idempotent:
+ *   - knowledge_entries: title as upsert key; bumps version on content change.
+ *   - turicks_brain: per-source refresh (delete this source's chunks, re-insert).
+ *
+ * Requires: Ollama running with nomic-embed-text pulled, Postgres + pgvector up.
  */
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
+import { sql } from "drizzle-orm";
 import { getDb } from "../src/db/client.js";
 import { knowledgeEntries } from "../src/db/schema.js";
 import { eq, and } from "drizzle-orm";
+import { embedText, embedTexts, chunkText } from "../src/lib/embed.js";
+
+/** Postgres vector literal: number[] → "[1,2,3]". */
+function toVector(embedding: number[]): string {
+  return `[${embedding.join(",")}]`;
+}
 
 interface DocEntry {
   entry_type: string;
@@ -162,7 +178,10 @@ function collectDocs(rootDir: string): DocEntry[] {
 
 // ── Upsert logic ──────────────────────────────────────────────────────────────
 
-async function upsertEntry(entry: DocEntry): Promise<{ action: "inserted" | "updated" | "skipped" }> {
+async function upsertEntry(
+  entry: DocEntry,
+  docEmbedding: number[],
+): Promise<{ action: "inserted" | "updated" | "skipped"; id: string }> {
   const db = getDb();
   const existing = await db
     .select()
@@ -177,23 +196,29 @@ async function upsertEntry(entry: DocEntry): Promise<{ action: "inserted" | "upd
     .limit(1);
 
   if (existing.length === 0) {
-    await db.insert(knowledgeEntries).values({
-      tenant_id: "turicks",
-      entry_type: entry.entry_type,
-      title: entry.title,
-      content: entry.content,
-      source: entry.source,
-      tags: entry.tags,
-      metadata: entry.metadata,
-      version: 1,
-      is_current: true,
-    });
-    return { action: "inserted" };
+    const [row] = await db
+      .insert(knowledgeEntries)
+      .values({
+        tenant_id: "turicks",
+        entry_type: entry.entry_type,
+        title: entry.title,
+        content: entry.content,
+        source: entry.source,
+        tags: entry.tags,
+        metadata: entry.metadata,
+        version: 1,
+        is_current: true,
+      })
+      .returning({ id: knowledgeEntries.id });
+    await setKnowledgeEmbedding(row!.id, docEmbedding);
+    return { action: "inserted", id: row!.id };
   }
 
   const current = existing[0]!;
   if (current.content === entry.content) {
-    return { action: "skipped" }; // no change
+    // Backfill embedding if a prior sync (pre-vector) left it null.
+    await setKnowledgeEmbedding(current.id, docEmbedding);
+    return { action: "skipped", id: current.id };
   }
 
   // Content changed — mark old as non-current, insert new version
@@ -202,25 +227,84 @@ async function upsertEntry(entry: DocEntry): Promise<{ action: "inserted" | "upd
     .set({ is_current: false })
     .where(eq(knowledgeEntries.id, current.id));
 
-  await db.insert(knowledgeEntries).values({
-    tenant_id: "turicks",
-    entry_type: entry.entry_type,
-    title: entry.title,
-    content: entry.content,
-    source: entry.source,
-    tags: entry.tags,
-    metadata: entry.metadata,
-    version: (current.version ?? 1) + 1,
-    is_current: true,
-  });
+  const [row] = await db
+    .insert(knowledgeEntries)
+    .values({
+      tenant_id: "turicks",
+      entry_type: entry.entry_type,
+      title: entry.title,
+      content: entry.content,
+      source: entry.source,
+      tags: entry.tags,
+      metadata: entry.metadata,
+      version: (current.version ?? 1) + 1,
+      is_current: true,
+    })
+    .returning({ id: knowledgeEntries.id });
+  await setKnowledgeEmbedding(row!.id, docEmbedding);
 
-  return { action: "updated" };
+  return { action: "updated", id: row!.id };
+}
+
+/** Set the doc-level embedding column on a knowledge_entries row (hybrid search). */
+async function setKnowledgeEmbedding(id: string, embedding: number[]): Promise<void> {
+  const db = getDb();
+  await db.execute(
+    sql`UPDATE knowledge_entries SET embedding = ${toVector(embedding)}::vector WHERE id = ${id}`,
+  );
+}
+
+/**
+ * Refresh a single source's chunks in the turicks_brain vector table.
+ * Idempotent: deletes any existing chunks for this source_path, then inserts
+ * freshly-embedded chunks. This is the store search_turicks_brain queries.
+ */
+async function syncVectorChunks(entry: DocEntry): Promise<number> {
+  const db = getDb();
+  const chunks = chunkText(entry.content);
+  if (chunks.length === 0) return 0;
+
+  const embeddings = await embedTexts(chunks);
+
+  // Remove prior chunks for this source (idempotent re-run).
+  await db.execute(
+    sql`DELETE FROM turicks_brain WHERE metadata->>'source_path' = ${entry.source}`,
+  );
+
+  for (let i = 0; i < chunks.length; i++) {
+    const metadata = {
+      source_path: entry.source,
+      title: entry.title,
+      entry_type: entry.entry_type,
+      tags: entry.tags,
+      chunk_index: i,
+      chunk_count: chunks.length,
+    };
+    await db.execute(sql`
+      INSERT INTO turicks_brain (content, metadata, embedding)
+      VALUES (${chunks[i]!}, ${JSON.stringify(metadata)}::jsonb, ${toVector(embeddings[i]!)}::vector)
+    `);
+  }
+  return chunks.length;
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("🧠 Syncing docs to turicks-brain (knowledge_entries)…\n");
+  console.log("🧠 Syncing docs to turicks-brain (knowledge_entries + turicks_brain vectors)…\n");
+
+  // Fail loud + early if Ollama can't embed — otherwise we'd write keyword rows
+  // with no vectors and the vector search would silently stay empty (the exact
+  // production bug this rewrite fixes). One cheap probe before the loop.
+  try {
+    await embedText("connectivity probe");
+  } catch (err) {
+    console.error(
+      `❌ Ollama embeddings unavailable — aborting before any write.\n   ${(err as Error).message}\n` +
+        `   Start Ollama and pull the embed model, then re-run:  ollama pull nomic-embed-text`,
+    );
+    process.exit(1);
+  }
 
   const docs = collectDocs(".");
   console.log(`Found ${docs.length} documents to sync.\n`);
@@ -228,22 +312,36 @@ async function main() {
   let inserted = 0;
   let updated = 0;
   let skipped = 0;
+  let totalChunks = 0;
+  let failures = 0;
 
   for (const doc of docs) {
     try {
-      const { action } = await upsertEntry(doc);
+      // Doc-level embedding for knowledge_entries hybrid search (title + head of body).
+      const docEmbedding = await embedText(`${doc.title}\n\n${doc.content.slice(0, 4000)}`);
+      const { action } = await upsertEntry(doc, docEmbedding);
+
+      // Chunk + embed into the turicks_brain vector store (what agents query).
+      const chunks = await syncVectorChunks(doc);
+      totalChunks += chunks;
+
       const icon = action === "inserted" ? "✅" : action === "updated" ? "🔄" : "—";
-      console.log(`${icon} [${action}] ${doc.entry_type}: ${doc.title}`);
+      console.log(`${icon} [${action}] ${doc.entry_type}: ${doc.title}  (${chunks} chunks)`);
       if (action === "inserted") inserted++;
       else if (action === "updated") updated++;
       else skipped++;
     } catch (err) {
+      failures++;
       console.error(`❌ Failed: ${doc.title} — ${(err as Error).message}`);
     }
   }
 
-  console.log(`\n✅ Sync complete: ${inserted} inserted, ${updated} updated, ${skipped} skipped.`);
-  process.exit(0);
+  console.log(
+    `\n✅ Sync complete: ${inserted} inserted, ${updated} updated, ${skipped} skipped` +
+      ` · ${totalChunks} vector chunks embedded into turicks_brain` +
+      (failures > 0 ? ` · ${failures} FAILED` : ""),
+  );
+  process.exit(failures > 0 ? 1 : 0);
 }
 
 main().catch((err) => {

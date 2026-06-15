@@ -148,3 +148,79 @@ tests, not the eval percentage.
   `office-run.ts` guards) — see the verdict above. Simple ≠ stripped of hard-won
   safety; on a live system the simplest *reliable* architecture is the one whose
   complexity is documented, tested, and traceable to an incident.
+
+## 9. Context Isolation (Phase 1) — No Runtime Validation — **MEDIUM**
+
+The `outputMode: "last_message"` pin in office.ts enforces context isolation, but
+**only if the property is never accidentally changed to "full_history"**. There is no
+runtime validation that rejects "full_history" mode; the promise relies on:
+- Explicit pinning in code (office.ts line 142)
+- Tests that would break if changed (office-guard.test.ts)
+- Code review discipline
+
+A single PR that removes the pin or changes the value _will not crash tests_ (the
+tests would have to explicitly validate the mode). Mitigation: add an explicit
+startup assertion that pins the mode.
+
+- **Action:** `if (office.supervisor.outputMode !== "last_message") throw new Error(...)`
+
+## 10. Signal Schemas (Phase 2) — No Runtime Versioning — **MEDIUM**
+
+Signals are validated at publish and consume time against `SIGNAL_CONTRACTS`, but
+**there is no schema versioning**. If you change a schema (e.g., make a field
+required), old signals in the database that don't match the new schema will:
+- Fail validation during the sweep
+- Be marked consumed (poison pill) to not loop forever
+- Leave no durable record that they failed
+
+Mitigation: Before changing a schema, write a backfill migration that updates
+existing signals. See Phase 4 commit c289e50 for the pattern.
+
+- **Action:** Add a `schema_version` field to dept_signals; migrations transform old signals before consuming.
+
+## 11. Judge Memoization (Phase 3) — Single Redis Key Namespace — **LOW**
+
+Judge caches drafts for 60 minutes using a cache key based on hash(content). If two
+different tools (linkedin_post and send_email) produce identical copy, they reuse the
+same cached judgment. This is correct semantics (same copy, same evaluation) but
+could cause false confidence if one tool's context is slightly different (e.g.,
+LinkedIn-specific restrictions the email draft doesn't have).
+
+- **Action:** Include tool_name in the cache key: `judge:${hash(content)}:${tool_name}`
+
+## 12. Memory System (Phase C) — Keyword-Only Search — **MEDIUM**
+
+`search_knowledge` and `search_personal_rag` are keyword-based (ILIKE) with no
+semantic ranking. Queries like "LangGraph patterns" return good results because
+"LangGraph" is a literal word in the docs, but semantic similarity queries (e.g.,
+"multi-agent orchestration") may miss relevant documents that use different
+terminology.
+
+- **Roadmap:** Phase E will migrate to Chroma for semantic search + ranking.
+- **Workaround:** Add keyword aliases or query synonyms to the documents.
+
+## 13. Eval Harness (Golden Tasks) — Hardcoded, Not Managed — **MEDIUM**
+
+The 24 golden tasks for eval (routing, tool-selection, HITL coverage) are hardcoded
+in `src/eval/golden-tasks.ts`. There is no task registry, no versioning, and no
+facility to add new golden tasks without editing source. This is deliberate (golden
+tasks are sacred — they must be curated carefully), but it means:
+- Adding a new department requires manually adding 2-3 new golden tasks
+- No way to disable a task without a code change
+- No ability to A/B test different task sets across branches
+
+- **Action:** Consider a YAML registry + a `--golden-task-set` flag for branch-based customization.
+
+## 14. Nested Supervisor (Phase 5) — Not Yet in Production — **MEDIUM**
+
+The hierarchy proof (revenue-domain.ts) demonstrates that nesting works to 3 levels,
+but **it is not wired into the live office graph**. This is intentional:
+- Real business trigger needed (revenue dept > marketing + sales)
+- Full MTProto QA required before promoting (not just unit tests)
+- Token budget impacts unknown at 2-3 nesting levels
+
+If you promote Phase 5 to production:
+- Sub-supervisors MUST pin `outputMode: "last_message"`
+- Monitor token consumption (each level adds ~500 tokens of overhead)
+- Test full HITL flow on real Telegram (not just unit tests)
+
