@@ -63,7 +63,7 @@ d("Engineering CTO nested HITL (parent → engineering → devops)", () => {
     const office = buildEngineeringNestedOffice(new MemorySaver());
     const config = { configurable: { thread_id: "eng-reject" } };
     await office.invoke(
-      { messages: [new HumanMessage("Create a GitHub issue titled 'chore: bump deps' on repo pushkarverma3698/FounderOS with body 'Routine dependency update'.")] },
+      { messages: [new HumanMessage("Open a new GitHub issue on repo pushkarverma3698/FounderOS. Title: 'chore: bump deps'. Body: 'Routine dependency update'. Use your tools to actually create it now — do not assume it already exists.")] },
       config,
     );
     const approval = await getPendingApproval(office, config);
@@ -83,7 +83,7 @@ d("Engineering CTO nested HITL (parent → engineering → devops)", () => {
     const office = buildEngineeringNestedOffice(new MemorySaver());
     const config = { configurable: { thread_id: "eng-approve" } };
     await office.invoke(
-      { messages: [new HumanMessage("Create a GitHub issue titled 'chore: bump deps' on repo pushkarverma3698/FounderOS with body 'Routine dependency update'.")] },
+      { messages: [new HumanMessage("Open a new GitHub issue on repo pushkarverma3698/FounderOS. Title: 'chore: bump deps'. Body: 'Routine dependency update'. Use your tools to actually create it now — do not assume it already exists.")] },
       config,
     );
     const approval = await getPendingApproval(office, config);
