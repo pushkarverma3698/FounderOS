@@ -88,7 +88,7 @@ describe("searchKnowledge tool", () => {
   it("returns an informative empty-state message when nothing is found", async () => {
     const result = await searchKnowledge.invoke({ query: "nonexistent topic" });
     expect(result).toContain("No knowledge entries found");
-    expect(result).toContain("pnpm brain:sync");
+    expect(result).toContain("Do NOT fabricate");
   });
 
   it("formats found entries with type, title and preview", async () => {
@@ -105,8 +105,14 @@ describe("searchKnowledge tool", () => {
     expect(result).toContain("composio, gmail");
   });
 
-  it("routes to getKnowledgeByType when entry_type is provided", async () => {
+  it("keyword-searches with a type post-filter when entry_type is provided (never drops the query)", async () => {
     await searchKnowledge.invoke({ query: "brand", entry_type: "brand" });
+    expect(mockSearchKnowledgeEntries).toHaveBeenCalled();
+    expect(mockGetKnowledgeByType).not.toHaveBeenCalled();
+  });
+
+  it("lists by type only when the query is blank", async () => {
+    await searchKnowledge.invoke({ query: "   ", entry_type: "brand" });
     expect(mockGetKnowledgeByType).toHaveBeenCalled();
     expect(mockSearchKnowledgeEntries).not.toHaveBeenCalled();
   });

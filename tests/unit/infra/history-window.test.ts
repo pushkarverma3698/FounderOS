@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import { HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
-import { computeHistoryTrim } from "../../../src/infra/history-window.js";
+import { computeHistoryTrim, DEFAULT_KEEP_TURNS } from "../../../src/infra/history-window.js";
 
 /** Build a realistic trail of `turns` human/ai rounds, each with an id. */
 function trail(turns: number) {
@@ -24,6 +24,19 @@ function trail(turns: number) {
 }
 
 describe("computeHistoryTrim", () => {
+  it("default evicts a stale leading message fast (prod 2026-06-15 handoff leak)", () => {
+    // The thread's first message ('Do it yourself…') must age out within a few
+    // turns so it stops being forwarded to sub-agents on every handoff.
+    expect(DEFAULT_KEEP_TURNS).toBeLessThanOrEqual(4);
+    const msgs = [
+      new HumanMessage({ content: "Do it yourself don't use claude", id: "stale" }),
+      new AIMessage({ content: "ok", id: "a-stale" }),
+      ...trail(DEFAULT_KEEP_TURNS + 1),
+    ];
+    const { toRemove } = computeHistoryTrim(msgs); // no opts → uses DEFAULT_KEEP_TURNS
+    expect(toRemove).toContain("stale");
+  });
+
   it("keeps everything when under the turn limit", () => {
     const msgs = trail(3);
     const { toRemove, toKeep } = computeHistoryTrim(msgs, { keepTurns: 12 });

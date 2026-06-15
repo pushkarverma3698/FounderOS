@@ -65,12 +65,14 @@ describe("searchKnowledge — routing by entry_type", () => {
     vi.clearAllMocks();
   });
 
-  it("calls getKnowledgeByType when entry_type is provided — NOT searchKnowledgeEntries", async () => {
-    mockGetKnowledgeByType.mockResolvedValueOnce([makeEntry()]);
+  it("keyword-searches even when entry_type is provided — never drops the query", async () => {
+    // Regression for prod 2026-06-15: entry_type used to call getKnowledgeByType
+    // and ignore the query, so a zero-row type guess returned empty → hallucination.
+    mockSearchKnowledgeEntries.mockResolvedValueOnce([makeEntry({ entry_type: "adr" })]);
     await searchKnowledge.invoke({ query: "composio", entry_type: "adr" });
 
-    expect(mockGetKnowledgeByType).toHaveBeenCalledOnce();
-    expect(mockSearchKnowledgeEntries).not.toHaveBeenCalled();
+    expect(mockSearchKnowledgeEntries).toHaveBeenCalledWith("turicks", "composio", 15);
+    expect(mockGetKnowledgeByType).not.toHaveBeenCalled();
   });
 
   it("calls searchKnowledgeEntries when no entry_type — NOT getKnowledgeByType", async () => {
@@ -81,18 +83,40 @@ describe("searchKnowledge — routing by entry_type", () => {
     expect(mockGetKnowledgeByType).not.toHaveBeenCalled();
   });
 
-  it("passes TENANT and limit:5 to getKnowledgeByType", async () => {
-    mockGetKnowledgeByType.mockResolvedValueOnce([]);
-    await searchKnowledge.invoke({ query: "brand voice", entry_type: "brand" });
+  it("filters keyword results by entry_type when both match", async () => {
+    mockSearchKnowledgeEntries.mockResolvedValueOnce([
+      makeEntry({ title: "Brand voice", entry_type: "brand" }),
+      makeEntry({ title: "An ADR", entry_type: "adr" }),
+    ]);
+    const result = await searchKnowledge.invoke({ query: "voice", entry_type: "brand" });
 
-    expect(mockGetKnowledgeByType).toHaveBeenCalledWith("turicks", "brand", 5);
+    expect(result).toContain("Brand voice");
+    expect(result).not.toContain("An ADR");
   });
 
-  it("passes TENANT and query and limit:5 to searchKnowledgeEntries", async () => {
+  it("falls back to unfiltered keyword hits when the type filter wipes everything", async () => {
+    // Type label drifted (synced as "strategy", model guessed "strategic_pillar").
+    mockSearchKnowledgeEntries.mockResolvedValueOnce([
+      makeEntry({ title: "Turicks ICP", entry_type: "strategy" }),
+    ]);
+    const result = await searchKnowledge.invoke({ query: "ICP", entry_type: "strategic_pillar" });
+
+    expect(result).toContain("Turicks ICP");
+  });
+
+  it("lists by type when the query has no usable keywords", async () => {
+    mockGetKnowledgeByType.mockResolvedValueOnce([makeEntry({ entry_type: "brand" })]);
+    await searchKnowledge.invoke({ query: "  ", entry_type: "brand" });
+
+    expect(mockGetKnowledgeByType).toHaveBeenCalledWith("turicks", "brand", 5);
+    expect(mockSearchKnowledgeEntries).not.toHaveBeenCalled();
+  });
+
+  it("passes TENANT and query to searchKnowledgeEntries", async () => {
     mockSearchKnowledgeEntries.mockResolvedValueOnce([]);
     await searchKnowledge.invoke({ query: "LinkedIn positioning" });
 
-    expect(mockSearchKnowledgeEntries).toHaveBeenCalledWith("turicks", "LinkedIn positioning", 5);
+    expect(mockSearchKnowledgeEntries).toHaveBeenCalledWith("turicks", "LinkedIn positioning", 15);
   });
 });
 
@@ -112,9 +136,10 @@ describe("searchKnowledge — empty results", () => {
     expect(result).toContain("unknown topic");
   });
 
-  it("includes brain:sync hint so the founder knows how to populate it", async () => {
+  it("tells the model not to fabricate and points to fallback search tools", async () => {
     const result = await searchKnowledge.invoke({ query: "test" });
-    expect(result).toContain("pnpm brain:sync");
+    expect(result).toContain("Do NOT fabricate");
+    expect(result).toContain("search_turicks_brain");
   });
 
   it("includes the entry_type filter in the empty message when type was specified", async () => {
