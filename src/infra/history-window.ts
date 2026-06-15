@@ -21,8 +21,13 @@
 
 import type { BaseMessage } from "@langchain/core/messages";
 
-/** How many human turns of history to keep by default. */
-export const DEFAULT_KEEP_TURNS = 12;
+/**
+ * How many human turns of history to keep by default. Small on purpose — the
+ * supervisor forwards the whole kept window to sub-agents on handoff, so stale
+ * leading messages leak into routing (prod 2026-06-15). The gateway passes
+ * HISTORY_KEEP_TURNS (config) explicitly; this is only the bare-call fallback.
+ */
+export const DEFAULT_KEEP_TURNS = 4;
 
 export interface HistoryTrim {
   /** Message ids to delete from the checkpointer (RemoveMessage targets). */
