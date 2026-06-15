@@ -1,7 +1,7 @@
 # Weekly QA Auditor — Rebuild Design
 
 **Date:** 2026-06-15
-**Status:** Approved design — pending implementation plan
+**Status:** Approved design (all open questions resolved) — pending implementation plan
 **Branch:** `feat/weekly-qa-rebuild`
 **Supersedes:** the inline-bash `/opt/founderos/scripts/weekly-qa-audit.sh` (freshly installed 2026-06-15, never run)
 
@@ -115,9 +115,22 @@ duplicate PR next week — the 422 "already exists" guard finally works.
 
 ## 6. Write-surface guardrails
 
-- Diff-size cap (e.g. abort PR if > N files / > M lines changed without escalation).
+- **Isolated QA workspace (decided).** The auditor never touches the live `/opt/founderos`
+  checkout that systemd runs from. A **dedicated git clone at `/opt/founderos-qa`**, owned by
+  an unprivileged `founderos-qa` user, is the only directory Claude can write. Each run:
+  `git fetch origin && git reset --hard origin/main` in the QA workspace (clean, deterministic
+  base), branch, fix, push, PR. Claude's `--add-dir` is scoped to **`/opt/founderos-qa` only**
+  — it can read the prod logs/DB (Stage 1 is run by the harness, not Claude) but cannot edit
+  the running deployment. Full Docker-sandbox isolation is stronger but adds claude-auth-in-
+  container + bind-mount complexity; deferred as documented future hardening (the tool is
+  PR-only / never-merge, so the workspace boundary + denylist is sufficient now). See ADR.
+- Diff-size cap — **precise** (decided): abort the PR (escalate to founder for manual review)
+  if the proposed change exceeds **3 files OR 120 changed lines** in a single run. Tight by
+  design: an auto-fix should be a small, surgical, single-issue patch; anything larger is a
+  human decision, not an unsupervised one.
 - Protected-file denylist (`config.ts`, `schema.ts`, anything under secrets handling,
-  `.env*`) — Claude may flag but not auto-edit; those escalate to manual.
+  `.env*`, CI workflows under `.github/`) — Claude may flag but not auto-edit; those escalate
+  to manual.
 - PR only, never merge. `GITHUB_TOKEN` moved off the git cmdline (use a credential helper /
   `GIT_ASKPASS`), out of `ps`/log surface.
 
@@ -147,12 +160,17 @@ duplicate PR next week — the 422 "already exists" guard finally works.
 - No real-time/streaming monitoring — weekly + on-demand only.
 - No new dashboard UI — Markdown report + Telegram digest is enough.
 
-## 10. Open questions
+## 10. Resolved decisions (was open questions)
 
-1. Run the Claude Stage-3 pass **on the VPS** (where `claude` is authed, current design) or
-   **locally on the Mac** against a digest pulled over SSH? VPS keeps it self-contained;
-   local keeps heavyweight reasoning off the prod box.
-2. Where does the on-demand digest notify — Telegram, a file, or both?
-3. Diff-size cap exact thresholds.
-4. Should `state-checks.ts` reuse `src/db/queries.ts` directly (it's a script, cross-layer)
-   or get read-only query helpers of its own?
+1. **Stage-3 runs on the VPS** — self-contained, where `claude` is already authed. It runs in
+   the isolated `/opt/founderos-qa` workspace (§6), not the live deployment.
+2. **On-demand digest notifies both** — writes the Markdown report to
+   `docs/reviews/YYYY-MM-DD-prod-review.md` **and** sends a Telegram summary to the founder.
+3. **Diff-size cap is precise** — abort/escalate above **3 files or 120 changed lines** (§6).
+4. **`state-checks.ts` reuses `src/db/queries.ts`** where read functions already exist (rule
+   #17, no parallel query layer); it adds only the few **read-only** count/integrity helpers
+   not already present (RAG row+embedding counts, orphaned-HITL check, send-without-audit
+   check). No writes, no duplicated SQL.
+5. **Isolated Claude workspace on the VPS** — dedicated `/opt/founderos-qa` clone under an
+   unprivileged `founderos-qa` user; `--add-dir` scoped to that path only; live deployment
+   untouched (§6). Container sandbox deferred as future hardening.
