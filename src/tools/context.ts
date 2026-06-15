@@ -18,6 +18,7 @@ import { tool } from "@langchain/core/tools";
 import { TENANT } from "../core/config.js";
 import { z } from "zod";
 import { getFounderContext, upsertFounderContext } from "../db/queries.js";
+import { sanitizeContextUpdates } from "./context-guard.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:context" });
@@ -28,16 +29,18 @@ const log = childLogger({ module: "tool:context" });
 export const readContext = tool(
   async () => {
     const ctx = await getFounderContext(TENANT);
-    if (Object.keys(ctx).length === 0) {
-      return "No business context stored yet. Ask the founder to share their current priorities and active clients so you can remember them.";
-    }
     const lines: string[] = [];
     for (const [key, value] of Object.entries(ctx)) {
       if (key === "last_updated") continue;
       const val = Array.isArray(value)
         ? value.join(", ") || "(none)"
         : String(value || "(none)");
+      if (Array.isArray(value) && value.length === 0) continue; // skip empty fields
       lines.push(`• ${key.replace(/_/g, " ")}: ${val}`);
+    }
+    // Only `last_updated` (or nothing) means there is no real context to surface.
+    if (lines.length === 0) {
+      return "No business context stored yet. Ask the founder to share their current priorities and active clients so you can remember them.";
     }
     const updatedAt = ctx["last_updated"] ? `\n\nLast updated: ${ctx["last_updated"]}` : "";
     return `Current business context:\n${lines.join("\n")}${updatedAt}`;
@@ -54,10 +57,28 @@ export const readContext = tool(
 
 export const updateContext = tool(
   async ({ updates }) => {
-    await upsertFounderContext(TENANT, updates);
-    log.info({ keys: Object.keys(updates) }, "Founder context updated");
-    const keyList = Object.keys(updates).join(", ");
-    return `✅ Context updated: ${keyList}`;
+    const { clean, rejected } = sanitizeContextUpdates(updates);
+
+    if (Object.keys(clean).length === 0) {
+      // Fail loud (rule #19.5): nothing valid to persist — tell the founder why.
+      log.warn({ rejected }, "Founder context update rejected — nothing persisted");
+      const why = rejected.map((r) => `${r.key} (${r.reason})`).join("; ");
+      return `⚠️ Nothing saved to context. ${
+        why || "No recognised business-state fields were provided."
+      } Recognised keys: active_clients, open_deals, current_priorities, next_actions, notes (factual state only).`;
+    }
+
+    await upsertFounderContext(TENANT, clean);
+    log.info(
+      { keys: Object.keys(clean), rejected: rejected.map((r) => r.key) },
+      "Founder context updated",
+    );
+    const keyList = Object.keys(clean).join(", ");
+    const skipped =
+      rejected.length > 0
+        ? ` (skipped: ${rejected.map((r) => r.key).join(", ")})`
+        : "";
+    return `✅ Context updated: ${keyList}${skipped}`;
   },
   {
     name: "update_context",
