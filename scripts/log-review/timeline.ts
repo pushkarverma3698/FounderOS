@@ -36,7 +36,9 @@ export function buildTimeline(lines: LogLine[]): Turn[] {
       turn.inputTokens = num(line.data["inputTokens"]) ?? turn.inputTokens;
       turn.outputTokens = num(line.data["outputTokens"]) ?? turn.outputTokens;
       turn.usd = num(line.data["usd"]) ?? turn.usd;
-      turn.durationMs = num(line.data["ms"]) ?? turn.durationMs;
+      // Prod logs `ms` at the TOP LEVEL of the trace line, not inside `data`;
+      // read data first (test/flat emitters), fall back to top-level (prod).
+      turn.durationMs = num(line.data["ms"]) ?? num(line["ms"]) ?? turn.durationMs;
       const te = num(line.data["toolErrors"]);
       if (te !== undefined) turn.toolErrors = te;
     }
