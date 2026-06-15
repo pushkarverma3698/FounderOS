@@ -46,7 +46,15 @@ export async function runStateChecks(tenant: string): Promise<StateFinding[]> {
     const missingEmbeddings = await count(
       `SELECT count(*)::int AS n FROM turicks_brain WHERE embedding IS NULL`,
     );
-    if (missingEmbeddings && missingEmbeddings > 0) {
+    if (missingEmbeddings === null) {
+      findings.push({
+        type: "empty_store",
+        severity: "high",
+        summary:
+          "turicks_brain embedding-coverage query FAILED — Postgres/pgvector error (NOT an Ollama problem).",
+        evidence: ["count(*) FROM turicks_brain WHERE embedding IS NULL threw"],
+      });
+    } else if (missingEmbeddings > 0) {
       findings.push({
         type: "empty_store",
         severity: "high",
@@ -60,7 +68,14 @@ export async function runStateChecks(tenant: string): Promise<StateFinding[]> {
   const stuckHitl = await count(`
     SELECT count(*)::int AS n FROM hitl_approvals
     WHERE status = 'pending' AND created_at < now() - interval '24 hours'`);
-  if (stuckHitl && stuckHitl > 0) {
+  if (stuckHitl === null) {
+    findings.push({
+      type: "send_without_audit",
+      severity: "medium",
+      summary: "hitl_approvals stuck-pending query FAILED — Postgres unreachable.",
+      evidence: ["count(*) FROM hitl_approvals (pending > 24h) threw"],
+    });
+  } else if (stuckHitl > 0) {
     findings.push({
       type: "send_without_audit",
       severity: "medium",

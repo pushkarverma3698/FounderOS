@@ -25,7 +25,7 @@ pnpm install --frozen-lockfile --silent
 
 # --- Stage 1+2: harvest (zero Claude tokens) ---
 journalctl -u founderos --since "${WINDOW_DAYS} days ago" -o cat --no-pager \
-  | grep -E '"seam"|"level":(4|5)0' \
+  | { grep -E '"seam"|"level":(4|5)0' || true; } \
   | pnpm -s logreview --days="${WINDOW_DAYS}" --tenant="${TENANT}" --out="${DIGEST}"
 
 SUMMARY="$(cat "${DIGEST%.json}.summary.txt")"
