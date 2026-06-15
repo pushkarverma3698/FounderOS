@@ -25,8 +25,14 @@
 | Doc | What it covers |
 |-----|---------------|
 | [ARCHITECTURE.md](guides/ARCHITECTURE.md) | Supervisor + 7 departments, tool layers, HITL pattern, file map |
+| [PHASE-HARDENING-GUIDE.md](guides/PHASE-HARDENING-GUIDE.md) | **Phases 1-6 hardening** (context isolation, typed contracts, judge, signals, hierarchy, rules) |
+| [HITL-MATRIX.md](guides/HITL-MATRIX.md) | All 11 HITL-gated tools, gate patterns, observability |
+| [SIGNALS-AND-CONTRACTS.md](guides/SIGNALS-AND-CONTRACTS.md) | Department signals, event types, how to publish/consume, adding new types |
+| [JUDGE-AND-CRITIC.md](guides/JUDGE-AND-CRITIC.md) | Claude critic quality gate, two-gate system, brand voice validation |
+| [MEMORY-OPERATIONS.md](guides/MEMORY-OPERATIONS.md) | turicks-brain + personal-rag, populate, query, troubleshoot |
+| [SECURITY-RULES-20-21.md](guides/SECURITY-RULES-20-21.md) | Context isolation + typed handoffs, verification, monitoring |
 | [DEPLOYMENT.md](guides/DEPLOYMENT.md) | **Production runbook + CI/CD pipeline** (Hetzner VPS, systemd, GitHub Actions CD, env-without-SSH, Day-1 gotchas) |
-| [OPERATIONS.md](guides/OPERATIONS.md) | Start/stop, Telegram commands, troubleshooting runbook |
+| [OPERATIONS.md](guides/OPERATIONS.md) | Start/stop, Telegram commands, halt/resume, scheduler, quota, signals monitoring, troubleshooting |
 | [LOCAL-DEV.md](guides/LOCAL-DEV.md) | Local setup, env vars, troubleshooting |
 
 ## 📏 rules/ — the laws of the codebase
@@ -57,7 +63,17 @@ Key ones: 010 (v2 ReAct rebuild), 013 (personal/engineering separation),
 
 ## 🗺️ phases/ — phase delivery docs
 
-Per-phase goals, deliverables, and verification. See [phases/](phases/).
+**Key phases:**
+- [PHASE-1-CONTEXT-ISOLATION.md](phases/PHASE-1-CONTEXT-ISOLATION.md) — Per-turn token tracking, no context leakage
+- [PHASE-2-TYPED-CONTRACTS.md](phases/PHASE-2-TYPED-CONTRACTS.md) — Deterministic signal validation
+- [PHASE-3-CLAUDE-JUDGE.md](phases/PHASE-3-CLAUDE-JUDGE.md) — Quality gate on outbound copy
+- [PHASE-4-DEPT-SIGNALS.md](phases/PHASE-4-DEPT-SIGNALS.md) — Durable cross-dept messaging
+- [PHASE-5-HIERARCHY-PROOF.md](phases/PHASE-5-HIERARCHY-PROOF.md) — Nested HITL (proven, not yet in production)
+- [PHASE-6-RULES.md](phases/PHASE-6-RULES.md) — Rules #20-21 operationalized
+- [PHASE-C-INTELLIGENCE.md](phases/PHASE-C-INTELLIGENCE.md) — Context memory + knowledge search + scheduler
+- [PHASE-D-REVENUE-FLYWHEEL.md](phases/PHASE-D-REVENUE-FLYWHEEL.md) — Gumroad + LinkedIn launch + cinematic-web
+
+For complete Phase 1-6 hardening details, see [PHASE-HARDENING-GUIDE.md](guides/PHASE-HARDENING-GUIDE.md).
 
 ## 🎨 Other
 

@@ -38,4 +38,4 @@ These are hand-authored from the live code (not auto-generated). When you
 add/remove a department or tool, update **04** and **01**. When you change the
 run-loop guards, update **02** and **08**. The auto-generated topology graph at
 [`.claude/graph-mermaid.md`](../../.claude/graph-mermaid.md) is a separate,
-machine-generated view (regenerate with `npx tsx scripts/generate-knowledge-graph.ts`).
+machine-generated view (regenerate with `pnpm graph:gen`).

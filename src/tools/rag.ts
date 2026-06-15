@@ -25,17 +25,39 @@ const log = childLogger({ module: "tool:rag" });
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
+/**
+ * Discriminated failure so the tool can report the REAL failing component.
+ * The old code collapsed every error into "Ollama unavailable" — so a missing
+ * table, an empty store, or a DB outage all got blamed on Ollama, and the error
+ * was logged at debug level (invisible). That mislabeling cost a production
+ * debugging session (see CLAUDE.md rule #22). Stage-tagged errors fix that.
+ */
+type RagFailure = { stage: "embed" | "query"; message: string };
+
 async function runRagSearch(
   table: RagTable,
   query: string,
   topK: number,
-): Promise<RagHit[] | null> {
+): Promise<{ hits: RagHit[] } | { error: RagFailure }> {
+  // Stage 1: embed the query (Ollama). Failure here = embedding/Ollama problem.
+  let embedding: number[];
   try {
-    const embedding = await embedText(query);
-    return await searchRagTable(table, embedding, topK);
+    embedding = await embedText(query);
   } catch (err) {
-    log.debug({ table, query, err }, "RAG search unavailable");
-    return null;
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ table, query, err }, "RAG embed (Ollama) failed");
+    return { error: { stage: "embed", message } };
+  }
+
+  // Stage 2: vector query (Postgres/pgvector). Failure here = DB/store problem,
+  // NOT Ollama. An empty store is NOT an error — it returns zero hits.
+  try {
+    const hits = await searchRagTable(table, embedding, topK);
+    return { hits };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ table, query, err }, "RAG vector query failed");
+    return { error: { stage: "query", message } };
   }
 }
 
@@ -49,6 +71,22 @@ function formatResults(hits: RagHit[], query: string, sourceField: string): stri
       return `${i + 1}. [${src}] (score ${r.score.toFixed(2)})\n${r.content.trim()}`;
     })
     .join("\n\n");
+}
+
+/** Build an accurate, actionable error that names the REAL failing component. */
+function ragErrorMessage(store: string, failure: RagFailure): string {
+  if (failure.stage === "embed") {
+    return (
+      `${store} search failed: could not embed the query — Ollama is unavailable. ` +
+      `Check the ollama container is up and 'nomic-embed-text' is pulled. (${failure.message})`
+    );
+  }
+  // stage === "query": Postgres/pgvector problem — do NOT blame Ollama.
+  return (
+    `${store} search failed: the vector store query errored (Postgres/pgvector), not Ollama. ` +
+    `Check the pgvector extension is installed and the table exists + is populated ` +
+    `(run 'pnpm brain:sync'). (${failure.message})`
+  );
 }
 
 // ── searchPersonalRagTool ──────────────────────────────────────────────────────
@@ -90,22 +128,18 @@ export const searchPersonalRagTool: UnifiedTool = {
     }
     const topK = Math.min(Math.max(Number(args["top_k"] ?? 5), 1), 10);
 
-    const hits = await runRagSearch("personal_rag", query, topK);
+    const result = await runRagSearch("personal_rag", query, topK);
 
-    if (!hits) {
-      return {
-        success: false,
-        error:
-          "personal-rag search unavailable — check that Ollama is running with 'nomic-embed-text' pulled",
-      };
+    if ("error" in result) {
+      return { success: false, error: ragErrorMessage("personal-rag", result.error) };
     }
 
-    log.debug({ query, count: hits.length }, "personal-rag search");
+    log.debug({ query, count: result.hits.length }, "personal-rag search");
     return {
       success: true,
       data:
-        `Personal knowledge search for "${query}" (${hits.length} results):\n\n` +
-        formatResults(hits, query, "source_file"),
+        `Personal knowledge search for "${query}" (${result.hits.length} results):\n\n` +
+        formatResults(result.hits, query, "source_file"),
     };
   },
 };
@@ -151,22 +185,18 @@ export const searchTuricksBrainTool: UnifiedTool = {
     }
     const topK = Math.min(Math.max(Number(args["top_k"] ?? 5), 1), 10);
 
-    const hits = await runRagSearch("turicks_brain", query, topK);
+    const result = await runRagSearch("turicks_brain", query, topK);
 
-    if (!hits) {
-      return {
-        success: false,
-        error:
-          "turicks-brain search unavailable — check that Ollama is running with 'nomic-embed-text' pulled",
-      };
+    if ("error" in result) {
+      return { success: false, error: ragErrorMessage("turicks-brain", result.error) };
     }
 
-    log.debug({ query, count: hits.length }, "turicks-brain search");
+    log.debug({ query, count: result.hits.length }, "turicks-brain search");
     return {
       success: true,
       data:
-        `Turicks Brain search for "${query}" (${hits.length} results):\n\n` +
-        formatResults(hits, query, "source_path"),
+        `Turicks Brain search for "${query}" (${result.hits.length} results):\n\n` +
+        formatResults(result.hits, query, "source_path"),
     };
   },
 };

@@ -1,10 +1,20 @@
 /**
  * Generate a queryable knowledge graph from FounderOS codebase
  * Creates graph.json and integrates with Claude Code
+ *
+ * Derives departments + tools from the LIVE capability registry
+ * (src/agents/capabilities.ts) so the graph can never drift from reality
+ * (the 2026-06-15 stale-graph problem: it still listed a `prospecting`
+ * department merged away months earlier, and none of the RAG/vector tools).
  */
 
 import * as fs from "fs";
 import * as path from "path";
+import {
+  DEPARTMENT_TOOLS,
+  SUPERVISOR_TOOLS,
+  HITL_GATED_TOOLS,
+} from "../src/agents/capabilities.js";
 
 interface GraphNode {
   id: string;
@@ -68,150 +78,105 @@ function addEdge(edge: GraphEdge) {
   }
 }
 
+// Human-readable descriptions for known tools (best-effort; falls back to a
+// generic line for any tool not listed). The dept→tool wiring itself is derived
+// from the live registry, so this map only affects prose, never structure.
+const TOOL_DESCRIPTIONS: Record<string, string> = {
+  search_web: "Search the web via Gemini grounding (DuckDuckGo fallback)",
+  search_knowledge: "Keyword search over turicks-brain knowledge_entries (no LLM cost)",
+  publish_signal: "Publish a typed cross-department signal to dept_signals (Postgres, async sweep)",
+  send_email: "Send email via Composio Gmail (HITL-gated)",
+  read_emails: "Read the founder's Gmail inbox (read-only, no approval)",
+  create_calendar_event: "Create a Google Calendar event via Composio (HITL-gated)",
+  linkedin_post: "Post to LinkedIn via Composio — brand-validator + Claude judge then HITL-gated",
+  github_read: "Read GitHub repos, issues, and PRs",
+  github_write: "Write to GitHub (PR, commit, push) — HITL-gated",
+  project_workflow: "Run git/npm workflows in ~/Projects — HITL-gated",
+  claude_code: "Full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — HITL-gated",
+  read_file: "Read files from the founder's laptop (path-guarded, secrets blocked)",
+  list_dir: "List a single directory level on the founder's laptop (path-guarded)",
+  write_file: "Write files to the laptop — HITL-gated",
+  run_shell: "Run shell commands on the laptop — HITL-gated",
+  send_file: "Attach a laptop file into Telegram — HITL-gated",
+  browser: "Safari automation on the founder's Mac — HITL-gated",
+  search_personal_rag: "Semantic vector search over personal-rag (CV/career) via Ollama + pgvector",
+  search_turicks_brain: "Semantic vector search over turicks_brain (business/strategy) via Ollama + pgvector",
+  read_cv: "Read the founder's CV from personal-rag (read-only)",
+  search_jobs: "Search job listings via web search (Gemini grounding / DuckDuckGo)",
+  read_context: "Read durable business state (founder_context table) — supervisor only",
+  update_context: "Update durable business state (founder_context table) — supervisor only",
+  search_memory: "Unified memory search across knowledge + episodic stores — supervisor only",
+  record_event: "Record a durable episodic-memory event — HITL-gated, supervisor only",
+};
+
+function describeTool(name: string): string {
+  return TOOL_DESCRIPTIONS[name] ?? `${name} tool`;
+}
+
 // Define FounderOS architecture
 function buildGraph() {
-  // **DEPARTMENTS**
-  const departments = [
-    "research",
-    "comms",
-    "engineering",
-    "marketing",
-    "sales",
-    "prospecting",
-    "personal",
-    "jobhunt",
-  ];
+  // **DEPARTMENTS** — derived from the live registry (single source of truth).
+  const departments = Object.keys(DEPARTMENT_TOOLS);
 
   departments.forEach((dept) => {
     addNode({
       id: `dept_${dept}`,
       type: "department",
       name: dept,
-      description: `${dept} department - autonomous agent in the supervisor graph`,
+      description: `${dept} department — a ReAct agent in the supervisor graph`,
       file: "src/agents/office.ts",
     });
-
     graph.metadata.departments[dept] = [];
   });
 
-  // **AGENTS**
-  const agents = {
-    research: {
-      lead_intel: "Research agent for lead intelligence",
-      researcher: "General web research agent",
-    },
-    comms: {
-      email_agent: "Email composition and sending agent",
-      linkedin_agent: "LinkedIn content agent",
-    },
-    engineering: {
-      eng_engineer: "Engineering department coordinator",
-      code_reviewer: "Code review agent",
-      github_agent: "GitHub automation agent",
-    },
-    marketing: {
-      marketing_engineer: "Marketing department coordinator",
-      content_gen: "LinkedIn content generator",
-    },
-    sales: {
-      sales_engineer: "Sales department coordinator",
-      bdr: "Business development representative",
-      outreach: "Cold outreach agent",
-    },
-    prospecting: {
-      icp_scorer: "ICP (Ideal Customer Profile) scoring agent",
-    },
-    personal: {
-      personal_operator: "Personal laptop operator (HITL-gated)",
-    },
-    jobhunt: {
-      job_hunter: "Job search and application agent",
-    },
-  };
-
-  Object.entries(agents).forEach(([dept, agentList]) => {
-    Object.entries(agentList).forEach(([agentId, description]) => {
-      addNode({
-        id: `agent_${agentId}`,
-        type: "agent",
-        name: agentId,
-        description: description,
-        file: "src/agents/office.ts",
-      });
-      addEdge({
-        from: `agent_${agentId}`,
-        to: `dept_${dept}`,
-        type: "belongs_to",
-      });
-      graph.metadata.departments[dept]!.push(agentId);
-    });
-  });
-
-  // **TOOLS**
-  const tools = {
-    search_web: { dept: "research", description: "Search the web via Gemini grounding (DuckDuckGo fallback)" },
-    send_email: { dept: "comms", description: "Send emails via Composio Gmail (HITL-gated)" },
-    linkedin_post: {
-      dept: "marketing",
-      description: "Post to LinkedIn via Composio (HITL-gated approval)",
-    },
-    github_read: {
-      dept: "engineering",
-      description: "Read GitHub repos and issues",
-    },
-    github_write: {
-      dept: "engineering",
-      description: "Write to GitHub (PR, commit, push) — HITL-gated approval required",
-    },
-    read_file: {
-      dept: "personal",
-      description: "Read files from laptop",
-    },
-    write_file: {
-      dept: "personal",
-      description: "Write files to laptop (HITL-gated approval)",
-    },
-    run_shell: {
-      dept: "personal",
-      description: "Run shell commands (HITL-gated approval)",
-    },
-    send_file: {
-      dept: "personal",
-      description: "Send files via Telegram (HITL-gated approval)",
-    },
-    browser: {
-      dept: "personal",
-      description: "Control browser via AppleScript (HITL-gated approval)",
-    },
-    read_cv: {
-      dept: "jobhunt",
-      description: "Read personal CV from personal-rag",
-    },
-    search_jobs: {
-      dept: "jobhunt",
-      description: "Search job listings via web search (Gemini grounding / DuckDuckGo)",
-    },
-    project_workflow: {
-      dept: "engineering",
-      description: "Run git/npm commands in ~/Projects (HITL-gated for dangerous commands)",
-    },
-  };
-
-  Object.entries(tools).forEach(([toolName, { dept, description }]) => {
+  // **AGENTS** — in v2 each department IS a single ReAct agent (createReactAgent).
+  departments.forEach((dept) => {
+    const agentId = `${dept}_agent`;
     addNode({
-      id: `tool_${toolName}`,
-      type: "tool",
-      name: toolName,
-      description: description,
-      file: "src/tools/*.ts",
+      id: `agent_${agentId}`,
+      type: "agent",
+      name: agentId,
+      description: `${dept} ReAct agent — tool-calling loop, HITL-gated writes`,
+      file: "src/agents/office.ts",
     });
-    addEdge({
-      from: `tool_${toolName}`,
-      to: `dept_${dept}`,
-      type: "belongs_to",
-    });
-    graph.metadata.tools[toolName] = description;
+    addEdge({ from: `agent_${agentId}`, to: `dept_${dept}`, type: "belongs_to" });
+    graph.metadata.departments[dept]!.push(agentId);
   });
+
+  // **TOOLS** — derived from DEPARTMENT_TOOLS; a tool can belong to many depts.
+  const seenTools = new Set<string>();
+  for (const [dept, tools] of Object.entries(DEPARTMENT_TOOLS)) {
+    for (const t of tools as Array<{ name: string }>) {
+      const toolName = t.name;
+      const gated = HITL_GATED_TOOLS.has(toolName);
+      const description = describeTool(toolName) + (gated ? " [HITL]" : "");
+      if (!seenTools.has(toolName)) {
+        addNode({
+          id: `tool_${toolName}`,
+          type: "tool",
+          name: toolName,
+          description,
+          file: "src/tools/*.ts",
+        });
+        graph.metadata.tools[toolName] = description;
+        seenTools.add(toolName);
+      }
+      addEdge({ from: `tool_${toolName}`, to: `dept_${dept}`, type: "belongs_to" });
+    }
+  }
+
+  // **SUPERVISOR TOOLS** — not delegated to departments.
+  for (const t of SUPERVISOR_TOOLS as Array<{ name: string }>) {
+    const toolName = t.name;
+    const gated = HITL_GATED_TOOLS.has(toolName);
+    const description = describeTool(toolName) + (gated ? " [HITL]" : "");
+    if (!seenTools.has(toolName)) {
+      addNode({ id: `tool_${toolName}`, type: "tool", name: toolName, description, file: "src/tools/*.ts" });
+      graph.metadata.tools[toolName] = description;
+      seenTools.add(toolName);
+    }
+    addEdge({ from: `tool_${toolName}`, to: "service_supervisor", type: "belongs_to" });
+  }
 
   // **SERVICES**
   const services = [
@@ -236,14 +201,38 @@ function buildGraph() {
     {
       id: "service_postgres",
       name: "PostgreSQL",
-      description: "Durable state: leads, interrupts, audit log",
+      description: "Durable state: leads, interrupts, audit log, checkpoints, dept_signals",
       file: "src/db/schema.ts",
     },
     {
       id: "service_redis",
       name: "Redis",
-      description: "Ephemeral: cache, quotas, LLM prompt cache",
+      description: "Ephemeral: cache, quotas, LLM prompt cache [SaaS-phase, not boot-critical]",
       file: "src/infra/redis.ts",
+    },
+    {
+      id: "service_ollama",
+      name: "Ollama (nomic-embed-text)",
+      description: "Local 768-dim embeddings for RAG — text never leaves the box",
+      file: "src/lib/embed.ts",
+    },
+    {
+      id: "store_turicks_brain",
+      name: "turicks_brain (pgvector)",
+      description: "Business/strategy vector store; populated by pnpm brain:sync; queried by search_turicks_brain",
+      file: "src/db/rag-search.ts",
+    },
+    {
+      id: "store_personal_rag",
+      name: "personal_rag (pgvector)",
+      description: "Career/CV vector store (ADR-013/015 isolated); queried by search_personal_rag",
+      file: "src/db/rag-search.ts",
+    },
+    {
+      id: "service_judge",
+      name: "Claude Judge",
+      description: "Gate-2 critic for outbound copy (different model family — anti-sycophancy, fail-open)",
+      file: "src/infra/judge.ts",
     },
   ];
 
@@ -320,6 +309,28 @@ function buildGraph() {
     to: "service_redis",
     type: "depends_on",
   });
+
+  // RAG data flow: vector tools → Ollama (embed) + their pgvector store.
+  if (nodeMap.has("tool_search_turicks_brain")) {
+    addEdge({ from: "tool_search_turicks_brain", to: "service_ollama", type: "depends_on" });
+    addEdge({ from: "tool_search_turicks_brain", to: "store_turicks_brain", type: "depends_on" });
+  }
+  if (nodeMap.has("tool_search_personal_rag")) {
+    addEdge({ from: "tool_search_personal_rag", to: "service_ollama", type: "depends_on" });
+    addEdge({ from: "tool_search_personal_rag", to: "store_personal_rag", type: "depends_on" });
+  }
+  // brain:sync embeds docs → Ollama → turicks_brain.
+  addEdge({ from: "store_turicks_brain", to: "service_ollama", type: "depends_on" });
+  addEdge({ from: "store_turicks_brain", to: "service_postgres", type: "depends_on" });
+  addEdge({ from: "store_personal_rag", to: "service_postgres", type: "depends_on" });
+
+  // publish_signal → Postgres dept_signals.
+  if (nodeMap.has("tool_publish_signal")) {
+    addEdge({ from: "tool_publish_signal", to: "service_postgres", type: "depends_on" });
+  }
+
+  // Judge gates outbound copy (marketing/sales) and uses a different model family.
+  addEdge({ from: "service_supervisor", to: "service_judge", type: "depends_on" });
 }
 
 function generateGraphJson() {
@@ -361,14 +372,14 @@ function generateGraphVisualization() {
     mermaid += `  ${n.id}["${n.name}"]:::tool\n`;
   });
 
-  // Services
+  // Services (type "service" + "store" both render as service-styled boxes)
   const svcNodes = graph.nodes.filter((n) => n.type === "service");
   svcNodes.forEach((n) => {
     mermaid += `  ${n.id}["${n.name}"]:::service\n`;
   });
 
-  // Edges (sample, limit to 30 to keep readable)
-  graph.edges.slice(0, 30).forEach((e) => {
+  // All edges (the graph is small enough to render fully).
+  graph.edges.forEach((e) => {
     const fromNode = graph.nodes.find((n) => n.id === e.from);
     const toNode = graph.nodes.find((n) => n.id === e.to);
     if (fromNode && toNode) {

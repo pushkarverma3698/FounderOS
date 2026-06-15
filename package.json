@@ -21,6 +21,8 @@
     "setup": "node --env-file=.env --import tsx/esm scripts/setup-db.ts",
     "inspect": "node --env-file=.env --import tsx/esm scripts/inspect-thread.ts",
     "brain:sync": "node --env-file=.env --import tsx/esm scripts/sync-turicks-brain.ts",
+    "personal:sync": "node --env-file=.env --import tsx/esm scripts/sync-personal-rag.ts",
+    "graph:gen": "node --env-file=.env --import tsx/esm scripts/generate-knowledge-graph.ts",
     "lint": "tsc --noEmit",
     "mcp": "node --env-file=.env --import tsx/esm src/mcp/index.ts",
     "test:unit": "vitest run tests/unit",
