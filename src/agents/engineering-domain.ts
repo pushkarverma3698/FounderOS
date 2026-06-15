@@ -19,7 +19,7 @@ import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { getModel } from "./model.js";
 import { createTrimmedPrompt } from "../infra/context-manager.js";
-import { claudeCode, githubRead, githubWrite, projectWorkflow } from "./agent-tools.js";
+import { ENGINEERING_SUBAGENT_TOOLS } from "./capabilities.js";
 
 const workerBudget = { maxTokens: 4000 };
 
@@ -46,21 +46,21 @@ export function buildEngineeringDomain() {
   const llm = getModel();
   const coder = createReactAgent({
     llm,
-    tools: [claudeCode, githubRead],
+    tools: ENGINEERING_SUBAGENT_TOOLS["coder"]!,
     name: "coder",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(CODER_PROMPT, workerBudget) as any,
   });
   const qa = createReactAgent({
     llm,
-    tools: [claudeCode, githubRead],
+    tools: ENGINEERING_SUBAGENT_TOOLS["qa"]!,
     name: "qa",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(QA_PROMPT, workerBudget) as any,
   });
   const devops = createReactAgent({
     llm,
-    tools: [githubWrite, projectWorkflow],
+    tools: ENGINEERING_SUBAGENT_TOOLS["devops"]!,
     name: "devops",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(DEVOPS_PROMPT, workerBudget) as any,

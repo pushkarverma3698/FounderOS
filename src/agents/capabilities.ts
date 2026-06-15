@@ -52,6 +52,15 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   jobhunt: [readCv, searchJobs, sendEmail],
 };
 
+/** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops).
+ *  Kept here so the capability manifest stays the single source of truth when the
+ *  engineering department is promoted to a sub-supervisor (ADR-027, engineering-domain.ts). */
+export const ENGINEERING_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
+  coder: [claudeCode, githubRead],
+  qa: [claudeCode, githubRead],
+  devops: [githubWrite, projectWorkflow],
+};
+
 /** Supervisor-level tools (not delegated to departments). */
 export const SUPERVISOR_TOOLS: AnyTool[] = [readContext, updateContext, searchMemoryTool, recordEvent];
 

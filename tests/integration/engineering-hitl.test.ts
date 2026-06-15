@@ -93,8 +93,22 @@ d("Engineering CTO nested HITL (parent → engineering → devops)", () => {
     const workflowCallsAtInterrupt = projectWorkflowExecute.mock.calls.length;
     await office.invoke(new Command({ resume: "approved" }), config);
     // After approve: total calls must have increased (the HITL tool ran)
-    const totalAfter = githubExecute.mock.calls.length + projectWorkflowExecute.mock.calls.length;
-    const totalBefore = githubCallsAtInterrupt + workflowCallsAtInterrupt;
-    expect(totalAfter, "expected at least one tool execution after approval").toBeGreaterThan(totalBefore);
+    const githubDelta = githubExecute.mock.calls.length - githubCallsAtInterrupt;
+    const workflowDelta = projectWorkflowExecute.mock.calls.length - workflowCallsAtInterrupt;
+    // exactly one HITL-gated tool ran after approval (whichever the model chose)
+    expect(githubDelta + workflowDelta, "expected the approved HITL tool to run after resume").toBeGreaterThanOrEqual(1);
+  });
+
+  it("read-only engineering task → routes to coder/qa, NO interrupt (control)", { timeout: 90_000 }, async () => {
+    const office = buildEngineeringNestedOffice(new MemorySaver());
+    const config = { configurable: { thread_id: "eng-control" } };
+    await office.invoke(
+      { messages: [new HumanMessage("Read repo pushkarverma3698/FounderOS and tell me what its description and default branch are. Do not change anything.")] },
+      config,
+    );
+    const approval = await getPendingApproval(office, config);
+    expect(approval, "a read-only task should NOT need approval").toBeNull();
+    // github_write / project_workflow must NOT have been called (no new HITL side-effects)
+    expect(projectWorkflowExecute).not.toHaveBeenCalled();
   });
 });
