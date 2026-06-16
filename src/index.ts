@@ -14,6 +14,7 @@
 
 import { initTelemetry } from "./infra/telemetry.js";
 import { logBootReport } from "./infra/boot-report.js";
+import { assertBootConfigOrThrow } from "./infra/boot-validate.js";
 import { env } from "./core/config.js";
 import { closeDatabaseConnections } from "./db/client.js";
 import { getOffice } from "./agents/office.js";
@@ -52,6 +53,13 @@ async function main(): Promise<void> {
   // 1b. Capability self-check — log LIVE/MISSING integrations so config drift
   //     is visible in journald instead of surfacing as a silent dead department.
   logBootReport(env);
+
+  // 1c. Strict boot validation — FAIL LOUD before compiling the office if a
+  //     fatal misconfig would make the bot silently half-dead (dead LLM provider,
+  //     no DB, no Telegram transport). Converts a production-only failure into an
+  //     immediate startup error (CLAUDE.md rule #19.5).
+  const bootValidation = assertBootConfigOrThrow(env);
+  for (const w of bootValidation.warnings) log.warn({ module: "boot" }, `[boot] ${w}`);
 
   // 2. Compile the office once (warms the Postgres checkpointer).
   await getOffice();
