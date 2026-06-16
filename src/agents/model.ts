@@ -124,7 +124,7 @@ export function getSupervisorModel(): BaseChatModel {
   if (fallbacks.length === 0) return primary;
   return primary.withFallbacks({
     fallbacks: fallbacks.map((id) => buildModel(parseModelId(id), resolveTemperature())),
-  }) as BaseChatModel;
+  }) as unknown as BaseChatModel;
 }
 
 export function getModelFallbackMiddleware() {
