@@ -62,6 +62,30 @@ export function is503Error(err: unknown): boolean {
   );
 }
 
+/**
+ * A NON-recoverable quota/credit/billing error (distinct from a transient 429
+ * rate-limit or 503 capacity blip). "Your prepayment credits are depleted",
+ * "exceeded your current quota", billing/payment failures — none of these clear
+ * within a request, and on Gemini they share the API key with our fallback
+ * models, so retrying the primary OR the same-key fallbacks only burns latency.
+ * When this is true we skip straight to a different-key provider (OpenRouter).
+ *
+ * Deliberately narrow: plain "429 rate limit, please retry" and "503 high demand"
+ * are excluded — those DO recover and must keep their retry/backoff path.
+ */
+export function isQuotaExhaustedError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return (
+    /credits?\s*(are\s*)?depleted/.test(msg) ||
+    /exceeded your current quota/.test(msg) ||
+    /quota.*exceeded/.test(msg) ||
+    /insufficient\s*(credits|funds|quota|balance)/.test(msg) ||
+    /payment\s*required/.test(msg) ||
+    (/\bbilling\b/.test(msg) && /quota|credit|exceed|depleted|payment/.test(msg))
+  );
+}
+
 export function isEmptyContentsError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   return err.message.includes("contents is not specified");
@@ -392,6 +416,9 @@ export class FounderChatModel extends BaseChatModel {
     const sanitized = this.adapter.sanitizeMessages(messages);
 
     let lastErr: unknown;
+    // When the primary fails with a depleted-credits/quota error, the same-key
+    // Google fallbacks share that quota — skip them and jump to OpenRouter.
+    let skipSameKeyFallbacks = false;
     for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
       if (attempt > 0) {
         const delay = RETRY_BACKOFF_MS[attempt - 1]!;
@@ -401,6 +428,15 @@ export class FounderChatModel extends BaseChatModel {
       try {
         return await this._generateWith(this.primaryModel, sanitized, options, runManager);
       } catch (err) {
+        if (isQuotaExhaustedError(err)) {
+          log.error(
+            { primary: this.model },
+            "Primary model credits/quota exhausted — skipping same-key fallbacks, failing fast to OpenRouter. ACTION: top up the provider billing account.",
+          );
+          lastErr = err;
+          skipSameKeyFallbacks = true;
+          break;
+        }
         if (this.adapter.isTransientError(err)) {
           lastErr = err;
         } else {
@@ -432,7 +468,7 @@ export class FounderChatModel extends BaseChatModel {
       }
     }
 
-    if (this._fallbackInstances.length > 0) {
+    if (!skipSameKeyFallbacks && this._fallbackInstances.length > 0) {
       log.warn(
         { primary: this.model, fallbacks: this._fallbackModels },
         "Primary model retries exhausted, trying fallbacks",
@@ -443,6 +479,10 @@ export class FounderChatModel extends BaseChatModel {
           log.info({ model: this._fallbackModels[i] }, "Trying fallback model");
           return await this._generateWith(fallback, sanitized, options, runManager);
         } catch (fallbackErr) {
+          if (isQuotaExhaustedError(fallbackErr)) {
+            lastErr = fallbackErr;
+            break; // same key → remaining Google fallbacks share the depleted quota
+          }
           if (!this.adapter.isTransientError(fallbackErr)) throw fallbackErr;
           lastErr = fallbackErr;
         }
@@ -492,6 +532,14 @@ export class FounderChatModel extends BaseChatModel {
         yield* this._streamWith(this.primaryModel, stripped, options, runManager);
         return;
       } catch (err) {
+        if (isQuotaExhaustedError(err)) {
+          log.error(
+            { primary: this.model },
+            "Primary model credits/quota exhausted on stream — failing fast. ACTION: top up the provider billing account.",
+          );
+          lastErr = err;
+          break; // same-key fallbacks share the depleted quota
+        }
         if (!this.adapter.isTransientError(err)) throw err;
         lastErr = err;
       }
@@ -548,19 +596,23 @@ export function getModel(): FounderChatModel {
   if (provider === "google") {
     const apiKey = process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
     const fallbackModels = MODEL_FALLBACK_CHAIN[primaryModel] ?? [];
+    // maxRetries: 0 — the Google SDK's own retry does long internal backoff
+    // (~85s on a persistent 429), which stacks on top of OUR retry/fallback loop
+    // and wedges every request when credits are depleted. We own retry timing
+    // (RETRY_BACKOFF_MS) and fallback, so the SDK must fail fast.
     const fallbackInstances = fallbackModels.map(
       (m) =>
         new ChatGoogleGenerativeAI({
           model: m,
           temperature,
-          maxRetries: 1,
+          maxRetries: 0,
           ...(apiKey ? { apiKey } : {}),
         }),
     );
     const primaryInstance = new ChatGoogleGenerativeAI({
       model: primaryModel,
       temperature,
-      maxRetries: 2,
+      maxRetries: 0,
       ...(apiKey ? { apiKey } : {}),
     });
 
