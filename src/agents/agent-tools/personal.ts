@@ -140,12 +140,6 @@ export const writeFile = tool(
 
 export const runShell = tool(
   async ({ command, cwd }, config) => {
-    // Idempotency: prevent re-execution on HITL resume loop
-    const key = idemKey("shell", cwd ?? "", command);
-    if (await hasBeenAudited(key)) {
-      return `Already executed: ${command.slice(0, 80)}${command.length > 80 ? "…" : ""} (skipped duplicate)`;
-    }
-
     const dangerous = flagDangerousCommand(command);
     const rejected = await hitlGate({
       action: "run_shell",
@@ -155,6 +149,12 @@ export const runShell = tool(
       args: { command, cwd },
     }, config);
     if (rejected) return rejected;
+
+    // Idempotency after approval — prevents re-execution on HITL resume re-run, still shows the card.
+    const key = idemKey("shell", cwd ?? "", command);
+    if (await hasBeenAudited(key)) {
+      return `Already executed: ${command.slice(0, 80)}${command.length > 80 ? "…" : ""} (skipped duplicate)`;
+    }
 
     const r = await runShellSafe(command, cwd ?? undefined);
     if (!r.ok) return `Command failed: ${r.error}`;

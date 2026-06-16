@@ -214,8 +214,12 @@ const REALISTIC_PROMPTS: Record<string, string> = {
 
 function applyRealisticMode(tasks: Task[]): Task[] {
   return tasks.map((t) => {
-    const prompt = REALISTIC_PROMPTS[t.id];
+    let prompt = REALISTIC_PROMPTS[t.id];
     if (!prompt) return t;
+    // Shell E2E must use a fresh command — prod idempotency keys survive across runs.
+    if (t.id === "T10") {
+      prompt = `run this in terminal: echo "FounderOS E2E test-${Date.now()}"`;
+    }
     // Everyday users ramble; give research/multi-step a bit more time.
     const extraWait = ["T01", "T02", "T11", "T12", "T13", "T14"].includes(t.id) ? 15 : 0;
     return { ...t, prompt, waitS: t.waitS + extraWait };
