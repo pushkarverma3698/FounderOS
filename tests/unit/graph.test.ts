@@ -2,19 +2,33 @@ import { describe, it, expect } from "vitest";
 import graph from "../../.claude/graph.json";
 
 describe("Knowledge Graph (Graphify)", () => {
-  it("should have all 8 departments", () => {
+  it("should have all 7 departments (prospecting merged into research in Phase B)", () => {
     const depts = graph.nodes.filter((n) => n.type === "department");
-    expect(depts.length).toBe(8);
+    expect(depts.length).toBe(7);
     expect(depts.map((d) => d.name).sort()).toEqual([
       "comms",
       "engineering",
       "jobhunt",
       "marketing",
       "personal",
-      "prospecting",
       "research",
       "sales",
     ]);
+  });
+
+  it("should expose the current RAG / vector tools (2026-06-15 fix)", () => {
+    const toolNames = graph.nodes.filter((n) => n.type === "tool").map((t) => t.name);
+    expect(toolNames).toContain("search_turicks_brain");
+    expect(toolNames).toContain("search_personal_rag");
+    expect(toolNames).toContain("search_knowledge");
+    expect(toolNames).toContain("publish_signal");
+  });
+
+  it("should model the vector stores + Ollama as services", () => {
+    const names = graph.nodes.filter((n) => n.type === "service").map((s) => s.name);
+    expect(names.some((s) => /ollama/i.test(s))).toBe(true);
+    expect(names.some((s) => /turicks_brain/i.test(s))).toBe(true);
+    expect(names.some((s) => /personal_rag/i.test(s))).toBe(true);
   });
 
   it("should have all tools defined", () => {
@@ -44,7 +58,7 @@ describe("Knowledge Graph (Graphify)", () => {
   });
 
   it("should have metadata for all departments", () => {
-    expect(Object.keys(graph.metadata.departments).length).toBe(8);
+    expect(Object.keys(graph.metadata.departments).length).toBe(7);
     expect(graph.metadata.departments.research).toBeDefined();
     expect(graph.metadata.departments.comms).toBeDefined();
     expect(graph.metadata.departments.engineering).toBeDefined();

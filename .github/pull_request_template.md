@@ -19,6 +19,7 @@ Full checklist: docs/rules/CODE-REVIEW-CHECKLIST.md
 - [ ] Pure logic (routing/slicing/guards/parsing) is a unit-tested function, not a prompt instruction
 - [ ] Every fixed bug has a regression test on the real gateway path
 - [ ] "Why" comments on non-obvious functions
+- [ ] **Docs synced** (CLAUDE.md rule #18): New ADRs, phase docs, or decisions → run `pnpm brain:sync` — or N/A
 
 ## Observability impact
 

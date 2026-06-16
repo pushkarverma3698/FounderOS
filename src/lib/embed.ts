@@ -36,3 +36,46 @@ export async function embedText(text: string): Promise<number[]> {
   }
   return data.embedding;
 }
+
+/**
+ * Split text into overlapping character chunks for embedding.
+ * nomic-embed-text silently truncates long input (~2k token window), so a
+ * single embed of a large doc loses its tail. Chunking keeps every section
+ * retrievable. Splits on paragraph boundaries where possible to avoid cutting
+ * mid-sentence.
+ */
+export function chunkText(text: string, maxChars = 1800, overlap = 200): string[] {
+  const clean = text.trim();
+  if (clean.length <= maxChars) return clean.length > 0 ? [clean] : [];
+
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < clean.length) {
+    let end = Math.min(start + maxChars, clean.length);
+    // Prefer to break on a paragraph/sentence boundary inside the last 25%.
+    if (end < clean.length) {
+      const window = clean.slice(start, end);
+      const breakAt = Math.max(
+        window.lastIndexOf("\n\n"),
+        window.lastIndexOf(". "),
+        window.lastIndexOf("\n"),
+      );
+      if (breakAt > maxChars * 0.75) end = start + breakAt + 1;
+    }
+    chunks.push(clean.slice(start, end).trim());
+    if (end >= clean.length) break;
+    start = end - overlap; // overlap so context isn't lost at the seam
+  }
+  return chunks.filter((c) => c.length > 0);
+}
+
+/** Embed many strings with bounded concurrency (avoids hammering Ollama). */
+export async function embedTexts(texts: string[], concurrency = 4): Promise<number[][]> {
+  const out: number[][] = new Array<number[]>(texts.length);
+  for (let i = 0; i < texts.length; i += concurrency) {
+    const slice = texts.slice(i, i + concurrency);
+    const embedded = await Promise.all(slice.map((t) => embedText(t)));
+    for (let j = 0; j < embedded.length; j++) out[i + j] = embedded[j]!;
+  }
+  return out;
+}

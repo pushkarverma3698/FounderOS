@@ -21,6 +21,8 @@
     "setup": "node --env-file=.env --import tsx/esm scripts/setup-db.ts",
     "inspect": "node --env-file=.env --import tsx/esm scripts/inspect-thread.ts",
     "brain:sync": "node --env-file=.env --import tsx/esm scripts/sync-turicks-brain.ts",
+    "personal:sync": "node --env-file=.env --import tsx/esm scripts/sync-personal-rag.ts",
+    "graph:gen": "node --env-file=.env --import tsx/esm scripts/generate-knowledge-graph.ts",
     "lint": "tsc --noEmit",
     "mcp": "node --env-file=.env --import tsx/esm src/mcp/index.ts",
     "test:unit": "vitest run tests/unit",
@@ -33,7 +35,8 @@
     "test:ci": "vitest run",
     "test:live": "ALLOW_NETWORK=1 vitest run --config vitest.integration.config.ts && pnpm test:eval",
     "test:all": "pnpm test:ci && pnpm test:smoke",
-    "update-readme-metrics": "node --import tsx/esm scripts/update-readme-metrics.ts"
+    "update-readme-metrics": "node --import tsx/esm scripts/update-readme-metrics.ts",
+    "logreview": "node --env-file=.env --import tsx/esm scripts/log-review/harvest.ts"
   },
   "dependencies": {
     "@composio/core": "0.10.0",

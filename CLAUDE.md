@@ -25,7 +25,7 @@ FounderOS is a multi-agent AI operating system for two purposes:
 
 **FounderOS has a queryable knowledge graph** — structured topology of departments, agents, tools, and services.
 
-- **Location:** `.claude/graph.json` (43 nodes, 47 edges)
+- **Location:** `.claude/graph.json` (50 nodes, 64 edges — derived from the live capability registry)
 - **Visualization:** `.claude/graph-mermaid.md` (Mermaid diagram)
 - **Integration Guide:** `.claude/GRAPHIFY-INTEGRATION.md`
 
@@ -37,7 +37,7 @@ FounderOS is a multi-agent AI operating system for two purposes:
 
 **Regenerate after adding agents/tools:**
 ```bash
-npx tsx scripts/generate-knowledge-graph.ts
+pnpm graph:gen   # = node --env-file=.env --import tsx/esm scripts/generate-knowledge-graph.ts
 ```
 
 ## Content & Asset Delivery Rules
@@ -55,13 +55,20 @@ This applies to: Gumroad listings, LinkedIn posts, email templates, brand guidel
 ## Current Phase Status
 - 🟢 **DEPLOYED — LIVE in production since 2026-06-14**: Hetzner VPS, native systemd + Docker(Postgres+Ollama), `main` auto-deploys via GitHub Actions (CI → CD → `/health`). Full pipeline + Day-1 gotchas: `docs/guides/DEPLOYMENT.md`. Remaining wrap-up checklist: `docs/PRODUCTION-WRAP-UP.md`. Live-verified on the real Telegram path incl. recursion-abort recovery (PR #60).
 - ✅ Phases 1–3 (v1): Foundation, pods, gateway, tests, observability (SUPERSEDED by v2)
-- ✅ **v2 Rebuild (2026-06-01)**: Prebuilt supervisor + 3 ReAct departments — LIVE ON MAIN
-  - research [search_web] · comms [email*, linkedin*] · engineering [github_r, github_w*]
+- ✅ **v2 Rebuild (2026-06-01)**: Prebuilt supervisor + 7 ReAct departments — LIVE ON MAIN
+  - research [search_web] · comms [email*, calendar*] · engineering [github_r, github_w*, claude_code*] · marketing [linkedin_post*] · sales [search_web, send_email*] · personal [file, shell*, write*, browser*] · jobhunt [search_jobs, read_cv, send_email*]
   - (* = HITL-gated via native interrupt())
-  - 10,678 LOC → ~500 LOC core · now 57 test files · 614 tests green · tsc clean
+  - 10,678 LOC → ~500 LOC core · now 1008 tests green (57 test files) · tsc clean
 - ✅ **Phase B (2026-06-01)**: Marketing + Sales + Prospecting departments — MERGED (PR #5)
 - ✅ **Personal department (2026-06-03)**: 7th department `personal` — laptop operator (file/shell/browser, HITL-gated, `path-guard` confines to `$HOME`, secrets blocked even on read). MERGED (PR #16). Kept separate from `engineering` by least-privilege (ADR-013); Safari-MCP deferred (ADR-012). 267 tests green · eval 13/13.
-- 🔄 **Phase C (2026-06-01)**: Context memory + knowledge search + proactive scheduler — code complete, 47 tests green (branch `feat/phase-c-memory-scheduler`). Followups: populate turicks-brain (`brain:sync`), live Telegram verify. See `docs/phases/PHASE-C-INTELLIGENCE.md`.
+- ✅ **Phase C (2026-06-01)**: Context memory + knowledge search + proactive scheduler — code complete, merged to main. See `docs/phases/PHASE-C-INTELLIGENCE.md`.
+- ✅ **Phases 1–6 Hardening (2026-06-14)**: Production multi-agent transition merged (PR #70):
+  - **Phase 1**: Context isolation + per-turn token measurement (ADR-021, pinned outputMode:"last_message", implicit caching lever)
+  - **Phase 2**: Typed inter-department contracts (ADR-022, Zod validation, 3 event types: lead_discovered, proposal_approved, demo_ready)
+  - **Phase 3**: Claude-as-judge for outbound copy (ADR-023, two-gate system: brand-validator → judge, fail-open, different model family)
+  - **Phase 4**: Durable cross-department signals (ADR-024, dept_signals table, hourly sweep, exactly-once semantics)
+  - **Phase 5**: Hierarchy proof — nested HITL on supervisors (ADR-025, 3-level interrupt/resume proven; NOT in production yet, gated on business trigger)
+  - **Phase 6**: Rules #20–21 operationalized (context isolation + typed handoffs, see SECURITY-RULES-20-21.md)
 - 🔄 **Phase D (now)**: Revenue Flywheel — Gumroad live + LinkedIn launch sequence + cinematic-web done-for-you tier + weekly outbound rhythm
 - ⏳ **Phase E (gated, 4–6 wks reliable use)**: SaaS pivot — web gateway, multi-tenancy, billing (FounderOS SaaS *or* Cinematic Cloud — pick one)
 
@@ -361,6 +368,31 @@ not by hope. See ADRs 021–025.
   the Gemini drafter, so the critic can't rubber-stamp its own output. The judge is **fail-open**
   (HITL is the final human gate; it can only add a critique, never silently block). Needs
   `ANTHROPIC_API_KEY`; absent → no-op pass. ADR-023.
+
+### 22. Production bugs are necessary — verify real prod STATE + name the real failure (non-negotiable)
+A green test suite and a clean local run prove nothing about production. The 2026-06-15 RAG outage
+is the canonical example: every unit test passed, the code was correct, yet `search_turicks_brain`
+returned nothing in prod — because the `turicks_brain` pgvector table was **empty** (data was never
+ingested) and, worse, the error path **mislabeled a DB/empty-store problem as "Ollama unavailable"**,
+sending debugging down the wrong road. Going forward:
+
+1. **Production bugs are expected and must be hunted, not assumed away.** "It works locally / tests
+   pass" is the start of an investigation, not the end. Treat every "it should work" as unverified.
+   For any prod-affecting change, inspect the REAL prod state — don't trust that migrations ran, that
+   tables exist, or that they're *populated*.
+2. **Verify state, not just schema.** A table existing ≠ a table having rows. An empty-but-present
+   store is a distinct, silent failure class. Check counts/health of the actual data
+   (`SELECT COUNT(*)`, row + embedding counts), not just that the DDL applied.
+3. **Errors must name the REAL failing component.** Never collapse distinct failures into one
+   message. Stage-tag and surface them: an embedding failure says *Ollama*; a vector-query failure
+   says *Postgres/pgvector* and points at the fix (`pnpm brain:sync`). A misattributed error is worse
+   than no error — it actively misleads. Log at `error`, never `debug` (rule #19.5, fail loud).
+4. **Reproduce against prod reality.** Where safe, reproduce the bug on the real prod path (real DB,
+   real Ollama, real service) before and after the fix. Evidence standard = the real query result
+   (e.g. retrieved doc + similarity score) or the real row counts, not a passing mock.
+5. **Data-provisioning is part of "done".** A feature that needs data (RAG, embeddings, seeds) isn't
+   shipped until the ingestion path exists, runs in the deploy pipeline (or a documented runbook
+   step), and is verified to have populated prod. Schema without data is a latent prod outage.
 
 ## Engineering Protocol — Verification-First (PERMANENT, applies to every change)
 

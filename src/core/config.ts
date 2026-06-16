@@ -127,5 +127,13 @@ export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", fals
 /** Max recursive supervisor/sub-agent steps before LangGraph aborts a run. */
 export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 40);
 
-/** How many human turns of conversation history to persist per thread. */
-export const HISTORY_KEEP_TURNS = intEnv("HISTORY_KEEP_TURNS", 12);
+/**
+ * How many human turns of conversation history to persist per thread.
+ * Kept deliberately small: the prebuilt supervisor forwards the FULL kept window
+ * to every sub-agent on handoff, so any stale leading message pollutes routing.
+ * Prod 2026-06-15: at 12, the thread's first message ("Do it yourself don't use
+ * claude") never aged out and leaked into every transfer_to_* for hours, driving
+ * generic/wrong sub-agent searches. 4 keeps real follow-up context while evicting
+ * unrelated older turns fast. Durable context lives in memory tools, not history.
+ */
+export const HISTORY_KEEP_TURNS = intEnv("HISTORY_KEEP_TURNS", 4);

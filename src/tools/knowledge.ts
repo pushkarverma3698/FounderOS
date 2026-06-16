@@ -34,19 +34,38 @@ export const searchKnowledge = tool(
   async ({ query, entry_type }) => {
     log.debug({ query, entry_type }, "Knowledge search");
 
-    const results = entry_type
-      ? await getKnowledgeByType(TENANT, entry_type, 5)
-      : await searchKnowledgeEntries(TENANT, query, 5);
+    // Keyword-search-first. `entry_type` is a FORGIVING post-filter, never a
+    // query-dropping replacement. The old behaviour ran getKnowledgeByType and
+    // ignored `query`, so a model that guessed a type with zero rows (e.g.
+    // "strategic_pillar" when prod was synced from a script that labelled the
+    // same content "strategy") got an empty result and then HALLUCINATED an
+    // answer (prod 2026-06-15: fabricated Turicks ICP). We always run the keyword
+    // search, filter by type when asked, and fall back to the unfiltered keyword
+    // hits if the type filter wipes everything — real content over a false miss.
+    const hasQuery = query.trim().length > 0;
+    let results: Array<{ title: string; content: string; tags: string[] | null; entry_type?: string }>;
+
+    if (entry_type && !hasQuery) {
+      results = await getKnowledgeByType(TENANT, entry_type, 5);
+    } else {
+      const matches = await searchKnowledgeEntries(TENANT, query, 15);
+      if (entry_type) {
+        const filtered = matches.filter((r) => r.entry_type === entry_type);
+        results = (filtered.length > 0 ? filtered : matches).slice(0, 5);
+      } else {
+        results = matches.slice(0, 5);
+      }
+    }
 
     if (results.length === 0) {
-      return `No knowledge entries found for "${query}"${entry_type ? ` (type: ${entry_type})` : ""}. The turicks-brain may not have been synced yet — run \`pnpm brain:sync\` to populate it.`;
+      return `No knowledge entries found for "${query}"${entry_type ? ` (type: ${entry_type})` : ""}. The turicks-brain may not have this — try \`search_turicks_brain\` (semantic) or \`search_web\`. Do NOT fabricate an answer; tell the founder the knowledge base has no entry for this.`;
     }
 
     return results
       .map((r, i) => {
         const tags = (r.tags ?? []).join(", ");
         const preview = r.content.slice(0, 400).replace(/\n+/g, " ");
-        return `${i + 1}. [${("entry_type" in r ? (r as Record<string,string>)["entry_type"] : entry_type) ?? ""}] ${r.title}${tags ? `\n   Tags: ${tags}` : ""}\n   ${preview}${r.content.length > 400 ? "…" : ""}`;
+        return `${i + 1}. [${r.entry_type ?? entry_type ?? ""}] ${r.title}${tags ? `\n   Tags: ${tags}` : ""}\n   ${preview}${r.content.length > 400 ? "…" : ""}`;
       })
       .join("\n\n");
   },
@@ -57,7 +76,7 @@ export const searchKnowledge = tool(
     schema: z.object({
       query: z.string().describe("Keyword search query — what to look for"),
       entry_type: z
-        .enum(["adr", "brand", "case_study", "strategic_pillar", "phase", "decision"])
+        .enum(["adr", "brand", "case_study", "strategy", "strategic_pillar", "phase", "founder_profile"])
         .optional()
         .nullable()
         .describe("Optional: filter by content type"),

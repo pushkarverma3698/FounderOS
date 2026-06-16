@@ -43,10 +43,14 @@ services:
     volumes:
       - founderos_ollama_models:/root/.ollama
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:11434/api/tags || exit 1"]
+      # The ollama image ships no curl/wget — use the bundled `ollama` CLI,
+      # which exits 0 only when the server answers on :11434. (A curl probe
+      # here false-reported "unhealthy" forever: /bin/sh: curl: not found.)
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 6
+      start_period: 30s
 
 volumes:
   founderos_pgdata:
