@@ -114,43 +114,55 @@ export function getFallbackModelIds(): string[] {
 
 export function getModel(): BaseChatModel {
   const parsed = parseModelId(getConfiguredModelId());
-  return buildModel(parsed, resolveTemperature());
+  const model = buildModel(parsed, resolveTemperature());
+  if (!model) throw new Error(`Primary model ${parsed.id} is not configured (missing API key).`);
+  return model;
 }
 
 /** Supervisor model with env-configured fallbacks (departments use middleware instead). */
 export function getSupervisorModel(): BaseChatModel {
   const primary = getModel();
-  const fallbacks = getFallbackModelIds();
+  const fallbacks = buildFallbackModels();
   if (fallbacks.length === 0) return primary;
-  return primary.withFallbacks({
-    fallbacks: fallbacks.map((id) => buildModel(parseModelId(id), resolveTemperature())),
-  }) as unknown as BaseChatModel;
+  return primary.withFallbacks({ fallbacks }) as unknown as BaseChatModel;
 }
 
 export function getModelFallbackMiddleware() {
-  const fallbacks = getFallbackModelIds();
+  const fallbacks = buildFallbackModels();
   if (fallbacks.length === 0) return [];
-  return [modelFallbackMiddleware(...fallbacks.map((id) => buildModel(parseModelId(id), resolveTemperature())))];
+  return [modelFallbackMiddleware(...fallbacks)];
 }
 
-function buildModel(parsed: ParsedModelId, temperature: number): BaseChatModel {
+function buildModel(
+  parsed: ParsedModelId,
+  temperature: number,
+  opts: { optional?: boolean } = {},
+): BaseChatModel | null {
+  const optional = opts.optional ?? false;
+
   if (parsed.provider === "google-genai") {
+    if (!process.env["GOOGLE_GENERATIVE_AI_API_KEY"]) {
+      if (optional) return null;
+      throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is required for google-genai: models.");
+    }
     return new ChatGoogleGenerativeAI({
       model: parsed.model,
       temperature,
       maxRetries: 2,
-      ...(process.env["GOOGLE_GENERATIVE_AI_API_KEY"]
-        ? { apiKey: process.env["GOOGLE_GENERATIVE_AI_API_KEY"] }
-        : {}),
+      apiKey: process.env["GOOGLE_GENERATIVE_AI_API_KEY"],
     });
   }
 
   if (parsed.provider === "anthropic") {
+    if (!process.env["ANTHROPIC_API_KEY"]) {
+      if (optional) return null;
+      throw new Error("ANTHROPIC_API_KEY is required for anthropic: models.");
+    }
     return new ChatAnthropic({
       model: parsed.model,
       temperature,
       maxRetries: 2,
-      ...(process.env["ANTHROPIC_API_KEY"] ? { apiKey: process.env["ANTHROPIC_API_KEY"] } : {}),
+      apiKey: process.env["ANTHROPIC_API_KEY"],
     });
   }
 
@@ -164,10 +176,17 @@ function buildModel(parsed: ParsedModelId, temperature: number): BaseChatModel {
     });
   }
 
+  if (!process.env["OPENAI_API_KEY"] && optional) return null;
   return new ChatOpenAI({
     model: parsed.model,
     temperature,
     maxRetries: 2,
     ...(process.env["OPENAI_API_KEY"] ? { apiKey: process.env["OPENAI_API_KEY"] } : {}),
   });
+}
+
+function buildFallbackModels(): BaseChatModel[] {
+  return getFallbackModelIds()
+    .map((id) => buildModel(parseModelId(id), resolveTemperature(), { optional: true }))
+    .filter((m): m is BaseChatModel => m !== null);
 }
