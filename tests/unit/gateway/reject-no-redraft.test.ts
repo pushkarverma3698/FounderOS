@@ -22,11 +22,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const clearThreadCheckpoints = vi.fn(async () => 1);
 const getOffice = vi.fn();
 const cancelPendingApprovals = vi.fn(async () => 1);
+const getPendingInterrupt = vi.fn(async () => null);
+const resolveInterrupt = vi.fn(async () => true);
 
 vi.mock("../../../src/infra/checkpointer.js", () => ({ clearThreadCheckpoints }));
 vi.mock("../../../src/db/queries.js", async (importActual) => ({
   ...(await importActual<typeof import("../../../src/db/queries.js")>()),
   cancelPendingApprovals,
+  getPendingInterrupt,
+  resolveInterrupt,
 }));
 vi.mock("../../../src/agents/office.js", async (importActual) => {
   const actual = await importActual<typeof import("../../../src/agents/office.js")>();

@@ -15,6 +15,11 @@ import { describe, it, expect, vi } from "vitest";
 import { Command } from "@langchain/langgraph";
 import { resolvePendingApproval } from "../../../src/gateway/telegram.js";
 
+vi.mock("../../../src/db/queries.js", () => ({
+  getPendingInterrupt: vi.fn(async () => null),
+  resolveInterrupt: vi.fn(async () => true),
+}));
+
 const config = { configurable: { thread_id: "turicks:123" } };
 
 function officeWithInterrupt(approval: unknown) {
