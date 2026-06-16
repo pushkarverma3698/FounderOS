@@ -363,20 +363,23 @@ export async function clearStalePendingInterruptOnBoot(chatId: string | number):
   if (!pending) return false;
 
   const dbRow = await getPendingInterrupt(threadId);
-  const state = (await office.getState(config).catch(() => null)) as { createdAt?: string } | null;
-  const checkpointAt = state?.createdAt ? new Date(state.createdAt).getTime() : 0;
-  const dbAt = dbRow?.created_at ? new Date(dbRow.created_at).getTime() : 0;
-  const anchor = Math.max(checkpointAt, dbAt);
-  const expired = dbRow ? dbRow.expires_at < new Date() : false;
-  const tooOld = anchor > 0 && Date.now() - anchor > HITL_RESTORE_MAX_AGE_MS;
-  const legacy = !dbRow && anchor === 0;
+  if (!dbRow) {
+    await office.invoke(new Command({ resume: "rejected" }), config);
+    await cancelPendingApprovals(threadId);
+    log.info({ chatId, title: pending.title }, "Cleared orphan HITL interrupt on boot (no DB row)");
+    return true;
+  }
 
-  if (!expired && !tooOld && !legacy) return false;
+  const dbAt = dbRow.created_at ? new Date(dbRow.created_at).getTime() : 0;
+  const expired = dbRow.expires_at < new Date();
+  const tooOld = dbAt > 0 && Date.now() - dbAt > HITL_RESTORE_MAX_AGE_MS;
+
+  if (!expired && !tooOld) return false;
 
   if (dbRow) await resolveInterrupt(dbRow.interrupt_id, "expired");
   await office.invoke(new Command({ resume: "rejected" }), config);
   await cancelPendingApprovals(threadId);
-  log.info({ chatId, title: pending.title, legacy, tooOld, expired }, "Cleared stale HITL interrupt on boot");
+  log.info({ chatId, title: pending.title, tooOld, expired }, "Cleared stale HITL interrupt on boot");
   return true;
 }
 
