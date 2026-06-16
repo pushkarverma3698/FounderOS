@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildContextText, formatLeadNudge } from "../../../src/infra/scheduler.js";
+import { buildContextText, formatLeadNudge, formatProposalNudge, formatDemoNudge } from "../../../src/infra/scheduler.js";
 
 describe("buildContextText", () => {
   it("formats a flat string value", () => {
@@ -94,5 +94,40 @@ describe("formatLeadNudge (dept_signals consumer)", () => {
   it("ignores non-lead event types in the batch", () => {
     const other = { ...sig({ company: "X" }), event_type: "demo_ready" } as never;
     expect(formatLeadNudge([other])).toBe("");
+  });
+});
+
+describe("formatProposalNudge", () => {
+  const sig = (payload: unknown) =>
+    ({
+      event_type: "proposal_approved",
+      payload,
+    }) as unknown as import("../../../src/db/schema.js").DeptSignal;
+
+  it("renders approved proposals for engineering", () => {
+    const out = formatProposalNudge([
+      sig({ company: "Acme", proposalId: "p-1", amountUsd: 5000 }),
+    ]);
+    expect(out).toContain("Proposal approved");
+    expect(out).toContain("Acme");
+    expect(out).toContain("p-1");
+    expect(out).toContain("engineering");
+  });
+});
+
+describe("formatDemoNudge", () => {
+  const sig = (payload: unknown) =>
+    ({
+      event_type: "demo_ready",
+      payload,
+    }) as unknown as import("../../../src/db/schema.js").DeptSignal;
+
+  it("renders demo-ready signals for sales follow-up", () => {
+    const out = formatDemoNudge([
+      sig({ company: "Acme", repoUrl: "https://github.com/turicks/acme-demo" }),
+    ]);
+    expect(out).toContain("Demo ready");
+    expect(out).toContain("Acme");
+    expect(out).toMatch(/you approve before anything sends/i);
   });
 });

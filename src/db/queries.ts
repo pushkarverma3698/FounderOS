@@ -463,6 +463,18 @@ export async function countPendingDeptSignals(tenantId: string): Promise<number>
   return row?.total ?? 0;
 }
 
+/** List unconsumed signals (read-only — does not claim rows). */
+export async function listPendingDeptEvents(tenantId: string, toDept?: string) {
+  const db = getDb();
+  const conditions = [eq(deptSignals.tenant_id, tenantId), eq(deptSignals.consumed, false)];
+  if (toDept) conditions.push(eq(deptSignals.to_dept, toDept));
+  return db
+    .select()
+    .from(deptSignals)
+    .where(and(...conditions))
+    .orderBy(deptSignals.created_at);
+}
+
 // ── Founder Context (founder_context) ─────────────────────────────────────────
 
 /** Read the founder's current business context (returns {} if not yet set). */
