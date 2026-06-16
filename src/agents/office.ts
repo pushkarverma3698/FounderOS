@@ -19,7 +19,7 @@
 import { createSupervisor } from "@langchain/langgraph-supervisor";
 import { createAgent } from "langchain";
 import type { CompiledStateGraph, BaseCheckpointSaver } from "@langchain/langgraph";
-import { getModel, getModelFallbackMiddleware, getSupervisorModel } from "./model.js";
+import { getModel, getModelFallbackMiddleware } from "./model.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
 import { createAgentMiddleware, createTrimmedPrompt } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS, SUPERVISOR_TOOLS } from "./capabilities.js";
@@ -68,7 +68,8 @@ const SEARCH_TOOL_LIMITS = {
  * Exported for tests (inject MemorySaver). Production uses getOffice().
  */
 export function buildOffice(checkpointer: BaseCheckpointSaver) {
-  const llm = getSupervisorModel();
+  // createSupervisor requires a model with bindTools — withFallbacks() wrappers break routing.
+  const llm = getModel();
   const deptModel = getModel();
 
   // ── Phase C tools (available across departments) ──────────────────────────
