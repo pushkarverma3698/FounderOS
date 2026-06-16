@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Type check + lint
+    name: Type check + lint + wiring
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,9 +25,12 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # Compile/CI-time wiring integrity: a half-wired tool fails the build here
+      # instead of silently doing nothing in production (keyless, stub env).
+      - run: pnpm verify:wiring
 
   unit-tests:
-    name: Unit tests
+    name: Unit + regression tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +42,12 @@ jobs:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:unit
+      # Full deterministic suite (unit + regression) — the PR template's merge
+      # gate. Previously CI ran only test:unit, so regression guards never gated.
+      - run: pnpm test
+      # Offline boot smoke — cleanly SKIPs without live env, FAILs on a fatal
+      # misconfig. Never crashes the job.
+      - run: pnpm test:smoke
 
   integration-tests:
     name: Integration tests
