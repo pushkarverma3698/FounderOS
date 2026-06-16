@@ -13,15 +13,15 @@ import { hitlGate } from "./hitl.js";
  * review the event before it's committed to episodic_memory.
  */
 export const recordEvent = tool(
-  async ({ title, summary, tags, event_type, occurred_at }) => {
+  async ({ title, summary, tags, event_type, occurred_at }, config) => {
     const tagsStr = tags.join(", ") || "(none)";
-    const rejected = hitlGate({
+    const rejected = await hitlGate({
       action: "record_event",
       title: `📝 Record event: "${title}"?`,
       summary: `Type: ${event_type} | Tags: ${tagsStr}`,
       preview: summary,
       args: { title, summary, tags, event_type, occurred_at },
-    });
+    }, config);
     if (rejected) return rejected;
 
     return rawRecordEvent.invoke({ title, summary, tags, event_type, occurred_at });

@@ -118,30 +118,28 @@ export const sendEmail = tool(
     // so the HITL card only shows clean content. Within the cap, the agent
     // self-corrects with exact-delta guidance; past the cap we stop looping and
     // gate the closest draft (rule #16 — convergence lives in code, not the prompt).
+    if (await hasRecentOutboundToRecipient(TENANT, "send_email", to)) {
+      return `Already emailed ${to} recently — not re-sent (duplicate outreach guard). Say "force send" with new wording if you truly need a second email.`;
+    }
+
     const brand = await outboundQualityGate(body, "outreach", config);
     if (!brand.proceed) return `Revise before sending:\n${brand.fix}`;
 
-    // Pure summary (may run twice) — request approval.
-    const rejected = hitlGate({
+    const rejected = await hitlGate({
       action: "send_email",
       title: `📧 Send email to ${to}?`,
       summary: brand.warning ?? `Subject: ${subject}`,
       preview: body,
       args: { to, subject, body },
-    });
+    }, config);
     if (rejected) {
       clearBrandRetries(brand.retryKey);
       return rejected;
     }
     clearBrandRetries(brand.retryKey);
 
-    // Side-effects only AFTER approval.
     if (await isSuppressed(TENANT, to)) {
       return `BLOCKED: ${to} is on the do-not-contact list. Email not sent.`;
-    }
-
-    if (await hasRecentOutboundToRecipient(TENANT, "send_email", to)) {
-      return `Already emailed ${to} recently — not re-sent (duplicate outreach guard). Say "force send" with new wording if you truly need a second email.`;
     }
 
     const res = await emailTool.execute({
@@ -182,26 +180,28 @@ export const linkedinPost = tool(
     let draft = text;
     let brand = await outboundQualityGate(draft, "linkedin", config);
     if (!brand.proceed) {
-      const stripped = stripBannedPhrases(draft);
-      const strippedCheck = validateBrandVoice(stripped, "linkedin");
       const onlyBanned = validateBrandVoice(draft, "linkedin").violations.every((v) =>
         v.startsWith("found banned phrase"),
       );
-      if (onlyBanned && strippedCheck.valid) {
-        draft = stripped;
-        brand = { proceed: true, retryKey: brand.retryKey };
+      if (onlyBanned) {
+        draft = stripBannedPhrases(draft);
+        brand = {
+          proceed: true,
+          retryKey: brand.retryKey,
+          warning: "Auto-stripped banned phrases — review before posting.",
+        };
       } else {
         return `Revise before posting:\n${brand.fix}`;
       }
     }
 
-    const rejected = hitlGate({
+    const rejected = await hitlGate({
       action: "linkedin_post",
       title: "📣 Publish this LinkedIn post?",
       summary: brand.warning ?? "New LinkedIn post",
       preview: draft,
       args: { text: draft },
-    });
+    }, config);
     if (rejected) {
       clearBrandRetries(brand.retryKey);
       return rejected;
@@ -232,14 +232,14 @@ export const linkedinPost = tool(
 // ── Comms: Google Calendar (WRITE — requires approval) ────────────────────────
 
 export const createCalendarEvent = tool(
-  async ({ title, date, end_date, description, timezone }) => {
-    const rejected = hitlGate({
+  async ({ title, date, end_date, description, timezone }, config) => {
+    const rejected = await hitlGate({
       action: "create_calendar_event",
       title: `📅 Add to Google Calendar: "${title}"?`,
       summary: `Date: ${date}${end_date ? ` → ${end_date}` : ""}`,
       preview: description ? `${title}\n${description}` : title,
       args: { title, date, end_date, description, timezone },
-    });
+    }, config);
     if (rejected) return rejected;
 
     const res = await calendarTool.execute({

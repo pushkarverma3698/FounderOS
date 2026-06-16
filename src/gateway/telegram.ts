@@ -45,6 +45,8 @@ export {
   resumeOffice,
   formatApprovalCard,
   restorePendingApprovalAfterRestart,
+  withChatTurnLock,
+  clearStalePendingInterruptOnBoot,
 } from "./office-run.js";
 
 const log = logger.child({ module: "telegram" });

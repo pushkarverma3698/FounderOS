@@ -1,7 +1,7 @@
 /**
  * Crash recovery: after a bot restart the LangGraph checkpoint still holds the
  * interrupt but Telegram inline buttons on the old message are dead. Startup must
- * re-post a fresh approval card.
+ * re-post a fresh approval card for recent pauses only.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -15,6 +15,11 @@ const approval: ApprovalRequest = {
   summary: "Subject: Probe",
   preview: "one line",
   args: { to: "test@turicks.com" },
+};
+
+const recentOffice = {
+  getState: vi.fn().mockResolvedValue({ createdAt: new Date().toISOString() }),
+  invoke: vi.fn().mockResolvedValue({ messages: [] }),
 };
 
 describe("formatApprovalCard", () => {
@@ -35,10 +40,19 @@ describe("restorePendingApprovalAfterRestart", () => {
     vi.resetModules();
   });
 
-  it("re-posts a card when getPendingApproval returns an interrupt", async () => {
+  it("re-posts a card when getPendingApproval returns a recent interrupt", async () => {
     const sendMessage = vi.fn().mockResolvedValue(undefined);
+    vi.doMock("../../../src/db/queries.js", () => ({
+      getPendingInterrupt: vi.fn().mockResolvedValue({
+        interrupt_id: "id-1",
+        created_at: new Date(),
+        expires_at: new Date(Date.now() + 60_000),
+      }),
+      resolveInterrupt: vi.fn(),
+      cancelPendingApprovals: vi.fn(),
+    }));
     vi.doMock("../../../src/agents/office.js", () => ({
-      getOffice: vi.fn().mockResolvedValue({ getState: vi.fn() }),
+      getOffice: vi.fn().mockResolvedValue(recentOffice),
       getPendingApproval: vi.fn().mockResolvedValue(approval),
     }));
     vi.doMock("../../../src/gateway/telegram.js", () => ({
@@ -55,10 +69,41 @@ describe("restorePendingApprovalAfterRestart", () => {
     expect(String(html)).toContain("Resuming after restart");
   });
 
+  it("clears legacy interrupts without DB rows instead of re-posting", async () => {
+    const sendMessage = vi.fn();
+    vi.doMock("../../../src/db/queries.js", () => ({
+      getPendingInterrupt: vi.fn().mockResolvedValue(null),
+      resolveInterrupt: vi.fn(),
+      cancelPendingApprovals: vi.fn().mockResolvedValue(1),
+    }));
+    vi.doMock("../../../src/agents/office.js", () => ({
+      getOffice: vi.fn().mockResolvedValue({
+        getState: vi.fn().mockResolvedValue({}),
+        invoke: vi.fn().mockResolvedValue({ messages: [] }),
+      }),
+      getPendingApproval: vi.fn().mockResolvedValue(approval),
+    }));
+    vi.doMock("../../../src/gateway/telegram.js", () => ({
+      getBot: () => ({ api: { sendMessage } }),
+    }));
+
+    const { restorePendingApprovalAfterRestart } = await import(
+      "../../../src/gateway/office-run.js"
+    );
+    const ok = await restorePendingApprovalAfterRestart("123");
+    expect(ok).toBe(false);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it("is a no-op when no interrupt is pending", async () => {
     const sendMessage = vi.fn();
+    vi.doMock("../../../src/db/queries.js", () => ({
+      getPendingInterrupt: vi.fn(),
+      resolveInterrupt: vi.fn(),
+      cancelPendingApprovals: vi.fn(),
+    }));
     vi.doMock("../../../src/agents/office.js", () => ({
-      getOffice: vi.fn().mockResolvedValue({ getState: vi.fn() }),
+      getOffice: vi.fn().mockResolvedValue(recentOffice),
       getPendingApproval: vi.fn().mockResolvedValue(null),
     }));
     vi.doMock("../../../src/gateway/telegram.js", () => ({
