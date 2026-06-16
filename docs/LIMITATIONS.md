@@ -284,22 +284,25 @@ SDK · two-gate brand→judge (different model family, fail-open).
 
 ## Design intent clarifications (not bugs)
 
-### Rule #4 doc/reality mismatch
+### Rule #4 — now matches reality (updated 2026-06-16)
 
 CLAUDE.md Rule #4 states: "Always write to the `hitl_approvals` table BEFORE calling LangGraph
 `interrupt()`."
 
-**The real code does not do this.** `hitlGate` calls `interrupt()` directly with no DB pre-write.
-Crash-safety for pending HITL approvals comes from the **LangGraph Postgres checkpointer**: the
-graph state (including the pending interrupt node) is persisted before the process can crash, so
-a restart resumes correctly without needing a separate DB pre-write.
+**The code now does exactly this** (PRs #88/#92). `hitlGate` (`src/agents/agent-tools/hitl.ts`)
+checks `getPendingInterrupt(threadId)` and, if none exists, calls `createInterrupt(...)` to insert
+the pending `hitl_approvals` row **before** calling `interrupt()`. On LangGraph re-execution it
+skips the duplicate insert. The row is later resolved (approved/rejected/expired/cancelled) on the
+callback paths.
 
-The `hitl_approvals` table IS written — but it's written on the `approve` callback path, not
-before `interrupt()`. Rule #4 as written is aspirational; the actual safety guarantee (checkpointer
-persistence) is stronger and simpler.
+Two independent guarantees now hold together:
+- **Checkpointer persistence** — the LangGraph Postgres checkpointer persists the paused interrupt
+  node, so a crash/restart resumes correctly.
+- **DB-backed approval row** — written before `interrupt()`, so the daily stale-approval sweep and
+  boot-time orphan cleanup can reason about pending cards (and clear orphans with no DB row).
 
-**No code change needed.** The current implementation is correct. The CLAUDE.md rule should be
-updated in a future pass to accurately describe the checkpointer-based guarantee.
+An earlier revision of this doc claimed "the real code does not do this" — that was stale; this
+note was corrected when the pre-write landed.
 
 ### H3 — brand-retry in-memory counter (accepted design choice)
 
