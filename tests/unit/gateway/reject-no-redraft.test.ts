@@ -21,8 +21,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const clearThreadCheckpoints = vi.fn(async () => 1);
 const getOffice = vi.fn();
+const cancelPendingApprovals = vi.fn(async () => 1);
 
 vi.mock("../../../src/infra/checkpointer.js", () => ({ clearThreadCheckpoints }));
+vi.mock("../../../src/db/queries.js", async (importActual) => ({
+  ...(await importActual<typeof import("../../../src/db/queries.js")>()),
+  cancelPendingApprovals,
+}));
 vi.mock("../../../src/agents/office.js", async (importActual) => {
   const actual = await importActual<typeof import("../../../src/agents/office.js")>();
   return { ...actual, getOffice };
@@ -71,6 +76,7 @@ function pausedOffice(invoke: ReturnType<typeof vi.fn>) {
 describe("resumeOffice — rejection terminates the turn (no re-draft loop)", () => {
   beforeEach(() => {
     clearThreadCheckpoints.mockClear();
+    cancelPendingApprovals.mockClear();
     getOffice.mockReset();
   });
 
@@ -104,6 +110,14 @@ describe("resumeOffice — rejection terminates the turn (no re-draft loop)", ()
     expect(reply.text.toLowerCase()).toMatch(/cancel|reject/);
     // A new approval card would carry an inline keyboard — there must be none.
     expect(reply.opts?.reply_markup).toBeUndefined();
+  });
+
+  it("cancels ghost pending HITL approvals on rejection (G9 — no stale-reminder nag)", async () => {
+    getOffice.mockResolvedValue(pausedOffice(vi.fn()));
+
+    await resumeOffice(fakeCtx([]), "rejected");
+
+    expect(cancelPendingApprovals).toHaveBeenCalledWith("turicks:6775330211");
   });
 
   it("buildRejectionConfirmation names the rejected action for the founder", () => {

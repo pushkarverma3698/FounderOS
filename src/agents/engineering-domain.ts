@@ -20,6 +20,7 @@ import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { getModel } from "./model.js";
 import { createTrimmedPrompt } from "../infra/context-manager.js";
 import { ENGINEERING_SUBAGENT_TOOLS } from "./capabilities.js";
+import { assertContextIsolation, CONTEXT_ISOLATION_OUTPUT_MODE } from "./context-isolation.js";
 
 const workerBudget = { maxTokens: 4000 };
 
@@ -77,7 +78,7 @@ export function buildEngineeringDomain() {
     agents: [coder, qa, devops],
     llm,
     prompt: CTO_PROMPT,
-    outputMode: "last_message",
+    outputMode: assertContextIsolation(CONTEXT_ISOLATION_OUTPUT_MODE),
     includeAgentName: "inline",
     supervisorName: "engineering",
   }).compile({ name: "engineering" });
@@ -99,7 +100,7 @@ result verbatim. No preamble.`;
     agents: [engineering as any],
     llm,
     prompt: NESTED_PARENT_PROMPT,
-    outputMode: "last_message",
+    outputMode: assertContextIsolation(CONTEXT_ISOLATION_OUTPUT_MODE),
     includeAgentName: "inline",
   }).compile({ checkpointer });
 }

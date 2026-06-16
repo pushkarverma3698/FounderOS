@@ -21,7 +21,7 @@ import {
 import { buildBatchPrompt, splitBatch, parseCompanyArgs } from "../outbound/batch.js";
 import { getSystemStatus, formatRichStatus } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
-import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent } from "../db/queries.js";
+import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
@@ -100,6 +100,13 @@ export async function handleReset(ctx: Context): Promise<void> {
   if (chatId === undefined) return;
   try {
     const deleted = await clearThreadCheckpoints(threadIdFor(chatId));
+    // G9: also cancel any ghost pending HITL approval rows so the daily
+    // stale-approval reminder doesn't nag about a thread we just wiped.
+    try {
+      await cancelPendingApprovals(threadIdFor(chatId));
+    } catch (err) {
+      log.warn({ chatId, err: (err as Error).message }, "Cancel ghost approvals on /reset failed — non-fatal");
+    }
     await ctx.reply(
       `🧹 <b>Conversation reset.</b> Cleared ${deleted} memory snapshot${deleted === 1 ? "" : "s"}.\n` +
         `The office now starts fresh — past turns won't influence new replies.`,

@@ -7,7 +7,7 @@
  * Pattern: verbs + domain — createInterrupt, resolveInterrupt, logCost, checkIdempotency
  */
 
-import { and, count, desc, eq, gt, gte, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { tokenizeQuery, rankByTerms } from "./keyword-search.js";
 
@@ -130,6 +130,27 @@ export async function expireStaleInterrupts(): Promise<number> {
       and(
         eq(hitlApprovals.status, "pending"),
         lt(hitlApprovals.expires_at, new Date()),
+      ),
+    )
+    .returning({ interrupt_id: hitlApprovals.interrupt_id });
+  return result.length;
+}
+
+/**
+ * Cancel any still-pending HITL approvals for a thread (G9). Called when a thread
+ * is abandoned — founder rejected, run aborted/wedged, or /reset — so the daily
+ * stale-approval reminder never nags about a "ghost" approval whose interrupt has
+ * already been wiped from the checkpointer. Best-effort; returns the count cancelled.
+ */
+export async function cancelPendingApprovals(threadId: string): Promise<number> {
+  const db = getDb();
+  const result = await db
+    .update(hitlApprovals)
+    .set({ status: "cancelled", resolved_at: new Date() })
+    .where(
+      and(
+        eq(hitlApprovals.thread_id, threadId),
+        eq(hitlApprovals.status, "pending"),
       ),
     )
     .returning({ interrupt_id: hitlApprovals.interrupt_id });
@@ -355,11 +376,24 @@ export async function publishDeptEvent(
   return row.id;
 }
 
-/** Fetch unconsumed signals for a target department. */
+/**
+ * Atomically claim + return unconsumed signals for a target department (G2).
+ *
+ * The old implementation did SELECT-then-UPDATE in two statements, so two
+ * concurrent sweeps (overlapping cron, or any >1-process future) could both read
+ * the same rows and double-fire, and a crash between the two statements re-fired
+ * on the next sweep — the "exactly-once" guarantee was a comment, not a fact.
+ *
+ * This claims rows with `FOR UPDATE SKIP LOCKED` *inside* the UPDATE: a concurrent
+ * sweep skips already-locked rows instead of blocking or double-claiming, and an
+ * uncommitted transaction releases the lock leaving rows unconsumed. True
+ * exactly-once under concurrency, with no new infrastructure.
+ */
 export async function consumePendingEvents(tenantId: string, toDept: string) {
   const db = getDb();
-  const rows = await db
-    .select()
+
+  const claimed = db
+    .select({ id: deptSignals.id })
     .from(deptSignals)
     .where(
       and(
@@ -368,17 +402,18 @@ export async function consumePendingEvents(tenantId: string, toDept: string) {
         eq(deptSignals.to_dept, toDept),
       ),
     )
-    .orderBy(deptSignals.created_at);
+    .orderBy(deptSignals.created_at)
+    .for("update", { skipLocked: true });
 
-  if (rows.length > 0) {
-    const ids = rows.map((r) => r.id);
-    await db
-      .update(deptSignals)
-      .set({ consumed: true })
-      .where(sql`${deptSignals.id} = ANY(ARRAY[${sql.join(ids.map(id => sql`${id}::uuid`), sql`, `)}])`);
-  }
+  const rows = await db
+    .update(deptSignals)
+    .set({ consumed: true })
+    .where(inArray(deptSignals.id, claimed))
+    .returning();
 
-  return rows;
+  // UPDATE ... RETURNING gives no order guarantee — restore chronological order
+  // so downstream surfacing stays oldest-first.
+  return rows.sort((a, b) => (a.created_at?.getTime() ?? 0) - (b.created_at?.getTime() ?? 0));
 }
 
 // ── Founder Context (founder_context) ─────────────────────────────────────────

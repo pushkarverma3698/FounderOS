@@ -35,6 +35,19 @@ describe("buildBootReport", () => {
     expect(find(report, "Claude executor").detail).toContain("API-key");
   });
 
+  it("loudly warns when the OpenRouter cross-provider failover is unarmed (G1: total-outage risk)", () => {
+    const missing = find(buildBootReport({}), "LLM fallback (OpenRouter)");
+    expect(missing.live).toBe(false);
+    expect(missing.detail).toContain("NO cross-provider failover");
+    expect(missing.detail).toContain("OPENROUTER_API_KEY");
+  });
+
+  it("reports the OpenRouter failover armed when the key is present", () => {
+    const armed = find(buildBootReport({ OPENROUTER_API_KEY: "sk-or-v1-x" }), "LLM fallback (OpenRouter)");
+    expect(armed.live).toBe(true);
+    expect(armed.detail).toContain("armed");
+  });
+
   it("only reports LangSmith LIVE when both key AND tracing flag are set", () => {
     expect(find(buildBootReport({ LANGCHAIN_API_KEY: "ls-x" }), "Observability (LangSmith)").live).toBe(false);
     expect(
