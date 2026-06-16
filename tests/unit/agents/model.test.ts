@@ -9,6 +9,7 @@ import {
   getFallbackModelIds,
   getModel,
   getModelFallbackMiddleware,
+  getSupervisorModel,
   is503Error,
   isQuotaExhaustedError,
   parseModelId,
@@ -95,6 +96,14 @@ describe("fallback middleware config", () => {
       "anthropic:claude-haiku-4-5",
     ]);
     expect(getModelFallbackMiddleware()).toHaveLength(1);
+  });
+
+  it("skips fallback models whose API keys are absent (prod-safe boot)", () => {
+    process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5,google-genai:gemini-2.0-flash";
+    delete process.env["ANTHROPIC_API_KEY"];
+    delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
+    expect(() => getSupervisorModel()).not.toThrow();
+    expect(getModelFallbackMiddleware()).toEqual([]);
   });
 });
 
