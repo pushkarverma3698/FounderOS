@@ -453,6 +453,16 @@ export async function consumePendingEvents(tenantId: string, toDept: string) {
   return rows.sort((a, b) => (a.created_at?.getTime() ?? 0) - (b.created_at?.getTime() ?? 0));
 }
 
+/** Count unconsumed dept_signals (office pipeline backlog). */
+export async function countPendingDeptSignals(tenantId: string): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select({ total: count() })
+    .from(deptSignals)
+    .where(and(eq(deptSignals.tenant_id, tenantId), eq(deptSignals.consumed, false)));
+  return row?.total ?? 0;
+}
+
 // ── Founder Context (founder_context) ─────────────────────────────────────────
 
 /** Read the founder's current business context (returns {} if not yet set). */
