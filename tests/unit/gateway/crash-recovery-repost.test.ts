@@ -69,7 +69,7 @@ describe("restorePendingApprovalAfterRestart", () => {
     expect(String(html)).toContain("Resuming after restart");
   });
 
-  it("clears legacy interrupts without DB rows instead of re-posting", async () => {
+  it("clears orphan interrupts without DB rows instead of re-posting", async () => {
     const sendMessage = vi.fn();
     vi.doMock("../../../src/db/queries.js", () => ({
       getPendingInterrupt: vi.fn().mockResolvedValue(null),

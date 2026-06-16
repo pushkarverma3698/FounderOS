@@ -22,6 +22,7 @@ export type Seam =
   | "halt.blocked"
   | "wedge.recovered"
   | "checkpoint.trim"
+  | "guard.retry"
   | "turn.out"
   | "turn.error";
 

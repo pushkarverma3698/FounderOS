@@ -21,7 +21,7 @@
 
 import { InlineKeyboard, type Context } from "grammy";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
-import { RemoveMessage, type BaseMessage } from "@langchain/core/messages";
+import { RemoveMessage, SystemMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
 import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS } from "../core/config.js";
 import { computeHistoryTrim } from "../infra/history-window.js";
 import { logger } from "../infra/logger.js";
@@ -31,6 +31,10 @@ import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt } from "../db/queries.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 import { buildOfficeInput } from "./pre-router.js";
+import {
+  detectLinkedInRefusalWithoutTool,
+  detectUnbackedShellClaim,
+} from "./execution-guard.js";
 import { assertNonEmptyMessages } from "../infra/office-guard.js";
 import { isWedgedState, type WedgeState } from "../infra/wedge.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
@@ -363,20 +367,23 @@ export async function clearStalePendingInterruptOnBoot(chatId: string | number):
   if (!pending) return false;
 
   const dbRow = await getPendingInterrupt(threadId);
-  const state = (await office.getState(config).catch(() => null)) as { createdAt?: string } | null;
-  const checkpointAt = state?.createdAt ? new Date(state.createdAt).getTime() : 0;
-  const dbAt = dbRow?.created_at ? new Date(dbRow.created_at).getTime() : 0;
-  const anchor = Math.max(checkpointAt, dbAt);
-  const expired = dbRow ? dbRow.expires_at < new Date() : false;
-  const tooOld = anchor > 0 && Date.now() - anchor > HITL_RESTORE_MAX_AGE_MS;
-  const legacy = !dbRow && anchor === 0;
+  if (!dbRow) {
+    await office.invoke(new Command({ resume: "rejected" }), config);
+    await cancelPendingApprovals(threadId);
+    log.info({ chatId, title: pending.title }, "Cleared orphan HITL interrupt on boot (no DB row)");
+    return true;
+  }
 
-  if (!expired && !tooOld && !legacy) return false;
+  const dbAt = dbRow.created_at ? new Date(dbRow.created_at).getTime() : 0;
+  const expired = dbRow.expires_at < new Date();
+  const tooOld = dbAt > 0 && Date.now() - dbAt > HITL_RESTORE_MAX_AGE_MS;
+
+  if (!expired && !tooOld) return false;
 
   if (dbRow) await resolveInterrupt(dbRow.interrupt_id, "expired");
   await office.invoke(new Command({ resume: "rejected" }), config);
   await cancelPendingApprovals(threadId);
-  log.info({ chatId, title: pending.title, legacy, tooOld, expired }, "Cleared stale HITL interrupt on boot");
+  log.info({ chatId, title: pending.title, tooOld, expired }, "Cleared stale HITL interrupt on boot");
   return true;
 }
 
@@ -445,6 +452,35 @@ export async function trimThreadHistory(
 }
 
 // ── Route an incoming message into the office ──────────────────────────────────
+
+function needsExecutionGuardRetry(
+  userText: string,
+  messages: OfficeMessage[],
+  reply: string,
+): "shell" | "linkedin" | null {
+  if (detectUnbackedShellClaim(userText, messages, reply)) return "shell";
+  if (detectLinkedInRefusalWithoutTool(userText, messages, reply)) return "linkedin";
+  return null;
+}
+
+function buildGuardRetryMessages(kind: "shell" | "linkedin", userText: string): BaseMessage[] {
+  if (kind === "shell") {
+    return [
+      new SystemMessage(
+        "[RETRY DIRECTIVE: Your previous reply falsely claimed a shell command ran. " +
+          "Call run_shell NOW with the exact command. Do NOT claim execution without an approval card.]",
+      ),
+      new HumanMessage(userText),
+    ];
+  }
+  return [
+    new SystemMessage(
+      "[RETRY DIRECTIVE: Never refuse LinkedIn posts for banned phrases. " +
+        "Write the post, call linkedin_post — the tool auto-strips banned phrases before the approval card.]",
+    ),
+    new HumanMessage(userText),
+  ];
+}
 
 /** Route the literal text of the incoming message into the office. */
 export async function routeToOffice(ctx: Context): Promise<void> {
@@ -552,7 +588,7 @@ async function runOfficeTextLocked(ctx: Context, text: string, chatId: number | 
 
     log.debug({ chatId, ...budget.summary }, "Run complete — budget summary");
 
-    const approval = await getPendingApproval(office, config);
+    let approval = await getPendingApproval(office, config);
     if (approval) {
       trace.event("hitl.interrupt", { title: approval.title });
       await sendApprovalCard(ctx, approval);
@@ -560,8 +596,37 @@ async function runOfficeTextLocked(ctx: Context, text: string, chatId: number | 
     }
 
     // Slice to current turn — prevents stale reply / phantom tool error
-    const freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
-    const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
+    let freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
+    let freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
+
+    const guardKind = needsExecutionGuardRetry(text, freshRes.messages ?? [], finalReply(freshRes));
+    if (guardKind) {
+      trace.event("guard.retry", { kind: guardKind });
+      log.warn({ chatId, kind: guardKind }, "Execution guard retry — model skipped gated tool");
+      const retryMessages = buildGuardRetryMessages(guardKind, text);
+      assertNonEmptyMessages(retryMessages, "executionGuardRetry");
+      const retryBefore = (await office.getState(config).catch(() => null)) as {
+        values?: { messages?: OfficeMessage[] };
+      } | null;
+      const retryBaseLen = (retryBefore?.values?.messages ?? []).length;
+      const retryRes = (await office.invoke(
+        { messages: retryMessages },
+        {
+          ...config,
+          callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
+          metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
+        },
+      )) as { messages?: OfficeMessage[] };
+      approval = await getPendingApproval(office, config);
+      if (approval) {
+        trace.event("hitl.interrupt", { title: approval.title, guardRetry: guardKind });
+        await sendApprovalCard(ctx, approval);
+        return;
+      }
+      freshMessages = sliceFreshMessages(retryRes.messages ?? [], retryBaseLen);
+      freshRes = { messages: freshMessages.length > 0 ? freshMessages : retryRes.messages };
+    }
+
     await sendResult(ctx, freshRes, chatId);
     trace.event("turn.out", {
       toolErrors: collectToolErrors(freshRes).length,
