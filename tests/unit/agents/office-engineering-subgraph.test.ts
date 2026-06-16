@@ -9,6 +9,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { MemorySaver } from "@langchain/langgraph";
 
 const ENG_NODE = "engineering";
@@ -37,6 +39,12 @@ describe("P2 — engineering subgraph flag wiring", () => {
     for (const dept of ["research", "comms", "engineering", "marketing", "sales", "personal", "jobhunt"]) {
       expect(nodes).toContain(dept);
     }
+  });
+
+  it("supervisor llm is plain getModel() — withFallbacks breaks bindTools", async () => {
+    const src = readFileSync(join(process.cwd(), "src/agents/office.ts"), "utf8");
+    expect(src).toMatch(/const llm = getModel\(\)/);
+    expect(src).not.toMatch(/getSupervisorModel\(\)/);
   });
 
   it("flag on: office still exposes the SAME routable 'engineering' node (name unchanged)", async () => {

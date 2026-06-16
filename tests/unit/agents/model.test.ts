@@ -105,6 +105,13 @@ describe("fallback middleware config", () => {
     expect(() => getSupervisorModel()).not.toThrow();
     expect(getModelFallbackMiddleware()).toEqual([]);
   });
+
+  it("supervisor model exposes bindTools (createSupervisor hard requirement)", () => {
+    process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5";
+    delete process.env["ANTHROPIC_API_KEY"];
+    const model = getSupervisorModel() as unknown as { bindTools?: unknown };
+    expect(typeof model.bindTools).toBe("function");
+  });
 });
 
 describe("error classifiers kept for logs and retry policy tests", () => {
