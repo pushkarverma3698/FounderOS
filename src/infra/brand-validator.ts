@@ -113,6 +113,19 @@ export function validateBrandVoice(text: string, channel: Channel): BrandValidat
 }
 
 /**
+ * Deterministically remove banned phrases (case-insensitive) from draft text.
+ * Used when the only violations are banned phrases — auto-sanitize then HITL.
+ */
+export function stripBannedPhrases(text: string): string {
+  let out = text;
+  for (const phrase of BANNED_PHRASES) {
+    const re = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    out = out.replace(re, "").replace(/\s{2,}/g, " ").trim();
+  }
+  return out;
+}
+
+/**
  * Build a deterministic, single-shot correction message for the agent.
  *
  * Generic "word count too low" guidance makes the model overshoot and oscillate

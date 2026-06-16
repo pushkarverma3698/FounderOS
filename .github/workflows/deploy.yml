@@ -70,9 +70,10 @@ jobs:
             # While Gemini credits are depleted, prefer OpenRouter when the key is
             # available in GitHub secrets — avoids re-encoding the full PROD_DOTENV blob.
             if [ -n "${OPENROUTER_API_KEY:-}" ]; then
-              grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY)=' .env > .env.patched || true
+              grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
               {
                 printf '%s\n' 'AGENT_MODEL=openrouter:openai/gpt-4o-mini'
+                printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5,google-genai:gemini-2.0-flash'
                 printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
               } >> .env.patched
               mv .env.patched .env
