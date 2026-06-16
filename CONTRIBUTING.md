@@ -45,3 +45,17 @@ methodology and latest results.
 - Conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
 - Keep PRs focused; one concern each.
 - Update the relevant doc in `docs/` in the same PR when behavior changes.
+
+### Branch model (stable / beta / main)
+
+Production deploys from **`main`** only. All feature work integrates on **`beta`** first.
+
+```
+feat/* (cut from stable) → PR → beta → PR → stable → PR → main (CD deploy)
+```
+
+1. Cut branches from **`stable`**, not from `main` or `beta`.
+2. Open PRs to **`beta`** — CI + branch-policy workflow must pass.
+3. Only the founder merges **`beta` → `stable`** and **`stable` → `main`**.
+
+Full runbook: [`docs/process/BRANCH-MODEL.md`](docs/process/BRANCH-MODEL.md).

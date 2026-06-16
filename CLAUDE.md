@@ -79,7 +79,7 @@ This applies to: Gumroad listings, LinkedIn posts, email templates, brand guidel
 - Branch naming: `phase{N}/{short-description}` for phase work, `fix/{issue}` for bugs, `feat/{name}` for standalone features
 - Every branch gets a PR before merging to main — human approves merge
 - Current working branch: `main` (v2 merged 2026-06-01)
-- Branch model: `main`=production, `beta`=integration, `feat/*`=work. See `docs/process/BRANCH-MODEL.md` and ADR-027 (`docs/decisions/027-tool-count-and-handoff-rules.md`).
+- Branch model: `main`=production (founder-only merge), `stable`=release line, `beta`=integration, `feat/*`=work cut from `stable`. Flow: `feat/* → beta → stable → main`. See `docs/process/BRANCH-MODEL.md`.
 
 ### After Completing Work
 1. `pnpm test` must be green
