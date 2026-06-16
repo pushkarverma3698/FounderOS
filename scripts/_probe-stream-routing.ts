@@ -23,7 +23,7 @@ async function probeRoute(label: string, task: string, expected: string): Promis
         const tcName: string = tc.name ?? tc.function?.name ?? "";
         if (tcName.startsWith("transfer_to_")) {
           const agent = tcName.replace("transfer_to_", "");
-          stream.return?.(undefined);
+          stream.return?.();
           const ok = agent === expected;
           return { label, route: agent, expected, ok };
         }
