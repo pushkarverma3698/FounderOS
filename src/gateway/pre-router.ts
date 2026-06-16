@@ -48,7 +48,11 @@ const EXPLICIT_PREFIX = /\[route directly to (\w+) department\]/i;
 
 /** Filesystem / shell / browser on the founder's Mac → personal. Highest-precedence OS signal. */
 const PERSONAL_RE =
-  /(^|\s)~\/|\/Users\/pushkarverma|\b(desktop|downloads|documents|home folder|projects folder)\b|files? (in|on) (my|the)\b|\.(zshrc|bashrc|ssh|env)\b|\bmy (mac|laptop|machine|computer)\b|\b(safari|browser)\b|\b(send|attach|share) (me )?(the |this )?file\b|\battachment\b/i;
+  /(^|\s)~\/|\/Users\/pushkarverma|\b(desktop|downloads|documents|home folder|projects folder)\b|files? (in|on) (my|the)\b|\.(zshrc|bashrc|ssh|env)\b|\bmy (mac|laptop|machine|computer)\b|\b(safari|browser)\b|\b(send|attach|share) (me )?(the |this )?file\b|\battachment\b|\brun (this )?in (my )?(the )?terminal\b|\bterminal:\s*\w/i;
+
+/** Multi-department orchestration (brief + github + context) — let supervisor sequence. */
+const MULTI_DEPT_ORCHESTRATION_RE =
+  /\b(monday|weekly)\b[^.?!]{0,80}\b(github|issues?|context)\b|\b(github|issues?)\b[^.?!]{0,80}\b(monday|weekly|brief|plan)\b|\bresearch\b[^.?!]{0,60}\b(then|and)\b[^.?!]{0,40}\b(github|issue)\b/i;
 
 /** LinkedIn is marketing's ONLY domain — unambiguous, checked before code/email verbs. */
 const MARKETING_RE = /\blinkedin\b/i;
@@ -97,6 +101,9 @@ export function preRouteDepartment(input: string): RoutableDept | null {
     const dept = explicit[1]?.toLowerCase() as RoutableDept;
     if (dept && ROUTABLE_DEPTS.has(dept)) return dept;
   }
+
+  // Multi-step cross-department requests — supervisor must orchestrate.
+  if (MULTI_DEPT_ORCHESTRATION_RE.test(input)) return null;
 
   // 1..7 ordered keyword rules.
   for (const [pattern, dept] of RULES) {

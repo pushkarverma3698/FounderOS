@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { validateBrandVoice, brandFixGuidance, BANNED_PHRASES } from "../../../src/infra/brand-validator.js";
+import { validateBrandVoice, brandFixGuidance, stripBannedPhrases, BANNED_PHRASES } from "../../../src/infra/brand-validator.js";
 
 // ── Banned phrases ─────────────────────────────────────────────────────────────
 
@@ -209,5 +209,15 @@ describe("brandFixGuidance", () => {
     const noHook = `We are building something new.\n\n${GOOD_BODY}`;
     const msg = brandFixGuidance(noHook, "linkedin");
     expect(msg).toMatch(/hook/);
+  });
+});
+
+describe("stripBannedPhrases", () => {
+  it("removes banned phrases deterministically", () => {
+    const raw = "Our game-changing innovative solution creates synergy for stakeholders.";
+    const cleaned = stripBannedPhrases(raw);
+    expect(cleaned.toLowerCase()).not.toContain("game-changing");
+    expect(cleaned.toLowerCase()).not.toContain("synergy");
+    expect(validateBrandVoice(cleaned, "general").violations.filter((v) => v.startsWith("found banned"))).toHaveLength(0);
   });
 });

@@ -112,6 +112,38 @@ export function validateBrandVoice(text: string, channel: Channel): BrandValidat
   return { valid: violations.length === 0, violations };
 }
 
+/** Strip common suffixes so hyphenated compounds match changer/changing/changed. */
+function lastTokenStem(token: string): string {
+  const bare = token.replace(/(ing|ed|er|es|s)$/i, "");
+  return bare.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function phraseToStripRegex(phrase: string): RegExp {
+  const tokens = phrase.toLowerCase().split(/[\s-]+/);
+  if (tokens.length === 1) {
+    const stem = lastTokenStem(tokens[0]!);
+    return new RegExp(`\\b${stem}\\w*\\b`, "gi");
+  }
+  const head = tokens
+    .slice(0, -1)
+    .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("[\\s-]");
+  const tail = lastTokenStem(tokens[tokens.length - 1]!);
+  return new RegExp(`${head}[\\s-]${tail}\\w*`, "gi");
+}
+
+/**
+ * Deterministically remove banned phrases (case-insensitive) from draft text.
+ * Used when the only violations are banned phrases — auto-sanitize then HITL.
+ */
+export function stripBannedPhrases(text: string): string {
+  let out = text;
+  for (const phrase of [...BANNED_PHRASES].sort((a, b) => b.length - a.length)) {
+    out = out.replace(phraseToStripRegex(phrase), "").replace(/\s{2,}/g, " ").trim();
+  }
+  return out;
+}
+
 /**
  * Build a deterministic, single-shot correction message for the agent.
  *

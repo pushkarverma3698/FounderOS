@@ -117,6 +117,16 @@ export function getModel(): BaseChatModel {
   return buildModel(parsed, resolveTemperature());
 }
 
+/** Supervisor model with env-configured fallbacks (departments use middleware instead). */
+export function getSupervisorModel(): BaseChatModel {
+  const primary = getModel();
+  const fallbacks = getFallbackModelIds();
+  if (fallbacks.length === 0) return primary;
+  return primary.withFallbacks({
+    fallbacks: fallbacks.map((id) => buildModel(parseModelId(id), resolveTemperature())),
+  }) as unknown as BaseChatModel;
+}
+
 export function getModelFallbackMiddleware() {
   const fallbacks = getFallbackModelIds();
   if (fallbacks.length === 0) return [];

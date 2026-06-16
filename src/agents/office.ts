@@ -19,7 +19,7 @@
 import { createSupervisor } from "@langchain/langgraph-supervisor";
 import { createAgent } from "langchain";
 import type { CompiledStateGraph, BaseCheckpointSaver } from "@langchain/langgraph";
-import { getModel, getModelFallbackMiddleware } from "./model.js";
+import { getModel, getModelFallbackMiddleware, getSupervisorModel } from "./model.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
 import { createAgentMiddleware, createTrimmedPrompt } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS, SUPERVISOR_TOOLS } from "./capabilities.js";
@@ -68,7 +68,8 @@ const SEARCH_TOOL_LIMITS = {
  * Exported for tests (inject MemorySaver). Production uses getOffice().
  */
 export function buildOffice(checkpointer: BaseCheckpointSaver) {
-  const llm = getModel();
+  const llm = getSupervisorModel();
+  const deptModel = getModel();
 
   // ── Phase C tools (available across departments) ──────────────────────────
   // search_knowledge: turicks-brain keyword search (no LLM cost)
@@ -91,7 +92,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   ];
   // research: web search + internal knowledge + ICP scoring (no read_emails — inbox stays in comms)
   const research = createAgent({
-    model: llm,
+    model: deptModel,
     tools: DEPARTMENT_TOOLS["research"]!,
     name: "research",
     description: DEPARTMENT_DESCRIPTIONS.research,
@@ -101,7 +102,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
 
   // comms: Gmail + Calendar only (linkedin_post moved to marketing — single owner)
   const comms = createAgent({
-    model: llm,
+    model: deptModel,
     tools: DEPARTMENT_TOOLS["comms"]!,
     name: "comms",
     description: DEPARTMENT_DESCRIPTIONS.comms,
@@ -119,7 +120,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   const engineering = ENGINEERING_SUBGRAPH_ENABLED
     ? buildEngineeringDomain()
     : createAgent({
-        model: llm,
+        model: deptModel,
         tools: DEPARTMENT_TOOLS["engineering"]!,
         name: "engineering",
         description: DEPARTMENT_DESCRIPTIONS.engineering,
@@ -131,7 +132,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
 
   /** Marketing: LinkedIn content in Turicks brand voice. */
   const marketing = createAgent({
-    model: llm,
+    model: deptModel,
     tools: DEPARTMENT_TOOLS["marketing"]!,
     name: "marketing",
     description: DEPARTMENT_DESCRIPTIONS.marketing,
@@ -141,7 +142,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
 
   /** Sales: researches prospects + writes cold outreach emails (HITL-gated). */
   const sales = createAgent({
-    model: llm,
+    model: deptModel,
     tools: DEPARTMENT_TOOLS["sales"]!,
     name: "sales",
     description: DEPARTMENT_DESCRIPTIONS.sales,
@@ -152,7 +153,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   /** Personal: senior engineer on the founder's laptop — files, shell, browser
    *  (write/shell/browser HITL-gated; reads are instant). */
   const personal = createAgent({
-    model: llm,
+    model: deptModel,
     tools: DEPARTMENT_TOOLS["personal"]!,
     name: "personal",
     description: DEPARTMENT_DESCRIPTIONS.personal,
@@ -163,7 +164,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   /** Job-Hunt: researches roles + reads CV from personal-rag + HITL-drafts applications.
    *  ADR-015: personal-rag read-only; NEVER auto-submit; send_email HITL-gated. */
   const jobhunt = createAgent({
-    model: llm,
+    model: deptModel,
     tools: DEPARTMENT_TOOLS["jobhunt"]!,
     name: "jobhunt",
     description: DEPARTMENT_DESCRIPTIONS.jobhunt,

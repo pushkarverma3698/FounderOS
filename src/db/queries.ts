@@ -225,6 +225,43 @@ export async function hasBeenAudited(idempotencyKey: string): Promise<boolean> {
   return row !== undefined;
 }
 
+/** Default window for blocking duplicate outreach to the same recipient. */
+export const OUTBOUND_RECIPIENT_DEDUP_MS = 30 * 60 * 1000;
+
+/**
+ * True if we already performed `action` to `recipient` within `withinMs`.
+ * Used to block accidental double-sends when the model rephrases subject/body
+ * ("same email as before") but the exact idempotency key differs.
+ */
+export async function hasRecentOutboundToRecipient(
+  tenantId: string,
+  action: string,
+  recipient: string,
+  withinMs = OUTBOUND_RECIPIENT_DEDUP_MS,
+): Promise<boolean> {
+  const db = getDb();
+  const since = new Date(Date.now() - withinMs);
+  const rows = await db
+    .select({ payload: actionLog.payload })
+    .from(actionLog)
+    .where(
+      and(
+        eq(actionLog.tenant_id, tenantId),
+        eq(actionLog.action, action),
+        gt(actionLog.created_at, since),
+      ),
+    )
+    .orderBy(desc(actionLog.created_at))
+    .limit(20);
+
+  const target = recipient.trim().toLowerCase();
+  return rows.some((row) => {
+    const payload = row.payload as { to?: string; recipient?: string } | null;
+    const to = (payload?.to ?? payload?.recipient ?? "").trim().toLowerCase();
+    return to === target;
+  });
+}
+
 /**
  * Write an action log entry AFTER a successful external action.
  * Silently ignores duplicate key violations (already performed).

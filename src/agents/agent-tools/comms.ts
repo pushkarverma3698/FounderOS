@@ -13,8 +13,13 @@ import { emailTool } from "../../tools/email.js";
 import { readEmailsTool } from "../../tools/email-reader.js";
 import { linkedinPostTool } from "../../tools/linkedin.js";
 import { calendarTool } from "../../tools/calendar.js";
-import { isSuppressed } from "../../db/queries.js";
-import { validateBrandVoice, brandFixGuidance, type Channel } from "../../infra/brand-validator.js";
+import { hasRecentOutboundToRecipient, isSuppressed } from "../../db/queries.js";
+import {
+  validateBrandVoice,
+  brandFixGuidance,
+  stripBannedPhrases,
+  type Channel,
+} from "../../infra/brand-validator.js";
 import {
   BRAND_MAX_RETRIES,
   brandRetryKey,
@@ -135,6 +140,10 @@ export const sendEmail = tool(
       return `BLOCKED: ${to} is on the do-not-contact list. Email not sent.`;
     }
 
+    if (await hasRecentOutboundToRecipient(TENANT, "send_email", to)) {
+      return `Already emailed ${to} recently — not re-sent (duplicate outreach guard). Say "force send" with new wording if you truly need a second email.`;
+    }
+
     const res = await emailTool.execute({
       to,
       subject,
@@ -170,15 +179,28 @@ export const linkedinPost = tool(
     // self-corrects with exact-delta guidance; past the cap we STOP re-drafting
     // (this is what prevents the 146↔113 word-count oscillation from running to
     // the recursion limit) and gate the closest draft with violations noted.
-    const brand = await outboundQualityGate(text, "linkedin", config);
-    if (!brand.proceed) return `Revise before posting:\n${brand.fix}`;
+    let draft = text;
+    let brand = await outboundQualityGate(draft, "linkedin", config);
+    if (!brand.proceed) {
+      const stripped = stripBannedPhrases(draft);
+      const strippedCheck = validateBrandVoice(stripped, "linkedin");
+      const onlyBanned = validateBrandVoice(draft, "linkedin").violations.every((v) =>
+        v.startsWith("found banned phrase"),
+      );
+      if (onlyBanned && strippedCheck.valid) {
+        draft = stripped;
+        brand = { proceed: true, retryKey: brand.retryKey };
+      } else {
+        return `Revise before posting:\n${brand.fix}`;
+      }
+    }
 
     const rejected = hitlGate({
       action: "linkedin_post",
       title: "📣 Publish this LinkedIn post?",
       summary: brand.warning ?? "New LinkedIn post",
-      preview: text,
-      args: { text },
+      preview: draft,
+      args: { text: draft },
     });
     if (rejected) {
       clearBrandRetries(brand.retryKey);
@@ -187,8 +209,8 @@ export const linkedinPost = tool(
     clearBrandRetries(brand.retryKey);
 
     const res = await linkedinPostTool.execute({
-      text,
-      idempotency_key: idemKey("linkedin", text),
+      text: draft,
+      idempotency_key: idemKey("linkedin", draft),
       tenant_id: TENANT,
     });
 

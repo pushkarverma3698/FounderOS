@@ -156,6 +156,24 @@ describe("preRouteDepartment", () => {
     expect(preRouteDepartment("Score Acme Corp as a Turicks prospect against our ICP.")).toBe("research");
   });
 
+  it("routes terminal shell commands to personal", () => {
+    expect(preRouteDepartment('run this in terminal: echo "FounderOS E2E test"')).toBe("personal");
+  });
+
+  it("defers multi-department monday brief orchestration to the supervisor", () => {
+    expect(
+      preRouteDepartment("monday brief pls: context memory + my open github issues + bullet plan"),
+    ).toBeNull();
+  });
+
+  it("defers research-then-github multi-step to the supervisor", () => {
+    expect(
+      preRouteDepartment(
+        "Research langgraph js limitations then create a GitHub issue on FounderOS with findings",
+      ),
+    ).toBeNull();
+  });
+
   // ── Invariant: the pre-router is NEVER wrong on the golden set ──────────────
   // It may return null (defer to the supervisor) but must never fire a department
   // that differs from the golden task's expected route.

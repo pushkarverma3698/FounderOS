@@ -43,6 +43,8 @@ export {
   trimThreadHistory,
   runOfficeText,
   resumeOffice,
+  formatApprovalCard,
+  restorePendingApprovalAfterRestart,
 } from "./office-run.js";
 
 const log = logger.child({ module: "telegram" });
