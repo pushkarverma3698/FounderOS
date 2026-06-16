@@ -8,6 +8,17 @@
  * or project_workflow (run_command: gh pr create …) depending on model routing. Both are
  * HITL-gated. The tests check that AN interrupt surfaces and that the appropriate mock
  * is called (or not) — without prescribing which exact tool the LLM picks.
+ *
+ * ⚠️ FUNDED-GEMINI LIVE GATE (rule #19.6 / hierarchy plan P2): this exercises the
+ * 3-level nested supervisor (parent → engineering(CTO) → worker). Nested
+ * createSupervisor routing is reliable on Gemini 2.5 Flash (Phase 5 verified 3/3)
+ * but the OpenRouter gpt-4o-mini *fallback* loops on deep nesting — so when the
+ * Gemini key is present-but-depleted (429 credits), this test legitimately fails
+ * (every call falls back to gpt-4o-mini). That is a TRUE signal that the live
+ * 3-level path is unverifiable until billing is topped up — not a code bug. The
+ * production flag (ENGINEERING_SUBGRAPH) stays OFF until this gate passes on
+ * funded Gemini over real Telegram. recursionLimit is pinned to the production
+ * OFFICE_RECURSION_LIMIT so the test matches prod step budget.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemorySaver, Command } from "@langchain/langgraph";
