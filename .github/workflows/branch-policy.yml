@@ -1,0 +1,37 @@
+name: Branch policy
+
+# Enforces the stable → beta → main promotion ladder in CI so agents cannot
+# accidentally open feat/* → main and deploy broken code to production.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  promotion-ladder:
+    name: Verify PR base/head branches
+    runs-on: ubuntu-latest
+    steps:
+      - name: main only accepts stable
+        if: github.base_ref == 'main' && github.head_ref != 'stable'
+        run: |
+          echo "::error::PRs to main must come from branch 'stable' only."
+          echo "Flow: feat/* → beta → stable → main"
+          exit 1
+
+      - name: stable only accepts beta
+        if: github.base_ref == 'stable' && github.head_ref != 'beta'
+        run: |
+          echo "::error::PRs to stable must come from branch 'beta' only."
+          echo "When beta is validated, open PR: beta → stable"
+          exit 1
+
+      - name: beta accepts feature branches only
+        if: >-
+          github.base_ref == 'beta' &&
+          !startsWith(github.head_ref, 'feat/') &&
+          !startsWith(github.head_ref, 'fix/') &&
+          !startsWith(github.head_ref, 'chore/') &&
+          !startsWith(github.head_ref, 'cursor/')
+        run: |
+          echo "::error::PRs to beta must come from feat/*, fix/*, chore/*, or cursor/* branches."
+          exit 1

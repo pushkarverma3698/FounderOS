@@ -32,6 +32,9 @@ For EACH company, return exactly one line in this format:
   <name> — ICP <score>/10 — <≤12-word rationale> — Next: <send | research | skip>
 
 Then finish with a single "Shortlist:" line naming the companies scoring 7+ in priority order (or "Shortlist: none" if there are none).
+
+For EVERY company scoring 8–10, ALSO call publish_signal(event_type:"lead_discovered", payload:{company, icpScore: score*10, source:"outbound_batch", notes:"≤12-word rationale"}) so sales gets a proactive nudge on the hourly sweep. Do NOT publish for scores below 8.
+
 Be concise — this is a mobile digest. Do not draft any emails; scoring only.
 
 Companies:

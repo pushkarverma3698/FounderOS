@@ -237,6 +237,14 @@ export function startScheduler(): void {
     });
   });
 
+  // Wednesday 9:05am — mid-week outbound reminder
+  cron.schedule("5 9 * * 3", () => {
+    sendOutboundNudge().catch((err) => {
+      log.error({ err: (err as Error).message }, "Mid-week outbound nudge failed");
+      sendToChat(`⚠️ Outbound nudge failed: ${(err as Error).message}`, "HTML").catch(() => {});
+    });
+  });
+
   // Hourly — consume durable dept_signals (lead_discovered → revenue nudge).
   // Rows are marked consumed atomically, so each lead surfaces exactly once.
   cron.schedule("0 * * * *", () => {
@@ -246,5 +254,5 @@ export function startScheduler(): void {
     });
   });
 
-  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), stale approval check (daily 9am), dept-signal sweep (hourly)");
+  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am, Wed 9:05am), stale approval check (daily 9am), dept-signal sweep (hourly)");
 }

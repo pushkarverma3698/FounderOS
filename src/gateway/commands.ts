@@ -21,7 +21,7 @@ import {
 import { buildBatchPrompt, splitBatch, parseCompanyArgs } from "../outbound/batch.js";
 import { getSystemStatus, formatRichStatus } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
-import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals } from "../db/queries.js";
+import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals, countPendingDeptSignals } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
@@ -177,11 +177,13 @@ export async function handleStatus(ctx: Context): Promise<void> {
     todayStart.setHours(0, 0, 0, 0);
 
     // Fetch all data in parallel; each query has its own fallback
-    const [systemData, founderCtx, activity, lastEvent] = await Promise.all([
+    const [systemData, founderCtx, activity, lastEvent, outboundTargets, pendingSignals] = await Promise.all([
       getSystemStatus(),
       getFounderContext(TENANT).catch(() => ({} as Record<string, unknown>)),
       getActivitySummary(TENANT, todayStart).catch(() => ({} as Record<string, number>)),
       getLastEpisodicEvent(TENANT).catch(() => null),
+      getOutboundTargets(TENANT).catch(() => [] as string[]),
+      countPendingDeptSignals(TENANT).catch(() => 0),
     ]);
 
     const activeClients = Array.isArray(founderCtx["active_clients"])
@@ -209,6 +211,8 @@ export async function handleStatus(ctx: Context): Promise<void> {
       focus,
       lastEventContent: lastEvent?.content ?? null,
       lastEventRelativeTime,
+      outboundTargetCount: outboundTargets.length,
+      pendingSignals,
     });
 
     await ctx.reply(message, { parse_mode: "HTML" });
