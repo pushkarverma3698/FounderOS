@@ -21,16 +21,23 @@
  * to trimMessages being a Runnable) but has no side effects.
  */
 
-import { trimMessages, SystemMessage } from "@langchain/core/messages";
+import { trimMessages, SystemMessage, ToolMessage, isAIMessage, isToolMessage } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
 import { createMiddleware, dynamicSystemPromptMiddleware } from "langchain";
 import type { AnyAgentMiddleware } from "langchain";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/** Default per-message char cap (~3k tokens) before truncation. */
+export const DEFAULT_MAX_MESSAGE_CHARS = 12_000;
+
 export interface TrimOptions {
   /** Token budget for history (excluding system message). Default: 4000. */
   maxTokens?: number;
+  /** Max chars per message before truncation. Default: 12000. */
+  maxMessageChars?: number;
+  /** Per-tool completed-call caps enforced deterministically in middleware. */
+  toolCallLimits?: Record<string, number>;
 }
 
 /**
@@ -74,6 +81,73 @@ export function stripMessageNames(messages: BaseMessage[]): BaseMessage[] {
   });
 }
 
+export function countCompletedToolCalls(messages: BaseMessage[], toolName: string): number {
+  const pendingIds = new Set<string>();
+  let completed = 0;
+
+  for (const message of messages) {
+    if (isAIMessage(message)) {
+      for (const toolCall of message.tool_calls ?? []) {
+        if (toolCall.name === toolName && toolCall.id) {
+          pendingIds.add(toolCall.id);
+        }
+      }
+      continue;
+    }
+
+    if (!isToolMessage(message)) continue;
+
+    const toolCallId = message.tool_call_id;
+    if (toolCallId && pendingIds.has(toolCallId)) {
+      pendingIds.delete(toolCallId);
+      completed += 1;
+      continue;
+    }
+
+    if ((message as { name?: string }).name === toolName) {
+      completed += 1;
+    }
+  }
+
+  return completed;
+}
+
+function clampOversizedMessages(messages: BaseMessage[], maxChars: number): BaseMessage[] {
+  return messages.map((message) => {
+    if (typeof message.content !== "string" || message.content.length <= maxChars) {
+      return message;
+    }
+    const dropped = message.content.length - maxChars;
+    const clone = Object.assign(Object.create(Object.getPrototypeOf(message)), message) as BaseMessage;
+    clone.content =
+      `${message.content.slice(0, maxChars)}\n\n` +
+      `[Truncated ${dropped} chars — input exceeded ${maxChars} char budget. Answer from the visible excerpt.]`;
+    return clone;
+  });
+}
+
+function filterToolsByLimits<T extends { name?: string }>(
+  messages: BaseMessage[],
+  tools: T[] | undefined,
+  limits: Record<string, number> | undefined,
+): T[] | undefined {
+  if (!tools || !limits) return tools;
+  return tools.filter((tool) => {
+    const limit = limits[tool.name ?? ""];
+    if (limit === undefined) return true;
+    return countCompletedToolCalls(messages, tool.name ?? "") < limit;
+  });
+}
+
+function toolLimitExceededMessage(toolName: string, limit: number, toolCallId: string): ToolMessage {
+  return new ToolMessage({
+    content:
+      `${toolName} call limit (${limit}) reached for this turn. ` +
+      "Synthesize your answer from prior tool results now — do not retry this tool.",
+    tool_call_id: toolCallId,
+  });
+}
+
 async function trimHistory(rawMessages: BaseMessage[], maxTokens: number): Promise<BaseMessage[]> {
   const historyOnly = rawMessages.filter((m) => !(m instanceof SystemMessage));
   const trimmed = await trimMessages(historyOnly, {
@@ -89,6 +163,14 @@ async function trimHistory(rawMessages: BaseMessage[], maxTokens: number): Promi
   });
 
   return stripMessageNames(trimmed);
+}
+
+function prepareMessages(
+  rawMessages: BaseMessage[],
+  opts: { maxTokens: number; maxMessageChars: number },
+): Promise<BaseMessage[]> {
+  const clamped = clampOversizedMessages(rawMessages, opts.maxMessageChars);
+  return trimHistory(clamped, opts.maxTokens);
 }
 
 // ── Message modifier factory ───────────────────────────────────────────────────
@@ -119,6 +201,7 @@ export function createTrimmedPrompt(
   opts: TrimOptions = {},
 ): MessageModifier {
   const maxTokens = opts.maxTokens ?? 4000;
+  const maxMessageChars = opts.maxMessageChars ?? DEFAULT_MAX_MESSAGE_CHARS;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return async (input: any): Promise<BaseMessage[]> => {
@@ -132,7 +215,7 @@ export function createTrimmedPrompt(
     // Unit tests pass an array directly. Handle both.
     const rawMessages: BaseMessage[] = Array.isArray(input) ? input : (input?.messages ?? []);
 
-    const trimmed = await trimHistory(rawMessages, maxTokens);
+    const trimmed = await prepareMessages(rawMessages, { maxTokens, maxMessageChars });
 
     return [systemMsg, ...trimmed];
   };
@@ -143,6 +226,8 @@ export function createAgentMiddleware(
   opts: TrimOptions = {},
 ): AnyAgentMiddleware[] {
   const maxTokens = opts.maxTokens ?? 4000;
+  const maxMessageChars = opts.maxMessageChars ?? DEFAULT_MAX_MESSAGE_CHARS;
+  const toolCallLimits = opts.toolCallLimits;
 
   return [
     dynamicSystemPromptMiddleware(() =>
@@ -151,8 +236,24 @@ export function createAgentMiddleware(
     createMiddleware({
       name: "founderos_trim_messages",
       wrapModelCall: async (request, handler) => {
-        const messages = await trimHistory(request.messages, maxTokens);
-        return handler({ ...request, messages });
+        const messages = await prepareMessages(request.messages, { maxTokens, maxMessageChars });
+        const tools = filterToolsByLimits(messages, request.tools, toolCallLimits) ?? request.tools;
+        return handler({ ...request, messages, tools });
+      },
+      wrapToolCall: async (request, handler) => {
+        const toolName = request.toolCall.name;
+        const limit = toolCallLimits?.[toolName];
+        if (limit !== undefined) {
+          const completed = countCompletedToolCalls(request.state.messages ?? [], toolName);
+          if (completed >= limit) {
+            const toolCallId = request.toolCall.id;
+            if (!toolCallId) {
+              throw new Error(`Tool call ${toolName} is missing an id for limit enforcement.`);
+            }
+            return toolLimitExceededMessage(toolName, limit, toolCallId);
+          }
+        }
+        return handler(request);
       },
     }),
   ];

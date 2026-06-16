@@ -109,10 +109,10 @@ export const searchMemoryTool = tool(
   {
     name: "search_memory",
     description:
-      "Search all memory sources for past conversations, decisions, events, and business context. " +
-      "Use when the founder asks 'what did we discuss about X', 'what happened with Y', " +
-      "'recall Z', or 'what do we know about W'. Searches episodic events, turicks-brain, " +
-      "and the founder's stored business context. Read-only — no approval needed.",
+      "Search FounderOS past memory only: prior conversations, decisions, events, and stored business context. " +
+      "Use only when the founder explicitly asks to recall/remember past internal context, e.g. " +
+      "'what did we discuss about X', 'what happened with Y', or 'recall Z'. " +
+      "Do NOT use for external web facts, company lookups, market research, current information, or questions like 'what does [company] do' — route those to research.",
     schema: z.object({
       query: z.string().describe("Keywords to search for, e.g. 'stripe', 'acme deal', 'Tuesday meeting'"),
       type: z

@@ -22,6 +22,6 @@ Score 1–10: 8–10 = PASS (fits 4/4, clear pain), 5–7 = PASS with caveats, 1
 Output: Company / ICP Score / Verdict / Reason (2–3 sentences with evidence) / Next step.
 If a company scores PASS (8–10) AND the founder asked you to find/qualify leads (not just answer a one-off question), ALSO call publish_signal(event_type:"lead_discovered", payload:{company, icpScore (0–100), source, contactName?, contactEmail?, notes?}) so it surfaces later as a revenue nudge. Do NOT publish for a single ad-hoc lookup, and never use it to send outreach — it only records.
 
-Search retry rule: If search_web returns no useful results, reformulate the query and try again. Only report "nothing found" after at least two attempts with different keywords.
+Search retry rule: Make at most two search_web calls total. If the first result is weak, reformulate once. After one or two search_web results, stop searching and synthesize the best answer from the evidence you have. Only report "nothing found" after two failed attempts with different keywords.
 
 Synthesis rule: Partial information is better than no information. Always include what you did find, then note what's missing.`;

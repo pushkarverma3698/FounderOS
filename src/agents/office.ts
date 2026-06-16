@@ -46,6 +46,23 @@ const log = childLogger({ module: "office" });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _office: CompiledStateGraph<any, any, any> | undefined;
 
+const DEPARTMENT_DESCRIPTIONS = {
+  research: "Use for web facts, news, company or market research, ICP scoring, and internal Turicks knowledge lookups.",
+  comms: "Use for reading inbox, known-contact email, and Google Calendar work.",
+  engineering: "Use for GitHub repositories, issues, pull requests, code, tests, deployments, and FounderOS engineering work.",
+  marketing: "Use for LinkedIn posts, content strategy, and Turicks brand copy.",
+  sales: "Use for prospect research tied to cold outreach, unknown-company outreach, and sales emails.",
+  personal: "Use for files, directories, shell, browser, and laptop operations on the founder's machine.",
+  jobhunt: "Use for job searches, CV/resume work, applications, and hiring-manager outreach.",
+} as const;
+
+/** Deterministic search caps — prompt instructions alone are not enough on OpenRouter. */
+const SEARCH_TOOL_LIMITS = {
+  search_web: 2,
+  search_knowledge: 2,
+  search_turicks_brain: 2,
+} as const;
+
 /**
  * Build (compile) the office graph with a given checkpointer.
  * Exported for tests (inject MemorySaver). Production uses getOffice().
@@ -62,18 +79,24 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   //   Supervisor: 6000 tokens — needs routing context across more turns
   const subAgentBudget = { maxTokens: 4000 };
   const supervisorBudget = { maxTokens: 6000 };
-  const agentMiddleware = (prompt: string | (() => string)) => [
+  const agentMiddleware = (
+    prompt: string | (() => string),
+    toolCallLimits?: Record<string, number>,
+  ) => [
     ...getModelFallbackMiddleware(),
-    ...createAgentMiddleware(prompt, subAgentBudget),
+    ...createAgentMiddleware(prompt, {
+      ...subAgentBudget,
+      ...(toolCallLimits ? { toolCallLimits } : {}),
+    }),
   ];
-
   // research: web search + internal knowledge + ICP scoring (no read_emails — inbox stays in comms)
   const research = createAgent({
     model: llm,
     tools: DEPARTMENT_TOOLS["research"]!,
     name: "research",
+    description: DEPARTMENT_DESCRIPTIONS.research,
     includeAgentName: "inline",
-    middleware: agentMiddleware(RESEARCH_PROMPT),
+    middleware: agentMiddleware(RESEARCH_PROMPT, SEARCH_TOOL_LIMITS),
   }).graph;
 
   // comms: Gmail + Calendar only (linkedin_post moved to marketing — single owner)
@@ -81,6 +104,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     model: llm,
     tools: DEPARTMENT_TOOLS["comms"]!,
     name: "comms",
+    description: DEPARTMENT_DESCRIPTIONS.comms,
     includeAgentName: "inline",
     middleware: agentMiddleware(buildCommsPrompt),
   }).graph;
@@ -98,6 +122,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
         model: llm,
         tools: DEPARTMENT_TOOLS["engineering"]!,
         name: "engineering",
+        description: DEPARTMENT_DESCRIPTIONS.engineering,
         includeAgentName: "inline",
         middleware: agentMiddleware(ENGINEERING_PROMPT),
       }).graph;
@@ -109,8 +134,9 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     model: llm,
     tools: DEPARTMENT_TOOLS["marketing"]!,
     name: "marketing",
+    description: DEPARTMENT_DESCRIPTIONS.marketing,
     includeAgentName: "inline",
-    middleware: agentMiddleware(MARKETING_PROMPT),
+    middleware: agentMiddleware(MARKETING_PROMPT, { search_web: SEARCH_TOOL_LIMITS.search_web }),
   }).graph;
 
   /** Sales: researches prospects + writes cold outreach emails (HITL-gated). */
@@ -118,8 +144,9 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     model: llm,
     tools: DEPARTMENT_TOOLS["sales"]!,
     name: "sales",
+    description: DEPARTMENT_DESCRIPTIONS.sales,
     includeAgentName: "inline",
-    middleware: agentMiddleware(SALES_PROMPT),
+    middleware: agentMiddleware(SALES_PROMPT, { search_web: SEARCH_TOOL_LIMITS.search_web }),
   }).graph;
 
   /** Personal: senior engineer on the founder's laptop — files, shell, browser
@@ -128,6 +155,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     model: llm,
     tools: DEPARTMENT_TOOLS["personal"]!,
     name: "personal",
+    description: DEPARTMENT_DESCRIPTIONS.personal,
     includeAgentName: "inline",
     middleware: agentMiddleware(PERSONAL_PROMPT),
   }).graph;
@@ -138,6 +166,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     model: llm,
     tools: DEPARTMENT_TOOLS["jobhunt"]!,
     name: "jobhunt",
+    description: DEPARTMENT_DESCRIPTIONS.jobhunt,
     includeAgentName: "inline",
     middleware: agentMiddleware(JOBHUNT_PROMPT),
   }).graph;

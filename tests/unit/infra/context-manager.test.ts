@@ -11,10 +11,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage, AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import {
   createAgentMiddleware,
   createTrimmedPrompt,
+  countCompletedToolCalls,
   estimateMessageTokens,
   stripMessageNames,
 } from "../../../src/infra/context-manager.js";
@@ -26,6 +27,23 @@ function makeHistory(n: number): Array<HumanMessage | AIMessage> {
       : new AIMessage(`assistant turn ${i}`)
   );
 }
+
+describe("countCompletedToolCalls", () => {
+  it("counts tool messages matched to prior ai tool calls", () => {
+    const messages = [
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "call_1", name: "search_web", args: { query: "linear" } },
+          { id: "call_2", name: "search_web", args: { query: "linear app" } },
+        ],
+      }),
+      new ToolMessage({ content: "result 1", tool_call_id: "call_1", name: "search_web" }),
+      new ToolMessage({ content: "result 2", tool_call_id: "call_2", name: "search_web" }),
+    ];
+    expect(countCompletedToolCalls(messages, "search_web")).toBe(2);
+  });
+});
 
 describe("createTrimmedPrompt", () => {
   it("returns a callable MessageModifier", () => {
