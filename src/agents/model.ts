@@ -119,12 +119,9 @@ export function getModel(): BaseChatModel {
   return model;
 }
 
-/** Supervisor model with env-configured fallbacks (departments use middleware instead). */
+/** @deprecated Supervisor uses getModel() — withFallbacks breaks createSupervisor bindTools. */
 export function getSupervisorModel(): BaseChatModel {
-  const primary = getModel();
-  const fallbacks = buildFallbackModels();
-  if (fallbacks.length === 0) return primary;
-  return primary.withFallbacks({ fallbacks }) as unknown as BaseChatModel;
+  return getModel();
 }
 
 export function getModelFallbackMiddleware() {
