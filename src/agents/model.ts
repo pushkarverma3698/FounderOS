@@ -24,6 +24,8 @@ import type { BaseMessage, ToolMessage } from "@langchain/core/messages";
 import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import type { CallbackManagerForLLMRun } from "@langchain/core/callbacks/manager";
 import type { ChatResult } from "@langchain/core/outputs";
+import { ChatGenerationChunk } from "@langchain/core/outputs";
+import { AIMessageChunk } from "@langchain/core/messages";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { Runnable } from "@langchain/core/runnables";
 import type { StructuredTool } from "@langchain/core/tools";
@@ -522,6 +524,7 @@ export class FounderChatModel extends BaseChatModel {
     const stripped = this.adapter.sanitizeMessages(messages);
 
     let lastErr: unknown;
+    let skipSameKeyFallbacks = false;
     for (let attempt = 0; attempt <= RETRY_BACKOFF_MS.length; attempt++) {
       if (attempt > 0) {
         const delay = RETRY_BACKOFF_MS[attempt - 1]!;
@@ -538,6 +541,7 @@ export class FounderChatModel extends BaseChatModel {
             "Primary model credits/quota exhausted on stream — failing fast. ACTION: top up the provider billing account.",
           );
           lastErr = err;
+          skipSameKeyFallbacks = true;
           break; // same-key fallbacks share the depleted quota
         }
         if (!this.adapter.isTransientError(err)) throw err;
@@ -545,19 +549,44 @@ export class FounderChatModel extends BaseChatModel {
       }
     }
 
-    if (this._fallbackInstances.length === 0) throw lastErr;
-
-    log.warn({ primary: this.model }, "Primary model stream retries exhausted, trying fallbacks");
-
-    for (let i = 0; i < this._fallbackInstances.length; i++) {
-      const fallback = this._fallbackInstances[i]!;
-      try {
-        yield* this._streamWith(fallback, stripped, options, runManager);
-        return;
-      } catch (fallbackErr) {
-        if (!this.adapter.isTransientError(fallbackErr)) throw fallbackErr;
+    if (!skipSameKeyFallbacks && this._fallbackInstances.length > 0) {
+      log.warn({ primary: this.model }, "Primary model stream retries exhausted, trying fallbacks");
+      for (let i = 0; i < this._fallbackInstances.length; i++) {
+        const fallback = this._fallbackInstances[i]!;
+        try {
+          yield* this._streamWith(fallback, stripped, options, runManager);
+          return;
+        } catch (fallbackErr) {
+          if (isQuotaExhaustedError(fallbackErr)) {
+            lastErr = fallbackErr;
+            break; // same key → remaining Google fallbacks share the depleted quota
+          }
+          if (!this.adapter.isTransientError(fallbackErr)) throw fallbackErr;
+          lastErr = fallbackErr;
+        }
       }
     }
+
+    const openRouterRunner = this._openRouterBound ?? this._openRouterFallback;
+    if (openRouterRunner) {
+      log.warn({ primary: this.model }, "All primary/fallback stream models failed, trying OpenRouter/GPT-4o-mini");
+      try {
+        const msg = await openRouterRunner.invoke(stripped);
+        const chunk = new ChatGenerationChunk({
+          text: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+          message: new AIMessageChunk({ content: msg.content }),
+          generationInfo: { model: "openai/gpt-4o-mini", provider: "openrouter" },
+        });
+        yield chunk;
+        await runManager?.handleLLMNewToken(chunk.text, undefined, undefined, undefined, undefined, { chunk });
+        return;
+      } catch (orErr) {
+        log.error({ err: orErr }, "OpenRouter stream fallback also failed");
+        throw orErr;
+      }
+    }
+
+    log.error({ fallbacks: this._fallbackModels }, "All stream fallback models returned transient errors");
     throw lastErr;
   }
 }

@@ -14,9 +14,19 @@ import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import type { ChatResult } from "@langchain/core/outputs";
 import { FounderChatModel, GeminiAdapter, isQuotaExhaustedError, is503Error } from "../../../src/agents/model.js";
 
-/** Minimal fake chat model that always throws the given error from _generate. */
+/** Drains an async generator into an array. */
+async function collect<T>(gen: AsyncGenerator<T>): Promise<T[]> {
+  const results: T[] = [];
+  for await (const item of gen) results.push(item);
+  return results;
+}
+
+/** Minimal fake chat model that always throws the given error from _generate and stream. */
 function throwingModel(err: Error) {
-  return { _generate: vi.fn(async (): Promise<ChatResult> => { throw err; }) } as never;
+  return {
+    _generate: vi.fn(async (): Promise<ChatResult> => { throw err; }),
+    stream: vi.fn(async function* () { throw err; }),
+  } as never;
 }
 
 const QUOTA_ERR = new Error(
@@ -64,5 +74,29 @@ describe("FounderChatModel._generate — fast-fail on depleted credits", () => {
     expect((openRouter as unknown as { invoke: ReturnType<typeof vi.fn> }).invoke).toHaveBeenCalledOnce();
     // No multi-second backoff sleeps on the quota path (would be >14s with retries).
     expect(elapsed).toBeLessThan(2_000);
+  });
+});
+
+describe("FounderChatModel._streamResponseChunks — fast-fail on depleted credits (parity with _generate)", () => {
+  it("skips same-key Google fallbacks on stream path and yields OpenRouter result as single chunk", async () => {
+    const googleFallback = throwingModel(QUOTA_ERR);
+    const openRouter = {
+      invoke: vi.fn(async () => new AIMessage("openrouter-stream-rescue")),
+    } as never;
+
+    const model = new FounderChatModel({
+      primaryModel: throwingModel(QUOTA_ERR),
+      adapter: new GeminiAdapter(),
+      fallbackModels: ["gemini-2.5-flash-lite"],
+      fallbackInstances: [googleFallback],
+      openRouterFallback: openRouter,
+    });
+
+    const chunks = await collect(model._streamResponseChunks([new HumanMessage("hi")], {} as never));
+
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]!.text).toBe("openrouter-stream-rescue");
+    expect((googleFallback as unknown as { _generate: ReturnType<typeof vi.fn> })._generate).not.toHaveBeenCalled();
+    expect((openRouter as unknown as { invoke: ReturnType<typeof vi.fn> }).invoke).toHaveBeenCalledOnce();
   });
 });
