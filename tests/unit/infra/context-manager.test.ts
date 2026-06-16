@@ -12,7 +12,12 @@
 
 import { describe, it, expect } from "vitest";
 import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
-import { createTrimmedPrompt, estimateMessageTokens } from "../../../src/infra/context-manager.js";
+import {
+  createAgentMiddleware,
+  createTrimmedPrompt,
+  estimateMessageTokens,
+  stripMessageNames,
+} from "../../../src/infra/context-manager.js";
 
 function makeHistory(n: number): Array<HumanMessage | AIMessage> {
   return Array.from({ length: n }, (_, i) =>
@@ -95,5 +100,20 @@ describe("estimateMessageTokens", () => {
     const estimate = estimateMessageTokens(msgs);
     expect(estimate).toBeGreaterThanOrEqual(90);
     expect(estimate).toBeLessThanOrEqual(110);
+  });
+});
+
+describe("createAgentMiddleware", () => {
+  it("returns dynamic prompt + trimming middleware for LangChain v1 agents", () => {
+    const middleware = createAgentMiddleware("System.", { maxTokens: 100 });
+    expect(middleware).toHaveLength(2);
+  });
+
+  it("strips provider-incompatible message names without mutating originals", () => {
+    const msg = new AIMessage({ content: "hello", name: "supervisor" });
+    const [result] = stripMessageNames([msg]);
+    expect(result).not.toBe(msg);
+    expect(result?.name).toBeUndefined();
+    expect(msg.name).toBe("supervisor");
   });
 });

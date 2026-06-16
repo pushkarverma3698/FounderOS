@@ -17,10 +17,10 @@
  */
 
 import { createSupervisor } from "@langchain/langgraph-supervisor";
-import { createReactAgent } from "@langchain/langgraph/prebuilt";
+import { createAgent } from "langchain";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
-import { getModel } from "./model.js";
-import { createTrimmedPrompt } from "../infra/context-manager.js";
+import { getModel, getModelFallbackMiddleware } from "./model.js";
+import { createAgentMiddleware } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS } from "./capabilities.js";
 import { assertContextIsolation, CONTEXT_ISOLATION_OUTPUT_MODE } from "./context-isolation.js";
 import { MARKETING_PROMPT, SALES_PROMPT, RESEARCH_PROMPT } from "./system-prompts.js";
@@ -45,20 +45,24 @@ Route to exactly one team and relay its result verbatim. No preamble.`;
  */
 export function buildRevenueDomain() {
   const llm = getModel();
-  const marketing = createReactAgent({
-    llm,
+  const agentMiddleware = (prompt: string) => [
+    ...getModelFallbackMiddleware(),
+    ...createAgentMiddleware(prompt, subAgentBudget),
+  ];
+  const marketing = createAgent({
+    model: llm,
     tools: DEPARTMENT_TOOLS["marketing"]!,
     name: "marketing",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(MARKETING_PROMPT, subAgentBudget) as any,
-  });
-  const sales = createReactAgent({
-    llm,
+    includeAgentName: "inline",
+    middleware: agentMiddleware(MARKETING_PROMPT),
+  }).graph;
+  const sales = createAgent({
+    model: llm,
     tools: DEPARTMENT_TOOLS["sales"]!,
     name: "sales",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(SALES_PROMPT, subAgentBudget) as any,
-  });
+    includeAgentName: "inline",
+    middleware: agentMiddleware(SALES_PROMPT),
+  }).graph;
   return createSupervisor({
     agents: [marketing, sales],
     llm,
@@ -78,13 +82,16 @@ export function buildRevenueDomain() {
 export function buildNestedOffice(checkpointer: BaseCheckpointSaver) {
   const llm = getModel();
   const revenue = buildRevenueDomain();
-  const research = createReactAgent({
-    llm,
+  const research = createAgent({
+    model: llm,
     tools: DEPARTMENT_TOOLS["research"]!,
     name: "research",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(RESEARCH_PROMPT, subAgentBudget) as any,
-  });
+    includeAgentName: "inline",
+    middleware: [
+      ...getModelFallbackMiddleware(),
+      ...createAgentMiddleware(RESEARCH_PROMPT, subAgentBudget),
+    ],
+  }).graph;
   return createSupervisor({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     agents: [research, revenue as any],

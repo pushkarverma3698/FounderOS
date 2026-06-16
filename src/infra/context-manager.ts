@@ -5,10 +5,9 @@
  * On every LLM call the supervisor and each sub-agent see the entire accumulated
  * history — O(n) tokens per call, growing without bound.
  *
- * Solution: a MessageModifier that trims the history to a token budget BEFORE
- * each LLM call. This is the Claude Code pattern: rolling window, keep the most
- * recent turns, always keep the system message. The checkpointer state is
- * unchanged — full history is still persisted and /reset still works.
+ * Solution: trim the history to a token budget BEFORE each LLM call. The
+ * checkpointer state is unchanged — full history is still persisted and /reset
+ * still works.
  *
  * Uses trimMessages from @langchain/core/messages (v0.3.80, installed,
  * previously unused). Passed as the `prompt` parameter to createReactAgent /
@@ -24,6 +23,8 @@
 
 import { trimMessages, SystemMessage } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
+import { createMiddleware, dynamicSystemPromptMiddleware } from "langchain";
+import type { AnyAgentMiddleware } from "langchain";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,32 @@ export function estimateMessageTokens(messages: BaseMessage[]): number {
     const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
     return sum + estimateTokens(text);
   }, 0);
+}
+
+export function stripMessageNames(messages: BaseMessage[]): BaseMessage[] {
+  return messages.map((m) => {
+    if (m.name == null) return m;
+    const clone = Object.assign(Object.create(Object.getPrototypeOf(m)), m) as BaseMessage;
+    (clone as { name?: string }).name = undefined;
+    return clone;
+  });
+}
+
+async function trimHistory(rawMessages: BaseMessage[], maxTokens: number): Promise<BaseMessage[]> {
+  const historyOnly = rawMessages.filter((m) => !(m instanceof SystemMessage));
+  const trimmed = await trimMessages(historyOnly, {
+    maxTokens,
+    strategy: "last",
+    tokenCounter: (msgs) =>
+      msgs.reduce((sum, m) => {
+        const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        return sum + estimateTokens(text);
+      }, 0),
+    // Don't start on a partial exchange — keep full human/AI pairs.
+    startOn: "human",
+  });
+
+  return stripMessageNames(trimmed);
 }
 
 // ── Message modifier factory ───────────────────────────────────────────────────
@@ -105,25 +132,28 @@ export function createTrimmedPrompt(
     // Unit tests pass an array directly. Handle both.
     const rawMessages: BaseMessage[] = Array.isArray(input) ? input : (input?.messages ?? []);
 
-    // Filter out any existing SystemMessages from history (the supervisor
-    // injects them; we don't want duplicates or stale ones).
-    const historyOnly = rawMessages.filter((m) => !(m instanceof SystemMessage));
-
-    // Trim using LangChain's built-in utility — keeps the most recent messages
-    // within the token budget, using character-based counting (same approximation
-    // as our estimateTokens: 1 token ≈ 4 chars).
-    const trimmed = await trimMessages(historyOnly, {
-      maxTokens,
-      strategy: "last",
-      tokenCounter: (msgs) =>
-        msgs.reduce((sum, m) => {
-          const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-          return sum + estimateTokens(text);
-        }, 0),
-      // Don't start on a partial exchange — keep full human/AI pairs
-      startOn: "human",
-    });
+    const trimmed = await trimHistory(rawMessages, maxTokens);
 
     return [systemMsg, ...trimmed];
   };
+}
+
+export function createAgentMiddleware(
+  systemPromptText: string | (() => string),
+  opts: TrimOptions = {},
+): AnyAgentMiddleware[] {
+  const maxTokens = opts.maxTokens ?? 4000;
+
+  return [
+    dynamicSystemPromptMiddleware(() =>
+      typeof systemPromptText === "function" ? systemPromptText() : systemPromptText,
+    ),
+    createMiddleware({
+      name: "founderos_trim_messages",
+      wrapModelCall: async (request, handler) => {
+        const messages = await trimHistory(request.messages, maxTokens);
+        return handler({ ...request, messages });
+      },
+    }),
+  ];
 }
