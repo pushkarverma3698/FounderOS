@@ -33,8 +33,10 @@ import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format
 import { buildOfficeInput } from "./pre-router.js";
 import {
   detectLinkedInRefusalWithoutTool,
+  detectUnbackedInboxClaim,
   detectUnbackedShellClaim,
 } from "./execution-guard.js";
+import { tryInboxReadFastPath } from "./inbox-fast-path.js";
 import { assertNonEmptyMessages } from "../infra/office-guard.js";
 import { isWedgedState, type WedgeState } from "../infra/wedge.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
@@ -457,18 +459,32 @@ function needsExecutionGuardRetry(
   userText: string,
   messages: OfficeMessage[],
   reply: string,
-): "shell" | "linkedin" | null {
+): "shell" | "linkedin" | "inbox" | null {
   if (detectUnbackedShellClaim(userText, messages, reply)) return "shell";
   if (detectLinkedInRefusalWithoutTool(userText, messages, reply)) return "linkedin";
+  if (detectUnbackedInboxClaim(userText, messages, reply)) return "inbox";
   return null;
 }
 
-function buildGuardRetryMessages(kind: "shell" | "linkedin", userText: string): BaseMessage[] {
+function buildGuardRetryMessages(
+  kind: "shell" | "linkedin" | "inbox",
+  userText: string,
+): BaseMessage[] {
   if (kind === "shell") {
     return [
       new SystemMessage(
         "[RETRY DIRECTIVE: Your previous reply falsely claimed a shell command ran. " +
           "Call run_shell NOW with the exact command. Do NOT claim execution without an approval card.]",
+      ),
+      new HumanMessage(userText),
+    ];
+  }
+  if (kind === "inbox") {
+    const query = /\bunread\b/i.test(userText) ? "is:unread" : "in:inbox";
+    return [
+      new SystemMessage(
+        `[RETRY DIRECTIVE: Your previous reply summarized the inbox without calling read_emails. ` +
+          `Call read_emails NOW with query "${query}" and return sender + subject lines verbatim.]`,
       ),
       new HumanMessage(userText),
     ];
@@ -553,6 +569,19 @@ async function runOfficeTextLocked(ctx: Context, text: string, chatId: number | 
         `Running your new message fresh.`,
         { parse_mode: "HTML" },
       );
+    }
+
+    // ── Inbox fast path (read-only) ───────────────────────────────────────────
+    // Deterministic Gmail read — no LLM hop for "check my unread emails".
+    const inboxFast = await tryInboxReadFastPath(text);
+    if (inboxFast) {
+      stopTyping();
+      trace.event("inbox.fastpath", { textLen: text.length });
+      log.info({ chatId }, "Inbox read via fast path");
+      for (const chunk of splitForTelegram(markdownToTelegramHtml(inboxFast))) {
+        await ctx.reply(chunk, { parse_mode: "HTML" });
+      }
+      return;
     }
 
     // ── Capture turn boundary before invoke ───────────────────────────────────

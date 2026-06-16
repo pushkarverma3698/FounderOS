@@ -313,7 +313,7 @@ async function sendAndCollect(
   return replies;
 }
 
-/** Tap an inline HITL card — prefer the card from this task's replies (avoids stale cards). */
+/** Tap an inline HITL card — always resolve from live history (cardId hint is unreliable). */
 async function clickCard(
   client: TelegramClient,
   peer: string,
@@ -321,44 +321,39 @@ async function clickCard(
   opts: { cardId?: number; waitS?: number } = {},
 ): Promise<BotReply[]> {
   const waitS = opts.waitS ?? 60;
-  let card: Api.Message | undefined;
 
-  if (opts.cardId != null) {
-    const msgs = await client.getMessages(peer, { ids: [opts.cardId] });
-    card = msgs[0];
+  const msgs = await history(client, peer, 20);
+  let card = [...msgs].reverse().find(
+    (m) =>
+      !m.out &&
+      m.replyMarkup instanceof Api.ReplyInlineMarkup &&
+      m.replyMarkup.rows.some((row) =>
+        row.buttons.some(
+          (b) => b instanceof Api.KeyboardButtonCallback && b.data.toString("utf-8") === decision,
+        ),
+      ),
+  );
+
+  if (!card && opts.cardId != null) {
+    const byId = msgs.find((m) => m.id === opts.cardId);
     if (
-      card &&
-      !(
-        card.replyMarkup instanceof Api.ReplyInlineMarkup &&
-        card.replyMarkup.rows.some((row) =>
-          row.buttons.some(
-            (b) => b instanceof Api.KeyboardButtonCallback && b.data.toString("utf-8") === decision,
-          ),
-        )
+      byId &&
+      !byId.out &&
+      byId.replyMarkup instanceof Api.ReplyInlineMarkup &&
+      byId.replyMarkup.rows.some((row) =>
+        row.buttons.some(
+          (b) => b instanceof Api.KeyboardButtonCallback && b.data.toString("utf-8") === decision,
+        ),
       )
     ) {
-      card = undefined;
+      card = byId;
     }
-  }
-
-  if (!card) {
-    const msgs = await history(client, peer, 20);
-    card = [...msgs].reverse().find(
-      (m) =>
-        !m.out &&
-        m.replyMarkup instanceof Api.ReplyInlineMarkup &&
-        m.replyMarkup.rows.some((row) =>
-          row.buttons.some(
-            (b) => b instanceof Api.KeyboardButtonCallback && b.data.toString("utf-8") === decision,
-          ),
-        ),
-    );
   }
 
   if (!card) return [];
 
   const baseline = card.id;
-  await sleep(500); // let Telegram register the inline keyboard before callback
+  await sleep(800);
   await card.click({ data: Buffer.from(decision) });
 
   const deadline = Date.now() + waitS * 1_000;

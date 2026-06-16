@@ -186,6 +186,12 @@ describe("preRouteDepartment", () => {
     expect(String(msgs[0]!.content)).toMatch(/auto-strips/i);
   });
 
+  it("strengthens comms inbox directive for read-only inbox checks", () => {
+    const msgs = buildOfficeInput("Check my unread emails.");
+    expect(String(msgs[0]!.content)).toMatch(/read_emails/i);
+    expect(String(msgs[0]!.content)).toMatch(/is:unread/i);
+  });
+
   it("defers research-then-github multi-step to the supervisor", () => {
     expect(
       preRouteDepartment(

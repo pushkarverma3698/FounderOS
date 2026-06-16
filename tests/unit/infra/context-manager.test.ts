@@ -16,6 +16,8 @@ import {
   createAgentMiddleware,
   createTrimmedPrompt,
   countCompletedToolCalls,
+  countPendingToolCalls,
+  countScheduledToolCalls,
   estimateMessageTokens,
   stripMessageNames,
 } from "../../../src/infra/context-manager.js";
@@ -42,6 +44,20 @@ describe("countCompletedToolCalls", () => {
       new ToolMessage({ content: "result 2", tool_call_id: "call_2", name: "search_web" }),
     ];
     expect(countCompletedToolCalls(messages, "search_web")).toBe(2);
+  });
+
+  it("counts pending tool calls without matching tool messages", () => {
+    const messages = [
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "call_1", name: "search_web", args: { query: "a" } },
+          { id: "call_2", name: "search_web", args: { query: "b" } },
+        ],
+      }),
+    ];
+    expect(countPendingToolCalls(messages, "search_web")).toBe(2);
+    expect(countScheduledToolCalls(messages, "search_web")).toBe(2);
   });
 });
 

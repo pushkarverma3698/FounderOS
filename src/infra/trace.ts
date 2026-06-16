@@ -23,6 +23,7 @@ export type Seam =
   | "wedge.recovered"
   | "checkpoint.trim"
   | "guard.retry"
+  | "inbox.fastpath"
   | "turn.out"
   | "turn.error";
 
