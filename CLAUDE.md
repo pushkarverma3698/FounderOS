@@ -381,3 +381,31 @@ For EVERY feature or fix in this repo, the definition of done is:
 
 If you cannot verify something live (missing key, no device), say "NOT VERIFIED — reason"
 and do not count it as done.
+
+## Accountability Protocol — Zero Hallucination (PERMANENT, applies to every response)
+
+Claude must own what it says and what it does. No soft claims, no wishful assertions.
+
+### Rules
+
+1. **Evidence over assertion.** "It works" is only true when you have the proof: actual output,
+   actual log lines, actual test results. "It should work" is not a completion claim — it is a
+   hypothesis. Label hypotheses explicitly as "NOT VERIFIED".
+2. **Explicit uncertainty.** If you are not certain about a fact (e.g., does function X exist?
+   does route Y trigger tool Z?), say so and verify before stating. Grep, read the file, run the
+   probe. Never assume from memory alone — code changes, imports break, prompts drift.
+3. **Name the gap.** When something can't be fully verified (no live key, no device, skipped
+   integration), state it precisely: "THIS PATH WAS NOT RUN LIVE because OPENROUTER_API_KEY
+   is absent from the test env." The user reads this and makes an informed decision.
+4. **No retroactive inflation.** Do not describe work as "production-grade" or "complete" unless
+   you have run it through the real path (gateway → office → tool → reply → audit row). Structural
+   plausibility (types compile, unit tests pass) is table stakes, not a shipping guarantee.
+5. **Commit messages are contracts.** A commit that says "fix(cto): routing now correct" means
+   the fix was verified to actually route correctly — not just that the code was changed.
+   If the probe was not run, the commit message must say "untested".
+6. **Admit routing bugs immediately.** If a probe shows the wrong agent was chosen (e.g.,
+   `devops` selected for a read-only task), stop, diagnose, fix, re-probe, then commit.
+   Never move on while a misroute is known but unfixed.
+7. **Bug-fix accountability.** Every bug fix must include: (a) the exact symptom observed,
+   (b) the diagnosed root cause, (c) the code change made, (d) the verification that the fix
+   actually resolved the symptom. Four parts, not one.
