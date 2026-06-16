@@ -174,6 +174,11 @@ describe("preRouteDepartment", () => {
     expect(String(msgs[0]!.content)).toMatch(/read_context/i);
   });
 
+  it("injects explicit personal route prefix for shell runs", () => {
+    const msgs = buildOfficeInput('run this in terminal: echo "FounderOS E2E test"');
+    expect(String(msgs[1]!.content)).toMatch(/\[Route directly to personal department\]/i);
+  });
+
   it("strengthens personal shell-run routing directive", () => {
     const msgs = buildOfficeInput('run this in terminal: echo "FounderOS E2E test"');
     expect(String(msgs[0]!.content)).toMatch(/run_shell/i);
