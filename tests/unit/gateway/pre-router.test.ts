@@ -166,6 +166,26 @@ describe("preRouteDepartment", () => {
     ).toBeNull();
   });
 
+  it("injects orchestration directive for monday brief (not bare HumanMessage)", () => {
+    const msgs = buildOfficeInput("monday brief pls: context memory + my open github issues + bullet plan");
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]).toBeInstanceOf(SystemMessage);
+    expect(String(msgs[0]!.content)).toMatch(/ORCHESTRATION DIRECTIVE/i);
+    expect(String(msgs[0]!.content)).toMatch(/read_context/i);
+  });
+
+  it("strengthens personal shell-run routing directive", () => {
+    const msgs = buildOfficeInput('run this in terminal: echo "FounderOS E2E test"');
+    expect(String(msgs[0]!.content)).toMatch(/run_shell/i);
+    expect(String(msgs[0]!.content)).toMatch(/NEVER claim/i);
+  });
+
+  it("strengthens marketing linkedin directive when banned phrases present", () => {
+    const msgs = buildOfficeInput("linkedin: our game-changing innovative solution creates synergy");
+    expect(String(msgs[0]!.content)).toMatch(/linkedin_post/i);
+    expect(String(msgs[0]!.content)).toMatch(/auto-strips/i);
+  });
+
   it("defers research-then-github multi-step to the supervisor", () => {
     expect(
       preRouteDepartment(

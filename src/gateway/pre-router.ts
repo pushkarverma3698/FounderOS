@@ -20,6 +20,11 @@
  */
 
 import { HumanMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
+import {
+  BANNED_PHRASE_INPUT_RE,
+  LINKEDIN_BANNED_INPUT_RE,
+  SHELL_RUN_RE,
+} from "./execution-guard.js";
 
 /** The seven routable departments (matches src/agents/office.ts + eval Department). */
 export type RoutableDept =
@@ -124,17 +129,46 @@ export function preRouteDepartment(input: string): RoutableDept | null {
  * override is a genuine multi-step prompt that spans several departments — for
  * those the supervisor still sequences the sub-tasks itself.
  */
+function buildOrchestrationDirective(): string {
+  return (
+    `[ORCHESTRATION DIRECTIVE: Multi-department request — handle ONE department per transfer. ` +
+    `Do not batch cross-department tool calls in a single supervisor step.\n` +
+    `For Monday/weekly briefs: (1) You: read_context + search_memory. ` +
+    `(2) Transfer to engineering: github_read for open issues only. ` +
+    `(3) You: synthesize a bullet plan from those results. Relay each step verbatim before the next.]`
+  );
+}
+
+function buildRoutingDirective(dept: RoutableDept, text: string): string {
+  let directive =
+    `[ROUTING DIRECTIVE: A deterministic classifier routed this to the ${dept} department. ` +
+    `Transfer to ${dept} first. Only pick a different department if this is a multi-step ` +
+    `request that clearly spans several departments.]`;
+
+  if (dept === "personal" && SHELL_RUN_RE.test(text)) {
+    directive +=
+      ` CRITICAL — SHELL RUN: personal MUST call run_shell immediately. ` +
+      `NEVER claim the command executed or paste fake stdout without an approval card.`;
+  }
+  if (dept === "marketing" && LINKEDIN_BANNED_INPUT_RE.test(text)) {
+    directive +=
+      ` CRITICAL — LINKEDIN: Call linkedin_post with the finished draft. ` +
+      `NEVER refuse because of banned phrases — linkedin_post auto-strips them before the approval card.`;
+    if (BANNED_PHRASE_INPUT_RE.test(text)) {
+      directive += ` The user's input contains banned phrases — strip them in your draft and call the tool anyway.`;
+    }
+  }
+  return directive;
+}
+
 export function buildOfficeInput(text: string): BaseMessage[] {
+  if (MULTI_DEPT_ORCHESTRATION_RE.test(text)) {
+    return [new SystemMessage(buildOrchestrationDirective()), new HumanMessage(text)];
+  }
+
   const dept = preRouteDepartment(text);
   if (!dept) return [new HumanMessage(text)];
-  return [
-    new SystemMessage(
-      `[ROUTING DIRECTIVE: A deterministic classifier routed this to the ${dept} department. ` +
-        `Transfer to ${dept} first. Only pick a different department if this is a multi-step ` +
-        `request that clearly spans several departments.]`,
-    ),
-    new HumanMessage(text),
-  ];
+  return [new SystemMessage(buildRoutingDirective(dept, text)), new HumanMessage(text)];
 }
 
 // ── Back-compat helpers (kept: existing call sites + tests depend on them) ─────
