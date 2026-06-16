@@ -108,6 +108,22 @@ function intEnv(key: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** Parse a boolean env var ("1"/"true"/"yes" → true), falling back to a default. */
+function boolEnv(key: string, fallback = false): boolean {
+  const v = (process.env[key] ?? "").trim().toLowerCase();
+  if (v === "") return fallback;
+  return v === "1" || v === "true" || v === "yes";
+}
+
+/**
+ * Promote the engineering department to the CTO sub-supervisor (coder/qa/devops).
+ * Default OFF — production stays flat until the 3-level nested-HITL path is
+ * live-verified over real Telegram (hierarchy plan P2 gate, rule #19.6). Flipping
+ * this to "1" is the single, reversible lever that swaps the flat engineering
+ * ReAct agent for the hierarchical CTO subgraph in office.ts.
+ */
+export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", false);
+
 /** Max recursive supervisor/sub-agent steps before LangGraph aborts a run. */
 export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 40);
 
