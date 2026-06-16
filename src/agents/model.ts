@@ -31,6 +31,7 @@ import type { Runnable } from "@langchain/core/runnables";
 import type { StructuredTool } from "@langchain/core/tools";
 import { childLogger } from "../infra/logger.js";
 
+
 const log = childLogger({ module: "model" });
 
 const MODEL_FALLBACK_CHAIN: Record<string, string[]> = {
