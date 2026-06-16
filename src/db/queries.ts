@@ -463,6 +463,35 @@ export async function countPendingDeptSignals(tenantId: string): Promise<number>
   return row?.total ?? 0;
 }
 
+/** List unconsumed dept_signals oldest-first (read-only — does not mark consumed). */
+export async function listPendingDeptSignals(tenantId: string, limit = 20) {
+  const db = getDb();
+  return db
+    .select()
+    .from(deptSignals)
+    .where(and(eq(deptSignals.tenant_id, tenantId), eq(deptSignals.consumed, false)))
+    .orderBy(deptSignals.created_at)
+    .limit(limit);
+}
+
+/** Recent LLM call rows for /runs cost digest. */
+export async function getRecentLlmCosts(tenantId: string, limit = 10) {
+  const db = getDb();
+  return db
+    .select({
+      agent: aiCallCosts.agent,
+      model: aiCallCosts.model,
+      tokens_in: aiCallCosts.tokens_in,
+      tokens_out: aiCallCosts.tokens_out,
+      cost_usd: aiCallCosts.cost_usd,
+      created_at: aiCallCosts.created_at,
+    })
+    .from(aiCallCosts)
+    .where(eq(aiCallCosts.tenant_id, tenantId))
+    .orderBy(desc(aiCallCosts.created_at))
+    .limit(limit);
+}
+
 // ── Founder Context (founder_context) ─────────────────────────────────────────
 
 /** Read the founder's current business context (returns {} if not yet set). */

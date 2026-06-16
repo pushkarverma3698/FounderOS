@@ -90,7 +90,7 @@ async function main(): Promise<void> {
   await sendToChat(
     `🚀 <b>FounderOS is running</b>\n\n` +
     `Departments: research · comms · engineering · marketing · sales · personal · jobhunt\n` +
-    `Commands: /status · /context · /target · /targets · /outbound\n\n` +
+    `Commands: /status · /signals · /runs · /context · /target · /outbound\n\n` +
     `Ready for your first message.`,
     "HTML",
   ).catch((err) => log.warn({ err: (err as Error).message }, "Startup notification failed — bot token may not be ready yet"));
