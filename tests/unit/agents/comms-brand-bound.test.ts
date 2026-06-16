@@ -31,6 +31,13 @@ vi.mock("../../../src/tools/linkedin.js", () => ({
   linkedinPostTool: { execute: (...a: unknown[]) => mockExecute(...a) },
 }));
 
+vi.mock("../../../src/db/queries.js", () => ({
+  createInterrupt: vi.fn(async () => "test-interrupt-id"),
+  getPendingInterrupt: vi.fn(async () => null),
+  hasRecentOutboundToRecipient: vi.fn(async () => false),
+  isSuppressed: vi.fn(async () => false),
+}));
+
 const { linkedinPost } = await import("../../../src/agents/agent-tools/comms.js");
 const { BRAND_MAX_RETRIES } = await import("../../../src/infra/brand-retry.js");
 const { _resetBrandRetries } = await import("../../../src/infra/brand-retry.js");
