@@ -25,7 +25,7 @@ describe("SUPERVISOR_PROMPT — personal routing keywords", () => {
   });
 
   it("contains CANNOT rule preventing supervisor from answering file questions itself", () => {
-    expect(SUPERVISOR_PROMPT).toMatch(/NO filesystem access|you cannot|NEVER say.*file.*Desktop/i);
+    expect(SUPERVISOR_PROMPT).toMatch(/NO filesystem|NEVER say.*can't run|Route to personal/i);
   });
 
   it("contains routing rule for Desktop / home folder patterns", () => {

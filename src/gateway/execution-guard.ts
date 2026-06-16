@@ -21,6 +21,10 @@ export const SHELL_RUN_RE =
 export const FAKE_SHELL_CLAIM_RE =
   /\b(executed|ran the command|command (was )?run|here(?:'s| is) the output|stdout|stderr|output of the command)\b/i;
 
+/** Supervisor deferred shell work back to the user instead of routing to personal. */
+export const SHELL_DEFERRAL_RE =
+  /\b(can't|cannot|unable to)\b[^.?!]{0,50}\b(execut|run)\b|\brun (it |this )?(yourself|in your terminal)\b|\byou can run\b[^.?!]{0,40}\bterminal\b/i;
+
 /** LinkedIn post request with banned phrases the model may refuse instead of calling the tool. */
 export const LINKEDIN_BANNED_INPUT_RE =
   /\blinkedin\b/i;
@@ -68,7 +72,7 @@ export function detectUnbackedShellClaim(
 ): boolean {
   if (!isShellRunRequest(userInput)) return false;
   if (hadToolCall(messages, "run_shell")) return false;
-  return FAKE_SHELL_CLAIM_RE.test(reply);
+  return FAKE_SHELL_CLAIM_RE.test(reply) || SHELL_DEFERRAL_RE.test(reply);
 }
 
 /**

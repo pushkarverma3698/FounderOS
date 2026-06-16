@@ -45,6 +45,13 @@ describe("detectUnbackedShellClaim", () => {
     expect(detectUnbackedShellClaim(input, [aiMsg(reply)], reply)).toBe(true);
   });
 
+  it("flags supervisor deferral instead of run_shell", () => {
+    const input = 'run this in terminal: echo "FounderOS E2E test"';
+    const reply =
+      "I can't execute commands directly in the terminal. You can run echo in your terminal yourself.";
+    expect(detectUnbackedShellClaim(input, [aiMsg(reply)], reply)).toBe(true);
+  });
+
   it("passes when run_shell was called", () => {
     const input = 'run this in terminal: echo "test"';
     const msgs = [aiMsg("", [{ name: "run_shell" }]), toolMsg("run_shell", "stdout:\ntest")];

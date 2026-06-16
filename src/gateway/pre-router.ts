@@ -168,7 +168,14 @@ export function buildOfficeInput(text: string): BaseMessage[] {
 
   const dept = preRouteDepartment(text);
   if (!dept) return [new HumanMessage(text)];
-  return [new SystemMessage(buildRoutingDirective(dept, text)), new HumanMessage(text)];
+
+  // Explicit prefix is the strongest routing signal — supervisor cannot "helpfully" refuse.
+  const humanText =
+    dept === "personal" && SHELL_RUN_RE.test(text)
+      ? `[Route directly to personal department]: ${text}`
+      : text;
+
+  return [new SystemMessage(buildRoutingDirective(dept, text)), new HumanMessage(humanText)];
 }
 
 // ── Back-compat helpers (kept: existing call sites + tests depend on them) ─────
