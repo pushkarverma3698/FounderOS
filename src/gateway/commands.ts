@@ -26,6 +26,7 @@ import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
 import { runWorkflow, validateParams } from "../workflows/runner.js";
+import { formatProviderStatusLine, getLastProviderProbe } from "../infra/provider-probes.js";
 
 /** Escape special HTML characters for Telegram HTML parse mode. */
 function safeHtml(text: string): string {
@@ -213,6 +214,7 @@ export async function handleStatus(ctx: Context): Promise<void> {
       lastEventRelativeTime,
       outboundTargetCount: outboundTargets.length,
       pendingSignals,
+      providerStatusLine: formatProviderStatusLine(getLastProviderProbe()),
     });
 
     await ctx.reply(message, { parse_mode: "HTML" });

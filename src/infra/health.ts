@@ -18,6 +18,8 @@ import { join } from "node:path";
 import { getPgPool } from "../db/client.js";
 import { getTodayCostUsd } from "../db/queries.js";
 import { childLogger } from "./logger.js";
+import { runProviderProbes, getLastProviderProbe } from "./provider-probes.js";
+import { getGmailBackend } from "./provider-config.js";
 
 const log = childLogger({ module: "health" });
 
@@ -72,18 +74,45 @@ export interface HealthReport {
   status: "ok" | "degraded";
   version: string;
   uptime_s: number;
-  checks: { database: "up" | "down" };
+  checks: {
+    database: "up" | "down";
+    gmail_backend: string;
+    gmail_active: "up" | "down" | "unconfigured";
+  };
+  integrations: {
+    composio_gmail: { status: string; detail: string };
+    gws_gmail: { status: string; detail: string };
+    active_gmail: { status: string; detail: string };
+    checked_at: string | null;
+  };
   spend_today_usd: Record<string, number>;
 }
 
 /** Build the health report (exported for testing without a socket). */
 export async function buildHealthReport(): Promise<HealthReport> {
   const [db, spend] = await Promise.all([pingDb(), spendByTenant()]);
+  const probe =
+    (await runProviderProbes().catch(() => null)) ?? getLastProviderProbe();
+  const backend = probe?.gmail_backend ?? getGmailBackend();
+  const composio = probe?.composio_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
+  const gws = probe?.gws_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
+  const active = probe?.active_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
+  const gmailDegraded = active.status === "down";
   return {
-    status: db ? "ok" : "degraded",
+    status: db && !gmailDegraded ? "ok" : "degraded",
     version: APP_VERSION,
     uptime_s: Math.round((Date.now() - startedAt) / 1000),
-    checks: { database: db ? "up" : "down" },
+    checks: {
+      database: db ? "up" : "down",
+      gmail_backend: backend,
+      gmail_active: active.status,
+    },
+    integrations: {
+      composio_gmail: composio,
+      gws_gmail: gws,
+      active_gmail: active,
+      checked_at: probe?.checked_at ?? null,
+    },
     spend_today_usd: spend,
   };
 }

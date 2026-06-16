@@ -212,6 +212,7 @@ describe("formatStatusMessage rich format", () => {
       lastEventRelativeTime: "2h ago",
       outboundTargetCount: 4,
       pendingSignals: 2,
+      providerStatusLine: "🟢 Gmail: composio",
     });
     expect(result).toContain("📋");
     expect(result).toContain("Acme Corp");
@@ -231,6 +232,7 @@ describe("formatStatusMessage rich format", () => {
       lastEventRelativeTime: null,
       outboundTargetCount: 0,
       pendingSignals: 0,
+      providerStatusLine: null,
     });
     expect(result).toContain("🔒");
     expect(result).toContain("3");
@@ -250,6 +252,7 @@ describe("formatStatusMessage rich format", () => {
       lastEventRelativeTime: null,
       outboundTargetCount: 3,
       pendingSignals: 1,
+      providerStatusLine: null,
     });
     expect(result).toContain("📬");
     expect(result).toContain("2");
