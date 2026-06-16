@@ -249,7 +249,9 @@ export const webSearchTool: UnifiedTool = {
     return {
       success: false,
       data: [],
-      error: `webSearchTool: ${primaryError}; DuckDuckGo fallback also failed: ${fallback.error}`,
+      error:
+        `webSearchTool: ${primaryError}; DuckDuckGo fallback also failed: ${fallback.error}. ` +
+        `STOP — do not call search_web again this turn. Answer from prior results or say search failed.`,
     };
   },
 };

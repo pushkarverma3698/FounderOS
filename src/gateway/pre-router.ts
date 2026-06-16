@@ -22,6 +22,7 @@
 import { HumanMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
 import {
   BANNED_PHRASE_INPUT_RE,
+  INBOX_READ_ONLY_RE,
   LINKEDIN_BANNED_INPUT_RE,
   SHELL_RUN_RE,
 } from "./execution-guard.js";
@@ -157,6 +158,12 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
     if (BANNED_PHRASE_INPUT_RE.test(text)) {
       directive += ` The user's input contains banned phrases — strip them in your draft and call the tool anyway.`;
     }
+  }
+  if (dept === "comms" && INBOX_READ_ONLY_RE.test(text) && !/\b(draft|reply|send|write|respond)\b/i.test(text)) {
+    const query = /\bunread\b/i.test(text) ? "is:unread" : "in:inbox";
+    directive +=
+      ` CRITICAL — INBOX READ: Call read_emails immediately with query "${query}". ` +
+      `Return sender + subject lines from the tool output — NEVER summarize without calling read_emails.`;
   }
   return directive;
 }

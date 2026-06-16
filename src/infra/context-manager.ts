@@ -112,6 +112,32 @@ export function countCompletedToolCalls(messages: BaseMessage[], toolName: strin
   return completed;
 }
 
+/** Tool calls scheduled in AI messages but not yet answered by ToolMessage. */
+export function countPendingToolCalls(messages: BaseMessage[], toolName: string): number {
+  const pendingIds = new Set<string>();
+
+  for (const message of messages) {
+    if (isAIMessage(message)) {
+      for (const toolCall of message.tool_calls ?? []) {
+        if (toolCall.name === toolName && toolCall.id) {
+          pendingIds.add(toolCall.id);
+        }
+      }
+      continue;
+    }
+
+    if (!isToolMessage(message)) continue;
+    const toolCallId = message.tool_call_id;
+    if (toolCallId) pendingIds.delete(toolCallId);
+  }
+
+  return pendingIds.size;
+}
+
+export function countScheduledToolCalls(messages: BaseMessage[], toolName: string): number {
+  return countCompletedToolCalls(messages, toolName) + countPendingToolCalls(messages, toolName);
+}
+
 function clampOversizedMessages(messages: BaseMessage[], maxChars: number): BaseMessage[] {
   return messages.map((message) => {
     if (typeof message.content !== "string" || message.content.length <= maxChars) {
@@ -135,7 +161,7 @@ function filterToolsByLimits<T extends { name?: string }>(
   return tools.filter((tool) => {
     const limit = limits[tool.name ?? ""];
     if (limit === undefined) return true;
-    return countCompletedToolCalls(messages, tool.name ?? "") < limit;
+    return countScheduledToolCalls(messages, tool.name ?? "") < limit;
   });
 }
 
@@ -244,8 +270,10 @@ export function createAgentMiddleware(
         const toolName = request.toolCall.name;
         const limit = toolCallLimits?.[toolName];
         if (limit !== undefined) {
-          const completed = countCompletedToolCalls(request.state.messages ?? [], toolName);
-          if (completed >= limit) {
+          const messages = request.state.messages ?? [];
+          const completed = countCompletedToolCalls(messages, toolName);
+          const pending = countPendingToolCalls(messages, toolName);
+          if (completed >= limit || completed + pending > limit) {
             const toolCallId = request.toolCall.id;
             if (!toolCallId) {
               throw new Error(`Tool call ${toolName} is missing an id for limit enforcement.`);

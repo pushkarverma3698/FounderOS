@@ -34,10 +34,42 @@ interface EmailMessage {
   messageId?: string;
   threadId?: string;
   sender?: string;
+  from?: string;
   subject?: string;
   messageText?: string;
+  snippet?: string;
   messageTimestamp?: string;
   preview?: Record<string, unknown>;
+}
+
+function normalizeEmailMessage(raw: Record<string, unknown>): EmailMessage {
+  return {
+    messageId: String(raw["messageId"] ?? raw["id"] ?? raw["message_id"] ?? ""),
+    threadId: String(raw["threadId"] ?? raw["thread_id"] ?? ""),
+    sender: String(raw["sender"] ?? raw["from"] ?? raw["senderEmail"] ?? "unknown sender"),
+    subject: String(raw["subject"] ?? "(no subject)"),
+    messageText: String(raw["messageText"] ?? raw["snippet"] ?? raw["body"] ?? raw["preview"] ?? ""),
+    messageTimestamp: String(raw["messageTimestamp"] ?? raw["date"] ?? raw["internalDate"] ?? ""),
+  };
+}
+
+function extractMessages(result: Record<string, unknown>): EmailMessage[] {
+  const data = result["data"];
+  if (Array.isArray(data)) {
+    return data.map((m) => normalizeEmailMessage(m as Record<string, unknown>));
+  }
+  if (data && typeof data === "object") {
+    const nested = data as { messages?: unknown[] };
+    if (Array.isArray(nested.messages)) {
+      return nested.messages.map((m) => normalizeEmailMessage(m as Record<string, unknown>));
+    }
+  }
+  if (Array.isArray(result["messages"])) {
+    return (result["messages"] as unknown[]).map((m) =>
+      normalizeEmailMessage(m as Record<string, unknown>),
+    );
+  }
+  return [];
 }
 
 // ── Tool: Read Emails ─────────────────────────────────────────────────────────
@@ -80,10 +112,9 @@ export const readEmailsTool: UnifiedTool = {
         { query, max_results, verbose: false },
         getGmailConnectionId(),
         getGmailUserId(),
-      );
+      ) as Record<string, unknown>;
 
-      const data = result["data"] as { messages?: EmailMessage[] } | undefined;
-      const messages: EmailMessage[] = data?.messages ?? [];
+      const messages = extractMessages(result);
 
       if (messages.length === 0) {
         return {

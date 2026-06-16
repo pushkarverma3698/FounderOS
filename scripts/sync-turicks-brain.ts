@@ -180,7 +180,7 @@ function collectDocs(rootDir: string): DocEntry[] {
 
 async function upsertEntry(
   entry: DocEntry,
-  docEmbedding: number[],
+  docEmbedding: number[] | null,
 ): Promise<{ action: "inserted" | "updated" | "skipped"; id: string }> {
   const db = getDb();
   const existing = await db
@@ -210,14 +210,13 @@ async function upsertEntry(
         is_current: true,
       })
       .returning({ id: knowledgeEntries.id });
-    await setKnowledgeEmbedding(row!.id, docEmbedding);
+    if (docEmbedding) await setKnowledgeEmbedding(row!.id, docEmbedding);
     return { action: "inserted", id: row!.id };
   }
 
   const current = existing[0]!;
   if (current.content === entry.content) {
-    // Backfill embedding if a prior sync (pre-vector) left it null.
-    await setKnowledgeEmbedding(current.id, docEmbedding);
+    if (docEmbedding) await setKnowledgeEmbedding(current.id, docEmbedding);
     return { action: "skipped", id: current.id };
   }
 
@@ -241,7 +240,7 @@ async function upsertEntry(
       is_current: true,
     })
     .returning({ id: knowledgeEntries.id });
-  await setKnowledgeEmbedding(row!.id, docEmbedding);
+  if (docEmbedding) await setKnowledgeEmbedding(row!.id, docEmbedding);
 
   return { action: "updated", id: row!.id };
 }
@@ -291,19 +290,28 @@ async function syncVectorChunks(entry: DocEntry): Promise<number> {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("🧠 Syncing docs to turicks-brain (knowledge_entries + turicks_brain vectors)…\n");
+  const keywordOnly = process.argv.includes("--keyword-only");
 
-  // Fail loud + early if Ollama can't embed — otherwise we'd write keyword rows
-  // with no vectors and the vector search would silently stay empty (the exact
-  // production bug this rewrite fixes). One cheap probe before the loop.
-  try {
-    await embedText("connectivity probe");
-  } catch (err) {
-    console.error(
-      `❌ Ollama embeddings unavailable — aborting before any write.\n   ${(err as Error).message}\n` +
-        `   Start Ollama and pull the embed model, then re-run:  ollama pull nomic-embed-text`,
+  if (keywordOnly) {
+    console.log(
+      "🧠 Syncing docs to knowledge_entries (keyword-only — no Ollama, no turicks_brain vectors)…\n",
     );
-    process.exit(1);
+  } else {
+    console.log("🧠 Syncing docs to turicks-brain (knowledge_entries + turicks_brain vectors)…\n");
+
+    // Fail loud + early if Ollama can't embed — otherwise we'd write keyword rows
+    // with no vectors and the vector search would silently stay empty (the exact
+    // production bug this rewrite fixes). One cheap probe before the loop.
+    try {
+      await embedText("connectivity probe");
+    } catch (err) {
+      console.error(
+        `❌ Ollama embeddings unavailable — aborting before any write.\n   ${(err as Error).message}\n` +
+          `   Start Ollama and pull the embed model, then re-run:  ollama pull nomic-embed-text\n` +
+          `   Or use keyword-only (no vectors):  node --import tsx/esm scripts/sync-turicks-brain.ts --keyword-only`,
+      );
+      process.exit(1);
+    }
   }
 
   const docs = collectDocs(".");
@@ -317,16 +325,22 @@ async function main() {
 
   for (const doc of docs) {
     try {
-      // Doc-level embedding for knowledge_entries hybrid search (title + head of body).
-      const docEmbedding = await embedText(`${doc.title}\n\n${doc.content.slice(0, 4000)}`);
+      const docEmbedding = keywordOnly
+        ? null
+        : await embedText(`${doc.title}\n\n${doc.content.slice(0, 4000)}`);
       const { action } = await upsertEntry(doc, docEmbedding);
 
-      // Chunk + embed into the turicks_brain vector store (what agents query).
-      const chunks = await syncVectorChunks(doc);
-      totalChunks += chunks;
+      let chunks = 0;
+      if (!keywordOnly) {
+        chunks = await syncVectorChunks(doc);
+        totalChunks += chunks;
+      }
 
       const icon = action === "inserted" ? "✅" : action === "updated" ? "🔄" : "—";
-      console.log(`${icon} [${action}] ${doc.entry_type}: ${doc.title}  (${chunks} chunks)`);
+      console.log(
+        `${icon} [${action}] ${doc.entry_type}: ${doc.title}` +
+          (keywordOnly ? "" : `  (${chunks} chunks)`),
+      );
       if (action === "inserted") inserted++;
       else if (action === "updated") updated++;
       else skipped++;
@@ -338,7 +352,7 @@ async function main() {
 
   console.log(
     `\n✅ Sync complete: ${inserted} inserted, ${updated} updated, ${skipped} skipped` +
-      ` · ${totalChunks} vector chunks embedded into turicks_brain` +
+      (keywordOnly ? " (keyword-only)" : ` · ${totalChunks} vector chunks embedded into turicks_brain`) +
       (failures > 0 ? ` · ${failures} FAILED` : ""),
   );
   process.exit(failures > 0 ? 1 : 0);

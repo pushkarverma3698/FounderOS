@@ -94,3 +94,31 @@ export const SHELL_RETRY_HINT =
 
 export const LINKEDIN_RETRY_HINT =
   "⚠️ I should call linkedin_post (banned phrases are auto-stripped). Retrying…";
+
+/** Read-only inbox check — excludes draft/reply/send workflows. */
+export const INBOX_READ_ONLY_RE =
+  /\b(check|read|show|list|any|what(?:'s| is) in)\b[^.?!]{0,50}\b(unread )?(emails?|inbox)\b|\b(unread|inbox)\b[^.?!]{0,40}\b(check|emails?)\b|\bcheck my unread emails?\b/i;
+
+/** Vague inbox summary without listing senders/subjects. */
+export const FAKE_INBOX_CLAIM_RE =
+  /\b(several|some|many|a few|multiple)\b[^.?!]{0,40}\b(unread )?emails?\b|\b(you have|there are)\b[^.?!]{0,40}\b(unread )?emails?\b|\b(review them|need your attention)\b/i;
+
+export function isInboxReadOnlyRequest(input: string): boolean {
+  const text = input.trim();
+  if (!text || !INBOX_READ_ONLY_RE.test(text)) return false;
+  if (/\b(draft|reply|send|write|respond|compose|forward)\b/i.test(text)) return false;
+  return true;
+}
+
+export function detectUnbackedInboxClaim(
+  userInput: string,
+  messages: OfficeMessageLike[],
+  reply: string,
+): boolean {
+  if (!isInboxReadOnlyRequest(userInput)) return false;
+  if (hadToolCall(messages, "read_emails")) return false;
+  return FAKE_INBOX_CLAIM_RE.test(reply);
+}
+
+export const INBOX_RETRY_HINT =
+  "⚠️ That inbox summary was not from Gmail — retrying with read_emails…";
