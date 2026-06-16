@@ -23,6 +23,8 @@ import { getModel } from "./model.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
 import { createTrimmedPrompt } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS, SUPERVISOR_TOOLS } from "./capabilities.js";
+import { ENGINEERING_SUBGRAPH_ENABLED } from "../core/config.js";
+import { buildEngineeringDomain } from "./engineering-domain.js";
 import {
   buildSupervisorPrompt,
   RESEARCH_PROMPT,
@@ -78,13 +80,22 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     prompt: createTrimmedPrompt(buildCommsPrompt(), subAgentBudget) as any,
   });
 
-  const engineering = createReactAgent({
-    llm,
-    tools: DEPARTMENT_TOOLS["engineering"]!,
-    name: "engineering",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(ENGINEERING_PROMPT, subAgentBudget) as any,
-  });
+  // engineering: either the flat ReAct agent (production default) or the
+  // hierarchical CTO sub-supervisor (coder/qa/devops) when ENGINEERING_SUBGRAPH=1.
+  // BOTH are named "engineering", so the supervisor's routing + capability
+  // manifest are identical — only the internal topology of the node changes.
+  // The subgraph is compiled WITHOUT its own checkpointer (engineering-domain.ts);
+  // the parent's checkpointer here supplies persistence so nested interrupts are
+  // crash-safe (hierarchy plan P2 / ADR-027).
+  const engineering = ENGINEERING_SUBGRAPH_ENABLED
+    ? buildEngineeringDomain()
+    : createReactAgent({
+        llm,
+        tools: DEPARTMENT_TOOLS["engineering"]!,
+        name: "engineering",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        prompt: createTrimmedPrompt(ENGINEERING_PROMPT, subAgentBudget) as any,
+      });
 
   // ── Phase B departments ───────────────────────────────────────────────────
 
@@ -127,8 +138,12 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   });
 
   return createSupervisor({
-    // 7 departments — prospecting merged into research (ICP scoring is now a research mode)
-    agents: [research, comms, engineering, marketing, sales, personal, jobhunt],
+    // 7 departments — prospecting merged into research (ICP scoring is now a research mode).
+    // `engineering` may be a ReAct agent or a compiled sub-supervisor (same name);
+    // createSupervisor accepts both, but the union widens the type — cast at this
+    // single boundary (same as the proven nested pattern in engineering-domain.ts).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    agents: [research, comms, engineering as any, marketing, sales, personal, jobhunt],
     llm,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(buildSupervisorPrompt(), supervisorBudget) as any,
