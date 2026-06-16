@@ -70,19 +70,19 @@ export const listDir = tool(
 // ── Personal: send a laptop file to Telegram (OUTBOUND — requires approval) ───
 
 export const sendFile = tool(
-  async ({ path: filePath }) => {
+  async ({ path: filePath }, config) => {
     // Validate BEFORE interrupt() (read-only stat; safe to re-run on resume).
     const r = await resolveSendableFile(filePath);
     if (!r.ok) return `ERROR: ${r.error}`;
 
     const sizeKb = (r.size / 1024).toFixed(1);
-    const rejected = hitlGate({
+    const rejected = await hitlGate({
       action: "send_file",
       title: `📎 Send ${r.name} to your Telegram?`,
       summary: `Attach ${r.name} (${sizeKb} KB) from ${r.path}`,
       preview: r.path,
       args: { path: r.path },
-    });
+    }, config);
     if (rejected) return rejected;
 
     // Side effect AFTER approval only (rule #3). Single-tenant → default chat.
@@ -110,14 +110,14 @@ export const sendFile = tool(
 // ── Personal: write a file (WRITE — requires approval) ────────────────────────
 
 export const writeFile = tool(
-  async ({ path: filePath, content }) => {
-    const rejected = hitlGate({
+  async ({ path: filePath, content }, config) => {
+    const rejected = await hitlGate({
       action: "write_file",
       title: `💾 Write file ${filePath}?`,
       summary: `Write ${content.length} chars to ${filePath}`,
       preview: content.slice(0, 2000),
       args: { path: filePath, content },
-    });
+    }, config);
     if (rejected) return rejected;
 
     const r = await writeFileSafe(filePath, content);
@@ -139,7 +139,7 @@ export const writeFile = tool(
 // ── Personal: run a shell command / script (WRITE — requires approval) ─────────
 
 export const runShell = tool(
-  async ({ command, cwd }) => {
+  async ({ command, cwd }, config) => {
     // Idempotency: prevent re-execution on HITL resume loop
     const key = idemKey("shell", cwd ?? "", command);
     if (await hasBeenAudited(key)) {
@@ -147,13 +147,13 @@ export const runShell = tool(
     }
 
     const dangerous = flagDangerousCommand(command);
-    const rejected = hitlGate({
+    const rejected = await hitlGate({
       action: "run_shell",
       title: `${dangerous ? "⚠️ DANGEROUS " : "🖥️ "}Run shell command?`,
       summary: `${dangerous ? "⚠️ This looks destructive. " : ""}cwd: ${cwd ?? "(personal root)"}`,
       preview: command,
       args: { command, cwd },
-    });
+    }, config);
     if (rejected) return rejected;
 
     const r = await runShellSafe(command, cwd ?? undefined);
@@ -182,14 +182,14 @@ export const runShell = tool(
 // ── Personal: drive Safari via AppleScript (WRITE — requires approval) ─────────
 
 export const browser = tool(
-  async ({ action, url, js }) => {
-    const rejected = hitlGate({
+  async ({ action, url, js }, config) => {
+    const rejected = await hitlGate({
       action: "browser",
       title: `🌐 Browser: ${action}?`,
       summary: action === "open_url" ? `Open ${url}` : action === "run_js" ? "Run JavaScript in Safari" : "Read the current Safari page",
       preview: url ?? js ?? "(current page)",
       args: { action, url, js },
-    });
+    }, config);
     if (rejected) return rejected;
 
     const r = await browserAction(action as BrowserAction, { ...(url ? { url } : {}), ...(js ? { js } : {}) });

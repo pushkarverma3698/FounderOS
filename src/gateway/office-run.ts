@@ -28,7 +28,7 @@ import { logger } from "../infra/logger.js";
 import { getOffice, getPendingApproval } from "../agents/office.js";
 import type { ApprovalRequest } from "../agents/agent-tools.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
-import { cancelPendingApprovals } from "../db/queries.js";
+import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt } from "../db/queries.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 import { buildOfficeInput } from "./pre-router.js";
 import { assertNonEmptyMessages } from "../infra/office-guard.js";
@@ -42,6 +42,29 @@ import { buildRunMetadata } from "../infra/telemetry.js";
 import { SUPERVISOR_PROMPT } from "../agents/system-prompts.js";
 
 const log = logger.child({ module: "office-run" });
+
+/** Only re-post HITL cards paused within this window (crash recovery, not ancient E2E junk). */
+export const HITL_RESTORE_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+
+/** Serialize office runs per chat so slow turns cannot bleed replies into the next message. */
+const chatTurnChains = new Map<string, Promise<void>>();
+
+export async function withChatTurnLock<T>(chatId: string | number, fn: () => Promise<T>): Promise<T> {
+  const key = String(chatId);
+  const tail = chatTurnChains.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const slot = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  chatTurnChains.set(key, tail.then(() => slot));
+  await tail;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (chatTurnChains.get(key) === slot) chatTurnChains.delete(key);
+  }
+}
 
 // ── Safe HTML ─────────────────────────────────────────────────────────────────
 
@@ -180,6 +203,11 @@ export async function resolvePendingApproval(
 ): Promise<ApprovalRequest | null> {
   const pending = await getPendingApproval(office as Parameters<typeof getPendingApproval>[0], config);
   if (!pending) return null;
+  const threadId = config?.configurable?.thread_id as string | undefined;
+  if (threadId) {
+    const row = await getPendingInterrupt(threadId);
+    if (row) await resolveInterrupt(row.interrupt_id, "rejected");
+  }
   await office.invoke(new Command({ resume: "rejected" }), config);
   return pending;
 }
@@ -324,10 +352,37 @@ async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promis
 
 /**
  * After a process restart, Telegram inline buttons on the OLD card are dead but the
- * LangGraph checkpoint still holds the interrupt. Re-post a fresh card so the
- * founder (or E2E harness) can approve/reject without /reset.
+ * LangGraph checkpoint may still hold the interrupt. Re-post a fresh card only for
+ * recent pauses; auto-clear ancient E2E leftovers (git clone cards, etc.).
  */
+export async function clearStalePendingInterruptOnBoot(chatId: string | number): Promise<boolean> {
+  const office = await getOffice();
+  const config = officeConfig(chatId);
+  const threadId = threadIdFor(chatId);
+  const pending = await getPendingApproval(office, config);
+  if (!pending) return false;
+
+  const dbRow = await getPendingInterrupt(threadId);
+  const state = (await office.getState(config).catch(() => null)) as { createdAt?: string } | null;
+  const checkpointAt = state?.createdAt ? new Date(state.createdAt).getTime() : 0;
+  const dbAt = dbRow?.created_at ? new Date(dbRow.created_at).getTime() : 0;
+  const anchor = Math.max(checkpointAt, dbAt);
+  const expired = dbRow ? dbRow.expires_at < new Date() : false;
+  const tooOld = anchor > 0 && Date.now() - anchor > HITL_RESTORE_MAX_AGE_MS;
+  const legacy = !dbRow && anchor === 0;
+
+  if (!expired && !tooOld && !legacy) return false;
+
+  if (dbRow) await resolveInterrupt(dbRow.interrupt_id, "expired");
+  await office.invoke(new Command({ resume: "rejected" }), config);
+  await cancelPendingApprovals(threadId);
+  log.info({ chatId, title: pending.title, legacy, tooOld, expired }, "Cleared stale HITL interrupt on boot");
+  return true;
+}
+
 export async function restorePendingApprovalAfterRestart(chatId: string | number): Promise<boolean> {
+  if (await clearStalePendingInterruptOnBoot(chatId)) return false;
+
   const office = await getOffice();
   const config = officeConfig(chatId);
   const pending = await getPendingApproval(office, config);
@@ -407,6 +462,10 @@ export async function routeToOffice(ctx: Context): Promise<void> {
  */
 export async function runOfficeText(ctx: Context, text: string): Promise<void> {
   const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
+  await withChatTurnLock(chatId, () => runOfficeTextLocked(ctx, text, chatId));
+}
+
+async function runOfficeTextLocked(ctx: Context, text: string, chatId: number | string): Promise<void> {
   const config = officeConfig(chatId);
 
   const trace = startTurn({ chatId, kind: "message", promptHash: activePromptHash(SUPERVISOR_PROMPT) });
@@ -569,6 +628,10 @@ export function buildRejectionConfirmation(approval: ApprovalRequest): string {
 
 export async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Promise<void> {
   const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
+  await withChatTurnLock(chatId, () => resumeOfficeLocked(ctx, decision, chatId));
+}
+
+async function resumeOfficeLocked(ctx: Context, decision: "approved" | "rejected", chatId: number | string): Promise<void> {
   const config = officeConfig(chatId);
   const trace = startTurn({ chatId, kind: "resume", promptHash: activePromptHash(SUPERVISOR_PROMPT) });
   trace.event("hitl.resume", { decision });
@@ -603,6 +666,8 @@ export async function resumeOffice(ctx: Context, decision: "approved" | "rejecte
     // deterministically: clear the thread and confirm. The side effect only
     // runs after an "approved" resume, so action_log stays empty (safety holds).
     if (decision === "rejected") {
+      const row = await getPendingInterrupt(threadIdFor(chatId));
+      if (row) await resolveInterrupt(row.interrupt_id, "rejected");
       await clearThreadCheckpoints(threadIdFor(chatId));
       await cancelGhostApprovals(chatId);
       trace.event("turn.out", { rejected: true });
@@ -648,6 +713,8 @@ export async function resumeOffice(ctx: Context, decision: "approved" | "rejecte
       await sendApprovalCard(ctx, next);
       return;
     }
+    const row = await getPendingInterrupt(threadIdFor(chatId));
+    if (row) await resolveInterrupt(row.interrupt_id, "approved");
     const freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
     const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
     await sendResult(ctx, freshRes, chatId);

@@ -63,7 +63,7 @@ export function missingGithubWriteFields(
 }
 
 export const githubWrite = tool(
-  async ({ action, owner, repo, title, body, content }) => {
+  async ({ action, owner, repo, title, body, content }, config) => {
     // Structured-input guard: a github_write call missing fields its action needs
     // is surfaced to the model as a precise, correctable error — never sent to the
     // GitHub API to fail opaquely (which previously produced confused retries).
@@ -78,13 +78,13 @@ export const githubWrite = tool(
       return `Already performed: github_${action}${repo ? " on " + repo : ""}${title ? " · " + title : ""} (skipped duplicate)`;
     }
 
-    const rejected = hitlGate({
+    const rejected = await hitlGate({
       action: `github_${action}`,
       title: `🔧 GitHub ${action} — proceed?`,
       summary: `${action} ${owner ?? ""}${repo ? "/" + repo : ""}${title ? " · " + title : ""}`.trim(),
       preview: content ?? body ?? title ?? "",
       args: { action, owner, repo, title, body, content },
-    });
+    }, config);
     if (rejected) return rejected;
 
     const res = await githubTool.execute({
@@ -122,7 +122,7 @@ export const githubWrite = tool(
 // read_file / list_files: instant (no HITL). run_command: ALWAYS HITL-gated.
 
 export const projectWorkflow = tool(
-  async ({ action, command, path: filePath, cwd }) => {
+  async ({ action, command, path: filePath, cwd }, config) => {
     // Read actions: instant, no approval
     if (action === "read_file" || action === "list_files") {
       const res = await projectWorkflowTool.execute({ action, path: filePath });
@@ -141,13 +141,13 @@ export const projectWorkflow = tool(
       }
 
       const dangerous = flagDangerousWorkflowCommand(command);
-      const rejected = hitlGate({
+      const rejected = await hitlGate({
         action: "project_workflow",
         title: `${dangerous ? "⚠️ DANGEROUS " : "🔧 "}Run command in project?`,
         summary: `${dangerous ? "⚠️ Potentially destructive. " : ""}cwd: ${cwd ?? "founderos"}`,
         preview: command,
         args: { action, command, cwd },
-      });
+      }, config);
       if (rejected) return rejected;
 
       const res = await projectWorkflowTool.execute({ action, command, cwd });
@@ -178,7 +178,7 @@ export const projectWorkflow = tool(
 // ── Engineering: Claude Code CLI (HITL-gated) ────────────────────────────────
 
 export const claudeCode = tool(
-  async ({ task, cwd }) => {
+  async ({ task, cwd }, config) => {
     // Detect binary before showing the approval card so we fail fast
     const binary = findClaudeBinary();
     if (!binary) {
@@ -191,13 +191,13 @@ export const claudeCode = tool(
       return `Already executed this exact task (skipped duplicate run).`;
     }
 
-    const rejected = hitlGate({
+    const rejected = await hitlGate({
       action: "claude_code",
       title: "🤖 Run this task with Claude Code?",
       summary: `One approval covers the whole task. Workspace: ${cwd ?? "~/Projects/agent-workspace"}`,
       preview: task,
       args: { task, cwd },
-    });
+    }, config);
     if (rejected) return rejected;
 
     const res = await claudeCodeTool.execute({

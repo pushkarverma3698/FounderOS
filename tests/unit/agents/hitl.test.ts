@@ -31,6 +31,11 @@ vi.mock("@langchain/langgraph", async (orig) => {
   return { ...actual, interrupt: mockInterrupt };
 });
 
+vi.mock("../../../src/db/queries.js", () => ({
+  createInterrupt: vi.fn().mockResolvedValue("test-interrupt-id"),
+  getPendingInterrupt: vi.fn().mockResolvedValue(null),
+}));
+
 // Dynamic import AFTER mocks are hoisted
 const { hitlGate, idemKey } = await import("../../../src/agents/agent-tools/hitl.js");
 
@@ -96,39 +101,39 @@ describe("hitlGate", () => {
     vi.clearAllMocks();
   });
 
-  it("returns null when interrupt returns 'approved' — execution continues", () => {
+  it("returns null when interrupt returns 'approved' — execution continues", async () => {
     mockInterrupt.mockReturnValue("approved");
-    const result = hitlGate(APPROVAL_PAYLOAD);
+    const result = await hitlGate(APPROVAL_PAYLOAD, { configurable: { thread_id: "turicks:1" } });
     expect(result).toBeNull();
   });
 
-  it("returns rejection string when interrupt returns 'rejected'", () => {
+  it("returns rejection string when interrupt returns 'rejected'", async () => {
     mockInterrupt.mockReturnValue("rejected");
-    const result = hitlGate(APPROVAL_PAYLOAD);
+    const result = await hitlGate(APPROVAL_PAYLOAD);
     expect(result).toBe("❌ Rejected by founder.");
   });
 
-  it("returns rejection string for any non-approved value — empty string", () => {
+  it("returns rejection string for any non-approved value — empty string", async () => {
     mockInterrupt.mockReturnValue("");
-    const result = hitlGate(APPROVAL_PAYLOAD);
+    const result = await hitlGate(APPROVAL_PAYLOAD);
     expect(result).toBe("❌ Rejected by founder.");
   });
 
-  it("returns rejection string for any non-approved value — arbitrary string", () => {
+  it("returns rejection string for any non-approved value — arbitrary string", async () => {
     mockInterrupt.mockReturnValue("maybe");
-    const result = hitlGate(APPROVAL_PAYLOAD);
+    const result = await hitlGate(APPROVAL_PAYLOAD);
     expect(result).toBe("❌ Rejected by founder.");
   });
 
-  it("returns rejection string when interrupt returns null (unresolved resume)", () => {
+  it("returns rejection string when interrupt returns null (unresolved resume)", async () => {
     mockInterrupt.mockReturnValue(null);
-    const result = hitlGate(APPROVAL_PAYLOAD);
+    const result = await hitlGate(APPROVAL_PAYLOAD);
     expect(result).toBe("❌ Rejected by founder.");
   });
 
-  it("passes kind:'approval' + full payload to interrupt (contract verification)", () => {
+  it("passes kind:'approval' + full payload to interrupt (contract verification)", async () => {
     mockInterrupt.mockReturnValue("approved");
-    hitlGate(APPROVAL_PAYLOAD);
+    await hitlGate(APPROVAL_PAYLOAD);
 
     expect(mockInterrupt).toHaveBeenCalledOnce();
     expect(mockInterrupt).toHaveBeenCalledWith({
@@ -141,9 +146,9 @@ describe("hitlGate", () => {
     });
   });
 
-  it("always calls interrupt exactly once per gate invocation", () => {
+  it("always calls interrupt exactly once per gate invocation", async () => {
     mockInterrupt.mockReturnValue("approved");
-    hitlGate(APPROVAL_PAYLOAD);
+    await hitlGate(APPROVAL_PAYLOAD);
     expect(mockInterrupt).toHaveBeenCalledTimes(1);
   });
 

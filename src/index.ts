@@ -19,6 +19,7 @@ import { closeDatabaseConnections } from "./db/client.js";
 import { getOffice } from "./agents/office.js";
 import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
 import { restorePendingApprovalAfterRestart } from "./gateway/office-run.js";
+import { expireStaleInterrupts } from "./db/queries.js";
 import { startHealthServer } from "./infra/health.js";
 import { startScheduler } from "./infra/scheduler.js";
 import { acquireSingleInstanceLock, releaseSingleInstanceLock, waitForProcessExit } from "./infra/single-instance.js";
@@ -62,8 +63,10 @@ async function main(): Promise<void> {
   // 4. Telegram bot (long polling — runs in background).
   await startBot();
 
-  // 4b. Crash recovery — if a HITL interrupt survived in the checkpointer, the old
-  //     Telegram inline keyboard is invalid after restart. Re-post a fresh card.
+  // 4b. Crash recovery — expire DB rows, clear ancient checkpoints, re-post recent HITL.
+  await expireStaleInterrupts().catch((err) => {
+    log.warn({ err: (err as Error).message }, "expireStaleInterrupts failed — non-fatal");
+  });
   const restored = await restorePendingApprovalAfterRestart(env.TELEGRAM_CHAT_ID).catch((err) => {
     log.warn({ err: (err as Error).message }, "Pending HITL restore failed — non-fatal");
     return false;
