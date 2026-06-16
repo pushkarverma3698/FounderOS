@@ -299,16 +299,45 @@ async function sendHtmlSafe(ctx: Context, html: string): Promise<void> {
   }
 }
 
-async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promise<void> {
+/** Build the HTML body + inline keyboard for an approval card (shared by reply + restart repost). */
+export function formatApprovalCard(
+  approval: ApprovalRequest,
+  opts: { afterRestart?: boolean } = {},
+): { html: string; keyboard: InlineKeyboard } {
   const keyboard = new InlineKeyboard()
     .text("✅ Approve", "approve")
     .text("❌ Reject", "reject");
-
   const preview = approval.preview ? `\n\n<i>${safeHtml(approval.preview.slice(0, 1500))}</i>` : "";
-  await ctx.reply(
-    `${safeHtml(approval.title)}\n${safeHtml(approval.summary)}${preview}`,
-    { parse_mode: "HTML", reply_markup: keyboard },
-  );
+  const prefix = opts.afterRestart
+    ? `⏸️ <b>Resuming after restart</b> — still waiting on your approval:\n\n`
+    : "";
+  return {
+    html: `${prefix}${safeHtml(approval.title)}\n${safeHtml(approval.summary)}${preview}`,
+    keyboard,
+  };
+}
+
+async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promise<void> {
+  const { html, keyboard } = formatApprovalCard(approval);
+  await ctx.reply(html, { parse_mode: "HTML", reply_markup: keyboard });
+}
+
+/**
+ * After a process restart, Telegram inline buttons on the OLD card are dead but the
+ * LangGraph checkpoint still holds the interrupt. Re-post a fresh card so the
+ * founder (or E2E harness) can approve/reject without /reset.
+ */
+export async function restorePendingApprovalAfterRestart(chatId: string | number): Promise<boolean> {
+  const office = await getOffice();
+  const config = officeConfig(chatId);
+  const pending = await getPendingApproval(office, config);
+  if (!pending) return false;
+
+  const { html, keyboard } = formatApprovalCard(pending, { afterRestart: true });
+  const { getBot } = await import("./telegram.js");
+  await getBot().api.sendMessage(chatId, html, { parse_mode: "HTML", reply_markup: keyboard });
+  log.info({ chatId, title: pending.title }, "Re-posted pending HITL card after restart");
+  return true;
 }
 
 // ── Office run helpers ─────────────────────────────────────────────────────────

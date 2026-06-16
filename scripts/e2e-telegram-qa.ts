@@ -586,7 +586,9 @@ async function cmdApproveLast(): Promise<void> {
   const since = new Date(Date.now() - 5 * 60_000);
   try {
     console.log(`\n✅ Approving the latest pending card (post-restart)…`);
-    const out = await clickLatestCard(client, peer, "approve");
+    // After restart the bot re-posts a fresh card — wait briefly for it to land.
+    await sleep(3_000);
+    const out = await clickLatestCard(client, peer, "approve", 90);
     if (out.length === 0) {
       console.log("⚠ No pending card found, or no follow-up reply. The card may have been lost on restart (BLOCKER).");
     } else {
