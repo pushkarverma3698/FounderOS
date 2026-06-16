@@ -136,6 +136,12 @@ function boolEnv(key: string, fallback = false): boolean {
  */
 export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", false);
 
+/**
+ * Promote marketing + sales into a `revenue` sub-supervisor (ADR-028 / ADR-025).
+ * Default OFF — live MTProto nested-HITL verification required before production.
+ */
+export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", false);
+
 /** Max recursive supervisor/sub-agent steps before LangGraph aborts a run. */
 export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 40);
 

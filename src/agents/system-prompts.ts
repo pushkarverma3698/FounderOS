@@ -18,7 +18,7 @@
  * The founder is Pushkar Verma — solo founder of Turicks (AI automation agency)
  * and Naggar Retreat. FounderOS is his Telegram-based company operating system.
  *
- * Departments (7): research · comms · engineering · marketing · sales · personal · jobhunt
+ * Departments (8): admin · research · comms · engineering · marketing · sales · personal · jobhunt
  *
  * Architecture decision (2026-06-05): each tool has exactly ONE department owner
  * (prospecting merged into research; linkedin_post → marketing only; read_emails
@@ -28,6 +28,7 @@
  */
 
 export { SUPERVISOR_PROMPT, buildSupervisorPrompt } from "./prompts/supervisor.js";
+export { ADMIN_PROMPT } from "./prompts/admin.js";
 export { RESEARCH_PROMPT } from "./prompts/research.js";
 export { buildCommsPrompt } from "./prompts/comms.js";
 export { ENGINEERING_PROMPT } from "./prompts/engineering.js";

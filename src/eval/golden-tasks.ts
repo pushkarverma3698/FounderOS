@@ -12,6 +12,15 @@
 import type { GoldenTask } from "./types.js";
 
 export const GOLDEN_TASKS: GoldenTask[] = [
+  // ── Admin (context + memory) ───────────────────────────────────────────────
+  {
+    id: "admin-focus",
+    input: "What's my current focus and priorities?",
+    expectedRoute: "admin",
+    expectedTools: ["read_context"],
+    expectsHitl: false,
+  },
+
   // ── Research (read-only) ──────────────────────────────────────────────────
   {
     id: "research-company",

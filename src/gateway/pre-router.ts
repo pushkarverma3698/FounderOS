@@ -2,33 +2,21 @@
  * FounderOS — Pre-Router
  * =======================
  * Deterministic, pure routing rules that fire BEFORE the supervisor LLM.
- *
- * Why: Gemini at temperature 0 is still not perfectly reproducible on routing
- * (CLAUDE.md rule #16). The supervisor's routing table lives in a prompt the
- * model *may* drift from. So we push routing into a pure function with unit
- * tests, and inject the result as an ADVISORY hint (a SystemMessage) — never a
- * hard override. A misfiring rule stays LLM-correctable; a correct rule removes
- * the model's only chance to drift.
- *
- * The hint is consumed identically by the Telegram gateway and the eval harness
- * via buildOfficeInput(), so `pnpm eval` measures the REAL production path
- * (CLAUDE.md rule #19), not a router-less shortcut.
- *
- * Rule order is significant — FIRST match wins. The order encodes the
- * supervisor's DISAMBIGUATION rules (route by goal, not by an intermediate
- * step): unambiguous OS/content signals first, then job/sales/comms/research.
  */
 
 import { HumanMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
+import { REVENUE_SUBGRAPH_ENABLED } from "../core/config.js";
 import {
   BANNED_PHRASE_INPUT_RE,
   INBOX_READ_ONLY_RE,
   LINKEDIN_BANNED_INPUT_RE,
   SHELL_RUN_RE,
 } from "./execution-guard.js";
+import { buildTaskLedgerDirective, detectTaskLedger } from "./task-ledger.js";
 
-/** The seven routable departments (matches src/agents/office.ts + eval Department). */
+/** Routable departments (matches office.ts + eval Department). */
 export type RoutableDept =
+  | "admin"
   | "research"
   | "comms"
   | "engineering"
@@ -38,6 +26,7 @@ export type RoutableDept =
   | "jobhunt";
 
 const ROUTABLE_DEPTS: ReadonlySet<RoutableDept> = new Set<RoutableDept>([
+  "admin",
   "research",
   "comms",
   "engineering",
@@ -47,40 +36,30 @@ const ROUTABLE_DEPTS: ReadonlySet<RoutableDept> = new Set<RoutableDept>([
   "jobhunt",
 ]);
 
-// ── Rule predicates (pure regex, ordered by precedence) ───────────────────────
-
-/** `/q` and workflow steps inject "[Route directly to X department]: …". Honour it verbatim. */
 const EXPLICIT_PREFIX = /\[route directly to (\w+) department\]/i;
 
-/** Filesystem / shell / browser on the founder's Mac → personal. Highest-precedence OS signal. */
 const PERSONAL_RE =
   /(^|\s)~\/|\/Users\/pushkarverma|\b(desktop|downloads|documents|home folder|projects folder)\b|files? (in|on) (my|the)\b|\.(zshrc|bashrc|ssh|env)\b|\bmy (mac|laptop|machine|computer)\b|\b(safari|browser)\b|\b(send|attach|share) (me )?(the |this )?file\b|\battachment\b|\brun (this )?in (my )?(the )?terminal\b|\bterminal:\s*\w/i;
 
-/** Multi-department orchestration (brief + github + context) — let supervisor sequence. */
-const MULTI_DEPT_ORCHESTRATION_RE =
-  /\b(monday|weekly)\b[^.?!]{0,80}\b(github|issues?|context)\b|\b(github|issues?)\b[^.?!]{0,80}\b(monday|weekly|brief|plan)\b|\bresearch\b[^.?!]{0,60}\b(then|and)\b[^.?!]{0,40}\b(github|issue)\b/i;
-
-/** LinkedIn is marketing's ONLY domain — unambiguous, checked before code/email verbs. */
 const MARKETING_RE = /\blinkedin\b/i;
 
-/** GitHub or a code-authoring request → engineering. Checked before jobhunt/comms. */
 const ENGINEERING_RE =
   /\bgithub\b|\brepositor|\brepo\b|\b(write|create|build|fix|refactor|debug|implement|review)\b[^.?!]*\b(typescript|javascript|python|function|script|code|app|website|api|endpoint|component|class|module|bug|feature)\b|\b(commit|pull request|merge|rebase|push to)\b/i;
 
-/** Job search / applications / CV — must beat sales+comms so "outreach email" for a job → jobhunt. */
 const JOBHUNT_RE =
   /\bjobs?\b|\bpositions?\b|\bhiring\b|\brecruiter\b|\b(cv|resume|cover letter)\b|\bapply\b|\bapplication\b|\bopen (role|position)/i;
 
-/** Cold outreach to an unknown company/person → sales. */
 const SALES_RE = /\bcold (outreach|email)\b|\boutreach to (the )?(founder|ceo|cto|owner|head)\b/i;
 
-/** Inbox / known-contact email / calendar → comms. */
 const COMMS_RE =
   /\b(unread|inbox)\b|\bread (my )?emails?\b|\bcheck (my )?(email|inbox)\b|email (to )?[\w.+-]+@[\w.-]+|\bemail (our|my|the|him|her|them|client)\b|\bcalendar\b|\breminder\b|\bblock (time|my)\b|\bdeep work\b|\bfocus block\b/i;
 
-/** Web facts / news / ICP scoring / memory review → research. */
+/** Business state + episodic memory (ADR-028 admin worker). */
+const ADMIN_RE =
+  /\b(what('s| is| are) my (current )?(focus|priorities|situation))\b|\bwhat did we (discuss|decide|agree|talk about)\b|\b(log this|record (this|that|the)|remember this)\b|\bpending signals?\b/i;
+
 const RESEARCH_RE =
-  /\bresearch\b|\bnews\b|\bwhat (does|is|are|'s)\b|\bscore\b|\bICP\b|\bqualify\b|\bprospect\b|\bgood fit\b|\bthis week\b|\bweekly\b|\bmonday plan\b|\bcontext memory\b|\bopen items\b|\baccomplished\b|\bsearch for\b|\bsummari[sz]e\b|\bmarket\b|\blatest\b/i;
+  /\bresearch\b|\bnews\b|\bwhat (does|is|are|'s)\b|\bscore\b|\bICP\b|\bqualify\b|\bprospect\b|\bgood fit\b|\bopen items\b|\baccomplished\b|\bsearch for\b|\bsummari[sz]e\b|\bmarket\b|\blatest\b/i;
 
 const RULES: ReadonlyArray<[RegExp, RoutableDept]> = [
   [PERSONAL_RE, "personal"],
@@ -89,29 +68,29 @@ const RULES: ReadonlyArray<[RegExp, RoutableDept]> = [
   [JOBHUNT_RE, "jobhunt"],
   [SALES_RE, "sales"],
   [COMMS_RE, "comms"],
+  [ADMIN_RE, "admin"],
   [RESEARCH_RE, "research"],
 ];
 
-// ── Public API ────────────────────────────────────────────────────────────────
+/** Map marketing/sales → revenue when the revenue subgraph flag is on. */
+export function resolveSupervisorTarget(dept: RoutableDept): string {
+  if (REVENUE_SUBGRAPH_ENABLED && (dept === "marketing" || dept === "sales")) {
+    return "revenue";
+  }
+  return dept;
+}
 
-/**
- * Deterministically choose a department from the raw input, or null to let the
- * supervisor decide. First matching rule wins. Pure — no I/O, no model call.
- */
 export function preRouteDepartment(input: string): RoutableDept | null {
   if (!input || input.trim().length === 0) return null;
 
-  // 0. Explicit "[Route directly to X department]" prefix overrides everything.
   const explicit = EXPLICIT_PREFIX.exec(input);
   if (explicit) {
     const dept = explicit[1]?.toLowerCase() as RoutableDept;
     if (dept && ROUTABLE_DEPTS.has(dept)) return dept;
   }
 
-  // Multi-step cross-department requests — supervisor must orchestrate.
-  if (MULTI_DEPT_ORCHESTRATION_RE.test(input)) return null;
+  if (detectTaskLedger(input)) return null;
 
-  // 1..7 ordered keyword rules.
   for (const [pattern, dept] of RULES) {
     if (pattern.test(input)) return dept;
   }
@@ -119,33 +98,18 @@ export function preRouteDepartment(input: string): RoutableDept | null {
   return null;
 }
 
-/**
- * Build the office invocation messages for a raw founder input. Used by BOTH the
- * Telegram gateway and the eval harness so they exercise the SAME routing path.
- *
- * The hint is authoritative for SINGLE-department requests: the deterministic
- * classifier is unit-tested to never misroute the golden set, so it is more
- * reliable than the LLM on ambiguous edges (e.g. "research them first, then cold
- * outreach" → sales; an explicit email address → comms). The only sanctioned
- * override is a genuine multi-step prompt that spans several departments — for
- * those the supervisor still sequences the sub-tasks itself.
- */
-function buildOrchestrationDirective(): string {
-  return (
-    `[ORCHESTRATION DIRECTIVE: Multi-department request — handle ONE department per transfer. ` +
-    `Do not batch cross-department tool calls in a single supervisor step.\n` +
-    `For Monday/weekly briefs: (1) You: read_context + search_memory. ` +
-    `(2) Transfer to engineering: github_read for open issues only. ` +
-    `(3) You: synthesize a bullet plan from those results. Relay each step verbatim before the next.]`
-  );
-}
-
 function buildRoutingDirective(dept: RoutableDept, text: string): string {
+  const target = resolveSupervisorTarget(dept);
   let directive =
     `[ROUTING DIRECTIVE: A deterministic classifier routed this to the ${dept} department. ` +
-    `Transfer to ${dept} first. Only pick a different department if this is a multi-step ` +
+    `Transfer to ${target} first. Only pick a different department if this is a multi-step ` +
     `request that clearly spans several departments.]`;
 
+  if (dept === "admin") {
+    directive +=
+      ` CRITICAL — ADMIN: Use read_context / search_memory / update_context / record_event as appropriate. ` +
+      `You have NO business tools yourself — delegate to admin.`;
+  }
   if (dept === "personal" && SHELL_RUN_RE.test(text)) {
     directive +=
       ` CRITICAL — SHELL RUN: personal MUST call run_shell immediately. ` +
@@ -169,14 +133,14 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
 }
 
 export function buildOfficeInput(text: string): BaseMessage[] {
-  if (MULTI_DEPT_ORCHESTRATION_RE.test(text)) {
-    return [new SystemMessage(buildOrchestrationDirective()), new HumanMessage(text)];
+  const ledger = detectTaskLedger(text);
+  if (ledger) {
+    return [new SystemMessage(buildTaskLedgerDirective(ledger)), new HumanMessage(text)];
   }
 
   const dept = preRouteDepartment(text);
   if (!dept) return [new HumanMessage(text)];
 
-  // Explicit prefix is the strongest routing signal — supervisor cannot "helpfully" refuse.
   const humanText =
     dept === "personal" && SHELL_RUN_RE.test(text)
       ? `[Route directly to personal department]: ${text}`
@@ -185,12 +149,6 @@ export function buildOfficeInput(text: string): BaseMessage[] {
   return [new SystemMessage(buildRoutingDirective(dept, text)), new HumanMessage(humanText)];
 }
 
-// ── Back-compat helpers (kept: existing call sites + tests depend on them) ─────
-
-/**
- * Narrow pre-router kept for its existing unit tests. Prefer preRouteDepartment
- * for new code — it covers all seven departments.
- */
 export function preRoutePersonalVsEngineering(input: string): "personal" | "engineering" | null {
   if (/github|repositor|repo\b/i.test(input)) return "engineering";
   if (/~\/|\/Users\/pushkarverma|desktop|downloads|documents|home folder/i.test(input)) {
@@ -199,7 +157,6 @@ export function preRoutePersonalVsEngineering(input: string): "personal" | "engi
   return null;
 }
 
-/** True when the input is clearly a cold-outreach request. */
 export function isOutreachRequest(input: string): boolean {
   return /\boutreach\b|\bcold email\b|\breach out\b/i.test(input);
 }

@@ -34,6 +34,7 @@ import {
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
 import { searchMemoryTool } from "../tools/memory.js";
+import { listPendingSignals } from "./agent-tools/pending-signals.js";
 
 // Tool generics are heterogeneous across departments; the graph only needs
 // `.name` + invokability, both checked by tests. Typing the union precisely
@@ -54,6 +55,7 @@ type AnyTool = any;
  *   alignment. Engineering and comms don't query business strategy.
  */
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
+  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals],
   research: [searchWeb, searchKnowledge, searchTuricksBrain, publishSignal],
   comms: [sendEmail, readEmails, createCalendarEvent],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode],
@@ -72,8 +74,8 @@ export const ENGINEERING_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
   devops: [githubWrite, projectWorkflow],
 };
 
-/** Supervisor-level tools (not delegated to departments). */
-export const SUPERVISOR_TOOLS: AnyTool[] = [readContext, updateContext, searchMemoryTool, recordEvent];
+/** Supervisors route via handoffs only — no business tools (ADR-028). */
+export const SUPERVISOR_TOOLS: AnyTool[] = [];
 
 /** Tools that pause for founder approval (HITL interrupt) before acting. */
 export const HITL_GATED_TOOLS = new Set([
@@ -105,7 +107,7 @@ export function buildCapabilityManifest(): string {
   return [
     "CAPABILITIES (auto-generated from the live tool registry — this list IS the truth; never claim a listed tool is missing, never claim an unlisted tool exists; * = pauses for founder approval):",
     ...lines,
-    `- supervisor (you): ${SUPERVISOR_TOOLS.map((t) => (HITL_GATED_TOOLS.has(t.name) ? `${t.name}*` : t.name)).join(", ")}`,
+    "- supervisor (you): handoffs only — route to departments; you have NO business tools",
     "Notes:",
     "- claude_code = a full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — engineering's primary executor for any build/code/repo task.",
     "- browser = Safari automation on the founder's Mac (personal dept).",

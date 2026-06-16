@@ -2,10 +2,11 @@ import { describe, it, expect } from "vitest";
 import graph from "../../.claude/graph.json";
 
 describe("Knowledge Graph (Graphify)", () => {
-  it("should have all 7 departments (prospecting merged into research in Phase B)", () => {
+  it("should have all 8 departments (admin + 7 operational)", () => {
     const depts = graph.nodes.filter((n) => n.type === "department");
-    expect(depts.length).toBe(7);
+    expect(depts.length).toBe(8);
     expect(depts.map((d) => d.name).sort()).toEqual([
+      "admin",
       "comms",
       "engineering",
       "jobhunt",
@@ -58,7 +59,8 @@ describe("Knowledge Graph (Graphify)", () => {
   });
 
   it("should have metadata for all departments", () => {
-    expect(Object.keys(graph.metadata.departments).length).toBe(7);
+    expect(Object.keys(graph.metadata.departments).length).toBe(8);
+    expect(graph.metadata.departments.admin).toBeDefined();
     expect(graph.metadata.departments.research).toBeDefined();
     expect(graph.metadata.departments.comms).toBeDefined();
     expect(graph.metadata.departments.engineering).toBeDefined();
