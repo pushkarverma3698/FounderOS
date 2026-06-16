@@ -78,7 +78,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     tools: DEPARTMENT_TOOLS["comms"]!,
     name: "comms",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(buildCommsPrompt(), subAgentBudget) as any,
+    prompt: createTrimmedPrompt(buildCommsPrompt, subAgentBudget) as any,
   });
 
   // engineering: either the flat ReAct agent (production default) or the
@@ -147,7 +147,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     agents: [research, comms, engineering as any, marketing, sales, personal, jobhunt],
     llm,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(buildSupervisorPrompt(), supervisorBudget) as any,
+    prompt: createTrimmedPrompt(buildSupervisorPrompt, supervisorBudget) as any,
     // Supervisor-level tools: context read/write + unified memory search/record
     // These are NOT delegated to departments — the supervisor handles them directly.
     tools: SUPERVISOR_TOOLS,

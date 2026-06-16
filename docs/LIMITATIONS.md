@@ -272,11 +272,48 @@ become incidents at scale.**
 - **G11 — CTO subgraph unit-proven, not live-proven; eval non-deterministic — LOW.** Before
   `ENGINEERING_SUBGRAPH=1`: run the full MTProto `e2e-telegram-qa.ts` against the nested topology
   N times, assert nested-HITL approve/reject + token overhead. (Extends §14.)
-- **G12 — scheduler compiles a second `MemorySaver` office — LOW.** Cron LLM calls
-  (`sendMondayBrief`) bypass the budget guard, trace seam, and halt switch. Route scheduler LLM
-  work through the guarded run path, or document it as unguarded.
+- **G12 — scheduler compiles a second `MemorySaver` office — LOW (partially fixed 2026-06-16).**
+  The per-fire `buildOffice(new MemorySaver())` inside `sendMondayBrief` is now memoised via
+  `getSchedulerOffice()` so the graph compiles only once. Remaining: Monday-brief LLM calls still
+  bypass the budget guard, trace seam, and halt switch. Route scheduler LLM work through the
+  guarded run path, or document it as unguarded.
 
 **Do NOT change (already textbook):** idempotency on external sends · HITL pure-before-gate
 contract · Postgres checkpointer · compile-once office singleton · `maxRetries:0` on the Google
 SDK · two-gate brand→judge (different model family, fail-open).
+
+---
+
+## Design intent clarifications (not bugs)
+
+### Rule #4 doc/reality mismatch
+
+CLAUDE.md Rule #4 states: "Always write to the `hitl_approvals` table BEFORE calling LangGraph
+`interrupt()`."
+
+**The real code does not do this.** `hitlGate` calls `interrupt()` directly with no DB pre-write.
+Crash-safety for pending HITL approvals comes from the **LangGraph Postgres checkpointer**: the
+graph state (including the pending interrupt node) is persisted before the process can crash, so
+a restart resumes correctly without needing a separate DB pre-write.
+
+The `hitl_approvals` table IS written — but it's written on the `approve` callback path, not
+before `interrupt()`. Rule #4 as written is aspirational; the actual safety guarantee (checkpointer
+persistence) is stronger and simpler.
+
+**No code change needed.** The current implementation is correct. The CLAUDE.md rule should be
+updated in a future pass to accurately describe the checkpointer-based guarantee.
+
+### H3 — brand-retry in-memory counter (accepted design choice)
+
+`src/infra/brand-retry.ts` uses a process-scope `Map` to count retry attempts. A process restart
+mid-oscillation resets the counter, which could theoretically bypass the convergence cap.
+
+This is **accepted** because:
+- Brand validation oscillation happens within seconds of a single ReAct turn
+- A deploy mid-oscillation (a few seconds) is extremely rare
+- The oscillation cap (`BRAND_MAX_RETRIES=2`) exists to prevent runaway loops, not to survive
+  multi-process deployments
+
+**Permanent fix path (when needed):** move the counter to a TTL'd Postgres row keyed by
+`thread_id + channel` (see G8 above). This is the right fix for Phase E multi-tenant.
 

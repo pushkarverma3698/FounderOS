@@ -72,23 +72,34 @@ export function estimateMessageTokens(messages: BaseMessage[]): number {
  *  2. Trims the history array to `maxTokens` keeping the most recent messages
  *     (strategy: "last" — same as Claude Code's rolling window)
  *
+ * Accepts a string OR a zero-arg factory function. Pass a factory when the
+ * prompt must stay fresh across a long-running process — e.g. buildCommsPrompt
+ * and buildSupervisorPrompt inject today's date, so they must be re-evaluated
+ * on every LLM call (not frozen at office compile time). Static prompts can
+ * pass a plain string.
+ *
  * Usage:
  *   const research = createReactAgent({
- *     llm,
- *     tools: [...],
- *     name: "research",
+ *     llm, tools: [...], name: "research",
  *     prompt: createTrimmedPrompt(RESEARCH_PROMPT, { maxTokens: 4000 }),
  *   });
+ *
+ *   // Date-sensitive: pass the function reference, NOT the evaluated call:
+ *   prompt: createTrimmedPrompt(buildCommsPrompt, subAgentBudget)
  */
 export function createTrimmedPrompt(
-  systemPromptText: string,
+  systemPromptText: string | (() => string),
   opts: TrimOptions = {},
 ): MessageModifier {
   const maxTokens = opts.maxTokens ?? 4000;
-  const systemMsg = new SystemMessage(systemPromptText);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return async (input: any): Promise<BaseMessage[]> => {
+    // Re-evaluate factory on every call so date-injected prompts stay current.
+    const promptText =
+      typeof systemPromptText === "function" ? systemPromptText() : systemPromptText;
+    const systemMsg = new SystemMessage(promptText);
+
     // LangGraph 0.2.x passes the full state { messages: BaseMessage[] } at
     // runtime, even though the TypeScript type signature says BaseMessage[].
     // Unit tests pass an array directly. Handle both.

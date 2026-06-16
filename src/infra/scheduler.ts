@@ -30,6 +30,13 @@ import { env, TENANT } from "../core/config.js";
 
 const log = childLogger({ module: "scheduler" });
 
+// Memoised office for scheduler use — compiled once, reused across Monday fires.
+// A new MemorySaver is fine here (scheduler runs are one-shot, not resumed).
+let _schedulerOffice: ReturnType<typeof buildOffice> | undefined;
+function getSchedulerOffice(): ReturnType<typeof buildOffice> {
+  _schedulerOffice ??= buildOffice(new MemorySaver());
+  return _schedulerOffice;
+}
 
 // ── Monday brief ──────────────────────────────────────────────────────────────
 
@@ -65,8 +72,8 @@ async function sendMondayBrief(): Promise<void> {
 
   const contextText = buildContextText(ctx);
 
-  // Use a fresh MemorySaver office (no checkpoint persistence for scheduler tasks)
-  const office = buildOffice(new MemorySaver());
+  // Reuse the module-scoped memoised office (compiled once, never per Monday fire).
+  const office = getSchedulerOffice();
   const config = { configurable: { thread_id: `${TENANT}:scheduler:monday` } };
 
   const prompt = `${SCHEDULER_BRIEF_PROMPT}\n\nToday is: ${today}\n\nFounder context:\n${contextText}`;
@@ -218,6 +225,7 @@ export function startScheduler(): void {
   cron.schedule("0 9 * * *", () => {
     sendStaleApprovalReminder().catch((err) => {
       log.error({ err: (err as Error).message }, "Stale approval check failed");
+      sendToChat(`⚠️ Stale approval check failed: ${(err as Error).message}`, "HTML").catch(() => {});
     });
   });
 
@@ -225,6 +233,7 @@ export function startScheduler(): void {
   cron.schedule("5 8 * * 1", () => {
     sendOutboundNudge().catch((err) => {
       log.error({ err: (err as Error).message }, "Outbound nudge failed");
+      sendToChat(`⚠️ Outbound nudge failed: ${(err as Error).message}`, "HTML").catch(() => {});
     });
   });
 
@@ -233,6 +242,7 @@ export function startScheduler(): void {
   cron.schedule("0 * * * *", () => {
     sweepDeptSignals().catch((err) => {
       log.error({ err: (err as Error).message }, "Dept signal sweep failed");
+      sendToChat(`⚠️ Dept signal sweep failed: ${(err as Error).message}`, "HTML").catch(() => {});
     });
   });
 
