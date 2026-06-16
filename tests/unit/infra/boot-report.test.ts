@@ -8,14 +8,22 @@ const find = (report: ReturnType<typeof buildBootReport>, name: string) => {
 };
 
 describe("buildBootReport", () => {
-  it("reports LLM as MISSING when no Google key is set", () => {
+  it("reports LLM as MISSING when the selected provider key is absent", () => {
     const report = buildBootReport({});
-    expect(find(report, "LLM (Gemini)").live).toBe(false);
+    expect(find(report, "LLM (selected provider)").live).toBe(false);
   });
 
-  it("reports LLM as LIVE when the Google key is present", () => {
-    const report = buildBootReport({ GOOGLE_GENERATIVE_AI_API_KEY: "AIza-x" });
-    expect(find(report, "LLM (Gemini)").live).toBe(true);
+  it("reports LLM as LIVE when the selected provider key is present", () => {
+    const report = buildBootReport({ OPENROUTER_API_KEY: "sk-or-v1-x" });
+    expect(find(report, "LLM (selected provider)").live).toBe(true);
+  });
+
+  it("supports Gemini when AGENT_MODEL selects google-genai", () => {
+    const report = buildBootReport({
+      AGENT_MODEL: "google-genai:gemini-2.5-flash",
+      GOOGLE_GENERATIVE_AI_API_KEY: "AIza-x",
+    });
+    expect(find(report, "LLM (selected provider)").live).toBe(true);
   });
 
   it("treats whitespace-only keys as MISSING", () => {
@@ -35,17 +43,20 @@ describe("buildBootReport", () => {
     expect(find(report, "Claude executor").detail).toContain("API-key");
   });
 
-  it("loudly warns when the OpenRouter cross-provider failover is unarmed (G1: total-outage risk)", () => {
-    const missing = find(buildBootReport({}), "LLM fallback (OpenRouter)");
+  it("loudly warns when model fallback is unarmed (G1: total-outage risk)", () => {
+    const missing = find(buildBootReport({}), "LLM fallbacks");
     expect(missing.live).toBe(false);
-    expect(missing.detail).toContain("NO cross-provider failover");
-    expect(missing.detail).toContain("OPENROUTER_API_KEY");
+    expect(missing.detail).toContain("NO model fallback configured");
+    expect(missing.detail).toContain("AGENT_FALLBACK_MODELS");
   });
 
-  it("reports the OpenRouter failover armed when the key is present", () => {
-    const armed = find(buildBootReport({ OPENROUTER_API_KEY: "sk-or-v1-x" }), "LLM fallback (OpenRouter)");
+  it("reports model fallback armed when fallback models are configured", () => {
+    const armed = find(
+      buildBootReport({ AGENT_FALLBACK_MODELS: "anthropic:claude-haiku-4-5" }),
+      "LLM fallbacks",
+    );
     expect(armed.live).toBe(true);
-    expect(armed.detail).toContain("armed");
+    expect(armed.detail).toContain("modelFallbackMiddleware armed");
   });
 
   it("only reports LangSmith LIVE when both key AND tracing flag are set", () => {
@@ -61,8 +72,8 @@ describe("buildBootReport", () => {
   it("covers every documented integration (stable surface)", () => {
     const names = buildBootReport({}).map((c) => c.name);
     expect(names).toEqual([
-      "LLM (Gemini)",
-      "LLM fallback (OpenRouter)",
+      "LLM (selected provider)",
+      "LLM fallbacks",
       "Composio (email/linkedin/calendar)",
       "GitHub tools",
       "Web search (Firecrawl)",
@@ -84,7 +95,7 @@ describe("config fail-fast (production)", () => {
     });
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.issues.some((i) => i.path.includes("GOOGLE_GENERATIVE_AI_API_KEY"))).toBe(true);
+      expect(result.error.issues.some((i) => i.path.includes("AGENT_MODEL"))).toBe(true);
     }
   });
 
@@ -95,7 +106,7 @@ describe("config fail-fast (production)", () => {
       TELEGRAM_BOT_TOKEN: "x",
       TELEGRAM_CHAT_ID: "1",
       NODE_ENV: "production",
-      GOOGLE_GENERATIVE_AI_API_KEY: "AIza-x",
+      OPENROUTER_API_KEY: "sk-or-v1-x",
     });
     expect(result.success).toBe(true);
   });

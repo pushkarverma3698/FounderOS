@@ -15,10 +15,10 @@
  */
 
 import { createSupervisor } from "@langchain/langgraph-supervisor";
-import { createReactAgent } from "@langchain/langgraph/prebuilt";
+import { createAgent } from "langchain";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
-import { getModel } from "./model.js";
-import { createTrimmedPrompt } from "../infra/context-manager.js";
+import { getModel, getModelFallbackMiddleware } from "./model.js";
+import { createAgentMiddleware } from "../infra/context-manager.js";
 import { ENGINEERING_SUBAGENT_TOOLS } from "./capabilities.js";
 import { assertContextIsolation, CONTEXT_ISOLATION_OUTPUT_MODE } from "./context-isolation.js";
 
@@ -53,27 +53,31 @@ Relay the chosen engineer's result verbatim — no preamble.`;
  */
 export function buildEngineeringDomain() {
   const llm = getModel();
-  const coder = createReactAgent({
-    llm,
+  const agentMiddleware = (prompt: string) => [
+    ...getModelFallbackMiddleware(),
+    ...createAgentMiddleware(prompt, workerBudget),
+  ];
+  const coder = createAgent({
+    model: llm,
     tools: ENGINEERING_SUBAGENT_TOOLS["coder"]!,
     name: "coder",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(CODER_PROMPT, workerBudget) as any,
-  });
-  const qa = createReactAgent({
-    llm,
+    includeAgentName: "inline",
+    middleware: agentMiddleware(CODER_PROMPT),
+  }).graph;
+  const qa = createAgent({
+    model: llm,
     tools: ENGINEERING_SUBAGENT_TOOLS["qa"]!,
     name: "qa",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(QA_PROMPT, workerBudget) as any,
-  });
-  const devops = createReactAgent({
-    llm,
+    includeAgentName: "inline",
+    middleware: agentMiddleware(QA_PROMPT),
+  }).graph;
+  const devops = createAgent({
+    model: llm,
     tools: ENGINEERING_SUBAGENT_TOOLS["devops"]!,
     name: "devops",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(DEVOPS_PROMPT, workerBudget) as any,
-  });
+    includeAgentName: "inline",
+    middleware: agentMiddleware(DEVOPS_PROMPT),
+  }).graph;
   return createSupervisor({
     agents: [coder, qa, devops],
     llm,

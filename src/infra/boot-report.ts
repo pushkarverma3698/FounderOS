@@ -18,7 +18,11 @@ const log = logger.child({ module: "boot" });
 
 /** The subset of env/config keys the report inspects. All optional strings. */
 export interface BootCapabilityInput {
+  AGENT_MODEL?: string | undefined;
+  AGENT_FALLBACK_MODELS?: string | undefined;
   GOOGLE_GENERATIVE_AI_API_KEY?: string | undefined;
+  OPENAI_API_KEY?: string | undefined;
+  ANTHROPIC_API_KEY?: string | undefined;
   OPENROUTER_API_KEY?: string | undefined;
   COMPOSIO_API_KEY?: string | undefined;
   GITHUB_TOKEN?: string | undefined;
@@ -39,6 +43,21 @@ export interface CapabilityStatus {
 }
 
 const has = (v: string | undefined): boolean => typeof v === "string" && v.trim().length > 0;
+const selectedModel = (env: BootCapabilityInput): string =>
+  env.AGENT_MODEL?.trim() || "openrouter:openai/gpt-4o-mini";
+const selectedProvider = (model: string): string => {
+  if (model.includes(":")) return model.split(":", 1)[0]!;
+  if (model.includes("gemini")) return "google-genai";
+  if (model.includes("claude")) return "anthropic";
+  return "openai";
+};
+const hasProviderKey = (env: BootCapabilityInput, provider: string): boolean => {
+  if (provider === "google-genai") return has(env.GOOGLE_GENERATIVE_AI_API_KEY);
+  if (provider === "anthropic") return has(env.ANTHROPIC_API_KEY);
+  if (provider === "openrouter") return has(env.OPENROUTER_API_KEY);
+  if (provider === "openai") return has(env.OPENAI_API_KEY);
+  return false;
+};
 
 /**
  * Map env presence → capability statuses. Pure: no fs, no network, no globals.
@@ -47,18 +66,24 @@ const has = (v: string | undefined): boolean => typeof v === "string" && v.trim(
  * executor dual-auth verify step in DEPLOYMENT.md, not here.
  */
 export function buildBootReport(env: BootCapabilityInput): CapabilityStatus[] {
+  const model = selectedModel(env);
+  const provider = selectedProvider(model);
+  const modelLive = hasProviderKey(env, provider);
+  const fallbackModels = env.AGENT_FALLBACK_MODELS?.trim();
   return [
     {
-      name: "LLM (Gemini)",
-      live: has(env.GOOGLE_GENERATIVE_AI_API_KEY),
-      detail: has(env.GOOGLE_GENERATIVE_AI_API_KEY) ? "GOOGLE_GENERATIVE_AI_API_KEY set" : "no key — office is dead",
+      name: "LLM (selected provider)",
+      live: modelLive,
+      detail: modelLive
+        ? `${model} configured`
+        : `no ${provider} key for ${model} — office is dead`,
     },
     {
-      name: "LLM fallback (OpenRouter)",
-      live: has(env.OPENROUTER_API_KEY),
-      detail: has(env.OPENROUTER_API_KEY)
-        ? "cross-provider failover armed (GPT-4o-mini)"
-        : "⚠ NO cross-provider failover — a Gemini quota/outage takes the whole office DOWN. Set OPENROUTER_API_KEY.",
+      name: "LLM fallbacks",
+      live: has(fallbackModels),
+      detail: has(fallbackModels)
+        ? `modelFallbackMiddleware armed: ${fallbackModels}`
+        : "NO model fallback configured — set AGENT_FALLBACK_MODELS for cross-provider failover.",
     },
     {
       name: "Composio (email/linkedin/calendar)",

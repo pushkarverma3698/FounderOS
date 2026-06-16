@@ -11,8 +11,14 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
-import { createTrimmedPrompt, estimateMessageTokens } from "../../../src/infra/context-manager.js";
+import { HumanMessage, AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
+import {
+  createAgentMiddleware,
+  createTrimmedPrompt,
+  countCompletedToolCalls,
+  estimateMessageTokens,
+  stripMessageNames,
+} from "../../../src/infra/context-manager.js";
 
 function makeHistory(n: number): Array<HumanMessage | AIMessage> {
   return Array.from({ length: n }, (_, i) =>
@@ -21,6 +27,23 @@ function makeHistory(n: number): Array<HumanMessage | AIMessage> {
       : new AIMessage(`assistant turn ${i}`)
   );
 }
+
+describe("countCompletedToolCalls", () => {
+  it("counts tool messages matched to prior ai tool calls", () => {
+    const messages = [
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { id: "call_1", name: "search_web", args: { query: "linear" } },
+          { id: "call_2", name: "search_web", args: { query: "linear app" } },
+        ],
+      }),
+      new ToolMessage({ content: "result 1", tool_call_id: "call_1", name: "search_web" }),
+      new ToolMessage({ content: "result 2", tool_call_id: "call_2", name: "search_web" }),
+    ];
+    expect(countCompletedToolCalls(messages, "search_web")).toBe(2);
+  });
+});
 
 describe("createTrimmedPrompt", () => {
   it("returns a callable MessageModifier", () => {
@@ -95,5 +118,20 @@ describe("estimateMessageTokens", () => {
     const estimate = estimateMessageTokens(msgs);
     expect(estimate).toBeGreaterThanOrEqual(90);
     expect(estimate).toBeLessThanOrEqual(110);
+  });
+});
+
+describe("createAgentMiddleware", () => {
+  it("returns dynamic prompt + trimming middleware for LangChain v1 agents", () => {
+    const middleware = createAgentMiddleware("System.", { maxTokens: 100 });
+    expect(middleware).toHaveLength(2);
+  });
+
+  it("strips provider-incompatible message names without mutating originals", () => {
+    const msg = new AIMessage({ content: "hello", name: "supervisor" });
+    const [result] = stripMessageNames([msg]);
+    expect(result).not.toBe(msg);
+    expect(result?.name).toBeUndefined();
+    expect(msg.name).toBe("supervisor");
   });
 });

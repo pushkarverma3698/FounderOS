@@ -20,11 +20,15 @@ export const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_CHAT_ID: z.string().min(1),
 
-  // LLM — Google key required (Gemini Flash primary model)
+  // LLM providers — one key must match the selected AGENT_MODEL provider.
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().transform(v => v || undefined).optional(),
+  OPENAI_API_KEY: z.string().transform(v => v || undefined).optional(),
+  ANTHROPIC_API_KEY: z.string().transform(v => v || undefined).optional(),
+  OPENROUTER_API_KEY: z.string().transform(v => v || undefined).optional(),
 
-  // Optional: override the agent model
-  AGENT_MODEL: z.string().default("gemini-2.5-flash"),
+  // Optional: override the agent model. Prefixes are explicit provider routing.
+  AGENT_MODEL: z.string().default("openrouter:openai/gpt-4o-mini"),
+  AGENT_FALLBACK_MODELS: z.string().transform(v => v || undefined).optional(),
 
   // Optional: override the tenant name
   FOUNDER_TENANT: z.string().default("turicks"),
@@ -32,10 +36,6 @@ export const envSchema = z.object({
   // Tool keys — optional; tools fail loudly when key is missing
   COMPOSIO_API_KEY: z.string().transform(v => v || undefined).optional(),
   GITHUB_TOKEN: z.string().transform(v => v || undefined).optional(),
-  OPENAI_API_KEY: z.string().transform(v => v || undefined).optional(),
-
-  // Cross-provider fallback — optional; enables OpenRouter/GPT-4o-mini when all Google models 503
-  OPENROUTER_API_KEY: z.string().transform(v => v || undefined).optional(),
 
   // Observability — optional, degrades gracefully
   LANGCHAIN_API_KEY: z.string().optional(),
@@ -68,16 +68,28 @@ export const envSchema = z.object({
   RUN_BUDGET_USD: z.coerce.number().positive().default(0.50),
   RUN_BUDGET_TOKENS: z.coerce.number().int().positive().default(50_000),
 }).superRefine((cfg, ctx) => {
-  // Fail-fast in production: without an LLM key the whole office is dead, but the
-  // bot would otherwise boot "fine" and silently fail on the first message. Keys
-  // are still optional in development/test so local + CI unit runs need no real
-  // secrets. Other tool keys (Composio, GitHub) degrade per-tool by design.
-  if (cfg.NODE_ENV === "production" && !cfg.GOOGLE_GENERATIVE_AI_API_KEY) {
+  if (cfg.NODE_ENV !== "production") return;
+
+  const provider = cfg.AGENT_MODEL.includes(":")
+    ? cfg.AGENT_MODEL.split(":", 1)[0]
+    : cfg.AGENT_MODEL.includes("gemini")
+      ? "google-genai"
+      : cfg.AGENT_MODEL.includes("claude")
+        ? "anthropic"
+        : "openai";
+  const missing =
+    provider === "google-genai" ? !cfg.GOOGLE_GENERATIVE_AI_API_KEY :
+    provider === "anthropic" ? !cfg.ANTHROPIC_API_KEY :
+    provider === "openrouter" ? !cfg.OPENROUTER_API_KEY :
+    provider === "openai" ? !cfg.OPENAI_API_KEY :
+    true;
+
+  if (missing) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      path: ["GOOGLE_GENERATIVE_AI_API_KEY"],
+      path: ["AGENT_MODEL"],
       message:
-        "required in production — the agent model needs it. Set it in the prod .env (or PROD_DOTENV secret).",
+        `selected provider "${provider}" needs a matching production API key. Set AGENT_MODEL and the provider key in the prod .env (or PROD_DOTENV secret).`,
     });
   }
 });

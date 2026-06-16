@@ -40,20 +40,18 @@ enforcement** that they stay in sync. This is the single biggest source of the
 - **Why deferred:** it's net-new code (fails the YAGNI/reuse filter today at 7
   departments); revisit when department count or contributor count grows.
 
-## 2. `model.ts` accumulated defensive layers — **MEDIUM**
+## 2. Model layer drift — **RESOLVED, LIVE VERIFICATION PENDING**
 
-`FounderChatGoogle` (~480 LOC) stacks five recovery behaviours: name-stripping,
-empty-message sanitization, transient-retry with backoff, Google fallback chain,
-and an OpenRouter cross-provider escape. Each exists for a real, dated Gemini SDK
-quirk. It is correct but hard to read end-to-end.
+The old `FounderChatModel` wrapper was deleted in ADR-028. `model.ts` now returns
+plain LangChain provider models selected by provider-prefixed `AGENT_MODEL` values,
+and department failover uses LangChain's official `modelFallbackMiddleware`.
 
-- **Root cause:** workarounds for `@langchain/google-genai@0.1.x` bugs
-  (no-candidates crash, empty-contents 400) and Gemini capacity 503s.
-- **Path to simplify:** when the Gemini SDK is upgraded, re-test each workaround and
-  delete the ones the SDK now handles. Several (`isNoCandidatesError`,
-  `syntheticResponseFromLastTool`) are SDK-version-specific and should not outlive it.
-- **Why deferred now:** removing any layer without first proving the SDK fixed it
-  would regress a production P0 (verification-first rule).
+- **Resolved:** custom `bindTools`, manual `_generate` retry/fallback, OpenRouter
+  special-case execution, and synthetic "success" responses are gone.
+- **Current default:** `openrouter:openai/gpt-4o-mini` while Gemini credits are
+  depleted.
+- **Still required before claiming prod fixed:** live MTProto route → tool call →
+  HITL approve/reject → matching `action_log` evidence with real provider keys.
 
 ## 3. `any`-typed tool arrays — **MEDIUM**
 

@@ -17,11 +17,11 @@
  */
 
 import { createSupervisor } from "@langchain/langgraph-supervisor";
-import { createReactAgent } from "@langchain/langgraph/prebuilt";
+import { createAgent } from "langchain";
 import type { CompiledStateGraph, BaseCheckpointSaver } from "@langchain/langgraph";
-import { getModel } from "./model.js";
+import { getModel, getModelFallbackMiddleware } from "./model.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
-import { createTrimmedPrompt } from "../infra/context-manager.js";
+import { createAgentMiddleware, createTrimmedPrompt } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS, SUPERVISOR_TOOLS } from "./capabilities.js";
 import { ENGINEERING_SUBGRAPH_ENABLED } from "../core/config.js";
 import { buildEngineeringDomain } from "./engineering-domain.js";
@@ -46,6 +46,23 @@ const log = childLogger({ module: "office" });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _office: CompiledStateGraph<any, any, any> | undefined;
 
+const DEPARTMENT_DESCRIPTIONS = {
+  research: "Use for web facts, news, company or market research, ICP scoring, and internal Turicks knowledge lookups.",
+  comms: "Use for reading inbox, known-contact email, and Google Calendar work.",
+  engineering: "Use for GitHub repositories, issues, pull requests, code, tests, deployments, and FounderOS engineering work.",
+  marketing: "Use for LinkedIn posts, content strategy, and Turicks brand copy.",
+  sales: "Use for prospect research tied to cold outreach, unknown-company outreach, and sales emails.",
+  personal: "Use for files, directories, shell, browser, and laptop operations on the founder's machine.",
+  jobhunt: "Use for job searches, CV/resume work, applications, and hiring-manager outreach.",
+} as const;
+
+/** Deterministic search caps — prompt instructions alone are not enough on OpenRouter. */
+const SEARCH_TOOL_LIMITS = {
+  search_web: 2,
+  search_knowledge: 2,
+  search_turicks_brain: 2,
+} as const;
+
 /**
  * Build (compile) the office graph with a given checkpointer.
  * Exported for tests (inject MemorySaver). Production uses getOffice().
@@ -62,24 +79,35 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   //   Supervisor: 6000 tokens — needs routing context across more turns
   const subAgentBudget = { maxTokens: 4000 };
   const supervisorBudget = { maxTokens: 6000 };
-
+  const agentMiddleware = (
+    prompt: string | (() => string),
+    toolCallLimits?: Record<string, number>,
+  ) => [
+    ...getModelFallbackMiddleware(),
+    ...createAgentMiddleware(prompt, {
+      ...subAgentBudget,
+      ...(toolCallLimits ? { toolCallLimits } : {}),
+    }),
+  ];
   // research: web search + internal knowledge + ICP scoring (no read_emails — inbox stays in comms)
-  const research = createReactAgent({
-    llm,
+  const research = createAgent({
+    model: llm,
     tools: DEPARTMENT_TOOLS["research"]!,
     name: "research",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(RESEARCH_PROMPT, subAgentBudget) as any,
-  });
+    description: DEPARTMENT_DESCRIPTIONS.research,
+    includeAgentName: "inline",
+    middleware: agentMiddleware(RESEARCH_PROMPT, SEARCH_TOOL_LIMITS),
+  }).graph;
 
   // comms: Gmail + Calendar only (linkedin_post moved to marketing — single owner)
-  const comms = createReactAgent({
-    llm,
+  const comms = createAgent({
+    model: llm,
     tools: DEPARTMENT_TOOLS["comms"]!,
     name: "comms",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(buildCommsPrompt, subAgentBudget) as any,
-  });
+    description: DEPARTMENT_DESCRIPTIONS.comms,
+    includeAgentName: "inline",
+    middleware: agentMiddleware(buildCommsPrompt),
+  }).graph;
 
   // engineering: either the flat ReAct agent (production default) or the
   // hierarchical CTO sub-supervisor (coder/qa/devops) when ENGINEERING_SUBGRAPH=1.
@@ -90,53 +118,58 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   // crash-safe (hierarchy plan P2 / ADR-027).
   const engineering = ENGINEERING_SUBGRAPH_ENABLED
     ? buildEngineeringDomain()
-    : createReactAgent({
-        llm,
+    : createAgent({
+        model: llm,
         tools: DEPARTMENT_TOOLS["engineering"]!,
         name: "engineering",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        prompt: createTrimmedPrompt(ENGINEERING_PROMPT, subAgentBudget) as any,
-      });
+        description: DEPARTMENT_DESCRIPTIONS.engineering,
+        includeAgentName: "inline",
+        middleware: agentMiddleware(ENGINEERING_PROMPT),
+      }).graph;
 
   // ── Phase B departments ───────────────────────────────────────────────────
 
   /** Marketing: LinkedIn content in Turicks brand voice. */
-  const marketing = createReactAgent({
-    llm,
+  const marketing = createAgent({
+    model: llm,
     tools: DEPARTMENT_TOOLS["marketing"]!,
     name: "marketing",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(MARKETING_PROMPT, subAgentBudget) as any,
-  });
+    description: DEPARTMENT_DESCRIPTIONS.marketing,
+    includeAgentName: "inline",
+    middleware: agentMiddleware(MARKETING_PROMPT, { search_web: SEARCH_TOOL_LIMITS.search_web }),
+  }).graph;
 
   /** Sales: researches prospects + writes cold outreach emails (HITL-gated). */
-  const sales = createReactAgent({
-    llm,
+  const sales = createAgent({
+    model: llm,
     tools: DEPARTMENT_TOOLS["sales"]!,
     name: "sales",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(SALES_PROMPT, subAgentBudget) as any,
-  });
+    description: DEPARTMENT_DESCRIPTIONS.sales,
+    includeAgentName: "inline",
+    middleware: agentMiddleware(SALES_PROMPT, { search_web: SEARCH_TOOL_LIMITS.search_web }),
+  }).graph;
 
   /** Personal: senior engineer on the founder's laptop — files, shell, browser
    *  (write/shell/browser HITL-gated; reads are instant). */
-  const personal = createReactAgent({
-    llm,
+  const personal = createAgent({
+    model: llm,
     tools: DEPARTMENT_TOOLS["personal"]!,
     name: "personal",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(PERSONAL_PROMPT, subAgentBudget) as any,
-  });
+    description: DEPARTMENT_DESCRIPTIONS.personal,
+    includeAgentName: "inline",
+    middleware: agentMiddleware(PERSONAL_PROMPT),
+  }).graph;
 
   /** Job-Hunt: researches roles + reads CV from personal-rag + HITL-drafts applications.
    *  ADR-015: personal-rag read-only; NEVER auto-submit; send_email HITL-gated. */
-  const jobhunt = createReactAgent({
-    llm,
+  const jobhunt = createAgent({
+    model: llm,
     tools: DEPARTMENT_TOOLS["jobhunt"]!,
     name: "jobhunt",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prompt: createTrimmedPrompt(JOBHUNT_PROMPT, subAgentBudget) as any,
-  });
+    description: DEPARTMENT_DESCRIPTIONS.jobhunt,
+    includeAgentName: "inline",
+    middleware: agentMiddleware(JOBHUNT_PROMPT),
+  }).graph;
 
   return createSupervisor({
     // 7 departments — prospecting merged into research (ICP scoring is now a research mode).
