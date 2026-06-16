@@ -220,7 +220,63 @@ but **it is not wired into the live office graph**. This is intentional:
 - Token budget impacts unknown at 2-3 nesting levels
 
 If you promote Phase 5 to production:
-- Sub-supervisors MUST pin `outputMode: "last_message"`
+- Sub-supervisors MUST pin `outputMode: "last_message"` (now enforced at runtime by
+  `assertContextIsolation` — a `"full_history"` change throws at office build; see G5 below)
 - Monitor token consumption (each level adds ~500 tokens of overhead)
 - Test full HITL flow on real Telegram (not just unit tests)
+
+---
+
+## Architecture audit — 2026-06-16 (senior agentic-AI review)
+
+Full gaps/limitations review at the "final architecture" freeze point. Verdict:
+**well-built single-tenant system; the gaps cluster in (1) failover, (2) single-process /
+single-tenant scaling ceiling, and (3) guarantees enforced by discipline not runtime.**
+Four were fixed immediately (PR `feat/stabilization-hardening-g1-g2-g5-g9`); the rest are
+tracked here as the pre-scale hardening backlog. **None are correctness bugs today; all
+become incidents at scale.**
+
+**Fixed 2026-06-16:**
+- **G1 — OpenRouter failover unarmed in prod (was CRITICAL).** Cross-provider fallback in
+  `model.ts` is gated on `OPENROUTER_API_KEY`; unset in prod = Gemini outage takes the whole
+  office down (it was firing — credits depleted). Boot now warns loudly. **Remaining ops
+  action: set `OPENROUTER_API_KEY` in prod `PROD_DOTENV` + verify a turn lands on GPT-4o-mini.**
+- **G2 — `consumePendingEvents` non-atomic (was HIGH).** Now `FOR UPDATE SKIP LOCKED`, true
+  exactly-once under concurrency. Verified live on real Postgres.
+- **G5 — context isolation enforced by convention (was HIGH).** `assertContextIsolation` now
+  throws on any `outputMode` ≠ `"last_message"`; structural test forbids the `full_history`
+  literal under `src/agents`.
+- **G9 — ghost `hitl_approvals` rows (was MEDIUM).** Pending approvals are now cancelled on
+  reject / abort / wedge / `/reset`, so the daily stale-reminder can't nag about a wiped thread.
+
+**Deferred backlog (do BEFORE flipping any scaling lever or the CTO subgraph flag):**
+- **G3 — single-process transport is the scaling wall — HIGH.** PID-lock + grammy long-poll +
+  inline ≤14s backoff serialize all work (head-of-line blocking at multi-user). Data layer is
+  scale-ready; transport is not. Pre-Phase-E re-platform: job queue (BullMQ/pg-boss) + webhooks.
+  (Extends §4.)
+- **G4 — no daily send-quota ceiling — HIGH.** `suppression_check` IS wired (`comms.ts`, better
+  than §5 implies) but `quota_check` is nowhere. Add a Postgres-backed daily send counter on the
+  post-approval `send_email`/`linkedin_post` path (don't depend on unwired Redis).
+- **G6 — budget mis-prices fallback models + judge is off-budget — MEDIUM.** `BudgetGuardCallback`
+  prices every call as the constructor `modelId`; lite/judge/OpenRouter calls are mis/uncounted.
+  Read the actual model per call (`generationInfo`) and fold judge tokens into the run budget.
+- **G7 — `is503Error` substring-matches "500" anywhere — MEDIUM.** Free-text matching can route a
+  real app-level failure into the retry/fallback loop (violates rule #19.5 fail-loud). Match on
+  structured status codes / error classes.
+- **G8 — brand-retry counter is process-local — MEDIUM.** `brand-retry.ts` Map resets on restart
+  and is per-process; the convergence cap weakens on restart/scale. Move to checkpointer state or
+  a TTL'd Postgres row keyed by thread+channel.
+- **G10 — injection defense is prompt-level; `run_shell` args unguarded — MEDIUM.** Add a
+  deterministic destructive-pattern check on `run_shell` (surfaced on the HITL card) and treat
+  tool-result content as untrusted before it re-enters the model (tool-output re-injection).
+- **G11 — CTO subgraph unit-proven, not live-proven; eval non-deterministic — LOW.** Before
+  `ENGINEERING_SUBGRAPH=1`: run the full MTProto `e2e-telegram-qa.ts` against the nested topology
+  N times, assert nested-HITL approve/reject + token overhead. (Extends §14.)
+- **G12 — scheduler compiles a second `MemorySaver` office — LOW.** Cron LLM calls
+  (`sendMondayBrief`) bypass the budget guard, trace seam, and halt switch. Route scheduler LLM
+  work through the guarded run path, or document it as unguarded.
+
+**Do NOT change (already textbook):** idempotency on external sends · HITL pure-before-gate
+contract · Postgres checkpointer · compile-once office singleton · `maxRetries:0` on the Google
+SDK · two-gate brand→judge (different model family, fail-open).
 

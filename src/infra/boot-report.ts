@@ -56,7 +56,9 @@ export function buildBootReport(env: BootCapabilityInput): CapabilityStatus[] {
     {
       name: "LLM fallback (OpenRouter)",
       live: has(env.OPENROUTER_API_KEY),
-      detail: has(env.OPENROUTER_API_KEY) ? "503 cross-provider fallback armed" : "no 503 fallback (optional)",
+      detail: has(env.OPENROUTER_API_KEY)
+        ? "cross-provider failover armed (GPT-4o-mini)"
+        : "⚠ NO cross-provider failover — a Gemini quota/outage takes the whole office DOWN. Set OPENROUTER_API_KEY.",
     },
     {
       name: "Composio (email/linkedin/calendar)",

@@ -22,6 +22,7 @@ import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { getModel } from "./model.js";
 import { createTrimmedPrompt } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS } from "./capabilities.js";
+import { assertContextIsolation, CONTEXT_ISOLATION_OUTPUT_MODE } from "./context-isolation.js";
 import { MARKETING_PROMPT, SALES_PROMPT, RESEARCH_PROMPT } from "./system-prompts.js";
 
 const subAgentBudget = { maxTokens: 4000 };
@@ -62,7 +63,7 @@ export function buildRevenueDomain() {
     agents: [marketing, sales],
     llm,
     prompt: REVENUE_PROMPT,
-    outputMode: "last_message",
+    outputMode: assertContextIsolation(CONTEXT_ISOLATION_OUTPUT_MODE),
     includeAgentName: "inline",
     supervisorName: "revenue",
   }).compile({ name: "revenue" });
@@ -89,7 +90,7 @@ export function buildNestedOffice(checkpointer: BaseCheckpointSaver) {
     agents: [research, revenue as any],
     llm,
     prompt: NESTED_PARENT_PROMPT,
-    outputMode: "last_message",
+    outputMode: assertContextIsolation(CONTEXT_ISOLATION_OUTPUT_MODE),
     includeAgentName: "inline",
   }).compile({ checkpointer });
 }

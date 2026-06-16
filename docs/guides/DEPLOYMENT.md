@@ -181,7 +181,7 @@ branch). Merge to `main` → CI runs → on success CD deploys. That's the whole
 | `DEPLOY_SSH_KEY` | **dedicated** deploy private key whose public half is in `founderos`'s `~/.ssh/authorized_keys` (not your personal key) |
 | `PROD_DOTENV` | the FULL production `.env`, **base64-encoded** — CD renders it to `/opt/founderos/.env` on every deploy (see below) |
 | `GOOGLE_GENERATIVE_AI_API_KEY` | used by integration tests + the `main`-only eval job |
-| `OPENROUTER_API_KEY` | (optional) 503 fallback, used by integration tests |
+| `OPENROUTER_API_KEY` | **production resilience — set this.** Arms the cross-provider failover (`model.ts` → GPT-4o-mini) so a Gemini quota/billing lapse degrades gracefully instead of taking the whole office down. Without it the bot is 100% down on any Gemini outage (this fired 2026-06-16 when Gemini credits depleted). Put it in `PROD_DOTENV` too, not just here. Verify: temporarily point `AGENT_MODEL` at a dead key and confirm a real turn returns with `provider: "openrouter"` in the trace. |
 | `DATABASE_URL` · `TELEGRAM_BOT_TOKEN` · `TELEGRAM_CHAT_ID` | used by the `main`-only eval job |
 
 `GITHUB_TOKEN` is provided automatically by Actions — do not create it.

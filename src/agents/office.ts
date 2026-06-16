@@ -25,6 +25,7 @@ import { createTrimmedPrompt } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS, SUPERVISOR_TOOLS } from "./capabilities.js";
 import { ENGINEERING_SUBGRAPH_ENABLED } from "../core/config.js";
 import { buildEngineeringDomain } from "./engineering-domain.js";
+import { assertContextIsolation, CONTEXT_ISOLATION_OUTPUT_MODE } from "./context-isolation.js";
 import {
   buildSupervisorPrompt,
   RESEARCH_PROMPT,
@@ -154,7 +155,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     // crosses back to the supervisor — its internal tool calls/results never
     // pollute the supervisor's history. "last_message" is the library default;
     // we pin it explicitly so the isolation guarantee can't silently regress.
-    outputMode: "last_message",
+    outputMode: assertContextIsolation(CONTEXT_ISOLATION_OUTPUT_MODE),
     // Gemini (and most non-OpenAI providers) can't accept the agent name as a
     // message `name` attribute — the google-genai adapter maps name→author and
     // throws "Unknown author: supervisor". "inline" embeds the name in the

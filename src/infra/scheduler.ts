@@ -191,7 +191,8 @@ export function formatLeadNudge(signals: DeptSignal[]): string {
 
 /**
  * Consume pending lead_discovered signals for the revenue dept and push a nudge.
- * consumePendingEvents marks rows consumed atomically, so a lead surfaces once.
+ * consumePendingEvents claims rows with FOR UPDATE SKIP LOCKED, so each lead
+ * surfaces exactly once even under concurrent sweeps (G2).
  */
 export async function sweepDeptSignals(): Promise<void> {
   const toDept = DEFAULT_TARGET_DEPT["lead_discovered"] ?? "sales";

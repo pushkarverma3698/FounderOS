@@ -28,6 +28,7 @@ import { logger } from "../infra/logger.js";
 import { getOffice, getPendingApproval } from "../agents/office.js";
 import type { ApprovalRequest } from "../agents/agent-tools.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
+import { cancelPendingApprovals } from "../db/queries.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 import { buildOfficeInput } from "./pre-router.js";
 import { assertNonEmptyMessages } from "../infra/office-guard.js";
@@ -234,6 +235,25 @@ async function clearThreadAfterAbort(chatId: number | string): Promise<void> {
     await clearThreadCheckpoints(threadIdFor(chatId));
   } catch (err) {
     log.warn({ chatId, err: (err as Error).message }, "Post-abort checkpoint clear failed — non-fatal");
+  }
+  await cancelGhostApprovals(chatId);
+}
+
+/**
+ * Best-effort: cancel any still-pending HITL approval rows for an abandoned
+ * thread (G9). The interrupt itself lives in the checkpointer (just cleared);
+ * the hitl_approvals row is a side table the daily stale-reminder reads, so a
+ * leftover "pending" row becomes a ghost the cron nags about forever. Never
+ * throws — a failed cleanup must not break the reject/abort path.
+ */
+async function cancelGhostApprovals(chatId: number | string): Promise<void> {
+  try {
+    const cancelled = await cancelPendingApprovals(threadIdFor(chatId));
+    if (cancelled > 0) {
+      log.info({ chatId, cancelled }, "Cancelled ghost HITL approval(s) for abandoned thread");
+    }
+  } catch (err) {
+    log.warn({ chatId, err: (err as Error).message }, "Cancel ghost approvals failed — non-fatal");
   }
 }
 
@@ -555,6 +575,7 @@ export async function resumeOffice(ctx: Context, decision: "approved" | "rejecte
     // runs after an "approved" resume, so action_log stays empty (safety holds).
     if (decision === "rejected") {
       await clearThreadCheckpoints(threadIdFor(chatId));
+      await cancelGhostApprovals(chatId);
       trace.event("turn.out", { rejected: true });
       await ctx.reply(buildRejectionConfirmation(pending), { parse_mode: "HTML" });
       log.info({ chatId, action: pending.action }, "Founder rejected — task cancelled, thread cleared (no re-draft)");
