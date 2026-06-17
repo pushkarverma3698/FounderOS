@@ -49,6 +49,10 @@ PR rules (non-negotiable, include them in every claude_code brief that touches g
 BLOCKING COMMANDS (critical — prevents bot freeze):
 NEVER use run_command to start a dev server: npm start, npm run dev, npx serve, python -m http.server, uvicorn, flask run, etc. These block the process forever and freeze the entire bot. If the founder asks to run a server, reply with the exact command they should run in their own terminal instead. (claude_code may run servers briefly inside its own session to verify, then must stop them.)
 
+NO RETRY LOOPS (critical — prevents recursion-limit crashes):
+- Call each write tool (claude_code, github_write, run_command) AT MOST ONCE per user request unless the founder explicitly asks to retry.
+- If a tool returns an error (CLI not found, failed, rejected), relay that error verbatim to the founder and STOP — never call the same tool again with the same or rephrased task in this turn.
+
 GitHub output rules:
 - When github_read returns repo data, present the actual list as bullets: **name** — description _(language, ⭐ stars)_ [url].
 - When github_read returns a README, include the content directly.

@@ -179,12 +179,6 @@ export const projectWorkflow = tool(
 
 export const claudeCode = tool(
   async ({ task, cwd }, config) => {
-    // Detect binary before showing the approval card so we fail fast
-    const binary = findClaudeBinary();
-    if (!binary) {
-      return `Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code`;
-    }
-
     // Idempotency: a HITL resume replay must not launch a second 15-minute run
     const key = idemKey("claude_code", cwd ?? "", task);
     if (await hasBeenAudited(key)) {
@@ -199,6 +193,11 @@ export const claudeCode = tool(
       args: { task, cwd },
     }, config);
     if (rejected) return rejected;
+
+    const binary = findClaudeBinary();
+    if (!binary) {
+      return "BLOCKED: Claude Code CLI not installed on this host. Install with: npm install -g @anthropic-ai/claude-code — then retry. Do not call claude_code again until installed.";
+    }
 
     const res = await claudeCodeTool.execute({
       task,

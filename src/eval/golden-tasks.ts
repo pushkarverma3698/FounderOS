@@ -110,16 +110,17 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     id: "webdesign-proof-drop-outreach",
     input: "Draft a Proof Drop cold email to the founder of Langfuse about their launch site — we built a demo at https://proof.turicks.com/showcase-1",
     expectedRoute: "sales",
-    expectedTools: ["search_web", "send_email"],
+    expectedTools: ["send_email"],
     expectsHitl: true,
-    note: "Proof Drop outreach for Cinematic Launch Experience.",
+    note: "Proof Drop outreach — company named in prompt; sales may skip search_web and draft directly.",
   },
   {
     id: "webdesign-build-landing",
     input: "Build a cinematic landing page for a fictional AI observability startup called AgentOps using the neon preset.",
     expectedRoute: "engineering",
+    expectedTools: ["claude_code"],
     expectsHitl: true,
-    note: "Whole-task build routes to engineering → claude_code (HITL).",
+    note: "Routes to engineering → claude_code HITL. Requires Claude Code CLI on host.",
   },
 
   // ── ICP Scoring (now a research mode, not a separate department) ─────────
