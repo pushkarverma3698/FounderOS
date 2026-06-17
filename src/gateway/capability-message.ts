@@ -30,6 +30,11 @@ export function buildWelcomeMessage(firstName?: string): string {
     `⚡ <b>Power shortcuts</b>\n` +
     `<code>/q research …</code> · <code>/signals</code> · <code>/runs</code> · ` +
     `<code>/status</code> · <code>/ping</code> · <code>/departments</code> · <code>/help</code>\n\n` +
+    `🤖 <b>MISO mission control</b> — track multi-agent work in one dashboard\n` +
+    `<code>/miso_start &lt;goal&gt;</code> · <code>/miso_plan</code> · ` +
+    `<code>/miso_status</code> · <code>/miso_close</code>\n\n` +
+    `🖥 <b>JARVIS web</b> — desktop command center (SSE stream + rich HITL)\n` +
+    `<code>GET /api/v1/missions</code> on port 3001 · UI: <code>apps/jarvis</code>\n\n` +
     `✋ = you approve before anything leaves the building (email, LinkedIn, GitHub writes, shell).\n` +
     `🛑 <code>/halt</code> pauses all work · <code>/resume</code> lifts it.`
   );
@@ -45,7 +50,10 @@ export function buildRestartMessage(): string {
     `• <i>"Research [company] and score them for outreach"</i>\n` +
     `• <i>"List open GitHub issues on FounderOS"</i>\n` +
     `• <i>"What's my focus this week?"</i>\n` +
+    `• <code>/miso_start Ship LinkedIn launch sequence</code> — mission dashboard\n` +
     `• <code>/target CompanyA, CompanyB</code> then <code>/outbound</code>\n\n` +
+    `<b>JARVIS web:</b> <code>/api/v1/health</code> on port 3001 · ` +
+    `<code>cd apps/jarvis && pnpm dev</code>\n\n` +
     `Full capability guide: <code>/start</code> · live status: <code>/status</code>`
   );
 }

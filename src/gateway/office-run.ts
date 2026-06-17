@@ -19,7 +19,7 @@
  * unit-test in isolation.
  */
 
-import { InlineKeyboard, type Context } from "grammy";
+import { type Context } from "grammy";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { RemoveMessage, SystemMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
 import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS } from "../core/config.js";
@@ -47,6 +47,9 @@ import { readHalt, formatHaltNotice } from "../infra/halt.js";
 import { TraceCallback } from "../infra/trace-callback.js";
 import { buildRunMetadata } from "../infra/telemetry.js";
 import { SUPERVISOR_PROMPT } from "../agents/system-prompts.js";
+import { safeHtml, formatApprovalCard } from "./approval-card.js";
+import { createTelegramSession, type GatewaySession } from "./session.js";
+import { syncMissionTrace, refreshMissionDashboard } from "./mission-sync.js";
 
 const log = logger.child({ module: "office-run" });
 
@@ -73,16 +76,9 @@ export async function withChatTurnLock<T>(chatId: string | number, fn: () => Pro
   }
 }
 
-// ── Safe HTML ─────────────────────────────────────────────────────────────────
+// ── Safe HTML (re-export for backwards compatibility) ─────────────────────────
 
-/** Escape special HTML characters for Telegram HTML parse mode. */
-export function safeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+export { safeHtml, formatApprovalCard } from "./approval-card.js";
 
 function threadIdFor(chatId: number | string): string {
   return `${TENANT}:${chatId}`;
@@ -294,67 +290,55 @@ async function cancelGhostApprovals(chatId: number | string): Promise<void> {
 
 // ── Send helpers ─────────────────────────────────────────────────────────────
 
-/** Send the office's result to Telegram — final reply plus any tool failures. */
-async function sendResult(ctx: Context, res: { messages?: OfficeMessage[] }, chatId: number | string): Promise<void> {
+/** Send the office's result — final reply plus any tool failures. */
+async function sendResult(session: GatewaySession, res: { messages?: OfficeMessage[] }, chatId: number | string): Promise<void> {
   const reply = finalReply(res);
   const errs = collectToolErrors(res);
 
-  // Convert the model's Markdown → Telegram-safe HTML so bold/bullets/code
-  // render properly instead of leaking raw asterisks.
   let out = markdownToTelegramHtml(reply);
   if (errs.length > 0) {
     out += `\n\n⚠️ <b>Tool issue${errs.length > 1 ? "s" : ""}:</b>\n<code>${safeHtml(errs.join("\n").slice(0, 800))}</code>`;
   }
 
-  // Telegram caps messages at 4096 chars — split long replies across messages.
-  const chunks = splitForTelegram(out, TELEGRAM_MAX);
-  for (const chunk of chunks) {
-    await sendHtmlSafe(ctx, chunk);
-  }
-
-  log.info(
-    { chatId, replyPreview: reply.slice(0, 80), chunks: chunks.length, toolErrors: errs.length },
-    "Replied to Telegram",
-  );
-}
-
-/**
- * Send an HTML message, falling back to plain text if Telegram rejects the
- * markup (e.g. a malformed tag the converter didn't catch). A formatting slip
- * must never swallow the founder's answer.
- */
-async function sendHtmlSafe(ctx: Context, html: string): Promise<void> {
-  try {
-    await ctx.reply(html, { parse_mode: "HTML" });
-  } catch (err) {
-    log.warn({ err: (err as Error).message }, "HTML send failed — retrying as plain text");
-    // Strip tags for a readable plain-text fallback.
-    const plain = html.replace(/<[^>]+>/g, "");
-    await ctx.reply(plain);
+  if (session.transport === "telegram") {
+    const chunks = splitForTelegram(out, TELEGRAM_MAX);
+    for (const chunk of chunks) {
+      await session.onHtml(chunk);
+    }
+    log.info(
+      { chatId, replyPreview: reply.slice(0, 80), chunks: chunks.length, toolErrors: errs.length },
+      "Replied to Telegram",
+    );
+  } else {
+    await session.onReply(reply);
+    if (errs.length > 0) {
+      await session.onStatus(`Tool issues: ${errs.join("; ").slice(0, 500)}`);
+    }
+    session.emitStream("turn.complete", { replyPreview: reply.slice(0, 200), toolErrors: errs.length });
   }
 }
 
-/** Build the HTML body + inline keyboard for an approval card (shared by reply + restart repost). */
-export function formatApprovalCard(
-  approval: ApprovalRequest,
-  opts: { afterRestart?: boolean } = {},
-): { html: string; keyboard: InlineKeyboard } {
-  const keyboard = new InlineKeyboard()
-    .text("✅ Approve", "approve")
-    .text("❌ Reject", "reject");
-  const preview = approval.preview ? `\n\n<i>${safeHtml(approval.preview.slice(0, 1500))}</i>` : "";
-  const prefix = opts.afterRestart
-    ? `⏸️ <b>Resuming after restart</b> — still waiting on your approval:\n\n`
-    : "";
+async function sendApprovalCard(session: GatewaySession, approval: ApprovalRequest): Promise<void> {
+  await session.onApproval(approval);
+}
+
+function wrapTrace(session: GatewaySession, trace: TurnTrace): TurnTrace {
   return {
-    html: `${prefix}${safeHtml(approval.title)}\n${safeHtml(approval.summary)}${preview}`,
-    keyboard,
+    ...trace,
+    event(seam, data) {
+      trace.event(seam, data);
+      session.emitStream(
+        seam === "hitl.interrupt" ? "hitl.pending" :
+        seam === "route.decided" ? "department.routed" :
+        seam === "tool.call" ? "tool.start" :
+        seam === "tool.result" ? "tool.end" :
+        seam === "turn.out" ? "turn.complete" :
+        seam === "turn.error" ? "turn.error" : "tool.start",
+        data,
+      );
+      void syncMissionTrace(session.id, trace, seam, data);
+    },
   };
-}
-
-async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promise<void> {
-  const { html, keyboard } = formatApprovalCard(approval);
-  await ctx.reply(html, { parse_mode: "HTML", reply_markup: keyboard });
 }
 
 /**
@@ -407,23 +391,20 @@ export async function restorePendingApprovalAfterRestart(chatId: string | number
 
 // ── Office run helpers ─────────────────────────────────────────────────────────
 
-/** Build the LangGraph config for a chat's thread (single source of construction). */
+/** Build the LangGraph config for a session thread. */
+function officeConfigForSession(session: GatewaySession) {
+  return {
+    configurable: { thread_id: session.threadId },
+    recursionLimit: OFFICE_RECURSION_LIMIT,
+  };
+}
+
+/** @deprecated use officeConfigForSession — kept for boot recovery helpers. */
 function officeConfig(chatId: number | string) {
   return {
     configurable: { thread_id: threadIdFor(chatId) },
     recursionLimit: OFFICE_RECURSION_LIMIT,
   };
-}
-
-/**
- * Start the Telegram "typing…" indicator and return a stop() closure.
- * One timer reference, no leaks — replaces the duplicated setInterval boilerplate
- * (and the function-object side-channel hack from the interrupt-guard branch).
- */
-function startTyping(ctx: Context): () => void {
-  ctx.replyWithChatAction("typing").catch(() => {});
-  const id = setInterval(() => ctx.replyWithChatAction("typing").catch(() => {}), 4000);
-  return () => clearInterval(id);
 }
 
 /**
@@ -521,88 +502,76 @@ export async function routeToOffice(ctx: Context): Promise<void> {
   await runOfficeText(ctx, text);
 }
 
-/**
- * Run an arbitrary prompt through the office on this chat's thread.
- * Shared by plain messages and commands (e.g. /outbound builds its own prompt).
- */
+/** Run an arbitrary prompt through the office on this session's thread. */
 export async function runOfficeText(ctx: Context, text: string): Promise<void> {
-  const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
-  await withChatTurnLock(chatId, () => runOfficeTextLocked(ctx, text, chatId));
+  const session = createTelegramSession(ctx);
+  await withChatTurnLock(session.id, () => runOfficeSession(session, text));
 }
 
-async function runOfficeTextLocked(ctx: Context, text: string, chatId: number | string): Promise<void> {
-  const config = officeConfig(chatId);
+/** Transport-neutral office run (Telegram + web gateways). */
+export async function runOfficeSession(session: GatewaySession, text: string): Promise<void> {
+  await runOfficeSessionLocked(session, text);
+}
 
-  const trace = startTurn({ chatId, kind: "message", promptHash: activePromptHash(SUPERVISOR_PROMPT) });
+async function runOfficeSessionLocked(session: GatewaySession, text: string): Promise<void> {
+  const config = officeConfigForSession(session);
+  const chatId = session.id;
+
+  const baseTrace = startTurn({ chatId, kind: "message", promptHash: activePromptHash(SUPERVISOR_PROMPT) });
+  const trace = wrapTrace(session, baseTrace);
   trace.event("turn.in", { textLen: text.length });
 
-  // ── Global halt (kill switch) ───────────────────────────────────────────────
-  // A founder-engaged halt (/halt) refuses every NEW turn before any office work
-  // or side effect. Checked at turn entry; an in-flight run is not aborted (turns
-  // are seconds-long and the budget guard caps runaway loops). See docs/PRODUCTION.md.
   const halt = await readHalt();
   if (halt) {
     trace.event("halt.blocked", { reason: halt.reason });
     log.warn({ chatId, reason: halt.reason }, "Turn refused — global halt engaged");
-    await ctx.reply(formatHaltNotice(halt), { parse_mode: "HTML" });
+    await session.onSystemNotice(formatHaltNotice(halt));
     return;
   }
 
   log.info({ chatId, task: text.slice(0, 80) }, "Routing to office");
-  const stopTyping = startTyping(ctx);
+  const stopTyping = session.onTyping();
 
   try {
     const office = await getOffice();
 
-    // ── Interrupt guard ───────────────────────────────────────────────────────
-    // If the thread is paused on a pending approval, a fresh invoke({messages})
-    // re-serves the parked state and produces a stale reply every turn. Cancel it
-    // first, inform the founder, then proceed with the new request.
     const stale = await resolvePendingApproval(office, config);
     if (stale) {
       trace.event("hitl.interrupt", { cancelledStale: true, title: stale.title });
       log.warn({ chatId, title: stale.title }, "Cancelled stale pending approval — new message arrived");
-      await ctx.reply(
+      await session.onSystemNotice(
         `⏸️ <b>Pending approval cancelled</b>\n` +
         `You had an unanswered approval card (<i>${safeHtml(stale.title)}</i>). ` +
         `I've cancelled it so your new request runs cleanly. Re-ask if you still want it.`,
-        { parse_mode: "HTML" },
       );
     }
 
-    // ── Wedge guard ───────────────────────────────────────────────────────────
-    // A run that aborted mid-graph (recursion limit/budget/crash) leaves the
-    // thread parked on a pending node with no interrupt; a fresh invoke would
-    // resume the stuck node and loop forever. Clear it so this message runs clean.
-    if (await recoverWedgedThread(office, config, threadIdFor(chatId))) {
+    if (await recoverWedgedThread(office, config, session.threadId)) {
       trace.event("wedge.recovered", {});
       log.warn({ chatId }, "Recovered wedged thread before new message");
-      await ctx.reply(
+      await session.onSystemNotice(
         `🧹 <b>Recovered a stuck task.</b> A previous run didn't finish cleanly, so I cleared it. ` +
         `Running your new message fresh.`,
-        { parse_mode: "HTML" },
       );
     }
 
-    // ── Inbox fast path (read-only) ───────────────────────────────────────────
-    // Deterministic Gmail read — no LLM hop for "check my unread emails".
     const inboxFast = await tryInboxReadFastPath(text);
     if (inboxFast) {
       stopTyping();
       trace.event("inbox.fastpath", { textLen: text.length });
       log.info({ chatId }, "Inbox read via fast path");
-      for (const chunk of splitForTelegram(markdownToTelegramHtml(inboxFast))) {
-        await ctx.reply(chunk, { parse_mode: "HTML" });
+      if (session.transport === "telegram") {
+        for (const chunk of splitForTelegram(markdownToTelegramHtml(inboxFast))) {
+          await session.onHtml(chunk);
+        }
+      } else {
+        await session.onReply(inboxFast);
       }
       return;
     }
 
-    // ── Capture turn boundary before invoke ───────────────────────────────────
-    // The checkpointer returns the full trail after invoke. Slicing to baseLen
-    // isolates this turn's output so finalReply/collectToolErrors never surface
-    // messages from earlier turns.
     const beforeState = await office.getState(config).catch((err) => {
-      log.warn({ chatId, err: (err as Error).message }, "getState failed — baseLen will be 0 (reply may include stale content)");
+      log.warn({ chatId, err: (err as Error).message }, "getState failed — baseLen will be 0");
       return null;
     }) as { values?: { messages?: OfficeMessage[] } } | null;
     const baseLen = (beforeState?.values?.messages ?? []).length;
@@ -610,13 +579,10 @@ async function runOfficeTextLocked(ctx: Context, text: string, chatId: number | 
     const budget = createRunBudget();
     const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
 
-    // Inject a deterministic pre-router hint so the supervisor starts in the
-    // right department. Same builder the eval uses (CLAUDE.md rule #19).
     const invokeMessages: BaseMessage[] = buildOfficeInput(text);
     trace.event("route.decided", { hint: (invokeMessages[0]?.content ?? "").toString().slice(0, 60) });
 
-    // Guard: Gemini returns 400 if contents is empty or last message is blank.
-    assertNonEmptyMessages(invokeMessages, "runOfficeText");
+    assertNonEmptyMessages(invokeMessages, "runOfficeSession");
 
     const res = (await office.invoke(
       { messages: invokeMessages },
@@ -633,11 +599,10 @@ async function runOfficeTextLocked(ctx: Context, text: string, chatId: number | 
     let approval = await getPendingApproval(office, config);
     if (approval) {
       trace.event("hitl.interrupt", { title: approval.title });
-      await sendApprovalCard(ctx, approval);
+      await sendApprovalCard(session, approval);
       return;
     }
 
-    // Slice to current turn — prevents stale reply / phantom tool error
     let freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
     let freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
 
@@ -662,24 +627,24 @@ async function runOfficeTextLocked(ctx: Context, text: string, chatId: number | 
       approval = await getPendingApproval(office, config);
       if (approval) {
         trace.event("hitl.interrupt", { title: approval.title, guardRetry: guardKind });
-        await sendApprovalCard(ctx, approval);
+        await sendApprovalCard(session, approval);
         return;
       }
       freshMessages = sliceFreshMessages(retryRes.messages ?? [], retryBaseLen);
       freshRes = { messages: freshMessages.length > 0 ? freshMessages : retryRes.messages };
     }
 
-    await sendResult(ctx, freshRes, chatId);
+    const replyText = finalReply(freshRes);
+    await sendResult(session, freshRes, chatId);
     trace.event("turn.out", {
+      replyPreview: replyText.slice(0, 200),
       toolErrors: collectToolErrors(freshRes).length,
       inputTokens: budget.summary.totalInputTokens,
       outputTokens: budget.summary.totalOutputTokens,
       usd: Number(budget.summary.totalUsd.toFixed(6)),
     });
-    // Clean turn → record episodic memory + bound the persisted history so the
-    // thread can never grow unbounded and anchor the model on stale state.
     if (freshMessages.length > 0) {
-      recordConversationEnd(threadIdFor(chatId), res.messages ?? []).catch((err) =>
+      recordConversationEnd(session.threadId, res.messages ?? []).catch((err) =>
         log.warn({ chatId, err: (err as Error).message }, "Conversation recording failed"),
       );
       trimThreadHistory(office, config, trace).catch((err) =>
@@ -692,31 +657,25 @@ async function runOfficeTextLocked(ctx: Context, text: string, chatId: number | 
     if (err instanceof BudgetExceededError) {
       log.warn({ chatId, reason: err.reason }, "Run stopped: budget exceeded");
       await clearThreadAfterAbort(chatId);
-      await ctx.reply(
+      await session.onSystemNotice(
         `💰 <b>Run stopped — budget limit reached</b>\n` +
           `<code>${safeHtml(err.reason)}</code>\n\n` +
           `Adjust <code>RUN_BUDGET_USD</code> or <code>RUN_BUDGET_TOKENS</code> in <code>.env</code> to raise the cap.`,
-        { parse_mode: "HTML" },
       );
       return;
     }
     if (err instanceof GraphRecursionError) {
       log.warn({ chatId }, "Run stopped: recursion limit reached");
-      // Preventive: the aborted run left the thread parked on a pending node.
-      // Clear it now so the founder's NEXT message isn't trapped in the same loop.
       await clearThreadAfterAbort(chatId);
-      await ctx.reply(
+      await session.onSystemNotice(
         `🔁 <b>I got stuck in a loop on that one</b> and stopped to avoid runaway cost.\n` +
           `I've cleared that task — just send your next message normally.`,
-        { parse_mode: "HTML" },
       );
       return;
     }
     const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
     log.error({ err: msg, chatId }, "Office run failed");
-    await ctx.reply(`❌ <b>Error</b>\n<code>${safeHtml(msg.slice(0, 1200))}</code>`, {
-      parse_mode: "HTML",
-    });
+    await session.onSystemNotice(`❌ <b>Error</b>\n<code>${safeHtml(msg.slice(0, 1200))}</code>`);
   }
 }
 
@@ -734,70 +693,66 @@ export function buildRejectionConfirmation(approval: ApprovalRequest): string {
 }
 
 export async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Promise<void> {
-  const chatId = ctx.chat?.id ?? ctx.from?.id ?? "unknown";
-  await withChatTurnLock(chatId, () => resumeOfficeLocked(ctx, decision, chatId));
+  const session = createTelegramSession(ctx);
+  await withChatTurnLock(session.id, () => resumeOfficeSession(session, decision));
 }
 
-async function resumeOfficeLocked(ctx: Context, decision: "approved" | "rejected", chatId: number | string): Promise<void> {
-  const config = officeConfig(chatId);
-  const trace = startTurn({ chatId, kind: "resume", promptHash: activePromptHash(SUPERVISOR_PROMPT) });
+/** Transport-neutral HITL resume. */
+export async function resumeOfficeSession(
+  session: GatewaySession,
+  decision: "approved" | "rejected",
+): Promise<void> {
+  await resumeOfficeSessionLocked(session, decision);
+}
+
+async function resumeOfficeSessionLocked(
+  session: GatewaySession,
+  decision: "approved" | "rejected",
+): Promise<void> {
+  const config = officeConfigForSession(session);
+  const chatId = session.id;
+  const baseTrace = startTurn({ chatId, kind: "resume", promptHash: activePromptHash(SUPERVISOR_PROMPT) });
+  const trace = wrapTrace(session, baseTrace);
   trace.event("hitl.resume", { decision });
 
-  // ── Global halt (kill switch) ───────────────────────────────────────────────
-  // Freeze approvals too: while halted we never resume into the office, so no
-  // side effect (email/LinkedIn/GitHub/file write) executes. The pending card
-  // stays put until /resume — fail-safe by default. See docs/PRODUCTION.md.
   const halt = await readHalt();
   if (halt) {
     trace.event("halt.blocked", { reason: halt.reason, decision });
     log.warn({ chatId, reason: halt.reason, decision }, "Resume refused — global halt engaged");
-    await ctx.reply(formatHaltNotice(halt), { parse_mode: "HTML" });
+    await session.onSystemNotice(formatHaltNotice(halt));
     return;
   }
 
   try {
     const office = await getOffice();
 
-    // Idempotency — don't re-invoke if no interrupt exists (double-tap, restart).
     const pending = await getPendingApproval(office, config);
     if (!pending) {
-      await ctx.reply("ℹ️ No pending approval found — it may have already been handled.", { parse_mode: "HTML" });
+      await session.onSystemNotice("ℹ️ No pending approval found — it may have already been handled.");
       return;
     }
 
-    // ── Rejection terminates the turn — NEVER resume into the agent ────────────
-    // A ReAct sub-agent treats the rejection tool-result ("❌ Rejected by
-    // founder.") as feedback and re-drafts, firing interrupt() again → an
-    // endless stream of approval cards the founder can't escape (live repro
-    // 2026-06-12). The founder said no, so we abandon the paused task
-    // deterministically: clear the thread and confirm. The side effect only
-    // runs after an "approved" resume, so action_log stays empty (safety holds).
     if (decision === "rejected") {
-      const row = await getPendingInterrupt(threadIdFor(chatId));
+      const row = await getPendingInterrupt(session.threadId);
       if (row) await resolveInterrupt(row.interrupt_id, "rejected");
-      await clearThreadCheckpoints(threadIdFor(chatId));
+      await clearThreadCheckpoints(session.threadId);
       await cancelGhostApprovals(chatId);
       trace.event("turn.out", { rejected: true });
-      await ctx.reply(buildRejectionConfirmation(pending), { parse_mode: "HTML" });
+      await session.onSystemNotice(buildRejectionConfirmation(pending));
       log.info({ chatId, action: pending.action }, "Founder rejected — task cancelled, thread cleared (no re-draft)");
       return;
     }
 
-    // Capture turn boundary so the resume reply only shows this turn's output
-    // (otherwise collectToolErrors re-surfaces every prior turn's tool errors).
     const beforeState = await office.getState(config).catch(() => null) as { values?: { messages?: OfficeMessage[] } } | null;
     const baseLen = (beforeState?.values?.messages ?? []).length;
 
-    // Guard: validate checkpoint messages before resuming to prevent Gemini 400
-    // "contents is not specified" when history trim leaves blank/empty messages.
     const checkpointMessages = (beforeState?.values?.messages ?? []) as BaseMessage[];
     try {
-      assertNonEmptyMessages(checkpointMessages, "resumeOffice");
+      assertNonEmptyMessages(checkpointMessages, "resumeOfficeSession");
     } catch (guardErr) {
-      log.error({ chatId, err: (guardErr as Error).message }, "resumeOffice guard: checkpoint invalid — aborting to prevent Gemini 400");
-      await ctx.reply(
+      log.error({ chatId, err: (guardErr as Error).message }, "resumeOffice guard: checkpoint invalid");
+      await session.onSystemNotice(
         `❌ <b>Cannot resume — conversation state is invalid.</b>\n\nUse /reset to clear the thread and try again.`,
-        { parse_mode: "HTML" },
       );
       return;
     }
@@ -813,19 +768,20 @@ async function resumeOfficeLocked(ctx: Context, decision: "approved" | "rejected
       },
     )) as { messages?: OfficeMessage[] };
 
-    // A run may pause again (e.g. research → then email approval).
     const next = await getPendingApproval(office, config);
     if (next) {
       trace.event("hitl.interrupt", { title: next.title, rePaused: true });
-      await sendApprovalCard(ctx, next);
+      await sendApprovalCard(session, next);
       return;
     }
-    const row = await getPendingInterrupt(threadIdFor(chatId));
+    const row = await getPendingInterrupt(session.threadId);
     if (row) await resolveInterrupt(row.interrupt_id, "approved");
     const freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
     const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
-    await sendResult(ctx, freshRes, chatId);
+    const replyText = finalReply(freshRes);
+    await sendResult(session, freshRes, chatId);
     trace.event("turn.out", {
+      replyPreview: replyText.slice(0, 200),
       resumed: true,
       inputTokens: budget.summary.totalInputTokens,
       outputTokens: budget.summary.totalOutputTokens,
@@ -838,19 +794,17 @@ async function resumeOfficeLocked(ctx: Context, decision: "approved" | "rejected
     if (err instanceof BudgetExceededError) {
       log.warn({ chatId, reason: err.reason }, "Resume stopped: budget exceeded");
       await clearThreadAfterAbort(chatId);
-      await ctx.reply(`💰 <b>Run stopped — budget limit reached</b>\n<code>${safeHtml(err.reason)}</code>`, { parse_mode: "HTML" });
+      await session.onSystemNotice(`💰 <b>Run stopped — budget limit reached</b>\n<code>${safeHtml(err.reason)}</code>`);
       return;
     }
     if (err instanceof GraphRecursionError) {
       log.warn({ chatId }, "Resume stopped: recursion limit reached");
       await clearThreadAfterAbort(chatId);
-      await ctx.reply(`🔁 <b>That got stuck in a loop</b> and I stopped it. I've cleared that task — send your next message normally.`, { parse_mode: "HTML" });
+      await session.onSystemNotice(`🔁 <b>That got stuck in a loop</b> and I stopped it. I've cleared that task — send your next message normally.`);
       return;
     }
     const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
     log.error({ err: msg, chatId }, "Office resume failed");
-    await ctx.reply(`❌ <b>Resume failed</b>\n<code>${safeHtml(msg.slice(0, 1200))}</code>`, {
-      parse_mode: "HTML",
-    });
+    await session.onSystemNotice(`❌ <b>Resume failed</b>\n<code>${safeHtml(msg.slice(0, 1200))}</code>`);
   }
 }

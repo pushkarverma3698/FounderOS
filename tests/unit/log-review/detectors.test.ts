@@ -106,14 +106,43 @@ describe("hallucination_candidate — refusal phrasings (honest refusals NEVER f
     expect(a.some((x) => x.type === "hallucination_candidate")).toBe(false);
   });
 
-  it("does not flag a reply grounded by search_knowledge in logs", () => {
+  it("does not flag a reply grounded by a substantive tool.result", () => {
     const a = runDetectors([
       base({
         reply: "According to our knowledge base, Turicks provides done-for-you cinematic brand content.",
-        lines: [{ level: 30, time: 1, seam: "llm.call", raw: "search_knowledge tool called" }],
+        lines: [
+          {
+            level: 30,
+            time: 1,
+            seam: "tool.result",
+            raw: "tool result",
+            data: { preview: "[strategy] STRATEGIC VISION — FounderOS portfolio product…" },
+          },
+        ],
       }),
     ]);
     expect(a.some((x) => x.type === "hallucination_candidate")).toBe(false);
+  });
+
+  it("flags empty-store search then long reply (prod ICP fabrication class)", () => {
+    const a = runDetectors([
+      base({
+        outputTokens: 342,
+        lines: [
+          {
+            level: 30,
+            time: 1,
+            seam: "tool.result",
+            raw: "empty",
+            data: {
+              preview:
+                'No knowledge entries found for "ICP" (type: strategic_pillar). The turicks-brain may not have been synced yet — run `pnpm brain:sync` to populate it.',
+            },
+          },
+        ],
+      }),
+    ]);
+    expect(a.some((x) => x.type === "hallucination_candidate")).toBe(true);
   });
 
   it("does not flag a reply that is too short to be substantive (<40 chars)", () => {

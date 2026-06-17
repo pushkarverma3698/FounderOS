@@ -29,6 +29,7 @@ import {
   knowledgeEntries,
   conversations,
   episodicMemory,
+  missions,
   type NewActionLog,
   type NewDeptSignal,
   type NewHitlApproval,
@@ -38,6 +39,8 @@ import {
   type NewAgentResult,
   type NewConversation,
   type NewEpisodicMemory,
+  type NewMission,
+  type Mission,
 } from "./schema.js";
 
 // ── HITL Approvals (hitl_approvals) ──────────────────────────────────────────
@@ -861,4 +864,70 @@ export async function getLastEpisodicEvent(
     content: row.summary ?? row.title,
     created_at: row.created_at ?? new Date(),
   };
+}
+
+// ── Missions (MISO mission control) ───────────────────────────────────────────
+
+const ACTIVE_MISSION_PHASES = ["INIT", "RUNNING", "PARTIAL", "AWAITING APPROVAL"];
+
+export async function createMission(data: Omit<NewMission, "mission_id" | "created_at">): Promise<string> {
+  const db = getDb();
+  const [row] = await db.insert(missions).values(data).returning({ id: missions.mission_id });
+  return row!.id;
+}
+
+export async function getMissionById(missionId: string): Promise<Mission | null> {
+  const db = getDb();
+  const [row] = await db.select().from(missions).where(eq(missions.mission_id, missionId)).limit(1);
+  return row ?? null;
+}
+
+export async function getActiveMission(sessionId: string): Promise<Mission | null> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(missions)
+    .where(and(eq(missions.session_id, sessionId), inArray(missions.phase, ACTIVE_MISSION_PHASES)))
+    .orderBy(desc(missions.started_at))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function listMissions(tenantId: string, limit = 20): Promise<Mission[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(missions)
+    .where(eq(missions.tenant_id, tenantId))
+    .orderBy(desc(missions.created_at))
+    .limit(limit);
+}
+
+export async function updateMissionPhase(
+  missionId: string,
+  patch: Partial<
+    Pick<
+      Mission,
+      "phase" | "department" | "next_action" | "agent_statuses" | "turn_id" | "completed_at"
+    >
+  >,
+): Promise<void> {
+  const db = getDb();
+  await db.update(missions).set(patch).where(eq(missions.mission_id, missionId));
+}
+
+export async function setMissionTelegramMsg(missionId: string, msgId: number): Promise<void> {
+  const db = getDb();
+  await db.update(missions).set({ telegram_msg_id: msgId }).where(eq(missions.mission_id, missionId));
+}
+
+export async function closeMission(
+  missionId: string,
+  phase: "COMPLETE" | "ERROR" = "COMPLETE",
+): Promise<void> {
+  const db = getDb();
+  await db
+    .update(missions)
+    .set({ phase, completed_at: new Date(), next_action: "closed" })
+    .where(eq(missions.mission_id, missionId));
 }
