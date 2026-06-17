@@ -75,7 +75,11 @@ export function validateBootConfig(env: BootValidationInput): BootValidation {
   }
 
   // ── Optional integrations: degraded, not fatal ──────────────────────────────
-  for (const name of ["Composio (email/linkedin/calendar)", "GitHub tools"]) {
+  for (const name of [
+    "Google Workspace (gws)",
+    "LinkedIn (direct API)",
+    "GitHub tools",
+  ]) {
     const cap = report.find((c) => c.name === name);
     if (cap && !cap.live) warnings.push(`${name} not configured — ${cap.detail}.`);
   }
