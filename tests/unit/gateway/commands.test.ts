@@ -146,6 +146,15 @@ describe("handleDepartments", () => {
 // ── /start updated welcome message ────────────────────────────────────────────
 
 describe("handleStart", () => {
+  it("shows product capability guide", async () => {
+    const { handleStart } = await import("../../../src/gateway/commands.js");
+    const { ctx, replies } = fakeCtx();
+    await handleStart(ctx);
+    expect(replies[0]).toContain("What you can do");
+    expect(replies[0]).toContain("Admin");
+    expect(replies[0]).toContain("Jobhunt");
+  });
+
   it("mentions /help in the welcome message", async () => {
     const { handleStart } = await import("../../../src/gateway/commands.js");
     const { ctx, replies } = fakeCtx();
