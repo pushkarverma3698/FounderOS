@@ -1,0 +1,53 @@
+name: Telegram stress (VPS MTProto)
+
+# Runs the real founder-simulation harness on the Hetzner VPS against the LIVE bot.
+# Requires TELEGRAM_TESTER_* in /opt/founderos/.env (founder MTProto login).
+# workflow_dispatch must exist on default branch (main) to trigger from GitHub UI.
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "e2e-telegram-qa selector"
+        required: true
+        default: "stabilization"
+        type: choice
+        options:
+          - stabilization
+          - group6
+          - group1
+          - all
+
+concurrency:
+  group: telegram-stress-vps
+  cancel-in-progress: false
+
+jobs:
+  mtproto-stress:
+    name: MTProto stress on VPS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Telegram E2E on production VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          command_timeout: "45m"
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd /opt/founderos
+            git fetch --quiet origin main
+            git checkout -f main
+            git pull --ff-only origin main
+            if ! grep -q '^TELEGRAM_TESTER_SESSION=' .env 2>/dev/null; then
+              echo "::error::TELEGRAM_TESTER_SESSION missing from VPS .env — run telegram-tester.ts login on VPS first"
+              exit 1
+            fi
+            pnpm install --frozen-lockfile
+            SUITE="${{ inputs.suite }}"
+            echo "==> Telegram stress suite: $SUITE"
+            ALLOW_NETWORK=1 ENGINEERING_SUBGRAPH=1 OFFICE_RECURSION_LIMIT=40 \
+              node --env-file=.env --import tsx/esm scripts/e2e-telegram-qa.ts run "$SUITE" --approve --realistic
+            echo "==> Telegram stress complete"
