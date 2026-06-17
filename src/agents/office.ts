@@ -17,11 +17,12 @@
  */
 
 import { createSupervisor } from "@langchain/langgraph-supervisor";
-import { createAgent } from "langchain";
+import { createAgent, dynamicSystemPromptMiddleware } from "langchain";
 import type { CompiledStateGraph, BaseCheckpointSaver } from "@langchain/langgraph";
-import { getModel, getModelFallbackMiddleware } from "./model.js";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { getModel, getModelFallbackMiddleware } from "./model/index.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
-import { createAgentMiddleware, createTrimmedPrompt } from "../infra/context-manager.js";
+import { createTrimmedPrompt, createTrimMiddleware } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS, SUPERVISOR_TOOLS } from "./capabilities.js";
 import { ENGINEERING_SUBGRAPH_ENABLED } from "../core/config.js";
 import { buildEngineeringDomain } from "./engineering-domain.js";
@@ -46,31 +47,55 @@ const log = childLogger({ module: "office" });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _office: CompiledStateGraph<any, any, any> | undefined;
 
-const DEPARTMENT_DESCRIPTIONS = {
-  research: "Use for web facts, news, company or market research, ICP scoring, and internal Turicks knowledge lookups.",
-  comms: "Use for reading inbox, known-contact email, and Google Calendar work.",
-  engineering: "Use for GitHub repositories, issues, pull requests, code, tests, deployments, and FounderOS engineering work.",
-  marketing: "Use for LinkedIn posts, content strategy, and Turicks brand copy.",
-  sales: "Use for prospect research tied to cold outreach, unknown-company outreach, and sales emails.",
-  personal: "Use for files, directories, shell, browser, and laptop operations on the founder's machine.",
-  jobhunt: "Use for job searches, CV/resume work, applications, and hiring-manager outreach.",
-} as const;
+/**
+ * Build one v1 `createAgent` department. Replaces the deprecated
+ * `createReactAgent` (ADR-028). Differences handled here:
+ *  - prompt: a STATIC string → `systemPrompt`; a date-fresh FACTORY (comms) →
+ *    `dynamicSystemPromptMiddleware` (re-evaluated per call so today's date stays
+ *    current in a long-running process).
+ *  - trimming: the rolling-window history bound is now `createTrimMiddleware`
+ *    (was the `prompt` MessageModifier).
+ *  - resilience: each department gets the cross-provider `fallback` middleware so
+ *    a depleted/erroring primary fails over to AGENT_FALLBACK_MODELS.
+ * The agent's `name` lands on `.graph.name`; createSupervisor consumes `.graph`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyMiddleware = any;
+function buildDepartment(opts: {
+  name: string;
+  model: BaseChatModel;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools: any;
+  prompt: string | (() => string);
+  maxTokens: number;
+  fallback: AnyMiddleware | null;
+}) {
+  const middleware: AnyMiddleware[] = [];
+  let systemPrompt: string | undefined;
+  if (typeof opts.prompt === "function") {
+    const promptFn = opts.prompt;
+    middleware.push(dynamicSystemPromptMiddleware(() => promptFn()));
+  } else {
+    systemPrompt = opts.prompt;
+  }
+  middleware.push(createTrimMiddleware(opts.maxTokens));
+  if (opts.fallback) middleware.push(opts.fallback);
 
-/** Deterministic search caps — prompt instructions alone are not enough on OpenRouter. */
-const SEARCH_TOOL_LIMITS = {
-  search_web: 2,
-  search_knowledge: 2,
-  search_turicks_brain: 2,
-} as const;
+  return createAgent({
+    model: opts.model,
+    tools: opts.tools,
+    name: opts.name,
+    ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+    middleware,
+  });
+}
 
 /**
  * Build (compile) the office graph with a given checkpointer.
  * Exported for tests (inject MemorySaver). Production uses getOffice().
  */
 export function buildOffice(checkpointer: BaseCheckpointSaver) {
-  // createSupervisor requires a model with bindTools — withFallbacks() wrappers break routing.
   const llm = getModel();
-  const deptModel = getModel();
 
   // ── Phase C tools (available across departments) ──────────────────────────
   // search_knowledge: turicks-brain keyword search (no LLM cost)
@@ -79,39 +104,28 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   // Token budgets (trimming happens before each LLM call, not in the checkpointer):
   //   Sub-agents: 4000 tokens — tool-focused, short working memory is enough
   //   Supervisor: 6000 tokens — needs routing context across more turns
-  const subAgentBudget = { maxTokens: 4000 };
+  const subAgentTokens = 4000;
   const supervisorBudget = { maxTokens: 6000 };
-  const agentMiddleware = (
+
+  // Cross-provider failover (AGENT_FALLBACK_MODELS). One stateless instance shared
+  // by every department; null when no fallbacks are configured. The SUPERVISOR's
+  // own routing model does NOT get this (createSupervisor takes no middleware —
+  // the documented ADR-028 gap; the supervisor relies on its provider's retry).
+  const fallback = getModelFallbackMiddleware();
+  const dept = (
+    name: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools: any,
     prompt: string | (() => string),
-    toolCallLimits?: Record<string, number>,
-  ) => [
-    ...getModelFallbackMiddleware(),
-    ...createAgentMiddleware(prompt, {
-      ...subAgentBudget,
-      ...(toolCallLimits ? { toolCallLimits } : {}),
-    }),
-  ];
+  ) => buildDepartment({ name, model: llm, tools, prompt, maxTokens: subAgentTokens, fallback });
+
   // research: web search + internal knowledge + ICP scoring (no read_emails — inbox stays in comms)
-  const research = createAgent({
-    model: deptModel,
-    tools: DEPARTMENT_TOOLS["research"]!,
-    name: "research",
-    description: DEPARTMENT_DESCRIPTIONS.research,
-    includeAgentName: "inline",
-    middleware: agentMiddleware(RESEARCH_PROMPT, SEARCH_TOOL_LIMITS),
-  }).graph;
+  const research = dept("research", DEPARTMENT_TOOLS["research"]!, RESEARCH_PROMPT);
 
-  // comms: Gmail + Calendar only (linkedin_post moved to marketing — single owner)
-  const comms = createAgent({
-    model: deptModel,
-    tools: DEPARTMENT_TOOLS["comms"]!,
-    name: "comms",
-    description: DEPARTMENT_DESCRIPTIONS.comms,
-    includeAgentName: "inline",
-    middleware: agentMiddleware(buildCommsPrompt),
-  }).graph;
+  // comms: Gmail + Calendar only (date-fresh prompt → dynamic system prompt middleware)
+  const comms = dept("comms", DEPARTMENT_TOOLS["comms"]!, buildCommsPrompt);
 
-  // engineering: either the flat ReAct agent (production default) or the
+  // engineering: either the flat createAgent department (production default) or the
   // hierarchical CTO sub-supervisor (coder/qa/devops) when ENGINEERING_SUBGRAPH=1.
   // BOTH are named "engineering", so the supervisor's routing + capability
   // manifest are identical — only the internal topology of the node changes.
@@ -120,66 +134,36 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   // crash-safe (hierarchy plan P2 / ADR-027).
   const engineering = ENGINEERING_SUBGRAPH_ENABLED
     ? buildEngineeringDomain()
-    : createAgent({
-        model: deptModel,
-        tools: DEPARTMENT_TOOLS["engineering"]!,
-        name: "engineering",
-        description: DEPARTMENT_DESCRIPTIONS.engineering,
-        includeAgentName: "inline",
-        middleware: agentMiddleware(ENGINEERING_PROMPT),
-      }).graph;
+    : dept("engineering", DEPARTMENT_TOOLS["engineering"]!, ENGINEERING_PROMPT);
 
   // ── Phase B departments ───────────────────────────────────────────────────
 
   /** Marketing: LinkedIn content in Turicks brand voice. */
-  const marketing = createAgent({
-    model: deptModel,
-    tools: DEPARTMENT_TOOLS["marketing"]!,
-    name: "marketing",
-    description: DEPARTMENT_DESCRIPTIONS.marketing,
-    includeAgentName: "inline",
-    middleware: agentMiddleware(MARKETING_PROMPT, { search_web: SEARCH_TOOL_LIMITS.search_web }),
-  }).graph;
+  const marketing = dept("marketing", DEPARTMENT_TOOLS["marketing"]!, MARKETING_PROMPT);
 
   /** Sales: researches prospects + writes cold outreach emails (HITL-gated). */
-  const sales = createAgent({
-    model: deptModel,
-    tools: DEPARTMENT_TOOLS["sales"]!,
-    name: "sales",
-    description: DEPARTMENT_DESCRIPTIONS.sales,
-    includeAgentName: "inline",
-    middleware: agentMiddleware(SALES_PROMPT, { search_web: SEARCH_TOOL_LIMITS.search_web }),
-  }).graph;
+  const sales = dept("sales", DEPARTMENT_TOOLS["sales"]!, SALES_PROMPT);
 
   /** Personal: senior engineer on the founder's laptop — files, shell, browser
    *  (write/shell/browser HITL-gated; reads are instant). */
-  const personal = createAgent({
-    model: deptModel,
-    tools: DEPARTMENT_TOOLS["personal"]!,
-    name: "personal",
-    description: DEPARTMENT_DESCRIPTIONS.personal,
-    includeAgentName: "inline",
-    middleware: agentMiddleware(PERSONAL_PROMPT),
-  }).graph;
+  const personal = dept("personal", DEPARTMENT_TOOLS["personal"]!, PERSONAL_PROMPT);
 
   /** Job-Hunt: researches roles + reads CV from personal-rag + HITL-drafts applications.
    *  ADR-015: personal-rag read-only; NEVER auto-submit; send_email HITL-gated. */
-  const jobhunt = createAgent({
-    model: deptModel,
-    tools: DEPARTMENT_TOOLS["jobhunt"]!,
-    name: "jobhunt",
-    description: DEPARTMENT_DESCRIPTIONS.jobhunt,
-    includeAgentName: "inline",
-    middleware: agentMiddleware(JOBHUNT_PROMPT),
-  }).graph;
+  const jobhunt = dept("jobhunt", DEPARTMENT_TOOLS["jobhunt"]!, JOBHUNT_PROMPT);
+
+  // createSupervisor consumes COMPILED graphs. A v1 createAgent exposes its
+  // compiled graph (with the `name` on it) at `.graph`; the engineering subgraph
+  // is already a compiled graph. Unwrap each createAgent department to `.graph`.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const g = (a: any) => (a?.graph ?? a);
 
   return createSupervisor({
     // 7 departments — prospecting merged into research (ICP scoring is now a research mode).
-    // `engineering` may be a ReAct agent or a compiled sub-supervisor (same name);
-    // createSupervisor accepts both, but the union widens the type — cast at this
-    // single boundary (same as the proven nested pattern in engineering-domain.ts).
+    // `engineering` may be a flat createAgent department or a compiled CTO
+    // sub-supervisor (same name); createSupervisor accepts both compiled graphs.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    agents: [research, comms, engineering as any, marketing, sales, personal, jobhunt],
+    agents: [g(research), g(comms), g(engineering), g(marketing), g(sales), g(personal), g(jobhunt)] as any,
     llm,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(buildSupervisorPrompt, supervisorBudget) as any,

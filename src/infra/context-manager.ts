@@ -5,9 +5,10 @@
  * On every LLM call the supervisor and each sub-agent see the entire accumulated
  * history — O(n) tokens per call, growing without bound.
  *
- * Solution: trim the history to a token budget BEFORE each LLM call. The
- * checkpointer state is unchanged — full history is still persisted and /reset
- * still works.
+ * Solution: a MessageModifier that trims the history to a token budget BEFORE
+ * each LLM call. This is the Claude Code pattern: rolling window, keep the most
+ * recent turns, always keep the system message. The checkpointer state is
+ * unchanged — full history is still persisted and /reset still works.
  *
  * Uses trimMessages from @langchain/core/messages (v0.3.80, installed,
  * previously unused). Passed as the `prompt` parameter to createReactAgent /
@@ -21,23 +22,15 @@
  * to trimMessages being a Runnable) but has no side effects.
  */
 
-import { trimMessages, SystemMessage, ToolMessage, isAIMessage, isToolMessage } from "@langchain/core/messages";
+import { trimMessages, SystemMessage } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
-import { createMiddleware, dynamicSystemPromptMiddleware } from "langchain";
-import type { AnyAgentMiddleware } from "langchain";
+import { createMiddleware } from "langchain";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-/** Default per-message char cap (~3k tokens) before truncation. */
-export const DEFAULT_MAX_MESSAGE_CHARS = 12_000;
 
 export interface TrimOptions {
   /** Token budget for history (excluding system message). Default: 4000. */
   maxTokens?: number;
-  /** Max chars per message before truncation. Default: 12000. */
-  maxMessageChars?: number;
-  /** Per-tool completed-call caps enforced deterministically in middleware. */
-  toolCallLimits?: Record<string, number>;
 }
 
 /**
@@ -72,133 +65,6 @@ export function estimateMessageTokens(messages: BaseMessage[]): number {
   }, 0);
 }
 
-export function stripMessageNames(messages: BaseMessage[]): BaseMessage[] {
-  return messages.map((m) => {
-    if (m.name == null) return m;
-    const clone = Object.assign(Object.create(Object.getPrototypeOf(m)), m) as BaseMessage;
-    (clone as { name?: string }).name = undefined;
-    return clone;
-  });
-}
-
-export function countCompletedToolCalls(messages: BaseMessage[], toolName: string): number {
-  const pendingIds = new Set<string>();
-  let completed = 0;
-
-  for (const message of messages) {
-    if (isAIMessage(message)) {
-      for (const toolCall of message.tool_calls ?? []) {
-        if (toolCall.name === toolName && toolCall.id) {
-          pendingIds.add(toolCall.id);
-        }
-      }
-      continue;
-    }
-
-    if (!isToolMessage(message)) continue;
-
-    const toolCallId = message.tool_call_id;
-    if (toolCallId && pendingIds.has(toolCallId)) {
-      pendingIds.delete(toolCallId);
-      completed += 1;
-      continue;
-    }
-
-    if ((message as { name?: string }).name === toolName) {
-      completed += 1;
-    }
-  }
-
-  return completed;
-}
-
-/** Tool calls scheduled in AI messages but not yet answered by ToolMessage. */
-export function countPendingToolCalls(messages: BaseMessage[], toolName: string): number {
-  const pendingIds = new Set<string>();
-
-  for (const message of messages) {
-    if (isAIMessage(message)) {
-      for (const toolCall of message.tool_calls ?? []) {
-        if (toolCall.name === toolName && toolCall.id) {
-          pendingIds.add(toolCall.id);
-        }
-      }
-      continue;
-    }
-
-    if (!isToolMessage(message)) continue;
-    const toolCallId = message.tool_call_id;
-    if (toolCallId) pendingIds.delete(toolCallId);
-  }
-
-  return pendingIds.size;
-}
-
-export function countScheduledToolCalls(messages: BaseMessage[], toolName: string): number {
-  return countCompletedToolCalls(messages, toolName) + countPendingToolCalls(messages, toolName);
-}
-
-function clampOversizedMessages(messages: BaseMessage[], maxChars: number): BaseMessage[] {
-  return messages.map((message) => {
-    if (typeof message.content !== "string" || message.content.length <= maxChars) {
-      return message;
-    }
-    const dropped = message.content.length - maxChars;
-    const clone = Object.assign(Object.create(Object.getPrototypeOf(message)), message) as BaseMessage;
-    clone.content =
-      `${message.content.slice(0, maxChars)}\n\n` +
-      `[Truncated ${dropped} chars — input exceeded ${maxChars} char budget. Answer from the visible excerpt.]`;
-    return clone;
-  });
-}
-
-function filterToolsByLimits<T extends { name?: string }>(
-  messages: BaseMessage[],
-  tools: T[] | undefined,
-  limits: Record<string, number> | undefined,
-): T[] | undefined {
-  if (!tools || !limits) return tools;
-  return tools.filter((tool) => {
-    const limit = limits[tool.name ?? ""];
-    if (limit === undefined) return true;
-    return countScheduledToolCalls(messages, tool.name ?? "") < limit;
-  });
-}
-
-function toolLimitExceededMessage(toolName: string, limit: number, toolCallId: string): ToolMessage {
-  return new ToolMessage({
-    content:
-      `${toolName} call limit (${limit}) reached for this turn. ` +
-      "Synthesize your answer from prior tool results now — do not retry this tool.",
-    tool_call_id: toolCallId,
-  });
-}
-
-async function trimHistory(rawMessages: BaseMessage[], maxTokens: number): Promise<BaseMessage[]> {
-  const historyOnly = rawMessages.filter((m) => !(m instanceof SystemMessage));
-  const trimmed = await trimMessages(historyOnly, {
-    maxTokens,
-    strategy: "last",
-    tokenCounter: (msgs) =>
-      msgs.reduce((sum, m) => {
-        const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-        return sum + estimateTokens(text);
-      }, 0),
-    // Don't start on a partial exchange — keep full human/AI pairs.
-    startOn: "human",
-  });
-
-  return stripMessageNames(trimmed);
-}
-
-function prepareMessages(
-  rawMessages: BaseMessage[],
-  opts: { maxTokens: number; maxMessageChars: number },
-): Promise<BaseMessage[]> {
-  const clamped = clampOversizedMessages(rawMessages, opts.maxMessageChars);
-  return trimHistory(clamped, opts.maxTokens);
-}
-
 // ── Message modifier factory ───────────────────────────────────────────────────
 
 /**
@@ -227,7 +93,6 @@ export function createTrimmedPrompt(
   opts: TrimOptions = {},
 ): MessageModifier {
   const maxTokens = opts.maxTokens ?? 4000;
-  const maxMessageChars = opts.maxMessageChars ?? DEFAULT_MAX_MESSAGE_CHARS;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return async (input: any): Promise<BaseMessage[]> => {
@@ -241,48 +106,60 @@ export function createTrimmedPrompt(
     // Unit tests pass an array directly. Handle both.
     const rawMessages: BaseMessage[] = Array.isArray(input) ? input : (input?.messages ?? []);
 
-    const trimmed = await prepareMessages(rawMessages, { maxTokens, maxMessageChars });
+    // Filter out any existing SystemMessages from history (the supervisor
+    // injects them; we don't want duplicates or stale ones).
+    const historyOnly = rawMessages.filter((m) => !(m instanceof SystemMessage));
+
+    // Trim using LangChain's built-in utility — keeps the most recent messages
+    // within the token budget, using character-based counting (same approximation
+    // as our estimateTokens: 1 token ≈ 4 chars).
+    const trimmed = await trimMessages(historyOnly, {
+      maxTokens,
+      strategy: "last",
+      tokenCounter: (msgs) =>
+        msgs.reduce((sum, m) => {
+          const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+          return sum + estimateTokens(text);
+        }, 0),
+      // Don't start on a partial exchange — keep full human/AI pairs
+      startOn: "human",
+    });
 
     return [systemMsg, ...trimmed];
   };
 }
 
-export function createAgentMiddleware(
-  systemPromptText: string | (() => string),
-  opts: TrimOptions = {},
-): AnyAgentMiddleware[] {
-  const maxTokens = opts.maxTokens ?? 4000;
-  const maxMessageChars = opts.maxMessageChars ?? DEFAULT_MAX_MESSAGE_CHARS;
-  const toolCallLimits = opts.toolCallLimits;
+// ── v1 middleware form (createAgent departments) ─────────────────────────────
 
-  return [
-    dynamicSystemPromptMiddleware(() =>
-      typeof systemPromptText === "function" ? systemPromptText() : systemPromptText,
-    ),
-    createMiddleware({
-      name: "founderos_trim_messages",
-      wrapModelCall: async (request, handler) => {
-        const messages = await prepareMessages(request.messages, { maxTokens, maxMessageChars });
-        const tools = filterToolsByLimits(messages, request.tools, toolCallLimits) ?? request.tools;
-        return handler({ ...request, messages, tools });
-      },
-      wrapToolCall: async (request, handler) => {
-        const toolName = request.toolCall.name;
-        const limit = toolCallLimits?.[toolName];
-        if (limit !== undefined) {
-          const messages = request.state.messages ?? [];
-          const completed = countCompletedToolCalls(messages, toolName);
-          const pending = countPendingToolCalls(messages, toolName);
-          if (completed >= limit || completed + pending > limit) {
-            const toolCallId = request.toolCall.id;
-            if (!toolCallId) {
-              throw new Error(`Tool call ${toolName} is missing an id for limit enforcement.`);
-            }
-            return toolLimitExceededMessage(toolName, limit, toolCallId);
-          }
-        }
-        return handler(request);
-      },
-    }),
-  ];
+/** Shared char-based token counter (1 token ≈ 4 chars), used by both forms. */
+function countTokens(messages: BaseMessage[]): number {
+  return estimateMessageTokens(messages);
+}
+
+/**
+ * The v1-middleware equivalent of `createTrimmedPrompt`'s trimming half, for
+ * `createAgent` departments. It bounds the message HISTORY (suffix) to a token
+ * budget right before each model call via `wrapModelCall`, keeping the most
+ * recent full human/AI exchanges ("last" strategy — the Claude Code rolling
+ * window). The system prompt is handled separately by createAgent's
+ * `systemPrompt` / `dynamicSystemPromptMiddleware`, so — unlike the old
+ * combined modifier — this touches only `request.messages`.
+ *
+ * Checkpointer state is untouched (full history still persisted; /reset works).
+ * Trimming the suffix preserves the byte-stable system+manifest prefix that
+ * drives implicit caching (CLAUDE rule #20).
+ */
+export function createTrimMiddleware(maxTokens = 4000) {
+  return createMiddleware({
+    name: "TrimHistory",
+    wrapModelCall: async (request, handler) => {
+      const trimmed = await trimMessages(request.messages, {
+        maxTokens,
+        strategy: "last",
+        tokenCounter: countTokens,
+        startOn: "human",
+      });
+      return handler({ ...request, messages: trimmed });
+    },
+  });
 }
