@@ -12,7 +12,7 @@
 
 **Pushkar Verma** is a solo founder building two businesses simultaneously:
 
-1. **Turicks** — an AI automation agency that builds AI agents for SME founders
+1. **Turicks** — The Autonomous Studio: cinematic launch experiences for AI/dev-tool startups, delivered via FounderOS
 2. **Naggar Retreat** — a boutique guesthouse/hospitality business in Naggar (Himachal Pradesh, India)
 
 He runs both via FounderOS — a multi-agent AI operating system that handles research,
@@ -22,27 +22,29 @@ outreach, content, engineering, and operations through Telegram.
 
 ## Turicks — The AI Agency
 
-**What it does:** Builds custom AI agent systems for SME founders who want to automate
-their operations — lead generation, content, customer support, internal workflows.
+**What it does:** Ships cinematic launch experiences and governed AI delivery for AI-native and dev-tool startups — landing pages, copy, deploy — using FounderOS as the trust/audit layer.
 
 **ICP (Ideal Customer Profile):**
-- Solo founders or lean teams (1–5 people)
-- Revenue: $50K–$500K ARR
-- Geography: EU and US primarily
-- Pain: Repetitive ops work eating into founder time
-- They want: automation that works today, not a 6-month project
+- Founders of AI/dev-tool startups (seed–Series A)
+- Team size 2–20
+- Pain: generic launch site; need credibility for funding or product launch
+- They want: beautiful, governed delivery — not vibe-coded slop
 
 **Services + Pricing:**
-- Starter: $500 one-time (simple automation / first agent)
-- Retainer: $5,000/month (ongoing agency work, multiple agents, iteration)
-- Done-For-You: custom (cinematic-web / full-stack AI builds)
+- Cinematic Launch Experience: $8,000+ (DFY landing + copy + deploy via cinematic-web)
+- Retainer: $5,000/month (ongoing iterations)
+- Gumroad packs: $14–34 (passive digital products)
+- Proof Drops: custom artifacts for pipeline (founder time investment)
+
+**Retired:** $500 starter tier (ADR-032).
 
 **Brand voice:** Direct, confident, founder-to-founder. No corporate jargon. No fluff.
 Never uses "leverage", "synergies", "delve", "transformative", or "cutting-edge".
 Writes like a peer, not a pitch deck.
 
-**Current status (2026):** Active — outbound and LinkedIn launch sequence in progress.
-Using FounderOS itself as the flagship case study / portfolio piece.
+**Current status (2026):** Repositioned as The Autonomous Studio (ADR-032). Proof showcases + Proof Drop outreach in progress. FounderOS is the delivery OS and portfolio demo.
+
+**Strategy docs:** `docs/strategy/00`–`05` · Phase: `PHASE-D-BIS-PROOF-AND-DISTRIBUTION.md`
 
 ---
 
@@ -77,10 +79,10 @@ Plus shared tools: context read/write, knowledge search (available to all depart
 
 ## 2026 Goals
 
-1. **Revenue Flywheel (Phase D):** Gumroad live + LinkedIn launch sequence + 5 outbound/week
-2. **Portfolio Signal:** FounderOS ships production-grade features that close AI/agent hiring gaps
-3. **Operational Reliability:** Bot is the daily OS — zero-downtime, deterministic, no hallucination
-4. **Phase E (gated):** SaaS pivot (web gateway, multi-tenancy, billing) — only after 4–6 weeks reliable solo use
+1. **Proof & Distribution (Phase D-Bis):** 3 showcases on proof.turicks.com + LinkedIn build-in-public + Proof Drops
+2. **Revenue:** 1 closed client/month at ≥$8K (Cinematic Launch Experience)
+3. **Portfolio Signal:** FounderOS + governed delivery as hiring/credibility moat
+4. **SCALE gate (deferred):** MCP bridge, studio dept — only after $5K+ banked or first client
 
 ---
 

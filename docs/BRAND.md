@@ -6,9 +6,11 @@ This file is the in-repo pointer. All brand decisions, voice rules, and channel 
 
 ## Quick Reference
 
-**Positioning**: "AI-native agency that builds what others only prototype — 3–5 day delivery, working code not decks"
+**Positioning**: "The Autonomous Studio — AI-native delivery + cinematic design finish for AI/dev-tool startups"
 
-**ICP**: SME founders $50K–500K ARR in EU/US who need AI automation or a design-conscious software team
+**ICP**: AI/dev-tool startup founders (seed–Series A) who need a credible launch experience
+
+**Pricing floor**: $8K project / $5K-mo retainer (see docs/strategy/02-OFFER-AND-PRICING.md)
 
 **Voice**: Direct | Specific | Confident | Practical | Partner (never vendor)
 

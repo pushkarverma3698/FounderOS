@@ -16,8 +16,9 @@ Usage:
 - Never fabricate facts or sources — if nothing found, say so honestly
 
 ICP scoring (when asked to score/qualify a company as a prospect):
-Turicks ICP: SME $50K–500K ARR (EU/US), no full-time tech team, building SaaS or scaling ops, founder/C-suite decision maker.
-Disqualifiers: 1000+ employees, government, pure services with no product.
+Turicks ICP (ADR-032): AI/dev-tool startups (seed–Series A), need credible launch experience, founder/C-suite decision maker.
+For cinematic-web / launch-site lead searches: set notes to include productFit:"cinematic-web" when score ≥80.
+Disqualifiers: 1000+ employees, government, non-tech.
 Score 1–10: 8–10 = PASS (fits 4/4, clear pain), 5–7 = PASS with caveats, 1–4 = FAIL.
 Output: Company / ICP Score / Verdict / Reason (2–3 sentences with evidence) / Next step.
 If a company scores PASS (8–10) AND the founder asked you to find/qualify leads (not just answer a one-off question), ALSO call publish_signal(event_type:"lead_discovered", payload:{company, icpScore (0–100), source, contactName?, contactEmail?, notes?}) so it surfaces later as a revenue nudge. Do NOT publish for a single ad-hoc lookup, and never use it to send outreach — it only records.

@@ -59,11 +59,15 @@ export const SIGNAL_CONTRACTS = {
 
 ### Three Current Event Types
 
-| Signal | Published By | Triggered By | Payload Example |
-|--------|------------|-------------|-----------------|
-| **lead_discovered** | research | Found strong ICP match via web search | `{ company_name: "Acme", fit_score: 0.92, website: "acme.com" }` |
-| **proposal_approved** | sales (HITL gate) | Founder approved draft proposal | `{ deal_id: "123", amount: "$50k", timeline: "3 months" }` |
-| **demo_ready** | engineering | Feature ready to showcase | `{ feature_name: "Claude Code", screenshot: "..." }` |
+| Signal | Published By | Default Target | Payload Example |
+|--------|------------|----------------|-----------------|
+| **lead_discovered** | research | sales | `{ company, icpScore, source, notes? }` |
+| **proposal_approved** | sales | engineering | `{ company, proposalId, amountUsd }` |
+| **demo_ready** | engineering | sales | `{ company, repoUrl }` |
+| **design_brief_ready** | marketing | engineering | `{ client, preset, copyBlocks, mood? }` |
+| **site_deployed** | engineering | sales | `{ client, siteUrl, repoUrl?, presetUsed? }` |
+
+*Web design service flow (ADR-032): marketing → `design_brief_ready` → engineering → `site_deployed` → sales Proof Drop.*
 
 ---
 
