@@ -98,6 +98,14 @@ describe("validateSignalPayload — deterministic boundary gate", () => {
         presetUsed: "neon",
       }).ok,
     ).toBe(true);
+    expect(
+      validateSignalPayload("proof_drop_ready", {
+        company: "Linear",
+        artifactType: "hero_redesign",
+        artifactSummary: "Cinematic hero mock with scroll-driven metrics.",
+        outreachHook: "Mocked a launch hero for your billing revamp.",
+      }).ok,
+    ).toBe(true);
   });
 
   it("never throws on hostile input (null/undefined/non-object)", () => {

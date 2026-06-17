@@ -4,7 +4,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildContextText, formatLeadNudge, formatProposalNudge, formatDemoNudge, formatDesignBriefNudge, formatSiteDeployedNudge } from "../../../src/infra/scheduler.js";
+import { buildContextText, formatLeadNudge, formatProposalNudge, formatDemoNudge, formatDesignBriefNudge, formatSiteDeployedNudge, formatProofDropNudge } from "../../../src/infra/scheduler.js";
+import { buildProofDropCadenceNudge } from "../../../src/outbound/proof-drop.js";
 
 describe("buildContextText", () => {
   it("formats a flat string value", () => {
@@ -170,5 +171,39 @@ describe("formatSiteDeployedNudge (web design pipeline)", () => {
     expect(out).toContain("https://agentops.example.com");
     expect(out).toContain("neon");
     expect(out).toMatch(/you approve before anything sends/i);
+  });
+});
+
+describe("formatProofDropNudge (Phase D-Bis GTM)", () => {
+  const sig = (payload: unknown) =>
+    ({
+      event_type: "proof_drop_ready",
+      payload,
+    }) as unknown as import("../../../src/db/schema.js").DeptSignal;
+
+  it("renders proof drop signals for sales follow-up", () => {
+    const out = formatProofDropNudge([
+      sig({
+        company: "Linear",
+        artifactType: "hero_redesign",
+        artifactSummary: "Dark-mode hero with scroll-driven agent metrics mock.",
+      }),
+    ]);
+    expect(out).toContain("Proof Drop ready");
+    expect(out).toContain("Linear");
+    expect(out).toContain("hero_redesign");
+    expect(out).toMatch(/you approve before anything sends/i);
+  });
+});
+
+describe("buildProofDropCadenceNudge (scheduler import)", () => {
+  it("nudges when below weekly target", () => {
+    const nudge = buildProofDropCadenceNudge({
+      countThisWeek: 0,
+      target: 2,
+      remaining: 2,
+      recent: [],
+    });
+    expect(nudge).toContain("/proofdrop");
   });
 });

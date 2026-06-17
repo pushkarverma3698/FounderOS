@@ -19,6 +19,12 @@ import {
   clearOutboundTargets,
 } from "../outbound/targets.js";
 import { buildBatchPrompt, splitBatch, parseCompanyArgs } from "../outbound/batch.js";
+import {
+  getProofDropStats,
+  recordProofDrop,
+  formatProofDropStats,
+  normalizeProofDropCompany,
+} from "../outbound/proof-drop.js";
 import { getSystemStatus, formatRichStatus } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
 import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals, countPendingDeptSignals, listPendingDeptSignals, getRecentLlmCosts, getTodayCostUsd } from "../db/queries.js";
@@ -319,6 +325,66 @@ export async function handleOutbound(
   await runOfficeText(ctx, buildBatchPrompt(batch));
 }
 
+// ── /proofdrop — Phase D-Bis Proof Drop workflow shortcut ─────────────────────
+
+export async function handleProofDrop(
+  ctx: Context,
+  runOfficeText: (ctx: Context, text: string) => Promise<void>,
+): Promise<void> {
+  const arg = (ctx.match ?? "").toString().trim();
+
+  if (!arg) {
+    const stats = await getProofDropStats(TENANT);
+    await ctx.reply(
+      `🎁 <b>Proof Drop Pipeline</b> (Phase D-Bis GTM)\n\n` +
+        `${formatProofDropStats(stats)}\n\n` +
+        `<b>Usage:</b> <code>/proofdrop CompanyName</code>\n` +
+        `Example: <code>/proofdrop Linear</code>\n\n` +
+        `Flow: ICP gate → research → artifact concept → outreach draft (HITL ✋)\n` +
+        `Target: ${stats.target}/week high-craft drops.`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const company = normalizeProofDropCompany(arg);
+  if (!company) {
+    await ctx.reply("❌ Invalid company name. Example: <code>/proofdrop Linear</code>", {
+      parse_mode: "HTML",
+    });
+    return;
+  }
+
+  const wf = getWorkflow("proof_drop");
+  if (!wf) {
+    await ctx.reply("❌ Proof Drop workflow not registered.", { parse_mode: "HTML" });
+    return;
+  }
+
+  const result = await runWorkflow(wf, { company }, {
+    async sendStatus(msg) {
+      await ctx.reply(msg, { parse_mode: "HTML" });
+    },
+    async runStep(task) {
+      try {
+        await runOfficeText(ctx, task);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
+
+  if (result.completed) {
+    const stats = await recordProofDrop(TENANT, company);
+    await ctx.reply(
+      `🎁 Proof Drop logged for <b>${safeHtml(company)}</b>.\n${formatProofDropStats(stats)}`,
+      { parse_mode: "HTML" },
+    );
+    log.info({ company, stepsRun: result.stepsRun }, "Proof Drop workflow completed");
+  }
+}
+
 // ── /commands ─────────────────────────────────────────────────────────────────
 
 export async function handleCommands(ctx: Context): Promise<void> {
@@ -346,12 +412,14 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<code>/targets clear</code> — empty the list\n` +
     `<code>/untarget &lt;company&gt;</code> — remove a specific prospect\n` +
     `<code>/outbound</code> — ICP-score the whole list (no approval needed)\n` +
-    `<code>/outbound &lt;company&gt;</code> — score a single company ad-hoc\n\n` +
+    `<code>/outbound &lt;company&gt;</code> — score a single company ad-hoc\n` +
+    `<code>/proofdrop &lt;company&gt;</code> — 🎁 Proof Drop: research → artifact → outreach (HITL ✋)\n\n` +
 
     `<b>🏭 Workflows — run a company SOP in one command</b>\n` +
     `<code>/workflows</code> — list all available procedures\n` +
     `<code>/run onboarding company=Acme</code> — score → research → welcome email → GitHub repo\n` +
     `<code>/run outbound company=Stripe</code> — score → find hook → cold email\n` +
+    `<code>/run proof_drop company=Linear</code> — 🎁 research → artifact concept → Proof Drop email\n` +
     `<code>/run weekly_digest</code> — review memory + open items + Monday plan\n\n` +
 
     `<b>⚡ Power-user direct routing</b>\n` +

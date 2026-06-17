@@ -20,7 +20,7 @@ export function buildWelcomeMessage(firstName?: string): string {
     `📣 <b>Marketing</b> — LinkedIn drafts ✋\n` +
     `<i>"Draft a build-in-public post about today's ship"</i>\n\n` +
     `📈 <b>Sales</b> — ICP + cold outreach ✋\n` +
-    `<i>/target Acme, Beta · /outbound · "Draft outreach to Razorpay"</i>\n\n` +
+    `<i>/target Acme, Beta · /outbound · /proofdrop Linear · "Draft outreach to Razorpay"</i>\n\n` +
     `💻 <b>Personal</b> — your laptop (files, shell, Safari) ✋\n` +
     `<i>"List ~/Projects" · "Read founderos.log" · "Open URL in Safari"</i>\n\n` +
     `🎯 <b>Jobhunt</b> — CV + job search\n` +

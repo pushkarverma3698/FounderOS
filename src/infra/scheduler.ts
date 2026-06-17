@@ -22,6 +22,7 @@ import { getFounderContext, getPendingInterrupt, consumePendingEvents } from "..
 import type { DeptSignal } from "../db/schema.js";
 import { DEFAULT_TARGET_DEPT } from "../agents/agent-tools/signals.js";
 import { getOutboundTargets } from "../outbound/targets.js";
+import { getProofDropStats, buildProofDropCadenceNudge } from "../outbound/proof-drop.js";
 import { sendToChat } from "./telegram-send.js";
 import { buildOffice } from "../agents/office.js";
 import { SCHEDULER_BRIEF_PROMPT } from "../agents/system-prompts.js";
@@ -266,6 +267,29 @@ export function formatSiteDeployedNudge(signals: DeptSignal[]): string {
   );
 }
 
+/** Format consumed proof_drop_ready signals for sales follow-up. */
+export function formatProofDropNudge(signals: DeptSignal[]): string {
+  const items = signals.filter((s) => s.event_type === "proof_drop_ready");
+  if (items.length === 0) return "";
+
+  const lines = items.map((s) => {
+    const p = (s.payload ?? {}) as {
+      company?: string;
+      artifactType?: string;
+      artifactSummary?: string;
+    };
+    const type = p.artifactType ? ` · ${p.artifactType}` : "";
+    const summary = p.artifactSummary ? `\n  <i>${p.artifactSummary.slice(0, 120)}${p.artifactSummary.length > 120 ? "…" : ""}</i>` : "";
+    return `• <b>${p.company ?? "Unknown"}</b>${type}${summary}`;
+  });
+
+  return (
+    `🎁 <b>Proof Drop${items.length > 1 ? "s" : ""} ready</b> (${items.length})\n\n` +
+    `${lines.join("\n")}\n\n` +
+    `Send when ready: <code>/proofdrop {company}</code> or <code>/q sales draft Proof Drop email to {company}</code> — you approve before anything sends.`
+  );
+}
+
 /**
  * Consume pending lead_discovered signals for the revenue dept and push a nudge.
  * consumePendingEvents claims rows with FOR UPDATE SKIP LOCKED, so each lead
@@ -290,6 +314,11 @@ export async function sweepDeptSignals(): Promise<void> {
       toDept: DEFAULT_TARGET_DEPT["site_deployed"] ?? "sales",
       format: formatSiteDeployedNudge,
     },
+    {
+      event: "proof_drop_ready",
+      toDept: DEFAULT_TARGET_DEPT["proof_drop_ready"] ?? "sales",
+      format: formatProofDropNudge,
+    },
   ];
 
   for (const { event, toDept, format } of sweeps) {
@@ -300,6 +329,18 @@ export async function sweepDeptSignals(): Promise<void> {
     await sendToChat(nudge, "HTML");
     log.info({ count: filtered.length, event, toDept }, "Dept signal sweep — nudge sent");
   }
+}
+
+/** Wednesday nudge when Proof Drop cadence is below target (no LLM). */
+async function sendProofDropCadenceNudge(): Promise<void> {
+  const stats = await getProofDropStats(TENANT);
+  const nudge = buildProofDropCadenceNudge(stats);
+  if (!nudge) {
+    log.info({ count: stats.countThisWeek, target: stats.target }, "Proof Drop cadence on track — no nudge");
+    return;
+  }
+  await sendToChat(nudge, "HTML");
+  log.info({ count: stats.countThisWeek, target: stats.target }, "Proof Drop cadence nudge sent");
 }
 
 // ── Scheduler boot ────────────────────────────────────────────────────────────
@@ -329,11 +370,11 @@ export function startScheduler(): void {
     });
   });
 
-  // Wednesday 9:05am — mid-week outbound reminder
+  // Wednesday 9:05am — Proof Drop cadence reminder (Phase D-Bis)
   cron.schedule("5 9 * * 3", () => {
-    sendOutboundNudge().catch((err) => {
-      log.error({ err: (err as Error).message }, "Mid-week outbound nudge failed");
-      sendToChat(`⚠️ Outbound nudge failed: ${(err as Error).message}`, "HTML").catch(() => {});
+    sendProofDropCadenceNudge().catch((err) => {
+      log.error({ err: (err as Error).message }, "Proof Drop cadence nudge failed");
+      sendToChat(`⚠️ Proof Drop nudge failed: ${(err as Error).message}`, "HTML").catch(() => {});
     });
   });
 
@@ -346,5 +387,5 @@ export function startScheduler(): void {
     });
   });
 
-  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am, Wed 9:05am), stale approval check (daily 9am), dept-signal sweep (hourly)");
+  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), Proof Drop cadence (Wed 9:05am), stale approval check (daily 9am), dept-signal sweep (hourly)");
 }
