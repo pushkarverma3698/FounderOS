@@ -24,6 +24,8 @@ export type Seam =
   | "checkpoint.trim"
   | "guard.retry"
   | "inbox.fastpath"
+  | "hierarchy.enter"
+  | "hierarchy.exit"
   | "turn.out"
   | "turn.error";
 
@@ -81,6 +83,27 @@ export function startTurn(opts: {
       }
     },
   };
+}
+
+/** Graph agents that form the CEO → CTO → worker hierarchy (P6). */
+export const HIERARCHY_AGENTS = [
+  "supervisor",
+  "engineering",
+  "coder",
+  "qa",
+  "devops",
+] as const;
+
+export type HierarchyAgent = (typeof HIERARCHY_AGENTS)[number];
+
+/** Map agent name → depth (0 = CEO, 1 = CTO/domain, 2 = worker). */
+export function hierarchyDepth(agent: string): number | null {
+  if (agent === "supervisor") return 0;
+  if (agent === "engineering" || agent === "revenue") return 1;
+  if (agent === "coder" || agent === "qa" || agent === "devops" || agent === "marketing" || agent === "sales") {
+    return 2;
+  }
+  return null;
 }
 
 /** 12-char sha256 of the active prompt — stamped into traces to catch prompt regressions. */

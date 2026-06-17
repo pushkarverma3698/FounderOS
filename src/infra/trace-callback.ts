@@ -9,6 +9,7 @@
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import type { Serialized } from "@langchain/core/load/serializable";
 import type { TurnTrace } from "./trace.js";
+import { hierarchyDepth } from "./trace.js";
 
 /** Best-effort tool name from the Serialized id array LangChain passes. */
 function toolName(serialized: Serialized | undefined, runName?: string): string {
@@ -22,6 +23,37 @@ export class TraceCallback extends BaseCallbackHandler {
 
   constructor(private readonly trace: TurnTrace) {
     super();
+  }
+
+  override async handleChainStart(
+    chain: Serialized,
+    _inputs: unknown,
+    _runId: string,
+    _parentRunId?: string,
+    _tags?: string[],
+    _metadata?: Record<string, unknown>,
+    runName?: string,
+  ): Promise<void> {
+    const agent = toolName(chain, runName);
+    const depth = hierarchyDepth(agent);
+    if (depth !== null) {
+      this.trace.event("hierarchy.enter", { agent, depth, parentRunId: _parentRunId ?? null });
+    }
+  }
+
+  override async handleChainEnd(
+    _outputs: unknown,
+    _runId: string,
+    _parentRunId?: string,
+    _tags?: string[],
+    _metadata?: Record<string, unknown>,
+    runName?: string,
+  ): Promise<void> {
+    const agent = runName ?? "unknown";
+    const depth = hierarchyDepth(agent);
+    if (depth !== null) {
+      this.trace.event("hierarchy.exit", { agent, depth, parentRunId: _parentRunId ?? null });
+    }
   }
 
   override async handleToolStart(
