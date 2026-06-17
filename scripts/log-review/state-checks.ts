@@ -22,7 +22,27 @@ export async function runStateChecks(tenant: string): Promise<StateFinding[]> {
   void tenant; // part of the stable harvester interface; checks are currently tenant-global
   const findings: StateFinding[] = [];
 
-  // 1. RAG store populated? Empty-but-present is a silent fabrication source.
+  // 1. Keyword knowledge store (search_knowledge) — separate from vector RAG.
+  const knowledgeRows = await count(`SELECT count(*)::int AS n FROM knowledge_entries`);
+  if (knowledgeRows === null) {
+    findings.push({
+      type: "empty_store",
+      severity: "high",
+      summary:
+        "knowledge_entries count query FAILED — Postgres unreachable or table missing.",
+      evidence: ["count(*) FROM knowledge_entries threw"],
+    });
+  } else if (knowledgeRows === 0) {
+    findings.push({
+      type: "empty_store",
+      severity: "high",
+      summary:
+        "knowledge_entries has 0 rows — search_knowledge returns empty → fabrication risk. Run `pnpm brain:sync`.",
+      evidence: ["SELECT count(*) FROM knowledge_entries → 0"],
+    });
+  }
+
+  // 2. Vector RAG store populated? Empty-but-present is a silent fabrication source.
   const ragRows = await count(`SELECT count(*)::int AS n FROM turicks_brain`);
   if (ragRows === null) {
     findings.push({
@@ -41,7 +61,7 @@ export async function runStateChecks(tenant: string): Promise<StateFinding[]> {
       evidence: ["SELECT count(*) FROM turicks_brain → 0"],
     });
   } else {
-    // 2. Rows present but embeddings NULL → vector search silently returns
+    // 3. Rows present but embeddings NULL → vector search silently returns
     //    nothing → the same fabrication class. Verify DATA, not just presence.
     const missingEmbeddings = await count(
       `SELECT count(*)::int AS n FROM turicks_brain WHERE embedding IS NULL`,
@@ -64,7 +84,7 @@ export async function runStateChecks(tenant: string): Promise<StateFinding[]> {
     }
   }
 
-  // 3. Orphaned HITL approvals stuck pending far past the sweep window.
+  // 4. Orphaned HITL approvals stuck pending far past the sweep window.
   const stuckHitl = await count(`
     SELECT count(*)::int AS n FROM hitl_approvals
     WHERE status = 'pending' AND created_at < now() - interval '24 hours'`);
@@ -81,6 +101,25 @@ export async function runStateChecks(tenant: string): Promise<StateFinding[]> {
       severity: "medium",
       summary: `${stuckHitl} HITL approval(s) pending > 24h — sweeper or resume path may be wedged.`,
       evidence: [`stuck pending = ${stuckHitl}`],
+    });
+  }
+
+  // 5. Personal career RAG (search_personal_rag / read_cv) — portfolio questions hallucinate when empty.
+  const personalRagRows = await count(`SELECT count(*)::int AS n FROM personal_rag`);
+  if (personalRagRows === null) {
+    findings.push({
+      type: "empty_store",
+      severity: "medium",
+      summary: "personal_rag count query FAILED — Postgres/pgvector error.",
+      evidence: ["count(*) FROM personal_rag threw"],
+    });
+  } else if (personalRagRows === 0) {
+    findings.push({
+      type: "empty_store",
+      severity: "medium",
+      summary:
+        "personal_rag has 0 rows — portfolio/CV questions may hallucinate. Re-ingest personal-rag.",
+      evidence: ["SELECT count(*) FROM personal_rag → 0"],
     });
   }
 

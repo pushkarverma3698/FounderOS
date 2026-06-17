@@ -560,6 +560,59 @@ export const episodicMemory = agentsSchema.table(
 export type EpisodicMemory = typeof episodicMemory.$inferSelect;
 export type NewEpisodicMemory = typeof episodicMemory.$inferInsert;
 
+// ── missions (MISO mission control) ───────────────────────────────────────────
+
+/** MISO lifecycle phases — INIT → RUNNING → PARTIAL → AWAITING APPROVAL → COMPLETE (+ ERROR). */
+export const MISSION_PHASES = [
+  "INIT",
+  "RUNNING",
+  "PARTIAL",
+  "AWAITING APPROVAL",
+  "COMPLETE",
+  "ERROR",
+] as const;
+
+export type MissionPhase = (typeof MISSION_PHASES)[number];
+
+/**
+ * Durable MISO mission state — one row per active/completed mission.
+ * Telegram dashboard message_id stored for edit-in-place updates.
+ */
+export const missions = agentsSchema.table(
+  "missions",
+  {
+    mission_id: uuid("mission_id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull().default("turicks"),
+    /** Gateway session id (Telegram chatId or web session id). */
+    session_id: text("session_id").notNull(),
+    thread_id: text("thread_id").notNull(),
+    owner: text("owner").notNull().default("founder"),
+    issue_ref: text("issue_ref"),
+    goal: text("goal").notNull(),
+    scope: text("scope"),
+    completion_criteria: text("completion_criteria"),
+    risk: text("risk").default("low"),
+    phase: text("phase").notNull().default("INIT"),
+    department: text("department"),
+    next_action: text("next_action"),
+    /** Per-department status lines for MISO template — e.g. { research: "done" }. */
+    agent_statuses: jsonb("agent_statuses").$type<Record<string, string>>().default({}),
+    /** Telegram message_id of the pinned MISO dashboard (null for web-only missions). */
+    telegram_msg_id: bigint("telegram_msg_id", { mode: "number" }),
+    turn_id: uuid("turn_id"),
+    started_at: timestamp("started_at", { withTimezone: true }).defaultNow(),
+    completed_at: timestamp("completed_at", { withTimezone: true }),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    sessionActiveIdx: index("missions_session_active_idx").on(t.session_id, t.phase),
+    tenantIdx: index("missions_tenant_idx").on(t.tenant_id, t.created_at),
+  }),
+);
+
+export type Mission = typeof missions.$inferSelect;
+export type NewMission = typeof missions.$inferInsert;
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
 export const interruptRegistry = hitlApprovals;
