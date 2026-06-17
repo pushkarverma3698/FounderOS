@@ -11,8 +11,10 @@ import { MemorySaver, Command } from "@langchain/langgraph";
 import { OFFICE_RECURSION_LIMIT } from "../src/core/config.js";
 
 const APPROVE = process.env["P2_LIVE_APPROVE"] !== "0";
+/** Nested CTO subgraph needs headroom beyond prod telegram default (often 20). */
+const LIVE_RECURSION_LIMIT = Math.max(OFFICE_RECURSION_LIMIT, 40);
 const PROMPT =
-  "Create a GitHub issue on pushkarverma3698/FounderOS titled 'P2 live verify script' with body 'automated gate'. Use tools now.";
+  "Create a GitHub issue on pushkarverma3698/FounderOS titled 'P2 live verify' with body 'automated gate'. Use tools now.";
 
 async function main() {
   const { buildOffice, getPendingApproval } = await import("../src/agents/office.js");
@@ -21,7 +23,7 @@ async function main() {
   const office = buildOffice(new MemorySaver());
   const config = {
     configurable: { thread_id: `p2-live-${Date.now()}` },
-    recursionLimit: OFFICE_RECURSION_LIMIT,
+    recursionLimit: LIVE_RECURSION_LIMIT,
   };
 
   console.log("STEP 1 invoke (expect HITL interrupt)...");

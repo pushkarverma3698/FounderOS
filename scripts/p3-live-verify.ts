@@ -57,9 +57,11 @@ async function main() {
   const { buildOfficeInput } = await import("../src/gateway/pre-router.js");
 
   const office = buildOffice(new MemorySaver());
+  /** Nested CTO subgraph needs headroom beyond prod telegram default (often 20). */
+  const liveRecursionLimit = Math.max(OFFICE_RECURSION_LIMIT, 40);
   const config = {
     configurable: { thread_id: `p3-live-${Date.now()}` },
-    recursionLimit: OFFICE_RECURSION_LIMIT,
+    recursionLimit: liveRecursionLimit,
   };
 
   console.log("STEP invoke (expect HITL after P3 handoff wiring)...");
