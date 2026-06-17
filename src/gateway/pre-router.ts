@@ -9,6 +9,8 @@ import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED } from "../core/
 import {
   BANNED_PHRASE_INPUT_RE,
   INBOX_READ_ONLY_RE,
+  INTERNAL_KNOWLEDGE_DIRECTIVE,
+  isInternalKnowledgeRequest,
   LINKEDIN_BANNED_INPUT_RE,
   SHELL_RUN_RE,
 } from "./execution-guard.js";
@@ -133,6 +135,14 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
       ` CRITICAL — INBOX READ: Call read_emails immediately with query "${query}". ` +
       `Return sender + subject lines from the tool output — NEVER summarize without calling read_emails.`;
   }
+  if (dept === "research" && isInternalKnowledgeRequest(text)) {
+    directive += ` CRITICAL — INTERNAL KNOWLEDGE: ${INTERNAL_KNOWLEDGE_DIRECTIVE}`;
+  }
+  if (dept === "admin" && isInternalKnowledgeRequest(text)) {
+    directive +=
+      ` CRITICAL — Use read_context + search_memory + search_knowledge via admin tools. ` +
+      `If stores are empty, say so — never invent Turicks ICP/strategy from prior chat.`;
+  }
   if (
     dept === "engineering" &&
     /\b(create|open|file)\b[^.?!]*\b(issue|pull request|pr)\b|\bgithub\b[^.?!]*(issue|pr|pull)/i.test(text)
@@ -154,15 +164,22 @@ export function buildOfficeInput(text: string): BaseMessage[] {
     return [new SystemMessage(buildTaskLedgerDirective(ledger)), new HumanMessage(text)];
   }
 
+  const grounding =
+    isInternalKnowledgeRequest(text) ? [new SystemMessage(INTERNAL_KNOWLEDGE_DIRECTIVE)] : [];
+
   const dept = preRouteDepartment(text);
-  if (!dept) return [new HumanMessage(text)];
+  if (!dept) return [...grounding, new HumanMessage(text)];
 
   const humanText =
     dept === "personal" && SHELL_RUN_RE.test(text)
       ? `[Route directly to personal department]: ${text}`
       : text;
 
-  return [new SystemMessage(buildRoutingDirective(dept, text)), new HumanMessage(humanText)];
+  return [
+    ...grounding,
+    new SystemMessage(buildRoutingDirective(dept, text)),
+    new HumanMessage(humanText),
+  ];
 }
 
 export function preRoutePersonalVsEngineering(input: string): "personal" | "engineering" | null {

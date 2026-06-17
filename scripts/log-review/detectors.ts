@@ -6,7 +6,7 @@ const COST_USD = 0.05; // per-turn cost over this = spike
 
 /** Tool previews that mean "looked, found nothing" — NOT grounding for a confident reply. */
 const EMPTY_TOOL_RESULT_RE =
-  /\b(no (knowledge|memory) (entries )?found|nothing found|may not have been synced|not found for|try different keywords)\b/i;
+  /\b(no (knowledge|memory) (entries )?found|nothing found|may not have been synced|not found for|try different keywords|no information was found|does not contain|ollama|embeddings? unreachable)\b/i;
 
 const hasSeam = (t: Turn, seam: string): boolean => t.lines.some((l) => l.seam === seam);
 const lineText = (t: Turn): string =>

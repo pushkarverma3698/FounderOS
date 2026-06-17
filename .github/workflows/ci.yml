@@ -25,6 +25,9 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # Emit JS (dist/) — catches issues tsc --noEmit alone can miss. Must pass
+      # before merge; deploy also runs build on the VPS (deploy/deploy.sh).
+      - run: pnpm build:all
       # Compile/CI-time wiring integrity: a half-wired tool fails the build here
       # instead of silently doing nothing in production (keyless, stub env).
       - run: pnpm verify:wiring
