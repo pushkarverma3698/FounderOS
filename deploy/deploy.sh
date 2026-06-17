@@ -24,8 +24,8 @@ pnpm install --frozen-lockfile
 echo "==> Type check (lint) — abort deploy if red"
 pnpm lint
 
-echo "==> Building"
-pnpm build
+echo "==> Building (backend + JARVIS)"
+pnpm build:all
 
 echo "==> Ensuring Postgres + Ollama are up"
 docker compose -f deploy/stack.compose.yml up -d
