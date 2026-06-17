@@ -3,7 +3,12 @@
  * Usage: Use these patterns in Claude Code when searching
  */
 
-import graph from "./graph.json";
+// The generated knowledge graph lives in .claude/graph.json (repo-root tooling
+// dir). This helper was moved from .claude/ → scripts/ in 104bb7e, which broke
+// the old "./graph.json" relative import and pulled the file into tsconfig's
+// "scripts/**/*" compile scope — a red `tsc --noEmit` (= `pnpm lint`) that
+// blocked all of CI and therefore every production deploy. Point at the real path.
+import graph from "../.claude/graph.json" with { type: "json" };
 
 // Types
 interface Node {

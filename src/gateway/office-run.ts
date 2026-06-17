@@ -37,6 +37,7 @@ import {
   detectLinkedInRefusalWithoutTool,
   detectUnbackedInboxClaim,
   detectUnbackedKnowledgeClaim,
+  detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
   isInternalKnowledgeRequest,
 } from "./execution-guard.js";
@@ -50,6 +51,7 @@ import { readHalt, formatHaltNotice } from "../infra/halt.js";
 import { TraceCallback } from "../infra/trace-callback.js";
 import { buildRunMetadata } from "../infra/telemetry.js";
 import { SUPERVISOR_PROMPT } from "../agents/system-prompts.js";
+import { isStructuredToolFailure } from "../agents/tool-result.js";
 import { safeHtml, formatApprovalCard } from "./approval-card.js";
 import { createTelegramSession, type GatewaySession } from "./session.js";
 import { syncMissionTrace, refreshMissionDashboard } from "./mission-sync.js";
@@ -150,7 +152,12 @@ const TOOL_ERROR_KEYWORDS =
 const STRUCTURED_FAILURE = /"(?:success|ok)"\s*:\s*false/i;
 
 export function isToolFailure(content: string): boolean {
+  // 1. Structured failure envelope (rule #22/#24) — deterministic, 100% precise.
+  if (isStructuredToolFailure(content)) return true;
+  // 2. Legacy `{ success|ok: false }` JSON soft-fail flag.
   if (STRUCTURED_FAILURE.test(content)) return true;
+  // 3. Fallback keyword heuristic for un-migrated tools (errors lead their message;
+  //    content bodies do not — only the FIRST LINE is checked to avoid false positives).
   const firstLine = content.split("\n", 1)[0] ?? "";
   return TOOL_ERROR_KEYWORDS.test(firstLine);
 }
@@ -492,22 +499,35 @@ async function purgeStaleFabricatedKnowledgeFromCheckpoint(
 
 // ── Route an incoming message into the office ──────────────────────────────────
 
-function needsExecutionGuardRetry(
+export function needsExecutionGuardRetry(
   userText: string,
   messages: OfficeMessage[],
   reply: string,
-): "shell" | "linkedin" | "inbox" | "knowledge" | null {
+): "shell" | "linkedin" | "inbox" | "memory" | "knowledge" | null {
   if (detectUnbackedShellClaim(userText, messages, reply)) return "shell";
   if (detectLinkedInRefusalWithoutTool(userText, messages, reply)) return "linkedin";
   if (detectUnbackedInboxClaim(userText, messages, reply)) return "inbox";
+  if (detectUnbackedMemoryClaim(userText, messages, reply)) return "memory";
   if (detectUnbackedKnowledgeClaim(userText, messages, reply)) return "knowledge";
   return null;
 }
 
-function buildGuardRetryMessages(
-  kind: "shell" | "linkedin" | "inbox" | "knowledge",
+export function buildGuardRetryMessages(
+  kind: "shell" | "linkedin" | "inbox" | "memory" | "knowledge",
   userText: string,
 ): BaseMessage[] {
+  if (kind === "memory") {
+    return [
+      new SystemMessage(
+        "[RETRY DIRECTIVE: Your previous reply answered an internal-knowledge question " +
+          "from your own memory without checking FounderOS state. Call read_context AND " +
+          "search_knowledge (and search_memory if relevant) NOW before answering. Relay only " +
+          "what the tools return — if they return nothing, say the knowledge base has no entry. " +
+          "Never fabricate facts about Turicks, Naggar, or the founder.]",
+      ),
+      new HumanMessage(userText),
+    ];
+  }
   if (kind === "shell") {
     return [
       new SystemMessage(
@@ -702,9 +722,9 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
 
     let replyText = finalReply(freshRes);
     const stillUngrounded = needsExecutionGuardRetry(text, freshRes.messages ?? [], replyText);
-    if (stillUngrounded === "knowledge") {
-      trace.event("guard.blocked", { kind: "knowledge" });
-      log.warn({ chatId }, "Knowledge guard blocked ungrounded reply — sending safe refusal");
+    if (stillUngrounded === "knowledge" || stillUngrounded === "memory") {
+      trace.event("guard.blocked", { kind: stillUngrounded });
+      log.warn({ chatId, kind: stillUngrounded }, "Guard blocked ungrounded reply — sending safe refusal");
       const purged = await purgeFabricatedAiFromCheckpoint(office, config, freshMessages).catch((err) => {
         log.warn({ chatId, err: (err as Error).message }, "Failed to purge fabricated AI from checkpoint");
         return 0;

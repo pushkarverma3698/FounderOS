@@ -6,10 +6,12 @@ import { describe, it, expect } from "vitest";
 import {
   aiMessageLooksFabricatedKnowledge,
   detectUnbackedKnowledgeClaim,
+  detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
   detectLinkedInRefusalWithoutTool,
   hadEmptyKnowledgeToolResult,
   hadToolCall,
+  isInternalKnowledgeRequest,
   isShellRunRequest,
 } from "../../../src/gateway/execution-guard.js";
 
@@ -198,5 +200,63 @@ describe("detectLinkedInRefusalWithoutTool", () => {
     const input = "linkedin: game-changing synergy post";
     const msgs = [aiMsg("", [{ name: "linkedin_post" }])];
     expect(detectLinkedInRefusalWithoutTool(input, msgs, "draft")).toBe(false);
+  });
+});
+
+describe("isInternalKnowledgeRequest", () => {
+  it("detects questions about our companies", () => {
+    expect(isInternalKnowledgeRequest("What does Turicks do?")).toBe(true);
+    expect(isInternalKnowledgeRequest("tell me about Naggar Retreat")).toBe(true);
+  });
+
+  it("detects questions about our internal state / decisions", () => {
+    expect(isInternalKnowledgeRequest("what's our ICP?")).toBe(true);
+    expect(isInternalKnowledgeRequest("what did we decide about pricing?")).toBe(true);
+    expect(isInternalKnowledgeRequest("do you remember what we agreed on the roadmap?")).toBe(true);
+  });
+
+  it("ignores generic / arithmetic / greeting prompts", () => {
+    expect(isInternalKnowledgeRequest("what is 2+2?")).toBe(false);
+    expect(isInternalKnowledgeRequest("hi there")).toBe(false);
+    expect(isInternalKnowledgeRequest("write a poem about the sea")).toBe(false);
+  });
+
+  it("ignores explicit web/research prompts even if a company is named", () => {
+    expect(isInternalKnowledgeRequest("research Turicks competitors online")).toBe(false);
+    expect(isInternalKnowledgeRequest("find the latest news about Naggar")).toBe(false);
+  });
+});
+
+describe("detectUnbackedMemoryClaim", () => {
+  const MEMORY_TOOLS = ["read_context", "search_memory", "search_knowledge", "search_turicks_brain"];
+
+  it("flags an internal-knowledge answer produced without any memory tool", () => {
+    const input = "What does Turicks do?";
+    const reply =
+      "Turicks is an AI agency that builds custom automation and cinematic web experiences for startups.";
+    expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(true);
+  });
+
+  it("flags asking the founder back without first checking memory (SELF-QUERY rule)", () => {
+    const input = "what did we decide about pricing?";
+    const reply = "Could you remind me what your pricing model is?";
+    expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(true);
+  });
+
+  it.each(MEMORY_TOOLS)("passes when %s was called", (tool) => {
+    const input = "what's our ICP?";
+    const msgs = [aiMsg("", [{ name: tool }]), toolMsg(tool, "ICP: seed-stage founders")];
+    expect(detectUnbackedMemoryClaim(input, msgs, "Your ICP is seed-stage founders.")).toBe(false);
+  });
+
+  it("ignores non-internal questions entirely", () => {
+    const input = "what is 2+2?";
+    expect(detectUnbackedMemoryClaim(input, [aiMsg("4")], "4")).toBe(false);
+  });
+
+  it("ignores web/research prompts (those legitimately skip memory tools)", () => {
+    const input = "research Turicks competitors online";
+    const reply = "Top competitors include several boutique AI agencies.";
+    expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(false);
   });
 });

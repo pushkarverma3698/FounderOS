@@ -25,13 +25,15 @@ import { tool } from "@langchain/core/tools";
 import { TENANT } from "../core/config.js";
 import { z } from "zod";
 import { searchKnowledgeEntries, getKnowledgeByType } from "../db/queries.js";
+import { withToolErrorBoundary } from "../agents/tool-result.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:knowledge" });
 
 
 export const searchKnowledge = tool(
-  async ({ query, entry_type }) => {
+  async ({ query, entry_type }) =>
+    withToolErrorBoundary("db", "query turicks_brain (knowledge_entries) in Postgres", async () => {
     log.debug({ query, entry_type }, "Knowledge search");
 
     // Keyword-search-first. `entry_type` is a FORGIVING post-filter, never a
@@ -68,7 +70,7 @@ export const searchKnowledge = tool(
         return `${i + 1}. [${r.entry_type ?? entry_type ?? ""}] ${r.title}${tags ? `\n   Tags: ${tags}` : ""}\n   ${preview}${r.content.length > 400 ? "…" : ""}`;
       })
       .join("\n\n");
-  },
+    }),
   {
     name: "search_knowledge",
     description:

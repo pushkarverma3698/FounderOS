@@ -208,7 +208,7 @@ FounderOS has undergone significant changes since the v2 rebuild (2026-06-01):
    - Separation boundary: ADR-013, never cross-write
 2. Populating turicks-brain:
    - `pnpm brain:sync` after adding/editing docs in docs/
-   - Reads `docs/decisions/`, `docs/phases/`, `docs/superpowers/specs/`
+   - Reads `docs/decisions/`, `docs/phases/`, `docs/strategy/`
    - Upserts to knowledge_entries table
    - Indexed by pgvector embeddings (Ollama nomic-embed-text)
 3. Populating personal-rag:

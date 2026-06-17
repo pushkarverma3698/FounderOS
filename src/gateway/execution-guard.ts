@@ -123,6 +123,46 @@ export function detectUnbackedInboxClaim(
 export const INBOX_RETRY_HINT =
   "⚠️ That inbox summary was not from Gmail — retrying with read_emails…";
 
+// ── Unbacked memory / internal-knowledge claim (ADR-032) ─────────────────────
+// Forces memory-tool calls before answering internal-knowledge questions.
+
+/** The DB/memory-backed tools that must answer internal-knowledge questions. */
+export const MEMORY_TOOL_NAMES = [
+  "read_context",
+  "search_memory",
+  "search_knowledge",
+  "search_turicks_brain",
+] as const;
+
+/** Question is about OUR business / stored decisions / founder context. */
+export const INTERNAL_KNOWLEDGE_RE =
+  /\b(turicks|naggar)\b|\bour\b[^.?!]{0,40}\b(icp|strateg|pricing|price|roadmap|clients?|customers?|offer(?:ing)?s?|services?|positioning|brand|goals?|plans?|stack|vision|mission)\b|\bwhat did we (decide|agree|discuss|choose|pick)\b|\b(do you|what do you)\b[^.?!]{0,20}\b(remember|recall|know)\b[^.?!]{0,40}\b(we|our|i|my|decid|agree)\b|\bfounder(?:'s)? (context|notes?|preferences?)\b|\bmy (notes?|context|preferences?)\b/i;
+
+/** Explicit external/web research — legitimately skips memory tools. */
+export const EXTERNAL_RESEARCH_RE =
+  /\b(search (the )?web|google (it|for)|look (it )?up online|latest news|news about|competitors?|market research|on the (web|internet))\b/i;
+
+export function hadAnyMemoryToolCall(messages: OfficeMessageLike[]): boolean {
+  return MEMORY_TOOL_NAMES.some((name) => hadToolCall(messages, name));
+}
+
+/**
+ * True when the founder asked an internal-knowledge question but the office
+ * answered without calling any memory/DB tool — parametric chat, not FounderOS state.
+ */
+export function detectUnbackedMemoryClaim(
+  userInput: string,
+  messages: OfficeMessageLike[],
+  reply: string,
+): boolean {
+  if (!isInternalKnowledgeRequest(userInput)) return false;
+  if (hadAnyMemoryToolCall(messages)) return false;
+  return reply.trim().length > 0;
+}
+
+export const MEMORY_RETRY_HINT =
+  "⚠️ I answered without checking FounderOS memory — retrying with the database…";
+
 // ── Knowledge / RAG grounding guard (prod ICP fabrication class) ─────────────
 
 /** Tool returned empty store — model must refuse, not invent. */
@@ -246,7 +286,10 @@ export const INTERNAL_KNOWLEDGE_DIRECTIVE =
   "messages in this thread (they may be stale/wrong). Do NOT use search_web for internal Turicks facts.]";
 
 export function isInternalKnowledgeRequest(input: string): boolean {
-  return INTERNAL_KNOWLEDGE_REQUEST_RE.test(input.trim());
+  const text = input.trim();
+  if (!text) return false;
+  if (EXTERNAL_RESEARCH_RE.test(text)) return false;
+  return INTERNAL_KNOWLEDGE_RE.test(text) || INTERNAL_KNOWLEDGE_REQUEST_RE.test(text);
 }
 
 /**

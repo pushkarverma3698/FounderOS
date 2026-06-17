@@ -2,7 +2,7 @@
 
 > **Status:** 🔄 Active (started 2026-06-17)  
 > **Supersedes:** [PHASE-D-REVENUE-FLYWHEEL.md](PHASE-D-REVENUE-FLYWHEEL.md) (Gumroad-first motion — archived)  
-> **Strategy:** [docs/strategy/](../strategy/) · **ADR:** [032-ai-native-studio-repositioning.md](../decisions/032-ai-native-studio-repositioning.md)
+> **Strategy:** [docs/strategy/](../strategy/) · **ADR:** [033-ai-native-studio-repositioning.md](../decisions/033-ai-native-studio-repositioning.md)
 
 ---
 
