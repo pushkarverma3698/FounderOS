@@ -60,15 +60,16 @@ FounderOS is both:
 1. The tool Pushkar uses daily to run Turicks + Naggar Retreat
 2. The product/portfolio piece he is building and intends to open-source / monetize
 
-**8 active departments:**
-- **research** — web search, competitive intel, market research
-- **comms** — email send, LinkedIn post, Google Calendar events
-- **engineering** — GitHub read/write, project workflow (HITL-gated)
-- **marketing** — content strategy, LinkedIn posts, Gumroad listings
-- **sales** — ICP scoring, lead qualification, outreach sequences
-- **personal** — laptop file operations, shell commands (HITL-gated, path-guarded)
-- **jobhunt** — CV read, job search, application drafts
-- **memory** — episodic recall, knowledge search, context reading
+**7 active ReAct departments:**
+- **research** — web search, knowledge base search, competitive intel
+- **comms** — email send, read emails, Google Calendar
+- **engineering** — GitHub read/write, Claude Code execution
+- **marketing** — LinkedIn posts, content strategy
+- **sales** — prospect research, outreach email drafting
+- **personal** — file operations, shell commands, browser (all HITL-gated, path-guarded)
+- **jobhunt** — CV management, job search, application drafting
+
+Plus shared tools: context read/write, knowledge search (available to all departments)
 
 **Where it runs:** Telegram bot, single-tenant (Pushkar only, as of 2026).
 
