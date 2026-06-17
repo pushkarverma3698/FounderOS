@@ -1,5 +1,6 @@
 packages:
   - "."
+  - "apps/jarvis"
 
 # pnpm build-script policy (pnpm 10+/11).
 # The three `ws` native accelerators are optional — the JS fallback is used when
