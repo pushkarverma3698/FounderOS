@@ -278,7 +278,7 @@ export const readEmails = tool(
   async ({ query, limit }) => {
     const res = await readEmailsTool.execute({ query, max_results: limit ?? 10 });
     if (!res.success) {
-      return `Email read failed: ${res.error ?? "unknown error"}. (Check that COMPOSIO_API_KEY is set.)`;
+      return `Email read failed: ${res.error ?? "unknown error"}. (Check gws auth or GMAIL_BACKEND=composio rollback.)`;
     }
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
   },

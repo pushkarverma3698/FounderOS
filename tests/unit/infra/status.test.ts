@@ -212,7 +212,7 @@ describe("formatStatusMessage rich format", () => {
       lastEventRelativeTime: "2h ago",
       outboundTargetCount: 4,
       pendingSignals: 2,
-      providerStatusLine: "🟢 Gmail: composio",
+      providerStatusLine: "🟢 Gmail gws · 🟢 LinkedIn direct",
     });
     expect(result).toContain("📋");
     expect(result).toContain("Acme Corp");

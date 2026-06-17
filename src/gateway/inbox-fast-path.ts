@@ -23,7 +23,7 @@ export async function tryInboxReadFastPath(input: string): Promise<string | null
   const query = inboxQueryForRequest(input);
   const res = await readEmailsTool.execute({ query, max_results: 10 });
   if (!res.success) {
-    return `❌ Inbox read failed: ${res.error ?? "unknown error"}. Check COMPOSIO_API_KEY and Gmail connection.`;
+    return `❌ Inbox read failed: ${res.error ?? "unknown error"}. Check gws auth (\`gws auth status\`) or set GMAIL_BACKEND=composio.`;
   }
   const body = typeof res.data === "string" ? res.data : JSON.stringify(res.data);
   if (body.includes("No emails found")) {
