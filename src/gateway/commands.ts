@@ -28,6 +28,7 @@ import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.
 import { runWorkflow, validateParams } from "../workflows/runner.js";
 import { formatSignalsMessage, formatRunsMessage, parseRunsLimit } from "./pipeline-format.js";
 import { formatProviderStatusLine, getLastProviderProbe } from "../infra/provider-probes.js";
+import { buildWelcomeMessage } from "./capability-message.js";
 
 /** Escape special HTML characters for Telegram HTML parse mode. */
 function safeHtml(text: string): string {
@@ -46,37 +47,8 @@ function threadIdFor(chatId: number | string): string {
 // ── /start ─────────────────────────────────────────────────────────────────────
 
 export async function handleStart(ctx: Context): Promise<void> {
-  const name = ctx.from?.first_name ? ` ${ctx.from.first_name}` : "";
-  await ctx.reply(
-    `👋 <b>FounderOS${name}</b> — your AI chief of staff is live.\n\n` +
-      `Just tell me what you need. I route it to the right department:\n` +
-      `• <b>Research</b> — <i>"Research Stripe and summarise what they do"</i>\n` +
-      `• <b>Comms</b> — <i>"Email alex@acme.com a short intro"</i> (you approve before it sends)\n` +
-      `• <b>Engineering</b> — <i>"Write a TS function to validate emails"</i> / <i>"Open a GitHub issue on …"</i>\n\n` +
-      `🎯 <b>Weekly outbound</b>\n` +
-      `• <code>/target Acme Corp, Beta Ltd</code> — add prospects to this week's list\n` +
-      `• <code>/targets</code> — show the list (<code>/targets clear</code> to empty it)\n` +
-      `• <code>/outbound</code> — ICP-score the list (or <code>/outbound stripe.com</code> ad-hoc)\n` +
-      `  then <i>"draft outreach to &lt;winner&gt;"</i> to send (you approve first)\n\n` +
-      `🏭 <b>Workflows (multi-step SOPs)</b>\n` +
-      `• <code>/workflows</code> — list all available procedures\n` +
-      `• <code>/run onboarding company=Acme</code> — score → research → email → repo\n` +
-      `• <code>/run outbound company=Stripe</code> — score → hook → cold email\n\n` +
-      `⚡ <b>Power-user</b>\n` +
-      `• <code>/q research what does Anthropic do?</code> — direct to department\n` +
-      `• <code>/signals</code> — pending pipeline signals (leads, handoffs)\n` +
-      `• <code>/runs</code> — recent LLM calls + today's spend\n\n` +
-      `⚙️ <b>System</b>\n` +
-      `• <code>/help</code> — full command list (same as /commands)\n` +
-      `• <code>/ping</code> — check if the bot is alive + latency\n` +
-      `• <code>/commands</code> — full command list\n` +
-      `• <code>/departments</code> — what each department does\n` +
-      `• <code>/status</code> — uptime, pending approvals, emails sent today\n` +
-      `• <code>/context</code> — view/update your business context\n` +
-      `• <code>/halt</code> — 🛑 emergency stop (refuse all tasks) · <code>/resume</code> to lift\n\n` +
-      `🔒 Anything that leaves the building (email, LinkedIn, GitHub writes) asks for your approval first.`,
-    { parse_mode: "HTML" },
-  );
+  const name = ctx.from?.first_name;
+  await ctx.reply(buildWelcomeMessage(name), { parse_mode: "HTML" });
 }
 
 // ── /help — alias for /commands ───────────────────────────────────────────────
