@@ -312,8 +312,7 @@ have to rediscover it, it belongs in the DB.
 4. **`MEMORY.md`** — the fast scannable index for the next session (status, gotchas, file locations).
 
 This rule operationalizes the founder's directive: "everything I do with the assistant must be
-done with FounderOS, so it becomes the single source of truth." See ADR-016 and
-`docs/superpowers/specs/2026-06-04-memory-system-design.md`.
+done with FounderOS, so it becomes the single source of truth." See ADR-016.
 
 ### 19. Test the REAL path, reproduce before fixing, verify live (non-negotiable)
 The most damaging bugs this project hit (wedged-interrupt loop, duplicate bot instances, stale-reply
