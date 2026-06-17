@@ -37,9 +37,9 @@ describe("web gateway", () => {
   it("requires bearer token when WEB_GATEWAY_TOKEN is set", async () => {
     process.env["WEB_GATEWAY_TOKEN"] = "secret-token";
     const app = createWebApp();
-    const res = await app.request("http://localhost/api/v1/missions");
+    const res = await app.request("http://localhost/api/v1/health");
     expect(res.status).toBe(401);
-    const ok = await app.request("http://localhost/api/v1/missions", {
+    const ok = await app.request("http://localhost/api/v1/health", {
       headers: { authorization: "Bearer secret-token" },
     });
     expect(ok.status).toBe(200);
