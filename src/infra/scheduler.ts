@@ -231,6 +231,41 @@ export function formatDemoNudge(signals: DeptSignal[]): string {
   );
 }
 
+/** Format consumed design_brief_ready signals for engineering build. */
+export function formatDesignBriefNudge(signals: DeptSignal[]): string {
+  const items = signals.filter((s) => s.event_type === "design_brief_ready");
+  if (items.length === 0) return "";
+
+  const lines = items.map((s) => {
+    const p = (s.payload ?? {}) as { client?: string; preset?: string };
+    return `• <b>${p.client ?? "Unknown"}</b> — preset ${p.preset ?? "?"}`;
+  });
+
+  return (
+    `🎨 <b>Design brief${items.length > 1 ? "s" : ""} ready</b> (${items.length})\n\n` +
+    `${lines.join("\n")}\n\n` +
+    `Build when ready: <code>/q engineering build cinematic landing for {client} using {preset} preset</code>`
+  );
+}
+
+/** Format consumed site_deployed signals for sales follow-up. */
+export function formatSiteDeployedNudge(signals: DeptSignal[]): string {
+  const items = signals.filter((s) => s.event_type === "site_deployed");
+  if (items.length === 0) return "";
+
+  const lines = items.map((s) => {
+    const p = (s.payload ?? {}) as { client?: string; siteUrl?: string; presetUsed?: string };
+    const preset = p.presetUsed ? ` · ${p.presetUsed}` : "";
+    return `• <b>${p.client ?? "Unknown"}</b> — ${p.siteUrl ?? "?"}${preset}`;
+  });
+
+  return (
+    `🌐 <b>Site${items.length > 1 ? "s" : ""} deployed</b> (${items.length})\n\n` +
+    `${lines.join("\n")}\n\n` +
+    `Follow up when ready: <code>/q sales Proof Drop email to {client} with site link</code> — you approve before anything sends.`
+  );
+}
+
 /**
  * Consume pending lead_discovered signals for the revenue dept and push a nudge.
  * consumePendingEvents claims rows with FOR UPDATE SKIP LOCKED, so each lead
@@ -245,6 +280,16 @@ export async function sweepDeptSignals(): Promise<void> {
       format: formatProposalNudge,
     },
     { event: "demo_ready", toDept: DEFAULT_TARGET_DEPT["demo_ready"] ?? "sales", format: formatDemoNudge },
+    {
+      event: "design_brief_ready",
+      toDept: DEFAULT_TARGET_DEPT["design_brief_ready"] ?? "engineering",
+      format: formatDesignBriefNudge,
+    },
+    {
+      event: "site_deployed",
+      toDept: DEFAULT_TARGET_DEPT["site_deployed"] ?? "sales",
+      format: formatSiteDeployedNudge,
+    },
   ];
 
   for (const { event, toDept, format } of sweeps) {

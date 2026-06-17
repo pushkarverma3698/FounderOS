@@ -57,4 +57,27 @@ describe("prepareSignal", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/unknown event type/i);
   });
+
+  it("defaults design_brief_ready → engineering and site_deployed → sales", () => {
+    const brief = prepareSignal("design_brief_ready", {
+      client: "AgentOps",
+      preset: "neon",
+      copyBlocks: { hero: "Trust your agents" },
+    }, { fromDept: "marketing" });
+    expect(brief.ok).toBe(true);
+    if (brief.ok) {
+      expect(brief.signal.to_dept).toBe("engineering");
+      expect(brief.signal.from_dept).toBe("marketing");
+    }
+
+    const deployed = prepareSignal("site_deployed", {
+      client: "AgentOps",
+      siteUrl: "https://agentops.example.com",
+    }, { fromDept: "engineering" });
+    expect(deployed.ok).toBe(true);
+    if (deployed.ok) {
+      expect(deployed.signal.to_dept).toBe("sales");
+      expect(deployed.signal.from_dept).toBe("engineering");
+    }
+  });
 });

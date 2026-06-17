@@ -14,7 +14,8 @@ const VALID = {
   AGENT_MODEL: "google-genai:gemini-2.5-flash",
   GOOGLE_GENERATIVE_AI_API_KEY: "test-key",
   AGENT_FALLBACK_MODELS: "openrouter:openai/gpt-4o-mini",
-  COMPOSIO_API_KEY: "ck_test",
+  LINKEDIN_ACCESS_TOKEN: "li_token",
+  LINKEDIN_AUTHOR_URN: "urn:li:person:test",
   GITHUB_TOKEN: "ghp_test",
   DATABASE_URL: "postgresql://founderos:founderos@localhost:5432/founderos",
   TELEGRAM_BOT_TOKEN: "1234567890:AAExampleBotFatherToken_abc",
@@ -82,14 +83,15 @@ describe("validateBootConfig — non-fatal warnings", () => {
     expect(warnings.some((w) => w.includes("not in '<digits>:<token>' shape"))).toBe(true);
   });
 
-  it("warns when optional integrations (Composio/GitHub) are missing", () => {
+  it("warns when optional integrations are missing", () => {
     const { errors, warnings } = validateBootConfig({
       ...VALID,
-      COMPOSIO_API_KEY: undefined,
+      LINKEDIN_ACCESS_TOKEN: undefined,
+      LINKEDIN_AUTHOR_URN: undefined,
       GITHUB_TOKEN: undefined,
     });
     expect(errors).toEqual([]);
-    expect(warnings.some((w) => w.includes("Composio"))).toBe(true);
+    expect(warnings.some((w) => w.includes("LinkedIn"))).toBe(true);
     expect(warnings.some((w) => w.includes("GitHub"))).toBe(true);
   });
 });

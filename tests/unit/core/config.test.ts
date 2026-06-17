@@ -13,4 +13,14 @@ describe("env config — embedding + executor vars", () => {
     expect(parsed.EMBED_DIM).toBe(768);
     expect(parsed.CLAUDE_EXECUTOR_API_KEY).toBeUndefined();
   });
+
+  it("defaults integration backends to direct APIs (ADR-029)", () => {
+    const parsed = envSchema.parse({
+      DATABASE_URL: "postgresql://u:p@localhost:5432/db",
+      TELEGRAM_BOT_TOKEN: "x",
+      TELEGRAM_CHAT_ID: "1",
+    });
+    expect(parsed.GMAIL_BACKEND).toBe("gws");
+    expect(parsed.LINKEDIN_BACKEND).toBe("direct");
+  });
 });

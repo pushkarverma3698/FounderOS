@@ -25,6 +25,7 @@ import { trimMessages, SystemMessage, ToolMessage, isAIMessage, isToolMessage } 
 import type { BaseMessage } from "@langchain/core/messages";
 import { createMiddleware, dynamicSystemPromptMiddleware } from "langchain";
 import type { AnyAgentMiddleware } from "langchain";
+import { isStructuredToolFailure } from "../agents/tool-result.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,8 @@ export interface TrimOptions {
   maxMessageChars?: number;
   /** Per-tool completed-call caps enforced deterministically in middleware. */
   toolCallLimits?: Record<string, number>;
+  /** When true, strip all tools after any [[TOOL_FAILURE]] tool result (engineering). */
+  stopToolsAfterFailure?: boolean;
 }
 
 /**
@@ -152,6 +155,12 @@ function clampOversizedMessages(messages: BaseMessage[], maxChars: number): Base
   });
 }
 
+function hasTerminalToolFailure(messages: BaseMessage[]): boolean {
+  return messages.some(
+    (m) => isToolMessage(m) && typeof m.content === "string" && isStructuredToolFailure(m.content),
+  );
+}
+
 function filterToolsByLimits<T extends { name?: string }>(
   messages: BaseMessage[],
   tools: T[] | undefined,
@@ -254,6 +263,7 @@ export function createAgentMiddleware(
   const maxTokens = opts.maxTokens ?? 4000;
   const maxMessageChars = opts.maxMessageChars ?? DEFAULT_MAX_MESSAGE_CHARS;
   const toolCallLimits = opts.toolCallLimits;
+  const stopToolsAfterFailure = opts.stopToolsAfterFailure ?? false;
 
   return [
     dynamicSystemPromptMiddleware(() =>
@@ -263,7 +273,10 @@ export function createAgentMiddleware(
       name: "founderos_trim_messages",
       wrapModelCall: async (request, handler) => {
         const messages = await prepareMessages(request.messages, { maxTokens, maxMessageChars });
-        const tools = filterToolsByLimits(messages, request.tools, toolCallLimits) ?? request.tools;
+        let tools = filterToolsByLimits(messages, request.tools, toolCallLimits) ?? request.tools;
+        if (stopToolsAfterFailure && hasTerminalToolFailure(messages)) {
+          tools = [];
+        }
         return handler({ ...request, messages, tools });
       },
       wrapToolCall: async (request, handler) => {

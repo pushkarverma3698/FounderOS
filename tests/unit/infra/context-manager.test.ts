@@ -150,4 +150,24 @@ describe("createAgentMiddleware", () => {
     expect(result?.name).toBeUndefined();
     expect(msg.name).toBe("supervisor");
   });
+
+  it("enforces per-tool call limits via scheduled count", () => {
+    const messages = [
+      new AIMessage({
+        content: "",
+        tool_calls: [{ id: "call_1", name: "claude_code", args: { task: "build" } }],
+      }),
+      new ToolMessage({
+        content: "❌ CLI missing [[TOOL_FAILURE stage=auth]]",
+        tool_call_id: "call_1",
+        name: "claude_code",
+      }),
+      new AIMessage({
+        content: "",
+        tool_calls: [{ id: "call_2", name: "claude_code", args: { task: "build again" } }],
+      }),
+    ];
+    expect(countScheduledToolCalls(messages, "claude_code")).toBe(2);
+    expect(countScheduledToolCalls(messages, "claude_code") < 1).toBe(false);
+  });
 });

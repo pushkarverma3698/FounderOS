@@ -1,16 +1,14 @@
 /**
- * FounderOS — Email Reader Tool (dual backend)
- * =============================================
- * Reads Gmail via Composio (default) or gws CLI (GMAIL_BACKEND=gws).
- * Read-only — no HITL approval needed.
+ * FounderOS — Email Reader Tool
+ * ==============================
+ * Reads Gmail. Provider backend is env-selectable (gws default). Read-only — no HITL.
  *
- * See ADR-028 for migration plan.
+ * See ADR-029.
  */
 
 import { childLogger } from "../infra/logger.js";
 import { getGmailBackend } from "../infra/provider-config.js";
-import { readEmailsViaComposio } from "./gmail-composio-read.js";
-import { readEmailsViaGws } from "./gmail-gws-read.js";
+import { providerReadEmails } from "../infra/providers/index.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:email-reader" });
@@ -45,11 +43,6 @@ export const readEmailsTool: UnifiedTool = {
     const { query = "in:inbox", max_results = 10 } = input as ReadEmailsArgs;
     const backend = getGmailBackend();
     log.debug({ backend, query }, "read_emails dispatch");
-
-    const args = { query, max_results };
-    if (backend === "gws") {
-      return readEmailsViaGws(args);
-    }
-    return readEmailsViaComposio(args);
+    return providerReadEmails({ query, max_results });
   },
 };

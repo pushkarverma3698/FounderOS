@@ -70,7 +70,7 @@ describe("validateSignalPayload — deterministic boundary gate", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("validates proposal_approved and demo_ready contracts", () => {
+  it("validates proposal_approved, demo_ready, design_brief_ready, and site_deployed contracts", () => {
     expect(
       validateSignalPayload("proposal_approved", {
         company: "Acme",
@@ -82,6 +82,20 @@ describe("validateSignalPayload — deterministic boundary gate", () => {
       validateSignalPayload("demo_ready", {
         company: "Acme",
         repoUrl: "https://github.com/turicks/acme-demo",
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateSignalPayload("design_brief_ready", {
+        client: "AgentOps",
+        preset: "neon",
+        copyBlocks: { hero: "Ship agents you can trust" },
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateSignalPayload("site_deployed", {
+        client: "AgentOps",
+        siteUrl: "https://agentops.example.com",
+        presetUsed: "neon",
       }).ok,
     ).toBe(true);
   });

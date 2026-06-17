@@ -13,6 +13,7 @@ import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../../tools/p
 import { claudeCodeTool, findClaudeBinary } from "../../tools/claude-code.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
+import { toolFailure } from "../tool-result.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
 import { sendStatusText } from "../../infra/telegram-send.js";
@@ -179,12 +180,6 @@ export const projectWorkflow = tool(
 
 export const claudeCode = tool(
   async ({ task, cwd }, config) => {
-    // Detect binary before showing the approval card so we fail fast
-    const binary = findClaudeBinary();
-    if (!binary) {
-      return `Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code`;
-    }
-
     // Idempotency: a HITL resume replay must not launch a second 15-minute run
     const key = idemKey("claude_code", cwd ?? "", task);
     if (await hasBeenAudited(key)) {
@@ -199,6 +194,22 @@ export const claudeCode = tool(
       args: { task, cwd },
     }, config);
     if (rejected) return rejected;
+
+    const binary = findClaudeBinary();
+    if (!binary) {
+      const fail = toolFailure(
+        "auth",
+        "Claude Code CLI not installed on this host. Install with: npm install -g @anthropic-ai/claude-code — then retry.",
+      );
+      // Audit so HITL resume + model retries cannot re-enter the same brief.
+      await writeAuditEntry({
+        action: "claude_code",
+        idempotency_key: key,
+        payload: { task: task.slice(0, 400), cwd, failed: "no_binary" },
+        tenant_id: TENANT,
+      });
+      return fail;
+    }
 
     const res = await claudeCodeTool.execute({
       task,
