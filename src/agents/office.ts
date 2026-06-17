@@ -21,7 +21,7 @@ import { createAgent } from "langchain";
 import type { CompiledStateGraph, BaseCheckpointSaver } from "@langchain/langgraph";
 import { getModel, getModelFallbackMiddleware } from "./model.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
-import { createAgentMiddleware, createTrimmedPrompt } from "../infra/context-manager.js";
+import { createAgentMiddleware, createTrimmedPrompt, type TrimOptions } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS } from "./capabilities.js";
 import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED } from "../core/config.js";
 import { buildEngineeringDomain } from "./engineering-domain.js";
@@ -87,14 +87,23 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
   const supervisorBudget = { maxTokens: 6000 };
   const agentMiddleware = (
     prompt: string | (() => string),
-    toolCallLimits?: Record<string, number>,
-  ) => [
-    ...getModelFallbackMiddleware(),
-    ...createAgentMiddleware(prompt, {
-      ...subAgentBudget,
-      ...(toolCallLimits ? { toolCallLimits } : {}),
-    }),
-  ];
+    toolCallLimitsOrOpts?: Record<string, number> | TrimOptions,
+  ) => {
+    const extra: TrimOptions =
+      toolCallLimitsOrOpts !== undefined &&
+      ("stopToolsAfterFailure" in toolCallLimitsOrOpts ||
+        "maxTokens" in toolCallLimitsOrOpts ||
+        "toolCallLimits" in toolCallLimitsOrOpts)
+        ? (toolCallLimitsOrOpts as TrimOptions)
+        : { toolCallLimits: toolCallLimitsOrOpts as Record<string, number> | undefined };
+    return [
+      ...getModelFallbackMiddleware(),
+      ...createAgentMiddleware(prompt, {
+        ...subAgentBudget,
+        ...extra,
+      }),
+    ];
+  };
   // ── Admin worker (ADR-028): context + memory + signal visibility ─────────
   const admin = createAgent({
     model: deptModel,
@@ -140,7 +149,10 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
         name: "engineering",
         description: DEPARTMENT_DESCRIPTIONS.engineering,
         includeAgentName: "inline",
-        middleware: agentMiddleware(ENGINEERING_PROMPT),
+        middleware: agentMiddleware(ENGINEERING_PROMPT, {
+          stopToolsAfterFailure: true,
+          toolCallLimits: { claude_code: 1, github_write: 1 },
+        }),
       }).graph;
 
   // ── Phase B departments ───────────────────────────────────────────────────

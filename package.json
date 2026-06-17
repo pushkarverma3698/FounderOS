@@ -15,6 +15,8 @@
     "build:all": "pnpm build && pnpm build:jarvis",
     "test": "vitest run",
     "eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
+    "eval:webdesign": "node --env-file=.env --import tsx/esm scripts/e2e-web-design-manual.ts",
+    "eval:webdesign:hitl": "node --env-file=.env --import tsx/esm scripts/e2e-web-design-hitl-resume.ts",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "db:generate": "drizzle-kit generate",

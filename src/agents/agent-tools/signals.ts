@@ -30,10 +30,12 @@ export const DEFAULT_TARGET_DEPT: Record<string, string> = {
   lead_discovered: "sales",
   proposal_approved: "engineering",
   demo_ready: "sales",
+  design_brief_ready: "engineering",
+  site_deployed: "sales",
 };
 
-/** The department that owns the publish_signal tool today (the discoverer). */
-const PUBLISHER_DEPT = "research";
+/** Default publisher when from_dept is not specified. */
+const DEFAULT_PUBLISHER_DEPT = "research";
 
 export type PreparedSignal =
   | {
@@ -64,7 +66,7 @@ export function prepareSignal(
   return {
     ok: true,
     signal: {
-      from_dept: opts.fromDept ?? PUBLISHER_DEPT,
+      from_dept: opts.fromDept ?? DEFAULT_PUBLISHER_DEPT,
       to_dept: toDept,
       event_type: validation.eventType,
       payload: validation.payload,
@@ -76,10 +78,11 @@ export function prepareSignal(
 // ── Tool ─────────────────────────────────────────────────────────────────────
 
 export const publishSignal = tool(
-  async ({ event_type, payload, to_dept }, config: RunnableConfig | undefined) => {
+  async ({ event_type, payload, to_dept, from_dept }, config: RunnableConfig | undefined) => {
     const threadId = config?.configurable?.["thread_id"] as string | undefined;
     const prepared = prepareSignal(event_type, payload, {
       ...(to_dept ? { toDept: to_dept } : {}),
+      ...(from_dept ? { fromDept: from_dept } : {}),
       ...(threadId ? { threadId } : {}),
     });
     if (!prepared.ok) return `Signal rejected (typed contract): ${prepared.error}`;
@@ -117,13 +120,20 @@ export const publishSignal = tool(
       payload: z
         .record(z.unknown())
         .describe(
-          "Structured details for the event. lead_discovered requires {company, icpScore (0-100), source}; optional contactName, contactEmail, notes.",
+          "Structured details for the event. lead_discovered: {company, icpScore, source}; design_brief_ready: {client, preset, copyBlocks}; site_deployed: {client, siteUrl}.",
         ),
       to_dept: z
         .string()
         .optional()
         .nullable()
         .describe("Target department (optional — sensible default per event type)."),
+      from_dept: z
+        .string()
+        .optional()
+        .nullable()
+        .describe(
+          "Publishing department (optional — defaults to research). Marketing should pass marketing; engineering should pass engineering.",
+        ),
     }),
   },
 );

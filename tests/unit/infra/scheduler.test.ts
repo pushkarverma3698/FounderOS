@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildContextText, formatLeadNudge, formatProposalNudge, formatDemoNudge } from "../../../src/infra/scheduler.js";
+import { buildContextText, formatLeadNudge, formatProposalNudge, formatDemoNudge, formatDesignBriefNudge, formatSiteDeployedNudge } from "../../../src/infra/scheduler.js";
 
 describe("buildContextText", () => {
   it("formats a flat string value", () => {
@@ -128,6 +128,47 @@ describe("formatDemoNudge", () => {
     ]);
     expect(out).toContain("Demo ready");
     expect(out).toContain("Acme");
+    expect(out).toMatch(/you approve before anything sends/i);
+  });
+});
+
+describe("formatDesignBriefNudge (web design pipeline)", () => {
+  const sig = (payload: unknown) =>
+    ({
+      event_type: "design_brief_ready",
+      payload,
+    }) as unknown as import("../../../src/db/schema.js").DeptSignal;
+
+  it("renders design brief signals for engineering build", () => {
+    const out = formatDesignBriefNudge([
+      sig({ client: "AgentOps", preset: "neon" }),
+    ]);
+    expect(out).toContain("Design brief ready");
+    expect(out).toContain("AgentOps");
+    expect(out).toContain("neon");
+    expect(out).toMatch(/engineering build cinematic landing/i);
+  });
+});
+
+describe("formatSiteDeployedNudge (web design pipeline)", () => {
+  const sig = (payload: unknown) =>
+    ({
+      event_type: "site_deployed",
+      payload,
+    }) as unknown as import("../../../src/db/schema.js").DeptSignal;
+
+  it("renders deployed site signals for sales Proof Drop follow-up", () => {
+    const out = formatSiteDeployedNudge([
+      sig({
+        client: "AgentOps",
+        siteUrl: "https://agentops.example.com",
+        presetUsed: "neon",
+      }),
+    ]);
+    expect(out).toContain("Site deployed");
+    expect(out).toContain("AgentOps");
+    expect(out).toContain("https://agentops.example.com");
+    expect(out).toContain("neon");
     expect(out).toMatch(/you approve before anything sends/i);
   });
 });
