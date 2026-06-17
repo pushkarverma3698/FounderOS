@@ -52,8 +52,19 @@ This applies to: Gumroad listings, LinkedIn posts, email templates, brand guidel
 
 ---
 
-## Current Phase Status
-- 🟢 **DEPLOYED — LIVE in production since 2026-06-14**: Hetzner VPS, native systemd + Docker(Postgres+Ollama), `main` auto-deploys via GitHub Actions (CI → CD → `/health`). Full pipeline + Day-1 gotchas: `docs/guides/DEPLOYMENT.md`. Remaining wrap-up checklist: `docs/PRODUCTION-WRAP-UP.md`. Live-verified on the real Telegram path incl. recursion-abort recovery (PR #60).
+## ⚠️ Architecture is LOCKED
+
+The 7-department supervisor + ReAct structure is production-stable (live since 2026-06-14, Phases 1-6 hardening complete). **Next phase: add tools and hierarchy only. Do not rearchitect.**
+
+- If adding a tool: follow [docs/rules/PROGRAMMING-RULES.md](docs/rules/PROGRAMMING-RULES.md#add-a-tool) wiring map
+- If adding hierarchy: reference [docs/decisions/025-hierarchy-proof-on-prebuilts.md](docs/decisions/025-hierarchy-proof-on-prebuilts.md)
+- If in doubt: consult PROGRAMMING-RULES before touching code
+
+---
+
+## Current Phase Status (2026-06-17)
+
+🟢 **PRODUCTION LIVE** — Hetzner VPS, 1,098 green tests, 90% routing eval, 0 data loss.
 - ✅ Phases 1–3 (v1): Foundation, pods, gateway, tests, observability (SUPERSEDED by v2)
 - ✅ **v2 Rebuild (2026-06-01)**: Prebuilt supervisor + 7 ReAct departments — LIVE ON MAIN
   - research [search_web] · comms [email*, calendar*] · engineering [github_r, github_w*, claude_code*] · marketing [linkedin_post*] · sales [search_web, send_email*] · personal [file, shell*, write*, browser*] · jobhunt [search_jobs, read_cv, send_email*]
