@@ -1,5 +1,16 @@
 # Phase D — Revenue Flywheel
 
+> ⚠️ **SUPERSEDED (2026-06-17)** — This doc is archived. Current strategy:
+> - [PHASE-D-BIS-PROOF-AND-DISTRIBUTION.md](PHASE-D-BIS-PROOF-AND-DISTRIBUTION.md)
+> - [docs/strategy/README.md](../strategy/README.md)
+> - [ADR-032](../decisions/032-ai-native-studio-repositioning.md)
+>
+> Kept for historical reference only. Do not use for planning.
+
+---
+
+# Phase D — Revenue Flywheel (ARCHIVED)
+
 **Status:** 🔄 Active (started 2026-06-14)  
 **Timeline:** 8-12 weeks  
 **Success Criteria:** $5K MRR + 3+ credible portfolio signals + 20+ qualified meetings

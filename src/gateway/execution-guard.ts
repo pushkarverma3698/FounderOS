@@ -123,14 +123,8 @@ export function detectUnbackedInboxClaim(
 export const INBOX_RETRY_HINT =
   "⚠️ That inbox summary was not from Gmail — retrying with read_emails…";
 
-// ── Unbacked memory / internal-knowledge claim ──────────────────────────────────
-// The single most damaging prod failure mode (2026-06-17): a weak or swapped model
-// answers business/memory questions from its own parametric weights — which know
-// nothing about Turicks/Naggar — instead of calling a DB/memory tool, so it
-// hallucinates. The tool-layer anti-fabricate sentinels (context.ts, knowledge.ts)
-// only fire if the tool is actually CALLED. This guard makes the discipline
-// deterministic and model-agnostic: if the founder asks an internal-knowledge
-// question and zero memory tools fired this turn, force a retry that calls one.
+// ── Unbacked memory / internal-knowledge claim (ADR-032) ─────────────────────
+// Forces memory-tool calls before answering internal-knowledge questions.
 
 /** The DB/memory-backed tools that must answer internal-knowledge questions. */
 export const MEMORY_TOOL_NAMES = [
@@ -148,22 +142,13 @@ export const INTERNAL_KNOWLEDGE_RE =
 export const EXTERNAL_RESEARCH_RE =
   /\b(search (the )?web|google (it|for)|look (it )?up online|latest news|news about|competitors?|market research|on the (web|internet))\b/i;
 
-export function isInternalKnowledgeRequest(input: string): boolean {
-  const text = input.trim();
-  if (!text || !INTERNAL_KNOWLEDGE_RE.test(text)) return false;
-  if (EXTERNAL_RESEARCH_RE.test(text)) return false;
-  return true;
-}
-
 export function hadAnyMemoryToolCall(messages: OfficeMessageLike[]): boolean {
   return MEMORY_TOOL_NAMES.some((name) => hadToolCall(messages, name));
 }
 
 /**
  * True when the founder asked an internal-knowledge question but the office
- * answered (or asked back) without calling any memory/DB tool — i.e. the reply
- * is sourced from the model's parametric memory, not FounderOS state. Fail-safe:
- * if a memory tool fired, we never flag (the tool's own sentinel governs empties).
+ * answered without calling any memory/DB tool — parametric chat, not FounderOS state.
  */
 export function detectUnbackedMemoryClaim(
   userInput: string,
@@ -172,11 +157,187 @@ export function detectUnbackedMemoryClaim(
 ): boolean {
   if (!isInternalKnowledgeRequest(userInput)) return false;
   if (hadAnyMemoryToolCall(messages)) return false;
-  // Any non-empty reply here is necessarily un-sourced (no tool ran): whether it
-  // fabricated an answer or asked the founder back without checking first, the
-  // correct move is identical — retry and force the memory tool (SELF-QUERY rule).
   return reply.trim().length > 0;
 }
 
 export const MEMORY_RETRY_HINT =
   "⚠️ I answered without checking FounderOS memory — retrying with the database…";
+
+// ── Knowledge / RAG grounding guard (prod ICP fabrication class) ─────────────
+
+/** Tool returned empty store — model must refuse, not invent. */
+export const EMPTY_KNOWLEDGE_RESULT_RE =
+  /\b(no (knowledge|memory) (entries )?found|no memory found|nothing found|do not fabricate|may not have been synced|no information was found|does not contain (specific )?entries)\b/i;
+
+/** RAG/embed/DB failure in a knowledge tool result — same class as empty store. */
+export const KNOWLEDGE_TOOL_FAILURE_RE =
+  /\b(ollama|embeddings? unreachable|rag embed|rag query|success:\s*false|search failed|unavailable at http)\b/i;
+
+/** Partial refusal then invention — "No entry found. However, based on general understanding…" */
+export const FABRICATION_BRIDGE_RE =
+  /\b(however|based on (general|my) (understanding|knowledge|training)|typically targets|as a general rule|general understanding)\b/i;
+
+/** Reply cites turicks-brain / ADR / knowledge entry — allowed specificity. */
+export const CITED_KNOWLEDGE_GROUNDING_RE =
+  /\b(knowledge base|turicks-brain|brain:sync|ADR-\d+|case study|according to our|entry \d+:|source_path|\[\w+\] )/i;
+
+/**
+ * Specific revenue/ARR/deal numbers on internal business questions — the prod ICP
+ * fabrication used "$50,000 and $500,000". Dept tool results are hidden from the
+ * supervisor (outputMode:last_message), so we must judge reply specificity.
+ */
+export const UNBACKED_BUSINESS_SPECIFICITY_RE =
+  /\$\d{1,3}(?:,\d{3})+\s*(?:[-–—]|and|to)\s*\$?\d{1,3}(?:,\d{3})*|\$\d{1,3}[kK]\s*(?:to|[-–—])\s*\$?\d{1,3}[kK]|\b(£|€)\s*\d{1,3}(?:,\d{3})+|\bdeal value(s)?\s*(of|at)?\s*\$|\bclosed\b[^.]{0,40}\b(client|customer)\b[^.]{0,40}\$\d/i;
+
+/** Honest refusal language — never retry these. */
+export const HONEST_KNOWLEDGE_REFUSAL_RE =
+  /\b(no (knowledge|memory|information|entry|entries)|doesn'?t have|does not have|don'?t have|do not have|not (found|in the knowledge)|knowledge base does not|does not contain|brain:sync|may not have|try different keywords|no matching entry)\b/i;
+
+/** User asked about internal Turicks/business facts (not generic small talk). */
+export const INTERNAL_KNOWLEDGE_REQUEST_RE =
+  /\b(turicks|icp|naggar|our (brand|positioning|strategy|pillar|icp)|what (is|are) we|company context|turicks-?brain|strategic pillar)\b/i;
+
+export const KNOWLEDGE_SEARCH_TOOLS = [
+  "search_knowledge",
+  "search_memory",
+  "search_turicks_brain",
+  "search_personal_rag",
+  "read_cv",
+] as const;
+
+function toolMessageText(m: OfficeMessageLike): string {
+  return typeof m.content === "string" ? m.content : "";
+}
+
+export function hadKnowledgeSearchTool(messages: OfficeMessageLike[]): boolean {
+  return KNOWLEDGE_SEARCH_TOOLS.some((t) => hadToolCall(messages, t));
+}
+
+/** True when a knowledge/RAG tool ran and returned an explicit empty-store message. */
+export function hadEmptyKnowledgeToolResult(messages: OfficeMessageLike[]): boolean {
+  for (const m of messages) {
+    const type = m._getType?.() ?? "";
+    if (type !== "tool") continue;
+    const name = m.name ?? "";
+    if (!KNOWLEDGE_SEARCH_TOOLS.includes(name as (typeof KNOWLEDGE_SEARCH_TOOLS)[number])) continue;
+    const text = toolMessageText(m);
+    if (EMPTY_KNOWLEDGE_RESULT_RE.test(text) || KNOWLEDGE_TOOL_FAILURE_RE.test(text)) return true;
+  }
+  return false;
+}
+
+/** True when reply invents specific business metrics without citing turicks-brain. */
+export function replyHasUnbackedBusinessSpecifics(reply: string): boolean {
+  const text = reply.trim();
+  if (!UNBACKED_BUSINESS_SPECIFICITY_RE.test(text)) return false;
+  if (CITED_KNOWLEDGE_GROUNDING_RE.test(text)) return false;
+  return true;
+}
+
+/** Classic ICP/strategy prose without turicks-brain citation — matches prompt-embedded ICP. */
+export const UNBACKED_ICP_PROSE_RE =
+  /\b(ideal customer profile|\bICP\b)[^.]{0,250}\b(SME|small to medium|ARR|annual recurring|EU|US|Europe|United States)\b/i;
+
+export function replyHasUnbackedIcpProse(reply: string): boolean {
+  const text = reply.trim();
+  if (!UNBACKED_ICP_PROSE_RE.test(text)) return false;
+  if (CITED_KNOWLEDGE_GROUNDING_RE.test(text)) return false;
+  return true;
+}
+
+/** Confident internal-facts answer without turicks-brain citation (checkpoint purge class). */
+export const INTERNAL_ANSWER_WITHOUT_GROUNDING_RE =
+  /\b(ICP|ideal customer profile|strategic pillar|positioning|revenue band|annual recurring|our (clients|pillars|strategy))\b/i;
+
+/**
+ * True when an AI message in checkpoint history looks like fabricated/stale
+ * Turicks knowledge — safe to purge before a fresh internal-facts turn.
+ */
+export function aiMessageLooksFabricatedKnowledge(content: string): boolean {
+  const text = content.trim();
+  if (text.length < 20) return false;
+  if (HONEST_KNOWLEDGE_REFUSAL_RE.test(text) && !FABRICATION_BRIDGE_RE.test(text)) return false;
+  if (CITED_KNOWLEDGE_GROUNDING_RE.test(text)) return false;
+  if (replyHasUnbackedBusinessSpecifics(text)) return true;
+  if (replyHasUnbackedIcpProse(text)) return true;
+  if (
+    FABRICATION_BRIDGE_RE.test(text) &&
+    /\b(typical|typically|generally|SME|ARR|EU|US)\b/i.test(text)
+  ) {
+    return true;
+  }
+  if (INTERNAL_ANSWER_WITHOUT_GROUNDING_RE.test(text) && text.length >= 40) return true;
+  return false;
+}
+
+export function buildKnowledgeGroundingRefusal(): string {
+  return (
+    "I don't have a verified answer for that in turicks-brain. " +
+    "Search returned no matching entry (or failed). " +
+    "If docs were updated recently, run `pnpm brain:sync` on the server and ask again. " +
+    "I won't guess at ICP, clients, revenue bands, or deal values."
+  );
+}
+
+export const INTERNAL_KNOWLEDGE_DIRECTIVE =
+  "[GROUNDING DIRECTIVE: Turicks-specific facts (ICP, strategy, pillars, clients, revenue) MUST come from " +
+  "search_knowledge + search_turicks_brain tool output THIS turn. If both return no entries, say ONLY that " +
+  "turicks-brain has no entry — suggest brain:sync. NEVER use training data, system prompts, or prior assistant " +
+  "messages in this thread (they may be stale/wrong). Do NOT use search_web for internal Turicks facts.]";
+
+export function isInternalKnowledgeRequest(input: string): boolean {
+  const text = input.trim();
+  if (!text) return false;
+  if (EXTERNAL_RESEARCH_RE.test(text)) return false;
+  return INTERNAL_KNOWLEDGE_RE.test(text) || INTERNAL_KNOWLEDGE_REQUEST_RE.test(text);
+}
+
+/**
+ * True when the model answered with confident internal business facts despite:
+ * - an empty knowledge/memory/RAG tool result, OR
+ * - no knowledge search at all on an internal-facts question.
+ */
+export function detectUnbackedKnowledgeClaim(
+  userInput: string,
+  messages: OfficeMessageLike[],
+  reply: string,
+): boolean {
+  const text = reply.trim();
+  if (text.length < 40) return false;
+
+  // Partial refusal + "however based on general understanding" + specifics = fabrication.
+  if (
+    isInternalKnowledgeRequest(userInput) &&
+    FABRICATION_BRIDGE_RE.test(text) &&
+    (UNBACKED_BUSINESS_SPECIFICITY_RE.test(text) || /\b(typical|typically|generally)\b/i.test(text))
+  ) {
+    return true;
+  }
+
+  if (HONEST_KNOWLEDGE_REFUSAL_RE.test(text) && !FABRICATION_BRIDGE_RE.test(text)) return false;
+
+  if (hadEmptyKnowledgeToolResult(messages)) return true;
+
+  // Dept sub-agents use outputMode:last_message — supervisor never sees their tool
+  // results. Block specific internal metrics unless the reply cites turicks-brain.
+  if (isInternalKnowledgeRequest(userInput) && replyHasUnbackedBusinessSpecifics(text)) {
+    return true;
+  }
+
+  if (isInternalKnowledgeRequest(userInput) && replyHasUnbackedIcpProse(text)) {
+    return true;
+  }
+
+  // Stale checkpoint regurgitation: model repeats prior ICP/strategy without calling tools.
+  if (isInternalKnowledgeRequest(userInput) && !hadKnowledgeSearchTool(messages)) {
+    if (HONEST_KNOWLEDGE_REFUSAL_RE.test(text) && !FABRICATION_BRIDGE_RE.test(text)) return false;
+    if (replyHasUnbackedBusinessSpecifics(text) || replyHasUnbackedIcpProse(text)) return true;
+    if (INTERNAL_ANSWER_WITHOUT_GROUNDING_RE.test(text) && text.length >= 30) return true;
+    if (text.length >= 80) return true;
+  }
+
+  return false;
+}
+
+export const KNOWLEDGE_RETRY_HINT =
+  "⚠️ That answer wasn't grounded in turicks-brain — retrying with a real knowledge search…";

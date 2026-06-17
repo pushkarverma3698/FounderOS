@@ -6,7 +6,8 @@ DB-backed HITL). Run through this before merging any PR. Pairs with
 
 ## Correctness & safety
 
-- [ ] `pnpm gate` is green (tsc + full vitest suite).
+- [ ] `pnpm predeploy` is green (`lint` + `build:all` + `verify:wiring` + full vitest).
+      **Tests alone are not enough** — `pnpm build:all` must emit without errors.
 - [ ] Behaviour-affecting change (prompt / tool / model / routing) checked against
       `pnpm eval` — golden routing/tool/HITL set not regressed.
 - [ ] HITL gate fires for every **external** side effect (email, LinkedIn, GitHub

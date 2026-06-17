@@ -63,7 +63,6 @@ becomes a stage-tagged envelope, not a raw crash or a swallowed error.
 - Repro-test-first (rule #23, $0): `detectUnbackedMemoryClaim` RED→GREEN (12→0
   fails); `tool-result` envelope 7/7; `isToolFailure` marker path proven RED→GREEN
   (passes with marker check, fails without).
-- `pnpm lint` exit 0; `pnpm test` **1193/1193** green.
-- NOT YET live-confirmed on prod (needs deploy + a real Telegram turn showing a
-  `read_context`/`search_knowledge` call in the trace). Tracked as the open
-  verification step.
+- `pnpm lint` exit 0; `pnpm test` **1219/1219** green (merged with knowledge guard v2 from beta).
+- Merged `detectUnbackedMemoryClaim` (force tool call) with `detectUnbackedKnowledgeClaim` (block fabrication).
+- NOT YET live-confirmed on prod Telegram — requires deploy + trace showing memory tools fired.

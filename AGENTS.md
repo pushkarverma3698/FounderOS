@@ -35,5 +35,27 @@ this only records the gotchas.
 
 ### Running / testing
 - Tests are keyless: `pnpm test` (vitest, ~1100 tests). Lint: `pnpm lint` (tsc --noEmit).
-  Build: `pnpm build`. Dev run: `pnpm dev`. Health: `curl localhost:3001/health`.
+  Build: `pnpm build:all` (backend `tsc` + `apps/jarvis` Vite). Dev run: `pnpm dev`.
+  Health: `curl localhost:3001/health`.
 - `pnpm eval` / `pnpm test:integration` need a **real** Gemini key + live Postgres.
+
+### Pre-deploy (mandatory — do not skip, do not claim "ready" without evidence)
+**A green `pnpm test` alone is NOT deploy-ready.** Type errors can hide behind
+`tsx` dev mode; production runs compiled `dist/` via `pnpm start`.
+
+Before merging to `main` or triggering deploy, run locally and paste/confirm output:
+
+```bash
+pnpm predeploy   # = lint + build:all + verify:wiring + test
+```
+
+| Step | What it catches |
+|------|-----------------|
+| `pnpm lint` | Type errors (no emit) |
+| `pnpm build:all` | **Compile-time errors** — backend emit + JARVIS frontend |
+| `pnpm verify:wiring` | Half-wired tools / registry drift |
+| `pnpm test` | Regression + unit suite |
+
+**Agent rule:** Never say "deployed" or "ready for prod" until `pnpm predeploy` is
+green on the branch you are merging. CI and the deploy workflow both run `build:all`.
+If you did not run it, label the claim **NOT VERIFIED**.

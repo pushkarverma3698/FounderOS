@@ -111,6 +111,33 @@ function collectDocs(rootDir: string): DocEntry[] {
     });
   }
 
+  // ── Strategy docs (Autonomous Studio — ADR-032) ─────────────────────────────
+  const strategyDir = join(root, "docs/strategy");
+  if (existsSync(strategyDir)) {
+    for (const file of readdirSync(strategyDir).filter((f) => f.endsWith(".md") && f !== "README.md")) {
+      const content = readFile(join(strategyDir, file));
+      docs.push({
+        entry_type: "strategy",
+        title: titleFromFilename(file),
+        content,
+        source: `docs/strategy/${file}`,
+        tags: ["strategy", "gtm", "autonomous-studio", "turicks"],
+      });
+    }
+  }
+
+  // ── Roadmap (business + FounderOS direction) ─────────────────────────────────
+  const roadmapDoc = join(root, "docs/ROADMAP.md");
+  if (existsSync(roadmapDoc)) {
+    docs.push({
+      entry_type: "strategy",
+      title: "FounderOS Roadmap and Strategic Direction",
+      content: readFile(roadmapDoc),
+      source: "docs/ROADMAP.md",
+      tags: ["strategy", "roadmap", "phase", "turicks"],
+    });
+  }
+
   // ── Phase Docs ──────────────────────────────────────────────────────────────
   const phasesDir = join(root, "docs/phases");
   if (existsSync(phasesDir)) {

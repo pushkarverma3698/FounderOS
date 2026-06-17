@@ -25,9 +25,9 @@ FounderOS is a multi-agent AI operating system for two purposes:
 
 **FounderOS has a queryable knowledge graph** — structured topology of departments, agents, tools, and services.
 
-- **Location:** `.claude/graph.json` (50 nodes, 64 edges — derived from the live capability registry)
+- **Location:** `.claude/graph.json` (derived from the live capability registry)
 - **Visualization:** `.claude/graph-mermaid.md` (Mermaid diagram)
-- **Integration Guide:** `.claude/GRAPHIFY-INTEGRATION.md`
+- **Query helper:** `scripts/graph-query-helper.ts`
 
 **How to use:**
 - Before any file search, think: "Can I navigate via the graph?"

@@ -51,6 +51,10 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 
+  /** Web gateway (JARVIS UI) — optional Bearer token; unset = open in dev. */
+  WEB_GATEWAY_TOKEN: z.string().transform(v => v || undefined).optional(),
+  WEB_GATEWAY_PORT: z.coerce.number().int().positive().default(3002),
+
   // Redis — optional; used only if a tool requires it
   REDIS_URL: z.string().url().default("redis://localhost:6379"),
 
