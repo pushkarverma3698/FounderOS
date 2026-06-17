@@ -75,8 +75,9 @@ async function main(): Promise<void> {
   await getOffice();
   log.info("Office ready (supervisor + 7 departments)");
 
-  // 3. Health/metrics server.
+  // 3. Health/metrics + web gateway (JARVIS API at /api/v1/*).
   healthServer = startHealthServer();
+  log.info("Web gateway ready — JARVIS API at /api/v1/* (same port as /health)");
 
   // 4. Telegram bot (long polling — runs in background).
   await startBot();

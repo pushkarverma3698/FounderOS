@@ -10,6 +10,8 @@ describe("capability-message", () => {
     expect(msg).toContain("Personal");
     expect(msg).toContain("Jobhunt");
     expect(msg).toContain("/help");
+    expect(msg).toContain("MISO");
+    expect(msg).toContain("JARVIS");
     expect(msg).toContain("✋");
   });
 
@@ -20,5 +22,7 @@ describe("capability-message", () => {
     expect(msg).toContain("jobhunt");
     expect(msg).toContain("/start");
     expect(msg).toContain("/status");
+    expect(msg).toContain("miso_start");
+    expect(msg).toContain("JARVIS");
   });
 });

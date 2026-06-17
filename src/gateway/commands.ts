@@ -29,6 +29,16 @@ import { runWorkflow, validateParams } from "../workflows/runner.js";
 import { formatSignalsMessage, formatRunsMessage, parseRunsLimit } from "./pipeline-format.js";
 import { formatProviderStatusLine, getLastProviderProbe } from "../infra/provider-probes.js";
 import { buildWelcomeMessage } from "./capability-message.js";
+import {
+  createMission,
+  getActiveMission,
+  getMissionById,
+  getRecentAuditEntries,
+} from "../db/queries.js";
+import { formatMisoDashboard, formatMisoPlan, formatMisoClose, missionToView } from "./mission-control.js";
+import { postMissionDashboard } from "./mission-sync.js";
+import { buildMisoStatus, closeActiveMission } from "./web.js";
+import { TENANT as CONFIG_TENANT } from "../core/config.js";
 
 /** Escape special HTML characters for Telegram HTML parse mode. */
 function safeHtml(text: string): string {
@@ -351,6 +361,12 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<code>/signals</code> — list pending cross-department signals (read-only)\n` +
     `<code>/runs [n]</code> — last n LLM calls + today's spend (default 10, max 25)\n\n` +
 
+    `<b>🤖 MISO Mission Control</b>\n` +
+    `<code>/miso_start &lt;goal&gt;</code> — open a mission dashboard\n` +
+    `<code>/miso_plan</code> — show execution plan for active mission\n` +
+    `<code>/miso_status</code> — mission phase + pending HITL\n` +
+    `<code>/miso_close</code> — close active mission with summary\n\n` +
+
     `<b>🔒 Approval-gated actions</b> (bot asks before sending)\n` +
     `<i>"Email alex@acme.com about X"</i> → approval card → ✅/❌\n` +
     `<i>"Post to LinkedIn about X"</i> → approval card → ✅/❌\n` +
@@ -555,4 +571,72 @@ export async function handleRuns(ctx: Context): Promise<void> {
     log.error({ err: (err as Error).message }, "/runs failed");
     await ctx.reply(`❌ Could not load runs: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
   }
+}
+
+// ── MISO mission control ──────────────────────────────────────────────────────
+
+export async function handleMisoStart(ctx: Context): Promise<void> {
+  const chatId = ctx.chat?.id;
+  if (chatId === undefined) return;
+  const sessionId = String(chatId);
+  const goal = (ctx.match ?? "").toString().trim();
+  if (!goal) {
+    await ctx.reply("Usage: <code>/miso_start &lt;goal&gt;</code>", { parse_mode: "HTML" });
+    return;
+  }
+
+  const existing = await getActiveMission(sessionId);
+  if (existing) {
+    await ctx.reply(
+      `⏸ Active mission already open:\n<pre>${safeHtml(formatMisoDashboard(missionToView(existing)))}</pre>\nUse /miso_close first.`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const missionId = await createMission({
+    tenant_id: CONFIG_TENANT,
+    session_id: sessionId,
+    thread_id: threadIdFor(chatId),
+    goal,
+    owner: ctx.from?.first_name ?? "founder",
+    phase: "INIT",
+    next_action: "send a task or /miso_plan",
+  });
+
+  await postMissionDashboard(sessionId, missionId);
+  const row = await getMissionById(missionId);
+  await ctx.reply(row ? formatMisoDashboard(missionToView(row)) : "Mission started.");
+}
+
+export async function handleMisoPlan(ctx: Context): Promise<void> {
+  const chatId = ctx.chat?.id;
+  if (chatId === undefined) return;
+  const mission = await getActiveMission(String(chatId));
+  if (!mission) {
+    await ctx.reply("No active mission. Use <code>/miso_start &lt;goal&gt;</code>", { parse_mode: "HTML" });
+    return;
+  }
+  await ctx.reply(formatMisoPlan(mission.goal));
+}
+
+export async function handleMisoStatus(ctx: Context): Promise<void> {
+  const chatId = ctx.chat?.id;
+  if (chatId === undefined) return;
+  const text = await buildMisoStatus(String(chatId));
+  await ctx.reply(text);
+}
+
+export async function handleMisoClose(ctx: Context): Promise<void> {
+  const chatId = ctx.chat?.id;
+  if (chatId === undefined) return;
+  const sessionId = String(chatId);
+  const summary = await closeActiveMission(sessionId);
+  if (!summary) {
+    await ctx.reply("No active mission to close.");
+    return;
+  }
+  const audit = await getRecentAuditEntries(CONFIG_TENANT, 3);
+  const auditLine = audit.length > 0 ? `\nRecent audit: ${audit.map((a) => a.action).join(", ")}` : "";
+  await ctx.reply(`${summary}${auditLine}`);
 }
