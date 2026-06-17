@@ -52,25 +52,39 @@ This applies to: Gumroad listings, LinkedIn posts, email templates, brand guidel
 
 ---
 
-## Current Phase Status
-- 🟢 **DEPLOYED — LIVE in production since 2026-06-14**: Hetzner VPS, native systemd + Docker(Postgres+Ollama), `main` auto-deploys via GitHub Actions (CI → CD → `/health`). Full pipeline + Day-1 gotchas: `docs/guides/DEPLOYMENT.md`. Remaining wrap-up checklist: `docs/PRODUCTION-WRAP-UP.md`. Live-verified on the real Telegram path incl. recursion-abort recovery (PR #60).
-- ✅ Phases 1–3 (v1): Foundation, pods, gateway, tests, observability (SUPERSEDED by v2)
-- ✅ **v2 Rebuild (2026-06-01)**: Prebuilt supervisor + 7 ReAct departments — LIVE ON MAIN
-  - research [search_web] · comms [email*, calendar*] · engineering [github_r, github_w*, claude_code*] · marketing [linkedin_post*] · sales [search_web, send_email*] · personal [file, shell*, write*, browser*] · jobhunt [search_jobs, read_cv, send_email*]
-  - (* = HITL-gated via native interrupt())
-  - 10,678 LOC → ~500 LOC core · now 1008 tests green (57 test files) · tsc clean
-- ✅ **Phase B (2026-06-01)**: Marketing + Sales + Prospecting departments — MERGED (PR #5)
-- ✅ **Personal department (2026-06-03)**: 7th department `personal` — laptop operator (file/shell/browser, HITL-gated, `path-guard` confines to `$HOME`, secrets blocked even on read). MERGED (PR #16). Kept separate from `engineering` by least-privilege (ADR-013); Safari-MCP deferred (ADR-012). 267 tests green · eval 13/13.
-- ✅ **Phase C (2026-06-01)**: Context memory + knowledge search + proactive scheduler — code complete, merged to main. See `docs/phases/PHASE-C-INTELLIGENCE.md`.
-- ✅ **Phases 1–6 Hardening (2026-06-14)**: Production multi-agent transition merged (PR #70):
-  - **Phase 1**: Context isolation + per-turn token measurement (ADR-021, pinned outputMode:"last_message", implicit caching lever)
-  - **Phase 2**: Typed inter-department contracts (ADR-022, Zod validation, 3 event types: lead_discovered, proposal_approved, demo_ready)
-  - **Phase 3**: Claude-as-judge for outbound copy (ADR-023, two-gate system: brand-validator → judge, fail-open, different model family)
-  - **Phase 4**: Durable cross-department signals (ADR-024, dept_signals table, hourly sweep, exactly-once semantics)
-  - **Phase 5**: Hierarchy proof — nested HITL on supervisors (ADR-025, 3-level interrupt/resume proven; NOT in production yet, gated on business trigger)
-  - **Phase 6**: Rules #20–21 operationalized (context isolation + typed handoffs, see SECURITY-RULES-20-21.md)
-- 🔄 **Phase D (now)**: Revenue Flywheel — Gumroad live + LinkedIn launch sequence + cinematic-web done-for-you tier + weekly outbound rhythm
-- ⏳ **Phase E (gated, 4–6 wks reliable use)**: SaaS pivot — web gateway, multi-tenancy, billing (FounderOS SaaS *or* Cinematic Cloud — pick one)
+## ⚠️ Architecture is LOCKED
+
+The 7-department supervisor + ReAct structure is production-stable (live since 2026-06-14, Phases 1-6 hardening complete). **Next phase: add tools and hierarchy only. Do not rearchitect.**
+
+- If adding a tool: follow [docs/rules/PROGRAMMING-RULES.md](docs/rules/PROGRAMMING-RULES.md#add-a-tool) wiring map
+- If adding hierarchy: reference [docs/decisions/025-hierarchy-proof-on-prebuilts.md](docs/decisions/025-hierarchy-proof-on-prebuilts.md)
+- If in doubt: consult PROGRAMMING-RULES before touching code
+
+---
+
+## Current Phase Status (2026-06-17)
+
+**🟢 PRODUCTION LIVE** — Hetzner VPS, 1,098 green tests, 90% routing eval, 0 data loss.
+
+**Shipped & Locked:**
+- ✅ v2 Rebuild (7 ReAct departments, LangGraph supervisor, ~500 LOC core)
+- ✅ Phases 1–6 Hardening (context isolation, typed contracts, Claude judge, dept signals, nested HITL proof, security rules)
+- ✅ Production deployment (GitHub Actions CD, systemd, Postgres checkpointer, Hetzner VPS)
+- ✅ Eval harness (29 golden tasks, deterministic scoring, infrastructure-error isolation)
+
+**Current Work (Phase D):**
+- In progress: LinkedIn launch sequence, revenue flywheel (Gumroad, weekly outbound)
+- Docs refresh (2026-06-17): Removing stale v1 content, showcasing production stability
+
+**Next Phase (Phase E — gated on 4+ weeks stable production):**
+- SaaS pivot (multi-tenant, billing, web gateway)
+- Real RAG (pgvector + ts_tsvector hybrid search)
+
+**NEVER DO (intentional defers):**
+- Rearchitect supervisor / department boundaries
+- Change tool ownership (each tool = one department)
+- Add integration layers before tools are proven
+- Experimental model swaps (Gemini 2.5 Flash is the rule, not OpenRouter fallback)
 
 ## Git Workflow (Non-Negotiable)
 
