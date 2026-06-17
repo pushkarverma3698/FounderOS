@@ -13,6 +13,42 @@ Every change must answer **why** before **what**:
 
 ---
 
+## Git / PR policy (non-negotiable — prevents "not mergeable")
+
+**Cloud agents and Cursor must NEVER open PRs targeting `main`.** CI enforces this in
+`.github/workflows/branch-policy.yml` — PRs to `main` are rejected unless the head
+branch is exactly `stable`.
+
+### Correct flow
+
+```
+cursor/* or feat/*  →  beta  →  stable  →  main (founder merges only, CD deploys)
+```
+
+| Action | Rule |
+|--------|------|
+| Cut branch from | `stable` (fetch + pull first) |
+| Open PR to | **`beta`** always |
+| Merge to `main` | **Founder only** via `stable → main` promotion PR |
+
+### When creating a PR
+
+```bash
+git fetch origin stable && git checkout stable && git pull origin stable
+git checkout -b cursor/my-task-d523
+# … work …
+git push -u origin cursor/my-task-d523
+gh pr create --base beta --head cursor/my-task-d523 --draft --title "feat: …"
+```
+
+**Wrong:** `--base main` → Branch policy check **FAILS** → PR shows "not mergeable".
+
+**Right:** `--base beta` → CI + branch policy pass → founder promotes later.
+
+See `docs/process/BRANCH-MODEL.md` for the full ladder.
+
+---
+
 ## Cursor Cloud specific instructions
 
 This section captures non-obvious, durable setup/run caveats for FounderOS in the

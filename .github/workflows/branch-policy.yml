@@ -17,7 +17,10 @@ jobs:
         if: github.base_ref == 'main' && github.head_ref != 'stable'
         run: |
           echo "::error::PRs to main must come from branch 'stable' only."
-          echo "Flow: feat/* → beta → stable → main"
+          echo "Head branch '${{ github.head_ref }}' cannot merge to main."
+          echo "Fix: retarget PR to 'beta' (gh pr edit <n> --base beta) or open a promotion PR stable→main."
+          echo "Flow: feat/*|cursor/* → beta → stable → main"
+          echo "See docs/process/BRANCH-MODEL.md and AGENTS.md"
           exit 1
 
       - name: stable only accepts beta
