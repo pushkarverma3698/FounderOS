@@ -1,16 +1,18 @@
 # FounderOS — Roadmap & Strategic Direction
 
-*For Pushkar Verma, Turicks AI Agency. Updated: 2026-06-17.*
+*For Pushkar Verma, Turicks — The Autonomous Studio. Updated: 2026-06-17.*
 
-> 🟢 **PRODUCTION LIVE** since 2026-06-14. Running 24/7 on Hetzner VPS with GitHub Actions auto-deployment. **Architecture is locked.** Next work: add tools and hierarchy only.
+> 🟢 **PRODUCTION LIVE** since 2026-06-14. Running 24/7 on Hetzner VPS with GitHub Actions auto-deployment. **Architecture is locked.** FounderOS is **internal delivery infrastructure** — studio GTM is the priority.
 
 ---
 
 ## What FounderOS Is
 
-**A single-user AI operating system that takes real business actions — safely.**
+**A production multi-agent operating system that takes real business actions — safely.**
 
 You message it via Telegram → it routes to the right department → the agent does real work (searches, drafts, sends) → asks for your approval before anything leaves → all actions audited in Postgres.
+
+**In the current strategy:** FounderOS is the **trust/governance moat** for Turicks studio delivery — not the product being sold (yet).
 
 **Key properties:**
 - **Production-grade:** 1,098 unit tests (100% green), 29 golden-task eval suite (90% routing), 99.8% uptime
@@ -21,111 +23,93 @@ You message it via Telegram → it routes to the right department → the agent 
 
 ---
 
-## Current Status (Phase D — Revenue Flywheel)
+## Current Status
 
 ### Shipped & Locked ✅
 
 **v2 Architecture (7 ReAct departments):**
-- research [search_web, search_knowledge]
-- comms [send_email, read_emails]
-- engineering [github_read, github_write, claude_code]
-- marketing [linkedin_post]
-- sales [search_web, send_email]
-- personal [file, shell, browser, write_file]
-- jobhunt [search_jobs, read_cv, send_email]
+- research, comms, engineering, marketing, sales, personal, jobhunt
 
 **Phases 1-6 Hardening (complete):**
-- Phase 1: Context isolation + per-turn token measurement
-- Phase 2: Typed inter-department contracts (dept_signals, Zod validation)
-- Phase 3: Claude-as-judge quality gate (two-gate system: brand-validator → Claude judge)
-- Phase 4: Durable async signals (Postgres dept_signals table, hourly sweep)
-- Phase 5: Hierarchy proof (nested HITL on prebuilt supervisors, 3-level interrupt/resume proven)
-- Phase 6: Security rules operationalized (context isolation + typed handoffs enforced)
+- Context isolation, typed contracts, Claude-as-judge, dept_signals, hierarchy proof, security rules
 
 **Production Infrastructure:**
-- Hetzner VPS, systemd service, GitHub Actions CD pipeline
-- Postgres checkpointer (Postgres-backed LangGraph state)
-- Redis for caching and quotas
-- Ollama for local embeddings
-- LangSmith for telemetry and cost tracking
+- Hetzner VPS, systemd, GitHub Actions CD, Postgres checkpointer, Ollama embeddings, LangSmith telemetry
 
-### Current Work (Phase D)
+### Current Work — Phase D-Bis (Proof & Distribution)
 
-1. **LinkedIn launch sequence** — Build-in-public weekly posts (Gumroad integration next)
-2. **Revenue flywheel** — Gumroad done-for-you tier, weekly cold outreach rhythm
-3. **Documentation refresh** (2026-06-17) — Removing stale v1 content, showcasing production stability
+> **Supersedes** old Phase D Gumroad-first plan. See [docs/strategy/README.md](strategy/README.md).
+
+| Phase | Focus | Status |
+|-------|-------|--------|
+| **0 — Foundations** | Strategy docs, target list, brain:sync | 🔄 In progress |
+| **1 — Proof** | 3 showcases → proof.turicks.com | Pending |
+| **2 — Distribution** | LinkedIn build-in-public (3–5/wk) | Pending |
+| **3 — Outreach** | Proof Drops to target list | Pending |
+| **4 — Close** | 1 client/month @ ≥$8K | Target: 60–90 days |
+
+**The one metric:** Qualified conversations/month → **1 closed client/month at ≥$8K**.
 
 ### What NOT to do (Intentional Defers)
 
 | ❌ Deferred | ✅ Why |
 |----------|--------|
-| **SaaS pivot** | Gated on 4+ weeks stable production use — achieve that first, then multi-tenancy |
-| **Rearchitect supervisor** | Architecture is locked — only add tools and hierarchy from now on |
-| **Budget guard npm package** | Deprioritized for core reliability — can extract later |
-| **Real RAG (pgvector)** | brain_sync covers 90% of use case — upgrade when semantic search matters |
-| **Safari-MCP browser** | Deferred in ADR-012; personal.browser works fine for current use |
-| **Multi-provider cascade** | One good model (Gemini 2.5 Flash) > custom cascade — OpenRouter fallback for 503s |
+| **FounderOS feature building** | SCALE gate — $5K+ banked from client work first |
+| **SaaS pivot (Phase E)** | Studio revenue must prove GTM first |
+| **Gumroad info packs** | Deprioritized — premium studio, not info products |
+| **$500 starter tier** | Retired — commodity signal (ADR-032) |
+| **Rearchitect supervisor** | Architecture locked — add tools/hierarchy only when client needs them |
+
+---
+
+## Turicks Business Context
+
+### The Autonomous Studio
+- **Category:** AI-native creative + delivery for funded AI/dev-tool startups
+- **Solo founder:** Pushkar Verma (~10h/week)
+- **ICP:** AI/dev-tool startups (Seed–Series A), $8K+ budget
+- **Pricing:** $8K project floor / $5K-mo retainer floor
+- **Website:** turicks.com · **Proof hub:** proof.turicks.com (planned)
+
+### FounderOS role
+1. **Internal OS** — daily operations for Turicks + Naggar Retreat
+2. **Delivery moat** — HITL + eval + audit narrative for studio positioning
+3. **Build-in-public content** — real metrics for LinkedIn
 
 ---
 
 ## Next Phase (Phase E — SaaS Pivot) — DEFERRED
 
-**Prerequisite:** 4+ weeks of stable production use (Phases D must deliver real revenue signal first).
+**Prerequisites (re-sequenced):**
+- Phase D-Bis: 1+ client closed @ ≥$8K
+- SCALE gate: $5K+ banked
+- 4+ weeks stable production use
 
-**Scope:**
-- Multi-tenancy: auth layer (Clerk/Auth.js), per-user Composio entities, billing (Stripe/Lemon)
-- Web interface: Next.js app on app.turicks.com, real-time streaming, audit dashboard
-- More tools: Notion, Slack, Stripe, Airtable integrations
+**Scope (unchanged):**
+- Multi-tenancy, web gateway, billing
+- More integrations (Notion, Slack, Stripe)
 
-**Estimated:** 4-6 weeks of real work. Not started until Phase D proves the product.
+**Decision at gate:** FounderOS SaaS *or* continue scaling studio.
 
 ---
 
 ## Metrics That Matter
 
-**Primary:** Actions taken per week (emails, GitHub issues, LinkedIn posts, searches).
+**Primary (studio):** 1 closed client/month @ ≥$8K.
 
-**Secondary:**
+**Secondary (FounderOS ops):**
 - Uptime (target: 99.5%)
-- P95 response latency (<3s for real-time actions)
 - Eval routing accuracy (target: 90%+)
-- Test coverage (target: 80%+ on new code)
-- Zero data loss on crashes (Postgres checkpointer)
+- Zero data loss on crashes
 
-**Not tracked:** LOC, test count, model family count. Only: real work done.
-
----
-
-## How to Contribute
-
-1. **Read** [docs/README.md](README.md) — master index of all docs
-2. **Follow** [docs/rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) — wiring maps for adding tools/hierarchy
-3. **Write tests first** — [docs/rules/TESTING-RULES.md](rules/TESTING-RULES.md) for patterns
-4. **Run** `pnpm test` to verify green
-5. **Create PR** against `main` (human reviews before merge)
-
----
-
-## Business Context
-
-### Turicks (AI automation agency)
-- Solo founder: Pushkar Verma
-- ICP: SME founders, EU/US, $50K–500K ARR, need tech co-founder
-- Revenue model: $500 starter projects, $5K/mo retainer
-- Website: turicks.com
-
-### Products on FounderOS
-1. **FounderOS** (internal → SaaS Phase E)
-2. **Cinematic Web** (website builder, Gumroad → SaaS)
-3. **Gumroad packs:** ICP kit, brand-voice kit, LangGraph starter
+**Not tracked:** LOC, test count. Only: real work done + revenue.
 
 ---
 
 ## See Also
 
-- **[Root README.md](../README.md)** — What it does, architecture, eval results
+- **[docs/strategy/README.md](strategy/README.md)** — **Current GTM strategy (start here for planning)**
+- **[docs/phases/PHASE-D-BIS-PROOF-AND-DISTRIBUTION.md](phases/PHASE-D-BIS-PROOF-AND-DISTRIBUTION.md)** — Active phase doc
+- **[docs/decisions/032-ai-native-studio-repositioning.md](decisions/032-ai-native-studio-repositioning.md)** — ADR
 - **[docs/README.md](README.md)** — Documentation index
 - **[docs/guides/DEPLOYMENT.md](guides/DEPLOYMENT.md)** — Production runbook
-- **[docs/decisions/](decisions/)** — All architecture decisions (ADRs 001–028)
-- **[docs/study/](study/)** — Learning path (foundations → deep dive → lessons)
-- **[LIMITATIONS.md](LIMITATIONS.md)** — Honest tech-debt and deferred work

@@ -74,6 +74,21 @@ Every significant decision documented in [decisions/](decisions/). **Key ones fo
 
 ---
 
+## 🎯 Current strategy — The Autonomous Studio
+
+**Start here for GTM and phase planning (locked 2026-06-17):**
+
+| Doc | Purpose |
+|-----|---------|
+| [strategy/README.md](strategy/README.md) | **Master strategy index** — read first |
+| [strategy/00-VISION-AUTONOMOUS-STUDIO.md](strategy/00-VISION-AUTONOMOUS-STUDIO.md) | North star, category, moat narrative |
+| [strategy/04-EXECUTION-ROADMAP.md](strategy/04-EXECUTION-ROADMAP.md) | Phased GTM roadmap + weekly cadence |
+| [phases/PHASE-D-BIS-PROOF-AND-DISTRIBUTION.md](phases/PHASE-D-BIS-PROOF-AND-DISTRIBUTION.md) | **Active phase doc** (Phases 0–4) |
+| [decisions/032-ai-native-studio-repositioning.md](decisions/032-ai-native-studio-repositioning.md) | ADR locking repositioning |
+| [ROADMAP.md](ROADMAP.md) | FounderOS + business roadmap (updated) |
+
+---
+
 ## 🎯 Next phase — Adding tools & hierarchy
 
 **Architecture is locked.** Next work focuses on:
