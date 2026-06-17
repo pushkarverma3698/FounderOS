@@ -42,14 +42,12 @@ vi.mock("../../src/db/queries.js", async (orig) => {
   return { ...actual, isSuppressed: vi.fn(async () => false) };
 });
 
+import { hasLiveIntegrationModel } from "./live-model-guard.js";
+
 const { buildNestedOffice } = await import("../../src/agents/revenue-domain.js");
 const { getPendingApproval } = await import("../../src/agents/office.js");
 
-// ── Guard: only run with a real Google key ────────────────────────────────────
-
-const _gKey = process.env["GOOGLE_GENERATIVE_AI_API_KEY"] ?? "";
-const hasRealKey = _gKey.length > 20 && !_gKey.includes("test");
-const d = hasRealKey ? describe : describe.skip;
+const d = hasLiveIntegrationModel() ? describe : describe.skip;
 
 d("Nested HITL (parent → revenue → dept), live model, mocked sends", () => {
   beforeEach(() => {

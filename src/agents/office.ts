@@ -22,12 +22,14 @@ import type { CompiledStateGraph, BaseCheckpointSaver } from "@langchain/langgra
 import { getModel, getModelFallbackMiddleware } from "./model.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
 import { createAgentMiddleware, createTrimmedPrompt } from "../infra/context-manager.js";
-import { DEPARTMENT_TOOLS, SUPERVISOR_TOOLS } from "./capabilities.js";
-import { ENGINEERING_SUBGRAPH_ENABLED } from "../core/config.js";
+import { DEPARTMENT_TOOLS } from "./capabilities.js";
+import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED } from "../core/config.js";
 import { buildEngineeringDomain } from "./engineering-domain.js";
+import { buildRevenueDomain } from "./revenue-domain.js";
 import { assertContextIsolation, CONTEXT_ISOLATION_OUTPUT_MODE } from "./context-isolation.js";
 import {
   buildSupervisorPrompt,
+  ADMIN_PROMPT,
   RESEARCH_PROMPT,
   buildCommsPrompt,
   ENGINEERING_PROMPT,
@@ -47,11 +49,13 @@ const log = childLogger({ module: "office" });
 let _office: CompiledStateGraph<any, any, any> | undefined;
 
 const DEPARTMENT_DESCRIPTIONS = {
+  admin: "Use for business context, episodic memory, recording decisions, and viewing pending cross-department signals.",
   research: "Use for web facts, news, company or market research, ICP scoring, and internal Turicks knowledge lookups.",
   comms: "Use for reading inbox, known-contact email, and Google Calendar work.",
   engineering: "Use for GitHub repositories, issues, pull requests, code, tests, deployments, and FounderOS engineering work.",
   marketing: "Use for LinkedIn posts, content strategy, and Turicks brand copy.",
   sales: "Use for prospect research tied to cold outreach, unknown-company outreach, and sales emails.",
+  revenue: "Use for LinkedIn marketing content and sales cold outreach (routes internally to marketing or sales).",
   personal: "Use for files, directories, shell, browser, and laptop operations on the founder's machine.",
   jobhunt: "Use for job searches, CV/resume work, applications, and hiring-manager outreach.",
 } as const;
@@ -91,6 +95,16 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
       ...(toolCallLimits ? { toolCallLimits } : {}),
     }),
   ];
+  // ── Admin worker (ADR-028): context + memory + signal visibility ─────────
+  const admin = createAgent({
+    model: deptModel,
+    tools: DEPARTMENT_TOOLS["admin"]!,
+    name: "admin",
+    description: DEPARTMENT_DESCRIPTIONS.admin,
+    includeAgentName: "inline",
+    middleware: agentMiddleware(ADMIN_PROMPT),
+  }).graph;
+
   // research: web search + internal knowledge + ICP scoring (no read_emails — inbox stays in comms)
   const research = createAgent({
     model: deptModel,
@@ -173,19 +187,28 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     middleware: agentMiddleware(JOBHUNT_PROMPT),
   }).graph;
 
+  // Revenue: flat marketing+sales OR nested sub-supervisor (REVENUE_SUBGRAPH=1).
+  const revenueAgents = REVENUE_SUBGRAPH_ENABLED
+    ? [buildRevenueDomain()]
+    : [marketing, sales];
+
+  const coreAgents = [
+    admin,
+    research,
+    comms,
+    engineering as never,
+    ...revenueAgents,
+    personal,
+    jobhunt,
+  ];
+
   return createSupervisor({
-    // 7 departments — prospecting merged into research (ICP scoring is now a research mode).
-    // `engineering` may be a ReAct agent or a compiled sub-supervisor (same name);
-    // createSupervisor accepts both, but the union widens the type — cast at this
-    // single boundary (same as the proven nested pattern in engineering-domain.ts).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    agents: [research, comms, engineering as any, marketing, sales, personal, jobhunt],
+    agents: coreAgents as any,
     llm,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prompt: createTrimmedPrompt(buildSupervisorPrompt, supervisorBudget) as any,
-    // Supervisor-level tools: context read/write + unified memory search/record
-    // These are NOT delegated to departments — the supervisor handles them directly.
-    tools: SUPERVISOR_TOOLS,
+    // ADR-028: Chief of Staff routes only — no business tools.
     // Context isolation (CLAUDE rule #20): only a department's FINAL message
     // crosses back to the supervisor — its internal tool calls/results never
     // pollute the supervisor's history. "last_message" is the library default;
@@ -213,7 +236,11 @@ export async function getOffice() {
   // runtime (tests + production prove it); cast at this single boundary so
   // `pnpm lint` stays clean instead of carrying a permanent known error.
   _office = buildOffice(checkpointer as unknown as BaseCheckpointSaver);
-  log.info("Office compiled: supervisor + [research, comms, engineering, marketing, sales, personal, jobhunt]");
+  log.info(
+    `Office compiled: supervisor + [admin, research, comms, engineering, ${
+      REVENUE_SUBGRAPH_ENABLED ? "revenue(sub)" : "marketing, sales"
+    }, personal, jobhunt]`,
+  );
   return _office;
 }
 

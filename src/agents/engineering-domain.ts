@@ -21,6 +21,10 @@ import { getModel, getModelFallbackMiddleware } from "./model.js";
 import { createAgentMiddleware } from "../infra/context-manager.js";
 import { ENGINEERING_SUBAGENT_TOOLS } from "./capabilities.js";
 import { assertContextIsolation, CONTEXT_ISOLATION_OUTPUT_MODE } from "./context-isolation.js";
+import {
+  findEngineeringHandoff,
+  isolateEngineeringMessages,
+} from "./handoff-engineering.js";
 
 const workerBudget = { maxTokens: 4000 };
 
@@ -45,7 +49,15 @@ Routing rules (choose ONE):
   "list/read/show/inspect/query a repo, branch, file, or issue (read-only)" → coder
   "test/verify/lint/review" → qa
   "create issue/PR, push, deploy, run a workflow, or any GitHub write" → devops
-Relay the chosen engineer's result verbatim — no preamble.`;
+Relay the chosen engineer's result verbatim — no preamble.
+You receive an ENGINEERING_HANDOFF typed slice (taskBrief, owner, repo, branch, cwd) — use only those fields.`;
+
+/** P3: CTO LLM input is the typed slice only — not full supervisor routing bloat. */
+function engineeringHandoffPreModelHook(state: { messages: Parameters<typeof findEngineeringHandoff>[0] }) {
+  const handoff = findEngineeringHandoff(state.messages);
+  if (!handoff) return {};
+  return { llmInputMessages: isolateEngineeringMessages(state.messages, handoff) };
+}
 
 /**
  * Build the nested `engineering` sub-supervisor (CTO over coder+qa+devops),
@@ -85,6 +97,7 @@ export function buildEngineeringDomain() {
     outputMode: assertContextIsolation(CONTEXT_ISOLATION_OUTPUT_MODE),
     includeAgentName: "inline",
     supervisorName: "engineering",
+    preModelHook: engineeringHandoffPreModelHook,
   }).compile({ name: "engineering" });
 }
 

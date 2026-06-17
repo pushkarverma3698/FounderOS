@@ -21,11 +21,14 @@ import {
 import { buildBatchPrompt, splitBatch, parseCompanyArgs } from "../outbound/batch.js";
 import { getSystemStatus, formatRichStatus } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
-import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals } from "../db/queries.js";
+import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals, countPendingDeptSignals, listPendingDeptSignals, getRecentLlmCosts, getTodayCostUsd } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
 import { runWorkflow, validateParams } from "../workflows/runner.js";
+import { formatSignalsMessage, formatRunsMessage, parseRunsLimit } from "./pipeline-format.js";
+import { formatProviderStatusLine, getLastProviderProbe } from "../infra/provider-probes.js";
+import { buildWelcomeMessage } from "./capability-message.js";
 
 /** Escape special HTML characters for Telegram HTML parse mode. */
 function safeHtml(text: string): string {
@@ -44,35 +47,8 @@ function threadIdFor(chatId: number | string): string {
 // ── /start ─────────────────────────────────────────────────────────────────────
 
 export async function handleStart(ctx: Context): Promise<void> {
-  const name = ctx.from?.first_name ? ` ${ctx.from.first_name}` : "";
-  await ctx.reply(
-    `👋 <b>FounderOS${name}</b> — your AI chief of staff is live.\n\n` +
-      `Just tell me what you need. I route it to the right department:\n` +
-      `• <b>Research</b> — <i>"Research Stripe and summarise what they do"</i>\n` +
-      `• <b>Comms</b> — <i>"Email alex@acme.com a short intro"</i> (you approve before it sends)\n` +
-      `• <b>Engineering</b> — <i>"Write a TS function to validate emails"</i> / <i>"Open a GitHub issue on …"</i>\n\n` +
-      `🎯 <b>Weekly outbound</b>\n` +
-      `• <code>/target Acme Corp, Beta Ltd</code> — add prospects to this week's list\n` +
-      `• <code>/targets</code> — show the list (<code>/targets clear</code> to empty it)\n` +
-      `• <code>/outbound</code> — ICP-score the list (or <code>/outbound stripe.com</code> ad-hoc)\n` +
-      `  then <i>"draft outreach to &lt;winner&gt;"</i> to send (you approve first)\n\n` +
-      `🏭 <b>Workflows (multi-step SOPs)</b>\n` +
-      `• <code>/workflows</code> — list all available procedures\n` +
-      `• <code>/run onboarding company=Acme</code> — score → research → email → repo\n` +
-      `• <code>/run outbound company=Stripe</code> — score → hook → cold email\n\n` +
-      `⚡ <b>Power-user</b>\n` +
-      `• <code>/q research what does Anthropic do?</code> — direct to department\n\n` +
-      `⚙️ <b>System</b>\n` +
-      `• <code>/help</code> — full command list (same as /commands)\n` +
-      `• <code>/ping</code> — check if the bot is alive + latency\n` +
-      `• <code>/commands</code> — full command list\n` +
-      `• <code>/departments</code> — what each department does\n` +
-      `• <code>/status</code> — uptime, pending approvals, emails sent today\n` +
-      `• <code>/context</code> — view/update your business context\n` +
-      `• <code>/halt</code> — 🛑 emergency stop (refuse all tasks) · <code>/resume</code> to lift\n\n` +
-      `🔒 Anything that leaves the building (email, LinkedIn, GitHub writes) asks for your approval first.`,
-    { parse_mode: "HTML" },
-  );
+  const name = ctx.from?.first_name;
+  await ctx.reply(buildWelcomeMessage(name), { parse_mode: "HTML" });
 }
 
 // ── /help — alias for /commands ───────────────────────────────────────────────
@@ -177,11 +153,13 @@ export async function handleStatus(ctx: Context): Promise<void> {
     todayStart.setHours(0, 0, 0, 0);
 
     // Fetch all data in parallel; each query has its own fallback
-    const [systemData, founderCtx, activity, lastEvent] = await Promise.all([
+    const [systemData, founderCtx, activity, lastEvent, outboundTargets, pendingSignals] = await Promise.all([
       getSystemStatus(),
       getFounderContext(TENANT).catch(() => ({} as Record<string, unknown>)),
       getActivitySummary(TENANT, todayStart).catch(() => ({} as Record<string, number>)),
       getLastEpisodicEvent(TENANT).catch(() => null),
+      getOutboundTargets(TENANT).catch(() => [] as string[]),
+      countPendingDeptSignals(TENANT).catch(() => 0),
     ]);
 
     const activeClients = Array.isArray(founderCtx["active_clients"])
@@ -209,6 +187,9 @@ export async function handleStatus(ctx: Context): Promise<void> {
       focus,
       lastEventContent: lastEvent?.content ?? null,
       lastEventRelativeTime,
+      outboundTargetCount: outboundTargets.length,
+      pendingSignals,
+      providerStatusLine: formatProviderStatusLine(getLastProviderProbe()),
     });
 
     await ctx.reply(message, { parse_mode: "HTML" });
@@ -338,7 +319,7 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<code>/start</code> — welcome message + quick-start guide\n` +
     `<code>/commands</code> — this list\n` +
     `<code>/departments</code> — what each department does\n` +
-    `<code>/status</code> — uptime, pending approvals, emails sent today\n` +
+    `<code>/status</code> — uptime, pending approvals, pipeline + activity today\n` +
     `<code>/reset</code> — wipe this chat's memory (start a fresh conversation)\n` +
     `<code>/halt [reason]</code> — 🛑 kill switch: refuse all new tasks until /resume\n` +
     `<code>/resume</code> — lift the halt and process tasks normally again\n\n` +
@@ -366,7 +347,9 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<b>⚡ Power-user direct routing</b>\n` +
     `<code>/q &lt;dept&gt; &lt;task&gt;</code> — skip supervisor, go straight to a department\n` +
     `  Example: <code>/q research what does Anthropic do?</code>\n` +
-    `  Departments: research · comms · engineering · marketing · sales · personal · jobhunt\n\n` +
+    `  Departments: research · comms · engineering · marketing · sales · personal · jobhunt\n` +
+    `<code>/signals</code> — list pending cross-department signals (read-only)\n` +
+    `<code>/runs [n]</code> — last n LLM calls + today's spend (default 10, max 25)\n\n` +
 
     `<b>🔒 Approval-gated actions</b> (bot asks before sending)\n` +
     `<i>"Email alex@acme.com about X"</i> → approval card → ✅/❌\n` +
@@ -544,4 +527,32 @@ export async function handleQ(
   const routed = `[Route directly to ${dept} department]: ${task}`;
   log.info({ dept, task: task.slice(0, 80) }, "/q direct-to-dept");
   await runOfficeText(ctx, routed);
+}
+
+// ── /signals — pending dept_signals (read-only) ───────────────────────────────
+
+export async function handleSignals(ctx: Context): Promise<void> {
+  try {
+    const signals = await listPendingDeptSignals(TENANT, 20);
+    await ctx.reply(formatSignalsMessage(signals), { parse_mode: "HTML" });
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "/signals failed");
+    await ctx.reply(`❌ Could not load signals: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
+  }
+}
+
+// ── /runs — recent LLM cost digest ────────────────────────────────────────────
+
+export async function handleRuns(ctx: Context): Promise<void> {
+  try {
+    const limit = parseRunsLimit((ctx.match ?? "").toString());
+    const [todayUsd, calls] = await Promise.all([
+      getTodayCostUsd(TENANT),
+      getRecentLlmCosts(TENANT, limit),
+    ]);
+    await ctx.reply(formatRunsMessage(todayUsd, calls), { parse_mode: "HTML" });
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "/runs failed");
+    await ctx.reply(`❌ Could not load runs: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
+  }
 }

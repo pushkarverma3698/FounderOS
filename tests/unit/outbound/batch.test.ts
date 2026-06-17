@@ -35,6 +35,13 @@ describe("buildBatchPrompt", () => {
     const p = buildBatchPrompt(["Stripe"]);
     expect(p.toLowerCase()).toContain("do not draft");
   });
+
+  it("instructs publish_signal for high ICP scores (8–10)", () => {
+    const p = buildBatchPrompt(["Stripe"]);
+    expect(p).toContain('publish_signal(event_type:"lead_discovered"');
+    expect(p).toMatch(/8.?10/);
+    expect(p).toContain("outbound_batch");
+  });
 });
 
 describe("splitBatch", () => {

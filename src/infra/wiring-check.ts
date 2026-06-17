@@ -30,6 +30,7 @@ import {
   SALES_PROMPT,
   PERSONAL_PROMPT,
   JOBHUNT_PROMPT,
+  ADMIN_PROMPT,
 } from "../agents/system-prompts.js";
 
 export interface WiringReport {
@@ -47,12 +48,13 @@ export interface WiringInput {
   departmentPrompts: Record<string, string>;
 }
 
-/** Tool names that legitimately live at the supervisor level, not in a department. */
-const SUPERVISOR_ONLY_TOOLS = new Set(["record_event", "read_context", "update_context", "search_memory"]);
+/** Tool names that only exist at the supervisor level (empty under ADR-028). */
+const SUPERVISOR_ONLY_TOOLS = new Set<string>();
 
 /** Department → its system prompt text (comms is date-injected, so call the builder). */
 function departmentPrompts(): Record<string, string> {
   return {
+    admin: ADMIN_PROMPT,
     research: RESEARCH_PROMPT,
     comms: buildCommsPrompt(),
     engineering: ENGINEERING_PROMPT,

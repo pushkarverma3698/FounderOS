@@ -27,7 +27,9 @@ async function main(): Promise<void> {
   // 2. LangGraph checkpointer tables
   console.log("2️⃣  Setting up LangGraph checkpoint tables…");
   const pool = getPgPool();
-  const checkpointer = PostgresSaver.fromConnString(process.env["DATABASE_URL"]!);
+  const checkpointer = PostgresSaver.fromConnString(process.env["DATABASE_URL"]!, {
+    schema: "agents",
+  });
   await checkpointer.setup();
   console.log("   ✅ Checkpoint tables ready\n");
 

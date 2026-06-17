@@ -13,9 +13,9 @@ import {
 } from "../../../src/agents/capabilities.js";
 
 describe("DEPARTMENT_TOOLS registry", () => {
-  it("declares all 7 departments", () => {
+  it("declares all 8 departments (admin worker + 7 operational)", () => {
     expect(Object.keys(DEPARTMENT_TOOLS).sort()).toEqual(
-      ["comms", "engineering", "jobhunt", "marketing", "personal", "research", "sales"].sort(),
+      ["admin", "comms", "engineering", "jobhunt", "marketing", "personal", "research", "sales"].sort(),
     );
   });
 
@@ -57,10 +57,19 @@ describe("buildCapabilityManifest", () => {
     expect(manifest).toContain("send_email*");
   });
 
-  it("lists supervisor tools", () => {
-    for (const t of SUPERVISOR_TOOLS) {
-      expect(manifest).toContain((t as { name: string }).name);
+  it("lists admin department tools (moved from supervisor per ADR-028)", () => {
+    const adminNames = DEPARTMENT_TOOLS["admin"]!.map((t: { name: string }) => t.name);
+    expect(adminNames).toContain("read_context");
+    expect(adminNames).toContain("search_memory");
+    expect(adminNames).toContain("list_pending_signals");
+    for (const name of adminNames) {
+      expect(manifest).toContain(name);
     }
+  });
+
+  it("supervisor is handoffs-only (no business tools in SUPERVISOR_TOOLS)", () => {
+    expect(SUPERVISOR_TOOLS).toEqual([]);
+    expect(manifest).toMatch(/supervisor.*handoffs only/i);
   });
 
   it("mentions the MCP server so 'what MCP servers' answers are truthful", () => {
@@ -70,7 +79,6 @@ describe("buildCapabilityManifest", () => {
   it("HITL set covers every side-effecting tool name present in departments", () => {
     const allNames = Object.values(DEPARTMENT_TOOLS).flat().map((t: { name: string }) => t.name);
     for (const gated of HITL_GATED_TOOLS) {
-      if (gated === "record_event") continue; // supervisor-level
       expect(allNames, `${gated} exists in a department`).toContain(gated);
     }
   });

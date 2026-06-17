@@ -160,18 +160,26 @@ describe("preRouteDepartment", () => {
     expect(preRouteDepartment('run this in terminal: echo "FounderOS E2E test"')).toBe("personal");
   });
 
-  it("defers multi-department monday brief orchestration to the supervisor", () => {
+  it("defers multi-department monday brief orchestration to the supervisor (task ledger)", () => {
     expect(
       preRouteDepartment("monday brief pls: context memory + my open github issues + bullet plan"),
     ).toBeNull();
   });
 
-  it("injects orchestration directive for monday brief (not bare HumanMessage)", () => {
+  it("injects task ledger directive for monday brief (admin first, not COS tools)", () => {
     const msgs = buildOfficeInput("monday brief pls: context memory + my open github issues + bullet plan");
     expect(msgs).toHaveLength(2);
     expect(msgs[0]).toBeInstanceOf(SystemMessage);
-    expect(String(msgs[0]!.content)).toMatch(/ORCHESTRATION DIRECTIVE/i);
+    expect(String(msgs[0]!.content)).toMatch(/TASK LEDGER/i);
+    expect(String(msgs[0]!.content)).toMatch(/admin/i);
     expect(String(msgs[0]!.content)).toMatch(/read_context/i);
+    expect(String(msgs[0]!.content)).toMatch(/no business tools/i);
+  });
+
+  it("routes context/memory questions to admin", () => {
+    expect(preRouteDepartment("What's my current focus and priorities?")).toBe("admin");
+    expect(preRouteDepartment("What did we decide about the Acme deal last week?")).toBe("admin");
+    expect(preRouteDepartment("Log this: we closed the Beta Ltd deal today.")).toBe("admin");
   });
 
   it("injects explicit personal route prefix for shell runs", () => {
@@ -247,5 +255,19 @@ describe("buildOfficeInput", () => {
   it("the hint keeps a multi-step escape hatch (LLM may sequence across depts)", () => {
     const msgs = buildOfficeInput("Research what Stripe does");
     expect(String(msgs[0]!.content)).toMatch(/multi-step request that clearly spans/i);
+  });
+
+  it("github issue create gets CRITICAL GITHUB WRITE directive for engineering", () => {
+    const prompt =
+      "Create a GitHub issue on pushkarverma3698/FounderOS titled 'test' with body 'verify'.";
+    const msgs = buildOfficeInput(prompt);
+    expect(String(msgs[0]!.content)).toMatch(/CRITICAL — GITHUB WRITE/i);
+    expect(String(msgs[0]!.content)).toContain("engineering");
+  });
+
+  it("engineering routes embed ENGINEERING_HANDOFF envelope (P3)", () => {
+    const prompt = "List my GitHub repos on pushkarverma3698/FounderOS";
+    const msgs = buildOfficeInput(prompt);
+    expect(String(msgs[0]!.content)).toContain("[ENGINEERING_HANDOFF:v1:");
   });
 });

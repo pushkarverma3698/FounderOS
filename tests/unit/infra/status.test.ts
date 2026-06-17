@@ -210,6 +210,9 @@ describe("formatStatusMessage rich format", () => {
       focus: "Q2 sales push",
       lastEventContent: "Completed onboarding for Acme",
       lastEventRelativeTime: "2h ago",
+      outboundTargetCount: 4,
+      pendingSignals: 2,
+      providerStatusLine: "🟢 Gmail: composio",
     });
     expect(result).toContain("📋");
     expect(result).toContain("Acme Corp");
@@ -227,6 +230,9 @@ describe("formatStatusMessage rich format", () => {
       focus: null,
       lastEventContent: null,
       lastEventRelativeTime: null,
+      outboundTargetCount: 0,
+      pendingSignals: 0,
+      providerStatusLine: null,
     });
     expect(result).toContain("🔒");
     expect(result).toContain("3");
@@ -244,9 +250,15 @@ describe("formatStatusMessage rich format", () => {
       focus: null,
       lastEventContent: null,
       lastEventRelativeTime: null,
+      outboundTargetCount: 3,
+      pendingSignals: 1,
+      providerStatusLine: null,
     });
     expect(result).toContain("📬");
     expect(result).toContain("2");
     expect(result).toContain("5");
+    expect(result).toContain("🎯 Pipeline");
+    expect(result).toContain("3 outbound targets");
+    expect(result).toContain("1 pending signal");
   });
 });

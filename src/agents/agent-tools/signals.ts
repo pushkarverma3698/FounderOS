@@ -14,11 +14,12 @@
  * the signal only surfaces work, it doesn't perform it.
  */
 
+import { createHash } from "node:crypto";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { TENANT } from "../../core/config.js";
-import { publishDeptEvent } from "../../db/queries.js";
+import { publishDeptEventWithAudit } from "../../db/queries.js";
 import { validateSignalPayload, SIGNAL_EVENT_TYPES } from "../contracts.js";
 import { childLogger } from "../../infra/logger.js";
 
@@ -83,8 +84,26 @@ export const publishSignal = tool(
     });
     if (!prepared.ok) return `Signal rejected (typed contract): ${prepared.error}`;
 
-    const id = await publishDeptEvent({ tenant_id: TENANT, ...prepared.signal });
-    log.info({ id, event_type, to_dept: prepared.signal.to_dept }, "Dept signal published");
+    const payloadHash = createHash("sha256")
+      .update(JSON.stringify(prepared.signal.payload))
+      .digest("hex")
+      .slice(0, 16);
+    const idemKey = `signal_published:${event_type}:${payloadHash}:${threadId ?? "no-thread"}`;
+
+    const { signalId } = await publishDeptEventWithAudit(
+      { tenant_id: TENANT, ...prepared.signal },
+      {
+        tenant_id: TENANT,
+        action: "signal_published",
+        idempotency_key: idemKey,
+        payload: {
+          event_type: prepared.signal.event_type,
+          to_dept: prepared.signal.to_dept,
+          from_dept: prepared.signal.from_dept,
+        },
+      },
+    );
+    log.info({ id: signalId, event_type, to_dept: prepared.signal.to_dept }, "Dept signal published");
     return `📡 Signal recorded (${event_type} → ${prepared.signal.to_dept}). It will surface to the founder on the next revenue sweep — no message sent yet.`;
   },
   {

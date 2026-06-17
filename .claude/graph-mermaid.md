@@ -2,6 +2,7 @@
 
 ```mermaid
 graph TB
+  dept_admin["admin"]:::dept
   dept_research["research"]:::dept
   dept_comms["comms"]:::dept
   dept_engineering["engineering"]:::dept
@@ -9,8 +10,14 @@ graph TB
   dept_sales["sales"]:::dept
   dept_personal["personal"]:::dept
   dept_jobhunt["jobhunt"]:::dept
+  tool_read_context["read_context"]:::tool
+  tool_update_context["update_context"]:::tool
+  tool_search_memory["search_memory"]:::tool
+  tool_record_event["record_event"]:::tool
+  tool_list_pending_signals["list_pending_signals"]:::tool
   tool_search_web["search_web"]:::tool
   tool_search_knowledge["search_knowledge"]:::tool
+  tool_search_turicks_brain["search_turicks_brain"]:::tool
   tool_publish_signal["publish_signal"]:::tool
   tool_send_email["send_email"]:::tool
   tool_read_emails["read_emails"]:::tool
@@ -27,13 +34,8 @@ graph TB
   tool_run_shell["run_shell"]:::tool
   tool_browser["browser"]:::tool
   tool_search_personal_rag["search_personal_rag"]:::tool
-  tool_search_turicks_brain["search_turicks_brain"]:::tool
   tool_read_cv["read_cv"]:::tool
   tool_search_jobs["search_jobs"]:::tool
-  tool_read_context["read_context"]:::tool
-  tool_update_context["update_context"]:::tool
-  tool_search_memory["search_memory"]:::tool
-  tool_record_event["record_event"]:::tool
   service_supervisor["Supervisor"]:::service
   service_telegam["Telegram Gateway"]:::service
   service_hitl["HITL (Human-in-the-loop)"]:::service
@@ -43,6 +45,7 @@ graph TB
   store_turicks_brain["turicks_brain (pgvector)"]:::service
   store_personal_rag["personal_rag (pgvector)"]:::service
   service_judge["Claude Judge"]:::service
+  agent_admin_agent -->|belongs_to| dept_admin
   agent_research_agent -->|belongs_to| dept_research
   agent_comms_agent -->|belongs_to| dept_comms
   agent_engineering_agent -->|belongs_to| dept_engineering
@@ -50,8 +53,14 @@ graph TB
   agent_sales_agent -->|belongs_to| dept_sales
   agent_personal_agent -->|belongs_to| dept_personal
   agent_jobhunt_agent -->|belongs_to| dept_jobhunt
+  tool_read_context -->|belongs_to| dept_admin
+  tool_update_context -->|belongs_to| dept_admin
+  tool_search_memory -->|belongs_to| dept_admin
+  tool_record_event -->|belongs_to| dept_admin
+  tool_list_pending_signals -->|belongs_to| dept_admin
   tool_search_web -->|belongs_to| dept_research
   tool_search_knowledge -->|belongs_to| dept_research
+  tool_search_turicks_brain -->|belongs_to| dept_research
   tool_publish_signal -->|belongs_to| dept_research
   tool_send_email -->|belongs_to| dept_comms
   tool_read_emails -->|belongs_to| dept_comms
@@ -63,9 +72,11 @@ graph TB
   tool_search_web -->|belongs_to| dept_marketing
   tool_linkedin_post -->|belongs_to| dept_marketing
   tool_search_knowledge -->|belongs_to| dept_marketing
+  tool_search_turicks_brain -->|belongs_to| dept_marketing
   tool_search_web -->|belongs_to| dept_sales
   tool_send_email -->|belongs_to| dept_sales
   tool_search_knowledge -->|belongs_to| dept_sales
+  tool_search_turicks_brain -->|belongs_to| dept_sales
   tool_read_file -->|belongs_to| dept_personal
   tool_list_dir -->|belongs_to| dept_personal
   tool_send_file -->|belongs_to| dept_personal
@@ -77,10 +88,9 @@ graph TB
   tool_read_cv -->|belongs_to| dept_jobhunt
   tool_search_jobs -->|belongs_to| dept_jobhunt
   tool_send_email -->|belongs_to| dept_jobhunt
-  tool_read_context -->|belongs_to| service_supervisor
-  tool_update_context -->|belongs_to| service_supervisor
-  tool_search_memory -->|belongs_to| service_supervisor
-  tool_record_event -->|belongs_to| service_supervisor
+  tool_search_personal_rag -->|belongs_to| dept_jobhunt
+  dept_admin -->|calls| service_supervisor
+  dept_admin -->|calls| service_telegam
   dept_research -->|calls| service_supervisor
   dept_research -->|calls| service_telegam
   dept_comms -->|calls| service_supervisor

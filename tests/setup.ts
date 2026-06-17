@@ -23,6 +23,7 @@
 
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
+import os from "node:os";
 
 // ── 1. Load .env into process.env (real keys win, stubs below are fallbacks) ──
 const envPath = resolve(process.cwd(), ".env");
@@ -57,6 +58,12 @@ process.env["GOOGLE_GENERATIVE_AI_API_KEY"] ||= "test-google-key-for-vitest";
 process.env["LOG_LEVEL"] ||= "error"; // Suppress log noise in tests
 process.env["LANGCHAIN_TRACING_V2"] ||= "false";
 process.env["BUDGET_DAILY_USD"] ||= "999"; // Avoid budget checks blocking tests
+
+// Path roots: .env may contain founder-Mac placeholders (PERSONAL_ROOT=/Users/your-username)
+// that break path-guard tests on Cloud/Linux runners. Unit tests always use this VM's home.
+process.env["HOME"] ||= os.homedir();
+delete process.env["PERSONAL_ROOT"];
+delete process.env["PROJECT_WORKFLOW_ROOT"];
 
 // ── 3. Network kill-switch (determinism guarantee) ───────────────────────────
 //

@@ -75,6 +75,7 @@ describe("buildBootReport", () => {
       "LLM (selected provider)",
       "LLM fallbacks",
       "Composio (email/linkedin/calendar)",
+      "Gmail read backend",
       "GitHub tools",
       "Web search (Firecrawl)",
       "Claude executor",

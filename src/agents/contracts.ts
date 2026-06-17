@@ -89,6 +89,25 @@ export type SignalPayloadFor<E extends SignalEventType> = z.infer<
   (typeof SIGNAL_CONTRACTS)[E]
 >;
 
+// ── Engineering handoff slice (P3 — sync COS → CTO boundary) ─────────────────
+
+export {
+  EngineeringHandoffSchema,
+  type EngineeringHandoff,
+  type HandoffValidation,
+  extractEngineeringHandoff,
+  validateEngineeringHandoff,
+  formatEngineeringHandoffEnvelope,
+  parseEngineeringHandoffEnvelope,
+  findEngineeringHandoff,
+  isolateEngineeringMessages,
+  engineeringHandoffTokenEstimate,
+  ENGINEERING_HANDOFF_MARKER,
+  ENGINEERING_HANDOFF_TOKEN_CEILING,
+} from "./handoff-engineering.js";
+
+export { ENGINEERING_HANDOFF_SCHEMA_VERSION } from "./state.js";
+
 // ── Deterministic boundary validator ──────────────────────────────────────────
 
 export type ContractValidation =

@@ -23,9 +23,11 @@ let _db: ReturnType<typeof drizzle<typeof schema>> | undefined;
 function getSqlClient(): ReturnType<typeof postgres> {
   if (!_sqlClient) {
     _sqlClient = postgres(env.DATABASE_URL, {
-      max: 10,          // connection pool size — sufficient for startup scale
-      idle_timeout: 30, // seconds before idle connection is closed
+      max: 10,
+      idle_timeout: 30,
       connect_timeout: 10,
+      // P5: agents (operational) + brain (knowledge) schemas; public fallback for extensions.
+      connection: { options: "-c search_path=agents,brain,public" },
     });
   }
   return _sqlClient;
@@ -64,6 +66,10 @@ export function getPgPool(): pg.Pool {
       max: 20,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
+    });
+
+    _pool.on("connect", (client) => {
+      void client.query("SET search_path TO agents, brain, public");
     });
 
     _pool.on("error", (err) => {

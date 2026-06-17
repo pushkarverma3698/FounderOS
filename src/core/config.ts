@@ -35,6 +35,11 @@ export const envSchema = z.object({
 
   // Tool keys — optional; tools fail loudly when key is missing
   COMPOSIO_API_KEY: z.string().transform(v => v || undefined).optional(),
+  /** Gmail read backend: composio (default) or gws (Google Workspace CLI). ADR-028 */
+  GMAIL_BACKEND: z.enum(["composio", "gws"]).default("composio"),
+  GWS_BIN: z.string().transform(v => v || undefined).optional(),
+  PROVIDER_SMOKE_AT_BOOT: z.enum(["true", "false"]).optional(),
+  PROVIDER_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   GITHUB_TOKEN: z.string().transform(v => v || undefined).optional(),
 
   // Observability — optional, degrades gracefully
@@ -135,6 +140,12 @@ function boolEnv(key: string, fallback = false): boolean {
  * ReAct agent for the hierarchical CTO subgraph in office.ts.
  */
 export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", false);
+
+/**
+ * Promote marketing + sales into a `revenue` sub-supervisor (ADR-028 / ADR-025).
+ * Default OFF — live MTProto nested-HITL verification required before production.
+ */
+export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", false);
 
 /** Max recursive supervisor/sub-agent steps before LangGraph aborts a run. */
 export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 40);

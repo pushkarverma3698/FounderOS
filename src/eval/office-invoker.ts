@@ -24,6 +24,7 @@ import type { Department, Observation, GoldenTask } from "./types.js";
 import type { Invoker } from "./runner.js";
 
 const DEPARTMENTS = new Set<Department>([
+  "admin",
   "research",
   "comms",
   "engineering",

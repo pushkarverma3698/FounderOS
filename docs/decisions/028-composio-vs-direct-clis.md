@@ -1,6 +1,6 @@
 # ADR-028: Composio vs Direct CLIs (gws, gh, LinkedIn API)
 
-**Status:** Accepted  
+**Status:** Accepted · **Phase 1 implemented** 2026-06-16 (`GMAIL_BACKEND`, gws read path, provider probes)
 **Date:** 2026-06-16  
 **Context:** FounderOS uses Composio for Gmail, Google Calendar, and LinkedIn. GitHub already uses Octokit + `GITHUB_TOKEN`. The founder asked whether to remove Composio and standardize on direct CLIs (`gws` for Google Workspace, similar for LinkedIn).
 

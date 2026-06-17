@@ -22,7 +22,10 @@ import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
 import { restorePendingApprovalAfterRestart } from "./gateway/office-run.js";
 import { expireStaleInterrupts } from "./db/queries.js";
 import { startHealthServer } from "./infra/health.js";
+import { runProviderSmokeAtBoot } from "./infra/provider-probes.js";
+import { shouldRunProviderSmoke } from "./infra/provider-config.js";
 import { startScheduler } from "./infra/scheduler.js";
+import { buildRestartMessage } from "./gateway/capability-message.js";
 import { acquireSingleInstanceLock, releaseSingleInstanceLock, waitForProcessExit } from "./infra/single-instance.js";
 import { logger } from "./infra/logger.js";
 import type { Server } from "node:http";
@@ -61,6 +64,13 @@ async function main(): Promise<void> {
   const bootValidation = assertBootConfigOrThrow(env);
   for (const w of bootValidation.warnings) log.warn({ module: "boot" }, `[boot] ${w}`);
 
+  // 1d. Provider smoke — verify Composio/gws reachability at boot (warn only).
+  if (shouldRunProviderSmoke()) {
+    await runProviderSmokeAtBoot().catch((err) => {
+      log.warn({ err: (err as Error).message }, "Provider smoke failed — non-fatal");
+    });
+  }
+
   // 2. Compile the office once (warms the Postgres checkpointer).
   await getOffice();
   log.info("Office ready (supervisor + 7 departments)");
@@ -87,13 +97,9 @@ async function main(): Promise<void> {
   startScheduler();
 
   // 6. Startup notification — let the founder know the bot is alive.
-  await sendToChat(
-    `🚀 <b>FounderOS is running</b>\n\n` +
-    `Departments: research · comms · engineering · marketing · sales · personal · jobhunt\n` +
-    `Commands: /status · /context · /target · /targets · /outbound\n\n` +
-    `Ready for your first message.`,
-    "HTML",
-  ).catch((err) => log.warn({ err: (err as Error).message }, "Startup notification failed — bot token may not be ready yet"));
+  await sendToChat(buildRestartMessage(), "HTML").catch((err) =>
+    log.warn({ err: (err as Error).message }, "Startup notification failed — bot token may not be ready yet"),
+  );
 
   log.info("FounderOS running 🚀");
 }

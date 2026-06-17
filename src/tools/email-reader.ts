@@ -1,78 +1,24 @@
 /**
- * FounderOS — Email Reader Tool (Composio Gmail-backed)
- * ======================================================
- * Reads emails from Gmail via Composio's GMAIL_LIST_EMAILS action.
+ * FounderOS — Email Reader Tool (dual backend)
+ * =============================================
+ * Reads Gmail via Composio (default) or gws CLI (GMAIL_BACKEND=gws).
  * Read-only — no HITL approval needed.
  *
- * Use cases:
- *  - Check for replies to outreach emails
- *  - Review unread inbox before a call
- *  - Find a specific email by sender or subject
- *
- * Composio action: GMAIL_LIST_EMAILS
+ * See ADR-028 for migration plan.
  */
 
 import { childLogger } from "../infra/logger.js";
-import {
-  executeComposioAction,
-  getComposioApiKey,
-  getGmailConnectionId,
-  getGmailUserId,
-} from "../infra/composio.js";
+import { getGmailBackend } from "../infra/provider-config.js";
+import { readEmailsViaComposio } from "./gmail-composio-read.js";
+import { readEmailsViaGws } from "./gmail-gws-read.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:email-reader" });
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 export interface ReadEmailsArgs {
-  query?: string;       // Gmail search query, e.g. "is:unread", "from:alex@acme.com"
-  max_results?: number; // max emails to return (default 10)
+  query?: string;
+  max_results?: number;
 }
-
-interface EmailMessage {
-  messageId?: string;
-  threadId?: string;
-  sender?: string;
-  from?: string;
-  subject?: string;
-  messageText?: string;
-  snippet?: string;
-  messageTimestamp?: string;
-  preview?: Record<string, unknown>;
-}
-
-function normalizeEmailMessage(raw: Record<string, unknown>): EmailMessage {
-  return {
-    messageId: String(raw["messageId"] ?? raw["id"] ?? raw["message_id"] ?? ""),
-    threadId: String(raw["threadId"] ?? raw["thread_id"] ?? ""),
-    sender: String(raw["sender"] ?? raw["from"] ?? raw["senderEmail"] ?? "unknown sender"),
-    subject: String(raw["subject"] ?? "(no subject)"),
-    messageText: String(raw["messageText"] ?? raw["snippet"] ?? raw["body"] ?? raw["preview"] ?? ""),
-    messageTimestamp: String(raw["messageTimestamp"] ?? raw["date"] ?? raw["internalDate"] ?? ""),
-  };
-}
-
-function extractMessages(result: Record<string, unknown>): EmailMessage[] {
-  const data = result["data"];
-  if (Array.isArray(data)) {
-    return data.map((m) => normalizeEmailMessage(m as Record<string, unknown>));
-  }
-  if (data && typeof data === "object") {
-    const nested = data as { messages?: unknown[] };
-    if (Array.isArray(nested.messages)) {
-      return nested.messages.map((m) => normalizeEmailMessage(m as Record<string, unknown>));
-    }
-  }
-  if (Array.isArray(result["messages"])) {
-    return (result["messages"] as unknown[]).map((m) =>
-      normalizeEmailMessage(m as Record<string, unknown>),
-    );
-  }
-  return [];
-}
-
-// ── Tool: Read Emails ─────────────────────────────────────────────────────────
 
 export const readEmailsTool: UnifiedTool = {
   name: "read_emails",
@@ -97,49 +43,13 @@ export const readEmailsTool: UnifiedTool = {
 
   async execute(input: Record<string, unknown>): Promise<ToolResult> {
     const { query = "in:inbox", max_results = 10 } = input as ReadEmailsArgs;
+    const backend = getGmailBackend();
+    log.debug({ backend, query }, "read_emails dispatch");
 
-    if (!getComposioApiKey()) {
-      log.warn("COMPOSIO_API_KEY not set — email read skipped");
-      return {
-        success: false,
-        error: "COMPOSIO_API_KEY not configured. Add it to .env to enable Gmail access.",
-      };
+    const args = { query, max_results };
+    if (backend === "gws") {
+      return readEmailsViaGws(args);
     }
-
-    try {
-      const result = await executeComposioAction(
-        "GMAIL_FETCH_EMAILS",
-        { query, max_results, verbose: false },
-        getGmailConnectionId(),
-        getGmailUserId(),
-      ) as Record<string, unknown>;
-
-      const messages = extractMessages(result);
-
-      if (messages.length === 0) {
-        return {
-          success: true,
-          data: `No emails found matching "${query}". Inbox may be empty or the query returned no results.`,
-        };
-      }
-
-      const formatted = messages
-        .slice(0, max_results)
-        .map((m, i) => {
-          const from = m.sender ?? "unknown sender";
-          const subject = m.subject ?? "(no subject)";
-          const body = m.messageText?.slice(0, 200) ?? "";
-          const date = m.messageTimestamp ?? "";
-          return `${i + 1}. From: ${from}${date ? ` · ${date}` : ""}\n   Subject: ${subject}${body ? `\n   ${body}` : ""}`;
-        })
-        .join("\n\n");
-
-      log.info({ query, count: messages.length }, "Emails read via agent");
-      return { success: true, data: formatted };
-    } catch (err) {
-      const message = (err as Error).message;
-      log.error({ err: message, query }, "Email read failed");
-      return { success: false, error: message };
-    }
+    return readEmailsViaComposio(args);
   },
 };
