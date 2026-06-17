@@ -5,13 +5,16 @@
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { getOffice, getPendingApproval } from "../../src/agents/office.js";
 import { OFFICE_RECURSION_LIMIT } from "../../src/core/config.js";
-import {
-  buildKnowledgeGroundingRefusal,
-  detectUnbackedKnowledgeClaim,
-} from "../../src/gateway/execution-guard.js";
+import { buildKnowledgeGroundingRefusal } from "../../src/gateway/execution-guard.js";
 import { markdownToTelegramHtml } from "../../src/gateway/format.js";
-import { finalReply, sliceFreshMessages } from "../../src/gateway/office-run.js";
+import {
+  buildGuardRetryMessages,
+  finalReply,
+  needsExecutionGuardRetry,
+  sliceFreshMessages,
+} from "../../src/gateway/office-run.js";
 import { buildOfficeInput } from "../../src/gateway/pre-router.js";
+import type { OfficeMessageLike } from "../../src/gateway/execution-guard.js";
 
 export type StressStatus = "PASS" | "HITL" | "BLOCKED" | "FAIL" | "ERROR";
 
@@ -24,19 +27,21 @@ export interface StressTask {
   expectBlocked?: boolean;
   /** Run the same input twice on one thread (stale-reply regression). */
   repeatOnSameThread?: boolean;
-  validate?: (reply: string, toolsCalled: string[]) => string | null;
+  validate?: (reply: string, toolsCalled: string[], messages: OfficeMessageLike[]) => string | null;
 }
 
 export interface StressResult {
   task: StressTask;
   status: StressStatus;
   toolsCalled: string[];
+  freshMessages: OfficeMessageLike[];
   replySnippet: string;
   fullReply: string;
   elapsedMs: number;
   error?: string;
   validationError?: string;
   formatIssues: string[];
+  guardKind?: "shell" | "linkedin" | "inbox" | "memory" | "knowledge";
 }
 
 interface TrailMessage {
@@ -116,15 +121,63 @@ export async function runStressTask(
     const res = await office.invoke({ messages: buildOfficeInput(task.input) }, config);
     const elapsed = Date.now() - start;
 
-    const freshMessages = sliceFreshMessages(
+    let freshMessages = sliceFreshMessages(
       (res.messages ?? []) as Parameters<typeof sliceFreshMessages>[0],
       baseLen,
-    );
+    ) as OfficeMessageLike[];
     let fullReply = finalReply({ messages: freshMessages });
     let guardBlocked = false;
-    if (detectUnbackedKnowledgeClaim(task.input, freshMessages, fullReply)) {
+    let guardKind = needsExecutionGuardRetry(task.input, freshMessages, fullReply) ?? undefined;
+
+    if (guardKind) {
+      const retryMessages = buildGuardRetryMessages(guardKind, task.input);
+      const retryBefore = (await office.getState(config).catch(() => null)) as {
+        values?: { messages?: TrailMessage[] };
+      } | null;
+      const retryBaseLen = (retryBefore?.values?.messages ?? []).length;
+      const retryRes = await office.invoke({ messages: retryMessages }, config);
+      const retryPending = await getPendingApproval(
+        office as unknown as Parameters<typeof getPendingApproval>[0],
+        { configurable: { thread_id: threadId } },
+      );
+      if (retryPending) {
+        const uniqueTools = [
+          ...new Set(toolNames.filter((n) => n && !n.startsWith("transfer_to_"))),
+        ];
+        const formatIssues = validateTelegramHtml(markdownToTelegramHtml(fullReply));
+        let status: StressStatus;
+        let validationError: string | undefined;
+        if (task.expectHITL) {
+          status = "HITL";
+        } else {
+          status = "FAIL";
+          validationError = "Unexpected HITL interrupt fired";
+        }
+        return {
+          task,
+          status,
+          toolsCalled: uniqueTools,
+          freshMessages,
+          replySnippet: fullReply.slice(0, 200).replace(/\n/g, " "),
+          fullReply,
+          elapsedMs: elapsed,
+          formatIssues,
+          validationError,
+          guardKind,
+        };
+      }
+      freshMessages = sliceFreshMessages(
+        (retryRes.messages ?? []) as Parameters<typeof sliceFreshMessages>[0],
+        retryBaseLen,
+      ) as OfficeMessageLike[];
+      fullReply = finalReply({ messages: freshMessages });
+    }
+
+    const stillUngrounded = needsExecutionGuardRetry(task.input, freshMessages, fullReply);
+    if (stillUngrounded === "knowledge" || stillUngrounded === "memory") {
       fullReply = buildKnowledgeGroundingRefusal();
       guardBlocked = true;
+      guardKind = stillUngrounded;
     }
 
     const uniqueTools = [
@@ -143,11 +196,11 @@ export async function runStressTask(
     let validationError: string | undefined;
 
     if (task.expectBlocked) {
-      const vErr = task.validate?.(fullReply, uniqueTools) ?? null;
+      const vErr = task.validate?.(fullReply, uniqueTools, freshMessages) ?? null;
       status = vErr ? "FAIL" : "BLOCKED";
       validationError = vErr ?? undefined;
     } else if (guardBlocked) {
-      const vErr = task.validate?.(fullReply, uniqueTools) ?? null;
+      const vErr = task.validate?.(fullReply, uniqueTools, freshMessages) ?? null;
       status = vErr ? "FAIL" : "BLOCKED";
       validationError = vErr ?? undefined;
     } else if (hadInterrupt && task.expectHITL) {
@@ -166,7 +219,7 @@ export async function runStressTask(
       status = "FAIL";
       validationError = "Expected HITL interrupt but none fired";
     } else {
-      const vErr = task.validate?.(fullReply, uniqueTools) ?? null;
+      const vErr = task.validate?.(fullReply, uniqueTools, freshMessages) ?? null;
       if (vErr) {
         status = "FAIL";
         validationError = vErr;
@@ -179,17 +232,20 @@ export async function runStressTask(
       task,
       status,
       toolsCalled: uniqueTools,
+      freshMessages,
       replySnippet: fullReply.slice(0, 200).replace(/\n/g, " "),
       fullReply,
       elapsedMs: elapsed,
       formatIssues,
       validationError,
+      guardKind,
     };
   } catch (err: unknown) {
     return {
       task,
       status: "ERROR",
       toolsCalled: [],
+      freshMessages: [],
       replySnippet: "",
       fullReply: "",
       elapsedMs: Date.now() - start,

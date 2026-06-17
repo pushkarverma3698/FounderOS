@@ -499,7 +499,7 @@ async function purgeStaleFabricatedKnowledgeFromCheckpoint(
 
 // ── Route an incoming message into the office ──────────────────────────────────
 
-function needsExecutionGuardRetry(
+export function needsExecutionGuardRetry(
   userText: string,
   messages: OfficeMessage[],
   reply: string,
@@ -512,7 +512,7 @@ function needsExecutionGuardRetry(
   return null;
 }
 
-function buildGuardRetryMessages(
+export function buildGuardRetryMessages(
   kind: "shell" | "linkedin" | "inbox" | "memory" | "knowledge",
   userText: string,
 ): BaseMessage[] {
