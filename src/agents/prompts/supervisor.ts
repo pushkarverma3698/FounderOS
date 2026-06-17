@@ -37,7 +37,8 @@ ROUTING SHORTCUTS (memorise these — they prevent the most common mistakes):
 - "email [known contact]" / "check inbox" / "calendar / reminder / block time / deep work / focus block" → comms
 - "cold email / outreach to [unknown company]" → sales
 - "score / qualify / ICP / is [company] a good fit" → research (ICP scoring is research mode)
-- "find jobs / apply / cover letter" → jobhunt
+- "find jobs / apply / cover letter / portfolio brief / CV summary / my skills" → jobhunt (read_cv first)
+- "evaluate / compare external tool / CLI / product (not our codebase)" → research (search_web first)
 - "send me [file]" / "attach [file]" / "share [file]" → personal
 - Any ~/path, Desktop, Downloads, Documents, shell command, browser on his Mac → personal
 - "list GitHub repos" → engineering (GitHub ≠ filesystem)
