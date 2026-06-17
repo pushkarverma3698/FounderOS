@@ -43,6 +43,13 @@
       "when": 1779880400000,
       "tag": "0005_pgvector",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779880500000,
+      "tag": "0006_separate_schemas",
+      "breakpoints": true
     }
   ]
 }

@@ -414,6 +414,37 @@ export async function publishDeptEvent(
 }
 
 /**
+ * P4 — Atomically publish a dept_signal AND write the matching action_log row.
+ * If either insert fails, BOTH roll back (Postgres transaction).
+ */
+export async function publishDeptEventWithAudit(
+  signal: Omit<NewDeptSignal, "id" | "created_at">,
+  audit: Omit<NewActionLog, "id" | "created_at">,
+): Promise<{ signalId: string }> {
+  const db = getDb();
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(deptSignals)
+      .values(signal)
+      .returning({ id: deptSignals.id });
+    if (!row) throw new Error("publishDeptEventWithAudit: signal insert returned no rows");
+    await tx.insert(actionLog).values(audit);
+    return { signalId: row.id };
+  });
+}
+
+/** Count all dept_signals rows (test helper / migration verification). */
+export async function countDeptSignals(tenantId?: string): Promise<number> {
+  const db = getDb();
+  const conditions = tenantId ? [eq(deptSignals.tenant_id, tenantId)] : [];
+  const [row] = await db
+    .select({ total: count() })
+    .from(deptSignals)
+    .where(conditions.length > 0 ? and(...conditions) : undefined);
+  return row?.total ?? 0;
+}
+
+/**
  * Atomically claim + return unconsumed signals for a target department (G2).
  *
  * The old implementation did SELECT-then-UPDATE in two statements, so two
