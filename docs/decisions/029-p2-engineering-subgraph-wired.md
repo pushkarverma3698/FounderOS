@@ -50,5 +50,13 @@ node --env-file=.env --import tsx/esm scripts/e2e-telegram-qa.ts run T08 --appro
 Evidence: bot reply + matching `action_log` row for github issue create; reject path
 clean (no side effect); recursion abort does not wedge thread.
 
-**Status:** NOT VERIFIED in Cloud VM — requires founder MTProto session
-(`TELEGRAM_TESTER_SESSION`).
+**Automated live gate (office invoke path):**
+
+```bash
+pnpm gate:p2:live   # structural + live interrupt + approve → real GitHub issue
+P2_LIVE_APPROVE=0 pnpm verify:p2:live   # interrupt-only, no side effect
+```
+
+**Live verified 2026-06-17 (Cloud VM):** interrupt `github_create_issue` → approve → issue #109 created on `pushkarverma3698/FounderOS`; `/health` green with `ENGINEERING_SUBGRAPH=1` boot.
+
+**MTProto:** NOT VERIFIED in Cloud VM — requires `TELEGRAM_TESTER_SESSION` (optional; office invoke path proven).
