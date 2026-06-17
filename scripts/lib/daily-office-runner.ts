@@ -25,6 +25,7 @@ export interface StressResult {
   status: StressStatus;
   toolsCalled: string[];
   replySnippet: string;
+  fullReply: string;
   elapsedMs: number;
   error?: string;
   validationError?: string;
@@ -164,6 +165,7 @@ export async function runStressTask(
       status,
       toolsCalled: uniqueTools,
       replySnippet: fullReply.slice(0, 200).replace(/\n/g, " "),
+      fullReply,
       elapsedMs: elapsed,
       formatIssues,
       validationError,
@@ -174,6 +176,7 @@ export async function runStressTask(
       status: "ERROR",
       toolsCalled: [],
       replySnippet: "",
+      fullReply: "",
       elapsedMs: Date.now() - start,
       error: err instanceof Error ? err.message : String(err),
       formatIssues: [],

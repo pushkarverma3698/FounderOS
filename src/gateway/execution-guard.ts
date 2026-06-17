@@ -127,11 +127,31 @@ export const INBOX_RETRY_HINT =
 
 /** Tool returned empty store — model must refuse, not invent. */
 export const EMPTY_KNOWLEDGE_RESULT_RE =
-  /\b(no (knowledge|memory) (entries )?found|no memory found|nothing found|do not fabricate|may not have been synced)\b/i;
+  /\b(no (knowledge|memory) (entries )?found|no memory found|nothing found|do not fabricate|may not have been synced|no information was found|does not contain (specific )?entries)\b/i;
+
+/** RAG/embed/DB failure in a knowledge tool result — same class as empty store. */
+export const KNOWLEDGE_TOOL_FAILURE_RE =
+  /\b(ollama|embeddings? unreachable|rag embed|rag query|success:\s*false|search failed|unavailable at http)\b/i;
+
+/** Partial refusal then invention — "No entry found. However, based on general understanding…" */
+export const FABRICATION_BRIDGE_RE =
+  /\b(however|based on (general|my) (understanding|knowledge|training)|typically targets|as a general rule|general understanding)\b/i;
+
+/** Reply cites turicks-brain / ADR / knowledge entry — allowed specificity. */
+export const CITED_KNOWLEDGE_GROUNDING_RE =
+  /\b(knowledge base|turicks-brain|brain:sync|ADR-\d+|case study|according to our|entry \d+:|source_path|\[\w+\] )/i;
+
+/**
+ * Specific revenue/ARR/deal numbers on internal business questions — the prod ICP
+ * fabrication used "$50,000 and $500,000". Dept tool results are hidden from the
+ * supervisor (outputMode:last_message), so we must judge reply specificity.
+ */
+export const UNBACKED_BUSINESS_SPECIFICITY_RE =
+  /\$\d{1,3}(?:,\d{3})+\s*(?:[-–—]|and|to)\s*\$?\d{1,3}(?:,\d{3})*|\$\d{1,3}[kK]\s*(?:to|[-–—])\s*\$?\d{1,3}[kK]|\b(£|€)\s*\d{1,3}(?:,\d{3})+|\bdeal value(s)?\s*(of|at)?\s*\$|\bclosed\b[^.]{0,40}\b(client|customer)\b[^.]{0,40}\$\d/i;
 
 /** Honest refusal language — never retry these. */
 export const HONEST_KNOWLEDGE_REFUSAL_RE =
-  /\b(no (knowledge|memory|information|entry|entries)|don't have|do not have|not (found|in the knowledge)|brain:sync|may not have|try different keywords)\b/i;
+  /\b(no (knowledge|memory|information|entry|entries)|doesn'?t have|does not have|don'?t have|do not have|not (found|in the knowledge)|knowledge base does not|does not contain|brain:sync|may not have|try different keywords|no matching entry)\b/i;
 
 /** User asked about internal Turicks/business facts (not generic small talk). */
 export const INTERNAL_KNOWLEDGE_REQUEST_RE =
@@ -160,9 +180,27 @@ export function hadEmptyKnowledgeToolResult(messages: OfficeMessageLike[]): bool
     if (type !== "tool") continue;
     const name = m.name ?? "";
     if (!KNOWLEDGE_SEARCH_TOOLS.includes(name as (typeof KNOWLEDGE_SEARCH_TOOLS)[number])) continue;
-    if (EMPTY_KNOWLEDGE_RESULT_RE.test(toolMessageText(m))) return true;
+    const text = toolMessageText(m);
+    if (EMPTY_KNOWLEDGE_RESULT_RE.test(text) || KNOWLEDGE_TOOL_FAILURE_RE.test(text)) return true;
   }
   return false;
+}
+
+/** True when reply invents specific business metrics without citing turicks-brain. */
+export function replyHasUnbackedBusinessSpecifics(reply: string): boolean {
+  const text = reply.trim();
+  if (!UNBACKED_BUSINESS_SPECIFICITY_RE.test(text)) return false;
+  if (CITED_KNOWLEDGE_GROUNDING_RE.test(text)) return false;
+  return true;
+}
+
+export function buildKnowledgeGroundingRefusal(): string {
+  return (
+    "I don't have a verified answer for that in turicks-brain. " +
+    "Search returned no matching entry (or failed). " +
+    "If docs were updated recently, run `pnpm brain:sync` on the server and ask again. " +
+    "I won't guess at ICP, clients, revenue bands, or deal values."
+  );
 }
 
 export function isInternalKnowledgeRequest(input: string): boolean {
@@ -181,9 +219,25 @@ export function detectUnbackedKnowledgeClaim(
 ): boolean {
   const text = reply.trim();
   if (text.length < 40) return false;
-  if (HONEST_KNOWLEDGE_REFUSAL_RE.test(text)) return false;
+
+  // Partial refusal + "however based on general understanding" + specifics = fabrication.
+  if (
+    isInternalKnowledgeRequest(userInput) &&
+    FABRICATION_BRIDGE_RE.test(text) &&
+    (UNBACKED_BUSINESS_SPECIFICITY_RE.test(text) || /\b(typical|typically|generally)\b/i.test(text))
+  ) {
+    return true;
+  }
+
+  if (HONEST_KNOWLEDGE_REFUSAL_RE.test(text) && !FABRICATION_BRIDGE_RE.test(text)) return false;
 
   if (hadEmptyKnowledgeToolResult(messages)) return true;
+
+  // Dept sub-agents use outputMode:last_message — supervisor never sees their tool
+  // results. Block specific internal metrics unless the reply cites turicks-brain.
+  if (isInternalKnowledgeRequest(userInput) && replyHasUnbackedBusinessSpecifics(text)) {
+    return true;
+  }
 
   if (isInternalKnowledgeRequest(userInput) && !hadKnowledgeSearchTool(messages) && text.length >= 80) {
     return true;

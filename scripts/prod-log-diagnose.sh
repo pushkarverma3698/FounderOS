@@ -38,9 +38,9 @@ journalctl -u founderos --since "${DAYS} days ago" -o cat --no-pager 2>/dev/null
   | grep -F 'No memory found' | tail -10 || echo "(none)"
 echo ""
 
-echo "--- Recent guard.retry seams (last ${DAYS}d) ---"
+echo "--- Recent guard.retry / guard.blocked seams (last ${DAYS}d) ---"
 journalctl -u founderos --since "${DAYS} days ago" -o cat --no-pager 2>/dev/null \
-  | grep -F '"seam":"guard.retry"' | tail -10 || echo "(none)"
+  | grep -E '"seam":"guard\.(retry|blocked)"' | tail -10 || echo "(none)"
 echo ""
 
 echo "--- Log review harvest (last ${DAYS}d) ---"

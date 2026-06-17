@@ -77,6 +77,44 @@ describe("detectUnbackedKnowledgeClaim", () => {
     expect(detectUnbackedKnowledgeClaim(input, msgs, reply)).toBe(true);
   });
 
+  it("flags ICP fabrication when dept tool results are hidden (context isolation)", () => {
+    const input = "What is Turicks ICP? Be specific with revenue bands and geography.";
+    const reply =
+      "Turicks' Ideal Customer Profile focuses on SMEs with ARR between $50,000 and $500,000 in the United States and Europe.";
+    // Supervisor only sees transfer + synthesized dept reply — no tool messages.
+    const msgs = [
+      toolMsg("research", "Successfully transferred to research"),
+      aiMsg(reply),
+      toolMsg("research", "Successfully transferred back to supervisor"),
+      aiMsg(reply),
+    ];
+    expect(detectUnbackedKnowledgeClaim(input, msgs, reply)).toBe(true);
+  });
+
+  it("flags RAG embed failure as empty knowledge class", () => {
+    const msgs = [
+      toolMsg(
+        "search_turicks_brain",
+        "Ollama embeddings unreachable at http://localhost:11434. Is the ollama container up?",
+      ),
+    ];
+    expect(hadEmptyKnowledgeToolResult(msgs)).toBe(true);
+  });
+
+  it("allows honest refusal with no specifics", () => {
+    const input = "What is Turicks ICP?";
+    const reply =
+      "The knowledge base does not contain ICP entries. Run brain:sync or try different keywords.";
+    expect(detectUnbackedKnowledgeClaim(input, [], reply)).toBe(false);
+  });
+
+  it("allows 'does not have any entries' refusal (strategic pillars class)", () => {
+    const input = "List our strategic pillars for Turicks";
+    const reply =
+      "The Turicks knowledge base does not have any entries regarding our strategic pillars.";
+    expect(detectUnbackedKnowledgeClaim(input, [], reply)).toBe(false);
+  });
+
   it("does not flag honest refusal after empty search", () => {
     const input = "What is Turicks ICP?";
     const reply = "No knowledge entries found for ICP in turicks-brain. Run brain:sync.";
@@ -85,6 +123,20 @@ describe("detectUnbackedKnowledgeClaim", () => {
       aiMsg(reply),
     ];
     expect(detectUnbackedKnowledgeClaim(input, msgs, reply)).toBe(false);
+  });
+
+  it("flags $50K to $500K shorthand (common model format)", () => {
+    const input = "What is Turicks ICP?";
+    const reply = "Revenue Bands: $50K to $500K ARR targeting SMEs in the US and Europe.";
+    expect(detectUnbackedKnowledgeClaim(input, [], reply)).toBe(true);
+  });
+
+  it("flags partial refusal then fabricated metrics (However, based on…)", () => {
+    const input = "What is Turicks ICP?";
+    const reply =
+      "No specific entry was found in the knowledge base. However, based on general understanding, " +
+      "Turicks typically targets SMEs with ARR between $50K and $500K in the EU and US.";
+    expect(detectUnbackedKnowledgeClaim(input, [], reply)).toBe(true);
   });
 
   it("flags long internal answer with no knowledge tools called", () => {

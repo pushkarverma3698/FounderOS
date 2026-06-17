@@ -55,6 +55,8 @@
     "test:eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
     "test:smoke": "ALLOW_NETWORK=1 node --import tsx/esm scripts/smoke.ts",
     "test:smoke:miso": "ALLOW_NETWORK=1 node --env-file=.env --import tsx/esm scripts/smoke-miso-jarvis.ts",
+    "hallucination:stress": "ALLOW_NETWORK=1 ENGINEERING_SUBGRAPH=1 OFFICE_RECURSION_LIMIT=40 node --env-file=.env --import tsx/esm scripts/hallucination-stress.ts",
+    "hallucination:stress:quick": "ALLOW_NETWORK=1 ENGINEERING_SUBGRAPH=1 OFFICE_RECURSION_LIMIT=40 node --env-file=.env --import tsx/esm scripts/hallucination-stress.ts -- --quick",
     "test:ci": "vitest run",
     "test:live": "ALLOW_NETWORK=1 vitest run --config vitest.integration.config.ts && pnpm test:eval",
     "test:all": "pnpm test:ci && pnpm test:smoke",

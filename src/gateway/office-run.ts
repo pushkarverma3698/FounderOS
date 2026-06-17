@@ -32,6 +32,7 @@ import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt } from ".
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 import { buildOfficeInput } from "./pre-router.js";
 import {
+  buildKnowledgeGroundingRefusal,
   detectLinkedInRefusalWithoutTool,
   detectUnbackedInboxClaim,
   detectUnbackedKnowledgeClaim,
@@ -634,7 +635,15 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       freshRes = { messages: freshMessages.length > 0 ? freshMessages : retryRes.messages };
     }
 
-    const replyText = finalReply(freshRes);
+    let replyText = finalReply(freshRes);
+    const stillUngrounded = needsExecutionGuardRetry(text, freshRes.messages ?? [], replyText);
+    if (stillUngrounded === "knowledge") {
+      trace.event("guard.blocked", { kind: "knowledge" });
+      log.warn({ chatId }, "Knowledge guard blocked ungrounded reply — sending safe refusal");
+      replyText = buildKnowledgeGroundingRefusal();
+      freshRes = { messages: [{ content: replyText, _getType: () => "ai" }] };
+    }
+
     await sendResult(session, freshRes, chatId);
     trace.event("turn.out", {
       replyPreview: replyText.slice(0, 200),
