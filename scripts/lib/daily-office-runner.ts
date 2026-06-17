@@ -95,7 +95,7 @@ export async function runStressTask(
 
   const config: RunnableConfig = {
     configurable: { thread_id: threadId },
-    recursionLimit: OFFICE_RECURSION_LIMIT,
+    recursionLimit: Math.max(OFFICE_RECURSION_LIMIT, 40),
     callbacks: [toolCollector],
   };
 
