@@ -34,6 +34,7 @@ import { buildOfficeInput } from "./pre-router.js";
 import {
   detectLinkedInRefusalWithoutTool,
   detectUnbackedInboxClaim,
+  detectUnbackedKnowledgeClaim,
   detectUnbackedShellClaim,
 } from "./execution-guard.js";
 import { tryInboxReadFastPath } from "./inbox-fast-path.js";
@@ -459,15 +460,16 @@ function needsExecutionGuardRetry(
   userText: string,
   messages: OfficeMessage[],
   reply: string,
-): "shell" | "linkedin" | "inbox" | null {
+): "shell" | "linkedin" | "inbox" | "knowledge" | null {
   if (detectUnbackedShellClaim(userText, messages, reply)) return "shell";
   if (detectLinkedInRefusalWithoutTool(userText, messages, reply)) return "linkedin";
   if (detectUnbackedInboxClaim(userText, messages, reply)) return "inbox";
+  if (detectUnbackedKnowledgeClaim(userText, messages, reply)) return "knowledge";
   return null;
 }
 
 function buildGuardRetryMessages(
-  kind: "shell" | "linkedin" | "inbox",
+  kind: "shell" | "linkedin" | "inbox" | "knowledge",
   userText: string,
 ): BaseMessage[] {
   if (kind === "shell") {
@@ -485,6 +487,17 @@ function buildGuardRetryMessages(
       new SystemMessage(
         `[RETRY DIRECTIVE: Your previous reply summarized the inbox without calling read_emails. ` +
           `Call read_emails NOW with query "${query}" and return sender + subject lines verbatim.]`,
+      ),
+      new HumanMessage(userText),
+    ];
+  }
+  if (kind === "knowledge") {
+    return [
+      new SystemMessage(
+        "[RETRY DIRECTIVE: Your previous reply invented or guessed Turicks/business facts. " +
+          "Call search_knowledge AND search_turicks_brain for the topic. " +
+          "If both return no entries, reply ONLY that turicks-brain has no entry (suggest brain:sync). " +
+          "Do NOT invent ICP, strategy, clients, or positioning.]",
       ),
       new HumanMessage(userText),
     ];
