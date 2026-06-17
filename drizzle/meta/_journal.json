@@ -50,6 +50,13 @@
       "when": 1779880500000,
       "tag": "0006_separate_schemas",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779880600000,
+      "tag": "0007_missions",
+      "breakpoints": true
     }
   ]
 }

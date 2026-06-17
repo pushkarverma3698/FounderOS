@@ -29,9 +29,10 @@ import {
   handleWorkflows, handleRun, handleQ,
   handleSignals, handleRuns,
   handleHalt, handleResume,
+  handleMisoStart, handleMisoPlan, handleMisoStatus, handleMisoClose,
 } from "./commands.js";
 import { registerMediaHandlers } from "./media.js";
-import { routeToOffice, runOfficeText, resumeOffice } from "./office-run.js";
+import { routeToOffice, runOfficeText, runOfficeSession, resumeOffice, resumeOfficeSession } from "./office-run.js";
 
 // Re-export run-loop helpers so tests and media.ts can keep importing from here.
 export {
@@ -43,7 +44,9 @@ export {
   recoverWedgedThread,
   trimThreadHistory,
   runOfficeText,
+  runOfficeSession,
   resumeOffice,
+  resumeOfficeSession,
   formatApprovalCard,
   restorePendingApprovalAfterRestart,
   withChatTurnLock,
@@ -86,6 +89,10 @@ export function registerHandlers(bot: Bot): void {
   bot.command("q",           (ctx: Context) => handleQ(ctx, runOfficeText));
   bot.command("signals",     (ctx: Context) => handleSignals(ctx));
   bot.command("runs",        (ctx: Context) => handleRuns(ctx));
+  bot.command("miso_start",  (ctx: Context) => handleMisoStart(ctx));
+  bot.command("miso_plan",   (ctx: Context) => handleMisoPlan(ctx));
+  bot.command("miso_status", (ctx: Context) => handleMisoStatus(ctx));
+  bot.command("miso_close",  (ctx: Context) => handleMisoClose(ctx));
 
   // ── Free-text messages → office ────────────────────────────────────────────
 

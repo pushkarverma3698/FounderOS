@@ -20,6 +20,7 @@ import { getTodayCostUsd } from "../db/queries.js";
 import { childLogger } from "./logger.js";
 import { runProviderProbes, getLastProviderProbe } from "./provider-probes.js";
 import { getGmailBackend } from "./provider-config.js";
+import { handleWebGatewayRequest } from "../gateway/web.js";
 
 const log = childLogger({ module: "health" });
 
@@ -122,9 +123,20 @@ export async function buildHealthReport(): Promise<HealthReport> {
  */
 export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 3001)): Server {
   const server = createServer((req, res) => {
-    const url = (req.url ?? "/").split("?")[0];
+    const urlPath = (req.url ?? "/").split("?")[0] ?? "/";
 
-    if (req.method === "GET" && url === "/health") {
+    if (urlPath.startsWith("/api/")) {
+      void handleWebGatewayRequest(req, res, port).catch((err) => {
+        log.warn({ err: (err as Error).message }, "Web gateway request failed");
+        if (!res.headersSent) {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "internal_error" }));
+        }
+      });
+      return;
+    }
+
+    if (req.method === "GET" && urlPath === "/health") {
       void buildHealthReport().then((report) => {
         const code = report.checks.database === "up" ? 200 : 503;
         res.writeHead(code, { "content-type": "application/json" });
@@ -133,7 +145,7 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
       return;
     }
 
-    if (req.method === "GET" && url === "/metrics") {
+    if (req.method === "GET" && urlPath === "/metrics") {
       void spendByTenant().then((spend) => {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(
@@ -163,7 +175,7 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
     }
   });
 
-  server.listen(port, () => log.info({ port }, "Health server listening on /health and /metrics"));
+  server.listen(port, () => log.info({ port }, "Health + web gateway listening on /health, /metrics, /api/v1/*"));
   // Don't keep the event loop alive on this socket alone.
   server.unref();
   return server;

@@ -328,3 +328,42 @@ curl http://localhost:3001/health    # health check
 curl http://localhost:3001/metrics   # metrics
 grep "seam:" /tmp/founderos.log      # context isolation boundaries
 ```
+
+---
+
+## MISO Mission Control + JARVIS Web UI
+
+FounderOS implements the [MISO](https://clawhub.ai/ShunsukeHayashi/miso) (Mission Inline Skill Orchestration) pattern for multi-agent visibility.
+
+### Telegram commands
+
+| Command | Purpose |
+|---------|---------|
+| `/miso_start <goal>` | Open a pinned mission dashboard message |
+| `/miso_plan` | Show execution plan for the active mission |
+| `/miso_status` | Mission phase + pending HITL |
+| `/miso_close` | Close mission with summary |
+
+Lifecycle phases: `INIT` → `RUNNING` → `PARTIAL` → `AWAITING APPROVAL` → `COMPLETE` (+ `ERROR`).
+
+Trace events (`turn.in`, `route.decided`, `hitl.interrupt`, `turn.out`) update the mission row and refresh the dashboard.
+
+### Web gateway (JARVIS)
+
+HTTP API mounted on the health port (`3001` by default):
+
+- `POST /api/v1/sessions/:id/messages` — send a task (SSE stream on `/stream`)
+- `GET /api/v1/sessions/:id/stream` — SSE event stream
+- `POST /api/v1/sessions/:id/hitl/approve|reject` — HITL resume
+- `GET /api/v1/missions` — mission board
+- `GET /api/v1/audit` — recent `action_log` rows
+
+Optional auth: set `WEB_GATEWAY_TOKEN` in `.env` (Bearer token required when set).
+
+### JARVIS frontend
+
+```bash
+cd apps/jarvis && pnpm install && pnpm dev
+```
+
+Open http://localhost:5173 — proxies `/api` to `localhost:3001`.
