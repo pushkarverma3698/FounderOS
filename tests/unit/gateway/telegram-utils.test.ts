@@ -175,6 +175,23 @@ describe("collectToolErrors", () => {
     const res = { messages: [makeMsg("tool", '{"success":false,"error":"Email send failed: 401"}')] };
     expect(collectToolErrors(res)).toHaveLength(1);
   });
+
+  // Regression (rule #22/#24, 2026-06-17): a stage-tagged failure envelope must
+  // be detected deterministically by the gateway — no reliance on the keyword
+  // heuristic. This is how DB/Postgres failures now surface to the founder.
+  it("flags a structured tool-failure envelope via the marker (no error keyword in body)", () => {
+    // Body deliberately has NO error keyword — only the [[TOOL_FAILURE]] marker
+    // proves detection, so this genuinely exercises the deterministic path.
+    // Multi-line body so neither the first-line keyword check nor the marker's
+    // own "FAILURE" word lands on line 1 — only isStructuredToolFailure can catch it.
+    const res = {
+      messages: [
+        makeMsg("tool", "❌ turicks_brain returned nothing\nfrom the Postgres lookup [[TOOL_FAILURE stage=db]]"),
+      ],
+    };
+    expect(collectToolErrors(res)).toHaveLength(1);
+    expect(collectToolErrors(res)[0]).toContain("Postgres");
+  });
 });
 
 // ── sliceFreshMessages (per-turn isolation) ─────────────────────────────────────

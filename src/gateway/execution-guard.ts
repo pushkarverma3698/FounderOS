@@ -122,3 +122,61 @@ export function detectUnbackedInboxClaim(
 
 export const INBOX_RETRY_HINT =
   "⚠️ That inbox summary was not from Gmail — retrying with read_emails…";
+
+// ── Unbacked memory / internal-knowledge claim ──────────────────────────────────
+// The single most damaging prod failure mode (2026-06-17): a weak or swapped model
+// answers business/memory questions from its own parametric weights — which know
+// nothing about Turicks/Naggar — instead of calling a DB/memory tool, so it
+// hallucinates. The tool-layer anti-fabricate sentinels (context.ts, knowledge.ts)
+// only fire if the tool is actually CALLED. This guard makes the discipline
+// deterministic and model-agnostic: if the founder asks an internal-knowledge
+// question and zero memory tools fired this turn, force a retry that calls one.
+
+/** The DB/memory-backed tools that must answer internal-knowledge questions. */
+export const MEMORY_TOOL_NAMES = [
+  "read_context",
+  "search_memory",
+  "search_knowledge",
+  "search_turicks_brain",
+] as const;
+
+/** Question is about OUR business / stored decisions / founder context. */
+export const INTERNAL_KNOWLEDGE_RE =
+  /\b(turicks|naggar)\b|\bour\b[^.?!]{0,40}\b(icp|strateg|pricing|price|roadmap|clients?|customers?|offer(?:ing)?s?|services?|positioning|brand|goals?|plans?|stack|vision|mission)\b|\bwhat did we (decide|agree|discuss|choose|pick)\b|\b(do you|what do you)\b[^.?!]{0,20}\b(remember|recall|know)\b[^.?!]{0,40}\b(we|our|i|my|decid|agree)\b|\bfounder(?:'s)? (context|notes?|preferences?)\b|\bmy (notes?|context|preferences?)\b/i;
+
+/** Explicit external/web research — legitimately skips memory tools. */
+export const EXTERNAL_RESEARCH_RE =
+  /\b(search (the )?web|google (it|for)|look (it )?up online|latest news|news about|competitors?|market research|on the (web|internet))\b/i;
+
+export function isInternalKnowledgeRequest(input: string): boolean {
+  const text = input.trim();
+  if (!text || !INTERNAL_KNOWLEDGE_RE.test(text)) return false;
+  if (EXTERNAL_RESEARCH_RE.test(text)) return false;
+  return true;
+}
+
+export function hadAnyMemoryToolCall(messages: OfficeMessageLike[]): boolean {
+  return MEMORY_TOOL_NAMES.some((name) => hadToolCall(messages, name));
+}
+
+/**
+ * True when the founder asked an internal-knowledge question but the office
+ * answered (or asked back) without calling any memory/DB tool — i.e. the reply
+ * is sourced from the model's parametric memory, not FounderOS state. Fail-safe:
+ * if a memory tool fired, we never flag (the tool's own sentinel governs empties).
+ */
+export function detectUnbackedMemoryClaim(
+  userInput: string,
+  messages: OfficeMessageLike[],
+  reply: string,
+): boolean {
+  if (!isInternalKnowledgeRequest(userInput)) return false;
+  if (hadAnyMemoryToolCall(messages)) return false;
+  // Any non-empty reply here is necessarily un-sourced (no tool ran): whether it
+  // fabricated an answer or asked the founder back without checking first, the
+  // correct move is identical — retry and force the memory tool (SELF-QUERY rule).
+  return reply.trim().length > 0;
+}
+
+export const MEMORY_RETRY_HINT =
+  "⚠️ I answered without checking FounderOS memory — retrying with the database…";
