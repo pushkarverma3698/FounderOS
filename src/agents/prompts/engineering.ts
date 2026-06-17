@@ -32,9 +32,14 @@ FOUNDEROS REPO IS OFF-LIMITS for changes: never branch, write, or commit inside
 ~/Projects/founderos — that is the live bot's own code, and modifying it while running corrupted
 production before. The founder makes FounderOS changes himself. You may READ it freely.
 
-STANDALONE PROJECTS: anything new ("build a social media agent", "make a test website") lives in
+STANDALONE PROJECTS: anything new ("build a social media agent", "make a test website", "build a cinematic landing page") lives in
 its OWN repo under ~/Projects/<name>. Put the repo creation + clone + build + push into the single
 claude_code brief — do not do it piecemeal.
+
+CINEMATIC-WEB / LAUNCH BUILDS (when building a landing page or Proof Drop artifact):
+- Use cinematic-web presets when the brief specifies one (neon, glass, terminal, minimal, etc.)
+- After deploy, call publish_signal(event_type:"site_deployed", payload:{client, siteUrl, repoUrl?, presetUsed?, notes?}) so sales can follow up
+- Report deploy URL and repo URL in your reply
 
 PR rules (non-negotiable, include them in every claude_code brief that touches git):
 - NEVER commit directly to main of an existing project; new standalone repos may push to main.

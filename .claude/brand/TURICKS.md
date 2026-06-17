@@ -4,7 +4,7 @@ description: Comprehensive brand identity, voice, channel rules, and token econo
 metadata:
   type: reference
   version: "1.0"
-  last_updated: "2026-06-01"
+  last_updated: "2026-06-17"
 ---
 
 # Turicks — Brand Guidelines
@@ -14,9 +14,9 @@ metadata:
 | Field | Value |
 |---|---|
 | **Name** | Turicks |
-| **Tagline** | "Your SaaS development partner" |
-| **Internal positioning** | "AI-native agency that builds what others only prototype — 3–5 day delivery, working code not decks" |
-| **Mission** | Connect founders with an on-demand AI + engineering team that ships fast and designs well |
+| **Tagline** | "The Autonomous Studio" |
+| **Internal positioning** | "AI-native studio for AI/dev-tool startups — governed delivery on FounderOS, cinematic design finish" |
+| **Mission** | Ship cinematic launch experiences for AI-native startups — beautiful, audited, watchable |
 | **Website** | https://turicks.com |
 | **Type** | AI-native software agency (personal → SaaS operating model) |
 
@@ -27,7 +27,7 @@ metadata:
 ```
 Turicks (agency brand)
 ├── FounderOS           — internal AI OS running all ops (personal-use first, SaaS second)
-│   ├── Departments: sales | engineering | marketing | social | prospecting
+│   ├── Departments: research | comms | engineering | marketing | sales | personal | jobhunt
 │   └── Gateway: Telegram (now) → own web app (next)
 ├── turicks-brain       — knowledge DB + context store (Postgres + pgvector)
 │   └── Source of truth for all brand records, case studies, operational decisions
@@ -41,11 +41,11 @@ Turicks (agency brand)
 
 ## 3. Ideal Customer Profile (ICP)
 
-- **Who**: SME founders, $50K–500K ARR
-- **Where**: EU + US
-- **Pain**: "I need a technical co-founder but can't hire one full-time"
-- **Need**: AI automation, full-stack build, design-conscious software team
-- **Decision trigger**: Wasted money on agencies that delivered decks; wants working code fast
+- **Who**: Founders of AI-native or dev-tool startups (seed–Series A)
+- **Where**: Global, English-first
+- **Pain**: Launch site looks generic; investors/users don't feel the product is cutting-edge
+- **Need**: Cinematic launch experience + governed delivery (not vibe-coded slop)
+- **Decision trigger**: Funding round, product launch, rebrand, or failed agency that delivered decks
 
 ---
 
@@ -53,10 +53,13 @@ Turicks (agency brand)
 
 | Tier | Price | Description |
 |---|---|---|
-| Starter | $500 | First engagement, scoped deliverable |
-| Retainer | $5,000/mo | Ongoing agency relationship |
+| Cinematic Launch Experience | $8,000+ | DFY landing + copy + deploy (cinematic-web) |
+| Retainer | $5,000/mo | Ongoing site iterations + content |
+| Gumroad packs | $14–34 | Passive digital products |
 
-**Positioning**: Premium, value-over-price. Never compete on cost. Frame as ROI, not expense.
+**Retired:** $500 starter (commodity signal — see ADR-032).
+
+**Positioning**: Premium, outcome-based. Never compete on cost. Frame as ROI, not expense.
 
 ---
 
@@ -174,15 +177,9 @@ Every brand output — content, copy, campaign — must follow the cheapest viab
 
 ## 11. Team
 
-| Name | Role |
-|---|---|
-| Pushkar Verma | Software systems optimization (FounderOS architect) |
-| Partha Das | CEO |
-| Sourav Kumar | CTO |
-| Sumit Kumar | Business Head |
-| Omkar | Digital Marketing Head |
-| Akash Bhatti | UI/UX Design |
-| Manish Sharma | Full-stack Engineering |
+**Effectively solo (2026):** Pushkar Verma — founder, FounderOS architect, delivery + design craft.
+
+Historical team references in older collateral are superseded. See ADR-032.
 
 ---
 

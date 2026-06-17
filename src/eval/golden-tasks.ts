@@ -97,6 +97,31 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     note: "Sales researches before drafting; sending is conditional on a verified fit.",
   },
 
+  // ── Cinematic Launch Experience (web design service — ADR-032) ───────────
+  {
+    id: "webdesign-research-leads",
+    input: "Find AI dev-tool startups that might need a cinematic launch landing page.",
+    expectedRoute: "research",
+    expectedTools: ["search_web"],
+    expectsHitl: false,
+    note: "Routes to research for ICP lead discovery; may publish lead_discovered signal.",
+  },
+  {
+    id: "webdesign-proof-drop-outreach",
+    input: "Draft a Proof Drop cold email to the founder of Langfuse about their launch site — we built a demo at https://proof.turicks.com/showcase-1",
+    expectedRoute: "sales",
+    expectedTools: ["search_web", "send_email"],
+    expectsHitl: true,
+    note: "Proof Drop outreach for Cinematic Launch Experience.",
+  },
+  {
+    id: "webdesign-build-landing",
+    input: "Build a cinematic landing page for a fictional AI observability startup called AgentOps using the neon preset.",
+    expectedRoute: "engineering",
+    expectsHitl: true,
+    note: "Whole-task build routes to engineering → claude_code (HITL).",
+  },
+
   // ── ICP Scoring (now a research mode, not a separate department) ─────────
   // Prospecting was merged into research (2026-06-05). ICP scoring uses
   // search_web + search_knowledge — the exact same tools research has.

@@ -14,11 +14,11 @@ This file is the in-repo pointer. All brand decisions, voice rules, and channel 
 
 **Team reality**: Effectively solo — founder executes + learns design craft. (Stale "7-person team" copy retired.)
 
+**Pricing floor**: $8K project / $5K-mo retainer (see docs/strategy/02-OFFER-AND-PRICING.md). **$500 starter retired.**
+
 **Voice**: Direct | Specific | Confident | Practical | Partner (never vendor)
 
 **Primary CTA**: "Book a strategy call" / "See our proof work"
-
-**Pricing floor**: $8K project / $5K-mo retainer. **$500 starter retired** (commodity signal).
 
 **Banned phrases**: "game-changer", "excited to share", "synergy", "I wanted to reach out", "Just following up", "Hope this finds you well" — see full list in global brand doc.
 
