@@ -190,14 +190,22 @@ pnpm test
 ```
 
 ## Model
-**One model for the whole office** (supervisor + all sub-agents): `gemini-2.5-flash` (env: `AGENT_MODEL`).
 
-The old 6-tier multi-provider cascade was removed in v2. See `src/agents/model.ts` for the current truth.
+**Production (VPS only):** `openrouter:google/gemini-2.5-flash-preview-05-20` (paid, set in PROD_DOTENV)
 
-**503 fallback chain** (capacity spikes only): `gemini-2.5-flash → gemini-2.0-flash → gemini-1.5-flash`.  
-Non-503 errors are re-thrown immediately — not silently swallowed.
+**Development / integration testing (local, free):**
+```
+AGENT_MODEL=openrouter:google/gemini-2.5-flash-preview-05-20:free
+AGENT_FALLBACK_MODELS=openrouter:deepseek/deepseek-r1:free,openrouter:meta-llama/llama-3.3-70b-instruct:free
+```
+
+**NEVER set `google-genai:gemini-*` on your local machine.** That routes through the paid Google API key and burns quota on every test run. Always use the OpenRouter free-tier path locally.
+
+**503 fallback chain** (capacity spikes, prod only): free model → next free model in `AGENT_FALLBACK_MODELS`. Non-503 errors are re-thrown immediately.
 
 Temperature: **0 by default** (determinism rule #16). Override with `AGENT_TEMPERATURE` env for creative runs.
+
+See `src/agents/model.ts` for the implementation. The `openrouter:` prefix is mandatory — model.ts infers the provider from the prefix.
 
 ## File Locations Quick Reference
 ```
@@ -404,6 +412,24 @@ sending debugging down the wrong road. Going forward:
 5. **Data-provisioning is part of "done".** A feature that needs data (RAG, embeddings, seeds) isn't
    shipped until the ingestion path exists, runs in the deploy pipeline (or a documented runbook
    step), and is verified to have populated prod. Schema without data is a latent prod outage.
+
+### 23. Cost Gate — zero paid API calls during development (NON-NEGOTIABLE)
+Every real Gemini/OpenRouter paid call during a dev session is waste. The development loop is **zero-cost by design**. Violating this is as serious as a production outage — it burns the founder's daily budget on iteration noise.
+
+**The gate sequence is mandatory. Do not skip steps:**
+
+1. **Write a failing unit test first.** If you can't reproduce the bug in a unit test with mocked LLM output, you don't understand it yet. Do not move to step 2.
+2. **Fix the implementation until the unit test passes.** `pnpm test` is mocked and $0. This is your primary feedback loop — use it aggressively.
+3. **Run `pnpm lint && tsc --noEmit` clean.** Zero errors before ANY live call.
+4. **Integration check with free model.** Set `AGENT_MODEL=openrouter:google/gemini-2.5-flash-preview-05-20:free` and run a single probe only if the logic crosses LLM routing. Free tier, $0.
+5. **MTProto / live Telegram QA exactly once.** Only after steps 1–4 are green. This is the most expensive step. Run it once when the feature is PR-ready, not during debugging.
+6. **`pnpm eval` is a milestone gate.** Run it once when the entire feature is done. Not per iteration, not per file change.
+
+**What this means in practice:**
+- If something "seems broken" during dev: write a test, not a probe script.
+- If `pnpm test` is green but behaviour feels wrong: check mocks match reality before reaching for a live call.
+- Probe scripts (`scripts/probe-*.ts`, `scripts/e2e-telegram-qa.ts`) are verification artifacts, not debugging tools.
+- Any session that runs >3 paid API calls without all unit tests green first is doing it wrong.
 
 ## Engineering Protocol — Verification-First (PERMANENT, applies to every change)
 
