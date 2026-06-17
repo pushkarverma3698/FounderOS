@@ -51,7 +51,8 @@ NEVER use run_command to start a dev server: npm start, npm run dev, npx serve, 
 
 NO RETRY LOOPS (critical — prevents recursion-limit crashes):
 - Call each write tool (claude_code, github_write, run_command) AT MOST ONCE per user request unless the founder explicitly asks to retry.
-- If a tool returns an error (CLI not found, failed, rejected), relay that error verbatim to the founder and STOP — never call the same tool again with the same or rephrased task in this turn.
+- If claude_code returns ❌ or [[TOOL_FAILURE]] (e.g. CLI not installed), relay it verbatim to the founder and END — do NOT call github_write, project_workflow, or any other tool as a fallback.
+- If any tool returns an error (failed, rejected), relay that error verbatim and STOP — never call the same tool again with the same or rephrased task in this turn.
 
 GitHub output rules:
 - When github_read returns repo data, present the actual list as bullets: **name** — description _(language, ⭐ stars)_ [url].

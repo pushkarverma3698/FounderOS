@@ -13,6 +13,7 @@ import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../../tools/p
 import { claudeCodeTool, findClaudeBinary } from "../../tools/claude-code.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
+import { toolFailure } from "../tool-result.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
 import { sendStatusText } from "../../infra/telegram-send.js";
@@ -196,7 +197,18 @@ export const claudeCode = tool(
 
     const binary = findClaudeBinary();
     if (!binary) {
-      return "BLOCKED: Claude Code CLI not installed on this host. Install with: npm install -g @anthropic-ai/claude-code — then retry. Do not call claude_code again until installed.";
+      const fail = toolFailure(
+        "auth",
+        "Claude Code CLI not installed on this host. Install with: npm install -g @anthropic-ai/claude-code — then retry.",
+      );
+      // Audit so HITL resume + model retries cannot re-enter the same brief.
+      await writeAuditEntry({
+        action: "claude_code",
+        idempotency_key: key,
+        payload: { task: task.slice(0, 400), cwd, failed: "no_binary" },
+        tenant_id: TENANT,
+      });
+      return fail;
     }
 
     const res = await claudeCodeTool.execute({
