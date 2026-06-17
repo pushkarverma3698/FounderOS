@@ -67,6 +67,14 @@ const ADMIN_RE =
 const RESEARCH_RE =
   /\bresearch\b|\bnews\b|\bwhat (does|is|are|'s)\b|\bscore\b|\bICP\b|\bqualify\b|\bprospect\b|\bgood fit\b|\bopen items\b|\baccomplished\b|\bsearch for\b|\bsummari[sz]e\b|\bmarket\b|\blatest\b/i;
 
+/** External prospecting — must use search_web, not turicks-brain (eval + prod routing). */
+const EXTERNAL_LEAD_DISCOVERY_RE =
+  /\bfind\b[^.?!]{0,100}\b(startups?|prospects?|leads?)\b|\b(lead|prospect) (discovery|search)\b|\bcompanies that might need\b|\braised seed\b/i;
+
+/** Cinematic / launch-site builds — engineering must use claude_code, not project_workflow. */
+const CINEMATIC_BUILD_RE =
+  /\b(build|deploy|scaffold)\b[^.?!]*\b(cinematic|landing page|launch (site|page|experience))\b|\b(cinematic|neon|glass|terminal|minimal)\s+preset\b|\bcinematic-web\b/i;
+
 const RULES: ReadonlyArray<[RegExp, RoutableDept]> = [
   [PERSONAL_RE, "personal"],
   [MARKETING_RE, "marketing"],
@@ -96,6 +104,11 @@ export function preRouteDepartment(input: string): RoutableDept | null {
   }
 
   if (detectTaskLedger(input)) return null;
+
+  if (CINEMATIC_BUILD_RE.test(input)) return "engineering";
+  if (EXTERNAL_LEAD_DISCOVERY_RE.test(input) && !isInternalKnowledgeRequest(input)) {
+    return "research";
+  }
 
   for (const [pattern, dept] of RULES) {
     if (pattern.test(input)) return dept;
@@ -135,6 +148,12 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
       ` CRITICAL — INBOX READ: Call read_emails immediately with query "${query}". ` +
       `Return sender + subject lines from the tool output — NEVER summarize without calling read_emails.`;
   }
+  if (dept === "research" && EXTERNAL_LEAD_DISCOVERY_RE.test(text) && !isInternalKnowledgeRequest(text)) {
+    directive +=
+      ` CRITICAL — EXTERNAL LEAD DISCOVERY: call search_web immediately for prospect companies. ` +
+      `Do NOT call search_knowledge or search_turicks_brain — this is external market research, not Turicks internal facts. ` +
+      `Score leads from web evidence; publish_signal only when icpScore ≥ 80.`;
+  }
   if (dept === "research" && isInternalKnowledgeRequest(text)) {
     directive += ` CRITICAL — INTERNAL KNOWLEDGE: ${INTERNAL_KNOWLEDGE_DIRECTIVE}`;
   }
@@ -150,6 +169,11 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
     directive += ENGINEERING_SUBGRAPH_ENABLED
       ? ` CRITICAL — GITHUB WRITE: Transfer to engineering. The CTO subgraph MUST delegate to devops and call github_write or project_workflow — never claim an issue/PR was created without an approval card.`
       : ` CRITICAL — GITHUB WRITE: engineering MUST call github_write or project_workflow immediately — never claim an issue/PR was created without an approval card.`;
+  }
+  if (dept === "engineering" && CINEMATIC_BUILD_RE.test(text)) {
+    directive +=
+      ` CRITICAL — CINEMATIC BUILD: call claude_code ONCE with the complete brief (client, preset, deliverables). ` +
+      `NEVER use project_workflow or hand-rolled shell for scaffolding — claude_code owns multi-step builds.`;
   }
   if (dept === "engineering") {
     const handoff = extractEngineeringHandoff(text);
