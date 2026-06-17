@@ -23,6 +23,8 @@ export type Seam =
   | "wedge.recovered"
   | "checkpoint.trim"
   | "guard.retry"
+  | "guard.blocked"
+  | "guard.purged"
   | "inbox.fastpath"
   | "hierarchy.enter"
   | "hierarchy.exit"
