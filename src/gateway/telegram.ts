@@ -27,6 +27,7 @@ import {
   handleTarget, handleTargets, handleUntarget,
   handleOutbound, handleCommands, handleDepartments,
   handleWorkflows, handleRun, handleQ,
+  handleSignals, handleRuns,
   handleHalt, handleResume,
 } from "./commands.js";
 import { registerMediaHandlers } from "./media.js";
@@ -83,6 +84,8 @@ export function registerHandlers(bot: Bot): void {
   bot.command("run",         (ctx: Context) => handleRun(ctx, runOfficeText));
   // Phase 2 — Power-user direct-to-dept bypass
   bot.command("q",           (ctx: Context) => handleQ(ctx, runOfficeText));
+  bot.command("signals",     (ctx: Context) => handleSignals(ctx));
+  bot.command("runs",        (ctx: Context) => handleRuns(ctx));
 
   // ── Free-text messages → office ────────────────────────────────────────────
 
