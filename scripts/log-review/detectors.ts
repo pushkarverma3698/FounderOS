@@ -4,9 +4,39 @@ import type { Anomaly, Turn } from "./types.js";
 const LATENCY_MS = 30_000; // turn.out ms over this = slow
 const COST_USD = 0.05; // per-turn cost over this = spike
 
+/** Tool previews that mean "looked, found nothing" — NOT grounding for a confident reply. */
+const EMPTY_TOOL_RESULT_RE =
+  /\b(no (knowledge|memory) (entries )?found|nothing found|may not have been synced|not found for|try different keywords)\b/i;
+
 const hasSeam = (t: Turn, seam: string): boolean => t.lines.some((l) => l.seam === seam);
 const lineText = (t: Turn): string =>
   t.lines.map((l) => `${l.msg ?? ""} ${l.raw}`).join(" ").toLowerCase();
+
+function toolResultPreview(line: Turn["lines"][number]): string {
+  const fromData = line.data?.["preview"];
+  if (typeof fromData === "string") return fromData;
+  return line.raw;
+}
+
+/**
+ * True when a turn has a tool.result that actually returned content — not an
+ * empty-store miss (the canonical 2026-06-15 fabrication class).
+ */
+export function hasSubstantiveGrounding(t: Turn): boolean {
+  for (const line of t.lines) {
+    if (line.seam !== "tool.result") continue;
+    const preview = toolResultPreview(line);
+    if (EMPTY_TOOL_RESULT_RE.test(preview)) continue;
+    if (preview.trim().length > 0) return true;
+  }
+  // Legacy weak signal: explicit rag/search_knowledge mention in non-empty previews
+  if (lineText(t).includes("rag") || lineText(t).includes("search_knowledge")) {
+    return t.lines.some(
+      (l) => l.seam === "tool.result" && !EMPTY_TOOL_RESULT_RE.test(toolResultPreview(l)),
+    );
+  }
+  return false;
+}
 
 /** level>=50 anywhere in the turn. */
 function detectError(t: Turn): Anomaly | null {
@@ -53,29 +83,67 @@ function detectLatencyCost(t: Turn): Anomaly | null {
 }
 
 /**
+ * Empty knowledge/memory search followed by a long model reply — the prod
+ * ICP fabrication pattern (tools ran but returned nothing; model filled in anyway).
+ */
+function detectEmptyStoreFabrication(t: Turn): Anomaly | null {
+  const hadEmptySearch = t.lines.some(
+    (l) => l.seam === "tool.result" && EMPTY_TOOL_RESULT_RE.test(toolResultPreview(l)),
+  );
+  if (!hadEmptySearch) return null;
+  const substantive =
+    (t.reply ?? "").trim().length >= 40 || (t.outputTokens ?? 0) >= 120;
+  if (!substantive) return null;
+  const refusal = /\b(i don't have|i do not have|cannot|can't|no information|not able|don't know|may not have been synced|run `pnpm brain:sync`)\b/i.test(
+    t.reply ?? "",
+  );
+  if (refusal) return null;
+  return {
+    type: "hallucination_candidate",
+    severity: "medium",
+    turnId: t.turnId,
+    summary: `Turn ${t.turnId}: empty knowledge/memory search then substantive reply (${t.outputTokens ?? "?"} tok) — fabrication candidate.`,
+    evidence: [
+      (t.reply ?? `outputTokens=${t.outputTokens ?? "?"}`).slice(0, 200),
+      ...t.lines
+        .filter((l) => l.seam === "tool.result" && EMPTY_TOOL_RESULT_RE.test(toolResultPreview(l)))
+        .map((l) => toolResultPreview(l).slice(0, 120))
+        .slice(0, 2),
+    ],
+  };
+}
+
+/**
  * Borderline router (NOT an assertion). A confident-looking reply with no
  * supporting tool.result / rag hit in the turn is a fabrication CANDIDATE —
  * Claude judges it in Stage 3. Honest refusals are excluded.
  */
 function detectHallucinationCandidate(t: Turn): Anomaly | null {
   const reply = (t.reply ?? "").trim();
-  if (!reply) return null;
-  const refusal = /\b(i don't have|i do not have|cannot|can't|no information|not able|don't know)\b/i.test(reply);
-  if (refusal) return null; // honest refusal = good behaviour, never a candidate
-  const grounded = hasSeam(t, "tool.result") || lineText(t).includes("rag") || lineText(t).includes("search_knowledge");
-  if (grounded) return null;
+  const substantive = reply.length >= 40 || (t.outputTokens ?? 0) >= 120;
+  if (!substantive) return null;
+  const refusal = /\b(i don't have|i do not have|cannot|can't|no information|not able|don't know)\b/i.test(
+    reply,
+  );
+  if (refusal) return null;
+  if (hasSubstantiveGrounding(t)) return null;
   // confident, substantive, ungrounded → candidate only
-  if (reply.length < 40) return null;
   return {
     type: "hallucination_candidate",
     severity: "low",
     turnId: t.turnId,
     summary: `Turn ${t.turnId}: confident reply with no tool/RAG support — Claude to judge.`,
-    evidence: [reply.slice(0, 200)],
+    evidence: [(reply || `outputTokens=${t.outputTokens ?? "?"}`).slice(0, 200)],
   };
 }
 
-const DETECTORS = [detectError, detectWedge, detectLatencyCost, detectHallucinationCandidate];
+const DETECTORS = [
+  detectError,
+  detectWedge,
+  detectLatencyCost,
+  detectEmptyStoreFabrication,
+  detectHallucinationCandidate,
+];
 
 /** Run every detector over every turn. Pure. */
 export function runDetectors(turns: Turn[]): Anomaly[] {

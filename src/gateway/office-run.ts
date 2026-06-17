@@ -656,8 +656,10 @@ async function runOfficeTextLocked(ctx: Context, text: string, chatId: number | 
       freshRes = { messages: freshMessages.length > 0 ? freshMessages : retryRes.messages };
     }
 
+    const replyText = finalReply(freshRes);
     await sendResult(ctx, freshRes, chatId);
     trace.event("turn.out", {
+      replyPreview: replyText.slice(0, 200),
       toolErrors: collectToolErrors(freshRes).length,
       inputTokens: budget.summary.totalInputTokens,
       outputTokens: budget.summary.totalOutputTokens,
@@ -811,8 +813,10 @@ async function resumeOfficeLocked(ctx: Context, decision: "approved" | "rejected
     if (row) await resolveInterrupt(row.interrupt_id, "approved");
     const freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
     const freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
+    const replyText = finalReply(freshRes);
     await sendResult(ctx, freshRes, chatId);
     trace.event("turn.out", {
+      replyPreview: replyText.slice(0, 200),
       resumed: true,
       inputTokens: budget.summary.totalInputTokens,
       outputTokens: budget.summary.totalOutputTokens,
