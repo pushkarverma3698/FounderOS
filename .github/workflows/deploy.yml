@@ -105,12 +105,12 @@ jobs:
             if [ -n "${OPENROUTER_API_KEY:-}" ]; then
               grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
               {
-                printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-flash-preview-05-20'
+                printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-flash'
                 printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
                 printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
               } >> .env.patched
               mv .env.patched .env
               chmod 600 .env
-              echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-flash-preview-05-20"
+              echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-flash"
             fi
             ./deploy/deploy.sh
