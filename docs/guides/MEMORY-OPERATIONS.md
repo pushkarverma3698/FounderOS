@@ -14,7 +14,7 @@
 **What it reads:**
 - `docs/decisions/` (ADRs)
 - `docs/phases/` (phase docs)
-- `docs/superpowers/specs/` (design specs)
+- `docs/strategy/` (positioning and GTM)
 - `docs/BRAND.md` (brand guidelines)
 
 **What it does:**

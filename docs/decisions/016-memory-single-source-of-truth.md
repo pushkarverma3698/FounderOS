@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-06-04
-**Supersedes / extends:** the design spec `docs/superpowers/specs/2026-06-04-memory-system-design.md`
+**Supersedes:** deleted `docs/superpowers/specs/2026-06-04-memory-system-design.md` (docs purge 2026-06)
 
 ---
 
@@ -63,6 +63,5 @@ re-ingest for personal-rag, and `MEMORY.md` for the fast index.
   over HTTP (Phase 2 of the memory spec); pgvector hybrid search for semantic recall (F2).
 
 ## See also
-- `docs/superpowers/specs/2026-06-04-memory-system-design.md` — full design
 - ADR-013 (keep personal/engineering separate), ADR-015 (jobhunt + personal-rag boundary)
 - `src/tools/memory.ts`, `src/infra/conversation-recorder.ts`, `scripts/sync-turicks-brain.ts`

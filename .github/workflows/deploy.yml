@@ -91,17 +91,26 @@ jobs:
             else
               echo "==> PROD_DOTENV not set; using the .env already on the box"
             fi
-            # While Gemini credits are depleted, prefer OpenRouter when the key is
-            # available in GitHub secrets — avoids re-encoding the full PROD_DOTENV blob.
+            # Pin the production model on deploy without re-encoding the full
+            # PROD_DOTENV blob. Gemini 2.5 Flash is the documented production model
+            # (CLAUDE.md) and a strong agentic tool-caller.
+            #
+            # ROOT-CAUSE FIX (2026-06-17): the previous override forced
+            # openrouter:openai/gpt-4o-mini as a Gemini-credits-depleted stop-gap.
+            # gpt-4o-mini is too weak for this supervisor+ReAct topology — it chatted
+            # instead of routing and skipped DB/memory tool calls, so the bot answered
+            # from parametric memory and hallucinated. Gemini is funded again, so we
+            # revert to it. Fallback dropped the deprecated google-genai:gemini-2.0-flash
+            # (404 since ~May 2026) — now a single, healthy, different-family fallback.
             if [ -n "${OPENROUTER_API_KEY:-}" ]; then
               grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
               {
-                printf '%s\n' 'AGENT_MODEL=openrouter:openai/gpt-4o-mini'
-                printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5,google-genai:gemini-2.0-flash'
+                printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-flash-preview-05-20'
+                printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
                 printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
               } >> .env.patched
               mv .env.patched .env
               chmod 600 .env
-              echo "==> Patched .env: AGENT_MODEL=openrouter:openai/gpt-4o-mini"
+              echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-flash-preview-05-20"
             fi
             ./deploy/deploy.sh

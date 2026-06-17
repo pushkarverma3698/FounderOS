@@ -1,7 +1,7 @@
 # Turicks Strategy — Document Index
 
 > **Locked:** 2026-06-17 · **Category:** The Autonomous Studio  
-> **ADR:** [032-ai-native-studio-repositioning.md](../decisions/032-ai-native-studio-repositioning.md)
+> **ADR:** [033-ai-native-studio-repositioning.md](../decisions/033-ai-native-studio-repositioning.md)
 
 ---
 
@@ -33,9 +33,8 @@
 | Doc | Status |
 |-----|--------|
 | [PHASE-D-REVENUE-FLYWHEEL.md](../phases/PHASE-D-REVENUE-FLYWHEEL.md) | Superseded by Phase D-Bis |
-| [study/archive/SCALING-AND-PORTFOLIO-STRATEGY.md](../study/archive/SCALING-AND-PORTFOLIO-STRATEGY.md) | Archived — pre-repositioning |
-| [study/archive/STRATEGIC-VISION.md](../study/archive/STRATEGIC-VISION.md) | Archived — v1 strategic vision |
-| [study/archive/STRATEGY-WEEK-SPRINT.md](../study/archive/STRATEGY-WEEK-SPRINT.md) | Archived — sprint notes |
+
+_Pre-repositioning strategy archives were removed in the 2026-06 docs purge; see ADR-033 for the current positioning._
 
 ---
 
