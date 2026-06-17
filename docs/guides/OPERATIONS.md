@@ -325,8 +325,12 @@ psql founderos -c "SELECT * FROM knowledge_entries LIMIT 1;"
 ```bash
 tail -f /tmp/founderos.log           # live logs
 curl http://localhost:3001/health    # health check
+curl http://localhost:3001/api/v1/health  # JARVIS web gateway
 curl http://localhost:3001/metrics   # metrics
 grep "seam:" /tmp/founderos.log      # context isolation boundaries
+
+# Live MISO + JARVIS smoke (Postgres + HTTP + mission CRUD)
+pnpm test:smoke:miso
 ```
 
 ---
