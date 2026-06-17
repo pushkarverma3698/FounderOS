@@ -21,11 +21,13 @@ import {
 import { buildBatchPrompt, splitBatch, parseCompanyArgs } from "../outbound/batch.js";
 import { getSystemStatus, formatRichStatus } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
-import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals, countPendingDeptSignals } from "../db/queries.js";
+import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals, countPendingDeptSignals, listPendingDeptSignals, getRecentLlmCosts, getTodayCostUsd } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
 import { runWorkflow, validateParams } from "../workflows/runner.js";
+import { formatSignalsMessage, formatRunsMessage, parseRunsLimit } from "./pipeline-format.js";
+import { formatProviderStatusLine, getLastProviderProbe } from "../infra/provider-probes.js";
 
 /** Escape special HTML characters for Telegram HTML parse mode. */
 function safeHtml(text: string): string {
@@ -61,7 +63,9 @@ export async function handleStart(ctx: Context): Promise<void> {
       `• <code>/run onboarding company=Acme</code> — score → research → email → repo\n` +
       `• <code>/run outbound company=Stripe</code> — score → hook → cold email\n\n` +
       `⚡ <b>Power-user</b>\n` +
-      `• <code>/q research what does Anthropic do?</code> — direct to department\n\n` +
+      `• <code>/q research what does Anthropic do?</code> — direct to department\n` +
+      `• <code>/signals</code> — pending pipeline signals (leads, handoffs)\n` +
+      `• <code>/runs</code> — recent LLM calls + today's spend\n\n` +
       `⚙️ <b>System</b>\n` +
       `• <code>/help</code> — full command list (same as /commands)\n` +
       `• <code>/ping</code> — check if the bot is alive + latency\n` +
@@ -213,6 +217,7 @@ export async function handleStatus(ctx: Context): Promise<void> {
       lastEventRelativeTime,
       outboundTargetCount: outboundTargets.length,
       pendingSignals,
+      providerStatusLine: formatProviderStatusLine(getLastProviderProbe()),
     });
 
     await ctx.reply(message, { parse_mode: "HTML" });
@@ -342,7 +347,7 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<code>/start</code> — welcome message + quick-start guide\n` +
     `<code>/commands</code> — this list\n` +
     `<code>/departments</code> — what each department does\n` +
-    `<code>/status</code> — uptime, pending approvals, emails sent today\n` +
+    `<code>/status</code> — uptime, pending approvals, pipeline + activity today\n` +
     `<code>/reset</code> — wipe this chat's memory (start a fresh conversation)\n` +
     `<code>/halt [reason]</code> — 🛑 kill switch: refuse all new tasks until /resume\n` +
     `<code>/resume</code> — lift the halt and process tasks normally again\n\n` +
@@ -370,7 +375,9 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<b>⚡ Power-user direct routing</b>\n` +
     `<code>/q &lt;dept&gt; &lt;task&gt;</code> — skip supervisor, go straight to a department\n` +
     `  Example: <code>/q research what does Anthropic do?</code>\n` +
-    `  Departments: research · comms · engineering · marketing · sales · personal · jobhunt\n\n` +
+    `  Departments: research · comms · engineering · marketing · sales · personal · jobhunt\n` +
+    `<code>/signals</code> — list pending cross-department signals (read-only)\n` +
+    `<code>/runs [n]</code> — last n LLM calls + today's spend (default 10, max 25)\n\n` +
 
     `<b>🔒 Approval-gated actions</b> (bot asks before sending)\n` +
     `<i>"Email alex@acme.com about X"</i> → approval card → ✅/❌\n` +
@@ -548,4 +555,32 @@ export async function handleQ(
   const routed = `[Route directly to ${dept} department]: ${task}`;
   log.info({ dept, task: task.slice(0, 80) }, "/q direct-to-dept");
   await runOfficeText(ctx, routed);
+}
+
+// ── /signals — pending dept_signals (read-only) ───────────────────────────────
+
+export async function handleSignals(ctx: Context): Promise<void> {
+  try {
+    const signals = await listPendingDeptSignals(TENANT, 20);
+    await ctx.reply(formatSignalsMessage(signals), { parse_mode: "HTML" });
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "/signals failed");
+    await ctx.reply(`❌ Could not load signals: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
+  }
+}
+
+// ── /runs — recent LLM cost digest ────────────────────────────────────────────
+
+export async function handleRuns(ctx: Context): Promise<void> {
+  try {
+    const limit = parseRunsLimit((ctx.match ?? "").toString());
+    const [todayUsd, calls] = await Promise.all([
+      getTodayCostUsd(TENANT),
+      getRecentLlmCosts(TENANT, limit),
+    ]);
+    await ctx.reply(formatRunsMessage(todayUsd, calls), { parse_mode: "HTML" });
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "/runs failed");
+    await ctx.reply(`❌ Could not load runs: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
+  }
 }

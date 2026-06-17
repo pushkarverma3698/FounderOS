@@ -35,8 +35,8 @@ describe("P2 — engineering subgraph flag wiring", () => {
   it("default (flag unset): office compiles with a flat 'engineering' department node", async () => {
     const nodes = await compileOfficeNodes(undefined);
     expect(nodes).toContain(ENG_NODE);
-    // All 7 departments routable regardless of topology.
-    for (const dept of ["research", "comms", "engineering", "marketing", "sales", "personal", "jobhunt"]) {
+    // All 8 departments routable regardless of topology.
+    for (const dept of ["admin", "research", "comms", "engineering", "marketing", "sales", "personal", "jobhunt"]) {
       expect(nodes).toContain(dept);
     }
   });
@@ -52,7 +52,7 @@ describe("P2 — engineering subgraph flag wiring", () => {
     expect(nodes).toContain(ENG_NODE);
     // The supervisor's routable agent set is identical — only the node's internal
     // topology (flat agent vs CTO sub-supervisor) changes.
-    for (const dept of ["research", "comms", "engineering", "marketing", "sales", "personal", "jobhunt"]) {
+    for (const dept of ["admin", "research", "comms", "engineering", "marketing", "sales", "personal", "jobhunt"]) {
       expect(nodes).toContain(dept);
     }
   });
