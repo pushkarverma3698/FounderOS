@@ -13,6 +13,10 @@ import {
   SHELL_RUN_RE,
 } from "./execution-guard.js";
 import { buildTaskLedgerDirective, detectTaskLedger } from "./task-ledger.js";
+import {
+  extractEngineeringHandoff,
+  formatEngineeringHandoffEnvelope,
+} from "../agents/handoff-engineering.js";
 
 /** Routable departments (matches office.ts + eval Department). */
 export type RoutableDept =
@@ -136,6 +140,10 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
     directive += ENGINEERING_SUBGRAPH_ENABLED
       ? ` CRITICAL — GITHUB WRITE: Transfer to engineering. The CTO subgraph MUST delegate to devops and call github_write or project_workflow — never claim an issue/PR was created without an approval card.`
       : ` CRITICAL — GITHUB WRITE: engineering MUST call github_write or project_workflow immediately — never claim an issue/PR was created without an approval card.`;
+  }
+  if (dept === "engineering") {
+    const handoff = extractEngineeringHandoff(text);
+    directive += ` ${formatEngineeringHandoffEnvelope(handoff)}`;
   }
   return directive;
 }
