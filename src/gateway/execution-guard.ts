@@ -122,3 +122,75 @@ export function detectUnbackedInboxClaim(
 
 export const INBOX_RETRY_HINT =
   "⚠️ That inbox summary was not from Gmail — retrying with read_emails…";
+
+// ── Knowledge / RAG grounding guard (prod ICP fabrication class) ─────────────
+
+/** Tool returned empty store — model must refuse, not invent. */
+export const EMPTY_KNOWLEDGE_RESULT_RE =
+  /\b(no (knowledge|memory) (entries )?found|no memory found|nothing found|do not fabricate|may not have been synced)\b/i;
+
+/** Honest refusal language — never retry these. */
+export const HONEST_KNOWLEDGE_REFUSAL_RE =
+  /\b(no (knowledge|memory|information|entry|entries)|don't have|do not have|not (found|in the knowledge)|brain:sync|may not have|try different keywords)\b/i;
+
+/** User asked about internal Turicks/business facts (not generic small talk). */
+export const INTERNAL_KNOWLEDGE_REQUEST_RE =
+  /\b(turicks|icp|naggar|our (brand|positioning|strategy|pillar|icp)|what (is|are) we|company context|turicks-?brain|strategic pillar)\b/i;
+
+export const KNOWLEDGE_SEARCH_TOOLS = [
+  "search_knowledge",
+  "search_memory",
+  "search_turicks_brain",
+  "search_personal_rag",
+  "read_cv",
+] as const;
+
+function toolMessageText(m: OfficeMessageLike): string {
+  return typeof m.content === "string" ? m.content : "";
+}
+
+export function hadKnowledgeSearchTool(messages: OfficeMessageLike[]): boolean {
+  return KNOWLEDGE_SEARCH_TOOLS.some((t) => hadToolCall(messages, t));
+}
+
+/** True when a knowledge/RAG tool ran and returned an explicit empty-store message. */
+export function hadEmptyKnowledgeToolResult(messages: OfficeMessageLike[]): boolean {
+  for (const m of messages) {
+    const type = m._getType?.() ?? "";
+    if (type !== "tool") continue;
+    const name = m.name ?? "";
+    if (!KNOWLEDGE_SEARCH_TOOLS.includes(name as (typeof KNOWLEDGE_SEARCH_TOOLS)[number])) continue;
+    if (EMPTY_KNOWLEDGE_RESULT_RE.test(toolMessageText(m))) return true;
+  }
+  return false;
+}
+
+export function isInternalKnowledgeRequest(input: string): boolean {
+  return INTERNAL_KNOWLEDGE_REQUEST_RE.test(input.trim());
+}
+
+/**
+ * True when the model answered with confident internal business facts despite:
+ * - an empty knowledge/memory/RAG tool result, OR
+ * - no knowledge search at all on an internal-facts question.
+ */
+export function detectUnbackedKnowledgeClaim(
+  userInput: string,
+  messages: OfficeMessageLike[],
+  reply: string,
+): boolean {
+  const text = reply.trim();
+  if (text.length < 40) return false;
+  if (HONEST_KNOWLEDGE_REFUSAL_RE.test(text)) return false;
+
+  if (hadEmptyKnowledgeToolResult(messages)) return true;
+
+  if (isInternalKnowledgeRequest(userInput) && !hadKnowledgeSearchTool(messages) && text.length >= 80) {
+    return true;
+  }
+
+  return false;
+}
+
+export const KNOWLEDGE_RETRY_HINT =
+  "⚠️ That answer wasn't grounded in turicks-brain — retrying with a real knowledge search…";
