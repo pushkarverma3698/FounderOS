@@ -1,32 +1,38 @@
 /**
  * FounderOS — Integration provider health probes
  * ================================================
- * Reachability checks for Composio Gmail and gws — used at boot smoke, /health,
- * and /status. Failures are reported with the REAL component name (rule #22).
+ * Reachability checks for gws (primary) and legacy Composio — used at boot smoke,
+ * /health, and /status. Failures name the REAL component (rule #22).
  */
 
 import { Composio } from "@composio/core";
-import {
-  getComposioApiKey,
-  getGmailConnectionId,
-} from "./composio.js";
+import { getComposioApiKey, getGmailConnectionId } from "./composio.js";
 import { runGws } from "./gws-runner.js";
 import {
+  getCalendarBackend,
   getGmailBackend,
+  getLinkedInBackend,
   getProviderProbeTimeoutMs,
   type ProviderCheck,
   type ProviderStatus,
 } from "./provider-config.js";
+import { linkedInDirectConfigured } from "./providers/linkedin-direct.js";
+import { composioGoogleConfigured } from "./providers/google-composio.js";
+import { composioLinkedInConfigured } from "./providers/linkedin-composio.js";
 import { childLogger } from "./logger.js";
 
 const log = childLogger({ module: "provider-probes" });
 
 export interface ProviderProbeReport {
   checked_at: string;
-  gmail_backend: "composio" | "gws";
-  composio_gmail: ProviderCheck;
+  gmail_backend: "gws" | "composio";
+  calendar_backend: "gws" | "composio";
+  linkedin_backend: "direct" | "composio";
   gws_gmail: ProviderCheck;
+  composio_gmail: ProviderCheck;
   active_gmail: ProviderCheck;
+  active_calendar: ProviderCheck;
+  active_linkedin: ProviderCheck;
 }
 
 let lastProbe: ProviderProbeReport | null = null;
@@ -45,14 +51,13 @@ function check(status: ProviderStatus, detail: string): ProviderCheck {
 
 /** Probe Composio: API key present + Gmail connection ACTIVE. */
 export async function probeComposioGmail(timeoutMs = getProviderProbeTimeoutMs()): Promise<ProviderCheck> {
-  const apiKey = getComposioApiKey();
-  if (!apiKey) {
-    return check("unconfigured", "COMPOSIO_API_KEY not set");
+  if (!composioGoogleConfigured()) {
+    return check("unconfigured", "COMPOSIO_API_KEY not set (legacy fallback)");
   }
 
   const connId = getGmailConnectionId();
   try {
-    const composio = new Composio({ apiKey });
+    const composio = new Composio({ apiKey: getComposioApiKey()! });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const client = composio.getClient() as any;
     const probe = client.connectedAccounts.get(connId);
@@ -62,12 +67,11 @@ export async function probeComposioGmail(timeoutMs = getProviderProbeTimeoutMs()
     const account = (await Promise.race([probe, timeout])) as Record<string, unknown>;
     const status = String(account["status"] ?? account["state"] ?? "unknown");
     if (status.toUpperCase() === "ACTIVE") {
-      return check("up", `Gmail connection ${connId} ACTIVE`);
+      return check("up", `Composio Gmail ${connId} ACTIVE`);
     }
-    return check("down", `Composio Gmail connection ${connId} status=${status} — reconnect at app.composio.dev`);
+    return check("down", `Composio Gmail ${connId} status=${status}`);
   } catch (err) {
-    const msg = (err as Error).message;
-    return check("down", `Composio Gmail probe failed: ${msg}`);
+    return check("down", `Composio Gmail probe failed: ${(err as Error).message}`);
   }
 }
 
@@ -91,62 +95,83 @@ export async function probeGwsGmail(timeoutMs = getProviderProbeTimeoutMs()): Pr
   return check("down", `gws not ready: ${listed.error}`);
 }
 
-/** Run all Gmail provider probes and cache the result. */
+function probeLinkedInDirect(): ProviderCheck {
+  if (!linkedInDirectConfigured()) {
+    return check("unconfigured", "LINKEDIN_ACCESS_TOKEN or LINKEDIN_AUTHOR_URN not set");
+  }
+  return check("up", "LinkedIn direct API credentials configured");
+}
+
+function probeLinkedInComposio(): ProviderCheck {
+  if (!composioLinkedInConfigured()) {
+    return check("unconfigured", "COMPOSIO_API_KEY not set (legacy fallback)");
+  }
+  return check("up", "Composio LinkedIn configured");
+}
+
+/** Run all provider probes and cache the result. */
 export async function runProviderProbes(): Promise<ProviderProbeReport> {
   const timeoutMs = getProviderProbeTimeoutMs();
-  const backend = getGmailBackend();
+  const gmailBackend = getGmailBackend();
+  const calendarBackend = getCalendarBackend();
+  const linkedinBackend = getLinkedInBackend();
+
   const [composio_gmail, gws_gmail] = await Promise.all([
     probeComposioGmail(timeoutMs),
     probeGwsGmail(timeoutMs),
   ]);
 
-  const active_gmail = backend === "gws" ? gws_gmail : composio_gmail;
+  const active_gmail = gmailBackend === "gws" ? gws_gmail : composio_gmail;
+  const active_calendar = calendarBackend === "gws" ? gws_gmail : composio_gmail;
+  const active_linkedin =
+    linkedinBackend === "direct" ? probeLinkedInDirect() : probeLinkedInComposio();
 
   const report: ProviderProbeReport = {
     checked_at: new Date().toISOString(),
-    gmail_backend: backend,
+    gmail_backend: gmailBackend,
+    calendar_backend: calendarBackend,
+    linkedin_backend: linkedinBackend,
     composio_gmail,
     gws_gmail,
     active_gmail,
+    active_calendar,
+    active_linkedin,
   };
   setLastProviderProbe(report);
   return report;
 }
 
-/**
- * Boot-time smoke: log provider reachability. Non-fatal — warns only.
- * Called from index.ts when shouldRunProviderSmoke() is true.
- */
 export async function runProviderSmokeAtBoot(): Promise<void> {
   log.info("Running provider smoke probes…");
   const report = await runProviderProbes();
   const tag = (s: ProviderStatus) => (s === "up" ? "UP" : s === "down" ? "DOWN" : "SKIP");
 
   log.info(
-    `[boot] Gmail backend=${report.gmail_backend}  active=${tag(report.active_gmail.status)}  composio=${tag(report.composio_gmail.status)}  gws=${tag(report.gws_gmail.status)}`,
+    `[boot] gmail=${report.gmail_backend}/${tag(report.active_gmail.status)} ` +
+      `calendar=${report.calendar_backend}/${tag(report.active_calendar.status)} ` +
+      `linkedin=${report.linkedin_backend}/${tag(report.active_linkedin.status)}`,
   );
-  if (report.active_gmail.status === "down") {
-    log.warn(
-      { detail: report.active_gmail.detail, backend: report.gmail_backend },
-      "Active Gmail provider is DOWN — email read/send may fail until fixed",
-    );
-  }
+
   for (const [name, cap] of [
-    ["composio_gmail", report.composio_gmail],
-    ["gws_gmail", report.gws_gmail],
+    ["active_gmail", report.active_gmail],
+    ["active_calendar", report.active_calendar],
+    ["active_linkedin", report.active_linkedin],
   ] as const) {
     if (cap.status === "down") {
-      log.warn({ provider: name, detail: cap.detail }, "Provider probe DOWN");
+      log.warn({ provider: name, detail: cap.detail }, "Active provider probe DOWN");
     }
   }
 }
 
-/** One-line summary for /status (uses cache if fresh enough, else config-only). */
 export function formatProviderStatusLine(report: ProviderProbeReport | null): string {
-  const backend = getGmailBackend();
+  const gmail = getGmailBackend();
+  const linkedin = getLinkedInBackend();
   if (!report) {
-    return `📡 Gmail: <code>${backend}</code> (probe pending)`;
+    return `📡 Gmail: <code>${gmail}</code> · LinkedIn: <code>${linkedin}</code> (probe pending)`;
   }
-  const icon = report.active_gmail.status === "up" ? "🟢" : report.active_gmail.status === "down" ? "🔴" : "⚪";
-  return `${icon} Gmail: <code>${backend}</code> · ${report.active_gmail.detail.slice(0, 60)}`;
+  const icon = (s: ProviderStatus) => (s === "up" ? "🟢" : s === "down" ? "🔴" : "⚪");
+  return (
+    `${icon(report.active_gmail.status)} Gmail <code>${gmail}</code> · ` +
+    `${icon(report.active_linkedin.status)} LinkedIn <code>${linkedin}</code>`
+  );
 }

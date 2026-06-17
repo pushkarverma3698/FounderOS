@@ -1,0 +1,46 @@
+/**
+ * FounderOS — Integration provider types
+ * =======================================
+ * Stable contracts between tools and platform backends. Tools depend on these
+ * shapes — never on Composio, gws, or LinkedIn REST field names.
+ *
+ * See ADR-029 (direct platform integrations).
+ */
+
+import type { ToolResult } from "../../tools/index.js";
+
+/** Which adapter executes a platform call. Env-selectable; default = direct/gws. */
+export type GoogleBackend = "gws" | "composio";
+export type LinkedInBackend = "direct" | "composio";
+
+export interface SendEmailInput {
+  to: string;
+  subject: string;
+  body: string;
+  cc?: string;
+  reply_to?: string;
+}
+
+export interface ReadEmailsInput {
+  query: string;
+  max_results: number;
+}
+
+export interface CreateCalendarEventInput {
+  title: string;
+  start_datetime: string;
+  end_datetime: string;
+  timezone: string;
+  description?: string;
+}
+
+export interface LinkedInPostInput {
+  text: string;
+  author_urn: string;
+  image_url?: string;
+  visibility: "PUBLIC" | "CONNECTIONS";
+  schedule_time?: string;
+}
+
+/** Uniform provider outcome — maps 1:1 to ToolResult at the tool boundary. */
+export type ProviderOutcome = ToolResult;

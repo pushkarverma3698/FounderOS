@@ -1,16 +1,19 @@
 /**
  * FounderOS — Provider backend configuration
  * ===========================================
- * Centralizes which integration adapter is active for Gmail reads (Composio vs
- * gws). Departments and agent-tools stay unchanged — only tool bodies switch.
+ * Centralizes which integration adapter is active per platform.
+ * Departments and agent-tools stay unchanged — only provider adapters switch.
  *
- * See ADR-028 (Composio vs direct CLIs).
+ * Defaults (ADR-029): gws (Google), direct (LinkedIn). Composio = legacy rollback.
+ * See docs/decisions/029-direct-platform-integrations.md
  */
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import type { GoogleBackend, LinkedInBackend } from "./providers/types.js";
 
-export type GmailBackend = "composio" | "gws";
+export type GmailBackend = GoogleBackend;
+export type CalendarBackend = GoogleBackend;
 
 export type ProviderStatus = "up" | "down" | "unconfigured";
 
@@ -38,10 +41,31 @@ function envOr(key: string): string | undefined {
   return process.env[key] ?? readKeyFromEnvFile(key);
 }
 
-/** Active Gmail read backend. Default composio until gws is verified on prod. */
+function parseGoogleBackend(raw: string | undefined, fallback: GoogleBackend): GoogleBackend {
+  const v = (raw ?? fallback).toLowerCase();
+  return v === "composio" ? "composio" : "gws";
+}
+
+function parseLinkedInBackend(raw: string | undefined): LinkedInBackend {
+  const v = (raw ?? "direct").toLowerCase();
+  return v === "composio" ? "composio" : "direct";
+}
+
+/** Active Gmail backend. Default: gws (direct Google Workspace CLI). */
 export function getGmailBackend(): GmailBackend {
-  const raw = (envOr("GMAIL_BACKEND") ?? "composio").toLowerCase();
-  return raw === "gws" ? "gws" : "composio";
+  return parseGoogleBackend(envOr("GMAIL_BACKEND"), "gws");
+}
+
+/** Active Calendar backend. Default: gws. Falls back to GMAIL_BACKEND when unset. */
+export function getCalendarBackend(): CalendarBackend {
+  const explicit = envOr("CALENDAR_BACKEND");
+  if (explicit) return parseGoogleBackend(explicit, "gws");
+  return getGmailBackend();
+}
+
+/** Active LinkedIn backend. Default: direct (LinkedIn Posts API). */
+export function getLinkedInBackend(): LinkedInBackend {
+  return parseLinkedInBackend(envOr("LINKEDIN_BACKEND"));
 }
 
 /** Path to the gws binary (Google Workspace CLI). */
@@ -50,7 +74,7 @@ export function getGwsBin(): string {
 }
 
 /**
- * Run reachability probes at boot (Composio + gws when configured).
+ * Run reachability probes at boot (gws + legacy Composio when configured).
  * Default: on in production, off in dev/test unless forced.
  */
 export function shouldRunProviderSmoke(): boolean {
