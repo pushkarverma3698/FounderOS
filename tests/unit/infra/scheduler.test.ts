@@ -6,6 +6,11 @@
 import { describe, it, expect } from "vitest";
 import { buildContextText, formatLeadNudge, formatProposalNudge, formatDemoNudge, formatDesignBriefNudge, formatSiteDeployedNudge, formatProofDropNudge } from "../../../src/infra/scheduler.js";
 import { buildProofDropCadenceNudge } from "../../../src/outbound/proof-drop.js";
+import {
+  assessDailyBudget,
+  nextBudgetAlertThreshold,
+  formatBudgetThresholdAlert,
+} from "../../../src/infra/daily-budget.js";
 
 describe("buildContextText", () => {
   it("formats a flat string value", () => {
@@ -205,5 +210,18 @@ describe("buildProofDropCadenceNudge (scheduler import)", () => {
       recent: [],
     });
     expect(nudge).toContain("/proofdrop");
+  });
+});
+
+describe("daily budget alert helpers (scheduler import)", () => {
+  it("fires 80% alert once per day semantics", () => {
+    const status = assessDailyBudget(4, 5);
+    expect(nextBudgetAlertThreshold(status, [])).toBe(80);
+    expect(nextBudgetAlertThreshold(status, [80])).toBeNull();
+  });
+
+  it("formats cap-reached alert at 100%", () => {
+    const msg = formatBudgetThresholdAlert(assessDailyBudget(5, 5), 100);
+    expect(msg).toContain("blocked");
   });
 });

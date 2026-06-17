@@ -129,6 +129,15 @@ export const env = parseEnv();
  */
 export const TENANT = env.FOUNDER_TENANT;
 
+/** Daily LLM spend cap (USD) — enforced at gateway before new runs. */
+export const DAILY_BUDGET_USD = env.BUDGET_DAILY_USD;
+
+/** Per-run LLM spend cap (USD). */
+export const RUN_BUDGET_USD = env.RUN_BUDGET_USD;
+
+/** Per-run token cap (input + output). */
+export const RUN_BUDGET_TOKENS = env.RUN_BUDGET_TOKENS;
+
 /** Parse a positive-integer env var, falling back to a default for unset/garbage. */
 function intEnv(key: string, fallback: number): number {
   const n = Number(process.env[key]);

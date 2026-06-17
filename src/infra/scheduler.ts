@@ -18,7 +18,7 @@
 import cron from "node-cron";
 import { HumanMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
-import { getFounderContext, getPendingInterrupt, consumePendingEvents } from "../db/queries.js";
+import { getFounderContext, getPendingInterrupt, consumePendingEvents, getTodayCostUsd } from "../db/queries.js";
 import type { DeptSignal } from "../db/schema.js";
 import { DEFAULT_TARGET_DEPT } from "../agents/agent-tools/signals.js";
 import { getOutboundTargets } from "../outbound/targets.js";
@@ -27,7 +27,15 @@ import { sendToChat } from "./telegram-send.js";
 import { buildOffice } from "../agents/office.js";
 import { SCHEDULER_BRIEF_PROMPT } from "../agents/system-prompts.js";
 import { childLogger } from "./logger.js";
-import { env, TENANT } from "../core/config.js";
+import { TENANT } from "../core/config.js";
+import {
+  assessDailyBudget,
+  formatBudgetThresholdAlert,
+  getDailyBudgetCapUsd,
+  nextBudgetAlertThreshold,
+  checkDailyBudgetGate,
+} from "../infra/daily-budget.js";
+import { getBudgetAlertsState, recordBudgetAlertSent } from "../infra/daily-budget-alerts.js";
 
 const log = childLogger({ module: "scheduler" });
 
@@ -62,6 +70,18 @@ export function buildContextText(ctx: Record<string, unknown>): string {
 /** Format the founder context into a monday brief (with an LLM call). */
 async function sendMondayBrief(): Promise<void> {
   log.info("Generating Monday brief…");
+
+  const spent = await getTodayCostUsd(TENANT);
+  const dailyGate = checkDailyBudgetGate(spent, getDailyBudgetCapUsd());
+  if (!dailyGate.ok) {
+    log.warn({ spent }, "Monday brief skipped — daily budget cap reached");
+    await sendToChat(
+      `📅 <b>Monday brief skipped</b> — daily budget cap reached ($${spent.toFixed(4)}). ` +
+        `Check <code>/budget</code>.`,
+      "HTML",
+    );
+    return;
+  }
 
   const ctx = await getFounderContext(TENANT);
   const today = new Date().toLocaleDateString("en-GB", {
@@ -343,6 +363,21 @@ async function sendProofDropCadenceNudge(): Promise<void> {
   log.info({ count: stats.countThisWeek, target: stats.target }, "Proof Drop cadence nudge sent");
 }
 
+/** Hourly check — alert at 80% and 100% daily budget (zero LLM, deduped per day). */
+async function sendDailyBudgetAlertIfNeeded(): Promise<void> {
+  const spent = await getTodayCostUsd(TENANT);
+  const cap = getDailyBudgetCapUsd();
+  const status = assessDailyBudget(spent, cap);
+  const alertsState = await getBudgetAlertsState(TENANT);
+  const threshold = nextBudgetAlertThreshold(status, alertsState.levels);
+  if (!threshold) return;
+
+  const msg = formatBudgetThresholdAlert(status, threshold);
+  await sendToChat(msg, "HTML");
+  await recordBudgetAlertSent(TENANT, threshold);
+  log.info({ spent, cap, threshold }, "Daily budget threshold alert sent");
+}
+
 // ── Scheduler boot ────────────────────────────────────────────────────────────
 
 export function startScheduler(): void {
@@ -385,7 +420,10 @@ export function startScheduler(): void {
       log.error({ err: (err as Error).message }, "Dept signal sweep failed");
       sendToChat(`⚠️ Dept signal sweep failed: ${(err as Error).message}`, "HTML").catch(() => {});
     });
+    sendDailyBudgetAlertIfNeeded().catch((err) => {
+      log.error({ err: (err as Error).message }, "Daily budget alert check failed");
+    });
   });
 
-  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), Proof Drop cadence (Wed 9:05am), stale approval check (daily 9am), dept-signal sweep (hourly)");
+  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), Proof Drop cadence (Wed 9:05am), stale approval check (daily 9am), dept-signal sweep + budget alerts (hourly)");
 }

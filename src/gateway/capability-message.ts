@@ -28,7 +28,7 @@ export function buildWelcomeMessage(firstName?: string): string {
     `🏭 <b>Workflows</b> — multi-step SOPs\n` +
     `<code>/workflows</code> · <code>/run onboarding company=Acme</code>\n\n` +
     `⚡ <b>Power shortcuts</b>\n` +
-    `<code>/q research …</code> · <code>/signals</code> · <code>/runs</code> · ` +
+    `<code>/q research …</code> · <code>/signals</code> · <code>/budget</code> · <code>/runs</code> · ` +
     `<code>/status</code> · <code>/ping</code> · <code>/departments</code> · <code>/help</code>\n\n` +
     `🤖 <b>MISO mission control</b> — track multi-agent work in one dashboard\n` +
     `<code>/miso_start &lt;goal&gt;</code> · <code>/miso_plan</code> · ` +
