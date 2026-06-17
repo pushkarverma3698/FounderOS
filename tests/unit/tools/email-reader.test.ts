@@ -1,98 +1,48 @@
 /**
- * Unit tests for the readEmails tool.
- * Mocks Composio so no live API keys are needed.
- *
- * RED: these tests fail until src/tools/email-reader.ts is implemented.
+ * Unit tests for the readEmails tool — dual backend dispatch.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock Composio before importing the tool
-const mockExecuteComposioAction = vi.fn();
-const mockGetComposioApiKey = vi.fn(() => "test-key");
+const mockComposioRead = vi.fn();
+const mockGwsRead = vi.fn();
+const mockGetGmailBackend = vi.fn(() => "composio" as const);
 
-vi.mock("../../../src/infra/composio.js", async (orig) => {
-  const actual = await (orig() as Promise<Record<string, unknown>>);
-  return {
-    ...actual,
-    executeComposioAction: mockExecuteComposioAction,
-    getComposioApiKey: mockGetComposioApiKey,
-    getGmailConnectionId: () => "ca_test",
-    getGmailUserId: () => "user_test",
-  };
-});
+vi.mock("../../../src/tools/gmail-composio-read.js", () => ({
+  readEmailsViaComposio: mockComposioRead,
+}));
+
+vi.mock("../../../src/tools/gmail-gws-read.js", () => ({
+  readEmailsViaGws: mockGwsRead,
+}));
+
+vi.mock("../../../src/infra/provider-config.js", () => ({
+  getGmailBackend: mockGetGmailBackend,
+}));
 
 const { readEmailsTool } = await import("../../../src/tools/email-reader.js");
 
-describe("readEmailsTool", () => {
+describe("readEmailsTool dual backend", () => {
   beforeEach(() => {
-    mockExecuteComposioAction.mockReset();
-    mockGetComposioApiKey.mockReturnValue("test-key");
+    mockComposioRead.mockReset();
+    mockGwsRead.mockReset();
+    mockGetGmailBackend.mockReturnValue("composio");
+    mockComposioRead.mockResolvedValue({ success: true, data: "composio inbox" });
+    mockGwsRead.mockResolvedValue({ success: true, data: "gws inbox" });
   });
 
-  it("returns an error when COMPOSIO_API_KEY is not configured", async () => {
-    mockGetComposioApiKey.mockReturnValue(undefined);
-    const result = await readEmailsTool.execute({ query: "from:test@example.com" });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("COMPOSIO_API_KEY");
-  });
-
-  it("returns formatted email list on success", async () => {
-    // Use real Composio GMAIL_FETCH_EMAILS response field names
-    mockExecuteComposioAction.mockResolvedValue({
-      data: {
-        messages: [
-          {
-            messageId: "msg1",
-            sender: "alice@example.com",
-            subject: "Hello there",
-            messageText: "Just checking in...",
-            messageTimestamp: "2026-06-01T10:00:00Z",
-          },
-        ],
-      },
-    });
-
+  it("uses composio backend by default", async () => {
     const result = await readEmailsTool.execute({ query: "is:unread" });
-    expect(result.success).toBe(true);
-    const text = result.data as string;
-    expect(text).toContain("alice@example.com");
-    expect(text).toContain("Hello there");
+    expect(mockComposioRead).toHaveBeenCalled();
+    expect(mockGwsRead).not.toHaveBeenCalled();
+    expect(result.data).toBe("composio inbox");
   });
 
-  it("returns empty-state message when no emails found", async () => {
-    mockExecuteComposioAction.mockResolvedValue({ data: { messages: [] } });
+  it("uses gws when GMAIL_BACKEND=gws", async () => {
+    mockGetGmailBackend.mockReturnValue("gws");
     const result = await readEmailsTool.execute({ query: "is:unread" });
-    expect(result.success).toBe(true);
-    expect(result.data).toContain("No emails found");
-  });
-
-  it("returns error on Composio failure", async () => {
-    mockExecuteComposioAction.mockRejectedValue(new Error("API timeout"));
-    const result = await readEmailsTool.execute({ query: "is:unread" });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("API timeout");
-  });
-
-  it("defaults to inbox query when no query provided", async () => {
-    mockExecuteComposioAction.mockResolvedValue({ data: { messages: [] } });
-    await readEmailsTool.execute({});
-    expect(mockExecuteComposioAction).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ query: expect.any(String) }),
-      expect.any(String),
-      expect.any(String),
-    );
-  });
-
-  it("respects a maxResults limit", async () => {
-    mockExecuteComposioAction.mockResolvedValue({ data: { messages: [] } });
-    await readEmailsTool.execute({ query: "is:unread", max_results: 3 });
-    expect(mockExecuteComposioAction).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ max_results: 3 }),
-      expect.any(String),
-      expect.any(String),
-    );
+    expect(mockGwsRead).toHaveBeenCalled();
+    expect(mockComposioRead).not.toHaveBeenCalled();
+    expect(result.data).toBe("gws inbox");
   });
 });

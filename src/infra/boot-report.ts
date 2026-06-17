@@ -25,6 +25,7 @@ export interface BootCapabilityInput {
   ANTHROPIC_API_KEY?: string | undefined;
   OPENROUTER_API_KEY?: string | undefined;
   COMPOSIO_API_KEY?: string | undefined;
+  GMAIL_BACKEND?: string | undefined;
   GITHUB_TOKEN?: string | undefined;
   FIRECRAWL_API_KEY?: string | undefined;
   CLAUDE_EXECUTOR_API_KEY?: string | undefined;
@@ -89,6 +90,11 @@ export function buildBootReport(env: BootCapabilityInput): CapabilityStatus[] {
       name: "Composio (email/linkedin/calendar)",
       live: has(env.COMPOSIO_API_KEY),
       detail: has(env.COMPOSIO_API_KEY) ? "COMPOSIO_API_KEY set" : "comms/marketing sends disabled",
+    },
+    {
+      name: "Gmail read backend",
+      live: true,
+      detail: `GMAIL_BACKEND=${env.GMAIL_BACKEND?.trim() || "composio"} (gws requires CLI + auth on host)`,
     },
     {
       name: "GitHub tools",

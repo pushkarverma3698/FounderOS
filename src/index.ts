@@ -22,6 +22,8 @@ import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
 import { restorePendingApprovalAfterRestart } from "./gateway/office-run.js";
 import { expireStaleInterrupts } from "./db/queries.js";
 import { startHealthServer } from "./infra/health.js";
+import { runProviderSmokeAtBoot } from "./infra/provider-probes.js";
+import { shouldRunProviderSmoke } from "./infra/provider-config.js";
 import { startScheduler } from "./infra/scheduler.js";
 import { acquireSingleInstanceLock, releaseSingleInstanceLock, waitForProcessExit } from "./infra/single-instance.js";
 import { logger } from "./infra/logger.js";
@@ -60,6 +62,13 @@ async function main(): Promise<void> {
   //     immediate startup error (CLAUDE.md rule #19.5).
   const bootValidation = assertBootConfigOrThrow(env);
   for (const w of bootValidation.warnings) log.warn({ module: "boot" }, `[boot] ${w}`);
+
+  // 1d. Provider smoke — verify Composio/gws reachability at boot (warn only).
+  if (shouldRunProviderSmoke()) {
+    await runProviderSmokeAtBoot().catch((err) => {
+      log.warn({ err: (err as Error).message }, "Provider smoke failed — non-fatal");
+    });
+  }
 
   // 2. Compile the office once (warms the Postgres checkpointer).
   await getOffice();
