@@ -45,7 +45,7 @@ export async function getCheckpointer(): Promise<PostgresSaver> {
   }
 
   void getPgPool(); // ensure pool is warmed — not used by PostgresSaver directly
-  _saver = PostgresSaver.fromConnString(dbUrl);
+  _saver = PostgresSaver.fromConnString(dbUrl, { schema: "agents" });
 
   try {
     await _saver.setup();
@@ -79,7 +79,7 @@ export async function clearThreadCheckpoints(threadId: string): Promise<number> 
   const pool = getPgPool();
   // PostgresSaver-managed tables (not Drizzle). Order doesn't matter — all
   // scoped by thread_id. A missing table is tolerated (skip + continue).
-  const tables = ["checkpoints", "checkpoint_blobs", "checkpoint_writes"];
+  const tables = ["agents.checkpoints", "agents.checkpoint_blobs", "agents.checkpoint_writes"];
   let deleted = 0;
   for (const table of tables) {
     try {

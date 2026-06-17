@@ -30,13 +30,19 @@ import {
   integer,
   jsonb,
   numeric,
-  pgTable,
+  pgSchema,
   serial,
   text,
   timestamp,
   uuid,
   vector,
 } from "drizzle-orm/pg-core";
+
+/** P5: operational tables (agents, signals, checkpoints, audit). */
+export const agentsSchema = pgSchema("agents");
+
+/** P5: knowledge / vector tables (RAG, embeddings). */
+export const brainSchema = pgSchema("brain");
 
 // ── hitl_approvals ────────────────────────────────────────────────────────────
 
@@ -45,7 +51,7 @@ import {
  * Telegram callback_query resolves by interrupt_id.
  * Old name: interrupt_registry
  */
-export const hitlApprovals = pgTable(
+export const hitlApprovals = agentsSchema.table(
   "hitl_approvals",
   {
     interrupt_id: uuid("interrupt_id").primaryKey().defaultRandom(),
@@ -89,7 +95,7 @@ export const hitlApprovals = pgTable(
  * Queried by cost_watchdog agent every Sunday.
  * Old name: llm_costs
  */
-export const aiCallCosts = pgTable(
+export const aiCallCosts = agentsSchema.table(
   "ai_call_costs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -122,7 +128,7 @@ export const aiCallCosts = pgTable(
  * If found → skip. Otherwise → act + insert.
  * Old name: audit_log
  */
-export const actionLog = pgTable(
+export const actionLog = agentsSchema.table(
   "action_log",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -160,7 +166,7 @@ export const actionLog = pgTable(
  * Stages: researching → disqualified | drafting → approved → sent → replied → won | lost
  * Old name: lead_pipeline
  */
-export const outboundLeads = pgTable(
+export const outboundLeads = agentsSchema.table(
   "outbound_leads",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -212,7 +218,7 @@ export const outboundLeads = pgTable(
  * GDPR/CAN-SPAM suppression list. Exact email addresses and domain-level blocks.
  * Old name: suppression_list
  */
-export const doNotContact = pgTable(
+export const doNotContact = agentsSchema.table(
   "do_not_contact",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -239,7 +245,7 @@ export const doNotContact = pgTable(
  * Activate when pod finalize nodes start writing outcomes for few-shot injection.
  * Old name: task_outcomes
  */
-export const agentResults = pgTable(
+export const agentResults = agentsSchema.table(
   "agent_results",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -286,7 +292,7 @@ export const agentResults = pgTable(
  * Ephemeral equivalent already works via FounderState.departmentSignals (per-run).
  * Old name: dept_events
  */
-export const deptSignals = pgTable(
+export const deptSignals = agentsSchema.table(
   "dept_signals",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -330,7 +336,7 @@ export const deptSignals = pgTable(
  *
  * Sync script: scripts/sync-turicks-brain.ts
  */
-export const knowledgeEntries = pgTable(
+export const knowledgeEntries = brainSchema.table(
   "knowledge_entries",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -378,7 +384,7 @@ export const knowledgeEntries = pgTable(
 // personal_rag and turicks_brain are SEPARATE tables; the access layer
 // (src/db/rag-search.ts) enforces that one tool can never read the other.
 
-export const personalRag = pgTable(
+export const personalRag = brainSchema.table(
   "personal_rag",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -389,7 +395,7 @@ export const personalRag = pgTable(
   },
 );
 
-export const turicksBrain = pgTable(
+export const turicksBrain = brainSchema.table(
   "turicks_brain",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -446,7 +452,7 @@ export type NewKnowledgeEntry = typeof knowledgeEntries.$inferInsert;
  *   notes:              string    — freeform scratchpad
  *   last_updated:       string    — ISO timestamp of last write
  */
-export const founderContext = pgTable("founder_context", {
+export const founderContext = agentsSchema.table("founder_context", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenant_id: text("tenant_id").notNull().unique(),
   data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
@@ -466,7 +472,7 @@ export type NewFounderContext = typeof founderContext.$inferInsert;
  * One row per thread_id. Upserted on each turn so the summary + message_count
  * stay current without accumulating duplicate rows.
  */
-export const conversations = pgTable(
+export const conversations = agentsSchema.table(
   "conversations",
   {
     id: serial("id").primaryKey(),
@@ -513,7 +519,7 @@ export type NewConversation = typeof conversations.$inferInsert;
  * The `search_memory` tool queries this table alongside knowledge_entries
  * and founder_context to answer "what happened with X?" questions.
  */
-export const episodicMemory = pgTable(
+export const episodicMemory = agentsSchema.table(
   "episodic_memory",
   {
     id: serial("id").primaryKey(),

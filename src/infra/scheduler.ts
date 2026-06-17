@@ -196,18 +196,65 @@ export function formatLeadNudge(signals: DeptSignal[]): string {
   );
 }
 
+/** Format consumed proposal_approved signals for engineering. */
+export function formatProposalNudge(signals: DeptSignal[]): string {
+  const items = signals.filter((s) => s.event_type === "proposal_approved");
+  if (items.length === 0) return "";
+
+  const lines = items.map((s) => {
+    const p = (s.payload ?? {}) as { company?: string; proposalId?: string; amountUsd?: number };
+    const amt = typeof p.amountUsd === "number" ? ` · $${p.amountUsd}` : "";
+    return `• <b>${p.company ?? "Unknown"}</b> — proposal ${p.proposalId ?? "?"}${amt}`;
+  });
+
+  return (
+    `📋 <b>Proposal${items.length > 1 ? "s" : ""} approved</b> (${items.length})\n\n` +
+    `${lines.join("\n")}\n\n` +
+    `Start the build when ready: <code>/q engineering create issue for {company} build</code>`
+  );
+}
+
+/** Format consumed demo_ready signals for sales follow-up. */
+export function formatDemoNudge(signals: DeptSignal[]): string {
+  const items = signals.filter((s) => s.event_type === "demo_ready");
+  if (items.length === 0) return "";
+
+  const lines = items.map((s) => {
+    const p = (s.payload ?? {}) as { company?: string; repoUrl?: string };
+    return `• <b>${p.company ?? "Unknown"}</b> — demo at ${p.repoUrl ?? "?"}`;
+  });
+
+  return (
+    `🚀 <b>Demo${items.length > 1 ? "s" : ""} ready</b> (${items.length})\n\n` +
+    `${lines.join("\n")}\n\n` +
+    `Follow up when ready: <code>/q sales email {company} about the demo</code> — you approve before anything sends.`
+  );
+}
+
 /**
  * Consume pending lead_discovered signals for the revenue dept and push a nudge.
  * consumePendingEvents claims rows with FOR UPDATE SKIP LOCKED, so each lead
  * surfaces exactly once even under concurrent sweeps (G2).
  */
 export async function sweepDeptSignals(): Promise<void> {
-  const toDept = DEFAULT_TARGET_DEPT["lead_discovered"] ?? "sales";
-  const signals = await consumePendingEvents(TENANT, toDept);
-  const nudge = formatLeadNudge(signals);
-  if (!nudge) return;
-  await sendToChat(nudge, "HTML");
-  log.info({ count: signals.length, toDept }, "Revenue signal sweep — nudge sent");
+  const sweeps: Array<{ event: string; toDept: string; format: (s: DeptSignal[]) => string }> = [
+    { event: "lead_discovered", toDept: DEFAULT_TARGET_DEPT["lead_discovered"] ?? "sales", format: formatLeadNudge },
+    {
+      event: "proposal_approved",
+      toDept: DEFAULT_TARGET_DEPT["proposal_approved"] ?? "engineering",
+      format: formatProposalNudge,
+    },
+    { event: "demo_ready", toDept: DEFAULT_TARGET_DEPT["demo_ready"] ?? "sales", format: formatDemoNudge },
+  ];
+
+  for (const { event, toDept, format } of sweeps) {
+    const signals = await consumePendingEvents(TENANT, toDept);
+    const filtered = signals.filter((s) => s.event_type === event);
+    const nudge = format(filtered);
+    if (!nudge) continue;
+    await sendToChat(nudge, "HTML");
+    log.info({ count: filtered.length, event, toDept }, "Dept signal sweep — nudge sent");
+  }
 }
 
 // ── Scheduler boot ────────────────────────────────────────────────────────────
@@ -237,6 +284,14 @@ export function startScheduler(): void {
     });
   });
 
+  // Wednesday 9:05am — mid-week outbound reminder
+  cron.schedule("5 9 * * 3", () => {
+    sendOutboundNudge().catch((err) => {
+      log.error({ err: (err as Error).message }, "Mid-week outbound nudge failed");
+      sendToChat(`⚠️ Outbound nudge failed: ${(err as Error).message}`, "HTML").catch(() => {});
+    });
+  });
+
   // Hourly — consume durable dept_signals (lead_discovered → revenue nudge).
   // Rows are marked consumed atomically, so each lead surfaces exactly once.
   cron.schedule("0 * * * *", () => {
@@ -246,5 +301,5 @@ export function startScheduler(): void {
     });
   });
 
-  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), stale approval check (daily 9am), dept-signal sweep (hourly)");
+  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am, Wed 9:05am), stale approval check (daily 9am), dept-signal sweep (hourly)");
 }

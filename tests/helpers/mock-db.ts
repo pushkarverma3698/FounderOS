@@ -51,7 +51,8 @@ export function mockQueriesModule() {
     getRecentOutcomes: vi.fn().mockResolvedValue([]),
 
     // Cross-dept signals
-    publishDeptEvent: vi.fn().mockResolvedValue(undefined),
+    publishDeptEvent: vi.fn().mockResolvedValue("mock-signal-id"),
+    publishDeptEventWithAudit: vi.fn().mockResolvedValue({ signalId: "mock-signal-id" }),
     consumePendingEvents: vi.fn().mockResolvedValue([]),
   };
 }

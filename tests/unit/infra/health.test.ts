@@ -6,6 +6,12 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import type { Server } from "node:http";
+
+vi.mock("../../../src/infra/provider-probes.js", () => ({
+  runProviderProbes: vi.fn().mockRejectedValue(new Error("skip in tests")),
+  getLastProviderProbe: vi.fn().mockReturnValue(null),
+}));
+
 import { startHealthServer, buildHealthReport } from "../../../src/infra/health.js";
 
 // This test fetches the ephemeral HTTP server it spawns on loopback. The global
@@ -33,6 +39,8 @@ describe("health server", () => {
     expect(report).toHaveProperty("status");
     expect(report).toHaveProperty("version");
     expect(report.checks).toHaveProperty("database");
+    expect(report.checks).toHaveProperty("gmail_backend");
+    expect(report.integrations).toHaveProperty("composio_gmail");
     expect(report).toHaveProperty("spend_today_usd");
   });
 

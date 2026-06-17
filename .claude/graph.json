@@ -1,6 +1,13 @@
 {
   "nodes": [
     {
+      "id": "dept_admin",
+      "type": "department",
+      "name": "admin",
+      "description": "admin department — a ReAct agent in the supervisor graph",
+      "file": "src/agents/office.ts"
+    },
+    {
       "id": "dept_research",
       "type": "department",
       "name": "research",
@@ -47,6 +54,13 @@
       "type": "department",
       "name": "jobhunt",
       "description": "jobhunt department — a ReAct agent in the supervisor graph",
+      "file": "src/agents/office.ts"
+    },
+    {
+      "id": "agent_admin_agent",
+      "type": "agent",
+      "name": "admin_agent",
+      "description": "admin ReAct agent — tool-calling loop, HITL-gated writes",
       "file": "src/agents/office.ts"
     },
     {
@@ -99,6 +113,41 @@
       "file": "src/agents/office.ts"
     },
     {
+      "id": "tool_read_context",
+      "type": "tool",
+      "name": "read_context",
+      "description": "Read durable business state (founder_context table) — supervisor only",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_update_context",
+      "type": "tool",
+      "name": "update_context",
+      "description": "Update durable business state (founder_context table) — supervisor only",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_search_memory",
+      "type": "tool",
+      "name": "search_memory",
+      "description": "Unified memory search across knowledge + episodic stores — supervisor only",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_record_event",
+      "type": "tool",
+      "name": "record_event",
+      "description": "Record a durable episodic-memory event — HITL-gated, supervisor only [HITL]",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_list_pending_signals",
+      "type": "tool",
+      "name": "list_pending_signals",
+      "description": "list_pending_signals tool",
+      "file": "src/tools/*.ts"
+    },
+    {
       "id": "tool_search_web",
       "type": "tool",
       "name": "search_web",
@@ -110,6 +159,13 @@
       "type": "tool",
       "name": "search_knowledge",
       "description": "Keyword search over turicks-brain knowledge_entries (no LLM cost)",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_search_turicks_brain",
+      "type": "tool",
+      "name": "search_turicks_brain",
+      "description": "Semantic vector search over turicks_brain (business/strategy) via Ollama + pgvector",
       "file": "src/tools/*.ts"
     },
     {
@@ -225,13 +281,6 @@
       "file": "src/tools/*.ts"
     },
     {
-      "id": "tool_search_turicks_brain",
-      "type": "tool",
-      "name": "search_turicks_brain",
-      "description": "Semantic vector search over turicks_brain (business/strategy) via Ollama + pgvector",
-      "file": "src/tools/*.ts"
-    },
-    {
       "id": "tool_read_cv",
       "type": "tool",
       "name": "read_cv",
@@ -243,34 +292,6 @@
       "type": "tool",
       "name": "search_jobs",
       "description": "Search job listings via web search (Gemini grounding / DuckDuckGo)",
-      "file": "src/tools/*.ts"
-    },
-    {
-      "id": "tool_read_context",
-      "type": "tool",
-      "name": "read_context",
-      "description": "Read durable business state (founder_context table) — supervisor only",
-      "file": "src/tools/*.ts"
-    },
-    {
-      "id": "tool_update_context",
-      "type": "tool",
-      "name": "update_context",
-      "description": "Update durable business state (founder_context table) — supervisor only",
-      "file": "src/tools/*.ts"
-    },
-    {
-      "id": "tool_search_memory",
-      "type": "tool",
-      "name": "search_memory",
-      "description": "Unified memory search across knowledge + episodic stores — supervisor only",
-      "file": "src/tools/*.ts"
-    },
-    {
-      "id": "tool_record_event",
-      "type": "tool",
-      "name": "record_event",
-      "description": "Record a durable episodic-memory event — HITL-gated, supervisor only [HITL]",
       "file": "src/tools/*.ts"
     },
     {
@@ -353,6 +374,11 @@
   ],
   "edges": [
     {
+      "from": "agent_admin_agent",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
       "from": "agent_research_agent",
       "to": "dept_research",
       "type": "belongs_to"
@@ -388,12 +414,42 @@
       "type": "belongs_to"
     },
     {
+      "from": "tool_read_context",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_update_context",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_search_memory",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_record_event",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_list_pending_signals",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
       "from": "tool_search_web",
       "to": "dept_research",
       "type": "belongs_to"
     },
     {
       "from": "tool_search_knowledge",
+      "to": "dept_research",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_search_turicks_brain",
       "to": "dept_research",
       "type": "belongs_to"
     },
@@ -453,6 +509,11 @@
       "type": "belongs_to"
     },
     {
+      "from": "tool_search_turicks_brain",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
       "from": "tool_search_web",
       "to": "dept_sales",
       "type": "belongs_to"
@@ -464,6 +525,11 @@
     },
     {
       "from": "tool_search_knowledge",
+      "to": "dept_sales",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_search_turicks_brain",
       "to": "dept_sales",
       "type": "belongs_to"
     },
@@ -523,24 +589,19 @@
       "type": "belongs_to"
     },
     {
-      "from": "tool_read_context",
-      "to": "service_supervisor",
+      "from": "tool_search_personal_rag",
+      "to": "dept_jobhunt",
       "type": "belongs_to"
     },
     {
-      "from": "tool_update_context",
+      "from": "dept_admin",
       "to": "service_supervisor",
-      "type": "belongs_to"
+      "type": "calls"
     },
     {
-      "from": "tool_search_memory",
-      "to": "service_supervisor",
-      "type": "belongs_to"
-    },
-    {
-      "from": "tool_record_event",
-      "to": "service_supervisor",
-      "type": "belongs_to"
+      "from": "dept_admin",
+      "to": "service_telegam",
+      "type": "calls"
     },
     {
       "from": "dept_research",
@@ -675,8 +736,11 @@
   ],
   "metadata": {
     "projectName": "FounderOS",
-    "generatedAt": "2026-06-15T08:13:52.696Z",
+    "generatedAt": "2026-06-16T23:55:21.936Z",
     "departments": {
+      "admin": [
+        "admin_agent"
+      ],
       "research": [
         "research_agent"
       ],
@@ -700,8 +764,14 @@
       ]
     },
     "tools": {
+      "read_context": "Read durable business state (founder_context table) — supervisor only",
+      "update_context": "Update durable business state (founder_context table) — supervisor only",
+      "search_memory": "Unified memory search across knowledge + episodic stores — supervisor only",
+      "record_event": "Record a durable episodic-memory event — HITL-gated, supervisor only [HITL]",
+      "list_pending_signals": "list_pending_signals tool",
       "search_web": "Search the web via Gemini grounding (DuckDuckGo fallback)",
       "search_knowledge": "Keyword search over turicks-brain knowledge_entries (no LLM cost)",
+      "search_turicks_brain": "Semantic vector search over turicks_brain (business/strategy) via Ollama + pgvector",
       "publish_signal": "Publish a typed cross-department signal to dept_signals (Postgres, async sweep)",
       "send_email": "Send email via Composio Gmail (HITL-gated) [HITL]",
       "read_emails": "Read the founder's Gmail inbox (read-only, no approval)",
@@ -718,13 +788,8 @@
       "run_shell": "Run shell commands on the laptop — HITL-gated [HITL]",
       "browser": "Safari automation on the founder's Mac — HITL-gated [HITL]",
       "search_personal_rag": "Semantic vector search over personal-rag (CV/career) via Ollama + pgvector",
-      "search_turicks_brain": "Semantic vector search over turicks_brain (business/strategy) via Ollama + pgvector",
       "read_cv": "Read the founder's CV from personal-rag (read-only)",
-      "search_jobs": "Search job listings via web search (Gemini grounding / DuckDuckGo)",
-      "read_context": "Read durable business state (founder_context table) — supervisor only",
-      "update_context": "Update durable business state (founder_context table) — supervisor only",
-      "search_memory": "Unified memory search across knowledge + episodic stores — supervisor only",
-      "record_event": "Record a durable episodic-memory event — HITL-gated, supervisor only [HITL]"
+      "search_jobs": "Search job listings via web search (Gemini grounding / DuckDuckGo)"
     }
   }
 }

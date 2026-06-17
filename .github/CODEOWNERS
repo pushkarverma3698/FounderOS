@@ -1,0 +1,5 @@
+# FounderOS — code owners
+# main and stable require @pushkarverma3698 approval (branch protection + require_code_owner_reviews).
+# Cloud agents and CI may open PRs to beta; only the founder merges stable → main.
+
+* @pushkarverma3698
