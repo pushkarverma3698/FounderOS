@@ -256,4 +256,12 @@ describe("buildOfficeInput", () => {
     const msgs = buildOfficeInput("Research what Stripe does");
     expect(String(msgs[0]!.content)).toMatch(/multi-step request that clearly spans/i);
   });
+
+  it("github issue create gets CRITICAL GITHUB WRITE directive for engineering", () => {
+    const prompt =
+      "Create a GitHub issue on pushkarverma3698/FounderOS titled 'test' with body 'verify'.";
+    const msgs = buildOfficeInput(prompt);
+    expect(String(msgs[0]!.content)).toMatch(/CRITICAL — GITHUB WRITE/i);
+    expect(String(msgs[0]!.content)).toContain("engineering");
+  });
 });

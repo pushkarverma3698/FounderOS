@@ -80,11 +80,15 @@ describe("getModel provider selection", () => {
 });
 
 describe("fallback middleware config", () => {
+  const savedFallbacks = process.env["AGENT_FALLBACK_MODELS"];
+
   afterEach(() => {
-    delete process.env["AGENT_FALLBACK_MODELS"];
+    if (savedFallbacks !== undefined) process.env["AGENT_FALLBACK_MODELS"] = savedFallbacks;
+    else delete process.env["AGENT_FALLBACK_MODELS"];
   });
 
   it("returns no middleware when no fallbacks are configured", () => {
+    delete process.env["AGENT_FALLBACK_MODELS"];
     expect(getFallbackModelIds()).toEqual([]);
     expect(getModelFallbackMiddleware()).toEqual([]);
   });
