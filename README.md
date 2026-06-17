@@ -257,14 +257,23 @@ pnpm lint           # TypeScript typecheck
 
 ## What's next
 
-Build-in-public roadmap (each on its own branch → PR):
+Architecture is stable. Next work: **add tools** and **add hierarchy only.**
 
-1. **Budget guard** — per-run token/$ cap, breach → Telegram alert, extract as `@founderos/budget-guard` npm
-2. **MCP server** — expose FounderOS tools via Model Context Protocol (Claude Code / Cursor can drive it)
-3. **Job-Hunt department** — reads your CV, researches the company, HITL-drafts tailored applications
-4. **Real RAG** — pgvector + `ts_tsvector` hybrid search over the knowledge base
+**Blocked/deferred (intentional):**
+- SaaS pivot (Phase E) — gated on 4+ weeks stable use (see [docs/ROADMAP.md](docs/ROADMAP.md))
+- Budget guard (npm extract) — deprioritized for core reliability
+- Real RAG (pgvector hybrid search) — brain_sync covers 90% of use case
 
-Follow the build at [turicks.com](https://turicks.com) or [LinkedIn](https://www.linkedin.com/in/pushkarverma3698/).
+**In progress:**
+- LinkedIn launch sequence (build-in-public, weekly posts)
+- Revenue flywheel (Gumroad done-for-you tier + outreach rhythm)
+
+**To contribute:**
+- Read [CLAUDE.md](CLAUDE.md) for development guidelines
+- Check [docs/rules/PROGRAMMING-RULES.md](docs/rules/PROGRAMMING-RULES.md) for wiring maps
+- Review golden tasks: [tests/eval/golden-tasks.ts](tests/eval/golden-tasks.ts)
+
+Follow the build at [turicks.com](https://turicks.com) or [@pushkarverma3698 on LinkedIn](https://www.linkedin.com/in/pushkarverma3698/).
 
 ---
 

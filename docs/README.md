@@ -1,97 +1,114 @@
 # FounderOS — Documentation Index
 
-> Start here. Every doc in the project is linked below, grouped by purpose.
+> **Start here.** Every doc in FounderOS is linked below, organized by role.
 
-> 🟢 **LIVE in production since 2026-06-14** — `main` auto-deploys to the Hetzner VPS
-> via GitHub Actions (CI → CD → `/health`). Runbook: [guides/DEPLOYMENT.md](guides/DEPLOYMENT.md).
-> What's left to fully wrap production: [PRODUCTION-WRAP-UP.md](PRODUCTION-WRAP-UP.md).
+> 🟢 **PRODUCTION LIVE** since 2026-06-14 on Hetzner VPS. Architecture locked (7 ReAct departments, LangGraph supervisor, Phases 1-6 hardening shipped). **Next phase:** add tools and hierarchy only — architecture is stable.
 
 ---
 
 ## 🚀 New here? Read in this order
 
-1. [diagrams/](diagrams/) — **8 mermaid flows** (architecture, request lifecycle, HITL, tool map, deploy, data, layering, thread states) — the fastest on-ramp
-2. [guides/ARCHITECTURE.md](guides/ARCHITECTURE.md) — how the system works (plain English + diagram)
-3. [rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) — the wiring maps (where to add what)
-4. [guides/OPERATIONS.md](guides/OPERATIONS.md) — how to run it day-to-day
-5. [guides/LOCAL-DEV.md](guides/LOCAL-DEV.md) — local setup + env vars
-6. [guides/DEPLOYMENT.md](guides/DEPLOYMENT.md) — the production runbook + CI/CD pipeline (we're live)
-7. [LIMITATIONS.md](LIMITATIONS.md) — honest tech-debt, scaling ceilings & deferred work
+1. **[Root README.md](../README.md)** — What FounderOS does, architecture overview, eval results
+2. **[diagrams/](diagrams/)** — 8 mermaid flows (architecture, request lifecycle, HITL, data model, deployment)
+3. **[guides/ARCHITECTURE.md](guides/ARCHITECTURE.md)** — Plain-English system design
+4. **[guides/LOCAL-DEV.md](guides/LOCAL-DEV.md)** — Local setup + env vars
+5. **[guides/DEPLOYMENT.md](guides/DEPLOYMENT.md)** — Production runbook (we're live, use this for troubleshooting)
+6. **[LIMITATIONS.md](LIMITATIONS.md)** — Honest tech-debt and deferred work
 
 ---
 
-## 📐 guides/ — how it works & how to run
+## 📖 Guides — How it works & how to run
 
-| Doc | What it covers |
-|-----|---------------|
-| [ARCHITECTURE.md](guides/ARCHITECTURE.md) | Supervisor + 7 departments, tool layers, HITL pattern, file map |
-| [PHASE-HARDENING-GUIDE.md](guides/PHASE-HARDENING-GUIDE.md) | **Phases 1-6 hardening** (context isolation, typed contracts, judge, signals, hierarchy, rules) |
+| Doc | Purpose |
+|-----|---------|
+| [ARCHITECTURE.md](guides/ARCHITECTURE.md) | System design: supervisor, 7 departments, tools, HITL pattern, data flow |
+| [LOCAL-DEV.md](guides/LOCAL-DEV.md) | Local setup, env vars, troubleshooting, running tests |
+| [DEPLOYMENT.md](guides/DEPLOYMENT.md) | Production runbook (Hetzner VPS, systemd, GitHub Actions CD, Day-1 gotchas) |
+| [OPERATIONS.md](guides/OPERATIONS.md) | Day-to-day: start/stop, Telegram commands, halt/resume, scheduler, monitoring |
 | [HITL-MATRIX.md](guides/HITL-MATRIX.md) | All 11 HITL-gated tools, gate patterns, observability |
-| [SIGNALS-AND-CONTRACTS.md](guides/SIGNALS-AND-CONTRACTS.md) | Department signals, event types, how to publish/consume, adding new types |
+| [SIGNALS-AND-CONTRACTS.md](guides/SIGNALS-AND-CONTRACTS.md) | Department signals, event types, publishing/consuming, adding new types |
 | [JUDGE-AND-CRITIC.md](guides/JUDGE-AND-CRITIC.md) | Claude critic quality gate, two-gate system, brand voice validation |
 | [MEMORY-OPERATIONS.md](guides/MEMORY-OPERATIONS.md) | turicks-brain + personal-rag, populate, query, troubleshoot |
 | [SECURITY-RULES-20-21.md](guides/SECURITY-RULES-20-21.md) | Context isolation + typed handoffs, verification, monitoring |
-| [DEPLOYMENT.md](guides/DEPLOYMENT.md) | **Production runbook + CI/CD pipeline** (Hetzner VPS, systemd, GitHub Actions CD, env-without-SSH, Day-1 gotchas) |
-| [OPERATIONS.md](guides/OPERATIONS.md) | Start/stop, Telegram commands, halt/resume, scheduler, quota, signals monitoring, troubleshooting |
-| [LOCAL-DEV.md](guides/LOCAL-DEV.md) | Local setup, env vars, troubleshooting |
-
-## 📏 rules/ — the laws of the codebase
-
-| Doc | What it covers |
-|-----|---------------|
-| [PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) | **Wiring maps**: exact files to touch for adding a tool / department / workflow / command, with "forget X → error Y" tables |
-| [TOOL-STANDARDS.md](rules/TOOL-STANDARDS.md) | The 8-point checklist every new tool must pass |
-| [TESTING-RULES.md](rules/TESTING-RULES.md) | 8 testing rules learned from real bugs + a test template |
-| [TOOL-INTEGRATION-PLAYBOOK.md](rules/TOOL-INTEGRATION-PLAYBOOK.md) | Verifying external API (Composio) contracts before writing the tool |
-
-## 🧭 decisions/ — Architecture Decision Records (ADRs)
-
-Numbered records of every significant decision and why. See [decisions/](decisions/).
-Key ones: 010 (v2 ReAct rebuild), 013 (personal/engineering separation),
-014 (job-first public-ready), 015 (jobhunt + personal-rag boundary),
-016 (memory single source of truth).
-
-## 📚 study/ — learning & strategy
-
-| Doc | What it covers |
-|-----|---------------|
-| [study/04-how-founderos-works.md](study/04-how-founderos-works.md) | Deep dive on the runtime |
-| [study/02-langgraph-patterns.md](study/02-langgraph-patterns.md) | LangGraph patterns used here |
-| [study/POSTMORTEM-eval-outputMode.md](study/POSTMORTEM-eval-outputMode.md) | The eval tool-detection bug post-mortem |
-| [study/CASE-STUDY-LOG.md](study/CASE-STUDY-LOG.md) | Build-in-public case study log |
-| `study/archive/` | Superseded status/progress docs (kept for history) |
-
-## 🗺️ phases/ — phase delivery docs
-
-**Key phases:**
-- [PHASE-1-CONTEXT-ISOLATION.md](phases/PHASE-1-CONTEXT-ISOLATION.md) — Per-turn token tracking, no context leakage
-- [PHASE-2-TYPED-CONTRACTS.md](phases/PHASE-2-TYPED-CONTRACTS.md) — Deterministic signal validation
-- [PHASE-3-CLAUDE-JUDGE.md](phases/PHASE-3-CLAUDE-JUDGE.md) — Quality gate on outbound copy
-- [PHASE-4-DEPT-SIGNALS.md](phases/PHASE-4-DEPT-SIGNALS.md) — Durable cross-dept messaging
-- [PHASE-5-HIERARCHY-PROOF.md](phases/PHASE-5-HIERARCHY-PROOF.md) — Nested HITL (proven, not yet in production)
-- [PHASE-6-RULES.md](phases/PHASE-6-RULES.md) — Rules #20-21 operationalized
-- [PHASE-C-INTELLIGENCE.md](phases/PHASE-C-INTELLIGENCE.md) — Context memory + knowledge search + scheduler
-- [PHASE-D-REVENUE-FLYWHEEL.md](phases/PHASE-D-REVENUE-FLYWHEEL.md) — Gumroad + LinkedIn launch + cinematic-web
-
-For complete Phase 1-6 hardening details, see [PHASE-HARDENING-GUIDE.md](guides/PHASE-HARDENING-GUIDE.md).
-
-## 🎨 Other
-
-| Doc | What it covers |
-|-----|---------------|
-| [ROADMAP.md](ROADMAP.md) | What's next and what NOT to build |
-| [BRAND.md](BRAND.md) | Turicks brand voice pointer |
-| `superpowers/specs/` | Design specs from brainstorming sessions |
-| `diagrams/` | System + pipeline diagrams |
+| [PHASE-HARDENING-GUIDE.md](guides/PHASE-HARDENING-GUIDE.md) | **Phases 1-6 hardening** (context isolation, typed contracts, judge, signals, hierarchy, rules) |
 
 ---
 
-## The 5 rules you must never break
+## 📏 Rules — The laws of the codebase
 
-1. **TDD always** — failing test first.
-2. **HITL before every external action** — `hitlGate()`, side-effect after approval.
-3. **Idempotency before every send** — audit only after confirmed success id.
-4. **Soft-failure detection** — check for the id; 200 + message ≠ success.
-5. **Determinism** — temperature 0; logic in pure functions, not prompts.
+| Doc | Purpose |
+|-----|---------|
+| [PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) | **Wiring maps:** exact files to touch for adding a tool / department / workflow / command |
+| [TOOL-STANDARDS.md](rules/TOOL-STANDARDS.md) | 8-point checklist every new tool must pass |
+| [TESTING-RULES.md](rules/TESTING-RULES.md) | 8 testing rules from real bugs + test template |
+| [TOOL-INTEGRATION-PLAYBOOK.md](rules/TOOL-INTEGRATION-PLAYBOOK.md) | Verifying external API contracts before implementation |
+
+---
+
+## 🧭 Decisions — Architecture Decision Records (ADRs)
+
+Every significant decision documented in [decisions/](decisions/). **Key ones for next phase:**
+
+| ADR | Decision |
+|-----|----------|
+| [001](decisions/001-why-langgraph.md) | LangGraph JS — stateful graphs, native HITL, Postgres checkpointing |
+| [013](decisions/013-keep-personal-and-engineering-separate.md) | Separate departments — least privilege |
+| [021](decisions/021-multi-agent-transition-and-token-measurement.md) | Context isolation + per-turn token tracking |
+| [022](decisions/022-typed-interdept-contracts.md) | Typed inter-department handoffs (dept_signals) |
+| [027](decisions/027-tool-count-and-handoff-rules.md) | **Current rules:** ~10 tools/agent, sync handoffs for nested HITL visibility |
+
+---
+
+## 📚 Study — Learning resources
+
+**Learning path for understanding FounderOS:**
+
+| Doc | What it covers |
+|-----|----------------|
+| [study/01-what-is-multi-agent-orchestration.md](study/01-what-is-multi-agent-orchestration.md) | Foundations: agents, tools, supervision, routing |
+| [study/02-langgraph-patterns.md](study/02-langgraph-patterns.md) | LangGraph primitives used in FounderOS (createSupervisor, createReactAgent, state, interrupt) |
+| [study/04-how-founderos-works.md](study/04-how-founderos-works.md) | **Deep dive:** runtime walkthrough (request → supervisor → department → tool → HITL → action) |
+| [study/POSTMORTEM-eval-outputMode.md](study/POSTMORTEM-eval-outputMode.md) | Bug post-mortem: eval tool detection + learning |
+| [study/CASE-STUDY-LOG.md](study/CASE-STUDY-LOG.md) | Build-in-public case study (shipping history, decisions, outcomes) |
+| [study/archive/](study/archive/) | Archived docs (v1 migration, strategic planning — reference only) |
+
+---
+
+## 🎯 Next phase — Adding tools & hierarchy
+
+**Architecture is locked.** Next work focuses on:
+
+1. **Adding tools** → Follow [rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md#add-a-tool) wiring map (6 file touches)
+2. **Adding hierarchy** → Nested HITL proof is documented in [decisions/025-hierarchy-proof-on-prebuilts.md](decisions/025-hierarchy-proof-on-prebuilts.md); proof-of-concept code in `feat/hierarchy-*` branch if revival needed
+
+**Do NOT:**
+- Rearchitect the supervisor or department structure
+- Change the 7-department boundary
+- Add new integration layers
+- Rewrite tool wrappers without wiring-map guidance
+
+**If unsure:** Check [rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) first.
+
+---
+
+## 🗺️ Other docs (reference)
+
+| Folder | Purpose |
+|--------|---------|
+| [decisions/](decisions/) | All 28 ADRs (001–028), full decision history |
+| [phases/](phases/) | Phase delivery docs (Phases 1-6 shipped and locked) |
+| [diagrams/](diagrams/) | System diagrams (mermaid) |
+| [process/](process/) | Development process docs |
+| [superpowers/specs/](superpowers/specs/) | Design specs from brainstorms |
+
+---
+
+## The 5 core rules (never break)
+
+1. **TDD always** — write failing test first
+2. **HITL before external actions** — `hitlGate()`, side effects after approval
+3. **Idempotency before sends** — audit only after confirmed success ID
+4. **Soft-failure detection** — 200 + message ≠ success, check for ID
+5. **Determinism** — temperature 0; logic in pure functions, not prompts
 
 Full detail: [rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md).
