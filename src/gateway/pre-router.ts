@@ -5,7 +5,7 @@
  */
 
 import { HumanMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
-import { REVENUE_SUBGRAPH_ENABLED } from "../core/config.js";
+import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED } from "../core/config.js";
 import {
   BANNED_PHRASE_INPUT_RE,
   INBOX_READ_ONLY_RE,
@@ -128,6 +128,14 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
     directive +=
       ` CRITICAL — INBOX READ: Call read_emails immediately with query "${query}". ` +
       `Return sender + subject lines from the tool output — NEVER summarize without calling read_emails.`;
+  }
+  if (
+    dept === "engineering" &&
+    /\b(create|open|file)\b[^.?!]*\b(issue|pull request|pr)\b|\bgithub\b[^.?!]*(issue|pr|pull)/i.test(text)
+  ) {
+    directive += ENGINEERING_SUBGRAPH_ENABLED
+      ? ` CRITICAL — GITHUB WRITE: Transfer to engineering. The CTO subgraph MUST delegate to devops and call github_write or project_workflow — never claim an issue/PR was created without an approval card.`
+      : ` CRITICAL — GITHUB WRITE: engineering MUST call github_write or project_workflow immediately — never claim an issue/PR was created without an approval card.`;
   }
   return directive;
 }

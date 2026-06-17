@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemorySaver, Command } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
 import { OFFICE_RECURSION_LIMIT } from "../../src/core/config.js";
+import { hasReliableNestedIntegrationModel } from "./live-model-guard.js";
 
 const githubExecute = vi.fn(async () => ({
   success: true,
@@ -47,9 +48,7 @@ vi.mock("../../src/db/queries.js", async (orig) => {
 const { buildEngineeringNestedOffice } = await import("../../src/agents/engineering-domain.js");
 const { getPendingApproval } = await import("../../src/agents/office.js");
 
-const _gKey = process.env["GOOGLE_GENERATIVE_AI_API_KEY"] ?? "";
-const hasRealKey = _gKey.length > 20 && !_gKey.includes("test");
-const d = hasRealKey ? describe : describe.skip;
+const d = hasReliableNestedIntegrationModel() ? describe : describe.skip;
 
 const ISSUE_PROMPT =
   "Open a new GitHub issue on repo pushkarverma3698/FounderOS. Title: 'chore: bump deps'. Body: 'Routine dependency update'. Use your tools to actually create it now — do not assume it already exists.";
@@ -92,7 +91,7 @@ d("Engineering CTO nested HITL (parent → engineering → devops)", () => {
 
   it("read-only engineering task → routes to coder/qa, NO interrupt (control)", { timeout: 90_000 }, async () => {
     const office = buildEngineeringNestedOffice(new MemorySaver());
-    const config = invokeConfig("eng-control");
+    const config = invokeConfig(`eng-control-${Date.now()}`);
     await office.invoke(
       {
         messages: [
