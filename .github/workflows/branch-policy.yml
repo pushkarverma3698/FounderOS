@@ -10,6 +10,8 @@ jobs:
   promotion-ladder:
     name: Verify PR base/head branches
     runs-on: ubuntu-latest
+    # Closed PRs (e.g. a mistaken beta→main) must not pollute checks on the head branch.
+    if: github.event.pull_request.state == 'open'
     steps:
       - name: main only accepts stable
         if: github.base_ref == 'main' && github.head_ref != 'stable'
