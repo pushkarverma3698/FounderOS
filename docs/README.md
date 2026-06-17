@@ -56,6 +56,9 @@ Every significant decision documented in [decisions/](decisions/). **Key ones fo
 | [021](decisions/021-multi-agent-transition-and-token-measurement.md) | Context isolation + per-turn token tracking |
 | [022](decisions/022-typed-interdept-contracts.md) | Typed inter-department handoffs (dept_signals) |
 | [027](decisions/027-tool-count-and-handoff-rules.md) | **Current rules:** ~10 tools/agent, sync handoffs for nested HITL visibility |
+| [032](decisions/032-deterministic-anti-hallucination-guards.md) | Memory-tool guard + structured tool-failure envelopes |
+| [033](decisions/033-ai-native-studio-repositioning.md) | Autonomous Studio repositioning + AI/dev-tool niche |
+| [034](decisions/034-recurring-hallucination-audit.md) | Why hallucination bugs recur — structural audit |
 
 ---
 
@@ -70,7 +73,20 @@ Every significant decision documented in [decisions/](decisions/). **Key ones fo
 | [study/04-how-founderos-works.md](study/04-how-founderos-works.md) | **Deep dive:** runtime walkthrough (request → supervisor → department → tool → HITL → action) |
 | [study/POSTMORTEM-eval-outputMode.md](study/POSTMORTEM-eval-outputMode.md) | Bug post-mortem: eval tool detection + learning |
 | [study/CASE-STUDY-LOG.md](study/CASE-STUDY-LOG.md) | Build-in-public case study (shipping history, decisions, outcomes) |
-| [study/archive/](study/archive/) | Archived docs (v1 migration, strategic planning — reference only) |
+
+---
+
+## 🎯 Strategy — Turicks GTM (2026-06)
+
+| Doc | Purpose |
+|-----|---------|
+| [strategy/README.md](strategy/README.md) | Index — Autonomous Studio repositioning |
+| [strategy/00-VISION-AUTONOMOUS-STUDIO.md](strategy/00-VISION-AUTONOMOUS-STUDIO.md) | North star, category, moat narrative |
+| [strategy/01-POSITIONING-AND-NICHE.md](strategy/01-POSITIONING-AND-NICHE.md) | AI-native studio + AI/dev-tool startup wedge |
+| [strategy/02-OFFER-AND-PRICING.md](strategy/02-OFFER-AND-PRICING.md) | $8K floor, retainer ladder |
+| [strategy/03-GTM-ACQUISITION-ENGINE.md](strategy/03-GTM-ACQUISITION-ENGINE.md) | Build-in-public, Proof Drops, referrals |
+| [strategy/04-EXECUTION-ROADMAP.md](strategy/04-EXECUTION-ROADMAP.md) | Phased roadmap + weekly cadence |
+| [strategy/05-SHOWCASE-BRIEF.md](strategy/05-SHOWCASE-BRIEF.md) | 3 showcase pieces for proof.turicks.com |
 
 ---
 
@@ -95,11 +111,11 @@ Every significant decision documented in [decisions/](decisions/). **Key ones fo
 
 | Folder | Purpose |
 |--------|---------|
-| [decisions/](decisions/) | All 28 ADRs (001–028), full decision history |
+| [decisions/](decisions/) | All ADRs (001–032+), full decision history |
 | [phases/](phases/) | Phase delivery docs (Phases 1-6 shipped and locked) |
 | [diagrams/](diagrams/) | System diagrams (mermaid) |
 | [process/](process/) | Development process docs |
-| [superpowers/specs/](superpowers/specs/) | Design specs from brainstorms |
+| [strategy/](strategy/) | Turicks GTM strategy doc set (2026-06) |
 
 ---
 

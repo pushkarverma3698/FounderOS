@@ -4,7 +4,7 @@ Full brand guidelines live at: `~/.claude/brand-guidelines/TURICKS.md`
 
 This file is the in-repo pointer. All brand decisions, voice rules, and channel specs are authoritative in the global file.
 
-> **Updated 2026-06-17:** Repositioned per ADR-032 — The Autonomous Studio.
+> **Updated 2026-06-17:** Repositioned per ADR-033 — The Autonomous Studio.
 
 ## Quick Reference
 

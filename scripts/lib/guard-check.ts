@@ -6,11 +6,12 @@ import {
   detectLinkedInRefusalWithoutTool,
   detectUnbackedInboxClaim,
   detectUnbackedKnowledgeClaim,
+  detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
   type OfficeMessageLike,
 } from "../../src/gateway/execution-guard.js";
 
-export type GuardKind = "shell" | "linkedin" | "inbox" | "knowledge";
+export type GuardKind = "shell" | "linkedin" | "inbox" | "memory" | "knowledge";
 
 export function detectGuardViolation(
   userInput: string,
@@ -20,6 +21,7 @@ export function detectGuardViolation(
   if (detectUnbackedShellClaim(userInput, messages, reply)) return "shell";
   if (detectLinkedInRefusalWithoutTool(userInput, messages, reply)) return "linkedin";
   if (detectUnbackedInboxClaim(userInput, messages, reply)) return "inbox";
+  if (detectUnbackedMemoryClaim(userInput, messages, reply)) return "memory";
   if (detectUnbackedKnowledgeClaim(userInput, messages, reply)) return "knowledge";
   return null;
 }
