@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  aiMessageLooksFabricatedKnowledge,
   detectUnbackedKnowledgeClaim,
   detectUnbackedShellClaim,
   detectLinkedInRefusalWithoutTool,
@@ -139,12 +140,49 @@ describe("detectUnbackedKnowledgeClaim", () => {
     expect(detectUnbackedKnowledgeClaim(input, [], reply)).toBe(true);
   });
 
+  it("flags generic ICP prose without dollar amounts (prompt-embedded class)", () => {
+    const input = "What is Turicks ICP?";
+    const reply =
+      "The Ideal Customer Profile for Turicks includes SMEs with annual recurring revenue, " +
+      "primarily in the EU and US, targeting founders without full-time tech teams.";
+    expect(detectUnbackedKnowledgeClaim(input, [], reply)).toBe(true);
+  });
+
   it("flags long internal answer with no knowledge tools called", () => {
     const input = "Describe Turicks ICP and positioning in detail";
     const reply =
       "Turicks is an AI automation agency serving SME founders in Europe and the United States. " +
       "The ideal customer profile is companies with $50K–500K ARR who need production agent systems.";
     expect(detectUnbackedKnowledgeClaim(input, [aiMsg(reply)], reply)).toBe(true);
+  });
+
+  it("flags stale regurgitation without tools on repeat ask (prod log class)", () => {
+    const input = "What is our ICP?";
+    const reply =
+      "Turicks ICP targets SMEs in the EU and US with annual recurring revenue, focusing on founders without full-time tech teams.";
+    expect(detectUnbackedKnowledgeClaim(input, [], reply)).toBe(true);
+  });
+
+  it("allows short honest refusal without tools", () => {
+    const input = "What is Turicks ICP?";
+    const reply = "No entry in turicks-brain for ICP. Run brain:sync.";
+    expect(detectUnbackedKnowledgeClaim(input, [], reply)).toBe(false);
+  });
+});
+
+describe("aiMessageLooksFabricatedKnowledge", () => {
+  it("flags fabricated ICP in checkpoint history", () => {
+    const stale =
+      "Turicks' Ideal Customer Profile focuses on SMEs with ARR between $50,000 and $500,000 in the United States and Europe.";
+    expect(aiMessageLooksFabricatedKnowledge(stale)).toBe(true);
+  });
+
+  it("skips honest refusal messages", () => {
+    expect(
+      aiMessageLooksFabricatedKnowledge(
+        "No knowledge entries found for ICP in turicks-brain. Run brain:sync.",
+      ),
+    ).toBe(false);
   });
 });
 

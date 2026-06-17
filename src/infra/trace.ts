@@ -24,6 +24,7 @@ export type Seam =
   | "checkpoint.trim"
   | "guard.retry"
   | "guard.blocked"
+  | "guard.purged"
   | "inbox.fastpath"
   | "hierarchy.enter"
   | "hierarchy.exit"

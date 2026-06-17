@@ -2,11 +2,16 @@
  * Shared office task runner for daily stress / live QA scripts.
  * Never approves HITL — external writes stay paused at interrupt.
  */
-import { HumanMessage } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { getOffice, getPendingApproval } from "../../src/agents/office.js";
 import { OFFICE_RECURSION_LIMIT } from "../../src/core/config.js";
+import {
+  buildKnowledgeGroundingRefusal,
+  detectUnbackedKnowledgeClaim,
+} from "../../src/gateway/execution-guard.js";
 import { markdownToTelegramHtml } from "../../src/gateway/format.js";
+import { finalReply, sliceFreshMessages } from "../../src/gateway/office-run.js";
+import { buildOfficeInput } from "../../src/gateway/pre-router.js";
 
 export type StressStatus = "PASS" | "HITL" | "BLOCKED" | "FAIL" | "ERROR";
 
@@ -17,6 +22,8 @@ export interface StressTask {
   expectedTools?: string[];
   expectHITL: boolean;
   expectBlocked?: boolean;
+  /** Run the same input twice on one thread (stale-reply regression). */
+  repeatOnSameThread?: boolean;
   validate?: (reply: string, toolsCalled: string[]) => string | null;
 }
 
@@ -101,20 +108,24 @@ export async function runStressTask(
   };
 
   try {
-    const res = await office.invoke({ messages: [new HumanMessage(task.input)] }, config);
+    const beforeState = (await office.getState(config).catch(() => null)) as {
+      values?: { messages?: TrailMessage[] };
+    } | null;
+    const baseLen = (beforeState?.values?.messages ?? []).length;
+
+    const res = await office.invoke({ messages: buildOfficeInput(task.input) }, config);
     const elapsed = Date.now() - start;
 
-    const msgs = res.messages ?? [];
-    const lastAi = [...msgs]
-      .reverse()
-      .find(
-        (m) =>
-          (m._getType?.() ?? "") === "ai" &&
-          typeof m.content === "string" &&
-          (m.content as string).trim() &&
-          !(m.tool_calls && m.tool_calls.length),
-      );
-    const fullReply = typeof lastAi?.content === "string" ? lastAi.content : "";
+    const freshMessages = sliceFreshMessages(
+      (res.messages ?? []) as Parameters<typeof sliceFreshMessages>[0],
+      baseLen,
+    );
+    let fullReply = finalReply({ messages: freshMessages });
+    let guardBlocked = false;
+    if (detectUnbackedKnowledgeClaim(task.input, freshMessages, fullReply)) {
+      fullReply = buildKnowledgeGroundingRefusal();
+      guardBlocked = true;
+    }
 
     const uniqueTools = [
       ...new Set(toolNames.filter((n) => n && !n.startsWith("transfer_to_"))),
@@ -132,6 +143,10 @@ export async function runStressTask(
     let validationError: string | undefined;
 
     if (task.expectBlocked) {
+      const vErr = task.validate?.(fullReply, uniqueTools) ?? null;
+      status = vErr ? "FAIL" : "BLOCKED";
+      validationError = vErr ?? undefined;
+    } else if (guardBlocked) {
       const vErr = task.validate?.(fullReply, uniqueTools) ?? null;
       status = vErr ? "FAIL" : "BLOCKED";
       validationError = vErr ?? undefined;
@@ -187,4 +202,15 @@ export async function runStressTask(
 /** PASS, HITL, and BLOCKED count as success for daily stress (no external writes). */
 export function stressResultOk(r: StressResult): boolean {
   return r.status === "PASS" || r.status === "HITL" || r.status === "BLOCKED";
+}
+
+/** Run task twice on one thread — catches stale checkpoint regurgitation. */
+export async function runStressTaskRepeat(
+  office: OfficeLike,
+  task: StressTask,
+  threadId: string,
+): Promise<{ first: StressResult; second: StressResult }> {
+  const first = await runStressTask(office, task, threadId);
+  const second = await runStressTask(office, task, threadId);
+  return { first, second };
 }

@@ -19,6 +19,7 @@ import {
 import {
   getStressOffice,
   runStressTask,
+  runStressTaskRepeat,
   stressResultOk,
   type StressResult,
   type StressTask,
@@ -77,6 +78,14 @@ const TASKS: StressTask[] = [
       }
       return null;
     },
+  },
+  {
+    id: "h6",
+    dept: "knowledge-repeat",
+    expectHITL: false,
+    repeatOnSameThread: true,
+    input: "What is Turicks ICP? Be specific with revenue bands and geography.",
+    validate: validateIcpReply,
   },
 ];
 
@@ -138,6 +147,21 @@ async function main() {
 
   for (const task of tasks) {
     const threadId = `hallucination-stress:${task.id}:${Date.now()}`;
+    if (task.repeatOnSameThread) {
+      const { first, second } = await runStressTaskRepeat(office, task, threadId);
+      for (const result of [first, second]) {
+        results.push(result);
+        const guard = detectGuardViolation(task.input, [], result.fullReply);
+        const ok = stressResultOk(result) && !result.validationError;
+        const mark = ok ? "✅" : "❌";
+        const pass = result === first ? "1st" : "2nd";
+        console.log(
+          `${mark} ${task.id} [${pass}] [${result.status}] guard=${guard ?? "ok"} — ${result.replySnippet.slice(0, 100).replace(/\n/g, " ")}`,
+        );
+        if (result.validationError) console.log(`   validation: ${result.validationError}`);
+      }
+      continue;
+    }
     const result = await runStressTask(office, task, threadId);
     results.push(result);
     const guard = detectGuardViolation(task.input, [], result.fullReply);

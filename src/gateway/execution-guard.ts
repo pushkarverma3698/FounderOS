@@ -194,6 +194,42 @@ export function replyHasUnbackedBusinessSpecifics(reply: string): boolean {
   return true;
 }
 
+/** Classic ICP/strategy prose without turicks-brain citation — matches prompt-embedded ICP. */
+export const UNBACKED_ICP_PROSE_RE =
+  /\b(ideal customer profile|\bICP\b)[^.]{0,250}\b(SME|small to medium|ARR|annual recurring|EU|US|Europe|United States)\b/i;
+
+export function replyHasUnbackedIcpProse(reply: string): boolean {
+  const text = reply.trim();
+  if (!UNBACKED_ICP_PROSE_RE.test(text)) return false;
+  if (CITED_KNOWLEDGE_GROUNDING_RE.test(text)) return false;
+  return true;
+}
+
+/** Confident internal-facts answer without turicks-brain citation (checkpoint purge class). */
+export const INTERNAL_ANSWER_WITHOUT_GROUNDING_RE =
+  /\b(ICP|ideal customer profile|strategic pillar|positioning|revenue band|annual recurring|our (clients|pillars|strategy))\b/i;
+
+/**
+ * True when an AI message in checkpoint history looks like fabricated/stale
+ * Turicks knowledge — safe to purge before a fresh internal-facts turn.
+ */
+export function aiMessageLooksFabricatedKnowledge(content: string): boolean {
+  const text = content.trim();
+  if (text.length < 20) return false;
+  if (HONEST_KNOWLEDGE_REFUSAL_RE.test(text) && !FABRICATION_BRIDGE_RE.test(text)) return false;
+  if (CITED_KNOWLEDGE_GROUNDING_RE.test(text)) return false;
+  if (replyHasUnbackedBusinessSpecifics(text)) return true;
+  if (replyHasUnbackedIcpProse(text)) return true;
+  if (
+    FABRICATION_BRIDGE_RE.test(text) &&
+    /\b(typical|typically|generally|SME|ARR|EU|US)\b/i.test(text)
+  ) {
+    return true;
+  }
+  if (INTERNAL_ANSWER_WITHOUT_GROUNDING_RE.test(text) && text.length >= 40) return true;
+  return false;
+}
+
 export function buildKnowledgeGroundingRefusal(): string {
   return (
     "I don't have a verified answer for that in turicks-brain. " +
@@ -202,6 +238,12 @@ export function buildKnowledgeGroundingRefusal(): string {
     "I won't guess at ICP, clients, revenue bands, or deal values."
   );
 }
+
+export const INTERNAL_KNOWLEDGE_DIRECTIVE =
+  "[GROUNDING DIRECTIVE: Turicks-specific facts (ICP, strategy, pillars, clients, revenue) MUST come from " +
+  "search_knowledge + search_turicks_brain tool output THIS turn. If both return no entries, say ONLY that " +
+  "turicks-brain has no entry — suggest brain:sync. NEVER use training data, system prompts, or prior assistant " +
+  "messages in this thread (they may be stale/wrong). Do NOT use search_web for internal Turicks facts.]";
 
 export function isInternalKnowledgeRequest(input: string): boolean {
   return INTERNAL_KNOWLEDGE_REQUEST_RE.test(input.trim());
@@ -239,8 +281,16 @@ export function detectUnbackedKnowledgeClaim(
     return true;
   }
 
-  if (isInternalKnowledgeRequest(userInput) && !hadKnowledgeSearchTool(messages) && text.length >= 80) {
+  if (isInternalKnowledgeRequest(userInput) && replyHasUnbackedIcpProse(text)) {
     return true;
+  }
+
+  // Stale checkpoint regurgitation: model repeats prior ICP/strategy without calling tools.
+  if (isInternalKnowledgeRequest(userInput) && !hadKnowledgeSearchTool(messages)) {
+    if (HONEST_KNOWLEDGE_REFUSAL_RE.test(text) && !FABRICATION_BRIDGE_RE.test(text)) return false;
+    if (replyHasUnbackedBusinessSpecifics(text) || replyHasUnbackedIcpProse(text)) return true;
+    if (INTERNAL_ANSWER_WITHOUT_GROUNDING_RE.test(text) && text.length >= 30) return true;
+    if (text.length >= 80) return true;
   }
 
   return false;

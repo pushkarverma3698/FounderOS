@@ -32,11 +32,13 @@ import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt } from ".
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 import { buildOfficeInput } from "./pre-router.js";
 import {
+  aiMessageLooksFabricatedKnowledge,
   buildKnowledgeGroundingRefusal,
   detectLinkedInRefusalWithoutTool,
   detectUnbackedInboxClaim,
   detectUnbackedKnowledgeClaim,
   detectUnbackedShellClaim,
+  isInternalKnowledgeRequest,
 } from "./execution-guard.js";
 import { tryInboxReadFastPath } from "./inbox-fast-path.js";
 import { assertNonEmptyMessages } from "../infra/office-guard.js";
@@ -436,6 +438,58 @@ export async function trimThreadHistory(
   trace?.event("checkpoint.trim", { removed: toRemove.length });
 }
 
+/**
+ * Remove fabricated AI messages from the checkpoint so the next turn cannot
+ * re-anchor on stale ICP/strategy text (prod "reiterates stale replies" class).
+ */
+async function purgeFabricatedAiFromCheckpoint(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  office: { updateState: (config: any, update: { messages: RemoveMessage[] }) => Promise<unknown> },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  config: any,
+  freshMessages: OfficeMessage[],
+): Promise<number> {
+  const removals: RemoveMessage[] = [];
+  for (const m of freshMessages) {
+    if ((m._getType?.() ?? "") !== "ai") continue;
+    const id = (m as BaseMessage).id;
+    if (id) removals.push(new RemoveMessage({ id }));
+  }
+  if (removals.length === 0) return 0;
+  await office.updateState(config, { messages: removals });
+  return removals.length;
+}
+
+/**
+ * Before an internal-facts turn, strip prior AI messages that look like
+ * fabricated Turicks knowledge so the model cannot regurgitate them without tools.
+ */
+async function purgeStaleFabricatedKnowledgeFromCheckpoint(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  office: {
+    getState: (config: any) => Promise<unknown>;
+    updateState: (config: any, update: { messages: RemoveMessage[] }) => Promise<unknown>;
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  config: any,
+): Promise<number> {
+  const state = (await office.getState(config).catch(() => null)) as {
+    values?: { messages?: OfficeMessage[] };
+  } | null;
+  const messages: OfficeMessage[] = state?.values?.messages ?? [];
+  const removals: RemoveMessage[] = [];
+  for (const m of messages) {
+    if ((m._getType?.() ?? "") !== "ai") continue;
+    const raw = typeof m.content === "string" ? m.content : "";
+    if (!aiMessageLooksFabricatedKnowledge(stripXmlTags(raw))) continue;
+    const id = (m as BaseMessage).id;
+    if (id) removals.push(new RemoveMessage({ id }));
+  }
+  if (removals.length === 0) return 0;
+  await office.updateState(config, { messages: removals });
+  return removals.length;
+}
+
 // ── Route an incoming message into the office ──────────────────────────────────
 
 function needsExecutionGuardRetry(
@@ -583,6 +637,17 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
     const invokeMessages: BaseMessage[] = buildOfficeInput(text);
     trace.event("route.decided", { hint: (invokeMessages[0]?.content ?? "").toString().slice(0, 60) });
 
+    if (isInternalKnowledgeRequest(text)) {
+      const stalePurged = await purgeStaleFabricatedKnowledgeFromCheckpoint(office, config).catch((err) => {
+        log.warn({ chatId, err: (err as Error).message }, "Failed to purge stale fabricated knowledge");
+        return 0;
+      });
+      if (stalePurged > 0) {
+        trace.event("guard.purged", { removed: stalePurged, stale: true });
+        log.info({ chatId, removed: stalePurged }, "Purged stale fabricated knowledge from checkpoint");
+      }
+    }
+
     assertNonEmptyMessages(invokeMessages, "runOfficeSession");
 
     const res = (await office.invoke(
@@ -640,6 +705,11 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
     if (stillUngrounded === "knowledge") {
       trace.event("guard.blocked", { kind: "knowledge" });
       log.warn({ chatId }, "Knowledge guard blocked ungrounded reply — sending safe refusal");
+      const purged = await purgeFabricatedAiFromCheckpoint(office, config, freshMessages).catch((err) => {
+        log.warn({ chatId, err: (err as Error).message }, "Failed to purge fabricated AI from checkpoint");
+        return 0;
+      });
+      if (purged > 0) trace.event("guard.purged", { removed: purged });
       replyText = buildKnowledgeGroundingRefusal();
       freshRes = { messages: [{ content: replyText, _getType: () => "ai" }] };
     }
