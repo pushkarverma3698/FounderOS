@@ -4,7 +4,7 @@
 > is and what he's working on, so they can answer "who is Pushkar?" or "what does Turicks
 > do?" without asking him. Read by `search_knowledge` queries.
 >
-> **Updated 2026-06-17** per ADR-032 — The Autonomous Studio repositioning.
+> **Updated 2026-06-17** per ADR-033 — The Autonomous Studio repositioning.
 >
 > Boundary (ADR-013/015): Personal career/portfolio data lives in personal-rag, NOT here.
 

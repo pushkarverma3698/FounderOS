@@ -1,4 +1,4 @@
-# ADR-032 — AI-Native Studio Repositioning
+# ADR-033 — AI-Native Studio Repositioning
 
 - **Date:** 2026-06-17
 - **Status:** Accepted

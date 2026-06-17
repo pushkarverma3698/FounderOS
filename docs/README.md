@@ -57,6 +57,7 @@ Every significant decision documented in [decisions/](decisions/). **Key ones fo
 | [022](decisions/022-typed-interdept-contracts.md) | Typed inter-department handoffs (dept_signals) |
 | [027](decisions/027-tool-count-and-handoff-rules.md) | **Current rules:** ~10 tools/agent, sync handoffs for nested HITL visibility |
 | [032](decisions/032-deterministic-anti-hallucination-guards.md) | Memory-tool guard + structured tool-failure envelopes |
+| [033](decisions/033-ai-native-studio-repositioning.md) | Autonomous Studio repositioning + AI/dev-tool niche |
 
 ---
 

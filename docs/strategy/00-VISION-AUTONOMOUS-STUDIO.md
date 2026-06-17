@@ -72,4 +72,4 @@ FounderOS is **internal delivery infrastructure**, not the product being sold (y
 
 - [01-POSITIONING-AND-NICHE.md](01-POSITIONING-AND-NICHE.md) — messaging + ICP
 - [04-EXECUTION-ROADMAP.md](04-EXECUTION-ROADMAP.md) — phased GTM
-- [ADR-032](../decisions/032-ai-native-studio-repositioning.md) — decision record
+- [ADR-033](../decisions/033-ai-native-studio-repositioning.md) — decision record
