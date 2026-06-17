@@ -264,4 +264,10 @@ describe("buildOfficeInput", () => {
     expect(String(msgs[0]!.content)).toMatch(/CRITICAL — GITHUB WRITE/i);
     expect(String(msgs[0]!.content)).toContain("engineering");
   });
+
+  it("engineering routes embed ENGINEERING_HANDOFF envelope (P3)", () => {
+    const prompt = "List my GitHub repos on pushkarverma3698/FounderOS";
+    const msgs = buildOfficeInput(prompt);
+    expect(String(msgs[0]!.content)).toContain("[ENGINEERING_HANDOFF:v1:");
+  });
 });
