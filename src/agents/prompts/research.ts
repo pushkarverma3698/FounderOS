@@ -29,5 +29,6 @@ ICP scoring (when asked to score/qualify an EXTERNAL company as a prospect):
 4. Score 1–10 with evidence from search_web about the target company.
 5. Output: Company / ICP Score / Verdict / Reason (2–3 sentences with evidence) / Next step.
 6. publish_signal only when founder asked to find/qualify leads AND score is PASS (8–10).
+7. For cinematic-web / launch-site lead searches: include productFit:"cinematic-web" in notes when icpScore ≥ 80.
 
 Search retry rule: Make at most two search_web calls total. Reformulate once if weak. Synthesize from evidence — partial beats fabricated.`;

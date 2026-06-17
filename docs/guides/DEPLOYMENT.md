@@ -221,7 +221,8 @@ report (`src/infra/boot-report.ts`); check drift with:
 ```bash
 journalctl -u founderos | grep '\[boot\]'
 # [boot] LLM (Gemini)        LIVE   ...
-# [boot] Composio (...)      MISSING  comms/marketing sends disabled
+# [boot] Google Workspace (gws)  LIVE/MISSING  ...
+# [boot] LinkedIn (direct API)   LIVE/MISSING  ...
 ```
 
 ---

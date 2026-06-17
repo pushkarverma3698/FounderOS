@@ -53,15 +53,20 @@ TELEGRAM_BOT_TOKEN=<your bot token>
 TELEGRAM_CHAT_ID=<your numeric chat id>
 GOOGLE_GENERATIVE_AI_API_KEY=<Gemini key>
 
-# Composio connections (Gmail + LinkedIn + Google Calendar)
-COMPOSIO_API_KEY=<key>
-COMPOSIO_GMAIL_CONN_ID=ca_nlLqda4MBFaA
-COMPOSIO_GMAIL_USER_ID=pg-test-750dbecb-ef9d-4ef7-a76d-d1de1fd0190f
-COMPOSIO_LINKEDIN_CONN_ID=ca_CDaqpUfRJ7vl
-COMPOSIO_LINKEDIN_USER_ID=turicks-internal
-# Google Calendar defaults are hardcoded in composio.ts — set to override:
-# COMPOSIO_GCAL_CONN_ID=ca_wbg4nQjAnw9o
-# COMPOSIO_GCAL_USER_ID=pg-test-750dbecb-ef9d-4ef7-a76d-d1de1fd0190f
+# Platform integrations (ADR-029 — direct APIs; Composio = legacy rollback)
+# Google: npm install -g @googleworkspace/cli && gws auth login (on VPS)
+# GMAIL_BACKEND=gws          # default
+# CALENDAR_BACKEND=gws         # default (follows GMAIL_BACKEND)
+LINKEDIN_ACCESS_TOKEN=<founder OAuth token>
+LINKEDIN_AUTHOR_URN=urn:li:person:...
+# LINKEDIN_BACKEND=direct      # default
+
+# Legacy rollback (only if direct APIs fail):
+# COMPOSIO_API_KEY=<key>
+# GMAIL_BACKEND=composio
+# LINKEDIN_BACKEND=composio
+# COMPOSIO_GMAIL_CONN_ID=ca_...
+# COMPOSIO_LINKEDIN_CONN_ID=ca_...
 
 # Optional
 FIRECRAWL_API_KEY=<key>   # web search
@@ -168,13 +173,20 @@ grep ERROR /tmp/founderos.log | tail -10
 Handled automatically by the fallback cascade (2.5 → 2.0 → 1.5). If all fail,
 error surfaces to Telegram.
 
-**Composio auth expired:**
-`Error: LinkedIn token expired. Please reconnect.`
-Go to app.composio.dev → Connections → reconnect. Connection ID stays the same.
+**Google (gws) auth missing:**
+```bash
+gws auth status   # should show authenticated user
+gws auth login    # one-time on VPS as founderos user
+node --env-file=.env --import tsx/esm scripts/probe-direct-integrations.ts
+```
+
+**LinkedIn token expired:**
+Set fresh `LINKEDIN_ACCESS_TOKEN` in `.env` (founder re-OAuth). Or rollback:
+`LINKEDIN_BACKEND=composio` + `COMPOSIO_API_KEY`.
 
 **Calendar not creating:**
 ```bash
-npx tsx --env-file=.env scripts/probe-gcal.ts
+node --env-file=.env --import tsx/esm scripts/probe-direct-integrations.ts
 ```
 
 ---
@@ -182,9 +194,11 @@ npx tsx --env-file=.env scripts/probe-gcal.ts
 ## Probe Scripts
 
 ```bash
-npx tsx --env-file=.env scripts/probe-gcal.ts    # test Google Calendar
-npx tsx --env-file=.env scripts/probe-real-task.ts  # run task through real office
-pnpm graph:gen                                   # regenerate .claude/graph.json
+npx tsx --env-file=.env scripts/probe-direct-integrations.ts  # gws + LinkedIn direct
+npx tsx --env-file=.env scripts/probe-providers.ts            # all provider probes
+npx tsx --env-file=.env scripts/probe-gcal.ts                 # calendar (legacy Composio)
+npx tsx --env-file=.env scripts/probe-real-task.ts            # run task through real office
+pnpm graph:gen                                                # regenerate .claude/graph.json
 ```
 
 ---

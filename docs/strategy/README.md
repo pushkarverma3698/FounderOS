@@ -13,8 +13,14 @@
 4. **[03-GTM-ACQUISITION-ENGINE.md](03-GTM-ACQUISITION-ENGINE.md)** — Channels: build-in-public, Proof Drops, referrals, awards
 5. **[04-EXECUTION-ROADMAP.md](04-EXECUTION-ROADMAP.md)** — Phased roadmap + weekly cadence + metrics
 6. **[05-SHOWCASE-BRIEF.md](05-SHOWCASE-BRIEF.md)** — 3 showcase pieces + award submission plan
+7. **[06-SCALE-GATE-BUILD-LIST.md](06-SCALE-GATE-BUILD-LIST.md)** — Deferred FounderOS builds (post-client)
 
 ---
+
+## Operational guides
+
+- **[GTM-WEB-DESIGN-RUNBOOK.md](../guides/GTM-WEB-DESIGN-RUNBOOK.md)** — Gumroad, showcases, Proof Drops, Telegram prompts
+
 
 ## Active phase doc
 

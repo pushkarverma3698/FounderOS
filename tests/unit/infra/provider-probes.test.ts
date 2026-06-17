@@ -60,16 +60,21 @@ describe("provider-probes", () => {
     expect(r.status).toBe("up");
   });
 
-  it("formatProviderStatusLine includes backend name", async () => {
+  it("formatProviderStatusLine includes backend names", async () => {
     const { formatProviderStatusLine } = await import("../../../src/infra/provider-probes.js");
     const line = formatProviderStatusLine({
       checked_at: new Date().toISOString(),
-      gmail_backend: "composio",
-      composio_gmail: { status: "up", detail: "ok" },
-      gws_gmail: { status: "unconfigured", detail: "skip" },
-      active_gmail: { status: "up", detail: "Gmail connection ACTIVE" },
+      gmail_backend: "gws",
+      calendar_backend: "gws",
+      linkedin_backend: "direct",
+      composio_gmail: { status: "unconfigured", detail: "skip" },
+      gws_gmail: { status: "up", detail: "gws ok" },
+      active_gmail: { status: "up", detail: "gws ok" },
+      active_calendar: { status: "up", detail: "gws ok" },
+      active_linkedin: { status: "up", detail: "LinkedIn direct configured" },
     });
-    expect(line).toContain("composio");
+    expect(line).toContain("gws");
+    expect(line).toContain("direct");
     expect(line).toContain("🟢");
   });
 });

@@ -49,11 +49,14 @@ You message it via Telegram → it routes to the right department → the agent 
 - Ollama for local embeddings
 - LangSmith for telemetry and cost tracking
 
-### Current Work (Phase D)
+### Current Work (Phase D-Bis — Proof & Distribution)
 
-1. **LinkedIn launch sequence** — Build-in-public weekly posts (Gumroad integration next)
-2. **Revenue flywheel** — Gumroad done-for-you tier, weekly cold outreach rhythm
-3. **Documentation refresh** (2026-06-17) — Removing stale v1 content, showcasing production stability
+1. **Cinematic Launch Experience** — web design service via existing depts (marketing + engineering + sales)
+2. **3 proof showcases** → `proof.turicks.com` (see `docs/strategy/05-SHOWCASE-BRIEF.md`)
+3. **Proof Drops + LinkedIn build-in-public** — 2–3 custom artifacts/week to AI/dev-tool target list
+4. **FounderOS wiring** — prompts, `design_brief_ready` / `site_deployed` signals (ADR-032)
+
+Strategy: [docs/strategy/](strategy/) · Phase doc: [PHASE-D-BIS-PROOF-AND-DISTRIBUTION.md](phases/PHASE-D-BIS-PROOF-AND-DISTRIBUTION.md)
 
 ### What NOT to do (Intentional Defers)
 
@@ -108,16 +111,16 @@ You message it via Telegram → it routes to the right department → the agent 
 
 ## Business Context
 
-### Turicks (AI automation agency)
+### Turicks (The Autonomous Studio)
 - Solo founder: Pushkar Verma
-- ICP: SME founders, EU/US, $50K–500K ARR, need tech co-founder
-- Revenue model: $500 starter projects, $5K/mo retainer
-- Website: turicks.com
+- ICP: AI/dev-tool startups (seed–Series A)
+- Revenue model: $8K+ Cinematic Launch Experience, $5K/mo retainer, Gumroad packs
+- Website: turicks.com · Proof gallery: proof.turicks.com (planned)
 
 ### Products on FounderOS
-1. **FounderOS** (internal → SaaS Phase E)
-2. **Cinematic Web** (website builder, Gumroad → SaaS)
-3. **Gumroad packs:** ICP kit, brand-voice kit, LangGraph starter
+1. **FounderOS** (delivery OS → SaaS Phase E)
+2. **Cinematic Web** (`cinematic-web` — Gumroad presets → DFY tier → SaaS deferred)
+3. **Gumroad packs:** ICP kit, brand-voice kit, LangGraph starter, cinematic premium pack
 
 ---
 
@@ -126,6 +129,7 @@ You message it via Telegram → it routes to the right department → the agent 
 - **[Root README.md](../README.md)** — What it does, architecture, eval results
 - **[docs/README.md](README.md)** — Documentation index
 - **[docs/guides/DEPLOYMENT.md](guides/DEPLOYMENT.md)** — Production runbook
-- **[docs/decisions/](decisions/)** — All architecture decisions (ADRs 001–028)
+- **[docs/decisions/](decisions/)** — All architecture decisions (ADRs 001–032+)
+- **[docs/strategy/](strategy/)** — Autonomous Studio GTM + web design service
 - **[docs/study/](study/)** — Learning path (foundations → deep dive → lessons)
 - **[LIMITATIONS.md](LIMITATIONS.md)** — Honest tech-debt and deferred work
