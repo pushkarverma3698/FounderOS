@@ -1,4 +1,4 @@
-# ADR-033: Why Hallucination Bugs Recur — Full Audit (2026-06-17)
+# ADR-034: Why Hallucination Bugs Recur — Full Audit (2026-06-17)
 
 **Status:** Accepted  
 **Date:** 2026-06-17  

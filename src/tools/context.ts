@@ -19,6 +19,7 @@ import { TENANT } from "../core/config.js";
 import { z } from "zod";
 import { getFounderContext, upsertFounderContext } from "../db/queries.js";
 import { sanitizeContextUpdates } from "./context-guard.js";
+import { withToolErrorBoundary } from "../agents/tool-result.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:context" });
@@ -27,7 +28,8 @@ const log = childLogger({ module: "tool:context" });
 // ── Read context ──────────────────────────────────────────────────────────────
 
 export const readContext = tool(
-  async () => {
+  async () =>
+    withToolErrorBoundary("db", "read founder_context from Postgres", async () => {
     const ctx = await getFounderContext(TENANT);
     const lines: string[] = [];
     for (const [key, value] of Object.entries(ctx)) {
@@ -44,7 +46,7 @@ export const readContext = tool(
     }
     const updatedAt = ctx["last_updated"] ? `\n\nLast updated: ${ctx["last_updated"]}` : "";
     return `Current business context:\n${lines.join("\n")}${updatedAt}`;
-  },
+    }),
   {
     name: "read_context",
     description:
@@ -68,17 +70,17 @@ export const updateContext = tool(
       } Recognised keys: active_clients, open_deals, current_priorities, next_actions, notes (factual state only).`;
     }
 
-    await upsertFounderContext(TENANT, clean);
-    log.info(
-      { keys: Object.keys(clean), rejected: rejected.map((r) => r.key) },
-      "Founder context updated",
-    );
-    const keyList = Object.keys(clean).join(", ");
-    const skipped =
-      rejected.length > 0
-        ? ` (skipped: ${rejected.map((r) => r.key).join(", ")})`
-        : "";
-    return `✅ Context updated: ${keyList}${skipped}`;
+    return withToolErrorBoundary("db", "write founder_context to Postgres", async () => {
+      await upsertFounderContext(TENANT, clean);
+      log.info(
+        { keys: Object.keys(clean), rejected: rejected.map((r) => r.key) },
+        "Founder context updated",
+      );
+      const keyList = Object.keys(clean).join(", ");
+      const skipped =
+        rejected.length > 0 ? ` (skipped: ${rejected.map((r) => r.key).join(", ")})` : "";
+      return `✅ Context updated: ${keyList}${skipped}`;
+    });
   },
   {
     name: "update_context",

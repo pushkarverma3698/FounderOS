@@ -1,7 +1,7 @@
 # Turicks Strategy — Document Index
 
 > **Locked:** 2026-06-17 · **Category:** The Autonomous Studio  
-> **ADR:** [032-ai-native-studio-repositioning.md](../decisions/032-ai-native-studio-repositioning.md)
+> **ADR:** [033-ai-native-studio-repositioning.md](../decisions/033-ai-native-studio-repositioning.md)
 
 ---
 
