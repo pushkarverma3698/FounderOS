@@ -265,6 +265,36 @@ describe("buildOfficeInput", () => {
     expect(String(msgs[0]!.content)).toContain("engineering");
   });
 
+  it("engineering cinematic build gets CRITICAL claude_code directive", () => {
+    const prompt =
+      "Build a cinematic landing page for a fictional AI observability startup called AgentOps using the neon preset.";
+    const msgs = buildOfficeInput(prompt);
+    expect(String(msgs[0]!.content)).toMatch(/CRITICAL — CINEMATIC BUILD/i);
+    expect(String(msgs[0]!.content)).toMatch(/claude_code/i);
+  });
+
+  it("external lead discovery gets CRITICAL search_web directive (not turicks-brain)", () => {
+    const prompt = "Find AI dev-tool startups that might need a cinematic launch landing page.";
+    const msgs = buildOfficeInput(prompt);
+    expect(String(msgs[0]!.content)).toMatch(/CRITICAL — EXTERNAL LEAD DISCOVERY/i);
+    expect(String(msgs[0]!.content)).toMatch(/search_web/i);
+    expect(String(msgs[0]!.content)).toMatch(/Do NOT call search_knowledge/i);
+  });
+
+  it("routes cinematic lead discovery to research", () => {
+    expect(
+      preRouteDepartment("Find AI dev-tool startups that might need a cinematic launch landing page."),
+    ).toBe("research");
+  });
+
+  it("routes cinematic landing build to engineering", () => {
+    expect(
+      preRouteDepartment(
+        "Build a cinematic landing page for AgentOps using the neon preset.",
+      ),
+    ).toBe("engineering");
+  });
+
   it("engineering routes embed ENGINEERING_HANDOFF envelope (P3)", () => {
     const prompt = "List my GitHub repos on pushkarverma3698/FounderOS";
     const msgs = buildOfficeInput(prompt);

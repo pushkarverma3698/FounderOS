@@ -191,11 +191,11 @@ pnpm test
 
 ## Model
 
-**Production (VPS only):** `openrouter:google/gemini-2.5-flash-preview-05-20` (paid, set in PROD_DOTENV)
+**Production (VPS only):** `openrouter:google/gemini-2.5-flash` (paid, set in PROD_DOTENV / deploy.yml)
 
 **Development / integration testing (local, free):**
 ```
-AGENT_MODEL=openrouter:google/gemini-2.5-flash-preview-05-20:free
+AGENT_MODEL=openrouter:google/gemini-2.5-flash:free
 AGENT_FALLBACK_MODELS=openrouter:deepseek/deepseek-r1:free,openrouter:meta-llama/llama-3.3-70b-instruct:free
 ```
 
@@ -420,7 +420,7 @@ Every real Gemini/OpenRouter paid call during a dev session is waste. The develo
 1. **Write a failing unit test first.** If you can't reproduce the bug in a unit test with mocked LLM output, you don't understand it yet. Do not move to step 2.
 2. **Fix the implementation until the unit test passes.** `pnpm test` is mocked and $0. This is your primary feedback loop — use it aggressively.
 3. **Run `pnpm lint && tsc --noEmit` clean.** Zero errors before ANY live call.
-4. **Integration check with free model.** Set `AGENT_MODEL=openrouter:google/gemini-2.5-flash-preview-05-20:free` and run a single probe only if the logic crosses LLM routing. Free tier, $0.
+4. **Integration check with free model.** Set `AGENT_MODEL=openrouter:google/gemini-2.5-flash:free` and run a single probe only if the logic crosses LLM routing. Free tier, $0.
 5. **MTProto / live Telegram QA exactly once.** Only after steps 1–4 are green. This is the most expensive step. Run it once when the feature is PR-ready, not during debugging.
 6. **`pnpm eval` is a milestone gate.** Run it once when the entire feature is done. Not per iteration, not per file change.
 
