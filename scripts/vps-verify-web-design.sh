@@ -47,10 +47,7 @@ fi
 
 echo "==> VPS verify complete"
 
-echo "==> Cinematic build probe (real claude_code artifacts)"
-if [ -f scripts/probe-cinematic-build.ts ]; then
-  node --env-file=.env --import tsx/esm scripts/probe-cinematic-build.ts 2>&1 | tee /tmp/probe-cinematic-build.log
-  tail -40 /tmp/probe-cinematic-build.log
-else
-  echo "!! probe-cinematic-build.ts not on this branch — skip"
-fi
+echo "==> Live showcase deploy + verification"
+chmod +x scripts/vps-live-showcase.sh
+bash scripts/vps-live-showcase.sh 2>&1 | tee /tmp/vps-live-showcase.log
+tail -50 /tmp/vps-live-showcase.log
