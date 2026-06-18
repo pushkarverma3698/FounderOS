@@ -22,13 +22,13 @@
 import { type Context } from "grammy";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { RemoveMessage, SystemMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
-import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS } from "../core/config.js";
+import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD } from "../core/config.js";
 import { computeHistoryTrim } from "../infra/history-window.js";
 import { logger } from "../infra/logger.js";
 import { getOffice, getPendingApproval } from "../agents/office.js";
 import type { ApprovalRequest } from "../agents/agent-tools.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
-import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt } from "../db/queries.js";
+import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt, getTodayCostUsd } from "../db/queries.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 import { buildOfficeInput } from "./pre-router.js";
 import { isProvidedLinkedInPostRequest } from "./execution-guard.js";
@@ -47,6 +47,10 @@ import { tryInboxReadFastPath } from "./inbox-fast-path.js";
 import { assertNonEmptyMessages } from "../infra/office-guard.js";
 import { isWedgedState, type WedgeState } from "../infra/wedge.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
+import {
+  assertDailyBudgetAllowsRun,
+  DailyBudgetExceededError,
+} from "../infra/daily-budget.js";
 import { recordConversationEnd } from "../infra/conversation-recorder.js";
 import { startTurn, activePromptHash, type TurnTrace } from "../infra/trace.js";
 import { readHalt, formatHaltNotice } from "../infra/halt.js";
@@ -680,6 +684,12 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
 
     assertNonEmptyMessages(invokeMessages, "runOfficeSession");
 
+    await assertDailyBudgetAllowsRun(
+      () => getTodayCostUsd(TENANT),
+      DAILY_BUDGET_USD,
+      (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped — fail-open"),
+    );
+
     const invokeConfig = {
       ...config,
       configurable: {
@@ -780,6 +790,15 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       );
       return;
     }
+    if (err instanceof DailyBudgetExceededError) {
+      log.warn({ chatId, reason: err.reason }, "Run refused: daily budget exceeded");
+      await session.onSystemNotice(
+        `🛑 <b>Daily budget cap reached</b>\n` +
+          `<code>${safeHtml(err.reason)}</code>\n\n` +
+          `Check spend: <code>/budget</code> · Adjust: <code>BUDGET_DAILY_USD</code> in <code>.env</code>.`,
+      );
+      return;
+    }
     if (err instanceof GraphRecursionError) {
       log.warn({ chatId }, "Run stopped: recursion limit reached");
       await clearThreadAfterAbort(chatId);
@@ -875,6 +894,13 @@ async function resumeOfficeSessionLocked(
 
     const budget = createRunBudget();
     const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
+
+    await assertDailyBudgetAllowsRun(
+      () => getTodayCostUsd(TENANT),
+      DAILY_BUDGET_USD,
+      (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped on resume — fail-open"),
+    );
+
     const res = (await office.invoke(
       new Command({ resume: decision }),
       {
@@ -911,6 +937,13 @@ async function resumeOfficeSessionLocked(
       log.warn({ chatId, reason: err.reason }, "Resume stopped: budget exceeded");
       await clearThreadAfterAbort(chatId);
       await session.onSystemNotice(`💰 <b>Run stopped — budget limit reached</b>\n<code>${safeHtml(err.reason)}</code>`);
+      return;
+    }
+    if (err instanceof DailyBudgetExceededError) {
+      log.warn({ chatId, reason: err.reason }, "Resume refused: daily budget exceeded");
+      await session.onSystemNotice(
+        `🛑 <b>Daily budget cap reached</b>\n<code>${safeHtml(err.reason)}</code>\n\nCheck: <code>/budget</code>`,
+      );
       return;
     }
     if (err instanceof GraphRecursionError) {

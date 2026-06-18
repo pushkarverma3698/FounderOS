@@ -18,15 +18,24 @@
 import cron from "node-cron";
 import { HumanMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
-import { getFounderContext, getPendingInterrupt, consumePendingEvents } from "../db/queries.js";
+import { getFounderContext, getPendingInterrupt, consumePendingEvents, getTodayCostUsd } from "../db/queries.js";
 import type { DeptSignal } from "../db/schema.js";
 import { DEFAULT_TARGET_DEPT } from "../agents/agent-tools/signals.js";
 import { getOutboundTargets } from "../outbound/targets.js";
+import { getProofDropStats, buildProofDropCadenceNudge } from "../outbound/proof-drop.js";
 import { sendToChat } from "./telegram-send.js";
 import { buildOffice } from "../agents/office.js";
 import { SCHEDULER_BRIEF_PROMPT } from "../agents/system-prompts.js";
 import { childLogger } from "./logger.js";
-import { env, TENANT } from "../core/config.js";
+import { TENANT } from "../core/config.js";
+import {
+  assessDailyBudget,
+  formatBudgetThresholdAlert,
+  getDailyBudgetCapUsd,
+  nextBudgetAlertThreshold,
+  checkDailyBudgetGate,
+} from "../infra/daily-budget.js";
+import { getBudgetAlertsState, recordBudgetAlertSent } from "../infra/daily-budget-alerts.js";
 
 const log = childLogger({ module: "scheduler" });
 
@@ -61,6 +70,18 @@ export function buildContextText(ctx: Record<string, unknown>): string {
 /** Format the founder context into a monday brief (with an LLM call). */
 async function sendMondayBrief(): Promise<void> {
   log.info("Generating Monday brief…");
+
+  const spent = await getTodayCostUsd(TENANT);
+  const dailyGate = checkDailyBudgetGate(spent, getDailyBudgetCapUsd());
+  if (!dailyGate.ok) {
+    log.warn({ spent }, "Monday brief skipped — daily budget cap reached");
+    await sendToChat(
+      `📅 <b>Monday brief skipped</b> — daily budget cap reached ($${spent.toFixed(4)}). ` +
+        `Check <code>/budget</code>.`,
+      "HTML",
+    );
+    return;
+  }
 
   const ctx = await getFounderContext(TENANT);
   const today = new Date().toLocaleDateString("en-GB", {
@@ -266,6 +287,29 @@ export function formatSiteDeployedNudge(signals: DeptSignal[]): string {
   );
 }
 
+/** Format consumed proof_drop_ready signals for sales follow-up. */
+export function formatProofDropNudge(signals: DeptSignal[]): string {
+  const items = signals.filter((s) => s.event_type === "proof_drop_ready");
+  if (items.length === 0) return "";
+
+  const lines = items.map((s) => {
+    const p = (s.payload ?? {}) as {
+      company?: string;
+      artifactType?: string;
+      artifactSummary?: string;
+    };
+    const type = p.artifactType ? ` · ${p.artifactType}` : "";
+    const summary = p.artifactSummary ? `\n  <i>${p.artifactSummary.slice(0, 120)}${p.artifactSummary.length > 120 ? "…" : ""}</i>` : "";
+    return `• <b>${p.company ?? "Unknown"}</b>${type}${summary}`;
+  });
+
+  return (
+    `🎁 <b>Proof Drop${items.length > 1 ? "s" : ""} ready</b> (${items.length})\n\n` +
+    `${lines.join("\n")}\n\n` +
+    `Send when ready: <code>/proofdrop {company}</code> or <code>/q sales draft Proof Drop email to {company}</code> — you approve before anything sends.`
+  );
+}
+
 /**
  * Consume pending lead_discovered signals for the revenue dept and push a nudge.
  * consumePendingEvents claims rows with FOR UPDATE SKIP LOCKED, so each lead
@@ -290,6 +334,11 @@ export async function sweepDeptSignals(): Promise<void> {
       toDept: DEFAULT_TARGET_DEPT["site_deployed"] ?? "sales",
       format: formatSiteDeployedNudge,
     },
+    {
+      event: "proof_drop_ready",
+      toDept: DEFAULT_TARGET_DEPT["proof_drop_ready"] ?? "sales",
+      format: formatProofDropNudge,
+    },
   ];
 
   for (const { event, toDept, format } of sweeps) {
@@ -300,6 +349,33 @@ export async function sweepDeptSignals(): Promise<void> {
     await sendToChat(nudge, "HTML");
     log.info({ count: filtered.length, event, toDept }, "Dept signal sweep — nudge sent");
   }
+}
+
+/** Wednesday nudge when Proof Drop cadence is below target (no LLM). */
+async function sendProofDropCadenceNudge(): Promise<void> {
+  const stats = await getProofDropStats(TENANT);
+  const nudge = buildProofDropCadenceNudge(stats);
+  if (!nudge) {
+    log.info({ count: stats.countThisWeek, target: stats.target }, "Proof Drop cadence on track — no nudge");
+    return;
+  }
+  await sendToChat(nudge, "HTML");
+  log.info({ count: stats.countThisWeek, target: stats.target }, "Proof Drop cadence nudge sent");
+}
+
+/** Hourly check — alert at 80% and 100% daily budget (zero LLM, deduped per day). */
+async function sendDailyBudgetAlertIfNeeded(): Promise<void> {
+  const spent = await getTodayCostUsd(TENANT);
+  const cap = getDailyBudgetCapUsd();
+  const status = assessDailyBudget(spent, cap);
+  const alertsState = await getBudgetAlertsState(TENANT);
+  const threshold = nextBudgetAlertThreshold(status, alertsState.levels);
+  if (!threshold) return;
+
+  const msg = formatBudgetThresholdAlert(status, threshold);
+  await sendToChat(msg, "HTML");
+  await recordBudgetAlertSent(TENANT, threshold);
+  log.info({ spent, cap, threshold }, "Daily budget threshold alert sent");
 }
 
 // ── Scheduler boot ────────────────────────────────────────────────────────────
@@ -329,11 +405,11 @@ export function startScheduler(): void {
     });
   });
 
-  // Wednesday 9:05am — mid-week outbound reminder
+  // Wednesday 9:05am — Proof Drop cadence reminder (Phase D-Bis)
   cron.schedule("5 9 * * 3", () => {
-    sendOutboundNudge().catch((err) => {
-      log.error({ err: (err as Error).message }, "Mid-week outbound nudge failed");
-      sendToChat(`⚠️ Outbound nudge failed: ${(err as Error).message}`, "HTML").catch(() => {});
+    sendProofDropCadenceNudge().catch((err) => {
+      log.error({ err: (err as Error).message }, "Proof Drop cadence nudge failed");
+      sendToChat(`⚠️ Proof Drop nudge failed: ${(err as Error).message}`, "HTML").catch(() => {});
     });
   });
 
@@ -344,7 +420,10 @@ export function startScheduler(): void {
       log.error({ err: (err as Error).message }, "Dept signal sweep failed");
       sendToChat(`⚠️ Dept signal sweep failed: ${(err as Error).message}`, "HTML").catch(() => {});
     });
+    sendDailyBudgetAlertIfNeeded().catch((err) => {
+      log.error({ err: (err as Error).message }, "Daily budget alert check failed");
+    });
   });
 
-  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am, Wed 9:05am), stale approval check (daily 9am), dept-signal sweep (hourly)");
+  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), Proof Drop cadence (Wed 9:05am), stale approval check (daily 9am), dept-signal sweep + budget alerts (hourly)");
 }
