@@ -73,6 +73,12 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/founderos
+            # Fix git permission drift (e.g. prior verify left root-owned refs).
+            if [ -d .git/refs/heads/cursor ]; then
+              rm -rf .git/refs/heads/cursor 2>/dev/null || true
+            fi
+            find .git -name '*.lock' -delete 2>/dev/null || true
+            git checkout -B main origin/main 2>/dev/null || git checkout main 2>/dev/null || true
             # Render the production .env from the secret (atomic, 0600). Only when
             # the secret is present — never clobber a good .env with an empty one.
             if [ -n "${PROD_DOTENV:-}" ]; then
