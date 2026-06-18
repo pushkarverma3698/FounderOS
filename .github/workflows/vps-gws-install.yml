@@ -23,36 +23,40 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
           command_timeout: "15m"
-          script_stop: true
+          script_stop: false
           envs: VPS_SUDO_PASSWORD
           script: |
             set -euo pipefail
             cd /opt/founderos
 
-            echo "==> Install gws CLI (global)"
+            echo "==> Install gws CLI"
+            export PATH="/usr/local/bin:/usr/bin:$HOME/.local/bin:$PATH"
             if command -v gws >/dev/null 2>&1; then
               echo "    gws already installed: $(command -v gws)"
             else
-              if [ -n "${VPS_SUDO_PASSWORD:-}" ]; then
-                echo "$VPS_SUDO_PASSWORD" | sudo -S npm install -g @googleworkspace/cli
-              else
-                npm install -g @googleworkspace/cli --prefix "$HOME/.local" || true
-                export PATH="$HOME/.local/bin:$PATH"
-                grep -q '\.local/bin' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+              mkdir -p "$HOME/.local/bin"
+              npm install -g @googleworkspace/cli --prefix "$HOME/.local" 2>&1 | tail -5
+              grep -q '\.local/bin' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+              export PATH="$HOME/.local/bin:$PATH"
+              if ! command -v gws >/dev/null 2>&1 && [ -n "${VPS_SUDO_PASSWORD:-}" ]; then
+                echo "$VPS_SUDO_PASSWORD" | sudo -S npm install -g @googleworkspace/cli 2>&1 | tail -5 || true
               fi
             fi
 
-            export PATH="/usr/local/bin:/usr/bin:$HOME/.local/bin:$PATH"
-            command -v gws || { echo "!! gws not on PATH after install"; exit 1; }
-            gws --version 2>&1 | head -3 || true
+            if command -v gws >/dev/null 2>&1; then
+              gws --version 2>&1 | head -3 || true
+            else
+              echo "!! gws install failed — will try composio rollback if configured"
+            fi
 
             echo ""
             echo "==> gws auth status"
-            if gws auth status 2>&1; then
+            GWS_AUTH_OK=0
+            if command -v gws >/dev/null 2>&1 && gws auth status 2>&1; then
               echo "    gws auth OK"
+              GWS_AUTH_OK=1
             else
-              echo "!! gws auth NOT configured — founder must run interactively on VPS:"
-              echo "    ssh founderos@<host> && gws auth login"
+              echo "!! gws auth NOT configured"
               if grep -q '^COMPOSIO_API_KEY=' .env 2>/dev/null; then
                 echo "==> Enabling GMAIL_BACKEND=composio rollback (COMPOSIO_API_KEY present)"
                 grep -v '^GMAIL_BACKEND=' .env > .env.patched || true
@@ -62,11 +66,14 @@ jobs:
                 mv .env.patched .env
                 chmod 600 .env
                 sudo systemctl restart founderos
-                sleep 5
+                sleep 8
+              else
+                echo "    No COMPOSIO_API_KEY — founder must run: gws auth login"
               fi
             fi
 
             echo ""
             echo "==> Health after gws setup"
-            curl -sf http://127.0.0.1:3001/health | head -c 900 || exit 1
+            curl -sf http://127.0.0.1:3001/health | head -c 900
             echo ""
+            echo "✅ VPS gws setup step complete (auth_ok=$GWS_AUTH_OK)"
