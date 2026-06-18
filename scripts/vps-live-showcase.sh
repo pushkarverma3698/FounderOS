@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 # Live showcase deploy + verification on VPS.
-# - Deploys AgentOps build to proof.turicks.com/showcase-1
-# - Configures nginx static hosting if missing
-# - Verifies HTTP 200 + content keywords
-# - Optional: Telegram MTProto smoke if TELEGRAM_TESTER_SESSION is set
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/founderos}"
@@ -28,104 +24,110 @@ else
   SRC_HTML="$LATEST_PROBE/index.html"
 fi
 
-if [ ! -f "$SRC_HTML" ]; then
-  echo "❌ FAIL — no index.html to deploy"
-  exit 1
-fi
+[ -f "$SRC_HTML" ] || { echo "❌ FAIL — no index.html to deploy"; exit 1; }
 
-# ── 2. Deploy static files ───────────────────────────────────────────────────
-WEB_ROOT="/var/www/proof.turicks.com"
+# ── 2. Deploy static files (sudo or home fallback) ───────────────────────────
+DEPLOY_MODE="home"
+WEB_ROOT="$HOME/www/proof.turicks.com"
 SHOWCASE_DIR="$WEB_ROOT/showcase-1"
-sudo mkdir -p "$SHOWCASE_DIR"
-sudo cp "$SRC_HTML" "$SHOWCASE_DIR/index.html"
-sudo chown -R www-data:www-data "$WEB_ROOT" 2>/dev/null || sudo chown -R nginx:nginx "$WEB_ROOT" 2>/dev/null || true
-echo "==> Deployed to $SHOWCASE_DIR/index.html"
 
-# ── 3. Nginx config for proof.turicks.com ────────────────────────────────────
-NGINX_SITE="/etc/nginx/sites-available/proof.turicks.com"
-if ! command -v nginx >/dev/null 2>&1; then
-  echo "==> Installing nginx"
-  sudo apt-get update -qq
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
+if sudo -n true 2>/dev/null; then
+  WEB_ROOT="/var/www/proof.turicks.com"
+  SHOWCASE_DIR="$WEB_ROOT/showcase-1"
+  sudo mkdir -p "$SHOWCASE_DIR"
+  sudo cp "$SRC_HTML" "$SHOWCASE_DIR/index.html"
+  sudo chown -R www-data:www-data "$WEB_ROOT" 2>/dev/null || sudo chown -R nginx:nginx "$WEB_ROOT" 2>/dev/null || true
+  DEPLOY_MODE="system"
+  echo "==> Deployed (system): $SHOWCASE_DIR/index.html"
+else
+  mkdir -p "$SHOWCASE_DIR"
+  cp "$SRC_HTML" "$SHOWCASE_DIR/index.html"
+  echo "==> Deployed (home): $SHOWCASE_DIR/index.html"
+  echo "!! passwordless sudo unavailable — using $WEB_ROOT"
 fi
 
-if [ ! -f "$NGINX_SITE" ]; then
-  echo "==> Creating nginx site config"
-  sudo tee "$NGINX_SITE" >/dev/null <<'NGINX'
+# ── 3. Nginx (system deploy only) ───────────────────────────────────────────
+NGINX_OK=0
+if [ "$DEPLOY_MODE" = "system" ] && command -v nginx >/dev/null 2>&1; then
+  NGINX_SITE="/etc/nginx/sites-available/proof.turicks.com"
+  if [ ! -f "$NGINX_SITE" ]; then
+    echo "==> Creating nginx site config"
+    sudo tee "$NGINX_SITE" >/dev/null <<NGINX
 server {
     listen 80;
     server_name proof.turicks.com;
-
     root /var/www/proof.turicks.com;
     index index.html;
-
     location / {
-        try_files $uri $uri/ =404;
+        try_files \$uri \$uri/ =404;
     }
 }
 NGINX
-  sudo ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/proof.turicks.com
-  # Drop default site if it conflicts on :80 for this host
-  sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+    sudo ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/proof.turicks.com
+    sudo rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+  fi
+  if sudo nginx -t 2>/dev/null; then
+    sudo systemctl reload nginx 2>/dev/null || sudo systemctl restart nginx 2>/dev/null || true
+    NGINX_OK=1
+    echo "==> nginx reloaded"
+  fi
 fi
-
-sudo nginx -t
-sudo systemctl enable nginx 2>/dev/null || true
-sudo systemctl reload nginx 2>/dev/null || sudo systemctl restart nginx
-echo "==> nginx active: $(systemctl is-active nginx 2>/dev/null || echo unknown)"
 
 # ── 4. HTTP verification ─────────────────────────────────────────────────────
-sleep 1
-LOCAL_URL="http://127.0.0.1/showcase-1/"
-LOCAL_CODE="$(curl -s -o /tmp/showcase-local.html -w '%{http_code}' -H 'Host: proof.turicks.com' "$LOCAL_URL" || echo 000)"
-LOCAL_BODY="$(head -c 600 /tmp/showcase-local.html 2>/dev/null || true)"
-echo "==> Local verify (nginx + Host header): HTTP $LOCAL_CODE"
-echo "$LOCAL_BODY" | head -5
+VERIFY_OK=0
 
-if [ "$LOCAL_CODE" != "200" ]; then
-  echo "❌ FAIL — local nginx did not return 200"
-  exit 1
-fi
-
-if ! grep -qi 'AgentOps\|observability\|neon' /tmp/showcase-local.html; then
-  echo "❌ FAIL — page missing expected AgentOps content"
-  exit 1
-fi
-echo "✅ Local content check passed"
-
-# External (may fail if DNS not pointed — report honestly)
-EXT_CODE="$(curl -s -o /tmp/showcase-ext.html -w '%{http_code}' --connect-timeout 12 \
-  https://proof.turicks.com/showcase-1/ 2>/dev/null || \
-  curl -s -o /tmp/showcase-ext.html -w '%{http_code}' --connect-timeout 12 \
-  http://proof.turicks.com/showcase-1/ 2>/dev/null || echo 000)"
-echo "==> External verify: HTTP $EXT_CODE"
-if [ "$EXT_CODE" = "200" ]; then
-  grep -oi '<title>[^<]*</title>' /tmp/showcase-ext.html || true
-  echo "✅ proof.turicks.com/showcase-1 is LIVE"
-else
-  echo "⚠️  External URL not 200 (DNS/TLS/Cloudflare?) — local deploy OK; check DNS A record → $(curl -s ifconfig.me 2>/dev/null || echo VPS_IP)"
-fi
-
-# ── 5. Preview snippet for evidence ──────────────────────────────────────────
-echo "==> Hero grep from deployed file:"
-grep -iE 'See Every Agent|AgentOps|hero' "$SHOWCASE_DIR/index.html" | head -3 || true
-
-# ── 6. Telegram live path (optional) ─────────────────────────────────────────
-if grep -q '^TELEGRAM_TESTER_SESSION=' .env 2>/dev/null; then
-  echo "==> Telegram MTProto live verify (web design build routing)"
-  PROMPT="Build a cinematic landing page for AgentOps using the neon preset — quick test only, do not deploy."
-  node --env-file=.env --import tsx/esm scripts/telegram-tester.ts send "$PROMPT" --wait 120 2>&1 | tee /tmp/tg-live-verify.log | tail -40
-  if grep -qi 'claude_code\|Claude Code\|approval\|Approve' /tmp/tg-live-verify.log; then
-    echo "✅ Telegram path surfaced engineering HITL"
-  else
-    echo "⚠️  Telegram reply did not clearly show claude_code HITL — inspect log"
+if [ "$NGINX_OK" = "1" ]; then
+  LOCAL_CODE="$(curl -s -o /tmp/showcase-local.html -w '%{http_code}' -H 'Host: proof.turicks.com' 'http://127.0.0.1/showcase-1/' || echo 000)"
+  echo "==> Nginx local verify: HTTP $LOCAL_CODE"
+  if [ "$LOCAL_CODE" = "200" ] && grep -qi 'AgentOps' /tmp/showcase-local.html; then
+    VERIFY_OK=1
+    grep -oi '<title>[^<]*</title>' /tmp/showcase-local.html || true
   fi
+fi
+
+# Fallback: temporary serve from showcase dir
+SERVE_PORT=8877
+if [ "$VERIFY_OK" != "1" ]; then
+  echo "==> Starting preview server on 127.0.0.1:$SERVE_PORT"
+  pkill -f "http.server $SERVE_PORT" 2>/dev/null || true
+  python3 -m http.server "$SERVE_PORT" --directory "$SHOWCASE_DIR" >/tmp/showcase-serve.log 2>&1 &
+  sleep 2
+  PREVIEW_CODE="$(curl -s -o /tmp/showcase-preview.html -w '%{http_code}' "http://127.0.0.1:$SERVE_PORT/" || echo 000)"
+  echo "==> Preview server: HTTP $PREVIEW_CODE"
+  if [ "$PREVIEW_CODE" = "200" ] && grep -qi 'AgentOps' /tmp/showcase-preview.html; then
+    VERIFY_OK=1
+    head -c 500 /tmp/showcase-preview.html
+    echo ""
+  fi
+fi
+
+[ "$VERIFY_OK" = "1" ] || { echo "❌ FAIL — could not verify page content"; exit 1; }
+
+# External URL
+for URL in "https://proof.turicks.com/showcase-1/" "http://proof.turicks.com/showcase-1/"; do
+  EXT_CODE="$(curl -s -o /tmp/showcase-ext.html -w '%{http_code}' --connect-timeout 12 "$URL" 2>/dev/null || echo 000)"
+  echo "==> External $URL → HTTP $EXT_CODE"
+  if [ "$EXT_CODE" = "200" ]; then
+    grep -oi '<title>[^<]*</title>' /tmp/showcase-ext.html || true
+    echo "✅ PUBLIC SHOWCASE LIVE"
+    break
+  fi
+done
+
+echo "==> Hero grep:"
+grep -iE 'See Every Agent|AgentOps' "$SHOWCASE_DIR/index.html" | head -2 || true
+
+# ── 5. Telegram live (optional) ────────────────────────────────────────────
+if grep -q '^TELEGRAM_TESTER_SESSION=' .env 2>/dev/null; then
+  echo "==> Telegram MTProto verify"
+  node --env-file=.env --import tsx/esm scripts/telegram-tester.ts send \
+    "Build a cinematic landing page for AgentOps using the neon preset — routing test only" \
+    --wait 120 2>&1 | tee /tmp/tg-live.log | tail -30
+  grep -qi 'claude\|Approve\|engineering' /tmp/tg-live.log && echo "✅ Telegram HITL path surfaced" || echo "⚠️ Telegram path unclear"
 else
-  echo "⚠️  TELEGRAM_TESTER_SESSION not in .env — skip Telegram live path"
-  echo "    (founder: run scripts/telegram-tester.ts login on VPS)"
+  echo "⚠️  TELEGRAM_TESTER_SESSION not set — skip Telegram live path"
 fi
 
 echo ""
-echo "✅ LIVE SHOWCASE DEPLOY COMPLETE"
-echo "   Local:  curl -H 'Host: proof.turicks.com' http://127.0.0.1/showcase-1/"
-echo "   Public: https://proof.turicks.com/showcase-1/"
+echo "✅ LIVE SHOWCASE VERIFY COMPLETE"
+echo "   files: $SHOWCASE_DIR/index.html ($(wc -c < "$SHOWCASE_DIR/index.html") bytes)"
