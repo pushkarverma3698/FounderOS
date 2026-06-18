@@ -20,6 +20,7 @@ import { GOLDEN_TASKS } from "../src/eval/golden-tasks.js";
 import { makeOfficeInvoker } from "../src/eval/office-invoker.js";
 import { runEval } from "../src/eval/runner.js";
 import { closeDatabaseConnections } from "../src/db/client.js";
+import { getConfiguredModelId, DEFAULT_AGENT_MODEL } from "../src/agents/model.js";
 
 type Check = { name: string; ok: boolean; detail: string };
 
@@ -200,6 +201,16 @@ async function testEngineeringHitl(): Promise<void> {
 
 async function main(): Promise<void> {
   console.log("\n🔬 Manual E2E — Web Design Service\n");
+
+  const modelId = getConfiguredModelId();
+  const deprecated = /preview-05-20|gpt-4o-mini/i.test(modelId);
+  record(
+    "env: AGENT_MODEL is production-capable",
+    !deprecated,
+    deprecated
+      ? `${modelId} is deprecated/weak — set AGENT_MODEL=${DEFAULT_AGENT_MODEL}`
+      : modelId,
+  );
 
   await testSignalContracts();
   await testSignalDbRoundTrip();

@@ -32,6 +32,7 @@ export const DEFAULT_TARGET_DEPT: Record<string, string> = {
   demo_ready: "sales",
   design_brief_ready: "engineering",
   site_deployed: "sales",
+  proof_drop_ready: "sales",
 };
 
 /** Default publisher when from_dept is not specified. */
@@ -120,7 +121,7 @@ export const publishSignal = tool(
       payload: z
         .record(z.unknown())
         .describe(
-          "Structured details for the event. lead_discovered: {company, icpScore, source}; design_brief_ready: {client, preset, copyBlocks}; site_deployed: {client, siteUrl}.",
+          "Structured details for the event. lead_discovered: {company, icpScore, source}; design_brief_ready: {client, preset, copyBlocks}; site_deployed: {client, siteUrl}; proof_drop_ready: {company, artifactType, artifactSummary, outreachHook}.",
         ),
       to_dept: z
         .string()

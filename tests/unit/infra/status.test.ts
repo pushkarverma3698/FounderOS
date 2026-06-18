@@ -213,6 +213,7 @@ describe("formatStatusMessage rich format", () => {
       outboundTargetCount: 4,
       pendingSignals: 2,
       providerStatusLine: "🟢 Gmail gws · 🟢 LinkedIn direct",
+      budgetStatusLine: null,
     });
     expect(result).toContain("📋");
     expect(result).toContain("Acme Corp");
@@ -233,6 +234,7 @@ describe("formatStatusMessage rich format", () => {
       outboundTargetCount: 0,
       pendingSignals: 0,
       providerStatusLine: null,
+      budgetStatusLine: null,
     });
     expect(result).toContain("🔒");
     expect(result).toContain("3");
@@ -253,6 +255,7 @@ describe("formatStatusMessage rich format", () => {
       outboundTargetCount: 3,
       pendingSignals: 1,
       providerStatusLine: null,
+      budgetStatusLine: null,
     });
     expect(result).toContain("📬");
     expect(result).toContain("2");
@@ -260,5 +263,26 @@ describe("formatStatusMessage rich format", () => {
     expect(result).toContain("🎯 Pipeline");
     expect(result).toContain("3 outbound targets");
     expect(result).toContain("1 pending signal");
+  });
+
+  it("includes budget line when provided", async () => {
+    const { formatRichStatus } = await import("../../../src/gateway/status.js");
+    const result = formatRichStatus({
+      uptimeSeconds: 100,
+      pendingApprovals: 0,
+      emailsSentToday: 0,
+      searchesToday: 0,
+      calendarEventsToday: 0,
+      activeClients: [],
+      focus: null,
+      lastEventContent: null,
+      lastEventRelativeTime: null,
+      outboundTargetCount: 0,
+      pendingSignals: 0,
+      providerStatusLine: null,
+      budgetStatusLine: "💰 Budget today: $4.00/$5.00 (80%) — 🟡 warning",
+    });
+    expect(result).toContain("💰 Budget today");
+    expect(result).toContain("80%");
   });
 });

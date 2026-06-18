@@ -39,6 +39,7 @@
     "verify:p2:live": "ALLOW_NETWORK=1 ENGINEERING_SUBGRAPH=1 node --env-file=.env --import tsx/esm scripts/p2-live-verify.ts",
     "predeploy": "pnpm lint && pnpm build:all && pnpm verify:wiring && pnpm test",
     "gate": "pnpm predeploy",
+    "gate:webdesign": "pnpm lint && pnpm test tests/unit/gateway/pre-router.test.ts tests/unit/infra/scheduler.test.ts tests/unit/agents/contracts.test.ts && pnpm eval:webdesign",
     "gate:beta": "pnpm lint && pnpm verify:wiring && pnpm test && pnpm verify:beta",
     "gate:p2": "pnpm lint && pnpm verify:wiring && pnpm test && pnpm verify:p2",
     "gate:p2:live": "pnpm gate:p2 && pnpm verify:p2:live",

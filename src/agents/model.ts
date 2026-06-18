@@ -30,7 +30,7 @@ export interface ParsedModelId {
 // set AGENT_MODEL silently degraded to a model that chats instead of calling
 // tools. Dev/CI always set AGENT_MODEL explicitly; this only bites on misconfig,
 // where Gemini Flash is the far safer failure mode.
-export const DEFAULT_AGENT_MODEL = "openrouter:google/gemini-2.5-flash-preview-05-20";
+export const DEFAULT_AGENT_MODEL = "openrouter:google/gemini-2.5-flash";
 
 export function is503Error(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
