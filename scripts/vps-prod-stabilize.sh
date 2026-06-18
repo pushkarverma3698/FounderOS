@@ -54,7 +54,7 @@ docker exec founderos-postgres psql -U founderos -d founderos -tAc \
   "SELECT 'personal_rag', count(*) FROM brain.personal_rag;" 2>/dev/null || true
 
 docker exec founderos-postgres psql -U founderos -d founderos -tAc \
-  "SELECT 'founder_context', count(*) FROM founder_context;" 2>/dev/null || true
+  "SELECT 'founder_context', count(*) FROM agents.founder_context;" 2>/dev/null || true
 
 echo ""
 echo "==> Re-sync turicks-brain (idempotent)"
