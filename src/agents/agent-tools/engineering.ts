@@ -4,6 +4,7 @@
  *   github_write     — WRITE (HITL-gated)
  *   project_workflow — read = instant; run_command = HITL-gated
  *   claude_code      — WRITE (HITL-gated)
+ *   deploy_static_site — WRITE (HITL-gated)
  */
 
 import { tool } from "@langchain/core/tools";
@@ -11,12 +12,14 @@ import { z } from "zod";
 import { githubTool } from "../../tools/github.js";
 import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../../tools/project-workflow.js";
 import { claudeCodeTool, findClaudeBinary } from "../../tools/claude-code.js";
+import { deployStaticSiteTool } from "../../tools/deploy-static-site.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import { toolFailure } from "../tool-result.js";
-import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
+import { hasBeenAudited, writeAuditEntry, publishDeptEventWithAudit } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
 import { sendStatusText } from "../../infra/telegram-send.js";
+import { prepareSignal } from "./signals.js";
 
 const log = childLogger({ module: "agent-tools:engineering" });
 
@@ -234,6 +237,96 @@ export const claudeCode = tool(
       cwd: z.string().optional().nullable().describe(
         "Working directory within ~/Projects (default: ~/Projects/agent-workspace). The FounderOS repo is not allowed."
       ),
+    }),
+  },
+);
+
+// ── Engineering: static site deploy (HITL-gated) ─────────────────────────────
+
+export const deployStaticSite = tool(
+  async ({ slug, sourcePath, client, presetUsed }, config) => {
+    const key = idemKey("deploy_static_site", slug, sourcePath);
+    if (await hasBeenAudited(key)) {
+      return `Already deployed ${slug} from this source (skipped duplicate).`;
+    }
+
+    const rejected = await hitlGate({
+      action: "deploy_static_site",
+      title: "🌐 Deploy static site to public URL?",
+      summary: `Slug: ${slug} · Source: ${sourcePath}`,
+      preview: `Deploys to /clients/${slug}/ (or /showcase-1/) and returns the public URL.`,
+      args: { slug, sourcePath, client, presetUsed },
+    }, config);
+    if (rejected) return rejected;
+
+    const res = await deployStaticSiteTool.execute({
+      slug,
+      sourcePath,
+      ...(client ? { client } : {}),
+      ...(presetUsed ? { presetUsed } : {}),
+    });
+    if (!res.success) return `Deploy failed: ${res.error}`;
+
+    const data = res.data as {
+      publicUrl: string;
+      deployPath: string;
+      deployMode: string;
+      bytesCopied: number;
+    };
+
+    await writeAuditEntry({
+      action: "deploy_static_site",
+      idempotency_key: key,
+      payload: { slug, sourcePath, publicUrl: data.publicUrl, deployPath: data.deployPath },
+      tenant_id: TENANT,
+    });
+
+    const clientName = client ?? slug;
+    const signalPrepared = prepareSignal(
+      "site_deployed",
+      {
+        client: clientName,
+        siteUrl: data.publicUrl,
+        ...(presetUsed ? { presetUsed } : {}),
+      },
+      { fromDept: "engineering" },
+    );
+    let signalNote = "";
+    if (signalPrepared.ok) {
+      const signalIdem = idemKey("signal_published", "site_deployed", slug, data.publicUrl);
+      if (!(await hasBeenAudited(signalIdem))) {
+        await publishDeptEventWithAudit(
+          { tenant_id: TENANT, ...signalPrepared.signal, consumed: false },
+          {
+            tenant_id: TENANT,
+            action: "signal_published",
+            idempotency_key: signalIdem,
+            payload: {
+              event_type: "site_deployed",
+              to_dept: signalPrepared.signal.to_dept,
+              from_dept: "engineering",
+              slug,
+            },
+          },
+        );
+        signalNote = " · site_deployed signal recorded for sales";
+      }
+    }
+
+    log.info({ slug, publicUrl: data.publicUrl }, "deploy_static_site executed");
+    return (
+      `✅ Site deployed (${data.deployMode}): ${data.publicUrl}\n` +
+      `   path: ${data.deployPath} (${data.bytesCopied} bytes)${signalNote}`
+    );
+  },
+  {
+    name: "deploy_static_site",
+    description: deployStaticSiteTool.description,
+    schema: z.object({
+      slug: z.string().describe("URL-safe client slug (e.g. langfuse, showcase-1)"),
+      sourcePath: z.string().describe("Path to index.html or static directory under ~/Projects"),
+      client: z.string().optional().nullable().describe("Client name for site_deployed signal"),
+      presetUsed: z.string().optional().nullable().describe("cinematic-web preset (neon, glass, etc.)"),
     }),
   },
 );
