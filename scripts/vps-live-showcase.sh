@@ -103,13 +103,14 @@ fi
 
 [ "$VERIFY_OK" = "1" ] || { echo "❌ FAIL — could not verify page content"; exit 1; }
 
-# External URL
-for URL in "https://proof.turicks.com/showcase-1/" "http://proof.turicks.com/showcase-1/"; do
+# External URL (domain + IP)
+VPS_IP="$(curl -s -4 --connect-timeout 3 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
+for URL in "http://${VPS_IP}/showcase-1/" "https://proof.turicks.com/showcase-1/" "http://proof.turicks.com/showcase-1/"; do
   EXT_CODE="$(curl -s -o /tmp/showcase-ext.html -w '%{http_code}' --connect-timeout 12 "$URL" 2>/dev/null || echo 000)"
   echo "==> External $URL → HTTP $EXT_CODE"
   if [ "$EXT_CODE" = "200" ]; then
     grep -oi '<title>[^<]*</title>' /tmp/showcase-ext.html || true
-    echo "✅ PUBLIC SHOWCASE LIVE"
+    echo "✅ PUBLIC SHOWCASE LIVE: $URL"
     break
   fi
 done

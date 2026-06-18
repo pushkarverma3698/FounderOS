@@ -16,6 +16,13 @@ import { publishDeptEventWithAudit, countDeptSignals } from "../src/db/queries.j
 import { TENANT } from "../src/core/config.js";
 import { buildOffice, getPendingApproval } from "../src/agents/office.js";
 import { findClaudeBinary } from "../src/tools/claude-code.js";
+import {
+  executeDeployStaticSite,
+  buildPublicUrl,
+  isValidDeploySlug,
+} from "../src/tools/deploy-static-site.js";
+import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { GOLDEN_TASKS } from "../src/eval/golden-tasks.js";
 import { makeOfficeInvoker } from "../src/eval/office-invoker.js";
 import { runEval } from "../src/eval/runner.js";
@@ -161,6 +168,38 @@ async function testLiveRouting(taskId: string): Promise<void> {
   );
 }
 
+async function testDeployTool(): Promise<void> {
+  record("deploy: slug validation", isValidDeploySlug("showcase-1"), "showcase-1 accepted");
+  const prevForce = process.env["DEPLOY_STATIC_SITE_FORCE_HOME"];
+  const prevHome = process.env["STATIC_SITE_HOME_ROOT"];
+  const prevBase = process.env["STATIC_SITE_PUBLIC_BASE_URL"];
+  const prevProjects = process.env["PROJECT_WORKFLOW_ROOT"];
+  const tmpHome = mkdtempSync(join("/tmp", "e2e-www-"));
+  const projectsBase = mkdtempSync(join("/tmp", "e2e-projects-"));
+  process.env["PROJECT_WORKFLOW_ROOT"] = projectsBase;
+  const srcDir = mkdtempSync(join(projectsBase, "e2e-deploy-"));
+  process.env["DEPLOY_STATIC_SITE_FORCE_HOME"] = "1";
+  process.env["STATIC_SITE_HOME_ROOT"] = tmpHome;
+  process.env["STATIC_SITE_PUBLIC_BASE_URL"] = "http://e2e.test";
+  writeFileSync(join(srcDir, "index.html"), "<html><title>E2E Deploy</title></html>");
+  try {
+    const res = executeDeployStaticSite({ slug: "e2e-client", sourcePath: join(srcDir, "index.html") });
+    const ok = res.success && (res.data as { publicUrl: string }).publicUrl === buildPublicUrl("e2e-client");
+    record("deploy: home-mode copy + public URL", ok, ok ? (res.data as { publicUrl: string }).publicUrl : String(res.error));
+  } finally {
+    rmSync(tmpHome, { recursive: true, force: true });
+    rmSync(projectsBase, { recursive: true, force: true });
+    if (prevForce === undefined) delete process.env["DEPLOY_STATIC_SITE_FORCE_HOME"];
+    else process.env["DEPLOY_STATIC_SITE_FORCE_HOME"] = prevForce;
+    if (prevHome === undefined) delete process.env["STATIC_SITE_HOME_ROOT"];
+    else process.env["STATIC_SITE_HOME_ROOT"] = prevHome;
+    if (prevBase === undefined) delete process.env["STATIC_SITE_PUBLIC_BASE_URL"];
+    else process.env["STATIC_SITE_PUBLIC_BASE_URL"] = prevBase;
+    if (prevProjects === undefined) delete process.env["PROJECT_WORKFLOW_ROOT"];
+    else process.env["PROJECT_WORKFLOW_ROOT"] = prevProjects;
+  }
+}
+
 async function testEngineeringHitl(): Promise<void> {
   const office = buildOffice(new MemorySaver());
   const config = {
@@ -214,6 +253,7 @@ async function main(): Promise<void> {
 
   await testSignalContracts();
   await testSignalDbRoundTrip();
+  await testDeployTool();
 
   const routingTasks = [
     "webdesign-research-leads",
