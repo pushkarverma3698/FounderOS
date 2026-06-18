@@ -990,8 +990,8 @@ async function resumeOfficeSessionLocked(
       }
       const row = await getPendingInterrupt(session.threadId);
       if (row) await resolveInterrupt(row.interrupt_id, "approved");
-      const replyText = finalReply(res as { messages?: OfficeMessage[] });
-      await sendResult(session, res as { messages?: OfficeMessage[] }, chatId);
+      const replyText = res.output ?? "✅ Shell command finished.";
+      await sendResult(session, { messages: [{ content: replyText, _getType: () => "ai" }] }, chatId);
       trace.event("turn.out", {
         replyPreview: replyText.slice(0, 200),
         resumed: true,

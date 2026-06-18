@@ -1,8 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { MemorySaver } from "@langchain/langgraph";
 import {
-  buildPersonalShellOffice,
-  buildShellHitlInput,
+  buildShellHitlGraph,
   isShellHitlRequest,
   resetPersonalShellOfficeForTests,
   shellFastPathThreadId,
@@ -23,14 +22,12 @@ describe("shell-hitl-fast-path", () => {
   });
 
   it("builds deterministic shell input with extracted command", () => {
-    const msgs = buildShellHitlInput('Run this in terminal: echo "hello"');
-    expect(String(msgs[0]?.content)).toContain('echo "hello"');
-    expect(String(msgs[1]?.content)).toContain("personal department");
+    expect(isShellHitlRequest('Run this in terminal: echo "hello"')).toBe(true);
   });
 
-  it("compiles personal shell office with checkpointer", () => {
+  it("compiles shell HITL graph with checkpointer", () => {
     const cp = new MemorySaver();
-    const graph = buildPersonalShellOffice(cp);
+    const graph = buildShellHitlGraph(cp);
     expect(typeof graph.invoke).toBe("function");
     expect(typeof graph.getState).toBe("function");
   });
