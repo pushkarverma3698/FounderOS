@@ -15,6 +15,8 @@ cd "$APP_DIR"
 
 echo "==> VPS verify: branch=$BRANCH"
 git fetch --quiet origin "$BRANCH"
+git reset --hard "origin/$BRANCH"
+git clean -fd
 git checkout -B "verify-$BRANCH" "origin/$BRANCH"
 
 echo "==> Dependencies"
