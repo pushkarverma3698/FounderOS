@@ -7,7 +7,7 @@ describe("GatewaySession", () => {
     expect(threadIdForSession("jarvis-desktop")).toMatch(/^turicks:jarvis-desktop$/);
   });
 
-  it("web session publishes turn.complete on reply", async () => {
+  it("web session does not publish turn.complete from onReply (deduped in sendResult)", async () => {
     resetStreamHubs();
     const events: string[] = [];
     subscribeStreamEvents("web-1", (ev) => events.push(ev.type));
@@ -15,6 +15,8 @@ describe("GatewaySession", () => {
     const session = createWebSession("web-1");
     await session.onReply("Hello from office");
 
+    expect(events).not.toContain("turn.complete");
+    session.emitStream("turn.complete", { reply: "Hello from office" });
     expect(events).toContain("turn.complete");
   });
 
