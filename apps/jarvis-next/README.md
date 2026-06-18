@@ -23,9 +23,7 @@ Terminal 2 — cinematic UI:
 pnpm dev:jarvis-next
 ```
 
-Open **http://localhost:3100**
-
-> **Do not use port 3000** — it is commonly taken by other Next.js sites (e.g. client projects). JARVIS uses **3100** on purpose.
+Open **http://localhost:3000**
 
 ## Environment
 

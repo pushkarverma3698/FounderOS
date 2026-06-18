@@ -93,9 +93,8 @@ this only records the gotchas.
 | GitHub | Octokit | — | `GITHUB_TOKEN` |
 
 ### JARVIS cinematic UI (`apps/jarvis-next`)
-- **UI:** `pnpm dev:jarvis-next` → **http://localhost:3100** (not 3000 — often another project)
+- **UI:** `pnpm dev:jarvis-next` → **http://localhost:3000**
 - **API:** `pnpm dev:jarvis-gateway` → gateway on **:3001** (skips Telegram poll; avoids 409 with prod bot)
-- If you see a random client website, you are on the wrong port — use **3100**.
 
 ### Running / testing
 - Tests are keyless: `pnpm test` (vitest, ~1100 tests). Lint: `pnpm lint` (tsc --noEmit).
