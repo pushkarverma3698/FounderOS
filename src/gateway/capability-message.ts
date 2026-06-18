@@ -20,7 +20,7 @@ export function buildWelcomeMessage(firstName?: string): string {
     `📣 <b>Marketing</b> — LinkedIn drafts ✋\n` +
     `<i>"Draft a build-in-public post about today's ship"</i>\n\n` +
     `📈 <b>Sales</b> — ICP + cold outreach ✋\n` +
-    `<i>/target Acme, Beta · /outbound · "Draft outreach to Razorpay"</i>\n\n` +
+    `<i>/target Acme, Beta · /outbound · /proofdrop Linear · "Draft outreach to Razorpay"</i>\n\n` +
     `💻 <b>Personal</b> — your laptop (files, shell, Safari) ✋\n` +
     `<i>"List ~/Projects" · "Read founderos.log" · "Open URL in Safari"</i>\n\n` +
     `🎯 <b>Jobhunt</b> — CV + job search\n` +
@@ -28,7 +28,7 @@ export function buildWelcomeMessage(firstName?: string): string {
     `🏭 <b>Workflows</b> — multi-step SOPs\n` +
     `<code>/workflows</code> · <code>/run onboarding company=Acme</code>\n\n` +
     `⚡ <b>Power shortcuts</b>\n` +
-    `<code>/q research …</code> · <code>/signals</code> · <code>/runs</code> · ` +
+    `<code>/q research …</code> · <code>/signals</code> · <code>/budget</code> · <code>/runs</code> · ` +
     `<code>/status</code> · <code>/ping</code> · <code>/departments</code> · <code>/help</code>\n\n` +
     `🤖 <b>MISO mission control</b> — track multi-agent work in one dashboard\n` +
     `<code>/miso_start &lt;goal&gt;</code> · <code>/miso_plan</code> · ` +
