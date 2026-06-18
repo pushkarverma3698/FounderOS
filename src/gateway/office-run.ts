@@ -36,6 +36,7 @@ import {
   aiMessageLooksFabricatedKnowledge,
   buildKnowledgeGroundingRefusal,
   detectLinkedInRefusalWithoutTool,
+  detectUnbackedGithubReadClaim,
   detectUnbackedInboxClaim,
   detectUnbackedKnowledgeClaim,
   detectUnbackedMemoryClaim,
@@ -44,6 +45,14 @@ import {
   isInternalKnowledgeRequest,
 } from "./execution-guard.js";
 import { tryInboxReadFastPath } from "./inbox-fast-path.js";
+import { tryGithubReadFastPath } from "./github-read-fast-path.js";
+import {
+  getShellHitlPendingApproval,
+  invokeShellHitlFastPath,
+  isShellHitlRequest,
+  resumeShellHitlFastPath,
+  shellFastPathThreadId,
+} from "./shell-hitl-fast-path.js";
 import { assertNonEmptyMessages } from "../infra/office-guard.js";
 import { isWedgedState, type WedgeState } from "../infra/wedge.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
@@ -550,17 +559,18 @@ export function needsExecutionGuardRetry(
   userText: string,
   messages: OfficeMessage[],
   reply: string,
-): "shell" | "linkedin" | "inbox" | "memory" | "knowledge" | null {
+): "shell" | "linkedin" | "inbox" | "github" | "memory" | "knowledge" | null {
   if (detectUnbackedShellClaim(userText, messages, reply)) return "shell";
   if (detectLinkedInRefusalWithoutTool(userText, messages, reply)) return "linkedin";
   if (detectUnbackedInboxClaim(userText, messages, reply)) return "inbox";
+  if (detectUnbackedGithubReadClaim(userText, messages, reply)) return "github";
   if (detectUnbackedMemoryClaim(userText, messages, reply)) return "memory";
   if (detectUnbackedKnowledgeClaim(userText, messages, reply)) return "knowledge";
   return null;
 }
 
 export function buildGuardRetryMessages(
-  kind: "shell" | "linkedin" | "inbox" | "memory" | "knowledge",
+  kind: "shell" | "linkedin" | "inbox" | "github" | "memory" | "knowledge",
   userText: string,
 ): BaseMessage[] {
   if (kind === "memory") {
@@ -590,6 +600,17 @@ export function buildGuardRetryMessages(
       new SystemMessage(
         `[RETRY DIRECTIVE: Your previous reply summarized the inbox without calling read_emails. ` +
           `Call read_emails NOW with query "${query}" and return sender + subject lines verbatim.]`,
+      ),
+      new HumanMessage(userText),
+    ];
+  }
+  if (kind === "github") {
+    const ownerRepo = userText.match(/\b([\w-]+\/[\w.-]+)\b/);
+    return [
+      new SystemMessage(
+        "[RETRY DIRECTIVE: Your previous reply listed GitHub data without calling github_read. " +
+          "Call github_read NOW (list_issues for open issues) and return the tool output verbatim." +
+          (ownerRepo ? ` Use owner/repo ${ownerRepo[1]}.` : ""),
       ),
       new HumanMessage(userText),
     ];
@@ -698,6 +719,36 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
         await session.onReply(inboxFast);
       }
       return;
+    }
+
+    const githubFast = await tryGithubReadFastPath(text);
+    if (githubFast) {
+      stopTyping();
+      trace.event("github.fastpath", { textLen: text.length });
+      log.info({ chatId }, "GitHub issue list via fast path");
+      if (session.transport === "telegram") {
+        for (const chunk of splitForTelegram(markdownToTelegramHtml(githubFast))) {
+          await session.onHtml(chunk);
+        }
+      } else {
+        await session.onReply(githubFast);
+      }
+      return;
+    }
+
+    if (isShellHitlRequest(text)) {
+      const shellHitl = await invokeShellHitlFastPath(config, text);
+      if (shellHitl) {
+        stopTyping();
+        trace.event("shell.fastpath", { textLen: text.length });
+        log.info({ chatId }, "Shell command via HITL fast path");
+        const approval = await getShellHitlPendingApproval(config);
+        if (approval) {
+          trace.event("hitl.interrupt", { title: approval.title, shellFastPath: true });
+          await sendApprovalCard(session, approval);
+        }
+        return;
+      }
     }
 
     const beforeState = await office.getState(config).catch((err) => {
@@ -901,6 +952,56 @@ async function resumeOfficeSessionLocked(
 
   try {
     const office = await getOffice();
+
+    const shellPending = await getShellHitlPendingApproval(config);
+    if (shellPending) {
+      if (decision === "rejected") {
+        const row = await getPendingInterrupt(session.threadId);
+        if (row) await resolveInterrupt(row.interrupt_id, "rejected");
+        await clearThreadCheckpoints(shellFastPathThreadId(session.threadId));
+        await cancelGhostApprovals(chatId);
+        trace.event("turn.out", { rejected: true, shellFastPath: true });
+        await session.onSystemNotice(buildRejectionConfirmation(shellPending));
+        log.info({ chatId, action: shellPending.action }, "Founder rejected shell fast path — no execution");
+        return;
+      }
+
+      const budget = createRunBudget();
+      const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
+      await assertDailyBudgetAllowsRun(
+        () => getTodayCostUsd(TENANT),
+        DAILY_BUDGET_USD,
+        (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped on shell resume — fail-open"),
+      );
+
+      const res = await resumeShellHitlFastPath(
+        {
+          ...config,
+          callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
+          metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
+        },
+        decision,
+      );
+      const nextShell = await getShellHitlPendingApproval(config);
+      if (nextShell) {
+        trace.event("hitl.interrupt", { title: nextShell.title, rePaused: true, shellFastPath: true });
+        await sendApprovalCard(session, nextShell);
+        return;
+      }
+      const row = await getPendingInterrupt(session.threadId);
+      if (row) await resolveInterrupt(row.interrupt_id, "approved");
+      const replyText = finalReply(res as { messages?: OfficeMessage[] });
+      await sendResult(session, res as { messages?: OfficeMessage[] }, chatId);
+      trace.event("turn.out", {
+        replyPreview: replyText.slice(0, 200),
+        resumed: true,
+        shellFastPath: true,
+        inputTokens: budget.summary.totalInputTokens,
+        outputTokens: budget.summary.totalOutputTokens,
+        usd: Number(budget.summary.totalUsd.toFixed(6)),
+      });
+      return;
+    }
 
     const pending = await getPendingApproval(office, config);
     if (!pending) {

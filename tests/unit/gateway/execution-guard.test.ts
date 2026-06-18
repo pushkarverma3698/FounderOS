@@ -5,13 +5,17 @@
 import { describe, it, expect } from "vitest";
 import {
   aiMessageLooksFabricatedKnowledge,
+  detectUnbackedGithubReadClaim,
+  detectUnbackedInboxClaim,
   detectUnbackedKnowledgeClaim,
   detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
   detectLinkedInRefusalWithoutTool,
   extractProvidedLinkedInPost,
+  extractShellCommand,
   hadEmptyKnowledgeToolResult,
   hadToolCall,
+  isGithubReadOnlyRequest,
   isInternalKnowledgeRequest,
   isShellRunRequest,
 } from "../../../src/gateway/execution-guard.js";
@@ -197,6 +201,30 @@ describe("extractProvidedLinkedInPost", () => {
 
   it("returns null when no quoted post body", () => {
     expect(extractProvidedLinkedInPost("Draft a LinkedIn post about AI automation")).toBeNull();
+  });
+});
+
+describe("detectUnbackedGithubReadClaim", () => {
+  it("flags fabricated issue list without github_read", () => {
+    const input = "List open issues on pushkarverma3698/FounderOS — just titles, max 5.";
+    const reply = "Open issues:\n* feat(jarvis): production-ready HUD\n* fix(office): LinkedIn HITL";
+    expect(detectUnbackedGithubReadClaim(input, [aiMsg(reply)], reply)).toBe(true);
+  });
+
+  it("passes when github_read was called", () => {
+    const input = "List open issues on pushkarverma3698/FounderOS";
+    const msgs = [aiMsg("", [{ name: "github_read" }])];
+    expect(detectUnbackedGithubReadClaim(input, msgs, "Issue #1 feat(jarvis)")).toBe(false);
+  });
+});
+
+describe("isGithubReadOnlyRequest", () => {
+  it("detects list open issues as read-only", () => {
+    expect(isGithubReadOnlyRequest("List open issues on pushkarverma3698/FounderOS")).toBe(true);
+  });
+
+  it("excludes create issue writes", () => {
+    expect(isGithubReadOnlyRequest("Create a GitHub issue titled chore")).toBe(false);
   });
 });
 
