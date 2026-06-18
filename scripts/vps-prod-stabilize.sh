@@ -22,7 +22,8 @@ if [ -d .git/refs/heads/cursor ]; then
   rm -rf .git/refs/heads/cursor 2>/dev/null || true
 fi
 find .git -name '*.lock' -delete 2>/dev/null || true
-git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
+git fetch --quiet origin "$BRANCH"
+git checkout --force --detach "origin/$BRANCH" 2>/dev/null || git reset --hard "origin/$BRANCH"
 
 # Ensure prod keeps Telegram polling on (NODE_ENV=production default is true;
 # strip an explicit false if someone set it during dev debugging).
@@ -67,11 +68,11 @@ fi
 
 echo ""
 echo "==> Seed founder context (idempotent)"
-if pnpm exec tsx scripts/seed-founder-context.ts 2>/dev/null || \
-   node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts; then
+if node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts; then
   echo "    seed-founder-context OK"
 else
-  echo "!! seed-founder-context failed (non-fatal)" >&2
+  echo "!! seed-founder-context FAILED" >&2
+  exit 1
 fi
 
 echo ""
