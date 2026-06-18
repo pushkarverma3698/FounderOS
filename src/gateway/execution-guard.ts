@@ -195,6 +195,47 @@ export function detectUnbackedGithubReadClaim(
 export const GITHUB_READ_RETRY_HINT =
   "⚠️ That GitHub data was not from the API — retrying with github_read…";
 
+// ── Unbacked GitHub write claim (HITL bypass class) ──────────────────────────
+
+/** User asked to create/update something on GitHub (issue, PR, repo). */
+export const GITHUB_WRITE_REQUEST_RE =
+  /\b(create|open|file|add|make)\b[^.?!]{0,60}\b(issue|pull request|pr|repo|readme)\b|\bgithub\b[^.?!]{0,60}\b(issue|pr|pull|repo|readme)\b|\bpush (to|changes to)\b[^.?!]{0,40}\bgithub\b/i;
+
+/** Reply language that implies a GitHub write succeeded without HITL / github_write. */
+export const FAKE_GITHUB_WRITE_CLAIM_RE =
+  /\b(issue #?\d+|pull request #?\d+|pr #?\d+)\b|\b(created|opened|filed|posted|published|updated)\b[^.?!]{0,40}\b(issue|pull request|pr|repo|readme)\b|\b(issue|pull request|pr|repo)\b[^.?!]{0,30}\b(was |has been )?(created|opened|filed|updated|published)\b|\b✅\b[^.?!]{0,40}\bgithub\b/i;
+
+/** Honest deferral — waiting for approval or offering a draft, not claiming success. */
+export const GITHUB_WRITE_DEFERRAL_OK_RE =
+  /\b(draft|ready for (your )?approval|awaiting approval|will create|need(?:s)? (your )?approval|approval card|waiting for|pending approval|not (yet )?(created|posted|live))\b/i;
+
+export function isGithubWriteRequest(input: string): boolean {
+  return GITHUB_WRITE_REQUEST_RE.test(input.trim());
+}
+
+export function hadGithubWriteToolCall(messages: OfficeMessageLike[]): boolean {
+  return hadToolCall(messages, "github_write") || hadToolCall(messages, "project_workflow");
+}
+
+/**
+ * True when the user asked for a GitHub write but the office reply claims it
+ * succeeded without calling github_write / project_workflow (HITL bypass class).
+ */
+export function detectUnbackedGithubWriteClaim(
+  userInput: string,
+  messages: OfficeMessageLike[],
+  reply: string,
+): boolean {
+  if (!isGithubWriteRequest(userInput)) return false;
+  if (hadGithubWriteToolCall(messages)) return false;
+  if (!FAKE_GITHUB_WRITE_CLAIM_RE.test(reply)) return false;
+  if (GITHUB_WRITE_DEFERRAL_OK_RE.test(reply)) return false;
+  return true;
+}
+
+export const GITHUB_WRITE_RETRY_HINT =
+  "⚠️ That GitHub write was not actually performed — retrying with github_write…";
+
 // ── Unbacked memory / internal-knowledge claim (ADR-032) ─────────────────────
 // Forces memory-tool calls before answering internal-knowledge questions.
 

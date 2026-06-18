@@ -232,3 +232,48 @@ Contract validation: PASS. Signal id: `32cf7ead-2268-4253-8214-9d746a27fed6`.
 | Jarvis API | `pnpm test:smoke:miso` stdout |
 
 **Campaign executed:** 2026-06-18 on Cloud VM (local Postgres, shared prod Telegram bot token).
+
+---
+
+## Post-Fix Verification — 2026-06-18 (same session)
+
+Code fixes committed on branch `cursor/full-manual-qa-campaign-d59b`. Infrastructure fixes applied on Cloud VM.
+
+### Fixes applied
+
+| ID | Fix | Files / action |
+|----|-----|----------------|
+| P0-1 | Ollama installed + `pnpm brain:sync` | 149 rows in `brain.turicks_brain` with embeddings |
+| P0-2 | GitHub HITL bypass guard + prompt hardening | `execution-guard.ts` (`detectUnbackedGithubWriteClaim`), `engineering.ts`, `pre-router.ts` |
+| P0-3 | Research handoff prompt | `prompts/research.ts` — never manually transfer back to supervisor |
+| P0-4 | Dev web-only mode | `TELEGRAM_POLLING_ENABLED` (default false in dev) — backend stays up, no 409 |
+| P0-5 | Admin context routing | `pre-router.ts` + `prompts/admin.ts` — "what do you know about me" → read_context |
+| P1-2 | personal_rag seeded | 1 chunk via `pnpm personal:sync` |
+| P1-3 | ~/.zshrc path-guard | Removed shell rc from `SECRET_BASENAMES`; secrets redacted via `readFileSafe` |
+| P1-4 | Sales draft-only | `prompts/sales.ts` — draft in reply when user says don't send |
+| P1-5 | E2E parallel lock | `scripts/e2e-telegram-qa.ts` — `/tmp/founderos-e2e.lock` |
+| P1-1 | gws missing message | Friendlier fail-loud in `gws-runner.ts` + `inbox-fast-path.ts` |
+
+### Verification evidence (fresh runs)
+
+| Check | Result | Evidence |
+|-------|--------|----------|
+| `pnpm predeploy` | **PASS** | lint + build:all + verify:wiring + **1198/1198** tests |
+| `pnpm qa:daily --skip-live --skip-integration` | **PASS** | `/tmp/founderos-qa/latest-daily.json` |
+| `brain.turicks_brain` | **PASS** | `SELECT count(*) → 149` |
+| `brain.personal_rag` | **PASS** | `SELECT count(*) → 1` |
+| Backend + Jarvis (polling off) | **PASS** | `/health` uptime stable; Jarvis `:5173` → 200 |
+| Probe T06 context | **PASS** | admin → read_context; real founder context in reply |
+| Probe T02 research handoff | **PASS** | research transfers back to supervisor cleanly |
+| Probe T05 ~/.zshrc | **PARTIAL** | Routes to personal (no secret-path block); HITL for shell read |
+| MTProto E2E group1 re-run | **BLOCKED** | `AUTH_KEY_DUPLICATED` — session cooldown needed; lock file prevents parallel contamination |
+| Prod VPS deploy | **NOT VERIFIED** | Requires founder merge + deploy pipeline |
+
+### Revised verdict
+
+**CONDITIONALLY READY for beta merge** — automated gate green (`pnpm predeploy`), data stores populated, dev Jarvis unblocked. Remaining before stable promotion:
+
+1. Re-run MTProto E2E **sequentially** after session cooldown (or fresh `telegram-tester login`)
+2. Prod: `pnpm brain:sync` + `TELEGRAM_POLLING_ENABLED=true` on VPS only
+3. Prod: install/configure gws OR set `GMAIL_BACKEND=composio` rollback
+4. Sequential T08/T13 with `--approve` to confirm HITL + `action_log` on GitHub writes

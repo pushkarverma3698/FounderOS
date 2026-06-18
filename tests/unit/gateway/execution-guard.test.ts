@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import {
   aiMessageLooksFabricatedKnowledge,
   detectUnbackedGithubReadClaim,
-  detectUnbackedInboxClaim,
+  detectUnbackedGithubWriteClaim,
   detectUnbackedKnowledgeClaim,
   detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
@@ -16,6 +16,7 @@ import {
   hadEmptyKnowledgeToolResult,
   hadToolCall,
   isGithubReadOnlyRequest,
+  isGithubWriteRequest,
   isInternalKnowledgeRequest,
   isShellRunRequest,
 } from "../../../src/gateway/execution-guard.js";
@@ -225,6 +226,37 @@ describe("isGithubReadOnlyRequest", () => {
 
   it("excludes create issue writes", () => {
     expect(isGithubReadOnlyRequest("Create a GitHub issue titled chore")).toBe(false);
+  });
+});
+
+describe("isGithubWriteRequest", () => {
+  it("detects create issue prompts", () => {
+    expect(
+      isGithubWriteRequest(
+        "create a GitHub issue on pushkarverma3698/FounderOS titled 'Known LangGraph limitations'",
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("detectUnbackedGithubWriteClaim", () => {
+  it("flags fake issue creation without github_write", () => {
+    const input =
+      "Research LangGraph limitations, then create a GitHub issue on pushkarverma3698/FounderOS with findings.";
+    const reply = "I've created issue #142 on FounderOS with the LangGraph limitations you requested.";
+    expect(detectUnbackedGithubWriteClaim(input, [aiMsg(reply)], reply)).toBe(true);
+  });
+
+  it("passes when github_write was called", () => {
+    const input = "create a github issue titled test on pushkarverma3698/FounderOS";
+    const msgs = [aiMsg("", [{ name: "github_write" }]), toolMsg("github_write", "✅ GitHub create_issue done")];
+    expect(detectUnbackedGithubWriteClaim(input, msgs, "Issue created successfully.")).toBe(false);
+  });
+
+  it("allows honest draft / approval deferral without tool call", () => {
+    const input = "create a github issue titled test on pushkarverma3698/FounderOS";
+    const reply = "Draft issue ready for your approval — I have not created it yet.";
+    expect(detectUnbackedGithubWriteClaim(input, [aiMsg(reply)], reply)).toBe(false);
   });
 });
 

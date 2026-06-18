@@ -61,7 +61,7 @@ export async function runGws(
     if (e.code === "ENOENT") {
       return {
         ok: false,
-        error: `gws CLI not found (${bin}). Install googleworkspace/cli or set GWS_BIN.`,
+        error: "Gmail is not connected on this host (gws CLI not installed). Install googleworkspace/cli, run gws auth login, or set GMAIL_BACKEND=composio.",
       };
     }
     const msg = e.stderr?.trim() || e.message || String(err);
