@@ -2,9 +2,28 @@
  * Web gateway — auth + route smoke tests (no live office).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createWebApp } from "../../../src/gateway/web.js";
 import { resetStreamHubs } from "../../../src/gateway/stream-hub.js";
+
+vi.mock("../../../src/db/queries.js", async (importActual) => {
+  const actual = await importActual<typeof import("../../../src/db/queries.js")>();
+  return {
+    ...actual,
+    getActiveMission: vi.fn().mockResolvedValue(null),
+    getRecentAuditEntries: vi.fn().mockResolvedValue([]),
+    listMissions: vi.fn().mockResolvedValue([]),
+  };
+});
+
+vi.mock("../../../src/agents/office.js", async (importActual) => {
+  const actual = await importActual<typeof import("../../../src/agents/office.js")>();
+  return {
+    ...actual,
+    getOffice: vi.fn().mockResolvedValue({}),
+    getPendingApproval: vi.fn().mockResolvedValue(null),
+  };
+});
 
 describe("web gateway", () => {
   beforeEach(() => {
