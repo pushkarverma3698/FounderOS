@@ -9,21 +9,25 @@ Film-grade HUD for FounderOS. Connects to the same `/api/v1/*` web gateway as th
 - **Framer Motion** — boot sequence, panel transitions
 - **Web Speech API** — voice commands + JARVIS-style TTS on replies
 
-## Run locally
+## Run locally (your machine)
 
-Terminal 1 — backend (gateway on :3001, no Telegram poll if prod bot is live):
-
-```bash
-pnpm dev:jarvis-gateway
-```
-
-Terminal 2 — cinematic UI:
+One command — starts API gateway + cinematic UI on your laptop:
 
 ```bash
-pnpm dev:jarvis-next
+pnpm install
+cp .env.example .env   # add GOOGLE_GENERATIVE_AI_API_KEY + DATABASE_URL
+pnpm run setup         # Postgres migrations
+pnpm dev:jarvis-local  # → http://localhost:3000
 ```
 
-Open **http://localhost:3000**
+Or two terminals:
+
+```bash
+pnpm dev:jarvis-gateway   # :3001 — no Telegram poll
+pnpm dev:jarvis-next      # :3000
+```
+
+Open **http://localhost:3000** in your browser (not the cloud VPS port forward).
 
 ## Environment
 

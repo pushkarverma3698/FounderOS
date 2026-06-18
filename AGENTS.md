@@ -92,9 +92,11 @@ this only records the gotchas.
 | LinkedIn post | `direct` | `LINKEDIN_BACKEND=composio` | `LINKEDIN_ACCESS_TOKEN` + `LINKEDIN_AUTHOR_URN` |
 | GitHub | Octokit | — | `GITHUB_TOKEN` |
 
-### JARVIS cinematic UI (`apps/jarvis-next`)
-- **UI:** `pnpm dev:jarvis-next` → **http://localhost:3000**
-- **API:** `pnpm dev:jarvis-gateway` → gateway on **:3001** (skips Telegram poll; avoids 409 with prod bot)
+### JARVIS cinematic UI (`apps/jarvis-next`) — **run on your machine**
+- **One command:** `pnpm dev:jarvis-local` → UI **http://localhost:3000**, API **:3001**
+- **Split:** `pnpm dev:jarvis-gateway` + `pnpm dev:jarvis-next`
+- Do **not** rely on cloud VPS port forwarding for preview; run locally in your repo checkout.
+- Needs Postgres + `GOOGLE_GENERATIVE_AI_API_KEY` in `.env`. Skips Telegram (no 409 with prod bot).
 
 ### Running / testing
 - Tests are keyless: `pnpm test` (vitest, ~1100 tests). Lint: `pnpm lint` (tsc --noEmit).
