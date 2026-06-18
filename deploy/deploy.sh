@@ -73,14 +73,28 @@ echo "==> Running migrations"
 pnpm db:migrate
 
 # Populate the turicks_brain pgvector store from docs/ (embeds via local Ollama).
-# Non-fatal: a transient Ollama hiccup must not block a deploy — the vector
-# store can be re-synced by hand (pnpm brain:sync). Without this step the store
-# stays empty and search_turicks_brain returns nothing (the 2026-06-15 prod bug).
+# FATAL if sync fails or store has zero embeddings — empty RAG = fabrication risk (2026-06-15 prod bug).
 echo "==> Syncing turicks-brain vector store (brain:sync)"
-if pnpm brain:sync; then
-  echo "    brain:sync OK"
+if ! pnpm brain:sync; then
+  echo "!! brain:sync FAILED — deploy aborted (RAG store empty = marketing/sales fabrication risk)" >&2
+  exit 1
+fi
+echo "    brain:sync OK"
+
+EMBEDDED="$(docker exec founderos-postgres psql -U founderos -d founderos -tAc \
+  "SELECT count(*) FROM brain.turicks_brain WHERE embedding IS NOT NULL;" 2>/dev/null | tr -d ' ')"
+if [ -z "$EMBEDDED" ] || [ "$EMBEDDED" -le 0 ] 2>/dev/null; then
+  echo "!! turicks_brain has 0 embedded rows — deploy aborted (run brain:sync after Ollama is healthy)" >&2
+  exit 1
+fi
+echo "    turicks_brain embedded rows: $EMBEDDED"
+
+echo "==> Seeding founder context (Phase D-Bis — idempotent)"
+if node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts; then
+  echo "    seed-founder-context OK"
 else
-  echo "!! brain:sync FAILED (non-fatal) — run it manually once Ollama is healthy" >&2
+  echo "!! seed-founder-context FAILED — deploy aborted (stale context = brand inconsistency)" >&2
+  exit 1
 fi
 
 echo "==> Restarting service (single-instance lock makes this safe)"

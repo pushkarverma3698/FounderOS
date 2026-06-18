@@ -65,7 +65,7 @@ Strategy: [docs/strategy/](strategy/) · Phase doc: [PHASE-D-BIS-PROOF-AND-DISTR
 | **SaaS pivot** | Gated on 4+ weeks stable production use — achieve that first, then multi-tenancy |
 | **Rearchitect supervisor** | Architecture is locked — only add tools and hierarchy from now on |
 | **Budget guard npm package** | Deprioritized for core reliability — can extract later |
-| **Real RAG (pgvector)** | brain_sync covers 90% of use case — upgrade when semantic search matters |
+| **Real RAG (pgvector)** | **Live in production** — `turicks_brain` + `brain:sync` on every deploy; keyword store in `knowledge_entries` |
 | **Safari-MCP browser** | Deferred in ADR-012; personal.browser works fine for current use |
 | **Multi-provider cascade** | One good model (Gemini 2.5 Flash) > custom cascade — OpenRouter fallback for 503s |
 
