@@ -19,7 +19,7 @@ import { env } from "./core/config.js";
 import { closeDatabaseConnections } from "./db/client.js";
 import { getOffice } from "./agents/office.js";
 import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
-import { restorePendingApprovalAfterRestart } from "./gateway/office-run.js";
+import { restorePendingApprovalAfterRestart, restorePendingWebHitl } from "./gateway/office-run.js";
 import { expireStaleInterrupts } from "./db/queries.js";
 import { startHealthServer } from "./infra/health.js";
 import { runProviderSmokeAtBoot } from "./infra/provider-probes.js";
@@ -92,6 +92,13 @@ async function main(): Promise<void> {
   });
   if (restored) {
     log.info("Restored pending HITL approval card after restart");
+  }
+  const webRestored = await restorePendingWebHitl().catch((err) => {
+    log.warn({ err: (err as Error).message }, "Pending web HITL restore failed — non-fatal");
+    return false;
+  });
+  if (webRestored) {
+    log.info("Restored pending HITL to JARVIS web SSE after restart");
   }
 
   // 5. Proactive scheduler (Monday brief + stale approval reminders).

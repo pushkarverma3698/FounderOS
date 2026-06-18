@@ -21,7 +21,7 @@ import {
 import { runOfficeSession, resumeOfficeSession } from "./office-run.js";
 import { createWebSession } from "./session.js";
 import { subscribeStreamEvents } from "./stream-hub.js";
-import { formatMisoDashboard, formatMisoClose, missionToView } from "./mission-control.js";
+import { formatMisoDashboard, formatMisoClose, formatMisoPlan, missionToView } from "./mission-control.js";
 import { getOffice, getPendingApproval } from "../agents/office.js";
 import { childLogger } from "../infra/logger.js";
 
@@ -31,18 +31,29 @@ function webToken(): string | undefined {
   return process.env["WEB_GATEWAY_TOKEN"]?.trim() || undefined;
 }
 
-function authOk(authHeader: string | undefined): boolean {
+/** Verify Bearer header or ?token= query (EventSource cannot send headers). */
+export function authOk(authHeader: string | undefined, queryToken?: string | null): boolean {
   const token = webToken();
   if (!token) return true;
-  if (!authHeader?.startsWith("Bearer ")) return false;
-  return authHeader.slice(7) === token;
+  if (authHeader?.startsWith("Bearer ") && authHeader.slice(7) === token) return true;
+  if (queryToken && queryToken === token) return true;
+  return false;
+}
+
+function queryTokenFromUrl(url: string): string | null {
+  try {
+    return new URL(url, "http://127.0.0.1").searchParams.get("token");
+  } catch {
+    return null;
+  }
 }
 
 export function createWebApp(): Hono {
   const app = new Hono();
 
   app.use("/api/*", async (c, next) => {
-    if (!authOk(c.req.header("authorization"))) {
+    const qToken = queryTokenFromUrl(c.req.url);
+    if (!authOk(c.req.header("authorization"), qToken)) {
       return c.json({ error: "unauthorized" }, 401);
     }
     await next();
@@ -141,6 +152,26 @@ export function createWebApp(): Hono {
   app.get("/api/v1/audit", async (c) => {
     const entries = await getRecentAuditEntries(TENANT, 50);
     return c.json({ entries });
+  });
+
+  app.get("/api/v1/sessions/:id/miso/status", async (c) => {
+    const sessionId = c.req.param("id");
+    const status = await buildMisoStatus(sessionId);
+    return c.json({ status });
+  });
+
+  app.get("/api/v1/sessions/:id/miso/plan", async (c) => {
+    const sessionId = c.req.param("id");
+    const mission = await getActiveMission(sessionId);
+    if (!mission) return c.json({ error: "no_active_mission" }, 404);
+    return c.json({ plan: formatMisoPlan(mission.goal) });
+  });
+
+  app.post("/api/v1/sessions/:id/miso/close", async (c) => {
+    const sessionId = c.req.param("id");
+    const summary = await closeActiveMission(sessionId);
+    if (!summary) return c.json({ error: "no_active_mission" }, 404);
+    return c.json({ ok: true, summary });
   });
 
   return app;

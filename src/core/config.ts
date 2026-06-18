@@ -59,6 +59,7 @@ export const envSchema = z.object({
 
   /** Web gateway (JARVIS UI) — optional Bearer token; unset = open in dev. */
   WEB_GATEWAY_TOKEN: z.string().transform(v => v || undefined).optional(),
+  /** Unused — web gateway shares HEALTH_PORT. Kept for backward compat in .env files. */
   WEB_GATEWAY_PORT: z.coerce.number().int().positive().default(3002),
 
   // Redis — optional; used only if a tool requires it

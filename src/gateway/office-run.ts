@@ -59,7 +59,7 @@ import { buildRunMetadata } from "../infra/telemetry.js";
 import { SUPERVISOR_PROMPT } from "../agents/system-prompts.js";
 import { isStructuredToolFailure } from "../agents/tool-result.js";
 import { safeHtml, formatApprovalCard } from "./approval-card.js";
-import { createTelegramSession, type GatewaySession } from "./session.js";
+import { createTelegramSession, createWebSession, type GatewaySession } from "./session.js";
 import { syncMissionTrace, refreshMissionDashboard } from "./mission-sync.js";
 
 const log = logger.child({ module: "office-run" });
@@ -326,11 +326,14 @@ async function sendResult(session: GatewaySession, res: { messages?: OfficeMessa
       "Replied to Telegram",
     );
   } else {
-    await session.onReply(reply);
-    if (errs.length > 0) {
-      await session.onStatus(`Tool issues: ${errs.join("; ").slice(0, 500)}`);
-    }
-    session.emitStream("turn.complete", { replyPreview: reply.slice(0, 200), toolErrors: errs.length });
+    session.emitStream("turn.complete", {
+      reply,
+      toolErrors: errs.length > 0 ? errs : undefined,
+    });
+    log.info(
+      { sessionId: session.id, replyPreview: reply.slice(0, 80), toolErrors: errs.length },
+      "Replied via web SSE",
+    );
   }
 }
 
@@ -338,11 +341,31 @@ async function sendApprovalCard(session: GatewaySession, approval: ApprovalReque
   await session.onApproval(approval);
 }
 
+function enrichTraceData(seam: string, data?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!data) return data;
+  if (seam === "tool.call" || seam === "tool.result") {
+    return {
+      ...data,
+      toolName: data["name"] ?? data["tool"] ?? data["toolName"] ?? "tool",
+      department: data["department"] ?? data["hint"],
+    };
+  }
+  if (seam === "route.decided") {
+    return { ...data, department: data["hint"] };
+  }
+  return data;
+}
+
 function wrapTrace(session: GatewaySession, trace: TurnTrace): TurnTrace {
   return {
     ...trace,
     event(seam, data) {
       trace.event(seam, data);
+      if (seam === "turn.out" && session.transport === "web") {
+        void syncMissionTrace(session.id, trace, seam, data);
+        return;
+      }
+      const enriched = enrichTraceData(seam, data);
       session.emitStream(
         seam === "hitl.interrupt" ? "hitl.pending" :
         seam === "route.decided" ? "department.routed" :
@@ -350,7 +373,7 @@ function wrapTrace(session: GatewaySession, trace: TurnTrace): TurnTrace {
         seam === "tool.result" ? "tool.end" :
         seam === "turn.out" ? "turn.complete" :
         seam === "turn.error" ? "turn.error" : "tool.start",
-        data,
+        enriched,
       );
       void syncMissionTrace(session.id, trace, seam, data);
     },
@@ -402,6 +425,24 @@ export async function restorePendingApprovalAfterRestart(chatId: string | number
   const { getBot } = await import("./telegram.js");
   await getBot().api.sendMessage(chatId, html, { parse_mode: "HTML", reply_markup: keyboard });
   log.info({ chatId, title: pending.title }, "Re-posted pending HITL card after restart");
+  return true;
+}
+
+/** Default JARVIS web session id (thread turicks:jarvis-desktop). */
+export const JARVIS_DESKTOP_SESSION = "jarvis-desktop";
+
+/** Re-publish pending HITL to web SSE clients after process restart. */
+export async function restorePendingWebHitl(sessionId = JARVIS_DESKTOP_SESSION): Promise<boolean> {
+  if (await clearStalePendingInterruptOnBoot(sessionId)) return false;
+
+  const office = await getOffice();
+  const config = officeConfig(sessionId);
+  const pending = await getPendingApproval(office, config);
+  if (!pending) return false;
+
+  const session = createWebSession(sessionId);
+  await session.onApproval(pending);
+  log.info({ sessionId, title: pending.title }, "Re-published pending HITL via web SSE after restart");
   return true;
 }
 

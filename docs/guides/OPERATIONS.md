@@ -371,17 +371,43 @@ Trace events (`turn.in`, `route.decided`, `hitl.interrupt`, `turn.out`) update t
 HTTP API mounted on the health port (`3001` by default):
 
 - `POST /api/v1/sessions/:id/messages` — send a task (SSE stream on `/stream`)
-- `GET /api/v1/sessions/:id/stream` — SSE event stream
+- `GET /api/v1/sessions/:id/stream` — SSE event stream (`?token=` when `WEB_GATEWAY_TOKEN` set)
 - `POST /api/v1/sessions/:id/hitl/approve|reject` — HITL resume
 - `GET /api/v1/missions` — mission board
+- `GET /api/v1/sessions/:id/miso/status|plan` — MISO lifecycle
+- `POST /api/v1/sessions/:id/miso/close` — close active mission
 - `GET /api/v1/audit` — recent `action_log` rows
 
-Optional auth: set `WEB_GATEWAY_TOKEN` in `.env` (Bearer token required when set).
+Optional auth: set `WEB_GATEWAY_TOKEN` in `.env` (Bearer header on fetch; `?token=` on SSE).
+When building for production, set the same value as `VITE_WEB_GATEWAY_TOKEN` (deploy script
+does this automatically from `WEB_GATEWAY_TOKEN`).
 
 ### JARVIS frontend
+
+**Development** (Vite dev server proxies `/api` → `:3001`):
 
 ```bash
 cd apps/jarvis && pnpm install && pnpm dev
 ```
 
 Open http://localhost:5173 — proxies `/api` to `localhost:3001`.
+
+**Production** (same port as backend — no separate static host):
+
+After `pnpm build:all`, the health server serves `apps/jarvis/dist` at `/`:
+
+```bash
+curl http://localhost:3001/              # JARVIS SPA
+curl http://localhost:3001/api/v1/health # web gateway
+pnpm test:smoke:jarvis                   # static + auth + API smoke
+pnpm test:smoke:miso                     # MISO + mission CRUD smoke
+```
+
+**Troubleshooting**
+
+| Symptom | Fix |
+|---------|-----|
+| UI 404 in prod | Run `pnpm build:jarvis` — dist must exist under `apps/jarvis/dist` |
+| API 401 | Set `VITE_WEB_GATEWAY_TOKEN` at build time to match `WEB_GATEWAY_TOKEN` |
+| SSE OFFLINE | Check token query on stream URL; verify `:3001` reachable |
+| Duplicate replies | Fixed — single `turn.complete` per turn (2026-06-18) |
