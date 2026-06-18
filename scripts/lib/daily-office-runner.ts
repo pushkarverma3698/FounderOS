@@ -170,7 +170,8 @@ export async function runStressTask(
     ) as OfficeMessageLike[];
     let fullReply = finalReply({ messages: freshMessages });
     let guardBlocked = false;
-    let guardKind = needsExecutionGuardRetry(task.input, freshMessages, fullReply) ?? undefined;
+    let uniqueTools = [...new Set(toolNames.filter((n) => n && !n.startsWith("transfer_to_")))];
+    let guardKind = needsExecutionGuardRetry(task.input, freshMessages, fullReply, uniqueTools) ?? undefined;
 
     if (guardKind) {
       const retryMessages = buildGuardRetryMessages(guardKind, task.input);
@@ -184,9 +185,7 @@ export async function runStressTask(
         { configurable: { thread_id: threadId } },
       );
       if (retryPending) {
-        const uniqueTools = [
-          ...new Set(toolNames.filter((n) => n && !n.startsWith("transfer_to_"))),
-        ];
+        uniqueTools = [...new Set(toolNames.filter((n) => n && !n.startsWith("transfer_to_")))];
         const formatIssues = validateTelegramHtml(markdownToTelegramHtml(fullReply));
         let status: StressStatus;
         let validationError: string | undefined;
@@ -214,18 +213,17 @@ export async function runStressTask(
         retryBaseLen,
       ) as OfficeMessageLike[];
       fullReply = finalReply({ messages: freshMessages });
+      uniqueTools = [...new Set(toolNames.filter((n) => n && !n.startsWith("transfer_to_")))];
     }
 
-    const stillUngrounded = needsExecutionGuardRetry(task.input, freshMessages, fullReply);
+    const stillUngrounded = needsExecutionGuardRetry(task.input, freshMessages, fullReply, uniqueTools);
     if (stillUngrounded === "knowledge" || stillUngrounded === "memory") {
       fullReply = buildKnowledgeGroundingRefusal();
       guardBlocked = true;
       guardKind = stillUngrounded;
     }
 
-    const uniqueTools = [
-      ...new Set(toolNames.filter((n) => n && !n.startsWith("transfer_to_"))),
-    ];
+    uniqueTools = [...new Set(toolNames.filter((n) => n && !n.startsWith("transfer_to_")))];
 
     const pendingApproval = await getPendingApproval(
       office as unknown as Parameters<typeof getPendingApproval>[0],

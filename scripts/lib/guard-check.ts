@@ -19,13 +19,14 @@ export function detectGuardViolation(
   userInput: string,
   messages: OfficeMessageLike[],
   reply: string,
+  toolsCalled?: readonly string[],
 ): GuardKind | null {
   if (detectUnbackedShellClaim(userInput, messages, reply)) return "shell";
   if (detectLinkedInRefusalWithoutTool(userInput, messages, reply)) return "linkedin";
   if (detectUnbackedInboxClaim(userInput, messages, reply)) return "inbox";
   if (detectUnbackedGithubWriteClaim(userInput, messages, reply)) return "github";
   if (detectUnbackedGithubReadClaim(userInput, messages, reply)) return "github";
-  if (detectUnbackedMemoryClaim(userInput, messages, reply)) return "memory";
-  if (detectUnbackedKnowledgeClaim(userInput, messages, reply)) return "knowledge";
+  if (detectUnbackedMemoryClaim(userInput, messages, reply, toolsCalled)) return "memory";
+  if (detectUnbackedKnowledgeClaim(userInput, messages, reply, toolsCalled)) return "knowledge";
   return null;
 }

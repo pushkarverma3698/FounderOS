@@ -12,10 +12,33 @@ import type { TurnTrace } from "./trace.js";
 import { hierarchyDepth } from "./trace.js";
 
 /** Best-effort tool name from the Serialized id array LangChain passes. */
-function toolName(serialized: Serialized | undefined, runName?: string): string {
+export function resolveToolRunName(serialized: Serialized | undefined, runName?: string): string {
   if (runName) return runName;
   const id = (serialized as { id?: string[] } | undefined)?.id;
   return id?.[id.length - 1] ?? "unknown";
+}
+
+/** Collects tool run names during office.invoke — used by execution guards when dept tool messages are hidden. */
+export class ToolNameCollector extends BaseCallbackHandler {
+  name = "ToolNameCollector";
+  readonly tools: string[] = [];
+
+  override async handleToolStart(
+    tool: Serialized,
+    _input: string,
+    _runId: string,
+    _parentRunId?: string,
+    _tags?: string[],
+    _metadata?: Record<string, unknown>,
+    runName?: string,
+  ): Promise<void> {
+    const name = resolveToolRunName(tool, runName);
+    if (name && !name.startsWith("transfer_to_")) this.tools.push(name);
+  }
+}
+
+function toolName(serialized: Serialized | undefined, runName?: string): string {
+  return resolveToolRunName(serialized, runName);
 }
 
 export class TraceCallback extends BaseCallbackHandler {

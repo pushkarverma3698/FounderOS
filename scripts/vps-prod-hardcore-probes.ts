@@ -72,6 +72,7 @@ const PROBE_TASKS: StressTask[] = [
         "What is Turicks ICP? Be specific with revenue bands and geography.",
         messages,
         reply,
+        tools,
       );
       if (guard) return `Execution guard would retry (${guard}) — ungrounded reply leaked`;
       if (/\$50[kK]?|\$500[kK]?|50,?000.*500,?000/i.test(reply) &&
@@ -87,11 +88,12 @@ const PROBE_TASKS: StressTask[] = [
     expectHITL: false,
     input: "What is Turicks ICP? Be specific with revenue bands and geography.",
     repeatOnSameThread: true,
-    validate: (reply, _tools, messages) => {
+    validate: (reply, tools, messages) => {
       const guard = detectGuardViolation(
         "What is Turicks ICP? Be specific with revenue bands and geography.",
         messages,
         reply,
+        tools,
       );
       if (guard) return `Stale checkpoint regurgitation (${guard})`;
       return null;
