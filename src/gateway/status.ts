@@ -33,6 +33,7 @@ export interface RichStatusData {
   outboundTargetCount: number;
   pendingSignals: number;
   providerStatusLine: string | null;
+  budgetStatusLine: string | null;
 }
 
 /** Format uptime into a human-readable string: "2h 15m", "45s", "10m". */
@@ -79,6 +80,7 @@ export function formatRichStatus(data: RichStatusData): string {
     outboundTargetCount,
     pendingSignals,
     providerStatusLine,
+    budgetStatusLine,
   } = data;
 
   const clientsStr = activeClients.length > 0 ? activeClients.join(", ") : "none set";
@@ -94,6 +96,7 @@ export function formatRichStatus(data: RichStatusData): string {
     `🟢 <b>FounderOS</b> — Running ${formatUptime(uptimeSeconds)}\n\n` +
     `📋 Context: ${clientsStr}, Focus: ${focusStr}\n` +
     `🎯 Pipeline: ${outboundTargetCount} outbound target${outboundTargetCount !== 1 ? "s" : ""} · ${pendingSignals} pending signal${pendingSignals !== 1 ? "s" : ""}\n` +
+    (budgetStatusLine ? `${budgetStatusLine}\n` : "") +
     (providerStatusLine ? `${providerStatusLine}\n` : "") +
     `📬 Today: ${emailsSentToday} email${emailsSentToday !== 1 ? "s" : ""} · ${searchesToday} search${searchesToday !== 1 ? "es" : ""} · ${calendarEventsToday} event${calendarEventsToday !== 1 ? "s" : ""}\n` +
     `⚡ Last: ${lastEventStr}\n` +

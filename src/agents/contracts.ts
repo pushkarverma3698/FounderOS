@@ -34,6 +34,7 @@ export const SIGNAL_EVENT_TYPES = [
   "demo_ready",
   "design_brief_ready",
   "site_deployed",
+  "proof_drop_ready",
 ] as const;
 
 export type SignalEventType = (typeof SIGNAL_EVENT_TYPES)[number];
@@ -95,6 +96,17 @@ export const SiteDeployedPayload = z.object({
 });
 export type SiteDeployedPayload = z.infer<typeof SiteDeployedPayload>;
 
+/** marketing drafted a proof-drop artifact concept → sales sends the drop. */
+export const ProofDropReadyPayload = z.object({
+  company: z.string().min(1),
+  artifactType: z.string().min(1),
+  artifactSummary: z.string().min(1),
+  outreachHook: z.string().min(1),
+  contactEmail: z.string().email().optional(),
+  notes: z.string().optional(),
+});
+export type ProofDropReadyPayload = z.infer<typeof ProofDropReadyPayload>;
+
 /**
  * The single source of truth mapping each event type to its payload contract.
  * `satisfies` makes the compiler reject an event type without a contract (or a
@@ -106,6 +118,7 @@ export const SIGNAL_CONTRACTS = {
   demo_ready: DemoReadyPayload,
   design_brief_ready: DesignBriefReadyPayload,
   site_deployed: SiteDeployedPayload,
+  proof_drop_ready: ProofDropReadyPayload,
 } satisfies Record<SignalEventType, z.ZodTypeAny>;
 
 /** The validated payload type for a given event type. */

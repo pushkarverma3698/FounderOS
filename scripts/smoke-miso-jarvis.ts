@@ -238,7 +238,28 @@ async function main(): Promise<void> {
       fail("POST /messages accept", JSON.stringify(accept));
     }
 
-    // Token auth gate
+    const misoStatus = await httpJson(`/api/v1/sessions/${SESSION}/miso/status`);
+    if (misoStatus.status === 200 && (misoStatus.body as { status?: string }).status) {
+      pass("GET /api/v1/sessions/:id/miso/status");
+    } else {
+      fail("GET miso/status", JSON.stringify(misoStatus));
+    }
+
+    const misoPlan = await httpJson(`/api/v1/sessions/${SESSION}/miso/plan`);
+    if (misoPlan.status === 200 || misoPlan.status === 404) {
+      pass("GET /api/v1/sessions/:id/miso/plan", String(misoPlan.status));
+    } else {
+      fail("GET miso/plan", String(misoPlan.status));
+    }
+
+    const misoClose = await httpJson(`/api/v1/sessions/${SESSION}/miso/close`, { method: "POST" });
+    if (misoClose.status === 200 || misoClose.status === 404) {
+      pass("POST /api/v1/sessions/:id/miso/close", String(misoClose.status));
+    } else {
+      fail("POST miso/close", String(misoClose.status));
+    }
+
+    // Token auth gate (set env after open-route checks — authOk reads env per request)
     const prev = process.env["WEB_GATEWAY_TOKEN"];
     process.env["WEB_GATEWAY_TOKEN"] = "smoke-secret";
     // Recreate app with auth — need fresh import; test via direct fetch to new server is heavy.
@@ -250,6 +271,13 @@ async function main(): Promise<void> {
     });
     if (deny.status === 401 && allow.status === 200) pass("WEB_GATEWAY_TOKEN auth gate");
     else fail("WEB_GATEWAY_TOKEN auth", `deny=${deny.status} allow=${allow.status}`);
+
+    const queryAuth = await authedApp.request(
+      "http://localhost/api/v1/sessions/test/stream?token=smoke-secret",
+    );
+    if (queryAuth.status === 200) pass("WEB_GATEWAY_TOKEN query auth for SSE");
+    else fail("WEB_GATEWAY_TOKEN query auth", String(queryAuth.status));
+
     if (prev) process.env["WEB_GATEWAY_TOKEN"] = prev;
     else delete process.env["WEB_GATEWAY_TOKEN"];
 

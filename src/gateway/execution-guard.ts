@@ -34,14 +34,54 @@ export const BANNED_PHRASE_INPUT_RE =
 
 /** Model refused to post instead of calling linkedin_post. */
 export const LINKEDIN_REFUSAL_RE =
-  /\b(cannot|can't|won't|will not|unable to|refus|not (able|allowed) to)\b[^.?!]{0,80}\b(post|publish|linkedin)\b|\b(banned|prohibited|not permitted)\b[^.?!]{0,60}\b(phrase|word)/i;
+  /\b(cannot|can't|won't|will not|unable to|refus|not (able|allowed) to)\b[^.?!]{0,80}\b(post|publish|linkedin)\b|\b(banned|prohibited|not permitted)\b[^.?!]{0,60}\b(phrase|word)|\b(too short|not long enough|word count|between \d+ and \d+ words|needs (to be|more) \d+ words?)\b/i;
 
 export function isShellRunRequest(input: string): boolean {
   return SHELL_RUN_RE.test(input);
 }
 
+/** Extract shell command from "run in terminal: ..." style prompts. */
+export function extractShellCommand(input: string): string | null {
+  const terminal = input.match(/\b(?:run\s+(?:this\s+)?in\s+(?:my\s+)?(?:the\s+)?terminal|terminal)\s*:\s*(.+)$/i);
+  if (terminal?.[1]) {
+    const raw = terminal[1].trim();
+    if (
+      (raw.startsWith('"') && raw.endsWith('"')) ||
+      (raw.startsWith("'") && raw.endsWith("'"))
+    ) {
+      return raw.slice(1, -1);
+    }
+    return raw;
+  }
+
+  const quoted = input.match(/\brun_shell\b[^"']*["']([^"']+)["']/i);
+  if (quoted?.[1]?.trim()) return quoted[1].trim();
+
+  return null;
+}
+
 export function isLinkedInPostRequest(input: string): boolean {
   return LINKEDIN_BANNED_INPUT_RE.test(input);
+}
+
+/**
+ * Extract founder-provided post body from "Post this on LinkedIn: '...'" patterns.
+ * Pure — unit-tested (rule #16). Used by pre-router to force linkedin_post calls.
+ */
+export function extractProvidedLinkedInPost(input: string): string | null {
+  const postThis = input.match(
+    /\bpost\s+(?:this|the following|it)\s+on\s+linkedin\s*:?\s*['"]([^'"]+)['"]/i,
+  );
+  if (postThis?.[1]?.trim()) return postThis[1].trim();
+
+  const linkedinQuoted = input.match(/\blinkedin\s*:?\s*['"]([^'"]{20,})['"]/i);
+  if (linkedinQuoted?.[1]?.trim()) return linkedinQuoted[1].trim();
+
+  return null;
+}
+
+export function isProvidedLinkedInPostRequest(input: string): boolean {
+  return isLinkedInPostRequest(input) && extractProvidedLinkedInPost(input) !== null;
 }
 
 export function hadToolCall(messages: OfficeMessageLike[], toolName: string): boolean {
@@ -93,7 +133,7 @@ export const SHELL_RETRY_HINT =
   "⚠️ That command was not actually run — I need your approval first. Retrying with the real run_shell tool…";
 
 export const LINKEDIN_RETRY_HINT =
-  "⚠️ I should call linkedin_post (banned phrases are auto-stripped). Retrying…";
+  "⚠️ I should call linkedin_post (banned phrases are auto-stripped; length is decided on the approval card). Retrying…";
 
 /** Read-only inbox check — excludes draft/reply/send workflows. */
 export const INBOX_READ_ONLY_RE =
@@ -122,6 +162,38 @@ export function detectUnbackedInboxClaim(
 
 export const INBOX_RETRY_HINT =
   "⚠️ That inbox summary was not from Gmail — retrying with read_emails…";
+
+/** Read-only GitHub queries — list/show/get issues, branches, repos (not create/write). */
+/** Write/create GitHub resources — excludes read-only "list open issues". */
+export const GITHUB_WRITE_INTENT_RE =
+  /\b(create|file|new)\b[^.?!]{0,40}\b(issue|pull request|pr|repo)\b|\bgithub\b[^.?!]{0,40}\b(create)\b/i;
+
+export const GITHUB_READ_ONLY_RE =
+  /\bpushkarverma3698\/[\w.-]+\b|\b(list|show|get|what are)\b[^.?!]{0,60}\b(open )?(issues?|pull requests?|prs?|branches|commits)\b|\b(list|show)\b[^.?!]{0,40}\b(repos?|repositories)\b/i;
+
+export function isGithubReadOnlyRequest(input: string): boolean {
+  const text = input.trim();
+  if (!text || GITHUB_WRITE_INTENT_RE.test(text)) return false;
+  return GITHUB_READ_ONLY_RE.test(text);
+}
+
+/**
+ * True when user asked for GitHub read data but engineering answered from memory
+ * without calling github_read (live-verified stress u3 / daily gate).
+ */
+export function detectUnbackedGithubReadClaim(
+  userInput: string,
+  messages: OfficeMessageLike[],
+  reply: string,
+): boolean {
+  if (!isGithubReadOnlyRequest(userInput)) return false;
+  if (hadToolCall(messages, "github_read")) return false;
+  if (reply.trim().length < 40) return false;
+  return /\b(issues?|#\d+|feat\(|fix\(|pull request|open issues)\b/i.test(reply);
+}
+
+export const GITHUB_READ_RETRY_HINT =
+  "⚠️ That GitHub data was not from the API — retrying with github_read…";
 
 // ── Unbacked memory / internal-knowledge claim (ADR-032) ─────────────────────
 // Forces memory-tool calls before answering internal-knowledge questions.

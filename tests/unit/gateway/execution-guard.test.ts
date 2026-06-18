@@ -5,12 +5,17 @@
 import { describe, it, expect } from "vitest";
 import {
   aiMessageLooksFabricatedKnowledge,
+  detectUnbackedGithubReadClaim,
+  detectUnbackedInboxClaim,
   detectUnbackedKnowledgeClaim,
   detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
   detectLinkedInRefusalWithoutTool,
+  extractProvidedLinkedInPost,
+  extractShellCommand,
   hadEmptyKnowledgeToolResult,
   hadToolCall,
+  isGithubReadOnlyRequest,
   isInternalKnowledgeRequest,
   isShellRunRequest,
 } from "../../../src/gateway/execution-guard.js";
@@ -188,11 +193,53 @@ describe("aiMessageLooksFabricatedKnowledge", () => {
   });
 });
 
+describe("extractProvidedLinkedInPost", () => {
+  it("extracts quoted text from Post this on LinkedIn", () => {
+    const text = "Post this on LinkedIn: 'AI agents save founders 10 hours a week.'";
+    expect(extractProvidedLinkedInPost(text)).toBe("AI agents save founders 10 hours a week.");
+  });
+
+  it("returns null when no quoted post body", () => {
+    expect(extractProvidedLinkedInPost("Draft a LinkedIn post about AI automation")).toBeNull();
+  });
+});
+
+describe("detectUnbackedGithubReadClaim", () => {
+  it("flags fabricated issue list without github_read", () => {
+    const input = "List open issues on pushkarverma3698/FounderOS — just titles, max 5.";
+    const reply = "Open issues:\n* feat(jarvis): production-ready HUD\n* fix(office): LinkedIn HITL";
+    expect(detectUnbackedGithubReadClaim(input, [aiMsg(reply)], reply)).toBe(true);
+  });
+
+  it("passes when github_read was called", () => {
+    const input = "List open issues on pushkarverma3698/FounderOS";
+    const msgs = [aiMsg("", [{ name: "github_read" }])];
+    expect(detectUnbackedGithubReadClaim(input, msgs, "Issue #1 feat(jarvis)")).toBe(false);
+  });
+});
+
+describe("isGithubReadOnlyRequest", () => {
+  it("detects list open issues as read-only", () => {
+    expect(isGithubReadOnlyRequest("List open issues on pushkarverma3698/FounderOS")).toBe(true);
+  });
+
+  it("excludes create issue writes", () => {
+    expect(isGithubReadOnlyRequest("Create a GitHub issue titled chore")).toBe(false);
+  });
+});
+
 describe("detectLinkedInRefusalWithoutTool", () => {
   it("flags prose refusal instead of linkedin_post", () => {
     const input = "linkedin: our game-changing innovative solution creates synergy";
     const reply =
       "I cannot post content with banned phrases like game-changing and synergy on LinkedIn.";
+    expect(detectLinkedInRefusalWithoutTool(input, [aiMsg(reply)], reply)).toBe(true);
+  });
+
+  it("flags word-count refusal instead of linkedin_post", () => {
+    const input = "Post this on LinkedIn: short post about AI agents.";
+    const reply =
+      "I cannot post this to LinkedIn yet. The post is too short. It needs to be between 150 and 300 words.";
     expect(detectLinkedInRefusalWithoutTool(input, [aiMsg(reply)], reply)).toBe(true);
   });
 

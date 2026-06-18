@@ -26,6 +26,8 @@ export type Seam =
   | "guard.blocked"
   | "guard.purged"
   | "inbox.fastpath"
+  | "github.fastpath"
+  | "shell.fastpath"
   | "hierarchy.enter"
   | "hierarchy.exit"
   | "turn.out"

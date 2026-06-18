@@ -96,11 +96,11 @@ export function createWebSession(sessionId: string): GatewaySession {
     async onStatus(text) {
       publishStreamEvent(sessionId, { type: "tool.start", data: { status: text } });
     },
-    async onReply(markdown) {
-      publishStreamEvent(sessionId, { type: "turn.complete", data: { reply: markdown } });
+    async onReply(_markdown) {
+      /* turn.complete is emitted once from sendResult — avoid duplicate SSE events */
     },
-    async onHtml(html) {
-      publishStreamEvent(sessionId, { type: "turn.complete", data: { replyHtml: html } });
+    async onHtml(_html) {
+      /* web transport uses markdown reply via sendResult */
     },
     onSystemNotice: async (html) => {
       publishStreamEvent(sessionId, { type: "tool.start", data: { notice: html } });

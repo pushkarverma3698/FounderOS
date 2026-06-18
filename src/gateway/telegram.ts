@@ -25,9 +25,9 @@ import { logger } from "../infra/logger.js";
 import {
   handleStart, handleReset, handleStatus, handleContext,
   handleTarget, handleTargets, handleUntarget,
-  handleOutbound, handleCommands, handleDepartments,
+  handleOutbound, handleProofDrop, handleCommands, handleDepartments,
   handleWorkflows, handleRun, handleQ,
-  handleSignals, handleRuns,
+  handleSignals, handleRuns, handleBudget,
   handleHalt, handleResume,
   handleMisoStart, handleMisoPlan, handleMisoStatus, handleMisoClose,
 } from "./commands.js";
@@ -80,6 +80,7 @@ export function registerHandlers(bot: Bot): void {
   bot.command("targets",     (ctx: Context) => handleTargets(ctx));
   bot.command("untarget",    (ctx: Context) => handleUntarget(ctx));
   bot.command("outbound",    (ctx: Context) => handleOutbound(ctx, runOfficeText));
+  bot.command("proofdrop",   (ctx: Context) => handleProofDrop(ctx, runOfficeText));
   bot.command("commands",    (ctx: Context) => handleCommands(ctx));
   bot.command("departments", (ctx: Context) => handleDepartments(ctx));
   // Phase 1 — Workflow / SOP engine
@@ -89,6 +90,7 @@ export function registerHandlers(bot: Bot): void {
   bot.command("q",           (ctx: Context) => handleQ(ctx, runOfficeText));
   bot.command("signals",     (ctx: Context) => handleSignals(ctx));
   bot.command("runs",        (ctx: Context) => handleRuns(ctx));
+  bot.command("budget",      (ctx: Context) => handleBudget(ctx));
   bot.command("miso_start",  (ctx: Context) => handleMisoStart(ctx));
   bot.command("miso_plan",   (ctx: Context) => handleMisoPlan(ctx));
   bot.command("miso_status", (ctx: Context) => handleMisoStatus(ctx));
