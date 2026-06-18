@@ -20,6 +20,10 @@ echo "========================================================================"
 
 cd "$APP_DIR"
 
+git fetch --quiet origin "$BRANCH"
+git reset --hard "origin/$BRANCH"
+git clean -fd
+
 # ── 1. Deploy latest + brain sync ────────────────────────────────────────────
 export DEPLOY_BRANCH="$BRANCH"
 chmod +x deploy/deploy.sh scripts/vps-prod-stabilize.sh 2>/dev/null || true
