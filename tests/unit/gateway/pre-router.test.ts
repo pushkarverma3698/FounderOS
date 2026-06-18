@@ -10,6 +10,7 @@ import {
   preRouteDepartment,
   buildOfficeInput,
 } from "../../../src/gateway/pre-router.js";
+import { extractShellCommand } from "../../../src/gateway/execution-guard.js";
 import { SystemMessage } from "@langchain/core/messages";
 import { GOLDEN_TASKS } from "../../../src/eval/golden-tasks.js";
 
@@ -103,6 +104,10 @@ describe("preRouteDepartment", () => {
   it("returns null for empty / whitespace input", () => {
     expect(preRouteDepartment("")).toBeNull();
     expect(preRouteDepartment("   ")).toBeNull();
+  });
+
+  it("routes context-awareness queries to admin (T06)", () => {
+    expect(preRouteDepartment("What do you know about me and my work?")).toBe("admin");
   });
 
   // ── Explicit "[Route directly to X department]" prefix (highest precedence) ──
@@ -206,6 +211,30 @@ describe("preRouteDepartment", () => {
     expect(String(msgs[0]!.content)).toMatch(/AI agents save founders/);
   });
 
+  it("extracts shell command from terminal prompt", () => {
+    expect(extractShellCommand('Run this in terminal: echo "hallucination-stress"')).toBe(
+      "echo \"hallucination-stress\"",
+    );
+  });
+
+  it("strengthens personal shell directive with exact command", () => {
+    const msgs = buildOfficeInput('Run this in terminal: echo "hallucination-stress"');
+    expect(String(msgs[0]!.content)).toMatch(/run_shell/i);
+    expect(String(msgs[0]!.content)).toMatch(/hallucination-stress/);
+  });
+
+  it("routes owner/repo issue list to engineering", () => {
+    expect(preRouteDepartment("List open issues on pushkarverma3698/FounderOS — just titles, max 5.")).toBe(
+      "engineering",
+    );
+  });
+
+  it("strengthens engineering github read directive for issue lists", () => {
+    const msgs = buildOfficeInput("List open issues on pushkarverma3698/FounderOS — just titles, max 5.");
+    expect(String(msgs[0]!.content)).toMatch(/github_read/i);
+    expect(String(msgs[0]!.content)).toMatch(/pushkarverma3698\/FounderOS/i);
+  });
+
   it("strengthens comms inbox directive for read-only inbox checks", () => {
     const msgs = buildOfficeInput("Check my unread emails.");
     expect(String(msgs[0]!.content)).toMatch(/read_emails/i);
@@ -249,7 +278,9 @@ describe("buildOfficeInput", () => {
     expect(msgs).toHaveLength(2);
     expect(msgs[0]).toBeInstanceOf(SystemMessage);
     expect(String(msgs[0]!.content)).toContain("engineering");
-    expect(String(msgs[1]!.content)).toBe("List my GitHub repositories.");
+    expect(String(msgs[1]!.content)).toBe(
+      "[Route directly to engineering department]: List my GitHub repositories.",
+    );
   });
 
   it("returns only the HumanMessage when no rule matches", () => {

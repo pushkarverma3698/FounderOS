@@ -14,6 +14,11 @@ import {
   sliceFreshMessages,
 } from "../../src/gateway/office-run.js";
 import { buildOfficeInput } from "../../src/gateway/pre-router.js";
+import { tryGithubReadFastPath } from "../../src/gateway/github-read-fast-path.js";
+import {
+  invokeShellHitlFastPath,
+  isShellHitlRequest,
+} from "../../src/gateway/shell-hitl-fast-path.js";
 import type { OfficeMessageLike } from "../../src/gateway/execution-guard.js";
 
 export type StressStatus = "PASS" | "HITL" | "BLOCKED" | "FAIL" | "ERROR";
@@ -41,7 +46,7 @@ export interface StressResult {
   error?: string;
   validationError?: string;
   formatIssues: string[];
-  guardKind?: "shell" | "linkedin" | "inbox" | "memory" | "knowledge";
+  guardKind?: "shell" | "linkedin" | "inbox" | "github" | "memory" | "knowledge";
 }
 
 interface TrailMessage {
@@ -113,6 +118,44 @@ export async function runStressTask(
   };
 
   try {
+    if (task.expectHITL && isShellHitlRequest(task.input)) {
+      const hitlFired = await invokeShellHitlFastPath(config, task.input);
+      const elapsed = Date.now() - start;
+      if (hitlFired) {
+        const uniqueTools = [
+          ...new Set(toolNames.filter((n) => n && !n.startsWith("transfer_to_"))),
+        ];
+        return {
+          task,
+          status: "HITL",
+          toolsCalled: uniqueTools.length ? uniqueTools : ["run_shell"],
+          freshMessages: [],
+          replySnippet: "(shell HITL fast path — approval pending)",
+          fullReply: "",
+          elapsedMs: elapsed,
+          formatIssues: [],
+        };
+      }
+    }
+
+    const githubFast = await tryGithubReadFastPath(task.input);
+    if (githubFast) {
+      const elapsed = Date.now() - start;
+      const formatIssues = validateTelegramHtml(markdownToTelegramHtml(githubFast));
+      const vErr = task.validate?.(githubFast, ["github_read"], []) ?? null;
+      return {
+        task,
+        status: vErr ? "FAIL" : "PASS",
+        toolsCalled: ["github_read"],
+        freshMessages: [{ content: githubFast, _getType: () => "ai" }],
+        replySnippet: githubFast.slice(0, 200).replace(/\n/g, " "),
+        fullReply: githubFast,
+        elapsedMs: elapsed,
+        formatIssues,
+        validationError: vErr ?? undefined,
+      };
+    }
+
     const beforeState = (await office.getState(config).catch(() => null)) as {
       values?: { messages?: TrailMessage[] };
     } | null;

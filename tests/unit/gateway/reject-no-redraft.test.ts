@@ -25,7 +25,15 @@ const cancelPendingApprovals = vi.fn(async () => 1);
 const getPendingInterrupt = vi.fn(async () => null);
 const resolveInterrupt = vi.fn(async () => true);
 
+const getShellHitlPendingApproval = vi.fn(async () => null);
+
 vi.mock("../../../src/infra/checkpointer.js", () => ({ clearThreadCheckpoints }));
+vi.mock("../../../src/gateway/shell-hitl-fast-path.js", () => ({
+  getShellHitlPendingApproval,
+  invokeShellHitlFastPath: vi.fn(async () => false),
+  isShellHitlRequest: vi.fn(() => false),
+  resumeShellHitlFastPath: vi.fn(),
+}));
 vi.mock("../../../src/db/queries.js", async (importActual) => ({
   ...(await importActual<typeof import("../../../src/db/queries.js")>()),
   cancelPendingApprovals,
@@ -81,6 +89,8 @@ describe("resumeOffice — rejection terminates the turn (no re-draft loop)", ()
   beforeEach(() => {
     clearThreadCheckpoints.mockClear();
     cancelPendingApprovals.mockClear();
+    getShellHitlPendingApproval.mockClear();
+    getShellHitlPendingApproval.mockResolvedValue(null);
     getOffice.mockReset();
   });
 

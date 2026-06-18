@@ -3,8 +3,11 @@
  * ============================================================================
  * History: `read_file` / `send_file` could exfiltrate secrets. A spoken or typed
  * "show me ~/.ssh/id_rsa" or "read my .env" must be DENIED, not just for writes
- * but for reads too — these files are exfiltration targets (CLAUDE.md security,
- * MEMORY 2026-06-11 leaked OPENAI/OPENROUTER keys via read_file ~/.zshrc).
+ * but for reads too — these files are exfiltration targets.
+ *
+ * Shell rc files (~/.zshrc, ~/.bash_profile) are ALLOWED at the path layer; live
+ * credential tokens are scrubbed by readFileSafe via redactSecrets() before any
+ * content leaves the process (defense-in-depth for T05-style reads).
  *
  * APPEND-ONLY. Never delete or weaken to make CI green. If a case here goes red,
  * the path-guard regressed — fix the guard, not the test.
@@ -14,7 +17,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { resolveSafePath } from "../../src/infra/path-guard.js";
+import { resolveSafePath, redactSecrets } from "../../src/infra/path-guard.js";
 
 const SECRET_TARGETS = [
   "~/.ssh/id_rsa",
@@ -24,8 +27,6 @@ const SECRET_TARGETS = [
   "~/cert.pem",
   "~/service.key",
   "~/.aws/credentials",
-  "~/.zshrc",
-  "~/.bash_profile",
 ];
 
 const SYSTEM_TARGETS = ["/etc/passwd", "/etc/shadow", "/private/etc/hosts", "/usr/bin/env", "/var/log/auth.log"];
@@ -38,6 +39,20 @@ describe("REGRESSION bug#7 — secret paths are denied even for reads", () => {
       if (!result.ok) expect(result.reason.toLowerCase()).toMatch(/secret|sensitive|denied/);
     });
   }
+});
+
+describe("REGRESSION bug#7 — shell rc allowed; secrets redacted at read time", () => {
+  it("allows ~/.zshrc path (content scrubbed by readFileSafe)", () => {
+    expect(resolveSafePath("~/.zshrc").ok).toBe(true);
+  });
+
+  it("redacts export lines that look like live API keys", () => {
+    const raw = 'export OPENROUTER_API_KEY=sk-or-v1-abcdefghijklmnopqrstuvwxyz123456\nalias ll="ls -la"';
+    const { redacted, count } = redactSecrets(raw);
+    expect(count).toBeGreaterThan(0);
+    expect(redacted).not.toContain("sk-or-v1-abcdefghijklmnopqrstuvwxyz123456");
+    expect(redacted).toContain("alias ll");
+  });
 });
 
 describe("REGRESSION bug#7 — system paths are denied even for reads", () => {

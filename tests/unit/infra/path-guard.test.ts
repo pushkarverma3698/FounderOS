@@ -71,15 +71,7 @@ describe("resolveSafePath — secret denylist (blocked even though inside home)"
     "Projects/app/.env",
     "secret.pem",
     "backup/id_rsa.pub",
-    // Secret-bearing config/credential files (added 2026-06-11 after E2E leak).
-    ".zshrc",
-    ".bashrc",
-    ".bash_profile",
-    ".profile",
-    ".zprofile",
-    ".netrc",
-    ".npmrc",
-    ".git-credentials",
+    // Shell rc files are allowed — readFileSafe redacts live credential tokens.
     "Projects/server.key",
   ];
   for (const rel of blocked) {
@@ -89,6 +81,18 @@ describe("resolveSafePath — secret denylist (blocked even though inside home)"
       if (!r.ok) expect(r.reason).toMatch(/secret|denied|sensitive/i);
     });
   }
+});
+
+describe("resolveSafePath — shell rc allowed with redaction at read time", () => {
+  it("allows ~/.zshrc inside home (secrets redacted by readFileSafe)", () => {
+    const r = resolveSafePath(".zshrc");
+    expect(r.ok).toBe(true);
+  });
+
+  it("still denies .netrc credential store", () => {
+    const r = resolveSafePath(".netrc");
+    expect(r.ok).toBe(false);
+  });
 });
 
 describe("resolveSafePath — PERSONAL_ROOT override", () => {

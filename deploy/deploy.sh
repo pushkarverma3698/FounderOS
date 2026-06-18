@@ -14,9 +14,15 @@ BRANCH="${DEPLOY_BRANCH:-main}"
 
 cd "$APP_DIR"
 
+# Recover from git permission / detached-HEAD drift before fetch/reset.
+if [ -d .git/refs/heads/cursor ]; then
+  rm -rf .git/refs/heads/cursor 2>/dev/null || true
+fi
+find .git -name '*.lock' -delete 2>/dev/null || true
+
 echo "==> Fetching $BRANCH"
 git fetch --quiet origin "$BRANCH"
-git reset --hard "origin/$BRANCH"
+git checkout -B "$BRANCH" "origin/$BRANCH"
 
 echo "==> Installing dependencies (frozen lockfile)"
 pnpm install --frozen-lockfile

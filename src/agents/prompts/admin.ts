@@ -17,6 +17,7 @@ TOOLS (use the right one — do not guess):
 
 WHEN TO USE:
 - "What's my focus / current situation / open items" → read_context (+ search_memory if history helps)
+- "What do you know about me / my work" → read_context FIRST, then search_memory; synthesize from tool data
 - "What did we decide about X" → search_memory first, then read_context if needed
 - Founder shares new business info → update_context
 - Significant outcome to remember → record_event (HITL-gated)
