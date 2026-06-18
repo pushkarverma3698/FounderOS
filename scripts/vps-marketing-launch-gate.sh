@@ -70,16 +70,7 @@ console.log('✅ RAG OK:', text.slice(0, 180).replace(/\n/g, ' '));
 # Founder context freshness (Phase D-Bis keywords)
 echo ""
 echo "==> Founder context probe"
-node --env-file=.env --import tsx/esm -e "
-import { getFounderContext } from './src/db/queries.js';
-const ctx = await getFounderContext('turicks');
-const json = JSON.stringify(ctx ?? {});
-if (!/Autonomous Studio|8K|\\$8K|dev-tool|showcase|proof\\.turicks/i.test(json)) {
-  console.error('Stale founder_context — missing Phase D-Bis keys');
-  process.exit(1);
-}
-console.log('✅ founder_context has Phase D-Bis strategy keys');
-" || fail "Founder context stale or missing"
+node --env-file=.env --import tsx/esm scripts/probe-founder-context-fresh.ts || fail "Founder context stale or missing"
 
 # ── 3. Office hardcore probes (same as local stabilization) ──────────────────
 echo ""
