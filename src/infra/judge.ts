@@ -143,3 +143,60 @@ export async function judgeOutbound(
   _cache.set(key, { verdict, at: now() });
   return verdict;
 }
+
+// ── RAG answer judge ──────────────────────────────────────────────────────────────
+
+function buildRagJudgePrompt(query: string, joined: string): string {
+  return [
+    "You are a senior information retrieval auditor. Assess whether the retrieved chunks",
+    "are relevant and sufficient to answer the user's query WITHOUT hallucination risk.",
+    "PASS if chunks directly contain information relevant to the query.",
+    "REVISE if chunks are vague, off-topic, or too thin to support an accurate answer.",
+    "",
+    `QUERY: ${query}`,
+    "",
+    "RETRIEVED CHUNKS:",
+    '"""',
+    joined,
+    '"""',
+    "",
+    'Reply with ONLY compact JSON. Either {"verdict":"pass"} or',
+    '{"verdict":"revise","critique":"<one concrete reason why chunks are insufficient>"}.',
+  ].join("\n");
+}
+
+/**
+ * Judge RAG retrieval quality. Returns `pass` if chunks are relevant and sufficient,
+ * or `revise` with a critique if they are vague, off-topic, or too thin.
+ * Advisory-only — never blocks; fail-open to `pass` on any error.
+ * Memoized by (query, joined-chunks) within a TTL.
+ */
+export async function judgeRagAnswer(
+  query: string,
+  chunks: string[],
+  opts: { model?: JudgeModel; now?: () => number } = {},
+): Promise<JudgeVerdict> {
+  const now = opts.now ?? Date.now;
+  const injected = opts.model;
+
+  if (!injected && !isJudgeEnabled()) return { verdict: "pass" };
+
+  const joined = chunks.join("\n\n---\n\n").slice(0, 2000);
+  const key = `rag:${hash(query)}:${hash(joined)}`;
+  const cached = _cache.get(key);
+  if (cached && now() - cached.at < JUDGE_CACHE_TTL_MS) return cached.verdict;
+
+  let verdict: JudgeVerdict;
+  try {
+    const model = injected ?? getJudgeModel();
+    const res = await model.invoke(buildRagJudgePrompt(query, joined));
+    const content = typeof res.content === "string" ? res.content : JSON.stringify(res.content);
+    verdict = parseJudgeVerdict(content);
+  } catch (err) {
+    log.warn({ err: (err as Error).message }, "RAG judge errored — failing open to pass");
+    verdict = { verdict: "pass" };
+  }
+
+  _cache.set(key, { verdict, at: now() });
+  return verdict;
+}

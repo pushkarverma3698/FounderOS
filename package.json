@@ -20,6 +20,7 @@
     "dev:jarvis-preview": "echo 'Local preview: pnpm dev:jarvis-local → http://localhost:3000' && pnpm dev:jarvis-local",
     "test": "vitest run",
     "eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
+    "judge:eval": "node --env-file=.env --import tsx/esm scripts/judge-eval.ts",
     "eval:webdesign": "node --env-file=.env --import tsx/esm scripts/e2e-web-design-manual.ts",
     "eval:webdesign:hitl": "node --env-file=.env --import tsx/esm scripts/e2e-web-design-hitl-resume.ts",
     "test:watch": "vitest",

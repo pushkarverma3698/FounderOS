@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   parseJudgeVerdict,
   judgeOutbound,
+  judgeRagAnswer,
   _resetJudgeCache,
   type JudgeModel,
 } from "../../../src/infra/judge.js";
@@ -93,5 +94,58 @@ describe("judgeOutbound", () => {
     await judgeOutbound("same body", "outreach", { model });
     await judgeOutbound("same body", "linkedin", { model });
     expect(calls.n).toBe(2);
+  });
+});
+
+describe("judgeRagAnswer", () => {
+  it("returns pass when chunks are relevant", async () => {
+    const v = await judgeRagAnswer(
+      "TypeScript experience",
+      ["Senior TypeScript engineer with 5 years React. Score: 0.85"],
+      { model: modelReturning('{"verdict":"pass"}') },
+    );
+    expect(v.verdict).toBe("pass");
+  });
+
+  it("returns revise when chunks are off-topic", async () => {
+    const v = await judgeRagAnswer(
+      "salary history",
+      ["JavaScript fundamentals tutorial content."],
+      {
+        model: modelReturning(
+          '{"verdict":"revise","critique":"Chunks contain tutorials, not salary data."}',
+        ),
+      },
+    );
+    expect(v.verdict).toBe("revise");
+  });
+
+  it("FAILS OPEN to pass when model throws", async () => {
+    const throwing: JudgeModel = {
+      async invoke() {
+        throw new Error("timeout");
+      },
+    };
+    const v = await judgeRagAnswer("anything", ["chunk"], { model: throwing });
+    expect(v.verdict).toBe("pass");
+  });
+
+  it("FAILS OPEN to pass when no API key and no injected model", async () => {
+    const savedKey = process.env["ANTHROPIC_API_KEY"];
+    delete process.env["ANTHROPIC_API_KEY"];
+    try {
+      const v = await judgeRagAnswer("anything", ["chunk"]);
+      expect(v.verdict).toBe("pass");
+    } finally {
+      if (savedKey !== undefined) process.env["ANTHROPIC_API_KEY"] = savedKey;
+    }
+  });
+
+  it("memoizes identical (query, chunks) within TTL", async () => {
+    const calls = { n: 0 };
+    const model = modelReturning('{"verdict":"pass"}', calls);
+    await judgeRagAnswer("same query", ["same chunk"], { model });
+    await judgeRagAnswer("same query", ["same chunk"], { model });
+    expect(calls.n).toBe(1);
   });
 });

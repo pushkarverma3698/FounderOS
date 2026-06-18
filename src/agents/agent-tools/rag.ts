@@ -15,19 +15,25 @@ import {
   searchPersonalRagTool,
   searchTuricksBrainTool,
 } from "../../tools/rag.js";
+import { ragOrchestrate } from "../../infra/rag-orchestrator.js";
 
 // ── search_personal_rag ────────────────────────────────────────────────────────
 
 export const searchPersonalRag = tool(
   async ({ query, doc_type, top_k }) => {
-    const result = await searchPersonalRagTool.execute({
-      query,
-      ...(doc_type ? { doc_type } : {}),
-      ...(top_k ? { top_k } : {}),
+    const orchestrated = await ragOrchestrate(query, async (q) => {
+      const result = await searchPersonalRagTool.execute({
+        query: q,
+        ...(doc_type ? { doc_type } : {}),
+        ...(top_k ? { top_k } : {}),
+      });
+      return result.success ? (result.data ?? "No results.") : `ERROR: ${result.error}`;
     });
-    return result.success
-      ? (result.data ?? "No results.")
-      : `ERROR: ${result.error}`;
+    let out = orchestrated.formattedText;
+    if (orchestrated.judgeVerdict?.verdict === "revise") {
+      out += `\n\n⚠️ Quality note: ${orchestrated.judgeCritique ?? "Results may be insufficient for this query."}`;
+    }
+    return out;
   },
   {
     name: searchPersonalRagTool.name,
@@ -59,14 +65,19 @@ export const searchPersonalRag = tool(
 
 export const searchTuricksBrain = tool(
   async ({ query, doc_type, top_k }) => {
-    const result = await searchTuricksBrainTool.execute({
-      query,
-      ...(doc_type ? { doc_type } : {}),
-      ...(top_k ? { top_k } : {}),
+    const orchestrated = await ragOrchestrate(query, async (q) => {
+      const result = await searchTuricksBrainTool.execute({
+        query: q,
+        ...(doc_type ? { doc_type } : {}),
+        ...(top_k ? { top_k } : {}),
+      });
+      return result.success ? (result.data ?? "No results.") : `ERROR: ${result.error}`;
     });
-    return result.success
-      ? (result.data ?? "No results.")
-      : `ERROR: ${result.error}`;
+    let out = orchestrated.formattedText;
+    if (orchestrated.judgeVerdict?.verdict === "revise") {
+      out += `\n\n⚠️ Quality note: ${orchestrated.judgeCritique ?? "Results may be insufficient for this query."}`;
+    }
+    return out;
   },
   {
     name: searchTuricksBrainTool.name,
