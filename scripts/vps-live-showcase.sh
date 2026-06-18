@@ -117,16 +117,11 @@ done
 echo "==> Hero grep:"
 grep -iE 'See Every Agent|AgentOps' "$SHOWCASE_DIR/index.html" | head -2 || true
 
-# ── 5. Telegram live (optional) ────────────────────────────────────────────
-if grep -q '^TELEGRAM_TESTER_SESSION=' .env 2>/dev/null; then
-  echo "==> Telegram MTProto verify"
-  node --env-file=.env --import tsx/esm scripts/telegram-tester.ts send \
-    "Build a cinematic landing page for AgentOps using the neon preset — routing test only" \
-    --wait 120 2>&1 | tee /tmp/tg-live.log | tail -30
-  grep -qi 'claude\|Approve\|engineering' /tmp/tg-live.log && echo "✅ Telegram HITL path surfaced" || echo "⚠️ Telegram path unclear"
-else
-  echo "⚠️  TELEGRAM_TESTER_SESSION not set — skip Telegram live path"
-fi
+  # Live HITL build (office approve path) — non-fatal, ~3-5 min
+  if [ -f scripts/live-build-hitl-verify.ts ] && command -v claude >/dev/null 2>&1; then
+    echo "==> Live HITL build verify (office approve path)"
+    node --env-file=.env --import tsx/esm scripts/live-build-hitl-verify.ts 2>&1 | tee /tmp/live-hitl-build.log | tail -25 || echo "!! live HITL build verify failed (non-fatal)"
+  fi
 
 echo ""
 echo "✅ LIVE SHOWCASE VERIFY COMPLETE"
