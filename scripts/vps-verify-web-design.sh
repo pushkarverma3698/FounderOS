@@ -46,3 +46,11 @@ else
 fi
 
 echo "==> VPS verify complete"
+
+echo "==> Cinematic build probe (real claude_code artifacts)"
+if [ -f scripts/probe-cinematic-build.ts ]; then
+  node --env-file=.env --import tsx/esm scripts/probe-cinematic-build.ts 2>&1 | tee /tmp/probe-cinematic-build.log
+  tail -40 /tmp/probe-cinematic-build.log
+else
+  echo "!! probe-cinematic-build.ts not on this branch — skip"
+fi
