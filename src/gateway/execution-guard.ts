@@ -40,6 +40,26 @@ export function isShellRunRequest(input: string): boolean {
   return SHELL_RUN_RE.test(input);
 }
 
+/** Extract shell command from "run in terminal: ..." style prompts. */
+export function extractShellCommand(input: string): string | null {
+  const terminal = input.match(/\b(?:run\s+(?:this\s+)?in\s+(?:my\s+)?(?:the\s+)?terminal|terminal)\s*:\s*(.+)$/i);
+  if (terminal?.[1]) {
+    const raw = terminal[1].trim();
+    if (
+      (raw.startsWith('"') && raw.endsWith('"')) ||
+      (raw.startsWith("'") && raw.endsWith("'"))
+    ) {
+      return raw.slice(1, -1);
+    }
+    return raw;
+  }
+
+  const quoted = input.match(/\brun_shell\b[^"']*["']([^"']+)["']/i);
+  if (quoted?.[1]?.trim()) return quoted[1].trim();
+
+  return null;
+}
+
 export function isLinkedInPostRequest(input: string): boolean {
   return LINKEDIN_BANNED_INPUT_RE.test(input);
 }
@@ -142,6 +162,79 @@ export function detectUnbackedInboxClaim(
 
 export const INBOX_RETRY_HINT =
   "⚠️ That inbox summary was not from Gmail — retrying with read_emails…";
+
+/** Read-only GitHub queries — list/show/get issues, branches, repos (not create/write). */
+/** Write/create GitHub resources — excludes read-only "list open issues". */
+export const GITHUB_WRITE_INTENT_RE =
+  /\b(create|file|new)\b[^.?!]{0,40}\b(issue|pull request|pr|repo)\b|\bgithub\b[^.?!]{0,40}\b(create)\b/i;
+
+export const GITHUB_READ_ONLY_RE =
+  /\bpushkarverma3698\/[\w.-]+\b|\b(list|show|get|what are)\b[^.?!]{0,60}\b(open )?(issues?|pull requests?|prs?|branches|commits)\b|\b(list|show)\b[^.?!]{0,40}\b(repos?|repositories)\b/i;
+
+export function isGithubReadOnlyRequest(input: string): boolean {
+  const text = input.trim();
+  if (!text || GITHUB_WRITE_INTENT_RE.test(text)) return false;
+  return GITHUB_READ_ONLY_RE.test(text);
+}
+
+/**
+ * True when user asked for GitHub read data but engineering answered from memory
+ * without calling github_read (live-verified stress u3 / daily gate).
+ */
+export function detectUnbackedGithubReadClaim(
+  userInput: string,
+  messages: OfficeMessageLike[],
+  reply: string,
+): boolean {
+  if (!isGithubReadOnlyRequest(userInput)) return false;
+  if (hadToolCall(messages, "github_read")) return false;
+  if (reply.trim().length < 40) return false;
+  return /\b(issues?|#\d+|feat\(|fix\(|pull request|open issues)\b/i.test(reply);
+}
+
+export const GITHUB_READ_RETRY_HINT =
+  "⚠️ That GitHub data was not from the API — retrying with github_read…";
+
+// ── Unbacked GitHub write claim (HITL bypass class) ──────────────────────────
+
+/** User asked to create/update something on GitHub (issue, PR, repo). */
+export const GITHUB_WRITE_REQUEST_RE =
+  /\b(create|open|file|add|make)\b[^.?!]{0,60}\b(issue|pull request|pr|repo|readme)\b|\bgithub\b[^.?!]{0,60}\b(issue|pr|pull|repo|readme)\b|\bpush (to|changes to)\b[^.?!]{0,40}\bgithub\b/i;
+
+/** Reply language that implies a GitHub write succeeded without HITL / github_write. */
+export const FAKE_GITHUB_WRITE_CLAIM_RE =
+  /\b(issue #?\d+|pull request #?\d+|pr #?\d+)\b|\b(created|opened|filed|posted|published|updated)\b[^.?!]{0,40}\b(issue|pull request|pr|repo|readme)\b|\b(issue|pull request|pr|repo)\b[^.?!]{0,30}\b(was |has been )?(created|opened|filed|updated|published)\b|\b✅\b[^.?!]{0,40}\bgithub\b/i;
+
+/** Honest deferral — waiting for approval or offering a draft, not claiming success. */
+export const GITHUB_WRITE_DEFERRAL_OK_RE =
+  /\b(draft|ready for (your )?approval|awaiting approval|will create|need(?:s)? (your )?approval|approval card|waiting for|pending approval|not (yet )?(created|posted|live))\b/i;
+
+export function isGithubWriteRequest(input: string): boolean {
+  return GITHUB_WRITE_REQUEST_RE.test(input.trim());
+}
+
+export function hadGithubWriteToolCall(messages: OfficeMessageLike[]): boolean {
+  return hadToolCall(messages, "github_write") || hadToolCall(messages, "project_workflow");
+}
+
+/**
+ * True when the user asked for a GitHub write but the office reply claims it
+ * succeeded without calling github_write / project_workflow (HITL bypass class).
+ */
+export function detectUnbackedGithubWriteClaim(
+  userInput: string,
+  messages: OfficeMessageLike[],
+  reply: string,
+): boolean {
+  if (!isGithubWriteRequest(userInput)) return false;
+  if (hadGithubWriteToolCall(messages)) return false;
+  if (!FAKE_GITHUB_WRITE_CLAIM_RE.test(reply)) return false;
+  if (GITHUB_WRITE_DEFERRAL_OK_RE.test(reply)) return false;
+  return true;
+}
+
+export const GITHUB_WRITE_RETRY_HINT =
+  "⚠️ That GitHub write was not actually performed — retrying with github_write…";
 
 // ── Unbacked memory / internal-knowledge claim (ADR-032) ─────────────────────
 // Forces memory-tool calls before answering internal-knowledge questions.

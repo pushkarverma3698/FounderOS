@@ -53,6 +53,7 @@
  */
 
 import { appendFileSync } from "node:fs";
+import { closeSync, openSync, unlinkSync, writeSync } from "node:fs";
 import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { TENANT } from "../src/core/config.js";
@@ -69,6 +70,7 @@ const BOT_TOKEN = process.env["TELEGRAM_BOT_TOKEN"] ?? "";
 const POLL_INTERVAL_MS = 2_000;
 const QUIET_CYCLES = 3; // stop collecting once the bot is quiet this many polls
 const RESULTS_FILE = "/tmp/e2e-results.jsonl";
+const E2E_LOCK_FILE = "/tmp/founderos-e2e.lock";
 /** Pause between tasks — lets async bot replies finish (realistic rapid-fire typing). */
 const INTER_TASK_DELAY_MS = parseInt(process.env["E2E_INTER_TASK_DELAY_MS"] ?? "4000", 10);
 /** Extra wait after tapping Approve — side effects (email/GitHub) need time on prod. */
@@ -77,6 +79,35 @@ const POST_APPROVE_WAIT_S = parseInt(process.env["E2E_POST_APPROVE_WAIT_S"] ?? "
 function fail(msg: string): never {
   console.error(`✗ ${msg}`);
   process.exit(1);
+}
+
+/** Prevent parallel MTProto suites — they share one user session and corrupt results. */
+function acquireE2eLock(): void {
+  try {
+    const fd = openSync(E2E_LOCK_FILE, "wx");
+    writeSync(fd, `${process.pid}\n`);
+    closeSync(fd);
+    const release = (): void => {
+      try {
+        unlinkSync(E2E_LOCK_FILE);
+      } catch {
+        /* already released */
+      }
+    };
+    process.on("exit", release);
+    process.on("SIGINT", () => {
+      release();
+      process.exit(130);
+    });
+    process.on("SIGTERM", () => {
+      release();
+      process.exit(143);
+    });
+  } catch {
+    fail(
+      `Another E2E harness holds ${E2E_LOCK_FILE}. Run one suite at a time — parallel runs cause AUTH_KEY_DUPLICATED and cross-task contamination.`,
+    );
+  }
 }
 
 if (!Number.isFinite(API_ID) || !API_HASH || !SESSION) {
@@ -566,6 +597,7 @@ function printResult(r: TaskResult): void {
 // ── Subcommands ─────────────────────────────────────────────────────────────
 
 async function cmdRun(selector: string, approve: boolean, realistic: boolean): Promise<void> {
+  acquireE2eLock();
   const tasks = tasksFor(selector, realistic);
   const peer = `@${await botUsername()}`;
   const client = await connect();
@@ -602,6 +634,7 @@ async function cmdRun(selector: string, approve: boolean, realistic: boolean): P
 
 /** Send a write task and STOP at the approval card (for crash-recovery T22). */
 async function cmdPark(selector: string): Promise<void> {
+  acquireE2eLock();
   const [task] = tasksFor(selector);
   if (!task) fail("No such task.");
   const peer = `@${await botUsername()}`;
@@ -626,6 +659,7 @@ async function cmdPark(selector: string): Promise<void> {
 
 /** Approve the most recent pending card (used after a bot restart for T22). */
 async function cmdApproveLast(): Promise<void> {
+  acquireE2eLock();
   const peer = `@${await botUsername()}`;
   const client = await connect();
   const since = new Date(Date.now() - 5 * 60_000);

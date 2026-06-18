@@ -62,6 +62,12 @@ export const envSchema = z.object({
   /** Unused — web gateway shares HEALTH_PORT. Kept for backward compat in .env files. */
   WEB_GATEWAY_PORT: z.coerce.number().int().positive().default(3002),
 
+  /** Enable Telegram long-polling in this process. Default: on in production, off in
+   * development — avoids 409 conflicts when the prod VPS bot already polls the same
+   * token while running Jarvis/E2E locally. Web gateway (/api/v1/*) stays up either way.
+   */
+  TELEGRAM_POLLING_ENABLED: z.enum(["true", "false"]).optional(),
+
   // Redis — optional; used only if a tool requires it
   REDIS_URL: z.string().url().default("redis://localhost:6379"),
 
@@ -166,6 +172,16 @@ export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", fals
  * Default OFF — live MTProto nested-HITL verification required before production.
  */
 export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", false);
+
+/**
+ * Long-poll Telegram in this process. Off in development by default so local
+ * `pnpm dev` can serve Jarvis without fighting the prod bot for getUpdates.
+ * Set TELEGRAM_POLLING_ENABLED=true explicitly to run the gateway locally.
+ */
+export const TELEGRAM_POLLING_ENABLED = boolEnv(
+  "TELEGRAM_POLLING_ENABLED",
+  env.NODE_ENV === "production",
+);
 
 /** Max recursive supervisor/sub-agent steps before LangGraph aborts a run. */
 export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 40);
