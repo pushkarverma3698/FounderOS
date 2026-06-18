@@ -1,0 +1,81 @@
+name: VPS Prod Hardcore QA
+
+# Full production stabilization gate — same class as local QA campaign.
+# Deploy + brain:sync + office probes + hallucination stress + MTProto E2E.
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Git branch to deploy and test on VPS"
+        required: true
+        default: "main"
+        type: string
+
+concurrency:
+  group: vps-prod-hardcore-qa
+  cancel-in-progress: false
+
+jobs:
+  hardcore-qa:
+    name: Prod hardcore QA on VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PROD_DOTENV: ${{ secrets.PROD_DOTENV }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - name: Run hardcore QA on production VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          command_timeout: "85m"
+          script_stop: true
+          envs: PROD_DOTENV,OPENROUTER_API_KEY,DEPLOY_BRANCH
+          script: |
+            set -euo pipefail
+            export DEPLOY_BRANCH="${{ inputs.branch }}"
+            cd /opt/founderos
+
+            if [ -d .git/refs/heads/cursor ]; then rm -rf .git/refs/heads/cursor 2>/dev/null || true; fi
+            find .git -name '*.lock' -delete 2>/dev/null || true
+
+            if [ -n "${PROD_DOTENV:-}" ]; then
+              umask 077
+              printf '%s' "$PROD_DOTENV" | base64 -d > .env.tmp
+              if grep -q '^DATABASE_URL=' .env.tmp; then
+                mv .env.tmp .env
+                chmod 600 .env
+              else
+                rm -f .env.tmp
+                echo "!! PROD_DOTENV invalid" >&2
+                exit 1
+              fi
+            fi
+            if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+              grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
+              {
+                printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-flash'
+                printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
+                printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
+              } >> .env.patched
+              mv .env.patched .env
+              chmod 600 .env
+            fi
+
+            git fetch --quiet origin "$DEPLOY_BRANCH"
+            git checkout -B "$DEPLOY_BRANCH" "origin/$DEPLOY_BRANCH"
+            git clean -fd
+            chmod +x scripts/vps-prod-hardcore-qa.sh scripts/vps-prod-hardcore-probes.ts 2>/dev/null || true
+            DEPLOY_BRANCH="$DEPLOY_BRANCH" bash scripts/vps-prod-hardcore-qa.sh
+        env:
+          DEPLOY_BRANCH: ${{ inputs.branch }}
+
+      - name: Upload QA artifacts summary
+        if: always()
+        run: |
+          echo "## Prod Hardcore QA" >> "$GITHUB_STEP_SUMMARY"
+          echo "Branch: ${{ inputs.branch }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Check VPS /tmp/founderos-prod-qa/ for full logs." >> "$GITHUB_STEP_SUMMARY"
