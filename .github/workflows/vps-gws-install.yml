@@ -1,0 +1,72 @@
+name: VPS gws install
+
+# One-shot: install gws CLI on prod VPS and verify Gmail backend.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: vps-gws-install
+  cancel-in-progress: false
+
+jobs:
+  install-gws:
+    name: Install gws on prod VPS
+    runs-on: ubuntu-latest
+    env:
+      VPS_SUDO_PASSWORD: ${{ secrets.VPS_SUDO_PASSWORD }}
+    steps:
+      - name: Install gws + verify auth over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          command_timeout: "15m"
+          script_stop: true
+          envs: VPS_SUDO_PASSWORD
+          script: |
+            set -euo pipefail
+            cd /opt/founderos
+
+            echo "==> Install gws CLI (global)"
+            if command -v gws >/dev/null 2>&1; then
+              echo "    gws already installed: $(command -v gws)"
+            else
+              if [ -n "${VPS_SUDO_PASSWORD:-}" ]; then
+                echo "$VPS_SUDO_PASSWORD" | sudo -S npm install -g @googleworkspace/cli
+              else
+                npm install -g @googleworkspace/cli --prefix "$HOME/.local" || true
+                export PATH="$HOME/.local/bin:$PATH"
+                grep -q '\.local/bin' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+              fi
+            fi
+
+            export PATH="/usr/local/bin:/usr/bin:$HOME/.local/bin:$PATH"
+            command -v gws || { echo "!! gws not on PATH after install"; exit 1; }
+            gws --version 2>&1 | head -3 || true
+
+            echo ""
+            echo "==> gws auth status"
+            if gws auth status 2>&1; then
+              echo "    gws auth OK"
+            else
+              echo "!! gws auth NOT configured — founder must run interactively on VPS:"
+              echo "    ssh founderos@<host> && gws auth login"
+              if grep -q '^COMPOSIO_API_KEY=' .env 2>/dev/null; then
+                echo "==> Enabling GMAIL_BACKEND=composio rollback (COMPOSIO_API_KEY present)"
+                grep -v '^GMAIL_BACKEND=' .env > .env.patched || true
+                grep -v '^CALENDAR_BACKEND=' .env.patched > .env.patched2 || true
+                mv .env.patched2 .env.patched
+                printf '%s\n' 'GMAIL_BACKEND=composio' 'CALENDAR_BACKEND=composio' >> .env.patched
+                mv .env.patched .env
+                chmod 600 .env
+                sudo systemctl restart founderos
+                sleep 5
+              fi
+            fi
+
+            echo ""
+            echo "==> Health after gws setup"
+            curl -sf http://127.0.0.1:3001/health | head -c 900 || exit 1
+            echo ""
