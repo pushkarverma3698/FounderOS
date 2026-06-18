@@ -12,7 +12,8 @@
  *   parent → research → search_web → NO interrupt (control case)
  *
  * Live Gemini (cheap) + MemorySaver; external sends mocked. Skips without a real
- * Google key — exactly like office-hitl.test.ts.
+ * Google key — exactly like office-hitl.test.ts. Nested 3-level routing needs
+ * google-genai (OpenRouter models loop or skip tools) — see live-model-guard.ts.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -42,12 +43,12 @@ vi.mock("../../src/db/queries.js", async (orig) => {
   return { ...actual, isSuppressed: vi.fn(async () => false) };
 });
 
-import { hasLiveIntegrationModel } from "./live-model-guard.js";
+import { hasReliableNestedIntegrationModel } from "./live-model-guard.js";
 
 const { buildNestedOffice } = await import("../../src/agents/revenue-domain.js");
 const { getPendingApproval } = await import("../../src/agents/office.js");
 
-const d = hasLiveIntegrationModel() ? describe : describe.skip;
+const d = hasReliableNestedIntegrationModel() ? describe : describe.skip;
 
 d("Nested HITL (parent → revenue → dept), live model, mocked sends", () => {
   beforeEach(() => {
