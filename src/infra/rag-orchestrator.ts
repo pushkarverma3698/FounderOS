@@ -35,7 +35,9 @@ export async function orchestrateRagQuery(input: RagOrchestratorInput): Promise<
     ...(input.top_k != null ? { top_k: input.top_k } : {}),
   });
 
-  return result.success ? (result.data ?? "No results.") : `ERROR: ${result.error}`;
+  return result.success
+    ? String(result.data ?? "No results.")
+    : `ERROR: ${result.error ?? "unknown"}`;
 }
 
 /** Alias kept for agentic-RAG WIP imports. */

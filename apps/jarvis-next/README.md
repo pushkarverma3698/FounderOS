@@ -18,6 +18,7 @@ pnpm install
 cp .env.example .env   # add GOOGLE_GENERATIVE_AI_API_KEY + DATABASE_URL
 pnpm run setup         # Postgres migrations
 pnpm dev:jarvis-local  # → http://localhost:3000
+pnpm verify:jarvis     # preflight: office compile + gateway + production build
 ```
 
 Or two terminals:

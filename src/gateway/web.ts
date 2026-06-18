@@ -81,7 +81,8 @@ export function createWebApp(): Hono {
     const sessionId = c.req.param("id");
     return streamSSE(c, async (stream) => {
       const unsub = subscribeStreamEvents(sessionId, (ev) => {
-        void stream.writeSSE({ data: JSON.stringify(ev), event: ev.type });
+        // Default SSE message event only — EventSource.onmessage ignores named `event:` types.
+        void stream.writeSSE({ data: JSON.stringify(ev) });
       });
       try {
         await stream.sleep(60 * 60 * 1000);
