@@ -199,6 +199,13 @@ describe("preRouteDepartment", () => {
     expect(String(msgs[0]!.content)).toMatch(/auto-strips/i);
   });
 
+  it("strengthens marketing linkedin directive for provided post text", () => {
+    const msgs = buildOfficeInput("Post this on LinkedIn: 'AI agents save founders 10 hours a week.'");
+    expect(String(msgs[0]!.content)).toMatch(/linkedin_post/i);
+    expect(String(msgs[0]!.content)).toMatch(/PROVIDED POST TEXT/i);
+    expect(String(msgs[0]!.content)).toMatch(/AI agents save founders/);
+  });
+
   it("strengthens comms inbox directive for read-only inbox checks", () => {
     const msgs = buildOfficeInput("Check my unread emails.");
     expect(String(msgs[0]!.content)).toMatch(/read_emails/i);

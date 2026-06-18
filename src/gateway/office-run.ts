@@ -31,6 +31,7 @@ import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt, getTodayCostUsd } from "../db/queries.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 import { buildOfficeInput } from "./pre-router.js";
+import { isProvidedLinkedInPostRequest } from "./execution-guard.js";
 import {
   aiMessageLooksFabricatedKnowledge,
   buildKnowledgeGroundingRefusal,
@@ -39,6 +40,7 @@ import {
   detectUnbackedKnowledgeClaim,
   detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
+  extractProvidedLinkedInPost,
   isInternalKnowledgeRequest,
 } from "./execution-guard.js";
 import { tryInboxReadFastPath } from "./inbox-fast-path.js";
@@ -605,8 +607,16 @@ export function buildGuardRetryMessages(
   }
   return [
     new SystemMessage(
-      "[RETRY DIRECTIVE: Never refuse LinkedIn posts for banned phrases. " +
-        "Write the post, call linkedin_post — the tool auto-strips banned phrases before the approval card.]",
+      (() => {
+        const provided = extractProvidedLinkedInPost(userText);
+        const body =
+          "[RETRY DIRECTIVE: Never refuse LinkedIn posts for banned phrases or word count. " +
+          "Call linkedin_post — banned phrases are auto-stripped; the founder decides length on the approval card.";
+        if (provided) {
+          return `${body} Use this exact text: """${provided.slice(0, 2500)}"""`;
+        }
+        return body;
+      })(),
     ),
     new HumanMessage(userText),
   ];
@@ -721,13 +731,19 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped — fail-open"),
     );
 
+    const invokeConfig = {
+      ...config,
+      configurable: {
+        ...config.configurable,
+        ...(isProvidedLinkedInPostRequest(text) ? { linkedin_user_provided: true } : {}),
+      },
+      callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
+      metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
+    };
+
     const res = (await office.invoke(
       { messages: invokeMessages },
-      {
-        ...config,
-        callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
-        metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
-      },
+      invokeConfig,
     )) as { messages?: OfficeMessage[] };
     stopTyping();
 
@@ -756,9 +772,10 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       const retryRes = (await office.invoke(
         { messages: retryMessages },
         {
-          ...config,
-          callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
-          metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
+          ...invokeConfig,
+          configurable: {
+            ...invokeConfig.configurable,
+          },
         },
       )) as { messages?: OfficeMessage[] };
       approval = await getPendingApproval(office, config);
