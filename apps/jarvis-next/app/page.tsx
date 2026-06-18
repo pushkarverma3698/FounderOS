@@ -26,22 +26,23 @@ export default function JarvisDashboard() {
     [speak, voiceOn],
   );
 
-  const { connected, lines, missions, pendingHitl, activeDept, pushLine, refreshMissions, setPendingHitl } =
+  const { connected, busy, lines, missions, pendingHitl, activeDept, pushLine, refreshMissions, setPendingHitl, markBusy } =
     useJarvisStream(onAssistantReply);
 
   const transmit = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
-      if (!trimmed) return;
+      if (!trimmed || busy) return;
       pushLine("user", trimmed);
       setInput("");
+      markBusy();
       try {
         await sendMessage(trimmed);
       } catch {
-        pushLine("system", "Transmission failed — is the gateway running on :3001?");
+        pushLine("error", "Transmission failed — is the gateway running on :3001?");
       }
     },
-    [pushLine],
+    [busy, markBusy, pushLine],
   );
 
   const handleVoice = useCallback(() => {
@@ -106,6 +107,7 @@ export default function JarvisDashboard() {
               <ChatPanel
                 lines={lines}
                 input={input}
+                busy={busy}
                 onInputChange={setInput}
                 onSend={() => void transmit(input)}
                 onVoiceStart={handleVoice}

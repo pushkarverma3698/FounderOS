@@ -1,3 +1,5 @@
+import { apiUrl } from "./gateway-url";
+
 export const SESSION_ID = "jarvis-cinematic";
 
 export const DEPARTMENTS = [
@@ -23,7 +25,7 @@ export interface MissionRow {
 }
 
 export async function sendMessage(text: string): Promise<void> {
-  const res = await fetch(`/api/v1/sessions/${SESSION_ID}/messages`, {
+  const res = await fetch(apiUrl(`/api/v1/sessions/${SESSION_ID}/messages`), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text }),
@@ -32,19 +34,19 @@ export async function sendMessage(text: string): Promise<void> {
 }
 
 export async function hitlDecision(decision: "approve" | "reject"): Promise<void> {
-  const res = await fetch(`/api/v1/sessions/${SESSION_ID}/hitl/${decision}`, { method: "POST" });
+  const res = await fetch(apiUrl(`/api/v1/sessions/${SESSION_ID}/hitl/${decision}`), { method: "POST" });
   if (!res.ok) throw new Error(`hitl failed: ${res.status}`);
 }
 
 export async function fetchMissions(): Promise<MissionRow[]> {
-  const res = await fetch("/api/v1/missions");
+  const res = await fetch(apiUrl("/api/v1/missions"));
   if (!res.ok) return [];
   const data = (await res.json()) as { missions: MissionRow[] };
   return data.missions ?? [];
 }
 
 export async function createMission(goal: string): Promise<void> {
-  const res = await fetch(`/api/v1/sessions/${SESSION_ID}/missions`, {
+  const res = await fetch(apiUrl(`/api/v1/sessions/${SESSION_ID}/missions`), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ goal }),

@@ -367,6 +367,16 @@
   font-size: 0.7rem;
 }
 
+.feed-error span {
+  color: #ff8a8a;
+}
+
+.composer input:disabled,
+.send-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .composer {
   display: flex;
   gap: 0.5rem;

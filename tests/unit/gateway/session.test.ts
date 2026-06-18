@@ -18,6 +18,20 @@ describe("GatewaySession", () => {
     expect(events).toContain("turn.complete");
   });
 
+  it("web session publishes turn.error on system notice", async () => {
+    resetStreamHubs();
+    let payload: Record<string, unknown> | undefined;
+    subscribeStreamEvents("web-2", (ev) => {
+      if (ev.type === "turn.error") payload = ev.data;
+    });
+
+    const session = createWebSession("web-2");
+    await session.onSystemNotice("❌ <b>Error</b>\n<code>model invalid</code>");
+
+    expect(payload?.message).toMatch(/Error/);
+    expect(payload?.notice).toBe(true);
+  });
+
   it("telegram session id comes from chat", () => {
     const ctx = {
       chat: { id: 999 },

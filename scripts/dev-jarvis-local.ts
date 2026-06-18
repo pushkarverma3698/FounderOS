@@ -18,7 +18,10 @@ function run(label: string, command: string, args: string[]): ChildProcess {
   const child = spawn(command, args, {
     cwd: root,
     stdio: "inherit",
-    env: process.env,
+    env: {
+      ...process.env,
+      NEXT_PUBLIC_JARVIS_GATEWAY_URL: process.env["NEXT_PUBLIC_JARVIS_GATEWAY_URL"] ?? "http://127.0.0.1:3001",
+    },
     shell: process.platform === "win32",
   });
   child.on("exit", (code, signal) => {
@@ -50,7 +53,8 @@ console.log("  ────────────────────");
 console.log("  API  → http://localhost:3001");
 console.log("  UI   → http://localhost:3000");
 console.log("");
-console.log("  Prerequisites: Postgres up, pnpm run setup, .env with GOOGLE_GENERATIVE_AI_API_KEY");
+console.log("  Prerequisites: Postgres up, pnpm run setup");
+console.log("  Recommended: AGENT_MODEL=google-genai:gemini-2.5-flash + GOOGLE_GENERATIVE_AI_API_KEY");
 console.log("  Ctrl+C stops both processes.");
 console.log("");
 

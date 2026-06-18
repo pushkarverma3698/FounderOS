@@ -29,6 +29,15 @@ pnpm dev:jarvis-next      # :3000
 
 Open **http://localhost:3000** in your browser (not the cloud VPS port forward).
 
+### Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| `400 ... is not a valid model ID` | Set `AGENT_MODEL=google-genai:gemini-2.5-flash` in `.env` (retired `preview-05-20` ids are auto-normalized on latest branch) |
+| `NEURAL LINK` shows OFFLINE | Gateway must be on `:3001`; SSE connects directly to `http://127.0.0.1:3001` (not the Next proxy) |
+| `Transmission failed` | Run `pnpm dev:jarvis-gateway` or use `pnpm dev:jarvis-local` |
+| Red errors in console for `/stream` | Pull latest — SSE proxy hang-up fix + CORS on gateway |
+
 ## Environment
 
 Optional: `JARVIS_GATEWAY_URL` (default `http://127.0.0.1:3001`) for API proxy in `next.config.ts`.

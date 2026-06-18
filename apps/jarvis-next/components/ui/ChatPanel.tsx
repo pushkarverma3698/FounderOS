@@ -7,6 +7,7 @@ import type { ChatLine } from "@/hooks/useJarvisStream";
 export function ChatPanel({
   lines,
   input,
+  busy,
   onInputChange,
   onSend,
   onVoiceStart,
@@ -14,6 +15,7 @@ export function ChatPanel({
 }: {
   lines: ChatLine[];
   input: string;
+  busy?: boolean;
   onInputChange: (v: string) => void;
   onSend: () => void;
   onVoiceStart: () => void;
@@ -69,13 +71,14 @@ export function ChatPanel({
         </button>
         <input
           value={input}
+          disabled={busy}
           onChange={(e) => onInputChange(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onSend()}
-          placeholder="Command the office…"
+          onKeyDown={(e) => e.key === "Enter" && !busy && onSend()}
+          placeholder={busy ? "Office processing…" : "Command the office…"}
           aria-label="Message"
         />
-        <button type="button" className="send-btn" onClick={onSend}>
-          TRANSMIT
+        <button type="button" className="send-btn" onClick={onSend} disabled={busy}>
+          {busy ? "…" : "TRANSMIT"}
         </button>
       </div>
     </section>

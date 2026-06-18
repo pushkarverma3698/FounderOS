@@ -324,7 +324,6 @@ async function sendResult(session: GatewaySession, res: { messages?: OfficeMessa
     if (errs.length > 0) {
       await session.onStatus(`Tool issues: ${errs.join("; ").slice(0, 500)}`);
     }
-    session.emitStream("turn.complete", { replyPreview: reply.slice(0, 200), toolErrors: errs.length });
   }
 }
 
@@ -752,7 +751,10 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
     }
   } catch (err) {
     stopTyping();
-    trace.event("turn.error", { kind: err instanceof Error ? err.name : "unknown" });
+    trace.event("turn.error", {
+      kind: err instanceof Error ? err.name : "unknown",
+      message: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
+    });
     if (err instanceof BudgetExceededError) {
       log.warn({ chatId, reason: err.reason }, "Run stopped: budget exceeded");
       await clearThreadAfterAbort(chatId);
