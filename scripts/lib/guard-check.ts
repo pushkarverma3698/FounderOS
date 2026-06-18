@@ -4,6 +4,8 @@
  */
 import {
   detectLinkedInRefusalWithoutTool,
+  detectUnbackedGithubReadClaim,
+  detectUnbackedGithubWriteClaim,
   detectUnbackedInboxClaim,
   detectUnbackedKnowledgeClaim,
   detectUnbackedMemoryClaim,
@@ -11,7 +13,7 @@ import {
   type OfficeMessageLike,
 } from "../../src/gateway/execution-guard.js";
 
-export type GuardKind = "shell" | "linkedin" | "inbox" | "memory" | "knowledge";
+export type GuardKind = "shell" | "linkedin" | "inbox" | "github" | "memory" | "knowledge";
 
 export function detectGuardViolation(
   userInput: string,
@@ -21,6 +23,8 @@ export function detectGuardViolation(
   if (detectUnbackedShellClaim(userInput, messages, reply)) return "shell";
   if (detectLinkedInRefusalWithoutTool(userInput, messages, reply)) return "linkedin";
   if (detectUnbackedInboxClaim(userInput, messages, reply)) return "inbox";
+  if (detectUnbackedGithubWriteClaim(userInput, messages, reply)) return "github";
+  if (detectUnbackedGithubReadClaim(userInput, messages, reply)) return "github";
   if (detectUnbackedMemoryClaim(userInput, messages, reply)) return "memory";
   if (detectUnbackedKnowledgeClaim(userInput, messages, reply)) return "knowledge";
   return null;

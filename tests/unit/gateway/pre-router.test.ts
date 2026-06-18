@@ -106,6 +106,10 @@ describe("preRouteDepartment", () => {
     expect(preRouteDepartment("   ")).toBeNull();
   });
 
+  it("routes context-awareness queries to admin (T06)", () => {
+    expect(preRouteDepartment("What do you know about me and my work?")).toBe("admin");
+  });
+
   // ── Explicit "[Route directly to X department]" prefix (highest precedence) ──
   it("honours an explicit research routing prefix", () => {
     expect(preRouteDepartment("[Route directly to research department]: What does Anthropic do?")).toBe("research");

@@ -37,11 +37,13 @@ import {
   buildKnowledgeGroundingRefusal,
   detectLinkedInRefusalWithoutTool,
   detectUnbackedGithubReadClaim,
+  detectUnbackedGithubWriteClaim,
   detectUnbackedInboxClaim,
   detectUnbackedKnowledgeClaim,
   detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
   extractProvidedLinkedInPost,
+  isGithubWriteRequest,
   isInternalKnowledgeRequest,
 } from "./execution-guard.js";
 import { tryInboxReadFastPath } from "./inbox-fast-path.js";
@@ -563,6 +565,7 @@ export function needsExecutionGuardRetry(
   if (detectUnbackedShellClaim(userText, messages, reply)) return "shell";
   if (detectLinkedInRefusalWithoutTool(userText, messages, reply)) return "linkedin";
   if (detectUnbackedInboxClaim(userText, messages, reply)) return "inbox";
+  if (detectUnbackedGithubWriteClaim(userText, messages, reply)) return "github";
   if (detectUnbackedGithubReadClaim(userText, messages, reply)) return "github";
   if (detectUnbackedMemoryClaim(userText, messages, reply)) return "memory";
   if (detectUnbackedKnowledgeClaim(userText, messages, reply)) return "knowledge";
@@ -605,6 +608,16 @@ export function buildGuardRetryMessages(
     ];
   }
   if (kind === "github") {
+    if (isGithubWriteRequest(userText)) {
+      return [
+        new SystemMessage(
+          "[RETRY DIRECTIVE: Your previous reply falsely claimed a GitHub issue/PR/repo was created. " +
+            "Call github_write NOW with the exact owner, repo, title, and body. " +
+            "Do NOT claim success until github_write returns ✅ after founder approval.]",
+        ),
+        new HumanMessage(userText),
+      ];
+    }
     const ownerRepo = userText.match(/\b([\w-]+\/[\w.-]+)\b/);
     return [
       new SystemMessage(

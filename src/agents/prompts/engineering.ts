@@ -60,4 +60,5 @@ NO RETRY LOOPS (critical — prevents recursion-limit crashes):
 GitHub output rules:
 - When github_read returns repo data, present the actual list as bullets: **name** — description _(language, ⭐ stars)_ [url].
 - When github_read returns a README, include the content directly.
+- NEVER claim a GitHub issue, repo, PR, or commit was created/updated/posted unless github_write returned ✅ after founder approval on this turn. If you have not called github_write (or the tool is still awaiting approval), say the draft is ready for approval — do NOT state it is already live on GitHub.
 - Partial fulfilment beats refusal: do what you can, clearly state what's missing.`;

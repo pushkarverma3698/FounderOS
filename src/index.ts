@@ -15,7 +15,7 @@
 import { initTelemetry } from "./infra/telemetry.js";
 import { logBootReport } from "./infra/boot-report.js";
 import { assertBootConfigOrThrow } from "./infra/boot-validate.js";
-import { env } from "./core/config.js";
+import { env, TELEGRAM_POLLING_ENABLED } from "./core/config.js";
 import { closeDatabaseConnections } from "./db/client.js";
 import { getOffice } from "./agents/office.js";
 import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
@@ -80,7 +80,12 @@ async function main(): Promise<void> {
   log.info("Web gateway ready — JARVIS API at /api/v1/* (same port as /health)");
 
   // 4. Telegram bot (long polling — runs in background).
-  await startBot();
+  // Skipped when TELEGRAM_POLLING_ENABLED=false (local Jarvis dev while prod bot polls).
+  if (TELEGRAM_POLLING_ENABLED) {
+    await startBot();
+  } else {
+    log.info("Telegram polling disabled (TELEGRAM_POLLING_ENABLED=false) — web gateway only");
+  }
 
   // 4b. Crash recovery — expire DB rows, clear ancient checkpoints, re-post recent HITL.
   await expireStaleInterrupts().catch((err) => {
@@ -104,10 +109,12 @@ async function main(): Promise<void> {
   // 5. Proactive scheduler (Monday brief + stale approval reminders).
   startScheduler();
 
-  // 6. Startup notification — let the founder know the bot is alive.
-  await sendToChat(buildRestartMessage(), "HTML").catch((err) =>
-    log.warn({ err: (err as Error).message }, "Startup notification failed — bot token may not be ready yet"),
-  );
+  // 6. Startup notification — let the founder know the bot is alive (polling mode only).
+  if (TELEGRAM_POLLING_ENABLED) {
+    await sendToChat(buildRestartMessage(), "HTML").catch((err) =>
+      log.warn({ err: (err as Error).message }, "Startup notification failed — bot token may not be ready yet"),
+    );
+  }
 
   log.info("FounderOS running 🚀");
 }

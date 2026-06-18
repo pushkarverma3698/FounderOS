@@ -53,10 +53,7 @@ const SYSTEM_ROOTS = ["/etc", "/System", "/Library", "/private", "/usr", "/bin",
  */
 const SECRET_BASENAMES = new Set(
   [
-    // shell rc / profile files (commonly hold `export SECRET=...`)
-    ".zshrc", ".zprofile", ".zshenv", ".zlogin",
-    ".bashrc", ".bash_profile", ".bash_login", ".profile", ".kshrc",
-    // credential / token stores
+    // credential / token stores (shell rc files are allowed — readFileSafe redacts secrets)
     ".netrc", ".npmrc", ".pypirc", ".git-credentials", ".dockercfg",
     "credentials", "secrets.json", "secrets.yaml", "secrets.yml",
   ].map((s) => s.toLowerCase()),

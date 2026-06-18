@@ -69,7 +69,7 @@ const COMMS_RE =
 
 /** Business state + episodic memory (ADR-028 admin worker). */
 const ADMIN_RE =
-  /\b(what('s| is| are) my (current )?(focus|priorities|situation))\b|\bwhat did we (discuss|decide|agree|talk about)\b|\b(log this|record (this|that|the)|remember this)\b|\bpending signals?\b/i;
+  /\b(what('s| is| are) my (current )?(focus|priorities|situation|work|background))\b|\bwhat do you know about (me|my)\b|\b(tell me|remind me) (what you know|about (me|my work|turicks))\b|\bwhat did we (discuss|decide|agree|talk about)\b|\b(log this|record (this|that|the)|remember this)\b|\bpending signals?\b/i;
 
 const RESEARCH_RE =
   /\bresearch\b|\bnews\b|\bwhat (does|is|are|'s)\b|\bscore\b|\bICP\b|\bqualify\b|\bprospect\b|\bgood fit\b|\bopen items\b|\baccomplished\b|\bsearch for\b|\bsummari[sz]e\b|\bmarket\b|\blatest\b/i;
@@ -178,6 +178,11 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
     directive +=
       ` CRITICAL — Use read_context + search_memory + search_knowledge via admin tools. ` +
       `If stores are empty, say so — never invent Turicks ICP/strategy from prior chat.`;
+  }
+  if (dept === "admin" && /\bwhat do you know about (me|my)\b|\b(tell me|remind me).*(me|my work)\b/i.test(text)) {
+    directive +=
+      ` CRITICAL — CONTEXT QUERY: Call read_context FIRST, then search_memory for recent decisions/work. ` +
+      `Synthesize from tool output only — never say you lack personal info if read_context returned data.`;
   }
   if (dept === "engineering" && isGithubReadOnlyRequest(text)) {
     const ownerRepo = text.match(/\b([\w-]+\/[\w.-]+)\b/);
