@@ -65,7 +65,7 @@ import {
 import { recordConversationEnd } from "../infra/conversation-recorder.js";
 import { startTurn, activePromptHash, type TurnTrace } from "../infra/trace.js";
 import { readHalt, formatHaltNotice } from "../infra/halt.js";
-import { TraceCallback } from "../infra/trace-callback.js";
+import { TraceCallback, ToolNameCollector } from "../infra/trace-callback.js";
 import { buildRunMetadata } from "../infra/telemetry.js";
 import { SUPERVISOR_PROMPT } from "../agents/system-prompts.js";
 import { isStructuredToolFailure } from "../agents/tool-result.js";
@@ -561,14 +561,15 @@ export function needsExecutionGuardRetry(
   userText: string,
   messages: OfficeMessage[],
   reply: string,
+  toolsCalled?: readonly string[],
 ): "shell" | "linkedin" | "inbox" | "github" | "memory" | "knowledge" | null {
   if (detectUnbackedShellClaim(userText, messages, reply)) return "shell";
   if (detectLinkedInRefusalWithoutTool(userText, messages, reply)) return "linkedin";
   if (detectUnbackedInboxClaim(userText, messages, reply)) return "inbox";
   if (detectUnbackedGithubWriteClaim(userText, messages, reply)) return "github";
   if (detectUnbackedGithubReadClaim(userText, messages, reply)) return "github";
-  if (detectUnbackedMemoryClaim(userText, messages, reply)) return "memory";
-  if (detectUnbackedKnowledgeClaim(userText, messages, reply)) return "knowledge";
+  if (detectUnbackedMemoryClaim(userText, messages, reply, toolsCalled)) return "memory";
+  if (detectUnbackedKnowledgeClaim(userText, messages, reply, toolsCalled)) return "knowledge";
   return null;
 }
 
@@ -795,13 +796,14 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped — fail-open"),
     );
 
+    const toolCollector = new ToolNameCollector();
     const invokeConfig = {
       ...config,
       configurable: {
         ...config.configurable,
         ...(isProvidedLinkedInPostRequest(text) ? { linkedin_user_provided: true } : {}),
       },
-      callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
+      callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace), toolCollector],
       metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
     };
 
@@ -822,8 +824,14 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
 
     let freshMessages = sliceFreshMessages(res.messages ?? [], baseLen);
     let freshRes = { messages: freshMessages.length > 0 ? freshMessages : res.messages };
+    let toolsCalled = [...new Set(toolCollector.tools)];
 
-    const guardKind = needsExecutionGuardRetry(text, freshRes.messages ?? [], finalReply(freshRes));
+    const guardKind = needsExecutionGuardRetry(
+      text,
+      freshRes.messages ?? [],
+      finalReply(freshRes),
+      toolsCalled,
+    );
     if (guardKind) {
       trace.event("guard.retry", { kind: guardKind });
       log.warn({ chatId, kind: guardKind }, "Execution guard retry — model skipped gated tool");
@@ -842,6 +850,7 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
           },
         },
       )) as { messages?: OfficeMessage[] };
+      toolsCalled = [...new Set([...toolsCalled, ...toolCollector.tools])];
       approval = await getPendingApproval(office, config);
       if (approval) {
         trace.event("hitl.interrupt", { title: approval.title, guardRetry: guardKind });
@@ -853,7 +862,12 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
     }
 
     let replyText = finalReply(freshRes);
-    const stillUngrounded = needsExecutionGuardRetry(text, freshRes.messages ?? [], replyText);
+    const stillUngrounded = needsExecutionGuardRetry(
+      text,
+      freshRes.messages ?? [],
+      replyText,
+      toolsCalled,
+    );
     if (stillUngrounded === "knowledge" || stillUngrounded === "memory") {
       trace.event("guard.blocked", { kind: stillUngrounded });
       log.warn({ chatId, kind: stillUngrounded }, "Guard blocked ungrounded reply — sending safe refusal");
