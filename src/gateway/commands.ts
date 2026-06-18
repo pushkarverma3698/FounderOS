@@ -19,9 +19,15 @@ import {
   clearOutboundTargets,
 } from "../outbound/targets.js";
 import { buildBatchPrompt, splitBatch, parseCompanyArgs } from "../outbound/batch.js";
+import {
+  getProofDropStats,
+  recordProofDrop,
+  formatProofDropStats,
+  normalizeProofDropCompany,
+} from "../outbound/proof-drop.js";
 import { getSystemStatus, formatRichStatus } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
-import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals, countPendingDeptSignals, listPendingDeptSignals, getRecentLlmCosts, getTodayCostUsd } from "../db/queries.js";
+import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals, countPendingDeptSignals, listPendingDeptSignals, getRecentLlmCosts, getTodayCostUsd, getCostBreakdown } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
@@ -38,7 +44,13 @@ import {
 import { formatMisoDashboard, formatMisoPlan, formatMisoClose, missionToView } from "./mission-control.js";
 import { postMissionDashboard } from "./mission-sync.js";
 import { buildMisoStatus, closeActiveMission } from "./web.js";
-import { TENANT as CONFIG_TENANT } from "../core/config.js";
+import { TENANT as CONFIG_TENANT, DAILY_BUDGET_USD } from "../core/config.js";
+import {
+  assessDailyBudget,
+  formatBudgetDashboard,
+  formatBudgetStatusLine,
+  getRunBudgetCaps,
+} from "../infra/daily-budget.js";
 
 /** Escape special HTML characters for Telegram HTML parse mode. */
 function safeHtml(text: string): string {
@@ -163,13 +175,14 @@ export async function handleStatus(ctx: Context): Promise<void> {
     todayStart.setHours(0, 0, 0, 0);
 
     // Fetch all data in parallel; each query has its own fallback
-    const [systemData, founderCtx, activity, lastEvent, outboundTargets, pendingSignals] = await Promise.all([
+    const [systemData, founderCtx, activity, lastEvent, outboundTargets, pendingSignals, todayUsd] = await Promise.all([
       getSystemStatus(),
       getFounderContext(TENANT).catch(() => ({} as Record<string, unknown>)),
       getActivitySummary(TENANT, todayStart).catch(() => ({} as Record<string, number>)),
       getLastEpisodicEvent(TENANT).catch(() => null),
       getOutboundTargets(TENANT).catch(() => [] as string[]),
       countPendingDeptSignals(TENANT).catch(() => 0),
+      getTodayCostUsd(TENANT).catch(() => 0),
     ]);
 
     const activeClients = Array.isArray(founderCtx["active_clients"])
@@ -200,6 +213,7 @@ export async function handleStatus(ctx: Context): Promise<void> {
       outboundTargetCount: outboundTargets.length,
       pendingSignals,
       providerStatusLine: formatProviderStatusLine(getLastProviderProbe()),
+      budgetStatusLine: formatBudgetStatusLine(assessDailyBudget(todayUsd, DAILY_BUDGET_USD)),
     });
 
     await ctx.reply(message, { parse_mode: "HTML" });
@@ -319,6 +333,66 @@ export async function handleOutbound(
   await runOfficeText(ctx, buildBatchPrompt(batch));
 }
 
+// ── /proofdrop — Phase D-Bis Proof Drop workflow shortcut ─────────────────────
+
+export async function handleProofDrop(
+  ctx: Context,
+  runOfficeText: (ctx: Context, text: string) => Promise<void>,
+): Promise<void> {
+  const arg = (ctx.match ?? "").toString().trim();
+
+  if (!arg) {
+    const stats = await getProofDropStats(TENANT);
+    await ctx.reply(
+      `🎁 <b>Proof Drop Pipeline</b> (Phase D-Bis GTM)\n\n` +
+        `${formatProofDropStats(stats)}\n\n` +
+        `<b>Usage:</b> <code>/proofdrop CompanyName</code>\n` +
+        `Example: <code>/proofdrop Linear</code>\n\n` +
+        `Flow: ICP gate → research → artifact concept → outreach draft (HITL ✋)\n` +
+        `Target: ${stats.target}/week high-craft drops.`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const company = normalizeProofDropCompany(arg);
+  if (!company) {
+    await ctx.reply("❌ Invalid company name. Example: <code>/proofdrop Linear</code>", {
+      parse_mode: "HTML",
+    });
+    return;
+  }
+
+  const wf = getWorkflow("proof_drop");
+  if (!wf) {
+    await ctx.reply("❌ Proof Drop workflow not registered.", { parse_mode: "HTML" });
+    return;
+  }
+
+  const result = await runWorkflow(wf, { company }, {
+    async sendStatus(msg) {
+      await ctx.reply(msg, { parse_mode: "HTML" });
+    },
+    async runStep(task) {
+      try {
+        await runOfficeText(ctx, task);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
+
+  if (result.completed) {
+    const stats = await recordProofDrop(TENANT, company);
+    await ctx.reply(
+      `🎁 Proof Drop logged for <b>${safeHtml(company)}</b>.\n${formatProofDropStats(stats)}`,
+      { parse_mode: "HTML" },
+    );
+    log.info({ company, stepsRun: result.stepsRun }, "Proof Drop workflow completed");
+  }
+}
+
 // ── /commands ─────────────────────────────────────────────────────────────────
 
 export async function handleCommands(ctx: Context): Promise<void> {
@@ -346,12 +420,14 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<code>/targets clear</code> — empty the list\n` +
     `<code>/untarget &lt;company&gt;</code> — remove a specific prospect\n` +
     `<code>/outbound</code> — ICP-score the whole list (no approval needed)\n` +
-    `<code>/outbound &lt;company&gt;</code> — score a single company ad-hoc\n\n` +
+    `<code>/outbound &lt;company&gt;</code> — score a single company ad-hoc\n` +
+    `<code>/proofdrop &lt;company&gt;</code> — 🎁 Proof Drop: research → artifact → outreach (HITL ✋)\n\n` +
 
     `<b>🏭 Workflows — run a company SOP in one command</b>\n` +
     `<code>/workflows</code> — list all available procedures\n` +
     `<code>/run onboarding company=Acme</code> — score → research → welcome email → GitHub repo\n` +
     `<code>/run outbound company=Stripe</code> — score → find hook → cold email\n` +
+    `<code>/run proof_drop company=Linear</code> — 🎁 research → artifact concept → Proof Drop email\n` +
     `<code>/run weekly_digest</code> — review memory + open items + Monday plan\n\n` +
 
     `<b>⚡ Power-user direct routing</b>\n` +
@@ -359,6 +435,7 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `  Example: <code>/q research what does Anthropic do?</code>\n` +
     `  Departments: research · comms · engineering · marketing · sales · personal · jobhunt\n` +
     `<code>/signals</code> — list pending cross-department signals (read-only)\n` +
+    `<code>/budget</code> — daily spend vs cap + 7-day breakdown\n` +
     `<code>/runs [n]</code> — last n LLM calls + today's spend (default 10, max 25)\n\n` +
 
     `<b>🤖 MISO Mission Control</b>\n` +
@@ -554,6 +631,23 @@ export async function handleSignals(ctx: Context): Promise<void> {
   } catch (err) {
     log.error({ err: (err as Error).message }, "/signals failed");
     await ctx.reply(`❌ Could not load signals: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
+  }
+}
+
+// ── /budget — daily + per-run spend dashboard ───────────────────────────────
+
+export async function handleBudget(ctx: Context): Promise<void> {
+  try {
+    const [todayUsd, breakdown] = await Promise.all([
+      getTodayCostUsd(TENANT),
+      getCostBreakdown(TENANT, 7).catch(() => []),
+    ]);
+    const status = assessDailyBudget(todayUsd, DAILY_BUDGET_USD);
+    const message = formatBudgetDashboard(status, getRunBudgetCaps(), breakdown);
+    await ctx.reply(message, { parse_mode: "HTML" });
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "/budget failed");
+    await ctx.reply(`❌ Could not load budget: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
   }
 }
 

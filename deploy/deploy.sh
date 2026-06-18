@@ -25,6 +25,14 @@ echo "==> Type check (lint) — abort deploy if red"
 pnpm lint
 
 echo "==> Building (backend + JARVIS)"
+# Inject web gateway token into JARVIS build when configured (SSE ?token= + Bearer fetch).
+if [ -f .env ] && grep -q '^WEB_GATEWAY_TOKEN=' .env; then
+  TOKEN="$(grep '^WEB_GATEWAY_TOKEN=' .env | cut -d= -f2- | tr -d '"')"
+  if [ -n "$TOKEN" ]; then
+    export VITE_WEB_GATEWAY_TOKEN="$TOKEN"
+    echo "    VITE_WEB_GATEWAY_TOKEN set from WEB_GATEWAY_TOKEN for JARVIS build"
+  fi
+fi
 pnpm build:all
 
 echo "==> Ensuring Postgres + Ollama are up"
@@ -77,5 +85,19 @@ if curl -fsS http://127.0.0.1:3001/health >/dev/null; then
   echo "==> Deploy OK — /health is green"
 else
   echo "!! /health did NOT come up — check: journalctl -u founderos -n 50" >&2
+  exit 1
+fi
+
+if curl -fsS http://127.0.0.1:3001/api/v1/health >/dev/null; then
+  echo "==> JARVIS web gateway OK — /api/v1/health"
+else
+  echo "!! /api/v1/health failed — JARVIS API may be down" >&2
+  exit 1
+fi
+
+if curl -fsS http://127.0.0.1:3001/ | grep -qi 'html\|jarvis\|root'; then
+  echo "==> JARVIS UI OK — GET / serves SPA"
+else
+  echo "!! GET / did not return JARVIS SPA — run pnpm build:jarvis on the box" >&2
   exit 1
 fi

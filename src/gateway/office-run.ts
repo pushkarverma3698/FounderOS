@@ -22,15 +22,16 @@
 import { type Context } from "grammy";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { RemoveMessage, SystemMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
-import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS } from "../core/config.js";
+import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD } from "../core/config.js";
 import { computeHistoryTrim } from "../infra/history-window.js";
 import { logger } from "../infra/logger.js";
 import { getOffice, getPendingApproval } from "../agents/office.js";
 import type { ApprovalRequest } from "../agents/agent-tools.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
-import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt } from "../db/queries.js";
+import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt, getTodayCostUsd } from "../db/queries.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 import { buildOfficeInput } from "./pre-router.js";
+import { isProvidedLinkedInPostRequest } from "./execution-guard.js";
 import {
   aiMessageLooksFabricatedKnowledge,
   buildKnowledgeGroundingRefusal,
@@ -39,12 +40,17 @@ import {
   detectUnbackedKnowledgeClaim,
   detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
+  extractProvidedLinkedInPost,
   isInternalKnowledgeRequest,
 } from "./execution-guard.js";
 import { tryInboxReadFastPath } from "./inbox-fast-path.js";
 import { assertNonEmptyMessages } from "../infra/office-guard.js";
 import { isWedgedState, type WedgeState } from "../infra/wedge.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
+import {
+  assertDailyBudgetAllowsRun,
+  DailyBudgetExceededError,
+} from "../infra/daily-budget.js";
 import { recordConversationEnd } from "../infra/conversation-recorder.js";
 import { startTurn, activePromptHash, type TurnTrace } from "../infra/trace.js";
 import { readHalt, formatHaltNotice } from "../infra/halt.js";
@@ -53,7 +59,7 @@ import { buildRunMetadata } from "../infra/telemetry.js";
 import { SUPERVISOR_PROMPT } from "../agents/system-prompts.js";
 import { isStructuredToolFailure } from "../agents/tool-result.js";
 import { safeHtml, formatApprovalCard } from "./approval-card.js";
-import { createTelegramSession, type GatewaySession } from "./session.js";
+import { createTelegramSession, createWebSession, type GatewaySession } from "./session.js";
 import { syncMissionTrace, refreshMissionDashboard } from "./mission-sync.js";
 
 const log = logger.child({ module: "office-run" });
@@ -320,11 +326,14 @@ async function sendResult(session: GatewaySession, res: { messages?: OfficeMessa
       "Replied to Telegram",
     );
   } else {
-    await session.onReply(reply);
-    if (errs.length > 0) {
-      await session.onStatus(`Tool issues: ${errs.join("; ").slice(0, 500)}`);
-    }
-    session.emitStream("turn.complete", { replyPreview: reply.slice(0, 200), toolErrors: errs.length });
+    session.emitStream("turn.complete", {
+      reply,
+      toolErrors: errs.length > 0 ? errs : undefined,
+    });
+    log.info(
+      { sessionId: session.id, replyPreview: reply.slice(0, 80), toolErrors: errs.length },
+      "Replied via web SSE",
+    );
   }
 }
 
@@ -332,11 +341,31 @@ async function sendApprovalCard(session: GatewaySession, approval: ApprovalReque
   await session.onApproval(approval);
 }
 
+function enrichTraceData(seam: string, data?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!data) return data;
+  if (seam === "tool.call" || seam === "tool.result") {
+    return {
+      ...data,
+      toolName: data["name"] ?? data["tool"] ?? data["toolName"] ?? "tool",
+      department: data["department"] ?? data["hint"],
+    };
+  }
+  if (seam === "route.decided") {
+    return { ...data, department: data["hint"] };
+  }
+  return data;
+}
+
 function wrapTrace(session: GatewaySession, trace: TurnTrace): TurnTrace {
   return {
     ...trace,
     event(seam, data) {
       trace.event(seam, data);
+      if (seam === "turn.out" && session.transport === "web") {
+        void syncMissionTrace(session.id, trace, seam, data);
+        return;
+      }
+      const enriched = enrichTraceData(seam, data);
       session.emitStream(
         seam === "hitl.interrupt" ? "hitl.pending" :
         seam === "route.decided" ? "department.routed" :
@@ -344,7 +373,7 @@ function wrapTrace(session: GatewaySession, trace: TurnTrace): TurnTrace {
         seam === "tool.result" ? "tool.end" :
         seam === "turn.out" ? "turn.complete" :
         seam === "turn.error" ? "turn.error" : "tool.start",
-        data,
+        enriched,
       );
       void syncMissionTrace(session.id, trace, seam, data);
     },
@@ -396,6 +425,24 @@ export async function restorePendingApprovalAfterRestart(chatId: string | number
   const { getBot } = await import("./telegram.js");
   await getBot().api.sendMessage(chatId, html, { parse_mode: "HTML", reply_markup: keyboard });
   log.info({ chatId, title: pending.title }, "Re-posted pending HITL card after restart");
+  return true;
+}
+
+/** Default JARVIS web session id (thread turicks:jarvis-desktop). */
+export const JARVIS_DESKTOP_SESSION = "jarvis-desktop";
+
+/** Re-publish pending HITL to web SSE clients after process restart. */
+export async function restorePendingWebHitl(sessionId = JARVIS_DESKTOP_SESSION): Promise<boolean> {
+  if (await clearStalePendingInterruptOnBoot(sessionId)) return false;
+
+  const office = await getOffice();
+  const config = officeConfig(sessionId);
+  const pending = await getPendingApproval(office, config);
+  if (!pending) return false;
+
+  const session = createWebSession(sessionId);
+  await session.onApproval(pending);
+  log.info({ sessionId, title: pending.title }, "Re-published pending HITL via web SSE after restart");
   return true;
 }
 
@@ -560,8 +607,16 @@ export function buildGuardRetryMessages(
   }
   return [
     new SystemMessage(
-      "[RETRY DIRECTIVE: Never refuse LinkedIn posts for banned phrases. " +
-        "Write the post, call linkedin_post — the tool auto-strips banned phrases before the approval card.]",
+      (() => {
+        const provided = extractProvidedLinkedInPost(userText);
+        const body =
+          "[RETRY DIRECTIVE: Never refuse LinkedIn posts for banned phrases or word count. " +
+          "Call linkedin_post — banned phrases are auto-stripped; the founder decides length on the approval card.";
+        if (provided) {
+          return `${body} Use this exact text: """${provided.slice(0, 2500)}"""`;
+        }
+        return body;
+      })(),
     ),
     new HumanMessage(userText),
   ];
@@ -670,13 +725,25 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
 
     assertNonEmptyMessages(invokeMessages, "runOfficeSession");
 
+    await assertDailyBudgetAllowsRun(
+      () => getTodayCostUsd(TENANT),
+      DAILY_BUDGET_USD,
+      (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped — fail-open"),
+    );
+
+    const invokeConfig = {
+      ...config,
+      configurable: {
+        ...config.configurable,
+        ...(isProvidedLinkedInPostRequest(text) ? { linkedin_user_provided: true } : {}),
+      },
+      callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
+      metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
+    };
+
     const res = (await office.invoke(
       { messages: invokeMessages },
-      {
-        ...config,
-        callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
-        metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
-      },
+      invokeConfig,
     )) as { messages?: OfficeMessage[] };
     stopTyping();
 
@@ -705,9 +772,10 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       const retryRes = (await office.invoke(
         { messages: retryMessages },
         {
-          ...config,
-          callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
-          metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
+          ...invokeConfig,
+          configurable: {
+            ...invokeConfig.configurable,
+          },
         },
       )) as { messages?: OfficeMessage[] };
       approval = await getPendingApproval(office, config);
@@ -760,6 +828,15 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
         `💰 <b>Run stopped — budget limit reached</b>\n` +
           `<code>${safeHtml(err.reason)}</code>\n\n` +
           `Adjust <code>RUN_BUDGET_USD</code> or <code>RUN_BUDGET_TOKENS</code> in <code>.env</code> to raise the cap.`,
+      );
+      return;
+    }
+    if (err instanceof DailyBudgetExceededError) {
+      log.warn({ chatId, reason: err.reason }, "Run refused: daily budget exceeded");
+      await session.onSystemNotice(
+        `🛑 <b>Daily budget cap reached</b>\n` +
+          `<code>${safeHtml(err.reason)}</code>\n\n` +
+          `Check spend: <code>/budget</code> · Adjust: <code>BUDGET_DAILY_USD</code> in <code>.env</code>.`,
       );
       return;
     }
@@ -858,6 +935,13 @@ async function resumeOfficeSessionLocked(
 
     const budget = createRunBudget();
     const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
+
+    await assertDailyBudgetAllowsRun(
+      () => getTodayCostUsd(TENANT),
+      DAILY_BUDGET_USD,
+      (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped on resume — fail-open"),
+    );
+
     const res = (await office.invoke(
       new Command({ resume: decision }),
       {
@@ -894,6 +978,13 @@ async function resumeOfficeSessionLocked(
       log.warn({ chatId, reason: err.reason }, "Resume stopped: budget exceeded");
       await clearThreadAfterAbort(chatId);
       await session.onSystemNotice(`💰 <b>Run stopped — budget limit reached</b>\n<code>${safeHtml(err.reason)}</code>`);
+      return;
+    }
+    if (err instanceof DailyBudgetExceededError) {
+      log.warn({ chatId, reason: err.reason }, "Resume refused: daily budget exceeded");
+      await session.onSystemNotice(
+        `🛑 <b>Daily budget cap reached</b>\n<code>${safeHtml(err.reason)}</code>\n\nCheck: <code>/budget</code>`,
+      );
       return;
     }
     if (err instanceof GraphRecursionError) {

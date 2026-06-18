@@ -59,6 +59,7 @@ export const envSchema = z.object({
 
   /** Web gateway (JARVIS UI) — optional Bearer token; unset = open in dev. */
   WEB_GATEWAY_TOKEN: z.string().transform(v => v || undefined).optional(),
+  /** Unused — web gateway shares HEALTH_PORT. Kept for backward compat in .env files. */
   WEB_GATEWAY_PORT: z.coerce.number().int().positive().default(3002),
 
   // Redis — optional; used only if a tool requires it
@@ -128,6 +129,15 @@ export const env = parseEnv();
  * knowledge). Import this everywhere instead of re-reading the env var.
  */
 export const TENANT = env.FOUNDER_TENANT;
+
+/** Daily LLM spend cap (USD) — enforced at gateway before new runs. */
+export const DAILY_BUDGET_USD = env.BUDGET_DAILY_USD;
+
+/** Per-run LLM spend cap (USD). */
+export const RUN_BUDGET_USD = env.RUN_BUDGET_USD;
+
+/** Per-run token cap (input + output). */
+export const RUN_BUDGET_TOKENS = env.RUN_BUDGET_TOKENS;
 
 /** Parse a positive-integer env var, falling back to a default for unset/garbage. */
 function intEnv(key: string, fallback: number): number {

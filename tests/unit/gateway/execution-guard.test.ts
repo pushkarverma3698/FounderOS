@@ -9,6 +9,7 @@ import {
   detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
   detectLinkedInRefusalWithoutTool,
+  extractProvidedLinkedInPost,
   hadEmptyKnowledgeToolResult,
   hadToolCall,
   isInternalKnowledgeRequest,
@@ -188,11 +189,29 @@ describe("aiMessageLooksFabricatedKnowledge", () => {
   });
 });
 
+describe("extractProvidedLinkedInPost", () => {
+  it("extracts quoted text from Post this on LinkedIn", () => {
+    const text = "Post this on LinkedIn: 'AI agents save founders 10 hours a week.'";
+    expect(extractProvidedLinkedInPost(text)).toBe("AI agents save founders 10 hours a week.");
+  });
+
+  it("returns null when no quoted post body", () => {
+    expect(extractProvidedLinkedInPost("Draft a LinkedIn post about AI automation")).toBeNull();
+  });
+});
+
 describe("detectLinkedInRefusalWithoutTool", () => {
   it("flags prose refusal instead of linkedin_post", () => {
     const input = "linkedin: our game-changing innovative solution creates synergy";
     const reply =
       "I cannot post content with banned phrases like game-changing and synergy on LinkedIn.";
+    expect(detectLinkedInRefusalWithoutTool(input, [aiMsg(reply)], reply)).toBe(true);
+  });
+
+  it("flags word-count refusal instead of linkedin_post", () => {
+    const input = "Post this on LinkedIn: short post about AI agents.";
+    const reply =
+      "I cannot post this to LinkedIn yet. The post is too short. It needs to be between 150 and 300 words.";
     expect(detectLinkedInRefusalWithoutTool(input, [aiMsg(reply)], reply)).toBe(true);
   });
 

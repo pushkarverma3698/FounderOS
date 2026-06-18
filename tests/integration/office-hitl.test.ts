@@ -16,6 +16,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MemorySaver, Command } from "@langchain/langgraph";
 import { HumanMessage } from "@langchain/core/messages";
+import { buildOfficeInput } from "../../src/gateway/pre-router.js";
 
 // ── Mock external side-effects BEFORE importing the office ────────────────────
 
@@ -39,6 +40,14 @@ vi.mock("../../src/tools/web-search.js", () => ({
   webSearchTool: { name: "search_web", description: "mock", execute: searchExecute },
 }));
 
+const linkedinExecute = vi.fn(async () => ({
+  success: true,
+  data: { post_id: "li_test_123" },
+}));
+vi.mock("../../src/tools/linkedin.js", () => ({
+  linkedinPostTool: { name: "linkedin_post", description: "mock", execute: linkedinExecute },
+}));
+
 vi.mock("../../src/db/queries.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return { ...actual, isSuppressed: vi.fn(async () => false) };
@@ -55,6 +64,7 @@ d("Office HITL loop (live model, mocked side-effects)", () => {
   beforeEach(() => {
     emailExecute.mockClear();
     searchExecute.mockClear();
+    linkedinExecute.mockClear();
   });
 
   it("email request → interrupt fired, REJECT → email NOT sent", { timeout: 90_000 }, async () => {
@@ -110,5 +120,38 @@ d("Office HITL loop (live model, mocked side-effects)", () => {
     expect(searchExecute).toHaveBeenCalled();
     const lastMsg = res.messages[res.messages.length - 1];
     expect(String(lastMsg.content).toLowerCase()).toContain("stripe");
+  });
+
+  it("LinkedIn post → interrupt fired, REJECT → not posted", { timeout: 90_000 }, async () => {
+    const office = buildOffice(new MemorySaver());
+    const config = { configurable: { thread_id: "hitl-linkedin-reject", linkedin_user_provided: true } };
+    const postText =
+      "Post this on LinkedIn: '3 founders asked me about AI agents today. Here is what I told them: start with one painful workflow, automate it end to end, measure the hours saved, then expand. That is how you get real ROI from AI without boiling the ocean or hiring a data team. Small, focused, measured. That beats a big bang every time for a lean team that needs results this quarter, not next year.'";
+
+    await office.invoke({ messages: buildOfficeInput(postText) }, config);
+
+    const approval = await getPendingApproval(office, config);
+    expect(approval, "expected linkedin_post approval interrupt").toBeTruthy();
+    expect(approval!.action).toBe("linkedin_post");
+    expect(linkedinExecute).not.toHaveBeenCalled();
+
+    await office.invoke(new Command({ resume: "rejected" }), config);
+    expect(linkedinExecute).not.toHaveBeenCalled();
+  });
+
+  it("LinkedIn post → interrupt fired, APPROVE → posted exactly once", { timeout: 90_000 }, async () => {
+    const office = buildOffice(new MemorySaver());
+    const config = { configurable: { thread_id: "hitl-linkedin-approve", linkedin_user_provided: true } };
+    const postText =
+      "Post this on LinkedIn: '3 founders asked me about AI agents today. Here is what I told them: start with one painful workflow, automate it end to end, measure the hours saved, then expand. That is how you get real ROI from AI without boiling the ocean or hiring a data team. Small, focused, measured. That beats a big bang every time for a lean team that needs results this quarter, not next year.'";
+
+    await office.invoke({ messages: buildOfficeInput(postText) }, config);
+
+    const approval = await getPendingApproval(office, config);
+    expect(approval, "expected linkedin_post approval interrupt").toBeTruthy();
+    expect(linkedinExecute).not.toHaveBeenCalled();
+
+    await office.invoke(new Command({ resume: "approved" }), config);
+    expect(linkedinExecute).toHaveBeenCalledOnce();
   });
 });
