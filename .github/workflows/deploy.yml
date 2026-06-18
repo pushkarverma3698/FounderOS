@@ -57,6 +57,8 @@ jobs:
     env:
       PROD_DOTENV: ${{ secrets.PROD_DOTENV }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+      LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_AUTHOR_URN }}
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -69,7 +71,7 @@ jobs:
           script_stop: true
           command_timeout: "10m"
           # Forward secrets into the remote shell.
-          envs: PROD_DOTENV,OPENROUTER_API_KEY
+          envs: PROD_DOTENV,OPENROUTER_API_KEY,LINKEDIN_ACCESS_TOKEN,LINKEDIN_AUTHOR_URN
           script: |
             set -euo pipefail
             cd /opt/founderos
@@ -78,45 +80,8 @@ jobs:
               rm -rf .git/refs/heads/cursor 2>/dev/null || true
             fi
             find .git -name '*.lock' -delete 2>/dev/null || true
-            git checkout -B main origin/main 2>/dev/null || git checkout main 2>/dev/null || true
-            # Render the production .env from the secret (atomic, 0600). Only when
-            # the secret is present — never clobber a good .env with an empty one.
-            if [ -n "${PROD_DOTENV:-}" ]; then
-              umask 077
-              printf '%s' "$PROD_DOTENV" | base64 -d > .env.tmp
-              # Sanity: a valid .env must contain DATABASE_URL, else abort (keep old).
-              if grep -q '^DATABASE_URL=' .env.tmp; then
-                mv .env.tmp .env
-                chmod 600 .env
-                echo "==> Rendered /opt/founderos/.env from PROD_DOTENV secret"
-              else
-                rm -f .env.tmp
-                echo "!! PROD_DOTENV decoded but has no DATABASE_URL — keeping existing .env" >&2
-                exit 1
-              fi
-            else
-              echo "==> PROD_DOTENV not set; using the .env already on the box"
-            fi
-            # Pin the production model on deploy without re-encoding the full
-            # PROD_DOTENV blob. Gemini 2.5 Flash is the documented production model
-            # (CLAUDE.md) and a strong agentic tool-caller.
-            #
-            # ROOT-CAUSE FIX (2026-06-17): the previous override forced
-            # openrouter:openai/gpt-4o-mini as a Gemini-credits-depleted stop-gap.
-            # gpt-4o-mini is too weak for this supervisor+ReAct topology — it chatted
-            # instead of routing and skipped DB/memory tool calls, so the bot answered
-            # from parametric memory and hallucinated. Gemini is funded again, so we
-            # revert to it. Fallback dropped the deprecated google-genai:gemini-2.0-flash
-            # (404 since ~May 2026) — now a single, healthy, different-family fallback.
-            if [ -n "${OPENROUTER_API_KEY:-}" ]; then
-              grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
-              {
-                printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-flash'
-                printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
-                printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
-              } >> .env.patched
-              mv .env.patched .env
-              chmod 600 .env
-              echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-flash"
-            fi
+            git fetch --quiet origin main
+            git checkout --force --detach origin/main 2>/dev/null || git checkout -B main origin/main
+            chmod +x scripts/apply-prod-env-overrides.sh deploy/deploy.sh 2>/dev/null || true
+            bash scripts/apply-prod-env-overrides.sh
             ./deploy/deploy.sh

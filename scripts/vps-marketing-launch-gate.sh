@@ -87,7 +87,11 @@ echo ""
 echo "==> Outbound integration checks"
 
 if grep -q '^LINKEDIN_ACCESS_TOKEN=.\+' .env 2>/dev/null && grep -q '^LINKEDIN_AUTHOR_URN=.\+' .env 2>/dev/null; then
-  echo "✅ LinkedIn direct API credentials present"
+  if node --env-file=.env --import tsx/esm scripts/probe-linkedin-token-live.ts; then
+    echo "✅ LinkedIn direct API credentials present and token validates"
+  else
+    fail "LinkedIn token configured but API validation failed — refresh OAuth token"
+  fi
 else
   warn "LINKEDIN_ACCESS_TOKEN or LINKEDIN_AUTHOR_URN missing — linkedin_post will fail at send"
 fi
