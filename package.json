@@ -16,6 +16,7 @@
     "build:all": "pnpm build && pnpm build:jarvis && pnpm build:jarvis-next",
     "dev:jarvis-next": "pnpm --filter founderos-jarvis-next dev",
     "dev:jarvis-gateway": "node --env-file=.env --import tsx/esm scripts/dev-jarvis-gateway.ts",
+    "dev:jarvis-preview": "echo '→ Gateway: pnpm dev:jarvis-gateway (port 3001)' && echo '→ UI:      pnpm dev:jarvis-next (port 3100) → http://localhost:3100' && pnpm dev:jarvis-gateway",
     "test": "vitest run",
     "eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
     "eval:webdesign": "node --env-file=.env --import tsx/esm scripts/e2e-web-design-manual.ts",

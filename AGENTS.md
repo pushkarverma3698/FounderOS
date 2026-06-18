@@ -92,6 +92,11 @@ this only records the gotchas.
 | LinkedIn post | `direct` | `LINKEDIN_BACKEND=composio` | `LINKEDIN_ACCESS_TOKEN` + `LINKEDIN_AUTHOR_URN` |
 | GitHub | Octokit | — | `GITHUB_TOKEN` |
 
+### JARVIS cinematic UI (`apps/jarvis-next`)
+- **UI:** `pnpm dev:jarvis-next` → **http://localhost:3100** (not 3000 — often another project)
+- **API:** `pnpm dev:jarvis-gateway` → gateway on **:3001** (skips Telegram poll; avoids 409 with prod bot)
+- If you see a random client website, you are on the wrong port — use **3100**.
+
 ### Running / testing
 - Tests are keyless: `pnpm test` (vitest, ~1100 tests). Lint: `pnpm lint` (tsc --noEmit).
   Build: `pnpm build:all` (backend `tsc` + `apps/jarvis` Vite). Dev run: `pnpm dev`.

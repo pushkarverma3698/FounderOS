@@ -11,10 +11,10 @@ Film-grade HUD for FounderOS. Connects to the same `/api/v1/*` web gateway as th
 
 ## Run locally
 
-Terminal 1 — backend (gateway on :3001):
+Terminal 1 — backend (gateway on :3001, no Telegram poll if prod bot is live):
 
 ```bash
-pnpm dev
+pnpm dev:jarvis-gateway
 ```
 
 Terminal 2 — cinematic UI:
@@ -23,7 +23,9 @@ Terminal 2 — cinematic UI:
 pnpm dev:jarvis-next
 ```
 
-Open http://localhost:3000
+Open **http://localhost:3100**
+
+> **Do not use port 3000** — it is commonly taken by other Next.js sites (e.g. client projects). JARVIS uses **3100** on purpose.
 
 ## Environment
 
