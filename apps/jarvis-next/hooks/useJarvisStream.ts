@@ -91,6 +91,7 @@ export function useJarvisStream(onAssistantReply?: (text: string) => void) {
   const [activeDept, setActiveDept] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);
+  const busyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onAssistantReplyRef = useRef(onAssistantReply);
   onAssistantReplyRef.current = onAssistantReply;
 
@@ -111,6 +112,18 @@ export function useJarvisStream(onAssistantReply?: (text: string) => void) {
     if (!res.ok) return;
     const data = (await res.json()) as { missions: MissionRow[] };
     setMissions(data.missions ?? []);
+  }, []);
+
+  const markBusy = useCallback(() => {
+    setBusy(true);
+    if (busyTimerRef.current) clearTimeout(busyTimerRef.current);
+    busyTimerRef.current = setTimeout(() => setBusy(false), 120_000);
+  }, []);
+
+  const markIdle = useCallback(() => {
+    if (busyTimerRef.current) clearTimeout(busyTimerRef.current);
+    busyTimerRef.current = null;
+    setBusy(false);
   }, []);
 
   useEffect(() => {
@@ -151,7 +164,7 @@ export function useJarvisStream(onAssistantReply?: (text: string) => void) {
             (text) => onAssistantReplyRef.current?.(text),
           );
           if (payload.type === "turn.complete" || payload.type === "turn.error") {
-            setBusy(false);
+            markIdle();
           }
         } catch {
           pushLine("system", ev.data);
@@ -166,9 +179,7 @@ export function useJarvisStream(onAssistantReply?: (text: string) => void) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       es?.close();
     };
-  }, [pushLine, refreshMissions]);
-
-  const markBusy = useCallback(() => setBusy(true), []);
+  }, [markIdle, pushLine, refreshMissions]);
 
   return {
     connected,
@@ -183,5 +194,6 @@ export function useJarvisStream(onAssistantReply?: (text: string) => void) {
     refreshMissions,
     setPendingHitl,
     markBusy,
+    markIdle,
   };
 }

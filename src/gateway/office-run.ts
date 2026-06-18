@@ -336,15 +336,15 @@ function wrapTrace(session: GatewaySession, trace: TurnTrace): TurnTrace {
     ...trace,
     event(seam, data) {
       trace.event(seam, data);
-      session.emitStream(
+      const streamType =
         seam === "hitl.interrupt" ? "hitl.pending" :
         seam === "route.decided" ? "department.routed" :
         seam === "tool.call" ? "tool.start" :
         seam === "tool.result" ? "tool.end" :
-        seam === "turn.out" ? "turn.complete" :
-        seam === "turn.error" ? "turn.error" : "tool.start",
-        data,
-      );
+        seam === "turn.error" ? "turn.error" :
+        seam === "turn.out" ? null :
+        "tool.start";
+      if (streamType) session.emitStream(streamType, data);
       void syncMissionTrace(session.id, trace, seam, data);
     },
   };

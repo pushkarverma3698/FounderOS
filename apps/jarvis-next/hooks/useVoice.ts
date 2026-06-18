@@ -83,12 +83,14 @@ export function useVoice() {
   }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.speechSynthesis.getVoices();
-    }
+    if (typeof window === "undefined") return;
+    const warmVoices = () => window.speechSynthesis.getVoices();
+    warmVoices();
+    window.speechSynthesis.addEventListener("voiceschanged", warmVoices);
     return () => {
       recognitionRef.current?.stop();
       window.speechSynthesis?.cancel();
+      window.speechSynthesis.removeEventListener("voiceschanged", warmVoices);
     };
   }, []);
 

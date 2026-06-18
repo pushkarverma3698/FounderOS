@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { JarvisScene } from "@/components/scene/JarvisScene";
 import { CinematicIntro } from "@/components/ui/CinematicIntro";
 import { HudHeader } from "@/components/ui/HudHeader";
@@ -26,7 +26,7 @@ export default function JarvisDashboard() {
     [speak, voiceOn],
   );
 
-  const { connected, busy, lines, missions, pendingHitl, activeDept, pushLine, refreshMissions, setPendingHitl, markBusy } =
+  const { connected, busy, lines, missions, pendingHitl, activeDept, pushLine, refreshMissions, setPendingHitl, markBusy, markIdle } =
     useJarvisStream(onAssistantReply);
 
   const transmit = useCallback(
@@ -39,10 +39,11 @@ export default function JarvisDashboard() {
       try {
         await sendMessage(trimmed);
       } catch {
+        markIdle();
         pushLine("error", "Transmission failed — is the gateway running on :3001?");
       }
     },
-    [busy, markBusy, pushLine],
+    [busy, markBusy, markIdle, pushLine],
   );
 
   const handleVoice = useCallback(() => {
@@ -76,6 +77,32 @@ export default function JarvisDashboard() {
       pushLine("system", "Could not open mission.");
     }
   }, [pushLine, refreshMissions, speak, voiceOn]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    const w = window as Window & {
+      __jarvisQa?: {
+        simulateTranscript: (text: string) => void;
+        speakTest: () => void;
+        voiceInfo: () => { speechRecognition: boolean; tts: boolean; voices: number };
+      };
+    };
+    w.__jarvisQa = {
+      simulateTranscript: (text: string) => void transmit(text),
+      speakTest: () => speak("JARVIS online. Systems nominal."),
+      voiceInfo: () => ({
+        speechRecognition: !!(
+          (window as Window & { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition ||
+          (window as Window & { SpeechRecognition?: unknown }).SpeechRecognition
+        ),
+        tts: !!window.speechSynthesis,
+        voices: window.speechSynthesis?.getVoices().length ?? 0,
+      }),
+    };
+    return () => {
+      delete w.__jarvisQa;
+    };
+  }, [speak, transmit]);
 
   return (
     <main className="dashboard">

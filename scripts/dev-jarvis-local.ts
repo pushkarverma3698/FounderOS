@@ -25,8 +25,14 @@ function run(label: string, command: string, args: string[]): ChildProcess {
     shell: process.platform === "win32",
   });
   child.on("exit", (code, signal) => {
+    if (shuttingDown) return;
     if (signal) console.error(`[${label}] exited (${signal})`);
     else if (code && code !== 0) console.error(`[${label}] exited with code ${code}`);
+    // If UI fails because :3000 is taken, keep gateway alive for an existing UI session.
+    if (label === "ui" && code === 1) {
+      console.error("[ui] Start failed — gateway still on :3001 (stop other Next dev on :3000 or retry UI only)");
+      return;
+    }
     shutdown(code ?? 1);
   });
   children.push(child);

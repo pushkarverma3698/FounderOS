@@ -7,7 +7,10 @@ export function gatewayBase(): string {
 }
 
 export function apiUrl(path: string): string {
-  const base = gatewayBase().replace(/\/$/, "");
+  const base = gatewayBase().replace(/\/$/, "").replace(/\/api$/, "");
   const p = path.startsWith("/") ? path : `/${path}`;
+  if (!p.startsWith("/api/")) {
+    throw new Error(`apiUrl path must start with /api/: got ${p}`);
+  }
   return `${base}${p}`;
 }
