@@ -22,7 +22,8 @@ find .git -name '*.lock' -delete 2>/dev/null || true
 
 echo "==> Fetching $BRANCH"
 git fetch --quiet origin "$BRANCH"
-git checkout -B "$BRANCH" "origin/$BRANCH"
+# Detached checkout avoids creating refs/heads/cursor/* (permission drift on VPS).
+git checkout --force --detach "origin/$BRANCH"
 
 echo "==> Installing dependencies (frozen lockfile)"
 pnpm install --frozen-lockfile

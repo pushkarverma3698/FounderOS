@@ -338,4 +338,26 @@ describe("detectUnbackedMemoryClaim", () => {
     const reply = "Top competitors include several boutique AI agencies.";
     expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(false);
   });
+
+  it("passes honest turicks-brain refusal without tool messages (guard-blocked reply class)", () => {
+    const input = "What is Turicks ICP?";
+    const reply =
+      "I don't have a verified answer for that in turicks-brain. Search returned no matching entry (or failed).";
+    expect(detectUnbackedMemoryClaim(input, [], reply)).toBe(false);
+  });
+
+  it("passes when toolsCalled includes search_knowledge but supervisor messages hide dept tools", () => {
+    const input = "What is Turicks ICP? Be specific with revenue bands and geography.";
+    const reply =
+      "From docs/strategy/01-POSITIONING-AND-NICHE: Turicks ICP is funded AI/dev-tool startups (Seed–Series A), $8K+ project budget, global remote.";
+    expect(
+      detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply, ["search_knowledge", "search_turicks_brain"]),
+    ).toBe(false);
+    expect(
+      detectUnbackedKnowledgeClaim(input, [aiMsg(reply)], reply, [
+        "search_knowledge",
+        "search_turicks_brain",
+      ]),
+    ).toBe(false);
+  });
 });
