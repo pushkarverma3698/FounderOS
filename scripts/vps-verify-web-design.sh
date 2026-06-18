@@ -3,6 +3,13 @@
 # Run ON the Hetzner box (or via .github/workflows/vps-verify.yml).
 set -euo pipefail
 
+if [ "${1:-}" = "--live-only" ]; then
+  APP_DIR="${APP_DIR:-/opt/founderos}"
+  cd "$APP_DIR"
+  chmod +x scripts/vps-live-showcase.sh
+  exec bash scripts/vps-live-showcase.sh
+fi
+
 APP_DIR="${APP_DIR:-/opt/founderos}"
 BRANCH="${VERIFY_BRANCH:-feat/web-design-service-cb8b}"
 cd "$APP_DIR"
