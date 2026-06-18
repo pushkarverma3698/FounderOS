@@ -18,6 +18,7 @@
     "dev:jarvis-gateway": "node --env-file=.env --import tsx/esm scripts/dev-jarvis-gateway.ts",
     "dev:jarvis-local": "node --env-file=.env --import tsx/esm scripts/dev-jarvis-local.ts",
     "verify:jarvis": "node --env-file=.env --import tsx/esm scripts/verify-jarvis-local.ts",
+    "jarvis:doctor": "node --env-file=.env --import tsx/esm scripts/jarvis-doctor.ts",
     "dev:jarvis-preview": "echo 'Local preview: pnpm dev:jarvis-local → http://localhost:3000' && pnpm dev:jarvis-local",
     "test": "vitest run",
     "eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",

@@ -11,7 +11,17 @@ Film-grade HUD for FounderOS. Connects to the same `/api/v1/*` web gateway as th
 
 ## Run locally (your machine)
 
-One command — starts API gateway + cinematic UI on your laptop:
+**One command — fixes pull conflicts, frees ports, verifies, then starts:**
+
+```bash
+git checkout cursor/jarvis-nextjs-cinematic-ae51
+pnpm jarvis:doctor --fix
+pnpm dev:jarvis-local
+```
+
+Doctor resets a conflicting local `src/agents/agent-tools/rag.ts` (needs `rag-orchestrator.ts` from this branch).
+
+Or step by step:
 
 ```bash
 pnpm install
