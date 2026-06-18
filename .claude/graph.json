@@ -225,6 +225,13 @@
       "file": "src/tools/*.ts"
     },
     {
+      "id": "tool_deploy_static_site",
+      "type": "tool",
+      "name": "deploy_static_site",
+      "description": "deploy_static_site tool [HITL]",
+      "file": "src/tools/*.ts"
+    },
+    {
       "id": "tool_linkedin_post",
       "type": "tool",
       "name": "linkedin_post",
@@ -494,6 +501,16 @@
       "type": "belongs_to"
     },
     {
+      "from": "tool_deploy_static_site",
+      "to": "dept_engineering",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_publish_signal",
+      "to": "dept_engineering",
+      "type": "belongs_to"
+    },
+    {
       "from": "tool_search_web",
       "to": "dept_marketing",
       "type": "belongs_to"
@@ -510,6 +527,11 @@
     },
     {
       "from": "tool_search_turicks_brain",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_publish_signal",
       "to": "dept_marketing",
       "type": "belongs_to"
     },
@@ -736,7 +758,7 @@
   ],
   "metadata": {
     "projectName": "FounderOS",
-    "generatedAt": "2026-06-16T23:55:21.936Z",
+    "generatedAt": "2026-06-18T13:19:17.251Z",
     "departments": {
       "admin": [
         "admin_agent"
@@ -780,6 +802,7 @@
       "github_write": "Write to GitHub (PR, commit, push) — HITL-gated [HITL]",
       "project_workflow": "Run git/npm workflows in ~/Projects — HITL-gated [HITL]",
       "claude_code": "Full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — HITL-gated [HITL]",
+      "deploy_static_site": "deploy_static_site tool [HITL]",
       "linkedin_post": "Post to LinkedIn via Composio — brand-validator + Claude judge then HITL-gated [HITL]",
       "read_file": "Read files from the founder's laptop (path-guarded, secrets blocked)",
       "list_dir": "List a single directory level on the founder's laptop (path-guarded)",

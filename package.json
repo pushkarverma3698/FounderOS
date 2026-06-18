@@ -60,6 +60,8 @@
     "test:eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
     "test:smoke": "ALLOW_NETWORK=1 node --import tsx/esm scripts/smoke.ts",
     "test:smoke:miso": "ALLOW_NETWORK=1 node --env-file=.env --import tsx/esm scripts/smoke-miso-jarvis.ts",
+    "test:smoke:jarvis": "ALLOW_NETWORK=1 node --env-file=.env --import tsx/esm scripts/smoke-jarvis-e2e.ts",
+    "test:jarvis": "pnpm --filter founderos-jarvis test",
     "hallucination:stress": "ALLOW_NETWORK=1 ENGINEERING_SUBGRAPH=1 OFFICE_RECURSION_LIMIT=40 node --env-file=.env --import tsx/esm scripts/hallucination-stress.ts",
     "hallucination:stress:quick": "ALLOW_NETWORK=1 ENGINEERING_SUBGRAPH=1 OFFICE_RECURSION_LIMIT=40 node --env-file=.env --import tsx/esm scripts/hallucination-stress.ts -- --quick",
     "telegram:stress": "ALLOW_NETWORK=1 ENGINEERING_SUBGRAPH=1 OFFICE_RECURSION_LIMIT=40 node --env-file=.env --import tsx/esm scripts/e2e-telegram-qa.ts run stabilization --approve --realistic",

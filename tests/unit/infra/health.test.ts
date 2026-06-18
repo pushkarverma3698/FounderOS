@@ -6,6 +6,9 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import type { Server } from "node:http";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 vi.mock("../../../src/infra/provider-probes.js", () => ({
   runProviderProbes: vi.fn().mockRejectedValue(new Error("skip in tests")),
@@ -63,11 +66,15 @@ describe("health server", () => {
     expect(body).toHaveProperty("uptime_s");
   });
 
-  it("unknown path returns 404", async () => {
+  it("unknown path returns 404 when JARVIS dist unavailable", async () => {
     const port = 39413;
+    const emptyRoot = mkdtempSync(join(tmpdir(), "jarvis-empty-"));
+    process.env["JARVIS_DIST_ROOT"] = emptyRoot;
     server = startHealthServer(port);
     await new Promise((r) => setTimeout(r, 100));
     const { status } = await get(port, "/nope");
     expect(status).toBe(404);
+    rmSync(emptyRoot, { recursive: true, force: true });
+    delete process.env["JARVIS_DIST_ROOT"];
   });
 });

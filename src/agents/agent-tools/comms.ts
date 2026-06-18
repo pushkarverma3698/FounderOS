@@ -178,17 +178,24 @@ export const linkedinPost = tool(
     // (this is what prevents the 146↔113 word-count oscillation from running to
     // the recursion limit) and gate the closest draft with violations noted.
     let draft = text;
+    const userProvided = config?.configurable?.["linkedin_user_provided"] === true;
     let brand = await outboundQualityGate(draft, "linkedin", config);
     if (!brand.proceed) {
-      const onlyBanned = validateBrandVoice(draft, "linkedin").violations.every((v) =>
-        v.startsWith("found banned phrase"),
-      );
+      const check = validateBrandVoice(draft, "linkedin");
+      const onlyBanned = check.violations.every((v) => v.startsWith("found banned phrase"));
+      const onlyWordCount = check.violations.every((v) => v.startsWith("word count"));
       if (onlyBanned) {
         draft = stripBannedPhrases(draft);
         brand = {
           proceed: true,
           retryKey: brand.retryKey,
           warning: "Auto-stripped banned phrases — review before posting.",
+        };
+      } else if (userProvided && onlyWordCount) {
+        brand = {
+          proceed: true,
+          retryKey: brand.retryKey,
+          warning: `${check.violations.join("\n")} — founder decides on approval card.`,
         };
       } else {
         return `Revise before posting:\n${brand.fix}`;

@@ -93,6 +93,18 @@ describe("linkedin_post brand-retry bounding", () => {
     expect(mockExecute).toHaveBeenCalledTimes(1);
   });
 
+  it("gates user-provided short posts on first call (skip word-count retry loop)", async () => {
+    mockInterrupt.mockReturnValue("approved");
+    const out = await linkedinPost.invoke(
+      { text: TOO_SHORT },
+      { configurable: { thread_id: "thread-provided", linkedin_user_provided: true } },
+    );
+    expect(out).not.toMatch(/Revise before posting/);
+    expect(mockInterrupt).toHaveBeenCalledTimes(1);
+    const payload = mockInterrupt.mock.calls[0]?.[0] as { summary: string };
+    expect(payload.summary).toMatch(/word count|founder decides/i);
+  });
+
   it("terminates within BRAND_MAX_RETRIES+1 calls even if the model never converges", async () => {
     let gateReached = false;
     for (let i = 0; i < 50; i++) {

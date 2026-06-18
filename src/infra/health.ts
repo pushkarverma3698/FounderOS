@@ -21,6 +21,7 @@ import { childLogger } from "./logger.js";
 import { runProviderProbes, getLastProviderProbe } from "./provider-probes.js";
 import { getGmailBackend } from "./provider-config.js";
 import { handleWebGatewayRequest } from "../gateway/web.js";
+import { serveJarvisStatic } from "./jarvis-static.js";
 
 const log = childLogger({ module: "health" });
 
@@ -159,8 +160,11 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
       return;
     }
 
-    res.writeHead(404, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: "not_found" }));
+    void serveJarvisStatic(req, res, urlPath).then((handled) => {
+      if (handled) return;
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "not_found" }));
+    });
   });
 
   // Bind failure (e.g. EADDRINUSE during a fast restart, before the previous
@@ -175,7 +179,9 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
     }
   });
 
-  server.listen(port, () => log.info({ port }, "Health + web gateway listening on /health, /metrics, /api/v1/*"));
+  server.listen(port, () =>
+    log.info({ port }, "Health + JARVIS UI + web gateway on /, /health, /metrics, /api/v1/*"),
+  );
   // Don't keep the event loop alive on this socket alone.
   server.unref();
   return server;

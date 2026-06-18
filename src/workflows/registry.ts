@@ -84,6 +84,39 @@ const WORKFLOWS: WorkflowDef[] = [
       },
     ],
   },
+  {
+    id: "proof_drop",
+    name: "Proof Drop",
+    description:
+      "Phase D-Bis GTM: research a startup, design a custom launch artifact concept, and draft personalized Proof Drop outreach (HITL-gated send).",
+    params: ["company"],
+    steps: [
+      {
+        id: "icp_gate",
+        label: "ICP gate",
+        task:
+          "Score {company} against the Turicks ICP for Phase D-Bis: funded AI/dev-tool startups (Seed–Series A), launching or re-launching, founder active on LinkedIn. Give ICP score 1–10 with a one-paragraph verdict. If score < 6, STOP and explain why this company is not worth a Proof Drop — do not continue.",
+      },
+      {
+        id: "research",
+        label: "Deep research",
+        task:
+          "Research {company} in depth for a Proof Drop: product positioning, recent launch/news, founder name + LinkedIn presence, current site aesthetic, and ONE specific gap Turicks cinematic launch could fill. Cite sources. Be specific — generic praise fails.",
+      },
+      {
+        id: "artifact",
+        label: "Artifact concept",
+        task:
+          "Design a custom Proof Drop artifact concept for {company}. Pick ONE type: hero_redesign (cinematic landing hero mock), launch_teaser (scroll narrative outline), or brand_motion (WebGL/motion concept). Output: artifact type, 3-sentence creative brief, mood references, and why this artifact would impress their founder. Turicks voice — direct, craft-first, no hype words. Then call publish_signal(event_type:\"proof_drop_ready\", payload:{company, artifactType, artifactSummary, outreachHook}, from_dept:\"marketing\").",
+      },
+      {
+        id: "outreach",
+        label: "Proof Drop email",
+        task:
+          "Draft a Proof Drop outreach email to the founder of {company}. Lead with the artifact concept from the previous step — offer the custom mock/concept as a gift, not a pitch deck. Max 150 words. Subject ≤8 words. Sign as: Pushkar, Turicks. IMPORTANT: You MUST call send_email to request approval — do not just write the email as text.",
+      },
+    ],
+  },
 ];
 
 // ── Public API (pure functions) ─────────────────────────────────────────────────

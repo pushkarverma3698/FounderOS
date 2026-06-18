@@ -8,6 +8,7 @@ import { HumanMessage, SystemMessage, type BaseMessage } from "@langchain/core/m
 import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED } from "../core/config.js";
 import {
   BANNED_PHRASE_INPUT_RE,
+  extractProvidedLinkedInPost,
   INBOX_READ_ONLY_RE,
   INTERNAL_KNOWLEDGE_DIRECTIVE,
   isInternalKnowledgeRequest,
@@ -135,9 +136,14 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
       `NEVER claim the command executed or paste fake stdout without an approval card.`;
   }
   if (dept === "marketing" && LINKEDIN_BANNED_INPUT_RE.test(text)) {
+    const providedPost = extractProvidedLinkedInPost(text);
     directive +=
       ` CRITICAL — LINKEDIN: Call linkedin_post with the finished draft. ` +
-      `NEVER refuse because of banned phrases — linkedin_post auto-strips them before the approval card.`;
+      `NEVER refuse because of banned phrases or word count — linkedin_post auto-strips banned phrases; the founder decides length on the approval card.`;
+    if (providedPost) {
+      directive +=
+        ` PROVIDED POST TEXT (call linkedin_post with this exact body NOW — no length check): """${providedPost.slice(0, 2500)}"""`;
+    }
     if (BANNED_PHRASE_INPUT_RE.test(text)) {
       directive += ` The user's input contains banned phrases — strip them in your draft and call the tool anyway.`;
     }
@@ -197,7 +203,9 @@ export function buildOfficeInput(text: string): BaseMessage[] {
   const humanText =
     dept === "personal" && SHELL_RUN_RE.test(text)
       ? `[Route directly to personal department]: ${text}`
-      : text;
+      : dept === "marketing" && extractProvidedLinkedInPost(text)
+        ? `[Route directly to marketing department]: ${text}`
+        : text;
 
   return [
     ...grounding,
