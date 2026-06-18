@@ -44,7 +44,8 @@ jobs:
             export VERIFY_BRANCH="${{ inputs.branch }}"
             cd /opt/founderos
             git fetch --quiet origin "$VERIFY_BRANCH"
-            git checkout -B "verify-$VERIFY_BRANCH" "origin/$VERIFY_BRANCH"
+            git reset --hard "origin/$VERIFY_BRANCH"
+            git clean -fd
             chmod +x scripts/vps-verify-web-design.sh scripts/vps-live-showcase.sh
             if [ "${{ inputs.live_only }}" = "true" ]; then
               bash scripts/vps-verify-web-design.sh --live-only
