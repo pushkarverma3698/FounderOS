@@ -17,6 +17,13 @@ echo "========================================================================"
 echo "FounderOS prod stabilize — branch=$BRANCH"
 echo "========================================================================"
 
+# Recover from git permission / detached-HEAD drift before deploy.
+if [ -d .git/refs/heads/cursor ]; then
+  rm -rf .git/refs/heads/cursor 2>/dev/null || true
+fi
+find .git -name '*.lock' -delete 2>/dev/null || true
+git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || true
+
 # Ensure prod keeps Telegram polling on (NODE_ENV=production default is true;
 # strip an explicit false if someone set it during dev debugging).
 if [ -f .env ] && grep -q '^TELEGRAM_POLLING_ENABLED=false' .env 2>/dev/null; then
