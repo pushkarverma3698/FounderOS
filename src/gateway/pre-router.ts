@@ -9,8 +9,10 @@ import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED } from "../core/
 import {
   BANNED_PHRASE_INPUT_RE,
   extractProvidedLinkedInPost,
+  extractShellCommand,
   INBOX_READ_ONLY_RE,
   INTERNAL_KNOWLEDGE_DIRECTIVE,
+  isGithubReadOnlyRequest,
   isInternalKnowledgeRequest,
   LINKEDIN_BANNED_INPUT_RE,
   SHELL_RUN_RE,
@@ -53,6 +55,10 @@ const MARKETING_RE = /\blinkedin\b/i;
 const ENGINEERING_RE =
   /\bgithub\b|\brepositor|\brepo\b|\b(write|create|build|fix|refactor|debug|implement|review)\b[^.?!]*\b(typescript|javascript|python|function|script|code|app|website|api|endpoint|component|class|module|bug|feature)\b|\b(commit|pull request|merge|rebase|push to)\b/i;
 
+/** Read-only GitHub: owner/repo paths, list issues/branches (not create/write). */
+const GITHUB_READ_ONLY_ROUTE_RE =
+  /\bpushkarverma3698\/[\w.-]+\b|\b(list|show|get|what are)\b[^.?!]{0,60}\b(open )?(issues?|pull requests?|prs?|branches|commits)\b|\b(list|show)\b[^.?!]{0,40}\b(repos?|repositories)\b/i;
+
 const JOBHUNT_RE =
   /\bjobs?\b|\bpositions?\b|\bhiring\b|\brecruiter\b|\b(cv|resume|cover letter)\b|\bapply\b|\bapplication\b|\bopen (role|position)/i;
 
@@ -79,6 +85,7 @@ const CINEMATIC_BUILD_RE =
 const RULES: ReadonlyArray<[RegExp, RoutableDept]> = [
   [PERSONAL_RE, "personal"],
   [MARKETING_RE, "marketing"],
+  [GITHUB_READ_ONLY_ROUTE_RE, "engineering"],
   [ENGINEERING_RE, "engineering"],
   [JOBHUNT_RE, "jobhunt"],
   [SALES_RE, "sales"],
@@ -131,9 +138,13 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
       `You have NO business tools yourself — delegate to admin.`;
   }
   if (dept === "personal" && SHELL_RUN_RE.test(text)) {
+    const shellCmd = extractShellCommand(text);
     directive +=
       ` CRITICAL — SHELL RUN: personal MUST call run_shell immediately. ` +
       `NEVER claim the command executed or paste fake stdout without an approval card.`;
+    if (shellCmd) {
+      directive += ` Call run_shell with command exactly: """${shellCmd}""" — do NOT transfer back without calling it.`;
+    }
   }
   if (dept === "marketing" && LINKEDIN_BANNED_INPUT_RE.test(text)) {
     const providedPost = extractProvidedLinkedInPost(text);
@@ -168,9 +179,16 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
       ` CRITICAL — Use read_context + search_memory + search_knowledge via admin tools. ` +
       `If stores are empty, say so — never invent Turicks ICP/strategy from prior chat.`;
   }
+  if (dept === "engineering" && isGithubReadOnlyRequest(text)) {
+    const ownerRepo = text.match(/\b([\w-]+\/[\w.-]+)\b/);
+    directive +=
+      ` CRITICAL — GITHUB READ: Call github_read immediately (list_issues for open issues, list_repos for repos). ` +
+      `Never invent issue titles from memory — return only what the tool returns.` +
+      (ownerRepo ? ` Use owner/repo ${ownerRepo[1]}.` : "");
+  }
   if (
     dept === "engineering" &&
-    /\b(create|open|file)\b[^.?!]*\b(issue|pull request|pr)\b|\bgithub\b[^.?!]*(issue|pr|pull)/i.test(text)
+    /\b(create|file)\b[^.?!]*\b(issue|pull request|pr)\b|\bgithub\b[^.?!]*(issue|pr|pull)/i.test(text)
   ) {
     directive += ENGINEERING_SUBGRAPH_ENABLED
       ? ` CRITICAL — GITHUB WRITE: Transfer to engineering. The CTO subgraph MUST delegate to devops and call github_write or project_workflow — never claim an issue/PR was created without an approval card.`
@@ -205,7 +223,9 @@ export function buildOfficeInput(text: string): BaseMessage[] {
       ? `[Route directly to personal department]: ${text}`
       : dept === "marketing" && extractProvidedLinkedInPost(text)
         ? `[Route directly to marketing department]: ${text}`
-        : text;
+        : dept === "engineering" && isGithubReadOnlyRequest(text)
+          ? `[Route directly to engineering department]: ${text}`
+          : text;
 
   return [
     ...grounding,
