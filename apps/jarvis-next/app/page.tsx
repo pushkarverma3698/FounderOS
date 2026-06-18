@@ -15,7 +15,6 @@ import "./dashboard.css";
 export const dynamic = "force-dynamic";
 
 export default function JarvisDashboard() {
-  const [introDone, setIntroDone] = useState(false);
   const [input, setInput] = useState("");
 
   const { voiceOn, setVoiceOn, speaking, recognizing, speak, startListening } = useVoice();
@@ -79,9 +78,9 @@ export default function JarvisDashboard() {
 
   return (
     <main className="dashboard">
-      <CinematicIntro onComplete={() => setIntroDone(true)} />
+      <CinematicIntro />
 
-      <div className={`dashboard-inner ${introDone ? "visible" : ""}`}>
+      <div className="dashboard-inner visible">
         <JarvisScene activeDept={activeDept} speaking={speaking} recognizing={recognizing} />
 
         <div className="hud-layer">

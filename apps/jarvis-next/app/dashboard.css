@@ -594,6 +594,7 @@
   text-shadow: 0 0 40px rgba(78, 240, 255, 0.5);
   margin-bottom: 2rem;
   position: relative;
+  opacity: 1;
 }
 
 .intro-lines {

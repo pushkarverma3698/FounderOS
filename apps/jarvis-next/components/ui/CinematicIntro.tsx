@@ -11,9 +11,14 @@ const BOOT_LINES = [
   "JARVIS INTERFACE ONLINE",
 ];
 
-export function CinematicIntro({ onComplete }: { onComplete: () => void }) {
+export function CinematicIntro({ onComplete }: { onComplete?: () => void }) {
   const [lineIdx, setLineIdx] = useState(0);
   const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    const failSafe = setTimeout(() => onComplete?.(), 4500);
+    return () => clearTimeout(failSafe);
+  }, [onComplete]);
 
   useEffect(() => {
     if (lineIdx >= BOOT_LINES.length) {
@@ -26,7 +31,7 @@ export function CinematicIntro({ onComplete }: { onComplete: () => void }) {
 
   useEffect(() => {
     if (done) {
-      const t = setTimeout(onComplete, 400);
+      const t = setTimeout(() => onComplete?.(), 400);
       return () => clearTimeout(t);
     }
   }, [done, onComplete]);
