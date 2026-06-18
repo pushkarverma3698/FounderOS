@@ -255,8 +255,15 @@ export const INTERNAL_KNOWLEDGE_RE =
 export const EXTERNAL_RESEARCH_RE =
   /\b(search (the )?web|google (it|for)|look (it )?up online|latest news|news about|competitors?|market research|on the (web|internet))\b/i;
 
-export function hadAnyMemoryToolCall(messages: OfficeMessageLike[]): boolean {
-  return MEMORY_TOOL_NAMES.some((name) => hadToolCall(messages, name));
+export function hadAnyMemoryToolCall(
+  messages: OfficeMessageLike[],
+  toolsCalled?: readonly string[],
+): boolean {
+  if (MEMORY_TOOL_NAMES.some((name) => hadToolCall(messages, name))) return true;
+  if (!toolsCalled?.length) return false;
+  return toolsCalled.some((name) =>
+    MEMORY_TOOL_NAMES.includes(name as (typeof MEMORY_TOOL_NAMES)[number]),
+  );
 }
 
 /**
@@ -267,10 +274,14 @@ export function detectUnbackedMemoryClaim(
   userInput: string,
   messages: OfficeMessageLike[],
   reply: string,
+  toolsCalled?: readonly string[],
 ): boolean {
   if (!isInternalKnowledgeRequest(userInput)) return false;
-  if (hadAnyMemoryToolCall(messages)) return false;
-  return reply.trim().length > 0;
+  if (hadAnyMemoryToolCall(messages, toolsCalled)) return false;
+  const text = reply.trim();
+  if (!text) return false;
+  if (HONEST_KNOWLEDGE_REFUSAL_RE.test(text) && !FABRICATION_BRIDGE_RE.test(text)) return false;
+  return true;
 }
 
 export const MEMORY_RETRY_HINT =
@@ -292,7 +303,7 @@ export const FABRICATION_BRIDGE_RE =
 
 /** Reply cites turicks-brain / ADR / knowledge entry — allowed specificity. */
 export const CITED_KNOWLEDGE_GROUNDING_RE =
-  /\b(knowledge base|turicks-brain|brain:sync|ADR-\d+|case study|according to our|entry \d+:|source_path|\[\w+\] )/i;
+  /\b(knowledge base|turicks-brain|brain:sync|ADR-\d+|case study|according to our|entry \d+:|source_path|docs\/strategy\/|positioning (doc|& niche)|01-POSITIONING|\[\w+\] )/i;
 
 /**
  * Specific revenue/ARR/deal numbers on internal business questions — the prod ICP
@@ -322,8 +333,15 @@ function toolMessageText(m: OfficeMessageLike): string {
   return typeof m.content === "string" ? m.content : "";
 }
 
-export function hadKnowledgeSearchTool(messages: OfficeMessageLike[]): boolean {
-  return KNOWLEDGE_SEARCH_TOOLS.some((t) => hadToolCall(messages, t));
+export function hadKnowledgeSearchTool(
+  messages: OfficeMessageLike[],
+  toolsCalled?: readonly string[],
+): boolean {
+  if (KNOWLEDGE_SEARCH_TOOLS.some((t) => hadToolCall(messages, t))) return true;
+  if (!toolsCalled?.length) return false;
+  return toolsCalled.some((name) =>
+    KNOWLEDGE_SEARCH_TOOLS.includes(name as (typeof KNOWLEDGE_SEARCH_TOOLS)[number]),
+  );
 }
 
 /** True when a knowledge/RAG tool ran and returned an explicit empty-store message. */
@@ -414,6 +432,7 @@ export function detectUnbackedKnowledgeClaim(
   userInput: string,
   messages: OfficeMessageLike[],
   reply: string,
+  toolsCalled?: readonly string[],
 ): boolean {
   const text = reply.trim();
   if (text.length < 40) return false;
@@ -442,7 +461,9 @@ export function detectUnbackedKnowledgeClaim(
   }
 
   // Stale checkpoint regurgitation: model repeats prior ICP/strategy without calling tools.
-  if (isInternalKnowledgeRequest(userInput) && !hadKnowledgeSearchTool(messages)) {
+  // Dept sub-agents hide tool results from supervisor messages (outputMode:last_message) —
+  // toolsCalled from the invoke callback is the authoritative evidence tools ran.
+  if (isInternalKnowledgeRequest(userInput) && !hadKnowledgeSearchTool(messages, toolsCalled)) {
     if (HONEST_KNOWLEDGE_REFUSAL_RE.test(text) && !FABRICATION_BRIDGE_RE.test(text)) return false;
     if (replyHasUnbackedBusinessSpecifics(text) || replyHasUnbackedIcpProse(text)) return true;
     if (INTERNAL_ANSWER_WITHOUT_GROUNDING_RE.test(text) && text.length >= 30) return true;
