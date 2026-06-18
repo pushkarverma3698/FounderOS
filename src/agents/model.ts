@@ -24,7 +24,13 @@ export interface ParsedModelId {
   id: string;
 }
 
-export const DEFAULT_AGENT_MODEL = "openrouter:openai/gpt-4o-mini";
+// Safety-net default when AGENT_MODEL is unset. Use the documented production
+// model (CLAUDE.md), a strong agentic tool-caller — NOT a small model. A weak
+// default (the old openrouter:openai/gpt-4o-mini) meant any env that forgot to
+// set AGENT_MODEL silently degraded to a model that chats instead of calling
+// tools. Dev/CI always set AGENT_MODEL explicitly; this only bites on misconfig,
+// where Gemini Flash is the far safer failure mode.
+export const DEFAULT_AGENT_MODEL = "openrouter:google/gemini-2.5-flash-preview-05-20";
 
 export function is503Error(err: unknown): boolean {
   if (!(err instanceof Error)) return false;

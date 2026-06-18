@@ -431,6 +431,22 @@ Every real Gemini/OpenRouter paid call during a dev session is waste. The develo
 - Probe scripts (`scripts/probe-*.ts`, `scripts/e2e-telegram-qa.ts`) are verification artifacts, not debugging tools.
 - Any session that runs >3 paid API calls without all unit tests green first is doing it wrong.
 
+### 24. "Done" means evidence, never the word "done" (NON-NEGOTIABLE — added 2026-06-17 by founder directive)
+A task is complete only when the verification command has been RUN in the same turn the claim is made,
+and its real output is shown. "Done", "fixed", "works", "should pass" with no fresh command output is a
+lie, not a status. This is the Iron Law from `superpowers:verification-before-completion`, now a project rule.
+
+- **Identify → Run → Read → Verify → Claim.** Before any completion/satisfaction statement: name the command
+  that proves it, run the FULL command fresh, read the exit code + failure count, and only then state the
+  result WITH the evidence inline. Skipping a step = lying.
+- **Evidence = the artifact, not a summary of it.** `pnpm lint` exit 0 + `pnpm test` "N/N passed" pasted in;
+  the real bot reply + the matching `action_log` row (or explicit NO ROW); the real query result. Never an
+  agent's "success" report taken on trust — verify independently against the VCS diff / real state.
+- **Stale evidence is not evidence.** A run from three edits ago does not prove the current state. Re-run.
+- **Determinism is the goal of every fix here.** Same input → same behaviour. Push correctness into pure,
+  unit-tested code (guards, parsers, envelopes) — never rely on a prompt instruction a weak/swapped model
+  may ignore (rule #16). A fix that only works on one model is not a fix; it's a latent regression.
+
 ## Engineering Protocol — Verification-First (PERMANENT, applies to every change)
 
 Unit tests are not proof. They are a safety net, not evidence that a feature works.
