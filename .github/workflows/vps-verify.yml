@@ -9,8 +9,16 @@ on:
       branch:
         description: "Git branch to verify on VPS"
         required: true
-        default: "feat/web-design-service-cb8b"
+        default: "main"
         type: string
+      live_only:
+        description: "Skip tests — only run live showcase + HITL build verify"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 concurrency:
   group: vps-verify
@@ -37,7 +45,11 @@ jobs:
             cd /opt/founderos
             git fetch --quiet origin "$VERIFY_BRANCH"
             git checkout -B "verify-$VERIFY_BRANCH" "origin/$VERIFY_BRANCH"
-            chmod +x scripts/vps-verify-web-design.sh
-            VERIFY_BRANCH="$VERIFY_BRANCH" bash scripts/vps-verify-web-design.sh
+            chmod +x scripts/vps-verify-web-design.sh scripts/vps-live-showcase.sh
+            if [ "${{ inputs.live_only }}" = "true" ]; then
+              bash scripts/vps-verify-web-design.sh --live-only
+            else
+              VERIFY_BRANCH="$VERIFY_BRANCH" bash scripts/vps-verify-web-design.sh
+            fi
         env:
           VERIFY_BRANCH: ${{ inputs.branch }}
