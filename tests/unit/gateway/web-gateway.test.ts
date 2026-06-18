@@ -2,9 +2,28 @@
  * Web gateway — auth + route smoke tests (no live office).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createWebApp } from "../../../src/gateway/web.js";
 import { resetStreamHubs } from "../../../src/gateway/stream-hub.js";
+
+vi.mock("../../../src/db/queries.js", async (importActual) => {
+  const actual = await importActual<typeof import("../../../src/db/queries.js")>();
+  return {
+    ...actual,
+    getActiveMission: vi.fn().mockResolvedValue(null),
+    getRecentAuditEntries: vi.fn().mockResolvedValue([]),
+    listMissions: vi.fn().mockResolvedValue([]),
+  };
+});
+
+vi.mock("../../../src/agents/office.js", async (importActual) => {
+  const actual = await importActual<typeof import("../../../src/agents/office.js")>();
+  return {
+    ...actual,
+    getOffice: vi.fn().mockResolvedValue({}),
+    getPendingApproval: vi.fn().mockResolvedValue(null),
+  };
+});
 
 describe("web gateway", () => {
   beforeEach(() => {
@@ -43,5 +62,22 @@ describe("web gateway", () => {
       headers: { authorization: "Bearer secret-token" },
     });
     expect(ok.status).toBe(200);
+  });
+
+  it("accepts query token for SSE stream when WEB_GATEWAY_TOKEN is set", async () => {
+    process.env["WEB_GATEWAY_TOKEN"] = "secret-token";
+    const app = createWebApp();
+    const deny = await app.request("http://localhost/api/v1/sessions/test/stream");
+    expect(deny.status).toBe(401);
+    const ok = await app.request("http://localhost/api/v1/sessions/test/stream?token=secret-token");
+    expect(ok.status).toBe(200);
+  });
+
+  it("GET miso/status returns status text", async () => {
+    const app = createWebApp();
+    const res = await app.request("http://localhost/api/v1/sessions/test/miso/status");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status?: string };
+    expect(body.status).toContain("MISO");
   });
 });

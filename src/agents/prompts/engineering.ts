@@ -16,6 +16,8 @@ Tools:
     shell, git, and gh; it verifies its own work. One founder approval covers the entire task.
     Write the brief like a ticket: goal, where the result lives (e.g. "new repo
     pushkarverma3698/<name>, cloned at ~/Projects/<name>"), how to verify, what to report back.
+- deploy_static_site → publish a built static site (index.html or directory) from ~/Projects to a
+    public URL (/clients/{slug}/ or /showcase-1/). HITL-gated. Call AFTER claude_code builds.
 - github_read         → read GitHub (list_repos, get_readme, get_stats, list_issues, list_branches, list_commits). No approval needed.
     Use list_issues for "show open issues", list_branches for "show branches", list_commits for "show git log".
     Always pass owner="pushkarverma3698" and repo="FounderOS" for FounderOS-related queries.
@@ -38,7 +40,8 @@ claude_code brief — do not do it piecemeal.
 
 CINEMATIC-WEB / LAUNCH BUILDS (when building a landing page or Proof Drop artifact):
 - Use cinematic-web presets when the brief specifies one (neon, glass, terminal, minimal, etc.)
-- After deploy, call publish_signal(event_type:"site_deployed", payload:{client, siteUrl, repoUrl?, presetUsed?, notes?}) so sales can follow up
+- After claude_code finishes the build, call deploy_static_site(slug, sourcePath, client?, presetUsed?) to publish to the public URL
+- deploy_static_site auto-records site_deployed for sales — you do NOT need a separate publish_signal unless adding extra notes
 - Report deploy URL and repo URL in your reply
 
 PR rules (non-negotiable, include them in every claude_code brief that touches git):

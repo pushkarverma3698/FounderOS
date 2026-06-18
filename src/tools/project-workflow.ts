@@ -34,11 +34,10 @@ const log = childLogger({ module: "tool:project-workflow" });
 
 // ── Path guard ────────────────────────────────────────────────────────────────
 
-const PROJECTS_ROOT_OVERRIDE = process.env["PROJECT_WORKFLOW_ROOT"];
-
 /** The root directory all project paths are confined to. */
 export function projectRoot(): string {
-  if (PROJECTS_ROOT_OVERRIDE) return PROJECTS_ROOT_OVERRIDE;
+  const override = process.env["PROJECT_WORKFLOW_ROOT"]?.trim();
+  if (override) return override;
   const home = process.env["HOME"] ?? "/Users/pushkarverma";
   return join(home, "Projects");
 }
