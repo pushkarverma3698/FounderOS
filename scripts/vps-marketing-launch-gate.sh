@@ -104,7 +104,43 @@ else
   warn "Gmail not ready — gws not authed and Composio rollback not configured (Proof Drop email blocked)"
 fi
 
-# ── 5. Website builder / showcase (client-facing proof) ──────────────────────
+# ── 5. Website builder tools (preset + no-LLM deploy path) ─────────────────
+echo ""
+echo "==> Website builder tool smoke (apply_cinematic_preset + eval:webdesign:full)"
+
+node --env-file=.env --import tsx/esm -e "
+import { DEPARTMENT_TOOLS } from './src/agents/capabilities.ts';
+const eng = DEPARTMENT_TOOLS.engineering.map((t) => t.name);
+for (const n of ['apply_cinematic_preset','claude_code','deploy_static_site']) {
+  if (!eng.includes(n)) { console.error('MISSING engineering tool:', n); process.exit(1); }
+}
+console.log('engineering tools:', eng.filter((t) => ['apply_cinematic_preset','claude_code','deploy_static_site'].includes(t)).join(', '));
+" || fail "engineering tools not wired"
+
+node --env-file=.env --import tsx/esm -e "
+import { executeApplyCinematicPreset } from './src/tools/cinematic-preset.ts';
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+const root = mkdtempSync(join(tmpdir(), 'launch-gate-wb-'));
+process.env['PROJECT_WORKFLOW_ROOT'] = root;
+const target = join(root, 'cinematic-smoke-test');
+const r = executeApplyCinematicPreset({ preset: 'neon', targetDir: target, client: 'AgentOps' });
+if (!r.success) { console.error('apply_cinematic_preset FAIL:', r.error); process.exit(1); }
+const html = readFileSync(join(target, 'index.html'), 'utf-8');
+if (!html.includes('AgentOps')) { console.error('FAIL: client not in HTML'); process.exit(1); }
+if (!existsSync(join(target, 'styles.css'))) { console.error('FAIL: styles.css missing'); process.exit(1); }
+console.log('✅ apply_cinematic_preset neon → AgentOps HTML, bytes', (r.data as {bytesCopied:number}).bytesCopied);
+rmSync(root, { recursive: true, force: true });
+" || fail "apply_cinematic_preset smoke failed"
+
+if pnpm eval:webdesign:full; then
+  echo "✅ eval:webdesign:full (preset → deploy, no LLM)"
+else
+  fail "eval:webdesign:full failed on VPS"
+fi
+
+# ── 6. Website builder / showcase (client-facing proof) ──────────────────────
 echo ""
 echo "==> Website builder showcase check"
 
@@ -134,7 +170,7 @@ else
   warn "No live showcase URL for marketing campaign"
 fi
 
-# ── 6. JARVIS + health ───────────────────────────────────────────────────────
+# ── 7. JARVIS + health ───────────────────────────────────────────────────────
 echo ""
 echo "==> Health"
 curl -sf http://127.0.0.1:3001/health | tee "$OUT/health-${RUN_ID}.json" >/dev/null || fail "/health not green"
