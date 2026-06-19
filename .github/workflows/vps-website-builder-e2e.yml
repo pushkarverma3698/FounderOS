@@ -1,0 +1,86 @@
+name: VPS Website Builder E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to verify on VPS"
+        required: true
+        default: "main"
+        type: string
+
+concurrency:
+  group: vps-website-builder-e2e
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Website builder E2E on VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      VPS_SUDO_PASSWORD: ${{ secrets.VPS_SUDO_PASSWORD }}
+    steps:
+      - name: Run E2E verify + nginx/env fixes on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          command_timeout: "40m"
+          script_stop: true
+          envs: VPS_SUDO_PASSWORD
+          script: |
+            set -euo pipefail
+            BRANCH="${{ inputs.branch }}"
+            cd /opt/founderos
+            git fetch --quiet origin "$BRANCH"
+            git reset --hard "origin/$BRANCH"
+            git clean -fd
+            chmod +x scripts/vps-website-builder-e2e-verify.sh scripts/vps-proof-nginx-setup.sh scripts/vps-live-showcase.sh 2>/dev/null || true
+
+            # Ensure STATIC_SITE_PUBLIC_BASE_URL (idempotent)
+            if ! grep -q '^STATIC_SITE_PUBLIC_BASE_URL=' .env 2>/dev/null; then
+              echo 'STATIC_SITE_PUBLIC_BASE_URL=http://95.217.162.12' >> .env
+              echo "==> Added STATIC_SITE_PUBLIC_BASE_URL to .env"
+            fi
+
+            # nginx for static hosting (passwordless sudo or VPS_SUDO_PASSWORD)
+            if ! command -v nginx >/dev/null 2>&1; then
+              if [ -n "${VPS_SUDO_PASSWORD:-}" ]; then
+                echo "$VPS_SUDO_PASSWORD" | sudo -S apt-get update -qq
+                echo "$VPS_SUDO_PASSWORD" | sudo -S apt-get install -y -qq nginx
+              else
+                sudo -n apt-get update -qq && sudo -n apt-get install -y -qq nginx || echo "!! nginx install skipped (no sudo)"
+              fi
+            fi
+            if command -v nginx >/dev/null 2>&1; then
+              bash scripts/vps-proof-nginx-setup.sh || true
+            fi
+
+            # Full automated verify
+            bash scripts/vps-website-builder-e2e-verify.sh 2>&1 | tee /tmp/vps-wb-e2e.log
+            tail -40 /tmp/vps-wb-e2e.log
+
+            # Evidence: public URL + health
+            PUBLIC_BASE="$(grep '^STATIC_SITE_PUBLIC_BASE_URL=' .env | cut -d= -f2- | tr -d '"')"
+            curl -s -o /dev/null -w "showcase HTTP %{http_code}\n" "${PUBLIC_BASE%/}/showcase-1/"
+            curl -sf http://127.0.0.1:3001/health | head -c 400 || echo "!! /health failed"
+            echo ""
+            echo "==> apply_cinematic_preset smoke (bundled neon)"
+            node --env-file=.env --import tsx/esm -e "
+            import { executeApplyCinematicPreset } from './src/tools/cinematic-preset.ts';
+            import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+            import { join } from 'node:path';
+            import { tmpdir } from 'node:os';
+            const root = mkdtempSync(join(tmpdir(), 'prod-preset-'));
+            process.env['PROJECT_WORKFLOW_ROOT'] = root;
+            const target = join(root, 'cinematic-smoke');
+            const r = executeApplyCinematicPreset({ preset: 'neon', targetDir: target, client: 'AgentOps' });
+            if (!r.success) { console.error('FAIL', r.error); process.exit(1); }
+            const html = readFileSync(join(target, 'index.html'), 'utf-8');
+            if (!html.includes('AgentOps')) { console.error('FAIL missing client'); process.exit(1); }
+            console.log('✅ apply_cinematic_preset smoke OK');
+            rmSync(root, { recursive: true, force: true });
+            "
