@@ -4,6 +4,8 @@ export type StreamHandler = (payload: { type: string; data?: Record<string, unkn
 
 /** All stream event types the backend may emit (named SSE `event:` or default message). */
 const STREAM_EVENT_TYPES = [
+  "stream.connected",
+  "system.notice",
   "department.routed",
   "tool.start",
   "tool.end",

@@ -20,10 +20,13 @@ import {
 } from "../db/queries.js";
 import { runOfficeSession, resumeOfficeSession } from "./office-run.js";
 import { createWebSession } from "./session.js";
-import { subscribeStreamEvents } from "./stream-hub.js";
+import { publishStreamEvent, subscribeStreamEvents } from "./stream-hub.js";
 import { formatMisoDashboard, formatMisoClose, formatMisoPlan, missionToView } from "./mission-control.js";
 import { getOffice, getPendingApproval } from "../agents/office.js";
 import { childLogger } from "../infra/logger.js";
+import { checkFfmpeg, audioToWav } from "../infra/media-convert.js";
+import { transcribeAudio } from "../tools/transcription.js";
+import { synthesizeSpeech } from "../tools/tts.js";
 
 const log = childLogger({ module: "web-gateway" });
 
@@ -46,6 +49,15 @@ function queryTokenFromUrl(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+function audioExtFromContentType(contentType: string | undefined): string {
+  const ct = (contentType ?? "").toLowerCase();
+  if (ct.includes("webm")) return "webm";
+  if (ct.includes("ogg")) return "ogg";
+  if (ct.includes("mp4") || ct.includes("m4a")) return "mp4";
+  if (ct.includes("wav")) return "wav";
+  return "webm";
 }
 
 export function createWebApp(): Hono {
@@ -77,6 +89,13 @@ export function createWebApp(): Hono {
   app.get("/api/v1/sessions/:id/stream", (c) => {
     const sessionId = c.req.param("id");
     return streamSSE(c, async (stream) => {
+      void stream.writeSSE({
+        data: JSON.stringify({
+          type: "stream.connected",
+          sessionId,
+          ts: new Date().toISOString(),
+        }),
+      });
       const unsub = subscribeStreamEvents(sessionId, (ev) => {
         // Default SSE message event (no `event:` field) — browser EventSource.onmessage
         // only fires for untyped events; type lives in the JSON payload.
@@ -87,6 +106,61 @@ export function createWebApp(): Hono {
       } finally {
         unsub();
       }
+    });
+  });
+
+  app.post("/api/v1/sessions/:id/voice", async (c) => {
+    const sessionId = c.req.param("id");
+    if (!(await checkFfmpeg())) {
+      return c.json({ error: "ffmpeg_unavailable" }, 503);
+    }
+    const raw = Buffer.from(await c.req.arrayBuffer());
+    if (!raw.length) return c.json({ error: "audio_required" }, 400);
+
+    const ext = audioExtFromContentType(c.req.header("content-type"));
+    let wav: Buffer;
+    try {
+      wav = await audioToWav(raw, ext);
+    } catch (err) {
+      log.error({ sessionId, err: (err as Error).message }, "Voice convert failed");
+      return c.json({ error: "audio_convert_failed" }, 400);
+    }
+
+    const result = await transcribeAudio(wav, "audio/wav");
+    if (!result.success) {
+      return c.json({ error: result.error }, 502);
+    }
+    if (!result.data.hasSpeech || !result.data.englishText.trim()) {
+      return c.json({ error: "no_speech_detected" }, 400);
+    }
+
+    const englishText = result.data.englishText.trim();
+    publishStreamEvent(sessionId, {
+      type: "system.notice",
+      data: { notice: `🎙 Voice: ${englishText}`, voice: true, transcript: result.data.transcript },
+    });
+
+    const session = createWebSession(sessionId);
+    void runOfficeSession(session, englishText).catch((err) =>
+      log.error({ sessionId, err: (err as Error).message }, "Web voice office run failed"),
+    );
+    return c.json({
+      accepted: true,
+      sessionId,
+      transcript: result.data.transcript,
+      englishText,
+      detectedLanguage: result.data.detectedLanguage,
+    });
+  });
+
+  app.post("/api/v1/tts", async (c) => {
+    const body = await c.req.json<{ text?: string }>().catch(() => ({ text: "" }));
+    const text = body.text?.trim() ?? "";
+    if (!text) return c.json({ error: "text_required" }, 400);
+    const tts = await synthesizeSpeech(text);
+    if (!tts.success) return c.json({ error: tts.error }, 502);
+    return new Response(new Uint8Array(tts.data.oggOpus), {
+      headers: { "content-type": "audio/ogg", "cache-control": "no-store" },
     });
   });
 

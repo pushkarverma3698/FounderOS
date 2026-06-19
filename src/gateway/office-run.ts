@@ -71,6 +71,7 @@ import { SUPERVISOR_PROMPT } from "../agents/system-prompts.js";
 import { isStructuredToolFailure } from "../agents/tool-result.js";
 import { safeHtml, formatApprovalCard } from "./approval-card.js";
 import { createTelegramSession, createWebSession, type GatewaySession } from "./session.js";
+import { departmentFromTransferTool } from "./dept-routing.js";
 import { syncMissionTrace, refreshMissionDashboard } from "./mission-sync.js";
 
 const log = logger.child({ module: "office-run" });
@@ -361,16 +362,24 @@ async function sendApprovalCard(session: GatewaySession, approval: ApprovalReque
 function enrichTraceData(seam: string, data?: Record<string, unknown>): Record<string, unknown> | undefined {
   if (!data) return data;
   if (seam === "tool.call" || seam === "tool.result") {
+    const toolName = String(data["name"] ?? data["tool"] ?? data["toolName"] ?? "tool");
+    const routed = departmentFromTransferTool(toolName);
     return {
       ...data,
-      toolName: data["name"] ?? data["tool"] ?? data["toolName"] ?? "tool",
-      department: data["department"] ?? data["hint"],
+      toolName,
+      department: routed ?? data["department"],
     };
   }
-  if (seam === "route.decided") {
-    return { ...data, department: data["hint"] };
-  }
   return data;
+}
+
+function streamTypeForSeam(seam: string): Parameters<GatewaySession["emitStream"]>[0] | null {
+  if (seam === "hitl.interrupt" || seam === "route.decided") return null;
+  if (seam === "tool.call") return "tool.start";
+  if (seam === "tool.result") return "tool.end";
+  if (seam === "turn.out") return "turn.complete";
+  if (seam === "turn.error") return "turn.error";
+  return "tool.start";
 }
 
 function wrapTrace(session: GatewaySession, trace: TurnTrace): TurnTrace {
@@ -383,15 +392,16 @@ function wrapTrace(session: GatewaySession, trace: TurnTrace): TurnTrace {
         return;
       }
       const enriched = enrichTraceData(seam, data);
-      session.emitStream(
-        seam === "hitl.interrupt" ? "hitl.pending" :
-        seam === "route.decided" ? "department.routed" :
-        seam === "tool.call" ? "tool.start" :
-        seam === "tool.result" ? "tool.end" :
-        seam === "turn.out" ? "turn.complete" :
-        seam === "turn.error" ? "turn.error" : "tool.start",
-        enriched,
-      );
+      const streamType = streamTypeForSeam(seam);
+      if (streamType) {
+        session.emitStream(streamType, enriched);
+        if (seam === "tool.call" && enriched?.department) {
+          session.emitStream("department.routed", {
+            department: enriched.department,
+            hint: enriched.department,
+          });
+        }
+      }
       void syncMissionTrace(session.id, trace, seam, data);
     },
   };
