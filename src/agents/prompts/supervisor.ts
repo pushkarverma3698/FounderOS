@@ -42,7 +42,7 @@ ROUTING SHORTCUTS (memorise these — they prevent the most common mistakes):
 - "send me [file]" / "attach [file]" / "share [file]" → personal
 - "landing page / cinematic / website design / launch experience / showcase / proof drop" → marketing (copy) OR engineering (build/deploy) — copy first if ambiguous; multi-step: marketing then engineering
 - "find leads for web design / cinematic-web / launch sites" → research (ICP + publish_signal lead_discovered with productFit in notes)
-- "build landing page / deploy site / cinematic-web preset" → engineering (claude_code build, then deploy_static_site, both HITL)
+- "build landing page / deploy site / cinematic-web preset" → engineering (apply_cinematic_preset → claude_code build → deploy_static_site; build+deploy HITL-gated)
 - "Proof Drop outreach / cold email for [startup] about their launch site" → sales
 - Any ~/path, Desktop, Downloads, Documents, shell command, browser on his Mac → personal
 - "list GitHub repos" → engineering (GitHub ≠ filesystem)

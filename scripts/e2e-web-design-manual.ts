@@ -21,6 +21,7 @@ import {
   buildPublicUrl,
   isValidDeploySlug,
 } from "../src/tools/deploy-static-site.js";
+import { executeApplyCinematicPreset } from "../src/tools/cinematic-preset.js";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { GOLDEN_TASKS } from "../src/eval/golden-tasks.js";
@@ -168,6 +169,25 @@ async function testLiveRouting(taskId: string): Promise<void> {
   );
 }
 
+async function testPresetTool(): Promise<void> {
+  const prevProjects = process.env["PROJECT_WORKFLOW_ROOT"];
+  const projectsBase = mkdtempSync(join("/tmp", "e2e-preset-projects-"));
+  process.env["PROJECT_WORKFLOW_ROOT"] = projectsBase;
+  const target = join(projectsBase, "cinematic-e2e-test");
+  try {
+    const res = executeApplyCinematicPreset({ preset: "neon", targetDir: target, client: "E2E" });
+    record(
+      "preset: apply_cinematic_preset copies scaffold",
+      res.success && (res.data as { filesCopied: string[] }).filesCopied.length > 0,
+      res.success ? `files=${(res.data as { filesCopied: string[] }).filesCopied.join(",")}` : String(res.error),
+    );
+  } finally {
+    rmSync(projectsBase, { recursive: true, force: true });
+    if (prevProjects === undefined) delete process.env["PROJECT_WORKFLOW_ROOT"];
+    else process.env["PROJECT_WORKFLOW_ROOT"] = prevProjects;
+  }
+}
+
 async function testDeployTool(): Promise<void> {
   record("deploy: slug validation", isValidDeploySlug("showcase-1"), "showcase-1 accepted");
   const prevForce = process.env["DEPLOY_STATIC_SITE_FORCE_HOME"];
@@ -253,12 +273,14 @@ async function main(): Promise<void> {
 
   await testSignalContracts();
   await testSignalDbRoundTrip();
+  await testPresetTool();
   await testDeployTool();
 
   const routingTasks = [
     "webdesign-research-leads",
     "webdesign-proof-drop-outreach",
     "webdesign-build-landing",
+    "webdesign-build-and-deploy",
   ] as const;
 
   for (const id of routingTasks) {

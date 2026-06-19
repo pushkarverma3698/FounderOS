@@ -303,11 +303,12 @@ describe("buildOfficeInput", () => {
     expect(String(msgs[0]!.content)).toContain("engineering");
   });
 
-  it("engineering cinematic build gets CRITICAL claude_code directive", () => {
+  it("engineering cinematic build gets CRITICAL pipeline directive", () => {
     const prompt =
       "Build a cinematic landing page for a fictional AI observability startup called AgentOps using the neon preset.";
     const msgs = buildOfficeInput(prompt);
-    expect(String(msgs[0]!.content)).toMatch(/CRITICAL — CINEMATIC BUILD/i);
+    expect(String(msgs[0]!.content)).toMatch(/CRITICAL — CINEMATIC BUILD PIPELINE/i);
+    expect(String(msgs[0]!.content)).toMatch(/apply_cinematic_preset/i);
     expect(String(msgs[0]!.content)).toMatch(/claude_code/i);
   });
 

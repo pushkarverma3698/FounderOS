@@ -4,6 +4,7 @@
  *   github_write     — WRITE (HITL-gated)
  *   project_workflow — read = instant; run_command = HITL-gated
  *   claude_code      — WRITE (HITL-gated)
+ *   apply_cinematic_preset — read-only scaffold copy (no approval)
  *   deploy_static_site — WRITE (HITL-gated)
  */
 
@@ -12,6 +13,7 @@ import { z } from "zod";
 import { githubTool } from "../../tools/github.js";
 import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../../tools/project-workflow.js";
 import { claudeCodeTool, findClaudeBinary } from "../../tools/claude-code.js";
+import { applyCinematicPresetTool } from "../../tools/cinematic-preset.js";
 import { deployStaticSiteTool } from "../../tools/deploy-static-site.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
@@ -238,6 +240,40 @@ export const claudeCode = tool(
       cwd: z.string().optional().nullable().describe(
         "Working directory within ~/Projects (default: ~/Projects/agent-workspace). The FounderOS repo is not allowed."
       ),
+    }),
+  },
+);
+
+// ── Engineering: cinematic preset scaffold (read-only copy) ───────────────────
+
+export const applyCinematicPreset = tool(
+  async ({ preset, targetDir, client }) => {
+    const res = await applyCinematicPresetTool.execute({
+      preset,
+      targetDir,
+      ...(client ? { client } : {}),
+    });
+    if (!res.success) return `apply_cinematic_preset failed: ${res.error}`;
+    const data = res.data as {
+      preset: string;
+      targetDir: string;
+      sourceDir: string;
+      filesCopied: string[];
+      bytesCopied: number;
+    };
+    return (
+      `✅ Applied cinematic-web "${data.preset}" preset → ${data.targetDir}\n` +
+      `   source: ${data.sourceDir}\n` +
+      `   files: ${data.filesCopied.join(", ") || "index.html"} (${data.bytesCopied} bytes)`
+    );
+  },
+  {
+    name: "apply_cinematic_preset",
+    description: applyCinematicPresetTool.description,
+    schema: z.object({
+      preset: z.enum(["neon", "glass", "terminal", "minimal"]).describe("cinematic-web preset name"),
+      targetDir: z.string().describe("Destination under ~/Projects"),
+      client: z.string().optional().nullable().describe("Client name for placeholder copy"),
     }),
   },
 );

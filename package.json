@@ -17,6 +17,8 @@
     "eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
     "eval:webdesign": "node --env-file=.env --import tsx/esm scripts/e2e-web-design-manual.ts",
     "eval:webdesign:hitl": "node --env-file=.env --import tsx/esm scripts/e2e-web-design-hitl-resume.ts",
+    "eval:webdesign:full": "node --env-file=.env --import tsx/esm scripts/e2e-web-design-full.ts",
+    "verify:webdesign:prod": "bash scripts/vps-website-builder-e2e-verify.sh",
     "probe:cinematic-build": "node --env-file=.env --import tsx/esm scripts/probe-cinematic-build.ts",
     "verify:live-build": "node --env-file=.env --import tsx/esm scripts/live-build-hitl-verify.ts",
     "test:watch": "vitest",

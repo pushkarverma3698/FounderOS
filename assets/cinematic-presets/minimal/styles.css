@@ -1,0 +1,24 @@
+:root { --bg: #fafafa; --text: #111; --muted: #555; --accent: #111; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+.hero, .features, footer { max-width: 720px; margin: 0 auto; padding: 2rem; }
+.hero { padding-top: 5rem; }
+.eyebrow { font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(2.25rem, 5vw, 3.75rem); font-weight: 600; margin: 0.75rem 0 1rem; line-height: 1.1; }
+.subhead { color: var(--muted); font-size: 1.15rem; margin-bottom: 2rem; max-width: 38ch; }
+.cta {
+  display: inline-block;
+  padding: 0.75rem 1.25rem;
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  border-radius: 6px;
+  font-weight: 600;
+}
+.features { padding-bottom: 4rem; color: var(--muted); }
+footer { padding-bottom: 3rem; font-size: 0.85rem; color: var(--muted); }

@@ -32,6 +32,7 @@ import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
 import { runWorkflow, validateParams } from "../workflows/runner.js";
+import { isValidCinematicPreset } from "../agents/cinematic-build.js";
 import { formatSignalsMessage, formatRunsMessage, parseRunsLimit } from "./pipeline-format.js";
 import { formatProviderStatusLine, getLastProviderProbe } from "../infra/provider-probes.js";
 import { buildWelcomeMessage } from "./capability-message.js";
@@ -386,7 +387,8 @@ export async function handleProofDrop(
       `${proofTable}\n\n` +
         `<b>Proof Drop Pipeline</b>\n${formatProofDropStats(stats)}\n\n` +
         `<b>Usage:</b> <code>/proofdrop CompanyName</code>\n` +
-        `Flow: ICP gate → research → artifact concept → outreach draft (HITL ✋)\n` +
+        `Example: <code>/proofdrop Linear</code>\n\n` +
+        `Flow: ICP gate → research → artifact → build site → outreach (HITL ✋)\n` +
         `Target: ${stats.target}/week high-craft drops.\n\n` +
         `To draft a LinkedIn "Build in Public" post from this data:\n` +
         `<code>/q marketing draft a LinkedIn post from my Proof of Work stats</code>`,
@@ -433,6 +435,88 @@ export async function handleProofDrop(
   }
 }
 
+// ── /webbuild — cinematic-web E2E shortcut ─────────────────────────────────────
+
+function parseWebBuildArgs(raw: string): { client: string; preset: string; slug: string } | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const kv = parseRunArgs(`web_build ${trimmed}`);
+  if (kv?.params["client"] && kv.params["preset"] && kv.params["slug"]) {
+    return {
+      client: kv.params["client"],
+      preset: kv.params["preset"].toLowerCase(),
+      slug: kv.params["slug"].toLowerCase(),
+    };
+  }
+
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  if (parts.length < 3) return null;
+  const client = parts[0]!;
+  const preset = parts[1]!.toLowerCase();
+  const slug = parts[2]!.toLowerCase();
+  if (!isValidCinematicPreset(preset)) return null;
+  return { client, preset, slug };
+}
+
+export async function handleWebBuild(
+  ctx: Context,
+  runOfficeText: (ctx: Context, text: string) => Promise<void>,
+): Promise<void> {
+  const arg = (ctx.match ?? "").toString().trim();
+
+  if (!arg) {
+    await ctx.reply(
+      `🌐 <b>Cinematic Web Build (E2E)</b>\n\n` +
+        `<b>Usage:</b> <code>/webbuild Client preset slug</code>\n` +
+        `Example: <code>/webbuild AgentOps neon showcase-1</code>\n\n` +
+        `Or: <code>/webbuild client=AgentOps preset=neon slug=showcase-1</code>\n\n` +
+        `Flow: apply_cinematic_preset → claude_code → deploy_static_site (HITL on build + deploy)\n` +
+        `Presets: neon · glass · terminal · minimal`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const parsed = parseWebBuildArgs(arg);
+  if (!parsed) {
+    await ctx.reply(
+      "❌ Invalid args. Example: <code>/webbuild AgentOps neon showcase-1</code>",
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const wf = getWorkflow("web_build");
+  if (!wf) {
+    await ctx.reply("❌ web_build workflow not registered.", { parse_mode: "HTML" });
+    return;
+  }
+
+  const result = await runWorkflow(wf, parsed, {
+    async sendStatus(msg) {
+      await ctx.reply(msg, { parse_mode: "HTML" });
+    },
+    async runStep(task) {
+      try {
+        await runOfficeText(ctx, task);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
+
+  if (result.completed) {
+    await ctx.reply(
+      `✅ Web build workflow finished for <b>${safeHtml(parsed.client)}</b> ` +
+        `(${safeHtml(parsed.preset)} → /${safeHtml(parsed.slug)}/). Check deploy URL above.`,
+      { parse_mode: "HTML" },
+    );
+    log.info({ ...parsed, stepsRun: result.stepsRun }, "web_build workflow completed");
+  }
+}
+
 // ── /commands ─────────────────────────────────────────────────────────────────
 
 export async function handleCommands(ctx: Context): Promise<void> {
@@ -461,13 +545,15 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<code>/untarget &lt;company&gt;</code> — remove a specific prospect\n` +
     `<code>/outbound</code> — ICP-score the whole list (no approval needed)\n` +
     `<code>/outbound &lt;company&gt;</code> — score a single company ad-hoc\n` +
-    `<code>/proofdrop &lt;company&gt;</code> — 🎁 Proof Drop: research → artifact → outreach (HITL ✋)\n\n` +
+    `<code>/proofdrop &lt;company&gt;</code> — 🎁 Proof Drop: research → artifact → build → outreach (HITL ✋)\n` +
+    `<code>/webbuild Client preset slug</code> — 🌐 E2E cinematic landing (e.g. <code>/webbuild AgentOps neon showcase-1</code>)\n\n` +
 
     `<b>🏭 Workflows — run a company SOP in one command</b>\n` +
     `<code>/workflows</code> — list all available procedures\n` +
     `<code>/run onboarding company=Acme</code> — score → research → welcome email → GitHub repo\n` +
     `<code>/run outbound company=Stripe</code> — score → find hook → cold email\n` +
-    `<code>/run proof_drop company=Linear</code> — 🎁 research → artifact concept → Proof Drop email\n` +
+    `<code>/run proof_drop company=Linear</code> — 🎁 research → artifact → build → Proof Drop email\n` +
+    `<code>/run web_build client=AgentOps preset=neon slug=showcase-1</code> — 🌐 preset → build → deploy\n` +
     `<code>/run weekly_digest</code> — review memory + open items + Monday plan\n\n` +
 
     `<b>⚡ Power-user direct routing</b>\n` +
