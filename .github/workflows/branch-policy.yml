@@ -30,14 +30,17 @@ jobs:
           echo "When beta is validated, open PR: beta → stable"
           exit 1
 
-      - name: beta accepts feature branches only
+      # Beta is the integration branch: ANY work/agent branch belongs here. We reject
+      # only the promotion branches (main/stable) instead of allowlisting prefixes —
+      # a prefix allowlist drifts every time a new agent tool appears (cursor/, claude/,
+      # codex/, …) and silently breaks that agent's PRs. Inverting the rule fixes that
+      # class of failure permanently. Merge is still gated by branch protection + full CI.
+      - name: beta rejects promotion branches only
         if: >-
           github.base_ref == 'beta' &&
-          !startsWith(github.head_ref, 'feat/') &&
-          !startsWith(github.head_ref, 'fix/') &&
-          !startsWith(github.head_ref, 'chore/') &&
-          !startsWith(github.head_ref, 'cursor/') &&
-          !startsWith(github.head_ref, 'claude/')
+          (github.head_ref == 'main' || github.head_ref == 'stable')
         run: |
-          echo "::error::PRs to beta must come from feat/*, fix/*, chore/*, cursor/*, or claude/* branches."
+          echo "::error::PRs to beta cannot come from 'main' or 'stable' (those are promotion targets)."
+          echo "Head branch '${{ github.head_ref }}' should never be the source of a beta PR."
+          echo "Open beta PRs from a work branch (feat/*, fix/*, chore/*, or any agent branch)."
           exit 1
