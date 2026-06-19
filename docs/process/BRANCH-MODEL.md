@@ -21,7 +21,7 @@ feat/*           ●─●   ●─●                       short-lived, cut fr
 | **`main`** | Production truth | **Founder only** (CODEOWNERS + branch protection) | Hetzner VPS via CD |
 | **`stable`** | Last validated release line | **Founder only** | Never deploys directly |
 | **`beta`** | Active integration | Agents + founder via PR | Never deploys |
-| **`feat/*`** `fix/*` `chore/*` | One task per branch | PR → `beta` | Never |
+| **`feat/*`** `fix/*` `chore/*` + any agent branch (`cursor/*`, `claude/*`, …) | One task per branch | PR → `beta` | Never |
 
 ## Rules (non-negotiable)
 
@@ -32,7 +32,9 @@ feat/*           ●─●   ●─●                       short-lived, cut fr
    git checkout stable && git pull origin stable
    git checkout -b feat/my-feature
    ```
-3. **Open PRs to `beta`** — CI + branch-policy workflow must pass.
+3. **Open PRs to `beta`** — CI + branch-policy workflow must pass. Any work/agent
+   branch may target `beta`; the policy rejects only `main`/`stable` as a beta PR head
+   (no prefix allowlist to keep in sync — a new agent tool's branches just work).
 4. **Promotion ladder** (founder merges in GitHub UI):
    - When `beta` is green + live-verified → PR **`beta` → `stable`**
    - When ready for production → PR **`stable` → `main`** → CD deploys
