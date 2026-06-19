@@ -104,10 +104,18 @@ async function sendMondayBrief(): Promise<void> {
     return;
   }
 
-  const res = (await office.invoke(
-    { messages: [new HumanMessage(prompt)] },
-    config,
-  )) as { messages: Array<{ content: unknown; _getType?: () => string; tool_calls?: unknown[] }> };
+  // 5-minute hard timeout (P0 fix): node-cron is single-threaded; if this LLM
+  // call hangs, ALL other jobs (hourly signal sweep, budget alerts) queue behind
+  // it for the rest of the day. We abort unconditionally after 5 minutes so
+  // the scheduler loop keeps running even on a Monday morning LLM outage.
+  const BRIEF_TIMEOUT_MS = 5 * 60 * 1000;
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("Monday brief LLM timed out (>5 min)")), BRIEF_TIMEOUT_MS),
+  );
+  const res = (await Promise.race([
+    office.invoke({ messages: [new HumanMessage(prompt)] }, config),
+    timeoutPromise,
+  ])) as { messages: Array<{ content: unknown; _getType?: () => string; tool_calls?: unknown[] }> };
 
   // Extract last AI reply
   let brief = "📅 Monday Brief — no content generated.";

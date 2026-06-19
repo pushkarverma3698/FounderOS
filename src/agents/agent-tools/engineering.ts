@@ -101,7 +101,8 @@ export const githubWrite = tool(
     });
 
     if (!res.success) return `GitHub ${action} failed: ${res.error}`;
-    await writeAuditEntry({ action: `github_${action}`, idempotency_key: key, payload: { action, owner, repo, title }, tenant_id: TENANT });
+    const auditGh = await writeAuditEntry({ action: `github_${action}`, idempotency_key: key, payload: { action, owner, repo, title }, tenant_id: TENANT });
+    if (!auditGh.written) log.warn({ key, action }, "writeAuditEntry: conflict on github_write");
     return `✅ GitHub ${action} done: ${JSON.stringify(res.data)}`;
   },
   {

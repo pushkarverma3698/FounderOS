@@ -144,7 +144,8 @@ export function finalReply(res: { messages?: OfficeMessage[] }): string {
       return text.trim();
     }
   }
-  return "✅ Done.";
+  log.warn("finalReply: no AI or tool message found — office completed without producing output");
+  return "⚠️ No reply generated — agent completed without output. Check /runs.";
 }
 
 /**
@@ -233,12 +234,17 @@ export async function resolvePendingApproval(
 ): Promise<ApprovalRequest | null> {
   const pending = await getPendingApproval(office as Parameters<typeof getPendingApproval>[0], config);
   if (!pending) return null;
+  // Checkpoint-first ordering (P1 fix): clear the LangGraph checkpoint BEFORE
+  // marking the DB row resolved. A crash between these two is recoverable:
+  // the boot scan re-runs getPendingApproval() and finds the checkpoint still
+  // interrupted, then can retry. If we mark the DB first and crash before the
+  // checkpoint is cleared, the HITL row is gone but the thread is stuck forever.
+  await office.invoke(new Command({ resume: "rejected" }), config);
   const threadId = config?.configurable?.thread_id as string | undefined;
   if (threadId) {
     const row = await getPendingInterrupt(threadId);
     if (row) await resolveInterrupt(row.interrupt_id, "rejected");
   }
-  await office.invoke(new Command({ resume: "rejected" }), config);
   return pending;
 }
 
@@ -760,6 +766,11 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
         if (approval) {
           trace.event("hitl.interrupt", { title: approval.title, shellFastPath: true });
           await sendApprovalCard(session, approval);
+        } else {
+          // Shell fast-path ran but the approval card could not be fetched — surface this
+          // rather than silently returning with the typing indicator stopped and no reply.
+          log.warn({ chatId }, "Shell fast-path: invoke succeeded but approval card is null");
+          await session.onSystemNotice("⚠️ Shell command queued but approval card could not be fetched — check /status.");
         }
         return;
       }

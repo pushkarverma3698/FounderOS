@@ -107,12 +107,15 @@ export const linkedinPostTool: UnifiedTool = {
       return { success: false, error: "LinkedIn post failed — provider returned no post id" };
     }
 
-    await writeAuditEntry({
+    const audit = await writeAuditEntry({
       tenant_id,
       action: "linkedin_post",
       idempotency_key,
       payload: { post_id: postId, text: text.slice(0, 100), visibility, backend: getLinkedInBackend() },
     });
+    if (!audit.written) {
+      log.warn({ idempotency_key }, "writeAuditEntry: conflict — idempotency key already existed; LinkedIn post may have been published twice");
+    }
 
     log.info({ post_id: postId, tenant: tenant_id }, "LinkedIn post published");
     return { success: true, data: { post_id: postId, post_url: data?.["post_url"] } };
