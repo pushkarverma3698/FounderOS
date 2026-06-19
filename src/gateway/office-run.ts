@@ -909,7 +909,10 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
     }
   } catch (err) {
     stopTyping();
-    trace.event("turn.error", { kind: err instanceof Error ? err.name : "unknown" });
+    trace.event("turn.error", {
+      kind: err instanceof Error ? err.name : "unknown",
+      message: err instanceof Error ? err.message : String(err),
+    });
     if (err instanceof BudgetExceededError) {
       log.warn({ chatId, reason: err.reason }, "Run stopped: budget exceeded");
       await clearThreadAfterAbort(chatId);
