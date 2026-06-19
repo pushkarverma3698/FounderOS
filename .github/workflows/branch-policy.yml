@@ -36,7 +36,8 @@ jobs:
           !startsWith(github.head_ref, 'feat/') &&
           !startsWith(github.head_ref, 'fix/') &&
           !startsWith(github.head_ref, 'chore/') &&
-          !startsWith(github.head_ref, 'cursor/')
+          !startsWith(github.head_ref, 'cursor/') &&
+          !startsWith(github.head_ref, 'claude/')
         run: |
-          echo "::error::PRs to beta must come from feat/*, fix/*, chore/*, or cursor/* branches."
+          echo "::error::PRs to beta must come from feat/*, fix/*, chore/*, cursor/*, or claude/* branches."
           exit 1
