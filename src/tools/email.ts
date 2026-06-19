@@ -71,12 +71,15 @@ export const emailTool: UnifiedTool = {
       return { success: false, error: "Email send failed — provider returned no message id" };
     }
 
-    await writeAuditEntry({
+    const audit = await writeAuditEntry({
       tenant_id,
       action: "send_email",
       idempotency_key,
       payload: { message_id: messageId, to, subject, backend: getGmailBackend() },
     });
+    if (!audit.written) {
+      log.warn({ idempotency_key, to }, "writeAuditEntry: conflict — idempotency key already existed; email may have been sent twice");
+    }
 
     log.info({ message_id: messageId, to, tenant: tenant_id }, "Email sent successfully");
     return { success: true, data: { message_id: messageId, to, subject } };

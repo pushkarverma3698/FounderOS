@@ -108,14 +108,16 @@ describe("normalizeProofDropCompany", () => {
 });
 
 describe("proof_drop workflow registry", () => {
-  it("registers a 4-step Proof Drop SOP with company param", () => {
+  it("registers a 5-step Proof Drop SOP with build + outreach", () => {
     const wf = getWorkflow("proof_drop");
     expect(wf).toBeDefined();
     expect(wf!.params).toEqual(["company"]);
-    expect(wf!.steps).toHaveLength(4);
+    expect(wf!.steps).toHaveLength(5);
     expect(wf!.steps[0]!.id).toBe("icp_gate");
     expect(wf!.steps[2]!.task).toContain("proof_drop_ready");
-    expect(wf!.steps[3]!.task.toLowerCase()).toContain("send_email");
+    expect(wf!.steps[3]!.id).toBe("build_site");
+    expect(wf!.steps[3]!.task).toContain("apply_cinematic_preset");
+    expect(wf!.steps[4]!.task.toLowerCase()).toContain("send_email");
   });
 });
 

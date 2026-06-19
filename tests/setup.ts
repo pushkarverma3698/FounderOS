@@ -53,6 +53,7 @@ process.env["TELEGRAM_CHAT_ID"] ||= "-1001234567890";
 process.env["TELEGRAM_BOT_TOKEN"] ||= "1234567890:test_bot_token_for_vitest";
 process.env["ANTHROPIC_API_KEY"] ||= "sk-ant-test-key-for-vitest";
 process.env["GOOGLE_GENERATIVE_AI_API_KEY"] ||= "test-google-key-for-vitest";
+process.env["OPENROUTER_API_KEY"] ||= "sk-or-test-key-for-vitest";
 
 // Optional vars — set to avoid any conditional failures
 process.env["LOG_LEVEL"] ||= "error"; // Suppress log noise in tests

@@ -22,6 +22,10 @@ import {
   extractEngineeringHandoff,
   formatEngineeringHandoffEnvelope,
 } from "../agents/handoff-engineering.js";
+import {
+  buildCinematicPipelineDirective,
+  resolveCinematicBuildParams,
+} from "../agents/cinematic-build.js";
 
 /** Routable departments (matches office.ts + eval Department). */
 export type RoutableDept =
@@ -200,9 +204,14 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
       : ` CRITICAL — GITHUB WRITE: engineering MUST call github_write or project_workflow immediately — never claim an issue/PR was created without an approval card.`;
   }
   if (dept === "engineering" && CINEMATIC_BUILD_RE.test(text)) {
-    directive +=
-      ` CRITICAL — CINEMATIC BUILD: call claude_code ONCE with the complete brief (client, preset, deliverables). ` +
-      `NEVER use project_workflow or hand-rolled shell for scaffolding — claude_code owns multi-step builds.`;
+    try {
+      const params = resolveCinematicBuildParams(text);
+      directive += ` ${buildCinematicPipelineDirective(params)}`;
+    } catch {
+      directive +=
+        ` CRITICAL — CINEMATIC BUILD: call apply_cinematic_preset, then claude_code ONCE, then deploy_static_site if deploy requested. ` +
+        `NEVER use project_workflow for scaffolding.`;
+    }
   }
   if (dept === "engineering") {
     const handoff = extractEngineeringHandoff(text);

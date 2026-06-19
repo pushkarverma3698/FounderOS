@@ -27,11 +27,12 @@ import {
 } from "../outbound/proof-drop.js";
 import { getSystemStatus, formatRichStatus } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
-import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals, countPendingDeptSignals, listPendingDeptSignals, getRecentLlmCosts, getTodayCostUsd, getCostBreakdown } from "../db/queries.js";
+import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals, countPendingDeptSignals, listPendingDeptSignals, getRecentLlmCosts, getTodayCostUsd, getCostBreakdown, getActionLogSummary } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
 import { runWorkflow, validateParams } from "../workflows/runner.js";
+import { isValidCinematicPreset } from "../agents/cinematic-build.js";
 import { formatSignalsMessage, formatRunsMessage, parseRunsLimit } from "./pipeline-format.js";
 import { formatProviderStatusLine, getLastProviderProbe } from "../infra/provider-probes.js";
 import { buildWelcomeMessage } from "./capability-message.js";
@@ -174,15 +175,18 @@ export async function handleStatus(ctx: Context): Promise<void> {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    // Fetch all data in parallel; each query has its own fallback
+    // Fetch all data in parallel. Failures are surfaced as undefined so the
+    // status card can show ⚠️ rather than silently returning zeroed metrics
+    // that make the system appear healthy when the DB is down (P2 fix).
+    let dbError = false;
     const [systemData, founderCtx, activity, lastEvent, outboundTargets, pendingSignals, todayUsd] = await Promise.all([
       getSystemStatus(),
-      getFounderContext(TENANT).catch(() => ({} as Record<string, unknown>)),
-      getActivitySummary(TENANT, todayStart).catch(() => ({} as Record<string, number>)),
-      getLastEpisodicEvent(TENANT).catch(() => null),
-      getOutboundTargets(TENANT).catch(() => [] as string[]),
-      countPendingDeptSignals(TENANT).catch(() => 0),
-      getTodayCostUsd(TENANT).catch(() => 0),
+      getFounderContext(TENANT).catch((err) => { log.warn({ err: (err as Error).message }, "/status: founderContext query failed"); dbError = true; return {} as Record<string, unknown>; }),
+      getActivitySummary(TENANT, todayStart).catch((err) => { log.warn({ err: (err as Error).message }, "/status: activitySummary query failed"); dbError = true; return {} as Record<string, number>; }),
+      getLastEpisodicEvent(TENANT).catch((err) => { log.warn({ err: (err as Error).message }, "/status: lastEpisodic query failed"); dbError = true; return null; }),
+      getOutboundTargets(TENANT).catch((err) => { log.warn({ err: (err as Error).message }, "/status: outboundTargets query failed"); dbError = true; return [] as string[]; }),
+      countPendingDeptSignals(TENANT).catch((err) => { log.warn({ err: (err as Error).message }, "/status: pendingSignals query failed"); dbError = true; return 0; }),
+      getTodayCostUsd(TENANT).catch((err) => { log.warn({ err: (err as Error).message }, "/status: todayCost query failed"); dbError = true; return 0; }),
     ]);
 
     const activeClients = Array.isArray(founderCtx["active_clients"])
@@ -216,7 +220,8 @@ export async function handleStatus(ctx: Context): Promise<void> {
       budgetStatusLine: formatBudgetStatusLine(assessDailyBudget(todayUsd, DAILY_BUDGET_USD)),
     });
 
-    await ctx.reply(message, { parse_mode: "HTML" });
+    const dbWarning = dbError ? "\n\n⚠️ <b>DB warning:</b> one or more status queries failed — metrics above may be incomplete. Check logs." : "";
+    await ctx.reply(message + dbWarning, { parse_mode: "HTML" });
   } catch (err) {
     await ctx.reply(`❌ Status check failed: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
   }
@@ -335,6 +340,36 @@ export async function handleOutbound(
 
 // ── /proofdrop — Phase D-Bis Proof Drop workflow shortcut ─────────────────────
 
+/**
+ * Format action_log rows into a "Proof of Work" Markdown table.
+ * Pure function — extracted for testability.
+ */
+export function formatProofOfWorkTable(
+  rows: Array<{ action: string; count: number; lastAt: Date }>,
+  days: number,
+): string {
+  if (rows.length === 0) {
+    return `No actions logged in the last ${days} days.`;
+  }
+  const now = new Date();
+  const dateRange = `${new Date(now.getTime() - days * 86_400_000).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}–${now.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+  const totalActions = rows.reduce((s, r) => s + r.count, 0);
+
+  const lines = rows.map((r) => {
+    const lastAtStr = r.lastAt.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    return `| ${r.action.padEnd(24)} | ${String(r.count).padStart(5)} | ${lastAtStr.padEnd(8)} |`;
+  });
+
+  return (
+    `📊 <b>Proof of Work — Last ${days} Days</b> (${dateRange})\n\n` +
+    `<pre>| Action                   | Count | Last At  |\n` +
+    `|--------------------------|-------|----------|\n` +
+    lines.join("\n") +
+    `</pre>\n\n` +
+    `⚡ <b>${totalActions} total actions</b> by FounderOS`
+  );
+}
+
 export async function handleProofDrop(
   ctx: Context,
   runOfficeText: (ctx: Context, text: string) => Promise<void>,
@@ -342,14 +377,21 @@ export async function handleProofDrop(
   const arg = (ctx.match ?? "").toString().trim();
 
   if (!arg) {
-    const stats = await getProofDropStats(TENANT);
+    // No company arg → show Proof of Work table + pipeline stats
+    const [stats, auditRows] = await Promise.all([
+      getProofDropStats(TENANT),
+      getActionLogSummary(TENANT, 7).catch(() => [] as Array<{ action: string; count: number; lastAt: Date }>),
+    ]);
+    const proofTable = formatProofOfWorkTable(auditRows, 7);
     await ctx.reply(
-      `🎁 <b>Proof Drop Pipeline</b> (Phase D-Bis GTM)\n\n` +
-        `${formatProofDropStats(stats)}\n\n` +
+      `${proofTable}\n\n` +
+        `<b>Proof Drop Pipeline</b>\n${formatProofDropStats(stats)}\n\n` +
         `<b>Usage:</b> <code>/proofdrop CompanyName</code>\n` +
         `Example: <code>/proofdrop Linear</code>\n\n` +
-        `Flow: ICP gate → research → artifact concept → outreach draft (HITL ✋)\n` +
-        `Target: ${stats.target}/week high-craft drops.`,
+        `Flow: ICP gate → research → artifact → build site → outreach (HITL ✋)\n` +
+        `Target: ${stats.target}/week high-craft drops.\n\n` +
+        `To draft a LinkedIn "Build in Public" post from this data:\n` +
+        `<code>/q marketing draft a LinkedIn post from my Proof of Work stats</code>`,
       { parse_mode: "HTML" },
     );
     return;
@@ -393,6 +435,88 @@ export async function handleProofDrop(
   }
 }
 
+// ── /webbuild — cinematic-web E2E shortcut ─────────────────────────────────────
+
+function parseWebBuildArgs(raw: string): { client: string; preset: string; slug: string } | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const kv = parseRunArgs(`web_build ${trimmed}`);
+  if (kv?.params["client"] && kv.params["preset"] && kv.params["slug"]) {
+    return {
+      client: kv.params["client"],
+      preset: kv.params["preset"].toLowerCase(),
+      slug: kv.params["slug"].toLowerCase(),
+    };
+  }
+
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  if (parts.length < 3) return null;
+  const client = parts[0]!;
+  const preset = parts[1]!.toLowerCase();
+  const slug = parts[2]!.toLowerCase();
+  if (!isValidCinematicPreset(preset)) return null;
+  return { client, preset, slug };
+}
+
+export async function handleWebBuild(
+  ctx: Context,
+  runOfficeText: (ctx: Context, text: string) => Promise<void>,
+): Promise<void> {
+  const arg = (ctx.match ?? "").toString().trim();
+
+  if (!arg) {
+    await ctx.reply(
+      `🌐 <b>Cinematic Web Build (E2E)</b>\n\n` +
+        `<b>Usage:</b> <code>/webbuild Client preset slug</code>\n` +
+        `Example: <code>/webbuild AgentOps neon showcase-1</code>\n\n` +
+        `Or: <code>/webbuild client=AgentOps preset=neon slug=showcase-1</code>\n\n` +
+        `Flow: apply_cinematic_preset → claude_code → deploy_static_site (HITL on build + deploy)\n` +
+        `Presets: neon · glass · terminal · minimal`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const parsed = parseWebBuildArgs(arg);
+  if (!parsed) {
+    await ctx.reply(
+      "❌ Invalid args. Example: <code>/webbuild AgentOps neon showcase-1</code>",
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const wf = getWorkflow("web_build");
+  if (!wf) {
+    await ctx.reply("❌ web_build workflow not registered.", { parse_mode: "HTML" });
+    return;
+  }
+
+  const result = await runWorkflow(wf, parsed, {
+    async sendStatus(msg) {
+      await ctx.reply(msg, { parse_mode: "HTML" });
+    },
+    async runStep(task) {
+      try {
+        await runOfficeText(ctx, task);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
+
+  if (result.completed) {
+    await ctx.reply(
+      `✅ Web build workflow finished for <b>${safeHtml(parsed.client)}</b> ` +
+        `(${safeHtml(parsed.preset)} → /${safeHtml(parsed.slug)}/). Check deploy URL above.`,
+      { parse_mode: "HTML" },
+    );
+    log.info({ ...parsed, stepsRun: result.stepsRun }, "web_build workflow completed");
+  }
+}
+
 // ── /commands ─────────────────────────────────────────────────────────────────
 
 export async function handleCommands(ctx: Context): Promise<void> {
@@ -421,13 +545,15 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<code>/untarget &lt;company&gt;</code> — remove a specific prospect\n` +
     `<code>/outbound</code> — ICP-score the whole list (no approval needed)\n` +
     `<code>/outbound &lt;company&gt;</code> — score a single company ad-hoc\n` +
-    `<code>/proofdrop &lt;company&gt;</code> — 🎁 Proof Drop: research → artifact → outreach (HITL ✋)\n\n` +
+    `<code>/proofdrop &lt;company&gt;</code> — 🎁 Proof Drop: research → artifact → build → outreach (HITL ✋)\n` +
+    `<code>/webbuild Client preset slug</code> — 🌐 E2E cinematic landing (e.g. <code>/webbuild AgentOps neon showcase-1</code>)\n\n` +
 
     `<b>🏭 Workflows — run a company SOP in one command</b>\n` +
     `<code>/workflows</code> — list all available procedures\n` +
     `<code>/run onboarding company=Acme</code> — score → research → welcome email → GitHub repo\n` +
     `<code>/run outbound company=Stripe</code> — score → find hook → cold email\n` +
-    `<code>/run proof_drop company=Linear</code> — 🎁 research → artifact concept → Proof Drop email\n` +
+    `<code>/run proof_drop company=Linear</code> — 🎁 research → artifact → build → Proof Drop email\n` +
+    `<code>/run web_build client=AgentOps preset=neon slug=showcase-1</code> — 🌐 preset → build → deploy\n` +
     `<code>/run weekly_digest</code> — review memory + open items + Monday plan\n\n` +
 
     `<b>⚡ Power-user direct routing</b>\n` +
@@ -697,6 +823,11 @@ export async function handleMisoStart(ctx: Context): Promise<void> {
     phase: "INIT",
     next_action: "send a task or /miso_plan",
   });
+
+  if (!missionId) {
+    await ctx.reply("❌ Failed to create mission — DB write returned no ID. Try again.", { parse_mode: "HTML" });
+    return;
+  }
 
   await postMissionDashboard(sessionId, missionId);
   const row = await getMissionById(missionId);

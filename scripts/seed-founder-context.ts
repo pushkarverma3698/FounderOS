@@ -64,7 +64,7 @@ const context = {
     "The Autonomous Studio for AI/dev-tool startups — governed AI delivery on FounderOS + cinematic design finish. FounderOS is live proof (1250+ tests, HITL on every external action).",
 
   website_builder:
-    "cinematic-web presets (separate repo) + FounderOS engineering pipeline: claude_code build → deploy_static_site → nginx at proof.turicks.com/showcase-1/ and /clients/{slug}/. HITL on build + deploy. NOT self-serve SaaS yet (SCALE gate deferred).",
+    "cinematic-web presets (bundled in assets/cinematic-presets + optional CINEMATIC_WEB_PRESETS_ROOT clone) + apply_cinematic_preset → claude_code → deploy_static_site → nginx at proof.turicks.com/showcase-1/ and /clients/{slug}/. Commands: /webbuild Client preset slug, /run web_build. HITL on build + deploy.",
 
   proof_gallery:
     "proof.turicks.com — 3 showcases planned (AgentOps fictional AI observability = showcase-1). IP fallback: http://95.217.162.12/showcase-1/",

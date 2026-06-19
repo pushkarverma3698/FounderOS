@@ -24,6 +24,14 @@ describe("getWorkflow", () => {
   it("returns undefined for unknown id", () => {
     expect(getWorkflow("nonexistent")).toBeUndefined();
   });
+
+  it("returns web_build workflow with client preset slug params", () => {
+    const wf = getWorkflow("web_build");
+    expect(wf).toBeDefined();
+    expect(wf!.params).toEqual(["client", "preset", "slug"]);
+    expect(wf!.steps[0]!.task).toContain("apply_cinematic_preset");
+    expect(wf!.steps[0]!.task).toContain("deploy_static_site");
+  });
 });
 
 describe("listWorkflows", () => {

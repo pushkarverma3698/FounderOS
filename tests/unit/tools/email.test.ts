@@ -12,7 +12,7 @@ vi.mock("../../../src/infra/providers/index.js", () => ({
 }));
 
 const mockHasBeenAudited = vi.fn(async () => false);
-const mockWriteAuditEntry = vi.fn(async () => undefined);
+const mockWriteAuditEntry = vi.fn(async () => ({ written: true }));
 
 vi.mock("../../../src/db/queries.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
@@ -33,7 +33,7 @@ describe("emailTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockHasBeenAudited.mockResolvedValue(false);
-    mockWriteAuditEntry.mockResolvedValue(undefined);
+    mockWriteAuditEntry.mockResolvedValue({ written: true });
     mockProviderSendEmail.mockResolvedValue({
       success: true,
       data: { message_id: "msg_abc123", to: "alice@example.com", subject: "Hello" },

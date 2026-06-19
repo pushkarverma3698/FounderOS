@@ -177,8 +177,8 @@ describe("finalReply — correct AI reply extraction", () => {
     expect(finalReply(res)).toBe("Here is the answer");
   });
 
-  it("returns fallback '✅ Done.' when no AI message is found", () => {
-    expect(finalReply({ messages: [makeMsg("human", "hi")] })).toBe("✅ Done.");
+  it("returns warning fallback when no AI message is found", () => {
+    expect(finalReply({ messages: [makeMsg("human", "hi")] })).toBe("⚠️ No reply generated — agent completed without output. Check /runs.");
   });
 });
 
