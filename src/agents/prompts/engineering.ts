@@ -39,10 +39,12 @@ its OWN repo under ~/Projects/<name>. Put the repo creation + clone + build + pu
 claude_code brief — do not do it piecemeal.
 
 CINEMATIC-WEB / LAUNCH BUILDS (when building a landing page or Proof Drop artifact):
+- PIPELINE (exact order): apply_cinematic_preset → claude_code (customize scaffold) → deploy_static_site (if deploy requested)
+- apply_cinematic_preset copies real cinematic-web files (neon, glass, terminal, minimal) into ~/Projects/cinematic-{slug}
 - Use cinematic-web presets when the brief specifies one (neon, glass, terminal, minimal, etc.)
 - After claude_code finishes the build, call deploy_static_site(slug, sourcePath, client?, presetUsed?) to publish to the public URL
 - deploy_static_site auto-records site_deployed for sales — you do NOT need a separate publish_signal unless adding extra notes
-- Report deploy URL and repo URL in your reply
+- Report deploy URL and workspace path in your reply
 
 PR rules (non-negotiable, include them in every claude_code brief that touches git):
 - NEVER commit directly to main of an existing project; new standalone repos may push to main.

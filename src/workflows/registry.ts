@@ -110,10 +110,38 @@ const WORKFLOWS: WorkflowDef[] = [
           "Design a custom Proof Drop artifact concept for {company}. Pick ONE type: hero_redesign (cinematic landing hero mock), launch_teaser (scroll narrative outline), or brand_motion (WebGL/motion concept). Output: artifact type, 3-sentence creative brief, mood references, and why this artifact would impress their founder. Turicks voice — direct, craft-first, no hype words. Then call publish_signal(event_type:\"proof_drop_ready\", payload:{company, artifactType, artifactSummary, outreachHook}, from_dept:\"marketing\").",
       },
       {
+        id: "build_site",
+        label: "Build Proof Drop landing",
+        task:
+          "If the artifact type is hero_redesign, run the full cinematic-web E2E pipeline for {company}: " +
+          "apply_cinematic_preset(preset=\"neon\", targetDir=~/Projects/cinematic-{company}, client=\"{company}\") → " +
+          "claude_code customize the scaffold → deploy_static_site(slug=URL-safe company slug, sourcePath=~/Projects/cinematic-{company}/index.html, client=\"{company}\", presetUsed=\"neon\"). " +
+          "Include the live public URL in your reply. For non-hero_redesign types, skip this step and say which artifact type was chosen.",
+      },
+      {
         id: "outreach",
         label: "Proof Drop email",
         task:
           "Draft a Proof Drop outreach email to the founder of {company}. Lead with the artifact concept from the previous step — offer the custom mock/concept as a gift, not a pitch deck. Max 150 words. Subject ≤8 words. Sign as: Pushkar, Turicks. IMPORTANT: You MUST call send_email to request approval — do not just write the email as text.",
+      },
+    ],
+  },
+  {
+    id: "web_build",
+    name: "Cinematic Web Build & Deploy",
+    description:
+      "Full E2E website builder: apply cinematic-web preset → claude_code customize → deploy_static_site public URL.",
+    params: ["client", "preset", "slug"],
+    steps: [
+      {
+        id: "pipeline",
+        label: "Preset → build → deploy",
+        task:
+          `Execute the full cinematic-web E2E pipeline for client "{client}" using the {preset} preset (slug "{slug}"):\n` +
+          `1) apply_cinematic_preset(preset="{preset}", targetDir=~/Projects/cinematic-{slug}, client="{client}")\n` +
+          `2) claude_code — customize the scaffold into a polished landing page with index.html in ~/Projects/cinematic-{slug}\n` +
+          `3) deploy_static_site(slug="{slug}", sourcePath=~/Projects/cinematic-{slug}/index.html, client="{client}", presetUsed="{preset}")\n` +
+          `Report the public URL from deploy_static_site. All three steps are required.`,
       },
     ],
   },

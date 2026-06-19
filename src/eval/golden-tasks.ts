@@ -118,9 +118,17 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     id: "webdesign-build-landing",
     input: "Build a cinematic landing page for a fictional AI observability startup called AgentOps using the neon preset.",
     expectedRoute: "engineering",
-    expectedTools: ["claude_code"],
+    expectedTools: ["apply_cinematic_preset", "claude_code"],
     expectsHitl: true,
-    note: "Routes to engineering → claude_code HITL. Requires Claude Code CLI on host.",
+    note: "Routes to engineering → preset scaffold + claude_code HITL. Requires Claude Code CLI on host.",
+  },
+  {
+    id: "webdesign-build-and-deploy",
+    input: "Build a cinematic landing page for AgentOps using the neon preset and deploy it as showcase-1.",
+    expectedRoute: "engineering",
+    expectedTools: ["apply_cinematic_preset", "claude_code"],
+    expectsHitl: true,
+    note: "Full E2E — deploy_static_site runs after claude_code HITL approves (second HITL gate).",
   },
 
   // ── ICP Scoring (now a research mode, not a separate department) ─────────
