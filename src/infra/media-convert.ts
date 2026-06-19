@@ -60,11 +60,17 @@ async function convertViaTemp(
   }
 }
 
-/** Telegram voice note (OGG/Opus) → 16kHz mono WAV (Gemini-supported). */
-export async function oggToWav(ogg: Buffer): Promise<Buffer> {
-  return convertViaTemp(ogg, "ogg", "wav", (i, o) => [
+/** Browser-recorded audio (webm/ogg/mp4) → 16kHz mono WAV for Gemini transcription. */
+export async function audioToWav(input: Buffer, inExt: string): Promise<Buffer> {
+  const ext = inExt.replace(/^\./, "") || "webm";
+  return convertViaTemp(input, ext, "wav", (i, o) => [
     "-y", "-i", i, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", o,
   ]);
+}
+
+/** Telegram voice note (OGG/Opus) → 16kHz mono WAV (Gemini-supported). */
+export async function oggToWav(ogg: Buffer): Promise<Buffer> {
+  return audioToWav(ogg, "ogg");
 }
 
 /** Gemini TTS raw PCM (s16le, mono) → OGG/Opus for Telegram sendVoice. */

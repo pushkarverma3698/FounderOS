@@ -13,21 +13,41 @@ function formatToolLine(type: string, data?: Record<string, unknown>): string {
   return `${ok ? "✓" : "✗"} ${name}${data?.error ? `: ${String(data.error)}` : ""}`;
 }
 
-function deptFromHint(hint: unknown): DepartmentId | null {
-  const lower = String(hint ?? "").toLowerCase();
+function stripHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .trim();
+}
+
+function deptFromEvent(data?: Record<string, unknown>): DepartmentId | null {
+  const direct = String(data?.department ?? "").toLowerCase();
+  if ((DEPARTMENTS as readonly string[]).includes(direct)) return direct as DepartmentId;
+  const lower = String(data?.hint ?? "").toLowerCase();
   for (const d of DEPARTMENTS) {
-    if (lower.includes(d)) return d;
+    if (lower === d || lower.includes(d)) return d;
   }
   return null;
 }
 
-export function useOfficeStream(sessionId: string) {
+export interface OfficeStreamOptions {
+  onAssistantReply?: (text: string) => void;
+}
+
+export function useOfficeStream(sessionId: string, options: OfficeStreamOptions = {}) {
   const [lines, setLines] = useState<StreamLine[]>([]);
   const [connected, setConnected] = useState(false);
   const [activeDept, setActiveDept] = useState<DepartmentId | null>(null);
   const [pendingHitl, setPendingHitl] = useState<PendingHitl | null>(null);
   const [missionTick, setMissionTick] = useState(0);
   const [auditTick, setAuditTick] = useState(0);
+
+  const onReplyRef = useRef(options.onAssistantReply);
+  onReplyRef.current = options.onAssistantReply;
 
   const pushLine = useCallback((type: StreamLine["type"], text: string, meta?: Record<string, unknown>) => {
     setLines((prev) => [
@@ -46,6 +66,15 @@ export function useOfficeStream(sessionId: string) {
 
   onEventRef.current = (payload) => {
     const { type, data } = payload;
+    if (type === "stream.connected") {
+      setConnected(true);
+      return;
+    }
+    if (type === "system.notice") {
+      const notice = stripHtml(String(data?.notice ?? ""));
+      if (notice) pushLine(data?.voice ? "user" : "system", notice, data);
+      return;
+    }
     if (type === "hitl.pending") {
       setPendingHitl({
         title: String(data?.title ?? "Approval required"),
@@ -57,21 +86,31 @@ export function useOfficeStream(sessionId: string) {
     if (type === "turn.complete") {
       setPendingHitl(null);
       const reply = data?.reply ?? data?.replyHtml;
-      if (reply) pushLine("assistant", String(reply));
+      if (reply) {
+        const text = String(reply);
+        pushLine("assistant", text);
+        onReplyRef.current?.(text);
+      }
+      const toolErrors = data?.toolErrors;
+      if (Array.isArray(toolErrors) && toolErrors.length > 0) {
+        pushLine("error", toolErrors.map(String).join("\n"));
+      }
       setAuditTick((n) => n + 1);
     }
     if (type === "turn.error") {
       pushLine("error", String(data?.message ?? data?.error ?? "Turn failed"));
     }
     if (type === "department.routed") {
-      const dept = deptFromHint(data?.hint ?? data?.department);
+      const dept = deptFromEvent(data);
       if (dept) setActiveDept(dept);
-      pushLine("system", `Routed: ${String(data?.hint ?? data?.department ?? "supervisor")}`);
+      const label = dept ?? String(data?.department ?? data?.hint ?? "supervisor");
+      pushLine("system", `Routed → ${label}`);
     }
     if (type === "mission.updated") {
       setMissionTick((n) => n + 1);
     }
     if (type === "tool.start" || type === "tool.end") {
+      if (data?.notice) return;
       pushLine("tool", formatToolLine(type, data), data);
     }
   };
