@@ -38,7 +38,7 @@ jobs:
             git fetch --quiet origin "$BRANCH"
             git reset --hard "origin/$BRANCH"
             git clean -fd
-            chmod +x scripts/vps-website-builder-e2e-verify.sh scripts/vps-proof-nginx-setup.sh scripts/vps-live-showcase.sh 2>/dev/null || true
+            chmod +x scripts/vps-website-builder-e2e-verify.sh scripts/vps-website-builder-smoke.sh scripts/vps-proof-nginx-setup.sh 2>/dev/null || true
 
             # Ensure STATIC_SITE_PUBLIC_BASE_URL (idempotent)
             if ! grep -q '^STATIC_SITE_PUBLIC_BASE_URL=' .env 2>/dev/null; then
@@ -46,41 +46,19 @@ jobs:
               echo "==> Added STATIC_SITE_PUBLIC_BASE_URL to .env"
             fi
 
-            # nginx for static hosting (passwordless sudo or VPS_SUDO_PASSWORD)
+            # nginx for static hosting
             if ! command -v nginx >/dev/null 2>&1; then
               if [ -n "${VPS_SUDO_PASSWORD:-}" ]; then
                 echo "$VPS_SUDO_PASSWORD" | sudo -S apt-get update -qq
                 echo "$VPS_SUDO_PASSWORD" | sudo -S apt-get install -y -qq nginx
               else
-                sudo -n apt-get update -qq && sudo -n apt-get install -y -qq nginx || echo "!! nginx install skipped (no sudo)"
+                sudo -n apt-get update -qq && sudo -n apt-get install -y -qq nginx || echo "!! nginx install skipped"
               fi
             fi
             if command -v nginx >/dev/null 2>&1; then
               bash scripts/vps-proof-nginx-setup.sh || true
             fi
 
-            # Full automated verify
-            bash scripts/vps-website-builder-e2e-verify.sh 2>&1 | tee /tmp/vps-wb-e2e.log
-            tail -40 /tmp/vps-wb-e2e.log
-
-            # Evidence: public URL + health
-            PUBLIC_BASE="$(grep '^STATIC_SITE_PUBLIC_BASE_URL=' .env | cut -d= -f2- | tr -d '"')"
-            curl -s -o /dev/null -w "showcase HTTP %{http_code}\n" "${PUBLIC_BASE%/}/showcase-1/"
-            curl -sf http://127.0.0.1:3001/health | head -c 400 || echo "!! /health failed"
-            echo ""
-            echo "==> apply_cinematic_preset smoke (bundled neon)"
-            node --env-file=.env --import tsx/esm -e "
-            import { executeApplyCinematicPreset } from './src/tools/cinematic-preset.ts';
-            import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
-            import { join } from 'node:path';
-            import { tmpdir } from 'node:os';
-            const root = mkdtempSync(join(tmpdir(), 'prod-preset-'));
-            process.env['PROJECT_WORKFLOW_ROOT'] = root;
-            const target = join(root, 'cinematic-smoke');
-            const r = executeApplyCinematicPreset({ preset: 'neon', targetDir: target, client: 'AgentOps' });
-            if (!r.success) { console.error('FAIL', r.error); process.exit(1); }
-            const html = readFileSync(join(target, 'index.html'), 'utf-8');
-            if (!html.includes('AgentOps')) { console.error('FAIL missing client'); process.exit(1); }
-            console.log('✅ apply_cinematic_preset smoke OK');
-            rmSync(root, { recursive: true, force: true });
-            "
+            # Fast prod smoke (evidence artifact)
+            bash scripts/vps-website-builder-smoke.sh 2>&1 | tee /tmp/vps-wb-smoke-latest.log
+            tail -50 /tmp/vps-wb-smoke-latest.log
