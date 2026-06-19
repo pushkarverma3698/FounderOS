@@ -46,6 +46,11 @@ describe("model id parsing", () => {
 });
 
 describe("getModel provider selection", () => {
+  beforeEach(() => {
+    // P5: key must be present for default openrouter model to initialize
+    process.env["OPENROUTER_API_KEY"] = "sk-or-test-key-for-vitest";
+  });
+
   afterEach(() => {
     delete process.env["AGENT_MODEL"];
     delete process.env["AGENT_TEMPERATURE"];
@@ -81,6 +86,11 @@ describe("getModel provider selection", () => {
 
 describe("fallback middleware config", () => {
   const savedFallbacks = process.env["AGENT_FALLBACK_MODELS"];
+
+  beforeEach(() => {
+    // Ensure the default OpenRouter model can initialize (P5: key required at startup)
+    process.env["OPENROUTER_API_KEY"] ||= "sk-or-test-key-for-vitest";
+  });
 
   afterEach(() => {
     if (savedFallbacks !== undefined) process.env["AGENT_FALLBACK_MODELS"] = savedFallbacks;
