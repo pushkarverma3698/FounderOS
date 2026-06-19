@@ -74,15 +74,15 @@ describe("finalReply", () => {
     expect(finalReply(res)).toBe("Found 3 results for your query.");
   });
 
-  it("returns '✅ Done.' when messages array is empty", () => {
-    expect(finalReply({ messages: [] })).toBe("✅ Done.");
+  it("returns warning when messages array is empty", () => {
+    expect(finalReply({ messages: [] })).toBe("⚠️ No reply generated — agent completed without output. Check /runs.");
   });
 
-  it("returns '✅ Done.' when only human messages present", () => {
+  it("returns warning when only human messages present", () => {
     const res = {
       messages: [humanMsg("Hello"), humanMsg("Still waiting")],
     };
-    expect(finalReply(res)).toBe("✅ Done.");
+    expect(finalReply(res)).toBe("⚠️ No reply generated — agent completed without output. Check /runs.");
   });
 
   it("skips AI messages that are pure routing hops (have tool_calls)", () => {

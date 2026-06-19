@@ -107,12 +107,15 @@ export const calendarTool: UnifiedTool = {
     }
 
     if (idempotency_key) {
-      await writeAuditEntry({
+      const audit = await writeAuditEntry({
         tenant_id,
         action: "create_calendar_event",
         idempotency_key,
         payload: { event_id: eventId, title, start: startDt, backend: getCalendarBackend() },
       });
+      if (!audit.written) {
+        log.warn({ idempotency_key }, "writeAuditEntry: conflict on calendar event");
+      }
     }
 
     log.info({ eventId, title, startDt, timezone }, "Calendar event created");

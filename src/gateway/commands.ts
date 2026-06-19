@@ -27,7 +27,7 @@ import {
 } from "../outbound/proof-drop.js";
 import { getSystemStatus, formatRichStatus } from "./status.js";
 import { parseContextCommand, formatContextDisplay } from "./context-command.js";
-import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals, countPendingDeptSignals, listPendingDeptSignals, getRecentLlmCosts, getTodayCostUsd, getCostBreakdown } from "../db/queries.js";
+import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals, countPendingDeptSignals, listPendingDeptSignals, getRecentLlmCosts, getTodayCostUsd, getCostBreakdown, getActionLogSummary } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
@@ -175,15 +175,18 @@ export async function handleStatus(ctx: Context): Promise<void> {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    // Fetch all data in parallel; each query has its own fallback
+    // Fetch all data in parallel. Failures are surfaced as undefined so the
+    // status card can show ⚠️ rather than silently returning zeroed metrics
+    // that make the system appear healthy when the DB is down (P2 fix).
+    let dbError = false;
     const [systemData, founderCtx, activity, lastEvent, outboundTargets, pendingSignals, todayUsd] = await Promise.all([
       getSystemStatus(),
-      getFounderContext(TENANT).catch(() => ({} as Record<string, unknown>)),
-      getActivitySummary(TENANT, todayStart).catch(() => ({} as Record<string, number>)),
-      getLastEpisodicEvent(TENANT).catch(() => null),
-      getOutboundTargets(TENANT).catch(() => [] as string[]),
-      countPendingDeptSignals(TENANT).catch(() => 0),
-      getTodayCostUsd(TENANT).catch(() => 0),
+      getFounderContext(TENANT).catch((err) => { log.warn({ err: (err as Error).message }, "/status: founderContext query failed"); dbError = true; return {} as Record<string, unknown>; }),
+      getActivitySummary(TENANT, todayStart).catch((err) => { log.warn({ err: (err as Error).message }, "/status: activitySummary query failed"); dbError = true; return {} as Record<string, number>; }),
+      getLastEpisodicEvent(TENANT).catch((err) => { log.warn({ err: (err as Error).message }, "/status: lastEpisodic query failed"); dbError = true; return null; }),
+      getOutboundTargets(TENANT).catch((err) => { log.warn({ err: (err as Error).message }, "/status: outboundTargets query failed"); dbError = true; return [] as string[]; }),
+      countPendingDeptSignals(TENANT).catch((err) => { log.warn({ err: (err as Error).message }, "/status: pendingSignals query failed"); dbError = true; return 0; }),
+      getTodayCostUsd(TENANT).catch((err) => { log.warn({ err: (err as Error).message }, "/status: todayCost query failed"); dbError = true; return 0; }),
     ]);
 
     const activeClients = Array.isArray(founderCtx["active_clients"])
@@ -217,7 +220,8 @@ export async function handleStatus(ctx: Context): Promise<void> {
       budgetStatusLine: formatBudgetStatusLine(assessDailyBudget(todayUsd, DAILY_BUDGET_USD)),
     });
 
-    await ctx.reply(message, { parse_mode: "HTML" });
+    const dbWarning = dbError ? "\n\n⚠️ <b>DB warning:</b> one or more status queries failed — metrics above may be incomplete. Check logs." : "";
+    await ctx.reply(message + dbWarning, { parse_mode: "HTML" });
   } catch (err) {
     await ctx.reply(`❌ Status check failed: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
   }
@@ -336,6 +340,36 @@ export async function handleOutbound(
 
 // ── /proofdrop — Phase D-Bis Proof Drop workflow shortcut ─────────────────────
 
+/**
+ * Format action_log rows into a "Proof of Work" Markdown table.
+ * Pure function — extracted for testability.
+ */
+export function formatProofOfWorkTable(
+  rows: Array<{ action: string; count: number; lastAt: Date }>,
+  days: number,
+): string {
+  if (rows.length === 0) {
+    return `No actions logged in the last ${days} days.`;
+  }
+  const now = new Date();
+  const dateRange = `${new Date(now.getTime() - days * 86_400_000).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}–${now.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+  const totalActions = rows.reduce((s, r) => s + r.count, 0);
+
+  const lines = rows.map((r) => {
+    const lastAtStr = r.lastAt.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    return `| ${r.action.padEnd(24)} | ${String(r.count).padStart(5)} | ${lastAtStr.padEnd(8)} |`;
+  });
+
+  return (
+    `📊 <b>Proof of Work — Last ${days} Days</b> (${dateRange})\n\n` +
+    `<pre>| Action                   | Count | Last At  |\n` +
+    `|--------------------------|-------|----------|\n` +
+    lines.join("\n") +
+    `</pre>\n\n` +
+    `⚡ <b>${totalActions} total actions</b> by FounderOS`
+  );
+}
+
 export async function handleProofDrop(
   ctx: Context,
   runOfficeText: (ctx: Context, text: string) => Promise<void>,
@@ -343,14 +377,21 @@ export async function handleProofDrop(
   const arg = (ctx.match ?? "").toString().trim();
 
   if (!arg) {
-    const stats = await getProofDropStats(TENANT);
+    // No company arg → show Proof of Work table + pipeline stats
+    const [stats, auditRows] = await Promise.all([
+      getProofDropStats(TENANT),
+      getActionLogSummary(TENANT, 7).catch(() => [] as Array<{ action: string; count: number; lastAt: Date }>),
+    ]);
+    const proofTable = formatProofOfWorkTable(auditRows, 7);
     await ctx.reply(
-      `🎁 <b>Proof Drop Pipeline</b> (Phase D-Bis GTM)\n\n` +
-        `${formatProofDropStats(stats)}\n\n` +
+      `${proofTable}\n\n` +
+        `<b>Proof Drop Pipeline</b>\n${formatProofDropStats(stats)}\n\n` +
         `<b>Usage:</b> <code>/proofdrop CompanyName</code>\n` +
         `Example: <code>/proofdrop Linear</code>\n\n` +
         `Flow: ICP gate → research → artifact → build site → outreach (HITL ✋)\n` +
-        `Target: ${stats.target}/week high-craft drops.`,
+        `Target: ${stats.target}/week high-craft drops.\n\n` +
+        `To draft a LinkedIn "Build in Public" post from this data:\n` +
+        `<code>/q marketing draft a LinkedIn post from my Proof of Work stats</code>`,
       { parse_mode: "HTML" },
     );
     return;
@@ -782,6 +823,11 @@ export async function handleMisoStart(ctx: Context): Promise<void> {
     phase: "INIT",
     next_action: "send a task or /miso_plan",
   });
+
+  if (!missionId) {
+    await ctx.reply("❌ Failed to create mission — DB write returned no ID. Try again.", { parse_mode: "HTML" });
+    return;
+  }
 
   await postMissionDashboard(sessionId, missionId);
   const row = await getMissionById(missionId);

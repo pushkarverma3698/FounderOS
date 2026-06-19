@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockHasBeenAudited = vi.fn(async () => false);
-const mockWriteAuditEntry = vi.fn(async () => {});
+const mockWriteAuditEntry = vi.fn(async () => ({ written: true }));
 const mockProviderLinkedInPost = vi.fn();
 const mockProviderLinkedInAnalytics = vi.fn();
 const mockProviderLinkedInConnect = vi.fn();
@@ -42,7 +42,7 @@ describe("linkedinPostTool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockHasBeenAudited.mockResolvedValue(false);
-    mockWriteAuditEntry.mockResolvedValue(undefined);
+    mockWriteAuditEntry.mockResolvedValue({ written: true });
     mockGetLinkedInAuthorUrn.mockReturnValue("urn:li:person:TEST123");
     mockGetLinkedInBackend.mockReturnValue("direct");
     mockProviderLinkedInPost.mockResolvedValue({

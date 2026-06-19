@@ -267,13 +267,22 @@ export async function hasRecentOutboundToRecipient(
 
 /**
  * Write an action log entry AFTER a successful external action.
- * Silently ignores duplicate key violations (already performed).
+ * Returns { written: true } on first write, { written: false } if the
+ * idempotency key already existed (double-send guard silently won the race).
+ * Callers MUST check written === false and log a warning — a false return
+ * means the caller's hasBeenAudited() check was beaten by a concurrent
+ * request and the external action may have fired twice.
  */
 export async function writeAuditEntry(
   data: Omit<NewActionLog, "id" | "created_at">,
-): Promise<void> {
+): Promise<{ written: boolean }> {
   const db = getDb();
-  await db.insert(actionLog).values(data).onConflictDoNothing();
+  const rows = await db
+    .insert(actionLog)
+    .values(data)
+    .onConflictDoNothing()
+    .returning({ id: actionLog.id });
+  return { written: rows.length > 0 };
 }
 
 /** Recent action log entries for a tenant (admin/debug). */
@@ -285,6 +294,34 @@ export async function getRecentAuditEntries(tenantId: string, limit = 50) {
     .where(eq(actionLog.tenant_id, tenantId))
     .orderBy(desc(actionLog.created_at))
     .limit(limit);
+}
+
+/**
+ * Aggregate action_log for the last N days, grouped by action type.
+ * Used by the ProofDrop generator to produce a verifiable "Proof of Work" table.
+ */
+export async function getActionLogSummary(
+  tenantId: string,
+  days: number,
+): Promise<Array<{ action: string; count: number; lastAt: Date }>> {
+  const db = getDb();
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const rows = await db
+    .select({
+      action: actionLog.action,
+      count: count(actionLog.id),
+      lastAt: sql<Date>`MAX(${actionLog.created_at})`,
+    })
+    .from(actionLog)
+    .where(
+      and(
+        eq(actionLog.tenant_id, tenantId),
+        gte(actionLog.created_at, since),
+      ),
+    )
+    .groupBy(actionLog.action)
+    .orderBy(desc(sql`MAX(${actionLog.created_at})`));
+  return rows.map((r) => ({ action: r.action, count: Number(r.count), lastAt: r.lastAt }));
 }
 
 // ── Outbound Leads (outbound_leads) ──────────────────────────────────────────
@@ -362,6 +399,12 @@ export async function addSuppression(
  * Checks both exact match and domain-prefix match (e.g. "@acme.com").
  */
 export async function isSuppressed(tenantId: string, email: string): Promise<boolean> {
+  if (!email.includes("@")) {
+    // Malformed email — log and treat as not suppressed to avoid blocking valid sends
+    const { childLogger } = await import("../infra/logger.js");
+    childLogger({ module: "queries" }).warn({ email }, "isSuppressed: malformed email (no @) — treating as not suppressed");
+    return false;
+  }
   const domain = "@" + email.split("@")[1];
   const db = getDb();
   const [row] = await db
