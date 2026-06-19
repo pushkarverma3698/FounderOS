@@ -111,5 +111,39 @@ These are the launch blockers if any is unmet. All are checked by the launch gat
 **Bottom line:** the product is ready to prove itself. The only thing standing between you and
 launch is pressing the launch-gate button on prod and clearing whatever live-state item (most
 likely the LinkedIn token or brain ingest) it surfaces.
-</content>
+
+---
+
+## LIVE GATE RESULT — 2026-06-19 (run #4, GitHub Actions → VPS, conclusion: success)
+
+**Verdict: ⚠️ CONDITIONAL PASS — core system proven live; 2 send-credentials missing.**
+Ran `vps-marketing-launch-gate.yml` on `main`; SSH to prod succeeded (deploy secrets valid).
+Real probe output (not a test mock):
+
+| Check | Live result |
+|-------|-------------|
+| Deploy / health | `/health` green · JARVIS `/api/v1/health` green · UI serves SPA · `FounderOS running 🚀` |
+| Office compile | supervisor + [admin, research, comms, engineering, marketing, sales, personal, jobhunt] |
+| Brain rows | `turicks_brain 206 / embedded 206` · `knowledge_entries 84` · `founder_context 1` (23 keys) |
+| Live RAG probe | `✅ RAG OK … (3 results): 1. [TURICKS.md] (score 0.67)` — real retrieval, canonical-outage class CLEARED |
+| Founder context | `✅ Phase D-Bis strategy keys present` |
+| Office hardcore probes | **6/6 PASS** — read_context · search_web · ICP grounding · **ICP-repeat identical tools (determinism)** · shell **HITL-gated** (real OpenRouter LLM turns) |
+| Showcase | artifact 30,379 bytes · **public URL → HTTP 200** |
+
+**Blockers to actual SENDS (founder-action only — not code/agent fixable):**
+1. ⚠️ `LINKEDIN_ACCESS_TOKEN` / `LINKEDIN_AUTHOR_URN` **missing on prod** (GitHub secret empty + not in
+   `PROD_DOTENV`) → `linkedin_post` fails at send. **Fix:** mint a LinkedIn OAuth token + author URN,
+   add both to `PROD_DOTENV` (and/or the repo secrets), redeploy.
+2. ⚠️ **Gmail not ready** — `gws` CLI not installed/authed, no Composio rollback → Proof Drop email
+   blocked (`gmail_active: down`). **Fix:** `npm i -g @googleworkspace/cli && gws auth login` on the VPS,
+   **or** set `GMAIL_BACKEND=composio` + a working `COMPOSIO_API_KEY` in `PROD_DOTENV`.
+
+**What this means for tomorrow:** LinkedIn **drafting** is ready now (office + RAG + brand gate + HITL all
+proven green); **publishing** a post and sending **Proof Drop email** are blocked until the two creds
+above are set. Re-run the gate after setting them — target is `✅ PASS` (0 warnings).
+
+Note (non-blocking): Composio Gmail probe shows `client.connectedAccounts.get is not a function`
+(composio-core 0.10.0 API drift) — irrelevant while `gws` is the default backend; documented Composio
+fragility (LIMITATIONS).
+
 </invoke>
