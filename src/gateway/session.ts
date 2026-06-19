@@ -103,7 +103,7 @@ export function createWebSession(sessionId: string): GatewaySession {
       /* web transport uses markdown reply via sendResult */
     },
     onSystemNotice: async (html) => {
-      publishStreamEvent(sessionId, { type: "tool.start", data: { notice: html } });
+      publishStreamEvent(sessionId, { type: "system.notice", data: { notice: html } });
     },
     async onApproval(approval) {
       publishStreamEvent(sessionId, {

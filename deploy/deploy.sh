@@ -51,12 +51,33 @@ for i in {1..30}; do
   echo "    waiting for postgres ($i/30)"; sleep 1
 done
 
-# Wait for Ollama API to be ready, then pull the embed model if not cached.
-echo "==> Waiting for Ollama"
+# Ensure Ollama is running. docker compose up -d starts it, but if the container
+# was stopped manually (or the Ollama service crashed), restart it explicitly.
+# This is the most common cause of empty turicks_brain: brain:sync ran while
+# Ollama was down and silently emitted 0 embeddings.
+echo "==> Ensuring Ollama container is running"
+if ! docker ps --filter "name=founderos-ollama" --filter "status=running" --quiet | grep -q .; then
+  echo "    founderos-ollama not running — starting it"
+  docker start founderos-ollama 2>/dev/null || \
+    docker compose -f deploy/stack.compose.yml up -d ollama
+fi
+
+# Wait for Ollama API to be ready (up to 60s — first boot pulls layers).
+echo "==> Waiting for Ollama API"
 for i in {1..30}; do
-  if curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then break; fi
+  if curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+    echo "    Ollama ready after ${i}s"
+    break
+  fi
   echo "    waiting for ollama ($i/30)"; sleep 2
 done
+# Hard fail if Ollama never came up — brain:sync would write 0 embeddings.
+if ! curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+  echo "!! Ollama did not start in 60s — deploy aborted (RAG requires Ollama)" >&2
+  echo "   Fix: docker start founderos-ollama && ollama pull nomic-embed-text" >&2
+  exit 1
+fi
+
 echo "==> Pulling nomic-embed-text (no-op if already cached)"
 docker exec founderos-ollama ollama pull nomic-embed-text
 

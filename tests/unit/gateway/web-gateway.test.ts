@@ -80,4 +80,24 @@ describe("web gateway", () => {
     const body = (await res.json()) as { status?: string };
     expect(body.status).toContain("MISO");
   });
+
+  it("rejects POST /tts without text", async () => {
+    const app = createWebApp();
+    const res = await app.request("http://localhost/api/v1/tts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects POST /voice without audio body", async () => {
+    const app = createWebApp();
+    const res = await app.request("http://localhost/api/v1/sessions/test/voice", {
+      method: "POST",
+      headers: { "content-type": "audio/webm" },
+      body: new Uint8Array(),
+    });
+    expect(res.status).toBe(400);
+  });
 });

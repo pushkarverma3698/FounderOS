@@ -39,6 +39,29 @@ body {
   backdrop-filter: blur(12px);
 }
 
+.hud-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.voice-reply-toggle {
+  font-size: 0.7rem;
+  font-family: "JetBrains Mono", monospace;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--accent-dim);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.voice-reply-toggle.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(61, 232, 255, 0.2);
+}
+
 .logo {
   font-family: "JetBrains Mono", monospace;
   letter-spacing: 0.08em;
@@ -152,6 +175,29 @@ body {
   display: flex;
   gap: 0.5rem;
   margin-top: 0.75rem;
+}
+
+.voice-btn {
+  width: 44px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid var(--accent-dim);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 1.1rem;
+}
+
+.voice-btn.recording {
+  border-color: #ff6b6b;
+  color: #ff6b6b;
+  box-shadow: 0 0 12px rgba(255, 107, 107, 0.35);
+  animation: pulse-rec 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-rec {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 .composer input {

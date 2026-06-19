@@ -8,8 +8,7 @@
  */
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, normalize, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, normalize, resolve } from "node:path";
 import {
   CINEMATIC_PRESETS,
   isValidCinematicPreset,
@@ -39,9 +38,11 @@ export interface ApplyCinematicPresetResult {
 export function bundledPresetsRoot(): string {
   const override = process.env["CINEMATIC_WEB_BUNDLED_ROOT"]?.trim();
   if (override) return override;
-  const here = dirname(fileURLToPath(import.meta.url));
-  // src/tools → ../../assets  |  dist/tools → ../../assets
-  return resolve(here, "..", "..", "assets", "cinematic-presets");
+  // process.cwd() = /opt/founderos (pinned by systemd WorkingDirectory), which is
+  // always the project root regardless of whether we're running tsx src/ or node dist/.
+  // import.meta.url would resolve to dist/src/tools/ in compiled mode, making the
+  // "../../../assets" hop land in dist/assets/ (nonexistent) — hence "preset not found".
+  return resolve(process.cwd(), "assets", "cinematic-presets");
 }
 
 /** External cinematic-web clone path (Website-Builder-Tool). */
