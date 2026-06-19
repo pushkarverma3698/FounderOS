@@ -18,7 +18,7 @@ vi.mock("../../../src/infra/provider-config.js", () => ({
 }));
 
 const mockHasBeenAudited = vi.fn(async () => false);
-const mockWriteAuditEntry = vi.fn(async () => undefined);
+const mockWriteAuditEntry = vi.fn(async () => ({ written: true }));
 
 vi.mock("../../../src/db/queries.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);

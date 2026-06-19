@@ -170,11 +170,15 @@ function buildModel(
   }
 
   if (parsed.provider === "openrouter") {
+    const apiKey = process.env["OPENROUTER_API_KEY"];
+    if (!apiKey && !optional) {
+      throw new Error("OPENROUTER_API_KEY is required for openrouter: models. Set it in .env or use a different AGENT_MODEL provider.");
+    }
     return new ChatOpenAI({
       model: parsed.model,
       temperature,
       maxRetries: 2,
-      apiKey: process.env["OPENROUTER_API_KEY"] || "missing-openrouter-key",
+      apiKey: apiKey || "missing-openrouter-key",
       configuration: { baseURL: "https://openrouter.ai/api/v1" },
     });
   }

@@ -72,15 +72,15 @@ describe("finalReply", () => {
 
   it("returns fallback when no AI messages", () => {
     const res = { messages: [makeMsg("human", "hello")] };
-    expect(finalReply(res)).toBe("✅ Done.");
+    expect(finalReply(res)).toBe("⚠️ No reply generated — agent completed without output. Check /runs.");
   });
 
   it("returns fallback when messages is empty", () => {
-    expect(finalReply({ messages: [] })).toBe("✅ Done.");
+    expect(finalReply({ messages: [] })).toBe("⚠️ No reply generated — agent completed without output. Check /runs.");
   });
 
   it("returns fallback when messages is undefined", () => {
-    expect(finalReply({})).toBe("✅ Done.");
+    expect(finalReply({})).toBe("⚠️ No reply generated — agent completed without output. Check /runs.");
   });
 
   it("skips AI messages with empty content", () => {
