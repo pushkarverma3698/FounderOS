@@ -64,6 +64,20 @@ export function createWebApp(): Hono {
   const app = new Hono();
 
   app.use("/api/*", async (c, next) => {
+    const origin = c.req.header("origin");
+    if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      c.header("Access-Control-Allow-Origin", origin);
+      c.header("Access-Control-Allow-Credentials", "true");
+      c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      c.header("Access-Control-Allow-Headers", "content-type, authorization");
+    }
+    if (c.req.method === "OPTIONS") {
+      return c.body(null, 204);
+    }
+    await next();
+  });
+
+  app.use("/api/*", async (c, next) => {
     const qToken = queryTokenFromUrl(c.req.url);
     if (!authOk(c.req.header("authorization"), qToken)) {
       return c.json({ error: "unauthorized" }, 401);
@@ -111,11 +125,11 @@ export function createWebApp(): Hono {
 
   app.post("/api/v1/sessions/:id/voice", async (c) => {
     const sessionId = c.req.param("id");
+    const raw = Buffer.from(await c.req.arrayBuffer());
+    if (!raw.length) return c.json({ error: "audio_required" }, 400);
     if (!(await checkFfmpeg())) {
       return c.json({ error: "ffmpeg_unavailable" }, 503);
     }
-    const raw = Buffer.from(await c.req.arrayBuffer());
-    if (!raw.length) return c.json({ error: "audio_required" }, 400);
 
     const ext = audioExtFromContentType(c.req.header("content-type"));
     let wav: Buffer;

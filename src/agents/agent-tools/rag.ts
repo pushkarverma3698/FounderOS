@@ -11,27 +11,26 @@
 
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import {
-  searchPersonalRagTool,
-  searchTuricksBrainTool,
-} from "../../tools/rag.js";
+import { orchestrateRagQuery } from "../../infra/rag-orchestrator.js";
 
 // ── search_personal_rag ────────────────────────────────────────────────────────
 
 export const searchPersonalRag = tool(
   async ({ query, doc_type, top_k }) => {
-    const result = await searchPersonalRagTool.execute({
+    return orchestrateRagQuery({
+      store: "personal",
       query,
-      ...(doc_type ? { doc_type } : {}),
-      ...(top_k ? { top_k } : {}),
+      doc_type,
+      top_k,
     });
-    return result.success
-      ? (result.data ?? "No results.")
-      : `ERROR: ${result.error}`;
   },
   {
-    name: searchPersonalRagTool.name,
-    description: searchPersonalRagTool.description,
+    name: "search_personal_rag",
+    description:
+      "Semantic search over Pushkar's personal knowledge base (personal-rag). " +
+      "Contains: CV, career history, skills, certifications, payslips, education, personal identity docs. " +
+      "Use for: career questions, 'what are my skills?', salary data, portfolio signals, background checks. " +
+      "Read-only, no approval needed.",
     schema: z.object({
       query: z
         .string()
@@ -59,18 +58,20 @@ export const searchPersonalRag = tool(
 
 export const searchTuricksBrain = tool(
   async ({ query, doc_type, top_k }) => {
-    const result = await searchTuricksBrainTool.execute({
+    return orchestrateRagQuery({
+      store: "turicks",
       query,
-      ...(doc_type ? { doc_type } : {}),
-      ...(top_k ? { top_k } : {}),
+      doc_type,
+      top_k,
     });
-    return result.success
-      ? (result.data ?? "No results.")
-      : `ERROR: ${result.error}`;
   },
   {
-    name: searchTuricksBrainTool.name,
-    description: searchTuricksBrainTool.description,
+    name: "search_turicks_brain",
+    description:
+      "Semantic search over the Turicks Brain knowledge base (vector DB). " +
+      "Contains: architectural decisions, business strategy, ADRs, conversation transcripts, " +
+      "founder notes, product plans, Turicks/Naggar context. " +
+      "Read-only, no approval needed.",
     schema: z.object({
       query: z
         .string()

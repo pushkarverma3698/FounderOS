@@ -12,6 +12,7 @@ import {
   getSupervisorModel,
   is503Error,
   isQuotaExhaustedError,
+  normalizeModelId,
   parseModelId,
 } from "../../../src/agents/model.js";
 
@@ -42,6 +43,21 @@ describe("model id parsing", () => {
 
   it("rejects unsupported prefixes loudly", () => {
     expect(() => parseModelId("unknown:model")).toThrow(/unsupported agent_model provider/i);
+  });
+
+  it("normalizes retired preview model ids to stable names", () => {
+    expect(normalizeModelId("openrouter:google/gemini-2.5-flash-preview-05-20")).toBe(
+      "openrouter:google/gemini-2.5-flash",
+    );
+    expect(normalizeModelId("google-genai:gemini-2.5-flash-preview-05-20")).toBe(
+      "google-genai:gemini-2.5-flash",
+    );
+  });
+
+  it("applies normalization in getConfiguredModelId", () => {
+    process.env["AGENT_MODEL"] = "openrouter:google/gemini-2.5-flash-preview-05-20";
+    expect(getConfiguredModelId()).toBe("openrouter:google/gemini-2.5-flash");
+    delete process.env["AGENT_MODEL"];
   });
 });
 
