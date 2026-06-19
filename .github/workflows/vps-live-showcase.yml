@@ -21,8 +21,8 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/founderos
-            git fetch --quiet origin cursor/verify-cinematic-build-cb8b
-            git checkout -B live-showcase origin/cursor/verify-cinematic-build-cb8b
+            git fetch --quiet origin main
+            git reset --hard origin/main
             chmod +x scripts/vps-live-showcase.sh
             bash scripts/vps-live-showcase.sh 2>&1 | tee /tmp/vps-live-showcase.log
             tail -60 /tmp/vps-live-showcase.log
