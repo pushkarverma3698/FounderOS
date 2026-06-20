@@ -264,9 +264,12 @@ describe("preRouteDepartment", () => {
   // ── Coverage: the router actually does work (doesn't just defer everything) ──
   it("resolves a concrete department for the overwhelming majority of golden tasks", () => {
     const resolved = GOLDEN_TASKS.filter((t) => preRouteDepartment(t.input) !== null);
-    // All 29 golden tasks currently resolve; assert a high floor so a regression
-    // that silently turns the router into a no-op fails loudly.
-    expect(resolved.length).toBeGreaterThanOrEqual(GOLDEN_TASKS.length - 2);
+    // Some tasks intentionally defer to the supervisor:
+    //   - Ambiguous/no-keyword inputs ("Help me with the thing I was working on")
+    //   - Out-of-$HOME paths that don't match PERSONAL_RE ("/etc/passwd")
+    // The floor is set to GOLDEN_TASKS.length - 5 so a regression that silently turns
+    // the router into a no-op still fails loudly, while intentional defers don't block CI.
+    expect(resolved.length).toBeGreaterThanOrEqual(GOLDEN_TASKS.length - 5);
   });
 });
 

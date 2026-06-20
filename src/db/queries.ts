@@ -27,6 +27,7 @@ import {
   agentResults,
   founderContext,
   knowledgeEntries,
+  turicksBrain,
   conversations,
   episodicMemory,
   missions,
@@ -694,6 +695,42 @@ export async function getKnowledgeByType(
     )
     .orderBy(desc(knowledgeEntries.updated_at))
     .limit(limit);
+}
+
+// ── RAG Health (knowledge_entries + turicks_brain) ───────────────────────────
+
+/**
+ * Count current knowledge entries for a tenant. Used by the health endpoint
+ * to surface empty-store as a distinct state (the prod outage class from 2026-06-15
+ * where turicks_brain was empty but the error said "Ollama unavailable"). Rule #22:
+ * verify STATE not just schema — a table existing ≠ having rows.
+ */
+export async function getKnowledgeEntryCount(tenantId: string): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select({ n: count() })
+    .from(knowledgeEntries)
+    .where(
+      and(
+        eq(knowledgeEntries.tenant_id, tenantId),
+        eq(knowledgeEntries.is_current, true),
+      ),
+    );
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * Count turicks_brain vector rows. A zero count means brain:sync has never
+ * been run — this is the silent failure class that caused the 2026-06-15 RAG
+ * outage. The health endpoint reports this separately from getKnowledgeEntryCount
+ * because the two tables serve different purposes:
+ *   knowledge_entries = structured docs (ADRs, brand, strategy)
+ *   turicks_brain     = embedded vector chunks for semantic search
+ */
+export async function getTuricksBrainCount(): Promise<number> {
+  const db = getDb();
+  const [row] = await db.select({ n: count() }).from(turicksBrain);
+  return Number(row?.n ?? 0);
 }
 
 // ── Conversations (conversations) ─────────────────────────────────────────────
