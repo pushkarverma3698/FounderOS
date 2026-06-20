@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildContextText, formatLeadNudge, formatProposalNudge, formatDemoNudge, formatDesignBriefNudge, formatSiteDeployedNudge, formatProofDropNudge } from "../../../src/infra/scheduler.js";
+import { buildContextText, formatLeadNudge, formatProposalNudge, formatDemoNudge, formatDesignBriefNudge, formatSiteDeployedNudge, formatProofDropNudge, runBrainSync } from "../../../src/infra/scheduler.js";
 import { buildProofDropCadenceNudge } from "../../../src/outbound/proof-drop.js";
 import {
   assessDailyBudget,
@@ -210,6 +210,18 @@ describe("buildProofDropCadenceNudge (scheduler import)", () => {
       recent: [],
     });
     expect(nudge).toContain("/proofdrop");
+  });
+});
+
+describe("runBrainSync (auto brain:sync)", () => {
+  it("runBrainSync is exported as an async function", () => {
+    expect(typeof runBrainSync).toBe("function");
+    // Returns a Promise (async).
+    const result = runBrainSync();
+    expect(result).toBeInstanceOf(Promise);
+    // Don't await — we can't spawn the real sync in unit tests without the DB.
+    // Just confirm it's callable and returns a Promise.
+    result.catch(() => {}); // suppress unhandled rejection
   });
 });
 
