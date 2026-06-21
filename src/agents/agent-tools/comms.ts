@@ -91,11 +91,13 @@ export async function outboundQualityGate(
   text: string,
   channel: Channel,
   config: RunnableConfig | undefined,
+  tool?: string,
 ): Promise<{ proceed: boolean; fix?: string; warning?: string; retryKey: string }> {
   const brand = brandCheckBounded(text, channel, config);
   if (!brand.proceed) return brand; // brand fix needed — re-draft before the judge
 
-  const verdict = await judgeOutbound(text, channel);
+  // §11: pass tool name so identical copy for different tools uses separate cache entries.
+  const verdict = await judgeOutbound(text, channel, { tool });
   if (verdict.verdict === "pass") return brand; // clean (may still carry a brand warning)
 
   const attempt = recordBrandFailure(brand.retryKey);
@@ -132,7 +134,7 @@ export const sendEmail = tool(
       return `Already emailed ${to} recently — not re-sent (duplicate outreach guard). Say "force send" with new wording if you truly need a second email.`;
     }
 
-    const brand = await outboundQualityGate(body, "outreach", config);
+    const brand = await outboundQualityGate(body, "outreach", config, "send_email");
     if (!brand.proceed) return `Revise before sending:\n${brand.fix}`;
 
     const rejected = await hitlGate({
@@ -198,7 +200,7 @@ export const linkedinPost = tool(
     // the recursion limit) and gate the closest draft with violations noted.
     let draft = text;
     const userProvided = config?.configurable?.["linkedin_user_provided"] === true;
-    let brand = await outboundQualityGate(draft, "linkedin", config);
+    let brand = await outboundQualityGate(draft, "linkedin", config, "linkedin_post");
     if (!brand.proceed) {
       const check = validateBrandVoice(draft, "linkedin");
       const onlyBanned = check.violations.every((v) => v.startsWith("found banned phrase"));

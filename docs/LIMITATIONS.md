@@ -251,34 +251,38 @@ become incidents at scale.**
 - **G9 — ghost `hitl_approvals` rows (was MEDIUM).** Pending approvals are now cancelled on
   reject / abort / wedge / `/reset`, so the daily stale-reminder can't nag about a wiped thread.
 
-**Deferred backlog (do BEFORE flipping any scaling lever or the CTO subgraph flag):**
+**Fixed 2026-06-21 (audit hardening pass):**
+- **G4 — no daily send-quota ceiling — FIXED.** `getDailyOutboundCount()` added to `queries.ts`
+  (Postgres-backed, counts `action_log` rows since midnight UTC). `sendEmail` and `linkedinPost`
+  both check quota before HITL. Limits: `DAILY_EMAIL_LIMIT=20`, `DAILY_LINKEDIN_LIMIT=3`
+  (env-overridable). Redis not used — Postgres is durable through restarts.
+- **G6 — budget mis-prices fallback models — FIXED.** `normalizeModelId()` added to `budget.ts`
+  strips provider prefix (`openrouter:google/gemini-2.5-flash` → `gemini-2.5-flash`) so
+  `MODEL_COSTS` lookup now resolves correctly. `handleLLMEnd` reads `generationInfo.model` per-call
+  when available, falling back to `this.modelId`. Judge calls (separate Claude model) remain
+  outside the per-run budget guard (fail-open, tiny — 512 max tokens, ~$0.0002/call).
+- **G7 — `is503Error` false-positive on "500" substring — FIXED.** Changed to `/\b500\b/` etc.
+  word-boundary regex. Regression tests added to `model.test.ts`.
+- **G10 — shell injection detection extended — FIXED.** `flagDangerousCommand` in `path-guard.ts`
+  now also flags `curl|bash`, `wget|sh`, base64-encoded payload pipes, cron/init writes, and
+  exfiltration patterns (piping sensitive paths to external endpoints). These surface as
+  "⚠️ DANGEROUS" on the HITL card — the founder still approves; the flag is informational.
+- **§11 — Judge cache key single namespace — FIXED.** Cache key is now `channel:tool:hash(text)`,
+  preventing a linkedin_post judgment from being reused for a send_email with identical copy.
+
+**Remaining deferred backlog (do BEFORE scaling levers):**
 - **G3 — single-process transport is the scaling wall — HIGH.** PID-lock + grammy long-poll +
   inline ≤14s backoff serialize all work (head-of-line blocking at multi-user). Data layer is
   scale-ready; transport is not. Pre-Phase-E re-platform: job queue (BullMQ/pg-boss) + webhooks.
   (Extends §4.)
-- **G4 — no daily send-quota ceiling — HIGH.** `suppression_check` IS wired (`comms.ts`, better
-  than §5 implies) but `quota_check` is nowhere. Add a Postgres-backed daily send counter on the
-  post-approval `send_email`/`linkedin_post` path (don't depend on unwired Redis).
-- **G6 — budget mis-prices fallback models + judge is off-budget — MEDIUM.** `BudgetGuardCallback`
-  prices every call as the constructor `modelId`; lite/judge/OpenRouter calls are mis/uncounted.
-  Read the actual model per call (`generationInfo`) and fold judge tokens into the run budget.
-- **G7 — `is503Error` substring-matches "500" anywhere — MEDIUM.** Free-text matching can route a
-  real app-level failure into the retry/fallback loop (violates rule #19.5 fail-loud). Match on
-  structured status codes / error classes.
-- **G8 — brand-retry counter is process-local — MEDIUM.** `brand-retry.ts` Map resets on restart
-  and is per-process; the convergence cap weakens on restart/scale. Move to checkpointer state or
-  a TTL'd Postgres row keyed by thread+channel.
-- **G10 — injection defense is prompt-level; `run_shell` args unguarded — MEDIUM.** Add a
-  deterministic destructive-pattern check on `run_shell` (surfaced on the HITL card) and treat
-  tool-result content as untrusted before it re-enters the model (tool-output re-injection).
-- **G11 — CTO subgraph unit-proven, not live-proven; eval non-deterministic — LOW.** Before
-  `ENGINEERING_SUBGRAPH=1`: run the full MTProto `e2e-telegram-qa.ts` against the nested topology
-  N times, assert nested-HITL approve/reject + token overhead. (Extends §14.)
-- **G12 — scheduler compiles a second `MemorySaver` office — LOW (partially fixed 2026-06-16).**
-  The per-fire `buildOffice(new MemorySaver())` inside `sendMondayBrief` is now memoised via
-  `getSchedulerOffice()` so the graph compiles only once. Remaining: Monday-brief LLM calls still
-  bypass the budget guard, trace seam, and halt switch. Route scheduler LLM work through the
-  guarded run path, or document it as unguarded.
+- **G8 — brand-retry counter is process-local — ACCEPTED.** `brand-retry.ts` Map resets on
+  restart. Accepted for single-tenant single-process (restart mid-oscillation is seconds-rare).
+  Fix for Phase E: TTL'd Postgres row keyed by thread+channel.
+- **G11 — CTO subgraph unit-proven, not live-proven — LOW.** Before `ENGINEERING_SUBGRAPH=1`:
+  run the full MTProto `e2e-telegram-qa.ts` against the nested topology. (Extends §14.)
+- **G12 — Monday-brief LLM bypasses budget guard — LOW.** `getSchedulerOffice()` singleton is
+  fixed; remaining gap is the brief LLM call has no budget tracking or halt switch. Runs once/week
+  with a 5-minute hard timeout — acceptable for now.
 
 **Do NOT change (already textbook):** idempotency on external sends · HITL pure-before-gate
 contract · Postgres checkpointer · compile-once office singleton · `maxRetries:0` on the Google

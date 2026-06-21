@@ -287,11 +287,29 @@ export function buildBrowserScript(action: BrowserAction, opts: { url?: string; 
   }
 }
 
-/** Execute a browser action against Safari. HITL-gated upstream. */
+/**
+ * Execute a browser action. Backend is selected by BROWSER_BACKEND env:
+ *   "playwright"   — headless Chromium via Playwright (Linux/Ubuntu VPS default)
+ *   "applescript"  — Safari via osascript (macOS only)
+ *   "auto"         — Playwright on linux, AppleScript on darwin (default when unset)
+ *
+ * HITL-gated upstream in agent-tools/personal.ts.
+ */
 export async function browserAction(
   action: BrowserAction,
   opts: { url?: string; js?: string },
 ): Promise<ShellResult> {
+  const backend = process.env["BROWSER_BACKEND"] ?? "auto";
+  const usePlaywright =
+    backend === "playwright" ||
+    (backend === "auto" && process.platform === "linux");
+
+  if (usePlaywright) {
+    const { playwrightBrowserAction } = await import("./browser-playwright.js");
+    return playwrightBrowserAction(action, opts);
+  }
+
+  // AppleScript / Safari (macOS)
   const script = buildBrowserScript(action, opts);
   try {
     const { stdout, stderr } = await execAsync(`osascript -e ${JSON.stringify(script)}`, {

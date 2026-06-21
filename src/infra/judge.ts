@@ -110,13 +110,16 @@ export function _resetJudgeCache(): void {
 
 /**
  * Judge an outbound draft. Returns `pass` to proceed to HITL as-is, or `revise`
- * with a critique to surface on the approval card. Memoized by (channel, text)
+ * with a critique to surface on the approval card. Memoized by (channel, tool, text)
  * within a TTL so the HITL interrupt re-execution doesn't fire a second Claude call.
+ *
+ * §11 fix: cache key includes tool_name so identical copy for different tools
+ * (e.g. linkedin_post vs send_email) can't share a cached verdict from the wrong context.
  */
 export async function judgeOutbound(
   text: string,
   channel: Channel,
-  opts: { model?: JudgeModel; now?: () => number } = {},
+  opts: { model?: JudgeModel; now?: () => number; tool?: string } = {},
 ): Promise<JudgeVerdict> {
   const now = opts.now ?? Date.now;
   const injected = opts.model;
@@ -124,7 +127,8 @@ export async function judgeOutbound(
   // No model configured and none injected → gate 2 is a no-op (fail-open pass).
   if (!injected && !isJudgeEnabled()) return { verdict: "pass" };
 
-  const key = `${channel}:${hash(text)}`;
+  const toolTag = opts.tool ?? "unknown";
+  const key = `${channel}:${toolTag}:${hash(text)}`;
   const cached = _cache.get(key);
   if (cached && now() - cached.at < JUDGE_CACHE_TTL_MS) return cached.verdict;
 

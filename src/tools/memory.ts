@@ -29,6 +29,7 @@ import {
   insertEpisodicEvent,
 } from "../db/queries.js";
 import { childLogger } from "../infra/logger.js";
+import { getMem0Client } from "../infra/mem0.js";
 
 const log = childLogger({ module: "tool:memory" });
 
@@ -100,6 +101,19 @@ export const searchMemoryTool = tool(
       }
     }
 
+    // 4. mem0 semantic search (supplemental — runs when MEM0_API_KEY is set)
+    const mem0 = getMem0Client();
+    if (mem0 && (type === "all" || type === "episodic")) {
+      const hits = await mem0.search(query, 5);
+      if (hits.length > 0) {
+        const formatted = hits.map((h) => {
+          const score = h.score ? ` (${(h.score * 100).toFixed(0)}% match)` : "";
+          return `• ${h.memory}${score}`;
+        });
+        sections.push(`**mem0 Semantic Recall:**\n${formatted.join("\n")}`);
+      }
+    }
+
     if (sections.length === 0) {
       return `No memory found for "${query}". Try different keywords or use record_event to log something new.`;
     }
@@ -164,6 +178,20 @@ export const recordEventTool = tool(
       source: "telegram",
       occurred_at: occurred_at ? new Date(occurred_at) : new Date(),
     });
+
+    // Also push to mem0 for semantic recall (fire-and-forget; non-fatal)
+    const mem0 = getMem0Client();
+    if (mem0) {
+      void mem0
+        .add(
+          [
+            { role: "user", content: title },
+            { role: "assistant", content: summary },
+          ],
+          { event_type, tags, tenant_id: TENANT },
+        )
+        .catch((e) => log.warn({ err: e }, "mem0 event push failed (non-fatal)"));
+    }
 
     log.info({ id, title, event_type }, "Episodic event recorded");
     return `Event recorded (id: ${id}): "${title}"`;
