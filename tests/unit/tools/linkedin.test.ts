@@ -59,13 +59,14 @@ describe("linkedinPostTool", () => {
   });
 
   it("passes author URN and visibility to the provider", async () => {
-    await linkedinPostTool.execute(BASE_POST_ARGS);
+    await linkedinPostTool.execute({ ...BASE_POST_ARGS, department: "marketing" });
 
     expect(mockProviderLinkedInPost).toHaveBeenCalledWith(
       expect.objectContaining({
         text: BASE_POST_ARGS.text,
-        author_urn: "urn:li:person:TEST123",
         visibility: "PUBLIC",
+        department: "marketing",
+        account_key: "turicks",
       }),
     );
   });
@@ -102,13 +103,16 @@ describe("linkedinPostTool", () => {
   });
 
   it("returns success: false when direct backend has no author URN", async () => {
-    mockGetLinkedInAuthorUrn.mockReturnValue(undefined);
+    mockProviderLinkedInPost.mockResolvedValueOnce({
+      success: false,
+      error: "LinkedIn author URN not configured for account 'turicks'. See ACCOUNT-REGISTRY-RUNBOOK.md.",
+    });
 
     const result = await linkedinPostTool.execute(BASE_POST_ARGS);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("LINKEDIN_AUTHOR_URN");
-    expect(mockProviderLinkedInPost).not.toHaveBeenCalled();
+    expect(result.error).toContain("author URN");
+    expect(mockProviderLinkedInPost).toHaveBeenCalledOnce();
   });
 });
 

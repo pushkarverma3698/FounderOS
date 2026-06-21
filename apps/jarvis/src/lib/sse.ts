@@ -2,6 +2,19 @@ import { streamUrl } from "./api.js";
 
 export type StreamHandler = (payload: { type: string; data?: Record<string, unknown> }) => void;
 
+/** All stream event types the backend may emit (named SSE `event:` or default message). */
+const STREAM_EVENT_TYPES = [
+  "stream.connected",
+  "system.notice",
+  "department.routed",
+  "tool.start",
+  "tool.end",
+  "hitl.pending",
+  "turn.complete",
+  "mission.updated",
+  "turn.error",
+] as const;
+
 export interface OfficeStreamOptions {
   sessionId: string;
   onEvent: StreamHandler;
@@ -36,14 +49,18 @@ export function connectOfficeStream(opts: OfficeStreamOptions): () => void {
         connect();
       }, backoff);
     };
-    es.onmessage = (ev) => {
+    const dispatch = (raw: string) => {
       try {
-        const payload = JSON.parse(ev.data) as { type: string; data?: Record<string, unknown> };
+        const payload = JSON.parse(raw) as { type: string; data?: Record<string, unknown> };
         opts.onEvent(payload);
       } catch {
-        opts.onEvent({ type: "system", data: { raw: ev.data } });
+        opts.onEvent({ type: "system", data: { raw } });
       }
     };
+    es.onmessage = (ev) => dispatch(ev.data);
+    for (const eventType of STREAM_EVENT_TYPES) {
+      es.addEventListener(eventType, (ev) => dispatch((ev as MessageEvent).data));
+    }
   }
 
   connect();

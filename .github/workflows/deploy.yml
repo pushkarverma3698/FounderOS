@@ -75,6 +75,36 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/founderos
+            # Render the production .env from the secret (atomic, 0600). Only when
+            # the secret is present — never clobber a good .env with an empty one.
+            if [ -n "${PROD_DOTENV:-}" ]; then
+              umask 077
+              printf '%s' "$PROD_DOTENV" | base64 -d > .env.tmp
+              # Sanity: a valid .env must contain DATABASE_URL, else abort (keep old).
+              if grep -q '^DATABASE_URL=' .env.tmp; then
+                mv .env.tmp .env
+                chmod 600 .env
+                echo "==> Rendered /opt/founderos/.env from PROD_DOTENV secret"
+              else
+                rm -f .env.tmp
+                echo "!! PROD_DOTENV decoded but has no DATABASE_URL — keeping existing .env" >&2
+                exit 1
+              fi
+            else
+              echo "==> PROD_DOTENV not set; using the .env already on the box"
+            fi
+            # Pin the production model. Gemini 2.5 Flash is the documented prod model.
+            if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+              grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
+              {
+                printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-flash'
+                printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
+                printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
+              } >> .env.patched
+              mv .env.patched .env
+              chmod 600 .env
+              echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-flash"
+            fi
             # Fix git permission drift (e.g. prior verify left root-owned refs).
             if [ -d .git/refs/heads/cursor ]; then
               rm -rf .git/refs/heads/cursor 2>/dev/null || true

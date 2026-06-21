@@ -187,6 +187,15 @@ export const TELEGRAM_POLLING_ENABLED = boolEnv(
 export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 40);
 
 /**
+ * Daily outbound send quotas (G4 gap — now enforced via action_log count).
+ * Postgres-backed: survives restarts, accurate under concurrent sends.
+ * Override via env: DAILY_EMAIL_LIMIT / DAILY_LINKEDIN_LIMIT.
+ * Set to 0 to disable the ceiling (not recommended before volume outbound).
+ */
+export const DAILY_EMAIL_LIMIT = intEnv("DAILY_EMAIL_LIMIT", 20);
+export const DAILY_LINKEDIN_LIMIT = intEnv("DAILY_LINKEDIN_LIMIT", 3);
+
+/**
  * How many human turns of conversation history to persist per thread.
  * Kept deliberately small: the prebuilt supervisor forwards the FULL kept window
  * to every sub-agent on handoff, so any stale leading message pollutes routing.

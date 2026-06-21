@@ -40,17 +40,27 @@ export function parseGwsStdout(stdout: string): unknown {
 /**
  * Run a gws subcommand with a timeout. Args are passed after the binary name,
  * e.g. runGws(["gmail", "users", "messages", "list", "--params", "{...}"]).
+ *
+ * When gwsProfileDir is set, GWS_CONFIG_HOME is pointed at that directory so
+ * multiple Google identities can coexist (ADR-036).
  */
 export async function runGws(
   args: string[],
   timeoutMs = 30_000,
+  opts?: { gwsProfileDir?: string },
 ): Promise<GwsRunOutcome> {
   const bin = getGwsBin();
+  const env = { ...process.env };
+  if (opts?.gwsProfileDir) {
+    env["GWS_CONFIG_HOME"] = opts.gwsProfileDir;
+    env["GOOGLE_APPLICATION_CREDENTIALS"] =
+      env["GOOGLE_APPLICATION_CREDENTIALS"] ?? `${opts.gwsProfileDir}/credentials.json`;
+  }
   try {
     const { stdout, stderr } = await execFileAsync(bin, args, {
       timeout: timeoutMs,
       maxBuffer: 4 * 1024 * 1024,
-      env: process.env,
+      env,
     });
     if (stderr?.trim()) {
       log.debug({ stderr: stderr.slice(0, 200) }, "gws stderr");

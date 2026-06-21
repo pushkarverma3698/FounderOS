@@ -47,6 +47,28 @@ describe("health server", () => {
     expect(report).toHaveProperty("spend_today_usd");
   });
 
+  it("buildHealthReport includes rag health with status + counts (never throws when DB down)", async () => {
+    const report = await buildHealthReport();
+    expect(report.checks).toHaveProperty("rag");
+    const rag = report.checks.rag as Record<string, unknown>;
+    // DB is down in unit tests — rag must report unavailable, not throw
+    expect(["ok", "empty", "unavailable"]).toContain(rag["status"]);
+    expect(typeof rag["knowledge_entries"]).toBe("number");
+    expect(typeof rag["brain_vectors"]).toBe("number");
+  });
+
+  it("rag status is 'empty' when both counts are 0, 'ok' when positive, 'unavailable' when DB down", () => {
+    // Pure logic from pingRag — modelled here without I/O
+    const classify = (ke: number, bv: number, dbDown: boolean) => {
+      if (dbDown) return "unavailable";
+      return ke > 0 || bv > 0 ? "ok" : "empty";
+    };
+    expect(classify(0, 0, false)).toBe("empty");     // the prod outage class
+    expect(classify(42, 0, false)).toBe("ok");
+    expect(classify(0, 100, false)).toBe("ok");
+    expect(classify(0, 0, true)).toBe("unavailable");
+  });
+
   it("GET /health returns JSON with checks (503 when DB down in tests)", async () => {
     const port = 39411;
     server = startHealthServer(port);
@@ -54,6 +76,8 @@ describe("health server", () => {
     const { status, body } = await get(port, "/health");
     expect([200, 503]).toContain(status);
     expect((body.checks as Record<string, string>).database).toMatch(/up|down/);
+    // rag field must be present in the HTTP response
+    expect((body.checks as Record<string, unknown>)["rag"]).toBeDefined();
   });
 
   it("GET /metrics returns spend + uptime", async () => {

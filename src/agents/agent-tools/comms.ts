@@ -8,12 +8,12 @@
 
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { TENANT } from "../../core/config.js";
+import { TENANT, DAILY_EMAIL_LIMIT, DAILY_LINKEDIN_LIMIT } from "../../core/config.js";
 import { emailTool } from "../../tools/email.js";
 import { readEmailsTool } from "../../tools/email-reader.js";
 import { linkedinPostTool } from "../../tools/linkedin.js";
 import { calendarTool } from "../../tools/calendar.js";
-import { hasRecentOutboundToRecipient, isSuppressed } from "../../db/queries.js";
+import { hasRecentOutboundToRecipient, isSuppressed, getDailyOutboundCount } from "../../db/queries.js";
 import {
   validateBrandVoice,
   brandFixGuidance,
@@ -112,8 +112,20 @@ export async function outboundQualityGate(
 
 // ── Comms: send email (WRITE — requires approval) ─────────────────────────────
 
-export const sendEmail = tool(
-  async ({ to, subject, body }, config) => {
+/** Department-bound send_email — routing picks the correct Google account (ADR-036). */
+export function createSendEmailTool(department: string) {
+  return tool(
+    async ({ to, subject, body, account_key }, config) => {
+    // G4: Postgres-backed daily send ceiling (enforced before HITL so we don't
+    // waste an approval card on a quota-exceeded email). Limit is env-overridable.
+    if (DAILY_EMAIL_LIMIT > 0) {
+      const todayCount = await getDailyOutboundCount(TENANT, ["send_email"]);
+      if (todayCount >= DAILY_EMAIL_LIMIT) {
+        log.warn({ todayCount, limit: DAILY_EMAIL_LIMIT }, "Daily email quota reached — send blocked");
+        return `Daily email limit reached (${todayCount}/${DAILY_EMAIL_LIMIT} sent today). Try again tomorrow or increase DAILY_EMAIL_LIMIT.`;
+      }
+    }
+
     // Brand voice check with a deterministic retry cap — runs before interrupt()
     // so the HITL card only shows clean content. Within the cap, the agent
     // self-corrects with exact-delta guidance; past the cap we stop looping and
@@ -148,6 +160,8 @@ export const sendEmail = tool(
       body,
       idempotency_key: idemKey("email", to, subject, body),
       tenant_id: TENANT,
+      department,
+      account_key,
     });
 
     if (!res.success) return `Email send failed: ${res.error}`;
@@ -164,14 +178,32 @@ export const sendEmail = tool(
       to: z.string().describe("Recipient email address"),
       subject: z.string().describe("Email subject line"),
       body: z.string().describe("Full email body text"),
+      account_key: z
+        .string()
+        .optional()
+        .nullable()
+        .describe("Override sending identity: turicks | personal | naggar. Default: department routing."),
     }),
   },
-);
+  );
+}
+
+/** @deprecated Use createSendEmailTool('comms') — kept for barrel compat. */
+export const sendEmail = createSendEmailTool("comms");
 
 // ── Marketing: LinkedIn post (WRITE — requires approval) ──────────────────────
 
 export const linkedinPost = tool(
   async ({ text }, config) => {
+    // G4: Postgres-backed daily LinkedIn post ceiling.
+    if (DAILY_LINKEDIN_LIMIT > 0) {
+      const todayCount = await getDailyOutboundCount(TENANT, ["linkedin_post"]);
+      if (todayCount >= DAILY_LINKEDIN_LIMIT) {
+        log.warn({ todayCount, limit: DAILY_LINKEDIN_LIMIT }, "Daily LinkedIn quota reached — post blocked");
+        return `Daily LinkedIn post limit reached (${todayCount}/${DAILY_LINKEDIN_LIMIT} posted today). Try again tomorrow or increase DAILY_LINKEDIN_LIMIT.`;
+      }
+    }
+
     // Brand voice check with a deterministic retry cap — runs before interrupt()
     // so the HITL card only shows clean content. Within the cap the agent
     // self-corrects with exact-delta guidance; past the cap we STOP re-drafting
@@ -219,6 +251,7 @@ export const linkedinPost = tool(
       text: draft,
       idempotency_key: idemKey("linkedin", draft),
       tenant_id: TENANT,
+      department: "marketing",
     });
 
     if (!res.success) return `LinkedIn post failed: ${res.error}`;
@@ -258,6 +291,7 @@ export const createCalendarEvent = tool(
       // Deterministic key so a resumed/retried run never creates the event twice.
       idempotency_key: idemKey("gcal", title, date),
       tenant_id: TENANT,
+      department: "comms",
     });
 
     if (!res.success) return `Calendar event creation failed: ${res.error}`;
@@ -283,7 +317,11 @@ export const createCalendarEvent = tool(
 
 export const readEmails = tool(
   async ({ query, limit }) => {
-    const res = await readEmailsTool.execute({ query, max_results: limit ?? 10 });
+    const res = await readEmailsTool.execute({
+      query,
+      max_results: limit ?? 10,
+      department: "comms",
+    });
     if (!res.success) {
       return `Email read failed: ${res.error ?? "unknown error"}. (Check gws auth or GMAIL_BACKEND=composio rollback.)`;
     }

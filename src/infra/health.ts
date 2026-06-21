@@ -16,7 +16,7 @@ import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { getPgPool } from "../db/client.js";
-import { getTodayCostUsd } from "../db/queries.js";
+import { getTodayCostUsd, getKnowledgeEntryCount, getTuricksBrainCount } from "../db/queries.js";
 import { childLogger } from "./logger.js";
 import { runProviderProbes, getLastProviderProbe } from "./provider-probes.js";
 import { getGmailBackend } from "./provider-config.js";
@@ -72,6 +72,14 @@ async function spendByTenant(): Promise<Record<string, number>> {
   return out;
 }
 
+export interface RagHealthCheck {
+  /** "ok" = has rows; "empty" = table exists but 0 rows (the production outage class);
+   *  "unavailable" = DB query failed */
+  status: "ok" | "empty" | "unavailable";
+  knowledge_entries: number;
+  brain_vectors: number;
+}
+
 export interface HealthReport {
   status: "ok" | "degraded";
   version: string;
@@ -80,6 +88,8 @@ export interface HealthReport {
     database: "up" | "down";
     gmail_backend: string;
     gmail_active: "up" | "down" | "unconfigured";
+    /** RAG store health: empty = brain:sync never ran (the 2026-06-15 prod outage class) */
+    rag: RagHealthCheck;
   };
   integrations: {
     composio_gmail: { status: string; detail: string };
@@ -90,9 +100,26 @@ export interface HealthReport {
   spend_today_usd: Record<string, number>;
 }
 
+/** Query RAG store health — never throws (DB down → unavailable). */
+async function pingRag(): Promise<RagHealthCheck> {
+  try {
+    const [ke, bv] = await Promise.all([
+      getKnowledgeEntryCount("turicks"),
+      getTuricksBrainCount(),
+    ]);
+    return {
+      status: ke > 0 || bv > 0 ? "ok" : "empty",
+      knowledge_entries: ke,
+      brain_vectors: bv,
+    };
+  } catch {
+    return { status: "unavailable", knowledge_entries: -1, brain_vectors: -1 };
+  }
+}
+
 /** Build the health report (exported for testing without a socket). */
 export async function buildHealthReport(): Promise<HealthReport> {
-  const [db, spend] = await Promise.all([pingDb(), spendByTenant()]);
+  const [db, spend, rag] = await Promise.all([pingDb(), spendByTenant(), pingRag()]);
   const probe =
     (await runProviderProbes().catch(() => null)) ?? getLastProviderProbe();
   const backend = probe?.gmail_backend ?? getGmailBackend();
@@ -108,6 +135,7 @@ export async function buildHealthReport(): Promise<HealthReport> {
       database: db ? "up" : "down",
       gmail_backend: backend,
       gmail_active: active.status,
+      rag,
     },
     integrations: {
       composio_gmail: composio,

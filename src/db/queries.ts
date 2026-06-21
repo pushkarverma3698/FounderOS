@@ -27,6 +27,7 @@ import {
   agentResults,
   founderContext,
   knowledgeEntries,
+  turicksBrain,
   conversations,
   episodicMemory,
   missions,
@@ -696,6 +697,42 @@ export async function getKnowledgeByType(
     .limit(limit);
 }
 
+// ── RAG Health (knowledge_entries + turicks_brain) ───────────────────────────
+
+/**
+ * Count current knowledge entries for a tenant. Used by the health endpoint
+ * to surface empty-store as a distinct state (the prod outage class from 2026-06-15
+ * where turicks_brain was empty but the error said "Ollama unavailable"). Rule #22:
+ * verify STATE not just schema — a table existing ≠ having rows.
+ */
+export async function getKnowledgeEntryCount(tenantId: string): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select({ n: count() })
+    .from(knowledgeEntries)
+    .where(
+      and(
+        eq(knowledgeEntries.tenant_id, tenantId),
+        eq(knowledgeEntries.is_current, true),
+      ),
+    );
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * Count turicks_brain vector rows. A zero count means brain:sync has never
+ * been run — this is the silent failure class that caused the 2026-06-15 RAG
+ * outage. The health endpoint reports this separately from getKnowledgeEntryCount
+ * because the two tables serve different purposes:
+ *   knowledge_entries = structured docs (ADRs, brand, strategy)
+ *   turicks_brain     = embedded vector chunks for semantic search
+ */
+export async function getTuricksBrainCount(): Promise<number> {
+  const db = getDb();
+  const [row] = await db.select({ n: count() }).from(turicksBrain);
+  return Number(row?.n ?? 0);
+}
+
 // ── Conversations (conversations) ─────────────────────────────────────────────
 
 /**
@@ -847,6 +884,37 @@ export async function searchEpisodicMemory(
     (r) => `${r.title} ${r.summary ?? ""} ${(r.tags ?? []).join(" ")}`,
     limit,
   );
+}
+
+// ── Daily Outbound Quota (action_log) ─────────────────────────────────────────
+
+/**
+ * Count outbound send actions for a tenant today (UTC midnight boundary).
+ * Uses the existing action_log table — no new table needed, Postgres-backed
+ * and durable (survives Redis/process restarts). Covers the G4 gap: no daily
+ * send ceiling was enforced before this query was wired into sendEmail/linkedinPost.
+ *
+ * @param actions  Which action types to count (e.g. ["send_email"])
+ */
+export async function getDailyOutboundCount(
+  tenantId: string,
+  actions: string[],
+): Promise<number> {
+  if (actions.length === 0) return 0;
+  const db = getDb();
+  const todayUtc = new Date();
+  todayUtc.setUTCHours(0, 0, 0, 0);
+  const [row] = await db
+    .select({ total: count() })
+    .from(actionLog)
+    .where(
+      and(
+        eq(actionLog.tenant_id, tenantId),
+        inArray(actionLog.action, actions),
+        gte(actionLog.created_at, todayUtc),
+      ),
+    );
+  return Number(row?.total ?? 0);
 }
 
 // ── Activity Summary (action_log) ─────────────────────────────────────────────

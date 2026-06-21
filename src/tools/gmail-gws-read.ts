@@ -37,12 +37,15 @@ export async function fetchGwsMessages(
   ids: string[],
   maxResults: number,
   timeoutMs: number,
+  gwsProfileDir?: string,
 ): Promise<{ messages: EmailMessage[]; error?: string }> {
   const messages: EmailMessage[] = [];
+  const runOpts = gwsProfileDir ? { gwsProfileDir } : undefined;
   for (const id of ids.slice(0, maxResults)) {
     const got = await runGws(
       ["gmail", "users", "messages", "get", "--params", getParams(id)],
       timeoutMs,
+      runOpts,
     );
     if (!got.ok) {
       return { messages, error: got.error };

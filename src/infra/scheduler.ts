@@ -16,6 +16,7 @@
  */
 
 import cron from "node-cron";
+import { spawn } from "node:child_process";
 import { HumanMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
 import { getFounderContext, getPendingInterrupt, consumePendingEvents, getTodayCostUsd } from "../db/queries.js";
@@ -371,6 +372,45 @@ async function sendProofDropCadenceNudge(): Promise<void> {
   log.info({ count: stats.countThisWeek, target: stats.target }, "Proof Drop cadence nudge sent");
 }
 
+// ── Auto brain sync ───────────────────────────────────────────────────────────
+
+/**
+ * Run the turicks-brain sync script in a child process.
+ *
+ * Why automated: brain:sync was a manual step. If it doesn't run, the RAG
+ * store goes empty — which looks like "Ollama unavailable" at query time
+ * (the 2026-06-15 production outage). Rule #22: data-provisioning is part
+ * of "done"; automation closes the gap.
+ *
+ * Runs at 2am daily (off-peak). Failure is non-fatal and reported to Telegram.
+ */
+export async function runBrainSync(): Promise<void> {
+  log.info("Auto brain sync starting…");
+  return new Promise((resolve) => {
+    const child = spawn(
+      process.execPath,
+      ["--import", "tsx/esm", "scripts/sync-turicks-brain.ts"],
+      { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"], timeout: 5 * 60_000 },
+    );
+    let stderr = "";
+    child.stderr?.on("data", (c: Buffer) => { stderr += c.toString(); });
+    child.on("close", (code) => {
+      if (code === 0) {
+        log.info("Auto brain sync completed");
+      } else {
+        log.error({ code, stderr: stderr.slice(0, 500) }, "Auto brain sync failed");
+        sendToChat(`⚠️ Auto brain sync failed (exit ${code ?? "?"}).\\nRun <code>pnpm brain:sync</code> manually.`, "HTML").catch(() => {});
+      }
+      resolve();
+    });
+    child.on("error", (err) => {
+      log.error({ err: err.message }, "Auto brain sync spawn error");
+      sendToChat(`⚠️ Auto brain sync spawn error: ${err.message}`, "HTML").catch(() => {});
+      resolve();
+    });
+  });
+}
+
 /** Hourly check — alert at 80% and 100% daily budget (zero LLM, deduped per day). */
 async function sendDailyBudgetAlertIfNeeded(): Promise<void> {
   const spent = await getTodayCostUsd(TENANT);
@@ -433,5 +473,13 @@ export function startScheduler(): void {
     });
   });
 
-  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), Proof Drop cadence (Wed 9:05am), stale approval check (daily 9am), dept-signal sweep + budget alerts (hourly)");
+  // Daily 2am — auto brain:sync (prevents the empty-RAG production outage class).
+  // Off-peak; non-fatal on failure (Telegram alert sent, bot continues).
+  cron.schedule("0 2 * * *", () => {
+    runBrainSync().catch((err) => {
+      log.error({ err: (err as Error).message }, "Auto brain sync cron error");
+    });
+  });
+
+  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), Proof Drop cadence (Wed 9:05am), stale approval check (daily 9am), dept-signal sweep + budget alerts (hourly), auto brain sync (daily 2am)");
 }

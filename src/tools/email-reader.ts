@@ -16,6 +16,8 @@ const log = childLogger({ module: "tool:email-reader" });
 export interface ReadEmailsArgs {
   query?: string;
   max_results?: number;
+  account_key?: string;
+  department?: string;
 }
 
 export const readEmailsTool: UnifiedTool = {
@@ -40,9 +42,14 @@ export const readEmailsTool: UnifiedTool = {
   },
 
   async execute(input: Record<string, unknown>): Promise<ToolResult> {
-    const { query = "in:inbox", max_results = 10 } = input as ReadEmailsArgs;
+    const {
+      query = "in:inbox",
+      max_results = 10,
+      account_key,
+      department,
+    } = input as ReadEmailsArgs;
     const backend = getGmailBackend();
-    log.debug({ backend, query }, "read_emails dispatch");
-    return providerReadEmails({ query, max_results });
+    log.debug({ backend, query, department, account_key }, "read_emails dispatch");
+    return providerReadEmails({ query, max_results, account_key, department });
   },
 };

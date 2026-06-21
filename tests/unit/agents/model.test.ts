@@ -12,6 +12,7 @@ import {
   getSupervisorModel,
   is503Error,
   isQuotaExhaustedError,
+  normalizeModelId,
   parseModelId,
 } from "../../../src/agents/model.js";
 
@@ -42,6 +43,21 @@ describe("model id parsing", () => {
 
   it("rejects unsupported prefixes loudly", () => {
     expect(() => parseModelId("unknown:model")).toThrow(/unsupported agent_model provider/i);
+  });
+
+  it("normalizes retired preview model ids to stable names", () => {
+    expect(normalizeModelId("openrouter:google/gemini-2.5-flash-preview-05-20")).toBe(
+      "openrouter:google/gemini-2.5-flash",
+    );
+    expect(normalizeModelId("google-genai:gemini-2.5-flash-preview-05-20")).toBe(
+      "google-genai:gemini-2.5-flash",
+    );
+  });
+
+  it("applies normalization in getConfiguredModelId", () => {
+    process.env["AGENT_MODEL"] = "openrouter:google/gemini-2.5-flash-preview-05-20";
+    expect(getConfiguredModelId()).toBe("openrouter:google/gemini-2.5-flash");
+    delete process.env["AGENT_MODEL"];
   });
 });
 
@@ -142,5 +158,14 @@ describe("error classifiers kept for logs and retry policy tests", () => {
 
   it("keeps the old backoff tuple exported for Gemini REST tooling", () => {
     expect(RETRY_BACKOFF_MS).toEqual([2_000, 4_000, 8_000]);
+  });
+
+  // G7 regression: word-boundary match prevents false positives on port numbers / longer codes
+  it("G7: does not false-positive on strings containing '500' mid-word", () => {
+    expect(is503Error(new Error("port 5001 already in use"))).toBe(false);
+    expect(is503Error(new Error("error code 50042"))).toBe(false);
+    expect(is503Error(new Error("HTTP 500 Internal Server Error"))).toBe(true);
+    expect(is503Error(new Error("status: 503"))).toBe(true);
+    expect(is503Error(new Error("429 Too Many Requests"))).toBe(true);
   });
 });

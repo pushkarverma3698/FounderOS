@@ -248,14 +248,15 @@ Answer each critique point explicitly. This prevents obvious failure modes from 
 HITL gates guard only external sends (email, LinkedIn, GitHub push).
 Never route to HITL for internal analysis, draft generation, or code review steps.
 
-### 14. Safety rails (current state — Phase 2 to complete)
-Current send path: `research → draft → [HITL approval] → Composio send → idempotency audit`.
+### 14. Safety rails (current state)
+Current send path: `research → draft → [HITL approval] → send → idempotency audit`.
 Idempotency via `action_log` is live and prevents duplicate sends.
 
-**Phase 2 additions (not yet wired):**
-- `suppression_check` — check `do_not_contact` table before every outbound email (GDPR/CAN-SPAM)
-- `quota_check` — call `incrQuota()` from redis.ts to enforce daily send limits
-Until these are wired, do not claim they are active safety rails.
+**LIVE rails (wired and active):**
+- `suppression_check` — `isSuppressed()` called in the shared `sendEmail` tool (`comms.ts:141`) before every outbound email (Postgres-backed `do_not_contact` table; GDPR/CAN-SPAM). Covers comms + sales + jobhunt departments.
+
+**NOT YET WIRED (Phase 2 gap):**
+- `quota_check` — `incrQuota()` exists in `redis.ts` but is not called on any send path. No daily send ceiling is enforced. Add a Postgres-backed daily send counter before any volume outbound (see LIMITATIONS.md G4).
 
 ### 15. Redis for ephemeral, Postgres for durable (see ADR-005)
 - Research cache, send quotas, LLM prompt cache → Redis (TTL, atomic INCR)

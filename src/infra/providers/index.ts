@@ -67,9 +67,12 @@ export async function providerLinkedInPost(input: LinkedInPostInput): Promise<To
     : composioLinkedInPost(input);
 }
 
-export async function providerLinkedInAnalytics(postId: string): Promise<ToolResult> {
+export async function providerLinkedInAnalytics(
+  postId: string,
+  opts?: { account_key?: string; department?: string },
+): Promise<ToolResult> {
   return getLinkedInBackend() === "direct"
-    ? directLinkedInAnalytics(postId)
+    ? directLinkedInAnalytics(postId, opts)
     : composioLinkedInAnalytics(postId);
 }
 

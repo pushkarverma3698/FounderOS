@@ -80,18 +80,22 @@ brief poll-drain window (mitigated by `waitForProcessExit` + SIGKILL).
 
 ## 5. Postgres-only durable path; Redis unwired — **LOW**
 
-`infra/redis.ts` exists (cache, quotas, prompt-hash) but is **not on the boot path**
-and not wired into sends. The documented Phase-2 safety rails that depend on it —
-`suppression_check` (do_not_contact) and `quota_check` (daily send limits) — are
-**not active**. Idempotency (via `action_log`) *is* live and does prevent duplicate
-sends.
+`infra/redis.ts` exists (cache, quotas, prompt-hash) but is **not on the boot path**.
+Idempotency (via `action_log`) *is* live and does prevent duplicate sends.
 
-- **Gap:** outbound email has no enforced daily quota and the suppression list is not
-  consulted before every send. For one founder sending a handful of emails this is
-  acceptable; before any volume outbound it is a **HIGH** gap.
-- **Action when outbound scales:** wire `suppression_check` + `quota_check` into the
-  comms/sales send path (the tables and the redis client already exist — this is
-  reuse, not new infra).
+**Suppression check status — WIRED (Postgres-backed):**
+`isSuppressed()` is called in the shared `sendEmail` tool (`src/agents/agent-tools/comms.ts:141`)
+after HITL approval, before every outbound send. Covers comms + sales + jobhunt departments.
+The `do_not_contact` table is in Postgres (not Redis) — durable, GDPR/CAN-SPAM compliant.
+
+**Quota check status — NOT WIRED:**
+`incrQuota()` exists in `redis.ts` but is not called on any send path. There is no daily
+send ceiling enforced. For one founder sending a handful of emails this is acceptable;
+before any volume outbound it is a **HIGH** gap.
+
+- **Gap:** outbound email has no enforced daily quota. Suppression is active; rate-limiting is not.
+- **Action when outbound scales:** call `incrQuota()` from the shared `sendEmail` path after the
+  suppression check. Use a Postgres-backed counter (more durable than Redis on restart) — see G4.
 
 ## 6. Config validity vs. presence — **MEDIUM**
 

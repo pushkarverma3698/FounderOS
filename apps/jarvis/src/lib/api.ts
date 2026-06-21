@@ -77,6 +77,39 @@ export async function fetchAudit(): Promise<{ entries: import("./types.js").Audi
   return apiFetch("/api/v1/audit");
 }
 
+export async function sendVoice(sessionId: string, audio: Blob): Promise<{
+  accepted: boolean;
+  englishText?: string;
+  transcript?: string;
+}> {
+  const headers: Record<string, string> = { "content-type": audio.type || "audio/webm" };
+  if (API_TOKEN) headers["authorization"] = `Bearer ${API_TOKEN}`;
+  const res = await fetch(`/api/v1/sessions/${encodeURIComponent(sessionId)}/voice`, {
+    method: "POST",
+    headers,
+    body: audio,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(text || res.statusText, res.status);
+  }
+  return (await res.json()) as { accepted: boolean; englishText?: string; transcript?: string };
+}
+
+export async function fetchTtsAudio(text: string): Promise<Blob> {
+  const headers = authHeaders();
+  const res = await fetch("/api/v1/tts", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new ApiError(errText || res.statusText, res.status);
+  }
+  return res.blob();
+}
+
 /** Exported for tests */
 export function getApiToken(): string {
   return API_TOKEN;

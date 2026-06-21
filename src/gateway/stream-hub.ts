@@ -7,6 +7,8 @@
 import { EventEmitter } from "node:events";
 
 export type StreamEventType =
+  | "stream.connected"
+  | "system.notice"
   | "department.routed"
   | "tool.start"
   | "tool.end"

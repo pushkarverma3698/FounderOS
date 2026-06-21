@@ -23,6 +23,8 @@ export interface CreateCalendarEventArgs {
   timezone?: string;
   idempotency_key?: string;
   tenant_id?: string;
+  account_key?: string;
+  department?: string;
 }
 
 export const calendarTool: UnifiedTool = {
@@ -59,6 +61,8 @@ export const calendarTool: UnifiedTool = {
       timezone = "Europe/Amsterdam",
       idempotency_key,
       tenant_id = "turicks",
+      account_key,
+      department,
     } = input as unknown as CreateCalendarEventArgs;
 
     // Past-date guard
@@ -94,6 +98,8 @@ export const calendarTool: UnifiedTool = {
       end_datetime: endDt,
       timezone,
       description,
+      account_key,
+      department,
     });
 
     if (!result.success) {
