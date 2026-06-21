@@ -52,6 +52,20 @@ export function createWebApp(): Hono {
   const app = new Hono();
 
   app.use("/api/*", async (c, next) => {
+    const origin = c.req.header("origin");
+    if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      c.header("Access-Control-Allow-Origin", origin);
+      c.header("Access-Control-Allow-Credentials", "true");
+      c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      c.header("Access-Control-Allow-Headers", "content-type, authorization");
+    }
+    if (c.req.method === "OPTIONS") {
+      return c.body(null, 204);
+    }
+    await next();
+  });
+
+  app.use("/api/*", async (c, next) => {
     const qToken = queryTokenFromUrl(c.req.url);
     if (!authOk(c.req.header("authorization"), qToken)) {
       return c.json({ error: "unauthorized" }, 401);

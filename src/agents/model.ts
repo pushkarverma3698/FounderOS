@@ -32,6 +32,27 @@ export interface ParsedModelId {
 // where Gemini Flash is the far safer failure mode.
 export const DEFAULT_AGENT_MODEL = "openrouter:google/gemini-2.5-flash";
 
+/** Retired OpenRouter / Google model ids → current stable ids. */
+const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
+  "google/gemini-2.5-flash-preview-05-20": "google/gemini-2.5-flash",
+  "google/gemini-2.5-flash-preview-05-20:free": "google/gemini-2.5-flash:free",
+  "gemini-2.5-flash-preview-05-20": "gemini-2.5-flash",
+  "gemini-2.0-flash": "gemini-2.5-flash",
+};
+
+export function normalizeModelId(modelId: string): string {
+  const trimmed = modelId.trim();
+  if (!trimmed) return trimmed;
+  try {
+    const parsed = parseModelId(trimmed);
+    const normalizedModel = DEPRECATED_MODEL_ALIASES[parsed.model] ?? parsed.model;
+    if (normalizedModel === parsed.model) return trimmed;
+    return `${parsed.provider}:${normalizedModel}`;
+  } catch {
+    return trimmed;
+  }
+}
+
 export function is503Error(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message;
@@ -108,7 +129,8 @@ export function parseModelId(modelId: string): ParsedModelId {
 }
 
 export function getConfiguredModelId(): string {
-  return process.env["AGENT_MODEL"]?.trim() || DEFAULT_AGENT_MODEL;
+  const raw = process.env["AGENT_MODEL"]?.trim() || DEFAULT_AGENT_MODEL;
+  return normalizeModelId(raw);
 }
 
 export function getFallbackModelIds(): string[] {
