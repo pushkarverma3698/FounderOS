@@ -84,6 +84,24 @@ export const envSchema = z.object({
   CLAUDE_EXECUTOR_API_KEY: z.string().transform(v => v || undefined).optional(),
   CLAUDE_EXECUTOR_BASE_URL: z.string().transform(v => v || undefined).optional(),
 
+  // ── RAG backend ──────────────────────────────────────────────────────────
+  /** "pgvector" (default, requires Ollama) or "ragflow" (self-hosted RAGFlow). */
+  RAG_BACKEND: z.enum(["pgvector", "ragflow"]).default("pgvector"),
+  RAGFLOW_BASE_URL: z.string().url().optional().or(z.literal("")).transform(v => v || undefined),
+  RAGFLOW_API_KEY: z.string().transform(v => v || undefined).optional(),
+  /** UUID of the RAGFlow knowledge-base dataset to query/upload into. */
+  RAGFLOW_DATASET_ID: z.string().transform(v => v || undefined).optional(),
+
+  // ── mem0 episodic memory cloud ────────────────────────────────────────────
+  /** When set, events are also pushed to mem0 cloud for semantic recall. */
+  MEM0_API_KEY: z.string().transform(v => v || undefined).optional(),
+  /** mem0 user_id — defaults to FOUNDER_TENANT (e.g. "turicks"). */
+  MEM0_USER_ID: z.string().transform(v => v || undefined).optional(),
+
+  // ── Browser backend ───────────────────────────────────────────────────────
+  /** "auto" = Playwright on linux, AppleScript on darwin. Override as needed. */
+  BROWSER_BACKEND: z.enum(["auto", "playwright", "applescript"]).default("auto"),
+
   // Budget controls
   BUDGET_DAILY_USD: z.coerce.number().positive().default(5.0),
   // Per-run caps — applied to each individual office.invoke() call
