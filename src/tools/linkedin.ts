@@ -10,12 +10,12 @@
 import { childLogger } from "../infra/logger.js";
 import { writeAuditEntry, hasBeenAudited } from "../db/queries.js";
 import {
-  getLinkedInAuthorUrn,
   providerLinkedInAnalytics,
   providerLinkedInConnect,
   providerLinkedInPost,
 } from "../infra/providers/index.js";
 import { getLinkedInBackend } from "../infra/provider-config.js";
+import { getLinkedInAccount } from "../infra/account-registry.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:linkedin" });
@@ -66,13 +66,24 @@ export const linkedinPostTool: UnifiedTool = {
   },
 
   async execute(input: Record<string, unknown>): Promise<ToolResult> {
-    const { text, image_url, visibility = "PUBLIC", idempotency_key, tenant_id, schedule_time } = input as {
+    const {
+      text,
+      image_url,
+      visibility = "PUBLIC",
+      idempotency_key,
+      tenant_id,
+      schedule_time,
+      account_key,
+      department,
+    } = input as {
       text: string;
       image_url?: string;
       visibility?: "PUBLIC" | "CONNECTIONS";
       idempotency_key: string;
       tenant_id: string;
       schedule_time?: string;
+      account_key?: string;
+      department?: string;
     };
 
     const alreadyPosted = await hasBeenAudited(idempotency_key);
@@ -81,11 +92,16 @@ export const linkedinPostTool: UnifiedTool = {
       return { success: true, data: { skipped: true, reason: "idempotency_key already used" } };
     }
 
-    const authorUrn = getLinkedInAuthorUrn();
+    const { credentials, ctx } = await getLinkedInAccount({
+      platform: "linkedin",
+      account_key,
+      department,
+    });
+    const authorUrn = credentials.author_urn;
     if (!authorUrn && getLinkedInBackend() === "direct") {
       return {
         success: false,
-        error: "LINKEDIN_AUTHOR_URN not configured. Set it in .env or use LINKEDIN_BACKEND=composio.",
+        error: `LinkedIn author URN not configured for account '${ctx.account_key}'. See ACCOUNT-REGISTRY-RUNBOOK.md.`,
       };
     }
 
@@ -95,6 +111,8 @@ export const linkedinPostTool: UnifiedTool = {
       image_url,
       visibility: visibility === "CONNECTIONS" ? "CONNECTIONS" : "PUBLIC",
       schedule_time,
+      account_key: ctx.account_key,
+      department,
     });
 
     if (!result.success) {
@@ -111,7 +129,13 @@ export const linkedinPostTool: UnifiedTool = {
       tenant_id,
       action: "linkedin_post",
       idempotency_key,
-      payload: { post_id: postId, text: text.slice(0, 100), visibility, backend: getLinkedInBackend() },
+      payload: {
+        post_id: postId,
+        text: text.slice(0, 100),
+        visibility,
+        backend: getLinkedInBackend(),
+        account_key: ctx.account_key,
+      },
     });
     if (!audit.written) {
       log.warn({ idempotency_key }, "writeAuditEntry: conflict — idempotency key already existed; LinkedIn post may have been published twice");

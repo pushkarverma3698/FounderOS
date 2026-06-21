@@ -17,6 +17,13 @@ vi.mock("../../../src/infra/provider-config.js", () => ({
   getLinkedInBackend: mockGetLinkedInBackend,
 }));
 
+vi.mock("../../../src/infra/account-registry.js", () => ({
+  getLinkedInAccount: vi.fn(async () => ({
+    credentials: { access_token: "tok", author_urn: "urn:li:person:TEST123" },
+    ctx: { account_key: "turicks" },
+  })),
+}));
+
 const mockHasBeenAudited = vi.fn(async () => false);
 const mockWriteAuditEntry = vi.fn(async () => ({ written: true }));
 

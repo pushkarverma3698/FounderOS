@@ -112,8 +112,10 @@ export async function outboundQualityGate(
 
 // ── Comms: send email (WRITE — requires approval) ─────────────────────────────
 
-export const sendEmail = tool(
-  async ({ to, subject, body }, config) => {
+/** Department-bound send_email — routing picks the correct Google account (ADR-036). */
+export function createSendEmailTool(department: string) {
+  return tool(
+    async ({ to, subject, body, account_key }, config) => {
     // G4: Postgres-backed daily send ceiling (enforced before HITL so we don't
     // waste an approval card on a quota-exceeded email). Limit is env-overridable.
     if (DAILY_EMAIL_LIMIT > 0) {
@@ -158,6 +160,8 @@ export const sendEmail = tool(
       body,
       idempotency_key: idemKey("email", to, subject, body),
       tenant_id: TENANT,
+      department,
+      account_key,
     });
 
     if (!res.success) return `Email send failed: ${res.error}`;
@@ -174,9 +178,18 @@ export const sendEmail = tool(
       to: z.string().describe("Recipient email address"),
       subject: z.string().describe("Email subject line"),
       body: z.string().describe("Full email body text"),
+      account_key: z
+        .string()
+        .optional()
+        .nullable()
+        .describe("Override sending identity: turicks | personal | naggar. Default: department routing."),
     }),
   },
-);
+  );
+}
+
+/** @deprecated Use createSendEmailTool('comms') — kept for barrel compat. */
+export const sendEmail = createSendEmailTool("comms");
 
 // ── Marketing: LinkedIn post (WRITE — requires approval) ──────────────────────
 
@@ -238,6 +251,7 @@ export const linkedinPost = tool(
       text: draft,
       idempotency_key: idemKey("linkedin", draft),
       tenant_id: TENANT,
+      department: "marketing",
     });
 
     if (!res.success) return `LinkedIn post failed: ${res.error}`;
@@ -277,6 +291,7 @@ export const createCalendarEvent = tool(
       // Deterministic key so a resumed/retried run never creates the event twice.
       idempotency_key: idemKey("gcal", title, date),
       tenant_id: TENANT,
+      department: "comms",
     });
 
     if (!res.success) return `Calendar event creation failed: ${res.error}`;
@@ -302,7 +317,11 @@ export const createCalendarEvent = tool(
 
 export const readEmails = tool(
   async ({ query, limit }) => {
-    const res = await readEmailsTool.execute({ query, max_results: limit ?? 10 });
+    const res = await readEmailsTool.execute({
+      query,
+      max_results: limit ?? 10,
+      department: "comms",
+    });
     if (!res.success) {
       return `Email read failed: ${res.error ?? "unknown error"}. (Check gws auth or GMAIL_BACKEND=composio rollback.)`;
     }

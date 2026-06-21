@@ -19,11 +19,17 @@ export interface SendEmailInput {
   body: string;
   cc?: string;
   reply_to?: string;
+  /** Brand identity — turicks | personal | naggar. Resolved via account registry. */
+  account_key?: string;
+  /** Department name for default account routing when account_key omitted. */
+  department?: string;
 }
 
 export interface ReadEmailsInput {
   query: string;
   max_results: number;
+  account_key?: string;
+  department?: string;
 }
 
 export interface CreateCalendarEventInput {
@@ -32,6 +38,8 @@ export interface CreateCalendarEventInput {
   end_datetime: string;
   timezone: string;
   description?: string;
+  account_key?: string;
+  department?: string;
 }
 
 export interface LinkedInPostInput {
@@ -40,6 +48,8 @@ export interface LinkedInPostInput {
   image_url?: string;
   visibility: "PUBLIC" | "CONNECTIONS";
   schedule_time?: string;
+  account_key?: string;
+  department?: string;
 }
 
 /** Uniform provider outcome — maps 1:1 to ToolResult at the tool boundary. */

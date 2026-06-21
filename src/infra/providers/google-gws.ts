@@ -7,9 +7,9 @@
 
 import { childLogger } from "../logger.js";
 import { runGws } from "../gws-runner.js";
+import { getGoogleAccount } from "../account-registry.js";
 import type { ToolResult } from "../../tools/index.js";
 import {
-  emailFromGwsGet,
   extractGwsMessageIds,
   formatEmailList,
 } from "../../tools/email-messages.js";
@@ -22,23 +22,25 @@ import type {
 
 const log = childLogger({ module: "provider:gws" });
 
+async function gwsOpts(input: { account_key?: string; department?: string }) {
+  const { credentials, ctx } = await getGoogleAccount({
+    platform: "google",
+    account_key: input.account_key,
+    department: input.department,
+  });
+  return { gwsProfileDir: credentials.gws_profile_dir, accountKey: ctx.account_key };
+}
+
 function listParams(query: string, maxResults: number): string {
   return JSON.stringify({ userId: "me", q: query, maxResults });
 }
 
-function getParams(messageId: string): string {
-  return JSON.stringify({
-    userId: "me",
-    id: messageId,
-    format: "metadata",
-    metadataHeaders: ["From", "Subject", "Date"],
-  });
-}
-
 export async function gwsReadEmails(input: ReadEmailsInput, timeoutMs = 30_000): Promise<ToolResult> {
+  const opts = await gwsOpts(input);
   const listed = await runGws(
     ["gmail", "users", "messages", "list", "--params", listParams(input.query, input.max_results)],
     timeoutMs,
+    { gwsProfileDir: opts.gwsProfileDir },
   );
   if (!listed.ok) {
     log.error({ err: listed.error, query: input.query }, "gws Gmail list failed");
@@ -50,16 +52,17 @@ export async function gwsReadEmails(input: ReadEmailsInput, timeoutMs = 30_000):
     return { success: true, data: formatEmailList([], input.query, input.max_results) };
   }
 
-  const { messages, error } = await fetchGwsMessages(ids, input.max_results, timeoutMs);
+  const { messages, error } = await fetchGwsMessages(ids, input.max_results, timeoutMs, opts.gwsProfileDir);
   if (error && messages.length === 0) {
     return { success: false, error: `gws Gmail read failed: ${error}` };
   }
 
-  log.info({ query: input.query, count: messages.length, backend: "gws" }, "Emails read");
+  log.info({ query: input.query, count: messages.length, backend: "gws", account: opts.accountKey }, "Emails read");
   return { success: true, data: formatEmailList(messages, input.query, input.max_results) };
 }
 
 export async function gwsSendEmail(input: SendEmailInput, timeoutMs = 30_000): Promise<ToolResult> {
+  const opts = await gwsOpts(input);
   const args = [
     "gmail",
     "+send",
@@ -72,7 +75,7 @@ export async function gwsSendEmail(input: SendEmailInput, timeoutMs = 30_000): P
   ];
   if (input.cc) args.push("--cc", input.cc);
 
-  const result = await runGws(args, timeoutMs);
+  const result = await runGws(args, timeoutMs, { gwsProfileDir: opts.gwsProfileDir });
   if (!result.ok) {
     log.error({ err: result.error, to: input.to }, "gws Gmail send failed");
     return { success: false, error: `gws Gmail send failed: ${result.error}` };
@@ -94,6 +97,7 @@ export async function gwsCreateCalendarEvent(
   input: CreateCalendarEventInput,
   timeoutMs = 30_000,
 ): Promise<ToolResult> {
+  const opts = await gwsOpts(input);
   const args = [
     "calendar",
     "+insert",
@@ -107,7 +111,7 @@ export async function gwsCreateCalendarEvent(
   if (input.description) args.push("--description", input.description);
   if (input.timezone) args.push("--timezone", input.timezone);
 
-  const result = await runGws(args, timeoutMs);
+  const result = await runGws(args, timeoutMs, { gwsProfileDir: opts.gwsProfileDir });
   if (!result.ok) {
     log.error({ err: result.error, title: input.title }, "gws Calendar insert failed");
     return { success: false, error: `gws Calendar create failed: ${result.error}` };
