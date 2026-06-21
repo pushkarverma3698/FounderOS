@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiUrl } from "@/lib/gateway-url";
 import { SESSION_ID, type MissionRow, type StreamEvent } from "@/lib/jarvis-api";
+import {
+  type CorePhase,
+  nextCorePhase,
+  VERIFY_SETTLE_MS,
+  THINKING_TIMEOUT_MS,
+} from "@/lib/core-phase";
 
 export interface ChatLine {
   id: string;
@@ -29,7 +35,10 @@ function handleStreamPayload(
     refreshMissions: () => void;
   },
   onAssistantReply?: (text: string) => void,
+  onEvent?: (type: string, data?: any) => void,
 ): void {
+  onEvent?.(payload.type, payload.data);
+
   if (payload.type === "hitl.pending") {
     setters.setPendingHitl({
       title: String(payload.data?.title ?? "Approval required"),
@@ -83,17 +92,23 @@ function handleStreamPayload(
   }
 }
 
-export function useJarvisStream(onAssistantReply?: (text: string) => void) {
+export function useJarvisStream(
+  onAssistantReply?: (text: string) => void,
+  onEvent?: (type: string, data?: any) => void,
+) {
   const [connected, setConnected] = useState(false);
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [missions, setMissions] = useState<MissionRow[]>([]);
   const [pendingHitl, setPendingHitl] = useState<HitlPending | null>(null);
   const [activeDept, setActiveDept] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const busyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [phase, setPhase] = useState<CorePhase>("idle");
+  const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onAssistantReplyRef = useRef(onAssistantReply);
   onAssistantReplyRef.current = onAssistantReply;
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
 
   const pushLine = useCallback((type: ChatLine["type"], text: string) => {
     setLines((prev) => [
@@ -114,17 +129,36 @@ export function useJarvisStream(onAssistantReply?: (text: string) => void) {
     setMissions(data.missions ?? []);
   }, []);
 
-  const markBusy = useCallback(() => {
-    setBusy(true);
-    if (busyTimerRef.current) clearTimeout(busyTimerRef.current);
-    busyTimerRef.current = setTimeout(() => setBusy(false), 120_000);
+  const clearTimers = useCallback(() => {
+    if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    safetyTimerRef.current = null;
+    settleTimerRef.current = null;
   }, []);
 
+  const markBusy = useCallback(() => {
+    clearTimers();
+    setPhase((p) => nextCorePhase(p, "send"));
+    safetyTimerRef.current = setTimeout(
+      () => setPhase((p) => nextCorePhase(p, "reset")),
+      THINKING_TIMEOUT_MS,
+    );
+  }, [clearTimers]);
+
   const markIdle = useCallback(() => {
-    if (busyTimerRef.current) clearTimeout(busyTimerRef.current);
-    busyTimerRef.current = null;
-    setBusy(false);
-  }, []);
+    clearTimers();
+    setPhase((p) => nextCorePhase(p, "reset"));
+  }, [clearTimers]);
+
+  /** Completion → short "verifying" beat → settle back to idle. */
+  const enterVerifying = useCallback(() => {
+    clearTimers();
+    setPhase((p) => nextCorePhase(p, "turn_complete"));
+    settleTimerRef.current = setTimeout(
+      () => setPhase((p) => nextCorePhase(p, "settle")),
+      VERIFY_SETTLE_MS,
+    );
+  }, [clearTimers]);
 
   useEffect(() => {
     void refreshMissions();
@@ -162,8 +196,11 @@ export function useJarvisStream(onAssistantReply?: (text: string) => void) {
             pushLine,
             { setPendingHitl, setActiveDept, refreshMissions },
             (text) => onAssistantReplyRef.current?.(text),
+            (type, data) => onEventRef.current?.(type, data),
           );
-          if (payload.type === "turn.complete" || payload.type === "turn.error") {
+          if (payload.type === "turn.complete") {
+            enterVerifying();
+          } else if (payload.type === "turn.error") {
             markIdle();
           }
         } catch {
@@ -179,11 +216,14 @@ export function useJarvisStream(onAssistantReply?: (text: string) => void) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       es?.close();
     };
-  }, [markIdle, pushLine, refreshMissions]);
+  }, [enterVerifying, markIdle, pushLine, refreshMissions]);
 
   return {
     connected,
-    busy,
+    phase,
+    busy: phase === "thinking",
+    verifying: phase === "verifying",
+    awaitingApproval: pendingHitl !== null,
     lines,
     missions,
     pendingHitl,
