@@ -90,8 +90,28 @@ No tools wired yet. Registry rows + `meta_graph` auth backend are seeded so mark
 
 - `pnpm accounts:seed` + manual auth runbook required once per environment
 - `pnpm accounts:status` shows missing env vars per account
+- `pnpm accounts:verify` proves department → account → credential ref chain
 - `createSendEmailTool(department)` — sales/comms/jobhunt get correct Gmail identity
 - Backward compatible: empty DB → convention defaults; legacy `LINKEDIN_ACCESS_TOKEN` maps to turicks
+
+## Centralization contract (what to touch when)
+
+| Change | Files to touch | Avoid |
+|--------|----------------|-------|
+| New account identity (`account_key`) | `src/core/accounts.ts` (`ACCOUNT_KEYS` + `ACCOUNT_SEED_SPECS`) → `pnpm accounts:seed` | Duplicating platform lists in scripts |
+| New department → account routing | `src/core/accounts.ts` (`DEPARTMENT_ACCOUNT_DEFAULTS`) only | Prompt instructions |
+| New email-sending department | `DEPARTMENT_ACCOUNT_DEFAULTS` + `capabilities.ts` one `createSendEmailTool("dept")` line | Per-tool env hacks |
+| Rotate a secret | `.env` or gws profile dir only | Code change |
+| New platform (e.g. Slack) | `src/infra/providers/{platform}.ts` + `providers/index.ts` dispatch + tool (ADR-029 map) | Composio unless spike |
+| Phase E SaaS | Swap `credential_refs` to Nango IDs in DB | Department/prompt changes |
+
+**Choke points (only these resolve accounts):**
+1. `src/core/accounts.ts` — routing + seed specs
+2. `src/infra/account-registry.ts` — `resolveAccountContext()`
+3. `src/infra/credential-resolver.ts` — env/profile lookup
+4. `src/infra/providers/*` — transport only
+
+**Known gaps (not yet registry-backed):** GitHub tool reads `GITHUB_TOKEN` directly (engineering always turicks); boot probes check global turicks creds only. Use `pnpm accounts:status` for per-account health.
 
 ## References
 

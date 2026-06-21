@@ -38,6 +38,7 @@
     "brain:sync": "node --env-file=.env --import tsx/esm scripts/sync-turicks-brain.ts",
     "accounts:seed": "node --env-file=.env --import tsx/esm scripts/seed-integration-accounts.ts",
     "accounts:status": "node --env-file=.env --import tsx/esm scripts/accounts-status.ts",
+    "accounts:verify": "node --env-file=.env --import tsx/esm scripts/verify-account-registry.ts",
     "personal:sync": "node --env-file=.env --import tsx/esm scripts/sync-personal-rag.ts",
     "graph:gen": "node --env-file=.env --import tsx/esm scripts/generate-knowledge-graph.ts",
     "lint": "tsc --noEmit",

@@ -61,7 +61,7 @@ export async function directLinkedInPost(input: LinkedInPostInput): Promise<Tool
   if (!author) {
     return {
       success: false,
-      error: "LINKEDIN_AUTHOR_URN not configured (e.g. urn:li:person:xxx).",
+      error: `LinkedIn author URN not configured for account '${creds.accountKey}'. See ACCOUNT-REGISTRY-RUNBOOK.md.`,
     };
   }
 

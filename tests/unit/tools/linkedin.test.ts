@@ -29,15 +29,6 @@ vi.mock("../../../src/infra/provider-config.js", () => ({
   getLinkedInBackend: mockGetLinkedInBackend,
 }));
 
-vi.mock("../../../src/infra/account-registry.js", () => ({
-  getLinkedInAccount: vi.fn(async () => ({
-    credentials: { access_token: "tok", author_urn: "urn:li:person:TEST123" },
-    ctx: { account_key: "turicks" },
-  })),
-}));
-
-import { getLinkedInAccount } from "../../../src/infra/account-registry.js";
-
 const { linkedinPostTool, linkedinAnalyticsTool, linkedinConnectTool } =
   await import("../../../src/tools/linkedin.js");
 
@@ -68,13 +59,14 @@ describe("linkedinPostTool", () => {
   });
 
   it("passes author URN and visibility to the provider", async () => {
-    await linkedinPostTool.execute(BASE_POST_ARGS);
+    await linkedinPostTool.execute({ ...BASE_POST_ARGS, department: "marketing" });
 
     expect(mockProviderLinkedInPost).toHaveBeenCalledWith(
       expect.objectContaining({
         text: BASE_POST_ARGS.text,
-        author_urn: "urn:li:person:TEST123",
         visibility: "PUBLIC",
+        department: "marketing",
+        account_key: "turicks",
       }),
     );
   });
@@ -111,24 +103,16 @@ describe("linkedinPostTool", () => {
   });
 
   it("returns success: false when direct backend has no author URN", async () => {
-    vi.mocked(getLinkedInAccount).mockResolvedValueOnce({
-      credentials: { access_token: "tok", author_urn: undefined },
-      ctx: {
-        account_key: "turicks",
-        platform: "linkedin",
-        auth_backend: "direct",
-        credential_refs: {},
-        display_name: "turicks linkedin",
-        status: "active",
-        source: "default",
-      },
+    mockProviderLinkedInPost.mockResolvedValueOnce({
+      success: false,
+      error: "LinkedIn author URN not configured for account 'turicks'. See ACCOUNT-REGISTRY-RUNBOOK.md.",
     });
 
     const result = await linkedinPostTool.execute(BASE_POST_ARGS);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("author URN");
-    expect(mockProviderLinkedInPost).not.toHaveBeenCalled();
+    expect(mockProviderLinkedInPost).toHaveBeenCalledOnce();
   });
 });
 

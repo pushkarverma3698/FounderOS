@@ -15,7 +15,7 @@ import {
   providerLinkedInPost,
 } from "../infra/providers/index.js";
 import { getLinkedInBackend } from "../infra/provider-config.js";
-import { getLinkedInAccount } from "../infra/account-registry.js";
+import { resolveAccountKey } from "../core/accounts.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:linkedin" });
@@ -92,26 +92,15 @@ export const linkedinPostTool: UnifiedTool = {
       return { success: true, data: { skipped: true, reason: "idempotency_key already used" } };
     }
 
-    const { credentials, ctx } = await getLinkedInAccount({
-      platform: "linkedin",
-      account_key,
-      department,
-    });
-    const authorUrn = credentials.author_urn;
-    if (!authorUrn && getLinkedInBackend() === "direct") {
-      return {
-        success: false,
-        error: `LinkedIn author URN not configured for account '${ctx.account_key}'. See ACCOUNT-REGISTRY-RUNBOOK.md.`,
-      };
-    }
+    const accountKey = resolveAccountKey("linkedin", { department, account_key });
 
     const result = await providerLinkedInPost({
       text,
-      author_urn: authorUrn ?? "",
+      author_urn: "", // provider resolves from registry
       image_url,
       visibility: visibility === "CONNECTIONS" ? "CONNECTIONS" : "PUBLIC",
       schedule_time,
-      account_key: ctx.account_key,
+      account_key: accountKey,
       department,
     });
 
@@ -134,7 +123,7 @@ export const linkedinPostTool: UnifiedTool = {
         text: text.slice(0, 100),
         visibility,
         backend: getLinkedInBackend(),
-        account_key: ctx.account_key,
+        account_key: accountKey,
       },
     });
     if (!audit.written) {

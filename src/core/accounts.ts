@@ -124,3 +124,51 @@ export function defaultGwsProfileDir(accountKey: AccountKey): string {
   const home = process.env["HOME"] ?? "/home/founderos";
   return `${home}/.founderos/accounts/${accountKey}/gws`;
 }
+
+/**
+ * Single source of truth for which accounts × platforms exist.
+ * Seed script, status CLI, and docs derive from here — do not duplicate elsewhere.
+ */
+export const ACCOUNT_SEED_SPECS: ReadonlyArray<{
+  account_key: AccountKey;
+  display_name: string;
+  platforms: ReadonlyArray<{
+    platform: Platform;
+    auth_backend: AuthBackend;
+  }>;
+}> = [
+  {
+    account_key: "turicks",
+    display_name: "Turicks (business)",
+    platforms: [
+      { platform: "google", auth_backend: "gws" },
+      { platform: "linkedin", auth_backend: "direct" },
+      { platform: "instagram", auth_backend: "meta_graph" },
+      { platform: "facebook", auth_backend: "meta_graph" },
+      { platform: "github", auth_backend: "pat" },
+    ],
+  },
+  {
+    account_key: "personal",
+    display_name: "Pushkar (personal)",
+    platforms: [
+      { platform: "google", auth_backend: "gws" },
+      { platform: "linkedin", auth_backend: "direct" },
+      { platform: "instagram", auth_backend: "meta_graph" },
+      { platform: "facebook", auth_backend: "meta_graph" },
+      { platform: "github", auth_backend: "pat" },
+    ],
+  },
+  {
+    account_key: "naggar",
+    display_name: "Naggar Retreat",
+    platforms: [
+      { platform: "google", auth_backend: "gws" },
+      { platform: "instagram", auth_backend: "meta_graph" },
+      { platform: "facebook", auth_backend: "meta_graph" },
+    ],
+  },
+];
+
+/** Departments that send email — each maps to createSendEmailTool(dept) in capabilities.ts */
+export const EMAIL_DEPARTMENTS = ["comms", "sales", "jobhunt"] as const;
