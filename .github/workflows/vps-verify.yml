@@ -43,10 +43,12 @@ jobs:
             set -euo pipefail
             export VERIFY_BRANCH="${{ inputs.branch }}"
             cd /opt/founderos
+            if [ -d .git/refs/heads/cursor ]; then rm -rf .git/refs/heads/cursor 2>/dev/null || true; fi
+            find .git -name '*.lock' -delete 2>/dev/null || true
             git fetch --quiet origin "$VERIFY_BRANCH"
             git reset --hard "origin/$VERIFY_BRANCH"
-            git clean -fd
-            chmod +x scripts/vps-verify-web-design.sh scripts/vps-live-showcase.sh
+            git clean -fd || true
+            chmod +x scripts/vps-verify-web-design.sh scripts/vps-live-showcase.sh scripts/vps-website-builder-smoke.sh 2>/dev/null || true
             if [ "${{ inputs.live_only }}" = "true" ]; then
               bash scripts/vps-verify-web-design.sh --live-only
             else
