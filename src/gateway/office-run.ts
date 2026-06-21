@@ -686,12 +686,20 @@ export async function routeToOffice(ctx: Context): Promise<void> {
 /** Run an arbitrary prompt through the office on this session's thread. */
 export async function runOfficeText(ctx: Context, text: string): Promise<void> {
   const session = createTelegramSession(ctx);
-  await withChatTurnLock(session.id, () => runOfficeSession(session, text));
+  await runOfficeSession(session, text);
 }
 
-/** Transport-neutral office run (Telegram + web gateways). */
+/**
+ * Transport-neutral office run (Telegram + web gateways).
+ *
+ * The per-session lock lives HERE — not in the Telegram wrapper — so every
+ * caller (web `web.ts`, Telegram `runOfficeText`) is serialized per chat.
+ * Without it, two concurrent same-session web turns race the LangGraph
+ * Postgres checkpointer and overwrite each other's state. See
+ * web-concurrency.test.ts.
+ */
 export async function runOfficeSession(session: GatewaySession, text: string): Promise<void> {
-  await runOfficeSessionLocked(session, text);
+  await withChatTurnLock(session.id, () => runOfficeSessionLocked(session, text));
 }
 
 async function runOfficeSessionLocked(session: GatewaySession, text: string): Promise<void> {
@@ -972,15 +980,19 @@ export function buildRejectionConfirmation(approval: ApprovalRequest): string {
 
 export async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Promise<void> {
   const session = createTelegramSession(ctx);
-  await withChatTurnLock(session.id, () => resumeOfficeSession(session, decision));
+  await resumeOfficeSession(session, decision);
 }
 
-/** Transport-neutral HITL resume. */
+/**
+ * Transport-neutral HITL resume. Shares the same per-session lock as
+ * {@link runOfficeSession} so an approval/reject decision cannot race a
+ * concurrent message turn on the same thread.
+ */
 export async function resumeOfficeSession(
   session: GatewaySession,
   decision: "approved" | "rejected",
 ): Promise<void> {
-  await resumeOfficeSessionLocked(session, decision);
+  await withChatTurnLock(session.id, () => resumeOfficeSessionLocked(session, decision));
 }
 
 async function resumeOfficeSessionLocked(

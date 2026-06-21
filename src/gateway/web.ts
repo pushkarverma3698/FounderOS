@@ -111,8 +111,10 @@ export function createWebApp(): Hono {
         }),
       });
       const unsub = subscribeStreamEvents(sessionId, (ev) => {
-        // Default SSE message event (no `event:` field) — browser EventSource.onmessage
-        // only fires for untyped events; type lives in the JSON payload.
+        // Emit as the default `message` event (no `event:` name). Browser
+        // EventSource.onmessage only fires for default-type frames; both web
+        // clients route on the JSON `payload.type`, so a named SSE event would
+        // be silently dropped. See web-gateway.test.ts regression.
         void stream.writeSSE({ data: JSON.stringify(ev) });
       });
       try {
