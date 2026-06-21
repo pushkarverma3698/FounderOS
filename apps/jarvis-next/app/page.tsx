@@ -9,6 +9,7 @@ import { MissionPanel } from "@/components/ui/MissionPanel";
 import { DeptRail } from "@/components/ui/DeptRail";
 import { useJarvisStream } from "@/hooks/useJarvisStream";
 import { useVoice } from "@/hooks/useVoice";
+import { useSfx } from "@/hooks/useSfx";
 import { createMission, hitlDecision, sendMessage, DEPARTMENTS } from "@/lib/jarvis-api";
 import "./dashboard.css";
 
@@ -20,6 +21,7 @@ export default function JarvisDashboard() {
   const [focusedPanel, setFocusedPanel] = useState<"chat" | "missions" | null>(null);
 
   const { voiceOn, setVoiceOn, speaking, recognizing, speak, startListening } = useVoice();
+  const { sfxOn, toggleSfx, playTransmit, playReceive, playStatus, playMic } = useSfx();
 
   // Track mouse coordinates for zero-gravity parallax drift
   useEffect(() => {
@@ -39,6 +41,17 @@ export default function JarvisDashboard() {
     [speak, voiceOn],
   );
 
+  const onEvent = useCallback(
+    (type: string) => {
+      if (type === "tool.start" || type === "department.routed") {
+        playStatus();
+      } else if (type === "turn.complete" || type === "turn.error") {
+        playReceive();
+      }
+    },
+    [playStatus, playReceive],
+  );
+
   const {
     connected,
     busy,
@@ -51,7 +64,7 @@ export default function JarvisDashboard() {
     setPendingHitl,
     markBusy,
     markIdle,
-  } = useJarvisStream(onAssistantReply);
+  } = useJarvisStream(onAssistantReply, onEvent);
 
   // Map AI cognitive/voice state to smooth ambient backdrop glows
   const glowColors = useMemo(() => {
@@ -104,6 +117,7 @@ export default function JarvisDashboard() {
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || busy) return;
+      playTransmit();
       pushLine("user", trimmed);
       setInput("");
       markBusy();
@@ -114,13 +128,14 @@ export default function JarvisDashboard() {
         pushLine("error", "Transmission failed — is the gateway running on :3001?");
       }
     },
-    [busy, markBusy, markIdle, pushLine],
+    [busy, markBusy, markIdle, pushLine, playTransmit],
   );
 
   const handleVoice = useCallback(() => {
+    playMic();
     const ok = startListening((text) => void transmit(text));
     if (!ok) pushLine("system", "Voice recognition unavailable in this browser.");
-  }, [pushLine, startListening, transmit]);
+  }, [pushLine, startListening, transmit, playMic]);
 
   const handleHitl = useCallback(
     async (decision: "approve" | "reject") => {
@@ -207,6 +222,8 @@ export default function JarvisDashboard() {
             speaking={speaking}
             recognizing={recognizing}
             onToggleVoice={() => setVoiceOn((v) => !v)}
+            sfxOn={sfxOn}
+            onToggleSfx={toggleSfx}
           />
 
           <div className="hud-body">

@@ -29,7 +29,10 @@ function handleStreamPayload(
     refreshMissions: () => void;
   },
   onAssistantReply?: (text: string) => void,
+  onEvent?: (type: string, data?: any) => void,
 ): void {
+  onEvent?.(payload.type, payload.data);
+
   if (payload.type === "hitl.pending") {
     setters.setPendingHitl({
       title: String(payload.data?.title ?? "Approval required"),
@@ -83,7 +86,10 @@ function handleStreamPayload(
   }
 }
 
-export function useJarvisStream(onAssistantReply?: (text: string) => void) {
+export function useJarvisStream(
+  onAssistantReply?: (text: string) => void,
+  onEvent?: (type: string, data?: any) => void,
+) {
   const [connected, setConnected] = useState(false);
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [missions, setMissions] = useState<MissionRow[]>([]);
@@ -94,6 +100,8 @@ export function useJarvisStream(onAssistantReply?: (text: string) => void) {
   const busyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onAssistantReplyRef = useRef(onAssistantReply);
   onAssistantReplyRef.current = onAssistantReply;
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
 
   const pushLine = useCallback((type: ChatLine["type"], text: string) => {
     setLines((prev) => [
@@ -162,6 +170,7 @@ export function useJarvisStream(onAssistantReply?: (text: string) => void) {
             pushLine,
             { setPendingHitl, setActiveDept, refreshMissions },
             (text) => onAssistantReplyRef.current?.(text),
+            (type, data) => onEventRef.current?.(type, data),
           );
           if (payload.type === "turn.complete" || payload.type === "turn.error") {
             markIdle();

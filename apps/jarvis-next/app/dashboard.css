@@ -756,6 +756,164 @@
   box-shadow: 0 0 10px rgba(255, 255, 255, 0.4);
 }
 
+/* Thought accordion styling */
+.thought-accordion {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.012);
+  background: rgba(255, 255, 255, 0.003);
+  margin-bottom: 0.85rem;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.thought-accordion:hover {
+  background: rgba(255, 255, 255, 0.008);
+  border-color: rgba(255, 255, 255, 0.02);
+}
+
+.thought-accordion.open {
+  border-color: rgba(78, 240, 255, 0.05);
+  background: rgba(0, 0, 0, 0.1);
+  box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.4);
+}
+
+.thought-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.85rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  transition: opacity 0.2s;
+}
+
+.thought-header:hover {
+  opacity: 0.9;
+}
+
+.thought-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.thought-pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+.thought-accordion.open .thought-pulse {
+  background: var(--violet);
+  box-shadow: 0 0 8px var(--violet);
+}
+
+.thought-title {
+  font-family: var(--mono-font);
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.thought-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.thought-time {
+  font-size: 0.52rem;
+  color: var(--muted);
+  opacity: 0.4;
+  letter-spacing: 0.05em;
+}
+
+.thought-chevron {
+  font-size: 0.5rem;
+  color: var(--muted);
+  opacity: 0.5;
+  transition: transform 0.3s;
+}
+
+.thought-steps-wrapper {
+  border-top: 1px solid rgba(255, 255, 255, 0.01);
+}
+
+.thought-steps {
+  padding: 0.6rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.thought-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-family: var(--mono-font);
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
+.thought-step-system .step-bullet {
+  color: var(--cyan);
+  opacity: 0.7;
+}
+
+.thought-step-system .step-text {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.thought-step-tool .step-bullet {
+  color: var(--violet);
+  opacity: 0.7;
+}
+
+.thought-step-tool .step-text {
+  color: var(--violet);
+  opacity: 0.9;
+}
+
+/* Cognitive status ticker styling */
+.cognitive-ticker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1rem;
+  margin: 0.5rem 1rem;
+  border-radius: 12px;
+  background: rgba(78, 240, 255, 0.015);
+  border: 1px solid rgba(78, 240, 255, 0.025);
+  backdrop-filter: blur(8px);
+}
+
+.ticker-pulse {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 10px var(--cyan);
+  animation: pulse-glow 0.8s ease-in-out infinite alternate;
+}
+
+.ticker-text {
+  font-family: var(--mono-font);
+  font-size: 0.58rem;
+  letter-spacing: 0.18em;
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(78, 240, 255, 0.15);
+  font-weight: 300;
+}
+
 @media (max-width: 1100px) {
   .hud-body {
     grid-template-columns: 1fr;

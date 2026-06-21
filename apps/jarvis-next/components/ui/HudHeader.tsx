@@ -8,12 +8,16 @@ export function HudHeader({
   speaking,
   recognizing,
   onToggleVoice,
+  sfxOn,
+  onToggleSfx,
 }: {
   connected: boolean;
   voiceOn: boolean;
   speaking: boolean;
   recognizing: boolean;
   onToggleVoice: () => void;
+  sfxOn: boolean;
+  onToggleSfx: () => void;
 }) {
   return (
     <motion.header 
@@ -50,6 +54,13 @@ export function HudHeader({
           onClick={onToggleVoice}
         >
           {voiceOn ? "VOICE ON" : "MUTED"}
+        </button>
+        <button 
+          type="button" 
+          className={`hud-voice-toggle ${sfxOn ? "on" : ""}`} 
+          onClick={onToggleSfx}
+        >
+          {sfxOn ? "SOUND ON" : "MUTED"}
         </button>
       </div>
     </motion.header>
