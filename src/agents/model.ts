@@ -57,9 +57,11 @@ export function is503Error(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const msg = err.message;
   return (
-    msg.includes("503") ||
-    msg.includes("500") ||
-    msg.includes("429") ||
+    // G7: word-boundary matches for HTTP status codes — msg.includes("500") would
+    // false-match "port 5001", "error 50042", or any number containing "500".
+    /\b503\b/.test(msg) ||
+    /\b500\b/.test(msg) ||
+    /\b429\b/.test(msg) ||
     msg.includes("high demand") ||
     msg.includes("Service Unavailable") ||
     msg.includes("Internal Server Error") ||

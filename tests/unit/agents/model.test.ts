@@ -159,4 +159,13 @@ describe("error classifiers kept for logs and retry policy tests", () => {
   it("keeps the old backoff tuple exported for Gemini REST tooling", () => {
     expect(RETRY_BACKOFF_MS).toEqual([2_000, 4_000, 8_000]);
   });
+
+  // G7 regression: word-boundary match prevents false positives on port numbers / longer codes
+  it("G7: does not false-positive on strings containing '500' mid-word", () => {
+    expect(is503Error(new Error("port 5001 already in use"))).toBe(false);
+    expect(is503Error(new Error("error code 50042"))).toBe(false);
+    expect(is503Error(new Error("HTTP 500 Internal Server Error"))).toBe(true);
+    expect(is503Error(new Error("status: 503"))).toBe(true);
+    expect(is503Error(new Error("429 Too Many Requests"))).toBe(true);
+  });
 });

@@ -212,10 +212,9 @@ export const outboundLeads = agentsSchema.table(
 // ── do_not_contact ────────────────────────────────────────────────────────────
 
 /**
- * SaaS-PHASE: table defined, NOT checked before sends. Activate in Phase 2:
- * add isDoNotContact() guard in agent-tools/comms.ts before send_email fires.
- *
  * GDPR/CAN-SPAM suppression list. Exact email addresses and domain-level blocks.
+ * ACTIVE: isSuppressed() checks this table in send_email (comms.ts) after HITL
+ * approval, before every outbound send. Covers comms + sales + jobhunt depts.
  * Old name: suppression_list
  */
 export const doNotContact = agentsSchema.table(

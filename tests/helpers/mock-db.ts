@@ -54,6 +54,9 @@ export function mockQueriesModule() {
     publishDeptEvent: vi.fn().mockResolvedValue("mock-signal-id"),
     publishDeptEventWithAudit: vi.fn().mockResolvedValue({ signalId: "mock-signal-id" }),
     consumePendingEvents: vi.fn().mockResolvedValue([]),
+
+    // G4: Daily outbound quota (Postgres-backed) — default 0 so tests pass under limit
+    getDailyOutboundCount: vi.fn().mockResolvedValue(0),
   };
 }
 
@@ -89,6 +92,7 @@ export function mockQueriesDownModule() {
     getRecentOutcomes: throwDb,
     publishDeptEvent: throwDb,
     consumePendingEvents: throwDb,
+    getDailyOutboundCount: throwDb,
   };
 }
 
@@ -122,5 +126,6 @@ export function mockSlowQueriesModule(delayMs: number) {
     getRecentOutcomes: slow([]),
     publishDeptEvent: slow(undefined),
     consumePendingEvents: slow([]),
+    getDailyOutboundCount: slow(0),
   };
 }

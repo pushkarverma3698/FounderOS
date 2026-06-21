@@ -886,6 +886,37 @@ export async function searchEpisodicMemory(
   );
 }
 
+// ── Daily Outbound Quota (action_log) ─────────────────────────────────────────
+
+/**
+ * Count outbound send actions for a tenant today (UTC midnight boundary).
+ * Uses the existing action_log table — no new table needed, Postgres-backed
+ * and durable (survives Redis/process restarts). Covers the G4 gap: no daily
+ * send ceiling was enforced before this query was wired into sendEmail/linkedinPost.
+ *
+ * @param actions  Which action types to count (e.g. ["send_email"])
+ */
+export async function getDailyOutboundCount(
+  tenantId: string,
+  actions: string[],
+): Promise<number> {
+  if (actions.length === 0) return 0;
+  const db = getDb();
+  const todayUtc = new Date();
+  todayUtc.setUTCHours(0, 0, 0, 0);
+  const [row] = await db
+    .select({ total: count() })
+    .from(actionLog)
+    .where(
+      and(
+        eq(actionLog.tenant_id, tenantId),
+        inArray(actionLog.action, actions),
+        gte(actionLog.created_at, todayUtc),
+      ),
+    );
+  return Number(row?.total ?? 0);
+}
+
 // ── Activity Summary (action_log) ─────────────────────────────────────────────
 
 /**

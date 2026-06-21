@@ -39,13 +39,13 @@ You message it via Telegram → it routes to the right department → the agent 
 - Phase 2: Typed inter-department contracts (dept_signals, Zod validation)
 - Phase 3: Claude-as-judge quality gate (two-gate system: brand-validator → Claude judge)
 - Phase 4: Durable async signals (Postgres dept_signals table, hourly sweep)
-- Phase 5: Hierarchy proof (nested HITL on prebuilt supervisors, 3-level interrupt/resume proven)
+- Phase 5: Hierarchy proof (nested HITL on prebuilt supervisors, 3-level interrupt/resume proven at unit level; **NOT wired in the live office graph** — gated on real business trigger + full MTProto QA, see LIMITATIONS.md §14)
 - Phase 6: Security rules operationalized (context isolation + typed handoffs enforced)
 
 **Production Infrastructure:**
 - Hetzner VPS, systemd service, GitHub Actions CD pipeline
 - Postgres checkpointer (Postgres-backed LangGraph state)
-- Redis for caching and quotas
+- Redis (optional — NOT on boot path; `incrQuota()` + cache functions defined but not called; bot starts clean without it)
 - Ollama for local embeddings
 - LangSmith for telemetry and cost tracking
 
@@ -65,7 +65,7 @@ Strategy: [docs/strategy/](strategy/) · Phase doc: [PHASE-D-BIS-PROOF-AND-DISTR
 | **SaaS pivot** | Gated on 4+ weeks stable production use — achieve that first, then multi-tenancy |
 | **Rearchitect supervisor** | Architecture is locked — only add tools and hierarchy from now on |
 | **Budget guard npm package** | Deprioritized for core reliability — can extract later |
-| **Real RAG (pgvector)** | **Live in production** — `turicks_brain` + `brain:sync` on every deploy; keyword store in `knowledge_entries` |
+| **Real RAG (pgvector)** | **Code live; data NOT guaranteed** — pgvector + Ollama embeddings wired; `pnpm brain:sync` required post-deploy to populate `turicks_brain`. Run `SELECT COUNT(*) FROM brain.turicks_brain` to verify. Falls back to keyword-only (`knowledge_entries`) if Ollama unavailable |
 | **Safari-MCP browser** | Deferred in ADR-012; personal.browser works fine for current use |
 | **Multi-provider cascade** | One good model (Gemini 2.5 Flash) > custom cascade — OpenRouter fallback for 503s |
 

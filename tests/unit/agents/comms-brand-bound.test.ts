@@ -36,6 +36,8 @@ vi.mock("../../../src/db/queries.js", () => ({
   getPendingInterrupt: vi.fn(async () => null),
   hasRecentOutboundToRecipient: vi.fn(async () => false),
   isSuppressed: vi.fn(async () => false),
+  // G4: quota stub — return 0 so brand-bound tests are not blocked by quota ceiling
+  getDailyOutboundCount: vi.fn(async () => 0),
 }));
 
 const { linkedinPost } = await import("../../../src/agents/agent-tools/comms.js");
