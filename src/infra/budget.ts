@@ -54,14 +54,59 @@ export const MODEL_COSTS: Record<string, ModelCost> = {
 /** Safe default for unlisted models (pessimistic estimate). */
 const DEFAULT_COST: ModelCost = { inputPerM: 0.10, outputPerM: 0.50 };
 
+// ── Model ID normalizer ───────────────────────────────────────────────────────
+
+/**
+ * Strip provider prefixes so MODEL_COSTS lookup works regardless of how the
+ * model is configured. Without this, every call falls through to DEFAULT_COST:
+ *   "openrouter:google/gemini-2.5-flash" → "gemini-2.5-flash"
+ *   "openrouter:openai/gpt-4o-mini"      → "gpt-4o-mini"
+ *   "google-genai:gemini-2.5-flash"      → "gemini-2.5-flash"
+ *   "gemini-2.5-flash"                   → "gemini-2.5-flash" (unchanged)
+ * Also strips trailing ":free" suffixes used by OpenRouter free-tier.
+ */
+const PROVIDER_PREFIXES = ["openrouter:", "google-genai:", "anthropic:", "openai:"];
+const TIER_SUFFIXES = [":free", ":nitro", ":paid", ":beta"];
+
+export function normalizeModelId(modelId: string): string {
+  let name = modelId;
+  // Strip known provider prefixes (e.g. "openrouter:", "google-genai:")
+  for (const prefix of PROVIDER_PREFIXES) {
+    if (name.startsWith(prefix)) {
+      name = name.slice(prefix.length);
+      break;
+    }
+  }
+  // Strip vendor subdirectory (e.g. "google/gemini-2.5-flash" → "gemini-2.5-flash")
+  const slashIdx = name.indexOf("/");
+  if (slashIdx !== -1) {
+    name = name.slice(slashIdx + 1);
+    // Strip ":free"/":nitro" suffix that follows the model name after vendor stripping
+    const colonSuffix = name.indexOf(":");
+    if (colonSuffix !== -1) name = name.slice(0, colonSuffix);
+    return name;
+  }
+  // For plain model IDs like "deepseek-r1:free" strip only known tier suffixes,
+  // not arbitrary colons (avoids treating ":free" as a provider boundary).
+  for (const suffix of TIER_SUFFIXES) {
+    if (name.endsWith(suffix)) {
+      name = name.slice(0, -suffix.length);
+      break;
+    }
+  }
+  return name;
+}
+
 // ── Pure cost estimator ───────────────────────────────────────────────────────
 
 /**
  * Calculate the estimated cost of a single LLM call.
  * Pure function — no I/O, no side effects.
+ * modelId is normalized before lookup so provider-prefixed strings resolve correctly.
  */
 export function estimateCost(inputTokens: number, outputTokens: number, modelId: string): number {
-  const costs = MODEL_COSTS[modelId] ?? DEFAULT_COST;
+  const normalized = normalizeModelId(modelId);
+  const costs = MODEL_COSTS[normalized] ?? MODEL_COSTS[modelId] ?? DEFAULT_COST;
   return (inputTokens * costs.inputPerM + outputTokens * costs.outputPerM) / 1_000_000;
 }
 
@@ -190,7 +235,16 @@ export class BudgetGuardCallback extends BaseCallbackHandler {
       usageMeta.candidatesTokenCount ??
       0;
 
-    this.tracker.accrue(inputTokens, outputTokens, this.modelId);
+    // G6: use the actual model from the response when available — handles the
+    // fallback model case where AGENT_MODEL ≠ what was actually called. The
+    // model field location varies by provider (OpenAI, Gemini, Anthropic).
+    const actualModel =
+      (genInfo?.["model"] as string | undefined) ??
+      (llmOut?.["model_id"] as string | undefined) ??
+      (llmOut?.["model"] as string | undefined) ??
+      this.modelId;
+
+    this.tracker.accrue(inputTokens, outputTokens, actualModel);
 
     const check = this.tracker.check();
     if (!check.ok) {

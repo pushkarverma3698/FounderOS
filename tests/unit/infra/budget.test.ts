@@ -10,6 +10,7 @@
 import { describe, it, expect } from "vitest";
 import {
   estimateCost,
+  normalizeModelId,
   BudgetTracker,
   BudgetExceededError,
   MODEL_COSTS,
@@ -48,6 +49,39 @@ describe("estimateCost", () => {
   it("exports MODEL_COSTS with at least 4 known models", () => {
     expect(Object.keys(MODEL_COSTS).length).toBeGreaterThanOrEqual(4);
     expect(MODEL_COSTS["gemini-2.5-flash"]).toBeDefined();
+  });
+});
+
+// ── normalizeModelId (G6) ─────────────────────────────────────────────────────
+
+describe("normalizeModelId — strips provider prefix for MODEL_COSTS lookup", () => {
+  it("strips openrouter:google/ prefix", () => {
+    expect(normalizeModelId("openrouter:google/gemini-2.5-flash")).toBe("gemini-2.5-flash");
+  });
+
+  it("strips openrouter:openai/ prefix", () => {
+    expect(normalizeModelId("openrouter:openai/gpt-4o-mini")).toBe("gpt-4o-mini");
+  });
+
+  it("strips google-genai: prefix", () => {
+    expect(normalizeModelId("google-genai:gemini-2.5-flash")).toBe("gemini-2.5-flash");
+  });
+
+  it("strips :free suffix used by OpenRouter free-tier", () => {
+    expect(normalizeModelId("openrouter:google/gemini-2.5-flash:free")).toBe("gemini-2.5-flash");
+    expect(normalizeModelId("deepseek-r1:free")).toBe("deepseek-r1");
+  });
+
+  it("leaves plain model IDs unchanged", () => {
+    expect(normalizeModelId("gemini-2.5-flash")).toBe("gemini-2.5-flash");
+    expect(normalizeModelId("claude-haiku-4-5")).toBe("claude-haiku-4-5");
+  });
+
+  it("ensures estimateCost resolves correctly for OpenRouter-prefixed models", () => {
+    const withPrefix = estimateCost(1_000_000, 0, "openrouter:google/gemini-2.5-flash");
+    const withoutPrefix = estimateCost(1_000_000, 0, "gemini-2.5-flash");
+    expect(withPrefix).toBe(withoutPrefix);
+    expect(withPrefix).toBe(0.075); // 0.075 per M input tokens
   });
 });
 
