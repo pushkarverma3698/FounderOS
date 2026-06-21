@@ -42,6 +42,27 @@ export function projectRoot(): string {
   return join(home, "Projects");
 }
 
+/** Expand a leading ~ to $HOME. */
+export function expandHomeInPath(p: string): string {
+  const home = process.env["HOME"] ?? "/Users/pushkarverma";
+  if (p === "~") return home;
+  if (p.startsWith("~/")) return join(home, p.slice(2));
+  return p;
+}
+
+/**
+ * Resolve a user-supplied path relative to ~/Projects (not process.cwd()).
+ * Supports absolute paths, ~/, and bare names like "cinematic-demo".
+ */
+export function resolveProjectPath(rawPath: string): string {
+  const root = projectRoot();
+  const expanded = expandHomeInPath(rawPath.trim());
+  if (expanded.startsWith("/")) {
+    return normalize(resolve(expanded));
+  }
+  return normalize(resolve(join(root, expanded)));
+}
+
 /** Secret patterns that are ALWAYS blocked (read or write). */
 const SECRET_PATTERNS = [
   /\.env(\.|$)/i,
