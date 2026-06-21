@@ -10,26 +10,32 @@ export function JarvisScene({
   activeDept,
   speaking,
   recognizing,
+  busy,
 }: {
   activeDept: string | null;
   speaking: boolean;
   recognizing: boolean;
+  busy: boolean;
 }) {
-  const pulse = speaking || recognizing;
-
   return (
     <div className="scene-root">
-      <Canvas camera={{ position: [0, 0.5, 5.5], fov: 42 }} dpr={[1, 1.5]} gl={{ antialias: true, alpha: true }}>
-        <color attach="background" args={["#020408"]} />
-        <fog attach="fog" args={["#020408", 6, 14]} />
+      <Canvas 
+        camera={{ position: [0, 0, 5.0], fov: 42 }} 
+        dpr={[1, 1.5]} 
+        gl={{ antialias: true, alpha: true }}
+      >
+        <color attach="background" args={["#050505"]} />
+        <fog attach="fog" args={["#050505", 5, 12]} />
         <Suspense fallback={null}>
-          <JarvisCore activeDept={activeDept} pulse={pulse} />
+          <JarvisCore 
+            activeDept={activeDept} 
+            speaking={speaking} 
+            recognizing={recognizing} 
+            busy={busy} 
+          />
         </Suspense>
       </Canvas>
       <div className="scene-vignette" aria-hidden />
-      <div className="scene-grid" aria-hidden />
-      <div className="scene-ring scene-ring-outer" aria-hidden />
-      <div className="scene-ring scene-ring-inner" aria-hidden />
     </div>
   );
 }

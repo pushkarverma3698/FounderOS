@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { JarvisScene } from "@/components/scene/JarvisScene";
 import { CinematicIntro } from "@/components/ui/CinematicIntro";
 import { HudHeader } from "@/components/ui/HudHeader";
@@ -9,15 +9,28 @@ import { MissionPanel } from "@/components/ui/MissionPanel";
 import { DeptRail } from "@/components/ui/DeptRail";
 import { useJarvisStream } from "@/hooks/useJarvisStream";
 import { useVoice } from "@/hooks/useVoice";
-import { createMission, hitlDecision, sendMessage } from "@/lib/jarvis-api";
+import { createMission, hitlDecision, sendMessage, DEPARTMENTS } from "@/lib/jarvis-api";
 import "./dashboard.css";
 
 export const dynamic = "force-dynamic";
 
 export default function JarvisDashboard() {
   const [input, setInput] = useState("");
+  const [mouseOffset, setMouseOffset] = useState({ x: 0, y: 0 });
+  const [focusedPanel, setFocusedPanel] = useState<"chat" | "missions" | null>(null);
 
   const { voiceOn, setVoiceOn, speaking, recognizing, speak, startListening } = useVoice();
+
+  // Track mouse coordinates for zero-gravity parallax drift
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      const x = (e.clientX / window.innerWidth) - 0.5;
+      const y = (e.clientY / window.innerHeight) - 0.5;
+      setMouseOffset({ x, y });
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
 
   const onAssistantReply = useCallback(
     (text: string) => {
@@ -26,8 +39,66 @@ export default function JarvisDashboard() {
     [speak, voiceOn],
   );
 
-  const { connected, busy, lines, missions, pendingHitl, activeDept, pushLine, refreshMissions, setPendingHitl, markBusy, markIdle } =
-    useJarvisStream(onAssistantReply);
+  const {
+    connected,
+    busy,
+    lines,
+    missions,
+    pendingHitl,
+    activeDept,
+    pushLine,
+    refreshMissions,
+    setPendingHitl,
+    markBusy,
+    markIdle,
+  } = useJarvisStream(onAssistantReply);
+
+  // Map AI cognitive/voice state to smooth ambient backdrop glows
+  const glowColors = useMemo(() => {
+    if (!connected) {
+      return {
+        cyanGlow: "rgba(80, 80, 80, 0.04)",
+        violetGlow: "rgba(40, 40, 40, 0.02)",
+        centerGlow: "rgba(0, 0, 0, 0.0)"
+      };
+    }
+    if (speaking) {
+      return {
+        cyanGlow: "rgba(255, 200, 87, 0.12)",
+        violetGlow: "rgba(251, 191, 36, 0.08)",
+        centerGlow: "rgba(255, 200, 87, 0.04)"
+      };
+    }
+    if (recognizing) {
+      return {
+        cyanGlow: "rgba(78, 240, 255, 0.18)",
+        violetGlow: "rgba(92, 255, 176, 0.12)",
+        centerGlow: "rgba(78, 240, 255, 0.06)"
+      };
+    }
+    if (busy) {
+      return {
+        cyanGlow: "rgba(167, 139, 250, 0.22)",
+        violetGlow: "rgba(255, 126, 179, 0.12)",
+        centerGlow: "rgba(167, 139, 250, 0.06)"
+      };
+    }
+    if (activeDept) {
+      const deptObj = DEPARTMENTS.find((d) => activeDept.includes(d.id));
+      if (deptObj) {
+        return {
+          cyanGlow: `${deptObj.color}20`,
+          violetGlow: `${deptObj.color}10`,
+          centerGlow: `${deptObj.color}04`
+        };
+      }
+    }
+    return {
+      cyanGlow: "rgba(78, 240, 255, 0.12)",
+      violetGlow: "rgba(167, 139, 250, 0.08)",
+      centerGlow: "rgba(78, 240, 255, 0.03)"
+    };
+  }, [connected, speaking, recognizing, busy, activeDept]);
 
   const transmit = useCallback(
     async (text: string) => {
@@ -106,10 +177,28 @@ export default function JarvisDashboard() {
 
   return (
     <main className="dashboard">
+      <div 
+        className="ambient-glows" 
+        style={{
+          "--cyan-glow": glowColors.cyanGlow,
+          "--violet-glow": glowColors.violetGlow,
+          "--center-glow": glowColors.centerGlow,
+        } as React.CSSProperties}
+      >
+        <div className="ambient-glow glow-top-left" />
+        <div className="ambient-glow glow-bottom-right" />
+        <div className="ambient-glow glow-center-burst" />
+      </div>
+
       <CinematicIntro />
 
       <div className="dashboard-inner visible">
-        <JarvisScene activeDept={activeDept} speaking={speaking} recognizing={recognizing} />
+        <JarvisScene 
+          activeDept={activeDept} 
+          speaking={speaking} 
+          recognizing={recognizing} 
+          busy={busy}
+        />
 
         <div className="hud-layer">
           <HudHeader
@@ -125,8 +214,10 @@ export default function JarvisDashboard() {
 
             <div className="center-stack">
               <div className="core-caption">
-                <span className="caption-label">CORE STATUS</span>
-                <span className="caption-value">{connected ? "SYNCED" : "STANDBY"}</span>
+                <span className="caption-label">CORE STATE</span>
+                <span className="caption-value">
+                  {connected ? (busy ? "COGNITION WAVE" : "STABLE SYNC") : "STANDBY"}
+                </span>
               </div>
             </div>
 
@@ -139,20 +230,28 @@ export default function JarvisDashboard() {
                 onSend={() => void transmit(input)}
                 onVoiceStart={handleVoice}
                 recognizing={recognizing}
+                isBlurred={focusedPanel !== null && focusedPanel !== "chat"}
+                onFocus={() => setFocusedPanel("chat")}
+                onBlur={() => setFocusedPanel(null)}
+                mouseOffset={mouseOffset}
               />
               <MissionPanel
                 missions={missions}
                 pendingHitl={pendingHitl}
                 onNewMission={() => void handleMission()}
                 onHitl={(d) => void handleHitl(d)}
+                isBlurred={focusedPanel !== null && focusedPanel !== "missions"}
+                onFocus={() => setFocusedPanel("missions")}
+                onBlur={() => setFocusedPanel(null)}
+                mouseOffset={mouseOffset}
               />
             </div>
           </div>
 
           <footer className="hud-footer">
-            <span>TURICKS AUTONOMOUS STUDIO</span>
-            <span className="footer-sep">|</span>
-            <span>7 DEPT · HITL GATED · TEMP 0</span>
+            <span>FOUNDER.OS COMMAND</span>
+            <span className="footer-sep">·</span>
+            <span>AUTONOMOUS MATRIX</span>
           </footer>
         </div>
       </div>

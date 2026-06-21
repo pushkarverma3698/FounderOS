@@ -12,6 +12,10 @@ export function ChatPanel({
   onSend,
   onVoiceStart,
   recognizing,
+  isBlurred,
+  onFocus,
+  onBlur,
+  mouseOffset = { x: 0, y: 0 },
 }: {
   lines: ChatLine[];
   input: string;
@@ -20,6 +24,10 @@ export function ChatPanel({
   onSend: () => void;
   onVoiceStart: () => void;
   recognizing: boolean;
+  isBlurred?: boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  mouseOffset?: { x: number; y: number };
 }) {
   const feedRef = useRef<HTMLDivElement>(null);
 
@@ -28,30 +36,41 @@ export function ChatPanel({
   }, [lines]);
 
   return (
-    <section className="chat-panel glass-panel">
+    <motion.section
+      className={`chat-panel glass-panel ${isBlurred ? "blurred" : ""}`}
+      onMouseEnter={onFocus}
+      onMouseLeave={onBlur}
+      animate={{
+        x: mouseOffset.x * -12,
+        y: (mouseOffset.y * -12) + Math.sin(Date.now() / 2500) * 4,
+      }}
+      transition={{ type: "spring", stiffness: 40, damping: 20 }}
+    >
       <div className="panel-label">
-        <span>COMMS CHANNEL</span>
-        <span className="panel-tag">AES-256</span>
+        <span>COMMUNICATION LINK</span>
+        <span className="panel-tag">SECURE CHANNEL</span>
       </div>
+
       <div className="feed" ref={feedRef}>
         <AnimatePresence initial={false}>
           {lines.length === 0 && (
             <motion.p
               key="placeholder"
               className="feed-placeholder"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+              initial={{ opacity: 0, filter: "blur(4px)" }}
+              animate={{ opacity: 1, filter: "blur(0px)" }}
+              transition={{ duration: 1.2 }}
             >
-              Awaiting your command, sir. Voice or text — the office is listening.
+              System fully initialized. Standing by for instructions.
             </motion.p>
           )}
           {lines.map((l) => (
             <motion.div
               key={l.id}
               className={`feed-line feed-${l.type}`}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25 }}
+              initial={{ opacity: 0, y: 12, filter: "blur(4px)" }}
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              transition={{ duration: 0.65, ease: [0.16, 1, 0.3, 1] }}
             >
               <time>{l.ts}</time>
               <span>{l.text}</span>
@@ -59,6 +78,7 @@ export function ChatPanel({
           ))}
         </AnimatePresence>
       </div>
+
       <div className="composer">
         <button
           type="button"
@@ -74,13 +94,18 @@ export function ChatPanel({
           disabled={busy}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && !busy && onSend()}
-          placeholder={busy ? "Office processing…" : "Command the office…"}
+          placeholder={busy ? "AI processing..." : "Initialize connection..."}
           aria-label="Message"
         />
-        <button type="button" className="send-btn" onClick={onSend} disabled={busy}>
-          {busy ? "…" : "TRANSMIT"}
+        <button 
+          type="button" 
+          className="send-btn" 
+          onClick={onSend} 
+          disabled={busy}
+        >
+          {busy ? "···" : "TRANSMIT"}
         </button>
       </div>
-    </section>
+    </motion.section>
   );
 }
