@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createWebApp } from "../../../src/gateway/web.js";
-import { resetStreamHubs } from "../../../src/gateway/stream-hub.js";
+import { resetStreamHubs, publishStreamEvent } from "../../../src/gateway/stream-hub.js";
 
 vi.mock("../../../src/db/queries.js", async (importActual) => {
   const actual = await importActual<typeof import("../../../src/db/queries.js")>();
@@ -71,6 +71,34 @@ describe("web gateway", () => {
     expect(deny.status).toBe(401);
     const ok = await app.request("http://localhost/api/v1/sessions/test/stream?token=secret-token");
     expect(ok.status).toBe(200);
+  });
+
+  it("streams events as default 'message' frames so browser onmessage fires", async () => {
+    // Regression: the gateway used to emit NAMED SSE events (`event: turn.complete`).
+    // Browser EventSource.onmessage only fires for default/`message`-type frames, so
+    // named events were silently dropped by both web clients (jarvis + jarvis-next),
+    // which subscribe via `es.onmessage` and route on the JSON `payload.type` field.
+    const app = createWebApp();
+    const res = await app.request("http://localhost/api/v1/sessions/sse-fmt/stream");
+    expect(res.status).toBe(200);
+    expect(res.body).toBeTruthy();
+
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+
+    // The stream emits a `stream.connected` frame first; skip it and read the
+    // next frame which is the published turn.complete event.
+    await reader.read(); // stream.connected frame
+    publishStreamEvent("sse-fmt", { type: "turn.complete", data: { reply: "ok" } });
+
+    const { value } = await reader.read();
+    const frame = dec.decode(value);
+    await reader.cancel();
+
+    // The payload type travels inside `data:` JSON — never as a named SSE `event:` line.
+    expect(frame).toContain("data:");
+    expect(frame).toContain('"type":"turn.complete"');
+    expect(frame).not.toMatch(/^event:/m);
   });
 
   it("GET miso/status returns status text", async () => {

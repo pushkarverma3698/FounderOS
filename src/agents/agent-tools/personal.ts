@@ -199,7 +199,7 @@ export const browser = tool(
   {
     name: "browser",
     description:
-      "Drive Safari on the founder's laptop. Actions: open_url (needs url), get_page_text (reads the current page), run_js (needs js). The founder is asked to APPROVE before it runs.",
+      "Drive a headless browser (Playwright on VPS, Safari on Mac). Actions: open_url (needs url), get_page_text (reads the current page), run_js (needs js). The founder is asked to APPROVE before it runs.",
     schema: z.object({
       action: z.enum(["open_url", "get_page_text", "run_js"]),
       url: z.string().optional().nullable().describe("URL for open_url"),
