@@ -158,7 +158,7 @@ else
   warn "showcase-1 not deployed — run: bash scripts/vps-live-showcase.sh"
 fi
 
-PUBLIC_BASE="$(grep '^STATIC_SITE_PUBLIC_BASE_URL=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' || echo 'http://95.217.162.12')"
+PUBLIC_BASE="$(grep '^STATIC_SITE_PUBLIC_BASE_URL=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' || echo 'http://YOUR_VPS_IP')"
 PUBLIC_URL="${PUBLIC_BASE%/}/showcase-1/"
 LOCAL_CODE="$(curl -s -o /tmp/launch-showcase.html -w '%{http_code}' --connect-timeout 8 "$PUBLIC_URL" 2>/dev/null || echo 000)"
 echo "    $PUBLIC_URL → HTTP $LOCAL_CODE"

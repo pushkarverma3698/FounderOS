@@ -10,7 +10,7 @@
 ### A. Deploy latest `main` (if not already)
 
 ```bash
-ssh founderos@95.217.162.12
+ssh founderos@YOUR_VPS_IP
 cd /opt/founderos
 git fetch origin main
 git checkout main && git reset --hard origin/main
