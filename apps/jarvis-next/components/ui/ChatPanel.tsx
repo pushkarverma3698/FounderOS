@@ -99,7 +99,7 @@ function ThoughtProcessAccordion({
                     } else if (parsed.name) {
                       displayText = `Invoking: ${parsed.name}`;
                     } else {
-                      displayText = `Process details: ${JSON.stringify(parsed)}`;
+                      displayText = "Processing...";
                     }
                   } catch {
                     // Ignore parsing error, keep text
@@ -118,6 +118,19 @@ function ThoughtProcessAccordion({
       </AnimatePresence>
     </div>
   );
+}
+
+function renderMarkdown(text: string): string {
+  let html = text.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+  const lines = html.split("\n");
+  const mapped = lines.map((line) => {
+    const m = line.match(/^\s*[*\-]\s+(.+)/);
+    return m ? `<li>${m[1]}</li>` : line;
+  });
+  html = mapped.join("\n");
+  html = html.replace(/((?:<li>[^\n]*\n?)+)/g, "<ul>$1</ul>");
+  html = html.replace(/\n/g, "<br>");
+  return html;
 }
 
 export function ChatPanel({
@@ -245,7 +258,11 @@ export function ChatPanel({
                 transition={{ duration: 0.65, ease: [0.16, 1, 0.3, 1] }}
               >
                 <time>{line.ts}</time>
-                <span>{line.text}</span>
+                {line.type === "assistant" ? (
+                  <span dangerouslySetInnerHTML={{ __html: renderMarkdown(line.text) }} />
+                ) : (
+                  <span>{line.text}</span>
+                )}
               </motion.div>
             );
           })}

@@ -88,7 +88,14 @@ function handleStreamPayload(
       pushLine("system", stripHtml(String(status)));
       return;
     }
-    pushLine("tool", JSON.stringify(payload.data ?? {}));
+    const toolName =
+      payload.data?.tool ?? payload.data?.name ?? payload.data?.toolName;
+    if (toolName) {
+      const verb = payload.type === "tool.start" ? "Invoking" : "Completed";
+      pushLine("tool", `${verb}: ${String(toolName)}`);
+      return;
+    }
+    // Silently drop internal telemetry blobs (model, textLen, etc.)
   }
 }
 

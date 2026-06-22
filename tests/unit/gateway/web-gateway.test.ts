@@ -84,10 +84,15 @@ describe("web gateway", () => {
     expect(res.body).toBeTruthy();
 
     const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+
+    // The stream emits a `stream.connected` frame first; skip it and read the
+    // next frame which is the published turn.complete event.
+    await reader.read(); // stream.connected frame
     publishStreamEvent("sse-fmt", { type: "turn.complete", data: { reply: "ok" } });
 
     const { value } = await reader.read();
-    const frame = new TextDecoder().decode(value);
+    const frame = dec.decode(value);
     await reader.cancel();
 
     // The payload type travels inside `data:` JSON — never as a named SSE `event:` line.

@@ -14,6 +14,8 @@ allowBuilds:
   esbuild: true
   protobufjs: true
   sharp: false
+  '@google/genai': set this to true or false
+  better-sqlite3: set this to true or false
 ignoredBuiltDependencies:
   - bufferutil
   - es5-ext

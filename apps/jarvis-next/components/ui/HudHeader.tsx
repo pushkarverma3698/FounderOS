@@ -53,14 +53,14 @@ export function HudHeader({
           className={`hud-voice-toggle ${voiceOn ? "on" : ""}`} 
           onClick={onToggleVoice}
         >
-          {voiceOn ? "VOICE ON" : "MUTED"}
+          {voiceOn ? "VOICE ON" : "VOICE OFF"}
         </button>
         <button 
           type="button" 
           className={`hud-voice-toggle ${sfxOn ? "on" : ""}`} 
           onClick={onToggleSfx}
         >
-          {sfxOn ? "SOUND ON" : "MUTED"}
+          {sfxOn ? "SFX ON" : "SFX OFF"}
         </button>
       </div>
     </motion.header>
