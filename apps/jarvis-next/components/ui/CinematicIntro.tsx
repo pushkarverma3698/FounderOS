@@ -4,11 +4,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useState } from "react";
 
 const BOOT_LINES = [
-  "FOUNDEROS NEURAL LINK",
-  "INITIALIZING OFFICE SUPERVISOR",
-  "LOADING 7 DEPARTMENT AGENTS",
-  "CALIBRATING MISO MISSION CONTROL",
-  "JARVIS INTERFACE ONLINE",
+  "COGNITIVE SYNAPSE ONLINE",
+  "ESTABLISHING SECURE PROTOCOLS",
+  "CALIBRATING NEURAL DEPARTMENTS",
+  "MISO CORE COGNITION SYNCHRONIZED",
+  "FOUNDER.OS ACTIVE",
 ];
 
 export function CinematicIntro({ onComplete }: { onComplete?: () => void }) {
@@ -16,22 +16,22 @@ export function CinematicIntro({ onComplete }: { onComplete?: () => void }) {
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    const failSafe = setTimeout(() => onComplete?.(), 4500);
+    const failSafe = setTimeout(() => onComplete?.(), 5500);
     return () => clearTimeout(failSafe);
   }, [onComplete]);
 
   useEffect(() => {
     if (lineIdx >= BOOT_LINES.length) {
-      const t = setTimeout(() => setDone(true), 600);
+      const t = setTimeout(() => setDone(true), 900);
       return () => clearTimeout(t);
     }
-    const t = setTimeout(() => setLineIdx((i) => i + 1), 520);
+    const t = setTimeout(() => setLineIdx((i) => i + 1), 650);
     return () => clearTimeout(t);
   }, [lineIdx]);
 
   useEffect(() => {
     if (done) {
-      const t = setTimeout(() => onComplete?.(), 400);
+      const t = setTimeout(() => onComplete?.(), 600);
       return () => clearTimeout(t);
     }
   }, [done, onComplete]);
@@ -42,36 +42,50 @@ export function CinematicIntro({ onComplete }: { onComplete?: () => void }) {
         <motion.div
           className="intro-overlay"
           initial={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.9, ease: "easeInOut" }}
+          exit={{ opacity: 0, filter: "blur(20px)" }}
+          transition={{ duration: 1.6, ease: [0.16, 1, 0.3, 1] }}
         >
           <div className="intro-flare" />
-          <motion.div
+          
+          <motion.h2
             className="intro-logo"
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.8 }}
+            initial={{ y: 20, opacity: 0, filter: "blur(5px)" }}
+            animate={{ y: 0, opacity: 0.9, filter: "blur(0px)" }}
+            transition={{ duration: 1.8, ease: [0.16, 1, 0.3, 1] }}
           >
-            ◆ JARVIS
-          </motion.div>
+            FOUNDER.OS
+          </motion.h2>
+
           <div className="intro-lines">
             {BOOT_LINES.slice(0, lineIdx).map((line, i) => (
               <motion.div
                 key={line}
                 className="intro-line"
-                initial={{ opacity: 0, x: -12 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.05 }}
+                initial={{ opacity: 0, y: 15, filter: "blur(4px)" }}
+                animate={{ opacity: 0.7, y: 0, filter: "blur(0px)" }}
+                transition={{ duration: 1.0, ease: [0.16, 1, 0.3, 1] }}
+                style={{ 
+                  fontFamily: "var(--display-font)",
+                  fontWeight: i === BOOT_LINES.length - 1 ? 500 : 300,
+                  color: i === BOOT_LINES.length - 1 ? "#ffffff" : "var(--muted)"
+                }}
               >
-                <span className="intro-cursor">▸</span> {line}
+                {line}
               </motion.div>
             ))}
           </div>
+
           <div className="intro-progress">
             <motion.div
               className="intro-progress-bar"
-              initial={{ width: "0%" }}
-              animate={{ width: `${(lineIdx / BOOT_LINES.length) * 100}%` }}
+              initial={{ left: "-100%" }}
+              animate={{ left: "100%" }}
+              transition={{ 
+                duration: 3.5, 
+                ease: "easeInOut",
+                repeat: Infinity 
+              }}
+              style={{ position: "absolute", width: "100%" }}
             />
           </div>
         </motion.div>
