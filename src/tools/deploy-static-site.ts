@@ -18,6 +18,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   statSync,
 } from "node:fs";
@@ -115,6 +116,63 @@ export function isAllowedSourcePath(sourcePath: string): boolean {
   return isProjectPath(abs);
 }
 
+/** Minimum byte size for a non-trivial landing page (catches empty/stub output). */
+const MIN_HTML_BYTES = 30;
+/** Leftover template tokens that mean the build never personalized the scaffold. */
+const PLACEHOLDER_RE = /\{\{\s*[A-Z0-9_]+\s*\}\}/;
+/** claude_code failure markers that must never reach the public web root. */
+const FAILURE_MARKER_RE = /\[\[TOOL_FAILURE\]\]|^\s*❌/;
+/** Crude but reliable "is this actually HTML" check. */
+const HTML_MARKUP_RE = /<(!doctype\s+html|html|body|main|section|div|header)\b/i;
+
+export interface ArtifactValidation {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * Deterministic guard against deploying hallucinated/broken output (rule #16).
+ * Resolves the index.html (file directly, or index.html inside a directory) and
+ * verifies it is non-empty, real markup, fully personalized, and not an error.
+ * Never throws; returns { ok, reason }.
+ */
+export function validateStaticArtifact(sourcePath: string): ArtifactValidation {
+  const abs = resolve(normalize(sourcePath));
+  if (!existsSync(abs)) return { ok: false, reason: `Source not found: ${abs}` };
+
+  let indexPath = abs;
+  const stat = statSync(abs);
+  if (stat.isDirectory()) {
+    indexPath = join(abs, "index.html");
+    if (!existsSync(indexPath)) {
+      return { ok: false, reason: `No index.html found in ${abs}` };
+    }
+  }
+
+  let html: string;
+  try {
+    html = readFileSync(indexPath, "utf-8");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason: `Could not read ${indexPath}: ${msg}` };
+  }
+
+  const trimmed = html.trim();
+  if (trimmed.length < MIN_HTML_BYTES) {
+    return { ok: false, reason: `index.html is empty or too small (${trimmed.length} bytes)` };
+  }
+  if (FAILURE_MARKER_RE.test(trimmed)) {
+    return { ok: false, reason: "index.html contains a build-failure marker, not a page" };
+  }
+  if (!HTML_MARKUP_RE.test(trimmed)) {
+    return { ok: false, reason: "index.html does not look like HTML (no markup tags found)" };
+  }
+  if (PLACEHOLDER_RE.test(trimmed)) {
+    return { ok: false, reason: "index.html still contains unfilled {{PLACEHOLDER}} tokens" };
+  }
+  return { ok: true };
+}
+
 function copyEntry(src: string, dest: string): number {
   const stat = statSync(src);
   if (stat.isDirectory()) {
@@ -198,6 +256,14 @@ export function executeDeployStaticSite(input: DeployStaticSiteInput): ToolResul
     return {
       success: false,
       error: `Source must be a file or directory under ~/Projects: ${sourcePath}`,
+    };
+  }
+
+  const validation = validateStaticArtifact(sourcePath);
+  if (!validation.ok) {
+    return {
+      success: false,
+      error: `Refusing to deploy — artifact failed validation: ${validation.reason}`,
     };
   }
 
