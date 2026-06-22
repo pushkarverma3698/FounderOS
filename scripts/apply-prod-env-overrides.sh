@@ -56,3 +56,16 @@ if [ -n "${LINKEDIN_ACCESS_TOKEN:-}" ] || [ -n "${LINKEDIN_AUTHOR_URN:-}" ]; the
   printf '%s\n' 'LINKEDIN_BACKEND=direct' >> .env
   chmod 600 .env
 fi
+
+# Static-site serving defaults — survive every .env re-render so deploy_static_site
+# publishes into the nginx-served /var/www tree with a public URL (not 127.0.0.1).
+# Only injected when absent, so an explicit PROD_DOTENV value still wins.
+if ! grep -q '^STATIC_SITE_PUBLIC_BASE_URL=' .env; then
+  printf 'STATIC_SITE_PUBLIC_BASE_URL=http://95.217.162.12\n' >> .env
+  echo "==> Patched .env: STATIC_SITE_PUBLIC_BASE_URL default"
+fi
+if ! grep -q '^STATIC_SITE_HOME_ROOT=' .env; then
+  printf 'STATIC_SITE_HOME_ROOT=/var/www\n' >> .env
+  echo "==> Patched .env: STATIC_SITE_HOME_ROOT default"
+fi
+chmod 600 .env
