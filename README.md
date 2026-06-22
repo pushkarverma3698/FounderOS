@@ -8,7 +8,9 @@ FounderOS runs your agency, handles your inbox, posts to LinkedIn, manages GitHu
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5_strict-3178c6.svg)](tsconfig.json)
 [![LangGraph](https://img.shields.io/badge/LangGraph-JS_0.2.74-orange.svg)](package.json)
-[![Tests](https://img.shields.io/badge/tests-850_passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-1098_passing-brightgreen.svg)](tests/)
+
+> 📚 **Engineering docs:** architecture, 39 ADRs, HITL matrix, deployment runbook, and honest limitations → **[docs/](docs/README.md)**
 
 ---
 
