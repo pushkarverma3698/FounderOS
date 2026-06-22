@@ -42,7 +42,7 @@ jobs:
 
             # Ensure STATIC_SITE_PUBLIC_BASE_URL (idempotent)
             if ! grep -q '^STATIC_SITE_PUBLIC_BASE_URL=' .env 2>/dev/null; then
-              echo 'STATIC_SITE_PUBLIC_BASE_URL=http://95.217.162.12' >> .env
+              echo 'STATIC_SITE_PUBLIC_BASE_URL=http://YOUR_VPS_IP' >> .env
               echo "==> Added STATIC_SITE_PUBLIC_BASE_URL to .env"
             fi
 

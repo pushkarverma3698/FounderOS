@@ -47,8 +47,8 @@ describe("deploy paths and URLs", () => {
 
   it("builds public URL from env", () => {
     const prev = process.env["STATIC_SITE_PUBLIC_BASE_URL"];
-    process.env["STATIC_SITE_PUBLIC_BASE_URL"] = "http://95.217.162.12";
-    expect(buildPublicUrl("langfuse")).toBe("http://95.217.162.12/clients/langfuse/");
+    process.env["STATIC_SITE_PUBLIC_BASE_URL"] = "http://YOUR_VPS_IP";
+    expect(buildPublicUrl("langfuse")).toBe("http://YOUR_VPS_IP/clients/langfuse/");
     process.env["STATIC_SITE_PUBLIC_BASE_URL"] = prev;
   });
 
