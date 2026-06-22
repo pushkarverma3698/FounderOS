@@ -9,16 +9,30 @@ import { childLogger } from "../logger.js";
 import {
   executeComposioAction,
   getComposioApiKey,
-  getGmailConnectionId,
-  getGmailUserId,
   getGCalConnectionId,
   getGCalUserId,
+  getGmailConnectionId,
+  getGmailUserId,
 } from "../composio.js";
+import { getComposioAccount } from "../account-registry.js";
 import type { ToolResult } from "../../tools/index.js";
 import { extractComposioMessages, formatEmailList } from "../../tools/email-messages.js";
 import type { CreateCalendarEventInput, ReadEmailsInput, SendEmailInput } from "./types.js";
 
 const log = childLogger({ module: "provider:composio-google" });
+
+async function composioGmailIds(input: { account_key?: string; department?: string }) {
+  const { connection, ctx } = await getComposioAccount("google", {
+    platform: "google",
+    account_key: input.account_key,
+    department: input.department,
+  });
+  return {
+    connectionId: connection.connection_id ?? getGmailConnectionId(),
+    userId: connection.user_id ?? getGmailUserId(),
+    accountKey: ctx.account_key,
+  };
+}
 
 export function composioGoogleConfigured(): boolean {
   return !!getComposioApiKey();
@@ -33,15 +47,16 @@ export async function composioReadEmails(input: ReadEmailsInput): Promise<ToolRe
   }
 
   try {
+    const ids = await composioGmailIds(input);
     const result = (await executeComposioAction(
       "GMAIL_FETCH_EMAILS",
       { query: input.query, max_results: input.max_results, verbose: false },
-      getGmailConnectionId(),
-      getGmailUserId(),
+      ids.connectionId,
+      ids.userId,
     )) as Record<string, unknown>;
 
     const messages = extractComposioMessages(result);
-    log.info({ query: input.query, count: messages.length, backend: "composio" }, "Emails read");
+    log.info({ query: input.query, count: messages.length, backend: "composio", account: ids.accountKey }, "Emails read");
     return { success: true, data: formatEmailList(messages, input.query, input.max_results) };
   } catch (err) {
     const message = (err as Error).message;
@@ -67,11 +82,12 @@ export async function composioSendEmail(input: SendEmailInput): Promise<ToolResu
     if (input.cc) args["cc"] = input.cc;
     if (input.reply_to) args["reply_to"] = input.reply_to;
 
+    const ids = await composioGmailIds(input);
     const result = await executeComposioAction(
       "GMAIL_SEND_EMAIL",
       args,
-      getGmailConnectionId(),
-      getGmailUserId(),
+      ids.connectionId,
+      ids.userId,
     );
 
     const data = result["data"] as Record<string, unknown> | undefined;

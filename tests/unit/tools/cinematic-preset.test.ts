@@ -65,6 +65,41 @@ describe("cinematic-preset tool", () => {
     expect(res.success).toBe(false);
   });
 
+  it("accepts relative targetDir under ~/Projects (not process.cwd())", () => {
+    const res = executeApplyCinematicPreset({
+      preset: "glass",
+      targetDir: "glass-template-test",
+      client: "TestCo",
+    });
+    expect(res.success).toBe(true);
+    const target = join(projectsRoot, "glass-template-test");
+    expect(existsSync(join(target, "index.html"))).toBe(true);
+  });
+
+  it("accepts ~/Projects/... targetDir", () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), "cinematic-home-"));
+    const fakeProjects = join(fakeHome, "Projects");
+    const prevRoot = process.env["PROJECT_WORKFLOW_ROOT"];
+    const prevHome = process.env["HOME"];
+    process.env["HOME"] = fakeHome;
+    process.env["PROJECT_WORKFLOW_ROOT"] = fakeProjects;
+    try {
+      const res = executeApplyCinematicPreset({
+        preset: "minimal",
+        targetDir: "~/Projects/tilde-path-test",
+        client: "TildeCo",
+      });
+      expect(res.success).toBe(true);
+      expect(existsSync(join(fakeProjects, "tilde-path-test", "index.html"))).toBe(true);
+    } finally {
+      if (prevRoot === undefined) delete process.env["PROJECT_WORKFLOW_ROOT"];
+      else process.env["PROJECT_WORKFLOW_ROOT"] = prevRoot;
+      if (prevHome === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = prevHome;
+      rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+
   it("personalizePresetFiles replaces placeholders", () => {
     const dir = mkdtempSync(join(tmpdir(), "preset-personalize-"));
     const file = join(dir, "index.html");

@@ -24,7 +24,7 @@
 
 export { hitlGate, idemKey, type ApprovalRequest } from "./agent-tools/hitl.js";
 export { searchWeb } from "./agent-tools/research.js";
-export { sendEmail, linkedinPost, createCalendarEvent, readEmails } from "./agent-tools/comms.js";
+export { createSendEmailTool, sendEmail, linkedinPost, createCalendarEvent, readEmails } from "./agent-tools/comms.js";
 export { githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite } from "./agent-tools/engineering.js";
 export { readFile, listDir, sendFile, writeFile, runShell, browser } from "./agent-tools/personal.js";
 export { readCv, searchJobs } from "./agent-tools/jobhunt.js";

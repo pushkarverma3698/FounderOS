@@ -57,6 +57,13 @@
       "when": 1779880600000,
       "tag": "0007_missions",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779880700000,
+      "tag": "0008_integration_accounts",
+      "breakpoints": true
     }
   ]
 }

@@ -10,7 +10,7 @@
 
 import {
   searchWeb,
-  sendEmail,
+  createSendEmailTool,
   readEmails,
   linkedinPost,
   createCalendarEvent,
@@ -59,12 +59,12 @@ type AnyTool = any;
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals],
   research: [searchWeb, searchKnowledge, searchTuricksBrain, publishSignal],
-  comms: [sendEmail, readEmails, createCalendarEvent],
+  comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal],
   marketing: [searchWeb, linkedinPost, searchKnowledge, searchTuricksBrain, publishSignal],
-  sales: [searchWeb, sendEmail, searchKnowledge, searchTuricksBrain],
+  sales: [createSendEmailTool("sales"), searchWeb, searchKnowledge, searchTuricksBrain],
   personal: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain],
-  jobhunt: [readCv, searchJobs, sendEmail, searchPersonalRag],
+  jobhunt: [readCv, searchJobs, createSendEmailTool("jobhunt"), searchPersonalRag],
 };
 
 /** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops).
