@@ -8,13 +8,13 @@
  */
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join, normalize, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
   CINEMATIC_PRESETS,
   isValidCinematicPreset,
   type CinematicPreset,
 } from "../agents/cinematic-build.js";
-import { isProjectPath, projectRoot } from "./project-workflow.js";
+import { isProjectPath, projectRoot, resolveProjectPath } from "./project-workflow.js";
 import type { ToolResult, UnifiedTool } from "./index.js";
 import { childLogger } from "../infra/logger.js";
 
@@ -112,16 +112,10 @@ export function executeApplyCinematicPreset(input: ApplyCinematicPresetInput): T
   }
   const preset = presetRaw;
 
-  const targetDir = resolve(normalize(input.targetDir.trim()));
-  const root = projectRoot();
-  if (!targetDir.startsWith(root + "/") && targetDir !== root) {
-    return {
-      success: false,
-      error: `targetDir must be under ${root}: ${targetDir}`,
-    };
-  }
+  const targetDir = resolveProjectPath(input.targetDir);
   if (!isProjectPath(targetDir)) {
-    return { success: false, error: `targetDir not allowed: ${targetDir}` };
+    const root = projectRoot();
+    return { success: false, error: `targetDir must be under ${root}: ${targetDir}` };
   }
 
   const sourceDir = resolvePresetSourceDir(preset);

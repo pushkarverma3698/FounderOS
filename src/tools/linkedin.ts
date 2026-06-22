@@ -10,12 +10,12 @@
 import { childLogger } from "../infra/logger.js";
 import { writeAuditEntry, hasBeenAudited } from "../db/queries.js";
 import {
-  getLinkedInAuthorUrn,
   providerLinkedInAnalytics,
   providerLinkedInConnect,
   providerLinkedInPost,
 } from "../infra/providers/index.js";
 import { getLinkedInBackend } from "../infra/provider-config.js";
+import { resolveAccountKey } from "../core/accounts.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:linkedin" });
@@ -66,13 +66,24 @@ export const linkedinPostTool: UnifiedTool = {
   },
 
   async execute(input: Record<string, unknown>): Promise<ToolResult> {
-    const { text, image_url, visibility = "PUBLIC", idempotency_key, tenant_id, schedule_time } = input as {
+    const {
+      text,
+      image_url,
+      visibility = "PUBLIC",
+      idempotency_key,
+      tenant_id,
+      schedule_time,
+      account_key,
+      department,
+    } = input as {
       text: string;
       image_url?: string;
       visibility?: "PUBLIC" | "CONNECTIONS";
       idempotency_key: string;
       tenant_id: string;
       schedule_time?: string;
+      account_key?: string;
+      department?: string;
     };
 
     const alreadyPosted = await hasBeenAudited(idempotency_key);
@@ -81,20 +92,16 @@ export const linkedinPostTool: UnifiedTool = {
       return { success: true, data: { skipped: true, reason: "idempotency_key already used" } };
     }
 
-    const authorUrn = getLinkedInAuthorUrn();
-    if (!authorUrn && getLinkedInBackend() === "direct") {
-      return {
-        success: false,
-        error: "LINKEDIN_AUTHOR_URN not configured. Set it in .env or use LINKEDIN_BACKEND=composio.",
-      };
-    }
+    const accountKey = resolveAccountKey("linkedin", { department, account_key });
 
     const result = await providerLinkedInPost({
       text,
-      author_urn: authorUrn ?? "",
+      author_urn: "", // provider resolves from registry
       image_url,
       visibility: visibility === "CONNECTIONS" ? "CONNECTIONS" : "PUBLIC",
       schedule_time,
+      account_key: accountKey,
+      department,
     });
 
     if (!result.success) {
@@ -111,7 +118,13 @@ export const linkedinPostTool: UnifiedTool = {
       tenant_id,
       action: "linkedin_post",
       idempotency_key,
-      payload: { post_id: postId, text: text.slice(0, 100), visibility, backend: getLinkedInBackend() },
+      payload: {
+        post_id: postId,
+        text: text.slice(0, 100),
+        visibility,
+        backend: getLinkedInBackend(),
+        account_key: accountKey,
+      },
     });
     if (!audit.written) {
       log.warn({ idempotency_key }, "writeAuditEntry: conflict — idempotency key already existed; LinkedIn post may have been published twice");

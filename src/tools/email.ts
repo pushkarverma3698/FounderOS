@@ -23,6 +23,8 @@ export interface SendEmailArgs {
   tenant_id: string;
   cc?: string;
   reply_to?: string;
+  account_key?: string;
+  department?: string;
 }
 
 export const emailTool: UnifiedTool = {
@@ -52,7 +54,8 @@ export const emailTool: UnifiedTool = {
   },
 
   async execute(input: Record<string, unknown>): Promise<ToolResult> {
-    const { to, subject, body, idempotency_key, tenant_id, cc, reply_to } = input as unknown as SendEmailArgs;
+    const { to, subject, body, idempotency_key, tenant_id, cc, reply_to, account_key, department } =
+      input as unknown as SendEmailArgs;
 
     const alreadySent = await hasBeenAudited(idempotency_key);
     if (alreadySent) {
@@ -60,7 +63,15 @@ export const emailTool: UnifiedTool = {
       return { success: true, data: { skipped: true, reason: "idempotency_key already used" } };
     }
 
-    const result = await providerSendEmail({ to, subject, body, cc, reply_to });
+    const result = await providerSendEmail({
+      to,
+      subject,
+      body,
+      cc,
+      reply_to,
+      account_key,
+      department,
+    });
     if (!result.success) {
       return result;
     }
@@ -75,7 +86,7 @@ export const emailTool: UnifiedTool = {
       tenant_id,
       action: "send_email",
       idempotency_key,
-      payload: { message_id: messageId, to, subject, backend: getGmailBackend() },
+      payload: { message_id: messageId, to, subject, backend: getGmailBackend(), account_key, department },
     });
     if (!audit.written) {
       log.warn({ idempotency_key, to }, "writeAuditEntry: conflict — idempotency key already existed; email may have been sent twice");

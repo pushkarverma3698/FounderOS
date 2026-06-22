@@ -9,9 +9,12 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { join } from "node:path";
 import {
   projectRoot,
   isProjectPath,
+  resolveProjectPath,
+  expandHomeInPath,
   flagDangerousWorkflowCommand,
   type WorkflowAction,
 } from "../../../src/tools/project-workflow.js";
@@ -29,6 +32,36 @@ describe("projectRoot()", () => {
     const root = projectRoot();
     // Must be ~/Projects, not just ~
     expect(root).not.toMatch(/^\/Users\/[^/]+$/);
+  });
+});
+
+describe("resolveProjectPath()", () => {
+  it("resolves bare names relative to ~/Projects, not process.cwd()", () => {
+    const root = projectRoot();
+    expect(resolveProjectPath("glass-template-test")).toBe(join(root, "glass-template-test"));
+    expect(resolveProjectPath("cinematic-demo")).toBe(join(root, "cinematic-demo"));
+  });
+
+  it("expands ~/Projects paths", () => {
+    const home = process.env["HOME"] ?? "/Users/test";
+    expect(resolveProjectPath("~/Projects/glass-template-test")).toBe(
+      join(home, "Projects/glass-template-test"),
+    );
+  });
+
+  it("passes through absolute paths under ~/Projects", () => {
+    const root = projectRoot();
+    const abs = join(root, "cinematic-agentops");
+    expect(resolveProjectPath(abs)).toBe(abs);
+  });
+});
+
+describe("expandHomeInPath()", () => {
+  it("expands ~ and ~/ prefixes", () => {
+    const home = process.env["HOME"] ?? "/Users/test";
+    expect(expandHomeInPath("~")).toBe(home);
+    expect(expandHomeInPath("~/Desktop")).toBe(join(home, "Desktop"));
+    expect(expandHomeInPath("/absolute/path")).toBe("/absolute/path");
   });
 });
 

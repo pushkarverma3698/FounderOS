@@ -5,9 +5,9 @@
  * No Composio middleman. Post-only scope (ADR-009).
  */
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { childLogger } from "../logger.js";
+import { readEnvValue } from "../credential-resolver.js";
+import { getLinkedInAccount } from "../account-registry.js";
 import type { ToolResult } from "../../tools/index.js";
 import type { LinkedInPostInput } from "./types.js";
 
@@ -16,58 +16,52 @@ const log = childLogger({ module: "provider:linkedin-direct" });
 const LINKEDIN_API_BASE = "https://api.linkedin.com/rest";
 const DEFAULT_API_VERSION = "202405";
 
-function readKeyFromEnvFile(key: string): string | undefined {
-  try {
-    const content = readFileSync(resolve(process.cwd(), ".env"), "utf8");
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith(`${key}=`)) {
-        return trimmed.slice(key.length + 1).trim();
-      }
-    }
-  } catch {
-    // no .env — fall back to process.env
-  }
-  return undefined;
-}
-
-function envOr(key: string): string | undefined {
-  return process.env[key] ?? readKeyFromEnvFile(key);
-}
-
-/** Whether direct LinkedIn API credentials are configured. */
+/** Whether direct LinkedIn API credentials are configured (default/turicks account). */
 export function linkedInDirectConfigured(): boolean {
-  return !!envOr("LINKEDIN_ACCESS_TOKEN") && !!getLinkedInAuthorUrn();
+  const token = readEnvValue("LINKEDIN_ACCESS_TOKEN");
+  const urn = readEnvValue("LINKEDIN_AUTHOR_URN");
+  return !!token && !!urn;
 }
 
-/** LinkedIn member/org URN for the author field. */
+/** LinkedIn member/org URN — legacy global default. */
 export function getLinkedInAuthorUrn(): string | undefined {
-  return envOr("LINKEDIN_AUTHOR_URN");
+  return readEnvValue("LINKEDIN_AUTHOR_URN");
 }
 
 export function getLinkedInAccessToken(): string | undefined {
-  return envOr("LINKEDIN_ACCESS_TOKEN");
+  return readEnvValue("LINKEDIN_ACCESS_TOKEN");
 }
 
 function getLinkedInApiVersion(): string {
-  return envOr("LINKEDIN_API_VERSION") ?? DEFAULT_API_VERSION;
+  return readEnvValue("LINKEDIN_API_VERSION") ?? DEFAULT_API_VERSION;
+}
+
+async function linkedInCreds(input: { account_key?: string; department?: string }) {
+  const { credentials, ctx } = await getLinkedInAccount({
+    platform: "linkedin",
+    account_key: input.account_key,
+    department: input.department,
+  });
+  return { ...credentials, accountKey: ctx.account_key };
 }
 
 export async function directLinkedInPost(input: LinkedInPostInput): Promise<ToolResult> {
-  const token = getLinkedInAccessToken();
+  const creds = await linkedInCreds(input);
+  const token = creds.access_token;
   if (!token) {
     return {
       success: false,
       error:
-        "LINKEDIN_ACCESS_TOKEN not configured. Complete founder OAuth and set the token in .env, or set LINKEDIN_BACKEND=composio.",
+        `LinkedIn access token not configured for account '${creds.accountKey}'. ` +
+        "Set the token env var from the account registry runbook, or use LINKEDIN_BACKEND=composio.",
     };
   }
 
-  const author = input.author_urn || getLinkedInAuthorUrn();
+  const author = input.author_urn || creds.author_urn;
   if (!author) {
     return {
       success: false,
-      error: "LINKEDIN_AUTHOR_URN not configured (e.g. urn:li:person:xxx).",
+      error: `LinkedIn author URN not configured for account '${creds.accountKey}'. See ACCOUNT-REGISTRY-RUNBOOK.md.`,
     };
   }
 
@@ -146,8 +140,12 @@ export async function directLinkedInPost(input: LinkedInPostInput): Promise<Tool
 }
 
 /** Read-only analytics — best-effort via direct API (may require extra scopes). */
-export async function directLinkedInAnalytics(postId: string): Promise<ToolResult> {
-  const token = getLinkedInAccessToken();
+export async function directLinkedInAnalytics(
+  postId: string,
+  opts?: { account_key?: string; department?: string },
+): Promise<ToolResult> {
+  const creds = await linkedInCreds(opts ?? {});
+  const token = creds.access_token;
   if (!token) {
     return { success: false, error: "LINKEDIN_ACCESS_TOKEN not configured." };
   }

@@ -612,6 +612,49 @@ export const missions = agentsSchema.table(
 export type Mission = typeof missions.$inferSelect;
 export type NewMission = typeof missions.$inferInsert;
 
+// ── integration_accounts (ADR-036) ────────────────────────────────────────────
+
+/**
+ * Registry of brand identities (turicks, personal, naggar) × platforms.
+ * Stores credential *references* (env var names, gws profile paths) — not raw secrets.
+ * Providers resolve via src/infra/account-registry.ts.
+ */
+export const integrationAccounts = agentsSchema.table(
+  "integration_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    /** turicks | personal | naggar */
+    account_key: text("account_key").notNull(),
+
+    /** google | linkedin | instagram | facebook | github */
+    platform: text("platform").notNull(),
+
+    display_name: text("display_name").notNull(),
+
+    /** active | expired | disabled */
+    status: text("status").notNull().default("active"),
+
+    /** gws | direct | meta_graph | composio | pat */
+    auth_backend: text("auth_backend").notNull(),
+
+    /** CredentialRefs JSON — env var names, gws profile dirs, composio ids */
+    credential_refs: jsonb("credential_refs").notNull().default({}),
+
+    metadata: jsonb("metadata"),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    accountPlatformUniq: index("ia_account_platform_idx").on(t.account_key, t.platform),
+    statusIdx: index("ia_status_idx").on(t.status),
+  }),
+);
+
+export type IntegrationAccountRow = typeof integrationAccounts.$inferSelect;
+export type NewIntegrationAccountRow = typeof integrationAccounts.$inferInsert;
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
 export const interruptRegistry = hitlApprovals;
