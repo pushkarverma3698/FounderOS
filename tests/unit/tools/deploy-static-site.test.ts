@@ -15,6 +15,7 @@ import {
   copyStaticArtifact,
   executeDeployStaticSite,
   publicBaseUrl,
+  validateStaticArtifact,
 } from "../../../src/tools/deploy-static-site.js";
 import { projectRoot } from "../../../src/tools/project-workflow.js";
 
@@ -124,6 +125,68 @@ describe("copyStaticArtifact", () => {
   });
 });
 
+describe("validateStaticArtifact (anti-hallucination guard)", () => {
+  let projectsTmp: string;
+
+  beforeEach(() => {
+    projectsTmp = mkdtempSync(join(projectRoot(), "validate-test-"));
+  });
+
+  afterEach(() => {
+    rmSync(projectsTmp, { recursive: true, force: true });
+  });
+
+  it("accepts a real HTML file", () => {
+    const html = join(projectsTmp, "index.html");
+    writeFileSync(html, "<!doctype html><html><body><h1>AgentOps</h1></body></html>");
+    expect(validateStaticArtifact(html).ok).toBe(true);
+  });
+
+  it("accepts a directory containing a valid index.html", () => {
+    writeFileSync(join(projectsTmp, "index.html"), "<html><body><main>Real</main></body></html>");
+    expect(validateStaticArtifact(projectsTmp).ok).toBe(true);
+  });
+
+  it("rejects a directory with no index.html", () => {
+    writeFileSync(join(projectsTmp, "notes.txt"), "hello");
+    const res = validateStaticArtifact(projectsTmp);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/index\.html/i);
+  });
+
+  it("rejects an empty index.html", () => {
+    const html = join(projectsTmp, "index.html");
+    writeFileSync(html, "   \n  ");
+    const res = validateStaticArtifact(html);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/empty/i);
+  });
+
+  it("rejects content with no HTML markup", () => {
+    const html = join(projectsTmp, "index.html");
+    writeFileSync(html, "I built the landing page for you. Let me know what you think!");
+    const res = validateStaticArtifact(html);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/markup/i);
+  });
+
+  it("rejects leftover {{TEMPLATE}} placeholders", () => {
+    const html = join(projectsTmp, "index.html");
+    writeFileSync(html, "<html><body><h1>{{CLIENT}}</h1></body></html>");
+    const res = validateStaticArtifact(html);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/placeholder/i);
+  });
+
+  it("rejects a claude_code tool-failure marker", () => {
+    const html = join(projectsTmp, "index.html");
+    writeFileSync(html, "[[TOOL_FAILURE]] claude CLI not installed");
+    const res = validateStaticArtifact(html);
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/failure|markup/i);
+  });
+});
+
 describe("executeDeployStaticSite", () => {
   let projectsTmp: string;
   let homeRoot: string;
@@ -167,5 +230,16 @@ describe("executeDeployStaticSite", () => {
       sourcePath: join(projectsTmp, "index.html"),
     });
     expect(result.success).toBe(false);
+  });
+
+  it("refuses to publish a hallucinated/broken artifact", () => {
+    const broken = join(projectsTmp, "broken.html");
+    writeFileSync(broken, "Here is your finished landing page!");
+    const result = executeDeployStaticSite({
+      slug: "agentops-demo",
+      sourcePath: broken,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/markup|not look like/i);
   });
 });

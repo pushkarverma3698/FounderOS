@@ -19,6 +19,7 @@
 import { childLogger } from "../infra/logger.js";
 import { embedText } from "../lib/embed.js";
 import { searchRagTable, type RagTable, type RagHit } from "../db/rag-search.js";
+import { getRagflowClient } from "../infra/ragflow.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:rag" });
@@ -39,6 +40,26 @@ async function runRagSearch(
   query: string,
   topK: number,
 ): Promise<{ hits: RagHit[] } | { error: RagFailure }> {
+  // RAGFlow backend: skip Ollama entirely, query RAGFlow's managed pipeline.
+  const ragflow = getRagflowClient();
+  if (ragflow) {
+    try {
+      const chunks = await ragflow.search(query, topK);
+      const hits: RagHit[] = chunks.map((c) => ({
+        content: c.content,
+        score: c.score,
+        metadata: { source_path: c.document_name ?? "", dataset: c.dataset_name ?? "" },
+      }));
+      log.debug({ table, query, count: hits.length, backend: "ragflow" }, "RAG search");
+      return { hits };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error({ table, query, err }, "RAGFlow search failed");
+      return { error: { stage: "query", message } };
+    }
+  }
+
+  // pgvector backend (default): embed via Ollama, query Postgres.
   // Stage 1: embed the query (Ollama). Failure here = embedding/Ollama problem.
   let embedding: number[];
   try {

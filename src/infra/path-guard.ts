@@ -145,6 +145,15 @@ export function flagDangerousCommand(cmd: string): boolean {
     /:\(\)\s*\{.*\}\s*;\s*:/, // fork bomb :(){ :|:& };:
     /\b(shutdown|reboot|halt)\b/,
     />\s*\/dev\/(sd|disk|hd)/,
+    // G10: remote code execution via pipe-to-shell (prompt injection / supply chain vector)
+    /\bcurl\b[^|]*\|[^|]*\b(bash|sh|zsh|python[23]?|node\d*|ruby|perl)\b/,
+    /\bwget\b[^|]*\|[^|]*\b(bash|sh|zsh|python[23]?|node\d*|ruby|perl)\b/,
+    // Base64-encoded payload piped to shell
+    /\bbase64\b.*(--decode|-d)\b.*\|.*\b(bash|sh|python[23]?|node\d*)\b/,
+    // Writing to system cron or init paths
+    /\b(crontab|cron\.d|init\.d|systemd\/system)\b.*>/,
+    // Exfiltration: pipe sensitive paths/vars to external endpoint
+    /\b(curl|wget|nc|netcat)\b[^#\n]*\b(http|ftp|tcp)\b[^#\n]*(\.ssh|\.aws|\.env|\$(?:HOME|USER|PATH)|token|secret|password)/i,
   ];
   return patterns.some((p) => p.test(c));
 }
