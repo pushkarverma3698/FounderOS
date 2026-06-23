@@ -377,6 +377,13 @@
       "name": "UnifiedTool",
       "description": "Standard tool interface for all agents",
       "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_apply_cinematic_preset",
+      "type": "tool",
+      "name": "apply_cinematic_preset",
+      "description": "Copy a cinematic-web preset scaffold (neon/glass/terminal/minimal) into ~/Projects before claude_code customises it",
+      "file": "src/tools/*.ts"
     }
   ],
   "edges": [
@@ -754,11 +761,16 @@
       "from": "service_supervisor",
       "to": "service_judge",
       "type": "depends_on"
+    },
+    {
+      "from": "tool_apply_cinematic_preset",
+      "to": "dept_engineering",
+      "type": "belongs_to"
     }
   ],
   "metadata": {
     "projectName": "FounderOS",
-    "generatedAt": "2026-06-18T13:19:17.251Z",
+    "generatedAt": "2026-06-23T21:53:04.728Z",
     "departments": {
       "admin": [
         "admin_agent"
@@ -812,7 +824,8 @@
       "browser": "Safari automation on the founder's Mac — HITL-gated [HITL]",
       "search_personal_rag": "Semantic vector search over personal-rag (CV/career) via Ollama + pgvector",
       "read_cv": "Read the founder's CV from personal-rag (read-only)",
-      "search_jobs": "Search job listings via web search (Gemini grounding / DuckDuckGo)"
+      "search_jobs": "Search job listings via web search (Gemini grounding / DuckDuckGo)",
+      "apply_cinematic_preset": "Copy a cinematic-web preset scaffold (neon/glass/terminal/minimal) into ~/Projects before claude_code customises it"
     }
   }
 }

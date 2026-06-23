@@ -50,10 +50,11 @@ export function findToolsByDepartment(dept: string): string[] {
   );
   if (!deptNode) return [];
 
+  // Edges go FROM tool TO department with type "belongs_to" (not "uses_tool" from dept to tool)
   return graph.edges
-    .filter((e: Edge) => e.from === deptNode.id && e.type === "uses_tool")
+    .filter((e: Edge) => e.to === deptNode.id && e.type === "belongs_to")
     .map((e: Edge) => {
-      const tool = graph.nodes.find((n: Node) => n.id === e.to);
+      const tool = graph.nodes.find((n: Node) => n.id === e.from && n.type === "tool");
       return tool?.name || "";
     })
     .filter(Boolean);
@@ -65,10 +66,11 @@ export function findDepartmentsByTool(toolName: string): string[] {
   );
   if (!toolNode) return [];
 
+  // Edges go FROM tool TO department with type "belongs_to"
   return graph.edges
-    .filter((e: Edge) => e.to === toolNode.id && e.type === "uses_tool")
+    .filter((e: Edge) => e.from === toolNode.id && e.type === "belongs_to")
     .map((e: Edge) => {
-      const dept = graph.nodes.find((n: Node) => n.id === e.from);
+      const dept = graph.nodes.find((n: Node) => n.id === e.to && n.type === "department");
       return dept?.name || "";
     })
     .filter(Boolean);
