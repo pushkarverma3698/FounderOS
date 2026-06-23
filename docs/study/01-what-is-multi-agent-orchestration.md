@@ -16,7 +16,9 @@ Think of it like running Turicks:
 - Each person uses their own tools (Figma, VS Code, HubSpot)
 - Nothing leaves the building without your sign-off
 
-FounderOS is that team, but in software.
+FounderOS is that team, but in software. As of v2 (production since 2026-06-14) it runs
+**8 departments** under a single supervisor — the architecture locked and hardened through
+6 production phases.
 
 ---
 
@@ -72,13 +74,15 @@ You could give one agent all the tools and one giant prompt. Here's why speciali
 
 | One Giant Agent | Supervisor + Specialists |
 |-----------------|--------------------------|
-| Confused by too many tools | Each agent has 2–4 focused tools |
+| Confused by too many tools | Each agent has 2–6 focused tools |
 | One prompt for all contexts | Each agent has a prompt tuned for its job |
 | Hard to test and debug | Each specialist tested independently |
 | Failure in one task breaks everything | Isolated failures, clean handoffs |
 | Hard to add new capabilities | Add a new agent in 10 lines |
 
-In practice: a research agent doesn't need to know about email formatting rules. An email agent doesn't need to know about GitHub repos. Focused = better quality.
+In practice: a research agent doesn't need to know about email formatting rules. An email
+agent doesn't need to know about GitHub repos. A personal-laptop agent must never touch
+GitHub credentials. Focused = better quality + security (least-privilege, ADR-013).
 
 ---
 
@@ -111,20 +115,31 @@ Good for: personal assistants with < 5 tools. You can hold the whole thing in yo
 
 ### Pattern 2: Supervisor + Specialists (FounderOS v2)
 ```
-User → Supervisor → Research Agent (search_web)
-                  → Comms Agent (email, linkedin)
-                  → Engineering Agent (github)
+User → Supervisor → Admin      (context, memory, signals)
+                  → Research   (search_web, turicks-brain)
+                  → Comms      (gmail, calendar)
+                  → Engineering (github, claude_code)
+                  → Marketing  (linkedin_post, brand)
+                  → Sales      (cold outreach, ICP scoring)
+                  → Personal   (files, shell, browser on founder's Mac)
+                  → Jobhunt    (CV, job search, applications)
 ```
-Good for: 3–10 tools split across clear departments. Easy to extend.
+Good for: 4–8 tools split across clear departments. Easy to extend. FounderOS runs 8
+departments today with ~30 total tools — all single-owner (no tool belongs to two depts).
 
 ### Pattern 3: Hierarchical Supervisor
 ```
-User → CEO → Sales Supervisor → BDR Agent
-                               → Lead Intel Agent
-          → Engineering Supervisor → Senior Dev Agent
+User → CEO → Revenue Supervisor → Marketing Agent (linkedin_post)
+                                 → Sales Agent (send_email)
+          → Engineering Supervisor → Coder Agent (claude_code)
                                    → QA Agent
+                                   → DevOps Agent (github_write)
 ```
-Good for: large teams where each department itself has sub-specialists. Adds latency and complexity — only justified when a single specialist genuinely can't handle a department's breadth.
+Good for: departments that themselves have sub-specialists. FounderOS has **proven** this
+works via integration test (`nested-hitl.test.ts`) — HITL `interrupt()` surfaces correctly
+through 3 levels. Both the engineering subgraph and revenue subgraph exist in code, but
+are **not in production yet** — gated on a real coordination trigger (ADR-025/027: only
+nest when a domain genuinely needs ≥2 coordinating sub-agents, not preemptively).
 
 ### Pattern 4: Parallel Agents
 ```
@@ -132,9 +147,13 @@ User → Orchestrator → Research Agent  ─┐
                     → Comms Agent     ─┼→ Merge → Result
                     → Eng Agent       ─┘
 ```
-Good for: tasks that are genuinely independent (e.g. research three companies simultaneously). Harder to implement — use when you've proven sequential is too slow.
+Good for: tasks that are genuinely independent (e.g. research three companies simultaneously).
+LangGraph supports this via `Send` edges; FounderOS doesn't use it yet — sequential routing
+handles all current use cases.
 
-**FounderOS current position**: Pattern 2. Move to Pattern 3 only when a department grows to 3+ tools that genuinely need independent management.
+**FounderOS current position**: Pattern 2 (flat 8-dept supervisor). Pattern 3 capability
+proven but production-gated. Move to Pattern 3 only when a department grows to 2+ agents
+that genuinely coordinate (ADR-027: tool count + coordination trigger).
 
 ---
 
@@ -170,10 +189,12 @@ END → final reply sent to Telegram
 
 | Type | How | FounderOS |
 |------|-----|-----------|
-| **Short-term** | `messages[]` in graph state | All — every run has a messages history |
+| **Short-term** | `messages[]` in graph state | All — every run has a messages history, bounded to 12 human turns |
 | **Long-term / per-user** | Postgres via checkpointer | Each chat has a stable `thread_id` — memory persists across messages |
-| **External knowledge** | RAG / vector DB | Not yet in v2 — planned (turicks-brain integration) |
-| **Tool state** | Returned in tool result | `audit_log` table tracks what was sent |
+| **External knowledge** | RAG / vector DB | **Live** — `turicks-brain` (pgvector, business docs) + `personal-rag` (CV/career). `admin` dept queries both. |
+| **Episodic memory** | `episodic_memory` Postgres table | `record_event` tool; queryable by `search_memory` |
+| **Business context** | `context` Postgres table | `read_context` / `update_context` tools (admin dept) |
+| **Tool state** | Returned in tool result | `action_log` table tracks every send (idempotency + audit) |
 
 ---
 
@@ -183,6 +204,30 @@ END → final reply sent to Telegram
 2. [ReAct paper](https://arxiv.org/abs/2210.03629) — the original think/act loop, 20 min
 3. [Multi-agent supervisor tutorial](https://langchain-ai.github.io/langgraphjs/tutorials/multi_agent/agent_supervisor/) — code + explanation, 45 min
 4. The FounderOS source: `src/agents/office.ts` — you built it, read it
+
+---
+
+---
+
+## The Quality Gate Stack
+
+Before any external action executes, FounderOS runs a layered set of guards. As a
+multi-agent system, this is important: agents can hallucinate, sycophancy can produce
+low-quality copy, and writes without human approval are dangerous.
+
+```
+Draft output
+  → [Gate 1] Brand validator (deterministic regex)
+  → [Gate 2] Claude judge (different model family → no self-agreement)
+  → [Gate 3] HITL interrupt() (mandatory human approval)
+  → [Idempotency check] (duplicate-send prevention)
+  → [Suppression check] (do-not-contact list)
+  → Actual send
+```
+
+The critical design principle: **Gates 1 and 2 are advisory; Gate 3 is mandatory.** The
+human is always the final approver for external side effects. See
+[05-safety-and-quality-gates.md](./05-safety-and-quality-gates.md) for the full picture.
 
 ---
 
