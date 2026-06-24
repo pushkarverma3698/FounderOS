@@ -221,3 +221,49 @@ export const searchTuricksBrainTool: UnifiedTool = {
     };
   },
 };
+
+// ── searchResearchCacheTool ────────────────────────────────────────────────────
+
+export const searchResearchCacheTool: UnifiedTool = {
+  name: "search_research_cache",
+  description:
+    "Semantic search over previously-scraped web pages (research_cache vector DB). " +
+    "Contains: full-text Markdown of pages the research department scraped via Apify " +
+    "(company sites, docs, articles), each with its source URL + retrieval date. " +
+    "Use BEFORE scraping again — prior findings are instant and free. " +
+    "Read-only, no approval needed.",
+  input_schema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description:
+          "What to search. E.g. 'Acme pricing tiers', 'competitor positioning'. Specific queries work best.",
+      },
+      top_k: { type: "number", description: "Number of results (1–10, default 5)" },
+    },
+    required: ["query"],
+  },
+
+  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+    const query = ((args["query"] as string | undefined) ?? "").trim();
+    if (!query) {
+      return { success: false, error: "query is required" };
+    }
+    const topK = Math.min(Math.max(Number(args["top_k"] ?? 5), 1), 10);
+
+    const result = await runRagSearch("research_cache", query, topK);
+
+    if ("error" in result) {
+      return { success: false, error: ragErrorMessage("research-cache", result.error) };
+    }
+
+    log.debug({ query, count: result.hits.length }, "research-cache search");
+    return {
+      success: true,
+      data:
+        `Research cache search for "${query}" (${result.hits.length} results):\n\n` +
+        formatResults(result.hits, query, "source_url"),
+    };
+  },
+};

@@ -6,10 +6,11 @@
 import {
   searchPersonalRagTool,
   searchTuricksBrainTool,
+  searchResearchCacheTool,
 } from "../tools/rag.js";
 import type { UnifiedTool } from "../tools/index.js";
 
-export type RagStore = "personal" | "turicks";
+export type RagStore = "personal" | "turicks" | "research";
 
 export interface RagOrchestratorInput {
   store: RagStore;
@@ -21,6 +22,7 @@ export interface RagOrchestratorInput {
 const TOOLS: Record<RagStore, UnifiedTool> = {
   personal: searchPersonalRagTool,
   turicks: searchTuricksBrainTool,
+  research: searchResearchCacheTool,
 };
 
 /** Run a read-only vector search against personal-rag or turicks-brain. */

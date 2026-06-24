@@ -1,9 +1,9 @@
 # Graphify Knowledge Graph Integration
 
 ## Graph Overview
-- **Nodes:** 54 (8 depts, 27 tools, 9 services)
-- **Edges:** 75
-- **Generated:** 2026-06-18T13:19:17.251Z
+- **Nodes:** 59 (8 depts, 32 tools, 9 services)
+- **Edges:** 80
+- **Generated:** 2026-06-24T15:24:21.220Z
 
 ## Departments (8)
 - **admin**: admin_agent
@@ -15,13 +15,17 @@
 - **personal**: personal_agent
 - **jobhunt**: jobhunt_agent
 
-## Tools (27)
+## Tools (32)
 - **read_context**: Read durable business state (founder_context table) — supervisor only
 - **update_context**: Update durable business state (founder_context table) — supervisor only
 - **search_memory**: Unified memory search across knowledge + episodic stores — supervisor only
 - **record_event**: Record a durable episodic-memory event — HITL-gated, supervisor only [HITL]
 - **list_pending_signals**: list_pending_signals tool
 - **search_web**: Search the web via Gemini grounding (DuckDuckGo fallback)
+- **scrape_url**: scrape_url tool
+- **deep_research**: deep_research tool
+- **crawl_site**: crawl_site tool
+- **search_research_cache**: search_research_cache tool
 - **search_knowledge**: Keyword search over turicks-brain knowledge_entries (no LLM cost)
 - **search_turicks_brain**: Semantic vector search over turicks_brain (business/strategy) via Ollama + pgvector
 - **publish_signal**: Publish a typed cross-department signal to dept_signals (Postgres, async sweep)
@@ -32,6 +36,7 @@
 - **github_write**: Write to GitHub (PR, commit, push) — HITL-gated [HITL]
 - **project_workflow**: Run git/npm workflows in ~/Projects — HITL-gated [HITL]
 - **claude_code**: Full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — HITL-gated [HITL]
+- **apply_cinematic_preset**: apply_cinematic_preset tool
 - **deploy_static_site**: deploy_static_site tool [HITL]
 - **linkedin_post**: Post to LinkedIn via Composio — brand-validator + Claude judge then HITL-gated [HITL]
 - **read_file**: Read files from the founder's laptop (path-guarded, secrets blocked)

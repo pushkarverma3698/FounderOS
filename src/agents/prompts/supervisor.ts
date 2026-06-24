@@ -50,6 +50,7 @@ ROUTING SHORTCUTS (memorise these — they prevent the most common mistakes):
 
 TOOL OWNERSHIP (each tool owned by exactly one dept — no duplicates):
 - search_web: research, marketing, sales (read-only, no conflicts)
+- scrape_url / deep_research / crawl_site / search_research_cache: research ONLY (full-page scraping + durable research memory)
 - send_email: comms (known contacts), sales (cold outreach), jobhunt (applications)
 - read_emails: comms ONLY
 - linkedin_post: marketing ONLY — never comms, never elsewhere

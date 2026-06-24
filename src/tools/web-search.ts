@@ -44,8 +44,9 @@ const DDG_SNIPPET_MAX = 300;
 
 // ── Fallback: DuckDuckGo HTML scrape ──────────────────────────────────────────
 
-/** Strip HTML tags and decode the handful of entities DDG emits. */
-function stripHtml(raw: string): string {
+/** Strip HTML tags and decode the handful of entities DDG emits.
+ *  Exported + reused by the Apify keyless fallback (src/tools/apify.ts). */
+export function stripHtml(raw: string): string {
   return raw
     .replace(/<[^>]+>/g, "")
     .replace(/&amp;/g, "&")
