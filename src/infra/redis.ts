@@ -80,6 +80,14 @@ export const KEYS = {
     `research:${createHash("md5").update(url.toLowerCase().trim()).digest("hex")}`,
 
   /**
+   * Scrape-result cache (dedup). Keyed by a hash of the url OR the deep_research
+   * query so repeat research is instant and never re-pays Apify credits.
+   * TTL: RESEARCH_CACHE_TTL_SECONDS (default 24h).
+   */
+  scrape: (key: string) =>
+    `scrape:${createHash("md5").update(key.toLowerCase().trim()).digest("hex")}`,
+
+  /**
    * Daily send quota counter for a tenant.
    * INCR + EXPIREAT to midnight UTC.
    * Format: quota:{tenantId}:{YYYY-MM-DD}

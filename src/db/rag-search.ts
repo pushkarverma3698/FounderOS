@@ -7,8 +7,10 @@
 import { sql } from "drizzle-orm";
 import { db } from "./client.js";
 
-export const ALLOWED_RAG_TABLES = new Set(["personal_rag", "turicks_brain"] as const);
-export type RagTable = "personal_rag" | "turicks_brain";
+// research_cache holds business-public web findings (not personal data), so it
+// sits alongside turicks_brain on the right side of the ADR-013/015 firewall.
+export const ALLOWED_RAG_TABLES = new Set(["personal_rag", "turicks_brain", "research_cache"] as const);
+export type RagTable = "personal_rag" | "turicks_brain" | "research_cache";
 
 export interface RagHit {
   content: string;

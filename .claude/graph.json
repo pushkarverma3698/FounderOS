@@ -155,6 +155,34 @@
       "file": "src/tools/*.ts"
     },
     {
+      "id": "tool_scrape_url",
+      "type": "tool",
+      "name": "scrape_url",
+      "description": "scrape_url tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_deep_research",
+      "type": "tool",
+      "name": "deep_research",
+      "description": "deep_research tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_crawl_site",
+      "type": "tool",
+      "name": "crawl_site",
+      "description": "crawl_site tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_search_research_cache",
+      "type": "tool",
+      "name": "search_research_cache",
+      "description": "search_research_cache tool",
+      "file": "src/tools/*.ts"
+    },
+    {
       "id": "tool_search_knowledge",
       "type": "tool",
       "name": "search_knowledge",
@@ -222,6 +250,13 @@
       "type": "tool",
       "name": "claude_code",
       "description": "Full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — HITL-gated [HITL]",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_apply_cinematic_preset",
+      "type": "tool",
+      "name": "apply_cinematic_preset",
+      "description": "apply_cinematic_preset tool",
       "file": "src/tools/*.ts"
     },
     {
@@ -377,13 +412,6 @@
       "name": "UnifiedTool",
       "description": "Standard tool interface for all agents",
       "file": "src/tools/*.ts"
-    },
-    {
-      "id": "tool_apply_cinematic_preset",
-      "type": "tool",
-      "name": "apply_cinematic_preset",
-      "description": "Copy a cinematic-web preset scaffold (neon/glass/terminal/minimal) into ~/Projects before claude_code customises it",
-      "file": "src/tools/*.ts"
     }
   ],
   "edges": [
@@ -458,6 +486,26 @@
       "type": "belongs_to"
     },
     {
+      "from": "tool_scrape_url",
+      "to": "dept_research",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_deep_research",
+      "to": "dept_research",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_crawl_site",
+      "to": "dept_research",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_search_research_cache",
+      "to": "dept_research",
+      "type": "belongs_to"
+    },
+    {
       "from": "tool_search_knowledge",
       "to": "dept_research",
       "type": "belongs_to"
@@ -508,6 +556,11 @@
       "type": "belongs_to"
     },
     {
+      "from": "tool_apply_cinematic_preset",
+      "to": "dept_engineering",
+      "type": "belongs_to"
+    },
+    {
       "from": "tool_deploy_static_site",
       "to": "dept_engineering",
       "type": "belongs_to"
@@ -543,12 +596,12 @@
       "type": "belongs_to"
     },
     {
-      "from": "tool_search_web",
+      "from": "tool_send_email",
       "to": "dept_sales",
       "type": "belongs_to"
     },
     {
-      "from": "tool_send_email",
+      "from": "tool_search_web",
       "to": "dept_sales",
       "type": "belongs_to"
     },
@@ -761,16 +814,11 @@
       "from": "service_supervisor",
       "to": "service_judge",
       "type": "depends_on"
-    },
-    {
-      "from": "tool_apply_cinematic_preset",
-      "to": "dept_engineering",
-      "type": "belongs_to"
     }
   ],
   "metadata": {
     "projectName": "FounderOS",
-    "generatedAt": "2026-06-23T21:53:04.728Z",
+    "generatedAt": "2026-06-24T15:24:21.220Z",
     "departments": {
       "admin": [
         "admin_agent"
@@ -804,6 +852,10 @@
       "record_event": "Record a durable episodic-memory event — HITL-gated, supervisor only [HITL]",
       "list_pending_signals": "list_pending_signals tool",
       "search_web": "Search the web via Gemini grounding (DuckDuckGo fallback)",
+      "scrape_url": "scrape_url tool",
+      "deep_research": "deep_research tool",
+      "crawl_site": "crawl_site tool",
+      "search_research_cache": "search_research_cache tool",
       "search_knowledge": "Keyword search over turicks-brain knowledge_entries (no LLM cost)",
       "search_turicks_brain": "Semantic vector search over turicks_brain (business/strategy) via Ollama + pgvector",
       "publish_signal": "Publish a typed cross-department signal to dept_signals (Postgres, async sweep)",
@@ -814,6 +866,7 @@
       "github_write": "Write to GitHub (PR, commit, push) — HITL-gated [HITL]",
       "project_workflow": "Run git/npm workflows in ~/Projects — HITL-gated [HITL]",
       "claude_code": "Full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — HITL-gated [HITL]",
+      "apply_cinematic_preset": "apply_cinematic_preset tool",
       "deploy_static_site": "deploy_static_site tool [HITL]",
       "linkedin_post": "Post to LinkedIn via Composio — brand-validator + Claude judge then HITL-gated [HITL]",
       "read_file": "Read files from the founder's laptop (path-guarded, secrets blocked)",
@@ -824,8 +877,7 @@
       "browser": "Safari automation on the founder's Mac — HITL-gated [HITL]",
       "search_personal_rag": "Semantic vector search over personal-rag (CV/career) via Ollama + pgvector",
       "read_cv": "Read the founder's CV from personal-rag (read-only)",
-      "search_jobs": "Search job listings via web search (Gemini grounding / DuckDuckGo)",
-      "apply_cinematic_preset": "Copy a cinematic-web preset scaffold (neon/glass/terminal/minimal) into ~/Projects before claude_code customises it"
+      "search_jobs": "Search job listings via web search (Gemini grounding / DuckDuckGo)"
     }
   }
 }
