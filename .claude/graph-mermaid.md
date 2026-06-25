@@ -27,6 +27,7 @@ graph TB
   tool_project_workflow["project_workflow"]:::tool
   tool_claude_code["claude_code"]:::tool
   tool_deploy_static_site["deploy_static_site"]:::tool
+  tool_apply_cinematic_preset["apply_cinematic_preset"]:::tool
   tool_linkedin_post["linkedin_post"]:::tool
   tool_read_file["read_file"]:::tool
   tool_list_dir["list_dir"]:::tool
@@ -71,6 +72,7 @@ graph TB
   tool_project_workflow -->|belongs_to| dept_engineering
   tool_claude_code -->|belongs_to| dept_engineering
   tool_deploy_static_site -->|belongs_to| dept_engineering
+  tool_apply_cinematic_preset -->|belongs_to| dept_engineering
   tool_publish_signal -->|belongs_to| dept_engineering
   tool_search_web -->|belongs_to| dept_marketing
   tool_linkedin_post -->|belongs_to| dept_marketing

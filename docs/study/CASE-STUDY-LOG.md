@@ -6,6 +6,106 @@
 
 ---
 
+## 2026-06-17 — ADR-032: Deterministic Anti-Hallucination Guards
+
+**Milestone**: Model-agnostic execution guard + structured tool failure envelope — merged.
+
+**Trigger**: Production exhibited the most damaging failure: the agent answered internal-knowledge
+questions from its own weights instead of calling memory tools. Root cause: (1) wrong production
+model (`gpt-4o-mini` — too weak for this topology), (2) no structural guard forcing tool use.
+
+**What was built:**
+- `src/gateway/execution-guard.ts`: `detectUnbackedMemoryClaim()` — pure regex guard on the
+  gateway. When an internal-knowledge question (Turicks, Naggar, "what did we decide") is asked
+  and zero memory tools fired, forces a retry with directive to call tools. Deterministic — works
+  across model swaps.
+- `src/agents/tool-result.ts`: `toolFailure(stage, message)` — structured failure envelope with
+  `[[TOOL_FAILURE stage=X]]` machine marker. Each tool names its REAL failing component (db,
+  embedding, composio, etc.) — no more misattributed errors.
+- `withToolErrorBoundary()` wraps DB tool bodies so Postgres exceptions become stage-tagged
+  envelopes, not raw crashes or swallowed errors.
+
+**Metrics**: `pnpm test` 1219/1219 green. `pnpm lint` exit 0.
+
+**Key lesson (rule #22):** A misattributed error is worse than no error — it sends debugging
+down the wrong road. Errors must name the REAL failing component.
+
+---
+
+## 2026-06-14 — Phases 1–6 Hardening Complete (PR #70)
+
+**Milestone**: Production multi-agent hardening — 6 phases merged to main. 1008 tests green.
+90% routing eval. 0 data loss.
+
+**Phase 1 — Context isolation + token measurement (ADR-021):**
+- Pinned `outputMode: "last_message"` with `assertContextIsolation()` boot-time guard
+- Per-turn `inputTokens`/`outputTokens`/`usd` logging on the `turn.out` seam
+- Confirmed Gemini implicit caching is the token lever (no Redis needed for caching)
+
+**Phase 2 — Typed inter-department contracts (ADR-022):**
+- `src/agents/contracts.ts` — 6 event types, Zod schemas, compiler-enforced parity
+- `validateSignalPayload()` — deterministic, total, never throws
+- Closed `SIGNAL_EVENT_TYPES` tuple with `satisfies Record<SignalEventType, ...>` guard
+
+**Phase 3 — Claude-as-judge (ADR-023):**
+- `src/infra/judge.ts` — Gate 2 in the 3-layer quality gate
+- Different model family (Claude) from Gemini drafter — no sycophancy
+- Fail-open, memoized, deterministic parse, temp 0
+- 14 unit tests covering all edge cases (fail-open, memoization, channel collision)
+
+**Phase 4 — Durable dept signals (ADR-024):**
+- `publish_signal` tool + hourly `sweepDeptSignals` cron consumer live
+- Exactly-once semantics (atomic consumed flag)
+- Live-verified: publish → row → consume → nudge → second consume = 0
+
+**Phase 5 — Hierarchy proof (ADR-025):**
+- `src/agents/revenue-domain.ts` + `src/agents/engineering-domain.ts` implemented
+- `tests/integration/nested-hitl.test.ts` — 3-level HITL proven GREEN against live model
+- Both subgraphs off by default; gated on real coordination trigger
+
+**Phase 6 — Rules #20–21 operationalized:**
+- `SECURITY-RULES-20-21.md` guide written
+- Structural test: forbids `"full_history"` anywhere under `src/agents/`
+
+**Portfolio value:** Every phase claim backed by evidence (unit tests, live Postgres verify,
+integration test). "Hierarchical-capable" is now a proven claim, not a marketing statement.
+
+---
+
+## 2026-06-03 — Personal Department (PR #16)
+
+**Milestone**: 7th (then 8th with admin) department `personal` — laptop operator.
+
+**Capabilities added:** `read_file`, `list_dir`, `send_file`, `write_file`, `run_shell`,
+`browser` (Safari automation). All writes and shell/browser are HITL-gated.
+
+**ADR-013:** `personal` and `engineering` kept strictly separate (least-privilege).
+Engineering tools have no laptop access; personal tools have no GitHub credentials.
+
+**Safety:** `src/infra/path-guard.ts` — home-dir confinement, secrets blocked even on read.
+
+**Metrics:** 267 tests green. Eval 13/13.
+
+---
+
+## 2026-06-01 — Phase B: Marketing + Sales + Prospecting (PR #5)
+
+**Milestone**: 3 new departments — marketing, sales, jobhunt — merged.
+
+**Marketing:** LinkedIn content (`linkedin_post` HITL-gated). Moved from comms (was causing
+routing collisions). Brand validator + Claude judge gates added.
+
+**Sales:** Cold outreach research + email drafts. ICP scoring via `search_web` + turicks-brain.
+`send_email` HITL-gated. Suppression check before every send.
+
+**Prospecting merged into research:** ICP scoring is a research mode, not a unique dept.
+No separate prospecting department needed.
+
+**Key routing fix:** `linkedin_post` → marketing ONLY. `read_emails` → comms ONLY.
+Eliminating dual-department tool ownership eliminated routing ambiguity.
+
+---
+
 ## 2026-06-01 — One-Week Sprint: All 4 Gumroad Products Assembled + turicks-web Updated
 
 **Milestone**: Sprint complete — 4 revenue-ready digital products packaged + live website updated.
