@@ -91,7 +91,10 @@ if grep -q '^PERSONAL_ROOT=/Users/' .env 2>/dev/null; then
 fi
 
 echo "==> Syncing Postgres user password with DATABASE_URL"
-DB_PASS=$(echo "$DATABASE_URL" | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|')
+# Read DATABASE_URL from the rendered .env (the on-box source of truth) — it is
+# NOT exported into this shell, so a bare $DATABASE_URL is unbound under `set -u`.
+DB_URL=$(grep -E '^DATABASE_URL=' .env | head -1 | cut -d= -f2- | tr -d '"')
+DB_PASS=$(printf '%s' "$DB_URL" | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|')
 docker exec founderos-postgres psql -U postgres -c "ALTER USER founderos WITH PASSWORD '$DB_PASS';" \
   && echo "    Password synced OK" \
   || echo "    WARNING: could not sync password (migration may fail)"
