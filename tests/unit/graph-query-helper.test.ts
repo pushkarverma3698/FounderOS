@@ -105,9 +105,9 @@ describe("graph-query-helper — other functions", () => {
     expect(depts.length).toBe(8);
   });
 
-  it("findNodesByType returns all tools (28 after apply_cinematic_preset fix)", () => {
+  it("findNodesByType returns all tools (32 after Apify research tools added)", () => {
     const tools = findNodesByType("tool");
-    expect(tools.length).toBe(28);
+    expect(tools.length).toBe(32);
   });
 
   it("findNodeByName finds search_web", () => {
