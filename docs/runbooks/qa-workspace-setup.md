@@ -6,7 +6,7 @@ logged in (Pro plan). No new OS user, no new Claude login. Isolation is by a SEP
 (`/opt/founderos-qa`), so QA git operations never touch the live deploy at `/opt/founderos`.
 
 ```bash
-# As the founderos user on 95.217.162.12 (NOT root, NOT a new user)
+# As the founderos user on YOUR_VPS_IP (NOT root, NOT a new user)
 git clone https://github.com/pushkarverma3698/FounderOS.git /opt/founderos-qa
 cd /opt/founderos-qa && pnpm install --frozen-lockfile
 # Provide /opt/founderos-qa/.env (DATABASE_URL read-only role preferred, TELEGRAM_BOT_TOKEN,

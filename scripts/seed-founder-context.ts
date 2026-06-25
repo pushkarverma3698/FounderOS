@@ -67,7 +67,7 @@ const context = {
     "cinematic-web presets (bundled in assets/cinematic-presets + optional CINEMATIC_WEB_PRESETS_ROOT clone) + apply_cinematic_preset → claude_code → deploy_static_site → nginx at proof.turicks.com/showcase-1/ and /clients/{slug}/. Commands: /webbuild Client preset slug, /run web_build. HITL on build + deploy.",
 
   proof_gallery:
-    "proof.turicks.com — 3 showcases planned (AgentOps fictional AI observability = showcase-1). IP fallback: http://95.217.162.12/showcase-1/",
+    "proof.turicks.com — 3 showcases planned (AgentOps fictional AI observability = showcase-1). IP fallback: http://YOUR_VPS_IP/showcase-1/",
 
   naggar_retreat:
     "Himalayan farm homestay in Naggar, Himachal Pradesh. Separate from Turicks GTM — booking/guest comms only.",

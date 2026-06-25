@@ -50,7 +50,7 @@ fi
 # ── 5. Public URL ────────────────────────────────────────────────────────────
 echo ""
 echo "==> Public showcase URL"
-PUBLIC_BASE="$(grep '^STATIC_SITE_PUBLIC_BASE_URL=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' || echo 'http://95.217.162.12')"
+PUBLIC_BASE="$(grep '^STATIC_SITE_PUBLIC_BASE_URL=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' || echo 'http://YOUR_VPS_IP')"
 PUBLIC_URL="${PUBLIC_BASE%/}/showcase-1/"
 CODE="$(curl -s -o /tmp/wb-showcase.html -w '%{http_code}' --connect-timeout 12 "$PUBLIC_URL" 2>/dev/null || echo 000)"
 echo "    $PUBLIC_URL → HTTP $CODE"
