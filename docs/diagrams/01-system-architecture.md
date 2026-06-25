@@ -16,7 +16,8 @@ graph TB
   end
 
   subgraph office["Office · src/agents"]
-    sup["Supervisor<br/>(Chief of Staff)"]
+    sup["Supervisor<br/>(Chief of Staff)<br/>outputMode: last_message<br/>No business tools (ADR-028)"]
+    admin["admin"]:::dept
     research["research"]:::dept
     comms["comms"]:::dept
     eng["engineering"]:::dept
@@ -42,8 +43,8 @@ graph TB
   tg --> run
   run --> sup
   run --> fmt --> tg
-  sup --> research & comms & eng & mktg & sales & personal & jobhunt
-  research & comms & eng & mktg & sales & personal & jobhunt -->|tool calls| ext3p
+  sup --> admin & research & comms & eng & mktg & sales & personal & jobhunt
+  admin & research & comms & eng & mktg & sales & personal & jobhunt -->|tool calls| ext3p
   eng -->|claude_code| cc
   sup -->|interrupt / resume / state| cp --> pg
   sched --> sup
@@ -57,7 +58,10 @@ graph TB
 **Key facts**
 - The office graph is compiled **once** (`getOffice()` singleton) with the Postgres
   checkpointer — never per request.
-- One model for the whole office: `gemini-2.5-flash` (temp 0), 503-only fallback chain.
+- 8 departments: admin · research · comms · engineering · marketing · sales · personal · jobhunt.
+- Supervisor has **no tools** (ADR-028). Business context and memory live in the `admin` dept.
+- `outputMode: "last_message"` is pinned + asserted at boot (ADR-021 context isolation).
+- One model for the whole office: `gemini-2.5-flash` via OpenRouter (temp 0), 503 fallback chain.
 - The gateway is the only layer that talks to Telegram; agents that need to push a
   file use the api-only `infra/telegram-send.ts` client (no second long-poll → no 409).
 - FounderOS also **exposes** an MCP server on `localhost:3100` (search_web, read_context,

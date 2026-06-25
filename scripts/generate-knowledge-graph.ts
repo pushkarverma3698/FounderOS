@@ -93,6 +93,7 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   github_write: "Write to GitHub (PR, commit, push) — HITL-gated",
   project_workflow: "Run git/npm workflows in ~/Projects — HITL-gated",
   claude_code: "Full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — HITL-gated",
+  apply_cinematic_preset: "Copy a cinematic-web preset scaffold (neon/glass/terminal/minimal) into ~/Projects before claude_code customises it",
   read_file: "Read files from the founder's laptop (path-guarded, secrets blocked)",
   list_dir: "List a single directory level on the founder's laptop (path-guarded)",
   write_file: "Write files to the laptop — HITL-gated",
@@ -431,18 +432,21 @@ When Claude Code encounters a search or question:
 tool_search_web
   ├─ belongs_to → dept_research
   ├─ belongs_to → dept_sales
-  └─ belongs_to → dept_prospecting
+  └─ belongs_to → dept_marketing
 \`\`\`
 
 ### "What can the personal department do?"
 \`\`\`
 dept_personal
-  ├─ uses → tool_read_file
-  ├─ uses → tool_write_file
-  ├─ uses → tool_run_shell
-  ├─ uses → tool_browser
-  └─ uses → tool_send_file
+  ├─ belongs_to (tool_read_file → dept_personal)
+  ├─ belongs_to (tool_write_file → dept_personal)
+  ├─ belongs_to (tool_run_shell → dept_personal)
+  ├─ belongs_to (tool_browser → dept_personal)
+  └─ belongs_to (tool_send_file → dept_personal)
 \`\`\`
+
+Note: graph edges go FROM tool TO department with type "belongs_to".
+Use \`findToolsByDepartment(dept)\` or filter \`edges.filter(e => e.to === deptId && e.type === "belongs_to")\`.
 
 ### "What is the HITL approval flow?"
 \`\`\`

@@ -16,6 +16,10 @@ graph TB
   tool_record_event["record_event"]:::tool
   tool_list_pending_signals["list_pending_signals"]:::tool
   tool_search_web["search_web"]:::tool
+  tool_scrape_url["scrape_url"]:::tool
+  tool_deep_research["deep_research"]:::tool
+  tool_crawl_site["crawl_site"]:::tool
+  tool_search_research_cache["search_research_cache"]:::tool
   tool_search_knowledge["search_knowledge"]:::tool
   tool_search_turicks_brain["search_turicks_brain"]:::tool
   tool_publish_signal["publish_signal"]:::tool
@@ -26,7 +30,9 @@ graph TB
   tool_github_write["github_write"]:::tool
   tool_project_workflow["project_workflow"]:::tool
   tool_claude_code["claude_code"]:::tool
+  tool_apply_cinematic_preset["apply_cinematic_preset"]:::tool
   tool_deploy_static_site["deploy_static_site"]:::tool
+  tool_apply_cinematic_preset["apply_cinematic_preset"]:::tool
   tool_linkedin_post["linkedin_post"]:::tool
   tool_read_file["read_file"]:::tool
   tool_list_dir["list_dir"]:::tool
@@ -60,6 +66,10 @@ graph TB
   tool_record_event -->|belongs_to| dept_admin
   tool_list_pending_signals -->|belongs_to| dept_admin
   tool_search_web -->|belongs_to| dept_research
+  tool_scrape_url -->|belongs_to| dept_research
+  tool_deep_research -->|belongs_to| dept_research
+  tool_crawl_site -->|belongs_to| dept_research
+  tool_search_research_cache -->|belongs_to| dept_research
   tool_search_knowledge -->|belongs_to| dept_research
   tool_search_turicks_brain -->|belongs_to| dept_research
   tool_publish_signal -->|belongs_to| dept_research
@@ -70,15 +80,17 @@ graph TB
   tool_github_write -->|belongs_to| dept_engineering
   tool_project_workflow -->|belongs_to| dept_engineering
   tool_claude_code -->|belongs_to| dept_engineering
+  tool_apply_cinematic_preset -->|belongs_to| dept_engineering
   tool_deploy_static_site -->|belongs_to| dept_engineering
+  tool_apply_cinematic_preset -->|belongs_to| dept_engineering
   tool_publish_signal -->|belongs_to| dept_engineering
   tool_search_web -->|belongs_to| dept_marketing
   tool_linkedin_post -->|belongs_to| dept_marketing
   tool_search_knowledge -->|belongs_to| dept_marketing
   tool_search_turicks_brain -->|belongs_to| dept_marketing
   tool_publish_signal -->|belongs_to| dept_marketing
-  tool_search_web -->|belongs_to| dept_sales
   tool_send_email -->|belongs_to| dept_sales
+  tool_search_web -->|belongs_to| dept_sales
   tool_search_knowledge -->|belongs_to| dept_sales
   tool_search_turicks_brain -->|belongs_to| dept_sales
   tool_read_file -->|belongs_to| dept_personal

@@ -25,6 +25,16 @@ describe("Knowledge Graph (Graphify)", () => {
     expect(toolNames).toContain("publish_signal");
   });
 
+  it("should include apply_cinematic_preset for engineering (2026-06-23 fix)", () => {
+    const toolNames = graph.nodes.filter((n) => n.type === "tool").map((t) => t.name);
+    expect(toolNames).toContain("apply_cinematic_preset");
+    // It must be wired to engineering
+    const edge = graph.edges.find(
+      (e) => e.from === "tool_apply_cinematic_preset" && e.to === "dept_engineering" && e.type === "belongs_to"
+    );
+    expect(edge).toBeDefined();
+  });
+
   it("should model the vector stores + Ollama as services", () => {
     const names = graph.nodes.filter((n) => n.type === "service").map((s) => s.name);
     expect(names.some((s) => /ollama/i.test(s))).toBe(true);
