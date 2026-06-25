@@ -90,6 +90,12 @@ if grep -q '^PERSONAL_ROOT=/Users/' .env 2>/dev/null; then
   echo "    patched: removed stale PERSONAL_ROOT placeholder from .env"
 fi
 
+echo "==> Syncing Postgres user password with DATABASE_URL"
+DB_PASS=$(echo "$DATABASE_URL" | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|')
+docker exec founderos-postgres psql -U postgres -c "ALTER USER founderos WITH PASSWORD '$DB_PASS';" \
+  && echo "    Password synced OK" \
+  || echo "    WARNING: could not sync password (migration may fail)"
+
 echo "==> Running migrations"
 pnpm db:migrate
 
