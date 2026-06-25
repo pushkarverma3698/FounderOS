@@ -78,8 +78,9 @@ export const envSchema = z.object({
    */
   TELEGRAM_POLLING_ENABLED: z.enum(["true", "false"]).optional(),
 
-  // Redis — optional; used only if a tool requires it
-  REDIS_URL: z.string().url().default("redis://localhost:6379"),
+  // Redis — optional; SaaS-phase only, not wired into any prod send path.
+  // Empty string or missing → undefined (Redis client skips connection).
+  REDIS_URL: z.preprocess(v => (v === "" ? undefined : v), z.string().url().optional()),
 
   // Global halt (kill switch) — optional flag-file path override.
   // Default: $HOME/.founderos/HALT (resolved in src/infra/halt.ts).
