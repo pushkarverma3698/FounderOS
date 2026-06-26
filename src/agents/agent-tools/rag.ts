@@ -54,6 +54,32 @@ export const searchPersonalRag = tool(
   },
 );
 
+// ── search_research_cache ──────────────────────────────────────────────────────
+
+export const searchResearchCache = tool(
+  async ({ query, top_k }) => {
+    return orchestrateRagQuery({
+      store: "research",
+      query,
+      top_k,
+    });
+  },
+  {
+    name: "search_research_cache",
+    description:
+      "Semantic search over web pages this department already scraped (research_cache). " +
+      "Each result carries its source URL + retrieval date. " +
+      "ALWAYS try this before scrape_url/deep_research — prior findings are instant and free. " +
+      "Read-only, no approval needed.",
+    schema: z.object({
+      query: z
+        .string()
+        .describe("What to search. E.g. 'Acme pricing', 'competitor positioning'. Specific queries work best."),
+      top_k: z.number().optional().nullable().describe("Number of results (1–10, default 5)"),
+    }),
+  },
+);
+
 // ── search_turicks_brain ───────────────────────────────────────────────────────
 
 export const searchTuricksBrain = tool(

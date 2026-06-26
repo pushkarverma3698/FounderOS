@@ -454,7 +454,7 @@ export async function runBrainSync(): Promise<void> {
   return new Promise((resolve) => {
     const child = spawn(
       process.execPath,
-      ["--import", "tsx/esm", "scripts/sync-turicks-brain.ts"],
+      ["--env-file=.env", "--import", "tsx/esm", "scripts/sync-turicks-brain.ts"],
       { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"], timeout: 5 * 60_000 },
     );
     let stderr = "";
@@ -464,7 +464,7 @@ export async function runBrainSync(): Promise<void> {
         log.info("Auto brain sync completed");
       } else {
         log.error({ code, stderr: stderr.slice(0, 500) }, "Auto brain sync failed");
-        sendToChat(`⚠️ Auto brain sync failed (exit ${code ?? "?"}).\\nRun <code>pnpm brain:sync</code> manually.`, "HTML").catch(() => {});
+        sendToChat(`⚠️ Auto brain sync failed (exit ${code ?? "?"}).\nRun <code>pnpm brain:sync</code> manually.`, "HTML").catch(() => {});
       }
       resolve();
     });

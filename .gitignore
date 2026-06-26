@@ -50,3 +50,6 @@ coverage/
 gumroad-packs/
 *.zip
 .claude/worktrees/
+
+# actual prod env filename (gap: gitignore had .env.production)
+.env.prod

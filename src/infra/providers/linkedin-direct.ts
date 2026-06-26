@@ -14,7 +14,7 @@ import type { LinkedInPostInput } from "./types.js";
 const log = childLogger({ module: "provider:linkedin-direct" });
 
 const LINKEDIN_API_BASE = "https://api.linkedin.com/rest";
-const DEFAULT_API_VERSION = "202405";
+const DEFAULT_API_VERSION = "202506";
 
 /** Whether direct LinkedIn API credentials are configured (default/turicks account). */
 export function linkedInDirectConfigured(): boolean {

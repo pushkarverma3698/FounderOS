@@ -10,6 +10,10 @@
 
 import {
   searchWeb,
+  scrapeUrlTool,
+  deepResearch,
+  crawlSiteTool,
+  searchResearchCache,
   createSendEmailTool,
   readEmails,
   linkedinPost,
@@ -62,7 +66,7 @@ type AnyTool = any;
  */
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals],
-  research: [searchWeb, searchKnowledge, searchTuricksBrain, publishSignal],
+  research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal],
   marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal],

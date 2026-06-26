@@ -65,6 +65,10 @@ const SEARCH_TOOL_LIMITS = {
   search_web: 2,
   search_knowledge: 2,
   search_turicks_brain: 2,
+  search_research_cache: 2,
+  scrape_url: 2,
+  deep_research: 1,
+  crawl_site: 1,
 } as const;
 
 /**
