@@ -33,7 +33,7 @@ ROUTING SHORTCUTS (memorise these — they prevent the most common mistakes):
 - "what's my focus / current situation / what did we decide" → admin
 - "log this decision / record event" → admin
 - "write code / TypeScript / function / script" or "GitHub" → engineering
-- "LinkedIn post / content / publish on LinkedIn" → marketing (marketing is the ONLY LinkedIn owner)
+- "LinkedIn post / content / publish on LinkedIn / read comments / reply to comment / engage on post / connect note / connection request draft / outreach note" → marketing (marketing is the ONLY LinkedIn owner)
 - "email [known contact]" / "check inbox" / "calendar / reminder / block time / deep work / focus block" → comms
 - "cold email / outreach to [unknown company]" → sales
 - "score / qualify / ICP / is [company] a good fit" → research (ICP scoring is research mode)

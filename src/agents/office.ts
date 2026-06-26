@@ -53,7 +53,7 @@ const DEPARTMENT_DESCRIPTIONS = {
   research: "Use for web facts, news, company or market research, ICP scoring, and internal Turicks knowledge lookups.",
   comms: "Use for reading inbox, known-contact email, and Google Calendar work.",
   engineering: "Use for GitHub repositories, issues, pull requests, code, tests, deployments, and FounderOS engineering work.",
-  marketing: "Use for LinkedIn posts, content strategy, and Turicks brand copy.",
+  marketing: "Use for LinkedIn posts, content strategy, reading LinkedIn comments, drafting comment replies and connection notes (copy-paste, no auto-send), and Turicks brand copy.",
   sales: "Use for prospect research tied to cold outreach, unknown-company outreach, and sales emails.",
   revenue: "Use for LinkedIn marketing content and sales cold outreach (routes internally to marketing or sales).",
   personal: "Use for files, directories, shell, browser, and laptop operations on the founder's machine.",

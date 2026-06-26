@@ -139,6 +139,91 @@ export async function directLinkedInPost(input: LinkedInPostInput): Promise<Tool
   }
 }
 
+export interface LinkedInComment {
+  id: string;
+  author_urn: string;
+  text: string;
+  created_at: number;
+}
+
+/**
+ * Read comments on a LinkedIn post via the socialActions/comments sub-resource.
+ * Requires r_member_social scope. Returns a clear 403 hint if scope is absent.
+ */
+export async function directLinkedInReadComments(
+  postId: string,
+  opts?: { limit?: number; account_key?: string; department?: string },
+): Promise<import("../../tools/index.js").ToolResult> {
+  const creds = await linkedInCreds(opts ?? {});
+  const token = creds.access_token;
+  if (!token) {
+    return { success: false, error: "LINKEDIN_ACCESS_TOKEN not configured." };
+  }
+
+  try {
+    const limit = opts?.limit ?? 20;
+    const encoded = encodeURIComponent(postId);
+    const res = await fetch(
+      `${LINKEDIN_API_BASE}/socialActions/${encoded}/comments?count=${limit}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "LinkedIn-Version": getLinkedInApiVersion(),
+          "X-Restli-Protocol-Version": "2.0.0",
+        },
+      },
+    );
+
+    if (res.status === 403) {
+      return {
+        success: false,
+        error:
+          "LinkedIn read access denied (403). Reading comments requires r_member_social scope. " +
+          "Add this scope to your LinkedIn Developer App and re-authorize.",
+      };
+    }
+
+    if (!res.ok) {
+      const raw = await res.text();
+      return {
+        success: false,
+        error: `LinkedIn comments API error (${res.status}): ${raw.slice(0, 200)}`,
+      };
+    }
+
+    const data = (await res.json()) as {
+      elements?: Array<{
+        id?: string;
+        actor?: string;
+        message?: { text?: string };
+        created?: { time?: number };
+      }>;
+      paging?: { total?: number };
+    };
+
+    const comments: LinkedInComment[] = (data.elements ?? []).map((el) => ({
+      id: el.id ?? "",
+      author_urn: el.actor ?? "",
+      text: el.message?.text ?? "",
+      created_at: el.created?.time ?? 0,
+    }));
+
+    log.info({ post_id: postId, count: comments.length }, "LinkedIn comments fetched");
+    return {
+      success: true,
+      data: {
+        post_id: postId,
+        comments,
+        total: data.paging?.total ?? comments.length,
+      },
+    };
+  } catch (err) {
+    const message = (err as Error).message;
+    log.error({ err: message }, "LinkedIn comments fetch error");
+    return { success: false, error: message };
+  }
+}
+
 /** Read-only analytics — best-effort via direct API (may require extra scopes). */
 export async function directLinkedInAnalytics(
   postId: string,

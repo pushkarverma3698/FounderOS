@@ -12,6 +12,7 @@ import { TENANT, DAILY_EMAIL_LIMIT, DAILY_LINKEDIN_LIMIT } from "../../core/conf
 import { emailTool } from "../../tools/email.js";
 import { readEmailsTool } from "../../tools/email-reader.js";
 import { linkedinPostTool } from "../../tools/linkedin.js";
+import { linkedinReadCommentsTool } from "../../tools/linkedin-engagement.js";
 import { calendarTool } from "../../tools/calendar.js";
 import { hasRecentOutboundToRecipient, isSuppressed, getDailyOutboundCount } from "../../db/queries.js";
 import {
@@ -311,6 +312,132 @@ export const createCalendarEvent = tool(
       end_date: z.string().optional().nullable().describe("End date/time (ISO). Defaults to +1 day for all-day or +1h for timed."),
       description: z.string().optional().nullable().describe("Optional description or notes"),
       timezone: z.string().optional().nullable().describe("Timezone (default: Europe/Amsterdam)"),
+    }),
+  },
+);
+
+// ── Marketing: LinkedIn engagement assist (safe-assist, ADR-009 Option D) ──────
+// These tools NEVER auto-send. They surface drafts via HITL cards for copy-paste.
+
+/** Read comments on your LinkedIn posts — read-only, no approval needed. */
+export const linkedinReadComments = tool(
+  async ({ post_id, limit }) => {
+    const res = await linkedinReadCommentsTool.execute({ post_id, limit });
+    if (!res.success) {
+      return `LinkedIn comment read failed: ${res.error ?? "unknown error"}`;
+    }
+    const data = res.data as {
+      comments: Array<{ id: string; author_urn: string; text: string; created_at: number }>;
+      total: number;
+    };
+    if (!data.comments.length) return `No comments found on post ${post_id}.`;
+
+    const lines = data.comments.map(
+      (c, i) =>
+        `${i + 1}. ${c.author_urn}\n   "${c.text}"`,
+    );
+    return `📬 ${data.total} comment(s) on post:\n\n${lines.join("\n\n")}`;
+  },
+  {
+    name: "linkedin_read_comments",
+    description:
+      "Read comments on one of your LinkedIn posts. Returns commenter URN + text. " +
+      "Read-only — no approval needed. Requires r_member_social OAuth scope.",
+    schema: z.object({
+      post_id: z.string().describe("LinkedIn post URN (e.g. urn:li:share:123456789)"),
+      limit: z.number().optional().nullable().describe("Max comments to return (default 20)"),
+    }),
+  },
+);
+
+/** Draft a reply to a LinkedIn comment — HITL card, copy-paste on approval, no auto-send. */
+export const draftLinkedInReply = tool(
+  async ({ comment_author, comment_text, reply_text }, config) => {
+    const preview =
+      `Reply to: ${comment_author}\n` +
+      `Their comment: "${comment_text.slice(0, 150)}${comment_text.length > 150 ? "…" : ""}"\n\n` +
+      `— Your reply —\n${reply_text}`;
+
+    const rejected = await hitlGate(
+      {
+        action: "draft_linkedin_reply",
+        title: `💬 LinkedIn reply to ${comment_author}?`,
+        summary: "Review — copy-paste to LinkedIn after approving. No auto-send.",
+        preview,
+        args: { comment_author, comment_text, reply_text },
+      },
+      config,
+    );
+    if (rejected) return rejected;
+
+    log.info({ comment_author }, "LinkedIn reply draft approved for copy-paste");
+    return `✅ Reply approved. Copy this into LinkedIn:\n\n${reply_text}`;
+  },
+  {
+    name: "draft_linkedin_reply",
+    description:
+      "Draft a reply to a LinkedIn comment. Shows an Approve/Reject HITL card — on approval returns the text for you to copy-paste manually. No auto-send.",
+    schema: z.object({
+      comment_author: z.string().describe("Name or URN of the commenter"),
+      comment_text: z.string().describe("The original comment text you are replying to"),
+      reply_text: z
+        .string()
+        .describe("Your reply — conversational, ≤300 chars ideally. No banned phrases."),
+    }),
+  },
+);
+
+/** Draft a LinkedIn connection note + DM opener — HITL card, copy-paste on approval, ADR-009. */
+export const draftConnectionNote = tool(
+  async ({ profile_name, profile_context, connect_note, dm_opener }, config) => {
+    const notePreview =
+      `Target: ${profile_name}\n` +
+      `Why connect: ${profile_context}\n\n` +
+      `— Connect note (≤300 chars) —\n${connect_note}` +
+      (dm_opener ? `\n\n— DM opener (after they accept) —\n${dm_opener}` : "");
+
+    const rejected = await hitlGate(
+      {
+        action: "draft_connection_note",
+        title: `🤝 LinkedIn outreach to ${profile_name}?`,
+        summary: "Review — copy-paste to LinkedIn manually. No auto-send (ADR-009 Option D).",
+        preview: notePreview,
+        args: { profile_name, profile_context, connect_note, dm_opener },
+      },
+      config,
+    );
+    if (rejected) return rejected;
+
+    log.info({ profile_name }, "Connection note draft approved for copy-paste");
+    const lines = [
+      `✅ Outreach draft for ${profile_name} approved. Paste into LinkedIn:`,
+      ``,
+      `📋 Connect note:`,
+      connect_note,
+    ];
+    if (dm_opener) {
+      lines.push(``, `📩 DM opener (send after they accept):`, dm_opener);
+    }
+    return lines.join("\n");
+  },
+  {
+    name: "draft_connection_note",
+    description:
+      "Draft a LinkedIn connection note + optional DM opener for a target profile. " +
+      "Approve/Reject HITL card — on approval returns text for copy-paste. No auto-send (ADR-009 Option D).",
+    schema: z.object({
+      profile_name: z.string().describe("Full name of the person to connect with"),
+      profile_context: z
+        .string()
+        .describe("Why connect? Role, company, shared context — used to personalise the note"),
+      connect_note: z
+        .string()
+        .describe("Connection request note — max 300 chars, specific, no banned phrases"),
+      dm_opener: z
+        .string()
+        .optional()
+        .nullable()
+        .describe("Optional first DM to send after they accept the connection"),
     }),
   },
 );
