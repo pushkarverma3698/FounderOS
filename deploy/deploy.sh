@@ -127,6 +127,43 @@ else
   exit 1
 fi
 
+echo "==> Checking MCP bridge runtime dependencies"
+# ADR-041: when the bridge is enabled, the child server processes must be available.
+# A missing runtime contributes zero tools (isolated) but we surface it early here
+# so the operator knows to install before the first Blender/Slack request.
+MCP_BRIDGE_ENABLED_VAL="$(grep -E '^MCP_BRIDGE_ENABLED=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")"
+if [ "${MCP_BRIDGE_ENABLED_VAL:-false}" = "true" ]; then
+  echo "    MCP_BRIDGE_ENABLED=true — checking runtimes"
+
+  # blender-mcp requires uvx (ships with the `uv` Python package manager).
+  if ! command -v uvx >/dev/null 2>&1; then
+    echo "    WARNING: uvx not found — blender-mcp server will fail to start." >&2
+    echo "             Install: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+    echo "             Then: export PATH=\$HOME/.local/bin:\$PATH and redeploy." >&2
+  else
+    echo "    uvx OK: $(uvx --version 2>&1 | head -1)"
+  fi
+
+  # slack MCP requires SLACK_BOT_TOKEN + SLACK_TEAM_ID.
+  SLACK_TOKEN="$(grep -E '^SLACK_BOT_TOKEN=' .env 2>/dev/null | head -1 | cut -d= -f2-)"
+  SLACK_TEAM="$(grep -E '^SLACK_TEAM_ID=' .env 2>/dev/null | head -1 | cut -d= -f2-)"
+  if [ -z "$SLACK_TOKEN" ] || [ -z "$SLACK_TEAM" ]; then
+    echo "    WARNING: SLACK_BOT_TOKEN or SLACK_TEAM_ID missing — Slack MCP tools will be unavailable." >&2
+    echo "             Set both in PROD_DOTENV or as deployment secrets and redeploy." >&2
+  else
+    echo "    Slack env vars present (token length: ${#SLACK_TOKEN})"
+  fi
+
+  # npx is already on the PATH via Node.js — just confirm.
+  if ! command -v npx >/dev/null 2>&1; then
+    echo "    WARNING: npx not found — Slack MCP server cannot start." >&2
+  else
+    echo "    npx OK"
+  fi
+else
+  echo "    MCP_BRIDGE_ENABLED=false (default) — skipping bridge checks"
+fi
+
 echo "==> Restarting service (single-instance lock makes this safe)"
 sudo systemctl restart founderos
 
