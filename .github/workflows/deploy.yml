@@ -59,6 +59,11 @@ jobs:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
       LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_AUTHOR_URN }}
+      # MCP client bridge (ADR-041). Bridge is OFF by default (MCP_BRIDGE_ENABLED=false
+      # in PROD_DOTENV). To enable: set MCP_BRIDGE_ENABLED=true in PROD_DOTENV and
+      # add SLACK_BOT_TOKEN + SLACK_TEAM_ID as GitHub repo secrets.
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_TEAM_ID: ${{ secrets.SLACK_TEAM_ID }}
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
@@ -71,7 +76,7 @@ jobs:
           script_stop: true
           command_timeout: "10m"
           # Forward secrets into the remote shell.
-          envs: PROD_DOTENV,OPENROUTER_API_KEY,LINKEDIN_ACCESS_TOKEN,LINKEDIN_AUTHOR_URN
+          envs: PROD_DOTENV,OPENROUTER_API_KEY,LINKEDIN_ACCESS_TOKEN,LINKEDIN_AUTHOR_URN,SLACK_BOT_TOKEN,SLACK_TEAM_ID
           script: |
             set -euo pipefail
             cd /opt/founderos
@@ -104,6 +109,20 @@ jobs:
               mv .env.patched .env
               chmod 600 .env
               echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-flash"
+            fi
+            # MCP bridge Slack secrets — append only when the secret is set.
+            # These are NOT in PROD_DOTENV (they rotate independently); forwarded as
+            # separate GitHub secrets so they can be updated without re-encoding the
+            # entire PROD_DOTENV blob.
+            if [ -n "${SLACK_BOT_TOKEN:-}" ]; then
+              grep -v -E '^(SLACK_BOT_TOKEN|SLACK_TEAM_ID)=' .env > .env.patched || true
+              {
+                printf 'SLACK_BOT_TOKEN=%s\n' "$SLACK_BOT_TOKEN"
+                [ -n "${SLACK_TEAM_ID:-}" ] && printf 'SLACK_TEAM_ID=%s\n' "$SLACK_TEAM_ID"
+              } >> .env.patched
+              mv .env.patched .env
+              chmod 600 .env
+              echo "==> Patched .env: SLACK_BOT_TOKEN + SLACK_TEAM_ID set"
             fi
             # Fix git permission drift (e.g. prior verify left root-owned refs).
             if [ -d .git/refs/heads/cursor ]; then
