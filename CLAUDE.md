@@ -229,6 +229,9 @@ src/gateway/commands.ts        — All /command handlers
 src/gateway/format.ts          — markdownToTelegramHtml formatter
 src/workflows/registry.ts      — SOP workflow definitions
 src/workflows/runner.ts        — Pure workflow executor (callback-injected, no grammy)
+src/mcp/server.ts              — MCP SERVER: exposes read-only tools to external clients
+src/mcp/client.ts              — MCP CLIENT bridge: agents consume external MCP servers (ADR-041)
+mcp-bridge.json                — External MCP server manifest (servers + write allowlist)
 drizzle/                       — Generated migration SQL (run: npx drizzle-kit migrate)
 ```
 

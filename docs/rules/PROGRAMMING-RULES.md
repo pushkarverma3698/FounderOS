@@ -135,6 +135,32 @@ The simplest — **3 touch points**.
 
 ---
 
+## Wiring Map 5 — Add an External MCP Server (ADR-041)
+
+Connect agents to an external MCP server (Blender, Slack, …) **without** writing a
+native tool. **1 config file + 1 restart** — no code.
+
+| # | File | What you add |
+|---|------|-------------|
+| 1 | `mcp-bridge.json` | A `servers.<name>` entry: `command`, `args`, `department` (string or array), and the explicit `write` allowlist of tool names that must pass HITL. Secrets go in `env` as var **names**, not values. |
+| 2 | `.env` (+ `PROD_DOTENV`) | `MCP_BRIDGE_ENABLED=true` + any vars named in the server's `env`. |
+| 3 | — | Restart. `applyMcpBridge()` connects once at boot and merges the server's tools into `DEPARTMENT_TOOLS`; writes are auto-gated, reads pass through. |
+
+Bridged tools are renamed `mcp__<server>__<tool>`. Classification is the manifest
+`write` list only (no heuristics — rule #16); set `gateUnlisted: true` on a server to
+gate every tool not proven a read. A server that fails to connect contributes zero
+tools and never crashes boot (failure isolation, rule #12).
+
+### Forget → Error table
+
+| If you forget… | You get… |
+|----------------|----------|
+| `write` entry for a side-effecting tool | The tool runs **ungated** (no approval) — a P0 safety gap. List every write tool (or set `gateUnlisted`). |
+| `MCP_BRIDGE_ENABLED=true` | Bridge is a no-op; the external tools never appear. |
+| an `env` var named in the manifest | The child server starts without its credential and its tools fail at call time (logged, isolated). |
+
+---
+
 ## Path & Import Rules (project-wide)
 
 - **ES modules** — every import uses a `.js` extension even for `.ts` files:

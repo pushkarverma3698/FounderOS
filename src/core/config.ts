@@ -82,6 +82,14 @@ export const envSchema = z.object({
   // Empty string or missing → undefined (Redis client skips connection).
   REDIS_URL: z.preprocess(v => (v === "" ? undefined : v), z.string().url().optional()),
 
+  // ── External MCP client bridge (ADR-041) ────────────────────────────────────
+  /** Connect agents to external MCP servers declared in the bridge manifest.
+   *  Default OFF — flag-gated so the default build is byte-identical until a
+   *  founder explicitly opts in. Reads pass through; writes are HITL-gated. */
+  MCP_BRIDGE_ENABLED: z.enum(["true", "false"]).default("false"),
+  /** Path to the bridge manifest (servers + per-server write allowlist). */
+  MCP_BRIDGE_MANIFEST: z.string().default("mcp-bridge.json"),
+
   // Global halt (kill switch) — optional flag-file path override.
   // Default: $HOME/.founderos/HALT (resolved in src/infra/halt.ts).
   HALT_FLAG_PATH: z.string().transform(v => v || undefined).optional(),
@@ -215,6 +223,16 @@ export const TELEGRAM_POLLING_ENABLED = boolEnv(
   "TELEGRAM_POLLING_ENABLED",
   env.NODE_ENV === "production",
 );
+
+/**
+ * Connect agents to external MCP servers (ADR-041). Default OFF — the single,
+ * reversible lever that merges manifest-declared external tools into the
+ * department arrays. Reads pass through; writes route through hitlGate.
+ */
+export const MCP_BRIDGE_ENABLED = env.MCP_BRIDGE_ENABLED === "true";
+
+/** Filesystem path to the external MCP bridge manifest. */
+export const MCP_BRIDGE_MANIFEST = env.MCP_BRIDGE_MANIFEST;
 
 /** Max recursive supervisor/sub-agent steps before LangGraph aborts a run. */
 export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 40);

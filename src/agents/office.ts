@@ -22,7 +22,7 @@ import type { CompiledStateGraph, BaseCheckpointSaver } from "@langchain/langgra
 import { getModel, getModelFallbackMiddleware } from "./model.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
 import { createAgentMiddleware, createTrimmedPrompt, type TrimOptions } from "../infra/context-manager.js";
-import { DEPARTMENT_TOOLS } from "./capabilities.js";
+import { DEPARTMENT_TOOLS, applyMcpBridge } from "./capabilities.js";
 import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED } from "../core/config.js";
 import { buildEngineeringDomain } from "./engineering-domain.js";
 import { buildRevenueDomain } from "./revenue-domain.js";
@@ -245,6 +245,10 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
  */
 export async function getOffice() {
   if (_office) return _office;
+  // Connect external MCP servers (ADR-041) and merge their tools into the
+  // department registry BEFORE the graph reads DEPARTMENT_TOOLS. No-op unless
+  // MCP_BRIDGE_ENABLED — flag-off leaves the registry byte-identical.
+  await applyMcpBridge();
   const checkpointer = await getCheckpointer();
   // Upstream LangGraph typing bug: PostgresSaver isn't assignable to
   // BaseCheckpointSaver<number> because serde.dumpsTyped is typed sync on the
