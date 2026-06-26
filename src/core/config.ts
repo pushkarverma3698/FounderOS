@@ -48,6 +48,16 @@ export const envSchema = z.object({
   LINKEDIN_API_VERSION: z.string().transform(v => v || undefined).optional(),
   GITHUB_TOKEN: z.string().transform(v => v || undefined).optional(),
 
+  // ── Apify web scraper (research department real-data engine) ────────────────
+  /** Apify API token (https://apify.com → Console → Integrations). One key, all
+   *  environments. Absent → research scrape tools fall back to keyless fetch. */
+  APIFY_TOKEN: z.string().transform(v => v || undefined).optional(),
+  /** Apify REST base URL. Override only for self-hosted/proxy setups. */
+  APIFY_BASE_URL: z.string().url().default("https://api.apify.com/v2"),
+  /** Scrape backend: "apify" (default) uses Apify actors; "fetch" forces the
+   *  keyless in-process fallback even when a token is set (offline/dev). */
+  SCRAPE_BACKEND: z.enum(["apify", "fetch"]).default("apify"),
+
   // Observability — optional, degrades gracefully
   LANGCHAIN_API_KEY: z.string().optional(),
   LANGCHAIN_PROJECT: z.string().default("founderos"),
@@ -68,8 +78,9 @@ export const envSchema = z.object({
    */
   TELEGRAM_POLLING_ENABLED: z.enum(["true", "false"]).optional(),
 
-  // Redis — optional; used only if a tool requires it
-  REDIS_URL: z.string().url().default("redis://localhost:6379"),
+  // Redis — optional; SaaS-phase only, not wired into any prod send path.
+  // Empty string or missing → undefined (Redis client skips connection).
+  REDIS_URL: z.preprocess(v => (v === "" ? undefined : v), z.string().url().optional()),
 
   // Global halt (kill switch) — optional flag-file path override.
   // Default: $HOME/.founderos/HALT (resolved in src/infra/halt.ts).
@@ -91,6 +102,10 @@ export const envSchema = z.object({
   RAGFLOW_API_KEY: z.string().transform(v => v || undefined).optional(),
   /** UUID of the RAGFlow knowledge-base dataset to query/upload into. */
   RAGFLOW_DATASET_ID: z.string().transform(v => v || undefined).optional(),
+
+  /** TTL (seconds) for the Redis scrape cache — dedups repeat scrapes of the
+   *  same URL/query so we don't re-pay Apify credits + re-embed. Default 24h. */
+  RESEARCH_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
 
   // ── mem0 episodic memory cloud ────────────────────────────────────────────
   /** When set, events are also pushed to mem0 cloud for semantic recall. */

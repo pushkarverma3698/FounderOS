@@ -64,6 +64,13 @@
       "when": 1779880700000,
       "tag": "0008_integration_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779880800000,
+      "tag": "0009_research_cache",
+      "breakpoints": true
     }
   ]
 }

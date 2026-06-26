@@ -405,10 +405,31 @@ export const turicksBrain = brainSchema.table(
   },
 );
 
+/**
+ * research_cache — durable memory of web pages scraped by the research dept
+ * (Apify rag-web-browser / website-content-crawler). Kept SEPARATE from the
+ * curated turicks_brain so raw web content never pollutes hand-synced strategy
+ * docs (ADR-013/015 separation spirit). Auto-ingested by src/infra/research-memory.ts;
+ * queried by search_research_cache. Each row's metadata carries the citation
+ * (source_url, title, retrieved_at) so stored findings stay verifiable.
+ */
+export const researchCache = brainSchema.table(
+  "research_cache",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    content: text("content").notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+    embedding: vector("embedding", { dimensions: 768 }),
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+);
+
 export type PersonalRagRow = typeof personalRag.$inferSelect;
 export type NewPersonalRagRow = typeof personalRag.$inferInsert;
 export type TuricksBrainRow = typeof turicksBrain.$inferSelect;
 export type NewTuricksBrainRow = typeof turicksBrain.$inferInsert;
+export type ResearchCacheRow = typeof researchCache.$inferSelect;
+export type NewResearchCacheRow = typeof researchCache.$inferInsert;
 
 // ── Type exports ──────────────────────────────────────────────────────────────
 
