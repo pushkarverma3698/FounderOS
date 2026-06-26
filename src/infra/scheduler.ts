@@ -19,7 +19,8 @@ import cron from "node-cron";
 import { spawn } from "node:child_process";
 import { HumanMessage } from "@langchain/core/messages";
 import { MemorySaver } from "@langchain/langgraph";
-import { getFounderContext, getPendingInterrupt, consumePendingEvents, getTodayCostUsd } from "../db/queries.js";
+import { getFounderContext, getPendingInterrupt, consumePendingEvents, getTodayCostUsd, getRecentLinkedInPostIds, hasBeenAudited, writeAuditEntry } from "../db/queries.js";
+import { directLinkedInReadComments, type LinkedInComment } from "./providers/linkedin-direct.js";
 import type { DeptSignal } from "../db/schema.js";
 import { DEFAULT_TARGET_DEPT } from "../agents/agent-tools/signals.js";
 import { getOutboundTargets } from "../outbound/targets.js";
@@ -360,6 +361,70 @@ export async function sweepDeptSignals(): Promise<void> {
   }
 }
 
+// ── Social cadence (Mon/Wed/Fri LinkedIn posting rhythm) ─────────────────────
+
+const CADENCE_PILLARS: Record<number, string> = {
+  1: "BUILD_LOG",       // Monday
+  3: "AI_EDUCATION",   // Wednesday
+  5: "FOUNDER_STORY",  // Friday
+};
+
+/**
+ * Build the scheduler prompt for a social cadence post.
+ * Pure function — extracted for testability (rule #16, no prompt instructions in cron logic).
+ */
+export function buildSocialCadencePrompt(
+  date: Date,
+): { prompt: string; pillar: string; threadId: string } {
+  const day = date.getDay();
+  const pillar = CADENCE_PILLARS[day] ?? "BUILD_LOG";
+  const dateStr = date.toISOString().split("T")[0]!;
+  const threadId = `${TENANT}:marketing:cadence:${dateStr}`;
+  const prompt =
+    `Social cadence post for today (${dateStr}). Content pillar: ${pillar}.\n` +
+    `Research what's trending in AI/engineering/LLM this week, then write and post a LinkedIn post using the ${pillar} pillar.\n` +
+    `Focus on FounderOS capabilities or Turicks mission. The post must appeal to hiring managers at AI companies — show technical depth and real-world impact. Call linkedin_post when done (HITL card will fire for approval).`;
+  return { prompt, pillar, threadId };
+}
+
+/**
+ * Mon/Wed/Fri cadence job — triggers the marketing dept to research + draft + HITL a post.
+ * Budget-gated. Times out after 5 min (same as Monday brief) to keep cron loop unblocked.
+ */
+async function sendSocialCadenceNudge(): Promise<void> {
+  const spent = await getTodayCostUsd(TENANT);
+  const dailyGate = checkDailyBudgetGate(spent, getDailyBudgetCapUsd());
+  if (!dailyGate.ok) {
+    log.warn({ spent }, "Social cadence skipped — daily budget cap reached");
+    return;
+  }
+
+  const { prompt, pillar, threadId } = buildSocialCadencePrompt(new Date());
+  log.info({ pillar, threadId }, "Social cadence firing…");
+
+  const office = getSchedulerOffice();
+  const config = { configurable: { thread_id: threadId } };
+
+  const CADENCE_TIMEOUT_MS = 5 * 60 * 1000;
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("Social cadence LLM timed out (>5 min)")), CADENCE_TIMEOUT_MS),
+  );
+
+  try {
+    await Promise.race([
+      office.invoke({ messages: [new HumanMessage(prompt)] }, config),
+      timeoutPromise,
+    ]);
+    log.info({ pillar }, "Social cadence fired — HITL card surfaced to Telegram");
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "Social cadence failed");
+    await sendToChat(
+      `⚠️ Social cadence failed (${pillar}): ${(err as Error).message}`,
+      "HTML",
+    );
+  }
+}
+
 /** Wednesday nudge when Proof Drop cadence is below target (no LLM). */
 async function sendProofDropCadenceNudge(): Promise<void> {
   const stats = await getProofDropStats(TENANT);
@@ -426,6 +491,102 @@ async function sendDailyBudgetAlertIfNeeded(): Promise<void> {
   log.info({ spent, cap, threshold }, "Daily budget threshold alert sent");
 }
 
+// ── LinkedIn comment sweep (every 6 hours) ────────────────────────────────────
+
+/**
+ * Build the marketing dept prompt for a batch of new comments.
+ * Pure function — extracted for testability.
+ */
+export function buildCommentSweepPrompt(
+  postId: string,
+  comments: Array<{ id: string; author_urn: string; text: string }>,
+): { prompt: string; threadId: string } {
+  const threadId = `${TENANT}:marketing:comment-sweep:${postId}:${Date.now()}`;
+  const commentLines = comments
+    .map((c, i) => `${i + 1}. ${c.author_urn}: "${c.text}"`)
+    .join("\n");
+  const prompt =
+    `New comments on LinkedIn post ${postId} that need replies drafted:\n\n${commentLines}\n\n` +
+    `For each comment worth engaging, draft a reply and call draft_linkedin_reply (HITL card — I copy-paste it). ` +
+    `Skip generic praise ("Great post!") unless you can add something specific. One HITL card per reply.`;
+  return { prompt, threadId };
+}
+
+/**
+ * Every 6 hours: read new comments on recent posts and surface HITL reply-draft cards.
+ * Uses action_log to track seen comment IDs so duplicates never surface.
+ */
+async function sweepLinkedInComments(): Promise<void> {
+  const postIds = await getRecentLinkedInPostIds(TENANT, 30);
+  if (!postIds.length) {
+    log.debug("Comment sweep: no recent posts in audit log, skipping");
+    return;
+  }
+
+  log.info({ count: postIds.length }, "Comment sweep: checking posts for new comments");
+
+  let totalNew = 0;
+
+  for (const postId of postIds) {
+    const result = await directLinkedInReadComments(postId, { limit: 50 });
+    if (!result.success) {
+      // 403 = missing r_member_social scope — log once, don't spam Telegram
+      log.debug({ postId, err: result.error }, "Comment sweep: could not read comments");
+      continue;
+    }
+
+    const allComments = (result.data as { comments: LinkedInComment[] }).comments;
+
+    // Filter to unseen comments
+    const newComments: LinkedInComment[] = [];
+    for (const c of allComments) {
+      const seenKey = `linkedin_comment:${c.id}`;
+      const seen = await hasBeenAudited(seenKey);
+      if (!seen) newComments.push(c);
+    }
+
+    if (!newComments.length) continue;
+    totalNew += newComments.length;
+
+    // Mark all as seen first (before invoking LLM) — prevents double-draft on retry
+    for (const c of newComments) {
+      await writeAuditEntry({
+        tenant_id: TENANT,
+        action: "linkedin_comment_seen",
+        idempotency_key: `linkedin_comment:${c.id}`,
+        payload: {
+          post_id: postId,
+          author_urn: c.author_urn,
+          text_preview: c.text.slice(0, 100),
+        },
+      });
+    }
+
+    // Invoke marketing to draft replies (surfaces HITL cards to Telegram)
+    const { prompt, threadId } = buildCommentSweepPrompt(postId, newComments);
+    const office = getSchedulerOffice();
+    const SWEEP_TIMEOUT_MS = 5 * 60 * 1000;
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Comment sweep LLM timed out (>5 min)")), SWEEP_TIMEOUT_MS),
+    );
+    try {
+      await Promise.race([
+        office.invoke({ messages: [new HumanMessage(prompt)] }, { configurable: { thread_id: threadId } }),
+        timeoutPromise,
+      ]);
+      log.info({ postId, count: newComments.length }, "Comment sweep: draft cards surfaced");
+    } catch (err) {
+      log.error({ postId, err: (err as Error).message }, "Comment sweep: draft invocation failed");
+    }
+  }
+
+  if (totalNew > 0) {
+    log.info({ totalNew }, "Comment sweep complete");
+  } else {
+    log.debug("Comment sweep: no new comments found");
+  }
+}
+
 // ── Scheduler boot ────────────────────────────────────────────────────────────
 
 export function startScheduler(): void {
@@ -481,5 +642,22 @@ export function startScheduler(): void {
     });
   });
 
-  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), Proof Drop cadence (Wed 9:05am), stale approval check (daily 9am), dept-signal sweep + budget alerts (hourly), auto brain sync (daily 2am)");
+  // Mon/Wed/Fri 9:10am — social cadence: research trend → marketing drafts → HITL card.
+  // 9:10am (10 min after stale-approval check) to avoid cron pile-up.
+  cron.schedule("10 9 * * 1,3,5", () => {
+    sendSocialCadenceNudge().catch((err) => {
+      log.error({ err: (err as Error).message }, "Social cadence cron error");
+      sendToChat(`⚠️ Social cadence failed: ${(err as Error).message}`, "HTML").catch(() => {});
+    });
+  });
+
+  // Every 6 hours — LinkedIn comment sweep: new comments on recent posts → HITL reply-draft cards.
+  // Silently skips if r_member_social scope absent (403 is not surfaced as an alert).
+  cron.schedule("0 */6 * * *", () => {
+    sweepLinkedInComments().catch((err) => {
+      log.error({ err: (err as Error).message }, "Comment sweep cron error");
+    });
+  });
+
+  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), Proof Drop cadence (Wed 9:05am), stale approval check (daily 9am), social cadence (Mon/Wed/Fri 9:10am), comment sweep (every 6h), dept-signal sweep + budget alerts (hourly), auto brain sync (daily 2am)");
 }
