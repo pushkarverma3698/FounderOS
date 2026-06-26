@@ -95,7 +95,11 @@ echo "==> Syncing Postgres user password with DATABASE_URL"
 # NOT exported into this shell, so a bare $DATABASE_URL is unbound under `set -u`.
 DB_URL=$(grep -E '^DATABASE_URL=' .env | head -1 | cut -d= -f2- | tr -d '"')
 DB_PASS=$(printf '%s' "$DB_URL" | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|')
-docker exec founderos-postgres psql -U postgres -c "ALTER USER founderos WITH PASSWORD '$DB_PASS';" \
+# Connect as the container superuser, which is POSTGRES_USER=founderos — NOT
+# "postgres" (that role does not exist in this cluster, so the old `-U postgres`
+# silently failed every deploy, leaving the password drifted → migrations 28P01).
+# Local socket auth is trust for the superuser, so no password is needed here.
+docker exec founderos-postgres psql -U founderos -d founderos -c "ALTER USER founderos WITH PASSWORD '$DB_PASS';" \
   && echo "    Password synced OK" \
   || echo "    WARNING: could not sync password (migration may fail)"
 
