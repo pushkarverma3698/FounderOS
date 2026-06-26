@@ -389,7 +389,7 @@ export async function runBrainSync(): Promise<void> {
   return new Promise((resolve) => {
     const child = spawn(
       process.execPath,
-      ["--import", "tsx/esm", "scripts/sync-turicks-brain.ts"],
+      ["--env-file=.env", "--import", "tsx/esm", "scripts/sync-turicks-brain.ts"],
       { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"], timeout: 5 * 60_000 },
     );
     let stderr = "";
