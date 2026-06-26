@@ -1,0 +1,19 @@
+{
+  "servers": {
+    "blender": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["blender-mcp"],
+      "department": "personal",
+      "write": ["execute_blender_code", "render_image"]
+    },
+    "slack": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-slack"],
+      "env": ["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"],
+      "department": "comms",
+      "write": ["slack_post_message", "slack_reply_to_thread"]
+    }
+  }
+}

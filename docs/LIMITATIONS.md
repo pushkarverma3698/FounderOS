@@ -119,6 +119,10 @@ calendar down) — see MEMORY.md.
 - **Action:** treat Composio connectivity as a monitored dependency (health probe +
   `/status` surfacing), and consider a direct-API fallback for the highest-value path
   (Gmail) so one vendor outage doesn't silence all outbound.
+- **Strategic direction (ADR-041):** do NOT expand Composio. New external integrations
+  (social, tools) go through the MCP client bridge (`src/mcp/client.ts`), where a dead
+  server isolates to its own tools instead of cascading across three departments.
+  Composio stays as-is for Gmail/LinkedIn/Calendar; social migrates to MCP opportunistically.
 
 ## 8. Dead-export candidates (verify before removing) — **LOW**
 

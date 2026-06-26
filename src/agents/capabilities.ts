@@ -45,6 +45,7 @@ import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
 import { searchMemoryTool } from "../tools/memory.js";
 import { listPendingSignals } from "./agent-tools/pending-signals.js";
+import { MCP_BRIDGE_ENABLED, MCP_BRIDGE_MANIFEST } from "../core/config.js";
 
 // Tool generics are heterogeneous across departments; the graph only needs
 // `.name` + invokability, both checked by tests. Typing the union precisely
@@ -104,6 +105,41 @@ export const HITL_GATED_TOOLS = new Set([
   "create_calendar_event",
   "record_event",
 ]);
+
+/**
+ * Merge bridged external-MCP tools (ADR-041) into the live department registry.
+ * Pure given its inputs — mutates the passed maps in place so both the office
+ * graph and the capability manifest see the same tools. Gated tool names are
+ * added to the HITL set so they render with `*` and the gateway knows to pause.
+ */
+export function mergeBridgedTools(
+  target: Record<string, AnyTool[]>,
+  hitl: Set<string>,
+  byDept: Record<string, AnyTool[]>,
+  gatedNames: string[],
+): void {
+  for (const name of gatedNames) hitl.add(name);
+  for (const [dept, tools] of Object.entries(byDept)) {
+    (target[dept] ??= []).push(...tools);
+  }
+}
+
+/**
+ * Connect external MCP servers and merge their tools into DEPARTMENT_TOOLS.
+ * No-op unless MCP_BRIDGE_ENABLED — and the bridge modules are dynamically
+ * imported so the default (flag-off) build never even loads @langchain/mcp-adapters.
+ * Call once at startup, BEFORE buildOffice() reads DEPARTMENT_TOOLS.
+ */
+export async function applyMcpBridge(): Promise<void> {
+  if (!MCP_BRIDGE_ENABLED) return;
+  const { loadManifest } = await import("../mcp/bridge-manifest.js");
+  const { gatedRuntimeNames } = await import("../mcp/bridge-classify.js");
+  const { getBridgedTools } = await import("../mcp/client.js");
+
+  const manifest = loadManifest(MCP_BRIDGE_MANIFEST);
+  const byDept = await getBridgedTools(manifest);
+  mergeBridgedTools(DEPARTMENT_TOOLS, HITL_GATED_TOOLS, byDept, gatedRuntimeNames(manifest));
+}
 
 /**
  * Render the truthful capability manifest injected into the supervisor prompt.
