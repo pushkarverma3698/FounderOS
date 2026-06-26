@@ -224,6 +224,69 @@ export async function directLinkedInReadComments(
   }
 }
 
+/**
+ * Fetch the author's own recent posts via LinkedIn REST API.
+ * Requires r_member_social scope — returns a clear 403 hint if absent.
+ * The tool wrapper falls back to action_log when this 403s.
+ */
+export async function directLinkedInGetMyPosts(
+  opts?: { limit?: number; account_key?: string; department?: string },
+): Promise<ToolResult> {
+  const creds = await linkedInCreds(opts ?? {});
+  const token = creds.access_token;
+  if (!token) return { success: false, error: "LINKEDIN_ACCESS_TOKEN not configured." };
+
+  const author = creds.author_urn;
+  if (!author) return { success: false, error: "LINKEDIN_AUTHOR_URN not configured." };
+
+  try {
+    const limit = opts?.limit ?? 5;
+    const encoded = encodeURIComponent(author);
+    const res = await fetch(
+      `${LINKEDIN_API_BASE}/posts?author=${encoded}&q=author&count=${limit}&fields=id,commentary,created`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "LinkedIn-Version": getLinkedInApiVersion(),
+          "X-Restli-Protocol-Version": "2.0.0",
+        },
+      },
+    );
+
+    if (res.status === 403) {
+      return {
+        success: false,
+        error:
+          "LinkedIn read access denied (403). Fetching your posts requires r_member_social scope. " +
+          "Add this scope to your LinkedIn Developer App and re-authorize. " +
+          "Falling back to FounderOS audit log for post IDs.",
+      };
+    }
+
+    if (!res.ok) {
+      const raw = await res.text();
+      return { success: false, error: `LinkedIn posts API error (${res.status}): ${raw.slice(0, 200)}` };
+    }
+
+    const data = (await res.json()) as {
+      elements?: Array<{ id?: string; commentary?: string; created?: { time?: number } }>;
+    };
+
+    const posts = (data.elements ?? []).map((el) => ({
+      id: el.id ?? "",
+      text: el.commentary ?? "",
+      created_at: el.created?.time ?? 0,
+    }));
+
+    log.info({ count: posts.length, author }, "LinkedIn own posts fetched");
+    return { success: true, data: { posts } };
+  } catch (err) {
+    const message = (err as Error).message;
+    log.error({ err: message }, "LinkedIn get-my-posts network error");
+    return { success: false, error: message };
+  }
+}
+
 /** Read-only analytics — best-effort via direct API (may require extra scopes). */
 export async function directLinkedInAnalytics(
   postId: string,

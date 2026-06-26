@@ -27,6 +27,7 @@ import {
   directLinkedInAnalytics,
   directLinkedInPost,
   directLinkedInReadComments,
+  directLinkedInGetMyPosts,
   getLinkedInAuthorUrn as getDirectAuthorUrn,
 } from "./linkedin-direct.js";
 import type {
@@ -75,6 +76,13 @@ export async function providerLinkedInAnalytics(
   return getLinkedInBackend() === "direct"
     ? directLinkedInAnalytics(postId, opts)
     : composioLinkedInAnalytics(postId);
+}
+
+/** Fetch the author's own recent posts. Direct API only — falls back to action_log in the tool wrapper. */
+export async function providerLinkedInGetMyPosts(
+  opts?: { limit?: number; account_key?: string; department?: string },
+): Promise<ToolResult> {
+  return directLinkedInGetMyPosts(opts);
 }
 
 /** Read comments on a LinkedIn post. Direct API only — Composio doesn't expose comments endpoint. */

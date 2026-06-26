@@ -12,7 +12,8 @@ import { TENANT, DAILY_EMAIL_LIMIT, DAILY_LINKEDIN_LIMIT } from "../../core/conf
 import { emailTool } from "../../tools/email.js";
 import { readEmailsTool } from "../../tools/email-reader.js";
 import { linkedinPostTool } from "../../tools/linkedin.js";
-import { linkedinReadCommentsTool } from "../../tools/linkedin-engagement.js";
+import { linkedinReadCommentsTool, linkedinGetMyPostsTool } from "../../tools/linkedin-engagement.js";
+import { getRecentLinkedInPostIds } from "../../db/queries.js";
 import { calendarTool } from "../../tools/calendar.js";
 import { hasRecentOutboundToRecipient, isSuppressed, getDailyOutboundCount } from "../../db/queries.js";
 import {
@@ -318,6 +319,45 @@ export const createCalendarEvent = tool(
 
 // ── Marketing: LinkedIn engagement assist (safe-assist, ADR-009 Option D) ──────
 // These tools NEVER auto-send. They surface drafts via HITL cards for copy-paste.
+
+/** Get the author's own recent LinkedIn post IDs — read-only, no approval needed.
+ *  Falls back to FounderOS action_log if r_member_social scope is absent. */
+export const linkedinGetMyPosts = tool(
+  async ({ limit = 5 }) => {
+    const res = await linkedinGetMyPostsTool.execute({ limit });
+    if (res.success) {
+      const data = res.data as { posts: Array<{ id: string; text: string; created_at: number }> };
+      if (!data.posts.length) return "No recent LinkedIn posts found via API.";
+      const lines = data.posts.map(
+        (p, i) => `${i + 1}. ${p.id}${p.text ? ` — "${p.text.slice(0, 80)}${p.text.length > 80 ? "…" : ""}"` : ""}`,
+      );
+      return `Your recent LinkedIn posts:\n\n${lines.join("\n")}`;
+    }
+
+    // API failed (likely missing r_member_social scope) — fall back to action_log
+    const postIds = await getRecentLinkedInPostIds(TENANT, 30);
+    if (!postIds.length) {
+      return (
+        "No recent LinkedIn posts found. Either post via FounderOS first (so I can track the IDs) " +
+        "or add r_member_social scope to your LinkedIn Developer App and re-authorize."
+      );
+    }
+    const lines = postIds.map((id, i) => `${i + 1}. ${id}`);
+    return (
+      `Your recent LinkedIn posts (from FounderOS audit log):\n\n${lines.join("\n")}\n\n` +
+      `Note: ${res.error ?? "LinkedIn API scope not available — use any ID above with linkedin_read_comments."}`
+    );
+  },
+  {
+    name: "linkedin_get_my_posts",
+    description:
+      "Get your own recent LinkedIn post IDs. Call this when no post_id is given for comment reading. " +
+      "Falls back to FounderOS audit log if LinkedIn API scope is absent. Read-only — no approval needed.",
+    schema: z.object({
+      limit: z.number().optional().nullable().describe("Max posts to return (default 5)"),
+    }),
+  },
+);
 
 /** Read comments on your LinkedIn posts — read-only, no approval needed. */
 export const linkedinReadComments = tool(

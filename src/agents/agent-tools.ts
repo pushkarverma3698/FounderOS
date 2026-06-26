@@ -28,6 +28,7 @@ export {
   createSendEmailTool,
   sendEmail,
   linkedinPost,
+  linkedinGetMyPosts,
   linkedinReadComments,
   draftLinkedInReply,
   draftConnectionNote,

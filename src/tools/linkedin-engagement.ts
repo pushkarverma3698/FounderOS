@@ -5,10 +5,30 @@
  */
 
 import { childLogger } from "../infra/logger.js";
-import { providerLinkedInReadComments } from "../infra/providers/index.js";
+import { providerLinkedInReadComments, providerLinkedInGetMyPosts } from "../infra/providers/index.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:linkedin-engagement" });
+
+export const linkedinGetMyPostsTool: UnifiedTool = {
+  name: "linkedin_get_my_posts",
+  description:
+    "Fetch your own recent LinkedIn post IDs. Use this when the founder says 'my latest post' or 'my posts' " +
+    "without specifying a post URN. Returns post IDs for use with linkedin_read_comments. " +
+    "Falls back to FounderOS audit log if r_member_social scope is absent.",
+  input_schema: {
+    type: "object",
+    properties: {
+      limit: { type: "number", description: "Max posts to return (default 5)" },
+    },
+    required: [],
+  },
+  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+    const { limit } = args as { limit?: number };
+    log.info({ limit }, "Fetching own LinkedIn posts");
+    return providerLinkedInGetMyPosts({ limit });
+  },
+};
 
 export const linkedinReadCommentsTool: UnifiedTool = {
   name: "linkedin_read_comments",

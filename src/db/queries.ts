@@ -286,6 +286,32 @@ export async function writeAuditEntry(
   return { written: rows.length > 0 };
 }
 
+/**
+ * Return LinkedIn post IDs from action_log (posts published by FounderOS).
+ * Used by the comment sweep scheduler and the linkedin_get_my_posts fallback.
+ */
+export async function getRecentLinkedInPostIds(
+  tenantId: string,
+  daysBack = 30,
+): Promise<string[]> {
+  const db = getDb();
+  const since = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
+  const rows = await db
+    .select({ payload: actionLog.payload })
+    .from(actionLog)
+    .where(
+      and(
+        eq(actionLog.tenant_id, tenantId),
+        eq(actionLog.action, "linkedin_post"),
+        gte(actionLog.created_at, since),
+      ),
+    )
+    .orderBy(desc(actionLog.created_at));
+  return rows
+    .map((r) => (r.payload as Record<string, unknown> | null)?.["post_id"] as string | undefined)
+    .filter((id): id is string => !!id);
+}
+
 /** Recent action log entries for a tenant (admin/debug). */
 export async function getRecentAuditEntries(tenantId: string, limit = 50) {
   const db = getDb();
