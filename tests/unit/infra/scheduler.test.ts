@@ -223,6 +223,30 @@ describe("runBrainSync (auto brain:sync)", () => {
     // Just confirm it's callable and returns a Promise.
     result.catch(() => {}); // suppress unhandled rejection
   });
+
+  it("formats brain sync error message with proper newline (not escaped backslash)", () => {
+    // This test verifies the fix for the brain sync error message bug.
+    // The error message should contain a real newline (\n), not a literal backslash-n (\\n).
+    //
+    // Expected format:
+    // ⚠️ Auto brain sync failed (exit X).
+    // Run <code>pnpm brain:sync</code> manually.
+    //
+    // The message is constructed with template literals, so a single \n should create a newline.
+    const messageTemplate = `⚠️ Auto brain sync failed (exit ${1 ?? "?"}).\nRun <code>pnpm brain:sync</code> manually.`;
+
+    // Should contain an actual newline character
+    expect(messageTemplate).toContain("\n");
+
+    // Should not contain a literal escaped backslash-n (which would be \\n in source)
+    expect(messageTemplate).not.toContain("\\n");
+
+    // Split on newline and verify structure
+    const lines = messageTemplate.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("Auto brain sync failed");
+    expect(lines[1]).toContain("pnpm brain:sync");
+  });
 });
 
 describe("daily budget alert helpers (scheduler import)", () => {

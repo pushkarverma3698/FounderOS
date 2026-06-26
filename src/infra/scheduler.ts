@@ -399,7 +399,7 @@ export async function runBrainSync(): Promise<void> {
         log.info("Auto brain sync completed");
       } else {
         log.error({ code, stderr: stderr.slice(0, 500) }, "Auto brain sync failed");
-        sendToChat(`⚠️ Auto brain sync failed (exit ${code ?? "?"}).\\nRun <code>pnpm brain:sync</code> manually.`, "HTML").catch(() => {});
+        sendToChat(`⚠️ Auto brain sync failed (exit ${code ?? "?"}).\nRun <code>pnpm brain:sync</code> manually.`, "HTML").catch(() => {});
       }
       resolve();
     });
