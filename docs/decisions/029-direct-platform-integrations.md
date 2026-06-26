@@ -72,9 +72,40 @@ For Workspace: service account + domain-wide delegation (super admin grants scop
 - Provider contract tests (e.g. Composio field names) live in `tests/unit/infra/providers/`
 - Instagram (future): Meta Graph API direct — skip Composio entirely
 
+## Addendum 2026-06-27 — `googleapis` backend (unattended default for prod)
+
+The `gws` CLI backend needs an interactive `gws auth login` on the host (or a
+gws profile dir), which is not "add keys and go" and broke prod (2026-06-27
+audit: `gws_gmail down — gws not ready`, `GWS_BIN`/`GOOGLE_APPLICATION_CREDENTIALS`
+unset; Composio rollback also dead via SDK drift → **email/calendar fully down**).
+
+Added a third Google backend, `googleapis`, that authenticates with a Workspace
+**service account + domain-wide delegation** (no CLI, no interactive login):
+
+- `src/infra/providers/google-direct.ts` — `directSendEmail` / `directReadEmails`
+  / `directCreateCalendarEvent`, identical signatures + `ToolResult` shapes to the
+  gws adapter (drop-in at the provider layer; `comms.ts`, prompts, capability
+  registry, and the suppression/quota/brand/judge/HITL rails are untouched).
+- Selected via `GMAIL_BACKEND=googleapis` / `CALENDAR_BACKEND=googleapis`
+  (`src/infra/providers/index.ts` 3-way dispatch; `provider-config.ts` parser).
+- Credentials resolve through the existing account registry (ADR-036): one shared
+  SA JSON (`GOOGLE_APPLICATION_CREDENTIALS`) + a per-account impersonation subject
+  (`GOOGLE_SUBJECT_<ACCOUNT>`, fallback `GOOGLE_IMPERSONATE_SUBJECT`). Multi-company
+  resolution is preserved.
+- `/health` + boot smoke probe the active backend honestly (`googleapis_gmail`,
+  `gmail_active`) — rule #22.
+
+`gws` remains valid; `composio` remains the (now non-functional) legacy rollback.
+**Prod default → `googleapis`** once the SA JSON + subject are provisioned.
+
+Founder setup: see `.env.example` (Google section) — Workspace admin creates the
+service account, enables domain-wide delegation for `gmail.send`, `gmail.readonly`,
+`calendar.events`, drops the JSON on the host, sets the two env vars.
+
 ## References
 
 - ADR-028 (hybrid migration plan — partially superseded)
 - ADR-006 (auth strategy — Phase E may revisit Nango)
 - ADR-009 (LinkedIn outreach ban — post-only regardless of provider)
 - `src/infra/provider-config.ts` — env flags
+- `src/infra/providers/google-direct.ts` — googleapis service-account adapter (2026-06-27)

@@ -19,6 +19,11 @@ import {
 } from "./google-composio.js";
 import { gwsCreateCalendarEvent, gwsReadEmails, gwsSendEmail } from "./google-gws.js";
 import {
+  directCreateCalendarEvent,
+  directReadEmails,
+  directSendEmail,
+} from "./google-direct.js";
+import {
   composioLinkedInAnalytics,
   composioLinkedInConnect,
   composioLinkedInPost,
@@ -50,17 +55,24 @@ export type {
 } from "./types.js";
 
 export async function providerReadEmails(input: ReadEmailsInput): Promise<ToolResult> {
-  return getGmailBackend() === "gws" ? gwsReadEmails(input) : composioReadEmails(input);
+  const backend = getGmailBackend();
+  if (backend === "gws") return gwsReadEmails(input);
+  if (backend === "googleapis") return directReadEmails(input);
+  return composioReadEmails(input);
 }
 
 export async function providerSendEmail(input: SendEmailInput): Promise<ToolResult> {
-  return getGmailBackend() === "gws" ? gwsSendEmail(input) : composioSendEmail(input);
+  const backend = getGmailBackend();
+  if (backend === "gws") return gwsSendEmail(input);
+  if (backend === "googleapis") return directSendEmail(input);
+  return composioSendEmail(input);
 }
 
 export async function providerCreateCalendarEvent(input: CreateCalendarEventInput): Promise<ToolResult> {
-  return getCalendarBackend() === "gws"
-    ? gwsCreateCalendarEvent(input)
-    : composioCreateCalendarEvent(input);
+  const backend = getCalendarBackend();
+  if (backend === "gws") return gwsCreateCalendarEvent(input);
+  if (backend === "googleapis") return directCreateCalendarEvent(input);
+  return composioCreateCalendarEvent(input);
 }
 
 export async function providerLinkedInPost(input: LinkedInPostInput): Promise<ToolResult> {

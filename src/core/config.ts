@@ -35,9 +35,9 @@ export const envSchema = z.object({
 
   // Tool keys — optional; tools fail loudly when key is missing
   COMPOSIO_API_KEY: z.string().transform(v => v || undefined).optional(),
-  /** Gmail backend: gws (default) or composio (legacy rollback). ADR-029 */
-  GMAIL_BACKEND: z.enum(["composio", "gws"]).default("gws"),
-  CALENDAR_BACKEND: z.enum(["composio", "gws"]).optional(),
+  /** Gmail backend: gws | googleapis (service account, unattended) | composio (legacy rollback). ADR-029 */
+  GMAIL_BACKEND: z.enum(["composio", "gws", "googleapis"]).default("gws"),
+  CALENDAR_BACKEND: z.enum(["composio", "gws", "googleapis"]).optional(),
   GWS_BIN: z.string().transform(v => v || undefined).optional(),
   PROVIDER_SMOKE_AT_BOOT: z.enum(["true", "false"]).optional(),
   PROVIDER_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().optional(),

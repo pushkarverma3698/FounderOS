@@ -9,8 +9,10 @@
 
 import type { ToolResult } from "../../tools/index.js";
 
-/** Which adapter executes a platform call. Env-selectable; default = direct/gws. */
-export type GoogleBackend = "gws" | "composio";
+/** Which adapter executes a platform call. Env-selectable; default = direct/gws.
+ *  - gws:        Google Workspace CLI on the host (interactive `gws auth login`).
+ *  - googleapis: service account + domain-wide delegation (unattended; ADR-029). */
+export type GoogleBackend = "gws" | "googleapis" | "composio";
 export type LinkedInBackend = "direct" | "composio";
 
 export interface SendEmailInput {

@@ -94,6 +94,7 @@ export interface HealthReport {
   integrations: {
     composio_gmail: { status: string; detail: string };
     gws_gmail: { status: string; detail: string };
+    googleapis_gmail: { status: string; detail: string };
     active_gmail: { status: string; detail: string };
     checked_at: string | null;
   };
@@ -125,6 +126,7 @@ export async function buildHealthReport(): Promise<HealthReport> {
   const backend = probe?.gmail_backend ?? getGmailBackend();
   const composio = probe?.composio_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
   const gws = probe?.gws_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
+  const googleapis = probe?.googleapis_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
   const active = probe?.active_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
   const gmailDegraded = active.status === "down";
   return {
@@ -140,6 +142,7 @@ export async function buildHealthReport(): Promise<HealthReport> {
     integrations: {
       composio_gmail: composio,
       gws_gmail: gws,
+      googleapis_gmail: googleapis,
       active_gmail: active,
       checked_at: probe?.checked_at ?? null,
     },
