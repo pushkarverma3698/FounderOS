@@ -135,7 +135,11 @@ echo "==> Checking MCP bridge runtime dependencies"
 # ADR-041: when the bridge is enabled, the child server processes must be available.
 # A missing runtime contributes zero tools (isolated) but we surface it early here
 # so the operator knows to install before the first Blender/Slack request.
-MCP_BRIDGE_ENABLED_VAL="$(grep -E '^MCP_BRIDGE_ENABLED=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")"
+# `|| true` is REQUIRED: under `set -euo pipefail`, a `VAR=$(grep … | …)` whose
+# grep finds no match returns non-zero (pipefail) and aborts the entire deploy.
+# Prod .env has no MCP_BRIDGE_ENABLED line → this killed the deploy right after
+# seed-founder-context until fixed. Treat "absent" as the default (false).
+MCP_BRIDGE_ENABLED_VAL="$(grep -E '^MCP_BRIDGE_ENABLED=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
 if [ "${MCP_BRIDGE_ENABLED_VAL:-false}" = "true" ]; then
   echo "    MCP_BRIDGE_ENABLED=true — checking runtimes"
 
@@ -149,8 +153,8 @@ if [ "${MCP_BRIDGE_ENABLED_VAL:-false}" = "true" ]; then
   fi
 
   # slack MCP requires SLACK_BOT_TOKEN + SLACK_TEAM_ID.
-  SLACK_TOKEN="$(grep -E '^SLACK_BOT_TOKEN=' .env 2>/dev/null | head -1 | cut -d= -f2-)"
-  SLACK_TEAM="$(grep -E '^SLACK_TEAM_ID=' .env 2>/dev/null | head -1 | cut -d= -f2-)"
+  SLACK_TOKEN="$(grep -E '^SLACK_BOT_TOKEN=' .env 2>/dev/null | head -1 | cut -d= -f2- || true)"
+  SLACK_TEAM="$(grep -E '^SLACK_TEAM_ID=' .env 2>/dev/null | head -1 | cut -d= -f2- || true)"
   if [ -z "$SLACK_TOKEN" ] || [ -z "$SLACK_TEAM" ]; then
     echo "    WARNING: SLACK_BOT_TOKEN or SLACK_TEAM_ID missing — Slack MCP tools will be unavailable." >&2
     echo "             Set both in PROD_DOTENV or as deployment secrets and redeploy." >&2
