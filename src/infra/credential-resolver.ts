@@ -33,6 +33,10 @@ export function readEnvValue(key: string): string | undefined {
 
 export interface ResolvedGoogleCredentials {
   gws_profile_dir: string;
+  /** Path to the service-account JSON (googleapis backend). */
+  service_account_path?: string;
+  /** Mailbox to impersonate via domain-wide delegation (googleapis backend). */
+  impersonate_subject?: string;
 }
 
 export interface ResolvedLinkedInCredentials {
@@ -60,6 +64,10 @@ export function defaultCredentialRefs(
     case "google":
       return {
         gws_profile_dir: defaultGwsProfileDir(accountKey),
+        // googleapis backend: one shared service-account JSON across the Workspace
+        // (domain-wide delegation), with a per-account impersonation subject.
+        google_sa_path_env: "GOOGLE_APPLICATION_CREDENTIALS",
+        google_subject_env: `GOOGLE_SUBJECT_${accountKey.toUpperCase()}`,
         composio_connection_id_env:
           accountKey === "turicks" ? "COMPOSIO_GMAIL_CONN_ID" : `COMPOSIO_GMAIL_CONN_ID_${accountKey.toUpperCase()}`,
         composio_user_id_env:
@@ -98,8 +106,14 @@ export function defaultCredentialRefs(
 }
 
 export function resolveGoogleCredentials(refs: CredentialRefs): ResolvedGoogleCredentials {
+  const saPathKey = refs.google_sa_path_env ?? "GOOGLE_APPLICATION_CREDENTIALS";
+  const subjectKey = refs.google_subject_env;
+  const subject =
+    (subjectKey ? readEnvValue(subjectKey) : undefined) ?? readEnvValue("GOOGLE_IMPERSONATE_SUBJECT");
   return {
     gws_profile_dir: refs.gws_profile_dir ?? defaultGwsProfileDir("turicks"),
+    service_account_path: readEnvValue(saPathKey),
+    impersonate_subject: subject,
   };
 }
 

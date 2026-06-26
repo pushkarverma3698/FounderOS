@@ -86,6 +86,8 @@
   },
   "dependencies": {
     "@composio/core": "0.10.0",
+    "@googleapis/calendar": "^15.0.0",
+    "@googleapis/gmail": "^17.0.0",
     "@langchain/anthropic": "^1.4.1",
     "@langchain/core": "^1.1.49",
     "@langchain/google-genai": "^2.1.31",
@@ -98,6 +100,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "bottleneck": "^2.19.5",
     "drizzle-orm": "^0.38.0",
+    "google-auth-library": "^10.9.0",
     "grammy": "^1.31.0",
     "hono": "^4.6.0",
     "ioredis": "^5.3.0",
