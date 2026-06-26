@@ -71,3 +71,18 @@ describe("MARKETING_PROMPT — GitHub URL consistency", () => {
     expect(MARKETING_PROMPT).toContain("github.com/pushkarverma3698/FounderOS");
   });
 });
+
+describe("MARKETING_PROMPT — comment engagement paste path", () => {
+  it("supports a paste-driven reply path that does NOT require linkedin_read_comments", async () => {
+    const { MARKETING_PROMPT } = await import("../../../src/agents/system-prompts.js");
+    // PATH A: founder pastes a comment → draft directly, no API read (no r_member_social needed).
+    expect(MARKETING_PROMPT).toContain("PATH A");
+    expect(MARKETING_PROMPT).toContain("Do NOT call linkedin_read_comments");
+  });
+
+  it("tells the founder to paste the comment when read_comments 403s on scope", async () => {
+    const { MARKETING_PROMPT } = await import("../../../src/agents/system-prompts.js");
+    expect(MARKETING_PROMPT).toContain("r_member_social");
+    expect(MARKETING_PROMPT).toMatch(/Paste the comment text/i);
+  });
+});
