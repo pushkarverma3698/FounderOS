@@ -23,7 +23,7 @@ import { Bot, type Context } from "grammy";
 import { env } from "../core/config.js";
 import { logger } from "../infra/logger.js";
 import {
-  handleStart, handleReset, handleStatus, handleContext,
+  handleStart, handleReset, handleStatus, handleContext, handleCompany,
   handleTarget, handleTargets, handleUntarget,
   handleOutbound, handleProofDrop, handleWebBuild, handleCommands, handleDepartments,
   handleWorkflows, handleRun, handleQ,
@@ -76,6 +76,7 @@ export function registerHandlers(bot: Bot): void {
   bot.command("resume",      (ctx: Context) => handleResume(ctx));
   bot.command("status",      (ctx: Context) => handleStatus(ctx));
   bot.command("context",     (ctx: Context) => handleContext(ctx));
+  bot.command("company",      (ctx: Context) => handleCompany(ctx));
   bot.command("target",      (ctx: Context) => handleTarget(ctx));
   bot.command("targets",     (ctx: Context) => handleTargets(ctx));
   bot.command("untarget",    (ctx: Context) => handleUntarget(ctx));

@@ -31,6 +31,7 @@ import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt, getTodayCostUsd } from "../db/queries.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 import { buildOfficeInput } from "./pre-router.js";
+import { getActiveCompany } from "./active-company.js";
 import { isProvidedLinkedInPostRequest } from "./execution-guard.js";
 import {
   aiMessageLooksFabricatedKnowledge,
@@ -803,7 +804,7 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
     const budget = createRunBudget();
     const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
 
-    const invokeMessages: BaseMessage[] = buildOfficeInput(text);
+    const invokeMessages: BaseMessage[] = buildOfficeInput(text, getActiveCompany(chatId));
     trace.event("route.decided", { hint: (invokeMessages[0]?.content ?? "").toString().slice(0, 60) });
 
     if (isInternalKnowledgeRequest(text)) {

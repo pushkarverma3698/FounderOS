@@ -293,6 +293,34 @@ describe("buildOfficeInput", () => {
     expect(String(msgs[0]!.content)).toBe("hey there");
   });
 
+  it("injects NO company prefix for the default tenant (cache-stable, rule #20)", () => {
+    // Default tenant (turicks) emits an empty override → message shape unchanged.
+    const msgs = buildOfficeInput("hey there", "turicks");
+    expect(msgs).toHaveLength(1);
+    expect(String(msgs[0]!.content)).toBe("hey there");
+  });
+
+  it("prepends a company override SystemMessage for a non-default company", () => {
+    const msgs = buildOfficeInput("hey there", "naggar");
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0]).toBeInstanceOf(SystemMessage);
+    expect(String(msgs[0]!.content)).toContain("Naggar Retreat");
+    expect(String(msgs[1]!.content)).toBe("hey there");
+  });
+
+  it("keeps the company override ahead of the routing directive when both apply", () => {
+    const msgs = buildOfficeInput("List my GitHub repositories.", "naggar");
+    expect(msgs).toHaveLength(3);
+    expect(String(msgs[0]!.content)).toContain("Naggar Retreat");
+    expect(String(msgs[1]!.content)).toContain("engineering");
+  });
+
+  it("an unknown company key falls back to the default tenant (no injection)", () => {
+    const msgs = buildOfficeInput("hey there", "acme");
+    expect(msgs).toHaveLength(1);
+    expect(String(msgs[0]!.content)).toBe("hey there");
+  });
+
   it("the hint keeps a multi-step escape hatch (LLM may sequence across depts)", () => {
     const msgs = buildOfficeInput("Research what Stripe does");
     expect(String(msgs[0]!.content)).toMatch(/multi-step request that clearly spans/i);
