@@ -17,7 +17,10 @@ import {
   getInterruptById,
   listMissions,
   getRecentAuditEntries,
+  getCostBreakdown,
+  searchKnowledgeEntries,
 } from "../db/queries.js";
+import { buildCockpitState, summarizeCost, type CostRow } from "./cockpit.js";
 import { runOfficeSession, resumeOfficeSession } from "./office-run.js";
 import { createWebSession } from "./session.js";
 import { publishStreamEvent, subscribeStreamEvents } from "./stream-hub.js";
@@ -244,6 +247,22 @@ export function createWebApp(): Hono {
   app.get("/api/v1/audit", async (c) => {
     const entries = await getRecentAuditEntries(TENANT, 50);
     return c.json({ entries });
+  });
+
+  // ── Ops cockpit (Phase 5) — read-only observability ──────────────────────
+  app.get("/api/v1/cockpit/state", (c) => c.json(buildCockpitState()));
+
+  app.get("/api/v1/cockpit/cost", async (c) => {
+    const days = Math.min(Math.max(Number(c.req.query("days") ?? 7) || 7, 1), 90);
+    const rows = (await getCostBreakdown(TENANT, days)) as unknown as CostRow[];
+    return c.json({ days, ...summarizeCost(rows) });
+  });
+
+  app.get("/api/v1/cockpit/knowledge", async (c) => {
+    const q = c.req.query("q")?.trim() ?? "";
+    if (!q) return c.json({ query: "", results: [] });
+    const results = await searchKnowledgeEntries(TENANT, q, 8);
+    return c.json({ query: q, results });
   });
 
   app.get("/api/v1/sessions/:id/miso/status", async (c) => {

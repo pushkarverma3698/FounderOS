@@ -22,6 +22,7 @@ import { runProviderProbes, getLastProviderProbe } from "./provider-probes.js";
 import { getGmailBackend } from "./provider-config.js";
 import { handleWebGatewayRequest } from "../gateway/web.js";
 import { serveJarvisStatic } from "./jarvis-static.js";
+import { COCKPIT_HTML } from "../gateway/cockpit-ui.js";
 
 const log = childLogger({ module: "health" });
 
@@ -188,6 +189,12 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
           }),
         );
       });
+      return;
+    }
+
+    if (req.method === "GET" && urlPath === "/cockpit") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" });
+      res.end(COCKPIT_HTML);
       return;
     }
 
