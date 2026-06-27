@@ -71,11 +71,11 @@ for i in {1..30}; do
   fi
   echo "    waiting for ollama ($i/30)"; sleep 2
 done
-# Hard fail if Ollama never came up — brain:sync would write 0 embeddings.
+# Best-effort: Ollama only powers RAG embeddings. If it's down, brain:sync warns
+# below and the bot still deploys — don't abort a working bot for a RAG sidecar.
 if ! curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
-  echo "!! Ollama did not start in 60s — deploy aborted (RAG requires Ollama)" >&2
-  echo "   Fix: docker start founderos-ollama && ollama pull nomic-embed-text" >&2
-  exit 1
+  echo "    WARNING: Ollama not up in 60s — RAG embeddings will be skipped." >&2
+  echo "             Fix: docker start founderos-ollama && ollama pull nomic-embed-text" >&2
 fi
 
 echo "==> Pulling nomic-embed-text (no-op if already cached)"
@@ -107,28 +107,29 @@ echo "==> Running migrations"
 pnpm db:migrate
 
 # Populate the turicks_brain pgvector store from docs/ (embeds via local Ollama).
-# FATAL if sync fails or store has zero embeddings — empty RAG = fabrication risk (2026-06-15 prod bug).
-echo "==> Syncing turicks-brain vector store (brain:sync)"
-if ! pnpm brain:sync; then
-  echo "!! brain:sync FAILED — deploy aborted (RAG store empty = marketing/sales fabrication risk)" >&2
-  exit 1
+# BEST-EFFORT (not fatal): a RAG-sync hiccup must never block shipping a working
+# bot. RAG degrades gracefully — query-time anti-fabricate sentinel (2026-06-15
+# fix) handles a thin/empty store. Re-run `pnpm brain:sync` out-of-band if warned.
+echo "==> Syncing turicks-brain vector store (brain:sync) — best-effort"
+if pnpm brain:sync; then
+  echo "    brain:sync OK"
+else
+  echo "    WARNING: brain:sync failed — RAG may be stale/empty. Bot still deploys; re-run once Ollama is healthy." >&2
 fi
-echo "    brain:sync OK"
 
 EMBEDDED="$(docker exec founderos-postgres psql -U founderos -d founderos -tAc \
-  "SELECT count(*) FROM brain.turicks_brain WHERE embedding IS NOT NULL;" 2>/dev/null | tr -d ' ')"
+  "SELECT count(*) FROM brain.turicks_brain WHERE embedding IS NOT NULL;" 2>/dev/null | tr -d ' ' || true)"
 if [ -z "$EMBEDDED" ] || [ "$EMBEDDED" -le 0 ] 2>/dev/null; then
-  echo "!! turicks_brain has 0 embedded rows — deploy aborted (run brain:sync after Ollama is healthy)" >&2
-  exit 1
+  echo "    WARNING: turicks_brain has 0 embedded rows — RAG answers stay thin until brain:sync succeeds." >&2
+else
+  echo "    turicks_brain embedded rows: $EMBEDDED"
 fi
-echo "    turicks_brain embedded rows: $EMBEDDED"
 
-echo "==> Seeding founder context (Phase D-Bis — idempotent)"
+echo "==> Seeding founder context (idempotent) — best-effort"
 if node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts; then
   echo "    seed-founder-context OK"
 else
-  echo "!! seed-founder-context FAILED — deploy aborted (stale context = brand inconsistency)" >&2
-  exit 1
+  echo "    WARNING: seed-founder-context failed — founder context may be stale. Bot still deploys." >&2
 fi
 
 echo "==> Checking MCP bridge runtime dependencies"
@@ -184,16 +185,16 @@ else
   exit 1
 fi
 
+# Secondary surfaces — the JARVIS web UI is not the core product (the Telegram
+# bot is). Warn, don't abort, if they're down.
 if curl -fsS http://127.0.0.1:3001/api/v1/health >/dev/null; then
   echo "==> JARVIS web gateway OK — /api/v1/health"
 else
-  echo "!! /api/v1/health failed — JARVIS API may be down" >&2
-  exit 1
+  echo "    WARNING: /api/v1/health failed — JARVIS web UI may be down (core bot is up)." >&2
 fi
 
 if curl -fsS http://127.0.0.1:3001/ | grep -qi 'html\|jarvis\|root'; then
   echo "==> JARVIS UI OK — GET / serves SPA"
 else
-  echo "!! GET / did not return JARVIS SPA — run pnpm build:jarvis on the box" >&2
-  exit 1
+  echo "    WARNING: GET / did not return the JARVIS SPA — run 'pnpm build:jarvis' on the box (core bot is up)." >&2
 fi
