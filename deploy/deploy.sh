@@ -79,7 +79,7 @@ if ! curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
 fi
 
 echo "==> Pulling nomic-embed-text (no-op if already cached)"
-docker exec founderos-ollama ollama pull nomic-embed-text
+docker exec founderos-ollama ollama pull nomic-embed-text || true
 
 # Defensive: strip a stale Mac-style PERSONAL_ROOT placeholder if one slipped in.
 # The prod .env is normally rendered from the PROD_DOTENV secret (which should

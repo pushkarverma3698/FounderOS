@@ -18,6 +18,10 @@ const ENG_NODE = "engineering";
 /** Compile the office with the flag set, returning the compiled graph's node names. */
 async function compileOfficeNodes(flag: string | undefined): Promise<string[]> {
   vi.resetModules();
+  // Isolate the engineering-topology assertions from the revenue subgraph:
+  // with REVENUE_SUBGRAPH defaulting true, marketing/sales collapse into a
+  // single `revenue` node. Force it off so this suite tests engineering alone.
+  process.env["REVENUE_SUBGRAPH"] = "0";
   if (flag === undefined) delete process.env["ENGINEERING_SUBGRAPH"];
   else process.env["ENGINEERING_SUBGRAPH"] = flag;
   const { buildOffice } = await import("../../../src/agents/office.js");
@@ -29,8 +33,14 @@ async function compileOfficeNodes(flag: string | undefined): Promise<string[]> {
 }
 
 describe("P2 — engineering subgraph flag wiring", () => {
-  beforeEach(() => delete process.env["ENGINEERING_SUBGRAPH"]);
-  afterEach(() => delete process.env["ENGINEERING_SUBGRAPH"]);
+  beforeEach(() => {
+    delete process.env["ENGINEERING_SUBGRAPH"];
+    delete process.env["REVENUE_SUBGRAPH"];
+  });
+  afterEach(() => {
+    delete process.env["ENGINEERING_SUBGRAPH"];
+    delete process.env["REVENUE_SUBGRAPH"];
+  });
 
   it("default (flag unset): office compiles with a flat 'engineering' department node", async () => {
     const nodes = await compileOfficeNodes(undefined);

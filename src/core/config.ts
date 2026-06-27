@@ -206,13 +206,13 @@ function boolEnv(key: string, fallback = false): boolean {
  * this to "1" is the single, reversible lever that swaps the flat engineering
  * ReAct agent for the hierarchical CTO subgraph in office.ts.
  */
-export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", false);
+export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", true);
 
 /**
  * Promote marketing + sales into a `revenue` sub-supervisor (ADR-028 / ADR-025).
  * Default OFF — live MTProto nested-HITL verification required before production.
  */
-export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", false);
+export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", true);
 
 /**
  * Long-poll Telegram in this process. Off in development by default so local

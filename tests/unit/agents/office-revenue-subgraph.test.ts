@@ -31,16 +31,16 @@ describe("P3 — revenue subgraph flag wiring", () => {
     delete process.env["ENGINEERING_SUBGRAPH"];
   });
 
-  it("default: flat marketing + sales nodes (no revenue)", async () => {
-    const nodes = await compileOfficeNodes(undefined);
+  it("flag off (REVENUE_SUBGRAPH=0): flat marketing + sales nodes (no revenue)", async () => {
+    const nodes = await compileOfficeNodes("0");
     expect(nodes).toContain("marketing");
     expect(nodes).toContain("sales");
     expect(nodes).not.toContain("revenue");
     expect(nodes).toContain("admin");
   });
 
-  it("flag on: revenue replaces marketing + sales at top level", async () => {
-    const nodes = await compileOfficeNodes("1");
+  it("default (flag unset → prod default true): revenue replaces marketing + sales at top level", async () => {
+    const nodes = await compileOfficeNodes(undefined);
     expect(nodes).toContain("revenue");
     expect(nodes).not.toContain("marketing");
     expect(nodes).not.toContain("sales");

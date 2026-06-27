@@ -3,6 +3,7 @@
  * department (or answers small talk) and relays sub-agent output verbatim.
  */
 import { buildCapabilityManifest } from "../capabilities.js";
+import { REVENUE_SUBGRAPH_ENABLED } from "../../core/config.js";
 
 export const SUPERVISOR_PROMPT = `You are FounderOS — Pushkar's AI Chief of Staff, running Turicks AI agency.
 
@@ -118,7 +119,50 @@ Never invent results. If a department failed or approval was rejected, say so ho
  * never guesses dates from training data (e.g. "July 19, 2024").
  * The static SUPERVISOR_PROMPT export stays available for tests that check routing keywords.
  */
+/**
+ * When REVENUE_SUBGRAPH is active, the parent supervisor no longer sees
+ * `marketing`/`sales` as routable agents — it sees a single `revenue` agent
+ * that fans out internally (REVENUE_PROMPT). Reconcile the static routing table
+ * so the parent never emits a transfer_to_marketing/transfer_to_sales that no
+ * longer resolves. Pure string substitution — deterministic, no LLM.
+ */
+function patchForRevenueSubgraph(prompt: string): string {
+  return prompt
+    .replace("ROUTING TABLE — 8 departments:", "ROUTING TABLE — 7 departments:")
+    .replace(
+      "| marketing   | LinkedIn posts, content strategy, brand copy — LinkedIn is marketing ONLY   |\n| sales       | Cold outreach email, reaching out to an UNKNOWN company/person               |",
+      "| revenue     | LinkedIn/content/brand copy AND cold outreach — routes internally to marketing or sales |",
+    )
+    .replace(
+      `- "LinkedIn post / content / publish on LinkedIn / read comments / reply to comment / engage on post / connect note / connection request draft / outreach note" → marketing (marketing is the ONLY LinkedIn owner)`,
+      `- "LinkedIn post / content / publish on LinkedIn / read comments / reply to comment / engage on post / connect note / connection request draft / outreach note" → revenue`,
+    )
+    .replace(
+      `- "cold email / outreach to [unknown company]" → sales`,
+      `- "cold email / outreach to [unknown company]" → revenue`,
+    )
+    .replace(
+      `- "landing page / cinematic / website design / launch experience / showcase / proof drop" → marketing (copy) OR engineering (build/deploy) — copy first if ambiguous; multi-step: marketing then engineering`,
+      `- "landing page / cinematic / website design / launch experience / showcase / proof drop" → revenue (copy/content) OR engineering (build/deploy) — copy first if ambiguous; multi-step: revenue then engineering`,
+    )
+    .replace(
+      `- "Proof Drop outreach / cold email for [startup] about their launch site" → sales`,
+      `- "Proof Drop outreach / cold email for [startup] about their launch site" → revenue`,
+    )
+    .replace(
+      "- search_web: research, marketing, sales (read-only, no conflicts)",
+      "- search_web: research, revenue (read-only, no conflicts)",
+    )
+    .replace(
+      "- linkedin_post: marketing ONLY — never comms, never elsewhere",
+      "- linkedin_post: revenue ONLY (routed internally to marketing) — never comms, never elsewhere",
+    );
+}
+
 export function buildSupervisorPrompt(): string {
   const today = new Date().toISOString().split("T")[0]!;
-  return `TODAY: ${today} — always use this as the real current date. Never guess dates from training data.\n\n${SUPERVISOR_PROMPT}`;
+  const base = REVENUE_SUBGRAPH_ENABLED
+    ? patchForRevenueSubgraph(SUPERVISOR_PROMPT)
+    : SUPERVISOR_PROMPT;
+  return `TODAY: ${today} — always use this as the real current date. Never guess dates from training data.\n\n${base}`;
 }
