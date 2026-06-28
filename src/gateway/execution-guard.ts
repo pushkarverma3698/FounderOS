@@ -255,6 +255,19 @@ export const INTERNAL_KNOWLEDGE_RE =
 export const EXTERNAL_RESEARCH_RE =
   /\b(search (the )?web|google (it|for)|look (it )?up online|latest news|news about|competitors?|market research|on the (web|internet))\b/i;
 
+/**
+ * Imperative creative / outbound-action requests. These TELL the office to
+ * produce content or perform an operation (draft, write, send, build) — they are
+ * NOT factual questions about stored internal state, even when they name a
+ * company. Treating them as internal-knowledge questions made the memory guard
+ * derail the work into a lookup and then overwrite the result with the
+ * turics-brain refusal sentinel ("just chatting / refusing instead of doing").
+ * Anchored at the start (after optional pleasantries) so a question like
+ * "what does Turicks make?" is unaffected — only a LEADING action verb excludes.
+ */
+export const ACTION_REQUEST_RE =
+  /^\s*(?:please\s+|can you\s+|could you\s+|i need you to\s+|help me\s+)?(draft|write|compose|create|generate|design|build|make me|post|publish|send|email|schedule|tweet|pitch|reply|respond|outline|brainstorm)\b/i;
+
 export function hadAnyMemoryToolCall(
   messages: OfficeMessageLike[],
   toolsCalled?: readonly string[],
@@ -420,6 +433,8 @@ export function isInternalKnowledgeRequest(input: string): boolean {
   const text = input.trim();
   if (!text) return false;
   if (EXTERNAL_RESEARCH_RE.test(text)) return false;
+  // Creative / outbound-action tasks are not internal-facts questions (L3 fix).
+  if (ACTION_REQUEST_RE.test(text)) return false;
   return INTERNAL_KNOWLEDGE_RE.test(text) || INTERNAL_KNOWLEDGE_REQUEST_RE.test(text);
 }
 

@@ -304,6 +304,26 @@ describe("isInternalKnowledgeRequest", () => {
     expect(isInternalKnowledgeRequest("research Turicks competitors online")).toBe(false);
     expect(isInternalKnowledgeRequest("find the latest news about Naggar")).toBe(false);
   });
+
+  // L3 over-trigger fix: a creative/action task that merely NAMES a company is
+  // not an internal-facts QUESTION. Misclassifying these forced the memory guard
+  // to derail the work into a lookup and then replace the result with a refusal
+  // sentinel ("just chatting / refusing instead of being intelligent").
+  it("ignores creative / outbound action tasks that merely name a company", () => {
+    expect(isInternalKnowledgeRequest("Draft a LinkedIn post about Turicks' new cinematic-web service")).toBe(false);
+    expect(isInternalKnowledgeRequest("write a cold email pitching Turicks to a fintech CTO")).toBe(false);
+    expect(isInternalKnowledgeRequest("create a landing page headline for Naggar Retreat")).toBe(false);
+    expect(isInternalKnowledgeRequest("compose a tweet announcing Turicks")).toBe(false);
+    expect(isInternalKnowledgeRequest("send the Turicks intro deck to the Naggar contact")).toBe(false);
+    expect(isInternalKnowledgeRequest("generate three tagline options for Turicks")).toBe(false);
+  });
+
+  // Guard rails kept: genuine internal-facts questions still classify true even
+  // when phrased with a leading verb.
+  it("still detects genuine internal-facts questions", () => {
+    expect(isInternalKnowledgeRequest("what is our Turicks ICP?")).toBe(true);
+    expect(isInternalKnowledgeRequest("remind me what we decided about Naggar pricing")).toBe(true);
+  });
 });
 
 describe("detectUnbackedMemoryClaim", () => {
@@ -336,6 +356,13 @@ describe("detectUnbackedMemoryClaim", () => {
   it("ignores web/research prompts (those legitimately skip memory tools)", () => {
     const input = "research Turicks competitors online";
     const reply = "Top competitors include several boutique AI agencies.";
+    expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(false);
+  });
+
+  it("does NOT fire on a creative draft that names a company (L3 over-trigger)", () => {
+    const input = "Draft a LinkedIn post about Turicks' new cinematic-web service";
+    const reply =
+      "🚀 We just shipped cinematic web experiences at Turicks — buttery-smooth WebGL, story-driven scroll, sub-second loads. Here's how we think about motion as a product surface…";
     expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(false);
   });
 
