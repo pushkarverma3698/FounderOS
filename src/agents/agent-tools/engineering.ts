@@ -17,7 +17,7 @@ import { applyCinematicPresetTool } from "../../tools/cinematic-preset.js";
 import { deployStaticSiteTool } from "../../tools/deploy-static-site.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
-import { toolFailure, type ToolFailureStage } from "../tool-result.js";
+import { toolFailure, isStructuredToolFailure, type ToolFailureStage } from "../tool-result.js";
 import { hasBeenAudited, writeAuditEntry, publishDeptEventWithAudit } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
 import { sendStatusText } from "../../infra/telegram-send.js";
@@ -69,13 +69,98 @@ function githubFailure(action: string, error: string): string {
   return toolFailure(stage, `GitHub ${action} failed: ${error}${hint}`);
 }
 
+// ── Consecutive-failure cap (B5 — GitHub loop-wedge fix) ─────────────────────
+//
+// Problem: when github_read / github_write hit a 401 / auth error the ReAct
+// agent retries the tool indefinitely until GraphRecursionError ("🔁 stuck in
+// a loop"). The structured toolFailure envelope alone is not enough — the agent
+// treats any tool result as an invitation to try again.
+//
+// Fix: on the 2nd consecutive structured failure for the same tool within a
+// single turn, upgrade the result to a plain terminal message (no envelope
+// marker) that explicitly tells the agent to stop. The counter is injected
+// so the pure `capConsecutiveToolFailures` helper is fully unit-testable.
+
+/** Consecutive-failure counter for a single turn. Keyed by tool name. */
+export type ToolFailureCounter = {
+  get(toolName: string): number;
+  increment(toolName: string): void;
+  reset(toolName: string): void;
+};
+
+/** Factory — creates one counter instance per turn (or per test case). */
+export function makeToolFailureCounter(): ToolFailureCounter {
+  const counts = new Map<string, number>();
+  return {
+    get(toolName: string): number {
+      return counts.get(toolName) ?? 0;
+    },
+    increment(toolName: string): void {
+      counts.set(toolName, (counts.get(toolName) ?? 0) + 1);
+    },
+    reset(toolName: string): void {
+      counts.set(toolName, 0);
+    },
+  };
+}
+
+/**
+ * Cap consecutive structured tool failures within a turn (pure, deterministic).
+ *
+ * - Success result  → resets the counter, returns the result unchanged.
+ * - 1st failure     → increments counter to 1, returns the failure as-is
+ *                     (the ReAct agent is allowed one retry).
+ * - 2nd+ failure    → returns a TERMINAL plain-text message (no envelope
+ *                     marker) that names the real failing component (rule #22)
+ *                     and instructs the agent to stop retrying.
+ */
+export function capConsecutiveToolFailures(
+  counter: ToolFailureCounter,
+  toolName: string,
+  result: string,
+): string {
+  if (!isStructuredToolFailure(result)) {
+    // Success path — reset streak and pass through
+    counter.reset(toolName);
+    return result;
+  }
+
+  counter.increment(toolName);
+  const streak = counter.get(toolName);
+
+  if (streak >= 2) {
+    // Terminal: surface the real error to the founder; tell the agent to stop.
+    // We strip the structured marker so the gateway doesn't double-surface and
+    // the agent sees a plain instruction, not an envelope it might retry.
+    const body = result.replace(/\s*\[\[TOOL_FAILURE[^\]]*\]\]/g, "").trim();
+    return (
+      `GitHub auth failed — ${body}. ` +
+      `Do not retry this tool. Report to the founder: the GITHUB_TOKEN is likely expired or missing the required scope. ` +
+      `Stop here and surface this error directly.`
+    );
+  }
+
+  return result;
+}
+
+// Per-module shared counter — one instance for the lifetime of the module
+// (i.e. one per process restart, which is one "turn context").
+// Tests inject their own counter via the pure helper; production code uses this.
+const _sharedGithubCounter = makeToolFailureCounter();
+
 // ── Engineering: GitHub read (read-only, NO approval) ─────────────────────────
 
 export const githubRead = tool(
   async ({ action, owner, repo }) => {
     const res = await githubTool.execute({ action, ...(owner ? { owner } : {}), ...(repo ? { repo } : {}) });
-    if (!res.success) return githubFailure(`read (${action})`, res.error ?? "unknown error");
-    return JSON.stringify(res.data, null, 2);
+    if (!res.success) {
+      return capConsecutiveToolFailures(
+        _sharedGithubCounter,
+        "github_read",
+        githubFailure(`read (${action})`, res.error ?? "unknown error"),
+      );
+    }
+    return capConsecutiveToolFailures(_sharedGithubCounter, "github_read", JSON.stringify(res.data, null, 2));
   },
   {
     name: "github_read",
@@ -146,10 +231,20 @@ export const githubWrite = tool(
       ...(content ? { content } : {}),
     });
 
-    if (!res.success) return githubFailure(action, res.error ?? "unknown error");
+    if (!res.success) {
+      return capConsecutiveToolFailures(
+        _sharedGithubCounter,
+        "github_write",
+        githubFailure(action, res.error ?? "unknown error"),
+      );
+    }
     const auditGh = await writeAuditEntry({ action: `github_${action}`, idempotency_key: key, payload: { action, owner, repo, title }, tenant_id: TENANT });
     if (!auditGh.written) log.warn({ key, action }, "writeAuditEntry: conflict on github_write");
-    return `✅ GitHub ${action} done: ${JSON.stringify(res.data)}`;
+    return capConsecutiveToolFailures(
+      _sharedGithubCounter,
+      "github_write",
+      `✅ GitHub ${action} done: ${JSON.stringify(res.data)}`,
+    );
   },
   {
     name: "github_write",

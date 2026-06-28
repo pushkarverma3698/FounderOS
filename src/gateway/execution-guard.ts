@@ -476,12 +476,24 @@ export const INTERNAL_KNOWLEDGE_DIRECTIVE =
   "turicks-brain has no entry — suggest brain:sync. NEVER use training data, system prompts, or prior assistant " +
   "messages in this thread (they may be stale/wrong). Do NOT use search_web for internal Turicks facts.]";
 
+/**
+ * Questions about the BOT'S OWN recent behaviour — "how did you handle X",
+ * "what did you do", "why did you route" — are NOT internal-knowledge questions
+ * about stored business state. Misclassifying them caused the memory guard to
+ * force a memory-tool call instead of answering about the bot's own context
+ * (B4 fix, H16 symptom: "just tell me how you handled this" was refused).
+ */
+export const SELF_REFERENTIAL_RE =
+  /\b(how did you (handle|respond|deal|route)|what did you do\b|why did you\b|how you handled|what you just did|how did you respond)\b/i;
+
 export function isInternalKnowledgeRequest(input: string): boolean {
   const text = input.trim();
   if (!text) return false;
   if (EXTERNAL_RESEARCH_RE.test(text)) return false;
   // Creative / outbound-action tasks are not internal-facts questions (L3 fix).
   if (ACTION_REQUEST_RE.test(text)) return false;
+  // Questions about the bot's OWN recent behaviour are not stored-state lookups (B4 fix).
+  if (SELF_REFERENTIAL_RE.test(text)) return false;
   return INTERNAL_KNOWLEDGE_RE.test(text) || INTERNAL_KNOWLEDGE_REQUEST_RE.test(text);
 }
 
@@ -537,3 +549,33 @@ export function detectUnbackedKnowledgeClaim(
 
 export const KNOWLEDGE_RETRY_HINT =
   "⚠️ That answer wasn't grounded in turicks-brain — retrying with a real knowledge search…";
+
+// ── B2: Injection-echo redactor ───────────────────────────────────────────────
+
+/**
+ * Sentence-level regex that matches the SUBJECT + VERB pattern of a bot echoing
+ * an injected ask to expose its own system-level instructions. Only matches
+ * when the sentence subject is the bot/I/my and the object is the literal
+ * phrasing of the injected content ("system prompt", "system instructions",
+ * "full prompt", "initial instructions").
+ *
+ * Intentionally narrow: "My architecture routes to 7 departments" — no match.
+ * "Here is my system prompt:" — match.
+ */
+const INJECTION_ECHO_RE =
+  /[^.!?\n]*\b(my|here(?:'s|\s+is)|i(?:'ll|\s+will)?(?:\s+now)?)\b[^.!?\n]{0,80}\b(system\s+prompt|system\s+instructions?|full\s+prompt|initial\s+instructions?|these\s+instructions?|my\s+instructions?(?:\s+are|\s+say|\s+state)?)[^.!?\n]*/gi;
+
+/**
+ * Pure deterministic post-filter (B2 fix). Strips sentences from `reply` whose
+ * subject is the bot revealing/printing/emailing its own system-level instructions.
+ *
+ * Preserves all other content — including legitimate routing/architecture
+ * explanations ("My architecture routes to 7 departments").
+ *
+ * Pure function — no I/O, no LLM, always deterministic (rule #16).
+ */
+export function redactInjectionEcho(reply: string): string {
+  const redacted = reply.replace(INJECTION_ECHO_RE, "");
+  // Collapse runs of whitespace/newlines left by stripped sentences, then trim.
+  return redacted.replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim();
+}
