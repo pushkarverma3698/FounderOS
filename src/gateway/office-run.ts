@@ -48,6 +48,7 @@ import {
   extractProvidedLinkedInPost,
   isGithubWriteRequest,
   isInternalKnowledgeRequest,
+  redactInjectionEcho,
 } from "./execution-guard.js";
 import { tryInboxReadFastPath } from "./inbox-fast-path.js";
 import { tryGithubReadFastPath } from "./github-read-fast-path.js";
@@ -136,7 +137,7 @@ export function finalReply(res: { messages?: OfficeMessage[] }): string {
     const type = m._getType?.() ?? "";
     const text = typeof m.content === "string" ? m.content : "";
     if (type === "ai" && text.trim() && !(m.tool_calls && m.tool_calls.length > 0)) {
-      return stripXmlTags(text.trim());
+      return redactInjectionEcho(stripXmlTags(text.trim()));
     }
   }
   // Pass 2: fall back to last tool message so engineering/shell results surface
