@@ -10,6 +10,7 @@ import {
   detectUnbackedKnowledgeClaim,
   detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
+  detectUnbackedWebResearchClaim,
   detectLinkedInRefusalWithoutTool,
   extractProvidedLinkedInPost,
   extractShellCommand,
@@ -67,6 +68,43 @@ describe("detectUnbackedShellClaim", () => {
     const input = 'run this in terminal: echo "test"';
     const msgs = [aiMsg("", [{ name: "run_shell" }]), toolMsg("run_shell", "stdout:\ntest")];
     expect(detectUnbackedShellClaim(input, msgs, "stdout:\ntest")).toBe(false);
+  });
+});
+
+describe("detectUnbackedWebResearchClaim (HARD-2: refuses instead of search_web)", () => {
+  // The exact live-prod failure: "latest on X" → "no real-time access" with no search_web.
+  const userH03 = "Tell me the latest on Anthropic's MCP and recent news about it.";
+  const refusalH03 =
+    "I cannot provide the latest on Anthropic's MCP as I do not have access to real-time news or up-to-date information.";
+
+  it("fires when a fresh-info request is refused for 'no real-time access' and search_web was never called", () => {
+    expect(detectUnbackedWebResearchClaim(userH03, [aiMsg(refusalH03)], refusalH03)).toBe(true);
+  });
+
+  it("fires via the toolsCalled list too (context isolation hides dept tool calls)", () => {
+    // search_web NOT in the list → still ungrounded.
+    expect(detectUnbackedWebResearchClaim(userH03, [], refusalH03, ["read_context"])).toBe(true);
+  });
+
+  it("does NOT fire when search_web actually ran (genuine search)", () => {
+    const msgs = [aiMsg("", [{ name: "search_web" }]), toolMsg("search_web", "MCP results…")];
+    expect(detectUnbackedWebResearchClaim(userH03, msgs, refusalH03)).toBe(false);
+    expect(detectUnbackedWebResearchClaim(userH03, [], refusalH03, ["search_web"])).toBe(false);
+  });
+
+  it("does NOT fire on a normal helpful answer to a fresh-info request", () => {
+    const good = "Here are 3 recent MCP updates Anthropic shipped: …";
+    expect(detectUnbackedWebResearchClaim(userH03, [aiMsg(good)], good)).toBe(false);
+  });
+
+  it("does NOT fire when the request is not time-sensitive / external", () => {
+    const internal = "What is our Turicks ICP?";
+    const refusal = "I do not have access to real-time news.";
+    expect(detectUnbackedWebResearchClaim(internal, [], refusal)).toBe(false);
+  });
+
+  it("ignores empty input", () => {
+    expect(detectUnbackedWebResearchClaim("", [], "anything")).toBe(false);
   });
 });
 

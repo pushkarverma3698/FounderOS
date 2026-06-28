@@ -46,7 +46,7 @@ export interface StressResult {
   error?: string;
   validationError?: string;
   formatIssues: string[];
-  guardKind?: "shell" | "linkedin" | "inbox" | "github" | "memory" | "knowledge";
+  guardKind?: "shell" | "linkedin" | "inbox" | "github" | "web" | "memory" | "knowledge";
 }
 
 interface TrailMessage {

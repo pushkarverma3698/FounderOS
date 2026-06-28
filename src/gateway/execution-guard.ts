@@ -342,6 +342,53 @@ export const KNOWLEDGE_SEARCH_TOOLS = [
   "read_cv",
 ] as const;
 
+/** Web / real-time research tools (research department). */
+export const WEB_SEARCH_TOOLS = ["search_web"] as const;
+
+/**
+ * Request that needs FRESH / external info — time-sensitive ("latest", "recent",
+ * "today", "news") or explicitly online. When the founder asks this and the office
+ * REFUSES citing "no real-time access" WITHOUT calling search_web, that's the
+ * "refuses instead of using its tools" bug (HARD-2): the research department owns
+ * search_web, so the answer is to search, not to apologize.
+ */
+export const WEB_RESEARCH_REQUEST_RE =
+  /\b(latest|recent(ly)?|current(ly)?|newest|up[- ]?to[- ]?date|breaking|today|this week|news|what'?s new)\b/i;
+
+/** Reply that declines for lack of real-time / web access instead of searching. */
+export const WEB_REFUSAL_RE =
+  /\b(can'?t|cannot|can not|unable to|do(n'?t| not) have|no)\b[^.?!]{0,70}\b(access to\s+)?(real[- ]?time|live|up[- ]?to[- ]?date|latest|current|recent|online|internet|web)\b[^.?!]{0,55}\b(news|information|info|data|updates?|access|results?)\b/i;
+
+export function hadWebSearchTool(
+  messages: OfficeMessageLike[],
+  toolsCalled?: readonly string[],
+): boolean {
+  if (WEB_SEARCH_TOOLS.some((t) => hadToolCall(messages, t))) return true;
+  if (!toolsCalled?.length) return false;
+  return toolsCalled.some((name) =>
+    WEB_SEARCH_TOOLS.includes(name as (typeof WEB_SEARCH_TOOLS)[number]),
+  );
+}
+
+/**
+ * True when the founder asked for fresh/external info but the office REFUSED
+ * citing no real-time/web access without ever calling search_web. Deterministic —
+ * fires only on the conjunction (time-sensitive request AND realtime-refusal
+ * reply AND no web tool call), so a genuine search or a normal answer never trips it.
+ */
+export function detectUnbackedWebResearchClaim(
+  userInput: string,
+  messages: OfficeMessageLike[],
+  reply: string,
+  toolsCalled?: readonly string[],
+): boolean {
+  const text = userInput.trim();
+  if (!text) return false;
+  if (!WEB_RESEARCH_REQUEST_RE.test(text)) return false;
+  if (hadWebSearchTool(messages, toolsCalled)) return false; // genuinely searched
+  return WEB_REFUSAL_RE.test(reply);
+}
+
 function toolMessageText(m: OfficeMessageLike): string {
   return typeof m.content === "string" ? m.content : "";
 }

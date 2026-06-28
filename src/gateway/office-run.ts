@@ -44,6 +44,7 @@ import {
   detectUnbackedKnowledgeClaim,
   detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
+  detectUnbackedWebResearchClaim,
   extractProvidedLinkedInPost,
   isGithubWriteRequest,
   isInternalKnowledgeRequest,
@@ -580,19 +581,22 @@ export function needsExecutionGuardRetry(
   messages: OfficeMessage[],
   reply: string,
   toolsCalled?: readonly string[],
-): "shell" | "linkedin" | "inbox" | "github" | "memory" | "knowledge" | null {
+): "shell" | "linkedin" | "inbox" | "github" | "web" | "memory" | "knowledge" | null {
   if (detectUnbackedShellClaim(userText, messages, reply)) return "shell";
   if (detectLinkedInRefusalWithoutTool(userText, messages, reply)) return "linkedin";
   if (detectUnbackedInboxClaim(userText, messages, reply)) return "inbox";
   if (detectUnbackedGithubWriteClaim(userText, messages, reply)) return "github";
   if (detectUnbackedGithubReadClaim(userText, messages, reply)) return "github";
+  // Web research BEFORE memory/knowledge: a "latest news" refusal must retry with
+  // search_web, not be force-refused as an unbacked internal-knowledge claim.
+  if (detectUnbackedWebResearchClaim(userText, messages, reply, toolsCalled)) return "web";
   if (detectUnbackedMemoryClaim(userText, messages, reply, toolsCalled)) return "memory";
   if (detectUnbackedKnowledgeClaim(userText, messages, reply, toolsCalled)) return "knowledge";
   return null;
 }
 
 export function buildGuardRetryMessages(
-  kind: "shell" | "linkedin" | "inbox" | "github" | "memory" | "knowledge",
+  kind: "shell" | "linkedin" | "inbox" | "github" | "web" | "memory" | "knowledge",
   userText: string,
 ): BaseMessage[] {
   if (kind === "memory") {
@@ -643,6 +647,17 @@ export function buildGuardRetryMessages(
         "[RETRY DIRECTIVE: Your previous reply listed GitHub data without calling github_read. " +
           "Call github_read NOW (list_issues for open issues) and return the tool output verbatim." +
           (ownerRepo ? ` Use owner/repo ${ownerRepo[1]}.` : ""),
+      ),
+      new HumanMessage(userText),
+    ];
+  }
+  if (kind === "web") {
+    return [
+      new SystemMessage(
+        "[RETRY DIRECTIVE: Your previous reply refused a request for fresh/external information " +
+          "claiming you have no real-time or web access. You DO — the research department owns " +
+          "search_web. Call search_web NOW for each topic the founder asked about and answer from " +
+          "the results. Never say you lack internet/real-time access without first calling search_web.]",
       ),
       new HumanMessage(userText),
     ];
