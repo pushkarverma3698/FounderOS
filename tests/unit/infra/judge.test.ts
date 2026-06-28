@@ -7,11 +7,13 @@
  * failure returns "pass" because HITL is the final, human gate — the judge must
  * never silently block the founder's workflow on its own confusion.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   parseJudgeVerdict,
   judgeOutbound,
+  isJudgeEnabled,
   _resetJudgeCache,
+  _resetJudgeModel,
   type JudgeModel,
 } from "../../../src/infra/judge.js";
 
@@ -50,6 +52,32 @@ describe("parseJudgeVerdict", () => {
   it("FAILS OPEN to pass when verdict says revise but critique is missing", () => {
     // Without an actionable critique a 'revise' is useless — degrade to pass.
     expect(parseJudgeVerdict('{"verdict":"revise"}')).toEqual({ verdict: "pass" });
+  });
+});
+
+describe("isJudgeEnabled (default = free OpenRouter, not Anthropic)", () => {
+  const saved = {
+    or: process.env["OPENROUTER_API_KEY"],
+    anthropic: process.env["ANTHROPIC_API_KEY"],
+  };
+  beforeEach(() => _resetJudgeModel());
+  afterEach(() => {
+    if (saved.or === undefined) delete process.env["OPENROUTER_API_KEY"];
+    else process.env["OPENROUTER_API_KEY"] = saved.or;
+    if (saved.anthropic === undefined) delete process.env["ANTHROPIC_API_KEY"];
+    else process.env["ANTHROPIC_API_KEY"] = saved.anthropic;
+  });
+
+  it("is enabled by an OpenRouter key alone — no Anthropic key required", () => {
+    process.env["OPENROUTER_API_KEY"] = "sk-or-test";
+    delete process.env["ANTHROPIC_API_KEY"];
+    expect(isJudgeEnabled()).toBe(true);
+  });
+
+  it("is disabled (no-op pass) when the default provider's key is absent", () => {
+    delete process.env["OPENROUTER_API_KEY"];
+    delete process.env["ANTHROPIC_API_KEY"];
+    expect(isJudgeEnabled()).toBe(false);
   });
 });
 

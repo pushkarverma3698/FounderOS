@@ -255,6 +255,19 @@ export const INTERNAL_KNOWLEDGE_RE =
 export const EXTERNAL_RESEARCH_RE =
   /\b(search (the )?web|google (it|for)|look (it )?up online|latest news|news about|competitors?|market research|on the (web|internet))\b/i;
 
+/**
+ * Imperative creative / outbound-action requests. These TELL the office to
+ * produce content or perform an operation (draft, write, send, build) — they are
+ * NOT factual questions about stored internal state, even when they name a
+ * company. Treating them as internal-knowledge questions made the memory guard
+ * derail the work into a lookup and then overwrite the result with the
+ * turics-brain refusal sentinel ("just chatting / refusing instead of doing").
+ * Anchored at the start (after optional pleasantries) so a question like
+ * "what does Turicks make?" is unaffected — only a LEADING action verb excludes.
+ */
+export const ACTION_REQUEST_RE =
+  /^\s*(?:please\s+|can you\s+|could you\s+|i need you to\s+|help me\s+)?(draft|write|compose|create|generate|design|build|make me|post|publish|send|email|schedule|tweet|pitch|reply|respond|outline|brainstorm)\b/i;
+
 export function hadAnyMemoryToolCall(
   messages: OfficeMessageLike[],
   toolsCalled?: readonly string[],
@@ -328,6 +341,53 @@ export const KNOWLEDGE_SEARCH_TOOLS = [
   "search_personal_rag",
   "read_cv",
 ] as const;
+
+/** Web / real-time research tools (research department). */
+export const WEB_SEARCH_TOOLS = ["search_web"] as const;
+
+/**
+ * Request that needs FRESH / external info — time-sensitive ("latest", "recent",
+ * "today", "news") or explicitly online. When the founder asks this and the office
+ * REFUSES citing "no real-time access" WITHOUT calling search_web, that's the
+ * "refuses instead of using its tools" bug (HARD-2): the research department owns
+ * search_web, so the answer is to search, not to apologize.
+ */
+export const WEB_RESEARCH_REQUEST_RE =
+  /\b(latest|recent(ly)?|current(ly)?|newest|up[- ]?to[- ]?date|breaking|today|this week|news|what'?s new)\b/i;
+
+/** Reply that declines for lack of real-time / web access instead of searching. */
+export const WEB_REFUSAL_RE =
+  /\b(can'?t|cannot|can not|unable to|do(n'?t| not) have|no)\b[^.?!]{0,70}\b(access to\s+)?(real[- ]?time|live|up[- ]?to[- ]?date|latest|current|recent|online|internet|web)\b[^.?!]{0,55}\b(news|information|info|data|updates?|access|results?)\b/i;
+
+export function hadWebSearchTool(
+  messages: OfficeMessageLike[],
+  toolsCalled?: readonly string[],
+): boolean {
+  if (WEB_SEARCH_TOOLS.some((t) => hadToolCall(messages, t))) return true;
+  if (!toolsCalled?.length) return false;
+  return toolsCalled.some((name) =>
+    WEB_SEARCH_TOOLS.includes(name as (typeof WEB_SEARCH_TOOLS)[number]),
+  );
+}
+
+/**
+ * True when the founder asked for fresh/external info but the office REFUSED
+ * citing no real-time/web access without ever calling search_web. Deterministic —
+ * fires only on the conjunction (time-sensitive request AND realtime-refusal
+ * reply AND no web tool call), so a genuine search or a normal answer never trips it.
+ */
+export function detectUnbackedWebResearchClaim(
+  userInput: string,
+  messages: OfficeMessageLike[],
+  reply: string,
+  toolsCalled?: readonly string[],
+): boolean {
+  const text = userInput.trim();
+  if (!text) return false;
+  if (!WEB_RESEARCH_REQUEST_RE.test(text)) return false;
+  if (hadWebSearchTool(messages, toolsCalled)) return false; // genuinely searched
+  return WEB_REFUSAL_RE.test(reply);
+}
 
 function toolMessageText(m: OfficeMessageLike): string {
   return typeof m.content === "string" ? m.content : "";
@@ -420,6 +480,8 @@ export function isInternalKnowledgeRequest(input: string): boolean {
   const text = input.trim();
   if (!text) return false;
   if (EXTERNAL_RESEARCH_RE.test(text)) return false;
+  // Creative / outbound-action tasks are not internal-facts questions (L3 fix).
+  if (ACTION_REQUEST_RE.test(text)) return false;
   return INTERNAL_KNOWLEDGE_RE.test(text) || INTERNAL_KNOWLEDGE_REQUEST_RE.test(text);
 }
 

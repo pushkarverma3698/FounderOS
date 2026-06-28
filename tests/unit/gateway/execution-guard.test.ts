@@ -10,6 +10,7 @@ import {
   detectUnbackedKnowledgeClaim,
   detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
+  detectUnbackedWebResearchClaim,
   detectLinkedInRefusalWithoutTool,
   extractProvidedLinkedInPost,
   extractShellCommand,
@@ -67,6 +68,43 @@ describe("detectUnbackedShellClaim", () => {
     const input = 'run this in terminal: echo "test"';
     const msgs = [aiMsg("", [{ name: "run_shell" }]), toolMsg("run_shell", "stdout:\ntest")];
     expect(detectUnbackedShellClaim(input, msgs, "stdout:\ntest")).toBe(false);
+  });
+});
+
+describe("detectUnbackedWebResearchClaim (HARD-2: refuses instead of search_web)", () => {
+  // The exact live-prod failure: "latest on X" → "no real-time access" with no search_web.
+  const userH03 = "Tell me the latest on Anthropic's MCP and recent news about it.";
+  const refusalH03 =
+    "I cannot provide the latest on Anthropic's MCP as I do not have access to real-time news or up-to-date information.";
+
+  it("fires when a fresh-info request is refused for 'no real-time access' and search_web was never called", () => {
+    expect(detectUnbackedWebResearchClaim(userH03, [aiMsg(refusalH03)], refusalH03)).toBe(true);
+  });
+
+  it("fires via the toolsCalled list too (context isolation hides dept tool calls)", () => {
+    // search_web NOT in the list → still ungrounded.
+    expect(detectUnbackedWebResearchClaim(userH03, [], refusalH03, ["read_context"])).toBe(true);
+  });
+
+  it("does NOT fire when search_web actually ran (genuine search)", () => {
+    const msgs = [aiMsg("", [{ name: "search_web" }]), toolMsg("search_web", "MCP results…")];
+    expect(detectUnbackedWebResearchClaim(userH03, msgs, refusalH03)).toBe(false);
+    expect(detectUnbackedWebResearchClaim(userH03, [], refusalH03, ["search_web"])).toBe(false);
+  });
+
+  it("does NOT fire on a normal helpful answer to a fresh-info request", () => {
+    const good = "Here are 3 recent MCP updates Anthropic shipped: …";
+    expect(detectUnbackedWebResearchClaim(userH03, [aiMsg(good)], good)).toBe(false);
+  });
+
+  it("does NOT fire when the request is not time-sensitive / external", () => {
+    const internal = "What is our Turicks ICP?";
+    const refusal = "I do not have access to real-time news.";
+    expect(detectUnbackedWebResearchClaim(internal, [], refusal)).toBe(false);
+  });
+
+  it("ignores empty input", () => {
+    expect(detectUnbackedWebResearchClaim("", [], "anything")).toBe(false);
   });
 });
 
@@ -304,6 +342,26 @@ describe("isInternalKnowledgeRequest", () => {
     expect(isInternalKnowledgeRequest("research Turicks competitors online")).toBe(false);
     expect(isInternalKnowledgeRequest("find the latest news about Naggar")).toBe(false);
   });
+
+  // L3 over-trigger fix: a creative/action task that merely NAMES a company is
+  // not an internal-facts QUESTION. Misclassifying these forced the memory guard
+  // to derail the work into a lookup and then replace the result with a refusal
+  // sentinel ("just chatting / refusing instead of being intelligent").
+  it("ignores creative / outbound action tasks that merely name a company", () => {
+    expect(isInternalKnowledgeRequest("Draft a LinkedIn post about Turicks' new cinematic-web service")).toBe(false);
+    expect(isInternalKnowledgeRequest("write a cold email pitching Turicks to a fintech CTO")).toBe(false);
+    expect(isInternalKnowledgeRequest("create a landing page headline for Naggar Retreat")).toBe(false);
+    expect(isInternalKnowledgeRequest("compose a tweet announcing Turicks")).toBe(false);
+    expect(isInternalKnowledgeRequest("send the Turicks intro deck to the Naggar contact")).toBe(false);
+    expect(isInternalKnowledgeRequest("generate three tagline options for Turicks")).toBe(false);
+  });
+
+  // Guard rails kept: genuine internal-facts questions still classify true even
+  // when phrased with a leading verb.
+  it("still detects genuine internal-facts questions", () => {
+    expect(isInternalKnowledgeRequest("what is our Turicks ICP?")).toBe(true);
+    expect(isInternalKnowledgeRequest("remind me what we decided about Naggar pricing")).toBe(true);
+  });
 });
 
 describe("detectUnbackedMemoryClaim", () => {
@@ -336,6 +394,13 @@ describe("detectUnbackedMemoryClaim", () => {
   it("ignores web/research prompts (those legitimately skip memory tools)", () => {
     const input = "research Turicks competitors online";
     const reply = "Top competitors include several boutique AI agencies.";
+    expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(false);
+  });
+
+  it("does NOT fire on a creative draft that names a company (L3 over-trigger)", () => {
+    const input = "Draft a LinkedIn post about Turicks' new cinematic-web service";
+    const reply =
+      "🚀 We just shipped cinematic web experiences at Turicks — buttery-smooth WebGL, story-driven scroll, sub-second loads. Here's how we think about motion as a product surface…";
     expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(false);
   });
 

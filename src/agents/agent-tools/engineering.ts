@@ -17,7 +17,7 @@ import { applyCinematicPresetTool } from "../../tools/cinematic-preset.js";
 import { deployStaticSiteTool } from "../../tools/deploy-static-site.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
-import { toolFailure } from "../tool-result.js";
+import { toolFailure, type ToolFailureStage } from "../tool-result.js";
 import { hasBeenAudited, writeAuditEntry, publishDeptEventWithAudit } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
 import { sendStatusText } from "../../infra/telegram-send.js";
@@ -25,12 +25,56 @@ import { prepareSignal } from "./signals.js";
 
 const log = childLogger({ module: "agent-tools:engineering" });
 
+/**
+ * Classify a raw GitHub/Octokit error message into the REAL failing component
+ * (rule #22) so the gateway surfaces it loudly and points at its own fix.
+ * The launch-day P1/P2 bug: a 401 "Bad credentials" (expired GITHUB_TOKEN)
+ * reached the ReAct loop as a plain string and was swallowed → silent NO-REPLY.
+ * Pure + unit-tested; never throws.
+ */
+export function classifyGithubError(message: string): ToolFailureStage {
+  const m = message.toLowerCase();
+  if (
+    m.includes("bad credentials") ||
+    m.includes("401") ||
+    m.includes("403") ||
+    m.includes("forbidden") ||
+    m.includes("not accessible by personal access token") ||
+    m.includes("requires authentication") ||
+    m.includes("token")
+  ) {
+    return "auth";
+  }
+  if (
+    m.includes("enotfound") ||
+    m.includes("etimedout") ||
+    m.includes("econnrefused") ||
+    m.includes("econnreset") ||
+    m.includes("network")
+  ) {
+    return "network";
+  }
+  return "external_api";
+}
+
+/** Wrap a failed GitHub ToolResult into a stage-tagged, fail-loud envelope. */
+function githubFailure(action: string, error: string): string {
+  const stage = classifyGithubError(error);
+  const hint =
+    stage === "auth"
+      ? " — rotate GITHUB_TOKEN (expired or missing scope)"
+      : stage === "network"
+        ? " — GitHub unreachable, retry shortly"
+        : "";
+  return toolFailure(stage, `GitHub ${action} failed: ${error}${hint}`);
+}
+
 // ── Engineering: GitHub read (read-only, NO approval) ─────────────────────────
 
 export const githubRead = tool(
   async ({ action, owner, repo }) => {
     const res = await githubTool.execute({ action, ...(owner ? { owner } : {}), ...(repo ? { repo } : {}) });
-    if (!res.success) return `GitHub read failed: ${res.error}`;
+    if (!res.success) return githubFailure(`read (${action})`, res.error ?? "unknown error");
     return JSON.stringify(res.data, null, 2);
   },
   {
@@ -102,7 +146,7 @@ export const githubWrite = tool(
       ...(content ? { content } : {}),
     });
 
-    if (!res.success) return `GitHub ${action} failed: ${res.error}`;
+    if (!res.success) return githubFailure(action, res.error ?? "unknown error");
     const auditGh = await writeAuditEntry({ action: `github_${action}`, idempotency_key: key, payload: { action, owner, repo, title }, tenant_id: TENANT });
     if (!auditGh.written) log.warn({ key, action }, "writeAuditEntry: conflict on github_write");
     return `✅ GitHub ${action} done: ${JSON.stringify(res.data)}`;

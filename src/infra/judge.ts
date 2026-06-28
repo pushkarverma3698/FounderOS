@@ -1,10 +1,12 @@
 /**
- * FounderOS — Claude-as-judge (Phase 3)
- * =====================================
+ * FounderOS — independent critic / judge (Phase 3)
+ * ================================================
  * Generator≠critic (CLAUDE rule #6). The drafting agents run on Gemini; this
- * judge runs on a Claude-family model, so the critic cannot rubber-stamp its
- * own generation (sycophancy guard). It is **gate 2** for outbound copy, after
- * the deterministic `brand-validator` (gate 1) passes.
+ * judge runs on a DIFFERENT model family (default: a FREE OpenRouter Llama-70b,
+ * configurable via JUDGE_MODEL — Anthropic still supported), so the critic
+ * cannot rubber-stamp its own generation (sycophancy guard) and costs $0 per
+ * draft. It is **gate 2** for outbound copy, after the deterministic
+ * `brand-validator` (gate 1) passes.
  *
  * Fail-open by design: ANY failure (no API key, model error, unparseable
  * output, or a 'revise' with no actionable critique) returns `pass`. HITL is the
@@ -16,8 +18,13 @@
  */
 
 import { ChatAnthropic } from "@langchain/anthropic";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { ChatOpenAI } from "@langchain/openai";
 import type { Channel } from "./brand-validator.js";
 import { childLogger } from "./logger.js";
+
+/** Judge providers we support. Kept local so infra/ doesn't depend on agents/. */
+type JudgeProvider = "anthropic" | "openrouter" | "openai" | "google-genai";
 
 const log = childLogger({ module: "judge" });
 
@@ -28,22 +35,77 @@ export interface JudgeModel {
   invoke(messages: unknown): Promise<{ content: unknown }>;
 }
 
-/** Claude model id for the critic. Override with JUDGE_MODEL. Cheap + fast is fine. */
-const JUDGE_MODEL = process.env["JUDGE_MODEL"] ?? "claude-haiku-4-5";
+/**
+ * Critic model id. Override with JUDGE_MODEL. Default = a FREE OpenRouter model
+ * from a DIFFERENT family than the Gemini drafter (rule #6 anti-sycophancy) so
+ * the critic can't rubber-stamp its own generation — and costs $0 (no paid
+ * Anthropic call on every outbound draft). Llama-3.3-70b follows the compact-JSON
+ * instruction reliably; deepseek-r1:free also works but is chattier.
+ * Accepts a provider-prefixed id (openrouter:/anthropic:/openai:/google-genai:);
+ * a bare id is treated as OpenRouter for free-tier convenience.
+ */
+const JUDGE_MODEL =
+  process.env["JUDGE_MODEL"]?.trim() || "openrouter:meta-llama/llama-3.3-70b-instruct:free";
 /** Memoize a verdict for this long so the interrupt() re-execution is a cache hit. */
 const JUDGE_CACHE_TTL_MS = 5 * 60_000;
 
-/** The judge only runs if a Claude key is configured (otherwise gate 2 is a no-op pass). */
-export function isJudgeEnabled(): boolean {
-  return Boolean(process.env["ANTHROPIC_API_KEY"]);
+/** Resolve the judge model id, defaulting a bare id to the OpenRouter free tier. */
+function resolveJudgeModelId(): { provider: JudgeProvider; model: string } {
+  const raw = JUDGE_MODEL.includes(":") ? JUDGE_MODEL : `openrouter:${JUDGE_MODEL}`;
+  const sep = raw.indexOf(":");
+  const provider = raw.slice(0, sep) as JudgeProvider;
+  const model = raw.slice(sep + 1).trim();
+  const valid: JudgeProvider[] = ["anthropic", "openrouter", "openai", "google-genai"];
+  if (!valid.includes(provider) || !model) {
+    // Unrecognized override → safe default (free OpenRouter Llama).
+    return { provider: "openrouter", model: "meta-llama/llama-3.3-70b-instruct:free" };
+  }
+  return { provider, model };
 }
 
-let _model: ChatAnthropic | undefined;
-function getJudgeModel(): ChatAnthropic {
+/** True if the configured judge provider has its API key set (else gate 2 = no-op pass). */
+export function isJudgeEnabled(): boolean {
+  const { provider } = resolveJudgeModelId();
+  switch (provider) {
+    case "anthropic":
+      return Boolean(process.env["ANTHROPIC_API_KEY"]);
+    case "openrouter":
+      return Boolean(process.env["OPENROUTER_API_KEY"]);
+    case "openai":
+      return Boolean(process.env["OPENAI_API_KEY"]);
+    case "google-genai":
+      return Boolean(process.env["GOOGLE_GENERATIVE_AI_API_KEY"]);
+    default:
+      return false;
+  }
+}
+
+let _model: BaseChatModel | undefined;
+function getJudgeModel(): BaseChatModel {
   if (!_model) {
-    _model = new ChatAnthropic({ model: JUDGE_MODEL, temperature: 0, maxTokens: 512 });
+    const { provider, model } = resolveJudgeModelId();
+    if (provider === "anthropic") {
+      _model = new ChatAnthropic({ model, temperature: 0, maxTokens: 512 });
+    } else if (provider === "openrouter") {
+      _model = new ChatOpenAI({
+        model,
+        temperature: 0,
+        maxTokens: 512,
+        maxRetries: 2,
+        apiKey: process.env["OPENROUTER_API_KEY"] || "missing-openrouter-key",
+        configuration: { baseURL: "https://openrouter.ai/api/v1" },
+      });
+    } else {
+      // openai / google-genai judges are uncommon; route via the standard OpenAI client.
+      _model = new ChatOpenAI({ model, temperature: 0, maxTokens: 512, maxRetries: 2 });
+    }
   }
   return _model;
+}
+
+/** Test seam: drop the memoized model so a JUDGE_MODEL change is picked up. */
+export function _resetJudgeModel(): void {
+  _model = undefined;
 }
 
 // ── Prompt ─────────────────────────────────────────────────────────────────────

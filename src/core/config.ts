@@ -238,6 +238,15 @@ export const MCP_BRIDGE_MANIFEST = env.MCP_BRIDGE_MANIFEST;
 export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 40);
 
 /**
+ * Hard ceiling on a single office turn (ms). A hung model/tool call otherwise
+ * leaves the founder with the typing indicator forever and NO reply — the worst
+ * silent-failure class. On expiry the gateway aborts loud, clears the thread, and
+ * tells the founder. Generous default (3 min) so legitimate multi-step / claude_code
+ * runs finish; override with OFFICE_TURN_TIMEOUT_MS. Set 0 to disable (not advised).
+ */
+export const OFFICE_TURN_TIMEOUT_MS = intEnv("OFFICE_TURN_TIMEOUT_MS", 180_000);
+
+/**
  * Daily outbound send quotas (G4 gap — now enforced via action_log count).
  * Postgres-backed: survives restarts, accurate under concurrent sends.
  * Override via env: DAILY_EMAIL_LIMIT / DAILY_LINKEDIN_LIMIT.
