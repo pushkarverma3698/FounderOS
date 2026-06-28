@@ -22,7 +22,8 @@
 import { type Context } from "grammy";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { RemoveMessage, SystemMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
-import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD } from "../core/config.js";
+import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS } from "../core/config.js";
+import { withTurnTimeout, TurnTimeoutError } from "./turn-timeout.js";
 import { computeHistoryTrim } from "../infra/history-window.js";
 import { logger } from "../infra/logger.js";
 import { getOffice, getPendingApproval } from "../agents/office.js";
@@ -837,9 +838,10 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
     };
 
-    const res = (await office.invoke(
-      { messages: invokeMessages },
-      invokeConfig,
+    const res = (await withTurnTimeout(
+      office.invoke({ messages: invokeMessages }, invokeConfig),
+      OFFICE_TURN_TIMEOUT_MS,
+      "office.invoke",
     )) as { messages?: OfficeMessage[] };
     stopTyping();
 
@@ -871,14 +873,18 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
         values?: { messages?: OfficeMessage[] };
       } | null;
       const retryBaseLen = (retryBefore?.values?.messages ?? []).length;
-      const retryRes = (await office.invoke(
-        { messages: retryMessages },
-        {
-          ...invokeConfig,
-          configurable: {
-            ...invokeConfig.configurable,
+      const retryRes = (await withTurnTimeout(
+        office.invoke(
+          { messages: retryMessages },
+          {
+            ...invokeConfig,
+            configurable: {
+              ...invokeConfig.configurable,
+            },
           },
-        },
+        ),
+        OFFICE_TURN_TIMEOUT_MS,
+        "guard-retry",
       )) as { messages?: OfficeMessage[] };
       toolsCalled = [...new Set([...toolsCalled, ...toolCollector.tools])];
       approval = await getPendingApproval(office, config);
@@ -957,6 +963,16 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       await session.onSystemNotice(
         `🔁 <b>I got stuck in a loop on that one</b> and stopped to avoid runaway cost.\n` +
           `I've cleared that task — just send your next message normally.`,
+      );
+      return;
+    }
+    if (err instanceof TurnTimeoutError) {
+      // The worst silent-failure class: a hung invoke. Abort LOUD, never hang.
+      log.error({ chatId, ms: err.ms, label: err.label }, "Run stopped: turn timeout (hung invoke)");
+      await clearThreadAfterAbort(chatId);
+      await session.onSystemNotice(
+        `⏱️ <b>That took too long and I stopped it</b> (over ${Math.round(err.ms / 1000)}s).\n` +
+          `Nothing was sent. I've cleared the task — try again, or break it into smaller steps.`,
       );
       return;
     }
@@ -1107,13 +1123,17 @@ async function resumeOfficeSessionLocked(
       (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped on resume — fail-open"),
     );
 
-    const res = (await office.invoke(
-      new Command({ resume: decision }),
-      {
-        ...config,
-        callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
-        metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
-      },
+    const res = (await withTurnTimeout(
+      office.invoke(
+        new Command({ resume: decision }),
+        {
+          ...config,
+          callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
+          metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
+        },
+      ),
+      OFFICE_TURN_TIMEOUT_MS,
+      "office.resume",
     )) as { messages?: OfficeMessage[] };
 
     const next = await getPendingApproval(office, config);
@@ -1156,6 +1176,15 @@ async function resumeOfficeSessionLocked(
       log.warn({ chatId }, "Resume stopped: recursion limit reached");
       await clearThreadAfterAbort(chatId);
       await session.onSystemNotice(`🔁 <b>That got stuck in a loop</b> and I stopped it. I've cleared that task — send your next message normally.`);
+      return;
+    }
+    if (err instanceof TurnTimeoutError) {
+      log.error({ chatId, ms: err.ms, label: err.label }, "Resume stopped: turn timeout (hung invoke)");
+      await clearThreadAfterAbort(chatId);
+      await session.onSystemNotice(
+        `⏱️ <b>That took too long and I stopped it</b> (over ${Math.round(err.ms / 1000)}s).\n` +
+          `Nothing was sent. I've cleared the task — try again.`,
+      );
       return;
     }
     const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
