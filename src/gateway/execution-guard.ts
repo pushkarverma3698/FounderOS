@@ -353,11 +353,21 @@ export const WEB_SEARCH_TOOLS = ["search_web"] as const;
  * search_web, so the answer is to search, not to apologize.
  */
 export const WEB_RESEARCH_REQUEST_RE =
-  /\b(latest|recent(ly)?|current(ly)?|newest|up[- ]?to[- ]?date|breaking|today|this week|news|what'?s new)\b/i;
+  /\b(latest|recent(ly)?|current(ly)?|newest|up[- ]?to[- ]?date|breaking|today|this week|news|(any(thing)?|what'?s)\s+new|any news|update[ds]?\s+(on|about))\b/i;
 
 /** Reply that declines for lack of real-time / web access instead of searching. */
 export const WEB_REFUSAL_RE =
   /\b(can'?t|cannot|can not|unable to|do(n'?t| not) have|no)\b[^.?!]{0,70}\b(access to\s+)?(real[- ]?time|live|up[- ]?to[- ]?date|latest|current|recent|online|internet|web)\b[^.?!]{0,55}\b(news|information|info|data|updates?|access|results?)\b/i;
+
+/**
+ * A different refusal shape (T02 live 2026-06-29): instead of citing "no real-time
+ * access", the supervisor NARRATES the tool/handoff machinery — "I can only transfer
+ * to the research department", "not able to call that tool directly", "I need to use
+ * the search_web tool" — and stops there instead of actually searching. A genuine
+ * answer never talks about transferring to a department or being unable to call a tool.
+ */
+export const WEB_META_REFUSAL_RE =
+  /\b(can only transfer|transfer to (the )?research|(not|un)able to call|cannot (call|use|access|fulf[il]+)|need to (use|call) (the )?search_web)\b/i;
 
 export function hadWebSearchTool(
   messages: OfficeMessageLike[],
@@ -386,7 +396,7 @@ export function detectUnbackedWebResearchClaim(
   if (!text) return false;
   if (!WEB_RESEARCH_REQUEST_RE.test(text)) return false;
   if (hadWebSearchTool(messages, toolsCalled)) return false; // genuinely searched
-  return WEB_REFUSAL_RE.test(reply);
+  return WEB_REFUSAL_RE.test(reply) || WEB_META_REFUSAL_RE.test(reply);
 }
 
 function toolMessageText(m: OfficeMessageLike): string {

@@ -212,14 +212,23 @@ function boolEnv(key: string, fallback = false): boolean {
  * live-verified over real Telegram (hierarchy plan P2 gate, rule #19.6). Flipping
  * this to "1" is the single, reversible lever that swaps the flat engineering
  * ReAct agent for the hierarchical CTO subgraph in office.ts.
+ *
+ * 2026-06-29: default RESTORED to false. The default had drifted to `true`, so
+ * production was silently running the UNVERIFIED CTO subgraph — which ping-pongs
+ * `engineering ↔ coder` (transfer_to_coder) into GraphRecursionError on a trivial
+ * read like "list my repos" (T04 live loop). The flat ReAct engineering agent is
+ * the production-stable path; the subgraph stays opt-in until its nested-HITL loop
+ * is live-verified (rule #19.6).
  */
-export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", true);
+export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", false);
 
 /**
  * Promote marketing + sales into a `revenue` sub-supervisor (ADR-028 / ADR-025).
  * Default OFF — live MTProto nested-HITL verification required before production.
+ * 2026-06-29: default RESTORED to false (same drift-to-true bug as the engineering
+ * subgraph above; flat marketing+sales is the production-stable design).
  */
-export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", true);
+export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", false);
 
 /**
  * Add the `creative` nested sub-supervisor (art_director/copywriter/brand_designer)

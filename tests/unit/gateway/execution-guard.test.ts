@@ -109,6 +109,35 @@ describe("detectUnbackedWebResearchClaim (HARD-2: refuses instead of search_web)
   });
 });
 
+describe("detectUnbackedWebResearchClaim — T02 live regression (meta-refusal)", () => {
+  // Exact live-prod failure 2026-06-29: realistic phrasing "anything new w/ langgraph"
+  // and a NEW refusal shape — the supervisor narrates the tool/handoff machinery
+  // ("I can only transfer to the research department") instead of just searching.
+  const userT02 = "anything new w/ langgraph? saw ppl talking on twitter idk";
+  const metaRefusal =
+    "I'm sorry, I cannot fulfill that request. I need to use the search_web tool to " +
+    "find recent information about LangGraph, but I am not able to call that tool " +
+    "directly. I can only transfer to the research department, which can then use search_web.";
+
+  it("matches the time-sensitive request phrasing 'anything new'", () => {
+    expect(detectUnbackedWebResearchClaim(userT02, [aiMsg(metaRefusal)], metaRefusal)).toBe(true);
+  });
+
+  it("fires on a meta-refusal that narrates the tool/handoff instead of searching", () => {
+    const req = "what's the latest on LangGraph?";
+    expect(detectUnbackedWebResearchClaim(req, [aiMsg(metaRefusal)], metaRefusal)).toBe(true);
+  });
+
+  it("does NOT fire when the meta-language appears but search_web actually ran", () => {
+    expect(detectUnbackedWebResearchClaim(userT02, [], metaRefusal, ["search_web"])).toBe(false);
+  });
+
+  it("does NOT fire on a real answer to 'anything new'", () => {
+    const good = "LangGraph just shipped v1 with createAgent middleware and better streaming.";
+    expect(detectUnbackedWebResearchClaim(userT02, [aiMsg(good)], good)).toBe(false);
+  });
+});
+
 describe("detectUnbackedKnowledgeClaim", () => {
   it("flags confident reply after empty search_knowledge result (prod ICP class)", () => {
     const input = "What is Turicks ICP?";
