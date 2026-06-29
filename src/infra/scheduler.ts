@@ -38,8 +38,20 @@ import {
   checkDailyBudgetGate,
 } from "../infra/daily-budget.js";
 import { getBudgetAlertsState, recordBudgetAlertSent } from "../infra/daily-budget-alerts.js";
+import { sweepStaleCheckpoints } from "../infra/checkpointer.js";
 
 const log = childLogger({ module: "scheduler" });
+
+/**
+ * Checkpoint retention window (days). Threads idle longer than this are purged
+ * by the daily sweep. Override with CHECKPOINT_TTL_DAYS; default 30. Pure parse
+ * so a malformed env value falls back rather than disabling the sweep.
+ */
+export function getCheckpointTtlDays(): number {
+  const raw = process.env["CHECKPOINT_TTL_DAYS"];
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 30;
+}
 
 // Memoised office for scheduler use — compiled once, reused across Monday fires.
 // A new MemorySaver is fine here (scheduler runs are one-shot, not resumed).
@@ -476,6 +488,21 @@ export async function runBrainSync(): Promise<void> {
   });
 }
 
+/**
+ * Daily — purge checkpoints for threads idle past the TTL window (zero LLM).
+ * Bounds unbounded growth of agents.checkpoints (storage + query-latency tax).
+ * Non-fatal: a missing table or DB hiccup is logged, never crashes the cron loop.
+ */
+export async function runCheckpointSweep(): Promise<void> {
+  const days = getCheckpointTtlDays();
+  const { threads, rows } = await sweepStaleCheckpoints(days);
+  if (threads > 0) {
+    log.info({ threads, rows, days }, "Checkpoint TTL sweep purged stale threads");
+  } else {
+    log.debug({ days }, "Checkpoint TTL sweep — no stale threads");
+  }
+}
+
 /** Hourly check — alert at 80% and 100% daily budget (zero LLM, deduped per day). */
 async function sendDailyBudgetAlertIfNeeded(): Promise<void> {
   const spent = await getTodayCostUsd(TENANT);
@@ -642,6 +669,14 @@ export function startScheduler(): void {
     });
   });
 
+  // Daily 3:30am — checkpoint TTL sweep (bounds unbounded checkpoint table growth).
+  // Off-peak, after brain sync; non-fatal on failure.
+  cron.schedule("30 3 * * *", () => {
+    runCheckpointSweep().catch((err) => {
+      log.error({ err: (err as Error).message }, "Checkpoint TTL sweep cron error");
+    });
+  });
+
   // Mon/Wed/Fri 9:10am — social cadence: research trend → marketing drafts → HITL card.
   // 9:10am (10 min after stale-approval check) to avoid cron pile-up.
   cron.schedule("10 9 * * 1,3,5", () => {
@@ -659,5 +694,5 @@ export function startScheduler(): void {
     });
   });
 
-  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), Proof Drop cadence (Wed 9:05am), stale approval check (daily 9am), social cadence (Mon/Wed/Fri 9:10am), comment sweep (every 6h), dept-signal sweep + budget alerts (hourly), auto brain sync (daily 2am)");
+  log.info("Scheduler started — Monday brief (Mon 8am) + outbound nudge (Mon 8:05am), Proof Drop cadence (Wed 9:05am), stale approval check (daily 9am), social cadence (Mon/Wed/Fri 9:10am), comment sweep (every 6h), dept-signal sweep + budget alerts (hourly), auto brain sync (daily 2am), checkpoint TTL sweep (daily 3:30am)");
 }
