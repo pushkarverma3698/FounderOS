@@ -19,21 +19,27 @@
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getOffice, getPendingApproval } from "../src/agents/office.js";
-import { GOLDEN_TASKS } from "../src/eval/golden-tasks.js";
+import { GOLDEN_TASKS, CREATIVE_GOLDEN_TASKS } from "../src/eval/golden-tasks.js";
+import { CREATIVE_SUBGRAPH_ENABLED } from "../src/core/config.js";
 import { runEval } from "../src/eval/runner.js";
 import { renderReport } from "../src/eval/report.js";
 import { makeOfficeInvoker } from "../src/eval/office-invoker.js";
 import { closeDatabaseConnections } from "../src/db/client.js";
 
 async function main(): Promise<void> {
-  console.log(`\n🧪 FounderOS eval — ${GOLDEN_TASKS.length} golden tasks\n`);
+  // Creative tasks only run when the creative dept is actually wired in, else the
+  // route can never resolve and the cases would falsely fail.
+  const tasks = CREATIVE_SUBGRAPH_ENABLED
+    ? [...GOLDEN_TASKS, ...CREATIVE_GOLDEN_TASKS]
+    : GOLDEN_TASKS;
+  console.log(`\n🧪 FounderOS eval — ${tasks.length} golden tasks${CREATIVE_SUBGRAPH_ENABLED ? " (incl. creative)" : ""}\n`);
 
   const office = await getOffice();
   // getPendingApproval has a compatible (office, config) signature.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const invoke = makeOfficeInvoker(office as any, getPendingApproval as any);
 
-  const report = await runEval(GOLDEN_TASKS, invoke, { taskDelayMs: 1500 });
+  const report = await runEval(tasks, invoke, { taskDelayMs: 1500 });
   const md = renderReport(report);
 
   const outPath = resolve(process.cwd(), "EVAL.md");

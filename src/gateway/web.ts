@@ -30,6 +30,8 @@ import { childLogger } from "../infra/logger.js";
 import { checkFfmpeg, audioToWav } from "../infra/media-convert.js";
 import { transcribeAudio } from "../tools/transcription.js";
 import { synthesizeSpeech } from "../tools/tts.js";
+import { uploadFile, generatePresignedUrl, deleteFile } from "../infra/storage/s3-client.js";
+import { saveAsset, getAsset, deleteAssetRecord } from "../infra/storage/asset-repo.js";
 
 const log = childLogger({ module: "web-gateway" });
 
@@ -242,6 +244,83 @@ export function createWebApp(): Hono {
       missionId,
       dashboard: row ? formatMisoDashboard(missionToView(row)) : null,
     });
+  });
+
+  // ── Asset storage endpoints ────────────────────────────────────────────────
+
+  app.post("/api/v1/assets/upload", async (c) => {
+    const formData = await c.req.formData().catch(() => null);
+    if (!formData) return c.json({ error: "multipart_required" }, 400);
+
+    const file = formData.get("file") as File | null;
+    const runId = (formData.get("run_id") as string | null)?.trim();
+    const assetType = (formData.get("asset_type") as string | null)?.trim() ?? "input";
+
+    if (!file) return c.json({ error: "file_required" }, 400);
+    if (!runId) return c.json({ error: "run_id_required" }, 400);
+
+    const fileBytes = Buffer.from(await file.arrayBuffer());
+    let s3Key: string;
+    try {
+      s3Key = await uploadFile(fileBytes, file.name, runId);
+    } catch (err) {
+      log.error({ err: (err as Error).message }, "Asset upload S3 error");
+      return c.json({ error: "upload_failed", detail: (err as Error).message }, 502);
+    }
+
+    let assetId: string;
+    try {
+      assetId = await saveAsset({
+        run_id: runId,
+        s3_key: s3Key,
+        original_filename: file.name,
+        asset_type: assetType,
+        mime_type: file.type || null,
+        agent_id: null,
+        expires_at: null,
+      });
+    } catch (err) {
+      log.error({ s3Key, err: (err as Error).message }, "Asset DB record failed");
+      return c.json({ error: "db_record_failed", s3_key: s3Key }, 500);
+    }
+
+    let presignedDownloadUrl: string;
+    try {
+      presignedDownloadUrl = await generatePresignedUrl(s3Key);
+    } catch {
+      presignedDownloadUrl = "";
+    }
+
+    return c.json({ asset_id: assetId, s3_key: s3Key, presigned_download_url: presignedDownloadUrl }, 201);
+  });
+
+  app.get("/api/v1/assets/:id/url", async (c) => {
+    const assetId = c.req.param("id");
+    const row = await getAsset(assetId);
+    if (!row) return c.json({ error: "not_found" }, 404);
+
+    try {
+      const url = await generatePresignedUrl(row.s3_key);
+      return c.json({ asset_id: assetId, s3_key: row.s3_key, url });
+    } catch (err) {
+      return c.json({ error: "presign_failed", detail: (err as Error).message }, 502);
+    }
+  });
+
+  app.delete("/api/v1/assets/:id", async (c) => {
+    const assetId = c.req.param("id");
+    const row = await getAsset(assetId);
+    if (!row) return c.json({ error: "not_found" }, 404);
+
+    try {
+      await deleteFile(row.s3_key);
+    } catch (err) {
+      log.error({ assetId, s3Key: row.s3_key, err: (err as Error).message }, "Asset S3 delete error");
+      return c.json({ error: "s3_delete_failed", detail: (err as Error).message }, 502);
+    }
+
+    await deleteAssetRecord(assetId);
+    return c.json({ ok: true, asset_id: assetId });
   });
 
   app.get("/api/v1/audit", async (c) => {

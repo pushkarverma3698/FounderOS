@@ -21,7 +21,7 @@
  * to trimMessages being a Runnable) but has no side effects.
  */
 
-import { trimMessages, SystemMessage, ToolMessage, isAIMessage, isToolMessage } from "@langchain/core/messages";
+import { trimMessages, SystemMessage, ToolMessage, isAIMessage, isToolMessage, isHumanMessage } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
 import { createMiddleware, dynamicSystemPromptMiddleware } from "langchain";
 import type { AnyAgentMiddleware } from "langchain";
@@ -41,6 +41,14 @@ export interface TrimOptions {
   toolCallLimits?: Record<string, number>;
   /** When true, strip all tools after any [[TOOL_FAILURE]] tool result (engineering). */
   stopToolsAfterFailure?: boolean;
+  /**
+   * Roadmap #11 — task-anchor projection. When true, the FIRST human message
+   * (the anchoring task) is always preserved across trimming, even in a long
+   * thread where strategy:"last" would otherwise drop it. Deterministic — a
+   * pure state projection of the task, not an LLM summary. Default OFF so the
+   * existing rolling-window behaviour is byte-identical until opted in.
+   */
+  preserveTaskAnchor?: boolean;
 }
 
 /**
@@ -183,16 +191,47 @@ function toolLimitExceededMessage(toolName: string, limit: number, toolCallId: s
   });
 }
 
-async function trimHistory(rawMessages: BaseMessage[], maxTokens: number): Promise<BaseMessage[]> {
+const countMsgTokens = (msgs: BaseMessage[]): number =>
+  msgs.reduce((sum, m) => {
+    const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+    return sum + estimateTokens(text);
+  }, 0);
+
+async function trimHistory(
+  rawMessages: BaseMessage[],
+  maxTokens: number,
+  preserveTaskAnchor = false,
+): Promise<BaseMessage[]> {
   const historyOnly = rawMessages.filter((m) => !(m instanceof SystemMessage));
+
+  // Task-anchor projection (roadmap #11): keep the first human message pinned so
+  // the original task is never silently dropped by the rolling window. We reserve
+  // its token cost, trim the REST to the remaining budget, then prepend it — but
+  // only if it isn't already retained by the normal trim (short threads) and only
+  // when it genuinely fits, so we never blow the budget to keep it.
+  if (preserveTaskAnchor) {
+    const firstHumanIdx = historyOnly.findIndex((m) => isHumanMessage(m));
+    if (firstHumanIdx !== -1) {
+      const anchor = historyOnly[firstHumanIdx]!;
+      const anchorTokens = countMsgTokens([anchor]);
+      const rest = historyOnly.filter((_, i) => i !== firstHumanIdx);
+      const trimmedRest = await trimMessages(rest, {
+        maxTokens: Math.max(0, maxTokens - anchorTokens),
+        strategy: "last",
+        tokenCounter: countMsgTokens,
+        startOn: "human",
+      });
+      // If the trim already kept the anchor (short thread) don't duplicate it.
+      const alreadyKept = trimmedRest.includes(anchor);
+      const out = alreadyKept ? trimmedRest : [anchor, ...trimmedRest];
+      return stripMessageNames(out);
+    }
+  }
+
   const trimmed = await trimMessages(historyOnly, {
     maxTokens,
     strategy: "last",
-    tokenCounter: (msgs) =>
-      msgs.reduce((sum, m) => {
-        const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-        return sum + estimateTokens(text);
-      }, 0),
+    tokenCounter: countMsgTokens,
     // Don't start on a partial exchange — keep full human/AI pairs.
     startOn: "human",
   });
@@ -202,10 +241,10 @@ async function trimHistory(rawMessages: BaseMessage[], maxTokens: number): Promi
 
 function prepareMessages(
   rawMessages: BaseMessage[],
-  opts: { maxTokens: number; maxMessageChars: number },
+  opts: { maxTokens: number; maxMessageChars: number; preserveTaskAnchor?: boolean },
 ): Promise<BaseMessage[]> {
   const clamped = clampOversizedMessages(rawMessages, opts.maxMessageChars);
-  return trimHistory(clamped, opts.maxTokens);
+  return trimHistory(clamped, opts.maxTokens, opts.preserveTaskAnchor ?? false);
 }
 
 // ── Message modifier factory ───────────────────────────────────────────────────
@@ -237,6 +276,7 @@ export function createTrimmedPrompt(
 ): MessageModifier {
   const maxTokens = opts.maxTokens ?? 4000;
   const maxMessageChars = opts.maxMessageChars ?? DEFAULT_MAX_MESSAGE_CHARS;
+  const preserveTaskAnchor = opts.preserveTaskAnchor ?? false;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return async (input: any): Promise<BaseMessage[]> => {
@@ -250,7 +290,7 @@ export function createTrimmedPrompt(
     // Unit tests pass an array directly. Handle both.
     const rawMessages: BaseMessage[] = Array.isArray(input) ? input : (input?.messages ?? []);
 
-    const trimmed = await prepareMessages(rawMessages, { maxTokens, maxMessageChars });
+    const trimmed = await prepareMessages(rawMessages, { maxTokens, maxMessageChars, preserveTaskAnchor });
 
     return [systemMsg, ...trimmed];
   };
@@ -264,6 +304,7 @@ export function createAgentMiddleware(
   const maxMessageChars = opts.maxMessageChars ?? DEFAULT_MAX_MESSAGE_CHARS;
   const toolCallLimits = opts.toolCallLimits;
   const stopToolsAfterFailure = opts.stopToolsAfterFailure ?? false;
+  const preserveTaskAnchor = opts.preserveTaskAnchor ?? false;
 
   return [
     dynamicSystemPromptMiddleware(() =>
@@ -272,7 +313,7 @@ export function createAgentMiddleware(
     createMiddleware({
       name: "founderos_trim_messages",
       wrapModelCall: async (request, handler) => {
-        const messages = await prepareMessages(request.messages, { maxTokens, maxMessageChars });
+        const messages = await prepareMessages(request.messages, { maxTokens, maxMessageChars, preserveTaskAnchor });
         let tools = filterToolsByLimits(messages, request.tools, toolCallLimits) ?? request.tools;
         if (stopToolsAfterFailure && hasTerminalToolFailure(messages)) {
           tools = [];

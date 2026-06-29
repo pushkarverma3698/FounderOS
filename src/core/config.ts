@@ -125,6 +125,13 @@ export const envSchema = z.object({
   /** "auto" = Playwright on linux, AppleScript on darwin. Override as needed. */
   BROWSER_BACKEND: z.enum(["auto", "playwright", "applescript"]).default("auto"),
 
+  // ── S3 Asset Storage (optional — feature disabled when STORAGE_BUCKET is unset) ─
+  STORAGE_BUCKET: z.string().transform(v => v || undefined).optional(),
+  AWS_ACCESS_KEY_ID: z.string().transform(v => v || undefined).optional(),
+  AWS_SECRET_ACCESS_KEY: z.string().transform(v => v || undefined).optional(),
+  AWS_REGION: z.string().default("us-east-1"),
+  STORAGE_ENDPOINT_URL: z.string().transform(v => v || undefined).optional(),
+
   // Budget controls
   BUDGET_DAILY_USD: z.coerce.number().positive().default(5.0),
   // Per-run caps — applied to each individual office.invoke() call
@@ -222,6 +229,17 @@ export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", fals
  * subgraph above; flat marketing+sales is the production-stable design).
  */
 export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", false);
+
+/**
+ * Add the `creative` nested sub-supervisor (art_director/copywriter/brand_designer)
+ * as an extra routing target. Default OFF — unlike engineering/revenue (which
+ * REPLACE an existing same-named node), creative ADDS a new node to the
+ * supervisor's agent set, which changes routing surface. It stays off until the
+ * routing is live-verified on the VPS with `pnpm eval` (the eval needs a real
+ * model key, absent in CI/web). Flip CREATIVE_SUBGRAPH=1 to enable. Generating
+ * images also needs GOOGLE_GENERATIVE_AI_API_KEY.
+ */
+export const CREATIVE_SUBGRAPH_ENABLED = boolEnv("CREATIVE_SUBGRAPH", false);
 
 /**
  * Long-poll Telegram in this process. Off in development by default so local

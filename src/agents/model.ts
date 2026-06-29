@@ -154,6 +154,34 @@ export function getSupervisorModel(): BaseChatModel {
   return getModel();
 }
 
+/**
+ * Worker (department/specialist) model — roadmap #10 model split.
+ *
+ * Routing reliability lives in the SUPERVISOR, which keeps the strong primary
+ * model (getModel()). Workers do tool-calling inside one department where the
+ * task is already chosen, so they can run on a cheaper model with no routing
+ * risk. Set WORKER_AGENT_MODEL to a cheaper id (e.g.
+ * "openrouter:google/gemini-2.5-flash-lite") to take the saving.
+ *
+ * Default = the primary model, so behaviour is byte-identical until the founder
+ * opts in. Same prefix rules as AGENT_MODEL. If the worker id is misconfigured
+ * (missing key), we fail SAFE back to the primary rather than crash a department.
+ */
+export function getWorkerModelId(): string {
+  const raw = process.env["WORKER_AGENT_MODEL"]?.trim();
+  return raw && raw.length > 0 ? normalizeModelId(raw) : getConfiguredModelId();
+}
+
+export function getWorkerModel(): BaseChatModel {
+  const workerId = getWorkerModelId();
+  if (workerId === getConfiguredModelId()) return getModel(); // no split configured
+  const parsed = parseModelId(workerId);
+  const model = buildModel(parsed, resolveTemperature(), { optional: true });
+  if (model) return model;
+  // Misconfigured worker model (e.g. missing key) — fail safe to the primary.
+  return getModel();
+}
+
 export function getModelFallbackMiddleware() {
   const fallbacks = buildFallbackModels();
   if (fallbacks.length === 0) return [];
