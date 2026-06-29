@@ -125,6 +125,13 @@ export const envSchema = z.object({
   /** "auto" = Playwright on linux, AppleScript on darwin. Override as needed. */
   BROWSER_BACKEND: z.enum(["auto", "playwright", "applescript"]).default("auto"),
 
+  // ── S3 Asset Storage (optional — feature disabled when STORAGE_BUCKET is unset) ─
+  STORAGE_BUCKET: z.string().transform(v => v || undefined).optional(),
+  AWS_ACCESS_KEY_ID: z.string().transform(v => v || undefined).optional(),
+  AWS_SECRET_ACCESS_KEY: z.string().transform(v => v || undefined).optional(),
+  AWS_REGION: z.string().default("us-east-1"),
+  STORAGE_ENDPOINT_URL: z.string().transform(v => v || undefined).optional(),
+
   // Budget controls
   BUDGET_DAILY_USD: z.coerce.number().positive().default(5.0),
   // Per-run caps — applied to each individual office.invoke() call
