@@ -3,14 +3,45 @@
  * These test the context-text builder without touching cron, DB, or LLM.
  */
 
-import { describe, it, expect } from "vitest";
-import { buildContextText, formatLeadNudge, formatProposalNudge, formatDemoNudge, formatDesignBriefNudge, formatSiteDeployedNudge, formatProofDropNudge, runBrainSync } from "../../../src/infra/scheduler.js";
+import { describe, it, expect, afterEach } from "vitest";
+import { buildContextText, formatLeadNudge, formatProposalNudge, formatDemoNudge, formatDesignBriefNudge, formatSiteDeployedNudge, formatProofDropNudge, runBrainSync, getCheckpointTtlDays } from "../../../src/infra/scheduler.js";
 import { buildProofDropCadenceNudge } from "../../../src/outbound/proof-drop.js";
 import {
   assessDailyBudget,
   nextBudgetAlertThreshold,
   formatBudgetThresholdAlert,
 } from "../../../src/infra/daily-budget.js";
+
+describe("getCheckpointTtlDays", () => {
+  const KEY = "CHECKPOINT_TTL_DAYS";
+  const orig = process.env[KEY];
+  afterEach(() => {
+    if (orig === undefined) delete process.env[KEY];
+    else process.env[KEY] = orig;
+  });
+
+  it("defaults to 30 days when unset", () => {
+    delete process.env[KEY];
+    expect(getCheckpointTtlDays()).toBe(30);
+  });
+
+  it("honours a valid positive override", () => {
+    process.env[KEY] = "7";
+    expect(getCheckpointTtlDays()).toBe(7);
+  });
+
+  it("falls back to 30 on a non-numeric value (never disables the sweep)", () => {
+    process.env[KEY] = "soon";
+    expect(getCheckpointTtlDays()).toBe(30);
+  });
+
+  it("falls back to 30 on a non-positive value (guards an accidental wipe-everything)", () => {
+    process.env[KEY] = "0";
+    expect(getCheckpointTtlDays()).toBe(30);
+    process.env[KEY] = "-5";
+    expect(getCheckpointTtlDays()).toBe(30);
+  });
+});
 
 describe("buildContextText", () => {
   it("formats a flat string value", () => {

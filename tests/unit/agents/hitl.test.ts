@@ -37,7 +37,9 @@ vi.mock("../../../src/db/queries.js", () => ({
 }));
 
 // Dynamic import AFTER mocks are hoisted
-const { hitlGate, idemKey } = await import("../../../src/agents/agent-tools/hitl.js");
+const { hitlGate, idemKey, timeBucket, recurringIdemKey } = await import(
+  "../../../src/agents/agent-tools/hitl.js"
+);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -93,6 +95,96 @@ describe("idemKey", () => {
     expect(() => idemKey("email", "alice@example.com")).not.toThrow();
     const key = idemKey("email", "alice@example.com");
     expect(key).toMatch(/^email:turicks:[0-9a-f]{16}$/);
+  });
+});
+
+// ── P0 #2: idempotency window — both failure directions (roadmap audit) ───────
+//
+// idemKey() is the resume-safe default (time-invariant). recurringIdemKey() is
+// the opt-in windowed variant for scheduled senders. These tests pin BOTH
+// failure modes the roadmap names:
+//   • "too narrow"  → double-sends slip through (must be impossible for idemKey
+//                      across an approval gap, and impossible for recurringIdemKey
+//                      within one window).
+//   • "too broad"   → legitimately-repeated actions deduped forever (must be
+//                      fixable via recurringIdemKey across windows).
+
+describe("timeBucket (UTC, pure, injectable instant)", () => {
+  it("day granularity → ISO date in UTC", () => {
+    expect(timeBucket("day", new Date("2026-06-29T23:30:00Z"))).toBe("2026-06-29");
+  });
+
+  it("month granularity → YYYY-MM", () => {
+    expect(timeBucket("month", new Date("2026-06-29T12:00:00Z"))).toBe("2026-06");
+  });
+
+  it("week granularity → ISO-8601 week label", () => {
+    // 2026-06-29 is a Monday; ISO week 27 of 2026.
+    expect(timeBucket("week", new Date("2026-06-29T00:00:00Z"))).toBe("2026-W27");
+  });
+
+  it("uses UTC, not local TZ — boundary instant doesn't drift", () => {
+    // 23:30Z stays on the 29th regardless of where the server runs.
+    expect(timeBucket("day", new Date("2026-06-29T23:59:59Z"))).toBe("2026-06-29");
+    expect(timeBucket("day", new Date("2026-06-30T00:00:01Z"))).toBe("2026-06-30");
+  });
+});
+
+describe("idemKey resume-safety — guards the 'too narrow' double-send", () => {
+  it("is time-invariant: identical across an approval gap that crosses midnight", () => {
+    // Initial interrupt fires at 23:59 on the 29th; founder approves at 00:01 on
+    // the 30th and the tool re-runs. The key MUST match or the action re-fires.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-06-29T23:59:00Z"));
+      const atInterrupt = idemKey("email", "alice@example.com", "Quarterly invoice");
+      vi.setSystemTime(new Date("2026-06-30T00:01:00Z")); // approval crosses the day boundary
+      const atResume = idemKey("email", "alice@example.com", "Quarterly invoice");
+      expect(atResume).toBe(atInterrupt); // → hasBeenAudited() skips the 2nd send
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("recurringIdemKey — fixes the 'too broad' permanent-dedup, no within-window double-send", () => {
+  it("same content in the SAME window → same key (within-window dedupe holds)", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-06-29T09:00:00Z"));
+      const first = recurringIdemKey("newsletter", "week", "weekly digest body");
+      vi.setSystemTime(new Date("2026-06-30T18:00:00Z")); // later, same ISO week
+      const second = recurringIdemKey("newsletter", "week", "weekly digest body");
+      expect(second).toBe(first); // duplicate send inside one week is still deduped
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("same content in the NEXT window → different key (legit repeat is allowed)", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-06-01T09:00:00Z")); // June
+      const june = recurringIdemKey("newsletter", "month", "monthly digest body");
+      vi.setSystemTime(new Date("2026-07-01T09:00:00Z")); // July — a new, allowed send
+      const july = recurringIdemKey("newsletter", "month", "monthly digest body");
+      expect(july).not.toBe(june); // the next month's identical newsletter is NOT swallowed
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("differs from the plain idemKey for the same parts (window is part of the hash)", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-06-29T09:00:00Z"));
+      const plain = idemKey("newsletter", "body");
+      const windowed = recurringIdemKey("newsletter", "month", "body");
+      expect(windowed).not.toBe(plain);
+      expect(windowed).toMatch(/^newsletter:turicks:[0-9a-f]{16}$/); // same shape
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

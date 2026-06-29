@@ -213,6 +213,36 @@ export async function getCostBreakdown(tenantId: string, days = 7) {
     .orderBy(desc(sql`SUM(${aiCallCosts.cost_usd})`));
 }
 
+/**
+ * Per-DEPARTMENT cost attribution (roadmap #9). Groups ai_call_costs by `agent`
+ * (the department/specialist that made the call) over the last N days. This is
+ * the "cost per task" scoreboard the roadmap wants to replace "number of agents".
+ *
+ * Note: rows exist only for calls that persist a cost via logLlmCost (today:
+ * image generation + any future per-call LLM logging). An empty result means no
+ * costed calls in the window, not an error.
+ */
+export async function getCostByDepartment(tenantId: string, days = 7) {
+  const db = getDb();
+  const since = new Date(Date.now() - days * 86_400_000);
+
+  return db
+    .select({
+      department: aiCallCosts.agent,
+      calls: sql<number>`COUNT(*)::int`,
+      total_cost_usd: sql<string>`COALESCE(SUM(${aiCallCosts.cost_usd}), 0)`,
+    })
+    .from(aiCallCosts)
+    .where(
+      and(
+        eq(aiCallCosts.tenant_id, tenantId),
+        gt(aiCallCosts.created_at, since),
+      ),
+    )
+    .groupBy(aiCallCosts.agent)
+    .orderBy(desc(sql`SUM(${aiCallCosts.cost_usd})`));
+}
+
 // ── Action Log (action_log) ───────────────────────────────────────────────────
 
 /**

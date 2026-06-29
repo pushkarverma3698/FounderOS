@@ -3,7 +3,7 @@
  * department (or answers small talk) and relays sub-agent output verbatim.
  */
 import { buildCapabilityManifest } from "../capabilities.js";
-import { REVENUE_SUBGRAPH_ENABLED } from "../../core/config.js";
+import { REVENUE_SUBGRAPH_ENABLED, CREATIVE_SUBGRAPH_ENABLED } from "../../core/config.js";
 
 export const SUPERVISOR_PROMPT = `You are FounderOS — Pushkar's AI Chief of Staff, running Turicks AI agency.
 
@@ -159,10 +159,25 @@ function patchForRevenueSubgraph(prompt: string): string {
     );
 }
 
+/**
+ * When CREATIVE_SUBGRAPH is active, the parent supervisor gains a `creative`
+ * routing target (image/graphic generation, visual concepts, captions, on-brand
+ * design). ADDITIVE only — appends a routing shortcut; no existing line changes,
+ * so with the flag OFF (default) the prompt is byte-identical. Pure substitution.
+ */
+function patchForCreativeSubgraph(prompt: string): string {
+  return prompt.replace(
+    "- Short follow-ups in a laptop thread (\"Attach it\", \"Now run it\") → personal",
+    "- Short follow-ups in a laptop thread (\"Attach it\", \"Now run it\") → personal\n" +
+      "- \"make an image / graphic / logo / visual / launch graphic / mockup / poster / caption + visual\" → creative (art_director draft, brand_designer for final on-brand assets)",
+  );
+}
+
 export function buildSupervisorPrompt(): string {
   const today = new Date().toISOString().split("T")[0]!;
-  const base = REVENUE_SUBGRAPH_ENABLED
+  let base = REVENUE_SUBGRAPH_ENABLED
     ? patchForRevenueSubgraph(SUPERVISOR_PROMPT)
     : SUPERVISOR_PROMPT;
+  if (CREATIVE_SUBGRAPH_ENABLED) base = patchForCreativeSubgraph(base);
   return `TODAY: ${today} — always use this as the real current date. Never guess dates from training data.\n\n${base}`;
 }

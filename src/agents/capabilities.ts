@@ -41,6 +41,7 @@ import {
   searchTuricksBrain,
   publishSignal,
 } from "./agent-tools.js";
+import { generateImageTool, listBrandAssetsTool } from "./agent-tools/creative.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
 import { searchMemoryTool } from "../tools/memory.js";
@@ -83,6 +84,15 @@ export const ENGINEERING_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
   coder: [claudeCode, githubRead],
   qa: [claudeCode, githubRead],
   devops: [githubWrite, projectWorkflow],
+};
+
+/** Creative sub-supervisor — per-specialist tools (art_director/copywriter/brand_designer).
+ *  The Creative department is ALWAYS nested (the one department that earns it). Each
+ *  specialist carries a tight 2-tool kit — over-tooling degrades an agent (roadmap). */
+export const CREATIVE_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
+  art_director: [generateImageTool, listBrandAssetsTool],
+  copywriter: [searchTuricksBrain, searchWeb],
+  brand_designer: [generateImageTool, listBrandAssetsTool],
 };
 
 /** Supervisors route via handoffs only — no business tools (ADR-028). */

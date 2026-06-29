@@ -19,13 +19,14 @@
 import { createSupervisor } from "@langchain/langgraph-supervisor";
 import { createAgent } from "langchain";
 import type { CompiledStateGraph, BaseCheckpointSaver } from "@langchain/langgraph";
-import { getModel, getModelFallbackMiddleware } from "./model.js";
+import { getModel, getWorkerModel, getModelFallbackMiddleware } from "./model.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
 import { createAgentMiddleware, createTrimmedPrompt, type TrimOptions } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS, applyMcpBridge } from "./capabilities.js";
-import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED } from "../core/config.js";
+import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED, CREATIVE_SUBGRAPH_ENABLED } from "../core/config.js";
 import { buildEngineeringDomain } from "./engineering-domain.js";
 import { buildRevenueDomain } from "./revenue-domain.js";
+import { buildCreativeDomain } from "./creative-department.js";
 import { assertContextIsolation, CONTEXT_ISOLATION_OUTPUT_MODE } from "./context-isolation.js";
 import {
   buildSupervisorPrompt,
@@ -58,6 +59,7 @@ const DEPARTMENT_DESCRIPTIONS = {
   revenue: "Use for LinkedIn marketing content and sales cold outreach (routes internally to marketing or sales).",
   personal: "Use for files, directories, shell, browser, and laptop operations on the founder's machine.",
   jobhunt: "Use for job searches, CV/resume work, applications, and hiring-manager outreach.",
+  creative: "Use for generating images/graphics, visual concepts, captions, and on-brand publish-grade design assets (routes internally to art_director, copywriter, or brand_designer).",
 } as const;
 
 /** Deterministic search caps — prompt instructions alone are not enough on OpenRouter. */
@@ -77,8 +79,11 @@ const SEARCH_TOOL_LIMITS = {
  */
 export function buildOffice(checkpointer: BaseCheckpointSaver) {
   // createSupervisor requires a model with bindTools — withFallbacks() wrappers break routing.
+  // Model split (roadmap #10): the supervisor keeps the strong model for routing
+  // reliability; departments run on the (optionally cheaper) worker model. With no
+  // WORKER_AGENT_MODEL set, getWorkerModel() === getModel(), so this is a no-op.
   const llm = getModel();
-  const deptModel = getModel();
+  const deptModel = getWorkerModel();
 
   // ── Phase C tools (available across departments) ──────────────────────────
   // search_knowledge: turicks-brain keyword search (no LLM cost)
@@ -208,6 +213,11 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     ? [buildRevenueDomain()]
     : [marketing, sales];
 
+  // Creative: ADDITIVE nested sub-supervisor, off by default (CREATIVE_SUBGRAPH=1).
+  // Unlike engineering/revenue it introduces a NEW routing target, so it stays
+  // gated until routing is eval-verified on the VPS.
+  const creativeAgents = CREATIVE_SUBGRAPH_ENABLED ? [buildCreativeDomain()] : [];
+
   const coreAgents = [
     admin,
     research,
@@ -216,6 +226,7 @@ export function buildOffice(checkpointer: BaseCheckpointSaver) {
     ...revenueAgents,
     personal,
     jobhunt,
+    ...creativeAgents,
   ];
 
   return createSupervisor({
