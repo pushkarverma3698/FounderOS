@@ -7,7 +7,7 @@
  * Only S3 keys are stored here; file content never enters Postgres.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { getDb } from "../../db/client.js";
 import {
   agentAssets,
@@ -36,6 +36,21 @@ export async function getAssetsForRun(runId: string): Promise<AgentAsset[]> {
     .from(agentAssets)
     .where(eq(agentAssets.run_id, runId))
     .orderBy(agentAssets.created_at);
+}
+
+/**
+ * Return the most recent brand assets (asset_type = 'brand'), newest first.
+ * The brand_designer uses this to enforce visual consistency across a campaign —
+ * it sees prior approved brand imagery before producing new work.
+ */
+export async function getBrandAssets(limit = 20): Promise<AgentAsset[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(agentAssets)
+    .where(eq(agentAssets.asset_type, "brand"))
+    .orderBy(desc(agentAssets.created_at))
+    .limit(limit);
 }
 
 /** Fetch a single asset record by UUID. Returns undefined if not found. */
