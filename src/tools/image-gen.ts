@@ -31,16 +31,26 @@ export interface ImageModelSpec {
   tier: ImageTier;
 }
 
-/** Nano Banana 2 — fast drafts. The default for everything but explicit finals. */
+/**
+ * Nano Banana (Gemini 2.5 Flash Image) — fast drafts, the default.
+ * GA model id `gemini-2.5-flash-image`; ~$0.039/img at ≤1024px (image output is
+ * 1290 tokens × $30/1M). NOTE: Google has scheduled `gemini-2.5-flash-image` for
+ * shutdown on 2026-10-02; the successor is `gemini-3.1-flash-image-preview`
+ * ("Nano Banana 2", ~$0.067/img @1K) — set IMAGE_DRAFT_MODEL to swap when needed.
+ */
 export const IMAGE_MODEL_DRAFT: ImageModelSpec = {
-  id: "gemini-3-1-flash-image",
-  usdPerImage: 0.01,
+  id: process.env["IMAGE_DRAFT_MODEL"]?.trim() || "gemini-2.5-flash-image",
+  usdPerImage: 0.039,
   tier: "draft",
 };
 
-/** Nano Banana Pro — final, publish-grade assets. Gated. */
+/**
+ * Nano Banana Pro (Gemini 3 Pro Image) — final, publish-grade assets. Gated.
+ * Preview model id `gemini-3-pro-image-preview`; ~$0.134/img at 1K–2K (1120
+ * tokens), ~$0.24 at 4K. Override with IMAGE_FINAL_MODEL.
+ */
 export const IMAGE_MODEL_FINAL: ImageModelSpec = {
-  id: "gemini-3-pro-image",
+  id: process.env["IMAGE_FINAL_MODEL"]?.trim() || "gemini-3-pro-image-preview",
   usdPerImage: 0.134,
   tier: "final",
 };
