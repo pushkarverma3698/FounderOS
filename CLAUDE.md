@@ -191,7 +191,12 @@ pnpm test
 
 ## Model
 
-**Production (VPS only):** `openrouter:google/gemini-2.5-flash` (paid, set in PROD_DOTENV / deploy.yml)
+**Production (VPS only):** `openrouter:google/gemini-2.5-pro` (paid, set in deploy.yml). Reliability
+trial (2026-07-01): swapped from `gemini-2.5-flash` — Flash's weak agentic tool-calling was the root
+cause behind most repeat-guard / execution-guard scar tissue. Pro runs on BOTH supervisor and workers
+for a clean full-strength read. Fallback: `gemini-2.5-flash` → `claude-haiku-4-5`. Cost-reclaim path
+once Pro is proven: set `WORKER_AGENT_MODEL=openrouter:google/gemini-2.5-flash` (strong supervisor,
+cheap workers). Prior prod model was `openrouter:google/gemini-2.5-flash`.
 
 **Development / integration testing (local, free):**
 ```

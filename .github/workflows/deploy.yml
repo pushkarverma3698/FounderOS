@@ -116,17 +116,20 @@ jobs:
             else
               echo "==> PROD_DOTENV not set; using the .env already on the box"
             fi
-            # Pin the production model. Gemini 2.5 Flash is the documented prod model.
+            # Pin the production model. Gemini 2.5 Pro is the documented prod model
+            # (stronger agentic tool-caller — reliability trial replacing 2.5 Flash).
+            # Fallback drops to Flash first (cheap, same family) on a Pro capacity 503,
+            # then Haiku. Reclaim cost later via WORKER_AGENT_MODEL=…flash once Pro is proven.
             if [ -n "${OPENROUTER_API_KEY:-}" ]; then
               grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
               {
-                printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-flash'
-                printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
+                printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-pro'
+                printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:google/gemini-2.5-flash,anthropic:claude-haiku-4-5'
                 printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
               } >> .env.patched
               mv .env.patched .env
               chmod 600 .env
-              echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-flash"
+              echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-pro"
             fi
             # MCP bridge Slack secrets — append only when the secret is set.
             # These are NOT in PROD_DOTENV (they rotate independently); forwarded as
