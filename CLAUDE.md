@@ -90,7 +90,7 @@ The 7-department supervisor + ReAct structure is production-stable (live since 2
 - Branch naming: `phase{N}/{short-description}` for phase work, `fix/{issue}` for bugs, `feat/{name}` for standalone features
 - Every branch gets a PR before merging to main — human approves merge
 - Current working branch: `main` (v2 merged 2026-06-01)
-- Branch model: `main`=production (founder-only merge), `stable`=release line, `beta`=integration, `feat/*`=work cut from `stable`. Flow: `feat/* → beta → stable → main`. See `docs/process/BRANCH-MODEL.md`.
+- Branch model (**simplified 2026-07-01 — flat**): cut a work branch from `main` → PR straight to `main` → CD auto-deploys on merge. The old `feat/* → beta → stable → main` ladder was removed (friction without added safety; the `branch-policy` check is now a no-op pass). See `docs/process/BRANCH-MODEL.md`.
 
 ### After Completing Work
 1. `pnpm test` must be green
@@ -191,7 +191,12 @@ pnpm test
 
 ## Model
 
-**Production (VPS only):** `openrouter:google/gemini-2.5-flash` (paid, set in PROD_DOTENV / deploy.yml)
+**Production (VPS only):** `openrouter:google/gemini-2.5-pro` (paid, set in deploy.yml). Reliability
+trial (2026-07-01): swapped from `gemini-2.5-flash` — Flash's weak agentic tool-calling was the root
+cause behind most repeat-guard / execution-guard scar tissue. Pro runs on BOTH supervisor and workers
+for a clean full-strength read. Fallback: `gemini-2.5-flash` → `claude-haiku-4-5`. Cost-reclaim path
+once Pro is proven: set `WORKER_AGENT_MODEL=openrouter:google/gemini-2.5-flash` (strong supervisor,
+cheap workers). Prior prod model was `openrouter:google/gemini-2.5-flash`.
 
 **Development / integration testing (local, free):**
 ```

@@ -7,11 +7,19 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { readCvTool, searchJobsTool } from "../../tools/career.js";
+import { makeRepeatGuard, repeatGuardBlockMessage } from "./repeat-guard.js";
+
+// Loop breakers (T04, extended): bound identical read_cv / search_jobs calls.
+const _readCvRepeatGuard = makeRepeatGuard();
+const _searchJobsRepeatGuard = makeRepeatGuard();
 
 // ── Job-Hunt: read CV from personal-rag (read-only, NO approval) ─────────────
 
 export const readCv = tool(
   async ({ query }) => {
+    if (_readCvRepeatGuard.shouldBlock("read_cv", { query })) {
+      return repeatGuardBlockMessage("read_cv", "CV/background data");
+    }
     const res = await readCvTool.execute({ query });
     if (!res.success) return `CV read failed: ${res.error}`;
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
@@ -31,6 +39,9 @@ export const readCv = tool(
 
 export const searchJobs = tool(
   async ({ query, location }) => {
+    if (_searchJobsRepeatGuard.shouldBlock("search_jobs", { query, location })) {
+      return repeatGuardBlockMessage("search_jobs", "job search results");
+    }
     const res = await searchJobsTool.execute({ query, ...(location ? { location } : {}) });
     if (!res.success) return `Job search failed: ${res.error}`;
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);

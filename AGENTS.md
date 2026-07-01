@@ -13,39 +13,37 @@ Every change must answer **why** before **what**:
 
 ---
 
-## Git / PR policy (non-negotiable — prevents "not mergeable")
+## Git / PR policy (simplified 2026-07-01 — flat model)
 
-**Cloud agents and Cursor must NEVER open PRs targeting `main`.** CI enforces this in
-`.github/workflows/branch-policy.yml` — PRs to `main` are rejected unless the head
-branch is exactly `stable`.
+The `feat/* → beta → stable → main` ladder was **removed** (too much friction for no
+added safety that CI + branch protection don't already provide). The model is now
+flat: **any work branch → `main` → CD deploys.**
 
-### Correct flow
+### Flow
 
 ```
-cursor/* or feat/*  →  beta  →  stable  →  main (founder merges only, CD deploys)
+cursor/* or feat/*  →  main  (PR + green CI)  →  CD deploys
 ```
 
 | Action | Rule |
 |--------|------|
-| Cut branch from | `stable` (fetch + pull first) |
-| Open PR to | **`beta`** always |
-| Merge to `main` | **Founder only** via `stable → main` promotion PR |
+| Cut branch from | `main` (fetch + pull first) |
+| Open PR to | **`main`** |
+| Merge | Once CI is green (founder or authorised agent) → CD auto-deploys |
 
 ### When creating a PR
 
 ```bash
-git fetch origin stable && git checkout stable && git pull origin stable
+git fetch origin main && git checkout main && git pull origin main
 git checkout -b cursor/my-task-d523
 # … work …
+pnpm gate                       # tsc + tests, $0
 git push -u origin cursor/my-task-d523
-gh pr create --base beta --head cursor/my-task-d523 --draft --title "feat: …"
+gh pr create --base main --head cursor/my-task-d523 --draft --title "feat: …"
 ```
 
-**Wrong:** `--base main` → Branch policy check **FAILS** → PR shows "not mergeable".
-
-**Right:** `--base beta` → CI + branch policy pass → founder promotes later.
-
-See `docs/process/BRANCH-MODEL.md` for the full ladder.
+The old `branch-policy` ladder check is now a no-op that always passes, so
+`--base main` no longer shows "not mergeable". See `docs/process/BRANCH-MODEL.md`.
 
 ---
 
