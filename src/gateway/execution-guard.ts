@@ -589,3 +589,40 @@ export function redactInjectionEcho(reply: string): string {
   // Collapse runs of whitespace/newlines left by stripped sentences, then trim.
   return redacted.replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim();
 }
+
+// ── Guard exhaustion (symmetry fix, 2026-06-30) ──────────────────────────────
+//
+// needsExecutionGuardRetry() detects 7 distinct "model skipped its gated tool"
+// shapes and office-run.ts retries ONCE. Until this fix, only the "knowledge"
+// and "memory" kinds were re-verified after that retry — if the SAME guard
+// fired again post-retry for shell/linkedin/inbox/github/web, the (still
+// wrong) reply was silently sent to the founder. That asymmetry is exactly
+// how a "fixed" refusal/loop bug could resurface under a new phrasing without
+// any test catching it: the retry ran, but nothing checked whether it worked.
+// This makes every guard kind terminate the same way — fail loud, never silent
+// (rule #19.5) — instead of only the two fabrication-risk kinds.
+
+export type GuardKind = "shell" | "linkedin" | "inbox" | "github" | "web" | "memory" | "knowledge";
+
+const GUARD_KIND_ACTION: Record<GuardKind, string> = {
+  shell: "run that command with run_shell",
+  linkedin: "call linkedin_post",
+  inbox: "call read_emails",
+  github: "call github_read / github_write",
+  web: "call search_web",
+  memory: "check FounderOS memory",
+  knowledge: "search turicks-brain",
+};
+
+/**
+ * Honest, generic exhaustion notice for the 5 "tool-skip" guard kinds (shell,
+ * linkedin, inbox, github, web). The "knowledge"/"memory" kinds keep their own
+ * more specific fabrication-refusal wording (buildKnowledgeGroundingRefusal) —
+ * this covers the other 5, which previously had no fallback at all.
+ */
+export function buildGuardExhaustedNotice(kind: GuardKind): string {
+  return (
+    `⚠️ I tried twice to ${GUARD_KIND_ACTION[kind]} and didn't get a clean result either time. ` +
+    `Stopping here instead of guessing — please re-send the request, or ask me directly to ${GUARD_KIND_ACTION[kind]}.`
+  );
+}

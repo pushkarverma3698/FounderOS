@@ -5,6 +5,7 @@
 import { describe, it, expect } from "vitest";
 import {
   aiMessageLooksFabricatedKnowledge,
+  buildGuardExhaustedNotice,
   detectUnbackedGithubReadClaim,
   detectUnbackedGithubWriteClaim,
   detectUnbackedKnowledgeClaim,
@@ -21,6 +22,7 @@ import {
   isInternalKnowledgeRequest,
   isShellRunRequest,
   redactInjectionEcho,
+  type GuardKind,
 } from "../../../src/gateway/execution-guard.js";
 
 function aiMsg(text: string, toolCalls?: { name: string }[]) {
@@ -586,5 +588,28 @@ describe("isInternalKnowledgeRequest — B4 self-referential exclusion", () => {
 
   it("'what is our Turicks ICP?' still returns true", () => {
     expect(isInternalKnowledgeRequest("what is our Turicks ICP?")).toBe(true);
+  });
+});
+
+// ── buildGuardExhaustedNotice (symmetry fix, 2026-06-30) ─────────────────────
+// Before this fix, office-run.ts only checked "stillUngrounded" for the
+// knowledge/memory kinds after a retry; shell/linkedin/inbox/github/web had no
+// fallback at all — a still-broken reply after the retry was sent silently.
+
+describe("buildGuardExhaustedNotice", () => {
+  const kinds: GuardKind[] = ["shell", "linkedin", "inbox", "github", "web"];
+
+  it.each(kinds)("produces an honest, non-empty notice for guard kind '%s'", (kind) => {
+    const notice = buildGuardExhaustedNotice(kind);
+    expect(notice.length).toBeGreaterThan(20);
+    expect(notice).toMatch(/tried twice/i);
+    expect(notice).toMatch(/stopping here|re-send/i);
+  });
+
+  it("never claims success or fabricates a result", () => {
+    for (const kind of kinds) {
+      const notice = buildGuardExhaustedNotice(kind);
+      expect(notice).not.toMatch(/✅|done|created|sent|posted/i);
+    }
   });
 });

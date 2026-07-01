@@ -36,6 +36,7 @@ import { getActiveCompany } from "./active-company.js";
 import { isProvidedLinkedInPostRequest } from "./execution-guard.js";
 import {
   aiMessageLooksFabricatedKnowledge,
+  buildGuardExhaustedNotice,
   buildKnowledgeGroundingRefusal,
   detectLinkedInRefusalWithoutTool,
   detectUnbackedGithubReadClaim,
@@ -49,6 +50,7 @@ import {
   isGithubWriteRequest,
   isInternalKnowledgeRequest,
   redactInjectionEcho,
+  type GuardKind,
 } from "./execution-guard.js";
 import { tryInboxReadFastPath } from "./inbox-fast-path.js";
 import { tryGithubReadFastPath } from "./github-read-fast-path.js";
@@ -582,7 +584,7 @@ export function needsExecutionGuardRetry(
   messages: OfficeMessage[],
   reply: string,
   toolsCalled?: readonly string[],
-): "shell" | "linkedin" | "inbox" | "github" | "web" | "memory" | "knowledge" | null {
+): GuardKind | null {
   if (detectUnbackedShellClaim(userText, messages, reply)) return "shell";
   if (detectLinkedInRefusalWithoutTool(userText, messages, reply)) return "linkedin";
   if (detectUnbackedInboxClaim(userText, messages, reply)) return "inbox";
@@ -596,10 +598,7 @@ export function needsExecutionGuardRetry(
   return null;
 }
 
-export function buildGuardRetryMessages(
-  kind: "shell" | "linkedin" | "inbox" | "github" | "web" | "memory" | "knowledge",
-  userText: string,
-): BaseMessage[] {
+export function buildGuardRetryMessages(kind: GuardKind, userText: string): BaseMessage[] {
   if (kind === "memory") {
     return [
       new SystemMessage(
@@ -689,6 +688,31 @@ export function buildGuardRetryMessages(
     ),
     new HumanMessage(userText),
   ];
+}
+
+/**
+ * Decide what to do once the SAME guard still fires after the one allowed
+ * retry (symmetry fix, 2026-06-30). Pure — no I/O — so all 7 guard kinds are
+ * unit-testable without mocking LangGraph.
+ *
+ * "knowledge"/"memory" keep their existing fabrication-safe refusal (a
+ * confident but ungrounded business-facts answer is actively dangerous, so it
+ * is replaced outright). The other 5 kinds ("shell"/"linkedin"/"inbox"/
+ * "github"/"web") previously had NO fallback here — a still-broken reply after
+ * the retry was sent to the founder unchanged. They now get an honest
+ * exhaustion notice instead of a silent pass-through (rule #19.5, fail loud).
+ */
+export function applyGuardOutcome(
+  stillUngrounded: GuardKind | null,
+  replyText: string,
+): { replyText: string; blocked: boolean } {
+  if (stillUngrounded === "knowledge" || stillUngrounded === "memory") {
+    return { replyText: buildKnowledgeGroundingRefusal(), blocked: true };
+  }
+  if (stillUngrounded) {
+    return { replyText: buildGuardExhaustedNotice(stillUngrounded), blocked: true };
+  }
+  return { replyText, blocked: false };
 }
 
 /** Route the literal text of the incoming message into the office. */
@@ -920,15 +944,18 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       replyText,
       toolsCalled,
     );
-    if (stillUngrounded === "knowledge" || stillUngrounded === "memory") {
+    const guardOutcome = applyGuardOutcome(stillUngrounded, replyText);
+    if (guardOutcome.blocked) {
       trace.event("guard.blocked", { kind: stillUngrounded });
-      log.warn({ chatId, kind: stillUngrounded }, "Guard blocked ungrounded reply — sending safe refusal");
-      const purged = await purgeFabricatedAiFromCheckpoint(office, config, freshMessages).catch((err) => {
-        log.warn({ chatId, err: (err as Error).message }, "Failed to purge fabricated AI from checkpoint");
-        return 0;
-      });
-      if (purged > 0) trace.event("guard.purged", { removed: purged });
-      replyText = buildKnowledgeGroundingRefusal();
+      log.warn({ chatId, kind: stillUngrounded }, "Guard still firing after retry — blocking pass-through reply");
+      if (stillUngrounded === "knowledge" || stillUngrounded === "memory") {
+        const purged = await purgeFabricatedAiFromCheckpoint(office, config, freshMessages).catch((err) => {
+          log.warn({ chatId, err: (err as Error).message }, "Failed to purge fabricated AI from checkpoint");
+          return 0;
+        });
+        if (purged > 0) trace.event("guard.purged", { removed: purged });
+      }
+      replyText = guardOutcome.replyText;
       freshRes = { messages: [{ content: replyText, _getType: () => "ai" }] };
     }
 
