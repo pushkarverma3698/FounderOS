@@ -2,7 +2,7 @@
  * Unit tests for calendarTool — tool boundary (idempotency, past-date guard, audit).
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockProviderCreateCalendarEvent = vi.fn();
 
@@ -34,10 +34,21 @@ function successResult(id = "event_abc123") {
 
 describe("calendarTool", () => {
   beforeEach(() => {
+    // Pin "now" so the tool's past-date guard is deterministic (rule #16). The
+    // fixture dates (2026-07-02, 2026-07-10) must stay in the future relative to
+    // "now" — otherwise this suite silently breaks the instant the real wall-clock
+    // rolls past a hardcoded date (it did, on 2026-07-02). Fake ONLY Date so real
+    // timers/async are untouched.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-01T00:00:00Z"));
     vi.clearAllMocks();
     mockHasBeenAudited.mockResolvedValue(false);
     mockWriteAuditEntry.mockResolvedValue(undefined);
     mockProviderCreateCalendarEvent.mockResolvedValue(successResult());
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("returns success: true with event_id on an all-day event", async () => {
