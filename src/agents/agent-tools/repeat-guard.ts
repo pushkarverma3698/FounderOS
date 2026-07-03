@@ -55,6 +55,30 @@ export interface RepeatGuard {
 const DEFAULT_MAX_REPEATS = 3;
 const DEFAULT_WINDOW_MS = 90_000;
 
+/**
+ * Terminal, dual-audience message returned when a read tool is called with the
+ * SAME arguments past the repeat threshold inside one turn.
+ *
+ * Two readers must both be served by one string:
+ *  - the MODEL, which must STOP looping and answer with what it already has; and
+ *  - the FOUNDER, if it ever surfaces — it must read as an honest "I may be stuck"
+ *    note, never a fabricated success (rule #19 fail loud, rule #24 no fake "done").
+ *
+ * This is the deterministic answer to "even when it loops without crashing, the
+ * model should know it is going in circles and say so instead of hallucinating."
+ */
+export function repeatGuardBlockMessage(toolName: string, dataLabel?: string): string {
+  const what = dataLabel ?? "results";
+  return (
+    `STOP — you have already called ${toolName} with these exact arguments and its ` +
+    `result is already in the conversation above. Calling it again will not return ` +
+    `anything new; you are going in circles. Do NOT call ${toolName} again. ` +
+    `Answer the founder now using the ${what} you already have. If that data does not ` +
+    `actually satisfy the request, say so plainly and state exactly what is missing — ` +
+    `do NOT claim the task is complete when it is not.`
+  );
+}
+
 export function makeRepeatGuard(opts: RepeatGuardOptions = {}): RepeatGuard {
   const maxRepeats = opts.maxRepeats ?? DEFAULT_MAX_REPEATS;
   const windowMs = opts.windowMs ?? DEFAULT_WINDOW_MS;

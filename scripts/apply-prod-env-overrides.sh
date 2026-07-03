@@ -14,8 +14,25 @@ cd "$APP_DIR"
 
 if [ -n "${PROD_DOTENV:-}" ]; then
   umask 077
+  # Preserve the live on-box MTProto tester session across the render.
+  # TELEGRAM_TESTER_SESSION is a RUNTIME artifact (written by an on-box re-login),
+  # NOT part of PROD_DOTENV. Without this, the render reverts it to the stale value
+  # baked into the secret and Telegram revokes the auth key (AUTH_KEY_DUPLICATED),
+  # breaking every MTProto E2E QA run. The same fix exists inline in deploy.yml, but
+  # it MUST also live here: this script is the LAST writer of .env in both the deploy
+  # and the hardcore-QA workflows, so a workflow-only copy is silently undone here.
+  PRESERVE_SESSION=""
+  if [ -f .env ]; then
+    PRESERVE_SESSION="$(grep -E '^TELEGRAM_TESTER_SESSION=' .env | head -1 || true)"
+  fi
   printf '%s' "$PROD_DOTENV" | base64 -d > .env.tmp
   if grep -q '^DATABASE_URL=' .env.tmp; then
+    if [ -n "$PRESERVE_SESSION" ]; then
+      grep -v -E '^TELEGRAM_TESTER_SESSION=' .env.tmp > .env.tmp2 || true
+      printf '%s\n' "$PRESERVE_SESSION" >> .env.tmp2
+      mv .env.tmp2 .env.tmp
+      echo "==> Preserved on-box TELEGRAM_TESTER_SESSION across .env render"
+    fi
     mv .env.tmp .env
     chmod 600 .env
     echo "==> Rendered .env from PROD_DOTENV"
@@ -28,17 +45,21 @@ else
   echo "==> PROD_DOTENV not set; using existing .env on box"
 fi
 
-# Pin production model + OpenRouter key (same as deploy.yml).
+# Pin production model + OpenRouter key. MUST match deploy.yml — this script runs
+# LAST, so whatever it writes here is the model the bot actually boots with. It
+# previously hard-coded gemini-2.5-flash, which silently reverted the Pro pin that
+# deploy.yml (and PR #257) set, so the Pro reliability trial never actually ran in
+# prod. Keep this the single source of truth for the production model.
 if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
   {
-    printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-flash'
-    printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
+    printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-pro'
+    printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:google/gemini-2.5-flash,anthropic:claude-haiku-4-5'
     printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
   } >> .env.patched
   mv .env.patched .env
   chmod 600 .env
-  echo "==> Patched .env: AGENT_MODEL + OPENROUTER_API_KEY"
+  echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-pro + OPENROUTER_API_KEY"
 fi
 
 # LinkedIn direct API — separate secrets so founder can update without re-encoding PROD_DOTENV.

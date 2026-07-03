@@ -31,7 +31,11 @@ import {
 import { judgeOutbound } from "../../infra/judge.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
+import { makeRepeatGuard, repeatGuardBlockMessage } from "./repeat-guard.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
+
+// Loop breaker (T04, extended): bound identical read_emails calls in one turn.
+const _readEmailsRepeatGuard = makeRepeatGuard();
 
 const log = childLogger({ module: "agent-tools:comms" });
 
@@ -486,6 +490,9 @@ export const draftConnectionNote = tool(
 
 export const readEmails = tool(
   async ({ query, limit }) => {
+    if (_readEmailsRepeatGuard.shouldBlock("read_emails", { query, limit })) {
+      return repeatGuardBlockMessage("read_emails", "emails");
+    }
     const res = await readEmailsTool.execute({
       query,
       max_results: limit ?? 10,
