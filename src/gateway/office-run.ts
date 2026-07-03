@@ -35,6 +35,12 @@ import { buildOfficeInput } from "./pre-router.js";
 import { getActiveCompany } from "./active-company.js";
 import { isProvidedLinkedInPostRequest } from "./execution-guard.js";
 import {
+  attemptLoopRecovery,
+  buildRecoveryInput,
+  RECOVERY_RECURSION_LIMIT,
+  LOOP_RECOVERY_FAILED_MESSAGE,
+} from "./loop-recovery.js";
+import {
   aiMessageLooksFabricatedKnowledge,
   buildKnowledgeGroundingRefusal,
   detectLinkedInRefusalWithoutTool,
@@ -974,12 +980,45 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       return;
     }
     if (err instanceof GraphRecursionError) {
-      log.warn({ chatId }, "Run stopped: recursion limit reached");
+      log.warn({ chatId }, "Run stopped: recursion limit reached — attempting loop recovery");
       await clearThreadAfterAbort(chatId);
-      await session.onSystemNotice(
-        `🔁 <b>I got stuck in a loop on that one</b> and stopped to avoid runaway cost.\n` +
-          `I've cleared that task — just send your next message normally.`,
-      );
+      trace.event("loop.recovery.start", {});
+
+      // Recover-or-stop (founder launch requirement): one bounded single-pass
+      // retry on the freshly-cleared thread that forbids re-transferring. If it
+      // produces a real answer, deliver it — the task is ultimately completed.
+      const outcome = await attemptLoopRecovery(async () => {
+        const office = await getOffice();
+        const recoveryMessages = buildOfficeInput(buildRecoveryInput(text), getActiveCompany(chatId));
+        assertNonEmptyMessages(recoveryMessages, "loopRecovery");
+        const recoveryRes = (await withTurnTimeout(
+          office.invoke(
+            { messages: recoveryMessages },
+            {
+              ...config,
+              recursionLimit: RECOVERY_RECURSION_LIMIT,
+              callbacks: [new TraceCallback(trace)],
+            },
+          ),
+          OFFICE_TURN_TIMEOUT_MS,
+          "loop-recovery",
+        )) as { messages?: OfficeMessage[] };
+        // A recovery pass that pauses for HITL is not a completed answer — treat as
+        // non-recovered so the founder gets the honest "break it down" notice.
+        if (await getPendingApproval(office, config)) return "";
+        return finalReply(recoveryRes);
+      });
+
+      if (outcome.status === "recovered") {
+        trace.event("loop.recovery.ok", { replyLen: outcome.reply?.length ?? 0 });
+        log.info({ chatId }, "Loop recovery completed the task on the bounded retry");
+        await sendResult(session, { messages: [{ content: outcome.reply!, _getType: () => "ai" }] }, chatId);
+        return;
+      }
+
+      trace.event("loop.recovery.failed", {});
+      log.warn({ chatId }, "Loop recovery failed — asking founder to break the task down");
+      await session.onSystemNotice(LOOP_RECOVERY_FAILED_MESSAGE);
       return;
     }
     if (err instanceof TurnTimeoutError) {
