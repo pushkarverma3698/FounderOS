@@ -14,6 +14,9 @@
 # Run:  bash scripts/test-deploy-env-render.sh
 set -euo pipefail
 
+# Resolve the repo root BEFORE cd'ing away, so we can invoke the real script.
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
@@ -68,4 +71,26 @@ printf '%s' "$PROD_DOTENV" | base64 -d > .env.tmp
 mv .env.tmp .env
 grep -q "$STALE_SESSION" .env || fail "fresh box should accept secret's session"
 
-echo "PASS: deploy render preserves on-box TELEGRAM_TESTER_SESSION (2 assertions + negative control)"
+echo "PASS: deploy.yml inline render preserves on-box TELEGRAM_TESTER_SESSION (2 assertions + negative control)"
+
+# ── REAL last-writer path: scripts/apply-prod-env-overrides.sh ───────────────
+# The workflow-inline block above is correct, but apply-prod-env-overrides.sh is
+# the script that writes .env LAST in every workflow (deploy + hardcore-QA). The
+# 2026-07-01 prod incident: this shared script did NOT preserve the session (→
+# AUTH_KEY_DUPLICATED) and hard-coded gemini-2.5-flash (→ the Pro pin never took
+# effect). This asserts the REAL script, not a copy, does both correctly.
+cat > .env <<EOF
+DATABASE_URL=postgres://founderos:pw@localhost:5432/founderos
+TELEGRAM_TESTER_SESSION=$LIVE_SESSION
+TELEGRAM_BOT_TOKEN=123:abc
+EOF
+APP_DIR="$WORK" PROD_DOTENV="$PROD_DOTENV" OPENROUTER_API_KEY="test-key" \
+  bash "$REPO_ROOT/scripts/apply-prod-env-overrides.sh" >/dev/null
+
+REAL_SESSION="$(grep -E '^TELEGRAM_TESTER_SESSION=' .env | head -1 | cut -d= -f2-)"
+[ "$REAL_SESSION" = "$LIVE_SESSION" ] || fail "apply-prod-env-overrides.sh clobbered the live session (AUTH_KEY_DUPLICATED root cause)"
+grep -q "$STALE_SESSION" .env && fail "stale session leaked through apply-prod-env-overrides.sh"
+grep -q '^AGENT_MODEL=openrouter:google/gemini-2.5-pro$' .env || fail "apply-prod-env-overrides.sh did not pin Gemini 2.5 Pro (silent Flash revert)"
+grep -q '^AGENT_FALLBACK_MODELS=openrouter:google/gemini-2.5-flash,anthropic:claude-haiku-4-5$' .env || fail "apply-prod-env-overrides.sh fallback chain not Flash→Haiku"
+
+echo "PASS: apply-prod-env-overrides.sh (real last writer) preserves session + pins Pro"

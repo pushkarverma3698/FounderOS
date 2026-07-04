@@ -22,6 +22,60 @@ const MONDAY_BRIEF_RE =
 const RESEARCH_THEN_GITHUB_RE =
   /\bresearch\b[^.?!]{0,80}\b(then|and)\b[^.?!]{0,80}\b(github|issue)\b/i;
 
+// ── Cross-department fan-out detection (T28/T29) ──────────────────────────────
+// A single message that asks for a LinkedIn post AND/OR a GitHub issue (often on
+// top of a research ask) must become an explicit ordered ledger. Without one the
+// supervisor improvises the whole plan inside one ReAct loop — it recurses to the
+// limit and, worse, drafts the post inline instead of calling the HITL-gated
+// linkedin_post / github_write tools (so no approval card ever appears).
+
+/** Asks to publish/draft a LinkedIn post (not just read comments or reply). */
+const LINKEDIN_POST_RE =
+  /\b(?:linkedin|li)\b[^.?!\n]{0,40}\bpost\b|\bpost\b[^.?!\n]{0,20}\b(?:on|to)\b[^.?!\n]{0,10}\blinkedin\b|\bdraft[^.?!\n]{0,30}\blinkedin\b/i;
+
+/** Asks to open/create a GitHub issue. */
+const GITHUB_ISSUE_RE =
+  /\b(?:github|gh)\b[^.?!\n]{0,40}\bissue\b|\bissue\b[^.?!\n]{0,30}\b(?:github|gh|repo)\b|\bopen\b[^.?!\n]{0,20}\bissue\b/i;
+
+/** A research/comparison lead-in that should run before any write step. */
+const RESEARCH_HINT_RE =
+  /\b(research|find|compare|teardown|analy[sz]e|alternatives?|versus|who wins|top \d)\b|\bvs\b/i;
+
+/**
+ * Intent text shared by any marketing step that ends in a LinkedIn publish.
+ * It makes the HITL gate non-optional in deterministic code so approval-gate
+ * phrasing ("gate before posting", "show me first") can never be read as
+ * "skip the tool and paste a draft".
+ */
+const MARKETING_LINKEDIN_INTENT =
+  "Write the complete, publish-ready post and call linkedin_post with the final text. " +
+  "The linkedin_post approval card IS the founder's review gate — phrases like " +
+  '"gate before posting" or "show me first" mean call the tool, never paste the draft as plain text.';
+
+const ENGINEERING_ISSUE_INTENT =
+  "Open the GitHub issue with github_write (HITL-gated). The approval card is the founder's review gate — do not skip it.";
+
+/** Build an ordered fan-out ledger from detected write actions, or null. */
+function detectFanOutLedger(input: string): TaskLedgerStep[] | null {
+  const wantsLinkedIn = LINKEDIN_POST_RE.test(input);
+  const wantsGithub = GITHUB_ISSUE_RE.test(input);
+  if (!wantsLinkedIn && !wantsGithub) return null;
+
+  const wantsResearch = RESEARCH_HINT_RE.test(input);
+  const steps: TaskLedgerStep[] = [];
+  if (wantsResearch) {
+    steps.push({
+      dept: "research",
+      intent: "Research the topic with search_web (and search_turicks_brain for internal angle). Return findings verbatim.",
+    });
+  }
+  if (wantsGithub) steps.push({ dept: "engineering", intent: ENGINEERING_ISSUE_INTENT });
+  if (wantsLinkedIn) steps.push({ dept: "marketing", intent: MARKETING_LINKEDIN_INTENT });
+
+  // A real fan-out needs at least two departments; a lone write stays normal routing.
+  return steps.length >= 2 ? steps : null;
+}
+
 const MONDAY_BRIEF_STEPS: TaskLedgerStep[] = [
   {
     dept: "admin",
@@ -58,7 +112,7 @@ export function detectTaskLedger(input: string): TaskLedgerStep[] | null {
       },
     ];
   }
-  return null;
+  return detectFanOutLedger(input);
 }
 
 /** Build the SystemMessage directive the Chief of Staff must follow. */

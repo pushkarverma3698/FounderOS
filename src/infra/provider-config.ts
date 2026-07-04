@@ -72,7 +72,11 @@ export function getLinkedInBackend(): LinkedInBackend {
 
 /** Path to the gws binary (Google Workspace CLI). */
 export function getGwsBin(): string {
-  return envOr("GWS_BIN") ?? "gws";
+  // Use `||` not `??`: an empty GWS_BIN (e.g. `GWS_BIN=` in a rendered prod .env)
+  // must still fall back to "gws". With `??`, an empty string passes through and
+  // execFile("") throws "The argument 'file' cannot be empty" — the exact prod
+  // failure that took Gmail down on 2026-07-01. Never exec an empty binary path.
+  return envOr("GWS_BIN") || "gws";
 }
 
 /**
