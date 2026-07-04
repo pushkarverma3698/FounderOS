@@ -31,9 +31,16 @@ import type { ApprovalRequest } from "../agents/agent-tools.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt, getTodayCostUsd } from "../db/queries.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
-import { buildOfficeInput } from "./pre-router.js";
+import { buildOfficeInput, buildRecoveryOfficeInput } from "./pre-router.js";
+import { is503Error, isQuotaExhaustedError } from "../agents/model.js";
 import { getActiveCompany } from "./active-company.js";
 import { isProvidedLinkedInPostRequest } from "./execution-guard.js";
+import {
+  attemptLoopRecovery,
+  buildRecoveryInput,
+  RECOVERY_RECURSION_LIMIT,
+  LOOP_RECOVERY_FAILED_MESSAGE,
+} from "./loop-recovery.js";
 import {
   aiMessageLooksFabricatedKnowledge,
   buildKnowledgeGroundingRefusal,
@@ -974,12 +981,67 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       return;
     }
     if (err instanceof GraphRecursionError) {
-      log.warn({ chatId }, "Run stopped: recursion limit reached");
+      log.warn({ chatId }, "Run stopped: recursion limit reached — attempting loop recovery");
       await clearThreadAfterAbort(chatId);
-      await session.onSystemNotice(
-        `🔁 <b>I got stuck in a loop on that one</b> and stopped to avoid runaway cost.\n` +
-          `I've cleared that task — just send your next message normally.`,
-      );
+      trace.event("loop.recovery.start", {});
+
+      // Recover-or-stop (founder launch requirement): one bounded single-pass
+      // retry on the freshly-cleared thread that forbids re-transferring. If it
+      // produces a real answer, deliver it — the task is ultimately completed.
+      const recoveryTools = new ToolNameCollector();
+      const outcome = await attemptLoopRecovery(async () => {
+        const office = await getOffice();
+        // Recovery input carries ONLY the recovery directive — never the
+        // grounding/routing/ledger directives (they contradict it; see
+        // buildRecoveryOfficeInput).
+        const recoveryMessages = buildRecoveryOfficeInput(buildRecoveryInput(text), getActiveCompany(chatId));
+        assertNonEmptyMessages(recoveryMessages, "loopRecovery");
+        const recoveryRes = (await withTurnTimeout(
+          office.invoke(
+            { messages: recoveryMessages },
+            {
+              ...config,
+              recursionLimit: RECOVERY_RECURSION_LIMIT,
+              callbacks: [new TraceCallback(trace), recoveryTools],
+            },
+          ),
+          OFFICE_TURN_TIMEOUT_MS,
+          "loop-recovery",
+        )) as { messages?: OfficeMessage[] };
+        // A recovery pass that pauses for HITL is not a completed answer — treat as
+        // non-recovered so the founder gets the honest "break it down" notice.
+        if (await getPendingApproval(office, config)) return "";
+        return finalReply(recoveryRes);
+      });
+
+      // The recovered reply must clear the same anti-fabrication guard as a normal
+      // turn — before this check the recovery path delivered exactly the unbacked
+      // answer the normal path blocks (two subsystems enforcing opposite policies).
+      let deliverRecovery = outcome.status === "recovered";
+      if (deliverRecovery) {
+        const recoveredGuard = needsExecutionGuardRetry(
+          text,
+          [],
+          outcome.reply ?? "",
+          [...new Set(recoveryTools.tools)],
+        );
+        if (recoveredGuard === "memory" || recoveredGuard === "knowledge") {
+          trace.event("loop.recovery.guard_blocked", { kind: recoveredGuard });
+          log.warn({ chatId, kind: recoveredGuard }, "Recovery reply failed grounding guard — honest stop");
+          deliverRecovery = false;
+        }
+      }
+
+      if (deliverRecovery) {
+        trace.event("loop.recovery.ok", { replyLen: outcome.reply?.length ?? 0 });
+        log.info({ chatId }, "Loop recovery completed the task on the bounded retry");
+        await sendResult(session, { messages: [{ content: outcome.reply!, _getType: () => "ai" }] }, chatId);
+        return;
+      }
+
+      trace.event("loop.recovery.failed", {});
+      log.warn({ chatId }, "Loop recovery failed — asking founder to break the task down");
+      await session.onSystemNotice(LOOP_RECOVERY_FAILED_MESSAGE);
       return;
     }
     if (err instanceof TurnTimeoutError) {
@@ -992,10 +1054,33 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       );
       return;
     }
+    // Provider capacity/quota errors on the SUPERVISOR's own LLM call have no
+    // fallback (createSupervisor takes a bare model — fallback middleware only
+    // covers departments). Surface them honestly instead of a raw stack dump.
+    if (is503Error(err) || isQuotaExhaustedError(err) || isProviderNoToolUseError(err)) {
+      const reason = err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200);
+      log.warn({ chatId, err: reason }, "Run stopped: model provider unavailable");
+      await clearThreadAfterAbort(chatId);
+      await session.onSystemNotice(
+        `🌩️ <b>The AI provider is overloaded or unavailable right now</b>\n` +
+          `<code>${safeHtml(reason)}</code>\n\n` +
+          `Nothing was lost — send the message again in a minute.`,
+      );
+      return;
+    }
     const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);
     log.error({ err: msg, chatId }, "Office run failed");
     await session.onSystemNotice(`❌ <b>Error</b>\n<code>${safeHtml(msg.slice(0, 1200))}</code>`);
   }
+}
+
+/**
+ * OpenRouter 404 "No endpoints found that support tool use" — the configured
+ * model cannot run this system at all (live-hit 2026-07-03 with hermes-3-405b).
+ */
+export function isProviderNoToolUseError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return /no endpoints found/i.test(err.message) || (/\b404\b/.test(err.message) && /tool use/i.test(err.message));
 }
 
 // ── Resume a paused run after an approval decision ─────────────────────────────

@@ -17,6 +17,7 @@ import { logBootReport } from "./infra/boot-report.js";
 import { assertBootConfigOrThrow } from "./infra/boot-validate.js";
 import { env, TELEGRAM_POLLING_ENABLED } from "./core/config.js";
 import { closeDatabaseConnections } from "./db/client.js";
+import { closeBrowser } from "./tools/browser-playwright.js";
 import { getOffice } from "./agents/office.js";
 import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
 import { restorePendingApprovalAfterRestart, restorePendingWebHitl } from "./gateway/office-run.js";
@@ -125,6 +126,7 @@ async function shutdown(signal: string): Promise<void> {
   log.info({ signal }, "Shutdown signal received — draining…");
   healthServer?.close();
   await stopBot();
+  await closeBrowser(); // release the singleton headless Chromium (no-op if never launched)
   await closeDatabaseConnections();
   releaseSingleInstanceLock();
   log.info("FounderOS stopped cleanly");

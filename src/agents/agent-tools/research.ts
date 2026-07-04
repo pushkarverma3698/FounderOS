@@ -18,8 +18,13 @@ import { scrapeUrl, ragSearch, crawlSite, type ScrapeResult } from "../../tools/
 import { getCachedScrape, setCachedScrape, ingestResearch } from "../../infra/research-memory.js";
 import { recordEventTool } from "../../tools/memory.js";
 import { childLogger } from "../../infra/logger.js";
+import { makeRepeatGuard, repeatGuardBlockMessage } from "./repeat-guard.js";
 
 const log = childLogger({ module: "agent-tool:research" });
+
+// Loop breaker (T04, extended): a weak model can spin on the SAME search_web
+// query. Bounds identical calls even when they succeed — self-scopes to a turn.
+const _searchWebRepeatGuard = makeRepeatGuard();
 
 const DEEP_RESEARCH_MAX_PAGES = 3; // hard cap — protects RUN_BUDGET_* + Apify credits
 const CRAWL_MAX_PAGES_DEFAULT = 10;
@@ -30,6 +35,9 @@ const EXCERPT_MAX = 1_500; // per-page content bound in tool output (token contr
 
 export const searchWeb = tool(
   async ({ query, limit }) => {
+    if (_searchWebRepeatGuard.shouldBlock("search_web", { query, limit })) {
+      return repeatGuardBlockMessage("search_web", "search results");
+    }
     const res = await webSearchTool.execute({ query, limit: limit ?? 5 });
     if (!res.success) {
       return `Web search failed: ${res.error ?? "unknown error"}. (Primary is Gemini grounding via GOOGLE_GENERATIVE_AI_API_KEY; the keyless DuckDuckGo fallback may be rate-limited — retry shortly.)`;

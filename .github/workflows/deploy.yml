@@ -80,6 +80,16 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/founderos
+            # The live MTProto tester session (TELEGRAM_TESTER_SESSION) is a RUNTIME
+            # artifact owned by the box: it is written there by an on-box re-login and
+            # is NOT in PROD_DOTENV. Rendering .env from the secret used to revert it to
+            # a stale value, which made Telegram revoke the auth key (AUTH_KEY_DUPLICATED)
+            # on every deploy. Capture the on-box line first and re-inject it after the
+            # render so deploys never clobber the live session.
+            PRESERVE_SESSION=""
+            if [ -f .env ]; then
+              PRESERVE_SESSION="$(grep -E '^TELEGRAM_TESTER_SESSION=' .env | head -1 || true)"
+            fi
             # Render the production .env from the secret (atomic, 0600). Only when
             # the secret is present — never clobber a good .env with an empty one.
             if [ -n "${PROD_DOTENV:-}" ]; then
@@ -87,6 +97,14 @@ jobs:
               printf '%s' "$PROD_DOTENV" | base64 -d > .env.tmp
               # Sanity: a valid .env must contain DATABASE_URL, else abort (keep old).
               if grep -q '^DATABASE_URL=' .env.tmp; then
+                # Re-inject the preserved on-box session (drop any stale copy from the
+                # secret first, then append the live one).
+                if [ -n "$PRESERVE_SESSION" ]; then
+                  grep -v -E '^TELEGRAM_TESTER_SESSION=' .env.tmp > .env.tmp2 || true
+                  printf '%s\n' "$PRESERVE_SESSION" >> .env.tmp2
+                  mv .env.tmp2 .env.tmp
+                  echo "==> Preserved on-box TELEGRAM_TESTER_SESSION across .env render"
+                fi
                 mv .env.tmp .env
                 chmod 600 .env
                 echo "==> Rendered /opt/founderos/.env from PROD_DOTENV secret"
@@ -98,17 +116,20 @@ jobs:
             else
               echo "==> PROD_DOTENV not set; using the .env already on the box"
             fi
-            # Pin the production model. Gemini 2.5 Flash is the documented prod model.
+            # Pin the production model. Gemini 2.5 Pro is the documented prod model
+            # (stronger agentic tool-caller — reliability trial replacing 2.5 Flash).
+            # Fallback drops to Flash first (cheap, same family) on a Pro capacity 503,
+            # then Haiku. Reclaim cost later via WORKER_AGENT_MODEL=…flash once Pro is proven.
             if [ -n "${OPENROUTER_API_KEY:-}" ]; then
               grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
               {
-                printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-flash'
-                printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
+                printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-pro'
+                printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:google/gemini-2.5-flash,anthropic:claude-haiku-4-5'
                 printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
               } >> .env.patched
               mv .env.patched .env
               chmod 600 .env
-              echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-flash"
+              echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-pro"
             fi
             # MCP bridge Slack secrets — append only when the secret is set.
             # These are NOT in PROD_DOTENV (they rotate independently); forwarded as

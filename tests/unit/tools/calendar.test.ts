@@ -2,7 +2,7 @@
  * Unit tests for calendarTool — tool boundary (idempotency, past-date guard, audit).
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockProviderCreateCalendarEvent = vi.fn();
 
@@ -20,13 +20,25 @@ vi.mock("../../../src/db/queries.js", async (orig) => {
 
 const { calendarTool } = await import("../../../src/tools/calendar.js");
 
+// Computed relative to "now" (not hardcoded) so these tests never go stale as
+// the calendar's past-date guard compares against Date.now() at test-run time.
+function tomorrow(): string {
+  const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
+/** A future timed datetime (tomorrow at 09:00), for tests that need a specific time-of-day. */
+function tomorrowAt9am(): string {
+  return `${tomorrow()}T09:00:00`;
+}
+
 function successResult(id = "event_abc123") {
   return {
     success: true,
     data: {
       event_id: id,
       title: "test",
-      date: "2026-07-02T00:00:00",
+      date: `${tomorrow()}T00:00:00`,
       html_link: `https://www.google.com/calendar/event?eid=${id}`,
     },
   };
@@ -34,22 +46,34 @@ function successResult(id = "event_abc123") {
 
 describe("calendarTool", () => {
   beforeEach(() => {
+    // Pin "now" so the tool's past-date guard is deterministic (rule #16). The
+    // fixture dates (2026-07-02, 2026-07-10) must stay in the future relative to
+    // "now" — otherwise this suite silently breaks the instant the real wall-clock
+    // rolls past a hardcoded date (it did, on 2026-07-02). Fake ONLY Date so real
+    // timers/async are untouched.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-01T00:00:00Z"));
     vi.clearAllMocks();
     mockHasBeenAudited.mockResolvedValue(false);
     mockWriteAuditEntry.mockResolvedValue(undefined);
     mockProviderCreateCalendarEvent.mockResolvedValue(successResult());
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("returns success: true with event_id on an all-day event", async () => {
-    const result = await calendarTool.execute({ title: "UK", date: "2026-07-02" });
+    const date = tomorrow();
+    const result = await calendarTool.execute({ title: "UK", date });
 
     expect(result.success).toBe(true);
     expect((result.data as { event_id: string }).event_id).toBe("event_abc123");
     expect(mockProviderCreateCalendarEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "UK",
-        start_datetime: "2026-07-02T00:00:00",
-        end_datetime: "2026-07-02T23:59:00",
+        start_datetime: `${date}T00:00:00`,
+        end_datetime: `${date}T23:59:00`,
       }),
     );
   });
@@ -60,7 +84,7 @@ describe("calendarTool", () => {
       error: "Invalid time range",
     });
 
-    const result = await calendarTool.execute({ title: "Bad", date: "2026-07-10T09:00:00" });
+    const result = await calendarTool.execute({ title: "Bad", date: tomorrowAt9am() });
 
     expect(result.success).toBe(false);
     expect(mockWriteAuditEntry).not.toHaveBeenCalled();
@@ -79,7 +103,7 @@ describe("calendarTool", () => {
 
     const result = await calendarTool.execute({
       title: "Dup",
-      date: "2026-07-02",
+      date: tomorrow(),
       idempotency_key: "cal:dup",
     });
 
@@ -89,12 +113,13 @@ describe("calendarTool", () => {
   });
 
   it("timed event end defaults to +1h", async () => {
-    await calendarTool.execute({ title: "Timed", date: "2026-07-10T09:00:00" });
+    const date = tomorrow();
+    await calendarTool.execute({ title: "Timed", date: `${date}T09:00:00` });
 
     expect(mockProviderCreateCalendarEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        start_datetime: "2026-07-10T09:00:00",
-        end_datetime: "2026-07-10T10:00:00",
+        start_datetime: `${date}T09:00:00`,
+        end_datetime: `${date}T10:00:00`,
       }),
     );
   });

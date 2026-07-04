@@ -17,6 +17,7 @@ import { applyCinematicPresetTool } from "../../tools/cinematic-preset.js";
 import { deployStaticSiteTool } from "../../tools/deploy-static-site.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
+import { makeRepeatGuard, repeatGuardBlockMessage } from "./repeat-guard.js";
 import { toolFailure, isStructuredToolFailure, type ToolFailureStage } from "../tool-result.js";
 import { hasBeenAudited, writeAuditEntry, publishDeptEventWithAudit } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
@@ -148,10 +149,22 @@ export function capConsecutiveToolFailures(
 // Tests inject their own counter via the pure helper; production code uses this.
 const _sharedGithubCounter = makeToolFailureCounter();
 
+// Repeat-call breaker (T04): bounds identical github_read calls even when they
+// SUCCEED — the failure cap above only fires on errors. Time-windowed so it
+// self-scopes to a turn; a legitimate repeat minutes later is never blocked.
+const _githubRepeatGuard = makeRepeatGuard();
+
 // ── Engineering: GitHub read (read-only, NO approval) ─────────────────────────
 
 export const githubRead = tool(
   async ({ action, owner, repo }) => {
+    // Loop breaker: if the model has already called github_read with this exact
+    // input twice, stop hitting the API and force it to answer with what it has.
+    // This is the deterministic fix for the GraphRecursionError wedge on a
+    // successful-but-repeated list_repos (rule #16 — never trust the model to stop).
+    if (_githubRepeatGuard.shouldBlock("github_read", { action, owner, repo })) {
+      return repeatGuardBlockMessage("github_read", "GitHub data");
+    }
     const res = await githubTool.execute({ action, ...(owner ? { owner } : {}), ...(repo ? { repo } : {}) });
     if (!res.success) {
       return capConsecutiveToolFailures(
