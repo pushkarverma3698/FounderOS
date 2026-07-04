@@ -80,84 +80,6 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/founderos
-            # The live MTProto tester session (TELEGRAM_TESTER_SESSION) is a RUNTIME
-            # artifact owned by the box: it is written there by an on-box re-login and
-            # is NOT in PROD_DOTENV. Rendering .env from the secret used to revert it to
-            # a stale value, which made Telegram revoke the auth key (AUTH_KEY_DUPLICATED)
-            # on every deploy. Capture the on-box line first and re-inject it after the
-            # render so deploys never clobber the live session.
-            PRESERVE_SESSION=""
-            if [ -f .env ]; then
-              PRESERVE_SESSION="$(grep -E '^TELEGRAM_TESTER_SESSION=' .env | head -1 || true)"
-            fi
-            # Render the production .env from the secret (atomic, 0600). Only when
-            # the secret is present — never clobber a good .env with an empty one.
-            if [ -n "${PROD_DOTENV:-}" ]; then
-              umask 077
-              printf '%s' "$PROD_DOTENV" | base64 -d > .env.tmp
-              # Sanity: a valid .env must contain DATABASE_URL, else abort (keep old).
-              if grep -q '^DATABASE_URL=' .env.tmp; then
-                # Re-inject the preserved on-box session (drop any stale copy from the
-                # secret first, then append the live one).
-                if [ -n "$PRESERVE_SESSION" ]; then
-                  grep -v -E '^TELEGRAM_TESTER_SESSION=' .env.tmp > .env.tmp2 || true
-                  printf '%s\n' "$PRESERVE_SESSION" >> .env.tmp2
-                  mv .env.tmp2 .env.tmp
-                  echo "==> Preserved on-box TELEGRAM_TESTER_SESSION across .env render"
-                fi
-                mv .env.tmp .env
-                chmod 600 .env
-                echo "==> Rendered /opt/founderos/.env from PROD_DOTENV secret"
-              else
-                rm -f .env.tmp
-                echo "!! PROD_DOTENV decoded but has no DATABASE_URL — keeping existing .env" >&2
-                exit 1
-              fi
-            else
-              echo "==> PROD_DOTENV not set; using the .env already on the box"
-            fi
-            # Pin the production model — HYBRID split (cost-reclaim, proven-Pro path).
-            # Supervisor stays on Gemini 2.5 Pro (strong agentic routing/tool-calling);
-            # workers drop to 2.5 Flash via WORKER_AGENT_MODEL (getWorkerModel honours it,
-            # fails safe to the primary if unset/misconfigured). Fallback drops to Flash
-            # first (cheap, same family) on a Pro capacity 503, then Haiku.
-            # Also enable the advanced departments that ship OFF by default:
-            #   CREATIVE_SUBGRAPH   → art_director/copywriter/brand_designer (Nano Banana image-gen)
-            #   ENGINEERING_SUBGRAPH → coder/qa/devops CTO sub-supervisor
-            #   MCP_BRIDGE_ENABLED  → external MCP tools (browser-use, blender, slack; per-server
-            #                         try/catch means a dead server contributes zero tools, no crash)
-            if [ -n "${OPENROUTER_API_KEY:-}" ]; then
-              # Also drop any stale LINKEDIN_API_VERSION — a leftover malformed value
-              # (20240501) 426'd every post on 2026-07-04. Unset lets the code default
-              # (a current YYYYMM) apply; the code now ignores malformed values anyway.
-              grep -v -E '^(AGENT_MODEL|WORKER_AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS|CREATIVE_SUBGRAPH|ENGINEERING_SUBGRAPH|MCP_BRIDGE_ENABLED|LINKEDIN_API_VERSION)=' .env > .env.patched || true
-              {
-                printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-pro'
-                printf '%s\n' 'WORKER_AGENT_MODEL=openrouter:google/gemini-2.5-flash'
-                printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:google/gemini-2.5-flash,anthropic:claude-haiku-4-5'
-                printf '%s\n' 'CREATIVE_SUBGRAPH=1'
-                printf '%s\n' 'ENGINEERING_SUBGRAPH=1'
-                printf '%s\n' 'MCP_BRIDGE_ENABLED=true'
-                printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
-              } >> .env.patched
-              mv .env.patched .env
-              chmod 600 .env
-              echo "==> Patched .env: hybrid model (Pro supervisor + Flash workers), creative+engineering subgraphs ON, MCP bridge ON"
-            fi
-            # MCP bridge Slack secrets — append only when the secret is set.
-            # These are NOT in PROD_DOTENV (they rotate independently); forwarded as
-            # separate GitHub secrets so they can be updated without re-encoding the
-            # entire PROD_DOTENV blob.
-            if [ -n "${SLACK_BOT_TOKEN:-}" ]; then
-              grep -v -E '^(SLACK_BOT_TOKEN|SLACK_TEAM_ID)=' .env > .env.patched || true
-              {
-                printf 'SLACK_BOT_TOKEN=%s\n' "$SLACK_BOT_TOKEN"
-                [ -n "${SLACK_TEAM_ID:-}" ] && printf 'SLACK_TEAM_ID=%s\n' "$SLACK_TEAM_ID"
-              } >> .env.patched
-              mv .env.patched .env
-              chmod 600 .env
-              echo "==> Patched .env: SLACK_BOT_TOKEN + SLACK_TEAM_ID set"
-            fi
             # Fix git permission drift (e.g. prior verify left root-owned refs).
             if [ -d .git/refs/heads/cursor ]; then
               rm -rf .git/refs/heads/cursor 2>/dev/null || true
@@ -166,5 +88,11 @@ jobs:
             git fetch --quiet origin main
             git checkout --force --detach origin/main 2>/dev/null || git checkout -B main origin/main
             chmod +x scripts/apply-prod-env-overrides.sh deploy/deploy.sh 2>/dev/null || true
+            # scripts/apply-prod-env-overrides.sh is the ONLY writer of .env (render
+            # from PROD_DOTENV, TELEGRAM_TESTER_SESSION preservation, hybrid model +
+            # subgraph pins, LinkedIn/Slack secrets, static-site defaults). It used to
+            # be duplicated inline here AND in the script, with the script running
+            # last — silently discarding this workflow's patch every deploy. Fixed
+            # 2026-07-04: single source of truth, see the script's header comment.
             bash scripts/apply-prod-env-overrides.sh
             ./deploy/deploy.sh
