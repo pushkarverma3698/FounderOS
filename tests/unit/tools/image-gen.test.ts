@@ -13,6 +13,22 @@ import {
   IMAGE_MODEL_FINAL,
 } from "../../../src/tools/image-gen.js";
 
+describe("model ids — pinned to REAL Generative Language API model names", () => {
+  // 2026-07-04 prod incident: IMAGE_MODEL_DRAFT.id was "gemini-3-1-flash-image"
+  // (a typo'd/nonexistent id — dash instead of the real "2.5" family name). Every
+  // live creative-department image request 404'd for days before this was caught
+  // by reading prod logs, not by this test suite (all fetch calls were mocked).
+  // Pin the literal strings so a typo here can never again go unnoticed until a
+  // live call — verified against the real API on 2026-07-04 (HTTP 200, real
+  // inline image data returned for both ids).
+  it("DRAFT id is the real, live-verified Generative Language model", () => {
+    expect(IMAGE_MODEL_DRAFT.id).toBe("gemini-2.5-flash-image");
+  });
+  it("FINAL id is the real, live-verified Generative Language model", () => {
+    expect(IMAGE_MODEL_FINAL.id).toBe("gemini-3-pro-image");
+  });
+});
+
 describe("selectImageModel — cost-disciplined, fail-cheap", () => {
   it("defaults to the cheap DRAFT model (no signal)", () => {
     expect(selectImageModel({}).id).toBe(IMAGE_MODEL_DRAFT.id);

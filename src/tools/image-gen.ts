@@ -4,9 +4,16 @@
  * Core image-generation primitive for the Creative department. Two tiers, with
  * the SAME cost discipline as the Ollama/Claude router (rule #17, ADR cost gate):
  *
- *   • DRAFT  → Nano Banana 2  (gemini-3-1-flash-image)  — cheap, the default.
- *   • FINAL  → Nano Banana Pro (gemini-3-pro-image)     — ~$0.134/img, gated on
+ *   • DRAFT  → Nano Banana  (gemini-2.5-flash-image)  — cheap, the default.
+ *   • FINAL  → Nano Banana Pro (gemini-3-pro-image)   — ~$0.134/img, gated on
  *              an EXPLICIT "final asset" intent AND a budget check by the caller.
+ *
+ * 2026-07-04: DRAFT's id was "gemini-3-1-flash-image" — nonexistent on the
+ * Generative Language API (HTTP 404 on every real call, confirmed in prod
+ * journalctl). Every unit test mocked fetch, so this shipped and stayed broken
+ * in prod for days undetected. Fixed to "gemini-2.5-flash-image" — live-verified
+ * against the real API (HTTP 200, real inline image bytes returned) before this
+ * fix landed. FINAL's id was already correct (also live-verified).
  *
  * Model selection is a PURE function (rule #16: routing lives in deterministic
  * code, not a prompt the model may ignore). The HTTP call takes an injectable
@@ -31,9 +38,9 @@ export interface ImageModelSpec {
   tier: ImageTier;
 }
 
-/** Nano Banana 2 — fast drafts. The default for everything but explicit finals. */
+/** Nano Banana — fast drafts. The default for everything but explicit finals. */
 export const IMAGE_MODEL_DRAFT: ImageModelSpec = {
-  id: "gemini-3-1-flash-image",
+  id: "gemini-2.5-flash-image",
   usdPerImage: 0.01,
   tier: "draft",
 };
