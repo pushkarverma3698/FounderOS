@@ -31,7 +31,18 @@ describe("P3 — revenue subgraph flag wiring", () => {
     delete process.env["ENGINEERING_SUBGRAPH"];
   });
 
-  it("default: flat marketing + sales nodes (no revenue)", async () => {
+  it("flag off (REVENUE_SUBGRAPH=0): flat marketing + sales nodes (no revenue)", async () => {
+    const nodes = await compileOfficeNodes("0");
+    expect(nodes).toContain("marketing");
+    expect(nodes).toContain("sales");
+    expect(nodes).not.toContain("revenue");
+    expect(nodes).toContain("admin");
+  });
+
+  it("default (flag unset → prod default FALSE): flat marketing + sales, no revenue", async () => {
+    // 2026-06-29: default restored to false. Production runs the flat,
+    // production-stable marketing + sales departments; the revenue sub-supervisor
+    // is opt-in until its nested-HITL loop is live-verified (rule #19.6).
     const nodes = await compileOfficeNodes(undefined);
     expect(nodes).toContain("marketing");
     expect(nodes).toContain("sales");
@@ -39,7 +50,7 @@ describe("P3 — revenue subgraph flag wiring", () => {
     expect(nodes).toContain("admin");
   });
 
-  it("flag on: revenue replaces marketing + sales at top level", async () => {
+  it("flag on (REVENUE_SUBGRAPH=1): revenue replaces marketing + sales at top level", async () => {
     const nodes = await compileOfficeNodes("1");
     expect(nodes).toContain("revenue");
     expect(nodes).not.toContain("marketing");

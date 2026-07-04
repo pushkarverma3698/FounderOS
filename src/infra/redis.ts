@@ -32,10 +32,15 @@ let _redis: Redis | null = null;
 
 /**
  * Lazy singleton — connects on first use.
- * Graceful: logs errors but does not throw on connection failure.
+ * Returns null if REDIS_URL is not configured (SaaS-phase: Redis is optional).
+ * Callers must handle null → fail-open (cacheGet returns null, incrQuota returns 0).
  */
-export function getRedis(): Redis {
+export function getRedis(): Redis | null {
   if (_redis) return _redis;
+  if (!env.REDIS_URL) {
+    log.debug("REDIS_URL not set — Redis disabled");
+    return null;
+  }
 
   _redis = new Redis(env.REDIS_URL, {
     maxRetriesPerRequest: 2,
@@ -149,8 +154,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
  * Times out after 3s to prevent slow Redis from blocking callers.
  */
 export async function cacheGet<T>(key: string): Promise<T | null> {
+  const redis = getRedis();
+  if (!redis) return null;
   try {
-    const raw = await withTimeout(getRedis().get(key), REDIS_OP_TIMEOUT_MS, "GET");
+    const raw = await withTimeout(redis.get(key), REDIS_OP_TIMEOUT_MS, "GET");
     return raw ? (JSON.parse(raw) as T) : null;
   } catch (err) {
     log.warn({ key, err: (err as Error).message }, "Redis cacheGet failed — cache miss");
@@ -166,9 +173,11 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
  */
 export async function cacheSet(key: string, value: unknown, ttlSeconds: number): Promise<void> {
   if (ttlSeconds <= 0) return; // CEO tier: never cache
+  const redis = getRedis();
+  if (!redis) return;
   try {
     await withTimeout(
-      getRedis().setex(key, ttlSeconds, JSON.stringify(value)),
+      redis.setex(key, ttlSeconds, JSON.stringify(value)),
       REDIS_OP_TIMEOUT_MS,
       "SETEX",
     );
@@ -184,9 +193,10 @@ export async function cacheSet(key: string, value: unknown, ttlSeconds: number):
  * Times out after 3s.
  */
 export async function incrQuota(tenantId: string): Promise<number> {
+  const redis = getRedis();
+  if (!redis) return 0;
   const key = KEYS.quota(tenantId, todayUtc());
   try {
-    const redis = getRedis();
     const count = await withTimeout(redis.incr(key), REDIS_OP_TIMEOUT_MS, "INCR");
     if (count === 1) {
       // First increment today — set expiry to midnight UTC (fire-and-forget, non-critical)
@@ -203,9 +213,11 @@ export async function incrQuota(tenantId: string): Promise<number> {
 
 /** Get current quota count without incrementing. Returns 0 on miss or error. */
 export async function getQuota(tenantId: string): Promise<number> {
+  const redis = getRedis();
+  if (!redis) return 0;
   const key = KEYS.quota(tenantId, todayUtc());
   try {
-    const raw = await getRedis().get(key);
+    const raw = await redis.get(key);
     return raw ? parseInt(raw, 10) : 0;
   } catch {
     return 0;

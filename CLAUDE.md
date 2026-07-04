@@ -195,9 +195,10 @@ pnpm test
 
 **Development / integration testing (local, free):**
 ```
-AGENT_MODEL=openrouter:google/gemini-2.5-flash:free
-AGENT_FALLBACK_MODELS=openrouter:deepseek/deepseek-r1:free,openrouter:meta-llama/llama-3.3-70b-instruct:free
+AGENT_MODEL=openrouter:meta-llama/llama-3.3-70b-instruct:free
+AGENT_FALLBACK_MODELS=openrouter:qwen/qwen3-next-80b-a3b-instruct:free,openrouter:nousresearch/hermes-3-llama-3.1-405b:free
 ```
+⚠️ `openrouter:google/gemini-2.5-flash:free` was **RETIRED 2026-06-27** (returns 404, NOT 503 — the fallback chain won't catch it). Use llama-3.3-70b as the free primary.
 
 **NEVER set `google-genai:gemini-*` on your local machine.** That routes through the paid Google API key and burns quota on every test run. Always use the OpenRouter free-tier path locally.
 
@@ -229,6 +230,9 @@ src/gateway/commands.ts        — All /command handlers
 src/gateway/format.ts          — markdownToTelegramHtml formatter
 src/workflows/registry.ts      — SOP workflow definitions
 src/workflows/runner.ts        — Pure workflow executor (callback-injected, no grammy)
+src/mcp/server.ts              — MCP SERVER: exposes read-only tools to external clients
+src/mcp/client.ts              — MCP CLIENT bridge: agents consume external MCP servers (ADR-041)
+mcp-bridge.json                — External MCP server manifest (servers + write allowlist)
 drizzle/                       — Generated migration SQL (run: npx drizzle-kit migrate)
 ```
 
@@ -421,7 +425,7 @@ Every real Gemini/OpenRouter paid call during a dev session is waste. The develo
 1. **Write a failing unit test first.** If you can't reproduce the bug in a unit test with mocked LLM output, you don't understand it yet. Do not move to step 2.
 2. **Fix the implementation until the unit test passes.** `pnpm test` is mocked and $0. This is your primary feedback loop — use it aggressively.
 3. **Run `pnpm lint && tsc --noEmit` clean.** Zero errors before ANY live call.
-4. **Integration check with free model.** Set `AGENT_MODEL=openrouter:google/gemini-2.5-flash:free` and run a single probe only if the logic crosses LLM routing. Free tier, $0.
+4. **Integration check with free model.** Set `AGENT_MODEL=openrouter:meta-llama/llama-3.3-70b-instruct:free` and run a single probe only if the logic crosses LLM routing. Free tier, $0. (⚠️ `gemini-2.5-flash:free` retired 2026-06-27)
 5. **MTProto / live Telegram QA exactly once.** Only after steps 1–4 are green. This is the most expensive step. Run it once when the feature is PR-ready, not during debugging.
 6. **`pnpm eval` is a milestone gate.** Run it once when the entire feature is done. Not per iteration, not per file change.
 

@@ -21,7 +21,9 @@ vi.mock("../../../src/db/client.js", async (orig) => {
   };
 });
 
-const { clearThreadCheckpoints } = await import("../../../src/infra/checkpointer.js");
+const { clearThreadCheckpoints, sweepStaleCheckpoints } = await import(
+  "../../../src/infra/checkpointer.js"
+);
 
 describe("clearThreadCheckpoints", () => {
   beforeEach(() => {
@@ -65,5 +67,60 @@ describe("clearThreadCheckpoints", () => {
       .mockResolvedValueOnce({ rowCount: 4 });
     const total = await clearThreadCheckpoints("turicks:123");
     expect(total).toBe(7);
+  });
+});
+
+describe("sweepStaleCheckpoints (P0: TTL backstop on unbounded checkpoint growth)", () => {
+  beforeEach(() => {
+    mockQuery.mockReset();
+  });
+
+  it("selects stale threads by latest-checkpoint age, parameterized on maxAgeDays", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] }); // SELECT stale threads → none
+    await sweepStaleCheckpoints(30);
+
+    const [sql, params] = mockQuery.mock.calls[0]!;
+    expect(sql).toMatch(/FROM agents\.checkpoints/);
+    expect(sql).toMatch(/GROUP BY thread_id/);
+    expect(sql).toMatch(/HAVING MAX\(\(checkpoint->>'ts'\)::timestamptz\)/); // newest turn, not oldest
+    expect(sql).toMatch(/NOW\(\) - \(\$1 \|\| ' days'\)::interval/);
+    expect(params).toEqual(["30"]); // value bound, never interpolated
+  });
+
+  it("clears every stale thread and sums rows deleted across them", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ thread_id: "turicks:1" }, { thread_id: "turicks:2" }] }) // SELECT
+      // clearThreadCheckpoints("turicks:1") → 3 DELETEs
+      .mockResolvedValueOnce({ rowCount: 2 })
+      .mockResolvedValueOnce({ rowCount: 1 })
+      .mockResolvedValueOnce({ rowCount: 0 })
+      // clearThreadCheckpoints("turicks:2") → 3 DELETEs
+      .mockResolvedValueOnce({ rowCount: 4 })
+      .mockResolvedValueOnce({ rowCount: 0 })
+      .mockResolvedValueOnce({ rowCount: 3 });
+
+    const result = await sweepStaleCheckpoints(7);
+    expect(result).toEqual({ threads: 2, rows: 10 });
+
+    // every DELETE after the SELECT is thread-scoped to one of the stale ids
+    const deleteCalls = mockQuery.mock.calls.slice(1);
+    expect(deleteCalls).toHaveLength(6);
+    for (const [sql, params] of deleteCalls) {
+      expect(sql).toContain("thread_id");
+      expect((params as string[])[0]).toMatch(/^turicks:(1|2)$/);
+    }
+  });
+
+  it("returns zeros and does NOT throw if the checkpoints table is missing", async () => {
+    mockQuery.mockRejectedValueOnce(new Error('relation "agents.checkpoints" does not exist'));
+    const result = await sweepStaleCheckpoints(30);
+    expect(result).toEqual({ threads: 0, rows: 0 });
+    expect(mockQuery).toHaveBeenCalledTimes(1); // bailed after the failed SELECT, no DELETEs
+  });
+
+  it("rejects a non-positive maxAgeDays (guards an accidental wipe-everything)", async () => {
+    await expect(sweepStaleCheckpoints(0)).rejects.toThrow(/positive number/);
+    await expect(sweepStaleCheckpoints(-5)).rejects.toThrow(/positive number/);
+    expect(mockQuery).not.toHaveBeenCalled(); // never touches the DB on bad input
   });
 });

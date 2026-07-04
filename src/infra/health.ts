@@ -22,6 +22,7 @@ import { runProviderProbes, getLastProviderProbe } from "./provider-probes.js";
 import { getGmailBackend } from "./provider-config.js";
 import { handleWebGatewayRequest } from "../gateway/web.js";
 import { serveJarvisStatic } from "./jarvis-static.js";
+import { COCKPIT_HTML } from "../gateway/cockpit-ui.js";
 
 const log = childLogger({ module: "health" });
 
@@ -94,6 +95,7 @@ export interface HealthReport {
   integrations: {
     composio_gmail: { status: string; detail: string };
     gws_gmail: { status: string; detail: string };
+    googleapis_gmail: { status: string; detail: string };
     active_gmail: { status: string; detail: string };
     checked_at: string | null;
   };
@@ -125,6 +127,7 @@ export async function buildHealthReport(): Promise<HealthReport> {
   const backend = probe?.gmail_backend ?? getGmailBackend();
   const composio = probe?.composio_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
   const gws = probe?.gws_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
+  const googleapis = probe?.googleapis_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
   const active = probe?.active_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
   const gmailDegraded = active.status === "down";
   return {
@@ -140,6 +143,7 @@ export async function buildHealthReport(): Promise<HealthReport> {
     integrations: {
       composio_gmail: composio,
       gws_gmail: gws,
+      googleapis_gmail: googleapis,
       active_gmail: active,
       checked_at: probe?.checked_at ?? null,
     },
@@ -185,6 +189,12 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
           }),
         );
       });
+      return;
+    }
+
+    if (req.method === "GET" && urlPath === "/cockpit") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" });
+      res.end(COCKPIT_HTML);
       return;
     }
 

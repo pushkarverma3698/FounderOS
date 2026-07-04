@@ -43,7 +43,9 @@ function envOr(key: string): string | undefined {
 
 function parseGoogleBackend(raw: string | undefined, fallback: GoogleBackend): GoogleBackend {
   const v = (raw ?? fallback).toLowerCase();
-  return v === "composio" ? "composio" : "gws";
+  if (v === "googleapis") return "googleapis";
+  if (v === "composio") return "composio";
+  return "gws";
 }
 
 function parseLinkedInBackend(raw: string | undefined): LinkedInBackend {

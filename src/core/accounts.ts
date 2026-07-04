@@ -35,6 +35,11 @@ export interface CredentialRefs {
   refresh_token_env?: string;
   /** Directory passed as GWS_CONFIG_HOME / GOOGLE_APPLICATION_CREDENTIALS parent. */
   gws_profile_dir?: string;
+  /** Env var holding the service-account JSON path (googleapis backend). */
+  google_sa_path_env?: string;
+  /** Env var holding the impersonation subject — the mailbox to act as
+   *  (googleapis domain-wide delegation). */
+  google_subject_env?: string;
   /** Composio rollback — env vars for connection + user id. */
   composio_connection_id_env?: string;
   composio_user_id_env?: string;

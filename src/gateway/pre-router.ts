@@ -18,6 +18,7 @@ import {
   SHELL_RUN_RE,
 } from "./execution-guard.js";
 import { buildTaskLedgerDirective, detectTaskLedger } from "./task-ledger.js";
+import { buildCompanyContextBlock, getCompany } from "../core/companies.js";
 import {
   extractEngineeringHandoff,
   formatEngineeringHandoffEnvelope,
@@ -220,17 +221,21 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
   return directive;
 }
 
-export function buildOfficeInput(text: string): BaseMessage[] {
+export function buildOfficeInput(text: string, companyKey?: string): BaseMessage[] {
+  // Active-company override — empty for the default boot tenant (cache-stable).
+  const companyBlock = buildCompanyContextBlock(getCompany(companyKey));
+  const companyPrefix = companyBlock ? [new SystemMessage(companyBlock)] : [];
+
   const ledger = detectTaskLedger(text);
   if (ledger) {
-    return [new SystemMessage(buildTaskLedgerDirective(ledger)), new HumanMessage(text)];
+    return [...companyPrefix, new SystemMessage(buildTaskLedgerDirective(ledger)), new HumanMessage(text)];
   }
 
   const grounding =
     isInternalKnowledgeRequest(text) ? [new SystemMessage(INTERNAL_KNOWLEDGE_DIRECTIVE)] : [];
 
   const dept = preRouteDepartment(text);
-  if (!dept) return [...grounding, new HumanMessage(text)];
+  if (!dept) return [...companyPrefix, ...grounding, new HumanMessage(text)];
 
   const humanText =
     dept === "personal" && SHELL_RUN_RE.test(text)
@@ -242,6 +247,7 @@ export function buildOfficeInput(text: string): BaseMessage[] {
           : text;
 
   return [
+    ...companyPrefix,
     ...grounding,
     new SystemMessage(buildRoutingDirective(dept, text)),
     new HumanMessage(humanText),

@@ -35,9 +35,9 @@ export const envSchema = z.object({
 
   // Tool keys — optional; tools fail loudly when key is missing
   COMPOSIO_API_KEY: z.string().transform(v => v || undefined).optional(),
-  /** Gmail backend: gws (default) or composio (legacy rollback). ADR-029 */
-  GMAIL_BACKEND: z.enum(["composio", "gws"]).default("gws"),
-  CALENDAR_BACKEND: z.enum(["composio", "gws"]).optional(),
+  /** Gmail backend: gws | googleapis (service account, unattended) | composio (legacy rollback). ADR-029 */
+  GMAIL_BACKEND: z.enum(["composio", "gws", "googleapis"]).default("gws"),
+  CALENDAR_BACKEND: z.enum(["composio", "gws", "googleapis"]).optional(),
   GWS_BIN: z.string().transform(v => v || undefined).optional(),
   PROVIDER_SMOKE_AT_BOOT: z.enum(["true", "false"]).optional(),
   PROVIDER_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
@@ -78,8 +78,17 @@ export const envSchema = z.object({
    */
   TELEGRAM_POLLING_ENABLED: z.enum(["true", "false"]).optional(),
 
-  // Redis — optional; used only if a tool requires it
-  REDIS_URL: z.string().url().default("redis://localhost:6379"),
+  // Redis — optional; SaaS-phase only, not wired into any prod send path.
+  // Empty string or missing → undefined (Redis client skips connection).
+  REDIS_URL: z.preprocess(v => (v === "" ? undefined : v), z.string().url().optional()),
+
+  // ── External MCP client bridge (ADR-041) ────────────────────────────────────
+  /** Connect agents to external MCP servers declared in the bridge manifest.
+   *  Default OFF — flag-gated so the default build is byte-identical until a
+   *  founder explicitly opts in. Reads pass through; writes are HITL-gated. */
+  MCP_BRIDGE_ENABLED: z.enum(["true", "false"]).default("false"),
+  /** Path to the bridge manifest (servers + per-server write allowlist). */
+  MCP_BRIDGE_MANIFEST: z.string().default("mcp-bridge.json"),
 
   // Global halt (kill switch) — optional flag-file path override.
   // Default: $HOME/.founderos/HALT (resolved in src/infra/halt.ts).
@@ -115,6 +124,13 @@ export const envSchema = z.object({
   // ── Browser backend ───────────────────────────────────────────────────────
   /** "auto" = Playwright on linux, AppleScript on darwin. Override as needed. */
   BROWSER_BACKEND: z.enum(["auto", "playwright", "applescript"]).default("auto"),
+
+  // ── S3 Asset Storage (optional — feature disabled when STORAGE_BUCKET is unset) ─
+  STORAGE_BUCKET: z.string().transform(v => v || undefined).optional(),
+  AWS_ACCESS_KEY_ID: z.string().transform(v => v || undefined).optional(),
+  AWS_SECRET_ACCESS_KEY: z.string().transform(v => v || undefined).optional(),
+  AWS_REGION: z.string().default("us-east-1"),
+  STORAGE_ENDPOINT_URL: z.string().transform(v => v || undefined).optional(),
 
   // Budget controls
   BUDGET_DAILY_USD: z.coerce.number().positive().default(5.0),
@@ -196,14 +212,34 @@ function boolEnv(key: string, fallback = false): boolean {
  * live-verified over real Telegram (hierarchy plan P2 gate, rule #19.6). Flipping
  * this to "1" is the single, reversible lever that swaps the flat engineering
  * ReAct agent for the hierarchical CTO subgraph in office.ts.
+ *
+ * 2026-06-29: default RESTORED to false. The default had drifted to `true`, so
+ * production was silently running the UNVERIFIED CTO subgraph — which ping-pongs
+ * `engineering ↔ coder` (transfer_to_coder) into GraphRecursionError on a trivial
+ * read like "list my repos" (T04 live loop). The flat ReAct engineering agent is
+ * the production-stable path; the subgraph stays opt-in until its nested-HITL loop
+ * is live-verified (rule #19.6).
  */
 export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", false);
 
 /**
  * Promote marketing + sales into a `revenue` sub-supervisor (ADR-028 / ADR-025).
  * Default OFF — live MTProto nested-HITL verification required before production.
+ * 2026-06-29: default RESTORED to false (same drift-to-true bug as the engineering
+ * subgraph above; flat marketing+sales is the production-stable design).
  */
 export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", false);
+
+/**
+ * Add the `creative` nested sub-supervisor (art_director/copywriter/brand_designer)
+ * as an extra routing target. Default OFF — unlike engineering/revenue (which
+ * REPLACE an existing same-named node), creative ADDS a new node to the
+ * supervisor's agent set, which changes routing surface. It stays off until the
+ * routing is live-verified on the VPS with `pnpm eval` (the eval needs a real
+ * model key, absent in CI/web). Flip CREATIVE_SUBGRAPH=1 to enable. Generating
+ * images also needs GOOGLE_GENERATIVE_AI_API_KEY.
+ */
+export const CREATIVE_SUBGRAPH_ENABLED = boolEnv("CREATIVE_SUBGRAPH", false);
 
 /**
  * Long-poll Telegram in this process. Off in development by default so local
@@ -215,8 +251,27 @@ export const TELEGRAM_POLLING_ENABLED = boolEnv(
   env.NODE_ENV === "production",
 );
 
+/**
+ * Connect agents to external MCP servers (ADR-041). Default OFF — the single,
+ * reversible lever that merges manifest-declared external tools into the
+ * department arrays. Reads pass through; writes route through hitlGate.
+ */
+export const MCP_BRIDGE_ENABLED = env.MCP_BRIDGE_ENABLED === "true";
+
+/** Filesystem path to the external MCP bridge manifest. */
+export const MCP_BRIDGE_MANIFEST = env.MCP_BRIDGE_MANIFEST;
+
 /** Max recursive supervisor/sub-agent steps before LangGraph aborts a run. */
 export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 40);
+
+/**
+ * Hard ceiling on a single office turn (ms). A hung model/tool call otherwise
+ * leaves the founder with the typing indicator forever and NO reply — the worst
+ * silent-failure class. On expiry the gateway aborts loud, clears the thread, and
+ * tells the founder. Generous default (3 min) so legitimate multi-step / claude_code
+ * runs finish; override with OFFICE_TURN_TIMEOUT_MS. Set 0 to disable (not advised).
+ */
+export const OFFICE_TURN_TIMEOUT_MS = intEnv("OFFICE_TURN_TIMEOUT_MS", 180_000);
 
 /**
  * Daily outbound send quotas (G4 gap — now enforced via action_log count).

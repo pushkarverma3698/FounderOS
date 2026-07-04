@@ -122,6 +122,46 @@ describe("createTrimmedPrompt", () => {
     // The newest message must be present
     expect(contents.some((c) => c.includes("NEWEST"))).toBe(true);
   });
+
+  // Roadmap #11 — task-anchor projection (opt-in, deterministic)
+  it("default (no anchor): the original task CAN be dropped by the rolling window", async () => {
+    const modifier = createTrimmedPrompt("Sys.", { maxTokens: 60 });
+    const history = [
+      new HumanMessage("TASK: migrate the billing service to the new schema"),
+      ...Array.from({ length: 12 }, (_, i) =>
+        i % 2 === 0 ? new AIMessage(`reply ${i} with some filler content here`) : new HumanMessage(`follow-up ${i} with filler`),
+      ),
+      new HumanMessage("NEWEST follow-up"),
+    ];
+    const result = await modifier(history);
+    const contents = result.map((m) => (typeof m.content === "string" ? m.content : ""));
+    expect(contents.some((c) => c.includes("NEWEST"))).toBe(true);
+    expect(contents.some((c) => c.includes("TASK: migrate"))).toBe(false); // task lost
+  });
+
+  it("preserveTaskAnchor: the original task survives even when the window is full", async () => {
+    const modifier = createTrimmedPrompt("Sys.", { maxTokens: 60, preserveTaskAnchor: true });
+    const history = [
+      new HumanMessage("TASK: migrate the billing service to the new schema"),
+      ...Array.from({ length: 12 }, (_, i) =>
+        i % 2 === 0 ? new AIMessage(`reply ${i} with some filler content here`) : new HumanMessage(`follow-up ${i} with filler`),
+      ),
+      new HumanMessage("NEWEST follow-up"),
+    ];
+    const result = await modifier(history);
+    const contents = result.map((m) => (typeof m.content === "string" ? m.content : ""));
+    expect(contents.some((c) => c.includes("TASK: migrate"))).toBe(true);  // anchor kept
+    expect(contents.some((c) => c.includes("NEWEST"))).toBe(true);          // recency kept too
+    expect(contents.filter((c) => c.includes("TASK: migrate")).length).toBe(1); // not duplicated
+  });
+
+  it("preserveTaskAnchor on a short thread does not duplicate the first message", async () => {
+    const modifier = createTrimmedPrompt("Sys.", { maxTokens: 4000, preserveTaskAnchor: true });
+    const history = [new HumanMessage("only task"), new AIMessage("ok")];
+    const result = await modifier(history);
+    const contents = result.map((m) => (typeof m.content === "string" ? m.content : ""));
+    expect(contents.filter((c) => c === "only task").length).toBe(1);
+  });
 });
 
 describe("estimateMessageTokens", () => {

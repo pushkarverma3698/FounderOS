@@ -22,7 +22,8 @@
 import { type Context } from "grammy";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { RemoveMessage, SystemMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
-import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD } from "../core/config.js";
+import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS } from "../core/config.js";
+import { withTurnTimeout, TurnTimeoutError } from "./turn-timeout.js";
 import { computeHistoryTrim } from "../infra/history-window.js";
 import { logger } from "../infra/logger.js";
 import { getOffice, getPendingApproval } from "../agents/office.js";
@@ -31,9 +32,11 @@ import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt, getTodayCostUsd } from "../db/queries.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
 import { buildOfficeInput } from "./pre-router.js";
+import { getActiveCompany } from "./active-company.js";
 import { isProvidedLinkedInPostRequest } from "./execution-guard.js";
 import {
   aiMessageLooksFabricatedKnowledge,
+  buildGuardExhaustedNotice,
   buildKnowledgeGroundingRefusal,
   detectLinkedInRefusalWithoutTool,
   detectUnbackedGithubReadClaim,
@@ -42,9 +45,12 @@ import {
   detectUnbackedKnowledgeClaim,
   detectUnbackedMemoryClaim,
   detectUnbackedShellClaim,
+  detectUnbackedWebResearchClaim,
   extractProvidedLinkedInPost,
   isGithubWriteRequest,
   isInternalKnowledgeRequest,
+  redactInjectionEcho,
+  type GuardKind,
 } from "./execution-guard.js";
 import { tryInboxReadFastPath } from "./inbox-fast-path.js";
 import { tryGithubReadFastPath } from "./github-read-fast-path.js";
@@ -133,7 +139,7 @@ export function finalReply(res: { messages?: OfficeMessage[] }): string {
     const type = m._getType?.() ?? "";
     const text = typeof m.content === "string" ? m.content : "";
     if (type === "ai" && text.trim() && !(m.tool_calls && m.tool_calls.length > 0)) {
-      return stripXmlTags(text.trim());
+      return redactInjectionEcho(stripXmlTags(text.trim()));
     }
   }
   // Pass 2: fall back to last tool message so engineering/shell results surface
@@ -578,21 +584,21 @@ export function needsExecutionGuardRetry(
   messages: OfficeMessage[],
   reply: string,
   toolsCalled?: readonly string[],
-): "shell" | "linkedin" | "inbox" | "github" | "memory" | "knowledge" | null {
+): GuardKind | null {
   if (detectUnbackedShellClaim(userText, messages, reply)) return "shell";
   if (detectLinkedInRefusalWithoutTool(userText, messages, reply)) return "linkedin";
   if (detectUnbackedInboxClaim(userText, messages, reply)) return "inbox";
   if (detectUnbackedGithubWriteClaim(userText, messages, reply)) return "github";
   if (detectUnbackedGithubReadClaim(userText, messages, reply)) return "github";
+  // Web research BEFORE memory/knowledge: a "latest news" refusal must retry with
+  // search_web, not be force-refused as an unbacked internal-knowledge claim.
+  if (detectUnbackedWebResearchClaim(userText, messages, reply, toolsCalled)) return "web";
   if (detectUnbackedMemoryClaim(userText, messages, reply, toolsCalled)) return "memory";
   if (detectUnbackedKnowledgeClaim(userText, messages, reply, toolsCalled)) return "knowledge";
   return null;
 }
 
-export function buildGuardRetryMessages(
-  kind: "shell" | "linkedin" | "inbox" | "github" | "memory" | "knowledge",
-  userText: string,
-): BaseMessage[] {
+export function buildGuardRetryMessages(kind: GuardKind, userText: string): BaseMessage[] {
   if (kind === "memory") {
     return [
       new SystemMessage(
@@ -645,6 +651,17 @@ export function buildGuardRetryMessages(
       new HumanMessage(userText),
     ];
   }
+  if (kind === "web") {
+    return [
+      new SystemMessage(
+        "[RETRY DIRECTIVE: Your previous reply refused a request for fresh/external information " +
+          "claiming you have no real-time or web access. You DO — the research department owns " +
+          "search_web. Call search_web NOW for each topic the founder asked about and answer from " +
+          "the results. Never say you lack internet/real-time access without first calling search_web.]",
+      ),
+      new HumanMessage(userText),
+    ];
+  }
   if (kind === "knowledge") {
     return [
       new SystemMessage(
@@ -671,6 +688,31 @@ export function buildGuardRetryMessages(
     ),
     new HumanMessage(userText),
   ];
+}
+
+/**
+ * Decide what to do once the SAME guard still fires after the one allowed
+ * retry (symmetry fix, 2026-06-30). Pure — no I/O — so all 7 guard kinds are
+ * unit-testable without mocking LangGraph.
+ *
+ * "knowledge"/"memory" keep their existing fabrication-safe refusal (a
+ * confident but ungrounded business-facts answer is actively dangerous, so it
+ * is replaced outright). The other 5 kinds ("shell"/"linkedin"/"inbox"/
+ * "github"/"web") previously had NO fallback here — a still-broken reply after
+ * the retry was sent to the founder unchanged. They now get an honest
+ * exhaustion notice instead of a silent pass-through (rule #19.5, fail loud).
+ */
+export function applyGuardOutcome(
+  stillUngrounded: GuardKind | null,
+  replyText: string,
+): { replyText: string; blocked: boolean } {
+  if (stillUngrounded === "knowledge" || stillUngrounded === "memory") {
+    return { replyText: buildKnowledgeGroundingRefusal(), blocked: true };
+  }
+  if (stillUngrounded) {
+    return { replyText: buildGuardExhaustedNotice(stillUngrounded), blocked: true };
+  }
+  return { replyText, blocked: false };
 }
 
 /** Route the literal text of the incoming message into the office. */
@@ -803,7 +845,7 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
     const budget = createRunBudget();
     const agentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
 
-    const invokeMessages: BaseMessage[] = buildOfficeInput(text);
+    const invokeMessages: BaseMessage[] = buildOfficeInput(text, getActiveCompany(chatId));
     trace.event("route.decided", { hint: (invokeMessages[0]?.content ?? "").toString().slice(0, 60) });
 
     if (isInternalKnowledgeRequest(text)) {
@@ -836,9 +878,10 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
     };
 
-    const res = (await office.invoke(
-      { messages: invokeMessages },
-      invokeConfig,
+    const res = (await withTurnTimeout(
+      office.invoke({ messages: invokeMessages }, invokeConfig),
+      OFFICE_TURN_TIMEOUT_MS,
+      "office.invoke",
     )) as { messages?: OfficeMessage[] };
     stopTyping();
 
@@ -870,14 +913,18 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
         values?: { messages?: OfficeMessage[] };
       } | null;
       const retryBaseLen = (retryBefore?.values?.messages ?? []).length;
-      const retryRes = (await office.invoke(
-        { messages: retryMessages },
-        {
-          ...invokeConfig,
-          configurable: {
-            ...invokeConfig.configurable,
+      const retryRes = (await withTurnTimeout(
+        office.invoke(
+          { messages: retryMessages },
+          {
+            ...invokeConfig,
+            configurable: {
+              ...invokeConfig.configurable,
+            },
           },
-        },
+        ),
+        OFFICE_TURN_TIMEOUT_MS,
+        "guard-retry",
       )) as { messages?: OfficeMessage[] };
       toolsCalled = [...new Set([...toolsCalled, ...toolCollector.tools])];
       approval = await getPendingApproval(office, config);
@@ -897,15 +944,18 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       replyText,
       toolsCalled,
     );
-    if (stillUngrounded === "knowledge" || stillUngrounded === "memory") {
+    const guardOutcome = applyGuardOutcome(stillUngrounded, replyText);
+    if (guardOutcome.blocked) {
       trace.event("guard.blocked", { kind: stillUngrounded });
-      log.warn({ chatId, kind: stillUngrounded }, "Guard blocked ungrounded reply — sending safe refusal");
-      const purged = await purgeFabricatedAiFromCheckpoint(office, config, freshMessages).catch((err) => {
-        log.warn({ chatId, err: (err as Error).message }, "Failed to purge fabricated AI from checkpoint");
-        return 0;
-      });
-      if (purged > 0) trace.event("guard.purged", { removed: purged });
-      replyText = buildKnowledgeGroundingRefusal();
+      log.warn({ chatId, kind: stillUngrounded }, "Guard still firing after retry — blocking pass-through reply");
+      if (stillUngrounded === "knowledge" || stillUngrounded === "memory") {
+        const purged = await purgeFabricatedAiFromCheckpoint(office, config, freshMessages).catch((err) => {
+          log.warn({ chatId, err: (err as Error).message }, "Failed to purge fabricated AI from checkpoint");
+          return 0;
+        });
+        if (purged > 0) trace.event("guard.purged", { removed: purged });
+      }
+      replyText = guardOutcome.replyText;
       freshRes = { messages: [{ content: replyText, _getType: () => "ai" }] };
     }
 
@@ -956,6 +1006,16 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       await session.onSystemNotice(
         `🔁 <b>I got stuck in a loop on that one</b> and stopped to avoid runaway cost.\n` +
           `I've cleared that task — just send your next message normally.`,
+      );
+      return;
+    }
+    if (err instanceof TurnTimeoutError) {
+      // The worst silent-failure class: a hung invoke. Abort LOUD, never hang.
+      log.error({ chatId, ms: err.ms, label: err.label }, "Run stopped: turn timeout (hung invoke)");
+      await clearThreadAfterAbort(chatId);
+      await session.onSystemNotice(
+        `⏱️ <b>That took too long and I stopped it</b> (over ${Math.round(err.ms / 1000)}s).\n` +
+          `Nothing was sent. I've cleared the task — try again, or break it into smaller steps.`,
       );
       return;
     }
@@ -1106,13 +1166,17 @@ async function resumeOfficeSessionLocked(
       (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped on resume — fail-open"),
     );
 
-    const res = (await office.invoke(
-      new Command({ resume: decision }),
-      {
-        ...config,
-        callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
-        metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
-      },
+    const res = (await withTurnTimeout(
+      office.invoke(
+        new Command({ resume: decision }),
+        {
+          ...config,
+          callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace)],
+          metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
+        },
+      ),
+      OFFICE_TURN_TIMEOUT_MS,
+      "office.resume",
     )) as { messages?: OfficeMessage[] };
 
     const next = await getPendingApproval(office, config);
@@ -1155,6 +1219,15 @@ async function resumeOfficeSessionLocked(
       log.warn({ chatId }, "Resume stopped: recursion limit reached");
       await clearThreadAfterAbort(chatId);
       await session.onSystemNotice(`🔁 <b>That got stuck in a loop</b> and I stopped it. I've cleared that task — send your next message normally.`);
+      return;
+    }
+    if (err instanceof TurnTimeoutError) {
+      log.error({ chatId, ms: err.ms, label: err.label }, "Resume stopped: turn timeout (hung invoke)");
+      await clearThreadAfterAbort(chatId);
+      await session.onSystemNotice(
+        `⏱️ <b>That took too long and I stopped it</b> (over ${Math.round(err.ms / 1000)}s).\n` +
+          `Nothing was sent. I've cleared the task — try again.`,
+      );
       return;
     }
     const msg = err instanceof Error ? (err.stack ?? err.message) : String(err);

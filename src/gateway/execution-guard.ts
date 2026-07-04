@@ -255,6 +255,19 @@ export const INTERNAL_KNOWLEDGE_RE =
 export const EXTERNAL_RESEARCH_RE =
   /\b(search (the )?web|google (it|for)|look (it )?up online|latest news|news about|competitors?|market research|on the (web|internet))\b/i;
 
+/**
+ * Imperative creative / outbound-action requests. These TELL the office to
+ * produce content or perform an operation (draft, write, send, build) — they are
+ * NOT factual questions about stored internal state, even when they name a
+ * company. Treating them as internal-knowledge questions made the memory guard
+ * derail the work into a lookup and then overwrite the result with the
+ * turics-brain refusal sentinel ("just chatting / refusing instead of doing").
+ * Anchored at the start (after optional pleasantries) so a question like
+ * "what does Turicks make?" is unaffected — only a LEADING action verb excludes.
+ */
+export const ACTION_REQUEST_RE =
+  /^\s*(?:please\s+|can you\s+|could you\s+|i need you to\s+|help me\s+)?(draft|write|compose|create|generate|design|build|make me|post|publish|send|email|schedule|tweet|pitch|reply|respond|outline|brainstorm)\b/i;
+
 export function hadAnyMemoryToolCall(
   messages: OfficeMessageLike[],
   toolsCalled?: readonly string[],
@@ -328,6 +341,63 @@ export const KNOWLEDGE_SEARCH_TOOLS = [
   "search_personal_rag",
   "read_cv",
 ] as const;
+
+/** Web / real-time research tools (research department). */
+export const WEB_SEARCH_TOOLS = ["search_web"] as const;
+
+/**
+ * Request that needs FRESH / external info — time-sensitive ("latest", "recent",
+ * "today", "news") or explicitly online. When the founder asks this and the office
+ * REFUSES citing "no real-time access" WITHOUT calling search_web, that's the
+ * "refuses instead of using its tools" bug (HARD-2): the research department owns
+ * search_web, so the answer is to search, not to apologize.
+ */
+export const WEB_RESEARCH_REQUEST_RE =
+  /\b(latest|recent(ly)?|current(ly)?|newest|up[- ]?to[- ]?date|breaking|today|this week|news|(any(thing)?|what'?s)\s+new|any news|update[ds]?\s+(on|about))\b/i;
+
+/** Reply that declines for lack of real-time / web access instead of searching. */
+export const WEB_REFUSAL_RE =
+  /\b(can'?t|cannot|can not|unable to|do(n'?t| not) have|no)\b[^.?!]{0,70}\b(access to\s+)?(real[- ]?time|live|up[- ]?to[- ]?date|latest|current|recent|online|internet|web)\b[^.?!]{0,55}\b(news|information|info|data|updates?|access|results?)\b/i;
+
+/**
+ * A different refusal shape (T02 live 2026-06-29): instead of citing "no real-time
+ * access", the supervisor NARRATES the tool/handoff machinery — "I can only transfer
+ * to the research department", "not able to call that tool directly", "I need to use
+ * the search_web tool" — and stops there instead of actually searching. A genuine
+ * answer never talks about transferring to a department or being unable to call a tool.
+ */
+export const WEB_META_REFUSAL_RE =
+  /\b(can only transfer|transfer to (the )?research|(not|un)able to call|cannot (call|use|access|fulf[il]+)|need to (use|call) (the )?search_web)\b/i;
+
+export function hadWebSearchTool(
+  messages: OfficeMessageLike[],
+  toolsCalled?: readonly string[],
+): boolean {
+  if (WEB_SEARCH_TOOLS.some((t) => hadToolCall(messages, t))) return true;
+  if (!toolsCalled?.length) return false;
+  return toolsCalled.some((name) =>
+    WEB_SEARCH_TOOLS.includes(name as (typeof WEB_SEARCH_TOOLS)[number]),
+  );
+}
+
+/**
+ * True when the founder asked for fresh/external info but the office REFUSED
+ * citing no real-time/web access without ever calling search_web. Deterministic —
+ * fires only on the conjunction (time-sensitive request AND realtime-refusal
+ * reply AND no web tool call), so a genuine search or a normal answer never trips it.
+ */
+export function detectUnbackedWebResearchClaim(
+  userInput: string,
+  messages: OfficeMessageLike[],
+  reply: string,
+  toolsCalled?: readonly string[],
+): boolean {
+  const text = userInput.trim();
+  if (!text) return false;
+  if (!WEB_RESEARCH_REQUEST_RE.test(text)) return false;
+  if (hadWebSearchTool(messages, toolsCalled)) return false; // genuinely searched
+  return WEB_REFUSAL_RE.test(reply) || WEB_META_REFUSAL_RE.test(reply);
+}
 
 function toolMessageText(m: OfficeMessageLike): string {
   return typeof m.content === "string" ? m.content : "";
@@ -416,10 +486,24 @@ export const INTERNAL_KNOWLEDGE_DIRECTIVE =
   "turicks-brain has no entry — suggest brain:sync. NEVER use training data, system prompts, or prior assistant " +
   "messages in this thread (they may be stale/wrong). Do NOT use search_web for internal Turicks facts.]";
 
+/**
+ * Questions about the BOT'S OWN recent behaviour — "how did you handle X",
+ * "what did you do", "why did you route" — are NOT internal-knowledge questions
+ * about stored business state. Misclassifying them caused the memory guard to
+ * force a memory-tool call instead of answering about the bot's own context
+ * (B4 fix, H16 symptom: "just tell me how you handled this" was refused).
+ */
+export const SELF_REFERENTIAL_RE =
+  /\b(how did you (handle|respond|deal|route)|what did you do\b|why did you\b|how you handled|what you just did|how did you respond)\b/i;
+
 export function isInternalKnowledgeRequest(input: string): boolean {
   const text = input.trim();
   if (!text) return false;
   if (EXTERNAL_RESEARCH_RE.test(text)) return false;
+  // Creative / outbound-action tasks are not internal-facts questions (L3 fix).
+  if (ACTION_REQUEST_RE.test(text)) return false;
+  // Questions about the bot's OWN recent behaviour are not stored-state lookups (B4 fix).
+  if (SELF_REFERENTIAL_RE.test(text)) return false;
   return INTERNAL_KNOWLEDGE_RE.test(text) || INTERNAL_KNOWLEDGE_REQUEST_RE.test(text);
 }
 
@@ -475,3 +559,70 @@ export function detectUnbackedKnowledgeClaim(
 
 export const KNOWLEDGE_RETRY_HINT =
   "⚠️ That answer wasn't grounded in turicks-brain — retrying with a real knowledge search…";
+
+// ── B2: Injection-echo redactor ───────────────────────────────────────────────
+
+/**
+ * Sentence-level regex that matches the SUBJECT + VERB pattern of a bot echoing
+ * an injected ask to expose its own system-level instructions. Only matches
+ * when the sentence subject is the bot/I/my and the object is the literal
+ * phrasing of the injected content ("system prompt", "system instructions",
+ * "full prompt", "initial instructions").
+ *
+ * Intentionally narrow: "My architecture routes to 7 departments" — no match.
+ * "Here is my system prompt:" — match.
+ */
+const INJECTION_ECHO_RE =
+  /[^.!?\n]*\b(my|here(?:'s|\s+is)|i(?:'ll|\s+will)?(?:\s+now)?)\b[^.!?\n]{0,80}\b(system\s+prompt|system\s+instructions?|full\s+prompt|initial\s+instructions?|these\s+instructions?|my\s+instructions?(?:\s+are|\s+say|\s+state)?)[^.!?\n]*/gi;
+
+/**
+ * Pure deterministic post-filter (B2 fix). Strips sentences from `reply` whose
+ * subject is the bot revealing/printing/emailing its own system-level instructions.
+ *
+ * Preserves all other content — including legitimate routing/architecture
+ * explanations ("My architecture routes to 7 departments").
+ *
+ * Pure function — no I/O, no LLM, always deterministic (rule #16).
+ */
+export function redactInjectionEcho(reply: string): string {
+  const redacted = reply.replace(INJECTION_ECHO_RE, "");
+  // Collapse runs of whitespace/newlines left by stripped sentences, then trim.
+  return redacted.replace(/\n{3,}/g, "\n\n").replace(/[ \t]{2,}/g, " ").trim();
+}
+
+// ── Guard exhaustion (symmetry fix, 2026-06-30) ──────────────────────────────
+//
+// needsExecutionGuardRetry() detects 7 distinct "model skipped its gated tool"
+// shapes and office-run.ts retries ONCE. Until this fix, only the "knowledge"
+// and "memory" kinds were re-verified after that retry — if the SAME guard
+// fired again post-retry for shell/linkedin/inbox/github/web, the (still
+// wrong) reply was silently sent to the founder. That asymmetry is exactly
+// how a "fixed" refusal/loop bug could resurface under a new phrasing without
+// any test catching it: the retry ran, but nothing checked whether it worked.
+// This makes every guard kind terminate the same way — fail loud, never silent
+// (rule #19.5) — instead of only the two fabrication-risk kinds.
+
+export type GuardKind = "shell" | "linkedin" | "inbox" | "github" | "web" | "memory" | "knowledge";
+
+const GUARD_KIND_ACTION: Record<GuardKind, string> = {
+  shell: "run that command with run_shell",
+  linkedin: "call linkedin_post",
+  inbox: "call read_emails",
+  github: "call github_read / github_write",
+  web: "call search_web",
+  memory: "check FounderOS memory",
+  knowledge: "search turicks-brain",
+};
+
+/**
+ * Honest, generic exhaustion notice for the 5 "tool-skip" guard kinds (shell,
+ * linkedin, inbox, github, web). The "knowledge"/"memory" kinds keep their own
+ * more specific fabrication-refusal wording (buildKnowledgeGroundingRefusal) —
+ * this covers the other 5, which previously had no fallback at all.
+ */
+export function buildGuardExhaustedNotice(kind: GuardKind): string {
+  return (
+    `⚠️ I tried twice to ${GUARD_KIND_ACTION[kind]} and didn't get a clean result either time. ` +
+    `Stopping here instead of guessing — please re-send the request, or ask me directly to ${GUARD_KIND_ACTION[kind]}.`
+  );
+}

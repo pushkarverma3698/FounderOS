@@ -30,6 +30,8 @@ import { parseContextCommand, formatContextDisplay } from "./context-command.js"
 import { getFounderContext, upsertFounderContext, getActivitySummary, getLastEpisodicEvent, cancelPendingApprovals, countPendingDeptSignals, listPendingDeptSignals, getRecentLlmCosts, getTodayCostUsd, getCostBreakdown, getActionLogSummary } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
+import { COMPANY_PROFILES, getCompany, DEFAULT_COMPANY_KEY } from "../core/companies.js";
+import { getActiveCompany, setActiveCompany, parseCompanyArg } from "./active-company.js";
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
 import { runWorkflow, validateParams } from "../workflows/runner.js";
 import { isValidCinematicPreset } from "../agents/cinematic-build.js";
@@ -115,6 +117,46 @@ export async function handleReset(ctx: Context): Promise<void> {
   } catch (err) {
     await ctx.reply(`❌ Reset failed: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
   }
+}
+
+// ── /company — switch the active business for this thread ─────────────────────
+
+export async function handleCompany(ctx: Context): Promise<void> {
+  const chatId = ctx.chat?.id;
+  if (chatId === undefined) return;
+
+  const arg = parseCompanyArg((ctx.match ?? "").toString());
+  const known = Object.values(COMPANY_PROFILES)
+    .map((c) => `<code>${safeHtml(c.key)}</code> — ${safeHtml(c.displayName)}`)
+    .join("\n");
+
+  if (!arg) {
+    const current = getCompany(getActiveCompany(chatId));
+    await ctx.reply(
+      `🏢 Active company: <b>${safeHtml(current.displayName)}</b> (<code>${safeHtml(current.key)}</code>)\n\n` +
+        `Switch with <code>/company &lt;key&gt;</code>. Known:\n${known}`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  if (!setActiveCompany(chatId, arg)) {
+    await ctx.reply(
+      `❌ Unknown company <code>${safeHtml(arg)}</code>. Known:\n${known}`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  const company = getCompany(arg);
+  await ctx.reply(
+    `✅ Now operating as <b>${safeHtml(company.displayName)}</b>.\n` +
+      `<i>${safeHtml(company.tagline)}</i>\n\n` +
+      `New messages in this chat run in ${safeHtml(company.displayName)}'s voice. ` +
+      `Switch back with <code>/company ${safeHtml(DEFAULT_COMPANY_KEY)}</code>.`,
+    { parse_mode: "HTML" },
+  );
+  log.info({ chatId, company: company.key }, "Active company switched via /company");
 }
 
 // ── /halt — global kill switch ────────────────────────────────────────────────
@@ -536,7 +578,8 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<code>/context</code> — view your stored business context (clients, priorities)\n` +
     `<code>/context set &lt;key&gt; &lt;value&gt;</code> — update a key\n` +
     `  Valid keys: <code>active_clients</code> · <code>current_priorities</code> · <code>open_deals</code> · <code>next_actions</code> · <code>focus</code>\n` +
-    `  Example: <code>/context set active_clients Acme, Beta Ltd</code>\n\n` +
+    `  Example: <code>/context set active_clients Acme, Beta Ltd</code>\n` +
+    `<code>/company</code> — show / switch the active business (e.g. <code>/company naggar</code>)\n\n` +
 
     `<b>🎯 Outbound</b>\n` +
     `<code>/target &lt;company&gt;</code> — add prospect(s) to this week's list (comma-separated)\n` +

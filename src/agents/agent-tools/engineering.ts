@@ -10,6 +10,7 @@
 
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import { githubTool } from "../../tools/github.js";
 import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../../tools/project-workflow.js";
 import { claudeCodeTool, findClaudeBinary } from "../../tools/claude-code.js";
@@ -17,7 +18,8 @@ import { applyCinematicPresetTool } from "../../tools/cinematic-preset.js";
 import { deployStaticSiteTool } from "../../tools/deploy-static-site.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
-import { toolFailure } from "../tool-result.js";
+import { makeRepeatGuard, makeThreadScopedRegistry } from "./repeat-guard.js";
+import { toolFailure, isStructuredToolFailure, type ToolFailureStage } from "../tool-result.js";
 import { hasBeenAudited, writeAuditEntry, publishDeptEventWithAudit } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
 import { sendStatusText } from "../../infra/telegram-send.js";
@@ -25,13 +27,169 @@ import { prepareSignal } from "./signals.js";
 
 const log = childLogger({ module: "agent-tools:engineering" });
 
+/**
+ * Classify a raw GitHub/Octokit error message into the REAL failing component
+ * (rule #22) so the gateway surfaces it loudly and points at its own fix.
+ * The launch-day P1/P2 bug: a 401 "Bad credentials" (expired GITHUB_TOKEN)
+ * reached the ReAct loop as a plain string and was swallowed → silent NO-REPLY.
+ * Pure + unit-tested; never throws.
+ */
+export function classifyGithubError(message: string): ToolFailureStage {
+  const m = message.toLowerCase();
+  if (
+    m.includes("bad credentials") ||
+    m.includes("401") ||
+    m.includes("403") ||
+    m.includes("forbidden") ||
+    m.includes("not accessible by personal access token") ||
+    m.includes("requires authentication") ||
+    m.includes("token")
+  ) {
+    return "auth";
+  }
+  if (
+    m.includes("enotfound") ||
+    m.includes("etimedout") ||
+    m.includes("econnrefused") ||
+    m.includes("econnreset") ||
+    m.includes("network")
+  ) {
+    return "network";
+  }
+  return "external_api";
+}
+
+/** Wrap a failed GitHub ToolResult into a stage-tagged, fail-loud envelope. */
+function githubFailure(action: string, error: string): string {
+  const stage = classifyGithubError(error);
+  const hint =
+    stage === "auth"
+      ? " — rotate GITHUB_TOKEN (expired or missing scope)"
+      : stage === "network"
+        ? " — GitHub unreachable, retry shortly"
+        : "";
+  return toolFailure(stage, `GitHub ${action} failed: ${error}${hint}`);
+}
+
+// ── Consecutive-failure cap (B5 — GitHub loop-wedge fix) ─────────────────────
+//
+// Problem: when github_read / github_write hit a 401 / auth error the ReAct
+// agent retries the tool indefinitely until GraphRecursionError ("🔁 stuck in
+// a loop"). The structured toolFailure envelope alone is not enough — the agent
+// treats any tool result as an invitation to try again.
+//
+// Fix: on the 2nd consecutive structured failure for the same tool within a
+// single turn, upgrade the result to a plain terminal message (no envelope
+// marker) that explicitly tells the agent to stop. The counter is injected
+// so the pure `capConsecutiveToolFailures` helper is fully unit-testable.
+
+/** Consecutive-failure counter for a single turn. Keyed by tool name. */
+export type ToolFailureCounter = {
+  get(toolName: string): number;
+  increment(toolName: string): void;
+  reset(toolName: string): void;
+};
+
+/** Factory — creates one counter instance per turn (or per test case). */
+export function makeToolFailureCounter(): ToolFailureCounter {
+  const counts = new Map<string, number>();
+  return {
+    get(toolName: string): number {
+      return counts.get(toolName) ?? 0;
+    },
+    increment(toolName: string): void {
+      counts.set(toolName, (counts.get(toolName) ?? 0) + 1);
+    },
+    reset(toolName: string): void {
+      counts.set(toolName, 0);
+    },
+  };
+}
+
+/**
+ * Cap consecutive structured tool failures within a turn (pure, deterministic).
+ *
+ * - Success result  → resets the counter, returns the result unchanged.
+ * - 1st failure     → increments counter to 1, returns the failure as-is
+ *                     (the ReAct agent is allowed one retry).
+ * - 2nd+ failure    → returns a TERMINAL plain-text message (no envelope
+ *                     marker) that names the real failing component (rule #22)
+ *                     and instructs the agent to stop retrying.
+ */
+export function capConsecutiveToolFailures(
+  counter: ToolFailureCounter,
+  toolName: string,
+  result: string,
+): string {
+  if (!isStructuredToolFailure(result)) {
+    // Success path — reset streak and pass through
+    counter.reset(toolName);
+    return result;
+  }
+
+  counter.increment(toolName);
+  const streak = counter.get(toolName);
+
+  if (streak >= 2) {
+    // Terminal: surface the real error to the founder; tell the agent to stop.
+    // We strip the structured marker so the gateway doesn't double-surface and
+    // the agent sees a plain instruction, not an envelope it might retry.
+    const body = result.replace(/\s*\[\[TOOL_FAILURE[^\]]*\]\]/g, "").trim();
+    return (
+      `GitHub auth failed — ${body}. ` +
+      `Do not retry this tool. Report to the founder: the GITHUB_TOKEN is likely expired or missing the required scope. ` +
+      `Stop here and surface this error directly.`
+    );
+  }
+
+  return result;
+}
+
+// Per-THREAD registries (fix 2026-06-30): a single shared counter/guard at
+// module scope would leak across every conversation for the life of the
+// process (the office graph compiles once — rule #2). Each thread_id now gets
+// its own lazily-created counter and repeat-guard, so one thread's call
+// history can never block or contaminate another's (rule #20).
+// Tests inject their own counter/guard via the pure helpers directly.
+const _githubFailureCounters = makeThreadScopedRegistry(makeToolFailureCounter);
+
+// Repeat-call breaker (T04): bounds identical github_read calls even when they
+// SUCCEED — the failure cap above only fires on errors. Time-windowed so it
+// self-scopes to a turn; a legitimate repeat minutes later is never blocked.
+const _githubRepeatGuards = makeThreadScopedRegistry(() => makeRepeatGuard());
+
+function threadIdFrom(config: RunnableConfig | undefined): string | undefined {
+  return config?.configurable?.["thread_id"] as string | undefined;
+}
+
 // ── Engineering: GitHub read (read-only, NO approval) ─────────────────────────
 
 export const githubRead = tool(
-  async ({ action, owner, repo }) => {
+  async ({ action, owner, repo }, config) => {
+    const threadId = threadIdFrom(config);
+    const repeatGuard = _githubRepeatGuards.get(threadId);
+    const failureCounter = _githubFailureCounters.get(threadId);
+
+    // Loop breaker: if the model has already called github_read with this exact
+    // input twice, stop hitting the API and force it to answer with what it has.
+    // This is the deterministic fix for the GraphRecursionError wedge on a
+    // successful-but-repeated list_repos (rule #16 — never trust the model to stop).
+    if (repeatGuard.shouldBlock("github_read", { action, owner, repo })) {
+      return (
+        `You have already called github_read (action="${action}") with these exact ` +
+        `arguments and the result is in the conversation above. Do NOT call github_read ` +
+        `again — answer the founder now using the data you already retrieved.`
+      );
+    }
     const res = await githubTool.execute({ action, ...(owner ? { owner } : {}), ...(repo ? { repo } : {}) });
-    if (!res.success) return `GitHub read failed: ${res.error}`;
-    return JSON.stringify(res.data, null, 2);
+    if (!res.success) {
+      return capConsecutiveToolFailures(
+        failureCounter,
+        "github_read",
+        githubFailure(`read (${action})`, res.error ?? "unknown error"),
+      );
+    }
+    return capConsecutiveToolFailures(failureCounter, "github_read", JSON.stringify(res.data, null, 2));
   },
   {
     name: "github_read",
@@ -102,10 +260,21 @@ export const githubWrite = tool(
       ...(content ? { content } : {}),
     });
 
-    if (!res.success) return `GitHub ${action} failed: ${res.error}`;
+    const failureCounter = _githubFailureCounters.get(threadIdFrom(config));
+    if (!res.success) {
+      return capConsecutiveToolFailures(
+        failureCounter,
+        "github_write",
+        githubFailure(action, res.error ?? "unknown error"),
+      );
+    }
     const auditGh = await writeAuditEntry({ action: `github_${action}`, idempotency_key: key, payload: { action, owner, repo, title }, tenant_id: TENANT });
     if (!auditGh.written) log.warn({ key, action }, "writeAuditEntry: conflict on github_write");
-    return `✅ GitHub ${action} done: ${JSON.stringify(res.data)}`;
+    return capConsecutiveToolFailures(
+      failureCounter,
+      "github_write",
+      `✅ GitHub ${action} done: ${JSON.stringify(res.data)}`,
+    );
   },
   {
     name: "github_write",

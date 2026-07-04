@@ -6,7 +6,7 @@
  */
 
 import { Composio } from "@composio/core";
-import { getComposioApiKey, getGmailConnectionId } from "./composio.js";
+import { getComposioApiKey, getGmailConnectionId, getLinkedInConnectionId } from "./composio.js";
 import { runGws } from "./gws-runner.js";
 import {
   getCalendarBackend,
@@ -19,16 +19,20 @@ import {
 import { linkedInDirectConfigured } from "./providers/linkedin-direct.js";
 import { composioGoogleConfigured } from "./providers/google-composio.js";
 import { composioLinkedInConfigured } from "./providers/linkedin-composio.js";
+import { directReadEmails, googleapisConfigured } from "./providers/google-direct.js";
+import type { GoogleBackend } from "./providers/types.js";
+import type { ToolResult } from "../tools/index.js";
 import { childLogger } from "./logger.js";
 
 const log = childLogger({ module: "provider-probes" });
 
 export interface ProviderProbeReport {
   checked_at: string;
-  gmail_backend: "gws" | "composio";
-  calendar_backend: "gws" | "composio";
+  gmail_backend: GoogleBackend;
+  calendar_backend: GoogleBackend;
   linkedin_backend: "direct" | "composio";
   gws_gmail: ProviderCheck;
+  googleapis_gmail: ProviderCheck;
   composio_gmail: ProviderCheck;
   active_gmail: ProviderCheck;
   active_calendar: ProviderCheck;
@@ -95,6 +99,27 @@ export async function probeGwsGmail(timeoutMs = getProviderProbeTimeoutMs()): Pr
   return check("down", `gws not ready: ${listed.error}`);
 }
 
+/** Probe googleapis: service-account + subject configured, then a 1-message list. */
+export async function probeGoogleapisGmail(
+  timeoutMs = getProviderProbeTimeoutMs(),
+): Promise<ProviderCheck> {
+  if (!(await googleapisConfigured())) {
+    return check("unconfigured", "GOOGLE_APPLICATION_CREDENTIALS / GOOGLE_SUBJECT_* not set");
+  }
+  try {
+    const probe = directReadEmails({ query: "", max_results: 1 });
+    const timeout = new Promise<ToolResult>((_, reject) =>
+      setTimeout(() => reject(new Error("googleapis probe timed out")), timeoutMs),
+    );
+    const result = await Promise.race([probe, timeout]);
+    return result.success
+      ? check("up", "googleapis Gmail list OK")
+      : check("down", `googleapis Gmail probe failed: ${result.error}`);
+  } catch (err) {
+    return check("down", `googleapis Gmail probe failed: ${(err as Error).message}`);
+  }
+}
+
 function probeLinkedInDirect(): ProviderCheck {
   if (!linkedInDirectConfigured()) {
     return check("unconfigured", "LINKEDIN_ACCESS_TOKEN or LINKEDIN_AUTHOR_URN not set");
@@ -102,11 +127,42 @@ function probeLinkedInDirect(): ProviderCheck {
   return check("up", "LinkedIn direct API credentials configured");
 }
 
-function probeLinkedInComposio(): ProviderCheck {
+/**
+ * Probe Composio LinkedIn: API key present + the connection is ACTUALLY ACTIVE
+ * (reachability, not just presence) — mirrors probeComposioGmail.
+ *
+ * Fix (2026-07-01): this used to return "up" whenever COMPOSIO_API_KEY was
+ * merely present, without ever calling the Composio API to check the LinkedIn
+ * connection's real status. That is exactly the shallow check that let the
+ * documented Composio outage (LIMITATIONS.md §7 — "Composio key was invalid in
+ * both dev and prod: email/linkedin/calendar down") go undetected: /status's
+ * 🟢/🔴 LinkedIn indicator would have shown a false 🟢 the whole time.
+ */
+export async function probeLinkedInComposio(
+  timeoutMs = getProviderProbeTimeoutMs(),
+): Promise<ProviderCheck> {
   if (!composioLinkedInConfigured()) {
     return check("unconfigured", "COMPOSIO_API_KEY not set (legacy fallback)");
   }
-  return check("up", "Composio LinkedIn configured");
+
+  const connId = getLinkedInConnectionId();
+  try {
+    const composio = new Composio({ apiKey: getComposioApiKey()! });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = composio.getClient() as any;
+    const probe = client.connectedAccounts.get(connId);
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Composio LinkedIn probe timed out")), timeoutMs),
+    );
+    const account = (await Promise.race([probe, timeout])) as Record<string, unknown>;
+    const status = String(account["status"] ?? account["state"] ?? "unknown");
+    if (status.toUpperCase() === "ACTIVE") {
+      return check("up", `Composio LinkedIn ${connId} ACTIVE`);
+    }
+    return check("down", `Composio LinkedIn ${connId} status=${status}`);
+  } catch (err) {
+    return check("down", `Composio LinkedIn probe failed: ${(err as Error).message}`);
+  }
 }
 
 /** Run all provider probes and cache the result. */
@@ -116,15 +172,18 @@ export async function runProviderProbes(): Promise<ProviderProbeReport> {
   const calendarBackend = getCalendarBackend();
   const linkedinBackend = getLinkedInBackend();
 
-  const [composio_gmail, gws_gmail] = await Promise.all([
+  const [composio_gmail, gws_gmail, googleapis_gmail] = await Promise.all([
     probeComposioGmail(timeoutMs),
     probeGwsGmail(timeoutMs),
+    probeGoogleapisGmail(timeoutMs),
   ]);
 
-  const active_gmail = gmailBackend === "gws" ? gws_gmail : composio_gmail;
-  const active_calendar = calendarBackend === "gws" ? gws_gmail : composio_gmail;
+  const pick = (b: GoogleBackend): ProviderCheck =>
+    b === "gws" ? gws_gmail : b === "googleapis" ? googleapis_gmail : composio_gmail;
+  const active_gmail = pick(gmailBackend);
+  const active_calendar = pick(calendarBackend);
   const active_linkedin =
-    linkedinBackend === "direct" ? probeLinkedInDirect() : probeLinkedInComposio();
+    linkedinBackend === "direct" ? probeLinkedInDirect() : await probeLinkedInComposio(timeoutMs);
 
   const report: ProviderProbeReport = {
     checked_at: new Date().toISOString(),
@@ -133,6 +192,7 @@ export async function runProviderProbes(): Promise<ProviderProbeReport> {
     linkedin_backend: linkedinBackend,
     composio_gmail,
     gws_gmail,
+    googleapis_gmail,
     active_gmail,
     active_calendar,
     active_linkedin,
