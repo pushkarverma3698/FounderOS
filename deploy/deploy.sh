@@ -176,12 +176,23 @@ fi
 echo "==> Restarting service (single-instance lock makes this safe)"
 sudo systemctl restart founderos
 
+# Poll instead of a single flat sleep+check: a fixed `sleep 5` false-failed a
+# genuinely healthy deploy on 2026-07-04 (MCP bridge npx spawn + office compile
+# pushed boot to ~6.3s, one tick past the old 5s window) — the job exited 1 while
+# the service was seconds from "FounderOS running". Same condition-based-waiting
+# fix as the Ollama wait loop above: retry up to 30x2s (60s) before giving up.
 echo "==> Waiting for health"
-sleep 5
-if curl -fsS http://127.0.0.1:3001/health >/dev/null; then
-  echo "==> Deploy OK — /health is green"
-else
-  echo "!! /health did NOT come up — check: journalctl -u founderos -n 50" >&2
+HEALTH_OK=false
+for i in {1..30}; do
+  if curl -fsS http://127.0.0.1:3001/health >/dev/null 2>&1; then
+    echo "==> Deploy OK — /health is green after ${i}s"
+    HEALTH_OK=true
+    break
+  fi
+  sleep 2
+done
+if [ "$HEALTH_OK" != true ]; then
+  echo "!! /health did NOT come up within 60s — check: journalctl -u founderos -n 50" >&2
   exit 1
 fi
 
