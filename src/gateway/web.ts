@@ -434,6 +434,12 @@ export async function closeActiveMission(sessionId: string): Promise<string | nu
   const mission = await getActiveMission(sessionId);
   if (!mission) return null;
   await closeMission(mission.mission_id, "COMPLETE");
+  if (mission.telegram_msg_id) {
+    // Reflect the terminal state on the pinned card itself — closing only the
+    // DB row left the pinned dashboard visually frozen at its last live phase.
+    const { refreshMissionDashboard } = await import("./mission-sync.js");
+    await refreshMissionDashboard(sessionId, mission.mission_id).catch(() => {});
+  }
   return formatMisoClose({
     implemented: mission.goal,
     validation: "manual close via /miso_close",
