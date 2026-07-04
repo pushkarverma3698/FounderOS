@@ -14,6 +14,25 @@
       "env": ["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"],
       "department": "comms",
       "write": ["slack_post_message", "slack_reply_to_thread"]
+    },
+    "browser-use": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["--from", "browser-use[cli]", "browser-use", "--mcp"],
+      "env": ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
+      "department": "personal",
+      "write": [
+        "retry_with_browser_use_agent",
+        "browser_navigate",
+        "browser_click",
+        "browser_type",
+        "browser_scroll",
+        "browser_go_back",
+        "browser_switch_tab",
+        "browser_close_tab",
+        "browser_close_session",
+        "browser_close_all"
+      ]
     }
   }
 }
