@@ -28,6 +28,7 @@ export type Seam =
   | "loop.recovery.start"
   | "loop.recovery.ok"
   | "loop.recovery.failed"
+  | "loop.recovery.guard_blocked"
   | "inbox.fastpath"
   | "github.fastpath"
   | "shell.fastpath"

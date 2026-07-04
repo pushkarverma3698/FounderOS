@@ -397,10 +397,43 @@ describe("isInternalKnowledgeRequest", () => {
 describe("detectUnbackedMemoryClaim", () => {
   const MEMORY_TOOLS = ["read_context", "search_memory", "search_knowledge", "search_turicks_brain"];
 
-  it("flags an internal-knowledge answer produced without any memory tool", () => {
+  // 2026-07-04 refuse-class fix: a plain correct answer with NO fabrication
+  // signal must NOT be flagged — the old flag-anything behaviour converted
+  // correct replies into brain-sync refusals (T35 prod loop class).
+  it("does NOT flag a plain internal-knowledge answer without fabrication signals", () => {
     const input = "What does Turicks do?";
     const reply =
       "Turicks is an AI agency that builds custom automation and cinematic web experiences for startups.";
+    expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(false);
+  });
+
+  it("does NOT flag the T35 multi-part synthesis reply (prod refuse/loop repro)", () => {
+    const input =
+      "ok so: what does turicks do? what does naggar do? which has more revenue potential in 2026 and why? and what's 1 action i should take this week for the winner?";
+    const reply =
+      "Turicks is your AI agency; Naggar is the retreat business. Revenue potential in 2026 favors Turicks: recurring service revenue scales with delivery capacity while the retreat is seasonal. One action this week: ship the Gumroad launch post and book two discovery calls.";
+    expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(false);
+    expect(detectUnbackedKnowledgeClaim(input, [aiMsg(reply)], reply)).toBe(false);
+  });
+
+  it("does NOT flag an in-thread goals recap (founder follow-up class)", () => {
+    const input = "so what are our goals for this week then?";
+    const reply =
+      "Based on what we just discussed: 1) finish the launch QA battery, 2) merge the loop-recovery PR, 3) send the two follow-up emails you drafted.";
+    expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(false);
+  });
+
+  it("STILL flags unbacked revenue specifics without memory tools (H14 class)", () => {
+    const input = "What does Turicks do and how is revenue?";
+    const reply =
+      "Turicks is doing great — $42,000 and $58,000 MRR bands from 11 retainer clients closed this quarter.";
+    expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(true);
+  });
+
+  it("STILL flags 'however, based on general understanding' fabrication bridges", () => {
+    const input = "What is our Naggar strategy?";
+    const reply =
+      "No entry found. However, based on general understanding, retreats typically target wellness tourists.";
     expect(detectUnbackedMemoryClaim(input, [aiMsg(reply)], reply)).toBe(true);
   });
 

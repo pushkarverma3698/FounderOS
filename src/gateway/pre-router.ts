@@ -221,6 +221,19 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
   return directive;
 }
 
+/**
+ * Input for the LOOP-RECOVERY pass only: company context + the recovery text,
+ * with NO grounding/routing/ledger directives. Stacking those onto the recovery
+ * directive gave the model mutually contradictory orders ("tools only THIS turn"
+ * vs "transfer to research first" vs "answer from what you already know") — every
+ * branch violated one, so recovery could never converge (2026-07-04 fix).
+ */
+export function buildRecoveryOfficeInput(recoveryText: string, companyKey?: string): BaseMessage[] {
+  const companyBlock = buildCompanyContextBlock(getCompany(companyKey));
+  const companyPrefix = companyBlock ? [new SystemMessage(companyBlock)] : [];
+  return [...companyPrefix, new HumanMessage(recoveryText)];
+}
+
 export function buildOfficeInput(text: string, companyKey?: string): BaseMessage[] {
   // Active-company override — empty for the default boot tenant (cache-stable).
   const companyBlock = buildCompanyContextBlock(getCompany(companyKey));

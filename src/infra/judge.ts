@@ -46,8 +46,14 @@ export interface JudgeModel {
  */
 const JUDGE_MODEL =
   process.env["JUDGE_MODEL"]?.trim() || "openrouter:meta-llama/llama-3.3-70b-instruct:free";
-/** Memoize a verdict for this long so the interrupt() re-execution is a cache hit. */
-const JUDGE_CACHE_TTL_MS = 5 * 60_000;
+/**
+ * Memoize a verdict so the interrupt() re-execution is a cache hit. MUST cover
+ * the full HITL approval window (24h, hitl.ts HITL_TTL_MS): the judge runs
+ * BEFORE hitlGate, so an approval tapped after the cache expired re-judged the
+ * draft on resume — a flipped verdict silently vetoed the founder's approval
+ * ("Revise before sending" after Approve). 2026-07-04 purity fix.
+ */
+const JUDGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** Resolve the judge model id, defaulting a bare id to the OpenRouter free tier. */
 function resolveJudgeModelId(): { provider: JudgeProvider; model: string } {
