@@ -2,11 +2,23 @@
 # Apply production .env on VPS from GitHub Actions secrets.
 # Called by deploy / stabilize / launch-gate workflows before running deploy scripts.
 #
+# THE SINGLE SOURCE OF TRUTH for production .env patching (2026-07-04 consolidation).
+# Previously deploy.yml ALSO carried its own inline copy of this render+patch logic,
+# and since this script ran AFTER that inline copy (as the last step before
+# deploy.sh), it silently re-rendered from PROD_DOTENV and re-applied an OLDER,
+# simpler model patch — wiping the hybrid-model split and CREATIVE_SUBGRAPH /
+# ENGINEERING_SUBGRAPH / MCP_BRIDGE_ENABLED flags that deploy.yml's copy had just
+# set, every single deploy. Confirmed live on the box: the flags never actually
+# reached the running process despite deploy logs claiming success. Fix: this is
+# now the ONLY writer of .env; deploy.yml just calls it.
+#
 # Inputs (env vars forwarded by appleboy/ssh-action):
-#   PROD_DOTENV          — base64-encoded full .env (required for DATABASE_URL)
-#   OPENROUTER_API_KEY   — optional override (pins AGENT_MODEL)
+#   PROD_DOTENV           — base64-encoded full .env (required for DATABASE_URL)
+#   OPENROUTER_API_KEY    — optional override (pins AGENT_MODEL + hybrid split)
 #   LINKEDIN_ACCESS_TOKEN — optional override
 #   LINKEDIN_AUTHOR_URN   — optional override
+#   SLACK_BOT_TOKEN       — optional (MCP bridge Slack connector, ADR-041)
+#   SLACK_TEAM_ID         — optional (MCP bridge Slack connector, ADR-041)
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/founderos}"
@@ -45,21 +57,47 @@ else
   echo "==> PROD_DOTENV not set; using existing .env on box"
 fi
 
-# Pin production model + OpenRouter key. MUST match deploy.yml — this script runs
-# LAST, so whatever it writes here is the model the bot actually boots with. It
-# previously hard-coded gemini-2.5-flash, which silently reverted the Pro pin that
-# deploy.yml (and PR #257) set, so the Pro reliability trial never actually ran in
-# prod. Keep this the single source of truth for the production model.
+# Pin the production model — HYBRID split (cost-reclaim, proven-Pro path).
+# Supervisor stays on Gemini 2.5 Pro (strong agentic routing/tool-calling); workers
+# drop to 2.5 Flash via WORKER_AGENT_MODEL (getWorkerModel honours it, fails safe to
+# the primary if unset/misconfigured). Fallback drops to Flash first (cheap, same
+# family) on a Pro capacity 503, then Haiku.
+# Also enable the advanced departments that ship OFF by default:
+#   CREATIVE_SUBGRAPH   → art_director/copywriter/brand_designer (Nano Banana image-gen)
+#   ENGINEERING_SUBGRAPH → coder/qa/devops CTO sub-supervisor
+#   MCP_BRIDGE_ENABLED  → external MCP tools (browser-use, blender, slack; per-server
+#                         try/catch means a dead server contributes zero tools, no crash)
+# This is now the ONLY place these pins are written — this script is the last
+# writer of .env, so whatever it sets here is what the bot actually boots with.
 if [ -n "${OPENROUTER_API_KEY:-}" ]; then
-  grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
+  # Also drop any stale LINKEDIN_API_VERSION — a leftover malformed value
+  # (20240501) 426'd every post on 2026-07-04. Unset lets the code default
+  # (a current YYYYMM) apply; the code now ignores malformed values anyway.
+  grep -v -E '^(AGENT_MODEL|WORKER_AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS|CREATIVE_SUBGRAPH|ENGINEERING_SUBGRAPH|MCP_BRIDGE_ENABLED|LINKEDIN_API_VERSION)=' .env > .env.patched || true
   {
     printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-pro'
+    printf '%s\n' 'WORKER_AGENT_MODEL=openrouter:google/gemini-2.5-flash'
     printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:google/gemini-2.5-flash,anthropic:claude-haiku-4-5'
+    printf '%s\n' 'CREATIVE_SUBGRAPH=1'
+    printf '%s\n' 'ENGINEERING_SUBGRAPH=1'
+    printf '%s\n' 'MCP_BRIDGE_ENABLED=true'
     printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
   } >> .env.patched
   mv .env.patched .env
   chmod 600 .env
-  echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-pro + OPENROUTER_API_KEY"
+  echo "==> Patched .env: hybrid model (Pro supervisor + Flash workers), creative+engineering subgraphs ON, MCP bridge ON"
+fi
+
+# MCP bridge Slack secrets — append only when the secret is set.
+if [ -n "${SLACK_BOT_TOKEN:-}" ]; then
+  grep -v -E '^(SLACK_BOT_TOKEN|SLACK_TEAM_ID)=' .env > .env.patched || true
+  {
+    printf 'SLACK_BOT_TOKEN=%s\n' "$SLACK_BOT_TOKEN"
+    [ -n "${SLACK_TEAM_ID:-}" ] && printf 'SLACK_TEAM_ID=%s\n' "$SLACK_TEAM_ID"
+  } >> .env.patched
+  mv .env.patched .env
+  chmod 600 .env
+  echo "==> Patched .env: SLACK_BOT_TOKEN + SLACK_TEAM_ID set"
 fi
 
 # LinkedIn direct API — separate secrets so founder can update without re-encoding PROD_DOTENV.

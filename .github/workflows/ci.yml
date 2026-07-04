@@ -1,8 +1,12 @@
 name: CI
 
+# SIMPLIFIED 2026-07-04: push runs only on main (post-merge); PRs are covered by
+# the pull_request event alone. Previously push ran on "**" so every PR commit
+# triggered the whole workflow TWICE (push + pull_request) — double the checks,
+# double the queue time, zero added safety.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
     branches: ["**"]
 
@@ -55,6 +59,11 @@ jobs:
   integration-tests:
     name: Integration tests
     runs-on: ubuntu-latest
+    # Main-only (post-merge): on PRs this job either silently skipped or spent
+    # free-tier quota — either way it showed as a green check that proved
+    # nothing, cluttering every PR. PR safety = quality + unit-tests (the two
+    # required checks in branch protection).
+    if: github.ref == 'refs/heads/main'
     # NOTE: the `secrets` context is NOT allowed in job-level `if:` — using it
     # invalidates the whole workflow file (every job fails in 0s). Instead we
     # always start the job and skip the steps when the key is absent (env IS
