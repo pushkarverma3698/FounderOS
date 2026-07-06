@@ -53,4 +53,17 @@ describe("outboundQualityGate", () => {
     expect(res.proceed).toBe(true);
     expect(res.fix).toBeUndefined();
   });
+
+  // M5 fix: this exact scenario (no judge key configured → gate 2 no-op pass)
+  // must surface a visible warning on the HITL card — before the fix, a
+  // silently-skipped judge was indistinguishable from a genuine pass.
+  it("M5: surfaces a degraded-gate warning on the HITL card when the judge is a no-op", async () => {
+    const res = await outboundQualityGate(
+      "Hi Sam, saw your team shipped the billing revamp. We build small AI tools that cut support load — worth a 15-min look?",
+      "outreach",
+      cfg,
+    );
+    expect(res.proceed).toBe(true);
+    expect(res.warning).toMatch(/quality judge.*unavailable/i);
+  });
 });

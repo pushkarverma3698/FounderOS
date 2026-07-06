@@ -72,8 +72,13 @@ describe("buildCapabilityManifest", () => {
     expect(manifest).toMatch(/supervisor.*handoffs only/i);
   });
 
-  it("mentions the MCP server so 'what MCP servers' answers are truthful", () => {
-    expect(manifest).toMatch(/MCP server on localhost:3100/);
+  // M6 regression: the manifest previously claimed the server ran on a fixed
+  // HTTP port ("localhost:3100"); it actually only ever shipped as a stdio
+  // subprocess (src/mcp/index.ts) — the anti-drift capability registry had
+  // itself drifted. Assert the transport it actually uses, not a guessed port.
+  it("mentions the MCP server's REAL transport so 'what MCP servers' answers are truthful", () => {
+    expect(manifest).toMatch(/MCP server \(stdio transport/);
+    expect(manifest).not.toMatch(/localhost:3100/);
   });
 
   it("HITL set covers every side-effecting tool name present in departments", () => {
