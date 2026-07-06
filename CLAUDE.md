@@ -455,6 +455,24 @@ lie, not a status. This is the Iron Law from `superpowers:verification-before-co
 - **Determinism is the goal of every fix here.** Same input → same behaviour. Push correctness into pure,
   unit-tested code (guards, parsers, envelopes) — never rely on a prompt instruction a weak/swapped model
   may ignore (rule #16). A fix that only works on one model is not a fix; it's a latent regression.
+- **A look-alike tool is not verification of THIS codebase.** 2026-07-04 incident: `IMAGE_MODEL_DRAFT.id`
+  was a nonexistent Generative Language model (`gemini-3-1-flash-image`) — every real image request 404'd
+  in prod for days. It shipped because every test mocked `fetch`, and when asked to "check nano banana,"
+  the first check called a *different*, generic image-generation MCP tool (different API key, different
+  model registry) that happened to work — and that success was nearly reported as proof the app's own
+  `generateImage()` worked. It wasn't the same code. **Verification must call the actual function/path in
+  THIS repo** (`generateImage()` from `src/tools/image-gen.ts`, the real deployed `dist/`, the real gateway
+  loop) — never a similar-sounding external tool, a different SDK, or a different model registry, even if
+  it "does the same thing." If you cannot invoke the real path, say so; do not substitute a proxy and call
+  it verification.
+- **A reply claiming success is not evidence a deliverable exists.** The same incident's second half: even
+  after the model-id fix, `generate_image` returned only `{ asset_id }` — no way for the founder to actually
+  see the image. Nothing crashed, no test failed, but the feature was still useless end-to-end. For any
+  feature that hands the founder an artifact (image, file, link, voice note), verification means fetching
+  or opening THAT artifact and confirming it is real content — not just that the tool call returned 200 or
+  that the chat reply contains cheerful text. See `scripts/e2e-telegram-qa.ts` group8 for the pattern
+  (`expectMediaUrl`: the harness does a real HTTP GET on whatever URL the bot returns and fails the task if
+  it doesn't resolve to real image/audio bytes).
 
 ## Engineering Protocol — Verification-First (PERMANENT, applies to every change)
 

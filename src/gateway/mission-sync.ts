@@ -16,10 +16,18 @@ import {
   phaseFromTrace,
   PHASE_REACTION,
 } from "./mission-control.js";
+import { departmentFromTransferTool } from "./dept-routing.js";
 import { publishStreamEvent } from "./stream-hub.js";
 import { logger } from "../infra/logger.js";
 
 const log = logger.child({ module: "mission-sync" });
+
+/** Per-department status once a mission reaches a terminal phase. */
+const TERMINAL_AGENT_STATUS: Partial<Record<string, string>> = {
+  COMPLETE: "done",
+  ERROR: "error",
+  CANCELLED: "cancelled",
+};
 
 export async function syncMissionTrace(
   sessionId: string,
@@ -36,10 +44,18 @@ export async function syncMissionTrace(
   if (seam === "route.decided" && data?.hint) {
     department = departmentFromRouteHint(String(data.hint)) ?? department;
   }
+  if (seam === "tool.call") {
+    const toolName = data?.["name"] ?? data?.["tool"] ?? data?.["toolName"];
+    if (typeof toolName === "string") {
+      department = departmentFromTransferTool(toolName) ?? department;
+    }
+  }
 
   const agentStatuses = { ...(mission.agent_statuses ?? {}) };
   if (department) {
-    agentStatuses[department] = phase === "AWAITING APPROVAL" ? "awaiting approval" : "active";
+    const terminalStatus = phase ? TERMINAL_AGENT_STATUS[phase] : undefined;
+    agentStatuses[department] =
+      terminalStatus ?? (phase === "AWAITING APPROVAL" ? "awaiting approval" : "active");
   }
 
   if (phase || nextAction || department) {
@@ -49,7 +65,9 @@ export async function syncMissionTrace(
       ...(department ? { department } : {}),
       agent_statuses: agentStatuses,
       turn_id: trace.turnId,
-      ...(phase === "COMPLETE" || phase === "ERROR" ? { completed_at: new Date() } : {}),
+      ...(phase === "COMPLETE" || phase === "ERROR" || phase === "CANCELLED"
+        ? { completed_at: new Date() }
+        : {}),
     }).catch((err) => log.warn({ err: (err as Error).message }, "Mission phase update failed"));
   }
 

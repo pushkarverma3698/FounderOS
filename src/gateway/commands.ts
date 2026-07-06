@@ -899,12 +899,15 @@ export async function handleMisoClose(ctx: Context): Promise<void> {
   const chatId = ctx.chat?.id;
   if (chatId === undefined) return;
   const sessionId = String(chatId);
+  const missionBeforeClose = await getActiveMission(sessionId);
   const summary = await closeActiveMission(sessionId);
   if (!summary) {
     await ctx.reply("No active mission to close.");
     return;
   }
-  const audit = await getRecentAuditEntries(CONFIG_TENANT, 3);
+  // Scope the audit line to this mission's own window — action_log is tenant-wide,
+  // so an unscoped query surfaces unrelated activity from other missions/sessions.
+  const audit = await getRecentAuditEntries(CONFIG_TENANT, 3, missionBeforeClose?.started_at ?? undefined);
   const auditLine = audit.length > 0 ? `\nRecent audit: ${audit.map((a) => a.action).join(", ")}` : "";
   await ctx.reply(`${summary}${auditLine}`);
 }

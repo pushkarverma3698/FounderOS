@@ -1,9 +1,23 @@
 version: "3.9"
 
+# LOCAL = PROD PARITY (2026-07-04): the postgres + ollama services below mirror
+# deploy/stack.compose.yml (the production stack on the VPS) — same images, same
+# service shape. Only differences: local binds 0.0.0.0 for convenience and the
+# app service exists here for optional containerized runs (prod runs the app
+# under systemd on the host, not in Docker).
+#
+# If you change an image/version here, change deploy/stack.compose.yml too (and
+# vice versa) — drift between these two files is how "works locally, breaks in
+# prod" happens.
+
 services:
-  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  # ── PostgreSQL (pgvector — SAME image as prod) ────────────────────────────
+  # postgres:16-alpine (the old image) has NO pgvector extension: every RAG
+  # feature (turicks_brain, knowledge search) silently had no local story.
+  # pgvector/pgvector:pg16 is what production runs.
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
+    container_name: founderos-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: founderos
@@ -12,14 +26,37 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # New volume name on purpose: the old postgres_data volume was initialized
+      # by alpine/musl postgres and is not collation-safe under the Debian-based
+      # pgvector image. Fresh volume → re-seed with: npx tsx scripts/setup-db.ts
+      - postgres_pgvector_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U founderos"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ── FounderOS App ──────────────────────────────────────────────────────────
+  # ── Ollama (embeddings — SAME image as prod) ──────────────────────────────
+  # Prod runs nomic-embed-text in this container; without it local brain:sync
+  # emits 0 embeddings (the exact silent-failure class behind the 2026-06-15
+  # prod RAG outage). Pull the model once after first start:
+  #   docker exec founderos-ollama ollama pull nomic-embed-text
+  ollama:
+    image: ollama/ollama
+    container_name: founderos-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - founderos_ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  # ── FounderOS App (optional — prod runs under systemd, NOT Docker) ────────
   app:
     build:
       context: ..
@@ -30,7 +67,6 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://founderos:founderos@postgres:5432/founderos
-      REDIS_URL: redis://redis:6379
       NODE_ENV: production
       # All other vars come from .env file (never commit secrets)
     env_file:
@@ -42,4 +78,5 @@ services:
       - ./scratchpad:/app/.scratchpad
 
 volumes:
-  postgres_data:
+  postgres_pgvector_data:
+  founderos_ollama_models:

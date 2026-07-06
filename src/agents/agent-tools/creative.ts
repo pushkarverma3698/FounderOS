@@ -4,7 +4,12 @@
  * Tools for the Creative department: image generation (Nano Banana) + brand
  * asset listing. Generated images flow straight into the S3 `agent_assets`
  * layer (roadmap #7: bytes in object storage, only a pointer in state) — the
- * tool returns the asset_id + a presigned URL, never raw image bytes.
+ * tool returns the asset_id + a presigned download_url, never raw image bytes.
+ *
+ * 2026-07-04: the presign used to be a SEPARATE tool (get_download_url) the
+ * specialist had to remember to call. It never did — the founder only ever
+ * got a bare asset_id over Telegram, no way to see the image. generate_image
+ * now presigns internally (rule #16: deterministic code, not LLM memory).
  *
  * Cost discipline (roadmap #6): the cheap DRAFT model is the default. The
  * expensive Nano Banana Pro tier fires ONLY when the caller passes final=true
@@ -17,7 +22,7 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { generateImage, ImageGenError, IMAGE_MODEL_FINAL } from "../../tools/image-gen.js";
-import { uploadFile, StorageError } from "../../infra/storage/s3-client.js";
+import { uploadFile, generatePresignedUrl, StorageError } from "../../infra/storage/s3-client.js";
 import { saveAsset, getBrandAssets } from "../../infra/storage/asset-repo.js";
 import { logLlmCost, getTodayCostUsd } from "../../db/queries.js";
 import { getDailyBudgetCapUsd, checkDailyBudgetGate } from "../../infra/daily-budget.js";
@@ -106,14 +111,28 @@ export const generateImageTool = tool(
       return `generate_image: uploaded to S3 (key=${s3Key}) but DB record failed: ${(err as Error).message}`;
     }
 
-    log.info({ assetId, model: img.model, tier: img.tier, usd: img.usd }, "generate_image ok");
+    // Presign the download link HERE — deterministic, not left to the LLM to
+    // remember as a separate get_download_url call. Without this, the founder
+    // only ever received a bare asset_id (2026-07-04 finding: the image was
+    // generated correctly but was never actually deliverable end-to-end).
+    let downloadUrl: string | null = null;
+    try {
+      downloadUrl = await generatePresignedUrl(s3Key);
+    } catch (err) {
+      log.warn({ err: (err as Error).message, s3Key }, "generate_image: presign failed (asset still saved)");
+    }
+
+    log.info({ assetId, model: img.model, tier: img.tier, usd: img.usd, hasUrl: !!downloadUrl }, "generate_image ok");
     return JSON.stringify({
       asset_id: assetId,
       s3_key: s3Key,
+      download_url: downloadUrl,
       model: img.model,
       tier: img.tier,
       usd: img.usd,
-      note: "Use get_download_url to share this image. Drafts are internal — publish via comms/marketing (HITL).",
+      note: downloadUrl
+        ? "Share download_url directly with the founder so they can see the image. Drafts are internal — publish via comms/marketing (HITL)."
+        : "download_url presign failed — call get_download_url with s3_key to retry. Drafts are internal — publish via comms/marketing (HITL).",
     });
   },
   {
@@ -123,7 +142,9 @@ export const generateImageTool = tool(
       "Banana 2) by default. Pass final=true ONLY for a publish-grade asset — " +
       "that uses Nano Banana Pro (~$0.13/img) and is checked against the daily " +
       "budget. The image is stored in S3; the tool returns { asset_id, s3_key, " +
-      "model, tier, usd }. Drafts stay internal — never auto-publish.",
+      "download_url, model, tier, usd }. ALWAYS include download_url verbatim " +
+      "in your reply — it is the only way the founder can actually see the " +
+      "image. Drafts stay internal — never auto-publish.",
     schema: z.object({
       prompt: z.string().describe("What to draw — be specific about subject, style, composition."),
       final: z

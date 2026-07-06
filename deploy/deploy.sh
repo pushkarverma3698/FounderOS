@@ -173,15 +173,48 @@ else
   echo "    MCP_BRIDGE_ENABLED=false (default) — skipping bridge checks"
 fi
 
+echo "==> Checking creative department storage dependencies"
+# CREATIVE_SUBGRAPH is forced on by apply-prod-env-overrides.sh, but generate_image
+# needs S3 to actually deliver an image — without it, every request generates the
+# image (real spend) then dead-ends at the upload step. 2026-07 finding: this was
+# never enforced anywhere (not boot, not deploy, not docs), so a missing bucket
+# would silently break creative in prod with zero signal until a founder complained.
+CREATIVE_SUBGRAPH_VAL="$(grep -E '^CREATIVE_SUBGRAPH=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+if [ "${CREATIVE_SUBGRAPH_VAL:-0}" = "1" ] || [ "${CREATIVE_SUBGRAPH_VAL:-0}" = "true" ]; then
+  STORAGE_BUCKET_VAL="$(grep -E '^STORAGE_BUCKET=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  AWS_KEY_VAL="$(grep -E '^AWS_ACCESS_KEY_ID=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  AWS_SECRET_VAL="$(grep -E '^AWS_SECRET_ACCESS_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  if [ -z "$STORAGE_BUCKET_VAL" ] || [ -z "$AWS_KEY_VAL" ] || [ -z "$AWS_SECRET_VAL" ]; then
+    echo "    WARNING: CREATIVE_SUBGRAPH=1 but STORAGE_BUCKET/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY" >&2
+    echo "             are not all set — generate_image will fail at the S3 upload step for every" >&2
+    echo "             request. Set them in PROD_DOTENV (or STORAGE_ENDPOINT_URL for R2/MinIO)." >&2
+  else
+    echo "    STORAGE_BUCKET=$STORAGE_BUCKET_VAL — creative image delivery ready"
+  fi
+else
+  echo "    CREATIVE_SUBGRAPH not enabled — skipping storage check"
+fi
+
 echo "==> Restarting service (single-instance lock makes this safe)"
 sudo systemctl restart founderos
 
+# Poll instead of a single flat sleep+check: a fixed `sleep 5` false-failed a
+# genuinely healthy deploy on 2026-07-04 (MCP bridge npx spawn + office compile
+# pushed boot to ~6.3s, one tick past the old 5s window) — the job exited 1 while
+# the service was seconds from "FounderOS running". Same condition-based-waiting
+# fix as the Ollama wait loop above: retry up to 30x2s (60s) before giving up.
 echo "==> Waiting for health"
-sleep 5
-if curl -fsS http://127.0.0.1:3001/health >/dev/null; then
-  echo "==> Deploy OK — /health is green"
-else
-  echo "!! /health did NOT come up — check: journalctl -u founderos -n 50" >&2
+HEALTH_OK=false
+for i in {1..30}; do
+  if curl -fsS http://127.0.0.1:3001/health >/dev/null 2>&1; then
+    echo "==> Deploy OK — /health is green after ${i}s"
+    HEALTH_OK=true
+    break
+  fi
+  sleep 2
+done
+if [ "$HEALTH_OK" != true ]; then
+  echo "!! /health did NOT come up within 60s — check: journalctl -u founderos -n 50" >&2
   exit 1
 fi
 
