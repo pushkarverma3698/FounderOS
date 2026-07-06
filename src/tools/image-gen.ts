@@ -38,16 +38,34 @@ export interface ImageModelSpec {
   tier: ImageTier;
 }
 
-/** Nano Banana — fast drafts. The default for everything but explicit finals. */
+/**
+ * Nano Banana (Gemini 2.5 Flash Image) — fast drafts, the default.
+ * `gemini-2.5-flash-image` is the id LIVE-VERIFIED against the real API
+ * (2026-07-04, real inline image bytes returned — see file header). Cost
+ * updated to ~$0.039/img at ≤1024px (1290 output tokens × $30/1M) — the prior
+ * $0.01 figure was a rough guess. NOTE: Google has scheduled this model for
+ * shutdown on 2026-10-02; the successor is `gemini-3.1-flash-image-preview`
+ * ("Nano Banana 2", ~$0.067/img @1K) — set IMAGE_DRAFT_MODEL to swap when that
+ * successor has been live-verified the same way.
+ */
 export const IMAGE_MODEL_DRAFT: ImageModelSpec = {
-  id: "gemini-2.5-flash-image",
-  usdPerImage: 0.01,
+  id: process.env["IMAGE_DRAFT_MODEL"]?.trim() || "gemini-2.5-flash-image",
+  usdPerImage: 0.039,
   tier: "draft",
 };
 
-/** Nano Banana Pro — final, publish-grade assets. Gated. */
+/**
+ * Nano Banana Pro (Gemini 3 Pro Image) — final, publish-grade assets. Gated.
+ * `gemini-3-pro-image` (no `-preview` suffix) is the id LIVE-VERIFIED against
+ * the real API (2026-07-04). A `gemini-3-pro-image-preview` alias was proposed
+ * once but never live-verified — do not switch to it without re-verifying the
+ * same way (real HTTP 200 + real image bytes), since an unverified id repeats
+ * the exact DRAFT-model incident this file's header documents. Override with
+ * IMAGE_FINAL_MODEL if a verified successor lands. ~$0.134/img at 1K–2K
+ * (1120 tokens), ~$0.24 at 4K.
+ */
 export const IMAGE_MODEL_FINAL: ImageModelSpec = {
-  id: "gemini-3-pro-image",
+  id: process.env["IMAGE_FINAL_MODEL"]?.trim() || "gemini-3-pro-image",
   usdPerImage: 0.134,
   tier: "final",
 };
