@@ -26,7 +26,7 @@ import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD, O
 import { withTurnTimeout, TurnTimeoutError } from "./turn-timeout.js";
 import { computeHistoryTrim } from "../infra/history-window.js";
 import { logger } from "../infra/logger.js";
-import { getOffice, getPendingApproval } from "../agents/office.js";
+import { getOffice, getPendingApproval, getFallbackOffice } from "../agents/office.js";
 import type { ApprovalRequest } from "../agents/agent-tools.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt, getTodayCostUsd } from "../db/queries.js";
@@ -1156,12 +1156,59 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       );
       return;
     }
-    // Provider capacity/quota errors on the SUPERVISOR's own LLM call have no
-    // fallback (createSupervisor takes a bare model — fallback middleware only
-    // covers departments). Surface them honestly instead of a raw stack dump.
+    // M2 fix: provider capacity/quota errors on the SUPERVISOR's own LLM call
+    // used to have no recovery — createSupervisor takes a bare model, so the
+    // department-level fallback middleware never covers it. Now attempt ONE
+    // retry against a separate, fallback-model-bound office (getFallbackOffice,
+    // a no-op unless AGENT_FALLBACK_MODELS is configured) before giving up.
+    // NOT verified live against a real provider outage (no live keys in this
+    // session) — the retry reuses the SAME thread_id/checkpointer as the
+    // primary office, which should be checkpoint-compatible since the graph
+    // topology is identical (only the bound model differs), but that specific
+    // claim wasn't exercised against a real Postgres + real model pair.
     if (is503Error(err) || isQuotaExhaustedError(err) || isProviderNoToolUseError(err)) {
       const reason = err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200);
-      log.warn({ chatId, err: reason }, "Run stopped: model provider unavailable");
+      log.warn({ chatId, err: reason }, "Run stopped: model provider unavailable — attempting fallback office");
+      trace.event("gate.degraded", { gate: "supervisor_model", reason: reason.slice(0, 200) });
+
+      const fallbackOffice = await getFallbackOffice().catch((fbErr) => {
+        log.warn({ chatId, err: (fbErr as Error).message }, "getFallbackOffice failed — no retry available");
+        return null;
+      });
+
+      if (fallbackOffice) {
+        try {
+          const retryMessages = buildOfficeInput(text, getActiveCompany(chatId));
+          assertNonEmptyMessages(retryMessages, "supervisorFallbackRetry");
+          const fallbackRes = (await withTurnTimeout(
+            fallbackOffice.invoke({ messages: retryMessages }, config),
+            OFFICE_TURN_TIMEOUT_MS,
+            "office.invoke.fallback",
+          )) as { messages?: OfficeMessage[] };
+
+          const fallbackApproval = await getPendingApproval(fallbackOffice, config);
+          if (fallbackApproval) {
+            trace.event("hitl.interrupt", { title: fallbackApproval.title, fallbackOffice: true });
+            await sendApprovalCard(session, fallbackApproval);
+            return;
+          }
+
+          await session
+            .onSystemNotice("🌩️ <i>Primary AI provider was unavailable — used the fallback model for this turn.</i>")
+            .catch(() => {
+              /* best-effort */
+            });
+          await sendResult(session, fallbackRes, chatId);
+          trace.event("turn.out", { fallbackOffice: true });
+          return;
+        } catch (fallbackErr) {
+          log.warn(
+            { chatId, err: (fallbackErr as Error).message },
+            "Fallback office retry also failed — falling through to standard outage notice",
+          );
+        }
+      }
+
       await clearThreadAfterAbort(chatId);
       await session.onSystemNotice(
         `🌩️ <b>The AI provider is overloaded or unavailable right now</b>\n` +
