@@ -237,7 +237,11 @@ export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", false);
  * supervisor's agent set, which changes routing surface. It stays off until the
  * routing is live-verified on the VPS with `pnpm eval` (the eval needs a real
  * model key, absent in CI/web). Flip CREATIVE_SUBGRAPH=1 to enable. Generating
- * images also needs GOOGLE_GENERATIVE_AI_API_KEY.
+ * images also needs GOOGLE_GENERATIVE_AI_API_KEY, AND delivering them needs
+ * STORAGE_BUCKET + AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (S3/R2/MinIO) —
+ * without storage, generate_image produces the image then dead-ends at the
+ * upload step for every request. `logBootReport` warns loudly if this flag is
+ * on without storage configured; see boot-report.ts.
  */
 export const CREATIVE_SUBGRAPH_ENABLED = boolEnv("CREATIVE_SUBGRAPH", false);
 
