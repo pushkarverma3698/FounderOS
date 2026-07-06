@@ -3,7 +3,7 @@
  * Track 4 — D1 fixes.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Context } from "grammy";
 
 // ── Minimal grammy Context mock ───────────────────────────────────────────────
@@ -167,5 +167,73 @@ describe("handleStart", () => {
     const { ctx, replies } = fakeCtx();
     await handleStart(ctx);
     expect(replies[0]).toContain("/ping");
+  });
+});
+
+// ── /subagent (ADR-046) — plan → approve → execute ────────────────────────────
+
+describe("buildSubagentBrief — pure execution brief", () => {
+  it("embeds the approved plan when present", async () => {
+    const { buildSubagentBrief } = await import("../../../src/gateway/commands.js");
+    const brief = buildSubagentBrief("build a todo CLI", "1. scaffold\n2. tests");
+    expect(brief).toContain("build a todo CLI");
+    expect(brief).toContain("APPROVED IMPLEMENTATION PLAN");
+    expect(brief).toContain("1. scaffold");
+    expect(brief).toContain("claude_code");
+  });
+
+  it("omits the plan section when no plan is available", async () => {
+    const { buildSubagentBrief } = await import("../../../src/gateway/commands.js");
+    const brief = buildSubagentBrief("build a todo CLI", null);
+    expect(brief).toContain("build a todo CLI");
+    expect(brief).not.toContain("APPROVED IMPLEMENTATION PLAN");
+  });
+
+  it("treats a blank plan string as no plan", async () => {
+    const { buildSubagentBrief } = await import("../../../src/gateway/commands.js");
+    expect(buildSubagentBrief("x", "   ")).not.toContain("APPROVED IMPLEMENTATION PLAN");
+  });
+});
+
+describe("handleSubagent — plan → approve → execute flow", () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  it("empty task → shows usage, never plans or dispatches", async () => {
+    const { handleSubagent } = await import("../../../src/gateway/commands.js");
+    const { claudeCodeTool } = await import("../../../src/tools/claude-code.js");
+    const spy = vi.spyOn(claudeCodeTool, "execute");
+    const { ctx, replies } = fakeCtx("");
+    const dispatched: string[] = [];
+    await handleSubagent(ctx, async (_c, text) => { dispatched.push(text); });
+    expect(replies[0]).toContain("/subagent");
+    expect(spy).not.toHaveBeenCalled();
+    expect(dispatched).toHaveLength(0);
+  });
+
+  it("plan success → surfaces the plan and dispatches a plan-embedded brief", async () => {
+    const { handleSubagent } = await import("../../../src/gateway/commands.js");
+    const { claudeCodeTool } = await import("../../../src/tools/claude-code.js");
+    vi.spyOn(claudeCodeTool, "execute").mockResolvedValue({ success: true, data: "1. scaffold\n2. add tests" });
+    const { ctx, replies } = fakeCtx("build a todo CLI");
+    const dispatched: string[] = [];
+    await handleSubagent(ctx, async (_c, text) => { dispatched.push(text); });
+    expect(claudeCodeTool.execute).toHaveBeenCalledWith(expect.objectContaining({ mode: "plan" }));
+    expect(replies.some((r) => r.includes("Implementation plan"))).toBe(true);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]).toContain("APPROVED IMPLEMENTATION PLAN");
+    expect(dispatched[0]).toContain("scaffold");
+  });
+
+  it("plan failure → graceful fallback, still dispatches a no-plan brief", async () => {
+    const { handleSubagent } = await import("../../../src/gateway/commands.js");
+    const { claudeCodeTool } = await import("../../../src/tools/claude-code.js");
+    vi.spyOn(claudeCodeTool, "execute").mockResolvedValue({ success: false, error: "CLI not found" });
+    const { ctx, replies } = fakeCtx("build a todo CLI");
+    const dispatched: string[] = [];
+    await handleSubagent(ctx, async (_c, text) => { dispatched.push(text); });
+    expect(replies.some((r) => r.includes("Planning step unavailable"))).toBe(true);
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]).not.toContain("APPROVED IMPLEMENTATION PLAN");
+    expect(dispatched[0]).toContain("build a todo CLI");
   });
 });

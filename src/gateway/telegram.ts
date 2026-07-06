@@ -25,7 +25,7 @@ import { logger } from "../infra/logger.js";
 import {
   handleStart, handleReset, handleStatus, handleContext, handleCompany,
   handleTarget, handleTargets, handleUntarget,
-  handleOutbound, handleProofDrop, handleWebBuild, handleCommands, handleDepartments,
+  handleOutbound, handleProofDrop, handleWebBuild, handleSubagent, handleCommands, handleDepartments,
   handleWorkflows, handleRun, handleQ,
   handleSignals, handleRuns, handleBudget,
   handleHalt, handleResume,
@@ -98,6 +98,7 @@ export function registerHandlers(bot: Bot): void {
   bot.command("outbound",    (ctx: Context) => handleOutbound(ctx, runOfficeText));
   bot.command("proofdrop",   (ctx: Context) => handleProofDrop(ctx, runOfficeText));
   bot.command("webbuild",    (ctx: Context) => handleWebBuild(ctx, runOfficeText));
+  bot.command("subagent",    (ctx: Context) => handleSubagent(ctx, runOfficeText));
   bot.command("commands",    (ctx: Context) => handleCommands(ctx));
   bot.command("departments", (ctx: Context) => handleDepartments(ctx));
   // Phase 1 — Workflow / SOP engine
