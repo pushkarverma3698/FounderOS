@@ -13,6 +13,7 @@ import {
   INBOX_READ_ONLY_RE,
   INTERNAL_KNOWLEDGE_DIRECTIVE,
   isGithubReadOnlyRequest,
+  isGithubWriteRequest,
   isInternalKnowledgeRequest,
   LINKEDIN_BANNED_INPUT_RE,
   SHELL_RUN_RE,
@@ -219,6 +220,50 @@ function buildRoutingDirective(dept: RoutableDept, text: string): string {
     directive += ` ${formatEngineeringHandoffEnvelope(handoff)}`;
   }
   return directive;
+}
+
+/**
+ * H4 fix — the "real pivot" from the audit: for the SAME high-confidence
+ * intents `buildRoutingDirective` above already tags with a "CRITICAL —
+ * call X now" directive, also return the exact tool name so office-run.ts
+ * can pass it through as `configurable.forced_tool`, and each department's
+ * `forceToolChoiceMiddleware` (office.ts) sets the model's native
+ * `toolChoice: {type:"function", function:{name}}` for that department's
+ * first step. This converts "the model ignored the directive and hallucinated
+ * the action" from a detect-and-retry problem (execution-guard.ts's
+ * `detectUnbacked*Claim` family) into a structurally impossible state for
+ * that one call — the provider must either call the named tool or the
+ * request fails, it cannot emit prose instead.
+ *
+ * Deliberately narrow: only the cases already proven by the existing
+ * CRITICAL directives (real prod incidents, real regression tests) get a
+ * forced tool. This reuses those same classification regexes — it does not
+ * invent new ones — so gated behind FORCE_TOOL_CHOICE_ENABLED (default OFF)
+ * until live-verified against a real provider (tool_choice forcing is a
+ * provider-side contract this session has no live key to confirm).
+ *
+ * Returns null when no high-confidence forced tool applies — the supervisor/
+ * department behave exactly as before.
+ */
+export function resolveForcedTool(dept: RoutableDept, text: string): string | null {
+  if (dept === "personal" && SHELL_RUN_RE.test(text)) return "run_shell";
+  if (dept === "marketing" && extractProvidedLinkedInPost(text)) return "linkedin_post";
+  if (
+    dept === "comms" &&
+    INBOX_READ_ONLY_RE.test(text) &&
+    !/\b(draft|reply|send|write|respond)\b/i.test(text)
+  ) {
+    return "read_emails";
+  }
+  // GitHub write is only forced for the FLAT engineering department — the
+  // nested CTO subgraph (ENGINEERING_SUBGRAPH=1) delegates github_write to a
+  // "devops" sub-agent, a different node this middleware isn't wired onto,
+  // and that subgraph is unverified in production (see ADR-027 gating).
+  if (dept === "engineering" && !ENGINEERING_SUBGRAPH_ENABLED && isGithubWriteRequest(text)) {
+    return "github_write";
+  }
+  if (dept === "engineering" && isGithubReadOnlyRequest(text)) return "github_read";
+  return null;
 }
 
 /**

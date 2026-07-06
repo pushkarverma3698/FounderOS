@@ -38,8 +38,16 @@ const HITL_TTL_MS = 24 * 60 * 60 * 1000;
  * write/exec tool that gates behind interrupt() (shell, claude_code, github, mcp,
  * email, linkedin, gcal) uses THIS function — never the windowed variant below.
  */
+/**
+ * L4 fix: use the FULL SHA-1 digest (40 hex chars / 160 bits), not a 16-char
+ * (64-bit) truncation. `action_log.idempotency_key` is a `text` column
+ * (unbounded) so this needed no migration. At 64 bits the birthday bound for a
+ * collision is ~4 billion actions — fine for one founder today, but truncating
+ * at all was an unforced trade-off with zero benefit (storage cost of the extra
+ * 24 hex chars is negligible) and a real risk before any multi-tenant/SaaS scale.
+ */
 export function idemKey(prefix: string, ...parts: string[]): string {
-  const h = createHash("sha1").update(parts.join("|")).digest("hex").slice(0, 16);
+  const h = createHash("sha1").update(parts.join("|")).digest("hex");
   return `${prefix}:${TENANT}:${h}`;
 }
 

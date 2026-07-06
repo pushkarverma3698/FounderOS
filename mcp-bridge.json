@@ -3,14 +3,14 @@
     "blender": {
       "transport": "stdio",
       "command": "uvx",
-      "args": ["blender-mcp"],
+      "args": ["blender-mcp@1.6.4"],
       "department": "personal",
       "write": ["execute_blender_code", "render_image"]
     },
     "slack": {
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-slack"],
+      "args": ["-y", "@modelcontextprotocol/server-slack@2025.4.25"],
       "env": ["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"],
       "department": "comms",
       "write": ["slack_post_message", "slack_reply_to_thread"]
@@ -18,7 +18,7 @@
     "browser-use": {
       "transport": "stdio",
       "command": "uvx",
-      "args": ["--from", "browser-use[cli]", "browser-use", "--mcp"],
+      "args": ["--from", "browser-use[cli]==0.13.3", "browser-use", "--mcp"],
       "env": ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
       "department": "personal",
       "write": [

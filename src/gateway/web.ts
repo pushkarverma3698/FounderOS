@@ -39,10 +39,24 @@ function webToken(): string | undefined {
   return process.env["WEB_GATEWAY_TOKEN"]?.trim() || undefined;
 }
 
+/**
+ * C2 fix: whether a MISSING token is allowed to mean "open". Previously this
+ * was unconditional (fail-open), so a production deploy that forgot to set
+ * WEB_GATEWAY_TOKEN silently exposed every /api/* route — including turn
+ * execution and the HITL approve/reject endpoints — to anyone who could reach
+ * the port. Now it's open only in dev/test, or when explicitly opted into via
+ * WEB_GATEWAY_ALLOW_ANONYMOUS=true (e.g. a deployment fronted by its own
+ * reverse-proxy auth).
+ */
+function allowAnonymousWebAccess(): boolean {
+  if (process.env["WEB_GATEWAY_ALLOW_ANONYMOUS"] === "true") return true;
+  return process.env["NODE_ENV"] !== "production";
+}
+
 /** Verify Bearer header or ?token= query (EventSource cannot send headers). */
 export function authOk(authHeader: string | undefined, queryToken?: string | null): boolean {
   const token = webToken();
-  if (!token) return true;
+  if (!token) return allowAnonymousWebAccess();
   if (authHeader?.startsWith("Bearer ") && authHeader.slice(7) === token) return true;
   if (queryToken && queryToken === token) return true;
   return false;
@@ -200,8 +214,12 @@ export function createWebApp(): Hono {
     const interruptId = c.req.param("interruptId");
     const row = await getInterruptById(interruptId);
     if (!row) return c.json({ error: "not_found" }, 404);
+    if (row.status !== "pending") return c.json({ error: "stale", status: row.status }, 409);
     const sessionId = row.thread_id.split(":").slice(1).join(":") || row.thread_id;
-    await resumeOfficeSession(createWebSession(sessionId), "approved");
+    // H1: bind the resume to THIS interrupt id — a mismatch (the pending
+    // action changed between the client fetching this id and the click)
+    // refuses the resume instead of silently approving whatever is current.
+    await resumeOfficeSession(createWebSession(sessionId), "approved", interruptId);
     return c.json({ ok: true });
   });
 
@@ -209,8 +227,9 @@ export function createWebApp(): Hono {
     const interruptId = c.req.param("interruptId");
     const row = await getInterruptById(interruptId);
     if (!row) return c.json({ error: "not_found" }, 404);
+    if (row.status !== "pending") return c.json({ error: "stale", status: row.status }, 409);
     const sessionId = row.thread_id.split(":").slice(1).join(":") || row.thread_id;
-    await resumeOfficeSession(createWebSession(sessionId), "rejected");
+    await resumeOfficeSession(createWebSession(sessionId), "rejected", interruptId);
     return c.json({ ok: true });
   });
 

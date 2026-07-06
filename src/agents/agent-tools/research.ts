@@ -19,6 +19,7 @@ import { getCachedScrape, setCachedScrape, ingestResearch } from "../../infra/re
 import { recordEventTool } from "../../tools/memory.js";
 import { childLogger } from "../../infra/logger.js";
 import { makeRepeatGuard, repeatGuardBlockMessage } from "./repeat-guard.js";
+import { resolveEgressUrl } from "../../infra/egress-guard.js";
 
 const log = childLogger({ module: "agent-tool:research" });
 
@@ -82,6 +83,16 @@ async function persist(cacheKey: string, pages: ScrapeResult[]): Promise<void> {
 
 export const scrapeUrlTool = tool(
   async ({ url }) => {
+    // H2 fix: block SSRF-style internal targets + exfiltration-shaped query
+    // strings before any egress; log every allowed target for auditability
+    // (reads aren't gated, so this is the only trace an exfil attempt leaves).
+    const egress = resolveEgressUrl(url);
+    if (!egress.ok) {
+      log.warn({ url, reason: egress.reason }, "scrape_url: egress denied");
+      return egress.reason;
+    }
+    log.info({ url }, "scrape_url: egress");
+
     const cached = await getCachedScrape(url);
     if (cached && cached.length > 0) {
       return formatPages(`Scraped "${url}" (from cache):`, cached);
@@ -131,6 +142,14 @@ export const deepResearch = tool(
       const hits = (search.success ? (search.data as Array<{ url: string }>) : []) ?? [];
       const urls = hits.map((h) => h.url).filter((u) => u && u.startsWith("http")).slice(0, cap);
       for (const url of urls) {
+        // H2 fix: same egress guard as scrape_url — skip (not abort) a denied
+        // URL so one bad search result doesn't fail the whole deep_research call.
+        const egress = resolveEgressUrl(url);
+        if (!egress.ok) {
+          log.warn({ url, reason: egress.reason }, "deep_research: egress denied, skipping");
+          continue;
+        }
+        log.info({ url }, "deep_research: egress");
         const one = await scrapeUrl(url);
         if (one.ok) pages.push(...one.data);
       }
@@ -176,6 +195,13 @@ export const deepResearch = tool(
 
 export const crawlSiteTool = tool(
   async ({ start_url, max_pages }) => {
+    const egress = resolveEgressUrl(start_url);
+    if (!egress.ok) {
+      log.warn({ url: start_url, reason: egress.reason }, "crawl_site: egress denied");
+      return egress.reason;
+    }
+    log.info({ url: start_url }, "crawl_site: egress");
+
     const cap = Math.min(Math.max(max_pages ?? CRAWL_MAX_PAGES_DEFAULT, 1), CRAWL_MAX_PAGES_CEILING);
     const res = await crawlSite(start_url, cap);
     if (!res.ok) {

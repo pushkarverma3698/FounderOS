@@ -79,7 +79,9 @@ The 7-department supervisor + ReAct structure is production-stable (live since 2
   - **Phase 3**: Claude-as-judge for outbound copy (ADR-023, two-gate system: brand-validator → judge, fail-open, different model family)
   - **Phase 4**: Durable cross-department signals (ADR-024, dept_signals table, hourly sweep, exactly-once semantics)
   - **Phase 5**: Hierarchy proof — nested HITL on supervisors (ADR-025, 3-level interrupt/resume proven; NOT in production yet, gated on business trigger)
-  - **Phase 6**: Rules #20–21 operationalized (context isolation + typed handoffs, see SECURITY-RULES-20-21.md)
+  - **Phase 6**: Rules #20–21 operationalized (context isolation + typed handoffs; see
+    [docs/guides/SECURITY-RULES-20-21.md](docs/guides/SECURITY-RULES-20-21.md), backed by
+    ADR-021 (context isolation) and ADR-022 (typed contracts))
 - 🔄 **Phase D (now)**: Revenue Flywheel — Gumroad live + LinkedIn launch sequence + cinematic-web done-for-you tier + weekly outbound rhythm
 - ⏳ **Phase E (gated, 4–6 wks reliable use)**: SaaS pivot — web gateway, multi-tenancy, billing (FounderOS SaaS *or* Cinematic Cloud — pick one)
 
@@ -473,6 +475,25 @@ lie, not a status. This is the Iron Law from `superpowers:verification-before-co
   that the chat reply contains cheerful text. See `scripts/e2e-telegram-qa.ts` group8 for the pattern
   (`expectMediaUrl`: the harness does a real HTTP GET on whatever URL the bot returns and fails the task if
   it doesn't resolve to real image/audio bytes).
+
+### 25. No AI grading its own homework — red-green discipline is enforced, not trusted (non-negotiable)
+A test written by the same pass that wrote the fix it tests can be wrong in the fix's favor without
+anyone noticing — it is structurally the weakest test in the suite. This closes that specific gap; it
+does not restate #16/#19/#22–24 (which cover determinism and prod-verification, not who checks the checker).
+
+1. **Red before green, always.** Per rule #19.1/#23 step 1: write the test, confirm it FAILS against the
+   OLD code, THEN write the fix. A test never run red is unverified — you don't actually know it can fail.
+2. **Run `pnpm verify:test-integrity` before any "done" claim** on a diff touching `*.test.ts`/`*.spec.ts`.
+   It mechanically rejects tautologies (`expect(true).toBe(true)`), a test whose only assertion is
+   `.toBeDefined()`/`.toBeTruthy()`, empty test bodies, `.only` left in, unexplained `.skip`, and a test
+   mocking the exact unit it claims to test. A green run is a precondition for rule #24's evidence, not a
+   substitute for it. See `docs/rules/TESTING-RULES.md` Rule 15 for the full pattern list.
+3. **When in doubt, run `/code-review` on the diff before claiming done** — a second pass, even automated,
+   catches self-serving tests the author's own read-through won't.
+4. **The escape hatch is the exception, not the norm.** A `// test-integrity-ignore: <reason>` comment
+   requires a real, non-empty reason and is reviewable in the diff; silently restructuring a bad test to
+   dodge the pattern instead of fixing it is the same violation this rule exists to catch. `.only` has no
+   escape hatch — it disables the rest of the suite and is never legitimate to merge.
 
 ## Engineering Protocol — Verification-First (PERMANENT, applies to every change)
 
