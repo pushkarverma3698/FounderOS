@@ -173,6 +173,28 @@ else
   echo "    MCP_BRIDGE_ENABLED=false (default) — skipping bridge checks"
 fi
 
+echo "==> Checking creative department storage dependencies"
+# CREATIVE_SUBGRAPH is forced on by apply-prod-env-overrides.sh, but generate_image
+# needs S3 to actually deliver an image — without it, every request generates the
+# image (real spend) then dead-ends at the upload step. 2026-07 finding: this was
+# never enforced anywhere (not boot, not deploy, not docs), so a missing bucket
+# would silently break creative in prod with zero signal until a founder complained.
+CREATIVE_SUBGRAPH_VAL="$(grep -E '^CREATIVE_SUBGRAPH=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+if [ "${CREATIVE_SUBGRAPH_VAL:-0}" = "1" ] || [ "${CREATIVE_SUBGRAPH_VAL:-0}" = "true" ]; then
+  STORAGE_BUCKET_VAL="$(grep -E '^STORAGE_BUCKET=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  AWS_KEY_VAL="$(grep -E '^AWS_ACCESS_KEY_ID=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  AWS_SECRET_VAL="$(grep -E '^AWS_SECRET_ACCESS_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  if [ -z "$STORAGE_BUCKET_VAL" ] || [ -z "$AWS_KEY_VAL" ] || [ -z "$AWS_SECRET_VAL" ]; then
+    echo "    WARNING: CREATIVE_SUBGRAPH=1 but STORAGE_BUCKET/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY" >&2
+    echo "             are not all set — generate_image will fail at the S3 upload step for every" >&2
+    echo "             request. Set them in PROD_DOTENV (or STORAGE_ENDPOINT_URL for R2/MinIO)." >&2
+  else
+    echo "    STORAGE_BUCKET=$STORAGE_BUCKET_VAL — creative image delivery ready"
+  fi
+else
+  echo "    CREATIVE_SUBGRAPH not enabled — skipping storage check"
+fi
+
 echo "==> Restarting service (single-instance lock makes this safe)"
 sudo systemctl restart founderos
 
