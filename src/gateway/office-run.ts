@@ -22,7 +22,7 @@
 import { type Context } from "grammy";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { RemoveMessage, SystemMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
-import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS } from "../core/config.js";
+import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS, MAX_CONCURRENT_CHAT_LOCKS } from "../core/config.js";
 import { withTurnTimeout, TurnTimeoutError } from "./turn-timeout.js";
 import { computeHistoryTrim } from "../infra/history-window.js";
 import { logger } from "../infra/logger.js";
@@ -93,20 +93,50 @@ export const HITL_RESTORE_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 /** Serialize office runs per chat so slow turns cannot bleed replies into the next message. */
 const chatTurnChains = new Map<string, Promise<void>>();
 
+/** L3 fix — thrown when the concurrent-distinct-chat-lock cap is hit (see MAX_CONCURRENT_CHAT_LOCKS). */
+export class TooManyConcurrentSessionsError extends Error {
+  constructor(limit: number) {
+    super(`Too many concurrent chat sessions in flight (limit ${limit}) — try again shortly.`);
+    this.name = "TooManyConcurrentSessionsError";
+  }
+}
+
+/** Test-only: clear the concurrent-lock map between tests (avoids cross-test leakage). */
+export function __resetChatTurnLocksForTests(): void {
+  chatTurnChains.clear();
+}
+
 export async function withChatTurnLock<T>(chatId: string | number, fn: () => Promise<T>): Promise<T> {
   const key = String(chatId);
+  // L3 fix: only a genuinely NEW key can hit the cap — a chat that already has
+  // an entry (queuing behind its own prior turn) is never rejected.
+  if (!chatTurnChains.has(key) && chatTurnChains.size >= MAX_CONCURRENT_CHAT_LOCKS) {
+    throw new TooManyConcurrentSessionsError(MAX_CONCURRENT_CHAT_LOCKS);
+  }
   const tail = chatTurnChains.get(key) ?? Promise.resolve();
   let release!: () => void;
   const slot = new Promise<void>((resolve) => {
     release = resolve;
   });
-  chatTurnChains.set(key, tail.then(() => slot));
+  // L3 fix: the map must store — and later compare against — the SAME promise
+  // reference. The previous code compared `chatTurnChains.get(key) === slot`,
+  // but the value actually stored is `tail.then(() => slot)` — a DIFFERENT
+  // promise object that merely resolves to `slot`'s value. Promise equality is
+  // by reference, so that comparison was always false: the cleanup branch
+  // never ran, and a key was never removed from the map once used — the exact
+  // "unbounded growth" the audit named, just more absolute than described (not
+  // "no burst cap", but "never actually self-cleans at all"). Found by writing
+  // a real regression test (tests/unit/gateway/chat-lock-cap.test.ts) that
+  // asserted capacity is freed after a turn completes — it failed until this
+  // was fixed, confirming the bug was real, not a testing artifact.
+  const chain = tail.then(() => slot);
+  chatTurnChains.set(key, chain);
   await tail;
   try {
     return await fn();
   } finally {
     release();
-    if (chatTurnChains.get(key) === slot) chatTurnChains.delete(key);
+    if (chatTurnChains.get(key) === chain) chatTurnChains.delete(key);
   }
 }
 
@@ -746,7 +776,18 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
  * web-concurrency.test.ts.
  */
 export async function runOfficeSession(session: GatewaySession, text: string): Promise<void> {
-  await withChatTurnLock(session.id, () => runOfficeSessionLocked(session, text));
+  try {
+    await withChatTurnLock(session.id, () => runOfficeSessionLocked(session, text));
+  } catch (err) {
+    if (err instanceof TooManyConcurrentSessionsError) {
+      log.warn({ chatId: session.id }, "Turn refused — concurrent-session cap reached");
+      await session.onSystemNotice(
+        "🚦 <b>Too many sessions running right now.</b> Please try again in a moment.",
+      );
+      return;
+    }
+    throw err;
+  }
 }
 
 async function runOfficeSessionLocked(session: GatewaySession, text: string): Promise<void> {
@@ -1150,7 +1191,18 @@ export async function resumeOfficeSession(
   decision: "approved" | "rejected",
   expectedInterruptId?: string,
 ): Promise<void> {
-  await withChatTurnLock(session.id, () => resumeOfficeSessionLocked(session, decision, expectedInterruptId));
+  try {
+    await withChatTurnLock(session.id, () => resumeOfficeSessionLocked(session, decision, expectedInterruptId));
+  } catch (err) {
+    if (err instanceof TooManyConcurrentSessionsError) {
+      log.warn({ chatId: session.id }, "Resume refused — concurrent-session cap reached");
+      await session.onSystemNotice(
+        "🚦 <b>Too many sessions running right now.</b> Please try again in a moment.",
+      );
+      return;
+    }
+    throw err;
+  }
 }
 
 async function resumeOfficeSessionLocked(
