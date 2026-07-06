@@ -460,3 +460,30 @@ you do NOT batch it for later. In order:
 
 A bot that "passes after the fix" is only proven when step 4's evidence (reply + audit row)
 is in the report — not when the unit test goes green.
+
+---
+
+## Rule 15: Banned Self-Serving Test Patterns (mechanically enforced)
+
+**Canonical statement:** CLAUDE.md rule #25 ("no AI grading its own homework"). This rule is
+the concrete pattern list only — don't restate #25's reasoning here.
+
+`pnpm verify:test-integrity` (wired into the CI `quality` job) scans changed `*.test.ts` /
+`*.spec.ts` files in the diff and hard-fails on:
+
+| Pattern | Example |
+|---|---|
+| Tautological assertion | `expect(true).toBe(true)` |
+| Sole weak assertion | only `.toBeDefined()` / `.toBeTruthy()` / `.toBeNull()` etc. in the whole test — nothing specific verified |
+| Empty test body | `it("does X", () => {})` |
+| `.only` left in | `it.only(...)`, `describe.only(...)` — no exceptions, ever |
+| `.skip` with no reason | `it.skip(...)` without a `test-integrity-ignore:` comment above it |
+| Mocking the unit under test | `vi.mock("../../../src/tools/foo.js")` inside `foo.test.ts` (see Rule 1 — test the contract, not a mock of yourself) |
+
+**Escape hatch:** `// test-integrity-ignore: <reason>` directly above the flagged line —
+reviewable, narrow, never blanket-applied to a whole file. `.only` never honors it: leaving
+the rest of a suite disabled is not something a good reason can excuse.
+
+Implementation: `src/infra/test-integrity-check.ts` (pure, AST-based via the TypeScript
+Compiler API — unit-tested in `tests/unit/infra/test-integrity-check.test.ts`) and
+`scripts/verify-test-integrity.ts` (the CLI, diffs against `origin/main`).
