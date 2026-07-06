@@ -22,7 +22,7 @@
 import { type Context } from "grammy";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { RemoveMessage, SystemMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
-import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS, MAX_CONCURRENT_CHAT_LOCKS } from "../core/config.js";
+import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS, MAX_CONCURRENT_CHAT_LOCKS, FORCE_TOOL_CHOICE_ENABLED } from "../core/config.js";
 import { withTurnTimeout, TurnTimeoutError } from "./turn-timeout.js";
 import { computeHistoryTrim } from "../infra/history-window.js";
 import { logger } from "../infra/logger.js";
@@ -31,7 +31,7 @@ import type { ApprovalRequest } from "../agents/agent-tools.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt, getTodayCostUsd } from "../db/queries.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
-import { buildOfficeInput, buildRecoveryOfficeInput } from "./pre-router.js";
+import { buildOfficeInput, buildRecoveryOfficeInput, preRouteDepartment, resolveForcedTool } from "./pre-router.js";
 import { is503Error, isQuotaExhaustedError } from "../agents/model.js";
 import { getActiveCompany } from "./active-company.js";
 import { isProvidedLinkedInPostRequest } from "./execution-guard.js";
@@ -952,12 +952,21 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       (msg) => void notifyBudgetGateDegraded(session, trace, chatId, "new turn", msg),
     );
 
+    // H4 fix — flag-gated (default OFF, see FORCE_TOOL_CHOICE_ENABLED doc).
+    // Reuses the SAME pre-router classification buildOfficeInput already used
+    // to pick the CRITICAL directive text a few lines above — never a second,
+    // divergent classifier.
+    const preRoutedDept = FORCE_TOOL_CHOICE_ENABLED ? preRouteDepartment(text) : null;
+    const forcedTool = preRoutedDept ? resolveForcedTool(preRoutedDept, text) : null;
+    if (forcedTool) trace.event("tool.forced", { tool: forcedTool });
+
     const toolCollector = new ToolNameCollector();
     const invokeConfig = {
       ...config,
       configurable: {
         ...config.configurable,
         ...(isProvidedLinkedInPostRequest(text) ? { linkedin_user_provided: true } : {}),
+        ...(forcedTool ? { forced_tool: forcedTool } : {}),
       },
       callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace), toolCollector],
       metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),

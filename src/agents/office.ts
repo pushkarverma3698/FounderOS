@@ -20,9 +20,9 @@ import type { CompiledStateGraph, BaseCheckpointSaver } from "@langchain/langgra
 import { getModel, getWorkerModel, getModelFallbackMiddleware, getSupervisorFallbackModel } from "./model.js";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { getCheckpointer } from "../infra/checkpointer.js";
-import { createAgentMiddleware, createTrimmedPrompt, type TrimOptions } from "../infra/context-manager.js";
+import { createAgentMiddleware, createTrimmedPrompt, forceToolChoiceMiddleware, type TrimOptions } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS, applyMcpBridge } from "./capabilities.js";
-import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED, CREATIVE_SUBGRAPH_ENABLED } from "../core/config.js";
+import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED, CREATIVE_SUBGRAPH_ENABLED, FORCE_TOOL_CHOICE_ENABLED } from "../core/config.js";
 import { buildEngineeringDomain } from "./engineering-domain.js";
 import { buildRevenueDomain } from "./revenue-domain.js";
 import { buildCreativeDomain } from "./creative-department.js";
@@ -116,6 +116,10 @@ export function buildOffice(checkpointer: BaseCheckpointSaver, supervisorModel?:
         ...subAgentBudget,
         ...extra,
       }),
+      // H4 fix — flag-gated (default OFF); a no-op middleware list entry isn't
+      // added at all when disabled, matching the project's own convention for
+      // any behaviour change unverified against a live provider.
+      ...(FORCE_TOOL_CHOICE_ENABLED ? [forceToolChoiceMiddleware()] : []),
     ];
   };
   // ── Admin worker (ADR-028): context + memory + signal visibility ─────────

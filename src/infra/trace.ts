@@ -21,6 +21,7 @@ export type Seam =
   | "hitl.resume"
   | "hitl.stale_approval"
   | "gate.degraded"
+  | "tool.forced"
   | "halt.blocked"
   | "wedge.recovered"
   | "checkpoint.trim"
