@@ -19,7 +19,11 @@ jobs:
     name: Type check + lint + wiring
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 — verify:test-integrity diffs against origin/main, which
+      # needs full history; the default shallow clone can't resolve it.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -35,6 +39,9 @@ jobs:
       # Compile/CI-time wiring integrity: a half-wired tool fails the build here
       # instead of silently doing nothing in production (keyless, stub env).
       - run: pnpm verify:wiring
+      # CLAUDE.md rule #25: fails the build on tautological/self-serving test
+      # patterns in changed test files (gamed tests should never reach prod).
+      - run: pnpm verify:test-integrity
 
   unit-tests:
     name: Unit + regression tests
