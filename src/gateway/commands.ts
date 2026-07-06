@@ -35,6 +35,7 @@ import { getActiveCompany, setActiveCompany, parseCompanyArg } from "./active-co
 import { getWorkflow, listWorkflows, parseRunArgs } from "../workflows/registry.js";
 import { runWorkflow, validateParams } from "../workflows/runner.js";
 import { isValidCinematicPreset } from "../agents/cinematic-build.js";
+import { claudeCodeTool } from "../tools/claude-code.js";
 import { formatSignalsMessage, formatRunsMessage, parseRunsLimit } from "./pipeline-format.js";
 import { formatProviderStatusLine, getLastProviderProbe } from "../infra/provider-probes.js";
 import { buildWelcomeMessage } from "./capability-message.js";
@@ -559,6 +560,96 @@ export async function handleWebBuild(
   }
 }
 
+// ── /subagent — plan → approve → execute an engineering task via Claude Code ──
+//
+// ADR-046: Claude Code is the EXECUTOR (do not out-code it); FounderOS is the
+// governance layer around it. Flow:
+//   1. Plan pass — claude_code mode:"plan" (read-only, no writes, no HITL) returns
+//      a decomposed implementation plan. Surfaced to the founder.
+//   2. Execute pass — the task + approved plan go through the office → engineering
+//      → claude_code (execute), which fires the ONE existing HITL approval card,
+//      then Claude runs the whole thing end-to-end (spawning its own subagents).
+// Only the plan flag is new; execution reuses the proven office + HITL path.
+
+const SUBAGENT_PLAN_DISPLAY_CAP = 3400; // Telegram hard-limits 4096; leave headroom
+
+/**
+ * Build the execution brief handed to the office (pure — unit-tested).
+ * Embeds the approved plan when present so the engineering department runs the
+ * whole task as one self-contained claude_code brief.
+ */
+export function buildSubagentBrief(task: string, plan: string | null): string {
+  const base =
+    "Engineering task delegated via /subagent. Use the claude_code tool to execute this " +
+    "end-to-end in ONE run — implement, verify by actually running it, and report the real output. " +
+    `Do not split it into separate department turns.\n\nTASK:\n${task.trim()}`;
+  if (!plan || !plan.trim()) return base;
+  return `${base}\n\nAPPROVED IMPLEMENTATION PLAN (follow this decomposition):\n${plan.trim()}`;
+}
+
+export async function handleSubagent(
+  ctx: Context,
+  runOfficeText: (ctx: Context, text: string) => Promise<void>,
+): Promise<void> {
+  const task = (ctx.match ?? "").toString().trim();
+
+  if (!task) {
+    await ctx.reply(
+      `🤖 <b>/subagent — plan → approve → execute an engineering task</b>\n\n` +
+        `<b>Usage:</b> <code>/subagent &lt;task&gt;</code>\n` +
+        `Example: <code>/subagent build a CLI todo app in Rust, test it, and push to a new GitHub repo</code>\n\n` +
+        `Flow: Claude Code drafts an implementation plan (read-only) → you approve the build → ` +
+        `it runs the whole task end-to-end and reports real output.`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+
+  // ── Stage 1: plan pass (read-only — no writes, no approval needed) ──────────
+  await ctx.reply(
+    `🧠 <b>Planning</b> — Claude Code is drafting an implementation plan (read-only)…`,
+    { parse_mode: "HTML" },
+  );
+
+  let plan: string | null = null;
+  try {
+    const res = await claudeCodeTool.execute({ task, mode: "plan" });
+    if (res.success && typeof res.data === "string" && res.data.trim()) {
+      plan = res.data.trim();
+    } else {
+      logger.warn({ err: res.error }, "subagent plan pass failed — proceeding to execution without a plan");
+      await ctx.reply(
+        `⚠️ Planning step unavailable (${safeHtml(res.error ?? "no plan returned")}). ` +
+          `Proceeding straight to execution — you'll still get one approval card before any writes.`,
+        { parse_mode: "HTML" },
+      );
+    }
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, "subagent plan pass threw — proceeding to execution");
+    await ctx.reply(
+      `⚠️ Planning step errored (${safeHtml((err as Error).message)}). Proceeding straight to execution.`,
+      { parse_mode: "HTML" },
+    );
+  }
+
+  if (plan) {
+    const shown =
+      plan.length > SUBAGENT_PLAN_DISPLAY_CAP
+        ? plan.slice(0, SUBAGENT_PLAN_DISPLAY_CAP) +
+          "\n…(plan truncated for display — the full plan drives execution)"
+        : plan;
+    await ctx.reply(
+      `📋 <b>Implementation plan</b>\n\n<pre>${safeHtml(shown)}</pre>\n\n` +
+        `▶️ Sending to engineering — you'll get <b>one approval card</b> before any writes.`,
+      { parse_mode: "HTML" },
+    );
+  }
+
+  // ── Stage 2: execute via the office (engineering → claude_code HITL fires) ──
+  await runOfficeText(ctx, buildSubagentBrief(task, plan));
+  logger.info({ hasPlan: plan !== null, taskLen: task.length }, "subagent task dispatched to office");
+}
+
 // ── /commands ─────────────────────────────────────────────────────────────────
 
 export async function handleCommands(ctx: Context): Promise<void> {
@@ -603,6 +694,7 @@ export async function handleCommands(ctx: Context): Promise<void> {
     `<code>/q &lt;dept&gt; &lt;task&gt;</code> — skip supervisor, go straight to a department\n` +
     `  Example: <code>/q research what does Anthropic do?</code>\n` +
     `  Departments: research · comms · engineering · marketing · sales · personal · jobhunt\n` +
+    `<code>/subagent &lt;task&gt;</code> — 🤖 engineering: Claude Code plans → you approve → runs it e2e\n` +
     `<code>/signals</code> — list pending cross-department signals (read-only)\n` +
     `<code>/budget</code> — daily spend vs cap + 7-day breakdown\n` +
     `<code>/runs [n]</code> — last n LLM calls + today's spend (default 10, max 25)\n\n` +

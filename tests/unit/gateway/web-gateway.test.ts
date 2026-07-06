@@ -33,6 +33,8 @@ describe("web gateway", () => {
 
   afterEach(() => {
     delete process.env["WEB_GATEWAY_TOKEN"];
+    delete process.env["WEB_GATEWAY_ALLOW_ANONYMOUS"];
+    process.env["NODE_ENV"] = "test";
   });
 
   it("GET /api/v1/health returns ok", async () => {
@@ -62,6 +64,24 @@ describe("web gateway", () => {
       headers: { authorization: "Bearer secret-token" },
     });
     expect(ok.status).toBe(200);
+  });
+
+  // C2 regression: an unset token used to mean "open" unconditionally — in
+  // production that left every /api/* route (including HITL approve/reject)
+  // reachable by anyone who could hit the port. It must now fail closed.
+  it("C2: fails closed in production when no token is configured", async () => {
+    process.env["NODE_ENV"] = "production";
+    const app = createWebApp();
+    const res = await app.request("http://localhost/api/v1/health");
+    expect(res.status).toBe(401);
+  });
+
+  it("C2: stays open in production when WEB_GATEWAY_ALLOW_ANONYMOUS=true", async () => {
+    process.env["NODE_ENV"] = "production";
+    process.env["WEB_GATEWAY_ALLOW_ANONYMOUS"] = "true";
+    const app = createWebApp();
+    const res = await app.request("http://localhost/api/v1/health");
+    expect(res.status).toBe(200);
   });
 
   it("accepts query token for SSE stream when WEB_GATEWAY_TOKEN is set", async () => {

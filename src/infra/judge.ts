@@ -28,7 +28,14 @@ type JudgeProvider = "anthropic" | "openrouter" | "openai" | "google-genai";
 
 const log = childLogger({ module: "judge" });
 
-export type JudgeVerdict = { verdict: "pass" } | { verdict: "revise"; critique: string };
+/**
+ * M5 fix: `degraded` distinguishes "passed because the copy is genuinely fine"
+ * from "passed because gate 2 itself couldn't run" (no key configured, or an
+ * infra error) — these were previously indistinguishable to the caller, so a
+ * silently-skipped critic looked identical to a real pass. Only meaningful on
+ * the pass branch; a `revise` verdict means the judge DID run.
+ */
+export type JudgeVerdict = { verdict: "pass"; degraded?: boolean } | { verdict: "revise"; critique: string };
 
 /** Minimal model surface so tests can inject a fake (no network). */
 export interface JudgeModel {
@@ -193,7 +200,7 @@ export async function judgeOutbound(
   const injected = opts.model;
 
   // No model configured and none injected → gate 2 is a no-op (fail-open pass).
-  if (!injected && !isJudgeEnabled()) return { verdict: "pass" };
+  if (!injected && !isJudgeEnabled()) return { verdict: "pass", degraded: true };
 
   const toolTag = opts.tool ?? "unknown";
   const key = `${channel}:${toolTag}:${hash(text)}`;
@@ -209,7 +216,7 @@ export async function judgeOutbound(
   } catch (err) {
     // Infra failure must never block the founder — HITL still gates the send.
     log.warn({ err: (err as Error).message, channel }, "Judge errored — failing open to pass");
-    verdict = { verdict: "pass" };
+    verdict = { verdict: "pass", degraded: true };
   }
 
   _cache.set(key, { verdict, at: now() });

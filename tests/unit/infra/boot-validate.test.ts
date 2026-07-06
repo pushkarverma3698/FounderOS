@@ -94,4 +94,32 @@ describe("validateBootConfig — non-fatal warnings", () => {
     expect(warnings.some((w) => w.includes("LinkedIn"))).toBe(true);
     expect(warnings.some((w) => w.includes("GitHub"))).toBe(true);
   });
+
+  // C2 regression: a production boot with no web gateway token must warn loudly
+  // — the runtime now fails closed (auth.ts), but a silent boot would leave the
+  // founder unable to explain why JARVIS suddenly 401s everywhere.
+  it("warns when WEB_GATEWAY_TOKEN is unset in production", () => {
+    const { errors, warnings } = validateBootConfig({
+      ...VALID,
+      NODE_ENV: "production",
+      WEB_GATEWAY_TOKEN: undefined,
+    });
+    expect(errors).toEqual([]);
+    expect(warnings.some((w) => w.includes("WEB_GATEWAY_TOKEN is not set in production"))).toBe(true);
+  });
+
+  it("does not warn when WEB_GATEWAY_ALLOW_ANONYMOUS is explicitly true", () => {
+    const { warnings } = validateBootConfig({
+      ...VALID,
+      NODE_ENV: "production",
+      WEB_GATEWAY_TOKEN: undefined,
+      WEB_GATEWAY_ALLOW_ANONYMOUS: "true",
+    });
+    expect(warnings.some((w) => w.includes("WEB_GATEWAY_TOKEN"))).toBe(false);
+  });
+
+  it("does not warn about the web gateway outside production", () => {
+    const { warnings } = validateBootConfig({ ...VALID, WEB_GATEWAY_TOKEN: undefined });
+    expect(warnings.some((w) => w.includes("WEB_GATEWAY_TOKEN"))).toBe(false);
+  });
 });

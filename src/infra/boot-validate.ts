@@ -20,6 +20,9 @@ export interface BootValidationInput extends BootCapabilityInput {
   DATABASE_URL?: string | undefined;
   TELEGRAM_BOT_TOKEN?: string | undefined;
   TELEGRAM_CHAT_ID?: string | undefined;
+  NODE_ENV?: string | undefined;
+  WEB_GATEWAY_TOKEN?: string | undefined;
+  WEB_GATEWAY_ALLOW_ANONYMOUS?: string | undefined;
 }
 
 export interface BootValidation {
@@ -72,6 +75,21 @@ export function validateBootConfig(env: BootValidationInput): BootValidation {
   }
   if (!present(env.TELEGRAM_CHAT_ID)) {
     errors.push("TELEGRAM_CHAT_ID is not set — startup notifications and HITL cards have no destination.");
+  }
+
+  // ── Web gateway: C2 — no token in production is now fail-closed at runtime,
+  // but a founder who forgot to set one should see this at boot, not discover
+  // it only when the JARVIS web UI mysteriously 401s. ─────────────────────────
+  if (
+    env.NODE_ENV === "production" &&
+    !present(env.WEB_GATEWAY_TOKEN) &&
+    env.WEB_GATEWAY_ALLOW_ANONYMOUS !== "true"
+  ) {
+    warnings.push(
+      "WEB_GATEWAY_TOKEN is not set in production — /api/* (including HITL approve/reject) now " +
+        "fails closed by default. Set WEB_GATEWAY_TOKEN, or WEB_GATEWAY_ALLOW_ANONYMOUS=true if the " +
+        "gateway is intentionally open behind your own reverse-proxy auth.",
+    );
   }
 
   // ── Optional integrations: degraded, not fatal ──────────────────────────────
