@@ -270,3 +270,53 @@ describe("stream-json parsing", () => {
     expect(resultFromEvent(JSON.stringify({ type: "assistant" }))).toBeNull();
   });
 });
+
+// ── Plan mode (ADR-046) — buildClaudeCliArgs is pure + deterministic ──────────
+
+describe("buildClaudeCliArgs — execute mode (default)", () => {
+  it("uses acceptEdits + the full write toolset + the execution directive", async () => {
+    const { buildClaudeCliArgs, EXECUTION_DIRECTIVE } = await import("../../../src/tools/claude-code.js");
+    const args = buildClaudeCliArgs("build a thing", "execute");
+    expect(args.join(" ")).toContain("--permission-mode acceptEdits");
+    const tools = args[args.indexOf("--allowedTools") + 1]!;
+    expect(tools).toContain("Bash");
+    expect(tools).toContain("Write");
+    expect(tools).toContain("Edit");
+    expect(args[args.indexOf("-p") + 1]).toContain(EXECUTION_DIRECTIVE);
+  });
+
+  it("defaults to execute mode when mode is omitted", async () => {
+    const { buildClaudeCliArgs } = await import("../../../src/tools/claude-code.js");
+    expect(buildClaudeCliArgs("x").join(" ")).toContain("acceptEdits");
+  });
+});
+
+describe("buildClaudeCliArgs — plan mode (read-only, ADR-046)", () => {
+  it("uses --permission-mode plan and a read-only toolset (no Bash/Write/Edit)", async () => {
+    const { buildClaudeCliArgs } = await import("../../../src/tools/claude-code.js");
+    const args = buildClaudeCliArgs("build a thing", "plan");
+    expect(args.join(" ")).toContain("--permission-mode plan");
+    const tools = args[args.indexOf("--allowedTools") + 1]!;
+    expect(tools).not.toContain("Bash");
+    expect(tools).not.toContain("Write");
+    expect(tools).not.toContain("Edit");
+    expect(tools).not.toContain("NotebookEdit");
+    expect(tools).toContain("Read");
+  });
+
+  it("appends the plan directive, not the execution directive", async () => {
+    const { buildClaudeCliArgs, PLAN_DIRECTIVE, EXECUTION_DIRECTIVE } = await import("../../../src/tools/claude-code.js");
+    const planArgs = buildClaudeCliArgs("build a thing", "plan");
+    const brief = planArgs[planArgs.indexOf("-p") + 1]!;
+    expect(brief).toContain(PLAN_DIRECTIVE);
+    expect(brief).not.toContain(EXECUTION_DIRECTIVE);
+  });
+
+  it("withPlanDirective is idempotent (directive appears exactly once)", async () => {
+    const { withPlanDirective, PLAN_DIRECTIVE } = await import("../../../src/tools/claude-code.js");
+    const once = withPlanDirective("task");
+    const twice = withPlanDirective(once);
+    expect(once).toBe(twice);
+    expect(once.split(PLAN_DIRECTIVE).length - 1).toBe(1);
+  });
+});
