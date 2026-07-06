@@ -79,6 +79,17 @@ describe("isJudgeEnabled (default = free OpenRouter, not Anthropic)", () => {
     delete process.env["ANTHROPIC_API_KEY"];
     expect(isJudgeEnabled()).toBe(false);
   });
+
+  // M5 fix: the no-key no-op path is the OTHER fail-open branch (besides the
+  // model throwing) — must also be flagged degraded so it's distinguishable
+  // from a genuine pass.
+  it("judgeOutbound marks the no-key no-op path as degraded", async () => {
+    delete process.env["OPENROUTER_API_KEY"];
+    delete process.env["ANTHROPIC_API_KEY"];
+    const v = await judgeOutbound("anything", "outreach", {});
+    expect(v.verdict).toBe("pass");
+    if (v.verdict === "pass") expect(v.degraded).toBe(true);
+  });
 });
 
 describe("judgeOutbound", () => {
@@ -104,6 +115,18 @@ describe("judgeOutbound", () => {
     };
     const v = await judgeOutbound("anything", "outreach", { model: throwing });
     expect(v.verdict).toBe("pass");
+    // M5 fix: this pass must be flagged as DEGRADED (gate didn't actually run),
+    // distinct from a genuine pass — see comms.ts's outboundQualityGate, which
+    // surfaces this on the HITL approval card.
+    if (v.verdict === "pass") expect(v.degraded).toBe(true);
+  });
+
+  it("marks a genuine model pass as NOT degraded (M5)", async () => {
+    const v = await judgeOutbound("Clean, helpful copy.", "outreach", {
+      model: modelReturning('{"verdict":"pass"}'),
+    });
+    expect(v.verdict).toBe("pass");
+    if (v.verdict === "pass") expect(v.degraded).toBeUndefined();
   });
 
   it("memoizes identical (text, channel) within TTL — resume re-run is a cache hit, not a 2nd Claude call", async () => {

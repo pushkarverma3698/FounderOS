@@ -79,7 +79,7 @@ import { readHalt, formatHaltNotice } from "../infra/halt.js";
 import { TraceCallback, ToolNameCollector } from "../infra/trace-callback.js";
 import { buildRunMetadata } from "../infra/telemetry.js";
 import { SUPERVISOR_PROMPT } from "../agents/system-prompts.js";
-import { isStructuredToolFailure } from "../agents/tool-result.js";
+import { isStructuredToolFailure, isToolNotice } from "../agents/tool-result.js";
 import { safeHtml, formatApprovalCard } from "./approval-card.js";
 import { createTelegramSession, createWebSession, type GatewaySession } from "./session.js";
 import { departmentFromTransferTool } from "./dept-routing.js";
@@ -225,6 +225,20 @@ export function finalReply(res: { messages?: OfficeMessage[] }): string {
  *   1. a structured failure flag — `{ success|ok: false }` (how tools soft-fail), or
  *   2. an error keyword on the FIRST LINE (errors lead their message; content
  *      bodies do not). Deep-body matches are content, not failures.
+ *
+ * M4 fix (2026-07-06): the first-line keyword heuristic still false-positived
+ * on a class of messages that ARE on the first line and DO contain a keyword,
+ * but are deliberate, successful soft-declines, not failures — e.g. comms.ts's
+ * "BLOCKED: alice@x.com is on the do-not-contact list. Email not sent." (the
+ * tool correctly did NOT send, per the founder's own suppression policy) or
+ * "Daily email limit reached...". These were flagged with a scary "⚠️ Tool
+ * issue" banner despite being 100% correct outcomes. Rather than a 40+ tool
+ * file migration to the structured envelope (the "finish migrating everything"
+ * ask is a much larger follow-up), the 4 known deliberate-soft-decline call
+ * sites in comms.ts now wrap their message in `toolNotice()` — a distinct
+ * marker checked FIRST, below — so this specific, real false-positive class is
+ * fixed without touching the 38 other tool files that were never mis-flagging
+ * in the first place.
  */
 const TOOL_ERROR_KEYWORDS =
   /(fail|error|not set|not configured|cannot find|blocked|unauthor|invalid|denied)/i;
@@ -235,7 +249,9 @@ export function isToolFailure(content: string): boolean {
   if (isStructuredToolFailure(content)) return true;
   // 2. Legacy `{ success|ok: false }` JSON soft-fail flag.
   if (STRUCTURED_FAILURE.test(content)) return true;
-  // 3. Fallback keyword heuristic for un-migrated tools (errors lead their message;
+  // 3. Explicit non-failure notice (M4) — never a failure, regardless of keywords.
+  if (isToolNotice(content)) return false;
+  // 4. Fallback keyword heuristic for un-migrated tools (errors lead their message;
   //    content bodies do not — only the FIRST LINE is checked to avoid false positives).
   const firstLine = content.split("\n", 1)[0] ?? "";
   return TOOL_ERROR_KEYWORDS.test(firstLine);
@@ -413,6 +429,29 @@ async function sendResult(session: GatewaySession, res: { messages?: OfficeMessa
       "Replied via web SSE",
     );
   }
+}
+
+/**
+ * M5 fix: the daily-budget check is deliberately fail-open (telemetry outage
+ * must never block the founder — see daily-budget.ts), but it previously only
+ * LOGGED the degradation; the founder had no way to know a cost gate had
+ * silently no-op'd this turn. Now it's a visible, non-blocking notice too.
+ */
+export async function notifyBudgetGateDegraded(
+  session: GatewaySession,
+  trace: TurnTrace,
+  chatId: string | number,
+  context: string,
+  msg: string,
+): Promise<void> {
+  log.warn({ chatId, err: msg }, `Daily budget check skipped (${context}) — fail-open`);
+  trace.event("gate.degraded", { gate: "daily_budget", context, reason: msg.slice(0, 200) });
+  await session.onSystemNotice(
+    `⚠️ <b>Daily budget check unavailable</b> — proceeding without a spend cap this turn (telemetry error). ` +
+      `Cost is still logged normally; only the pre-run cap check was skipped.`,
+  ).catch(() => {
+    /* best-effort — never block the turn on this notice failing to send */
+  });
 }
 
 async function sendApprovalCard(session: GatewaySession, approval: ApprovalRequest): Promise<void> {
@@ -910,7 +949,7 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
     await assertDailyBudgetAllowsRun(
       () => getTodayCostUsd(TENANT),
       DAILY_BUDGET_USD,
-      (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped — fail-open"),
+      (msg) => void notifyBudgetGateDegraded(session, trace, chatId, "new turn", msg),
     );
 
     const toolCollector = new ToolNameCollector();
@@ -1258,7 +1297,7 @@ async function resumeOfficeSessionLocked(
       await assertDailyBudgetAllowsRun(
         () => getTodayCostUsd(TENANT),
         DAILY_BUDGET_USD,
-        (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped on shell resume — fail-open"),
+        (msg) => void notifyBudgetGateDegraded(session, trace, chatId, "shell resume", msg),
       );
 
       const res = await resumeShellHitlFastPath(
@@ -1337,7 +1376,7 @@ async function resumeOfficeSessionLocked(
     await assertDailyBudgetAllowsRun(
       () => getTodayCostUsd(TENANT),
       DAILY_BUDGET_USD,
-      (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped on resume — fail-open"),
+      (msg) => void notifyBudgetGateDegraded(session, trace, chatId, "resume", msg),
     );
 
     const res = (await withTurnTimeout(

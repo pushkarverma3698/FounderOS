@@ -82,7 +82,11 @@ describe("P2 gateway — nested engineering HITL card", () => {
     expect(seams()).toContain("hitl.interrupt");
     expect(seams()).not.toContain("turn.out");
     expect(ctx.reply).toHaveBeenCalled();
-    const replyText = String((ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] ?? "");
+    // M5: this test's fake env has no DB, so the daily-budget check itself
+    // fails open and now sends a visible (separate) degraded-gate notice —
+    // check the LAST reply (the actual HITL card), not assume it's the first.
+    const calls = (ctx.reply as ReturnType<typeof vi.fn>).mock.calls;
+    const replyText = String(calls[calls.length - 1]?.[0] ?? "");
     expect(replyText.toLowerCase()).toMatch(/github|issue|approve|reject/);
   });
 });
