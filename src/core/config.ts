@@ -67,10 +67,16 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 
-  /** Web gateway (JARVIS UI) — optional Bearer token; unset = open in dev. */
+  /** Web gateway (JARVIS UI) — optional Bearer token; unset = open in dev/test only (C2 fix). */
   WEB_GATEWAY_TOKEN: z.string().transform(v => v || undefined).optional(),
   /** Unused — web gateway shares HEALTH_PORT. Kept for backward compat in .env files. */
   WEB_GATEWAY_PORT: z.coerce.number().int().positive().default(3002),
+  /** C2 fix: explicit opt-in to run the web gateway (including the HITL
+   *  approve/reject endpoints) with NO token in production. Default false —
+   *  an unset WEB_GATEWAY_TOKEN now fails closed in production instead of
+   *  silently allowing anyone who can reach the port to run turns or approve
+   *  HITL cards. */
+  WEB_GATEWAY_ALLOW_ANONYMOUS: z.enum(["true", "false"]).default("false"),
 
   /** Enable Telegram long-polling in this process. Default: on in production, off in
    * development — avoids 409 conflicts when the prod VPS bot already polls the same

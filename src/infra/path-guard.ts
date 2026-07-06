@@ -12,6 +12,7 @@
  * Pure functions — no I/O, fully unit-tested.
  */
 
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -107,29 +108,57 @@ export function redactSecrets(content: string): { redacted: string; count: numbe
 }
 
 /**
+ * Resolve `abs` following any symlinks, even when the path (or its tail) does
+ * not exist yet — needed for write targets. Walks up to the nearest existing
+ * ancestor, realpath's THAT (resolving any symlinked directory in the chain),
+ * then reattaches the non-existent suffix unchanged.
+ */
+function resolveRealpath(abs: string): string {
+  try {
+    return fs.realpathSync(abs);
+  } catch {
+    const parent = path.dirname(abs);
+    if (parent === abs) return abs; // reached the filesystem root
+    return path.join(resolveRealpath(parent), path.basename(abs));
+  }
+}
+
+/**
  * Resolve `input` to an absolute path and confirm it is safe:
  * inside `root` (default personalRoot()) and not on the secret/system denylist.
+ *
+ * H5 fix: containment and the secret denylist are evaluated on the REALPATH
+ * (symlinks resolved), not just the lexical path. Without this, a symlink
+ * created inside the root by an earlier approved write (e.g. `ln -s ~/.ssh
+ * ~/Documents/backup`) would resolve lexically inside the root and pass every
+ * check, while actually reading/writing outside it or through the denylist.
  */
 export function resolveSafePath(input: string, root?: string): SafePath {
   const base = root ? path.resolve(expandHome(root)) : personalRoot();
+  const realBase = resolveRealpath(base);
   const expanded = expandHome(input.trim());
   const abs = path.resolve(base, expanded);
+  const real = resolveRealpath(abs);
 
-  // System roots are never allowed (covers absolute /etc, /usr, etc).
-  if (SYSTEM_ROOTS.some((r) => abs === r || abs.startsWith(`${r}/`))) {
+  // System roots are never allowed (covers absolute /etc, /usr, etc) — check
+  // both the lexical and resolved path.
+  if (
+    SYSTEM_ROOTS.some((r) => abs === r || abs.startsWith(`${r}/`)) ||
+    SYSTEM_ROOTS.some((r) => real === r || real.startsWith(`${r}/`))
+  ) {
     return { ok: false, reason: `Denied: '${abs}' is a protected system path.` };
   }
 
-  // Must stay within the personal root.
-  if (abs !== base && !abs.startsWith(`${base}${path.sep}`)) {
+  // Must stay within the personal root — after resolving symlinks.
+  if (real !== realBase && !real.startsWith(`${realBase}${path.sep}`)) {
     return { ok: false, reason: `Denied: '${abs}' is outside the personal root '${base}'.` };
   }
 
-  if (isSecret(abs)) {
+  if (isSecret(abs) || isSecret(real)) {
     return { ok: false, reason: `Denied: '${abs}' is a secret/sensitive path (blocked even for reads).` };
   }
 
-  return { ok: true, path: abs };
+  return { ok: true, path: real };
 }
 
 /**

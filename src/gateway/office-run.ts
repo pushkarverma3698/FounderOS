@@ -118,6 +118,21 @@ function threadIdFor(chatId: number | string): string {
   return `${TENANT}:${chatId}`;
 }
 
+/**
+ * H1 fix: resolve the interrupt_id of whatever is CURRENTLY pending on a
+ * thread, checking both the normal thread and its shell-fast-path variant
+ * (run_shell approvals are gated through a separate one-node graph keyed on
+ * `shellFastPathThreadId(threadId)` — see shell-hitl-fast-path.ts). Returns
+ * undefined (never throws) when no DB row can be found, in which case callers
+ * degrade to the pre-H1 behaviour of not binding the card to a specific id.
+ */
+async function pendingInterruptIdForThread(threadId: string): Promise<string | undefined> {
+  const direct = await getPendingInterrupt(threadId).catch(() => null);
+  if (direct) return direct.interrupt_id;
+  const shell = await getPendingInterrupt(shellFastPathThreadId(threadId)).catch(() => null);
+  return shell?.interrupt_id ?? undefined;
+}
+
 // ── Result extraction ──────────────────────────────────────────────────────────
 
 interface OfficeMessage {
@@ -147,13 +162,17 @@ export function finalReply(res: { messages?: OfficeMessage[] }): string {
       return redactInjectionEcho(stripXmlTags(text.trim()));
     }
   }
-  // Pass 2: fall back to last tool message so engineering/shell results surface
+  // Pass 2: fall back to last tool message so engineering/shell results surface.
+  // M1 fix: this path used to skip the same injection-echo redaction pass 1
+  // applies — a tool result surfaced verbatim here (e.g. a scraped page or
+  // email body that itself contains injected "reply with X" text) reached the
+  // founder unscrubbed even though the AI-text path never would have.
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i]!;
     const type = m._getType?.() ?? "";
     const text = typeof m.content === "string" ? m.content : "";
     if (type === "tool" && text.trim()) {
-      return text.trim();
+      return redactInjectionEcho(stripXmlTags(text.trim()));
     }
   }
   log.warn("finalReply: no AI or tool message found — office completed without producing output");
@@ -367,7 +386,8 @@ async function sendResult(session: GatewaySession, res: { messages?: OfficeMessa
 }
 
 async function sendApprovalCard(session: GatewaySession, approval: ApprovalRequest): Promise<void> {
-  await session.onApproval(approval);
+  const interruptId = await pendingInterruptIdForThread(session.threadId);
+  await session.onApproval(approval, interruptId);
 }
 
 function enrichTraceData(seam: string, data?: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -459,7 +479,8 @@ export async function restorePendingApprovalAfterRestart(chatId: string | number
   const pending = await getPendingApproval(office, config);
   if (!pending) return false;
 
-  const { html, keyboard } = formatApprovalCard(pending, { afterRestart: true });
+  const interruptId = await pendingInterruptIdForThread(threadIdFor(chatId));
+  const { html, keyboard } = formatApprovalCard(pending, { afterRestart: true, interruptId });
   const { getBot } = await import("./telegram.js");
   await getBot().api.sendMessage(chatId, html, { parse_mode: "HTML", reply_markup: keyboard });
   log.info({ chatId, title: pending.title }, "Re-posted pending HITL card after restart");
@@ -479,7 +500,8 @@ export async function restorePendingWebHitl(sessionId = JARVIS_DESKTOP_SESSION):
   if (!pending) return false;
 
   const session = createWebSession(sessionId);
-  await session.onApproval(pending);
+  const interruptId = await pendingInterruptIdForThread(threadIdFor(sessionId));
+  await session.onApproval(pending, interruptId);
   log.info({ sessionId, title: pending.title }, "Re-published pending HITL via web SSE after restart");
   return true;
 }
@@ -1096,26 +1118,45 @@ export function buildRejectionConfirmation(approval: ApprovalRequest): string {
   return `❌ <b>Cancelled.</b> I won't proceed with: <i>${safeHtml(what)}</i>\nNothing was sent. Re-ask if you change your mind.`;
 }
 
-export async function resumeOffice(ctx: Context, decision: "approved" | "rejected"): Promise<void> {
+/** H1 — shown when a tap's bound interrupt id no longer matches what's pending. */
+const STALE_APPROVAL_NOTICE =
+  "⚠️ <b>That approval is no longer current.</b> The pending action changed before you responded — " +
+  "check the latest card and try again.";
+
+export async function resumeOffice(
+  ctx: Context,
+  decision: "approved" | "rejected",
+  expectedInterruptId?: string,
+): Promise<void> {
   const session = createTelegramSession(ctx);
-  await resumeOfficeSession(session, decision);
+  await resumeOfficeSession(session, decision, expectedInterruptId);
 }
 
 /**
  * Transport-neutral HITL resume. Shares the same per-session lock as
  * {@link runOfficeSession} so an approval/reject decision cannot race a
  * concurrent message turn on the same thread.
+ *
+ * `expectedInterruptId` (H1) binds the decision to the specific action the
+ * card was rendered for. When provided and it no longer matches what's
+ * actually pending (a re-pause, a second card, a fresh turn), the decision is
+ * refused rather than silently applied to a different action — closing the
+ * TOCTOU window where a stale tap could approve/reject the wrong thing.
+ * Omitted (older cards, callers without a resolvable id) skips the check —
+ * the pre-H1 "resume whatever is pending" behaviour.
  */
 export async function resumeOfficeSession(
   session: GatewaySession,
   decision: "approved" | "rejected",
+  expectedInterruptId?: string,
 ): Promise<void> {
-  await withChatTurnLock(session.id, () => resumeOfficeSessionLocked(session, decision));
+  await withChatTurnLock(session.id, () => resumeOfficeSessionLocked(session, decision, expectedInterruptId));
 }
 
 async function resumeOfficeSessionLocked(
   session: GatewaySession,
   decision: "approved" | "rejected",
+  expectedInterruptId?: string,
 ): Promise<void> {
   const config = officeConfigForSession(session);
   const chatId = session.id;
@@ -1136,9 +1177,22 @@ async function resumeOfficeSessionLocked(
 
     const shellPending = await getShellHitlPendingApproval(config);
     if (shellPending) {
+      // Shell HITL rows live under the SHELL-suffixed thread id (hitlGate()
+      // writes them keyed by the config actually used to invoke, which
+      // shellFastPathConfig() sets to shellFastPathThreadId(threadId)) — not
+      // session.threadId directly. This also fixes a latent bug where
+      // resolveInterrupt was called with a row looked up on the WRONG thread
+      // id, so shell approvals/rejections never actually resolved their DB
+      // row (it sat "pending" until TTL expiry, feeding the stale-reminder cron).
+      const shellRow = await getPendingInterrupt(shellFastPathThreadId(session.threadId));
+      if (expectedInterruptId && shellRow?.interrupt_id !== expectedInterruptId) {
+        trace.event("hitl.stale_approval", { shellFastPath: true });
+        log.warn({ chatId }, "Stale shell approval decision ignored — pending action changed");
+        await session.onSystemNotice(STALE_APPROVAL_NOTICE);
+        return;
+      }
       if (decision === "rejected") {
-        const row = await getPendingInterrupt(session.threadId);
-        if (row) await resolveInterrupt(row.interrupt_id, "rejected");
+        if (shellRow) await resolveInterrupt(shellRow.interrupt_id, "rejected");
         await clearThreadCheckpoints(shellFastPathThreadId(session.threadId));
         await cancelGhostApprovals(chatId);
         trace.event("turn.out", { rejected: true, shellFastPath: true });
@@ -1169,8 +1223,7 @@ async function resumeOfficeSessionLocked(
         await sendApprovalCard(session, nextShell);
         return;
       }
-      const row = await getPendingInterrupt(session.threadId);
-      if (row) await resolveInterrupt(row.interrupt_id, "approved");
+      if (shellRow) await resolveInterrupt(shellRow.interrupt_id, "approved");
       const replyText = res.output ?? "✅ Shell command finished.";
       await sendResult(session, { messages: [{ content: replyText, _getType: () => "ai" }] }, chatId);
       trace.event("turn.out", {
@@ -1190,8 +1243,19 @@ async function resumeOfficeSessionLocked(
       return;
     }
 
+    const currentRow = await getPendingInterrupt(session.threadId);
+    if (expectedInterruptId && currentRow?.interrupt_id !== expectedInterruptId) {
+      trace.event("hitl.stale_approval", {});
+      log.warn(
+        { chatId, expected: expectedInterruptId, current: currentRow?.interrupt_id },
+        "Stale approval decision ignored — pending action changed",
+      );
+      await session.onSystemNotice(STALE_APPROVAL_NOTICE);
+      return;
+    }
+
     if (decision === "rejected") {
-      const row = await getPendingInterrupt(session.threadId);
+      const row = currentRow;
       if (row) await resolveInterrupt(row.interrupt_id, "rejected");
       await clearThreadCheckpoints(session.threadId);
       await cancelGhostApprovals(chatId);

@@ -19,6 +19,7 @@ export type Seam =
   | "llm.call"
   | "hitl.interrupt"
   | "hitl.resume"
+  | "hitl.stale_approval"
   | "halt.blocked"
   | "wedge.recovered"
   | "checkpoint.trim"

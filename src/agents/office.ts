@@ -2,14 +2,12 @@
  * FounderOS v2 — The Office (Supervisor + Department Sub-Agents)
  * ==============================================================
  * The whole multi-agent system in one file. A prebuilt LangGraph supervisor
- * routes each request to one of three department sub-agents, each a ReAct agent
- * with real, HITL-gated tools.
- *
- *   supervisor (Chief of Staff)
- *     ├─ research      → [search_web]
- *     ├─ comms         → [send_email*, linkedin_post*]
- *     └─ engineering   → [github_read, github_write*]
- *                          (* = requires founder approval via interrupt())
+ * routes each request to one of its department sub-agents (currently 8: admin,
+ * research, comms, engineering, marketing, sales, personal, jobhunt), each a
+ * ReAct agent with real, HITL-gated tools. Tool membership per
+ * department is the single source of truth in capabilities.ts (DEPARTMENT_TOOLS)
+ * — see buildCapabilityManifest() for the live, auto-generated list rather than
+ * hand-maintaining an example here that drifts (see docs/LIMITATIONS.md M6/L1).
  *
  * Compiled ONCE with the Postgres checkpointer (rule: never compile per request).
  * The checkpointer also makes HITL crash-safe for free — a pending approval
