@@ -14,6 +14,7 @@ import { describe, it, expect } from "vitest";
 import { HumanMessage, AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import {
   createAgentMiddleware,
+  forceToolChoiceMiddleware,
   createTrimmedPrompt,
   countCompletedToolCalls,
   countPendingToolCalls,
@@ -209,5 +210,60 @@ describe("createAgentMiddleware", () => {
     ];
     expect(countScheduledToolCalls(messages, "claude_code")).toBe(2);
     expect(countScheduledToolCalls(messages, "claude_code") < 1).toBe(false);
+  });
+});
+
+// H4 fix: forceToolChoiceMiddleware sets the model's native toolChoice for a
+// department's FIRST call to a pre-router-named tool, then stops once that
+// tool has been called once. A fake `handler` just echoes the request it
+// received so these tests can assert on exactly what was passed through —
+// no real model/provider call.
+describe("forceToolChoiceMiddleware (H4)", () => {
+  const echo = async (req: unknown) => req;
+  function fakeRequest(overrides: Record<string, unknown> = {}) {
+    return {
+      messages: [],
+      tools: [{ name: "run_shell" }, { name: "read_file" }],
+      runtime: { configurable: {} },
+      ...overrides,
+    };
+  }
+
+  it("does nothing when no forced_tool is set in configurable", async () => {
+    const mw = forceToolChoiceMiddleware();
+    const req = fakeRequest();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const out = (await (mw as any).wrapModelCall(req, echo)) as { toolChoice?: unknown };
+    expect(out.toolChoice).toBeUndefined();
+  });
+
+  it("does nothing when the named tool isn't in this department's tool set", async () => {
+    const mw = forceToolChoiceMiddleware();
+    const req = fakeRequest({ runtime: { configurable: { forced_tool: "github_write" } } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const out = (await (mw as any).wrapModelCall(req, echo)) as { toolChoice?: unknown };
+    expect(out.toolChoice).toBeUndefined();
+  });
+
+  it("sets toolChoice to the named function when forced_tool matches an available tool", async () => {
+    const mw = forceToolChoiceMiddleware();
+    const req = fakeRequest({ runtime: { configurable: { forced_tool: "run_shell" } } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const out = (await (mw as any).wrapModelCall(req, echo)) as {
+      toolChoice?: { type: string; function: { name: string } };
+    };
+    expect(out.toolChoice).toEqual({ type: "function", function: { name: "run_shell" } });
+  });
+
+  it("stops forcing once the tool has already been called once this turn", async () => {
+    const mw = forceToolChoiceMiddleware();
+    const messages = [
+      new AIMessage({ content: "", tool_calls: [{ id: "c1", name: "run_shell", args: {} }] }),
+      new ToolMessage({ content: "done", tool_call_id: "c1", name: "run_shell" }),
+    ];
+    const req = fakeRequest({ messages, runtime: { configurable: { forced_tool: "run_shell" } } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const out = (await (mw as any).wrapModelCall(req, echo)) as { toolChoice?: unknown };
+    expect(out.toolChoice).toBeUndefined();
   });
 });

@@ -6,17 +6,32 @@
 > Method: evidence-first — every finding cites the file:line it was verified against.
 > Nothing below is speculation from docs; each claim was checked in source.
 >
-> **Update 2026-07-06 (this branch, `fix/agentic-audit-findings`):** C1, C2, H1, H5,
-> M1, M6, M7, and L1 are FIXED below (code + regression tests, `pnpm test` green,
+> **Update 2026-07-06 (branch `fix/agentic-audit-findings`, PR #273):** C1, C2, H1,
+> H5, M1, M6, M7, and L1 are FIXED (code + regression tests, `pnpm test` green,
 > `tsc --noEmit` clean). H3 is fixed via version-pinning rather than the originally
 > proposed `gateUnlisted` default flip — see the revised note in H3. A bonus
 > correctness bug (unrelated to the original findings, found while implementing H1)
 > is also fixed: `sweepDeptSignals()` silently dropped cross-department signals that
-> shared a `to_dept` with another event type — see Part IV §4. H2, H4, M2–M5, L2–L4
-> remain open by design (each carries a "why deferred" note — either genuine
-> architectural work beyond a single PR, or a documented, deliberate trade-off this
-> review re-examined and chose not to reverse). Part IV adds a scalability +
-> multi-step-workflow audit requested alongside the fixes.
+> shared a `to_dept` with another event type — see Part IV §4. Part IV adds a
+> scalability + multi-step-workflow audit requested alongside the fixes.
+>
+> **Update 2026-07-06 (this branch, `fix/audit-remediation-round-2`, stacked on
+> PR #273):** the remaining items are now addressed too. FIXED: L3 (found the
+> `chatTurnChains` map's cleanup comparison used the wrong promise reference — it
+> never actually freed a key, a real unbounded-growth bug, not just a missing
+> burst cap — plus added the burst cap), L4 (idempotency hashes are now the full
+> digest, not a 64-bit truncation), M4 (a new `toolNotice()` marker stops 4 real
+> false-positive "⚠️ Tool issue" banners on deliberate soft-declines), M5 (the
+> judge and daily-budget fail-open paths now surface a visible notice, not just a
+> log line — narrowed from the original finding: brand-validator and halt.ts
+> turned out NOT to be fail-open on inspection, corrected rather than perpetuated),
+> H2 (SSRF/exfiltration-shaped egress now blocked in scrape_url/crawl_site/
+> deep_research), M2 (a supervisor-level provider outage now retries against a
+> fallback-model-bound office), and H4 (the audit's actual pivot — pre-router-
+> classified intents now force the model's native `tool_choice`, flag-gated
+> `FORCE_TOOL_CHOICE` default OFF, unverified against a live provider). M3 is
+> explicitly NOT implemented — see its updated note for why. See Part V for the
+> full round-2 writeup and what remains genuinely open.
 
 ---
 
@@ -90,21 +105,21 @@ Telegram (grammy long-poll)          Web (Hono REST+SSE, mounted on health serve
 | C1 | **CRITICAL** | ✅ FIXED | Telegram gateway has **no inbound sender authentication** — any Telegram user can drive the full agent AND approve their own HITL cards | `telegram.ts:103-127`, `session.ts:41` |
 | C2 | **CRITICAL** | ✅ FIXED | Web gateway auth is **fail-open** (no token ⇒ allow) and listens on **all interfaces**; exposes run-turn + HITL-approve endpoints | `web.ts:43-49,95,188-213`, `health.ts:220` |
 | H1 | HIGH | ✅ FIXED | HITL approvals are not bound to a specific action — callback data is the literal `"approve"`; whatever is pending at tap time gets approved (TOCTOU) | `telegram.ts:113-127`, `web.ts:199-213`, `hitl.ts:132` |
-| H2 | HIGH | open | Prompt-injection → **read-tool exfiltration channel**: untrusted email/web content shares context with ungated network-egress reads (`scrape_url` etc.) | `capabilities.ts:71`, `agent-tools/research.ts` |
+| H2 | HIGH | ✅ FIXED (narrowed) | Prompt-injection → **read-tool exfiltration channel**: untrusted email/web content shares context with ungated network-egress reads (`scrape_url` etc.) | `capabilities.ts:71`, `agent-tools/research.ts` |
 | H3 | HIGH | ✅ FIXED (revised) | MCP bridge write-classification is **default-ungated** (deny-list); no manifest server sets `gateUnlisted` — an upstream server update ships new side-effecting tools straight past HITL | `bridge-classify.ts:21-32`, `mcp-bridge.json` |
-| H4 | HIGH | open | 600+ lines of regex "execution guards" are load-bearing for correctness: they re-invoke the graph, inject retry system-messages into the durable thread, and **delete checkpoint messages based on string matching** | `execution-guard.ts` (613 LOC), `office-run.ts:537-604,884-940` |
+| H4 | HIGH | ✅ FIXED (flag-gated) | 600+ lines of regex "execution guards" are load-bearing for correctness: they re-invoke the graph, inject retry system-messages into the durable thread, and **delete checkpoint messages based on string matching** | `execution-guard.ts` (613 LOC), `office-run.ts:537-604,884-940` |
 | H5 | HIGH | ✅ FIXED | Personal-department path guard is **lexical, not realpath** — a symlink inside `$HOME` pointing at `~/.ssh`/`/etc` passes the guard | `path-guard.ts:113-133` |
 | M1 | MEDIUM | ✅ FIXED | `finalReply` pass-2 fallback returns the **raw last tool message** without `redactInjectionEcho` — injected/echoed content bypasses the redaction applied to AI text | `office-run.ts:139-161` |
-| M2 | MEDIUM | open | Supervisor LLM call has **no fallback** (fallback middleware wraps departments only); provider outage = total outage, by design but unresilient | `office-run.ts:1057-1060`, `office.ts:85` |
-| M3 | MEDIUM | open | Aggressive trim budgets (4k sub-agent / 6k supervisor tokens) + `last_message` isolation = silent state loss on long multi-step / multi-department tasks | `office.ts:95-96,243` |
-| M4 | MEDIUM | open | `isToolFailure` first-line keyword heuristic still mis-classifies (legit content starting with "blocked/denied/invalid…" → false ⚠️; real failures below line 1 in unmigrated tools → missed) | `office-run.ts:180-193` |
-| M5 | MEDIUM | open | Fail-open stack-up: Claude judge, brand gate, daily-budget check, halt-file read are each individually fail-open — under infra faults the "two-gate" outbound system degrades to HITL-only, invisibly | `judge.ts`, `office-run.ts:847-851` |
+| M2 | MEDIUM | ✅ FIXED | Supervisor LLM call has **no fallback** (fallback middleware wraps departments only); provider outage = total outage, by design but unresilient | `office-run.ts:1057-1060`, `office.ts:85` |
+| M3 | MEDIUM | **open by design** | Aggressive trim budgets (4k sub-agent / 6k supervisor tokens) + `last_message` isolation = silent state loss on long multi-step / multi-department tasks | `office.ts:95-96,243` |
+| M4 | MEDIUM | ✅ FIXED (narrowed) | `isToolFailure` first-line keyword heuristic still mis-classifies (legit content starting with "blocked/denied/invalid…" → false ⚠️; real failures below line 1 in unmigrated tools → missed) | `office-run.ts:180-193` |
+| M5 | MEDIUM | ✅ FIXED (narrowed) | Fail-open stack-up: Claude judge, brand gate, daily-budget check, halt-file read are each individually fail-open — under infra faults the "two-gate" outbound system degrades to HITL-only, invisibly | `judge.ts`, `office-run.ts:847-851` |
 | M6 | MEDIUM | ✅ FIXED | Capability manifest tells the supervisor FounderOS "RUNS an MCP server on localhost:3100" — actual transport is **stdio**; the anti-drift registry itself has drifted | `capabilities.ts:175` vs `mcp/index.ts:22-40` |
 | M7 | MEDIUM | ✅ FIXED | Safety documentation drift: CLAUDE.md + LIMITATIONS.md state the send-quota is unwired; it is wired for email only — other channels (LinkedIn, calendar, signals) have no ceiling | `comms.ts:130-135` vs `LIMITATIONS.md §5` |
 | L1 | LOW | ✅ FIXED | `office.ts` header comment describes "three department sub-agents"; graph.json carries empty tool descriptions ("scrape_url tool") — knowledge-graph quality erosion | `office.ts:4-12`, `.claude/graph.json` |
-| L2 | LOW | open | Loop-recovery re-invoke bypasses inbox/GitHub fast paths and applies only the memory/knowledge guard subset | `office-run.ts:983-1045` |
-| L3 | LOW | open | `chatTurnChains` map can grow unbounded with arbitrary web session ids (compounds with C2) | `office-run.ts:94-111` |
-| L4 | LOW | open | 64-bit truncated SHA-1 idempotency keys — fine single-tenant, revisit before SaaS | `hitl.ts:41-44` |
+| L2 | LOW | **open by design** | Loop-recovery re-invoke bypasses inbox/GitHub fast paths and applies only the memory/knowledge guard subset | `office-run.ts:983-1045` |
+| L3 | LOW | ✅ FIXED (found a worse bug) | `chatTurnChains` map can grow unbounded with arbitrary web session ids (compounds with C2) — turned out the cleanup NEVER fired at all (wrong promise reference), not just missing a burst cap | `office-run.ts:94-111` |
+| L4 | LOW | ✅ FIXED | 64-bit truncated SHA-1 idempotency keys — fine single-tenant, revisit before SaaS | `hitl.ts:41-44` |
 | — | — | ✅ FIXED (bonus) | `sweepDeptSignals()` claimed-and-discarded cross-department signals sharing a `to_dept` with another event type — see Part IV §4 | `scheduler.ts` (`sweepDeptSignals`) |
 
 ---
@@ -225,10 +240,132 @@ This closes the actual supply-chain half of H3 (an `npx -y`/`uvx` unpinned spawn
 3. ~~**H1** — interrupt-id-bound approvals (small, permanent).~~ ✅ done
 4. ~~**H5** — realpath in path-guard (20 lines, unit-testable).~~ ✅ done
 5. ~~**H3** — pinned server versions (manifest-level; `gateUnlisted` default left as-is — see revised note).~~ ✅ done (revised)
-6. **H2** — egress tainting/allowlist (design ½ day, ships incrementally). Still open — genuine new control-flow, not a config/one-file fix; needs its own design pass and eval-verification per rule #16 before landing on the locked architecture.
-7. **H4** — guard-layer ratchet, eval-gated, as the Pro-model trial matures. Still open — deliberately not touched here: it's a multi-week ratchet tied to eval-suite verification on the new model, not a bug with a bounded diff, and CLAUDE.md's architecture-lock explicitly calls for eval-gated changes here, not a fix-PR rewrite.
+6. ~~**H2** — egress tainting/allowlist.~~ ✅ done (narrowed — see Part V §1)
+7. ~~**H4** — guard-layer ratchet.~~ ✅ done (narrowed to flag-gated tool_choice forcing — see Part V §2)
 
-See Part IV for the scalability + multi-step-workflow audit, including one more bug fixed along the way (`sweepDeptSignals`, Part IV §4).
+See Part IV for the scalability + multi-step-workflow audit, including one more bug fixed along the way (`sweepDeptSignals`, Part IV §4). See Part V for the round-2 remediation of H2/H3-revised/H4/M2/M4/M5/L3/L4, and why M3 is explicitly NOT implemented.
+
+---
+
+# Part V — Round-2 remediation (branch `fix/audit-remediation-round-2`)
+
+> Stacked on PR #273 (`fix/agentic-audit-findings`). Same evidence-first
+> standard: every fix has a regression test, `pnpm test`/`tsc --noEmit` clean
+> at every commit boundary (5 staged commits: L3+L4 → M4+M5 → H2 → M2 → H4).
+> Nothing here was verified against a real Telegram bot, real Postgres, or a
+> real paid model — same sandbox constraint as round 1 — flagged explicitly
+> per finding below rather than overclaimed.
+
+## 1. H2 — narrowed from "egress tainting" to SSRF + exfiltration-shape guards
+
+The original pivot ("taint the turn after untrusted content enters, gate
+further egress like a write") would be a real behavior change to the core
+tool-call loop — new approval friction on every multi-step research task,
+needing eval verification this sandbox can't do. Implemented the narrower,
+unambiguously-safe half instead: `src/infra/egress-guard.ts` blocks
+SSRF-style targets (private/loopback/link-local IPs, the cloud metadata
+endpoint) and exfiltration-shaped query strings (>500 chars) in
+`scrape_url`/`crawl_site`/`deep_research`'s fallback loop, and logs every
+allowed target for auditability. A domain allowlist was rejected as
+impractical (research must hit unpredictable public sites). Full taint-
+based gating remains a genuine, separate design effort.
+
+## 2. H4 — the real pivot, flag-gated
+
+Implemented as originally proposed: `resolveForcedTool()` (pre-router.ts)
+reuses the SAME classification regexes as the existing "CRITICAL — call X
+now" directives (no new classifier), and `forceToolChoiceMiddleware()`
+(context-manager.ts) sets the model's native `toolChoice` for a
+department's first step via `configurable.forced_tool`. Gated behind
+`FORCE_TOOL_CHOICE` (default OFF) because tool_choice forcing is a
+provider-side contract this session had no live model key to confirm —
+same bar as every other unverified-live lever in this codebase.
+
+**Finding while building this:** shell, inbox-read, and GitHub-read requests
+mostly never reach this middleware at all — `shell-hitl-fast-path.ts`,
+`inbox-fast-path.ts`, and `github-read-fast-path.ts` already intercept them
+with a DETERMINISTIC one-node graph before the office's ReAct loop even
+runs, which is a strictly stronger guarantee (the model has no choice at
+all, not just a forced one). This wiring's real leverage is on
+`github_write` and `linkedin_post`-with-founder-provided-text, which have no
+such fast path — the guard-retry/detect-after-the-fact problem H4 identified
+is real specifically for those two, less so for the other three.
+
+**Recommendation before flipping `FORCE_TOOL_CHOICE=1` in production:** run
+`pnpm eval`, then a live MTProto GitHub-write test, watching for either (a)
+the configured provider rejecting/ignoring the `toolChoice` shape (some
+OpenRouter-routed models have inconsistent function-calling support — see
+`docs/rules` on provider quirks), or (b) the forced call succeeding but the
+model then failing to produce a sensible follow-up once `toolChoice` reverts
+to `auto`. Once verified, the `execution-guard.ts` regexes this makes
+redundant (`detectUnbackedGithubWriteClaim`, `detectLinkedInRefusalWithoutTool`)
+can be retired — but only after, not before, live proof.
+
+## 3. M2 — supervisor fallback office
+
+`getSupervisorFallbackModel()` (model.ts) + `getFallbackOffice()` (office.ts)
+compile a second office bound to the first configured
+`AGENT_FALLBACK_MODELS` entry; office-run.ts retries once against it on a
+503/quota/no-tool-use error from the primary supervisor call. No-op
+(byte-identical) when no fallback model is configured. **Not verified**: the
+checkpoint-compatibility of resuming the same `thread_id` on a second,
+differently-model-bound compiled graph — the topology is identical (same
+`buildOffice` call), which is what checkpoint replay depends on, but this
+specific claim wasn't exercised against a real Postgres + real model pair.
+
+## 4. M4 — narrowed from "migrate 40+ tools" to the 4 real false positives
+
+Surveyed the actual tool surface: only 4 files had a genuine false-positive
+pattern (comms.ts's suppression-block/daily-limit/duplicate-outreach
+messages — deliberate soft-declines that happen to contain keywords like
+"blocked"). The other 38 tool files were never mis-flagging — migrating them
+to the structured envelope is real cleanup work but not a bug fix. Added a
+narrower `toolNotice()` marker instead, checked before the keyword heuristic.
+
+## 5. M5 — narrowed after checking each claimed fail-open site individually
+
+The original finding lumped 4 things together as "each individually
+fail-open." On inspection: the judge (`judge.ts`) and the daily-budget check
+(`daily-budget.ts`) genuinely fail open. The **brand-validator has no
+external dependency at all** (pure, deterministic — can't fail open), and
+**halt.ts is explicitly documented and implemented as fail-SAFE**, with only
+one narrow non-ENOENT read-error edge case that fails open. Fixed the two
+real cases (judge `degraded` flag surfaced on the HITL card; daily-budget
+fail-open now sends a visible notice, not just a log line) and corrected the
+overstatement about the other two rather than building unneeded machinery.
+
+## 6. L3 — found a worse bug than described
+
+The audit said the map "self-cleans... but nothing bounds burst size."
+Actually: the cleanup's `chatTurnChains.get(key) === slot` comparison checked
+against the wrong promise object (the map stores `tail.then(() => slot)`, a
+DIFFERENT promise than `slot` itself — reference equality is always false).
+A key was **never** removed once used, for the life of the process — worse
+than a missing burst cap, a permanent leak. Found via a real regression test
+that failed red against the actual pre-fix code before being fixed (not a
+test written to match new code). Fixed the reference bug and added a
+`MAX_CONCURRENT_CHAT_LOCKS` circuit breaker as defense-in-depth.
+
+## 7. L4 — done, plus one more site found
+
+`idemKey()` (hitl.ts) fixed as described. Also found and fixed the SAME
+64-bit truncation in `publishSignal`'s payload hash (signals.ts) — feeds the
+identical `action_log.idempotency_key` uniqueness constraint, same class of
+issue, not called out in the original finding.
+
+## 8. M3 — explicitly NOT implemented; this is the honest remaining gap
+
+The audit's own pivot ("per-thread scratchpad table, typed like signals,
+that departments can re-read") is a genuine new subsystem — a new DB table,
+a new tool, wiring across every department's prompt — not a bounded fix.
+Per CLAUDE.md's own rule #17 (reuse & simplicity-first: a feature ships only
+if it's mostly reuse, not a net-new subsystem), building this hastily inside
+a remediation round, un-eval-verified, on a codebase whose architecture is
+explicitly locked, would be the wrong call — it risks introducing a new class
+of bug into "locked" territory to fix a Medium-severity state-loss issue.
+**This is the one item from the original audit that remains genuinely open**,
+and should be scoped as its own design + implementation effort, not folded
+into a fix PR.
 
 ---
 

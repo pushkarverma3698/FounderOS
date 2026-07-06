@@ -22,16 +22,16 @@
 import { type Context } from "grammy";
 import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { RemoveMessage, SystemMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
-import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS } from "../core/config.js";
+import { TENANT, OFFICE_RECURSION_LIMIT, HISTORY_KEEP_TURNS, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS, MAX_CONCURRENT_CHAT_LOCKS, FORCE_TOOL_CHOICE_ENABLED } from "../core/config.js";
 import { withTurnTimeout, TurnTimeoutError } from "./turn-timeout.js";
 import { computeHistoryTrim } from "../infra/history-window.js";
 import { logger } from "../infra/logger.js";
-import { getOffice, getPendingApproval } from "../agents/office.js";
+import { getOffice, getPendingApproval, getFallbackOffice } from "../agents/office.js";
 import type { ApprovalRequest } from "../agents/agent-tools.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { cancelPendingApprovals, getPendingInterrupt, resolveInterrupt, getTodayCostUsd } from "../db/queries.js";
 import { markdownToTelegramHtml, splitForTelegram, TELEGRAM_MAX } from "./format.js";
-import { buildOfficeInput, buildRecoveryOfficeInput } from "./pre-router.js";
+import { buildOfficeInput, buildRecoveryOfficeInput, preRouteDepartment, resolveForcedTool } from "./pre-router.js";
 import { is503Error, isQuotaExhaustedError } from "../agents/model.js";
 import { getActiveCompany } from "./active-company.js";
 import { isProvidedLinkedInPostRequest } from "./execution-guard.js";
@@ -79,7 +79,7 @@ import { readHalt, formatHaltNotice } from "../infra/halt.js";
 import { TraceCallback, ToolNameCollector } from "../infra/trace-callback.js";
 import { buildRunMetadata } from "../infra/telemetry.js";
 import { SUPERVISOR_PROMPT } from "../agents/system-prompts.js";
-import { isStructuredToolFailure } from "../agents/tool-result.js";
+import { isStructuredToolFailure, isToolNotice } from "../agents/tool-result.js";
 import { safeHtml, formatApprovalCard } from "./approval-card.js";
 import { createTelegramSession, createWebSession, type GatewaySession } from "./session.js";
 import { departmentFromTransferTool } from "./dept-routing.js";
@@ -93,20 +93,50 @@ export const HITL_RESTORE_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 /** Serialize office runs per chat so slow turns cannot bleed replies into the next message. */
 const chatTurnChains = new Map<string, Promise<void>>();
 
+/** L3 fix — thrown when the concurrent-distinct-chat-lock cap is hit (see MAX_CONCURRENT_CHAT_LOCKS). */
+export class TooManyConcurrentSessionsError extends Error {
+  constructor(limit: number) {
+    super(`Too many concurrent chat sessions in flight (limit ${limit}) — try again shortly.`);
+    this.name = "TooManyConcurrentSessionsError";
+  }
+}
+
+/** Test-only: clear the concurrent-lock map between tests (avoids cross-test leakage). */
+export function __resetChatTurnLocksForTests(): void {
+  chatTurnChains.clear();
+}
+
 export async function withChatTurnLock<T>(chatId: string | number, fn: () => Promise<T>): Promise<T> {
   const key = String(chatId);
+  // L3 fix: only a genuinely NEW key can hit the cap — a chat that already has
+  // an entry (queuing behind its own prior turn) is never rejected.
+  if (!chatTurnChains.has(key) && chatTurnChains.size >= MAX_CONCURRENT_CHAT_LOCKS) {
+    throw new TooManyConcurrentSessionsError(MAX_CONCURRENT_CHAT_LOCKS);
+  }
   const tail = chatTurnChains.get(key) ?? Promise.resolve();
   let release!: () => void;
   const slot = new Promise<void>((resolve) => {
     release = resolve;
   });
-  chatTurnChains.set(key, tail.then(() => slot));
+  // L3 fix: the map must store — and later compare against — the SAME promise
+  // reference. The previous code compared `chatTurnChains.get(key) === slot`,
+  // but the value actually stored is `tail.then(() => slot)` — a DIFFERENT
+  // promise object that merely resolves to `slot`'s value. Promise equality is
+  // by reference, so that comparison was always false: the cleanup branch
+  // never ran, and a key was never removed from the map once used — the exact
+  // "unbounded growth" the audit named, just more absolute than described (not
+  // "no burst cap", but "never actually self-cleans at all"). Found by writing
+  // a real regression test (tests/unit/gateway/chat-lock-cap.test.ts) that
+  // asserted capacity is freed after a turn completes — it failed until this
+  // was fixed, confirming the bug was real, not a testing artifact.
+  const chain = tail.then(() => slot);
+  chatTurnChains.set(key, chain);
   await tail;
   try {
     return await fn();
   } finally {
     release();
-    if (chatTurnChains.get(key) === slot) chatTurnChains.delete(key);
+    if (chatTurnChains.get(key) === chain) chatTurnChains.delete(key);
   }
 }
 
@@ -195,6 +225,20 @@ export function finalReply(res: { messages?: OfficeMessage[] }): string {
  *   1. a structured failure flag — `{ success|ok: false }` (how tools soft-fail), or
  *   2. an error keyword on the FIRST LINE (errors lead their message; content
  *      bodies do not). Deep-body matches are content, not failures.
+ *
+ * M4 fix (2026-07-06): the first-line keyword heuristic still false-positived
+ * on a class of messages that ARE on the first line and DO contain a keyword,
+ * but are deliberate, successful soft-declines, not failures — e.g. comms.ts's
+ * "BLOCKED: alice@x.com is on the do-not-contact list. Email not sent." (the
+ * tool correctly did NOT send, per the founder's own suppression policy) or
+ * "Daily email limit reached...". These were flagged with a scary "⚠️ Tool
+ * issue" banner despite being 100% correct outcomes. Rather than a 40+ tool
+ * file migration to the structured envelope (the "finish migrating everything"
+ * ask is a much larger follow-up), the 4 known deliberate-soft-decline call
+ * sites in comms.ts now wrap their message in `toolNotice()` — a distinct
+ * marker checked FIRST, below — so this specific, real false-positive class is
+ * fixed without touching the 38 other tool files that were never mis-flagging
+ * in the first place.
  */
 const TOOL_ERROR_KEYWORDS =
   /(fail|error|not set|not configured|cannot find|blocked|unauthor|invalid|denied)/i;
@@ -205,7 +249,9 @@ export function isToolFailure(content: string): boolean {
   if (isStructuredToolFailure(content)) return true;
   // 2. Legacy `{ success|ok: false }` JSON soft-fail flag.
   if (STRUCTURED_FAILURE.test(content)) return true;
-  // 3. Fallback keyword heuristic for un-migrated tools (errors lead their message;
+  // 3. Explicit non-failure notice (M4) — never a failure, regardless of keywords.
+  if (isToolNotice(content)) return false;
+  // 4. Fallback keyword heuristic for un-migrated tools (errors lead their message;
   //    content bodies do not — only the FIRST LINE is checked to avoid false positives).
   const firstLine = content.split("\n", 1)[0] ?? "";
   return TOOL_ERROR_KEYWORDS.test(firstLine);
@@ -383,6 +429,29 @@ async function sendResult(session: GatewaySession, res: { messages?: OfficeMessa
       "Replied via web SSE",
     );
   }
+}
+
+/**
+ * M5 fix: the daily-budget check is deliberately fail-open (telemetry outage
+ * must never block the founder — see daily-budget.ts), but it previously only
+ * LOGGED the degradation; the founder had no way to know a cost gate had
+ * silently no-op'd this turn. Now it's a visible, non-blocking notice too.
+ */
+export async function notifyBudgetGateDegraded(
+  session: GatewaySession,
+  trace: TurnTrace,
+  chatId: string | number,
+  context: string,
+  msg: string,
+): Promise<void> {
+  log.warn({ chatId, err: msg }, `Daily budget check skipped (${context}) — fail-open`);
+  trace.event("gate.degraded", { gate: "daily_budget", context, reason: msg.slice(0, 200) });
+  await session.onSystemNotice(
+    `⚠️ <b>Daily budget check unavailable</b> — proceeding without a spend cap this turn (telemetry error). ` +
+      `Cost is still logged normally; only the pre-run cap check was skipped.`,
+  ).catch(() => {
+    /* best-effort — never block the turn on this notice failing to send */
+  });
 }
 
 async function sendApprovalCard(session: GatewaySession, approval: ApprovalRequest): Promise<void> {
@@ -746,7 +815,18 @@ export async function runOfficeText(ctx: Context, text: string): Promise<void> {
  * web-concurrency.test.ts.
  */
 export async function runOfficeSession(session: GatewaySession, text: string): Promise<void> {
-  await withChatTurnLock(session.id, () => runOfficeSessionLocked(session, text));
+  try {
+    await withChatTurnLock(session.id, () => runOfficeSessionLocked(session, text));
+  } catch (err) {
+    if (err instanceof TooManyConcurrentSessionsError) {
+      log.warn({ chatId: session.id }, "Turn refused — concurrent-session cap reached");
+      await session.onSystemNotice(
+        "🚦 <b>Too many sessions running right now.</b> Please try again in a moment.",
+      );
+      return;
+    }
+    throw err;
+  }
 }
 
 async function runOfficeSessionLocked(session: GatewaySession, text: string): Promise<void> {
@@ -869,8 +949,16 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
     await assertDailyBudgetAllowsRun(
       () => getTodayCostUsd(TENANT),
       DAILY_BUDGET_USD,
-      (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped — fail-open"),
+      (msg) => void notifyBudgetGateDegraded(session, trace, chatId, "new turn", msg),
     );
+
+    // H4 fix — flag-gated (default OFF, see FORCE_TOOL_CHOICE_ENABLED doc).
+    // Reuses the SAME pre-router classification buildOfficeInput already used
+    // to pick the CRITICAL directive text a few lines above — never a second,
+    // divergent classifier.
+    const preRoutedDept = FORCE_TOOL_CHOICE_ENABLED ? preRouteDepartment(text) : null;
+    const forcedTool = preRoutedDept ? resolveForcedTool(preRoutedDept, text) : null;
+    if (forcedTool) trace.event("tool.forced", { tool: forcedTool });
 
     const toolCollector = new ToolNameCollector();
     const invokeConfig = {
@@ -878,6 +966,7 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       configurable: {
         ...config.configurable,
         ...(isProvidedLinkedInPostRequest(text) ? { linkedin_user_provided: true } : {}),
+        ...(forcedTool ? { forced_tool: forcedTool } : {}),
       },
       callbacks: [new BudgetGuardCallback(budget, agentModel), new TraceCallback(trace), toolCollector],
       metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
@@ -1076,12 +1165,59 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       );
       return;
     }
-    // Provider capacity/quota errors on the SUPERVISOR's own LLM call have no
-    // fallback (createSupervisor takes a bare model — fallback middleware only
-    // covers departments). Surface them honestly instead of a raw stack dump.
+    // M2 fix: provider capacity/quota errors on the SUPERVISOR's own LLM call
+    // used to have no recovery — createSupervisor takes a bare model, so the
+    // department-level fallback middleware never covers it. Now attempt ONE
+    // retry against a separate, fallback-model-bound office (getFallbackOffice,
+    // a no-op unless AGENT_FALLBACK_MODELS is configured) before giving up.
+    // NOT verified live against a real provider outage (no live keys in this
+    // session) — the retry reuses the SAME thread_id/checkpointer as the
+    // primary office, which should be checkpoint-compatible since the graph
+    // topology is identical (only the bound model differs), but that specific
+    // claim wasn't exercised against a real Postgres + real model pair.
     if (is503Error(err) || isQuotaExhaustedError(err) || isProviderNoToolUseError(err)) {
       const reason = err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200);
-      log.warn({ chatId, err: reason }, "Run stopped: model provider unavailable");
+      log.warn({ chatId, err: reason }, "Run stopped: model provider unavailable — attempting fallback office");
+      trace.event("gate.degraded", { gate: "supervisor_model", reason: reason.slice(0, 200) });
+
+      const fallbackOffice = await getFallbackOffice().catch((fbErr) => {
+        log.warn({ chatId, err: (fbErr as Error).message }, "getFallbackOffice failed — no retry available");
+        return null;
+      });
+
+      if (fallbackOffice) {
+        try {
+          const retryMessages = buildOfficeInput(text, getActiveCompany(chatId));
+          assertNonEmptyMessages(retryMessages, "supervisorFallbackRetry");
+          const fallbackRes = (await withTurnTimeout(
+            fallbackOffice.invoke({ messages: retryMessages }, config),
+            OFFICE_TURN_TIMEOUT_MS,
+            "office.invoke.fallback",
+          )) as { messages?: OfficeMessage[] };
+
+          const fallbackApproval = await getPendingApproval(fallbackOffice, config);
+          if (fallbackApproval) {
+            trace.event("hitl.interrupt", { title: fallbackApproval.title, fallbackOffice: true });
+            await sendApprovalCard(session, fallbackApproval);
+            return;
+          }
+
+          await session
+            .onSystemNotice("🌩️ <i>Primary AI provider was unavailable — used the fallback model for this turn.</i>")
+            .catch(() => {
+              /* best-effort */
+            });
+          await sendResult(session, fallbackRes, chatId);
+          trace.event("turn.out", { fallbackOffice: true });
+          return;
+        } catch (fallbackErr) {
+          log.warn(
+            { chatId, err: (fallbackErr as Error).message },
+            "Fallback office retry also failed — falling through to standard outage notice",
+          );
+        }
+      }
+
       await clearThreadAfterAbort(chatId);
       await session.onSystemNotice(
         `🌩️ <b>The AI provider is overloaded or unavailable right now</b>\n` +
@@ -1150,7 +1286,18 @@ export async function resumeOfficeSession(
   decision: "approved" | "rejected",
   expectedInterruptId?: string,
 ): Promise<void> {
-  await withChatTurnLock(session.id, () => resumeOfficeSessionLocked(session, decision, expectedInterruptId));
+  try {
+    await withChatTurnLock(session.id, () => resumeOfficeSessionLocked(session, decision, expectedInterruptId));
+  } catch (err) {
+    if (err instanceof TooManyConcurrentSessionsError) {
+      log.warn({ chatId: session.id }, "Resume refused — concurrent-session cap reached");
+      await session.onSystemNotice(
+        "🚦 <b>Too many sessions running right now.</b> Please try again in a moment.",
+      );
+      return;
+    }
+    throw err;
+  }
 }
 
 async function resumeOfficeSessionLocked(
@@ -1206,7 +1353,7 @@ async function resumeOfficeSessionLocked(
       await assertDailyBudgetAllowsRun(
         () => getTodayCostUsd(TENANT),
         DAILY_BUDGET_USD,
-        (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped on shell resume — fail-open"),
+        (msg) => void notifyBudgetGateDegraded(session, trace, chatId, "shell resume", msg),
       );
 
       const res = await resumeShellHitlFastPath(
@@ -1285,7 +1432,7 @@ async function resumeOfficeSessionLocked(
     await assertDailyBudgetAllowsRun(
       () => getTodayCostUsd(TENANT),
       DAILY_BUDGET_USD,
-      (msg) => log.warn({ chatId, err: msg }, "Daily budget check skipped on resume — fail-open"),
+      (msg) => void notifyBudgetGateDegraded(session, trace, chatId, "resume", msg),
     );
 
     const res = (await withTurnTimeout(

@@ -268,6 +268,23 @@ export const TELEGRAM_POLLING_ENABLED = boolEnv(
  */
 export const MCP_BRIDGE_ENABLED = env.MCP_BRIDGE_ENABLED === "true";
 
+/**
+ * H4 fix — force the model's native tool_choice for the SAME high-confidence
+ * intents the pre-router already tags with a "CRITICAL — call X now"
+ * SystemMessage directive (shell run, LinkedIn post with provided text,
+ * inbox read, GitHub read/write). Converts "the model ignored the directive"
+ * from a detect-and-retry problem (execution-guard.ts) into a structurally
+ * impossible state for that department's first step.
+ *
+ * Default OFF: tool_choice forcing is a provider-side contract (does the
+ * configured model/provider honour `{type:"function", function:{name}}`?)
+ * that could not be verified against a real model in the session that
+ * built this — same standard as ENGINEERING_SUBGRAPH/REVENUE_SUBGRAPH/
+ * CREATIVE_SUBGRAPH/MCP_BRIDGE_ENABLED above: a behaviour change stays
+ * opt-in until live-verified, not shipped live-by-default on a guess.
+ */
+export const FORCE_TOOL_CHOICE_ENABLED = boolEnv("FORCE_TOOL_CHOICE", false);
+
 /** Filesystem path to the external MCP bridge manifest. */
 export const MCP_BRIDGE_MANIFEST = env.MCP_BRIDGE_MANIFEST;
 
@@ -302,3 +319,14 @@ export const DAILY_LINKEDIN_LIMIT = intEnv("DAILY_LINKEDIN_LIMIT", 3);
  * unrelated older turns fast. Durable context lives in memory tools, not history.
  */
 export const HISTORY_KEEP_TURNS = intEnv("HISTORY_KEEP_TURNS", 4);
+
+/**
+ * L3 fix (defense-in-depth): hard cap on distinct concurrent chat/session locks
+ * (`chatTurnChains` in office-run.ts). Each entry self-cleans once its turn
+ * finishes, so at rest the map is empty — but nothing previously bounded how
+ * many DISTINCT keys could exist at once, so a burst of many different chat/
+ * session ids in flight simultaneously could grow it without limit. 1000 is far
+ * above any realistic single-founder concurrent-session count; this is a circuit
+ * breaker for abuse, not a limit anyone should ever hit in normal use.
+ */
+export const MAX_CONCURRENT_CHAT_LOCKS = intEnv("MAX_CONCURRENT_CHAT_LOCKS", 1000);

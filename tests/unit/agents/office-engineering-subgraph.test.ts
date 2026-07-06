@@ -51,10 +51,15 @@ describe("P2 — engineering subgraph flag wiring", () => {
     }
   });
 
-  it("supervisor llm is plain getModel() — withFallbacks breaks bindTools", async () => {
+  it("supervisor llm is plain getModel() (or an M2 fallback override) — withFallbacks breaks bindTools", async () => {
     const src = readFileSync(join(process.cwd(), "src/agents/office.ts"), "utf8");
-    expect(src).toMatch(/const llm = getModel\(\)/);
+    // M2 fix: buildOffice accepts an optional supervisorModel override (used by
+    // getFallbackOffice() to retry a supervisor-level provider outage against a
+    // fallback model) — the DEFAULT path is still the same plain getModel(),
+    // never a .withFallbacks()-wrapped model.
+    expect(src).toMatch(/const llm = supervisorModel \?\? getModel\(\)/);
     expect(src).not.toMatch(/getSupervisorModel\(\)/);
+    expect(src).not.toMatch(/\.withFallbacks\(/);
   });
 
   it("flag on: office still exposes the SAME routable 'engineering' node (name unchanged)", async () => {
