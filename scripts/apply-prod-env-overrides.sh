@@ -88,12 +88,18 @@ if [ -n "${OPENROUTER_API_KEY:-}" ]; then
     printf '%s\n' 'CREATIVE_SUBGRAPH=1'
     printf '%s\n' 'ENGINEERING_SUBGRAPH=1'
     printf '%s\n' 'MCP_BRIDGE_ENABLED=true'
-    printf '%s\n' 'FORCE_TOOL_CHOICE=1'
+    # FORCE_TOOL_CHOICE intentionally NOT pinned (launch rollback 2026-07-07):
+    # forcing native tool_choice on gemini-2.5-pro via OpenRouter was never
+    # live-verified (config.ts:279 says keep OFF until it is) and, stacked on the
+    # deterministic-supervisor Proxy, drove multi-step tasks into the 180s
+    # turn-timeout in prod. It is stripped above (line 84) and left unset, so the
+    # code default (FORCE_TOOL_CHOICE_ENABLED=false) applies. Re-pin only after a
+    # green MTProto verification of tool_choice forcing against the real provider.
     printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
   } >> .env.patched
   mv .env.patched .env
   chmod 600 .env
-  echo "==> Patched .env: Pro on BOTH tiers + FORCE_TOOL_CHOICE=1 (locked reliability posture), creative+engineering subgraphs ON, MCP bridge ON"
+  echo "==> Patched .env: Pro on BOTH tiers (FORCE_TOOL_CHOICE unset — launch rollback), creative+engineering subgraphs ON, MCP bridge ON"
 fi
 
 # MCP bridge Slack secrets — append only when the secret is set.

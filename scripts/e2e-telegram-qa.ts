@@ -354,6 +354,15 @@ function applyRealisticMode(tasks: Task[]): Task[] {
 
 function tasksFor(selector: string, realistic = false): Task[] {
   let tasks: Task[];
+  // Comma list of task ids and/or group names, e.g. "T13,T36,group8" — preserves
+  // TASKS declaration order and de-dupes. Lets a targeted launch verification run
+  // exactly the repro tasks (e.g. multi-step github + image) in one short run.
+  if (selector.includes(",")) {
+    const wanted = new Set(selector.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean));
+    tasks = TASKS.filter((t) => wanted.has(t.id.toLowerCase()) || wanted.has(t.group.toLowerCase()));
+    if (tasks.length === 0) fail(`Comma selector "${selector}" matched no tasks. Use ids (T01..T37) or groups (group1..group8).`);
+    return realistic ? applyRealisticMode(tasks) : tasks;
+  }
   if (selector === "all") tasks = TASKS;
   else if (selector === "stabilization") {
     // Hallucination gate + safe read-only probes (no external writes).
