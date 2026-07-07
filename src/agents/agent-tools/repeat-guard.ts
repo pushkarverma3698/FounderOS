@@ -67,6 +67,19 @@ const DEFAULT_WINDOW_MS = 90_000;
  * This is the deterministic answer to "even when it loops without crashing, the
  * model should know it is going in circles and say so instead of hallucinating."
  */
+/**
+ * Stable machine marker on every repeat-guard block message (mirrors the
+ * TOOL_FAILURE_MARKER pattern in tool-result.ts). Lets context-manager.ts count
+ * how many times the guard has fired in the current message window, deterministically,
+ * without re-deriving the block text via string matching on the prose.
+ */
+export const REPEAT_GUARD_BLOCK_MARKER = "[[REPEAT_GUARD_BLOCK]]";
+
+/** True iff the content is a repeat-guard STOP message (rule #16 — no fuzzy guessing). */
+export function isRepeatGuardBlock(content: string): boolean {
+  return content.includes(REPEAT_GUARD_BLOCK_MARKER);
+}
+
 export function repeatGuardBlockMessage(toolName: string, dataLabel?: string): string {
   const what = dataLabel ?? "results";
   return (
@@ -75,7 +88,7 @@ export function repeatGuardBlockMessage(toolName: string, dataLabel?: string): s
     `anything new; you are going in circles. Do NOT call ${toolName} again. ` +
     `Answer the founder now using the ${what} you already have. If that data does not ` +
     `actually satisfy the request, say so plainly and state exactly what is missing — ` +
-    `do NOT claim the task is complete when it is not.`
+    `do NOT claim the task is complete when it is not. ${REPEAT_GUARD_BLOCK_MARKER}`
   );
 }
 
