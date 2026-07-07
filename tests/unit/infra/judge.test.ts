@@ -12,6 +12,7 @@ import {
   parseJudgeVerdict,
   judgeOutbound,
   isJudgeEnabled,
+  buildOpenAIJudgeConfig,
   _resetJudgeCache,
   _resetJudgeModel,
   type JudgeModel,
@@ -52,6 +53,17 @@ describe("parseJudgeVerdict", () => {
   it("FAILS OPEN to pass when verdict says revise but critique is missing", () => {
     // Without an actionable critique a 'revise' is useless — degrade to pass.
     expect(parseJudgeVerdict('{"verdict":"revise"}')).toEqual({ verdict: "pass" });
+  });
+});
+
+describe("buildOpenAIJudgeConfig (structured-output enforcement, OpenRouter/OpenAI path only)", () => {
+  it("constrains the OpenAI-compatible judge call to JSON-mode output", () => {
+    // OpenAI-compatible providers (OpenRouter free-tier Llama, OpenAI) support the
+    // `response_format` contract — constrain generation to valid JSON instead of
+    // relying on the prompt instruction alone, so a verbose/prose reply from a weak
+    // free model can't slip past `parseJudgeVerdict`'s regex extraction.
+    const cfg = buildOpenAIJudgeConfig("meta-llama/llama-3.3-70b-instruct:free");
+    expect(cfg.response_format).toEqual({ type: "json_object" });
   });
 });
 
