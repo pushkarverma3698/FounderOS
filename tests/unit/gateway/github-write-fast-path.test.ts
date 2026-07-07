@@ -90,7 +90,7 @@ describe("github-write-fast-path", () => {
       expect(write?.action).toBe("create_issue");
     });
 
-    it("defers the T13 multi-step research-then-write request to office routing (does NOT fast-path an empty-body issue)", () => {
+    it("defers the T13 multi-step research-then-write request to office routing, but still fast-paths the same request once a body is given inline", () => {
       // Exact T13 prompt from scripts/e2e-telegram-qa.ts — has a title marker
       // AND owner/repo, so without the research-chain guard this would
       // wrongly fast-path with an empty body before the research ever ran.
@@ -99,12 +99,12 @@ describe("github-write-fast-path", () => {
           "pushkarverma3698/FounderOS titled 'Known LangGraph limitations' with those findings in the body.",
       );
       expect(t13).toBeNull();
-    });
 
-    it("still fast-paths a research-flavored request when the body is given inline", () => {
-      // Contrast case: the guard only fires when there's no body to extract —
-      // if the founder already pasted the findings, there's nothing left to
-      // research and the write is safe to fast-path.
+      // Contrast case, same research-flavored language: the guard only fires
+      // when there's no body to extract — if the founder already pasted the
+      // findings, there's nothing left to research and the write is safe to
+      // fast-path. Proves the null above is specifically about the missing
+      // body, not the presence of "research" triggering a blanket block.
       const withInlineBody = extractGithubWriteParams(
         'Research the bug and create a github issue in acme/widgets titled "Bug found" ' +
           'body: "Root cause: null pointer in auth.ts line 42"',
