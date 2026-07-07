@@ -18,7 +18,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync, symlinkSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { resolveSafePath } from "../../src/infra/path-guard.js";
 
 const cleanupDirs: string[] = [];
@@ -30,7 +30,12 @@ describe("REGRESSION bug#8 — symlink escape is denied", () => {
   it("denies a symlink inside the root that points OUTSIDE the root", () => {
     const root = mkdtempSync(join(homedir(), ".founderos-pathguard-root-"));
     cleanupDirs.push(root);
-    const outside = mkdtempSync(join(tmpdir(), "founderos-pathguard-outside-"));
+    // Target must be OUTSIDE the personal root but NOT a system root, so the
+    // containment branch (not the system-path branch) is the one exercised.
+    // tmpdir() realpaths under /private/var on macOS, which matches the /var
+    // SYSTEM_ROOT and short-circuits before containment — so use a sibling of
+    // `root` under homedir() instead (outside root, never a system root).
+    const outside = mkdtempSync(join(homedir(), ".founderos-pathguard-outside-"));
     cleanupDirs.push(outside);
     writeFileSync(join(outside, "loot.txt"), "outside the root");
     symlinkSync(outside, join(root, "escape-link"));
