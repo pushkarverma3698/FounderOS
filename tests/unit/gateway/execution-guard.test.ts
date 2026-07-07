@@ -268,6 +268,7 @@ describe("extractProvidedLinkedInPost", () => {
     expect(extractProvidedLinkedInPost(text)).toBe("AI agents save founders 10 hours a week.");
   });
 
+  // test-integrity-ignore: null IS the exact contract when there's no quoted post body — no stronger assertion applies.
   it("returns null when no quoted post body", () => {
     expect(extractProvidedLinkedInPost("Draft a LinkedIn post about AI automation")).toBeNull();
   });

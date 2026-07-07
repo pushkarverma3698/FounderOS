@@ -185,11 +185,13 @@ describe("fallback middleware config", () => {
   // office when the supervisor's own (unwrapped, middleware-less) model call
   // hits a 503/quota error — createSupervisor can't take fallback middleware.
   describe("getSupervisorFallbackModel (M2)", () => {
+    // test-integrity-ignore: null IS the exact contract for "no fallback configured" — there is no stronger assertion for this pure function's negative case.
     it("returns null when no fallback models are configured", () => {
       delete process.env["AGENT_FALLBACK_MODELS"];
       expect(getSupervisorFallbackModel()).toBeNull();
     });
 
+    // test-integrity-ignore: null IS the exact contract when every fallback lacks a key — there is no stronger assertion for this pure function's negative case.
     it("returns null when every configured fallback is missing its API key", () => {
       process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5,google-genai:gemini-2.0-flash";
       delete process.env["ANTHROPIC_API_KEY"];

@@ -38,15 +38,18 @@ describe("routeFromMessages", () => {
     expect(routeFromMessages(msgs)).toBe("marketing");
   });
 
+  // test-integrity-ignore: null IS the exact contract for "no handoff" — there is no stronger assertion for this pure function's negative case.
   it("returns null when there was no handoff", () => {
     expect(routeFromMessages([human("hi"), ai([])])).toBeNull();
   });
 
+  // test-integrity-ignore: null IS the exact contract when only non-department handoff targets appear — no stronger assertion applies.
   it("ignores transfer targets that are not real departments (handoff-back)", () => {
     const msgs = [ai([{ name: "transfer_back_to_supervisor" }]), ai([{ name: "transfer_to_supervisor" }])];
     expect(routeFromMessages(msgs)).toBeNull();
   });
 
+  // test-integrity-ignore: null IS the exact contract for an empty trail — no stronger assertion applies.
   it("handles an empty trail", () => {
     expect(routeFromMessages([])).toBeNull();
   });
@@ -120,6 +123,7 @@ describe("makeOfficeInvoker — forced_tool injection", () => {
     expect(config.configurable?.["forced_tool"]).toBe("run_shell");
   });
 
+  // test-integrity-ignore: undefined IS the exact contract when forcing is off (key must be absent, not just falsy) — no stronger assertion applies.
   it("does NOT inject forced_tool when forcing is OFF (default)", async () => {
     const config = await runWith(false);
     expect(config.configurable?.["forced_tool"]).toBeUndefined();
