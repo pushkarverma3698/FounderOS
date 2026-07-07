@@ -100,6 +100,17 @@ const TITLE_MARKER_RE = /\btitle[d]?\s*[:\-]?\s*["'“]([^"'”]{1,200})["'”]|
 const BODY_MARKER_RE = /\bbody\s*[:\-]?\s*["'“]([^"'”]{1,2000})["'”]|\bbody\s*:\s*([^\n]{1,2000})/i;
 
 /**
+ * A prior step (research/search/read) must run BEFORE the write, and its
+ * output is what belongs in the body/content (e.g. T13: "Research X, then
+ * create a GitHub issue... with those findings in the body"). Without an
+ * explicit body marker in the text, fast-pathing here would create the issue
+ * with an EMPTY body and skip the research step entirely — worse than the
+ * refusal bug this file exists to fix. Bail and let office routing run the
+ * chain for real; github_write is still HITL-gated when it gets there.
+ */
+const RESEARCH_CHAIN_RE = /\b(research|investigate|find out|look up|look into|search (?:the web|online|for))\b/i;
+
+/**
  * Extract structured github_write params from free text. Returns null when the
  * request isn't an unambiguous, explicitly-marked write (deliberately
  * conservative — see module docstring).
@@ -113,6 +124,10 @@ export function extractGithubWriteParams(input: string): GithubWriteParams | nul
   const title = (titleMatch?.[1] ?? titleMatch?.[2])?.trim();
   const bodyMatch = input.match(BODY_MARKER_RE);
   const body = (bodyMatch?.[1] ?? bodyMatch?.[2])?.trim();
+
+  // Multi-step chain (research/search must run first to produce the body) —
+  // defer to office routing rather than fast-path an empty-body write.
+  if (!body && RESEARCH_CHAIN_RE.test(input)) return null;
 
   const params: GithubWriteParams = {
     action,
