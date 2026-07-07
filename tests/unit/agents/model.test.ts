@@ -30,6 +30,16 @@ describe("worker model split (roadmap #10)", () => {
     expect(getWorkerModelId()).toBe(getConfiguredModelId());
   });
 
+  it("locked reliability posture: Pro on BOTH tiers when WORKER_AGENT_MODEL is unset", () => {
+    // The forcing rollout runs the strong Pro model on supervisor AND workers so
+    // a weak worker can't reintroduce the tool-faking class. Pin that here.
+    delete process.env["WORKER_AGENT_MODEL"];
+    process.env["AGENT_MODEL"] = "openrouter:google/gemini-2.5-pro";
+    expect(getConfiguredModelId()).toBe("openrouter:google/gemini-2.5-pro");
+    expect(getWorkerModelId()).toBe("openrouter:google/gemini-2.5-pro");
+    expect(getWorkerModelId()).toBe(getConfiguredModelId());
+  });
+
   it("honours a cheaper WORKER_AGENT_MODEL override (distinct from primary)", () => {
     process.env["AGENT_MODEL"] = "openrouter:google/gemini-2.5-flash";
     process.env["WORKER_AGENT_MODEL"] = "openrouter:google/gemini-2.5-flash-lite";
@@ -175,11 +185,13 @@ describe("fallback middleware config", () => {
   // office when the supervisor's own (unwrapped, middleware-less) model call
   // hits a 503/quota error — createSupervisor can't take fallback middleware.
   describe("getSupervisorFallbackModel (M2)", () => {
+    // test-integrity-ignore: null IS the exact contract for "no fallback configured" — there is no stronger assertion for this pure function's negative case.
     it("returns null when no fallback models are configured", () => {
       delete process.env["AGENT_FALLBACK_MODELS"];
       expect(getSupervisorFallbackModel()).toBeNull();
     });
 
+    // test-integrity-ignore: null IS the exact contract when every fallback lacks a key — there is no stronger assertion for this pure function's negative case.
     it("returns null when every configured fallback is missing its API key", () => {
       process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5,google-genai:gemini-2.0-flash";
       delete process.env["ANTHROPIC_API_KEY"];

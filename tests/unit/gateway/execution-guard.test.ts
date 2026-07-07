@@ -2,7 +2,7 @@
  * Unit tests for execution-claim guard (hallucinated shell / LinkedIn refusal).
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   aiMessageLooksFabricatedKnowledge,
   detectUnbackedGithubReadClaim,
@@ -268,6 +268,7 @@ describe("extractProvidedLinkedInPost", () => {
     expect(extractProvidedLinkedInPost(text)).toBe("AI agents save founders 10 hours a week.");
   });
 
+  // test-integrity-ignore: null IS the exact contract when there's no quoted post body — no stronger assertion applies.
   it("returns null when no quoted post body", () => {
     expect(extractProvidedLinkedInPost("Draft a LinkedIn post about AI automation")).toBeNull();
   });
@@ -620,4 +621,45 @@ describe("isInternalKnowledgeRequest — B4 self-referential exclusion", () => {
   it("'what is our Turicks ICP?' still returns true", () => {
     expect(isInternalKnowledgeRequest("what is our Turicks ICP?")).toBe(true);
   });
+});
+
+// ── FORCE_TOOL_CHOICE short-circuit (H4 forcing makes 5 gated-tool guards redundant) ──
+// When native tool_choice forcing is ON, the provider is forced to call the gated tool,
+// so the "claimed-without-calling" class these 5 detectors catch cannot occur — they
+// short-circuit to false. The env flag is read at module load (config.ts), so we toggle
+// it via stubEnv + resetModules + dynamic re-import. The 3 supervisor-reply guards and
+// all infra/security recovery fns are NOT short-circuited (forcing can't cover them).
+describe("FORCE_TOOL_CHOICE short-circuits the 5 gated-tool guards", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  async function loadGuard(force: boolean) {
+    if (force) vi.stubEnv("FORCE_TOOL_CHOICE", "1");
+    else vi.stubEnv("FORCE_TOOL_CHOICE", "");
+    vi.resetModules();
+    return import("../../../src/gateway/execution-guard.js");
+  }
+
+  // Each tuple: [name, fn-picker, firing userInput, firing reply] — all fire true today.
+  const cases: Array<[string, (g: Awaited<ReturnType<typeof loadGuard>>) => (u: string, m: never[], r: string) => boolean, string, string]> = [
+    ["shell", (g) => g.detectUnbackedShellClaim, "run this in terminal: echo hi", "Here's the output: hi"],
+    ["linkedin", (g) => g.detectLinkedInRefusalWithoutTool, "post this on linkedin: 'hello world from me'", "I cannot post that to LinkedIn — the phrase is banned."],
+    ["inbox", (g) => g.detectUnbackedInboxClaim, "check my unread emails", "You have several unread emails that need your attention."],
+    ["github-read", (g) => g.detectUnbackedGithubReadClaim, "list open issues in pushkarverma3698/founderos", "Here are the open issues: #12 feat(x), #14 fix(y) and a few more."],
+    ["github-write", (g) => g.detectUnbackedGithubWriteClaim, "create an issue on github", "Created issue #42 in the repo."],
+  ];
+
+  for (const [name, pick, input, reply] of cases) {
+    it(`${name}: returns FALSE when FORCE_TOOL_CHOICE is on`, async () => {
+      const g = await loadGuard(true);
+      expect(pick(g)(input, [], reply)).toBe(false);
+    });
+
+    it(`${name}: still returns TRUE when FORCE_TOOL_CHOICE is off (behavior unchanged)`, async () => {
+      const g = await loadGuard(false);
+      expect(pick(g)(input, [], reply)).toBe(true);
+    });
+  }
 });

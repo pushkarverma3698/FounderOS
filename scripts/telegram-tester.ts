@@ -196,17 +196,22 @@ async function cmdClick(decision: "approve" | "reject"): Promise<void> {
   const client = await connect(true);
 
   const msgs = await history(client, peer, 15);
+  let matchedData: Buffer | undefined;
   const card = [...msgs].reverse().find((m) => {
     if (m.out || !(m.replyMarkup instanceof Api.ReplyInlineMarkup)) return false;
-    return m.replyMarkup.rows.some((row) =>
-      row.buttons.some(
-        (b) => b instanceof Api.KeyboardButtonCallback && b.data.toString("utf-8") === decision,
-      ),
-    );
+    for (const row of m.replyMarkup.rows) {
+      for (const b of row.buttons) {
+        if (b instanceof Api.KeyboardButtonCallback && b.data.toString("utf-8").startsWith(`${decision}:`)) {
+          matchedData = b.data;
+          return true;
+        }
+      }
+    }
+    return false;
   });
-  if (!card) fail(`No pending HITL card with a "${decision}" button in the last 15 messages.`);
+  if (!card || !matchedData) fail(`No pending HITL card with a "${decision}" button in the last 15 messages.`);
 
-  await card.click({ data: Buffer.from(decision) });
+  await card.click({ data: matchedData });
   console.log(`✓ clicked "${decision}" on card #${card.id} — waiting for the bot's follow-up…`);
 
   // Watch for the post-decision reply (resume runs the actual side effect).
