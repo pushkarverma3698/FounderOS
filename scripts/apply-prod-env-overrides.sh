@@ -30,16 +30,17 @@ else
 fi
 
 # Pin production model (same as deploy.yml). 2026-07-07: OpenRouter account
-# credits exhausted (402 Insufficient credits); switched to direct Google API
-# (GOOGLE_GENERATIVE_AI_API_KEY comes from PROD_DOTENV above).
+# credits exhausted (402); direct Gemini (google-genai) produced empty/malformed
+# tool-calling output in this graph (untested integration). Switched to
+# anthropic:claude-haiku-4-5, already the vetted fallback in this codepath.
 grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
 {
-  printf '%s\n' 'AGENT_MODEL=google-genai:gemini-2.5-pro'
+  printf '%s\n' 'AGENT_MODEL=anthropic:claude-haiku-4-5'
   printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
-echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-2.5-pro"
+echo "==> Patched .env: AGENT_MODEL=anthropic:claude-haiku-4-5"
 if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   grep -v -E '^OPENROUTER_API_KEY=' .env > .env.patched || true
   printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" >> .env.patched
