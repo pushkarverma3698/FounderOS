@@ -27,6 +27,7 @@ import { buildEngineeringDomain } from "./engineering-domain.js";
 import { buildRevenueDomain } from "./revenue-domain.js";
 import { buildCreativeDomain } from "./creative-department.js";
 import { assertContextIsolation, CONTEXT_ISOLATION_OUTPUT_MODE } from "./context-isolation.js";
+import { supervisorLoopGuardPostModelHook } from "./supervisor-loop-guard.js";
 import {
   buildSupervisorPrompt,
   ADMIN_PROMPT,
@@ -410,6 +411,12 @@ export function buildOffice(checkpointer: BaseCheckpointSaver, supervisorModel?:
     // throws "Unknown author: supervisor". "inline" embeds the name in the
     // message CONTENT instead, which every provider accepts.
     includeAgentName: "inline",
+    // Root-cause loop fix (2026-07-07 audit, MEMORY.md "T35 chained-synthesis
+    // LOOPS"): stops the supervisor re-transferring to the same department over
+    // and over (a class the within-department repeat-guard never covered) BEFORE
+    // OFFICE_RECURSION_LIMIT or the budget cap have to catch it. Deterministic —
+    // see supervisor-loop-guard.ts.
+    postModelHook: supervisorLoopGuardPostModelHook,
   }).compile({ checkpointer });
 }
 
