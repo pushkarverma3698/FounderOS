@@ -57,11 +57,19 @@ else
   echo "==> PROD_DOTENV not set; using existing .env on box"
 fi
 
-# Pin the production model — HYBRID split (cost-reclaim, proven-Pro path).
-# Supervisor stays on Gemini 2.5 Pro (strong agentic routing/tool-calling); workers
-# drop to 2.5 Flash via WORKER_AGENT_MODEL (getWorkerModel honours it, fails safe to
-# the primary if unset/misconfigured). Fallback drops to Flash first (cheap, same
-# family) on a Pro capacity 503, then Haiku.
+# Pin the production model — LOCKED RELIABILITY POSTURE (2026-07-07, CLAUDE.md).
+# Pro on BOTH tiers (WORKER_AGENT_MODEL intentionally omitted — getWorkerModel
+# falls back to AGENT_MODEL when unset) + FORCE_TOOL_CHOICE=1. Native tool_choice
+# forcing is the structural fix for the tool-faking class: it makes the model
+# actually call the gated tool instead of claiming it did. With forcing ON, the
+# 5 gated-tool execution-guard detectors short-circuit to `return false` (they'd
+# be false positives once the provider is forced to call the tool); the 3
+# supervisor-reply guards (web-research/memory/knowledge) stay on regardless.
+# Previously this pinned a hybrid split (Pro supervisor + Flash workers) with
+# forcing unset — that was the actual root cause the forcing rollout fixes, so
+# re-pinning a weak worker here would silently reintroduce it. Cost-reclaim path
+# (once Pro-both-tiers is proven stable) is WORKER_AGENT_MODEL=…flash, forcing
+# still ON.
 # Also enable the advanced departments that ship OFF by default:
 #   CREATIVE_SUBGRAPH   → art_director/copywriter/brand_designer (Nano Banana image-gen)
 #   ENGINEERING_SUBGRAPH → coder/qa/devops CTO sub-supervisor
@@ -73,19 +81,19 @@ if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   # Also drop any stale LINKEDIN_API_VERSION — a leftover malformed value
   # (20240501) 426'd every post on 2026-07-04. Unset lets the code default
   # (a current YYYYMM) apply; the code now ignores malformed values anyway.
-  grep -v -E '^(AGENT_MODEL|WORKER_AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS|CREATIVE_SUBGRAPH|ENGINEERING_SUBGRAPH|MCP_BRIDGE_ENABLED|LINKEDIN_API_VERSION)=' .env > .env.patched || true
+  grep -v -E '^(AGENT_MODEL|WORKER_AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS|CREATIVE_SUBGRAPH|ENGINEERING_SUBGRAPH|MCP_BRIDGE_ENABLED|LINKEDIN_API_VERSION|FORCE_TOOL_CHOICE)=' .env > .env.patched || true
   {
     printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-pro'
-    printf '%s\n' 'WORKER_AGENT_MODEL=openrouter:google/gemini-2.5-flash'
     printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:google/gemini-2.5-flash,anthropic:claude-haiku-4-5'
     printf '%s\n' 'CREATIVE_SUBGRAPH=1'
     printf '%s\n' 'ENGINEERING_SUBGRAPH=1'
     printf '%s\n' 'MCP_BRIDGE_ENABLED=true'
+    printf '%s\n' 'FORCE_TOOL_CHOICE=1'
     printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
   } >> .env.patched
   mv .env.patched .env
   chmod 600 .env
-  echo "==> Patched .env: hybrid model (Pro supervisor + Flash workers), creative+engineering subgraphs ON, MCP bridge ON"
+  echo "==> Patched .env: Pro on BOTH tiers + FORCE_TOOL_CHOICE=1 (locked reliability posture), creative+engineering subgraphs ON, MCP bridge ON"
 fi
 
 # MCP bridge Slack secrets — append only when the secret is set.
