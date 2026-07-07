@@ -59,20 +59,18 @@ fi
 
 # Pin the production model — LOCKED RELIABILITY POSTURE (2026-07-07, CLAUDE.md).
 # Pro on BOTH tiers (WORKER_AGENT_MODEL intentionally omitted — getWorkerModel
-# falls back to AGENT_MODEL when unset) + FORCE_TOOL_CHOICE=1. Native tool_choice
-# forcing is the structural fix for the tool-faking class: it makes the model
-# actually call the gated tool instead of claiming it did. With forcing ON, the
-# 5 gated-tool execution-guard detectors short-circuit to `return false` (they'd
-# be false positives once the provider is forced to call the tool); the 3
-# supervisor-reply guards (web-research/memory/knowledge) stay on regardless.
-# Previously this pinned a hybrid split (Pro supervisor + Flash workers) with
-# forcing unset — that was the actual root cause the forcing rollout fixes, so
-# re-pinning a weak worker here would silently reintroduce it. Cost-reclaim path
-# (once Pro-both-tiers is proven stable) is WORKER_AGENT_MODEL=…flash, forcing
-# still ON.
-# Also enable the advanced departments that ship OFF by default:
-#   CREATIVE_SUBGRAPH   → art_director/copywriter/brand_designer (Nano Banana image-gen)
-#   ENGINEERING_SUBGRAPH → coder/qa/devops CTO sub-supervisor
+# falls back to AGENT_MODEL when unset).
+# FORCE_TOOL_CHOICE stays OFF (unset) — the 2026-07-07 routing-determinism plan
+# scoped this back out: it caused the #278 meltdown and is unverified against
+# the live provider. Routing determinism for high-value writes (e.g. GitHub
+# issue/PR creation) now comes from deterministic HITL fast-paths instead
+# (see src/gateway/*-fast-path.ts), not from forcing tool_choice on the model.
+# CREATIVE_SUBGRAPH / ENGINEERING_SUBGRAPH are also deliberately NOT re-pinned
+# here anymore (2026-07-07): the founder's daily-driver+revenue scope is the
+# flat 8-department topology (research/comms/admin/personal/jobhunt/
+# engineering/marketing/sales). Nested sub-supervisors were prod-only bug
+# surface never covered by the eval harness — leaving these unset lets the
+# code default (false) apply, matching what's actually tested.
 #   MCP_BRIDGE_ENABLED  → external MCP tools (browser-use, blender, slack; per-server
 #                         try/catch means a dead server contributes zero tools, no crash)
 # This is now the ONLY place these pins are written — this script is the last
@@ -85,15 +83,12 @@ if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   {
     printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-pro'
     printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:google/gemini-2.5-flash,anthropic:claude-haiku-4-5'
-    printf '%s\n' 'CREATIVE_SUBGRAPH=1'
-    printf '%s\n' 'ENGINEERING_SUBGRAPH=1'
     printf '%s\n' 'MCP_BRIDGE_ENABLED=true'
-    printf '%s\n' 'FORCE_TOOL_CHOICE=1'
     printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
   } >> .env.patched
   mv .env.patched .env
   chmod 600 .env
-  echo "==> Patched .env: Pro on BOTH tiers + FORCE_TOOL_CHOICE=1 (locked reliability posture), creative+engineering subgraphs ON, MCP bridge ON"
+  echo "==> Patched .env: Pro on BOTH tiers (locked reliability posture), FORCE_TOOL_CHOICE + creative/engineering subgraphs OFF (flat topology), MCP bridge ON"
 fi
 
 # MCP bridge Slack secrets — append only when the secret is set.
