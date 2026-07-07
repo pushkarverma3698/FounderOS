@@ -200,6 +200,15 @@ for a clean full-strength read. Fallback: `gemini-2.5-flash` → `claude-haiku-4
 once Pro is proven: set `WORKER_AGENT_MODEL=openrouter:google/gemini-2.5-flash` (strong supervisor,
 cheap workers). Prior prod model was `openrouter:google/gemini-2.5-flash`.
 
+**Locked reliability posture (2026-07-07):** prod runs Pro on BOTH tiers (`WORKER_AGENT_MODEL`
+UNSET) **with `FORCE_TOOL_CHOICE=1`** — native `tool_choice` forcing is the permanent, structural
+fix for the tool-faking class (it makes the model call the gated tool instead of claiming it did).
+With forcing ON, the 5 gated-tool `execution-guard.ts` detectors (shell / linkedin / inbox /
+github-read / github-write) short-circuit to `return false`; the 3 supervisor-reply guards
+(web-research / memory / knowledge) and all infra/security recovery fns stay ON — forcing can't
+cover them. Keep forcing OFF locally (free models may silently not honour it). Verified live via
+`FORCE_TOOL_CHOICE=1 … scripts/probe-real-task.ts` (the forced tool must appear in the call trail).
+
 **Development / integration testing (local, free):**
 ```
 AGENT_MODEL=openrouter:meta-llama/llama-3.3-70b-instruct:free
