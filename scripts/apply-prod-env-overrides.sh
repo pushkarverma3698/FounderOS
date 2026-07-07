@@ -57,20 +57,14 @@ else
   echo "==> PROD_DOTENV not set; using existing .env on box"
 fi
 
-# Pin the production model — LOCKED RELIABILITY POSTURE (2026-07-07, CLAUDE.md).
-# Pro on BOTH tiers (WORKER_AGENT_MODEL intentionally omitted — getWorkerModel
-# falls back to AGENT_MODEL when unset).
-# FORCE_TOOL_CHOICE stays OFF (unset) — the 2026-07-07 routing-determinism plan
-# scoped this back out: it caused the #278 meltdown and is unverified against
-# the live provider. Routing determinism for high-value writes (e.g. GitHub
-# issue/PR creation) now comes from deterministic HITL fast-paths instead
-# (see src/gateway/*-fast-path.ts), not from forcing tool_choice on the model.
-# CREATIVE_SUBGRAPH / ENGINEERING_SUBGRAPH are also deliberately NOT re-pinned
-# here anymore (2026-07-07): the founder's daily-driver+revenue scope is the
-# flat 8-department topology (research/comms/admin/personal/jobhunt/
-# engineering/marketing/sales). Nested sub-supervisors were prod-only bug
-# surface never covered by the eval harness — leaving these unset lets the
-# code default (false) apply, matching what's actually tested.
+# Pin the production model — HYBRID split (cost-reclaim, proven-Pro path).
+# Supervisor stays on Gemini 2.5 Pro (strong agentic routing/tool-calling); workers
+# drop to 2.5 Flash via WORKER_AGENT_MODEL (getWorkerModel honours it, fails safe to
+# the primary if unset/misconfigured). Fallback drops to Flash first (cheap, same
+# family) on a Pro capacity 503, then Haiku.
+# Also enable the advanced departments that ship OFF by default:
+#   CREATIVE_SUBGRAPH   → art_director/copywriter/brand_designer (Nano Banana image-gen)
+#   ENGINEERING_SUBGRAPH → coder/qa/devops CTO sub-supervisor
 #   MCP_BRIDGE_ENABLED  → external MCP tools (browser-use, blender, slack; per-server
 #                         try/catch means a dead server contributes zero tools, no crash)
 # This is now the ONLY place these pins are written — this script is the last
@@ -79,24 +73,19 @@ if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   # Also drop any stale LINKEDIN_API_VERSION — a leftover malformed value
   # (20240501) 426'd every post on 2026-07-04. Unset lets the code default
   # (a current YYYYMM) apply; the code now ignores malformed values anyway.
-  grep -v -E '^(AGENT_MODEL|WORKER_AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS|CREATIVE_SUBGRAPH|ENGINEERING_SUBGRAPH|MCP_BRIDGE_ENABLED|LINKEDIN_API_VERSION|FORCE_TOOL_CHOICE)=' .env > .env.patched || true
+  grep -v -E '^(AGENT_MODEL|WORKER_AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS|CREATIVE_SUBGRAPH|ENGINEERING_SUBGRAPH|MCP_BRIDGE_ENABLED|LINKEDIN_API_VERSION)=' .env > .env.patched || true
   {
     printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-pro'
+    printf '%s\n' 'WORKER_AGENT_MODEL=openrouter:google/gemini-2.5-flash'
     printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:google/gemini-2.5-flash,anthropic:claude-haiku-4-5'
+    printf '%s\n' 'CREATIVE_SUBGRAPH=1'
+    printf '%s\n' 'ENGINEERING_SUBGRAPH=1'
     printf '%s\n' 'MCP_BRIDGE_ENABLED=true'
-    # FORCE_TOOL_CHOICE intentionally NOT pinned (launch rollback 2026-07-07,
-    # PR #283): forcing native tool_choice on gemini-2.5-pro via OpenRouter was
-    # never live-verified (config.ts:279 says keep OFF until it is) and, stacked
-    # on the deterministic-supervisor Proxy, drove multi-step tasks into the
-    # 180s turn-timeout in prod. It is stripped above (line 82) and left unset,
-    # so the code default (FORCE_TOOL_CHOICE_ENABLED=false) applies. Re-pin only
-    # after a green MTProto verification of tool_choice forcing against the
-    # real provider.
     printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
   } >> .env.patched
   mv .env.patched .env
   chmod 600 .env
-  echo "==> Patched .env: Pro on BOTH tiers (locked reliability posture), FORCE_TOOL_CHOICE + creative/engineering subgraphs OFF (flat topology), MCP bridge ON"
+  echo "==> Patched .env: hybrid model (Pro supervisor + Flash workers), creative+engineering subgraphs ON, MCP bridge ON"
 fi
 
 # MCP bridge Slack secrets — append only when the secret is set.

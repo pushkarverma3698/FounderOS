@@ -22,7 +22,6 @@ import {
   estimateMessageTokens,
   stripMessageNames,
 } from "../../../src/infra/context-manager.js";
-import { repeatGuardBlockMessage } from "../../../src/agents/agent-tools/repeat-guard.js";
 
 function makeHistory(n: number): Array<HumanMessage | AIMessage> {
   return Array.from({ length: n }, (_, i) =>
@@ -266,93 +265,5 @@ describe("forceToolChoiceMiddleware (H4)", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const out = (await (mw as any).wrapModelCall(req, echo)) as { toolChoice?: unknown };
     expect(out.toolChoice).toBeUndefined();
-  });
-});
-
-// Repeat-guard hard stop (2026-07-07 — GitHub github_read infinite-loop incident):
-// the repeat-guard's "STOP" ToolMessage is a plain instruction the model can
-// ignore — and a weak/aggressive model (gemini-2.5-pro observed live) DID ignore
-// it, re-issuing the identical tool call for 2.5+ minutes of paid LLM calls.
-// This is the deterministic fix: once N repeat-guard blocks have accumulated in
-// the message window, strip ALL tools from the next model call (the same
-// proven mechanism as `stopToolsAfterFailure` above) so the model is physically
-// unable to call a tool and must answer in plain text — no reliance on the
-// model choosing to obey an instruction (rule #16).
-describe("createAgentMiddleware — repeat-guard hard stop (loop termination)", () => {
-  const echo = async (req: unknown) => req;
-
-  function repeatGuardToolMessage(id: string, toolName = "github_read") {
-    return new ToolMessage({
-      content: repeatGuardBlockMessage(toolName, "GitHub data"),
-      tool_call_id: id,
-      name: toolName,
-    });
-  }
-
-  it("passes tools through unchanged when no repeat-guard block has fired yet", async () => {
-    const mw = createAgentMiddleware("Sys.")[1]!;
-    const req = {
-      messages: [new HumanMessage("list my repos")],
-      tools: [{ name: "github_read" }],
-      state: { messages: [] },
-      runtime: { configurable: {} },
-    };
-    const out = (await (mw as any).wrapModelCall(req, echo)) as { tools: unknown[] };
-    expect(out.tools).toHaveLength(1);
-  });
-
-  it("passes tools through after a single repeat-guard block (one retry is allowed)", async () => {
-    const mw = createAgentMiddleware("Sys.")[1]!;
-    const messages = [
-      new HumanMessage("list my repos"),
-      new AIMessage({ content: "", tool_calls: [{ id: "c1", name: "github_read", args: {} }] }),
-      repeatGuardToolMessage("c1"),
-    ];
-    const req = {
-      messages,
-      tools: [{ name: "github_read" }],
-      state: { messages },
-      runtime: { configurable: {} },
-    };
-    const out = (await (mw as any).wrapModelCall(req, echo)) as { tools: unknown[] };
-    expect(out.tools).toHaveLength(1);
-  });
-
-  it("strips ALL tools once the repeat-guard block count reaches the hard-stop threshold", async () => {
-    const mw = createAgentMiddleware("Sys.")[1]!;
-    const messages = [
-      new HumanMessage("list my repos"),
-      new AIMessage({ content: "", tool_calls: [{ id: "c1", name: "github_read", args: {} }] }),
-      repeatGuardToolMessage("c1"),
-      new AIMessage({ content: "", tool_calls: [{ id: "c2", name: "github_read", args: {} }] }),
-      repeatGuardToolMessage("c2"),
-    ];
-    const req = {
-      messages,
-      tools: [{ name: "github_read" }],
-      state: { messages },
-      runtime: { configurable: {} },
-    };
-    const out = (await (mw as any).wrapModelCall(req, echo)) as { tools: unknown[] };
-    expect(out.tools).toHaveLength(0);
-  });
-
-  it("stripping tools is scoped to the repeat-guard marker, not any tool result", async () => {
-    const mw = createAgentMiddleware("Sys.")[1]!;
-    const messages = [
-      new HumanMessage("search for linear"),
-      new AIMessage({ content: "", tool_calls: [{ id: "c1", name: "search_web", args: {} }] }),
-      new ToolMessage({ content: "normal result 1", tool_call_id: "c1", name: "search_web" }),
-      new AIMessage({ content: "", tool_calls: [{ id: "c2", name: "search_web", args: {} }] }),
-      new ToolMessage({ content: "normal result 2", tool_call_id: "c2", name: "search_web" }),
-    ];
-    const req = {
-      messages,
-      tools: [{ name: "search_web" }],
-      state: { messages },
-      runtime: { configurable: {} },
-    };
-    const out = (await (mw as any).wrapModelCall(req, echo)) as { tools: unknown[] };
-    expect(out.tools).toHaveLength(1);
   });
 });

@@ -93,38 +93,6 @@ export function isJudgeEnabled(): boolean {
   }
 }
 
-/**
- * Pure config builder for the OpenAI-compatible judge path (OpenRouter/OpenAI).
- * `response_format: { type: "json_object" }` is OpenAI's/OpenRouter's native
- * JSON-mode contract — it constrains generation to syntactically valid JSON at
- * the provider level, rather than relying solely on the prompt instruction
- * ("Reply with ONLY compact JSON"). This closes the gap where a weak/free model
- * could return prose or fenced markdown that `parseJudgeVerdict`'s regex/JSON.parse
- * would otherwise have to fall back on (silently degrading to `pass`).
- *
- * Not applied to Anthropic: `ChatAnthropic` has no equivalent `response_format`
- * field, so that path is left on prompt-only instruction (rule #16 unaffected —
- * `parseJudgeVerdict` remains the deterministic, unit-tested safety net either way).
- *
- * Pulled out as a pure function (no network) so the contract is unit-testable
- * without constructing a real ChatOpenAI client.
- */
-export function buildOpenAIJudgeConfig(model: string): {
-  model: string;
-  temperature: number;
-  maxTokens: number;
-  maxRetries: number;
-  response_format: { type: "json_object" };
-} {
-  return {
-    model,
-    temperature: 0,
-    maxTokens: 512,
-    maxRetries: 2,
-    response_format: { type: "json_object" },
-  };
-}
-
 let _model: BaseChatModel | undefined;
 function getJudgeModel(): BaseChatModel {
   if (!_model) {
@@ -133,13 +101,16 @@ function getJudgeModel(): BaseChatModel {
       _model = new ChatAnthropic({ model, temperature: 0, maxTokens: 512 });
     } else if (provider === "openrouter") {
       _model = new ChatOpenAI({
-        ...buildOpenAIJudgeConfig(model),
+        model,
+        temperature: 0,
+        maxTokens: 512,
+        maxRetries: 2,
         apiKey: process.env["OPENROUTER_API_KEY"] || "missing-openrouter-key",
         configuration: { baseURL: "https://openrouter.ai/api/v1" },
       });
     } else {
       // openai / google-genai judges are uncommon; route via the standard OpenAI client.
-      _model = new ChatOpenAI(buildOpenAIJudgeConfig(model));
+      _model = new ChatOpenAI({ model, temperature: 0, maxTokens: 512, maxRetries: 2 });
     }
   }
   return _model;

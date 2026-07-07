@@ -27,7 +27,6 @@ import { buildEngineeringDomain } from "./engineering-domain.js";
 import { buildRevenueDomain } from "./revenue-domain.js";
 import { buildCreativeDomain } from "./creative-department.js";
 import { assertContextIsolation, CONTEXT_ISOLATION_OUTPUT_MODE } from "./context-isolation.js";
-import { supervisorLoopGuardPostModelHook } from "./supervisor-loop-guard.js";
 import {
   buildSupervisorPrompt,
   ADMIN_PROMPT,
@@ -43,9 +42,6 @@ import {
 import type { RunnableConfig } from "@langchain/core/runnables";
 import type { ApprovalRequest } from "./agent-tools.js";
 import { childLogger } from "../infra/logger.js";
-import { AIMessage, type BaseMessage } from "@langchain/core/messages";
-import { detectTaskLedger } from "../gateway/task-ledger.js";
-import { resolveSupervisorTarget, type RoutableDept } from "../gateway/pre-router.js";
 
 const log = childLogger({ module: "office" });
 
@@ -76,156 +72,6 @@ const SEARCH_TOOL_LIMITS = {
   crawl_site: 1,
 } as const;
 
-function getCompletedDepartments(messages: BaseMessage[]): string[] {
-  const completed: string[] = [];
-  for (const msg of messages) {
-    if (msg._getType() === "ai") {
-      const aiMsg = msg as AIMessage;
-      const hasHandoffBack = aiMsg.tool_calls?.some(tc => tc.name.startsWith("transfer_back_to_"));
-      if (hasHandoffBack && aiMsg.name) {
-        completed.push(aiMsg.name.toLowerCase());
-      }
-    }
-  }
-  return completed;
-}
-
-function getDepartmentOutputMessage(messages: BaseMessage[], dept: string): BaseMessage | null {
-  let handoffBackIndex = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg && msg._getType() === "ai") {
-      const aiMsg = msg as AIMessage;
-      const hasHandoffBack = aiMsg.tool_calls?.some(tc => tc.name.startsWith("transfer_back_to_"));
-      if (hasHandoffBack && aiMsg.name?.toLowerCase() === dept.toLowerCase()) {
-        handoffBackIndex = i;
-        break;
-      }
-    }
-  }
-  if (handoffBackIndex > 0) {
-    return messages[handoffBackIndex - 1] || null;
-  }
-  return null;
-}
-
-export function wrapSupervisorModel(originalModel: BaseChatModel): BaseChatModel {
-  const handler: ProxyHandler<any> = {
-    get(target, prop, receiver) {
-      if (prop === "bindTools") {
-        return function(tools: any[], options?: any) {
-          const bound = target.bindTools(tools, options);
-          return new Proxy(bound, {
-            get(boundTarget, boundProp, boundReceiver) {
-              if (boundProp === "invoke") {
-                return async function(input: any, options: any) {
-                  return handleSupervisorInvoke(originalModel, boundTarget, tools, input, options);
-                };
-              }
-              return Reflect.get(boundTarget, boundProp, boundReceiver);
-            }
-          });
-        };
-      }
-      if (prop === "invoke") {
-        return async function(input: any, options: any) {
-          return handleSupervisorInvoke(originalModel, target, [], input, options);
-        };
-      }
-      return Reflect.get(target, prop, receiver);
-    }
-  };
-  return new Proxy(originalModel, handler);
-}
-
-async function handleSupervisorInvoke(
-  originalModel: BaseChatModel,
-  target: any,
-  tools: any[],
-  input: any,
-  options: any
-): Promise<AIMessage> {
-  const messages: BaseMessage[] = Array.isArray(input)
-    ? input
-    : (input && typeof input === "object" && "messages" in input)
-    ? (input as any).messages
-    : [];
-
-  const completed = getCompletedDepartments(messages);
-
-  // 1. Check for Task Ledger (Option B)
-  const humanMsg = messages.find(m => m._getType() === "human");
-  const queryText = humanMsg ? humanMsg.content.toString() : "";
-  const ledger = detectTaskLedger(queryText);
-
-  if (ledger && ledger.length > 0) {
-    const nextStep = ledger.find(step => {
-      if (step.dept === "synthesize") return false;
-      const targetDept = resolveSupervisorTarget(step.dept as RoutableDept);
-      return !completed.includes(targetDept.toLowerCase());
-    });
-
-    if (nextStep) {
-      const targetDept = resolveSupervisorTarget(nextStep.dept as RoutableDept);
-      const toolName = `transfer_to_${targetDept.toLowerCase()}`;
-      return new AIMessage({
-        content: `Transferring to ${targetDept} as planned in task ledger.`,
-        tool_calls: [{
-          name: toolName,
-          args: {},
-          id: `call_${Math.random().toString(36).slice(2)}`
-        }]
-      });
-    }
-
-    // All steps are completed. If there is a synthesize step or we just need to wrap up,
-    // call the original model to synthesize the final reply.
-    return originalModel.invoke(messages, options);
-  }
-
-  // 2. Check for Single Department Directive (Option A)
-  let preRoutedDept: string | null = null;
-  const ROUTING_DIRECTIVE_RE = /\[ROUTING DIRECTIVE: A deterministic classifier routed this to the (\w+) department/i;
-  for (const msg of messages) {
-    if (msg._getType() === "system") {
-      const match = ROUTING_DIRECTIVE_RE.exec(msg.content.toString());
-      if (match && match[1]) {
-        preRoutedDept = match[1].toLowerCase();
-        break;
-      }
-    }
-  }
-
-  if (preRoutedDept) {
-    const targetDept = resolveSupervisorTarget(preRoutedDept as RoutableDept);
-    const hasRun = completed.includes(targetDept.toLowerCase());
-
-    if (!hasRun) {
-      const toolName = `transfer_to_${targetDept.toLowerCase()}`;
-      return new AIMessage({
-        content: `Routing to ${targetDept} department.`,
-        tool_calls: [{
-          name: toolName,
-          args: {},
-          id: `call_${Math.random().toString(36).slice(2)}`
-        }]
-      });
-    } else {
-      const deptMsg = getDepartmentOutputMessage(messages, targetDept);
-      if (deptMsg) {
-        return new AIMessage({
-          content: deptMsg.content,
-          name: "supervisor"
-        });
-      }
-    }
-  }
-
-  // 3. Fallback to standard supervisor model
-  const boundTarget = target;
-  return boundTarget.invoke ? boundTarget.invoke(input, options) : originalModel.invoke(input, options);
-}
-
 /**
  * Build (compile) the office graph with a given checkpointer.
  * Exported for tests (inject MemorySaver). Production uses getOffice().
@@ -241,14 +87,6 @@ export function buildOffice(checkpointer: BaseCheckpointSaver, supervisorModel?:
   // Model split (roadmap #10): the supervisor keeps the strong model for routing
   // reliability; departments run on the (optionally cheaper) worker model. With no
   // WORKER_AGENT_MODEL set, getWorkerModel() === getModel(), so this is a no-op.
-  // Launch rollback (2026-07-07): the deterministic supervisor Proxy
-  // (wrapSupervisorModel, PR #281) hijacked the supervisor's routing/synthesis
-  // decision but was NEVER live-verified against the real langgraph-supervisor
-  // message flow — its unit tests mock the exact message shape it expects. Stacked
-  // on FORCE_TOOL_CHOICE=1 it caused multi-step tasks (e.g. "search repos then
-  // create issue") to loop to the 180s turn-timeout in prod. Restore the LLM-driven
-  // supervisor, which is the production-stable path. The wrapper + its test are kept
-  // so the logic can be re-enabled once it is verified live against the real graph.
   const llm = supervisorModel ?? getModel();
   const deptModel = getWorkerModel();
 
@@ -417,12 +255,6 @@ export function buildOffice(checkpointer: BaseCheckpointSaver, supervisorModel?:
     // throws "Unknown author: supervisor". "inline" embeds the name in the
     // message CONTENT instead, which every provider accepts.
     includeAgentName: "inline",
-    // Root-cause loop fix (2026-07-07 audit, MEMORY.md "T35 chained-synthesis
-    // LOOPS"): stops the supervisor re-transferring to the same department over
-    // and over (a class the within-department repeat-guard never covered) BEFORE
-    // OFFICE_RECURSION_LIMIT or the budget cap have to catch it. Deterministic —
-    // see supervisor-loop-guard.ts.
-    postModelHook: supervisorLoopGuardPostModelHook,
   }).compile({ checkpointer });
 }
 

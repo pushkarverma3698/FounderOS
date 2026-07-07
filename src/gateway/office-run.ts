@@ -66,13 +66,6 @@ import {
   resumeShellHitlFastPath,
   shellFastPathThreadId,
 } from "./shell-hitl-fast-path.js";
-import {
-  extractGithubWriteParams,
-  getGithubWriteHitlPendingApproval,
-  githubWriteFastPathThreadId,
-  invokeGithubWriteFastPath,
-  resumeGithubWriteFastPath,
-} from "./github-write-fast-path.js";
 import { assertNonEmptyMessages } from "../infra/office-guard.js";
 import { isWedgedState, type WedgeState } from "../infra/wedge.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
@@ -157,10 +150,9 @@ function threadIdFor(chatId: number | string): string {
 
 /**
  * H1 fix: resolve the interrupt_id of whatever is CURRENTLY pending on a
- * thread, checking the normal thread and its fast-path variants (run_shell
- * and github_write approvals are gated through separate one-node graphs keyed
- * on `shellFastPathThreadId(threadId)` / `githubWriteFastPathThreadId(threadId)`
- * — see shell-hitl-fast-path.ts / github-write-fast-path.ts). Returns
+ * thread, checking both the normal thread and its shell-fast-path variant
+ * (run_shell approvals are gated through a separate one-node graph keyed on
+ * `shellFastPathThreadId(threadId)` — see shell-hitl-fast-path.ts). Returns
  * undefined (never throws) when no DB row can be found, in which case callers
  * degrade to the pre-H1 behaviour of not binding the card to a specific id.
  */
@@ -168,9 +160,7 @@ async function pendingInterruptIdForThread(threadId: string): Promise<string | u
   const direct = await getPendingInterrupt(threadId).catch(() => null);
   if (direct) return direct.interrupt_id;
   const shell = await getPendingInterrupt(shellFastPathThreadId(threadId)).catch(() => null);
-  if (shell) return shell.interrupt_id;
-  const githubWriteFp = await getPendingInterrupt(githubWriteFastPathThreadId(threadId)).catch(() => null);
-  return githubWriteFp?.interrupt_id ?? undefined;
+  return shell?.interrupt_id ?? undefined;
 }
 
 // ── Result extraction ──────────────────────────────────────────────────────────
@@ -931,26 +921,6 @@ async function runOfficeSessionLocked(session: GatewaySession, text: string): Pr
       }
     }
 
-    if (isGithubWriteRequest(text) && extractGithubWriteParams(text)) {
-      const githubWriteHitl = await invokeGithubWriteFastPath(config, text);
-      if (githubWriteHitl) {
-        stopTyping();
-        trace.event("github_write.fastpath", { textLen: text.length });
-        log.info({ chatId }, "GitHub write via HITL fast path");
-        const approval = await getGithubWriteHitlPendingApproval(config);
-        if (approval) {
-          trace.event("hitl.interrupt", { title: approval.title, githubWriteFastPath: true });
-          await sendApprovalCard(session, approval);
-        } else {
-          // Mirrors the shell fast-path's fail-loud behaviour (rule #19.5) — never
-          // silently drop the typing indicator with no reply.
-          log.warn({ chatId }, "GitHub-write fast-path: invoke succeeded but approval card is null");
-          await session.onSystemNotice("⚠️ GitHub write queued but approval card could not be fetched — check /status.");
-        }
-        return;
-      }
-    }
-
     const beforeState = await office.getState(config).catch((err) => {
       log.warn({ chatId, err: (err as Error).message }, "getState failed — baseLen will be 0");
       return null;
@@ -1410,65 +1380,6 @@ async function resumeOfficeSessionLocked(
         inputTokens: budget.summary.totalInputTokens,
         outputTokens: budget.summary.totalOutputTokens,
         usd: Number(budget.summary.totalUsd.toFixed(6)),
-      });
-      return;
-    }
-
-    const githubWritePending = await getGithubWriteHitlPendingApproval(config);
-    if (githubWritePending) {
-      // Mirrors the shell fast-path block above — github_write HITL rows live
-      // under the GITHUB-WRITE-suffixed thread id (githubWriteFastPathConfig()
-      // sets it to githubWriteFastPathThreadId(threadId)), not session.threadId
-      // directly.
-      const githubWriteRow = await getPendingInterrupt(githubWriteFastPathThreadId(session.threadId));
-      if (expectedInterruptId && githubWriteRow?.interrupt_id !== expectedInterruptId) {
-        trace.event("hitl.stale_approval", { githubWriteFastPath: true });
-        log.warn({ chatId }, "Stale github-write approval decision ignored — pending action changed");
-        await session.onSystemNotice(STALE_APPROVAL_NOTICE);
-        return;
-      }
-      if (decision === "rejected") {
-        if (githubWriteRow) await resolveInterrupt(githubWriteRow.interrupt_id, "rejected");
-        await clearThreadCheckpoints(githubWriteFastPathThreadId(session.threadId));
-        await cancelGhostApprovals(chatId);
-        trace.event("turn.out", { rejected: true, githubWriteFastPath: true });
-        await session.onSystemNotice(buildRejectionConfirmation(githubWritePending));
-        log.info({ chatId, action: githubWritePending.action }, "Founder rejected github-write fast path — no execution");
-        return;
-      }
-
-      const ghBudget = createRunBudget();
-      const ghAgentModel = process.env["AGENT_MODEL"] ?? "gemini-2.5-flash";
-      await assertDailyBudgetAllowsRun(
-        () => getTodayCostUsd(TENANT),
-        DAILY_BUDGET_USD,
-        (msg) => void notifyBudgetGateDegraded(session, trace, chatId, "github-write resume", msg),
-      );
-
-      const ghRes = await resumeGithubWriteFastPath(
-        {
-          ...config,
-          callbacks: [new BudgetGuardCallback(ghBudget, ghAgentModel), new TraceCallback(trace)],
-          metadata: buildRunMetadata({ tenant_id: TENANT, trace_id: trace.turnId, prompt_hash: trace.promptHash }),
-        },
-        decision,
-      );
-      const nextGithubWrite = await getGithubWriteHitlPendingApproval(config);
-      if (nextGithubWrite) {
-        trace.event("hitl.interrupt", { title: nextGithubWrite.title, rePaused: true, githubWriteFastPath: true });
-        await sendApprovalCard(session, nextGithubWrite);
-        return;
-      }
-      if (githubWriteRow) await resolveInterrupt(githubWriteRow.interrupt_id, "approved");
-      const ghReplyText = ghRes.output ?? "✅ GitHub write finished.";
-      await sendResult(session, { messages: [{ content: ghReplyText, _getType: () => "ai" }] }, chatId);
-      trace.event("turn.out", {
-        replyPreview: ghReplyText.slice(0, 200),
-        resumed: true,
-        githubWriteFastPath: true,
-        inputTokens: ghBudget.summary.totalInputTokens,
-        outputTokens: ghBudget.summary.totalOutputTokens,
-        usd: Number(ghBudget.summary.totalUsd.toFixed(6)),
       });
       return;
     }

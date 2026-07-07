@@ -207,13 +207,7 @@ export class BudgetGuardCallback extends BaseCallbackHandler {
     private readonly tracker: BudgetTracker,
     private readonly modelId: string = "gemini-2.5-flash",
   ) {
-    // raiseError: true is required — LangChain's CallbackManager swallows any
-    // exception thrown from handleLLMEnd unless the handler opts in via this
-    // flag (see BaseRunManager.handleLLMEnd in @langchain/core/callbacks/manager).
-    // Without it, BudgetExceededError below only produces a logged
-    // "Error in handler BudgetGuardCallback, handleLLMEnd: ..." line and the
-    // run keeps going — the run never actually stops on budget breach.
-    super({ raiseError: true });
+    super();
   }
 
   override async handleLLMEnd(output: LLMResult): Promise<void> {

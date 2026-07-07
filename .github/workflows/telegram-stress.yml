@@ -7,10 +7,15 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: "e2e-telegram-qa selector (all | stabilization | group1..group8 | T01..T37 | from:TNN | comma list)"
+        description: "e2e-telegram-qa selector"
         required: true
         default: "stabilization"
-        type: string
+        type: choice
+        options:
+          - stabilization
+          - group6
+          - group1
+          - all
 
 concurrency:
   group: telegram-stress-vps

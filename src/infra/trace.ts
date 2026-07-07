@@ -35,7 +35,6 @@ export type Seam =
   | "inbox.fastpath"
   | "github.fastpath"
   | "shell.fastpath"
-  | "github_write.fastpath"
   | "hierarchy.enter"
   | "hierarchy.exit"
   | "turn.out"

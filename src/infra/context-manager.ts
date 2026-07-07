@@ -26,7 +26,6 @@ import type { BaseMessage } from "@langchain/core/messages";
 import { createMiddleware, dynamicSystemPromptMiddleware } from "langchain";
 import type { AnyAgentMiddleware } from "langchain";
 import { isStructuredToolFailure } from "../agents/tool-result.js";
-import { isRepeatGuardBlock } from "../agents/agent-tools/repeat-guard.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -168,25 +167,6 @@ function hasTerminalToolFailure(messages: BaseMessage[]): boolean {
   return messages.some(
     (m) => isToolMessage(m) && typeof m.content === "string" && isStructuredToolFailure(m.content),
   );
-}
-
-/**
- * Loop wedge fix (2026-07-07 — github_read infinite-loop incident): a weak/
- * aggressive model can ignore the repeat-guard's "STOP" ToolMessage and keep
- * re-issuing the identical tool call. The repeat-guard itself only decides
- * whether to short-circuit ONE call; it cannot force the ReAct loop to end.
- * Once this many repeat-guard blocks have accumulated in the message window,
- * strip ALL tools from the next model call — the model becomes physically
- * unable to call a tool and must answer in plain text. This never depends on
- * the model choosing to obey an instruction (rule #16).
- */
-const REPEAT_GUARD_HARD_STOP_THRESHOLD = 2;
-
-function hasExceededRepeatGuardBlocks(messages: BaseMessage[]): boolean {
-  const blockCount = messages.filter(
-    (m) => isToolMessage(m) && typeof m.content === "string" && isRepeatGuardBlock(m.content),
-  ).length;
-  return blockCount >= REPEAT_GUARD_HARD_STOP_THRESHOLD;
 }
 
 function filterToolsByLimits<T extends { name?: string }>(
@@ -361,7 +341,7 @@ export function createAgentMiddleware(
       wrapModelCall: async (request, handler) => {
         const messages = await prepareMessages(request.messages, { maxTokens, maxMessageChars, preserveTaskAnchor });
         let tools = filterToolsByLimits(messages, request.tools, toolCallLimits) ?? request.tools;
-        if ((stopToolsAfterFailure && hasTerminalToolFailure(messages)) || hasExceededRepeatGuardBlocks(messages)) {
+        if (stopToolsAfterFailure && hasTerminalToolFailure(messages)) {
           tools = [];
         }
         return handler({ ...request, messages, tools });

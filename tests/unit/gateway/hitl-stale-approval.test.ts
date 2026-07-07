@@ -24,7 +24,6 @@ const cancelPendingApprovals = vi.fn(async () => 1);
 const getPendingInterrupt = vi.fn(async (_threadId: string) => null as { interrupt_id: string } | null);
 const resolveInterrupt = vi.fn(async () => true);
 const getShellHitlPendingApproval = vi.fn(async () => null);
-const getGithubWriteHitlPendingApproval = vi.fn(async () => null);
 
 vi.mock("../../../src/infra/checkpointer.js", () => ({ clearThreadCheckpoints }));
 vi.mock("../../../src/gateway/shell-hitl-fast-path.js", () => ({
@@ -33,13 +32,6 @@ vi.mock("../../../src/gateway/shell-hitl-fast-path.js", () => ({
   isShellHitlRequest: vi.fn(() => false),
   resumeShellHitlFastPath: vi.fn(),
   shellFastPathThreadId: (threadId: string) => `${threadId}:shell-fp`,
-}));
-vi.mock("../../../src/gateway/github-write-fast-path.js", () => ({
-  getGithubWriteHitlPendingApproval,
-  invokeGithubWriteFastPath: vi.fn(async () => false),
-  extractGithubWriteParams: vi.fn(() => null),
-  resumeGithubWriteFastPath: vi.fn(),
-  githubWriteFastPathThreadId: (threadId: string) => `${threadId}:github-write-fp`,
 }));
 vi.mock("../../../src/db/queries.js", async (importActual) => ({
   ...(await importActual<typeof import("../../../src/db/queries.js")>()),
