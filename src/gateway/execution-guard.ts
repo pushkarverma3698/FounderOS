@@ -6,6 +6,8 @@
  * the gated run_shell tool. Pure functions, unit-tested (rule #16).
  */
 
+import { FORCE_TOOL_CHOICE_ENABLED } from "../core/config.js";
+
 export interface OfficeMessageLike {
   content: unknown;
   _getType?: () => string;
@@ -110,6 +112,9 @@ export function detectUnbackedShellClaim(
   messages: OfficeMessageLike[],
   reply: string,
 ): boolean {
+  // When native tool_choice forcing is on, the provider is forced to call run_shell,
+  // so the "claimed-without-calling" class this detects cannot occur. Kept for rollback.
+  if (FORCE_TOOL_CHOICE_ENABLED) return false;
   if (!isShellRunRequest(userInput)) return false;
   if (hadToolCall(messages, "run_shell")) return false;
   return FAKE_SHELL_CLAIM_RE.test(reply) || SHELL_DEFERRAL_RE.test(reply);
@@ -124,6 +129,8 @@ export function detectLinkedInRefusalWithoutTool(
   messages: OfficeMessageLike[],
   reply: string,
 ): boolean {
+  // Forced linkedin_post makes the refusal-without-tool class impossible. Kept for rollback.
+  if (FORCE_TOOL_CHOICE_ENABLED) return false;
   if (!isLinkedInPostRequest(userInput)) return false;
   if (hadToolCall(messages, "linkedin_post")) return false;
   return LINKEDIN_REFUSAL_RE.test(reply);
@@ -155,6 +162,8 @@ export function detectUnbackedInboxClaim(
   messages: OfficeMessageLike[],
   reply: string,
 ): boolean {
+  // Forced read_emails makes the fabricated-inbox class impossible. Kept for rollback.
+  if (FORCE_TOOL_CHOICE_ENABLED) return false;
   if (!isInboxReadOnlyRequest(userInput)) return false;
   if (hadToolCall(messages, "read_emails")) return false;
   return FAKE_INBOX_CLAIM_RE.test(reply);
@@ -186,6 +195,8 @@ export function detectUnbackedGithubReadClaim(
   messages: OfficeMessageLike[],
   reply: string,
 ): boolean {
+  // Forced github_read makes the answered-from-memory class impossible. Kept for rollback.
+  if (FORCE_TOOL_CHOICE_ENABLED) return false;
   if (!isGithubReadOnlyRequest(userInput)) return false;
   if (hadToolCall(messages, "github_read")) return false;
   if (reply.trim().length < 40) return false;
@@ -226,6 +237,8 @@ export function detectUnbackedGithubWriteClaim(
   messages: OfficeMessageLike[],
   reply: string,
 ): boolean {
+  // Forced github_write (flat engineering) makes the fake-write class impossible. Kept for rollback.
+  if (FORCE_TOOL_CHOICE_ENABLED) return false;
   if (!isGithubWriteRequest(userInput)) return false;
   if (hadGithubWriteToolCall(messages)) return false;
   if (!FAKE_GITHUB_WRITE_CLAIM_RE.test(reply)) return false;

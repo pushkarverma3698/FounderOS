@@ -12,12 +12,14 @@
  * exposes routeFromMessages / collectDeptTools / the 3-arg extractObservation.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   routeFromMessages,
   collectDeptTools,
   extractObservation,
 } from "../../../src/eval/office-invoker.js";
+import type { RunnableConfig } from "@langchain/core/runnables";
+import type { GoldenTask } from "../../../src/eval/types.js";
 
 const ai = (toolCalls: Array<{ name: string }>) => ({
   _getType: () => "ai",
@@ -79,5 +81,47 @@ describe("extractObservation", () => {
 
   it("handles an empty run", () => {
     expect(extractObservation([], [], false)).toEqual({ route: null, tools: [], hadInterrupt: false });
+  });
+});
+
+// ── makeOfficeInvoker forced_tool injection (Gate B fidelity) ──────────────────
+// The eval MUST mirror the production gateway (office-run.ts:959-970): when native
+// tool_choice forcing is on, inject the SAME configurable.forced_tool. Before this
+// fix the eval never set it, so FORCE_TOOL_CHOICE=1 eval runs proved nothing about
+// forcing. FORCE_TOOL_CHOICE_ENABLED is read at import time, so we reset+re-import
+// the module under each env to observe both branches without any LLM.
+describe("makeOfficeInvoker — forced_tool injection", () => {
+  const SHELL_TASK: GoldenTask = { id: "t-shell", input: "run in terminal: ls -la" } as GoldenTask;
+
+  afterEach(() => {
+    delete process.env["FORCE_TOOL_CHOICE"];
+    vi.resetModules();
+  });
+
+  async function runWith(force: boolean): Promise<RunnableConfig> {
+    if (force) process.env["FORCE_TOOL_CHOICE"] = "1";
+    else delete process.env["FORCE_TOOL_CHOICE"];
+    vi.resetModules();
+    const mod = await import("../../../src/eval/office-invoker.js");
+    let captured: RunnableConfig = {};
+    const fakeOffice = {
+      invoke: async (_input: unknown, config: RunnableConfig) => {
+        captured = config;
+        return { messages: [] };
+      },
+    };
+    const invoker = mod.makeOfficeInvoker(fakeOffice, async () => null);
+    await invoker(SHELL_TASK);
+    return captured;
+  }
+
+  it("injects forced_tool matching the production gateway when forcing is ON", async () => {
+    const config = await runWith(true);
+    expect(config.configurable?.["forced_tool"]).toBe("run_shell");
+  });
+
+  it("does NOT inject forced_tool when forcing is OFF (default)", async () => {
+    const config = await runWith(false);
+    expect(config.configurable?.["forced_tool"]).toBeUndefined();
   });
 });

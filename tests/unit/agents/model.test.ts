@@ -30,6 +30,16 @@ describe("worker model split (roadmap #10)", () => {
     expect(getWorkerModelId()).toBe(getConfiguredModelId());
   });
 
+  it("locked reliability posture: Pro on BOTH tiers when WORKER_AGENT_MODEL is unset", () => {
+    // The forcing rollout runs the strong Pro model on supervisor AND workers so
+    // a weak worker can't reintroduce the tool-faking class. Pin that here.
+    delete process.env["WORKER_AGENT_MODEL"];
+    process.env["AGENT_MODEL"] = "openrouter:google/gemini-2.5-pro";
+    expect(getConfiguredModelId()).toBe("openrouter:google/gemini-2.5-pro");
+    expect(getWorkerModelId()).toBe("openrouter:google/gemini-2.5-pro");
+    expect(getWorkerModelId()).toBe(getConfiguredModelId());
+  });
+
   it("honours a cheaper WORKER_AGENT_MODEL override (distinct from primary)", () => {
     process.env["AGENT_MODEL"] = "openrouter:google/gemini-2.5-flash";
     process.env["WORKER_AGENT_MODEL"] = "openrouter:google/gemini-2.5-flash-lite";

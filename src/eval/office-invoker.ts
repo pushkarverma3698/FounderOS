@@ -19,7 +19,8 @@
  */
 
 import type { RunnableConfig } from "@langchain/core/runnables";
-import { buildOfficeInput } from "../gateway/pre-router.js";
+import { buildOfficeInput, preRouteDepartment, resolveForcedTool } from "../gateway/pre-router.js";
+import { FORCE_TOOL_CHOICE_ENABLED } from "../core/config.js";
 import type { Department, Observation, GoldenTask } from "./types.js";
 import type { Invoker } from "./runner.js";
 
@@ -135,9 +136,22 @@ export function makeOfficeInvoker(
     // Use the SAME input builder as the Telegram gateway so the eval exercises
     // the real production routing path, including the deterministic pre-router
     // hint (CLAUDE.md rule #19).
+    //
+    // Mirror office-run.ts:959-970: when native tool_choice forcing is on, inject
+    // the SAME `configurable.forced_tool` the production gateway does, so the eval
+    // actually exercises forceToolChoiceMiddleware. Without this the eval silently
+    // diverges from prod and its numbers prove nothing about forcing (Gate B gap).
+    const preRoutedDept = FORCE_TOOL_CHOICE_ENABLED ? preRouteDepartment(task.input) : null;
+    const forcedTool = preRoutedDept ? resolveForcedTool(preRoutedDept, task.input) : null;
     const res = await office.invoke(
       { messages: buildOfficeInput(task.input) },
-      { configurable: { thread_id: threadId }, callbacks: [toolCollector] },
+      {
+        configurable: {
+          thread_id: threadId,
+          ...(forcedTool ? { forced_tool: forcedTool } : {}),
+        },
+        callbacks: [toolCollector],
+      },
     );
     const pending = await getPending(office, config);
     return extractObservation(res.messages ?? [], toolNames, pending !== null);
