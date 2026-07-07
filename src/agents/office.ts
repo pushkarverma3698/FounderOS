@@ -241,9 +241,15 @@ export function buildOffice(checkpointer: BaseCheckpointSaver, supervisorModel?:
   // Model split (roadmap #10): the supervisor keeps the strong model for routing
   // reliability; departments run on the (optionally cheaper) worker model. With no
   // WORKER_AGENT_MODEL set, getWorkerModel() === getModel(), so this is a no-op.
-  // satisfies test assertion: const llm = supervisorModel ?? getModel();
-  const rawLlm = supervisorModel ?? getModel();
-  const llm = wrapSupervisorModel(rawLlm);
+  // Launch rollback (2026-07-07): the deterministic supervisor Proxy
+  // (wrapSupervisorModel, PR #281) hijacked the supervisor's routing/synthesis
+  // decision but was NEVER live-verified against the real langgraph-supervisor
+  // message flow — its unit tests mock the exact message shape it expects. Stacked
+  // on FORCE_TOOL_CHOICE=1 it caused multi-step tasks (e.g. "search repos then
+  // create issue") to loop to the 180s turn-timeout in prod. Restore the LLM-driven
+  // supervisor, which is the production-stable path. The wrapper + its test are kept
+  // so the logic can be re-enabled once it is verified live against the real graph.
+  const llm = supervisorModel ?? getModel();
   const deptModel = getWorkerModel();
 
   // ── Phase C tools (available across departments) ──────────────────────────
