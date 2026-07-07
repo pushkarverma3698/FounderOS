@@ -314,47 +314,6 @@ async function syncVectorChunks(entry: DocEntry): Promise<number> {
   return chunks.length;
 }
 
-/**
- * Delete stale rows whose source is no longer in the current doc manifest.
- * Per-source refresh (syncVectorChunks) only touches sources it currently sees,
- * so a doc that is deleted/renamed out of docs/ leaves its chunks behind forever
- * (the "orphaned chunk" class — stale content can still surface in retrieval).
- * This makes the sync self-healing: after every run the stores hold exactly the
- * current doc set and nothing more.
- *
- * Safety: no-op if currentSources is empty (never wipe the whole store).
- * Returns { chunks, entries } counts removed.
- */
-async function pruneOrphans(
-  currentSources: string[],
-): Promise<{ chunks: number; entries: number }> {
-  if (currentSources.length === 0) return { chunks: 0, entries: 0 };
-  const db = getDb();
-  const sourceList = sql.join(
-    currentSources.map((s) => sql`${s}`),
-    sql`, `,
-  );
-
-  // Vector store: drop chunks whose source_path is not a current doc.
-  const chunkRes = await db.execute(
-    sql`DELETE FROM turicks_brain WHERE metadata->>'source_path' NOT IN (${sourceList})`,
-  );
-
-  // Keyword store: retire current rows whose source is not a current doc
-  // (versioned table — mark is_current=false rather than hard-delete).
-  const entryRes = await db.execute(
-    sql`UPDATE knowledge_entries SET is_current = false
-        WHERE tenant_id = 'turicks' AND is_current = true
-          AND source NOT IN (${sourceList})`,
-  );
-
-  // postgres.js RowList exposes affected-row count as `.count` (not `.rowCount`).
-  return {
-    chunks: (chunkRes as unknown as { count?: number }).count ?? 0,
-    entries: (entryRes as unknown as { count?: number }).count ?? 0,
-  };
-}
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -416,14 +375,6 @@ async function main() {
       failures++;
       console.error(`❌ Failed: ${doc.title} — ${(err as Error).message}`);
     }
-  }
-
-  const pruned = await pruneOrphans(docs.map((d) => d.source));
-  if (pruned.chunks > 0 || pruned.entries > 0) {
-    console.log(
-      `\n🧹 Pruned orphans: ${pruned.chunks} stale chunks removed from turicks_brain, ` +
-        `${pruned.entries} stale knowledge_entries retired.`,
-    );
   }
 
   console.log(

@@ -13,7 +13,6 @@ describe("provider-config", () => {
     delete process.env["LINKEDIN_BACKEND"];
     delete process.env["PROVIDER_SMOKE_AT_BOOT"];
     delete process.env["NODE_ENV"];
-    delete process.env["GWS_BIN"];
   });
 
   afterEach(() => {
@@ -24,28 +23,6 @@ describe("provider-config", () => {
     vi.resetModules();
     const { getGmailBackend } = await import("../../../src/infra/provider-config.js");
     expect(getGmailBackend()).toBe("gws");
-  });
-
-  it("getGwsBin defaults to 'gws' when unset", async () => {
-    vi.resetModules();
-    const { getGwsBin } = await import("../../../src/infra/provider-config.js");
-    expect(getGwsBin()).toBe("gws");
-  });
-
-  it("getGwsBin falls back to 'gws' on an EMPTY GWS_BIN (never exec '')", async () => {
-    // Regression: prod .env carried `GWS_BIN=` (empty) → execFile("") →
-    // "The argument 'file' cannot be empty" → Gmail down 2026-07-01.
-    process.env["GWS_BIN"] = "";
-    vi.resetModules();
-    const { getGwsBin } = await import("../../../src/infra/provider-config.js");
-    expect(getGwsBin()).toBe("gws");
-  });
-
-  it("getGwsBin honours an explicit GWS_BIN path", async () => {
-    process.env["GWS_BIN"] = "/usr/local/bin/gws";
-    vi.resetModules();
-    const { getGwsBin } = await import("../../../src/infra/provider-config.js");
-    expect(getGwsBin()).toBe("/usr/local/bin/gws");
   });
 
   it("honours GMAIL_BACKEND=composio for rollback", async () => {

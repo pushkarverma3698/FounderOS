@@ -17,7 +17,7 @@ import { applyCinematicPresetTool } from "../../tools/cinematic-preset.js";
 import { deployStaticSiteTool } from "../../tools/deploy-static-site.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
-import { makeRepeatGuard, repeatGuardBlockMessage } from "./repeat-guard.js";
+import { makeRepeatGuard } from "./repeat-guard.js";
 import { toolFailure, isStructuredToolFailure, type ToolFailureStage } from "../tool-result.js";
 import { hasBeenAudited, writeAuditEntry, publishDeptEventWithAudit } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
@@ -163,7 +163,11 @@ export const githubRead = tool(
     // This is the deterministic fix for the GraphRecursionError wedge on a
     // successful-but-repeated list_repos (rule #16 — never trust the model to stop).
     if (_githubRepeatGuard.shouldBlock("github_read", { action, owner, repo })) {
-      return repeatGuardBlockMessage("github_read", "GitHub data");
+      return (
+        `You have already called github_read (action="${action}") with these exact ` +
+        `arguments and the result is in the conversation above. Do NOT call github_read ` +
+        `again — answer the founder now using the data you already retrieved.`
+      );
     }
     const res = await githubTool.execute({ action, ...(owner ? { owner } : {}), ...(repo ? { repo } : {}) });
     if (!res.success) {

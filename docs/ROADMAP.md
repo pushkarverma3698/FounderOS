@@ -2,7 +2,7 @@
 
 *For Pushkar Verma, Turicks AI Agency. Updated: 2026-06-17.*
 
-> See [`CLAUDE.md` — Current Phase Status](../CLAUDE.md#current-phase-status-2026-06-17) for the live, single-source phase status. (Architecture is locked; next work is tools and hierarchy only.)
+> 🟢 **PRODUCTION LIVE** since 2026-06-14. Running 24/7 on Hetzner VPS with GitHub Actions auto-deployment. **Architecture is locked.** Next work: add tools and hierarchy only.
 
 ---
 

@@ -88,17 +88,14 @@ Idempotency (via `action_log`) *is* live and does prevent duplicate sends.
 after HITL approval, before every outbound send. Covers comms + sales + jobhunt departments.
 The `do_not_contact` table is in Postgres (not Redis) — durable, GDPR/CAN-SPAM compliant.
 
-**Quota check status — WIRED (Postgres-backed), doc corrected 2026-07-06 (M7):**
-This section previously said the daily quota was NOT wired — that was stale. A daily
-ceiling IS enforced for both outbound channels via `getDailyOutboundCount()`
-(Postgres-backed, counts today's `action_log` rows, not Redis):
-`src/agents/agent-tools/comms.ts:130` gates `send_email` against `DAILY_EMAIL_LIMIT`
-(default 20/day), and `:207` gates `linkedin_post` against `DAILY_LINKEDIN_LIMIT`
-(default 3/day). `incrQuota()` in `redis.ts` is unused and can be removed once Redis
-itself is either wired for something else or dropped — it is not the quota mechanism.
+**Quota check status — NOT WIRED:**
+`incrQuota()` exists in `redis.ts` but is not called on any send path. There is no daily
+send ceiling enforced. For one founder sending a handful of emails this is acceptable;
+before any volume outbound it is a **HIGH** gap.
 
-- **Still a gap:** no per-recipient or per-department granularity — the ceiling is a
-  single daily counter per tenant per action name. Revisit before multi-tenant SaaS.
+- **Gap:** outbound email has no enforced daily quota. Suppression is active; rate-limiting is not.
+- **Action when outbound scales:** call `incrQuota()` from the shared `sendEmail` path after the
+  suppression check. Use a Postgres-backed counter (more durable than Redis on restart) — see G4.
 
 ## 6. Config validity vs. presence — **MEDIUM**
 

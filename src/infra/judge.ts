@@ -28,14 +28,7 @@ type JudgeProvider = "anthropic" | "openrouter" | "openai" | "google-genai";
 
 const log = childLogger({ module: "judge" });
 
-/**
- * M5 fix: `degraded` distinguishes "passed because the copy is genuinely fine"
- * from "passed because gate 2 itself couldn't run" (no key configured, or an
- * infra error) — these were previously indistinguishable to the caller, so a
- * silently-skipped critic looked identical to a real pass. Only meaningful on
- * the pass branch; a `revise` verdict means the judge DID run.
- */
-export type JudgeVerdict = { verdict: "pass"; degraded?: boolean } | { verdict: "revise"; critique: string };
+export type JudgeVerdict = { verdict: "pass" } | { verdict: "revise"; critique: string };
 
 /** Minimal model surface so tests can inject a fake (no network). */
 export interface JudgeModel {
@@ -53,14 +46,8 @@ export interface JudgeModel {
  */
 const JUDGE_MODEL =
   process.env["JUDGE_MODEL"]?.trim() || "openrouter:meta-llama/llama-3.3-70b-instruct:free";
-/**
- * Memoize a verdict so the interrupt() re-execution is a cache hit. MUST cover
- * the full HITL approval window (24h, hitl.ts HITL_TTL_MS): the judge runs
- * BEFORE hitlGate, so an approval tapped after the cache expired re-judged the
- * draft on resume — a flipped verdict silently vetoed the founder's approval
- * ("Revise before sending" after Approve). 2026-07-04 purity fix.
- */
-const JUDGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/** Memoize a verdict for this long so the interrupt() re-execution is a cache hit. */
+const JUDGE_CACHE_TTL_MS = 5 * 60_000;
 
 /** Resolve the judge model id, defaulting a bare id to the OpenRouter free tier. */
 function resolveJudgeModelId(): { provider: JudgeProvider; model: string } {
@@ -200,7 +187,7 @@ export async function judgeOutbound(
   const injected = opts.model;
 
   // No model configured and none injected → gate 2 is a no-op (fail-open pass).
-  if (!injected && !isJudgeEnabled()) return { verdict: "pass", degraded: true };
+  if (!injected && !isJudgeEnabled()) return { verdict: "pass" };
 
   const toolTag = opts.tool ?? "unknown";
   const key = `${channel}:${toolTag}:${hash(text)}`;
@@ -216,7 +203,7 @@ export async function judgeOutbound(
   } catch (err) {
     // Infra failure must never block the founder — HITL still gates the send.
     log.warn({ err: (err as Error).message, channel }, "Judge errored — failing open to pass");
-    verdict = { verdict: "pass", degraded: true };
+    verdict = { verdict: "pass" };
   }
 
   _cache.set(key, { verdict, at: now() });

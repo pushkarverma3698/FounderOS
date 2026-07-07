@@ -67,16 +67,10 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 
-  /** Web gateway (JARVIS UI) — optional Bearer token; unset = open in dev/test only (C2 fix). */
+  /** Web gateway (JARVIS UI) — optional Bearer token; unset = open in dev. */
   WEB_GATEWAY_TOKEN: z.string().transform(v => v || undefined).optional(),
   /** Unused — web gateway shares HEALTH_PORT. Kept for backward compat in .env files. */
   WEB_GATEWAY_PORT: z.coerce.number().int().positive().default(3002),
-  /** C2 fix: explicit opt-in to run the web gateway (including the HITL
-   *  approve/reject endpoints) with NO token in production. Default false —
-   *  an unset WEB_GATEWAY_TOKEN now fails closed in production instead of
-   *  silently allowing anyone who can reach the port to run turns or approve
-   *  HITL cards. */
-  WEB_GATEWAY_ALLOW_ANONYMOUS: z.enum(["true", "false"]).default("false"),
 
   /** Enable Telegram long-polling in this process. Default: on in production, off in
    * development — avoids 409 conflicts when the prod VPS bot already polls the same
@@ -243,11 +237,7 @@ export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", false);
  * supervisor's agent set, which changes routing surface. It stays off until the
  * routing is live-verified on the VPS with `pnpm eval` (the eval needs a real
  * model key, absent in CI/web). Flip CREATIVE_SUBGRAPH=1 to enable. Generating
- * images also needs GOOGLE_GENERATIVE_AI_API_KEY, AND delivering them needs
- * STORAGE_BUCKET + AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (S3/R2/MinIO) —
- * without storage, generate_image produces the image then dead-ends at the
- * upload step for every request. `logBootReport` warns loudly if this flag is
- * on without storage configured; see boot-report.ts.
+ * images also needs GOOGLE_GENERATIVE_AI_API_KEY.
  */
 export const CREATIVE_SUBGRAPH_ENABLED = boolEnv("CREATIVE_SUBGRAPH", false);
 
@@ -267,23 +257,6 @@ export const TELEGRAM_POLLING_ENABLED = boolEnv(
  * department arrays. Reads pass through; writes route through hitlGate.
  */
 export const MCP_BRIDGE_ENABLED = env.MCP_BRIDGE_ENABLED === "true";
-
-/**
- * H4 fix — force the model's native tool_choice for the SAME high-confidence
- * intents the pre-router already tags with a "CRITICAL — call X now"
- * SystemMessage directive (shell run, LinkedIn post with provided text,
- * inbox read, GitHub read/write). Converts "the model ignored the directive"
- * from a detect-and-retry problem (execution-guard.ts) into a structurally
- * impossible state for that department's first step.
- *
- * Default OFF: tool_choice forcing is a provider-side contract (does the
- * configured model/provider honour `{type:"function", function:{name}}`?)
- * that could not be verified against a real model in the session that
- * built this — same standard as ENGINEERING_SUBGRAPH/REVENUE_SUBGRAPH/
- * CREATIVE_SUBGRAPH/MCP_BRIDGE_ENABLED above: a behaviour change stays
- * opt-in until live-verified, not shipped live-by-default on a guess.
- */
-export const FORCE_TOOL_CHOICE_ENABLED = boolEnv("FORCE_TOOL_CHOICE", false);
 
 /** Filesystem path to the external MCP bridge manifest. */
 export const MCP_BRIDGE_MANIFEST = env.MCP_BRIDGE_MANIFEST;
@@ -319,14 +292,3 @@ export const DAILY_LINKEDIN_LIMIT = intEnv("DAILY_LINKEDIN_LIMIT", 3);
  * unrelated older turns fast. Durable context lives in memory tools, not history.
  */
 export const HISTORY_KEEP_TURNS = intEnv("HISTORY_KEEP_TURNS", 4);
-
-/**
- * L3 fix (defense-in-depth): hard cap on distinct concurrent chat/session locks
- * (`chatTurnChains` in office-run.ts). Each entry self-cleans once its turn
- * finishes, so at rest the map is empty — but nothing previously bounded how
- * many DISTINCT keys could exist at once, so a burst of many different chat/
- * session ids in flight simultaneously could grow it without limit. 1000 is far
- * above any realistic single-founder concurrent-session count; this is a circuit
- * breaker for abuse, not a limit anyone should ever hit in normal use.
- */
-export const MAX_CONCURRENT_CHAT_LOCKS = intEnv("MAX_CONCURRENT_CHAT_LOCKS", 1000);

@@ -170,8 +170,7 @@ export function buildCapabilityManifest(): string {
     "Notes:",
     "- claude_code = a full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — engineering's primary executor for any build/code/repo task.",
     "- apply_cinematic_preset = copies cinematic-web preset scaffold (neon/glass/terminal/minimal) before landing page builds.",
-    "- browser = deterministic low-level browser control (personal dept): open_url / get_page_text / run_js via headless Chromium (Playwright) on the VPS or Safari on macOS. Use for precise, scripted single actions.",
-    "- mcp__browser-use__retry_with_browser_use_agent = the AUTONOMOUS AI browser agent (personal dept, external browser-use MCP server): give it a natural-language goal and it navigates, clicks, types, and extracts across multiple steps on its own. Use for multi-step web tasks (log in and…, find and fill…, search and summarise…). Granular mcp__browser-use__browser_navigate/click/type/scroll/extract_content/get_state tools are also available for step-by-step control.",
-    "- FounderOS also RUNS an MCP server (stdio transport, src/mcp/index.ts — start with `pnpm mcp`) exposing search_web, read_context, search_knowledge, search_memory, read_cv, github_read to external MCP clients (e.g. Claude Code, Cursor) that spawn it as a subprocess.",
+    "- browser = Safari automation on the founder's Mac (personal dept).",
+    "- FounderOS also RUNS an MCP server on localhost:3100 exposing search_web, read_context, search_knowledge, search_memory, read_cv, github_read to external MCP clients.",
   ].join("\n");
 }

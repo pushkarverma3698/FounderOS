@@ -186,25 +186,6 @@ branch). Merge to `main` → CI runs → on success CD deploys. That's the whole
 
 `GITHUB_TOKEN` is provided automatically by Actions — do not create it.
 
-### Creative department storage (required — `CREATIVE_SUBGRAPH` is forced ON in prod)
-
-`apply-prod-env-overrides.sh` unconditionally sets `CREATIVE_SUBGRAPH=1`, but
-`generate_image` still needs an S3-compatible bucket to actually deliver an image —
-without it, the image is generated (real spend) then the tool dead-ends at the
-upload step and the founder never receives a `download_url`. Put these in
-`PROD_DOTENV`:
-
-| Var | Purpose |
-|---|---|
-| `STORAGE_BUCKET` | bucket name for generated images/assets |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | credentials for that bucket |
-| `STORAGE_ENDPOINT_URL` | only for Cloudflare R2 / MinIO — omit for real AWS S3 |
-
-Verify: `journalctl -u founderos | grep '\[boot\]'` should show
-`Creative image storage (S3)  LIVE`. If it shows `MISSING`, the creative
-department will look "broken" (images never arrive) even though routing and
-generation both succeed — `deploy.sh` also warns about this at deploy time.
-
 ### Managing production env without SSH
 
 The prod `.env` is a **rendered artifact**, not a hand-maintained file. To change

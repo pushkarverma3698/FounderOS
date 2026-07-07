@@ -5,7 +5,6 @@
 
 import { describe, it, expect } from "vitest";
 import { safeHtml, finalReply, collectToolErrors, sliceFreshMessages } from "../../../src/gateway/telegram.js";
-import { toolNotice } from "../../../src/agents/tool-result.js";
 
 // ── safeHtml ──────────────────────────────────────────────────────────────────
 
@@ -192,30 +191,6 @@ describe("collectToolErrors", () => {
     };
     expect(collectToolErrors(res)).toHaveLength(1);
     expect(collectToolErrors(res)[0]).toContain("Postgres");
-  });
-
-  // M4 regression: a deliberate, successful soft-decline (suppression block,
-  // daily limit, duplicate-outreach guard) must NOT be flagged as a tool
-  // issue, even though its first line contains keywords ("blocked", "limit
-  // reached") the legacy heuristic scans for. Before the fix, comms.ts's own
-  // real messages for these cases triggered a false-positive "⚠️ Tool issue"
-  // banner on a 100%-correct outcome.
-  it("does NOT flag a do-not-contact suppression block (real comms.ts message, M4)", () => {
-    const msg = toolNotice("BLOCKED: alice@x.com is on the do-not-contact list. Email not sent.");
-    const res = { messages: [makeMsg("tool", msg)] };
-    expect(collectToolErrors(res)).toEqual([]);
-  });
-
-  it("does NOT flag a daily send-limit notice (real comms.ts message, M4)", () => {
-    const msg = toolNotice("Daily email limit reached (20/20 sent today). Try again tomorrow or increase DAILY_EMAIL_LIMIT.");
-    const res = { messages: [makeMsg("tool", msg)] };
-    expect(collectToolErrors(res)).toEqual([]);
-  });
-
-  it("still flags the SAME wording when it is NOT wrapped in toolNotice (heuristic unchanged for un-migrated tools)", () => {
-    // Confirms the fix is scoped to the marker, not a blanket keyword exemption.
-    const res = { messages: [makeMsg("tool", "BLOCKED: alice@x.com is on the do-not-contact list. Email not sent.")] };
-    expect(collectToolErrors(res)).toHaveLength(1);
   });
 });
 

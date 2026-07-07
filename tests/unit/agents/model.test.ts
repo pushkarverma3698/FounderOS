@@ -9,7 +9,6 @@ import {
   getFallbackModelIds,
   getModel,
   getModelFallbackMiddleware,
-  getSupervisorFallbackModel,
   getSupervisorModel,
   getWorkerModelId,
   is503Error,
@@ -169,31 +168,6 @@ describe("fallback middleware config", () => {
     delete process.env["ANTHROPIC_API_KEY"];
     const model = getSupervisorModel() as unknown as { bindTools?: unknown };
     expect(typeof model.bindTools).toBe("function");
-  });
-
-  // M2 fix: office.ts's getFallbackOffice() uses this to build a SEPARATE
-  // office when the supervisor's own (unwrapped, middleware-less) model call
-  // hits a 503/quota error — createSupervisor can't take fallback middleware.
-  describe("getSupervisorFallbackModel (M2)", () => {
-    it("returns null when no fallback models are configured", () => {
-      delete process.env["AGENT_FALLBACK_MODELS"];
-      expect(getSupervisorFallbackModel()).toBeNull();
-    });
-
-    it("returns null when every configured fallback is missing its API key", () => {
-      process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5,google-genai:gemini-2.0-flash";
-      delete process.env["ANTHROPIC_API_KEY"];
-      delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
-      expect(getSupervisorFallbackModel()).toBeNull();
-    });
-
-    it("returns the first buildable fallback model", () => {
-      process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5";
-      process.env["ANTHROPIC_API_KEY"] = "sk-ant-test";
-      const model = getSupervisorFallbackModel() as unknown as { bindTools?: unknown } | null;
-      expect(model).not.toBeNull();
-      expect(typeof model?.bindTools).toBe("function");
-    });
   });
 });
 

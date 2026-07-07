@@ -65,36 +65,6 @@ describe("buildBootReport", () => {
       "Claude executor",
       "Observability (LangSmith)",
       "RAG embeddings (Ollama)",
-      "Creative image storage (S3)",
     ]);
-  });
-
-  it("reports S3 as not-required when CREATIVE_SUBGRAPH is off", () => {
-    const cap = find(buildBootReport({}), "Creative image storage (S3)");
-    expect(cap.live).toBe(true);
-    expect(cap.detail).toContain("creative department off");
-  });
-
-  it("reports S3 as MISSING when CREATIVE_SUBGRAPH is on but bucket/creds are absent", () => {
-    const cap = find(
-      buildBootReport({ CREATIVE_SUBGRAPH_ENABLED: true }),
-      "Creative image storage (S3)",
-    );
-    expect(cap.live).toBe(false);
-    expect(cap.detail).toContain("generate_image will succeed then fail at S3 upload");
-  });
-
-  it("reports S3 as LIVE when CREATIVE_SUBGRAPH is on and bucket/creds are set", () => {
-    const cap = find(
-      buildBootReport({
-        CREATIVE_SUBGRAPH_ENABLED: true,
-        STORAGE_BUCKET: "founderos-assets",
-        AWS_ACCESS_KEY_ID: "AKIA_x",
-        AWS_SECRET_ACCESS_KEY: "secret_x",
-      }),
-      "Creative image storage (S3)",
-    );
-    expect(cap.live).toBe(true);
-    expect(cap.detail).toContain("founderos-assets");
   });
 });

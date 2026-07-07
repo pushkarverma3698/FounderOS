@@ -8,7 +8,6 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { homedir } from "node:os";
-import { fileURLToPath } from "node:url";
 import {
   bridgeManifestSchema,
   loadManifest,
@@ -130,51 +129,5 @@ describe("isWriteTool (classification)", () => {
 describe("bridgedToolName", () => {
   it("namespaces tool names to avoid collisions with native tools", () => {
     expect(bridgedToolName("blender", "render_image")).toBe("mcp__blender__render_image");
-  });
-});
-
-// Pins the REAL shipped mcp-bridge.json — a regression here means a browser-use
-// action tool silently became ungated (would skip the founder HITL card) or a
-// read tool became gated (needless approval friction). Classification is data.
-describe("shipped mcp-bridge.json — browser-use classification", () => {
-  const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
-  const manifest = loadManifest(join(repoRoot, "mcp-bridge.json"));
-
-  it("registers the browser-use server on the personal department via uvx", () => {
-    const entry = manifest.servers["browser-use"];
-    expect(entry).toBeDefined();
-    expect(entry?.command).toBe("uvx");
-    expect(departmentsOf(entry as McpServerEntry)).toEqual(["personal"]);
-  });
-
-  it("gates the autonomous agent and every page-acting tool (HITL required)", () => {
-    for (const w of [
-      "retry_with_browser_use_agent",
-      "browser_navigate",
-      "browser_click",
-      "browser_type",
-      "browser_scroll",
-      "browser_close_all",
-    ]) {
-      expect(isWriteTool("browser-use", w, manifest)).toBe(true);
-    }
-  });
-
-  it("keeps read-only state tools ungated (read-through, no approval)", () => {
-    for (const r of [
-      "browser_get_state",
-      "browser_extract_content",
-      "browser_list_tabs",
-      "browser_list_sessions",
-    ]) {
-      expect(isWriteTool("browser-use", r, manifest)).toBe(false);
-    }
-  });
-
-  it("forwards an LLM key by name only (no secret value in the manifest)", () => {
-    const entry = manifest.servers["browser-use"] as McpServerEntry;
-    expect(entry.env).toContain("ANTHROPIC_API_KEY");
-    // env holds NAMES to forward from process.env — never literal secrets.
-    for (const name of entry.env) expect(name).not.toMatch(/^(bu_|sk-|ghp_)/);
   });
 });

@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  makeRepeatGuard,
-  canonicalToolKey,
-  repeatGuardBlockMessage,
-} from "../../../src/agents/agent-tools/repeat-guard.js";
+import { makeRepeatGuard, canonicalToolKey } from "../../../src/agents/agent-tools/repeat-guard.js";
 
 describe("repeat-guard — github list_repos loop (T04 live 2026-06-29)", () => {
   it("blocks the 3rd identical call within the window (caps real API at 2)", () => {
@@ -44,28 +40,5 @@ describe("repeat-guard — github list_repos loop (T04 live 2026-06-29)", () => 
     g.shouldBlock("github_read", { action: "list_repos" });
     g.shouldBlock("github_read", { action: "list_repos" });
     expect(g.shouldBlock("search_web", { action: "list_repos" })).toBe(false);
-  });
-});
-
-describe("repeatGuardBlockMessage — honest loop-awareness (rule #19/#24)", () => {
-  it("names the looping tool and forbids re-calling it", () => {
-    const msg = repeatGuardBlockMessage("read_emails", "emails");
-    expect(msg).toContain("read_emails");
-    expect(msg).toContain("Do NOT call read_emails again");
-    expect(msg).toContain("emails");
-  });
-
-  it("tells the model to be honest instead of claiming a false completion", () => {
-    const msg = repeatGuardBlockMessage("search_web", "search results");
-    // The message must push toward an honest "here's what's missing", never a fake done.
-    expect(msg).toContain("going in circles");
-    expect(msg.toLowerCase()).toContain("do not claim the task is complete");
-    expect(msg).toContain("what is missing");
-  });
-
-  it("falls back to a generic data label when none is given", () => {
-    const msg = repeatGuardBlockMessage("list_dir");
-    expect(msg).toContain("results");
-    expect(msg).toContain("list_dir");
   });
 });

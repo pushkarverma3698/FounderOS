@@ -14,21 +14,7 @@ import type { LinkedInPostInput } from "./types.js";
 const log = childLogger({ module: "provider:linkedin-direct" });
 
 const LINKEDIN_API_BASE = "https://api.linkedin.com/rest";
-// LinkedIn versions the REST API monthly as YYYYMM and keeps each version active
-// for ~1 year. A stale or malformed value is rejected with HTTP 426 ("Requested
-// version … is not active") and silently kills every post. Keep this current.
-const DEFAULT_API_VERSION = "202606";
-
-/**
- * Resolve the LinkedIn-Version header value. Deterministic + defensive: a version
- * MUST be exactly six digits (YYYYMM). Anything else — an old dotted value like
- * "20240501", empty string, garbage — is IGNORED in favour of the known-good
- * default, so a bad env var can never 426 the whole posting path (prod 2026-07-04:
- * a leftover LINKEDIN_API_VERSION=20240501 in .env broke every post). Exported for
- * unit tests. */
-export function resolveLinkedInApiVersion(raw: string | undefined): string {
-  return raw && /^\d{6}$/.test(raw.trim()) ? raw.trim() : DEFAULT_API_VERSION;
-}
+const DEFAULT_API_VERSION = "202506";
 
 /** Whether direct LinkedIn API credentials are configured (default/turicks account). */
 export function linkedInDirectConfigured(): boolean {
@@ -47,7 +33,7 @@ export function getLinkedInAccessToken(): string | undefined {
 }
 
 function getLinkedInApiVersion(): string {
-  return resolveLinkedInApiVersion(readEnvValue("LINKEDIN_API_VERSION"));
+  return readEnvValue("LINKEDIN_API_VERSION") ?? DEFAULT_API_VERSION;
 }
 
 async function linkedInCreds(input: { account_key?: string; department?: string }) {

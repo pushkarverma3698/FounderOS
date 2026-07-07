@@ -2,7 +2,7 @@
 
 > **Start here.** Every doc in FounderOS is linked below, organized by role.
 
-> See [`CLAUDE.md` — Current Phase Status](../CLAUDE.md#current-phase-status-2026-06-17) for the live, single-source phase status. (Architecture is locked; next phase is tools and hierarchy only.)
+> 🟢 **PRODUCTION LIVE** since 2026-06-14 on Hetzner VPS. Architecture locked (7 ReAct departments, LangGraph supervisor, Phases 1-6 hardening shipped). **Next phase:** add tools and hierarchy only — architecture is stable.
 
 ---
 

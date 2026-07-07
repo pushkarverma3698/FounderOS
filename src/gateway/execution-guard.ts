@@ -280,24 +280,8 @@ export function hadAnyMemoryToolCall(
 }
 
 /**
- * Reply asks the FOUNDER for facts the memory tools should hold ("could you
- * remind me what your pricing model is?") — the SELF-QUERY class. High-precision:
- * a normal answer never phrases itself as a question back about our own state.
- */
-export const ASKS_FOUNDER_BACK_RE =
-  /\b(could|can|would) you (remind|tell) me\b|\bwhat(?:'s| is| are) your (pricing|icp|strateg|goals?|plans?|clients?)\b/i;
-
-/**
- * True when the founder asked an internal-knowledge question and the reply shows a
- * HIGH-PRECISION fabrication/self-query signal without any memory/DB tool call.
- *
- * Deliberately narrow (2026-07-04 refuse-class fix): the previous version flagged
- * ANY non-refusal reply on any prompt mentioning turicks/naggar/"our plans" — it
- * converted correct in-thread answers into brain-sync refusals (T35 class, live
- * prod loop). The guard only sees regexes over text; it cannot distinguish
- * "synthesized from this conversation" from "fabricated", so it may only fire on
- * reply shapes that are near-certainly fabrication (unbacked $ metrics, ICP prose,
- * "however, based on general understanding…") or self-query.
+ * True when the founder asked an internal-knowledge question but the office
+ * answered without calling any memory/DB tool — parametric chat, not FounderOS state.
  */
 export function detectUnbackedMemoryClaim(
   userInput: string,
@@ -310,11 +294,7 @@ export function detectUnbackedMemoryClaim(
   const text = reply.trim();
   if (!text) return false;
   if (HONEST_KNOWLEDGE_REFUSAL_RE.test(text) && !FABRICATION_BRIDGE_RE.test(text)) return false;
-  if (ASKS_FOUNDER_BACK_RE.test(text)) return true;
-  if (replyHasUnbackedBusinessSpecifics(text)) return true;
-  if (replyHasUnbackedIcpProse(text)) return true;
-  if (FABRICATION_BRIDGE_RE.test(text) && /\b(typical|typically|generally)\b/i.test(text)) return true;
-  return false;
+  return true;
 }
 
 export const MEMORY_RETRY_HINT =
@@ -570,10 +550,8 @@ export function detectUnbackedKnowledgeClaim(
   if (isInternalKnowledgeRequest(userInput) && !hadKnowledgeSearchTool(messages, toolsCalled)) {
     if (HONEST_KNOWLEDGE_REFUSAL_RE.test(text) && !FABRICATION_BRIDGE_RE.test(text)) return false;
     if (replyHasUnbackedBusinessSpecifics(text) || replyHasUnbackedIcpProse(text)) return true;
-    // NOTE (2026-07-04): the former `text.length >= 80` catch-all is gone — it
-    // flagged ANY substantive answer (incl. correct in-thread synthesis) as
-    // fabrication and fed the refuse/loop class. Keyword-anchored checks only.
     if (INTERNAL_ANSWER_WITHOUT_GROUNDING_RE.test(text) && text.length >= 30) return true;
+    if (text.length >= 80) return true;
   }
 
   return false;

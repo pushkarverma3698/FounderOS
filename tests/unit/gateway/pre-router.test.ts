@@ -9,7 +9,6 @@ import {
   isOutreachRequest,
   preRouteDepartment,
   buildOfficeInput,
-  resolveForcedTool,
 } from "../../../src/gateway/pre-router.js";
 import { extractShellCommand } from "../../../src/gateway/execution-guard.js";
 import { SystemMessage } from "@langchain/core/messages";
@@ -275,54 +274,6 @@ describe("preRouteDepartment", () => {
 });
 
 // ── buildOfficeInput ──────────────────────────────────────────────────────────
-
-// ── resolveForcedTool (H4) ────────────────────────────────────────────────────
-// Reuses the SAME classification regexes as buildRoutingDirective's CRITICAL
-// directives — these tests lock in that the forced-tool cases match the
-// existing, already-proven "CRITICAL — call X now" cases exactly.
-
-describe("resolveForcedTool (H4)", () => {
-  it("forces run_shell for a personal-department shell-run request", () => {
-    expect(resolveForcedTool("personal", "run in terminal: ls -la")).toBe("run_shell");
-  });
-
-  it("does not force run_shell for a non-shell personal request", () => {
-    expect(resolveForcedTool("personal", "send me the file on my desktop")).toBeNull();
-  });
-
-  it("forces linkedin_post only when the founder provided exact post text", () => {
-    const withText = 'Post this on LinkedIn: "Shipped a new feature today!"';
-    expect(resolveForcedTool("marketing", withText)).toBe("linkedin_post");
-  });
-
-  it("does not force linkedin_post for a vague 'write me a post' request (no exact text)", () => {
-    expect(resolveForcedTool("marketing", "write a LinkedIn post about our launch")).toBeNull();
-  });
-
-  it("forces read_emails for a read-only inbox check", () => {
-    expect(resolveForcedTool("comms", "check my unread emails")).toBe("read_emails");
-  });
-
-  it("does not force read_emails when the request also asks to draft/reply/send", () => {
-    expect(resolveForcedTool("comms", "check my inbox and draft a reply to the last email")).toBeNull();
-  });
-
-  it("forces github_write for a GitHub issue-creation request (flat engineering)", () => {
-    expect(resolveForcedTool("engineering", "create a github issue in pushkarverma3698/FounderOS about the bug")).toBe(
-      "github_write",
-    );
-  });
-
-  it("forces github_read for a read-only GitHub request", () => {
-    expect(resolveForcedTool("engineering", "list open issues in pushkarverma3698/FounderOS")).toBe("github_read");
-  });
-
-  it("returns null for a department/text combination with no high-confidence forced tool", () => {
-    expect(resolveForcedTool("research", "what's the latest AI agent news?")).toBeNull();
-    expect(resolveForcedTool("admin", "what's my current focus?")).toBeNull();
-    expect(resolveForcedTool("sales", "draft a cold email to Acme Corp")).toBeNull();
-  });
-});
 
 describe("buildOfficeInput", () => {
   it("prepends a SystemMessage hint when a department is matched", () => {

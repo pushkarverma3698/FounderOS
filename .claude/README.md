@@ -13,7 +13,7 @@ the **Authoritative** column wins; the other is stale and should be fixed.
 | Tool / test / review bars | [`docs/rules/`](../docs/rules) | `TOOL-STANDARDS`, `TESTING-RULES`, `CODE-REVIEW-CHECKLIST`. |
 | Architectural decisions (the "why") | [`docs/decisions/`](../docs/decisions) | 40 ADRs. A decision here cannot be silently re-decided. |
 | Doc index | [`docs/README.md`](../docs/README.md) | Master map of all docs. |
-| Session status / changelog | [`/MEMORY.md`](../MEMORY.md) | **Not** `CLAUDE.md`. See Memory below. |
+| Session status / changelog | `MEMORY.md` (auto-memory) | **Not** `CLAUDE.md`. See Memory below. |
 | Brand voice | [`brand/TURICKS.md`](brand/TURICKS.md) | Applied to all outbound copy. |
 
 ## What lives in this folder
@@ -34,17 +34,13 @@ the **Authoritative** column wins; the other is stale and should be fixed.
 
 ## Memory — which `MEMORY.md` is canonical
 
-Three things can be called "memory" here. Only one is canonical:
+There are two files named `MEMORY.md`. They are **not** interchangeable:
 
-- ✅ **Canonical (committed, source of truth):** [`/MEMORY.md`](../MEMORY.md) at repo root.
-  This is the file `CLAUDE.md` rule #18.4 and `PROGRAMMING-RULES.md` Wiring Map 3 mean — a
-  short, current, scannable status/gotchas/file-location index. Update it at the end of any
-  session that changed state.
+- ✅ **Canonical (live):** the auto-memory at
+  `~/.claude/projects/-Users-pushkarverma-Projects-founderos/memory/MEMORY.md`.
+  Loaded into context each session; this is the current status / gotchas / file-location index.
 - 🗄️ **Archived:** `.claude/memory/MEMORY.md` is a committed snapshot from the **v1 era (2026-05-28)**.
   It predates the v2 ReAct rebuild and references superseded concepts (pods, registry critic).
   Kept for history only — **do not treat it as current state.**
-- 🖥️ **Local convenience cache, not canonical:** the per-machine Claude Code auto-memory (a
-  path under `~/.claude/projects/.../memory/MEMORY.md`) is not portable, not committed, and
-  not visible to other sessions or contributors — never treat it as the source of truth.
 
-When you update memory at end of a session, update the **canonical** root `/MEMORY.md` (rule #18 in `CLAUDE.md`).
+When you update memory at end of a session, update the **canonical** auto-memory (rule #25 in `CLAUDE.md`).

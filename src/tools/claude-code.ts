@@ -66,19 +66,11 @@ export function findClaudeBinary(): string | null {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 export const TIMEOUT_MS = 15 * 60_000; // 15 minutes — real coding tasks need it
-export const PLAN_TIMEOUT_MS = 5 * 60_000; // plan mode reads only — never needs the full window
 const MAX_RESULT_CHARS = 16_000; // final answer cap (Telegram-friendly)
 const PROGRESS_MIN_INTERVAL_MS = 20_000; // at most one progress ping per 20s
 
 /** Tools the headless session may use without interactive prompts. */
 const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep WebFetch WebSearch NotebookEdit";
-
-/**
- * Plan mode (ADR-046): read-only tools ONLY — no Bash/Edit/Write/NotebookEdit.
- * The plan pass must never mutate the workspace; it produces a decomposition the
- * founder approves before a separate execute pass does the real work.
- */
-const PLAN_ALLOWED_TOOLS = "Read Glob Grep WebFetch WebSearch";
 
 /**
  * Standing directive appended to EVERY brief so the executor never stops at file
@@ -100,48 +92,6 @@ export const EXECUTION_DIRECTIVE =
 /** Append the standing execution directive to a brief (idempotent — never double-appends). */
 export function withExecutionDirective(task: string): string {
   return task.includes(EXECUTION_DIRECTIVE) ? task : task + EXECUTION_DIRECTIVE;
-}
-
-/**
- * Standing directive for PLAN mode (ADR-046). Forces a read-only, decomposed
- * implementation plan — the `/subagent` command surfaces this to the founder for
- * approval, then a separate execute pass does the real work. Enforced in code
- * (rule #16), never left to the caller's brief wording.
- */
-export const PLAN_DIRECTIVE =
-  "\n\n---\nPlanning requirement (always): DO NOT write, edit, run, or commit anything — this is a " +
-  "read-only planning pass. Produce ONLY a concrete implementation plan for the task above, broken into a " +
-  "numbered list of discrete, independently-verifiable subtasks. For each subtask state: (1) what it does, " +
-  "(2) which files/components it touches, (3) how it will be verified. End with any risks or open questions. " +
-  "Keep it tight and skimmable — the founder approves this plan before execution begins.";
-
-/** Append the standing plan directive to a brief (idempotent — never double-appends). */
-export function withPlanDirective(task: string): string {
-  return task.includes(PLAN_DIRECTIVE) ? task : task + PLAN_DIRECTIVE;
-}
-
-/**
- * Build the Claude Code CLI args for a run (pure + unit-tested — rule #16).
- * plan mode  → --permission-mode plan + read-only tools + plan directive.
- * execute mode → --permission-mode acceptEdits + full tools + execution directive.
- */
-export function buildClaudeCliArgs(task: string, mode: "plan" | "execute" = "execute"): string[] {
-  if (mode === "plan") {
-    return [
-      "-p", withPlanDirective(task),
-      "--output-format", "stream-json",
-      "--verbose",
-      "--permission-mode", "plan",
-      "--allowedTools", PLAN_ALLOWED_TOOLS,
-    ];
-  }
-  return [
-    "-p", withExecutionDirective(task),
-    "--output-format", "stream-json",
-    "--verbose",
-    "--permission-mode", "acceptEdits",
-    "--allowedTools", ALLOWED_TOOLS,
-  ];
 }
 
 // ── Workspace policy ──────────────────────────────────────────────────────────
@@ -291,13 +241,6 @@ export const claudeCodeTool: UnifiedTool = {
           "Working directory within ~/Projects (default: ~/Projects/agent-workspace). " +
           "The FounderOS repo itself is not allowed.",
       },
-      mode: {
-        type: "string",
-        enum: ["plan", "execute"],
-        description:
-          "plan = read-only pass that returns a decomposed implementation plan (no writes). " +
-          "execute (default) = do the whole task end-to-end. Used by the /subagent plan→approve→execute flow.",
-      },
     },
     required: ["task"],
   },
@@ -307,7 +250,6 @@ export const claudeCodeTool: UnifiedTool = {
     if (!task || task.trim().length === 0) {
       return { success: false, error: "claude_code requires a non-empty task argument." };
     }
-    const mode: "plan" | "execute" = args["mode"] === "plan" ? "plan" : "execute";
 
     const binaryOverride = args["_binaryOverride"] as string | undefined;
     const binary = binaryOverride ?? findClaudeBinary();
@@ -330,11 +272,15 @@ export const claudeCodeTool: UnifiedTool = {
 
     const cliArgs = binaryOverride
       ? [] // test seam: /bin/pwd, /bin/false, /bin/echo run argument-free
-      : buildClaudeCliArgs(task, mode);
+      : [
+          "-p", withExecutionDirective(task),
+          "--output-format", "stream-json",
+          "--verbose",
+          "--permission-mode", "acceptEdits",
+          "--allowedTools", ALLOWED_TOOLS,
+        ];
 
-    const timeoutMs = mode === "plan" ? PLAN_TIMEOUT_MS : TIMEOUT_MS;
-
-    log.info({ task: task.slice(0, 120), cwd, mode }, "claude_code executor starting");
+    log.info({ task: task.slice(0, 120), cwd }, "claude_code executor starting");
 
     return await new Promise<ToolResult>((resolvePromise) => {
       const child = spawn(binary, cliArgs, {
@@ -363,9 +309,9 @@ export const claudeCodeTool: UnifiedTool = {
         setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
         settle({
           success: false,
-          error: `Claude Code timed out after ${timeoutMs / 60_000} minutes. Partial progress may exist in ${cwd}. Last status: ${lastAssistantLine || "n/a"}`,
+          error: `Claude Code timed out after ${TIMEOUT_MS / 60_000} minutes. Partial progress may exist in ${cwd}. Last status: ${lastAssistantLine || "n/a"}`,
         });
-      }, timeoutMs);
+      }, TIMEOUT_MS);
 
       const rl = createInterface({ input: child.stdout });
       rl.on("line", (line) => {

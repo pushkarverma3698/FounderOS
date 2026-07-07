@@ -34,18 +34,6 @@ export const TOOL_FAILURE_MARKER = "[[TOOL_FAILURE";
 const MARKER_RE = /\[\[TOOL_FAILURE stage=([a-z_]+)\]\]/;
 
 /**
- * M4 fix — stable marker for a DELIBERATE, successful soft-decline: the tool
- * did exactly what it should (didn't send because the founder's own policy
- * said not to), but the message happens to contain a keyword
- * (`isToolFailure`'s legacy fallback heuristic in office-run.ts scans for
- * "blocked"/"denied"/"limit"/etc.) that would otherwise misfire a "⚠️ Tool
- * issue" banner onto a correct, expected outcome. Distinct from
- * TOOL_FAILURE_MARKER: this says "not a failure, don't flag me — regardless
- * of what keywords appear in this text", not "this failed, here's the stage".
- */
-export const TOOL_NOTICE_MARKER = "[[TOOL_NOTICE]]";
-
-/**
  * Format a soft tool failure. The body is human-readable (surfaced to the
  * founder); the trailing marker is machine-readable (detected by the gateway).
  */
@@ -53,23 +41,9 @@ export function toolFailure(stage: ToolFailureStage, message: string): string {
   return `❌ ${message.trim()} ${TOOL_FAILURE_MARKER} stage=${stage}]]`;
 }
 
-/**
- * Wrap a message that is a deliberate, successful soft-decline (suppressed
- * recipient, daily send limit, duplicate-outreach guard, etc.) — never a
- * failure, no matter what keywords the message contains.
- */
-export function toolNotice(message: string): string {
-  return `${message.trim()} ${TOOL_NOTICE_MARKER}`;
-}
-
 /** Deterministic: true iff the content carries a failure envelope marker. */
 export function isStructuredToolFailure(content: string): boolean {
   return MARKER_RE.test(content);
-}
-
-/** True iff the content is explicitly marked as a non-failure notice (M4). */
-export function isToolNotice(content: string): boolean {
-  return content.includes(TOOL_NOTICE_MARKER);
 }
 
 /** The named failing component, or null when the content is not an envelope. */

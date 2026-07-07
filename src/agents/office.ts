@@ -2,12 +2,14 @@
  * FounderOS v2 — The Office (Supervisor + Department Sub-Agents)
  * ==============================================================
  * The whole multi-agent system in one file. A prebuilt LangGraph supervisor
- * routes each request to one of its department sub-agents (currently 8: admin,
- * research, comms, engineering, marketing, sales, personal, jobhunt), each a
- * ReAct agent with real, HITL-gated tools. Tool membership per
- * department is the single source of truth in capabilities.ts (DEPARTMENT_TOOLS)
- * — see buildCapabilityManifest() for the live, auto-generated list rather than
- * hand-maintaining an example here that drifts (see docs/LIMITATIONS.md M6/L1).
+ * routes each request to one of three department sub-agents, each a ReAct agent
+ * with real, HITL-gated tools.
+ *
+ *   supervisor (Chief of Staff)
+ *     ├─ research      → [search_web]
+ *     ├─ comms         → [send_email*, linkedin_post*]
+ *     └─ engineering   → [github_read, github_write*]
+ *                          (* = requires founder approval via interrupt())
  *
  * Compiled ONCE with the Postgres checkpointer (rule: never compile per request).
  * The checkpointer also makes HITL crash-safe for free — a pending approval
@@ -17,12 +19,11 @@
 import { createSupervisor } from "@langchain/langgraph-supervisor";
 import { createAgent } from "langchain";
 import type { CompiledStateGraph, BaseCheckpointSaver } from "@langchain/langgraph";
-import { getModel, getWorkerModel, getModelFallbackMiddleware, getSupervisorFallbackModel } from "./model.js";
-import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { getModel, getWorkerModel, getModelFallbackMiddleware } from "./model.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
-import { createAgentMiddleware, createTrimmedPrompt, forceToolChoiceMiddleware, type TrimOptions } from "../infra/context-manager.js";
+import { createAgentMiddleware, createTrimmedPrompt, type TrimOptions } from "../infra/context-manager.js";
 import { DEPARTMENT_TOOLS, applyMcpBridge } from "./capabilities.js";
-import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED, CREATIVE_SUBGRAPH_ENABLED, FORCE_TOOL_CHOICE_ENABLED } from "../core/config.js";
+import { ENGINEERING_SUBGRAPH_ENABLED, REVENUE_SUBGRAPH_ENABLED, CREATIVE_SUBGRAPH_ENABLED } from "../core/config.js";
 import { buildEngineeringDomain } from "./engineering-domain.js";
 import { buildRevenueDomain } from "./revenue-domain.js";
 import { buildCreativeDomain } from "./creative-department.js";
@@ -75,19 +76,13 @@ const SEARCH_TOOL_LIMITS = {
 /**
  * Build (compile) the office graph with a given checkpointer.
  * Exported for tests (inject MemorySaver). Production uses getOffice().
- *
- * `supervisorModel` (M2 fix): override the supervisor's own model — used by
- * getFallbackOffice() to compile a SEPARATE office bound to a fallback model
- * when the primary supervisor call hits a provider outage/quota error.
- * Omitted (the normal path) uses getModel() exactly as before — byte-identical
- * behaviour for every existing caller.
  */
-export function buildOffice(checkpointer: BaseCheckpointSaver, supervisorModel?: BaseChatModel) {
+export function buildOffice(checkpointer: BaseCheckpointSaver) {
   // createSupervisor requires a model with bindTools — withFallbacks() wrappers break routing.
   // Model split (roadmap #10): the supervisor keeps the strong model for routing
   // reliability; departments run on the (optionally cheaper) worker model. With no
   // WORKER_AGENT_MODEL set, getWorkerModel() === getModel(), so this is a no-op.
-  const llm = supervisorModel ?? getModel();
+  const llm = getModel();
   const deptModel = getWorkerModel();
 
   // ── Phase C tools (available across departments) ──────────────────────────
@@ -116,10 +111,6 @@ export function buildOffice(checkpointer: BaseCheckpointSaver, supervisorModel?:
         ...subAgentBudget,
         ...extra,
       }),
-      // H4 fix — flag-gated (default OFF); a no-op middleware list entry isn't
-      // added at all when disabled, matching the project's own convention for
-      // any behaviour change unverified against a live provider.
-      ...(FORCE_TOOL_CHOICE_ENABLED ? [forceToolChoiceMiddleware()] : []),
     ];
   };
   // ── Admin worker (ADR-028): context + memory + signal visibility ─────────
@@ -282,49 +273,6 @@ export async function getOffice() {
     }, personal, jobhunt]`,
   );
   return _office;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _fallbackOffice: CompiledStateGraph<any, any, any> | undefined;
-let _fallbackAttempted = false;
-
-/**
- * M2 fix — supervisor-level model fallback. `getOffice()`'s supervisor has no
- * fallback (createSupervisor takes a bare model; see buildOffice's doc
- * comment). This compiles a SEPARATE office bound to the first configured
- * AGENT_FALLBACK_MODELS entry, reusing the SAME (already-populated)
- * DEPARTMENT_TOOLS and checkpointer as the primary office, so office-run.ts
- * can retry a supervisor-level 503/quota failure against it on the SAME
- * thread instead of the turn simply failing outright.
- *
- * Returns null (no-op) when no fallback model is configured/buildable —
- * byte-identical to today's behaviour for any deployment that hasn't set
- * AGENT_FALLBACK_MODELS. Never throws.
- *
- * NOT verified against a real provider outage in this session (no live keys
- * available) — the checkpoint-compatibility of resuming the SAME thread_id
- * on a second, differently-model-bound compiled graph is the one thing this
- * couldn't be proven against a real Postgres + real model pair; the graph
- * TOPOLOGY is identical (same buildOffice call), which is what checkpoint
- * replay depends on, but flag this explicitly rather than overclaim.
- */
-export async function getFallbackOffice() {
-  if (_fallbackOffice) return _fallbackOffice;
-  if (_fallbackAttempted) return null;
-  _fallbackAttempted = true;
-  const fallbackModel = getSupervisorFallbackModel();
-  if (!fallbackModel) return null;
-  const checkpointer = await getCheckpointer();
-  _fallbackOffice = buildOffice(checkpointer as unknown as BaseCheckpointSaver, fallbackModel);
-  log.info("Fallback office compiled (supervisor-level 503/quota retry path)");
-  return _fallbackOffice;
-}
-
-/** Test-only: reset both office singletons. */
-export function __resetOfficeForTests(): void {
-  _office = undefined;
-  _fallbackOffice = undefined;
-  _fallbackAttempted = false;
 }
 
 /**

@@ -188,22 +188,6 @@ export function getModelFallbackMiddleware() {
   return [modelFallbackMiddleware(...fallbacks)];
 }
 
-/**
- * M2 fix: the supervisor's own model has no fallback — `createSupervisor`
- * (from `@langchain/langgraph-supervisor`) takes a bare `LanguageModelLike`
- * with no middleware option, so `getModelFallbackMiddleware()` (which wraps
- * departments via `createAgent`'s middleware pipeline) genuinely cannot apply
- * to it; this isn't a workaround being skipped, it's a real library
- * constraint (confirmed against the installed package's type definitions).
- * Returns the first buildable model from AGENT_FALLBACK_MODELS, or null if
- * none is configured/available — office-run.ts uses this to compile a
- * SEPARATE fallback office (see getFallbackOffice in office.ts) and retry
- * once when the supervisor's own call hits a provider outage/quota error.
- */
-export function getSupervisorFallbackModel(): BaseChatModel | null {
-  return buildFallbackModels()[0] ?? null;
-}
-
 function buildModel(
   parsed: ParsedModelId,
   temperature: number,

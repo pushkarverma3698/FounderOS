@@ -23,24 +23,15 @@ import { flagDangerousCommand, personalRoot } from "../../infra/path-guard.js";
 import { sendDocument } from "../../infra/telegram-send.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
-import { makeRepeatGuard, repeatGuardBlockMessage } from "./repeat-guard.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
 
 const log = childLogger({ module: "agent-tools:personal" });
 
-// Loop breakers (T04, extended): bound identical read_file / list_dir calls in
-// one turn so a weak model that re-reads the same path stops and answers.
-const _readFileRepeatGuard = makeRepeatGuard();
-const _listDirRepeatGuard = makeRepeatGuard();
-
 // ── Personal: read a file (read-only, NO approval) ────────────────────────────
 
 export const readFile = tool(
   async ({ path: filePath }) => {
-    if (_readFileRepeatGuard.shouldBlock("read_file", { path: filePath })) {
-      return repeatGuardBlockMessage("read_file", "file contents");
-    }
     const r = await readFileSafe(filePath);
     if (!r.ok) return `ERROR: ${r.error}`;
     const body = r.content.length ? r.content : "(file is empty)";
@@ -60,9 +51,6 @@ export const readFile = tool(
 
 export const listDir = tool(
   async ({ path: dirPath }) => {
-    if (_listDirRepeatGuard.shouldBlock("list_dir", { path: dirPath })) {
-      return repeatGuardBlockMessage("list_dir", "directory listing");
-    }
     const r = await listDirSafe(dirPath ?? ".");
     if (!r.ok) return `ERROR: ${r.error}`;
     if (!r.entries.length) return `DIRECTORY LISTING of ${dirPath ?? "~"}:\n(empty directory)`;

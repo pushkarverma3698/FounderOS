@@ -15,9 +15,8 @@
 import { initTelemetry } from "./infra/telemetry.js";
 import { logBootReport } from "./infra/boot-report.js";
 import { assertBootConfigOrThrow } from "./infra/boot-validate.js";
-import { env, TELEGRAM_POLLING_ENABLED, CREATIVE_SUBGRAPH_ENABLED } from "./core/config.js";
+import { env, TELEGRAM_POLLING_ENABLED } from "./core/config.js";
 import { closeDatabaseConnections } from "./db/client.js";
-import { closeBrowser } from "./tools/browser-playwright.js";
 import { getOffice } from "./agents/office.js";
 import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
 import { restorePendingApprovalAfterRestart, restorePendingWebHitl } from "./gateway/office-run.js";
@@ -56,7 +55,7 @@ async function main(): Promise<void> {
 
   // 1b. Capability self-check — log LIVE/MISSING integrations so config drift
   //     is visible in journald instead of surfacing as a silent dead department.
-  logBootReport({ ...env, CREATIVE_SUBGRAPH_ENABLED });
+  logBootReport(env);
 
   // 1c. Strict boot validation — FAIL LOUD before compiling the office if a
   //     fatal misconfig would make the bot silently half-dead (dead LLM provider,
@@ -126,7 +125,6 @@ async function shutdown(signal: string): Promise<void> {
   log.info({ signal }, "Shutdown signal received — draining…");
   healthServer?.close();
   await stopBot();
-  await closeBrowser(); // release the singleton headless Chromium (no-op if never launched)
   await closeDatabaseConnections();
   releaseSingleInstanceLock();
   log.info("FounderOS stopped cleanly");

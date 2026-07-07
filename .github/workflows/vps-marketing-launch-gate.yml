@@ -1,23 +1,23 @@
-name: VPS Prod Hardcore QA
+name: VPS Marketing Launch Gate
 
-# Full production stabilization gate — same class as local QA campaign.
-# Deploy + brain:sync + office probes + hallucination stress + MTProto E2E.
+# Full marketing-campaign readiness check on production VPS.
+# Deploy + brain + founder context + office probes + integrations + showcase.
 on:
   workflow_dispatch:
     inputs:
       branch:
-        description: "Git branch to deploy and test on VPS"
+        description: "Git branch to deploy and verify on VPS"
         required: true
         default: "main"
         type: string
 
 concurrency:
-  group: vps-prod-hardcore-qa
+  group: vps-marketing-launch-gate
   cancel-in-progress: false
 
 jobs:
-  hardcore-qa:
-    name: Prod hardcore QA on VPS
+  launch-gate:
+    name: Marketing launch gate on VPS
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -26,7 +26,7 @@ jobs:
       LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
       LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_AUTHOR_URN }}
     steps:
-      - name: Run hardcore QA on production VPS
+      - name: Run marketing launch gate on VPS
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -47,15 +47,16 @@ jobs:
             git fetch --quiet origin "$DEPLOY_BRANCH"
             git reset --hard "origin/$DEPLOY_BRANCH"
             git clean -fd
-            chmod +x scripts/apply-prod-env-overrides.sh scripts/vps-prod-hardcore-qa.sh 2>/dev/null || true
+            chmod +x scripts/apply-prod-env-overrides.sh scripts/vps-marketing-launch-gate.sh 2>/dev/null || true
             bash scripts/apply-prod-env-overrides.sh
-            DEPLOY_BRANCH="$DEPLOY_BRANCH" bash scripts/vps-prod-hardcore-qa.sh
+            DEPLOY_BRANCH="$DEPLOY_BRANCH" bash scripts/vps-marketing-launch-gate.sh
         env:
           DEPLOY_BRANCH: ${{ inputs.branch }}
 
-      - name: Upload QA artifacts summary
+      - name: Upload launch gate summary
         if: always()
         run: |
-          echo "## Prod Hardcore QA" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Marketing Launch Gate" >> "$GITHUB_STEP_SUMMARY"
           echo "Branch: ${{ inputs.branch }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Check VPS /tmp/founderos-prod-qa/ for full logs." >> "$GITHUB_STEP_SUMMARY"
+          echo "LinkedIn secrets: LINKEDIN_ACCESS_TOKEN + LINKEDIN_AUTHOR_URN (GitHub repo secrets)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Check VPS /tmp/founderos-launch-gate/ for full logs." >> "$GITHUB_STEP_SUMMARY"

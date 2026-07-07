@@ -332,48 +332,44 @@ export function formatProofDropNudge(signals: DeptSignal[]): string {
   );
 }
 
-/** Per-event-type formatter, keyed the same way DEFAULT_TARGET_DEPT is. */
-const SIGNAL_FORMATTERS: Record<string, (s: DeptSignal[]) => string> = {
-  lead_discovered: formatLeadNudge,
-  proposal_approved: formatProposalNudge,
-  demo_ready: formatDemoNudge,
-  design_brief_ready: formatDesignBriefNudge,
-  site_deployed: formatSiteDeployedNudge,
-  proof_drop_ready: formatProofDropNudge,
-};
-
 /**
- * Consume pending dept_signals and push a nudge per event type.
- *
- * consumePendingEvents(tenant, toDept) claims (FOR UPDATE SKIP LOCKED) and
- * marks consumed EVERY unconsumed row for that (tenant, to_dept) pair,
- * regardless of event_type — it has no event_type filter. Several event types
- * in SIGNAL_FORMATTERS share the same toDept (today: lead_discovered,
- * demo_ready, site_deployed, proof_drop_ready all target "sales"; proposal_approved
- * and design_brief_ready both target "engineering"). Calling consumePendingEvents
- * once per event type — as this used to — meant the FIRST call for a shared
- * toDept silently claimed-and-discarded every OTHER event type's rows before
- * their own sweep iteration ran, so e.g. every demo_ready/site_deployed/
- * proof_drop_ready signal was swallowed with no nudge ever sent (found while
- * auditing multi-department signal routing for scale, 2026-07-06 — no prior
- * test covered this). Fixed by claiming ONCE per toDept, then bucketing the
- * claimed batch by event_type in memory before formatting/sending.
+ * Consume pending lead_discovered signals for the revenue dept and push a nudge.
+ * consumePendingEvents claims rows with FOR UPDATE SKIP LOCKED, so each lead
+ * surfaces exactly once even under concurrent sweeps (G2).
  */
 export async function sweepDeptSignals(): Promise<void> {
-  const eventTypes = Object.keys(SIGNAL_FORMATTERS);
-  const toDeptOf = (eventType: string): string => DEFAULT_TARGET_DEPT[eventType] ?? "sales";
-  const toDepts = new Set(eventTypes.map(toDeptOf));
+  const sweeps: Array<{ event: string; toDept: string; format: (s: DeptSignal[]) => string }> = [
+    { event: "lead_discovered", toDept: DEFAULT_TARGET_DEPT["lead_discovered"] ?? "sales", format: formatLeadNudge },
+    {
+      event: "proposal_approved",
+      toDept: DEFAULT_TARGET_DEPT["proposal_approved"] ?? "engineering",
+      format: formatProposalNudge,
+    },
+    { event: "demo_ready", toDept: DEFAULT_TARGET_DEPT["demo_ready"] ?? "sales", format: formatDemoNudge },
+    {
+      event: "design_brief_ready",
+      toDept: DEFAULT_TARGET_DEPT["design_brief_ready"] ?? "engineering",
+      format: formatDesignBriefNudge,
+    },
+    {
+      event: "site_deployed",
+      toDept: DEFAULT_TARGET_DEPT["site_deployed"] ?? "sales",
+      format: formatSiteDeployedNudge,
+    },
+    {
+      event: "proof_drop_ready",
+      toDept: DEFAULT_TARGET_DEPT["proof_drop_ready"] ?? "sales",
+      format: formatProofDropNudge,
+    },
+  ];
 
-  for (const toDept of toDepts) {
+  for (const { event, toDept, format } of sweeps) {
     const signals = await consumePendingEvents(TENANT, toDept);
-    for (const eventType of eventTypes) {
-      if (toDeptOf(eventType) !== toDept) continue;
-      const filtered = signals.filter((s) => s.event_type === eventType);
-      const nudge = SIGNAL_FORMATTERS[eventType]!(filtered);
-      if (!nudge) continue;
-      await sendToChat(nudge, "HTML");
-      log.info({ count: filtered.length, event: eventType, toDept }, "Dept signal sweep — nudge sent");
-    }
+    const filtered = signals.filter((s) => s.event_type === event);
+    const nudge = format(filtered);
+    if (!nudge) continue;
+    await sendToChat(nudge, "HTML");
+    log.info({ count: filtered.length, event, toDept }, "Dept signal sweep — nudge sent");
   }
 }
 

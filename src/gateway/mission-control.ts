@@ -9,12 +9,18 @@
 
 import type { Mission, MissionPhase } from "../db/schema.js";
 import type { Seam } from "../infra/trace.js";
-import { ROUTABLE_DEPARTMENTS, type RoutableDepartment } from "./dept-routing.js";
 
-/** Single source of truth for department ids — mirrors office sub-agents (dept-routing.ts). */
-export const DEPARTMENTS = ROUTABLE_DEPARTMENTS;
+export const DEPARTMENTS = [
+  "research",
+  "comms",
+  "engineering",
+  "marketing",
+  "sales",
+  "personal",
+  "jobhunt",
+] as const;
 
-export type DepartmentId = RoutableDepartment;
+export type DepartmentId = (typeof DEPARTMENTS)[number];
 
 /** Emoji reactions per MISO spec. */
 export const PHASE_REACTION: Record<MissionPhase, string> = {
@@ -24,7 +30,6 @@ export const PHASE_REACTION: Record<MissionPhase, string> = {
   "AWAITING APPROVAL": "👀",
   COMPLETE: "🎉",
   ERROR: "❌",
-  CANCELLED: "🚫",
 };
 
 export interface MissionView {
@@ -51,14 +56,10 @@ export function formatElapsed(ms: number): string {
 
 export function missionToView(row: Mission, now = Date.now()): MissionView {
   const started = row.started_at ? new Date(row.started_at).getTime() : now;
-  const rawStatuses = row.agent_statuses ?? {};
-  // Merge onto the full department roster so the dashboard always shows all
-  // 8 departments — not just the ones touched so far — with the rest "idle".
-  const statuses: Record<string, string> = {};
-  for (const d of DEPARTMENTS) statuses[d] = rawStatuses[d] ?? "idle";
+  const statuses = row.agent_statuses ?? {};
   const entries = Object.entries(statuses);
-  const doneAgents = entries.filter(([, s]) => /done|complete|idle|error|cancelled/i.test(s)).length;
-  const totalAgents = entries.length;
+  const doneAgents = entries.filter(([, s]) => /done|complete|idle/i.test(s)).length;
+  const totalAgents = entries.length > 0 ? entries.length : DEPARTMENTS.length;
   return {
     missionId: row.mission_id,
     title: row.goal.slice(0, 60),
@@ -89,7 +90,12 @@ export function formatMisoDashboard(view: MissionView): string {
   lines.push(`- Goal: ${view.goal}`);
   lines.push("");
 
-  for (const [agent, status] of Object.entries(view.agentStatuses)) {
+  const statusEntries =
+    Object.keys(view.agentStatuses).length > 0
+      ? Object.entries(view.agentStatuses)
+      : DEPARTMENTS.map((d) => [d, view.department === d ? "active" : "idle"] as [string, string]);
+
+  for (const [agent, status] of statusEntries) {
     lines.push(`↳ ${agent}: ${status}`);
   }
 
@@ -145,7 +151,7 @@ export function phaseFromTrace(seam: Seam, data?: Record<string, unknown>): Miss
     case "hitl.interrupt":
       return "AWAITING APPROVAL";
     case "turn.out":
-      return data?.rejected ? "CANCELLED" : "COMPLETE";
+      return data?.rejected ? "COMPLETE" : "RUNNING";
     case "turn.error":
       return "ERROR";
     default:

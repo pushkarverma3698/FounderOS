@@ -582,7 +582,7 @@ export type NewEpisodicMemory = typeof episodicMemory.$inferInsert;
 
 // ── missions (MISO mission control) ───────────────────────────────────────────
 
-/** MISO lifecycle phases — INIT → RUNNING → PARTIAL → AWAITING APPROVAL → COMPLETE (+ ERROR/CANCELLED). */
+/** MISO lifecycle phases — INIT → RUNNING → PARTIAL → AWAITING APPROVAL → COMPLETE (+ ERROR). */
 export const MISSION_PHASES = [
   "INIT",
   "RUNNING",
@@ -590,7 +590,6 @@ export const MISSION_PHASES = [
   "AWAITING APPROVAL",
   "COMPLETE",
   "ERROR",
-  "CANCELLED",
 ] as const;
 
 export type MissionPhase = (typeof MISSION_PHASES)[number];

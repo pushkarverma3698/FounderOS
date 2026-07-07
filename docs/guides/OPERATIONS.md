@@ -139,12 +139,15 @@ pnpm brain:sync
 
 ---
 
-## Adding a Tool
+## Adding a Tool (Quick Reference)
 
-Follow `docs/rules/PROGRAMMING-RULES.md` Wiring Map 1 (all 6 layers) — the single source of
-truth for the exact file-touch sequence and the forget→error table. Not re-listed here: an
-earlier, shorter version of this list drifted out of sync (it omitted the prompt/routing
-layer), which is exactly the failure mode Wiring Map 1 exists to prevent.
+Full checklist: `../rules/TOOL-STANDARDS.md`
+
+1. `src/tools/{name}.ts` — implement `UnifiedTool`
+2. `tests/unit/tools/{name}.test.ts` — mock Composio, test soft-failure path
+3. `src/agents/agent-tools.ts` — add LangChain wrapper with `hitlGate()`
+4. `src/agents/office.ts` — wire into the right department's `tools: []` array
+5. `pnpm test` + `pnpm lint` green
 
 ---
 
@@ -167,10 +170,8 @@ grep ERROR /tmp/founderos.log | tail -10
 - If stuck: `/reset` clears the thread including pending approvals.
 
 **503 Gemini errors:**
-Handled automatically by the fallback cascade — see `CLAUDE.md` "Model" section for the
-current, authoritative chain (production: `gemini-2.5-pro` → `gemini-2.5-flash` →
-`claude-haiku-4-5`; local/dev: OpenRouter free-tier models only, never a paid key). If all
-fail, the error surfaces to Telegram.
+Handled automatically by the fallback cascade (2.5 → 2.0 → 1.5). If all fail,
+error surfaces to Telegram.
 
 **Google (gws) auth missing:**
 ```bash

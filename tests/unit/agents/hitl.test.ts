@@ -60,16 +60,14 @@ describe("idemKey", () => {
     expect(key1).toBe(key2);
   });
 
-  // L4 fix: idemKey now uses the FULL SHA-1 digest (40 hex chars / 160 bits),
-  // not a 16-char (64-bit) truncation — see the doc comment on idemKey().
-  it("has format '{prefix}:{TENANT}:{40-hex}' (full SHA-1, L4 fix)", () => {
+  it("has format '{prefix}:{TENANT}:{16-hex}'", () => {
     const key = idemKey("gcal", "meeting", "2026-06-05");
-    // e.g. "gcal:turicks:abc...40 hex chars"
+    // e.g. "gcal:turicks:abc1234567890def"
     const parts = key.split(":");
     expect(parts).toHaveLength(3);
     expect(parts[0]).toBe("gcal");
     expect(parts[1]).toBe("turicks"); // TENANT default
-    expect(parts[2]).toMatch(/^[0-9a-f]{40}$/);
+    expect(parts[2]).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it("different parts produce different keys (not always the same hash)", () => {
@@ -96,7 +94,7 @@ describe("idemKey", () => {
   it("single part works without error", () => {
     expect(() => idemKey("email", "alice@example.com")).not.toThrow();
     const key = idemKey("email", "alice@example.com");
-    expect(key).toMatch(/^email:turicks:[0-9a-f]{40}$/);
+    expect(key).toMatch(/^email:turicks:[0-9a-f]{16}$/);
   });
 });
 
@@ -183,7 +181,7 @@ describe("recurringIdemKey — fixes the 'too broad' permanent-dedup, no within-
       const plain = idemKey("newsletter", "body");
       const windowed = recurringIdemKey("newsletter", "month", "body");
       expect(windowed).not.toBe(plain);
-      expect(windowed).toMatch(/^newsletter:turicks:[0-9a-f]{40}$/); // same shape (L4: full SHA-1)
+      expect(windowed).toMatch(/^newsletter:turicks:[0-9a-f]{16}$/); // same shape
     } finally {
       vi.useRealTimers();
     }

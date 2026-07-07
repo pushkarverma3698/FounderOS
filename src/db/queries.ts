@@ -342,16 +342,13 @@ export async function getRecentLinkedInPostIds(
     .filter((id): id is string => !!id);
 }
 
-/** Recent action log entries for a tenant (admin/debug). Pass `since` to scope to a time window (e.g. a mission's started_at). */
-export async function getRecentAuditEntries(tenantId: string, limit = 50, since?: Date) {
+/** Recent action log entries for a tenant (admin/debug). */
+export async function getRecentAuditEntries(tenantId: string, limit = 50) {
   const db = getDb();
-  const conditions = since
-    ? and(eq(actionLog.tenant_id, tenantId), gte(actionLog.created_at, since))
-    : eq(actionLog.tenant_id, tenantId);
   return db
     .select()
     .from(actionLog)
-    .where(conditions)
+    .where(eq(actionLog.tenant_id, tenantId))
     .orderBy(desc(actionLog.created_at))
     .limit(limit);
 }

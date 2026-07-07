@@ -88,12 +88,10 @@ export const publishSignal = tool(
     });
     if (!prepared.ok) return `Signal rejected (typed contract): ${prepared.error}`;
 
-    // L4 fix: full digest, not a 64-bit truncation — this feeds the same
-    // action_log.idempotency_key uniqueness constraint as every other guarded
-    // action (see hitl.ts's idemKey doc comment for the rationale).
     const payloadHash = createHash("sha256")
       .update(JSON.stringify(prepared.signal.payload))
-      .digest("hex");
+      .digest("hex")
+      .slice(0, 16);
     const idemKey = `signal_published:${event_type}:${payloadHash}:${threadId ?? "no-thread"}`;
 
     const { signalId } = await publishDeptEventWithAudit(

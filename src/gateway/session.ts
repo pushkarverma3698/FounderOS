@@ -24,9 +24,7 @@ export interface GatewaySession {
   onReply(markdown: string): Promise<void>;
   onHtml(html: string): Promise<void>;
   onSystemNotice(html: string): Promise<void>;
-  /** interruptId (H1) binds the rendered card's buttons to this specific
-   *  action — see formatApprovalCard. Omit only when no DB row could be found. */
-  onApproval(approval: ApprovalRequest, interruptId?: string): Promise<void>;
+  onApproval(approval: ApprovalRequest): Promise<void>;
   emitStream(type: Parameters<typeof publishStreamEvent>[1]["type"], data?: Record<string, unknown>): void;
 }
 
@@ -72,8 +70,8 @@ export function createTelegramSession(ctx: Context): GatewaySession {
     },
     onHtml: sendHtmlSafe,
     onSystemNotice: sendHtmlSafe,
-    async onApproval(approval, interruptId) {
-      const { html, keyboard } = formatApprovalCard(approval, { interruptId });
+    async onApproval(approval) {
+      const { html, keyboard } = formatApprovalCard(approval);
       await ctx.reply(html, { parse_mode: "HTML", reply_markup: keyboard });
       publishStreamEvent(id, {
         type: "hitl.pending",
@@ -107,7 +105,7 @@ export function createWebSession(sessionId: string): GatewaySession {
     onSystemNotice: async (html) => {
       publishStreamEvent(sessionId, { type: "system.notice", data: { notice: html } });
     },
-    async onApproval(approval, interruptId) {
+    async onApproval(approval) {
       publishStreamEvent(sessionId, {
         type: "hitl.pending",
         data: {
@@ -115,7 +113,6 @@ export function createWebSession(sessionId: string): GatewaySession {
           summary: approval.summary,
           preview: approval.preview?.slice(0, 2000),
           action: approval.action,
-          interruptId,
         },
       });
     },

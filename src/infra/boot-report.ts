@@ -36,10 +36,6 @@ export interface BootCapabilityInput {
   LANGCHAIN_API_KEY?: string | undefined;
   LANGCHAIN_TRACING_V2?: string | undefined;
   OLLAMA_URL?: string | undefined;
-  STORAGE_BUCKET?: string | undefined;
-  AWS_ACCESS_KEY_ID?: string | undefined;
-  AWS_SECRET_ACCESS_KEY?: string | undefined;
-  CREATIVE_SUBGRAPH_ENABLED?: boolean | undefined;
 }
 
 export interface CapabilityStatus {
@@ -148,17 +144,6 @@ export function buildBootReport(env: BootCapabilityInput): CapabilityStatus[] {
       name: "RAG embeddings (Ollama)",
       live: has(env.OLLAMA_URL),
       detail: `endpoint ${env.OLLAMA_URL ?? "(unset)"} — liveness checked at query time`,
-    },
-    {
-      name: "Creative image storage (S3)",
-      live:
-        !env.CREATIVE_SUBGRAPH_ENABLED ||
-        (has(env.STORAGE_BUCKET) && has(env.AWS_ACCESS_KEY_ID) && has(env.AWS_SECRET_ACCESS_KEY)),
-      detail: !env.CREATIVE_SUBGRAPH_ENABLED
-        ? "CREATIVE_SUBGRAPH=0 — creative department off, S3 not required"
-        : has(env.STORAGE_BUCKET) && has(env.AWS_ACCESS_KEY_ID) && has(env.AWS_SECRET_ACCESS_KEY)
-          ? `bucket=${env.STORAGE_BUCKET} — image delivery ready`
-          : "CREATIVE_SUBGRAPH=1 but STORAGE_BUCKET/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY missing — generate_image will succeed then fail at S3 upload, so every image request silently dead-ends for the founder. Set them (or STORAGE_ENDPOINT_URL for R2/MinIO) in PROD_DOTENV.",
     },
   ];
 }

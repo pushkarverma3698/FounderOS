@@ -79,9 +79,7 @@ The 7-department supervisor + ReAct structure is production-stable (live since 2
   - **Phase 3**: Claude-as-judge for outbound copy (ADR-023, two-gate system: brand-validator → judge, fail-open, different model family)
   - **Phase 4**: Durable cross-department signals (ADR-024, dept_signals table, hourly sweep, exactly-once semantics)
   - **Phase 5**: Hierarchy proof — nested HITL on supervisors (ADR-025, 3-level interrupt/resume proven; NOT in production yet, gated on business trigger)
-  - **Phase 6**: Rules #20–21 operationalized (context isolation + typed handoffs; see
-    [docs/guides/SECURITY-RULES-20-21.md](docs/guides/SECURITY-RULES-20-21.md), backed by
-    ADR-021 (context isolation) and ADR-022 (typed contracts))
+  - **Phase 6**: Rules #20–21 operationalized (context isolation + typed handoffs, see SECURITY-RULES-20-21.md)
 - 🔄 **Phase D (now)**: Revenue Flywheel — Gumroad live + LinkedIn launch sequence + cinematic-web done-for-you tier + weekly outbound rhythm
 - ⏳ **Phase E (gated, 4–6 wks reliable use)**: SaaS pivot — web gateway, multi-tenancy, billing (FounderOS SaaS *or* Cinematic Cloud — pick one)
 
@@ -92,7 +90,7 @@ The 7-department supervisor + ReAct structure is production-stable (live since 2
 - Branch naming: `phase{N}/{short-description}` for phase work, `fix/{issue}` for bugs, `feat/{name}` for standalone features
 - Every branch gets a PR before merging to main — human approves merge
 - Current working branch: `main` (v2 merged 2026-06-01)
-- Branch model (**simplified 2026-07-01 — flat**): cut a work branch from `main` → PR straight to `main` → CD auto-deploys on merge. The old `feat/* → beta → stable → main` ladder was removed (friction without added safety; the `branch-policy` check is now a no-op pass). See `docs/process/BRANCH-MODEL.md`.
+- Branch model: `main`=production (founder-only merge), `stable`=release line, `beta`=integration, `feat/*`=work cut from `stable`. Flow: `feat/* → beta → stable → main`. See `docs/process/BRANCH-MODEL.md`.
 
 ### After Completing Work
 1. `pnpm test` must be green
@@ -193,12 +191,7 @@ pnpm test
 
 ## Model
 
-**Production (VPS only):** `openrouter:google/gemini-2.5-pro` (paid, set in deploy.yml). Reliability
-trial (2026-07-01): swapped from `gemini-2.5-flash` — Flash's weak agentic tool-calling was the root
-cause behind most repeat-guard / execution-guard scar tissue. Pro runs on BOTH supervisor and workers
-for a clean full-strength read. Fallback: `gemini-2.5-flash` → `claude-haiku-4-5`. Cost-reclaim path
-once Pro is proven: set `WORKER_AGENT_MODEL=openrouter:google/gemini-2.5-flash` (strong supervisor,
-cheap workers). Prior prod model was `openrouter:google/gemini-2.5-flash`.
+**Production (VPS only):** `openrouter:google/gemini-2.5-flash` (paid, set in PROD_DOTENV / deploy.yml)
 
 **Development / integration testing (local, free):**
 ```
@@ -457,43 +450,6 @@ lie, not a status. This is the Iron Law from `superpowers:verification-before-co
 - **Determinism is the goal of every fix here.** Same input → same behaviour. Push correctness into pure,
   unit-tested code (guards, parsers, envelopes) — never rely on a prompt instruction a weak/swapped model
   may ignore (rule #16). A fix that only works on one model is not a fix; it's a latent regression.
-- **A look-alike tool is not verification of THIS codebase.** 2026-07-04 incident: `IMAGE_MODEL_DRAFT.id`
-  was a nonexistent Generative Language model (`gemini-3-1-flash-image`) — every real image request 404'd
-  in prod for days. It shipped because every test mocked `fetch`, and when asked to "check nano banana,"
-  the first check called a *different*, generic image-generation MCP tool (different API key, different
-  model registry) that happened to work — and that success was nearly reported as proof the app's own
-  `generateImage()` worked. It wasn't the same code. **Verification must call the actual function/path in
-  THIS repo** (`generateImage()` from `src/tools/image-gen.ts`, the real deployed `dist/`, the real gateway
-  loop) — never a similar-sounding external tool, a different SDK, or a different model registry, even if
-  it "does the same thing." If you cannot invoke the real path, say so; do not substitute a proxy and call
-  it verification.
-- **A reply claiming success is not evidence a deliverable exists.** The same incident's second half: even
-  after the model-id fix, `generate_image` returned only `{ asset_id }` — no way for the founder to actually
-  see the image. Nothing crashed, no test failed, but the feature was still useless end-to-end. For any
-  feature that hands the founder an artifact (image, file, link, voice note), verification means fetching
-  or opening THAT artifact and confirming it is real content — not just that the tool call returned 200 or
-  that the chat reply contains cheerful text. See `scripts/e2e-telegram-qa.ts` group8 for the pattern
-  (`expectMediaUrl`: the harness does a real HTTP GET on whatever URL the bot returns and fails the task if
-  it doesn't resolve to real image/audio bytes).
-
-### 25. No AI grading its own homework — red-green discipline is enforced, not trusted (non-negotiable)
-A test written by the same pass that wrote the fix it tests can be wrong in the fix's favor without
-anyone noticing — it is structurally the weakest test in the suite. This closes that specific gap; it
-does not restate #16/#19/#22–24 (which cover determinism and prod-verification, not who checks the checker).
-
-1. **Red before green, always.** Per rule #19.1/#23 step 1: write the test, confirm it FAILS against the
-   OLD code, THEN write the fix. A test never run red is unverified — you don't actually know it can fail.
-2. **Run `pnpm verify:test-integrity` before any "done" claim** on a diff touching `*.test.ts`/`*.spec.ts`.
-   It mechanically rejects tautologies (`expect(true).toBe(true)`), a test whose only assertion is
-   `.toBeDefined()`/`.toBeTruthy()`, empty test bodies, `.only` left in, unexplained `.skip`, and a test
-   mocking the exact unit it claims to test. A green run is a precondition for rule #24's evidence, not a
-   substitute for it. See `docs/rules/TESTING-RULES.md` Rule 15 for the full pattern list.
-3. **When in doubt, run `/code-review` on the diff before claiming done** — a second pass, even automated,
-   catches self-serving tests the author's own read-through won't.
-4. **The escape hatch is the exception, not the norm.** A `// test-integrity-ignore: <reason>` comment
-   requires a real, non-empty reason and is reviewable in the diff; silently restructuring a bad test to
-   dodge the pattern instead of fixing it is the same violation this rule exists to catch. `.only` has no
-   escape hatch — it disables the rest of the suite and is never legitimate to merge.
 
 ## Engineering Protocol — Verification-First (PERMANENT, applies to every change)
 

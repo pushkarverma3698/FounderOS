@@ -296,32 +296,6 @@ export function createTrimmedPrompt(
   };
 }
 
-/**
- * H4 fix — force the model's native tool_choice for a department's FIRST call
- * to a specific tool named via `configurable.forced_tool` (set by office-run.ts
- * from pre-router.ts's resolveForcedTool()). Once that tool has been called
- * once (success or failure — `countCompletedToolCalls` counts either), forcing
- * stops so the department can synthesize its final answer normally.
- *
- * A no-op when `forced_tool` is unset (the default — see FORCE_TOOL_CHOICE_ENABLED
- * in core/config.ts) or names a tool this department doesn't carry.
- */
-export function forceToolChoiceMiddleware(): AnyAgentMiddleware {
-  return createMiddleware({
-    name: "founderos_force_tool_choice",
-    wrapModelCall: async (request, handler) => {
-      const forced = request.runtime.configurable?.["forced_tool"] as string | undefined;
-      if (!forced) return handler(request);
-      if (!request.tools.some((t) => t.name === forced)) return handler(request);
-      if (countCompletedToolCalls(request.messages, forced) > 0) return handler(request);
-      return handler({
-        ...request,
-        toolChoice: { type: "function", function: { name: forced } },
-      });
-    },
-  });
-}
-
 export function createAgentMiddleware(
   systemPromptText: string | (() => string),
   opts: TrimOptions = {},

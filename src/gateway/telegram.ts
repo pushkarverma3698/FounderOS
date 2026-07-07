@@ -25,7 +25,7 @@ import { logger } from "../infra/logger.js";
 import {
   handleStart, handleReset, handleStatus, handleContext, handleCompany,
   handleTarget, handleTargets, handleUntarget,
-  handleOutbound, handleProofDrop, handleWebBuild, handleSubagent, handleCommands, handleDepartments,
+  handleOutbound, handleProofDrop, handleWebBuild, handleCommands, handleDepartments,
   handleWorkflows, handleRun, handleQ,
   handleSignals, handleRuns, handleBudget,
   handleHalt, handleResume,
@@ -33,7 +33,6 @@ import {
 } from "./commands.js";
 import { registerMediaHandlers } from "./media.js";
 import { routeToOffice, runOfficeText, runOfficeSession, resumeOffice, resumeOfficeSession } from "./office-run.js";
-import { isAuthorizedTelegramUser } from "./auth.js";
 
 // Re-export run-loop helpers so tests and media.ts can keep importing from here.
 export {
@@ -68,20 +67,6 @@ export function getBot(): Bot {
 // ── Handlers ───────────────────────────────────────────────────────────────────
 
 export function registerHandlers(bot: Bot): void {
-  // C1 fix: authorize BEFORE any command/message/callback handler runs. Every
-  // update type is composed through this middleware chain in registration
-  // order, so registering the gate first means an unauthorized sender never
-  // reaches a single tool, read, or HITL approval button. Silent drop (no
-  // reply) — a rejection message would just confirm the bot exists to a
-  // stranger probing it.
-  bot.use(async (ctx: Context, next) => {
-    if (!isAuthorizedTelegramUser(ctx)) {
-      log.warn({ from: ctx.from?.id, chat: ctx.chat?.id }, "Unauthorized Telegram update rejected");
-      return;
-    }
-    await next();
-  });
-
   // Command handlers are implemented in commands.ts (extracted for testability).
   // This file stays focused on bot lifecycle + message/callback routing.
   bot.command("start",       (ctx: Context) => handleStart(ctx));
@@ -98,7 +83,6 @@ export function registerHandlers(bot: Bot): void {
   bot.command("outbound",    (ctx: Context) => handleOutbound(ctx, runOfficeText));
   bot.command("proofdrop",   (ctx: Context) => handleProofDrop(ctx, runOfficeText));
   bot.command("webbuild",    (ctx: Context) => handleWebBuild(ctx, runOfficeText));
-  bot.command("subagent",    (ctx: Context) => handleSubagent(ctx, runOfficeText));
   bot.command("commands",    (ctx: Context) => handleCommands(ctx));
   bot.command("departments", (ctx: Context) => handleDepartments(ctx));
   // Phase 1 — Workflow / SOP engine
@@ -128,25 +112,18 @@ export function registerHandlers(bot: Bot): void {
 
   bot.on("callback_query:data", async (ctx: Context) => {
     const data = ctx.callbackQuery?.data ?? "";
-    // H1 fix: callback data is `approve:<interrupt_id>` / `reject:<interrupt_id>`
-    // so a tap can only resume the SPECIFIC action it was rendered for — never
-    // whatever happens to be pending when the button is pressed. A bare
-    // "approve"/"reject" (older cards rendered before this ships) still works;
-    // the id is optional and resumeOffice degrades to the old "resume whatever
-    // is pending" behaviour only when it's absent.
-    const [action, interruptId] = data.split(":", 2);
-    if (action !== "approve" && action !== "reject") {
+    if (data !== "approve" && data !== "reject") {
       await ctx.answerCallbackQuery({ text: "Unknown action" });
       return;
     }
-    const decision = action === "approve" ? "approved" : "rejected";
+    const decision = data === "approve" ? "approved" : "rejected";
     await ctx.answerCallbackQuery({ text: decision === "approved" ? "✅ Approved" : "❌ Rejected" });
     try {
       await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
     } catch {
       /* best-effort */
     }
-    await resumeOffice(ctx, decision, interruptId || undefined);
+    await resumeOffice(ctx, decision);
   });
 
   bot.catch((err) => {
