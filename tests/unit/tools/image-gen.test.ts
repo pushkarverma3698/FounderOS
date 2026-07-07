@@ -106,6 +106,18 @@ describe("generateImage — injected fetch, stage-tagged errors", () => {
     ).rejects.toMatchObject({ stage: "parse" });
   });
 
+  it("throws a request-stage error (fail-fast) when the API hangs past the timeout", async () => {
+    // Prod symptom (T36/T37, 2026-07-07): image requests produced NO REPLY —
+    // the generateContent fetch had no timeout, so a stalled call rode all the
+    // way to the 180s turn timeout and the founder got silence. A bounded call
+    // must convert a hang into a fast, stage-tagged error that surfaces (#19.5,
+    // #22.3 fail-loud). Injected fetch never resolves; a short timeout must win.
+    const hangForever = () => new Promise(() => {}) as never;
+    await expect(
+      generateImage("x", {}, { apiKey: "k", fetchImpl: hangForever, timeoutMs: 50 }),
+    ).rejects.toMatchObject({ stage: "request" });
+  });
+
   it("hits the Pro model + URL when final=true", async () => {
     let calledUrl = "";
     const spy = async (url: string) => {
