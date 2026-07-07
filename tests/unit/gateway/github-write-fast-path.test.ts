@@ -1,9 +1,17 @@
 /**
  * Unit tests for the deterministic GitHub-write HITL fast path.
- * Reproduces the T13 failure class: a structured "create a github issue…"
- * request must pause on an approval interrupt WITHOUT ever reaching the LLM
- * supervisor/department (which was free to refuse per the advisory-only
- * pre-router). See src/gateway/github-write-fast-path.ts docstring.
+ * Covers two distinct failure classes:
+ *   1. A single-step, structured "create a github issue…" request must pause
+ *      on an approval interrupt WITHOUT ever reaching the LLM supervisor/
+ *      department (which was free to refuse per the advisory-only
+ *      pre-router).
+ *   2. A multi-step request (T13: "research X, then create an issue... with
+ *      those findings in the body") must NOT fast-path — the body doesn't
+ *      exist yet in the message text, so fast-pathing would create an
+ *      empty-body issue and silently skip the research step. This must fall
+ *      through to office routing, where research runs first and the
+ *      still-HITL-gated github_write tool fires for real.
+ * See src/gateway/github-write-fast-path.ts docstring.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -80,6 +88,35 @@ describe("github-write-fast-path", () => {
 
       const write = extractGithubWriteParams('Create a github issue in acme/widgets titled "Fix login bug"');
       expect(write?.action).toBe("create_issue");
+    });
+
+    it("defers the T13 multi-step research-then-write request to office routing (does NOT fast-path an empty-body issue)", () => {
+      // Exact T13 prompt from scripts/e2e-telegram-qa.ts — has a title marker
+      // AND owner/repo, so without the research-chain guard this would
+      // wrongly fast-path with an empty body before the research ever ran.
+      const t13 = extractGithubWriteParams(
+        "Research what the top 3 LangGraph JS limitations are in production, then create a GitHub issue on " +
+          "pushkarverma3698/FounderOS titled 'Known LangGraph limitations' with those findings in the body.",
+      );
+      expect(t13).toBeNull();
+    });
+
+    it("still fast-paths a research-flavored request when the body is given inline", () => {
+      // Contrast case: the guard only fires when there's no body to extract —
+      // if the founder already pasted the findings, there's nothing left to
+      // research and the write is safe to fast-path.
+      const withInlineBody = extractGithubWriteParams(
+        'Research the bug and create a github issue in acme/widgets titled "Bug found" ' +
+          'body: "Root cause: null pointer in auth.ts line 42"',
+      );
+      expect(withInlineBody).toEqual({
+        action: "create_issue",
+        owner: "acme",
+        repo: "widgets",
+        title: "Bug found",
+        body: "Root cause: null pointer in auth.ts line 42",
+        content: undefined,
+      });
     });
 
     it("extracts update_readme content from the body marker", () => {
