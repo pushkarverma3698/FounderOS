@@ -116,17 +116,23 @@ jobs:
             else
               echo "==> PROD_DOTENV not set; using the .env already on the box"
             fi
-            # Pin the production model. Gemini 2.5 Flash is the documented prod model.
+            # Pin the production model. 2026-07-07: OpenRouter account credits exhausted
+            # (402 Insufficient credits); founder has active Gemini billing — switched to
+            # direct Google API. GOOGLE_GENERATIVE_AI_API_KEY comes from PROD_DOTENV above.
+            grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
+            {
+              printf '%s\n' 'AGENT_MODEL=google-genai:gemini-2.5-pro'
+              printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
+            } >> .env.patched
+            mv .env.patched .env
+            chmod 600 .env
+            echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-2.5-pro"
             if [ -n "${OPENROUTER_API_KEY:-}" ]; then
-              grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
-              {
-                printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-flash'
-                printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
-                printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
-              } >> .env.patched
+              grep -v -E '^OPENROUTER_API_KEY=' .env > .env.patched || true
+              printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" >> .env.patched
               mv .env.patched .env
               chmod 600 .env
-              echo "==> Patched .env: AGENT_MODEL=openrouter:google/gemini-2.5-flash"
+              echo "==> Patched .env: OPENROUTER_API_KEY refreshed (fallback path)"
             fi
             # MCP bridge Slack secrets — append only when the secret is set.
             # These are NOT in PROD_DOTENV (they rotate independently); forwarded as
