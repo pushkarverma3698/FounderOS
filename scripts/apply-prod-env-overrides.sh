@@ -84,6 +84,14 @@ if [ -n "${OPENROUTER_API_KEY:-}" ]; then
     printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-pro'
     printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:google/gemini-2.5-flash,anthropic:claude-haiku-4-5'
     printf '%s\n' 'MCP_BRIDGE_ENABLED=true'
+    # FORCE_TOOL_CHOICE intentionally NOT pinned (launch rollback 2026-07-07,
+    # PR #283): forcing native tool_choice on gemini-2.5-pro via OpenRouter was
+    # never live-verified (config.ts:279 says keep OFF until it is) and, stacked
+    # on the deterministic-supervisor Proxy, drove multi-step tasks into the
+    # 180s turn-timeout in prod. It is stripped above (line 82) and left unset,
+    # so the code default (FORCE_TOOL_CHOICE_ENABLED=false) applies. Re-pin only
+    # after a green MTProto verification of tool_choice forcing against the
+    # real provider.
     printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
   } >> .env.patched
   mv .env.patched .env
