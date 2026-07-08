@@ -1,0 +1,75 @@
+# Live E2E proof — real Gemini (repo secret) + real Postgres service container.
+# Runs the production kernel composition end to end and asserts DB evidence
+# (hitl_approvals row before interrupt, zero action_log rows on reject,
+# checkpoint resume on a fresh kernel instance, ai_call_costs populated),
+# then the full live golden-set eval (accuracy gate ≥ 0.8).
+# Manually triggered: this is the milestone/acceptance gate, not the dev loop.
+name: Live E2E
+
+on:
+  workflow_dispatch:
+  # workflow_dispatch is only routable once this file exists on the default
+  # branch; until the rebuild merges, run on pushes to its branch instead.
+  push:
+    branches: ["claude/founderos-zero-base-audit-25xidu"]
+
+jobs:
+  live-e2e:
+    name: Live kernel proof + golden-set eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: pgvector/pgvector:16
+        env:
+          POSTGRES_USER: founderos
+          POSTGRES_PASSWORD: founderos
+          POSTGRES_DB: founderos
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U founderos"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+      AGENT_MODEL: "google-genai:gemini-2.5-flash"
+      DATABASE_URL: "postgresql://founderos:founderos@localhost:5432/founderos"
+      TELEGRAM_BOT_TOKEN: "ci:placeholder"
+      TELEGRAM_CHAT_ID: "000000000"
+      SCRAPE_BACKEND: "fetch"
+      LOG_LEVEL: "warn"
+    steps:
+      - name: Fail fast when the key is absent
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY == ''
+        run: |
+          echo "GOOGLE_GENERATIVE_AI_API_KEY secret is not set — live E2E cannot run."
+          exit 1
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      # package.json scripts use --env-file=.env; CI provides real env vars.
+      - run: touch .env
+      - name: Migrate DB (drizzle + LangGraph checkpoint tables)
+        run: node --env-file=.env --import tsx/esm scripts/setup-db.ts
+      - name: Live kernel proof (production composition, DB-evidence assertions)
+        run: node --env-file=.env --import tsx/esm scripts/live-e2e-proof.ts
+      - name: Live golden-set eval (accuracy gate ≥ 0.8)
+        run: pnpm eval
+      - name: Live cost ledger (from real ai_call_costs rows)
+        run: pnpm proof:costs
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-e2e-reports
+          path: |
+            eval-report.md
+            docs/COSTS.md
+          if-no-files-found: ignore
