@@ -17,7 +17,7 @@ import { kernelReply, getPendingKernelApproval } from "../kernel/index.js";
 import type { ApprovalRequest } from "../infra/hitl.js";
 import { formatApprovalCard, safeHtml } from "./approval-card.js";
 import { markdownToTelegramHtml, splitForTelegram } from "./format.js";
-import { getPendingInterrupt, resolveInterrupt, getTodayCostUsd } from "../db/queries.js";
+import { getPendingInterrupt, resolveInterrupt, getTodayCostUsd, logLlmCost } from "../db/queries.js";
 import { BudgetExceededError, BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
 import { assertDailyBudgetAllowsRun, DailyBudgetExceededError } from "../infra/daily-budget.js";
 import { readHalt, formatHaltNotice } from "../infra/halt.js";
@@ -53,6 +53,28 @@ export async function withChatTurnLock<T>(chatId: string | number, fn: () => Pro
 
 export function threadIdFor(chatId: number | string): string {
   return `${TENANT}:${chatId}`;
+}
+
+/**
+ * Persist one LLM call to ai_call_costs. The daily budget cap
+ * (assertDailyBudgetAllowsRun → getTodayCostUsd) and the cost ledger
+ * (pnpm proof:costs, /budget) read this table — without this sink both see $0.
+ * Fire-and-forget: a DB blip must never break a founder turn.
+ */
+export function kernelCostSink(call: { model: string; inputTokens: number; outputTokens: number; usd: number }): void {
+  void logLlmCost({
+    tenant_id: TENANT,
+    agent: "kernel",
+    tier: "primary",
+    model: call.model,
+    tokens_in: call.inputTokens,
+    tokens_out: call.outputTokens,
+    cost_usd: call.usd.toFixed(6),
+  }).catch((err) => log.warn({ err: String(err) }, "ai_call_costs write failed")); // allow-failopen: cost row is telemetry; the turn must not die on a DB blip
+}
+
+function makeBudgetCallback(): BudgetGuardCallback {
+  return new BudgetGuardCallback(createRunBudget(), process.env["AGENT_MODEL"] ?? "", kernelCostSink);
 }
 
 // ── Reply / card senders ───────────────────────────────────────────────────────
@@ -94,7 +116,7 @@ export async function runKernelText(ctx: Context, text: string): Promise<void> {
       const config = {
         configurable: { thread_id: threadIdFor(chatId) },
         recursionLimit: OFFICE_RECURSION_LIMIT,
-        callbacks: [new BudgetGuardCallback(createRunBudget(), process.env["AGENT_MODEL"] ?? ""), new TraceCallback(trace)],
+        callbacks: [makeBudgetCallback(), new TraceCallback(trace)],
       };
       trace.event("turn.in", { textPreview: text.slice(0, 120) });
 
@@ -147,7 +169,7 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
       const config = {
         configurable: { thread_id: threadId },
         recursionLimit: OFFICE_RECURSION_LIMIT,
-        callbacks: [new BudgetGuardCallback(createRunBudget(), process.env["AGENT_MODEL"] ?? ""), new TraceCallback(trace)],
+        callbacks: [makeBudgetCallback(), new TraceCallback(trace)],
       };
       trace.event("hitl.resume", { decision });
 

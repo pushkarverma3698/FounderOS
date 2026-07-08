@@ -121,18 +121,21 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
+      # package.json scripts use --env-file=.env; CI provides real env vars.
+      - run: touch .env
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
       - name: Run eval
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
         run: pnpm eval
-      - name: Update README metrics
+      - name: Regenerate proof scoreboard
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-        run: pnpm update-readme-metrics
-      - name: Commit updated metrics
+        run: pnpm proof:scoreboard
+      - name: Commit updated proof artifacts
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git diff --quiet && git diff --staged --quiet || \
-            (git add EVAL.md README.md && \
-             git commit -m "chore(eval): auto-update README metrics [skip ci]" && \
+            (git add docs/PROOF.md eval-report.md && \
+             git commit -m "chore(proof): auto-update proof artifacts [skip ci]" && \
              git push)
