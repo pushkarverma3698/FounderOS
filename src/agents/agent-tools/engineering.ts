@@ -10,6 +10,7 @@
 
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import { githubTool } from "../../tools/github.js";
 import { projectWorkflowTool, flagDangerousWorkflowCommand } from "../../tools/project-workflow.js";
 import { claudeCodeTool, findClaudeBinary } from "../../tools/claude-code.js";
@@ -17,7 +18,7 @@ import { applyCinematicPresetTool } from "../../tools/cinematic-preset.js";
 import { deployStaticSiteTool } from "../../tools/deploy-static-site.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
-import { makeRepeatGuard } from "./repeat-guard.js";
+import { makeRepeatGuard, makeThreadScopedRegistry } from "./repeat-guard.js";
 import { toolFailure, isStructuredToolFailure, type ToolFailureStage } from "../tool-result.js";
 import { hasBeenAudited, writeAuditEntry, publishDeptEventWithAudit } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
@@ -144,25 +145,36 @@ export function capConsecutiveToolFailures(
   return result;
 }
 
-// Per-module shared counter — one instance for the lifetime of the module
-// (i.e. one per process restart, which is one "turn context").
-// Tests inject their own counter via the pure helper; production code uses this.
-const _sharedGithubCounter = makeToolFailureCounter();
+// Per-THREAD registries (fix 2026-06-30): a single shared counter/guard at
+// module scope would leak across every conversation for the life of the
+// process (the office graph compiles once — rule #2). Each thread_id now gets
+// its own lazily-created counter and repeat-guard, so one thread's call
+// history can never block or contaminate another's (rule #20).
+// Tests inject their own counter/guard via the pure helpers directly.
+const _githubFailureCounters = makeThreadScopedRegistry(makeToolFailureCounter);
 
 // Repeat-call breaker (T04): bounds identical github_read calls even when they
 // SUCCEED — the failure cap above only fires on errors. Time-windowed so it
 // self-scopes to a turn; a legitimate repeat minutes later is never blocked.
-const _githubRepeatGuard = makeRepeatGuard();
+const _githubRepeatGuards = makeThreadScopedRegistry(() => makeRepeatGuard());
+
+function threadIdFrom(config: RunnableConfig | undefined): string | undefined {
+  return config?.configurable?.["thread_id"] as string | undefined;
+}
 
 // ── Engineering: GitHub read (read-only, NO approval) ─────────────────────────
 
 export const githubRead = tool(
-  async ({ action, owner, repo }) => {
+  async ({ action, owner, repo }, config) => {
+    const threadId = threadIdFrom(config);
+    const repeatGuard = _githubRepeatGuards.get(threadId);
+    const failureCounter = _githubFailureCounters.get(threadId);
+
     // Loop breaker: if the model has already called github_read with this exact
     // input twice, stop hitting the API and force it to answer with what it has.
     // This is the deterministic fix for the GraphRecursionError wedge on a
     // successful-but-repeated list_repos (rule #16 — never trust the model to stop).
-    if (_githubRepeatGuard.shouldBlock("github_read", { action, owner, repo })) {
+    if (repeatGuard.shouldBlock("github_read", { action, owner, repo })) {
       return (
         `You have already called github_read (action="${action}") with these exact ` +
         `arguments and the result is in the conversation above. Do NOT call github_read ` +
@@ -172,12 +184,12 @@ export const githubRead = tool(
     const res = await githubTool.execute({ action, ...(owner ? { owner } : {}), ...(repo ? { repo } : {}) });
     if (!res.success) {
       return capConsecutiveToolFailures(
-        _sharedGithubCounter,
+        failureCounter,
         "github_read",
         githubFailure(`read (${action})`, res.error ?? "unknown error"),
       );
     }
-    return capConsecutiveToolFailures(_sharedGithubCounter, "github_read", JSON.stringify(res.data, null, 2));
+    return capConsecutiveToolFailures(failureCounter, "github_read", JSON.stringify(res.data, null, 2));
   },
   {
     name: "github_read",
@@ -248,9 +260,10 @@ export const githubWrite = tool(
       ...(content ? { content } : {}),
     });
 
+    const failureCounter = _githubFailureCounters.get(threadIdFrom(config));
     if (!res.success) {
       return capConsecutiveToolFailures(
-        _sharedGithubCounter,
+        failureCounter,
         "github_write",
         githubFailure(action, res.error ?? "unknown error"),
       );
@@ -258,7 +271,7 @@ export const githubWrite = tool(
     const auditGh = await writeAuditEntry({ action: `github_${action}`, idempotency_key: key, payload: { action, owner, repo, title }, tenant_id: TENANT });
     if (!auditGh.written) log.warn({ key, action }, "writeAuditEntry: conflict on github_write");
     return capConsecutiveToolFailures(
-      _sharedGithubCounter,
+      failureCounter,
       "github_write",
       `✅ GitHub ${action} done: ${JSON.stringify(res.data)}`,
     );
