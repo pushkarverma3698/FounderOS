@@ -206,6 +206,18 @@ export class BudgetGuardCallback extends BaseCallbackHandler {
   constructor(
     private readonly tracker: BudgetTracker,
     private readonly modelId: string = "gemini-2.5-flash",
+    /**
+     * Per-call sink, invoked after accrual and BEFORE the cap check (a call
+     * that blows the budget still belongs on the ledger). Wire it to persist
+     * rows into ai_call_costs — the daily budget cap and the cost ledger read
+     * that table, so leaving this unset makes both blind. Must not throw.
+     */
+    private readonly onAccrue?: (call: {
+      model: string;
+      inputTokens: number;
+      outputTokens: number;
+      usd: number;
+    }) => void,
   ) {
     super();
   }
@@ -245,6 +257,12 @@ export class BudgetGuardCallback extends BaseCallbackHandler {
       this.modelId;
 
     this.tracker.accrue(inputTokens, outputTokens, actualModel);
+    this.onAccrue?.({
+      model: actualModel,
+      inputTokens,
+      outputTokens,
+      usd: estimateCost(inputTokens, outputTokens, actualModel),
+    });
 
     const check = this.tracker.check();
     if (!check.ok) {

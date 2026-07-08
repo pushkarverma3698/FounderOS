@@ -4,7 +4,8 @@
 #
 # Inputs (env vars forwarded by appleboy/ssh-action):
 #   PROD_DOTENV          — base64-encoded full .env (required for DATABASE_URL)
-#   OPENROUTER_API_KEY   — optional override (pins AGENT_MODEL)
+#   OPENROUTER_API_KEY   — optional override (fallback path; AGENT_MODEL pins to
+#                          google-genai:gemini-2.5-pro regardless of this var)
 #   LINKEDIN_ACCESS_TOKEN — optional override
 #   LINKEDIN_AUTHOR_URN   — optional override
 set -euo pipefail
@@ -28,17 +29,24 @@ else
   echo "==> PROD_DOTENV not set; using existing .env on box"
 fi
 
-# Pin production model + OpenRouter key (same as deploy.yml).
+# Pin production model (same as deploy.yml). 2026-07-07: OpenRouter account
+# credits exhausted (402); direct Gemini (google-genai) produced empty/malformed
+# tool-calling output in this graph (untested integration). Switched to
+# anthropic:claude-haiku-4-5, already the vetted fallback in this codepath.
+grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
+{
+  printf '%s\n' 'AGENT_MODEL=anthropic:claude-haiku-4-5'
+  printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
+} >> .env.patched
+mv .env.patched .env
+chmod 600 .env
+echo "==> Patched .env: AGENT_MODEL=anthropic:claude-haiku-4-5"
 if [ -n "${OPENROUTER_API_KEY:-}" ]; then
-  grep -v -E '^(AGENT_MODEL|OPENROUTER_API_KEY|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
-  {
-    printf '%s\n' 'AGENT_MODEL=openrouter:google/gemini-2.5-flash'
-    printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
-    printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY"
-  } >> .env.patched
+  grep -v -E '^OPENROUTER_API_KEY=' .env > .env.patched || true
+  printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" >> .env.patched
   mv .env.patched .env
   chmod 600 .env
-  echo "==> Patched .env: AGENT_MODEL + OPENROUTER_API_KEY"
+  echo "==> Patched .env: OPENROUTER_API_KEY refreshed (fallback path)"
 fi
 
 # LinkedIn direct API — separate secrets so founder can update without re-encoding PROD_DOTENV.
