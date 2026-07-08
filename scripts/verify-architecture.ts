@@ -28,7 +28,22 @@ const BASELINE_PATH = join(ROOT, "governance", "architecture-baseline.json");
 
 /** Modules deleted by the v3 kill order. Re-creating one fails CI hard (no ratchet). */
 export const TOMBSTONES: string[] = [
-  // Populated by Phase 4 (gateway rewire + kill). Empty until then.
+  // The three-layer control split (audit §6) — never again:
+  "src/gateway/office-run.ts",
+  "src/gateway/execution-guard.ts",
+  "src/gateway/pre-router.ts",
+  "src/gateway/task-ledger.ts",
+  // Regex fast-path bypasses of the graph:
+  "src/gateway/inbox-fast-path.ts",
+  "src/gateway/github-read-fast-path.ts",
+  "src/gateway/shell-hitl-fast-path.ts",
+  // The LLM supervisor + flag-gated alternate topologies:
+  "src/agents/office.ts",
+  "src/agents/engineering-domain.ts",
+  "src/agents/revenue-domain.ts",
+  "src/agents/creative-department.ts",
+  // Typed-object-smuggled-through-prose handoff:
+  "src/agents/handoff-engineering.ts",
 ];
 
 /** Frozen trees (founder decision 2026-07-07): excluded from every rule. */

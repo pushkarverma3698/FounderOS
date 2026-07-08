@@ -1,0 +1,134 @@
+/**
+ * v3 gateway run loop — tested with a FAKE kernel (repo rule #19.3: the
+ * gateway loop gets direct unit tests; never rely on the eval harness).
+ */
+
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { Context } from "grammy";
+
+const fakeKernel = {
+  invoke: vi.fn(async () => ({ reply: "All done.", mission: { status: "done" } })),
+  getState: vi.fn(async () => ({ tasks: [] })),
+};
+vi.mock("../../../src/gateway/kernel-boot.js", () => ({
+  getKernel: vi.fn(async () => fakeKernel),
+}));
+
+const resolveInterrupt = vi.fn(async () => ({}));
+const getPendingInterrupt = vi.fn(async (): Promise<unknown> => null);
+vi.mock("../../../src/db/queries.js", () => ({
+  getPendingInterrupt: (...a: unknown[]) => getPendingInterrupt(...(a as [])),
+  resolveInterrupt: (...a: unknown[]) => resolveInterrupt(...(a as [])),
+  getTodayCostUsd: vi.fn(async () => 0),
+}));
+
+vi.mock("../../../src/infra/halt.js", () => ({
+  readHalt: vi.fn(async () => null),
+  formatHaltNotice: vi.fn(() => "halted"),
+}));
+
+const { runKernelText, resumeKernel } = await import("../../../src/gateway/kernel-run.js");
+import { Command } from "@langchain/langgraph";
+
+interface Reply {
+  text: string;
+  opts?: { reply_markup?: unknown };
+}
+
+function fakeCtx(): { ctx: Context; replies: Reply[] } {
+  const replies: Reply[] = [];
+  const ctx = {
+    chat: { id: 777 },
+    reply: vi.fn(async (text: string, opts?: Reply["opts"]) => {
+      replies.push({ text, ...(opts !== undefined ? { opts } : {}) });
+    }),
+  } as unknown as Context;
+  return { ctx, replies };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  fakeKernel.invoke.mockResolvedValue({ reply: "All done.", mission: { status: "done" } } as never);
+  fakeKernel.getState.mockResolvedValue({ tasks: [] } as never);
+  getPendingInterrupt.mockResolvedValue(null);
+});
+
+describe("runKernelText", () => {
+  it("invokes the kernel with the turn record and sends the reply", async () => {
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "hello kernel");
+
+    expect(fakeKernel.invoke).toHaveBeenCalledTimes(1);
+    const [input, config] = fakeKernel.invoke.mock.calls[0]! as unknown as [
+      { turn: { raw_input: string; chat_id: string } },
+      { configurable: { thread_id: string } },
+    ];
+    expect(input.turn.raw_input).toBe("hello kernel");
+    expect(config.configurable.thread_id).toBe("turicks:777");
+    expect(replies).toHaveLength(1);
+    expect(replies[0]!.text).toContain("All done.");
+  });
+
+  it("pauses on a pending approval: sends the card with Approve/Reject, no reply", async () => {
+    fakeKernel.getState.mockResolvedValue({
+      tasks: [
+        {
+          interrupts: [
+            {
+              value: {
+                kind: "approval",
+                action: "send_email",
+                title: "Send email to a@b.c?",
+                summary: "Subject: hi",
+                preview: "hello body",
+                args: {},
+              },
+            },
+          ],
+        },
+      ],
+    } as never);
+
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "send the email");
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]!.text).toContain("Send email to a@b.c?");
+    expect(replies[0]!.opts?.reply_markup).toBeDefined();
+  });
+
+  it("kernel invoke failure → loud ❌ error reply (never silent, never a wipe)", async () => {
+    fakeKernel.invoke.mockRejectedValue(new Error("planner exploded"));
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "boom");
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]!.text).toContain("❌");
+    expect(replies[0]!.text).toContain("planner exploded");
+  });
+});
+
+describe("resumeKernel", () => {
+  it("resolves the DB approval row and resumes the graph with the decision", async () => {
+    getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-1", created_at: new Date().toISOString() });
+    const { ctx, replies } = fakeCtx();
+    await resumeKernel(ctx, "approved");
+
+    expect(resolveInterrupt).toHaveBeenCalledWith("int-1", "approved");
+    const [cmd] = fakeKernel.invoke.mock.calls[0]! as unknown as [Command];
+    expect(cmd).toBeInstanceOf(Command);
+    expect(replies[0]!.text).toContain("All done.");
+  });
+
+  it("a multi-step plan can pause AGAIN on the next gated step", async () => {
+    getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-1", created_at: new Date().toISOString() });
+    fakeKernel.getState.mockResolvedValue({
+      tasks: [{ interrupts: [{ value: { kind: "approval", action: "x", title: "Second approval?", summary: "s", preview: "", args: {} } }] }],
+    } as never);
+    const { ctx, replies } = fakeCtx();
+    await resumeKernel(ctx, "approved");
+
+    expect(replies[0]!.text).toContain("Second approval?");
+    expect(replies[0]!.opts?.reply_markup).toBeDefined();
+  });
+});

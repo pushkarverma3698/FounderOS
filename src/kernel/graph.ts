@@ -66,10 +66,12 @@ export type CompiledKernel = ReturnType<typeof buildKernel>;
  * gated tool). Mirrors the old office helper so the gateway swap is 1:1.
  */
 export async function getPendingKernelApproval(
-  kernel: { getState: (c: RunnableConfig) => Promise<{ tasks?: Array<{ interrupts?: Array<{ value: unknown }> }> }> },
+  kernel: { getState: (c: RunnableConfig) => Promise<unknown> },
   config: RunnableConfig,
 ): Promise<unknown | null> {
-  const state = await kernel.getState(config);
+  const state = (await kernel.getState(config)) as {
+    tasks?: Array<{ interrupts?: Array<{ value: unknown }> }>;
+  };
   const interrupts = (state.tasks ?? []).flatMap((t) => t.interrupts ?? []);
   return interrupts.length > 0 ? interrupts[0]!.value : null;
 }
