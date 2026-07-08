@@ -8,6 +8,10 @@ name: Live E2E
 
 on:
   workflow_dispatch:
+  # workflow_dispatch is only routable once this file exists on the default
+  # branch; until the rebuild merges, run on pushes to its branch instead.
+  push:
+    branches: ["claude/founderos-zero-base-audit-25xidu"]
 
 jobs:
   live-e2e:
