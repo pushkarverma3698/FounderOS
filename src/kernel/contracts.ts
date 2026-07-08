@@ -171,6 +171,24 @@ export const PlanSchema = z.object({
 });
 export type Plan = z.infer<typeof PlanSchema>;
 
+/**
+ * Planner outcome: either a full plan, or a direct reply for inputs that need
+ * no tools (greetings, clarifications, refusals). Direct replies make the
+ * trivial path exactly ONE LLM call — the old system burned 4 on "hello".
+ */
+export const PlannerDecisionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("reply"), text: z.string().min(1) }),
+  z.object({ type: z.literal("plan"), plan: PlanSchema }),
+]);
+export type PlannerDecision = z.infer<typeof PlannerDecisionSchema>;
+
+export function validatePlannerDecision(input: unknown): Validation<PlannerDecision> {
+  const res = PlannerDecisionSchema.safeParse(input);
+  return res.success
+    ? { ok: true, value: res.data }
+    : { ok: false, error: `Invalid planner decision — ${zodIssues(res.error)}` };
+}
+
 // ── Step result (discriminated — the supervisor branches on status, not prose) ─
 
 export const StepResultSchema = z.discriminatedUnion("status", [
