@@ -1,10 +1,10 @@
 # FounderOS Proof Scoreboard
 
-_Generated 2026-07-08T07:23:21.420Z · commit `f660087` · regenerate with `pnpm proof:scoreboard`_
+_Generated 2026-07-08T16:07:55.446Z · commit `199ec8f` · regenerate with `pnpm proof:scoreboard`_
 
 ## Deterministic test suite (offline, $0)
 
-✅ 1215 tests / 121 files — all green
+✅ 1213 tests / 120 files — all green
 
 ## Kernel guarantees (each one is an executable scenario, not a claim)
 
