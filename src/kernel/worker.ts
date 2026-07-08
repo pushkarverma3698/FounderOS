@@ -26,6 +26,7 @@ import {
   type BaseMessage,
 } from "@langchain/core/messages";
 import { isGraphInterrupt } from "@langchain/langgraph";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import { jsonrepair } from "jsonrepair";
 import {
   digestToolResult,
@@ -39,11 +40,11 @@ import {
 import type { KernelStateType, KernelUpdate } from "./state.js";
 import type { KernelChatModel } from "./planner.js";
 
-/** Narrow tool surface (LangChain StructuredTool satisfies it). */
+/** Narrow tool surface. `config` carries thread_id for DB-backed HITL gates. */
 export interface KernelTool {
   name: string;
   description?: string;
-  invoke(args: Record<string, unknown>): Promise<unknown>;
+  invoke(args: Record<string, unknown>, config?: RunnableConfig): Promise<unknown>;
 }
 
 /** A model that can bind tools (BaseChatModel satisfies it; fakes return self). */
@@ -154,7 +155,7 @@ export function routeAfterAgent(state: KernelStateType): "tools" | "collect" {
 
 /** Tool-execution node: runs the pending calls, records receipts BY CODE. */
 export function makeToolsNode(specs: Record<string, WorkerSpec>) {
-  return async function tools(state: KernelStateType): Promise<KernelUpdate> {
+  return async function tools(state: KernelStateType, config?: RunnableConfig): Promise<KernelUpdate> {
     const step = currentStep(state);
     const spec = specs[step.worker]!;
     const last = state.scratch[state.scratch.length - 1] as AIMessage;
@@ -191,7 +192,7 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
       let resultStr: string;
       let ok: boolean;
       try {
-        const raw = await tool.invoke((call.args ?? {}) as Record<string, unknown>);
+        const raw = await tool.invoke((call.args ?? {}) as Record<string, unknown>, config);
         resultStr = typeof raw === "string" ? raw : JSON.stringify(raw);
         ok = !isFailureResult(resultStr);
       } catch (err) {

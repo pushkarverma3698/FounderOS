@@ -53,12 +53,64 @@ export function normalizeModelId(modelId: string): string {
   }
 }
 
+/**
+ * Extract the HTTP status from a provider error. Structured properties first
+ * (OpenAI/Anthropic/Gemini SDK errors carry .status; fetch errors nest a
+ * response), then the SDK message convention of a leading "NNN " prefix.
+ * Returns null for transport-level errors that never got a response.
+ */
+export function httpStatusOf(err: unknown): number | null {
+  if (!err || typeof err !== "object") return null;
+  const e = err as Record<string, unknown>;
+  const candidates = [
+    e["status"],
+    e["statusCode"],
+    (e["response"] as { status?: unknown } | undefined)?.status,
+    (e["error"] as { status?: unknown } | undefined)?.status,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "number" && c >= 100 && c <= 599) return c;
+  }
+  const msg = (e as { message?: unknown }).message;
+  if (typeof msg === "string") {
+    const m = /^(\d{3})\b/.exec(msg.trim());
+    if (m) {
+      const n = Number(m[1]);
+      if (n >= 100 && n <= 599) return n;
+    }
+  }
+  if (e["cause"] && e["cause"] !== err) return httpStatusOf(e["cause"]);
+  return null;
+}
+
+const TRANSPORT_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "EAI_AGAIN",
+  "EPIPE",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_SOCKET",
+]);
+
+/**
+ * Retriable-by-class: 5xx + 408/429 by REAL status, transport errors by code,
+ * plus the provider message idioms that carry no status at all. Definitively
+ * NOT retriable: 4xx auth/permission/not-found — those surface loudly instead
+ * of burning the fallback chain (audit Run B: a 403 must not look like load).
+ */
 export function is503Error(err: unknown): boolean {
+  const status = httpStatusOf(err);
+  if (status !== null && status !== 500) {
+    // 500 also matches message idioms below; other statuses classify cleanly here.
+    return status === 429 || status === 408 || status >= 501;
+  }
+  const code = (err as { code?: unknown } | null)?.code ?? ((err as { cause?: { code?: unknown } } | null)?.cause?.code);
+  if (typeof code === "string" && TRANSPORT_CODES.has(code)) return true;
   if (!(err instanceof Error)) return false;
   const msg = err.message;
   return (
-    // G7: word-boundary matches for HTTP status codes — msg.includes("500") would
-    // false-match "port 5001", "error 50042", or any number containing "500".
+    // Word-boundary matches — plain .includes("500") would false-match "port 5001".
     /\b503\b/.test(msg) ||
     /\b500\b/.test(msg) ||
     /\b429\b/.test(msg) ||
@@ -74,6 +126,18 @@ export function is503Error(err: unknown): boolean {
     /fetch failed/i.test(msg) ||
     /network (error|timeout)/i.test(msg)
   );
+}
+
+/**
+ * Should the MODEL fallback chain engage? Everything retriable, PLUS 404 —
+ * a retired/renamed model id (the 2026-06-27 gemini-2.5-flash:free incident:
+ * 404, not 503, and the old chain never caught it). Auth failures (401/403)
+ * stay excluded: the fallback shares the key, so falling back just hides the
+ * real misconfig.
+ */
+export function isModelFallbackError(err: unknown): boolean {
+  if (is503Error(err)) return true;
+  return httpStatusOf(err) === 404;
 }
 
 export function isQuotaExhaustedError(err: unknown): boolean {
