@@ -66,6 +66,23 @@ jobs:
       DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
       TELEGRAM_BOT_TOKEN: "ci:placeholder"
       TELEGRAM_CHAT_ID: "000000000"
+    # Real Postgres for the integration suites that verify actual DB state
+    # (signal-transaction, gateway-postgres-state). Same pgvector image as prod
+    # (deploy/stack.compose.yml) so `CREATE EXTENSION vector` in setup-db works.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Note when skipped
         if: env.GOOGLE_GENERATIVE_AI_API_KEY == ''
@@ -82,6 +99,10 @@ jobs:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
+      # Real migration path — creates app + LangGraph checkpoint tables so the
+      # Postgres-backed integration suites verify actual DB state (rule #22).
+      - run: node --import tsx/esm scripts/setup-db.ts
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
       - run: pnpm test:integration
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
