@@ -20,7 +20,9 @@ jobs:
     timeout-minutes: 40
     services:
       postgres:
-        image: postgres:16
+        # pgvector image, NOT postgres:16 — setup-db.ts runs CREATE EXTENSION vector
+        # (0005_pgvector.sql) and fails on the plain image.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: founderos
           POSTGRES_PASSWORD: founderos

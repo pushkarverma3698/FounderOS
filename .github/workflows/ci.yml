@@ -62,6 +62,21 @@ jobs:
     # invalidates the whole workflow file (every job fails in 0s). Instead we
     # always start the job and skip the steps when the key is absent (env IS
     # allowed in step-level `if:`).
+    services:
+      postgres:
+        # pgvector image, NOT postgres:16 — migrations run CREATE EXTENSION vector
+        # (0005_pgvector.sql) and fail on the plain image.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -86,6 +101,12 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
+      # package.json scripts use --env-file=.env; CI provides real env vars.
+      - run: touch .env
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
+      - name: Migrate DB (drizzle + LangGraph checkpoint tables)
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
+        run: node --env-file=.env --import tsx/esm scripts/setup-db.ts
       - run: pnpm test:integration
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
 
