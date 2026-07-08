@@ -31,6 +31,9 @@ jobs:
       # Compile/CI-time wiring integrity: a half-wired tool fails the build here
       # instead of silently doing nothing in production (keyless, stub env).
       - run: pnpm verify:wiring
+      # v3 anti-slop invariants (ratchet): new architectural debt fails the PR.
+      # Baseline lives in governance/architecture-baseline.json and may only shrink.
+      - run: pnpm verify:arch
 
   unit-tests:
     name: Unit + regression tests

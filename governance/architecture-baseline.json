@@ -1,0 +1,7 @@
+{
+  "gateway-imports": 3,
+  "kernel-purity": 0,
+  "fail-open-catch": 35,
+  "loc-budget": 10,
+  "regex-routing": 29
+}
