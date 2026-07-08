@@ -33,7 +33,10 @@
     "setup": "node --env-file=.env --import tsx/esm scripts/setup-db.ts",
     "brain:sync": "node --env-file=.env --import tsx/esm scripts/sync-turicks-brain.ts",
     "personal:sync": "node --env-file=.env --import tsx/esm scripts/sync-personal-rag.ts",
-    "graph:gen": "node --env-file=.env --import tsx/esm scripts/generate-knowledge-graph.ts"
+    "graph:gen": "node --env-file=.env --import tsx/esm scripts/generate-knowledge-graph.ts",
+    "proof:scoreboard": "node --import tsx/esm scripts/proof-scoreboard.ts",
+    "proof:case-study": "node --env-file=.env --import tsx/esm scripts/export-case-study.ts",
+    "proof:costs": "node --env-file=.env --import tsx/esm scripts/proof-cost-ledger.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
