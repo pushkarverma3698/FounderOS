@@ -187,6 +187,16 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
         return;
       }
 
+      // interrupt() re-execution re-inserts a pending hitl_approvals row
+      // (hitlGate cannot tell a resume re-run from a fresh gate). The graph
+      // checkpoint is the source of truth: it is NOT paused here, so any
+      // still-pending row for this thread is that artifact — resolve it with
+      // the founder's decision so no phantom card can ever be restored.
+      const orphan = await getPendingInterrupt(threadId);
+      if (orphan) {
+        await resolveInterrupt(orphan.interrupt_id, decision);
+      }
+
       const reply = kernelReply(res as never);
       trace.event("turn.out", { replyPreview: reply.slice(0, 200) });
       await sendReply(ctx, reply);
