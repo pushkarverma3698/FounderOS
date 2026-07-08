@@ -158,3 +158,48 @@ bugs, not product bugs — the product code behaved correctly each time):
 MTProto session + real bot token), live LLM routing/eval (`pnpm eval`, needs a paid or free
 OpenRouter key), and real Gmail transport — none of these credentials exist in this container.
 The paths above them were exercised for real; the credentials are the only missing layer.
+
+---
+
+## Entry 6 — CI integration job: two pre-existing failure classes (found via PR #292)
+
+**Problem.** The `Integration tests` CI job fails on every run where the repo's secrets are
+configured, for reasons unrelated to any PR's diff:
+1. `office-hitl.test.ts` (5 tests): the CI `OPENROUTER_API_KEY` is real-looking but has **zero
+   credits** — `hasLiveIntegrationModel()` only checks key *presence*, so the suite runs live
+   and every call dies with `402 Insufficient credits`.
+2. `signal-transaction.test.ts` (2 tests): needs a real Postgres, but the job defines
+   `DATABASE_URL=postgresql://ci:ci@localhost:5432/ci` with **no Postgres service container**
+   → `ECONNREFUSED`. (The new gateway-postgres-state suite skipped cleanly in the same run —
+   confirming its reachability probe works — but skipping means no CI coverage.)
+
+**Options considered.**
+- Do nothing / report only — leaves the job permanently red; every future PR shows a failing
+  check that reviewers learn to ignore. Worst outcome for a repo whose rules are built on
+  "no false green, no ignored red".
+- For (1), auto-`skip` inside each test on 402 — scatters error-classification through test
+  bodies. Instead: one async guard, `hasUsableLiveIntegrationModel()`, that makes a single
+  minimal live probe call and skips the whole suite LOUDLY (with the provider's reason) when
+  the provider is unusable. A depleted key is equivalent to an absent key for test purposes;
+  the prod boot validator (`test:smoke`) still fails LOUD on a dead provider, so no safety
+  regression. Cost: one tiny probe per CI run, only when keys are configured (rule #23 ok).
+- For (2), add a `pgvector/pgvector:pg16` service container (same image as prod
+  `deploy/stack.compose.yml`) + run the real `scripts/setup-db.ts` before the suite. This
+  turns BOTH Postgres-dependent suites from dead weight into real CI coverage — the new
+  gateway-postgres-state suite now runs on every keyed CI run instead of skipping.
+
+**Chosen:** async probe guard + Postgres service. Branch policy check (PRs to main must come
+from `stable`) stays red by design: `beta` has diverged onto the v3 kernel line while this
+work is on main's v2 line (retargeting to beta produced a dirty 51-commit PR — reverted).
+Routing the merge is the founder's call; the check exists precisely to force that decision.
+
+**Entry 6 verification (fresh runs):**
+- `pnpm lint` → exit 0; ci.yml parses (js-yaml OK)
+- CI-equivalent simulation (clean env: fresh `ci` Postgres db, job env vars only, no LLM keys):
+  `scripts/setup-db.ts` → "Database setup complete"; `vitest --config vitest.integration.config.ts`
+  → **3 files passed | 4 skipped** (gateway-postgres-state + signal-transaction now RUN and pass)
+- Probe-failure path exercised with a real provider error (real-looking invalid OpenRouter key):
+  `[live-model-guard] SKIP live suites — provider probe failed: 401 User not found.` →
+  office-hitl 5 skipped instead of 5 failed. The CI 402 takes this identical catch path.
+  NOT VERIFIED against the literal 402 (needs the repo's actual depleted key).
+- `pnpm test` → 1648/1648 green after the changes.

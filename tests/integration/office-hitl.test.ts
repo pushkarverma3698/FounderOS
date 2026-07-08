@@ -53,12 +53,14 @@ vi.mock("../../src/db/queries.js", async (orig) => {
   return { ...actual, isSuppressed: vi.fn(async () => false) };
 });
 
-import { hasLiveIntegrationModel } from "./live-model-guard.js";
+import { hasUsableLiveIntegrationModel } from "./live-model-guard.js";
 
 // Import AFTER mocks are registered
 const { buildOffice, getPendingApproval } = await import("../../src/agents/office.js");
 
-const d = hasLiveIntegrationModel() ? describe : describe.skip;
+// Probe the provider (not just the key): a keyed-but-depleted account (402)
+// fails every test with the same provider error — skip loudly instead.
+const d = (await hasUsableLiveIntegrationModel()) ? describe : describe.skip;
 
 d("Office HITL loop (live model, mocked side-effects)", () => {
   beforeEach(() => {
