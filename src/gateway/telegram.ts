@@ -20,8 +20,9 @@
  */
 
 import { Bot, type Context } from "grammy";
-import { env } from "../core/config.js";
+import { env, TENANT } from "../core/config.js";
 import { logger } from "../infra/logger.js";
+import { writeAuditEntry } from "../db/queries.js";
 import {
   handleStart, handleReset, handleStatus, handleContext, handleCompany,
   handleTarget, handleTargets, handleUntarget,
