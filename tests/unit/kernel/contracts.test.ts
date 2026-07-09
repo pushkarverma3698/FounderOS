@@ -120,6 +120,39 @@ describe("kind normalization — planner drift repair (live T02 regression)", ()
   });
 });
 
+describe("text.summary shape repair (live T01/T03 regression)", () => {
+  // LIVE FAILURE 2026-07-09: comms worker emitted {"summary": …} where the
+  // contract wants {"text": …} — same honest content, wrong field name. The
+  // shape is repaired in code; content is never altered or invented.
+  it("normalizes {summary} to {text} through validateStepResult", () => {
+    const msg = "Failed to read unread emails: gws auth missing.";
+    const res = validateStepResult(
+      { status: "ok", step_id: "s1", output: { summary: msg }, tool_receipts: [] },
+      envelope({ expected: { kind: "data", schema_ref: "text.summary" } }),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok && res.value.status === "ok") expect(res.value.output).toEqual({ text: msg });
+  });
+
+  it("wraps a bare JSON-string answer into {text}", () => {
+    const parsed = OUTPUT_CONTRACTS["text.summary"]!.safeParse("Linear builds issue tracking.");
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toEqual({ text: "Linear builds issue tracking." });
+  });
+
+  it("leaves a correct {text} untouched", () => {
+    const parsed = OUTPUT_CONTRACTS["text.summary"]!.safeParse({ text: "already right" });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toEqual({ text: "already right" });
+  });
+
+  it("still rejects empty and content-free outputs", () => {
+    expect(OUTPUT_CONTRACTS["text.summary"]!.safeParse({}).success).toBe(false);
+    expect(OUTPUT_CONTRACTS["text.summary"]!.safeParse({ summary: "" }).success).toBe(false);
+    expect(OUTPUT_CONTRACTS["text.summary"]!.safeParse("").success).toBe(false);
+  });
+});
+
 describe("plan validation", () => {
   const plan = (steps: TaskEnvelope[]) => ({ schema_version: KERNEL_SCHEMA_VERSION, goal: "g", steps });
 

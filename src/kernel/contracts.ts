@@ -106,9 +106,23 @@ export function stableStringify(value: unknown): string {
  * ref used anywhere resolves here. Signal payload schemas are included so a
  * step can produce a `dept_signals`-ready payload directly.
  */
+/**
+ * Live T01/T03 repair (kind-drift's sibling): models emit pure-text answers as
+ * a bare string or {"summary": …} instead of {"text": …} — same honest
+ * content, wrong wrapper. Repair the SHAPE in code; content is never altered.
+ */
+function coerceTextSummary(val: unknown): unknown {
+  if (typeof val === "string") return { text: val };
+  if (val && typeof val === "object" && !Array.isArray(val) && !("text" in val)) {
+    const summary = (val as Record<string, unknown>)["summary"];
+    if (typeof summary === "string") return { text: summary };
+  }
+  return val;
+}
+
 export const OUTPUT_CONTRACTS: Record<string, z.ZodTypeAny> = {
   /** Free-text answer/summary — the default for read/synthesis steps. */
-  "text.summary": z.object({ text: z.string().min(1) }),
+  "text.summary": z.preprocess(coerceTextSummary, z.object({ text: z.string().min(1) })),
   /** Research findings with sources — grounded, not vibes. */
   "research.findings": z.object({
     summary: z.string().min(1),
@@ -131,6 +145,19 @@ export const OUTPUT_CONTRACTS: Record<string, z.ZodTypeAny> = {
 
 export function isOutputSchemaRef(ref: string): boolean {
   return Object.prototype.hasOwnProperty.call(OUTPUT_CONTRACTS, ref);
+}
+
+/**
+ * Live T01 repair: workers often finalize a pure-text step with the prose
+ * answer itself (or jsonrepair mangles it into fragments) instead of
+ * {"text": …}. For "text.summary" ONLY: keep the parsed value when the
+ * contract already accepts it, else salvage the worker's raw final text.
+ * Never invents content; validateStepResult (incl. the action-receipt gate)
+ * still runs on the result. All other contracts are untouched.
+ */
+export function repairTextSummaryOutput(parsed: unknown, rawText: string): unknown {
+  if (OUTPUT_CONTRACTS["text.summary"]!.safeParse(parsed).success) return parsed;
+  return rawText.trim().length > 0 ? { text: rawText } : parsed;
 }
 
 // ── Task envelope (the ONLY thing a worker sees) ──────────────────────────────

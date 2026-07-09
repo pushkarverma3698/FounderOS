@@ -31,6 +31,7 @@ import { jsonrepair } from "jsonrepair";
 import {
   digestToolResult,
   hashToolArgs,
+  repairTextSummaryOutput,
   validateStepResult,
   type StepResult,
   type TaskEnvelope,
@@ -263,7 +264,11 @@ export function collect(state: KernelStateType): KernelUpdate {
 
   const lastAi = [...state.scratch].reverse().find((m) => isAIMessage(m));
   const text = lastAi && typeof lastAi.content === "string" ? lastAi.content : "";
-  const parsed = text ? tryParseJson(text) : null;
+  const parsedRaw = text ? tryParseJson(text) : null;
+  // Live T01 repair: for the pure-text contract, a prose finalize IS the
+  // payload — salvage it instead of failing an honest answer (contracts.ts).
+  const parsed =
+    step.expected.schema_ref === "text.summary" ? repairTextSummaryOutput(parsedRaw, text) : parsedRaw;
 
   const failedValidation = (message: string): KernelUpdate => ({
     results: [
