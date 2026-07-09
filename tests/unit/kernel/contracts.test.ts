@@ -69,6 +69,90 @@ describe("registry parity", () => {
   });
 });
 
+describe("kind normalization — planner drift repair (live T02 regression)", () => {
+  // LIVE FAILURE 2026-07-09: planner emitted expected.kind:"research.findings"
+  // (the schema_ref value), which the strict enum rejected → the whole plan
+  // died at the planning stage. kind must be repaired from schema_ref instead.
+  it("repairs kind echoing the schema_ref (research.findings → data)", () => {
+    const res = TaskEnvelopeSchema.safeParse({
+      ...envelope(),
+      expected: { kind: "research.findings", schema_ref: "research.findings" },
+    });
+    expect(res.success).toBe(true);
+    expect(res.success && res.data.expected.kind).toBe("data");
+  });
+
+  it("derives draft from a draft.* schema_ref when kind is invalid", () => {
+    const res = TaskEnvelopeSchema.safeParse({
+      ...envelope(),
+      worker: "comms",
+      expected: { kind: "draft.email", schema_ref: "draft.email" },
+    });
+    expect(res.success).toBe(true);
+    expect(res.success && res.data.expected.kind).toBe("draft");
+  });
+
+  it("derives action_receipt from action.summary when kind is invalid", () => {
+    const res = TaskEnvelopeSchema.safeParse({
+      ...envelope(),
+      expected: { kind: "action.summary", schema_ref: "action.summary" },
+    });
+    expect(res.success).toBe(true);
+    expect(res.success && res.data.expected.kind).toBe("action_receipt");
+  });
+
+  it("NEVER weakens a valid action_receipt the model emitted correctly", () => {
+    const res = TaskEnvelopeSchema.safeParse({
+      ...envelope(),
+      expected: { kind: "action_receipt", schema_ref: "text.summary" },
+    });
+    expect(res.success).toBe(true);
+    // untouched — the receipt safety check must still apply to this step.
+    expect(res.success && res.data.expected.kind).toBe("action_receipt");
+  });
+
+  it("still rejects an unknown schema_ref regardless of kind repair", () => {
+    const res = TaskEnvelopeSchema.safeParse({
+      ...envelope(),
+      expected: { kind: "made.up", schema_ref: "made.up" },
+    });
+    expect(res.success).toBe(false);
+  });
+});
+
+describe("text.summary shape repair (live T01/T03 regression)", () => {
+  // LIVE FAILURE 2026-07-09: comms worker emitted {"summary": …} where the
+  // contract wants {"text": …} — same honest content, wrong field name. The
+  // shape is repaired in code; content is never altered or invented.
+  it("normalizes {summary} to {text} through validateStepResult", () => {
+    const msg = "Failed to read unread emails: gws auth missing.";
+    const res = validateStepResult(
+      { status: "ok", step_id: "s1", output: { summary: msg }, tool_receipts: [] },
+      envelope({ expected: { kind: "data", schema_ref: "text.summary" } }),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok && res.value.status === "ok") expect(res.value.output).toEqual({ text: msg });
+  });
+
+  it("wraps a bare JSON-string answer into {text}", () => {
+    const parsed = OUTPUT_CONTRACTS["text.summary"]!.safeParse("Linear builds issue tracking.");
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toEqual({ text: "Linear builds issue tracking." });
+  });
+
+  it("leaves a correct {text} untouched", () => {
+    const parsed = OUTPUT_CONTRACTS["text.summary"]!.safeParse({ text: "already right" });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toEqual({ text: "already right" });
+  });
+
+  it("still rejects empty and content-free outputs", () => {
+    expect(OUTPUT_CONTRACTS["text.summary"]!.safeParse({}).success).toBe(false);
+    expect(OUTPUT_CONTRACTS["text.summary"]!.safeParse({ summary: "" }).success).toBe(false);
+    expect(OUTPUT_CONTRACTS["text.summary"]!.safeParse("").success).toBe(false);
+  });
+});
+
 describe("plan validation", () => {
   const plan = (steps: TaskEnvelope[]) => ({ schema_version: KERNEL_SCHEMA_VERSION, goal: "g", steps });
 
