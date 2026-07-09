@@ -81,86 +81,6 @@ jobs:
           script: |
             set -euo pipefail
             cd /opt/founderos
-            # The live MTProto tester session (TELEGRAM_TESTER_SESSION) is a RUNTIME
-            # artifact owned by the box: it is written there by an on-box re-login and
-            # is NOT in PROD_DOTENV. Rendering .env from the secret used to revert it to
-            # a stale value, which made Telegram revoke the auth key (AUTH_KEY_DUPLICATED)
-            # on every deploy. Capture the on-box line first and re-inject it after the
-            # render so deploys never clobber the live session.
-            PRESERVE_SESSION=""
-            if [ -f .env ]; then
-              PRESERVE_SESSION="$(grep -E '^TELEGRAM_TESTER_SESSION=' .env | head -1 || true)"
-            fi
-            # Render the production .env from the secret (atomic, 0600). Only when
-            # the secret is present — never clobber a good .env with an empty one.
-            if [ -n "${PROD_DOTENV:-}" ]; then
-              umask 077
-              printf '%s' "$PROD_DOTENV" | base64 -d > .env.tmp
-              # Sanity: a valid .env must contain DATABASE_URL, else abort (keep old).
-              if grep -q '^DATABASE_URL=' .env.tmp; then
-                # Re-inject the preserved on-box session (drop any stale copy from the
-                # secret first, then append the live one).
-                if [ -n "$PRESERVE_SESSION" ]; then
-                  grep -v -E '^TELEGRAM_TESTER_SESSION=' .env.tmp > .env.tmp2 || true
-                  printf '%s\n' "$PRESERVE_SESSION" >> .env.tmp2
-                  mv .env.tmp2 .env.tmp
-                  echo "==> Preserved on-box TELEGRAM_TESTER_SESSION across .env render"
-                fi
-                mv .env.tmp .env
-                chmod 600 .env
-                echo "==> Rendered /opt/founderos/.env from PROD_DOTENV secret"
-              else
-                rm -f .env.tmp
-                echo "!! PROD_DOTENV decoded but has no DATABASE_URL — keeping existing .env" >&2
-                exit 1
-              fi
-            else
-              echo "==> PROD_DOTENV not set; using the .env already on the box"
-            fi
-            # Pin the production model. 2026-07-09: reverted to direct Gemini after
-            # proving google-genai:gemini-2.5-flash tool-calls cleanly on the live box
-            # (the earlier "malformed Gemini" note was gemini-2.5-PRO, not flash).
-            # anthropic:claude-haiku-4-5 is unusable in prod — there is no
-            # ANTHROPIC_API_KEY, so it 401s on EVERY message. Fallback = FREE OpenRouter
-            # models only (founder directive: no paid fallback).
-            grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
-            {
-              printf '%s\n' 'AGENT_MODEL=google-genai:gemini-2.5-flash'
-              printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free'
-            } >> .env.patched
-            mv .env.patched .env
-            chmod 600 .env
-            echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-2.5-flash"
-            # Primary model key — forwarded as a separate secret so a PROD_DOTENV
-            # re-render can never wipe it. Without this the direct-Gemini path 401s.
-            if [ -n "${GOOGLE_GENERATIVE_AI_API_KEY:-}" ]; then
-              grep -v -E '^GOOGLE_GENERATIVE_AI_API_KEY=' .env > .env.patched || true
-              printf 'GOOGLE_GENERATIVE_AI_API_KEY=%s\n' "$GOOGLE_GENERATIVE_AI_API_KEY" >> .env.patched
-              mv .env.patched .env
-              chmod 600 .env
-              echo "==> Patched .env: GOOGLE_GENERATIVE_AI_API_KEY refreshed (primary model)"
-            fi
-            if [ -n "${OPENROUTER_API_KEY:-}" ]; then
-              grep -v -E '^OPENROUTER_API_KEY=' .env > .env.patched || true
-              printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" >> .env.patched
-              mv .env.patched .env
-              chmod 600 .env
-              echo "==> Patched .env: OPENROUTER_API_KEY refreshed (fallback path)"
-            fi
-            # MCP bridge Slack secrets — append only when the secret is set.
-            # These are NOT in PROD_DOTENV (they rotate independently); forwarded as
-            # separate GitHub secrets so they can be updated without re-encoding the
-            # entire PROD_DOTENV blob.
-            if [ -n "${SLACK_BOT_TOKEN:-}" ]; then
-              grep -v -E '^(SLACK_BOT_TOKEN|SLACK_TEAM_ID)=' .env > .env.patched || true
-              {
-                printf 'SLACK_BOT_TOKEN=%s\n' "$SLACK_BOT_TOKEN"
-                [ -n "${SLACK_TEAM_ID:-}" ] && printf 'SLACK_TEAM_ID=%s\n' "$SLACK_TEAM_ID"
-              } >> .env.patched
-              mv .env.patched .env
-              chmod 600 .env
-              echo "==> Patched .env: SLACK_BOT_TOKEN + SLACK_TEAM_ID set"
-            fi
             # Fix git permission drift (e.g. prior verify left root-owned refs).
             if [ -d .git/refs/heads/cursor ]; then
               rm -rf .git/refs/heads/cursor 2>/dev/null || true
@@ -169,5 +89,10 @@ jobs:
             git fetch --quiet origin main
             git checkout --force --detach origin/main 2>/dev/null || git checkout -B main origin/main
             chmod +x scripts/apply-prod-env-overrides.sh deploy/deploy.sh 2>/dev/null || true
+            # scripts/apply-prod-env-overrides.sh is THE single renderer of .env:
+            # PROD_DOTENV render, on-box preservation (TELEGRAM_TESTER_SESSION +
+            # provisioned keys), model pin, and per-secret patches all live there.
+            # 2026-07-09: an inline second render here clobbered the preservation —
+            # never duplicate that logic in this workflow again.
             bash scripts/apply-prod-env-overrides.sh
             ./deploy/deploy.sh

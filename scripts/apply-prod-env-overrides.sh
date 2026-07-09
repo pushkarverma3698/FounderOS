@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Apply production .env on VPS from GitHub Actions secrets.
-# Called by deploy / stabilize / launch-gate workflows before running deploy scripts.
+# THE single renderer of /opt/founderos/.env from GitHub Actions secrets.
+# Called by deploy / stabilize / launch-gate workflows before running deploy
+# scripts. deploy.yml must NOT render .env itself — a second inline render is
+# how the TELEGRAM_TESTER_SESSION preservation drifted and got clobbered.
 #
 # Inputs (env vars forwarded by appleboy/ssh-action):
 #   PROD_DOTENV          — base64-encoded full .env (required for DATABASE_URL)
@@ -9,15 +11,44 @@
 #   OPENROUTER_API_KEY   — free-tier fallback path key
 #   LINKEDIN_ACCESS_TOKEN — optional override
 #   LINKEDIN_AUTHOR_URN   — optional override
+#   SLACK_BOT_TOKEN / SLACK_TEAM_ID — MCP bridge Slack server (optional)
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/founderos}"
 cd "$APP_DIR"
 
+# Runtime values OWNED BY THE BOX, never by the PROD_DOTENV snapshot:
+# - TELEGRAM_TESTER_SESSION is written by an on-box re-login; rendering a stale
+#   copy makes Telegram revoke the auth key (AUTH_KEY_DUPLICATED) every deploy.
+#   The box value always wins.
+# - Provisioned keys (Firecrawl/Composio/Gmail backend) may postdate the
+#   PROD_DOTENV snapshot. The secret wins when it has them; the box value is
+#   preserved only when the render would otherwise DELETE a working key.
+PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND"
+
 if [ -n "${PROD_DOTENV:-}" ]; then
   umask 077
+  PRESERVE_SESSION=""
+  if [ -f .env ]; then
+    PRESERVE_SESSION="$(grep -E '^TELEGRAM_TESTER_SESSION=' .env | head -1 || true)"
+  fi
   printf '%s' "$PROD_DOTENV" | base64 -d > .env.tmp
   if grep -q '^DATABASE_URL=' .env.tmp; then
+    if [ -n "$PRESERVE_SESSION" ]; then
+      grep -v -E '^TELEGRAM_TESTER_SESSION=' .env.tmp > .env.tmp2 || true
+      printf '%s\n' "$PRESERVE_SESSION" >> .env.tmp2
+      mv .env.tmp2 .env.tmp
+      echo "==> Preserved on-box TELEGRAM_TESTER_SESSION across .env render"
+    fi
+    for key in $PRESERVE_IF_MISSING; do
+      if ! grep -q "^${key}=" .env.tmp && [ -f .env ]; then
+        BOX_LINE="$(grep -E "^${key}=" .env | head -1 || true)"
+        if [ -n "$BOX_LINE" ]; then
+          printf '%s\n' "$BOX_LINE" >> .env.tmp
+          echo "==> Preserved on-box ${key} (absent from PROD_DOTENV)"
+        fi
+      fi
+    done
     mv .env.tmp .env
     chmod 600 .env
     echo "==> Rendered .env from PROD_DOTENV"
@@ -59,6 +90,19 @@ if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   mv .env.patched .env
   chmod 600 .env
   echo "==> Patched .env: OPENROUTER_API_KEY refreshed (fallback path)"
+fi
+
+# MCP bridge Slack secrets — separate GitHub secrets so they rotate without
+# re-encoding the entire PROD_DOTENV blob. Appended only when set.
+if [ -n "${SLACK_BOT_TOKEN:-}" ]; then
+  grep -v -E '^(SLACK_BOT_TOKEN|SLACK_TEAM_ID)=' .env > .env.patched || true
+  {
+    printf 'SLACK_BOT_TOKEN=%s\n' "$SLACK_BOT_TOKEN"
+    [ -n "${SLACK_TEAM_ID:-}" ] && printf 'SLACK_TEAM_ID=%s\n' "$SLACK_TEAM_ID"
+  } >> .env.patched
+  mv .env.patched .env
+  chmod 600 .env
+  echo "==> Patched .env: SLACK_BOT_TOKEN + SLACK_TEAM_ID set"
 fi
 
 # LinkedIn direct API — separate secrets so founder can update without re-encoding PROD_DOTENV.
