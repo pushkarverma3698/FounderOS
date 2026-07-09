@@ -1,205 +1,184 @@
-# ARCHITECTURE_LEDGER
-
-Reasoning dump for the production-readiness pass (branch `claude/founderos-production-ready-az0y06`).
-Each entry: problem → options → why this implementation.
 
 ---
 
-## Entry 1 — Baseline audit (2026-07-08)
+# PART 2 — v3 Kernel Production Pass (branch `claude/founderos-v3-production-gea8pn`)
 
-**Problem.** Establish whether the repo actually compiles/passes before changing anything, so
-fixes target real failures rather than assumed ones.
+## Entry 7 — v3 baseline audit (2026-07-08)
 
-**Measured baseline (fresh clone, `pnpm install --frozen-lockfile`):**
-- `pnpm lint` (tsc --noEmit): **clean, exit 0**
-- `pnpm test` (vitest): **163 files / 1648 tests, all green**
-- `pnpm build` and `pnpm build:all` (core tsc emit + jarvis Vite + jarvis-next Next 15): **all pass**
-- `pnpm verify:wiring`: **passed, 0 warnings**
+**Problem.** Founder directive: run the same production-readiness protocol against the NEW
+v3 architecture. The v3 kernel rebuild lives on `beta` (commit a53a6f2, PR #291) — a
+-26,583/+5,063 line slim-down introducing `src/kernel/` (contracts, planner, supervisor,
+worker, synthesizer, tool-adapter, graph, signals, state). `main` meanwhile carried on the
+v2 line (51 commits ahead of the merge base, incl. PR #292's runtime state proof).
 
-**Conclusion.** The codebase compiles and the deterministic CI gates are already green.
-The remaining production-readiness gap is the *runtime* proof: no `.env` exists here, Docker
-daemon is not running, and no LLM API keys are available in this container. The work is
-therefore: (a) boot a real local Postgres, (b) run the real migration/setup path against it,
-(c) drive a simulated Telegram payload through the real gateway → graph → checkpointer path
-and prove state survives (interrupt/resume), (d) leave CI passing.
+**Options for the branch base.**
+1. Base on `main` and merge beta in — produces the exact "dirty 51-commit PR" the previous
+   session hit and reverted. Rejected.
+2. Base on `origin/beta` — the v3 kernel line itself; the production pass verifies v3 as it
+   will actually ship, and the PR diff shows only this session's fixes. **Chosen.**
+   (The designated branch had zero unique commits — it was identical to origin/main — so
+   resetting it onto beta loses nothing.)
+
+**Measured v3 baseline (fresh `pnpm install --frozen-lockfile`, all run this session):**
+- `pnpm lint` (tsc --noEmit): exit 0
+- `pnpm test`: 120 files / 1222 tests, all green
+- `pnpm build` (tsc emit): exit 0 — NOTE: v3 dropped the jarvis/jarvis-next apps entirely
+  (`apps/` does not exist; `build:all` = `build`). There is no Next.js service on this line;
+  the task's "boot Next.js" step is therefore N/A on v3 — documented, not skipped silently.
+- `pnpm verify:wiring`: passed, 0 warnings
+- `pnpm verify:arch` (new v3 gate): all 5 architecture gates green (gateway-imports,
+  kernel-purity, fail-open-catch, loc-budget, regex-routing)
+
+**Identified v3 gaps to close (the actual work):**
+1. No runtime state proof: `tests/integration/` on this line has only live-model-guard,
+   log-review, signal-transaction — the gateway↔Postgres interrupt/resume state-drop proof
+   (PR #292) never reached the v3 line, and v3's kernel path is exactly the code it must cover.
+2. Real-Postgres verification: boot the system PG16 cluster, run the real setup/migration
+   path, prove the kernel checkpointer persists and resumes state across a simulated
+   Telegram payload.
+3. CI: check whether beta's integration job has the same two pre-existing failure classes
+   fixed on main in #292 (dead-key 402s + missing Postgres service).
 
 ---
 
-## Entry 2 — Booting PostgreSQL without Docker
+## Entry 8 — v3 runtime state proof: seam placement + a suspected resume-state bug
 
-**Problem.** `docker compose up -d postgres` is the documented path, but the Docker daemon is
-not running in this container (`/var/run/docker.sock` absent). The runtime proof needs a real
-Postgres with the schema applied.
+**Problem.** Prove the v3 gateway loop (`runKernelText` → HITL pause → `resumeKernel`)
+does not drop state, against the REAL Postgres checkpointer, with a simulated Telegram
+payload — no live LLM/Telegram credentials exist in this container.
+
+**Seam placement (adapted from Entry 4 to the v3 composition root).** `kernel-boot.ts`
+imports `getModel` (planner) and `getWorkerModel` (worker + synthesizer) from
+`agents/model.js` at module level, so an export-level `vi.mock` intercepts cleanly (the
+Entry-5 intra-module-binding trap does not apply here — the caller is a different module).
+Everything else runs REAL: `getKernel()` composition, DEPARTMENT_TOOLS with the production
+`send_email` wrapper (daily quota → duplicate-outreach guard → brand gate → `hitlGate`
+writing `hitl_approvals` → `interrupt()` → suppression → idempotency audit), the Postgres
+checkpointer, and the full kernel graph. Faked at the credential boundary only:
+`providerSendEmail` (Gmail transport) and `judgeOutbound` (fail-open Claude judge, would
+otherwise attempt a live call). Scripted models discriminate by SYSTEM-PROMPT CONTENT
+(synthesizer prompt vs worker protocol), not call order — invariant under graph topology.
+
+**Options for the model fake.** (a) Reuse kernel-e2e's `buildKernel` injection — rejected:
+that bypasses `kernel-boot.ts`/`getKernel()`, the exact composition root under test.
+(b) Mock at `agents/model.js` — chosen: `runKernelText` then exercises every production
+line from the grammy seam down.
+
+**Suspected bug to prove/disprove (red repro first, rule #19).** `resumeKernel` resolves
+the `hitl_approvals` row BEFORE `kernel.invoke(Command{resume})`. On resume the gated tool
+re-executes from the top (documented interrupt() semantics) and `hitlGate` re-runs:
+`getPendingInterrupt` now finds nothing (just resolved) → it INSERTS A FRESH `pending` row
+→ `interrupt()` returns "approved" and the turn completes — leaving an ORPHAN pending row.
+Consequences if real: `restorePendingApproval` re-posts a stale approval card after any
+restart within 2h, and the next callback tap "resolves" a phantom. The test asserts
+zero pending rows for the thread after a completed resume; if that fails, the fix will be
+designed in a follow-up entry before touching code.
+
+---
+
+## Entry 9 — CONFIRMED v3 bug: orphan pending `hitl_approvals` row after every approved resume
+
+**Symptom (red repro, this session).** The new integration test's turn-2 assertion
+"zero pending rows after a completed resume" fails: one orphan `pending` row remains.
+
+**Root cause.** `resumeKernel` resolves the pending row BEFORE `kernel.invoke(Command{resume})`.
+LangGraph then re-executes the gated tool from the top; `hitlGate` re-runs, finds no pending
+row (just resolved), inserts a FRESH one, and `interrupt()` returns the resume value. The turn
+completes with a phantom `pending` row. Consequences: `restorePendingApproval` re-posts a stale
+approval card after any restart within 2h, and the next tap "resolves" a phantom — the exact
+wedged-interrupt bug class rule #19 exists for.
 
 **Options considered.**
-1. Start `dockerd` manually — heavyweight, may not work in a nested/unprivileged container,
-   and adds nothing over a direct Postgres.
-2. Use the preinstalled system PostgreSQL 16 (`/usr/lib/postgresql/16`) via `pg_ctlcluster`,
-   create the `founderos` role/db to match `.env.example` defaults.
-3. Skip a real DB and mock the checkpointer — explicitly forbidden by the task (zero-trust
-   execution) and by project rule #22 (verify real state, not schema).
+1. Reorder: resolve AFTER invoke. Leaks anyway in the pause-again case (a second gated step
+   skips its own insert because step-1's row is still pending, then orphans on ITS resume) —
+   and loses the "decision durably recorded before side effects" property. Rejected.
+2. `hitlGate` skips insert when the latest resolved row matches this payload — time/content
+   heuristics, breaks legitimately-repeated approvals (shell commands), flaky. Rejected.
+3. Transport-layer reconciliation (CHOSEN): the graph checkpoint is the source of truth for
+   "paused". In `resumeKernel`, after the post-invoke approval check says the graph is NOT
+   paused, any still-pending DB row for this thread is by definition the re-execution
+   artifact — resolve it with the founder's decision. Deterministic, no change to hitlGate's
+   rule-#4 crash-recovery write, covers single- and multi-gated-step missions uniformly.
+   Fail loud: a DB error here surfaces via the existing typed error reply, no swallowed catch
+   (also keeps the verify:arch fail-open-catch ratchet at baseline).
 
-**Chosen: option 2.** It gives a genuine Postgres 16 the same major version as the pgvector
-prod image, needs no daemon privileges, and the connection string can mirror
-`docker-compose.yml` defaults so `scripts/setup-db.ts` and drizzle migrations run unmodified.
-Known limitation to verify: the system Postgres may lack the `vector` extension (prod uses
-`pgvector/pgvector:16`). If `CREATE EXTENSION vector` fails, the RAG tables are the only
-casualty — document it, don't fake it.
+**Known limitation (documented, not hidden):** when a mission pauses AGAIN on a second gated
+step, the surviving pending row still carries step-1's callback_data, so a crash-restore card
+between the two approvals shows the previous step's payload. Pre-existing behaviour, separate
+bug class, not widened by this fix.
+
+**Also fixed in the test harness (not product code):** the reject-path scenario must use a
+DIFFERENT recipient — the duplicate-outreach guard (correctly) short-circuits a second send to
+the just-emailed address BEFORE the HITL gate, so the mission completes without pausing.
+The scripted planner/worker now parse the recipient from the message instead of a constant.
 
 ---
 
-## Entry 3 — Simulated Telegram payload without live keys
+## Entry 10 — v3 verification results (2026-07-08, every command run fresh in this session)
 
-**Problem.** Prove the system "can handle a simulated Telegram payload without dropping
-state." A full live boot (`src/index.ts`) requires a real `TELEGRAM_BOT_TOKEN` (grammy calls
-`getMe` against api.telegram.org) and a real LLM key — neither exists in this container.
+**Runtime environment booted for the proof:**
+- System PostgreSQL 16.13 started (`pg_ctlcluster 16 main start`), `postgresql-16-pgvector`
+  installed (extension `vector 0.6.0` verified with a real `CREATE EXTENSION`), `founderos`
+  role + database created to match `.env.example`, and the REAL migration path run
+  (`scripts/setup-db.ts`): 17 tables in `agents` (incl. LangGraph `checkpoints` /
+  `checkpoint_writes` / `checkpoint_blobs`), 4 in `brain` — verified with `\dt`, not assumed.
+
+**Simulated Telegram payload, real v3 path, real Postgres**
+(`tests/integration/kernel-postgres-state.test.ts`, 4/4 green):
+1. Turn 1 (text payload → `runKernelText`): pauses on the approval card ("Send email to …?",
+   Approve/Reject keyboard), `hitl_approvals` row `pending`, >0 checkpoint rows for the thread,
+   transport NOT called.
+2. Turn 2 (approve → `resumeKernel`): transport fires exactly once with the turn-1 payload,
+   `action_log` idempotency row written (`email:turicks:<sha1-16>`), approval row resolved,
+   ZERO pending rows remain (Entry-9 fix verified), reply carries the code-side receipts
+   block, and the thread still holds the turn-1 mission with `status: done` — state NOT dropped.
+3. Replay with the same idempotency key skips (`skipped: true`), transport still exactly once.
+4. Reject path: typed `hitl_rejected` reply ("Nothing was sent"), NO transport call, row
+   `rejected`, no orphans.
+
+**Gates (fresh runs, in order):**
+- `pnpm lint` → exit 0
+- `pnpm test` → 120 files / 1222 tests green (incl. the changed `resumeKernel`)
+- `pnpm build` → exit 0
+- `pnpm verify:wiring` → "✅ … fully wired (0 warning(s))"
+- `pnpm verify:arch` → all 5 ratchets = baseline (the Entry-9 fix adds NO fail-open catch)
+- `pnpm test:integration` → 3 files / 7 tests green (new suite + signal-transaction both
+  RUNNING against the real local Postgres, not skipping)
+- `pnpm test:smoke` → keyless env (CI condition): clean SKIP exit 0; with this container's
+  placeholder .env: FAILS LOUD ("no openrouter key … office is dead") — the boot validator
+  doing its job.
+
+**NOT VERIFIED (named per the accountability protocol):** live Telegram round-trip (no real
+bot token — grammy `getMe` cannot authenticate), live LLM planning/routing (`pnpm eval`; no
+OpenRouter/Gemini key in this container), real Gmail transport, and MTProto founder-simulation
+QA. Every layer beneath those credentials was exercised for real. Additionally N/A on v3:
+there is no Next.js app on this line (`apps/` was removed by the kernel rebuild).
+
+---
+
+## Entry 11 — Replacing production (main, v2) with the v3 kernel line
+
+**Problem.** Founder directive: "replace main with new architecture v3." `main` (v2) has 51
+commits the v3 line never saw; `stable` has its own unique history; the CI-enforced ladder
+only allows work → beta → stable → main. A naive beta→main merge conflicts across the whole
+v2/v3 surface.
 
 **Options considered.**
-1. Boot `src/index.ts` with placeholder token — fails at grammy `bot.init()` with 401;
-   proves nothing past config validation.
-2. Drive the office invoker directly (`scripts/probe-real-task.ts` style) — exercises the
-   graph but bypasses the gateway run-loop, which project rule #19.3 identifies as the
-   highest-risk code. Insufficient alone.
-3. A verification script that boots the REAL gateway pipeline (the same handler wiring
-   `telegram.ts` uses) against the REAL local Postgres, with exactly two fakes at the
-   process boundary: the Telegram transport (grammy outbound API) and the LLM model.
-   Everything between — routing, HITL `hitl_approvals` DB write, `interrupt()`, checkpointer
-   persistence, resume, idempotency audit — is the production code path.
+1. Merge main into beta resolving file-by-file — hundreds of conflict hunks across files v3
+   deliberately deleted; every manual hunk is a chance to resurrect tombstoned v2 modules
+   (verify:arch would catch some, not all). Rejected.
+2. Force-push beta over main — violates the repo's own "never commit to main / only humans
+   merge via the ladder" governance and silently orphans main's history. Rejected.
+3. `git merge -s ours` (CHOSEN): from a work branch on beta, record merges of origin/main and
+   origin/stable that keep the v3 TREE byte-identical while making both histories ancestors.
+   The founder's decision "v3 replaces v2" is encoded exactly: v2's history is preserved,
+   v2's content is retired. After this lands in beta, beta ⊇ main ∧ beta ⊇ stable, so the
+   ladder promotions (beta→stable→main) become content-clean merges with zero conflict hunks.
+   Deploy-critical main-side fixes were audited first and already exist on beta: the
+   anthropic model pin in deploy.yml, scripts/apply-prod-env-overrides.sh, and the
+   pgvector/pgvector:pg16 prod image in deploy/stack.compose.yml.
 
-**Chosen: option 3.** The boundaries faked are exactly the two that require external
-credentials; all state-carrying logic runs for real against Postgres. The state-drop check is
-concrete: turn 1 sends a payload that triggers a HITL interrupt (row in `hitl_approvals` +
-checkpoint row in Postgres), the process-level state is then re-read, turn 2 resumes the
-same thread, and the audit row must appear exactly once. That is the strongest verifiable
-claim available without live Telegram/LLM credentials — anything stronger would be fabricated
-evidence. NOT VERIFIED live-Telegram/live-LLM paths are named as such in the final report.
-
----
-
-## Entry 4 — Mock boundaries for the simulated-payload test (exact placement)
-
-**Problem.** Pick the mock seams so the test proves the production path rather than a
-mocked shadow of it. A mock placed one layer too high silently excludes the logic under test
-(this repo's rule #19 history: green suites that never touched the real run-loop).
-
-**Boundaries considered, and what each would exclude:**
-- Mock `agents/office.js` (like the unit gateway tests) → excludes the graph, checkpointer,
-  HITL wrapper entirely. Rejected — that's the unit suite's job, already green.
-- Mock `tools/email.js` (`emailTool`) → excludes `hasBeenAudited`/`writeAuditEntry`, i.e. the
-  idempotency audit this test must prove. Rejected.
-- Mock `infra/providers/index.js` (`providerSendEmail`) → excludes ONLY the Gmail HTTP
-  transport. Everything above it — quota check, duplicate-outreach guard, brand gate,
-  `hitl_approvals` insert, `interrupt()`, Postgres checkpoint persistence, resume,
-  suppression check, idempotency audit to `action_log` — runs for real. **Chosen.**
-- Model: mock `agents/model.js#getModel` with a scripted `BaseChatModel` that decides by its
-  *bound tool set* (has `send_email` → comms dept; has `transfer_to_comms` → supervisor),
-  not by call order. Rationale: one shared model instance serves supervisor + 8 departments,
-  so a sequence-queue fake would couple the test to LangGraph's internal invocation order —
-  brittle. Tool-set detection is invariant under graph topology changes.
-- Judge: mock `infra/judge.js#judgeOutbound` → deterministic "pass". It is fail-open by
-  design (ADR-023) and would otherwise attempt a live OpenRouter call from inside the test.
-
-**Placement:** `tests/integration/gateway-postgres-state.test.ts` — the integration config is
-the suite that documents "hits a real Postgres checkpointer" and is CI-gated, and the file
-skips itself (runIf) when Postgres is unreachable so it can never break keyless CI. Unlike the
-other integration suites it needs NO live LLM key — the graph is real, the model is scripted.
-
-**State-drop proof (what "without dropping state" means here, concretely):**
-1. Turn 1 (simulated Telegram text payload → `routeToOffice`): approval card replied;
-   `hitl_approvals` row `pending` in Postgres; ≥1 row in `agents.checkpoints` for the thread.
-2. Turn 2 (simulated approve callback → `resumeOffice`): resume value reaches the paused
-   tool; `providerSendEmail` called exactly once; `action_log` row with the deterministic
-   idempotency key exists; `hitl_approvals` row resolved `approved`; final reply delivered;
-   original HumanMessage still present in thread state (history preserved across the pause).
-
----
-
-## Entry 5 — Verification results (2026-07-08, all commands run fresh in this session)
-
-**Failures hit while building the runtime proof, and their fixes** (both were test-harness
-bugs, not product bugs — the product code behaved correctly each time):
-
-1. **`401 Missing Authentication header` inside the comms agent.** Mocking `getModel` alone
-   was insufficient: departments use `getWorkerModel()`, which internally calls the
-   module-local `getModel` binding — an export-level mock cannot intercept an intra-module
-   call. Fix: mock `getWorkerModel` (and `getModelFallbackMiddleware`) directly.
-2. **`GraphRecursionError` ("stuck in a loop") on turn 1.** Root cause chain: an earlier
-   failed run's idempotency sub-test had written a REAL `action_log` row for the recipient →
-   the duplicate-outreach guard (`hasRecentOutboundToRecipient`) correctly blocked the send →
-   the scripted model naively re-emitted the identical tool call forever. Two fixes: unique
-   recipient per run (`alex+<ts>@example.com`) so cross-run audit rows can never collide, and
-   the scripted comms model is now terminal on ANY tool result (reports the outcome instead of
-   retrying). Notably the product's recursion guard caught the loop, aborted, cleared the
-   thread, and told the founder — exactly the designed fail-safe behaviour.
-3. Trivial: asserted a nonexistent `action` column on `hitl_approvals` — dropped.
-
-**Final evidence (each command run in this session, in this order):**
-- `pnpm lint` → exit 0 (tsc clean, includes the new test)
-- `pnpm build` + `pnpm build:all` → exit 0 (core tsc emit, jarvis Vite, jarvis-next Next 15 prod build)
-- `pnpm verify:wiring` → "✅ Wiring check passed — registry is fully wired (0 warning(s))"
-- `pnpm test` → **163 files / 1648 tests passed**
-- `pnpm test:integration` → **3 files passed (incl. the new gateway-postgres-state suite:
-  3/3), 4 skipped** (the skipped suites require a live LLM key — honest skip by design)
-- `pnpm test:smoke` → keyless (CI condition): "SKIP … clean skip, not a failure", exit 0.
-  With this container's placeholder .env: FAILS LOUD ("no openrouter key … office is dead") —
-  that is the boot validator doing its job; this container has no live keys.
-- PostgreSQL 16.13 booted locally (system cluster + `postgresql-16-pgvector`), `founderos`
-  db created, `scripts/setup-db.ts` ran the real migration path: 17 tables in `agents`
-  (incl. LangGraph `checkpoints`/`checkpoint_writes`/`checkpoint_blobs`), 4 in `brain`.
-- Next.js (`apps/jarvis-next`) production server booted → `GET / → HTTP 200`.
-- Simulated Telegram payload, real path, real Postgres: turn 1 pauses on the approval card
-  with a `pending` row in `agents.hitl_approvals` and >0 rows in `agents.checkpoints`;
-  turn 2 (approve) fires the transport exactly once, writes the `action_log` idempotency row
-  (`email:turicks:<sha1-16>`), resolves the interrupt to `approved`, and the thread still
-  holds the turn-1 HumanMessage (state NOT dropped). Replay of the approved action skips on
-  idempotency. 3/3 green.
-
-**NOT VERIFIED (named per the accountability protocol):** live Telegram round-trip (needs an
-MTProto session + real bot token), live LLM routing/eval (`pnpm eval`, needs a paid or free
-OpenRouter key), and real Gmail transport — none of these credentials exist in this container.
-The paths above them were exercised for real; the credentials are the only missing layer.
-
----
-
-## Entry 6 — CI integration job: two pre-existing failure classes (found via PR #292)
-
-**Problem.** The `Integration tests` CI job fails on every run where the repo's secrets are
-configured, for reasons unrelated to any PR's diff:
-1. `office-hitl.test.ts` (5 tests): the CI `OPENROUTER_API_KEY` is real-looking but has **zero
-   credits** — `hasLiveIntegrationModel()` only checks key *presence*, so the suite runs live
-   and every call dies with `402 Insufficient credits`.
-2. `signal-transaction.test.ts` (2 tests): needs a real Postgres, but the job defines
-   `DATABASE_URL=postgresql://ci:ci@localhost:5432/ci` with **no Postgres service container**
-   → `ECONNREFUSED`. (The new gateway-postgres-state suite skipped cleanly in the same run —
-   confirming its reachability probe works — but skipping means no CI coverage.)
-
-**Options considered.**
-- Do nothing / report only — leaves the job permanently red; every future PR shows a failing
-  check that reviewers learn to ignore. Worst outcome for a repo whose rules are built on
-  "no false green, no ignored red".
-- For (1), auto-`skip` inside each test on 402 — scatters error-classification through test
-  bodies. Instead: one async guard, `hasUsableLiveIntegrationModel()`, that makes a single
-  minimal live probe call and skips the whole suite LOUDLY (with the provider's reason) when
-  the provider is unusable. A depleted key is equivalent to an absent key for test purposes;
-  the prod boot validator (`test:smoke`) still fails LOUD on a dead provider, so no safety
-  regression. Cost: one tiny probe per CI run, only when keys are configured (rule #23 ok).
-- For (2), add a `pgvector/pgvector:pg16` service container (same image as prod
-  `deploy/stack.compose.yml`) + run the real `scripts/setup-db.ts` before the suite. This
-  turns BOTH Postgres-dependent suites from dead weight into real CI coverage — the new
-  gateway-postgres-state suite now runs on every keyed CI run instead of skipping.
-
-**Chosen:** async probe guard + Postgres service. Branch policy check (PRs to main must come
-from `stable`) stays red by design: `beta` has diverged onto the v3 kernel line while this
-work is on main's v2 line (retargeting to beta produced a dirty 51-commit PR — reverted).
-Routing the merge is the founder's call; the check exists precisely to force that decision.
-
-**Entry 6 verification (fresh runs):**
-- `pnpm lint` → exit 0; ci.yml parses (js-yaml OK)
-- CI-equivalent simulation (clean env: fresh `ci` Postgres db, job env vars only, no LLM keys):
-  `scripts/setup-db.ts` → "Database setup complete"; `vitest --config vitest.integration.config.ts`
-  → **3 files passed | 4 skipped** (gateway-postgres-state + signal-transaction now RUN and pass)
-- Probe-failure path exercised with a real provider error (real-looking invalid OpenRouter key):
-  `[live-model-guard] SKIP live suites — provider probe failed: 401 User not found.` →
-  office-hitl 5 skipped instead of 5 failed. The CI 402 takes this identical catch path.
-  NOT VERIFIED against the literal 402 (needs the repo's actual depleted key).
-- `pnpm test` → 1648/1648 green after the changes.
+**Safety check before pushing:** the work branch's tree hash must equal origin/beta's tree
+hash — proving the merge changed NOTHING in v3 content. The ladder PRs must be MERGE-merged
+(not squashed): squashing flattens the merge commit and loses the recorded ancestry, which
+would re-conflict stable→main.

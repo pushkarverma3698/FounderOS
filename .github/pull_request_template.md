@@ -7,9 +7,15 @@ Full checklist: docs/rules/CODE-REVIEW-CHECKLIST.md
 
 <!-- One or two lines: what this changes and the problem it solves. -->
 
+## Failing test first (v3 invariant #2)
+
+<!-- For bug fixes: name the test that reproduced the bug BEFORE the fix (file + test name),
+     or state why a repro test is impossible. A fix with no prior red test does not merge. -->
+
 ## Checklist
 
 - [ ] `pnpm gate` green (tsc + tests)
+- [ ] `pnpm verify:arch` green (no new architectural debt; baseline may only shrink)
 - [ ] Behaviour change checked against `pnpm eval` (routing/tool/HITL not regressed) — or N/A
 - [ ] No hardcoded secrets; no `console.log` in `src/` (boot `console.error` excepted)
 - [ ] Errors fail loud (surfaced to founder), no swallowed errors or fake "Done."

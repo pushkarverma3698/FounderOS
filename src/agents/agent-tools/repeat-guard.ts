@@ -75,3 +75,38 @@ export function makeRepeatGuard(opts: RepeatGuardOptions = {}): RepeatGuard {
     },
   };
 }
+
+// ── Per-thread registry (context-isolation fix, 2026-06-30) ─────────────────
+//
+// Any stateful loop-guard (this one, or the consecutive-failure counter in
+// engineering.ts) MUST be scoped per conversation thread, never created once
+// at module scope. The office graph is compiled ONCE (rule #2) and tools are
+// bound at that time, so a module-level `const guard = makeRepeatGuard()`
+// lives for the entire process and is silently shared by every thread —
+// directly violating rule #20 (no context leakage across any graph boundary).
+// `makeThreadScopedRegistry` gives each thread_id its own lazily-created
+// instance so one thread's call history can never block or bleed into
+// another's.
+
+export interface ThreadScopedRegistry<T> {
+  /** Returns the instance for this thread, creating it on first use. */
+  get(threadId: string | undefined): T;
+}
+
+/** Key used when no thread_id is available (tests, or a config-less call). */
+const UNSCOPED_THREAD_KEY = "__unscoped__";
+
+export function makeThreadScopedRegistry<T>(factory: () => T): ThreadScopedRegistry<T> {
+  const byThread = new Map<string, T>();
+  return {
+    get(threadId: string | undefined): T {
+      const key = threadId ?? UNSCOPED_THREAD_KEY;
+      let instance = byThread.get(key);
+      if (!instance) {
+        instance = factory();
+        byThread.set(key, instance);
+      }
+      return instance;
+    },
+  };
+}

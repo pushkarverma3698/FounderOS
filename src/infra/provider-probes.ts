@@ -6,7 +6,7 @@
  */
 
 import { Composio } from "@composio/core";
-import { getComposioApiKey, getGmailConnectionId } from "./composio.js";
+import { getComposioApiKey, getGmailConnectionId, getLinkedInConnectionId } from "./composio.js";
 import { runGws } from "./gws-runner.js";
 import {
   getCalendarBackend,
@@ -127,11 +127,42 @@ function probeLinkedInDirect(): ProviderCheck {
   return check("up", "LinkedIn direct API credentials configured");
 }
 
-function probeLinkedInComposio(): ProviderCheck {
+/**
+ * Probe Composio LinkedIn: API key present + the connection is ACTUALLY ACTIVE
+ * (reachability, not just presence) — mirrors probeComposioGmail.
+ *
+ * Fix (2026-07-01): this used to return "up" whenever COMPOSIO_API_KEY was
+ * merely present, without ever calling the Composio API to check the LinkedIn
+ * connection's real status. That is exactly the shallow check that let the
+ * documented Composio outage (LIMITATIONS.md §7 — "Composio key was invalid in
+ * both dev and prod: email/linkedin/calendar down") go undetected: /status's
+ * 🟢/🔴 LinkedIn indicator would have shown a false 🟢 the whole time.
+ */
+export async function probeLinkedInComposio(
+  timeoutMs = getProviderProbeTimeoutMs(),
+): Promise<ProviderCheck> {
   if (!composioLinkedInConfigured()) {
     return check("unconfigured", "COMPOSIO_API_KEY not set (legacy fallback)");
   }
-  return check("up", "Composio LinkedIn configured");
+
+  const connId = getLinkedInConnectionId();
+  try {
+    const composio = new Composio({ apiKey: getComposioApiKey()! });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = composio.getClient() as any;
+    const probe = client.connectedAccounts.get(connId);
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Composio LinkedIn probe timed out")), timeoutMs),
+    );
+    const account = (await Promise.race([probe, timeout])) as Record<string, unknown>;
+    const status = String(account["status"] ?? account["state"] ?? "unknown");
+    if (status.toUpperCase() === "ACTIVE") {
+      return check("up", `Composio LinkedIn ${connId} ACTIVE`);
+    }
+    return check("down", `Composio LinkedIn ${connId} status=${status}`);
+  } catch (err) {
+    return check("down", `Composio LinkedIn probe failed: ${(err as Error).message}`);
+  }
 }
 
 /** Run all provider probes and cache the result. */
@@ -152,7 +183,7 @@ export async function runProviderProbes(): Promise<ProviderProbeReport> {
   const active_gmail = pick(gmailBackend);
   const active_calendar = pick(calendarBackend);
   const active_linkedin =
-    linkedinBackend === "direct" ? probeLinkedInDirect() : probeLinkedInComposio();
+    linkedinBackend === "direct" ? probeLinkedInDirect() : await probeLinkedInComposio(timeoutMs);
 
   const report: ProviderProbeReport = {
     checked_at: new Date().toISOString(),

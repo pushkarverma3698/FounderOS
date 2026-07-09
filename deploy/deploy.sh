@@ -196,5 +196,5 @@ fi
 if curl -fsS http://127.0.0.1:3001/ | grep -qi 'html\|jarvis\|root'; then
   echo "==> JARVIS UI OK — GET / serves SPA"
 else
-  echo "    WARNING: GET / did not return the JARVIS SPA — run 'pnpm build:jarvis' on the box (core bot is up)." >&2
+  echo "    (v3: web SPA removed — health endpoint only)" >&2
 fi
