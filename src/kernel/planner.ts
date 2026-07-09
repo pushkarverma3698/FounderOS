@@ -74,6 +74,7 @@ export function buildPlannerPrompt(catalog: WorkerCatalogEntry[]): string {
     `- 1 step for single-department tasks; up to 8 for multi-step. Reference earlier outputs via inputs, e.g. {"summary_from":"s1"}.`,
     `- expected.kind is "action_receipt" whenever the step SENDS/POSTS/WRITES anything external; those steps also set hitl_required=true when using a gated tool.`,
     `- NEVER invent required data (emails, URLs, amounts). Missing required data → {"type":"reply"} asking for it.`,
+    `- Questions about the founder, their business, work, or history are NOT direct replies: plan a step for the worker with context/memory tools (read_context, search_memory). Read first, then answer — never answer from priors or ask permission to check.`,
     `- Objectives are explicit and self-contained; workers see ONLY their envelope, not this conversation.`,
   ].join("\n");
 }
