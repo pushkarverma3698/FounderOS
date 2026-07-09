@@ -19,6 +19,8 @@ export {
   buildPlannerPrompt,
   parseRouteOverride,
   overrideDecision,
+  summarizePreviousTurn,
+  historyMessages,
   ROUTE_OVERRIDE_RE,
   type KernelChatModel,
   type WorkerCatalogEntry,

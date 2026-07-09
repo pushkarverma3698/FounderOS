@@ -15,6 +15,7 @@ import {
   KERNEL_SCHEMA_VERSION,
   type KernelBindableModel,
   type KernelTool,
+  summarizePreviousTurn,
   type WorkerSpec,
 } from "../../../src/kernel/index.js";
 
@@ -313,5 +314,156 @@ describe("kernel E2E (scripted models, real graph)", () => {
     expect(res.failure?.stage).toBe("planning");
     expect(worker.calls).toBe(0);
     expect(res.reply).toContain("planning failure");
+  });
+});
+
+// ── Cross-turn memory (conversation history hydrated from the checkpointer) ───
+
+const turnAt = (id: string, raw_input: string) => ({
+  turn: { id, chat_id: "1", received_at: new Date().toISOString(), raw_input },
+});
+
+describe("cross-turn memory (checkpointer-hydrated history)", () => {
+  it("turn 2's planner sees turn 1's exchange — even across a kernel rebuild (process restart)", async () => {
+    const saver = new MemorySaver();
+    const build = (planner: ScriptedModel) =>
+      buildKernel({
+        plannerModel: planner,
+        workerModel: new ScriptedModel([]),
+        synthesizerModel: new ScriptedModel([]),
+        workers: makeWorkers([searchTool()]),
+        checkpointer: saver,
+      });
+
+    const p1 = new ScriptedModel([ai(JSON.stringify({ type: "reply", text: "Tagline drafted: Ship boring, win big." }))]);
+    const r1 = await build(p1).invoke(turnAt("t1", "Draft a tagline for Turicks"), cfg("memory"));
+    expect(r1.reply).toContain("Ship boring, win big.");
+
+    // Process restart: NEW graph instance, same (Postgres-backed in prod) checkpointer.
+    const p2 = new ScriptedModel([
+      (msgs) => {
+        const all = msgs.map((m) => String(m.content)).join("\n");
+        expect(all).toContain("Draft a tagline for Turicks");
+        expect(all).toContain("Ship boring, win big.");
+        return ai(JSON.stringify({ type: "reply", text: "That tagline was: Ship boring, win big." }));
+      },
+    ]);
+    const r2 = await build(p2).invoke(turnAt("t2", "What tagline did you draft?"), cfg("memory"));
+    expect(p2.calls).toBe(1);
+    expect(r2.reply).toBe("That tagline was: Ship boring, win big.");
+    // Turn 1 is now durably summarized in the thread's history channel.
+    expect(r2.history.at(-1)?.user_input).toBe("Draft a tagline for Turicks");
+    expect(r2.history.at(-1)?.outcome).toBe("replied");
+  });
+
+  it("prod regression ('Send it'): a FAILED turn's reply + evidence is visible to the next turn's planner", async () => {
+    const saver = new MemorySaver();
+    const build = (planner: ScriptedModel, worker: ScriptedModel) =>
+      buildKernel({
+        plannerModel: planner,
+        workerModel: worker,
+        synthesizerModel: new ScriptedModel([]),
+        workers: makeWorkers([searchTool()]),
+        checkpointer: saver,
+      });
+
+    // Turn 1: worker never finalizes with valid JSON → validation failure (the 23:02 prod trace).
+    const p1 = new ScriptedModel([
+      ai(planJson([researchStep({ worker: "comms", objective: "Draft reply to the Google security alert" })])),
+    ]);
+    const w1 = new ScriptedModel([ai("Here is the draft: Dear Google, thanks for the alert.")], true);
+    const r1 = await build(p1, w1).invoke(turnAt("t1", "Draft a reply to the Google email"), cfg("sendit"));
+    expect(r1.mission.status).toBe("failed");
+
+    // Turn 2: "Send it" — the planner must see what "it" refers to.
+    const p2 = new ScriptedModel([
+      (msgs) => {
+        const all = msgs.map((m) => String(m.content)).join("\n");
+        expect(all).toContain("Draft a reply to the Google email");
+        expect(all).toContain("[turn failed]");
+        return ai(JSON.stringify({ type: "reply", text: "Retrying the Google draft." }));
+      },
+    ]);
+    const r2 = await build(p2, new ScriptedModel([])).invoke(turnAt("t2", "Send it"), cfg("sendit"));
+    expect(p2.calls).toBe(1);
+    expect(r2.reply).toBe("Retrying the Google draft.");
+    expect(r2.history.at(-1)?.outcome).toBe("failed");
+  });
+
+  it("HITL pause: a turn awaiting approval is NOT summarized; after resume it lands in history with its final reply", async () => {
+    const saver = new MemorySaver();
+    const gated: KernelTool = {
+      name: "send_email",
+      invoke: async (args) => {
+        const decision = interrupt({ kind: "approval", action: "send_email", title: "Send email?", args });
+        if (decision !== "approved") return "❌ Rejected by founder.";
+        return JSON.stringify({ success: true, message_id: "m1" });
+      },
+    };
+    const build = (planner: ScriptedModel, worker: ScriptedModel, synth: ScriptedModel) =>
+      buildKernel({
+        plannerModel: planner,
+        workerModel: worker,
+        synthesizerModel: synth,
+        workers: makeWorkers([gated]),
+        checkpointer: saver,
+      });
+
+    const p1 = new ScriptedModel([
+      ai(planJson([researchStep({ worker: "comms", expected: { kind: "action_receipt", schema_ref: "action.summary" }, objective: "Send the email to sam@x.dev" })])),
+    ]);
+    const w1 = new ScriptedModel([
+      aiTool("send_email", { to: "sam@x.dev", subject: "hi", body: "hello" }),
+      ai(JSON.stringify({ summary: "Email sent to sam@x.dev" })),
+    ]);
+    const synth = new ScriptedModel([ai("Sent the email to sam.")]);
+    const k1 = build(p1, w1, synth);
+
+    await k1.invoke(turnAt("t1", "send the email"), cfg("hitl-mem"));
+    // Paused: reply empty ⇒ the turn must NOT be summarizable yet.
+    const paused = await k1.getState(cfg("hitl-mem"));
+    expect(paused.values.reply).toBe("");
+    expect(summarizePreviousTurn(paused.values)).toBeNull();
+
+    await k1.invoke(new Command({ resume: "approved" }), cfg("hitl-mem"));
+
+    // Next turn (fresh kernel = process restart): turn 1 appears ONCE, with the post-resume reply.
+    const p2 = new ScriptedModel([
+      (msgs) => {
+        const all = msgs.map((m) => String(m.content)).join("\n");
+        expect(all).toContain("send the email");
+        expect(all).toContain("Sent the email to sam.");
+        return ai(JSON.stringify({ type: "reply", text: "Yes — it went out." }));
+      },
+    ]);
+    const r2 = await build(p2, new ScriptedModel([]), new ScriptedModel([])).invoke(
+      turnAt("t2", "did that go out?"),
+      cfg("hitl-mem"),
+    );
+    expect(p2.calls).toBe(1);
+    expect(r2.history).toHaveLength(1);
+    expect(r2.history[0]?.turn_id).toBe("t1");
+    expect(r2.history[0]?.outcome).toBe("done");
+  });
+
+  it("history is capped: only the most recent turns are retained", async () => {
+    const saver = new MemorySaver();
+    const build = (planner: ScriptedModel) =>
+      buildKernel({
+        plannerModel: planner,
+        workerModel: new ScriptedModel([]),
+        synthesizerModel: new ScriptedModel([]),
+        workers: makeWorkers([searchTool()]),
+        checkpointer: saver,
+      });
+
+    for (let i = 1; i <= 25; i += 1) {
+      const p = new ScriptedModel([ai(JSON.stringify({ type: "reply", text: `reply ${i}` }))]);
+      await build(p).invoke(turnAt(`t${i}`, `message ${i}`), cfg("cap"));
+    }
+    const state = await build(new ScriptedModel([])).getState(cfg("cap"));
+    const history = state.values.history as Array<{ user_input: string }>;
+    expect(history.length).toBeLessThanOrEqual(20);
+    expect(history.at(-1)?.user_input).toBe("message 24"); // turn 25 itself summarizes on the NEXT turn
   });
 });

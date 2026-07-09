@@ -9,9 +9,9 @@
  * never constructs a provider client or reads env, which is what makes the
  * full graph runnable offline in CI at $0 and swappable in production.
  *
- * Known limitation (by design, Phase 4 wires it): cross-turn conversational
- * context comes from durable memory via the composition root, not from
- * replaying chat history into the planner.
+ * Cross-turn conversational context: the plan node folds each completed turn
+ * into the checkpointed `history` channel and replays it to the planner LLM
+ * (see planner.ts) — workers still see ONLY their envelope, never the chat.
  */
 
 import { StateGraph, START, END, type BaseCheckpointSaver } from "@langchain/langgraph";
