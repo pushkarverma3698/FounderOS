@@ -182,3 +182,31 @@ v2/v3 surface.
 hash — proving the merge changed NOTHING in v3 content. The ladder PRs must be MERGE-merged
 (not squashed): squashing flattens the merge commit and loses the recorded ancestry, which
 would re-conflict stable→main.
+
+---
+
+## Entry 12 — main's CI was already red: the eval job depends on absent repo secrets
+
+**Symptom.** Every push to main fails CI at "Eval + update README metrics" — including the
+two v2 pushes BEFORE the v3 promotion (runs #843, #853) and the v3 merge itself (#863). The
+three real gates (quality, unit+regression, integration) are green; the eval job dies in
+config validation: `DATABASE_URL: Invalid url`, `TELEGRAM_BOT_TOKEN/CHAT_ID: empty` — the
+job reads them from repo secrets that are not set.
+
+**Why it matters.** deploy.yml auto-fires only on CI success for main, so a permanently red
+eval job silently disables auto-deploy forever — the exact "red check reviewers learn to
+ignore" failure class Entry 6 named. (v3 shipped anyway via deploy.yml's workflow_dispatch
+escape hatch, which re-runs lint+build as preflight — nothing unverified was deployed.)
+
+**Options.**
+1. Ask the founder to add DATABASE_URL/TELEGRAM secrets — but the eval needs a THROWAWAY
+   database, not a production one; pointing the eval at prod Postgres from a CI runner would
+   be actively wrong, and placeholder Telegram values as "secrets" is configuration theatre.
+2. Make the job self-sufficient (CHOSEN): give it the same pgvector service container +
+   placeholder Telegram env the Integration-tests job and live-e2e.yml already use, and run
+   the real `scripts/setup-db.ts` migration before `pnpm eval`. The live LLM key still comes
+   from secrets (that part is real and present). This mirrors live-e2e.yml exactly — same
+   proof, same env pattern, zero new secrets.
+
+**Verification:** js-yaml parse of ci.yml + the next main push must show the eval job either
+green or failing on a REAL eval regression (accuracy gate), never on missing env.
