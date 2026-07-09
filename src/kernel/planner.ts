@@ -21,6 +21,7 @@ import {
   WORKERS,
   type FailureReport,
   type PlannerDecision,
+  type TurnSummary,
   type WorkerId,
 } from "./contracts.js";
 import { RESET } from "./state.js";
@@ -76,6 +77,7 @@ export function buildPlannerPrompt(catalog: WorkerCatalogEntry[]): string {
     `- NEVER invent required data (emails, URLs, amounts). Missing required data → {"type":"reply"} asking for it.`,
     `- Questions about the founder, their business, work, or history are NOT direct replies: plan a step for the worker with context/memory tools (read_context, search_memory). Read first, then answer — never answer from priors or ask permission to check.`,
     `- Objectives are explicit and self-contained; workers see ONLY their envelope, not this conversation.`,
+    `- Earlier turns of this conversation may precede the newest message. Resolve references ("it", "that draft", "send it") against them; a turn marked [turn failed] shows what was attempted and why it stopped. Copy any content a step needs from the conversation (drafts, names, addresses) VERBATIM into the objective/inputs — never a bare reference like "the previous email".`,
   ].join("\n");
 }
 

@@ -15,6 +15,7 @@ import type {
   StepResult,
   ToolReceipt,
   TurnRecord,
+  TurnSummary,
 } from "./contracts.js";
 
 export const RESET = "reset" as const;
@@ -71,7 +72,23 @@ export const KernelState = Annotation.Root({
     reducer: (_curr, update) => update,
     default: () => "",
   }),
+
+  /**
+   * Cross-turn conversation memory — the ONLY channel that survives the plan
+   * node's per-turn reset. Persisted in the thread checkpoint (Postgres in
+   * prod), hydrated on every invoke, capped to the most recent turns.
+   */
+  history: Annotation<TurnSummary[], ListUpdate<TurnSummary>>({
+    reducer: (curr, update) => {
+      const next = update === RESET ? [] : Array.isArray(update) ? curr.concat(update) : update.set;
+      return next.length > HISTORY_MAX_TURNS ? next.slice(-HISTORY_MAX_TURNS) : next;
+    },
+    default: () => [],
+  }),
 });
+
+/** Bound on retained turn summaries — keeps checkpoint rows and planner prompts small. */
+export const HISTORY_MAX_TURNS = 20;
 
 export type KernelStateType = typeof KernelState.State;
 export type KernelUpdate = typeof KernelState.Update;
