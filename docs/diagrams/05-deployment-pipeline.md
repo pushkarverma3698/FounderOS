@@ -29,7 +29,7 @@ flowchart TD
   health -- yes --> live([🟢 LIVE])
   health -- no --> rollback[deploy fails loud<br/>previous unit still running]
 
-  subgraph vps["Hetzner VPS · 95.217.162.12"]
+  subgraph vps["Hetzner VPS · YOUR_VPS_IP"]
     app["founderos.service<br/>(native systemd, Node 22)"]
     dpg[("Docker: Postgres")]
     dol["Docker: Ollama"]
@@ -50,5 +50,5 @@ flowchart TD
   password and would overwrite working prod values. Refresh the Mac copy *from* the box.
 - Postgres + Ollama run as Docker containers; the app itself runs **native** under
   systemd (not containerized) so deploys are a fast `git pull` + restart.
-- Deploy key `~/.ssh/founderos_deploy`; SSH `founderos@95.217.162.12:22`; the deploy
+- Deploy key `~/.ssh/founderos_deploy`; SSH `founderos@YOUR_VPS_IP:22`; the deploy
   user's only NOPASSWD sudo right is `systemctl restart founderos`.

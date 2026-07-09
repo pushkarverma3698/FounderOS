@@ -31,6 +31,9 @@ jobs:
       # Compile/CI-time wiring integrity: a half-wired tool fails the build here
       # instead of silently doing nothing in production (keyless, stub env).
       - run: pnpm verify:wiring
+      # v3 anti-slop invariants (ratchet): new architectural debt fails the PR.
+      # Baseline lives in governance/architecture-baseline.json and may only shrink.
+      - run: pnpm verify:arch
 
   unit-tests:
     name: Unit + regression tests
@@ -59,6 +62,21 @@ jobs:
     # invalidates the whole workflow file (every job fails in 0s). Instead we
     # always start the job and skip the steps when the key is absent (env IS
     # allowed in step-level `if:`).
+    services:
+      postgres:
+        # pgvector image, NOT postgres:16 — migrations run CREATE EXTENSION vector
+        # (0005_pgvector.sql) and fail on the plain image.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -83,6 +101,12 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
+      # package.json scripts use --env-file=.env; CI provides real env vars.
+      - run: touch .env
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
+      - name: Migrate DB (drizzle + LangGraph checkpoint tables)
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
+        run: node --env-file=.env --import tsx/esm scripts/setup-db.ts
       - run: pnpm test:integration
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
 
@@ -118,18 +142,21 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
+      # package.json scripts use --env-file=.env; CI provides real env vars.
+      - run: touch .env
+        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
       - name: Run eval
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
         run: pnpm eval
-      - name: Update README metrics
+      - name: Regenerate proof scoreboard
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-        run: pnpm update-readme-metrics
-      - name: Commit updated metrics
+        run: pnpm proof:scoreboard
+      - name: Commit updated proof artifacts
         if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git diff --quiet && git diff --staged --quiet || \
-            (git add EVAL.md README.md && \
-             git commit -m "chore(eval): auto-update README metrics [skip ci]" && \
+            (git add docs/PROOF.md eval-report.md && \
+             git commit -m "chore(proof): auto-update proof artifacts [skip ci]" && \
              git push)

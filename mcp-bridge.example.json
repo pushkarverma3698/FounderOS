@@ -1,0 +1,65 @@
+{
+  "_README": "Curated, copy-paste MCP server gallery for FounderOS (ADR-041). Copy the blocks you want into mcp-bridge.json (or point MCP_BRIDGE_MANIFEST here), add the listed env keys, set MCP_BRIDGE_ENABLED=true, and restart. Reads pass through; every tool in a server's `write` list is HITL-gated. Exact tool names are logged at boot ('MCP server bridged … classified: …') — verify the write list before trusting a server. JSON has no comments, so see docs/guides/MCP-SERVERS.md for the full guide. Verified package names as of 2026-06.",
+  "servers": {
+    "filesystem": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/founderos/workspace"],
+      "department": "personal",
+      "write": ["write_file", "edit_file", "create_directory", "move_file"]
+    },
+    "git": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "/opt/founderos"],
+      "department": "engineering",
+      "write": ["git_commit", "git_create_branch", "git_add"]
+    },
+    "fetch": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "department": "research",
+      "write": []
+    },
+    "apify": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@apify/actors-mcp-server", "--actors", "apify/rag-web-browser,apify/instagram-scraper"],
+      "env": ["APIFY_TOKEN"],
+      "department": "research",
+      "write": []
+    },
+    "notion": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@notionhq/notion-mcp-server"],
+      "env": ["NOTION_TOKEN"],
+      "department": ["admin", "research"],
+      "write": ["API-post-page", "API-patch-page", "API-patch-block-children"],
+      "gateUnlisted": true
+    },
+    "slack": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-slack"],
+      "env": ["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"],
+      "department": "comms",
+      "write": ["slack_post_message", "slack_reply_to_thread"]
+    },
+    "sequential-thinking": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "department": "engineering",
+      "write": []
+    },
+    "blender": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["blender-mcp"],
+      "department": "personal",
+      "write": ["execute_blender_code", "render_image"]
+    }
+  }
+}

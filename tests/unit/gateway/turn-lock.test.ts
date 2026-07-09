@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { withChatTurnLock } from "../../../src/gateway/office-run.js";
+import { withChatTurnLock } from "../../../src/gateway/kernel-run.js";
 
 describe("withChatTurnLock", () => {
   it("runs turns for the same chat sequentially", async () => {

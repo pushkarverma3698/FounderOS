@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "jarvis-next",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "founderos-jarvis-next", "dev"],
+      "port": 3000
+    }
+  ]
+}

@@ -17,14 +17,14 @@
 
 After you approve **deploy_static_site**, FounderOS:
 1. Copies `index.html` (or a static directory) from `~/Projects/...` to the web root
-2. Returns the public URL (e.g. `http://95.217.162.12/clients/langfuse/`)
+2. Returns the public URL (e.g. `http://YOUR_VPS_IP/clients/langfuse/`)
 3. Records `site_deployed` in Postgres for the sales sweep
 
 ---
 
 ## Your one-time VPS setup (founder only)
 
-SSH: `founderos@95.217.162.12`
+SSH: `founderos@YOUR_VPS_IP`
 
 ### 1. Install nginx (required for port 80 — no domain needed)
 
@@ -43,14 +43,14 @@ bash scripts/vps-proof-nginx-setup.sh
 ```
 
 This serves:
-- `http://95.217.162.12/showcase-1/` — AgentOps showcase
-- `http://95.217.162.12/clients/{slug}/` — per-client Proof Drops
+- `http://YOUR_VPS_IP/showcase-1/` — AgentOps showcase
+- `http://YOUR_VPS_IP/clients/{slug}/` — per-client Proof Drops
 
 ### 3. Set public URL in `.env` (on VPS)
 
 ```bash
 # /opt/founderos/.env
-STATIC_SITE_PUBLIC_BASE_URL=http://95.217.162.12
+STATIC_SITE_PUBLIC_BASE_URL=http://YOUR_VPS_IP
 ```
 
 Restart the bot after editing: `sudo systemctl restart founderos`
@@ -71,7 +71,7 @@ founderos ALL=(ALL) NOPASSWD: /usr/sbin/nginx, /bin/systemctl reload nginx, /bin
 
 ### 5. Optional — domain later
 
-When you own DNS for `proof.turicks.com`, point an A record to `95.217.162.12`. The nginx config already answers for that hostname.
+When you own DNS for `proof.turicks.com`, point an A record to `YOUR_VPS_IP`. The nginx config already answers for that hostname.
 
 ---
 
@@ -86,7 +86,7 @@ When you own DNS for `proof.turicks.com`, point an A record to `95.217.162.12`. 
 
 3. **Approve HITL #2** — `deploy_static_site` (publishes to public URL)
 
-4. **Open the URL** the bot returns, e.g. `http://95.217.162.12/showcase-1/`
+4. **Open the URL** the bot returns, e.g. `http://YOUR_VPS_IP/showcase-1/`
 
 5. **Sales follow-up** — scheduler surfaces `site_deployed`; ask sales dept for Proof Drop email or run yourself.
 
@@ -99,7 +99,7 @@ cd ~/www/proof.turicks.com/showcase-1
 python3 -m http.server 8888 --bind 0.0.0.0
 ```
 
-Open `http://95.217.162.12:8888/` in your browser. **Ctrl+C** stops the server (foreground process — use a second SSH tab).
+Open `http://YOUR_VPS_IP:8888/` in your browser. **Ctrl+C** stops the server (foreground process — use a second SSH tab).
 
 ---
 
@@ -150,7 +150,7 @@ GitHub Actions: workflow **VPS Verify** with `live_only=true` runs the live show
 
 - [ ] `curl localhost:3001/health` → 200 on VPS
 - [ ] `pnpm eval:webdesign` → all checks pass
-- [ ] `http://95.217.162.12/showcase-1/` → AgentOps page (or `:8888` temp server)
+- [ ] `http://YOUR_VPS_IP/showcase-1/` → AgentOps page (or `:8888` temp server)
 - [ ] Telegram: build HITL approve → deploy HITL approve → URL in reply
 - [ ] `action_log` row for `deploy_static_site` + `site_deployed` signal in `dept_signals`
 

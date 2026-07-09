@@ -8,11 +8,13 @@
  */
 
 import { describe, it, expect } from "vitest";
+import type { LLMResult } from "@langchain/core/outputs";
 import {
   estimateCost,
   normalizeModelId,
   BudgetTracker,
   BudgetExceededError,
+  BudgetGuardCallback,
   MODEL_COSTS,
 } from "../../../src/infra/budget.js";
 
@@ -163,6 +165,44 @@ describe("BudgetTracker", () => {
 });
 
 // ── BudgetExceededError ───────────────────────────────────────────────────────
+
+// ── BudgetGuardCallback cost persistence (bug: kernel path never wrote ai_call_costs,
+// so the daily budget cap read $0 forever and the cost ledger stayed empty) ──────
+
+describe("BudgetGuardCallback — onAccrue sink", () => {
+  const geminiResult = (input: number, output: number): LLMResult => ({
+    generations: [[{ text: "ok", generationInfo: { usage_metadata: { promptTokenCount: input, candidatesTokenCount: output } } }]],
+    llmOutput: {},
+  });
+
+  it("reports every call to the sink with the computed usd", async () => {
+    const calls: Array<{ model: string; inputTokens: number; outputTokens: number; usd: number }> = [];
+    const cb = new BudgetGuardCallback(
+      new BudgetTracker({ maxUsd: 1, maxTokens: 100_000 }),
+      "google-genai:gemini-2.5-flash",
+      (c) => calls.push(c),
+    );
+    await cb.handleLLMEnd(geminiResult(1000, 500));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      model: "google-genai:gemini-2.5-flash",
+      inputTokens: 1000,
+      outputTokens: 500,
+      usd: estimateCost(1000, 500, "google-genai:gemini-2.5-flash"),
+    });
+  });
+
+  it("still reports the call that blows the budget (the overage must be on the ledger)", async () => {
+    const calls: unknown[] = [];
+    const cb = new BudgetGuardCallback(
+      new BudgetTracker({ maxUsd: 0.000001, maxTokens: 10 }),
+      "gemini-2.5-flash",
+      (c) => calls.push(c),
+    );
+    await expect(cb.handleLLMEnd(geminiResult(1000, 500))).rejects.toThrow(BudgetExceededError);
+    expect(calls).toHaveLength(1);
+  });
+});
 
 describe("BudgetExceededError", () => {
   it("is an instance of Error", () => {

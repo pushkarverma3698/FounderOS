@@ -213,6 +213,36 @@ export async function getCostBreakdown(tenantId: string, days = 7) {
     .orderBy(desc(sql`SUM(${aiCallCosts.cost_usd})`));
 }
 
+/**
+ * Per-DEPARTMENT cost attribution (roadmap #9). Groups ai_call_costs by `agent`
+ * (the department/specialist that made the call) over the last N days. This is
+ * the "cost per task" scoreboard the roadmap wants to replace "number of agents".
+ *
+ * Note: rows exist only for calls that persist a cost via logLlmCost (today:
+ * image generation + any future per-call LLM logging). An empty result means no
+ * costed calls in the window, not an error.
+ */
+export async function getCostByDepartment(tenantId: string, days = 7) {
+  const db = getDb();
+  const since = new Date(Date.now() - days * 86_400_000);
+
+  return db
+    .select({
+      department: aiCallCosts.agent,
+      calls: sql<number>`COUNT(*)::int`,
+      total_cost_usd: sql<string>`COALESCE(SUM(${aiCallCosts.cost_usd}), 0)`,
+    })
+    .from(aiCallCosts)
+    .where(
+      and(
+        eq(aiCallCosts.tenant_id, tenantId),
+        gt(aiCallCosts.created_at, since),
+      ),
+    )
+    .groupBy(aiCallCosts.agent)
+    .orderBy(desc(sql`SUM(${aiCallCosts.cost_usd})`));
+}
+
 // ── Action Log (action_log) ───────────────────────────────────────────────────
 
 /**
@@ -284,6 +314,32 @@ export async function writeAuditEntry(
     .onConflictDoNothing()
     .returning({ id: actionLog.id });
   return { written: rows.length > 0 };
+}
+
+/**
+ * Return LinkedIn post IDs from action_log (posts published by FounderOS).
+ * Used by the comment sweep scheduler and the linkedin_get_my_posts fallback.
+ */
+export async function getRecentLinkedInPostIds(
+  tenantId: string,
+  daysBack = 30,
+): Promise<string[]> {
+  const db = getDb();
+  const since = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
+  const rows = await db
+    .select({ payload: actionLog.payload })
+    .from(actionLog)
+    .where(
+      and(
+        eq(actionLog.tenant_id, tenantId),
+        eq(actionLog.action, "linkedin_post"),
+        gte(actionLog.created_at, since),
+      ),
+    )
+    .orderBy(desc(actionLog.created_at));
+  return rows
+    .map((r) => (r.payload as Record<string, unknown> | null)?.["post_id"] as string | undefined)
+    .filter((id): id is string => !!id);
 }
 
 /** Recent action log entries for a tenant (admin/debug). */

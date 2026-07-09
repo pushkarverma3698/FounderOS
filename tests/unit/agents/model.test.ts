@@ -10,11 +10,38 @@ import {
   getModel,
   getModelFallbackMiddleware,
   getSupervisorModel,
+  getWorkerModelId,
   is503Error,
   isQuotaExhaustedError,
   normalizeModelId,
   parseModelId,
 } from "../../../src/agents/model.js";
+
+describe("worker model split (roadmap #10)", () => {
+  afterEach(() => {
+    delete process.env["WORKER_AGENT_MODEL"];
+    delete process.env["AGENT_MODEL"];
+  });
+
+  it("defaults the worker id to the primary model id when unset (no split)", () => {
+    delete process.env["WORKER_AGENT_MODEL"];
+    process.env["AGENT_MODEL"] = "openrouter:google/gemini-2.5-flash";
+    expect(getWorkerModelId()).toBe(getConfiguredModelId());
+  });
+
+  it("honours a cheaper WORKER_AGENT_MODEL override (distinct from primary)", () => {
+    process.env["AGENT_MODEL"] = "openrouter:google/gemini-2.5-flash";
+    process.env["WORKER_AGENT_MODEL"] = "openrouter:google/gemini-2.5-flash-lite";
+    expect(getWorkerModelId()).toBe(normalizeModelId("openrouter:google/gemini-2.5-flash-lite"));
+    expect(getWorkerModelId()).not.toBe(getConfiguredModelId()); // a real split
+  });
+
+  it("blank/whitespace WORKER_AGENT_MODEL falls back to primary (never empty)", () => {
+    process.env["WORKER_AGENT_MODEL"] = "   ";
+    process.env["AGENT_MODEL"] = "openrouter:google/gemini-2.5-flash";
+    expect(getWorkerModelId()).toBe(getConfiguredModelId());
+  });
+});
 
 describe("model id parsing", () => {
   it("defaults to OpenRouter for the current credit-depletion recovery path", () => {

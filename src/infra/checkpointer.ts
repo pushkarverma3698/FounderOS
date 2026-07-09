@@ -99,5 +99,64 @@ export async function clearThreadCheckpoints(threadId: string): Promise<number> 
   return deleted;
 }
 
+// ── TTL Sweep (P0: bound unbounded checkpoint growth) ───────────────────────────
+
+/**
+ * Delete checkpoints for threads that have been idle longer than `maxAgeDays`.
+ *
+ * Why: thread IDs are stable per chat, so `agents.checkpoints` grows forever —
+ * one row per turn, per thread, with no expiry. Left alone this is a silent
+ * storage + query-latency tax (every list/get scans an ever-larger table). This
+ * sweep is the durable backstop to the per-thread /reset (clearThreadCheckpoints).
+ *
+ * Staleness is measured by the LATEST checkpoint's `ts` (an ISO-8601 string that
+ * LangGraph always writes inside the `checkpoint` JSONB) — NOT by row insertion,
+ * which Postgres doesn't track. A thread is swept only if its newest checkpoint
+ * is older than the cutoff, so an active conversation is never truncated
+ * mid-stream; we then reuse clearThreadCheckpoints so blobs/writes never orphan.
+ *
+ * Defensive: if the checkpoints table doesn't exist yet (fresh DB, setup() not
+ * run) it logs and returns zeros rather than throwing — a maintenance sweep must
+ * never crash the scheduler. Designed to run from infra/scheduler.ts (daily).
+ *
+ * @param maxAgeDays threads idle longer than this are purged. Must be > 0.
+ * @returns { threads, rows } — stale threads found and total rows deleted.
+ */
+export async function sweepStaleCheckpoints(
+  maxAgeDays: number,
+): Promise<{ threads: number; rows: number }> {
+  if (!Number.isFinite(maxAgeDays) || maxAgeDays <= 0) {
+    throw new Error(`sweepStaleCheckpoints: maxAgeDays must be a positive number, got ${maxAgeDays}`);
+  }
+  const pool = getPgPool();
+
+  let staleThreadIds: string[];
+  try {
+    // Group by thread, keep only threads whose MOST-RECENT checkpoint ts is past
+    // the cutoff. Parameterized interval avoids any string interpolation in SQL.
+    const res = await pool.query<{ thread_id: string }>(
+      `SELECT thread_id
+         FROM agents.checkpoints
+        GROUP BY thread_id
+       HAVING MAX((checkpoint->>'ts')::timestamptz) < NOW() - ($1 || ' days')::interval`,
+      [String(maxAgeDays)],
+    );
+    staleThreadIds = res.rows.map((r) => r.thread_id);
+  } catch (err) {
+    log.warn(
+      { err: err instanceof Error ? err.message : String(err), maxAgeDays },
+      "sweepStaleCheckpoints: could not list stale threads (table missing?) — skipping",
+    );
+    return { threads: 0, rows: 0 };
+  }
+
+  let rows = 0;
+  for (const threadId of staleThreadIds) {
+    rows += await clearThreadCheckpoints(threadId);
+  }
+  log.info({ threads: staleThreadIds.length, rows, maxAgeDays }, "Stale checkpoint sweep complete");
+  return { threads: staleThreadIds.length, rows };
+}
+
 // Thread IDs are constructed directly in telegram.ts: `${TENANT}:${chatId}`
 // (no extra layer needed for single-tenant Telegram bot)

@@ -676,6 +676,48 @@ export const integrationAccounts = agentsSchema.table(
 export type IntegrationAccountRow = typeof integrationAccounts.$inferSelect;
 export type NewIntegrationAccountRow = typeof integrationAccounts.$inferInsert;
 
+// ── agent_assets ──────────────────────────────────────────────────────────────
+
+/**
+ * S3 asset references — one row per file uploaded by a user or agent.
+ * File content NEVER enters Postgres; only the S3 key and metadata are stored.
+ * Presigned URLs are generated on-demand via generatePresignedUrl().
+ */
+export const agentAssets = agentsSchema.table(
+  "agent_assets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    /** LangGraph run id that produced or consumed this file. */
+    run_id: text("run_id").notNull(),
+
+    /** Agent that uploaded the file (e.g. "personal", "engineering"). */
+    agent_id: text("agent_id"),
+
+    /** S3 key — "{prefix}/{run_id}/{uuid4}_{sanitized_filename}" */
+    s3_key: text("s3_key").notNull(),
+
+    original_filename: text("original_filename"),
+
+    /** 'input' | 'output' | 'scratch' */
+    asset_type: text("asset_type"),
+
+    mime_type: text("mime_type"),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+
+    /** Nullable — set for scratch files that should be cleaned up. */
+    expires_at: timestamp("expires_at", { withTimezone: true }),
+  },
+  (t) => ({
+    runIdx: index("aa_run_idx").on(t.run_id),
+    typeIdx: index("aa_type_idx").on(t.asset_type),
+  }),
+);
+
+export type AgentAsset = typeof agentAssets.$inferSelect;
+export type NewAgentAsset = typeof agentAssets.$inferInsert;
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
 export const interruptRegistry = hitlApprovals;

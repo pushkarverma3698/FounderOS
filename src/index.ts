@@ -1,25 +1,24 @@
 /**
- * FounderOS v2 — Entry Point
+ * FounderOS v3 — Entry Point
  * ===========================
  * Startup sequence:
- *  1. Init telemetry (LangSmith)
- *  2. Compile the office (supervisor + sub-agents; initialises DB checkpointer)
- *  3. Start health server
- *  4. Start Telegram bot (long polling)
- *  5. Graceful shutdown handlers
- *
- * The old multi-pod graph, custom HITL registry, and cron scheduler are no
- * longer booted — the office handles routing, and HITL is native (interrupt()).
+ *  1. Single-instance lock (one long-poller, ever)
+ *  2. Telemetry + boot report + strict boot validation
+ *  3. Compile the kernel (planner + pure supervisor + workers, Postgres checkpointer)
+ *  4. Health server + Telegram bot
+ *  5. Crash recovery (expire stale approvals, re-post a recent pending card)
+ *  6. Maintenance scheduler
  */
 
+import { InlineKeyboard } from "grammy";
 import { initTelemetry } from "./infra/telemetry.js";
 import { logBootReport } from "./infra/boot-report.js";
 import { assertBootConfigOrThrow } from "./infra/boot-validate.js";
 import { env, TELEGRAM_POLLING_ENABLED } from "./core/config.js";
 import { closeDatabaseConnections } from "./db/client.js";
-import { getOffice } from "./agents/office.js";
-import { startBot, stopBot, sendToChat } from "./gateway/telegram.js";
-import { restorePendingApprovalAfterRestart, restorePendingWebHitl } from "./gateway/office-run.js";
+import { getKernel } from "./gateway/kernel-boot.js";
+import { startBot, stopBot, sendToChat, getBot } from "./gateway/telegram.js";
+import { restorePendingApproval } from "./gateway/kernel-run.js";
 import { expireStaleInterrupts } from "./db/queries.js";
 import { startHealthServer } from "./infra/health.js";
 import { runProviderSmokeAtBoot } from "./infra/provider-probes.js";
@@ -35,88 +34,57 @@ const log = logger.child({ module: "main" });
 let healthServer: Server | undefined;
 
 async function main(): Promise<void> {
-  log.info("FounderOS starting…");
+  log.info("FounderOS v3 starting…");
 
-  // 0. Single-instance lock — two long-polling bots cause Telegram 409 conflicts
-  //    and split updates between processes (the #1 reliability bug). Replace any
-  //    previous live instance so exactly one process owns getUpdates.
   const { replacedPid } = acquireSingleInstanceLock();
   if (replacedPid !== null) {
     log.warn({ replacedPid }, "Terminated a previous FounderOS instance before starting");
-    // Wait until the old instance has ACTUALLY exited (SIGKILL on timeout) so it
-    // has released the Telegram long-poll and the health port. A fixed sleep was
-    // not enough — a slow graceful drain left the port held, the new instance
-    // crashed on EADDRINUSE, and the stale old code kept running.
     await waitForProcessExit(replacedPid);
   }
 
-  // 1. Telemetry — first, so PII scrubbing hooks in before any LLM call.
   initTelemetry();
-
-  // 1b. Capability self-check — log LIVE/MISSING integrations so config drift
-  //     is visible in journald instead of surfacing as a silent dead department.
   logBootReport(env);
-
-  // 1c. Strict boot validation — FAIL LOUD before compiling the office if a
-  //     fatal misconfig would make the bot silently half-dead (dead LLM provider,
-  //     no DB, no Telegram transport). Converts a production-only failure into an
-  //     immediate startup error (CLAUDE.md rule #19.5).
   const bootValidation = assertBootConfigOrThrow(env);
   for (const w of bootValidation.warnings) log.warn({ module: "boot" }, `[boot] ${w}`);
 
-  // 1d. Provider smoke — verify Composio/gws reachability at boot (warn only).
   if (shouldRunProviderSmoke()) {
     await runProviderSmokeAtBoot().catch((err) => {
       log.warn({ err: (err as Error).message }, "Provider smoke failed — non-fatal");
     });
   }
 
-  // 2. Compile the office once (warms the Postgres checkpointer).
-  await getOffice();
-  log.info("Office ready (supervisor + 7 departments)");
+  await getKernel();
+  log.info("Kernel ready (planner + pure supervisor + 8 workers + synthesizer)");
 
-  // 3. Health/metrics + web gateway (JARVIS API at /api/v1/*).
   healthServer = startHealthServer();
-  log.info("Web gateway ready — JARVIS API at /api/v1/* (same port as /health)");
 
-  // 4. Telegram bot (long polling — runs in background).
-  // Skipped when TELEGRAM_POLLING_ENABLED=false (local Jarvis dev while prod bot polls).
   if (TELEGRAM_POLLING_ENABLED) {
     await startBot();
   } else {
-    log.info("Telegram polling disabled (TELEGRAM_POLLING_ENABLED=false) — web gateway only");
+    log.info("Telegram polling disabled (TELEGRAM_POLLING_ENABLED=false)");
   }
 
-  // 4b. Crash recovery — expire DB rows, clear ancient checkpoints, re-post recent HITL.
+  // Crash recovery — expire stale DB approvals, re-post a recent pending card.
   await expireStaleInterrupts().catch((err) => {
     log.warn({ err: (err as Error).message }, "expireStaleInterrupts failed — non-fatal");
   });
-  const restored = await restorePendingApprovalAfterRestart(env.TELEGRAM_CHAT_ID).catch((err) => {
+  const restored = await restorePendingApproval(env.TELEGRAM_CHAT_ID, async (text: string, keyboard: InlineKeyboard) => {
+    await getBot().api.sendMessage(env.TELEGRAM_CHAT_ID, text, { parse_mode: "HTML", reply_markup: keyboard });
+  }).catch((err) => {
     log.warn({ err: (err as Error).message }, "Pending HITL restore failed — non-fatal");
     return false;
   });
-  if (restored) {
-    log.info("Restored pending HITL approval card after restart");
-  }
-  const webRestored = await restorePendingWebHitl().catch((err) => {
-    log.warn({ err: (err as Error).message }, "Pending web HITL restore failed — non-fatal");
-    return false;
-  });
-  if (webRestored) {
-    log.info("Restored pending HITL to JARVIS web SSE after restart");
-  }
+  if (restored) log.info("Restored pending HITL approval card after restart");
 
-  // 5. Proactive scheduler (Monday brief + stale approval reminders).
   startScheduler();
 
-  // 6. Startup notification — let the founder know the bot is alive (polling mode only).
   if (TELEGRAM_POLLING_ENABLED) {
     await sendToChat(buildRestartMessage(), "HTML").catch((err) =>
-      log.warn({ err: (err as Error).message }, "Startup notification failed — bot token may not be ready yet"),
+      log.warn({ err: (err as Error).message }, "Startup notification failed"),
     );
   }
 
-  log.info("FounderOS running 🚀");
+  log.info("FounderOS v3 running 🚀");
 }
 
 // ── Graceful Shutdown ─────────────────────────────────────────────────────────

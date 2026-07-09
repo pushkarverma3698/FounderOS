@@ -20,8 +20,6 @@ import { getTodayCostUsd, getKnowledgeEntryCount, getTuricksBrainCount } from ".
 import { childLogger } from "./logger.js";
 import { runProviderProbes, getLastProviderProbe } from "./provider-probes.js";
 import { getGmailBackend } from "./provider-config.js";
-import { handleWebGatewayRequest } from "../gateway/web.js";
-import { serveJarvisStatic } from "./jarvis-static.js";
 
 const log = childLogger({ module: "health" });
 
@@ -94,6 +92,7 @@ export interface HealthReport {
   integrations: {
     composio_gmail: { status: string; detail: string };
     gws_gmail: { status: string; detail: string };
+    googleapis_gmail: { status: string; detail: string };
     active_gmail: { status: string; detail: string };
     checked_at: string | null;
   };
@@ -125,6 +124,7 @@ export async function buildHealthReport(): Promise<HealthReport> {
   const backend = probe?.gmail_backend ?? getGmailBackend();
   const composio = probe?.composio_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
   const gws = probe?.gws_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
+  const googleapis = probe?.googleapis_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
   const active = probe?.active_gmail ?? { status: "unconfigured" as const, detail: "not probed" };
   const gmailDegraded = active.status === "down";
   return {
@@ -140,6 +140,7 @@ export async function buildHealthReport(): Promise<HealthReport> {
     integrations: {
       composio_gmail: composio,
       gws_gmail: gws,
+      googleapis_gmail: googleapis,
       active_gmail: active,
       checked_at: probe?.checked_at ?? null,
     },
@@ -153,17 +154,6 @@ export async function buildHealthReport(): Promise<HealthReport> {
 export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 3001)): Server {
   const server = createServer((req, res) => {
     const urlPath = (req.url ?? "/").split("?")[0] ?? "/";
-
-    if (urlPath.startsWith("/api/")) {
-      void handleWebGatewayRequest(req, res, port).catch((err) => {
-        log.warn({ err: (err as Error).message }, "Web gateway request failed");
-        if (!res.headersSent) {
-          res.writeHead(500, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: "internal_error" }));
-        }
-      });
-      return;
-    }
 
     if (req.method === "GET" && urlPath === "/health") {
       void buildHealthReport().then((report) => {
@@ -188,11 +178,8 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
       return;
     }
 
-    void serveJarvisStatic(req, res, urlPath).then((handled) => {
-      if (handled) return;
-      res.writeHead(404, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "not_found" }));
-    });
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "not_found" }));
   });
 
   // Bind failure (e.g. EADDRINUSE during a fast restart, before the previous
@@ -207,9 +194,7 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
     }
   });
 
-  server.listen(port, () =>
-    log.info({ port }, "Health + JARVIS UI + web gateway on /, /health, /metrics, /api/v1/*"),
-  );
+  server.listen(port, () => log.info({ port }, "Health server on /health, /metrics"));
   // Don't keep the event loop alive on this socket alone.
   server.unref();
   return server;

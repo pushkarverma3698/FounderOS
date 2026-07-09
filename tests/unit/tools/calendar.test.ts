@@ -26,7 +26,7 @@ function successResult(id = "event_abc123") {
     data: {
       event_id: id,
       title: "test",
-      date: "2026-07-02T00:00:00",
+      date: "2026-12-02T00:00:00",
       html_link: `https://www.google.com/calendar/event?eid=${id}`,
     },
   };
@@ -41,15 +41,15 @@ describe("calendarTool", () => {
   });
 
   it("returns success: true with event_id on an all-day event", async () => {
-    const result = await calendarTool.execute({ title: "UK", date: "2026-07-02" });
+    const result = await calendarTool.execute({ title: "UK", date: "2026-12-02" });
 
     expect(result.success).toBe(true);
     expect((result.data as { event_id: string }).event_id).toBe("event_abc123");
     expect(mockProviderCreateCalendarEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "UK",
-        start_datetime: "2026-07-02T00:00:00",
-        end_datetime: "2026-07-02T23:59:00",
+        start_datetime: "2026-12-02T00:00:00",
+        end_datetime: "2026-12-02T23:59:00",
       }),
     );
   });
@@ -79,7 +79,7 @@ describe("calendarTool", () => {
 
     const result = await calendarTool.execute({
       title: "Dup",
-      date: "2026-07-02",
+      date: "2026-12-02",
       idempotency_key: "cal:dup",
     });
 

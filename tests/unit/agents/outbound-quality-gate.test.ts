@@ -1,27 +1,35 @@
 /**
- * Phase 3 wiring: outboundQualityGate = brand-validator (gate 1) + Claude judge
- * (gate 2). Gate 2 is fail-open and only runs when no real send happens, so with
- * no ANTHROPIC_API_KEY in the test env the judge is a no-op pass and the gate
+ * Phase 3 wiring: outboundQualityGate = brand-validator (gate 1) + independent
+ * judge (gate 2). Gate 2 is fail-open and only runs when no real send happens, so
+ * with NO provider key in the test env the judge is a no-op pass and the gate
  * behaves like the deterministic brand check — proving gate 1 still governs.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { outboundQualityGate } from "../../../src/agents/agent-tools/comms.js";
 import { _resetBrandRetries } from "../../../src/infra/brand-retry.js";
-import { _resetJudgeCache } from "../../../src/infra/judge.js";
+import { _resetJudgeCache, _resetJudgeModel } from "../../../src/infra/judge.js";
 
 const cfg = { configurable: { thread_id: "t_gate" } };
 
 // Pin gate 2 to its no-op (fail-open) mode so the unit test never makes a live
-// Claude call. The judge's own behaviour is covered in judge.test.ts.
-let savedKey: string | undefined;
+// model call. The default judge provider is OpenRouter, so clear BOTH keys.
+// The judge's own behaviour is covered (with an injected fake) in judge.test.ts.
+const saved: Record<string, string | undefined> = {};
+const JUDGE_KEYS = ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"] as const;
 beforeEach(() => {
   _resetBrandRetries();
   _resetJudgeCache();
-  savedKey = process.env["ANTHROPIC_API_KEY"];
-  delete process.env["ANTHROPIC_API_KEY"];
+  _resetJudgeModel();
+  for (const k of JUDGE_KEYS) {
+    saved[k] = process.env[k];
+    delete process.env[k];
+  }
 });
 afterEach(() => {
-  if (savedKey !== undefined) process.env["ANTHROPIC_API_KEY"] = savedKey;
+  for (const k of JUDGE_KEYS) {
+    if (saved[k] !== undefined) process.env[k] = saved[k];
+    else delete process.env[k];
+  }
 });
 
 describe("outboundQualityGate", () => {
@@ -36,7 +44,7 @@ describe("outboundQualityGate", () => {
     expect(res.fix).toBeTruthy();
   });
 
-  it("passes a clean draft through (judge is a no-op without ANTHROPIC_API_KEY)", async () => {
+  it("passes a clean draft through (judge is a no-op with no provider key)", async () => {
     const res = await outboundQualityGate(
       "Hi Sam, saw your team shipped the billing revamp. We build small AI tools that cut support load — worth a 15-min look?",
       "outreach",

@@ -78,7 +78,9 @@ Strategy: [docs/strategy/](strategy/) · Phase doc: [PHASE-D-BIS-PROOF-AND-DISTR
 **Scope:**
 - Multi-tenancy: auth layer (Clerk/Auth.js), per-user Composio entities, billing (Stripe/Lemon)
 - Web interface: Next.js app on app.turicks.com, real-time streaming, audit dashboard
-- More tools: Notion, Slack, Stripe, Airtable integrations
+- More tools: Slack, Stripe, Airtable — now added via the **MCP client bridge** (ADR-041),
+  not hand-written native tools or expanded Composio. Add a server = 1 manifest entry
+  (Wiring Map 5). Notion deferred — Apify (ADR-037) already lands research in the DB.
 
 **Estimated:** 4-6 weeks of real work. Not started until Phase D proves the product.
 

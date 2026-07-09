@@ -9,7 +9,7 @@
  *   1. System web root when passwordless sudo works: /var/www/...
  *   2. Home fallback: ~/www/proof.turicks.com/...
  *
- * Public URL is built from STATIC_SITE_PUBLIC_BASE_URL (e.g. http://95.217.162.12).
+ * Public URL is built from STATIC_SITE_PUBLIC_BASE_URL (e.g. http://YOUR_VPS_IP).
  */
 
 import { execSync } from "node:child_process";
