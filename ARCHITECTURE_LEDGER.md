@@ -153,3 +153,32 @@ bot token — grammy `getMe` cannot authenticate), live LLM planning/routing (`p
 OpenRouter/Gemini key in this container), real Gmail transport, and MTProto founder-simulation
 QA. Every layer beneath those credentials was exercised for real. Additionally N/A on v3:
 there is no Next.js app on this line (`apps/` was removed by the kernel rebuild).
+
+---
+
+## Entry 11 — Replacing production (main, v2) with the v3 kernel line
+
+**Problem.** Founder directive: "replace main with new architecture v3." `main` (v2) has 51
+commits the v3 line never saw; `stable` has its own unique history; the CI-enforced ladder
+only allows work → beta → stable → main. A naive beta→main merge conflicts across the whole
+v2/v3 surface.
+
+**Options considered.**
+1. Merge main into beta resolving file-by-file — hundreds of conflict hunks across files v3
+   deliberately deleted; every manual hunk is a chance to resurrect tombstoned v2 modules
+   (verify:arch would catch some, not all). Rejected.
+2. Force-push beta over main — violates the repo's own "never commit to main / only humans
+   merge via the ladder" governance and silently orphans main's history. Rejected.
+3. `git merge -s ours` (CHOSEN): from a work branch on beta, record merges of origin/main and
+   origin/stable that keep the v3 TREE byte-identical while making both histories ancestors.
+   The founder's decision "v3 replaces v2" is encoded exactly: v2's history is preserved,
+   v2's content is retired. After this lands in beta, beta ⊇ main ∧ beta ⊇ stable, so the
+   ladder promotions (beta→stable→main) become content-clean merges with zero conflict hunks.
+   Deploy-critical main-side fixes were audited first and already exist on beta: the
+   anthropic model pin in deploy.yml, scripts/apply-prod-env-overrides.sh, and the
+   pgvector/pgvector:pg16 prod image in deploy/stack.compose.yml.
+
+**Safety check before pushing:** the work branch's tree hash must equal origin/beta's tree
+hash — proving the merge changed NOTHING in v3 content. The ladder PRs must be MERGE-merged
+(not squashed): squashing flattens the merge commit and loses the recorded ancestry, which
+would re-conflict stable→main.
