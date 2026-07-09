@@ -9,7 +9,18 @@
       "handler": "handlePreToolUse",
       "toolsToEnrich": ["Read", "Explore", "find", "grep", "Glob"],
       "description": "Graphify auto-hook: enriches file operations with knowledge graph context"
-    }
+    },
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/telegram-verify.mjs\"",
+            "timeout": 45
+          }
+        ]
+      }
+    ]
   },
   "inference": {
     "model": "claude-opus-4.1"

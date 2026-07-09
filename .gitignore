@@ -54,3 +54,4 @@ gumroad-packs/
 # actual prod env filename (gap: gitignore had .env.production)
 .env.prod
 .vitest-report.json
+.claude/run/

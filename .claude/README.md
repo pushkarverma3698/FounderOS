@@ -28,7 +28,10 @@ the **Authoritative** column wins; the other is stale and should be fixed.
 | `settings.json` | Committed hook + env config. |
 | `settings.local.json` | Local-only overrides (not the source of truth for shared rules). |
 | `brand/` | Brand guidelines (`TURICKS.md`). |
-| `skills/` | Project-scoped skills (Apify Actor toolkit). |
+| `skills/` | Project-scoped skills (Apify Actor toolkit + `dept-dispatch` orchestration skill). |
+| `agents/` | Department subagents (`dept-*.md`) mirroring `src/agents/capabilities.ts` — dev-harness twins of the runtime departments. |
+| `hooks/telegram-verify.mjs` | `SubagentStop` hook (wired in `settings.json`): pushes each finished subagent's final message + test log through the Telegram bridge. 3 retries, fail-logged, never blocks a session. |
+| `run/` | Hook runtime artifacts (test logs, delivery receipts, failure logs). Gitignored. |
 | `memory/MEMORY.md` | **Archived v1-era session log.** Stale — see Memory below. |
 | `launch.json`, `worktrees/` | Local tooling scaffolding. |
 
