@@ -4,8 +4,9 @@
 #
 # Inputs (env vars forwarded by appleboy/ssh-action):
 #   PROD_DOTENV          — base64-encoded full .env (required for DATABASE_URL)
-#   OPENROUTER_API_KEY   — optional override (fallback path; AGENT_MODEL pins to
-#                          google-genai:gemini-2.5-pro regardless of this var)
+#   GOOGLE_GENERATIVE_AI_API_KEY — primary model key (AGENT_MODEL pins to
+#                          google-genai:gemini-2.5-flash); MUST be set or prod 401s
+#   OPENROUTER_API_KEY   — free-tier fallback path key
 #   LINKEDIN_ACCESS_TOKEN — optional override
 #   LINKEDIN_AUTHOR_URN   — optional override
 set -euo pipefail
@@ -29,18 +30,29 @@ else
   echo "==> PROD_DOTENV not set; using existing .env on box"
 fi
 
-# Pin production model (same as deploy.yml). 2026-07-07: OpenRouter account
-# credits exhausted (402); direct Gemini (google-genai) produced empty/malformed
-# tool-calling output in this graph (untested integration). Switched to
-# anthropic:claude-haiku-4-5, already the vetted fallback in this codepath.
+# Pin production model (same as deploy.yml). 2026-07-09: reverted to direct
+# Gemini after proving google-genai:gemini-2.5-flash tool-calls cleanly on the
+# live box (the earlier "malformed Gemini" note was gemini-2.5-PRO, not flash).
+# anthropic:claude-haiku-4-5 is unusable in prod — there is no ANTHROPIC_API_KEY,
+# so it 401s on every message. Fallback = FREE OpenRouter models only (founder
+# directive: no paid fallback).
 grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
 {
-  printf '%s\n' 'AGENT_MODEL=anthropic:claude-haiku-4-5'
-  printf '%s\n' 'AGENT_FALLBACK_MODELS=anthropic:claude-haiku-4-5'
+  printf '%s\n' 'AGENT_MODEL=google-genai:gemini-2.5-flash'
+  printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
-echo "==> Patched .env: AGENT_MODEL=anthropic:claude-haiku-4-5"
+echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-2.5-flash"
+# Primary model key — forwarded from a GitHub secret so a PROD_DOTENV re-render
+# can never wipe it. Without this the direct-Gemini path 401s.
+if [ -n "${GOOGLE_GENERATIVE_AI_API_KEY:-}" ]; then
+  grep -v -E '^GOOGLE_GENERATIVE_AI_API_KEY=' .env > .env.patched || true
+  printf 'GOOGLE_GENERATIVE_AI_API_KEY=%s\n' "$GOOGLE_GENERATIVE_AI_API_KEY" >> .env.patched
+  mv .env.patched .env
+  chmod 600 .env
+  echo "==> Patched .env: GOOGLE_GENERATIVE_AI_API_KEY refreshed (primary model)"
+fi
 if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   grep -v -E '^OPENROUTER_API_KEY=' .env > .env.patched || true
   printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" >> .env.patched
