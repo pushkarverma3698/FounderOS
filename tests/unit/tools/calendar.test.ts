@@ -60,7 +60,7 @@ describe("calendarTool", () => {
       error: "Invalid time range",
     });
 
-    const result = await calendarTool.execute({ title: "Bad", date: "2026-07-10T09:00:00" });
+    const result = await calendarTool.execute({ title: "Bad", date: "2026-12-02T09:00:00" });
 
     expect(result.success).toBe(false);
     expect(mockWriteAuditEntry).not.toHaveBeenCalled();
@@ -89,12 +89,15 @@ describe("calendarTool", () => {
   });
 
   it("timed event end defaults to +1h", async () => {
-    await calendarTool.execute({ title: "Timed", date: "2026-07-10T09:00:00" });
+    // Far-future date — a near-term date here is a time-bomb: once it passes,
+    // the past-date guard rejects the event before the provider is ever called
+    // (this exact test went red on 2026-07-11 with the old 2026-07-10 fixture).
+    await calendarTool.execute({ title: "Timed", date: "2026-12-02T09:00:00" });
 
     expect(mockProviderCreateCalendarEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        start_datetime: "2026-07-10T09:00:00",
-        end_datetime: "2026-07-10T10:00:00",
+        start_datetime: "2026-12-02T09:00:00",
+        end_datetime: "2026-12-02T10:00:00",
       }),
     );
   });
