@@ -113,6 +113,9 @@ jobs:
   eval-and-update-readme:
     name: Eval + update README metrics
     runs-on: ubuntu-latest
+    # Milestone gate only — must not block auto-deploy when billing/infra flakes.
+    # Merge gate is `gate` (lint+build+wiring+arch+test); eval updates proof artifacts.
+    continue-on-error: true
     # Only on main. The `secrets` context is illegal in `if:`, so the key check
     # happens at the step level via env (see steps below).
     if: github.ref == 'refs/heads/main'
@@ -137,6 +140,10 @@ jobs:
     env:
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      # Match prod + live-e2e.yml. Without this, DEFAULT_AGENT_MODEL routes eval
+      # through paid OpenRouter (402 when credits are empty) and blocks deploy.
+      AGENT_MODEL: "google-genai:gemini-2.5-flash"
+      AGENT_FALLBACK_MODELS: "openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free"
       DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
       TELEGRAM_BOT_TOKEN: "ci:placeholder"
       TELEGRAM_CHAT_ID: "000000000"
