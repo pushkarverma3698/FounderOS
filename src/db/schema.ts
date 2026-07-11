@@ -718,10 +718,68 @@ export const agentAssets = agentsSchema.table(
 export type AgentAsset = typeof agentAssets.$inferSelect;
 export type NewAgentAsset = typeof agentAssets.$inferInsert;
 
+// ── gap_scans (AI Visibility Gap Scanner — lead-acquisition Layer 1) ──────────
+
+/**
+ * One row per finished AI-visibility gap scan — the per-vertical learning-loop
+ * dataset (lead-acquisition spec §11) and the retrieval store agents query to
+ * answer "what did Acme's last scan say?" / "show me every CRM scan".
+ *
+ * `report` is the full GapReportData (rates, evidence, causes) and `insights`
+ * the multi-angle critique (funnel, threats, volatility, confidence) — both
+ * stored whole as JSONB so a scan can be re-rendered or re-analyzed without
+ * rerunning paid surface calls. Hot columns are broken out for indexed lookup.
+ */
+export const gapScans = agentsSchema.table(
+  "gap_scans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull().default("turicks"),
+
+    target_name: text("target_name").notNull(),
+    /** Normalized bare domain (protocol/www stripped) — the scan's natural key. */
+    target_domain: text("target_domain").notNull(),
+    category: text("category").notNull(),
+
+    /** 0–100 weighted gap vs the best competitor. */
+    gap_score: integer("gap_score").notNull(),
+    /** Scan self-critique grade: high | medium | low. */
+    confidence: text("confidence").notNull().default("low"),
+    completion_rate: numeric("completion_rate", { precision: 4, scale: 3 }).notNull(),
+    runs_total: integer("runs_total").notNull(),
+
+    /** Surface ids sampled, e.g. ["google-ai","chatgpt","perplexity"]. */
+    surfaces: jsonb("surfaces").$type<string[]>().notNull().default([]),
+    /** Full GapReportData — rates, evidence, causes. */
+    report: jsonb("report").$type<Record<string, unknown>>().notNull(),
+    /** GapInsights — intent funnel, threat profile, volatility, confidence. */
+    insights: jsonb("insights").$type<Record<string, unknown>>(),
+    /** Rendered 1-page gap report — the outreach artifact, ready to resend. */
+    markdown: text("markdown").notNull(),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    /** Hot path: latest scan for a domain. */
+    domainTimeIdx: index("gs_domain_time_idx").on(t.tenant_id, t.target_domain, t.created_at),
+    /** Vertical dataset: all scans in a category. */
+    categoryIdx: index("gs_category_idx").on(t.tenant_id, t.category),
+  }),
+);
+
+export type GapScan = typeof gapScans.$inferSelect;
+export type NewGapScan = typeof gapScans.$inferInsert;
+
 // ── scheduled_posts ─────────────────────────────────────────────────────────
 
-/** Lifecycle of a queued social post. Approved-at-schedule → fired by the sweep. */
-export const SCHEDULED_POST_STATUSES = ["scheduled", "posted", "failed", "canceled"] as const;
+/**
+ * Lifecycle of a queued social post. Approved-at-schedule → claimed by a sweep
+ * ('posting') → published ('posted') or 'failed'. The 'posting' claim state is
+ * what makes the every-minute sweep safe against overlap: a row is atomically
+ * flipped to 'posting' before the provider call, so a second (overlapping) sweep
+ * tick can never re-select and republish it.
+ */
+export const SCHEDULED_POST_STATUSES = ["scheduled", "posting", "posted", "failed", "canceled"] as const;
 export type ScheduledPostStatus = (typeof SCHEDULED_POST_STATUSES)[number];
 
 /**

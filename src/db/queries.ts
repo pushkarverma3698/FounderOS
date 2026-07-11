@@ -7,7 +7,7 @@
  * Pattern: verbs + domain — createInterrupt, resolveInterrupt, logCost, checkIdempotency
  */
 
-import { and, count, desc, eq, gt, gte, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { tokenizeQuery, rankByTerms } from "./keyword-search.js";
 
@@ -1005,25 +1005,40 @@ export async function insertScheduledPost(data: ScheduledPostInput): Promise<Sch
   return existing!;
 }
 
-/** Posts whose time has arrived and are still awaiting publish (sweep hot path). */
-export async function getDueScheduledPosts(
+/**
+ * ATOMICALLY claim due posts for one sweep. Flips each selected row from
+ * 'scheduled' → 'posting' inside a single statement and RETURNs the claimed
+ * rows. `FOR UPDATE SKIP LOCKED` means a concurrent/overlapping sweep tick (the
+ * cron fires every minute and does not await the prior run) can never re-select
+ * the same row — this is the guard against double-posting to LinkedIn. A row
+ * left stuck in 'posting' after a hard crash is the SAFE failure direction (it
+ * simply won't republish); `hasBeenAudited` in the sweep is the second layer.
+ */
+export async function claimDueScheduledPosts(
   tenantId: string,
   now: Date = new Date(),
   limit = 10,
 ): Promise<ScheduledPost[]> {
   const db = getDb();
-  return db
-    .select()
-    .from(scheduledPosts)
-    .where(
-      and(
-        eq(scheduledPosts.tenant_id, tenantId),
-        eq(scheduledPosts.status, "scheduled"),
-        lte(scheduledPosts.scheduled_at, now),
-      ),
+  // postgres.js raw-SQL binds don't serialize a JS Date — pass an ISO string and
+  // cast in SQL (the query builder does this implicitly; raw execute does not).
+  const nowIso = now.toISOString();
+  const rows = await db.execute(sql`
+    UPDATE agents.scheduled_posts
+    SET status = 'posting'
+    WHERE id IN (
+      SELECT id FROM agents.scheduled_posts
+      WHERE tenant_id = ${tenantId}
+        AND status = 'scheduled'
+        AND scheduled_at <= ${nowIso}::timestamptz
+      ORDER BY scheduled_at
+      LIMIT ${limit}
+      FOR UPDATE SKIP LOCKED
     )
-    .orderBy(scheduledPosts.scheduled_at)
-    .limit(limit);
+    RETURNING *
+  `);
+  // postgres.js driver: db.execute returns a RowList (array-like of row objects).
+  return rows as unknown as ScheduledPost[];
 }
 
 /** Mark a queued post published — the row's status transition IS the dedup guard. */

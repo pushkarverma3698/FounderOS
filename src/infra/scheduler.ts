@@ -18,7 +18,7 @@ import { spawn } from "node:child_process";
 import {
   getPendingInterrupt,
   getTodayCostUsd,
-  getDueScheduledPosts,
+  claimDueScheduledPosts,
   markScheduledPostPosted,
   markScheduledPostFailed,
   hasBeenAudited,
@@ -159,7 +159,10 @@ async function publishScheduledPost(post: ScheduledPost): Promise<void> {
 
 /** Every minute — publish any scheduled posts whose time has arrived (zero-LLM). */
 export async function runScheduledPostSweep(): Promise<void> {
-  const due = await getDueScheduledPosts(TENANT, new Date());
+  // Atomically claim due rows ('scheduled' → 'posting') so an overlapping tick
+  // (this cron fires every minute and does not await the prior run) can never
+  // re-select and republish the same post. See claimDueScheduledPosts.
+  const due = await claimDueScheduledPosts(TENANT, new Date());
   for (const post of due) {
     try {
       await publishScheduledPost(post);

@@ -60,7 +60,7 @@ describe("calendarTool", () => {
       error: "Invalid time range",
     });
 
-    const result = await calendarTool.execute({ title: "Bad", date: "2026-07-10T09:00:00" });
+    const result = await calendarTool.execute({ title: "Bad", date: "2026-12-02T09:00:00" });
 
     expect(result.success).toBe(false);
     expect(mockWriteAuditEntry).not.toHaveBeenCalled();
