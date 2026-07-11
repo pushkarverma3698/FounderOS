@@ -2,26 +2,33 @@
  * Live-path smoke for the outreach reflection loop.
  * Usage: pnpm outreach:reflect
  *
- * Requires GOOGLE_GENERATIVE_AI_API_KEY (generator). Reflector uses LM Studio when
- * LM_STUDIO_URL is set; otherwise falls back to the same cloud model.
+ * Requires GOOGLE_GENERATIVE_AI_API_KEY (generator).
+ * Reflector uses OpenRouter free tier (OPENROUTER_API_KEY) when validation triggers a rewrite.
  * Exits 0 when a draft is queued, 1 on failure. Prints JSON accountability report.
  */
 
 import { runOutreachReflection } from "../src/outreach/index.js";
-import { buildGeneratorModel, buildReflectorModel } from "../src/outreach/models.js";
+import {
+  buildGeneratorModel,
+  buildReflectorModel,
+  describeGeneratorModel,
+  describeReflectorModel,
+} from "../src/outreach/models.js";
 import type { LeadContext } from "../src/outreach/contracts.js";
 
-function hasLocalReflector(): boolean {
-  const url = process.env["LM_STUDIO_URL"] ?? process.env["OUTREACH_REFLECTOR_BASE_URL"] ?? "";
-  return url.trim().length > 0;
-}
-
 async function main(): Promise<void> {
-  const key = process.env["GOOGLE_GENERATIVE_AI_API_KEY"]?.trim();
-  if (!key) {
+  const geminiKey = process.env["GOOGLE_GENERATIVE_AI_API_KEY"]?.trim();
+  if (!geminiKey) {
     console.error("GOOGLE_GENERATIVE_AI_API_KEY not set — live outreach smoke cannot run.");
     console.error("Offline proof: pnpm test tests/unit/outreach/reflection-e2e.test.ts");
     process.exit(1);
+  }
+
+  const orKey = process.env["OPENROUTER_API_KEY"]?.trim();
+  if (!orKey) {
+    console.warn(
+      "OPENROUTER_API_KEY not set — reflector rewrites will fail if the first draft does not pass validation.",
+    );
   }
 
   const lead: LeadContext = {
@@ -38,13 +45,13 @@ async function main(): Promise<void> {
   };
 
   const generatorModel = buildGeneratorModel();
-  const reflectorModel = hasLocalReflector() ? buildReflectorModel() : buildGeneratorModel();
+  const reflectorModel = buildReflectorModel();
 
   console.log(
     JSON.stringify({
       phase: "start",
-      generator: process.env["OUTREACH_GENERATOR_MODEL"] ?? process.env["AGENT_MODEL"] ?? "default",
-      reflector: hasLocalReflector() ? "local" : "cloud-fallback",
+      generator: describeGeneratorModel().id,
+      reflector: describeReflectorModel().id,
     }),
   );
 

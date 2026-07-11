@@ -18,7 +18,7 @@ export {
 
 export { OutreachReflectionGraphState, type OutreachGraphState } from "./state.js";
 export { validateConnectionDraft, InMemoryDailyLimitTracker } from "./validator.js";
-export { buildGeneratorModel, buildReflectorModel, type OutreachModelConfig } from "./models.js";
+export { buildGeneratorModel, buildReflectorModel, describeReflectorModel, DEFAULT_REFLECTOR_MODEL, type OutreachModelConfig } from "./models.js";
 export { createInMemoryOutreachQueue, type OutreachQueue, type OutreachQueueEntry } from "./queue.js";
 export { routeAfterValidator, terminalFailureReason, isTerminalFailure } from "./routing.js";
 export {

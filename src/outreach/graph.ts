@@ -7,6 +7,7 @@
  *                                  └→ fail → END
  *
  * Inject models at build time so CI runs with scripted fakes at $0.
+ * Generator = primary cloud; reflector = OpenRouter free tier (see models.ts).
  */
 
 import { StateGraph, START, END, type BaseCheckpointSaver } from "@langchain/langgraph";
