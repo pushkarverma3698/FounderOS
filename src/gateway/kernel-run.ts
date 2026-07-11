@@ -156,15 +156,17 @@ async function streamKernelTurn(
       if (label === null || label === lastLabel) continue;
       lastLabel = label;
       trace.event("turn.progress", { label });
-      if (placeholderId !== undefined && ctx.chat) {
+      const id = placeholderId;
+      if (id !== undefined && ctx.chat) {
         const chatId = ctx.chat.id;
-        await silently("edit", () => ctx.api.editMessageText(chatId, placeholderId!, label));
+        await silently("edit", () => ctx.api.editMessageText(chatId, id, label));
       }
     }
   } finally {
-    if (placeholderId !== undefined && ctx.chat) {
+    const id = placeholderId;
+    if (id !== undefined && ctx.chat) {
       const chatId = ctx.chat.id;
-      await silently("delete", () => ctx.api.deleteMessage(chatId, placeholderId!));
+      await silently("delete", () => ctx.api.deleteMessage(chatId, id));
     }
   }
 
