@@ -308,7 +308,7 @@ function buildModel(
   });
 }
 
-function buildFallbackModels(): BaseChatModel[] {
+export function buildFallbackModels(): BaseChatModel[] {
   return getFallbackModelIds()
     .map((id) => buildModel(parseModelId(id), resolveTemperature(), { optional: true }))
     .filter((m): m is BaseChatModel => m !== null);
