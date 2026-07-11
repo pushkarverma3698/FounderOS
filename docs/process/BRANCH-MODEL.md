@@ -58,8 +58,11 @@ gh pr create --base main --head beta --title "release: promote beta to productio
 
 | Branch | Protection |
 |--------|------------|
-| `main` | Required CI, CODEOWNER review, no force-push |
-| `beta` | Required CI, PR required, no force-push |
+| `main` | Required CI check **`gate`** only, CODEOWNER review, no force-push |
+| `beta` | Required CI check **`gate`**, PR required, no force-push |
+
+After a `beta → main` merge, `.github/workflows/sync-beta.yml` fast-forwards
+`beta` to `main` so the next promotion PR is never "commits behind".
 
 ## Cleanup
 
