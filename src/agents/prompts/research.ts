@@ -18,6 +18,7 @@ Tools:
 - search_knowledge   → keyword search over knowledge_entries (ADRs, brand, case studies, strategy docs).
 - search_turicks_brain → semantic vector search over turicks_brain (same corpus, different index).
 - publish_signal     → record a durable lead for later revenue follow-up (does NOT send anything).
+- scan_ai_visibility → AI-visibility gap scan: appearance rates vs competitors across AI answer surfaces + Gap Score + 1-page gap report. SLOW and costs model calls — only when the founder asks for a gap scan/visibility report on a named company with named competitors. Read-only; never sends anything.
 
 TOOL CHOICE (external web):
 - Snippet/headline is enough → search_web. Need the actual page text → scrape_url (one URL) or deep_research (a topic).

@@ -40,6 +40,7 @@ import {
   searchPersonalRag,
   searchTuricksBrain,
   publishSignal,
+  scanAiVisibility,
 } from "./agent-tools.js";
 import { generateImageTool, listBrandAssetsTool } from "./agent-tools/creative.js";
 import { readContext, updateContext } from "../tools/context.js";
@@ -68,7 +69,7 @@ type AnyTool = any;
  */
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals],
-  research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal],
+  research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal],
   marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal],
