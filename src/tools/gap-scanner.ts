@@ -30,6 +30,7 @@ import {
 } from "./gap-scan-core.js";
 import { renderGapReport } from "./gap-scan-render.js";
 import { deriveInsights, type GapInsights } from "./gap-scan-insights.js";
+import { assertGapScanBudget, recordGapScanCost } from "./gap-scan-budget.js";
 
 const log = childLogger({ module: "tool:scan_ai_visibility" });
 
@@ -316,6 +317,12 @@ export const gapScannerTool: UnifiedTool = {
       };
     }
 
+    // Cost gate BEFORE any paid surface call (a scan can fire 100+ model calls).
+    const budget = await assertGapScanBudget();
+    if (!budget.ok) {
+      return { success: false, error: `Gap scan blocked — ${budget.reason}` };
+    }
+
     try {
       const { report, insights, markdown } = await runGapScan(
         {
@@ -333,6 +340,7 @@ export const gapScannerTool: UnifiedTool = {
           error: `All ${report.runs_total} surface calls failed (surfaces: ${report.surfaces.join(", ")}) — check API keys/quota and retry.`,
         };
       }
+      await recordGapScanCost(report);
       const persistence = await persistScan(report, insights, markdown);
       log.info(
         {

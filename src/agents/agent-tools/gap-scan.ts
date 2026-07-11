@@ -14,7 +14,7 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { gapScannerTool } from "../../tools/gap-scanner.js";
 import { normalizeDomain } from "../../tools/gap-scan-core.js";
-import { getLatestGapScan, listGapScans } from "../../db/gap-scan-queries.js";
+import { getLatestGapScan, listGapScans, getGapScanById } from "../../db/gap-scan-queries.js";
 
 export const scanAiVisibility = tool(
   async ({ company_name, domain, category, competitors, runs_per_prompt }) => {
@@ -73,7 +73,15 @@ function summaryLine(s: {
 }
 
 export const getGapScans = tool(
-  async ({ domain, category, limit, full_report }) => {
+  async ({ domain, category, limit, full_report, scan_id }) => {
+    // Direct id lookup (e.g. from a summary list line) returns that exact report.
+    if (scan_id) {
+      const scan = await getGapScanById(scan_id);
+      if (!scan) return `No gap scan found with id ${scan_id}. List scans first (no scan_id) to see valid ids.`;
+      const when = scan.created_at ? scan.created_at.toISOString().slice(0, 10) : "unknown date";
+      return `Gap scan ${scan.id} — ${scan.target_name} (${scan.target_domain}), ${when}:\n\n${scan.markdown}`;
+    }
+
     const normalized = domain ? normalizeDomain(domain) : undefined;
 
     if (full_report && normalized) {
@@ -99,7 +107,7 @@ export const getGapScans = tool(
     description:
       "Retrieve PAST AI-visibility gap scans from the gap_scans table ($0, instant — no model calls). " +
       "List scan history filtered by target domain (trend over time) or category (the vertical dataset), " +
-      "or fetch the latest full 1-page report for a domain with full_report=true. " +
+      "fetch the latest full 1-page report for a domain with full_report=true, or fetch one exact scan by scan_id. " +
       "Always try this BEFORE scan_ai_visibility when the founder asks about an existing/previous scan.",
     schema: z.object({
       domain: z.string().optional().nullable().describe("Filter by target domain, e.g. 'acme.com'"),
@@ -110,6 +118,11 @@ export const getGapScans = tool(
         .optional()
         .nullable()
         .describe("With domain: return the latest full Markdown report instead of a summary list"),
+      scan_id: z
+        .string()
+        .optional()
+        .nullable()
+        .describe("Fetch one exact scan by its id (from a summary list line) — returns that full report"),
     }),
   },
 );

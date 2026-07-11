@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockGetDue = vi.fn();
+const mockClaimDue = vi.fn();
 const mockMarkPosted = vi.fn(async () => {});
 const mockMarkFailed = vi.fn(async () => {});
 const mockHasBeenAudited = vi.fn(async () => false);
@@ -14,7 +14,7 @@ vi.mock("../../../src/db/queries.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return {
     ...actual,
-    getDueScheduledPosts: mockGetDue,
+    claimDueScheduledPosts: mockClaimDue,
     markScheduledPostPosted: mockMarkPosted,
     markScheduledPostFailed: mockMarkFailed,
     hasBeenAudited: mockHasBeenAudited,
@@ -65,7 +65,7 @@ describe("runScheduledPostSweep", () => {
   });
 
   it("publishes a due post with its mention, audits, and marks it posted", async () => {
-    mockGetDue.mockResolvedValue([duePost()]);
+    mockClaimDue.mockResolvedValue([duePost()]);
     await runScheduledPostSweep();
 
     expect(mockProviderPost).toHaveBeenCalledWith(
@@ -84,7 +84,7 @@ describe("runScheduledPostSweep", () => {
   });
 
   it("marks failed + alerts the founder when the provider errors", async () => {
-    mockGetDue.mockResolvedValue([duePost()]);
+    mockClaimDue.mockResolvedValue([duePost()]);
     mockProviderPost.mockResolvedValue({ success: false, error: "429 rate limited" });
     await runScheduledPostSweep();
 
@@ -94,7 +94,7 @@ describe("runScheduledPostSweep", () => {
   });
 
   it("is idempotent — skips the provider when the key was already audited", async () => {
-    mockGetDue.mockResolvedValue([duePost({ post_id: "urn:li:share:existing" })]);
+    mockClaimDue.mockResolvedValue([duePost({ post_id: "urn:li:share:existing" })]);
     mockHasBeenAudited.mockResolvedValue(true);
     await runScheduledPostSweep();
 
@@ -103,8 +103,17 @@ describe("runScheduledPostSweep", () => {
   });
 
   it("posts without a mention when none is set on the row", async () => {
-    mockGetDue.mockResolvedValue([duePost({ mention_urn: null, mention_name: null })]);
+    mockClaimDue.mockResolvedValue([duePost({ mention_urn: null, mention_name: null })]);
     await runScheduledPostSweep();
     expect(mockProviderPost).toHaveBeenCalledWith(expect.objectContaining({ mention: undefined }));
+  });
+
+  it("claims via the ATOMIC claim (not a plain read) so overlapping ticks can't double-post", async () => {
+    // The sweep must go through claimDueScheduledPosts, which flips rows to
+    // 'posting' in one statement — a second concurrent tick then sees nothing.
+    mockClaimDue.mockResolvedValue([]);
+    await runScheduledPostSweep();
+    expect(mockClaimDue).toHaveBeenCalledTimes(1);
+    expect(mockProviderPost).not.toHaveBeenCalled(); // nothing claimed ⇒ nothing posted
   });
 });

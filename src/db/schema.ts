@@ -772,8 +772,14 @@ export type NewGapScan = typeof gapScans.$inferInsert;
 
 // ── scheduled_posts ─────────────────────────────────────────────────────────
 
-/** Lifecycle of a queued social post. Approved-at-schedule → fired by the sweep. */
-export const SCHEDULED_POST_STATUSES = ["scheduled", "posted", "failed", "canceled"] as const;
+/**
+ * Lifecycle of a queued social post. Approved-at-schedule → claimed by a sweep
+ * ('posting') → published ('posted') or 'failed'. The 'posting' claim state is
+ * what makes the every-minute sweep safe against overlap: a row is atomically
+ * flipped to 'posting' before the provider call, so a second (overlapping) sweep
+ * tick can never re-select and republish it.
+ */
+export const SCHEDULED_POST_STATUSES = ["scheduled", "posting", "posted", "failed", "canceled"] as const;
 export type ScheduledPostStatus = (typeof SCHEDULED_POST_STATUSES)[number];
 
 /**

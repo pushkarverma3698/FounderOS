@@ -8,10 +8,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockListGapScans = vi.fn();
 const mockGetLatestGapScan = vi.fn();
+const mockGetGapScanById = vi.fn();
 
 vi.mock("../../../src/db/gap-scan-queries.js", () => ({
   listGapScans: mockListGapScans,
   getLatestGapScan: mockGetLatestGapScan,
+  getGapScanById: mockGetGapScanById,
   saveGapScan: vi.fn(),
 }));
 
@@ -34,6 +36,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockListGapScans.mockResolvedValue([SUMMARY]);
   mockGetLatestGapScan.mockResolvedValue(null);
+  mockGetGapScanById.mockResolvedValue(null);
 });
 
 describe("get_gap_scans", () => {
@@ -57,6 +60,23 @@ describe("get_gap_scans", () => {
     expect(mockGetLatestGapScan).toHaveBeenCalledWith("acme.com");
     expect(out).toContain("# AI Visibility Gap Report — Acme");
     expect(out).toContain("id id-1");
+  });
+
+  it("fetches one exact scan by scan_id and returns its full report", async () => {
+    mockGetGapScanById.mockResolvedValue({
+      ...SUMMARY,
+      markdown: "# AI Visibility Gap Report — Acme\n…",
+    });
+    const out = await getGapScans.invoke({ scan_id: "id-1" });
+    expect(mockGetGapScanById).toHaveBeenCalledWith("id-1");
+    expect(mockListGapScans).not.toHaveBeenCalled(); // id lookup short-circuits the list path
+    expect(out).toContain("Gap scan id-1 — Acme (acme.com)");
+    expect(out).toContain("# AI Visibility Gap Report — Acme");
+  });
+
+  it("says so honestly when a scan_id is unknown", async () => {
+    const out = await getGapScans.invoke({ scan_id: "does-not-exist" });
+    expect(out).toContain("No gap scan found with id does-not-exist");
   });
 
   it("says so honestly when nothing is saved (never fabricates a scan)", async () => {

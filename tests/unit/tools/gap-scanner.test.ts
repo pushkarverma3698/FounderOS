@@ -15,6 +15,15 @@ vi.stubGlobal("fetch", mockFetch);
 const mockSaveGapScan = vi.fn(async () => "scan-uuid-1");
 vi.mock("../../../src/db/gap-scan-queries.js", () => ({ saveGapScan: mockSaveGapScan }));
 
+// Budget boundary — same dynamic-import seam as persistence, so the $0 path and
+// the CLI-without-DB path never touch a real Postgres. Default: budget clear.
+const mockGetTodayCostUsd = vi.fn(async () => 0);
+const mockLogLlmCost = vi.fn(async () => {});
+vi.mock("../../../src/db/queries.js", () => ({
+  getTodayCostUsd: mockGetTodayCostUsd,
+  logLlmCost: mockLogLlmCost,
+}));
+
 const {
   gapScannerTool,
   runGapScan,
@@ -51,6 +60,7 @@ const CONFIG = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockGetTodayCostUsd.mockResolvedValue(0);
   delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   delete process.env["OPENROUTER_API_KEY"];
   delete process.env["GAP_SCAN_SURFACES"];
@@ -336,6 +346,53 @@ describe("gapScannerTool.execute", () => {
     const res = await gapScannerTool.execute(ARGS);
     expect(res.success).toBe(false);
     expect(res.error).toContain("surface calls failed");
+  });
+
+  // ── Cost control (the scan fires many paid surface calls) ───────────────────
+
+  it("blocks the scan (no surface calls, no spend) when the daily budget is exceeded", async () => {
+    process.env["OPENROUTER_API_KEY"] = "or-key";
+    process.env["GAP_SCAN_SURFACES"] = "chatgpt=openai/gpt-4o-mini";
+    mockGetTodayCostUsd.mockResolvedValue(99_999); // way over any cap
+
+    const res = await gapScannerTool.execute(ARGS);
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/budget/i);
+    expect(mockFetch).not.toHaveBeenCalled(); // never reached the surfaces
+    expect(mockSaveGapScan).not.toHaveBeenCalled();
+  });
+
+  it("records the scan's spend in ai_call_costs after a successful scan", async () => {
+    process.env["OPENROUTER_API_KEY"] = "or-key";
+    process.env["GAP_SCAN_SURFACES"] = "chatgpt=openai/gpt-4o-mini";
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: "HubSpot (hubspot.com) dominates." } }] }),
+    });
+
+    const res = await gapScannerTool.execute(ARGS);
+    expect(res.success).toBe(true);
+    expect(mockLogLlmCost).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: "research", tier: "gap-scan" }),
+    );
+    // Cost must be proportional to the completed calls (2 prompts × 1 surface × 1 run).
+    const logged = mockLogLlmCost.mock.calls[0]![0] as { cost_usd: string };
+    expect(Number(logged.cost_usd)).toBeGreaterThan(0);
+  });
+
+  it("fails OPEN on a budget-read error — a DB blip must not block a read-only scan", async () => {
+    process.env["OPENROUTER_API_KEY"] = "or-key";
+    process.env["GAP_SCAN_SURFACES"] = "chatgpt=openai/gpt-4o-mini";
+    mockGetTodayCostUsd.mockRejectedValueOnce(new Error("connection refused"));
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: "HubSpot wins." } }] }),
+    });
+
+    const res = await gapScannerTool.execute(ARGS);
+    expect(res.success).toBe(true); // budget telemetry down ⇒ do not block the scan
   });
 });
 
