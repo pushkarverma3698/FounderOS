@@ -1,35 +1,36 @@
-name: Live E2E
+name: Live check
 
-# Full kernel proof + golden-set eval. Manual only — acceptance gate, not dev loop.
+# Optional milestone gate — real API key + Postgres. Run manually before a big
+# release; never blocks merge or deploy.
 on:
   workflow_dispatch:
 
 jobs:
-  live-e2e:
-    name: Live kernel proof + golden-set eval
+  live:
+    name: Integration + eval (live)
     runs-on: ubuntu-latest
     timeout-minutes: 40
     services:
       postgres:
         image: pgvector/pgvector:pg16
         env:
-          POSTGRES_USER: founderos
-          POSTGRES_PASSWORD: founderos
-          POSTGRES_DB: founderos
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U founderos"
+          --health-cmd "pg_isready -U ci"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       AGENT_MODEL: "google-genai:gemini-2.5-flash"
-      DATABASE_URL: "postgresql://founderos:founderos@localhost:5432/founderos"
+      AGENT_FALLBACK_MODELS: "openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free"
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
       TELEGRAM_BOT_TOKEN: "ci:placeholder"
       TELEGRAM_CHAT_ID: "000000000"
-      SCRAPE_BACKEND: "fetch"
-      LOG_LEVEL: "warn"
     steps:
       - name: Require API key
         if: env.GOOGLE_GENERATIVE_AI_API_KEY == ''
@@ -48,18 +49,15 @@ jobs:
       - run: touch .env
       - name: Migrate DB
         run: node --env-file=.env --import tsx/esm scripts/setup-db.ts
-      - name: Live kernel proof
-        run: node --env-file=.env --import tsx/esm scripts/live-e2e-proof.ts
-      - name: Live golden-set eval
-        run: pnpm eval
-      - name: Live cost ledger
-        run: pnpm proof:costs
-      - name: Upload eval report
+      - run: pnpm test:integration
+      - run: pnpm eval
+      - run: pnpm proof:scoreboard
+      - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: live-e2e-reports
+          name: live-check-reports
           path: |
             eval-report.md
-            docs/COSTS.md
+            docs/PROOF.md
           if-no-files-found: ignore

@@ -1,0 +1,38 @@
+name: Sync beta
+
+# After every main push (including beta→main promotion), fast-forward beta when
+# it is strictly behind main so the next promotion PR is never blocked.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Fast-forward beta to main
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip beta-sync]')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin beta main
+          BETA_SHA="$(git rev-parse origin/beta)"
+          MAIN_SHA="$(git rev-parse origin/main)"
+          if [ "$BETA_SHA" = "$MAIN_SHA" ]; then
+            echo "beta already matches main — nothing to sync"
+            exit 0
+          fi
+          if ! git merge-base --is-ancestor origin/beta origin/main; then
+            echo "beta has commits not in main — skip auto-sync (merge beta→main first)"
+            exit 0
+          fi
+          git checkout beta
+          git merge --ff-only origin/main
+          git push origin beta
