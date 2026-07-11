@@ -37,9 +37,3 @@ export { SALES_PROMPT } from "./prompts/sales.js";
 export { PERSONAL_PROMPT } from "./prompts/personal.js";
 export { JOBHUNT_PROMPT } from "./prompts/jobhunt.js";
 export { SCHEDULER_BRIEF_PROMPT } from "./prompts/scheduler.js";
-export {
-  CREATIVE_PROMPT,
-  ART_DIRECTOR_PROMPT,
-  COPYWRITER_PROMPT,
-  BRAND_DESIGNER_PROMPT,
-} from "./prompts/creative.js";
