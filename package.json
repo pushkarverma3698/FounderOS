@@ -20,6 +20,7 @@
     "test:smoke": "ALLOW_NETWORK=1 node --import tsx/esm scripts/smoke.ts",
     "test:ci": "vitest run",
     "eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
+    "outreach:reflect": "node --import tsx/esm scripts/run-outreach-reflection.ts",
     "qa:telegram": "ALLOW_NETWORK=1 node --env-file=.env --import tsx/esm scripts/e2e-telegram-qa.ts run all --approve",
     "lint": "tsc --noEmit",
     "verify:arch": "node --import tsx/esm scripts/verify-architecture.ts",

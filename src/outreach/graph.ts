@@ -22,9 +22,20 @@ import {
   type OutreachNodeDeps,
 } from "./nodes.js";
 import { buildGeneratorModel, buildReflectorModel, type OutreachModelConfig } from "./models.js";
-import { createInMemoryOutreachQueue, type OutreachQueue } from "./queue.js";
+import { createInMemoryOutreachQueue, type OutreachQueue, type OutreachQueueEntry } from "./queue.js";
 import { InMemoryDailyLimitTracker } from "./validator.js";
 import type { LeadContext } from "./contracts.js";
+
+/** Caller-facing result after `runOutreachReflection` completes. */
+export interface OutreachRunResult {
+  status: "queued" | "failed";
+  draft: string;
+  retry_count: number;
+  validation_errors: string[];
+  queue_id?: string;
+  queue_entry?: OutreachQueueEntry;
+  failure_reason?: string;
+}
 
 export interface BuildOutreachReflectionGraphOpts {
   modelConfig?: OutreachModelConfig;
@@ -71,15 +82,26 @@ export type CompiledOutreachReflectionGraph = ReturnType<typeof buildOutreachRef
 export async function runOutreachReflection(
   lead: LeadContext,
   opts: BuildOutreachReflectionGraphOpts = {},
-): Promise<OutreachGraphState> {
-  const graph = buildOutreachReflectionGraph(opts);
-  const result = await graph.invoke({
+): Promise<OutreachRunResult> {
+  const queue = opts.queue ?? createInMemoryOutreachQueue();
+  const graph = buildOutreachReflectionGraph({ ...opts, queue });
+  const state = (await graph.invoke({
     lead_context: lead,
     messages: [],
     current_draft: "",
     validation_errors: [],
     retry_count: 0,
     status: "running",
-  });
-  return result as OutreachGraphState;
+  })) as OutreachGraphState;
+
+  const queueEntry = state.queue_id ? queue.get(state.queue_id) : undefined;
+  return {
+    status: state.status === "queued" ? "queued" : "failed",
+    draft: state.current_draft,
+    retry_count: state.retry_count,
+    validation_errors: state.validation_errors,
+    queue_id: state.queue_id,
+    queue_entry: queueEntry,
+    failure_reason: state.failure_reason,
+  };
 }
