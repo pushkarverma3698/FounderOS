@@ -17,24 +17,24 @@ Every change must answer **why** before **what**:
 
 **Cloud agents and Cursor must NEVER open PRs targeting `main`.** CI enforces this in
 `.github/workflows/branch-policy.yml` — PRs to `main` are rejected unless the head
-branch is exactly `stable`.
+branch is exactly `beta`.
 
 ### Correct flow
 
 ```
-cursor/* or feat/*  →  beta  →  stable  →  main (founder merges only, CD deploys)
+cursor/* or feat/*  →  beta  →  main (founder merges only, CD deploys)
 ```
 
 | Action | Rule |
 |--------|------|
-| Cut branch from | `stable` (fetch + pull first) |
+| Cut branch from | `beta` (fetch + pull first) |
 | Open PR to | **`beta`** always |
-| Merge to `main` | **Founder only** via `stable → main` promotion PR |
+| Merge to `main` | **Founder only** via `beta → main` promotion PR |
 
 ### When creating a PR
 
 ```bash
-git fetch origin stable && git checkout stable && git pull origin stable
+git fetch origin beta && git checkout beta && git pull origin beta
 git checkout -b cursor/my-task-d523
 # … work …
 git push -u origin cursor/my-task-d523

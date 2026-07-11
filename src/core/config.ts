@@ -234,17 +234,6 @@ export const ENGINEERING_SUBGRAPH_ENABLED = boolEnv("ENGINEERING_SUBGRAPH", fals
 export const REVENUE_SUBGRAPH_ENABLED = boolEnv("REVENUE_SUBGRAPH", false);
 
 /**
- * Add the `creative` nested sub-supervisor (art_director/copywriter/brand_designer)
- * as an extra routing target. Default OFF — unlike engineering/revenue (which
- * REPLACE an existing same-named node), creative ADDS a new node to the
- * supervisor's agent set, which changes routing surface. It stays off until the
- * routing is live-verified on the VPS with `pnpm eval` (the eval needs a real
- * model key, absent in CI/web). Flip CREATIVE_SUBGRAPH=1 to enable. Generating
- * images also needs GOOGLE_GENERATIVE_AI_API_KEY.
- */
-export const CREATIVE_SUBGRAPH_ENABLED = boolEnv("CREATIVE_SUBGRAPH", false);
-
-/**
  * Long-poll Telegram in this process. Off in development by default so local
  * `pnpm dev` can serve Jarvis without fighting the prod bot for getUpdates.
  * Set TELEGRAM_POLLING_ENABLED=true explicitly to run the gateway locally.

@@ -184,6 +184,12 @@ branch). Merge to `main` → CI runs → on success CD deploys. That's the whole
 | `OPENROUTER_API_KEY` | **production resilience — set this.** Arms the cross-provider failover (`model.ts` → GPT-4o-mini) so a Gemini quota/billing lapse degrades gracefully instead of taking the whole office down. Without it the bot is 100% down on any Gemini outage (this fired 2026-06-16 when Gemini credits depleted). Put it in `PROD_DOTENV` too, not just here. Verify: temporarily point `AGENT_MODEL` at a dead key and confirm a real turn returns with `provider: "openrouter"` in the trace. |
 | `DATABASE_URL` · `TELEGRAM_BOT_TOKEN` · `TELEGRAM_CHAT_ID` | used by the `main`-only eval job |
 
+**Image delivery (S3):** `marketing.generate_image` stores bytes in object storage and
+returns an asset pointer. If `GOOGLE_GENERATIVE_AI_API_KEY` is set but
+`STORAGE_BUCKET` + `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` are missing, the
+tool generates the image (real spend) then dead-ends at upload — boot + deploy now
+warn loudly. Include all three in `PROD_DOTENV` (or `STORAGE_ENDPOINT_URL` for R2/MinIO).
+
 `GITHUB_TOKEN` is provided automatically by Actions — do not create it.
 
 ### Managing production env without SSH
