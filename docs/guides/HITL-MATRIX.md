@@ -10,15 +10,17 @@
 |---|------|-----------|------|--------------|----------|-----------|------------|
 | 1 | `send_email` | comms, sales | External write | Full gate | Sender reputation, CAN-SPAM compliance, privacy violations | Founder approves content + recipient | "Email not sent (rejected by founder)" |
 | 2 | `linkedin_post` | marketing | External write | Gate 1 (brand) → Gate 2 (judge) | Brand safety, regulatory risk (no false claims), LinkedIn terms violation | Founder approves after brand-validator + Claude judge | "Post not published (rejected)" |
-| 3 | `github_write` | engineering | External write | Full gate | Account security (commits, PRs, pushes affect production), code review required | Founder reviews PR content + target branch | "PR not created (rejected)" |
-| 4 | `project_workflow` | engineering | External action | Full gate | CI/CD triggers, deployment automation (can break production), affects other teams | Founder confirms workflow + deploy targets | "Workflow not executed (rejected)" |
-| 5 | `claude_code` | engineering | Local execution | Full gate | Arbitrary shell/git execution on founder's machine, file writes to any path (unless path-guarded) | Founder reviews: files touched, shell commands, git operations | "Code not executed (rejected)" |
-| 6 | `create_calendar_event` | comms | External write | Full gate | Calendar namespace collision, privacy (attendees see event details), can overwrite existing events | Founder confirms event + attendees | "Event not created (rejected)" |
-| 7 | `write_file` | personal | Local write | Full gate | Arbitrary file modification on founder's machine, overwrites existing files, can corrupt configs | Founder reviews: file path, content, file size | "File not written (rejected)" |
-| 8 | `run_shell` | personal | Local execution | Full gate | Arbitrary shell commands, can delete files, kill processes, install software | Founder reviews: command, working directory, env vars | "Command not executed (rejected)" |
-| 9 | `send_file` | personal | External send | Full gate | File exfiltration risk, sharing confidential files via Telegram | Founder confirms: file path, recipient, content type | "File not sent (rejected)" |
-| 10 | `browser` | personal | Local automation | Full gate | Arbitrary browser automation, can access private data (cookies, autofills), login to founder's accounts | Founder reviews: URL, actions (click/type/navigate), scope | "Browser action not executed (rejected)" |
-| 11 | `read_emails` | comms | External read | **NO gate** | Read-only, instant execution, no side effects, no privacy loss (founder's own inbox) | N/A | N/A |
+| 3 | `schedule_social_post` | marketing | External write (deferred) | Gate 1 (brand) → Gate 2 (judge) → HITL once | Same outbound risk as immediate post; approval covers **both** queueing and future auto-publish (no second card at cron time) | Founder approves draft + `scheduled_at`; cron publishes with zero LLM | "Post not scheduled (rejected)" |
+| 4 | `github_write` | engineering | External write | Full gate | Account security (commits, PRs, pushes affect production), code review required | Founder reviews PR content + target branch | "PR not created (rejected)" |
+| 5 | `project_workflow` | engineering | External action | Full gate | CI/CD triggers, deployment automation (can break production), affects other teams | Founder confirms workflow + deploy targets | "Workflow not executed (rejected)" |
+| 6 | `claude_code` | engineering | Local execution | Full gate | Arbitrary shell/git execution on founder's machine, file writes to any path (unless path-guarded) | Founder reviews: files touched, shell commands, git operations | "Code not executed (rejected)" |
+| 7 | `create_calendar_event` | comms | External write | Full gate | Calendar namespace collision, privacy (attendees see event details), can overwrite existing events | Founder confirms event + attendees | "Event not created (rejected)" |
+| 8 | `write_file` | personal | Local write | Full gate | Arbitrary file modification on founder's machine, overwrites existing files, can corrupt configs | Founder reviews: file path, content, file size | "File not written (rejected)" |
+| 9 | `run_shell` | personal | Local execution | Full gate | Arbitrary shell commands, can delete files, kill processes, install software | Founder reviews: command, working directory, env vars | "Command not executed (rejected)" |
+| 10 | `send_file` | personal | External send | Full gate | File exfiltration risk, sharing confidential files via Telegram | Founder confirms: file path, recipient, content type | "File not sent (rejected)" |
+| 11 | `browser` | personal | Local automation | Full gate | Arbitrary browser automation, can access private data (cookies, autofills), login to founder's accounts | Founder reviews: URL, actions (click/type/navigate), scope | "Browser action not executed (rejected)" |
+| 12 | `read_emails` | comms | External read | **NO gate** | Read-only, instant execution, no side effects, no privacy loss (founder's own inbox) | N/A | N/A |
+| — | `list_scheduled_posts` | marketing | External read | **NO gate** | Read-only queue inspection; no publish side effect | N/A | N/A |
 
 ---
 
@@ -38,10 +40,10 @@ Founder clicks [Approve] (or edits + re-approves)
 send_email executes, email sent, audit record written
 ```
 
-### Two-Gate (1 tool)
+### Two-Gate (2 tools)
 **Sequence:** Agent drafts → Gate 1 (brand-validator, no LLM) → Gate 2 (Claude judge) → HITL approval → Post
 
-Example (linkedin_post):
+Example (`linkedin_post` — publish now):
 ```
 Agent: "I'll post about FounderOS on LinkedIn"
        ↓
@@ -54,6 +56,21 @@ HITL Card: [Draft preview] [Judge feedback] [Approve] [Edit]
 Founder clicks [Approve]
        ↓
 linkedin_post executes, post published, audit record written
+```
+
+Example (`schedule_social_post` — publish later):
+```
+Agent: "I'll schedule this post for Tuesday 9am"
+       ↓
+Gate 1 + Gate 2 (same as linkedin_post)
+       ↓
+HITL Card: [Draft + scheduled_at] [Approve] [Edit]
+       ↓
+Founder clicks [Approve] once
+       ↓
+Row inserted in scheduled_posts (status: scheduled)
+       ↓
+Later: runScheduledPostSweep() publishes via providerLinkedInPost — no second HITL
 ```
 
 ### No Gate (1 tool)
@@ -73,7 +90,7 @@ Results returned to agent (internal use, no external send)
 ## Key Principles
 
 ### 1. **All External Writes Gate**
-- `send_email`, `linkedin_post`, `github_write`, `project_workflow`, `create_calendar_event`
+- `send_email`, `linkedin_post`, `schedule_social_post`, `github_write`, `project_workflow`, `create_calendar_event`
 - **Why:** Affects others (recipient, followers, CI/CD, attendees) → consent required
 
 ### 2. **All Local Writes/Execution Gate**
@@ -81,7 +98,7 @@ Results returned to agent (internal use, no external send)
 - **Why:** Can modify founder's machine → explicit approval required
 
 ### 3. **Send Operations Gate**
-- `send_file`, `send_email`, `linkedin_post`
+- `send_file`, `send_email`, `linkedin_post`, `schedule_social_post`
 - **Why:** Data leaves the system → audit trail required
 
 ### 4. **Reads Don't Gate** (unless sensitive)
@@ -183,7 +200,7 @@ grep "send_email\|hitlGate" /tmp/founderos.log | tail -20
 
 ```
 Does the tool send data outside FounderOS?
-├─ YES (send_email, linkedin_post, github_write, create_calendar_event, send_file)
+├─ YES (send_email, linkedin_post, schedule_social_post, github_write, create_calendar_event, send_file)
 │  └─ Full gate? YES
 ├─ NO, does it execute on the founder's machine?
 │  ├─ YES (claude_code, run_shell, browser, write_file)

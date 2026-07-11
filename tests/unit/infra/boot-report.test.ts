@@ -65,6 +65,26 @@ describe("buildBootReport", () => {
       "Claude executor",
       "Observability (LangSmith)",
       "RAG embeddings (Ollama)",
+      "Image delivery storage (S3)",
     ]);
+  });
+
+  it("warns when Gemini key is set but S3 storage is missing", () => {
+    const row = find(buildBootReport({
+      GOOGLE_GENERATIVE_AI_API_KEY: "AIza-x",
+    }), "Image delivery storage (S3)");
+    expect(row.live).toBe(false);
+    expect(row.detail).toContain("STORAGE_BUCKET");
+  });
+
+  it("reports S3 LIVE when Gemini + storage credentials are present", () => {
+    const row = find(buildBootReport({
+      GOOGLE_GENERATIVE_AI_API_KEY: "AIza-x",
+      STORAGE_BUCKET: "founderos-assets",
+      AWS_ACCESS_KEY_ID: "AKIA",
+      AWS_SECRET_ACCESS_KEY: "secret",
+    }), "Image delivery storage (S3)");
+    expect(row.live).toBe(true);
+    expect(row.detail).toContain("founderos-assets");
   });
 });

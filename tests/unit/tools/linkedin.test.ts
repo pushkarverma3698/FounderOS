@@ -58,6 +58,18 @@ describe("linkedinPostTool", () => {
     expect((result.data as { post_id: string }).post_id).toBe("urn:li:share:123");
   });
 
+  it("passes account_key override to provider when explicit", async () => {
+    await linkedinPostTool.execute({
+      ...BASE_POST_ARGS,
+      account_key: "personal",
+      department: "marketing",
+    });
+
+    expect(mockProviderLinkedInPost).toHaveBeenCalledWith(
+      expect.objectContaining({ account_key: "personal" }),
+    );
+  });
+
   it("passes author URN and visibility to the provider", async () => {
     await linkedinPostTool.execute({ ...BASE_POST_ARGS, department: "marketing" });
 

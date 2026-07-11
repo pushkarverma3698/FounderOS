@@ -43,7 +43,7 @@ const DESCRIPTIONS: Record<(typeof WORKERS)[number], string> = {
   research: "Web facts, news, company/market research, ICP scoring, internal Turicks knowledge lookups.",
   comms: "Reading inbox, known-contact email, Google Calendar work.",
   engineering: "GitHub repos, issues, PRs, code, tests, deployments, FounderOS engineering work.",
-  marketing: "LinkedIn posts, content strategy, comment replies, Turicks brand copy.",
+  marketing: "LinkedIn posts, content strategy, comment replies, Turicks brand copy, image generation (draft + final), brand asset library.",
   sales: "Prospect research tied to cold outreach, unknown-company outreach, sales emails.",
   personal: "Files, directories, shell, browser, and laptop operations on the founder's machine.",
   jobhunt: "Job searches, CV/resume work, applications, hiring-manager outreach.",

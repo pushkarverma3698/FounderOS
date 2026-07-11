@@ -21,8 +21,7 @@ export type Department =
   | "marketing"
   | "sales"
   | "personal"
-  | "jobhunt"
-  | "creative";
+  | "jobhunt";
 
 /** A single golden evaluation case: the expected behaviour for one input. */
 export interface GoldenTask {
