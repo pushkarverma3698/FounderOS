@@ -8,6 +8,23 @@
 
 ---
 
+## Account strategy (who posts from where)
+
+**Full policy:** [LINKEDIN-ACCOUNT-AND-GROWTH-STRATEGY.md](LINKEDIN-ACCOUNT-AND-GROWTH-STRATEGY.md)
+
+| Flow | LinkedIn identity | @Turicks tag | Why |
+|------|-------------------|--------------|-----|
+| **A. Immediate** | Turicks **company page** | No | Official brand / showcase |
+| **B. Scheduled** | Pushkar **personal** | **Yes** (default) | Followers + build-in-public |
+| **C. Outreach** | Personal | No | Connection notes (ADR-009) |
+| **Engagement** | Turicks page context | No | Comments on company posts |
+
+Code: `resolveLinkedInPostingPolicy()` in `src/core/linkedin-posting-policy.ts`.
+
+Scheduled growth posts should **learn from analytics** before drafting — see growth strategy doc and `linkedin_analytics` marketing tool.
+
+---
+
 ## At a glance — four separate systems
 
 These are **not** one pipeline. Do not conflate them.
@@ -28,7 +45,9 @@ These are **not** one pipeline. Do not conflate them.
 
 ## A. Immediate LinkedIn post (`linkedin_post`)
 
-**Use when:** Founder says *"Post this on LinkedIn now."*
+**Use when:** Founder says *"Post this on LinkedIn now"* as **Turicks company page** (official brand).
+
+**Not for:** Build-in-public follower growth — use Flow B (scheduled, personal + @Turicks).
 
 ### E2E path
 
@@ -55,15 +74,20 @@ Telegram message
 
 ### Env
 
-- `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_AUTHOR_URN`
-- `LINKEDIN_ORG_URN`, `LINKEDIN_ORG_NAME` — optional, for @company tag on personal posts
+- `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_AUTHOR_URN` — **must be Turicks org URN** for company-page posts
+- `LINKEDIN_AUTHOR_URN_PERSONAL` — used by Flow B (scheduled) via `account_key: personal`
+- `LINKEDIN_ORG_NAME` — display name for `@Turicks` mention on personal posts (default: `Turicks`)
 - `LINKEDIN_API_VERSION` — default `202606` ([Microsoft versioning docs](https://learn.microsoft.com/en-us/linkedin/marketing/versioning?view=li-lms-2026-06))
 
 ---
 
 ## B. Scheduled LinkedIn post (`schedule_social_post`)
 
-**Use when:** Founder says *"Schedule this for Tuesday 9am"* or *"Queue this post for tomorrow."*
+**Use when:** Founder says *"Schedule this for Tuesday 9am"* or cadence growth content.
+
+**Identity:** Pushkar **personal profile** + **@Turicks** tag (default). Problem → FounderOS solution → outcome. Learns from `linkedin_analytics` on recent posts before drafting.
+
+**On `main` only** — not on the outreach-only branch until merged.
 
 LinkedIn has **no native schedule API** for personal posts. FounderOS stores the approved text in Postgres and a **zero-LLM cron** publishes when `scheduled_at` arrives.
 
@@ -273,6 +297,7 @@ flowchart TB
 
 ## Related docs
 
+- [LINKEDIN-ACCOUNT-AND-GROWTH-STRATEGY.md](LINKEDIN-ACCOUNT-AND-GROWTH-STRATEGY.md) — personal vs company page, growth formula, analytics loop
 - [HITL-MATRIX.md](HITL-MATRIX.md) — gate patterns for `linkedin_post` / `schedule_social_post`
 - [JUDGE-AND-CRITIC.md](JUDGE-AND-CRITIC.md) — brand + judge before outbound
 - [ACCOUNT-REGISTRY-RUNBOOK.md](ACCOUNT-REGISTRY-RUNBOOK.md) — LinkedIn tokens + org URN

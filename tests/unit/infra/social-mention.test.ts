@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  appendCompanyPageMention,
   buildCommentary,
   escapeLittleText,
   isOrganizationUrn,
@@ -28,7 +29,6 @@ describe("escapeLittleText", () => {
     expect(escapeLittleText("a (b) [c] @d #e")).toBe("a \\(b\\) \\[c\\] \\@d \\#e");
   });
   it("escapes backslash first so it never double-processes", () => {
-    // A literal backslash becomes \\, and is not re-escaped by later passes.
     expect(escapeLittleText("x\\y")).toBe("x\\\\y");
   });
   it("leaves plain text untouched", () => {
@@ -54,5 +54,23 @@ describe("buildCommentary", () => {
 
   it("yields only the annotation when the body is empty", () => {
     expect(buildCommentary("", TURICKS)).toBe("@[Turicks](urn:li:organization:2414183)");
+  });
+});
+
+describe("appendCompanyPageMention", () => {
+  it("appends @Turicks when missing", () => {
+    const out = appendCompanyPageMention("Shipped FounderOS this week.", "Turicks");
+    expect(out).toContain("Shipped FounderOS this week.");
+    expect(out.endsWith("@Turicks")).toBe(true);
+  });
+
+  it("does not duplicate existing mention", () => {
+    const text = "Great week @Turicks";
+    expect(appendCompanyPageMention(text, "Turicks")).toBe(text);
+  });
+
+  it("is case-insensitive for duplicate detection", () => {
+    const text = "Follow @turicks for updates";
+    expect(appendCompanyPageMention(text, "Turicks")).toBe(text);
   });
 });
