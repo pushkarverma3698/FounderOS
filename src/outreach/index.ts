@@ -26,4 +26,5 @@ export {
   runOutreachReflection,
   type BuildOutreachReflectionGraphOpts,
   type CompiledOutreachReflectionGraph,
+  type OutreachRunResult,
 } from "./graph.js";
