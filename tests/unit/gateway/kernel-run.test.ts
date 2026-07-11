@@ -71,7 +71,7 @@ describe("progressLabelFor", () => {
   it("returns a worker + truncated-objective label while executing", () => {
     const state = baseState({ status: "executing", plan: PLAN as never, cursor: 0 });
     expect(progressLabelFor(state)).toBe(
-      "🔧 research: Find the founder's five most recent LinkedIn posts and su…",
+      "🔧 research: Find the founder's five most recent LinkedIn posts and summ…",
     );
   });
 
@@ -148,8 +148,8 @@ describe("runKernelText", () => {
     ];
     expect(input.turn.raw_input).toBe("hello kernel");
     expect(config.configurable.thread_id).toBe("turicks:777");
-    expect(replies).toHaveLength(1);
-    expect(replies[0]!.text).toContain("All done.");
+    expect(replies).toHaveLength(2); // progress placeholder + final reply
+    expect(replies.at(-1)!.text).toContain("All done.");
   });
 
   it("pauses on a pending approval: sends the card with Approve/Reject, no reply", async () => {
@@ -175,9 +175,9 @@ describe("runKernelText", () => {
     const { ctx, replies } = fakeCtx();
     await runKernelText(ctx, "send the email");
 
-    expect(replies).toHaveLength(1);
-    expect(replies[0]!.text).toContain("Send email to a@b.c?");
-    expect(replies[0]!.opts?.reply_markup).toBeDefined();
+    expect(replies).toHaveLength(2); // progress placeholder + approval card
+    expect(replies.at(-1)!.text).toContain("Send email to a@b.c?");
+    expect(replies.at(-1)!.opts?.reply_markup).toBeDefined();
   });
 
   it("kernel invoke failure → loud ❌ error reply (never silent, never a wipe)", async () => {
@@ -187,9 +187,9 @@ describe("runKernelText", () => {
     const { ctx, replies } = fakeCtx();
     await runKernelText(ctx, "boom");
 
-    expect(replies).toHaveLength(1);
-    expect(replies[0]!.text).toContain("❌");
-    expect(replies[0]!.text).toContain("planner exploded");
+    expect(replies).toHaveLength(2); // progress placeholder + error reply
+    expect(replies.at(-1)!.text).toContain("❌");
+    expect(replies.at(-1)!.text).toContain("planner exploded");
   });
 });
 
@@ -202,7 +202,7 @@ describe("resumeKernel", () => {
     expect(resolveInterrupt).toHaveBeenCalledWith("int-1", "approved");
     const [cmd] = fakeKernel.stream.mock.calls[0]! as unknown as [Command];
     expect(cmd).toBeInstanceOf(Command);
-    expect(replies[0]!.text).toContain("All done.");
+    expect(replies.at(-1)!.text).toContain("All done.");
   });
 
   it("a multi-step plan can pause AGAIN on the next gated step", async () => {
@@ -213,7 +213,7 @@ describe("resumeKernel", () => {
     const { ctx, replies } = fakeCtx();
     await resumeKernel(ctx, "approved");
 
-    expect(replies[0]!.text).toContain("Second approval?");
-    expect(replies[0]!.opts?.reply_markup).toBeDefined();
+    expect(replies.at(-1)!.text).toContain("Second approval?");
+    expect(replies.at(-1)!.opts?.reply_markup).toBeDefined();
   });
 });
