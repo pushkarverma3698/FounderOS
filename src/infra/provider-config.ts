@@ -10,6 +10,7 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { isOrganizationUrn, type MentionTarget } from "./social-mention.js";
 import type { GoogleBackend, LinkedInBackend } from "./providers/types.js";
 
 export type GmailBackend = GoogleBackend;
@@ -68,6 +69,20 @@ export function getCalendarBackend(): CalendarBackend {
 /** Active LinkedIn backend. Default: direct (LinkedIn Posts API). */
 export function getLinkedInBackend(): LinkedInBackend {
   return parseLinkedInBackend(envOr("LINKEDIN_BACKEND"));
+}
+
+/**
+ * The Company Page to @tag when posting from a personal profile.
+ * Reads LINKEDIN_ORG_URN + LINKEDIN_ORG_NAME. Returns undefined (→ post without
+ * a tag) when unconfigured or malformed, so the scheduling feature stays usable
+ * before the founder wires the org URN. Personal-profile posting already works;
+ * this only adds the page tag on top (org-native posting is a later, gated step).
+ */
+export function getCompanyPageMention(): MentionTarget | undefined {
+  const urn = envOr("LINKEDIN_ORG_URN");
+  const name = envOr("LINKEDIN_ORG_NAME");
+  if (!urn || !name || !isOrganizationUrn(urn)) return undefined;
+  return { urn: urn.trim(), name: name.trim() };
 }
 
 /** Path to the gws binary (Google Workspace CLI). */

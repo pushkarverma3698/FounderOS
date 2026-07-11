@@ -21,6 +21,8 @@ import {
   linkedinReadComments,
   draftLinkedInReply,
   draftConnectionNote,
+  scheduleSocialPost,
+  listScheduledPosts,
   createCalendarEvent,
   githubRead,
   githubWrite,
@@ -40,6 +42,8 @@ import {
   searchPersonalRag,
   searchTuricksBrain,
   publishSignal,
+  scanAiVisibility,
+  getGapScans,
 } from "./agent-tools.js";
 import { generateImageTool, listBrandAssetsTool } from "./agent-tools/creative.js";
 import { readContext, updateContext } from "../tools/context.js";
@@ -68,10 +72,10 @@ type AnyTool = any;
  */
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals],
-  research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal],
+  research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal],
-  marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal],
+  marketing: [searchWeb, linkedinPost, scheduleSocialPost, listScheduledPosts, linkedinGetMyPosts, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal],
   sales: [createSendEmailTool("sales"), searchWeb, searchKnowledge, searchTuricksBrain],
   personal: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain],
   jobhunt: [readCv, searchJobs, createSendEmailTool("jobhunt"), searchPersonalRag],
@@ -102,6 +106,7 @@ export const SUPERVISOR_TOOLS: AnyTool[] = [];
 export const HITL_GATED_TOOLS = new Set([
   "send_email",
   "linkedin_post",
+  "schedule_social_post",
   "draft_linkedin_reply",
   "draft_connection_note",
   "github_write",

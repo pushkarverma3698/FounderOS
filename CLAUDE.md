@@ -94,7 +94,12 @@ pnpm proof:case-study <thread>  # anonymized case study from a checkpoint
 ```
 
 ## Model policy
-Production: `openrouter:google/gemini-2.5-flash`, temperature 0, planner+workers
+Production (pinned by `scripts/apply-prod-env-overrides.sh`, 2026-07-09):
+`AGENT_MODEL=google-genai:gemini-2.5-flash` (direct Gemini — proven to tool-call
+cleanly on-box; requires the `GOOGLE_GENERATIVE_AI_API_KEY` GitHub secret, else
+prod 401s). Fallback = FREE OpenRouter models only (founder directive: no paid
+fallback): `openrouter:meta-llama/llama-3.3-70b-instruct:free`,
+`openrouter:qwen/qwen3-next-80b-a3b-instruct:free`. Temperature 0, planner+workers
 (`WORKER_AGENT_MODEL` splits them). Budget caps enforced (`BUDGET_DAILY_USD`,
 `RUN_BUDGET_USD`). Provider errors classify by HTTP status class
 (`httpStatusOf`/`is503Error`/`isModelFallbackError` in `src/agents/model.ts`):

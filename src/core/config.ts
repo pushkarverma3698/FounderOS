@@ -46,6 +46,9 @@ export const envSchema = z.object({
   LINKEDIN_ACCESS_TOKEN: z.string().transform(v => v || undefined).optional(),
   LINKEDIN_AUTHOR_URN: z.string().transform(v => v || undefined).optional(),
   LINKEDIN_API_VERSION: z.string().transform(v => v || undefined).optional(),
+  /** Company Page to @tag when posting from the personal profile (scheduled posts). */
+  LINKEDIN_ORG_URN: z.string().transform(v => v || undefined).optional(),
+  LINKEDIN_ORG_NAME: z.string().transform(v => v || undefined).optional(),
   GITHUB_TOKEN: z.string().transform(v => v || undefined).optional(),
 
   // ── Apify web scraper (research department real-data engine) ────────────────
