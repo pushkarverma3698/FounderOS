@@ -22,13 +22,39 @@ vi.mock("../../../src/tools/web-search.js", () => ({ webSearchTool: { execute: w
 vi.mock("../../../src/infra/research-memory.js", () => ({ getCachedScrape, setCachedScrape, ingestResearch }));
 vi.mock("../../../src/tools/memory.js", () => ({ recordEventTool: { invoke: recordInvoke } }));
 
-const { scrapeUrlTool, deepResearch } = await import("../../../src/agents/agent-tools/research.js");
+const { scrapeUrlTool, deepResearch, searchWeb } = await import("../../../src/agents/agent-tools/research.js");
 
 const mkPage = (url: string) => ({ url, title: url, markdown: `body of ${url}`, retrieved_at: "2026-06-24T00:00:00.000Z" });
 
 beforeEach(() => {
   vi.clearAllMocks();
   getCachedScrape.mockResolvedValue(null);
+});
+
+describe("search_web", () => {
+  it("persists hits to research memory and logs episodic event", async () => {
+    webExecute.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { title: "AI trends", url: "https://a.com", snippet: "snippet one" },
+        { title: "LinkedIn debate", url: "https://b.com", snippet: "snippet two" },
+      ],
+    });
+    const out = (await searchWeb.invoke({ query: "LinkedIn AI trends" })) as string;
+    expect(out).toContain("https://a.com");
+    expect(setCachedScrape).toHaveBeenCalledWith("search:LinkedIn AI trends", expect.any(Array));
+    expect(ingestResearch).toHaveBeenCalled();
+    expect(recordInvoke).toHaveBeenCalledWith(
+      expect.objectContaining({ tags: ["research", "search_web"], event_type: "task_completed" }),
+    );
+  });
+
+  it("does not persist when search returns no results", async () => {
+    webExecute.mockResolvedValueOnce({ success: true, data: [] });
+    const out = (await searchWeb.invoke({ query: "ghost" })) as string;
+    expect(out).toContain("No web results");
+    expect(ingestResearch).not.toHaveBeenCalled();
+  });
 });
 
 describe("deep_research", () => {
