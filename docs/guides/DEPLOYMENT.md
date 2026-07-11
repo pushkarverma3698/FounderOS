@@ -157,19 +157,15 @@ killing the process — distinct from a crash.
 **`main` IS production** (single-tenant — there is no separate `production`
 branch). Merge to `main` → CI runs → on success CD deploys. That's the whole loop.
 
-- **CI** (`.github/workflows/ci.yml`): on every push/PR —
-  `pnpm lint` + `pnpm test:unit` (unconditional, need no secrets), plus
-  integration tests and (on `main` only) `pnpm eval` **when the relevant secret
-  is present**. The skip is done at the *step* level via an `env` check —
-  **never** put `secrets.*` in a job-level `if:`; that is illegal and silently
-  invalidates the entire workflow file (every job fails in 0s).
-- **CD** (`.github/workflows/deploy.yml`): `workflow_run` triggers on a
-  **successful CI run on `main`**, renders the prod `.env` from `PROD_DOTENV`,
-  then SSHes in and runs `deploy/deploy.sh`
-  (fetch → install → lint → build → migrate → `systemctl restart` → `/health`).
-  The old instance keeps running until the very last step, so a failed build
-  never takes prod down. There's also a `workflow_dispatch` button in the
-  Actions tab for manual deploys.
+- **CI** (`.github/workflows/ci.yml`): one job — `pnpm gate` + `pnpm test:smoke`
+  on every push/PR. Branch protection should require only the **`gate`** check.
+- **CD** (`.github/workflows/deploy.yml`): `workflow_run` after green CI on
+  `main`, SSH + `deploy/deploy.sh` (lint/build/migrate/restart on the VPS).
+  Manual: `workflow_dispatch` in the Actions tab.
+- **Live check** (`.github/workflows/live-check.yml`): optional manual run for
+  integration tests + eval (needs `GOOGLE_GENERATIVE_AI_API_KEY`). Never blocks merge.
+- **Sync beta** (`.github/workflows/sync-beta.yml`): after each `main` push,
+  fast-forwards `beta` when it is behind `main`.
 
 ### Required GitHub repo secrets (Settings → Secrets and variables → Actions)
 

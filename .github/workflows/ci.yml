@@ -1,5 +1,8 @@
 name: CI
 
+# One real install (`gate`). Legacy job names below are thin pass-throughs so
+# existing branch protection (2 required checks) keeps working without a GitHub
+# settings change. When you update protection, require only `gate` and delete them.
 on:
   push:
     branches: ["**"]
@@ -7,12 +10,12 @@ on:
     branches: ["**"]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Type check + lint + wiring
+  gate:
+    name: gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,166 +27,20 @@ jobs:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      # Emit JS (dist/) — catches issues tsc --noEmit alone can miss. Must pass
-      # before merge; deploy also runs build on the VPS (deploy/deploy.sh).
-      - run: pnpm build:all
-      # Compile/CI-time wiring integrity: a half-wired tool fails the build here
-      # instead of silently doing nothing in production (keyless, stub env).
-      - run: pnpm verify:wiring
-      # v3 anti-slop invariants (ratchet): new architectural debt fails the PR.
-      # Baseline lives in governance/architecture-baseline.json and may only shrink.
-      - run: pnpm verify:arch
+      - run: pnpm gate
+      - run: pnpm test:smoke
+
+  # --- Legacy names for branch protection (no second install) ---
+  quality:
+    name: Type check + lint + wiring
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Covered by gate job"
 
   unit-tests:
     name: Unit + regression tests
+    needs: gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: "pnpm"
-      - run: pnpm install --frozen-lockfile
-      # Full deterministic suite (unit + regression) — the PR template's merge
-      # gate. Previously CI ran only test:unit, so regression guards never gated.
-      - run: pnpm test
-      # Offline boot smoke — cleanly SKIPs without live env, FAILs on a fatal
-      # misconfig. Never crashes the job.
-      - run: pnpm test:smoke
-
-  integration-tests:
-    name: Integration tests
-    runs-on: ubuntu-latest
-    # NOTE: the `secrets` context is NOT allowed in job-level `if:` — using it
-    # invalidates the whole workflow file (every job fails in 0s). Instead we
-    # always start the job and skip the steps when the key is absent (env IS
-    # allowed in step-level `if:`).
-    services:
-      postgres:
-        # pgvector image, NOT postgres:16 — migrations run CREATE EXTENSION vector
-        # (0005_pgvector.sql) and fail on the plain image.
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: ci
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      # Minimal env for config.ts validation
-      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
-      TELEGRAM_BOT_TOKEN: "ci:placeholder"
-      TELEGRAM_CHAT_ID: "000000000"
-    steps:
-      - name: Note when skipped
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY == ''
-        run: echo "GOOGLE_GENERATIVE_AI_API_KEY not set — skipping integration tests."
-      - uses: actions/checkout@v4
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-      - uses: pnpm/action-setup@v4
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-        with:
-          node-version: "22"
-          cache: "pnpm"
-      - run: pnpm install --frozen-lockfile
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-      # package.json scripts use --env-file=.env; CI provides real env vars.
-      - run: touch .env
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-      - name: Migrate DB (drizzle + LangGraph checkpoint tables)
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-        run: node --env-file=.env --import tsx/esm scripts/setup-db.ts
-      - run: pnpm test:integration
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-
-  eval-and-update-readme:
-    name: Eval + update README metrics
-    runs-on: ubuntu-latest
-    # Milestone gate only — must not block auto-deploy when billing/infra flakes.
-    # Merge gate is `gate` (lint+build+wiring+arch+test); eval updates proof artifacts.
-    continue-on-error: true
-    # Only on main. The `secrets` context is illegal in `if:`, so the key check
-    # happens at the step level via env (see steps below).
-    if: github.ref == 'refs/heads/main'
-    needs: [quality, unit-tests]
-    # Self-sufficient env (same pattern as Integration tests + live-e2e.yml):
-    # the eval needs a THROWAWAY Postgres, not a production secret — a missing
-    # DATABASE_URL secret used to fail this job on every main push, which
-    # silently disabled the workflow_run-gated auto-deploy.
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: ci
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      # Match prod + live-e2e.yml. Without this, DEFAULT_AGENT_MODEL routes eval
-      # through paid OpenRouter (402 when credits are empty) and blocks deploy.
-      AGENT_MODEL: "google-genai:gemini-2.5-flash"
-      AGENT_FALLBACK_MODELS: "openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free"
-      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
-      TELEGRAM_BOT_TOKEN: "ci:placeholder"
-      TELEGRAM_CHAT_ID: "000000000"
-    steps:
-      - name: Note when skipped
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY == ''
-        run: echo "GOOGLE_GENERATIVE_AI_API_KEY not set — skipping eval/readme update."
-      - uses: actions/checkout@v4
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: pnpm/action-setup@v4
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-        with:
-          node-version: "22"
-          cache: "pnpm"
-      - run: pnpm install --frozen-lockfile
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-      # package.json scripts use --env-file=.env; CI provides real env vars.
-      - run: touch .env
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-      - name: Migrate DB (drizzle + LangGraph checkpoint tables)
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-        run: node --env-file=.env --import tsx/esm scripts/setup-db.ts
-      - name: Run eval
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-        run: pnpm eval
-      - name: Regenerate proof scoreboard
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-        run: pnpm proof:scoreboard
-      - name: Commit updated proof artifacts
-        if: env.GOOGLE_GENERATIVE_AI_API_KEY != ''
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git diff --quiet && git diff --staged --quiet || \
-            (git add docs/PROOF.md eval-report.md && \
-             git commit -m "chore(proof): auto-update proof artifacts [skip ci]" && \
-             git push)
+      - run: echo "Covered by gate job"
