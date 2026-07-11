@@ -29,6 +29,7 @@ import {
   type WeightedPrompt,
 } from "./gap-scan-core.js";
 import { renderGapReport } from "./gap-scan-render.js";
+import { deriveInsights, type GapInsights } from "./gap-scan-insights.js";
 
 const log = childLogger({ module: "tool:scan_ai_visibility" });
 
@@ -152,6 +153,7 @@ export interface GapScanConfig {
 
 export interface GapScanOutcome {
   report: GapReportData;
+  insights: GapInsights;
   markdown: string;
 }
 
@@ -200,7 +202,49 @@ export async function runGapScan(
     surfaces: surfaces.map((s) => s.id),
     generatedAt: now().toISOString(),
   });
-  return { report, markdown: renderGapReport(report) };
+  const insights = deriveInsights(report, runs);
+  return { report, insights, markdown: renderGapReport(report, insights) };
+}
+
+// ── Persistence (agents retrieve past scans; the learning-loop dataset §11) ───
+
+export interface PersistOutcome {
+  persisted: boolean;
+  scan_id?: string;
+  persist_error?: string;
+}
+
+/**
+ * Save one finished scan to gap_scans. Dynamic import keeps the DB layer (and
+ * its full-env validation) out of the $0 test/CLI path; a persistence failure
+ * never voids the scan — the report already exists — but it is SURFACED in the
+ * tool result (persist_error), never swallowed.
+ */
+async function persistScan(report: GapReportData, insights: GapInsights, markdown: string): Promise<PersistOutcome> {
+  if (!process.env["DATABASE_URL"]) {
+    return { persisted: false, persist_error: "DATABASE_URL not set — scan not saved to gap_scans" };
+  }
+  try {
+    const { saveGapScan } = await import("../db/gap-scan-queries.js");
+    const scan_id = await saveGapScan({
+      target_name: report.target.name,
+      target_domain: report.target.domain,
+      category: report.category,
+      gap_score: report.gap_score,
+      confidence: insights.confidence.grade,
+      completion_rate: String(report.completion_rate),
+      runs_total: report.runs_total,
+      surfaces: report.surfaces,
+      report: report as unknown as Record<string, unknown>,
+      insights: insights as unknown as Record<string, unknown>,
+      markdown,
+    });
+    return { persisted: true, scan_id };
+  } catch (err) {
+    const persist_error = err instanceof Error ? err.message : String(err);
+    log.warn({ err: persist_error }, "gap scan persistence failed");
+    return { persisted: false, persist_error };
+  }
 }
 
 // ── Args parsing (pure, exported for tests) ───────────────────────────────────
@@ -273,7 +317,7 @@ export const gapScannerTool: UnifiedTool = {
     }
 
     try {
-      const { report, markdown } = await runGapScan(
+      const { report, insights, markdown } = await runGapScan(
         {
           target: { name: companyName, domain },
           competitors,
@@ -289,11 +333,22 @@ export const gapScannerTool: UnifiedTool = {
           error: `All ${report.runs_total} surface calls failed (surfaces: ${report.surfaces.join(", ")}) — check API keys/quota and retry.`,
         };
       }
+      const persistence = await persistScan(report, insights, markdown);
       log.info(
-        { target: domain, gap_score: report.gap_score, completion: report.completion_rate, runs: report.runs_total },
+        {
+          target: domain,
+          gap_score: report.gap_score,
+          confidence: insights.confidence.grade,
+          completion: report.completion_rate,
+          runs: report.runs_total,
+          persisted: persistence.persisted,
+        },
         "gap scan complete",
       );
-      return { success: true, data: { gap_score: report.gap_score, markdown, report } };
+      return {
+        success: true,
+        data: { gap_score: report.gap_score, markdown, report, insights, ...persistence },
+      };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
     }

@@ -59,7 +59,7 @@ async function main(): Promise<void> {
     `Scanning ${name} (${domain}) vs ${competitors.map((c) => c.name).join(", ")} on [${surfaces.map((s) => s.id).join(", ")}] — ${runs} runs/prompt…`,
   );
   const started = Date.now();
-  const { report, markdown } = await runGapScan(
+  const { report, insights, markdown } = await runGapScan(
     {
       target: { name, domain },
       competitors,
@@ -79,16 +79,43 @@ async function main(): Promise<void> {
   mkdirSync(outDir, { recursive: true });
   const stamp = report.generated_at.slice(0, 10);
   const base = join(outDir, `${report.target.domain.replace(/[^a-z0-9.-]/gi, "_")}-${stamp}`);
-  writeFileSync(`${base}.json`, JSON.stringify(report, null, 2) + "\n");
+  writeFileSync(`${base}.json`, JSON.stringify({ report, insights }, null, 2) + "\n");
   writeFileSync(`${base}.md`, markdown);
 
+  // Persist to gap_scans when a DB is configured (agents retrieve via get_gap_scans).
+  let savedLine = "not saved (DATABASE_URL not set)";
+  if (process.env["DATABASE_URL"]) {
+    try {
+      const { saveGapScan } = await import("../src/db/gap-scan-queries.js");
+      const id = await saveGapScan({
+        target_name: report.target.name,
+        target_domain: report.target.domain,
+        category: report.category,
+        gap_score: report.gap_score,
+        confidence: insights.confidence.grade,
+        completion_rate: String(report.completion_rate),
+        runs_total: report.runs_total,
+        surfaces: report.surfaces,
+        report: report as unknown as Record<string, unknown>,
+        insights: insights as unknown as Record<string, unknown>,
+        markdown,
+      });
+      savedLine = `saved to gap_scans as ${id}`;
+    } catch (err) {
+      savedLine = `DB save FAILED: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
   const target = report.companies[0]!;
-  console.log(`\nGap Score: ${report.gap_score}/100  (${((Date.now() - started) / 1000).toFixed(0)}s)`);
+  console.log(`\nGap Score: ${report.gap_score}/100  (${((Date.now() - started) / 1000).toFixed(0)}s) · confidence ${insights.confidence.grade}`);
   console.log(`Completion: ${report.runs_completed}/${report.runs_total} (${Math.round(report.completion_rate * 100)}%)`);
   console.log(`Target appearance: ${Math.round(target.appearance_rate * 100)}% · cited: ${Math.round(target.cited_rate * 100)}%`);
   console.log(`Share-of-answer rank: ${report.share_of_answer_rank.join(" > ")}`);
-  for (const c of report.causes) console.log(`Cause: ${c.cause}`);
-  console.log(`\nArtifacts:\n  ${base}.json\n  ${base}.md`);
+  console.log(`Lost answers: ${insights.stake.lost_answers}/${insights.stake.completed} named a competitor without ${report.target.name}`);
+  for (const t of insights.threats) console.log(`Threat: ${t.name} — ${t.threat} (index ${t.threat_index})`);
+  for (const c of [...report.causes, ...insights.additional_causes]) console.log(`Cause: ${c.cause}`);
+  console.log(`\nDB: ${savedLine}`);
+  console.log(`Artifacts:\n  ${base}.json\n  ${base}.md`);
 }
 
 main().catch((err) => {

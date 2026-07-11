@@ -10,6 +10,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
+// Persistence boundary — the real module pulls the DB client (and full env
+// validation); the tool's dynamic import resolves to this mock instead.
+const mockSaveGapScan = vi.fn(async () => "scan-uuid-1");
+vi.mock("../../../src/db/gap-scan-queries.js", () => ({ saveGapScan: mockSaveGapScan }));
+
 const {
   gapScannerTool,
   runGapScan,
@@ -54,8 +59,8 @@ beforeEach(() => {
 // ── runGapScan (the offline e2e) ──────────────────────────────────────────────
 
 describe("runGapScan", () => {
-  it("samples prompts × surfaces × N and produces a full report + markdown", async () => {
-    const { report, markdown } = await runGapScan(
+  it("samples prompts × surfaces × N and produces a full report + insights + markdown", async () => {
+    const { report, insights, markdown } = await runGapScan(
       CONFIG,
       [
         scriptedSurface("chatgpt", "HubSpot (hubspot.com) and Close lead the CRM space."),
@@ -77,11 +82,19 @@ describe("runGapScan", () => {
     expect(report.causes.length).toBeGreaterThan(0);
     expect(report.evidence.length).toBeGreaterThan(0);
 
-    // The 1-pager carries the sections the spec fixes.
+    // The multi-angle insights ride along with the report.
+    expect(insights.stake.lost_answers).toBe(20); // competitors in every answer, target in none
+    expect(insights.threats[0]!.threat).toBe("primary");
+    expect(insights.confidence.grade).toBe("medium"); // 20 runs but runsPerPrompt 2 < 3
+
+    // The 1-pager carries the sections the spec fixes, plus the insight angles.
     expect(markdown).toContain("# AI Visibility Gap Report — Acme");
     expect(markdown).toContain("Gap Score: 100/100");
     expect(markdown).toContain("| **Acme** (you) | 0% |");
+    expect(markdown).toContain("## Where the funnel leaks (by buyer intent)");
+    expect(markdown).toContain("## Competitor threat profile");
     expect(markdown).toContain("## Top diagnosed causes");
+    expect(markdown).toContain("## Confidence: MEDIUM");
     expect(markdown).toContain("Methodology:");
     expect(markdown).toContain("20 sampled answers");
   });
@@ -237,7 +250,7 @@ describe("gapScannerTool.execute", () => {
     expect(res.error).toContain("No AI surfaces configured");
   });
 
-  it("runs the scan against configured surfaces and returns gap_score + markdown + report", async () => {
+  it("runs the scan, persists it to gap_scans, and returns gap_score + markdown + report + insights", async () => {
     process.env["OPENROUTER_API_KEY"] = "or-key";
     process.env["GAP_SCAN_SURFACES"] = "chatgpt=openai/gpt-4o-mini";
     mockFetch.mockResolvedValue({
@@ -248,10 +261,71 @@ describe("gapScannerTool.execute", () => {
 
     const res = await gapScannerTool.execute(ARGS);
     expect(res.success).toBe(true);
-    const data = res.data as { gap_score: number; markdown: string; report: { runs_total: number } };
+    const data = res.data as {
+      gap_score: number;
+      markdown: string;
+      report: { runs_total: number };
+      insights: { confidence: { grade: string } };
+      persisted: boolean;
+      scan_id: string;
+    };
     expect(data.gap_score).toBe(100);
     expect(data.markdown).toContain("AI Visibility Gap Report — Acme");
     expect(data.report.runs_total).toBe(2); // 2 prompts × 1 surface × 1 run
+    expect(data.insights.confidence.grade).toBe("low"); // 2 answers is a tiny sample
+
+    // Persisted with the hot columns broken out for indexed retrieval.
+    expect(data).toMatchObject({ persisted: true, scan_id: "scan-uuid-1" });
+    expect(mockSaveGapScan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target_name: "Acme",
+        target_domain: "acme.com",
+        category: "CRM",
+        gap_score: 100,
+        confidence: "low",
+        runs_total: 2,
+        surfaces: ["chatgpt"],
+        markdown: expect.stringContaining("AI Visibility Gap Report"),
+        report: expect.objectContaining({ gap_score: 100 }),
+        insights: expect.objectContaining({ confidence: expect.anything() }),
+      }),
+    );
+  });
+
+  it("surfaces a DB failure honestly (persist_error) without voiding the scan", async () => {
+    process.env["OPENROUTER_API_KEY"] = "or-key";
+    process.env["GAP_SCAN_SURFACES"] = "chatgpt=openai/gpt-4o-mini";
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: "HubSpot wins." } }] }),
+    });
+    mockSaveGapScan.mockRejectedValueOnce(new Error("connection refused"));
+
+    const res = await gapScannerTool.execute(ARGS);
+    expect(res.success).toBe(true); // the report exists — persistence failure never voids it
+    expect(res.data).toMatchObject({ persisted: false, persist_error: "connection refused" });
+  });
+
+  it("reports not-saved when DATABASE_URL is not configured", async () => {
+    process.env["OPENROUTER_API_KEY"] = "or-key";
+    process.env["GAP_SCAN_SURFACES"] = "chatgpt=openai/gpt-4o-mini";
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: "HubSpot wins." } }] }),
+    });
+
+    const saved = process.env["DATABASE_URL"];
+    delete process.env["DATABASE_URL"];
+    try {
+      const res = await gapScannerTool.execute(ARGS);
+      expect(res.success).toBe(true);
+      expect(res.data).toMatchObject({ persisted: false, persist_error: expect.stringContaining("DATABASE_URL") });
+      expect(mockSaveGapScan).not.toHaveBeenCalled();
+    } finally {
+      process.env["DATABASE_URL"] = saved!;
+    }
   });
 
   it("soft-fails (never throws) when every surface call fails", async () => {
