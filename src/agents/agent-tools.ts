@@ -30,6 +30,7 @@ export {
   sendEmail,
   linkedinPost,
   linkedinGetMyPosts,
+  linkedinAnalytics,
   linkedinReadComments,
   draftLinkedInReply,
   draftConnectionNote,

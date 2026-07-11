@@ -8,10 +8,11 @@
 
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import { prepareLinkedInFeedPost } from "../../core/linkedin-posting-policy.js";
 import { TENANT, DAILY_EMAIL_LIMIT, DAILY_LINKEDIN_LIMIT } from "../../core/config.js";
 import { emailTool } from "../../tools/email.js";
 import { readEmailsTool } from "../../tools/email-reader.js";
-import { linkedinPostTool } from "../../tools/linkedin.js";
+import { linkedinPostTool, linkedinAnalyticsTool } from "../../tools/linkedin.js";
 import { linkedinReadCommentsTool, linkedinGetMyPostsTool } from "../../tools/linkedin-engagement.js";
 import { getRecentLinkedInPostIds } from "../../db/queries.js";
 import { calendarTool } from "../../tools/calendar.js";
@@ -251,22 +252,26 @@ export const linkedinPost = tool(
     }
     clearBrandRetries(brand.retryKey);
 
+    const { text: publishText, account_key, policy } = prepareLinkedInFeedPost(draft, "immediate_feed");
+
     const res = await linkedinPostTool.execute({
-      text: draft,
-      idempotency_key: idemKey("linkedin", draft),
+      text: publishText,
+      idempotency_key: idemKey("linkedin", publishText),
       tenant_id: TENANT,
       department: "marketing",
+      account_key,
     });
 
     if (!res.success) return `LinkedIn post failed: ${res.error}`;
     const data = res.data as { skipped?: boolean } | undefined;
     if (data?.skipped) return `This post was already published earlier — not re-posted (idempotency).`;
-    return `✅ LinkedIn post published.`;
+    return `✅ LinkedIn post published (${policy.rationale}).`;
   },
   {
     name: "linkedin_post",
     description:
-      "Publish a post to LinkedIn. The founder is asked to APPROVE before it publishes. Provide the full final post text.",
+      "Publish a post to LinkedIn from the **Turicks company page**. The founder is asked to APPROVE before it publishes. " +
+      "For scheduled build-in-public posts (personal profile + @Turicks), use schedule_social_post when available. Provide the full final post text.",
     schema: z.object({
       text: z.string().describe("The full post text, ready to publish"),
     }),
@@ -355,6 +360,33 @@ export const linkedinGetMyPosts = tool(
       "Falls back to FounderOS audit log if LinkedIn API scope is absent. Read-only — no approval needed.",
     schema: z.object({
       limit: z.number().optional().nullable().describe("Max posts to return (default 5)"),
+    }),
+  },
+);
+
+/** Fetch engagement analytics for a LinkedIn post — read-only, no approval. */
+export const linkedinAnalytics = tool(
+  async ({ post_id }) => {
+    const res = await linkedinAnalyticsTool.execute({ post_id, tenant_id: TENANT });
+    if (!res.success) {
+      return `LinkedIn analytics failed: ${res.error ?? "unknown error"}`;
+    }
+    const data = res.data as Record<string, unknown> | undefined;
+    if (!data) return "No analytics data returned.";
+    const lines = Object.entries(data)
+      .filter(([, v]) => v !== undefined && v !== null)
+      .map(([k, v]) => `- ${k}: ${String(v)}`);
+    return lines.length
+      ? `📊 Post analytics (${post_id}):\n${lines.join("\n")}`
+      : `Analytics returned for ${post_id} but no metrics parsed — raw scopes may be limited.`;
+  },
+  {
+    name: "linkedin_analytics",
+    description:
+      "Fetch engagement metrics for a LinkedIn post (impressions, reactions, comments). " +
+      "Call linkedin_get_my_posts first if you need post IDs. Read-only — use before drafting the next post to learn what worked.",
+    schema: z.object({
+      post_id: z.string().describe("LinkedIn post URN or ID from linkedin_get_my_posts or action_log"),
     }),
   },
 );

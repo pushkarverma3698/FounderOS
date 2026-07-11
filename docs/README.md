@@ -26,6 +26,7 @@
 | [DEPLOYMENT.md](guides/DEPLOYMENT.md) | Production runbook (Hetzner VPS, systemd, GitHub Actions CD, Day-1 gotchas) |
 | [OPERATIONS.md](guides/OPERATIONS.md) | Day-to-day: start/stop, Telegram commands, halt/resume, scheduler, monitoring |
 | [LINKEDIN-AUTOMATION-FLOWS.md](guides/LINKEDIN-AUTOMATION-FLOWS.md) | **LinkedIn post, scheduled queue, outreach reflection, gap scanner** — E2E reference |
+| [LINKEDIN-ACCOUNT-AND-GROWTH-STRATEGY.md](guides/LINKEDIN-ACCOUNT-AND-GROWTH-STRATEGY.md) | **Personal vs company page**, @Turicks tagging, analytics-driven growth content |
 | [HITL-MATRIX.md](guides/HITL-MATRIX.md) | All HITL-gated tools (incl. `schedule_social_post`), gate patterns, observability |
 | [SIGNALS-AND-CONTRACTS.md](guides/SIGNALS-AND-CONTRACTS.md) | Department signals, event types, publishing/consuming, adding new types |
 | [JUDGE-AND-CRITIC.md](guides/JUDGE-AND-CRITIC.md) | Claude critic quality gate, two-gate system, brand voice validation |
