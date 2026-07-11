@@ -56,17 +56,29 @@ describe("validateConnectionDraft", () => {
     expect(r.errors.some((e) => e.toLowerCase().includes("url"))).toBe(true);
   });
 
-  it("rejects when daily limit exhausted", () => {
-    const tight = new InMemoryDailyLimitTracker(1);
-    tight.recordSend("acct");
+  it("rejects when ICP score is below outreach floor (40)", () => {
+    const limits = new InMemoryDailyLimitTracker(20);
+    const lowIcp = { ...baseLead, icp_match_score: 39 };
     const r = validateConnectionDraft({
       draft: "Hi Jane — your LangGraph post resonated. Curious how you eval agents?",
-      lead_context: baseLead,
+      lead_context: lowIcp,
       account_id: "acct",
-      checkDailyLimit: (id) => tight.check(id),
+      checkDailyLimit: (id) => limits.check(id),
     });
     expect(r.valid).toBe(false);
-    expect(r.errors.some((e) => e.includes("Daily account limit"))).toBe(true);
+    expect(r.errors.some((e) => e.includes("ICP"))).toBe(true);
+  });
+
+  it("accepts ICP score at boundary (40)", () => {
+    const limits = new InMemoryDailyLimitTracker(20);
+    const atFloor = { ...baseLead, icp_match_score: 40 };
+    const r = validateConnectionDraft({
+      draft: "Hi Jane — your LangGraph post resonated. Curious how you eval agents?",
+      lead_context: atFloor,
+      account_id: "acct",
+      checkDailyLimit: (id) => limits.check(id),
+    });
+    expect(r.valid).toBe(true);
   });
 });
 
