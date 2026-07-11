@@ -31,7 +31,8 @@ export type Seam =
   | "hierarchy.enter"
   | "hierarchy.exit"
   | "turn.out"
-  | "turn.error";
+  | "turn.error"
+  | "turn.progress";
 
 export interface TraceEvent {
   turnId: string;
