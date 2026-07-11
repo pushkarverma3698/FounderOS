@@ -121,11 +121,19 @@ export function progressLabelFor(state: KernelStateType): string | null {
 
 const PROGRESS_PLACEHOLDER_TEXT = "🤔 Working on it…";
 
+/** Runs a Telegram progress call and swallows any failure — a progress ping is cosmetic; the turn must not die on a Telegram blip. */
+async function silently(op: string, fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    log.warn({ err: String(err) }, `Progress placeholder ${op} failed`); // allow-failopen: progress ping is cosmetic; the turn must not die on a Telegram blip
+  }
+}
+
 /**
  * Sends one placeholder message, edits it as progressLabelFor(state) changes
  * while streaming the kernel turn, and deletes it once the turn ends
- * (success, HITL pause, or error). Every Telegram call here is best-effort —
- * a progress ping failing must never fail the turn.
+ * (success, HITL pause, or error).
  */
 async function streamKernelTurn(
   ctx: Context,
@@ -133,12 +141,9 @@ async function streamKernelTurn(
   streamPromise: Promise<AsyncIterable<unknown>>,
 ): Promise<KernelStateType> {
   let placeholderId: number | undefined;
-  try {
-    const placeholder = await ctx.reply(PROGRESS_PLACEHOLDER_TEXT);
-    placeholderId = placeholder.message_id;
-  } catch (err) {
-    log.warn({ err: String(err) }, "Progress placeholder send failed"); // allow-failopen: progress ping is cosmetic; the turn must not die on a Telegram blip
-  }
+  await silently("send", async () => {
+    placeholderId = (await ctx.reply(PROGRESS_PLACEHOLDER_TEXT)).message_id;
+  });
 
   let lastLabel: string | null = null;
   let lastState: KernelStateType | undefined;
@@ -148,25 +153,18 @@ async function streamKernelTurn(
     for await (const state of streamIter) {
       lastState = state as KernelStateType;
       const label = progressLabelFor(lastState);
-      if (label !== null && label !== lastLabel) {
-        lastLabel = label;
-        trace.event("turn.progress", { label });
-        if (placeholderId !== undefined && ctx.chat) {
-          try {
-            await ctx.api.editMessageText(ctx.chat.id, placeholderId, label);
-          } catch (err) {
-            log.warn({ err: String(err) }, "Progress placeholder edit failed"); // allow-failopen: progress ping is cosmetic; the turn must not die on a Telegram blip
-          }
-        }
+      if (label === null || label === lastLabel) continue;
+      lastLabel = label;
+      trace.event("turn.progress", { label });
+      if (placeholderId !== undefined && ctx.chat) {
+        const chatId = ctx.chat.id;
+        await silently("edit", () => ctx.api.editMessageText(chatId, placeholderId!, label));
       }
     }
   } finally {
     if (placeholderId !== undefined && ctx.chat) {
-      try {
-        await ctx.api.deleteMessage(ctx.chat.id, placeholderId);
-      } catch (err) {
-        log.warn({ err: String(err) }, "Progress placeholder delete failed"); // allow-failopen: progress ping is cosmetic; the turn must not die on a Telegram blip
-      }
+      const chatId = ctx.chat.id;
+      await silently("delete", () => ctx.api.deleteMessage(chatId, placeholderId!));
     }
   }
 

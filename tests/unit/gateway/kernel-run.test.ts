@@ -52,20 +52,24 @@ function baseState(overrides: Partial<KernelStateType["mission"]>): KernelStateT
   } as unknown as KernelStateType;
 }
 
-const PLAN = {
-  schema_version: 1,
-  goal: "g",
-  steps: [
-    {
-      step_id: "s1",
-      worker: "research",
-      objective: "Find the founder's five most recent LinkedIn posts and summarize engagement",
-      inputs: {},
-      expected: { kind: "data", schema_ref: "research.findings" },
-      constraints: { max_tool_calls: 3, hitl_required: false },
-    },
-  ],
-} as const;
+function makePlan(objective: string) {
+  return {
+    schema_version: 1,
+    goal: "g",
+    steps: [
+      {
+        step_id: "s1",
+        worker: "research",
+        objective,
+        inputs: {},
+        expected: { kind: "data", schema_ref: "research.findings" },
+        constraints: { max_tool_calls: 3, hitl_required: false },
+      },
+    ],
+  } as const;
+}
+
+const PLAN = makePlan("Find the founder's five most recent LinkedIn posts and summarize engagement");
 
 describe("progressLabelFor", () => {
   it("returns a worker + truncated-objective label while executing", () => {
@@ -221,25 +225,7 @@ describe("resumeKernel", () => {
 describe("progress streaming", () => {
   const EXECUTING_STEP1 = {
     reply: "",
-    mission: {
-      status: "executing",
-      cursor: 0,
-      goal: "g",
-      plan: {
-        schema_version: 1,
-        goal: "g",
-        steps: [
-          {
-            step_id: "s1",
-            worker: "research",
-            objective: "Look up recent posts",
-            inputs: {},
-            expected: { kind: "data", schema_ref: "research.findings" },
-            constraints: { max_tool_calls: 3, hitl_required: false },
-          },
-        ],
-      },
-    },
+    mission: { status: "executing", cursor: 0, goal: "g", plan: makePlan("Look up recent posts") },
   };
   const SYNTHESIZING = {
     reply: "",
