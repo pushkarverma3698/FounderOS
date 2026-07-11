@@ -35,7 +35,7 @@ jobs:
           --health-retries 10
     env:
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
-      AGENT_MODEL: "google-genai:gemini-2.5-flash"
+      AGENT_MODEL: "google-genai:gemini-flash-latest"
       DATABASE_URL: "postgresql://founderos:founderos@localhost:5432/founderos"
       TELEGRAM_BOT_TOKEN: "ci:placeholder"
       TELEGRAM_CHAT_ID: "000000000"
