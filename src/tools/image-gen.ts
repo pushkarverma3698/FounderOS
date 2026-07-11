@@ -88,7 +88,15 @@ type FetchLike = (url: string, init: { method: string; headers: Record<string, s
 export interface GenerateImageDeps {
   fetchImpl?: FetchLike;
   apiKey?: string;
+  /** Hard ceiling for the generateContent call. A stalled call must fail fast
+   *  (loud, stage-tagged) instead of riding to the 180s turn timeout as silence
+   *  (#19.5/#22.3). Default from IMAGE_GEN_TIMEOUT_MS or 60s. */
+  timeoutMs?: number;
 }
+
+/** Default hard ceiling for a single image API call (ms). Below the 180s turn
+ *  timeout so the founder gets a real error, never silence. */
+const DEFAULT_IMAGE_TIMEOUT_MS = 60_000;
 
 /**
  * Generate one image. Throws ImageGenError stage-tagged (rule #22: errors name
@@ -108,23 +116,38 @@ export async function generateImage(
     );
   }
   const fetchImpl = (deps.fetchImpl ?? (globalThis.fetch as unknown as FetchLike));
+  const timeoutMs =
+    deps.timeoutMs ??
+    (Number(process.env["IMAGE_GEN_TIMEOUT_MS"]) || DEFAULT_IMAGE_TIMEOUT_MS);
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${spec.id}:generateContent?key=${apiKey}`;
 
-  log.info({ model: spec.id, tier: spec.tier, usd: spec.usdPerImage }, "image-gen.request");
+  log.info({ model: spec.id, tier: spec.tier, usd: spec.usdPerImage, timeoutMs }, "image-gen.request");
 
   let res: Awaited<ReturnType<FetchLike>>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    res = await fetchImpl(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseModalities: ["IMAGE"] },
+    res = await Promise.race([
+      fetchImpl(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseModalities: ["IMAGE"] },
+        }),
       }),
-    });
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new ImageGenError(`image API did not respond within ${timeoutMs}ms`, "request")),
+          timeoutMs,
+        );
+      }),
+    ]);
   } catch (err) {
+    if (err instanceof ImageGenError) throw err;
     throw new ImageGenError(`image API request failed: ${(err as Error).message}`, "request");
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   const raw = await res.text();

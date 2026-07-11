@@ -173,6 +173,25 @@ else
   echo "    MCP_BRIDGE_ENABLED=false (default) — skipping bridge checks"
 fi
 
+echo "==> Checking image delivery storage (S3)"
+# marketing.generate_image needs S3 to deliver an asset URL. Without storage
+# config, every request generates the image (real spend) then dead-ends at upload.
+GEMINI_KEY_VAL="$(grep -E '^GOOGLE_GENERATIVE_AI_API_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+if [ -n "$GEMINI_KEY_VAL" ]; then
+  STORAGE_BUCKET_VAL="$(grep -E '^STORAGE_BUCKET=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  AWS_KEY_VAL="$(grep -E '^AWS_ACCESS_KEY_ID=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  AWS_SECRET_VAL="$(grep -E '^AWS_SECRET_ACCESS_KEY=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  if [ -z "$STORAGE_BUCKET_VAL" ] || [ -z "$AWS_KEY_VAL" ] || [ -z "$AWS_SECRET_VAL" ]; then
+    echo "    WARNING: GOOGLE_GENERATIVE_AI_API_KEY set but STORAGE_BUCKET/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY" >&2
+    echo "             are not all set — generate_image will fail at the S3 upload step for every" >&2
+    echo "             request. Set them in PROD_DOTENV (or STORAGE_ENDPOINT_URL for R2/MinIO)." >&2
+  else
+    echo "    STORAGE_BUCKET=$STORAGE_BUCKET_VAL — image delivery ready"
+  fi
+else
+  echo "    GOOGLE_GENERATIVE_AI_API_KEY not set — skipping storage check"
+fi
+
 echo "==> Restarting service (single-instance lock makes this safe)"
 sudo systemctl restart founderos
 

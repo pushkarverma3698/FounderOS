@@ -36,6 +36,9 @@ export interface BootCapabilityInput {
   LANGCHAIN_API_KEY?: string | undefined;
   LANGCHAIN_TRACING_V2?: string | undefined;
   OLLAMA_URL?: string | undefined;
+  STORAGE_BUCKET?: string | undefined;
+  AWS_ACCESS_KEY_ID?: string | undefined;
+  AWS_SECRET_ACCESS_KEY?: string | undefined;
 }
 
 export interface CapabilityStatus {
@@ -144,6 +147,17 @@ export function buildBootReport(env: BootCapabilityInput): CapabilityStatus[] {
       name: "RAG embeddings (Ollama)",
       live: has(env.OLLAMA_URL),
       detail: `endpoint ${env.OLLAMA_URL ?? "(unset)"} — liveness checked at query time`,
+    },
+    {
+      name: "Image delivery storage (S3)",
+      live:
+        !has(env.GOOGLE_GENERATIVE_AI_API_KEY) ||
+        (has(env.STORAGE_BUCKET) && has(env.AWS_ACCESS_KEY_ID) && has(env.AWS_SECRET_ACCESS_KEY)),
+      detail: !has(env.GOOGLE_GENERATIVE_AI_API_KEY)
+        ? "GOOGLE_GENERATIVE_AI_API_KEY unset — generate_image disabled, S3 not required"
+        : has(env.STORAGE_BUCKET) && has(env.AWS_ACCESS_KEY_ID) && has(env.AWS_SECRET_ACCESS_KEY)
+          ? `bucket=${env.STORAGE_BUCKET} — image delivery ready`
+          : "GOOGLE_GENERATIVE_AI_API_KEY set but STORAGE_BUCKET/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY missing — generate_image will succeed then fail at S3 upload. Set them (or STORAGE_ENDPOINT_URL for R2/MinIO) in PROD_DOTENV.",
     },
   ];
 }

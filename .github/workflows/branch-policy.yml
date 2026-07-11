@@ -1,6 +1,6 @@
 name: Branch policy
 
-# Enforces the stable → beta → main promotion ladder in CI so agents cannot
+# Enforces the beta → main promotion ladder in CI so agents cannot
 # accidentally open feat/* → main and deploy broken code to production.
 on:
   pull_request:
@@ -10,37 +10,30 @@ jobs:
   promotion-ladder:
     name: Verify PR base/head branches
     runs-on: ubuntu-latest
-    # Closed PRs (e.g. a mistaken beta→main) must not pollute checks on the head branch.
+    # Closed PRs (e.g. a mistaken feat→main) must not pollute checks on the head branch.
     if: github.event.pull_request.state == 'open'
     steps:
-      - name: main only accepts stable
-        if: github.base_ref == 'main' && github.head_ref != 'stable'
+      - name: main only accepts beta
+        if: github.base_ref == 'main' && github.head_ref != 'beta'
         run: |
-          echo "::error::PRs to main must come from branch 'stable' only."
+          echo "::error::PRs to main must come from branch 'beta' only."
           echo "Head branch '${{ github.head_ref }}' cannot merge to main."
-          echo "Fix: retarget PR to 'beta' (gh pr edit <n> --base beta) or open a promotion PR stable→main."
-          echo "Flow: feat/*|cursor/* → beta → stable → main"
+          echo "Fix: retarget PR to 'beta' (gh pr edit <n> --base beta) or open a promotion PR beta→main."
+          echo "Flow: feat/*|cursor/* → beta → main"
           echo "See docs/process/BRANCH-MODEL.md and AGENTS.md"
           exit 1
 
-      - name: stable only accepts beta
-        if: github.base_ref == 'stable' && github.head_ref != 'beta'
-        run: |
-          echo "::error::PRs to stable must come from branch 'beta' only."
-          echo "When beta is validated, open PR: beta → stable"
-          exit 1
-
       # Beta is the integration branch: ANY work/agent branch belongs here. We reject
-      # only the promotion branches (main/stable) instead of allowlisting prefixes —
+      # only the promotion branch (main) instead of allowlisting prefixes —
       # a prefix allowlist drifts every time a new agent tool appears (cursor/, claude/,
       # codex/, …) and silently breaks that agent's PRs. Inverting the rule fixes that
       # class of failure permanently. Merge is still gated by branch protection + full CI.
       - name: beta rejects promotion branches only
         if: >-
           github.base_ref == 'beta' &&
-          (github.head_ref == 'main' || github.head_ref == 'stable')
+          github.head_ref == 'main'
         run: |
-          echo "::error::PRs to beta cannot come from 'main' or 'stable' (those are promotion targets)."
+          echo "::error::PRs to beta cannot come from 'main' (that is a promotion target)."
           echo "Head branch '${{ github.head_ref }}' should never be the source of a beta PR."
           echo "Open beta PRs from a work branch (feat/*, fix/*, chore/*, or any agent branch)."
           exit 1
