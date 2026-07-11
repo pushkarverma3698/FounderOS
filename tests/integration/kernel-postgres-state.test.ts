@@ -214,10 +214,11 @@ describe.runIf(pgUp)("v3 kernel run-loop ↔ Postgres state integrity", () => {
 
     await runKernelText(ctx, `Send an email to ${EMAIL_TO} confirming the Thursday 3pm retreat call`);
 
-    // The founder got exactly one approval card, with Approve/Reject buttons.
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!.text).toContain(`Send email to ${EMAIL_TO}?`);
-    expect(sent[0]!.opts?.reply_markup).toBeDefined();
+    // The founder got the progress placeholder, then exactly one approval card
+    // with Approve/Reject buttons (the placeholder is deleted, not counted here).
+    expect(sent).toHaveLength(2);
+    expect(sent.at(-1)!.text).toContain(`Send email to ${EMAIL_TO}?`);
+    expect(sent.at(-1)!.opts?.reply_markup).toBeDefined();
 
     // Nothing was sent yet.
     expect(h.providerSendEmail).not.toHaveBeenCalled();
@@ -266,10 +267,11 @@ describe.runIf(pgUp)("v3 kernel run-loop ↔ Postgres state integrity", () => {
     expect(rows.rows.some((r) => r.status === "approved")).toBe(true);
     expect(rows.rows.filter((r) => r.status === "pending")).toHaveLength(0);
 
-    // Founder-facing reply: synthesized text + code-side receipts block.
-    expect(sent).toHaveLength(1);
-    expect(sent[0]!.text).toContain("Action receipts");
-    expect(sent[0]!.text).toContain("send_email");
+    // Founder-facing reply: synthesized text + code-side receipts block
+    // (placeholder + final reply).
+    expect(sent).toHaveLength(2);
+    expect(sent.at(-1)!.text).toContain("Action receipts");
+    expect(sent.at(-1)!.text).toContain("send_email");
 
     // State was NOT dropped: the thread still holds the turn-1 mission, done.
     const kernel = await getKernel();
@@ -303,7 +305,7 @@ describe.runIf(pgUp)("v3 kernel run-loop ↔ Postgres state integrity", () => {
 
     const t1 = makeCtx(REJECT_CHAT_ID);
     await runKernelText(t1.ctx, `Send an email to ${REJECT_EMAIL_TO} confirming the Thursday 3pm retreat call`);
-    expect(t1.sent[0]!.text).toContain(`Send email to ${REJECT_EMAIL_TO}?`);
+    expect(t1.sent.at(-1)!.text).toContain(`Send email to ${REJECT_EMAIL_TO}?`);
 
     const t2 = makeCtx(REJECT_CHAT_ID);
     await resumeKernel(t2.ctx, "rejected");
@@ -312,8 +314,8 @@ describe.runIf(pgUp)("v3 kernel run-loop ↔ Postgres state integrity", () => {
     expect(h.providerSendEmail).toHaveBeenCalledTimes(1);
 
     // The reply names the rejection honestly (typed failure, fail loud).
-    expect(t2.sent).toHaveLength(1);
-    expect(t2.sent[0]!.text.toLowerCase()).toContain("nothing was sent");
+    expect(t2.sent).toHaveLength(2);
+    expect(t2.sent.at(-1)!.text.toLowerCase()).toContain("nothing was sent");
 
     // The approval row is rejected; nothing pending remains.
     const rows = await pool.query(`SELECT status FROM agents.hitl_approvals WHERE thread_id = $1`, [

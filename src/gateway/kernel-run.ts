@@ -24,6 +24,7 @@ import { readHalt, formatHaltNotice } from "../infra/halt.js";
 import { startTurn } from "../infra/trace.js";
 import { TraceCallback } from "../infra/trace-callback.js";
 import { logger } from "../infra/logger.js";
+import type { KernelStateType } from "../kernel/index.js";
 
 const log = logger.child({ module: "kernel-run" });
 
@@ -94,6 +95,88 @@ async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promis
   await ctx.reply(card.html, { parse_mode: "HTML", reply_markup: card.keyboard });
 }
 
+// ── Progress streaming ─────────────────────────────────────────────────────
+
+const PROGRESS_OBJECTIVE_MAX = 60;
+
+/**
+ * Step-level progress label for the CURRENT state, or null when nothing is
+ * worth showing (planning/failed/done, or a malformed cursor — mirrors
+ * dispatch's own bounds check rather than throwing).
+ */
+export function progressLabelFor(state: KernelStateType): string | null {
+  const { mission } = state;
+  if (!mission) return null; // first streamed snapshot, before the plan node has run
+  if (mission.status === "executing") {
+    const step = mission.plan?.steps[mission.cursor];
+    if (!step) return null;
+    const objective =
+      step.objective.length > PROGRESS_OBJECTIVE_MAX
+        ? `${step.objective.slice(0, PROGRESS_OBJECTIVE_MAX - 1)}…`
+        : step.objective;
+    return `🔧 ${step.worker}: ${objective}`;
+  }
+  if (mission.status === "synthesizing") return "✍️ Writing your reply…";
+  return null;
+}
+
+const PROGRESS_PLACEHOLDER_TEXT = "🤔 Working on it…";
+
+/** Runs a Telegram progress call and swallows any failure — a progress ping is cosmetic; the turn must not die on a Telegram blip. */
+async function silently(op: string, fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    log.warn({ err: String(err) }, `Progress placeholder ${op} failed`); // allow-failopen: progress ping is cosmetic; the turn must not die on a Telegram blip
+  }
+}
+
+/**
+ * Sends one placeholder message, edits it as progressLabelFor(state) changes
+ * while streaming the kernel turn, and deletes it once the turn ends
+ * (success, HITL pause, or error).
+ */
+async function streamKernelTurn(
+  ctx: Context,
+  trace: ReturnType<typeof startTurn>,
+  streamPromise: Promise<AsyncIterable<unknown>>,
+): Promise<KernelStateType> {
+  let placeholderId: number | undefined;
+  await silently("send", async () => {
+    placeholderId = (await ctx.reply(PROGRESS_PLACEHOLDER_TEXT)).message_id;
+  });
+
+  let lastLabel: string | null = null;
+  let lastState: KernelStateType | undefined;
+
+  try {
+    const streamIter = await streamPromise;
+    for await (const state of streamIter) {
+      lastState = state as KernelStateType;
+      const label = progressLabelFor(lastState);
+      if (label === null || label === lastLabel) continue;
+      lastLabel = label;
+      trace.event("turn.progress", { label });
+      const id = placeholderId;
+      if (id !== undefined && ctx.chat) {
+        const chatId = ctx.chat.id;
+        await silently("edit", () => ctx.api.editMessageText(chatId, id, label));
+      }
+    }
+  } finally {
+    const id = placeholderId;
+    if (id !== undefined && ctx.chat) {
+      const chatId = ctx.chat.id;
+      await silently("delete", () => ctx.api.deleteMessage(chatId, id));
+    }
+  }
+
+  if (!lastState) {
+    throw new Error("kernel.stream produced no state — this should be unreachable (graph always yields at least once)");
+  }
+  return lastState;
+}
+
 // ── One text turn ──────────────────────────────────────────────────────────────
 
 export async function runKernelText(ctx: Context, text: string): Promise<void> {
@@ -121,16 +204,20 @@ export async function runKernelText(ctx: Context, text: string): Promise<void> {
       trace.event("turn.in", { textPreview: text.slice(0, 120) });
 
       const res = await withTurnTimeout(
-        kernel.invoke(
-          {
-            turn: {
-              id: trace.turnId,
-              chat_id: String(chatId),
-              received_at: new Date().toISOString(),
-              raw_input: text,
+        streamKernelTurn(
+          ctx,
+          trace,
+          kernel.stream(
+            {
+              turn: {
+                id: trace.turnId,
+                chat_id: String(chatId),
+                received_at: new Date().toISOString(),
+                raw_input: text,
+              },
             },
-          },
-          config,
+            { ...config, streamMode: "values" },
+          ) as Promise<AsyncIterable<unknown>>,
         ),
         OFFICE_TURN_TIMEOUT_MS,
         "kernel.invoke",
@@ -174,7 +261,14 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
       trace.event("hitl.resume", { decision });
 
       const res = await withTurnTimeout(
-        kernel.invoke(new Command({ resume: decision }), config),
+        streamKernelTurn(
+          ctx,
+          trace,
+          kernel.stream(new Command({ resume: decision }), {
+            ...config,
+            streamMode: "values",
+          }) as Promise<AsyncIterable<unknown>>,
+        ),
         OFFICE_TURN_TIMEOUT_MS,
         "kernel.resume",
       );

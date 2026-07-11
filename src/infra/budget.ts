@@ -36,6 +36,7 @@ export interface ModelCost {
 export const MODEL_COSTS: Record<string, ModelCost> = {
   // Google Gemini
   "gemini-2.5-flash":                 { inputPerM: 0.075,  outputPerM: 0.30 },
+  "gemini-flash-latest":              { inputPerM: 0.075,  outputPerM: 0.30 },
   "gemini-2.5-flash-preview-05-20":   { inputPerM: 0.075,  outputPerM: 0.30 },
   "gemini-2.5-flash-lite":            { inputPerM: 0.0375, outputPerM: 0.15 },
   "gemini-2.5-pro":                   { inputPerM: 1.25,   outputPerM: 10.0 },

@@ -15,12 +15,12 @@ import {
   buildKernel,
   type CompiledKernel,
   type KernelBindableModel,
-  type KernelChatModel,
   type KernelTool,
   type WorkerSpec,
   WORKERS,
 } from "../kernel/index.js";
-import { getModel, getWorkerModel } from "../agents/model.js";
+import { buildFallbackModels, getModel, getWorkerModel } from "../agents/model.js";
+import { withModelFallbacks } from "./model-fallback.js";
 import { DEPARTMENT_TOOLS, applyMcpBridge } from "../agents/capabilities.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
 import {
@@ -74,10 +74,26 @@ export function buildWorkerSpecs(): WorkerSpec[] {
 
 /** Build a kernel against an injected checkpointer (tests: MemorySaver). */
 export function buildProductionKernel(checkpointer: BaseCheckpointSaver): CompiledKernel {
+  // 2026-07-11: wrap every kernel model with the AGENT_FALLBACK_MODELS chain.
+  // Without this the configured free OpenRouter fallbacks never engaged — a
+  // Gemini quota/retirement error surfaced raw at the founder on every turn.
+  const fallbacks = buildFallbackModels() as unknown as KernelBindableModel[];
   return buildKernel({
-    plannerModel: getModel() as unknown as KernelChatModel,
-    workerModel: getWorkerModel() as unknown as KernelBindableModel,
-    synthesizerModel: getWorkerModel() as unknown as KernelChatModel,
+    plannerModel: withModelFallbacks(
+      getModel() as unknown as KernelBindableModel,
+      fallbacks,
+      "planner",
+    ),
+    workerModel: withModelFallbacks(
+      getWorkerModel() as unknown as KernelBindableModel,
+      fallbacks,
+      "worker",
+    ),
+    synthesizerModel: withModelFallbacks(
+      getWorkerModel() as unknown as KernelBindableModel,
+      fallbacks,
+      "synthesizer",
+    ),
     workers: buildWorkerSpecs(),
     checkpointer,
   });
