@@ -217,3 +217,88 @@ describe("resumeKernel", () => {
     expect(replies.at(-1)!.opts?.reply_markup).toBeDefined();
   });
 });
+
+describe("progress streaming", () => {
+  const EXECUTING_STEP1 = {
+    reply: "",
+    mission: {
+      status: "executing",
+      cursor: 0,
+      goal: "g",
+      plan: {
+        schema_version: 1,
+        goal: "g",
+        steps: [
+          {
+            step_id: "s1",
+            worker: "research",
+            objective: "Look up recent posts",
+            inputs: {},
+            expected: { kind: "data", schema_ref: "research.findings" },
+            constraints: { max_tool_calls: 3, hitl_required: false },
+          },
+        ],
+      },
+    },
+  };
+  const SYNTHESIZING = {
+    reply: "",
+    mission: { ...EXECUTING_STEP1.mission, status: "synthesizing", cursor: 1 },
+  };
+  const DONE = { reply: "Here you go.", mission: { ...EXECUTING_STEP1.mission, status: "done", cursor: 1 } };
+
+  it("edits the placeholder as the label changes, then deletes it before the final reply", async () => {
+    fakeKernel.stream.mockImplementation(async function* () {
+      yield EXECUTING_STEP1;
+      yield SYNTHESIZING;
+      yield DONE;
+    });
+
+    const { ctx, replies, edits, deletedIds } = fakeCtx();
+    await runKernelText(ctx, "do the thing");
+
+    expect(edits).toEqual(["🔧 research: Look up recent posts", "✍️ Writing your reply…"]);
+    expect(deletedIds).toEqual([1]); // placeholder was message_id 1
+    expect(replies.at(-1)!.text).toContain("Here you go.");
+  });
+
+  it("does not re-edit when consecutive states produce the same label", async () => {
+    fakeKernel.stream.mockImplementation(async function* () {
+      yield EXECUTING_STEP1;
+      yield EXECUTING_STEP1; // agent/tools loop — same step, same label
+      yield DONE;
+    });
+
+    const { ctx, edits } = fakeCtx();
+    await runKernelText(ctx, "do the thing");
+
+    expect(edits).toEqual(["🔧 research: Look up recent posts"]);
+  });
+
+  it("deletes the placeholder even when the stream throws", async () => {
+    fakeKernel.stream.mockImplementation(async function* () {
+      yield EXECUTING_STEP1;
+      throw new Error("worker exploded");
+    });
+
+    const { ctx, deletedIds, replies } = fakeCtx();
+    await runKernelText(ctx, "do the thing");
+
+    expect(deletedIds).toEqual([1]);
+    expect(replies.at(-1)!.text).toContain("❌");
+  });
+
+  it("still shows progress on resumeKernel for a multi-step plan continuing after approval", async () => {
+    getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-1", created_at: new Date().toISOString() });
+    fakeKernel.stream.mockImplementation(async function* () {
+      yield SYNTHESIZING;
+      yield DONE;
+    });
+
+    const { ctx, edits, deletedIds } = fakeCtx();
+    await resumeKernel(ctx, "approved");
+
+    expect(edits).toEqual(["✍️ Writing your reply…"]);
+    expect(deletedIds).toEqual([1]);
+  });
+});
