@@ -19,7 +19,7 @@ import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:transcription" });
 
-const AUDIO_MODEL = process.env["TRANSCRIPTION_MODEL"] ?? "gemini-2.5-flash";
+const AUDIO_MODEL = process.env["TRANSCRIPTION_MODEL"] ?? "gemini-flash-latest";
 const MIN_TRANSCRIPT_CHARS = 3;
 
 export interface Transcription {

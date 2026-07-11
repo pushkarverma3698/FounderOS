@@ -86,6 +86,15 @@ describe("model id parsing", () => {
     expect(getConfiguredModelId()).toBe("openrouter:google/gemini-2.5-flash");
     delete process.env["AGENT_MODEL"];
   });
+
+  it("normalizes retired gemini-2.5-flash to gemini-flash-latest (2026-07-11 retirement: 404 'no longer available to new users')", () => {
+    expect(normalizeModelId("google-genai:gemini-2.5-flash")).toBe(
+      "google-genai:gemini-flash-latest",
+    );
+    expect(normalizeModelId("openrouter:google/gemini-2.5-flash")).toBe(
+      "openrouter:google/gemini-flash-latest",
+    );
+  });
 });
 
 describe("getModel provider selection", () => {
