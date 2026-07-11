@@ -16,6 +16,14 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { SIGNAL_CONTRACTS } from "./signals.js";
+import {
+  EXPECTED_KINDS,
+  kindFromSchemaRef,
+  repairEnvelopeExpected,
+  type ExpectedKind,
+} from "./envelope-repair.js";
+
+export { EXPECTED_KINDS, kindFromSchemaRef, type ExpectedKind } from "./envelope-repair.js";
 
 export const KERNEL_SCHEMA_VERSION = 1 as const;
 
@@ -165,57 +173,6 @@ export function repairTextSummaryOutput(parsed: unknown, rawText: string): unkno
 export const MAX_TOOL_CALLS_PER_STEP = 6;
 export const MAX_PLAN_STEPS = 8;
 
-/**
- * Coarse output kinds. `kind` exists only to drive the action-receipt safety
- * check in validateStepResult (an "action_receipt" step must carry a real
- * successful receipt). It is otherwise fully derivable from schema_ref.
- */
-export const EXPECTED_KINDS = ["data", "draft", "action_receipt"] as const;
-export type ExpectedKind = (typeof EXPECTED_KINDS)[number];
-
-/** Derive the coarse kind from a schema_ref prefix (deterministic, model-free). */
-export function kindFromSchemaRef(schemaRef: unknown): ExpectedKind {
-  const ref = typeof schemaRef === "string" ? schemaRef : "";
-  if (ref.startsWith("draft.")) return "draft";
-  if (ref === "action.summary") return "action_receipt";
-  return "data";
-}
-
-/**
- * Repair planner drift (rule #16 — push correctness into code, not the prompt).
- * LLM planners frequently echo the schema_ref into `kind` (e.g.
- * kind:"research.findings" instead of "data"), which used to fail the ENTIRE
- * plan at the validation stage (live T02 outage, 2026-07-09). When `kind` is
- * not a valid coarse kind, derive it from schema_ref. A VALID model-emitted
- * kind — including "action_receipt" — is left untouched, so the receipt safety
- * check is never weakened.
- */
-function normalizeExpectedKind(val: unknown): unknown {
-  if (!val || typeof val !== "object") return val;
-  const o = val as Record<string, unknown>;
-  if ((EXPECTED_KINDS as readonly string[]).includes(o["kind"] as string)) return val;
-  return { ...o, kind: kindFromSchemaRef(o["schema_ref"]) };
-}
-
-/**
- * Repair planner schema_ref drift (kind-drift's sibling — live outage
- * 2026-07-11, turnId 9ad11675): planners invent data-shaped refs
- * ("github.commit_list", "features.list") that used to kill the ENTIRE plan
- * with "unknown output schema_ref". An unknown ref on a pure-data step falls
- * back to "data.generic" — the registry's declared escape hatch — AFTER kind
- * repair. Steps whose ref or kind implies a side effect (draft.*,
- * action_receipt) are NEVER remapped: those contracts feed HITL previews and
- * the receipt safety check.
- */
-function normalizeUnknownSchemaRef(val: unknown): unknown {
-  if (!val || typeof val !== "object") return val;
-  const o = val as Record<string, unknown>;
-  const ref = o["schema_ref"];
-  if (typeof ref !== "string" || ref === "" || isOutputSchemaRef(ref)) return val;
-  if (o["kind"] !== "data" || kindFromSchemaRef(ref) !== "data") return val;
-  return { ...o, schema_ref: "data.generic" };
-}
-
 export const TaskEnvelopeSchema = z.object({
   step_id: z.string().min(1),
   worker: WorkerIdSchema,
@@ -224,7 +181,7 @@ export const TaskEnvelopeSchema = z.object({
   /** Named inputs; values are prior step outputs referenced by the planner. */
   inputs: z.record(z.unknown()).default({}),
   expected: z.preprocess(
-    (val) => normalizeUnknownSchemaRef(normalizeExpectedKind(val)),
+    (val) => repairEnvelopeExpected(val, isOutputSchemaRef),
     z.object({
       kind: z.enum(EXPECTED_KINDS),
       schema_ref: z.string().refine(isOutputSchemaRef, { message: "unknown output schema_ref" }),
