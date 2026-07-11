@@ -27,8 +27,73 @@ vi.mock("../../../src/infra/halt.js", () => ({
   formatHaltNotice: vi.fn(() => "halted"),
 }));
 
-const { runKernelText, resumeKernel } = await import("../../../src/gateway/kernel-run.js");
+const { runKernelText, resumeKernel, progressLabelFor } = await import("../../../src/gateway/kernel-run.js");
 import { Command } from "@langchain/langgraph";
+import type { KernelStateType } from "../../../src/kernel/index.js";
+
+function baseState(overrides: Partial<KernelStateType["mission"]>): KernelStateType {
+  return {
+    turn: { id: "t1", chat_id: "1", received_at: "", raw_input: "" },
+    mission: { goal: "g", status: "planning", plan: null, cursor: 0, ...overrides },
+    results: [],
+    attempts: {},
+    failure: null,
+    scratch: [],
+    step_receipts: [],
+    reply: "",
+    last_turn: null,
+    history: [],
+  } as unknown as KernelStateType;
+}
+
+const PLAN = {
+  schema_version: 1,
+  goal: "g",
+  steps: [
+    {
+      step_id: "s1",
+      worker: "research",
+      objective: "Find the founder's five most recent LinkedIn posts and summarize engagement",
+      inputs: {},
+      expected: { kind: "data", schema_ref: "research.findings" },
+      constraints: { max_tool_calls: 3, hitl_required: false },
+    },
+  ],
+} as const;
+
+describe("progressLabelFor", () => {
+  it("returns a worker + truncated-objective label while executing", () => {
+    const state = baseState({ status: "executing", plan: PLAN as never, cursor: 0 });
+    expect(progressLabelFor(state)).toBe(
+      "🔧 research: Find the founder's five most recent LinkedIn posts and su…",
+    );
+  });
+
+  it("returns the writing label while synthesizing", () => {
+    const state = baseState({ status: "synthesizing", plan: PLAN as never, cursor: 1 });
+    expect(progressLabelFor(state)).toBe("✍️ Writing your reply…");
+  });
+
+  it("returns null while planning (nothing worth showing yet)", () => {
+    const state = baseState({ status: "planning", plan: null, cursor: 0 });
+    expect(progressLabelFor(state)).toBeNull();
+  });
+
+  it("returns null when done or failed", () => {
+    expect(progressLabelFor(baseState({ status: "done", plan: PLAN as never, cursor: 1 }))).toBeNull();
+    expect(progressLabelFor(baseState({ status: "failed", plan: PLAN as never, cursor: 0 }))).toBeNull();
+  });
+
+  it("returns null defensively when cursor is out of range (mirrors dispatch's own bounds check)", () => {
+    const state = baseState({ status: "executing", plan: PLAN as never, cursor: 5 });
+    expect(progressLabelFor(state)).toBeNull();
+  });
+
+  it("returns null when executing with no plan (should not happen, but must not throw)", () => {
+    const state = baseState({ status: "executing", plan: null, cursor: 0 });
+    expect(progressLabelFor(state)).toBeNull();
+  });
+});
 
 interface Reply {
   text: string;
