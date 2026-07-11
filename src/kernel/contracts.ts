@@ -197,6 +197,25 @@ function normalizeExpectedKind(val: unknown): unknown {
   return { ...o, kind: kindFromSchemaRef(o["schema_ref"]) };
 }
 
+/**
+ * Repair planner schema_ref drift (kind-drift's sibling — live outage
+ * 2026-07-11, turnId 9ad11675): planners invent data-shaped refs
+ * ("github.commit_list", "features.list") that used to kill the ENTIRE plan
+ * with "unknown output schema_ref". An unknown ref on a pure-data step falls
+ * back to "data.generic" — the registry's declared escape hatch — AFTER kind
+ * repair. Steps whose ref or kind implies a side effect (draft.*,
+ * action_receipt) are NEVER remapped: those contracts feed HITL previews and
+ * the receipt safety check.
+ */
+function normalizeUnknownSchemaRef(val: unknown): unknown {
+  if (!val || typeof val !== "object") return val;
+  const o = val as Record<string, unknown>;
+  const ref = o["schema_ref"];
+  if (typeof ref !== "string" || ref === "" || isOutputSchemaRef(ref)) return val;
+  if (o["kind"] !== "data" || kindFromSchemaRef(ref) !== "data") return val;
+  return { ...o, schema_ref: "data.generic" };
+}
+
 export const TaskEnvelopeSchema = z.object({
   step_id: z.string().min(1),
   worker: WorkerIdSchema,
@@ -205,7 +224,7 @@ export const TaskEnvelopeSchema = z.object({
   /** Named inputs; values are prior step outputs referenced by the planner. */
   inputs: z.record(z.unknown()).default({}),
   expected: z.preprocess(
-    normalizeExpectedKind,
+    (val) => normalizeUnknownSchemaRef(normalizeExpectedKind(val)),
     z.object({
       kind: z.enum(EXPECTED_KINDS),
       schema_ref: z.string().refine(isOutputSchemaRef, { message: "unknown output schema_ref" }),
