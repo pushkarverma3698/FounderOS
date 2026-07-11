@@ -31,7 +31,10 @@ import {
   conversations,
   episodicMemory,
   missions,
+  scheduledPosts,
   type NewActionLog,
+  type NewScheduledPost,
+  type ScheduledPost,
   type NewDeptSignal,
   type NewHitlApproval,
   type NewOutboundLead,
@@ -971,6 +974,107 @@ export async function getDailyOutboundCount(
       ),
     );
   return Number(row?.total ?? 0);
+}
+
+// ── scheduled_posts (server-side social scheduling) ──────────────────────────
+
+/** Input for queuing a post — id/timestamps/status are set by the DB layer. */
+export type ScheduledPostInput = Omit<
+  NewScheduledPost,
+  "id" | "created_at" | "posted_at" | "status" | "post_id" | "post_url" | "error"
+>;
+
+/**
+ * Queue an approved post. Idempotent on idempotency_key: a duplicate schedule
+ * (e.g. an interrupt() resume re-running the tool) returns the existing row
+ * instead of inserting a second copy.
+ */
+export async function insertScheduledPost(data: ScheduledPostInput): Promise<ScheduledPost> {
+  const db = getDb();
+  const [row] = await db
+    .insert(scheduledPosts)
+    .values({ ...data, status: "scheduled" })
+    .onConflictDoNothing({ target: scheduledPosts.idempotency_key })
+    .returning();
+  if (row) return row;
+  const [existing] = await db
+    .select()
+    .from(scheduledPosts)
+    .where(eq(scheduledPosts.idempotency_key, data.idempotency_key))
+    .limit(1);
+  return existing!;
+}
+
+/**
+ * ATOMICALLY claim due posts for one sweep. Flips each selected row from
+ * 'scheduled' → 'posting' inside a single statement and RETURNs the claimed
+ * rows. `FOR UPDATE SKIP LOCKED` means a concurrent/overlapping sweep tick (the
+ * cron fires every minute and does not await the prior run) can never re-select
+ * the same row — this is the guard against double-posting to LinkedIn. A row
+ * left stuck in 'posting' after a hard crash is the SAFE failure direction (it
+ * simply won't republish); `hasBeenAudited` in the sweep is the second layer.
+ */
+export async function claimDueScheduledPosts(
+  tenantId: string,
+  now: Date = new Date(),
+  limit = 10,
+): Promise<ScheduledPost[]> {
+  const db = getDb();
+  // postgres.js raw-SQL binds don't serialize a JS Date — pass an ISO string and
+  // cast in SQL (the query builder does this implicitly; raw execute does not).
+  const nowIso = now.toISOString();
+  const rows = await db.execute(sql`
+    UPDATE agents.scheduled_posts
+    SET status = 'posting'
+    WHERE id IN (
+      SELECT id FROM agents.scheduled_posts
+      WHERE tenant_id = ${tenantId}
+        AND status = 'scheduled'
+        AND scheduled_at <= ${nowIso}::timestamptz
+      ORDER BY scheduled_at
+      LIMIT ${limit}
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING *
+  `);
+  // postgres.js driver: db.execute returns a RowList (array-like of row objects).
+  return rows as unknown as ScheduledPost[];
+}
+
+/** Mark a queued post published — the row's status transition IS the dedup guard. */
+export async function markScheduledPostPosted(
+  id: string,
+  postId: string,
+  postUrl?: string,
+): Promise<void> {
+  const db = getDb();
+  await db
+    .update(scheduledPosts)
+    .set({ status: "posted", post_id: postId, post_url: postUrl ?? null, posted_at: new Date() })
+    .where(eq(scheduledPosts.id, id));
+}
+
+/** Mark a queued post failed — the sweep surfaces the error to the founder. */
+export async function markScheduledPostFailed(id: string, error: string): Promise<void> {
+  const db = getDb();
+  await db
+    .update(scheduledPosts)
+    .set({ status: "failed", error: error.slice(0, 500) })
+    .where(eq(scheduledPosts.id, id));
+}
+
+/** Upcoming (still-scheduled) posts for the founder's "what's queued" view. */
+export async function listUpcomingScheduledPosts(
+  tenantId: string,
+  limit = 10,
+): Promise<ScheduledPost[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(scheduledPosts)
+    .where(and(eq(scheduledPosts.tenant_id, tenantId), eq(scheduledPosts.status, "scheduled")))
+    .orderBy(scheduledPosts.scheduled_at)
+    .limit(limit);
 }
 
 // ── Activity Summary (action_log) ─────────────────────────────────────────────

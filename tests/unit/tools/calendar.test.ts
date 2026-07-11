@@ -60,7 +60,7 @@ describe("calendarTool", () => {
       error: "Invalid time range",
     });
 
-    const result = await calendarTool.execute({ title: "Bad", date: "2026-07-10T09:00:00" });
+    const result = await calendarTool.execute({ title: "Bad", date: "2026-12-02T09:00:00" });
 
     expect(result.success).toBe(false);
     expect(mockWriteAuditEntry).not.toHaveBeenCalled();
@@ -89,12 +89,17 @@ describe("calendarTool", () => {
   });
 
   it("timed event end defaults to +1h", async () => {
-    await calendarTool.execute({ title: "Timed", date: "2026-07-10T09:00:00" });
+    // Computed future date so this can't rot — the tool rejects past-dated events,
+    // which is exactly what broke the old hardcoded "2026-07-10" once that day passed.
+    const day = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const start = `${day}T09:00:00`;
+    const end = `${day}T10:00:00`;
+    await calendarTool.execute({ title: "Timed", date: start });
 
     expect(mockProviderCreateCalendarEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        start_datetime: "2026-07-10T09:00:00",
-        end_datetime: "2026-07-10T10:00:00",
+        start_datetime: start,
+        end_datetime: end,
       }),
     );
   });

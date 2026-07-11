@@ -25,6 +25,7 @@
 
 export { hitlGate, idemKey, type ApprovalRequest } from "./agent-tools/hitl.js";
 export { searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool } from "./agent-tools/research.js";
+export { scanAiVisibility, getGapScans } from "./agent-tools/gap-scan.js";
 export {
   createSendEmailTool,
   sendEmail,
@@ -33,6 +34,8 @@ export {
   linkedinReadComments,
   draftLinkedInReply,
   draftConnectionNote,
+  scheduleSocialPost,
+  listScheduledPosts,
   createCalendarEvent,
   readEmails,
 } from "./agent-tools/comms.js";
