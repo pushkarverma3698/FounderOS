@@ -15,6 +15,7 @@ import type {
   StepResult,
   ToolReceipt,
   TurnRecord,
+  TurnSummary,
 } from "./contracts.js";
 
 export const RESET = "reset" as const;
@@ -71,7 +72,47 @@ export const KernelState = Annotation.Root({
     reducer: (_curr, update) => update,
     default: () => "",
   }),
+
+  /**
+   * Snapshot of the turn CURRENTLY being processed, taken by the plan node.
+   * Needed because the incoming `turn` update lands BEFORE plan runs — by
+   * then the previous turn's input is gone from `turn`. The next turn's plan
+   * node pairs this snapshot with the checkpointed `reply` to summarize.
+   */
+  last_turn: Annotation<TurnRecord | null>({
+    reducer: (_curr, update) => update,
+    default: () => null,
+  }),
+
+  /**
+   * Cross-turn conversation memory — the ONLY channel that survives the plan
+   * node's per-turn reset. Persisted in the thread checkpoint (Postgres in
+   * prod), hydrated on every invoke, capped to the most recent turns.
+   */
+  history: Annotation<TurnSummary[], ListUpdate<TurnSummary>>({
+    reducer: (curr, update) => {
+      const next = update === RESET ? [] : Array.isArray(update) ? curr.concat(update) : update.set;
+      return trimHistory(next);
+    },
+    default: () => [],
+  }),
 });
+
+/** Bounds on retained turn summaries — keep checkpoint rows and planner prompts small. */
+export const HISTORY_MAX_TURNS = 20;
+/** Char budget across ALL retained summaries (~4k tokens) — protects the run budget on long threads. */
+export const HISTORY_MAX_CHARS = 16_000;
+
+/** Trim oldest-first to both the turn cap and the total char budget (always keeps the newest turn). */
+function trimHistory(list: TurnSummary[]): TurnSummary[] {
+  let out = list.length > HISTORY_MAX_TURNS ? list.slice(-HISTORY_MAX_TURNS) : list;
+  let chars = out.reduce((n, t) => n + t.user_input.length + t.reply.length, 0);
+  while (out.length > 1 && chars > HISTORY_MAX_CHARS) {
+    chars -= out[0]!.user_input.length + out[0]!.reply.length;
+    out = out.slice(1);
+  }
+  return out;
+}
 
 export type KernelStateType = typeof KernelState.State;
 export type KernelUpdate = typeof KernelState.Update;

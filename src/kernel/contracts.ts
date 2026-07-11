@@ -314,6 +314,25 @@ export interface TurnRecord {
   raw_input: string;
 }
 
+// ── Cross-turn conversation memory ─────────────────────────────────────────────
+// One compact record per COMPLETED turn, accumulated in the thread's checkpoint
+// (Postgres in prod) and replayed to the planner so follow-ups like "send it"
+// resolve against real prior turns instead of failing cold.
+
+export const TURN_OUTCOMES = ["replied", "done", "failed"] as const;
+export type TurnOutcome = (typeof TURN_OUTCOMES)[number];
+
+export const TurnSummarySchema = z.object({
+  turn_id: z.string().min(1),
+  at: z.string(),
+  user_input: z.string(),
+  goal: z.string(),
+  outcome: z.enum(TURN_OUTCOMES),
+  /** Final founder-facing reply (truncated) — includes failure evidence on failed turns. */
+  reply: z.string(),
+});
+export type TurnSummary = z.infer<typeof TurnSummarySchema>;
+
 export interface SystemState {
   schema_version: typeof KERNEL_SCHEMA_VERSION;
   turn: TurnRecord;
