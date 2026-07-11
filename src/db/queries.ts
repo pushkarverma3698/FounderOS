@@ -1020,6 +1020,9 @@ export async function claimDueScheduledPosts(
   limit = 10,
 ): Promise<ScheduledPost[]> {
   const db = getDb();
+  // postgres.js raw-SQL binds don't serialize a JS Date — pass an ISO string and
+  // cast in SQL (the query builder does this implicitly; raw execute does not).
+  const nowIso = now.toISOString();
   const rows = await db.execute(sql`
     UPDATE agents.scheduled_posts
     SET status = 'posting'
@@ -1027,7 +1030,7 @@ export async function claimDueScheduledPosts(
       SELECT id FROM agents.scheduled_posts
       WHERE tenant_id = ${tenantId}
         AND status = 'scheduled'
-        AND scheduled_at <= ${now}
+        AND scheduled_at <= ${nowIso}::timestamptz
       ORDER BY scheduled_at
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
