@@ -8,13 +8,16 @@
 import { childLogger } from "../logger.js";
 import { readEnvValue } from "../credential-resolver.js";
 import { getLinkedInAccount } from "../account-registry.js";
+import { buildCommentary } from "../social-mention.js";
 import type { ToolResult } from "../../tools/index.js";
 import type { LinkedInPostInput } from "./types.js";
 
 const log = childLogger({ module: "provider:linkedin-direct" });
 
 const LINKEDIN_API_BASE = "https://api.linkedin.com/rest";
-const DEFAULT_API_VERSION = "202506";
+// YYYYMM version header. 202506 (Marketing June 2025) was SUNSET — keep this on a
+// currently-supported month or every call 400s. Override with LINKEDIN_API_VERSION.
+const DEFAULT_API_VERSION = "202606";
 
 /** Whether direct LinkedIn API credentials are configured (default/turicks account). */
 export function linkedInDirectConfigured(): boolean {
@@ -67,7 +70,9 @@ export async function directLinkedInPost(input: LinkedInPostInput): Promise<Tool
 
   const body: Record<string, unknown> = {
     author,
-    commentary: input.text,
+    // buildCommentary is a no-op when no mention is set (plain-post behavior
+    // unchanged); with a mention it escapes the body + appends the @[Org](urn) tag.
+    commentary: buildCommentary(input.text, input.mention),
     visibility: input.visibility === "CONNECTIONS" ? "CONNECTIONS" : "PUBLIC",
     distribution: { feedDistribution: "MAIN_FEED" },
     lifecycleState: "PUBLISHED",

@@ -7,7 +7,7 @@
  * Pattern: verbs + domain — createInterrupt, resolveInterrupt, logCost, checkIdempotency
  */
 
-import { and, count, desc, eq, gt, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { tokenizeQuery, rankByTerms } from "./keyword-search.js";
 
@@ -31,7 +31,10 @@ import {
   conversations,
   episodicMemory,
   missions,
+  scheduledPosts,
   type NewActionLog,
+  type NewScheduledPost,
+  type ScheduledPost,
   type NewDeptSignal,
   type NewHitlApproval,
   type NewOutboundLead,
@@ -971,6 +974,92 @@ export async function getDailyOutboundCount(
       ),
     );
   return Number(row?.total ?? 0);
+}
+
+// ── scheduled_posts (server-side social scheduling) ──────────────────────────
+
+/** Input for queuing a post — id/timestamps/status are set by the DB layer. */
+export type ScheduledPostInput = Omit<
+  NewScheduledPost,
+  "id" | "created_at" | "posted_at" | "status" | "post_id" | "post_url" | "error"
+>;
+
+/**
+ * Queue an approved post. Idempotent on idempotency_key: a duplicate schedule
+ * (e.g. an interrupt() resume re-running the tool) returns the existing row
+ * instead of inserting a second copy.
+ */
+export async function insertScheduledPost(data: ScheduledPostInput): Promise<ScheduledPost> {
+  const db = getDb();
+  const [row] = await db
+    .insert(scheduledPosts)
+    .values({ ...data, status: "scheduled" })
+    .onConflictDoNothing({ target: scheduledPosts.idempotency_key })
+    .returning();
+  if (row) return row;
+  const [existing] = await db
+    .select()
+    .from(scheduledPosts)
+    .where(eq(scheduledPosts.idempotency_key, data.idempotency_key))
+    .limit(1);
+  return existing!;
+}
+
+/** Posts whose time has arrived and are still awaiting publish (sweep hot path). */
+export async function getDueScheduledPosts(
+  tenantId: string,
+  now: Date = new Date(),
+  limit = 10,
+): Promise<ScheduledPost[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(scheduledPosts)
+    .where(
+      and(
+        eq(scheduledPosts.tenant_id, tenantId),
+        eq(scheduledPosts.status, "scheduled"),
+        lte(scheduledPosts.scheduled_at, now),
+      ),
+    )
+    .orderBy(scheduledPosts.scheduled_at)
+    .limit(limit);
+}
+
+/** Mark a queued post published — the row's status transition IS the dedup guard. */
+export async function markScheduledPostPosted(
+  id: string,
+  postId: string,
+  postUrl?: string,
+): Promise<void> {
+  const db = getDb();
+  await db
+    .update(scheduledPosts)
+    .set({ status: "posted", post_id: postId, post_url: postUrl ?? null, posted_at: new Date() })
+    .where(eq(scheduledPosts.id, id));
+}
+
+/** Mark a queued post failed — the sweep surfaces the error to the founder. */
+export async function markScheduledPostFailed(id: string, error: string): Promise<void> {
+  const db = getDb();
+  await db
+    .update(scheduledPosts)
+    .set({ status: "failed", error: error.slice(0, 500) })
+    .where(eq(scheduledPosts.id, id));
+}
+
+/** Upcoming (still-scheduled) posts for the founder's "what's queued" view. */
+export async function listUpcomingScheduledPosts(
+  tenantId: string,
+  limit = 10,
+): Promise<ScheduledPost[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(scheduledPosts)
+    .where(and(eq(scheduledPosts.tenant_id, tenantId), eq(scheduledPosts.status, "scheduled")))
+    .orderBy(scheduledPosts.scheduled_at)
+    .limit(limit);
 }
 
 // ── Activity Summary (action_log) ─────────────────────────────────────────────

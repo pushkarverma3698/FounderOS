@@ -8,6 +8,7 @@
  */
 
 import type { ToolResult } from "../../tools/index.js";
+import type { MentionTarget } from "../social-mention.js";
 
 /** Which adapter executes a platform call. Env-selectable; default = direct/gws.
  *  - gws:        Google Workspace CLI on the host (interactive `gws auth login`).
@@ -50,6 +51,8 @@ export interface LinkedInPostInput {
   image_url?: string;
   visibility: "PUBLIC" | "CONNECTIONS";
   schedule_time?: string;
+  /** Optional org (Company Page) to @tag in the post body. */
+  mention?: MentionTarget;
   account_key?: string;
   department?: string;
 }

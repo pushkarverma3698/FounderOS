@@ -13,7 +13,9 @@ import { emailTool } from "../../tools/email.js";
 import { readEmailsTool } from "../../tools/email-reader.js";
 import { linkedinPostTool } from "../../tools/linkedin.js";
 import { linkedinReadCommentsTool, linkedinGetMyPostsTool } from "../../tools/linkedin-engagement.js";
-import { getRecentLinkedInPostIds } from "../../db/queries.js";
+import { scheduleSocialPostTool } from "../../tools/scheduled-post.js";
+import { getCompanyPageMention } from "../../infra/provider-config.js";
+import { getRecentLinkedInPostIds, listUpcomingScheduledPosts } from "../../db/queries.js";
 import { calendarTool } from "../../tools/calendar.js";
 import { hasRecentOutboundToRecipient, isSuppressed, getDailyOutboundCount } from "../../db/queries.js";
 import {
@@ -270,6 +272,128 @@ export const linkedinPost = tool(
     schema: z.object({
       text: z.string().describe("The full post text, ready to publish"),
     }),
+  },
+);
+
+// ── Marketing: Scheduled LinkedIn post (WRITE — approved once, auto-published) ─
+
+/**
+ * Schedule a LinkedIn post to auto-publish later. LinkedIn's API has no native
+ * scheduling, so we persist an approved post and a cron sweep fires it at the
+ * chosen time. HITL happens ONCE here (approve content + time); the sweep posts
+ * without a second approval. Same brand-validator + judge gate as an immediate
+ * post. By default it @tags the Turicks company page (post-from-personal growth
+ * play) when LINKEDIN_ORG_URN / LINKEDIN_ORG_NAME are configured.
+ */
+export const scheduleSocialPost = tool(
+  async ({ text, scheduled_at, tag_company_page = true, visibility = "PUBLIC" }, config) => {
+    const when = new Date(scheduled_at);
+    if (Number.isNaN(when.getTime())) {
+      return `I couldn't parse "${scheduled_at}" as a date/time. Give me an ISO 8601 datetime (e.g. 2026-07-12T09:00:00+02:00).`;
+    }
+    if (when.getTime() <= Date.now()) {
+      return `That time (${when.toISOString()}) is in the past — pick a future time.`;
+    }
+
+    // Same outbound quality gate as an immediate post (brand-validator + judge,
+    // bounded retries). Banned phrases are auto-stripped; other failures re-draft.
+    let draft = text;
+    let brand = await outboundQualityGate(draft, "linkedin", config, "schedule_social_post");
+    if (!brand.proceed) {
+      const check = validateBrandVoice(draft, "linkedin");
+      const onlyBanned = check.violations.every((v) => v.startsWith("found banned phrase"));
+      if (onlyBanned) {
+        draft = stripBannedPhrases(draft);
+        brand = {
+          proceed: true,
+          retryKey: brand.retryKey,
+          warning: "Auto-stripped banned phrases — review before scheduling.",
+        };
+      } else {
+        return `Revise before scheduling:\n${brand.fix}`;
+      }
+    }
+
+    const mention = tag_company_page ? getCompanyPageMention() : undefined;
+    const tagNote = !tag_company_page
+      ? ""
+      : mention
+        ? `\n\nWill tag: @${mention.name}`
+        : "\n\n⚠️ Company-page tag requested but LINKEDIN_ORG_URN / LINKEDIN_ORG_NAME are not set — this will post WITHOUT a tag. Set them to enable @page tagging.";
+
+    const whenLabel = when.toISOString();
+    const rejected = await hitlGate(
+      {
+        action: "schedule_social_post",
+        title: "📅 Schedule this LinkedIn post?",
+        summary: brand.warning ?? `Publishes automatically at ${whenLabel}`,
+        preview: `${draft}\n\n— Scheduled for ${whenLabel} —${tagNote}`,
+        args: { text: draft, scheduled_at: whenLabel, tagged: !!mention },
+      },
+      config,
+    );
+    if (rejected) {
+      clearBrandRetries(brand.retryKey);
+      return rejected;
+    }
+    clearBrandRetries(brand.retryKey);
+
+    const res = await scheduleSocialPostTool.execute({
+      text: draft,
+      scheduled_at: whenLabel,
+      platform: "linkedin",
+      visibility,
+      mention_urn: mention?.urn,
+      mention_name: mention?.name,
+      // Time-invariant so an interrupt() resume never queues a duplicate.
+      idempotency_key: idemKey("linkedin_sched", draft, whenLabel),
+      tenant_id: TENANT,
+      department: "marketing",
+    });
+
+    if (!res.success) return `Scheduling failed: ${res.error}`;
+    const data = res.data as { scheduled_at: string; tagged: boolean };
+    return `✅ LinkedIn post scheduled for ${data.scheduled_at}${data.tagged ? ` (tagging @${mention?.name})` : ""}. I'll publish it automatically and confirm here.`;
+  },
+  {
+    name: "schedule_social_post",
+    description:
+      "Schedule a LinkedIn post to auto-publish at a future time. The founder APPROVES once now (an Approve/Reject card); it then posts automatically at the scheduled time — no second approval. Provide the full final text and an ISO 8601 datetime. By default it @tags the Turicks company page.",
+    schema: z.object({
+      text: z.string().describe("The full, final post text, ready to publish"),
+      scheduled_at: z
+        .string()
+        .describe("ISO 8601 datetime to publish at, e.g. 2026-07-12T09:00:00+02:00 (must be future)"),
+      tag_company_page: z
+        .boolean()
+        .optional()
+        .nullable()
+        .describe("Tag the Turicks company page in the post. Default: true."),
+      visibility: z
+        .enum(["PUBLIC", "CONNECTIONS"])
+        .optional()
+        .nullable()
+        .describe("Post visibility. Default: PUBLIC."),
+    }),
+  },
+);
+
+/** List upcoming scheduled posts — read-only, no approval. */
+export const listScheduledPosts = tool(
+  async () => {
+    const rows = await listUpcomingScheduledPosts(TENANT, 10);
+    if (!rows.length) return "No scheduled posts in the queue.";
+    const lines = rows.map((r, i) => {
+      const when = r.scheduled_at instanceof Date ? r.scheduled_at.toISOString() : String(r.scheduled_at);
+      const tag = r.mention_name ? ` @${r.mention_name}` : "";
+      return `${i + 1}. ${when} — "${r.text.slice(0, 60)}${r.text.length > 60 ? "…" : ""}"${tag}`;
+    });
+    return `📅 Upcoming scheduled posts:\n\n${lines.join("\n")}`;
+  },
+  {
+    name: "list_scheduled_posts",
+    description: "List upcoming scheduled social posts and their publish times. Read-only — no approval needed.",
+    schema: z.object({}),
   },
 );
 
