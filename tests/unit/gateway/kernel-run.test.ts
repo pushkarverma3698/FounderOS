@@ -6,8 +6,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Context } from "grammy";
 
+const DONE_STATE = { reply: "All done.", mission: { status: "done", plan: null, cursor: 0, goal: "" } };
+
+async function* singleYield(state: unknown) {
+  yield state;
+}
+
 const fakeKernel = {
-  invoke: vi.fn(async () => ({ reply: "All done.", mission: { status: "done" } })),
+  stream: vi.fn((..._args: unknown[]) => singleYield(DONE_STATE)),
   getState: vi.fn(async () => ({ tasks: [] })),
 };
 vi.mock("../../../src/gateway/kernel-boot.js", () => ({
@@ -100,20 +106,32 @@ interface Reply {
   opts?: { reply_markup?: unknown };
 }
 
-function fakeCtx(): { ctx: Context; replies: Reply[] } {
+function fakeCtx(): { ctx: Context; replies: Reply[]; edits: string[]; deletedIds: number[] } {
   const replies: Reply[] = [];
+  const edits: string[] = [];
+  const deletedIds: number[] = [];
+  let nextMessageId = 1;
   const ctx = {
     chat: { id: 777 },
     reply: vi.fn(async (text: string, opts?: Reply["opts"]) => {
       replies.push({ text, ...(opts !== undefined ? { opts } : {}) });
+      return { message_id: nextMessageId++ };
     }),
+    api: {
+      editMessageText: vi.fn(async (_chatId: number, _messageId: number, text: string) => {
+        edits.push(text);
+      }),
+      deleteMessage: vi.fn(async (_chatId: number, messageId: number) => {
+        deletedIds.push(messageId);
+      }),
+    },
   } as unknown as Context;
-  return { ctx, replies };
+  return { ctx, replies, edits, deletedIds };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  fakeKernel.invoke.mockResolvedValue({ reply: "All done.", mission: { status: "done" } } as never);
+  fakeKernel.stream.mockImplementation(() => singleYield(DONE_STATE));
   fakeKernel.getState.mockResolvedValue({ tasks: [] } as never);
   getPendingInterrupt.mockResolvedValue(null);
 });
@@ -123,8 +141,8 @@ describe("runKernelText", () => {
     const { ctx, replies } = fakeCtx();
     await runKernelText(ctx, "hello kernel");
 
-    expect(fakeKernel.invoke).toHaveBeenCalledTimes(1);
-    const [input, config] = fakeKernel.invoke.mock.calls[0]! as unknown as [
+    expect(fakeKernel.stream).toHaveBeenCalledTimes(1);
+    const [input, config] = fakeKernel.stream.mock.calls[0]! as unknown as [
       { turn: { raw_input: string; chat_id: string } },
       { configurable: { thread_id: string } },
     ];
@@ -163,7 +181,9 @@ describe("runKernelText", () => {
   });
 
   it("kernel invoke failure → loud ❌ error reply (never silent, never a wipe)", async () => {
-    fakeKernel.invoke.mockRejectedValue(new Error("planner exploded"));
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw new Error("planner exploded");
+    });
     const { ctx, replies } = fakeCtx();
     await runKernelText(ctx, "boom");
 
@@ -180,7 +200,7 @@ describe("resumeKernel", () => {
     await resumeKernel(ctx, "approved");
 
     expect(resolveInterrupt).toHaveBeenCalledWith("int-1", "approved");
-    const [cmd] = fakeKernel.invoke.mock.calls[0]! as unknown as [Command];
+    const [cmd] = fakeKernel.stream.mock.calls[0]! as unknown as [Command];
     expect(cmd).toBeInstanceOf(Command);
     expect(replies[0]!.text).toContain("All done.");
   });
