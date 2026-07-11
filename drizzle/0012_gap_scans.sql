@@ -1,4 +1,4 @@
--- FounderOS — Migration 0011: gap_scans table
+-- FounderOS — Migration 0012: gap_scans table
 -- AI Visibility Gap Scanner persistence (lead-acquisition spec Layer 1 + §11).
 -- One row per finished scan: hot columns for indexed lookup, full report +
 -- insights as JSONB so scans can be re-rendered without rerunning paid calls.

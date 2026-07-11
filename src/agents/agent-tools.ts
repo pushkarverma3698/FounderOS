@@ -34,6 +34,8 @@ export {
   linkedinReadComments,
   draftLinkedInReply,
   draftConnectionNote,
+  scheduleSocialPost,
+  listScheduledPosts,
   createCalendarEvent,
   readEmails,
 } from "./agent-tools/comms.js";
