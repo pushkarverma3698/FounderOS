@@ -54,10 +54,10 @@ describe("registry parity", () => {
     }
   });
 
-  it("envelope rejects a schema_ref outside the registry", () => {
+  it("envelope rejects an unknown side-effecting schema_ref (draft.*)", () => {
     const res = TaskEnvelopeSchema.safeParse({
       ...envelope(),
-      expected: { kind: "data", schema_ref: "made.up" },
+      expected: { kind: "draft", schema_ref: "draft.made_up" },
     });
     expect(res.success).toBe(false);
   });
@@ -111,10 +111,52 @@ describe("kind normalization — planner drift repair (live T02 regression)", ()
     expect(res.success && res.data.expected.kind).toBe("action_receipt");
   });
 
-  it("still rejects an unknown schema_ref regardless of kind repair", () => {
+  it("still rejects an unknown schema_ref on an explicit action_receipt step", () => {
     const res = TaskEnvelopeSchema.safeParse({
       ...envelope(),
-      expected: { kind: "made.up", schema_ref: "made.up" },
+      expected: { kind: "action_receipt", schema_ref: "send.made_up" },
+    });
+    expect(res.success).toBe(false);
+  });
+});
+
+describe("schema_ref drift repair — planner invents data refs (live 2026-07-11 regression)", () => {
+  // LIVE FAILURE 2026-07-11 18:33 (turnId 9ad11675): the planner emitted
+  // invented data-shaped schema_refs for two summary steps → "unknown output
+  // schema_ref" killed the ENTIRE plan at the planning stage. Same drift
+  // family as kind-echo (T02): repair in code, never in the prompt.
+  it("repairs an unknown data-kind schema_ref to data.generic", () => {
+    const res = TaskEnvelopeSchema.safeParse({
+      ...envelope(),
+      expected: { kind: "data", schema_ref: "github.commit_list" },
+    });
+    expect(res.success).toBe(true);
+    expect(res.success && res.data.expected.schema_ref).toBe("data.generic");
+    expect(res.success && res.data.expected.kind).toBe("data");
+  });
+
+  it("repairs when kind AND schema_ref both drifted", () => {
+    const res = TaskEnvelopeSchema.safeParse({
+      ...envelope(),
+      expected: { kind: "features.list", schema_ref: "features.list" },
+    });
+    expect(res.success).toBe(true);
+    expect(res.success && res.data.expected.schema_ref).toBe("data.generic");
+    expect(res.success && res.data.expected.kind).toBe("data");
+  });
+
+  it("NEVER remaps an unknown draft.* ref — draft contracts feed HITL previews", () => {
+    const res = TaskEnvelopeSchema.safeParse({
+      ...envelope(),
+      expected: { kind: "draft", schema_ref: "draft.tweet" },
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it("NEVER remaps an unknown ref on an action_receipt step — receipt gate stays intact", () => {
+    const res = TaskEnvelopeSchema.safeParse({
+      ...envelope(),
+      expected: { kind: "action_receipt", schema_ref: "email.sent" },
     });
     expect(res.success).toBe(false);
   });
