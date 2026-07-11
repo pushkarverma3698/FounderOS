@@ -106,6 +106,7 @@ const PROGRESS_OBJECTIVE_MAX = 60;
  */
 export function progressLabelFor(state: KernelStateType): string | null {
   const { mission } = state;
+  if (!mission) return null; // first streamed snapshot, before the plan node has run
   if (mission.status === "executing") {
     const step = mission.plan?.steps[mission.cursor];
     if (!step) return null;

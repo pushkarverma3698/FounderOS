@@ -103,6 +103,11 @@ describe("progressLabelFor", () => {
     const state = baseState({ status: "executing", plan: null, cursor: 0 });
     expect(progressLabelFor(state)).toBeNull();
   });
+
+  it("returns null when mission is undefined (the initial stream snapshot, before the plan node runs)", () => {
+    const state = { turn: { id: "t1", chat_id: "1", received_at: "", raw_input: "" } } as unknown as KernelStateType;
+    expect(progressLabelFor(state)).toBeNull();
+  });
 });
 
 interface Reply {
