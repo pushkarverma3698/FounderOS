@@ -37,7 +37,7 @@ const DDG_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 const DDG_TIMEOUT_MS = 12_000;
 const GEMINI_GROUNDING_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
 const GROUNDED_SNIPPET_MAX = 300;
 const GROUNDED_ANSWER_MAX = 1_500;
 const DDG_SNIPPET_MAX = 300;

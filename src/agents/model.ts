@@ -30,7 +30,7 @@ export interface ParsedModelId {
 // set AGENT_MODEL silently degraded to a model that chats instead of calling
 // tools. Dev/CI always set AGENT_MODEL explicitly; this only bites on misconfig,
 // where Gemini Flash is the far safer failure mode.
-export const DEFAULT_AGENT_MODEL = "openrouter:google/gemini-2.5-flash";
+export const DEFAULT_AGENT_MODEL = "openrouter:google/gemini-flash-latest";
 
 /** Retired OpenRouter / Google model ids → current stable ids. */
 const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
@@ -38,6 +38,11 @@ const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
   "google/gemini-2.5-flash-preview-05-20:free": "google/gemini-2.5-flash:free",
   "gemini-2.5-flash-preview-05-20": "gemini-2.5-flash",
   "gemini-2.0-flash": "gemini-2.5-flash",
+  // 2026-07-11: gemini-2.5-flash returns 404 "no longer available to new
+  // users" on newly billing-enabled Google Cloud projects (verified live).
+  // gemini-flash-latest is Google's rolling alias to the current model.
+  "google/gemini-2.5-flash": "google/gemini-flash-latest",
+  "gemini-2.5-flash": "gemini-flash-latest",
 };
 
 export function normalizeModelId(modelId: string): string {

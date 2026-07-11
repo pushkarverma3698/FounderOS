@@ -16,7 +16,7 @@ import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:vision" });
 
-const VISION_MODEL = process.env["VISION_MODEL"] ?? "gemini-2.5-flash";
+const VISION_MODEL = process.env["VISION_MODEL"] ?? "gemini-flash-latest";
 
 export interface ImageTranslation {
   /** Detected language of the text in the image, e.g. "Dutch". "English" if already English. */

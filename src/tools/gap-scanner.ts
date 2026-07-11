@@ -45,7 +45,7 @@ export interface Surface {
 
 const SURFACE_TIMEOUT_MS = 45_000;
 const GEMINI_GROUNDED_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 /** Default OpenRouter-backed surfaces; override via GAP_SCAN_SURFACES="id=model,id=model". */
 const DEFAULT_OPENROUTER_SURFACES = "chatgpt=openai/gpt-4o-mini,perplexity=perplexity/sonar";
