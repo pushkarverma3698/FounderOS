@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Delete remote branches already merged into main. Keeps main, stable, beta.
+# Delete remote branches already merged into main. Keeps main, beta.
 # Usage: ./scripts/prune-merged-branches.sh [--dry-run]
 set -euo pipefail
 
 DRY="${1:-}"
 REPO="${GITHUB_REPOSITORY:-pushkarverma3698/FounderOS}"
-KEEP='^(main|stable|beta|HEAD)$'
+KEEP='^(main|beta|HEAD)$'
 
 git fetch origin --prune
 

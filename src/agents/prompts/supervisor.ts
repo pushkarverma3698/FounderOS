@@ -3,7 +3,7 @@
  * department (or answers small talk) and relays sub-agent output verbatim.
  */
 import { buildCapabilityManifest } from "../capabilities.js";
-import { REVENUE_SUBGRAPH_ENABLED, CREATIVE_SUBGRAPH_ENABLED } from "../../core/config.js";
+import { REVENUE_SUBGRAPH_ENABLED } from "../../core/config.js";
 
 export const SUPERVISOR_PROMPT = `You are FounderOS — Pushkar's AI Chief of Staff, running Turicks AI agency.
 
@@ -25,7 +25,7 @@ ROUTING TABLE — 8 departments:
 | research    | Web facts, news, company/market research, ICP scoring — no outreach goal    |
 | comms       | Reading inbox, emailing a KNOWN contact, Google Calendar                     |
 | engineering | Writing/reviewing code, GitHub (issues, repos, PRs), FounderOS features     |
-| marketing   | LinkedIn posts, content strategy, brand copy — LinkedIn is marketing ONLY   |
+| marketing   | LinkedIn posts, content strategy, brand copy, images/visuals — LinkedIn is marketing ONLY   |
 | sales       | Cold outreach email, reaching out to an UNKNOWN company/person               |
 | personal    | Files/dirs/shell/browser on the founder's Mac                                |
 | jobhunt     | Job search, CV, applications, outreach to hiring managers                    |
@@ -42,6 +42,7 @@ ROUTING SHORTCUTS (memorise these — they prevent the most common mistakes):
 - "evaluate / compare external tool / CLI / product (not our codebase)" → research (search_web first)
 - "send me [file]" / "attach [file]" / "share [file]" → personal
 - "landing page / cinematic / website design / launch experience / showcase / proof drop" → marketing (copy) OR engineering (build/deploy) — copy first if ambiguous; multi-step: marketing then engineering
+- "make an image / graphic / logo / visual / launch graphic / mockup / poster / caption + visual" → marketing (generate_image for visuals; linkedin_post only when publishing)
 - "find leads for web design / cinematic-web / launch sites" → research (ICP + publish_signal lead_discovered with productFit in notes)
 - "build landing page / deploy site / cinematic-web preset" → engineering (apply_cinematic_preset → claude_code build → deploy_static_site; build+deploy HITL-gated)
 - "Proof Drop outreach / cold email for [startup] about their launch site" → sales
@@ -130,7 +131,7 @@ function patchForRevenueSubgraph(prompt: string): string {
   return prompt
     .replace("ROUTING TABLE — 8 departments:", "ROUTING TABLE — 7 departments:")
     .replace(
-      "| marketing   | LinkedIn posts, content strategy, brand copy — LinkedIn is marketing ONLY   |\n| sales       | Cold outreach email, reaching out to an UNKNOWN company/person               |",
+      "| marketing   | LinkedIn posts, content strategy, brand copy, images/visuals — LinkedIn is marketing ONLY   |\n| sales       | Cold outreach email, reaching out to an UNKNOWN company/person               |",
       "| revenue     | LinkedIn/content/brand copy AND cold outreach — routes internally to marketing or sales |",
     )
     .replace(
@@ -159,25 +160,10 @@ function patchForRevenueSubgraph(prompt: string): string {
     );
 }
 
-/**
- * When CREATIVE_SUBGRAPH is active, the parent supervisor gains a `creative`
- * routing target (image/graphic generation, visual concepts, captions, on-brand
- * design). ADDITIVE only — appends a routing shortcut; no existing line changes,
- * so with the flag OFF (default) the prompt is byte-identical. Pure substitution.
- */
-function patchForCreativeSubgraph(prompt: string): string {
-  return prompt.replace(
-    "- Short follow-ups in a laptop thread (\"Attach it\", \"Now run it\") → personal",
-    "- Short follow-ups in a laptop thread (\"Attach it\", \"Now run it\") → personal\n" +
-      "- \"make an image / graphic / logo / visual / launch graphic / mockup / poster / caption + visual\" → creative (art_director draft, brand_designer for final on-brand assets)",
-  );
-}
-
 export function buildSupervisorPrompt(): string {
   const today = new Date().toISOString().split("T")[0]!;
-  let base = REVENUE_SUBGRAPH_ENABLED
+  const base = REVENUE_SUBGRAPH_ENABLED
     ? patchForRevenueSubgraph(SUPERVISOR_PROMPT)
     : SUPERVISOR_PROMPT;
-  if (CREATIVE_SUBGRAPH_ENABLED) base = patchForCreativeSubgraph(base);
   return `TODAY: ${today} — always use this as the real current date. Never guess dates from training data.\n\n${base}`;
 }

@@ -90,6 +90,13 @@ describe("generateImage — injected fetch, stage-tagged errors", () => {
     ).rejects.toMatchObject({ stage: "parse" });
   });
 
+  it("throws a request-stage error (fail-fast) when the API hangs past the timeout", async () => {
+    const hangForever = () => new Promise(() => {}) as never;
+    await expect(
+      generateImage("x", {}, { apiKey: "k", fetchImpl: hangForever, timeoutMs: 50 }),
+    ).rejects.toMatchObject({ stage: "request" });
+  });
+
   it("hits the Pro model + URL when final=true", async () => {
     let calledUrl = "";
     const spy = async (url: string) => {
