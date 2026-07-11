@@ -1,8 +1,9 @@
 /**
  * FounderOS — Social mention / LinkedIn "little text" builder (PURE)
  * ==================================================================
- * Builds the `commentary` field for the LinkedIn Posts API, optionally
- * @tagging an organization (Company Page) from a personal-authored post.
+ * Two layers:
+ *   1. buildCommentary — structured org URN annotations for linkedin-direct.ts
+ *   2. appendCompanyPageMention — plain @CompanyName for scheduled personal posts
  *
  * LinkedIn encodes an organization mention inline in commentary as:
  *   "…body… @[Exact Org Name](urn:li:organization:2414183)"
@@ -10,11 +11,14 @@
  * renders as plain text. When ANY annotation is present, LinkedIn parses the
  * ENTIRE commentary as "little text", so reserved structural characters in the
  * body must be escaped or they corrupt annotation parsing.
- * See docs/decisions/009 + the Posts API "Mentions and Hashtags" section.
  *
  * This module is deterministic + side-effect-free (v3 invariant: routing/parsing
  * lives in unit-tested functions, never a prompt instruction).
  */
+
+import { readEnvValue } from "./credential-resolver.js";
+
+const DEFAULT_ORG_NAME = "Turicks";
 
 /** An organization the post should @tag (Company Page). */
 export interface MentionTarget {
@@ -60,4 +64,26 @@ export function buildCommentary(text: string, mention?: MentionTarget): string {
   const body = escapeLittleText(text).trimEnd();
   const annotation = `@[${mention.name}](${mention.urn})`;
   return body ? `${body}\n\n${annotation}` : annotation;
+}
+
+/** Company display name for @mentions (env: LINKEDIN_ORG_NAME). */
+export function getCompanyPageName(): string {
+  return readEnvValue("LINKEDIN_ORG_NAME")?.trim() || DEFAULT_ORG_NAME;
+}
+
+/** Org URN for Turicks company page (env: LINKEDIN_ORG_URN) — used when posting as org. */
+export function getCompanyPageUrn(): string | undefined {
+  return readEnvValue("LINKEDIN_ORG_URN")?.trim() || undefined;
+}
+
+/**
+ * Append @CompanyName to post text when posting from personal profile for growth.
+ * Idempotent — skips if mention already present (case-insensitive).
+ */
+export function appendCompanyPageMention(text: string, orgName = getCompanyPageName()): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  const needle = `@${orgName}`;
+  if (trimmed.toLowerCase().includes(needle.toLowerCase())) return trimmed;
+  return `${trimmed}\n\n${needle}`;
 }
