@@ -32,9 +32,12 @@ import {
   episodicMemory,
   missions,
   scheduledPosts,
+  scheduledTasks,
   type NewActionLog,
   type NewScheduledPost,
   type ScheduledPost,
+  type NewScheduledTask,
+  type ScheduledTask,
   type NewDeptSignal,
   type NewHitlApproval,
   type NewOutboundLead,
@@ -1107,6 +1110,160 @@ export async function listUpcomingScheduledPosts(
     .where(and(eq(scheduledPosts.tenant_id, tenantId), eq(scheduledPosts.status, "scheduled")))
     .orderBy(scheduledPosts.scheduled_at)
     .limit(limit);
+}
+
+/** Cancel a still-scheduled post. Returns the row, or undefined when it was not in 'scheduled' state. */
+export async function cancelScheduledPost(id: string): Promise<ScheduledPost | undefined> {
+  const db = getDb();
+  const [row] = await db
+    .update(scheduledPosts)
+    .set({ status: "canceled" })
+    .where(and(eq(scheduledPosts.id, id), eq(scheduledPosts.status, "scheduled")))
+    .returning();
+  return row;
+}
+
+/** Move a still-scheduled post to a new time. Returns the row, or undefined when not reschedulable. */
+export async function rescheduleScheduledPost(
+  id: string,
+  newTime: Date,
+): Promise<ScheduledPost | undefined> {
+  const db = getDb();
+  const [row] = await db
+    .update(scheduledPosts)
+    .set({ scheduled_at: newTime })
+    .where(and(eq(scheduledPosts.id, id), eq(scheduledPosts.status, "scheduled")))
+    .returning();
+  return row;
+}
+
+// ── scheduled_tasks (founder-scheduled future kernel turns) ───────────────────
+
+/** Input for scheduling a task — id/timestamps/status/attempts are DB-owned. */
+export type ScheduledTaskInput = Omit<
+  NewScheduledTask,
+  "id" | "created_at" | "completed_at" | "status" | "attempts" | "error"
+>;
+
+/**
+ * Queue a task. Idempotent on idempotency_key: a duplicate schedule (e.g. an
+ * interrupt() resume re-running the tool) returns the existing row instead of
+ * inserting a second copy — same contract as insertScheduledPost.
+ */
+export async function insertScheduledTask(data: ScheduledTaskInput): Promise<ScheduledTask> {
+  const db = getDb();
+  const [row] = await db
+    .insert(scheduledTasks)
+    .values({ ...data, status: "scheduled" })
+    .onConflictDoNothing({ target: scheduledTasks.idempotency_key })
+    .returning();
+  if (row) return row;
+  const [existing] = await db
+    .select()
+    .from(scheduledTasks)
+    .where(eq(scheduledTasks.idempotency_key, data.idempotency_key))
+    .limit(1);
+  return existing!;
+}
+
+/**
+ * ATOMICALLY claim due tasks for one sweep ('scheduled' → 'running', attempts+1).
+ * `FOR UPDATE SKIP LOCKED` makes overlapping sweep ticks safe — same double-fire
+ * guard as claimDueScheduledPosts. A row stuck in 'running' after a hard crash
+ * is the SAFE failure direction: it simply won't re-fire.
+ */
+export async function claimDueScheduledTasks(
+  tenantId: string,
+  now: Date = new Date(),
+  limit = 5,
+): Promise<ScheduledTask[]> {
+  const db = getDb();
+  const nowIso = now.toISOString();
+  const rows = await db.execute(sql`
+    UPDATE agents.scheduled_tasks
+    SET status = 'running', attempts = attempts + 1
+    WHERE id IN (
+      SELECT id FROM agents.scheduled_tasks
+      WHERE tenant_id = ${tenantId}
+        AND status = 'scheduled'
+        AND scheduled_at <= ${nowIso}::timestamptz
+      ORDER BY scheduled_at
+      LIMIT ${limit}
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING *
+  `);
+  return rows as unknown as ScheduledTask[];
+}
+
+/** Mark a claimed task completed — the fired turn's reply already went to the founder. */
+export async function markScheduledTaskDone(id: string): Promise<void> {
+  const db = getDb();
+  await db
+    .update(scheduledTasks)
+    .set({ status: "done", completed_at: new Date() })
+    .where(eq(scheduledTasks.id, id));
+}
+
+/** Mark a claimed task failed — the sweep surfaces the error to the founder. */
+export async function markScheduledTaskFailed(id: string, error: string): Promise<void> {
+  const db = getDb();
+  await db
+    .update(scheduledTasks)
+    .set({ status: "failed", error: error.slice(0, 500) })
+    .where(eq(scheduledTasks.id, id));
+}
+
+/**
+ * Release a claimed task back to 'scheduled' at a later time — used when a
+ * temporary gate (halt, daily budget) blocks the fire. attempts (bumped at
+ * claim time) bounds how often this can happen before the runner gives up.
+ */
+export async function releaseScheduledTask(id: string, nextAt: Date): Promise<void> {
+  const db = getDb();
+  await db
+    .update(scheduledTasks)
+    .set({ status: "scheduled", scheduled_at: nextAt })
+    .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.status, "running")));
+}
+
+/** Upcoming (still-scheduled) tasks for the founder's "what's queued" view. */
+export async function listUpcomingScheduledTasks(
+  tenantId: string,
+  limit = 20,
+): Promise<ScheduledTask[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(scheduledTasks)
+    .where(and(eq(scheduledTasks.tenant_id, tenantId), eq(scheduledTasks.status, "scheduled")))
+    .orderBy(scheduledTasks.scheduled_at)
+    .limit(limit);
+}
+
+/** Cancel a still-scheduled task. Returns the row, or undefined when it was not in 'scheduled' state. */
+export async function cancelScheduledTask(id: string): Promise<ScheduledTask | undefined> {
+  const db = getDb();
+  const [row] = await db
+    .update(scheduledTasks)
+    .set({ status: "canceled" })
+    .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.status, "scheduled")))
+    .returning();
+  return row;
+}
+
+/** Move a still-scheduled task to a new time. Returns the row, or undefined when not reschedulable. */
+export async function rescheduleScheduledTask(
+  id: string,
+  newTime: Date,
+): Promise<ScheduledTask | undefined> {
+  const db = getDb();
+  const [row] = await db
+    .update(scheduledTasks)
+    .set({ scheduled_at: newTime })
+    .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.status, "scheduled")))
+    .returning();
+  return row;
 }
 
 // ── Activity Summary (action_log) ─────────────────────────────────────────────

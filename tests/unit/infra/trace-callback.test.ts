@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { GraphInterrupt } from "@langchain/langgraph";
 import { TraceCallback } from "../../../src/infra/trace-callback.js";
 import { startTurn } from "../../../src/infra/trace.js";
 
@@ -28,6 +29,14 @@ describe("TraceCallback", () => {
     await cb.handleToolError(new Error("kaboom"));
     const ev = t.events.find((e) => e.seam === "tool.error");
     expect(ev?.data?.["error"]).toContain("kaboom");
+  });
+
+  it("logs a HITL GraphInterrupt as hitl.interrupt, NOT tool.error (2026-07-12 journal noise)", async () => {
+    const t = fakeTrace();
+    const cb = new TraceCallback(t);
+    await cb.handleToolError(new GraphInterrupt([{ value: { kind: "approval" } }] as any));
+    expect(t.events.some((e) => e.seam === "tool.error")).toBe(false);
+    expect(t.events.some((e) => e.seam === "hitl.interrupt")).toBe(true);
   });
 
   it("emits llm.call on handleLLMStart", async () => {

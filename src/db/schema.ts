@@ -845,6 +845,68 @@ export const scheduledPosts = agentsSchema.table(
 export type ScheduledPost = typeof scheduledPosts.$inferSelect;
 export type NewScheduledPost = typeof scheduledPosts.$inferInsert;
 
+// ── scheduled_tasks ───────────────────────────────────────────────────────────
+
+/**
+ * Lifecycle of a scheduled agent task. 'scheduled' → claimed by the sweep
+ * ('running') → 'done' | 'failed', or 'canceled' by the founder. A halted/
+ * over-budget system releases a claimed row back to 'scheduled' at a later
+ * time (bounded by attempts), so a founder-scheduled task is never silently
+ * consumed by a temporary gate.
+ */
+export const SCHEDULED_TASK_STATUSES = ["scheduled", "running", "done", "failed", "canceled"] as const;
+export type ScheduledTaskStatus = (typeof SCHEDULED_TASK_STATUSES)[number];
+
+/**
+ * Future kernel turns, scheduled by the founder via the schedule_task tool
+ * ("tomorrow 9am: summarise my LinkedIn analytics"). A zero-LLM cron sweep
+ * (src/infra/scheduler.ts) claims due rows and fires each one as a normal
+ * kernel turn on the founder's own thread — so HITL gating, receipts, budget
+ * caps and history all apply exactly as if the founder had typed the prompt
+ * at that moment. Safety is by construction: the task row itself performs no
+ * side effects; any external action inside the fired turn still raises its
+ * own approval card.
+ */
+export const scheduledTasks = agentsSchema.table(
+  "scheduled_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+
+    /** What the kernel should do when the task fires — a normal turn input. */
+    prompt: text("prompt").notNull(),
+
+    /** Chat whose thread the turn runs on (and where replies/cards go). */
+    chat_id: text("chat_id").notNull(),
+
+    /** When the sweep should fire this task. */
+    scheduled_at: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+
+    /** scheduled | running | done | failed | canceled. */
+    status: text("status").notNull().default("scheduled"),
+
+    /** Claim counter — bounds halt/budget deferrals so a task can't zombie. */
+    attempts: integer("attempts").notNull().default(0),
+
+    /** Time-invariant key so an interrupt() resume re-run never double-inserts. */
+    idempotency_key: text("idempotency_key").notNull().unique(),
+
+    /** Set on failure — surfaced to the founder by the sweep. */
+    error: text("error"),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    completed_at: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => ({
+    /** Sweep hot path: pull due 'scheduled' rows ordered by time. */
+    dueIdx: index("st_due_idx").on(t.status, t.scheduled_at),
+    tenantIdx: index("st_tenant_idx").on(t.tenant_id, t.scheduled_at),
+  }),
+);
+
+export type ScheduledTask = typeof scheduledTasks.$inferSelect;
+export type NewScheduledTask = typeof scheduledTasks.$inferInsert;
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
 export const interruptRegistry = hitlApprovals;
