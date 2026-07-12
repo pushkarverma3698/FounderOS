@@ -22,7 +22,7 @@
  * Skips cleanly when Postgres is unreachable (keyless CI-without-services).
  */
 
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll, vi } from "vitest";
 import pg from "pg";
 
 // ── Postgres reachability probe (collection-time skip, like the other suites) ──
@@ -63,9 +63,11 @@ describe.runIf(pgUp)("getPgPool first query on a fresh connection", () => {
   it("does not trip pg's queued-query deprecation and still resolves the agents/brain search_path", async () => {
     process.on("warning", onWarning);
 
-    // Cold pool: this file is its own vitest worker, so the db/client
-    // singleton is fresh. The very first pool.query() forces a brand-new
-    // connection — exactly the code path that raced at boot.
+    // Cold pool: reset the module registry so the db/client singleton is
+    // provably fresh (not merely fresh-by-default per-file isolation). The
+    // very first pool.query() then forces a brand-new connection — exactly
+    // the code path that raced at boot.
+    vi.resetModules();
     const { getPgPool } = await import("../../src/db/client.js");
     const res = await getPgPool().query<{ search_path: string }>("SHOW search_path");
 
