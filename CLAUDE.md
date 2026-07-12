@@ -75,7 +75,7 @@ src/agents/            — worker prompts (prompts/, system-prompts.ts),
 src/tools/             — UnifiedTool implementations (ToolResult envelope)
 src/infra/             — hitl, checkpointer (PostgresSaver), budget, daily-budget,
                          trace, scheduler (maintenance only), health
-src/db/                — schema (17 tables) + queries; src/eval/ — golden tasks,
+src/db/                — schema (18 tables) + queries; src/eval/ — golden tasks,
                          runner, scoring, kernel-invoker; src/proof/ — proof renderers
 src/mcp/               — MCP server (read-only external surface)
 ```

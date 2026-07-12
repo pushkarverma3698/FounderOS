@@ -33,6 +33,8 @@ import {
   missions,
   scheduledPosts,
   scheduledTasks,
+  failureLessons,
+  type FailureLessonRow,
   type NewActionLog,
   type NewScheduledPost,
   type ScheduledPost,
@@ -1299,6 +1301,67 @@ export async function rescheduleScheduledTask(
     .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.status, "scheduled")))
     .returning();
   return row;
+}
+
+// ── failure_lessons (Hermes learning seam — kernel LessonStore backing) ───────
+
+/** One lesson per (tenant, worker, signature) — the retry-injection lookup. */
+export async function getFailureLesson(
+  tenantId: string,
+  worker: string,
+  signature: string,
+): Promise<FailureLessonRow | undefined> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(failureLessons)
+    .where(
+      and(
+        eq(failureLessons.tenant_id, tenantId),
+        eq(failureLessons.worker, worker),
+        eq(failureLessons.signature, signature),
+      ),
+    )
+    .limit(1);
+  return row;
+}
+
+/**
+ * Record a resolution: first occurrence inserts, repeats bump times_seen and
+ * refresh the resolving context — the newest successful correction is the one
+ * future retries should imitate.
+ */
+export async function upsertFailureLesson(data: {
+  tenant_id: string;
+  worker: string;
+  signature: string;
+  component: string;
+  objective: string;
+  resolved_with_tools: string[];
+}): Promise<void> {
+  const db = getDb();
+  await db
+    .insert(failureLessons)
+    .values({ ...data, last_resolved_at: new Date() })
+    .onConflictDoUpdate({
+      target: [failureLessons.tenant_id, failureLessons.worker, failureLessons.signature],
+      set: {
+        times_seen: sql`${failureLessons.times_seen} + 1`,
+        component: data.component,
+        objective: data.objective,
+        resolved_with_tools: data.resolved_with_tools,
+        last_resolved_at: new Date(),
+      },
+    });
+}
+
+/** Telemetry: how often a lesson actually got injected into a retry. */
+export async function bumpFailureLessonApplied(id: string): Promise<void> {
+  const db = getDb();
+  await db
+    .update(failureLessons)
+    .set({ times_applied: sql`${failureLessons.times_applied} + 1` })
+    .where(eq(failureLessons.id, id));
 }
 
 // ── Activity Summary (action_log) ─────────────────────────────────────────────
