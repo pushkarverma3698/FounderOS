@@ -85,9 +85,12 @@ export function getCompanyPageMention(): MentionTarget | undefined {
   return { urn: urn.trim(), name: name.trim() };
 }
 
-/** Path to the gws binary (Google Workspace CLI). */
+/** Path to the gws binary (Google Workspace CLI). Empty/whitespace means unset
+ *  — PROD_DOTENV renders `GWS_BIN=`, and execFile("") crashes with
+ *  "The argument 'file' cannot be empty" instead of an honest probe result. */
 export function getGwsBin(): string {
-  return envOr("GWS_BIN") ?? "gws";
+  const bin = envOr("GWS_BIN")?.trim();
+  return bin ? bin : "gws";
 }
 
 /**

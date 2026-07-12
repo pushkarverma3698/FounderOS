@@ -27,6 +27,16 @@ import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "model-fallback" });
 
+/** Pause before the post-chain primary retry — Gemini 503 spikes clear in seconds. */
+export const PRIMARY_RETRY_DELAY_MS = 2_500;
+
+export interface FallbackOptions {
+  /** Overridable for tests; defaults to PRIMARY_RETRY_DELAY_MS. */
+  primaryRetryDelayMs?: number;
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 /**
  * Wrap a primary model with an ordered fallback chain. Returns the primary
  * untouched when the chain is empty (identity — zero overhead for tests and
@@ -36,8 +46,10 @@ export function withModelFallbacks(
   primary: KernelBindableModel,
   fallbacks: KernelBindableModel[],
   label = "kernel",
+  options: FallbackOptions = {},
 ): KernelBindableModel {
   if (fallbacks.length === 0) return primary;
+  const retryDelayMs = options.primaryRetryDelayMs ?? PRIMARY_RETRY_DELAY_MS;
 
   return {
     async invoke(messages) {
@@ -49,7 +61,6 @@ export function withModelFallbacks(
           { label, err: err instanceof Error ? err.message : String(err) },
           "Primary model failed retriably — engaging fallback chain",
         );
-        let lastErr: unknown = err;
         for (const [i, fb] of fallbacks.entries()) {
           try {
             const reply = await fb.invoke(messages);
@@ -61,16 +72,30 @@ export function withModelFallbacks(
               { label, fallbackIndex: i, err: fbErr instanceof Error ? fbErr.message : String(fbErr) },
               "Fallback model also failed retriably — trying next",
             );
-            lastErr = fbErr;
           }
         }
-        throw lastErr;
+        // Chain exhausted. The free fallbacks share daily quotas and often 429
+        // together while the primary's 5xx is a seconds-long spike (2026-07-12
+        // 68eae59d killed a founder turn this way) — give the primary ONE more
+        // shot after a short pause before failing the turn.
+        await sleep(retryDelayMs);
+        try {
+          const reply = await primary.invoke(messages);
+          log.info({ label }, "Primary model recovered on post-chain retry");
+          return reply;
+        } catch (retryErr) {
+          log.warn(
+            { label, err: retryErr instanceof Error ? retryErr.message : String(retryErr) },
+            "Primary retry after chain exhaustion also failed — turn fails",
+          );
+          throw retryErr;
+        }
       }
     },
     bindTools(tools: KernelTool[]): KernelChatModel {
       const bind = (m: KernelBindableModel): KernelBindableModel =>
         m.bindTools ? m.bindTools(tools) : m;
-      return withModelFallbacks(bind(primary), fallbacks.map(bind), label);
+      return withModelFallbacks(bind(primary), fallbacks.map(bind), label, options);
     },
   };
 }

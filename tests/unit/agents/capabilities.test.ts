@@ -82,6 +82,15 @@ describe("buildCapabilityManifest", () => {
       expect(allNames, `${gated} exists in a department`).toContain(gated);
     }
   });
+
+  it("marketing can LIST scheduled posts — 2026-07-11 turn 1fb2ea76 had no route to answer", () => {
+    const marketing = DEPARTMENT_TOOLS["marketing"]!.map((t: { name: string }) => t.name);
+    expect(marketing).toContain("list_scheduled_posts");
+    // Read access only: creating/scheduling posts stays a comms concern (HITL-gated there).
+    expect(marketing).not.toContain("schedule_social_post");
+    const comms = DEPARTMENT_TOOLS["comms"]!.map((t: { name: string }) => t.name);
+    expect(comms).toContain("list_scheduled_posts");
+  });
 });
 
 describe("SUPERVISOR_PROMPT embeds the generated manifest", () => {

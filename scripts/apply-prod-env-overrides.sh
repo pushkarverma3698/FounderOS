@@ -21,10 +21,12 @@ cd "$APP_DIR"
 # - TELEGRAM_TESTER_SESSION is written by an on-box re-login; rendering a stale
 #   copy makes Telegram revoke the auth key (AUTH_KEY_DUPLICATED) every deploy.
 #   The box value always wins.
-# - Provisioned keys (Firecrawl/Composio/Gmail backend) may postdate the
-#   PROD_DOTENV snapshot. The secret wins when it has them; the box value is
-#   preserved only when the render would otherwise DELETE a working key.
-PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND"
+# - Provisioned keys may postdate the PROD_DOTENV snapshot. The secret wins when
+#   it has a NON-EMPTY value; the box value is preserved when the render would
+#   otherwise DELETE or BLANK a working key. 2026-07-12: the post-#325 render
+#   wiped on-box APIFY_TOKEN + STORAGE_*/AWS_* (S3 went LIVE→MISSING between
+#   boots) because they were not listed here.
+PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND APIFY_TOKEN SCRAPE_BACKEND STORAGE_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY STORAGE_ENDPOINT_URL WEB_GATEWAY_TOKEN GWS_BIN MEM0_API_KEY REDIS_URL GOOGLE_APPLICATION_CREDENTIALS OFFICE_TURN_TIMEOUT_MS"
 
 if [ -n "${PROD_DOTENV:-}" ]; then
   umask 077
@@ -41,11 +43,16 @@ if [ -n "${PROD_DOTENV:-}" ]; then
       echo "==> Preserved on-box TELEGRAM_TESTER_SESSION across .env render"
     fi
     for key in $PRESERVE_IF_MISSING; do
-      if ! grep -q "^${key}=" .env.tmp && [ -f .env ]; then
-        BOX_LINE="$(grep -E "^${key}=" .env | head -1 || true)"
+      # "Missing" = absent OR present-but-empty: an empty snapshot line must not
+      # clobber a provisioned box value (GWS_BIN= broke every gws probe with
+      # execFile("") on 2026-07-12). Box values must themselves be non-empty.
+      if ! grep -qE "^${key}=." .env.tmp && [ -f .env ]; then
+        BOX_LINE="$(grep -E "^${key}=." .env | head -1 || true)"
         if [ -n "$BOX_LINE" ]; then
+          grep -v -E "^${key}=" .env.tmp > .env.tmp2 || true
+          mv .env.tmp2 .env.tmp
           printf '%s\n' "$BOX_LINE" >> .env.tmp
-          echo "==> Preserved on-box ${key} (absent from PROD_DOTENV)"
+          echo "==> Preserved on-box ${key} (absent/empty in PROD_DOTENV)"
         fi
       fi
     done

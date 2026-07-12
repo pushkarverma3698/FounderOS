@@ -386,3 +386,32 @@ describe("groundedResponseToResults — pure mapping", () => {
     expect(groundedResponseToResults({}, "q", 5)).toEqual([]);
   });
 });
+
+// 2026-07-11 incidents ed826c52/cd4fea33: research turns hit the 180s turn kill
+// because a hung grounding call had NO per-request timeout (DDG already has one).
+describe("Gemini grounding — per-request timeout", () => {
+  it("sends the grounding fetch with an abort signal so a hung call cannot eat the turn budget", async () => {
+    process.env["GOOGLE_GENERATIVE_AI_API_KEY"] = "test-key";
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: { parts: [{ text: "answer" }] },
+            groundingMetadata: {
+              groundingChunks: [{ web: { uri: "https://a.com", title: "A" } }],
+              groundingSupports: [],
+            },
+          },
+        ],
+      }),
+    });
+
+    const out = await webSearchTool.execute({ query: "anything" });
+    expect(out.success).toBe(true);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const init = mockFetch.mock.calls[0]![1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+});

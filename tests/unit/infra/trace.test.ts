@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { startTurn, activePromptHash, setTraceSink, type TraceEvent } from "../../../src/infra/trace.js";
+import { startTurn, activePromptHash, seamLogLevel, setTraceSink, type TraceEvent } from "../../../src/infra/trace.js";
 
 afterEach(() => setTraceSink(null));
 
@@ -39,5 +39,15 @@ describe("TurnTrace", () => {
     expect(activePromptHash("hello")).toBe(activePromptHash("hello"));
     expect(activePromptHash("hello")).toHaveLength(12);
     expect(activePromptHash("a")).not.toBe(activePromptHash("b"));
+  });
+
+  // 2026-07-11 harvest undercounted failures: turn.error was emitted at info (30),
+  // invisible to any level-based log digest. Error seams carry their true severity.
+  it("seamLogLevel maps error seams to their true severity", () => {
+    expect(seamLogLevel("turn.error")).toBe("error");
+    expect(seamLogLevel("tool.error")).toBe("warn");
+    expect(seamLogLevel("turn.in")).toBe("info");
+    expect(seamLogLevel("turn.out")).toBe("info");
+    expect(seamLogLevel("turn.progress")).toBe("info");
   });
 });

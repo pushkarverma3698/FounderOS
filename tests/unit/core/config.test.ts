@@ -23,4 +23,17 @@ describe("env config — embedding + executor vars", () => {
     expect(parsed.GMAIL_BACKEND).toBe("gws");
     expect(parsed.LINKEDIN_BACKEND).toBe("direct");
   });
+
+  it("keeps FIRECRAWL_API_KEY through parsing (boot report read it as always-missing, 2026-07-12)", () => {
+    // Zod strips unknown keys: FIRECRAWL_API_KEY was absent from envSchema, so
+    // logBootReport(env) reported Firecrawl MISSING on prod even with the key
+    // set in .env. Every key BootCapabilityInput inspects must survive parseEnv.
+    const parsed = envSchema.parse({
+      DATABASE_URL: "postgresql://u:p@localhost:5432/db",
+      TELEGRAM_BOT_TOKEN: "x",
+      TELEGRAM_CHAT_ID: "1",
+      FIRECRAWL_API_KEY: "fc-test-key",
+    });
+    expect(parsed.FIRECRAWL_API_KEY).toBe("fc-test-key");
+  });
 });

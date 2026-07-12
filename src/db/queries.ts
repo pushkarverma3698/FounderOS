@@ -345,6 +345,38 @@ export async function getRecentLinkedInPostIds(
     .filter((id): id is string => !!id);
 }
 
+/**
+ * LinkedIn posts published by FounderOS, WITH their text from the audit
+ * payload. The get_my_posts audit-log fallback needs content, not bare URNs —
+ * the LinkedIn read API 403s without r_member_social, and a URN list made
+ * "summarise my posts" impossible (live 2026-07-12 64ba4004).
+ */
+export async function getRecentLinkedInPosts(
+  tenantId: string,
+  daysBack = 30,
+): Promise<Array<{ post_id: string; text: string; at: string }>> {
+  const db = getDb();
+  const since = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
+  const rows = await db
+    .select({ payload: actionLog.payload, created_at: actionLog.created_at })
+    .from(actionLog)
+    .where(
+      and(
+        eq(actionLog.tenant_id, tenantId),
+        eq(actionLog.action, "linkedin_post"),
+        gte(actionLog.created_at, since),
+      ),
+    )
+    .orderBy(desc(actionLog.created_at));
+  return rows.flatMap((r) => {
+    const payload = r.payload as Record<string, unknown> | null;
+    const postId = payload?.["post_id"];
+    if (typeof postId !== "string" || !postId) return [];
+    const text = typeof payload?.["text"] === "string" ? (payload["text"] as string) : "";
+    return [{ post_id: postId, text, at: r.created_at?.toISOString?.() ?? "" }];
+  });
+}
+
 /** Recent action log entries for a tenant (admin/debug). */
 export async function getRecentAuditEntries(tenantId: string, limit = 50) {
   const db = getDb();

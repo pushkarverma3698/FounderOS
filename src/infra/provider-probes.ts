@@ -53,36 +53,48 @@ function check(status: ProviderStatus, detail: string): ProviderCheck {
   return { status, detail };
 }
 
+/**
+ * Fetch a Composio connected account and map its live status to a ProviderCheck.
+ * Resources live on the Composio INSTANCE in the installed SDK (@composio/core
+ * ≥0.10) — getClient() exposes a different generated client without this
+ * surface, which crashed every probe in prod on 2026-07-12.
+ */
+async function probeComposioConnection(
+  label: string,
+  connId: string,
+  timeoutMs: number,
+): Promise<ProviderCheck> {
+  try {
+    const composio = new Composio({ apiKey: getComposioApiKey()!, allowTracking: false });
+    const probe = composio.connectedAccounts.get(connId);
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} probe timed out`)), timeoutMs),
+    );
+    const account = (await Promise.race([probe, timeout])) as unknown as Record<string, unknown>;
+    const status = String(account["status"] ?? account["state"] ?? "unknown");
+    if (status.toUpperCase() === "ACTIVE") {
+      return check("up", `${label} ${connId} ACTIVE`);
+    }
+    return check("down", `${label} ${connId} status=${status}`);
+  } catch (err) {
+    return check("down", `${label} probe failed: ${(err as Error).message}`);
+  }
+}
+
 /** Probe Composio: API key present + Gmail connection ACTIVE. */
 export async function probeComposioGmail(timeoutMs = getProviderProbeTimeoutMs()): Promise<ProviderCheck> {
   if (!composioGoogleConfigured()) {
     return check("unconfigured", "COMPOSIO_API_KEY not set (legacy fallback)");
   }
-
-  const connId = getGmailConnectionId();
-  try {
-    const composio = new Composio({ apiKey: getComposioApiKey()! });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const client = composio.getClient() as any;
-    const probe = client.connectedAccounts.get(connId);
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Composio probe timed out")), timeoutMs),
-    );
-    const account = (await Promise.race([probe, timeout])) as Record<string, unknown>;
-    const status = String(account["status"] ?? account["state"] ?? "unknown");
-    if (status.toUpperCase() === "ACTIVE") {
-      return check("up", `Composio Gmail ${connId} ACTIVE`);
-    }
-    return check("down", `Composio Gmail ${connId} status=${status}`);
-  } catch (err) {
-    return check("down", `Composio Gmail probe failed: ${(err as Error).message}`);
-  }
+  return probeComposioConnection("Composio Gmail", getGmailConnectionId(), timeoutMs);
 }
 
 /** Probe gws: binary exists + auth/list smoke (maxResults 1). */
 export async function probeGwsGmail(timeoutMs = getProviderProbeTimeoutMs()): Promise<ProviderCheck> {
   const auth = await runGws(["auth", "status"], Math.min(timeoutMs, 5_000));
-  if (!auth.ok && auth.error.includes("not found")) {
+  // "not installed" is gws-runner's ENOENT mapping (missing binary / empty GWS_BIN)
+  // — an unconfigured host, not a failing provider.
+  if (!auth.ok && (auth.error.includes("not found") || auth.error.includes("not installed"))) {
     return check("unconfigured", auth.error);
   }
 
@@ -144,25 +156,7 @@ export async function probeLinkedInComposio(
   if (!composioLinkedInConfigured()) {
     return check("unconfigured", "COMPOSIO_API_KEY not set (legacy fallback)");
   }
-
-  const connId = getLinkedInConnectionId();
-  try {
-    const composio = new Composio({ apiKey: getComposioApiKey()! });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const client = composio.getClient() as any;
-    const probe = client.connectedAccounts.get(connId);
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Composio LinkedIn probe timed out")), timeoutMs),
-    );
-    const account = (await Promise.race([probe, timeout])) as Record<string, unknown>;
-    const status = String(account["status"] ?? account["state"] ?? "unknown");
-    if (status.toUpperCase() === "ACTIVE") {
-      return check("up", `Composio LinkedIn ${connId} ACTIVE`);
-    }
-    return check("down", `Composio LinkedIn ${connId} status=${status}`);
-  } catch (err) {
-    return check("down", `Composio LinkedIn probe failed: ${(err as Error).message}`);
-  }
+  return probeComposioConnection("Composio LinkedIn", getLinkedInConnectionId(), timeoutMs);
 }
 
 /** Run all provider probes and cache the result. */

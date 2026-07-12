@@ -57,4 +57,27 @@ describe("provider-config", () => {
     const { shouldRunProviderSmoke } = await import("../../../src/infra/provider-config.js");
     expect(shouldRunProviderSmoke()).toBe(false);
   });
+
+  // 2026-07-12: PROD_DOTENV rendered `GWS_BIN=` (present but EMPTY) → execFile("")
+  // → "The argument 'file' cannot be empty" on every gws probe. Empty must mean unset.
+  it("getGwsBin falls back to PATH resolution when GWS_BIN is empty", async () => {
+    process.env["GWS_BIN"] = "";
+    vi.resetModules();
+    const { getGwsBin } = await import("../../../src/infra/provider-config.js");
+    expect(getGwsBin()).toBe("gws");
+  });
+
+  it("getGwsBin falls back when GWS_BIN is whitespace", async () => {
+    process.env["GWS_BIN"] = "   ";
+    vi.resetModules();
+    const { getGwsBin } = await import("../../../src/infra/provider-config.js");
+    expect(getGwsBin()).toBe("gws");
+  });
+
+  it("getGwsBin honours an explicit binary path", async () => {
+    process.env["GWS_BIN"] = "/home/founderos/.local/bin/gws";
+    vi.resetModules();
+    const { getGwsBin } = await import("../../../src/infra/provider-config.js");
+    expect(getGwsBin()).toBe("/home/founderos/.local/bin/gws");
+  });
 });

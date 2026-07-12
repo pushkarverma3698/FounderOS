@@ -32,6 +32,7 @@ vi.mock("../../../src/db/queries.js", () => ({
   isSuppressed: vi.fn(async () => false),
   getDailyOutboundCount: vi.fn(async () => 0),
   getRecentLinkedInPostIds: vi.fn(async () => ["urn:li:share:99"]),
+  getRecentLinkedInPosts: vi.fn(async () => [{ post_id: "urn:li:share:99", text: "hello", at: "2026-07-01T00:00:00Z" }]),
 }));
 
 const GOOD_HOOK = "7 founders told me they can't hire a dev team.";

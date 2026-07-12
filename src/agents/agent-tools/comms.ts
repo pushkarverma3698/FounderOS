@@ -16,7 +16,7 @@ import { linkedinPostTool, linkedinAnalyticsTool } from "../../tools/linkedin.js
 import { linkedinReadCommentsTool, linkedinGetMyPostsTool } from "../../tools/linkedin-engagement.js";
 import { scheduleSocialPostTool } from "../../tools/scheduled-post.js";
 import { getCompanyPageMention } from "../../infra/provider-config.js";
-import { getRecentLinkedInPostIds, listUpcomingScheduledPosts } from "../../db/queries.js";
+import { getRecentLinkedInPosts, listUpcomingScheduledPosts } from "../../db/queries.js";
 import { calendarTool } from "../../tools/calendar.js";
 import { hasRecentOutboundToRecipient, isSuppressed, getDailyOutboundCount } from "../../db/queries.js";
 import {
@@ -463,15 +463,19 @@ export const linkedinGetMyPosts = tool(
       return `Your recent LinkedIn posts:\n\n${lines.join("\n")}`;
     }
 
-    // API failed (likely missing r_member_social scope) — fall back to action_log
-    const postIds = await getRecentLinkedInPostIds(TENANT, 30);
-    if (!postIds.length) {
+    // API failed (likely missing r_member_social scope) — fall back to action_log.
+    // The payload carries the post TEXT (FounderOS published these itself);
+    // bare URNs made "summarise my posts" impossible (live 2026-07-12 64ba4004).
+    const posts = await getRecentLinkedInPosts(TENANT, 30);
+    if (!posts.length) {
       return (
         "No recent LinkedIn posts found. Either post via FounderOS first (so I can track the IDs) " +
         "or add r_member_social scope to your LinkedIn Developer App and re-authorize."
       );
     }
-    const lines = postIds.map((id, i) => `${i + 1}. ${id}`);
+    const lines = posts.map(
+      (p, i) => `${i + 1}. ${p.post_id}${p.at ? ` (${p.at.slice(0, 10)})` : ""}${p.text ? `\n   "${p.text}"` : ""}`,
+    );
     return (
       `Your recent LinkedIn posts (from FounderOS audit log):\n\n${lines.join("\n")}\n\n` +
       `Note: ${res.error ?? "LinkedIn API scope not available — use any ID above with linkedin_read_comments."}`
