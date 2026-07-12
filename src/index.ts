@@ -19,6 +19,7 @@ import { closeDatabaseConnections } from "./db/client.js";
 import { getKernel } from "./gateway/kernel-boot.js";
 import { startBot, stopBot, sendToChat, getBot } from "./gateway/telegram.js";
 import { restorePendingApproval } from "./gateway/kernel-run.js";
+import { runDueScheduledTask } from "./gateway/scheduled-task-run.js";
 import { expireStaleInterrupts } from "./db/queries.js";
 import { startHealthServer } from "./infra/health.js";
 import { runProviderSmokeAtBoot } from "./infra/provider-probes.js";
@@ -76,7 +77,9 @@ async function main(): Promise<void> {
   });
   if (restored) log.info("Restored pending HITL approval card after restart");
 
-  startScheduler();
+  // Scheduled agent tasks fire via the gateway runner — injected here so the
+  // infra scheduler never imports gateway (import-direction rule R1).
+  startScheduler({ taskExecutor: runDueScheduledTask });
 
   if (TELEGRAM_POLLING_ENABLED) {
     await sendToChat(buildRestartMessage(), "HTML").catch((err) =>
