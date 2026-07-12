@@ -19,6 +19,7 @@ import { closeDatabaseConnections } from "./db/client.js";
 import { getKernel } from "./gateway/kernel-boot.js";
 import { startBot, stopBot, sendToChat, getBot } from "./gateway/telegram.js";
 import { restorePendingApproval } from "./gateway/kernel-run.js";
+import { resumeInterruptedMission } from "./gateway/mission-resume.js";
 import { runDueScheduledTask } from "./gateway/scheduled-task-run.js";
 import { expireStaleInterrupts } from "./db/queries.js";
 import { startHealthServer } from "./infra/health.js";
@@ -76,6 +77,18 @@ async function main(): Promise<void> {
     return false;
   });
   if (restored) log.info("Restored pending HITL approval card after restart");
+
+  // A mission the crash caught mid-node (no HITL pause, no folded failure)
+  // resumes from its last valid checkpoint. Fire-and-forget: a resumed
+  // mission can run for minutes and must not stall the scheduler or the bot;
+  // the chat-turn lock serializes it against any new founder message.
+  if (TELEGRAM_POLLING_ENABLED && !restored) {
+    resumeInterruptedMission(env.TELEGRAM_CHAT_ID)
+      .then((resumed) => {
+        if (resumed) log.info("Resumed a mission interrupted by the restart");
+      })
+      .catch((err) => log.warn({ err: (err as Error).message }, "Mission resume failed — non-fatal")); // allow-failopen: boot must survive a resume blip; the checkpoint still holds the state
+  }
 
   // Scheduled agent tasks fire via the gateway runner — injected here so the
   // infra scheduler never imports gateway (import-direction rule R1).
