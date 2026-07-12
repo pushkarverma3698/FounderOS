@@ -40,6 +40,7 @@ import {
 } from "./contracts.js";
 import type { KernelStateType, KernelUpdate } from "./state.js";
 import type { KernelChatModel } from "./planner.js";
+import { messageContentText } from "./message-text.js";
 
 /** Narrow tool surface. `config` carries thread_id for DB-backed HITL gates. */
 export interface KernelTool {
@@ -263,7 +264,10 @@ export function collect(state: KernelStateType): KernelUpdate {
   }
 
   const lastAi = [...state.scratch].reverse().find((m) => isAIMessage(m));
-  const text = lastAi && typeof lastAi.content === "string" ? lastAi.content : "";
+  // messageContentText, not a string typeof check: gemini-flash-latest started
+  // returning parts arrays and string-only extraction killed honest finalizes
+  // (live d211fb74 / 8c7e098f, 2026-07-11).
+  const text = lastAi ? messageContentText(lastAi.content) : "";
   const parsedRaw = text ? tryParseJson(text) : null;
   // Live T01 repair: for the pure-text contract, a prose finalize IS the
   // payload — salvage it instead of failing an honest answer (contracts.ts).

@@ -88,14 +88,39 @@ describe("withModelFallbacks", () => {
     expect(fallback.invoke).not.toHaveBeenCalled();
   });
 
-  it("throws the last fallback error when the whole chain is down", async () => {
+  it("retries the primary ONCE after chain exhaustion, then throws (chain fully down)", async () => {
+    // 2026-07-12 68eae59d: the free fallbacks share daily limits and often 429
+    // together while the primary's 503 is a seconds-long spike — the chain must
+    // give the primary one more shot before killing the founder's turn.
     const primary = failingModel(quotaError());
     const fallback = failingModel(
       Object.assign(new Error("503 Service Unavailable"), { status: 503 }),
     );
-    const model = withModelFallbacks(primary, [fallback]);
+    const model = withModelFallbacks(primary, [fallback], "kernel", { primaryRetryDelayMs: 0 });
 
-    await expect(model.invoke(MSGS)).rejects.toThrow("503");
+    await expect(model.invoke(MSGS)).rejects.toThrow("429");
+    expect(primary.invoke).toHaveBeenCalledTimes(2);
+    expect(fallback.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers the turn when the primary's transient failure clears on the post-chain retry (68eae59d)", async () => {
+    let calls = 0;
+    const primary: KernelBindableModel = {
+      invoke: vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw Object.assign(new Error("[503 Service Unavailable] high demand"), { status: 503 });
+        }
+        return new AIMessage("primary-recovered");
+      }),
+    };
+    const fallback = failingModel(quotaError());
+    const model = withModelFallbacks(primary, [fallback], "kernel", { primaryRetryDelayMs: 0 });
+
+    const reply = await model.invoke(MSGS);
+
+    expect(reply.content).toBe("primary-recovered");
+    expect(primary.invoke).toHaveBeenCalledTimes(2);
   });
 
   it("returns the primary untouched when no fallbacks are configured", () => {

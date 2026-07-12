@@ -36,6 +36,14 @@ describe("selectImageModel — cost-disciplined, fail-cheap", () => {
   it("ambiguous wording stays on the cheap tier", () => {
     expect(selectImageModel({ intent: "something nice and finished-looking" }).tier).toBe("draft");
   });
+
+  it("pins model ids that exist on the live Generative Language API (7a241686 regression)", () => {
+    // 2026-07-12 01:17 prod: "gemini-3-1-flash-image" 404'd — the real id uses
+    // a dot ("gemini-3.1-flash-image", verified against ListModels with the
+    // prod key on 2026-07-12). Pin both ids so a typo can never ship again.
+    expect(IMAGE_MODEL_DRAFT.id).toBe("gemini-3.1-flash-image");
+    expect(IMAGE_MODEL_FINAL.id).toBe("gemini-3-pro-image");
+  });
 });
 
 describe("extractInlineImage — tolerant of camelCase and snake_case", () => {

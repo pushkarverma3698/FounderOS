@@ -30,3 +30,14 @@ describe("buildPlannerPrompt — FounderOS self-knowledge routing", () => {
     expect(prompt).toContain("search_memory");
   });
 });
+
+describe("buildPlannerPrompt — draft is not send (live 89188cd5)", () => {
+  // 2026-07-11 21:45: founder said "just draft a LinkedIn post" and got a
+  // publish-approval card — the planner routed a DRAFT request into the gated
+  // linkedin_post tool. Drafting must produce content for review, not actions.
+  it("tells the planner that draft/write/prepare requests never call posting or sending tools", () => {
+    const prompt = buildPlannerPrompt(catalog);
+    expect(prompt).toMatch(/draft.*(is not|≠|never).*(send|post|publish)/is);
+    expect(prompt).toContain('"draft"');
+  });
+});

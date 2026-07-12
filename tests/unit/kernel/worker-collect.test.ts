@@ -69,3 +69,43 @@ describe("collect — prose finalize repair (live T01 regression)", () => {
     expect(update.results?.[0]?.status).toBe("failed");
   });
 });
+
+/**
+ * LIVE FAILURE 2026-07-11 d211fb74 + 2026-07-12 8c7e098f (build a2b4979):
+ * gemini-flash-latest returned the finalize as an ARRAY of content parts;
+ * collect() extracted "" and killed honest answers with "did not finalize".
+ */
+describe("collect — parts-array finalize (live d211fb74 regression)", () => {
+  const stateWithContent = (step: TaskEnvelope, content: unknown): KernelStateType =>
+    ({
+      mission: { goal: "g", status: "executing", plan: { schema_version: 1, goal: "g", steps: [step] }, cursor: 0 },
+      results: [],
+      attempts: {},
+      scratch: [new AIMessage({ content: content as never })],
+      step_receipts: [],
+      failure: null,
+      reply: "",
+    }) as unknown as KernelStateType;
+
+  it("salvages a prose finalize delivered as content parts for text.summary", () => {
+    const update = collect(
+      stateWithContent(envelope(), [{ type: "text", text: "The pending action is the LinkedIn approval." }]),
+    );
+    const result = update.results?.[0];
+    expect(result?.status).toBe("ok");
+    if (result?.status === "ok") {
+      expect(result.output).toEqual({ text: "The pending action is the LinkedIn approval." });
+    }
+  });
+
+  it("parses a JSON finalize delivered as content parts for structured contracts", () => {
+    const step = envelope({ expected: { kind: "data", schema_ref: "research.findings" } });
+    const update = collect(
+      stateWithContent(step, [
+        { type: "text", text: '{"summary":"Linear ships fast","sources":[{"title":"Linear blog"}]}' },
+      ]),
+    );
+    const result = update.results?.[0];
+    expect(result?.status).toBe("ok");
+  });
+});

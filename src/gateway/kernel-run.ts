@@ -24,6 +24,8 @@ import { readHalt, formatHaltNotice } from "../infra/halt.js";
 import { startTurn } from "../infra/trace.js";
 import { TraceCallback } from "../infra/trace-callback.js";
 import { logger } from "../infra/logger.js";
+import { isModelFallbackError } from "../agents/model.js";
+import { recordFailedTurnInHistory, type FoldableKernel } from "./failed-turn-fold.js";
 import type { KernelStateType } from "../kernel/index.js";
 
 const log = logger.child({ module: "kernel-run" });
@@ -183,6 +185,7 @@ export async function runKernelText(ctx: Context, text: string): Promise<void> {
   const chatId = ctx.chat?.id ?? "unknown";
   await withChatTurnLock(chatId, async () => {
     const trace = startTurn({ chatId: String(chatId), kind: "message", promptHash: "kernel-v3" });
+    let foldCtx: { kernel: FoldableKernel; config: unknown } | undefined;
     try {
       const halt = await readHalt();
       if (halt) {
@@ -201,6 +204,7 @@ export async function runKernelText(ctx: Context, text: string): Promise<void> {
         recursionLimit: OFFICE_RECURSION_LIMIT,
         callbacks: [makeBudgetCallback(), new TraceCallback(trace)],
       };
+      foldCtx = { kernel: kernel as unknown as FoldableKernel, config };
       trace.event("turn.in", { textPreview: text.slice(0, 120) });
 
       const res = await withTurnTimeout(
@@ -235,6 +239,7 @@ export async function runKernelText(ctx: Context, text: string): Promise<void> {
       await sendReply(ctx, reply);
     } catch (err) {
       trace.event("turn.error", { message: err instanceof Error ? err.message.slice(0, 400) : String(err) });
+      if (foldCtx) await recordFailedTurnInHistory(foldCtx.kernel, foldCtx.config, err);
       await replyForError(ctx, err);
     }
   });
@@ -247,6 +252,7 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
   await withChatTurnLock(chatId, async () => {
     const threadId = threadIdFor(chatId);
     const trace = startTurn({ chatId: String(chatId), kind: "resume", promptHash: "kernel-v3" });
+    let foldCtx: { kernel: FoldableKernel; config: unknown } | undefined;
     try {
       const pending = await getPendingInterrupt(threadId);
       if (pending) {
@@ -258,6 +264,7 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
         recursionLimit: OFFICE_RECURSION_LIMIT,
         callbacks: [makeBudgetCallback(), new TraceCallback(trace)],
       };
+      foldCtx = { kernel: kernel as unknown as FoldableKernel, config };
       trace.event("hitl.resume", { decision });
 
       const res = await withTurnTimeout(
@@ -296,6 +303,7 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
       await sendReply(ctx, reply);
     } catch (err) {
       trace.event("turn.error", { message: err instanceof Error ? err.message.slice(0, 400) : String(err) });
+      if (foldCtx) await recordFailedTurnInHistory(foldCtx.kernel, foldCtx.config, err);
       await replyForError(ctx, err);
     }
   });
@@ -346,6 +354,16 @@ async function replyForError(ctx: Context, err: unknown): Promise<void> {
     // With the kernel's bounded steps this should be unreachable; if it fires it is a bug — say so.
     await ctx.reply(
       `🔁 <b>Hit the graph recursion limit</b> — this should not happen in v3; please report. State is preserved.`,
+      { parse_mode: "HTML" },
+    );
+    return;
+  }
+  if (isModelFallbackError(err)) {
+    // Provider outage/rate-limit after the whole fallback chain — a raw SDK
+    // stack here reads like a system bug to the founder (2026-07-12 68eae59d).
+    await ctx.reply(
+      `🤖 <b>The AI provider is overloaded or rate-limited right now</b> — nothing is broken on our side. ` +
+        `Wait a minute and send "try again"; I remember what you asked.`,
       { parse_mode: "HTML" },
     );
     return;
