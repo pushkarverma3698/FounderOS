@@ -60,6 +60,14 @@ export function setTraceSink(sink: TraceSink | null): void {
 
 const log = logger.child({ module: "trace" });
 
+/** Error seams surface at their true severity so level-based log harvests count
+ *  them — turn.error at info (30) made the 2026-07-11 digest undercount failures. */
+export function seamLogLevel(seam: Seam): "info" | "warn" | "error" {
+  if (seam === "turn.error") return "error";
+  if (seam === "tool.error") return "warn";
+  return "info";
+}
+
 export function startTurn(opts: {
   chatId: string | number;
   kind: "message" | "resume";
@@ -81,7 +89,7 @@ export function startTurn(opts: {
         const safe = data ? (scrubObject(data) as Record<string, unknown>) : undefined;
         const ev: TraceEvent = { turnId, seam, ms: Date.now() - t0, data: safe };
         events.push(ev);
-        log.info({ turnId, seam, ms: ev.ms, chatId, kind: opts.kind, data: safe }, `trace ${seam}`);
+        log[seamLogLevel(seam)]({ turnId, seam, ms: ev.ms, chatId, kind: opts.kind, data: safe }, `trace ${seam}`);
         _sink?.(ev);
       } catch {
         /* a trace failure must never break a turn (rule #19.5 fail-safe) */
