@@ -44,7 +44,7 @@ export interface TraceEvent {
 export interface TurnTrace {
   turnId: string;
   chatId: string;
-  kind: "message" | "resume";
+  kind: "message" | "resume" | "scheduled";
   promptHash: string;
   events: readonly TraceEvent[];
   event(seam: Seam, data?: Record<string, unknown>): void;
@@ -70,7 +70,7 @@ export function seamLogLevel(seam: Seam): "info" | "warn" | "error" {
 
 export function startTurn(opts: {
   chatId: string | number;
-  kind: "message" | "resume";
+  kind: "message" | "resume" | "scheduled";
   promptHash: string;
 }): TurnTrace {
   const turnId = randomUUID();
