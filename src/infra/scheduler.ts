@@ -23,12 +23,14 @@ import {
   markScheduledPostFailed,
   hasBeenAudited,
   writeAuditEntry,
+  claimDueScheduledTasks,
+  markScheduledTaskFailed,
 } from "../db/queries.js";
 import { providerLinkedInPost } from "./providers/index.js";
 import { sendToChat } from "./telegram-send.js";
 import { childLogger } from "./logger.js";
 import { TENANT, env } from "../core/config.js";
-import type { ScheduledPost } from "../db/schema.js";
+import type { ScheduledPost, ScheduledTask } from "../db/schema.js";
 import {
   assessDailyBudget,
   formatBudgetThresholdAlert,
@@ -175,7 +177,30 @@ export async function runScheduledPostSweep(): Promise<void> {
   }
 }
 
-export function startScheduler(): void {
+/**
+ * Fires one claimed scheduled task. Injected from src/index.ts (the runner
+ * needs the kernel + bot API, which live in gateway — infra must not import
+ * gateway, so the dependency arrives inverted).
+ */
+export type ScheduledTaskExecutor = (task: ScheduledTask) => Promise<void>;
+
+/** Every minute — fire any scheduled agent tasks whose time has arrived. */
+export async function runScheduledTaskSweep(executor: ScheduledTaskExecutor): Promise<void> {
+  // Atomic claim ('scheduled' → 'running') — overlap-safe, same as the post sweep.
+  const due = await claimDueScheduledTasks(TENANT, new Date());
+  for (const task of due) {
+    try {
+      await executor(task);
+    } catch (err) {
+      const message = (err as Error).message;
+      log.error({ id: task.id, err: message }, "Scheduled task sweep error");
+      // allow-failopen: already logged above; a failed mark-failed must not abort the sweep for the remaining due tasks.
+      await markScheduledTaskFailed(task.id, message).catch(() => undefined);
+    }
+  }
+}
+
+export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }): void {
   cron.schedule("0 9 * * *", () => {
     sendStaleApprovalReminder().catch((err) =>
       log.error({ err: (err as Error).message }, "Stale approval check failed"),
@@ -199,7 +224,16 @@ export function startScheduler(): void {
       log.error({ err: (err as Error).message }, "Scheduled post sweep cron error"),
     );
   });
+  const taskExecutor = opts?.taskExecutor;
+  if (taskExecutor) {
+    cron.schedule("* * * * *", () => {
+      runScheduledTaskSweep(taskExecutor).catch((err) =>
+        log.error({ err: (err as Error).message }, "Scheduled task sweep cron error"),
+      );
+    });
+  }
   log.info(
-    "Scheduler started — stale-approval check (daily 9am), budget alerts (hourly), brain sync (daily 2am), checkpoint sweep (daily 3:30am), scheduled-post sweep (every minute)",
+    "Scheduler started — stale-approval check (daily 9am), budget alerts (hourly), brain sync (daily 2am), checkpoint sweep (daily 3:30am), scheduled-post sweep (every minute)" +
+      (taskExecutor ? ", scheduled-task sweep (every minute)" : ""),
   );
 }

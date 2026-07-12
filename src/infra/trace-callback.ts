@@ -7,6 +7,7 @@
  * office.invoke({ callbacks: [new TraceCallback(trace)] }).
  */
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
+import { isGraphInterrupt } from "@langchain/langgraph";
 import type { Serialized } from "@langchain/core/load/serializable";
 import type { TurnTrace } from "./trace.js";
 import { hierarchyDepth } from "./trace.js";
@@ -108,6 +109,13 @@ export class TraceCallback extends BaseCallbackHandler {
     _parentRunId?: string,
     _tags?: string[],
   ): Promise<void> {
+    // interrupt() inside a HITL-gated tool bubbles up as a GraphInterrupt —
+    // a normal pause, not a failure. Logging it as tool.error made a healthy
+    // approval card look like a 47s tool crash in the 2026-07-12 prod journal.
+    if (isGraphInterrupt(err)) {
+      this.trace.event("hitl.interrupt", { via: "tool" });
+      return;
+    }
     this.trace.event("tool.error", { error: err.message.slice(0, 200) });
   }
 

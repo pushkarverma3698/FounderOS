@@ -47,6 +47,7 @@ import {
   getGapScans,
 } from "./agent-tools.js";
 import { generateImageTool, listBrandAssetsTool } from "./agent-tools/creative.js";
+import { scheduleTask, listScheduled, editScheduled } from "./agent-tools/scheduling.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
 import { searchMemoryTool } from "../tools/memory.js";
@@ -72,7 +73,7 @@ type AnyTool = any;
  *   alignment. Engineering and comms don't query business strategy.
  */
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals],
+  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal],
@@ -99,6 +100,7 @@ export const HITL_GATED_TOOLS = new Set([
   "send_email",
   "linkedin_post",
   "schedule_social_post",
+  "schedule_task",
   "draft_linkedin_reply",
   "draft_connection_note",
   "github_write",
