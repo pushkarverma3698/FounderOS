@@ -1,0 +1,18 @@
+=== FounderOS Kernel Inventory Report ===
+
+Package Information:
+  "name": "founderos",
+  "version": "0.1.0",
+  "version": "0.1.0",
+
+TypeScript Files in src/kernel/:
+/Users/pushkarverma/Projects/founderos/src/kernel/contracts.ts
+/Users/pushkarverma/Projects/founderos/src/kernel/graph.ts
+/Users/pushkarverma/Projects/founderos/src/kernel/index.ts
+/Users/pushkarverma/Projects/founderos/src/kernel/planner.ts
+/Users/pushkarverma/Projects/founderos/src/kernel/signals.ts
+/Users/pushkarverma/Projects/founderos/src/kernel/state.ts
+/Users/pushkarverma/Projects/founderos/src/kernel/supervisor.ts
+/Users/pushkarverma/Projects/founderos/src/kernel/synthesizer.ts
+/Users/pushkarverma/Projects/founderos/src/kernel/tool-adapter.ts
+/Users/pushkarverma/Projects/founderos/src/kernel/worker.ts
