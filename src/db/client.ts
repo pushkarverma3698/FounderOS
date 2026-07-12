@@ -62,14 +62,15 @@ export function getPgPool(): pg.Pool {
   if (!_pool) {
     _pool = new pg.Pool({
       connectionString: env.DATABASE_URL,
+      // search_path via the startup packet, NOT a 'connect'-event query: pg-pool
+      // emits 'connect' before the client is readyForQuery, so a fire-and-forget
+      // SET queued there races the first pool.query() on every fresh connection
+      // (pg@9 "client.query() while already executing" deprecation at boot).
+      options: "-c search_path=agents,brain,public",
       min: 5,
       max: 20,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
-    });
-
-    _pool.on("connect", (client) => {
-      void client.query("SET search_path TO agents, brain, public");
     });
 
     _pool.on("error", (err) => {
