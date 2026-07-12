@@ -36,6 +36,15 @@ export const searchWeb = tool(
     }
     const results = (res.data as Array<{ title: string; url: string; snippet: string }>) ?? [];
     if (results.length === 0) return `No web results found for "${query}".`;
+
+    const pages = searchHitsToPages(query, results);
+    await persist(`search:${query}`, pages);
+    logResearchEvent(
+      `Researched: ${query}`,
+      `Web search — ${results.length} results saved to research memory: ${results.map((r) => r.url).join(", ")}`,
+      "search_web",
+    );
+
     return results
       .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
       .join("\n\n");
@@ -43,7 +52,9 @@ export const searchWeb = tool(
   {
     name: "search_web",
     description:
-      "Search the web for current information, news, or company/market research. Returns titles, URLs, and snippets only (no full page text). For full page content use scrape_url or deep_research. Read-only — no approval needed.",
+      "Search the web for current information, news, or company/market research. Returns titles, URLs, and snippets only (no full page text). " +
+      "Results are cached and saved to research memory (searchable later via search_research_cache). " +
+      "For full page content use scrape_url or deep_research. Read-only — no approval needed.",
     schema: z.object({
       query: z.string().describe("The search query"),
       limit: z.number().optional().nullable().describe("Max results (default 5)"),
@@ -68,6 +79,32 @@ function formatPages(label: string, pages: ScrapeResult[]): string {
 async function persist(cacheKey: string, pages: ScrapeResult[]): Promise<void> {
   await setCachedScrape(cacheKey, pages);
   await ingestResearch(pages); // fail-open inside (Ollama/DB errors logged, not thrown)
+}
+
+/** Log research activity to episodic memory (non-HITL, best-effort). */
+function logResearchEvent(title: string, summary: string, tag: string): void {
+  void recordEventTool
+    .invoke({
+      title: title.slice(0, 120),
+      summary: summary.slice(0, 500),
+      tags: ["research", tag],
+      event_type: "task_completed",
+    })
+    .catch((err) => log.warn({ err }, `${tag}: episodic log failed (non-fatal)`));
+}
+
+/** Turn search_web hits into lightweight ScrapeResults for research_cache. */
+function searchHitsToPages(
+  query: string,
+  hits: Array<{ title: string; url: string; snippet: string }>,
+): ScrapeResult[] {
+  const retrieved_at = new Date().toISOString();
+  return hits.map((h) => ({
+    url: h.url,
+    title: h.title,
+    markdown: `## ${h.title}\n\n${h.snippet}\n\nSource: ${h.url}\n\n_Search query: "${query}"_`,
+    retrieved_at,
+  }));
 }
 
 // ── scrape_url ────────────────────────────────────────────────────────────────
@@ -133,16 +170,11 @@ export const deepResearch = tool(
     }
 
     await persist(query, pages);
-
-    // Track research history in episodic memory (non-HITL — read-only research log).
-    void recordEventTool
-      .invoke({
-        title: `Researched: ${query}`.slice(0, 120),
-        summary: `Deep research via ${source} — ${pages.length} sources: ${pages.map((p) => p.url).join(", ")}`.slice(0, 500),
-        tags: ["research", "deep_research"],
-        event_type: "task_completed",
-      })
-      .catch((err) => log.warn({ err }, "deep_research: episodic log failed (non-fatal)"));
+    logResearchEvent(
+      `Researched: ${query}`,
+      `Deep research via ${source} — ${pages.length} sources: ${pages.map((p) => p.url).join(", ")}`,
+      "deep_research",
+    );
 
     return formatPages(`Deep research on "${query}" (${pages.length} sources via ${source}):`, pages);
   },
@@ -175,14 +207,11 @@ export const crawlSiteTool = tool(
     }
     const chunks = await ingestResearch(res.data);
 
-    void recordEventTool
-      .invoke({
-        title: `Crawled site: ${start_url}`.slice(0, 120),
-        summary: `Ingested ${res.data.length} pages (${chunks} chunks) from ${start_url} into research memory.`.slice(0, 500),
-        tags: ["research", "crawl_site"],
-        event_type: "task_completed",
-      })
-      .catch((err) => log.warn({ err }, "crawl_site: episodic log failed (non-fatal)"));
+    logResearchEvent(
+      `Crawled site: ${start_url}`,
+      `Ingested ${res.data.length} pages (${chunks} chunks) from ${start_url} into research memory.`,
+      "crawl_site",
+    );
 
     const list = res.data.map((p, i) => `${i + 1}. ${p.title} — ${p.url}`).join("\n");
     return (
