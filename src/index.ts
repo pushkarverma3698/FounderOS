@@ -20,7 +20,7 @@ import { getKernel } from "./gateway/kernel-boot.js";
 import { startBot, stopBot, sendToChat, getBot } from "./gateway/telegram.js";
 import { restorePendingApproval } from "./gateway/kernel-run.js";
 import { resumeInterruptedMission } from "./gateway/mission-resume.js";
-import { runDueScheduledTask } from "./gateway/scheduled-task-run.js";
+import { runDueScheduledTask, recoverStrandedScheduledTasks } from "./gateway/scheduled-task-run.js";
 import { expireStaleInterrupts } from "./db/queries.js";
 import { startHealthServer } from "./infra/health.js";
 import { runProviderSmokeAtBoot } from "./infra/provider-probes.js";
@@ -89,6 +89,13 @@ async function main(): Promise<void> {
       })
       .catch((err) => log.warn({ err: (err as Error).message }, "Mission resume failed — non-fatal")); // allow-failopen: boot must survive a resume blip; the checkpoint still holds the state
   }
+
+  // A task the crash caught in 'running' can never re-fire on its own —
+  // requeue or fail it loud BEFORE the sweep starts (single-instance lock
+  // guarantees every 'running' row at boot is stranded, not in-flight).
+  await recoverStrandedScheduledTasks().catch((err) => {
+    log.warn({ err: (err as Error).message }, "Stranded-task recovery failed — non-fatal"); // allow-failopen: boot must survive a recovery blip; the rows stay visible in the DB
+  });
 
   // Scheduled agent tasks fire via the gateway runner — injected here so the
   // infra scheduler never imports gateway (import-direction rule R1).

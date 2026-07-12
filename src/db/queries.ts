@@ -1169,8 +1169,9 @@ export async function insertScheduledTask(data: ScheduledTaskInput): Promise<Sch
 /**
  * ATOMICALLY claim due tasks for one sweep ('scheduled' → 'running', attempts+1).
  * `FOR UPDATE SKIP LOCKED` makes overlapping sweep ticks safe — same double-fire
- * guard as claimDueScheduledPosts. A row stuck in 'running' after a hard crash
- * is the SAFE failure direction: it simply won't re-fire.
+ * guard as claimDueScheduledPosts. A row stranded in 'running' by a hard crash
+ * cannot re-fire on its own — boot recovery (reclaimStrandedScheduledTasks)
+ * requeues or fails it loud.
  */
 export async function claimDueScheduledTasks(
   tenantId: string,
@@ -1225,6 +1226,40 @@ export async function releaseScheduledTask(id: string, nextAt: Date): Promise<vo
     .update(scheduledTasks)
     .set({ status: "scheduled", scheduled_at: nextAt })
     .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.status, "running")));
+}
+
+/**
+ * Boot-time crash recovery for the task queue. The single-instance lock
+ * guarantees exactly one FounderOS process, so at boot ANY 'running' row is
+ * stranded — its executor died mid-fire and it can never re-fire on its own.
+ * Rows under the attempt cap go back to 'scheduled' (due now, so the next
+ * sweep re-fires them); rows at the cap fail loud instead of crash-looping
+ * a task that keeps killing the process. attempts was already bumped at
+ * claim time, so the cap bounds total fires exactly like a gate deferral.
+ */
+export async function reclaimStrandedScheduledTasks(
+  tenantId: string,
+  maxAttempts: number,
+  now: Date = new Date(),
+): Promise<{ requeued: ScheduledTask[]; failed: ScheduledTask[] }> {
+  const db = getDb();
+  const failed = await db
+    .update(scheduledTasks)
+    .set({ status: "failed", error: `stranded in 'running' by a crash/restart with the attempt cap (${maxAttempts}) reached` })
+    .where(
+      and(
+        eq(scheduledTasks.tenant_id, tenantId),
+        eq(scheduledTasks.status, "running"),
+        gte(scheduledTasks.attempts, maxAttempts),
+      ),
+    )
+    .returning();
+  const requeued = await db
+    .update(scheduledTasks)
+    .set({ status: "scheduled", scheduled_at: now })
+    .where(and(eq(scheduledTasks.tenant_id, tenantId), eq(scheduledTasks.status, "running")))
+    .returning();
+  return { requeued, failed };
 }
 
 /** Upcoming (still-scheduled) tasks for the founder's "what's queued" view. */

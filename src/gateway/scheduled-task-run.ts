@@ -25,6 +25,7 @@ import {
   markScheduledTaskDone,
   markScheduledTaskFailed,
   releaseScheduledTask,
+  reclaimStrandedScheduledTasks,
 } from "../db/queries.js";
 import { BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
 import { assertDailyBudgetAllowsRun, DailyBudgetExceededError } from "../infra/daily-budget.js";
@@ -70,6 +71,37 @@ async function collectFinalState(streamPromise: Promise<AsyncIterable<unknown>>)
     throw new Error("kernel.stream produced no state — this should be unreachable (graph always yields at least once)");
   }
   return last;
+}
+
+/**
+ * Boot-time crash recovery for the task queue. A row the crash caught in
+ * 'running' can never re-fire on its own (the claim moved it out of the
+ * sweep's WHERE clause), so the founder's task would vanish silently — the
+ * one failure mode this system forbids. The single-instance lock guarantees
+ * no other process is mid-fire at boot, so every 'running' row is stranded:
+ * requeue it (due now) under the attempt cap, fail it LOUD past the cap.
+ * DB state is settled before any Telegram send, so a notify blip cannot
+ * un-recover a task. Called once from src/index.ts before the sweep starts.
+ */
+export async function recoverStrandedScheduledTasks(): Promise<void> {
+  const { requeued, failed } = await reclaimStrandedScheduledTasks(TENANT, MAX_TASK_ATTEMPTS);
+  if (requeued.length === 0 && failed.length === 0) return;
+  log.warn(
+    { requeued: requeued.map((t) => t.id), failed: failed.map((t) => t.id) },
+    "Reclaimed scheduled tasks stranded in 'running' by a crash/restart",
+  );
+  for (const task of failed) {
+    await notifyChat(
+      task.chat_id,
+      `❌ <b>Scheduled task dropped</b> — a crash caught it mid-run and it hit the ${MAX_TASK_ATTEMPTS}-attempt cap. Re-schedule it if still needed.\n<code>${safeHtml(task.prompt.slice(0, 200))}</code>`,
+    );
+  }
+  for (const task of requeued) {
+    await notifyChat(
+      task.chat_id,
+      `🔁 <b>Scheduled task re-queued after the restart</b> — it was mid-run when the process stopped and will fire again within a minute.\n<code>${safeHtml(task.prompt.slice(0, 200))}</code>`,
+    );
+  }
 }
 
 /** Fire one claimed task as a kernel turn. Injected into the infra sweep by src/index.ts. */
