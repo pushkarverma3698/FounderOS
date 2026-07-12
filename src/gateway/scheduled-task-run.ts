@@ -142,6 +142,9 @@ export async function runDueScheduledTask(task: ScheduledTask): Promise<void> {
       await notifyChat(chatId, `⏰ <b>Scheduled task running</b>\n<code>${safeHtml(task.prompt.slice(0, 300))}</code>`);
       trace.event("turn.in", { textPreview: task.prompt.slice(0, 120), scheduledTaskId: task.id });
 
+      // On deadline the run is ABORTED, not abandoned — the signal goes only to
+      // stream() so the post-timeout fold/getState still work on a clean config.
+      const abort = new AbortController();
       const res = await withTurnTimeout(
         collectFinalState(
           kernel.stream(
@@ -153,11 +156,12 @@ export async function runDueScheduledTask(task: ScheduledTask): Promise<void> {
                 raw_input: task.prompt,
               },
             },
-            { ...config, streamMode: "values" },
+            { ...config, streamMode: "values", signal: abort.signal },
           ) as Promise<AsyncIterable<unknown>>,
         ),
         OFFICE_TURN_TIMEOUT_MS,
         "kernel.scheduled",
+        () => abort.abort(),
       );
 
       // The turn itself is done either way — a pending approval is the founder's

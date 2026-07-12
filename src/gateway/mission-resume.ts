@@ -176,12 +176,16 @@ export async function resumeInterruptedMission(chatId: string): Promise<boolean>
       );
 
       // null input = continue this thread from its last valid checkpoint.
+      // On deadline the run is ABORTED, not abandoned — the signal goes only to
+      // stream() so the post-timeout fold/getState still work on a clean config.
+      const abort = new AbortController();
       const res = await withTurnTimeout(
         collectFinalState(
-          kernel.stream(null, { ...config, streamMode: "values" }) as Promise<AsyncIterable<unknown>>,
+          kernel.stream(null, { ...config, streamMode: "values", signal: abort.signal }) as Promise<AsyncIterable<unknown>>,
         ),
         OFFICE_TURN_TIMEOUT_MS,
         "kernel.mission-resume",
+        () => abort.abort(),
       );
 
       // The resumed run can pause on a gated step — same card path as a live turn.
