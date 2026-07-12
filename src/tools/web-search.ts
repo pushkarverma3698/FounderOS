@@ -36,6 +36,9 @@ const DDG_HTML_URL = "https://html.duckduckgo.com/html/";
 const DDG_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 const DDG_TIMEOUT_MS = 12_000;
+// A hung grounding call must fail fast into the DDG fallback — without this a
+// single stuck request ate the whole 180s turn budget (2026-07-11 ed826c52).
+const GROUNDING_TIMEOUT_MS = 25_000;
 const GEMINI_GROUNDING_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
 const GROUNDED_SNIPPET_MAX = 300;
@@ -192,6 +195,7 @@ async function geminiGroundedSearch(query: string, limit: number, apiKey: string
         contents: [{ parts: [{ text: `Search the web and report current factual findings for: ${query}` }] }],
         tools: [{ google_search: {} }],
       }),
+      signal: AbortSignal.timeout(GROUNDING_TIMEOUT_MS),
     });
 
     if (!response.ok) {

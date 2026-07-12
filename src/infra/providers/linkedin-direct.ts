@@ -17,7 +17,7 @@ const log = childLogger({ module: "provider:linkedin-direct" });
 const LINKEDIN_API_BASE = "https://api.linkedin.com/rest";
 // YYYYMM version header. 202506 (Marketing June 2025) was SUNSET — keep this on a
 // currently-supported month or every call 400s. Override with LINKEDIN_API_VERSION.
-const DEFAULT_API_VERSION = "202606";
+export const LINKEDIN_DEFAULT_API_VERSION = "202606";
 
 /** Whether direct LinkedIn API credentials are configured (default/turicks account). */
 export function linkedInDirectConfigured(): boolean {
@@ -35,8 +35,16 @@ export function getLinkedInAccessToken(): string | undefined {
   return readEnvValue("LINKEDIN_ACCESS_TOKEN");
 }
 
-function getLinkedInApiVersion(): string {
-  return readEnvValue("LINKEDIN_API_VERSION") ?? DEFAULT_API_VERSION;
+export function getLinkedInApiVersion(): string {
+  // The env pin may only move the version FORWARD. A stale pin from an old
+  // PROD_DOTENV snapshot (202405, live 2026-07-12) silently downgraded below
+  // the shipped default and 426'd every LinkedIn call — the code default is
+  // the floor.
+  const pinned = readEnvValue("LINKEDIN_API_VERSION");
+  if (pinned && /^\d{6}$/.test(pinned) && Number(pinned) > Number(LINKEDIN_DEFAULT_API_VERSION)) {
+    return pinned;
+  }
+  return LINKEDIN_DEFAULT_API_VERSION;
 }
 
 async function linkedInCreds(input: { account_key?: string; department?: string }) {

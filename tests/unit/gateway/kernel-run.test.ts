@@ -15,6 +15,7 @@ async function* singleYield(state: unknown) {
 const fakeKernel = {
   stream: vi.fn((..._args: unknown[]) => singleYield(DONE_STATE)),
   getState: vi.fn(async () => ({ tasks: [] })),
+  updateState: vi.fn(async (..._args: unknown[]) => ({})),
 };
 vi.mock("../../../src/gateway/kernel-boot.js", () => ({
   getKernel: vi.fn(async () => fakeKernel),
@@ -199,6 +200,87 @@ describe("runKernelText", () => {
     expect(replies).toHaveLength(2); // progress placeholder + error reply
     expect(replies.at(-1)!.text).toContain("❌");
     expect(replies.at(-1)!.text).toContain("planner exploded");
+  });
+
+  /**
+   * LIVE FAILURE 2026-07-12 33f64116: turn 68eae59d died on model exhaustion
+   * with reply="" in the checkpoint, so summarizePreviousTurn skipped it and
+   * "Try again" retried the EMAIL task from two turns earlier. A hard-failed
+   * turn must be folded into thread history so the next planner call sees it.
+   */
+  it("hard kernel failure folds the failed turn into thread history (33f64116 amnesia regression)", async () => {
+    const failedTurn = {
+      id: "t-dead",
+      chat_id: "777",
+      received_at: new Date().toISOString(),
+      raw_input: "Read previous LinkedIn posts and summarise",
+    };
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw new Error("429 Provider returned error");
+    });
+    fakeKernel.getState.mockResolvedValue({ tasks: [], values: { turn: failedTurn } } as never);
+
+    const { ctx } = fakeCtx();
+    await runKernelText(ctx, "Read previous LinkedIn posts and summarise");
+
+    expect(fakeKernel.updateState).toHaveBeenCalledTimes(1);
+    const [, values] = fakeKernel.updateState.mock.calls[0]! as unknown as [
+      unknown,
+      { last_turn: { id: string }; reply: string; failure: { stage: string; retryable: boolean } },
+    ];
+    expect(values.last_turn.id).toBe("t-dead");
+    expect(values.reply).toContain("429");
+    expect(values.failure.stage).toBe("model");
+    expect(values.failure.retryable).toBe(true);
+  });
+
+  it("the folded values make the failed turn visible to summarizePreviousTurn", async () => {
+    const failedTurn = { id: "t-dead", chat_id: "777", received_at: "2026-07-12T01:25:12Z", raw_input: "summarise posts" };
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw new Error("429 Provider returned error");
+    });
+    fakeKernel.getState.mockResolvedValue({ tasks: [], values: { turn: failedTurn } } as never);
+
+    const { ctx } = fakeCtx();
+    await runKernelText(ctx, "summarise posts");
+
+    const [, values] = fakeKernel.updateState.mock.calls[0]! as unknown as [unknown, Record<string, unknown>];
+    const { summarizePreviousTurn } = await import("../../../src/kernel/planner.js");
+    const nextState = {
+      ...values,
+      mission: { goal: "summarise posts", status: "executing", plan: { steps: [] }, cursor: 0 },
+      history: [],
+    } as never;
+    const summary = summarizePreviousTurn(nextState);
+    expect(summary?.turn_id).toBe("t-dead");
+    expect(summary?.outcome).toBe("failed");
+    expect(summary?.user_input).toBe("summarise posts");
+  });
+
+  it("history fold failure never masks the founder error reply", async () => {
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw new Error("planner exploded");
+    });
+    fakeKernel.getState.mockRejectedValue(new Error("checkpoint read failed"));
+
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "boom");
+
+    expect(replies.at(-1)!.text).toContain("❌");
+  });
+
+  it("model rate-limit exhaustion gets a friendly reply, not a raw stack (68eae59d)", async () => {
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw Object.assign(new Error("429 Provider returned error\n\nTroubleshooting URL: https://..."), {
+        status: 429,
+      });
+    });
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "boom");
+
+    const last = replies.at(-1)!.text;
+    expect(last).toContain("overloaded");
+    expect(last).not.toContain("Troubleshooting URL");
   });
 });
 

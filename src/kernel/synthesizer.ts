@@ -12,6 +12,7 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { StepResult, ToolReceipt } from "./contracts.js";
 import type { KernelStateType, KernelUpdate } from "./state.js";
 import type { KernelChatModel } from "./planner.js";
+import { messageContentText } from "./message-text.js";
 
 const SYNTHESIZER_PROMPT = [
   `You are the FounderOS synthesizer. Write the reply to the founder for a completed mission.`,
@@ -40,7 +41,7 @@ export function makeSynthesizeNode(model: KernelChatModel) {
       new SystemMessage(SYNTHESIZER_PROMPT),
       new HumanMessage(JSON.stringify({ goal: state.mission.goal, step_results: okResults }, null, 2)),
     ]);
-    const text = typeof response.content === "string" ? response.content : JSON.stringify(response.content);
+    const text = messageContentText(response.content) || JSON.stringify(response.content);
 
     return {
       mission: { ...state.mission, status: "done" },

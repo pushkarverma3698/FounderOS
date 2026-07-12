@@ -25,15 +25,22 @@ vi.mock("../../../src/infra/composio.js", async (orig) => {
   };
 });
 
+/** Overridable per-test: make connectedAccounts.get() reject (revoked-key class). */
+let mockConnectedAccountError: Error | null = null;
+
+// Instance-level resource surface — matches the installed @composio/core ≥0.10.
+// getClient() exposes a DIFFERENT generated client; mocking that wrong shape is
+// how the 2026-07-12 "connectedAccounts.get is not a function" prod crash stayed
+// CI-green (composio-sdk-surface.test.ts pins the real SDK against drift).
 vi.mock("@composio/core", () => ({
   Composio: class {
-    getClient() {
-      return {
-        connectedAccounts: {
-          get: vi.fn().mockImplementation(() => Promise.resolve(mockConnectedAccountStatus)),
-        },
-      };
-    }
+    connectedAccounts = {
+      get: vi.fn().mockImplementation(() =>
+        mockConnectedAccountError
+          ? Promise.reject(mockConnectedAccountError)
+          : Promise.resolve(mockConnectedAccountStatus),
+      ),
+    };
   },
 }));
 
@@ -42,6 +49,7 @@ describe("provider-probes", () => {
     mockRunGws.mockReset();
     mockGetComposioApiKey.mockReturnValue("ck_test");
     mockConnectedAccountStatus = { status: "ACTIVE" };
+    mockConnectedAccountError = null;
   });
 
   it("probeComposioGmail returns up when connection ACTIVE", async () => {
@@ -63,6 +71,18 @@ describe("provider-probes", () => {
     const { probeGwsGmail } = await import("../../../src/infra/provider-probes.js");
     const r = await probeGwsGmail(5_000);
     expect(r.status).toBe("up");
+  });
+
+  it("probeGwsGmail returns unconfigured (not down) when the gws CLI is not installed", async () => {
+    // gws-runner's ENOENT message — what an empty/missing GWS_BIN surfaces as.
+    mockRunGws.mockResolvedValue({
+      ok: false,
+      error:
+        "Gmail is not connected on this host (gws CLI not installed). Install googleworkspace/cli, run gws auth login, or set GMAIL_BACKEND=composio.",
+    });
+    const { probeGwsGmail } = await import("../../../src/infra/provider-probes.js");
+    const r = await probeGwsGmail(5_000);
+    expect(r.status).toBe("unconfigured");
   });
 
   // ── probeLinkedInComposio (2026-07-01 fix) ──────────────────────────────────
@@ -92,11 +112,7 @@ describe("provider-probes", () => {
 
   it("probeLinkedInComposio returns down when the Composio API call itself fails (revoked key)", async () => {
     mockGetComposioApiKey.mockReturnValue("ck_test"); // configured, but the call below rejects
-    const { Composio } = await import("@composio/core");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (Composio.prototype as any).getClient = () => ({
-      connectedAccounts: { get: vi.fn().mockRejectedValue(new Error("401 Unauthorized")) },
-    });
+    mockConnectedAccountError = new Error("401 Unauthorized");
     const { probeLinkedInComposio } = await import("../../../src/infra/provider-probes.js");
     const r = await probeLinkedInComposio(5_000);
     expect(r.status).toBe("down");

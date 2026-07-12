@@ -50,6 +50,9 @@ export const envSchema = z.object({
   LINKEDIN_ORG_URN: z.string().transform(v => v || undefined).optional(),
   LINKEDIN_ORG_NAME: z.string().transform(v => v || undefined).optional(),
   GITHUB_TOKEN: z.string().transform(v => v || undefined).optional(),
+  // Zod strips unknown keys — without this line the boot report read
+  // env.FIRECRAWL_API_KEY as undefined and reported Firecrawl MISSING forever.
+  FIRECRAWL_API_KEY: z.string().transform(v => v || undefined).optional(),
 
   // ── Apify web scraper (research department real-data engine) ────────────────
   /** Apify API token (https://apify.com → Console → Integrations). One key, all
