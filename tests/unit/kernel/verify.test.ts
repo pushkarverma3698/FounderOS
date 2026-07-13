@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { verifyStepResult } from "../../../src/kernel/verify.js";
-import { TaskEnvelopeSchema, type TaskEnvelope } from "../../../src/kernel/contracts.js";
+import { TaskEnvelopeSchema, StepResultSchema, type TaskEnvelope } from "../../../src/kernel/contracts.js";
 import type { StepResult } from "../../../src/kernel/contracts.js";
 
 const makeEnvelope = (over: Partial<TaskEnvelope> = {}): TaskEnvelope =>
@@ -47,6 +47,21 @@ describe("verifyStepResult", () => {
     expect(verified.status).toBe("failed");
     if (verified.status === "failed") {
       expect(verified.failure.stage).toBe("validation");
+    }
+  });
+
+  it("handles verifier throwing cleanly by returning a valid StepResult", async () => {
+    const circular: any = {};
+    circular.self = circular;
+    const envelope = makeEnvelope();
+    const result = makeOkResult(circular);
+    const verified = await verifyStepResult(result, envelope);
+    expect(verified.status).toBe("failed");
+    if (verified.status === "failed") {
+      expect(verified.failure.stage).toBe("validation");
+      expect(verified.failure.message).toContain("Verifier threw error");
+      const parsed = StepResultSchema.safeParse(verified);
+      expect(parsed.success).toBe(true);
     }
   });
 });
