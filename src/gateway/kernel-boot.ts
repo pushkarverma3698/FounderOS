@@ -151,3 +151,13 @@ export async function getKernel(): Promise<CompiledKernel> {
   log.info(`Kernel compiled: planner + pure supervisor + ${WORKERS.length} workers + synthesizer`);
   return _kernel;
 }
+
+/**
+ * Drop the compiled-kernel singleton so the NEXT getKernel() rebuilds — used by
+ * `/connect` after adding an MCP server so its tools become live without a
+ * process restart. Safe because an in-flight turn already holds its own kernel
+ * reference; only the next turn recompiles (and applyMcpBridge is idempotent).
+ */
+export function resetKernelCache(): void {
+  _kernel = undefined;
+}

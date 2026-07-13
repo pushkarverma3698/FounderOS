@@ -143,3 +143,60 @@ manifest/`gateUnlisted` win), and `gatedNames` excluding failed-server tools
 Consolidation: the earlier standalone `scripts/probe-mcp-bridge.ts` (stdio-only,
 hard-coded reference server) was merged into `scripts/mcp-bridge-probe.ts`
 (`pnpm mcp:probe`, any manifest, HTTP + `--invoke`) — one probe, not two.
+
+## Amendment — 2026-07-13 (Tier 3: `/connect` registry discovery + live install)
+The last friction was acquisition: adding a server still meant hand-editing
+`mcp-bridge.json`. Tier 3 brings the "browse and click" of the Claude-app
+connector marketplace into Telegram, while every install still flows through the
+same HITL gate.
+
+- **Registry client** (`src/mcp/registry.ts`). `searchRegistry(query)` hits the
+  official registry (`registry.modelcontextprotocol.io/v0/servers?search=`) and
+  `mapRegistryServer` (pure, unit-tested) maps each result to a runnable manifest
+  entry: a `streamable-http` remote → `{transport:"http",url,headerEnv}`, a
+  `uvx`/`npx` stdio package → `{transport:"stdio",command,args}`. Docker/OCI-only
+  servers are surfaced but marked unsupported. Secrets are never inlined — a
+  required secret header becomes a `headerEnv` mapping to an env-var NAME the
+  founder must set (same rule as everywhere else in the bridge).
+- **Manifest writer** (`src/mcp/manifest-store.ts`). `addServerToManifest`
+  validates the entry AND the whole resulting manifest before writing, and
+  refuses to overwrite an existing key — a `/connect` can never corrupt the file.
+- **`/connect` command** (`src/gateway/commands.ts`, 8th command). `/connect
+  <query>` searches and lists installable candidates with a copy-paste install
+  hint; `/connect add <name> <department>` installs into the manifest and, when
+  the bridge is on and no secret is missing, reloads it live. The branching logic
+  is a pure `runConnect(args, deps)` with the registry/writer/reload injected, so
+  it is fully unit-tested.
+- **Safe live reload.** `applyMcpBridge` is now idempotent — it strips previously
+  merged tools (all `mcp__`-prefixed; native tools never are) before re-merging,
+  so a reload cannot duplicate a server's tools. `/connect` resets the bridge
+  connect-cache and the compiled-kernel singleton (`resetKernelCache`), and the
+  next turn recompiles. Because strip REASSIGNS the department arrays rather than
+  mutating in place, an in-flight turn keeps its own stable kernel — no
+  mutation-under-foot.
+
+**Evidence (2026-07-13, real registry + real bridge, not mocked).**
+`searchRegistry` against the live registry returned real servers for
+notion/linear/stripe with correct transport classification and secret detection
+(`smithery-notion` → `SMITHERY_API_KEY` from its header template). The full
+`runConnect` flow installed a server into a temp manifest (duplicate correctly
+refused). Idempotent reload was verified end-to-end: three `applyMcpBridge`
+cycles against live DeepWiki produced identical, non-duplicated tools
+(`IDEMPOTENT: true`). New unit tests cover the registry mapping, manifest writer,
+`/connect` branching (search / add / unknown-dept / missing-secret / bridge-off /
+unsupported / duplicate), and strip-merge idempotency (`registry.test.ts`,
+`manifest-store.test.ts`, `connect-command.test.ts`, `capabilities.test.ts`).
+Full `pnpm gate` green (1538 tests).
+
+## Tier 4 (Composio → MCP): already solved by ADR-029 — no migration
+The research doc's Tier 4 targeted Composio's "one key kills three departments"
+fragility. Verified 2026-07-13 that **ADR-029 already retired it**: `GMAIL_BACKEND`
+defaults to `gws`, `LINKEDIN_BACKEND` to `direct`, and `src/infra/providers/index.ts`
+dispatches by flag so Composio code runs ONLY when explicitly selected as a
+rollback. Composio is no longer in any default critical path — the fragility is
+gone. Routing Gmail/Calendar/LinkedIn through MCP instead would bolt an
+agent-facing transport onto a direct-function provider layer that already works,
+complicating a solved path for zero safety gain (agents that WANT those services
+over MCP already can — Slack is in the seed manifest). **Decision: do not
+migrate.** Tier 4 is closed as already-delivered by ADR-029; the founder can add
+any hosted service via `/connect` if they ever want the MCP path.
