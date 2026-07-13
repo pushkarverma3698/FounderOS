@@ -58,8 +58,8 @@ function stateWithCalls(
     results: priorResults,
     attempts: {},
     failure: null,
-    scratch: [ai],
-    step_receipts: receipts,
+    scratch: { s1: [ai] },
+    step_receipts: { s1: receipts },
     reply: "",
     last_turn: null,
     history: [],
@@ -79,8 +79,8 @@ describe("makeToolsNode — duplicate FAILED call guard (turn 49dbaa06)", () => 
     const update = await makeToolsNode(specWith(tool))(state);
 
     expect(invoke).not.toHaveBeenCalled();
-    expect(update.step_receipts).toEqual([]);
-    const msg = update.scratch?.[0];
+    expect((update.step_receipts as any)["s1"]).toEqual([]);
+    const msg = (update.scratch as any)["s1"]?.[0];
     expect(msg && String((msg as { content: unknown }).content)).toMatch(/already failed/i);
   });
 
@@ -128,9 +128,9 @@ describe("makeToolsNode — duplicate FAILED call guard (turn 49dbaa06)", () => 
     const update = await makeToolsNode(specWith(tool))(state);
 
     expect(invoke).toHaveBeenCalledTimes(1);
-    expect(update.step_receipts).toHaveLength(1);
-    expect(update.scratch).toHaveLength(2);
-    expect(String((update.scratch![1] as { content: unknown }).content)).toMatch(/already failed/i);
+    expect((update.step_receipts as any)["s1"]).toHaveLength(1);
+    expect((update.scratch as any)["s1"]).toHaveLength(2);
+    expect(String(((update.scratch as any)["s1"]![1] as { content: unknown }).content)).toMatch(/already failed/i);
   });
 });
 
@@ -150,8 +150,8 @@ describe("makeToolsNode — cross-step duplicate FAILED call guard (within one t
     const update = await makeToolsNode(specWith(tool))(state);
 
     expect(invoke).not.toHaveBeenCalled();
-    expect(update.step_receipts).toEqual([]);
-    expect(String((update.scratch![0] as { content: unknown }).content)).toMatch(/already failed/i);
+    expect((update.step_receipts as any)["s1"]).toEqual([]);
+    expect(String(((update.scratch as any)["s1"]![0] as { content: unknown }).content)).toMatch(/already failed/i);
   });
 
   it("does NOT short-circuit when the identical prior-step call SUCCEEDED", async () => {
