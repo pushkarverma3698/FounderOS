@@ -21,16 +21,19 @@ import { hitlGate, idemKey } from "./hitl.js";
 import { toolFailure } from "../tool-result.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
 import { TENANT } from "../../core/config.js";
-import { isWriteTool, bridgedToolName } from "../../mcp/bridge-classify.js";
+import { isWriteTool, bridgedToolName, annotationsOf } from "../../mcp/bridge-classify.js";
 import type { BridgeManifest } from "../../mcp/bridge-manifest.js";
 
 const log = childLogger({ module: "agent-tools:external-mcp" });
 
-/** Minimal shape we rely on from a loaded MCP tool (a DynamicStructuredTool). */
+/** Minimal shape we rely on from a loaded MCP tool (a DynamicStructuredTool).
+ *  `metadata.annotations` carries the server's read-only/destructive hints, which
+ *  the adapter passes through and Tier 2 classification consults. */
 export interface LoadedMcpTool {
   name: string;
   description?: string;
   schema: unknown;
+  metadata?: { annotations?: unknown };
   invoke(args: Record<string, unknown>, config?: RunnableConfig): Promise<unknown>;
 }
 
@@ -76,7 +79,7 @@ export function gateMcpTool(
 ) {
   const bareName = loaded.name;
   const runtimeName = bridgedToolName(serverName, bareName);
-  const gated = isWriteTool(serverName, bareName, manifest);
+  const gated = isWriteTool(serverName, bareName, manifest, annotationsOf(loaded));
   const baseDesc = loaded.description ?? `External ${serverName} tool ${bareName}.`;
   const description = gated
     ? `${baseDesc} (external ${serverName} — requires founder approval)`
