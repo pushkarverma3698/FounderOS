@@ -61,6 +61,51 @@ describe("bridgeManifestSchema", () => {
     });
     expect(departmentsOf(parsed.servers["x"] as McpServerEntry)).toEqual(["personal"]);
   });
+
+  it("parses an http server with defaulted headers/headerEnv (Tier 1)", () => {
+    const parsed = bridgeManifestSchema.parse({
+      servers: { deepwiki: { transport: "http", url: "https://mcp.deepwiki.com/mcp", department: "research" } },
+    });
+    const entry = parsed.servers["deepwiki"] as McpServerEntry;
+    expect(entry.transport).toBe("http");
+    if (entry.transport !== "http") throw new Error("narrowing");
+    expect(entry.url).toBe("https://mcp.deepwiki.com/mcp");
+    expect(entry.headers).toEqual({});
+    expect(entry.headerEnv).toEqual({});
+    expect(entry.write).toEqual([]);
+  });
+
+  it("keeps secret header values out of the manifest — headerEnv holds env-var NAMES", () => {
+    const parsed = bridgeManifestSchema.parse({
+      servers: {
+        notion: {
+          transport: "http",
+          url: "https://mcp.notion.com/mcp",
+          headerEnv: { Authorization: "NOTION_MCP_TOKEN" },
+          department: "admin",
+          write: ["create-pages"],
+        },
+      },
+    });
+    const entry = parsed.servers["notion"] as McpServerEntry;
+    if (entry.transport !== "http") throw new Error("narrowing");
+    expect(entry.headerEnv).toEqual({ Authorization: "NOTION_MCP_TOKEN" });
+    expect(isWriteTool("notion", "create-pages", parsed)).toBe(true);
+  });
+
+  it("rejects an http server missing url", () => {
+    const r = bridgeManifestSchema.safeParse({
+      servers: { bad: { transport: "http", department: "research" } },
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects an unknown transport", () => {
+    const r = bridgeManifestSchema.safeParse({
+      servers: { bad: { transport: "carrier-pigeon", url: "x", department: "research" } },
+    });
+    expect(r.success).toBe(false);
+  });
 });
 
 describe("loadManifest", () => {

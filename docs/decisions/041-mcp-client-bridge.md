@@ -67,3 +67,38 @@ idempotency, per-server failure isolation, flag-off no-op (`tests/unit/mcp/*`). 
 the manifest at `@modelcontextprotocol/server-everything`, flip the flag, confirm reads load and
 a "write" tool triggers an interrupt — no API keys needed. MTProto QA once: Blender read passes
 through; `execute_blender_code` fires the approval card → approve → `action_log` row written.
+
+## Amendment — 2026-07-13 (Tier 0 + Tier 1: enable + hosted-remote transport)
+Follow-up from `docs/research/MCP-CONNECTOR-ECOSYSTEM.md`. The bridge shipped
+`stdio`-only, which excluded the entire hosted-remote ecosystem (the ~256
+OAuth/HTTP servers — Notion, Linear, Stripe, DeepWiki…) that make external
+capabilities zero-install. Two changes, no kernel impact:
+
+- **Tier 0 (enable).** `MCP_BRIDGE_ENABLED` is now documented in `.env.example`
+  and flipped on per deployment — no code change, the bridge was already built.
+- **Tier 1 (transport).** `mcpServerSchema` becomes a discriminated union on
+  `transport`: the existing `stdio` member is unchanged (entries that omit
+  `transport` still default to stdio — backward-compatible), plus a new `http`
+  member `{ url, headers, headerEnv }` for streamable-HTTP servers via
+  `@langchain/mcp-adapters` (already a dependency). Secrets stay out of the
+  manifest exactly as stdio does it: `headerEnv` maps a header name → an env-var
+  NAME, resolved from `process.env` at connect time (`toConnection`,
+  `src/mcp/client.ts`). Everything downstream — `gateMcpTool`, the `write`
+  allowlist, `mcp__server__tool` naming, failure isolation — is transport-
+  agnostic and unchanged, so an HTTP server's write tool is HITL-gated identically
+  to a stdio one.
+
+Seed: `deepwiki` (HTTP, authless, read-only) added to `mcp-bridge.json` under
+`research` as the zero-setup "flip and it works" example.
+
+**Evidence (2026-07-13, real path, not mocked).** `pnpm mcp:probe mcp-bridge.json
+--invoke` against the live code path: DeepWiki connected over HTTP and loaded 3
+read tools (`read_wiki_structure`, `read_wiki_contents`, `ask_question`), all
+classified read/pass-through; a live `read_wiki_structure` call returned 2,435
+chars of real content. Blender (`uvx`) and Slack (`npx`) failed to connect in the
+sandbox (proxy blocks pypi/npm TLS) and were isolated to zero tools — the others
+loaded regardless, confirming the failure-isolation contract. A probe manifest
+marking `ask_question` as `write` flipped it to WRITE (HITL-gated), confirming
+gating is transport-agnostic. New unit tests cover http schema parsing,
+backward-compat stdio default, url-required rejection, unknown-transport
+rejection, and `toConnection` header/env resolution (`tests/unit/mcp/*`, $0).
