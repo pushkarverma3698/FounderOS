@@ -18,13 +18,23 @@ import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 import type { Connection } from "@langchain/mcp-adapters";
 import { childLogger } from "../infra/logger.js";
 import { gateMcpTool, type LoadedMcpTool } from "../agents/agent-tools/external-mcp.js";
-import { isWriteTool } from "./bridge-classify.js";
+import { isWriteTool, annotationsOf, bridgedToolName } from "./bridge-classify.js";
 import { departmentsOf, type BridgeManifest, type McpServerEntry } from "./bridge-manifest.js";
 
 const log = childLogger({ module: "mcp:client" });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTool = any;
+
+/** What the bridge produces: tools grouped by department, plus the runtime
+ *  names of the ones that resolved to HITL-gated (manifest write list OR a
+ *  server annotation). `gatedNames` is derived from the LOADED tools — so it
+ *  never lists a tool that failed to connect (no dead gates) and it captures
+ *  annotation-gated tools the manifest alone couldn't know about. */
+export interface BridgedTools {
+  byDept: Record<string, AnyTool[]>;
+  gatedNames: string[];
+}
 
 /**
  * Build the adapter connection config for one server, resolving forwarded
@@ -79,10 +89,11 @@ export async function buildBridgedTools(
       additionalToolNamePrefix: "",
       throwOnLoadError: false,
     }),
-): Promise<Record<string, AnyTool[]>> {
+): Promise<BridgedTools> {
   const byDept: Record<string, AnyTool[]> = {};
+  const gatedNames: string[] = [];
   const entries = Object.entries(manifest.servers);
-  if (entries.length === 0) return byDept;
+  if (entries.length === 0) return { byDept, gatedNames };
 
   const servers: Record<string, Connection> = {};
   for (const [name, entry] of entries) servers[name] = toConnection(entry);
@@ -96,9 +107,14 @@ export async function buildBridgedTools(
       for (const dept of departmentsOf(entry)) {
         (byDept[dept] ??= []).push(...wrapped);
       }
-      // Log every tool's resolved gating so a missed write classification is
-      // visible in boot logs (defense-in-depth for the allowlist, review M4).
-      const classified = loaded.map((t) => `${t.name}=${isWriteTool(name, t.name, manifest) ? "WRITE" : "read"}`);
+      // Classify each loaded tool WITH its annotations — the same decision
+      // gateMcpTool makes — so gatedNames and the boot log both reflect reality
+      // (manifest write list OR a server-declared write hint).
+      const classified = loaded.map((t) => {
+        const write = isWriteTool(name, t.name, manifest, annotationsOf(t));
+        if (write) gatedNames.push(bridgedToolName(name, t.name));
+        return `${t.name}=${write ? "WRITE" : "read"}`;
+      });
       log.info(
         { server: name, tools: loaded.length, departments: departmentsOf(entry), classified },
         "MCP server bridged",
@@ -107,16 +123,16 @@ export async function buildBridgedTools(
       log.warn({ server: name, err: (err as Error).message }, "MCP server failed to load — skipped (isolated)");
     }
   }
-  return byDept;
+  return { byDept, gatedNames };
 }
 
 // ── Connect-once memoization ────────────────────────────────────────────────
 // Cache the in-flight PROMISE, not the resolved value, so two concurrent callers
 // at startup can never both spawn a full set of child-process connections (H2).
-let inflight: Promise<Record<string, AnyTool[]>> | null = null;
+let inflight: Promise<BridgedTools> | null = null;
 
 /** Memoized accessor — connects once, reuses thereafter (rule #2). */
-export async function getBridgedTools(manifest: BridgeManifest): Promise<Record<string, AnyTool[]>> {
+export async function getBridgedTools(manifest: BridgeManifest): Promise<BridgedTools> {
   if (inflight) return inflight;
   inflight = buildBridgedTools(manifest);
   return inflight;

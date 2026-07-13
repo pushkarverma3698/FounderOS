@@ -14,7 +14,7 @@ import {
   departmentsOf,
   type McpServerEntry,
 } from "../../../src/mcp/bridge-manifest.js";
-import { isWriteTool, bridgedToolName } from "../../../src/mcp/bridge-classify.js";
+import { isWriteTool, bridgedToolName, annotationsOf } from "../../../src/mcp/bridge-classify.js";
 
 // Temp files live under $HOME — path-guard's SYSTEM_ROOTS blocks /tmp on macOS.
 const tmpDirs: string[] = [];
@@ -174,5 +174,56 @@ describe("isWriteTool (classification)", () => {
 describe("bridgedToolName", () => {
   it("namespaces tool names to avoid collisions with native tools", () => {
     expect(bridgedToolName("blender", "render_image")).toBe("mcp__blender__render_image");
+  });
+});
+
+describe("annotationsOf", () => {
+  it("reads readOnlyHint/destructiveHint from metadata.annotations", () => {
+    expect(annotationsOf({ metadata: { annotations: { readOnlyHint: true } } })).toEqual({
+      readOnlyHint: true,
+      destructiveHint: undefined,
+    });
+  });
+
+  it("returns undefined when the server annotated nothing recognisable", () => {
+    expect(annotationsOf({})).toBeUndefined();
+    expect(annotationsOf({ metadata: {} })).toBeUndefined();
+    expect(annotationsOf({ metadata: { annotations: { title: "x" } } })).toBeUndefined();
+  });
+});
+
+describe("isWriteTool with annotations (Tier 2)", () => {
+  const manifest = bridgeManifestSchema.parse({
+    servers: { deepwiki: { transport: "http", url: "https://mcp.deepwiki.com/mcp", department: "research" } },
+  });
+
+  it("gates a tool the server marks not-read-only, though unlisted", () => {
+    expect(isWriteTool("deepwiki", "edit", manifest, { readOnlyHint: false })).toBe(true);
+  });
+
+  it("gates a tool the server marks destructive", () => {
+    expect(isWriteTool("deepwiki", "purge", manifest, { destructiveHint: true })).toBe(true);
+  });
+
+  it("leaves a read-only-annotated tool ungated", () => {
+    expect(isWriteTool("deepwiki", "ask", manifest, { readOnlyHint: true })).toBe(false);
+  });
+
+  it("preserves the read-through default when the server said nothing", () => {
+    expect(isWriteTool("deepwiki", "ask", manifest, undefined)).toBe(false);
+  });
+
+  it("explicit manifest write ALWAYS wins over a read-only hint (hints only tighten)", () => {
+    const listed = bridgeManifestSchema.parse({
+      servers: { s: { command: "x", department: "personal", write: ["danger"] } },
+    });
+    expect(isWriteTool("s", "danger", listed, { readOnlyHint: true })).toBe(true);
+  });
+
+  it("gateUnlisted still wins regardless of a read-only hint", () => {
+    const paranoid = bridgeManifestSchema.parse({
+      servers: { s: { command: "x", department: "personal", gateUnlisted: true } },
+    });
+    expect(isWriteTool("s", "whatever", paranoid, { readOnlyHint: true })).toBe(true);
   });
 });
