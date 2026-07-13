@@ -17,6 +17,7 @@ import type {
   TurnRecord,
   TurnSummary,
 } from "./contracts.js";
+import type { LessonCandidate } from "./lessons.js";
 
 export const RESET = "reset" as const;
 type Reset = typeof RESET;
@@ -71,6 +72,16 @@ export const KernelState = Annotation.Root({
   reply: Annotation<string>({
     reducer: (_curr, update) => update,
     default: () => "",
+  }),
+
+  /**
+   * Failure-lesson bookkeeping for the ACTIVE retry: stashed when dispatch
+   * builds a retry, settled (recorded or discarded) on the next dispatch pass.
+   * Reset every turn by the plan node.
+   */
+  lesson_candidate: Annotation<LessonCandidate | null>({
+    reducer: (_curr, update) => update,
+    default: () => null,
   }),
 
   /**

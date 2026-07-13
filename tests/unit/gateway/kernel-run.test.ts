@@ -162,6 +162,15 @@ describe("runKernelText", () => {
     expect(replies.at(-1)!.text).toContain("All done.");
   });
 
+  it("hands the kernel stream an AbortSignal so a deadline ABORTS the run instead of orphaning it", async () => {
+    const { ctx } = fakeCtx();
+    await runKernelText(ctx, "hello kernel");
+
+    const [, config] = fakeKernel.stream.mock.calls[0]! as unknown as [unknown, { signal?: AbortSignal }];
+    expect(config.signal).toBeInstanceOf(AbortSignal);
+    expect(config.signal!.aborted).toBe(false); // a completed turn never aborts
+  });
+
   it("pauses on a pending approval: sends the card with Approve/Reject, no reply", async () => {
     fakeKernel.getState.mockResolvedValue({
       tasks: [

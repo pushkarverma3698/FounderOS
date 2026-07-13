@@ -23,6 +23,9 @@ import { buildFallbackModels, getModel, getWorkerModel } from "../agents/model.j
 import { withModelFallbacks } from "./model-fallback.js";
 import { DEPARTMENT_TOOLS, applyMcpBridge } from "../agents/capabilities.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
+import { getFailureLesson, upsertFailureLesson, bumpFailureLessonApplied } from "../db/queries.js";
+import { TENANT } from "../core/config.js";
+import type { FailureLesson, LessonStore } from "../kernel/index.js";
 import {
   ADMIN_PROMPT,
   RESEARCH_PROMPT,
@@ -72,6 +75,43 @@ export function buildWorkerSpecs(): WorkerSpec[] {
   });
 }
 
+/**
+ * Postgres-backed LessonStore (the Hermes learning seam). Failure-tolerant on
+ * every edge: lessons are an accelerant — a DB blip must degrade to "no
+ * lesson", never to a broken retry.
+ */
+export function buildLessonStore(): LessonStore {
+  return {
+    async lookup(worker: string, signature: string): Promise<FailureLesson | null> {
+      try {
+        const row = await getFailureLesson(TENANT, worker, signature);
+        if (!row) return null;
+        void bumpFailureLessonApplied(row.id).catch(() => undefined); // allow-failopen: applied-count is telemetry; the lookup result matters, the counter does not
+        return {
+          worker: row.worker,
+          signature: row.signature,
+          component: row.component,
+          objective: row.objective,
+          resolved_with_tools: row.resolved_with_tools ?? [],
+          times_seen: row.times_seen,
+          last_resolved_at: (row.last_resolved_at ?? new Date()).toISOString(),
+        };
+      } catch (err) {
+        log.warn({ err: String(err), worker }, "Failure-lesson lookup failed — retry proceeds without it"); // allow-failopen: lessons are an accelerant, never a dependency
+        return null;
+      }
+    },
+    async record(lesson): Promise<void> {
+      try {
+        await upsertFailureLesson({ tenant_id: TENANT, ...lesson });
+        log.info({ worker: lesson.worker, signature: lesson.signature.slice(0, 80) }, "Failure lesson recorded");
+      } catch (err) {
+        log.warn({ err: String(err), worker: lesson.worker }, "Failure-lesson record failed — non-fatal"); // allow-failopen: lessons are an accelerant, never a dependency
+      }
+    },
+  };
+}
+
 /** Build a kernel against an injected checkpointer (tests: MemorySaver). */
 export function buildProductionKernel(checkpointer: BaseCheckpointSaver): CompiledKernel {
   // 2026-07-11: wrap every kernel model with the AGENT_FALLBACK_MODELS chain.
@@ -96,6 +136,7 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
     ),
     workers: buildWorkerSpecs(),
     checkpointer,
+    lessons: buildLessonStore(),
   });
 }
 

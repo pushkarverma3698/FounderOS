@@ -207,6 +207,9 @@ export async function runKernelText(ctx: Context, text: string): Promise<void> {
       foldCtx = { kernel: kernel as unknown as FoldableKernel, config };
       trace.event("turn.in", { textPreview: text.slice(0, 120) });
 
+      // On deadline the run is ABORTED, not abandoned — the signal goes only to
+      // stream() so the post-timeout fold/getState still work on a clean config.
+      const abort = new AbortController();
       const res = await withTurnTimeout(
         streamKernelTurn(
           ctx,
@@ -220,11 +223,12 @@ export async function runKernelText(ctx: Context, text: string): Promise<void> {
                 raw_input: text,
               },
             },
-            { ...config, streamMode: "values" },
+            { ...config, streamMode: "values", signal: abort.signal },
           ) as Promise<AsyncIterable<unknown>>,
         ),
         OFFICE_TURN_TIMEOUT_MS,
         "kernel.invoke",
+        () => abort.abort(),
       );
 
       const approval = (await getPendingKernelApproval(kernel, config)) as ApprovalRequest | null;
@@ -267,6 +271,7 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
       foldCtx = { kernel: kernel as unknown as FoldableKernel, config };
       trace.event("hitl.resume", { decision });
 
+      const abort = new AbortController();
       const res = await withTurnTimeout(
         streamKernelTurn(
           ctx,
@@ -274,10 +279,12 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
           kernel.stream(new Command({ resume: decision }), {
             ...config,
             streamMode: "values",
+            signal: abort.signal,
           }) as Promise<AsyncIterable<unknown>>,
         ),
         OFFICE_TURN_TIMEOUT_MS,
         "kernel.resume",
+        () => abort.abort(),
       );
 
       // A multi-step plan can pause again on the NEXT gated step.
