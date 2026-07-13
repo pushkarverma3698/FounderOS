@@ -134,16 +134,34 @@ export function mergeBridgedTools(
 }
 
 /**
+ * Drop every previously-merged bridged tool (all `mcp__`-prefixed) from the
+ * registry and HITL set. Native tools never carry that prefix, so this makes
+ * applyMcpBridge idempotent — safe to re-run on a live `/connect` reload without
+ * duplicating a server's tools.
+ */
+export function stripBridgedTools(
+  target: Record<string, AnyTool[]> = DEPARTMENT_TOOLS,
+  hitl: Set<string> = HITL_GATED_TOOLS,
+): void {
+  for (const dept of Object.keys(target)) {
+    target[dept] = (target[dept] ?? []).filter((t) => !String(t.name).startsWith("mcp__"));
+  }
+  for (const name of [...hitl]) if (name.startsWith("mcp__")) hitl.delete(name);
+}
+
+/**
  * Connect external MCP servers and merge their tools into DEPARTMENT_TOOLS.
  * No-op unless MCP_BRIDGE_ENABLED — and the bridge modules are dynamically
  * imported so the default (flag-off) build never even loads @langchain/mcp-adapters.
- * Call once at startup, BEFORE buildOffice() reads DEPARTMENT_TOOLS.
+ * Idempotent: existing bridged tools are stripped first, so it is safe to call
+ * again on a live reload as well as once at startup (before DEPARTMENT_TOOLS is read).
  */
 export async function applyMcpBridge(): Promise<void> {
   if (!MCP_BRIDGE_ENABLED) return;
   const { loadManifest } = await import("../mcp/bridge-manifest.js");
   const { getBridgedTools } = await import("../mcp/client.js");
 
+  stripBridgedTools();
   const manifest = loadManifest(MCP_BRIDGE_MANIFEST);
   // gatedNames comes from the LOADED tools (manifest write list OR annotation),
   // so annotation-gated tools render with `*` and no dead gates leak in.
