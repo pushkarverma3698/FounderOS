@@ -142,12 +142,13 @@ export function mergeBridgedTools(
 export async function applyMcpBridge(): Promise<void> {
   if (!MCP_BRIDGE_ENABLED) return;
   const { loadManifest } = await import("../mcp/bridge-manifest.js");
-  const { gatedRuntimeNames } = await import("../mcp/bridge-classify.js");
   const { getBridgedTools } = await import("../mcp/client.js");
 
   const manifest = loadManifest(MCP_BRIDGE_MANIFEST);
-  const byDept = await getBridgedTools(manifest);
-  mergeBridgedTools(DEPARTMENT_TOOLS, HITL_GATED_TOOLS, byDept, gatedRuntimeNames(manifest));
+  // gatedNames comes from the LOADED tools (manifest write list OR annotation),
+  // so annotation-gated tools render with `*` and no dead gates leak in.
+  const { byDept, gatedNames } = await getBridgedTools(manifest);
+  mergeBridgedTools(DEPARTMENT_TOOLS, HITL_GATED_TOOLS, byDept, gatedNames);
 }
 
 /**
