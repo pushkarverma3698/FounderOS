@@ -56,16 +56,12 @@ export async function verifyStepResult(result: StepResult, envelope: TaskEnvelop
       status: "failed",
       step_id: result.step_id,
       failure: {
-        status: "failed",
         step_id: result.step_id,
-        failure: {
-          step_id: result.step_id,
-          stage: "validation",
-          component: `kernel/verify:${envelope.worker}`,
-          message: `Verifier threw error: ${(err as Error).message}`,
-          retryable: true,
-        }
-      } as any
+        stage: "validation",
+        component: `kernel/verify:${envelope.worker}`,
+        message: `Verifier threw error: ${(err as Error).message}`,
+        retryable: true,
+      }
     };
   }
 
