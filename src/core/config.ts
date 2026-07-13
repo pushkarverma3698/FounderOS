@@ -121,6 +121,16 @@ export const envSchema = z.object({
    *  same URL/query so we don't re-pay Apify credits + re-embed. Default 24h. */
   RESEARCH_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(86_400),
 
+  // ── LLM response cache (tenant-isolated, Redis-backed) ─────────────────────
+  /** Cache side-effect-free LLM calls (planner + synthesizer) keyed by
+   *  {tenant}:{hash(model+temp+messages)}. Default OFF — flag-gated so the
+   *  default/CI build is byte-identical and the golden set stays deterministic.
+   *  Only unbound (tool-free) calls are cached; worker tool-calling is never
+   *  cached. No-op when REDIS_URL is unset (cacheGet/cacheSet fail open). */
+  LLM_CACHE_ENABLED: z.enum(["true", "false"]).default("false"),
+  /** TTL (seconds) for a cached LLM response. 0 disables writes. Default 1h. */
+  LLM_CACHE_TTL_SECONDS: z.coerce.number().int().nonnegative().default(3_600),
+
   // ── mem0 episodic memory cloud ────────────────────────────────────────────
   /** When set, events are also pushed to mem0 cloud for semantic recall. */
   MEM0_API_KEY: z.string().transform(v => v || undefined).optional(),

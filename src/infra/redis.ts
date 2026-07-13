@@ -1,17 +1,18 @@
 /**
  * FounderOS — Redis Client + Key Helpers
  * =======================================
- * SaaS-PHASE: This module is NOT wired into any production send path.
- * It is kept ready for Phase 2 features:
- *   - research cache (reduce Firecrawl spend)
- *   - daily send quota enforcement (currently ungated)
- *   - LLM prompt cache (multi-tenant, tier-gated)
+ * SaaS-PHASE: fail-open cache/quota primitives. Wiring is opt-in per feature:
+ *   - research/scrape cache — WIRED (infra/research-memory.ts → apify/research tools)
+ *   - LLM response cache    — WIRED, flag-gated (gateway/model-cache.ts;
+ *                             LLM_CACHE_ENABLED, planner + synthesizer only)
+ *   - daily send quota enforcement — NOT wired (incrQuota/getQuota unused)
  *
- * Current wiring: NONE — only the unit tests exercise this code.
- * Redis is NOT in docker-compose (removed 2026-06-05, was a dead boot dep).
+ * All helpers fail open: no REDIS_URL → getRedis() returns null → cacheGet=null,
+ * cacheSet=no-op, incrQuota=0. Redis is optional; a Redis instance must exist for
+ * the wired features to actually cache (else they silently pass through).
  *
- * To activate: set REDIS_URL env, add redis service back to docker-compose,
- * call incrQuota() in comms/send-email before send, cacheGet/cacheSet in search_web.
+ * To enable the LLM cache in prod: provision Redis, set REDIS_URL (already in
+ * PRESERVE_IF_MISSING) + LLM_CACHE_ENABLED=true.
  *
  * Key namespaces (ready for use):
  *   research:{url_hash}         TTL 7d   — Tavily/Firecrawl company research blob

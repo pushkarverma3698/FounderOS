@@ -19,8 +19,17 @@ import {
   type WorkerSpec,
   WORKERS,
 } from "../kernel/index.js";
-import { buildFallbackModels, getModel, getWorkerModel } from "../agents/model.js";
+import {
+  buildFallbackModels,
+  getModel,
+  getWorkerModel,
+  getConfiguredModelId,
+  getWorkerModelId,
+  resolveTemperature,
+} from "../agents/model.js";
 import { withModelFallbacks } from "./model-fallback.js";
+import { withLlmCache } from "./model-cache.js";
+import { env } from "../core/config.js";
 import { DEPARTMENT_TOOLS, applyMcpBridge } from "../agents/capabilities.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
 import { getFailureLesson, upsertFailureLesson, bumpFailureLessonApplied } from "../db/queries.js";
@@ -118,21 +127,47 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
   // Without this the configured free OpenRouter fallbacks never engaged — a
   // Gemini quota/retirement error surfaced raw at the founder on every turn.
   const fallbacks = buildFallbackModels() as unknown as KernelBindableModel[];
+  // LLM response cache (opt-in, off by default). Only the side-effect-free
+  // planner + synthesizer calls are cached; worker tool-calling is excluded by
+  // construction (withLlmCache.bindTools bypasses the cache). Layered OUTSIDE
+  // the fallback chain so a hit skips it entirely.
+  const cacheEnabled = env.LLM_CACHE_ENABLED === "true";
+  const temperature = resolveTemperature();
+  const cachePlanner = (m: KernelBindableModel): KernelBindableModel =>
+    withLlmCache(m, {
+      enabled: cacheEnabled,
+      tenantId: TENANT,
+      modelId: getConfiguredModelId(),
+      temperature,
+      ttlSeconds: env.LLM_CACHE_TTL_SECONDS,
+    });
+  const cacheSynth = (m: KernelBindableModel): KernelBindableModel =>
+    withLlmCache(m, {
+      enabled: cacheEnabled,
+      tenantId: TENANT,
+      modelId: getWorkerModelId(),
+      temperature,
+      ttlSeconds: env.LLM_CACHE_TTL_SECONDS,
+    });
   return buildKernel({
-    plannerModel: withModelFallbacks(
-      getModel() as unknown as KernelBindableModel,
-      fallbacks,
-      "planner",
+    plannerModel: cachePlanner(
+      withModelFallbacks(
+        getModel() as unknown as KernelBindableModel,
+        fallbacks,
+        "planner",
+      ),
     ),
     workerModel: withModelFallbacks(
       getWorkerModel() as unknown as KernelBindableModel,
       fallbacks,
       "worker",
     ),
-    synthesizerModel: withModelFallbacks(
-      getWorkerModel() as unknown as KernelBindableModel,
-      fallbacks,
-      "synthesizer",
+    synthesizerModel: cacheSynth(
+      withModelFallbacks(
+        getWorkerModel() as unknown as KernelBindableModel,
+        fallbacks,
+        "synthesizer",
+      ),
     ),
     workers: buildWorkerSpecs(),
     checkpointer,
