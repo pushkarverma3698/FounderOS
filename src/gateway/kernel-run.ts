@@ -25,6 +25,7 @@ import { startTurn } from "../infra/trace.js";
 import { TraceCallback } from "../infra/trace-callback.js";
 import { logger } from "../infra/logger.js";
 import { isModelFallbackError } from "../agents/model.js";
+import { enqueueTurnAutoRetry } from "./auto-retry.js";
 import { recordFailedTurnInHistory, type FoldableKernel } from "./failed-turn-fold.js";
 import type { KernelStateType } from "../kernel/index.js";
 
@@ -244,7 +245,8 @@ export async function runKernelText(ctx: Context, text: string): Promise<void> {
     } catch (err) {
       trace.event("turn.error", { message: err instanceof Error ? err.message.slice(0, 400) : String(err) });
       if (foldCtx) await recordFailedTurnInHistory(foldCtx.kernel, foldCtx.config, err);
-      await replyForError(ctx, err);
+      // A live text turn can be replayed verbatim, so provider exhaustion auto-retries.
+      await replyForError(ctx, err, { chatId: String(chatId), text, turnId: trace.turnId });
     }
   });
 }
@@ -334,7 +336,12 @@ export async function restorePendingApproval(
 
 // ── Typed error replies (fail loud; the thread is NEVER wiped) ────────────────
 
-async function replyForError(ctx: Context, err: unknown): Promise<void> {
+/** `retry` (a live text turn, replayable verbatim) lets provider exhaustion queue ONE auto-retry; a resume omits it and keeps the manual path. */
+async function replyForError(
+  ctx: Context,
+  err: unknown,
+  retry?: { chatId: string; text: string; turnId: string },
+): Promise<void> {
   if (err instanceof BudgetExceededError) {
     await ctx.reply(
       `💰 <b>Run stopped — budget limit reached</b>\n<code>${safeHtml(err.reason)}</code>`,
@@ -368,6 +375,16 @@ async function replyForError(ctx: Context, err: unknown): Promise<void> {
   if (isModelFallbackError(err)) {
     // Provider outage/rate-limit after the whole fallback chain — a raw SDK
     // stack here reads like a system bug to the founder (2026-07-12 68eae59d).
+    if (retry && (await enqueueTurnAutoRetry(retry.chatId, retry.text, retry.turnId))) {
+      // Auto-retry queued (2026-07-13 audit) — the founder does nothing.
+      await ctx.reply(
+        `🤖 <b>The AI provider is rate-limited right now</b> — nothing is broken on our side. ` +
+          `I'll retry automatically in ~3 minutes; you don't need to do anything.`,
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+    // No replayable input (a resume) or the queue write failed — manual fallback.
     await ctx.reply(
       `🤖 <b>The AI provider is overloaded or rate-limited right now</b> — nothing is broken on our side. ` +
         `Wait a minute and send "try again"; I remember what you asked.`,

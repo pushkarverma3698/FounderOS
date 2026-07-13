@@ -158,7 +158,7 @@ export function isQuotaExhaustedError(err: unknown): boolean {
   );
 }
 
-function resolveTemperature(): number {
+export function resolveTemperature(): number {
   const raw = process.env["AGENT_TEMPERATURE"];
   if (raw === undefined) return 0;
   const n = Number.parseFloat(raw);
