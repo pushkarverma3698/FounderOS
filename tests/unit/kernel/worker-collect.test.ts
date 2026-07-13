@@ -28,24 +28,24 @@ const stateWith = (step: TaskEnvelope, finalText: string): KernelStateType =>
     mission: { goal: "g", status: "executing", plan: { schema_version: 1, goal: "g", steps: [step] }, cursor: 0 },
     results: [],
     attempts: {},
-    scratch: [new AIMessage(finalText)],
-    step_receipts: [],
+    scratch: { s1: [new AIMessage(finalText)] },
+    step_receipts: { s1: [] },
     failure: null,
     reply: "",
   }) as unknown as KernelStateType;
 
 describe("collect — prose finalize repair (live T01 regression)", () => {
-  it("wraps a prose finalize into {text} for text.summary and validates ok", () => {
+  it("wraps a prose finalize into {text} for text.summary and validates ok", async () => {
     const prose = "Linear is a project management tool for software teams. It tracks issues and cycles.";
-    const update = collect(stateWith(envelope(), prose));
+    const update = await collect(stateWith(envelope(), prose));
     const result = update.results?.[0];
     expect(result?.status).toBe("ok");
     if (result?.status === "ok") expect(result.output).toEqual({ text: prose });
   });
 
-  it("does NOT wrap prose for structured contracts (research.findings still fails loud)", () => {
+  it("does NOT wrap prose for structured contracts (research.findings still fails loud)", async () => {
     const step = envelope({ expected: { kind: "data", schema_ref: "research.findings" } });
-    const update = collect(stateWith(step, "here are my findings as prose"));
+    const update = await collect(stateWith(step, "here are my findings as prose"));
     const result = update.results?.[0];
     // Depending on jsonrepair's salvage the failure is "did not finalize" or a
     // schema mismatch — either way it MUST fail loud, never silently wrap.
@@ -56,16 +56,16 @@ describe("collect — prose finalize repair (live T01 regression)", () => {
     }
   });
 
-  it("prose wrap NEVER bypasses the action-receipt gate", () => {
+  it("prose wrap NEVER bypasses the action-receipt gate", async () => {
     const step = envelope({ expected: { kind: "action_receipt", schema_ref: "text.summary" } });
-    const update = collect(stateWith(step, "email sent, all done!"));
+    const update = await collect(stateWith(step, "email sent, all done!"));
     const result = update.results?.[0];
     expect(result?.status).toBe("failed");
     if (result?.status === "failed") expect(result.failure.message).toMatch(/receipt/);
   });
 
-  it("still fails when the worker produced no final text at all", () => {
-    const update = collect(stateWith(envelope(), ""));
+  it("still fails when the worker produced no final text at all", async () => {
+    const update = await collect(stateWith(envelope(), ""));
     expect(update.results?.[0]?.status).toBe("failed");
   });
 });
@@ -81,14 +81,14 @@ describe("collect — parts-array finalize (live d211fb74 regression)", () => {
       mission: { goal: "g", status: "executing", plan: { schema_version: 1, goal: "g", steps: [step] }, cursor: 0 },
       results: [],
       attempts: {},
-      scratch: [new AIMessage({ content: content as never })],
-      step_receipts: [],
+      scratch: { s1: [new AIMessage({ content: content as never })] },
+      step_receipts: { s1: [] },
       failure: null,
       reply: "",
     }) as unknown as KernelStateType;
 
-  it("salvages a prose finalize delivered as content parts for text.summary", () => {
-    const update = collect(
+  it("salvages a prose finalize delivered as content parts for text.summary", async () => {
+    const update = await collect(
       stateWithContent(envelope(), [{ type: "text", text: "The pending action is the LinkedIn approval." }]),
     );
     const result = update.results?.[0];
@@ -98,14 +98,110 @@ describe("collect — parts-array finalize (live d211fb74 regression)", () => {
     }
   });
 
-  it("parses a JSON finalize delivered as content parts for structured contracts", () => {
+  it("parses a JSON finalize delivered as content parts for structured contracts", async () => {
     const step = envelope({ expected: { kind: "data", schema_ref: "research.findings" } });
-    const update = collect(
+    const update = await collect(
       stateWithContent(step, [
         { type: "text", text: '{"summary":"Linear ships fast","sources":[{"title":"Linear blog"}]}' },
       ]),
     );
     const result = update.results?.[0];
     expect(result?.status).toBe("ok");
+  });
+});
+
+describe("collect — output unwrapping and coercion (battery test failures)", () => {
+  const stateWith = (step: TaskEnvelope, finalText: string): KernelStateType =>
+    ({
+      mission: { goal: "g", status: "executing", plan: { schema_version: 1, goal: "g", steps: [step] }, cursor: 0 },
+      results: [],
+      attempts: {},
+      scratch: { s1: [new AIMessage(finalText)] },
+      step_receipts: { s1: [] },
+      failure: null,
+      reply: "",
+    }) as unknown as KernelStateType;
+
+  it("unwraps research.findings wrapped under key research.findings", async () => {
+    const step = envelope({ expected: { kind: "data", schema_ref: "research.findings" } });
+    const wrapped = JSON.stringify({
+      "research.findings": {
+        summary: "Linear is great",
+        sources: [{ title: "Linear website", url: "https://linear.app" }]
+      }
+    });
+    const update = await collect(stateWith(step, wrapped));
+    const result = update.results?.[0];
+    expect(result?.status).toBe("ok");
+    if (result?.status === "ok") {
+      expect(result.output).toEqual({
+        summary: "Linear is great",
+        sources: [{ title: "Linear website", url: "https://linear.app" }]
+      });
+    }
+  });
+
+  it("unwraps action.summary wrapped under key action", async () => {
+    const step = envelope({ expected: { kind: "data", schema_ref: "action.summary" } });
+    const wrapped = JSON.stringify({
+      action: {
+        summary: "Database migrated successfully"
+      }
+    });
+    const update = await collect(stateWith(step, wrapped));
+    const result = update.results?.[0];
+    expect(result?.status).toBe("ok");
+    if (result?.status === "ok") {
+      expect(result.output).toEqual({
+        summary: "Database migrated successfully"
+      });
+    }
+  });
+
+  it("coerces text -> body for draft.linkedin_post", async () => {
+    const step = envelope({ expected: { kind: "data", schema_ref: "draft.linkedin_post" } });
+    const payload = JSON.stringify({
+      text: "This is a great new feature in FounderOS!"
+    });
+    const update = await collect(stateWith(step, payload));
+    const result = update.results?.[0];
+    expect(result?.status).toBe("ok");
+    if (result?.status === "ok") {
+      expect(result.output).toEqual({
+        body: "This is a great new feature in FounderOS!"
+      });
+    }
+  });
+
+  it("coerces text -> summary for action.summary", async () => {
+    const step = envelope({ expected: { kind: "data", schema_ref: "action.summary" } });
+    const payload = JSON.stringify({
+      text: "Removed old logs"
+    });
+    const update = await collect(stateWith(step, payload));
+    const result = update.results?.[0];
+    expect(result?.status).toBe("ok");
+    if (result?.status === "ok") {
+      expect(result.output).toEqual({
+        summary: "Removed old logs"
+      });
+    }
+  });
+
+  it("coerces text -> summary for research.findings", async () => {
+    const step = envelope({ expected: { kind: "data", schema_ref: "research.findings" } });
+    const payload = JSON.stringify({
+      text: "Found 3 open issues",
+      sources: []
+    });
+    const update = await collect(stateWith(step, payload));
+    const result = update.results?.[0];
+    expect(result?.status).toBe("ok");
+    if (result?.status === "ok") {
+      expect(result.output).toEqual({
+        summary: "Found 3 open issues",
+        sources: []
+      });
+    }
   });
 });

@@ -20,6 +20,7 @@
 
 import { HumanMessage } from "@langchain/core/messages";
 import { dispatch } from "./supervisor.js";
+import { RESET } from "./state.js";
 import type { KernelStateType, KernelUpdate } from "./state.js";
 import type { Mission, StepResult } from "./contracts.js";
 
@@ -162,8 +163,13 @@ export function makeLessonDispatch(lessons?: LessonStore) {
         } catch {
           /* allow-failopen: a lesson lookup blip must never break the retry it decorates */
         }
-        if (lesson && out.scratch && typeof out.scratch === "object" && !Array.isArray(out.scratch) && "set" in out.scratch) {
-          out.scratch = { set: [...out.scratch.set, new HumanMessage(lessonMessage(lesson))] };
+        if (lesson && out.scratch && typeof out.scratch === "object" && !Array.isArray(out.scratch)) {
+          const stepScratch = (out.scratch as Record<string, any>)[step.step_id];
+          if (stepScratch && "set" in stepScratch) {
+            (out.scratch as Record<string, any>)[step.step_id] = {
+              set: [...stepScratch.set, new HumanMessage(lessonMessage(lesson))],
+            };
+          }
         }
       }
     }

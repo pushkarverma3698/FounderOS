@@ -36,6 +36,28 @@ function accumulating<T>() {
   };
 }
 
+export type RecordUpdate<T> = Record<string, T[] | Reset | { set: T[] }> | Reset;
+
+function accumulatingRecord<T>() {
+  return {
+    reducer: (curr: Record<string, T[]>, update: RecordUpdate<T>): Record<string, T[]> => {
+      if (update === RESET) return {};
+      const next = { ...curr };
+      for (const [stepId, val] of Object.entries(update)) {
+        if (val === RESET) {
+          delete next[stepId];
+        } else if (Array.isArray(val)) {
+          next[stepId] = (next[stepId] ?? []).concat(val);
+        } else {
+          next[stepId] = val.set;
+        }
+      }
+      return next;
+    },
+    default: () => ({}) as Record<string, T[]>,
+  };
+}
+
 export const KernelState = Annotation.Root({
   turn: Annotation<TurnRecord>({
     reducer: (curr, update) => update ?? curr,
@@ -62,11 +84,11 @@ export const KernelState = Annotation.Root({
     default: () => null,
   }),
 
-  /** Worker-local working memory for the ACTIVE step only; wiped at step boundaries. */
-  scratch: Annotation<BaseMessage[], ListUpdate<BaseMessage>>(accumulating<BaseMessage>()),
+  /** Worker-local working memory isolated by step_id; wiped at step boundaries. */
+  scratch: Annotation<Record<string, BaseMessage[]>, RecordUpdate<BaseMessage>>(accumulatingRecord<BaseMessage>()),
 
   /** Receipts recorded (by code, not the model) while executing the active step. */
-  step_receipts: Annotation<ToolReceipt[], ListUpdate<ToolReceipt>>(accumulating<ToolReceipt>()),
+  step_receipts: Annotation<Record<string, ToolReceipt[]>, RecordUpdate<ToolReceipt>>(accumulatingRecord<ToolReceipt>()),
 
   /** The final founder-facing reply for this turn. */
   reply: Annotation<string>({

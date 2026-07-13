@@ -95,8 +95,8 @@ function stateWith(over: Partial<KernelStateType>): KernelStateType {
     results: [],
     attempts: {},
     failure: null,
-    scratch: [],
-    step_receipts: [],
+    scratch: {},
+    step_receipts: {},
     reply: "",
     lesson_candidate: null,
     last_turn: null,
@@ -139,7 +139,7 @@ describe("makeLessonDispatch", () => {
     const update = await node(stateWith({ results: [FAILED_RESULT] }));
 
     expect(store.lookup).toHaveBeenCalledWith("research", LESSON.signature);
-    const scratch = (update.scratch as { set: HumanMessage[] }).set;
+    const scratch = (update.scratch as Record<string, { set: HumanMessage[] }>)["s1"]!.set;
     expect(scratch).toHaveLength(3); // envelope + RETRY + lesson
     const text = String(scratch[2]!.content);
     expect(text).toContain("KNOWN FAILURE PATTERN (seen 3×");
@@ -153,7 +153,7 @@ describe("makeLessonDispatch", () => {
 
     const update = await node(stateWith({ results: [FAILED_RESULT] }));
 
-    const scratch = (update.scratch as { set: HumanMessage[] }).set;
+    const scratch = (update.scratch as Record<string, { set: HumanMessage[] }>)["s1"]!.set;
     expect(scratch).toHaveLength(2);
     expect(update.lesson_candidate).toMatchObject({ step_id: "s1" });
   });
@@ -209,7 +209,7 @@ describe("makeLessonDispatch", () => {
     const candidate = { step_id: "s1", worker: "research", signature: "sig", component: "c", objective: "o" };
 
     const retryUpdate = await node(stateWith({ results: [FAILED_RESULT] }));
-    expect((retryUpdate.scratch as { set: unknown[] }).set).toHaveLength(2); // no lesson, no crash
+    expect((retryUpdate.scratch as Record<string, { set: unknown[] }>)["s1"]!.set).toHaveLength(2); // no lesson, no crash
     expect(retryUpdate.mission).toMatchObject({ status: "executing" });
 
     const recordUpdate = await node(stateWith({ results: [OK_RESULT], lesson_candidate: candidate }));

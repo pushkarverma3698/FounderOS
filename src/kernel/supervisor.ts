@@ -88,58 +88,82 @@ export function dispatch(state: KernelStateType): KernelUpdate {
     return { mission: { ...mission, status: "failed" }, failure, reply: formatFailureReply(failure) };
   }
 
-  let cursor = mission.cursor;
-  while (cursor < plan.steps.length) {
-    const step = plan.steps[cursor]!;
+  const okStepIds = new Set(results.filter(r => r.status === "ok").map(r => r.step_id));
+  const failedStepIds = new Set(results.filter(r => r.status === "failed").map(r => r.step_id));
+
+  let nextStepIdx = -1;
+  for (let i = 0; i < plan.steps.length; i++) {
+    const step = plan.steps[i]!;
+    const completed = okStepIds.has(step.step_id);
+    if (!completed) {
+      const deps = step.dependencies ?? [];
+      const depsOk = deps.every(d => okStepIds.has(d));
+      if (depsOk) {
+        nextStepIdx = i;
+        break;
+      }
+    }
+  }
+
+  if (nextStepIdx !== -1) {
+    const step = plan.steps[nextStepIdx]!;
     const last = lastResultFor(step.step_id, results);
 
     if (!last) {
-      // Fresh (or retried) step: seed the worker's isolated context.
       const attempt = attempts[step.step_id] ?? 0;
       return {
-        mission: { ...mission, status: "executing", cursor },
+        mission: { ...mission, status: "executing", cursor: nextStepIdx },
         attempts: { [step.step_id]: attempt + 1 },
-        scratch: { set: [envelopeMessage(step, results)] },
-        step_receipts: RESET,
+        scratch: { [step.step_id]: { set: [envelopeMessage(step, results)] } },
+        step_receipts: { [step.step_id]: RESET },
       };
     }
 
-    if (last.status === "ok") {
-      cursor += 1;
-      continue;
-    }
-
-    // Failed step: one visible retry for retryable failures, then terminate.
     const attempt = attempts[step.step_id] ?? 0;
-    if (last.failure.retryable && attempt < MAX_ATTEMPTS_PER_STEP) {
+    if (last.status === "failed" && last.failure.retryable && attempt < MAX_ATTEMPTS_PER_STEP) {
       return {
-        mission: { ...mission, status: "executing", cursor },
+        mission: { ...mission, status: "executing", cursor: nextStepIdx },
         attempts: { [step.step_id]: attempt + 1 },
         scratch: {
-          set: [
-            envelopeMessage(step, results),
-            new HumanMessage(
-              `RETRY ${attempt} of ${MAX_ATTEMPTS_PER_STEP - 1}: the previous attempt failed — ${last.failure.message}. ` +
-                `Correct the issue and finish with valid JSON for "${step.expected.schema_ref}".`,
-            ),
-          ],
+          [step.step_id]: {
+            set: [
+              envelopeMessage(step, results),
+              new HumanMessage(
+                `RETRY ${attempt} of ${MAX_ATTEMPTS_PER_STEP - 1}: the previous attempt failed — ${last.failure.message}. ` +
+                  `Correct the issue and finish with valid JSON for "${step.expected.schema_ref}".`,
+              ),
+            ],
+          },
         },
-        step_receipts: RESET,
-        // The retried step's failed result must not shadow a later success:
-        // drop it from the bus (results keeps ONLY non-superseded entries).
+        step_receipts: { [step.step_id]: RESET },
         results: { set: results.filter((r) => r !== last) },
       };
     }
 
+    const failureReport = last.status === "failed" ? last.failure : {
+      step_id: step.step_id,
+      stage: "validation" as const,
+      component: "supervisor",
+      message: "Step failed with invalid status.",
+      retryable: false,
+    };
     return {
-      mission: { ...mission, status: "failed", cursor },
-      failure: last.failure,
-      reply: formatFailureReply(last.failure),
+      mission: { ...mission, status: "failed", cursor: nextStepIdx },
+      failure: failureReport,
+      reply: formatFailureReply(failureReport),
     };
   }
 
-  // Every step completed ok.
-  return { mission: { ...mission, status: "synthesizing", cursor } };
+  const failedStep = results.find(r => r.status === "failed");
+  if (failedStep && failedStep.status === "failed") {
+    return {
+      mission: { ...mission, status: "failed" },
+      failure: failedStep.failure,
+      reply: formatFailureReply(failedStep.failure),
+    };
+  }
+
+  return { mission: { ...mission, status: "synthesizing" } };
 }
 
 /** Conditional edge after dispatch. */

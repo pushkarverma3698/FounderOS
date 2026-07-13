@@ -51,6 +51,7 @@ import { scheduleTask, listScheduled, editScheduled } from "./agent-tools/schedu
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
 import { searchMemoryTool } from "../tools/memory.js";
+import { writeArtifact } from "../tools/artifact.js";
 import { listPendingSignals } from "./agent-tools/pending-signals.js";
 import { MCP_BRIDGE_ENABLED, MCP_BRIDGE_MANIFEST } from "../core/config.js";
 import type { BridgeManifest } from "../mcp/bridge-manifest.js";
@@ -75,7 +76,7 @@ type AnyTool = any;
  *   alignment. Engineering and comms don't query business strategy.
  */
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled],
+  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, writeArtifact],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal],
