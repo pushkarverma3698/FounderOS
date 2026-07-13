@@ -10,6 +10,8 @@ import {
   SUPERVISOR_TOOLS,
   HITL_GATED_TOOLS,
   buildCapabilityManifest,
+  mergeBridgedTools,
+  stripBridgedTools,
 } from "../../../src/agents/capabilities.js";
 
 describe("DEPARTMENT_TOOLS registry", () => {
@@ -98,5 +100,38 @@ describe("SUPERVISOR_PROMPT embeds the generated manifest", () => {
     const { SUPERVISOR_PROMPT } = await import("../../../src/agents/system-prompts.js");
     expect(SUPERVISOR_PROMPT).toContain("CAPABILITIES (auto-generated from the live tool registry");
     expect(SUPERVISOR_PROMPT).toContain("claude_code*");
+  });
+});
+
+describe("stripBridgedTools — idempotent live reload (Tier 3)", () => {
+  const nativeA = { name: "send_email" };
+  const nativeB = { name: "search_web" };
+  const bridged1 = { name: "mcp__notion__search" };
+  const bridged2 = { name: "mcp__notion__create_page" };
+
+  it("removes only mcp__-prefixed tools and gate names, leaving native ones", () => {
+    const target: Record<string, { name: string }[]> = {
+      research: [nativeB, bridged1, bridged2],
+      comms: [nativeA],
+    };
+    const hitl = new Set(["send_email", "mcp__notion__create_page"]);
+    stripBridgedTools(target, hitl);
+    expect(target["research"]!.map((t) => t.name)).toEqual(["search_web"]);
+    expect(target["comms"]!.map((t) => t.name)).toEqual(["send_email"]);
+    expect([...hitl]).toEqual(["send_email"]);
+  });
+
+  it("makes a strip→merge cycle idempotent (no duplicate tools on reload)", () => {
+    const target: Record<string, { name: string }[]> = { research: [nativeB] };
+    const hitl = new Set<string>();
+    const byDept = { research: [bridged1, bridged2] };
+
+    for (let i = 0; i < 3; i++) {
+      stripBridgedTools(target, hitl);
+      mergeBridgedTools(target, hitl, byDept, ["mcp__notion__create_page"]);
+    }
+    // one native + two bridged, regardless of how many reloads ran
+    expect(target["research"]!.map((t) => t.name)).toEqual(["search_web", "mcp__notion__search", "mcp__notion__create_page"]);
+    expect([...hitl]).toEqual(["mcp__notion__create_page"]);
   });
 });

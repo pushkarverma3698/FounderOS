@@ -22,6 +22,7 @@ import {
   handleHalt,
   handleResume,
   handleCommands,
+  handleConnect,
 } from "./commands.js";
 import { registerMediaHandlers } from "./media.js";
 import { runKernelText, resumeKernel } from "./kernel-run.js";
@@ -46,6 +47,7 @@ export function registerHandlers(bot: Bot): void {
   bot.command("resume", (ctx: Context) => handleResume(ctx));
   bot.command("status", (ctx: Context) => handleStatus(ctx));
   bot.command("budget", (ctx: Context) => handleBudget(ctx));
+  bot.command("connect", (ctx: Context) => handleConnect(ctx));
   bot.command("commands", (ctx: Context) => handleCommands(ctx));
 
   bot.on("message:text", async (ctx: Context) => {
