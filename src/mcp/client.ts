@@ -26,8 +26,28 @@ const log = childLogger({ module: "mcp:client" });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTool = any;
 
-/** Build the stdio connection config, resolving forwarded env-var names to values. */
-function toConnection(entry: McpServerEntry): Connection {
+/**
+ * Build the adapter connection config for one server, resolving forwarded
+ * env-var NAMES to their values at connect time (secrets never live in the
+ * manifest — see bridge-manifest.ts). Pure given (entry, process.env); exported
+ * so the transport-mapping is unit-tested rather than asserted.
+ */
+export function toConnection(entry: McpServerEntry): Connection {
+  if (entry.transport === "http") {
+    // Literal headers first, then secret headers resolved from process.env.
+    const headers: Record<string, string> = { ...entry.headers };
+    for (const [header, envName] of Object.entries(entry.headerEnv)) {
+      const v = process.env[envName];
+      if (v !== undefined) headers[header] = v;
+      else log.warn({ header, envName }, "MCP http header env var requested but unset");
+    }
+    return {
+      transport: "http",
+      url: entry.url,
+      ...(Object.keys(headers).length ? { headers } : {}),
+    };
+  }
+
   const env: Record<string, string> = {};
   for (const name of entry.env) {
     const v = process.env[name];
