@@ -94,6 +94,11 @@ function executedToolCalls(scratch: BaseMessage[]): number {
   return scratch.filter((m) => isToolMessage(m)).length;
 }
 
+/** True when an identical (tool + args_hash) call already FAILED among these receipts. */
+function alreadyFailedIdentically(receipts: ToolReceipt[], tool: string, argsHash: string): boolean {
+  return receipts.some((r) => r.tool === tool && r.args_hash === argsHash && !r.ok);
+}
+
 function workerProtocol(step: TaskEnvelope, remainingCalls: number): string {
   return [
     ``,
@@ -191,6 +196,23 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
         continue;
       }
 
+      // Duplicate-failure guard (turn 49dbaa06): if this EXACT call already failed
+      // in this step, don't re-invoke — re-running proved-failing calls burns LLM
+      // roundtrips and re-hits the failing external surface. No slot, no receipt;
+      // just tell the model plainly not to repeat it. Receipts accrued earlier in
+      // THIS batch count too, so a doubled call in one message is caught as well.
+      const argsHash = hashToolArgs(call.args ?? {});
+      if (alreadyFailedIdentically([...state.step_receipts, ...receipts], call.name, argsHash)) {
+        messages.push(
+          new ToolMessage({
+            content: `❌ ${call.name} with these exact arguments already failed in this step — do NOT repeat it. Try a different approach or finalize with what you have. ${TOOL_FAILURE_MARKER} stage=tool]]`,
+            tool_call_id: callId,
+            name: call.name,
+          }),
+        );
+        continue;
+      }
+
       let resultStr: string;
       let ok: boolean;
       try {
@@ -207,7 +229,7 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
       executed += 1;
       receipts.push({
         tool: call.name,
-        args_hash: hashToolArgs(call.args ?? {}),
+        args_hash: argsHash,
         result_digest: digestToolResult(resultStr),
         ok,
         at: new Date().toISOString(),
