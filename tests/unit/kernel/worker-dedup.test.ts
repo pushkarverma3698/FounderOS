@@ -31,6 +31,7 @@ function receipt(tool: string, args: unknown, ok: boolean): ToolReceipt {
 function stateWithCalls(
   calls: { id: string; name: string; args: Record<string, unknown> }[],
   receipts: ToolReceipt[],
+  priorResults: { tool_receipts: ToolReceipt[] }[] = [],
 ): KernelStateType {
   const ai = new AIMessage({ content: "", tool_calls: calls });
   return {
@@ -54,7 +55,7 @@ function stateWithCalls(
       },
       cursor: 0,
     },
-    results: [],
+    results: priorResults,
     attempts: {},
     failure: null,
     scratch: [ai],
@@ -130,5 +131,41 @@ describe("makeToolsNode — duplicate FAILED call guard (turn 49dbaa06)", () => 
     expect(update.step_receipts).toHaveLength(1);
     expect(update.scratch).toHaveLength(2);
     expect(String((update.scratch![1] as { content: unknown }).content)).toMatch(/already failed/i);
+  });
+});
+
+describe("makeToolsNode — cross-step duplicate FAILED call guard (within one turn)", () => {
+  it("short-circuits a call that already FAILED in an EARLIER completed step this turn (receipts on state.results)", async () => {
+    const invoke = vi.fn(async () => "should not run");
+    const tool: KernelTool = { name: "github_read", invoke };
+    const args = { repo: "founderos", path: "missing.md" };
+    // step_receipts is empty (fresh step) but a prior OK-collected step carries
+    // the failing receipt for this exact call.
+    const state = stateWithCalls(
+      [{ id: "call-x", name: "github_read", args }],
+      [],
+      [{ tool_receipts: [receipt("github_read", args, false)] }],
+    );
+
+    const update = await makeToolsNode(specWith(tool))(state);
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(update.step_receipts).toEqual([]);
+    expect(String((update.scratch![0] as { content: unknown }).content)).toMatch(/already failed/i);
+  });
+
+  it("does NOT short-circuit when the identical prior-step call SUCCEEDED", async () => {
+    const invoke = vi.fn(async () => "fresh result");
+    const tool: KernelTool = { name: "github_read", invoke };
+    const args = { repo: "founderos", path: "README.md" };
+    const state = stateWithCalls(
+      [{ id: "call-x", name: "github_read", args }],
+      [],
+      [{ tool_receipts: [receipt("github_read", args, true)] }],
+    );
+
+    await makeToolsNode(specWith(tool))(state);
+
+    expect(invoke).toHaveBeenCalledOnce();
   });
 });
