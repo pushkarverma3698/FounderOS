@@ -42,7 +42,11 @@ function accumulatingRecord<T>() {
   return {
     reducer: (curr: Record<string, T[]>, update: RecordUpdate<T>): Record<string, T[]> => {
       if (update === RESET) return {};
-      const next = { ...curr };
+      // Migration guard: stale checkpoints from before the isolated-records
+      // upgrade (PR #345) store these channels as flat arrays. Discard them
+      // — the dispatch node resets scratch/step_receipts every step anyway.
+      const base = Array.isArray(curr) ? {} : curr;
+      const next = { ...base };
       for (const [stepId, val] of Object.entries(update)) {
         if (val === RESET) {
           delete next[stepId];
