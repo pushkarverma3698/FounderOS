@@ -195,12 +195,24 @@ fi
 echo "==> Restarting service (single-instance lock makes this safe)"
 sudo systemctl restart founderos
 
-echo "==> Waiting for health"
-sleep 5
-if curl -fsS http://127.0.0.1:3001/health >/dev/null; then
-  echo "==> Deploy OK — /health is green"
-else
-  echo "!! /health did NOT come up — check: journalctl -u founderos -n 50" >&2
+# Poll for health rather than a single shot: v3 boot binds the health server
+# only AFTER compiling the kernel + bridging MCP child servers (blender/slack/
+# deepwiki spawn at startup once MCP_BRIDGE_ENABLED=true), which pushes first-
+# healthy to ~7s — a lone `sleep 5 && curl` races the boot and reports a false
+# failure on an otherwise-successful deploy (2026-07-13). Same {1..30} idiom as
+# the Postgres/Ollama readiness loops above.
+echo "==> Waiting for health (up to 60s — v3 boot spawns MCP bridge child servers)"
+HEALTHY=""
+for i in {1..30}; do
+  if curl -fsS http://127.0.0.1:3001/health >/dev/null 2>&1; then
+    HEALTHY=1
+    echo "==> Deploy OK — /health is green (after $((i * 2))s)"
+    break
+  fi
+  sleep 2
+done
+if [ -z "$HEALTHY" ]; then
+  echo "!! /health did NOT come up in 60s — check: journalctl -u founderos -n 50" >&2
   exit 1
 fi
 
