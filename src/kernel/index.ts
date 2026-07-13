@@ -32,8 +32,10 @@ export {
   resolveInputs,
   envelopeMessage,
   formatFailureReply,
+  retryMessage,
   MAX_ATTEMPTS_PER_STEP,
 } from "./supervisor.js";
+export { isKernelTerminalError, describeInterceptedError } from "./errors.js";
 export {
   makeAgentNode,
   makeToolsNode,
@@ -47,7 +49,7 @@ export {
   type KernelBindableModel,
   type WorkerSpec,
 } from "./worker.js";
-export { makeSynthesizeNode, receiptsBlock } from "./synthesizer.js";
+export { makeSynthesizeNode, receiptsBlock, fallbackSynthesisReply } from "./synthesizer.js";
 export {
   normalizeFailureSignature,
   lessonMessage,

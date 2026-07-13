@@ -44,6 +44,7 @@ import type { KernelStateType, KernelUpdate } from "./state.js";
 import type { KernelChatModel } from "./planner.js";
 import { messageContentText } from "./message-text.js";
 import { verifyStepResult } from "./verify.js";
+import { describeInterceptedError, isKernelTerminalError } from "./errors.js";
 
 /** Narrow tool surface. `config` carries thread_id for DB-backed HITL gates. */
 export interface KernelTool {
@@ -159,16 +160,49 @@ export function makeAgentNode(model: KernelBindableModel, specs: Record<string, 
     const bindable = remaining > 0 && spec.tools.length > 0 && model.bindTools
       ? model.bindTools(spec.tools)
       : model;
-    const response = await bindable.invoke([system, ...scratch]);
-    return { scratch: { [step.step_id]: [response] } };
+    // Self-correction seam: a model error that escapes the fallback chain used
+    // to abort the WHOLE mission (completed steps discarded, raw error at the
+    // gateway). Degrade it to a typed retryable failure so the supervisor's
+    // own retry loop handles it; terminal errors (HITL interrupt, budget caps,
+    // turn-timeout abort) still propagate untouched — see errors.ts.
+    try {
+      const response = await bindable.invoke([system, ...scratch]);
+      return { scratch: { [step.step_id]: [response] } };
+    } catch (err) {
+      if (isKernelTerminalError(err)) throw err;
+      return {
+        results: [
+          {
+            status: "failed",
+            step_id: step.step_id,
+            failure: {
+              step_id: step.step_id,
+              stage: "model",
+              component: `kernel/worker:${step.worker}`,
+              message: `Worker model call failed: ${describeInterceptedError(err)}`,
+              retryable: true,
+            },
+          } satisfies StepResult,
+        ],
+      };
+    }
   };
+}
+
+/** Stages the agent node records ITSELF (pre-collect) — collect must not double-record. */
+const AGENT_RECORDED_STAGES: ReadonlySet<string> = new Set(["routing", "model"]);
+
+function agentRecordedFailure(state: KernelStateType, stepId: string): boolean {
+  return state.results.some(
+    (r) => r.step_id === stepId && r.status === "failed" && AGENT_RECORDED_STAGES.has(r.failure.stage),
+  );
 }
 
 /** Route after the agent turn: run tools, or collect the step result. */
 export function routeAfterAgent(state: KernelStateType): "tools" | "collect" {
-  // A routing/spec failure short-circuits straight past tools.
+  // A routing/spec or intercepted-model failure short-circuits straight past tools.
   const step = state.mission.plan?.steps[state.mission.cursor];
-  if (step && state.results.some((r) => r.step_id === step.step_id && r.status === "failed" && r.failure.stage === "routing")) {
+  if (step && agentRecordedFailure(state, step.step_id)) {
     return "collect";
   }
   if (!step) return "collect";
@@ -283,8 +317,8 @@ function tryParseJson(text: string): unknown | null {
 export async function collect(state: KernelStateType): Promise<KernelUpdate> {
   const step = currentStep(state);
 
-  // Routing failure already recorded by the agent node — nothing to collect.
-  if (state.results.some((r) => r.step_id === step.step_id && r.status === "failed" && r.failure.stage === "routing")) {
+  // Routing/model failure already recorded by the agent node — nothing to collect.
+  if (agentRecordedFailure(state, step.step_id)) {
     return {};
   }
 
