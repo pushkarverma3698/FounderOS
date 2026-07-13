@@ -5,8 +5,8 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
-import { buildBridgedTools } from "../../../src/mcp/client.js";
-import { bridgeManifestSchema } from "../../../src/mcp/bridge-manifest.js";
+import { buildBridgedTools, toConnection } from "../../../src/mcp/client.js";
+import { bridgeManifestSchema, mcpServerSchema } from "../../../src/mcp/bridge-manifest.js";
 import type { LoadedMcpTool } from "../../../src/agents/agent-tools/external-mcp.js";
 
 function tool(name: string): LoadedMcpTool {
@@ -63,5 +63,51 @@ describe("buildBridgedTools", () => {
     const byDept = await buildBridgedTools(bridgeManifestSchema.parse({ servers: {} }), factory as never);
     expect(byDept).toEqual({});
     expect(factory).not.toHaveBeenCalled();
+  });
+});
+
+describe("toConnection (transport mapping, Tier 1)", () => {
+  it("maps a stdio entry and forwards resolved env-var values", () => {
+    process.env.__MCP_TEST_TOKEN = "secret-value";
+    const entry = mcpServerSchema.parse({
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "server"],
+      env: ["__MCP_TEST_TOKEN"],
+      department: "comms",
+    });
+    const conn = toConnection(entry) as { transport: string; command: string; env: Record<string, string> };
+    expect(conn.transport).toBe("stdio");
+    expect(conn.command).toBe("npx");
+    expect(conn.env).toEqual({ __MCP_TEST_TOKEN: "secret-value" });
+    delete process.env.__MCP_TEST_TOKEN;
+  });
+
+  it("maps an http entry, merging literal headers with env-resolved secret headers", () => {
+    process.env.__MCP_TEST_AUTH = "Bearer abc123";
+    const entry = mcpServerSchema.parse({
+      transport: "http",
+      url: "https://mcp.example.com/mcp",
+      headers: { "X-Version": "2026-07" },
+      headerEnv: { Authorization: "__MCP_TEST_AUTH" },
+      department: "research",
+    });
+    const conn = toConnection(entry) as { transport: string; url: string; headers: Record<string, string> };
+    expect(conn.transport).toBe("http");
+    expect(conn.url).toBe("https://mcp.example.com/mcp");
+    expect(conn.headers).toEqual({ "X-Version": "2026-07", Authorization: "Bearer abc123" });
+    delete process.env.__MCP_TEST_AUTH;
+  });
+
+  it("omits a header whose env var is unset (never sends an empty secret)", () => {
+    delete process.env.__MCP_MISSING;
+    const entry = mcpServerSchema.parse({
+      transport: "http",
+      url: "https://mcp.example.com/mcp",
+      headerEnv: { Authorization: "__MCP_MISSING" },
+      department: "research",
+    });
+    const conn = toConnection(entry) as { headers?: Record<string, string> };
+    expect(conn.headers).toBeUndefined();
   });
 });

@@ -14,16 +14,9 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 
-/** One external MCP server entry. */
-export const mcpServerSchema = z.object({
-  /** Transport — only stdio is supported today (local child process). */
-  transport: z.literal("stdio").default("stdio"),
-  /** Executable to spawn (e.g. "uvx", "npx"). */
-  command: z.string().min(1),
-  /** Arguments passed to the executable. */
-  args: z.array(z.string()).default([]),
-  /** Names of process env vars to forward to the child (secrets stay out of the manifest). */
-  env: z.array(z.string()).default([]),
+/** Fields every server carries regardless of transport — the routing +
+ *  safety-classification data the bridge acts on (transport-agnostic). */
+const sharedServerFields = {
   /** Department(s) that receive this server's tools. */
   department: z.union([z.string(), z.array(z.string())]),
   /** Explicit allowlist of tool names that require HITL approval. Everything
@@ -34,7 +27,43 @@ export const mcpServerSchema = z.object({
    *  Default false honours the explicit-allowlist contract; flip it on for a
    *  server whose tool surface you don't fully trust to enumerate. */
   gateUnlisted: z.boolean().default(false),
+};
+
+/** A local child-process server (blender, npx-launched servers). */
+export const stdioServerSchema = z.object({
+  transport: z.literal("stdio"),
+  /** Executable to spawn (e.g. "uvx", "npx"). */
+  command: z.string().min(1),
+  /** Arguments passed to the executable. */
+  args: z.array(z.string()).default([]),
+  /** Names of process env vars to forward to the child (secrets stay out of the manifest). */
+  env: z.array(z.string()).default([]),
+  ...sharedServerFields,
 });
+
+/** A hosted remote server reached over streamable HTTP (the 2026 default:
+ *  Notion, Linear, Stripe, DeepWiki, … — no local install). */
+export const httpServerSchema = z.object({
+  transport: z.literal("http"),
+  /** The server's streamable-HTTP endpoint (e.g. "https://mcp.deepwiki.com/mcp"). */
+  url: z.string().url(),
+  /** Literal, NON-SECRET headers sent verbatim (e.g. an API-version pin). */
+  headers: z.record(z.string(), z.string()).default({}),
+  /** header name → env-var NAME whose value becomes that header at connect
+   *  time. This is the HTTP analogue of stdio `env`: secrets stay out of the
+   *  manifest, resolved from process.env only when the connection is opened.
+   *  e.g. { "Authorization": "NOTION_MCP_TOKEN" }. */
+  headerEnv: z.record(z.string(), z.string()).default({}),
+  ...sharedServerFields,
+});
+
+/** One external MCP server entry — stdio (local) or http (hosted remote).
+ *  The `preprocess` keeps backward-compat: an entry that omits `transport`
+ *  still parses as stdio, so pre-http manifests (and their tests) are unchanged. */
+export const mcpServerSchema = z.preprocess(
+  (v) => (v && typeof v === "object" && !Array.isArray(v) && !("transport" in v) ? { transport: "stdio", ...v } : v),
+  z.discriminatedUnion("transport", [stdioServerSchema, httpServerSchema]),
+);
 
 export type McpServerEntry = z.infer<typeof mcpServerSchema>;
 

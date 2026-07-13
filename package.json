@@ -36,7 +36,8 @@
     "proof:scoreboard": "node --import tsx/esm scripts/proof-scoreboard.ts",
     "proof:case-study": "node --env-file=.env --import tsx/esm scripts/export-case-study.ts",
     "proof:costs": "node --env-file=.env --import tsx/esm scripts/proof-cost-ledger.ts",
-    "gap:scan": "node --env-file=.env --import tsx/esm scripts/gap-scan.ts"
+    "gap:scan": "node --env-file=.env --import tsx/esm scripts/gap-scan.ts",
+    "mcp:probe": "node --env-file=.env --import tsx/esm scripts/mcp-bridge-probe.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
