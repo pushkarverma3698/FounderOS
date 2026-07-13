@@ -53,6 +53,8 @@ import { searchKnowledge } from "../tools/knowledge.js";
 import { searchMemoryTool } from "../tools/memory.js";
 import { listPendingSignals } from "./agent-tools/pending-signals.js";
 import { MCP_BRIDGE_ENABLED, MCP_BRIDGE_MANIFEST } from "../core/config.js";
+import type { BridgeManifest } from "../mcp/bridge-manifest.js";
+import type { BridgedTools } from "../mcp/client.js";
 
 // Tool generics are heterogeneous across departments; the graph only needs
 // `.name` + invokability, both checked by tests. Typing the union precisely
@@ -149,23 +151,34 @@ export function stripBridgedTools(
   for (const name of [...hitl]) if (name.startsWith("mcp__")) hitl.delete(name);
 }
 
+/** Injectable seams for applyMcpBridge (same discipline as buildBridgedTools'
+ *  client factory): production omits them and gets the real dynamically
+ *  imported modules; tests pass fakes so no adapter loads and no process spawns. */
+interface McpBridgeDeps {
+  loadManifest: (path: string) => BridgeManifest;
+  getBridgedTools: (manifest: BridgeManifest) => Promise<BridgedTools>;
+}
+
 /**
  * Connect external MCP servers and merge their tools into DEPARTMENT_TOOLS.
  * No-op unless MCP_BRIDGE_ENABLED — and the bridge modules are dynamically
  * imported so the default (flag-off) build never even loads @langchain/mcp-adapters.
- * Idempotent: existing bridged tools are stripped first, so it is safe to call
- * again on a live reload as well as once at startup (before DEPARTMENT_TOOLS is read).
+ * Idempotent: previously-bridged tools are stripped in the SAME synchronous
+ * block as the merge (no await between), so overlapping invocations (startup
+ * racing a /connect reload) can never interleave strip/merge and duplicate
+ * tools, and in-flight turns keep seeing the previous bridge tools until the
+ * new set lands.
  */
-export async function applyMcpBridge(): Promise<void> {
-  if (!MCP_BRIDGE_ENABLED) return;
-  const { loadManifest } = await import("../mcp/bridge-manifest.js");
-  const { getBridgedTools } = await import("../mcp/client.js");
+export async function applyMcpBridge(deps?: McpBridgeDeps): Promise<void> {
+  if (!deps && !MCP_BRIDGE_ENABLED) return;
+  const { loadManifest } = deps ?? (await import("../mcp/bridge-manifest.js"));
+  const { getBridgedTools } = deps ?? (await import("../mcp/client.js"));
 
-  stripBridgedTools();
   const manifest = loadManifest(MCP_BRIDGE_MANIFEST);
   // gatedNames comes from the LOADED tools (manifest write list OR annotation),
   // so annotation-gated tools render with `*` and no dead gates leak in.
   const { byDept, gatedNames } = await getBridgedTools(manifest);
+  stripBridgedTools();
   mergeBridgedTools(DEPARTMENT_TOOLS, HITL_GATED_TOOLS, byDept, gatedNames);
 }
 

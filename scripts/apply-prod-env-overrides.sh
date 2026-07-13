@@ -12,6 +12,7 @@
 #   LINKEDIN_ACCESS_TOKEN — optional override
 #   LINKEDIN_AUTHOR_URN   — optional override
 #   SLACK_BOT_TOKEN / SLACK_TEAM_ID — MCP bridge Slack server (optional)
+#   LANGCHAIN_API_KEY    — LangSmith tracing (optional; sets LANGCHAIN_TRACING_V2=true when present)
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/founderos}"
@@ -26,7 +27,7 @@ cd "$APP_DIR"
 #   otherwise DELETE or BLANK a working key. 2026-07-12: the post-#325 render
 #   wiped on-box APIFY_TOKEN + STORAGE_*/AWS_* (S3 went LIVE→MISSING between
 #   boots) because they were not listed here.
-PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND APIFY_TOKEN SCRAPE_BACKEND STORAGE_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY STORAGE_ENDPOINT_URL WEB_GATEWAY_TOKEN GWS_BIN MEM0_API_KEY REDIS_URL GOOGLE_APPLICATION_CREDENTIALS OFFICE_TURN_TIMEOUT_MS"
+PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND APIFY_TOKEN SCRAPE_BACKEND STORAGE_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY STORAGE_ENDPOINT_URL WEB_GATEWAY_TOKEN GWS_BIN MEM0_API_KEY REDIS_URL GOOGLE_APPLICATION_CREDENTIALS OFFICE_TURN_TIMEOUT_MS MCP_BRIDGE_ENABLED"
 
 if [ -n "${PROD_DOTENV:-}" ]; then
   umask 077
@@ -100,6 +101,20 @@ if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   mv .env.patched .env
   chmod 600 .env
   echo "==> Patched .env: OPENROUTER_API_KEY refreshed (fallback path)"
+fi
+
+# LangSmith tracing — forwarded from a GitHub secret so it never depends on an
+# on-box value existing first (unlike PRESERVE_IF_MISSING keys). Boot report
+# (src/infra/boot-report.ts) flags this MISSING until both vars are set.
+if [ -n "${LANGCHAIN_API_KEY:-}" ]; then
+  grep -v -E '^(LANGCHAIN_API_KEY|LANGCHAIN_TRACING_V2)=' .env > .env.patched || true
+  {
+    printf 'LANGCHAIN_API_KEY=%s\n' "$LANGCHAIN_API_KEY"
+    printf 'LANGCHAIN_TRACING_V2=true\n'
+  } >> .env.patched
+  mv .env.patched .env
+  chmod 600 .env
+  echo "==> Patched .env: LANGCHAIN_API_KEY + LANGCHAIN_TRACING_V2=true set (LangSmith tracing)"
 fi
 
 # MCP bridge Slack secrets — separate GitHub secrets so they rotate without

@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 const SCRIPT = fileURLToPath(new URL("../../../scripts/apply-prod-env-overrides.sh", import.meta.url));
 
 /** Run the real renderer in a temp APP_DIR; returns the rendered .env text. */
-function render(boxEnv: string, snapshot: string): string {
+function render(boxEnv: string, snapshot: string, extraEnv: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "prod-env-render-"));
   writeFileSync(join(dir, ".env"), boxEnv);
   execFileSync("bash", [SCRIPT], {
@@ -27,6 +27,7 @@ function render(boxEnv: string, snapshot: string): string {
       PATH: process.env["PATH"] ?? "",
       APP_DIR: dir,
       PROD_DOTENV: Buffer.from(snapshot).toString("base64"),
+      ...extraEnv,
     },
   });
   return readFileSync(join(dir, ".env"), "utf8");
@@ -93,5 +94,22 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     const rendered = render("", SNAPSHOT_BASE + "AGENT_MODEL=something-else\n");
     expect(valueOf(rendered, "AGENT_MODEL")).toBe("google-genai:gemini-flash-latest");
     expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain(":free");
+  });
+
+  it("preserves on-box MCP_BRIDGE_ENABLED absent from PROD_DOTENV", () => {
+    const rendered = render("MCP_BRIDGE_ENABLED=true\n", SNAPSHOT_BASE);
+    expect(valueOf(rendered, "MCP_BRIDGE_ENABLED")).toBe("true");
+  });
+
+  it("forwards LANGCHAIN_API_KEY from the GitHub secret and pins tracing on", () => {
+    const rendered = render("", SNAPSHOT_BASE, { LANGCHAIN_API_KEY: "lsv2_pt_test_value" });
+    expect(valueOf(rendered, "LANGCHAIN_API_KEY")).toBe("lsv2_pt_test_value");
+    expect(valueOf(rendered, "LANGCHAIN_TRACING_V2")).toBe("true");
+  });
+
+  it("does not touch LangSmith vars when LANGCHAIN_API_KEY secret is absent", () => {
+    const rendered = render("", SNAPSHOT_BASE);
+    expect(valueOf(rendered, "LANGCHAIN_API_KEY")).toBeUndefined();
+    expect(valueOf(rendered, "LANGCHAIN_TRACING_V2")).toBeUndefined();
   });
 });

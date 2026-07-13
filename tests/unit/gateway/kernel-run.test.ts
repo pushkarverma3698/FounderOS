@@ -23,10 +23,12 @@ vi.mock("../../../src/gateway/kernel-boot.js", () => ({
 
 const resolveInterrupt = vi.fn(async () => ({}));
 const getPendingInterrupt = vi.fn(async (): Promise<unknown> => null);
+const insertScheduledTask = vi.fn(async (data: Record<string, unknown>) => ({ id: "task-1", ...data }));
 vi.mock("../../../src/db/queries.js", () => ({
   getPendingInterrupt: (...a: unknown[]) => getPendingInterrupt(...(a as [])),
   resolveInterrupt: (...a: unknown[]) => resolveInterrupt(...(a as [])),
   getTodayCostUsd: vi.fn(async () => 0),
+  insertScheduledTask: (...a: unknown[]) => insertScheduledTask(...(a as [Record<string, unknown>])),
 }));
 
 vi.mock("../../../src/infra/halt.js", () => ({
@@ -288,8 +290,48 @@ describe("runKernelText", () => {
     await runKernelText(ctx, "boom");
 
     const last = replies.at(-1)!.text;
-    expect(last).toContain("overloaded");
+    expect(last).toMatch(/rate-limited/i);
     expect(last).not.toContain("Troubleshooting URL");
+  });
+
+  /**
+   * 2026-07-13 prod audit (turn 49dbaa06 latency review): after the whole model
+   * fallback chain is exhausted, don't make the founder manually type "try
+   * again" — queue ONE automatic retry of the same turn ~3 minutes out via the
+   * scheduled-task sweep and say so.
+   */
+  it("model exhaustion enqueues ONE automatic retry ~3 min out and tells the founder", async () => {
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw Object.assign(new Error("429 rate limit"), { status: 429 });
+    });
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "summarise my LinkedIn posts");
+
+    expect(insertScheduledTask).toHaveBeenCalledTimes(1);
+    const arg = insertScheduledTask.mock.calls[0]![0]!;
+    expect(arg["prompt"]).toBe("summarise my LinkedIn posts");
+    expect(arg["chat_id"]).toBe("777");
+    expect(String(arg["idempotency_key"])).toMatch(/^auto-retry:/);
+    const delayMs = new Date(arg["scheduled_at"] as string).getTime() - Date.now();
+    expect(delayMs).toBeGreaterThan(2 * 60 * 1000);
+    expect(delayMs).toBeLessThan(4 * 60 * 1000);
+
+    const last = replies.at(-1)!.text;
+    expect(last).toMatch(/retry/i);
+    expect(last).toMatch(/automatic/i);
+    expect(last).not.toMatch(/try again/i); // no manual instruction on the auto-retry path
+  });
+
+  it("falls back to the manual 'try again' message when the retry cannot be enqueued", async () => {
+    insertScheduledTask.mockRejectedValueOnce(new Error("db unavailable"));
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw Object.assign(new Error("429 rate limit"), { status: 429 });
+    });
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "summarise my LinkedIn posts");
+
+    expect(insertScheduledTask).toHaveBeenCalledTimes(1);
+    expect(replies.at(-1)!.text).toMatch(/try again/i);
   });
 });
 
@@ -303,6 +345,18 @@ describe("resumeKernel", () => {
     const [cmd] = fakeKernel.stream.mock.calls[0]! as unknown as [Command];
     expect(cmd).toBeInstanceOf(Command);
     expect(replies.at(-1)!.text).toContain("All done.");
+  });
+
+  it("model exhaustion on a resume does NOT auto-retry (no raw input to replay) — manual message", async () => {
+    getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-1", created_at: new Date().toISOString() });
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw Object.assign(new Error("429 rate limit"), { status: 429 });
+    });
+    const { ctx, replies } = fakeCtx();
+    await resumeKernel(ctx, "approved");
+
+    expect(insertScheduledTask).not.toHaveBeenCalled();
+    expect(replies.at(-1)!.text).toMatch(/try again/i);
   });
 
   it("a multi-step plan can pause AGAIN on the next gated step", async () => {
