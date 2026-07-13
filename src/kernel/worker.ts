@@ -33,6 +33,8 @@ import {
   hashToolArgs,
   repairTextSummaryOutput,
   validateStepResult,
+  getSchemaTemplate,
+  repairWrappedOutput,
   type StepResult,
   type TaskEnvelope,
   type ToolReceipt,
@@ -41,6 +43,7 @@ import {
 import type { KernelStateType, KernelUpdate } from "./state.js";
 import type { KernelChatModel } from "./planner.js";
 import { messageContentText } from "./message-text.js";
+import { verifyStepResult } from "./verify.js";
 
 /** Narrow tool surface. `config` carries thread_id for DB-backed HITL gates. */
 export interface KernelTool {
@@ -108,16 +111,20 @@ function alreadyFailedIdentically(receipts: ToolReceipt[], tool: string, argsHas
  */
 export function turnReceipts(state: KernelStateType): ToolReceipt[] {
   const prior = state.results.flatMap((r) => ("tool_receipts" in r ? r.tool_receipts : []));
-  return [...prior, ...state.step_receipts];
+  return [...prior, ...Object.values(state.step_receipts).flat()];
 }
 
 function workerProtocol(step: TaskEnvelope, remainingCalls: number): string {
+  const template = getSchemaTemplate(step.expected.schema_ref);
   return [
     ``,
     `EXECUTION PROTOCOL:`,
     `- You are completing ONE step: "${step.objective}"`,
     `- Tool calls remaining for this step: ${remainingCalls}. When it reaches 0 you MUST finalize.`,
-    `- Finalize by replying with ONE JSON object satisfying schema "${step.expected.schema_ref}" — no prose around it.`,
+    `- Finalize by replying with ONE JSON object satisfying schema "${step.expected.schema_ref}".`,
+    `- Do NOT wrap your output in a outer key named "${step.expected.schema_ref}" or any other root wrapper. Output the fields directly at the root.`,
+    `- Your JSON must match this structure:`,
+    template,
     `- Report failures honestly; never fabricate tool output. Rejected approvals are final.`,
   ].join("\n");
 }
@@ -146,13 +153,14 @@ export function makeAgentNode(model: KernelBindableModel, specs: Record<string, 
       };
     }
 
-    const remaining = Math.max(0, step.constraints.max_tool_calls - executedToolCalls(state.scratch));
+    const scratch = state.scratch[step.step_id] ?? [];
+    const remaining = Math.max(0, step.constraints.max_tool_calls - executedToolCalls(scratch));
     const system = new SystemMessage(spec.prompt + workerProtocol(step, remaining));
     const bindable = remaining > 0 && spec.tools.length > 0 && model.bindTools
       ? model.bindTools(spec.tools)
       : model;
-    const response = await bindable.invoke([system, ...state.scratch]);
-    return { scratch: [response] };
+    const response = await bindable.invoke([system, ...scratch]);
+    return { scratch: { [step.step_id]: [response] } };
   };
 }
 
@@ -163,13 +171,15 @@ export function routeAfterAgent(state: KernelStateType): "tools" | "collect" {
   if (step && state.results.some((r) => r.step_id === step.step_id && r.status === "failed" && r.failure.stage === "routing")) {
     return "collect";
   }
-  const last = state.scratch[state.scratch.length - 1];
+  if (!step) return "collect";
+  const scratch = state.scratch[step.step_id] ?? [];
+  const last = scratch[scratch.length - 1];
   if (!last || !isAIMessage(last)) return "collect";
   const wantsTools = (last.tool_calls?.length ?? 0) > 0;
   if (!wantsTools) return "collect";
-  const cap = step?.constraints.max_tool_calls ?? 0;
+  const cap = step.constraints.max_tool_calls;
   // Budget exhausted → stop looping regardless of what the model wants.
-  return executedToolCalls(state.scratch) < cap ? "tools" : "collect";
+  return executedToolCalls(scratch) < cap ? "tools" : "collect";
 }
 
 /** Tool-execution node: runs the pending calls, records receipts BY CODE. */
@@ -177,9 +187,10 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
   return async function tools(state: KernelStateType, config?: RunnableConfig): Promise<KernelUpdate> {
     const step = currentStep(state);
     const spec = specs[step.worker]!;
-    const last = state.scratch[state.scratch.length - 1] as AIMessage;
+    const scratch = state.scratch[step.step_id] ?? [];
+    const last = scratch[scratch.length - 1] as AIMessage;
     const cap = step.constraints.max_tool_calls;
-    let executed = executedToolCalls(state.scratch);
+    let executed = executedToolCalls(scratch);
 
     const messages: ToolMessage[] = [];
     const receipts: ToolReceipt[] = [];
@@ -251,7 +262,7 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
       messages.push(new ToolMessage({ content: resultStr, tool_call_id: callId, name: call.name }));
     }
 
-    return { scratch: messages, step_receipts: receipts };
+    return { scratch: { [step.step_id]: messages }, step_receipts: { [step.step_id]: receipts } };
   };
 }
 
@@ -269,7 +280,7 @@ function tryParseJson(text: string): unknown | null {
 }
 
 /** PURE node: turn the step's scratch into a validated StepResult. */
-export function collect(state: KernelStateType): KernelUpdate {
+export async function collect(state: KernelStateType): Promise<KernelUpdate> {
   const step = currentStep(state);
 
   // Routing failure already recorded by the agent node — nothing to collect.
@@ -278,7 +289,8 @@ export function collect(state: KernelStateType): KernelUpdate {
   }
 
   // Founder rejected a gated action → terminal for this step, never retried.
-  const rejected = state.scratch.some(
+  const scratch = state.scratch[step.step_id] ?? [];
+  const rejected = scratch.some(
     (m) => isToolMessage(m) && typeof m.content === "string" && m.content.includes(REJECTION_MARKER),
   );
   if (rejected) {
@@ -299,16 +311,18 @@ export function collect(state: KernelStateType): KernelUpdate {
     };
   }
 
-  const lastAi = [...state.scratch].reverse().find((m) => isAIMessage(m));
+  const lastAi = [...scratch].reverse().find((m) => isAIMessage(m));
   // messageContentText, not a string typeof check: gemini-flash-latest started
   // returning parts arrays and string-only extraction killed honest finalizes
   // (live d211fb74 / 8c7e098f, 2026-07-11).
   const text = lastAi ? messageContentText(lastAi.content) : "";
   const parsedRaw = text ? tryParseJson(text) : null;
+  // Salvage wrapped outputs for structured contracts too.
+  const repairedRaw = repairWrappedOutput(parsedRaw, step.expected.schema_ref);
   // Live T01 repair: for the pure-text contract, a prose finalize IS the
   // payload — salvage it instead of failing an honest answer (contracts.ts).
   const parsed =
-    step.expected.schema_ref === "text.summary" ? repairTextSummaryOutput(parsedRaw, text) : parsedRaw;
+    step.expected.schema_ref === "text.summary" ? repairTextSummaryOutput(repairedRaw, text) : repairedRaw;
 
   const failedValidation = (message: string): KernelUpdate => ({
     results: [
@@ -335,9 +349,11 @@ export function collect(state: KernelStateType): KernelUpdate {
     status: "ok" as const,
     step_id: step.step_id,
     output: parsed,
-    tool_receipts: state.step_receipts,
+    tool_receipts: state.step_receipts[step.step_id] ?? [],
   };
   const validated = validateStepResult(candidate, step);
   if (!validated.ok) return failedValidation(validated.error);
-  return { results: [validated.value] };
+  
+  const verified = await verifyStepResult(validated.value, step);
+  return { results: [verified] };
 }
