@@ -48,3 +48,12 @@ export {
   type WorkerSpec,
 } from "./worker.js";
 export { makeSynthesizeNode, receiptsBlock } from "./synthesizer.js";
+export {
+  normalizeFailureSignature,
+  lessonMessage,
+  makeLessonDispatch,
+  SIGNATURE_MAX_CHARS,
+  type FailureLesson,
+  type LessonStore,
+  type LessonCandidate,
+} from "./lessons.js";

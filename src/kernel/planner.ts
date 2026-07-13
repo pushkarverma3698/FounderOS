@@ -196,6 +196,7 @@ export function makePlanNode(model: KernelChatModel, catalog: WorkerCatalogEntry
       step_receipts: RESET,
       failure: null,
       reply: "",
+      lesson_candidate: null,
       last_turn: state.turn,
       ...(previous ? { history: [previous] } : {}),
     };

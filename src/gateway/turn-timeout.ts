@@ -7,11 +7,15 @@
  * hang does (rule #19/#22, fail-loud). This wraps an invoke in a deadline so the
  * gateway can abort LOUD instead of hanging SILENT.
  *
- * Note: `Promise.race` does not cancel the underlying work — the hung invoke may
- * keep running in the background. That's acceptable: we release the chat-turn lock,
- * tell the founder, and clear the thread so the next message runs clean. Bounding
- * the wait is what matters; the orphaned promise is harmless (no side effect runs
- * without HITL approval, rule #4).
+ * `Promise.race` alone does not cancel the underlying work, so callers pass an
+ * `onDeadline` that aborts the run's AbortSignal: the orphaned invoke used to
+ * keep executing in the background — burning model budget and racing checkpoint
+ * writes against the founder's next message. Two guarantees when the deadline
+ * fires: the run is actively aborted (not merely abandoned), and the abandoned
+ * promise's eventual rejection (AbortError, a late provider error) is marked
+ * handled — otherwise it would hit the fatal unhandledRejection handler in
+ * src/index.ts and kill the whole process minutes after the founder already
+ * got the timeout message.
  */
 
 /** Thrown when an office turn exceeds OFFICE_TURN_TIMEOUT_MS. */
@@ -31,19 +35,34 @@ export class TurnTimeoutError extends Error {
  * settles first; rejects with {@link TurnTimeoutError} if the deadline wins.
  * A non-positive `ms` disables the guard (returns the promise unchanged).
  *
- * The timer is always cleared (success, failure, or timeout) so a resolved turn
- * never keeps the event loop alive.
+ * `onDeadline` runs when (and only when) the deadline wins — pass the run's
+ * AbortController.abort so the orphaned work actually stops instead of racing
+ * the next turn. The timer is always cleared (success, failure, or timeout)
+ * so a resolved turn never keeps the event loop alive.
  */
 export function withTurnTimeout<T>(
   promise: Promise<T>,
   ms: number,
   label = "office.invoke",
+  onDeadline?: () => void,
 ): Promise<T> {
   if (!Number.isFinite(ms) || ms <= 0) return promise;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new TurnTimeoutError(ms, label)), ms);
+    timer = setTimeout(() => {
+      try {
+        onDeadline?.();
+      } catch {
+        /* allow-failopen: an abort() blip must never mask the timeout rejection below */
+      }
+      // The abandoned run rejects later (AbortError / late provider error).
+      // Mark that rejection handled: the TurnTimeoutError below is the one
+      // the caller sees, and an orphaned rejection would otherwise trip the
+      // fatal unhandledRejection handler and kill the process.
+      promise.catch(() => undefined); // allow-failopen: the timeout error is already propagating to the caller
+      reject(new TurnTimeoutError(ms, label));
+    }, ms);
   });
 
   return Promise.race([promise, deadline]).finally(() => {

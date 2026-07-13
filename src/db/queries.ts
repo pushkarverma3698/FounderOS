@@ -33,6 +33,8 @@ import {
   missions,
   scheduledPosts,
   scheduledTasks,
+  failureLessons,
+  type FailureLessonRow,
   type NewActionLog,
   type NewScheduledPost,
   type ScheduledPost,
@@ -1169,8 +1171,9 @@ export async function insertScheduledTask(data: ScheduledTaskInput): Promise<Sch
 /**
  * ATOMICALLY claim due tasks for one sweep ('scheduled' → 'running', attempts+1).
  * `FOR UPDATE SKIP LOCKED` makes overlapping sweep ticks safe — same double-fire
- * guard as claimDueScheduledPosts. A row stuck in 'running' after a hard crash
- * is the SAFE failure direction: it simply won't re-fire.
+ * guard as claimDueScheduledPosts. A row stranded in 'running' by a hard crash
+ * cannot re-fire on its own — boot recovery (reclaimStrandedScheduledTasks)
+ * requeues or fails it loud.
  */
 export async function claimDueScheduledTasks(
   tenantId: string,
@@ -1227,6 +1230,40 @@ export async function releaseScheduledTask(id: string, nextAt: Date): Promise<vo
     .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.status, "running")));
 }
 
+/**
+ * Boot-time crash recovery for the task queue. The single-instance lock
+ * guarantees exactly one FounderOS process, so at boot ANY 'running' row is
+ * stranded — its executor died mid-fire and it can never re-fire on its own.
+ * Rows under the attempt cap go back to 'scheduled' (due now, so the next
+ * sweep re-fires them); rows at the cap fail loud instead of crash-looping
+ * a task that keeps killing the process. attempts was already bumped at
+ * claim time, so the cap bounds total fires exactly like a gate deferral.
+ */
+export async function reclaimStrandedScheduledTasks(
+  tenantId: string,
+  maxAttempts: number,
+  now: Date = new Date(),
+): Promise<{ requeued: ScheduledTask[]; failed: ScheduledTask[] }> {
+  const db = getDb();
+  const failed = await db
+    .update(scheduledTasks)
+    .set({ status: "failed", error: `stranded in 'running' by a crash/restart with the attempt cap (${maxAttempts}) reached` })
+    .where(
+      and(
+        eq(scheduledTasks.tenant_id, tenantId),
+        eq(scheduledTasks.status, "running"),
+        gte(scheduledTasks.attempts, maxAttempts),
+      ),
+    )
+    .returning();
+  const requeued = await db
+    .update(scheduledTasks)
+    .set({ status: "scheduled", scheduled_at: now })
+    .where(and(eq(scheduledTasks.tenant_id, tenantId), eq(scheduledTasks.status, "running")))
+    .returning();
+  return { requeued, failed };
+}
+
 /** Upcoming (still-scheduled) tasks for the founder's "what's queued" view. */
 export async function listUpcomingScheduledTasks(
   tenantId: string,
@@ -1264,6 +1301,67 @@ export async function rescheduleScheduledTask(
     .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.status, "scheduled")))
     .returning();
   return row;
+}
+
+// ── failure_lessons (Hermes learning seam — kernel LessonStore backing) ───────
+
+/** One lesson per (tenant, worker, signature) — the retry-injection lookup. */
+export async function getFailureLesson(
+  tenantId: string,
+  worker: string,
+  signature: string,
+): Promise<FailureLessonRow | undefined> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(failureLessons)
+    .where(
+      and(
+        eq(failureLessons.tenant_id, tenantId),
+        eq(failureLessons.worker, worker),
+        eq(failureLessons.signature, signature),
+      ),
+    )
+    .limit(1);
+  return row;
+}
+
+/**
+ * Record a resolution: first occurrence inserts, repeats bump times_seen and
+ * refresh the resolving context — the newest successful correction is the one
+ * future retries should imitate.
+ */
+export async function upsertFailureLesson(data: {
+  tenant_id: string;
+  worker: string;
+  signature: string;
+  component: string;
+  objective: string;
+  resolved_with_tools: string[];
+}): Promise<void> {
+  const db = getDb();
+  await db
+    .insert(failureLessons)
+    .values({ ...data, last_resolved_at: new Date() })
+    .onConflictDoUpdate({
+      target: [failureLessons.tenant_id, failureLessons.worker, failureLessons.signature],
+      set: {
+        times_seen: sql`${failureLessons.times_seen} + 1`,
+        component: data.component,
+        objective: data.objective,
+        resolved_with_tools: data.resolved_with_tools,
+        last_resolved_at: new Date(),
+      },
+    });
+}
+
+/** Telemetry: how often a lesson actually got injected into a retry. */
+export async function bumpFailureLessonApplied(id: string): Promise<void> {
+  const db = getDb();
+  await db
+    .update(failureLessons)
+    .set({ times_applied: sql`${failureLessons.times_applied} + 1` })
+    .where(eq(failureLessons.id, id));
 }
 
 // ── Activity Summary (action_log) ─────────────────────────────────────────────

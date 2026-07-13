@@ -13,7 +13,6 @@
 
 import { loadManifest } from "../src/mcp/bridge-manifest.js";
 import { buildBridgedTools } from "../src/mcp/client.js";
-import { gatedRuntimeNames } from "../src/mcp/bridge-classify.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -24,8 +23,8 @@ async function main(): Promise<void> {
   const manifest = loadManifest(manifestPath);
   console.log(`Declared servers: ${Object.keys(manifest.servers).join(", ")}\n`);
 
-  const byDept = await buildBridgedTools(manifest);
-  const gatedNames = new Set(gatedRuntimeNames(manifest));
+  const { byDept, gatedNames: gated } = await buildBridgedTools(manifest);
+  const gatedNames = new Set(gated);
 
   let total = 0;
   for (const [dept, tools] of Object.entries(byDept)) {
@@ -33,7 +32,11 @@ async function main(): Promise<void> {
     for (const t of tools) {
       total += 1;
       const gated = gatedNames.has(t.name) ? "WRITE (HITL-gated)" : "read (pass-through)";
-      console.log(`   • ${t.name}  →  ${gated}`);
+      // Surface the raw server annotations so it's visible whether gating came
+      // from the manifest write list or a server-declared hint (Tier 2).
+      const ann = (t as { metadata?: { annotations?: unknown } }).metadata?.annotations;
+      const annStr = ann && Object.keys(ann as object).length ? `  annotations=${JSON.stringify(ann)}` : "";
+      console.log(`   • ${t.name}  →  ${gated}${annStr}`);
     }
   }
   if (total === 0) console.log("(no tools loaded — every declared server was unreachable/ isolated)");

@@ -102,3 +102,44 @@ marking `ask_question` as `write` flipped it to WRITE (HITL-gated), confirming
 gating is transport-agnostic. New unit tests cover http schema parsing,
 backward-compat stdio default, url-required rejection, unknown-transport
 rejection, and `toConnection` header/env resolution (`tests/unit/mcp/*`, $0).
+
+## Amendment — 2026-07-13 (Tier 2: annotation-driven classification)
+The write allowlist was the last hand-maintained chore: every mutating tool on
+every server had to be typed into `mcp-bridge.json` by hand, and a forgotten
+name meant an ungated external write. MCP tool annotations (spec 2025-06-18 —
+`readOnlyHint`/`destructiveHint`) let a server declare a tool's risk itself, so
+a well-annotated server needs no `write` list at all.
+
+- **A second classification source, trusted only to tighten.** `isWriteTool`
+  gains an optional `annotations` argument; `annotationsOf` reads them off the
+  loaded tool (the adapter surfaces them at `metadata.annotations`). Precedence,
+  each step only ever ADDS a gate: (1) manifest `write` list → gate; (2)
+  `gateUnlisted` → gate; (3) `destructiveHint:true` or `readOnlyHint:false` →
+  gate; (4) else read-through. The MCP spec is explicit that a server's
+  annotations are hints, not guarantees, so we never let a `readOnlyHint:true`
+  REMOVE a gate the founder set — the manifest and `gateUnlisted` always win, and
+  a missing hint preserves the existing read-through default (no over-gating of
+  un-annotated servers like DeepWiki).
+- **Truthful capability manifest, no dead gates.** `buildBridgedTools` now
+  returns `{ byDept, gatedNames }` where `gatedNames` is derived from the LOADED
+  tools (write list OR annotation) rather than from the manifest alone. So
+  annotation-gated tools render with `*` in the capability text, and a tool from
+  a server that failed to connect can never leak in as a dead gate. The actual
+  pause is unchanged — it fires inside `gateMcpTool` via `hitlGate()`/`interrupt()`,
+  independent of this display set.
+
+**Evidence (2026-07-13, real MCP server, not mocked).** A local stdio MCP server
+annotating four tools, connected through the real `@langchain/mcp-adapters` with
+an EMPTY manifest `write` list, classified via `pnpm mcp:probe`:
+`look` (`readOnlyHint:true`) → read; `mutate` (`readOnlyHint:false`) → WRITE
+(HITL-gated); `destroy` (`destructiveHint:true`) → WRITE (HITL-gated);
+`plain` (no annotation) → read. Gating came 100% from server annotations. Against
+live DeepWiki (HTTP, no annotations) all three read tools stay read-through,
+confirming un-annotated servers keep the default. New unit tests cover
+`annotationsOf`, the full precedence table (hint tightens, never loosens;
+manifest/`gateUnlisted` win), and `gatedNames` excluding failed-server tools
+(`tests/unit/mcp/*`, $0). Full `pnpm gate` green (1477 tests).
+
+Consolidation: the earlier standalone `scripts/probe-mcp-bridge.ts` (stdio-only,
+hard-coded reference server) was merged into `scripts/mcp-bridge-probe.ts`
+(`pnpm mcp:probe`, any manifest, HTTP + `--invoke`) — one probe, not two.

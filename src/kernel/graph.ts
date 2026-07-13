@@ -18,7 +18,8 @@ import { StateGraph, START, END, type BaseCheckpointSaver } from "@langchain/lan
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { KernelState, type KernelStateType } from "./state.js";
 import { makePlanNode, type KernelChatModel, type WorkerCatalogEntry } from "./planner.js";
-import { dispatch, routeAfterDispatch, routeAfterPlan } from "./supervisor.js";
+import { routeAfterDispatch, routeAfterPlan } from "./supervisor.js";
+import { makeLessonDispatch, type LessonStore } from "./lessons.js";
 import { makeAgentNode, makeToolsNode, routeAfterAgent, collect, type KernelBindableModel, type WorkerSpec } from "./worker.js";
 import { makeSynthesizeNode } from "./synthesizer.js";
 
@@ -28,6 +29,8 @@ export interface KernelConfig {
   synthesizerModel: KernelChatModel;
   workers: WorkerSpec[];
   checkpointer?: BaseCheckpointSaver;
+  /** Failure-lesson memory (Postgres in prod, fakes/absent in tests) — optional accelerant. */
+  lessons?: LessonStore;
 }
 
 export function buildKernel(config: KernelConfig) {
@@ -43,7 +46,7 @@ export function buildKernel(config: KernelConfig) {
 
   const graph = new StateGraph(KernelState)
     .addNode("plan", makePlanNode(config.plannerModel, catalog))
-    .addNode("dispatch", dispatch)
+    .addNode("dispatch", makeLessonDispatch(config.lessons))
     .addNode("agent", makeAgentNode(config.workerModel, specs))
     .addNode("tools", makeToolsNode(specs))
     .addNode("collect", collect)

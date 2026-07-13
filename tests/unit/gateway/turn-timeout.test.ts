@@ -45,4 +45,49 @@ describe("withTurnTimeout", () => {
     await expect(withTurnTimeout(Promise.resolve(42), 0)).resolves.toBe(42);
     await expect(withTurnTimeout(Promise.resolve(7), -1)).resolves.toBe(7);
   });
+
+  it("fires onDeadline exactly once when the deadline wins (the run gets ABORTED, not abandoned)", async () => {
+    const onDeadline = vi.fn();
+    const hang = new Promise<string>(() => {});
+    const guarded = withTurnTimeout(hang, 5000, "kernel.invoke", onDeadline);
+    const assertion = expect(guarded).rejects.toBeInstanceOf(TurnTimeoutError);
+    await vi.advanceTimersByTimeAsync(5000);
+    await assertion;
+    expect(onDeadline).toHaveBeenCalledTimes(1);
+  });
+
+  it("never fires onDeadline when the promise settles in time", async () => {
+    const onDeadline = vi.fn();
+    await expect(withTurnTimeout(Promise.resolve("ok"), 5000, "kernel.invoke", onDeadline)).resolves.toBe("ok");
+    await vi.advanceTimersByTimeAsync(10_000); // timer must be cleared, not merely raced past
+    expect(onDeadline).not.toHaveBeenCalled();
+  });
+
+  it("a throwing onDeadline cannot mask the TurnTimeoutError", async () => {
+    const hang = new Promise<string>(() => {});
+    const guarded = withTurnTimeout(hang, 5000, "kernel.invoke", () => {
+      throw new Error("abort() blew up");
+    });
+    const assertion = expect(guarded).rejects.toBeInstanceOf(TurnTimeoutError);
+    await vi.advanceTimersByTimeAsync(5000);
+    await assertion;
+  });
+
+  it("the abandoned promise's LATE rejection after a timeout is marked handled (no fatal unhandledRejection)", async () => {
+    // Before this guard: the orphaned run's AbortError/provider error rejected
+    // with nobody listening → src/index.ts unhandledRejection → process.exit(1),
+    // minutes after the founder already saw the timeout message. Vitest fails
+    // the suite on any unhandled rejection, so this test IS the assertion.
+    let rejectLate!: (err: Error) => void;
+    const hang = new Promise<string>((_res, rej) => {
+      rejectLate = rej;
+    });
+    const guarded = withTurnTimeout(hang, 5000, "kernel.invoke");
+    const assertion = expect(guarded).rejects.toBeInstanceOf(TurnTimeoutError);
+    await vi.advanceTimersByTimeAsync(5000);
+    await assertion;
+
+    rejectLate(new Error("AbortError: the orphaned run finally died"));
+    await vi.advanceTimersByTimeAsync(1); // flush microtasks — would surface an unhandled rejection
+  });
 });

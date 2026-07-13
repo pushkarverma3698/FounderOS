@@ -34,6 +34,7 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
   vector,
 } from "drizzle-orm/pg-core";
@@ -906,6 +907,51 @@ export const scheduledTasks = agentsSchema.table(
 
 export type ScheduledTask = typeof scheduledTasks.$inferSelect;
 export type NewScheduledTask = typeof scheduledTasks.$inferInsert;
+
+// ── failure_lessons ───────────────────────────────────────────────────────────
+
+/**
+ * The Hermes learning seam (src/kernel/lessons.ts): one row per
+ * (tenant, worker, normalized failure signature) that a corrected retry has
+ * RESOLVED at least once. The kernel injects the lesson into future retries
+ * of the same signature — recorded by code from validated results, never by
+ * the model, so a lesson can never assert something that didn't happen.
+ */
+export const failureLessons = agentsSchema.table(
+  "failure_lessons",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+
+    /** Worker (department) the failure occurred in. */
+    worker: text("worker").notNull(),
+
+    /** Normalized failure signature (kernel normalizeFailureSignature). */
+    signature: text("signature").notNull(),
+
+    /** Real failing component from the FailureReport. */
+    component: text("component").notNull(),
+
+    /** Objective of the step that recorded the lesson (model context). */
+    objective: text("objective").notNull(),
+
+    /** Tool names whose successful receipts backed the resolving attempt. */
+    resolved_with_tools: jsonb("resolved_with_tools").$type<string[]>().notNull().default([]),
+
+    /** Occurrences recorded (resolutions), and injections into retries. */
+    times_seen: integer("times_seen").notNull().default(1),
+    times_applied: integer("times_applied").notNull().default(0),
+
+    last_resolved_at: timestamp("last_resolved_at", { withTimezone: true }).notNull().defaultNow(),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    /** Lookup + upsert hot path: one lesson per (tenant, worker, signature). */
+    lessonKeyIdx: uniqueIndex("fl_tenant_worker_sig_idx").on(t.tenant_id, t.worker, t.signature),
+  }),
+);
+
+export type FailureLessonRow = typeof failureLessons.$inferSelect;
 
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them

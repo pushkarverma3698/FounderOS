@@ -9,8 +9,14 @@ import { buildBridgedTools, toConnection } from "../../../src/mcp/client.js";
 import { bridgeManifestSchema, mcpServerSchema } from "../../../src/mcp/bridge-manifest.js";
 import type { LoadedMcpTool } from "../../../src/agents/agent-tools/external-mcp.js";
 
-function tool(name: string): LoadedMcpTool {
-  return { name, description: name, schema: z.object({}), invoke: vi.fn().mockResolvedValue("ok") };
+function tool(name: string, annotations?: Record<string, unknown>): LoadedMcpTool {
+  return {
+    name,
+    description: name,
+    schema: z.object({}),
+    ...(annotations ? { metadata: { annotations } } : {}),
+    invoke: vi.fn().mockResolvedValue("ok"),
+  };
 }
 
 function fakeClient(toolsByServer: Record<string, LoadedMcpTool[] | Error>) {
@@ -36,7 +42,7 @@ describe("buildBridgedTools", () => {
       blender: [tool("get_scene_info"), tool("execute_blender_code")],
       slack: [tool("slack_post_message")],
     });
-    const byDept = await buildBridgedTools(manifest, () => client);
+    const { byDept } = await buildBridgedTools(manifest, () => client);
 
     expect(byDept["personal"]?.map((t) => t.name)).toEqual([
       "mcp__blender__get_scene_info",
@@ -52,7 +58,7 @@ describe("buildBridgedTools", () => {
       blender: new Error("connection refused"),
       slack: [tool("slack_post_message")],
     });
-    const byDept = await buildBridgedTools(manifest, () => client);
+    const { byDept } = await buildBridgedTools(manifest, () => client);
 
     expect(byDept["personal"]).toBeUndefined();
     expect(byDept["comms"]?.map((t) => t.name)).toEqual(["mcp__slack__slack_post_message"]);
@@ -60,9 +66,39 @@ describe("buildBridgedTools", () => {
 
   it("returns empty for an empty manifest without building a client", async () => {
     const factory = vi.fn();
-    const byDept = await buildBridgedTools(bridgeManifestSchema.parse({ servers: {} }), factory as never);
+    const { byDept, gatedNames } = await buildBridgedTools(
+      bridgeManifestSchema.parse({ servers: {} }),
+      factory as never,
+    );
     expect(byDept).toEqual({});
+    expect(gatedNames).toEqual([]);
     expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("reports gatedNames from the manifest write allowlist (no dead gate for failed servers)", async () => {
+    const client = fakeClient({
+      blender: [tool("get_scene_info"), tool("execute_blender_code")],
+      slack: new Error("no token"), // fails → its write tool must NOT appear in gatedNames
+    });
+    const { gatedNames } = await buildBridgedTools(manifest, () => client);
+    expect(gatedNames).toEqual(["mcp__blender__execute_blender_code"]);
+  });
+
+  it("gates a tool the SERVER annotates as not-read-only, even when unlisted (Tier 2)", async () => {
+    // deepwiki declares no manifest `write`; the server annotates one tool mutating.
+    const annotated = bridgeManifestSchema.parse({
+      servers: { deepwiki: { transport: "http", url: "https://mcp.deepwiki.com/mcp", department: "research" } },
+    });
+    const client = fakeClient({
+      deepwiki: [
+        tool("read_wiki_structure", { readOnlyHint: true }),
+        tool("submit_edit", { readOnlyHint: false }),
+        tool("purge", { destructiveHint: true }),
+        tool("ask_question"), // no annotation → read-through default preserved
+      ],
+    });
+    const { gatedNames } = await buildBridgedTools(annotated, () => client);
+    expect(gatedNames.sort()).toEqual(["mcp__deepwiki__purge", "mcp__deepwiki__submit_edit"]);
   });
 });
 

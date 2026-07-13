@@ -6,7 +6,7 @@
 
 ## [2026-06-26] External MCP Client Bridge (ADR-041) — `feat/mcp-client-bridge`
 - **What:** FounderOS agents can now CONSUME external MCP servers (Blender, Slack, +long tail) via `@langchain/mcp-adapters` `MultiServerMCPClient`. Was server-only before.
-- **Files (new):** `src/mcp/bridge-manifest.ts` (Zod manifest+loader), `src/mcp/bridge-classify.ts` (pure read/write classify + `mcp__<server>__<tool>` naming), `src/agents/agent-tools/external-mcp.ts` (`gateMcpTool`), `src/mcp/client.ts` (`buildBridgedTools`, per-server isolation, promise-memoized), `mcp-bridge.json` (seed: blender→personal, slack→comms), `scripts/probe-mcp-bridge.ts`.
+- **Files (new):** `src/mcp/bridge-manifest.ts` (Zod manifest+loader), `src/mcp/bridge-classify.ts` (pure read/write classify + `mcp__<server>__<tool>` naming), `src/agents/agent-tools/external-mcp.ts` (`gateMcpTool`), `src/mcp/client.ts` (`buildBridgedTools`, per-server isolation, promise-memoized), `mcp-bridge.json` (seed: blender→personal, slack→comms, deepwiki→research over HTTP), `scripts/mcp-bridge-probe.ts` (`pnpm mcp:probe`).
 - **Wiring:** flag `MCP_BRIDGE_ENABLED` (default OFF) → `applyMcpBridge()` in `getOffice()` merges bridged tools into `DEPARTMENT_TOOLS` before `buildOffice`. Flag-off = byte-identical (dynamic import, no adapter load).
 - **Safety:** writes = explicit per-server `write` allowlist ONLY (no heuristics); gated via existing `hitlGate`+`idemKey`+`writeAuditEntry`. Architect review applied: H1 canonical-sorted-key idem hash, H2 promise-cached memo, M3 honest msg on audit race, M4 opt-in `gateUnlisted` + per-tool boot classification log. Dead server isolates (rule #12) — never crashes boot.
 - **Composio:** keep as-is, do NOT expand; social → MCP later (LIMITATIONS §7 updated).

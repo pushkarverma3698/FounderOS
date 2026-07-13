@@ -25,6 +25,7 @@ vi.mock("../../../src/gateway/kernel-boot.js", () => ({
 const mockMarkDone = vi.fn(async () => {});
 const mockMarkFailed = vi.fn(async () => {});
 const mockRelease = vi.fn(async () => {});
+const mockReclaim = vi.fn(async (): Promise<{ requeued: unknown[]; failed: unknown[] }> => ({ requeued: [], failed: [] }));
 vi.mock("../../../src/db/queries.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return {
@@ -33,6 +34,7 @@ vi.mock("../../../src/db/queries.js", async (orig) => {
     markScheduledTaskDone: mockMarkDone,
     markScheduledTaskFailed: mockMarkFailed,
     releaseScheduledTask: mockRelease,
+    reclaimStrandedScheduledTasks: mockReclaim,
   };
 });
 
@@ -56,7 +58,7 @@ vi.mock("../../../src/gateway/telegram.js", () => ({
   getBot: () => ({ api: { sendMessage: mockSendMessage } }),
 }));
 
-const { runDueScheduledTask, MAX_TASK_ATTEMPTS, TASK_DEFER_MS } = await import(
+const { runDueScheduledTask, recoverStrandedScheduledTasks, MAX_TASK_ATTEMPTS, TASK_DEFER_MS } = await import(
   "../../../src/gateway/scheduled-task-run.js"
 );
 import type { ScheduledTask } from "../../../src/db/schema.js";
@@ -153,6 +155,27 @@ describe("runDueScheduledTask", () => {
     expect(sent.at(-1)!.text).toContain("Publish this LinkedIn post?");
     expect(sent.at(-1)!.opts?.reply_markup).toBeDefined();
     expect(mockMarkDone).toHaveBeenCalledWith("st1"); // the turn ran; the card is the founder's move
+  });
+
+  it("boot recovery requeues stranded tasks and drops capped ones LOUD (never silently)", async () => {
+    mockReclaim.mockResolvedValueOnce({
+      requeued: [claimedTask({ id: "st-requeued", prompt: "Weekly metrics digest" })],
+      failed: [claimedTask({ id: "st-capped", prompt: "Flaky crash-looping task", attempts: MAX_TASK_ATTEMPTS })],
+    });
+
+    await recoverStrandedScheduledTasks();
+
+    expect(mockReclaim).toHaveBeenCalledWith("turicks", MAX_TASK_ATTEMPTS);
+    const texts = sent.map((s) => s.text);
+    expect(texts.some((t) => t.includes("re-queued after the restart") && t.includes("Weekly metrics digest"))).toBe(true);
+    expect(texts.some((t) => t.includes("Scheduled task dropped") && t.includes("Flaky crash-looping task"))).toBe(true);
+  });
+
+  it("boot recovery is silent when nothing was stranded (clean restart = zero noise)", async () => {
+    await recoverStrandedScheduledTasks();
+
+    expect(mockReclaim).toHaveBeenCalledTimes(1);
+    expect(sent).toHaveLength(0);
   });
 
   it("kernel failure → marks failed, folds the turn into history, notifies loud", async () => {
