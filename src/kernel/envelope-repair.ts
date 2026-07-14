@@ -40,3 +40,44 @@ export function repairEnvelopeExpected(
 ): unknown {
   return normalizeUnknownSchemaRef(normalizeExpectedKind(val), isKnownSchemaRef);
 }
+
+/** Safe default tool budget when the planner omits it (mid of the 1–6 range). */
+export const DEFAULT_STEP_MAX_TOOL_CALLS = 3;
+
+/**
+ * Fill a step's `constraints` when the planner model drops the field or one of
+ * its keys — a real weak-model failure mode (live 2026-07-13: gemini/free
+ * fallback emitted a step with no `constraints`, failing planner validation
+ * with "plan.steps.0.constraints: Required"). Deterministic and model-free:
+ *   - max_tool_calls → DEFAULT_STEP_MAX_TOOL_CALLS
+ *   - hitl_required  → TRUE for action_receipt steps (fail SAFE: a dropped gate
+ *     flag must never auto-approve an external send), FALSE otherwise.
+ * A well-formed envelope passes through with identical values (determinism).
+ */
+export function repairEnvelopeConstraints(val: unknown): unknown {
+  if (!val || typeof val !== "object" || Array.isArray(val)) return val;
+  const o = val as Record<string, unknown>;
+  const expected = o["expected"];
+  const kind = expected && typeof expected === "object" ? (expected as Record<string, unknown>)["kind"] : undefined;
+  const schemaRef =
+    expected && typeof expected === "object" ? (expected as Record<string, unknown>)["schema_ref"] : undefined;
+  const isAction = kind === "action_receipt" || kindFromSchemaRef(schemaRef) === "action_receipt";
+
+  const current = o["constraints"];
+  const base =
+    current && typeof current === "object" && !Array.isArray(current)
+      ? (current as Record<string, unknown>)
+      : {};
+  const needsMax = typeof base["max_tool_calls"] !== "number";
+  const needsHitl = typeof base["hitl_required"] !== "boolean";
+  if (!needsMax && !needsHitl && current === base) return val; // fully formed — untouched
+
+  return {
+    ...o,
+    constraints: {
+      ...base,
+      ...(needsMax ? { max_tool_calls: DEFAULT_STEP_MAX_TOOL_CALLS } : {}),
+      ...(needsHitl ? { hitl_required: isAction } : {}),
+    },
+  };
+}
