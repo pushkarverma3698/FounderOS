@@ -6,6 +6,7 @@
  */
 
 export * from "./contracts.js";
+export { WorkspaceHandleSchema, RUN_ID_RE, WORKSPACE_KINDS, type WorkspaceHandle, type WorkspaceKind } from "./workspace.js";
 export { KernelState, RESET, type KernelStateType, type KernelUpdate, type ListUpdate } from "./state.js";
 export {
   buildKernel,
