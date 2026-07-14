@@ -11,15 +11,22 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   vpsRunTool,
   validateVpsRunInput,
   buildDockerCommand,
   shellQuote,
   makeRunId,
+  makeSshRunner,
   resolveVpsRunConfig,
   VPS_RUN_PROFILE,
   FORBIDDEN_MOUNT,
+  SSH_LOCAL_TIMEOUT_CODE,
+  SSH_LOCAL_TIMEOUT_MARK,
+  SSH_MAX_STDOUT_BYTES,
   type SshRunner,
   type SshResult,
   type VpsRunData,
@@ -113,6 +120,86 @@ describe("validateVpsRunInput", () => {
   it("makeRunId always satisfies the grammar", () => {
     for (let i = 0; i < 20; i++) expect(RUN_ID_RE.test(makeRunId())).toBe(true);
   });
+
+  it("tolerates hostile arg shapes — circular objects, non-string fields — without throwing", () => {
+    const circular: Record<string, unknown> = { command: "ls" };
+    circular["self"] = circular;
+    circular["run_id"] = 42; // non-string → freshly generated, never coerced
+    circular["image"] = { $ne: 1 };
+    circular["brief"] = ["not", "a", "string"];
+    const r = validateVpsRunInput(circular);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(RUN_ID_RE.test(r.input.run_id)).toBe(true);
+      expect(r.input.image).toBe(VPS_RUN_PROFILE.defaultImage);
+      expect(r.input.brief).toBeUndefined();
+    }
+  });
+
+  it("non-finite timeout_minutes (NaN/Infinity) falls back to the default, never NaN seconds", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const r = validateVpsRunInput({ command: "ls", timeout_minutes: bad });
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.input.timeoutMinutes).toBe(VPS_RUN_PROFILE.defaultTimeoutMinutes);
+    }
+  });
+});
+
+// ── makeSshRunner transport hardening (audit 2026-07-14) ─────────────────────
+// These spawn a REAL child process via a fake `ssh` on PATH — still $0, still
+// offline; they pin the three ways a bad connection could take down the host:
+// EPIPE crash, hung 'close', unbounded buffering.
+
+function withFakeSsh(script: string): { restore: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), "fake-ssh-"));
+  writeFileSync(join(dir, "ssh"), script);
+  chmodSync(join(dir, "ssh"), 0o755);
+  const oldPath = process.env["PATH"];
+  process.env["PATH"] = `${dir}:${oldPath ?? ""}`;
+  return { restore: () => void (process.env["PATH"] = oldPath) };
+}
+
+describe("makeSshRunner — connection failure hardening", () => {
+  const RUNNER_CFG: VpsRunConfig = { host: "root@vps.test", runsRoot: "/srv/agent-runs" };
+
+  it("remote exiting before draining a large stdin (EPIPE) resolves instead of crashing the host", async () => {
+    const { restore } = withFakeSsh("#!/bin/sh\nexit 255\n");
+    try {
+      const run = makeSshRunner(RUNNER_CFG);
+      // 1 MiB brief > 64 KiB pipe buffer: the write is mid-flight when ssh dies.
+      const res = await run("mkdir -p x && cat > x/BRIEF.md", { stdin: "x".repeat(1024 * 1024), timeoutMs: 10_000 });
+      expect(res.code).toBe(255);
+    } finally {
+      restore();
+    }
+  });
+
+  it("settles within grace when the kill-timer fires but descendants hold the stdio pipes (ControlMaster class)", async () => {
+    const { restore } = withFakeSsh("#!/bin/sh\nsleep 15 &\nwait\n");
+    try {
+      const run = makeSshRunner(RUNNER_CFG);
+      const t0 = Date.now();
+      const res = await run("docker run …", { timeoutMs: 500 });
+      expect(Date.now() - t0).toBeLessThan(8_000); // 500ms timeout + 2s grace, generous CI margin
+      expect(res.code).toBe(SSH_LOCAL_TIMEOUT_CODE);
+      expect(res.stderr).toContain(SSH_LOCAL_TIMEOUT_MARK);
+    } finally {
+      restore();
+    }
+  }, 15_000);
+
+  it("runaway remote stdout is tail-trimmed to the cap, not buffered unboundedly", async () => {
+    const { restore } = withFakeSsh(`#!/bin/sh\nhead -c 20000000 /dev/zero | tr '\\0' 'a'\n`);
+    try {
+      const run = makeSshRunner(RUNNER_CFG);
+      const res = await run("noisy job", { timeoutMs: 30_000 });
+      expect(res.code).toBe(0);
+      expect(res.stdout.length).toBeGreaterThan(0);
+      expect(res.stdout.length).toBeLessThanOrEqual(SSH_MAX_STDOUT_BYTES);
+    } finally {
+      restore();
+    }
+  }, 30_000);
 });
 
 // ── Docker command construction ───────────────────────────────────────────────
@@ -177,7 +264,9 @@ describe("vpsRunTool.execute — happy path", () => {
     expect(calls[1]!.cmd).toContain("docker run");
     expect(calls[2]!.cmd).toContain("find work");
     expect(calls[3]!.cmd).toContain("cat ");
-    expect(calls[4]!.cmd).toBe("rm -rf /srv/agent-runs/run-test12");
+    // Cleanup reaps a possibly-orphaned container BEFORE removing the sandbox
+    // (killing the docker CLI over a dead SSH link does not stop the container).
+    expect(calls[4]!.cmd).toBe("docker rm -f agent-run-run-test12 >/dev/null 2>&1; rm -rf /srv/agent-runs/run-test12");
     expect(uploaded).toHaveLength(1);
   });
 });

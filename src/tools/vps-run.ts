@@ -112,7 +112,10 @@ export function validateVpsRunInput(
 
   const network = args["network"] === "bridge" ? "bridge" : VPS_RUN_PROFILE.defaultNetwork;
 
-  const rawTimeout = typeof args["timeout_minutes"] === "number" ? args["timeout_minutes"] : VPS_RUN_PROFILE.defaultTimeoutMinutes;
+  const rawTimeout =
+    typeof args["timeout_minutes"] === "number" && Number.isFinite(args["timeout_minutes"])
+      ? args["timeout_minutes"]
+      : VPS_RUN_PROFILE.defaultTimeoutMinutes;
   const timeoutMinutes = Math.min(Math.max(1, Math.round(rawTimeout)), VPS_RUN_PROFILE.maxTimeoutMinutes);
 
   const brief = typeof args["brief"] === "string" && args["brief"].trim() ? args["brief"] : undefined;
@@ -159,6 +162,13 @@ export interface SshResult {
 }
 export type SshRunner = (remoteCommand: string, opts?: { stdin?: string; timeoutMs?: number }) => Promise<SshResult>;
 
+/** Local-kill exit code — mirrors coreutils `timeout` so callers report both the same way. */
+export const SSH_LOCAL_TIMEOUT_CODE = 124;
+export const SSH_LOCAL_TIMEOUT_MARK = "[vps-ssh: local timeout — ssh client killed]";
+/** stdout cap: artifact `cat`s (≤ maxArtifactBytes) always fit; runaway container logs get tail-trimmed. */
+export const SSH_MAX_STDOUT_BYTES = VPS_RUN_PROFILE.maxArtifactBytes + 2 * 1024 * 1024;
+export const SSH_MAX_STDERR_BYTES = 256 * 1024;
+
 export function makeSshRunner(cfg: VpsRunConfig): SshRunner {
   return (remoteCommand, opts = {}) =>
     new Promise((resolve, reject) => {
@@ -173,17 +183,54 @@ export function makeSshRunner(cfg: VpsRunConfig): SshRunner {
       const child = spawn("ssh", args, { stdio: ["pipe", "pipe", "pipe"] });
       const out: Buffer[] = [];
       const err: Buffer[] = [];
-      const timer = setTimeout(() => child.kill("SIGKILL"), opts.timeoutMs ?? 60_000);
-      child.stdout.on("data", (c: Buffer) => out.push(c));
-      child.stderr.on("data", (c: Buffer) => err.push(c));
-      child.on("error", (e) => {
+      let outLen = 0;
+      let errLen = 0;
+      let settled = false;
+      const settle = (result: SshResult | null, e?: Error) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
-        reject(e);
+        if (result) resolve(result);
+        else reject(e ?? new Error("ssh failed"));
+      };
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        // 'close' waits for ALL stdio to drain; a descendant holding the pipes
+        // (ssh ControlMaster/ControlPersist, ProxyCommand) would keep it from
+        // ever firing after the kill — settle after a short grace so a hung
+        // connection can never hang the tool call.
+        const grace = setTimeout(() => {
+          // Release the pipe handles the descendant is holding open, then settle.
+          child.stdout.destroy();
+          child.stderr.destroy();
+          settle({
+            code: SSH_LOCAL_TIMEOUT_CODE,
+            stdout: Buffer.concat(out),
+            stderr: `${Buffer.concat(err).toString("utf8")}\n${SSH_LOCAL_TIMEOUT_MARK}`,
+          });
+        }, 2_000);
+        grace.unref();
+      }, opts.timeoutMs ?? 60_000);
+      // Tail-trim so a runaway remote stream cannot balloon gateway memory.
+      child.stdout.on("data", (c: Buffer) => {
+        out.push(c);
+        outLen += c.length;
+        while (outLen > SSH_MAX_STDOUT_BYTES && out.length > 1) outLen -= out.shift()!.length;
       });
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        resolve({ code: code ?? 1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString("utf8") });
+      child.stderr.on("data", (c: Buffer) => {
+        err.push(c);
+        errLen += c.length;
+        while (errLen > SSH_MAX_STDERR_BYTES && err.length > 1) errLen -= err.shift()!.length;
       });
+      child.on("error", (e) => settle(null, e));
+      child.on("close", (code) =>
+        settle({ code: code ?? 1, stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString("utf8") }),
+      );
+      // EPIPE lands here when the remote exits before draining stdin (failed
+      // mkdir, dropped connection). Without a listener it is an uncaught
+      // exception that kills the whole gateway process; 'close' still reports
+      // the real exit code, so swallowing is correct.
+      child.stdin.on("error", () => {});
       if (opts.stdin !== undefined) child.stdin.end(opts.stdin);
       else child.stdin.end();
     });
@@ -266,10 +313,13 @@ export const vpsRunTool: UnifiedTool = {
       //    are the evidence the founder needs when a job fails.
       const { artifacts, harvestError } = await harvestArtifacts(ssh, upload, input.run_id, runDir);
 
-      // 4. Cleanup. Fail-open: the artifacts are already durable in S3, and a
-      //    leftover directory must not turn a finished job into a failure.
+      // 4. Cleanup: force-remove the container first (reaps orphans left when
+      //    the local SSH kill fired mid-run — killing the docker CLI does NOT
+      //    stop the container), then the sandbox dir. Fail-open: the artifacts
+      //    are already durable in S3, and a leftover must not turn a finished
+      //    job into a failure.
       // allow-failopen: sandbox cleanup is best-effort; artifacts already uploaded
-      await ssh(`rm -rf ${runDir}`, { timeoutMs: 30_000 }).catch(() =>
+      await ssh(`docker rm -f agent-run-${input.run_id} >/dev/null 2>&1; rm -rf ${runDir}`, { timeoutMs: 30_000 }).catch(() =>
         log.warn({ runDir }, "vps_run: sandbox cleanup failed (left for ops sweep)"),
       );
 
