@@ -44,6 +44,7 @@ import type { KernelStateType, KernelUpdate } from "./state.js";
 import type { KernelChatModel } from "./planner.js";
 import { messageContentText } from "./message-text.js";
 import { verifyStepResult } from "./verify.js";
+import { clampToolOutput, pruneScratchForModel } from "./tool-output-guard.js";
 
 /** Narrow tool surface. `config` carries thread_id for DB-backed HITL gates. */
 export interface KernelTool {
@@ -159,7 +160,9 @@ export function makeAgentNode(model: KernelBindableModel, specs: Record<string, 
     const bindable = remaining > 0 && spec.tools.length > 0 && model.bindTools
       ? model.bindTools(spec.tools)
       : model;
-    const response = await bindable.invoke([system, ...scratch]);
+    // Read-time projection only — the checkpointed scratch stays untouched;
+    // oldest oversized tool results are collapsed before the model re-reads them.
+    const response = await bindable.invoke([system, ...pruneScratchForModel(scratch)]);
     return { scratch: { [step.step_id]: [response] } };
   };
 }
@@ -252,6 +255,8 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
         ok = false;
       }
       executed += 1;
+      // Receipt digest = FULL payload (ground truth); the model sees the clamped
+      // version — a runaway scraper/DB result must not be replayed every hop.
       receipts.push({
         tool: call.name,
         args_hash: argsHash,
@@ -259,7 +264,7 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
         ok,
         at: new Date().toISOString(),
       });
-      messages.push(new ToolMessage({ content: resultStr, tool_call_id: callId, name: call.name }));
+      messages.push(new ToolMessage({ content: clampToolOutput(resultStr), tool_call_id: callId, name: call.name }));
     }
 
     return { scratch: { [step.step_id]: messages }, step_receipts: { [step.step_id]: receipts } };
