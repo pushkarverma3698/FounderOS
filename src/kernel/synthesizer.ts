@@ -13,6 +13,10 @@ import type { StepResult, ToolReceipt } from "./contracts.js";
 import type { KernelStateType, KernelUpdate } from "./state.js";
 import type { KernelChatModel } from "./planner.js";
 import { messageContentText } from "./message-text.js";
+import { clampToolOutput } from "./tool-output-guard.js";
+
+/** Per-step char cap on the JSON the synthesizer re-reads (~2k tokens each). */
+export const SYNTH_STEP_OUTPUT_MAX_CHARS = 8_000;
 
 const SYNTHESIZER_PROMPT = [
   `You are the FounderOS synthesizer. Write the reply to the founder for a completed mission.`,
@@ -33,9 +37,15 @@ export function receiptsBlock(results: StepResult[]): string {
 
 export function makeSynthesizeNode(model: KernelChatModel) {
   return async function synthesize(state: KernelStateType): Promise<KernelUpdate> {
+    // Contract-validated outputs can still carry unbounded strings — bound each
+    // step's JSON before the final LLM call (token protection, mirrors the
+    // worker-loop clamp in tool-output-guard.ts).
     const okResults = state.results
       .filter((r): r is Extract<StepResult, { status: "ok" }> => r.status === "ok")
-      .map((r) => ({ step_id: r.step_id, output: r.output }));
+      .map((r) => ({
+        step_id: r.step_id,
+        output_json: clampToolOutput(JSON.stringify(r.output, null, 2), SYNTH_STEP_OUTPUT_MAX_CHARS),
+      }));
 
     const response = await model.invoke([
       new SystemMessage(SYNTHESIZER_PROMPT),
