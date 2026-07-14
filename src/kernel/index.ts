@@ -49,7 +49,20 @@ export {
   type KernelBindableModel,
   type WorkerSpec,
 } from "./worker.js";
-export { makeSynthesizeNode, receiptsBlock, fallbackSynthesisReply } from "./synthesizer.js";
+export {
+  makeSynthesizeNode,
+  receiptsBlock,
+  fallbackSynthesisReply,
+  SYNTH_STEP_OUTPUT_MAX_CHARS,
+} from "./synthesizer.js";
+export {
+  clampToolOutput,
+  pruneScratchForModel,
+  TOOL_OUTPUT_MAX_CHARS,
+  TOOL_OUTPUT_TRUNCATED_MARKER,
+  SCRATCH_MAX_CHARS,
+  SCRATCH_KEEP_RECENT_TOOL_RESULTS,
+} from "./tool-output-guard.js";
 export {
   normalizeFailureSignature,
   lessonMessage,

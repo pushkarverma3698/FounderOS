@@ -28,6 +28,7 @@ import {
   resolveTemperature,
 } from "../agents/model.js";
 import { withModelFallbacks } from "./model-fallback.js";
+import { withModelRetry } from "./model-retry.js";
 import { withLlmCache } from "./model-cache.js";
 import { env } from "../core/config.js";
 import { DEPARTMENT_TOOLS, applyMcpBridge } from "../agents/capabilities.js";
@@ -149,22 +150,25 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
       temperature,
       ttlSeconds: env.LLM_CACHE_TTL_SECONDS,
     });
+  // Retry-with-jitter sits INSIDE the fallback chain: a transient 429/529 on
+  // the primary is absorbed with backoff before a fallback (different model,
+  // different answers) has to take over. Auth/404 pass straight through.
   return buildKernel({
     plannerModel: cachePlanner(
       withModelFallbacks(
-        getModel() as unknown as KernelBindableModel,
+        withModelRetry(getModel() as unknown as KernelBindableModel, { label: "planner" }),
         fallbacks,
         "planner",
       ),
     ),
     workerModel: withModelFallbacks(
-      getWorkerModel() as unknown as KernelBindableModel,
+      withModelRetry(getWorkerModel() as unknown as KernelBindableModel, { label: "worker" }),
       fallbacks,
       "worker",
     ),
     synthesizerModel: cacheSynth(
       withModelFallbacks(
-        getWorkerModel() as unknown as KernelBindableModel,
+        withModelRetry(getWorkerModel() as unknown as KernelBindableModel, { label: "synthesizer" }),
         fallbacks,
         "synthesizer",
       ),

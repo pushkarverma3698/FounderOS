@@ -195,6 +195,64 @@ describe("text.summary shape repair (live T01/T03 regression)", () => {
   });
 });
 
+describe("constraints repair — planner drops the field (live 2026-07-13 regression)", () => {
+  const raw = (over: Record<string, unknown> = {}) => ({
+    step_id: "s1",
+    worker: "admin",
+    objective: "List all scheduled tasks and identify the recurrence",
+    inputs: {},
+    expected: { kind: "data", schema_ref: "text.summary" },
+    ...over,
+  });
+
+  it("fills a MISSING constraints object with a safe tool budget + hitl=false for data steps", () => {
+    // The exact live failure: a step with no `constraints` key → planner validation rejected it.
+    const res = TaskEnvelopeSchema.safeParse(raw());
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.constraints.max_tool_calls).toBe(3);
+      expect(res.data.constraints.hitl_required).toBe(false);
+    }
+  });
+
+  it("defaults hitl_required=TRUE for an action step (fail safe — a dropped gate must not auto-send)", () => {
+    const res = TaskEnvelopeSchema.safeParse(
+      raw({ worker: "comms", objective: "Send the recap email", expected: { kind: "action_receipt", schema_ref: "action.summary" } }),
+    );
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.constraints.hitl_required).toBe(true);
+  });
+
+  it("infers action-step gating from schema_ref even when kind is also dropped", () => {
+    const res = TaskEnvelopeSchema.safeParse(raw({ expected: { schema_ref: "action.summary" } }));
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.constraints.hitl_required).toBe(true);
+  });
+
+  it("fills only the MISSING key when constraints is partial", () => {
+    const res = TaskEnvelopeSchema.safeParse(raw({ constraints: { max_tool_calls: 5 } }));
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.constraints.max_tool_calls).toBe(5); // author's value kept
+      expect(res.data.constraints.hitl_required).toBe(false); // dropped key filled
+    }
+  });
+
+  it("leaves a fully-formed envelope byte-identical (determinism)", () => {
+    const good = { ...raw(), constraints: { max_tool_calls: 2, hitl_required: false } };
+    const a = TaskEnvelopeSchema.parse(good);
+    const b = TaskEnvelopeSchema.parse(good);
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+    expect(a.constraints).toEqual({ max_tool_calls: 2, hitl_required: false });
+  });
+
+  it("a repaired plan now validates end-to-end where it previously failed", () => {
+    const step = raw(); // no constraints — the shape from the live trace
+    const res = validatePlan({ schema_version: KERNEL_SCHEMA_VERSION, goal: "check recurrence", steps: [step] });
+    expect(res.ok).toBe(true);
+  });
+});
+
 describe("plan validation", () => {
   const plan = (steps: TaskEnvelope[]) => ({ schema_version: KERNEL_SCHEMA_VERSION, goal: "g", steps });
 
