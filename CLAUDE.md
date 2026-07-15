@@ -78,6 +78,10 @@ src/infra/             — hitl, checkpointer (PostgresSaver), budget, daily-bud
 src/db/                — schema (18 tables) + queries; src/eval/ — golden tasks,
                          runner, scoring, kernel-invoker; src/proof/ — proof renderers
 src/mcp/               — MCP server (read-only external surface)
+video-factory/         — client social-video engine (standalone npm dir, NOT in
+                         the pnpm workspace): brands/ registry + HyperFrames
+                         projects; kernel side = src/tools/video-brand.ts,
+                         video-brief.ts (see docs/VIDEO-FACTORY.md)
 ```
 
 ## Commands
