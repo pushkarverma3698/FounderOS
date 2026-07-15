@@ -44,6 +44,7 @@ import type { KernelStateType, KernelUpdate } from "./state.js";
 import type { KernelChatModel } from "./planner.js";
 import { messageContentText } from "./message-text.js";
 import { verifyStepResult } from "./verify.js";
+import { clampToolOutput, pruneScratchForModel } from "./tool-output-guard.js";
 
 /** Narrow tool surface. `config` carries thread_id for DB-backed HITL gates. */
 export interface KernelTool {
@@ -114,6 +115,15 @@ export function turnReceipts(state: KernelStateType): ToolReceipt[] {
   return [...prior, ...Object.values(state.step_receipts).flat()];
 }
 
+/** Terminal-turn nudge (transient; never stored) forcing a JSON finalize from the tool results already gathered. */
+function finalizeNudge(step: TaskEnvelope): HumanMessage {
+  return new HumanMessage(
+    `You have no tool calls left for this step. Do NOT call any tool. ` +
+      `Reply NOW with ONE JSON object satisfying "${step.expected.schema_ref}", built ONLY from the tool ` +
+      `results above. If they are insufficient, say so honestly inside the JSON — never return an empty message.`,
+  );
+}
+
 function workerProtocol(step: TaskEnvelope, remainingCalls: number): string {
   const template = getSchemaTemplate(step.expected.schema_ref);
   return [
@@ -159,7 +169,16 @@ export function makeAgentNode(model: KernelBindableModel, specs: Record<string, 
     const bindable = remaining > 0 && spec.tools.length > 0 && model.bindTools
       ? model.bindTools(spec.tools)
       : model;
-    const response = await bindable.invoke([system, ...scratch]);
+    // Read-time projection only — the checkpointed scratch stays untouched;
+    // oldest oversized tool results are collapsed before the model re-reads them.
+    // When the tool budget is spent, append a finalize nudge (NOT stored to
+    // scratch): weak models sometimes return empty content on the terminal
+    // turn, which collect() can only report as "did not finalize" (live
+    // 2026-07-13, admin/text.summary). The nudge maximises a valid finalize
+    // without fabricating anything.
+    const invokeMsgs = [system, ...pruneScratchForModel(scratch)];
+    if (remaining === 0 && executedToolCalls(scratch) > 0) invokeMsgs.push(finalizeNudge(step));
+    const response = await bindable.invoke(invokeMsgs);
     return { scratch: { [step.step_id]: [response] } };
   };
 }
@@ -252,6 +271,8 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
         ok = false;
       }
       executed += 1;
+      // Receipt digest = FULL payload (ground truth); the model sees the clamped
+      // version — a runaway scraper/DB result must not be replayed every hop.
       receipts.push({
         tool: call.name,
         args_hash: argsHash,
@@ -259,7 +280,7 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
         ok,
         at: new Date().toISOString(),
       });
-      messages.push(new ToolMessage({ content: resultStr, tool_call_id: callId, name: call.name }));
+      messages.push(new ToolMessage({ content: clampToolOutput(resultStr), tool_call_id: callId, name: call.name }));
     }
 
     return { scratch: { [step.step_id]: messages }, step_receipts: { [step.step_id]: receipts } };
