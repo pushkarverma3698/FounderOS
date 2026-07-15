@@ -76,7 +76,7 @@ describe("compileCompositePlan", () => {
     expect(filter).toContain(`enable=between(t\\,${Math.round((hook.start_s + 0.3) * 100) / 100}`);
   });
 
-  it("audio: VO + ducked music mix to -14 LUFS; VO-only and music-only degrade cleanly", () => {
+  it("audio: VO + ducked music mix to -14 LUFS; VO-only degrades cleanly", () => {
     const list = sl();
     const both = compositeStep(list, paths(list, true, true)).argv.join(" ");
     expect(both).toContain("amix=inputs=2");
@@ -86,9 +86,25 @@ describe("compileCompositePlan", () => {
     const voOnly = compositeStep(list, paths(list, true, false)).argv.join(" ");
     expect(voOnly).not.toContain("amix");
     expect(voOnly).toContain("[vo]loudnorm");
+  });
 
-    const silent = compositeStep(list, paths(list, false, false)).argv;
-    expect(silent).toContain("-an");
+  it("ambient mode (no VO, no music): clips' native audio rides the transition grammar", () => {
+    const list = sl();
+    const argv = compositeStep(list, paths(list, false, false)).argv;
+    const filter = argv.join(" ");
+    expect(argv).not.toContain("-an");
+    // one acrossfade per non-cut junction, mirroring the xfade chain
+    const nonCut = list.shots.slice(0, -1).filter((s) => s.transition_out.type !== "cut").length;
+    expect((filter.match(/acrossfade=d=/g) ?? []).length).toBe(nonCut);
+    expect(filter).toContain("loudnorm=I=-14");
+    expect(filter).toContain(`afade=t=out:st=${Math.round((list.duration_s - 1.5) * 100) / 100}:d=1.5`);
+
+    // normalization keeps audio: veo shots resample native ambient, title cards get silence
+    const norms = normalizeSteps(list, paths(list, false, false));
+    const veoNorm = norms[0]!.argv.join(" ");
+    expect(veoNorm).toContain("aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo");
+    const cardNorm = norms.at(-1)!.argv.join(" ");
+    expect(cardNorm).toContain("anullsrc");
   });
 
   it("ends on a fade-out and ships faststart mp4", () => {

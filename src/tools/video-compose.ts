@@ -72,29 +72,46 @@ export function wrapCaption(text: string, maxChars: number): string[] {
   return lines;
 }
 
+/** Ambient mode: no VO and no music → the shots' own generated audio carries
+ *  the mix (Veo 3.1 produces native ambient sound). Without this, a
+ *  keys-limited production would ship silent — never production grade. */
+export function isAmbientMode(paths: ComposePaths): boolean {
+  return paths.voFile === null && paths.musicFile === null;
+}
+
 /**
  * Per-shot normalization: constant fps/SAR, cover-scale + center-crop to the
  * canvas (this is the whole 1:1 implementation — 16:9 sources crop to square
- * here), exact trim, audio stripped (VO/music own the mix).
+ * here), exact trim. Audio is stripped when VO/music own the mix; in ambient
+ * mode each clip keeps (or gains, for silent title cards) a uniform 48kHz
+ * stereo track so the acrossfade chain always has matching streams.
  */
 export function normalizeSteps(shotlist: ShotList, paths: ComposePaths): FfmpegStep[] {
   const { width: w, height: h } = shotlist.canvas;
+  const ambient = isAmbientMode(paths);
   return shotlist.shots.map((shot, i) => {
     const isLast = i === shotlist.shots.length - 1;
     const out = `${paths.workDir}/${shot.id}.norm.mp4`;
-    return {
-      id: `norm-${shot.id}`,
-      argv: [
-        "-y",
-        "-i", paths.shotFiles[shot.id] ?? `assets/${shot.id}.mp4`,
-        "-vf", `fps=${shotlist.fps},scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},setsar=1`,
-        "-t", String(trimmedLength(shot, isLast)),
-        "-an",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
-        out,
-      ],
-      produces: out,
-    };
+    const len = trimmedLength(shot, isLast);
+    const argv: string[] = ["-y", "-i", paths.shotFiles[shot.id] ?? `assets/${shot.id}.mp4`];
+    if (ambient) {
+      const vchain = `[0:v]fps=${shotlist.fps},scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},setsar=1[v]`;
+      if (shot.kind === "title-card") {
+        // Title cards render mute — synthesize a silent track so the
+        // downstream acrossfade chain always sees matching audio streams.
+        argv.push("-f", "lavfi", "-i", `anullsrc=channel_layout=stereo:sample_rate=48000:duration=${len}`);
+        argv.push("-filter_complex", vchain, "-map", "[v]", "-map", "1:a");
+      } else {
+        // Veo clips carry native ambient audio; a clip without an audio
+        // stream fails loud here (typed step failure), never silently.
+        argv.push("-filter_complex", `${vchain};[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]`, "-map", "[v]", "-map", "[a]");
+      }
+      argv.push("-c:a", "aac", "-b:a", "192k");
+    } else {
+      argv.push("-vf", `fps=${shotlist.fps},scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},setsar=1`, "-an");
+    }
+    argv.push("-t", String(len), "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", out);
+    return { id: `norm-${shot.id}`, argv, produces: out };
   });
 }
 
@@ -169,13 +186,34 @@ export function compositeStep(shotlist: ShotList, paths: ComposePaths): FfmpegSt
   filters.push(`${lastLabel}${vOps}[vfinal]`);
 
   const audioFilters: string[] = [];
+  let ambientLabel = "";
+  if (isAmbientMode(paths)) {
+    // Ambient mode: the clips' own audio rides the same transition grammar as
+    // the video — acrossfade mirrors each xfade's overlap, concat mirrors cuts —
+    // so picture and sound always move together.
+    let aLabel = "[0:a]";
+    for (let i = 1; i < shots.length; i++) {
+      const t = shots[i - 1]!.transition_out;
+      const next = `[ax${i}]`;
+      if (t.type === "cut" || t.duration_s === 0) {
+        audioFilters.push(`${aLabel}[${i}:a]concat=n=2:v=0:a=1${next}`);
+      } else {
+        audioFilters.push(`${aLabel}[${i}:a]acrossfade=d=${t.duration_s}${next}`);
+      }
+      aLabel = next;
+    }
+    audioFilters.push(
+      `${aLabel}atrim=0:${T},apad=whole_dur=${T},afade=t=out:st=${round2(T - 1.5)}:d=1.5,loudnorm=I=-14:TP=-1.5:LRA=11[afinal]`,
+    );
+    ambientLabel = "[afinal]";
+  }
   if (voIdx >= 0) audioFilters.push(`[${voIdx}:a]atrim=0:${T},apad=whole_dur=${T}[vo]`);
   if (musicIdx >= 0) {
     audioFilters.push(
       `[${musicIdx}:a]atrim=0:${T},volume=${voIdx >= 0 ? "0.22" : "0.9"},afade=t=in:st=0:d=1.5,afade=t=out:st=${round2(T - 2.5)}:d=2.5,apad=whole_dur=${T}[mus]`,
     );
   }
-  let audioLabel = "";
+  let audioLabel = ambientLabel;
   if (voIdx >= 0 && musicIdx >= 0) {
     audioFilters.push(`[vo][mus]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11[afinal]`);
     audioLabel = "[afinal]";
