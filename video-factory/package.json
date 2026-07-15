@@ -1,0 +1,15 @@
+{
+  "name": "founderos-video-factory",
+  "private": true,
+  "description": "FounderOS Video Factory — brand-driven HyperFrames composition + render workspace (standalone npm dir, not part of the pnpm workspace)",
+  "scripts": {
+    "doctor": "hyperframes doctor",
+    "lint": "hyperframes lint",
+    "check": "hyperframes check",
+    "render": "hyperframes render"
+  },
+  "dependencies": {
+    "gsap": "^3.14.2",
+    "hyperframes": "^0.7.58"
+  }
+}
