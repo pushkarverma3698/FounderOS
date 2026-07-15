@@ -30,6 +30,11 @@ if (!text || !voice || !out) {
   console.error("Required: --text <script> --voice <voice_id> --out <file.mp3>");
   process.exit(1);
 }
+const { existsSync } = await import("node:fs");
+if (existsSync(out)) {
+  console.log(`exists, skipping (idempotent): ${out}`);
+  process.exit(0);
+}
 
 const body = {
   text,

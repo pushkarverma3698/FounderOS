@@ -79,9 +79,11 @@ src/db/                — schema (18 tables) + queries; src/eval/ — golden ta
                          runner, scoring, kernel-invoker; src/proof/ — proof renderers
 src/mcp/               — MCP server (read-only external surface)
 video-factory/         — client social-video engine (standalone npm dir, NOT in
-                         the pnpm workspace): brands/ registry + HyperFrames
-                         projects; kernel side = src/tools/video-brand.ts,
-                         video-brief.ts (see docs/VIDEO-FACTORY.md)
+                         the pnpm workspace): brands/ registry, projects/,
+                         scripts/produce.mjs (receipt-checkpointed executor);
+                         kernel side = src/tools/video-{brand,brief,shotlist,
+                         models,compose,production,title-card}.ts (pure, $0) —
+                         see docs/VIDEO-FACTORY.md + docs/VIDEO-PIPELINE-AUDIT.md
 ```
 
 ## Commands
