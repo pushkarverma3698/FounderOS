@@ -13,6 +13,18 @@
  */
 import { ollamaGenerate } from "../lib/ollama.js";
 import type { RagHit } from "./rag-search.js";
+import type { HybridMode } from "./rag-hybrid.js";
+
+/**
+ * Should the fused result be reranked? Rerank uses the same local model family
+ * (Ollama) as the embedder, so in `keyword-fallback` — where the embedder is
+ * already down — a rerank call would just burn the full model timeout before
+ * failing open. Skip it there (and when disabled or there's nothing to reorder)
+ * so the degraded path stays fast.
+ */
+export function shouldRerank(enabled: boolean, mode: HybridMode, hitCount: number): boolean {
+  return enabled && mode !== "keyword-fallback" && hitCount > 1;
+}
 
 /** Build the ranking prompt. Passages are numbered 1-based (models count from 1),
  *  truncated so a long chunk can't blow the context window. */

@@ -8,7 +8,7 @@
  * TDD: RED until src/db/rag-rerank.ts exists.
  */
 import { describe, it, expect, vi } from "vitest";
-import { rerankHits, parseRerankOrder, buildRerankPrompt } from "../../../src/db/rag-rerank.js";
+import { rerankHits, parseRerankOrder, buildRerankPrompt, shouldRerank } from "../../../src/db/rag-rerank.js";
 import type { RagHit } from "../../../src/db/rag-search.js";
 
 const h = (c: string): RagHit => ({ content: c, metadata: {}, score: 0.5 });
@@ -40,6 +40,23 @@ describe("buildRerankPrompt", () => {
     expect(p).toContain("1.");
     expect(p).toContain("2.");
     expect(p).toContain("alpha");
+  });
+});
+
+describe("shouldRerank (gate)", () => {
+  it("reranks only when enabled, there is >1 hit, and the embedder was up", () => {
+    expect(shouldRerank(true, "hybrid", 5)).toBe(true);
+    expect(shouldRerank(true, "vector", 5)).toBe(true);
+  });
+  it("never reranks when disabled", () => {
+    expect(shouldRerank(false, "hybrid", 5)).toBe(false);
+  });
+  it("skips rerank in keyword-fallback (embedder/Ollama is down — don't burn the rerank timeout)", () => {
+    expect(shouldRerank(true, "keyword-fallback", 5)).toBe(false);
+  });
+  it("skips rerank when there is nothing to reorder (<=1 hit)", () => {
+    expect(shouldRerank(true, "hybrid", 1)).toBe(false);
+    expect(shouldRerank(true, "hybrid", 0)).toBe(false);
   });
 });
 

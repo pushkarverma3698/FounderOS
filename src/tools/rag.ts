@@ -27,7 +27,7 @@ import {
   type HybridResult,
 } from "../db/rag-hybrid.js";
 import { toRetrievalResult, renderRetrieval, RetrievalResultSchema } from "../db/retrieval-result.js";
-import { rerankHits } from "../db/rag-rerank.js";
+import { rerankHits, shouldRerank } from "../db/rag-rerank.js";
 import { RAG_RERANK_ENABLED } from "../core/config.js";
 import { getRagflowClient } from "../infra/ragflow.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
@@ -104,15 +104,11 @@ async function runRagSearch(table: RagTable, query: string, topK: number): Promi
     return result;
   }
 
-  // Optional local rerank (F5, flag-gated, fail-open). rerankHits returns the
-  // fused order unchanged if the model is unavailable — never fewer/worse results.
-  const hits = RAG_RERANK_ENABLED
-    ? await rerankHits(query, result.hits, topK)
-    : result.hits.slice(0, topK);
-  log.debug(
-    { table, query, count: hits.length, mode: result.mode, reranked: RAG_RERANK_ENABLED },
-    "RAG search",
-  );
+  // Optional local rerank (F5, flag-gated, fail-open). Skipped in keyword-fallback
+  // (the embedder/Ollama is down, so reranking would only burn the model timeout).
+  const rerank = shouldRerank(RAG_RERANK_ENABLED, result.mode, result.hits.length);
+  const hits = rerank ? await rerankHits(query, result.hits, topK) : result.hits.slice(0, topK);
+  log.debug({ table, query, count: hits.length, mode: result.mode, reranked: rerank }, "RAG search");
   return { ...result, hits };
 }
 
