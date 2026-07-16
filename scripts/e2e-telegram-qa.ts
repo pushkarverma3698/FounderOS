@@ -404,7 +404,16 @@ async function sendAndCollect(
   text: string,
   waitS: number,
 ): Promise<BotReply[]> {
-  const sent = await client.sendMessage(peer, { message: text });
+  let sent;
+  try {
+    sent = await client.sendMessage(peer, { message: text });
+  } catch (err) {
+    // Telegram rejects some harness inputs at the transport level (T15's blank
+    // prompt → 400 MESSAGE_EMPTY). One rejected send must not kill the whole
+    // suite — 2026-07-13 it aborted the run at 15/22 tasks.
+    console.log(`  ✗ harness send rejected by Telegram (task not delivered): ${String(err).slice(0, 120)}`);
+    return [];
+  }
   const deadline = Date.now() + waitS * 1_000;
   const seen = new Set<number>();
   const replies: BotReply[] = [];
