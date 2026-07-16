@@ -267,6 +267,14 @@ export const MCP_BRIDGE_ENABLED = env.MCP_BRIDGE_ENABLED === "true";
 export const MCP_BRIDGE_MANIFEST = env.MCP_BRIDGE_MANIFEST;
 
 /**
+ * Local rerank stage after hybrid RAG fusion (spec §1.1 F5). Default OFF — it
+ * adds an Ollama (qwen2.5:7b) call per query and must be live-verified on the VPS
+ * before production. Fail-open by design: when disabled or when the model is
+ * unavailable, retrieval uses the deterministic fused order.
+ */
+export const RAG_RERANK_ENABLED = boolEnv("RAG_RERANK", false);
+
+/**
  * Max recursive supervisor/sub-agent steps before LangGraph aborts a run.
  * Sized for the kernel's worst legitimate single step: dispatch + (agent+tools)
  * hops up to the tool budget + collect, times MAX_ATTEMPTS_PER_STEP (3 since
