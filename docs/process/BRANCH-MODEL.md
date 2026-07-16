@@ -1,8 +1,13 @@
 # Branch Model — beta / main
 
-FounderOS uses a **three-tier** model so production (`main`) stays protected while
-agents integrate continuously on `beta`. Only the founder promotes `beta → main`
-(CD auto-deploy).
+FounderOS uses a **two-stage promotion** — `feat/* → beta → main` — so production
+(`main`) stays protected while agents integrate continuously on `beta`. Only the
+founder promotes `beta → main` (CD auto-deploy).
+
+> **Note:** an earlier `stable` tier (`beta → stable → main`) was **retired** — it
+> added a promotion hop with no protection value once branch protection landed on
+> `main`. The ladder is now two-stage. CI (`branch-policy.yml`) enforces exactly
+> this; any doc that still says `beta → stable → main` is stale. See ADR-045.
 
 ```
 main    ─────────────────────────────●────────▶  production (CD deploys on merge)
