@@ -1,0 +1,11 @@
+{
+  "step_id": "verify-sh-04",
+  "key": "50c553ca",
+  "ok": true,
+  "attempts": 1,
+  "probe": {
+    "duration_s": 8,
+    "width": 1280,
+    "height": 720
+  }
+}

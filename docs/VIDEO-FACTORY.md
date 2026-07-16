@@ -5,18 +5,39 @@ FounderOS owns the pipeline end-to-end; clients are rows in a registry, not
 bespoke projects. First client: The Health Place (Bangalore wellness). First
 deliverable rendered 2026-07-14 (55s hero, 16:9 + 9:16 + 1:1, $0 API spend).
 
-## Architecture (contract-first, same discipline as the kernel)
+## Architecture v2 (contract-first, zero LLM in the execution path)
+
+> v1's execution stage (brief → `claude_code` hand-authoring) was audited and
+> replaced 2026-07-15 — see **docs/VIDEO-PIPELINE-AUDIT.md** for the fail-point
+> inventory (infinite poll loop, double-spend, no state, no compositing).
 
 ```
 founder ("make THP a reel about X")
   → planner → marketing worker
       → list_video_brands            (read: registry enumeration)
-      → compile_video_brief          (PURE CODE: brand.json + request → brief)
-  → engineering worker
-      → claude_code                  (HITL-gated: author composition in video-factory/,
-                                      hyperframes lint+check, render MP4 locally at $0)
+      → compile_shot_list            (PURE: seeded camera grammar, transitions,
+                                      pacing, overlays, per-shot model + cost)
+      → plan_video_production        (PURE: full step DAG → production.json +
+                                      deterministic CTA title card; budget-gated)
+  → founder (or claude_code, HITL)
+      → produce.mjs                  (dumb executor: receipts = checkpoints,
+                                      idempotent, bounded retries, ffprobe QA,
+                                      Veo/ElevenLabs gen + ffmpeg composite)
+      → video_production_status      (read: phase/failures derived from receipts)
   → founder reviews render → publish via existing comms/marketing gates (HITL)
 ```
+
+Loop eradication is structural: the plan is immutable data compiled by pure
+code; state is DERIVED from per-step receipts (content-hash keyed, so a paid
+Veo step can never double-bill and a stale plan self-invalidates); every step
+has `max_attempts: 2` and a terminal failure names the component. The creative
+layer (shot-by-shot breakdown, camera-angle rotation, transition grammar,
+pacing profiles, consistency anchor + per-shot seeds, model selection matrix)
+lives in `src/tools/video-shotlist.ts` / `video-models.ts`; compositing
+(xfade chain, VO + ducked-music mix at −14 LUFS, caption burn, 1:1 crop, QA
+probes) is compiled to exact ffmpeg argv by `video-compose.ts`; the step DAG +
+receipt contract by `video-production.ts`; the CTA card by
+`video-title-card.ts` — all unit-tested at $0.
 
 - **`video-factory/brands/<slug>/brand.json`** — the client contract. Zod-validated
   by `src/tools/video-brand.ts`; malformed profile = typed failure, never a guess.
@@ -70,11 +91,14 @@ Three aspect ratios reuse the same assets — incremental cost per extra format 
   that single file.
 
 ## Stage roadmap
-1. **Now**: brand registry + brief compiler + local HyperFrames render (this PR).
-2. **Keys provisioned** (`GEMINI_API_KEY`, `ELEVENLABS_API_KEY` on the VPS):
-   `scripts/gen-broll.mjs` (Veo 3.1, async poll, 2-day retention → download
-   immediately) + `scripts/gen-voiceover.mjs` (audio FIRST, then time scenes to
-   measured duration). Budget-gate through the existing `daily-budget` infra.
+1. ~~Brand registry + brief compiler + local HyperFrames render~~ (shipped, PR #358).
+2. ~~Deterministic production pipeline~~ (shipped, this PR): shot-list compiler,
+   model matrix, receipt-checkpointed executor (`scripts/produce.mjs`), bounded
+   Veo polling with operation-handle resume, Eleven Music bed, ffmpeg composite
+   with transitions/captions/audio mix, ffprobe QA. Requires `GEMINI_API_KEY` +
+   `ELEVENLABS_API_KEY` (+ `ELEVENLABS_VOICE_ID`) for paid stages; the plan and
+   the composite compile and test at $0. Spend is double-gated: `budget_usd` at
+   plan time, `--approve-spend` at execution time.
 3. **Scale**: schedule weekly reels per client via the existing scheduler;
    publish through `schedule_social_post` (already HITL-gated); move batch/4K
    renders to `hyperframes lambda` if volume exceeds local capacity.

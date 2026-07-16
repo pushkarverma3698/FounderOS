@@ -48,7 +48,13 @@ import {
   vpsRun,
 } from "./agent-tools.js";
 import { generateImageTool, listBrandAssetsTool } from "./agent-tools/creative.js";
-import { listVideoBrandsTool, compileVideoBriefTool } from "./agent-tools/video.js";
+import {
+  listVideoBrandsTool,
+  compileVideoBriefTool,
+  compileShotListTool,
+  planVideoProductionTool,
+  videoProductionStatusTool,
+} from "./agent-tools/video.js";
 import { scheduleTask, listScheduled, editScheduled } from "./agent-tools/scheduling.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
@@ -82,7 +88,7 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal, vpsRun],
-  marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal, generateImageTool, listBrandAssetsTool, listScheduledPosts, listVideoBrandsTool, compileVideoBriefTool],
+  marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal, generateImageTool, listBrandAssetsTool, listScheduledPosts, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool],
   sales: [createSendEmailTool("sales"), searchWeb, searchKnowledge, searchTuricksBrain],
   personal: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain],
   jobhunt: [readCv, searchJobs, createSendEmailTool("jobhunt"), searchPersonalRag],

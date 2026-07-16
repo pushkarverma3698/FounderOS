@@ -28,7 +28,23 @@ sudo apt-get install -y ffmpeg     # if missing
 ./node_modules/.bin/hyperframes doctor           # verify
 ```
 
-## Produce a video
+## Produce a video (v2 pipeline — footage reels)
+The marketing agent (or you) compiles a plan with `plan_video_production`,
+which writes `projects/<project>/production.json` + a deterministic CTA card.
+Then:
+
+```bash
+node scripts/produce.mjs --project projects/<project> --dry-run          # inspect steps + cost
+node scripts/produce.mjs --project projects/<project> --approve-spend 8  # execute (budget gate)
+```
+
+The executor is **idempotent and checkpointed**: every step writes an atomic
+receipt (`receipts/<step>.json`, content-hash keyed); re-running skips valid
+receipts, so paid Veo/ElevenLabs steps never double-bill. Retries are bounded
+(2 attempts) — a terminal failure names the failing component and halts.
+Needs: `GEMINI_API_KEY`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, ffmpeg.
+
+## Produce a motion-graphics composition (v1 path, still supported)
 ```bash
 cd projects/<project>
 HF=../../node_modules/.bin/hyperframes
