@@ -1,0 +1,56 @@
+[Unit]
+# FounderOS — read-only MCP server over Streamable HTTP (spec §1.2, item 6).
+# Binds 127.0.0.1:3100 (loopback only) and requires a bearer token; the Mac
+# reaches it through an SSH local-forward (see docs/VPS-MCP-SETUP.md). This is
+# a SEPARATE service from founderos.service (the Telegram bot) — either can run
+# without the other.
+Description=FounderOS read-only MCP server (Streamable HTTP, loopback + bearer)
+Documentation=https://github.com/pushkarverma3698/FounderOS/blob/beta/docs/VPS-MCP-SETUP.md
+# Postgres (Docker) backs read_context / search_memory / search_knowledge. It is
+# a soft dependency: those tools degrade gracefully if the DB is down, and
+# search_web / github_read / read_cv keep working — so we order After it but do
+# NOT Require it (the knowledge surface should stay reachable during a DB blip).
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=founderos
+Group=founderos
+WorkingDirectory=/opt/founderos
+
+# Node 22 is installed system-wide via NodeSource (apt) → /usr/bin/node; pnpm via
+# `npm i -g pnpm@9` → /usr/bin/pnpm. Do NOT use fnm/nvm here — systemd does not
+# source .bashrc, so shim dirs are never on PATH (same rationale as founderos.service).
+Environment=NODE_ENV=production
+Environment=PATH=/home/founderos/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/founderos
+
+# Config + secrets live in /opt/founderos/.env (chmod 600, NEVER committed).
+# `pnpm mcp:http` passes --env-file=.env, so FOUNDEROS_MCP_TOKEN (generate with
+# `openssl rand -hex 32`), FOUNDEROS_MCP_PORT, and DATABASE_URL are read from there.
+# The server refuses to start if FOUNDEROS_MCP_TOKEN is unset/too short, and
+# refuses a non-loopback bind unless FOUNDEROS_MCP_ALLOW_PUBLIC=1.
+ExecStart=/usr/bin/env pnpm mcp:http
+
+# 24/7 reliability with crash-loop back-off (mirrors founderos.service).
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Hardening — least privilege. The server needs its own dir + loopback socket only.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+PrivateTmp=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=founderos-mcp
+
+[Install]
+WantedBy=multi-user.target

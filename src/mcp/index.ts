@@ -1,7 +1,9 @@
 /**
- * FounderOS MCP Server — Entry Point
- * ===================================
- * Starts the MCP server on Streamable HTTP transport.
+ * FounderOS MCP Server — stdio Entry Point
+ * =========================================
+ * Starts the MCP server on the STDIO transport — the entry local Claude Code /
+ * Claude Desktop launch as a child process. For the network entry (Streamable
+ * HTTP, bearer-gated, loopback-bound), see src/mcp/index-http.ts / `pnpm mcp:http`.
  * Run: node --env-file=.env --import tsx/esm src/mcp/index.ts
  *  or: pnpm mcp
  *

@@ -21,8 +21,10 @@
  *   - search_knowledge → turicks-brain keyword search (knowledge_entries table)
  *   - read_cv         → personal-rag CV/career lookup (personal-rag REST API + wiki fallback)
  *
- * Transport: Streamable HTTP (MCP spec Nov 2025+)
- * Start: pnpm mcp  (or: node --env-file=.env --import tsx/esm src/mcp/index.ts)
+ * Transport-agnostic: buildMcpServer() only registers the tool handlers; the
+ * caller connects a transport. Two entry points wrap it —
+ *   - stdio (local Claude Code / Desktop):   src/mcp/index.ts     · pnpm mcp
+ *   - Streamable HTTP (loopback + bearer):    src/mcp/index-http.ts · pnpm mcp:http
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";

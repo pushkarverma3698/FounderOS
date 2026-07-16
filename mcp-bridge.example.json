@@ -1,6 +1,15 @@
 {
   "_README": "Curated, copy-paste MCP server gallery for FounderOS (ADR-041). Copy the blocks you want into mcp-bridge.json (or point MCP_BRIDGE_MANIFEST here), add the listed env keys, set MCP_BRIDGE_ENABLED=true, and restart. Reads pass through; every tool in a server's `write` list is HITL-gated. Exact tool names are logged at boot ('MCP server bridged … classified: …') — verify the write list before trusting a server. JSON has no comments, so see docs/guides/MCP-SERVERS.md for the full guide. Verified package names as of 2026-06.",
+  "_README_founderos_vps": "The 'founderos-vps' block consumes FounderOS's OWN read-only MCP server running on the VPS (spec §1.2, docs/VPS-MCP-SETUP.md), reached over the SSH tunnel at 127.0.0.1:3100. headerEnv sends the env var's value VERBATIM as the Authorization header, so the Mac var FOUNDEROS_MCP_BEARER must be the FULL string 'Bearer <token>' — NOT the raw token. The VPS stores the raw token in its own .env as FOUNDEROS_MCP_TOKEN. gateUnlisted:true means any future write tool is HITL-gated by default.",
   "servers": {
+    "founderos-vps": {
+      "transport": "http",
+      "url": "http://127.0.0.1:3100/mcp",
+      "headerEnv": { "Authorization": "FOUNDEROS_MCP_BEARER" },
+      "department": ["research", "personal"],
+      "write": [],
+      "gateUnlisted": true
+    },
     "filesystem": {
       "transport": "stdio",
       "command": "npx",

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  FounderOS — Mac → VPS MCP tunnel (spec §1.2, item 7).
+
+  Keeps an autossh local-forward open so the Mac's MCP clients can reach the
+  VPS MCP server at http://127.0.0.1:3100/mcp. Outbound SSH only; the VPS port
+  never leaves its own loopback.
+
+  BEFORE loading, replace YOUR_USERNAME below with your Mac account name (launchd
+  does not expand ~), and confirm the autossh path:
+      which autossh        # Apple Silicon Homebrew → /opt/homebrew/bin/autossh
+                           # Intel Homebrew        → /usr/local/bin/autossh
+  The `founderos-vps` host alias must exist in ~/.ssh/config (see
+  deploy/ssh-config.founderos-vps.example).
+
+  Install:
+      cp deploy/com.founderos.mcp-tunnel.plist ~/Library/LaunchAgents/
+      launchctl load  -w ~/Library/LaunchAgents/com.founderos.mcp-tunnel.plist
+  Reload after edits:
+      launchctl unload ~/Library/LaunchAgents/com.founderos.mcp-tunnel.plist
+      launchctl load  -w ~/Library/LaunchAgents/com.founderos.mcp-tunnel.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.founderos.mcp-tunnel</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/autossh</string>
+    <string>-M</string><string>0</string>
+    <string>-N</string>
+    <string>-L</string><string>3100:127.0.0.1:3100</string>
+    <string>-o</string><string>ServerAliveInterval=30</string>
+    <string>-o</string><string>ServerAliveCountMax=3</string>
+    <string>-o</string><string>ExitOnForwardFailure=yes</string>
+    <string>founderos-vps</string>
+  </array>
+
+  <!-- AUTOSSH_GATETIME=0 makes autossh restart even if the FIRST connection
+       dies quickly (e.g. laptop still joining Wi-Fi at login). -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AUTOSSH_GATETIME</key><string>0</string>
+  </dict>
+
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR_USERNAME/Library/Logs/founderos-mcp-tunnel.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR_USERNAME/Library/Logs/founderos-mcp-tunnel.err.log</string>
+</dict>
+</plist>
