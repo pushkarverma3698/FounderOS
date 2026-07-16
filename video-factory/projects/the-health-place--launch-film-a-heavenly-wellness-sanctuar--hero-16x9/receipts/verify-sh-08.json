@@ -1,0 +1,11 @@
+{
+  "step_id": "verify-sh-08",
+  "key": "7cc58730",
+  "ok": true,
+  "attempts": 1,
+  "probe": {
+    "duration_s": 6,
+    "width": 1280,
+    "height": 720
+  }
+}

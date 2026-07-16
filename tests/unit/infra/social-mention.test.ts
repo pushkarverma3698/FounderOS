@@ -34,6 +34,24 @@ describe("escapeLittleText", () => {
   it("leaves plain text untouched", () => {
     expect(escapeLittleText("hello world 123")).toBe("hello world 123");
   });
+
+  // ROOT CAUSE (LinkedIn post truncation bug): the "little text" grammar
+  // (learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/
+  // little-text-format) reserves <, >, *, _, and ~ in ADDITION to the structural
+  // annotation chars. LinkedIn's own docs show plain "* " bullet points MUST be
+  // escaped ("\\* Point 1"). Any of these left unescaped in a commentary that
+  // also carries a mention/hashtag annotation breaks the little-text parser —
+  // LinkedIn then renders only the text up to the corruption, i.e. a long,
+  // fully-approved draft publishes as just the first couple of lines.
+  it("escapes the full little-text reserved set: < > * _ ~", () => {
+    expect(escapeLittleText("a<b>c*d_e~f")).toBe("a\\<b\\>c\\*d\\_e\\~f");
+  });
+
+  it("escapes markdown-style bullet/emphasis characters common in LLM drafts", () => {
+    expect(escapeLittleText("Bullet points:\n\n* Point 1\n* Point 2")).toBe(
+      "Bullet points:\n\n\\* Point 1\n\\* Point 2",
+    );
+  });
 });
 
 describe("buildCommentary", () => {

@@ -38,8 +38,36 @@ export function isOrganizationUrn(urn: string): boolean {
  * Escaping these (backslash-prefix) makes body text render literally while a
  * deliberately-injected annotation still resolves. Backslash is escaped first
  * so we never double-process an escape we just added.
+ *
+ * This is the FULL reserved set per LinkedIn's little-text grammar (Text ::=
+ * NON_RESERVED_CHAR_SEQUENCES | "\|" | "\{" | "\}" | "\@" | "\[" | "\]" | "\("
+ * | "\)" | "\<" | "\>" | "\#" | "\\" | "\*" | "\_" | "\~" — see
+ * learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/
+ * little-text-format). The list previously stopped at ()[]{}@|# and omitted
+ * <>*_~ — LinkedIn's own docs show plain "*" bullets need escaping ("\* Point
+ * 1"). Any of those left unescaped in a commentary that ALSO carries a mention
+ * annotation breaks the little-text parser: LinkedIn renders only the text up
+ * to the corruption, so a fully-approved multi-paragraph draft (which commonly
+ * contains *, _, or ~ from LLM-style emphasis/bullets) publishes as just its
+ * first line or two.
  */
-const LITTLE_TEXT_SPECIALS = ["\\", "(", ")", "[", "]", "{", "}", "@", "|", "#"] as const;
+const LITTLE_TEXT_SPECIALS = [
+  "\\",
+  "|",
+  "{",
+  "}",
+  "@",
+  "[",
+  "]",
+  "(",
+  ")",
+  "<",
+  ">",
+  "#",
+  "*",
+  "_",
+  "~",
+] as const;
 
 /** Escape reserved little-text characters in free-form body text. */
 export function escapeLittleText(text: string): string {

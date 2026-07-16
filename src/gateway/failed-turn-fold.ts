@@ -19,7 +19,7 @@ const log = logger.child({ module: "failed-turn-fold" });
 
 /** Minimal checkpoint surface the fold needs (the compiled graph satisfies it). */
 export interface FoldableKernel {
-  getState(config: unknown): Promise<{ values?: { turn?: unknown } } | undefined>;
+  getState(config: unknown): Promise<{ values?: { turn?: unknown; mission?: unknown } } | undefined>;
   updateState?(config: unknown, values: Record<string, unknown>, asNode?: string): Promise<unknown>;
 }
 
@@ -45,10 +45,16 @@ export async function recordFailedTurnInHistory(
     const turn = snapshot?.values?.turn as { id?: string } | undefined;
     if (!turn?.id) return;
     const message = (err instanceof Error ? err.message : String(err)).slice(0, 300);
+    // A hard-failed turn otherwise leaves mission.status="executing" (cursor
+    // mid-plan) in the checkpoint, and the NEXT turn's progress stream shows
+    // the dead task's label until its plan node returns (live 2026-07-13
+    // 8e045446). Same terminal shape the plan node writes on failure.
+    const staleMission = snapshot?.values?.mission as { goal?: string } | undefined;
     await kernel.updateState(
       config,
       {
         last_turn: turn,
+        mission: { goal: staleMission?.goal ?? "", status: "failed", plan: null, cursor: 0 },
         failure: {
           step_id: "turn",
           stage: failureStageForError(err),

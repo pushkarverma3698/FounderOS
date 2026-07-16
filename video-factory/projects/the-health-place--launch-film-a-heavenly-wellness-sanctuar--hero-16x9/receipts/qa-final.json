@@ -1,0 +1,11 @@
+{
+  "step_id": "qa-final",
+  "key": "96acd49e",
+  "ok": true,
+  "attempts": 1,
+  "probe": {
+    "duration_s": 55,
+    "width": 1920,
+    "height": 1080
+  }
+}
