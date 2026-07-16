@@ -76,12 +76,17 @@ fi
 # alias to the current stable Flash model (resolved to gemini-3.5-flash at
 # verification time) and is confirmed live with the current key.
 # anthropic:claude-haiku-4-5 is unusable in prod — there is no ANTHROPIC_API_KEY,
-# so it 401s on every message. Fallback = FREE OpenRouter models only (founder
-# directive: no paid fallback).
+# so it 401s on every message. 2026-07-13: gemini-flash-latest (→ gemini-3.5-flash)
+# returned persistent 503 "high demand" all afternoon and the free-only fallback
+# chain exhausted (429/402) — 14/15 turns died. gemini-3-flash-preview and
+# gemini-3.1-flash-lite were live-verified serving + tool-calling on the founder's
+# paid key (1K RPM/10K RPD and 4K RPM/150K RPD headroom), so they sit FIRST in the
+# chain; FREE OpenRouter models stay as the last resort (founder directive: no
+# paid OpenRouter fallback — same-key Gemini fallbacks are covered by paid quota).
 grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
 {
   printf '%s\n' 'AGENT_MODEL=google-genai:gemini-flash-latest'
-  printf '%s\n' 'AGENT_FALLBACK_MODELS=openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free'
+  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-3-flash-preview,google-genai:gemini-3.1-flash-lite,openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
