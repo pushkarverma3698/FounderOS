@@ -25,27 +25,33 @@ vi.mock("../../../src/lib/embed.js", () => ({
 
 vi.mock("../../../src/db/rag-search.js", () => ({
   searchRagTable: vi.fn(),
+  keywordSearchRagTable: vi.fn(),
   ALLOWED_RAG_TABLES: new Set(["personal_rag", "turicks_brain"]),
   assertAllowedRagTable: vi.fn(),
 }));
 
 // Dynamic imports AFTER mocks are hoisted
 const { embedText } = await import("../../../src/lib/embed.js");
-const { searchRagTable } = await import("../../../src/db/rag-search.js");
+const { searchRagTable, keywordSearchRagTable } = await import("../../../src/db/rag-search.js");
 const { searchPersonalRagTool, searchTuricksBrainTool } = await import(
   "../../../src/tools/rag.js"
 );
 
 const mockEmbedText = vi.mocked(embedText);
 const mockSearchRagTable = vi.mocked(searchRagTable);
+const mockKeywordSearch = vi.mocked(keywordSearchRagTable);
 
 const DUMMY_VEC = new Array<number>(768).fill(0.1);
 
+/** Vector succeeds; keyword defaults to no matches → fused order = vector order,
+ *  mode "hybrid". Tests that assert on vector content still hold. */
 function mockSuccess(hits: RagHit[]) {
   mockEmbedText.mockResolvedValueOnce(DUMMY_VEC);
   mockSearchRagTable.mockResolvedValueOnce(hits);
+  mockKeywordSearch.mockResolvedValueOnce([]);
 }
 
+/** Embedder (Ollama) is down. Keyword availability is set per-test. */
 function mockEmbedFail() {
   mockEmbedText.mockRejectedValueOnce(
     new Error(
@@ -54,16 +60,28 @@ function mockEmbedFail() {
   );
 }
 
-/** Embed succeeds but the pgvector query throws (e.g. missing table / DB down). */
+/** Embed succeeds but the Postgres query throws (missing table / DB down). The
+ *  keyword path hits the SAME Postgres, so a real DB outage fails it too — model
+ *  that here so the "names the vector store, not Ollama" guarantee is tested
+ *  under a realistic both-down scenario (not an artificial vector-only failure). */
 function mockQueryFail(message: string) {
   mockEmbedText.mockResolvedValueOnce(DUMMY_VEC);
   mockSearchRagTable.mockRejectedValueOnce(new Error(message));
+  mockKeywordSearch.mockRejectedValueOnce(new Error(message));
+}
+
+/** Keyword path is also down (DB unreachable). */
+function mockKeywordFail(message = "DB unreachable") {
+  mockKeywordSearch.mockRejectedValueOnce(new Error(message));
 }
 
 // ── searchPersonalRagTool ─────────────────────────────────────────────────────
 
 describe("searchPersonalRagTool", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockKeywordSearch.mockResolvedValue([]); // default: keyword finds nothing
+  });
 
   it("has name 'search_personal_rag'", () => {
     expect(searchPersonalRagTool.name).toBe("search_personal_rag");
@@ -133,12 +151,27 @@ describe("searchPersonalRagTool", () => {
     expect(mockSearchRagTable).toHaveBeenCalledWith("personal_rag", DUMMY_VEC, 10);
   });
 
-  it("returns error message when Ollama is unreachable (soft-fail)", async () => {
+  it("falls back to LABELLED keyword results when Ollama is unreachable (F1)", async () => {
     mockEmbedFail();
+    mockKeywordSearch.mockResolvedValueOnce([
+      { content: "TypeScript at Turicks", metadata: { source_file: "work.md" }, score: 0.5 },
+    ]);
+    const result = await searchPersonalRagTool.execute({ query: "typescript" });
+
+    // Ollama down is no longer a hard failure — keyword covers it, labelled degraded.
+    expect(result.success).toBe(true);
+    expect(String(result.data)).toMatch(/semantic search unavailable/i);
+    expect(String(result.data)).toContain("TypeScript at Turicks");
+  });
+
+  it("hard-fails naming Ollama when BOTH the embedder and keyword path are down", async () => {
+    mockEmbedFail();
+    mockKeywordFail();
     const result = await searchPersonalRagTool.execute({ query: "skills" });
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/personal-rag/i);
+    expect(result.error).toMatch(/ollama/i);
   });
 
   it("returns failure for empty query without calling embedText", async () => {
@@ -160,7 +193,10 @@ describe("searchPersonalRagTool", () => {
 // ── searchTuricksBrainTool ────────────────────────────────────────────────────
 
 describe("searchTuricksBrainTool", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockKeywordSearch.mockResolvedValue([]); // default: keyword finds nothing
+  });
 
   it("has name 'search_turicks_brain'", () => {
     expect(searchTuricksBrainTool.name).toBe("search_turicks_brain");
@@ -209,12 +245,26 @@ describe("searchTuricksBrainTool", () => {
     expect(mockEmbedText).toHaveBeenCalledWith("Naggar pricing");
   });
 
-  it("returns error message when Ollama is unreachable (soft-fail)", async () => {
+  it("falls back to LABELLED keyword results when Ollama is unreachable (F1)", async () => {
     mockEmbedFail();
+    mockKeywordSearch.mockResolvedValueOnce([
+      { content: "We chose LangGraph", metadata: { source_path: "ADR-001.md" }, score: 0.5 },
+    ]);
+    const result = await searchTuricksBrainTool.execute({ query: "langgraph" });
+
+    expect(result.success).toBe(true);
+    expect(String(result.data)).toMatch(/semantic search unavailable/i);
+    expect(String(result.data)).toContain("We chose LangGraph");
+  });
+
+  it("hard-fails naming Ollama when BOTH the embedder and keyword path are down", async () => {
+    mockEmbedFail();
+    mockKeywordFail();
     const result = await searchTuricksBrainTool.execute({ query: "Naggar pricing" });
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/turicks-brain/i);
+    expect(result.error).toMatch(/ollama/i);
   });
 
   it("returns failure for whitespace-only query without calling embedText", async () => {
@@ -248,8 +298,12 @@ describe("searchTuricksBrainTool", () => {
     expect(result.error).not.toMatch(/ollama is unavailable/i);
   });
 
-  it("embed-stage failure DOES name Ollama (correct attribution)", async () => {
+  it("embed-stage failure DOES name Ollama when it cannot fall back (both down)", async () => {
+    // With hybrid retrieval, an embed failure alone degrades to keyword; to get a
+    // hard failure the keyword path must be down too. When it is, attribution must
+    // still point at Ollama (the embed stage), not the vector store.
     mockEmbedFail();
+    mockKeywordFail();
     const result = await searchTuricksBrainTool.execute({ query: "ICP" });
 
     expect(result.success).toBe(false);
