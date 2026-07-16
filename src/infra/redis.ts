@@ -109,6 +109,16 @@ export const KEYS = {
    * TTL: LLM_CACHE_TTL[tier] seconds (CEO = 0 = no cache).
    */
   llmCache: (tenantId: string, promptHash: string) => `llm:${tenantId}:${promptHash}`,
+
+  /**
+   * Query-embedding cache (RAG, spec §1.1 F3). Keyed by a hash of the embed
+   * model + text so the same query never re-embeds. Embeddings are deterministic,
+   * so this is NOT tenant-namespaced (a vector for "what is our ICP" is identical
+   * for everyone) and caching cannot change retrieval outputs — only latency.
+   * TTL: EMBED_CACHE_TTL_SECONDS (30 days).
+   */
+  embed: (model: string, text: string) =>
+    `embed:${createHash("sha256").update(`${model}\n${text}`).digest("hex")}`,
 } as const;
 
 // ── Key Utilities ─────────────────────────────────────────────────────────────

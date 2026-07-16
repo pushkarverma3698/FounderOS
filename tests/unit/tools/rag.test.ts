@@ -21,6 +21,8 @@ import type { RagHit } from "../../../src/db/rag-search.js";
 
 vi.mock("../../../src/lib/embed.js", () => ({
   embedText: vi.fn(),
+  // The tool embeds via the Redis-cached wrapper (F3); drive that here.
+  embedTextCached: vi.fn(),
 }));
 
 vi.mock("../../../src/db/rag-search.js", () => ({
@@ -31,13 +33,13 @@ vi.mock("../../../src/db/rag-search.js", () => ({
 }));
 
 // Dynamic imports AFTER mocks are hoisted
-const { embedText } = await import("../../../src/lib/embed.js");
+const { embedTextCached } = await import("../../../src/lib/embed.js");
 const { searchRagTable, keywordSearchRagTable } = await import("../../../src/db/rag-search.js");
 const { searchPersonalRagTool, searchTuricksBrainTool } = await import(
   "../../../src/tools/rag.js"
 );
 
-const mockEmbedText = vi.mocked(embedText);
+const mockEmbedText = vi.mocked(embedTextCached);
 const mockSearchRagTable = vi.mocked(searchRagTable);
 const mockKeywordSearch = vi.mocked(keywordSearchRagTable);
 

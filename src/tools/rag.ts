@@ -17,7 +17,7 @@
  */
 
 import { childLogger } from "../infra/logger.js";
-import { embedText } from "../lib/embed.js";
+import { embedTextCached } from "../lib/embed.js";
 import { searchRagTable, keywordSearchRagTable, type RagTable, type RagHit } from "../db/rag-search.js";
 import {
   hybridRagSearch,
@@ -26,10 +26,17 @@ import {
   type HybridOk,
   type HybridResult,
 } from "../db/rag-hybrid.js";
+import { toRetrievalResult, renderRetrieval, RetrievalResultSchema } from "../db/retrieval-result.js";
+import { rerankHits } from "../db/rag-rerank.js";
+import { RAG_RERANK_ENABLED } from "../core/config.js";
 import { getRagflowClient } from "../infra/ragflow.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:rag" });
+
+/** When rerank is on, fuse a wider candidate pool then let the model pick the
+ *  top-k from it (spec §1.1 F5: "top-20 fused → rerank → top-5"). */
+const RERANK_CANDIDATE_POOL = 20;
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -50,7 +57,7 @@ type RagFailure = { stage: "embed" | "query"; message: string };
 async function realVectorSearch(table: RagTable, query: string, topK: number): Promise<RagHit[]> {
   let embedding: number[];
   try {
-    embedding = await embedText(query);
+    embedding = await embedTextCached(query); // Redis-cached (F3); fail-open to a fresh embed
   } catch (err) {
     throw new RagStageError("embed", err instanceof Error ? err.message : String(err));
   }
@@ -89,17 +96,32 @@ async function runRagSearch(table: RagTable, query: string, topK: number): Promi
 
   // pgvector backend (default): hybrid (vector ⊕ keyword) fused with RRF, with a
   // labelled keyword fallback if the embedder is down (see src/db/rag-hybrid.ts).
-  const result = await hybridRagSearch(table, query, topK, HYBRID_DEPS);
+  // When rerank is on, fuse a wider pool so the reranker has candidates to pick from.
+  const fetchK = RAG_RERANK_ENABLED ? Math.max(topK, RERANK_CANDIDATE_POOL) : topK;
+  const result = await hybridRagSearch(table, query, fetchK, HYBRID_DEPS);
   if ("error" in result) {
     log.error({ table, query, stage: result.error.stage }, "RAG hybrid search failed");
-  } else {
-    log.debug({ table, query, count: result.hits.length, mode: result.mode }, "RAG search");
+    return result;
   }
-  return result;
+
+  // Optional local rerank (F5, flag-gated, fail-open). rerankHits returns the
+  // fused order unchanged if the model is unavailable — never fewer/worse results.
+  const hits = RAG_RERANK_ENABLED
+    ? await rerankHits(query, result.hits, topK)
+    : result.hits.slice(0, topK);
+  log.debug(
+    { table, query, count: hits.length, mode: result.mode, reranked: RAG_RERANK_ENABLED },
+    "RAG search",
+  );
+  return { ...result, hits };
 }
 
-/** Render a successful hybrid result, prefixing a banner when recall is degraded
- *  to keyword-only so the founder never mistakes thin results for the full set. */
+/**
+ * Render a successful hybrid result. Hits are projected into validated
+ * RetrievalResults (F4) so citations render mechanically from real retrieved
+ * sources; a degraded (keyword-only) run is banner-flagged so the founder never
+ * mistakes thin results for the full set.
+ */
 function renderRagSuccess(result: HybridOk, query: string, label: string, sourceField: string): string {
   const suffix =
     result.mode === "hybrid" ? ", hybrid" : result.mode === "keyword-fallback" ? ", keyword-only" : "";
@@ -107,22 +129,16 @@ function renderRagSuccess(result: HybridOk, query: string, label: string, source
     result.mode === "keyword-fallback"
       ? `⚠️ Semantic search unavailable (${result.degradedReason}) — showing keyword matches only; recall may be reduced.\n\n`
       : "";
+  // Validate at the boundary: a malformed/source-less hit is dropped, never
+  // rendered as a citable source (F4 — hallucinated sources become a typed miss).
+  const results = result.hits
+    .map((h) => RetrievalResultSchema.safeParse(toRetrievalResult(h, sourceField)))
+    .filter((p) => p.success)
+    .map((p) => p.data);
   return (
-    `${banner}${label} search for "${query}" (${result.hits.length} results${suffix}):\n\n` +
-    formatResults(result.hits, query, sourceField)
+    `${banner}${label} search for "${query}" (${results.length} results${suffix}):\n\n` +
+    renderRetrieval(results, query)
   );
-}
-
-function formatResults(hits: RagHit[], query: string, sourceField: string): string {
-  if (hits.length === 0) {
-    return `No results found for "${query}". The knowledge base may not have this information yet.`;
-  }
-  return hits
-    .map((r, i) => {
-      const src = (r.metadata[sourceField] as string | undefined) ?? "unknown";
-      return `${i + 1}. [${src}] (score ${r.score.toFixed(2)})\n${r.content.trim()}`;
-    })
-    .join("\n\n");
 }
 
 /** Build an accurate, actionable error that names the REAL failing component. */
