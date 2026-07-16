@@ -22,9 +22,10 @@
  *   - read_cv         → personal-rag CV/career lookup (personal-rag REST API + wiki fallback)
  *
  * Transport-agnostic: buildMcpServer() only registers the tool handlers; the
- * caller connects a transport. Two entry points wrap it —
- *   - stdio (local Claude Code / Desktop):   src/mcp/index.ts     · pnpm mcp
- *   - Streamable HTTP (loopback + bearer):    src/mcp/index-http.ts · pnpm mcp:http
+ * caller connects a transport. The entry point src/mcp/index.ts (`pnpm mcp`)
+ * wraps it in the stdio transport — run locally by Claude Code / Desktop, or
+ * launched over SSH by a remote client to reach the VPS copy (the SSH key is the
+ * auth; see docs/VPS-MCP-SETUP.md).
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";

@@ -96,21 +96,6 @@ export const envSchema = z.object({
   /** Path to the bridge manifest (servers + per-server write allowlist). */
   MCP_BRIDGE_MANIFEST: z.string().default("mcp-bridge.json"),
 
-  // ── MCP HTTP server (spec §1.2 — the VPS-side network entry point) ──────────
-  /** Bearer token the MCP HTTP server requires (value read here for validation;
-   *  the server also reads it at startup). NAME-only elsewhere in the repo — the
-   *  value never lives in mcp-bridge.json, logs, or receipts. Generate with
-   *  `openssl rand -hex 32`. Only needed by `pnpm mcp:http`, so optional here. */
-  FOUNDEROS_MCP_TOKEN: z.string().transform(v => v || undefined).optional(),
-  /** Port the MCP HTTP server binds (matches the SSH -L forward). Default 3100. */
-  FOUNDEROS_MCP_PORT: z.coerce.number().int().positive().default(3100),
-  /** Host the MCP HTTP server binds. Loopback by design; a public bind requires
-   *  FOUNDEROS_MCP_ALLOW_PUBLIC=1. Default 127.0.0.1. */
-  FOUNDEROS_MCP_HOST: z.string().default("127.0.0.1"),
-  /** Escape hatch to bind a non-loopback address (NOT recommended — the bearer
-   *  token becomes the only control). "1" to allow; default "0". */
-  FOUNDEROS_MCP_ALLOW_PUBLIC: z.enum(["0", "1"]).default("0"),
-
   // Global halt (kill switch) — optional flag-file path override.
   // Default: $HOME/.founderos/HALT (resolved in src/infra/halt.ts).
   HALT_FLAG_PATH: z.string().transform(v => v || undefined).optional(),

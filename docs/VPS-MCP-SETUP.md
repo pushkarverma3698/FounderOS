@@ -284,94 +284,79 @@ gh api user
 
 ---
 
-## 🌐 FounderOS MCP HTTP server (Mac ⇄ VPS bridge)
+## 🌐 Connect a local MCP client to the VPS server (over SSH)
 
 Everything above configures the MCPs that FounderOS **consumes**. This section
-sets up the MCP server FounderOS **exposes** — its own read-only knowledge tools
-(`search_web`, `github_read`, `read_context`, `search_memory`, `search_knowledge`,
-`read_cv`) served over Streamable HTTP from the VPS so the Mac's MCP clients
-(Claude Code / Desktop / the FounderOS bridge) can query the production data
-plane. Spec: `docs/plans/2026-07-14-MCP-TOPOLOGY-...md` §1.2.
+lets you (and colleagues) point a local MCP client — Claude Code, Claude Desktop —
+at the read-only knowledge tools FounderOS **exposes** (`search_web`,
+`github_read`, `read_context`, `search_memory`, `search_knowledge`, `read_cv`),
+running on the VPS against the production data.
 
-**Topology (defense-in-depth on a private transport):**
+**The simple model: launch the stdio server on the VPS over SSH.** Your MCP
+client runs `ssh founderos-vps '… node … src/mcp/index.ts'`; JSON-RPC flows over
+the SSH pipe. That means:
+
+- **Your SSH key is the auth** — the same key you already use. No bearer token.
+- **No open port, no tunnel daemon, no extra service** — the connection lives
+  only while your client is running, and drops when it exits.
+- **No secrets on your machine** — tool credentials are read from the VPS's own
+  `/opt/founderos/.env`; the tools execute on the VPS.
 
 ```
-Mac  ──(ssh -N -L 3100:127.0.0.1:3100)──▶  VPS 127.0.0.1:3100
- MCP client → http://127.0.0.1:3100/mcp        founderos-mcp.service
- Authorization: Bearer <token>                  bind 127.0.0.1 only · token
-                                                checked BEFORE tool dispatch
+Mac (MCP client) ──ssh founderos-vps──▶  VPS: node src/mcp/index.ts (stdio)
+   JSON-RPC over the SSH pipe                reads /opt/founderos/.env, runs tools
 ```
 
-The port never leaves the VPS's loopback — the SSH tunnel is the only ingress —
-and even inside the tunnel every request must carry the bearer token.
+### One-time setup
 
-### VPS side
+1. **SSH host alias** — append `deploy/ssh-config.founderos-vps.example` to your
+   `~/.ssh/config` (pins the `founderos_deploy` key to `founderos-vps`). Confirm:
+   ```bash
+   ssh founderos-vps 'echo ok && test -d /opt/founderos && echo found-founderos'
+   ```
+2. **MCP client config** — copy the `founderos-vps` block from
+   `deploy/mcp-founderos-vps.example.json` into your client's config:
+   - **Claude Code:** `~/.mcp.json` (global) or a project `.mcp.json`.
+   - **Claude Desktop:** `claude_desktop_config.json`.
+   ```jsonc
+   {
+     "mcpServers": {
+       "founderos-vps": {
+         "command": "ssh",
+         "args": ["founderos-vps",
+                  "cd /opt/founderos && LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/index.ts"]
+       }
+     }
+   }
+   ```
+   `LOG_STDERR=1` keeps logs off stdout so the JSON-RPC stream stays clean — it's
+   already baked into `pnpm mcp`; keep it in the SSH command too.
+3. **Restart the client.** It spawns the SSH child on demand; the VPS tools
+   appear as `search_web`, `search_memory`, etc.
 
-**1. Generate the token** (do NOT hand-pick one) and store it in the app `.env`
-(chmod 600, never committed):
+### Giving a colleague access
 
-```bash
-# On the VPS:
-TOKEN="$(openssl rand -hex 32)"
-printf 'FOUNDEROS_MCP_TOKEN=%s\n' "$TOKEN" >> /opt/founderos/.env
-# optional overrides (defaults shown):
-#   FOUNDEROS_MCP_PORT=3100
-#   FOUNDEROS_MCP_HOST=127.0.0.1
-chmod 600 /opt/founderos/.env
-echo "Mac needs this exact value → Bearer $TOKEN"   # copy for the Mac step
-```
+They need exactly two things — nothing FounderOS-specific to install:
 
-The server refuses to start if `FOUNDEROS_MCP_TOKEN` is unset or shorter than 16
-chars, and refuses any non-loopback bind unless `FOUNDEROS_MCP_ALLOW_PUBLIC=1`.
+1. SSH access to the VPS (their own key added to the VPS `authorized_keys`, or a
+   shared deploy key) plus the `founderos-vps` alias from step 1.
+2. The `founderos-vps` block from step 2 in their MCP client config.
 
-**2. Install the systemd unit** (`deploy/founderos-mcp.service`, modeled on the
-production `founderos.service` — `User=founderos`, `WorkingDirectory=/opt/founderos`):
+No token to share, no port to open. Revoke access by removing their SSH key on
+the VPS.
 
-```bash
-sudo cp /opt/founderos/deploy/founderos-mcp.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now founderos-mcp
-systemctl status founderos-mcp
-# liveness (no auth needed — returns no data):
-curl -s http://127.0.0.1:3100/healthz    # → {"status":"ok"}
-# auth boundary (should be 401 without a token):
-curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3100/mcp   # → 401
-```
+### Local Claude Code (same machine as the server)
 
-### Mac side
+Running a client on the VPS itself? Just `pnpm mcp` — same tools, stdio, no SSH
+hop. (`pnpm mcp` sets `LOG_STDERR=1` for you.)
 
-**3. SSH host alias** — append `deploy/ssh-config.founderos-vps.example` to
-`~/.ssh/config` (pins `founderos_deploy` to this host).
+### If you later need it always-on
 
-**4. autossh tunnel via launchd** — `deploy/com.founderos.mcp-tunnel.plist`
-(replace `YOUR_USERNAME`, confirm the `autossh` path with `which autossh`):
-
-```bash
-brew install autossh    # if not present
-cp deploy/com.founderos.mcp-tunnel.plist ~/Library/LaunchAgents/
-launchctl load -w ~/Library/LaunchAgents/com.founderos.mcp-tunnel.plist
-curl -s http://127.0.0.1:3100/healthz    # now answered THROUGH the tunnel
-```
-
-**5. Bridge manifest** — copy the `founderos-vps` block from
-`mcp-bridge.example.json` into `mcp-bridge.json`, then set the Mac env var the
-manifest references. ⚠️ **`headerEnv` sends the value verbatim as the header**, so
-this var holds the full `Bearer <token>` string — not the raw token:
-
-```bash
-export FOUNDEROS_MCP_BEARER="Bearer <the-token-from-step-1>"   # keep in keychain/env, not the repo
-# then, in .env or the shell that launches FounderOS:
-#   MCP_BRIDGE_ENABLED=true
-pnpm mcp:probe mcp-bridge.json --invoke     # verify the server connects + lists tools
-```
-
-The token value lives only on the two machines (VPS `.env`, Mac keychain/env);
-`mcp-bridge.json` and this repo only ever name the env var, never its value.
-
-### Local Claude Code (no network)
-
-`pnpm mcp` still serves the same tools over **stdio** for a Claude Code instance
-running on the same box — no token, no port. HTTP is only for the cross-machine hop.
+The on-demand SSH model above is right for "connect when required." If you ever
+want the server **running 24/7** and reachable by multiple clients or non-SSH MCP
+clients simultaneously, the always-on HTTP variant (loopback bind + bearer token
++ autossh tunnel + systemd) lived in git history at commit `f54e5a8` — restore it
+from there rather than rebuilding.
 
 ---
 

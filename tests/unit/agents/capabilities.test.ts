@@ -81,10 +81,10 @@ describe("buildCapabilityManifest", () => {
   });
 
   it("mentions the MCP server so 'what MCP servers' answers are truthful", () => {
-    // Advertises the read-only server and its network entry (127.0.0.1:3100).
-    // Wording tracks the HTTP entry added in spec §1.2 (item 6).
+    // Advertises the read-only stdio server (pnpm mcp), reachable locally or
+    // over SSH — so "what MCP servers do you run" answers stay truthful.
     expect(manifest).toMatch(/MCP server/);
-    expect(manifest).toMatch(/127\.0\.0\.1:3100/);
+    expect(manifest).toMatch(/pnpm mcp/);
   });
 
   it("HITL set covers every side-effecting tool name present in departments", () => {

@@ -1,8 +1,8 @@
-# FounderOS — Mac ~/.ssh/config alias for the MCP tunnel (spec §1.2, item 7).
-# Append this block to ~/.ssh/config on the Mac. The autossh launchd job
-# (deploy/com.founderos.mcp-tunnel.plist) and any manual `ssh founderos-vps`
-# resolve the host, user, and key from here — so the tunnel command stays short
-# and the deploy key is pinned to exactly this host.
+# FounderOS — ~/.ssh/config alias for reaching the VPS (spec §1.2).
+# Append this block to ~/.ssh/config. The MCP client config
+# (deploy/mcp-founderos-vps.example.json) and any manual `ssh founderos-vps`
+# resolve the host, user, and key from here — so the command stays short and the
+# deploy key is pinned to exactly this host.
 
 Host founderos-vps
     HostName 95.217.162.12

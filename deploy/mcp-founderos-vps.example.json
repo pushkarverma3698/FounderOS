@@ -1,0 +1,12 @@
+{
+  "_README": "Drop this 'founderos-vps' block into your MCP client's config (Claude Code: ~/.mcp.json or the project .mcp.json; Claude Desktop: claude_desktop_config.json). It launches FounderOS's read-only MCP server ON the VPS over SSH — your existing SSH key is the auth, and the VPS's own .env supplies every tool credential, so nothing secret lives on your machine. The connection opens when your client starts and drops when it exits. Prereqs: (1) SSH access to the VPS with the 'founderos-vps' host alias in ~/.ssh/config (see deploy/ssh-config.founderos-vps.example); (2) FounderOS deployed at /opt/founderos on the VPS. No port, no token, no tunnel daemon.",
+  "mcpServers": {
+    "founderos-vps": {
+      "command": "ssh",
+      "args": [
+        "founderos-vps",
+        "cd /opt/founderos && LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/index.ts"
+      ]
+    }
+  }
+}
