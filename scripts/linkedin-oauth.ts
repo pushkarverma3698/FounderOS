@@ -27,7 +27,7 @@ const CLIENT_ID = process.env["LINKEDIN_CLIENT_ID"];
 const CLIENT_SECRET = process.env["LINKEDIN_CLIENT_SECRET"];
 const PORT = 3000;
 const REDIRECT_URI = `http://localhost:${PORT}/callback`;
-const SCOPES = ["openid", "profile", "email", "w_member_social"].join("%20");
+const SCOPES = ["openid", "profile", "email", "w_member_social", "r_member_social"].join("%20");
 const STATE = `founderos-${Date.now()}`;
 
 if (!CLIENT_ID || !CLIENT_SECRET) {
