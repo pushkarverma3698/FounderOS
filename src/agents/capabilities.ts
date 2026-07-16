@@ -205,6 +205,6 @@ export function buildCapabilityManifest(): string {
     "- claude_code = a full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — engineering's primary executor for any build/code/repo task.",
     "- apply_cinematic_preset = copies cinematic-web preset scaffold (neon/glass/terminal/minimal) before landing page builds.",
     "- browser = Safari automation on the founder's Mac (personal dept).",
-    "- FounderOS also RUNS an MCP server on localhost:3100 exposing search_web, read_context, search_knowledge, search_memory, read_cv, github_read to external MCP clients.",
+    "- FounderOS also RUNS a read-only MCP server (pnpm mcp, stdio) exposing search_web, read_context, search_knowledge, search_memory, read_cv, github_read to external MCP clients; a remote client can launch it over SSH to query the VPS copy.",
   ].join("\n");
 }

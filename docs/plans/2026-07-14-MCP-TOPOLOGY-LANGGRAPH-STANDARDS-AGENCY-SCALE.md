@@ -78,6 +78,16 @@ speed/quality ratchets. Each lands with a failing test first per the PR rules.
 
 ### 1.2 MCP topology — Mac as Host/Client, VPS as Server
 
+> **Update (2026-07-16) — shipped simpler than proposed.** For the actual need
+> (a founder + colleagues connecting *on demand*, reusing SSH keys they already
+> hold), the always-on HTTP topology below was over-engineered. What shipped
+> instead: the MCP client launches the existing **stdio** server on the VPS
+> **over SSH** (`ssh founderos-vps 'node … src/mcp/index.ts'`) — the SSH key is
+> the auth, no HTTP listener, no bearer token, no tunnel daemon, no systemd unit.
+> See `docs/VPS-MCP-SETUP.md`. The HTTP/loopback/bearer design below (items 6–7)
+> was built and then removed (git `f54e5a8`); restore it from history only if an
+> always-on, multi-client, or non-SSH-client deployment is ever required.
+
 **Current state:** FounderOS already has both halves of the protocol, but the server half is
 mis-documented. `src/mcp/server.ts` claims "Transport: Streamable HTTP" and
 `capabilities.ts` tells the planner "FounderOS also RUNS an MCP server on localhost:3100" —

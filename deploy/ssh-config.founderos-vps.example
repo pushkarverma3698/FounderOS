@@ -1,0 +1,17 @@
+# FounderOS — ~/.ssh/config alias for reaching the VPS (spec §1.2).
+# Append this block to ~/.ssh/config. The MCP client config
+# (deploy/mcp-founderos-vps.example.json) and any manual `ssh founderos-vps`
+# resolve the host, user, and key from here — so the command stays short and the
+# deploy key is pinned to exactly this host.
+
+Host founderos-vps
+    HostName 95.217.162.12
+    User root
+    IdentityFile ~/.ssh/founderos_deploy
+    IdentitiesOnly yes
+    # Reap a dead connection fast so autossh reconnects promptly.
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+    # First-connect trust-on-first-use; switch to a pinned known_hosts entry for
+    # stricter checking once you've confirmed the host key.
+    StrictHostKeyChecking accept-new
