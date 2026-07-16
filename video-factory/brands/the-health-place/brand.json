@@ -1,0 +1,53 @@
+{
+  "slug": "the-health-place",
+  "name": "The Health Place",
+  "canonical_name_confirmed": false,
+  "website": "https://thehealthplace.in",
+  "industry": "Holistic wellness centre",
+  "location": "Hoodi, Bangalore, India",
+  "palette": {
+    "background": "#0E2B20",
+    "surface": "#1F4D36",
+    "primary": "#9CB8A4",
+    "text": "#F5F0E6",
+    "muted": "#C9D8CD",
+    "accent": "#D9C08B"
+  },
+  "typography": {
+    "heading": "'Inter', 'Segoe UI', 'DejaVu Sans', sans-serif",
+    "body": "'Inter', 'Segoe UI', 'DejaVu Sans', sans-serif",
+    "style": "clean humanist sans-serif, generous letter-spacing on headings"
+  },
+  "tone": ["calm", "reflective", "empathetic", "nature-forward", "slightly spiritual"],
+  "tagline": "A Heavenly abode to Stay, Breathe, and Belong",
+  "mission": "Focusing on nation's wellness by correcting people's lifestyle",
+  "copy_lines": [
+    "A place to pause. A place to breathe. A place to belong.",
+    "When an individual heals, relationships heal. When relationships heal, families heal. When families heal, society heals.",
+    "Here, we reconnect with nature — the ultimate healer.",
+    "The mind finds calmness. The body regains strength. The heart feels heard. The soul feels connected."
+  ],
+  "pillars": [
+    "Physical", "Emotional", "Mental", "Social",
+    "Spiritual", "Environmental", "Vocational", "Financial"
+  ],
+  "pillars_label": "8 Dimensions of Wellness",
+  "audiences": ["Women", "Men", "Children", "Older Adults", "Corporates"],
+  "cta": {
+    "line": "Begin your wellness journey.",
+    "website": "thehealthplace.in",
+    "phone": "+91 6361012354",
+    "email": "info@thehealthplace.in"
+  },
+  "socials": { "instagram": "@the_health.place" },
+  "video": {
+    "aspect_ratios": ["16:9", "9:16", "1:1"],
+    "pacing": "calm",
+    "captions": "always",
+    "music": "ambient meditative, soft and warm",
+    "voice": { "language": "en-IN", "style": "warm Indian-English" },
+    "motion": "slow fades and gentle drifts — no aggressive cuts, no neon",
+    "avoid": ["full-frame linear gradients (H.264 banding)", "jump cuts", "harsh contrast flips"]
+  },
+  "notes": "Site metadata references 'VitaMinta' — confirm canonical brand name and real logo with client before final delivery. No formal brand guide exists; this file IS the codified brand system."
+}
