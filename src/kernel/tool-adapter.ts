@@ -16,7 +16,10 @@ import type { ToolResult, UnifiedTool } from "../tools/index.js";
 import { hitlGate, idemKey } from "../infra/hitl.js";
 import { hasBeenAudited, writeAuditEntry } from "../db/queries.js";
 import { TENANT } from "../core/config.js";
+import { childLogger } from "../infra/logger.js";
 import { TOOL_FAILURE_MARKER, type KernelTool } from "./worker.js";
+
+const log = childLogger({ module: "tool-adapter" });
 
 /** HITL configuration for a gated (external side-effect) tool. */
 export interface GateSpec {
@@ -76,12 +79,22 @@ export function adaptTool(tool: UnifiedTool, opts: AdaptOptions = {}): KernelToo
       );
 
       if (gate && key && res.success) {
-        await writeAuditEntry({
+        const { written } = await writeAuditEntry({
           tenant_id: TENANT,
           action: gate.action,
           idempotency_key: key,
           payload: args,
         });
+        if (!written) {
+          // The unique idempotency index rejected our INSERT — a concurrent worker
+          // (parallel routing runs steps within one turn) already audited this exact
+          // action. The DB row is single-shot, but the SIDE EFFECT is not: it may
+          // have fired twice. Surface it loudly; never swallow (queries.ts contract).
+          log.warn(
+            { action: gate.action, idempotency_key: key },
+            "Idempotency race: audit row already existed — gated side effect may have executed twice under parallel routing.",
+          );
+        }
       }
       return formatToolResult(tool.name, res);
     },

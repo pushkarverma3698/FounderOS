@@ -38,7 +38,7 @@ function accumulating<T>() {
 
 export type RecordUpdate<T> = Record<string, T[] | Reset | { set: T[] }> | Reset;
 
-function accumulatingRecord<T>() {
+export function accumulatingRecord<T>() {
   return {
     reducer: (curr: Record<string, T[]>, update: RecordUpdate<T>): Record<string, T[]> => {
       if (update === RESET) return {};
