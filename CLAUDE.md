@@ -115,8 +115,10 @@ fallback): `openrouter:meta-llama/llama-3.3-70b-instruct:free`,
 5xx/429/transport → retriable; 404 → model fallback; 401/403 → fail loud.
 
 ## Git
-- Never commit to `main`. Flow: work branch → `beta` → `stable` → `main`
-  (CI-enforced). Only humans merge.
+- Never commit to `main`. Flow: work branch → `beta` → `main`
+  (CI-enforced by `.github/workflows/branch-policy.yml`). Only humans merge to
+  `main`. The former `stable` tier was retired — see ADR-045; production is a
+  two-stage promotion, not three.
 - Evidence in every PR: fresh `pnpm gate` output + live-path proof (or an
   explicit NOT VERIFIED with the reason).
 
