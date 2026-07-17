@@ -179,14 +179,20 @@ describe("makeSshRunner — connection failure hardening", () => {
     try {
       const run = makeSshRunner(RUNNER_CFG);
       const t0 = Date.now();
-      const res = await run("docker run …", { timeoutMs: 500 });
-      expect(Date.now() - t0).toBeLessThan(8_000); // 500ms timeout + 2s grace, generous CI margin
+      // timeoutMs must comfortably exceed worst-case `sh` startup on a loaded
+      // machine: the grace path only exists once the script has forked `sleep`
+      // (the pipe-holder). If SIGKILL lands first, 'close' fires immediately and
+      // reports code 1 — the wrong scenario. At 500ms that race was lost under
+      // full-suite parallel load (2026-07-17); SIGKILL is unblockable, so margin
+      // is the only ordering guarantee. Do not lower this below seconds.
+      const res = await run("docker run …", { timeoutMs: 3_000 });
+      expect(Date.now() - t0).toBeLessThan(12_000); // 3s timeout + 2s grace, generous CI margin
       expect(res.code).toBe(SSH_LOCAL_TIMEOUT_CODE);
       expect(res.stderr).toContain(SSH_LOCAL_TIMEOUT_MARK);
     } finally {
       restore();
     }
-  }, 15_000);
+  }, 20_000);
 
   it("runaway remote stdout is tail-trimmed to the cap, not buffered unboundedly", async () => {
     const { restore } = withFakeSsh(`#!/bin/sh\nhead -c 20000000 /dev/zero | tr '\\0' 'a'\n`);
