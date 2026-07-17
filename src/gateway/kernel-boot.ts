@@ -32,6 +32,7 @@ import { withModelRetry } from "./model-retry.js";
 import { withLlmCache } from "./model-cache.js";
 import { env } from "../core/config.js";
 import { DEPARTMENT_TOOLS, applyMcpBridge } from "../agents/capabilities.js";
+import { resolveVpsRunConfig } from "../tools/vps-run.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
 import { getFailureLesson, upsertFailureLesson, bumpFailureLessonApplied } from "../db/queries.js";
 import { TENANT } from "../core/config.js";
@@ -73,14 +74,31 @@ const PROMPTS: Record<(typeof WORKERS)[number], string | (() => string)> = {
   jobhunt: JOBHUNT_PROMPT,
 };
 
+/**
+ * Tools that are only useful when their backing infrastructure is configured.
+ * Offering an unconfigured tool to the planner/worker is worse than not having
+ * it: the LLM picks it, the founder burns HITL approvals, and it fails on
+ * execute with a `not configured` error. Gate them out of the offered set so the
+ * agent routes to a tool that can actually succeed. (2026-07-18: prod had
+ * VPS_RUN_HOST unset, so every vps_run attempt cost two HITL approvals then died
+ * with `vps-config: vps_run is not configured`.)
+ */
+function isUnconfiguredTool(toolName: string): boolean {
+  if (toolName === "vps_run") return resolveVpsRunConfig() === null;
+  return false;
+}
+
 export function buildWorkerSpecs(): WorkerSpec[] {
   return WORKERS.map((id) => {
     const prompt = PROMPTS[id];
+    const tools = (DEPARTMENT_TOOLS[id] ?? []).filter(
+      (t) => !isUnconfiguredTool((t as { name?: string }).name ?? ""),
+    );
     return {
       id,
       description: DESCRIPTIONS[id],
       prompt: typeof prompt === "function" ? prompt() : prompt,
-      tools: (DEPARTMENT_TOOLS[id] ?? []) as unknown as KernelTool[],
+      tools: tools as unknown as KernelTool[],
     };
   });
 }

@@ -56,6 +56,7 @@ import {
   videoProductionStatusTool,
 } from "./agent-tools/video.js";
 import { scheduleTask, listScheduled, editScheduled } from "./agent-tools/scheduling.js";
+import { listWorkflows } from "./agent-tools/workflows.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
 import { searchMemoryTool } from "../tools/memory.js";
@@ -84,7 +85,7 @@ type AnyTool = any;
  *   alignment. Engineering and comms don't query business strategy.
  */
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, writeArtifact],
+  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, writeArtifact, listWorkflows],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal, vpsRun],
