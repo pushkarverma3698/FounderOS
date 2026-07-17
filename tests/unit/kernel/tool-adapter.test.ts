@@ -23,6 +23,11 @@ vi.mock("../../../src/db/queries.js", () => ({
   writeAuditEntry,
 }));
 
+const warn = vi.fn();
+vi.mock("../../../src/infra/logger.js", () => ({
+  childLogger: () => ({ warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+}));
+
 const { adaptTool, formatToolResult } = await import("../../../src/kernel/tool-adapter.js");
 const { isFailureResult } = await import("../../../src/kernel/worker.js");
 import type { UnifiedTool } from "../../../src/tools/index.js";
@@ -113,5 +118,19 @@ describe("gated tool — HITL → idempotency → execute → audit", () => {
 
     expect(isFailureResult(result)).toBe(true);
     expect(writeAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("concurrent double-execute: writeAuditEntry {written:false} → warns loudly (side effect may have fired twice)", async () => {
+    interruptMock.mockReturnValue("approved");
+    writeAuditEntry.mockResolvedValueOnce({ written: false });
+    const result = (await adaptTool(emailTool, { gate }).invoke({ to: "a@b.c", subject: "hi" }, config)) as string;
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "email_sent", idempotency_key: expect.stringContaining("email_sent:") }),
+      expect.stringContaining("twice"),
+    );
+    expect(result).toContain("message_id"); // action still surfaced to the user
   });
 });
