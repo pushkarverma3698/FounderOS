@@ -18,6 +18,8 @@ import {
   deleteFile,
   StorageError,
   _setClientForTest,
+  listFiles,
+  stageFile,
 } from "../../../src/infra/storage/s3-client.js";
 
 // ── Shared mock S3 client factory ─────────────────────────────────────────────

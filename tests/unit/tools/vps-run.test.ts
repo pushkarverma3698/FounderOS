@@ -10,7 +10,8 @@
  * artifacts are harvested even when the container fails.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as s3Client from "../../../src/infra/storage/s3-client.js";
 import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -348,6 +349,73 @@ describe("vpsRunTool.execute — failures name the real component", () => {
     ]);
     const res = await vpsRunTool.execute({ ...BASE_ARGS, _ssh: ssh, _upload: fakeUpload().upload });
     expect(res.success).toBe(true);
+  });
+});
+
+describe("vps_run — s3-isolated mode", () => {
+  let originalMode: string | undefined;
+
+  beforeEach(() => {
+    originalMode = process.env.VPS_RUN_MODE;
+    process.env.VPS_RUN_MODE = "s3-isolated";
+    process.env.STORAGE_BUCKET = "test-bucket";
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    process.env.VPS_RUN_MODE = originalMode;
+  });
+
+  it("stages BRIEF.md to S3, executes docker command without volume mounts, and lists outputs from S3", async () => {
+    const stageSpy = vi.spyOn(s3Client, "stageFile").mockResolvedValue("agent-runs/run-test12/brief.md");
+    const listSpy = vi.spyOn(s3Client, "listFiles").mockResolvedValue(["agent-runs/run-test12/outputs/hello.png"]);
+    const downloadSpy = vi.spyOn(s3Client, "downloadFile").mockResolvedValue(Buffer.from("IMAGE_BYTES"));
+
+    const { ssh, calls } = fakeSsh([
+      { match: "docker run", result: { code: 0, stdout: Buffer.from("container run complete") } },
+    ]);
+
+    const res = await vpsRunTool.execute({ ...BASE_ARGS, _ssh: ssh });
+
+    expect(res.success).toBe(true);
+    expect(stageSpy).toHaveBeenCalledWith(expect.any(Buffer), "BRIEF.md", "run-test12");
+    expect(listSpy).toHaveBeenCalledWith("agent-runs/run-test12/outputs/");
+    expect(downloadSpy).toHaveBeenCalledWith("agent-runs/run-test12/outputs/hello.png");
+
+    const dockerCall = calls.find((c) => c.cmd.includes("docker run"));
+    expect(dockerCall).toBeDefined();
+    expect(dockerCall!.cmd).not.toContain("-v ");
+    expect(dockerCall!.cmd).toContain("-e STORAGE_BUCKET=");
+    expect(dockerCall!.cmd).toContain("founderos-runner:latest");
+
+    const data = res.data as VpsRunData;
+    expect(data.artifacts).toHaveLength(1);
+    expect(data.artifacts[0]).toEqual({
+      path: "outputs/hello.png",
+      s3_key: "agent-runs/run-test12/outputs/hello.png",
+      bytes: 11,
+    });
+  });
+
+  it("handles staging failures gracefully", async () => {
+    vi.spyOn(s3Client, "stageFile").mockRejectedValue(new Error("S3 staging failed"));
+    const { ssh } = fakeSsh([]);
+
+    const res = await vpsRunTool.execute({ ...BASE_ARGS, _ssh: ssh });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/vps-ssh.*S3 staging failed/s);
+  });
+
+  it("handles empty outputs gracefully", async () => {
+    vi.spyOn(s3Client, "stageFile").mockResolvedValue("key");
+    vi.spyOn(s3Client, "listFiles").mockResolvedValue([]);
+
+    const { ssh } = fakeSsh([{ match: "docker run", result: { code: 0 } }]);
+
+    const res = await vpsRunTool.execute({ ...BASE_ARGS, _ssh: ssh });
+    expect(res.success).toBe(true);
+    const data = res.data as VpsRunData;
+    expect(data.artifacts).toHaveLength(0);
   });
 });
 
