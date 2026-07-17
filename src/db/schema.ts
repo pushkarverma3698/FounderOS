@@ -953,6 +953,66 @@ export const failureLessons = agentsSchema.table(
 
 export type FailureLessonRow = typeof failureLessons.$inferSelect;
 
+// ── saved_workflows (reusable-script catalog) ─────────────────────────────────
+
+/**
+ * One row per distinct script/workflow the agent has run (vps_run, claude_code).
+ * Modeled on failure_lessons: identity is a content `signature` (tool + command
+ * + image), and `run_count` increments on every repeat — so "our most-used
+ * workflows" is just `ORDER BY run_count DESC`. Scripts themselves live in S3
+ * (`s3_keys`, populated for vps_run whose artifacts are uploaded); this table is
+ * the findable index that lets tomorrow's agent look up and re-run a proven
+ * workflow instead of re-deriving it. Written best-effort from code AFTER a run
+ * has already succeeded — a catalog write must never fail a finished job.
+ */
+export const savedWorkflows = agentsSchema.table(
+  "saved_workflows",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+
+    /** Human-readable name derived from the command/brief — for eyeballing. */
+    slug: text("slug").notNull(),
+
+    /** Dedup identity: hash of (tool, command, image). One row per signature. */
+    signature: text("signature").notNull(),
+
+    /** Tool that produced the script — 'vps_run' | 'claude_code'. */
+    tool: text("tool").notNull(),
+
+    /** The script / command that was run. */
+    command: text("command").notNull(),
+
+    /** Optional context that travelled with the run. */
+    brief: text("brief"),
+
+    /** Container image (vps_run) — null for claude_code. */
+    image: text("image"),
+
+    /** S3 keys of the saved scripts/outputs (vps_run artifacts); [] otherwise. */
+    s3_keys: jsonb("s3_keys").$type<string[]>().notNull().default([]),
+
+    /** Most recent LangGraph run id that exercised this workflow. */
+    last_run_id: text("last_run_id"),
+
+    /** How many times this exact workflow has been run. */
+    run_count: integer("run_count").notNull().default(1),
+
+    first_used_at: timestamp("first_used_at", { withTimezone: true }).notNull().defaultNow(),
+    last_used_at: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    /** Upsert hot path: one row per (tenant, signature). */
+    workflowKeyIdx: uniqueIndex("sw_tenant_sig_idx").on(t.tenant_id, t.signature),
+    /** "Most used" lookup: pull a tenant's workflows by run frequency. */
+    popularityIdx: index("sw_popularity_idx").on(t.tenant_id, t.run_count),
+  }),
+);
+
+export type SavedWorkflow = typeof savedWorkflows.$inferSelect;
+export type NewSavedWorkflow = typeof savedWorkflows.$inferInsert;
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
 export const interruptRegistry = hitlApprovals;

@@ -34,7 +34,9 @@ import {
   scheduledPosts,
   scheduledTasks,
   failureLessons,
+  savedWorkflows,
   type FailureLessonRow,
+  type SavedWorkflow,
   type NewActionLog,
   type NewScheduledPost,
   type ScheduledPost,
@@ -1353,6 +1355,64 @@ export async function upsertFailureLesson(data: {
         last_resolved_at: new Date(),
       },
     });
+}
+
+// ── Saved workflows (saved_workflows) ─────────────────────────────────────────
+
+/**
+ * Catalog a script/workflow run so it's findable and re-runnable tomorrow.
+ * Upserts on (tenant, signature): the first run inserts, every repeat bumps
+ * run_count and refreshes the S3 keys + last-used timestamp. Callers invoke this
+ * best-effort AFTER a job has already succeeded — it must never throw the run.
+ */
+export async function recordWorkflowRun(data: {
+  tenant_id: string;
+  slug: string;
+  signature: string;
+  tool: string;
+  command: string;
+  brief?: string;
+  image?: string;
+  s3_keys?: string[];
+  last_run_id?: string;
+}): Promise<void> {
+  const db = getDb();
+  const s3Keys = data.s3_keys ?? [];
+  await db
+    .insert(savedWorkflows)
+    .values({
+      tenant_id: data.tenant_id,
+      slug: data.slug,
+      signature: data.signature,
+      tool: data.tool,
+      command: data.command,
+      brief: data.brief ?? null,
+      image: data.image ?? null,
+      s3_keys: s3Keys,
+      last_run_id: data.last_run_id ?? null,
+      last_used_at: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [savedWorkflows.tenant_id, savedWorkflows.signature],
+      set: {
+        run_count: sql`${savedWorkflows.run_count} + 1`,
+        slug: data.slug,
+        s3_keys: s3Keys,
+        last_run_id: data.last_run_id ?? null,
+        last_used_at: new Date(),
+      },
+    });
+}
+
+/** The tenant's most-run workflows, most-used first — the "what do we run a lot" view. */
+export async function topWorkflows(tenantId: string, limit = 20): Promise<SavedWorkflow[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(savedWorkflows)
+    .where(eq(savedWorkflows.tenant_id, tenantId))
+    .orderBy(desc(savedWorkflows.run_count), desc(savedWorkflows.last_used_at))
+    .limit(limit);
 }
 
 /** Telemetry: how often a lesson actually got injected into a retry. */

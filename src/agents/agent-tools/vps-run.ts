@@ -16,7 +16,8 @@ import { vpsRunTool, VPS_RUN_PROFILE, type VpsRunData } from "../../tools/vps-ru
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import { toolFailure } from "../tool-result.js";
-import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
+import { hasBeenAudited, writeAuditEntry, recordWorkflowRun } from "../../db/queries.js";
+import { slugifyWorkflow, workflowSignature } from "../../tools/workflow-catalog.js";
 import { TENANT } from "../../core/config.js";
 
 const log = childLogger({ module: "agent-tools:vps-run" });
@@ -60,6 +61,22 @@ export const vpsRun = tool(
       payload: { command: command.slice(0, 400), run_id: data!.run_id, artifacts: data!.artifacts.length },
       tenant_id: TENANT,
     });
+    // Catalog the workflow so it's findable/re-runnable tomorrow. Best-effort:
+    // the job already succeeded and its outputs are durable in S3 — a catalog
+    // write must never turn that into a failure.
+    // allow-failopen: workflow cataloging is an index, never a dependency
+    await recordWorkflowRun({
+      tenant_id: TENANT,
+      slug: slugifyWorkflow(command, brief ?? undefined),
+      signature: workflowSignature("vps_run", command, image ?? undefined),
+      tool: "vps_run",
+      command,
+      ...(brief ? { brief } : {}),
+      ...(image ? { image } : {}),
+      s3_keys: data!.artifacts.map((a) => a.s3_key),
+      last_run_id: data!.run_id,
+    }).catch((err) => log.warn({ err: String(err) }, "vps_run: workflow catalog write failed (non-fatal)"));
+
     log.info({ run_id: data!.run_id }, "vps_run executed via engineering agent");
     const artifactLines = data!.artifacts.map((a) => `   - ${a.path} → s3://${a.s3_key} (${a.bytes} bytes)`).join("\n");
     return (

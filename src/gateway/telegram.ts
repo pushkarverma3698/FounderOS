@@ -14,6 +14,7 @@
 import { Bot, type Context } from "grammy";
 import { env } from "../core/config.js";
 import { logger } from "../infra/logger.js";
+import { formatTimestamp } from "../infra/timestamp.js";
 import {
   handleStart,
   handleReset,
@@ -54,7 +55,13 @@ export function registerHandlers(bot: Bot): void {
     const text = ctx.message?.text ?? "";
     if (text.startsWith("/")) return;
     if (!text.trim()) return; // ignore empty / whitespace-only messages
-    log.info({ from: ctx.from?.id, text: text.slice(0, 80) }, "Message received");
+    // Telegram `message.date` is epoch SECONDS (the send time); receivedAt is
+    // our clock. Both formatted to readable UTC so logs never show a raw epoch.
+    const sentAt = ctx.message?.date ? formatTimestamp(ctx.message.date * 1000) : undefined;
+    log.info(
+      { from: ctx.from?.id, text: text.slice(0, 80), sentAt, receivedAt: formatTimestamp() },
+      "Message received",
+    );
     await runKernelText(ctx, text);
   });
 
