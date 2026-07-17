@@ -263,6 +263,7 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
             name: call.name,
           }),
         );
+        executed += 1;
         continue;
       }
 
