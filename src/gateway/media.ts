@@ -57,7 +57,7 @@ export function unsupportedMediaReply(label: string): string {
 
 async function handleUnsupported(ctx: Context, label: string): Promise<void> {
   log.info({ from: ctx.from?.id, kind: label }, "Unsupported media received — acknowledging instead of dropping");
-  await ctx.reply(unsupportedMediaReply(label)).catch(() => {});
+  await ctx.reply(unsupportedMediaReply(label)).catch(() => {}); // allow-failopen: best-effort courtesy reply; a Telegram send failure must not crash the handler
 }
 
 async function handleImage(ctx: Context, fileId: string, mimeType: string): Promise<void> {
