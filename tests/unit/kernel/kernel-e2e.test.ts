@@ -237,7 +237,7 @@ describe("kernel E2E (scripted models, real graph)", () => {
     expect(state.values.mission.plan).not.toBeNull();
   });
 
-  it("unproven action claim: ok-output with no successful receipt is REJECTED, retried once, then typed failure", async () => {
+  it("unproven action claim: ok-output with no successful receipt is REJECTED, retried (corrected + diagnostic), then typed failure", async () => {
     const failingTool = searchTool(async () => {
       throw new Error("Apify quota exhausted");
     });
@@ -256,7 +256,7 @@ describe("kernel E2E (scripted models, real graph)", () => {
     expect(res.mission.status).toBe("failed");
     expect(res.failure?.stage).toBe("validation");
     expect(res.failure?.message).toMatch(/receipt/);
-    expect(res.attempts["s1"]).toBe(2); // one original + ONE visible retry
+    expect(res.attempts["s1"]).toBe(3); // one original + corrected retry + diagnostic retry
     expect(res.reply).toContain("Task stopped");
   });
 
@@ -275,9 +275,9 @@ describe("kernel E2E (scripted models, real graph)", () => {
     const res = await k.invoke(turn("research forever"), cfg("loop"));
     expect(res.mission.status).toBe("failed");
     expect(res.failure?.stage).toBe("validation");
-    // Cap = 2 → exactly 2 executions per attempt, 2 attempts. Never 10 wasted hops.
-    expect(executions).toBe(4);
-    expect(worker.calls).toBeLessThanOrEqual(8);
+    // Cap = 2 → exactly 2 executions per attempt, 3 attempts (corrected + diagnostic). Never 10 wasted hops.
+    expect(executions).toBe(6);
+    expect(worker.calls).toBeLessThanOrEqual(12);
     // The thread survives with full state (the old system wiped it here).
     const state = await k.getState(cfg("loop"));
     expect(state.values.results.length).toBeGreaterThan(0);

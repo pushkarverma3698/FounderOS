@@ -1,0 +1,47 @@
+{
+  "slug": "turicks",
+  "name": "Turicks",
+  "canonical_name_confirmed": true,
+  "website": "https://turicks.com",
+  "industry": "The Autonomous Studio — AI-native creative + delivery",
+  "location": "India",
+  "palette": {
+    "background": "#0B0F14",
+    "surface": "#141B24",
+    "primary": "#4FD1C5",
+    "text": "#F2F5F7",
+    "muted": "#8FA3B0",
+    "accent": "#E8B84B"
+  },
+  "typography": {
+    "heading": "'Inter', 'Segoe UI', 'DejaVu Sans', sans-serif",
+    "body": "'Inter', 'Segoe UI', 'DejaVu Sans', sans-serif",
+    "style": "modern grotesque, tight tracking, confident scale contrast"
+  },
+  "tone": ["direct", "specific", "confident", "practical", "partner-never-vendor"],
+  "tagline": "The Autonomous Studio",
+  "mission": "AI-native creative + delivery for funded AI/dev-tool startups. We design the launch experience. FounderOS runs governed, audited delivery.",
+  "copy_lines": [
+    "Beautiful product, shipped by an AI studio you can trust and watch.",
+    "HITL on every external action. Idempotent audit log. Eval harness. 1,098 tests green.",
+    "We design the launch experience. FounderOS runs governed, audited delivery."
+  ],
+  "pillars": ["Design", "Delivery", "Governance", "Proof"],
+  "pillars_label": "What the studio runs on",
+  "audiences": ["Funded AI startups", "Dev-tool startups", "Seed to Series A"],
+  "cta": {
+    "line": "Book a strategy call.",
+    "website": "turicks.com"
+  },
+  "socials": {},
+  "video": {
+    "aspect_ratios": ["16:9", "9:16", "1:1"],
+    "pacing": "brisk",
+    "captions": "always",
+    "music": "minimal electronic, understated",
+    "voice": { "language": "en-IN", "style": "direct, confident" },
+    "motion": "precise snaps and reveals — engineered, not flashy",
+    "avoid": ["banned phrases: game-changer, excited to share, synergy", "stocky corporate b-roll"]
+  },
+  "notes": "Own brand. Full guidelines in docs/BRAND.md + global TURICKS.md. Max 3 emojis per social caption; word limits per channel apply to captions the factory writes."
+}

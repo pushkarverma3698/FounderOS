@@ -140,7 +140,7 @@ describe("failure-lesson learning loop E2E (real graph)", () => {
     expect(r2.mission.status).toBe("done");
 
     const m2RetryMsgs = w2.received[1]!.map((m) => String(m.content)).join("\n");
-    expect(m2RetryMsgs).toContain("RETRY 1 of 1"); // the normal retry instruction…
+    expect(m2RetryMsgs).toContain("RETRY 1 of 2"); // the normal (non-final) retry instruction…
     expect(m2RetryMsgs).toContain("KNOWN FAILURE PATTERN (seen 1×"); // …plus the learned lesson
     expect(m2RetryMsgs).toContain("Find the latest LangGraph news");
 

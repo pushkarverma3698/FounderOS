@@ -53,6 +53,7 @@ export function registerHandlers(bot: Bot): void {
   bot.on("message:text", async (ctx: Context) => {
     const text = ctx.message?.text ?? "";
     if (text.startsWith("/")) return;
+    if (!text.trim()) return; // ignore empty / whitespace-only messages
     log.info({ from: ctx.from?.id, text: text.slice(0, 80) }, "Message received");
     await runKernelText(ctx, text);
   });

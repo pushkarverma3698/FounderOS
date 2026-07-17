@@ -17,12 +17,26 @@
  */
 
 import { childLogger } from "../infra/logger.js";
-import { embedText } from "../lib/embed.js";
-import { searchRagTable, type RagTable, type RagHit } from "../db/rag-search.js";
+import { embedTextCached } from "../lib/embed.js";
+import { searchRagTable, keywordSearchRagTable, type RagTable, type RagHit } from "../db/rag-search.js";
+import {
+  hybridRagSearch,
+  RagStageError,
+  type HybridDeps,
+  type HybridOk,
+  type HybridResult,
+} from "../db/rag-hybrid.js";
+import { toRetrievalResult, renderRetrieval, RetrievalResultSchema } from "../db/retrieval-result.js";
+import { rerankHits, shouldRerank } from "../db/rag-rerank.js";
+import { RAG_RERANK_ENABLED } from "../core/config.js";
 import { getRagflowClient } from "../infra/ragflow.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:rag" });
+
+/** When rerank is on, fuse a wider candidate pool then let the model pick the
+ *  top-k from it (spec §1.1 F5: "top-20 fused → rerank → top-5"). */
+const RERANK_CANDIDATE_POOL = 20;
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -35,12 +49,33 @@ const log = childLogger({ module: "tool:rag" });
  */
 type RagFailure = { stage: "embed" | "query"; message: string };
 
-async function runRagSearch(
-  table: RagTable,
-  query: string,
-  topK: number,
-): Promise<{ hits: RagHit[] } | { error: RagFailure }> {
-  // RAGFlow backend: skip Ollama entirely, query RAGFlow's managed pipeline.
+/**
+ * Real vector retrieval: embed (Ollama) then pgvector query. Throws a
+ * RagStageError so a failure keeps its stage — embedder vs vector store —
+ * even after passing through the hybrid orchestrator's Promise.allSettled.
+ */
+async function realVectorSearch(table: RagTable, query: string, topK: number): Promise<RagHit[]> {
+  let embedding: number[];
+  try {
+    embedding = await embedTextCached(query); // Redis-cached (F3); fail-open to a fresh embed
+  } catch (err) {
+    throw new RagStageError("embed", err instanceof Error ? err.message : String(err));
+  }
+  try {
+    return await searchRagTable(table, embedding, topK);
+  } catch (err) {
+    throw new RagStageError("query", err instanceof Error ? err.message : String(err));
+  }
+}
+
+const HYBRID_DEPS: HybridDeps = {
+  vectorSearch: realVectorSearch,
+  keywordSearch: keywordSearchRagTable,
+};
+
+async function runRagSearch(table: RagTable, query: string, topK: number): Promise<HybridResult> {
+  // RAGFlow backend: skip Ollama/pgvector entirely, query RAGFlow's own hybrid
+  // pipeline. Returned as a single ranked list (mode "vector" — no local fusion).
   const ragflow = getRagflowClient();
   if (ragflow) {
     try {
@@ -51,7 +86,7 @@ async function runRagSearch(
         metadata: { source_path: c.document_name ?? "", dataset: c.dataset_name ?? "" },
       }));
       log.debug({ table, query, count: hits.length, backend: "ragflow" }, "RAG search");
-      return { hits };
+      return { hits, mode: "vector" };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error({ table, query, err }, "RAGFlow search failed");
@@ -59,39 +94,47 @@ async function runRagSearch(
     }
   }
 
-  // pgvector backend (default): embed via Ollama, query Postgres.
-  // Stage 1: embed the query (Ollama). Failure here = embedding/Ollama problem.
-  let embedding: number[];
-  try {
-    embedding = await embedText(query);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.error({ table, query, err }, "RAG embed (Ollama) failed");
-    return { error: { stage: "embed", message } };
+  // pgvector backend (default): hybrid (vector ⊕ keyword) fused with RRF, with a
+  // labelled keyword fallback if the embedder is down (see src/db/rag-hybrid.ts).
+  // When rerank is on, fuse a wider pool so the reranker has candidates to pick from.
+  const fetchK = RAG_RERANK_ENABLED ? Math.max(topK, RERANK_CANDIDATE_POOL) : topK;
+  const result = await hybridRagSearch(table, query, fetchK, HYBRID_DEPS);
+  if ("error" in result) {
+    log.error({ table, query, stage: result.error.stage }, "RAG hybrid search failed");
+    return result;
   }
 
-  // Stage 2: vector query (Postgres/pgvector). Failure here = DB/store problem,
-  // NOT Ollama. An empty store is NOT an error — it returns zero hits.
-  try {
-    const hits = await searchRagTable(table, embedding, topK);
-    return { hits };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.error({ table, query, err }, "RAG vector query failed");
-    return { error: { stage: "query", message } };
-  }
+  // Optional local rerank (F5, flag-gated, fail-open). Skipped in keyword-fallback
+  // (the embedder/Ollama is down, so reranking would only burn the model timeout).
+  const rerank = shouldRerank(RAG_RERANK_ENABLED, result.mode, result.hits.length);
+  const hits = rerank ? await rerankHits(query, result.hits, topK) : result.hits.slice(0, topK);
+  log.debug({ table, query, count: hits.length, mode: result.mode, reranked: rerank }, "RAG search");
+  return { ...result, hits };
 }
 
-function formatResults(hits: RagHit[], query: string, sourceField: string): string {
-  if (hits.length === 0) {
-    return `No results found for "${query}". The knowledge base may not have this information yet.`;
-  }
-  return hits
-    .map((r, i) => {
-      const src = (r.metadata[sourceField] as string | undefined) ?? "unknown";
-      return `${i + 1}. [${src}] (score ${r.score.toFixed(2)})\n${r.content.trim()}`;
-    })
-    .join("\n\n");
+/**
+ * Render a successful hybrid result. Hits are projected into validated
+ * RetrievalResults (F4) so citations render mechanically from real retrieved
+ * sources; a degraded (keyword-only) run is banner-flagged so the founder never
+ * mistakes thin results for the full set.
+ */
+function renderRagSuccess(result: HybridOk, query: string, label: string, sourceField: string): string {
+  const suffix =
+    result.mode === "hybrid" ? ", hybrid" : result.mode === "keyword-fallback" ? ", keyword-only" : "";
+  const banner =
+    result.mode === "keyword-fallback"
+      ? `⚠️ Semantic search unavailable (${result.degradedReason}) — showing keyword matches only; recall may be reduced.\n\n`
+      : "";
+  // Validate at the boundary: a malformed/source-less hit is dropped, never
+  // rendered as a citable source (F4 — hallucinated sources become a typed miss).
+  const results = result.hits
+    .map((h) => RetrievalResultSchema.safeParse(toRetrievalResult(h, sourceField)))
+    .filter((p) => p.success)
+    .map((p) => p.data);
+  return (
+    `${banner}${label} search for "${query}" (${results.length} results${suffix}):\n\n` +
+    renderRetrieval(results, query)
+  );
 }
 
 /** Build an accurate, actionable error that names the REAL failing component. */
@@ -155,13 +198,7 @@ export const searchPersonalRagTool: UnifiedTool = {
       return { success: false, error: ragErrorMessage("personal-rag", result.error) };
     }
 
-    log.debug({ query, count: result.hits.length }, "personal-rag search");
-    return {
-      success: true,
-      data:
-        `Personal knowledge search for "${query}" (${result.hits.length} results):\n\n` +
-        formatResults(result.hits, query, "source_file"),
-    };
+    return { success: true, data: renderRagSuccess(result, query, "Personal knowledge", "source_file") };
   },
 };
 
@@ -212,13 +249,7 @@ export const searchTuricksBrainTool: UnifiedTool = {
       return { success: false, error: ragErrorMessage("turicks-brain", result.error) };
     }
 
-    log.debug({ query, count: result.hits.length }, "turicks-brain search");
-    return {
-      success: true,
-      data:
-        `Turicks Brain search for "${query}" (${result.hits.length} results):\n\n` +
-        formatResults(result.hits, query, "source_path"),
-    };
+    return { success: true, data: renderRagSuccess(result, query, "Turicks Brain", "source_path") };
   },
 };
 
@@ -258,12 +289,6 @@ export const searchResearchCacheTool: UnifiedTool = {
       return { success: false, error: ragErrorMessage("research-cache", result.error) };
     }
 
-    log.debug({ query, count: result.hits.length }, "research-cache search");
-    return {
-      success: true,
-      data:
-        `Research cache search for "${query}" (${result.hits.length} results):\n\n` +
-        formatResults(result.hits, query, "source_url"),
-    };
+    return { success: true, data: renderRagSuccess(result, query, "Research cache", "source_url") };
   },
 };

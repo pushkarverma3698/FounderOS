@@ -42,40 +42,54 @@ const PII_FIELDS = [
 
 const isDev = env.NODE_ENV === "development";
 
-export const logger = pino({
-  level: env.LOG_LEVEL,
+// The stdio MCP server (src/mcp/index.ts, `pnpm mcp`) speaks JSON-RPC on stdout,
+// so ANY log line on stdout corrupts the protocol stream. When LOG_STDERR=1 the
+// logger writes to stderr (fd 2) instead, keeping stdout pure for that entry.
+// Default (unset) stays stdout so prod log aggregation is unchanged. Must be set
+// in the environment BEFORE this module loads — the `mcp` npm script does exactly
+// that, as does the .mcp.json ssh command in docs/VPS-MCP-SETUP.md.
+const toStderr = process.env["LOG_STDERR"] === "1";
 
-  // Redact PII — nested paths with wildcard
-  redact: {
-    paths: [
-      ...PII_FIELDS,
-      ...PII_FIELDS.map((f) => `*.${f}`),
-      ...PII_FIELDS.map((f) => `**.${f}`),
-    ],
-    censor: "[REDACTED]",
+export const logger = pino(
+  {
+    level: env.LOG_LEVEL,
+
+    // Redact PII — nested paths with wildcard
+    redact: {
+      paths: [
+        ...PII_FIELDS,
+        ...PII_FIELDS.map((f) => `*.${f}`),
+        ...PII_FIELDS.map((f) => `**.${f}`),
+      ],
+      censor: "[REDACTED]",
+    },
+
+    // Pretty-print in dev, raw JSON in prod (picked up by log aggregators).
+    transport: isDev
+      ? {
+          target: "pino-pretty",
+          options: {
+            colorize: true,
+            translateTime: "HH:MM:ss",
+            ignore: "pid,hostname",
+            // fd 2 = stderr when LOG_STDERR=1 (keeps stdio-MCP stdout clean).
+            ...(toStderr ? { destination: 2 } : {}),
+          },
+        }
+      : undefined,
+
+    // Standard fields on every log line
+    base: {
+      app: "founderos",
+      env: env.NODE_ENV,
+    },
+
+    // ISO timestamp
+    timestamp: pino.stdTimeFunctions.isoTime,
   },
-
-  // Pretty-print in dev, raw JSON in prod (picked up by log aggregators)
-  transport: isDev
-    ? {
-        target: "pino-pretty",
-        options: {
-          colorize: true,
-          translateTime: "HH:MM:ss",
-          ignore: "pid,hostname",
-        },
-      }
-    : undefined,
-
-  // Standard fields on every log line
-  base: {
-    app: "founderos",
-    env: env.NODE_ENV,
-  },
-
-  // ISO timestamp
-  timestamp: pino.stdTimeFunctions.isoTime,
-});
+  // In prod (no pino-pretty transport) route the raw stream to stderr directly.
+  toStderr && !isDev ? pino.destination(2) : undefined,
+);
 
 // ── Typed child-logger helpers ────────────────────────────────────────────────
 

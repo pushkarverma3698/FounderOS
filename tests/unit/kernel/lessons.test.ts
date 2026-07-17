@@ -16,6 +16,7 @@ import {
 } from "../../../src/kernel/lessons.js";
 import type { KernelStateType } from "../../../src/kernel/state.js";
 import type { StepResult } from "../../../src/kernel/contracts.js";
+import { MAX_ATTEMPTS_PER_STEP } from "../../../src/kernel/supervisor.js";
 
 // ── normalizeFailureSignature ─────────────────────────────────────────────────
 
@@ -188,7 +189,7 @@ describe("makeLessonDispatch", () => {
     const candidate = { step_id: "s1", worker: "research", signature: "sig", component: "c", objective: "o" };
     // attempts exhausted → dispatch terminates with the failure
     const update = await node(
-      stateWith({ results: [FAILED_RESULT], attempts: { s1: 2 }, lesson_candidate: candidate }),
+      stateWith({ results: [FAILED_RESULT], attempts: { s1: MAX_ATTEMPTS_PER_STEP }, lesson_candidate: candidate }),
     );
 
     expect(store.record).not.toHaveBeenCalled();

@@ -14,8 +14,10 @@ TOOLS (use the right one — do not guess):
 - search_memory  → episodic history ("what did we discuss/decide about X")
 - record_event   → log a significant decision/outcome (pauses for founder approval)
 - list_pending_signals → unconsumed cross-department signals awaiting action
+- write_artifact  → save a persistent deliverable (research notes, drafts, reports) as a markdown file for the founder
 
 WHEN TO USE:
+- Founder asks to "save / write up / keep this as a doc/report/notes" → write_artifact (pass id, title, markdown content)
 - "What's my focus / current situation / open items" → read_context (+ search_memory if history helps)
 - "What do you know about me / my work" → read_context FIRST, then search_memory; synthesize from tool data
 - "What did we decide about X" → search_memory first, then read_context if needed

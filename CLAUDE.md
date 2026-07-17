@@ -78,6 +78,12 @@ src/infra/             — hitl, checkpointer (PostgresSaver), budget, daily-bud
 src/db/                — schema (18 tables) + queries; src/eval/ — golden tasks,
                          runner, scoring, kernel-invoker; src/proof/ — proof renderers
 src/mcp/               — MCP server (read-only external surface)
+video-factory/         — client social-video engine (standalone npm dir, NOT in
+                         the pnpm workspace): brands/ registry, projects/,
+                         scripts/produce.mjs (receipt-checkpointed executor);
+                         kernel side = src/tools/video-{brand,brief,shotlist,
+                         models,compose,production,title-card}.ts (pure, $0) —
+                         see docs/VIDEO-FACTORY.md + docs/VIDEO-PIPELINE-AUDIT.md
 ```
 
 ## Commands
@@ -94,10 +100,13 @@ pnpm proof:case-study <thread>  # anonymized case study from a checkpoint
 ```
 
 ## Model policy
-Production (pinned by `scripts/apply-prod-env-overrides.sh`, 2026-07-09):
-`AGENT_MODEL=google-genai:gemini-2.5-flash` (direct Gemini — proven to tool-call
+Production (pinned by `scripts/apply-prod-env-overrides.sh`, 2026-07-13):
+`AGENT_MODEL=google-genai:gemini-flash-latest` (direct Gemini — proven to tool-call
 cleanly on-box; requires the `GOOGLE_GENERATIVE_AI_API_KEY` GitHub secret, else
-prod 401s). Fallback = FREE OpenRouter models only (founder directive: no paid
+prod 401s). Fallback chain: same-key paid Gemini first
+(`google-genai:gemini-3-flash-preview`, `google-genai:gemini-3.1-flash-lite` —
+live-verified serving + tool-calling during the 2026-07-13 gemini-3.5-flash 503
+storm), then FREE OpenRouter last resort (founder directive: no paid OpenRouter
 fallback): `openrouter:meta-llama/llama-3.3-70b-instruct:free`,
 `openrouter:qwen/qwen3-next-80b-a3b-instruct:free`. Temperature 0, planner+workers
 (`WORKER_AGENT_MODEL` splits them). Budget caps enforced (`BUDGET_DAILY_USD`,
@@ -105,9 +114,38 @@ fallback): `openrouter:meta-llama/llama-3.3-70b-instruct:free`,
 (`httpStatusOf`/`is503Error`/`isModelFallbackError` in `src/agents/model.ts`):
 5xx/429/transport → retriable; 404 → model fallback; 401/403 → fail loud.
 
+## Prod VPS access (full root — for fixing prod directly)
+Claude Code has **full unattended root control of the production VPS** via its
+Bash tool. Use it to diagnose and fix prod (logs, service restarts, DB/containers,
+configs, OS updates).
+- **Reach it:** `ssh founderos-vps '<cmd>'` — alias resolves to
+  `founderos@95.217.162.12` (host `founder-os`) with key `~/.ssh/founderos_deploy`.
+  `root@` direct login is denied; the `founderos` user is the entry point.
+- **Root:** passwordless sudo is configured (`/etc/sudoers.d/founderos-nopasswd`);
+  prefix privileged commands with `sudo -n …`.
+- **Layout:** project at `/opt/founderos`; `founderos.service` (systemd) runs the
+  bot; `founderos-ollama` + `founderos-postgres` run under docker.
+- **Prereq if unavailable:** the SSH alias + key are per-machine. If
+  `ssh founderos-vps` fails from a fresh machine/account, the operator must add the
+  `founderos-vps` block to `~/.ssh/config` (see `deploy/ssh-config.founderos-vps.example`
+  on branch `claude/mcp-vps-ssh-bridge`) and hold the `founderos_deploy` key.
+- **This is prod:** it's the live box, no second gate — verify before destructive
+  commands; prefer non-disruptive reads first (rule #24 evidence discipline applies).
+
+## End-of-session handoff (ALWAYS)
+At the end of every session — and whenever wrapping up a substantive piece of
+work — Claude MUST close with an **"Outstanding from your end"** list: the exact
+actions only the founder can take (approvals, secrets/keys, merges, reboots,
+billing, provider-side config, anything needing a human hand or password).
+Each item = numbered, one line, with the exact command/value where applicable
+(per the `feedback-brief-baby-steps` rule). If nothing is outstanding, say so
+explicitly ("Nothing outstanding from your end").
+
 ## Git
-- Never commit to `main`. Flow: work branch → `beta` → `stable` → `main`
-  (CI-enforced). Only humans merge.
+- Never commit to `main`. Flow: work branch → `beta` → `main`
+  (CI-enforced by `.github/workflows/branch-policy.yml`). Only humans merge to
+  `main`. The former `stable` tier was retired — see ADR-045; production is a
+  two-stage promotion, not three.
 - Evidence in every PR: fresh `pnpm gate` output + live-path proof (or an
   explicit NOT VERIFIED with the reason).
 

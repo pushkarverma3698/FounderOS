@@ -88,21 +88,29 @@ EOF
 Create environment file:
 
 ```bash
-# On VPS:
+# On VPS — fill each value with a REAL secret. This file is never committed and
+# is chmod 600 (owner-only). Do NOT leave the placeholders in place: a running
+# service with a placeholder key fails loud, which is the point — no silent
+# fallback to a fake credential.
 cat > /root/.founderos/vps-env.sh << 'EOF'
 #!/bin/bash
 # FounderOS VPS Environment Variables
 # Source this file in ~/.bashrc or Claude startup
 
-export GITHUB_PERSONAL_ACCESS_TOKEN="ghp_your_token_here"
-export GEMINI_API_KEY="your_gemini_key_here"
-export COMPOSIO_API_KEY="your_composio_key_here"
-export OPENROUTER_API_KEY="your_openrouter_key_here"
-export ANTHROPIC_API_KEY="your_anthropic_key_here"
+export GITHUB_PERSONAL_ACCESS_TOKEN="<real-github-pat>"
+export GEMINI_API_KEY="<real-gemini-key>"
+export COMPOSIO_API_KEY="<real-composio-key>"
+export OPENROUTER_API_KEY="<real-openrouter-key>"
+export ANTHROPIC_API_KEY="<real-anthropic-key>"
 EOF
 
 chmod 600 /root/.founderos/vps-env.sh
 ```
+
+> **Secret hygiene:** every value above is a real credential kept only in this
+> `chmod 600` file (or the OS keychain), never in the repo, never in a commit,
+> never in `mcp-bridge.json`. The FounderOS MCP HTTP server's own token is
+> covered in its dedicated section below — generate it, do not hand-pick it.
 
 ### Step 5: Load Environment at Startup
 
@@ -276,8 +284,85 @@ gh api user
 
 ---
 
+## 🌐 Connect a local MCP client to the VPS server (over SSH)
+
+Everything above configures the MCPs that FounderOS **consumes**. This section
+lets you (and colleagues) point a local MCP client — Claude Code, Claude Desktop —
+at the read-only knowledge tools FounderOS **exposes** (`search_web`,
+`github_read`, `read_context`, `search_memory`, `search_knowledge`, `read_cv`),
+running on the VPS against the production data.
+
+**The simple model: launch the stdio server on the VPS over SSH.** Your MCP
+client runs `ssh founderos-vps '… node … src/mcp/index.ts'`; JSON-RPC flows over
+the SSH pipe. That means:
+
+- **Your SSH key is the auth** — the same key you already use. No bearer token.
+- **No open port, no tunnel daemon, no extra service** — the connection lives
+  only while your client is running, and drops when it exits.
+- **No secrets on your machine** — tool credentials are read from the VPS's own
+  `/opt/founderos/.env`; the tools execute on the VPS.
+
+```
+Mac (MCP client) ──ssh founderos-vps──▶  VPS: node src/mcp/index.ts (stdio)
+   JSON-RPC over the SSH pipe                reads /opt/founderos/.env, runs tools
+```
+
+### One-time setup
+
+1. **SSH host alias** — append `deploy/ssh-config.founderos-vps.example` to your
+   `~/.ssh/config` (pins the `founderos_deploy` key to `founderos-vps`). Confirm:
+   ```bash
+   ssh founderos-vps 'echo ok && test -d /opt/founderos && echo found-founderos'
+   ```
+2. **MCP client config** — copy the `founderos-vps` block from
+   `deploy/mcp-founderos-vps.example.json` into your client's config:
+   - **Claude Code:** `~/.mcp.json` (global) or a project `.mcp.json`.
+   - **Claude Desktop:** `claude_desktop_config.json`.
+   ```jsonc
+   {
+     "mcpServers": {
+       "founderos-vps": {
+         "command": "ssh",
+         "args": ["founderos-vps",
+                  "cd /opt/founderos && LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/index.ts"]
+       }
+     }
+   }
+   ```
+   `LOG_STDERR=1` keeps logs off stdout so the JSON-RPC stream stays clean — it's
+   already baked into `pnpm mcp`; keep it in the SSH command too.
+3. **Restart the client.** It spawns the SSH child on demand; the VPS tools
+   appear as `search_web`, `search_memory`, etc.
+
+### Giving a colleague access
+
+They need exactly two things — nothing FounderOS-specific to install:
+
+1. SSH access to the VPS (their own key added to the VPS `authorized_keys`, or a
+   shared deploy key) plus the `founderos-vps` alias from step 1.
+2. The `founderos-vps` block from step 2 in their MCP client config.
+
+No token to share, no port to open. Revoke access by removing their SSH key on
+the VPS.
+
+### Local Claude Code (same machine as the server)
+
+Running a client on the VPS itself? Just `pnpm mcp` — same tools, stdio, no SSH
+hop. (`pnpm mcp` sets `LOG_STDERR=1` for you.)
+
+### If you later need it always-on
+
+The on-demand SSH model above is right for "connect when required." If you ever
+want the server **running 24/7** and reachable by multiple clients or non-SSH MCP
+clients simultaneously, the always-on HTTP variant (loopback bind + bearer token
++ autossh tunnel + systemd) lived in git history at commit `f54e5a8` — restore it
+from there rather than rebuilding.
+
+---
+
 ## 📚 Related Docs
 
 - [MCP Official Docs](https://modelcontextprotocol.io/)
 - [FounderOS CLAUDE.md](../CLAUDE.md)
 - [VPS Production Guide](./PRODUCTION.md)
+- [MCP topology spec §1.2](./plans/2026-07-14-MCP-TOPOLOGY-LANGGRAPH-STANDARDS-AGENCY-SCALE.md)

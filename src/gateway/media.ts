@@ -50,6 +50,16 @@ export function wantsSpeech(caption: string): boolean {
   return /\b(speak|spoken|say it|read it|read aloud|aloud|voice|voice note|uitspreken|voorlezen)\b/i.test(caption);
 }
 
+/** Friendly acknowledgement for content types the bot can't process — prevents silent drops. Exported for tests. */
+export function unsupportedMediaReply(label: string): string {
+  return `🤔 I can't handle ${label} yet — I work with text, voice notes, and photos of text. Send your request as a message and I'll get on it.`;
+}
+
+async function handleUnsupported(ctx: Context, label: string): Promise<void> {
+  log.info({ from: ctx.from?.id, kind: label }, "Unsupported media received — acknowledging instead of dropping");
+  await ctx.reply(unsupportedMediaReply(label)).catch(() => {}); // allow-failopen: best-effort courtesy reply; a Telegram send failure must not crash the handler
+}
+
 async function handleImage(ctx: Context, fileId: string, mimeType: string): Promise<void> {
   const caption = ctx.message?.caption ?? "";
   await ctx.replyWithChatAction("typing").catch(() => {});
@@ -170,7 +180,11 @@ export function registerMediaHandlers(bot: Bot, runOfficeText: RunOfficeTextFn):
 
   bot.on("message:document", async (ctx: Context) => {
     const doc = ctx.message?.document;
-    if (!doc?.mime_type?.startsWith("image/")) return; // only image documents
+    if (!doc) return;
+    if (!doc.mime_type?.startsWith("image/")) {
+      await handleUnsupported(ctx, "non-image files"); // was a silent drop
+      return;
+    }
     log.info({ from: ctx.from?.id, mime: doc.mime_type }, "Image document received");
     await handleImage(ctx, doc.file_id, doc.mime_type);
   });
@@ -188,4 +202,10 @@ export function registerMediaHandlers(bot: Bot, runOfficeText: RunOfficeTextFn):
     log.info({ from: ctx.from?.id, duration: audio.duration }, "Audio message received");
     await handleVoice(ctx, audio.file_id, runOfficeText);
   });
+
+  // Content types we can't process yet: acknowledge instead of dropping silently.
+  bot.on(["message:video", "message:video_note"], (ctx: Context) => handleUnsupported(ctx, "videos"));
+  bot.on(["message:sticker", "message:animation"], (ctx: Context) => handleUnsupported(ctx, "stickers or GIFs"));
+  bot.on("message:location", (ctx: Context) => handleUnsupported(ctx, "locations"));
+  bot.on("message:contact", (ctx: Context) => handleUnsupported(ctx, "contacts"));
 }
