@@ -6,6 +6,7 @@
  */
 import { sql } from "drizzle-orm";
 import { db } from "./client.js";
+import { tokenizeQuery, scoreByTerms, rankByTerms } from "./keyword-search.js";
 
 // research_cache holds business-public web findings (not personal data), so it
 // sits alongside turicks_brain on the right side of the ADR-013/015 firewall.
@@ -54,4 +55,51 @@ export async function searchRagTable(
       score: number;
     }>
   ).map((r) => ({ content: r.content, metadata: r.metadata ?? {}, score: Number(r.score) }));
+}
+
+/**
+ * Keyword search over the SAME rag table as {@link searchRagTable}, using only
+ * the `content` column (schema-safe — no tsvector/GIN assumption). The query is
+ * tokenised into significant terms; rows matching ANY term are fetched (ILIKE
+ * OR), then ranked in JS by term overlap. This is the keyword half of hybrid
+ * retrieval (spec §1.1 F2) and the fallback when the embedder is down (F1).
+ *
+ * `score` is the fraction of query terms present (0–1) — a rough relevance that
+ * RRF ignores (it fuses by rank), but that keeps the RagHit shape meaningful for
+ * keyword-only fallback rendering.
+ */
+export async function keywordSearchRagTable(
+  table: RagTable,
+  query: string,
+  topK: number,
+): Promise<RagHit[]> {
+  assertAllowedRagTable(table);
+  const terms = tokenizeQuery(query);
+  if (terms.length === 0) return []; // nothing significant to match on
+
+  const limit = Math.min(Math.max(topK, 1), 10);
+  const candidateLimit = Math.min(limit * 4, 40); // over-fetch, then rank precisely
+
+  // OR the per-term ILIKE patterns. Terms are alphanumeric (tokenizeQuery strips
+  // punctuation) and still passed as bound params — never interpolated.
+  const patterns = terms.map((t) => sql`content ILIKE ${"%" + t + "%"}`);
+  let whereOr = patterns[0]!;
+  for (let i = 1; i < patterns.length; i++) whereOr = sql`${whereOr} OR ${patterns[i]!}`;
+
+  const rows = await db.execute(sql`
+    SELECT content, metadata
+    FROM ${sql.identifier(table)}
+    WHERE ${whereOr}
+    LIMIT ${candidateLimit}
+  `);
+
+  const candidates = (
+    rows as unknown as Array<{ content: string; metadata: Record<string, unknown> | null }>
+  ).map((r) => ({ content: r.content, metadata: r.metadata ?? {} }));
+
+  return rankByTerms(candidates, terms, (c) => c.content, limit).map((c) => ({
+    content: c.content,
+    metadata: c.metadata,
+    score: Math.min(1, scoreByTerms(c.content, terms) / terms.length),
+  }));
 }

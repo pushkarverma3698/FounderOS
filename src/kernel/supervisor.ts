@@ -7,16 +7,19 @@
  *
  * Responsibilities: read plan[cursor] → dispatch the next TaskEnvelope to a
  * worker (seeding its isolated scratch context), advance past ok steps, retry
- * a retryable failure exactly ONCE (visible in `attempts`), terminate on
- * anything else with a typed FailureReport. It performs no work itself.
+ * a retryable failure with ESCALATION (visible in `attempts`): one corrected
+ * retry, then one final DIAGNOSTIC retry that forces an approach change and
+ * re-states the exact output contract. Terminate on anything else with a
+ * typed FailureReport. It performs no work itself.
  */
 
 import { HumanMessage } from "@langchain/core/messages";
 import { RESET } from "./state.js";
 import type { KernelStateType, KernelUpdate } from "./state.js";
+import { getSchemaTemplate } from "./contracts.js";
 import type { FailureReport, StepResult, TaskEnvelope } from "./contracts.js";
 
-export const MAX_ATTEMPTS_PER_STEP = 2; // 1 original + 1 visible retry
+export const MAX_ATTEMPTS_PER_STEP = 3; // 1 original + 1 corrected retry + 1 diagnostic retry
 
 /**
  * Resolve envelope inputs against completed step outputs. The deterministic
@@ -62,6 +65,35 @@ export function formatFailureReply(failure: FailureReport): string {
       : "Nothing was invented and completed steps are preserved — the mission is resumable.",
   );
   return lines.join("\n");
+}
+
+/**
+ * Escalating retry instruction (pure). `attempt` = attempts already dispatched,
+ * so the retry being built is attempt N+1:
+ *   - corrected retry: name the failure, demand the fix (unchanged v3 message —
+ *     lessons.ts and the golden set key off its "RETRY x of y" prefix);
+ *   - final DIAGNOSTIC retry: force an approach change, re-state the exact
+ *     output contract, and carry the failure evidence — the model must stop
+ *     iterating on a proven-dead path before the step goes terminal.
+ */
+export function retryMessage(step: TaskEnvelope, failure: FailureReport, attempt: number): HumanMessage {
+  const isFinal = attempt + 1 >= MAX_ATTEMPTS_PER_STEP;
+  if (!isFinal) {
+    return new HumanMessage(
+      `RETRY ${attempt} of ${MAX_ATTEMPTS_PER_STEP - 1}: the previous attempt failed — ${failure.message}. ` +
+        `Correct the issue and finish with valid JSON for "${step.expected.schema_ref}".`,
+    );
+  }
+  const lines = [
+    `DIAGNOSTIC RETRY ${attempt} of ${MAX_ATTEMPTS_PER_STEP - 1} (FINAL attempt): every previous attempt failed — ${failure.message}.`,
+    `Your previous approach is proven not to work. Change it:`,
+    `- If a tool call failed, use a DIFFERENT tool or DIFFERENT arguments (identical failed calls are blocked).`,
+    `- If output validation failed, reply with ONLY one JSON object exactly matching "${step.expected.schema_ref}":`,
+    getSchemaTemplate(step.expected.schema_ref),
+  ];
+  if (failure.evidence) lines.push(`Evidence from the failed attempt: ${failure.evidence.slice(0, 300)}`);
+  lines.push(`If the objective is genuinely impossible with your tools, finalize honestly with what you verified — never fabricate.`);
+  return new HumanMessage(lines.join("\n"));
 }
 
 function lastResultFor(stepId: string, results: StepResult[]): StepResult | undefined {
@@ -126,13 +158,7 @@ export function dispatch(state: KernelStateType): KernelUpdate {
         attempts: { [step.step_id]: attempt + 1 },
         scratch: {
           [step.step_id]: {
-            set: [
-              envelopeMessage(step, results),
-              new HumanMessage(
-                `RETRY ${attempt} of ${MAX_ATTEMPTS_PER_STEP - 1}: the previous attempt failed — ${last.failure.message}. ` +
-                  `Correct the issue and finish with valid JSON for "${step.expected.schema_ref}".`,
-              ),
-            ],
+            set: [envelopeMessage(step, results), retryMessage(step, last.failure, attempt)],
           },
         },
         step_receipts: { [step.step_id]: RESET },

@@ -13,6 +13,7 @@ import type { StepResult, ToolReceipt } from "./contracts.js";
 import type { KernelStateType, KernelUpdate } from "./state.js";
 import type { KernelChatModel } from "./planner.js";
 import { messageContentText } from "./message-text.js";
+import { isKernelTerminalError } from "./errors.js";
 import { clampToolOutput } from "./tool-output-guard.js";
 
 /** Per-step char cap on the JSON the synthesizer re-reads (~2k tokens each). */
@@ -35,6 +36,28 @@ export function receiptsBlock(results: StepResult[]): string {
   return `\n\n—\nAction receipts:\n${lines.join("\n")}`;
 }
 
+/** Per-step char cap in the deterministic fallback reply (Telegram-friendly). */
+const FALLBACK_OUTPUT_MAX_CHARS = 600;
+
+/**
+ * Deterministic reply when the synthesizer model itself is unavailable. Every
+ * step already completed and validated — losing the whole turn over a reply-
+ * writing blip (the pre-2026-07-13 behaviour) throws away proven work. Honest
+ * framing, raw validated outputs, no model prose.
+ */
+export function fallbackSynthesisReply(goal: string, okResults: Array<{ step_id: string; output_json: string }>): string {
+  const lines = [
+    `✅ All steps completed and verified, but the reply-writing model was unavailable — raw validated results below.`,
+    `Goal: ${goal}`,
+    ...okResults.map((r) => {
+      // output_json is the already-clamped pretty JSON — collapse it to one bullet line.
+      const rendered = r.output_json.replace(/\s+/g, " ").trim();
+      return `• ${r.step_id}: ${rendered.length > FALLBACK_OUTPUT_MAX_CHARS ? rendered.slice(0, FALLBACK_OUTPUT_MAX_CHARS) + "…" : rendered}`;
+    }),
+  ];
+  return lines.join("\n");
+}
+
 export function makeSynthesizeNode(model: KernelChatModel) {
   return async function synthesize(state: KernelStateType): Promise<KernelUpdate> {
     // Contract-validated outputs can still carry unbounded strings — bound each
@@ -47,11 +70,20 @@ export function makeSynthesizeNode(model: KernelChatModel) {
         output_json: clampToolOutput(JSON.stringify(r.output, null, 2), SYNTH_STEP_OUTPUT_MAX_CHARS),
       }));
 
-    const response = await model.invoke([
-      new SystemMessage(SYNTHESIZER_PROMPT),
-      new HumanMessage(JSON.stringify({ goal: state.mission.goal, step_results: okResults }, null, 2)),
-    ]);
-    const text = messageContentText(response.content) || JSON.stringify(response.content);
+    let text: string;
+    try {
+      const response = await model.invoke([
+        new SystemMessage(SYNTHESIZER_PROMPT),
+        new HumanMessage(JSON.stringify({ goal: state.mission.goal, step_results: okResults }, null, 2)),
+      ]);
+      text = messageContentText(response.content) || JSON.stringify(response.content);
+    } catch (err) {
+      // Budget caps, HITL interrupts, and timeout aborts propagate; anything
+      // else degrades to the deterministic reply — the mission's validated
+      // work survives a reply-writer blip.
+      if (isKernelTerminalError(err)) throw err;
+      text = fallbackSynthesisReply(state.mission.goal, okResults);
+    }
 
     return {
       mission: { ...state.mission, status: "done" },

@@ -78,6 +78,16 @@ speed/quality ratchets. Each lands with a failing test first per the PR rules.
 
 ### 1.2 MCP topology — Mac as Host/Client, VPS as Server
 
+> **Update (2026-07-16) — shipped simpler than proposed.** For the actual need
+> (a founder + colleagues connecting *on demand*, reusing SSH keys they already
+> hold), the always-on HTTP topology below was over-engineered. What shipped
+> instead: the MCP client launches the existing **stdio** server on the VPS
+> **over SSH** (`ssh founderos-vps 'node … src/mcp/index.ts'`) — the SSH key is
+> the auth, no HTTP listener, no bearer token, no tunnel daemon, no systemd unit.
+> See `docs/VPS-MCP-SETUP.md`. The HTTP/loopback/bearer design below (items 6–7)
+> was built and then removed (git `f54e5a8`); restore it from history only if an
+> always-on, multi-client, or non-SSH-client deployment is ever required.
+
 **Current state:** FounderOS already has both halves of the protocol, but the server half is
 mis-documented. `src/mcp/server.ts` claims "Transport: Streamable HTTP" and
 `capabilities.ts` tells the planner "FounderOS also RUNS an MCP server on localhost:3100" —
@@ -388,19 +398,19 @@ plane into a first-class knowledge source for every MCP client the Mac runs.
 
 ## 4. Follow-up index
 
-| # | Item | Section | Size |
-|---|---|---|---|
-| 1 | Embed-failure surfacing (`component: "ollama-embed"`) + labelled keyword fallback | §1.1 F1 | S |
-| 2 | Redis embedding cache | §1.1 F3 | S |
-| 3 | Hybrid retrieval with RRF in one tool | §1.1 F2 | M |
-| 4 | `RetrievalResultSchema` + citations | §1.1 F4 | M |
-| 5 | Local rerank stage (fail-open, tagged) | §1.1 F5 | S |
-| 6 | `src/mcp/http.ts` Streamable HTTP entry + bearer auth + loopback guard | §1.2 | M |
-| 7 | VPS `founderos-mcp.service` + Mac autossh launchd plist + `mcp-bridge.json` entry | §1.2 | S (ops) |
-| 8 | Fitness functions R7–R9 | §2.3 | S |
-| 9 | Postgres-backed outreach queue | §3.1 | S |
-| 10 | `WorkspaceHandle` contract | §3.2 | S |
-| 11 | **`vps_run` containerized job runner (recommended next)** | §3.3 | M |
+| # | Item | Section | Size | Status |
+|---|---|---|---|---|
+| 1 | Embed-failure surfacing + labelled keyword fallback | §1.1 F1 | S | ✅ done (stage-tagged errors; keyword fallback in `rag-hybrid.ts`) |
+| 2 | Redis embedding cache | §1.1 F3 | S | ✅ done (`embedTextCached`, 30-day TTL, fail-open) |
+| 3 | Hybrid retrieval with RRF in one tool | §1.1 F2 | M | ✅ done (`rrf.ts` + `rag-hybrid.ts`) |
+| 4 | `RetrievalResultSchema` + citations | §1.1 F4 | M | ✅ done (`retrieval-result.ts`; validated citations) |
+| 5 | Local rerank stage (fail-open, tagged) | §1.1 F5 | S | ✅ done (`rag-rerank.ts`, flag-gated `RAG_RERANK`, OFF until VPS-verified) |
+| 6 | MCP server reachable from the Mac | §1.2 | M | ✅ done (shipped simpler: stdio-over-SSH, not the HTTP variant) |
+| 7 | Mac↔VPS connection ops | §1.2 | S (ops) | ✅ done (`.mcp.json` over SSH + `~/.ssh/config` alias) |
+| 8 | Fitness functions R7–R9 | §2.3 | S | pending |
+| 9 | Postgres-backed outreach queue | §3.1 | S | pending |
+| 10 | `WorkspaceHandle` contract | §3.2 | S | ✅ done (shipped with #11) |
+| 11 | `vps_run` containerized job runner | §3.3 | M | ✅ done (merged, PR #356) |
 
 Each item lands as its own PR with a failing test first, fresh `pnpm gate` output, and
 live-path proof per the evidence rule. This document itself changes no behavior:

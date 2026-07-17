@@ -81,7 +81,10 @@ describe("buildCapabilityManifest", () => {
   });
 
   it("mentions the MCP server so 'what MCP servers' answers are truthful", () => {
-    expect(manifest).toMatch(/MCP server on localhost:3100/);
+    // Advertises the read-only stdio server (pnpm mcp), reachable locally or
+    // over SSH — so "what MCP servers do you run" answers stay truthful.
+    expect(manifest).toMatch(/MCP server/);
+    expect(manifest).toMatch(/pnpm mcp/);
   });
 
   it("HITL set covers every side-effecting tool name present in departments", () => {
