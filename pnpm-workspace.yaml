@@ -12,15 +12,17 @@ allowBuilds:
   esbuild: true
   protobufjs: true
   sharp: false
-  '@google/genai': set this to true or false
-  better-sqlite3: set this to true or false
+  '@google/genai': false
+  better-sqlite3: true
 ignoredBuiltDependencies:
   - bufferutil
   - es5-ext
   - utf-8-validate
+  - '@google/genai'
 onlyBuiltDependencies:
   - esbuild
   - protobufjs
+  - better-sqlite3
 # pnpm 11's pre-run drift check was failing every `pnpm <script>` (test/lint/eval)
 # while the optional builds sat "pending". tsc/vitest verify real correctness;
 # this skips only pnpm's convenience pre-run check.
