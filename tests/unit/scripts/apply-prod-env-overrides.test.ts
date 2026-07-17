@@ -90,10 +90,10 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     expect(valueOf(rendered, "TELEGRAM_TESTER_SESSION")).toBe("box-session");
   });
 
-  it("still pins the production model and free fallbacks", () => {
+  it("still pins the production model and stable fallbacks", () => {
     const rendered = render("", SNAPSHOT_BASE + "AGENT_MODEL=something-else\n");
-    expect(valueOf(rendered, "AGENT_MODEL")).toBe("google-genai:gemini-flash-latest");
-    expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain(":free");
+    expect(valueOf(rendered, "AGENT_MODEL")).toBe("google-genai:gemini-2.5-flash");
+    expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain("google-genai:");
   });
 
   it("preserves on-box MCP_BRIDGE_ENABLED absent from PROD_DOTENV", () => {
