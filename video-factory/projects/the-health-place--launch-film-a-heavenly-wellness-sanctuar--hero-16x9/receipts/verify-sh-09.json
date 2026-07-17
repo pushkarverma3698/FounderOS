@@ -1,0 +1,11 @@
+{
+  "step_id": "verify-sh-09",
+  "key": "d2c2685d",
+  "ok": true,
+  "attempts": 1,
+  "probe": {
+    "duration_s": 6,
+    "width": 1920,
+    "height": 1080
+  }
+}

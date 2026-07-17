@@ -45,8 +45,16 @@ import {
   publishSignal,
   scanAiVisibility,
   getGapScans,
+  vpsRun,
 } from "./agent-tools.js";
 import { generateImageTool, listBrandAssetsTool } from "./agent-tools/creative.js";
+import {
+  listVideoBrandsTool,
+  compileVideoBriefTool,
+  compileShotListTool,
+  planVideoProductionTool,
+  videoProductionStatusTool,
+} from "./agent-tools/video.js";
 import { scheduleTask, listScheduled, editScheduled } from "./agent-tools/scheduling.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
@@ -79,8 +87,8 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, writeArtifact],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
-  engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal],
-  marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal, generateImageTool, listBrandAssetsTool, listScheduledPosts],
+  engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal, vpsRun],
+  marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal, generateImageTool, listBrandAssetsTool, listScheduledPosts, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool],
   sales: [createSendEmailTool("sales"), searchWeb, searchKnowledge, searchTuricksBrain],
   personal: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain],
   jobhunt: [readCv, searchJobs, createSendEmailTool("jobhunt"), searchPersonalRag],
@@ -112,6 +120,7 @@ export const HITL_GATED_TOOLS = new Set([
   "browser",
   "send_file",
   "claude_code",
+  "vps_run",
   "deploy_static_site",
   "project_workflow",
   "create_calendar_event",
@@ -203,6 +212,7 @@ export function buildCapabilityManifest(): string {
     "- claude_code = a full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — engineering's primary executor for any build/code/repo task.",
     "- apply_cinematic_preset = copies cinematic-web preset scaffold (neon/glass/terminal/minimal) before landing page builds.",
     "- browser = Safari automation on the founder's Mac (personal dept).",
-    "- FounderOS also RUNS an MCP server on localhost:3100 exposing search_web, read_context, search_knowledge, search_memory, read_cv, github_read to external MCP clients.",
+    "- list_video_brands / compile_video_brief = the Video Factory (video-factory/): brand-token registry + deterministic production briefs for client social videos; execution/rendering runs locally via claude_code at $0 API cost.",
+    "- FounderOS also RUNS a read-only MCP server (pnpm mcp, stdio) exposing search_web, read_context, search_knowledge, search_memory, read_cv, github_read to external MCP clients; a remote client can launch it over SSH to query the VPS copy.",
   ].join("\n");
 }

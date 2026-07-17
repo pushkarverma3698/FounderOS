@@ -266,8 +266,22 @@ export const MCP_BRIDGE_ENABLED = env.MCP_BRIDGE_ENABLED === "true";
 /** Filesystem path to the external MCP bridge manifest. */
 export const MCP_BRIDGE_MANIFEST = env.MCP_BRIDGE_MANIFEST;
 
-/** Max recursive supervisor/sub-agent steps before LangGraph aborts a run. */
-export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 40);
+/**
+ * Local rerank stage after hybrid RAG fusion (spec §1.1 F5). Default OFF — it
+ * adds an Ollama (qwen2.5:7b) call per query and must be live-verified on the VPS
+ * before production. Fail-open by design: when disabled or when the model is
+ * unavailable, retrieval uses the deterministic fused order.
+ */
+export const RAG_RERANK_ENABLED = boolEnv("RAG_RERANK", false);
+
+/**
+ * Max recursive supervisor/sub-agent steps before LangGraph aborts a run.
+ * Sized for the kernel's worst legitimate single step: dispatch + (agent+tools)
+ * hops up to the tool budget + collect, times MAX_ATTEMPTS_PER_STEP (3 since
+ * 2026-07-13 — the diagnostic-retry escalation added one attempt; 40 was sized
+ * for 2 and could abort a legal third attempt).
+ */
+export const OFFICE_RECURSION_LIMIT = intEnv("OFFICE_RECURSION_LIMIT", 60);
 
 /**
  * Hard ceiling on a single office turn (ms). A hung model/tool call otherwise

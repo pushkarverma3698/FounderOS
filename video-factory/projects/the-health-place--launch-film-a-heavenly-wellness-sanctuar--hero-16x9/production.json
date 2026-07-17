@@ -1,0 +1,951 @@
+{
+  "plan": {
+    "version": 1,
+    "project": "the-health-place--launch-film-a-heavenly-wellness-sanctuar--hero-16x9",
+    "brand_slug": "the-health-place",
+    "topic": "launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong",
+    "format": "hero-16x9",
+    "duration_s": 55,
+    "canvas": {
+      "width": 1920,
+      "height": 1080
+    },
+    "total_est_usd": 11.05,
+    "max_attempts": 2,
+    "steps": [
+      {
+        "id": "vendor-gsap",
+        "kind": "copy",
+        "params": {
+          "from": "node_modules/gsap/dist/gsap.min.js",
+          "to": "assets/vendor/gsap.min.js"
+        },
+        "needs": [],
+        "produces": "assets/vendor/gsap.min.js",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "gen-sh-01",
+        "kind": "veo",
+        "params": {
+          "prompt": "dramatic push-in from wide to close, high production value. The single most arresting visual for \"launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong\" — focusing on nation's wellness by correcting people's lifestyle. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+          "model": "veo-3.1-generate-preview",
+          "aspect": "16:9",
+          "duration_s": 8,
+          "seed": 1907737509
+        },
+        "needs": [],
+        "produces": "assets/sh-01.mp4",
+        "est_cost_usd": 3.2
+      },
+      {
+        "id": "verify-sh-01",
+        "kind": "probe",
+        "params": {
+          "file": "assets/sh-01.mp4",
+          "min_duration_s": 6.8
+        },
+        "needs": [
+          "gen-sh-01"
+        ],
+        "produces": "",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "gen-sh-02",
+        "kind": "veo",
+        "params": {
+          "prompt": "macro detail shot, textures filling the frame. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Physical\" dimension, experienced by women. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+          "model": "veo-3.1-fast-generate-preview",
+          "aspect": "16:9",
+          "duration_s": 8,
+          "seed": 1890959890
+        },
+        "needs": [],
+        "produces": "assets/sh-02.mp4",
+        "est_cost_usd": 1.2
+      },
+      {
+        "id": "verify-sh-02",
+        "kind": "probe",
+        "params": {
+          "file": "assets/sh-02.mp4",
+          "min_duration_s": 7.8
+        },
+        "needs": [
+          "gen-sh-02"
+        ],
+        "produces": "",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "gen-sh-03",
+        "kind": "veo",
+        "params": {
+          "prompt": "medium tracking shot, smooth gimbal glide. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Physical\" dimension, experienced by women. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+          "model": "veo-3.1-fast-generate-preview",
+          "aspect": "16:9",
+          "duration_s": 8,
+          "seed": 1874182271
+        },
+        "needs": [],
+        "produces": "assets/sh-03.mp4",
+        "est_cost_usd": 1.2
+      },
+      {
+        "id": "verify-sh-03",
+        "kind": "probe",
+        "params": {
+          "file": "assets/sh-03.mp4",
+          "min_duration_s": 7.8
+        },
+        "needs": [
+          "gen-sh-03"
+        ],
+        "produces": "",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "gen-sh-04",
+        "kind": "veo",
+        "params": {
+          "prompt": "handheld over-the-shoulder view, natural and human. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Emotional\" dimension, experienced by men. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+          "model": "veo-3.1-fast-generate-preview",
+          "aspect": "16:9",
+          "duration_s": 8,
+          "seed": 1857404652
+        },
+        "needs": [],
+        "produces": "assets/sh-04.mp4",
+        "est_cost_usd": 1.2
+      },
+      {
+        "id": "verify-sh-04",
+        "kind": "probe",
+        "params": {
+          "file": "assets/sh-04.mp4",
+          "min_duration_s": 7.8
+        },
+        "needs": [
+          "gen-sh-04"
+        ],
+        "produces": "",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "gen-sh-05",
+        "kind": "veo",
+        "params": {
+          "prompt": "low-angle hero shot, subject framed against light. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Emotional\" dimension, experienced by men. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+          "model": "veo-3.1-fast-generate-preview",
+          "aspect": "16:9",
+          "duration_s": 8,
+          "seed": 1840627033
+        },
+        "needs": [],
+        "produces": "assets/sh-05.mp4",
+        "est_cost_usd": 1.2
+      },
+      {
+        "id": "verify-sh-05",
+        "kind": "probe",
+        "params": {
+          "file": "assets/sh-05.mp4",
+          "min_duration_s": 7.8
+        },
+        "needs": [
+          "gen-sh-05"
+        ],
+        "produces": "",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "gen-sh-06",
+        "kind": "veo",
+        "params": {
+          "prompt": "macro detail shot, textures filling the frame. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Mental\" dimension, experienced by children. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+          "model": "veo-3.1-fast-generate-preview",
+          "aspect": "16:9",
+          "duration_s": 6,
+          "seed": 1823849414
+        },
+        "needs": [],
+        "produces": "assets/sh-06.mp4",
+        "est_cost_usd": 0.9
+      },
+      {
+        "id": "verify-sh-06",
+        "kind": "probe",
+        "params": {
+          "file": "assets/sh-06.mp4",
+          "min_duration_s": 5.8
+        },
+        "needs": [
+          "gen-sh-06"
+        ],
+        "produces": "",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "gen-sh-07",
+        "kind": "veo",
+        "params": {
+          "prompt": "medium tracking shot, smooth gimbal glide. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Mental\" dimension, experienced by children. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+          "model": "veo-3.1-fast-generate-preview",
+          "aspect": "16:9",
+          "duration_s": 6,
+          "seed": 1807071795
+        },
+        "needs": [],
+        "produces": "assets/sh-07.mp4",
+        "est_cost_usd": 0.9
+      },
+      {
+        "id": "verify-sh-07",
+        "kind": "probe",
+        "params": {
+          "file": "assets/sh-07.mp4",
+          "min_duration_s": 5.8
+        },
+        "needs": [
+          "gen-sh-07"
+        ],
+        "produces": "",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "gen-sh-08",
+        "kind": "veo",
+        "params": {
+          "prompt": "handheld over-the-shoulder view, natural and human. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Mental\" dimension, experienced by children. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+          "model": "veo-3.1-fast-generate-preview",
+          "aspect": "16:9",
+          "duration_s": 6,
+          "seed": 1790294176
+        },
+        "needs": [],
+        "produces": "assets/sh-08.mp4",
+        "est_cost_usd": 0.9
+      },
+      {
+        "id": "verify-sh-08",
+        "kind": "probe",
+        "params": {
+          "file": "assets/sh-08.mp4",
+          "min_duration_s": 5.8
+        },
+        "needs": [
+          "gen-sh-08"
+        ],
+        "produces": "",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "gen-sh-09",
+        "kind": "hyperframes",
+        "params": {
+          "composition": "cta.html",
+          "quality": "standard"
+        },
+        "needs": [
+          "vendor-gsap"
+        ],
+        "produces": "assets/sh-09.mp4",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "verify-sh-09",
+        "kind": "probe",
+        "params": {
+          "file": "assets/sh-09.mp4",
+          "min_duration_s": 6
+        },
+        "needs": [
+          "gen-sh-09"
+        ],
+        "produces": "",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "norm-sh-01",
+        "kind": "ffmpeg",
+        "params": {
+          "argv": [
+            "-y",
+            "-i",
+            "assets/sh-01.mp4",
+            "-filter_complex",
+            "[0:v]fps=24,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,setsar=1[v];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]",
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-t",
+            "6.8",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "work/sh-01.norm.mp4"
+          ]
+        },
+        "needs": [
+          "verify-sh-01",
+          "verify-sh-02",
+          "verify-sh-03",
+          "verify-sh-04",
+          "verify-sh-05",
+          "verify-sh-06",
+          "verify-sh-07",
+          "verify-sh-08",
+          "verify-sh-09"
+        ],
+        "produces": "work/sh-01.norm.mp4",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "norm-sh-02",
+        "kind": "ffmpeg",
+        "params": {
+          "argv": [
+            "-y",
+            "-i",
+            "assets/sh-02.mp4",
+            "-filter_complex",
+            "[0:v]fps=24,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,setsar=1[v];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]",
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-t",
+            "7.8",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "work/sh-02.norm.mp4"
+          ]
+        },
+        "needs": [
+          "verify-sh-01",
+          "verify-sh-02",
+          "verify-sh-03",
+          "verify-sh-04",
+          "verify-sh-05",
+          "verify-sh-06",
+          "verify-sh-07",
+          "verify-sh-08",
+          "verify-sh-09"
+        ],
+        "produces": "work/sh-02.norm.mp4",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "norm-sh-03",
+        "kind": "ffmpeg",
+        "params": {
+          "argv": [
+            "-y",
+            "-i",
+            "assets/sh-03.mp4",
+            "-filter_complex",
+            "[0:v]fps=24,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,setsar=1[v];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]",
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-t",
+            "7.8",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "work/sh-03.norm.mp4"
+          ]
+        },
+        "needs": [
+          "verify-sh-01",
+          "verify-sh-02",
+          "verify-sh-03",
+          "verify-sh-04",
+          "verify-sh-05",
+          "verify-sh-06",
+          "verify-sh-07",
+          "verify-sh-08",
+          "verify-sh-09"
+        ],
+        "produces": "work/sh-03.norm.mp4",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "norm-sh-04",
+        "kind": "ffmpeg",
+        "params": {
+          "argv": [
+            "-y",
+            "-i",
+            "assets/sh-04.mp4",
+            "-filter_complex",
+            "[0:v]fps=24,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,setsar=1[v];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]",
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-t",
+            "7.8",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "work/sh-04.norm.mp4"
+          ]
+        },
+        "needs": [
+          "verify-sh-01",
+          "verify-sh-02",
+          "verify-sh-03",
+          "verify-sh-04",
+          "verify-sh-05",
+          "verify-sh-06",
+          "verify-sh-07",
+          "verify-sh-08",
+          "verify-sh-09"
+        ],
+        "produces": "work/sh-04.norm.mp4",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "norm-sh-05",
+        "kind": "ffmpeg",
+        "params": {
+          "argv": [
+            "-y",
+            "-i",
+            "assets/sh-05.mp4",
+            "-filter_complex",
+            "[0:v]fps=24,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,setsar=1[v];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]",
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-t",
+            "7.8",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "work/sh-05.norm.mp4"
+          ]
+        },
+        "needs": [
+          "verify-sh-01",
+          "verify-sh-02",
+          "verify-sh-03",
+          "verify-sh-04",
+          "verify-sh-05",
+          "verify-sh-06",
+          "verify-sh-07",
+          "verify-sh-08",
+          "verify-sh-09"
+        ],
+        "produces": "work/sh-05.norm.mp4",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "norm-sh-06",
+        "kind": "ffmpeg",
+        "params": {
+          "argv": [
+            "-y",
+            "-i",
+            "assets/sh-06.mp4",
+            "-filter_complex",
+            "[0:v]fps=24,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,setsar=1[v];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]",
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-t",
+            "5.8",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "work/sh-06.norm.mp4"
+          ]
+        },
+        "needs": [
+          "verify-sh-01",
+          "verify-sh-02",
+          "verify-sh-03",
+          "verify-sh-04",
+          "verify-sh-05",
+          "verify-sh-06",
+          "verify-sh-07",
+          "verify-sh-08",
+          "verify-sh-09"
+        ],
+        "produces": "work/sh-06.norm.mp4",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "norm-sh-07",
+        "kind": "ffmpeg",
+        "params": {
+          "argv": [
+            "-y",
+            "-i",
+            "assets/sh-07.mp4",
+            "-filter_complex",
+            "[0:v]fps=24,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,setsar=1[v];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]",
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-t",
+            "5.8",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "work/sh-07.norm.mp4"
+          ]
+        },
+        "needs": [
+          "verify-sh-01",
+          "verify-sh-02",
+          "verify-sh-03",
+          "verify-sh-04",
+          "verify-sh-05",
+          "verify-sh-06",
+          "verify-sh-07",
+          "verify-sh-08",
+          "verify-sh-09"
+        ],
+        "produces": "work/sh-07.norm.mp4",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "norm-sh-08",
+        "kind": "ffmpeg",
+        "params": {
+          "argv": [
+            "-y",
+            "-i",
+            "assets/sh-08.mp4",
+            "-filter_complex",
+            "[0:v]fps=24,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,setsar=1[v];[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]",
+            "-map",
+            "[v]",
+            "-map",
+            "[a]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-t",
+            "5.8",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "work/sh-08.norm.mp4"
+          ]
+        },
+        "needs": [
+          "verify-sh-01",
+          "verify-sh-02",
+          "verify-sh-03",
+          "verify-sh-04",
+          "verify-sh-05",
+          "verify-sh-06",
+          "verify-sh-07",
+          "verify-sh-08",
+          "verify-sh-09"
+        ],
+        "produces": "work/sh-08.norm.mp4",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "norm-sh-09",
+        "kind": "ffmpeg",
+        "params": {
+          "argv": [
+            "-y",
+            "-i",
+            "assets/sh-09.mp4",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=channel_layout=stereo:sample_rate=48000:duration=6",
+            "-filter_complex",
+            "[0:v]fps=24,scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,setsar=1[v]",
+            "-map",
+            "[v]",
+            "-map",
+            "1:a",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-t",
+            "6",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "work/sh-09.norm.mp4"
+          ]
+        },
+        "needs": [
+          "verify-sh-01",
+          "verify-sh-02",
+          "verify-sh-03",
+          "verify-sh-04",
+          "verify-sh-05",
+          "verify-sh-06",
+          "verify-sh-07",
+          "verify-sh-08",
+          "verify-sh-09"
+        ],
+        "produces": "work/sh-09.norm.mp4",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "composite",
+        "kind": "ffmpeg",
+        "params": {
+          "argv": [
+            "-y",
+            "-i",
+            "work/sh-01.norm.mp4",
+            "-i",
+            "work/sh-02.norm.mp4",
+            "-i",
+            "work/sh-03.norm.mp4",
+            "-i",
+            "work/sh-04.norm.mp4",
+            "-i",
+            "work/sh-05.norm.mp4",
+            "-i",
+            "work/sh-06.norm.mp4",
+            "-i",
+            "work/sh-07.norm.mp4",
+            "-i",
+            "work/sh-08.norm.mp4",
+            "-i",
+            "work/sh-09.norm.mp4",
+            "-filter_complex",
+            "[0:v][1:v]xfade=transition=dissolve:duration=0.8:offset=6[vx1];[vx1][2:v]xfade=transition=fade:duration=0.8:offset=13[vx2];[vx2][3:v]xfade=transition=dissolve:duration=0.8:offset=20[vx3];[vx3][4:v]xfade=transition=fade:duration=0.8:offset=27[vx4];[vx4][5:v]xfade=transition=dissolve:duration=0.8:offset=34[vx5];[vx5][6:v]xfade=transition=fade:duration=0.8:offset=39[vx6];[vx6][7:v]xfade=transition=dissolve:duration=0.8:offset=44[vx7];[vx7][8:v]xfade=transition=fade:duration=0.8:offset=49[vx8];[vx8]drawtext=font=DejaVu Sans:text=When an individual heals\\, relationships heal. When:fontsize=56:fontcolor=white:borderw=4:bordercolor=black@0.55:x=(w-text_w)/2:y=696:enable=between(t\\,0.3\\,5.85),drawtext=font=DejaVu Sans:text=relationships heal\\, families heal. When families:fontsize=56:fontcolor=white:borderw=4:bordercolor=black@0.55:x=(w-text_w)/2:y=769:enable=between(t\\,0.3\\,5.85),drawtext=font=DejaVu Sans:text=heal\\, society heals.:fontsize=56:fontcolor=white:borderw=4:bordercolor=black@0.55:x=(w-text_w)/2:y=842:enable=between(t\\,0.3\\,5.85),drawtext=font=DejaVu Sans:text=A place to pause. A place to breathe. A place to:fontsize=56:fontcolor=white:borderw=4:bordercolor=black@0.55:x=(w-text_w)/2:y=769:enable=between(t\\,6.3\\,12.85),drawtext=font=DejaVu Sans:text=belong.:fontsize=56:fontcolor=white:borderw=4:bordercolor=black@0.55:x=(w-text_w)/2:y=842:enable=between(t\\,6.3\\,12.85),drawtext=font=DejaVu Sans:text=Here\\, we reconnect with nature — the ultimate healer.:fontsize=56:fontcolor=white:borderw=4:bordercolor=black@0.55:x=(w-text_w)/2:y=842:enable=between(t\\,20.3\\,26.85),drawtext=font=DejaVu Sans:text=A Heavenly abode to Stay\\, Breathe\\, and Belong:fontsize=56:fontcolor=white:borderw=4:bordercolor=black@0.55:x=(w-text_w)/2:y=842:enable=between(t\\,34.3\\,38.85),fade=t=out:st=54.4:d=0.6[vfinal];[0:a][1:a]acrossfade=d=0.8[ax1];[ax1][2:a]acrossfade=d=0.8[ax2];[ax2][3:a]acrossfade=d=0.8[ax3];[ax3][4:a]acrossfade=d=0.8[ax4];[ax4][5:a]acrossfade=d=0.8[ax5];[ax5][6:a]acrossfade=d=0.8[ax6];[ax6][7:a]acrossfade=d=0.8[ax7];[ax7][8:a]acrossfade=d=0.8[ax8];[ax8]atrim=0:55,apad=whole_dur=55,afade=t=out:st=53.5:d=1.5,loudnorm=I=-14:TP=-1.5:LRA=11[afinal]",
+            "-map",
+            "[vfinal]",
+            "-map",
+            "[afinal]",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            "24",
+            "-t",
+            "55",
+            "-movflags",
+            "+faststart",
+            "renders/the-health-place--launch-film-a-heavenly-wellness-sanctuar--hero-16x9.mp4"
+          ]
+        },
+        "needs": [
+          "verify-sh-01",
+          "verify-sh-02",
+          "verify-sh-03",
+          "verify-sh-04",
+          "verify-sh-05",
+          "verify-sh-06",
+          "verify-sh-07",
+          "verify-sh-08",
+          "verify-sh-09",
+          "norm-sh-01",
+          "norm-sh-02",
+          "norm-sh-03",
+          "norm-sh-04",
+          "norm-sh-05",
+          "norm-sh-06",
+          "norm-sh-07",
+          "norm-sh-08",
+          "norm-sh-09"
+        ],
+        "produces": "renders/the-health-place--launch-film-a-heavenly-wellness-sanctuar--hero-16x9.mp4",
+        "est_cost_usd": 0
+      },
+      {
+        "id": "qa-final",
+        "kind": "probe",
+        "params": {
+          "file": "renders/the-health-place--launch-film-a-heavenly-wellness-sanctuar--hero-16x9.mp4",
+          "min_duration_s": 54.5,
+          "max_duration_s": 55.5,
+          "width": 1920,
+          "height": 1080
+        },
+        "needs": [
+          "composite"
+        ],
+        "produces": "",
+        "est_cost_usd": 0
+      }
+    ]
+  },
+  "shotlist": {
+    "brand_slug": "the-health-place",
+    "topic": "launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong",
+    "format": "hero-16x9",
+    "source_aspect": "16:9",
+    "canvas": {
+      "width": 1920,
+      "height": 1080
+    },
+    "fps": 24,
+    "duration_s": 55,
+    "pacing": "calm",
+    "style_anchor": "Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+    "vo_word_budget": 147,
+    "music_direction": "ambient meditative, soft and warm; pacing: calm; instrumental only, no vocals",
+    "project_seed": 226288978,
+    "shots": [
+      {
+        "id": "sh-01",
+        "scene_id": "s1-hook",
+        "scene_role": "hook",
+        "kind": "veo-broll",
+        "start_s": 0,
+        "duration_s": 6,
+        "gen_seconds": 8,
+        "camera": "dramatic push-in from wide to close, high production value",
+        "subject": "The single most arresting visual for \"launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong\" — focusing on nation's wellness by correcting people's lifestyle",
+        "prompt": "dramatic push-in from wide to close, high production value. The single most arresting visual for \"launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong\" — focusing on nation's wellness by correcting people's lifestyle. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+        "overlay_text": "When an individual heals, relationships heal. When relationships heal, families heal. When families heal, society heals.",
+        "transition_out": {
+          "type": "dissolve",
+          "duration_s": 0.8
+        },
+        "seed": 1907737509
+      },
+      {
+        "id": "sh-02",
+        "scene_id": "s2-body",
+        "scene_role": "body",
+        "kind": "veo-broll",
+        "start_s": 6,
+        "duration_s": 7,
+        "gen_seconds": 8,
+        "camera": "macro detail shot, textures filling the frame",
+        "subject": "launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Physical\" dimension, experienced by women",
+        "prompt": "macro detail shot, textures filling the frame. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Physical\" dimension, experienced by women. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+        "overlay_text": "A place to pause. A place to breathe. A place to belong.",
+        "transition_out": {
+          "type": "fade",
+          "duration_s": 0.8
+        },
+        "seed": 1890959890
+      },
+      {
+        "id": "sh-03",
+        "scene_id": "s2-body",
+        "scene_role": "body",
+        "kind": "veo-broll",
+        "start_s": 13,
+        "duration_s": 7,
+        "gen_seconds": 8,
+        "camera": "medium tracking shot, smooth gimbal glide",
+        "subject": "launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Physical\" dimension, experienced by women",
+        "prompt": "medium tracking shot, smooth gimbal glide. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Physical\" dimension, experienced by women. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+        "overlay_text": "",
+        "transition_out": {
+          "type": "dissolve",
+          "duration_s": 0.8
+        },
+        "seed": 1874182271
+      },
+      {
+        "id": "sh-04",
+        "scene_id": "s3-body",
+        "scene_role": "body",
+        "kind": "veo-broll",
+        "start_s": 20,
+        "duration_s": 7,
+        "gen_seconds": 8,
+        "camera": "handheld over-the-shoulder view, natural and human",
+        "subject": "launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Emotional\" dimension, experienced by men",
+        "prompt": "handheld over-the-shoulder view, natural and human. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Emotional\" dimension, experienced by men. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+        "overlay_text": "Here, we reconnect with nature — the ultimate healer.",
+        "transition_out": {
+          "type": "fade",
+          "duration_s": 0.8
+        },
+        "seed": 1857404652
+      },
+      {
+        "id": "sh-05",
+        "scene_id": "s3-body",
+        "scene_role": "body",
+        "kind": "veo-broll",
+        "start_s": 27,
+        "duration_s": 7,
+        "gen_seconds": 8,
+        "camera": "low-angle hero shot, subject framed against light",
+        "subject": "launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Emotional\" dimension, experienced by men",
+        "prompt": "low-angle hero shot, subject framed against light. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Emotional\" dimension, experienced by men. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+        "overlay_text": "",
+        "transition_out": {
+          "type": "dissolve",
+          "duration_s": 0.8
+        },
+        "seed": 1840627033
+      },
+      {
+        "id": "sh-06",
+        "scene_id": "s4-body",
+        "scene_role": "body",
+        "kind": "veo-broll",
+        "start_s": 34,
+        "duration_s": 5,
+        "gen_seconds": 6,
+        "camera": "macro detail shot, textures filling the frame",
+        "subject": "launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Mental\" dimension, experienced by children",
+        "prompt": "macro detail shot, textures filling the frame. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Mental\" dimension, experienced by children. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+        "overlay_text": "A Heavenly abode to Stay, Breathe, and Belong",
+        "transition_out": {
+          "type": "fade",
+          "duration_s": 0.8
+        },
+        "seed": 1823849414
+      },
+      {
+        "id": "sh-07",
+        "scene_id": "s4-body",
+        "scene_role": "body",
+        "kind": "veo-broll",
+        "start_s": 39,
+        "duration_s": 5,
+        "gen_seconds": 6,
+        "camera": "medium tracking shot, smooth gimbal glide",
+        "subject": "launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Mental\" dimension, experienced by children",
+        "prompt": "medium tracking shot, smooth gimbal glide. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Mental\" dimension, experienced by children. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+        "overlay_text": "",
+        "transition_out": {
+          "type": "dissolve",
+          "duration_s": 0.8
+        },
+        "seed": 1807071795
+      },
+      {
+        "id": "sh-08",
+        "scene_id": "s4-body",
+        "scene_role": "body",
+        "kind": "veo-broll",
+        "start_s": 44,
+        "duration_s": 5,
+        "gen_seconds": 6,
+        "camera": "handheld over-the-shoulder view, natural and human",
+        "subject": "launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Mental\" dimension, experienced by children",
+        "prompt": "handheld over-the-shoulder view, natural and human. launch film: a heavenly wellness sanctuary in Bangalore where you pause, breathe, and belong — the \"Mental\" dimension, experienced by children. Consistent visual style across every shot of this film: holistic wellness centre in Hoodi, Bangalore, India. Mood: calm, reflective, empathetic, nature-forward, slightly spiritual. Motion language: slow fades and gentle drifts — no aggressive cuts, no neon. Cohesive color grade echoing a palette of deep #0E2B20 backgrounds with #D9C08B accents. Same lighting temperature and lens character in every shot, like one cinematographer shot the whole piece. No text, no captions, no logos, no watermarks inside the footage. Avoid: full-frame linear gradients (H.264 banding); jump cuts; harsh contrast flips.",
+        "overlay_text": "",
+        "transition_out": {
+          "type": "fade",
+          "duration_s": 0.8
+        },
+        "seed": 1790294176
+      },
+      {
+        "id": "sh-09",
+        "scene_id": "s5-cta",
+        "scene_role": "cta",
+        "kind": "title-card",
+        "start_s": 49,
+        "duration_s": 6,
+        "gen_seconds": 0,
+        "camera": "static title card, GSAP staggered entrances",
+        "subject": "The Health Place wordmark + CTA",
+        "prompt": "",
+        "overlay_text": "",
+        "transition_out": {
+          "type": "fade",
+          "duration_s": 0.6
+        },
+        "seed": 2828842459
+      }
+    ]
+  }
+}

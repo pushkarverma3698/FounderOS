@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #0E2B20; font-family: 'Inter', 'Segoe UI', 'DejaVu Sans', sans-serif; color: #F5F0E6; }
+      #root { position: relative; width: 1920px; height: 1080px; background: #0E2B20; }
+      .glow { position: absolute; inset: 0; background: radial-gradient(ellipse 1190px 799px at 50% 42%, #1F4D36 0%, rgba(0,0,0,0) 70%); }
+      .scene { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 60px; }
+      .wordmark { font-size: 84px; font-weight: 600; letter-spacing: 0.2em; color: #F5F0E6; text-transform: uppercase; }
+      .divider { width: 300px; height: 2px; background: #D9C08B; margin: 36px auto; }
+      .cta-line { font-size: 44px; font-weight: 300; letter-spacing: 0.08em; color: #C9D8CD; }
+      .contact { font-size: 28px; font-weight: 400; letter-spacing: 0.1em; color: #9CB8A4; margin-top: 38px; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="the-health-place--launch-film-a-heavenly-wellness-sanctuar--hero-16x9-cta" data-start="0" data-duration="6" data-width="1920" data-height="1080">
+      <div class="glow"></div>
+      <section id="cta" class="scene clip" data-start="0" data-duration="6" data-track-index="1">
+        <div id="cta-mark" class="wordmark">The Health Place</div>
+        <div id="cta-divider" class="divider"></div>
+        <div id="cta-line" class="cta-line">Begin your wellness journey.</div>
+        <div id="cta-contact" class="contact">@the_health.place  ·  thehealthplace.in  ·  +91 6361012354</div>
+      </section>
+    </div>
+    <script>
+      // Seek-safe contract: ONE paused timeline, absolute positions, no wall-clock JS.
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+      tl.from("#cta-mark", { opacity: 0, y: 28, duration: 1.1, ease: "power2.out" }, 0.43);
+      tl.from("#cta-divider", { scaleX: 0, duration: 0.9, ease: "power2.inOut" }, 1.08);
+      tl.from("#cta-line", { opacity: 0, y: 20, duration: 1.0, ease: "power1.out" }, 1.62);
+      tl.from("#cta-contact", { opacity: 0, duration: 1.0, ease: "power1.out" }, 2.23);
+      window.__timelines["the-health-place--launch-film-a-heavenly-wellness-sanctuar--hero-16x9-cta"] = tl;
+    </script>
+  </body>
+</html>

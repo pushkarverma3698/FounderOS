@@ -78,6 +78,12 @@ src/infra/             — hitl, checkpointer (PostgresSaver), budget, daily-bud
 src/db/                — schema (18 tables) + queries; src/eval/ — golden tasks,
                          runner, scoring, kernel-invoker; src/proof/ — proof renderers
 src/mcp/               — MCP server (read-only external surface)
+video-factory/         — client social-video engine (standalone npm dir, NOT in
+                         the pnpm workspace): brands/ registry, projects/,
+                         scripts/produce.mjs (receipt-checkpointed executor);
+                         kernel side = src/tools/video-{brand,brief,shotlist,
+                         models,compose,production,title-card}.ts (pure, $0) —
+                         see docs/VIDEO-FACTORY.md + docs/VIDEO-PIPELINE-AUDIT.md
 ```
 
 ## Commands
@@ -94,10 +100,13 @@ pnpm proof:case-study <thread>  # anonymized case study from a checkpoint
 ```
 
 ## Model policy
-Production (pinned by `scripts/apply-prod-env-overrides.sh`, 2026-07-09):
-`AGENT_MODEL=google-genai:gemini-2.5-flash` (direct Gemini — proven to tool-call
+Production (pinned by `scripts/apply-prod-env-overrides.sh`, 2026-07-13):
+`AGENT_MODEL=google-genai:gemini-flash-latest` (direct Gemini — proven to tool-call
 cleanly on-box; requires the `GOOGLE_GENERATIVE_AI_API_KEY` GitHub secret, else
-prod 401s). Fallback = FREE OpenRouter models only (founder directive: no paid
+prod 401s). Fallback chain: same-key paid Gemini first
+(`google-genai:gemini-3-flash-preview`, `google-genai:gemini-3.1-flash-lite` —
+live-verified serving + tool-calling during the 2026-07-13 gemini-3.5-flash 503
+storm), then FREE OpenRouter last resort (founder directive: no paid OpenRouter
 fallback): `openrouter:meta-llama/llama-3.3-70b-instruct:free`,
 `openrouter:qwen/qwen3-next-80b-a3b-instruct:free`. Temperature 0, planner+workers
 (`WORKER_AGENT_MODEL` splits them). Budget caps enforced (`BUDGET_DAILY_USD`,

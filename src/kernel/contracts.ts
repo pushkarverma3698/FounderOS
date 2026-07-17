@@ -6,10 +6,17 @@ import {
   EXPECTED_KINDS,
   kindFromSchemaRef,
   repairEnvelopeExpected,
+  repairEnvelopeConstraints,
   type ExpectedKind,
 } from "./envelope-repair.js";
 
-export { EXPECTED_KINDS, kindFromSchemaRef, type ExpectedKind } from "./envelope-repair.js";
+export {
+  EXPECTED_KINDS,
+  kindFromSchemaRef,
+  repairEnvelopeConstraints,
+  DEFAULT_STEP_MAX_TOOL_CALLS,
+  type ExpectedKind,
+} from "./envelope-repair.js";
 export const KERNEL_SCHEMA_VERSION = 1 as const;
 
 // ── Workers ──────────────────────────────────────────────────────────────────
@@ -196,26 +203,30 @@ export function repairWrappedOutput(parsed: unknown, ref: string): unknown {
 export const MAX_TOOL_CALLS_PER_STEP = 6;
 export const MAX_PLAN_STEPS = 8;
 
-export const TaskEnvelopeSchema = z.object({
-  step_id: z.string().min(1),
-  worker: WorkerIdSchema,
-  /** Explicit statement of the task — the planner may not delegate by vibes. */
-  objective: z.string().min(8),
-  /** Named inputs; values are prior step outputs referenced by the planner. */
-  inputs: z.record(z.unknown()).default({}),
-  expected: z.preprocess(
-    (val) => repairEnvelopeExpected(val, isOutputSchemaRef),
-    z.object({
-      kind: z.enum(EXPECTED_KINDS),
-      schema_ref: z.string().refine(isOutputSchemaRef, { message: "unknown output schema_ref" }),
+export const TaskEnvelopeSchema = z.preprocess(
+  // Fill dropped `constraints` (weak-model failure) before field validation.
+  repairEnvelopeConstraints,
+  z.object({
+    step_id: z.string().min(1),
+    worker: WorkerIdSchema,
+    /** Explicit statement of the task — the planner may not delegate by vibes. */
+    objective: z.string().min(8),
+    /** Named inputs; values are prior step outputs referenced by the planner. */
+    inputs: z.record(z.unknown()).default({}),
+    expected: z.preprocess(
+      (val) => repairEnvelopeExpected(val, isOutputSchemaRef),
+      z.object({
+        kind: z.enum(EXPECTED_KINDS),
+        schema_ref: z.string().refine(isOutputSchemaRef, { message: "unknown output schema_ref" }),
+      }),
+    ),
+    dependencies: z.array(z.string()).optional(),
+    constraints: z.object({
+      max_tool_calls: z.number().int().min(1).max(MAX_TOOL_CALLS_PER_STEP),
+      hitl_required: z.boolean(),
     }),
-  ),
-  dependencies: z.array(z.string()).optional(),
-  constraints: z.object({
-    max_tool_calls: z.number().int().min(1).max(MAX_TOOL_CALLS_PER_STEP),
-    hitl_required: z.boolean(),
   }),
-});
+);
 export type TaskEnvelope = z.infer<typeof TaskEnvelopeSchema>;
 
 // ── Plan ──────────────────────────────────────────────────────────────────────

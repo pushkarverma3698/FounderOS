@@ -6,6 +6,7 @@
  */
 
 export * from "./contracts.js";
+export { WorkspaceHandleSchema, RUN_ID_RE, WORKSPACE_KINDS, type WorkspaceHandle, type WorkspaceKind } from "./workspace.js";
 export { KernelState, RESET, type KernelStateType, type KernelUpdate, type ListUpdate } from "./state.js";
 export {
   buildKernel,
@@ -32,8 +33,10 @@ export {
   resolveInputs,
   envelopeMessage,
   formatFailureReply,
+  retryMessage,
   MAX_ATTEMPTS_PER_STEP,
 } from "./supervisor.js";
+export { isKernelTerminalError, describeInterceptedError } from "./errors.js";
 export {
   makeAgentNode,
   makeToolsNode,
@@ -47,7 +50,20 @@ export {
   type KernelBindableModel,
   type WorkerSpec,
 } from "./worker.js";
-export { makeSynthesizeNode, receiptsBlock } from "./synthesizer.js";
+export {
+  makeSynthesizeNode,
+  receiptsBlock,
+  fallbackSynthesisReply,
+  SYNTH_STEP_OUTPUT_MAX_CHARS,
+} from "./synthesizer.js";
+export {
+  clampToolOutput,
+  pruneScratchForModel,
+  TOOL_OUTPUT_MAX_CHARS,
+  TOOL_OUTPUT_TRUNCATED_MARKER,
+  SCRATCH_MAX_CHARS,
+  SCRATCH_KEEP_RECENT_TOOL_RESULTS,
+} from "./tool-output-guard.js";
 export {
   normalizeFailureSignature,
   lessonMessage,

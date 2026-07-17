@@ -35,6 +35,12 @@ describe("DEPARTMENT_TOOLS registry", () => {
     expect(names).toContain("claude_code");
   });
 
+  it("engineering carries vps_run and it is HITL-gated (spec 2026-07-14 item 11)", () => {
+    const names = DEPARTMENT_TOOLS["engineering"]!.map((t: { name: string }) => t.name);
+    expect(names).toContain("vps_run");
+    expect(HITL_GATED_TOOLS.has("vps_run")).toBe(true);
+  });
+
   it("personal carries the browser tool (the 2026-06-09 'no browser' answer was false)", () => {
     const names = DEPARTMENT_TOOLS["personal"]!.map((t: { name: string }) => t.name);
     expect(names).toContain("browser");
@@ -75,7 +81,10 @@ describe("buildCapabilityManifest", () => {
   });
 
   it("mentions the MCP server so 'what MCP servers' answers are truthful", () => {
-    expect(manifest).toMatch(/MCP server on localhost:3100/);
+    // Advertises the read-only stdio server (pnpm mcp), reachable locally or
+    // over SSH — so "what MCP servers do you run" answers stay truthful.
+    expect(manifest).toMatch(/MCP server/);
+    expect(manifest).toMatch(/pnpm mcp/);
   });
 
   it("HITL set covers every side-effecting tool name present in departments", () => {

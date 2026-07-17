@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 1080px; height: 1920px; overflow: hidden;
+        background: #0e2b20;
+        font-family: "Inter", "Segoe UI", "DejaVu Sans", sans-serif;
+        color: #f5f0e6;
+      }
+      #root { position: relative; width: 1080px; height: 1920px; background: #0e2b20; }
+      .glow {
+        position: absolute; inset: 0;
+        background: radial-gradient(ellipse 900px 1100px at 50% 45%, #1f4d36 0%, rgba(31, 77, 54, 0) 70%);
+      }
+      .scene { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 64px; }
+      .hook-line { font-size: 62px; font-weight: 300; letter-spacing: 0.04em; line-height: 1.7; color: #f5f0e6; }
+      .wordmark { font-size: 58px; font-weight: 600; letter-spacing: 0.16em; color: #f5f0e6; }
+      .divider { width: 240px; height: 2px; background: #d9c08b; margin: 40px auto; }
+      .tagline { font-size: 36px; font-weight: 300; letter-spacing: 0.05em; line-height: 1.6; color: #c9d8cd; }
+      .subline { font-size: 26px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: #9cb8a4; margin-top: 34px; }
+      .sec-heading { font-size: 44px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: #f5f0e6; line-height: 1.5; }
+      .dim-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; margin-top: 64px; }
+      .dim-inner {
+        display: block; font-size: 30px; font-weight: 400; letter-spacing: 0.06em; color: #f5f0e6;
+        background: rgba(31, 77, 54, 0.85); border: 1px solid #9cb8a4;
+        padding: 20px 12px; border-radius: 60px; white-space: nowrap; min-width: 380px;
+      }
+      .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 24px; margin-top: 56px; max-width: 860px; }
+      .chip {
+        font-size: 30px; font-weight: 400; letter-spacing: 0.06em; color: #0e2b20;
+        background: #9cb8a4; padding: 16px 36px; border-radius: 60px;
+      }
+      .quote { font-size: 34px; font-weight: 300; line-height: 1.8; max-width: 880px; margin-top: 84px; color: #c9d8cd; }
+      .nature-line { font-size: 52px; font-weight: 300; line-height: 1.7; max-width: 920px; color: #f5f0e6; }
+      .nature-em { color: #d9c08b; font-style: italic; }
+      .cta-line { font-size: 38px; font-weight: 300; letter-spacing: 0.06em; color: #c9d8cd; margin-top: 44px; }
+      .contact { font-size: 26px; font-weight: 400; letter-spacing: 0.08em; line-height: 1.9; color: #9cb8a4; margin-top: 40px; }
+      .caption {
+        position: absolute; bottom: 96px; left: 0; right: 0; text-align: center;
+        font-size: 24px; font-weight: 400; letter-spacing: 0.12em; text-transform: uppercase; color: #9cb8a4;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="thp-hero-vertical"
+      data-start="0"
+      data-duration="55"
+      data-width="1080"
+      data-height="1920"
+    >
+      <div class="glow"></div>
+
+      <!-- S1 · HOOK 0–6s -->
+      <section id="s1" class="scene clip" data-start="0" data-duration="6" data-track-index="1">
+        <div id="s1-l1" class="hook-line">A place to pause.</div>
+        <div id="s1-l2" class="hook-line">A place to breathe.</div>
+        <div id="s1-l3" class="hook-line">A place to belong.</div>
+      </section>
+
+      <!-- S2 · POSITIONING 6–16s -->
+      <section id="s2" class="scene clip" data-start="6" data-duration="10" data-track-index="1">
+        <div id="s2-mark" class="wordmark">THE HEALTH PLACE</div>
+        <div id="s2-divider" class="divider"></div>
+        <div id="s2-tagline" class="tagline">A heavenly abode to<br />Stay, Breathe, and Belong.</div>
+        <div id="s2-subline" class="subline">Correcting lifestyle<br />Restoring wellness</div>
+      </section>
+
+      <!-- S3 · 8 DIMENSIONS 16–32s -->
+      <section id="s3" class="scene clip" data-start="16" data-duration="16" data-track-index="1">
+        <div id="s3-heading" class="sec-heading">8 Dimensions<br />of Wellness</div>
+        <div id="s3-leaf" style="margin-top: 48px">
+          <svg width="110" height="110" viewBox="0 0 100 100" fill="none">
+            <path d="M50 8 C78 26 86 58 50 92 C14 58 22 26 50 8 Z" stroke="#d9c08b" stroke-width="3" fill="rgba(217,192,139,0.12)"/>
+            <path d="M50 14 L50 86" stroke="#d9c08b" stroke-width="2"/>
+          </svg>
+        </div>
+        <div class="dim-grid">
+          <span id="d1" class="dim-inner">Physical</span>
+          <span id="d2" class="dim-inner">Emotional</span>
+          <span id="d3" class="dim-inner">Mental</span>
+          <span id="d4" class="dim-inner">Social</span>
+          <span id="d5" class="dim-inner">Spiritual</span>
+          <span id="d6" class="dim-inner">Environmental</span>
+          <span id="d7" class="dim-inner">Vocational</span>
+          <span id="d8" class="dim-inner">Financial</span>
+        </div>
+      </section>
+
+      <!-- S4 · AUDIENCES 32–42s -->
+      <section id="s4" class="scene clip" data-start="32" data-duration="10" data-track-index="1">
+        <div id="s4-heading" class="sec-heading">For every<br />stage of life</div>
+        <div class="chips">
+          <span id="c1" class="chip">Women</span>
+          <span id="c2" class="chip">Men</span>
+          <span id="c3" class="chip">Children</span>
+          <span id="c4" class="chip">Older Adults</span>
+          <span id="c5" class="chip">Corporates</span>
+        </div>
+        <div id="s4-quote" class="quote">
+          &ldquo;When an individual heals, relationships heal. When families heal, society heals.&rdquo;
+        </div>
+      </section>
+
+      <!-- S5 · NATURE 42–50s -->
+      <section id="s5" class="scene clip" data-start="42" data-duration="8" data-track-index="1">
+        <div id="s5-leaf" style="position: absolute; left: 540px; top: 960px; opacity: 0.16">
+          <svg width="560" height="560" viewBox="0 0 100 100" fill="none" style="transform: translate(-50%, -50%)">
+            <path d="M50 8 C78 26 86 58 50 92 C14 58 22 26 50 8 Z" stroke="#9cb8a4" stroke-width="1.5" fill="none"/>
+          </svg>
+        </div>
+        <div id="s5-line" class="nature-line">
+          Here, we reconnect with nature &mdash;<br />
+          <span class="nature-em">the ultimate healer.</span>
+        </div>
+      </section>
+
+      <!-- S6 · CTA 50–55s -->
+      <section id="s6" class="scene clip" data-start="50" data-duration="5" data-track-index="1">
+        <div id="s6-leaf">
+          <svg width="68" height="68" viewBox="0 0 100 100" fill="none">
+            <path d="M50 8 C78 26 86 58 50 92 C14 58 22 26 50 8 Z" stroke="#d9c08b" stroke-width="3" fill="rgba(217,192,139,0.15)"/>
+          </svg>
+        </div>
+        <div id="s6-mark" class="wordmark" style="font-size: 50px; margin-top: 28px">THE HEALTH PLACE</div>
+        <div id="s6-cta" class="cta-line">Begin your wellness journey.</div>
+        <div id="s6-contact" class="contact">
+          @the_health.place<br />thehealthplace.in &nbsp;·&nbsp; +91 6361012354
+        </div>
+      </section>
+
+      <div id="cap" class="caption clip" data-start="0" data-duration="55" data-track-index="2">
+        Hoodi · Bangalore
+      </div>
+    </div>
+
+    <script>
+      // Seek-safe contract: ONE paused timeline, absolute positions, no wall-clock JS.
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      tl.from("#s1-l1", { opacity: 0, y: 40, duration: 1.2, ease: "power2.out" }, 0.4);
+      tl.from("#s1-l2", { opacity: 0, y: 40, duration: 1.2, ease: "power2.out" }, 1.7);
+      tl.from("#s1-l3", { opacity: 0, y: 40, duration: 1.2, ease: "power2.out" }, 3.0);
+
+      tl.from("#s2-mark", { opacity: 0, y: 30, duration: 1.4, ease: "power2.out" }, 6.4);
+      tl.from("#s2-divider", { scaleX: 0, duration: 1.0, ease: "power2.inOut" }, 7.2);
+      tl.from("#s2-tagline", { opacity: 0, y: 24, duration: 1.2, ease: "power2.out" }, 7.8);
+      tl.from("#s2-subline", { opacity: 0, duration: 1.2, ease: "power1.out" }, 9.0);
+
+      tl.from("#s3-heading", { opacity: 0, y: 24, duration: 1.0, ease: "power2.out" }, 16.4);
+      tl.from("#s3-leaf", { opacity: 0, scale: 0.7, duration: 1.2, ease: "power2.out" }, 17.0);
+      const dims = ["#d1", "#d2", "#d3", "#d4", "#d5", "#d6", "#d7", "#d8"];
+      dims.forEach((sel, i) => {
+        tl.from(sel, { opacity: 0, y: 18, duration: 0.8, ease: "power2.out" }, 17.8 + i * 0.55);
+      });
+
+      tl.from("#s4-heading", { opacity: 0, y: 24, duration: 1.0, ease: "power2.out" }, 32.4);
+      ["#c1", "#c2", "#c3", "#c4", "#c5"].forEach((sel, i) => {
+        tl.from(sel, { opacity: 0, y: 20, duration: 0.7, ease: "power2.out" }, 33.3 + i * 0.35);
+      });
+      tl.from("#s4-quote", { opacity: 0, y: 24, duration: 1.4, ease: "power2.out" }, 35.6);
+
+      tl.from("#s5-leaf", { opacity: 0, scale: 0.9, duration: 2.0, ease: "power1.out" }, 42.3);
+      tl.from("#s5-line", { opacity: 0, y: 30, duration: 1.6, ease: "power2.out" }, 43.0);
+
+      tl.from("#s6-leaf", { opacity: 0, scale: 0.7, duration: 1.0, ease: "power2.out" }, 50.4);
+      tl.from("#s6-mark", { opacity: 0, y: 24, duration: 1.1, ease: "power2.out" }, 50.9);
+      tl.from("#s6-cta", { opacity: 0, duration: 1.0, ease: "power1.out" }, 51.8);
+      tl.from("#s6-contact", { opacity: 0, duration: 1.0, ease: "power1.out" }, 52.6);
+
+      tl.from("#cap", { opacity: 0, duration: 1.5, ease: "power1.out" }, 1.0);
+
+      window.__timelines["thp-hero-vertical"] = tl;
+    </script>
+  </body>
+</html>
