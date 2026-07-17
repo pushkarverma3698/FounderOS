@@ -250,10 +250,10 @@ function buildGraph() {
   // **INTERFACES/TYPES**
   const interfaces = [
     {
-      id: "interface_office_state",
-      name: "OfficeState",
-      description: "LangGraph annotation schema for agent state",
-      file: "src/agents/state.ts",
+      id: "interface_kernel_state",
+      name: "KernelState",
+      description: "LangGraph annotation schema for kernel graph state",
+      file: "src/kernel/state.ts",
     },
     {
       id: "interface_unified_tool",
