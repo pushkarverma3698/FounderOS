@@ -91,6 +91,42 @@ describe("withModelRetry", () => {
   });
 });
 
+describe("withModelRetry — per-attempt deadline + retry budget (2026-07-17 503-storm incident)", () => {
+  it("aborts a HUNG attempt at attemptTimeoutMs and retries — a silent stall becomes a bounded retry", async () => {
+    const { sleeper, rng } = harness();
+    let calls = 0;
+    const model: KernelBindableModel = {
+      invoke: async () => {
+        calls += 1;
+        if (calls === 1) return new Promise(() => {}); // in-flight HTTP that never settles
+        return new AIMessage("recovered");
+      },
+    };
+    const res = await withModelRetry(model, { sleeper, rng, attemptTimeoutMs: 20 }).invoke([]);
+    expect(res.content).toBe("recovered");
+    expect(calls).toBe(2);
+  });
+
+  it("stops retrying once the retry budget is exhausted, surfacing the REAL provider error", async () => {
+    const { sleeper, rng } = harness();
+    // Storm conditions: each failing call burns ~50s of wall clock before its 503 lands.
+    let clock = 0;
+    const model = {
+      calls: 0,
+      async invoke(): Promise<AIMessage> {
+        model.calls += 1;
+        clock += 50_000;
+        throw statusError(503, "503 Service Unavailable — high demand");
+      },
+    };
+    await expect(
+      withModelRetry(model, { sleeper, rng, now: () => clock, budgetMs: 90_000 }).invoke([]),
+    ).rejects.toThrow("503");
+    // 2 attempts × 50s = 100s ≥ 90s budget — the schedule's 3rd/4th attempts must NOT run.
+    expect(model.calls).toBe(2);
+  });
+});
+
 describe("jitteredDelay", () => {
   it("stays within (ceiling/2, ceiling]", () => {
     expect(jitteredDelay(4_000, () => 0)).toBe(2_000);

@@ -19,6 +19,7 @@
 
 import type { KernelBindableModel, KernelChatModel, KernelTool } from "../kernel/index.js";
 import { is503Error } from "../agents/model.js";
+import { raceWithDeadline } from "./model-deadline.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "model-retry" });
@@ -26,9 +27,31 @@ const log = childLogger({ module: "model-retry" });
 /** Backoff ceilings per attempt; actual delay is jittered in (ceiling/2, ceiling]. */
 export const MODEL_RETRY_BACKOFF_MS: readonly number[] = [1_000, 2_000, 4_000];
 
+/**
+ * Hard deadline for ONE model.invoke attempt. 2026-07-17: storm-degraded but
+ * SUCCESSFUL Gemini calls ran up to ~35s, so this must stay comfortably above
+ * that; hung calls previously ran unbounded (254s observed) until the turn
+ * watchdog killed the whole turn.
+ */
+export const MODEL_ATTEMPT_TIMEOUT_MS = 45_000;
+
+/**
+ * Total wall-clock budget for the retry loop. Once exceeded, remaining
+ * scheduled retries are dropped and the last provider error surfaces to the
+ * fallback chain — bounded work per layer keeps the whole model stack inside
+ * OFFICE_TURN_TIMEOUT_MS.
+ */
+export const MODEL_RETRY_BUDGET_MS = 90_000;
+
 export interface ModelRetryOptions {
   /** Per-retry delay ceilings (length = max retries). Default MODEL_RETRY_BACKOFF_MS. */
   backoffMs?: readonly number[];
+  /** Hard deadline per attempt. Default MODEL_ATTEMPT_TIMEOUT_MS. */
+  attemptTimeoutMs?: number;
+  /** Total wall-clock budget across attempts. Default MODEL_RETRY_BUDGET_MS. */
+  budgetMs?: number;
+  /** Injectable clock for tests. Defaults to Date.now. */
+  now?: () => number;
   /** Injectable for tests. Defaults to setTimeout. */
   sleeper?: (ms: number) => Promise<void>;
   /** Injectable for tests. Defaults to Math.random. */
@@ -54,20 +77,31 @@ export function withModelRetry(
   options: ModelRetryOptions = {},
 ): KernelBindableModel {
   const backoff = options.backoffMs ?? MODEL_RETRY_BACKOFF_MS;
+  const attemptTimeoutMs = options.attemptTimeoutMs ?? MODEL_ATTEMPT_TIMEOUT_MS;
+  const budgetMs = options.budgetMs ?? MODEL_RETRY_BUDGET_MS;
+  const now = options.now ?? Date.now;
   const sleep = options.sleeper ?? defaultSleep;
   const rng = options.rng ?? Math.random;
   const label = options.label ?? "kernel";
 
   return {
     async invoke(messages) {
+      const started = now();
       let lastErr: unknown;
       for (let attempt = 0; attempt <= backoff.length; attempt += 1) {
         try {
-          return await model.invoke(messages);
+          return await raceWithDeadline(model.invoke(messages), attemptTimeoutMs, label);
         } catch (err) {
           if (!is503Error(err)) throw err; // auth/404/logic errors: not ours to absorb
           lastErr = err;
           if (attempt === backoff.length) break;
+          if (now() - started >= budgetMs) {
+            log.warn(
+              { label, attempt: attempt + 1, elapsedMs: now() - started, budgetMs },
+              "Retry budget exhausted — surfacing the provider error to the fallback chain",
+            );
+            break;
+          }
           const delay = jitteredDelay(backoff[attempt]!, rng);
           log.warn(
             { label, attempt: attempt + 1, delayMs: delay, err: err instanceof Error ? err.message : String(err) },

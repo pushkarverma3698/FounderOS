@@ -13,6 +13,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { AIMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
 import { withModelFallbacks } from "../../../src/gateway/model-fallback.js";
+import { withModelRetry } from "../../../src/gateway/model-retry.js";
 import type { KernelBindableModel, KernelTool } from "../../../src/kernel/index.js";
 
 const MSGS: BaseMessage[] = [new HumanMessage("hi")];
@@ -167,5 +168,71 @@ describe("withModelFallbacks", () => {
 
     const reply = await model.bindTools!(tools).invoke(MSGS);
     expect(reply.content).toBe("plain");
+  });
+});
+
+describe("withModelFallbacks — resolution budget + per-attempt deadlines (2026-07-17 503-storm incident)", () => {
+  // Prod trace 16:53–17:03 UTC: planner retries + fallback chain + post-chain
+  // primary retry summed past the 300s turn watchdog on EVERY turn, so the
+  // founder saw generic 5-minute hangs instead of the real provider error.
+  // The chain must be time-bounded end to end.
+  it("caps a HUNG fallback with the attempt deadline and moves to the next", async () => {
+    const primary = failingModel(quotaError());
+    const hungFallback: KernelBindableModel = { invoke: vi.fn(() => new Promise(() => {})) };
+    const liveFallback = okModel("fallback-1");
+    const model = withModelFallbacks(primary, [hungFallback, liveFallback], "kernel", {
+      attemptTimeoutMs: 20,
+    });
+
+    const reply = await model.invoke(MSGS);
+
+    expect(reply.content).toBe("fallback-1");
+    expect(hungFallback.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips remaining fallbacks AND the post-chain primary retry once the budget is exhausted", async () => {
+    // Storm conditions: every failing call burns ~100s before its 503 lands.
+    let clock = 0;
+    const slow503 = (): KernelBindableModel => ({
+      invoke: vi.fn(async () => {
+        clock += 100_000;
+        throw quotaError();
+      }),
+    });
+    const primary = slow503();
+    const deadFallback = slow503();
+    const neverReached = okModel("never");
+    const model = withModelFallbacks(primary, [deadFallback, neverReached], "kernel", {
+      now: () => clock,
+      budgetMs: 120_000,
+      primaryRetryDelayMs: 0,
+    });
+
+    await expect(model.invoke(MSGS)).rejects.toThrow();
+    expect(deadFallback.invoke).toHaveBeenCalledTimes(1); // 100s elapsed < 120s → still tried
+    expect(neverReached.invoke).not.toHaveBeenCalled(); // 200s elapsed ≥ 120s → skipped
+    expect(primary.invoke).toHaveBeenCalledTimes(1); // post-chain retry skipped too
+  });
+
+  it("REGRESSION 2026-07-17: a full storm of HUNG models fails fast instead of outliving the turn watchdog", async () => {
+    // Composed exactly as kernel-boot layers it: fallbacks(retry(primary), [fb]).
+    // Before the fix this hung until the 300s watchdog; now it must reject on
+    // its own, quickly, with a retriable timeout the caller can classify.
+    const hung = (): KernelBindableModel => ({ invoke: vi.fn(() => new Promise(() => {})) });
+    const primary = hung();
+    const fallback = hung();
+    const composed = withModelFallbacks(
+      withModelRetry(primary, {
+        attemptTimeoutMs: 10,
+        budgetMs: 20,
+        sleeper: async () => {},
+        rng: () => 0.5,
+      }),
+      [fallback],
+      "storm",
+      { attemptTimeoutMs: 10, budgetMs: 40, primaryRetryDelayMs: 0 },
+    );
+
+    await expect(composed.invoke(MSGS)).rejects.toThrow(/exceeded/);
   });
 });
