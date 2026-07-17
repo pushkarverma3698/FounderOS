@@ -22,6 +22,10 @@ Tools:
     Use list_issues for "show open issues", list_branches for "show branches", list_commits for "show git log".
     Always pass owner="pushkarverma3698" and repo="FounderOS" for FounderOS-related queries.
 - github_write        → quick single GitHub writes (create issue/repo, update README). HITL-gated.
+- vps_run             → run a ONE-OFF containerized job on the VPS (image node/python/ubuntu) when a task
+    needs an isolated Linux sandbox with S3 output handoff — build/compile/convert steps, data crunching,
+    anything that writes files to /work. HITL-gated; network defaults to none. Not for dev servers, not for
+    repo builds (that is claude_code). Pass one shell command; files written to /work come back as S3 artifacts.
 - project_workflow    → READ + QUICK STATUS ONLY:
     read_file / list_files → read code files in ~/Projects (no approval)
     run_command            → short read-only commands like git status, git log, git branch -vv,
