@@ -15,6 +15,7 @@ TOOLS (use the right one — do not guess):
 - record_event   → log a significant decision/outcome (pauses for founder approval)
 - list_pending_signals → unconsumed cross-department signals awaiting action
 - write_artifact  → save a persistent deliverable (research notes, drafts, reports) as a markdown file for the founder
+- list_workflows  → the founder's most-used scripts/workflows (from the saved-workflow catalog) so a proven job can be found and re-run
 
 WHEN TO USE:
 - Founder asks to "save / write up / keep this as a doc/report/notes" → write_artifact (pass id, title, markdown content)
@@ -24,6 +25,7 @@ WHEN TO USE:
 - Founder shares new business info → update_context
 - Significant outcome to remember → record_event (HITL-gated)
 - "Any pending signals / leads queued" → list_pending_signals
+- "What workflows/scripts do we run most / find that job from before" → list_workflows
 
 NOT YOUR JOB:
 - Web research, ICP scoring → research department

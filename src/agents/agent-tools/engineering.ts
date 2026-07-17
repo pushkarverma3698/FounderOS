@@ -20,7 +20,8 @@ import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import { makeRepeatGuard, makeThreadScopedRegistry } from "./repeat-guard.js";
 import { toolFailure, isStructuredToolFailure, type ToolFailureStage } from "../tool-result.js";
-import { hasBeenAudited, writeAuditEntry, publishDeptEventWithAudit } from "../../db/queries.js";
+import { hasBeenAudited, writeAuditEntry, publishDeptEventWithAudit, recordWorkflowRun } from "../../db/queries.js";
+import { slugifyWorkflow, workflowSignature } from "../../tools/workflow-catalog.js";
 import { TENANT } from "../../core/config.js";
 import { sendStatusText } from "../../infra/telegram-send.js";
 import { prepareSignal } from "./signals.js";
@@ -395,6 +396,17 @@ export const claudeCode = tool(
       return `Claude Code failed: ${res.error}`;
     }
     await writeAuditEntry({ action: "claude_code", idempotency_key: key, payload: { task: task.slice(0, 400), cwd }, tenant_id: TENANT });
+    // Catalog the workflow (command only — claude_code writes to the VPS
+    // workspace, not S3). Best-effort: never fail an already-succeeded run.
+    // allow-failopen: workflow cataloging is an index, never a dependency
+    await recordWorkflowRun({
+      tenant_id: TENANT,
+      slug: slugifyWorkflow(task),
+      signature: workflowSignature("claude_code", task),
+      tool: "claude_code",
+      command: task,
+      ...(cwd ? { brief: `cwd: ${cwd}` } : {}),
+    }).catch((err) => log.warn({ err: String(err) }, "claude_code: workflow catalog write failed (non-fatal)"));
     log.info({ task: task.slice(0, 80) }, "claude_code executed via engineering agent");
     return typeof res.data === "string" ? res.data : "Claude Code completed.";
   },

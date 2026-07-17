@@ -17,6 +17,7 @@
 import { InputFile, type Bot, type Context } from "grammy";
 import { env } from "../core/config.js";
 import { childLogger } from "../infra/logger.js";
+import { formatTimestamp } from "../infra/timestamp.js";
 import { checkFfmpeg, oggToWav } from "../infra/media-convert.js";
 import { translateImage } from "../tools/vision.js";
 import { transcribeAudio } from "../tools/transcription.js";
@@ -56,7 +57,7 @@ export function unsupportedMediaReply(label: string): string {
 }
 
 async function handleUnsupported(ctx: Context, label: string): Promise<void> {
-  log.info({ from: ctx.from?.id, kind: label }, "Unsupported media received — acknowledging instead of dropping");
+  log.info({ from: ctx.from?.id, kind: label, receivedAt: formatTimestamp() }, "Unsupported media received — acknowledging instead of dropping");
   await ctx.reply(unsupportedMediaReply(label)).catch(() => {}); // allow-failopen: best-effort courtesy reply; a Telegram send failure must not crash the handler
 }
 
@@ -174,7 +175,7 @@ export function registerMediaHandlers(bot: Bot, runOfficeText: RunOfficeTextFn):
     const sizes = ctx.message?.photo ?? [];
     const largest = sizes[sizes.length - 1];
     if (!largest) return;
-    log.info({ from: ctx.from?.id, sizes: sizes.length, caption: ctx.message?.caption ?? "" }, "Photo received");
+    log.info({ from: ctx.from?.id, sizes: sizes.length, caption: ctx.message?.caption ?? "", receivedAt: formatTimestamp() }, "Photo received");
     await handleImage(ctx, largest.file_id, "image/jpeg");
   });
 
@@ -185,21 +186,21 @@ export function registerMediaHandlers(bot: Bot, runOfficeText: RunOfficeTextFn):
       await handleUnsupported(ctx, "non-image files"); // was a silent drop
       return;
     }
-    log.info({ from: ctx.from?.id, mime: doc.mime_type }, "Image document received");
+    log.info({ from: ctx.from?.id, mime: doc.mime_type, receivedAt: formatTimestamp() }, "Image document received");
     await handleImage(ctx, doc.file_id, doc.mime_type);
   });
 
   bot.on("message:voice", async (ctx: Context) => {
     const voice = ctx.message?.voice;
     if (!voice) return;
-    log.info({ from: ctx.from?.id, duration: voice.duration }, "Voice message received");
+    log.info({ from: ctx.from?.id, duration: voice.duration, receivedAt: formatTimestamp() }, "Voice message received");
     await handleVoice(ctx, voice.file_id, runOfficeText);
   });
 
   bot.on("message:audio", async (ctx: Context) => {
     const audio = ctx.message?.audio;
     if (!audio) return;
-    log.info({ from: ctx.from?.id, duration: audio.duration }, "Audio message received");
+    log.info({ from: ctx.from?.id, duration: audio.duration, receivedAt: formatTimestamp() }, "Audio message received");
     await handleVoice(ctx, audio.file_id, runOfficeText);
   });
 
