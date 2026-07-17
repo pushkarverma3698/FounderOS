@@ -161,7 +161,6 @@ export function dispatch(state: KernelStateType): KernelUpdate {
             set: [envelopeMessage(step, results), retryMessage(step, last.failure, attempt)],
           },
         },
-        step_receipts: { [step.step_id]: RESET },
         results: { set: results.filter((r) => r !== last) },
       };
     }
