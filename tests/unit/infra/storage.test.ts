@@ -18,6 +18,8 @@ import {
   deleteFile,
   StorageError,
   _setClientForTest,
+  listFiles,
+  stageFile,
 } from "../../../src/infra/storage/s3-client.js";
 
 // ── Shared mock S3 client factory ─────────────────────────────────────────────
@@ -230,5 +232,61 @@ describe("deleteFile", () => {
     _setClientForTest(mock);
 
     await expect(deleteFile("uploads/run1/file.pdf")).rejects.toThrow(StorageError);
+  });
+});
+
+// ── listFiles ─────────────────────────────────────────────────────────────────
+
+describe("listFiles", () => {
+  beforeEach(() => {
+    process.env["STORAGE_BUCKET"] = "test-bucket";
+  });
+
+  it("lists matching keys from S3 ListObjectsV2 response", async () => {
+    const mock = makeMockClient({
+      send: vi.fn().mockResolvedValue({
+        Contents: [{ Key: "agent-runs/run1/outputs/out1.png" }, { Key: "agent-runs/run1/outputs/out2.png" }],
+      }),
+    });
+    _setClientForTest(mock);
+
+    const keys = await listFiles("agent-runs/run1/outputs/");
+    expect(keys).toEqual(["agent-runs/run1/outputs/out1.png", "agent-runs/run1/outputs/out2.png"]);
+    expect(mock.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws StorageError on S3 list error", async () => {
+    const mock = makeMockClient({
+      send: vi.fn().mockRejectedValue(new Error("ListError")),
+    });
+    _setClientForTest(mock);
+
+    await expect(listFiles("prefix")).rejects.toThrow(StorageError);
+  });
+});
+
+// ── stageFile ─────────────────────────────────────────────────────────────────
+
+describe("stageFile", () => {
+  beforeEach(() => {
+    process.env["STORAGE_BUCKET"] = "test-bucket";
+  });
+
+  it("stages a file preserving literal filename", async () => {
+    const mock = makeMockClient();
+    _setClientForTest(mock);
+
+    const key = await stageFile(Buffer.from("brief content"), "BRIEF.md", "run-123");
+    expect(key).toBe("agent-runs/run-123/brief.md");
+    expect(mock.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws StorageError on staging error", async () => {
+    const mock = makeMockClient({
+      send: vi.fn().mockRejectedValue(new Error("StageError")),
+    });
+    _setClientForTest(mock);
+
+    await expect(stageFile(Buffer.from("x"), "f.txt", "r1")).rejects.toThrow(StorageError);
   });
 });

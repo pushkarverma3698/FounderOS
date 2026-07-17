@@ -75,7 +75,7 @@ export const vpsRun = tool(
       command: z.string().describe("Shell command to run inside the container at /work (files written to /work are uploaded to S3)"),
       brief: z.string().optional().nullable().describe("Optional context written to /work/BRIEF.md before the command runs"),
       image: z.enum(["node:22-bookworm-slim", "python:3.12-slim", "ubuntu:24.04"]).optional().nullable(),
-      network: z.enum(["none", "bridge"]).optional().nullable().describe("Default none; bridge only for jobs that must fetch"),
+      network: z.enum(["none", "bridge"]).optional().nullable().describe("Default none; bridge only for jobs that must fetch or install packages"),
       timeout_minutes: z.number().optional().nullable().describe("Hard cap 30 (default 10)"),
     }),
   },

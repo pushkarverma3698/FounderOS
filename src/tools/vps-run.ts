@@ -1,35 +1,14 @@
 /**
- * FounderOS — VPS containerized job runner (spec 2026-07-14 §3.3, follow-up item 11)
- * ====================================================================================
- * Runs one founder-approved command inside an ephemeral Docker container on the
- * VPS and hands the outputs off by-reference through S3. This is the third
- * workspace stratum: state stays in the checkpointer, artifacts in S3
- * run-prefixes — this tool provides the execution sandbox on the always-on box.
- *
- * Flow (each step is a separate SSH exec so nothing is quoted-into-a-script):
- *   1. mkdir {runsRoot}/{run_id}/work + write BRIEF.md (brief travels on stdin)
- *   2. docker run --rm … -v {runsRoot}/{run_id}/work:/work  (bounded by `timeout`)
- *   3. find + cat small output files → upload each to S3 agent-runs/{run_id}/
- *   4. rm -rf the run dir (fail-open: artifacts already durable in S3)
- *
- * SECURITY INVARIANTS (unit-pinned in tests/unit/tools/vps-run.test.ts):
- *   - run_id grammar (kernel RUN_ID_RE) is the traversal boundary — no dots or
- *     slashes can ever reach a path or S3 key.
- *   - The ONLY volume mount is {runsRoot}/{run_id}/work; mounting the live
- *     FounderOS checkout (/root/founderos) is structurally impossible and
- *     additionally hard-asserted (the 2026-06-09 incident class, VPS edition).
- *   - Image must be on the pinned allowlist; network default is none.
- *   - HITL approval happens in the agent wrapper BEFORE execute() is reached.
- *
- * Never throws: every failure returns { success:false, error } naming the real
- * failing component (vps-config | vps-ssh | vps-docker | vps-artifacts).
+ * FounderOS — VPS containerized job runner (spec 2026-07-14 §3.3)
+ * Runs one approved command inside an ephemeral Docker container on the VPS.
+ * Hands outputs off by-reference via S3.
  */
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import { RUN_ID_RE, WorkspaceHandleSchema, type WorkspaceHandle } from "../kernel/workspace.js";
-import { uploadFile } from "../infra/storage/s3-client.js";
+import { uploadFile, downloadFile, listFiles, stageFile } from "../infra/storage/s3-client.js";
 import { childLogger } from "../infra/logger.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
@@ -71,11 +50,7 @@ export function resolveVpsRunConfig(env: Record<string, string | undefined> = pr
   const host = env["VPS_RUN_HOST"]?.trim();
   if (!host) return null;
   const keyPath = env["VPS_RUN_SSH_KEY"]?.trim();
-  return {
-    host,
-    ...(keyPath ? { keyPath } : {}),
-    runsRoot: env["VPS_RUN_RUNS_ROOT"]?.trim() || VPS_RUN_PROFILE.runsRoot,
-  };
+  return { host, ...(keyPath ? { keyPath } : {}), runsRoot: env["VPS_RUN_RUNS_ROOT"]?.trim() || VPS_RUN_PROFILE.runsRoot };
 }
 
 // ── Pure input validation + command construction (unit-tested) ────────────────
@@ -93,45 +68,25 @@ export function makeRunId(): string {
   return `run-${randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
-/** Validate raw args into a typed input, or return the correctable error. */
-export function validateVpsRunInput(
-  args: Record<string, unknown>,
-): { ok: true; input: VpsRunInput } | { ok: false; error: string } {
+export function validateVpsRunInput(args: Record<string, unknown>): { ok: true; input: VpsRunInput } | { ok: false; error: string } {
   const command = typeof args["command"] === "string" ? args["command"].trim() : "";
   if (!command) return { ok: false, error: "vps_run needs a non-empty 'command' to execute in the container." };
-
   const runId = typeof args["run_id"] === "string" && args["run_id"] ? args["run_id"] : makeRunId();
-  if (!RUN_ID_RE.test(runId)) {
-    return { ok: false, error: `run_id "${runId}" is invalid — lowercase alphanumerics/hyphens, 4-64 chars (it becomes a path and S3 key segment).` };
-  }
-
+  if (!RUN_ID_RE.test(runId)) return { ok: false, error: `run_id "${runId}" is invalid — lowercase alphanumerics/hyphens, 4-64 chars (it becomes a path and S3 key segment).` };
   const image = typeof args["image"] === "string" && args["image"] ? args["image"] : VPS_RUN_PROFILE.defaultImage;
-  if (!(VPS_RUN_PROFILE.imageAllowlist as readonly string[]).includes(image)) {
-    return { ok: false, error: `image "${image}" is not on the pinned allowlist: ${VPS_RUN_PROFILE.imageAllowlist.join(", ")}` };
-  }
-
+  if (!(VPS_RUN_PROFILE.imageAllowlist as readonly string[]).includes(image)) return { ok: false, error: `image "${image}" is not on the pinned allowlist: ${VPS_RUN_PROFILE.imageAllowlist.join(", ")}` };
   const network = args["network"] === "bridge" ? "bridge" : VPS_RUN_PROFILE.defaultNetwork;
-
-  const rawTimeout =
-    typeof args["timeout_minutes"] === "number" && Number.isFinite(args["timeout_minutes"])
-      ? args["timeout_minutes"]
-      : VPS_RUN_PROFILE.defaultTimeoutMinutes;
+  const rawTimeout = typeof args["timeout_minutes"] === "number" && Number.isFinite(args["timeout_minutes"]) ? args["timeout_minutes"] : VPS_RUN_PROFILE.defaultTimeoutMinutes;
   const timeoutMinutes = Math.min(Math.max(1, Math.round(rawTimeout)), VPS_RUN_PROFILE.maxTimeoutMinutes);
-
   const brief = typeof args["brief"] === "string" && args["brief"].trim() ? args["brief"] : undefined;
   return { ok: true, input: { command, run_id: runId, image, network, timeoutMinutes, ...(brief ? { brief } : {}) } };
 }
 
-/** POSIX single-quote escaping for one shell word. */
 export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/**
- * Build the remote `docker run` command line (one string for the remote shell).
- * Pure; throws only on the structurally-impossible forbidden mount, which the
- * run_id grammar already prevents — the assert is defense-in-depth.
- */
+/** Build remote docker command line. */
 export function buildDockerCommand(input: VpsRunInput, runsRoot: string): string {
   const workDir = `${runsRoot}/${input.run_id}/work`;
   if (workDir.includes(FORBIDDEN_MOUNT)) {
@@ -148,6 +103,28 @@ export function buildDockerCommand(input: VpsRunInput, runsRoot: string): string
     "-v", `${workDir}:/work`,
     "-w", "/work",
     input.image,
+    "bash", "-lc", shellQuote(input.command),
+  ];
+  return parts.join(" ");
+}
+
+export function buildS3IsolatedDockerCommand(input: VpsRunInput, storageBucket: string): string {
+  const parts = [
+    "timeout", `${input.timeoutMinutes * 60}s`,
+    "docker", "run", "--rm",
+    "--name", `agent-run-${input.run_id}`,
+    `--network=bridge`,
+    `--memory=${VPS_RUN_PROFILE.memory}`,
+    `--cpus=${VPS_RUN_PROFILE.cpus}`,
+    `--pids-limit=${VPS_RUN_PROFILE.pidsLimit}`,
+    "-e", `STORAGE_BUCKET=${shellQuote(storageBucket)}`,
+    "-e", `S3_INPUT_PREFIX=${shellQuote(`agent-runs/${input.run_id}`)}`,
+    "-e", `S3_OUTPUT_PREFIX=${shellQuote(`agent-runs/${input.run_id}/outputs`)}`,
+    "-e", `AWS_ACCESS_KEY_ID=${shellQuote(process.env.AWS_ACCESS_KEY_ID || "")}`,
+    "-e", `AWS_SECRET_ACCESS_KEY=${shellQuote(process.env.AWS_SECRET_ACCESS_KEY || "")}`,
+    "-e", `AWS_REGION=${shellQuote(process.env.AWS_REGION || "us-east-1")}`,
+    "-w", "/work",
+    "founderos-runner:latest",
     "bash", "-lc", shellQuote(input.command),
   ];
   return parts.join(" ");
@@ -262,8 +239,10 @@ export const vpsRunTool: UnifiedTool = {
     "Run one command inside an ephemeral Docker sandbox on the VPS (2 CPU / 2 GB, " +
     "no network by default, hard timeout). Outputs written to /work are uploaded " +
     "to S3 under agent-runs/{run_id}/ and the sandbox is deleted. Requires founder " +
-    "approval. Use for overnight research jobs, report generation, and builds that " +
-    "must not run on the Mac.",
+    "approval. CRITICAL: network defaults to 'none'. To download/install packages, " +
+    "set network to 'bridge'. Standard slim images lack libraries for compiling or running " +
+    "native addons (like npm 'canvas' package) - use zero-dependency methods like SVGs, " +
+    "BMP/PPM binaries, or custom scripts.",
   input_schema: {
     type: "object",
     properties: {
@@ -271,7 +250,7 @@ export const vpsRunTool: UnifiedTool = {
       brief: { type: "string", description: "Optional context written to /work/BRIEF.md before the command runs" },
       run_id: { type: "string", description: "Optional run id (lowercase alnum/hyphens); generated when omitted" },
       image: { type: "string", description: `Container image; allowlist: ${VPS_RUN_PROFILE.imageAllowlist.join(", ")}` },
-      network: { type: "string", enum: ["none", "bridge"], description: "Container network (default none)" },
+      network: { type: "string", enum: ["none", "bridge"], description: "Container network (default none; bridge allows outbound package downloads)" },
       timeout_minutes: { type: "number", description: `Hard cap ${VPS_RUN_PROFILE.maxTimeoutMinutes} min (default ${VPS_RUN_PROFILE.defaultTimeoutMinutes})` },
     },
     required: ["command"],
@@ -292,36 +271,68 @@ export const vpsRunTool: UnifiedTool = {
     const runDir = `${cfg.runsRoot}/${input.run_id}`;
     const workDir = `${runDir}/work`;
 
+    const isS3Isolated = process.env.VPS_RUN_MODE === "s3-isolated";
+    const bucket = process.env.STORAGE_BUCKET || "founder-os-creative-agent-workspace";
+
     try {
-      // 1. Prepare sandbox dir + BRIEF.md (brief travels on stdin, never quoted).
-      const prep = await ssh(`mkdir -p ${workDir} && cat > ${workDir}/BRIEF.md`, {
-        stdin: input.brief ?? `# ${input.run_id}\n${input.command}\n`,
-        timeoutMs: 30_000,
-      });
-      if (prep.code !== 0) {
-        return { success: false, error: `vps-ssh: sandbox preparation failed (exit ${prep.code}): ${prep.stderr.slice(0, 500)}` };
+      let dockerCommand = "";
+      if (isS3Isolated) {
+        // 1. Prepare sandbox: Upload BRIEF.md to S3 (staging inputs)
+        const briefContent = input.brief ?? `# ${input.run_id}\n${input.command}\n`;
+        await stageFile(Buffer.from(briefContent, "utf8"), "BRIEF.md", input.run_id);
+        dockerCommand = buildS3IsolatedDockerCommand(input, bucket);
+      } else {
+        // Prepare sandbox dir + BRIEF.md via SSH
+        const prep = await ssh(`mkdir -p ${workDir} && cat > ${workDir}/BRIEF.md`, {
+          stdin: input.brief ?? `# ${input.run_id}\n${input.command}\n`,
+          timeoutMs: 30_000,
+        });
+        if (prep.code !== 0) {
+          return { success: false, error: `vps-ssh: sandbox preparation failed (exit ${prep.code}): ${prep.stderr.slice(0, 500)}` };
+        }
+        dockerCommand = buildDockerCommand(input, cfg.runsRoot);
       }
 
       // 2. Run the container, bounded by `timeout` on the remote side and a
       //    slightly longer SSH kill on ours.
-      const docker = await ssh(buildDockerCommand(input, cfg.runsRoot), {
+      const docker = await ssh(dockerCommand, {
         timeoutMs: (input.timeoutMinutes * 60 + 60) * 1000,
       });
       const stdoutTail = docker.stdout.toString("utf8").slice(-VPS_RUN_PROFILE.stdoutTailChars);
 
-      // 3. Harvest artifacts REGARDLESS of exit code — partial outputs and logs
-      //    are the evidence the founder needs when a job fails.
-      const { artifacts, harvestError } = await harvestArtifacts(ssh, upload, input.run_id, runDir);
+      // 3. Harvest artifacts REGARDLESS of exit code
+      let artifacts: VpsRunArtifact[] = [];
+      let harvestError: string | undefined;
 
-      // 4. Cleanup: force-remove the container first (reaps orphans left when
-      //    the local SSH kill fired mid-run — killing the docker CLI does NOT
-      //    stop the container), then the sandbox dir. Fail-open: the artifacts
-      //    are already durable in S3, and a leftover must not turn a finished
-      //    job into a failure.
-      // allow-failopen: sandbox cleanup is best-effort; artifacts already uploaded
-      await ssh(`docker rm -f agent-run-${input.run_id} >/dev/null 2>&1; rm -rf ${runDir}`, { timeoutMs: 30_000 }).catch(() =>
-        log.warn({ runDir }, "vps_run: sandbox cleanup failed (left for ops sweep)"),
-      );
+      if (isS3Isolated) {
+        try {
+          const keys = await listFiles(`agent-runs/${input.run_id}/outputs/`);
+          for (const key of keys) {
+            const filename = basename(key);
+            const buf = await downloadFile(key);
+            artifacts.push({ path: `outputs/${filename}`, s3_key: key, bytes: buf.length });
+          }
+        } catch (err) {
+          harvestError = `vps-artifacts: S3 harvest failed: ${(err as Error).message}`;
+        }
+      } else {
+        const harvest = await harvestArtifacts(ssh, upload, input.run_id, runDir);
+        artifacts = harvest.artifacts;
+        harvestError = harvest.harvestError;
+      }
+
+      // 4. Cleanup
+      if (isS3Isolated) {
+        // allow-failopen: sandbox cleanup is best-effort
+        await ssh(`docker rm -f agent-run-${input.run_id} >/dev/null 2>&1`, { timeoutMs: 30_000 }).catch(() =>
+          log.warn("vps_run: sandbox cleanup failed"),
+        );
+      } else {
+        // allow-failopen: sandbox cleanup is best-effort; artifacts already uploaded
+        await ssh(`docker rm -f agent-run-${input.run_id} >/dev/null 2>&1; rm -rf ${runDir}`, { timeoutMs: 30_000 }).catch(() =>
+          log.warn({ runDir }, "vps_run: sandbox cleanup failed (left for ops sweep)"),
+        );
+      }
 
       const workspace: WorkspaceHandle = WorkspaceHandleSchema.parse({
         run_id: input.run_id,

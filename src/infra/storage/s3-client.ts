@@ -17,6 +17,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
@@ -165,6 +166,45 @@ export async function deleteFile(s3Key: string): Promise<void> {
     log.info({ s3Key }, "storage.delete.ok");
   } catch (err) {
     log.error({ s3Key, err }, "storage.delete.error");
+    throw new StorageError((err as Error).message, s3Key);
+  }
+}
+
+/** List objects matching a prefix. */
+export async function listFiles(prefix: string): Promise<string[]> {
+  log.info({ prefix }, "storage.list.start");
+  try {
+    const res = await getClient().send(
+      new ListObjectsV2Command({ Bucket: getBucket(), Prefix: prefix }),
+    );
+    const keys = (res.Contents || [])
+      .map((c) => c.Key)
+      .filter((k): k is string => !!k);
+    log.info({ prefix, count: keys.length }, "storage.list.ok");
+    return keys;
+  } catch (err) {
+    log.error({ prefix, err }, "storage.list.error");
+    throw new StorageError((err as Error).message, prefix);
+  }
+}
+
+/** Stage a file preserving its literal filename under agent-runs namespace. */
+export async function stageFile(
+  fileBytes: Buffer,
+  filename: string,
+  runId: string,
+  prefix = "agent-runs",
+): Promise<string> {
+  const safe = sanitizeFilename(filename);
+  const s3Key = `${prefix}/${runId}/${safe}`;
+  log.info({ s3Key, runId, prefix, bytes: fileBytes.length }, "storage.stage.start");
+  try {
+    await getClient().send(
+      new PutObjectCommand({ Bucket: getBucket(), Key: s3Key, Body: fileBytes }),
+    );
+    return s3Key;
+  } catch (err) {
+    log.error({ s3Key, err }, "storage.stage.error");
     throw new StorageError((err as Error).message, s3Key);
   }
 }

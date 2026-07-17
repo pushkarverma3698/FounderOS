@@ -83,14 +83,19 @@ fi
 # paid key (1K RPM/10K RPD and 4K RPM/150K RPD headroom), so they sit FIRST in the
 # chain; FREE OpenRouter models stay as the last resort (founder directive: no
 # paid OpenRouter fallback — same-key Gemini fallbacks are covered by paid quota).
+# 2026-07-17: a prior edit replaced this chain with gemini-2.5-pro and
+# gemini-2-flash — BOTH return 404 on the prod key (live-probed today), leaving
+# one working fallback behind two dead ids during an active flash-latest 503
+# storm. Restored the policy chain; gemini-3.1-flash-lite sits first because it
+# probed 200 in 0.5s while gemini-3-flash-preview probed 200 in 39s (degraded).
 grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
 {
-  printf '%s\n' 'AGENT_MODEL=google-genai:gemini-2.5-flash'
-  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-2.5-pro,google-genai:gemini-2-flash,google-genai:gemini-3.1-flash-lite'
+  printf '%s\n' 'AGENT_MODEL=google-genai:gemini-flash-latest'
+  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-3.1-flash-lite,google-genai:gemini-3-flash-preview,openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
-echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-2.5-flash"
+echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-flash-latest"
 # Primary model key — forwarded from a GitHub secret so a PROD_DOTENV re-render
 # can never wipe it. Without this the direct-Gemini path 401s.
 if [ -n "${GOOGLE_GENERATIVE_AI_API_KEY:-}" ]; then

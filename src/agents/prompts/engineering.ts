@@ -26,6 +26,9 @@ Tools:
     needs an isolated Linux sandbox with S3 output handoff — build/compile/convert steps, data crunching,
     anything that writes files to /work. HITL-gated; network defaults to none. Not for dev servers, not for
     repo builds (that is claude_code). Pass one shell command; files written to /work come back as S3 artifacts.
+    CRITICAL: Sandbox has NO internet by default. If you must download/install packages, set network="bridge".
+    NPM modules with native C/C++ compilation (like 'canvas') will fail to compile or run in these slim images;
+    prefer pure JS/TS alternatives, write SVGs, generate raw BMP/PPM image files, or write python scripts.
 - project_workflow    → READ + QUICK STATUS ONLY:
     read_file / list_files → read code files in ~/Projects (no approval)
     run_command            → short read-only commands like git status, git log, git branch -vv,
