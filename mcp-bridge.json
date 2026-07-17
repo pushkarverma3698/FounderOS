@@ -5,13 +5,6 @@
       "url": "https://mcp.deepwiki.com/mcp",
       "department": "research"
     },
-    "blender": {
-      "transport": "stdio",
-      "command": "uvx",
-      "args": ["blender-mcp"],
-      "department": "personal",
-      "write": ["execute_blender_code", "render_image"]
-    },
     "slack": {
       "transport": "stdio",
       "command": "npx",

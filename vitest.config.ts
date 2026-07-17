@@ -8,7 +8,13 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     // Default run = deterministic, offline-safe layers only. Integration (live
     // Gemini) and smoke (live Telegram) are opt-in via their own scripts.
-    include: ["tests/unit/**/*.{test,spec}.ts", "tests/regression/**/*.{test,spec}.ts"],
+    include: [
+      "tests/unit/**/*.{test,spec}.ts",
+      "tests/regression/**/*.{test,spec}.ts",
+      // Load suite is stub-invoker only ($0, offline) — safe in the default run.
+      // It was silently orphaned before: no include, no script, never in CI.
+      "tests/load/**/*.{test,spec}.ts",
+    ],
     // Determinism is enforced by the network kill-switch in tests/setup.ts
     // (re-installed before EACH file via setupFiles), NOT by Vitest's global
     // mock-reset knobs. We deliberately leave unstubGlobals/restoreMocks OFF:
