@@ -34,16 +34,28 @@ cursor/* or feat/*  →  beta  →  main (founder merges only, CD deploys)
 ### When creating a PR
 
 ```bash
+# 1. Start clean: pull latest beta and checkout your branch
 git fetch origin beta && git checkout beta && git pull origin beta
 git checkout -b cursor/my-task-d523
-# … work …
+
+# 2. ... perform work ...
+
+# 3. Before pushing, merge latest beta back into your branch to prevent "out-of-date" status
+git fetch origin beta && git merge origin/beta
+
+# 4. Verify all typechecks, compilations, and tests pass locally
+pnpm gate
+
+# 5. Push the branch
 git push -u origin cursor/my-task-d523
-gh pr create --base beta --head cursor/my-task-d523 --draft --title "feat: …"
+
+# 6. Create the PR non-interactively (always specify base, title, and body)
+gh pr create --base beta --head cursor/my-task-d523 --draft --title "feat: ..." --body "PR Description"
 ```
 
-**Wrong:** `--base main` → Branch policy check **FAILS** → PR shows "not mergeable".
+**Wrong:** `--base main` or ignoring out-of-date base branch drift → CI/branch policy blocks it.
 
-**Right:** `--base beta` → CI + branch policy pass → founder promotes later.
+**Right:** Merge `beta` locally first, run `pnpm gate`, and specify `--body` to open the PR cleanly.
 
 See `docs/process/BRANCH-MODEL.md` for the full ladder.
 

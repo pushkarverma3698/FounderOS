@@ -85,12 +85,12 @@ fi
 # paid OpenRouter fallback — same-key Gemini fallbacks are covered by paid quota).
 grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
 {
-  printf '%s\n' 'AGENT_MODEL=google-genai:gemini-flash-latest'
-  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-3-flash-preview,google-genai:gemini-3.1-flash-lite,openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free'
+  printf '%s\n' 'AGENT_MODEL=google-genai:gemini-2.5-flash'
+  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-2.5-pro,google-genai:gemini-2-flash,google-genai:gemini-3.1-flash-lite'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
-echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-flash-latest"
+echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-2.5-flash"
 # Primary model key — forwarded from a GitHub secret so a PROD_DOTENV re-render
 # can never wipe it. Without this the direct-Gemini path 401s.
 if [ -n "${GOOGLE_GENERATIVE_AI_API_KEY:-}" ]; then
