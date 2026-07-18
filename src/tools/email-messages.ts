@@ -53,6 +53,62 @@ export function headerFromGwsPayload(payload: unknown, name: string): string | u
   return hit?.value;
 }
 
+/** One MIME node of a Gmail `format: full` payload (recursive). */
+interface GwsMimePart {
+  mimeType?: string;
+  body?: { data?: string };
+  parts?: GwsMimePart[];
+}
+
+function decodeGwsBodyData(data: string): string | undefined {
+  try {
+    // Gmail API bodies are base64url; tolerate standard base64 too.
+    return Buffer.from(data, "base64url").toString("utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Depth-first search for the first part matching `mimeType` that carries data. */
+function findPartBody(part: GwsMimePart, mimeType: string): string | undefined {
+  if (part.mimeType === mimeType && part.body?.data) return decodeGwsBodyData(part.body.data);
+  for (const child of part.parts ?? []) {
+    const hit = findPartBody(child, mimeType);
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
+}
+
+/**
+ * Extract the readable body from a `format: full` payload: prefer text/plain
+ * anywhere in the MIME tree, fall back to tag-stripped text/html, else
+ * undefined (caller falls back to the snippet — e.g. metadata-format payloads).
+ */
+export function bodyFromGwsPayload(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const root = payload as GwsMimePart;
+  const plain = findPartBody(root, "text/plain");
+  if (plain !== undefined) return plain;
+  const html = findPartBody(root, "text/html");
+  if (html !== undefined) return stripHtml(html);
+  // Non-multipart message whose top-level mimeType we didn't match (e.g. text/x-…).
+  if (root.body?.data) return decodeGwsBodyData(root.body.data);
+  return undefined;
+}
+
 /** Map a gws gmail.users.messages.get JSON body to EmailMessage. */
 export function emailFromGwsGet(raw: Record<string, unknown>): EmailMessage {
   const payload = raw["payload"];
@@ -61,7 +117,7 @@ export function emailFromGwsGet(raw: Record<string, unknown>): EmailMessage {
     threadId: String(raw["threadId"] ?? raw["thread_id"] ?? ""),
     sender: headerFromGwsPayload(payload, "From") ?? "unknown sender",
     subject: headerFromGwsPayload(payload, "Subject") ?? "(no subject)",
-    messageText: String(raw["snippet"] ?? ""),
+    messageText: bodyFromGwsPayload(payload) ?? String(raw["snippet"] ?? ""),
     messageTimestamp: headerFromGwsPayload(payload, "Date") ?? "",
   };
 }
@@ -77,6 +133,10 @@ export function extractGwsMessageIds(parsed: unknown): string[] {
   return messages.map((m) => m.id).filter((id): id is string => typeof id === "string" && id.length > 0);
 }
 
+/** Per-email body cap in the tool result — full bodies for normal emails, a
+ *  hard ceiling so a newsletter blob can't flood the worker's context. */
+export const EMAIL_BODY_MAX_CHARS = 2000;
+
 export function formatEmailList(messages: EmailMessage[], query: string, maxResults: number): string {
   if (messages.length === 0) {
     return `No emails found matching "${query}". Inbox may be empty or the query returned no results.`;
@@ -86,7 +146,7 @@ export function formatEmailList(messages: EmailMessage[], query: string, maxResu
     .map((m, i) => {
       const from = m.sender ?? "unknown sender";
       const subject = m.subject ?? "(no subject)";
-      const body = m.messageText?.slice(0, 200) ?? "";
+      const body = m.messageText?.slice(0, EMAIL_BODY_MAX_CHARS) ?? "";
       const date = m.messageTimestamp ?? "";
       return `${i + 1}. From: ${from}${date ? ` · ${date}` : ""}\n   Subject: ${subject}${body ? `\n   ${body}` : ""}`;
     })
