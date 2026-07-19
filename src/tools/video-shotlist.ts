@@ -33,6 +33,8 @@ export interface Shot {
   duration_s: number;
   /** Veo billing/generation length (int 4/6/8s) — clip is trimmed to duration_s + overlap. */
   gen_seconds: number;
+  /** Raw timeline need (duration_s + transition overlap); engine grids derive from this. */
+  need_seconds: number;
   camera: string;
   subject: string;
   /** Full generation prompt (camera + subject + consistency anchor). Empty for title cards. */
@@ -124,6 +126,15 @@ export function veoGenSeconds(needS: number): number {
   return 8;
 }
 
+/**
+ * Kling bills only 5s or 10s clips (fal I2V grid). Snap the timeline need to
+ * that grid so we buy exactly one billable tier and never over-purchase — a
+ * silent ~40%/clip credit leak if we asked Veo-grid lengths of a Kling model.
+ */
+export function klingGenSeconds(needS: number): 5 | 10 {
+  return needS <= 5 ? 5 : 10;
+}
+
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
@@ -206,6 +217,7 @@ export function compileShotList(brand: BrandProfile, req: ShotListRequest): Shot
         camera: "static title card, GSAP staggered entrances",
         subject: `${brand.name} wordmark + CTA`,
         prompt: "",
+        need_seconds: 0,
         overlay_text: "",
         transition_out: { type: "fade", duration_s: pacing.transition_s },
         seed: fnv1a(`${projectSeed}:cta`),
@@ -229,6 +241,7 @@ export function compileShotList(brand: BrandProfile, req: ShotListRequest): Shot
       const transition = pacing.transitions[idx % pacing.transitions.length]!;
       const durationS = pieces[i]!;
       const overlap = transition === "cut" ? 0 : pacing.transition_s;
+      const needS = round1(durationS + overlap);
       shots.push({
         id: `sh-${String(idx + 1).padStart(2, "0")}`,
         scene_id: scene.id,
@@ -236,7 +249,8 @@ export function compileShotList(brand: BrandProfile, req: ShotListRequest): Shot
         kind: "veo-broll",
         start_s: round1(cursor),
         duration_s: durationS,
-        gen_seconds: veoGenSeconds(durationS + overlap),
+        gen_seconds: veoGenSeconds(needS),
+        need_seconds: needS,
         camera: finalCamera,
         subject,
         prompt: `${finalCamera}. ${subject}. ${anchor}`,

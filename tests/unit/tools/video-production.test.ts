@@ -46,10 +46,27 @@ describe("compileProductionPlan", () => {
   it("every generated asset is gated by a probe before compositing", () => {
     const plan = makePlan("script", true);
     const composite = plan.steps.find((s) => s.id === "composite")!;
-    for (const gen of plan.steps.filter((s) => s.kind === "veo" || s.kind === "hyperframes")) {
+    for (const gen of plan.steps.filter((s) => s.kind === "kling" || s.kind === "hyperframes")) {
       const verify = plan.steps.find((s) => s.kind === "probe" && s.needs.includes(gen.id));
       expect(verify, `${gen.id} must have a verify probe`).toBeDefined();
       expect(composite.needs).toContain(verify!.id);
+    }
+  });
+
+  it("Gate 2: every Kling shot depends on its keyframe (never animate an unmade frame)", () => {
+    const plan = makePlan("script");
+    const kling = plan.steps.filter((s) => s.kind === "kling");
+    expect(kling.length).toBeGreaterThan(0);
+    for (const gen of kling) {
+      const shotId = gen.id.replace("gen-", "");
+      const keyframe = plan.steps.find((s) => s.id === `keyframe-${shotId}`);
+      expect(keyframe, `${gen.id} must have a keyframe step`).toBeDefined();
+      expect(keyframe!.kind).toBe("keyframe");
+      expect(gen.needs).toContain(`keyframe-${shotId}`);
+      // keyframe carries the draft-cheap cost, the Kling step the expensive animate
+      expect(keyframe!.est_cost_usd).toBeGreaterThan(0);
+      expect(gen.params["image"]).toBe(keyframe!.produces);
+      expect(gen.params["fallback_model"]).toContain("veo");
     }
   });
 
@@ -112,14 +129,16 @@ describe("deriveStatus (receipts = state)", () => {
 
   it("bounded retries: one failure → still ready; MAX_ATTEMPTS failures → terminal, phase failed, component named", () => {
     const plan = makePlan();
-    const gen = plan.steps.find((s) => s.kind === "veo")!;
-    const once: StepReceipt = { step_id: gen.id, key: stepKey(gen), ok: false, attempts: 1, error: "Veo start failed: 503" };
-    expect(deriveStatus(plan, { [gen.id]: once }).steps.find((s) => s.id === gen.id)?.status).toBe("ready");
+    const gen = plan.steps.find((s) => s.kind === "kling")!;
+    // The keyframe (Gate 2 dependency) must be done for the Kling step to be eligible.
+    const kf = okReceipt(plan, `keyframe-${gen.id.replace("gen-", "")}`);
+    const once: StepReceipt = { step_id: gen.id, key: stepKey(gen), ok: false, attempts: 1, error: "fal submit failed: 503" };
+    expect(deriveStatus(plan, { [kf.step_id]: kf, [gen.id]: once }).steps.find((s) => s.id === gen.id)?.status).toBe("ready");
 
     const terminal: StepReceipt = { ...once, attempts: MAX_ATTEMPTS };
-    const status = deriveStatus(plan, { [gen.id]: terminal });
+    const status = deriveStatus(plan, { [kf.step_id]: kf, [gen.id]: terminal });
     expect(status.phase).toBe("failed");
-    expect(status.failures).toEqual([{ step_id: gen.id, kind: "veo", attempts: MAX_ATTEMPTS, error: "Veo start failed: 503" }]);
+    expect(status.failures).toEqual([{ step_id: gen.id, kind: "kling", attempts: MAX_ATTEMPTS, error: "fal submit failed: 503" }]);
     // downstream verify is blocked, not retried into a loop
     expect(status.steps.find((s) => s.id === `verify-${gen.id.replace("gen-", "")}`)?.status).toBe("blocked");
   });
@@ -128,7 +147,7 @@ describe("deriveStatus (receipts = state)", () => {
     const plan = makePlan();
     const receipts: Record<string, StepReceipt> = {};
     for (const s of plan.steps) {
-      if (s.kind === "veo" || s.kind === "hyperframes" || s.kind === "elevenlabs-music" || s.id.startsWith("verify-") || s.id === "vendor-gsap") {
+      if (s.kind === "keyframe" || s.kind === "kling" || s.kind === "hyperframes" || s.kind === "elevenlabs-music" || s.id.startsWith("verify-") || s.id === "vendor-gsap") {
         receipts[s.id] = okReceipt(plan, s.id);
       }
     }

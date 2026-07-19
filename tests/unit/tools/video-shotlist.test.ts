@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "vitest";
 import { loadBrand, type BrandProfile } from "../../../src/tools/video-brand.js";
-import { compileShotList, splitSceneIntoShots, veoGenSeconds, fnv1a } from "../../../src/tools/video-shotlist.js";
+import { compileShotList, splitSceneIntoShots, veoGenSeconds, klingGenSeconds, fnv1a } from "../../../src/tools/video-shotlist.js";
 
 function thp(): BrandProfile {
   const res = loadBrand("the-health-place");
@@ -45,6 +45,14 @@ describe("compileShotList", () => {
       expect(s.duration_s + s.transition_out.duration_s).toBeLessThanOrEqual(8);
       expect([4, 6, 8]).toContain(s.gen_seconds);
       expect(s.gen_seconds).toBeGreaterThanOrEqual(s.duration_s + s.transition_out.duration_s);
+    }
+  });
+
+  it("carries need_seconds (>= duration) so engine grids can size the buy", () => {
+    const sl = compileShotList(thp(), { format: "hero-16x9", topic: "t", duration_s: 55 });
+    for (const s of sl.shots.filter((s) => s.kind === "veo-broll")) {
+      expect(s.need_seconds).toBeGreaterThanOrEqual(s.duration_s);
+      expect(s.need_seconds).toBeCloseTo(s.duration_s + s.transition_out.duration_s, 5);
     }
   });
 
@@ -114,6 +122,13 @@ describe("primitives", () => {
     expect(veoGenSeconds(4)).toBe(4);
     expect(veoGenSeconds(5.5)).toBe(6);
     expect(veoGenSeconds(7.8)).toBe(8);
+  });
+
+  it("klingGenSeconds snaps to the 5s/10s billing grid (no over-buy)", () => {
+    expect(klingGenSeconds(3)).toBe(5);
+    expect(klingGenSeconds(5)).toBe(5);
+    expect(klingGenSeconds(5.1)).toBe(10);
+    expect(klingGenSeconds(7)).toBe(10);
   });
 
   it("fnv1a is stable (cross-checked with produce.mjs's copy)", () => {

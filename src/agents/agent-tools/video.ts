@@ -197,8 +197,8 @@ export const planVideoProductionTool = tool(
   {
     name: "plan_video_production",
     description:
-      "Compile a COMPLETE executable video production plan (shot list → per-shot Veo model + seed → " +
-      "ffmpeg composite with transitions/captions/audio mix → QA) and write it to " +
+      "Compile a COMPLETE executable video production plan (shot list → per-shot Nano Banana keyframe → " +
+      "Kling image-to-video, Veo fallback → ffmpeg composite with transitions/captions/audio mix → QA) and write it to " +
       "video-factory/projects/<project>/production.json plus a deterministic CTA title card. " +
       "$0 and side-effect-free beyond local files — actual paid generation happens only when the " +
       "founder (or claude_code with approval) runs produce.mjs, which is budget-gated and idempotent. " +
