@@ -269,11 +269,13 @@ function buildModel(
       if (optional) return null;
       throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is required for google-genai: models.");
     }
+    const baseUrl = process.env["GEMINI_BASE_URL"] || process.env["GOOGLE_GENAI_BASE_URL"];
     return new ChatGoogleGenerativeAI({
       model: parsed.model,
       temperature,
       maxRetries: 2,
       apiKey: process.env["GOOGLE_GENERATIVE_AI_API_KEY"],
+      ...(baseUrl ? { baseUrl } : {}),
     });
   }
 
