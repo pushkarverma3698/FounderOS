@@ -25,7 +25,12 @@ import {
   writeAuditEntry,
   claimDueScheduledTasks,
   markScheduledTaskFailed,
+  claimDueReminders,
+  markReminderFired,
+  advanceReminder,
+  reclaimStrandedReminders,
 } from "../db/queries.js";
+import { nextRecurrence } from "../core/time.js";
 import { providerLinkedInPost } from "./providers/index.js";
 import { sendToChat } from "./telegram-send.js";
 import { childLogger } from "./logger.js";
@@ -200,6 +205,47 @@ export async function runScheduledTaskSweep(executor: ScheduledTaskExecutor): Pr
   }
 }
 
+/** Minimal HTML escape for founder-supplied reminder text sent with parse_mode HTML. */
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Every minute — ping any reminders whose time has arrived (ZERO-LLM). A
+ * reminder never executes anything: it sends its text straight to chat. One-shot
+ * rows are marked 'fired'; recurring rows re-arm to their next occurrence. The
+ * send failing for one row must not abort the sweep for the rest.
+ */
+export async function runReminderSweep(now: Date = new Date()): Promise<void> {
+  const due = await claimDueReminders(TENANT, now);
+  for (const rem of due) {
+    try {
+      await sendToChat(`⏰ <b>Reminder</b>\n${escapeHtml(rem.text)}`, "HTML");
+      if (rem.recurrence) {
+        await advanceReminder(rem.id, nextRecurrence(rem.recurrence, now, rem.timezone), now);
+      } else {
+        await markReminderFired(rem.id, now);
+      }
+    } catch (err) {
+      // allow-failopen: one reminder's send/mark blip must not stop the others; the row stays 'firing' and boot recovery re-pings it.
+      log.error({ id: rem.id, err: (err as Error).message }, "Reminder sweep error");
+    }
+  }
+}
+
+/**
+ * Boot-time recovery: requeue reminders left in 'firing' by a crash (the
+ * single-instance lock means any 'firing' row at boot is stranded). Called once
+ * from src/index.ts before the sweep starts. At-least-once: a duplicate ping
+ * beats a dropped reminder.
+ */
+export async function recoverStrandedReminders(): Promise<void> {
+  const requeued = await reclaimStrandedReminders(TENANT);
+  if (requeued.length > 0) {
+    log.warn({ ids: requeued.map((r) => r.id) }, "Reclaimed reminders stranded in 'firing' by a crash/restart");
+  }
+}
+
 export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }): void {
   cron.schedule("0 9 * * *", () => {
     sendStaleApprovalReminder().catch((err) =>
@@ -224,6 +270,11 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
       log.error({ err: (err as Error).message }, "Scheduled post sweep cron error"),
     );
   });
+  cron.schedule("* * * * *", () => {
+    runReminderSweep().catch((err) =>
+      log.error({ err: (err as Error).message }, "Reminder sweep cron error"),
+    );
+  });
   const taskExecutor = opts?.taskExecutor;
   if (taskExecutor) {
     cron.schedule("* * * * *", () => {
@@ -233,7 +284,7 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
     });
   }
   log.info(
-    "Scheduler started — stale-approval check (daily 9am), budget alerts (hourly), brain sync (daily 2am), checkpoint sweep (daily 3:30am), scheduled-post sweep (every minute)" +
+    "Scheduler started — stale-approval check (daily 9am), budget alerts (hourly), brain sync (daily 2am), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
       (taskExecutor ? ", scheduled-task sweep (every minute)" : ""),
   );
 }

@@ -33,10 +33,13 @@ import {
   missions,
   scheduledPosts,
   scheduledTasks,
+  reminders,
   failureLessons,
   savedWorkflows,
   type FailureLessonRow,
   type SavedWorkflow,
+  type Reminder,
+  type NewReminder,
   type NewActionLog,
   type NewScheduledPost,
   type ScheduledPost,
@@ -1301,6 +1304,121 @@ export async function rescheduleScheduledTask(
     .update(scheduledTasks)
     .set({ scheduled_at: newTime })
     .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.status, "scheduled")))
+    .returning();
+  return row;
+}
+
+// ── reminders (founder-facing pure ping — zero-LLM) ───────────────────────────
+
+/** Input for a reminder — id/timestamps/status/error are DB-owned. */
+export type ReminderInput = Omit<NewReminder, "id" | "created_at" | "fired_at" | "status" | "error">;
+
+/** Queue a reminder. Idempotent on idempotency_key (same contract as tasks). */
+export async function insertReminder(data: ReminderInput): Promise<Reminder> {
+  const db = getDb();
+  const [row] = await db
+    .insert(reminders)
+    .values({ ...data, status: "scheduled" })
+    .onConflictDoNothing({ target: reminders.idempotency_key })
+    .returning();
+  if (row) return row;
+  const [existing] = await db
+    .select()
+    .from(reminders)
+    .where(eq(reminders.idempotency_key, data.idempotency_key))
+    .limit(1);
+  return existing!;
+}
+
+/**
+ * ATOMICALLY claim due reminders ('scheduled' → 'firing'). `FOR UPDATE SKIP
+ * LOCKED` makes overlapping sweep ticks safe — a second tick can't re-select a
+ * row already being fired. A row stranded in 'firing' by a crash is requeued by
+ * boot recovery (reclaimStrandedReminders).
+ */
+export async function claimDueReminders(
+  tenantId: string,
+  now: Date = new Date(),
+  limit = 10,
+): Promise<Reminder[]> {
+  const db = getDb();
+  const nowIso = now.toISOString();
+  const rows = await db.execute(sql`
+    UPDATE agents.reminders
+    SET status = 'firing'
+    WHERE id IN (
+      SELECT id FROM agents.reminders
+      WHERE tenant_id = ${tenantId}
+        AND status = 'scheduled'
+        AND remind_at <= ${nowIso}::timestamptz
+      ORDER BY remind_at
+      LIMIT ${limit}
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING *
+  `);
+  return rows as unknown as Reminder[];
+}
+
+/** One-shot fired: mark it done. */
+export async function markReminderFired(id: string, firedAt: Date = new Date()): Promise<void> {
+  const db = getDb();
+  await db.update(reminders).set({ status: "fired", fired_at: firedAt }).where(eq(reminders.id, id));
+}
+
+/** Recurring fired: re-arm to the next occurrence (back to 'scheduled'). */
+export async function advanceReminder(id: string, nextAt: Date, firedAt: Date = new Date()): Promise<void> {
+  const db = getDb();
+  await db
+    .update(reminders)
+    .set({ status: "scheduled", remind_at: nextAt, fired_at: firedAt })
+    .where(eq(reminders.id, id));
+}
+
+/**
+ * Boot-time recovery: the single-instance lock means any 'firing' row at boot
+ * was stranded mid-send by a crash. Requeue it (status back to 'scheduled',
+ * remind_at unchanged so it fires immediately). At-least-once: a duplicate ping
+ * is preferable to a dropped reminder.
+ */
+export async function reclaimStrandedReminders(tenantId: string): Promise<Reminder[]> {
+  const db = getDb();
+  return db
+    .update(reminders)
+    .set({ status: "scheduled" })
+    .where(and(eq(reminders.tenant_id, tenantId), eq(reminders.status, "firing")))
+    .returning();
+}
+
+/** Upcoming (still-scheduled) reminders for the founder's "what's queued" view. */
+export async function listUpcomingReminders(tenantId: string, limit = 20): Promise<Reminder[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(reminders)
+    .where(and(eq(reminders.tenant_id, tenantId), eq(reminders.status, "scheduled")))
+    .orderBy(reminders.remind_at)
+    .limit(limit);
+}
+
+/** Cancel a still-scheduled reminder. Returns the row, or undefined when not cancelable. */
+export async function cancelReminder(id: string): Promise<Reminder | undefined> {
+  const db = getDb();
+  const [row] = await db
+    .update(reminders)
+    .set({ status: "canceled" })
+    .where(and(eq(reminders.id, id), eq(reminders.status, "scheduled")))
+    .returning();
+  return row;
+}
+
+/** Move a still-scheduled reminder to a new time. Returns the row, or undefined. */
+export async function rescheduleReminder(id: string, newTime: Date): Promise<Reminder | undefined> {
+  const db = getDb();
+  const [row] = await db
+    .update(reminders)
+    .set({ remind_at: newTime })
+    .where(and(eq(reminders.id, id), eq(reminders.status, "scheduled")))
     .returning();
   return row;
 }
