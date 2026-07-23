@@ -18,9 +18,10 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, readdirSync, copyFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, readdirSync, copyFileSync, rmSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stepKey } from "./lib/step-key.mjs"; // single source of truth (mirrors src/tools/video-production.ts)
 
 const FACTORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -29,17 +30,6 @@ function arg(name, fallback) {
   return i > -1 ? process.argv[i + 1] : fallback;
 }
 const flag = (name) => process.argv.includes(`--${name}`);
-
-// fnv1a + stepKey MUST match src/tools/video-shotlist.ts / video-production.ts.
-function fnv1a(input) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h >>> 0;
-}
-const stepKey = (s) => fnv1a(JSON.stringify({ id: s.id, kind: s.kind, params: s.params, produces: s.produces })).toString(16);
 
 const projectArg = arg("project");
 if (!projectArg) {
@@ -111,6 +101,44 @@ function executeStep(step) {
         "--seed", String(p.seed),
       ]);
       return;
+    case "keyframe":
+      run("node", [
+        join(FACTORY_ROOT, "scripts", "gen-keyframe.mjs"),
+        "--prompt", p.prompt,
+        "--out", join(projectDir, step.produces),
+        "--aspect", p.aspect,
+        "--model", p.model,
+        "--seed", String(p.seed),
+      ]);
+      return;
+    case "kling": {
+      const outPath = join(projectDir, step.produces);
+      run("node", [
+        join(FACTORY_ROOT, "scripts", "gen-kling.mjs"),
+        "--prompt", p.prompt,
+        "--image", join(projectDir, p.image),
+        "--out", outPath,
+        "--aspect", p.aspect,
+        "--duration", String(p.duration_s),
+        "--model", p.model,
+        "--seed", String(p.seed),
+        "--fallback-model", p.fallback_model,
+        "--fallback-duration", String(p.fallback_duration_s),
+      ]);
+      // gen-kling.mjs records which engine actually produced the clip so a
+      // Kling→Veo fallback is auditable in the receipt (never silent).
+      const engineFile = `${outPath}.engine.json`;
+      let engine_used = "kling";
+      if (existsSync(engineFile)) {
+        try {
+          engine_used = JSON.parse(readFileSync(engineFile, "utf8")).engine_used ?? "kling";
+        } catch {
+          /* sidecar unreadable — default to kling */
+        }
+        rmSync(engineFile, { force: true });
+      }
+      return { engine_used };
+    }
     case "hyperframes":
       run(join(FACTORY_ROOT, "node_modules", ".bin", "hyperframes"), [
         "render", "-c", p.composition, "-o", step.produces, "--quality", p.quality ?? "standard",
@@ -205,14 +233,15 @@ for (const step of pending) {
   const attempts = (prev && prev.key === stepKey(step) ? prev.attempts : 0) + 1;
   console.log(`→ ${step.id} [${step.kind}] (attempt ${attempts}/${plan.max_attempts})`);
   try {
-    const probe = executeStep(step);
+    const result = executeStep(step);
     const receipt = { step_id: step.id, key: stepKey(step), ok: true, attempts };
     if (step.produces) {
       const artifact = join(projectDir, step.produces);
       if (!existsSync(artifact)) throw new Error(`step succeeded but artifact missing: ${step.produces}`);
       receipt.sha256 = sha256(artifact);
     }
-    if (probe) receipt.probe = probe;
+    if (result?.engine_used) receipt.engine_used = result.engine_used;
+    else if (result) receipt.probe = result;
     writeReceipt(receipt);
     done.add(step.id);
   } catch (err) {

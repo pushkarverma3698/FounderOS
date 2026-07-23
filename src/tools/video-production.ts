@@ -26,7 +26,7 @@ export const MAX_ATTEMPTS = 2;
 
 export const ProductionStepSchema = z.object({
   id: z.string(),
-  kind: z.enum(["copy", "veo", "hyperframes", "elevenlabs-vo", "elevenlabs-music", "probe", "ffmpeg"]),
+  kind: z.enum(["copy", "keyframe", "kling", "veo", "hyperframes", "elevenlabs-vo", "elevenlabs-music", "probe", "ffmpeg"]),
   /** Kind-specific parameters — the executor's entire instruction set. */
   params: z.record(z.string(), z.unknown()),
   needs: z.array(z.string()).default([]),
@@ -57,6 +57,8 @@ export const StepReceiptSchema = z.object({
   attempts: z.number(),
   sha256: z.string().optional(),
   probe: z.object({ duration_s: z.number(), width: z.number().optional(), height: z.number().optional() }).optional(),
+  /** Which engine actually produced the clip ("kling" | "veo") — records fallbacks. */
+  engine_used: z.string().optional(),
   error: z.string().optional(),
 });
 export type StepReceipt = z.infer<typeof StepReceiptSchema>;
@@ -115,7 +117,7 @@ export function deriveStatus(plan: ProductionPlan, receipts: Record<string, Step
   const allDone = rows.every((s) => s.status === "done");
   const anyFailed = failures.length > 0;
   const compositeDone = statuses.get("qa-final") === "done";
-  const generating = rows.some((s) => (s.kind === "veo" || s.kind === "elevenlabs-vo" || s.kind === "elevenlabs-music" || s.kind === "hyperframes") && s.status !== "done");
+  const generating = rows.some((s) => (s.kind === "keyframe" || s.kind === "kling" || s.kind === "veo" || s.kind === "elevenlabs-vo" || s.kind === "elevenlabs-music" || s.kind === "hyperframes") && s.status !== "done");
   const phase: ProductionPhase = anyFailed ? "failed" : allDone && compositeDone ? "delivered" : generating ? "generating" : "compositing";
 
   return {
@@ -162,19 +164,41 @@ export function compileProductionPlan(shotlist: ShotList, models: ModelPlan, opt
         est_cost_usd: 0,
       });
     } else {
+      // Image-to-video: a cheap Nano Banana keyframe is generated + verified,
+      // THEN animated by Kling (Gate 2 — never pay to animate an unmade frame).
+      // Kling hard-failures fall back to Veo inside gen-kling.mjs (recorded in
+      // engine_used). The keyframe carries no camera-motion verbs — it is a still.
+      const keyframeFile = `assets/${shot.id}.keyframe.png`;
+      const keyframeCost = assign?.keyframe_cost_usd ?? 0;
       steps.push({
-        id: genId,
-        kind: "veo",
+        id: `keyframe-${shot.id}`,
+        kind: "keyframe",
         params: {
-          prompt: shot.prompt,
-          model: assign?.model ?? "veo-3.1-fast-generate-preview",
+          prompt: `${shot.subject}. ${shotlist.style_anchor}`,
+          model: assign?.keyframe_model ?? "gemini-3.1-flash-image",
           aspect: shotlist.source_aspect,
-          duration_s: shot.gen_seconds,
           seed: shot.seed,
         },
         needs: [],
+        produces: keyframeFile,
+        est_cost_usd: keyframeCost,
+      });
+      steps.push({
+        id: genId,
+        kind: "kling",
+        params: {
+          prompt: shot.prompt,
+          image: keyframeFile,
+          model: assign?.model ?? "fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
+          aspect: shotlist.source_aspect,
+          duration_s: assign?.gen_seconds ?? 5,
+          seed: shot.seed,
+          fallback_model: assign?.fallback_model ?? "veo-3.1-fast-generate-preview",
+          fallback_duration_s: assign?.fallback_gen_seconds ?? shot.gen_seconds,
+        },
+        needs: [`keyframe-${shot.id}`],
         produces: file,
-        est_cost_usd: assign?.est_cost_usd ?? 0,
+        est_cost_usd: Math.round(((assign?.est_cost_usd ?? 0) - keyframeCost) * 100) / 100,
       });
     }
     const isLast = shot === shotlist.shots.at(-1);

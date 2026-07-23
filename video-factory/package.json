@@ -9,6 +9,7 @@
     "render": "hyperframes render"
   },
   "dependencies": {
+    "@fal-ai/client": "^1.6.4",
     "gsap": "^3.14.2",
     "hyperframes": "^0.7.58"
   }
