@@ -1,12 +1,13 @@
 /**
  * Video Factory — model-selection matrix tests ($0, pure).
- * Engine assignment is code, cost estimates are exact, budget gate is typed.
+ * Kling-first image-to-video: keyframe + Kling animate, Veo fallback recorded,
+ * cost estimates exact (keyframe + animate), budget gate typed.
  */
 
 import { describe, it, expect } from "vitest";
 import { loadBrand, type BrandProfile } from "../../../src/tools/video-brand.js";
 import { compileShotList } from "../../../src/tools/video-shotlist.js";
-import { planModels, VEO_MODELS } from "../../../src/tools/video-models.js";
+import { planModels, KLING_MODELS, KEYFRAME_MODELS, VEO_MODELS } from "../../../src/tools/video-models.js";
 
 function shotlist(duration = 30) {
   const res = loadBrand("the-health-place");
@@ -19,7 +20,7 @@ describe("planModels", () => {
     expect(planModels(shotlist())).toEqual(planModels(shotlist()));
   });
 
-  it("hook gets the premium model on standard tier; body rides fast; title card is $0 local", () => {
+  it("hook gets Kling Pro + Nano Banana Pro; body rides Turbo + draft; title card is $0 local", () => {
     const plan = planModels(shotlist());
     const sl = shotlist();
     const byId = new Map(plan.assignments.map((a) => [a.shot_id, a]));
@@ -29,25 +30,51 @@ describe("planModels", () => {
         expect(a.engine).toBe("hyperframes");
         expect(a.est_cost_usd).toBe(0);
       } else if (shot.scene_role === "hook") {
-        expect(a.model).toBe(VEO_MODELS.premium.model);
+        expect(a.engine).toBe("kling");
+        expect(a.model).toBe(KLING_MODELS.pro.model);
+        expect(a.keyframe_model).toBe(KEYFRAME_MODELS.pro.model);
       } else {
-        expect(a.model).toBe(VEO_MODELS.fast.model);
+        expect(a.engine).toBe("kling");
+        expect(a.model).toBe(KLING_MODELS.turbo.model);
+        expect(a.keyframe_model).toBe(KEYFRAME_MODELS.draft.model);
       }
     }
   });
 
-  it("economy tier forces every generated shot onto the fast model", () => {
-    const plan = planModels(shotlist(), { tier: "economy" });
-    for (const a of plan.assignments.filter((a) => a.engine === "veo")) {
-      expect(a.model).toBe(VEO_MODELS.fast.model);
+  it("every generated shot records a Veo fallback path (reliability, never a dead render)", () => {
+    for (const a of planModels(shotlist()).assignments.filter((a) => a.engine === "kling")) {
+      expect(a.fallback_engine).toBe("veo");
+      expect([VEO_MODELS.premium.model, VEO_MODELS.fast.model]).toContain(a.fallback_model);
+      expect(a.fallback_gen_seconds).toBeGreaterThan(0);
     }
   });
 
-  it("costs are gen_seconds × rate, and totals add up", () => {
+  it("Kling clips bill only on the 5s/10s grid", () => {
+    for (const a of planModels(shotlist(90)).assignments.filter((a) => a.engine === "kling")) {
+      expect([5, 10]).toContain(a.gen_seconds);
+    }
+  });
+
+  it("economy tier forces every generated shot onto Kling Turbo + draft keyframe", () => {
+    const plan = planModels(shotlist(), { tier: "economy" });
+    for (const a of plan.assignments.filter((a) => a.engine === "kling")) {
+      expect(a.model).toBe(KLING_MODELS.turbo.model);
+      expect(a.keyframe_model).toBe(KEYFRAME_MODELS.draft.model);
+    }
+  });
+
+  it("premium tier puts every generated shot on Kling Pro + Nano Banana Pro", () => {
+    for (const a of planModels(shotlist(), { tier: "premium" }).assignments.filter((a) => a.engine === "kling")) {
+      expect(a.model).toBe(KLING_MODELS.pro.model);
+      expect(a.keyframe_model).toBe(KEYFRAME_MODELS.pro.model);
+    }
+  });
+
+  it("cost = keyframe + gen_seconds × rate, and totals add up", () => {
     const plan = planModels(shotlist());
-    for (const a of plan.assignments.filter((a) => a.engine === "veo")) {
-      const rate = a.model === VEO_MODELS.premium.model ? VEO_MODELS.premium.usd_per_s : VEO_MODELS.fast.usd_per_s;
-      expect(a.est_cost_usd).toBeCloseTo(a.gen_seconds * rate, 2);
+    for (const a of plan.assignments.filter((a) => a.engine === "kling")) {
+      const rate = a.model === KLING_MODELS.pro.model ? KLING_MODELS.pro.usd_per_s : KLING_MODELS.turbo.usd_per_s;
+      expect(a.est_cost_usd).toBeCloseTo(a.gen_seconds * rate + (a.keyframe_cost_usd ?? 0), 2);
     }
     const videoSum = plan.assignments.reduce((s, a) => s + a.est_cost_usd, 0);
     expect(plan.video_est_usd).toBeCloseTo(videoSum, 2);

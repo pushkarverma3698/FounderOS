@@ -6,20 +6,39 @@
  * flag the audit flagged (F7): model choice is code, never a human memory or
  * a prompt instruction.
  *
- * Matrix logic: the hook shot carries the video — it gets the premium model
- * on standard/premium tiers. Body b-roll rides the fast tier. Title cards
- * render locally on HyperFrames at $0. Economy tier forces everything to fast.
+ * v2 (Kling-first, image-to-video): every generated shot is a Nano Banana
+ * keyframe animated by Kling (fal.ai) — the reference-image conditioning the
+ * audit (F8, "green-screen-grade") was missing. Veo 3.1 is retained as an
+ * automatic per-shot FALLBACK (recorded here, invoked at runtime by
+ * gen-kling.mjs) so a Kling/fal outage never fails a render. Title cards stay
+ * local on HyperFrames at $0. Kling clips bill on a 5s/10s grid.
  */
 
-import type { ShotList, Shot } from "./video-shotlist.js";
+import { klingGenSeconds, veoGenSeconds, type ShotList, type Shot } from "./video-shotlist.js";
 
-export type Engine = "veo" | "hyperframes";
+export type Engine = "veo" | "hyperframes" | "kling";
 export type QualityTier = "premium" | "standard" | "economy";
 
-/** Veo pricing (USD per generated second) — update alongside docs/VIDEO-FACTORY.md. */
+/** Veo pricing (USD/s) — the reliability fallback, not the primary path. */
 export const VEO_MODELS = {
   premium: { model: "veo-3.1-generate-preview", usd_per_s: 0.4 },
   fast: { model: "veo-3.1-fast-generate-preview", usd_per_s: 0.15 },
+} as const;
+
+/**
+ * Kling image-to-video via fal.ai (USD/s). Model ids are pinned here and
+ * live-verified once with FAL_KEY (see docs plan verification). `turbo` is the
+ * cost/quality sweet spot for volume; `pro` is the cinematic hero tier.
+ */
+export const KLING_MODELS = {
+  pro: { model: "fal-ai/kling-video/v3/pro/image-to-video", usd_per_s: 0.112 },
+  turbo: { model: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video", usd_per_s: 0.084 },
+} as const;
+
+/** Nano Banana keyframe generators (flat USD/image) — the "draft cheap" stage. */
+export const KEYFRAME_MODELS = {
+  pro: { model: "gemini-3-pro-image", usd: 0.134 },
+  draft: { model: "gemini-3.1-flash-image", usd: 0.01 },
 } as const;
 
 /** Flat audio estimates (ElevenLabs VO ~950 chars + Eleven Music track). */
@@ -29,8 +48,17 @@ export interface ShotAssignment {
   shot_id: string;
   engine: Engine;
   model: string;
+  /** Billable generation length on the primary engine (Kling grid: 5 or 10). */
   gen_seconds: number;
+  /** Keyframe + primary animate. */
   est_cost_usd: number;
+  /** Nano Banana keyframe model + cost (absent for local title cards). */
+  keyframe_model?: string;
+  keyframe_cost_usd?: number;
+  /** Reliability path: engine/model/length used if the primary hard-fails. */
+  fallback_engine?: "veo";
+  fallback_model?: string;
+  fallback_gen_seconds?: number;
   /** Why this model — auditability of every creative/cost decision. */
   reason: string;
 }
@@ -64,20 +92,28 @@ function assignShot(shot: Shot, tier: QualityTier): ShotAssignment {
       reason: "Title card renders locally from the deterministic template — $0.",
     };
   }
-  const wantPremium = shot.scene_role === "hook" && tier !== "economy";
-  const pick = wantPremium ? VEO_MODELS.premium : VEO_MODELS.fast;
+  // Hero fidelity for the hook (it carries the video) and for the premium tier;
+  // economy forces the cost-efficient turbo path everywhere.
+  const wantPro = (shot.scene_role === "hook" || tier === "premium") && tier !== "economy";
+  const kling = wantPro ? KLING_MODELS.pro : KLING_MODELS.turbo;
+  const keyframe = wantPro ? KEYFRAME_MODELS.pro : KEYFRAME_MODELS.draft;
+  const genSeconds = klingGenSeconds(shot.need_seconds);
+  const animateCost = round2(genSeconds * kling.usd_per_s);
+  const veoFallback = shot.scene_role === "hook" && tier !== "economy" ? VEO_MODELS.premium : VEO_MODELS.fast;
   return {
     shot_id: shot.id,
-    engine: "veo",
-    model: pick.model,
-    gen_seconds: shot.gen_seconds,
-    est_cost_usd: round2(shot.gen_seconds * pick.usd_per_s),
-    reason:
-      pick === VEO_MODELS.premium
-        ? "Hook shot carries the video — premium model for maximum fidelity."
-        : shot.scene_role === "hook"
-          ? "Economy tier: hook on the fast model."
-          : "Body b-roll — fast model; consistency comes from the style anchor + seed.",
+    engine: "kling",
+    model: kling.model,
+    gen_seconds: genSeconds,
+    est_cost_usd: round2(animateCost + keyframe.usd),
+    keyframe_model: keyframe.model,
+    keyframe_cost_usd: keyframe.usd,
+    fallback_engine: "veo",
+    fallback_model: veoFallback.model,
+    fallback_gen_seconds: veoGenSeconds(shot.need_seconds),
+    reason: wantPro
+      ? "Hero shot: Nano Banana Pro keyframe → Kling 3.0 Pro I2V for maximum fidelity."
+      : "Body/volume: draft keyframe → Kling Turbo I2V; consistency comes from the anchored keyframe + seed.",
   };
 }
 

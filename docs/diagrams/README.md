@@ -1,41 +1,35 @@
-# FounderOS — System Diagrams
+# Diagrams
 
-> Every diagram here is **mermaid** (renders natively on GitHub). Read top to
-> bottom: the first three explain *what the system is* and *how one message
-> flows*; the rest are reference maps for a specific concern.
->
-> These diagrams are the fast on-ramp for any developer. For prose, pair them
-> with [../guides/ARCHITECTURE.md](../guides/ARCHITECTURE.md).
+The FounderOS v3 architecture, drawn. All diagrams are Mermaid (render natively
+on GitHub, export cleanly for slides and the Turicks site). Every one is grounded
+in the actual source — file paths are linked inline.
 
-## Read in this order
+## Understand the system
 
-| # | Diagram | Answers |
-|---|---------|---------|
-| 01 | [System architecture](01-system-architecture.md) | What are the moving parts and how do they connect? |
-| 02 | [Request lifecycle](02-request-lifecycle.md) | What happens to ONE Telegram message, step by step? |
-| 03 | [HITL approval flow](03-hitl-flow.md) | How does founder approval gate external actions? |
-| 04 | [Department & tool map](04-department-tool-map.md) | Which department owns which tool, and what's gated? |
-| 05 | [Deployment pipeline](05-deployment-pipeline.md) | How does a commit reach production? |
-| 06 | [Data model](06-data-model.md) | What does Postgres store and why? |
-| 07 | [Module layering](07-module-layering.md) | What can import what (the dependency rule)? |
-| 08 | [Thread state machine](08-thread-state-machine.md) | What states can a per-chat thread be in, and how do the guards recover it? |
+| # | Diagram | Shows |
+|---|---------|-------|
+| [01](01-system-architecture.md) | **System architecture** | Components and how they connect; the kernel-as-library boundary |
+| [02](02-orchestration-path.md) | **Orchestration path** | The one control flow: plan → dispatch → agent ⇄ tools → collect → synthesize |
+| [04](04-contract-dataflow.md) | **Contract data flow** | The task as a typed object at every boundary |
+| [06](06-data-model.md) | **Data model** | What Postgres stores (`agents` + `brain` schemas) |
 
-## The one-paragraph mental model
+## Understand the guarantees
 
-A Telegram message enters the **gateway** (`src/gateway/`). The gateway runs three
-**thread guards** (resolve stale approval → recover wedged thread → capture turn
-boundary), then invokes the **office** — a LangGraph `createSupervisor` graph
-(`src/agents/office.ts`) compiled **once** with a Postgres checkpointer. The
-supervisor routes to one of **7 ReAct departments**, each carrying real tools.
-Any tool that touches the outside world (send email, post, push, write file, run
-shell) **pauses** via native `interrupt()` and renders an Approve/Reject card.
-Side effects run **only after approval**, and every send is **idempotency-audited**.
-State persists in Postgres, so a pending approval **survives a process restart**.
+| # | Diagram | Shows |
+|---|---------|-------|
+| [03](03-hitl-flow.md) | **HITL approval flow** | How founder approval gates every external action (crash-safe) |
+| [07](07-receipt-and-zero-hallucination.md) | **Receipts & zero-hallucination** | Why the system can't claim an action it didn't take |
+| [08](08-anti-slop-ci-gates.md) | **Anti-slop CI gates** | The 6 machine-checked rules + the debt ratchet |
 
-## Keeping these current
+## The story & the shipping path
 
-These are hand-authored from the live code (not auto-generated). When you
-add/remove a department or tool, update **04** and **01**. When you change the
-run-loop guards, update **02** and **08**. The auto-generated topology graph at
-[`.claude/graph-mermaid.md`](../../.claude/graph-mermaid.md) is a separate,
-machine-generated view (regenerate with `pnpm graph:gen`).
+| # | Diagram | Shows |
+|---|---------|-------|
+| [09](09-v2-vs-v3.md) | **v2 vs v3** | The pivot, side by side (marketing showcase) |
+| [10](10-capability-map.md) | **Capability map** | 8 workers, their tools, and the 17 HITL gates |
+| [05](05-deployment-pipeline.md) | **Deployment pipeline** | How a commit reaches production (branch → beta → main → VPS) |
+
+> The v2-era topology diagrams (old system architecture, department/tool map,
+> module layering, thread state machine, request lifecycle through `office-run`)
+> were retired with the v2 architecture on 2026-07-08. The numbers 01–10 above are
+> the current v3 set.

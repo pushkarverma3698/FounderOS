@@ -1,12 +1,14 @@
 # 05 — Deployment Pipeline
 
-How a commit reaches production. **`main` IS production** (single-tenant, ADR-021):
-every merge to `main` auto-deploys to the Hetzner VPS after CI passes. Full
-runbook + Day-1 gotchas: [`docs/guides/DEPLOYMENT.md`](../guides/DEPLOYMENT.md).
+How a commit reaches production. Promotion is **two-stage** (work branch → `beta`
+→ `main`, ADR-045; the former `stable` tier was retired). **`main` IS production** —
+only humans merge to it, and every merge auto-deploys to the Hetzner VPS after CI
+passes. Full runbook + Day-1 gotchas: [`docs/guides/DEPLOYMENT.md`](../guides/DEPLOYMENT.md).
 
 ```mermaid
 flowchart TD
-  pr[Feature branch + PR] -->|human merge only| main[(main)]
+  pr[Feature branch + PR] -->|CI-green| beta[(beta)]
+  beta -->|human merge only| main[(main)]
   main --> ci
 
   subgraph ci["CI workflow (.github/workflows/ci.yml)"]

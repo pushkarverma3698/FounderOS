@@ -11,9 +11,9 @@ rejection — or a crash, or a stale card — is always a clean no-op.
 sequenceDiagram
   autonumber
   actor F as Founder
-  participant GW as Gateway (office-run)
-  participant SUP as Supervisor
-  participant DEPT as Department agent
+  participant GW as Gateway (kernel-run)
+  participant SUP as Supervisor (pure dispatch)
+  participant DEPT as Worker agent
   participant TOOL as HITL-gated tool
   participant PG as Postgres (checkpointer)
   participant EXT as External API
