@@ -1,132 +1,135 @@
 # FounderOS — Documentation Index
 
-> **Start here.** Every doc in FounderOS is linked below, organized by role.
-
-> 🟢 **PRODUCTION LIVE** since 2026-06-14 on Hetzner VPS. Architecture locked (7 ReAct departments, LangGraph supervisor, Phases 1-6 hardening shipped). **Next phase:** add tools and hierarchy only — architecture is stable.
+> **Start here.** FounderOS is a **deterministic, contract-first agent kernel** with a Telegram gateway. Every doc below reflects the **v3 architecture** (typed Plan → pure-code dispatch → isolated worker → receipt-validated collect → results-only synthesis). The v2 supervisor + 7-department system was audited and replaced on 2026-07-08 — see the case studies for the full story.
 
 ---
 
 ## 🚀 New here? Read in this order
 
-1. **[Root README.md](../README.md)** — What FounderOS does, architecture overview, eval results
-2. **[diagrams/](diagrams/)** — 8 mermaid flows (architecture, request lifecycle, HITL, data model, deployment)
-3. **[guides/ARCHITECTURE.md](guides/ARCHITECTURE.md)** — Plain-English system design
-4. **[guides/LOCAL-DEV.md](guides/LOCAL-DEV.md)** — Local setup + env vars
-5. **[guides/DEPLOYMENT.md](guides/DEPLOYMENT.md)** — Production runbook (we're live, use this for troubleshooting)
-6. **[LIMITATIONS.md](LIMITATIONS.md)** — Honest tech-debt and deferred work
+1. **[Root README.md](../README.md)** — What FounderOS does + the v3 architecture at a glance
+2. **[ARCHITECTURE.md](ARCHITECTURE.md)** — How the whole system works, in plain English (one message, end to end)
+3. **[FEATURES.md](FEATURES.md)** — Every feature and how it works, worker by worker
+4. **[CONCEPTS.md](CONCEPTS.md)** — Glossary of the domain vocabulary
+5. **[CLAUDE.md](../CLAUDE.md)** — The canonical contract-first design, file map, and non-negotiable rules
+6. **[JARVIS-ARCHITECTURE.md](../JARVIS-ARCHITECTURE.md)** — Why v2 failed within 3 steps and how the typed StateGraph fixes it
+7. **[guides/LOCAL-DEV.md](guides/LOCAL-DEV.md)** — Local setup + env vars
+8. **[LIMITATIONS.md](LIMITATIONS.md)** — Honest tech-debt and deferred work
+
+New to the story? The **[case studies](turicks-case-studies/)** and **[blog](turicks-blog/)** tell the v1→v2→v3 journey; the **[diagrams](diagrams/)** show the whole system visually.
 
 ---
 
-## 📖 Guides — How it works & how to run
+## 🧭 Architecture — the current truth
 
 | Doc | Purpose |
 |-----|---------|
-| [ARCHITECTURE.md](guides/ARCHITECTURE.md) | System design: supervisor, 7 departments, tools, HITL pattern, data flow |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | **How the whole system works** — plain-English walkthrough + the five core ideas |
+| [FEATURES.md](FEATURES.md) | **What it does** — the 8 workers, their tools, and every cross-cutting feature E2E |
+| [CONCEPTS.md](CONCEPTS.md) | **Glossary** — kernel, TaskEnvelope, ToolReceipt, HITL, and the rest |
+| [diagrams/](diagrams/) | **10 Mermaid diagrams** — architecture, orchestration path, contracts, receipts, CI gates, v2↔v3, capability map |
+| [../CLAUDE.md](../CLAUDE.md) | The canonical rules — contract-first kernel, anti-slop CI invariants, model policy, file map |
+| [../JARVIS-ARCHITECTURE.md](../JARVIS-ARCHITECTURE.md) | The contract-first design in full — typed boundaries, StateGraph, resumability |
+| [../ZERO-BASE-AUDIT.md](../ZERO-BASE-AUDIT.md) | The v2 autopsy (4 traced live failures) that mandated v3 |
+| [../ARCHITECTURE_LEDGER.md](../ARCHITECTURE_LEDGER.md) | Running ledger of production-readiness passes (v2 and v3) |
+| [PROOF.md](PROOF.md) | **Living scoreboard** — deterministic suite, kernel guarantees, debt ratchet (`pnpm proof:scoreboard`) |
+
+---
+
+## 📖 Guides — how to run & operate
+
+| Doc | Purpose |
+|-----|---------|
 | [LOCAL-DEV.md](guides/LOCAL-DEV.md) | Local setup, env vars, troubleshooting, running tests |
-| [DEPLOYMENT.md](guides/DEPLOYMENT.md) | Production runbook (Hetzner VPS, systemd, GitHub Actions CD, Day-1 gotchas) |
+| [DEPLOYMENT.md](guides/DEPLOYMENT.md) | Production runbook (Hetzner VPS, systemd, GitHub Actions CD) |
 | [OPERATIONS.md](guides/OPERATIONS.md) | Day-to-day: start/stop, Telegram commands, halt/resume, scheduler, monitoring |
-| [LINKEDIN-AUTOMATION-FLOWS.md](guides/LINKEDIN-AUTOMATION-FLOWS.md) | **LinkedIn post, scheduled queue, outreach reflection, gap scanner** — E2E reference |
-| [LINKEDIN-ACCOUNT-AND-GROWTH-STRATEGY.md](guides/LINKEDIN-ACCOUNT-AND-GROWTH-STRATEGY.md) | **Personal vs company page**, @Turicks tagging, analytics-driven growth content |
-| [HITL-MATRIX.md](guides/HITL-MATRIX.md) | All HITL-gated tools (incl. `schedule_social_post`), gate patterns, observability |
-| [SIGNALS-AND-CONTRACTS.md](guides/SIGNALS-AND-CONTRACTS.md) | Department signals, event types, publishing/consuming, adding new types |
-| [JUDGE-AND-CRITIC.md](guides/JUDGE-AND-CRITIC.md) | Claude critic quality gate, two-gate system, brand voice validation |
-| [MEMORY-OPERATIONS.md](guides/MEMORY-OPERATIONS.md) | turicks-brain + personal-rag, populate, query, troubleshoot |
-| [SECURITY-RULES-20-21.md](guides/SECURITY-RULES-20-21.md) | Context isolation + typed handoffs, verification, monitoring |
-| [PHASE-HARDENING-GUIDE.md](guides/PHASE-HARDENING-GUIDE.md) | **Phases 1-6 hardening** (context isolation, typed contracts, judge, signals, hierarchy, rules) |
+| [HITL-MATRIX.md](guides/HITL-MATRIX.md) | Every HITL-gated tool, gate patterns, observability |
+| [MEMORY-OPERATIONS.md](guides/MEMORY-OPERATIONS.md) | turicks-brain + personal-rag: populate, query, troubleshoot |
+| [MCP-SERVERS.md](guides/MCP-SERVERS.md) | MCP client bridge + read-only MCP server surface |
+| [../docs/VPS-MCP-SETUP.md](VPS-MCP-SETUP.md) | Wiring MCP servers on the production VPS |
+| [FAQ.md](FAQ.md) | Recurring questions, answered plainly |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common failures and where to look (reading a typed `FailureReport`) |
+
+Client-facing video engine: [VIDEO-FACTORY.md](VIDEO-FACTORY.md) · [VIDEO-PIPELINE-AUDIT.md](VIDEO-PIPELINE-AUDIT.md).
 
 ---
 
-## 📏 Rules — The laws of the codebase
+## 🔒 Security
 
 | Doc | Purpose |
 |-----|---------|
-| [PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) | **Wiring maps:** exact files to touch for adding a tool / department / workflow / command |
-| [TOOL-STANDARDS.md](rules/TOOL-STANDARDS.md) | 8-point checklist every new tool must pass |
-| [TESTING-RULES.md](rules/TESTING-RULES.md) | 8 testing rules from real bugs + test template |
-| [TOOL-INTEGRATION-PLAYBOOK.md](rules/TOOL-INTEGRATION-PLAYBOOK.md) | Verifying external API contracts before implementation |
+| [../SECURITY.md](../SECURITY.md) | Reporting policy + the built-in security controls (HITL, idempotency, path-guard, least privilege) |
+| [THREAT-MODEL.md](THREAT-MODEL.md) | Assets, trust boundaries, attack surface, mitigations, and honest residual risks |
 
 ---
 
-## 🧭 Decisions — Architecture Decision Records (ADRs)
+## 📏 Rules — the laws of the codebase
 
-Every significant decision documented in [decisions/](decisions/). **Key ones for next phase:**
+| Doc | Purpose |
+|-----|---------|
+| [PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) | Wiring maps — exact files to touch for adding a tool / command / workflow |
+| [TOOL-STANDARDS.md](rules/TOOL-STANDARDS.md) | Checklist every new tool must pass |
+| [TESTING-RULES.md](rules/TESTING-RULES.md) | Testing rules distilled from real bugs + test template |
+| [TOOL-INTEGRATION-PLAYBOOK.md](rules/TOOL-INTEGRATION-PLAYBOOK.md) | Verifying external API contracts before implementation |
+| [CODE-REVIEW-CHECKLIST.md](rules/CODE-REVIEW-CHECKLIST.md) | What every review must confirm |
+| [../agent-rules.md](../agent-rules.md) | The numbered engineering rules (rule #24 "done = evidence", etc.) |
+
+---
+
+## 🧭 Decisions — Architecture Decision Records
+
+All significant decisions live in [decisions/](decisions/). ADRs are **append-only history** — some record choices that later changed (e.g. ADR-010's v2 rebuild, superseded by v3; ADR-045 retiring the stable tier). They are kept as the decision trail, not as current instructions. Read them for *why*, read CLAUDE.md for *now*.
 
 | ADR | Decision |
 |-----|----------|
 | [001](decisions/001-why-langgraph.md) | LangGraph JS — stateful graphs, native HITL, Postgres checkpointing |
-| [013](decisions/013-keep-personal-and-engineering-separate.md) | Separate departments — least privilege |
-| [021](decisions/021-multi-agent-transition-and-token-measurement.md) | Context isolation + per-turn token tracking |
-| [022](decisions/022-typed-interdept-contracts.md) | Typed inter-department handoffs (dept_signals) |
-| [027](decisions/027-tool-count-and-handoff-rules.md) | **Current rules:** ~10 tools/agent, sync handoffs for nested HITL visibility |
-| [032](decisions/032-deterministic-anti-hallucination-guards.md) | Memory-tool guard + structured tool-failure envelopes |
-| [033](decisions/033-ai-native-studio-repositioning.md) | Autonomous Studio repositioning + AI/dev-tool niche |
-| [034](decisions/034-recurring-hallucination-audit.md) | Why hallucination bugs recur — structural audit |
+| [032](decisions/032-deterministic-anti-hallucination-guards.md) | Deterministic anti-hallucination (predecessor to the v3 receipt model) |
+| [041](decisions/041-mcp-client-bridge.md) | MCP client bridge |
+| [043](decisions/043-checkpoint-ttl-and-idempotency-window.md) | Checkpoint TTL + idempotency window |
+| [045](decisions/045-retire-stable-tier.md) | Retire the stable tier — two-stage promotion (beta → main) |
 
 ---
 
-## 📚 Study — Learning resources
-
-**Learning path for understanding FounderOS:**
+## 📚 Case studies & build log
 
 | Doc | What it covers |
 |-----|----------------|
-| [study/01-what-is-multi-agent-orchestration.md](study/01-what-is-multi-agent-orchestration.md) | Foundations: agents, tools, supervision, routing |
-| [study/02-langgraph-patterns.md](study/02-langgraph-patterns.md) | LangGraph primitives used in FounderOS (createSupervisor, createReactAgent, state, interrupt) |
-| [study/04-how-founderos-works.md](study/04-how-founderos-works.md) | **Deep dive:** runtime walkthrough (request → supervisor → department → tool → HITL → action) |
-| [study/POSTMORTEM-eval-outputMode.md](study/POSTMORTEM-eval-outputMode.md) | Bug post-mortem: eval tool detection + learning |
-| [study/CASE-STUDY-LOG.md](study/CASE-STUDY-LOG.md) | Build-in-public case study (shipping history, decisions, outcomes) |
+| [turicks-case-studies/](turicks-case-studies/) | **The v1→v2→v3 journey** — 5 candid case studies on where we fell for AI slop, what it cost us, and how we got out. Written for the Turicks community and website. |
+| [turicks-blog/](turicks-blog/) | **Opinion-led posts** riding the AI-slop moment + a ready-to-post [LinkedIn kit](turicks-blog/linkedin-kit.md) for every piece |
+| [study/CASE-STUDY-LOG.md](study/CASE-STUDY-LOG.md) | Append-only build-in-public log (milestones, decisions, metrics) |
+| [study/POSTMORTEM-eval-outputMode.md](study/POSTMORTEM-eval-outputMode.md) | Bug postmortem: eval tool-detection via `handleToolStart` |
 
 ---
 
-## 🎯 Strategy — Turicks GTM (2026-06)
+## 🎯 Strategy — Turicks GTM
 
 | Doc | Purpose |
 |-----|---------|
-| [strategy/README.md](strategy/README.md) | Index — Autonomous Studio repositioning |
-| [strategy/00-VISION-AUTONOMOUS-STUDIO.md](strategy/00-VISION-AUTONOMOUS-STUDIO.md) | North star, category, moat narrative |
-| [strategy/01-POSITIONING-AND-NICHE.md](strategy/01-POSITIONING-AND-NICHE.md) | AI-native studio + AI/dev-tool startup wedge |
-| [strategy/02-OFFER-AND-PRICING.md](strategy/02-OFFER-AND-PRICING.md) | $8K floor, retainer ladder |
+| [strategy/README.md](strategy/README.md) | Index — AI-native studio positioning |
+| [strategy/00-VISION-AUTONOMOUS-STUDIO.md](strategy/00-VISION-AUTONOMOUS-STUDIO.md) | North star, category, moat |
+| [strategy/02-OFFER-AND-PRICING.md](strategy/02-OFFER-AND-PRICING.md) | Offer + pricing ladder |
 | [strategy/03-GTM-ACQUISITION-ENGINE.md](strategy/03-GTM-ACQUISITION-ENGINE.md) | Build-in-public, Proof Drops, referrals |
-| [strategy/04-EXECUTION-ROADMAP.md](strategy/04-EXECUTION-ROADMAP.md) | Phased roadmap + weekly cadence |
-| [strategy/05-SHOWCASE-BRIEF.md](strategy/05-SHOWCASE-BRIEF.md) | 3 showcase pieces for proof.turicks.com |
 
 ---
 
-## 🎯 Next phase — Adding tools & hierarchy
-
-**Architecture is locked.** Next work focuses on:
-
-1. **Adding tools** → Follow [rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md#add-a-tool) wiring map (6 file touches)
-2. **Adding hierarchy** → Nested HITL proof is documented in [decisions/025-hierarchy-proof-on-prebuilts.md](decisions/025-hierarchy-proof-on-prebuilts.md); proof-of-concept code in `feat/hierarchy-*` branch if revival needed
-
-**Do NOT:**
-- Rearchitect the supervisor or department structure
-- Change the 7-department boundary
-- Add new integration layers
-- Rewrite tool wrappers without wiring-map guidance
-
-**If unsure:** Check [rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) first.
-
----
-
-## 🗺️ Other docs (reference)
+## 🗺️ Other folders
 
 | Folder | Purpose |
 |--------|---------|
-| [decisions/](decisions/) | All ADRs (001–032+), full decision history |
-| [phases/](phases/) | Phase delivery docs (Phases 1-6 shipped and locked) |
-| [diagrams/](diagrams/) | System diagrams (mermaid) |
-| [process/](process/) | Development process docs |
-| [strategy/](strategy/) | Turicks GTM strategy doc set (2026-06) |
+| [decisions/](decisions/) | All ADRs — full decision history |
+| [ops/](ops/) | Env vars, prod stabilization memory, "never again" runbook |
+| [process/](process/) | Branch model + release process (branch → beta → main) |
+| [research/](research/) | Forward-looking research (RAG, MCP ecosystem, multi-model) |
+| [plans/](plans/) | Active plans (dated one-shot session plans are pruned) |
+| [phases/](phases/) | Phase delivery docs (active phases only) |
 
 ---
 
-## The 5 core rules (never break)
+## The 5 core invariants (never break)
 
-1. **TDD always** — write failing test first
-2. **HITL before external actions** — `hitlGate()`, side effects after approval
-3. **Idempotency before sends** — audit only after confirmed success ID
-4. **Soft-failure detection** — 200 + message ≠ success, check for ID
-5. **Determinism** — temperature 0; logic in pure functions, not prompts
+1. **Determinism** — temperature 0; routing/parsing/guards are pure functions, never prompt instructions.
+2. **HITL before external actions** — DB row before `interrupt()`; side effects only after approval.
+3. **Idempotency before sends** — idempotency key checked before every external send; audit row only on real success.
+4. **Zero-hallucination** — action claims require a successful receipt; the synthesizer sees only validated results.
+5. **Failures name the real component** — `FailureReport = stage + component + evidence + retryable`; threads are never silently wiped.
 
-Full detail: [rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md).
+Full detail: [../CLAUDE.md](../CLAUDE.md) and [rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md).

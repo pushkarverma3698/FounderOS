@@ -24,11 +24,12 @@ function listParams(query: string, maxResults: number): string {
 }
 
 function getParams(messageId: string): string {
+  // format: "full" — metadata never carries the body, only the ~100-char
+  // snippet, which is why replies used to stop at "Make your journey smoother".
   return JSON.stringify({
     userId: "me",
     id: messageId,
-    format: "metadata",
-    metadataHeaders: ["From", "Subject", "Date"],
+    format: "full",
   });
 }
 
