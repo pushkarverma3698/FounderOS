@@ -14,6 +14,26 @@ FounderOS runs your agency, handles your inbox, posts to LinkedIn, manages GitHu
 
 ---
 
+## 🏗 The 4-Month Journey to Production
+
+Most open-source AI agents are toys that break in production. We spent 4 months building the crash-safe, Postgres-backed, Human-in-the-Loop (HITL) layer that everyone else skips. 
+
+This repository is the result of that journey. It contains the exact architecture we use at Turicks to run our operations.
+
+**Read the Case Studies & Proof of Hardening:**
+- 🛡️ [The Zero-Base Production Audit](docs/ZERO-BASE-AUDIT.md)
+- 📊 [QA & Stabilization Reports](docs/QA-STABILIZATION-REPORT-2026-06-18.md)
+- ⚙️ [Our 39 Architecture Decision Records (ADRs)](docs/decisions/)
+- 🔍 [Full Audit Log & Telemetry](docs/AUDIT_LOG.md)
+
+### System Architecture Highlights
+*(See [docs/diagrams/01-system-architecture.md](docs/diagrams/01-system-architecture.md) for deeper details)*
+- **Supervisor-Worker Pattern:** Gemini 2.5 Flash acts as the Chief of Staff, routing tasks cleanly without tool overlap.
+- **Postgres Checkpointing:** If the server crashes while an agent waits for your Telegram approval, the pending action survives the restart.
+- **Idempotent Executions:** Hashed keys prevent accidental double-sending of emails or duplicate API calls.
+
+---
+
 ## What it does
 
 ```
@@ -279,11 +299,16 @@ Follow the build at [turicks.com](https://turicks.com) or [@pushkarverma3698 on 
 
 ---
 
-## Built by
+## 🚀 Powered by Turicks (Hire Us)
 
-[Pushkar Verma](https://turicks.com) — AI automation engineer. Building FounderOS to run [Turicks](https://turicks.com), an AI-native agency that ships working code (not decks) in 3–5 days.
+FounderOS is the backend brain of our agency. But a brain needs a face. 
 
-*"Safe, evaluated, budget-capped agent actions — the production-hardening layer most agent projects skip."*
+We pair complex AI systems like FounderOS with **immersive 3D Websites and custom SaaS platforms** to create autonomous, high-converting digital businesses. If you are a founder or CTO looking to build a production-grade LangGraph system, or if you need a stunning 3D web frontend to capture leads, you don't need to spend 4 months figuring it out.
+
+**[Hire Turicks — India's AI-Native Agency](https://turicks.com)** 
+*We ship working code and immersive 3D web experiences in days, not months.*
+
+Built by [Pushkar Verma](https://www.linkedin.com/in/pushkarverma3698/). *"Safe, evaluated, budget-capped agent actions — the production-hardening layer most agent projects skip."*
 
 ---
 
