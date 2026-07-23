@@ -38,6 +38,7 @@ import {
   uuid,
   vector,
 } from "drizzle-orm/pg-core";
+import type { Recurrence as ReminderRecurrence } from "../core/time.js";
 
 /** P5: operational tables (agents, signals, checkpoints, audit). */
 export const agentsSchema = pgSchema("agents");
@@ -1012,6 +1013,65 @@ export const savedWorkflows = agentsSchema.table(
 
 export type SavedWorkflow = typeof savedWorkflows.$inferSelect;
 export type NewSavedWorkflow = typeof savedWorkflows.$inferInsert;
+
+// ── reminders (founder-facing pure ping — zero-LLM) ───────────────────────────
+
+/**
+ * A reminder NUDGES the founder — it never executes anything (that's
+ * scheduled_tasks). A zero-LLM cron sweep (src/infra/scheduler.ts) claims due
+ * rows and sends the text straight to chat with no kernel turn, no budget gate
+ * and no HITL — so the "ping me at exactly the right time" promise can't be
+ * throttled. One-shot rows go 'fired'; recurring rows re-arm (remind_at advances
+ * to the next occurrence, status back to 'scheduled'). At-least-once by design:
+ * a crash between send and mark re-pings rather than dropping — a duplicate
+ * nudge beats a missed one.
+ */
+export const REMINDER_STATUSES = ["scheduled", "firing", "fired", "canceled"] as const;
+export type ReminderStatus = (typeof REMINDER_STATUSES)[number];
+
+export const reminders = agentsSchema.table(
+  "reminders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+
+    /** Chat the ping is sent to. */
+    chat_id: text("chat_id").notNull(),
+
+    /** The nudge text shown to the founder at fire time. */
+    text: text("text").notNull(),
+
+    /** Next instant this reminder fires (UTC). Advances for recurring rows. */
+    remind_at: timestamp("remind_at", { withTimezone: true }).notNull(),
+
+    /** null = one-shot; else a simple repeat rule the sweep re-arms from. */
+    recurrence: jsonb("recurrence").$type<ReminderRecurrence | null>(),
+
+    /** IANA zone the founder set it in — for display + recurrence math. */
+    timezone: text("timezone").notNull().default("Asia/Kolkata"),
+
+    /** scheduled | firing | fired | canceled. */
+    status: text("status").notNull().default("scheduled"),
+
+    /** Time-invariant dedup key so an interrupt() resume never double-inserts. */
+    idempotency_key: text("idempotency_key").notNull().unique(),
+
+    /** Set on a fire error — surfaced to the founder by the sweep. */
+    error: text("error"),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    /** Last instant this reminder actually pinged. */
+    fired_at: timestamp("fired_at", { withTimezone: true }),
+  },
+  (t) => ({
+    /** Sweep hot path: pull due 'scheduled' rows ordered by time. */
+    dueIdx: index("rem_due_idx").on(t.status, t.remind_at),
+    tenantIdx: index("rem_tenant_idx").on(t.tenant_id, t.remind_at),
+  }),
+);
+
+export type Reminder = typeof reminders.$inferSelect;
+export type NewReminder = typeof reminders.$inferInsert;
 
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them

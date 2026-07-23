@@ -25,7 +25,7 @@ import { expireStaleInterrupts } from "./db/queries.js";
 import { startHealthServer } from "./infra/health.js";
 import { runProviderSmokeAtBoot } from "./infra/provider-probes.js";
 import { shouldRunProviderSmoke } from "./infra/provider-config.js";
-import { startScheduler } from "./infra/scheduler.js";
+import { startScheduler, recoverStrandedReminders } from "./infra/scheduler.js";
 import { buildRestartMessage } from "./gateway/capability-message.js";
 import { acquireSingleInstanceLock, releaseSingleInstanceLock, waitForProcessExit } from "./infra/single-instance.js";
 import { logger } from "./infra/logger.js";
@@ -95,6 +95,9 @@ async function main(): Promise<void> {
   // guarantees every 'running' row at boot is stranded, not in-flight).
   await recoverStrandedScheduledTasks().catch((err) => {
     log.warn({ err: (err as Error).message }, "Stranded-task recovery failed — non-fatal"); // allow-failopen: boot must survive a recovery blip; the rows stay visible in the DB
+  });
+  await recoverStrandedReminders().catch((err) => {
+    log.warn({ err: (err as Error).message }, "Stranded-reminder recovery failed — non-fatal"); // allow-failopen: boot must survive a recovery blip; the rows stay visible in the DB
   });
 
   // Scheduled agent tasks fire via the gateway runner — injected here so the
