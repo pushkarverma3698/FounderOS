@@ -75,8 +75,10 @@ src/agents/            — worker prompts (prompts/, system-prompts.ts),
 src/tools/             — UnifiedTool implementations (ToolResult envelope)
 src/infra/             — hitl, checkpointer (PostgresSaver), budget, daily-budget,
                          trace, scheduler (maintenance only), health
-src/db/                — schema (19 tables; saved_workflows = reusable-script
-                         catalog, run_count = "most used") + queries; src/eval/ — golden tasks,
+src/db/                — schema (20 tables; saved_workflows = reusable-script
+                         catalog, run_count = "most used"; reminders = zero-LLM
+                         pure-ping queue, distinct from scheduled_tasks) + queries;
+                         src/eval/ — golden tasks,
                          runner, scoring, kernel-invoker; src/proof/ — proof renderers
 src/mcp/               — MCP server (read-only external surface)
 video-factory/         — client social-video engine (standalone npm dir, NOT in

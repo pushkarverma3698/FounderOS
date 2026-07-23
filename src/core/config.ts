@@ -33,6 +33,10 @@ export const envSchema = z.object({
   // Optional: override the tenant name
   FOUNDER_TENANT: z.string().default("turicks"),
 
+  /** Founder-facing timezone (IANA). The server stays UTC; this is the zone the
+   *  planner resolves bare times in and reminders/tasks display in. See core/time.ts. */
+  APP_TIMEZONE: z.string().default("Asia/Kolkata"),
+
   // Tool keys — optional; tools fail loudly when key is missing
   COMPOSIO_API_KEY: z.string().transform(v => v || undefined).optional(),
   /** Gmail backend: gws | googleapis (service account, unattended) | composio (legacy rollback). ADR-029 */

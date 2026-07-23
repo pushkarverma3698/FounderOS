@@ -18,6 +18,7 @@ import { StateGraph, START, END, type BaseCheckpointSaver } from "@langchain/lan
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { KernelState, type KernelStateType } from "./state.js";
 import { makePlanNode, type KernelChatModel, type WorkerCatalogEntry } from "./planner.js";
+import type { Clock } from "../core/time.js";
 import { routeAfterDispatch, routeAfterPlan } from "./supervisor.js";
 import { makeLessonDispatch, type LessonStore } from "./lessons.js";
 import { makeAgentNode, makeToolsNode, routeAfterAgent, collect, type KernelBindableModel, type WorkerSpec } from "./worker.js";
@@ -31,6 +32,8 @@ export interface KernelConfig {
   checkpointer?: BaseCheckpointSaver;
   /** Failure-lesson memory (Postgres in prod, fakes/absent in tests) — optional accelerant. */
   lessons?: LessonStore;
+  /** Injected "now" for the planner's time-awareness — frozen in tests for determinism. */
+  clock?: Clock;
 }
 
 export function buildKernel(config: KernelConfig) {
@@ -45,7 +48,7 @@ export function buildKernel(config: KernelConfig) {
   }));
 
   const graph = new StateGraph(KernelState)
-    .addNode("plan", makePlanNode(config.plannerModel, catalog))
+    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock))
     .addNode("dispatch", makeLessonDispatch(config.lessons))
     .addNode("agent", makeAgentNode(config.workerModel, specs))
     .addNode("tools", makeToolsNode(specs))
