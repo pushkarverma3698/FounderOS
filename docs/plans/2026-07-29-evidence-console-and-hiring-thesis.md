@@ -370,6 +370,98 @@ The design eliminates the side-effect risk class rather than accepting it:
 
 Residual risk after mitigation is **cost**, not compromise — bounded by the caps.
 
+### A11. Critique pass — resequenced for "job ASAP in NL"
+
+The stated goal changed from *"build the most impressive artifact"* to **"get hired in
+the Dutch market as fast as possible."** The spec did not reflect that. Five findings.
+
+#### A11.1 — Applications do not need the console. They need a number.
+
+The console is weeks of work. A Dutch application needs a CV, a LinkedIn profile, and a
+cover letter — **today**. The benchmark produces a number that goes on the CV, and a CV
+bullet survives the recruiter never clicking a link. A dashboard URL does not.
+
+> *"Measured fabricated-action rate across three agent architectures; open-sourced the
+> harness"* is a stronger CV line than any dashboard, because it works offline.
+
+**Revised order — replaces the sequencing in the original spec and A6:**
+
+| Phase | Work | Outcome |
+|---|---|---|
+| **0** (days 1–3) | Benchmark core: pure metrics + task set (TDD, $0), then one capped live run | **The number exists** |
+| **0.5** (days 3–5) | CV, LinkedIn, README rewritten around that number; Tier A/B cover letters | **Applications go out** |
+| **1** (weeks 2–3) | Console S1 inspector + API + deploy | Live URL added to in-flight applications |
+| **2** | S2–S7 remaining evidence surfaces | Depth for later-stage interviews |
+| **3** | S12 adversarial harness, S13 hosted run | Requires the separate box |
+
+Applications start in **week 1**, not week 4. That is the single most important change
+in this amendment.
+
+#### A11.2 — The application layer is missing from the spec entirely
+
+Not specced, and needed before any console work:
+
+- **CV (PDF)** carrying the benchmark numbers — recruiters forward PDFs, not URLs
+- **One-page proof sheet** — architecture diagram + the three headline numbers
+- **Per-company cover letters** referencing that company's specific AI pain (Tier B:
+  Annex III obligations; Tier A: their actual product domain)
+- **Interview prep** — every claim in the artifacts generates a predictable question.
+  If you publish a determinism result you will be asked to derive it at a whiteboard.
+  Artifacts without prep is a trap.
+
+#### A11.3 — `BENCH_BUDGET_USD=1` is genuinely sufficient. Arithmetic:
+
+Gemini Flash ≈ $0.075/M input, $0.30/M output. Per task-run ≈ 4 model calls ≈ 12k input
++ 3.2k output ≈ **$0.002**.
+
+| Configuration | Runs | Est. cost |
+|---|---|---|
+| 20 tasks × 3 arms × 3 repeats | 180 | **$0.36** |
+| 40 tasks × 3 arms × 3 repeats | 360 | **$0.72** |
+
+So $1 covers a full first run with headroom. **Two conditions:** the cap must abort in
+code, not be advisory; and per-run step caps are mandatory, because an unbounded naive
+ReAct retry loop is exactly the failure mode that would burn the budget — which is also
+why "tool-budget adherence" is one of the measured metrics.
+
+#### A11.4 — Container hosting: separate small VPS, and **not yet**
+
+Decision for S13's sandbox: a **separate Hetzner box (~€4/mo), not the prod VPS, not
+local.**
+
+- *Local* — free but not always-on and unreachable by recruiters. Fails the purpose.
+- *Prod VPS* — cheap, but runs stranger-supplied agent configs on the box running the
+  live business. This would contradict the project's entire thesis in the most visible
+  way possible. When an interviewer asks "where does the sandbox run?", *"a separate
+  host with egress firewalling, so a compromise can't reach production"* is the answer
+  that gets an offer; *"same box as prod"* is the answer that ends the conversation.
+- *Separate box* — blast radius fully isolated, own IP, disposable and rebuildable.
+
+**Do not provision now.** Phases 0–2 need nothing extra: the benchmark runs locally and
+the console is read-only, so it can sit on the prod VPS safely. The box is a Phase 3
+cost only.
+
+#### A11.5 — Contingency if the benchmark delta is weak
+
+Arm A **cannot** fabricate action claims — receipts make it structurally impossible — so
+that metric is a near-certain win. The risk is the opposite: if naive ReAct rarely
+fabricates on this task set, the delta is small and the headline is weak.
+
+Plan for it rather than be surprised. If fabrication rates converge, the honest headline
+pivots to whichever metric actually separates the arms — most likely **failure recovery**
+and **determinism**, where contract-first design has the clearest structural advantage.
+Report the convergence explicitly; "fabrication was rarer than expected, but recovery
+differed sharply" is a credible finding, and burying it would be the credibility-killer.
+
+#### A11.6 — Why honest numbers are a *cultural* fit for the Dutch market
+
+Dutch business culture is directness-first and notably intolerant of overselling.
+Publishing a metric where FounderOS loses (benchmark success criterion 6) is not merely
+good epistemics — in this specific market it is a **positioning advantage**. The generic
+candidate arrives with an impressive demo and no numbers. The differentiator is arriving
+with numbers *including the unflattering ones*. That is a character signal, and it is
+harder to fake than any dashboard.
+
 ### A6. Sequencing change
 Docs/positioning track is promoted to run **first and in parallel**, not after the UI.
 Rationale: it is the cheapest credibility win, it unblocks applications immediately,
