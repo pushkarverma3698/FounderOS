@@ -311,6 +311,65 @@ rm -rf apps .claude/launch.json
 longer a workspace package (`pnpm-workspace.yaml` lists only `.`). A fresh config
 gets added when `apps/console` exists.
 
+### A7. Benchmark promoted to centrepiece
+Self-critique found three failures in the original spec: every surface was
+inward-looking (proved FounderOS works, not that the author makes *other* systems
+reliable); numbers had no baseline ("$0.003/turn" versus what?); and the "break-it"
+button was author-curated, i.e. marking my own homework.
+
+Fix: **[Agent Reliability Benchmark](2026-07-29-agent-reliability-benchmark.md)** —
+same tasks, same model, same tools through three arms (FounderOS kernel / naive ReAct /
+raw tool-calling), measuring fabricated-action rate, determinism, cost, latency,
+failure recovery and idempotency. Open-sourced with a mandatory threats-to-validity
+section. This becomes the flagship artifact and the spine of LinkedIn chapters 1, 5, 8.
+
+New console surface **S11 — Benchmark**. The fabricated-action-rate comparison replaces
+the mockup's invented "Autonomy Index" as the headline number.
+
+### A8. Public adversarial harness (S12)
+Strangers attempt to make the agent fabricate an action, escape its tool allowlist, or
+double-send. Every attempt logged; success rate published. Headline becomes
+*"N attempts, 0 successes"* — evidence the author did not curate.
+
+Hard requirements: replay/read-only tenant · no write tools present in the registry at
+all · per-IP rate limiting · prompts retained for analysis · abuse and moderation path
+defined before launch.
+
+### A9. Design interaction model — inspector, not dashboard
+**Keep the mockup's visual identity; rebuild the interaction as a DevTools-grade
+inspector.** Reasoning: generated dark-glow dashboards are now cheap and therefore
+signal little. The genuinely hard component — and the one a senior frontend interviewer
+probes — is a **real-time, virtualized, diffable execution-graph inspector**: DAG
+layout, thousands of streamed events without frame drops, out-of-order SSE handling,
+reconnection with backpressure, side-by-side plan diffing.
+
+Reference points: Chrome DevTools Performance panel, Linear, Datadog. Note the dead v2
+frontend failed at exactly this seam (unthrottled retry loop, no backoff) — a visibly
+correct streaming state machine is itself the proof.
+
+Additional senior signals to ship: publish the console's own measured Core Web Vitals
+on the site · motion only on state transition, interruptible, `prefers-reduced-motion`
+honoured · full keyboard operation and screen-reader support on a dense dark UI.
+
+### A10. Own-agent hosted run (S13) — founder decision, risk noted
+Visitors configure and run an agent against the harness. **Flagged as a serious
+security and cost problem; founder chose it with that stated. Proceeding.**
+
+The design eliminates the side-effect risk class rather than accepting it:
+
+- **Never on the prod VPS.** Separate host/container with egress firewalling. Non-negotiable.
+- **No free-form code.** Visitors compose from a **Zod-validated schema**; arbitrary
+  code execution is not part of the surface.
+- **All tools are sandboxed no-ops** — they record structured results but cannot act.
+  A "send email" tool produces a real receipt and no email. The run is genuine (real
+  model, real kernel, real receipts, real failures); the effects are inert.
+- **Budget**: per-session hard cap, global daily cap, automatic kill switch.
+- **Limits**: step caps reuse `MAX_PLAN_STEPS`; wall-clock timeout; per-IP rate limit.
+- **Auth**: lightweight (e.g. GitHub OAuth) to raise abuse cost, if abuse appears.
+- Full audit logging of every submitted configuration.
+
+Residual risk after mitigation is **cost**, not compromise — bounded by the caps.
+
 ### A6. Sequencing change
 Docs/positioning track is promoted to run **first and in parallel**, not after the UI.
 Rationale: it is the cheapest credibility win, it unblocks applications immediately,
