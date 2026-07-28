@@ -152,9 +152,10 @@ not a 6-week one.** The remote-bridge channel is the main lever that could compr
   hypotheses, not market data.
 - Whether any specific target company sponsors **at mid level** is unverified per
   company. Register presence proves legal capability, not willingness.
-- The partner-permit route (via spouse's Zoekjaar) remains available as an alternative
-  path and would remove the sponsorship filter entirely — worth re-costing if the
-  spouse's status changes.
+- **Settled 2026-07-29:** Tashi's partner visa is **applied**; the embassy/IND decision is
+  due by **9 October 2026**. If it does not come through by then, Tashi applies for
+  **Zoekjaar in November 2026** as the fallback. Either path keeps the partner-permit route
+  live — see the re-costing recommendation in §8.
 
 ---
 
@@ -201,5 +202,10 @@ criterion afterwards.
 **Recommendation:** keep the HSM machine running — it is built, it is cheap to
 operate, and it is the only route that pays from day one. But re-cost the partner
 permit as the *primary* route, because it is the one that matches the stated priority.
-That requires one fact this document does not have: **the current status of the
-spouse's Zoekjaar application.**
+
+**Status (settled 2026-07-29):** partner visa is applied, IND/embassy decision due
+**9 October 2026**. If granted, the partner-permit route above goes live immediately —
+no salary floor, no sponsor filter, physically in-country. If not granted, Tashi applies
+for **Zoekjaar in November 2026**, which reopens the same route on a different legal
+basis. Either way this is the branch worth re-costing now, ahead of the 9 Oct decision,
+rather than after it.

@@ -120,6 +120,13 @@
       "when": 1784100000000,
       "tag": "0016_reminders",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1784150000000,
+      "tag": "0017_job_applications",
+      "breakpoints": true
     }
   ]
 }
