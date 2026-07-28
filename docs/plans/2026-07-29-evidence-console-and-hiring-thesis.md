@@ -241,3 +241,67 @@ Separate Naukri profile for the India funnel. Console must be crawlable.
 - Whether v3 retained the Claude-as-judge gate; if not, judge calibration (human
   concordance) is a named-rare skill worth adding.
 - Whether to add a LangSmith or Promptfoo bridge for keyword coverage against lab screening.
+
+---
+
+## Amendments — 2026-07-29 (design file received, research corrected)
+
+### A1. Design mockup received and reconciled
+`FounderOS Jarvis Dashboard.dc.html` read and rendered. Verdict: **keep the visual
+system, replace the data model** — the mockup's headline numbers (Autonomy Index 87,
+MRR trajectory, acquisition funnel, agent progress bars) are fabricated, and several
+are structurally unknowable rather than merely placeholder. Full analysis, extracted
+design tokens, and the fiction→evidence substitution table:
+[`docs/design/DESIGN-SYSTEM.md`](../design/DESIGN-SYSTEM.md).
+
+The mockup's five-view rail (CORE/PLAN/ORG/SYS/DATA) maps cleanly onto the ten proof
+surfaces — the information architecture survives, the content does not.
+
+### A2. EU AI Act timeline — CORRECTED
+An earlier assumption that high-risk obligations bite on **2 Aug 2026** was **wrong**.
+The Digital Omnibus (Council approval 29 June 2026) moved Annex III standalone
+high-risk to **2 Dec 2027** and Annex I embedded to **2 Aug 2028**.
+
+This *strengthens* the plan: the control-plane build-out runs through 2026–2027, which
+is the hiring window. See [`docs/strategy/07-NL-AI-MARKET-AND-TARGETING.md`](../strategy/07-NL-AI-MARKET-AND-TARGETING.md) §1,
+including the control-to-obligation mapping and the explicit rule **never to claim
+"AI Act compliant"** (a legal conclusion requiring conformity assessment).
+
+### A3. Dutch market pain points identified
+Techleap's *AI Scaling Challenges for Dutch Founders* names four hurdles; two are
+directly exploitable: **talent acquisition crisis** (remedy explicitly includes
+international recruitment) and **insufficient industry knowledge** producing "unclear
+regulations, slow adoption by end-users, and negative media sentiment."
+
+The second reframes the whole pitch: the binding constraint on Dutch AI adoption is
+**trust, not capability**. FounderOS is a trust architecture. Lead with auditability
+and reliability, not model cleverness.
+
+### A4. MCP decision — publish our own, don't integrate someone else's
+Open question resolved. Rather than adding a third-party MCP server for novelty,
+**publish FounderOS's existing read-only MCP surface (`src/mcp/`) as a public
+endpoint** backed by the same evidence data as the console.
+
+Rationale:
+- A recruiter can connect their own Claude/Cursor and *interrogate the live system* —
+  "how many turns has it handled? show me a failure report" — from their own client.
+  That is a materially stronger demonstration than any integration.
+- It proves **MCP server authoring**, a scarce and current skill, rather than MCP
+  consumption, which is trivial.
+- **Zero marginal cost** — it reads Postgres, makes no model calls.
+- The server already exists and is read-only by design, so the security surface is
+  already the right shape.
+
+Constraints: same demo-tenant isolation, redaction and rate limiting as the HTTP API;
+no write tools exposed; publish the connection snippet on the console's front page.
+
+### A5. Repo cleanup
+`apps/jarvis` and `apps/jarvis-next` build artifacts deleted (source recoverable from
+git at `a53a6f2^` — 49 files). Stale `.claude/launch.json` removed; it referenced two
+dead apps. New config to be added when `apps/console` exists.
+
+### A6. Sequencing change
+Docs/positioning track is promoted to run **first and in parallel**, not after the UI.
+Rationale: it is the cheapest credibility win, it unblocks applications immediately,
+and the market research shows README/profile quality is screened before any demo is
+opened.
