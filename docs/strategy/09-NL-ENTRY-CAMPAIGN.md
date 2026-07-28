@@ -158,11 +158,48 @@ not a 6-week one.** The remote-bridge channel is the main lever that could compr
 
 ---
 
-## 7. Employment-history items needing the founder's decision
+## 7. Employment-history answers (settled 2026-07-29)
 
-- **Gap Jun 2025 – Nov 2025** (HFN end → Contact_ME start) is unexplained on the CV.
-  Recruiters ask. Decide the honest one-line answer and use it consistently.
-- **Contact_ME wage dispute** (₹1,63,955, complaint filed 2026-02-04). If unresolved,
-  decide in advance how reference checks are handled.
+- **Gap Jun 2025 – Nov 2025: got married in August 2025.** Complete, honest, and
+  universally understood. Deliberately **not** added to the CV — a sub-6-month gap
+  does not need explaining in writing, and writing it draws attention to something
+  a verbal sentence closes instantly. Keep it as the prepared verbal answer.
+- **Contact_ME wage dispute: resolved.** Nothing expected to surface in reference
+  checks. No further action.
 - **Turicks is self-employment.** Legitimate, but Dutch recruiters read it as a gap
   unless framed as client delivery with named sectors — which the master CV now does.
+
+---
+
+## 8. Route comparison — the salary contradiction
+
+The founder's position (2026-07-29): *"salary doesn't matter for now but what matters
+is entry into the Dutch culture."*
+
+**On the HSM route that position is not available.** €4,357/month is a permit
+condition, not a negotiating preference — IND rejects the application below it and
+the employer cannot lawfully proceed. So on this route salary is the *one* thing that
+cannot flex, which is precisely backwards from the stated priority.
+
+That is an argument about the route, not about the goal:
+
+| Route | Salary floor | Employer pool | Cultural entry | Viable now? |
+|---|---|---|---|---|
+| **HSM (current plan)** | €52,284/yr base — hard | Recognised sponsors only (~12,883) | After offer + MVV, ~Q2–Q3 2027 | Yes |
+| **Partner permit** (via spouse's Zoekjaar) | **None** | **Any Dutch employer** | Immediate on grant | Depends on spouse's status |
+| **Study route** (Dutch master's) | None while studying | Any, post-graduation | **Immediate, and it *is* cultural entry** | Yes — costs tuition + time |
+| Orientation year (own) | None | Any | Immediate | **No** — needs a Dutch or top-200 degree within 3 years; a 2022 Panjab BA does not qualify |
+| EU Blue Card | ~€5,688/mo — higher | Any | After offer | Worse than HSM on every axis |
+
+**Conclusion: if salary genuinely does not matter and cultural entry does, then the
+HSM route is the wrong thing to be optimising.** The partner permit dominates it on
+both axes — no salary floor, no sponsor filter, and he would be physically in-country.
+The study route is the slower but self-sufficient version, and it additionally fixes
+the humanities-degree screening problem and unlocks the reduced €3,122 graduate
+criterion afterwards.
+
+**Recommendation:** keep the HSM machine running — it is built, it is cheap to
+operate, and it is the only route that pays from day one. But re-cost the partner
+permit as the *primary* route, because it is the one that matches the stated priority.
+That requires one fact this document does not have: **the current status of the
+spouse's Zoekjaar application.**
