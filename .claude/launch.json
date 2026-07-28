@@ -6,12 +6,6 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "founderos-jarvis-next", "dev"],
       "port": 3000
-    },
-    {
-      "name": "jarvis-dist",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["-y", "serve", "-s", "apps/jarvis/dist", "-l", "4178"],
-      "port": 4178
     }
   ]
 }

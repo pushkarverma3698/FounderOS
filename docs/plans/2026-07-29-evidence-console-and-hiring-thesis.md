@@ -295,10 +295,21 @@ Rationale:
 Constraints: same demo-tenant isolation, redaction and rate limiting as the HTTP API;
 no write tools exposed; publish the connection snippet on the console's front page.
 
-### A5. Repo cleanup
-`apps/jarvis` and `apps/jarvis-next` build artifacts deleted (source recoverable from
-git at `a53a6f2^` — 49 files). Stale `.claude/launch.json` removed; it referenced two
-dead apps. New config to be added when `apps/console` exists.
+### A5. Repo cleanup — **PENDING, founder action required**
+Deletion of `apps/jarvis` and `apps/jarvis-next` was **attempted and blocked** by the
+sandbox permission layer (`rm -rf` denied). The directories are **still present** and
+still untracked.
+
+Verified safe to delete: the source is recoverable from git at `a53a6f2^` (49 files);
+only stale build output (`dist/`, `.next/`, `node_modules/`) sits on disk.
+
+Founder runs:
+```bash
+rm -rf apps .claude/launch.json
+```
+`.claude/launch.json` is stale — it references `founderos-jarvis-next`, which is no
+longer a workspace package (`pnpm-workspace.yaml` lists only `.`). A fresh config
+gets added when `apps/console` exists.
 
 ### A6. Sequencing change
 Docs/positioning track is promoted to run **first and in parallel**, not after the UI.
