@@ -57,6 +57,20 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
 - **Fix the schema, not the code**: if a task fails on ambiguous requirements,
   the planner asks for the missing field; never guess data.
 - **Bug fixes start with a failing test** (PR template section is mandatory).
+- **Deep-ideate, then self-critique from multiple angles (rule #25)**: before acting
+  on any non-trivial task, generate real alternatives and argue against your own
+  first answer. Three checks are mandatory, in this order:
+  1. **Does it already exist?** Grep before you build. (2026-07-29: a recurrence
+     module was written from scratch while `nextRecurrence` already sat in
+     `src/core/time.ts` — and the existing one was *better*, with real IANA
+     timezone handling instead of a fixed offset.)
+  2. **What is the binding constraint?** Optimising a downstream variable while an
+     upstream one is unverified is the most expensive mistake available. Name the
+     constraint before choosing the work.
+  3. **What would make this wrong?** State the strongest counter-argument to your
+     own plan and answer it, or adopt it.
+  Recommend one option with reasons; never present an unranked survey. If a
+  conclusion rests on an assumption, verify the assumption or label it unverified.
 - **Memory is the source of truth**: docs/ADR changes → `pnpm brain:sync`;
   significant decisions → episodic memory.
 - **Zero paid calls in the dev loop**: unit tests use scripted models;
