@@ -66,7 +66,9 @@ export function parseCsvLine(line: string): string[] {
 
 /** Extract the `name` column from the register CSV text. */
 export function parseSponsorCsv(csv: string): string[] {
-  const lines = csv.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  const lines = csv
+    .split(/\r?\n/)
+    .filter((l) => l.trim().length > 0 && !l.startsWith("#"));
   if (lines.length === 0) return [];
 
   // Drop the header row only if it actually is one.
@@ -74,7 +76,65 @@ export function parseSponsorCsv(csv: string): string[] {
   return body.map((line) => parseCsvLine(line)[0] ?? "").filter((n) => n.length > 0);
 }
 
-let cached: SponsorIndex | null = null;
+/** Read the `# scraped: YYYY-MM-DD` stamp the scraper writes, if present. */
+export function parseScrapedAt(csv: string): Date | null {
+  const m = /^#\s*scraped:\s*(\d{4}-\d{2}-\d{2})/im.exec(csv);
+  if (!m) return null;
+  const d = new Date(`${m[1]!}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * How long the register may go unrefreshed before its answers stop being
+ * trustworthy. IND republishes monthly, so 35 days is one cycle plus slack.
+ */
+export const REGISTER_MAX_AGE_DAYS = 35;
+
+export interface RegisterStaleness {
+  readonly stale: boolean;
+  readonly ageDays: number | null;
+  readonly note: string;
+}
+
+/**
+ * Whether the register is too old to support a confident NEGATIVE.
+ *
+ * The asymmetry is the whole point. A stale register cannot invent a sponsor, so
+ * a positive match stays valid however old the file is. But a company recognised
+ * last week is simply absent from last quarter's file, and screening against it
+ * produces a confident `not-sponsor` — a hard reject of a real opportunity, with
+ * nothing anywhere to indicate it happened.
+ */
+export function registerStaleness(scrapedAt: Date | null, now: Date = new Date()): RegisterStaleness {
+  if (scrapedAt === null) {
+    return {
+      stale: true,
+      ageDays: null,
+      note:
+        "Register carries no scrape date, so its age cannot be established. " +
+        "Re-scrape with: pnpm tsx scripts/ind-sponsors.ts",
+    };
+  }
+  const ageDays = Math.floor((now.getTime() - scrapedAt.getTime()) / 86_400_000);
+  if (ageDays > REGISTER_MAX_AGE_DAYS) {
+    return {
+      stale: true,
+      ageDays,
+      note:
+        `Register is ${ageDays} days old (IND republishes monthly). A company recognised ` +
+        `since ${scrapedAt.toISOString().slice(0, 10)} would be wrongly read as not-sponsor. ` +
+        `Re-scrape with: pnpm tsx scripts/ind-sponsors.ts`,
+    };
+  }
+  return { stale: false, ageDays, note: `Register scraped ${scrapedAt.toISOString().slice(0, 10)} (${ageDays}d old).` };
+}
+
+export interface SponsorRegister {
+  readonly index: SponsorIndex;
+  readonly scrapedAt: Date | null;
+}
+
+let cached: SponsorRegister | null = null;
 
 /**
  * The register index, built on first use and cached for the process lifetime.
@@ -82,7 +142,7 @@ let cached: SponsorIndex | null = null;
  * which is far longer than any process lifetime, so there is no staleness window
  * worth invalidating for.
  */
-export function getSponsorIndex(): SponsorIndex {
+export function getSponsorRegister(): SponsorRegister {
   if (cached) return cached;
 
   let csv: string;
@@ -103,8 +163,12 @@ export function getSponsorIndex(): SponsorIndex {
     );
   }
 
-  cached = buildSponsorIndex(names);
+  cached = { index: buildSponsorIndex(names), scrapedAt: parseScrapedAt(csv) };
   return cached;
+}
+
+export function getSponsorIndex(): SponsorIndex {
+  return getSponsorRegister().index;
 }
 
 /** Test seam — drops the cached index so a fresh one is built on next use. */

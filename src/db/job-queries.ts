@@ -13,7 +13,7 @@
  * gap-scan-queries.ts and account-queries.ts).
  */
 
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { jobApplications, type JobApplication, type NewJobApplication } from "./schema.js";
 
@@ -34,6 +34,34 @@ export async function findApplicationByDedupeKey(
     .where(and(eq(jobApplications.tenant_id, tenantId), eq(jobApplications.dedupe_key, dedupeKey)))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * Roles whose title WORDS match an already-screened role at the same company,
+ * excluding the exact key itself.
+ *
+ * This exists to catch the re-post: "Senior AI Engineer" and "AI Engineer
+ * (Senior)" are one job with two spellings, and the exact-key constraint sees
+ * two. It returns candidates for a human warning rather than blocking, because
+ * token-set equality is not sound enough to forfeit an application on.
+ */
+export async function findApplicationsBySoftKey(
+  softKey: string,
+  excludeDedupeKey: string,
+  tenantId: string = DEFAULT_TENANT,
+): Promise<JobApplication[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(jobApplications)
+    .where(
+      and(
+        eq(jobApplications.tenant_id, tenantId),
+        eq(jobApplications.soft_dedupe_key, softKey),
+        ne(jobApplications.dedupe_key, excludeDedupeKey),
+      ),
+    )
+    .limit(5);
 }
 
 /**
@@ -58,6 +86,8 @@ export async function recordScreenedApplication(
         registered_name: row.registered_name ?? null,
         title: row.title,
         url: row.url ?? null,
+        soft_dedupe_key: row.soft_dedupe_key ?? null,
+        route: row.route ?? "hsm",
         sponsor_verdict: row.sponsor_verdict,
         salary_status: row.salary_status,
         salary_evidence: row.salary_evidence ?? null,
@@ -113,6 +143,29 @@ export async function listLiveApplications(
     )
     .orderBy(asc(jobApplications.last_contact_at))
     .limit(opts.limit ?? 50);
+}
+
+/**
+ * Screening outcomes for review, newest first, optionally filtered by verdict.
+ *
+ * The audit surface for the gates themselves. A stale register or a broken regex
+ * shows up as a reject rate that jumps, and without a way to read rejects back
+ * there is nothing anywhere that would reveal it.
+ */
+export async function listScreenedApplications(
+  opts: { verdict?: string; route?: string; limit?: number; tenantId?: string } = {},
+): Promise<JobApplication[]> {
+  const db = getDb();
+  const conditions = [eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT)];
+  if (opts.verdict) conditions.push(eq(jobApplications.salary_status, opts.verdict));
+  if (opts.route) conditions.push(eq(jobApplications.route, opts.route));
+
+  return db
+    .select()
+    .from(jobApplications)
+    .where(and(...conditions))
+    .orderBy(desc(jobApplications.created_at))
+    .limit(opts.limit ?? 25);
 }
 
 /** Most recently screened roles, newest first — the daily-sweep read-back. */

@@ -941,6 +941,16 @@ export const jobApplications = agentsSchema.table(
     /** Normalised `company::role` — the identity that prevents double-applying. */
     dedupe_key: text("dedupe_key").notNull(),
 
+    /**
+     * Weaker identity (company + sorted title words, noise stripped) used to WARN
+     * about cosmetic re-posts. Never unique — sorting tokens is not sound enough
+     * to block an application on.
+     */
+    soft_dedupe_key: text("soft_dedupe_key"),
+
+    /** hsm | remote-contract — which route's gates produced the verdict. */
+    route: text("route").notNull().default("hsm"),
+
     company: text("company").notNull(),
     /** Canonical IND register name when the sponsor gate matched exactly. */
     registered_name: text("registered_name"),

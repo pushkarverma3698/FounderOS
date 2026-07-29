@@ -13,6 +13,8 @@
  */
 
 import { normaliseCompanyName } from "./sponsor-match.js";
+import { criterionOn, FULL_TIME_HOURS_PER_YEAR, type SalaryCriterion } from "./criteria.js";
+import { extractLanguage, type SalaryFacts } from "./extract.js";
 
 /**
  * €4,357/month gross excluding the 8% holiday allowance, verified at ind.nl for
@@ -50,7 +52,7 @@ export interface SalaryRange {
  * The ceiling of the range is what matters — a range straddling the floor is
  * negotiable upward and stays in play.
  */
-export function screenSalary(range: SalaryRange): ScreenResult {
+export function screenSalary(range: SalaryRange, floor = HSM_UNDER_30_ANNUAL_BASE_EUR): ScreenResult {
   const { min, max } = range;
   const stated = max ?? min;
 
@@ -72,42 +74,144 @@ export function screenSalary(range: SalaryRange): ScreenResult {
     };
   }
 
-  if (stated < HSM_UNDER_30_ANNUAL_BASE_EUR) {
+  if (stated < floor) {
     return {
       status: "reject",
       evidence:
-        `Ceiling €${stated} is below the €${HSM_UNDER_30_ANNUAL_BASE_EUR} annual base ` +
-        `required by the under-30 highly skilled migrant criterion. The employer cannot ` +
+        `Ceiling €${Math.round(stated)} is below the €${floor} annual base ` +
+        `required by the highly skilled migrant criterion. The employer cannot ` +
         `lawfully make this hire, so applying is void.`,
     };
   }
 
   return {
     status: "pass",
-    evidence: `Ceiling €${stated} clears the €${HSM_UNDER_30_ANNUAL_BASE_EUR} annual base.`,
+    evidence: `Ceiling €${Math.round(stated)} clears the €${floor} annual base.`,
   };
 }
 
-/** Softeners that turn a Dutch mention into a preference rather than a bar. */
-const languageSoftener = /\b(nice to have|a plus|preferred|advantage|bonus|desirable|helpful)\b/i;
-const languageHardRequirement = /\b(required|fluent|fluency|native|mandatory|must have|must be)\b/i;
-const dutchMention = /\b(dutch|nederlands|nederlandse)\b/i;
-
-/** Reject postings that genuinely require Dutch; keep the ones where it is a plus. */
+/**
+ * Reject postings that genuinely require Dutch; keep the ones where it is a plus.
+ *
+ * Delegates to the bilingual, sentence-scoped extractor. The predecessor matched
+ * only English requirement words, so "Nederlands is vereist" — the way most Dutch
+ * postings say it — passed straight through the gate.
+ */
 export function screenLanguage(text: string): ScreenResult {
-  if (!dutchMention.test(text)) {
-    return { status: "pass", evidence: "No Dutch-language requirement mentioned." };
+  const { dutchRequired, evidence } = extractLanguage(text);
+  if (dutchRequired === "yes") return { status: "reject", evidence };
+  if (dutchRequired === "unstated") return { status: "flag", evidence };
+  return { status: "pass", evidence };
+}
+
+/** Which permit route a screen is being run under. */
+export type ScreenRoute = "hsm" | "remote-contract";
+
+const HOLIDAY_ALLOWANCE_MULTIPLIER = 1.08;
+
+/** Convert one stated figure to an annual base, given its unit. */
+function toAnnual(value: number, unit: SalaryFacts["unit"]): number | null {
+  if (unit === "annual") return value;
+  if (unit === "monthly") return value * 12;
+  if (unit === "hourly") return value * FULL_TIME_HOURS_PER_YEAR;
+  return null;
+}
+
+/**
+ * Every annual-base figure the posting could plausibly mean.
+ *
+ * This is the mechanism behind the rule that governs queue volume: enumerate what
+ * is genuinely still open, screen each reading, and only involve a human when the
+ * readings DISAGREE. An unstated holiday basis on an €80k role is not worth
+ * anyone's attention — it clears the floor either way.
+ */
+export function candidateAnnualBases(facts: SalaryFacts): number[] {
+  const stated = facts.max ?? facts.min;
+  if (stated === undefined) return [];
+
+  const annual = toAnnual(stated, facts.unit);
+  if (annual === null) return [];
+
+  const byHoliday =
+    facts.holidayBasis === "included"
+      ? [annual / HOLIDAY_ALLOWANCE_MULTIPLIER]
+      : facts.holidayBasis === "excluded"
+        ? [annual]
+        : [annual, annual / HOLIDAY_ALLOWANCE_MULTIPLIER];
+
+  // A part-time posting may quote the full-time equivalent or the actual pay, and
+  // the wording rarely settles which. Both are live readings.
+  const fte = facts.fteFactor;
+  return fte === undefined ? byHoliday : byHoliday.flatMap((v) => [v, v * fte]);
+}
+
+/** Describe the unresolved ambiguities, for a flag's evidence. */
+function ambiguityNotes(facts: SalaryFacts): string[] {
+  const notes: string[] = [];
+  if (facts.holidayBasis === "unstated") {
+    notes.push("whether the figure includes the 8% holiday allowance");
   }
-  if (languageSoftener.test(text)) {
-    return { status: "pass", evidence: "Dutch mentioned as a preference, not a requirement." };
+  if (facts.fteFactor !== undefined) {
+    notes.push(`whether the figure is full-time-equivalent (posting is ${Math.round(facts.fteFactor * 40)}h/week)`);
   }
-  if (languageHardRequirement.test(text)) {
+  if (facts.unitInferred && facts.unit !== "none") {
+    notes.push(`whether the figure is ${facts.unit} (inferred from its size, not stated)`);
+  }
+  return notes;
+}
+
+/**
+ * Screen extracted salary facts against the criterion in force.
+ *
+ * Returns `flag` — never a verdict — when the criterion for the date is not one
+ * this codebase has verified. Asserting a legal threshold from a stale constant
+ * is the failure this guards against.
+ */
+export function screenSalaryFacts(
+  facts: SalaryFacts,
+  opts: { route?: ScreenRoute; now?: Date } = {},
+): ScreenResult {
+  const now = opts.now ?? new Date();
+  const criterion: SalaryCriterion | null = criterionOn(now);
+  if (!criterion) {
     return {
-      status: "reject",
-      evidence: "Posting requires Dutch fluency — not attainable within the hiring window.",
+      status: "flag",
+      evidence:
+        `No verified IND salary criterion for ${now.toISOString().slice(0, 10)} — the table in ` +
+        `criteria.ts covers 2026 only and IND revises every 1 January. Re-check ind.nl and add ` +
+        `the new window before trusting any salary verdict.`,
     };
   }
-  return { status: "pass", evidence: "Dutch mentioned without an explicit fluency requirement." };
+
+  const candidates = candidateAnnualBases(facts);
+  if (candidates.length === 0) {
+    const floorNote =
+      opts.route === "remote-contract"
+        ? `€${criterion.hourly}/hour (the ${criterion.annualBase} annual floor at full-time hours)`
+        : `€${criterion.annualBase} base`;
+    return {
+      status: "flag",
+      evidence: `No salary stated — normal for Dutch postings. Confirm the employer can meet ${floorNote} before investing in an application.`,
+    };
+  }
+
+  const results = candidates.map((v) => screenSalary({ max: v }, criterion.annualBase));
+  const statuses = new Set(results.map((r) => r.status));
+
+  if (statuses.size === 1) {
+    const only = results[0]!;
+    const quoted = facts.raw ? ` Read from: "${facts.raw}".` : "";
+    return { status: only.status, evidence: `${only.evidence}${quoted} (${criterion.basis}.)` };
+  }
+
+  const range = [Math.min(...candidates), Math.max(...candidates)].map((v) => `€${Math.round(v)}`);
+  return {
+    status: "flag",
+    evidence:
+      `Verdict depends on ${ambiguityNotes(facts).join(" and ")}. Readings span ${range[0]}–${range[1]} ` +
+      `against a €${criterion.annualBase} floor, so this genuinely needs a human. ` +
+      `Read from: "${facts.raw ?? "(no figure matched)"}".`,
+  };
 }
 
 /** Stable identity for a role, so the machine never applies to the same posting twice. */
@@ -118,6 +222,39 @@ export function dedupeKey(company: string, title: string): string {
     .trim()
     .replace(/\s+/g, " ");
   return `${normaliseCompanyName(company)}::${role}`;
+}
+
+/**
+ * Cosmetic tokens that carry no role identity — gender markers, employment type,
+ * and the decorations recruiters append to otherwise identical titles.
+ */
+const TITLE_NOISE = new Set([
+  "m", "f", "v", "d", "w", "x", "mfd", "mvd", "mv",
+  "fulltime", "full", "parttime", "part", "time", "fte",
+  "remote", "hybrid", "onsite", "freelance", "contract", "permanent",
+  "new", "urgent", "hiring", "role", "position", "vacancy", "job",
+]);
+
+/**
+ * A weaker identity than `dedupeKey`: same company, same title WORDS, any order,
+ * noise removed. "Senior AI Engineer", "AI Engineer (Senior)" and
+ * "Senior AI Engineer (m/f/d)" all collapse to one value.
+ *
+ * Deliberately NOT used to block. Sorting tokens can merge genuinely distinct
+ * roles ("engineering manager" vs "manager, engineering" are the same; "data
+ * engineer lead" vs "lead data engineer" are too, but the technique is not sound
+ * enough to bet an opportunity on). So this raises a warning for a human while
+ * `dedupeKey` remains the thing that actually prevents a double application.
+ */
+export function softDedupeKey(company: string, title: string): string {
+  const tokens = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 0 && !TITLE_NOISE.has(t));
+  const unique = [...new Set(tokens)].sort();
+  return `${normaliseCompanyName(company)}::${unique.join(" ")}`;
 }
 
 /**

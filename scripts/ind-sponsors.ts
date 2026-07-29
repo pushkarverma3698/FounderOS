@@ -94,7 +94,11 @@ export function shortlist(rows: readonly Sponsor[]): {
 
 function toCsv(rows: readonly Sponsor[]): string {
   const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  return ["name,kvk", ...rows.map((r) => `${esc(r.name)},${r.kvk}`)].join("\n");
+  // The scrape stamp is load-bearing, not decoration: the screening gate reads it
+  // to decide whether a "not on the register" answer is still trustworthy. Without
+  // it a stale file silently hard-rejects newly recognised sponsors.
+  const stamp = `# scraped: ${new Date().toISOString().slice(0, 10)}`;
+  return [stamp, "name,kvk", ...rows.map((r) => `${esc(r.name)},${r.kvk}`)].join("\n");
 }
 
 async function main(): Promise<void> {

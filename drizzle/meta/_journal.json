@@ -127,6 +127,13 @@
       "when": 1784150000000,
       "tag": "0017_job_applications",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784160000000,
+      "tag": "0018_job_applications_route",
+      "breakpoints": true
     }
   ]
 }
