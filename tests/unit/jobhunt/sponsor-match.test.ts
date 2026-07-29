@@ -94,3 +94,47 @@ describe("matchSponsor", () => {
     }
   });
 });
+
+/**
+ * A register entry whose whole identity is one category word ("X-Systems B.V." →
+ * "systems") used to be inherited as a candidate by every company with that word
+ * in its name, which is what flooded the approval queue. A word carried by many
+ * register entries is a category, not an identity.
+ *
+ * Thirteen entries carry "systems" here; "weaviate" is carried by one.
+ */
+const categoryIndex: SponsorIndex = new Map([
+  ...["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", "lambda", "mu"].map(
+    (w) => [`systems ${w}`, `Systems ${w} B.V.`] as [string, string],
+  ),
+  ["x systems", "X-Systems B.V."],
+  ["weaviate", "Weaviate B.V."],
+]);
+
+describe("matchSponsor — category words versus identities", () => {
+  it("does not queue an unrelated company that merely shares a category word", () => {
+    const r = matchSponsor("Fnordling Systems", categoryIndex);
+    expect(r.verdict).toBe("not-sponsor");
+  });
+
+  it("still queues an unrelated company that shares a distinctive name", () => {
+    // "weaviate" identifies exactly one entry, so the overlap is worth a human.
+    const r = matchSponsor("Fnordling Weaviate", categoryIndex);
+    expect(r.verdict).toBe("uncertain");
+    expect(r.candidates).toContain("Weaviate B.V.");
+  });
+
+  it("still queues an abbreviation, even one made of a category word", () => {
+    // The other direction — the ad gives less name than the register, as with
+    // "ASML" for "ASML Netherlands B.V.". That is recall, and it is untouched.
+    expect(matchSponsor("Systems", categoryIndex).verdict).toBe("uncertain");
+  });
+
+  it("still queues a multi-word register entry sitting inside a longer ad name", () => {
+    // Two common words together are an identity again; only the lone-category-word
+    // entries are dropped.
+    const r = matchSponsor("Fnordling Systems Alpha", categoryIndex);
+    expect(r.verdict).toBe("uncertain");
+    expect(r.candidates).toContain("Systems alpha B.V.");
+  });
+});
