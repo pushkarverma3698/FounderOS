@@ -24,7 +24,9 @@ import {
   handleResume,
   handleCommands,
   handleConnect,
+  unknownCommandReply,
 } from "./commands.js";
+import { handleAsk, handleDraft } from "./jobhunt-commands.js";
 import { registerMediaHandlers } from "./media.js";
 import { runKernelText, resumeKernel } from "./kernel-run.js";
 
@@ -50,10 +52,19 @@ export function registerHandlers(bot: Bot): void {
   bot.command("budget", (ctx: Context) => handleBudget(ctx));
   bot.command("connect", (ctx: Context) => handleConnect(ctx));
   bot.command("commands", (ctx: Context) => handleCommands(ctx));
+  bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
+  bot.command("ask", (ctx: Context) => handleAsk(ctx, { runKernelText }));
 
   bot.on("message:text", async (ctx: Context) => {
     const text = ctx.message?.text ?? "";
-    if (text.startsWith("/")) return;
+    if (text.startsWith("/")) {
+      // Registered commands never reach here (grammy matched them first), so
+      // anything left is one the founder typed that does not exist. Returning
+      // silently is the worst available answer: he acted, and the system gave
+      // no sign it had heard him. /draft 1 read exactly like a dead bot.
+      await ctx.reply(unknownCommandReply(text));
+      return;
+    }
     if (!text.trim()) return; // ignore empty / whitespace-only messages
     // Telegram `message.date` is epoch SECONDS (the send time); receivedAt is
     // our clock. Both formatted to readable UTC so logs never show a raw epoch.
