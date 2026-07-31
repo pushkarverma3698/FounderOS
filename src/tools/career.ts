@@ -140,6 +140,53 @@ export const readCvTool: UnifiedTool = {
   },
 };
 
+// ── Full CV text (for whole-document analysis, not search) ───────────────────
+
+/** Below this, the "CV" is a search excerpt or a stub, not a CV. */
+const MIN_PLAUSIBLE_CV_CHARS = 800;
+
+export type CvTextResult =
+  | { ok: true; text: string; source: "wiki" }
+  | { ok: false; error: string };
+
+/**
+ * Read the WHOLE CV document.
+ *
+ * `readCvTool` answers a QUERY — personal-rag returns its top 5 chunks, and the
+ * wiki fallback returns only lines matching the query keywords. That is right
+ * for "what's my LangGraph experience" and wrong for anything that needs to know
+ * what the CV does NOT say.
+ *
+ * Observed 2026-07-29: cv_gaps called readCvTool and got 195 characters back,
+ * then reported 18 skills as "missing from your CV" — every one of which the CV
+ * may well have stated. A gap report is a claim about absence, and absence can
+ * only be read off the complete document.
+ *
+ * Read-only (ADR-015). Never writes to personal-rag.
+ */
+export function readFullCvText(): CvTextResult {
+  try {
+    const text = readFileSync(WIKI_FALLBACK_PATH, "utf-8");
+    if (text.trim().length < MIN_PLAUSIBLE_CV_CHARS) {
+      return {
+        ok: false,
+        error:
+          `The CV document at ${WIKI_FALLBACK_PATH} is only ${text.trim().length} characters. ` +
+          "Refusing to compute gaps from it — a near-empty CV makes every skill in the " +
+          "market look missing.",
+      };
+    }
+    return { ok: true, text, source: "wiki" };
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        `Could not read the CV document at ${WIKI_FALLBACK_PATH}: ${(err as Error).message}. ` +
+        "Gaps cannot be computed without the full text.",
+    };
+  }
+}
+
 // ── search_jobs ───────────────────────────────────────────────────────────────
 
 export const searchJobsTool: UnifiedTool = {

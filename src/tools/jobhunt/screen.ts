@@ -35,6 +35,9 @@ import {
   findApplicationsBySoftKey,
   recordScreenedApplication,
 } from "../../db/job-queries.js";
+import { recordSignals } from "../../db/cv-signal-queries.js";
+import { signalsForPosting } from "./skills.js";
+import type { JobApplication } from "../../db/schema.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 
 const log = childLogger({ module: "tool:screen_job" });
@@ -101,6 +104,168 @@ export function sponsorGate(match: SponsorMatch, stale: ReturnType<typeof regist
   return { gate: "Sponsor", status, evidence: match.evidence };
 }
 
+// ── The gates, as a function ──────────────────────────────────────────────────
+
+export interface PostingInput {
+  readonly company: string;
+  readonly title: string;
+  readonly url?: string;
+  readonly description: string;
+  /** manual | ats-ingest — provenance, recorded so the funnel can be split by source. */
+  readonly source?: string;
+  /** Employer's publication date, when the source provides one. */
+  readonly postedAt?: Date;
+}
+
+export type ScreenOutcome =
+  | { readonly kind: "error"; readonly message: string }
+  | {
+      readonly kind: "duplicate";
+      readonly company: string;
+      readonly title: string;
+      readonly stage: string;
+      readonly appliedAt: Date | null;
+    }
+  | {
+      readonly kind: "screened";
+      readonly company: string;
+      readonly title: string;
+      readonly route: ScreenRoute;
+      readonly verdict: ScreenVerdict;
+      readonly routesTried: number;
+      readonly match: SponsorMatch;
+      readonly nearDuplicates: readonly JobApplication[];
+    };
+
+/**
+ * Apply every gate to one posting and record the verdict.
+ *
+ * This is the single screening path. `screen_job` (founder pastes a posting) and
+ * `ingest_jobs` (the daily sweep) both call it, and neither reimplements any part
+ * of it — two implementations of the same gates would drift, and the drift would
+ * be invisible: both paths would keep returning confident verdicts.
+ */
+export async function screenPosting(input: PostingInput): Promise<ScreenOutcome> {
+  const company = input.company.trim();
+  const title = input.title.trim();
+  if (company.length === 0 || title.length === 0) {
+    return { kind: "error", message: "screen_job needs both a company and a title." };
+  }
+
+  const description = input.description;
+  const key = dedupeKey(company, title);
+  const softKey = softDedupeKey(company, title);
+
+  // Duplicate check first — cheapest gate, most embarrassing failure.
+  let existing: JobApplication | null = null;
+  let nearDuplicates: JobApplication[] = [];
+  try {
+    existing = await findApplicationByDedupeKey(key);
+    nearDuplicates = await findApplicationsBySoftKey(softKey, key);
+  } catch (err) {
+    return { kind: "error", message: `Application tracker unreachable: ${(err as Error).message}` };
+  }
+
+  if (
+    existing &&
+    ENGAGED_STAGES.has(existing.stage) &&
+    !isStaleEnoughToReapply(existing.applied_at ?? null, new Date())
+  ) {
+    return {
+      kind: "duplicate",
+      company,
+      title,
+      stage: existing.stage,
+      appliedAt: existing.applied_at ?? null,
+    };
+  }
+
+  const facts = extractPostingFacts(description);
+
+  let register: ReturnType<typeof getSponsorRegister>;
+  try {
+    register = getSponsorRegister();
+  } catch (err) {
+    return { kind: "error", message: (err as Error).message };
+  }
+  const stale = registerStaleness(register.scrapedAt);
+  const match = matchSponsor(company, register.index);
+  const language = screenLanguage(description);
+
+  const outcomes = routesToScreen(facts.route).map((route) => {
+    const salary = screenSalaryFacts(facts.salary, { route });
+    const gates: Gate[] =
+      route === "hsm"
+        ? [sponsorGate(match, stale), { gate: "Salary", ...salary }, { gate: "Language", ...language }]
+        : [
+            { gate: "Route", status: "pass" as ScreenStatus, evidence: "Remote contract — no sponsor or permit floor applies." },
+            { gate: "Rate", ...salary },
+            { gate: "Language", ...language },
+          ];
+    return { route, verdict: combineVerdict(gates) };
+  });
+
+  const chosen = bestOutcome(outcomes);
+
+  try {
+    await recordScreenedApplication({
+      tenant_id: "turicks",
+      dedupe_key: key,
+      soft_dedupe_key: softKey,
+      company,
+      registered_name: match.registered_name ?? null,
+      title,
+      url: input.url ?? null,
+      route: chosen.route,
+      sponsor_verdict: match.verdict,
+      salary_status: chosen.verdict.status,
+      salary_evidence: chosen.verdict.reasons.join(" | ").slice(0, 2000),
+      stage: "screened",
+      description: description.slice(0, DESCRIPTION_MAX),
+      posted_at: input.postedAt ?? null,
+      source: input.source ?? "manual",
+    });
+  } catch (err) {
+    return {
+      kind: "error",
+      message: `Screened "${company} · ${title}" but could not record it: ${(err as Error).message}`,
+    };
+  }
+
+  // Only postings that clear every gate feed the CV signal table. Roles Pushkar
+  // cannot legally hold describe a market he cannot enter, and letting them vote
+  // on what his CV should say is how a gap report ends up recommending skills for
+  // jobs that would be rejected on the sponsor gate anyway.
+  if (chosen.verdict.status === "pass") {
+    try {
+      await recordSignals(signalsForPosting(description, company));
+    } catch (err) {
+      // allow-failopen: a lost frequency count must never discard a screening
+      // verdict. The verdict is the decision; signals are the running average.
+      log.warn({ company, title, err: (err as Error).message }, "CV signal recording failed");
+    }
+  }
+
+  log.info(
+    { company, title, route: chosen.route, verdict: chosen.verdict.status, detectedRoute: facts.route },
+    "Job screened",
+  );
+
+  return {
+    kind: "screened",
+    company,
+    title,
+    route: chosen.route,
+    verdict: chosen.verdict,
+    routesTried: outcomes.length,
+    match,
+    nearDuplicates,
+  };
+}
+
+/** Bound the stored posting body — enough to re-derive signals, not enough to bloat rows. */
+const DESCRIPTION_MAX = 20_000;
+
 export const screenJobTool: UnifiedTool = {
   name: "screen_job",
   description:
@@ -127,119 +292,54 @@ export const screenJobTool: UnifiedTool = {
   },
 
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
-    const company = String(args["company"] ?? "").trim();
-    const title = String(args["title"] ?? "").trim();
-    if (company.length === 0 || title.length === 0) {
-      return { success: false, error: "screen_job needs both a company and a title." };
-    }
-
-    const url = args["url"] as string | undefined;
-    const description = String(args["description"] ?? "");
-    const key = dedupeKey(company, title);
-    const softKey = softDedupeKey(company, title);
-
-    // Duplicate check first — cheapest gate, most embarrassing failure.
-    let existing: Awaited<ReturnType<typeof findApplicationByDedupeKey>> = null;
-    let nearDuplicates: Awaited<ReturnType<typeof findApplicationsBySoftKey>> = [];
-    try {
-      existing = await findApplicationByDedupeKey(key);
-      nearDuplicates = await findApplicationsBySoftKey(softKey, key);
-    } catch (err) {
-      return { success: false, error: `Application tracker unreachable: ${(err as Error).message}` };
-    }
-
-    if (
-      existing &&
-      ENGAGED_STAGES.has(existing.stage) &&
-      !isStaleEnoughToReapply(existing.applied_at ?? null, new Date())
-    ) {
-      return {
-        success: true,
-        data:
-          `ALREADY IN PIPELINE — ${company} · ${title}\n` +
-          `Stage: ${existing.stage}${existing.applied_at ? ` (applied ${existing.applied_at.toISOString().slice(0, 10)})` : ""}\n` +
-          `Do not apply again. Follow up on the existing application instead.`,
-      };
-    }
-
-    const facts = extractPostingFacts(description);
-
-    let register: ReturnType<typeof getSponsorRegister>;
-    try {
-      register = getSponsorRegister();
-    } catch (err) {
-      return { success: false, error: (err as Error).message };
-    }
-    const stale = registerStaleness(register.scrapedAt);
-    const match = matchSponsor(company, register.index);
-    const language = screenLanguage(description);
-
-    const outcomes = routesToScreen(facts.route).map((route) => {
-      const salary = screenSalaryFacts(facts.salary, { route });
-      const gates: Gate[] =
-        route === "hsm"
-          ? [sponsorGate(match, stale), { gate: "Salary", ...salary }, { gate: "Language", ...language }]
-          : [
-              { gate: "Route", status: "pass" as ScreenStatus, evidence: "Remote contract — no sponsor or permit floor applies." },
-              { gate: "Rate", ...salary },
-              { gate: "Language", ...language },
-            ];
-      return { route, verdict: combineVerdict(gates) };
+    const outcome = await screenPosting({
+      company: String(args["company"] ?? ""),
+      title: String(args["title"] ?? ""),
+      description: String(args["description"] ?? ""),
+      ...(args["url"] ? { url: String(args["url"]) } : {}),
+      source: "manual",
     });
-
-    const chosen = bestOutcome(outcomes);
-
-    try {
-      await recordScreenedApplication({
-        tenant_id: "turicks",
-        dedupe_key: key,
-        soft_dedupe_key: softKey,
-        company,
-        registered_name: match.registered_name ?? null,
-        title,
-        url: url ?? null,
-        route: chosen.route,
-        sponsor_verdict: match.verdict,
-        salary_status: chosen.verdict.status,
-        salary_evidence: chosen.verdict.reasons.join(" | ").slice(0, 2000),
-        stage: "screened",
-      });
-    } catch (err) {
-      return {
-        success: false,
-        error: `Screened "${company} · ${title}" but could not record it: ${(err as Error).message}`,
-      };
-    }
-
-    log.info(
-      { company, title, route: chosen.route, verdict: chosen.verdict.status, detectedRoute: facts.route },
-      "Job screened",
-    );
-
-    const routeLabel = chosen.route === "hsm" ? "sponsorship route" : "remote-contract route";
-    const header =
-      chosen.verdict.status === "reject"
-        ? `REJECT — ${company} · ${title}\nDo not apply. Reasons below are legal bars, not preferences. (Best of ${outcomes.length} route(s); shown: ${routeLabel}.)`
-        : chosen.verdict.status === "flag"
-          ? `NEEDS A HUMAN CHECK — ${company} · ${title}\nOne or more gates could not be settled from the posting alone. (${routeLabel})`
-          : `PASS — ${company} · ${title}\nClears every hard gate on the ${routeLabel}. Safe to research and draft.`;
-
-    const candidates =
-      match.candidates.length > 0
-        ? `\n\nRegister entries to disambiguate:\n${match.candidates.slice(0, 8).map((c) => `  · ${c}`).join("\n")}`
-        : "";
-
-    const nearDupeWarning =
-      nearDuplicates.length > 0
-        ? `\n\n⚠ POSSIBLE RE-POST of a role already in the tracker:\n${nearDuplicates
-            .slice(0, 3)
-            .map((d) => `  · "${d.title}" (${d.stage})`)
-            .join("\n")}\nCheck before applying — the titles differ but the words are the same.`
-        : "";
-
-    return {
-      success: true,
-      data: `${header}\n\n${chosen.verdict.reasons.map((r) => `  · ${r}`).join("\n")}${candidates}${nearDupeWarning}`,
-    };
+    if (outcome.kind === "error") return { success: false, error: outcome.message };
+    return { success: true, data: formatScreenOutcome(outcome) };
   },
 };
+
+/** Render a screening outcome for the founder. Pure — no I/O, no state. */
+export function formatScreenOutcome(
+  outcome: Extract<ScreenOutcome, { kind: "duplicate" | "screened" }>,
+): string {
+  if (outcome.kind === "duplicate") {
+    const applied = outcome.appliedAt
+      ? ` (applied ${outcome.appliedAt.toISOString().slice(0, 10)})`
+      : "";
+    return (
+      `ALREADY IN PIPELINE — ${outcome.company} · ${outcome.title}\n` +
+      `Stage: ${outcome.stage}${applied}\n` +
+      `Do not apply again. Follow up on the existing application instead.`
+    );
+  }
+
+  const { company, title, route, verdict, routesTried, match, nearDuplicates } = outcome;
+  const routeLabel = route === "hsm" ? "sponsorship route" : "remote-contract route";
+  const header =
+    verdict.status === "reject"
+      ? `REJECT — ${company} · ${title}\nDo not apply. Reasons below are legal bars, not preferences. (Best of ${routesTried} route(s); shown: ${routeLabel}.)`
+      : verdict.status === "flag"
+        ? `NEEDS A HUMAN CHECK — ${company} · ${title}\nOne or more gates could not be settled from the posting alone. (${routeLabel})`
+        : `PASS — ${company} · ${title}\nClears every hard gate on the ${routeLabel}. Safe to research and draft.`;
+
+  const candidates =
+    match.candidates.length > 0
+      ? `\n\nRegister entries to disambiguate:\n${match.candidates.slice(0, 8).map((c) => `  · ${c}`).join("\n")}`
+      : "";
+
+  const nearDupeWarning =
+    nearDuplicates.length > 0
+      ? `\n\n⚠ POSSIBLE RE-POST of a role already in the tracker:\n${nearDuplicates
+          .slice(0, 3)
+          .map((d) => `  · "${d.title}" (${d.stage})`)
+          .join("\n")}\nCheck before applying — the titles differ but the words are the same.`
+      : "";
+
+  return `${header}\n\n${verdict.reasons.map((r) => `  · ${r}`).join("\n")}${candidates}${nearDupeWarning}`;
+}

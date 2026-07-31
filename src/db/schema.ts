@@ -978,6 +978,18 @@ export const jobApplications = agentsSchema.table(
 
     notes: text("notes"),
 
+    /**
+     * The posting body, verbatim. Kept because the skill dictionary
+     * (src/tools/jobhunt/skills-dictionary.ts) will gain terms over time, and
+     * without the source text every signal recorded before a term was added is
+     * unrecoverable — the history would silently under-count the new term.
+     */
+    description: text("description"),
+    /** When the employer published it (from the ATS feed), not when we saw it. */
+    posted_at: timestamp("posted_at", { withTimezone: true }),
+    /** manual | ats-ingest — how the posting reached the gates. */
+    source: text("source").notNull().default("manual"),
+
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
@@ -991,6 +1003,53 @@ export const jobApplications = agentsSchema.table(
 
 export type JobApplication = typeof jobApplications.$inferSelect;
 export type NewJobApplication = typeof jobApplications.$inferInsert;
+
+// ── cv_signals ────────────────────────────────────────────────────────────────
+
+/**
+ * What the reachable market actually asks for, accumulated one posting at a time.
+ *
+ * Only postings that PASS the screening gates contribute. That restriction is
+ * the whole value of the table: the market at large is noise, while the roles
+ * Pushkar can legally hold are the only population his CV needs to match.
+ *
+ * It informs the CV; it never edits it. There is deliberately no write path from
+ * here to personal-rag (ADR-015 — read-only) or to any CV document. `cv_gaps`
+ * reports the difference and the founder decides what is true.
+ *
+ * `seen_count` is postings, NOT mentions — see src/tools/jobhunt/skills.ts.
+ */
+export const cvSignals = agentsSchema.table(
+  "cv_signals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+
+    /** Canonical term as the founder reads it, e.g. 'Kubernetes'. */
+    term: text("term").notNull(),
+
+    /** language | framework | infra | data | ai | practice | unknown. */
+    category: text("category").notNull(),
+
+    /** Number of DISTINCT passing postings that asked for this. */
+    seen_count: integer("seen_count").notNull().default(0),
+
+    first_seen_at: timestamp("first_seen_at", { withTimezone: true }).defaultNow(),
+    last_seen_at: timestamp("last_seen_at", { withTimezone: true }).defaultNow(),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    /** One row per term — the count is a running total, not an event log. */
+    termUniq: uniqueIndex("cv_signals_term_uniq").on(t.tenant_id, t.term),
+    /** Gap report hot path: most-demanded first. */
+    rankIdx: index("cv_signals_rank_idx").on(t.tenant_id, t.seen_count),
+  }),
+);
+
+export type CvSignal = typeof cvSignals.$inferSelect;
+export type NewCvSignal = typeof cvSignals.$inferInsert;
 
 // ── failure_lessons ───────────────────────────────────────────────────────────
 

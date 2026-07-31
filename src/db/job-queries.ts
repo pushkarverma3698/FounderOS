@@ -13,7 +13,7 @@
  * gap-scan-queries.ts and account-queries.ts).
  */
 
-import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { jobApplications, type JobApplication, type NewJobApplication } from "./schema.js";
 
@@ -166,6 +166,26 @@ export async function listScreenedApplications(
     .where(and(...conditions))
     .orderBy(desc(jobApplications.created_at))
     .limit(opts.limit ?? 25);
+}
+
+/**
+ * How many postings cleared every gate — the denominator for the CV gap report.
+ *
+ * Reported next to every percentage, because "68% of postings" over 4 postings
+ * and over 400 are the same number and mean entirely different things. Without
+ * the sample size the report invites a CV rewrite on three data points.
+ */
+export async function countPassingApplications(
+  tenantId: string = DEFAULT_TENANT,
+): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(jobApplications)
+    .where(
+      and(eq(jobApplications.tenant_id, tenantId), eq(jobApplications.salary_status, "pass")),
+    );
+  return Number(row?.n ?? 0);
 }
 
 /** Most recently screened roles, newest first — the daily-sweep read-back. */

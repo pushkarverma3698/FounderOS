@@ -71,7 +71,16 @@ function isPlausible(value: number, unit: Exclude<SalaryUnit, "none">): boolean 
  * Returns null when the token cannot be read confidently.
  */
 export function parseAmount(token: string): number | null {
-  const cleaned = token.replace(/[€\s]/g, "").replace(/,-$/, "").trim();
+  const cleaned = token
+    .replace(/[€\s]/g, "")
+    .replace(/,-$/, "")
+    .trim()
+    // A trailing separator is sentence punctuation, never part of the number.
+    // Observed live 2026-07-29: a posting ending "…€2,95." parsed as 295 —
+    // the trailing full stop made the comma look like a thousands mark — which
+    // became €613,600/year at full-time hours and PASSED the salary gate. A
+    // false pass is the expensive direction: it spends a real application.
+    .replace(/[.,]+$/, "");
   if (cleaned.length === 0) return null;
 
   const kSuffix = /^([\d.,]+)[kK]$/.exec(cleaned);

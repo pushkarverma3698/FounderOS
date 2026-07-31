@@ -203,3 +203,23 @@ describe("extractRoute", () => {
     expect(extractRoute("We are hiring an AI engineer.")).toBe("unclear");
   });
 });
+
+describe("parseAmount — trailing sentence punctuation", () => {
+  it("does not let a trailing full stop flip the decimal reading", () => {
+    // Live regression 2026-07-29: "€2,95." parsed as 295, which at full-time
+    // hours became a €613,600 ceiling and PASSED the salary gate on a posting
+    // that stated no salary at all.
+    expect(parseAmount("€2,95.")).toBe(2.95);
+    expect(parseAmount("€2,95")).toBe(2.95);
+  });
+
+  it("still reads real thousands grouping", () => {
+    expect(parseAmount("€55.000")).toBe(55000);
+    expect(parseAmount("€67,300")).toBe(67300);
+    expect(parseAmount("€55.000.")).toBe(55000);
+  });
+
+  it("ignores a trailing comma", () => {
+    expect(parseAmount("€4.357,")).toBe(4357);
+  });
+});

@@ -14,6 +14,14 @@ const mockFind = vi.fn(async (_key: string) => null as Record<string, unknown> |
 const mockSoft = vi.fn(async (_soft: string, _exclude: string) => [] as Record<string, unknown>[]);
 const mockRecord = vi.fn(async (row: Record<string, unknown>) => ({ id: "ja1", ...row }));
 
+// screen.ts records CV signals on a PASS. Mocked so the unit suite never opens a
+// database connection — a test that silently writes to a real table is a test
+// that passes for the wrong reason.
+vi.mock("../../../src/db/cv-signal-queries.js", () => ({
+  recordSignals: vi.fn(async () => 0),
+  listSignals: vi.fn(async () => []),
+}));
+
 vi.mock("../../../src/db/job-queries.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return {
