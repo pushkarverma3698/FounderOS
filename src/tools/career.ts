@@ -43,6 +43,20 @@ const WIKI_FALLBACK_PATH = process.env["PERSONAL_WIKI_PATH"]
 const CV_PATH = process.env["PERSONAL_CV_PATH"]
   ?? join(HOME_DIR, "Projects/personal-rag/data/local_docs/cv-master.md");
 
+/**
+ * Root of the per-track CV workspaces: `<dir>/<track>/cv.md`.
+ *
+ * One CV cannot serve three tracks. The AI, backend and frontend markets ask for
+ * different things, and a single document measured against all three produces a
+ * gap list that is wrong for each of them — every backend term reads as a gap on
+ * an AI CV and vice versa.
+ *
+ * The single-file path remains the fallback so nothing breaks before the three
+ * documents exist.
+ */
+const CV_DIR = process.env["PERSONAL_CV_DIR"]
+  ?? join(HOME_DIR, "Projects/personal-rag/data/local_docs/cv");
+
 // ── read_cv ───────────────────────────────────────────────────────────────────
 
 export const readCvTool: UnifiedTool = {
@@ -158,8 +172,20 @@ export const readCvTool: UnifiedTool = {
 const MIN_PLAUSIBLE_CV_CHARS = 800;
 
 export type CvTextResult =
-  | { ok: true; text: string; source: "cv" }
+  | { ok: true; text: string; source: "cv"; path: string }
   | { ok: false; error: string };
+
+/**
+ * Where a track's CV lives, and where to look if it doesn't exist yet.
+ *
+ * The per-track file is preferred; the shared master is the fallback. There is
+ * deliberately NO fallback from one track to another: a frontend gap report
+ * computed against the AI CV would be confidently wrong in both directions.
+ */
+export function cvPathsForTrack(track?: string): string[] {
+  if (!track || track === "unclassified") return [CV_PATH];
+  return [join(CV_DIR, track, "cv.md"), CV_PATH];
+}
 
 /**
  * Read the WHOLE CV document.
@@ -175,33 +201,52 @@ export type CvTextResult =
  * only be read off the complete document.
  *
  * Read-only (ADR-015). Never writes to personal-rag.
+ *
+ * With a `track`, reads that track's workspace CV and falls back to the shared
+ * master. It never falls back to ANOTHER track — a frontend report built on the
+ * AI CV would invent gaps and hide real ones at the same time.
  */
-export function readFullCvText(): CvTextResult {
-  try {
-    const text = readFileSync(CV_PATH, "utf-8");
+export function readFullCvText(track?: string): CvTextResult {
+  const candidates = cvPathsForTrack(track);
+  const failures: string[] = [];
+
+  for (const path of candidates) {
+    let text: string;
+    try {
+      text = readFileSync(path, "utf-8");
+    } catch (err) {
+      failures.push(`${path}: ${(err as Error).message}`);
+      continue;
+    }
+
+    // A too-short file is a HARD stop, not a reason to try the next candidate.
+    // Falling through would answer a question about the track's CV using the
+    // master, and report the result as though it were the track's.
     if (text.trim().length < MIN_PLAUSIBLE_CV_CHARS) {
       return {
         ok: false,
         error:
-          `The CV document at ${CV_PATH} is only ${text.trim().length} characters. ` +
+          `The CV document at ${path} is only ${text.trim().length} characters. ` +
           "Refusing to compute gaps from it — a near-empty CV makes every skill in the " +
           "market look missing.",
       };
     }
-    return { ok: true, text, source: "cv" };
-  } catch (err) {
-    // No silent fall back to the wiki. The wiki is model-synthesized from chat
-    // transcripts and has been observed to state the wrong employer, title and
-    // dates — substituting it here would turn a missing file into a confidently
-    // wrong gap report, which is the more expensive failure.
-    return {
-      ok: false,
-      error:
-        `Could not read the CV at ${CV_PATH}: ${(err as Error).message}. ` +
-        "Gaps cannot be computed without it. Set PERSONAL_CV_PATH or restore the file — " +
-        "the synthesized wiki is NOT an acceptable substitute.",
-    };
+    return { ok: true, text, source: "cv", path };
   }
+
+  // No silent fall back to the wiki. The wiki is model-synthesized from chat
+  // transcripts and has been observed to state the wrong employer, title and
+  // dates — substituting it here would turn a missing file into a confidently
+  // wrong gap report, which is the more expensive failure.
+  return {
+    ok: false,
+    error:
+      `Could not read the CV${track ? ` for the ${track} track` : ""}. Tried:\n` +
+      failures.map((f) => `  · ${f}`).join("\n") +
+      "\nGaps cannot be computed without it. Set PERSONAL_CV_DIR (per-track) or " +
+      "PERSONAL_CV_PATH (shared), or restore the file — the synthesized wiki is NOT " +
+      "an acceptable substitute.",
+  };
 }
 
 // ── search_jobs ───────────────────────────────────────────────────────────────

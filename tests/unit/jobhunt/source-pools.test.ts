@@ -11,13 +11,12 @@
 import { describe, it, expect } from "vitest";
 import {
   buildAtsInput,
-  classifyTrack,
   DEFAULT_EXPERIENCE,
   POOL_ORDER,
   POOL_QUERIES,
-  TRACK_PRIORITY,
   type SourcePool,
 } from "../../../src/tools/jobhunt/ats-source.js";
+import { classifyTrack, TRACK_PRIORITY } from "../../../src/tools/jobhunt/tracks.js";
 
 describe("classifyTrack", () => {
   it("assigns a plain AI title to the ai track", () => {

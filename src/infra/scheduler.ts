@@ -247,32 +247,68 @@ export async function recoverStrandedReminders(): Promise<void> {
 }
 
 /**
- * Daily — pull fresh postings and screen them all. Zero-LLM: the fetch is HTTP
- * and every gate is pure code, so this runs unattended without touching the
- * model budget.
+ * Daily — sweep every source pool, screen everything, and send a BRIEF.
  *
- * It reports on every outcome including failure. A sweep that goes quiet is
- * indistinguishable from a market with no jobs in it, and that ambiguity is the
- * whole reason the founder would stop trusting the number.
+ * Zero-LLM: the fetch is HTTP, every gate is pure code, and ranking is a set
+ * intersection, so this runs unattended without touching the model budget.
+ *
+ * What the founder receives is a ranked shortlist with one command per row, not
+ * a log of verdicts. The previous version screened flawlessly and produced zero
+ * applications for weeks: screening was never the binding constraint, and a
+ * report that costs nothing to ignore will be ignored.
+ *
+ * A total failure still sends. A sweep that goes quiet is indistinguishable from
+ * a market with no jobs in it, and that ambiguity is exactly why the founder
+ * would stop trusting the number.
  */
 export async function runJobIngestSweep(): Promise<void> {
-  const { runJobIngest, formatIngestSummary } = await import("../tools/jobhunt/ingest.js");
-  const result = await runJobIngest({ timeRange: "24h", limit: JOB_INGEST_DAILY_LIMIT });
+  const { runPooledIngest } = await import("../tools/jobhunt/ingest.js");
+  const { buildDailyBrief } = await import("../tools/jobhunt/daily-brief.js");
 
-  if (!result.ok) {
-    log.warn({ error: result.error }, "Daily job ingest failed");
+  const result = await runPooledIngest({
+    limit: JOB_INGEST_DAILY_LIMIT,
+    includeIndeed: true,
+  });
+
+  if (result.fetched === 0 && result.failures.length > 0) {
+    log.warn({ failures: result.failures }, "Daily job ingest failed on every source");
     // Plain text, no parse mode: real job titles contain "&" and "<", which
     // HTML mode would reject — the alert must not fail on the alert's content.
-    await sendToChat(`⚠ Job ingest failed — nothing was screened today.\n${result.error}`);
+    await sendToChat(
+      `⚠ Job sweep failed — nothing was screened today.\n${result.failures.join("\n")}`,
+    );
     return;
   }
 
-  log.info({ fetched: result.summary.fetched }, "Daily job ingest complete");
-  await sendToChat(formatIngestSummary(result.summary));
+  log.info(
+    { fetched: result.fetched, failures: result.failures.length },
+    "Daily job ingest complete",
+  );
+
+  try {
+    await sendToChat(
+      await buildDailyBrief({ screened: result.fetched, failures: result.failures }),
+    );
+  } catch (err) {
+    // The postings ARE screened and recorded by this point. Losing the brief must
+    // not read as losing the sweep, so say which one actually failed.
+    log.error({ err: (err as Error).message }, "Daily brief render failed");
+    await sendToChat(
+      `⚠ Screened ${result.fetched} posting(s), but the brief could not be built: ` +
+        `${(err as Error).message}\nThe screening results are recorded — run /jobs to read them.`,
+    );
+  }
 }
 
-/** Founder-approved daily volume: ~$4/month at the feed's per-job price. */
-const JOB_INGEST_DAILY_LIMIT = 10;
+/**
+ * Founder-approved daily volume, raised from 10 on 2026-07-31: ~$12/month at the
+ * feed's per-job price.
+ *
+ * Three tracks need roughly three times the volume of one. At 10/day split
+ * across ai, backend and frontend, every track sits permanently below
+ * MIN_SAMPLE_FOR_PERCENTAGES and no gap report is ever reportable.
+ */
+const JOB_INGEST_DAILY_LIMIT = 30;
 
 export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }): void {
   cron.schedule("0 9 * * *", () => {

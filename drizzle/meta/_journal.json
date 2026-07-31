@@ -141,6 +141,13 @@
       "when": 1784170000000,
       "tag": "0019_cv_signals",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1784180000000,
+      "tag": "0020_jobhunt_outcome_pipeline",
+      "breakpoints": true
     }
   ]
 }

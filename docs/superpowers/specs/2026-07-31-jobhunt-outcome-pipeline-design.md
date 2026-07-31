@@ -329,5 +329,77 @@ live run at PR time for evidence (rule #24), as with PR #393.
 
 ## Verification results
 
-*(To be filled after implementation — rule #24: "done" = the command run fresh
-with output shown.)*
+**Gate — 2026-07-31, fresh, exit 0.**
+`pnpm gate` → lint (tsc --noEmit) clean · wiring passed (11 pre-existing
+warnings, none for `job_brief`) · arch gates green (`loc-budget: 5 (= baseline)`,
+after extracting `tracks.ts` off `ats-source.ts`, which had crossed 400 lines) ·
+**218 test files, 2242 tests passed**.
+
+**Migration.** `drizzle/0020_jobhunt_outcome_pipeline.sql` applied to the local
+dev Postgres and verified by inspection: `job_applications` gained `track`,
+`liveness`, `liveness_checked_at`, `external_id`; `cv_signals` gained `track`;
+`cv_signals_term_uniq`/`_rank_idx` are dropped and replaced by the track-scoped
+pair. **The migration was inert on first run** — the file existed but was never
+added to `drizzle/meta/_journal.json`, so `db:migrate` reported success without
+applying it. Registering idx 20 fixed it. A hand-written migration is not
+applied until the journal names it.
+
+**Live e2e — two real runs (paid Apify), both exit 0.** Run 1 fetched 22 and
+screened 22; run 2 fetched 38 and screened 38. Four defects only a live run could
+find, each fixed and regression-tested:
+
+1. **Indeed mapped 0 of 20 rows, silently.** The actor nests everything
+   (`title.text`, `company.name`, `description.text`, `urls.indeed`,
+   `dates.posted`, `signals.isExpired`); the mapper was written against guessed
+   flat names while the output schema was unpublished. Every row died at the
+   title check and the sweep reported `failures: 0`. Fixed (nested reads first,
+   flat kept as fallback) and made loud: `droppedUnmappable` is now counted
+   separately from `droppedThin` and surfaced as a reported failure, because
+   "returned 10, usable 0" is schema drift, not a quiet market. After the fix,
+   live: **NL 10→7 usable, IN 10→9 usable**. `snippet` (200 chars) now sorts
+   LAST behind `description.text` (3,961 chars) — preferring it would have pushed
+   every row under `MIN_DESCRIPTION_CHARS` and reported the market as thin.
+2. **`DO TODAY (0)` while five roles had passed every gate.** Liveness ran on the
+   top 8 rows by overlap; all 8 were FLAGs, so every PASS ended the run at
+   `unknown` and was ineligible for DO TODAY. Overlap is the right order to READ
+   the brief in and the wrong order to VERIFY in. `verificationTargets()` now
+   spends the budget pass-first, then flags, by overlap within each group;
+   rejects get none, since a legal bar's being open changes nothing. Live result
+   after the fix: **DO TODAY (0) → DO TODAY (3)**, all verified live.
+3. **Headlines cut mid-word** ("…permit. They c"), dropping the clause the gate
+   was about to qualify. Now trims to the last complete sentence, falling back to
+   a word boundary with an ellipsis.
+4. **"Distributed Systems 150%".** `seen_count` is an all-time counter
+   incremented on every passing screen; the denominator counted distinct rows
+   standing today. The two populations differ, so the ratio can exceed 1. The
+   percentage is removed rather than clamped — the brief now reports the raw
+   sighting count, which is the number the data actually supports.
+
+**Liveness discipline held.** Across both runs: `live: 6, expired: 0,
+unverifiable: 2`. Rows that could not be reached were reported `unverifiable`
+and never downgraded to `expired` — the loud direction, as designed.
+
+**Per-track CVs.** `~/Projects/personal-rag/data/local_docs/cv/{ai,backend,
+frontend}/cv.md` created, seeded verbatim from `cv-master.md` and headed with a
+comment marking them untailored. The ingester globs `local_docs/*.md`
+non-recursively, so this subtree is NOT indexed and does not pollute personal-rag.
+**Limitation: until the founder tailors them, all three tracks score identical
+overlap.**
+
+### Known limitations (measured, not speculative)
+
+- Overlap is per-track in mechanism but not yet in substance — see above.
+- `classifyTrack` returns null for genuinely cross-cutting titles ("Full Stack
+  Engineer"): 2 of 38 rows in run 2. This is the designed behaviour (forcing a
+  guess corrupts two gap reports), but such rows score 0 overlap and sink.
+  13 further `unclassified` rows are pre-0020 rows backfilled by the migration.
+- Indeed rows dropped for expiry or age are not counted. Deliberate filters
+  rather than failures, but the number is currently invisible.
+- **O2 remains open**: cross-source duplicate detection between Indeed and the
+  ATS feed is still unbuilt. Both sources now run daily, so the founder can
+  receive the same role twice under two company strings. Extending
+  `LEGAL_SUFFIX_TOKENS` was considered and rejected — `normaliseCompanyName`
+  also backs the IND sponsor-register match, so collapsing `gmbh/ltd/inc` risks
+  a **false PASS on the sponsor legal gate**, which is far worse than a duplicate.
+- **O3 remains unobserved**: whether the daily scheduler has ever fired in
+  production. The sweep was exercised here by direct invocation, not by the timer.

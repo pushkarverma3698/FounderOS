@@ -27,6 +27,7 @@
 
 import { childLogger } from "../../infra/logger.js";
 import { runActorSync } from "../apify.js";
+import { titlesForTracks, TRACK_PRIORITY } from "./tracks.js";
 
 const log = childLogger({ module: "jobhunt:ats-source" });
 
@@ -81,6 +82,14 @@ export interface RawPosting {
   readonly description: string;
   readonly location: string;
   readonly postedAt: Date | null;
+  /**
+   * Which feed produced it. Recorded rather than inferred, because the two
+   * sources do not deserve equal trust: an aggregator row can be a repost, an
+   * agency listing, or a job filled a month ago.
+   */
+  readonly source?: string;
+  /** Source-native id. Indeed's job key is what the liveness lookup needs. */
+  readonly externalId?: string;
 }
 
 export type AtsFetch =
@@ -88,50 +97,6 @@ export type AtsFetch =
   | { readonly ok: false; readonly error: string };
 
 // ── Defaults: the campaign's actual target profile ───────────────────────────
-
-/**
- * The three tracks Pushkar applies for (founder direction, 2026-07-31).
- *
- * Frontend is the deepest track on his CV — three years of production React and
- * Next.js — and until now it was not searched at all, so the pipeline could not
- * have surfaced the roles he is most obviously qualified for.
- */
-export type RoleTrack = "ai" | "backend" | "frontend";
-
-export const TRACK_TITLES: Record<RoleTrack, readonly string[]> = {
-  ai: [
-    "AI Engineer:*",
-    "Machine Learning Engineer:*",
-    "LLM Engineer:*",
-    "MLOps Engineer:*",
-  ],
-  backend: [
-    "Backend Engineer:*",
-    "Software Engineer:*",
-    "Platform Engineer:*",
-    "Data Engineer:*",
-  ],
-  frontend: [
-    "Frontend Engineer:*",
-    "Front End Engineer:*",
-    "Full Stack Engineer:*",
-    "React Developer:*",
-  ],
-};
-
-/**
- * Priority order. This is NOT cosmetic: the sweep fetches roughly 10 postings a
- * day, so whichever titles the feed matches first spend the budget. AI leads
- * because it is the stated priority; frontend trails because those roles are the
- * easiest to find by hand if the budget runs out.
- */
-export const TRACK_PRIORITY: readonly RoleTrack[] = ["ai", "backend", "frontend"];
-
-/** Titles for the given tracks, in priority order, de-duplicated. */
-export function titlesForTracks(tracks: readonly RoleTrack[]): string[] {
-  const ordered = TRACK_PRIORITY.filter((t) => tracks.includes(t));
-  return [...new Set(ordered.flatMap((t) => TRACK_TITLES[t]))];
-}
 
 export const DEFAULT_TITLES: readonly string[] = titlesForTracks(TRACK_PRIORITY);
 
@@ -177,30 +142,6 @@ export const POOL_QUERIES: Record<SourcePool, AtsQuery> = {
 };
 
 export const POOL_ORDER: readonly SourcePool[] = ["nl-onsite", "nl-remote", "eu-remote-global"];
-
-/**
- * Which track a posting belongs to, from its title alone.
- *
- * Deterministic and pure: the same title always lands in the same track, so a
- * shift in the per-track market numbers is attributable to the market rather
- * than to the classifier. A title matching more than one track resolves by
- * TRACK_PRIORITY — "Full Stack" reads as frontend, "AI/Backend" as ai.
- *
- * Returns null when nothing matches. That is recorded as "unclassified" rather
- * than forced into a track, because a wrong track silently corrupts the gap
- * report for two tracks at once: the term is counted where it does not belong
- * and missing where it does.
- */
-export function classifyTrack(title: string): RoleTrack | null {
-  const normalised = title.toLowerCase();
-  for (const track of TRACK_PRIORITY) {
-    const matched = TRACK_TITLES[track].some((phrase) =>
-      normalised.includes(phrase.replace(/:\*$/, "").toLowerCase()),
-    );
-    if (matched) return track;
-  }
-  return null;
-}
 
 /**
  * Build the actor input. Pure — the daily sweep, a manual run and the tests all
