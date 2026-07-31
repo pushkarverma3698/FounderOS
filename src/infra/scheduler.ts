@@ -264,6 +264,7 @@ export async function recoverStrandedReminders(): Promise<void> {
 export async function runJobIngestSweep(): Promise<void> {
   const { runPooledIngest } = await import("../tools/jobhunt/ingest.js");
   const { buildDailyBrief } = await import("../tools/jobhunt/daily-brief.js");
+  const { toTelegramSafe } = await import("../tools/jobhunt/brief.js");
 
   const result = await runPooledIngest({
     limit: JOB_INGEST_DAILY_LIMIT,
@@ -272,10 +273,12 @@ export async function runJobIngestSweep(): Promise<void> {
 
   if (result.fetched === 0 && result.failures.length > 0) {
     log.warn({ failures: result.failures }, "Daily job ingest failed on every source");
-    // Plain text, no parse mode: real job titles contain "&" and "<", which
-    // HTML mode would reject — the alert must not fail on the alert's content.
+    // Escaped, not raw: sendToChat defaults to parse_mode "HTML", and real job
+    // titles carry "&" and "<" ("Bloom & Wild Group", prod 2026-07-31). Telegram
+    // rejects the WHOLE message on an unparseable entity — the alert must not
+    // fail on the alert's own content.
     await sendToChat(
-      `⚠ Job sweep failed — nothing was screened today.\n${result.failures.join("\n")}`,
+      toTelegramSafe(`⚠ Job sweep failed — nothing was screened today.\n${result.failures.join("\n")}`),
     );
     return;
   }
@@ -287,15 +290,21 @@ export async function runJobIngestSweep(): Promise<void> {
 
   try {
     await sendToChat(
-      await buildDailyBrief({ screened: result.fetched, failures: result.failures }),
+      toTelegramSafe(
+        await buildDailyBrief({ screened: result.fetched, failures: result.failures }),
+      ),
     );
   } catch (err) {
     // The postings ARE screened and recorded by this point. Losing the brief must
     // not read as losing the sweep, so say which one actually failed.
     log.error({ err: (err as Error).message }, "Daily brief render failed");
+    // Escaped too: this is the path that runs BECAUSE the brief failed, so an
+    // unescaped error message here would lose the founder the fallback as well.
     await sendToChat(
-      `⚠ Screened ${result.fetched} posting(s), but the brief could not be built: ` +
-        `${(err as Error).message}\nThe screening results are recorded — run /jobs to read them.`,
+      toTelegramSafe(
+        `⚠ Screened ${result.fetched} posting(s), but the brief could not be built: ` +
+          `${(err as Error).message}\nThe screening results are recorded — run /jobs to read them.`,
+      ),
     );
   }
 }

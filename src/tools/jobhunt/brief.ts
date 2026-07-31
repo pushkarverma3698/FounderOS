@@ -220,3 +220,19 @@ export function formatDailyBrief(input: BriefInput): string {
 
   return `${head}\n\n${sections.join("\n\n")}`;
 }
+
+/**
+ * Make arbitrary posting text safe for Telegram's HTML parse mode.
+ *
+ * The brief carries no markup of its own — every "&" and "<" in it comes from a
+ * real company or job title ("Bloom & Wild Group" arrived in the 2026-07-31 prod
+ * sweep). Telegram rejects the ENTIRE message when it cannot parse the entities,
+ * and the brief's own error path re-sends with the same parse mode, so one bad
+ * title means the founder receives nothing while the sweep logs success.
+ *
+ * Ampersand is escaped first; escaping it later would turn "&lt;" into
+ * "&amp;lt;" and print the escape instead of the character.
+ */
+export function toTelegramSafe(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
