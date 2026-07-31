@@ -35,6 +35,8 @@ vi.mock("../../../src/db/job-queries.js", async (orig) => {
 const { screenJobTool, combineVerdict, routesToScreen, bestOutcome } = await import(
   "../../../src/tools/jobhunt/screen.js"
 );
+const { extractPostingFacts } = await import("../../../src/tools/jobhunt/extract.js");
+const { screenSalaryFacts } = await import("../../../src/tools/jobhunt/filters.js");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -74,13 +76,21 @@ describe("combineVerdict", () => {
 });
 
 describe("routesToScreen", () => {
-  it("screens an unclear posting under BOTH routes rather than guessing", () => {
-    // Guessing wrong in either direction loses something, so both are screened.
-    expect(routesToScreen("unclear")).toEqual(["hsm", "remote-contract"]);
+  it("screens an unclear posting under every live permit basis rather than guessing", () => {
+    // Guessing wrong in any direction loses something, so all live bases are run.
+    expect(routesToScreen("unclear")).toEqual(["hsm", "partner-permit", "remote-contract"]);
   });
 
-  it("screens a clearly-typed posting under one route only", () => {
-    expect(routesToScreen("hsm")).toEqual(["hsm"]);
+  it("screens a Netherlands-based posting under every basis that could carry it", () => {
+    // One NL role can be lawful under HSM *or* a partner permit — those are
+    // different legal bases with different gates, not one route. Screening only
+    // HSM is what rejected roles that a partner permit makes perfectly reachable.
+    expect(routesToScreen("hsm")).toEqual(["hsm", "partner-permit"]);
+  });
+
+  it("screens a remote contract only as a remote contract", () => {
+    // No Dutch permit is involved in contracting from India, so no permit basis
+    // other than the contract itself has anything to say about it.
     expect(routesToScreen("remote-contract")).toEqual(["remote-contract"]);
   });
 });
@@ -104,7 +114,11 @@ describe("bestOutcome", () => {
 });
 
 describe("screenJobTool.execute — HSM route", () => {
-  it("rejects a company that is absent from the IND register", async () => {
+  it("flags rather than rejects a company absent from the IND register", async () => {
+    // Founder decision, 2026-07-31: recognition costs an employer ~€4,500 and
+    // ~4 weeks, and they do take it on for someone they want — so absence today
+    // is not "cannot hire you". Rejecting made that permanently invisible; there
+    // is no signal emitted when a rejection was wrong.
     const res = await screenJobTool.execute({
       company: "Zzyzx Widgetworks",
       title: "AI Engineer",
@@ -112,19 +126,33 @@ describe("screenJobTool.execute — HSM route", () => {
     });
 
     expect(res.success).toBe(true);
-    expect(res.data).toContain("REJECT");
+    expect(res.data).not.toContain("REJECT");
     expect(res.data).toContain("recognised-sponsor register");
   });
 
-  it("rejects a recognised sponsor advertising below the permit floor", async () => {
+  it("no longer rejects a below-floor salary outright, because another basis carries it", async () => {
+    // €40k is genuinely void on the HSM basis — the permit cannot be granted. But
+    // the same role is lawful on a partner permit, which has no salary criterion
+    // at all. So the posting survives as a human check rather than a hard no.
     const res = await screenJobTool.execute({
       company: "Adyen N.V.",
       title: "AI Engineer",
       description: `Salary €40.000 per jaar excl. vakantiegeld. ${ENGLISH_ONSITE}`,
     });
 
-    expect(res.data).toContain("REJECT");
-    expect(res.data).toContain("52284");
+    expect(res.data).not.toContain("REJECT");
+    expect(res.data).toContain("NEEDS A HUMAN CHECK");
+  });
+
+  it("still rejects €40k on the HSM basis itself — the legal floor is untouched", () => {
+    // The guarantee that must survive the multi-basis change: widening the routes
+    // must not quietly soften the one gate that encodes actual law. An employer
+    // cannot lawfully make this hire under the highly skilled migrant scheme.
+    const facts = extractPostingFacts(`Salary €40.000 per jaar excl. vakantiegeld. ${ENGLISH_ONSITE}`);
+    const result = screenSalaryFacts(facts.salary, { route: "hsm" });
+
+    expect(result.status).toBe("reject");
+    expect(result.evidence).toContain("52284");
   });
 
   it("passes a recognised sponsor clearing the floor", async () => {
@@ -200,16 +228,16 @@ describe("screenJobTool.execute — the defects this rewrite closes", () => {
     expect(res.data).toContain("PASS");
   });
 
-  it("flags a figure whose holiday-allowance basis decides the verdict", async () => {
-    // €54k stated: €54k excl. clears, €50k incl. does not. Genuinely a human call.
-    const res = await screenJobTool.execute({
-      company: "Adyen N.V.",
-      title: "AI Engineer",
-      description: `€54.000 per jaar. ${ENGLISH_ONSITE}`,
-    });
+  it("flags a figure whose holiday-allowance basis decides the HSM verdict", () => {
+    // €54k stated: €54k excl. clears the floor, €50k incl. does not. Genuinely a
+    // human call — but ONLY on the basis that has a floor. Asserted directly on
+    // the HSM basis, because the tool now reports the best basis of several and a
+    // partner permit is indifferent to which reading is right.
+    const facts = extractPostingFacts(`€54.000 per jaar. ${ENGLISH_ONSITE}`);
+    const result = screenSalaryFacts(facts.salary, { route: "hsm" });
 
-    expect(res.data).toContain("NEEDS A HUMAN CHECK");
-    expect(res.data).toContain("holiday allowance");
+    expect(result.status).toBe("flag");
+    expect(result.evidence).toContain("holiday allowance");
   });
 
   it("does NOT flag when the holiday-allowance basis cannot change the verdict", async () => {
@@ -252,18 +280,25 @@ describe("screenJobTool.execute — remote-contract route", () => {
     expect(mockRecord.mock.calls[0]![0]).toMatchObject({ route: "remote-contract" });
   });
 
-  it("still rejects a remote contract below the rate floor", async () => {
+  it("flags — never rejects — a low remote rate, since no legal floor applies", async () => {
+    // €12/hour is poor, and that is worth surfacing. But it is not unlawful:
+    // a remote contract involves no Dutch permit, so there is no criterion to
+    // breach. Rejecting would assert a legal bar that does not exist.
     const res = await screenJobTool.execute({
       company: "Zzyzx Widgetworks",
       title: "AI Engineer",
       description: "Fully remote freelance contract. €12 per hour. We work in English.",
     });
 
-    expect(res.data).toContain("REJECT");
+    expect(res.data).not.toContain("REJECT");
+    expect(res.data).toContain("NEEDS A HUMAN CHECK");
+    expect(res.data).toContain("NOT a legal bar");
   });
 
-  it("rescues an unclear posting that fails HSM but clears the contract rate", async () => {
-    // Not on the register, no on-site/remote marker either way → both routes run.
+  it("rescues an unclear posting that fails HSM but is fine on a no-sponsor basis", async () => {
+    // Not on the register, no on-site/remote marker either way → every live basis
+    // runs and the best wins. Which no-sponsor basis carries it is not the point;
+    // that it survives at all is.
     const res = await screenJobTool.execute({
       company: "Zzyzx Widgetworks",
       title: "AI Engineer",
@@ -271,7 +306,7 @@ describe("screenJobTool.execute — remote-contract route", () => {
     });
 
     expect(res.data).toContain("PASS");
-    expect(res.data).toContain("remote-contract route");
+    expect(mockRecord.mock.calls[0]![0]!.route).not.toBe("hsm");
   });
 });
 

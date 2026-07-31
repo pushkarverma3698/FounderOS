@@ -169,3 +169,41 @@ describe("mapAtsItems", () => {
     expect(posting!.postedAt?.toISOString()).toBe("2026-07-29T03:08:47.000Z");
   });
 });
+
+describe("role tracks", () => {
+  it("covers all three tracks Pushkar is applying for", async () => {
+    const { TRACK_TITLES } = await import("../../../src/tools/jobhunt/ats-source.js");
+    expect(Object.keys(TRACK_TITLES).sort()).toEqual(["ai", "backend", "frontend"]);
+  });
+
+  it("puts AI titles first, because the daily budget runs out", async () => {
+    // Only ~10 postings are fetched per day. Whichever titles the feed matches
+    // first consume that budget, so priority order is not cosmetic — it decides
+    // which market actually gets screened.
+    const { DEFAULT_TITLES, TRACK_TITLES } = await import(
+      "../../../src/tools/jobhunt/ats-source.js"
+    );
+    expect(DEFAULT_TITLES[0]).toBe(TRACK_TITLES.ai[0]);
+    const firstBackend = DEFAULT_TITLES.indexOf(TRACK_TITLES.backend[0]!);
+    const lastAi = DEFAULT_TITLES.indexOf(TRACK_TITLES.ai[TRACK_TITLES.ai.length - 1]!);
+    expect(lastAi).toBeLessThan(firstBackend);
+  });
+
+  it("includes a frontend track — the CV's deepest track, previously unsearched", async () => {
+    const { DEFAULT_TITLES } = await import("../../../src/tools/jobhunt/ats-source.js");
+    expect(DEFAULT_TITLES.some((t) => /frontend/i.test(t))).toBe(true);
+  });
+
+  it("lets a caller sweep one track alone", async () => {
+    const { titlesForTracks, TRACK_TITLES } = await import(
+      "../../../src/tools/jobhunt/ats-source.js"
+    );
+    expect(titlesForTracks(["frontend"])).toEqual([...TRACK_TITLES.frontend]);
+  });
+
+  it("de-duplicates titles shared across tracks", async () => {
+    const { titlesForTracks } = await import("../../../src/tools/jobhunt/ats-source.js");
+    const all = titlesForTracks(["ai", "backend", "frontend"]);
+    expect(new Set(all).size).toBe(all.length);
+  });
+});

@@ -15,6 +15,7 @@
 import { normaliseCompanyName } from "./sponsor-match.js";
 import { criterionOn, FULL_TIME_HOURS_PER_YEAR, type SalaryCriterion } from "./criteria.js";
 import { extractLanguage, type SalaryFacts } from "./extract.js";
+import { gateProfile, type PermitBasis } from "./permit-routes.js";
 
 /**
  * €4,357/month gross excluding the 8% holiday allowance, verified at ind.nl for
@@ -104,8 +105,14 @@ export function screenLanguage(text: string): ScreenResult {
   return { status: "pass", evidence };
 }
 
-/** Which permit route a screen is being run under. */
-export type ScreenRoute = "hsm" | "remote-contract";
+/**
+ * Which permit basis a screen is being run under.
+ *
+ * Aliased to `PermitBasis` so there is exactly one definition of the set. Two
+ * would drift, and the drift would show up as a route the screener silently
+ * declines to handle.
+ */
+export type ScreenRoute = PermitBasis;
 
 const HOLIDAY_ALLOWANCE_MULTIPLIER = 1.08;
 
@@ -172,19 +179,37 @@ export function screenSalaryFacts(
   opts: { route?: ScreenRoute; now?: Date } = {},
 ): ScreenResult {
   const now = opts.now ?? new Date();
+  const floorApplies = gateProfile(opts.route ?? "hsm").salaryFloorApplies;
   const criterion: SalaryCriterion | null = criterionOn(now);
+
+  // An unverified criterion only matters where the criterion is a legal condition.
+  // On a partner permit or a remote contract there is no floor to be stale about,
+  // so flagging here would manufacture doubt about a basis that has no such rule.
   if (!criterion) {
-    return {
-      status: "flag",
-      evidence:
-        `No verified IND salary criterion for ${now.toISOString().slice(0, 10)} — the table in ` +
-        `criteria.ts covers 2026 only and IND revises every 1 January. Re-check ind.nl and add ` +
-        `the new window before trusting any salary verdict.`,
-    };
+    return floorApplies
+      ? {
+          status: "flag",
+          evidence:
+            `No verified IND salary criterion for ${now.toISOString().slice(0, 10)} — the table in ` +
+            `criteria.ts covers 2026 only and IND revises every 1 January. Re-check ind.nl and add ` +
+            `the new window before trusting any salary verdict.`,
+        }
+      : {
+          status: "pass",
+          evidence: "No IND salary criterion applies on this basis.",
+        };
   }
 
   const candidates = candidateAnnualBases(facts);
   if (candidates.length === 0) {
+    if (!floorApplies) {
+      return {
+        status: "flag",
+        evidence:
+          "No salary stated — normal for Dutch postings. No criterion applies on this basis, so " +
+          "this is not a bar; ask at first contact before investing effort in an application.",
+      };
+    }
     const floorNote =
       opts.route === "remote-contract"
         ? `€${criterion.hourly}/hour (the ${criterion.annualBase} annual floor at full-time hours)`
@@ -197,6 +222,29 @@ export function screenSalaryFacts(
 
   const results = candidates.map((v) => screenSalary({ max: v }, criterion.annualBase));
   const statuses = new Set(results.map((r) => r.status));
+
+  // Where no legal floor applies, a low figure is a fact about the offer, not
+  // grounds to void it — so this never rejects. But it must not silently PASS
+  // either: "this role pays €40,000" stays decision-relevant even when it is
+  // perfectly lawful, and swallowing it would trade a wrong rejection for a
+  // wrong acceptance. Below the HSM figure it flags for a look; at or above it
+  // passes clean. The HSM number is used only as a familiar reference point here,
+  // never as a legal claim.
+  if (!floorApplies) {
+    const best = Math.round(Math.max(...candidates));
+    const quoted = facts.raw ? ` Read from: "${facts.raw}".` : "";
+    return best >= criterion.annualBase
+      ? {
+          status: "pass",
+          evidence: `€${best} — comfortably above the €${criterion.annualBase} HSM reference, and no criterion applies on this basis anyway.${quoted}`,
+        }
+      : {
+          status: "flag",
+          evidence:
+            `€${best} is below the €${criterion.annualBase} HSM reference. On this basis that is NOT a legal bar — ` +
+            `the role is lawful — but it is worth a deliberate look before applying.${quoted}`,
+        };
+  }
 
   if (statuses.size === 1) {
     const only = results[0]!;

@@ -12,15 +12,18 @@
  * entire Dutch market as sub-floor. Parsing is a pure unit-tested function
  * (extract.ts), never a prompt instruction.
  *
- * Two routes are screened, because the campaign's highest-EV channel is a remote
- * contract that needs no sponsor and has no legal floor. Applying the HSM gates
- * to it would reject exactly the opportunities worth most.
+ * A posting is screened under EVERY permit basis that could lawfully carry it
+ * (permit-routes.ts), and the best outcome wins. Screening under one basis and
+ * calling that the answer is what made the screener reject Netherlands roles that
+ * were perfectly reachable on a partner permit — and a rejected posting emits no
+ * signal that rejecting it was wrong.
  */
 
 import { childLogger } from "../../infra/logger.js";
 import { matchSponsor, type SponsorMatch } from "./sponsor-match.js";
 import { getSponsorRegister, registerStaleness } from "./sponsor-registry.js";
 import { extractPostingFacts, type PostingRoute } from "./extract.js";
+import { basesForPosting, gateProfile } from "./permit-routes.js";
 import {
   dedupeKey,
   isStaleEnoughToReapply,
@@ -71,9 +74,7 @@ export function combineVerdict(gates: readonly Gate[]): ScreenVerdict {
 
 /** Which concrete routes to screen a posting under. `unclear` gets both. */
 export function routesToScreen(route: PostingRoute): ScreenRoute[] {
-  if (route === "hsm") return ["hsm"];
-  if (route === "remote-contract") return ["remote-contract"];
-  return ["hsm", "remote-contract"];
+  return basesForPosting(route);
 }
 
 /**
@@ -99,8 +100,23 @@ export function sponsorGate(match: SponsorMatch, stale: ReturnType<typeof regist
       evidence: `${match.evidence} BUT this cannot be trusted: ${stale.note}`,
     };
   }
-  const status: ScreenStatus =
-    match.verdict === "sponsor" ? "pass" : match.verdict === "not-sponsor" ? "reject" : "flag";
+
+  // Absence from the register FLAGS rather than rejects (founder decision,
+  // 2026-07-31). Recognition costs an employer roughly €4,500 and about four
+  // weeks, and companies do take it on for someone they want — so "not a sponsor
+  // today" is not "cannot hire you". Rejecting made that permanently invisible;
+  // a flag keeps it a decision Pushkar gets to make.
+  if (match.verdict === "not-sponsor") {
+    return {
+      gate: "Sponsor",
+      status: "flag",
+      evidence:
+        `${match.evidence} They could still become one (~€4,500, ~4 weeks) — worth asking ` +
+        `if the role is otherwise strong, rather than assuming no.`,
+    };
+  }
+
+  const status: ScreenStatus = match.verdict === "sponsor" ? "pass" : "flag";
   return { gate: "Sponsor", status, evidence: match.evidence };
 }
 
@@ -192,16 +208,19 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   const match = matchSponsor(company, register.index);
   const language = screenLanguage(description);
 
+  // Screen under every basis that could lawfully carry this posting; the best
+  // outcome wins. A role rejected on one basis and reachable on another is a real
+  // opportunity, and the single-basis design discarded it without a trace.
   const outcomes = routesToScreen(facts.route).map((route) => {
+    const profile = gateProfile(route);
     const salary = screenSalaryFacts(facts.salary, { route });
-    const gates: Gate[] =
-      route === "hsm"
-        ? [sponsorGate(match, stale), { gate: "Salary", ...salary }, { gate: "Language", ...language }]
-        : [
-            { gate: "Route", status: "pass" as ScreenStatus, evidence: "Remote contract — no sponsor or permit floor applies." },
-            { gate: "Rate", ...salary },
-            { gate: "Language", ...language },
-          ];
+    const gates: Gate[] = [
+      profile.sponsorRequired
+        ? sponsorGate(match, stale)
+        : { gate: "Basis", status: "pass" as ScreenStatus, evidence: profile.basis },
+      { gate: profile.salaryFloorApplies ? "Salary" : "Rate", ...salary },
+      { gate: "Language", ...language },
+    ];
     return { route, verdict: combineVerdict(gates) };
   });
 
@@ -320,13 +339,23 @@ export function formatScreenOutcome(
   }
 
   const { company, title, route, verdict, routesTried, match, nearDuplicates } = outcome;
-  const routeLabel = route === "hsm" ? "sponsorship route" : "remote-contract route";
+  const routeLabel = gateProfile(route).label;
   const header =
     verdict.status === "reject"
       ? `REJECT — ${company} · ${title}\nDo not apply. Reasons below are legal bars, not preferences. (Best of ${routesTried} route(s); shown: ${routeLabel}.)`
       : verdict.status === "flag"
         ? `NEEDS A HUMAN CHECK — ${company} · ${title}\nOne or more gates could not be settled from the posting alone. (${routeLabel})`
         : `PASS — ${company} · ${title}\nClears every hard gate on the ${routeLabel}. Safe to research and draft.`;
+
+  // When a basis without a sponsor requirement wins, the sponsor position is
+  // never mentioned in the winning basis's reasons — so a founder weighing the
+  // more secure HSM footing would not learn the employer is not a recognised
+  // sponsor. State it explicitly rather than let the good news hide it.
+  const sponsorNote =
+    !gateProfile(route).sponsorRequired && match.verdict === "not-sponsor"
+      ? `\n\nWorth knowing: this employer is absent from the IND recognised-sponsor register, ` +
+        `so the HSM route is not open here today without them applying for recognition.`
+      : "";
 
   const candidates =
     match.candidates.length > 0
@@ -341,5 +370,5 @@ export function formatScreenOutcome(
           .join("\n")}\nCheck before applying — the titles differ but the words are the same.`
       : "";
 
-  return `${header}\n\n${verdict.reasons.map((r) => `  · ${r}`).join("\n")}${candidates}${nearDupeWarning}`;
+  return `${header}\n\n${verdict.reasons.map((r) => `  · ${r}`).join("\n")}${sponsorNote}${candidates}${nearDupeWarning}`;
 }
