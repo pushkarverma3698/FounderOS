@@ -24,10 +24,14 @@ import { childLogger } from "../../infra/logger.js";
 import { listSignals } from "../../db/cv-signal-queries.js";
 import { countPassingApplications } from "../../db/job-queries.js";
 import { readFullCvText } from "../career.js";
+import { TRACK_PRIORITY } from "./tracks.js";
 import { extractSkillTerms } from "./skills.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 
 const log = childLogger({ module: "tool:cv_gaps" });
+
+/** The stated priority track — reported when the caller doesn't name one. */
+export const DEFAULT_GAP_TRACK = "ai";
 
 /**
  * Below this many passing postings, percentages are not reported as findings.
@@ -98,21 +102,27 @@ function pct(count: number, sample: number): string {
   return `${Math.round((count / sample) * 100)}% (${count}/${sample})`;
 }
 
-export function formatGapReport(report: GapReport): string {
+export function formatGapReport(
+  report: GapReport,
+  opts: { track?: string; cvPath?: string } = {},
+): string {
   const { sampleSize, missing, confirmed, rising } = report;
+  // Always stated. A gap list that doesn't name its track invites the founder to
+  // read a backend finding as an AI one and change the wrong CV.
+  const scope = opts.track ? ` [${opts.track} track]` : "";
 
   if (sampleSize === 0) {
     return (
-      "CV GAPS — no data yet.\n\n" +
-      "No posting has cleared the screening gates, so there is nothing to compare " +
-      "the CV against. Run ingest_jobs first. Reporting gaps from zero passing " +
-      "postings would be inventing a market."
+      `CV GAPS${scope} — no data yet.\n\n` +
+      "No posting on this track has cleared the screening gates, so there is nothing " +
+      "to compare the CV against. Run ingest_jobs first. Reporting gaps from zero " +
+      "passing postings would be inventing a market."
     );
   }
 
   if (report.cvTermCount < MIN_CV_TERMS_FOR_GAPS) {
     return (
-      `CV GAPS — cannot report gaps.\n\n` +
+      `CV GAPS${scope} — cannot report gaps.\n\n` +
       `Only ${report.cvTermCount} recognisable skill term(s) were found in the CV document. ` +
       `A gap list is a claim about what the CV does NOT say, and against a CV this thin ` +
       `every one of the ${missing.length + confirmed.length} market terms would look ` +
@@ -125,14 +135,18 @@ export function formatGapReport(report: GapReport): string {
 
   const header =
     sampleSize < MIN_SAMPLE_FOR_PERCENTAGES
-      ? `CV GAPS — built from ${sampleSize} passing posting(s).\n` +
+      ? `CV GAPS${scope} — built from ${sampleSize} passing posting(s).\n` +
         `⚠ TOO SMALL TO ACT ON. Below ${MIN_SAMPLE_FOR_PERCENTAGES} postings a single ` +
         `employer's wishlist looks like a market trend. Read this as a preview, not a finding.`
-      : `CV GAPS — built from ${sampleSize} postings that cleared every hard gate.`;
+      : `CV GAPS${scope} — built from ${sampleSize} postings that cleared every hard gate.`;
 
   // The CV's own term count is the report's OTHER denominator. Printed because a
-  // short MISSING list and a thin CV look identical without it.
-  const basis = `Matched against ${report.cvTermCount} recognisable term(s) in your CV document.`;
+  // short MISSING list and a thin CV look identical without it. The path is
+  // printed too: with per-track workspaces, "which CV was this?" is a real
+  // question and a silently-fallen-back master would answer it wrongly.
+  const basis =
+    `Matched against ${report.cvTermCount} recognisable term(s) in your CV document` +
+    `${opts.cvPath ? ` (${opts.cvPath})` : ""}.`;
 
   const sections: string[] = [];
 
@@ -193,25 +207,39 @@ export const cvGapsTool: UnifiedTool = {
         description:
           "Narrow to one category: language, framework, infra, data, ai, practice.",
       },
+      track: {
+        type: "string",
+        description:
+          "Which career track to report on: ai, backend, or frontend. Each has its own CV " +
+          "and its own market, so a gap is only meaningful within one of them. Defaults to ai.",
+      },
     },
     required: [],
   },
 
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
     const category = args["category"];
+    const rawTrack = args["track"];
+    const track =
+      typeof rawTrack === "string" && (TRACK_PRIORITY as readonly string[]).includes(rawTrack)
+        ? rawTrack
+        : DEFAULT_GAP_TRACK;
 
     let signals: SignalRow[];
     let sampleSize: number;
     try {
-      const rows = await listSignals(
-        typeof category === "string" && category.length > 0 ? { category } : {},
-      );
+      const rows = await listSignals({
+        track,
+        ...(typeof category === "string" && category.length > 0 ? { category } : {}),
+      });
       signals = rows.map((r) => ({
         term: r.term,
         category: r.category,
         seen_count: r.seen_count,
       }));
-      sampleSize = await countPassingApplications();
+      // Same population on both sides. An all-track denominator under a
+      // single-track numerator understates every percentage in the report.
+      sampleSize = await countPassingApplications({ track });
     } catch (err) {
       return { success: false, error: `Signal store unreachable: ${(err as Error).message}` };
     }
@@ -220,14 +248,14 @@ export const cvGapsTool: UnifiedTool = {
     // matching excerpts; a gap report is a claim about what the CV does NOT say,
     // and absence can only be read off the complete document. An unreadable or
     // implausibly short CV fails loudly rather than making every term look missing.
-    const cv = readFullCvText();
+    const cv = readFullCvText(track);
     if (!cv.ok) return { success: false, error: cv.error };
 
     const report = buildGapReport(signals, cv.text, sampleSize);
     log.info(
-      { sampleSize, missing: report.missing.length, confirmed: report.confirmed.length },
+      { track, sampleSize, missing: report.missing.length, confirmed: report.confirmed.length },
       "CV gap report built",
     );
-    return { success: true, data: formatGapReport(report) };
+    return { success: true, data: formatGapReport(report, { track, cvPath: cv.path }) };
   },
 };

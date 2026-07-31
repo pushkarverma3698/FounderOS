@@ -16,7 +16,15 @@
  */
 
 import { childLogger } from "../../infra/logger.js";
-import { fetchAtsPostings, type AtsQuery, type RawPosting } from "./ats-source.js";
+import {
+  fetchAtsPostings,
+  MIN_ATS_LIMIT,
+  POOL_ORDER,
+  POOL_QUERIES,
+  type AtsQuery,
+  type RawPosting,
+} from "./ats-source.js";
+import { fetchIndeedPostings, type IndeedCountry } from "./indeed-source.js";
 import { screenPosting } from "./screen.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 
@@ -24,6 +32,18 @@ const log = childLogger({ module: "tool:ingest_jobs" });
 
 /** Provenance stamped on every row this path creates. */
 export const INGEST_SOURCE = "ats-ingest";
+
+/**
+ * NL for the remote-with-a-Dutch-office pool; IN for the remote-contract pool.
+ *
+ * Deliberately not US or global: a US company hiring a contractor in India is
+ * income, not a step toward the Netherlands (founder decision, 2026-07-31), and
+ * mixing the two would blur what the campaign is actually measuring.
+ */
+const INDEED_COUNTRIES: readonly IndeedCountry[] = ["NL", "IN"];
+
+/** The actor cannot apply `fromDays` alongside its remote filter, so we cut here. */
+const INDEED_MAX_AGE_DAYS = 3;
 
 export interface IngestLine {
   readonly company: string;
@@ -62,7 +82,11 @@ export async function screenBatch(postings: readonly RawPosting[]): Promise<Inge
         description: posting.description,
         ...(posting.url ? { url: posting.url } : {}),
         ...(posting.postedAt ? { postedAt: posting.postedAt } : {}),
-        source: INGEST_SOURCE,
+        // The posting's OWN provenance, not this module's. An Indeed row screened
+        // through here must not be recorded as an ATS row: liveness verification
+        // reads that field to decide which check to run.
+        source: posting.source ?? INGEST_SOURCE,
+        ...(posting.externalId ? { externalId: posting.externalId } : {}),
       });
 
       if (outcome.kind === "error") {
@@ -98,6 +122,84 @@ export async function screenBatch(postings: readonly RawPosting[]): Promise<Inge
   }
 
   return lines;
+}
+
+export interface PooledIngest {
+  readonly fetched: number;
+  readonly lines: readonly IngestLine[];
+  /** One entry per source that failed. An outage must read as an outage. */
+  readonly failures: readonly string[];
+}
+
+/**
+ * Sweep every source pool, then screen everything they returned.
+ *
+ * PER-POOL ISOLATION is the point. One pool failing does not abort the sweep —
+ * losing the Netherlands on-site pool because Indeed timed out would be the
+ * pipeline failing at exactly the moment it is unattended, and it would fail
+ * quietly, reporting a thin market rather than a broken run.
+ *
+ * The budget is split evenly across pools rather than spent first-come. Pool A
+ * returns the most rows, so a shared pool would consume the whole allowance
+ * before the remote-contract pools were reached — which is the coverage hole
+ * this design exists to close.
+ */
+export async function runPooledIngest(opts: {
+  limit: number;
+  includeIndeed?: boolean;
+}): Promise<PooledIngest> {
+  const perPool = Math.max(MIN_ATS_LIMIT, Math.floor(opts.limit / POOL_ORDER.length));
+  const postings: RawPosting[] = [];
+  const failures: string[] = [];
+
+  for (const pool of POOL_ORDER) {
+    const result = await fetchAtsPostings({ ...POOL_QUERIES[pool], timeRange: "24h", limit: perPool });
+    if (!result.ok) {
+      failures.push(`ATS pool "${pool}": ${result.error}`);
+      continue;
+    }
+    postings.push(...result.postings.map((p) => ({ ...p, source: INGEST_SOURCE })));
+  }
+
+  if (opts.includeIndeed) {
+    for (const country of INDEED_COUNTRIES) {
+      const result = await fetchIndeedPostings({
+        country,
+        limit: perPool,
+        remote: "remote",
+        maxAgeDays: INDEED_MAX_AGE_DAYS,
+      });
+      if (!result.ok) {
+        failures.push(`Indeed ${country}: ${result.error}`);
+        continue;
+      }
+      if (result.droppedThin > 0) {
+        // Reported, not hidden. A body too short to screen produces a verdict
+        // from evidence that was never fetched, so these are dropped — but a
+        // silent drop looks exactly like a thin market.
+        failures.push(
+          `Indeed ${country}: ${result.droppedThin} posting(s) dropped — body too short to screen.`,
+        );
+      }
+      if (result.droppedUnmappable > 0) {
+        // The 2026-07-31 alarm: 10 rows returned, 0 readable, and the sweep
+        // reported success. An unreadable row means the actor's output shape
+        // changed, which is our bug to fix — not evidence of an empty market.
+        failures.push(
+          `Indeed ${country}: ${result.droppedUnmappable} row(s) UNREADABLE — the actor's ` +
+            "output shape does not match the mapper. This is a schema drift, not a quiet market.",
+        );
+      }
+      postings.push(...result.postings);
+    }
+  }
+
+  const lines = await screenBatch(postings);
+  log.info(
+    { fetched: postings.length, pools: POOL_ORDER.length, failures: failures.length },
+    "Pooled job ingest complete",
+  );
+  return { fetched: postings.length, lines, failures };
 }
 
 /** Fetch → screen → summarise. The whole pipeline in one call. */

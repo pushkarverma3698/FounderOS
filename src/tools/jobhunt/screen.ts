@@ -38,7 +38,8 @@ import {
   findApplicationsBySoftKey,
   recordScreenedApplication,
 } from "../../db/job-queries.js";
-import { recordSignals } from "../../db/cv-signal-queries.js";
+import { recordSignals, UNCLASSIFIED_TRACK } from "../../db/cv-signal-queries.js";
+import { classifyTrack } from "./tracks.js";
 import { signalsForPosting } from "./skills.js";
 import type { JobApplication } from "../../db/schema.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
@@ -127,10 +128,12 @@ export interface PostingInput {
   readonly title: string;
   readonly url?: string;
   readonly description: string;
-  /** manual | ats-ingest — provenance, recorded so the funnel can be split by source. */
+  /** manual | ats-ingest | indeed-ingest — recorded so the funnel splits by source. */
   readonly source?: string;
   /** Employer's publication date, when the source provides one. */
   readonly postedAt?: Date;
+  /** The source's own id, when it has one — Indeed's job key powers liveness. */
+  readonly externalId?: string;
 }
 
 export type ScreenOutcome =
@@ -147,6 +150,8 @@ export type ScreenOutcome =
       readonly company: string;
       readonly title: string;
       readonly route: ScreenRoute;
+      /** ai | backend | frontend | unclassified — which market this posting is in. */
+      readonly track: string;
       readonly verdict: ScreenVerdict;
       readonly routesTried: number;
       readonly match: SponsorMatch;
@@ -226,6 +231,11 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
 
   const chosen = bestOutcome(outcomes);
 
+  // Derived here rather than taken from the caller, for the same reason the
+  // gates are: `screen_job` and `ingest_jobs` must classify identically, and a
+  // caller-supplied track would drift silently between the two paths.
+  const track = classifyTrack(title) ?? UNCLASSIFIED_TRACK;
+
   try {
     await recordScreenedApplication({
       tenant_id: "turicks",
@@ -236,6 +246,7 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
       title,
       url: input.url ?? null,
       route: chosen.route,
+      track,
       sponsor_verdict: match.verdict,
       salary_status: chosen.verdict.status,
       salary_evidence: chosen.verdict.reasons.join(" | ").slice(0, 2000),
@@ -243,6 +254,7 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
       description: description.slice(0, DESCRIPTION_MAX),
       posted_at: input.postedAt ?? null,
       source: input.source ?? "manual",
+      external_id: input.externalId ?? null,
     });
   } catch (err) {
     return {
@@ -257,7 +269,7 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   // jobs that would be rejected on the sponsor gate anyway.
   if (chosen.verdict.status === "pass") {
     try {
-      await recordSignals(signalsForPosting(description, company));
+      await recordSignals(signalsForPosting(description, company), { track });
     } catch (err) {
       // allow-failopen: a lost frequency count must never discard a screening
       // verdict. The verdict is the decision; signals are the running average.
@@ -266,7 +278,14 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   }
 
   log.info(
-    { company, title, route: chosen.route, verdict: chosen.verdict.status, detectedRoute: facts.route },
+    {
+      company,
+      title,
+      route: chosen.route,
+      track,
+      verdict: chosen.verdict.status,
+      detectedRoute: facts.route,
+    },
     "Job screened",
   );
 
@@ -275,6 +294,7 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
     company,
     title,
     route: chosen.route,
+    track,
     verdict: chosen.verdict,
     routesTried: outcomes.length,
     match,

@@ -88,6 +88,8 @@ export async function recordScreenedApplication(
         url: row.url ?? null,
         soft_dedupe_key: row.soft_dedupe_key ?? null,
         route: row.route ?? "hsm",
+        track: row.track ?? "unclassified",
+        external_id: row.external_id ?? null,
         sponsor_verdict: row.sponsor_verdict,
         salary_status: row.salary_status,
         salary_evidence: row.salary_evidence ?? null,
@@ -176,16 +178,75 @@ export async function listScreenedApplications(
  * the sample size the report invites a CV rewrite on three data points.
  */
 export async function countPassingApplications(
-  tenantId: string = DEFAULT_TENANT,
+  opts: { track?: string; tenantId?: string } = {},
 ): Promise<number> {
   const db = getDb();
+  const conditions = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    eq(jobApplications.salary_status, "pass"),
+  ];
+  // The denominator must match the numerator's population. A per-track gap
+  // report divided by the all-track count understates every percentage.
+  if (opts.track) conditions.push(eq(jobApplications.track, opts.track));
+
   const [row] = await db
     .select({ n: sql<number>`count(*)` })
     .from(jobApplications)
-    .where(
-      and(eq(jobApplications.tenant_id, tenantId), eq(jobApplications.salary_status, "pass")),
-    );
+    .where(and(...conditions));
   return Number(row?.n ?? 0);
+}
+
+/**
+ * Screened-but-not-yet-engaged rows — the population the daily brief ranks.
+ *
+ * Restricted to `stage = 'screened'` so a role already drafted or applied to
+ * never reappears in DO TODAY, and ordered newest-first so a capped read takes
+ * the freshest postings rather than an arbitrary slice.
+ */
+export async function listActionableApplications(
+  opts: { verdicts?: readonly string[]; limit?: number; tenantId?: string } = {},
+): Promise<JobApplication[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(jobApplications)
+    .where(
+      and(
+        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+        eq(jobApplications.stage, "screened"),
+        inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
+      ),
+    )
+    .orderBy(desc(jobApplications.created_at))
+    .limit(opts.limit ?? 100);
+}
+
+/**
+ * Record a liveness result.
+ *
+ * `expired` moves the row out of the actionable pool AND writes the reason, so
+ * a posting that vanishes from the brief can always be explained. Nothing is
+ * silently dropped — an unexplained disappearance is indistinguishable from a
+ * bug in the ranking.
+ */
+export async function recordLiveness(
+  id: string,
+  liveness: "live" | "expired" | "unverifiable",
+  opts: { reason?: string; checkedAt?: Date } = {},
+): Promise<JobApplication | null> {
+  const db = getDb();
+  const [saved] = await db
+    .update(jobApplications)
+    .set({
+      liveness,
+      liveness_checked_at: opts.checkedAt ?? new Date(),
+      ...(liveness === "expired" ? { stage: "expired" } : {}),
+      ...(opts.reason ? { notes: opts.reason } : {}),
+      updated_at: new Date(),
+    })
+    .where(eq(jobApplications.id, id))
+    .returning();
+  return saved ?? null;
 }
 
 /** Most recently screened roles, newest first — the daily-sweep read-back. */
