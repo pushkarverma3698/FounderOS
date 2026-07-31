@@ -53,11 +53,26 @@ present in the source query.
 Three live permit bases reach three different markets. One query cannot serve
 them, and the one we have serves only the first.
 
+The feed's own `aiWorkArrangementFilter` enum splits the market along exactly the
+line the three bases need — *"Remote OK = remote with an office available.
+Remote Solely = remote with no office available."*
+
 | pool | query | serves |
 |---|---|---|
-| **A** NL on-site/hybrid | ATS feed · NL · `aiWorkArrangementFilter: [on-site, hybrid]` | hsm, partner-permit |
-| **B** NL remote | ATS feed · NL · `[remote]` + Indeed `country:NL, remote:remote` | partner-permit, remote-contract |
-| **C** Dutch/EU companies hiring remote from India | Indeed `country:IN, remote:remote`, EU-employer filtered | remote-contract |
+| **A** NL on-site/hybrid | ATS · `locationSearch:["Netherlands"]` · `["On-site","Hybrid"]` | hsm, partner-permit |
+| **B** NL remote | ATS · `locationSearch:["Netherlands"]` · `["Remote OK"]` + Indeed `country:NL, remote` | partner-permit, remote-contract |
+| **C** EU companies hiring remote from India | ATS · **no `locationSearch`** · `["Remote Solely"]`, EU-employer filtered client-side + Indeed `country:IN, remote` | remote-contract |
+
+Pool C must drop `locationSearch` entirely — see O1 (resolved). It is scoped to
+EU employers only, so it is filtered on company data rather than posting
+location.
+
+Two further fields the feed exposes and we do not use:
+`aiVisaSponsorshipFilter` (a direct boolean for sponsorship-offering roles — a
+real signal for the HSM basis rather than an inference from the register), and
+`aiLanguageFilter` (detected description language — a *measurement* of the Dutch
+bar, not a replacement for the language gate, since an English-language posting
+can still demand Dutch).
 
 Pool C is new. It is scoped to **Dutch and EU employers only** (founder
 decision, 2026-07-31): a US company hiring a contractor in India is income, not
@@ -298,11 +313,13 @@ live run at PR time for evidence (rule #24), as with PR #393.
 
 ## Open questions
 
-- **O1 — unverified.** That `locationSearch: ["Netherlands"]` misses
-  "Remote / worldwide" postings is *inferred from the query shape, not observed*.
-  One run with `aiWorkArrangementFilter: ["Remote"]` (~$0.40) settles it. If the
-  feed already tags remote roles with the employer's NL location, pool B needs
-  no ATS change and only Indeed carries it.
+- **O1 — RESOLVED 2026-07-31, at $0, from the vendor's schema.** The feed
+  documents `hasNoLocation`: *"returns only jobs with no normalized location
+  (`locations_derived` is null). Do not combine with location search, which
+  would always return zero rows."* Postings with a null location therefore exist
+  and are mutually exclusive with `locationSearch`. `["Netherlands"]` provably
+  cannot see them. **Consequence: pool C must not set `locationSearch` at all.**
+  No probe was purchased — the answer was in the input schema.
 - **O2.** Indeed↔ATS cross-source duplicates: same role, different company
   string ("Adyen" vs "Adyen N.V."). `dedupe_key` exists but was built for one
   source. Needs a normalisation pass before pool B runs both sources, or the
