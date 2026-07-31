@@ -392,6 +392,47 @@ non-recursively, so this subtree is NOT indexed and does not pollute personal-ra
 **Limitation: until the founder tailors them, all three tracks score identical
 overlap.**
 
+### Production pass — 2026-08-01
+
+Config applied to the VPS: per-track CVs at `/opt/founderos-data/cv/{ai,backend,
+frontend}/cv.md` (outside the repo, so a future `git clean` cannot take them),
+`PERSONAL_CV_DIR` + `PERSONAL_CV_PATH` set in the prod `.env`.
+
+**Live prod sweep, exit 0**: 9 fetched → 9 screened (1 pass, 1 reject, 7 flags)
+in 4.7s, 8 rows persisted — 9 screened minus one the dedupe key collapsed, which
+is dedupe working on live data. `sendToChat` resolved, so the Telegram delivery
+path is confirmed end to end.
+
+Four further defects found by walking the production path:
+
+5. **No CV existed anywhere on the VPS** and both `PERSONAL_CV_*` were unset.
+   Nothing crashes — every posting scores 0 overlap and the brief renders a
+   confident order built from no comparison at all. `loadTrackCvs` now returns
+   the tracks it could not read and the brief lists them under INCOMPLETE RUN.
+6. **`PERSONAL_CV_*` were absent from `PRESERVE_IF_MISSING`**, so the on-box
+   values would be silently wiped by the next `PROD_DOTENV` render, reintroducing
+   defect 5 at an arbitrary later deploy.
+7. **The brief was sent with `parse_mode: "HTML"`.** The comment on the failure
+   path claimed "plain text, no parse mode", but every call site passed one
+   argument and got the HTML default. Real titles carry `&` and `<` ("Bloom &
+   Wild Group" arrived in this very sweep), and Telegram rejects the WHOLE
+   message on an unparseable entity. The catch-block fallback re-sent with the
+   same parse mode, so one `<` would have cost the founder the brief AND its
+   error notice while the sweep logged success. All three paths now escape.
+8. **`/draft N` and `/ask N` did not exist**, and `telegram.ts` returned early on
+   any message starting with `/`. The founder would read the brief, tap the only
+   control it offers, and receive complete silence. Both commands now exist and
+   resolve N in pure code against ranks pinned at render time (migration 0021) —
+   re-deriving the order on demand would silently retarget the command as
+   liveness and new screens reshuffle the list. Unknown slash commands now reply.
+
+**Migration ordering hazard (documented, not worked around).** 0020 drops
+`cv_signals_term_uniq`, which the pre-0020 `recordSignals` needs for its
+`ON CONFLICT (tenant_id, term)`. Applying 0020 to prod ahead of the code would
+break every signal write. `deploy.sh` runs `pnpm db:migrate` (line 107) before
+`systemctl restart` (line 196), so schema and code land together; 0020 was
+therefore deliberately NOT applied by hand.
+
 ### Known limitations (measured, not speculative)
 
 - Overlap is per-track in mechanism but not yet in substance — see above.
