@@ -28,8 +28,20 @@ const log = childLogger({ module: "tool:career" });
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const PERSONAL_RAG_URL = process.env["PERSONAL_RAG_URL"] ?? "http://localhost:8765";
+const HOME_DIR = process.env["HOME"] ?? "/Users/pushkarverma";
 const WIKI_FALLBACK_PATH = process.env["PERSONAL_WIKI_PATH"]
-  ?? join(process.env["HOME"] ?? "/Users/pushkarverma", "Projects/personal-rag/data/wiki.md");
+  ?? join(HOME_DIR, "Projects/personal-rag/data/wiki.md");
+
+/**
+ * The authoritative CV — a document Pushkar maintains, mirrored from Drive.
+ *
+ * Deliberately NOT the wiki. The wiki is synthesized from chat transcripts by a
+ * local model, and on 2026-07-31 it was found to state the wrong employer name,
+ * the wrong job title and dates off by a year for Contact_ME. Gap analysis that
+ * reads it produces confident findings about a career that did not happen.
+ */
+const CV_PATH = process.env["PERSONAL_CV_PATH"]
+  ?? join(HOME_DIR, "Projects/personal-rag/data/local_docs/cv-master.md");
 
 // ── read_cv ───────────────────────────────────────────────────────────────────
 
@@ -139,6 +151,58 @@ export const readCvTool: UnifiedTool = {
     }
   },
 };
+
+// ── Full CV text (for whole-document analysis, not search) ───────────────────
+
+/** Below this, the "CV" is a search excerpt or a stub, not a CV. */
+const MIN_PLAUSIBLE_CV_CHARS = 800;
+
+export type CvTextResult =
+  | { ok: true; text: string; source: "cv" }
+  | { ok: false; error: string };
+
+/**
+ * Read the WHOLE CV document.
+ *
+ * `readCvTool` answers a QUERY — personal-rag returns its top 5 chunks, and the
+ * wiki fallback returns only lines matching the query keywords. That is right
+ * for "what's my LangGraph experience" and wrong for anything that needs to know
+ * what the CV does NOT say.
+ *
+ * Observed 2026-07-29: cv_gaps called readCvTool and got 195 characters back,
+ * then reported 18 skills as "missing from your CV" — every one of which the CV
+ * may well have stated. A gap report is a claim about absence, and absence can
+ * only be read off the complete document.
+ *
+ * Read-only (ADR-015). Never writes to personal-rag.
+ */
+export function readFullCvText(): CvTextResult {
+  try {
+    const text = readFileSync(CV_PATH, "utf-8");
+    if (text.trim().length < MIN_PLAUSIBLE_CV_CHARS) {
+      return {
+        ok: false,
+        error:
+          `The CV document at ${CV_PATH} is only ${text.trim().length} characters. ` +
+          "Refusing to compute gaps from it — a near-empty CV makes every skill in the " +
+          "market look missing.",
+      };
+    }
+    return { ok: true, text, source: "cv" };
+  } catch (err) {
+    // No silent fall back to the wiki. The wiki is model-synthesized from chat
+    // transcripts and has been observed to state the wrong employer, title and
+    // dates — substituting it here would turn a missing file into a confidently
+    // wrong gap report, which is the more expensive failure.
+    return {
+      ok: false,
+      error:
+        `Could not read the CV at ${CV_PATH}: ${(err as Error).message}. ` +
+        "Gaps cannot be computed without it. Set PERSONAL_CV_PATH or restore the file — " +
+        "the synthesized wiki is NOT an acceptable substitute.",
+    };
+  }
+}
 
 // ── search_jobs ───────────────────────────────────────────────────────────────
 

@@ -896,6 +896,16 @@ export const scheduledTasks = agentsSchema.table(
     /** Set on failure — surfaced to the founder by the sweep. */
     error: text("error"),
 
+    /**
+     * Recurrence spec (`daily@08:07` | `weekdays@09:00` | `weekly@mon:09:12` |
+     * `monthly@01:06:07`), NULL for a one-shot task. On completion the sweep
+     * parses this and inserts a FRESH row for the next occurrence rather than
+     * mutating this one, so fired history stays immutable and a checkpoint replay
+     * can never re-arm twice. Parsed by `parseRecurrence` / `nextRecurrence` in
+     * src/core/time.ts, which resolve against APP_TIMEZONE.
+     */
+    recurrence: text("recurrence"),
+
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
     completed_at: timestamp("completed_at", { withTimezone: true }),
   },
@@ -908,6 +918,138 @@ export const scheduledTasks = agentsSchema.table(
 
 export type ScheduledTask = typeof scheduledTasks.$inferSelect;
 export type NewScheduledTask = typeof scheduledTasks.$inferInsert;
+
+// ── job_applications ──────────────────────────────────────────────────────────
+
+/**
+ * Application pipeline state for the Netherlands campaign.
+ *
+ * Exists so the machine can never re-apply to a role it has already touched, and
+ * so the funnel is MEASURED rather than estimated — docs/strategy/09-NL-ENTRY-CAMPAIGN.md
+ * currently carries guessed conversion rates, and this table is what replaces them.
+ *
+ * `dedupe_key` is the identity (normalised company + role, see
+ * src/tools/jobhunt/filters.ts) and is unique per tenant: the uniqueness
+ * constraint, not application logic, is what makes double-applying impossible.
+ */
+export const jobApplications = agentsSchema.table(
+  "job_applications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+
+    /** Normalised `company::role` — the identity that prevents double-applying. */
+    dedupe_key: text("dedupe_key").notNull(),
+
+    /**
+     * Weaker identity (company + sorted title words, noise stripped) used to WARN
+     * about cosmetic re-posts. Never unique — sorting tokens is not sound enough
+     * to block an application on.
+     */
+    soft_dedupe_key: text("soft_dedupe_key"),
+
+    /** hsm | remote-contract — which route's gates produced the verdict. */
+    route: text("route").notNull().default("hsm"),
+
+    company: text("company").notNull(),
+    /** Canonical IND register name when the sponsor gate matched exactly. */
+    registered_name: text("registered_name"),
+    title: text("title").notNull(),
+    url: text("url"),
+
+    /** sponsor | not-sponsor | uncertain — from src/tools/jobhunt/sponsor-match.ts. */
+    sponsor_verdict: text("sponsor_verdict").notNull(),
+
+    /** pass | flag | reject, plus the evidence string behind the decision. */
+    salary_status: text("salary_status").notNull(),
+    salary_evidence: text("salary_evidence"),
+
+    /** 0–1 CV-to-JD fit, with the matched/missing skills that produced it. */
+    fit_score: numeric("fit_score"),
+    fit_evidence: text("fit_evidence"),
+
+    /** screened | drafted | awaiting_approval | applied | replied | rejected | dormant. */
+    stage: text("stage").notNull().default("screened"),
+
+    applied_at: timestamp("applied_at", { withTimezone: true }),
+    last_contact_at: timestamp("last_contact_at", { withTimezone: true }),
+    /** Count of follow-ups sent — the Monday review follows up at day 7, then 14. */
+    followups_sent: integer("followups_sent").notNull().default(0),
+
+    notes: text("notes"),
+
+    /**
+     * The posting body, verbatim. Kept because the skill dictionary
+     * (src/tools/jobhunt/skills-dictionary.ts) will gain terms over time, and
+     * without the source text every signal recorded before a term was added is
+     * unrecoverable — the history would silently under-count the new term.
+     */
+    description: text("description"),
+    /** When the employer published it (from the ATS feed), not when we saw it. */
+    posted_at: timestamp("posted_at", { withTimezone: true }),
+    /** manual | ats-ingest — how the posting reached the gates. */
+    source: text("source").notNull().default("manual"),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    /** The gate that makes double-applying structurally impossible. */
+    dedupeUniq: uniqueIndex("ja_dedupe_uniq").on(t.tenant_id, t.dedupe_key),
+    /** Monday review hot path: live applications ordered by staleness. */
+    stageIdx: index("ja_stage_idx").on(t.tenant_id, t.stage, t.last_contact_at),
+  }),
+);
+
+export type JobApplication = typeof jobApplications.$inferSelect;
+export type NewJobApplication = typeof jobApplications.$inferInsert;
+
+// ── cv_signals ────────────────────────────────────────────────────────────────
+
+/**
+ * What the reachable market actually asks for, accumulated one posting at a time.
+ *
+ * Only postings that PASS the screening gates contribute. That restriction is
+ * the whole value of the table: the market at large is noise, while the roles
+ * Pushkar can legally hold are the only population his CV needs to match.
+ *
+ * It informs the CV; it never edits it. There is deliberately no write path from
+ * here to personal-rag (ADR-015 — read-only) or to any CV document. `cv_gaps`
+ * reports the difference and the founder decides what is true.
+ *
+ * `seen_count` is postings, NOT mentions — see src/tools/jobhunt/skills.ts.
+ */
+export const cvSignals = agentsSchema.table(
+  "cv_signals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+
+    /** Canonical term as the founder reads it, e.g. 'Kubernetes'. */
+    term: text("term").notNull(),
+
+    /** language | framework | infra | data | ai | practice | unknown. */
+    category: text("category").notNull(),
+
+    /** Number of DISTINCT passing postings that asked for this. */
+    seen_count: integer("seen_count").notNull().default(0),
+
+    first_seen_at: timestamp("first_seen_at", { withTimezone: true }).defaultNow(),
+    last_seen_at: timestamp("last_seen_at", { withTimezone: true }).defaultNow(),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    /** One row per term — the count is a running total, not an event log. */
+    termUniq: uniqueIndex("cv_signals_term_uniq").on(t.tenant_id, t.term),
+    /** Gap report hot path: most-demanded first. */
+    rankIdx: index("cv_signals_rank_idx").on(t.tenant_id, t.seen_count),
+  }),
+);
+
+export type CvSignal = typeof cvSignals.$inferSelect;
+export type NewCvSignal = typeof cvSignals.$inferInsert;
 
 // ── failure_lessons ───────────────────────────────────────────────────────────
 

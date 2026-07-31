@@ -28,7 +28,8 @@ export const systemClock: Clock = () => new Date();
 export type Recurrence =
   | { kind: "daily"; time: string } // "HH:MM", every day
   | { kind: "weekdays"; time: string } // "HH:MM", Mon–Fri
-  | { kind: "weekly"; weekday: number; time: string }; // weekday 0=Sun..6=Sat
+  | { kind: "weekly"; weekday: number; time: string } // weekday 0=Sun..6=Sat
+  | { kind: "monthly"; day: number; time: string }; // day 1..31, clamped to month length
 
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -143,6 +144,20 @@ export function plannerNowLine(clock: Clock = systemClock, timeZone = appTimeZon
 export function nextRecurrence(rec: Recurrence, after: Date, timeZone = appTimeZone()): Date {
   const [th, tm] = rec.time.split(":").map(Number);
   const { y, mo, d } = wallDate(after, timeZone);
+
+  // Monthly needs a month-stepping scan, and the requested day is clamped into
+  // short months so "the 31st" fires on 30 Sep rather than silently skipping it.
+  if (rec.kind === "monthly") {
+    for (let i = 0; i <= 13; i++) {
+      const ty = y + Math.floor((mo - 1 + i) / 12);
+      const tmo = ((mo - 1 + i) % 12) + 1;
+      const lastDay = new Date(Date.UTC(ty, tmo, 0)).getUTCDate();
+      const cand = zonedTimeToUtc(ty, tmo, Math.min(rec.day, lastDay), th ?? 0, tm ?? 0, timeZone);
+      if (cand.getTime() > after.getTime()) return cand;
+    }
+    throw new Error(`nextRecurrence: no fire time within 13 months for ${JSON.stringify(rec)}`);
+  }
+
   for (let i = 0; i < 8; i++) {
     const cand = zonedTimeToUtc(y, mo, d + i, th ?? 0, tm ?? 0, timeZone);
     if (cand.getTime() <= after.getTime()) continue;
@@ -155,9 +170,56 @@ export function nextRecurrence(rec: Recurrence, after: Date, timeZone = appTimeZ
   throw new Error(`nextRecurrence: no fire time within 8 days for ${JSON.stringify(rec)}`);
 }
 
+const WEEKDAY_KEYS: Record<string, number> = {
+  sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6,
+};
+
+function validTime(time: string): boolean {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(time);
+  if (!m) return false;
+  const h = Number(m[1]);
+  const mi = Number(m[2]);
+  return h >= 0 && h <= 23 && mi >= 0 && mi <= 59;
+}
+
+/**
+ * Parse a recurrence spec string so schedules can be stored as text and re-armed
+ * without an LLM. Returns null on anything malformed — a scheduler that guesses at
+ * an ambiguous schedule is worse than one that refuses it.
+ *
+ * Forms: `daily@08:07` · `weekdays@09:00` · `weekly@mon:09:12` · `monthly@01:06:07`
+ */
+export function parseRecurrence(spec: string): Recurrence | null {
+  const simple = /^(daily|weekdays)@(\d{1,2}:\d{2})$/i.exec(spec);
+  if (simple) {
+    const time = simple[2]!;
+    if (!validTime(time)) return null;
+    return { kind: simple[1]!.toLowerCase() as "daily" | "weekdays", time };
+  }
+
+  const weekly = /^weekly@([a-z]{3}):(\d{1,2}:\d{2})$/i.exec(spec);
+  if (weekly) {
+    const weekday = WEEKDAY_KEYS[weekly[1]!.toLowerCase()];
+    const time = weekly[2]!;
+    if (weekday === undefined || !validTime(time)) return null;
+    return { kind: "weekly", weekday, time };
+  }
+
+  const monthly = /^monthly@(\d{1,2}):(\d{1,2}:\d{2})$/i.exec(spec);
+  if (monthly) {
+    const day = Number(monthly[1]);
+    const time = monthly[2]!;
+    if (day < 1 || day > 31 || !validTime(time)) return null;
+    return { kind: "monthly", day, time };
+  }
+
+  return null;
+}
+
 /** Human label for a recurrence, e.g. "every weekday at 18:00". */
 export function describeRecurrence(rec: Recurrence): string {
   if (rec.kind === "daily") return `every day at ${rec.time}`;
   if (rec.kind === "weekdays") return `every weekday at ${rec.time}`;
+  if (rec.kind === "monthly") return `on day ${rec.day} of each month at ${rec.time}`;
   return `every ${WEEKDAY_NAMES[rec.weekday] ?? "?"} at ${rec.time}`;
 }
