@@ -82,15 +82,26 @@ export function headlineFor(row: JobApplication): string {
   return trimToSentence(reasons[0]!, HEADLINE_MAX);
 }
 
-/** Per-track CV text, read once per brief rather than once per row. */
-export function loadTrackCvs(): Map<string, string> {
+/**
+ * Per-track CV text, read once per brief rather than once per row.
+ *
+ * Returns the tracks it could NOT read alongside the ones it could. Without that
+ * list the failure is silent: a missing CV scores every posting at 0 overlap, so
+ * the brief still renders a confident-looking order built from no comparison at
+ * all. A log line does not reach the founder; a brief line does.
+ */
+export function loadTrackCvs(): { cvs: Map<string, string>; unreadable: string[] } {
   const cvs = new Map<string, string>();
+  const unreadable: string[] = [];
   for (const track of TRACK_PRIORITY) {
     const cv = readFullCvText(track);
     if (cv.ok) cvs.set(track, cv.text);
-    else log.warn({ track, error: cv.error }, "Track CV unreadable — overlap unavailable");
+    else {
+      unreadable.push(track);
+      log.warn({ track, error: cv.error }, "Track CV unreadable — overlap unavailable");
+    }
   }
-  return cvs;
+  return { cvs, unreadable };
 }
 
 /**
@@ -198,7 +209,7 @@ export interface BriefOptions {
 export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> {
   const now = opts.now ?? new Date();
   const applications = await listActionableApplications({});
-  const cvs = loadTrackCvs();
+  const { cvs, unreadable } = loadTrackCvs();
   const scored = rankRows(applications, cvs, now);
 
   const liveness = new Map<string, Liveness>();
@@ -239,13 +250,25 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     ageDays: ageInDays(row.created_at, now),
   }));
 
+  // An unreadable CV is not a cosmetic warning: it zeroes every overlap score
+  // for that track, so the ranking stops being a ranking. It belongs with the
+  // source failures, where the brief already says the numbers are a floor.
+  const cvFailure =
+    unreadable.length > 0
+      ? [
+          `CV unreadable for ${unreadable.join(", ")} — every overlap score on ` +
+            "those tracks is 0, so their order in this brief is arbitrary. " +
+            "Set PERSONAL_CV_DIR or restore the file.",
+        ]
+      : [];
+
   const input: BriefInput = {
     date: now,
     screened: opts.screened ?? applications.length,
     perTrack,
     rows,
     trends: await buildTrends(cvs, now),
-    failures: opts.failures ?? [],
+    failures: [...(opts.failures ?? []), ...cvFailure],
   };
 
   return formatDailyBrief(input);
