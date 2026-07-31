@@ -1006,6 +1006,16 @@ export const jobApplications = agentsSchema.table(
     liveness: text("liveness").notNull().default("unknown"),
     liveness_checked_at: timestamp("liveness_checked_at", { withTimezone: true }),
 
+    /**
+     * Where this row appeared in the LAST brief, and at what number.
+     *
+     * Pinned at render time so `/draft 2` resolves to the row the founder was
+     * looking at. Re-deriving the order on demand would silently retarget the
+     * command when liveness or new screens reshuffle the list.
+     */
+    brief_section: text("brief_section"),
+    brief_rank: integer("brief_rank"),
+
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },

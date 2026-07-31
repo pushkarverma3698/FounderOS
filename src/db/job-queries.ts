@@ -13,7 +13,7 @@
  * gap-scan-queries.ts and account-queries.ts).
  */
 
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { jobApplications, type JobApplication, type NewJobApplication } from "./schema.js";
 
@@ -260,4 +260,63 @@ export async function listRecentApplications(
     .where(eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT))
     .orderBy(desc(jobApplications.created_at))
     .limit(opts.limit ?? 20);
+}
+
+/** Sections of the brief a founder can address by number. */
+export type BriefSection = "do_today" | "ask";
+
+/**
+ * Pin the numbering the founder just read.
+ *
+ * Every render CLEARS the previous set first: a stale rank from yesterday's
+ * brief would answer `/draft 3` with a role that is no longer on the list, which
+ * is worse than answering "there is no 3" — the founder cannot tell the
+ * difference from a correct answer.
+ */
+export async function recordBriefRanks(
+  entries: ReadonlyArray<{ id: string; section: BriefSection; rank: number }>,
+  opts: { tenantId?: string } = {},
+): Promise<void> {
+  const db = getDb();
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT;
+
+  await db
+    .update(jobApplications)
+    .set({ brief_section: null, brief_rank: null })
+    .where(
+      and(eq(jobApplications.tenant_id, tenantId), isNotNull(jobApplications.brief_section)),
+    );
+
+  for (const entry of entries) {
+    await db
+      .update(jobApplications)
+      .set({ brief_section: entry.section, brief_rank: entry.rank })
+      .where(and(eq(jobApplications.tenant_id, tenantId), eq(jobApplications.id, entry.id)));
+  }
+}
+
+/**
+ * Resolve `/draft 2` to the row that was printed as 2.
+ *
+ * Returns null rather than a best guess. A command that quietly drafts for the
+ * wrong company is far more expensive than one that says it cannot find row 2.
+ */
+export async function getApplicationByBriefRank(
+  section: BriefSection,
+  rank: number,
+  opts: { tenantId?: string } = {},
+): Promise<JobApplication | null> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(jobApplications)
+    .where(
+      and(
+        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+        eq(jobApplications.brief_section, section),
+        eq(jobApplications.brief_rank, rank),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
 }

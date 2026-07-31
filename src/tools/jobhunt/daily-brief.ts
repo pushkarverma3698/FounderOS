@@ -16,6 +16,7 @@ import {
   listActionableApplications,
   countPassingApplications,
   recordLiveness,
+  recordBriefRanks,
 } from "../../db/job-queries.js";
 import { listSignals } from "../../db/cv-signal-queries.js";
 import { readFullCvText } from "../career.js";
@@ -23,7 +24,14 @@ import { TRACK_PRIORITY } from "./tracks.js";
 import { compareOverlap, overlapScore, type OverlapResult } from "./overlap.js";
 import { extractSkillTerms } from "./skills.js";
 import { verifyLiveness, type Liveness } from "./liveness.js";
-import { formatDailyBrief, type BriefInput, type BriefRow, type TrendRow } from "./brief.js";
+import {
+  formatDailyBrief,
+  selectAskable,
+  selectDoToday,
+  type BriefInput,
+  type BriefRow,
+  type TrendRow,
+} from "./brief.js";
 import type { JobApplication } from "../../db/schema.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 
@@ -271,7 +279,34 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     failures: [...(opts.failures ?? []), ...cvFailure],
   };
 
+  // Pin the numbering BEFORE returning the text. selectDoToday/selectAskable are
+  // pure and get the same `rows`, so what is stored is exactly what is printed.
+  // Deriving it again when /draft fires would retarget the command silently.
+  await persistBriefRanks(rows);
+
   return formatDailyBrief(input);
+}
+
+/**
+ * Store which row the founder will read as "1", "2", "3" in each section.
+ *
+ * Failure here is tolerated but reported: the brief is still worth sending
+ * without working handles, whereas throwing would lose the whole thing over the
+ * numbering. The founder finds out because /draft says it cannot resolve the row
+ * — never by drafting for the wrong company.
+ */
+async function persistBriefRanks(rows: readonly BriefRow[]): Promise<void> {
+  const entries = [
+    ...selectDoToday(rows).map((r, i) => ({ id: r.id, section: "do_today" as const, rank: i + 1 })),
+    ...selectAskable(rows).map((r, i) => ({ id: r.id, section: "ask" as const, rank: i + 1 })),
+  ];
+  try {
+    await recordBriefRanks(entries);
+  } catch (err) {
+    // allow-failopen: the brief itself is the deliverable. A lost rank makes
+    // /draft say "I can't find row N", which is loud and recoverable.
+    log.warn({ err: (err as Error).message }, "Brief rank persist failed — /draft handles stale");
+  }
 }
 
 export const jobBriefTool: UnifiedTool = {
