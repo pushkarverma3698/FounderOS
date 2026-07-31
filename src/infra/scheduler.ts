@@ -246,6 +246,34 @@ export async function recoverStrandedReminders(): Promise<void> {
   }
 }
 
+/**
+ * Daily — pull fresh postings and screen them all. Zero-LLM: the fetch is HTTP
+ * and every gate is pure code, so this runs unattended without touching the
+ * model budget.
+ *
+ * It reports on every outcome including failure. A sweep that goes quiet is
+ * indistinguishable from a market with no jobs in it, and that ambiguity is the
+ * whole reason the founder would stop trusting the number.
+ */
+export async function runJobIngestSweep(): Promise<void> {
+  const { runJobIngest, formatIngestSummary } = await import("../tools/jobhunt/ingest.js");
+  const result = await runJobIngest({ timeRange: "24h", limit: JOB_INGEST_DAILY_LIMIT });
+
+  if (!result.ok) {
+    log.warn({ error: result.error }, "Daily job ingest failed");
+    // Plain text, no parse mode: real job titles contain "&" and "<", which
+    // HTML mode would reject — the alert must not fail on the alert's content.
+    await sendToChat(`⚠ Job ingest failed — nothing was screened today.\n${result.error}`);
+    return;
+  }
+
+  log.info({ fetched: result.summary.fetched }, "Daily job ingest complete");
+  await sendToChat(formatIngestSummary(result.summary));
+}
+
+/** Founder-approved daily volume: ~$4/month at the feed's per-job price. */
+const JOB_INGEST_DAILY_LIMIT = 10;
+
 export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }): void {
   cron.schedule("0 9 * * *", () => {
     sendStaleApprovalReminder().catch((err) =>
@@ -264,6 +292,12 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
   });
   cron.schedule("0 2 * * *", () => {
     runBrainSync().catch((err) => log.error({ err: (err as Error).message }, "Auto brain sync cron error"));
+  });
+  // 01:30 UTC = 07:00 IST — the sweep lands before the founder's day starts.
+  cron.schedule("30 1 * * *", () => {
+    runJobIngestSweep().catch((err) =>
+      log.error({ err: (err as Error).message }, "Job ingest sweep cron error"),
+    );
   });
   cron.schedule("* * * * *", () => {
     runScheduledPostSweep().catch((err) =>
@@ -284,7 +318,7 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
     });
   }
   log.info(
-    "Scheduler started — stale-approval check (daily 9am), budget alerts (hourly), brain sync (daily 2am), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
+    "Scheduler started — stale-approval check (daily 9am), budget alerts (hourly), brain sync (daily 2am), job ingest (daily 1:30am UTC), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
       (taskExecutor ? ", scheduled-task sweep (every minute)" : ""),
   );
 }
