@@ -324,8 +324,14 @@ live run at PR time for evidence (rule #24), as with PR #393.
   string ("Adyen" vs "Adyen N.V."). `dedupe_key` exists but was built for one
   source. Needs a normalisation pass before pool B runs both sources, or the
   founder applies twice to one job.
-- **O3.** Whether the daily scheduler has ever actually fired in production is
-  still unobserved (carried over from the PR #393 verification).
+- **O3 — RESOLVED 2026-07-31, on the live box.** The daily sweep has never fired
+  in production because **it does not exist in the deployed build**:
+  `grep -c runJobIngestSweep /opt/founderos/src/infra/scheduler.ts` → `0`, and
+  there is no `30 1 * * *` cron line. Deployed HEAD is `9b76336` (PR #391); the
+  jobhunt work sits on unmerged branches. The cron subsystem itself is healthy —
+  over the same 7 days brain sync logged 9 firings and the reminder sweep 2 — so
+  this is a delivery gap, not a scheduler bug. **Daily operation is blocked on
+  merge + deploy, nothing else.**
 
 ## Verification results
 
