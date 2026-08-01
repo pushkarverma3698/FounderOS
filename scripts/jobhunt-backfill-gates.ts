@@ -25,7 +25,7 @@
  */
 
 import { listRecentApplications } from "../src/db/job-queries.js";
-import { toPostingCountry } from "../src/tools/jobhunt/country.js";
+import { countryFromUrl, toPostingCountry } from "../src/tools/jobhunt/country.js";
 import { screenPosting } from "../src/tools/jobhunt/screen.js";
 
 const DRY = process.argv.includes("--dry");
@@ -61,7 +61,13 @@ async function main(): Promise<void> {
       // established — because this script has no feed to ask. A row that never
       // had one stays `unknown`, which is the truth about it: it was screened by
       // a pipeline that did not record where the job was.
-      ...(row.country ? { country: toPostingCountry(row.country) } : {}),
+      // CARRIED FORWARD where it exists, RECOVERED FROM THE URL where it does
+      // not. Indeed serves each country on its own hostname, so `in.indeed.com`
+      // is a fact about the row rather than a reading of its text — and it is
+      // the only country evidence rows screened before the column existed have.
+      // Eight production rows sit on `in.indeed.com` while recording a Dutch
+      // partner permit as what makes them lawful.
+      country: row.country ? toPostingCountry(row.country) : countryFromUrl(row.url),
       ...(row.location ? { location: row.location } : {}),
     });
 
