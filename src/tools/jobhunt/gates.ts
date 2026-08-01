@@ -170,6 +170,9 @@ export const GATE_GLOSSARY: Readonly<Record<string, string>> = {
   Rate: "Is the day rate or salary worth taking on a remote contract, where no permit floor applies.",
   Language: "Does the posting require Dutch. If it does, you cannot be shortlisted.",
   Experience: "How many years the posting explicitly demands, versus your ~3.5 years shipped.",
+  Location:
+    "Does the ad say where the work actually sits. Until it does, every permit "  +
+    "basis below is an assumption rather than a finding.",
   Posting: "Whether we actually received enough of the job ad to judge it.",
 };
 
