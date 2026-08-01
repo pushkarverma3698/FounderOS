@@ -61,6 +61,43 @@ const EARLY_CAREER_TERMS: readonly string[] = [
 const EARLY_CAREER_RE = new RegExp(`\\b(?:${EARLY_CAREER_TERMS.join("|")})\\b`, "i");
 
 /**
+ * The subset safe to send to the FEED as `titleExclusionSearch`.
+ *
+ * WHY A SUBSET AND NOT THE WHOLE LIST. The feed matches an exclusion term the
+ * same way it matches a search term — as a SUBSTRING, with no word boundary. So
+ * excluding "intern" at source would also discard "Internal Tools Engineer" and
+ * every "International" role, and the loss would be invisible: an excluded
+ * posting is never returned, never counted, and never appears in the drop
+ * tally. That is precisely the silent-failure direction this pipeline exists to
+ * avoid, and it would be worse than the problem it solves.
+ *
+ * So the split is by evidence, not by convenience. A term goes here only if no
+ * ordinary engineering title contains it as a substring. Everything ambiguous —
+ * "intern", "grad", "stage", "starter" — stays client-side ONLY, where
+ * `EARLY_CAREER_RE` matches on a word boundary and every drop is counted.
+ *
+ * WHAT THIS BUYS. The feed charges per job returned ($0.012 as of 2026-08-01).
+ * On 2026-08-01 two of eight live rows were an internship and a graduate
+ * scheme — a quarter of the day's budget paid for, fetched, and then thrown
+ * away by `excludeEarlyCareer`. Excluding them upstream means the money buys
+ * roles he can actually take.
+ *
+ * `excludeEarlyCareer` still runs on everything that comes back. This list is an
+ * optimisation, never the guarantee.
+ */
+export const SOURCE_EXCLUDED_TITLE_TERMS: readonly string[] = [
+  "internship",
+  "trainee",
+  "apprentice",
+  "graduate",
+  "student",
+  "stagiair",
+  "praktikant",
+  "praktikum",
+  "placement",
+];
+
+/**
  * A graduation-year marker: "Graduate Software Engineer (2027)", "Class of 2027".
  * A future year in a title is a cohort programme, not a role starting now.
  */

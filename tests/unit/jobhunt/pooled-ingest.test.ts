@@ -142,9 +142,10 @@ describe("runPooledIngest", () => {
     expect(result.fetched).toBe(ATS_QUERIES - 1);
     expect(result.failures).toHaveLength(1);
     expect(result.failures[0]).toContain("HTTP 521");
-    // Queries run pool-major, so the second one is nl-onsite / backend.
+    // Queries run pool-major, so the second one is the first pool paired with
+    // the SECOND track in priority order.
     expect(result.failures[0]).toContain("nl-onsite");
-    expect(result.failures[0]).toContain("backend");
+    expect(result.failures[0]).toContain(TRACK_PRIORITY[1]!);
   });
 
   it("reports every pool failing as failures, NOT as an empty market", async () => {

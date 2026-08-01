@@ -28,6 +28,7 @@ import { fetchIndeedPostings, type IndeedCountry } from "./indeed-source.js";
 import { excludeEarlyCareer } from "./seniority.js";
 import { TRACK_PRIORITY, TRACK_TITLES, type RoleTrack } from "./tracks.js";
 import { screenPosting } from "./screen.js";
+import { formatIngestSummary } from "./ingest-format.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 
 const log = childLogger({ module: "tool:ingest_jobs" });
@@ -158,7 +159,13 @@ export async function runPooledIngest(opts: {
   const perQuery = Math.max(MIN_ATS_LIMIT, Math.floor(opts.limit / queries));
   const postings: RawPosting[] = [];
   const failures: string[] = [];
-  const perTrack: Record<RoleTrack, number> = { ai: 0, backend: 0, frontend: 0 };
+  // Derived from TRACK_PRIORITY rather than written out, so adding a track can
+  // never leave a counter silently missing — which would report that track as
+  // "0 postings" forever regardless of what the feed actually returned.
+  const perTrack = Object.fromEntries(TRACK_PRIORITY.map((t) => [t, 0])) as Record<
+    RoleTrack,
+    number
+  >;
 
   // EVERY TRACK GETS ITS OWN QUERY AND ITS OWN BUDGET.
   //
@@ -276,51 +283,6 @@ export async function runJobIngest(query: AtsQuery = {}): Promise<IngestResult> 
     "Job ingest complete",
   );
   return { ok: true, summary: { fetched: fetched.postings.length, lines } };
-}
-
-// ── Formatting (pure) ─────────────────────────────────────────────────────────
-
-const GROUP_ORDER: ReadonlyArray<IngestLine["outcome"]> = [
-  "pass",
-  "flag",
-  "reject",
-  "duplicate",
-  "error",
-];
-
-const GROUP_LABEL: Record<IngestLine["outcome"], string> = {
-  pass: "PASS — clears every hard gate, safe to draft",
-  flag: "NEEDS A HUMAN CHECK — one gate couldn't be settled from the posting",
-  reject: "REJECT — a legal bar, not a preference",
-  duplicate: "SKIPPED — already in the pipeline",
-  error: "FAILED TO SCREEN",
-};
-
-export function formatIngestSummary(summary: IngestSummary): string {
-  if (summary.fetched === 0) {
-    return (
-      "INGEST — 0 postings.\n\n" +
-      "The feed returned nothing for this query. That is a measurement, not " +
-      "necessarily a fault: Netherlands + 2–5 years + AI/backend in the last 24h " +
-      "is a narrow slice. If it stays at 0 for several days, widen the titles or " +
-      "the time range rather than assuming the sweep is broken."
-    );
-  }
-
-  const counts = GROUP_ORDER.map(
-    (g) => `${g}: ${summary.lines.filter((l) => l.outcome === g).length}`,
-  ).join(" · ");
-
-  const sections = GROUP_ORDER.flatMap((group) => {
-    const rows = summary.lines.filter((l) => l.outcome === group);
-    if (rows.length === 0) return [];
-    const body = rows
-      .map((r) => `  · ${r.company} — ${r.title}\n      ${r.detail}`)
-      .join("\n");
-    return [`${GROUP_LABEL[group]} (${rows.length})\n${body}`];
-  });
-
-  return `INGEST — ${summary.fetched} postings screened.\n${counts}\n\n${sections.join("\n\n")}`;
 }
 
 // ── Tool ──────────────────────────────────────────────────────────────────────

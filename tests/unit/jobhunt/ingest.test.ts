@@ -23,7 +23,8 @@ vi.mock("../../../src/tools/jobhunt/ats-source.js", async (orig) => {
   return { ...actual, fetchAtsPostings: mockFetch };
 });
 
-const { screenBatch, runJobIngest, formatIngestSummary, ingestJobsTool, INGEST_SOURCE } =
+const { formatIngestSummary } = await import("../../../src/tools/jobhunt/ingest-format.js");
+const { screenBatch, runJobIngest, ingestJobsTool, INGEST_SOURCE } =
   await import("../../../src/tools/jobhunt/ingest.js");
 
 function posting(overrides: Partial<RawPosting> = {}): RawPosting {

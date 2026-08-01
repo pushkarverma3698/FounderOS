@@ -109,7 +109,7 @@ describe("formatDailyBrief", () => {
       }),
     );
     expect(out).toContain("Python");
-    expect(out).toContain("your CV doesn't say");
+    expect(out).toContain("Not on your CV:");
   });
 
   it("reports a failed source ABOVE everything and calls the numbers a floor", () => {
@@ -118,7 +118,7 @@ describe("formatDailyBrief", () => {
     const out = formatDailyBrief(input({ failures: ['ATS pool "nl-remote": HTTP 521'] }));
     expect(out).toContain("INCOMPLETE RUN");
     expect(out).toContain("floor, not a measurement");
-    expect(out.indexOf("INCOMPLETE RUN")).toBeLessThan(out.indexOf("DO TODAY"));
+    expect(out.indexOf("INCOMPLETE RUN")).toBeLessThan(out.indexOf("APPLY TODAY"));
   });
 
   it("distinguishes 'nothing actionable' from 'nothing screened'", () => {
@@ -126,7 +126,7 @@ describe("formatDailyBrief", () => {
       input({ screened: 17, rows: [row({ verdict: "reject", liveness: "live" })] }),
     );
     expect(out).toContain("17 screened");
-    expect(out).toContain("DO TODAY (0)");
+    expect(out).toContain("APPLY TODAY (0)");
   });
 
   it("lists closed postings instead of silently dropping them", () => {
@@ -142,7 +142,7 @@ describe("formatDailyBrief", () => {
     const out = formatDailyBrief(
       input({ rows: [row({ verdict: "flag", liveness: "unverifiable" })] }),
     );
-    expect(out).toContain("couldn't confirm still open");
+    expect(out).toContain("couldn't confirm it's still open");
   });
 
   it("groups rejects by reason with counts", () => {
@@ -155,7 +155,8 @@ describe("formatDailyBrief", () => {
       }),
     );
     expect(out).toContain("NOT LAWFUL (2)");
-    expect(out).toContain("Dutch required ×2");
+    expect(out).toContain("Dutch required");
+    expect(out).toContain("×2");
   });
 
   it("nags when PASS roles sit undrafted, and names drafting as the bottleneck", () => {
@@ -177,7 +178,7 @@ describe("formatDailyBrief", () => {
         trends: [{ track: "ai", sampleSize: 23, term: "Python", seenCount: 18, absentDays: 14 }],
       }),
     );
-    expect(out).toContain("Python — asked 18× across 23 role(s)");
+    expect(out).toContain("asked 18× across 23 roles");
     expect(out).toContain("missing from your ai CV for 14 days");
   });
 
@@ -187,7 +188,7 @@ describe("formatDailyBrief", () => {
         trends: [{ track: "ai", sampleSize: 10, term: "Python", seenCount: 8, absentDays: null }],
       }),
     );
-    expect(out).toContain("Python — asked 8× across 10 role(s)");
+    expect(out).toContain("asked 8× across 10 roles");
     expect(out).not.toContain("missing from your");
   });
 

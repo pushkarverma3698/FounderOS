@@ -40,18 +40,23 @@ async function loadTrackCvsWith(cvDir: string) {
 }
 
 describe("loadTrackCvs", () => {
+  // Derived from TRACK_PRIORITY rather than hard-coded, so adding a track does
+  // not make this test fail for a reason that has nothing to do with what it
+  // asserts — which is that an unreadable CV is NAMED, not swallowed.
   it("names every track whose CV it could not read", async () => {
+    const { TRACK_PRIORITY } = await import("../../../src/tools/jobhunt/tracks.js");
     const { cvs, unreadable } = await loadTrackCvsWith(dir);
     expect(cvs.size).toBe(0);
-    expect(unreadable.sort()).toEqual(["ai", "backend", "frontend"]);
+    expect(unreadable.sort()).toEqual([...TRACK_PRIORITY].sort());
   });
 
   it("reports only the tracks that are actually missing", async () => {
+    const { TRACK_PRIORITY } = await import("../../../src/tools/jobhunt/tracks.js");
     mkdirSync(join(dir, "ai"), { recursive: true });
     writeFileSync(join(dir, "ai", "cv.md"), "Senior AI engineer. ".repeat(80));
     const { cvs, unreadable } = await loadTrackCvsWith(dir);
     expect(cvs.has("ai")).toBe(true);
-    expect(unreadable.sort()).toEqual(["backend", "frontend"]);
+    expect(unreadable.sort()).toEqual(TRACK_PRIORITY.filter((t) => t !== "ai").sort());
   });
 });
 

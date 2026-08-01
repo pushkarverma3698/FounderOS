@@ -15,21 +15,25 @@ Every change must answer **why** before **what**:
 
 ## Git / PR policy (non-negotiable — prevents "not mergeable")
 
-**Cloud agents and Cursor must NEVER open PRs targeting `main`.** CI enforces this in
-`.github/workflows/branch-policy.yml` — PRs to `main` are rejected unless the head
-branch is exactly `beta`.
+**Open your PRs against `beta`, not `main`.** `beta` is the integration branch: it
+is where a change is proven before production sees it. This is a working
+convention, no longer a CI gate — `.github/workflows/branch-policy.yml` was
+deleted on 2026-08-01 (founder directive) because the ladder was blocking
+finished work behind a human click while prod ran stale code.
 
 ### Correct flow
 
 ```
-cursor/* or feat/*  →  beta  →  main (founder merges only, CD deploys)
+cursor/* or feat/*  →  beta  →  main (CD deploys)
 ```
 
 | Action | Rule |
 |--------|------|
 | Cut branch from | `beta` (fetch + pull first) |
 | Open PR to | **`beta`** always |
-| Merge to `main` | **Founder only** via `beta → main` promotion PR |
+| Merge to `main` | Allowed, via a `beta → main` promotion PR, once CI is green |
+| Merge on red CI | **Never.** Branch protection on `main` still requires both checks |
+| After merging to `main` | **Verify the deploy landed.** A merge is not a deploy |
 
 ### When creating a PR
 

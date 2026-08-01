@@ -22,7 +22,8 @@
  */
 
 import { fetchAtsPostings } from "../src/tools/jobhunt/ats-source.js";
-import { screenBatch, formatIngestSummary } from "../src/tools/jobhunt/ingest.js";
+import { screenBatch } from "../src/tools/jobhunt/ingest.js";
+import { formatIngestSummary } from "../src/tools/jobhunt/ingest-format.js";
 import { reviewScreenedTool } from "../src/tools/jobhunt/review.js";
 import { cvGapsTool } from "../src/tools/jobhunt/gaps.js";
 import { listSignals } from "../src/db/cv-signal-queries.js";
