@@ -117,6 +117,45 @@ describe("screenIndianPay — ₹15 LPA is a flag line, never a bar", () => {
   });
 });
 
+describe("an implausibly wide range is a form nobody filled in", () => {
+  it("REGRESSION: does not pass a 10x range on its ceiling", () => {
+    // Live prod, 2026-08-01. A "Full Stack Web Developer, 2–5 years, freshers
+    // with exceptional portfolios welcome" advertised "₹50,000.00 - ₹500,000.00
+    // a month". Taking the ceiling annualised it to ₹60 LPA and PASSED, so the
+    // brief told the founder a ₹50k-a-month role paid sixty lakh. Taking the
+    // ceiling is right for the Dutch permit floor, where a band straddling it is
+    // negotiable upward. It is wrong here.
+    const facts = extractIndianPay("Salary: ₹50,000.00 - ₹500,000.00 a month");
+    const result = screenIndianPay(facts);
+
+    expect(result.status).toBe("flag");
+    expect(result.evidence).not.toContain("at or above");
+  });
+
+  it("shows BOTH ends, so the founder can see why it is untrustworthy", () => {
+    const result = screenIndianPay(extractIndianPay("₹50,000.00 - ₹500,000.00 a month"));
+    expect(result.evidence).toContain("₹6 LPA");
+    expect(result.evidence).toContain("₹60 LPA");
+  });
+
+  it("still never rejects — the role is real, only the number is not", () => {
+    const result = screenIndianPay(extractIndianPay("₹50,000.00 - ₹500,000.00 a month"));
+    expect(result.status).not.toBe("reject");
+  });
+
+  it("leaves an ordinary wide-but-real band alone", () => {
+    // ₹12–24 LPA is a normal band at this level. A threshold tight enough to
+    // catch that would bury real roles behind a question nobody needed asked.
+    const result = screenIndianPay(extractIndianPay("CTC: 12 - 24 LPA"));
+    expect(result.status).toBe("pass");
+  });
+
+  it("does not fire on a single figure, where there is no spread to judge", () => {
+    expect(screenIndianPay(extractIndianPay("CTC 18 LPA")).status).toBe("pass");
+    expect(screenIndianPay(extractIndianPay("CTC 8 LPA")).status).toBe("flag");
+  });
+});
+
 describe("formatLpa — the founder reads lakhs, not digits", () => {
   it("renders rupees as LPA", () => {
     expect(formatLpa(15 * LAKH)).toBe("₹15 LPA");
