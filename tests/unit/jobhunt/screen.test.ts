@@ -342,13 +342,19 @@ describe("screenJobTool.execute — remote-contract route", () => {
     // Not on the register, no on-site/remote marker either way → every live basis
     // runs and the best wins. Which no-sponsor basis carries it is not the point;
     // that it survives at all is.
+    //
+    // It survives as a FLAG, not a pass (founder decision, 2026-08-01). The
+    // no-sponsor bases are the ones with no gates of their own, so an
+    // unconditional pass on them made "we cannot tell where this job is" the
+    // easiest way to reach APPLY TODAY — see basisGate in screen-gates.ts.
     const res = await screenJobTool.execute({
       company: "Zzyzx Widgetworks",
       title: "AI Engineer",
       description: `€70 per hour. ${REMOTE_BODY}`,
     });
 
-    expect(res.data).toContain("PASS");
+    expect(res.data).not.toContain("REJECT");
+    expect(res.data).toContain("NEEDS A HUMAN CHECK");
     expect(mockRecord.mock.calls[0]![0]!.route).not.toBe("hsm");
   });
 });
