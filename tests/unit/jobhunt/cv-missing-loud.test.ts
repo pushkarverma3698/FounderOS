@@ -47,7 +47,9 @@ describe("loadTrackCvs", () => {
     const { TRACK_PRIORITY } = await import("../../../src/tools/jobhunt/tracks.js");
     const { cvs, unreadable } = await loadTrackCvsWith(dir);
     expect(cvs.size).toBe(0);
-    expect(unreadable.sort()).toEqual([...TRACK_PRIORITY].sort());
+    // "unclassified" joins the list: rows with no track are compared against
+    // the shared master CV, so an unreadable master is equally load-bearing.
+    expect(unreadable.sort()).toEqual([...TRACK_PRIORITY, "unclassified"].sort());
   });
 
   it("reports only the tracks that are actually missing", async () => {
@@ -56,7 +58,9 @@ describe("loadTrackCvs", () => {
     writeFileSync(join(dir, "ai", "cv.md"), "Senior AI engineer. ".repeat(80));
     const { cvs, unreadable } = await loadTrackCvsWith(dir);
     expect(cvs.has("ai")).toBe(true);
-    expect(unreadable.sort()).toEqual(TRACK_PRIORITY.filter((t) => t !== "ai").sort());
+    expect(unreadable.sort()).toEqual(
+      [...TRACK_PRIORITY.filter((t) => t !== "ai"), "unclassified"].sort(),
+    );
   });
 });
 
