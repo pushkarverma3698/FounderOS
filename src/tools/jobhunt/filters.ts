@@ -202,12 +202,25 @@ export function screenSalaryFacts(
 
   const candidates = candidateAnnualBases(facts);
   if (candidates.length === 0) {
+    // PASSES, deliberately. This branch used to return `flag` while its own
+    // evidence said "this is not a bar" — it stated the words and returned the
+    // status that bars it. Because Dutch postings routinely omit salary, and
+    // because `bestOutcome` takes the best status across every basis, that one
+    // line kept the partner-permit basis from ever rescuing a posting the HSM
+    // basis flagged: on 2026-08-01 six of eight live prod rows carried it, one
+    // of them with an EXACT IND sponsor-register match. DO TODAY was structurally
+    // near-empty regardless of how good the supply was.
+    //
+    // Where no floor applies, an unstated figure is a negotiation question, not a
+    // legal condition. The evidence still says nobody checked, so this can never
+    // be read as a confirmed offer — the question moves to first contact instead
+    // of blocking the row.
     if (!floorApplies) {
       return {
-        status: "flag",
+        status: "pass",
         evidence:
-          "No salary stated — normal for Dutch postings. No criterion applies on this basis, so " +
-          "this is not a bar; ask at first contact before investing effort in an application.",
+          "No salary stated — normal for Dutch postings, and no IND criterion applies on this " +
+          "basis, so it is not a bar. Pay is unconfirmed: ask at first contact.",
       };
     }
     const floorNote =

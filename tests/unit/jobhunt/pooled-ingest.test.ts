@@ -33,6 +33,10 @@ vi.mock("../../../src/tools/jobhunt/indeed-source.js", async (orig) => {
 const { runPooledIngest, INGEST_SOURCE } = await import("../../../src/tools/jobhunt/ingest.js");
 const { POOL_ORDER } = await import("../../../src/tools/jobhunt/ats-source.js");
 const { INDEED_SOURCE } = await import("../../../src/tools/jobhunt/indeed-source.js");
+const { TRACK_PRIORITY, TRACK_TITLES } = await import("../../../src/tools/jobhunt/tracks.js");
+
+/** One actor run per pool per track — the guarantee that no track can be starved. */
+const ATS_QUERIES = POOL_ORDER.length * TRACK_PRIORITY.length;
 
 function posting(overrides: Partial<RawPosting> = {}): RawPosting {
   return {
@@ -66,7 +70,47 @@ beforeEach(() => {
 describe("runPooledIngest", () => {
   it("queries every pool, not just the first", async () => {
     await runPooledIngest({ limit: 30 });
-    expect(mockFetchAts).toHaveBeenCalledTimes(POOL_ORDER.length);
+    expect(mockFetchAts).toHaveBeenCalledTimes(ATS_QUERIES);
+  });
+
+  it("gives EVERY track its own query, so no track can be starved by another", async () => {
+    // The 2026-08-01 defect: all twelve title phrases went into one titleSearch
+    // with one budget, AI first. Frontend — the deepest track on the CV — came
+    // back empty, and an unasked track is indistinguishable from an empty one.
+    await runPooledIngest({ limit: 30 });
+
+    for (const track of TRACK_PRIORITY) {
+      const callsForTrack = mockFetchAts.mock.calls.filter(
+        (c) => JSON.stringify(c[0].titles) === JSON.stringify(TRACK_TITLES[track]),
+      );
+      expect(callsForTrack, track).toHaveLength(POOL_ORDER.length);
+    }
+  });
+
+  it("reports a track that fetched nothing instead of staying quiet about it", async () => {
+    mockFetchAts.mockResolvedValue({ ok: true, postings: [] });
+    const result = await runPooledIngest({ limit: 30 });
+    for (const track of TRACK_PRIORITY) {
+      expect(result.perTrack[track]).toBe(0);
+      expect(result.failures.some((f) => f.includes(`Track "${track}": 0 postings`))).toBe(true);
+    }
+  });
+
+  it("drops early-career postings and COUNTS them", async () => {
+    // Half the live prod table on 2026-08-01 was interns and graduate schemes,
+    // swept in because the feed's title search is substring, not prefix.
+    mockFetchAts.mockResolvedValue({
+      ok: true,
+      postings: [posting(), posting({ title: "Software Engineer Intern" })],
+    });
+
+    const result = await runPooledIngest({ limit: 30 });
+
+    expect(result.droppedEarlyCareer).toBe(POOL_ORDER.length * TRACK_PRIORITY.length);
+    expect(result.failures.some((f) => f.includes("early-career"))).toBe(true);
+    for (const call of mockScreenPosting.mock.calls) {
+      expect(call[0].title).not.toContain("Intern");
+    }
   });
 
   it("splits the budget across pools instead of spending it first-come", async () => {
@@ -94,17 +138,21 @@ describe("runPooledIngest", () => {
 
     const result = await runPooledIngest({ limit: 30 });
 
-    expect(result.fetched).toBe(2);
+    // One query of the nine died; the other eight still produced a posting each.
+    expect(result.fetched).toBe(ATS_QUERIES - 1);
     expect(result.failures).toHaveLength(1);
     expect(result.failures[0]).toContain("HTTP 521");
-    expect(result.failures[0]).toContain("nl-remote");
+    // Queries run pool-major, so the second one is nl-onsite / backend.
+    expect(result.failures[0]).toContain("nl-onsite");
+    expect(result.failures[0]).toContain("backend");
   });
 
   it("reports every pool failing as failures, NOT as an empty market", async () => {
     mockFetchAts.mockResolvedValue({ ok: false, error: "upstream down" });
     const result = await runPooledIngest({ limit: 30 });
     expect(result.fetched).toBe(0);
-    expect(result.failures).toHaveLength(POOL_ORDER.length);
+    // One per dead query, plus one per track that consequently fetched nothing.
+    expect(result.failures).toHaveLength(ATS_QUERIES + TRACK_PRIORITY.length);
   });
 
   it("stamps ATS rows with the ATS provenance", async () => {
@@ -151,7 +199,7 @@ describe("runPooledIngest", () => {
   it("keeps the ATS pools when Indeed fails entirely", async () => {
     mockFetchIndeed.mockResolvedValue({ ok: false, error: "actor timeout" });
     const result = await runPooledIngest({ limit: 30, includeIndeed: true });
-    expect(result.fetched).toBe(POOL_ORDER.length);
+    expect(result.fetched).toBe(ATS_QUERIES);
     expect(result.failures.some((f) => f.includes("actor timeout"))).toBe(true);
   });
 });
