@@ -1,0 +1,112 @@
+/**
+ * Unit tests — source pools and track classification.
+ *
+ * The pool split is the fix for a real coverage hole: until 2026-07-31 every
+ * query set `locationSearch: ["Netherlands"]`, and the feed documents that a
+ * posting with a null `locations_derived` "would always return zero rows" when
+ * combined with a location search. Globally-remote roles were therefore
+ * unreachable, and the `remote-contract` permit basis had a gate but no funnel.
+ */
+
+import { describe, it, expect } from "vitest";
+import {
+  buildAtsInput,
+  DEFAULT_EXPERIENCE,
+  POOL_ORDER,
+  POOL_QUERIES,
+  type SourcePool,
+} from "../../../src/tools/jobhunt/ats-source.js";
+import { classifyTrack, TRACK_PRIORITY } from "../../../src/tools/jobhunt/tracks.js";
+
+describe("classifyTrack", () => {
+  it("assigns a plain AI title to the ai track", () => {
+    expect(classifyTrack("AI Engineer")).toBe("ai");
+    expect(classifyTrack("Senior Machine Learning Engineer, Platform")).toBe("ai");
+  });
+
+  it("assigns backend and frontend titles to their own tracks", () => {
+    expect(classifyTrack("Backend Engineer (Go)")).toBe("backend");
+    expect(classifyTrack("Frontend Engineer — React")).toBe("frontend");
+  });
+
+  it("resolves a multi-track title by priority, not by match order", () => {
+    // Contains both "AI Engineer" and "Backend Engineer". ai outranks backend,
+    // and the answer must not depend on which phrase appears first.
+    expect(classifyTrack("Backend Engineer / AI Engineer")).toBe("ai");
+    expect(classifyTrack("AI Engineer / Backend Engineer")).toBe("ai");
+  });
+
+  it("returns null rather than guessing when nothing matches", () => {
+    // Forcing this into a track would corrupt two gap reports at once: the
+    // term is counted where it does not belong and missing where it does.
+    expect(classifyTrack("Product Marketing Manager")).toBeNull();
+    expect(classifyTrack("")).toBeNull();
+  });
+
+  it("is case-insensitive", () => {
+    expect(classifyTrack("bAcKeNd EnGiNeEr")).toBe("backend");
+  });
+
+  it("only ever returns a track that is in the priority list", () => {
+    const titles = ["AI Engineer", "Backend Engineer", "React Developer", "Chef"];
+    for (const title of titles) {
+      const track = classifyTrack(title);
+      if (track !== null) expect(TRACK_PRIORITY).toContain(track);
+    }
+  });
+});
+
+describe("source pools", () => {
+  it("covers every pool in POOL_ORDER", () => {
+    for (const pool of POOL_ORDER) {
+      expect(POOL_QUERIES[pool]).toBeDefined();
+    }
+    expect(POOL_ORDER).toHaveLength(Object.keys(POOL_QUERIES).length);
+  });
+
+  it("sends a location filter for both Netherlands-based pools", () => {
+    for (const pool of ["nl-onsite", "nl-remote"] satisfies SourcePool[]) {
+      const input = buildAtsInput(POOL_QUERIES[pool]);
+      expect(input["locationSearch"]).toEqual(["Netherlands"]);
+    }
+  });
+
+  it("sends NO location filter for the globally-remote pool", () => {
+    // The whole point of pool C. A location filter here returns zero rows for
+    // exactly the postings it exists to find.
+    const input = buildAtsInput(POOL_QUERIES["eu-remote-global"]);
+    expect(input).not.toHaveProperty("locationSearch");
+  });
+
+  it("gives each pool a distinct, non-overlapping work arrangement", () => {
+    const seen = new Set<string>();
+    for (const pool of POOL_ORDER) {
+      const arrangements = buildAtsInput(POOL_QUERIES[pool])["aiWorkArrangementFilter"];
+      expect(Array.isArray(arrangements)).toBe(true);
+      for (const a of arrangements as string[]) {
+        expect(seen.has(a)).toBe(false); // no posting should be paid for twice
+        seen.add(a);
+      }
+    }
+    // All four of the feed's arrangements are accounted for.
+    expect(seen).toEqual(new Set(["On-site", "Hybrid", "Remote OK", "Remote Solely"]));
+  });
+
+  it("omits the work-arrangement filter when a query does not set one", () => {
+    expect(buildAtsInput({})).not.toHaveProperty("aiWorkArrangementFilter");
+  });
+
+  it("includes 5-10 experience but still excludes 10+", () => {
+    // 5-10 was excluded by HSM-only reasoning (the under-30 salary band), which
+    // does not bind under a partner permit or a remote contract.
+    expect(DEFAULT_EXPERIENCE).toContain("5-10");
+    expect(DEFAULT_EXPERIENCE).not.toContain("10+");
+  });
+
+  it("builds byte-identical input for the same pool twice", () => {
+    // A surprising result must be attributable to the market, not the request.
+    const a = buildAtsInput(POOL_QUERIES["nl-remote"]);
+    const b = buildAtsInput(POOL_QUERIES["nl-remote"]);
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+  });
+});

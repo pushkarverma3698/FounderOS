@@ -987,8 +987,34 @@ export const jobApplications = agentsSchema.table(
     description: text("description"),
     /** When the employer published it (from the ATS feed), not when we saw it. */
     posted_at: timestamp("posted_at", { withTimezone: true }),
-    /** manual | ats-ingest — how the posting reached the gates. */
+    /** manual | ats-ingest | indeed-ingest — how the posting reached the gates. */
     source: text("source").notNull().default("manual"),
+
+    /** ai | backend | frontend | unclassified — from the title, deterministically. */
+    track: text("track").notNull().default("unclassified"),
+
+    /** The source's own id — Indeed's job key is what its liveness lookup takes. */
+    external_id: text("external_id"),
+
+    /**
+     * unknown | live | expired | unverifiable.
+     *
+     * `unverifiable` is a distinct value, not a synonym for expired: a network
+     * failure that reads as "this job is dead" removes a real opportunity and
+     * emits no signal that it did.
+     */
+    liveness: text("liveness").notNull().default("unknown"),
+    liveness_checked_at: timestamp("liveness_checked_at", { withTimezone: true }),
+
+    /**
+     * Where this row appeared in the LAST brief, and at what number.
+     *
+     * Pinned at render time so `/draft 2` resolves to the row the founder was
+     * looking at. Re-deriving the order on demand would silently retarget the
+     * command when liveness or new screens reshuffle the list.
+     */
+    brief_section: text("brief_section"),
+    brief_rank: integer("brief_rank"),
 
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
@@ -998,6 +1024,8 @@ export const jobApplications = agentsSchema.table(
     dedupeUniq: uniqueIndex("ja_dedupe_uniq").on(t.tenant_id, t.dedupe_key),
     /** Monday review hot path: live applications ordered by staleness. */
     stageIdx: index("ja_stage_idx").on(t.tenant_id, t.stage, t.last_contact_at),
+    /** The brief's hot path: one track's passing postings. */
+    trackVerdictIdx: index("ja_track_verdict_idx").on(t.tenant_id, t.track, t.salary_status),
   }),
 );
 
@@ -1031,6 +1059,15 @@ export const cvSignals = agentsSchema.table(
     /** language | framework | infra | data | ai | practice | unknown. */
     category: text("category").notNull(),
 
+    /**
+     * ai | backend | frontend | unclassified — which market asked for it.
+     *
+     * Part of the identity, not a label. Blended into one bucket, "Python 60%"
+     * could be 100% of AI roles and 0% of frontend and the report could not tell
+     * the difference — so the finding could not be acted on either way.
+     */
+    track: text("track").notNull().default("unclassified"),
+
     /** Number of DISTINCT passing postings that asked for this. */
     seen_count: integer("seen_count").notNull().default(0),
 
@@ -1041,10 +1078,10 @@ export const cvSignals = agentsSchema.table(
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (t) => ({
-    /** One row per term — the count is a running total, not an event log. */
-    termUniq: uniqueIndex("cv_signals_term_uniq").on(t.tenant_id, t.term),
-    /** Gap report hot path: most-demanded first. */
-    rankIdx: index("cv_signals_rank_idx").on(t.tenant_id, t.seen_count),
+    /** One row per (track, term) — the count is a running total, not an event log. */
+    trackTermUniq: uniqueIndex("cv_signals_track_term_uniq").on(t.tenant_id, t.track, t.term),
+    /** Gap report hot path: most-demanded first, within one track. */
+    trackRankIdx: index("cv_signals_track_rank_idx").on(t.tenant_id, t.track, t.seen_count),
   }),
 );
 

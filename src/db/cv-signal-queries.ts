@@ -24,21 +24,29 @@ export interface SignalInput {
   readonly category: string;
 }
 
+/** Rows screened before tracks existed, and titles no classifier recognises. */
+export const UNCLASSIFIED_TRACK = "unclassified";
+
 /**
- * Record one posting's contribution. Each term is bumped by exactly one,
- * because the caller has already de-duplicated within the posting
+ * Record one posting's contribution TO ONE TRACK. Each term is bumped by exactly
+ * one, because the caller has already de-duplicated within the posting
  * (src/tools/jobhunt/skills.ts) — seen_count is postings, not mentions.
+ *
+ * The track is part of the identity. "Python, 60%" over a blended pool answers
+ * no question the founder can act on: it could be every AI role and no frontend
+ * role, and the CV he would change is different in each case.
  */
 export async function recordSignals(
   signals: readonly SignalInput[],
-  tenantId: string = DEFAULT_TENANT,
+  opts: { track?: string; tenantId?: string } = {},
 ): Promise<number> {
   if (signals.length === 0) return 0;
 
   const db = getDb();
   const now = new Date();
   const rows = signals.map((s) => ({
-    tenant_id: tenantId,
+    tenant_id: opts.tenantId ?? DEFAULT_TENANT,
+    track: opts.track ?? UNCLASSIFIED_TRACK,
     term: s.term,
     category: s.category,
     seen_count: 1,
@@ -50,7 +58,7 @@ export async function recordSignals(
     .insert(cvSignals)
     .values(rows)
     .onConflictDoUpdate({
-      target: [cvSignals.tenant_id, cvSignals.term],
+      target: [cvSignals.tenant_id, cvSignals.track, cvSignals.term],
       set: {
         // SQL-side increment: concurrent screens must both count.
         seen_count: sql`${cvSignals.seen_count} + 1`,
@@ -65,13 +73,20 @@ export async function recordSignals(
   return signals.length;
 }
 
-/** All signals, most-demanded first — the input to the gap report. */
+/**
+ * Signals, most-demanded first — the input to the gap report.
+ *
+ * Omitting `track` returns every track's rows unaggregated, which is the right
+ * answer for an inventory and the wrong one for a gap report. `cv_gaps` always
+ * passes a track.
+ */
 export async function listSignals(
-  opts: { category?: string; limit?: number; tenantId?: string } = {},
+  opts: { category?: string; track?: string; limit?: number; tenantId?: string } = {},
 ): Promise<CvSignal[]> {
   const db = getDb();
   const conditions = [eq(cvSignals.tenant_id, opts.tenantId ?? DEFAULT_TENANT)];
   if (opts.category) conditions.push(eq(cvSignals.category, opts.category));
+  if (opts.track) conditions.push(eq(cvSignals.track, opts.track));
 
   return db
     .select()

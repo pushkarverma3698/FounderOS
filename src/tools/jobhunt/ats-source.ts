@@ -27,6 +27,7 @@
 
 import { childLogger } from "../../infra/logger.js";
 import { runActorSync } from "../apify.js";
+import { titlesForTracks, TRACK_PRIORITY } from "./tracks.js";
 
 const log = childLogger({ module: "jobhunt:ats-source" });
 
@@ -57,7 +58,22 @@ export interface AtsQuery {
   readonly experienceLevels?: readonly string[];
   /** Restrict to specific employers — how the IND register becomes a target list. */
   readonly organizations?: readonly string[];
+  /** Which work arrangements to accept. Omit for all. */
+  readonly workArrangements?: readonly WorkArrangement[];
+  /**
+   * Drop `locationSearch` from the request entirely.
+   *
+   * Not the same as passing no locations, which falls back to the default. The
+   * feed documents that jobs with a null `locations_derived` exist and that
+   * combining them with a location search "would always return zero rows" — so a
+   * globally-remote posting with no city is UNREACHABLE while any location
+   * filter is set. Pool C exists to find exactly those.
+   */
+  readonly omitLocation?: boolean;
 }
+
+/** The feed's own vocabulary. "Remote OK" has an office; "Remote Solely" has none. */
+export type WorkArrangement = "On-site" | "Hybrid" | "Remote OK" | "Remote Solely";
 
 export interface RawPosting {
   readonly company: string;
@@ -66,6 +82,14 @@ export interface RawPosting {
   readonly description: string;
   readonly location: string;
   readonly postedAt: Date | null;
+  /**
+   * Which feed produced it. Recorded rather than inferred, because the two
+   * sources do not deserve equal trust: an aggregator row can be a repost, an
+   * agency listing, or a job filled a month ago.
+   */
+  readonly source?: string;
+  /** Source-native id. Indeed's job key is what the liveness lookup needs. */
+  readonly externalId?: string;
 }
 
 export type AtsFetch =
@@ -74,57 +98,50 @@ export type AtsFetch =
 
 // ── Defaults: the campaign's actual target profile ───────────────────────────
 
-/**
- * The three tracks Pushkar applies for (founder direction, 2026-07-31).
- *
- * Frontend is the deepest track on his CV — three years of production React and
- * Next.js — and until now it was not searched at all, so the pipeline could not
- * have surfaced the roles he is most obviously qualified for.
- */
-export type RoleTrack = "ai" | "backend" | "frontend";
-
-export const TRACK_TITLES: Record<RoleTrack, readonly string[]> = {
-  ai: [
-    "AI Engineer:*",
-    "Machine Learning Engineer:*",
-    "LLM Engineer:*",
-    "MLOps Engineer:*",
-  ],
-  backend: [
-    "Backend Engineer:*",
-    "Software Engineer:*",
-    "Platform Engineer:*",
-    "Data Engineer:*",
-  ],
-  frontend: [
-    "Frontend Engineer:*",
-    "Front End Engineer:*",
-    "Full Stack Engineer:*",
-    "React Developer:*",
-  ],
-};
-
-/**
- * Priority order. This is NOT cosmetic: the sweep fetches roughly 10 postings a
- * day, so whichever titles the feed matches first spend the budget. AI leads
- * because it is the stated priority; frontend trails because those roles are the
- * easiest to find by hand if the budget runs out.
- */
-export const TRACK_PRIORITY: readonly RoleTrack[] = ["ai", "backend", "frontend"];
-
-/** Titles for the given tracks, in priority order, de-duplicated. */
-export function titlesForTracks(tracks: readonly RoleTrack[]): string[] {
-  const ordered = TRACK_PRIORITY.filter((t) => tracks.includes(t));
-  return [...new Set(ordered.flatMap((t) => TRACK_TITLES[t]))];
-}
-
 export const DEFAULT_TITLES: readonly string[] = titlesForTracks(TRACK_PRIORITY);
 
 export const DEFAULT_LOCATIONS: readonly string[] = ["Netherlands"];
 
-/** 0-2 and 2-5 only: the permit's under-30 salary band is the cheaper hire, and
- *  a 10+ posting screening as PASS is a role he would not be shortlisted for. */
-export const DEFAULT_EXPERIENCE: readonly string[] = ["0-2", "2-5"];
+/**
+ * 0-2 through 5-10. `10+` stays out: a posting at that level screening as PASS
+ * is a role he would not be shortlisted for, which wastes the day's budget.
+ *
+ * `5-10` was previously excluded on the grounds that the permit's under-30
+ * salary band is the cheaper hire. That is HSM reasoning, and it only binds
+ * under HSM. Under a partner permit or a remote contract there is no band to
+ * stay under and a senior role simply pays more — so the old default capped the
+ * ceiling for two of the three live bases.
+ */
+export const DEFAULT_EXPERIENCE: readonly string[] = ["0-2", "2-5", "5-10"];
+
+// ── Source pools ──────────────────────────────────────────────────────────────
+
+/**
+ * Three permit bases reach three different markets, and one query only ever
+ * served the first.
+ *
+ * The split uses the feed's own work-arrangement vocabulary rather than an
+ * approximation of it: "Remote OK" means remote WITH an office (so the employer
+ * has a Dutch presence, and an NL permit is in play), while "Remote Solely"
+ * means no office at all (so there is nothing to relocate to, and only a remote
+ * contract applies).
+ */
+export type SourcePool = "nl-onsite" | "nl-remote" | "eu-remote-global";
+
+export const POOL_QUERIES: Record<SourcePool, AtsQuery> = {
+  /** On-site and hybrid roles in NL — the classic sponsored relocation. */
+  "nl-onsite": { workArrangements: ["On-site", "Hybrid"] },
+  /** Remote roles at employers with a Dutch office — lawful under HSM or a partner permit. */
+  "nl-remote": { workArrangements: ["Remote OK"] },
+  /**
+   * Office-less remote roles, location filter deliberately dropped (see
+   * `omitLocation`). Scoped to EU employers downstream, not here: a US company
+   * hiring a contractor in India is income, not a step toward the Netherlands.
+   */
+  "eu-remote-global": { workArrangements: ["Remote Solely"], omitLocation: true },
+};
+
+export const POOL_ORDER: readonly SourcePool[] = ["nl-onsite", "nl-remote", "eu-remote-global"];
 
 /**
  * Build the actor input. Pure — the daily sweep, a manual run and the tests all
@@ -136,9 +153,16 @@ export function buildAtsInput(query: AtsQuery = {}): Record<string, unknown> {
     timeRange: query.timeRange ?? "24h",
     limit: Math.max(MIN_ATS_LIMIT, query.limit ?? MIN_ATS_LIMIT),
     descriptionType: "text",
-    locationSearch: [...(query.locations ?? DEFAULT_LOCATIONS)],
+    // Omitted entirely for pool C — a null-location posting is unreachable while
+    // any location filter is set, per the feed's own `hasNoLocation` docs.
+    ...(query.omitLocation
+      ? {}
+      : { locationSearch: [...(query.locations ?? DEFAULT_LOCATIONS)] }),
     titleSearch: [...(query.titles ?? DEFAULT_TITLES)],
     aiExperienceLevelFilter: [...(query.experienceLevels ?? DEFAULT_EXPERIENCE)],
+    ...(query.workArrangements && query.workArrangements.length > 0
+      ? { aiWorkArrangementFilter: [...query.workArrangements] }
+      : {}),
     ...(query.organizations && query.organizations.length > 0
       ? { organizationSearch: [...query.organizations] }
       : {}),

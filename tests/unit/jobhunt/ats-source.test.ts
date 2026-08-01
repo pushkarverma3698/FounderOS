@@ -172,7 +172,7 @@ describe("mapAtsItems", () => {
 
 describe("role tracks", () => {
   it("covers all three tracks Pushkar is applying for", async () => {
-    const { TRACK_TITLES } = await import("../../../src/tools/jobhunt/ats-source.js");
+    const { TRACK_TITLES } = await import("../../../src/tools/jobhunt/tracks.js");
     expect(Object.keys(TRACK_TITLES).sort()).toEqual(["ai", "backend", "frontend"]);
   });
 
@@ -180,9 +180,7 @@ describe("role tracks", () => {
     // Only ~10 postings are fetched per day. Whichever titles the feed matches
     // first consume that budget, so priority order is not cosmetic — it decides
     // which market actually gets screened.
-    const { DEFAULT_TITLES, TRACK_TITLES } = await import(
-      "../../../src/tools/jobhunt/ats-source.js"
-    );
+    const { TRACK_TITLES } = await import("../../../src/tools/jobhunt/tracks.js");
     expect(DEFAULT_TITLES[0]).toBe(TRACK_TITLES.ai[0]);
     const firstBackend = DEFAULT_TITLES.indexOf(TRACK_TITLES.backend[0]!);
     const lastAi = DEFAULT_TITLES.indexOf(TRACK_TITLES.ai[TRACK_TITLES.ai.length - 1]!);
@@ -196,13 +194,13 @@ describe("role tracks", () => {
 
   it("lets a caller sweep one track alone", async () => {
     const { titlesForTracks, TRACK_TITLES } = await import(
-      "../../../src/tools/jobhunt/ats-source.js"
+      "../../../src/tools/jobhunt/tracks.js"
     );
     expect(titlesForTracks(["frontend"])).toEqual([...TRACK_TITLES.frontend]);
   });
 
   it("de-duplicates titles shared across tracks", async () => {
-    const { titlesForTracks } = await import("../../../src/tools/jobhunt/ats-source.js");
+    const { titlesForTracks } = await import("../../../src/tools/jobhunt/tracks.js");
     const all = titlesForTracks(["ai", "backend", "frontend"]);
     expect(new Set(all).size).toBe(all.length);
   });

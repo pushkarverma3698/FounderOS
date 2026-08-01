@@ -39,6 +39,7 @@ import {
   screenJob,
   reviewScreened,
   cvGaps,
+  jobBrief,
   projectWorkflow,
   claudeCode,
   applyCinematicPreset,
@@ -97,7 +98,7 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal, generateImageTool, listBrandAssetsTool, listScheduledPosts, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool],
   sales: [createSendEmailTool("sales"), searchWeb, searchKnowledge, searchTuricksBrain],
   personal: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain],
-  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, createSendEmailTool("jobhunt"), searchPersonalRag],
+  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobBrief, createSendEmailTool("jobhunt"), searchPersonalRag],
 };
 
 /** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops).
