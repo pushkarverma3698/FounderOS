@@ -142,7 +142,10 @@ describe("formatDailyBrief", () => {
     const out = formatDailyBrief(
       input({ rows: [row({ verdict: "flag", liveness: "unverifiable" })] }),
     );
-    expect(out).toContain("couldn't confirm it's still open");
+    // "not checked" rather than "closed": a liveness value that was never
+    // verified must read as absence of knowledge, never as a negative claim.
+    expect(out).toContain("not checked");
+    expect(out).not.toContain("✕ closed");
   });
 
   it("groups rejects by reason with counts", () => {

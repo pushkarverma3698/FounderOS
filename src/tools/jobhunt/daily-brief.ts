@@ -90,6 +90,25 @@ export function headlineFor(row: JobApplication): string {
   return trimToSentence(reasons[0]!, HEADLINE_MAX);
 }
 
+/** The only values `Liveness` actually has. Anything else is not knowledge. */
+const LIVENESS_VALUES: readonly string[] = ["live", "expired", "unverifiable"];
+
+/**
+ * Narrow a stored liveness string to the union, honestly.
+ *
+ * `row.liveness as Liveness` was an unchecked cast, and production carried
+ * `"unknown"` — the column's own default — on every row. That value is outside
+ * the union, so it reached the renderer and was displayed as "closed": the brief
+ * announced that three live roles had shut, on the strength of a check that had
+ * never run. Anything not positively one of the three collapses to
+ * `unverifiable`, which is what "we don't know" is called here.
+ */
+export function toLiveness(value: unknown): Liveness {
+  return typeof value === "string" && LIVENESS_VALUES.includes(value)
+    ? (value as Liveness)
+    : "unverifiable";
+}
+
 /**
  * Per-track CV text, read once per brief rather than once per row.
  *
@@ -109,8 +128,26 @@ export function loadTrackCvs(): { cvs: Map<string, string>; unreadable: string[]
       log.warn({ track, error: cv.error }, "Track CV unreadable — overlap unavailable");
     }
   }
+
+  // A row whose title matched no track is stored as "unclassified", and every
+  // row screened before tracks existed carries that value. Without an entry here
+  // the map lookup misses, the CV text is "", and EVERY such row scores 0/N —
+  // a ranking built from no comparison, printed with no warning. Production's
+  // first real brief showed "0/21 skills" on all three rows for exactly this
+  // reason. The shared master CV is the honest comparison for a row with no
+  // track, and it is what `readFullCvText()` returns when asked for no track.
+  const master = readFullCvText();
+  if (master.ok) cvs.set(UNCLASSIFIED_TRACK, master.text);
+  else {
+    unreadable.push(UNCLASSIFIED_TRACK);
+    log.warn({ error: master.error }, "Master CV unreadable — untracked rows score 0 overlap");
+  }
+
   return { cvs, unreadable };
 }
+
+/** The `track` column's default: a title that matched no track's phrases. */
+export const UNCLASSIFIED_TRACK = "unclassified";
 
 /**
  * Rank the actionable pool by stack overlap.
@@ -253,7 +290,7 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     route: row.route,
     url: row.url,
     overlap,
-    liveness: liveness.get(row.id) ?? (row.liveness as Liveness) ?? "unverifiable",
+    liveness: liveness.get(row.id) ?? toLiveness(row.liveness),
     headline: headlineFor(row),
     ageDays: ageInDays(row.created_at, now),
   }));
@@ -270,13 +307,27 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
         ]
       : [];
 
+  // Untracked rows are compared against the master CV rather than a tailored
+  // one, which is a weaker comparison than the ranking implies. Said out loud,
+  // because a number that is quietly less trustworthy than it looks is the kind
+  // of thing that gets acted on for weeks.
+  const untracked = scored.filter(({ row }) => row.track === UNCLASSIFIED_TRACK).length;
+  const untrackedNote =
+    untracked > 0
+      ? [
+          `${untracked} row(s) have no track — their title matched none of the ` +
+            `searched roles, or they were screened before tracks existed. They are ` +
+            `ranked against the master CV, not a tailored one.`,
+        ]
+      : [];
+
   const input: BriefInput = {
     date: now,
     screened: opts.screened ?? applications.length,
     perTrack,
     rows,
     trends: await buildTrends(cvs, now),
-    failures: [...(opts.failures ?? []), ...cvFailure],
+    failures: [...(opts.failures ?? []), ...cvFailure, ...untrackedNote],
   };
 
   // Pin the numbering BEFORE returning the text. selectDoToday/selectAskable are
