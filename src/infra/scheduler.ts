@@ -264,7 +264,7 @@ export async function recoverStrandedReminders(): Promise<void> {
 export async function runJobIngestSweep(): Promise<void> {
   const { runPooledIngest } = await import("../tools/jobhunt/ingest.js");
   const { buildDailyBrief } = await import("../tools/jobhunt/daily-brief.js");
-  const { toTelegramSafe } = await import("../tools/jobhunt/brief.js");
+  const { toTelegramSafe, splitForTelegram } = await import("../tools/jobhunt/brief.js");
 
   const result = await runPooledIngest({
     limit: JOB_INGEST_DAILY_LIMIT,
@@ -289,11 +289,23 @@ export async function runJobIngestSweep(): Promise<void> {
   );
 
   try {
-    await sendToChat(
-      toTelegramSafe(
-        await buildDailyBrief({ screened: result.fetched, failures: result.failures }),
-      ),
-    );
+    // NOT escaped here. The brief renders its own Telegram HTML and escapes every
+    // value at the point it is interpolated (see telegram-format.ts) — running a
+    // whole-message escape over it would print "&lt;b&gt;" at the founder rather
+    // than bolding anything, which is the exact "message is not formatted"
+    // complaint that started this.
+    //
+    // Chunked because Telegram rejects a body over 4,096 characters outright, and
+    // nothing in the send path splits. Before this, a brief that finally had
+    // enough supply to be worth reading would have been dropped whole — and the
+    // failure would have looked like a sweep that found nothing.
+    const brief = await buildDailyBrief({
+      screened: result.fetched,
+      failures: result.failures,
+    });
+    for (const part of splitForTelegram(brief)) {
+      await sendToChat(part);
+    }
   } catch (err) {
     // The postings ARE screened and recorded by this point. Losing the brief must
     // not read as losing the sweep, so say which one actually failed.

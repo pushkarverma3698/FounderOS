@@ -11,12 +11,14 @@
 import { describe, it, expect } from "vitest";
 import {
   buildAtsInput,
-  detectFeedError,
-  mapAtsItems,
-  stripLocationSuffix,
   MIN_ATS_LIMIT,
   DEFAULT_TITLES,
 } from "../../../src/tools/jobhunt/ats-source.js";
+import {
+  detectFeedError,
+  mapAtsItems,
+  stripLocationSuffix,
+} from "../../../src/tools/jobhunt/ats-mappers.js";
 
 /** Trimmed from a real dataset item (Speechify, Greenhouse, 2026-07-29). */
 const REAL_ITEM = {
@@ -171,9 +173,17 @@ describe("mapAtsItems", () => {
 });
 
 describe("role tracks", () => {
-  it("covers all three tracks Pushkar is applying for", async () => {
+  it("covers every track Pushkar is applying for", async () => {
+    // `fullstack` was split out of frontend on 2026-08-01: it had been one
+    // phrase competing inside another track's budget, and the founder reported
+    // seeing no full-stack roles at all.
     const { TRACK_TITLES } = await import("../../../src/tools/jobhunt/tracks.js");
-    expect(Object.keys(TRACK_TITLES).sort()).toEqual(["ai", "backend", "frontend"]);
+    expect(Object.keys(TRACK_TITLES).sort()).toEqual([
+      "ai",
+      "backend",
+      "frontend",
+      "fullstack",
+    ]);
   });
 
   it("puts AI titles first, because the daily budget runs out", async () => {

@@ -24,7 +24,14 @@
  */
 
 import { formatOverlap, type OverlapResult } from "./overlap.js";
+import { cmd, esc, link } from "./telegram-format.js";
 import type { Liveness } from "./liveness.js";
+
+// Re-exported so the transport keeps one import site for the escape helper.
+export { toTelegramSafe, splitForTelegram, TELEGRAM_MAX_CHARS } from "./telegram-format.js";
+
+/** A horizontal rule. Telegram has no <hr>, and a run of box characters reads as one. */
+const RULE = "━━━━━━━━━━━━━━━━━━━━━";
 
 /** More than this in front of a person before work is a list again, not a decision. */
 export const DO_TODAY_CAP = 3;
@@ -72,6 +79,11 @@ function pluralDays(n: number): string {
   return n === 1 ? "1 day" : `${n} days`;
 }
 
+/** "1 role" / "3 roles". "role(s)" is the tell of a template that never learned to count. */
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
 /**
  * DO TODAY: passed every gate AND confirmed still open.
  *
@@ -96,25 +108,73 @@ export function selectAskable(rows: readonly BriefRow[]): BriefRow[] {
     .slice(0, ASK_CAP);
 }
 
+/**
+ * One row, laid out so the decision is readable in about three seconds.
+ *
+ * The order is deliberate and it is the order a person actually decides in:
+ * WHO the role is with, HOW WELL it fits, WHETHER it is still open, WHAT the one
+ * open question is, WHAT is missing from the CV, and finally the command that
+ * acts on it. The command is last because it is what the eye should stop on.
+ *
+ * The title carries the link, so opening the posting is one tap and does not
+ * need a separate URL line competing for attention.
+ */
 function renderRow(row: BriefRow, index: number, command: string): string {
-  const label = `${row.company} — ${row.title}`;
+  const heading = `<b>${index}. ${esc(row.company)}</b> — ${link(row.title, row.url)}`;
+
   const liveness =
     row.liveness === "live"
-      ? " · verified live"
+      ? "✓ still open"
       : row.liveness === "unverifiable"
-        ? " · ⚠ couldn't confirm still open"
-        : "";
+        ? "⚠ couldn't confirm it's still open"
+        : "✕ closed";
+
+  const facts = `<i>${esc(formatOverlap(row.overlap))} skills · ${liveness} · ${esc(row.route)}</i>`;
+
   const gap =
     row.overlap.missing.length > 0
-      ? `\n     They ask for ${row.overlap.missing.slice(0, 3).join(", ")}; your CV doesn't say ${
-          row.overlap.missing.length === 1 ? "it" : "them"
-        }.`
+      ? `\n    <i>Not on your CV:</i> ${esc(row.overlap.missing.slice(0, 3).join(", "))}`
       : "";
+
   return (
-    `  ${index}. ${label}\n` +
-    `     overlap ${formatOverlap(row.overlap)}${liveness} · ${row.route}\n` +
-    `     ${row.headline}${gap}\n` +
-    `     → ${command} ${index}`
+    `${heading}\n` +
+    `    ${facts}\n` +
+    `    ${esc(row.headline)}${gap}\n` +
+    `    ▸ ${cmd(`${command} ${index}`)}`
+  );
+}
+
+/**
+ * The closing block: every command the founder can run right now, spelled out.
+ *
+ * The brief's whole purpose is to end in an action, and "→ /draft 1" buried
+ * beside row one is easy to scroll past. Collecting the commands at the bottom —
+ * where reading stops — with the company each one targets means the last thing
+ * on screen is a list of things to do, not a summary of things that happened.
+ */
+function renderNextActions(doToday: readonly BriefRow[], askable: readonly BriefRow[]): string {
+  const lines = [
+    ...doToday.map((r, i) => `${cmd(`/draft ${i + 1}`)} — apply to ${esc(r.company)}`),
+    ...askable.map((r, i) => `${cmd(`/ask ${i + 1}`)} — draft the question for ${esc(r.company)}`),
+  ];
+
+  // ONLY REAL COMMANDS APPEAR AS COMMANDS. `/draft` and `/ask` are registered on
+  // the bot (gateway/telegram.ts); nothing else is. Printing a plausible-looking
+  // `/jobs` would hand the founder something that silently does nothing, which is
+  // a worse failure than a plain sentence — it looks like the pipeline is broken.
+  // Everything else is phrased as the plain English the planner already routes.
+  if (lines.length === 0) {
+    return (
+      `<b>▶️ DO THIS NEXT</b>\n` +
+      `Nothing is actionable today, so the useful move is upstream — just ask:\n` +
+      `<i>“show me the job brief”</i> · <i>“what gaps are in my CV?”</i>`
+    );
+  }
+
+  return (
+    `<b>▶️ DO THIS NEXT</b>\n` +
+    lines.join("\n") +
+    `\n<i>Or just ask — “show me the job brief”, “what gaps are in my CV?”</i>`
   );
 }
 
@@ -126,40 +186,33 @@ function renderRow(row: BriefRow, index: number, command: string): string {
  * different findings, and collapsing them is how a broken feed hides for a week.
  */
 export function formatDailyBrief(input: BriefInput): string {
-  const date = input.date.toISOString().slice(0, 10);
-  const trackSummary = Object.entries(input.perTrack)
-    .filter(([, n]) => n > 0)
-    .map(([track, n]) => `${track} ${n}`)
-    .join(" · ");
+  const doToday = selectDoToday(input.rows);
+  const askable = selectAskable(input.rows);
 
-  const head =
-    `JOB BRIEF — ${date} · ${input.screened} screened` +
-    (trackSummary.length > 0 ? ` · ${trackSummary}` : "");
-
-  const sections: string[] = [];
+  const sections: string[] = [renderHeader(input, doToday.length, askable.length)];
 
   if (input.failures.length > 0) {
-    // First, above everything. A partial run that reads like a full one is a
-    // confident, wrong finding about the market.
+    // Above everything actionable. A partial run that reads like a full one is a
+    // confident, wrong finding about the market — and the founder would act on
+    // it, or stop acting, for the wrong reason.
     sections.push(
-      `⚠ INCOMPLETE RUN — ${input.failures.length} source(s) failed:\n` +
-        input.failures.map((f) => `  · ${f}`).join("\n") +
-        `\n  Today's numbers are a floor, not a measurement.`,
+      `<b>⚠️ INCOMPLETE RUN</b> — ${input.failures.length} source(s) failed\n` +
+        input.failures.map((f) => `• ${esc(f)}`).join("\n") +
+        `\n<i>Today's numbers are a floor, not a measurement.</i>`,
     );
   }
 
-  const doToday = selectDoToday(input.rows);
   sections.push(
     doToday.length === 0
-      ? `▸ DO TODAY (0)\n  Nothing cleared every gate AND verified live today.`
-      : `▸ DO TODAY (${doToday.length})\n` +
+      ? `<b>✅ APPLY TODAY (0)</b>\nNothing cleared every gate <i>and</i> verified still open.`
+      : `<b>✅ APPLY TODAY (${doToday.length})</b>\n\n` +
           doToday.map((r, i) => renderRow(r, i + 1, "/draft")).join("\n\n"),
   );
 
-  const askable = selectAskable(input.rows);
   if (askable.length > 0) {
     sections.push(
-      `▸ ONE QUESTION AWAY (${askable.length})\n` +
+      `<b>❓ ONE QUESTION AWAY (${askable.length})</b>\n` +
+        `<i>One unresolved gate each — you can settle it by asking the employer.</i>\n\n` +
         askable.map((r, i) => renderRow(r, i + 1, "/ask")).join("\n\n"),
     );
   }
@@ -169,8 +222,10 @@ export function formatDailyBrief(input: BriefInput): string {
     const byReason = new Map<string, number>();
     for (const r of rejected) byReason.set(r.headline, (byReason.get(r.headline) ?? 0) + 1);
     sections.push(
-      `▸ NOT LAWFUL (${rejected.length})   ` +
-        [...byReason.entries()].map(([reason, n]) => `${reason} ×${n}`).join(" · "),
+      `<b>⛔ NOT LAWFUL (${rejected.length})</b>\n` +
+        [...byReason.entries()]
+          .map(([reason, n]) => `• ${esc(reason)}${n > 1 ? ` <b>×${n}</b>` : ""}`)
+          .join("\n"),
     );
   }
 
@@ -179,19 +234,19 @@ export function formatDailyBrief(input: BriefInput): string {
     // Stated, not silently removed. A row that vanishes without explanation is
     // indistinguishable from a bug in the ranking.
     sections.push(
-      `▸ CLOSED SINCE WE SAW THEM (${expired.length})\n` +
-        expired.map((r) => `  · ${r.company} — ${r.title}`).join("\n"),
+      `<b>🚪 CLOSED SINCE WE SAW THEM (${expired.length})</b>\n` +
+        expired.map((r) => `• ${esc(r.company)} — ${esc(r.title)}`).join("\n"),
     );
   }
 
   if (input.trends.length > 0) {
     sections.push(
-      `▸ WHAT THE MARKET ASKED\n` +
+      `<b>📈 WHAT THE MARKET ASKED</b>\n` +
         input.trends
           .map((t) => {
             const absence =
               t.absentDays !== null
-                ? ` — missing from your ${t.track} CV for ${pluralDays(t.absentDays)}`
+                ? ` — missing from your ${esc(t.track)} CV for ${pluralDays(t.absentDays)}`
                 : "";
             // Deliberately a COUNT, not a percentage. `seenCount` is an all-time
             // tally incremented on every passing screen; `sampleSize` counts the
@@ -199,7 +254,10 @@ export function formatDailyBrief(input: BriefInput): string {
             // 2026-07-31 — a figure the stored data cannot support. The raw
             // number is the one we actually measured.
             const times = t.seenCount === 1 ? "once" : `${t.seenCount}×`;
-            return `  ${t.track}  ${t.term} — asked ${times} across ${t.sampleSize} role(s) that cleared the gates${absence}`;
+            return (
+              `• <b>${esc(t.term)}</b> <i>(${esc(t.track)})</i> — asked ${times} ` +
+              `across ${plural(t.sampleSize, "role", "roles")} that cleared the gates${absence}`
+            );
           })
           .join("\n"),
     );
@@ -213,26 +271,52 @@ export function formatDailyBrief(input: BriefInput): string {
     // The line that makes ignoring the brief cost something. Without it, a
     // pipeline that produces nothing looks exactly like one that is working.
     sections.push(
-      `⚠ ${stale.length} PASS role(s) have sat undrafted for up to ${pluralDays(oldest)}.\n` +
-        `  Screening is not the bottleneck. Drafting is.`,
+      `<b>⚠️ ${plural(stale.length, "role has", "roles have")} sat undrafted for up to ` +
+        `${pluralDays(oldest)}.</b>\n` +
+        `<i>Screening is not the bottleneck. Drafting is.</i>`,
     );
   }
 
-  return `${head}\n\n${sections.join("\n\n")}`;
+  sections.push(renderNextActions(doToday, askable));
+
+  return sections.join(`\n\n${RULE}\n\n`);
 }
 
 /**
- * Make arbitrary posting text safe for Telegram's HTML parse mode.
+ * The first three lines, which are the only ones guaranteed to be read.
  *
- * The brief carries no markup of its own — every "&" and "<" in it comes from a
- * real company or job title ("Bloom & Wild Group" arrived in the 2026-07-31 prod
- * sweep). Telegram rejects the ENTIRE message when it cannot parse the entities,
- * and the brief's own error path re-sends with the same parse mode, so one bad
- * title means the founder receives nothing while the sweep logs success.
- *
- * Ampersand is escaped first; escaping it later would turn "&lt;" into
- * "&amp;lt;" and print the escape instead of the character.
+ * They lead with the DECISION COUNT rather than the screening count. "47
+ * screened" is a statement about the machine; "3 to apply to today" is a
+ * statement about the founder's next hour, and it is the number that determines
+ * whether the rest of the message gets opened at all. The screening totals stay,
+ * one line down, because a day where 47 were screened and 0 passed is a very
+ * different finding from a day where 2 were screened.
  */
-export function toTelegramSafe(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function renderHeader(input: BriefInput, doToday: number, askable: number): string {
+  const date = input.date.toISOString().slice(0, 10);
+  const trackSummary = Object.entries(input.perTrack)
+    .filter(([, n]) => n > 0)
+    .map(([track, n]) => `${esc(track)} ${n}`)
+    .join(" · ");
+
+  const verdict =
+    doToday > 0
+      ? `<b>${doToday} to apply to today</b>`
+      : askable > 0
+        ? `<b>0 ready to send</b> · ${askable} one question away`
+        : `<b>Nothing actionable today</b>`;
+
+  const counts =
+    doToday > 0 && askable > 0 ? `${verdict} · ${askable} one question away` : verdict;
+
+  return (
+    `<b>🎯 JOB BRIEF</b> · ${date}\n` +
+    `${counts}\n` +
+    `<i>${input.screened} screened${trackSummary.length > 0 ? ` · ${trackSummary}` : ""}</i>`
+  );
 }
+
+// `toTelegramSafe` now lives in telegram-format.ts and is re-exported at the top
+// of this file. It moved because the brief became markup-bearing: escaping the
+// whole rendered message would print "&lt;b&gt;" instead of bolding anything.
+// Escaping is now applied per VALUE, at each interpolation site above.
