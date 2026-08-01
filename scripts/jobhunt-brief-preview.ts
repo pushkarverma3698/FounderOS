@@ -85,6 +85,8 @@ function row(over: Partial<BriefRow> & Pick<BriefRow, "id" | "company" | "title"
     track: "fullstack",
     verdict: "pass",
     route: "partner-permit route",
+    country: "NL",
+    location: "Amsterdam, North Holland, Netherlands",
     url: "https://boards.greenhouse.io/example/jobs/1",
     overlap: { matched: ["React", "TypeScript", "Node.js"], missing: [], asked: 3, ratio: 1 },
     liveness: "live",
@@ -100,12 +102,94 @@ const input: BriefInput = {
   screened: 47,
   perTrack: { ai: 11, fullstack: 14, backend: 13, frontend: 9 },
   failures: [],
-  spend: { runs: 10, returned: 47, costUsd: 0.664, failed: 0 },
+  notes: [
+    "Indeed NL: 8 listing(s) skipped — the employer has already closed them.",
+    "ATS india/backend: 3 repeat listing(s) collapsed — the feed returned the same role more than once. Billed for, screened once.",
+  ],
+  spend: { runs: 14, returned: 61, costUsd: 0.91, failed: 0 },
   trends: [
     { track: "ai", sampleSize: 11, term: "LangChain", seenCount: 7, absentDays: 12 },
     { track: "fullstack", sampleSize: 14, term: "Kubernetes", seenCount: 9, absentDays: 21 },
   ],
   rows: [
+    // Two Indian rows and one third-country row, so the preview exercises the
+    // market split rather than only the Netherlands block it was written for.
+    row({
+      id: "in1",
+      company: "Zeta Suite",
+      title: "Backend Engineer",
+      track: "backend",
+      route: "india-local",
+      country: "IN",
+      location: "Bengaluru, Karnataka, India",
+      gates: [
+        {
+          gate: "Basis",
+          status: "pass",
+          evidence:
+            "Based in India, where you already live and already have the right to work. No " +
+            "permit, no sponsor and no salary criterion is involved — only whether the role " +
+            "and the pay are worth taking.",
+        },
+        {
+          gate: "Pay",
+          status: "pass",
+          evidence: '\u20b924 LPA — at or above your \u20b915 LPA line. Read from: "18 - 24 LPA".',
+        },
+        EXPERIENCE_PASS,
+      ],
+      overlap: { matched: ["Node.js", "PostgreSQL"], missing: ["Kafka"], asked: 3, ratio: 0.67 },
+    }),
+    row({
+      id: "in2",
+      company: "Innovaccer",
+      title: "AI Engineer",
+      track: "ai",
+      route: "india-local",
+      country: "IN",
+      location: "Noida, Uttar Pradesh, India",
+      verdict: "flag",
+      gates: [
+        {
+          gate: "Basis",
+          status: "pass",
+          evidence: "Based in India, where you already live and already have the right to work.",
+        },
+        {
+          gate: "Pay",
+          status: "flag",
+          evidence:
+            "\u20b99 LPA is below your \u20b915 LPA line. Nothing here bars the role — it is " +
+            "lawful and you can apply — but it is worth a deliberate look before spending an " +
+            'application on it. Read from: "9 LPA".',
+        },
+        EXPERIENCE_PASS,
+      ],
+      overlap: { matched: ["Python", "LangChain"], missing: [], asked: 2, ratio: 1 },
+    }),
+    row({
+      id: "other1",
+      company: "Periferia IT Group",
+      title: "Fullstack Developer",
+      country: "other",
+      location: "Bogotá, Colombia",
+      route: "remote-contract",
+      verdict: "flag",
+      gates: [
+        {
+          gate: "Location",
+          status: "flag",
+          evidence:
+            "This role is based in a country outside both your markets — it is not a Dutch " +
+            "role and not an Indian one. You cannot be hired locally there, so the only way " +
+            "it works is as a remote contract billed from India. Confirm the employer will " +
+            "do that before applying.",
+        },
+        BASIS_PASS,
+        EXPERIENCE_PASS,
+      ],
+      overlap: { matched: ["React", "Node.js"], missing: ["Go"], asked: 3, ratio: 0.67 },
+    }),
     row({
       id: "1",
       company: "Bloom & Wild Group",

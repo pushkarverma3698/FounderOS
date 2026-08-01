@@ -30,20 +30,24 @@ import { childLogger } from "../../infra/logger.js";
 import {
   fetchAtsPostings,
   MIN_ATS_LIMIT,
+  POOL_COUNTRY,
   POOL_ORDER,
   POOL_QUERIES,
   type RawPosting,
 } from "./ats-source.js";
 import { fetchIndeedPostings, type IndeedCountry } from "./indeed-source.js";
 import { TRACK_PRIORITY, TRACK_TITLES, type RoleTrack } from "./tracks.js";
-import { screenPosting } from "./screen.js";
+import { dedupePostings, screenBatch, INGEST_SOURCE, type IngestLine } from "./ingest-batch.js";
 import { recordQueryCost } from "./ingest-ledger.js";
 import { ATS_PRICING, INDEED_PRICING } from "./cost.js";
 
-const log = childLogger({ module: "tool:ingest_jobs" });
+// Re-exported so every existing import site keeps resolving here. The batch
+// screening moved to ingest-batch.ts on 2026-08-01 when this file crossed its
+// size budget; nothing about its behaviour moved with it.
+export { dedupePostings, screenBatch, INGEST_SOURCE } from "./ingest-batch.js";
+export type { IngestLine, IngestSummary, IngestResult } from "./ingest-batch.js";
 
-/** Provenance stamped on every row this path creates. */
-export const INGEST_SOURCE = "ats-ingest";
+const log = childLogger({ module: "tool:ingest_jobs" });
 
 /**
  * NL for the remote-with-a-Dutch-office pool; IN for the remote-contract pool.
@@ -54,93 +58,46 @@ export const INGEST_SOURCE = "ats-ingest";
  */
 const INDEED_COUNTRIES: readonly IndeedCountry[] = ["NL", "IN"];
 
+/**
+ * Whether each country's Indeed query is restricted to remote roles.
+ *
+ * NL stays remote-only: a Dutch on-site role is already covered by the ATS
+ * `netherlands` pool, and what Indeed adds there is the remote-contract channel.
+ *
+ * IN IS DELIBERATELY UNRESTRICTED, and this is a correction. Until 2026-08-01
+ * both countries were pinned to `remote: "remote"`, so every on-site and hybrid
+ * role in Bangalore, Hyderabad, Pune, NCR and Mumbai was unreachable — not
+ * rejected, never asked for. He LIVES in India; on-site there is not a
+ * compromise, it is most of the market. An unasked market and an empty one
+ * produce the same zero, which is the failure direction this codebase treats as
+ * the expensive one.
+ */
+const INDEED_REMOTE: Record<IndeedCountry, "remote" | undefined> = {
+  NL: "remote",
+  IN: undefined,
+};
+
 /** The actor cannot apply `fromDays` alongside its remote filter, so we cut here. */
 const INDEED_MAX_AGE_DAYS = 3;
-
-export interface IngestLine {
-  readonly company: string;
-  readonly title: string;
-  readonly outcome: "pass" | "flag" | "reject" | "duplicate" | "error";
-  readonly detail: string;
-}
-
-export interface IngestSummary {
-  readonly fetched: number;
-  readonly lines: readonly IngestLine[];
-}
-
-export type IngestResult =
-  | { readonly ok: true; readonly summary: IngestSummary }
-  | { readonly ok: false; readonly error: string };
-
-/**
- * Screen a batch of already-fetched postings.
- *
- * Split out from the fetch so the batch behaviour is unit-testable without a
- * network call, and so a caller with postings from anywhere else can reuse it.
- *
- * One posting that blows up does NOT abort the batch. Losing nine good
- * screenings because the tenth had a malformed body would be the pipeline
- * failing at exactly the moment it is supposed to be unattended.
- */
-export async function screenBatch(postings: readonly RawPosting[]): Promise<IngestLine[]> {
-  const lines: IngestLine[] = [];
-
-  for (const posting of postings) {
-    try {
-      const outcome = await screenPosting({
-        company: posting.company,
-        title: posting.title,
-        description: posting.description,
-        ...(posting.url ? { url: posting.url } : {}),
-        ...(posting.postedAt ? { postedAt: posting.postedAt } : {}),
-        // The posting's OWN provenance, not this module's. An Indeed row screened
-        // through here must not be recorded as an ATS row: liveness verification
-        // reads that field to decide which check to run.
-        source: posting.source ?? INGEST_SOURCE,
-        ...(posting.externalId ? { externalId: posting.externalId } : {}),
-      });
-
-      if (outcome.kind === "error") {
-        lines.push({
-          company: posting.company,
-          title: posting.title,
-          outcome: "error",
-          detail: outcome.message,
-        });
-      } else if (outcome.kind === "duplicate") {
-        lines.push({
-          company: posting.company,
-          title: posting.title,
-          outcome: "duplicate",
-          detail: `already in pipeline at stage "${outcome.stage}"`,
-        });
-      } else {
-        lines.push({
-          company: outcome.company,
-          title: outcome.title,
-          outcome: outcome.verdict.status,
-          detail: outcome.verdict.reasons[0] ?? outcome.route,
-        });
-      }
-    } catch (err) {
-      lines.push({
-        company: posting.company,
-        title: posting.title,
-        outcome: "error",
-        detail: (err as Error).message,
-      });
-    }
-  }
-
-  return lines;
-}
 
 export interface PooledIngest {
   readonly fetched: number;
   readonly lines: readonly IngestLine[];
   /** One entry per source that failed. An outage must read as an outage. */
   readonly failures: readonly string[];
+  /**
+   * Rows a feed filtered out on purpose, with the reason and the count.
+   *
+   * SEPARATE FROM `failures`, and that separation is the fix. Expired postings
+   * and duplicates used to leave through unreported code paths, so the live NL
+   * sweep logged "returned 10, usable 2" with nothing accounting for the other
+   * eight — making "the market is thin", "eight were stale listings" and "the
+   * mapper is broken" three readings of one number. Filtering is correct;
+   * filtering invisibly is not, and putting these under the INCOMPLETE RUN
+   * heading would have been the opposite error: a working day reading as a
+   * broken one.
+   */
+  readonly notes: readonly string[];
   /** Postings fetched per track. A track at 0 is a finding, not a silence. */
   readonly perTrack: Readonly<Record<RoleTrack, number>>;
   /** Groups this sweep's rows in `job_ingest_runs`, so a day's cost is one query. */
@@ -175,6 +132,7 @@ export async function runPooledIngest(opts: {
   const perQuery = Math.max(MIN_ATS_LIMIT, Math.floor(opts.limit / queries));
   const lines: IngestLine[] = [];
   const failures: string[] = [];
+  const notes: string[] = [];
   let fetched = 0;
   // Derived from TRACK_PRIORITY rather than written out, so adding a track can
   // never leave a counter silently missing — which would report that track as
@@ -231,8 +189,22 @@ export async function runPooledIngest(opts: {
 
       perTrack[track] += result.postings.length;
       fetched += result.postings.length;
-      const batch = result.postings.map((p) => ({ ...p, source: INGEST_SOURCE }));
-      const batchLines = await screenBatch(batch);
+      // The row's OWN location wins; the pool's country is the fallback for a
+      // posting the feed gave no location for. A "netherlands" query can return
+      // a role listed in Belgium, and the specific answer beats the query's.
+      const batch = result.postings.map((p) => ({
+        ...p,
+        source: INGEST_SOURCE,
+        country: p.country && p.country !== "unknown" ? p.country : POOL_COUNTRY[pool],
+      }));
+      const { unique, collapsed } = dedupePostings(batch);
+      if (collapsed > 0) {
+        notes.push(
+          `ATS ${pool}/${track}: ${collapsed} repeat listing(s) collapsed — the feed returned ` +
+            `the same role more than once. Billed for, screened once.`,
+        );
+      }
+      const batchLines = await screenBatch(unique);
       lines.push(...batchLines);
       await recordQueryCost({
         sweepId,
@@ -240,6 +212,9 @@ export async function runPooledIngest(opts: {
         pool,
         track,
         requested: perQuery,
+        // `returned` is what we were BILLED for; the lines below are what we
+        // actually screened. Keeping both is what makes cost-per-useful-posting
+        // answerable rather than estimated.
         returned: result.postings.length,
         pricing: ATS_PRICING,
         lines: batchLines,
@@ -249,10 +224,11 @@ export async function runPooledIngest(opts: {
 
   if (opts.includeIndeed) {
     for (const country of INDEED_COUNTRIES) {
+      const remote = INDEED_REMOTE[country];
       const result = await fetchIndeedPostings({
         country,
         limit: perQuery,
-        remote: "remote",
+        ...(remote ? { remote } : {}),
         maxAgeDays: INDEED_MAX_AGE_DAYS,
       });
       if (!result.ok) {
@@ -288,8 +264,32 @@ export async function runPooledIngest(opts: {
             "output shape does not match the mapper. This is a schema drift, not a quiet market.",
         );
       }
+      // Legitimate filters, now COUNTED. They used to leave through bare
+      // `continue`s, so a run that returned 10 rows and screened 2 gave no
+      // account of the other 8 — and "the market is thin" was indistinguishable
+      // from "the mapper broke". Reported as notes, not failures: a day that
+      // correctly skipped eight dead listings is a working day.
+      if (result.droppedExpired > 0) {
+        notes.push(
+          `Indeed ${country}: ${result.droppedExpired} listing(s) skipped — the employer has ` +
+            `already closed them.`,
+        );
+      }
+      if (result.droppedStale > 0) {
+        notes.push(
+          `Indeed ${country}: ${result.droppedStale} listing(s) skipped — older than ` +
+            `${INDEED_MAX_AGE_DAYS} days.`,
+        );
+      }
       fetched += result.postings.length;
-      const batchLines = await screenBatch(result.postings);
+      const { unique, collapsed } = dedupePostings(result.postings);
+      if (collapsed > 0) {
+        notes.push(
+          `Indeed ${country}: ${collapsed} repeat listing(s) collapsed — the same role was ` +
+            `returned more than once. Billed for, screened once.`,
+        );
+      }
+      const batchLines = await screenBatch(unique);
       lines.push(...batchLines);
       await recordQueryCost({
         sweepId,
@@ -313,8 +313,15 @@ export async function runPooledIngest(opts: {
   }
 
   log.info(
-    { sweepId, fetched, perTrack, pools: POOL_ORDER.length, failures: failures.length },
+    {
+      sweepId,
+      fetched,
+      perTrack,
+      pools: POOL_ORDER.length,
+      failures: failures.length,
+      notes: notes.length,
+    },
     "Pooled job ingest complete",
   );
-  return { fetched, lines, failures, perTrack, sweepId };
+  return { fetched, lines, failures, notes, perTrack, sweepId };
 }

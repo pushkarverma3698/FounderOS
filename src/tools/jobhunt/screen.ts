@@ -23,6 +23,8 @@ import { childLogger } from "../../infra/logger.js";
 import { matchSponsor, type SponsorMatch } from "./sponsor-match.js";
 import { getSponsorRegister, registerStaleness } from "./sponsor-registry.js";
 import { extractPostingFacts, type PostingRoute } from "./extract.js";
+import { countryFromLocation, type PostingCountry } from "./country.js";
+import { screenIndianPay } from "./pay-india.js";
 import { basesForPosting, gateProfile } from "./permit-routes.js";
 import { THIN_BODY_CHARS, postingGate, basisGate, locationGate, sponsorGate } from "./screen-gates.js";
 import {
@@ -100,6 +102,14 @@ export interface PostingInput {
   readonly postedAt?: Date;
   /** The source's own id, when it has one — Indeed's job key powers liveness. */
   readonly externalId?: string;
+  /**
+   * Where the FETCHER says this job is. Supplied when the source knows for
+   * certain — the Indeed sweep knows which country it queried — and preferred
+   * over anything derivable from `location` or from the ad's prose.
+   */
+  readonly country?: PostingCountry;
+  /** The feed's own location string, when there is one. Read only if `country` is absent. */
+  readonly location?: string;
 }
 
 export type ScreenOutcome =
@@ -167,7 +177,13 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
     };
   }
 
-  const facts = extractPostingFacts(description);
+  // WHERE THE JOB IS, AS A FETCHED FACT. The caller's explicit country wins (the
+  // Indeed sweep knows whether it queried NL or IN); otherwise it is read off the
+  // feed's own location string. Only when neither exists does anything downstream
+  // fall back to the ad's wording — which is what used to file Indian roles as
+  // Dutch ones on the strength of the word "hybrid".
+  const country = input.country ?? countryFromLocation(input.location ?? "");
+  const facts = extractPostingFacts(description, country);
 
   let register: ReturnType<typeof getSponsorRegister>;
   try {
@@ -188,17 +204,29 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   const posting = postingGate(description);
   // Where the job sits is a fact about the posting, not about any one basis, so
   // it is reported once for all of them — see locationGate in screen-gates.ts.
-  const location = locationGate(facts.route);
+  const location = locationGate(country, facts.route);
 
   const outcomes = routesToScreen(facts.route).map((route) => {
     const profile = gateProfile(route);
-    const salary = screenSalaryFacts(facts.salary, { route });
+    // Each market is judged by its own numbers. A rupee figure against a euro
+    // reference is not approximately right, it is a different currency — so the
+    // pay gate is SELECTED by the basis rather than parameterised by it.
+    const pay: Gate =
+      profile.payReference === "inr"
+        ? { gate: "Pay", ...screenIndianPay(facts.pay) }
+        : {
+            gate: profile.salaryFloorApplies ? "Salary" : "Rate",
+            ...screenSalaryFacts(facts.salary, { route }),
+          };
     const gates: Gate[] = [
       ...(posting ? [posting] : []),
       ...(location ? [location] : []),
       profile.sponsorRequired ? sponsorGate(match, stale) : basisGate(profile),
-      { gate: profile.salaryFloorApplies ? "Salary" : "Rate", ...salary },
-      { gate: "Language", ...language },
+      pay,
+      // Omitted entirely where it cannot apply. "✅ No Dutch-language requirement
+      // mentioned" on a Bangalore posting is a cleared check about a language
+      // nobody asked for — noise wearing the costume of information.
+      ...(profile.dutchLanguageApplies ? [{ gate: "Language", ...language }] : []),
       experience,
     ];
     return { route, verdict: combineVerdict(gates) };
@@ -236,6 +264,11 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
       posted_at: input.postedAt ?? null,
       source: input.source ?? "manual",
       external_id: input.externalId ?? null,
+      // Stored, not re-derived at render time. The brief splits the two markets
+      // on this column, and re-guessing it from the ad later would reintroduce
+      // exactly the inference this column exists to replace.
+      country,
+      location: input.location ?? null,
     });
   } catch (err) {
     return {

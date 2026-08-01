@@ -168,11 +168,16 @@ export const GATE_GLOSSARY: Readonly<Record<string, string>> = {
     "Does the pay clear the permit's legal floor (€4,357/month base, under-30 band)? " +
     "Below it the permit cannot be issued, however much they want you.",
   Rate: "Is the day rate or salary worth taking on a remote contract, where no permit floor applies.",
+  Pay:
+    "Indian roles only. Does the pay reach your ₹15 LPA line — YOUR preference, not a " +
+    "legal bar. Below it the role is still lawful and still applicable; it just gets a " +
+    "second look before you spend an application on it.",
   Language: "Does the posting require Dutch. If it does, you cannot be shortlisted.",
   Experience: "How many years the posting explicitly demands, versus your ~3.5 years shipped.",
   Location:
-    "Does the ad say where the work actually sits. Until it does, every permit "  +
-    "basis below is an assumption rather than a finding.",
+    "Where the job actually is — taken from the feed, not guessed from the ad. Only " +
+    "appears when the answer is neither the Netherlands nor India, or when nobody " +
+    "recorded one, because then every basis below is an assumption rather than a finding.",
   Posting: "Whether we actually received enough of the job ad to judge it.",
 };
 

@@ -11,6 +11,7 @@
  * suffixes) be regression-tested without a network call.
  */
 
+import { countryFromLocation } from "./country.js";
 import type { RawPosting } from "./ats-source.js";
 
 /** Bound a stored posting body. Long enough for every real posting. */
@@ -164,6 +165,12 @@ export function mapAtsItems(items: readonly unknown[]): RawPosting[] {
       url: firstString(item["url"], item["job_url"], item["apply_url"], item["source_url"]),
       description,
       location,
+      // Read here, from the feed's own `locations_derived`, rather than left for
+      // the screener to infer from the ad's prose. A posting whose location the
+      // feed did not supply comes back `unknown`, which is an honest answer and
+      // gets flagged downstream — it is not rounded to the Netherlands because
+      // the body happened to contain the word "hybrid".
+      country: countryFromLocation(location),
       postedAt: parseDate(item["date_posted"] ?? item["datePosted"] ?? item["date_created"]),
     });
   }

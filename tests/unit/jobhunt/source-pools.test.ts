@@ -78,9 +78,15 @@ describe("source pools", () => {
     expect(input).not.toHaveProperty("locationSearch");
   });
 
-  it("gives each pool a distinct, non-overlapping work arrangement", () => {
+  it("keeps the two Netherlands-scoped pools from paying for the same posting twice", () => {
+    // Scoped to the pools that are separated BY ARRANGEMENT. `india` is
+    // separated by LOCATION instead and deliberately sends no arrangement filter
+    // at all — pinning it to remote is what made every on-site role in Bangalore
+    // unreachable, which is the defect the pool was added to fix. It cannot
+    // overlap the others regardless: they carry `locationSearch: ["Netherlands"]`
+    // or omit the location entirely.
     const seen = new Set<string>();
-    for (const pool of POOL_ORDER) {
+    for (const pool of ["netherlands", "eu-remote-global"] as const) {
       const arrangements = buildAtsInput(POOL_QUERIES[pool])["aiWorkArrangementFilter"];
       expect(Array.isArray(arrangements)).toBe(true);
       for (const a of arrangements as string[]) {
@@ -90,6 +96,12 @@ describe("source pools", () => {
     }
     // All four of the feed's arrangements are accounted for.
     expect(seen).toEqual(new Set(["On-site", "Hybrid", "Remote OK", "Remote Solely"]));
+  });
+
+  it("asks India for every desk arrangement, not just remote", () => {
+    const input = buildAtsInput(POOL_QUERIES["india"]);
+    expect(input).not.toHaveProperty("aiWorkArrangementFilter");
+    expect(input["locationSearch"]).toEqual(["India"]);
   });
 
   it("omits the work-arrangement filter when a query does not set one", () => {

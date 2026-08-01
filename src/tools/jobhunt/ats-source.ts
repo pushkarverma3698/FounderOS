@@ -39,6 +39,7 @@
 
 import { childLogger } from "../../infra/logger.js";
 import { runActorSync } from "../apify.js";
+import type { PostingCountry } from "./country.js";
 import { SOURCE_EXCLUDED_TITLE_TERMS } from "./seniority.js";
 import { detectFeedError, mapAtsItems } from "./ats-mappers.js";
 import { titlesForTracks, TRACK_PRIORITY } from "./tracks.js";
@@ -101,6 +102,12 @@ export interface RawPosting {
   readonly source?: string;
   /** Source-native id. Indeed's job key is what the liveness lookup needs. */
   readonly externalId?: string;
+  /**
+   * Where the fetcher established this job is — from the query it ran, or from
+   * the feed's own location string. Carried on the posting so the screener never
+   * has to re-derive it from the ad's wording.
+   */
+  readonly country?: PostingCountry;
 }
 
 export type AtsFetch =
@@ -143,7 +150,7 @@ export const DEFAULT_EXPERIENCE: readonly string[] = ["0-2", "2-5"];
  * means no office at all (so there is nothing to relocate to, and only a remote
  * contract applies).
  */
-export type SourcePool = "netherlands" | "eu-remote-global";
+export type SourcePool = "netherlands" | "eu-remote-global" | "india";
 
 export const POOL_QUERIES: Record<SourcePool, AtsQuery> = {
   /**
@@ -172,9 +179,43 @@ export const POOL_QUERIES: Record<SourcePool, AtsQuery> = {
    * folding this into the Netherlands query would silently return zero of them.
    */
   "eu-remote-global": { workArrangements: ["Remote Solely"], omitLocation: true },
+  /**
+   * The Indian market — the campaign's second market since 2026-08-01 ("we need
+   * dutch and indian both").
+   *
+   * NO WORK-ARRANGEMENT FILTER, deliberately, and that is the whole point of the
+   * pool. The only Indian supply the pipeline had before this was one Indeed
+   * query pinned to `remote: "remote"`, so every on-site and hybrid role in
+   * Bangalore, Hyderabad, Pune, NCR and Mumbai was structurally invisible — and
+   * invisible in the silent direction, because an unasked market and an empty one
+   * produce the same zero. He lives in India; on-site is not a compromise there,
+   * it is the majority of the market.
+   *
+   * A BARE COUNTRY rather than a list of cities. The feed accepts either, and one
+   * "India" query costs one actor start per track where six city phrases would
+   * cost six for the same coverage — the founder's standing instruction on not
+   * wasting credits applied to the obvious case.
+   */
+  india: { locations: ["India"] },
 };
 
-export const POOL_ORDER: readonly SourcePool[] = ["netherlands", "eu-remote-global"];
+export const POOL_ORDER: readonly SourcePool[] = ["netherlands", "eu-remote-global", "india"];
+
+/**
+ * Which country a pool's postings are in, where the query itself settles it.
+ *
+ * This is the fix for the defect that produced the whole 2026-08-01 rework: the
+ * fetcher KNEW the country — it had just asked for it by name — and dropped the
+ * answer so the screener could re-guess it from the ad's prose. `eu-remote-global`
+ * maps to `unknown` honestly: it deliberately omits any location filter, so its
+ * rows really could be anywhere and the row's own location string is the only
+ * evidence available.
+ */
+export const POOL_COUNTRY: Record<SourcePool, PostingCountry> = {
+  netherlands: "NL",
+  india: "IN",
+  "eu-remote-global": "unknown",
+};
 
 /**
  * Feed parameters that must NEVER appear in a request, and why.

@@ -100,6 +100,11 @@ export async function recordScreenedApplication(
         // was only ever written on a first insert. A field that silently stops
         // being written on the second sighting is the worst kind of half-working.
         gate_json: row.gate_json ?? null,
+        // In the UPDATE set for the same reason gate_json is: a re-sighted
+        // posting takes the conflict branch, and a column written only on first
+        // insert stops being maintained the moment a feed returns a row twice.
+        country: row.country ?? null,
+        location: row.location ?? null,
         fit_score: row.fit_score ?? null,
         fit_evidence: row.fit_evidence ?? null,
         notes: row.notes ?? null,
