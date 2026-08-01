@@ -25,6 +25,8 @@ import {
   type RawPosting,
 } from "./ats-source.js";
 import { fetchIndeedPostings, type IndeedCountry } from "./indeed-source.js";
+import { excludeEarlyCareer } from "./seniority.js";
+import { TRACK_PRIORITY, TRACK_TITLES, type RoleTrack } from "./tracks.js";
 import { screenPosting } from "./screen.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 
@@ -129,6 +131,10 @@ export interface PooledIngest {
   readonly lines: readonly IngestLine[];
   /** One entry per source that failed. An outage must read as an outage. */
   readonly failures: readonly string[];
+  /** Postings fetched per track. A track at 0 is a finding, not a silence. */
+  readonly perTrack: Readonly<Record<RoleTrack, number>>;
+  /** Early-career postings dropped before screening. Counted, never silent. */
+  readonly droppedEarlyCareer: number;
 }
 
 /**
@@ -148,24 +154,45 @@ export async function runPooledIngest(opts: {
   limit: number;
   includeIndeed?: boolean;
 }): Promise<PooledIngest> {
-  const perPool = Math.max(MIN_ATS_LIMIT, Math.floor(opts.limit / POOL_ORDER.length));
+  const queries = POOL_ORDER.length * TRACK_PRIORITY.length;
+  const perQuery = Math.max(MIN_ATS_LIMIT, Math.floor(opts.limit / queries));
   const postings: RawPosting[] = [];
   const failures: string[] = [];
+  const perTrack: Record<RoleTrack, number> = { ai: 0, backend: 0, frontend: 0 };
 
+  // EVERY TRACK GETS ITS OWN QUERY AND ITS OWN BUDGET.
+  //
+  // Until 2026-08-01 all twelve title phrases went into ONE `titleSearch` with
+  // ONE budget, AI first in the array. Nothing reserved supply for the others, so
+  // whichever titles the feed happened to match first spent the whole allowance —
+  // and frontend, the deepest track on the CV, came back empty. That was a
+  // property of the request, not of the Dutch market, and it was invisible: an
+  // empty track and an unasked track produce the same silence.
+  //
+  // Splitting by track costs one actor run per (pool × track) instead of per
+  // pool. That is the price of coverage being a guarantee rather than luck.
   for (const pool of POOL_ORDER) {
-    const result = await fetchAtsPostings({ ...POOL_QUERIES[pool], timeRange: "24h", limit: perPool });
-    if (!result.ok) {
-      failures.push(`ATS pool "${pool}": ${result.error}`);
-      continue;
+    for (const track of TRACK_PRIORITY) {
+      const result = await fetchAtsPostings({
+        ...POOL_QUERIES[pool],
+        titles: TRACK_TITLES[track],
+        timeRange: "24h",
+        limit: perQuery,
+      });
+      if (!result.ok) {
+        failures.push(`ATS pool "${pool}" / ${track}: ${result.error}`);
+        continue;
+      }
+      perTrack[track] += result.postings.length;
+      postings.push(...result.postings.map((p) => ({ ...p, source: INGEST_SOURCE })));
     }
-    postings.push(...result.postings.map((p) => ({ ...p, source: INGEST_SOURCE })));
   }
 
   if (opts.includeIndeed) {
     for (const country of INDEED_COUNTRIES) {
       const result = await fetchIndeedPostings({
         country,
-        limit: perPool,
+        limit: perQuery,
         remote: "remote",
         maxAgeDays: INDEED_MAX_AGE_DAYS,
       });
@@ -194,12 +221,44 @@ export async function runPooledIngest(opts: {
     }
   }
 
-  const lines = await screenBatch(postings);
+  // Internships and graduate schemes are removed HERE, after the count that
+  // proves the feed answered, so a thin day is never confused with a filtered
+  // one. On 2026-08-01 four of the eight live rows were intern/graduate/junior
+  // postings that the substring title match had swept in.
+  const seniority = excludeEarlyCareer(postings);
+  if (seniority.dropped > 0) {
+    failures.push(
+      `Dropped ${seniority.dropped} early-career posting(s) (intern / graduate / working student): ` +
+        seniority.droppedTitles.slice(0, 5).join("; "),
+    );
+  }
+
+  // A track that fetched nothing is reported. Zero rows for frontend used to be
+  // indistinguishable from never having asked for frontend.
+  for (const track of TRACK_PRIORITY) {
+    if (perTrack[track] === 0) {
+      failures.push(`Track "${track}": 0 postings across all ${POOL_ORDER.length} pools.`);
+    }
+  }
+
+  const lines = await screenBatch(seniority.kept);
   log.info(
-    { fetched: postings.length, pools: POOL_ORDER.length, failures: failures.length },
+    {
+      fetched: seniority.kept.length,
+      perTrack,
+      droppedEarlyCareer: seniority.dropped,
+      pools: POOL_ORDER.length,
+      failures: failures.length,
+    },
     "Pooled job ingest complete",
   );
-  return { fetched: postings.length, lines, failures };
+  return {
+    fetched: seniority.kept.length,
+    lines,
+    failures,
+    perTrack,
+    droppedEarlyCareer: seniority.dropped,
+  };
 }
 
 /** Fetch → screen → summarise. The whole pipeline in one call. */

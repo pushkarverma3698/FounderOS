@@ -172,14 +172,26 @@ describe("screenJobTool.execute — HSM route", () => {
     });
   });
 
-  it("flags rather than rejects when no salary is stated", async () => {
+  it("never rejects when no salary is stated, and passes on the basis with no floor", async () => {
+    // A missing figure is normal for Dutch postings. Under HSM the floor is a
+    // legal condition and still flags — but the partner-permit basis has no
+    // floor at all, and `bestOutcome` takes the best status across every basis,
+    // so the row is actionable rather than parked.
+    //
+    // This assertion used to expect NEEDS A HUMAN CHECK. That was the bug, not
+    // the spec: six of eight live prod rows sat there on 2026-08-01, one with an
+    // exact IND sponsor-register match, and DO TODAY was empty as a result.
     const res = await screenJobTool.execute({
       company: "Adyen N.V.",
       title: "AI Engineer",
       description: ENGLISH_ONSITE,
     });
 
-    expect(res.data).toContain("NEEDS A HUMAN CHECK");
+    expect(res.data).not.toContain("REJECT");
+    expect(res.data).toContain("PASS");
+    expect(res.data).toContain("partner-permit");
+    // Passing must never read as "the money is fine" — nobody checked.
+    expect(res.data).toMatch(/no salary stated/i);
   });
 
   it("records the canonical register name on an exact sponsor match", async () => {
