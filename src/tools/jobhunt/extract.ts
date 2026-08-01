@@ -17,10 +17,21 @@
  * a human resolves.
  */
 
+import { extractIndianPay, type IndianPayFacts } from "./pay-india.js";
+import { extractRoute, type PostingRoute } from "./route.js";
+import type { PostingCountry } from "./country.js";
+
+// Re-exported so every existing import of the route vocabulary keeps resolving
+// here. The implementations moved to route.ts and pay-india.ts on 2026-08-01
+// when this file reached its size budget; nothing about their behaviour moved.
+export { extractRoute } from "./route.js";
+export type { PostingRoute } from "./route.js";
+export { extractIndianPay } from "./pay-india.js";
+export type { IndianPayFacts } from "./pay-india.js";
+
 export type SalaryUnit = "annual" | "monthly" | "hourly" | "none";
 export type HolidayBasis = "included" | "excluded" | "unstated";
 export type DutchRequired = "yes" | "no" | "unstated";
-export type PostingRoute = "hsm" | "remote-contract" | "unclear";
 
 export interface SalaryFacts {
   readonly min?: number;
@@ -44,6 +55,10 @@ export interface PostingFacts {
   readonly salary: SalaryFacts;
   readonly language: LanguageFacts;
   readonly route: PostingRoute;
+  /** Rupee pay, read separately — Indian grouping and units share no syntax with EUR. */
+  readonly pay: IndianPayFacts;
+  /** Where the fetcher said the job is. Never re-derived from the ad's wording. */
+  readonly country: PostingCountry;
 }
 
 /** Plausible magnitude bands per unit — the disambiguator for European separators. */
@@ -347,32 +362,22 @@ export function extractLanguage(text: string): LanguageFacts {
   };
 }
 
-const REMOTE_MARKER =
-  /\b(fully remote|remote[- ]first|work from anywhere|100%\s*remote|freelance|freelancer|zzp|contractor|contracting|b2b|interim|detachering|zelfstandige)\b/i;
-const ONSITE_MARKER =
-  /\b(on[- ]?site|onsite|hybrid|hybride|relocation|relocate|visa sponsorship|sponsorship available|highly skilled migrant|kennismigrant|office[- ]based)\b/i;
-
 /**
- * Which permit route a posting belongs to.
+ * Every fact the gates read, from one pass over the posting.
  *
- * `unclear` is a real answer, not a failure: the caller screens an unclear
- * posting under BOTH routes and passes if either passes, because guessing wrong
- * in either direction loses something — guessing "remote" skips the sponsor gate
- * and wastes an application, guessing "hsm" applies a sponsor gate that does not
- * apply and silently drops the highest-value channel.
+ * `country` is passed IN rather than parsed out. It is the one input here that
+ * the fetcher already knew for certain — which feed, which country query, which
+ * `locations_derived` string — and re-deriving it from the ad's wording is what
+ * filed Indian roles as Dutch ones (see country.ts). The pay reading branches on
+ * it because a rupee figure and a euro figure are not the same number written
+ * differently; they are different currencies with different thousands grouping.
  */
-export function extractRoute(text: string): PostingRoute {
-  const remote = REMOTE_MARKER.test(text);
-  const onsite = ONSITE_MARKER.test(text);
-  if (remote && !onsite) return "remote-contract";
-  if (onsite && !remote) return "hsm";
-  return "unclear";
-}
-
-export function extractPostingFacts(text: string): PostingFacts {
+export function extractPostingFacts(text: string, country: PostingCountry = "unknown"): PostingFacts {
   return {
     salary: extractSalary(text),
     language: extractLanguage(text),
-    route: extractRoute(text),
+    route: extractRoute(text, country),
+    pay: extractIndianPay(text),
+    country,
   };
 }

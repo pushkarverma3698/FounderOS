@@ -60,13 +60,31 @@ describe("basesForPosting", () => {
     expect(bases).not.toContain("remote-contract");
   });
 
-  it("screens an unclear posting under every live basis", () => {
+  it("screens an unclear posting under every basis that does not need a country", () => {
     const bases = basesForPosting("unclear");
-    expect(bases).toEqual(expect.arrayContaining([...LIVE_PERMIT_BASES]));
+    expect(bases).toEqual(
+      expect.arrayContaining(["hsm", "partner-permit", "remote-contract"] as const),
+    );
+  });
+
+  it("REGRESSION: an unclear posting is NEVER screened as an Indian local hire", () => {
+    // `india-local` has the fewest gates of any basis — no register lookup, no
+    // permit criterion, no language bar — so including it here would make it win
+    // every tie on a posting nobody could place, and "we don't know where this
+    // is" would resolve to the most permissive answer available. That exact
+    // mechanism put a Bogotá role into APPLY TODAY on a Dutch partner permit.
+    // Being in India is a POSITIVE finding from the fetcher, never a fallback.
+    expect(basesForPosting("unclear")).not.toContain("india-local");
+  });
+
+  it("screens an Indian posting only as an Indian local hire", () => {
+    // Not alongside remote-contract: that would put a euro yardstick beside a
+    // rupee one on the same posting and let the kinder of the two win.
+    expect(basesForPosting("india")).toEqual(["india-local"]);
   });
 
   it("never returns a basis that is not live", () => {
-    for (const posting of ["hsm", "remote-contract", "unclear"] as const) {
+    for (const posting of ["hsm", "remote-contract", "india", "unclear"] as const) {
       for (const basis of basesForPosting(posting)) {
         expect(isLiveBasis(basis)).toBe(true);
       }

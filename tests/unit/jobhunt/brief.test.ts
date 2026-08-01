@@ -31,6 +31,8 @@ function row(overrides: Partial<BriefRow> = {}): BriefRow {
     track: "ai",
     verdict: "pass",
     route: "hsm",
+    country: "NL",
+    location: "Amsterdam, North Holland, Netherlands",
     url: "https://example.com/1",
     overlap: { matched: ["TypeScript"], missing: [], asked: 1, ratio: 1 },
     liveness: "live",

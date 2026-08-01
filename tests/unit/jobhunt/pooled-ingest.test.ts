@@ -14,6 +14,27 @@ import type { RawPosting } from "../../../src/tools/jobhunt/ats-source.js";
 const mockScreenPosting = vi.fn();
 const mockFetchAts = vi.fn();
 const mockFetchIndeed = vi.fn();
+const mockRecordQueryCost = vi.fn(async () => {});
+
+/**
+ * The cost ledger is a DATABASE WRITE and this is a unit test.
+ *
+ * It was not mocked until 2026-08-01, and the omission was invisible because
+ * `recordQueryCost` swallows its own errors — so on CI, where no Postgres is
+ * running, every call sat through a connection timeout and then succeeded
+ * quietly. Each test paid that once per query: at 10 queries the file took ~17s
+ * a test and stayed under vitest's 30s limit, and the moment the India pool took
+ * it to 14 the two slowest tests tipped over and the suite went red on timing
+ * rather than on behaviour.
+ *
+ * Mocked here rather than by raising the timeout: a unit test that opens a
+ * database connection is the bug, and a longer timeout would only hide it until
+ * the next query was added.
+ */
+vi.mock("../../../src/tools/jobhunt/ingest-ledger.js", async (orig) => {
+  const actual = await (orig() as Promise<Record<string, unknown>>);
+  return { ...actual, recordQueryCost: mockRecordQueryCost };
+});
 
 vi.mock("../../../src/tools/jobhunt/screen.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);

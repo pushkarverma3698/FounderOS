@@ -25,6 +25,7 @@
  */
 
 import { listRecentApplications } from "../src/db/job-queries.js";
+import { toPostingCountry } from "../src/tools/jobhunt/country.js";
 import { screenPosting } from "../src/tools/jobhunt/screen.js";
 
 const DRY = process.argv.includes("--dry");
@@ -55,6 +56,13 @@ async function main(): Promise<void> {
       ...(row.posted_at ? { postedAt: row.posted_at } : {}),
       source: row.source,
       ...(row.external_id ? { externalId: row.external_id } : {}),
+      // CARRIED FORWARD, not re-derived. Without these a backfill would rewrite
+      // every row's country to `unknown` — destroying a fact the fetcher
+      // established — because this script has no feed to ask. A row that never
+      // had one stays `unknown`, which is the truth about it: it was screened by
+      // a pipeline that did not record where the job was.
+      ...(row.country ? { country: toPostingCountry(row.country) } : {}),
+      ...(row.location ? { location: row.location } : {}),
     });
 
     if (outcome.kind === "error") {

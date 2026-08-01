@@ -162,6 +162,13 @@
       "when": 1785600000000,
       "tag": "0022_jobhunt_gates_and_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785690000000,
+      "tag": "0023_jobhunt_country",
+      "breakpoints": true
     }
   ]
 }
