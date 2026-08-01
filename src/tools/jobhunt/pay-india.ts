@@ -41,6 +41,17 @@ const MONTHS_PER_YEAR = 12;
 export const INDIA_PAY_REFERENCE_LPA = 15;
 export const INDIA_PAY_REFERENCE_INR = INDIA_PAY_REFERENCE_LPA * LAKH;
 
+/**
+ * Above this max/min ratio, a quoted range is not a band — it is an unfilled form.
+ *
+ * Four is deliberately generous. Real Indian bands do run wide (₹12–₹24 LPA is
+ * ordinary at this level, a 2× spread), so a tighter threshold would flag honest
+ * ads and bury real roles behind a question. What it catches is the shape live
+ * production produced on 2026-08-01: "₹50,000.00 - ₹500,000.00 a month", a 10×
+ * spread on a role open to freshers.
+ */
+const IMPLAUSIBLE_RANGE_RATIO = 4;
+
 export interface IndianPayFacts {
   /** Annualised rupees. Both ends present only when the ad quoted a range. */
   readonly minAnnual?: number;
@@ -194,6 +205,32 @@ export function screenIndianPay(
   referenceInr: number = INDIA_PAY_REFERENCE_INR,
 ): ScreenResult {
   const stated = facts.maxAnnual ?? facts.minAnnual;
+
+  // A range this wide is not a salary band, it is an unfilled form.
+  //
+  // Live prod, 2026-08-01: a "Full Stack Web Developer, 2–5 years, freshers with
+  // exceptional portfolios welcome" advertised "₹50,000.00 - ₹500,000.00 a
+  // month". Taking the ceiling — which is right for the Dutch permit floor,
+  // where a band straddling it is negotiable upward — annualised to ₹60 LPA and
+  // PASSED, so the brief told the founder a ₹50k-a-month role paid sixty lakh.
+  // Indeed's salary field is free text and ranges like this are common in it.
+  //
+  // The honest answer is the one `screenSalaryFacts` already gives for readings
+  // that disagree: show both ends and ask. Flag, never reject — the role is
+  // real, only the number is not.
+  if (facts.minAnnual !== undefined && facts.maxAnnual !== undefined && facts.minAnnual > 0) {
+    const spread = facts.maxAnnual / facts.minAnnual;
+    if (spread >= IMPLAUSIBLE_RANGE_RATIO) {
+      return {
+        status: "flag",
+        evidence:
+          `The ad quotes ${formatLpa(facts.minAnnual)} to ${formatLpa(facts.maxAnnual)} — a ` +
+          `${Math.round(spread)}× spread, which is a form nobody filled in rather than a real ` +
+          `band. Neither end can be trusted; ask what the role actually pays.` +
+          (facts.raw ? ` Read from: "${facts.raw}".` : ""),
+      };
+    }
+  }
 
   if (stated === undefined) {
     return {
