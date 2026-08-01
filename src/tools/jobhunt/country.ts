@@ -161,6 +161,44 @@ export function countryFromLocation(location: string): PostingCountry {
   return "other";
 }
 
+/**
+ * Country codes Indeed puts in its own hostname: `in.indeed.com`, `nl.indeed.com`.
+ *
+ * The leading label is which country Indeed SERVED the posting for — a fact
+ * about the row, not a reading of its text. That makes this a legitimate second
+ * source for the country, and the only one available for rows screened before
+ * the column existed: twelve production rows carry an Indeed URL and no country,
+ * and eight of them are on `in.indeed.com` while still recording a Dutch
+ * partner permit as what makes them lawful.
+ *
+ * Deliberately narrow. Only the two markets are recognised, and only as the
+ * FIRST label of the host — `www.indeed.com` and `boards.greenhouse.io` say
+ * nothing about geography and must come back `unknown`, not `other`.
+ */
+const HOST_COUNTRY: Record<string, PostingCountry> = { in: "IN", nl: "NL" };
+
+/**
+ * Read a country out of a posting URL, or `unknown`.
+ *
+ * Never returns `other`: a hostname that is not one of the two country domains
+ * has told us nothing, which is different from telling us the job is elsewhere.
+ */
+export function countryFromUrl(url: string | null | undefined): PostingCountry {
+  if (!url) return "unknown";
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return "unknown";
+  }
+  const [label, ...rest] = host.split(".");
+  // Only on a country-subdomain of a job board — `nl.example.com` is somebody's
+  // Dutch marketing site, not evidence about where a role sits.
+  if (!label || rest.length < 2) return "unknown";
+  if (!host.endsWith("indeed.com")) return "unknown";
+  return HOST_COUNTRY[label] ?? "unknown";
+}
+
 /** The country in the words the founder reads, for a gate's evidence line. */
 export function countryName(country: PostingCountry): string {
   if (country === "NL") return "the Netherlands";

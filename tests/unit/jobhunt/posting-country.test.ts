@@ -19,7 +19,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { countryFromLocation, countryName } from "../../../src/tools/jobhunt/country.js";
+import {
+  countryFromLocation,
+  countryFromUrl,
+  countryName,
+} from "../../../src/tools/jobhunt/country.js";
 import { extractRoute } from "../../../src/tools/jobhunt/extract.js";
 
 describe("countryFromLocation — reading the feed's own location string", () => {
@@ -61,8 +65,40 @@ describe("countryFromLocation — reading the feed's own location string", () =>
   });
 
   it("names the country in words, for the founder-facing evidence line", () => {
+
     expect(countryName("IN")).toBe("India");
     expect(countryName("NL")).toBe("the Netherlands");
+  });
+});
+
+describe("countryFromUrl — Indeed's own hostname is a fact about the row", () => {
+  it("reads the country domain", () => {
+    // Live prod: 12 rows carry an Indeed URL and no country, and eight of them
+    // are on in.indeed.com while recording a Dutch partner permit as what makes
+    // them lawful. The hostname is which country Indeed SERVED the posting for.
+    expect(countryFromUrl("https://in.indeed.com/viewjob?jk=7a18c604670561dc")).toBe("IN");
+    expect(countryFromUrl("https://nl.indeed.com/viewjob?jk=bfba205e5141ae43")).toBe("NL");
+  });
+
+  it("returns unknown — never `other` — for a host that says nothing", () => {
+    // `other` is a claim that the job IS somewhere else, which narrows the
+    // lawful bases to one. A greenhouse URL supports no such claim.
+    expect(countryFromUrl("https://boards.greenhouse.io/acme/jobs/1")).toBe("unknown");
+    expect(countryFromUrl("https://www.indeed.com/viewjob?jk=1")).toBe("unknown");
+    expect(countryFromUrl("https://jobs.lever.co/acme/1")).toBe("unknown");
+  });
+
+  it("does not read a country code off any old subdomain", () => {
+    // `nl.example.com` is somebody's Dutch marketing site, not evidence about
+    // where a role sits.
+    expect(countryFromUrl("https://nl.example.com/careers/1")).toBe("unknown");
+  });
+
+  it("survives a missing or malformed URL rather than throwing", () => {
+    expect(countryFromUrl(null)).toBe("unknown");
+    expect(countryFromUrl(undefined)).toBe("unknown");
+    expect(countryFromUrl("")).toBe("unknown");
+    expect(countryFromUrl("not a url")).toBe("unknown");
   });
 });
 
