@@ -37,7 +37,10 @@ function row(over: Partial<BriefRow> = {}): BriefRow {
     url: null,
     overlap: { matched: [], missing: [], asked: 21, ratio: 0 },
     liveness: "unverifiable",
-    headline: "Sponsor partially overlaps 1 register entry.",
+    gates: [
+      { gate: "Sponsor", status: "flag", evidence: "Sponsor partially overlaps 1 register entry." },
+    ],
+    legacyGates: false,
     ageDays: 0,
     ...over,
   };

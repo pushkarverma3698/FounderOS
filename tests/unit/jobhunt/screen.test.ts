@@ -44,7 +44,38 @@ beforeEach(() => {
   mockSoft.mockResolvedValue([]);
 });
 
-const ENGLISH_ONSITE = "On-site in Amsterdam. Visa sponsorship available. We work in English.";
+/**
+ * A realistic posting BODY, not a one-line stub.
+ *
+ * Length is load-bearing since 2026-08-01: the `Posting` gate flags a body under
+ * 400 characters, because the salary, language and experience gates all read the
+ * body and a 90-character fixture makes three of them answer confidently from
+ * evidence that was never there. A test whose input is thinner than anything the
+ * feed produces was testing a case the pipeline should refuse to rule on.
+ */
+const ENGLISH_ONSITE = [
+  "On-site in Amsterdam. Visa sponsorship available. We work in English.",
+  "About the role: you will join a product engineering team building payment",
+  "infrastructure used by merchants across Europe. You will own services end to",
+  "end, from design through deployment and on-call, and work closely with product",
+  "and design on what gets built next.",
+  "What you will do: design and ship backend services in TypeScript and Node.js;",
+  "model data in PostgreSQL; instrument what you build so it can be operated;",
+  "review your colleagues' code and have yours reviewed.",
+  "What we offer: 25 holiday days, a pension contribution, a learning budget, and",
+  "a hybrid schedule of two days a week in the Amsterdam office.",
+].join(" ");
+
+const REMOTE_BODY = [
+  "You will work asynchronously with a distributed team, own delivery of the",
+  "features you pick up, and write the tests that prove them. The stack is",
+  "TypeScript on Node.js with PostgreSQL, deployed to AWS. Invoicing is monthly",
+  "against an agreed scope; there is no employment relationship and no permit",
+  "involved. We review work in pull requests and pair when something is hard.",
+  "Onboarding is one week, and the contract is open-ended with 30 days notice",
+  "on either side. All communication, documentation and code review is in",
+  "English.",
+].join(" ");
 
 describe("combineVerdict", () => {
   it("passes only when every gate passes", () => {
@@ -284,7 +315,7 @@ describe("screenJobTool.execute — remote-contract route", () => {
     const res = await screenJobTool.execute({
       company: "Zzyzx Widgetworks",
       title: "AI Engineer",
-      description: "Fully remote freelance contract. €60 per hour. We work in English.",
+      description: `Fully remote freelance contract. €60 per hour. ${REMOTE_BODY}`,
     });
 
     expect(res.data).toContain("PASS");
@@ -299,7 +330,7 @@ describe("screenJobTool.execute — remote-contract route", () => {
     const res = await screenJobTool.execute({
       company: "Zzyzx Widgetworks",
       title: "AI Engineer",
-      description: "Fully remote freelance contract. €12 per hour. We work in English.",
+      description: `Fully remote freelance contract. €12 per hour. ${REMOTE_BODY}`,
     });
 
     expect(res.data).not.toContain("REJECT");
@@ -314,7 +345,7 @@ describe("screenJobTool.execute — remote-contract route", () => {
     const res = await screenJobTool.execute({
       company: "Zzyzx Widgetworks",
       title: "AI Engineer",
-      description: "€70 per hour. We work in English.",
+      description: `€70 per hour. ${REMOTE_BODY}`,
     });
 
     expect(res.data).toContain("PASS");

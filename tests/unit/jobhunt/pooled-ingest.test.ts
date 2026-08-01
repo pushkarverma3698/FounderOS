@@ -96,9 +96,13 @@ describe("runPooledIngest", () => {
     }
   });
 
-  it("drops early-career postings and COUNTS them", async () => {
-    // Half the live prod table on 2026-08-01 was interns and graduate schemes,
-    // swept in because the feed's title search is substring, not prefix.
+  it("SCREENS early-career postings instead of dropping them before the table", async () => {
+    // Reversed on 2026-08-01. These used to be dropped here, before screening,
+    // so they never reached job_applications and the founder could not audit
+    // what had been thrown away for him — a filter and an empty market look
+    // identical from outside. The founder's instruction was explicit: "store all
+    // the data we are collecting even if it is senior and of no use to us".
+    // The Experience gate rejects them now, WITH a stored reason.
     mockFetchAts.mockResolvedValue({
       ok: true,
       postings: [posting(), posting({ title: "Software Engineer Intern" })],
@@ -106,11 +110,9 @@ describe("runPooledIngest", () => {
 
     const result = await runPooledIngest({ limit: 30 });
 
-    expect(result.droppedEarlyCareer).toBe(POOL_ORDER.length * TRACK_PRIORITY.length);
-    expect(result.failures.some((f) => f.includes("early-career"))).toBe(true);
-    for (const call of mockScreenPosting.mock.calls) {
-      expect(call[0].title).not.toContain("Intern");
-    }
+    const screenedTitles = mockScreenPosting.mock.calls.map((c) => c[0].title);
+    expect(screenedTitles).toContain("Software Engineer Intern");
+    expect(result.fetched).toBe(POOL_ORDER.length * TRACK_PRIORITY.length * 2);
   });
 
   it("splits the budget across pools instead of spending it first-come", async () => {
@@ -144,7 +146,7 @@ describe("runPooledIngest", () => {
     expect(result.failures[0]).toContain("HTTP 521");
     // Queries run pool-major, so the second one is the first pool paired with
     // the SECOND track in priority order.
-    expect(result.failures[0]).toContain("nl-onsite");
+    expect(result.failures[0]).toContain("netherlands");
     expect(result.failures[0]).toContain(TRACK_PRIORITY[1]!);
   });
 

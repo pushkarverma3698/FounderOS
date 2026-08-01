@@ -71,6 +71,30 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
      own plan and answer it, or adopt it.
   Recommend one option with reasons; never present an unranked survey. If a
   conclusion rests on an assumption, verify the assumption or label it unverified.
+- **Build for the OUTCOME, not the instruction (rule #26 — founder directive,
+  2026-08-01)**: every request names a symptom and guesses a remedy. Before
+  writing anything, answer three questions in order: *what outcome does this
+  serve · what is the binding constraint on that outcome · does the requested
+  change move that constraint*. If the answer to the third is no, say so and name
+  what would — then build that too. Deliver the literal ask in full regardless;
+  the outcome lens decides HOW and WHAT ELSE, never WHETHER.
+  - Every deliverable must end in something the founder can ACT ON — a ranked
+    shortlist, a draft, a decision, a number that changes a choice. A log of what
+    happened is not an outcome. If ignoring the output costs nothing and emits no
+    signal, the design is wrong, however many tests pass.
+  - Anything shown to the founder must be legible to someone who has never read
+    the code. An internal label nobody defined ("Sponsor", "partially overlaps",
+    "not checked") is not information. Print every reason, in bullets, with its
+    own result — and split the Telegram message rather than hide a row.
+  - Never discard collected data because it is currently useless. A senior role
+    we will not apply to is still evidence about the market and about our own
+    filters; a filtered-out row and an empty market are indistinguishable from
+    outside, and that ambiguity has already cost this pipeline weeks. Reject
+    inside the pipeline where the reason is stored and shown, never before it.
+  - Two failures produced this rule: a screener that ran flawlessly for weeks and
+    produced zero applications (2026-07-31 — screening was never the constraint),
+    and the first real brief, which was unreadable because it displayed a PASSING
+    check as the reason a role needed attention (2026-08-01).
 - **Memory is the source of truth**: docs/ADR changes → `pnpm brain:sync`;
   significant decisions → episodic memory.
 - **Zero paid calls in the dev loop**: unit tests use scripted models;

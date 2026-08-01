@@ -9,7 +9,7 @@ import { isEarlyCareerTitle } from "../src/tools/jobhunt/seniority.js";
 
 for (const track of TRACK_PRIORITY) {
   const r = await fetchAtsPostings({
-    ...POOL_QUERIES["nl-onsite"], titles: TRACK_TITLES[track], timeRange: "7d", limit: 10,
+    ...POOL_QUERIES["netherlands"], titles: TRACK_TITLES[track], timeRange: "7d", limit: 10,
   });
   if (!r.ok) { console.log(`${track.toUpperCase()}: FETCH FAILED — ${r.error}`); continue; }
   const kept = r.postings.filter((p) => !isEarlyCareerTitle(p.title));

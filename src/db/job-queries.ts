@@ -93,6 +93,13 @@ export async function recordScreenedApplication(
         sponsor_verdict: row.sponsor_verdict,
         salary_status: row.salary_status,
         salary_evidence: row.salary_evidence ?? null,
+        // Must be in the UPDATE set, not only in the INSERT. Every posting the
+        // sweep sees twice takes the conflict branch, and on 2026-08-01 a
+        // backfill re-screened all 53 stored rows, reported the new verdicts
+        // correctly, and left `gate_json` NULL on every one of them — the column
+        // was only ever written on a first insert. A field that silently stops
+        // being written on the second sighting is the worst kind of half-working.
+        gate_json: row.gate_json ?? null,
         fit_score: row.fit_score ?? null,
         fit_evidence: row.fit_evidence ?? null,
         notes: row.notes ?? null,
@@ -292,6 +299,35 @@ export async function recordBriefRanks(
       .update(jobApplications)
       .set({ brief_section: entry.section, brief_rank: entry.rank })
       .where(and(eq(jobApplications.tenant_id, tenantId), eq(jobApplications.id, entry.id)));
+  }
+}
+
+/**
+ * Persist the CV-to-posting fit the brief just computed.
+ *
+ * The `fit_score` / `fit_evidence` columns were declared when the table was
+ * created and never once written to — every row in production carried NULL while
+ * the number was recomputed from scratch on every render and thrown away. That
+ * makes "did the market's demands drift away from my CV?" unanswerable, because
+ * nothing anywhere holds yesterday's score.
+ *
+ * Written here rather than at screening time on purpose: the score needs the
+ * TRACK's CV, which the brief already loads once per run. Computing it inside
+ * `screenPosting` would re-read a CV file per posting to store the same number.
+ */
+export async function recordFitScores(
+  entries: ReadonlyArray<{ id: string; score: number; evidence: string }>,
+): Promise<void> {
+  const db = getDb();
+  for (const entry of entries) {
+    await db
+      .update(jobApplications)
+      .set({
+        fit_score: entry.score.toFixed(4),
+        fit_evidence: entry.evidence.slice(0, 1000),
+        updated_at: new Date(),
+      })
+      .where(eq(jobApplications.id, entry.id));
   }
 }
 

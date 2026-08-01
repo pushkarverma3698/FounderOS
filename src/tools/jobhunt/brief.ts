@@ -8,53 +8,69 @@
  * founder ignored it entirely, nothing noticed. Weeks of flawless screening had
  * produced zero applications, because screening was never the binding constraint.
  *
- * Three properties make this an outcome rather than a report:
+ * Four properties make this an outcome rather than a report:
  *
- *   1. RANKED, and capped at what a person can act on before work. An
- *      undifferentiated queue of 13 is a list; three roles in order is a decision.
- *   2. ONE COMMAND PER ROW. `/draft 1` produces the application. Still
+ *   1. RANKED, best first. An undifferentiated queue is a list; an ordered one
+ *      is a decision.
+ *   2. COMPLETE. Every row shows every check with its own result (brief-row.ts).
+ *      The first production brief showed ONE line per row, picked by position
+ *      rather than by status, and the founder could not tell why any company was
+ *      on the list. Telegram's 4,096-character limit is handled by SPLITTING the
+ *      message, never by hiding a row — `splitForTelegram` exists for that.
+ *   3. ONE COMMAND PER ROW. `/draft 1` produces the application. Still
  *      HITL-gated, never auto-sent (ADR-009).
- *   3. IT REMEMBERS. "absent from your CV for 14 days", "6 roles undrafted for 5
- *      days". Ignoring the brief is currently silent; making it loud is the whole
- *      point, and it is the same failure-direction argument that turned rejects
- *      into flags in PR #393.
+ *   4. IT REMEMBERS, and it prices itself. "absent from your CV for 14 days",
+ *      "6 roles undrafted for 5 days", "$0.24 spent today". Ignoring the brief
+ *      was silent; making it loud is the whole point.
  *
  * Pure formatting. Every input is passed in, so the entire brief is unit-testable
  * with no DB, no network and no model.
  */
 
-import { formatOverlap, type OverlapResult } from "./overlap.js";
-import { cmd, esc, link } from "./telegram-format.js";
-import type { Liveness } from "./liveness.js";
+import { cmd, esc } from "./telegram-format.js";
+import { renderLegend, renderRow, trimToSentence, type BriefRow } from "./brief-row.js";
 
 // Re-exported so the transport keeps one import site for the escape helper.
 export { toTelegramSafe, splitForTelegram, TELEGRAM_MAX_CHARS } from "./telegram-format.js";
+export { renderRow, renderLegend } from "./brief-row.js";
+export type { BriefRow } from "./brief-row.js";
 
 /** A horizontal rule. Telegram has no <hr>, and a run of box characters reads as one. */
 const RULE = "━━━━━━━━━━━━━━━━━━━━━";
 
-/** More than this in front of a person before work is a list again, not a decision. */
-export const DO_TODAY_CAP = 3;
-export const ASK_CAP = 3;
+/**
+ * How many rows each actionable section prints IN FULL.
+ *
+ * Raised from 3 on 2026-08-01 (founder direction: "even if telegram message
+ * doesn't give all the result in one message give in 2 or 3 messages so that we
+ * can read everything and decide").
+ *
+ * Ten full rows across the two sections lands at roughly four Telegram messages.
+ * The first attempt at this used ten PER section and produced nine messages
+ * against the real table — which satisfies the letter of "show me everything"
+ * and defeats the point of it: a wall of text nobody reads is the same outcome
+ * as a brief that hid the row. The complaint that started this was never about
+ * the cap; it was that the reasons were unreadable.
+ *
+ * When the cap bites the brief SAYS SO with the count. A silent truncation is
+ * the failure this pipeline keeps being wrong about.
+ */
+export const DO_TODAY_CAP = 6;
+export const ASK_CAP = 4;
+
+/**
+ * How many rejected rows are NAMED. The rest are counted.
+ *
+ * Every reject is stored in `job_applications` regardless — that is the founder's
+ * instruction and it is a property of the database, not of this message. What the
+ * brief owes him is enough of the list to audit the filter ("is it throwing away
+ * things it shouldn't?") without the audit trail outweighing the ten roles he can
+ * actually act on.
+ */
+export const REJECT_CAP = 10;
 
 /** Below this many days undrafted, the nag would be noise rather than a signal. */
 export const STALE_UNDRAFTED_DAYS = 3;
-
-export interface BriefRow {
-  readonly id: string;
-  readonly company: string;
-  readonly title: string;
-  readonly track: string;
-  readonly verdict: string;
-  readonly route: string;
-  readonly url: string | null;
-  readonly overlap: OverlapResult;
-  readonly liveness: Liveness;
-  /** The single most decision-relevant gate line. */
-  readonly headline: string;
-  /** Days since it was screened and left untouched. */
-  readonly ageDays: number;
-}
 
 export interface TrendRow {
   readonly track: string;
@@ -65,6 +81,14 @@ export interface TrendRow {
   readonly absentDays: number | null;
 }
 
+/** What the day's feed calls cost and what they bought. Printed, never buried. */
+export interface SpendLine {
+  readonly runs: number;
+  readonly returned: number;
+  readonly costUsd: number;
+  readonly failed: number;
+}
+
 export interface BriefInput {
   readonly date: Date;
   readonly screened: number;
@@ -73,6 +97,8 @@ export interface BriefInput {
   readonly trends: readonly TrendRow[];
   /** Pools that failed this run — an outage must read as an outage, never as an empty market. */
   readonly failures: readonly string[];
+  /** Today's feed spend. Omitted when the ledger is unavailable, never faked. */
+  readonly spend?: SpendLine;
 }
 
 function pluralDays(n: number): string {
@@ -93,67 +119,61 @@ function plural(n: number, one: string, many: string): string {
  * pipeline exists to avoid.
  */
 export function selectDoToday(rows: readonly BriefRow[]): BriefRow[] {
-  return rows
-    .filter((r) => r.verdict === "pass" && r.liveness === "live")
-    .slice(0, DO_TODAY_CAP);
+  return rows.filter((r) => r.verdict === "pass" && r.liveness === "live").slice(0, DO_TODAY_CAP);
 }
 
 /**
  * ONE QUESTION AWAY: a single unresolved gate stands between this and an
  * application, and the founder can settle it by asking the employer.
+ *
+ * A PASS whose liveness could not be confirmed belongs here too: it is one
+ * check away from actionable, and that check is "is this still open?".
  */
 export function selectAskable(rows: readonly BriefRow[]): BriefRow[] {
   return rows
-    .filter((r) => r.verdict === "flag" && r.liveness !== "expired")
+    .filter(
+      (r) =>
+        r.liveness !== "expired" &&
+        (r.verdict === "flag" || (r.verdict === "pass" && r.liveness !== "live")),
+    )
     .slice(0, ASK_CAP);
 }
 
+/** True when the row was rejected on the level bar rather than on a legal one. */
+export function isTooSenior(row: BriefRow): boolean {
+  return row.gates.some((g) => g.gate === "Experience" && g.status === "reject");
+}
+
 /**
- * One row, laid out so the decision is readable in about three seconds.
+ * A rejected row, in one line.
  *
- * The order is deliberate and it is the order a person actually decides in:
- * WHO the role is with, HOW WELL it fits, WHETHER it is still open, WHAT the one
- * open question is, WHAT is missing from the CV, and finally the command that
- * acts on it. The command is last because it is what the eye should stop on.
- *
- * The title carries the link, so opening the posting is one tap and does not
- * need a separate URL line competing for attention.
+ * Deliberately terser than an actionable row. These are AUDIT material — the
+ * founder asked for them so nothing is thrown away behind his back, not so he
+ * could weigh them. The full evidence is on the record in `job_applications`;
+ * what belongs on screen is which company, which role, and the bar that stopped
+ * it. Printing the whole sentence for eighteen of them pushed the brief past ten
+ * Telegram messages and buried the ten roles he can actually act on.
  */
-function renderRow(row: BriefRow, index: number, command: string): string {
-  const heading = `<b>${index}. ${esc(row.company)}</b> — ${link(row.title, row.url)}`;
+const REJECT_REASON_MAX = 90;
 
-  // Exhaustive on purpose. An `else` here once turned every UNCHECKED row into
-  // "✕ closed" — a confident claim that a job had shut, made about a posting
-  // nobody had looked at. Prod carried `liveness = "unknown"` on all eight rows
-  // (a value outside the Liveness union, smuggled in by an unchecked cast), so
-  // the very first real brief told the founder three live roles were dead.
-  // Anything not positively verified says so as an absence of knowledge.
-  const liveness =
-    row.liveness === "live"
-      ? "✓ still open"
-      : row.liveness === "expired"
-        ? "✕ closed"
-        : "⚠ not checked — confirm before applying";
+function renderRejectLine(row: BriefRow): string {
+  const blocking = row.gates.find((g) => g.status === "reject") ?? row.gates[0];
+  const reason = blocking
+    ? `${blocking.gate}: ${trimToSentence(blocking.evidence, REJECT_REASON_MAX)}`
+    : "no reason recorded";
+  return `• <b>${esc(row.company)}</b> — ${esc(row.title)}\n    <i>${esc(reason)}</i>`;
+}
 
-  const facts = `<i>${esc(formatOverlap(row.overlap))} skills · ${liveness} · ${esc(row.route)}</i>`;
-
-  const gap =
-    row.overlap.missing.length > 0
-      ? `\n    <i>Not on your CV:</i> ${esc(row.overlap.missing.slice(0, 3).join(", "))}`
-      : "";
-
-  return (
-    `${heading}\n` +
-    `    ${facts}\n` +
-    `    ${esc(row.headline)}${gap}\n` +
-    `    ▸ ${cmd(`${command} ${index}`)}`
-  );
+/** "…and 7 more" — stated with the number, never a silent cut. */
+function overflowNote(total: number, shown: number, what: string): string {
+  if (total <= shown) return "";
+  return `\n\n<i>+ ${total - shown} more ${what} not shown here. Ask for the job brief again after clearing these.</i>`;
 }
 
 /**
  * The closing block: every command the founder can run right now, spelled out.
  *
- * The brief's whole purpose is to end in an action, and "→ /draft 1" buried
+ * The brief's whole purpose is to end in an action, and "▸ /draft 1" buried
  * beside row one is easy to scroll past. Collecting the commands at the bottom —
  * where reading stops — with the company each one targets means the last thing
  * on screen is a list of things to do, not a summary of things that happened.
@@ -168,7 +188,6 @@ function renderNextActions(doToday: readonly BriefRow[], askable: readonly Brief
   // the bot (gateway/telegram.ts); nothing else is. Printing a plausible-looking
   // `/jobs` would hand the founder something that silently does nothing, which is
   // a worse failure than a plain sentence — it looks like the pipeline is broken.
-  // Everything else is phrased as the plain English the planner already routes.
   if (lines.length === 0) {
     return (
       `<b>▶️ DO THIS NEXT</b>\n` +
@@ -194,6 +213,7 @@ function renderNextActions(doToday: readonly BriefRow[], askable: readonly Brief
 export function formatDailyBrief(input: BriefInput): string {
   const doToday = selectDoToday(input.rows);
   const askable = selectAskable(input.rows);
+  const allPassLive = input.rows.filter((r) => r.verdict === "pass" && r.liveness === "live").length;
 
   const sections: string[] = [renderHeader(input, doToday.length, askable.length)];
 
@@ -210,28 +230,45 @@ export function formatDailyBrief(input: BriefInput): string {
 
   sections.push(
     doToday.length === 0
-      ? `<b>✅ APPLY TODAY (0)</b>\nNothing cleared every gate <i>and</i> verified still open.`
-      : `<b>✅ APPLY TODAY (${doToday.length})</b>\n\n` +
-          doToday.map((r, i) => renderRow(r, i + 1, "/draft")).join("\n\n"),
+      ? `<b>✅ APPLY TODAY (0)</b>\nNothing cleared every check <i>and</i> verified still open.`
+      : `<b>✅ APPLY TODAY (${doToday.length})</b>\n` +
+          `<i>Every check below cleared. The only thing left is writing it.</i>\n\n` +
+          doToday.map((r, i) => renderRow(r, i + 1, "/draft")).join("\n\n") +
+          overflowNote(allPassLive, doToday.length, "ready to apply to"),
   );
 
   if (askable.length > 0) {
     sections.push(
       `<b>❓ ONE QUESTION AWAY (${askable.length})</b>\n` +
-        `<i>One unresolved gate each — you can settle it by asking the employer.</i>\n\n` +
+        `<i>Each has exactly one check we could not settle from the ad. ` +
+        `Asking the employer settles it.</i>\n\n` +
         askable.map((r, i) => renderRow(r, i + 1, "/ask")).join("\n\n"),
     );
   }
 
   const rejected = input.rows.filter((r) => r.verdict === "reject");
-  if (rejected.length > 0) {
-    const byReason = new Map<string, number>();
-    for (const r of rejected) byReason.set(r.headline, (byReason.get(r.headline) ?? 0) + 1);
+  const tooSenior = rejected.filter(isTooSenior);
+  const unlawful = rejected.filter((r) => !isTooSenior(r));
+
+  // Split, because they are different findings and the founder acts on them
+  // differently. "Not lawful" is a fact about the permit system; "too senior" is
+  // a fact about this posting, and a run full of them means the search terms are
+  // aimed above his level.
+  if (tooSenior.length > 0) {
     sections.push(
-      `<b>⛔ NOT LAWFUL (${rejected.length})</b>\n` +
-        [...byReason.entries()]
-          .map(([reason, n]) => `• ${esc(reason)}${n > 1 ? ` <b>×${n}</b>` : ""}`)
-          .join("\n"),
+      `<b>🚫 TOO SENIOR / TOO JUNIOR (${tooSenior.length})</b>\n` +
+        `<i>Kept on record, not applied to. Every one names the years it asked for.</i>\n` +
+        tooSenior.slice(0, REJECT_CAP).map(renderRejectLine).join("\n") +
+        overflowNote(tooSenior.length, Math.min(tooSenior.length, REJECT_CAP), "level-barred roles"),
+    );
+  }
+
+  if (unlawful.length > 0) {
+    sections.push(
+      `<b>⛔ NOT LAWFUL (${unlawful.length})</b>\n` +
+        `<i>A legal bar, not a preference. Nothing you write changes these.</i>\n` +
+        unlawful.slice(0, REJECT_CAP).map(renderRejectLine).join("\n") +
+        overflowNote(unlawful.length, Math.min(unlawful.length, REJECT_CAP), "barred roles"),
     );
   }
 
@@ -245,33 +282,9 @@ export function formatDailyBrief(input: BriefInput): string {
     );
   }
 
-  if (input.trends.length > 0) {
-    sections.push(
-      `<b>📈 WHAT THE MARKET ASKED</b>\n` +
-        input.trends
-          .map((t) => {
-            const absence =
-              t.absentDays !== null
-                ? ` — missing from your ${esc(t.track)} CV for ${pluralDays(t.absentDays)}`
-                : "";
-            // Deliberately a COUNT, not a percentage. `seenCount` is an all-time
-            // tally incremented on every passing screen; `sampleSize` counts the
-            // distinct rows standing today. Dividing them printed "150%" live on
-            // 2026-07-31 — a figure the stored data cannot support. The raw
-            // number is the one we actually measured.
-            const times = t.seenCount === 1 ? "once" : `${t.seenCount}×`;
-            return (
-              `• <b>${esc(t.term)}</b> <i>(${esc(t.track)})</i> — asked ${times} ` +
-              `across ${plural(t.sampleSize, "role", "roles")} that cleared the gates${absence}`
-            );
-          })
-          .join("\n"),
-    );
-  }
+  if (input.trends.length > 0) sections.push(renderTrends(input.trends));
 
-  const stale = input.rows.filter(
-    (r) => r.verdict === "pass" && r.ageDays >= STALE_UNDRAFTED_DAYS,
-  );
+  const stale = input.rows.filter((r) => r.verdict === "pass" && r.ageDays >= STALE_UNDRAFTED_DAYS);
   if (stale.length > 0) {
     const oldest = Math.max(...stale.map((r) => r.ageDays));
     // The line that makes ignoring the brief cost something. Without it, a
@@ -283,9 +296,58 @@ export function formatDailyBrief(input: BriefInput): string {
     );
   }
 
+  if (input.spend) sections.push(renderSpend(input.spend));
+
+  const legend = renderLegend(input.rows);
+  if (legend.length > 0) sections.push(legend);
+
   sections.push(renderNextActions(doToday, askable));
 
   return sections.join(`\n\n${RULE}\n\n`);
+}
+
+/** What the market asked for, as a count rather than a ratio the data can't support. */
+function renderTrends(trends: readonly TrendRow[]): string {
+  return (
+    `<b>📈 WHAT THE MARKET ASKED</b>\n` +
+    trends
+      .map((t) => {
+        const absence =
+          t.absentDays !== null
+            ? ` — missing from your ${esc(t.track)} CV for ${pluralDays(t.absentDays)}`
+            : "";
+        // Deliberately a COUNT, not a percentage. `seenCount` is an all-time
+        // tally incremented on every passing screen; `sampleSize` counts the
+        // distinct rows standing today. Dividing them printed "150%" live on
+        // 2026-07-31 — a figure the stored data cannot support.
+        const times = t.seenCount === 1 ? "once" : `${t.seenCount}×`;
+        return (
+          `• <b>${esc(t.term)}</b> <i>(${esc(t.track)})</i> — asked ${times} ` +
+          `across ${plural(t.sampleSize, "role", "roles")} that cleared the gates${absence}`
+        );
+      })
+      .join("\n")
+  );
+}
+
+/**
+ * What today cost.
+ *
+ * Printed in the brief rather than left in a table, because a cost nobody sees
+ * is a cost nobody governs — and until 2026-08-01 the only way to answer "what
+ * does this cost" was arithmetic by hand over the actor pricing pages.
+ */
+function renderSpend(spend: SpendLine): string {
+  const failed =
+    spend.failed > 0
+      ? ` <b>${spend.failed} of them failed</b> and were still billed for starting.`
+      : "";
+  return (
+    `<b>💰 WHAT TODAY COST</b>\n` +
+    `$${spend.costUsd.toFixed(2)} across ${plural(spend.runs, "feed call", "feed calls")}, ` +
+    `for ${plural(spend.returned, "posting", "postings")}.${failed}\n` +
+    `<i>Estimated from the actors' posted per-job prices, not from an invoice.</i>`
+  );
 }
 
 /**
@@ -294,9 +356,7 @@ export function formatDailyBrief(input: BriefInput): string {
  * They lead with the DECISION COUNT rather than the screening count. "47
  * screened" is a statement about the machine; "3 to apply to today" is a
  * statement about the founder's next hour, and it is the number that determines
- * whether the rest of the message gets opened at all. The screening totals stay,
- * one line down, because a day where 47 were screened and 0 passed is a very
- * different finding from a day where 2 were screened.
+ * whether the rest of the message gets opened at all.
  */
 function renderHeader(input: BriefInput, doToday: number, askable: number): string {
   const date = input.date.toISOString().slice(0, 10);
@@ -312,13 +372,16 @@ function renderHeader(input: BriefInput, doToday: number, askable: number): stri
         ? `<b>0 ready to send</b> · ${askable} one question away`
         : `<b>Nothing actionable today</b>`;
 
-  const counts =
-    doToday > 0 && askable > 0 ? `${verdict} · ${askable} one question away` : verdict;
+  const counts = doToday > 0 && askable > 0 ? `${verdict} · ${askable} one question away` : verdict;
 
   return (
     `<b>🎯 JOB BRIEF</b> · ${date}\n` +
     `${counts}\n` +
-    `<i>${input.screened} screened${trackSummary.length > 0 ? ` · ${trackSummary}` : ""}</i>`
+    `<i>${input.screened} screened${trackSummary.length > 0 ? ` · ${trackSummary}` : ""}</i>\n` +
+    // No number promised. The part count depends on how many roles are standing,
+    // and the header is rendered before the split knows — a stated "2–3" was
+    // wrong the first time it met the real table (6 parts, 53 rows).
+    `<i>This brief spans several messages. Nothing is cut — read to the end.</i>`
   );
 }
 
