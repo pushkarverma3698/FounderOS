@@ -5,14 +5,14 @@
  * of experience while applying for platform engineer" — reject postings that
  * demand more than four years.
  *
- * WHAT THIS DELIBERATELY DOES NOT DO. It does not reject on the word "Senior",
- * "Staff", "Lead" or "Principal" in a title. Those words mean four different
- * things in four different companies: a Dutch scale-up's "Senior Engineer" is
- * routinely a four-year role, and a founding team's "Staff" title is a scope
- * label with no year attached. Rejecting on a title would discard reachable
- * roles by the dozen and emit no signal that it had — the exact silent-failure
- * direction this pipeline keeps being wrong in. The gate rejects on a NUMBER the
- * employer wrote down, and on nothing else (founder decision, 2026-08-01).
+ * WHAT THIS DELIBERATELY DOES NOT DO. It does not reject, flag, or otherwise act
+ * on a title — not "Senior", "Staff", "Lead", "Principal", "Director", or "VP".
+ * Those words mean different things at different companies, and a title is not a
+ * year count: it is a guess about one, and the founder's instruction was to
+ * screen on stated years, not on guesses (founder correction, 2026-08-02: an
+ * earlier version of this gate flagged Director/VP titles with no stated years —
+ * that was scope the founder never asked for, added unilaterally, and reverted).
+ * The gate rejects on a NUMBER the employer wrote down, and on nothing else.
  *
  * THE CONSERVATIVE DIRECTION. A posting states several year figures — "3-5 years
  * backend", "5+ years with Kubernetes is a plus", "10 years serving the Dutch
@@ -147,18 +147,6 @@ export function experienceGate(description: string, title: string): Gate {
   const demand = extractExperienceDemand(description);
 
   if (demand.minYears === null) {
-    // A DEPARTMENT-LEAD title with no stated years is the one case where silence
-    // is itself informative. "Director of AI Engineering" appeared at position 1
-    // of APPLY TODAY on 2026-08-01 precisely because it named no year count, and
-    // putting it first is the failure the founder described: "no one will give a
-    // job to a 3 year or 4 year of experience" at that level.
-    //
-    // It FLAGS rather than rejects. Rejecting on a title alone is the thing he
-    // ruled out, and rightly — but a flag is the loud, reversible direction: the
-    // role still appears, one question away, instead of leading a list of things
-    // to apply to before work.
-    if (isLeadershipTitle(title)) return leadershipFlag(title, "It states no year count at all.");
-
     return {
       gate: "Experience",
       status: "pass",
@@ -169,10 +157,6 @@ export function experienceGate(description: string, title: string): Gate {
   }
 
   const status: ScreenStatus = demand.minYears > MAX_YEARS_DEMANDED ? "reject" : "pass";
-
-  if (status === "pass" && isLeadershipTitle(title)) {
-    return leadershipFlag(title, `It also asks for ${demand.minYears} year(s) of experience.`);
-  }
 
   if (status === "reject") {
     return {
@@ -199,33 +183,9 @@ export function experienceGate(description: string, title: string): Gate {
 
 /**
  * Titles that LOOK senior. Used only to add a sentence to a passing gate, never
- * to reject — see the module note on why a title is not evidence of a year count.
+ * to reject or flag — see the module note on why a title is not evidence of a
+ * year count.
  */
 export function isSeniorTitle(title: string): boolean {
   return /\b(?:senior|sr\.?|staff|principal|lead|head of|director)\b/i.test(title);
-}
-
-/**
- * Titles that run a DEPARTMENT rather than sit inside one.
- *
- * Deliberately narrower than `isSeniorTitle`. A Dutch scale-up's "Senior
- * Engineer" is routinely a four-year role and belongs in the pool; "Director of
- * AI Engineering" and "VP of Engineering" are not roles a 3.5-year candidate is
- * shortlisted for, whatever the ad omits. "Lead" is excluded on purpose — "Tech
- * Lead" is an ordinary senior-engineer title in half the market.
- */
-export function isLeadershipTitle(title: string): boolean {
-  return /\b(?:director|head\s+of|vp|vice\s+president|chief|cto|principal)\b/i.test(title);
-}
-
-/** The flag a department-lead title earns. Never a reject — that is a title, not evidence. */
-function leadershipFlag(title: string, detail: string): Gate {
-  return {
-    gate: "Experience",
-    status: "flag",
-    evidence:
-      `"${title}" runs a department rather than sitting in one, and you have ~3.5 years ` +
-      `shipped. ${detail} Not ruled out — ask what level they are actually hiring at ` +
-      `before spending an application on it.`,
-  };
 }

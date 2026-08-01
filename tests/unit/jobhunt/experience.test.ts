@@ -17,7 +17,6 @@ import {
   MAX_YEARS_DEMANDED,
   experienceGate,
   extractExperienceDemand,
-  isLeadershipTitle,
   isSeniorTitle,
 } from "../../../src/tools/jobhunt/experience.js";
 
@@ -129,44 +128,34 @@ describe("experienceGate", () => {
   });
 });
 
-describe("department-lead titles", () => {
+describe("titles never gate the decision on their own", () => {
   const BODY = "You will own services end to end and work in English. ";
 
-  it("FLAGS a Director role rather than leading APPLY TODAY with it", () => {
-    // "Director of AI Engineering" sat at position 1 of APPLY TODAY on
-    // 2026-08-01 precisely because it named no year count. It flags, not
-    // rejects: rejecting on a title alone is what the founder ruled out, and a
-    // flag is the loud, reversible direction — the role still appears, one
-    // question away, instead of leading the list of things to do before work.
-    const gate = experienceGate(BODY, "Director of AI Engineering");
-    expect(gate.status).toBe("flag");
-    expect(gate.evidence).toContain("runs a department");
+  it("does not flag or reject a Director/VP/Chief title with no stated years", () => {
+    // Reverted 2026-08-02 (founder correction): an earlier version of this gate
+    // flagged department-lead titles with no stated years. The founder's rule is
+    // stated years only — a title is a guess, not evidence, and the pipeline
+    // should screen on what the market actually asks, not on an inferred label.
+    expect(experienceGate(BODY, "Director of AI Engineering").status).toBe("pass");
+    expect(experienceGate(BODY, "VP of Engineering").status).toBe("pass");
+    expect(experienceGate(BODY, "Chief Technology Officer").status).toBe("pass");
   });
 
-  it("flags a leadership title even when the stated years are reachable", () => {
+  it("passes a leadership title when the stated years are reachable", () => {
     const gate = experienceGate(`${BODY}3 years of experience needed.`, "Head of Engineering");
-    expect(gate.status).toBe("flag");
+    expect(gate.status).toBe("pass");
   });
 
-  it("still REJECTS a leadership title that states too many years", () => {
-    // The hard bar wins over the softer one.
+  it("still rejects a leadership title that states too many years", () => {
+    // The hard bar — a real number — is the only thing that ever rejects.
     const gate = experienceGate(`${BODY}10 years of experience required.`, "VP of Engineering");
     expect(gate.status).toBe("reject");
   });
 
   it("leaves ordinary senior and lead titles in the pool", () => {
-    // A Dutch scale-up's "Senior Engineer" is routinely a four-year role, and
-    // "Tech Lead" is an ordinary senior-engineer title in half the market.
     expect(experienceGate(BODY, "Senior Backend Engineer").status).toBe("pass");
     expect(experienceGate(BODY, "Tech Lead, Payments").status).toBe("pass");
     expect(experienceGate(BODY, "Staff Software Engineer").status).toBe("pass");
-  });
-
-  it("recognises the department-lead vocabulary", () => {
-    expect(isLeadershipTitle("VP of Engineering")).toBe(true);
-    expect(isLeadershipTitle("Chief Technology Officer")).toBe(true);
-    expect(isLeadershipTitle("Backend Engineer")).toBe(false);
-    expect(isLeadershipTitle("Team Lead, Software Engineering")).toBe(false);
   });
 });
 
