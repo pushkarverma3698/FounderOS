@@ -1006,6 +1006,22 @@ export const jobApplications = agentsSchema.table(
     /** ai | backend | frontend | unclassified — from the title, deterministically. */
     track: text("track").notNull().default("unclassified"),
 
+    /**
+     * NL | IN | other | unknown — where the FETCHER said the job is.
+     *
+     * Never re-derived from the ad's wording. Route classification used to read
+     * the prose, so "hybrid" in an Indian posting was taken as proof of a Dutch
+     * office and nine Indeed-IN rows were stored under a Dutch permit basis. The
+     * feed always knew; the value was being thrown away before the screener ran.
+     *
+     * `other` and `unknown` are distinct. "This is in Colombia" narrows the
+     * lawful bases to one; "we could not tell" is a question that must be asked.
+     */
+    country: text("country"),
+
+    /** The feed's location string, verbatim — the evidence behind `country`. */
+    location: text("location"),
+
     /** The source's own id — Indeed's job key is what its liveness lookup takes. */
     external_id: text("external_id"),
 

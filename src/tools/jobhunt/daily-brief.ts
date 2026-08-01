@@ -22,6 +22,7 @@ import { summariseSpend } from "../../db/job-run-queries.js";
 import { compareOverlap, overlapScore, formatOverlap, type OverlapResult } from "./overlap.js";
 import { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
 import { parseGates } from "./gates.js";
+import { toPostingCountry } from "./country.js";
 import { buildTrends } from "./brief-trends.js";
 import { verifyLiveness, type Liveness } from "./liveness.js";
 import {
@@ -130,6 +131,8 @@ export function verificationTargets<T extends { row: { salary_status: string }; 
 export interface BriefOptions {
   readonly screened?: number;
   readonly failures?: readonly string[];
+  /** Rows the feeds filtered on purpose. Reported separately from failures. */
+  readonly notes?: readonly string[];
   readonly now?: Date;
   /** Skip network liveness checks — used by tests and by a $0 dry run. */
   readonly skipLiveness?: boolean;
@@ -197,6 +200,11 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
       track: row.track,
       verdict: row.salary_status,
       route: row.route,
+      // Read off the stored column, never re-derived. Rows screened before the
+      // column existed carry NULL and come back `unknown`, which is the truth
+      // about them — they were filed by a pipeline that recorded no country.
+      country: toPostingCountry(row.country),
+      location: row.location,
       url: row.url,
       overlap,
       liveness: liveness.get(row.id) ?? toLiveness(row.liveness),
@@ -242,6 +250,7 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     rows,
     trends: await buildTrends(cvs, now),
     failures: [...(opts.failures ?? []), ...cvFailure, ...untrackedNote],
+    notes: opts.notes ?? [],
     ...(spend ? { spend } : {}),
   };
 

@@ -302,6 +302,10 @@ export async function runJobIngestSweep(): Promise<void> {
     const brief = await buildDailyBrief({
       screened: result.fetched,
       failures: result.failures,
+      // Kept apart from `failures` all the way through. A day that correctly
+      // skipped eight expired listings is a working day, and printing that under
+      // "incomplete run" would teach the founder to distrust a healthy sweep.
+      notes: result.notes,
     });
     for (const part of splitForTelegram(brief)) {
       await sendToChat(part);

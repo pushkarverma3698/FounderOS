@@ -28,6 +28,7 @@
  */
 
 import { formatOverlap, type OverlapResult } from "./overlap.js";
+import { countryName, type PostingCountry } from "./country.js";
 import { cmd, esc, link } from "./telegram-format.js";
 import { GATE_GLOSSARY, gateMark, type Gate } from "./gates.js";
 import type { Liveness } from "./liveness.js";
@@ -39,6 +40,10 @@ export interface BriefRow {
   readonly track: string;
   readonly verdict: string;
   readonly route: string;
+  /** NL | IN | other | unknown — which market block this row belongs in. */
+  readonly country: PostingCountry;
+  /** The feed's location string, when it gave one. Printed so the market is checkable. */
+  readonly location?: string | null;
   readonly url: string | null;
   readonly overlap: OverlapResult;
   readonly liveness: Liveness;
@@ -179,7 +184,13 @@ export function skillsLine(overlap: OverlapResult): string {
  */
 export function renderRow(row: BriefRow, index: number, command: string | null): string {
   const heading = `<b>${index}. ${esc(row.company)}</b> — ${link(row.title, row.url)}`;
-  const meta = `    <i>${esc(row.track)} track · permit basis: ${esc(row.route)} · seen ${row.ageDays === 0 ? "today" : `${row.ageDays}d ago`}</i>`;
+  // The place comes first because it is what decides whether any of the rest
+  // applies. The feed's own string is quoted where there is one, so the market
+  // this row was filed under is checkable rather than asserted.
+  const where = row.location?.trim() ? row.location.trim() : countryName(row.country);
+  const meta =
+    `    <i>${esc(where)} · ${esc(row.track)} track · basis: ${esc(row.route)} · ` +
+    `seen ${row.ageDays === 0 ? "today" : `${row.ageDays}d ago`}</i>`;
   const action = command
     ? `\n    ▸ ${cmd(`${command} ${index}`)}`
     : "";

@@ -72,11 +72,21 @@ describe("toLedgerAmount", () => {
 });
 
 describe("the sweep's shape", () => {
-  it("runs 8 ATS queries, not 12", () => {
-    // The two Netherlands pools differed in exactly one field and were billed a
-    // separate actor start every day for it. Merging them is worth four starts a
-    // day at identical coverage.
-    expect(POOL_ORDER.length * TRACK_PRIORITY.length).toBe(8);
+  it("runs 12 ATS queries — three pools, four tracks", () => {
+    // Was 8. The two Netherlands pools differed in exactly one field and were
+    // billed a separate actor start every day for it; merging them saved four
+    // starts a day at identical coverage, and that saving is what pays for the
+    // `india` pool added on 2026-08-01. The founder chose that trade knowing the
+    // price (~+$0.45/sweep): the alternative was a second market whose entire
+    // on-site supply — most of Indian hiring — stayed unreachable.
+    expect(POOL_ORDER.length * TRACK_PRIORITY.length).toBe(12);
+  });
+
+  it("bills one actor start per market, not one per city", () => {
+    // The India pool asks for the bare country rather than six hub cities. Same
+    // coverage, one start instead of six per track.
+    expect(POOL_ORDER).toContain("india");
+    expect(POOL_ORDER).toHaveLength(3);
   });
 
   it("keeps the office-less remote pool separate", () => {

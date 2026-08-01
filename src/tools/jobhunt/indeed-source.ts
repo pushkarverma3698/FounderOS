@@ -25,8 +25,24 @@
 
 import { childLogger } from "../../infra/logger.js";
 import { runActorSync } from "../apify.js";
-import type { RawPosting } from "./ats-source.js";
+import {
+  mapIndeedItems,
+  readJobKeyStatuses,
+  type IndeedPosting,
+  type JobKeyStatus,
+} from "./indeed-mappers.js";
 import { TRACK_PRIORITY, TRACK_TITLES, type RoleTrack } from "./tracks.js";
+
+// Re-exported so every existing import site keeps resolving here. The pure
+// mappers moved to indeed-mappers.ts on 2026-08-01 when this file crossed its
+// size budget; nothing about their behaviour moved with them.
+export {
+  mapIndeedItems,
+  readJobKeyStatuses,
+  MIN_DESCRIPTION_CHARS,
+  INDEED_SOURCE,
+} from "./indeed-mappers.js";
+export type { IndeedPosting, JobKeyStatus, MappedIndeed } from "./indeed-mappers.js";
 
 const log = childLogger({ module: "jobhunt:indeed-source" });
 
@@ -35,19 +51,6 @@ export const INDEED_ACTOR = "kaix~indeed-scraper";
 
 /** Well under Apify's 300s sync ceiling, which returns HTTP 408 beyond it. */
 const INDEED_TIMEOUT_MS = 280_000;
-
-/** Bound a stored posting body, matching the ATS source. */
-const DESCRIPTION_MAX = 20_000;
-
-/**
- * A body shorter than this is a search snippet, not a posting.
- *
- * The gates read the body for salary figures and Dutch-language requirements.
- * Neither appears in a 200-character teaser, so screening one produces "no
- * salary stated" and "language unstated" — two flags derived from text that was
- * never retrieved. Dropping is the honest outcome; the count is reported.
- */
-export const MIN_DESCRIPTION_CHARS = 400;
 
 /** Indeed country codes the campaign uses. NL for pool B, IN for pool C. */
 export type IndeedCountry = "NL" | "IN";
@@ -63,11 +66,6 @@ export interface IndeedQuery {
   readonly location?: string;
 }
 
-export interface IndeedPosting extends RawPosting {
-  /** Indeed's own job key — the handle the liveness lookup needs. */
-  readonly jobKey: string;
-}
-
 export type IndeedFetch =
   | {
       readonly ok: true;
@@ -76,6 +74,10 @@ export type IndeedFetch =
       readonly droppedThin: number;
       /** Rows whose shape we could not read — the schema-drift alarm. */
       readonly droppedUnmappable: number;
+      /** Rows the actor flagged as closed. A legitimate filter, reported not hidden. */
+      readonly droppedExpired: number;
+      /** Rows older than `maxAgeDays`. Also legitimate, also reported. */
+      readonly droppedStale: number;
     }
   | { readonly ok: false; readonly error: string };
 
@@ -129,160 +131,6 @@ export function buildJobKeyInput(jobKeys: readonly string[]): Record<string, unk
   };
 }
 
-// ── Pure mappers ──────────────────────────────────────────────────────────────
-
-function asRecord(v: unknown): Record<string, unknown> {
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
-}
-
-function firstString(...candidates: unknown[]): string {
-  for (const c of candidates) {
-    if (typeof c === "string" && c.trim().length > 0) return c.trim();
-  }
-  return "";
-}
-
-function parseDate(value: unknown): Date | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    // Indeed emits epoch milliseconds on some fields and seconds on others.
-    const ms = value > 1e12 ? value : value * 1000;
-    const d = new Date(ms);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  if (typeof value !== "string" || value.trim().length === 0) return null;
-  const d = new Date(value.trim());
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-export interface MappedIndeed {
-  readonly postings: readonly IndeedPosting[];
-  readonly droppedThin: number;
-  /**
-   * Rows we could not read at all — no title, company or job key anywhere.
-   *
-   * Distinct from `droppedThin` on purpose. A thin row is a real posting we
-   * refuse to screen; an unmappable row means the actor's shape is not the shape
-   * we parse, and the correct response is to fix the mapper, not to conclude the
-   * market is empty. Keeping them in one counter hides a schema change behind a
-   * plausible-looking number.
-   */
-  readonly droppedUnmappable: number;
-}
-
-/**
- * Map dataset items → IndeedPosting[].
- *
- * The actor nests almost everything (`title.text`, `company.name`,
- * `description.text`, `urls.indeed`, `dates.posted`, `signals.isExpired`) and
- * publishes no output schema. The nested reads come FIRST and the flat names
- * remain as fallbacks: on 2026-07-31 this mapper was flat-only and returned 0
- * usable rows from 20 — silently, because an empty list is indistinguishable
- * from a quiet market.
- *
- * A malformed row is skipped, never thrown on. Every skip is counted.
- */
-export function mapIndeedItems(
-  items: readonly unknown[],
-  opts: { maxAgeDays?: number; now?: Date } = {},
-): MappedIndeed {
-  const postings: IndeedPosting[] = [];
-  const now = opts.now ?? new Date();
-  let droppedThin = 0;
-  let droppedUnmappable = 0;
-
-  for (const raw of items) {
-    const item = asRecord(raw);
-    const signals = asRecord(item["signals"]);
-
-    // An expired posting is not supply. Screening it spends the day's budget on
-    // a role nobody can apply to.
-    if (signals["isExpired"] === true || item["expired"] === true) continue;
-
-    const company = firstString(
-      asRecord(item["company"])["name"],
-      item["company"],
-      item["companyName"],
-      item["company_name"],
-      item["employer"],
-    );
-    const title = firstString(
-      asRecord(item["title"])["text"],
-      item["title"],
-      item["jobTitle"],
-      item["job_title"],
-      item["name"],
-    );
-    // `snippet` is a ~200-char teaser and sits LAST: preferring it would push
-    // every row under MIN_DESCRIPTION_CHARS and report the market as thin.
-    const description = firstString(
-      asRecord(item["description"])["text"],
-      item["description"],
-      item["descriptionText"],
-      item["description_text"],
-      item["jobDescription"],
-      item["snippet"],
-    ).slice(0, DESCRIPTION_MAX);
-    const jobKey = firstString(item["jobKey"], item["job_key"], item["id"], item["jobId"]);
-
-    if (company.length === 0 || title.length === 0 || jobKey.length === 0) {
-      droppedUnmappable += 1;
-      continue;
-    }
-
-    if (description.length < MIN_DESCRIPTION_CHARS) {
-      droppedThin += 1;
-      continue;
-    }
-
-    const postedAt = parseDate(
-      asRecord(item["dates"])["posted"] ??
-        item["datePublished"] ??
-        item["date"] ??
-        item["postedAt"] ??
-        item["pubDate"],
-    );
-
-    // The actor cannot apply `fromDays` alongside the remote filter, so the age
-    // cut lands here. A posting with no date survives: an unknown date is not
-    // evidence of an old one, and dropping it would be the silent direction.
-    if (opts.maxAgeDays !== undefined && postedAt) {
-      const ageDays = (now.getTime() - postedAt.getTime()) / 86_400_000;
-      if (ageDays > opts.maxAgeDays) continue;
-    }
-
-    postings.push({
-      company,
-      title,
-      url: firstString(
-        asRecord(item["urls"])["indeed"],
-        asRecord(item["urls"])["external"],
-        item["url"],
-        item["jobUrl"],
-        item["applyUrl"],
-        item["link"],
-      ),
-      description,
-      location: firstString(
-        asRecord(item["location"])["formatted"],
-        asRecord(item["location"])["formattedShort"],
-        item["location"],
-        item["formattedLocation"],
-        item["jobLocationCity"],
-        item["city"],
-      ),
-      postedAt,
-      source: INDEED_SOURCE,
-      externalId: jobKey,
-      jobKey,
-    });
-  }
-
-  return { postings, droppedThin, droppedUnmappable };
-}
-
-/** Provenance stamped on every row this source produces. */
-export const INDEED_SOURCE = "indeed-ingest";
-
 // ── Network ───────────────────────────────────────────────────────────────────
 
 /** Run the search and map its dataset. Never throws. */
@@ -296,6 +144,10 @@ export async function fetchIndeedPostings(query: IndeedQuery): Promise<IndeedFet
 
   const mapped = mapIndeedItems(run.items, {
     ...(query.maxAgeDays !== undefined ? { maxAgeDays: query.maxAgeDays } : {}),
+    // The country code we just queried IS the country. `IndeedCountry` is a
+    // subset of `PostingCountry` on purpose, so this needs no translation table
+    // that could drift.
+    country: query.country,
   });
   log.info(
     {
@@ -304,6 +156,8 @@ export async function fetchIndeedPostings(query: IndeedQuery): Promise<IndeedFet
       usable: mapped.postings.length,
       droppedThin: mapped.droppedThin,
       droppedUnmappable: mapped.droppedUnmappable,
+      droppedExpired: mapped.droppedExpired,
+      droppedStale: mapped.droppedStale,
     },
     "Indeed fetch complete",
   );
@@ -312,10 +166,10 @@ export async function fetchIndeedPostings(query: IndeedQuery): Promise<IndeedFet
     postings: mapped.postings,
     droppedThin: mapped.droppedThin,
     droppedUnmappable: mapped.droppedUnmappable,
+    droppedExpired: mapped.droppedExpired,
+    droppedStale: mapped.droppedStale,
   };
 }
-
-export type JobKeyStatus = "live" | "expired" | "unverifiable";
 
 /**
  * Look up job keys and read back each one's `expired` flag.
@@ -343,22 +197,4 @@ export async function lookupJobKeys(
     if (!result.has(key)) result.set(key, "unverifiable");
   }
   return result;
-}
-
-/** Pure half of the lookup: dataset items → per-key status. */
-export function readJobKeyStatuses(items: readonly unknown[]): Map<string, JobKeyStatus> {
-  const statuses = new Map<string, JobKeyStatus>();
-  for (const raw of items) {
-    const item = asRecord(raw);
-    const key = firstString(item["jobKey"], item["job_key"], item["id"], item["jobId"]);
-    if (key.length === 0) continue;
-
-    // Only an explicit boolean is trusted. A missing `expired` field means the
-    // actor did not report on it, which is not the same as reporting "open".
-    const expired = item["expired"];
-    if (expired === true) statuses.set(key, "expired");
-    else if (expired === false) statuses.set(key, "live");
-    else statuses.set(key, "unverifiable");
-  }
-  return statuses;
 }

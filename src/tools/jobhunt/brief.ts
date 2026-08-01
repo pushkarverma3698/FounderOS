@@ -28,12 +28,30 @@
  */
 
 import { cmd, esc } from "./telegram-format.js";
-import { renderLegend, renderRow, trimToSentence, type BriefRow } from "./brief-row.js";
+import { renderLegend, type BriefRow } from "./brief-row.js";
+import {
+  allocateByMarket,
+  isTooSenior,
+  renderFilterNotes,
+  renderMarketBlocks,
+  renderRejectLine,
+  renderSpend,
+  renderTrends,
+  PER_MARKET_ASK,
+  PER_MARKET_DO_TODAY,
+  type SpendLine,
+  type TrendRow,
+} from "./brief-sections.js";
 
 // Re-exported so the transport keeps one import site for the escape helper.
 export { toTelegramSafe, splitForTelegram, TELEGRAM_MAX_CHARS } from "./telegram-format.js";
 export { renderRow, renderLegend } from "./brief-row.js";
 export type { BriefRow } from "./brief-row.js";
+// The reject-line, trends and spend renderers moved to brief-sections.ts on
+// 2026-08-01 when this file crossed its size budget. Re-exported so every
+// existing import site — and every test — keeps resolving here.
+export { isTooSenior } from "./brief-sections.js";
+export type { TrendRow, SpendLine } from "./brief-sections.js";
 
 /** A horizontal rule. Telegram has no <hr>, and a run of box characters reads as one. */
 const RULE = "━━━━━━━━━━━━━━━━━━━━━";
@@ -72,23 +90,6 @@ export const REJECT_CAP = 10;
 /** Below this many days undrafted, the nag would be noise rather than a signal. */
 export const STALE_UNDRAFTED_DAYS = 3;
 
-export interface TrendRow {
-  readonly track: string;
-  readonly sampleSize: number;
-  readonly term: string;
-  readonly seenCount: number;
-  /** Days this term has been in demand and absent from that track's CV. */
-  readonly absentDays: number | null;
-}
-
-/** What the day's feed calls cost and what they bought. Printed, never buried. */
-export interface SpendLine {
-  readonly runs: number;
-  readonly returned: number;
-  readonly costUsd: number;
-  readonly failed: number;
-}
-
 export interface BriefInput {
   readonly date: Date;
   readonly screened: number;
@@ -97,6 +98,8 @@ export interface BriefInput {
   readonly trends: readonly TrendRow[];
   /** Pools that failed this run — an outage must read as an outage, never as an empty market. */
   readonly failures: readonly string[];
+  /** Rows the feeds filtered on purpose. Separate from failures: this is a working day. */
+  readonly notes?: readonly string[];
   /** Today's feed spend. Omitted when the ledger is unavailable, never faked. */
   readonly spend?: SpendLine;
 }
@@ -119,7 +122,11 @@ function plural(n: number, one: string, many: string): string {
  * pipeline exists to avoid.
  */
 export function selectDoToday(rows: readonly BriefRow[]): BriefRow[] {
-  return rows.filter((r) => r.verdict === "pass" && r.liveness === "live").slice(0, DO_TODAY_CAP);
+  return allocateByMarket(
+    rows.filter((r) => r.verdict === "pass" && r.liveness === "live"),
+    PER_MARKET_DO_TODAY,
+    DO_TODAY_CAP,
+  );
 }
 
 /**
@@ -130,38 +137,15 @@ export function selectDoToday(rows: readonly BriefRow[]): BriefRow[] {
  * check away from actionable, and that check is "is this still open?".
  */
 export function selectAskable(rows: readonly BriefRow[]): BriefRow[] {
-  return rows
-    .filter(
+  return allocateByMarket(
+    rows.filter(
       (r) =>
         r.liveness !== "expired" &&
         (r.verdict === "flag" || (r.verdict === "pass" && r.liveness !== "live")),
-    )
-    .slice(0, ASK_CAP);
-}
-
-/** True when the row was rejected on the level bar rather than on a legal one. */
-export function isTooSenior(row: BriefRow): boolean {
-  return row.gates.some((g) => g.gate === "Experience" && g.status === "reject");
-}
-
-/**
- * A rejected row, in one line.
- *
- * Deliberately terser than an actionable row. These are AUDIT material — the
- * founder asked for them so nothing is thrown away behind his back, not so he
- * could weigh them. The full evidence is on the record in `job_applications`;
- * what belongs on screen is which company, which role, and the bar that stopped
- * it. Printing the whole sentence for eighteen of them pushed the brief past ten
- * Telegram messages and buried the ten roles he can actually act on.
- */
-const REJECT_REASON_MAX = 90;
-
-function renderRejectLine(row: BriefRow): string {
-  const blocking = row.gates.find((g) => g.status === "reject") ?? row.gates[0];
-  const reason = blocking
-    ? `${blocking.gate}: ${trimToSentence(blocking.evidence, REJECT_REASON_MAX)}`
-    : "no reason recorded";
-  return `• <b>${esc(row.company)}</b> — ${esc(row.title)}\n    <i>${esc(reason)}</i>`;
+    ),
+    PER_MARKET_ASK,
+    ASK_CAP,
+  );
 }
 
 /** "…and 7 more" — stated with the number, never a silent cut. */
@@ -233,7 +217,7 @@ export function formatDailyBrief(input: BriefInput): string {
       ? `<b>✅ APPLY TODAY (0)</b>\nNothing cleared every check <i>and</i> verified still open.`
       : `<b>✅ APPLY TODAY (${doToday.length})</b>\n` +
           `<i>Every check below cleared. The only thing left is writing it.</i>\n\n` +
-          doToday.map((r, i) => renderRow(r, i + 1, "/draft")).join("\n\n") +
+          renderMarketBlocks(doToday, "/draft") +
           overflowNote(allPassLive, doToday.length, "ready to apply to"),
   );
 
@@ -242,7 +226,7 @@ export function formatDailyBrief(input: BriefInput): string {
       `<b>❓ ONE QUESTION AWAY (${askable.length})</b>\n` +
         `<i>Each has exactly one check we could not settle from the ad. ` +
         `Asking the employer settles it.</i>\n\n` +
-        askable.map((r, i) => renderRow(r, i + 1, "/ask")).join("\n\n"),
+        renderMarketBlocks(askable, "/ask"),
     );
   }
 
@@ -296,6 +280,9 @@ export function formatDailyBrief(input: BriefInput): string {
     );
   }
 
+  const filtered = renderFilterNotes(input.notes ?? []);
+  if (filtered.length > 0) sections.push(filtered);
+
   if (input.spend) sections.push(renderSpend(input.spend));
 
   const legend = renderLegend(input.rows);
@@ -304,50 +291,6 @@ export function formatDailyBrief(input: BriefInput): string {
   sections.push(renderNextActions(doToday, askable));
 
   return sections.join(`\n\n${RULE}\n\n`);
-}
-
-/** What the market asked for, as a count rather than a ratio the data can't support. */
-function renderTrends(trends: readonly TrendRow[]): string {
-  return (
-    `<b>📈 WHAT THE MARKET ASKED</b>\n` +
-    trends
-      .map((t) => {
-        const absence =
-          t.absentDays !== null
-            ? ` — missing from your ${esc(t.track)} CV for ${pluralDays(t.absentDays)}`
-            : "";
-        // Deliberately a COUNT, not a percentage. `seenCount` is an all-time
-        // tally incremented on every passing screen; `sampleSize` counts the
-        // distinct rows standing today. Dividing them printed "150%" live on
-        // 2026-07-31 — a figure the stored data cannot support.
-        const times = t.seenCount === 1 ? "once" : `${t.seenCount}×`;
-        return (
-          `• <b>${esc(t.term)}</b> <i>(${esc(t.track)})</i> — asked ${times} ` +
-          `across ${plural(t.sampleSize, "role", "roles")} that cleared the gates${absence}`
-        );
-      })
-      .join("\n")
-  );
-}
-
-/**
- * What today cost.
- *
- * Printed in the brief rather than left in a table, because a cost nobody sees
- * is a cost nobody governs — and until 2026-08-01 the only way to answer "what
- * does this cost" was arithmetic by hand over the actor pricing pages.
- */
-function renderSpend(spend: SpendLine): string {
-  const failed =
-    spend.failed > 0
-      ? ` <b>${spend.failed} of them failed</b> and were still billed for starting.`
-      : "";
-  return (
-    `<b>💰 WHAT TODAY COST</b>\n` +
-    `$${spend.costUsd.toFixed(2)} across ${plural(spend.runs, "feed call", "feed calls")}, ` +
-    `for ${plural(spend.returned, "posting", "postings")}.${failed}\n` +
-    `<i>Estimated from the actors' posted per-job prices, not from an invoice.</i>`
-  );
 }
 
 /**
