@@ -14,15 +14,15 @@
 import { childLogger } from "../../infra/logger.js";
 import {
   listActionableApplications,
-  countPassingApplications,
   recordLiveness,
   recordBriefRanks,
+  recordFitScores,
 } from "../../db/job-queries.js";
-import { listSignals } from "../../db/cv-signal-queries.js";
-import { readFullCvText } from "../career.js";
-import { TRACK_PRIORITY } from "./tracks.js";
-import { compareOverlap, overlapScore, type OverlapResult } from "./overlap.js";
-import { extractSkillTerms } from "./skills.js";
+import { summariseSpend } from "../../db/job-run-queries.js";
+import { compareOverlap, overlapScore, formatOverlap, type OverlapResult } from "./overlap.js";
+import { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
+import { parseGates } from "./gates.js";
+import { buildTrends } from "./brief-trends.js";
 import { verifyLiveness, type Liveness } from "./liveness.js";
 import {
   formatDailyBrief,
@@ -30,12 +30,17 @@ import {
   selectDoToday,
   type BriefInput,
   type BriefRow,
+  type SpendLine,
   type TrendRow,
 } from "./brief.js";
 import type { JobApplication } from "../../db/schema.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 
 const log = childLogger({ module: "jobhunt:daily-brief" });
+
+// Re-exported so the brief keeps one import site, and so the existing CV tests
+// (cv-missing-loud, cv-track) keep pointing at the same module surface.
+export { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
 
 /**
  * How many top-ranked rows to spend a liveness check on.
@@ -45,49 +50,9 @@ const log = childLogger({ module: "jobhunt:daily-brief" });
  */
 export const VERIFY_TOP_N = 8;
 
-/** Terms below this share of a track's passing postings are noise in a trend line. */
-const TREND_MIN_SHARE = 0.3;
-const TREND_TERMS_PER_TRACK = 2;
-
 function ageInDays(from: Date | null | undefined, now: Date): number {
   if (!from) return 0;
   return Math.max(0, Math.floor((now.getTime() - from.getTime()) / 86_400_000));
-}
-
-/** Longest headline the brief will print before trimming. */
-const HEADLINE_MAX = 160;
-
-/**
- * Trim to the last COMPLETE sentence that fits, falling back to a word boundary.
- *
- * A hard character cut ends the founder's decision line mid-word ("…They c"),
- * which reads as a rendering bug and drops whatever the gate was about to
- * qualify. Ending early but cleanly costs a clause and keeps the line credible.
- */
-function trimToSentence(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const window = text.slice(0, max);
-  const lastStop = window.lastIndexOf(". ");
-  if (lastStop > max / 2) return window.slice(0, lastStop + 1);
-  const lastSpace = window.lastIndexOf(" ");
-  return `${(lastSpace > 0 ? window.slice(0, lastSpace) : window).trimEnd()}…`;
-}
-
-/**
- * The single most decision-relevant line from a row's stored gate evidence.
- *
- * `salary_evidence` holds every gate joined by " | ". For a reject the first
- * failing gate is the answer; for anything else the first line is the leading
- * consideration.
- */
-export function headlineFor(row: JobApplication): string {
-  const reasons = (row.salary_evidence ?? "").split(" | ").filter((s) => s.trim().length > 0);
-  if (reasons.length === 0) return row.salary_status.toUpperCase();
-  if (row.salary_status === "reject") {
-    const bar = reasons.find((r) => /reject|cannot|void|required/i.test(r));
-    if (bar) return trimToSentence(bar, HEADLINE_MAX);
-  }
-  return trimToSentence(reasons[0]!, HEADLINE_MAX);
 }
 
 /** The only values `Liveness` actually has. Anything else is not knowledge. */
@@ -110,46 +75,6 @@ export function toLiveness(value: unknown): Liveness {
 }
 
 /**
- * Per-track CV text, read once per brief rather than once per row.
- *
- * Returns the tracks it could NOT read alongside the ones it could. Without that
- * list the failure is silent: a missing CV scores every posting at 0 overlap, so
- * the brief still renders a confident-looking order built from no comparison at
- * all. A log line does not reach the founder; a brief line does.
- */
-export function loadTrackCvs(): { cvs: Map<string, string>; unreadable: string[] } {
-  const cvs = new Map<string, string>();
-  const unreadable: string[] = [];
-  for (const track of TRACK_PRIORITY) {
-    const cv = readFullCvText(track);
-    if (cv.ok) cvs.set(track, cv.text);
-    else {
-      unreadable.push(track);
-      log.warn({ track, error: cv.error }, "Track CV unreadable — overlap unavailable");
-    }
-  }
-
-  // A row whose title matched no track is stored as "unclassified", and every
-  // row screened before tracks existed carries that value. Without an entry here
-  // the map lookup misses, the CV text is "", and EVERY such row scores 0/N —
-  // a ranking built from no comparison, printed with no warning. Production's
-  // first real brief showed "0/21 skills" on all three rows for exactly this
-  // reason. The shared master CV is the honest comparison for a row with no
-  // track, and it is what `readFullCvText()` returns when asked for no track.
-  const master = readFullCvText();
-  if (master.ok) cvs.set(UNCLASSIFIED_TRACK, master.text);
-  else {
-    unreadable.push(UNCLASSIFIED_TRACK);
-    log.warn({ error: master.error }, "Master CV unreadable — untracked rows score 0 overlap");
-  }
-
-  return { cvs, unreadable };
-}
-
-/** The `track` column's default: a title that matched no track's phrases. */
-export const UNCLASSIFIED_TRACK = "unclassified";
-
-/**
  * Rank the actionable pool by stack overlap.
  *
  * A row whose track has no readable CV scores zero overlap rather than being
@@ -168,41 +93,6 @@ export function rankRows(
   scored.sort((a, b) => compareOverlap(a.overlap, b.overlap));
   log.debug({ ranked: scored.length, now: now.toISOString() }, "Brief rows ranked");
   return scored;
-}
-
-/** The market trend lines, one or two terms per track, with how long they've been absent. */
-export async function buildTrends(cvs: ReadonlyMap<string, string>, now: Date): Promise<TrendRow[]> {
-  const trends: TrendRow[] = [];
-
-  for (const track of TRACK_PRIORITY) {
-    const sampleSize = await countPassingApplications({ track });
-    if (sampleSize === 0) continue;
-
-    const signals = await listSignals({ track, limit: 40 });
-    const cvText = cvs.get(track);
-    const cvTerms =
-      cvText === undefined ? null : new Set(extractSkillTerms(cvText).map((s) => s.term));
-
-    for (const signal of signals) {
-      if (signal.category === "unknown") continue;
-      if (signal.seen_count / sampleSize < TREND_MIN_SHARE) continue;
-      // A term already in the CV is not news. With no readable CV we cannot say
-      // either way, so absence is reported as null rather than guessed at.
-      const absent = cvTerms === null ? null : !cvTerms.has(signal.term);
-      if (absent === false) continue;
-
-      trends.push({
-        track,
-        sampleSize,
-        term: signal.term,
-        seenCount: signal.seen_count,
-        absentDays: absent === null ? null : ageInDays(signal.first_seen_at, now),
-      });
-      if (trends.filter((t) => t.track === track).length >= TREND_TERMS_PER_TRACK) break;
-    }
-  }
-
-  return trends;
 }
 
 /**
@@ -253,7 +143,16 @@ export interface BriefOptions {
  */
 export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> {
   const now = opts.now ?? new Date();
-  const applications = await listActionableApplications({});
+  // REJECTS ARE READ BACK TOO (founder direction, 2026-08-01: "store all the data
+  // we are collecting even if it is senior and of no use to us"). The brief has
+  // always had a NOT LAWFUL section and it was always empty, because this query
+  // defaulted to pass+flag — so the roles the pipeline threw away on the founder's
+  // behalf were invisible to him, which is the whole complaint. They cost nothing
+  // to show: one line each, and `verificationTargets` still refuses to spend the
+  // liveness budget on them.
+  const applications = await listActionableApplications({
+    verdicts: ["pass", "flag", "reject"],
+  });
   const { cvs, unreadable } = loadTrackCvs();
   const scored = rankRows(applications, cvs, now);
 
@@ -281,19 +180,32 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
   const perTrack: Record<string, number> = {};
   for (const { row } of scored) perTrack[row.track] = (perTrack[row.track] ?? 0) + 1;
 
-  const rows: BriefRow[] = scored.map(({ row, overlap }) => ({
-    id: row.id,
-    company: row.company,
-    title: row.title,
-    track: row.track,
-    verdict: row.salary_status,
-    route: row.route,
-    url: row.url,
-    overlap,
-    liveness: liveness.get(row.id) ?? toLiveness(row.liveness),
-    headline: headlineFor(row),
-    ageDays: ageInDays(row.created_at, now),
-  }));
+  const rows: BriefRow[] = scored.map(({ row, overlap }) => {
+    const { gates, legacy } = parseGates(row);
+    // A row verified in THIS run was checked seconds ago; anything else is as
+    // old as its stored timestamp says, and the brief must not round that to
+    // "today". Null when no check has ever run against it.
+    const livenessAgeDays = liveness.has(row.id)
+      ? 0
+      : row.liveness_checked_at
+        ? ageInDays(row.liveness_checked_at, now)
+        : null;
+    return {
+      id: row.id,
+      company: row.company,
+      title: row.title,
+      track: row.track,
+      verdict: row.salary_status,
+      route: row.route,
+      url: row.url,
+      overlap,
+      liveness: liveness.get(row.id) ?? toLiveness(row.liveness),
+      gates,
+      legacyGates: legacy,
+      ageDays: ageInDays(row.created_at, now),
+      livenessAgeDays,
+    };
+  });
 
   // An unreadable CV is not a cosmetic warning: it zeroes every overlap score
   // for that track, so the ranking stops being a ranking. It belongs with the
@@ -321,6 +233,8 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
         ]
       : [];
 
+  const spend = await todaysSpend(now);
+
   const input: BriefInput = {
     date: now,
     screened: opts.screened ?? applications.length,
@@ -328,14 +242,71 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     rows,
     trends: await buildTrends(cvs, now),
     failures: [...(opts.failures ?? []), ...cvFailure, ...untrackedNote],
+    ...(spend ? { spend } : {}),
   };
 
   // Pin the numbering BEFORE returning the text. selectDoToday/selectAskable are
   // pure and get the same `rows`, so what is stored is exactly what is printed.
   // Deriving it again when /draft fires would retarget the command silently.
   await persistBriefRanks(rows);
+  await persistFitScores(scored);
 
   return formatDailyBrief(input);
+}
+
+/**
+ * Today's feed spend, or nothing.
+ *
+ * Returns undefined rather than zero when the ledger cannot be read. "$0.00
+ * spent today" is a claim, and a claim made because a query failed is the kind
+ * of quiet wrongness that gets believed for a month.
+ */
+async function todaysSpend(now: Date): Promise<SpendLine | undefined> {
+  const since = new Date(now.getTime() - 86_400_000);
+  try {
+    const window = await summariseSpend(since);
+    return window.runs === 0
+      ? undefined
+      : {
+          runs: window.runs,
+          returned: window.returned,
+          costUsd: window.costUsd,
+          failed: window.failed,
+        };
+  } catch (err) {
+    // allow-failopen: the cost line is context, and losing the whole brief over
+    // an unreadable ledger would trade the deliverable for a footnote.
+    log.warn({ err: (err as Error).message }, "Spend summary unavailable — cost line omitted");
+    return undefined;
+  }
+}
+
+/**
+ * Store the overlap the ranking just computed.
+ *
+ * `fit_score` and `fit_evidence` were declared when the table was created and
+ * never written to, so the number was recomputed and discarded on every render
+ * and no history of it exists anywhere. Written here because this is where the
+ * TRACK's CV is already loaded.
+ */
+async function persistFitScores(
+  scored: ReadonlyArray<{ row: JobApplication; overlap: OverlapResult }>,
+): Promise<void> {
+  try {
+    await recordFitScores(
+      scored.map(({ row, overlap }) => ({
+        id: row.id,
+        score: overlap.ratio,
+        evidence:
+          `${formatOverlap(overlap)} matched. ` +
+          `Have: ${overlap.matched.join(", ") || "none"}. ` +
+          `Missing: ${overlap.missing.join(", ") || "none"}.`,
+      })),
+    );
+  } catch (err) {
+    // allow-failopen: the score is history, the brief is the deliverable.
+    log.warn({ err: (err as Error).message }, "Fit score persist failed");
+  }
 }
 
 /**

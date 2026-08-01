@@ -14,7 +14,7 @@ import { z } from "zod";
 import { readCvTool, searchJobsTool } from "../../tools/career.js";
 import { screenJobTool } from "../../tools/jobhunt/screen.js";
 import { reviewScreenedTool } from "../../tools/jobhunt/review.js";
-import { ingestJobsTool } from "../../tools/jobhunt/ingest.js";
+import { ingestJobsTool } from "../../tools/jobhunt/ingest-tool.js";
 import { cvGapsTool } from "../../tools/jobhunt/gaps.js";
 import { jobBriefTool } from "../../tools/jobhunt/daily-brief.js";
 

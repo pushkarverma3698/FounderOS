@@ -964,6 +964,19 @@ export const jobApplications = agentsSchema.table(
     salary_status: text("salary_status").notNull(),
     salary_evidence: text("salary_evidence"),
 
+    /**
+     * Every gate WITH its own status: `[{gate, status, evidence}, …]`.
+     *
+     * `salary_evidence` above is the same information flattened to one pipe-joined
+     * string, and a flat string cannot say WHICH check failed. The brief read
+     * position instead of status and printed reason #1 as the row's headline, so a
+     * role flagged on salary was labelled with its PASSING sponsor line — the
+     * founder's first real brief was unreadable for exactly this reason. Stored as
+     * text rather than jsonb: it is only ever read whole, and text keeps the
+     * migration a plain ADD COLUMN on a live table.
+     */
+    gate_json: text("gate_json"),
+
     /** 0–1 CV-to-JD fit, with the matched/missing skills that produced it. */
     fit_score: numeric("fit_score"),
     fit_evidence: text("fit_evidence"),
@@ -1087,6 +1100,66 @@ export const cvSignals = agentsSchema.table(
 
 export type CvSignal = typeof cvSignals.$inferSelect;
 export type NewCvSignal = typeof cvSignals.$inferInsert;
+
+// ── job_ingest_runs ───────────────────────────────────────────────────────────
+
+/**
+ * One row per paid feed call, with what it cost and what it bought.
+ *
+ * The founder asked on 2026-08-01 how many times the pipeline runs and what it
+ * costs, and the honest answer had to be reconstructed by hand from actor
+ * pricing pages and a reading of the cron schedule. That is a question about our
+ * own system that our own system could not answer, and the reconstruction is
+ * stale the moment a query count changes.
+ *
+ * `estimated_cost_usd` is ESTIMATED and named so. Apify bills per event on its
+ * own ledger and this table never sees that invoice; what it holds is our
+ * arithmetic over the posted per-job and per-start prices. It is right for
+ * spotting the day a sweep doubled, and it is not an accounting record.
+ */
+export const jobIngestRuns = agentsSchema.table(
+  "job_ingest_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+
+    /** Groups every query of one sweep, so a day's cost is one GROUP BY. */
+    sweep_id: uuid("sweep_id").notNull(),
+
+    /** ats | indeed — which feed was billed. */
+    feed: text("feed").notNull(),
+    /** The pool or country this query covered, e.g. "netherlands" or "NL". */
+    pool: text("pool").notNull(),
+    /** ai | fullstack | backend | frontend, or "all" for a feed we cannot split. */
+    track: text("track").notNull(),
+
+    /** What we asked for, and what came back. A gap between them is a finding. */
+    requested: integer("requested").notNull(),
+    returned: integer("returned").notNull().default(0),
+
+    /** Postings that reached the gates, and how they came out. */
+    screened: integer("screened").notNull().default(0),
+    passed: integer("passed").notNull().default(0),
+    flagged: integer("flagged").notNull().default(0),
+    rejected: integer("rejected").notNull().default(0),
+
+    /** Our arithmetic over the posted per-job + per-start prices. Not an invoice. */
+    estimated_cost_usd: numeric("estimated_cost_usd").notNull().default("0"),
+
+    /** Null on success. A failed query still gets a row — it was still billed a start. */
+    error: text("error"),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    /** "what did this month cost" — the question the table exists to answer. */
+    tenantDayIdx: index("jir_tenant_day_idx").on(t.tenant_id, t.created_at),
+    sweepIdx: index("jir_sweep_idx").on(t.sweep_id),
+  }),
+);
+
+export type JobIngestRun = typeof jobIngestRuns.$inferSelect;
+export type NewJobIngestRun = typeof jobIngestRuns.$inferInsert;
 
 // ── failure_lessons ───────────────────────────────────────────────────────────
 

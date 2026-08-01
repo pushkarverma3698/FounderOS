@@ -13,23 +13,32 @@
  * A low number is a FINDING, not a fault. Netherlands + recognised sponsor +
  * 2–5 years + AI/backend is a narrow slice, and the count this produces is the
  * first honest measurement of a market the campaign doc has been estimating.
+ *
+ * NOTHING FETCHED IS DISCARDED (founder direction, 2026-08-01: "store all the
+ * data we are collecting even if it is senior and of no use to us"). Early-career
+ * postings used to be dropped here, before screening, so they never reached the
+ * table and the founder could not audit what had been thrown away on his behalf
+ * — a filter and an empty market look identical from outside. They are a GATE
+ * now (experience.ts): every posting that arrives is screened, stored, and
+ * appears in the brief with the reason it will not be applied to. The only thing
+ * still filtered before it costs money is `titleExclusionSearch` at the feed,
+ * where a posting is never fetched and so cannot be stored either way.
  */
 
+import { randomUUID } from "node:crypto";
 import { childLogger } from "../../infra/logger.js";
 import {
   fetchAtsPostings,
   MIN_ATS_LIMIT,
   POOL_ORDER,
   POOL_QUERIES,
-  type AtsQuery,
   type RawPosting,
 } from "./ats-source.js";
 import { fetchIndeedPostings, type IndeedCountry } from "./indeed-source.js";
-import { excludeEarlyCareer } from "./seniority.js";
 import { TRACK_PRIORITY, TRACK_TITLES, type RoleTrack } from "./tracks.js";
 import { screenPosting } from "./screen.js";
-import { formatIngestSummary } from "./ingest-format.js";
-import type { UnifiedTool, ToolResult } from "../index.js";
+import { recordQueryCost } from "./ingest-ledger.js";
+import { ATS_PRICING, INDEED_PRICING } from "./cost.js";
 
 const log = childLogger({ module: "tool:ingest_jobs" });
 
@@ -134,8 +143,8 @@ export interface PooledIngest {
   readonly failures: readonly string[];
   /** Postings fetched per track. A track at 0 is a finding, not a silence. */
   readonly perTrack: Readonly<Record<RoleTrack, number>>;
-  /** Early-career postings dropped before screening. Counted, never silent. */
-  readonly droppedEarlyCareer: number;
+  /** Groups this sweep's rows in `job_ingest_runs`, so a day's cost is one query. */
+  readonly sweepId: string;
 }
 
 /**
@@ -150,15 +159,23 @@ export interface PooledIngest {
  * returns the most rows, so a shared pool would consume the whole allowance
  * before the remote-contract pools were reached — which is the coverage hole
  * this design exists to close.
+ *
+ * `opts.limit` is a TOTAL across the ATS queries, not a per-query figure, and it
+ * cannot bind below `queries × MIN_ATS_LIMIT` — the actor rejects a limit under
+ * 10, so that floor wins whenever the total is smaller. A caller passing 30
+ * across 8 queries gets 10 each and fetches up to 80, not 30. Every query's real
+ * cost is written to `job_ingest_runs` rather than inferred from this number.
  */
 export async function runPooledIngest(opts: {
   limit: number;
   includeIndeed?: boolean;
 }): Promise<PooledIngest> {
+  const sweepId = randomUUID();
   const queries = POOL_ORDER.length * TRACK_PRIORITY.length;
   const perQuery = Math.max(MIN_ATS_LIMIT, Math.floor(opts.limit / queries));
-  const postings: RawPosting[] = [];
+  const lines: IngestLine[] = [];
   const failures: string[] = [];
+  let fetched = 0;
   // Derived from TRACK_PRIORITY rather than written out, so adding a track can
   // never leave a counter silently missing — which would report that track as
   // "0 postings" forever regardless of what the feed actually returned.
@@ -177,7 +194,15 @@ export async function runPooledIngest(opts: {
   // empty track and an unasked track produce the same silence.
   //
   // Splitting by track costs one actor run per (pool × track) instead of per
-  // pool. That is the price of coverage being a guarantee rather than luck.
+  // pool. That is the price of coverage being a guarantee rather than luck —
+  // and merging the two Netherlands pools on 2026-08-01 brought it back down
+  // from 12 runs a sweep to 8 without giving any of that coverage up.
+  //
+  // SCREENED PER QUERY, not in one pooled batch at the end. Screening where the
+  // fetch happened is what lets each query's cost sit next to the verdicts it
+  // bought in `job_ingest_runs` — "we spent $0.13 on frontend and every row was
+  // rejected on the level bar" is an actionable sentence, and it is unavailable
+  // once the postings have been tipped into a shared array.
   for (const pool of POOL_ORDER) {
     for (const track of TRACK_PRIORITY) {
       const result = await fetchAtsPostings({
@@ -186,12 +211,39 @@ export async function runPooledIngest(opts: {
         timeRange: "24h",
         limit: perQuery,
       });
+
       if (!result.ok) {
         failures.push(`ATS pool "${pool}" / ${track}: ${result.error}`);
+        // Billed a start regardless of what came back — recorded, or the cost of
+        // a broken day would read as cheaper than a working one.
+        await recordQueryCost({
+          sweepId,
+          feed: "ats",
+          pool,
+          track,
+          requested: perQuery,
+          returned: 0,
+          pricing: ATS_PRICING,
+          error: result.error,
+        });
         continue;
       }
+
       perTrack[track] += result.postings.length;
-      postings.push(...result.postings.map((p) => ({ ...p, source: INGEST_SOURCE })));
+      fetched += result.postings.length;
+      const batch = result.postings.map((p) => ({ ...p, source: INGEST_SOURCE }));
+      const batchLines = await screenBatch(batch);
+      lines.push(...batchLines);
+      await recordQueryCost({
+        sweepId,
+        feed: "ats",
+        pool,
+        track,
+        requested: perQuery,
+        returned: result.postings.length,
+        pricing: ATS_PRICING,
+        lines: batchLines,
+      });
     }
   }
 
@@ -205,12 +257,24 @@ export async function runPooledIngest(opts: {
       });
       if (!result.ok) {
         failures.push(`Indeed ${country}: ${result.error}`);
+        await recordQueryCost({
+          sweepId,
+          feed: "indeed",
+          pool: country,
+          track: "all",
+          requested: perQuery,
+          returned: 0,
+          pricing: INDEED_PRICING,
+          error: result.error,
+        });
         continue;
       }
       if (result.droppedThin > 0) {
-        // Reported, not hidden. A body too short to screen produces a verdict
-        // from evidence that was never fetched, so these are dropped — but a
-        // silent drop looks exactly like a thin market.
+        // Reported, not hidden. These are dropped by the Indeed mapper before we
+        // ever see them; a body too short to screen produces a verdict from
+        // evidence that was never fetched, and a silent drop looks exactly like
+        // a thin market. Anything that DOES reach the gates with a thin body is
+        // stored and flagged by the `Posting` gate rather than dropped.
         failures.push(
           `Indeed ${country}: ${result.droppedThin} posting(s) dropped — body too short to screen.`,
         );
@@ -224,20 +288,20 @@ export async function runPooledIngest(opts: {
             "output shape does not match the mapper. This is a schema drift, not a quiet market.",
         );
       }
-      postings.push(...result.postings);
+      fetched += result.postings.length;
+      const batchLines = await screenBatch(result.postings);
+      lines.push(...batchLines);
+      await recordQueryCost({
+        sweepId,
+        feed: "indeed",
+        pool: country,
+        track: "all",
+        requested: perQuery,
+        returned: result.postings.length,
+        pricing: INDEED_PRICING,
+        lines: batchLines,
+      });
     }
-  }
-
-  // Internships and graduate schemes are removed HERE, after the count that
-  // proves the feed answered, so a thin day is never confused with a filtered
-  // one. On 2026-08-01 four of the eight live rows were intern/graduate/junior
-  // postings that the substring title match had swept in.
-  const seniority = excludeEarlyCareer(postings);
-  if (seniority.dropped > 0) {
-    failures.push(
-      `Dropped ${seniority.dropped} early-career posting(s) (intern / graduate / working student): ` +
-        seniority.droppedTitles.slice(0, 5).join("; "),
-    );
   }
 
   // A track that fetched nothing is reported. Zero rows for frontend used to be
@@ -248,111 +312,9 @@ export async function runPooledIngest(opts: {
     }
   }
 
-  const lines = await screenBatch(seniority.kept);
   log.info(
-    {
-      fetched: seniority.kept.length,
-      perTrack,
-      droppedEarlyCareer: seniority.dropped,
-      pools: POOL_ORDER.length,
-      failures: failures.length,
-    },
+    { sweepId, fetched, perTrack, pools: POOL_ORDER.length, failures: failures.length },
     "Pooled job ingest complete",
   );
-  return {
-    fetched: seniority.kept.length,
-    lines,
-    failures,
-    perTrack,
-    droppedEarlyCareer: seniority.dropped,
-  };
+  return { fetched, lines, failures, perTrack, sweepId };
 }
-
-/** Fetch → screen → summarise. The whole pipeline in one call. */
-export async function runJobIngest(query: AtsQuery = {}): Promise<IngestResult> {
-  const fetched = await fetchAtsPostings(query);
-  if (!fetched.ok) return { ok: false, error: fetched.error };
-
-  const lines = await screenBatch(fetched.postings);
-  log.info(
-    {
-      fetched: fetched.postings.length,
-      pass: lines.filter((l) => l.outcome === "pass").length,
-      reject: lines.filter((l) => l.outcome === "reject").length,
-    },
-    "Job ingest complete",
-  );
-  return { ok: true, summary: { fetched: fetched.postings.length, lines } };
-}
-
-// ── Tool ──────────────────────────────────────────────────────────────────────
-
-export const ingestJobsTool: UnifiedTool = {
-  name: "ingest_jobs",
-  description:
-    "Pull fresh job postings from the ATS feed (~50 platforms: Greenhouse, Lever, " +
-    "Workday, Personio, Recruitee…) and screen every one against the hard legal " +
-    "gates automatically. This is how postings ENTER the pipeline — use it when the " +
-    "founder asks to find, refresh, or sweep for new jobs. Returns a verdict " +
-    "breakdown, not a list of links. Read-mostly, no approval needed, no model spend.",
-  input_schema: {
-    type: "object",
-    properties: {
-      limit: {
-        type: "number",
-        description: "Postings to pull (minimum 10, which is also the daily budget).",
-      },
-      time_range: {
-        type: "string",
-        description: "How far back to look: 1h, 24h, 7d, or 6m. Defaults to 24h.",
-      },
-      titles: {
-        type: "array",
-        description:
-          "Array of title phrases to search, e.g. ['AI Engineer:*']. ':*' is a prefix wildcard. " +
-          "Omit to use the campaign's default target roles.",
-      },
-      locations: {
-        type: "array",
-        description:
-          "Array of exact 'City, Region, Country' phrases or a bare country, English names only " +
-          "(e.g. 'Amsterdam, North Holland, Netherlands'). Defaults to the Netherlands.",
-      },
-      organizations: {
-        type: "array",
-        description:
-          "Array of employer names to restrict to — this is how the IND recognised-sponsor " +
-          "register is used as a target list rather than only as a filter.",
-      },
-    },
-    required: [],
-  },
-
-  async execute(args: Record<string, unknown>): Promise<ToolResult> {
-    const timeRange = args["time_range"];
-    const query: AtsQuery = {
-      ...(typeof args["limit"] === "number" ? { limit: args["limit"] } : {}),
-      ...(timeRange === "1h" || timeRange === "24h" || timeRange === "7d" || timeRange === "6m"
-        ? { timeRange }
-        : {}),
-      ...(Array.isArray(args["titles"]) ? { titles: args["titles"] as string[] } : {}),
-      ...(Array.isArray(args["locations"]) ? { locations: args["locations"] as string[] } : {}),
-      ...(Array.isArray(args["organizations"])
-        ? { organizations: args["organizations"] as string[] }
-        : {}),
-    };
-
-    const result = await runJobIngest(query);
-    if (!result.ok) {
-      return {
-        success: false,
-        error:
-          `Job ingest failed: ${result.error}\n` +
-          "No postings were screened. Nothing was recorded — there is deliberately no " +
-          "fallback to web search, because a search snippet through the salary gate " +
-          "produces a confident verdict from evidence that was never fetched.",
-      };
-    }
-    return { success: true, data: formatIngestSummary(result.summary) };
-  },
-};

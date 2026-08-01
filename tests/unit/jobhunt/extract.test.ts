@@ -113,6 +113,39 @@ describe("extractSalary", () => {
   });
 });
 
+describe("extractSalary — numbers that are not money", () => {
+  it("does not read a 401(k) benefit as a €401,000 salary", () => {
+    // Found by rendering the brief from the REAL application table on
+    // 2026-08-01: three of the six roles in APPLY TODAY claimed "€401000 —
+    // comfortably above the €52284 HSM reference. Read from: '401k'". Each one
+    // was a confident statement about pay that the posting never made.
+    //
+    // MONEY_TOKEN accepts a bare `\d+k` because postings really do write "70k",
+    // and "401k" fits that shape exactly while 401,000 passes the annual
+    // plausibility band. The failure direction is the expensive one: a
+    // fabricated figure PASSES the salary gate, whereas a missing one only
+    // flags and asks a human.
+    const facts = extractSalary("We offer a 401(k) with company match and unlimited PTO.");
+    expect(facts.max).toBeUndefined();
+    expect(facts.unit).toBe("none");
+  });
+
+  it("handles the unparenthesised spelling too", () => {
+    expect(extractSalary("Benefits include a 401k plan.").max).toBeUndefined();
+  });
+
+  it("covers the rest of the family", () => {
+    expect(extractSalary("403(b) and 457(b) plans available.").max).toBeUndefined();
+  });
+
+  it("still reads a real salary in a posting that also lists a 401(k)", () => {
+    // The mask must not swallow the figure next to it.
+    const facts = extractSalary("Base salary €70.000 per jaar, plus a 401(k) match.");
+    expect(facts.max).toBe(70000);
+    expect(facts.unit).toBe("annual");
+  });
+});
+
 describe("extractFteFactor", () => {
   it("reads part-time hours as a fraction of full time", () => {
     expect(extractFteFactor("32 uur per week")).toBeCloseTo(0.8);

@@ -96,17 +96,19 @@ describe("source pools", () => {
     expect(buildAtsInput({})).not.toHaveProperty("aiWorkArrangementFilter");
   });
 
-  it("includes 5-10 experience but still excludes 10+", () => {
-    // 5-10 was excluded by HSM-only reasoning (the under-30 salary band), which
-    // does not bind under a partner permit or a remote contract.
-    expect(DEFAULT_EXPERIENCE).toContain("5-10");
-    expect(DEFAULT_EXPERIENCE).not.toContain("10+");
+  it("stops at the 2-5 band — the permit allowing a role is not a shortlist", () => {
+    // 5-10 was added on 2026-07-31 arguing the under-30 salary band is HSM-only
+    // reasoning. True about the PERMIT and irrelevant to the hiring manager: the
+    // founder's verdict on seeing "Senior Platform Engineer" was that nobody
+    // hires 3.5 years of experience into it. The band is a COST filter; the
+    // Experience gate is what actually rejects, on stated years.
+    expect(DEFAULT_EXPERIENCE).toEqual(["0-2", "2-5"]);
   });
 
   it("builds byte-identical input for the same pool twice", () => {
     // A surprising result must be attributable to the market, not the request.
-    const a = buildAtsInput(POOL_QUERIES["nl-remote"]);
-    const b = buildAtsInput(POOL_QUERIES["nl-remote"]);
+    const a = buildAtsInput(POOL_QUERIES["netherlands"]);
+    const b = buildAtsInput(POOL_QUERIES["netherlands"]);
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 });

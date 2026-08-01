@@ -207,11 +207,38 @@ export function extractFteFactor(text: string): number | undefined {
   return undefined;
 }
 
+/**
+ * US retirement-plan names that are a NUMBER followed by a letter, and are not
+ * money: 401(k), 401k, 403(b), 457(b).
+ *
+ * `MONEY_TOKEN` accepts a bare `\d+k` with no currency symbol, because Dutch and
+ * English postings both write "70k" for a salary. "401k" fits that shape
+ * exactly, parses as 401 × 1000, and 401,000 is a plausible annual figure — so a
+ * US posting listing its benefits was read as advertising a €401,000 salary.
+ * Three of the six roles in the first APPLY TODAY section built from real data
+ * (dev DB, 2026-08-01) carried that number, each one a confident claim about pay
+ * that the posting never made.
+ *
+ * The failure direction is the expensive one: a fabricated figure PASSES the
+ * salary gate. A missing figure only flags, which asks a human. So these are
+ * masked out of the text before any money match runs.
+ */
+const RETIREMENT_PLAN_RE = /\b40[13]\s*\(?\s*[kb]\s*\)?|\b457\s*\(?\s*b\s*\)?/gi;
+
+/** Blank a non-salary numeric idiom, preserving length so match offsets hold. */
+function maskNonSalaryNumbers(text: string): string {
+  return text.replace(RETIREMENT_PLAN_RE, (m) => " ".repeat(m.length));
+}
+
 /** Pull the salary range and its qualifiers out of the posting text. */
-export function extractSalary(text: string): SalaryFacts {
-  const holidayBasis = resolveHolidayBasis(text);
-  const fteFactor = extractFteFactor(text);
+export function extractSalary(raw: string): SalaryFacts {
+  const holidayBasis = resolveHolidayBasis(raw);
+  const fteFactor = extractFteFactor(raw);
   const base = { holidayBasis, ...(fteFactor !== undefined ? { fteFactor } : {}) };
+
+  // Masked AFTER the qualifier and FTE reads, which do not look at money, and
+  // length-preserving so every offset below still indexes the original text.
+  const text = maskNonSalaryNumbers(raw);
 
   const rangeRe = new RegExp(`(${MONEY_TOKEN})${RANGE_SEP}(${MONEY_TOKEN})`, "i");
   const range = rangeRe.exec(text);
