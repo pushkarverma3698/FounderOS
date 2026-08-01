@@ -24,6 +24,7 @@ import { matchSponsor, type SponsorMatch } from "./sponsor-match.js";
 import { getSponsorRegister, registerStaleness } from "./sponsor-registry.js";
 import { extractPostingFacts, type PostingRoute } from "./extract.js";
 import { basesForPosting, gateProfile } from "./permit-routes.js";
+import { THIN_BODY_CHARS, postingGate, basisGate, locationGate, sponsorGate } from "./screen-gates.js";
 import {
   dedupeKey,
   isStaleEnoughToReapply,
@@ -52,40 +53,12 @@ const log = childLogger({ module: "tool:screen_job" });
 // Re-exported so callers keep one import site for the screening vocabulary.
 export { combineVerdict } from "./gates.js";
 export { formatScreenOutcome } from "./screen-format.js";
+// Re-exported so every existing import of these gates keeps resolving here.
+export { THIN_BODY_CHARS, postingGate, basisGate, locationGate, sponsorGate } from "./screen-gates.js";
 export type { Gate, ScreenVerdict } from "./gates.js";
 
 /** Stages that mean the founder has already engaged — never silently re-screen over them. */
 const ENGAGED_STAGES = new Set(["drafted", "awaiting_approval", "applied", "replied"]);
-
-/**
- * Below this many characters, the body is a teaser rather than a job ad.
- *
- * The salary, language and experience gates all read the body, so a 200-character
- * stub produces three confident verdicts from evidence that was never fetched.
- * The posting is still SCREENED and still STORED — it is flagged instead, with
- * the reason, so a thin feed reads as a thin feed rather than as a quiet market.
- *
- * Deliberately the same number as `MIN_DESCRIPTION_CHARS` in indeed-source.ts,
- * which drops thin rows before they ever reach here. Two different thresholds
- * for "too thin to judge" would mean a body Indeed considered unusable arriving
- * from the ATS feed and being screened as if it were complete. Not imported from
- * there — a pure gate must not depend on a network module — so the equality is
- * asserted in tests/unit/jobhunt/thin-body.test.ts instead.
- */
-export const THIN_BODY_CHARS = 400;
-
-/** Flags a body too short to have carried the evidence the other gates read. */
-export function postingGate(description: string): Gate | null {
-  if (description.trim().length >= THIN_BODY_CHARS) return null;
-  return {
-    gate: "Posting",
-    status: "flag",
-    evidence:
-      `Only ${description.trim().length} characters of job ad reached us, so the ` +
-      `salary, language and experience checks below had almost nothing to read. ` +
-      `Open the link before trusting any of them.`,
-  };
-}
 
 /** Which concrete routes to screen a posting under. `unclear` gets both. */
 export function routesToScreen(route: PostingRoute): ScreenRoute[] {
@@ -101,38 +74,17 @@ export function routesToScreen(route: PostingRoute): ScreenRoute[] {
  */
 export function bestOutcome<T extends { verdict: ScreenVerdict }>(outcomes: readonly T[]): T {
   const rank: Record<ScreenStatus, number> = { pass: 0, flag: 1, reject: 2 };
-  return [...outcomes].sort((a, b) => rank[a.verdict.status] - rank[b.verdict.status])[0]!;
-}
-
-export function sponsorGate(match: SponsorMatch, stale: ReturnType<typeof registerStaleness>): Gate {
-  // A stale register cannot invent a sponsor, so a positive stays valid. A
-  // NEGATIVE from a stale file is a hard reject of a company that may have been
-  // recognised since — downgrade it to a human check rather than a silent drop.
-  if (match.verdict === "not-sponsor" && stale.stale) {
-    return {
-      gate: "Sponsor",
-      status: "flag",
-      evidence: `${match.evidence} BUT this cannot be trusted: ${stale.note}`,
-    };
-  }
-
-  // Absence from the register FLAGS rather than rejects (founder decision,
-  // 2026-07-31). Recognition costs an employer roughly €4,500 and about four
-  // weeks, and companies do take it on for someone they want — so "not a sponsor
-  // today" is not "cannot hire you". Rejecting made that permanently invisible;
-  // a flag keeps it a decision Pushkar gets to make.
-  if (match.verdict === "not-sponsor") {
-    return {
-      gate: "Sponsor",
-      status: "flag",
-      evidence:
-        `${match.evidence} They could still become one (~€4,500, ~4 weeks) — worth asking ` +
-        `if the role is otherwise strong, rather than assuming no.`,
-    };
-  }
-
-  const status: ScreenStatus = match.verdict === "sponsor" ? "pass" : "flag";
-  return { gate: "Sponsor", status, evidence: match.evidence };
+  // Ties break on the number of gates still open, not on array position. Once
+  // the shared Location gate started flagging every basis of an `unclear`
+  // posting, all three tied — and the winner became whichever came first in
+  // LIVE_PERMIT_BASES, which is HSM. That recorded the posting under the basis
+  // carrying the MOST unanswered questions (Location and Sponsor) rather than
+  // the fewest (Location alone), so the brief asked the founder about a
+  // recognised-sponsor register on a role that may never need one.
+  const openGates = (o: T): number => o.verdict.gates.filter((g) => g.status !== "pass").length;
+  return [...outcomes].sort(
+    (a, b) => rank[a.verdict.status] - rank[b.verdict.status] || openGates(a) - openGates(b),
+  )[0]!;
 }
 
 // ── The gates, as a function ──────────────────────────────────────────────────
@@ -234,15 +186,17 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   // once and shared across the routes rather than recomputed per route.
   const experience = experienceGate(description, title);
   const posting = postingGate(description);
+  // Where the job sits is a fact about the posting, not about any one basis, so
+  // it is reported once for all of them — see locationGate in screen-gates.ts.
+  const location = locationGate(facts.route);
 
   const outcomes = routesToScreen(facts.route).map((route) => {
     const profile = gateProfile(route);
     const salary = screenSalaryFacts(facts.salary, { route });
     const gates: Gate[] = [
       ...(posting ? [posting] : []),
-      profile.sponsorRequired
-        ? sponsorGate(match, stale)
-        : { gate: "Basis", status: "pass" as ScreenStatus, evidence: profile.basis },
+      ...(location ? [location] : []),
+      profile.sponsorRequired ? sponsorGate(match, stale) : basisGate(profile),
       { gate: profile.salaryFloorApplies ? "Salary" : "Rate", ...salary },
       { gate: "Language", ...language },
       experience,
