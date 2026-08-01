@@ -122,12 +122,18 @@ export function selectAskable(rows: readonly BriefRow[]): BriefRow[] {
 function renderRow(row: BriefRow, index: number, command: string): string {
   const heading = `<b>${index}. ${esc(row.company)}</b> — ${link(row.title, row.url)}`;
 
+  // Exhaustive on purpose. An `else` here once turned every UNCHECKED row into
+  // "✕ closed" — a confident claim that a job had shut, made about a posting
+  // nobody had looked at. Prod carried `liveness = "unknown"` on all eight rows
+  // (a value outside the Liveness union, smuggled in by an unchecked cast), so
+  // the very first real brief told the founder three live roles were dead.
+  // Anything not positively verified says so as an absence of knowledge.
   const liveness =
     row.liveness === "live"
       ? "✓ still open"
-      : row.liveness === "unverifiable"
-        ? "⚠ couldn't confirm it's still open"
-        : "✕ closed";
+      : row.liveness === "expired"
+        ? "✕ closed"
+        : "⚠ not checked — confirm before applying";
 
   const facts = `<i>${esc(formatOverlap(row.overlap))} skills · ${liveness} · ${esc(row.route)}</i>`;
 
