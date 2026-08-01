@@ -159,10 +159,21 @@ Each item = numbered, one line, with the exact command/value where applicable
 explicitly ("Nothing outstanding from your end").
 
 ## Git
-- Never commit to `main`. Flow: work branch → `beta` → `main`
-  (CI-enforced by `.github/workflows/branch-policy.yml`). Only humans merge to
-  `main`. The former `stable` tier was retired — see ADR-045; production is a
-  two-stage promotion, not three.
+- Never commit DIRECTLY to `main` — always through a PR. Flow: work branch →
+  `beta` → `main`, still the normal path because `beta` is where CD proves a
+  change before prod sees it.
+- **Claude may merge to `main` itself** (founder directive, 2026-08-01). The
+  previous "founder merges only" rule and the CI ladder that enforced it
+  (`.github/workflows/branch-policy.yml`, now deleted) were removed: work sat
+  finished-but-undeployed for days waiting on a human click, and prod ran stale
+  code while the fix for it was already green on `beta`. Waiting was the larger
+  risk, not the merge.
+- What still gates a merge: branch protection on `main` requires both CI checks
+  ("Type check + lint + wiring", "Unit + regression tests") to pass. Merge on
+  red is never acceptable.
+- After merging to `main`, WATCH THE DEPLOY and verify prod actually moved.
+  A merge is not a deploy, and CD silently failing was how prod stayed on
+  `a966e9a` for a full day.
 - Evidence in every PR: fresh `pnpm gate` output + live-path proof (or an
   explicit NOT VERIFIED with the reason).
 

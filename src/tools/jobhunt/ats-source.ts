@@ -21,12 +21,26 @@
  *   · `hasSalary` — Dutch postings routinely omit salary. Requiring it at source
  *     would shrink supply to near zero; the salary gate already FLAGS a missing
  *     figure for a human, which is the loud direction.
+ *   · `liOrganizationSizeFilter` — the feed CAN restrict to LinkedIn headcount
+ *     buckets ("1", "2-10", … "10001+") and we deliberately send none of them,
+ *     so every size from a two-person startup to a 10,000-seat enterprise is in
+ *     scope. `FORBIDDEN_INPUT_KEYS` holds that open in CI — see the note on it
+ *     for why a size filter is the wrong instrument here.
+ *
+ * WHAT *IS* FILTERED AT SOURCE (added 2026-08-01):
+ *   · `titleExclusionSearch` — unambiguous early-career terms. The feed bills per
+ *     job returned, and on 2026-08-01 a quarter of the day's budget was spent
+ *     fetching an internship and a graduate scheme only to discard both. Only
+ *     terms that are safe as a SUBSTRING go upstream; see
+ *     SOURCE_EXCLUDED_TITLE_TERMS.
  *
  * Network lives in one function. Everything else here is pure and unit-tested.
  */
 
 import { childLogger } from "../../infra/logger.js";
 import { runActorSync } from "../apify.js";
+import { SOURCE_EXCLUDED_TITLE_TERMS } from "./seniority.js";
+import { detectFeedError, mapAtsItems } from "./ats-mappers.js";
 import { titlesForTracks, TRACK_PRIORITY } from "./tracks.js";
 
 const log = childLogger({ module: "jobhunt:ats-source" });
@@ -43,9 +57,6 @@ const ATS_TIMEOUT_MS = 290_000;
 
 /** The actor rejects a limit below 10, so 10 is the floor as well as our budget. */
 export const MIN_ATS_LIMIT = 10;
-
-/** Bound a stored posting body. Long enough for every real posting. */
-const DESCRIPTION_MAX = 20_000;
 
 export interface AtsQuery {
   /** 1h | 24h | 7d | 6m. The daily sweep uses 24h so runs don't overlap. */
@@ -144,6 +155,30 @@ export const POOL_QUERIES: Record<SourcePool, AtsQuery> = {
 export const POOL_ORDER: readonly SourcePool[] = ["nl-onsite", "nl-remote", "eu-remote-global"];
 
 /**
+ * Feed parameters that must NEVER appear in a request, and why.
+ *
+ * The founder's instruction on 2026-08-01 was to open the pool to mid-sized
+ * companies and startups. The honest finding is that nothing was closing it —
+ * no size filter was ever sent — so the fix belongs in the title vocabulary
+ * (see TRACK_TITLES), not here.
+ *
+ * This list exists to keep it that way. A headcount filter is a tempting knob
+ * and the wrong instrument in both directions: capping size to "find startups"
+ * would discard the recognised sponsors that make the HSM basis work, and
+ * flooring it to "find sponsors" would discard exactly the scale-ups most likely
+ * to hire remotely and interview fast. Company size is not what makes a role
+ * reachable — the permit basis is, and that is already screened per posting.
+ *
+ * Asserted in tests/unit/jobhunt/source-pools.test.ts so a future edit that adds
+ * one has to delete this note first.
+ */
+export const FORBIDDEN_INPUT_KEYS: readonly string[] = [
+  "liOrganizationSizeFilter",
+  "liOrganizationEmployeesLte",
+  "liOrganizationEmployeesGte",
+];
+
+/**
  * Build the actor input. Pure — the daily sweep, a manual run and the tests all
  * produce byte-identical input for the same query, which is what makes a
  * surprising result attributable to the market rather than to the request.
@@ -159,6 +194,11 @@ export function buildAtsInput(query: AtsQuery = {}): Record<string, unknown> {
       ? {}
       : { locationSearch: [...(query.locations ?? DEFAULT_LOCATIONS)] }),
     titleSearch: [...(query.titles ?? DEFAULT_TITLES)],
+    // Costs nothing to send and saves a job's price for every intern or graduate
+    // scheme the broad title phrases would otherwise vacuum in. Only the terms
+    // that are unambiguous as a substring — the rest are caught client-side by
+    // `excludeEarlyCareer`, where a drop is word-boundary matched and counted.
+    titleExclusionSearch: [...SOURCE_EXCLUDED_TITLE_TERMS],
     aiExperienceLevelFilter: [...(query.experienceLevels ?? DEFAULT_EXPERIENCE)],
     ...(query.workArrangements && query.workArrangements.length > 0
       ? { aiWorkArrangementFilter: [...query.workArrangements] }
@@ -172,162 +212,6 @@ export function buildAtsInput(query: AtsQuery = {}): Record<string, unknown> {
     removeAgency: true,
     includeCompanyDetails: true,
   };
-}
-
-// ── Pure mappers ──────────────────────────────────────────────────────────────
-
-function asRecord(v: unknown): Record<string, unknown> {
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
-}
-
-/** First non-empty string among the candidates, else "". */
-function firstString(...candidates: unknown[]): string {
-  for (const c of candidates) {
-    if (typeof c === "string" && c.trim().length > 0) return c.trim();
-  }
-  return "";
-}
-
-/** First non-empty entry of a string array field, else "". */
-function firstOfArray(value: unknown): string {
-  if (!Array.isArray(value)) return "";
-  for (const entry of value) {
-    if (typeof entry === "string" && entry.trim().length > 0) return entry.trim();
-    const asObj = asRecord(entry);
-    const nested = firstString(asObj["name"], asObj["locality"], asObj["region"], asObj["country"]);
-    if (nested.length > 0) return nested;
-  }
-  return "";
-}
-
-/** Already carries a zone: trailing Z, or ±HH:MM / ±HHMM after the time part. */
-const HAS_TIMEZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
-
-/**
- * Parse a feed timestamp as UTC.
- *
- * The feed emits "2026-07-29T05:08:47" with no zone, and the actor's own docs
- * state the posted date/time is UTC. `new Date(...)` on a bare datetime uses the
- * HOST's timezone, so the developer machine (UTC+5:30) and the production VPS
- * (UTC) would store different `posted_at` values for the identical posting —
- * a discrepancy that only ever shows up as an unexplained off-by-one day.
- */
-function parseDate(value: unknown): Date | null {
-  if (typeof value !== "string" || value.trim().length === 0) return null;
-  const raw = value.trim();
-  const normalised = HAS_TIMEZONE.test(raw) ? raw : `${raw}Z`;
-  const d = new Date(normalised);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-/**
- * Strip a trailing location suffix from a job title.
- *
- * Observed on the live feed (2026-07-29): Speechify posted ONE role as four
- * items — "…Data Infrastructure & Acquisition - Utrecht, Netherlands",
- * "… - Rotterdam, Netherlands", "… - The Hague, Netherlands", and so on.
- *
- * The dedupe key is company + normalised title, so those read as four distinct
- * roles. The soft key doesn't catch them either, because the city tokens differ.
- * Left alone, a 10-posting daily budget gets spent screening the same job
- * repeatedly and the tracker reports a pipeline that does not exist.
- *
- * Only a suffix that actually matches the posting's own derived location is
- * removed — "Engineer - Payments" keeps its suffix, because "Payments" is not
- * where the job is.
- */
-export function stripLocationSuffix(title: string, location: string): string {
-  const locationTokens = new Set(
-    location
-      .toLowerCase()
-      .split(/[,/]/)
-      .map((p) => p.trim())
-      .filter((p) => p.length > 1),
-  );
-  if (locationTokens.size === 0) return title.trim();
-
-  const match = title.match(/^(.*?)[\s]*[-–—(]\s*([^-–—()]+)\)?\s*$/);
-  const head = match?.[1]?.trim();
-  const tail = match?.[2]?.trim().toLowerCase();
-  if (!head || !tail || head.length === 0) return title.trim();
-
-  // Every comma-separated part of the suffix must be part of this job's location.
-  const tailParts = tail.split(",").map((p) => p.trim()).filter((p) => p.length > 1);
-  if (tailParts.length === 0) return title.trim();
-  const isLocationSuffix = tailParts.every((p) => locationTokens.has(p));
-
-  return isLocationSuffix ? head : title.trim();
-}
-
-/**
- * An upstream failure reported INSIDE a successful run, if there is one.
- *
- * This is not hypothetical. On 2026-07-29 the actor exited 0 after 216s having
- * written a single item: `{ error: "Failed to fetch data after 5 attempts: API
- * request failed with status 521" }`. The run succeeded; the feed was down.
- *
- * Without this check that item maps to zero postings and the sweep reports "0
- * postings — a narrow market, not a fault", which is a confident, wrong finding
- * about the Dutch job market derived from a Cloudflare error. An outage must
- * read as an outage.
- */
-export function detectFeedError(items: readonly unknown[]): string | null {
-  for (const raw of items) {
-    const err = asRecord(raw)["error"];
-    if (typeof err === "string" && err.trim().length > 0) return err.trim();
-  }
-  return null;
-}
-
-/**
- * Map dataset items → RawPosting[]. Defensive about field names on purpose:
- * the feed spans ~50 ATS platforms and the aggregator's own enrichment fields
- * come and go between builds.
- *
- * A posting with no description is DROPPED, not passed through. The gates parse
- * the body; screening an empty body would produce a verdict from no evidence,
- * which is the one failure mode this pipeline exists to prevent.
- */
-export function mapAtsItems(items: readonly unknown[]): RawPosting[] {
-  const postings: RawPosting[] = [];
-  for (const raw of items) {
-    const item = asRecord(raw);
-    const org = asRecord(item["organization"]);
-
-    const company = firstString(
-      item["organization"],
-      org["name"],
-      item["organization_name"],
-      item["company"],
-      item["employer_name"],
-    );
-    const title = firstString(item["title"], item["job_title"], item["name"]);
-    const description = firstString(
-      item["description_text"],
-      item["description"],
-      item["job_description"],
-    ).slice(0, DESCRIPTION_MAX);
-
-    if (company.length === 0 || title.length === 0 || description.length === 0) continue;
-
-    const location = firstString(
-      firstOfArray(item["locations_derived"]),
-      firstOfArray(item["locations_raw"]),
-      item["location"],
-      firstOfArray(item["cities_derived"]),
-      firstOfArray(item["countries_derived"]),
-    );
-
-    postings.push({
-      company,
-      title: stripLocationSuffix(title, location),
-      url: firstString(item["url"], item["job_url"], item["apply_url"], item["source_url"]),
-      description,
-      location,
-      postedAt: parseDate(item["date_posted"] ?? item["datePosted"] ?? item["date_created"]),
-    });
-  }
-  return postings;
 }
 
 // ── Network ───────────────────────────────────────────────────────────────────

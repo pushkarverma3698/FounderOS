@@ -10,42 +10,104 @@
  */
 
 /**
- * The three tracks Pushkar applies for (founder direction, 2026-07-31).
+ * The four tracks Pushkar applies for (founder direction, 2026-07-31 / 2026-08-01).
  *
  * Frontend is the deepest track on his CV — three years of production React and
  * Next.js — and until 2026-07-31 it was not searched at all, so the pipeline
  * could not have surfaced the roles he is most obviously qualified for.
+ *
+ * `fullstack` was split out of frontend on 2026-08-01 after the founder reported
+ * seeing no full-stack roles at all. It had been ONE phrase ("Full Stack
+ * Engineer:*") competing with three others inside the frontend track's budget,
+ * which is the same starvation that hid frontend itself a day earlier — one
+ * level down. It is also the track his CV matches most directly: three years of
+ * React + Node + Postgres, shipped.
  */
-export type RoleTrack = "ai" | "backend" | "frontend";
+export type RoleTrack = "ai" | "fullstack" | "backend" | "frontend";
 
+/**
+ * TITLES ARE MATCHED AS SUBSTRINGS, NOT PREFIXES.
+ *
+ * The `:*` suffix reads like a prefix wildcard and the feed's docs describe it
+ * as one, but the live behaviour is a substring match — "Software Engineer:*"
+ * returned "Graduate Software Engineer (2027)" on 2026-08-01. That cuts both
+ * ways, and this list is built around the useful direction: "Backend Engineer"
+ * already covers "Senior Backend Engineer" and "Backend Engineer III", so
+ * seniority prefixes are NOT enumerated here.
+ *
+ * What must be enumerated is every way a company SPELLS the role, because those
+ * are genuinely different substrings:
+ *
+ *   · "Engineer" vs "Developer" — Dutch scale-ups and startups overwhelmingly
+ *     post "Developer"; enterprises post "Engineer". Searching only "Engineer"
+ *     silently selects for large companies, which is the exact bias the founder
+ *     asked to remove ("open the pool for mid sized companies and startups").
+ *   · "Full Stack" vs "Full-Stack" vs "Fullstack" — three distinct substrings
+ *     for one role. Matching one of the three drops roughly two thirds of them.
+ *   · "Founding Engineer" / "Product Engineer" — startup-native titles with no
+ *     enterprise equivalent. A startup's first engineering hire is never
+ *     advertised as "Backend Engineer II".
+ */
 export const TRACK_TITLES: Record<RoleTrack, readonly string[]> = {
   ai: [
     "AI Engineer:*",
+    "AI Developer:*",
     "Machine Learning Engineer:*",
     "LLM Engineer:*",
     "MLOps Engineer:*",
+    "GenAI:*",
+  ],
+  // The bare stem, not "Full Stack Engineer". Substring matching means the stem
+  // covers Engineer, Developer, Architect and Team Lead in one phrase — and it
+  // is the only form that also matches "Full Stack SOFTWARE Engineer", where a
+  // word sits between the two halves. Enumerating the suffixes instead let that
+  // title fall through to the backend track, which is how a full-stack role
+  // ended up counted as something else.
+  fullstack: [
+    "Full Stack:*",
+    "Full-Stack:*",
+    "Fullstack:*",
+    "Founding Engineer:*",
+    "Product Engineer:*",
   ],
   backend: [
     "Backend Engineer:*",
+    "Back End Engineer:*",
+    "Backend Developer:*",
     "Software Engineer:*",
+    "Software Developer:*",
     "Platform Engineer:*",
     "Data Engineer:*",
+    "Node.js Developer:*",
   ],
   frontend: [
     "Frontend Engineer:*",
     "Front End Engineer:*",
-    "Full Stack Engineer:*",
+    "Frontend Developer:*",
+    "Front End Developer:*",
+    "Front-End Developer:*",
     "React Developer:*",
+    "React Engineer:*",
+    "UI Engineer:*",
   ],
 };
 
 /**
- * Priority order. This is NOT cosmetic: the sweep fetches a bounded number of
- * postings a day, so whichever titles the feed matches first spend the budget.
- * AI leads because it is the stated priority; frontend trails because those
- * roles are the easiest to find by hand if the budget runs out.
+ * Priority order. Since 2026-08-01 every track gets its OWN query and its own
+ * budget, so this no longer decides who gets starved — but it still decides two
+ * real things: the order the sweep runs in (so a mid-sweep failure loses the
+ * least important track), and how `classifyTrack` breaks a tie.
+ *
+ * `fullstack` sits above `backend` deliberately: "Full Stack Software Engineer"
+ * contains both "full stack" and "software engineer", and full-stack is the more
+ * specific — and more accurate — reading of that posting.
  */
-export const TRACK_PRIORITY: readonly RoleTrack[] = ["ai", "backend", "frontend"];
+export const TRACK_PRIORITY: readonly RoleTrack[] = [
+  "ai",
+  "fullstack",
+  "backend",
+  "frontend",
+];
 
 /** Titles for the given tracks, in priority order, de-duplicated. */
 export function titlesForTracks(tracks: readonly RoleTrack[]): string[] {
@@ -59,7 +121,8 @@ export function titlesForTracks(tracks: readonly RoleTrack[]): string[] {
  * Deterministic and pure: the same title always lands in the same track, so a
  * shift in the per-track market numbers is attributable to the market rather
  * than to the classifier. A title matching more than one track resolves by
- * TRACK_PRIORITY — "Full Stack" reads as frontend, "AI/Backend" as ai.
+ * TRACK_PRIORITY — "Full Stack Software Engineer" reads as fullstack rather
+ * than backend, and "AI/Backend" as ai.
  *
  * Returns null when nothing matches. That is recorded as "unclassified" rather
  * than forced into a track, because a wrong track silently corrupts the gap
