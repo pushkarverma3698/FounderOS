@@ -41,36 +41,50 @@ import {
 import { recordSignals, UNCLASSIFIED_TRACK } from "../../db/cv-signal-queries.js";
 import { classifyTrack } from "./tracks.js";
 import { signalsForPosting } from "./skills.js";
+import { experienceGate } from "./experience.js";
+import { combineVerdict, serialiseGates, type Gate, type ScreenVerdict } from "./gates.js";
+import { formatScreenOutcome } from "./screen-format.js";
 import type { JobApplication } from "../../db/schema.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 
 const log = childLogger({ module: "tool:screen_job" });
 
+// Re-exported so callers keep one import site for the screening vocabulary.
+export { combineVerdict } from "./gates.js";
+export { formatScreenOutcome } from "./screen-format.js";
+export type { Gate, ScreenVerdict } from "./gates.js";
+
 /** Stages that mean the founder has already engaged — never silently re-screen over them. */
 const ENGAGED_STAGES = new Set(["drafted", "awaiting_approval", "applied", "replied"]);
 
-interface Gate {
-  readonly gate: string;
-  readonly status: ScreenStatus;
-  readonly evidence: string;
-}
-
-export interface ScreenVerdict {
-  readonly status: ScreenStatus;
-  /** One line per gate, in the order they were applied. */
-  readonly reasons: readonly string[];
-}
-
 /**
- * Combine the individual gate results into one verdict.
- * `reject` is absorbing — one legally impossible gate makes the posting void
- * regardless of how well it scores elsewhere.
+ * Below this many characters, the body is a teaser rather than a job ad.
+ *
+ * The salary, language and experience gates all read the body, so a 200-character
+ * stub produces three confident verdicts from evidence that was never fetched.
+ * The posting is still SCREENED and still STORED — it is flagged instead, with
+ * the reason, so a thin feed reads as a thin feed rather than as a quiet market.
+ *
+ * Deliberately the same number as `MIN_DESCRIPTION_CHARS` in indeed-source.ts,
+ * which drops thin rows before they ever reach here. Two different thresholds
+ * for "too thin to judge" would mean a body Indeed considered unusable arriving
+ * from the ATS feed and being screened as if it were complete. Not imported from
+ * there — a pure gate must not depend on a network module — so the equality is
+ * asserted in tests/unit/jobhunt/thin-body.test.ts instead.
  */
-export function combineVerdict(gates: readonly Gate[]): ScreenVerdict {
-  const reasons = gates.map((g) => `${g.gate}: ${g.evidence}`);
-  if (gates.some((g) => g.status === "reject")) return { status: "reject", reasons };
-  if (gates.some((g) => g.status === "flag")) return { status: "flag", reasons };
-  return { status: "pass", reasons };
+export const THIN_BODY_CHARS = 400;
+
+/** Flags a body too short to have carried the evidence the other gates read. */
+export function postingGate(description: string): Gate | null {
+  if (description.trim().length >= THIN_BODY_CHARS) return null;
+  return {
+    gate: "Posting",
+    status: "flag",
+    evidence:
+      `Only ${description.trim().length} characters of job ad reached us, so the ` +
+      `salary, language and experience checks below had almost nothing to read. ` +
+      `Open the link before trusting any of them.`,
+  };
 }
 
 /** Which concrete routes to screen a posting under. `unclear` gets both. */
@@ -216,15 +230,22 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   // Screen under every basis that could lawfully carry this posting; the best
   // outcome wins. A role rejected on one basis and reachable on another is a real
   // opportunity, and the single-basis design discarded it without a trace.
+  // Level and body-completeness do not vary by permit basis, so they are built
+  // once and shared across the routes rather than recomputed per route.
+  const experience = experienceGate(description, title);
+  const posting = postingGate(description);
+
   const outcomes = routesToScreen(facts.route).map((route) => {
     const profile = gateProfile(route);
     const salary = screenSalaryFacts(facts.salary, { route });
     const gates: Gate[] = [
+      ...(posting ? [posting] : []),
       profile.sponsorRequired
         ? sponsorGate(match, stale)
         : { gate: "Basis", status: "pass" as ScreenStatus, evidence: profile.basis },
       { gate: profile.salaryFloorApplies ? "Salary" : "Rate", ...salary },
       { gate: "Language", ...language },
+      experience,
     ];
     return { route, verdict: combineVerdict(gates) };
   });
@@ -250,6 +271,12 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
       sponsor_verdict: match.verdict,
       salary_status: chosen.verdict.status,
       salary_evidence: chosen.verdict.reasons.join(" | ").slice(0, 2000),
+      // The gates WITH their statuses. `salary_evidence` above is the same
+      // information flattened for human eyes and is kept for that; it is not the
+      // source the brief reads, because a flat string cannot say which check
+      // failed — which is precisely how a passing sponsor line ended up printed
+      // as the reason a row needed attention.
+      gate_json: serialiseGates(chosen.verdict.gates),
       stage: "screened",
       description: description.slice(0, DESCRIPTION_MAX),
       posted_at: input.postedAt ?? null,
@@ -342,53 +369,3 @@ export const screenJobTool: UnifiedTool = {
     return { success: true, data: formatScreenOutcome(outcome) };
   },
 };
-
-/** Render a screening outcome for the founder. Pure — no I/O, no state. */
-export function formatScreenOutcome(
-  outcome: Extract<ScreenOutcome, { kind: "duplicate" | "screened" }>,
-): string {
-  if (outcome.kind === "duplicate") {
-    const applied = outcome.appliedAt
-      ? ` (applied ${outcome.appliedAt.toISOString().slice(0, 10)})`
-      : "";
-    return (
-      `ALREADY IN PIPELINE — ${outcome.company} · ${outcome.title}\n` +
-      `Stage: ${outcome.stage}${applied}\n` +
-      `Do not apply again. Follow up on the existing application instead.`
-    );
-  }
-
-  const { company, title, route, verdict, routesTried, match, nearDuplicates } = outcome;
-  const routeLabel = gateProfile(route).label;
-  const header =
-    verdict.status === "reject"
-      ? `REJECT — ${company} · ${title}\nDo not apply. Reasons below are legal bars, not preferences. (Best of ${routesTried} route(s); shown: ${routeLabel}.)`
-      : verdict.status === "flag"
-        ? `NEEDS A HUMAN CHECK — ${company} · ${title}\nOne or more gates could not be settled from the posting alone. (${routeLabel})`
-        : `PASS — ${company} · ${title}\nClears every hard gate on the ${routeLabel}. Safe to research and draft.`;
-
-  // When a basis without a sponsor requirement wins, the sponsor position is
-  // never mentioned in the winning basis's reasons — so a founder weighing the
-  // more secure HSM footing would not learn the employer is not a recognised
-  // sponsor. State it explicitly rather than let the good news hide it.
-  const sponsorNote =
-    !gateProfile(route).sponsorRequired && match.verdict === "not-sponsor"
-      ? `\n\nWorth knowing: this employer is absent from the IND recognised-sponsor register, ` +
-        `so the HSM route is not open here today without them applying for recognition.`
-      : "";
-
-  const candidates =
-    match.candidates.length > 0
-      ? `\n\nRegister entries to disambiguate:\n${match.candidates.slice(0, 8).map((c) => `  · ${c}`).join("\n")}`
-      : "";
-
-  const nearDupeWarning =
-    nearDuplicates.length > 0
-      ? `\n\n⚠ POSSIBLE RE-POST of a role already in the tracker:\n${nearDuplicates
-          .slice(0, 3)
-          .map((d) => `  · "${d.title}" (${d.stage})`)
-          .join("\n")}\nCheck before applying — the titles differ but the words are the same.`
-      : "";
-
-  return `${header}\n\n${verdict.reasons.map((r) => `  · ${r}`).join("\n")}${sponsorNote}${candidates}${nearDupeWarning}`;
-}

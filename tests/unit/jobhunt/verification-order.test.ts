@@ -12,7 +12,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { headlineFor, verificationTargets } from "../../../src/tools/jobhunt/daily-brief.js";
+import { verificationTargets } from "../../../src/tools/jobhunt/daily-brief.js";
+import { trimToSentence } from "../../../src/tools/jobhunt/brief-row.js";
 import type { OverlapResult } from "../../../src/tools/jobhunt/overlap.js";
 
 function overlap(matched: number, asked: number): OverlapResult {
@@ -64,35 +65,29 @@ describe("verificationTargets", () => {
   });
 });
 
-describe("headlineFor", () => {
-  const base = { salary_status: "flag", salary_evidence: null } as never;
-
+describe("trimToSentence", () => {
   it("ends on a sentence boundary instead of mid-word", () => {
     // Live 2026-07-31: the sponsor gate rendered "…permit. They c".
     const long =
       '"Ottimate" is absent from the recognised-sponsor register. ' +
       "They cannot lawfully sponsor a highly skilled migrant permit. " +
       "They could still hire on another basis entirely, which is a separate question.";
-    const out = headlineFor({ ...base, salary_evidence: long });
+    const out = trimToSentence(long, 160);
     expect(out.length).toBeLessThanOrEqual(160);
     expect(out.endsWith(".")).toBe(true);
     expect(out).toContain("cannot lawfully sponsor");
   });
 
-  it("leaves a short headline untouched", () => {
-    const short = "Exact register match: \"BridgeFund B.V.\".";
-    expect(headlineFor({ ...base, salary_evidence: short })).toBe(short);
+  it("leaves a short line untouched", () => {
+    const short = 'Exact register match: "BridgeFund B.V.".';
+    expect(trimToSentence(short, 160)).toBe(short);
   });
 
   it("falls back to a word boundary with an ellipsis when there is no sentence stop", () => {
-    const out = headlineFor({ ...base, salary_evidence: "word ".repeat(60) });
+    const out = trimToSentence("word ".repeat(60), 160);
     expect(out.length).toBeLessThanOrEqual(161);
-    expect(out.endsWith("…")).toBe(true);
-    expect(out).not.toMatch(/\s…$/);
-  });
-
-  it("reports the verdict when there is no evidence at all", () => {
-    expect(headlineFor({ ...base, salary_status: "pass", salary_evidence: null })).toBe("PASS");
+    expect(out.endsWith("\u2026")).toBe(true);
+    expect(out).not.toMatch(/\s\u2026$/);
   });
 });
 

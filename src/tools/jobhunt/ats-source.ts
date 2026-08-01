@@ -114,16 +114,22 @@ export const DEFAULT_TITLES: readonly string[] = titlesForTracks(TRACK_PRIORITY)
 export const DEFAULT_LOCATIONS: readonly string[] = ["Netherlands"];
 
 /**
- * 0-2 through 5-10. `10+` stays out: a posting at that level screening as PASS
- * is a role he would not be shortlisted for, which wastes the day's budget.
+ * 0-2 and 2-5. `5-10` and `10+` stay out.
  *
- * `5-10` was previously excluded on the grounds that the permit's under-30
- * salary band is the cheaper hire. That is HSM reasoning, and it only binds
- * under HSM. Under a partner permit or a remote contract there is no band to
- * stay under and a senior role simply pays more — so the old default capped the
- * ceiling for two of the three live bases.
+ * `5-10` was added on 2026-07-31 on the argument that the permit's under-30
+ * salary band is HSM reasoning which does not bind on a partner permit or a
+ * remote contract. That argument was about the PERMIT and ignored the hiring
+ * manager: on 2026-08-01 the founder's verdict on seeing a "Senior Platform
+ * Engineer" in his brief was "no one will give a job to a 3 year or 4 year of
+ * experience while applying for platform engineer". He is right — the permit
+ * allowing a role does not mean a shortlist would.
+ *
+ * This is a COST filter, not the guarantee. The feed's band is an AI-inferred
+ * label and it is wrong often enough that some 5+ year roles still arrive; the
+ * `Experience` gate (experience.ts) is what actually rejects them, on the years
+ * the employer wrote down, and every one of those rejects is stored and shown.
  */
-export const DEFAULT_EXPERIENCE: readonly string[] = ["0-2", "2-5", "5-10"];
+export const DEFAULT_EXPERIENCE: readonly string[] = ["0-2", "2-5"];
 
 // ── Source pools ──────────────────────────────────────────────────────────────
 
@@ -137,22 +143,38 @@ export const DEFAULT_EXPERIENCE: readonly string[] = ["0-2", "2-5", "5-10"];
  * means no office at all (so there is nothing to relocate to, and only a remote
  * contract applies).
  */
-export type SourcePool = "nl-onsite" | "nl-remote" | "eu-remote-global";
+export type SourcePool = "netherlands" | "eu-remote-global";
 
 export const POOL_QUERIES: Record<SourcePool, AtsQuery> = {
-  /** On-site and hybrid roles in NL — the classic sponsored relocation. */
-  "nl-onsite": { workArrangements: ["On-site", "Hybrid"] },
-  /** Remote roles at employers with a Dutch office — lawful under HSM or a partner permit. */
-  "nl-remote": { workArrangements: ["Remote OK"] },
+  /**
+   * Every Netherlands role, whatever the desk arrangement.
+   *
+   * Was TWO queries until 2026-08-01 — `nl-onsite` (On-site + Hybrid) and
+   * `nl-remote` (Remote OK) — which differed in exactly one field:
+   * `aiWorkArrangementFilter`. Both carried `locationSearch: ["Netherlands"]`,
+   * both ran once per track, and both were billed a separate actor start every
+   * day. Four wasted starts a day buying a distinction we can make for free
+   * from the work-arrangement field the feed already returns on every posting.
+   *
+   * Merging them is the founder's own instruction ("Do not waste the costs and
+   * credits") applied to the cheapest available saving: 12 ATS runs per sweep
+   * become 8, with identical coverage.
+   */
+  netherlands: { workArrangements: ["On-site", "Hybrid", "Remote OK"] },
   /**
    * Office-less remote roles, location filter deliberately dropped (see
    * `omitLocation`). Scoped to EU employers downstream, not here: a US company
    * hiring a contractor in India is income, not a step toward the Netherlands.
+   *
+   * CANNOT be merged into the pool above, and the reason is not stylistic: it
+   * omits `locationSearch` entirely. A posting with a null `locations_derived`
+   * is unreachable while ANY location filter is set, per the feed's own docs, so
+   * folding this into the Netherlands query would silently return zero of them.
    */
   "eu-remote-global": { workArrangements: ["Remote Solely"], omitLocation: true },
 };
 
-export const POOL_ORDER: readonly SourcePool[] = ["nl-onsite", "nl-remote", "eu-remote-global"];
+export const POOL_ORDER: readonly SourcePool[] = ["netherlands", "eu-remote-global"];
 
 /**
  * Feed parameters that must NEVER appear in a request, and why.

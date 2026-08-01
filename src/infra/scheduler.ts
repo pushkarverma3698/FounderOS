@@ -322,14 +322,23 @@ export async function runJobIngestSweep(): Promise<void> {
 }
 
 /**
- * Founder-approved daily volume, raised from 10 on 2026-07-31: ~$12/month at the
- * feed's per-job price.
+ * Daily ATS volume, as a TOTAL split evenly across the sweep's ATS queries.
  *
- * Three tracks need roughly three times the volume of one. At 10/day split
- * across ai, backend and frontend, every track sits permanently below
- * MIN_SAMPLE_FOR_PERCENTAGES and no gap report is ever reportable.
+ * The number was 30 and it capped nothing. The sweep runs one query per
+ * (pool × track) and the actor rejects any limit below 10, so the real budget is
+ * `max(10, floor(total / queries))` per query — and at 30 across 8 queries that
+ * floor won every time. The sweep was quietly free to fetch 100 postings while
+ * a constant named DAILY_LIMIT said 30. A budget that does not bind is worse
+ * than no budget: it is a number the founder would reason about that has no
+ * relationship to what is spent.
+ *
+ * 80 across 8 ATS queries is 10 each — the floor, stated honestly. With the two
+ * Indeed queries the sweep's ceiling is 100 postings a day, and at the FREE-tier
+ * ATS price ($0.01/start + $0.012/job) that is at most ~$1.06/day. What it
+ * ACTUALLY costs is now recorded per query in `job_ingest_runs` and printed in
+ * the brief, so this comment can never quietly become fiction again.
  */
-const JOB_INGEST_DAILY_LIMIT = 30;
+const JOB_INGEST_DAILY_LIMIT = 80;
 
 export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }): void {
   cron.schedule("0 9 * * *", () => {

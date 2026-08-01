@@ -90,6 +90,42 @@ describe("askInstruction", () => {
     expect(out).toMatch(/do not ask about the role in general/i);
     expect(out).toMatch(/Do NOT send/i);
   });
+
+  it("sends ONLY the unresolved check to the model, never the passing ones", () => {
+    // The 2026-08-01 defect. This pasted every gate — passing ones included —
+    // under the heading "What is unresolved", so the model wrote a generic
+    // question. The founder gets one message to an employer; spending it on a
+    // check that already passed wastes it.
+    const row = {
+      ...ROW,
+      gate_json: JSON.stringify([
+        { gate: "Sponsor", status: "pass", evidence: "Exact register match." },
+        { gate: "Salary", status: "flag", evidence: "No salary stated in the ad." },
+        { gate: "Language", status: "pass", evidence: "No Dutch requirement found." },
+      ]),
+    } as unknown as JobApplication;
+
+    const out = askInstruction(row);
+    const unresolved = out.slice(out.indexOf("UNRESOLVED"), out.indexOf("ALREADY SETTLED"));
+
+    expect(unresolved).toContain("No salary stated");
+    expect(unresolved).not.toContain("Exact register match");
+    expect(unresolved).not.toContain("No Dutch requirement");
+    // The passing checks are still supplied — as context, clearly fenced off.
+    expect(out).toMatch(/ALREADY SETTLED[\s\S]*Exact register match/);
+    expect(out).toMatch(/do NOT ask about these/i);
+  });
+
+  it("admits it cannot tell which check passed on a pre-gate_json row", () => {
+    // Every production row on 2026-08-01 predates the column, so every check on
+    // them reads as unresolved. Handing the model three checks and calling all
+    // three open — without saying we don't actually know — would reproduce the
+    // exact defect this change closes, one layer down.
+    const out = askInstruction(ROW);
+    expect(out).toContain("Partner permit");
+    expect(out).toContain("cannot tell which of these");
+    expect(out).not.toContain("ALREADY SETTLED");
+  });
 });
 
 describe("unknownCommandReply", () => {

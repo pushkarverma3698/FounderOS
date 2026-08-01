@@ -34,7 +34,12 @@ function row(overrides: Partial<BriefRow> = {}): BriefRow {
     url: "https://example.com/1",
     overlap: { matched: ["TypeScript"], missing: [], asked: 1, ratio: 1 },
     liveness: "live",
-    headline: "Sponsor: exact register match",
+    gates: [
+      { gate: "Sponsor", status: "pass", evidence: "Exact register match: \"Adyen N.V.\"." },
+      { gate: "Salary", status: "pass", evidence: "Stated €65,000 clears the €52,284 criterion." },
+      { gate: "Language", status: "pass", evidence: "No Dutch-language requirement found." },
+    ],
+    legacyGates: false,
     ageDays: 0,
     ...overrides,
   };
@@ -148,18 +153,45 @@ describe("formatDailyBrief", () => {
     expect(out).not.toContain("✕ closed");
   });
 
-  it("groups rejects by reason with counts", () => {
+  it("names every rejected company rather than collapsing them into a count", () => {
+    // Rejects used to be grouped by reason and printed as "Dutch required ×2",
+    // which saved two lines and cost the founder the only thing he could act on:
+    // WHICH companies. He asked for "each and every info why this is choosen"
+    // (2026-08-01), and a tally answers the question nobody asked.
     const out = formatDailyBrief(
       input({
         rows: [
-          row({ id: "a", verdict: "reject", headline: "Dutch required" }),
-          row({ id: "b", verdict: "reject", headline: "Dutch required" }),
+          row({ id: "a", company: "Alpha", verdict: "reject", gates: [{ gate: "Language", status: "reject", evidence: "Dutch required" }] }),
+          row({ id: "b", company: "Beta", verdict: "reject", gates: [{ gate: "Language", status: "reject", evidence: "Dutch required" }] }),
         ],
       }),
     );
     expect(out).toContain("NOT LAWFUL (2)");
+    expect(out).toContain("Alpha");
+    expect(out).toContain("Beta");
     expect(out).toContain("Dutch required");
-    expect(out).toContain("×2");
+  });
+
+  it("separates a level bar from a legal one", () => {
+    // "Not lawful" is a fact about the permit system; "too senior" is a fact
+    // about this posting, and a run full of the second means the search terms
+    // are aimed above his level. Collapsing them hides that signal.
+    const out = formatDailyBrief(
+      input({
+        rows: [
+          row({ id: "a", company: "Alpha", verdict: "reject", gates: [{ gate: "Language", status: "reject", evidence: "Dutch required" }] }),
+          row({
+            id: "b",
+            company: "Beta",
+            verdict: "reject",
+            gates: [{ gate: "Experience", status: "reject", evidence: "Asks for 8 years minimum" }],
+          }),
+        ],
+      }),
+    );
+    expect(out).toContain("NOT LAWFUL (1)");
+    expect(out).toContain("TOO SENIOR / TOO JUNIOR (1)");
+    expect(out).toContain("Asks for 8 years minimum");
   });
 
   it("nags when PASS roles sit undrafted, and names drafting as the bottleneck", () => {
