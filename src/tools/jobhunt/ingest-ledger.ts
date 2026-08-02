@@ -40,12 +40,16 @@ function tally(lines: readonly IngestLine[]): {
   passed: number;
   flagged: number;
   rejected: number;
+  fresh: number;
 } {
   return {
     screened: lines.length,
     passed: lines.filter((l) => l.outcome === "pass").length,
     flagged: lines.filter((l) => l.outcome === "flag").length,
     rejected: lines.filter((l) => l.outcome === "reject").length,
+    // The yield that decides whether this query is worth running again. Every
+    // other count here goes up when the feed re-sells us yesterday's postings.
+    fresh: lines.filter((l) => l.isNew).length,
   };
 }
 

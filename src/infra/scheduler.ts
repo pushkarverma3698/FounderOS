@@ -246,8 +246,14 @@ export async function recoverStrandedReminders(): Promise<void> {
   }
 }
 
+// 01:30 UTC = 07:00 IST, every THIRD day (founder decision, 2026-08-02). The
+// feed bills per job RETURNED, so cadence changes only how often we re-buy the
+// same posting: the 2026-08-02 sweep was billed for 32 of which ZERO were new,
+// and daily bought that inventory three times over ($14.05/mo against $4.68).
+export const JOB_SWEEP_CRON = "30 1 */3 * *";
+
 /**
- * Daily — sweep every source pool, screen everything, and send a BRIEF.
+ * Every third day — sweep every source pool, screen everything, send a BRIEF.
  *
  * Zero-LLM: the fetch is HTTP, every gate is pure code, and ranking is a set
  * intersection, so this runs unattended without touching the model budget.
@@ -363,8 +369,7 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
   cron.schedule("0 2 * * *", () => {
     runBrainSync().catch((err) => log.error({ err: (err as Error).message }, "Auto brain sync cron error"));
   });
-  // 01:30 UTC = 07:00 IST — the sweep lands before the founder's day starts.
-  cron.schedule("30 1 * * *", () => {
+  cron.schedule(JOB_SWEEP_CRON, () => {
     runJobIngestSweep().catch((err) =>
       log.error({ err: (err as Error).message }, "Job ingest sweep cron error"),
     );
