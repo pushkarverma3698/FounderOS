@@ -44,6 +44,11 @@ export interface SpendLine {
   readonly returned: number;
   readonly costUsd: number;
   readonly failed: number;
+  /**
+   * Postings the tracker had never seen. The only number here that says whether
+   * the money bought anything — `returned` is what we were BILLED for.
+   */
+  readonly fresh: number;
 }
 
 function pluralDays(n: number): string {
@@ -234,10 +239,22 @@ export function renderSpend(spend: SpendLine): string {
     spend.failed > 0
       ? ` <b>${spend.failed} of them failed</b> and were still billed for starting.`
       : "";
+  // A SWEEP THAT BOUGHT NOTHING NEW MUST NOT READ AS A NORMAL MORNING. On
+  // 2026-08-02 the sweep returned 32 postings for $0.4682 and every one was
+  // already stored; the line said "for 32 postings" and looked like any other
+  // day. The feed bills per job returned, so `returned` is the invoice and
+  // `fresh` is the only part of it that was worth paying for — and a zero
+  // stated as a bare digit is exactly the kind of quiet that has cost this
+  // pipeline weeks before.
+  const yielded =
+    spend.fresh === 0
+      ? ` <b>None of them new</b> — every posting was already in your list, ` +
+        `so today's fetch bought nothing the pipeline did not already have.`
+      : ` <b>${spend.fresh} new</b>, the rest already in your list.`;
   return (
     `<b>💰 WHAT TODAY COST</b>\n` +
     `$${spend.costUsd.toFixed(2)} across ${plural(spend.runs, "feed call", "feed calls")}, ` +
-    `for ${plural(spend.returned, "posting", "postings")}.${failed}\n` +
+    `for ${plural(spend.returned, "posting", "postings")}.${yielded}${failed}\n` +
     `<i>Estimated from the actors' posted per-job prices, not from an invoice.</i>`
   );
 }

@@ -26,6 +26,15 @@ export interface IngestLine {
   readonly title: string;
   readonly outcome: "pass" | "flag" | "reject" | "duplicate" | "error";
   readonly detail: string;
+  /**
+   * Whether this posting had never been stored before.
+   *
+   * The feed bills per job RETURNED, so the cost of a sweep is fixed by supply
+   * and the VALUE of one is fixed by how much of that supply is new. Only an
+   * actual screening can answer it: an error never saw the tracker, and a
+   * duplicate is by definition not new.
+   */
+  readonly isNew: boolean;
 }
 
 export interface IngestSummary {
@@ -77,6 +86,7 @@ export async function screenBatch(postings: readonly RawPosting[]): Promise<Inge
           title: posting.title,
           outcome: "error",
           detail: outcome.message,
+          isNew: false,
         });
       } else if (outcome.kind === "duplicate") {
         lines.push({
@@ -84,6 +94,7 @@ export async function screenBatch(postings: readonly RawPosting[]): Promise<Inge
           title: posting.title,
           outcome: "duplicate",
           detail: `already in pipeline at stage "${outcome.stage}"`,
+          isNew: false,
         });
       } else {
         lines.push({
@@ -91,6 +102,7 @@ export async function screenBatch(postings: readonly RawPosting[]): Promise<Inge
           title: outcome.title,
           outcome: outcome.verdict.status,
           detail: outcome.verdict.reasons[0] ?? outcome.route,
+          isNew: outcome.isNew,
         });
       }
     } catch (err) {
@@ -99,6 +111,7 @@ export async function screenBatch(postings: readonly RawPosting[]): Promise<Inge
         title: posting.title,
         outcome: "error",
         detail: (err as Error).message,
+        isNew: false,
       });
     }
   }

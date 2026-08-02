@@ -82,6 +82,14 @@ const INDEED_MAX_AGE_DAYS = 3;
 
 export interface PooledIngest {
   readonly fetched: number;
+  /**
+   * Of everything fetched, how many the tracker had never seen.
+   *
+   * `fetched` is what the feed BILLED for; this is what it bought. On
+   * 2026-08-02 the two were 32 and 0 — the sweep paid full price to re-screen
+   * the previous sweep, and every number the pipeline reported went up anyway.
+   */
+  readonly fresh: number;
   readonly lines: readonly IngestLine[];
   /** One entry per source that failed. An outage must read as an outage. */
   readonly failures: readonly string[];
@@ -312,10 +320,13 @@ export async function runPooledIngest(opts: {
     }
   }
 
+  const fresh = lines.filter((l) => l.isNew).length;
+
   log.info(
     {
       sweepId,
       fetched,
+      fresh,
       perTrack,
       pools: POOL_ORDER.length,
       failures: failures.length,
@@ -323,5 +334,5 @@ export async function runPooledIngest(opts: {
     },
     "Pooled job ingest complete",
   );
-  return { fetched, lines, failures, notes, perTrack, sweepId };
+  return { fetched, fresh, lines, failures, notes, perTrack, sweepId };
 }

@@ -132,6 +132,16 @@ export type ScreenOutcome =
       readonly routesTried: number;
       readonly match: SponsorMatch;
       readonly nearDuplicates: readonly JobApplication[];
+      /**
+       * Whether the tracker had never seen this posting before.
+       *
+       * Free: the existing row is already loaded above to check for engagement.
+       * Reported because the feed bills per job RETURNED, so a sweep that
+       * re-buys yesterday's inventory costs full price — and on 2026-08-02 one
+       * did, screening 27 postings for $0.4682 and adding zero rows. Without
+       * this flag that morning was indistinguishable from a productive one.
+       */
+      readonly isNew: boolean;
     };
 
 /**
@@ -313,6 +323,7 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
     routesTried: outcomes.length,
     match,
     nearDuplicates,
+    isNew: existing === null,
   };
 }
 
