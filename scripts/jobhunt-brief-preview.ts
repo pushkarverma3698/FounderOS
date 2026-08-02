@@ -106,7 +106,7 @@ const input: BriefInput = {
     "Indeed NL: 8 listing(s) skipped — the employer has already closed them.",
     "ATS india/backend: 3 repeat listing(s) collapsed — the feed returned the same role more than once. Billed for, screened once.",
   ],
-  spend: { runs: 14, returned: 61, costUsd: 0.91, failed: 0 },
+  spend: { runs: 14, returned: 61, costUsd: 0.91, failed: 0, fresh: 9 },
   trends: [
     { track: "ai", sampleSize: 11, term: "LangChain", seenCount: 7, absentDays: 12 },
     { track: "fullstack", sampleSize: 14, term: "Kubernetes", seenCount: 9, absentDays: 21 },

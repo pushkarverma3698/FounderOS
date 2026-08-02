@@ -271,7 +271,10 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
  * of quiet wrongness that gets believed for a month.
  */
 async function todaysSpend(now: Date): Promise<SpendLine | undefined> {
-  const since = new Date(now.getTime() - 86_400_000);
+  // Three days, matching the sweep cadence. A 24-hour window on a sweep that
+  // runs every third day reports "$0.00" on two mornings out of three, which
+  // reads as a free pipeline rather than as a window that missed the run.
+  const since = new Date(now.getTime() - 3 * 86_400_000);
   try {
     const window = await summariseSpend(since);
     return window.runs === 0
@@ -281,6 +284,7 @@ async function todaysSpend(now: Date): Promise<SpendLine | undefined> {
           returned: window.returned,
           costUsd: window.costUsd,
           failed: window.failed,
+          fresh: window.fresh,
         };
   } catch (err) {
     // allow-failopen: the cost line is context, and losing the whole brief over

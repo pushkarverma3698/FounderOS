@@ -33,6 +33,8 @@ export interface SpendWindow {
   readonly costUsd: number;
   /** Calls that failed. Still billed a start, so still part of the cost. */
   readonly failed: number;
+  /** Postings never seen before. `returned` is the bill; this is what it bought. */
+  readonly fresh: number;
 }
 
 /**
@@ -55,6 +57,7 @@ export async function summariseSpend(
       passed: sql<number>`coalesce(sum(${jobIngestRuns.passed}), 0)`,
       cost: sql<string>`coalesce(sum(${jobIngestRuns.estimated_cost_usd}), 0)`,
       failed: sql<number>`count(*) filter (where ${jobIngestRuns.error} is not null)`,
+      fresh: sql<number>`coalesce(sum(${jobIngestRuns.fresh}), 0)`,
     })
     .from(jobIngestRuns)
     .where(
@@ -71,6 +74,7 @@ export async function summariseSpend(
     passed: Number(row?.passed ?? 0),
     costUsd: Number(row?.cost ?? 0),
     failed: Number(row?.failed ?? 0),
+    fresh: Number(row?.fresh ?? 0),
   };
 }
 

@@ -1159,6 +1159,18 @@ export const jobIngestRuns = agentsSchema.table(
     flagged: integer("flagged").notNull().default(0),
     rejected: integer("rejected").notNull().default(0),
 
+    /**
+     * Postings this query found that the tracker had never seen.
+     *
+     * The only column here that says whether the money bought anything.
+     * `returned` is what the feed BILLED us for, and on 2026-08-02 a sweep was
+     * billed for 32 postings of which zero were new. Recorded per QUERY, not
+     * per sweep, because "which pool still finds new roles" is what decides
+     * where to cut cost — and that is not recoverable from job_applications,
+     * which never records which query found a row.
+     */
+    fresh: integer("fresh").notNull().default(0),
+
     /** Our arithmetic over the posted per-job + per-start prices. Not an invoice. */
     estimated_cost_usd: numeric("estimated_cost_usd").notNull().default("0"),
 
