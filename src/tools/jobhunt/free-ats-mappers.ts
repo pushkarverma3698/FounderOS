@@ -72,10 +72,23 @@ function asId(value: unknown): string {
  * is of UNKNOWN age, and treating unknown as fresh is how a three-year-old
  * listing reaches the top of a brief that promised the founder new roles.
  */
+
+/** A numeric timestamp at/above this is epoch milliseconds (Sept 2001 in ms). */
+const EPOCH_MS_FLOOR = 1e12;
+/** …between this and EPOCH_MS_FLOOR it can only be epoch SECONDS (Sept 2001 in s). */
+const EPOCH_SECONDS_FLOOR = 1e9;
+
 export function parsePostedAt(value: unknown): Date | null {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
-    const fromEpoch = new Date(value);
-    return Number.isNaN(fromEpoch.getTime()) ? null : fromEpoch;
+    // Both bounds are September 2001. At or above EPOCH_MS_FLOOR the number can
+    // only be milliseconds; between the two it can only be SECONDS (as ms it
+    // would date the posting to the early 1970s, and a 1970 date is worse than
+    // null — the freshness filter would count it "stale" when the truth is we
+    // never knew its age); below EPOCH_SECONDS_FLOOR it is neither, and undated
+    // is the honest answer.
+    if (value >= EPOCH_MS_FLOOR) return new Date(value);
+    if (value >= EPOCH_SECONDS_FLOOR) return new Date(value * 1000);
+    return null;
   }
   if (typeof value === "string" && value.trim().length > 0) {
     const parsed = new Date(value.trim());

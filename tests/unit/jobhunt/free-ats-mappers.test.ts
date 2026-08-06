@@ -246,6 +246,21 @@ describe("parsePostedAt", () => {
     const parsed = parsePostedAt(value);
     expect(parsed).toBeNull();
   });
+
+  it("reads a plausible epoch in SECONDS as seconds, not as 1970 milliseconds", () => {
+    // 1754400000 is 2025-08-05 in seconds — and 1970-01-21 if read as ms. The
+    // 1970 reading is worse than null: the freshness window then drops the row
+    // as "stale", which mislabels a fresh posting as an old one.
+    const parsed = parsePostedAt(1_754_400_000);
+    expect(parsed?.toISOString()).toBe("2025-08-05T13:20:00.000Z");
+  });
+
+  it("returns null for a numeric timestamp too small to be a real posting date", () => {
+    // A tiny number is neither a credible seconds nor ms timestamp. Undated is
+    // the honest answer — the filter counts "undated" as its own bucket.
+    expect(parsePostedAt(5)).toBeNull();
+    expect(parsePostedAt(999)).toBeNull();
+  });
 });
 
 describe("toRawPosting", () => {

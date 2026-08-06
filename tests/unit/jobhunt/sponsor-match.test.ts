@@ -43,6 +43,29 @@ describe("normaliseCompanyName", () => {
     expect(normaliseCompanyName("Nedap N.V.")).toBe("nedap");
   });
 
+  it("strips non-Dutch legal suffixes the board registry and paid feed actually carry", () => {
+    // The free-board registry names employers as their board does ("Exploding
+    // Kittens, Inc.") while the paid feed names them as the ad does ("Exploding
+    // Kittens"). dedupeKey() builds on this function, so a suffix that survives
+    // here splits one job into two rows — one per lane.
+    expect(normaliseCompanyName("Exploding Kittens, Inc.")).toBe("exploding kittens");
+    expect(normaliseCompanyName("Zeeco, Inc.")).toBe("zeeco");
+    expect(normaliseCompanyName("Infosys Pvt. Ltd.")).toBe("infosys");
+    // Spelled-out and abbreviated forms of the same legal form must agree —
+    // prod row "Hybrid Laboratories India Private Limited" is the live case.
+    expect(normaliseCompanyName("Hybrid Laboratories India Private Limited")).toBe(
+      "hybrid laboratories india",
+    );
+    expect(normaliseCompanyName("Zalando SE")).toBe("zalando");
+    expect(normaliseCompanyName("Celonis GmbH")).toBe("celonis");
+  });
+
+  it("never strips a legal token that is the whole name, or a non-trailing one", () => {
+    // The guard is positional: only TRAILING tokens are legal-form noise.
+    expect(normaliseCompanyName("Ltd")).toBe("ltd");
+    expect(normaliseCompanyName("Co & Co Amsterdam")).toBe("co co amsterdam");
+  });
+
   it("is idempotent", () => {
     const once = normaliseCompanyName("Booking.com B.V.");
     expect(normaliseCompanyName(once)).toBe(once);
