@@ -33,6 +33,7 @@ function row(over: Partial<BriefRow> & Pick<BriefRow, "id">): BriefRow {
     track: "backend",
     verdict: "pass",
     route: "hsm",
+    country: "NL",
     url: "https://example.com/1",
     overlap: { matched: ["TypeScript", "PostgreSQL"], missing: ["Go"], asked: 3, ratio: 0.67 },
     liveness: "live",

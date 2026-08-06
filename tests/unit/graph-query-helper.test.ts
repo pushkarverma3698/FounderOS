@@ -8,7 +8,7 @@ import {
   findDepartmentsByTool,
   findAgentsByDepartment,
   getGraphSummary,
-} from "../../scripts/graph-query-helper";
+} from "../../scripts/graph-query-helper.js";
 
 // These tests guard against the 2026-06-23 regression where findToolsByDepartment
 // and findDepartmentsByTool always returned [] because they queried the wrong edge
@@ -84,7 +84,7 @@ describe("graph-query-helper — findDepartmentsByTool", () => {
     const depts = findDepartmentsByTool("apply_cinematic_preset");
     expect(depts).toContain("engineering");
     // Cinematic preset is engineering-only
-    expect(depts.every((d) => d === "engineering")).toBe(true);
+    expect(depts.every((d: string) => d === "engineering")).toBe(true);
   });
 
   it("finds personal and jobhunt for search_personal_rag", () => {
@@ -126,14 +126,14 @@ describe("graph-query-helper — other functions", () => {
     const edges = findEdgesFrom("dept_research");
     expect(edges.length).toBeGreaterThan(0);
     // research department calls supervisor
-    expect(edges.some((e) => e.to === "service_supervisor")).toBe(true);
+    expect(edges.some((e: any) => e.to === "service_supervisor")).toBe(true);
   });
 
   it("findEdgesTo returns edges pointing to dept_engineering", () => {
     const edges = findEdgesTo("dept_engineering");
     expect(edges.length).toBeGreaterThan(0);
     // engineering agent belongs_to engineering dept
-    expect(edges.some((e) => e.from === "agent_engineering_agent")).toBe(true);
+    expect(edges.some((e: any) => e.from === "agent_engineering_agent")).toBe(true);
   });
 
   it("findAgentsByDepartment returns the ReAct agent for each dept", () => {

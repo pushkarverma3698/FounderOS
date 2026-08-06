@@ -145,17 +145,17 @@ describe("webSearchTool — DuckDuckGo fallback", () => {
     const result = await webSearchTool.execute(BASE_ARGS);
 
     expect(result.success).toBe(true);
-    const items = result.data as Array<{ title: string; url: string; snippet: string }>;
+    const items = (result.data as Array<{ title: string; url: string; snippet: string }>) ?? [];
     expect(items).toHaveLength(1);
-    expect(items[0].title).toBe("LangGraph Production Patterns");
-    expect(items[0].url).toBe("https://blog.langchain.dev/langgraph");
-    expect(items[0].snippet).toContain("checkpointing");
+    expect(items[0]?.title).toBe("LangGraph Production Patterns");
+    expect(items[0]?.url).toBe("https://blog.langchain.dev/langgraph");
+    expect(items[0]?.snippet).toContain("checkpointing");
     // single GET to the DuckDuckGo HTML endpoint, no auth header
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    const [url, init] = mockFetch.mock.calls[0];
+    const [url, init] = mockFetch.mock.calls[0] ?? [];
     expect(String(url)).toContain("html.duckduckgo.com");
-    expect(init.method).toBe("GET");
-    expect((init.headers as Record<string, string>)["Authorization"]).toBeUndefined();
+    expect(init?.method).toBe("GET");
+    expect((init?.headers as Record<string, string>)["Authorization"]).toBeUndefined();
   });
 
   it("returns soft failure on HTTP 500 with status in error message", async () => {
@@ -206,14 +206,16 @@ describe("webSearchTool — query construction", () => {
   it("prepends 'site:{site}' when site param is provided", async () => {
     await webSearchTool.execute({ query: "typescript tips", site: "stackoverflow.com" });
 
-    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    const [firstCallUrl] = mockFetch.mock.calls[0] ?? [];
+    const url = new URL(String(firstCallUrl));
     expect(url.searchParams.get("q")).toBe("site:stackoverflow.com typescript tips");
   });
 
   it("sends the query unchanged when site param is absent", async () => {
     await webSearchTool.execute({ query: "typescript tips" });
 
-    const url = new URL(String(mockFetch.mock.calls[0][0]));
+    const [firstCallUrl] = mockFetch.mock.calls[0] ?? [];
+    const url = new URL(String(firstCallUrl));
     expect(url.searchParams.get("q")).toBe("typescript tips");
   });
 
@@ -278,15 +280,15 @@ describe("webSearchTool — Gemini grounding (primary)", () => {
     const result = await webSearchTool.execute(BASE_ARGS);
 
     expect(result.success).toBe(true);
-    const items = result.data as Array<{ title: string; url: string; snippet: string }>;
+    const items = (result.data as Array<{ title: string; url: string; snippet: string }>) ?? [];
     expect(items).toHaveLength(1);
-    expect(items[0].title).toBe("LangGraph 1.0");
-    expect(items[0].url).toBe("https://blog.langchain.dev/langgraph-1");
-    expect(items[0].snippet).toContain("durable execution");
+    expect(items[0]?.title).toBe("LangGraph 1.0");
+    expect(items[0]?.url).toBe("https://blog.langchain.dev/langgraph-1");
+    expect(items[0]?.snippet).toContain("durable execution");
     expect(mockFetch).toHaveBeenCalledTimes(1); // DuckDuckGo never called
-    const [url, init] = mockFetch.mock.calls[0];
+    const [url, init] = mockFetch.mock.calls[0] ?? [];
     expect(String(url)).toContain("generativelanguage.googleapis.com");
-    expect((init.headers as Record<string, string>)["x-goog-api-key"]).toBe("gemini-key");
+    expect((init?.headers as Record<string, string>)["x-goog-api-key"]).toBe("gemini-key");
   });
 
   it("falls back to DuckDuckGo when Gemini fails (503 capacity)", async () => {
@@ -323,9 +325,9 @@ describe("webSearchTool — Gemini grounding (primary)", () => {
     const result = await webSearchTool.execute(BASE_ARGS);
 
     expect(result.success).toBe(true);
-    const items = result.data as Array<{ title: string; snippet: string }>;
+    const items = (result.data as Array<{ title: string; snippet: string }>) ?? [];
     expect(items).toHaveLength(1);
-    expect(items[0].snippet).toBe("Plain answer with no citations.");
+    expect(items[0]?.snippet).toBe("Plain answer with no citations.");
   });
 
   it("fails soft when Gemini returns an empty candidate, then tries DuckDuckGo", async () => {
