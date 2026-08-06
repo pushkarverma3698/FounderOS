@@ -91,6 +91,19 @@ function mixedFlagRow(id: string): BriefRow {
   });
 }
 
+/**
+ * The "why it's here" line of the first row printed inside a section.
+ *
+ * Asserted on in isolation rather than against the whole message, because the
+ * words "years" and "apply" also appear in the section header and in the
+ * Experience bullet — a match anywhere in the brief would pass while the row
+ * itself still said the wrong thing, which is exactly the defect.
+ */
+function whyLineIn(out: string, from: string, until: string): string {
+  const block = out.slice(out.indexOf(from), out.indexOf(until));
+  return block.split("\n").find((line) => line.includes("Why it's here")) ?? "";
+}
+
 function input(rows: readonly BriefRow[]): BriefInput {
   return {
     date: new Date("2026-08-06T06:00:00Z"),
@@ -163,6 +176,38 @@ describe("the stretch section is about applying, not asking", () => {
     const out = formatDailyBrief(input([stretchRow("s1")]));
     expect(out).toMatch(/STRETCH/);
     expect(out.toLowerCase()).toContain("apply");
+  });
+
+  it("does not tell the founder to ask the question the header just ruled out", () => {
+    // The section header says verbatim "Nothing here needs a question first".
+    // Two lines under it every row printed "One answer settles it" — the ASK
+    // section's wording, reached because `whyLine` keys off `verdict` alone and
+    // cannot see which section it is being rendered under. The message
+    // contradicted itself inside two lines, and it pointed the founder at the
+    // one action this section exists to prevent.
+    const out = formatDailyBrief(input([stretchRow("s1")]));
+    const why = whyLineIn(out, "STRETCH", "DO THIS NEXT");
+    expect(why).not.toContain("One answer settles it");
+  });
+
+  it("says the years are the only bar, and that it is worth applying anyway", () => {
+    // The three claims the row owes the founder, matching the evidence
+    // `experienceGate` already produces: they ask for more years than he has ·
+    // nothing else is open · apply regardless.
+    const out = formatDailyBrief(input([stretchRow("s1")]));
+    const why = whyLineIn(out, "STRETCH", "DO THIS NEXT");
+    expect(why).toMatch(/years/i);
+    expect(why).toContain("~3.5 shipped");
+    expect(why).toMatch(/worth applying/i);
+  });
+
+  it("leaves the ASK section's reason line intact", () => {
+    // The over-correction guard, and it is not optional: deleting "One answer
+    // settles it" globally would satisfy both tests above while destroying the
+    // reason line on every row that genuinely IS one question away.
+    const out = formatDailyBrief(input([mixedFlagRow("q1")]));
+    const why = whyLineIn(out, "ONE QUESTION AWAY", "DO THIS NEXT");
+    expect(why).toContain("One answer settles it");
   });
 
   it("numbers stretch rows continuing from DO TODAY, as one run", () => {

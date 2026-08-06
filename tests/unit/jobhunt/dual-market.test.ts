@@ -120,7 +120,7 @@ describe("renderMarketBlocks — the numbering survives the split", () => {
   const selected = [row("nl1", "NL"), row("nl2", "NL"), row("in1", "IN"), row("in2", "IN")];
 
   it("numbers rows by their position in the SELECTED array, across blocks", () => {
-    const rendered = renderMarketBlocks(selected, "/draft");
+    const rendered = renderMarketBlocks(selected, "/draft", "do_today");
 
     // The Indian block starts at 3 because two Dutch rows precede it. If it
     // restarted at 1, `/draft 1` would be ambiguous and `/draft 3` would resolve
@@ -133,14 +133,14 @@ describe("renderMarketBlocks — the numbering survives the split", () => {
   });
 
   it("gives each market its own heading", () => {
-    const rendered = renderMarketBlocks(selected, "/draft");
+    const rendered = renderMarketBlocks(selected, "/draft", "do_today");
     expect(rendered).toContain("NETHERLANDS");
     expect(rendered).toContain("INDIA");
     expect(rendered.indexOf("NETHERLANDS")).toBeLessThan(rendered.indexOf("INDIA"));
   });
 
   it("prints no heading for a market with no rows", () => {
-    const rendered = renderMarketBlocks([row("nl1", "NL")], "/draft");
+    const rendered = renderMarketBlocks([row("nl1", "NL")], "/draft", "do_today");
     expect(rendered).not.toContain("INDIA");
     expect(rendered).not.toContain("LOCATION NOT CONFIRMED");
   });
@@ -152,7 +152,7 @@ describe("renderMarketBlocks — the numbering survives the split", () => {
     // independently would drift silently into drafting for the wrong company.
     const rows = [row("in1", "IN"), row("nl1", "NL"), row("nl2", "NL")];
     const selection = selectDoToday(rows);
-    const rendered = renderMarketBlocks(selection, "/draft");
+    const rendered = renderMarketBlocks(selection, "/draft", "do_today");
 
     selection.forEach((r, i) => {
       const heading = `${i + 1}. ${r.company}`;

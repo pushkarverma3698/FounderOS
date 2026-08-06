@@ -33,6 +33,23 @@ import { cmd, esc, link } from "./telegram-format.js";
 import { GATE_GLOSSARY, gateMark, type Gate } from "./gates.js";
 import type { Liveness } from "./liveness.js";
 
+/**
+ * Which actionable section a row is being printed under.
+ *
+ * PASSED DOWN, NEVER DERIVED HERE. `isStretchRow` lives in brief-select.ts, and
+ * importing it would close a runtime cycle — brief-row → brief-select →
+ * brief-sections → brief-row — while re-deciding membership locally would
+ * recreate the second notion of membership that brief-select.ts exists to
+ * prevent. The caller already holds the answer: `formatDailyBrief` renders the
+ * output of `selectStretch`, so it knows. This is the same shape as the
+ * `command` parameter, which has been threaded down for the same reason since
+ * the sections existed.
+ *
+ * Values match the vocabulary `persistBriefRanks` writes to `brief_section`,
+ * so the printed reason and the stored row describe themselves the same way.
+ */
+export type BriefSection = "do_today" | "stretch" | "ask";
+
 export interface BriefRow {
   readonly id: string;
   readonly company: string;
@@ -117,8 +134,18 @@ export function livenessLine(liveness: Liveness, ageDays?: number | null): strin
  *
  * Derived from STATUS. The old headline took `reasons[0]` and was therefore
  * wrong whenever gate #1 happened to pass, which was most of the time.
+ *
+ * AND FROM THE SECTION, since 2026-08-06. Status alone was not enough: a
+ * stretch row is a `flag` like an ASK row is, so it inherited ASK's sentence —
+ * "Experience — everything else cleared. One answer settles it." — and printed
+ * it two lines under a header that says "Nothing here needs a question first".
+ * The message contradicted itself, and the half the founder would have acted on
+ * was the half telling him to send the one question that invites a pre-emptive
+ * rejection on the years bar. Two rows with identical gates belong to different
+ * sections and owe the founder different sentences; only the caller knows
+ * which, so only the caller can say.
  */
-export function whyLine(row: BriefRow): string {
+export function whyLine(row: BriefRow, section: BriefSection): string {
   if (row.legacyGates) {
     return (
       "⚠️ <b>Why it's here:</b> screened before we started recording per-check " +
@@ -134,6 +161,24 @@ export function whyLine(row: BriefRow): string {
   }
   if (blocking.length === 0) {
     return `❓ <b>Why it's here:</b> the verdict is "${esc(row.verdict)}" but no check explains it — that is our bug, not the employer's.`;
+  }
+
+  // AFTER the three branches above, deliberately. A stretch row that predates
+  // the gate record still owes the founder its "we cannot say which check
+  // passed" warning, and one whose verdict no check explains still owes him
+  // that admission. The section changes the wording of a KNOWN reason; it never
+  // suppresses a doubt.
+  //
+  // The years figure is not read back out of the gate evidence. Deriving
+  // anything from prose is the defect gates.ts was written to close, and the
+  // number is already printed verbatim on the Experience bullet directly below
+  // — so this line states the shape and points at it.
+  if (section === "stretch") {
+    return (
+      "🪜 <b>Why it's here:</b> the years are the only thing in the way — they " +
+      "ask for more than your ~3.5 shipped, and every other check cleared. " +
+      "Worth applying to anyway; the Experience line below has their exact words."
+    );
   }
 
   const names = blocking.map((g) => g.gate).join(" and ");
@@ -182,7 +227,12 @@ export function skillsLine(overlap: OverlapResult): string {
  * it is what the eye should stop on, and the brief's whole purpose is to end in
  * an action.
  */
-export function renderRow(row: BriefRow, index: number, command: string | null): string {
+export function renderRow(
+  row: BriefRow,
+  index: number,
+  command: string | null,
+  section: BriefSection,
+): string {
   const heading = `<b>${index}. ${esc(row.company)}</b> — ${link(row.title, row.url)}`;
   // The place comes first because it is what decides whether any of the rest
   // applies. The feed's own string is quoted where there is one, so the market
@@ -198,7 +248,7 @@ export function renderRow(row: BriefRow, index: number, command: string | null):
   return (
     `${heading}\n` +
     `${meta}\n` +
-    `    ${whyLine(row)}\n` +
+    `    ${whyLine(row, section)}\n` +
     `${gateLines(row.gates)}\n` +
     `${skillsLine(row.overlap)}\n` +
     `    ${livenessLine(row.liveness, row.livenessAgeDays)}${action}`
