@@ -101,6 +101,13 @@ function renderFullList(findings: readonly Finding[]): string {
     .join("\n");
 }
 
+export async function runSelfAudit(): Promise<string> {
+  const staticFindings = runStaticAnalyzers();
+  const telemetry = await runTelemetryAnalyzers();
+  const ranked = rankFindings([...staticFindings, ...telemetry.findings]);
+  return renderReport(ranked);
+}
+
 async function main(): Promise<void> {
   const staticFindings = runStaticAnalyzers();
   const telemetry = await runTelemetryAnalyzers();
@@ -133,4 +140,9 @@ async function main(): Promise<void> {
     .catch(() => undefined); // allow-failopen: teardown only; the report is already printed
 }
 
-await main();
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

@@ -33,6 +33,7 @@ import {
 import { nextRecurrence } from "../core/time.js";
 import { providerLinkedInPost } from "./providers/index.js";
 import { sendToChat } from "./telegram-send.js";
+import { runSelfAuditSweep } from "../evolution/audit-sweep.js";
 import { childLogger } from "./logger.js";
 import { TENANT, env } from "../core/config.js";
 import type { ScheduledPost, ScheduledTask } from "../db/schema.js";
@@ -331,23 +332,7 @@ export async function runJobIngestSweep(): Promise<void> {
   }
 }
 
-/**
- * Daily ATS volume, as a TOTAL split evenly across the sweep's ATS queries.
- *
- * The number was 30 and it capped nothing. The sweep runs one query per
- * (pool × track) and the actor rejects any limit below 10, so the real budget is
- * `max(10, floor(total / queries))` per query — and at 30 across 8 queries that
- * floor won every time. The sweep was quietly free to fetch 100 postings while
- * a constant named DAILY_LIMIT said 30. A budget that does not bind is worse
- * than no budget: it is a number the founder would reason about that has no
- * relationship to what is spent.
- *
- * IT BECAME FICTION ANYWAY: the India pool took the sweep from 8 ATS queries to
- * 12 without touching this, so the ceiling silently became 120 + 20 Indeed, and
- * on 2026-08-06 it bought 92 postings for $0.997 while this said 80. A
- * per-posting count cannot bind a per-query floor. THE CAP THAT BINDS IS IN
- * DOLLARS — `spend-gate.ts`, before the first actor call of every sweep.
- */
+/** Daily ATS volume limit — dollar ceiling enforced in spend-gate.ts. */
 const JOB_INGEST_DAILY_LIMIT = 80;
 
 export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }): void {
@@ -392,8 +377,13 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
       );
     });
   }
+  cron.schedule("0 8 */3 * *", () => {
+    runSelfAuditSweep().catch((err) =>
+      log.error({ err: (err as Error).message }, "3-day self-audit sweep cron error"),
+    );
+  });
   log.info(
-    "Scheduler started — stale-approval check (daily 9am), budget alerts (hourly), brain sync (daily 2am), job ingest (daily 1:30am UTC), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
+    "Scheduler started — stale-approval check (daily 9am), self-audit sweep (every 3 days 8am), budget alerts (hourly), brain sync (daily 2am), job ingest (daily 1:30am UTC), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
       (taskExecutor ? ", scheduled-task sweep (every minute)" : ""),
   );
 }

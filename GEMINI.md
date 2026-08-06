@@ -22,6 +22,11 @@ A rule which is not enforced by layer 2 is a convention, and a rule that is enfo
 - Reason strictly over repo data, DB memory (`founder_context`, `turicks-brain`, `failure_lessons`), and live code.
 - Never use ungrounded generic world assumptions to overcomplicate tasks.
 
+## Experience & Outcome Over Code Purity (⚠️ NON-NEGOTIABLE)
+
+- The primary metric for FounderOS is **Founder Friction Saved & Real-World Outcome Quality**—not abstract code aesthetics or theoretical refactoring.
+- Every self-improvement cron and audit must analyze 3 days of real turn transcripts, user feedback, hallucination signatures, and execution friction, storing findings into `failure_lessons` and `turicks-brain`.
+
 ## Commands
 
 ```bash
