@@ -21,7 +21,27 @@ vi.mock("../../../src/tools/jobhunt/free-ingest.js", () => ({
 const mockSendToChat = vi.fn(async () => {});
 vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToChat: mockSendToChat }));
 
-const { runFreeSweep, FREE_SWEEP_CRON } = await import("../../../src/tools/jobhunt/sweep-runner.js");
+// Ranking and export both touch the database and the Sheets API. Neither is
+// what these tests are about — they are about WHICH messages the founder gets —
+// and leaving them real would make the suite need a DB and a credential.
+const mockBuildDailyBrief = vi.fn(async () => "");
+vi.mock("../../../src/tools/jobhunt/daily-brief.js", () => ({
+  buildDailyBrief: mockBuildDailyBrief,
+}));
+
+const mockExportJobSheet = vi.fn(async () => ({
+  ok: true as const,
+  queued: 3,
+  logged: 9,
+  url: "https://docs.google.com/spreadsheets/d/SHEET",
+}));
+vi.mock("../../../src/tools/jobhunt/sheet-export.js", () => ({
+  exportJobSheet: mockExportJobSheet,
+}));
+
+const { runFreeSweep, FREE_SWEEP_CRON, resetHeartbeat } = await import(
+  "../../../src/tools/jobhunt/sweep-runner.js"
+);
 
 function line(overrides: Partial<IngestLine> = {}): IngestLine {
   return {
@@ -50,6 +70,16 @@ function result(overrides: Partial<FreeIngestResult> = {}): FreeIngestResult {
 describe("runFreeSweep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The alive-ping clock is process state that survives between tests. Without
+    // this reset the suite would be order-dependent: a test that runs after a
+    // simulated three-hour gap would inherit a due ping.
+    resetHeartbeat(new Date());
+    mockExportJobSheet.mockResolvedValue({
+      ok: true as const,
+      queued: 3,
+      logged: 9,
+      url: "https://docs.google.com/spreadsheets/d/SHEET",
+    });
   });
 
   it("sends an alert when a new passing line exists", async () => {
@@ -84,7 +114,7 @@ describe("runFreeSweep", () => {
     expect(mockSendToChat).not.toHaveBeenCalled();
   });
 
-  it("names at most 5 passing roles and states the true total when more exist", async () => {
+  it("names at most 3 passing roles and states the true total when more exist", async () => {
     const lines = Array.from({ length: 8 }, (_, i) =>
       line({ company: `Company ${i}`, title: `Role ${i}` }),
     );
@@ -94,18 +124,95 @@ describe("runFreeSweep", () => {
     const [text] = mockSendToChat.mock.calls[0]!;
     expect(text).toContain("8 new role");
     expect(text).toContain("Company 0");
-    expect(text).toContain("Company 4");
-    expect(text).not.toContain("Company 5");
-    expect(text).toContain("+ 3 more");
+    expect(text).toContain("Company 2");
+    expect(text).not.toContain("Company 3");
+    expect(text).toContain("+ 5 more");
   });
 
-  it("does not invent /draft numbers, only points to the job brief", async () => {
+  it("does not invent /draft numbers — the sheet carries the numbering", async () => {
+    // The `#` column is the pinned `brief_rank`. A second set of numbers in the
+    // alert would give the founder two schemes for the same jobs and no way to
+    // tell which one /draft meant.
     mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
     await runFreeSweep();
 
     const [text] = mockSendToChat.mock.calls[0]!;
     expect(text).not.toMatch(/\/draft \d/);
-    expect(text.toLowerCase()).toContain("job brief");
+    expect(text).toContain("docs.google.com/spreadsheets");
+  });
+
+  it("ranks BEFORE it exports, so the sheet's # column is never blank", async () => {
+    // buildDailyBrief is what writes brief_section/brief_rank, and both the `#`
+    // column and the apply queue read them. Exporting first would publish the
+    // new rows unranked.
+    const order: string[] = [];
+    mockBuildDailyBrief.mockImplementation(async () => {
+      order.push("rank");
+      return "";
+    });
+    mockExportJobSheet.mockImplementation(async () => {
+      order.push("export");
+      return { ok: true as const, queued: 1, logged: 1, url: "https://x/y" };
+    });
+    mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
+
+    await runFreeSweep();
+
+    expect(order).toEqual(["rank", "export"]);
+  });
+
+  it("still alerts when ranking fails — the rows are screened and stored either way", async () => {
+    mockBuildDailyBrief.mockRejectedValue(new Error("db down"));
+    mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
+
+    await runFreeSweep();
+
+    expect(mockSendToChat).toHaveBeenCalledOnce();
+    expect(mockSendToChat.mock.calls[0]![0]).toContain("Aquablu B.V.");
+  });
+
+  it("folds an export failure into the alert rather than sending a second message", async () => {
+    // Two notifications for one event is how a channel becomes noise — and the
+    // unconfigured case would otherwise nag twice per sweep until setup.
+    mockExportJobSheet.mockResolvedValue({
+      ok: false as const,
+      skipped: true as const,
+      reason: "JOBHUNT_SHEET_ID is not set",
+    });
+    mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
+
+    await runFreeSweep();
+
+    expect(mockSendToChat).toHaveBeenCalledOnce();
+    const [text] = mockSendToChat.mock.calls[0]!;
+    expect(text).toContain("Aquablu B.V.");
+    expect(text).toContain("not set up yet");
+  });
+
+  it("does not rewrite the sheet on a sweep that found nothing", async () => {
+    // 48 identical rewrites a day spend quota to produce no change, and would
+    // overwrite the Applied column between a founder's click and his next sync.
+    mockRunFreeIngest.mockResolvedValue(result({ lines: [line({ isNew: false })] }));
+
+    await runFreeSweep();
+
+    expect(mockExportJobSheet).not.toHaveBeenCalled();
+  });
+
+  it("proves it is alive after three quiet hours, naming the boards it checked", async () => {
+    resetHeartbeat(new Date("2026-08-06T00:00:00Z"));
+    vi.setSystemTime(new Date("2026-08-06T03:30:00Z"));
+    mockRunFreeIngest.mockResolvedValue(
+      result({ lines: [line({ isNew: false })], boardsPolled: 285 }),
+    );
+
+    await runFreeSweep();
+
+    expect(mockSendToChat).toHaveBeenCalledOnce();
+    const [text] = mockSendToChat.mock.calls[0]!;
+    expect(text).toContain("alive");
+    expect(text).toContain("285");
+    vi.useRealTimers();
   });
 
   it("fires the outage alert when every board failed and nothing was screened", async () => {

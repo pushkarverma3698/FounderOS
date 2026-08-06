@@ -183,6 +183,13 @@
       "when": 1785870000000,
       "tag": "0025_jobhunt_screen_failures",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785960000000,
+      "tag": "0026_jobhunt_apply_ledger",
+      "breakpoints": true
     }
   ]
 }

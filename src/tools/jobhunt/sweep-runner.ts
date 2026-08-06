@@ -18,7 +18,12 @@
 import { childLogger } from "../../infra/logger.js";
 import { sendToChat } from "../../infra/telegram-send.js";
 import { esc } from "./telegram-format.js";
-import type { IngestLine } from "./ingest-batch.js";
+import {
+  afterQuietSweep,
+  afterSpokenSweep,
+  formatNewRowsAlert,
+  initialHeartbeat,
+} from "./sweep-heartbeat.js";
 
 const log = childLogger({ module: "scheduler" });
 
@@ -71,17 +76,13 @@ export async function runJobIngestSweep(): Promise<void> {
   );
 
   try {
-    // NOT escaped here. The brief renders its own Telegram HTML and escapes every
-    // value at the point it is interpolated (see telegram-format.ts) — running a
-    // whole-message escape over it would print "&lt;b&gt;" at the founder rather
-    // than bolding anything, which is the exact "message is not formatted"
-    // complaint that started this.
-    //
-    // Chunked because Telegram rejects a body over 4,096 characters outright, and
-    // nothing in the send path splits. Before this, a brief that finally had
-    // enough supply to be worth reading would have been dropped whole — and the
-    // failure would have looked like a sweep that found nothing.
-    const brief = await buildDailyBrief({
+    // The brief is still BUILT and no longer SENT (founder decision, 2026-08-06:
+    // the Sheet replaced the Telegram text). Building it is what pins
+    // `brief_section` and `brief_rank` on every row — the numbering `/draft N`
+    // resolves against and the `#` column the Sheet prints. Skipping the build
+    // to save the work would leave the queue unranked and `/draft 3` pointing at
+    // nothing.
+    await buildDailyBrief({
       screened: result.fetched,
       failures: result.failures,
       // Kept apart from `failures` all the way through. A day that correctly
@@ -89,22 +90,59 @@ export async function runJobIngestSweep(): Promise<void> {
       // "incomplete run" would teach the founder to distrust a healthy sweep.
       notes: result.notes,
     });
-    for (const part of splitForTelegram(brief)) {
-      await sendToChat(part);
-    }
+    const { link, notice } = await publishSheet();
+    lastSheetLink = link;
+    // The metered sweep has no alert of its own to carry the line — it runs
+    // every third day and the founder should hear from it either way.
+    await sendToChat(
+      notice ??
+        `📊 <b>Screened ${result.fetched} posting(s)</b> — the job sheet is up to date.\n${link}`,
+    );
   } catch (err) {
-    // The postings ARE screened and recorded by this point. Losing the brief must
-    // not read as losing the sweep, so say which one actually failed.
-    log.error({ err: (err as Error).message }, "Daily brief render failed");
-    // Escaped too: this is the path that runs BECAUSE the brief failed, so an
+    // The postings ARE screened and recorded by this point. Losing the ranking
+    // must not read as losing the sweep, so say which one actually failed.
+    log.error({ err: (err as Error).message }, "Brief ranking failed");
+    // Escaped: this is the path that runs BECAUSE the ranking failed, so an
     // unescaped error message here would lose the founder the fallback as well.
     await sendToChat(
       toTelegramSafe(
-        `⚠ Screened ${result.fetched} posting(s), but the brief could not be built: ` +
+        `⚠ Screened ${result.fetched} posting(s), but the ranking could not be built: ` +
           `${(err as Error).message}\nThe screening results are recorded — run /jobs to read them.`,
       ),
     );
   }
+}
+
+/**
+ * Rebuild the Sheet and report either its link or why there isn't one.
+ *
+ * SENDS NOTHING. It returns one line for the caller to append to whatever
+ * message it was already sending, because the two non-success paths coincide
+ * exactly with the moments the founder is being messaged anyway — and an export
+ * problem delivered as its own ⚠ would mean two notifications per sweep, every
+ * sweep, until he set the spreadsheet up. Two messages for one event is how a
+ * channel becomes noise.
+ *
+ * The two failures stay distinct in wording because they need opposite actions:
+ * "not set up" is a step he has not taken, "could not be updated" is an outage.
+ * Neither is ever silent — a lane that quietly stopped publishing looks exactly
+ * like a market with no jobs in it.
+ */
+async function publishSheet(): Promise<{ link: string | null; notice: string | null }> {
+  const { exportJobSheet } = await import("./sheet-export.js");
+  const { sheetLine } = await import("./sweep-heartbeat.js");
+
+  const exported = await exportJobSheet();
+  if (exported.ok) return { link: sheetLine(exported.url), notice: null };
+
+  return {
+    link: null,
+    notice: esc(
+      exported.skipped
+        ? `⚠ The job sheet is not set up yet (${exported.reason}) — results are recorded, run /jobs to read them.`
+        : `⚠ The job sheet could not be updated: ${exported.reason}`,
+    ),
+  };
 }
 
 /**
@@ -126,11 +164,7 @@ export async function runJobIngestSweep(): Promise<void> {
  */
 const JOB_INGEST_DAILY_LIMIT = 80;
 
-/**
- * Roles named in the free-sweep alert before it switches to "+ N more".
- * Failed boards named in the free-sweep outage alert before it stops listing.
- */
-const NEW_PASS_ALERT_CAP = 5;
+/** Failed boards named in the free-sweep outage alert before it stops listing. */
 const OUTAGE_ALERT_BOARD_CAP = 3;
 
 /**
@@ -142,34 +176,19 @@ const OUTAGE_ALERT_BOARD_CAP = 3;
 export const FREE_SWEEP_CRON = "*/30 * * * *";
 
 /**
- * The only message `runFreeSweep` is allowed to send for a healthy run.
+ * The lane's memory of when it last said anything.
  *
- * This lane ticks 48 times a day. A message every tick trains the founder to
- * stop reading it — the exact failure already on record for the metered feed's
- * old screening log, which ran flawlessly and produced zero applications for
- * weeks because nothing about it demanded a reaction. So this fires only for
- * postings that are BOTH a pass AND new: never a re-screened duplicate, and
- * never a flag or reject, however interesting.
- *
- * No `/draft` numbers here. Those are pinned by the daily brief's own ranking
- * (`persistBriefRanks` in daily-brief.ts), and this alert has no ranking of its
- * own to pin them against — inventing one would hand the founder a command that
- * resolves to the wrong row, or to nothing.
+ * Module state rather than a database row on purpose: it is a fact about THIS
+ * process's conversation with the founder, and a restart honestly resets it —
+ * the first sweep after a deploy then pings within the hour, which is exactly
+ * when he most wants to know the lane came back up. Persisting it would suppress
+ * that.
  */
-function formatFreeSweepAlert(passes: readonly IngestLine[]): string {
-  const shown = passes.slice(0, NEW_PASS_ALERT_CAP);
-  const rows = shown.map((p) => `• ${esc(p.company)} — ${esc(p.title)}`).join("\n");
-  const overflow =
-    passes.length > NEW_PASS_ALERT_CAP
-      ? `\n<i>+ ${passes.length - NEW_PASS_ALERT_CAP} more not shown here.</i>`
-      : "";
+let heartbeat = initialHeartbeat(new Date());
 
-  return (
-    `🆕 <b>${passes.length} new role${passes.length === 1 ? "" : "s"} passed screening</b>\n` +
-    rows +
-    overflow +
-    `\n\nAsk for the job brief for the full ranking and /draft numbers.`
-  );
+/** Test seam: reset the ping clock so a suite is not order-dependent. */
+export function resetHeartbeat(now: Date = new Date()): void {
+  heartbeat = initialHeartbeat(now);
 }
 
 /**
@@ -224,7 +243,43 @@ export async function runFreeSweep(): Promise<void> {
   }
 
   const newPasses = result.lines.filter((line) => line.outcome === "pass" && line.isNew);
-  if (newPasses.length === 0) return;
+  const now = new Date();
 
-  await sendToChat(formatFreeSweepAlert(newPasses));
+  // A sweep that found nothing does not touch the Sheet. Rewriting identical
+  // rows 48 times a day spends API quota to produce no change, and it would
+  // overwrite the `Applied` column between a founder's click and his next sync.
+  if (newPasses.length === 0) {
+    const { next, ping } = afterQuietSweep(heartbeat, result.boardsPolled, now, lastSheetLink);
+    heartbeat = next;
+    if (ping !== null) await sendToChat(ping);
+    return;
+  }
+
+  // Ranked BEFORE exported. `buildDailyBrief` is what writes `brief_section`
+  // and `brief_rank`, and the Sheet's `#` column and the apply queue both read
+  // those — exporting first would publish the new rows unranked and unnumbered.
+  const { buildDailyBrief } = await import("./daily-brief.js");
+  try {
+    await buildDailyBrief({ screened: result.screened, failures: result.failures, notes: [] });
+  } catch (err) {
+    // The rows are screened and stored. An unranked Sheet is still worth
+    // publishing — it just carries blank `#` cells, which is visibly wrong
+    // rather than quietly wrong.
+    log.error({ err: (err as Error).message }, "Ranking failed before free-lane export");
+  }
+
+  const { link, notice } = await publishSheet();
+  lastSheetLink = link;
+  await sendToChat(formatNewRowsAlert(newPasses, link ?? notice));
+  heartbeat = afterSpokenSweep(now);
 }
+
+/**
+ * The Sheet link, remembered between sweeps.
+ *
+ * The alive-ping wants to carry it, and a quiet sweep never calls the export —
+ * so without this the ping would either have to run an export purely to learn
+ * a URL that has not changed since the spreadsheet was created, or go out
+ * without the link the founder needs to act on it.
+ */
+let lastSheetLink: string | null = null;
