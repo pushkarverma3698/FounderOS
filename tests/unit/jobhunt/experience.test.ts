@@ -84,7 +84,12 @@ describe("extractExperienceDemand", () => {
 describe("experienceGate", () => {
   const BODY = "You will own services end to end and work in English. ";
 
-  it(`rejects above ${MAX_YEARS_DEMANDED} stated years`, () => {
+  it(`rejects 8 stated years — well clear of the ${MAX_YEARS_STRETCH}-year stretch band`, () => {
+    // Named for what it asserts. It used to read "rejects above
+    // MAX_YEARS_DEMANDED stated years", which stopped being true on 2026-08-06
+    // when 5 and 6 — both above the 4-year ceiling — became flags rather than
+    // rejects. The body always used 8, so the test passed while its name stated
+    // a general rule the gate no longer follows.
     const gate = experienceGate(`${BODY}8+ years of experience required.`, "Platform Engineer");
     expect(gate.status).toBe("reject");
     expect(gate.evidence).toContain("8 years minimum");

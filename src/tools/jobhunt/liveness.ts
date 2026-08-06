@@ -95,11 +95,31 @@ async function checkUrl(url: string): Promise<{ liveness: Liveness; detail: stri
   const timer = setTimeout(() => controller.abort(), URL_CHECK_TIMEOUT_MS);
   try {
     const response = await fetch(url, { method: "GET", signal: controller.signal, redirect: "follow" });
-    return { liveness: classifyHttpStatus(response.status), detail: `HTTP ${response.status}` };
+    const verdict = { liveness: classifyHttpStatus(response.status), detail: `HTTP ${response.status}` };
+    // ONLY THE STATUS IS EVER READ, so the body has to be thrown away
+    // explicitly. Under Node's undici an unread body holds the socket and
+    // buffers the whole page until GC — and `clearTimeout` below fires the
+    // moment the headers arrive, so that download is covered by no timeout at
+    // all. 2026-08-06 widened this from 8 sequential requests to 25 across a
+    // 6-way pool, which puts up to six full job pages in memory at once.
+    await releaseBody(response);
+    return verdict;
   } catch (err) {
     return { liveness: "unverifiable", detail: (err as Error).message };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/** Discard a response body without letting that failure change the verdict. */
+async function releaseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // A body we could not release is a leaked socket at worst. Letting the
+    // failure reach the caller's catch would turn a CONFIRMED-OPEN posting into
+    // `unverifiable`, which is the asymmetric, expensive direction this whole
+    // module is built to avoid — see the header.
   }
 }
 
@@ -110,12 +130,21 @@ async function checkUrl(url: string): Promise<{ liveness: Liveness; detail: stri
  * Plain async/await, no dependency: a small fixed pool of workers each pull
  * the next unclaimed index off a shared cursor and write their result to that
  * index, so completion order never touches the output position.
+ *
+ * A limit below one THROWS rather than returning quietly. `Math.min(0, n)`
+ * spawns zero workers, so every slot stays unwritten and the caller gets
+ * `[undefined, undefined, …]` typed as `R[]` with no error raised anywhere —
+ * which here would read as a shortlist nobody could verify. Unreachable while
+ * URL_CHECK_CONCURRENCY is a constant, and exactly the kind of silent wrong
+ * answer that surfaces the day a constant becomes configurable.
  */
-async function mapWithConcurrencyLimit<T, R>(
+export async function mapWithConcurrencyLimit<T, R>(
   items: readonly T[],
   limit: number,
   fn: (item: T) => Promise<R>,
 ): Promise<R[]> {
+  if (limit < 1) throw new Error(`mapWithConcurrencyLimit needs a limit of at least 1, got ${limit}.`);
+
   const results: R[] = new Array(items.length);
   let nextIndex = 0;
 

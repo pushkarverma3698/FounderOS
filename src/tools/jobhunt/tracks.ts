@@ -191,8 +191,9 @@ function escapeForRegExp(value: string): string {
 /**
  * True when `term` appears in `normalisedTitle` as whole words, not as a
  * fragment of a longer word. TRACK_CLASSIFY_TERMS contains short acronyms
- * ("sde", "sre", "go") that plain `includes()` also finds mid-word — see the
+ * ("sde", "sre") that plain `includes()` also finds mid-word — see the
  * TRACK_CLASSIFY_TERMS comment for the concrete false positives this avoids.
+ * It has never contained a bare "go"; the term is "go developer".
  */
 function matchesAsWholeWord(normalisedTitle: string, term: string): boolean {
   return new RegExp(`\\b${escapeForRegExp(term)}\\b`).test(normalisedTitle);
