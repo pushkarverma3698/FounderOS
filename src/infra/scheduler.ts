@@ -34,6 +34,7 @@ import { nextRecurrence } from "../core/time.js";
 import { providerLinkedInPost } from "./providers/index.js";
 import { sendToChat } from "./telegram-send.js";
 import { runSelfAuditSweep } from "../evolution/audit-sweep.js";
+import { runRagOptimizationSweep } from "./rag-optimization-sweep.js";
 import { childLogger } from "./logger.js";
 import { TENANT, env } from "../core/config.js";
 import type { ScheduledPost, ScheduledTask } from "../db/schema.js";
@@ -382,8 +383,13 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
       log.error({ err: (err as Error).message }, "3-day self-audit sweep cron error"),
     );
   });
+  cron.schedule("0 3 * * 0", () => {
+    runRagOptimizationSweep().catch((err) =>
+      log.error({ err: (err as Error).message }, "Weekly RAG optimization sweep cron error"),
+    );
+  });
   log.info(
-    "Scheduler started — stale-approval check (daily 9am), self-audit sweep (every 3 days 8am), budget alerts (hourly), brain sync (daily 2am), job ingest (daily 1:30am UTC), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
+    "Scheduler started — stale-approval check (daily 9am), self-audit sweep (every 3 days 8am), RAG optimization (weekly Sun 3am), budget alerts (hourly), brain sync (daily 2am), job ingest (daily 1:30am UTC), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
       (taskExecutor ? ", scheduled-task sweep (every minute)" : ""),
   );
 }
