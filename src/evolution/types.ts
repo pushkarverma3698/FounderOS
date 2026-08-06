@@ -23,6 +23,9 @@ export const FINDING_KINDS = [
   "oversized-prompt",
   "untested-module",
   "loc-pressure",
+  "cost-hotspot",
+  "recurring-failure",
+  "unapplied-lesson",
 ] as const;
 export type FindingKind = (typeof FINDING_KINDS)[number];
 
@@ -37,4 +40,23 @@ export interface Finding {
   readonly evidence: string;
   readonly severity: Severity;
   readonly location?: string;
+}
+
+/** One row of ai_call_costs, narrowed to what the cost analyzers read. */
+export interface CostRow {
+  readonly agent: string;
+  readonly model: string;
+  readonly tokens_in: number;
+  readonly tokens_out: number;
+  /** Dollars. Parsed from the numeric column by the collector, never here. */
+  readonly cost_usd: number;
+}
+
+/** One row of failure_lessons, narrowed to what the failure analyzers read. */
+export interface LessonRow {
+  readonly worker: string;
+  readonly signature: string;
+  readonly component: string;
+  readonly times_seen: number;
+  readonly times_applied: number;
 }
