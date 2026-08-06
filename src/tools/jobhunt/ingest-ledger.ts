@@ -24,7 +24,10 @@ const log = childLogger({ module: "jobhunt:ingest-ledger" });
 
 export interface LedgerEntry {
   readonly sweepId: string;
-  readonly feed: "ats" | "indeed";
+  // `free-ats` is the direct board-polling lane. It is billed at zero and still
+  // writes a row: a free lane that logged nothing would be indistinguishable
+  // from a free lane that stopped running.
+  readonly feed: "ats" | "indeed" | "free-ats";
   readonly pool: string;
   readonly track: string;
   readonly requested: number;
