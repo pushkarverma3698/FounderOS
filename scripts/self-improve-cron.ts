@@ -10,14 +10,16 @@
  */
 
 import { resolve } from "node:path";
-import { runClaudeCode } from "../src/tools/claude-code.js";
+import { claudeCodeTool } from "../src/tools/claude-code.js";
 import { collectSourceFiles } from "../src/evolution/collect.js";
 import {
   findDeadExports,
   findOrphanModules,
+} from "../src/evolution/analyzers/dead-code.js";
+import {
   findOversizedPrompts,
   findUntestedModules,
-} from "../src/evolution/analyzers/dead-code.js";
+} from "../src/evolution/analyzers/code-health.js";
 import { rankFindings } from "../src/evolution/rank.js";
 import { sendToChat } from "../src/infra/telegram-send.js";
 import { syncConversationSessions } from "./sync-conversation-session.js";
@@ -55,7 +57,7 @@ export async function runSelfImprovementLoop(): Promise<void> {
 
   // 3. Construct Claude Code prompt
   const findingSummaries = topFindings
-    .map((f, i) => `${i + 1}. [${f.severity.toUpperCase()}] ${f.ruleId}: ${f.summary}`)
+    .map((f, i) => `${i + 1}. [${f.severity.toUpperCase()}] ${f.kind} on ${f.subject}: ${f.evidence}`)
     .join("\n");
 
   const prompt = [
@@ -79,16 +81,15 @@ export async function runSelfImprovementLoop(): Promise<void> {
   );
 
   // 4. Run Claude Code CLI headless
-  const result = await runClaudeCode({
-    prompt,
-    workspace: ROOT,
-    timeoutMs: 600_000,
+  const result = await claudeCodeTool.execute({
+    task: prompt,
+    cwd: ROOT,
   });
 
   if (result.success) {
     console.log("Claude Code execution succeeded!");
     await sendToChat(
-      `✅ <b>Autonomous Self-Improvement Succeeded</b>\n\n${result.data?.output.slice(0, 500)}`,
+      `✅ <b>Autonomous Self-Improvement Succeeded</b>\n\n${String(result.data).slice(0, 500)}`,
       "HTML"
     );
   } else {
