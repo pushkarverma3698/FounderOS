@@ -69,6 +69,7 @@ mode this rule exists to prevent.
 |---|---|---|---|
 | [AG-001](AG-001-m0a-static-analyzers.md) | M0a static analyzers (prompt bloat, untested modules, LOC pressure) | M0a | **merged** — implemented faithfully; 2 defects found, both traced to a wrong rule in this brief, superseded by AG-002 |
 | [AG-002](AG-002-untested-module-resolution.md) | Fix `findUntestedModules` to use resolved specifiers, not raw text | M0a | **merged** — reviewed 2026-08-06: `resolveImport` exported and reused, both collision regressions green, 30 tests / lint / arch all green |
+| [AG-003](AG-003-telemetry-analyzers.md) | M0a telemetry analyzers — cost hotspots, recurring failures, unapplied lessons | M0a | **ready to dispatch** |
 
 ## Status vocabulary
 
