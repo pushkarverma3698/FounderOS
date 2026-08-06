@@ -48,8 +48,23 @@ export { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
  *
  * Verification is cheap but not free, and it only changes a decision near the
  * top of the list. Checking rank 40 buys nothing the founder will read today.
+ *
+ * MEASURED, 2026-08-06: of 34 rows stored in production, liveness was
+ * `unknown` on 21, `unverifiable` on 5, and `live` on 8 — exactly the 8 a
+ * budget of 8 ever checked, and all 8 came back live. The budget was the
+ * binding constraint on APPLY TODAY, not the market and not the gates:
+ * `selectDoToday` (brief.ts) only admits `pass && live`, so every row this
+ * budget left unchecked was invisible to that section no matter how strong
+ * its overlap or how genuinely open the role was.
+ *
+ * Raised from 8 to 25 only once `verifyLiveness` (liveness.ts) stopped
+ * checking URLs strictly sequentially — at ~10s worst case per check, 25
+ * sequential checks risked ~250s of wall time against the sweep's own
+ * timeout. Checked through a bounded pool instead, the wider budget is safe.
+ * `verificationTargets` below already spends every PASS before any FLAG, so
+ * the extra headroom goes to flags once every pass is covered.
  */
-export const VERIFY_TOP_N = 8;
+export const VERIFY_TOP_N = 25;
 
 function ageInDays(from: Date | null | undefined, now: Date): number {
   if (!from) return 0;

@@ -18,9 +18,8 @@ vi.mock("../../../src/tools/jobhunt/indeed-source.js", async (orig) => {
   return { ...actual, lookupJobKeys: mockLookup };
 });
 
-const { classifyHttpStatus, livenessReason, verifyLiveness } = await import(
-  "../../../src/tools/jobhunt/liveness.js"
-);
+const { classifyHttpStatus, livenessReason, verifyLiveness, URL_CHECK_CONCURRENCY } =
+  await import("../../../src/tools/jobhunt/liveness.js");
 const { INDEED_SOURCE } = await import("../../../src/tools/jobhunt/indeed-source.js");
 
 beforeEach(() => {
@@ -140,6 +139,91 @@ describe("verifyLiveness", () => {
     ]);
 
     expect(results.map((r) => r.id)).toEqual(["a", "b", "c"]);
+    fetchSpy.mockRestore();
+  });
+
+  it("returns results in input order even when later targets resolve first", async () => {
+    // Concurrency means completion order and input order diverge. The target
+    // requested FIRST is given the LONGEST delay here, so a naive
+    // completion-order collection would return it last — this must not happen.
+    const delayByUrl: Record<string, number> = {
+      "https://jobs.example.com/0": 30,
+      "https://jobs.example.com/1": 20,
+      "https://jobs.example.com/2": 10,
+      "https://jobs.example.com/3": 0,
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const delay = delayByUrl[String(input)] ?? 0;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return new Response("", { status: 200 });
+    });
+
+    const targets = Object.keys(delayByUrl).map((url, i) => ({
+      id: `t${i}`,
+      url,
+      source: "ats-ingest",
+    }));
+
+    const results = await verifyLiveness(targets);
+
+    expect(results.map((r) => r.id)).toEqual(["t0", "t1", "t2", "t3"]);
+    expect(results.every((r) => r.liveness === "live")).toBe(true);
+    fetchSpy.mockRestore();
+  });
+
+  it("never has more than URL_CHECK_CONCURRENCY checks in flight at once", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      inFlight -= 1;
+      return new Response("", { status: 200 });
+    });
+
+    const targets = Array.from({ length: 14 }, (_, i) => ({
+      id: `t${i}`,
+      url: `https://jobs.example.com/${i}`,
+      source: "ats-ingest",
+    }));
+
+    await verifyLiveness(targets);
+
+    expect(peak).toBeLessThanOrEqual(URL_CHECK_CONCURRENCY);
+    expect(peak).toBe(URL_CHECK_CONCURRENCY);
+    fetchSpy.mockRestore();
+  });
+
+  it("resolves a mixed batch of Indeed-keyed and URL-only targets correctly and in order", async () => {
+    mockLookup.mockResolvedValue(
+      new Map([
+        ["k1", "live"],
+        ["k2", "expired"],
+      ]),
+    );
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("", { status: 200 }))
+      .mockResolvedValueOnce(new Response("", { status: 404 }));
+
+    const targets = [
+      { id: "url-live", url: "https://jobs.example.com/a", source: "ats-ingest" },
+      { id: "indeed-live", url: null, source: INDEED_SOURCE, externalId: "k1" },
+      { id: "url-expired", url: "https://jobs.example.com/b", source: "ats-ingest" },
+      { id: "indeed-expired", url: null, source: INDEED_SOURCE, externalId: "k2" },
+      { id: "no-url", url: null, source: "manual" },
+    ];
+
+    const results = await verifyLiveness(targets);
+
+    expect(results.map((r) => [r.id, r.liveness])).toEqual([
+      ["url-live", "live"],
+      ["indeed-live", "live"],
+      ["url-expired", "expired"],
+      ["indeed-expired", "expired"],
+      ["no-url", "unverifiable"],
+    ]);
     fetchSpy.mockRestore();
   });
 });

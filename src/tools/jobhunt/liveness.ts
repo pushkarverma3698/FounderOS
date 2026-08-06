@@ -32,6 +32,20 @@ export type Liveness = JobKeyStatus;
 /** How long to wait on one posting URL before calling it unverifiable. */
 const URL_CHECK_TIMEOUT_MS = 10_000;
 
+/**
+ * Cap on simultaneous URL checks.
+ *
+ * These are independent GETs against unrelated third-party ATS hosts, so
+ * there is no correctness reason to serialize them. But they are bounded, not
+ * unbounded: several targets in one shortlist commonly land on the SAME ATS
+ * host (one platform serves many companies), and firing dozens of requests at
+ * one host in a single burst reads as abuse to that host's own rate limiter —
+ * which turns a genuinely live posting into `unverifiable` and defeats the
+ * entire purpose of checking. 6 clears a full verification budget in a
+ * handful of rounds without looking like a scraper to any one host.
+ */
+export const URL_CHECK_CONCURRENCY = 6;
+
 export interface LivenessTarget {
   readonly id: string;
   readonly url: string | null;
@@ -90,12 +104,44 @@ async function checkUrl(url: string): Promise<{ liveness: Liveness; detail: stri
 }
 
 /**
+ * Run `fn` over `items` with at most `limit` calls in flight at once,
+ * returning results in INPUT order regardless of which call finishes first.
+ *
+ * Plain async/await, no dependency: a small fixed pool of workers each pull
+ * the next unclaimed index off a shared cursor and write their result to that
+ * index, so completion order never touches the output position.
+ */
+async function mapWithConcurrencyLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await fn(items[index] as T);
+    }
+  }
+
+  const workerCount = Math.min(limit, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+/**
  * Verify a shortlist.
  *
  * Indeed rows go through the actor's `jobKeys` lookup, which reports `expired`
  * directly. Everything else is checked by fetching its posting URL. A row with
  * no URL and no job key is `unverifiable` — there is nothing to check, and
  * saying so is better than assuming either answer.
+ *
+ * The per-target work below runs through a bounded pool (URL_CHECK_CONCURRENCY)
+ * rather than one at a time — see that constant for why it is bounded at all.
  */
 export async function verifyLiveness(
   targets: readonly LivenessTarget[],
@@ -107,30 +153,31 @@ export async function verifyLiveness(
   );
   const keyStatuses = await lookupJobKeys(indeedTargets.map((t) => t.externalId as string));
 
-  const results: LivenessResult[] = [];
-  for (const target of targets) {
-    if (target.source === INDEED_SOURCE && target.externalId) {
-      const status = keyStatuses.get(target.externalId) ?? "unverifiable";
-      results.push({
-        id: target.id,
-        liveness: status,
-        reason: livenessReason(status, `Indeed job key ${target.externalId}`),
-      });
-      continue;
-    }
+  const results = await mapWithConcurrencyLimit<LivenessTarget, LivenessResult>(
+    targets,
+    URL_CHECK_CONCURRENCY,
+    async (target) => {
+      if (target.source === INDEED_SOURCE && target.externalId) {
+        const status = keyStatuses.get(target.externalId) ?? "unverifiable";
+        return {
+          id: target.id,
+          liveness: status,
+          reason: livenessReason(status, `Indeed job key ${target.externalId}`),
+        };
+      }
 
-    if (!target.url || target.url.trim().length === 0) {
-      results.push({
-        id: target.id,
-        liveness: "unverifiable",
-        reason: livenessReason("unverifiable", "no posting URL was recorded"),
-      });
-      continue;
-    }
+      if (!target.url || target.url.trim().length === 0) {
+        return {
+          id: target.id,
+          liveness: "unverifiable",
+          reason: livenessReason("unverifiable", "no posting URL was recorded"),
+        };
+      }
 
-    const { liveness, detail } = await checkUrl(target.url);
-    results.push({ id: target.id, liveness, reason: livenessReason(liveness, detail) });
-  }
+      const { liveness, detail } = await checkUrl(target.url);
+      return { id: target.id, liveness, reason: livenessReason(liveness, detail) };
+    },
+  );
 
   log.info(
     {
