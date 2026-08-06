@@ -1153,11 +1153,32 @@ export const jobIngestRuns = agentsSchema.table(
     requested: integer("requested").notNull(),
     returned: integer("returned").notNull().default(0),
 
-    /** Postings that reached the gates, and how they came out. */
+    /**
+     * Postings that reached the gates, and how they came out.
+     *
+     * These five MUST sum to `screened`. Until 2026-08-05 only the first three
+     * existed, so postings that came back `duplicate` or `error` were counted
+     * in `screened` and nowhere else — and a sweep where every posting threw
+     * looked identical to a market with nothing in it. That is how a total
+     * screening outage ran unnoticed from 2026-08-02 to 2026-08-05.
+     */
     screened: integer("screened").notNull().default(0),
     passed: integer("passed").notNull().default(0),
     flagged: integer("flagged").notNull().default(0),
     rejected: integer("rejected").notNull().default(0),
+    duplicates: integer("duplicates").notNull().default(0),
+    errored: integer("errored").notNull().default(0),
+
+    /**
+     * Why the postings in `errored` failed — the commonest message of the batch.
+     *
+     * Distinct from `error` below, which is the FETCH failing. This column is
+     * the gates failing on postings that arrived fine. Both can be null on the
+     * same row while every posting still failed, which was precisely the blind
+     * spot: the message existed in memory on every line and was never written
+     * down.
+     */
+    screen_error: text("screen_error"),
 
     /**
      * Postings this query found that the tracker had never seen.

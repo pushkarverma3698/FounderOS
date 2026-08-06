@@ -39,7 +39,8 @@ import { fetchIndeedPostings, type IndeedCountry } from "./indeed-source.js";
 import { TRACK_PRIORITY, TRACK_TITLES, type RoleTrack } from "./tracks.js";
 import { dedupePostings, screenBatch, INGEST_SOURCE, type IngestLine } from "./ingest-batch.js";
 import { recordQueryCost } from "./ingest-ledger.js";
-import { ATS_PRICING, INDEED_PRICING } from "./cost.js";
+import { ATS_PRICING, INDEED_PRICING, estimateQueryCost } from "./cost.js";
+import { checkSweepBudget } from "./spend-gate.js";
 
 // Re-exported so every existing import site keeps resolving here. The batch
 // screening moved to ingest-batch.ts on 2026-08-01 when this file crossed its
@@ -142,6 +143,44 @@ export async function runPooledIngest(opts: {
   const failures: string[] = [];
   const notes: string[] = [];
   let fetched = 0;
+
+  // WHAT THIS SWEEP WILL COST, BEFORE SPENDING ANY OF IT.
+  //
+  // The posting limit has never been the real budget. `perQuery` cannot go below
+  // MIN_ATS_LIMIT because the actor rejects a smaller one, so a caller asking for
+  // 80 across 12 queries gets 10 each and buys up to 120 — the declared limit
+  // silently stops binding the moment the query count grows. The cap that binds
+  // is denominated in dollars, checked here, because dollars are what runs out.
+  const indeedQueries = opts.includeIndeed ? INDEED_COUNTRIES.length : 0;
+  const projectedUsd =
+    queries * estimateQueryCost(ATS_PRICING, perQuery) +
+    indeedQueries * estimateQueryCost(INDEED_PRICING, perQuery);
+
+  const budget = await checkSweepBudget(projectedUsd);
+  if (!budget.ok) {
+    // Refused LOUDLY and reported as a failure, so a skipped sweep reaches the
+    // brief. Quietly declining to spend would be a cheaper rerun of the failure
+    // this pipeline already had: a system that stops producing without saying so.
+    log.warn({ sweepId, ...budget }, "Sweep refused by the spend cap");
+    return {
+      fetched: 0,
+      fresh: 0,
+      lines: [],
+      failures: [budget.reason],
+      notes: [],
+      perTrack: Object.fromEntries(TRACK_PRIORITY.map((t) => [t, 0])) as Record<RoleTrack, number>,
+      sweepId,
+    };
+  }
+
+  if (queries * MIN_ATS_LIMIT > opts.limit) {
+    // Said out loud rather than left as a surprise on the invoice.
+    notes.push(
+      `Requested limit ${opts.limit} cannot bind: ${queries} ATS queries × the actor's ` +
+        `${MIN_ATS_LIMIT}-job floor means up to ${queries * MIN_ATS_LIMIT} postings. ` +
+        `The spend cap (${budget.reason}) is what actually limits this sweep.`,
+    );
+  }
   // Derived from TRACK_PRIORITY rather than written out, so adding a track can
   // never leave a counter silently missing — which would report that track as
   // "0 postings" forever regardless of what the feed actually returned.
@@ -318,6 +357,21 @@ export async function runPooledIngest(opts: {
     if (perTrack[track] === 0) {
       failures.push(`Track "${track}": 0 postings across all ${POOL_ORDER.length} pools.`);
     }
+  }
+
+  // Postings that arrived and then failed the gates are an OUTAGE, and until
+  // 2026-08-05 nothing said so: `failures` was fed only by fetch errors, so when
+  // the sponsor register stopped resolving in the built output and every posting
+  // came back `kind: "error"`, four consecutive sweeps reported a quiet market.
+  // A rejection is the gates working and is deliberately not counted here.
+  const errored = lines.filter((l) => l.outcome === "error");
+  if (errored.length > 0) {
+    const cause = errored[0]!.detail || "no reason recorded";
+    const scope = errored.length === lines.length ? "EVERY posting" : `${errored.length} posting(s)`;
+    failures.push(
+      `${scope} failed to screen (${errored.length}/${lines.length}). ` +
+        `This is the gates failing, not a thin market. First cause: ${cause}`,
+    );
   }
 
   const fresh = lines.filter((l) => l.isNew).length;

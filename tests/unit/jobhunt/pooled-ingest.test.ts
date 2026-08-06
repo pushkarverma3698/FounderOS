@@ -15,6 +15,7 @@ const mockScreenPosting = vi.fn();
 const mockFetchAts = vi.fn();
 const mockFetchIndeed = vi.fn();
 const mockRecordQueryCost = vi.fn(async () => {});
+const mockCheckSweepBudget = vi.fn();
 
 /**
  * The cost ledger is a DATABASE WRITE and this is a unit test.
@@ -34,6 +35,20 @@ const mockRecordQueryCost = vi.fn(async () => {});
 vi.mock("../../../src/tools/jobhunt/ingest-ledger.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return { ...actual, recordQueryCost: mockRecordQueryCost };
+});
+
+/**
+ * The spend gate reads the cost ledger, which is a DATABASE READ.
+ *
+ * Same reasoning as `recordQueryCost` above: unmocked, every test sat through a
+ * Postgres connection timeout before the gate failed open, which took this file
+ * from ~100ms to 1.6s and would have kept climbing with each new query. A unit
+ * test that opens a connection is the bug. `spend-gate.test.ts` covers the
+ * decision itself, against numbers rather than a database.
+ */
+vi.mock("../../../src/tools/jobhunt/spend-gate.js", async (orig) => {
+  const actual = await (orig() as Promise<Record<string, unknown>>);
+  return { ...actual, checkSweepBudget: mockCheckSweepBudget };
 });
 
 vi.mock("../../../src/tools/jobhunt/screen.js", async (orig) => {
@@ -73,6 +88,14 @@ function posting(overrides: Partial<RawPosting> = {}): RawPosting {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockCheckSweepBudget.mockResolvedValue({
+    ok: true,
+    reason: "$0.10 spent this cycle of $2.00; this sweep projects $0.30.",
+    spentUsd: 0.1,
+    projectedUsd: 0.3,
+    capUsd: 2,
+    remainingUsd: 1.9,
+  });
   mockScreenPosting.mockResolvedValue({
     kind: "screened",
     company: "Acme BV",
@@ -225,5 +248,90 @@ describe("runPooledIngest", () => {
     const result = await runPooledIngest({ limit: 30, includeIndeed: true });
     expect(result.fetched).toBe(ATS_QUERIES);
     expect(result.failures.some((f) => f.includes("actor timeout"))).toBe(true);
+  });
+
+  /**
+   * A sweep that FETCHES fine and then fails to screen anything is an outage,
+   * and until 2026-08-05 it was reported as a quiet market.
+   *
+   * `failures` was fed only by fetch errors and empty tracks. When the sponsor
+   * register stopped resolving in the built output, every posting came back
+   * `kind: "error"`, `failures` stayed empty, and the brief said nothing was
+   * wrong for four consecutive sweeps.
+   */
+  it("reports a total screening failure as a failure, not as a thin market", async () => {
+    // Arrange — the feed is healthy; the gates are not.
+    mockScreenPosting.mockResolvedValue({
+      kind: "error",
+      message: "IND sponsor register unreadable at /opt/founderos/dist/docs/…: ENOENT",
+    });
+
+    // Act
+    const result = await runPooledIngest({ limit: 30 });
+
+    // Assert — the founder must be told, and told WHY.
+    expect(result.failures.some((f) => f.includes("failed to screen"))).toBe(true);
+    expect(result.failures.some((f) => f.includes("ENOENT"))).toBe(true);
+  });
+
+  /**
+   * The cap must stop the spend, not merely record it.
+   *
+   * The account is on Apify's FREE plan with a $5 hard platform cap shared with
+   * the research actors, and until 2026-08-05 nothing in the pipeline could
+   * refuse to spend — the cadence was the only brake, and the cadence does not
+   * know the balance.
+   */
+  it("buys nothing at all when the sweep would cross the spend cap", async () => {
+    mockCheckSweepBudget.mockResolvedValue({
+      ok: false,
+      reason: "Sweep SKIPPED to stay under the cap. $1.90 already spent this cycle of $2.00.",
+      spentUsd: 1.9,
+      projectedUsd: 0.3,
+      capUsd: 2,
+      remainingUsd: 0.1,
+    });
+
+    const result = await runPooledIngest({ limit: 30, includeIndeed: true });
+
+    // Not one actor run — the refusal has to come BEFORE the money is spent.
+    expect(mockFetchAts).not.toHaveBeenCalled();
+    expect(mockFetchIndeed).not.toHaveBeenCalled();
+    expect(result.fetched).toBe(0);
+  });
+
+  it("says out loud that it skipped the sweep, rather than reporting an empty market", async () => {
+    mockCheckSweepBudget.mockResolvedValue({
+      ok: false,
+      reason: "Sweep SKIPPED to stay under the cap. $1.90 already spent this cycle of $2.00.",
+      spentUsd: 1.9,
+      projectedUsd: 0.3,
+      capUsd: 2,
+      remainingUsd: 0.1,
+    });
+
+    const result = await runPooledIngest({ limit: 30 });
+
+    expect(result.failures.some((f) => f.includes("SKIPPED"))).toBe(true);
+  });
+
+  it("does not cry outage when screening merely rejects everything", async () => {
+    // Rejection is the gates working. Only an `error` outcome is a fault, and
+    // conflating the two would make the alarm useless within a week.
+    mockScreenPosting.mockResolvedValue({
+      kind: "screened",
+      company: "Acme BV",
+      title: "AI Engineer",
+      route: "hsm",
+      track: "ai",
+      verdict: { status: "reject", reasons: ["Sponsor: not on the register"] },
+      routesTried: 1,
+      match: { verdict: "not-sponsor", candidates: [], evidence: "no match" },
+      nearDuplicates: [],
+    });
+
+    const result = await runPooledIngest({ limit: 30 });
+
+    expect(result.failures.some((f) => f.includes("failed to screen"))).toBe(false);
   });
 });
