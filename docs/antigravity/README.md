@@ -83,7 +83,15 @@ mode this rule exists to prevent.
 |---|---|---|---|
 | [AG-001](AG-001-m0a-static-analyzers.md) | M0a static analyzers (prompt bloat, untested modules, LOC pressure) | M0a | **merged** — implemented faithfully; 2 defects found, both traced to a wrong rule in this brief, superseded by AG-002 |
 | [AG-002](AG-002-untested-module-resolution.md) | Fix `findUntestedModules` to use resolved specifiers, not raw text | M0a | **merged** — reviewed 2026-08-06: `resolveImport` exported and reused, both collision regressions green, 30 tests / lint / arch all green |
-| [AG-003](AG-003-telemetry-analyzers.md) | M0a telemetry analyzers — cost hotspots, recurring failures, unapplied lessons | M0a | **ready to dispatch** |
+| [AG-003](AG-003-telemetry-analyzers.md) | M0a telemetry analyzers — cost hotspots, recurring failures, unapplied lessons | M0a | **merged** — reviewed 2026-08-06: pure, `Number.isFinite` guard present; 2 output-ordering fixes applied on review |
+| [AG-004](AG-004-fitness-rules-lock.md) | Five new fitness rules + escape-hatch tag (the drift lock) | cross-cutting | **ready to dispatch** |
+| [AG-005](AG-005-instruction-file-precedence.md) | GEMINI.md, precedence order, retire `.cursorrules` | cross-cutting | **ready to dispatch** |
+| [AG-006](AG-006-rank-and-report.md) | M0a output surface — `rankFindings` + `renderReport` | M0a | **ready to dispatch** |
+
+**AG-004 / AG-005 / AG-006 have disjoint file sets and may be dispatched together.** AG-004 owns
+`scripts/` + `governance/`, AG-005 owns Markdown + `.cursorrules`, AG-006 owns `src/evolution/`.
+The only shared surface is the verify command, which reads the whole tree — which is why AG-004
+pins its baselines as literals by hand and is forbidden from running `--update-baseline`.
 
 ## Status vocabulary
 
