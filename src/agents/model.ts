@@ -43,6 +43,10 @@ const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
   // gemini-flash-latest is Google's rolling alias to the current model.
   "google/gemini-2.5-flash": "google/gemini-flash-latest",
   "gemini-2.5-flash": "gemini-flash-latest",
+  "google/gemini-2.5-flash:free": "google/gemma-4-31b-it:free",
+  "meta-llama/llama-3.3-70b-instruct:free": "openrouter/free",
+  "qwen/qwen-2.5-72b-instruct:free": "openrouter/free",
+  "deepseek/deepseek-r1:free": "openrouter/free",
 };
 
 export function normalizeModelId(modelId: string): string {
