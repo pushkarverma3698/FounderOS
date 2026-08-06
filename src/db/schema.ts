@@ -1045,6 +1045,15 @@ export const jobApplications = agentsSchema.table(
     brief_section: text("brief_section"),
     brief_rank: integer("brief_rank"),
 
+    /** pending | tailoring | tailored | failed — CV generation state. */
+    tailor_status: text("tailor_status"),
+    /** S3 key to the generated, JD-tailored CV PDF. */
+    tailored_cv_s3_key: text("tailored_cv_s3_key"),
+    /** S3 key to the generated DOCX variant. */
+    tailored_docx_s3_key: text("tailored_docx_s3_key"),
+    /** S3 key to the pre-drafted cover letter. */
+    cover_letter_s3_key: text("cover_letter_s3_key"),
+
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
