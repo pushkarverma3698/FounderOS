@@ -54,3 +54,6 @@ gumroad-packs/
 # actual prod env filename (gap: gitignore had .env.production)
 .env.prod
 .vitest-report.json
+
+# One-off board-registry maintenance run artifacts (scripts/jobhunt-board-registry.ts)
+.board-registry/

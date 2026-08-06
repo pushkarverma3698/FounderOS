@@ -43,6 +43,29 @@ Extrapolated to the full registry: roughly **260 new postings a day**, narrowing
 to an estimated **15–25 relevant** NL/India/remote engineering roles after the
 track and country filters.
 
+### Registry maintenance, 2026-08-06 (`scripts/jobhunt-board-registry.ts`)
+
+`prune` polled all 238 and dropped 36 tokens that answered a definitive 404/410
+(0 `unknown` — no timeout or 429 was ever read as absence). `grow` probed 12,760
+tokens derived from the IND recognised-sponsor register and found 144 live
+boards, of which **83 were kept and 61 dropped**.
+
+The 61 were dropped because only Greenhouse exposes an endpoint that declares
+which company a board belongs to. For Lever and Ashby the run could not confirm
+ownership, and writing the *register's* name onto an unconfirmed board asserts
+exactly the fact the sponsor gate exists to establish: `matchSponsor()` returned
+a confident `sponsor` PASS for all 61 — "Focus B.V.", "Lemonade B.V.",
+"SoSafe B.V." — when those tokens far more likely belong to the US, Belgian and
+German companies of the same name. A false PASS on the permit gate costs an
+application and teaches the founder to distrust the gate afterwards.
+
+Boards whose declared name *disagrees* with the register were kept: the declared
+name is still the truth about who owns the board, so the gate answers honestly
+(`General Assembly Remote Jobs` → uncertain, `Wellhub` → not-sponsor).
+
+**Registry: 238 → 202 (prune) → 285 (grow).** 207 Greenhouse, 62 Lever,
+16 Ashby.
+
 **A correction is recorded here deliberately.** An earlier estimate in this
 project put the figure at 1,739 new postings a day and ~137 relevant ones. That
 count almost certainly read Greenhouse's `updated_at`, which changes every time
