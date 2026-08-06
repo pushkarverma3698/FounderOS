@@ -22,6 +22,7 @@
  */
 
 import { childLogger } from "../../infra/logger.js";
+import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import { lookupJobKeys, type JobKeyStatus } from "./indeed-source.js";
 import { INDEED_SOURCE } from "./indeed-source.js";
 
@@ -123,43 +124,12 @@ async function releaseBody(response: Response): Promise<void> {
   }
 }
 
-/**
- * Run `fn` over `items` with at most `limit` calls in flight at once,
- * returning results in INPUT order regardless of which call finishes first.
- *
- * Plain async/await, no dependency: a small fixed pool of workers each pull
- * the next unclaimed index off a shared cursor and write their result to that
- * index, so completion order never touches the output position.
- *
- * A limit below one THROWS rather than returning quietly. `Math.min(0, n)`
- * spawns zero workers, so every slot stays unwritten and the caller gets
- * `[undefined, undefined, …]` typed as `R[]` with no error raised anywhere —
- * which here would read as a shortlist nobody could verify. Unreachable while
- * URL_CHECK_CONCURRENCY is a constant, and exactly the kind of silent wrong
- * answer that surfaces the day a constant becomes configurable.
- */
-export async function mapWithConcurrencyLimit<T, R>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  if (limit < 1) throw new Error(`mapWithConcurrencyLimit needs a limit of at least 1, got ${limit}.`);
-
-  const results: R[] = new Array(items.length);
-  let nextIndex = 0;
-
-  async function worker(): Promise<void> {
-    while (nextIndex < items.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      results[index] = await fn(items[index] as T);
-    }
-  }
-
-  const workerCount = Math.min(limit, items.length);
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  return results;
-}
+// The bounded pool this used to define privately now lives in core/concurrency.ts:
+// the free board lane needed the identical guarantees (input-order results, a
+// hard cap on in-flight requests to third-party hosts) and two copies of a
+// scheduling primitive drift. Re-exported so existing import sites and tests
+// keep resolving here.
+export { mapWithConcurrencyLimit };
 
 /**
  * Verify a shortlist.

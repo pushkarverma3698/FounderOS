@@ -24,12 +24,23 @@
  * propagates and abandons the remaining work, which is correct for a programming
  * error and wrong for an expected network failure: callers turn those into
  * result values instead.
+ *
+ * A limit below 1 THROWS rather than being clamped. Clamping looks kinder and is
+ * worse: zero workers would resolve `Promise.all([])` immediately and hand back
+ * an array of holes that every caller would read as real results — a shortlist
+ * nobody verified, or a sweep that polled nothing, reported as success. It is
+ * unreachable while every caller passes a constant, and it is exactly the kind of
+ * silent wrong answer that surfaces the day one of them becomes configurable.
  */
 export async function mapWithConcurrencyLimit<T, R>(
   items: readonly T[],
   limit: number,
   fn: (item: T) => Promise<R>,
 ): Promise<R[]> {
+  if (limit < 1) {
+    throw new Error(`mapWithConcurrencyLimit needs a limit of at least 1, got ${limit}.`);
+  }
+
   const results: R[] = new Array<R>(items.length);
   let nextIndex = 0;
 
@@ -41,7 +52,7 @@ export async function mapWithConcurrencyLimit<T, R>(
     }
   }
 
-  const workerCount = Math.max(1, Math.min(limit, items.length));
+  const workerCount = Math.min(limit, items.length);
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
   return results;
 }
