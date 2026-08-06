@@ -51,7 +51,7 @@ import {
 // Re-exported so the transport keeps one import site for the escape helper.
 export { toTelegramSafe, splitForTelegram, TELEGRAM_MAX_CHARS } from "./telegram-format.js";
 export { renderRow, renderLegend } from "./brief-row.js";
-export type { BriefRow } from "./brief-row.js";
+export type { BriefRow, BriefSection } from "./brief-row.js";
 // The reject-line, trends and spend renderers moved to brief-sections.ts on
 // 2026-08-01 when this file crossed its size budget. Re-exported so every
 // existing import site — and every test — keeps resolving here.
@@ -212,7 +212,7 @@ export function formatDailyBrief(input: BriefInput): string {
       ? `<b>✅ APPLY TODAY (0)</b>\nNothing cleared every check <i>and</i> verified still open.`
       : `<b>✅ APPLY TODAY (${totals.doToday})</b>\n` +
           `<i>Every check below cleared. The only thing left is writing it.</i>\n\n` +
-          renderMarketBlocks(doToday, "/draft") +
+          renderMarketBlocks(doToday, "/draft", "do_today") +
           overflowNote(totals.doToday, doToday.length, "ready to apply to"),
   );
 
@@ -227,7 +227,7 @@ export function formatDailyBrief(input: BriefInput): string {
         `<i>Every check cleared except the years — they ask for more than your ~3.5 ` +
         `shipped. That is a wish, not a wall, and applying early is what makes it ` +
         `land. Nothing here needs a question first.</i>\n\n` +
-        renderMarketBlocks(stretch, "/draft", doToday.length + 1) +
+        renderMarketBlocks(stretch, "/draft", "stretch", doToday.length + 1) +
         overflowNote(totals.stretch, stretch.length, "stretch roles"),
     );
   }
@@ -237,7 +237,7 @@ export function formatDailyBrief(input: BriefInput): string {
       `<b>❓ ONE QUESTION AWAY (${totals.askable})</b>\n` +
         `<i>Each has exactly one check we could not settle from the ad. ` +
         `Asking the employer settles it.</i>\n\n` +
-        renderMarketBlocks(askable, "/ask") +
+        renderMarketBlocks(askable, "/ask", "ask") +
         overflowNote(totals.askable, askable.length, "roles one question away"),
     );
   }
