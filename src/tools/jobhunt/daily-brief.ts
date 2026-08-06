@@ -12,23 +12,17 @@
  */
 
 import { childLogger } from "../../infra/logger.js";
-import {
-  listActionableApplications,
-  recordLiveness,
-  recordBriefRanks,
-  recordFitScores,
-} from "../../db/job-queries.js";
+import { listActionableApplications, recordLiveness } from "../../db/job-queries.js";
 import { summariseSpend } from "../../db/job-run-queries.js";
-import { compareOverlap, overlapScore, formatOverlap, type OverlapResult } from "./overlap.js";
+import { compareOverlap, overlapScore, type OverlapResult } from "./overlap.js";
 import { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
 import { parseGates } from "./gates.js";
 import { toPostingCountry } from "./country.js";
 import { buildTrends } from "./brief-trends.js";
 import { verifyLiveness, type Liveness } from "./liveness.js";
+import { persistBriefRanks, persistFitScores } from "./brief-persist.js";
 import {
   formatDailyBrief,
-  selectAskable,
-  selectDoToday,
   type BriefInput,
   type BriefRow,
   type SpendLine,
@@ -269,9 +263,10 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     ...(spend ? { spend } : {}),
   };
 
-  // Pin the numbering BEFORE returning the text. selectDoToday/selectAskable are
-  // pure and get the same `rows`, so what is stored is exactly what is printed.
-  // Deriving it again when /draft fires would retarget the command silently.
+  // Pin the numbering BEFORE returning the text. The section selectors are pure
+  // and get the same `rows` the renderer does, so what is stored is exactly what
+  // is printed. Deriving it again when /draft fires would retarget the command
+  // silently.
   await persistBriefRanks(rows);
   await persistFitScores(scored);
 
@@ -306,56 +301,6 @@ async function todaysSpend(now: Date): Promise<SpendLine | undefined> {
     // an unreadable ledger would trade the deliverable for a footnote.
     log.warn({ err: (err as Error).message }, "Spend summary unavailable — cost line omitted");
     return undefined;
-  }
-}
-
-/**
- * Store the overlap the ranking just computed.
- *
- * `fit_score` and `fit_evidence` were declared when the table was created and
- * never written to, so the number was recomputed and discarded on every render
- * and no history of it exists anywhere. Written here because this is where the
- * TRACK's CV is already loaded.
- */
-async function persistFitScores(
-  scored: ReadonlyArray<{ row: JobApplication; overlap: OverlapResult }>,
-): Promise<void> {
-  try {
-    await recordFitScores(
-      scored.map(({ row, overlap }) => ({
-        id: row.id,
-        score: overlap.ratio,
-        evidence:
-          `${formatOverlap(overlap)} matched. ` +
-          `Have: ${overlap.matched.join(", ") || "none"}. ` +
-          `Missing: ${overlap.missing.join(", ") || "none"}.`,
-      })),
-    );
-  } catch (err) {
-    // allow-failopen: the score is history, the brief is the deliverable.
-    log.warn({ err: (err as Error).message }, "Fit score persist failed");
-  }
-}
-
-/**
- * Store which row the founder will read as "1", "2", "3" in each section.
- *
- * Failure here is tolerated but reported: the brief is still worth sending
- * without working handles, whereas throwing would lose the whole thing over the
- * numbering. The founder finds out because /draft says it cannot resolve the row
- * — never by drafting for the wrong company.
- */
-async function persistBriefRanks(rows: readonly BriefRow[]): Promise<void> {
-  const entries = [
-    ...selectDoToday(rows).map((r, i) => ({ id: r.id, section: "do_today" as const, rank: i + 1 })),
-    ...selectAskable(rows).map((r, i) => ({ id: r.id, section: "ask" as const, rank: i + 1 })),
-  ];
-  try {
-    await recordBriefRanks(entries);
-  } catch (err) {
-    // allow-failopen: the brief itself is the deliverable. A lost rank makes
-    // /draft say "I can't find row N", which is loud and recoverable.
-    log.warn({ err: (err as Error).message }, "Brief rank persist failed — /draft handles stale");
   }
 }
 

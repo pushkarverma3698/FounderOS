@@ -60,6 +60,13 @@ describe("unresolvedMessage", () => {
     // is from an older brief".
     expect(unresolvedMessage("ask", 4)).toContain("most recent brief");
   });
+
+  it("names the stretch section too, because /draft now spans both", () => {
+    // `/draft` resolves against DO TODAY followed by the stretch section on one
+    // continuous numbering (2026-08-06). Naming only the first would tell the
+    // founder his row is not in a section it was never in.
+    expect(unresolvedMessage("draft", 4)).toContain("STRETCH");
+  });
 });
 
 describe("draftInstruction", () => {
@@ -157,6 +164,30 @@ describe("handleDraft (resolution path)", () => {
 
     expect(runKernelText).toHaveBeenCalledOnce();
     expect(runKernelText.mock.calls[0]![1]).toContain("Aquablu B.V");
+    expect(reply).not.toHaveBeenCalled();
+  });
+
+  it("resolves a stretch row when DO TODAY holds no row at that rank", async () => {
+    // The stretch section carries `/draft`, not `/ask` — a years flag is an
+    // application to write, not a question to send. Its ranks continue from DO
+    // TODAY, so the same integer reaches exactly one row across both sections.
+    vi.doMock("../../../src/db/job-queries.js", () => ({
+      getApplicationByBriefRank: vi.fn(async (section: string, rank: number) =>
+        section === "stretch" && rank === 3 ? ROW : null,
+      ),
+    }));
+    const { handleDraft } = await import("../../../src/gateway/jobhunt-commands.js");
+    const runKernelText = vi.fn(async () => undefined);
+    const reply = vi.fn(async () => undefined);
+
+    await handleDraft({ match: "3", reply } as never, { runKernelText });
+
+    expect(runKernelText).toHaveBeenCalledOnce();
+    expect(runKernelText.mock.calls[0]![1]).toContain("Aquablu B.V");
+    // It must be a DRAFT instruction, never the question prompt: asking an
+    // employer whether its five-year bar is firm invites the pre-emptive
+    // rejection the stretch band exists to avoid.
+    expect(runKernelText.mock.calls[0]![1]).toContain("Draft a tailored application");
     expect(reply).not.toHaveBeenCalled();
   });
 
