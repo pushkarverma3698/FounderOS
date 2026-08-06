@@ -61,6 +61,10 @@ gumroad-packs/
 # Mac apply client: local venv, the founder's real identity/resume paths, and
 # the synced queue + outcome ledger. apply-profile.json is PERSONAL DATA and
 # .queue/ holds row ids from production — neither belongs in git.
-mac-client/.venv/
+mac-client/.venv*/
 mac-client/apply-profile.json
 mac-client/.queue/
+
+# Python bytecode from the Mac client
+__pycache__/
+*.pyc
