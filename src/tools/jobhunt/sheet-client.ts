@@ -49,6 +49,7 @@ export async function writeTab(
   const token = await accessToken(target.credentialsPath);
   const range = encodeURIComponent(`${tabName}!A1:ZZ`);
 
+  await ensureTab(token, target.spreadsheetId, tabName);
   await sheetsCall(token, `${SHEETS_BASE}/${target.spreadsheetId}/values/${range}:clear`, {});
   await sheetsCall(
     token,
@@ -58,6 +59,35 @@ export async function writeTab(
   );
 
   log.info({ tab: tabName, rows: rows.length }, "Sheet tab written");
+}
+
+/**
+ * Create the tab if the spreadsheet does not have it yet.
+ *
+ * A blank Google Sheet contains exactly one tab called "Sheet1", so on a sheet
+ * the founder has just created BOTH our tabs are missing and every write fails
+ * with "Unable to parse range" — a ⚠ every thirty minutes, forever, for a
+ * spreadsheet that exists and is correctly shared. Asking him to hand-create
+ * two tabs with exact names is a setup step that silently breaks on a typo.
+ *
+ * Idempotent by checking first: addSheet on an existing title is a 400.
+ */
+async function ensureTab(token: string, spreadsheetId: string, tabName: string): Promise<void> {
+  const response = await fetch(
+    `${SHEETS_BASE}/${spreadsheetId}?fields=sheets.properties.title`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!response.ok) {
+    throw new Error(`Sheets API ${response.status} reading tabs: ${(await response.text()).slice(0, 300)}`);
+  }
+  const body = (await response.json()) as { sheets?: { properties?: { title?: string } }[] };
+  const titles = (body.sheets ?? []).map((sheet) => sheet.properties?.title);
+  if (titles.includes(tabName)) return;
+
+  await sheetsCall(token, `${SHEETS_BASE}/${spreadsheetId}:batchUpdate`, {
+    requests: [{ addSheet: { properties: { title: tabName } } }],
+  });
+  log.info({ tab: tabName }, "Sheet tab created");
 }
 
 /**

@@ -10,11 +10,16 @@ verify, leaves everything else blank, and advances only when you click.
 
 ```bash
 cd mac-client
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/playwright install chromium
 cp apply-profile.example.json apply-profile.json   # then fill it in
 ./install-launchagent.sh
 ```
+
+**Python 3.13, not `python3`.** On a Mac where `python3` is 3.14, the install
+fails building greenlet (a Playwright dependency) and you get a venv with no
+Playwright in it — the queue then dies at import time, after the LaunchAgent has
+already told you the jobs are ready.
 
 `apply-profile.json` is gitignored and holds your name, email, phone and the
 path to the resume PDF for each track. Nothing invents these values: a field
