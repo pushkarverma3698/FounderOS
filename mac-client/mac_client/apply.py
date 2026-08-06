@@ -49,6 +49,11 @@ async def fill_form(page, job: QueueJob, profile: ApplyProfile) -> tuple[list[st
     filled: list[str] = []
     skipped: list[str] = []
 
+    try:
+        await page.wait_for_selector('#first_name, #name, input[type="email"], input[type="file"]', timeout=10000)
+    except Exception:
+        pass
+
     for label, selectors, value in planned_fills(field_map, profile):
         if not value.strip():
             skipped.append(f"{label} (not in your profile)")
@@ -68,12 +73,19 @@ async def fill_form(page, job: QueueJob, profile: ApplyProfile) -> tuple[list[st
 
 
 async def _fill_first(page, selectors: tuple[str, ...], value: str) -> bool:
-    """Fill the first selector that exists. False when none do."""
+    """Fill the first selector that exists via native keystrokes. False when none do."""
     for selector in selectors:
         try:
-            await page.locator(selector).first.fill(value, timeout=FILL_TIMEOUT_MS)
+            loc = page.locator(selector).first
+            await loc.wait_for(state="visible", timeout=2000)
+            await loc.scroll_into_view_if_needed()
+            await loc.focus()
+            await page.keyboard.press("Meta+A")
+            await page.keyboard.type(value, delay=15)
+            print(f"  [TYPE OK] {selector} -> {value}", flush=True)
             return True
-        except Exception:
+        except Exception as err:
+            print(f"  [TYPE FAIL] {selector}: {err}", flush=True)
             continue
     return False
 
@@ -81,11 +93,15 @@ async def _fill_first(page, selectors: tuple[str, ...], value: str) -> bool:
 async def _upload_first(page, selectors: tuple[str, ...], path: str) -> bool:
     for selector in selectors:
         try:
-            await page.locator(selector).first.set_input_files(
+            loc = page.locator(selector).first
+            await loc.wait_for(state="attached", timeout=2000)
+            await loc.set_input_files(
                 str(Path(path).expanduser()), timeout=FILL_TIMEOUT_MS
             )
+            print(f"  [UPLOAD OK] {selector} -> {path}")
             return True
-        except Exception:
+        except Exception as err:
+            print(f"  [UPLOAD FAIL] {selector}: {err}")
             continue
     return False
 
@@ -94,6 +110,11 @@ async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str)
     """Open one job, fill it, and wait for the founder. Returns the outcome."""
     await page.goto(job.url, wait_until="domcontentloaded")
     filled, skipped = await fill_form(page, job, profile)
+
+    try:
+        await page.locator('input[type="file"], #first_name, #name, input[name="email"]').first.scroll_into_view_if_needed(timeout=2000)
+    except Exception:
+        pass
 
     loop = asyncio.get_running_loop()
     decided: asyncio.Future[str] = loop.create_future()
@@ -133,7 +154,7 @@ async def run_queue(jobs: list[QueueJob], profile: ApplyProfile) -> dict[str, in
     tally = {ledger.APPLIED: 0, ledger.SKIPPED: 0, "error": 0}
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, channel="chrome")
+        browser = await p.chromium.launch(headless=False)
         context = await browser.new_context(accept_downloads=False)
         page = await context.new_page()
 
@@ -191,7 +212,7 @@ def main() -> int:
         print("Nothing in the queue. The sweep has not found anything unapplied.")
         return 0
 
-    problems = missing_resumes(profile, [j.track for j in jobs])
+    problems = missing_resumes(profile, jobs)
     if problems:
         # Refusing to start is the point. Discovering a missing PDF at job three
         # means the founder has already reviewed a form he cannot submit.

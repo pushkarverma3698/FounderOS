@@ -93,8 +93,8 @@ def load_profile(path: Path = DEFAULT_PROFILE_PATH) -> ApplyProfile:
     )
 
 
-def missing_resumes(profile: ApplyProfile, tracks: list[str]) -> list[str]:
-    """Tracks in this queue whose resume file is absent from disk.
+def missing_resumes(profile: ApplyProfile, jobs: list[any] | list[str]) -> list[str]:
+    """Jobs/tracks in this queue whose resume file is absent from disk.
 
     Checked BEFORE the browser opens rather than at the upload. Discovering it
     mid-session means the founder has already reviewed a form he cannot submit,
@@ -102,10 +102,19 @@ def missing_resumes(profile: ApplyProfile, tracks: list[str]) -> list[str]:
     thing this tool exists to save.
     """
     problems: list[str] = []
-    for track in sorted(set(tracks)):
-        candidate = profile.resume_for(track)
-        if not candidate:
-            problems.append(f"{track}: no resume configured")
-        elif not Path(candidate).expanduser().is_file():
-            problems.append(f"{track}: file not found — {candidate}")
+    if jobs and hasattr(jobs[0], "track"):
+        for job in jobs:
+            job_id = getattr(job, "id", None)
+            candidate = profile.resume_for(job.track, job_id)
+            if not candidate:
+                problems.append(f"{getattr(job, 'company', job.track)} ({job.track}): no resume configured")
+            elif not Path(candidate).expanduser().is_file():
+                problems.append(f"{getattr(job, 'company', job.track)} ({job.track}): file not found — {candidate}")
+    else:
+        for track in sorted(set(jobs)):
+            candidate = profile.resume_for(track)
+            if not candidate:
+                problems.append(f"{track}: no resume configured")
+            elif not Path(candidate).expanduser().is_file():
+                problems.append(f"{track}: file not found — {candidate}")
     return problems
