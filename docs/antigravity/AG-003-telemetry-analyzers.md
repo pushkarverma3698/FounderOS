@@ -4,6 +4,9 @@
 **Branch:** `feat/m0a-evolution-engine-v0` (already exists — commit onto it, do not create a new one)
 **Milestone:** M0a — Evolution Engine v0
 **Depends on:** AG-001 + AG-002 (both merged; commit `a92d552`)
+**Standards:** read **[`docs/antigravity/STANDARDS.md`](STANDARDS.md)** in full first. It is binding
+and governs everything this brief does not explicitly override — purity and I/O placement, named
+constants, loud-over-silent failure handling, test discipline, and the close-out contract.
 
 ---
 
@@ -199,19 +202,17 @@ true negative:
 
 ---
 
-## Explicitly forbidden
+## Explicitly forbidden — task-specific
+
+The general rules (no `any`, no `console.log`, no new dependencies, 400-line limit, named constants,
+no git operations, no destructive commands) are in **[STANDARDS.md](STANDARDS.md)** and apply here in
+full. This list is only what is specific to *this* task:
 
 - **Do not** import `src/db/` — or any database module — from `analyzers/telemetry.ts`. The
-  analyzers must be callable with a plain array literal and nothing else.
+  analyzers must be callable with a plain array literal and nothing else. `collect-telemetry.ts` is
+  the only file here permitted to touch the database.
 - **Do not** modify `code-health.ts`, `dead-code.ts`, `collect.ts`, or any existing test file.
 - **Do not** change `Finding`, `Severity`, or `SourceFile` in `types.ts`. Additive only.
-- **Do not** make any network or LLM call. This sensor is $0 by construction.
-- **Do not** use `any`. Use `unknown` and narrow.
-- **Do not** add `console.log`.
-- **Do not** add an npm dependency.
-- **Do not** exceed 400 lines in any file (CI gate).
-- **Do not** hardcode a threshold inline — every one is an exported named constant.
-- **Do not** change git branch, rebase, force-push, or open a PR.
 
 ---
 

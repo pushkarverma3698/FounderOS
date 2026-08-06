@@ -26,8 +26,22 @@ Antigravity has **none** of the conversation's context. Every brief must be self
 1. **Goal** — one paragraph, what "done" means
 2. **Files in scope** — exact paths, nothing implied
 3. **The pattern to follow** — point at a real file already in the repo
-4. **Explicitly forbidden** — what must not be touched or changed
+4. **Explicitly forbidden** — only what is *task-specific*; the general list lives in STANDARDS.md
 5. **Verify command** — the exact command to run, with instructions to report raw output
+
+### Standards live in [STANDARDS.md](STANDARDS.md), not in the brief
+
+**[`docs/antigravity/STANDARDS.md`](STANDARDS.md) is binding on every delegated task** and is read
+automatically via the `delegated-task` skill. Purity and I/O placement, resolved-specifier
+reachability, named constants, loud-over-silent failure, test discipline, the no-`any`/no-`console.log`/
+400-LOC gates, and the close-out contract are all there.
+
+**Briefs must reference it, never restate it.** A rule copied into a brief is a rule that can be
+copied *wrong* — which is exactly what happened in AG-001, where the brief specified raw-text
+matching and produced two silent false negatives. One file, fixed once, applies to every future task.
+
+When a review finds a defect caused by a missing or wrong general rule, **fix STANDARDS.md**, not
+just the code. That is the difference between debugging and not having the bug again.
 
 The Antigravity-side skill `delegated-task`
 (`~/.gemini/antigravity/global_skills/delegated-task/SKILL.md`) encodes this contract on its end.

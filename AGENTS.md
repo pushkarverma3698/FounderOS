@@ -1,5 +1,10 @@
 # AGENTS.md
 
+> **Writing code in this repo?** `docs/antigravity/STANDARDS.md` is binding: purity and I/O
+> placement, resolved-specifier reachability, named constants, loud-over-silent failure handling,
+> test discipline, and the CI hard gates. This file covers git policy and environment; that one
+> covers how the code is written. Read it before the first edit, not after a review.
+
 ## Engineering principle — reason before code
 
 Every change must answer **why** before **what**:
