@@ -29,7 +29,8 @@ Every change must answer **why** before **what**:
 1. **Name the problem** — What fails today? What breaks if we don't act?
 2. **Name the stable boundary** — What should NOT change when a vendor/SDK drifts? (Usually: tool names, HITL gates, idempotency, department wiring.)
 3. **Minimize blast radius** — Prefer an adapter/env flag over rewriting tools, prompts, or graph structure.
-4. **Prove the real path** — Unit tests mock the provider dispatch layer; prod claims need boot probes or live evidence.
+4. **Grounding & Memory-First Reasoning** — Reason strictly over repo data, DB memory (`founder_context`, `turicks-brain`, `failure_lessons`), and live code. Never use ungrounded world assumptions to overcomplicate tasks.
+5. **Prove the real path** — Unit tests mock the provider dispatch layer; prod claims need boot probes or live evidence.
 
 **Integration rule (ADR-029):** Tools call `src/infra/providers/` — never Composio, gws, or platform REST directly. Swap `GMAIL_BACKEND`, `LINKEDIN_BACKEND` via env; departments unchanged.
 

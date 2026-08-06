@@ -17,6 +17,11 @@ A rule which is not enforced by layer 2 is a convention, and a rule that is enfo
 - **Binding coding standard:** [docs/antigravity/STANDARDS.md](docs/antigravity/STANDARDS.md). You must read it in full before writing code.
 - **Delegation contract & brief index:** [docs/antigravity/README.md](docs/antigravity/README.md).
 
+## Grounding & Memory-First Reasoning
+
+- Reason strictly over repo data, DB memory (`founder_context`, `turicks-brain`, `failure_lessons`), and live code.
+- Never use ungrounded generic world assumptions to overcomplicate tasks.
+
 ## Commands
 
 ```bash
