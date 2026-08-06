@@ -127,6 +127,43 @@ Python 3, pinned deps, its own venv. Ported from
 - **Any merge to `main`.** Both this and PR #419/#420 merge only when the
   founder declares everything verified (instruction, 2026-08-06).
 
+## As built (2026-08-06)
+
+Four deviations from the design above, each with its reason:
+
+1. **`applied_at` already existed.** It has been on `job_applications` since the
+   jobhunt schema was created and already drives the re-apply staleness rule in
+   `screen.ts`. Only `skipped_at` was added. The separation argument is
+   unchanged and is now also why a skip must not be stamped into `applied_at`.
+2. **No `@googleapis/sheets` dependency.** `google-auth-library` is already a
+   dependency and the two REST endpoints are reached directly — a package in
+   the lockfile, CI and audit surface for two fetch calls was not worth it.
+3. **Export failures do not send their own message.** The design implied a ⚠ of
+   its own; that would mean two notifications per sweep, every sweep, until the
+   spreadsheet exists. The notice is folded into the message the sweep was
+   already sending.
+4. **Drive API is disabled on `founderos-prod`, Sheets API is enabled.**
+   Verified 2026-08-06: `spreadsheets.get` on a fake id returns 404 (auth fine),
+   `drive/v3/about` returns 403 "has not been used in project 463877027794".
+   So the service account cannot create or share a spreadsheet. The founder
+   creates it and shares it with
+   `google-sheet-manager@founderos-prod.iam.gserviceaccount.com` — which is the
+   better arrangement anyway: he owns the file, and it survives key rotation.
+
+### Live evidence, this session ($0)
+
+| Check | Result |
+|---|---|
+| Free lane, 15-board sample of the pruned registry | 1,482 postings in 4.9s, **0 board failures** (was 3 of 12 pre-prune) |
+| Publication dates parsed | 1,466 / 1,482 (98.9%); the 16 undated are counted and reported |
+| Freshness filter, cold start | 0 kept, with the reason printed — correct: every posting predates the 6h window |
+| Sheets auth + request shape | 404 "Requested entity was not found" against a fake id — authenticated, correctly formed, sheet simply absent |
+| Sheet row rendering | `unverifiable` → "couldn't check", `uncertain` → "unclear — verify before applying", pinned rank preserved |
+
+**NOT VERIFIED:** no sweep has run in production against this code, no Sheet has
+been written, and no application has been submitted through the Mac client. The
+first real sweep after deploy is the proof.
+
 ## Verification before ship
 
 1. `pnpm gate` green on the VPS-side branch; pytest green on the Mac branch.
