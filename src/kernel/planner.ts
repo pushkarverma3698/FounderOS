@@ -218,8 +218,7 @@ export function makePlanNode(model: KernelChatModel, catalog: WorkerCatalogEntry
       ? overrideDecision(override.worker, override.rest || input)
       : await (async () => {
           const response = await model.invoke([
-            new SystemMessage(systemPrompt),
-            new SystemMessage(plannerNowLine(clock)),
+            new SystemMessage(`${systemPrompt}\n\n${plannerNowLine(clock)}`),
             ...historyMessages(conversation),
             new HumanMessage(input),
           ]);
