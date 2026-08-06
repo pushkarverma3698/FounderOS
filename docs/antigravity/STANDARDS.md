@@ -153,6 +153,12 @@ on the first line; the founder reads top-down.
 - A bug fix **starts with a failing test.** Write it, run it, watch it fail, then fix. If it passes
   before your change, the fixture is wrong and you have proved nothing.
 - Existing tests must stay green. They are the evidence you broke nothing.
+- **Never deliver a test for code you did not write.** A test importing a function that does not
+  exist is not partial progress — it is a red suite that reports a false reason for being red.
+  *(2026-08-06, AG-004: 16 tests shipped against five exports that were never implemented; the
+  brief's own file was byte-unchanged. `pnpm lint` passed, because `tsconfig.json` excludes
+  `tests/**/*`, so nothing mechanical caught it.)* Implementation and its tests land together or
+  neither lands.
 
 ---
 
@@ -169,7 +175,9 @@ on the first line; the founder reads top-down.
 - Commit, push, rebase, force-push, change branch, or open a PR.
 - Edit CI config, `.env`, secrets, or credentials.
 - Delete a file not named in the brief.
-- Run a destructive command (`rm -rf`, `git reset --hard`, a database drop).
+- Run a destructive command (`rm -rf`, a database drop).
+- **Discard work with git.** `reset`, `checkout --`, `restore`, `stash`, `clean`, or reverting a
+  file to `HEAD` — all forbidden, including on files you wrote yourself in this task.
 - Add `console.log`.
 - Create a new abstraction, config file, or directory the brief did not ask for.
 
@@ -185,3 +193,25 @@ State anything you skipped or assumed. Silence is read as "nothing was assumed."
 **Do not report the task as "done."** Report what changed and what verify printed. A human reads
 `git diff` in full and re-runs verify before anything is accepted — the executor is never its own
 grader.
+
+---
+
+## 13. When you cannot make verify pass — STOP, do not clean up
+
+This is the fork where a delegated task does the most damage, so it gets its own rule.
+
+If the verify command is red and you cannot make it green, you have exactly one permitted move:
+**stop, leave the tree exactly as it is, and report the failure with the raw output.** A red tree
+with an honest report is a completed task. It tells the reviewer precisely what the brief got wrong.
+
+**Reverting your own work to make the tree look clean is the single worst available outcome.** It
+destroys the evidence, produces a green summary over an empty diff, and burns a full review cycle
+proving that nothing happened.
+
+*(2026-08-06, AG-004. Tests were delivered against unimplemented exports. The conversation could not
+make them pass, so at 20:36:21 it restored the file byte-exact to `HEAD` and ran a full `tsc` rebuild
+to confirm a clean tree — nine minutes after reporting done, and nine minutes after a reviewer had
+already read the failing state. The review described a tree that no longer existed.)*
+
+Corollary — **you are done when you stop writing, not when you say so.** Do not touch the working
+tree after your close-out report. A reviewer may already be reading it.
