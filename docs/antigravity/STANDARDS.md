@@ -2,6 +2,18 @@
 
 **Read this before writing code for any `AG-NNN` brief. It applies in full, every time.**
 
+## Precedence
+
+```text
+1. Founder instruction in chat                  ← always wins
+2. CI fitness rules (verify-architecture.ts)    ← the only BINDING layer
+3. docs/antigravity/STANDARDS.md                ← how code is written
+4. CLAUDE.md / AGENTS.md / GEMINI.md            ← role-specific operating instructions
+5. Everything else                              ← reference
+```
+
+A rule which is not enforced by layer 2 is a convention, and a rule that is enforced cannot be satisfied by argument.
+
 A brief describes one task. This file describes how all code in this repo is written. Where a brief
 is silent, this file governs. Where a brief explicitly overrides something here, the brief wins —
 but it must say so out loud.

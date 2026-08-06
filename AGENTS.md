@@ -5,6 +5,23 @@
 > test discipline, and the CI hard gates. This file covers git policy and environment; that one
 > covers how the code is written. Read it before the first edit, not after a review.
 
+## Precedence
+
+```text
+1. Founder instruction in chat                  ← always wins
+2. CI fitness rules (verify-architecture.ts)    ← the only BINDING layer
+3. docs/antigravity/STANDARDS.md                ← how code is written
+4. CLAUDE.md / AGENTS.md / GEMINI.md            ← role-specific operating instructions
+5. Everything else                              ← reference
+```
+
+A rule which is not enforced by layer 2 is a convention, and a rule that is enforced cannot be satisfied by argument.
+
+Layer 5 reference material lives in [`docs/rules/`](docs/rules/) — notably the 8-point new-tool
+checklist in `TOOL-STANDARDS.md`, plus `PROGRAMMING-RULES.md`, `TESTING-RULES.md` and
+`TEST-PYRAMID.md`. `.cursorrules` used to be the only pointer to them; it is now a pointer file,
+so this is.
+
 ## Engineering principle — reason before code
 
 Every change must answer **why** before **what**:
@@ -120,7 +137,7 @@ this only records the gotchas.
 - Needs Postgres + `GOOGLE_GENERATIVE_AI_API_KEY` in `.env`. Skips Telegram (no 409 with prod bot).
 
 ### Running / testing
-- Tests are keyless: `pnpm test` (vitest, ~1100 tests). Lint: `pnpm lint` (tsc --noEmit).
+- Tests are keyless: `pnpm test` (vitest, ~2540 tests). Lint: `pnpm lint` (tsc --noEmit).
   Build: `pnpm build:all` (backend `tsc` + `apps/jarvis` Vite). Dev run: `pnpm dev`.
   Health: `curl localhost:3001/health`.
 - `pnpm eval` / `pnpm test:integration` need a **real** Gemini key + live Postgres.

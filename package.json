@@ -24,6 +24,7 @@
     "qa:telegram": "ALLOW_NETWORK=1 node --env-file=.env --import tsx/esm scripts/e2e-telegram-qa.ts run all --approve",
     "lint": "tsc --noEmit",
     "verify:arch": "node --import tsx/esm scripts/verify-architecture.ts",
+    "audit:self": "node --env-file=.env --import tsx/esm scripts/audit-self.ts",
     "verify:wiring": "node --import tsx/esm scripts/verify-wiring.ts",
     "verify:runtime-assets": "node --import tsx/esm scripts/verify-runtime-assets.ts",
     "gate": "pnpm lint && pnpm build:all && pnpm verify:runtime-assets && pnpm verify:wiring && pnpm verify:arch && pnpm test",
