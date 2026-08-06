@@ -81,7 +81,26 @@ export async function runActorSync(
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
-      return { ok: false, error: `Apify actor ${actorId} returned HTTP ${response.status}` };
+      // The BODY, not just the status. Apify puts the actual complaint there —
+      // which input key it rejected, which value was out of range. On 2026-08-03
+      // the NL query failed with a bare "returned HTTP 400" recorded, and that
+      // sentence is undiagnosable: it cannot distinguish a malformed input from
+      // a rate limit from an actor that changed its schema. Truncated because an
+      // error string ends up in a Telegram message and a database column.
+      let detail = "";
+      try {
+        detail = await response.text();
+      } catch {
+        // allow-failopen: the STATUS is the finding; the body is the detail. A
+        // body we cannot read must never cost us the status code too, which is
+        // what turns a diagnosable 400 into "response.text is not a function".
+        detail = "";
+      }
+      const suffix = detail.trim() ? `: ${detail.trim().slice(0, 500)}` : "";
+      return {
+        ok: false,
+        error: `Apify actor ${actorId} returned HTTP ${response.status}${suffix}`,
+      };
     }
     const json = (await response.json()) as unknown;
     if (!Array.isArray(json)) {

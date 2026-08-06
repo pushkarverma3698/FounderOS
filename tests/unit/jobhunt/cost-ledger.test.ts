@@ -16,6 +16,8 @@ import {
   estimateQueryCost,
   toLedgerAmount,
 } from "../../../src/tools/jobhunt/cost.js";
+import { tally } from "../../../src/tools/jobhunt/ingest-ledger.js";
+import type { IngestLine } from "../../../src/tools/jobhunt/ingest.js";
 import { POOL_ORDER } from "../../../src/tools/jobhunt/ats-source.js";
 import { TRACK_PRIORITY } from "../../../src/tools/jobhunt/tracks.js";
 import { THIN_BODY_CHARS } from "../../../src/tools/jobhunt/screen.js";
@@ -102,5 +104,80 @@ describe("the too-thin-to-judge threshold", () => {
     // arriving from the ATS feed and being screened as if it were complete.
     // Not shared by import — a pure gate must not depend on a network module.
     expect(THIN_BODY_CHARS).toBe(MIN_DESCRIPTION_CHARS);
+  });
+});
+
+/**
+ * The ledger must account for every screened posting.
+ *
+ * `IngestLine.outcome` has five values; the tally counted three. `duplicate`
+ * and `error` lines landed in `screened` and appeared in no other column, so a
+ * sweep in which EVERY posting failed was recorded as "27 screened, 0 passed,
+ * 0 flagged, 0 rejected" — arithmetically identical to a market that simply had
+ * nothing to offer. That ambiguity is what hid the 2026-08-02 sponsor-register
+ * outage for four days and ~$0.77 of Apify spend.
+ */
+describe("tally", () => {
+  const line = (outcome: IngestLine["outcome"], detail = ""): IngestLine => ({
+    company: "Acme",
+    title: "Engineer",
+    outcome,
+    detail,
+    isNew: false,
+  });
+
+  it("accounts for every line it was given", () => {
+    // Arrange — one of each outcome the pipeline can produce.
+    const lines = [
+      line("pass"),
+      line("flag"),
+      line("reject"),
+      line("duplicate"),
+      line("error"),
+    ];
+
+    // Act
+    const counts = tally(lines);
+
+    // Assert — the columns must sum to the total, or the ledger is lying.
+    expect(counts.screened).toBe(5);
+    expect(
+      counts.passed + counts.flagged + counts.rejected + counts.duplicates + counts.errored,
+    ).toBe(counts.screened);
+  });
+
+  it("records a sweep where everything errored as errored, not as an empty market", () => {
+    // The exact shape of 2026-08-02: 27 postings, every one throwing ENOENT on
+    // the sponsor register.
+    const lines = Array.from({ length: 27 }, () =>
+      line("error", "IND sponsor register unreadable at /opt/founderos/dist/docs/…: ENOENT"),
+    );
+
+    const counts = tally(lines);
+
+    expect(counts.screened).toBe(27);
+    expect(counts.errored).toBe(27);
+    expect(counts.passed).toBe(0);
+  });
+
+  it("keeps the error text, so the cause survives the sweep", () => {
+    // The message existed on IngestLine.detail all along and was never logged
+    // and never persisted, which is why the root cause took a code audit to
+    // find rather than a database query.
+    const counts = tally([line("error", "sponsor register unreadable: ENOENT")]);
+    expect(counts.screenError).toContain("ENOENT");
+  });
+
+  it("reports the commonest error when a query fails several ways", () => {
+    const counts = tally([
+      line("error", "tracker unreachable"),
+      line("error", "sponsor register unreadable"),
+      line("error", "sponsor register unreadable"),
+    ]);
+    expect(counts.screenError).toContain("sponsor register unreadable");
+  });
+
+  it("leaves the error text null when nothing errored", () => {
+    expect(tally([line("pass"), line("reject")]).screenError).toBeNull();
   });
 });

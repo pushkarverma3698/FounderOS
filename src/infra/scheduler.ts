@@ -342,11 +342,11 @@ export async function runJobIngestSweep(): Promise<void> {
  * than no budget: it is a number the founder would reason about that has no
  * relationship to what is spent.
  *
- * 80 across 8 ATS queries is 10 each — the floor, stated honestly. With the two
- * Indeed queries the sweep's ceiling is 100 postings a day, and at the FREE-tier
- * ATS price ($0.01/start + $0.012/job) that is at most ~$1.06/day. What it
- * ACTUALLY costs is now recorded per query in `job_ingest_runs` and printed in
- * the brief, so this comment can never quietly become fiction again.
+ * IT BECAME FICTION ANYWAY: the India pool took the sweep from 8 ATS queries to
+ * 12 without touching this, so the ceiling silently became 120 + 20 Indeed, and
+ * on 2026-08-06 it bought 92 postings for $0.997 while this said 80. A
+ * per-posting count cannot bind a per-query floor. THE CAP THAT BINDS IS IN
+ * DOLLARS — `spend-gate.ts`, before the first actor call of every sweep.
  */
 const JOB_INGEST_DAILY_LIMIT = 80;
 

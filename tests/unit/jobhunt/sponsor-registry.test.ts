@@ -6,12 +6,16 @@
  */
 
 import { describe, test, expect, beforeEach } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   parseCsvLine,
   parseSponsorCsv,
   getSponsorIndex,
   resetSponsorIndexCache,
+  resolveRepoRoot,
+  registerPathFrom,
   SPONSOR_REGISTER_PATH,
 } from "../../../src/tools/jobhunt/sponsor-registry.js";
 import { matchSponsor } from "../../../src/tools/jobhunt/sponsor-match.js";
@@ -85,5 +89,56 @@ describe("getSponsorIndex", () => {
   test("a company that is not on the register is rejected, not flagged", () => {
     const match = matchSponsor("Zzyzx Widgetworks", getSponsorIndex());
     expect(match.verdict).toBe("not-sponsor");
+  });
+});
+
+/**
+ * The register path must resolve from the BUILT layout, not just the source one.
+ *
+ * This is the regression guard for the 2026-08-02 outage. The loader counted
+ * three directories up from its own file, which is right for
+ * `src/tools/jobhunt/…` and wrong for what tsc actually emits: `tsconfig.json`
+ * sets no `rootDir` and includes both `src/**` and `scripts/**`, so the common
+ * root is the repo and the output lands at `dist/src/tools/jobhunt/…` — four
+ * deep. In production the path became `<repo>/dist/docs/…`, which does not
+ * exist, so `getSponsorRegister()` threw ENOENT on EVERY posting and the whole
+ * sweep resolved to `outcome: "error"`.
+ *
+ * Every one of these tests passed throughout, because `tsx` runs the source
+ * tree where three deep IS correct. Only production broke. So the fix is tested
+ * against both layouts explicitly, and the assertion below is the one that
+ * fails on the old implementation.
+ */
+describe("resolveRepoRoot", () => {
+  const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+  test("finds the repo root from the source layout", () => {
+    expect(resolveRepoRoot(resolve(repo, "src/tools/jobhunt"))).toBe(repo);
+  });
+
+  test("finds the repo root from the built layout tsc actually emits", () => {
+    // The 2026-08-02 outage in one assertion: counting levels returns
+    // `<repo>/dist` here, and every posting then fails to screen.
+    expect(resolveRepoRoot(resolve(repo, "dist/src/tools/jobhunt"))).toBe(repo);
+  });
+
+  test("throws rather than guessing when no package.json is above", () => {
+    expect(() => resolveRepoRoot("/")).toThrow(/repo root/i);
+  });
+});
+
+describe("SPONSOR_REGISTER_PATH", () => {
+  test("points at a register that exists on disk", () => {
+    // The loader's own failure mode, asserted directly: if this path is wrong,
+    // screening does not degrade — it stops entirely.
+    expect(existsSync(SPONSOR_REGISTER_PATH)).toBe(true);
+  });
+
+  test("honours the IND_SPONSOR_REGISTER_PATH override", () => {
+    expect(registerPathFrom({ IND_SPONSOR_REGISTER_PATH: "/tmp/reg.csv" })).toBe("/tmp/reg.csv");
+  });
+
+  test("falls back to the repo-relative register when no override is set", () => {
+    expect(registerPathFrom({})).toBe(SPONSOR_REGISTER_PATH);
   });
 });

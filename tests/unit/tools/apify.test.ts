@@ -118,6 +118,42 @@ describe("runActorSync", () => {
     if (!res.ok) expect(res.error).toContain("408");
   });
 
+  it("keeps the actor's own complaint, not just the status code", async () => {
+    // "returned HTTP 400" is undiagnosable: it cannot tell a malformed input
+    // from a rate limit from an actor whose schema changed. On 2026-08-03 the
+    // Netherlands Indeed query failed and that bare sentence is all that was
+    // recorded, so the cause could not be established afterwards at any price.
+    env.APIFY_TOKEN = "apify_test";
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () => '{"error":{"message":"Input is not valid: remote"}}',
+    });
+
+    const res = await runActorSync(RAG_BROWSER_ACTOR, {}, 1000);
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("Input is not valid: remote");
+  });
+
+  it("still reports the status when the error body cannot be read", async () => {
+    // The body is the detail; the status is the finding. Losing both because a
+    // stream failed would be strictly worse than what we had before.
+    env.APIFY_TOKEN = "apify_test";
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      text: async () => {
+        throw new Error("stream already consumed");
+      },
+    });
+
+    const res = await runActorSync(RAG_BROWSER_ACTOR, {}, 1000);
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("429");
+  });
+
   it("returns ok:false when the dataset is not an array", async () => {
     env.APIFY_TOKEN = "apify_test";
     mockFetch.mockResolvedValueOnce(jsonResponse({ not: "array" }));

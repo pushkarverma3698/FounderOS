@@ -176,6 +176,13 @@
       "when": 1785780000000,
       "tag": "0024_jobhunt_fresh_count",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785870000000,
+      "tag": "0025_jobhunt_screen_failures",
+      "breakpoints": true
     }
   ]
 }

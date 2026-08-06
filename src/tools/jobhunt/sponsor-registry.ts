@@ -15,18 +15,57 @@
  * three-way verdict in sponsor-match.ts exists to prevent.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, join, parse as parsePath } from "node:path";
 import { buildSponsorIndex, type SponsorIndex } from "./sponsor-match.js";
 
-/** Repo root: src/tools/jobhunt/… and dist/tools/jobhunt/… are both three deep. */
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+/**
+ * The repo root, found by SEARCHING for it rather than counting directories up.
+ *
+ * Counting is what broke production on 2026-08-02. The old constant went three
+ * levels up, which is correct for `src/tools/jobhunt/…` and wrong for what tsc
+ * actually emits: `tsconfig.json` sets no `rootDir` and includes both `src/**`
+ * and `scripts/**`, so the inferred common root is the repo and the build lands
+ * at `dist/src/tools/jobhunt/…` — four deep. The register path resolved to
+ * `<repo>/dist/docs/…`, which does not exist, and `getSponsorRegister()` threw
+ * ENOENT on every posting for four days.
+ *
+ * The whole test suite passed the entire time, because `tsx` runs the source
+ * tree where three deep is right. Searching for `package.json` is correct in
+ * both layouts and stays correct if the build output moves again.
+ */
+export function resolveRepoRoot(fromDir: string): string {
+  let dir = resolve(fromDir);
+  const { root } = parsePath(dir);
+
+  while (!existsSync(join(dir, "package.json"))) {
+    if (dir === root) {
+      throw new Error(
+        `Could not locate the repo root above ${fromDir}: no package.json in any ancestor.`,
+      );
+    }
+    dir = dirname(dir);
+  }
+  return dir;
+}
+
+export const REPO_ROOT = resolveRepoRoot(dirname(fileURLToPath(import.meta.url)));
 
 export const SPONSOR_REGISTER_PATH = resolve(
   REPO_ROOT,
   "docs/strategy/data/ind-sponsors-work.csv",
 );
+
+/**
+ * Where to read the register from. The env override exists so a deployment that
+ * stores the register outside the repo never has to patch code to say so.
+ */
+export function registerPathFrom(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  return env["IND_SPONSOR_REGISTER_PATH"] ?? SPONSOR_REGISTER_PATH;
+}
 
 /**
  * Parse one CSV line into fields, honouring quoted fields (register names contain
@@ -145,12 +184,14 @@ let cached: SponsorRegister | null = null;
 export function getSponsorRegister(): SponsorRegister {
   if (cached) return cached;
 
+  const path = registerPathFrom();
+
   let csv: string;
   try {
-    csv = readFileSync(SPONSOR_REGISTER_PATH, "utf8");
+    csv = readFileSync(path, "utf8");
   } catch (err) {
     throw new Error(
-      `IND sponsor register unreadable at ${SPONSOR_REGISTER_PATH}: ${(err as Error).message}. ` +
+      `IND sponsor register unreadable at ${path}: ${(err as Error).message}. ` +
         `Regenerate it with: pnpm tsx scripts/ind-sponsors.ts`,
     );
   }
@@ -158,7 +199,7 @@ export function getSponsorRegister(): SponsorRegister {
   const names = parseSponsorCsv(csv);
   if (names.length === 0) {
     throw new Error(
-      `IND sponsor register at ${SPONSOR_REGISTER_PATH} parsed to zero entries. ` +
+      `IND sponsor register at ${path} parsed to zero entries. ` +
         `Screening against an empty register would reject the entire market.`,
     );
   }
