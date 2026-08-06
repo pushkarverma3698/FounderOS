@@ -163,7 +163,7 @@ async def drive(page, fixture: str, url_hint: str, button: str, monkeypatch):
          "filled": filled, "skipped": skipped},
     )
     await page.click(f"#founderos-bar button:has-text('{button}')")
-    await page.wait_for_timeout(1800)
+    await page.wait_for_timeout(8500)
     return decided, recorded
 
 
@@ -231,5 +231,5 @@ async def test_a_second_click_cannot_submit_twice(page, monkeypatch):
     await page.evaluate(
         "document.querySelectorAll('#founderos-bar button')[1].click()"
     )
-    await page.wait_for_timeout(1800)
+    await page.wait_for_timeout(8500)
     assert calls == ["applied"]

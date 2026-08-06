@@ -212,3 +212,21 @@ export const jobBrief = tool(
     }),
   },
 );
+
+// ── Job-Hunt: tailor CV for pending applications ──────────────────────────────
+
+export const tailorCvTool = tool(
+  async ({ limit }) => {
+    const { processUntailoredApplications } = await import("../../tools/jobhunt/tailor-worker.js");
+    const res = await processUntailoredApplications(limit ?? 5);
+    return `Tailored ${res.succeeded}/${res.processed} CVs (${res.failed} failed). Details: ${JSON.stringify(res.details)}`;
+  },
+  {
+    name: "tailor_cv",
+    description: "Generate ATS-optimized tailored CV PDFs for job postings that passed screening gates.",
+    schema: z.object({
+      limit: z.number().optional().nullable().describe("Max applications to process in this run (default 5)"),
+    }),
+  },
+);
+

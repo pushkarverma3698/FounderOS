@@ -367,3 +367,55 @@ export async function getApplicationByBriefRank(
     .limit(1);
   return rows[0] ?? null;
 }
+
+/**
+ * List applications clearing gates that do not have a tailored CV yet.
+ */
+export async function listUntailoredApplications(
+  opts: { limit?: number; tenantId?: string } = {},
+): Promise<JobApplication[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(jobApplications)
+    .where(
+      and(
+        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+        eq(jobApplications.stage, "screened"),
+        inArray(jobApplications.salary_status, ["pass", "flag"]),
+        sql`${jobApplications.tailor_status} IS NULL OR ${jobApplications.tailor_status} = 'pending'`,
+      ),
+    )
+    .orderBy(desc(jobApplications.created_at))
+    .limit(opts.limit ?? 20);
+}
+
+/**
+ * Update CV tailoring status and S3 asset references for an application.
+ */
+export async function recordTailoringResult(
+  id: string,
+  opts: {
+    tailorStatus: "tailored" | "failed" | "tailoring";
+    tailoredCvS3Key?: string;
+    tailoredDocxS3Key?: string;
+    coverLetterS3Key?: string;
+    notes?: string;
+  },
+): Promise<JobApplication | null> {
+  const db = getDb();
+  const [saved] = await db
+    .update(jobApplications)
+    .set({
+      tailor_status: opts.tailorStatus,
+      ...(opts.tailoredCvS3Key ? { tailored_cv_s3_key: opts.tailoredCvS3Key } : {}),
+      ...(opts.tailoredDocxS3Key ? { tailored_docx_s3_key: opts.tailoredDocxS3Key } : {}),
+      ...(opts.coverLetterS3Key ? { cover_letter_s3_key: opts.coverLetterS3Key } : {}),
+      ...(opts.notes !== undefined ? { notes: opts.notes } : {}),
+      updated_at: new Date(),
+    })
+    .where(eq(jobApplications.id, id))
+    .returning();
+  return saved ?? null;
+}
+

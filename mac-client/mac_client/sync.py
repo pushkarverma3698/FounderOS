@@ -35,7 +35,7 @@ SSH_TIMEOUT_S = 60
 QUEUE_SQL = """
 SELECT coalesce(json_agg(row_to_json(q) ORDER BY q.brief_rank), '[]'::json)
 FROM (
-  SELECT id, company, title, track, url, brief_rank, brief_section
+  SELECT id, company, title, track, url, brief_rank, brief_section, tailored_cv_s3_key
   FROM agents.job_applications
   WHERE tenant_id = 'turicks'
     AND brief_section IN ('do_today','stretch')
@@ -59,6 +59,7 @@ class QueueJob:
     track: str
     url: str
     brief_rank: int | None
+    tailored_cv_s3_key: str | None = None
 
     @staticmethod
     def from_row(row: dict) -> "QueueJob":
@@ -69,6 +70,7 @@ class QueueJob:
             track=str(row.get("track") or "unclassified"),
             url=str(row.get("url") or ""),
             brief_rank=row.get("brief_rank"),
+            tailored_cv_s3_key=row.get("tailored_cv_s3_key"),
         )
 
 
@@ -110,6 +112,22 @@ def save_queue(jobs: list[QueueJob], path: Path = QUEUE_PATH) -> None:
     """Cache the queue so the browser session does not need the network."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps([j.__dict__ for j in jobs], indent=2))
+
+    # Fetch tailored CV PDFs for jobs that have them
+    for job in jobs:
+        if job.tailored_cv_s3_key:
+            job_dir = path.parent / job.id
+            job_dir.mkdir(parents=True, exist_ok=True)
+            pdf_path = job_dir / "tailored_cv.pdf"
+            if not pdf_path.exists():
+                try:
+                    # Download via AWS CLI or SSH S3 stream helper
+                    cmd = ["ssh", SSH_HOST, f'aws s3 cp "s3://$STORAGE_BUCKET/{job.tailored_cv_s3_key}" -']
+                    proc = subprocess.run(cmd, capture_output=True, timeout=30, check=False)
+                    if proc.returncode == 0 and len(proc.stdout) > 100:
+                        pdf_path.write_bytes(proc.stdout)
+                except Exception:
+                    pass
 
 
 def load_queue(path: Path = QUEUE_PATH) -> list[QueueJob]:

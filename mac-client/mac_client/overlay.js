@@ -71,8 +71,9 @@
     }
 
     target.click();
-    // Give the page a moment to accept the submission before we navigate away.
-    setTimeout(() => window.founderosDecision("applied"), 1200);
+    // Give the ATS time to upload the resume and show the success screen before we navigate away.
+    // A 1.2s timeout intercepts and cancels the submission mid-flight on slower ATS platforms.
+    setTimeout(() => window.founderosDecision("applied"), 8000);
   };
 
   function lock(label) {

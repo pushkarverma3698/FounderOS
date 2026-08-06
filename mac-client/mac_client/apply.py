@@ -58,7 +58,7 @@ async def fill_form(page, job: QueueJob, profile: ApplyProfile) -> tuple[list[st
         else:
             skipped.append(f"{label} (no matching field on this form)")
 
-    resume = profile.resume_for(job.track)
+    resume = profile.resume_for(job.track, job.id)
     if resume and await _upload_first(page, field_map.resume, resume):
         filled.append(f"resume ({Path(resume).name})")
     else:

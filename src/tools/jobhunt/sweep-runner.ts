@@ -98,6 +98,14 @@ export async function runJobIngestSweep(): Promise<void> {
       notice ??
         `📊 <b>Screened ${result.fetched} posting(s)</b> — the job sheet is up to date.\n${link}`,
     );
+
+    // Asynchronously trigger CV tailoring worker for new actionable rows
+    try {
+      const { processUntailoredApplications } = await import("./tailor-worker.js");
+      await processUntailoredApplications(10);
+    } catch (err) {
+      log.error({ err: (err as Error).message }, "CV tailoring worker failed post-ingest");
+    }
   } catch (err) {
     // The postings ARE screened and recorded by this point. Losing the ranking
     // must not read as losing the sweep, so say which one actually failed.
@@ -272,6 +280,13 @@ export async function runFreeSweep(): Promise<void> {
   lastSheetLink = link;
   await sendToChat(formatNewRowsAlert(newPasses, link ?? notice));
   heartbeat = afterSpokenSweep(now);
+
+  try {
+    const { processUntailoredApplications } = await import("./tailor-worker.js");
+    await processUntailoredApplications(5);
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "CV tailoring worker failed post-free-sweep");
+  }
 }
 
 /**
