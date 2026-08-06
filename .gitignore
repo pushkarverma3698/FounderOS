@@ -54,3 +54,13 @@ gumroad-packs/
 # actual prod env filename (gap: gitignore had .env.production)
 .env.prod
 .vitest-report.json
+
+# One-off board-registry maintenance run artifacts (scripts/jobhunt-board-registry.ts)
+.board-registry/
+
+# Mac apply client: local venv, the founder's real identity/resume paths, and
+# the synced queue + outcome ledger. apply-profile.json is PERSONAL DATA and
+# .queue/ holds row ids from production — neither belongs in git.
+mac-client/.venv/
+mac-client/apply-profile.json
+mac-client/.queue/

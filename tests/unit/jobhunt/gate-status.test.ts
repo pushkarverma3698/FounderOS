@@ -133,7 +133,7 @@ describe("serialiseGates / parseGates", () => {
 
 describe("whyLine — the founder-facing sentence", () => {
   it("names the FAILING check, never the first one", () => {
-    const out = whyLine(briefRow());
+    const out = whyLine(briefRow(), "ask");
     expect(out).toContain("Salary");
     expect(out).not.toContain("Sponsor");
   });
@@ -147,17 +147,40 @@ describe("whyLine — the founder-facing sentence", () => {
           { gate: "Language", status: "flag", evidence: "Dutch mentioned" },
         ],
       }),
+      "ask",
     );
     expect(out).toContain("Sponsor and Language");
   });
 
   it("says a pass is a pass rather than quoting a check at it", () => {
-    const out = whyLine(briefRow({ verdict: "pass", gates: [SPONSOR_PASS, LANGUAGE_PASS] }));
+    const out = whyLine(briefRow({ verdict: "pass", gates: [SPONSOR_PASS, LANGUAGE_PASS] }), "ask");
     expect(out).toContain("every check below cleared");
   });
 
   it("admits when the row predates the gate record", () => {
-    const out = whyLine(briefRow({ legacyGates: true }));
+    const out = whyLine(briefRow({ legacyGates: true }), "ask");
+    expect(out).toContain("cannot say which check passed");
+  });
+
+  it("tells a stretch row to apply rather than to ask", () => {
+    // Same verdict and the same gate shape as an ASK row — only the section
+    // differs, and it has to, because the sentence an ASK row needs is the one
+    // action the stretch section exists to prevent.
+    const years = {
+      gate: "Experience",
+      status: "flag",
+      evidence: "Asks for 5 years minimum; you have ~3.5 shipped.",
+    } as const;
+    const out = whyLine(briefRow({ gates: [SPONSOR_PASS, years, LANGUAGE_PASS] }), "stretch");
+    expect(out).not.toContain("One answer settles it");
+    expect(out).toContain("~3.5 shipped");
+  });
+
+  it("still admits a legacy row inside the stretch section", () => {
+    // Precedence: the section changes the wording of a KNOWN reason, it never
+    // suppresses a doubt. A row that predates the gate record owes the founder
+    // its warning wherever it is printed.
+    const out = whyLine(briefRow({ legacyGates: true }), "stretch");
     expect(out).toContain("cannot say which check passed");
   });
 });

@@ -36,7 +36,21 @@ export interface SponsorMatch {
  * is a genuinely different legal entity from "Deeploy", and collapsing them would
  * manufacture exactly the false positives this module exists to prevent.
  */
-const LEGAL_SUFFIX_TOKENS = new Set(["b", "v", "n", "bv", "nv", "cv", "vof"]);
+// Dutch forms first (the IND register is Dutch), then the forms the job feeds
+// actually carry: US (inc, llc, corp), UK (ltd, limited, plc), India (pvt),
+// Singapore (pte), Germany (gmbh, ag), EU/France (se, sa). This set feeds
+// dedupeKey() as well as sponsor matching — a suffix that survives here splits
+// one job seen by two lanes ("Exploding Kittens, Inc." on its Greenhouse board,
+// "Exploding Kittens" in the paid feed) into two rows. Only TRAILING tokens are
+// stripped, and never the last one standing, so "Co & Co Amsterdam" keeps its
+// name.
+const LEGAL_SUFFIX_TOKENS = new Set([
+  ...["b", "v", "n", "bv", "nv", "cv", "vof"],
+  ...["inc", "llc", "corp", "corporation", "co"],
+  ...["ltd", "limited", "plc"],
+  ...["pvt", "private", "pte"],
+  ...["gmbh", "ag", "se", "sa"],
+]);
 
 /** Tokens too generic to carry identity on their own. */
 const GENERIC_TOKENS = new Set(["the", "and", "of", "company", "tech", "technologies"]);

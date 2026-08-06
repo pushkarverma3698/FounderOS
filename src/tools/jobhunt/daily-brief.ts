@@ -12,23 +12,17 @@
  */
 
 import { childLogger } from "../../infra/logger.js";
-import {
-  listActionableApplications,
-  recordLiveness,
-  recordBriefRanks,
-  recordFitScores,
-} from "../../db/job-queries.js";
+import { listActionableApplications, recordLiveness } from "../../db/job-queries.js";
 import { summariseSpend } from "../../db/job-run-queries.js";
-import { compareOverlap, overlapScore, formatOverlap, type OverlapResult } from "./overlap.js";
+import { compareOverlap, overlapScore, type OverlapResult } from "./overlap.js";
 import { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
 import { parseGates } from "./gates.js";
 import { toPostingCountry } from "./country.js";
 import { buildTrends } from "./brief-trends.js";
 import { verifyLiveness, type Liveness } from "./liveness.js";
+import { persistBriefRanks, persistFitScores } from "./brief-persist.js";
 import {
   formatDailyBrief,
-  selectAskable,
-  selectDoToday,
   type BriefInput,
   type BriefRow,
   type SpendLine,
@@ -48,8 +42,23 @@ export { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
  *
  * Verification is cheap but not free, and it only changes a decision near the
  * top of the list. Checking rank 40 buys nothing the founder will read today.
+ *
+ * MEASURED, 2026-08-06: of 34 rows stored in production, liveness was
+ * `unknown` on 21, `unverifiable` on 5, and `live` on 8 — exactly the 8 a
+ * budget of 8 ever checked, and all 8 came back live. The budget was the
+ * binding constraint on APPLY TODAY, not the market and not the gates:
+ * `selectDoToday` (brief.ts) only admits `pass && live`, so every row this
+ * budget left unchecked was invisible to that section no matter how strong
+ * its overlap or how genuinely open the role was.
+ *
+ * Raised from 8 to 25 only once `verifyLiveness` (liveness.ts) stopped
+ * checking URLs strictly sequentially — at ~10s worst case per check, 25
+ * sequential checks risked ~250s of wall time against the sweep's own
+ * timeout. Checked through a bounded pool instead, the wider budget is safe.
+ * `verificationTargets` below already spends every PASS before any FLAG, so
+ * the extra headroom goes to flags once every pass is covered.
  */
-export const VERIFY_TOP_N = 8;
+export const VERIFY_TOP_N = 25;
 
 function ageInDays(from: Date | null | undefined, now: Date): number {
   if (!from) return 0;
@@ -254,9 +263,10 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     ...(spend ? { spend } : {}),
   };
 
-  // Pin the numbering BEFORE returning the text. selectDoToday/selectAskable are
-  // pure and get the same `rows`, so what is stored is exactly what is printed.
-  // Deriving it again when /draft fires would retarget the command silently.
+  // Pin the numbering BEFORE returning the text. The section selectors are pure
+  // and get the same `rows` the renderer does, so what is stored is exactly what
+  // is printed. Deriving it again when /draft fires would retarget the command
+  // silently.
   await persistBriefRanks(rows);
   await persistFitScores(scored);
 
@@ -291,56 +301,6 @@ async function todaysSpend(now: Date): Promise<SpendLine | undefined> {
     // an unreadable ledger would trade the deliverable for a footnote.
     log.warn({ err: (err as Error).message }, "Spend summary unavailable — cost line omitted");
     return undefined;
-  }
-}
-
-/**
- * Store the overlap the ranking just computed.
- *
- * `fit_score` and `fit_evidence` were declared when the table was created and
- * never written to, so the number was recomputed and discarded on every render
- * and no history of it exists anywhere. Written here because this is where the
- * TRACK's CV is already loaded.
- */
-async function persistFitScores(
-  scored: ReadonlyArray<{ row: JobApplication; overlap: OverlapResult }>,
-): Promise<void> {
-  try {
-    await recordFitScores(
-      scored.map(({ row, overlap }) => ({
-        id: row.id,
-        score: overlap.ratio,
-        evidence:
-          `${formatOverlap(overlap)} matched. ` +
-          `Have: ${overlap.matched.join(", ") || "none"}. ` +
-          `Missing: ${overlap.missing.join(", ") || "none"}.`,
-      })),
-    );
-  } catch (err) {
-    // allow-failopen: the score is history, the brief is the deliverable.
-    log.warn({ err: (err as Error).message }, "Fit score persist failed");
-  }
-}
-
-/**
- * Store which row the founder will read as "1", "2", "3" in each section.
- *
- * Failure here is tolerated but reported: the brief is still worth sending
- * without working handles, whereas throwing would lose the whole thing over the
- * numbering. The founder finds out because /draft says it cannot resolve the row
- * — never by drafting for the wrong company.
- */
-async function persistBriefRanks(rows: readonly BriefRow[]): Promise<void> {
-  const entries = [
-    ...selectDoToday(rows).map((r, i) => ({ id: r.id, section: "do_today" as const, rank: i + 1 })),
-    ...selectAskable(rows).map((r, i) => ({ id: r.id, section: "ask" as const, rank: i + 1 })),
-  ];
-  try {
-    await recordBriefRanks(entries);
-  } catch (err) {
-    // allow-failopen: the brief itself is the deliverable. A lost rank makes
-    // /draft say "I can't find row N", which is loud and recoverable.
-    log.warn({ err: (err as Error).message }, "Brief rank persist failed — /draft handles stale");
   }
 }
 

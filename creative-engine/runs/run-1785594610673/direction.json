@@ -1,0 +1,41 @@
+{
+  "brandName": "KAGE espresso shot hovering",
+  "vibe": "artisan-cafe",
+  "platePrompt": "A moody, intimate third-wave coffee bar with rich dark walnut surfaces, a gleaming brass espresso machine, and a single perfect latte with intricate foam art. Dramatic side lighting from a single pendant lamp creates deep shadows and warm highlights. Raw concrete walls with a single trailing pothos plant. The palette is deep espresso browns, warm cream, and oxidized copper. Spacious composition with generous negative space. Shot on Hasselblad X2D, 90mm macro lens, f/2.0, photorealistic.",
+  "tokens": {
+    "palette": {
+      "bg": "#0f0d0a",
+      "text": "#ede6d8",
+      "muted": "rgba(237, 230, 216, 0.5)",
+      "accent": "#b87a3d"
+    },
+    "type": {
+      "display": {
+        "family": "Instrument Serif",
+        "weight": 400,
+        "tracking": -15
+      },
+      "utility": {
+        "family": "Space Grotesk",
+        "weight": 500,
+        "tracking": 250
+      },
+      "scale": [
+        62,
+        20,
+        16,
+        13
+      ]
+    },
+    "accent": "#b87a3d"
+  },
+  "copy": {
+    "kicker": "A",
+    "headline": "KAGE ESPRESSO SHOT HOVERING",
+    "subheadline": "Crafted with intention. Served with soul.",
+    "dateVenue": "A",
+    "price": "",
+    "cta": "VISIT US",
+    "url": ""
+  }
+}

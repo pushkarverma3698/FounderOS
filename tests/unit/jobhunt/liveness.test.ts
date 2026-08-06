@@ -18,9 +18,13 @@ vi.mock("../../../src/tools/jobhunt/indeed-source.js", async (orig) => {
   return { ...actual, lookupJobKeys: mockLookup };
 });
 
-const { classifyHttpStatus, livenessReason, verifyLiveness } = await import(
-  "../../../src/tools/jobhunt/liveness.js"
-);
+const {
+  classifyHttpStatus,
+  livenessReason,
+  mapWithConcurrencyLimit,
+  verifyLiveness,
+  URL_CHECK_CONCURRENCY,
+} = await import("../../../src/tools/jobhunt/liveness.js");
 const { INDEED_SOURCE } = await import("../../../src/tools/jobhunt/indeed-source.js");
 
 beforeEach(() => {
@@ -61,6 +65,21 @@ describe("livenessReason", () => {
   it("says explicitly that an unconfirmed row is not evidence of closure", () => {
     const reason = livenessReason("unverifiable", "timeout");
     expect(reason).toContain("NOT evidence it closed");
+  });
+});
+
+describe("mapWithConcurrencyLimit", () => {
+  it("refuses a limit below one rather than returning an array of holes", async () => {
+    // `Math.min(0, n)` spawns zero workers, so every slot stays unwritten and
+    // the caller receives `[undefined, undefined, …]` typed as R[] with no
+    // error anywhere. Unreachable while URL_CHECK_CONCURRENCY is a constant —
+    // and exactly the kind of silent-wrong-answer this pipeline keeps paying
+    // for when a constant later becomes configurable.
+    await expect(mapWithConcurrencyLimit([1, 2], 0, async (n) => n)).rejects.toThrow(/limit/i);
+  });
+
+  it("still handles an empty input list", async () => {
+    expect(await mapWithConcurrencyLimit([], 6, async (n: number) => n)).toEqual([]);
   });
 });
 
@@ -140,6 +159,116 @@ describe("verifyLiveness", () => {
     ]);
 
     expect(results.map((r) => r.id)).toEqual(["a", "b", "c"]);
+    fetchSpy.mockRestore();
+  });
+
+  it("returns results in input order even when later targets resolve first", async () => {
+    // Concurrency means completion order and input order diverge. The target
+    // requested FIRST is given the LONGEST delay here, so a naive
+    // completion-order collection would return it last — this must not happen.
+    const delayByUrl: Record<string, number> = {
+      "https://jobs.example.com/0": 30,
+      "https://jobs.example.com/1": 20,
+      "https://jobs.example.com/2": 10,
+      "https://jobs.example.com/3": 0,
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const delay = delayByUrl[String(input)] ?? 0;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return new Response("", { status: 200 });
+    });
+
+    const targets = Object.keys(delayByUrl).map((url, i) => ({
+      id: `t${i}`,
+      url,
+      source: "ats-ingest",
+    }));
+
+    const results = await verifyLiveness(targets);
+
+    expect(results.map((r) => r.id)).toEqual(["t0", "t1", "t2", "t3"]);
+    expect(results.every((r) => r.liveness === "live")).toBe(true);
+    fetchSpy.mockRestore();
+  });
+
+  it("never has more than URL_CHECK_CONCURRENCY checks in flight at once", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    // Descending delays, so the target claimed FIRST in each round finishes
+    // LAST in it. 14 targets against a pool of 6 spans three rounds — the case
+    // the four-target test above cannot reach, because there every call starts
+    // in the same round and completion order alone could have produced the
+    // right answer.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const index = Number(String(input).split("/").pop());
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 15 - (index % URL_CHECK_CONCURRENCY)));
+      inFlight -= 1;
+      return new Response("", { status: 200 });
+    });
+
+    const targets = Array.from({ length: 14 }, (_, i) => ({
+      id: `t${i}`,
+      url: `https://jobs.example.com/${i}`,
+      source: "ats-ingest",
+    }));
+
+    const results = await verifyLiveness(targets);
+
+    expect(peak).toBe(URL_CHECK_CONCURRENCY);
+    // Input order survives ACROSS rounds, not just within one. A result written
+    // at the wrong index mislabels a live posting as closed on another row.
+    expect(results.map((r) => r.id)).toEqual(targets.map((t) => t.id));
+    fetchSpy.mockRestore();
+  });
+
+  it("releases the page body instead of leaving the socket holding it", async () => {
+    // Only `response.status` is ever read, but under Node's undici an unread
+    // body keeps the connection open and buffers the whole page until GC. The
+    // budget went from 8 sequential checks to 25 across a 6-way pool on
+    // 2026-08-06, so up to six full job pages can now be resident at once —
+    // and `clearTimeout` has already fired by the time the headers arrive, so
+    // that download is covered by no timeout at all.
+    const response = new Response("<html>a very long job page</html>", { status: 200 });
+    const cancel = vi.spyOn(response.body as ReadableStream, "cancel");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+
+    await verifyLiveness([{ id: "a", url: "https://jobs.example.com/1", source: "ats-ingest" }]);
+
+    expect(cancel).toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("resolves a mixed batch of Indeed-keyed and URL-only targets correctly and in order", async () => {
+    mockLookup.mockResolvedValue(
+      new Map([
+        ["k1", "live"],
+        ["k2", "expired"],
+      ]),
+    );
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("", { status: 200 }))
+      .mockResolvedValueOnce(new Response("", { status: 404 }));
+
+    const targets = [
+      { id: "url-live", url: "https://jobs.example.com/a", source: "ats-ingest" },
+      { id: "indeed-live", url: null, source: INDEED_SOURCE, externalId: "k1" },
+      { id: "url-expired", url: "https://jobs.example.com/b", source: "ats-ingest" },
+      { id: "indeed-expired", url: null, source: INDEED_SOURCE, externalId: "k2" },
+      { id: "no-url", url: null, source: "manual" },
+    ];
+
+    const results = await verifyLiveness(targets);
+
+    expect(results.map((r) => [r.id, r.liveness])).toEqual([
+      ["url-live", "live"],
+      ["indeed-live", "live"],
+      ["url-expired", "expired"],
+      ["indeed-expired", "expired"],
+      ["no-url", "unverifiable"],
+    ]);
     fetchSpy.mockRestore();
   });
 });

@@ -274,8 +274,14 @@ export async function listRecentApplications(
     .limit(opts.limit ?? 20);
 }
 
-/** Sections of the brief a founder can address by number. */
-export type BriefSection = "do_today" | "ask";
+/**
+ * Sections of the brief a founder can address by number.
+ *
+ * `do_today` and `stretch` share ONE continuous numbering: the stretch ranks
+ * start where do-today's stop, so `/draft N` reaches exactly one row across
+ * both. `ask` numbers itself from 1 because `/ask` addresses only that section.
+ */
+export type BriefSection = "do_today" | "stretch" | "ask";
 
 /**
  * Pin the numbering the founder just read.

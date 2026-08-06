@@ -1,0 +1,14 @@
+{
+  "first_name": "Your",
+  "last_name": "Name",
+  "email": "you@example.com",
+  "phone": "+31 6 00000000",
+  "linkedin": "https://www.linkedin.com/in/you",
+  "website": "",
+  "default_resume": "/absolute/path/to/your-cv.pdf",
+  "resumes": {
+    "ai": "/absolute/path/to/cv-ai.pdf",
+    "backend": "/absolute/path/to/cv-backend.pdf",
+    "frontend": "/absolute/path/to/cv-frontend.pdf"
+  }
+}

@@ -37,6 +37,19 @@ export const envSchema = z.object({
    *  planner resolves bare times in and reminders/tasks display in. See core/time.ts. */
   APP_TIMEZONE: z.string().default("Asia/Kolkata"),
 
+  /**
+   * The job Sheet the founder actually works from (ADR: apply loop, 2026-08-06).
+   *
+   * BOTH OPTIONAL, and the export is skipped unless both are set. The sweep
+   * that writes the Sheet also screens the postings and records them, and a
+   * missing spreadsheet id must not stop that — losing the export costs a view
+   * of the data, while failing the sweep costs the data. The skip is logged and
+   * announced, never silent: a lane that quietly stopped publishing looks
+   * exactly like a market with no jobs in it.
+   */
+  JOBHUNT_SHEET_ID: z.string().transform(v => v || undefined).optional(),
+  GOOGLE_SHEETS_CREDENTIALS_PATH: z.string().transform(v => v || undefined).optional(),
+
   // Tool keys — optional; tools fail loudly when key is missing
   COMPOSIO_API_KEY: z.string().transform(v => v || undefined).optional(),
   /** Gmail backend: gws | googleapis (service account, unattended) | composio (legacy rollback). ADR-029 */
