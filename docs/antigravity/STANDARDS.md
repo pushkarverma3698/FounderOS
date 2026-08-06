@@ -159,6 +159,7 @@ on the first line; the founder reads top-down.
   brief's own file was byte-unchanged. `pnpm lint` passed, because `tsconfig.json` excludes
   `tests/**/*`, so nothing mechanical caught it.)* Implementation and its tests land together or
   neither lands.
+- **No untested claims.** Never claim a bug is fixed, a feature is completed, or a browser/pipeline component works without empirical runtime proof (passing unit tests or terminal execution). Label any unexecuted claim **NOT VERIFIED**.
 
 ---
 

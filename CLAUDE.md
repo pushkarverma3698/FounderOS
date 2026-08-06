@@ -159,6 +159,10 @@ unenforced, and is expected to decay.
   instruction to the executor. Checklist: `docs/antigravity/README.md` § "Before you dispatch".
   **Enforced by:** nothing yet. Candidate for a fitness rule once the failure modes are stable.
 
+- **#33 — Never dismiss or reject claims from other AIs out of hand; deep-research and accept valid feedback.**
+  Claims, critique, or findings from other AIs (subagents, peer models, automated reviewers, or external AI agents) must never be rejected or dismissed out of hand. Perform thorough, deep research and empirical verification against codebase evidence before reaching any conclusion. If the claim or feedback proves valid upon investigation, accept and integrate it fully without defensive bias.
+  **Enforced by:** Judgement & empirical verification loop.
+
 ## File map
 ```
 src/kernel/            — contracts, signals, state, planner, supervisor (pure),
