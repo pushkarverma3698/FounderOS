@@ -132,6 +132,7 @@ so the review is not a formality on top of the work, it *is* the quality mechani
 | [AG-005](AG-005-instruction-file-precedence.md) | GEMINI.md, precedence order, retire `.cursorrules` | cross-cutting | **merged** — reviewed 2026-08-06: zero spec violations; one brief defect found on review (`.cursorrules` was the only pointer to `docs/rules/`), fixed by a pointer in `AGENTS.md` |
 | [AG-006](AG-006-rank-and-report.md) | M0a output surface — `rankFindings` + `renderReport` | M0a | **merged** — reviewed 2026-08-06: zero spec violations; three fixes applied on review (evidence-granular truncation, `localeCompare`→codepoint, plural) |
 | [AG-007](AG-007-typecheck-tests.md) | Bring `tests/` under `pnpm lint` — 109 errors / 34 files | cross-cutting | **merged** — verified 2026-08-06: tsconfig.test.json added, 109 type errors across 34 test files fixed, zero `any` or `@ts-ignore` bypasses, `pnpm gate` 100% green |
+| [Handoff M0b](CLAUDE-CODE-HANDOFF-AG-007-M0A.md) | Handoff Brief to Claude Code for M0b (Mission & Outcome DB Persistence) | M0b | **ready to dispatch** — all AG-007 & M0a work completed, 2,550 tests green, prompt ready |
 
 ### AG-004 must be rewritten before it is re-dispatched
 
