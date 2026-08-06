@@ -15,6 +15,7 @@
 import { describe, it, expect } from "vitest";
 import {
   MAX_YEARS_DEMANDED,
+  MAX_YEARS_STRETCH,
   experienceGate,
   extractExperienceDemand,
   isSeniorTitle,
@@ -91,6 +92,42 @@ describe("experienceGate", () => {
 
   it("passes at exactly the ceiling", () => {
     const gate = experienceGate(`${BODY}4 years of experience required.`, "Backend Engineer");
+    expect(gate.status).toBe("pass");
+  });
+
+  it(`flags ${MAX_YEARS_DEMANDED + 1} stated years as a stretch, not a reject`, () => {
+    // Measured, 2026-08-06: 8 of 34 screened postings carried a reject verdict and
+    // the level bar was the most common cause — "5+ years" is the single most
+    // common phrasing for a mid-level role, and it is aspirational, not a filter.
+    const gate = experienceGate(
+      `${BODY}${MAX_YEARS_DEMANDED + 1} years of experience required.`,
+      "Backend Engineer",
+    );
+    expect(gate.status).toBe("flag");
+    expect(gate.evidence).toContain(`${MAX_YEARS_DEMANDED + 1} years minimum`);
+    expect(gate.evidence.toLowerCase()).toContain("apply");
+  });
+
+  it(`flags ${MAX_YEARS_STRETCH} stated years — the top of the stretch band`, () => {
+    const gate = experienceGate(
+      `${BODY}${MAX_YEARS_STRETCH} years of experience required.`,
+      "Backend Engineer",
+    );
+    expect(gate.status).toBe("flag");
+  });
+
+  it(`rejects at ${MAX_YEARS_STRETCH + 1} stated years — a genuine level mismatch, not a stretch`, () => {
+    const gate = experienceGate(
+      `${BODY}${MAX_YEARS_STRETCH + 1} years of experience required.`,
+      "Backend Engineer",
+    );
+    expect(gate.status).toBe("reject");
+  });
+
+  it("passes a '3-5 years' range on its floor, not its ceiling", () => {
+    // The extractor takes the LOWEST figure in a range (see extractExperienceDemand
+    // tests above); the gate must inherit that reading, not re-derive its own.
+    const gate = experienceGate(`${BODY}3-5 years of experience required.`, "Backend Engineer");
     expect(gate.status).toBe("pass");
   });
 

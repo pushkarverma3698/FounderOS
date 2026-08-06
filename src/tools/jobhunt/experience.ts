@@ -5,6 +5,19 @@
  * of experience while applying for platform engineer" — reject postings that
  * demand more than four years.
  *
+ * REFINED, 2026-08-06: a flat reject above four years was too blunt. 8 of 34
+ * screened postings in the live database carried a reject verdict, and the
+ * level bar was the most common cause — "5+ years" is the single most common
+ * phrasing for a mid-level role in both target markets (Netherlands, India),
+ * and it reads as aspirational rather than a hard floor. A strong candidate at
+ * ~3.5 years is routinely interviewed for a role asking five, especially when
+ * the application arrives early, so auto-rejecting the whole 5-6 band threw
+ * away the largest reachable band of roles — and did so silently, because a
+ * reject never reaches the actionable brief. The gate now has a middle STRETCH
+ * band: five or six stated years is FLAGGED, not rejected, so the row survives
+ * to the founder instead of vanishing. Seven or more stays a reject — that is
+ * a genuine level mismatch, not a stretch.
+ *
  * WHAT THIS DELIBERATELY DOES NOT DO. It does not reject, flag, or otherwise act
  * on a title — not "Senior", "Staff", "Lead", "Principal", "Director", or "VP".
  * Those words mean different things at different companies, and a title is not a
@@ -32,14 +45,26 @@ import type { Gate } from "./gates.js";
 import { isEarlyCareerTitle } from "./seniority.js";
 
 /**
- * The most years a posting may demand and still be worth an application.
+ * The most years a posting may demand and still be a straightforward pass.
  *
  * Four, not three: Pushkar has ~3.5 years shipped (Mar 2023 → today), and a
- * posting asking for four is one a strong candidate at 3.5 wins routinely. Five
- * is where the screen stops being optimistic and starts being a waste of a
- * cover letter.
+ * posting asking for four is one a strong candidate at 3.5 wins routinely.
+ * Above this the bar is a stretch rather than a comfortable match — see
+ * `MAX_YEARS_STRETCH` for where a stretch stops being reachable at all.
  */
 export const MAX_YEARS_DEMANDED = 4;
+
+/**
+ * The top of the STRETCH band — postings asking for five or six years are
+ * flagged, not rejected.
+ *
+ * Measured, 2026-08-06: "5+ years" is the single most common phrasing for a
+ * mid-level role in both the Netherlands and India, and it is written as a
+ * wish, not a wall — a strong candidate at ~3.5 years is routinely shortlisted
+ * for it, especially applying early. Above six the number stops describing a
+ * stretch and starts describing a different level entirely.
+ */
+export const MAX_YEARS_STRETCH = 6;
 
 /**
  * Above this, the number is describing a company, a product, or a market — not a
@@ -117,13 +142,17 @@ export function extractExperienceDemand(description: string): ExperienceDemand {
 /**
  * The Experience gate — the level bar in BOTH directions.
  *
- * Four outcomes, all of them stated out loud in the brief:
+ * Five outcomes, all of them stated out loud in the brief:
  *   · an internship or graduate scheme → reject, named as such.
  *   · no figure stated  → pass, and SAY that no figure was stated. A silent pass
  *     and a verified match look identical, and the founder deserves to know
  *     which one he is reading.
- *   · at or under the ceiling → pass, with the number.
- *   · over the ceiling → reject, with the sentence that says so.
+ *   · at or under MAX_YEARS_DEMANDED → pass, with the number.
+ *   · above MAX_YEARS_DEMANDED but at or under MAX_YEARS_STRETCH → flag: a
+ *     stretch worth applying to, not a rejection, so the row survives to the
+ *     actionable brief instead of vanishing into the reject pile.
+ *   · above MAX_YEARS_STRETCH → reject, with the sentence that says so — a
+ *     genuine level mismatch, not a stretch.
  *
  * Early-career postings used to be DROPPED before screening, so they never
  * reached the table and the founder could not audit what had been thrown away on
@@ -156,16 +185,32 @@ export function experienceGate(description: string, title: string): Gate {
     };
   }
 
-  const status: ScreenStatus = demand.minYears > MAX_YEARS_DEMANDED ? "reject" : "pass";
+  const status: ScreenStatus =
+    demand.minYears > MAX_YEARS_STRETCH
+      ? "reject"
+      : demand.minYears > MAX_YEARS_DEMANDED
+        ? "flag"
+        : "pass";
 
   if (status === "reject") {
     return {
       gate: "Experience",
       status,
       evidence:
-        `Asks for ${demand.minYears} years minimum; you have ~3.5 shipped. ` +
-        `Their words: "${demand.evidence}". Skipped so the day's applications go ` +
-        `to roles that can actually shortlist you.`,
+        `Asks for ${demand.minYears} years minimum — clear of even a stretch from ` +
+        `your ~3.5 shipped. Their words: "${demand.evidence}". Skipped: this is a ` +
+        `genuine level mismatch, not a stretch worth applying into.`,
+    };
+  }
+
+  if (status === "flag") {
+    return {
+      gate: "Experience",
+      status,
+      evidence:
+        `Asks for ${demand.minYears} years minimum; you have ~3.5 shipped. Their ` +
+        `words: "${demand.evidence}". The bar is above your years but within ` +
+        `reach — apply if the stack matches, and apply early.`,
     };
   }
 
