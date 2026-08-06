@@ -1,7 +1,7 @@
 # AG-007 — Bring `tests/` under the same typecheck as `src/`
 
 **Milestone:** cross-cutting (the drift lock's missing half)
-**Status:** ready to dispatch
+**Status:** merged — verified with `pnpm gate` 2026-08-06
 **Read [STANDARDS.md](STANDARDS.md) in full before writing any code. It is binding.**
 
 ---
