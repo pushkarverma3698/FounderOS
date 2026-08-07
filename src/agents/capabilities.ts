@@ -91,24 +91,37 @@ type AnyTool = any;
  *   Research needs it for context, sales for ICP/messaging, marketing for brand
  *   alignment. Engineering and comms don't query business strategy.
  */
+import { synthesizeSkill } from "./agent-tools.js";
+
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, writeArtifact, listWorkflows],
+  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, writeArtifact, listWorkflows, synthesizeSkill],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
-  engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal, vpsRun],
+  engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal, vpsRun, synthesizeSkill],
   marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal, generateImageTool, listBrandAssetsTool, listScheduledPosts, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool],
   sales: [createSendEmailTool("sales"), searchWeb, searchKnowledge, searchTuricksBrain],
   personal: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain],
   jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobBrief, createSendEmailTool("jobhunt"), searchPersonalRag],
 };
 
-/** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops).
- *  Kept here so the capability manifest stays the single source of truth when the
- *  engineering department is promoted to a sub-supervisor (ADR-027, engineering-domain.ts). */
+/** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops). */
 export const ENGINEERING_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
-  coder: [claudeCode, githubRead],
+  coder: [claudeCode, githubRead, synthesizeSkill],
   qa: [claudeCode, githubRead],
   devops: [githubWrite, projectWorkflow],
+};
+
+/** Marketing sub-domain tool clusters (ADR-027 pattern). */
+export const MARKETING_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
+  social: [linkedinPost, linkedinAnalytics, draftLinkedInReply, draftConnectionNote, listScheduledPosts],
+  video: [compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listVideoBrandsTool],
+  creative: [generateImageTool, listBrandAssetsTool],
+};
+
+/** Admin sub-domain tool clusters (ADR-027 pattern). */
+export const ADMIN_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
+  scheduling: [scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder],
+  memory_context: [readContext, updateContext, searchMemoryTool, recordEvent, writeArtifact, synthesizeSkill],
 };
 
 /** Supervisors route via handoffs only — no business tools (ADR-028). */
