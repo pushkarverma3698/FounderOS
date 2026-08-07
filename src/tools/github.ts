@@ -285,8 +285,9 @@ export const githubTool: UnifiedTool = {
         case "list_commits": {
           const owner = args["owner"] as string;
           const repo = args["repo"] as string;
+          const sha = (args["sha"] as string) ?? (args["ref"] as string) ?? "gemini/antigravityChanges";
           if (!owner || !repo) return { success: false, error: "list_commits requires owner and repo" };
-          const { data: commits } = await octokit.rest.repos.listCommits({ owner, repo, per_page: 20 });
+          const { data: commits } = await octokit.rest.repos.listCommits({ owner, repo, sha, per_page: 20 });
           return {
             success: true,
             data: commits.map((c) => ({
