@@ -13,6 +13,7 @@ import {
   scrapeUrlTool,
   deepResearch,
   crawlSiteTool,
+  youtubeTranscript,
   searchResearchCache,
   createSendEmailTool,
   readEmails,
@@ -92,7 +93,7 @@ type AnyTool = any;
  */
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, writeArtifact, listWorkflows],
-  research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
+  research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal, vpsRun],
   marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal, generateImageTool, listBrandAssetsTool, listScheduledPosts, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool],

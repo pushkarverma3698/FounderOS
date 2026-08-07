@@ -25,6 +25,7 @@
 
 import { childLogger } from "../infra/logger.js";
 import { stripHtml } from "./web-search.js";
+import { readPageViaJina } from "./agent-reach.js";
 import { env } from "../core/config.js";
 
 const log = childLogger({ module: "tool:apify" });
@@ -49,7 +50,7 @@ export interface ScrapeResult {
 }
 
 export type ScrapeOutcome =
-  | { ok: true; data: ScrapeResult[]; source: "apify" | "fetch" }
+  | { ok: true; data: ScrapeResult[]; source: "apify" | "fetch" | "jina" }
   | { ok: false; error: string };
 
 // ── Low-level: run an Apify actor synchronously ───────────────────────────────
@@ -221,7 +222,23 @@ export async function scrapeUrl(url: string, timeoutMs = DEFAULT_SCRAPE_TIMEOUT_
       log.warn({ url, error: run.error }, "Apify scrape failed — trying fetch fallback");
     }
   }
-  return fetchToMarkdown(url);
+  const fetched = await fetchToMarkdown(url);
+  if (fetched.ok) return fetched;
+
+  // Last resort: Jina Reader (agent-reach's keyless web backend). Reaches pages
+  // that block a plain fetch or render their body via JS, with no token. Only
+  // runs once the two cheaper tiers have already failed.
+  const jina = await readPageViaJina(url);
+  if (jina.ok) {
+    log.info({ url }, "scrapeUrl: recovered via Jina Reader after fetch fallback failed");
+    return {
+      ok: true,
+      data: [{ url, title: jina.title, markdown: jina.markdown.slice(0, MARKDOWN_MAX), retrieved_at: new Date().toISOString() }],
+      source: "jina",
+    };
+  }
+  // Report the fetch tier's error — it names the component the caller can act on.
+  return fetched;
 }
 
 /**
