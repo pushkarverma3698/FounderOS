@@ -184,11 +184,12 @@ describe("handleDraft (resolution path)", () => {
     await handleDraft({ match: "3", reply } as never, { runKernelText });
 
     expect(runKernelText).toHaveBeenCalledOnce();
-    expect(runKernelText.mock.calls[0]![1]).toContain("Aquablu B.V");
+    const callArgs = runKernelText.mock.calls[0] as unknown as [string, string];
+    expect(callArgs[1]).toContain("Aquablu B.V");
     // It must be a DRAFT instruction, never the question prompt: asking an
     // employer whether its five-year bar is firm invites the pre-emptive
     // rejection the stretch band exists to avoid.
-    expect(runKernelText.mock.calls[0]![1]).toContain("Draft a tailored application");
+    expect(callArgs[1]).toContain("Draft a tailored application");
     expect(reply).not.toHaveBeenCalled();
   });
 
