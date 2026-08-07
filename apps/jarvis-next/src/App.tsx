@@ -128,6 +128,15 @@ export const App: React.FC = () => {
       prev.map((n) => (n.id === 'supervisor' ? { ...n, status: 'EXECUTING', lastAction: prompt } : n))
     );
 
+    // Send HTTP POST request to live backend server
+    void fetch('/api/v1/dispatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
+    }).catch(() => {
+      // ignore offline fallback
+    });
+
     setTimeout(() => {
       const toolEv: TraceEventItem = {
         turnId: ev.turnId,
@@ -154,6 +163,14 @@ export const App: React.FC = () => {
   };
 
   const handleApproveHitl = (id: string) => {
+    soundEngine.click();
+    voiceEngine.speak('HITL authorization approved.');
+    void fetch('/api/v1/hitl/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, action: 'approve' }),
+    }).catch(() => {});
+
     setPendingHitl((prev) => prev.filter((i) => i.id !== id));
     setNodes((prev) =>
       prev.map((n) => (n.id === 'personal' ? { ...n, status: 'SUCCESS', lastAction: 'Approved: shell execution' } : n))
@@ -161,6 +178,14 @@ export const App: React.FC = () => {
   };
 
   const handleRejectHitl = (id: string) => {
+    soundEngine.click();
+    voiceEngine.speak('HITL authorization rejected.');
+    void fetch('/api/v1/hitl/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, action: 'reject' }),
+    }).catch(() => {});
+
     setPendingHitl((prev) => prev.filter((i) => i.id !== id));
     setNodes((prev) =>
       prev.map((n) => (n.id === 'personal' ? { ...n, status: 'IDLE', lastAction: 'Rejected by founder' } : n))
