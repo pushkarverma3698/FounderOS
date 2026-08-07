@@ -1,0 +1,12 @@
+{
+  "thumbHeadlineOcr": 0.05084745762711865,
+  "contrastPerSlot": {},
+  "requiredFactsPresent": true,
+  "unverifiedFactOnCanvas": false,
+  "safeAreaBreach": false,
+  "strayTextInPlate": false,
+  "textCoverage": 0.25,
+  "reservedCleanliness": 0.1,
+  "focalOcclusion": 0.05,
+  "hierarchyRatio": 3.5
+}

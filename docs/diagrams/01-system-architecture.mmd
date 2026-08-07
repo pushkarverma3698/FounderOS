@@ -1,0 +1,52 @@
+graph TB
+  founder([Founder]):::ext
+
+  subgraph gw["Gateway · src/gateway"]
+    tg["telegram.ts<br/>grammY bot (long-poll)"]
+    run["kernel-run.ts<br/>lock → gates → invoke → HITL card / reply"]
+    boot["kernel-boot.ts<br/>⚙️ THE ONLY composition root"]
+  end
+
+  subgraph kernel["Kernel · src/kernel (pure, injected, $0-testable)"]
+    graph["graph.ts · StateGraph"]
+    plan["plan (LLM #1)"]
+    disp["dispatch (pure code)"]
+    agent["agent (LLM #2) ⇄ tools"]
+    coll["collect (pure)"]
+    synth["synthesize (LLM #3)"]
+    contracts["contracts.ts<br/>TaskEnvelope · Plan · StepResult<br/>ToolReceipt · FailureReport"]
+  end
+
+  subgraph tools["Tools · src/tools + src/agents/agent-tools"]
+    t1["research · comms · engineering"]
+    t2["marketing · sales · personal · jobhunt · admin"]
+  end
+
+  subgraph infra["Infra · src/infra"]
+    hitl["hitl.ts (approval rows)"]
+    ckpt["checkpointer (PostgresSaver)"]
+    budget["budget · daily-budget"]
+  end
+
+  db[("Postgres<br/>agents schema + brain schema")]:::ext
+  mcp["src/mcp<br/>read-only MCP server"]
+
+  provider["Model provider<br/>Gemini Flash (temp 0)"]:::ext
+  ext2["Composio · Gmail · LinkedIn<br/>GitHub · Firecrawl · VPS"]:::ext
+
+  founder <--> tg
+  tg <--> run
+  boot -. injects models+tools+checkpointer .-> graph
+  run --> graph
+  graph --> plan --> disp --> agent --> coll --> disp
+  disp --> synth
+  agent <--> tools
+  plan & agent & synth -. inference .-> provider
+  agent <--> hitl
+  tools <--> ext2
+  graph <--> ckpt --> db
+  hitl --> db
+  mcp -. read-only .-> db
+  founder -. read-only .-> mcp
+
+  classDef ext fill:#eee,stroke:#999,color:#333;

@@ -22,6 +22,7 @@
  */
 
 import { childLogger } from "../../infra/logger.js";
+import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import { lookupJobKeys, type JobKeyStatus } from "./indeed-source.js";
 import { INDEED_SOURCE } from "./indeed-source.js";
 
@@ -31,6 +32,20 @@ export type Liveness = JobKeyStatus;
 
 /** How long to wait on one posting URL before calling it unverifiable. */
 const URL_CHECK_TIMEOUT_MS = 10_000;
+
+/**
+ * Cap on simultaneous URL checks.
+ *
+ * These are independent GETs against unrelated third-party ATS hosts, so
+ * there is no correctness reason to serialize them. But they are bounded, not
+ * unbounded: several targets in one shortlist commonly land on the SAME ATS
+ * host (one platform serves many companies), and firing dozens of requests at
+ * one host in a single burst reads as abuse to that host's own rate limiter —
+ * which turns a genuinely live posting into `unverifiable` and defeats the
+ * entire purpose of checking. 6 clears a full verification budget in a
+ * handful of rounds without looking like a scraper to any one host.
+ */
+export const URL_CHECK_CONCURRENCY = 6;
 
 export interface LivenessTarget {
   readonly id: string;
@@ -81,13 +96,40 @@ async function checkUrl(url: string): Promise<{ liveness: Liveness; detail: stri
   const timer = setTimeout(() => controller.abort(), URL_CHECK_TIMEOUT_MS);
   try {
     const response = await fetch(url, { method: "GET", signal: controller.signal, redirect: "follow" });
-    return { liveness: classifyHttpStatus(response.status), detail: `HTTP ${response.status}` };
+    const verdict = { liveness: classifyHttpStatus(response.status), detail: `HTTP ${response.status}` };
+    // ONLY THE STATUS IS EVER READ, so the body has to be thrown away
+    // explicitly. Under Node's undici an unread body holds the socket and
+    // buffers the whole page until GC — and `clearTimeout` below fires the
+    // moment the headers arrive, so that download is covered by no timeout at
+    // all. 2026-08-06 widened this from 8 sequential requests to 25 across a
+    // 6-way pool, which puts up to six full job pages in memory at once.
+    await releaseBody(response);
+    return verdict;
   } catch (err) {
     return { liveness: "unverifiable", detail: (err as Error).message };
   } finally {
     clearTimeout(timer);
   }
 }
+
+/** Discard a response body without letting that failure change the verdict. */
+async function releaseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // A body we could not release is a leaked socket at worst. Letting the
+    // failure reach the caller's catch would turn a CONFIRMED-OPEN posting into
+    // `unverifiable`, which is the asymmetric, expensive direction this whole
+    // module is built to avoid — see the header.
+  }
+}
+
+// The bounded pool this used to define privately now lives in core/concurrency.ts:
+// the free board lane needed the identical guarantees (input-order results, a
+// hard cap on in-flight requests to third-party hosts) and two copies of a
+// scheduling primitive drift. Re-exported so existing import sites and tests
+// keep resolving here.
+export { mapWithConcurrencyLimit };
 
 /**
  * Verify a shortlist.
@@ -96,6 +138,9 @@ async function checkUrl(url: string): Promise<{ liveness: Liveness; detail: stri
  * directly. Everything else is checked by fetching its posting URL. A row with
  * no URL and no job key is `unverifiable` — there is nothing to check, and
  * saying so is better than assuming either answer.
+ *
+ * The per-target work below runs through a bounded pool (URL_CHECK_CONCURRENCY)
+ * rather than one at a time — see that constant for why it is bounded at all.
  */
 export async function verifyLiveness(
   targets: readonly LivenessTarget[],
@@ -107,30 +152,31 @@ export async function verifyLiveness(
   );
   const keyStatuses = await lookupJobKeys(indeedTargets.map((t) => t.externalId as string));
 
-  const results: LivenessResult[] = [];
-  for (const target of targets) {
-    if (target.source === INDEED_SOURCE && target.externalId) {
-      const status = keyStatuses.get(target.externalId) ?? "unverifiable";
-      results.push({
-        id: target.id,
-        liveness: status,
-        reason: livenessReason(status, `Indeed job key ${target.externalId}`),
-      });
-      continue;
-    }
+  const results = await mapWithConcurrencyLimit<LivenessTarget, LivenessResult>(
+    targets,
+    URL_CHECK_CONCURRENCY,
+    async (target) => {
+      if (target.source === INDEED_SOURCE && target.externalId) {
+        const status = keyStatuses.get(target.externalId) ?? "unverifiable";
+        return {
+          id: target.id,
+          liveness: status,
+          reason: livenessReason(status, `Indeed job key ${target.externalId}`),
+        };
+      }
 
-    if (!target.url || target.url.trim().length === 0) {
-      results.push({
-        id: target.id,
-        liveness: "unverifiable",
-        reason: livenessReason("unverifiable", "no posting URL was recorded"),
-      });
-      continue;
-    }
+      if (!target.url || target.url.trim().length === 0) {
+        return {
+          id: target.id,
+          liveness: "unverifiable",
+          reason: livenessReason("unverifiable", "no posting URL was recorded"),
+        };
+      }
 
-    const { liveness, detail } = await checkUrl(target.url);
-    results.push({ id: target.id, liveness, reason: livenessReason(liveness, detail) });
-  }
+      const { liveness, detail } = await checkUrl(target.url);
+      return { id: target.id, liveness, reason: livenessReason(liveness, detail) };
+    },
+  );
 
   log.info(
     {

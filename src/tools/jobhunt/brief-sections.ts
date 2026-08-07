@@ -25,7 +25,7 @@
  */
 
 import { esc } from "./telegram-format.js";
-import { renderRow, trimToSentence, type BriefRow } from "./brief-row.js";
+import { renderRow, trimToSentence, type BriefRow, type BriefSection } from "./brief-row.js";
 import type { PostingCountry } from "./country.js";
 
 /** What the market asked for, accumulated across passing screens. */
@@ -104,6 +104,7 @@ const MARKET_NOTE: Record<Market, string> = {
  */
 export const PER_MARKET_DO_TODAY = 3;
 export const PER_MARKET_ASK = 2;
+export const PER_MARKET_STRETCH = 2;
 
 /**
  * Take up to `perMarket` from each market in order, then spill the remainder.
@@ -135,10 +136,18 @@ export function allocateByMarket(
  * same array `persistBriefRanks` writes — which is what makes `/draft 4` and
  * "the fourth row of the message" the same thing by construction rather than by
  * two functions agreeing.
+ *
+ * `section` is REQUIRED and sits ahead of `startIndex` — the two sections that
+ * start at 1 would otherwise have to pass it just to reach the argument after
+ * it. Required rather than defaulted on purpose: a default would let the next
+ * section added here inherit another section's wording silently, which is
+ * precisely how the stretch rows came to print ASK's sentence. `tsc` failing is
+ * the loud direction.
  */
 export function renderMarketBlocks(
   selected: readonly BriefRow[],
   command: string,
+  section: BriefSection,
   startIndex = 1,
 ): string {
   const blocks = MARKET_ORDER.flatMap((market) => {
@@ -150,7 +159,7 @@ export function renderMarketBlocks(
     return [
       `<b>${MARKET_HEADING[market]} (${rows.length})</b>\n` +
         `<i>${esc(MARKET_NOTE[market])}</i>\n\n` +
-        rows.map(({ row, index }) => renderRow(row, index, command)).join("\n\n"),
+        rows.map(({ row, index }) => renderRow(row, index, command, section)).join("\n\n"),
     ];
   });
 

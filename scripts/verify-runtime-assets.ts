@@ -55,6 +55,20 @@ const ASSETS: readonly AssetCheck[] = [
       return `${register.index.size.toLocaleString()} entries from ${path}`;
     },
   },
+  {
+    name: "Free ATS board registry",
+    module: "dist/src/tools/jobhunt/free-boards.js",
+    check: (mod) => {
+      const path = (mod["boardsPathFrom"] as () => string)();
+      const getBoards = mod["getFreeBoards"] as () => readonly unknown[];
+      // `getFreeBoards` already throws below MIN_EXPECTED_BOARDS. Calling it here
+      // is the whole check: it proves the CSV resolves from dist/ and parses to a
+      // usable registry, which is exactly what the sponsor register failed to do
+      // for four days while every unit test passed.
+      const boards = getBoards();
+      return `${boards.length} boards from ${path}`;
+    },
+  },
 ];
 
 async function main(): Promise<void> {

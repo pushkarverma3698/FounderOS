@@ -97,7 +97,7 @@ export async function handleCommands(ctx: Context): Promise<void> {
       "/halt · /resume — emergency stop / restart",
       "",
       "<b>From the daily job brief</b>",
-      "/draft &lt;n&gt; — write the application for row n of DO TODAY",
+      "/draft &lt;n&gt; — write the application for row n of DO TODAY or A STRETCH WORTH APPLYING TO",
       "/ask &lt;n&gt; — write the question that unblocks row n of ONE QUESTION AWAY",
       "",
       "Everything else is natural language — the planner routes it.",

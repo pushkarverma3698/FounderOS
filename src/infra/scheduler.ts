@@ -46,6 +46,16 @@ import {
 } from "./daily-budget.js";
 import { getBudgetAlertsState, recordBudgetAlertSent } from "./daily-budget-alerts.js";
 import { sweepStaleCheckpoints } from "./checkpointer.js";
+import {
+  JOB_SWEEP_CRON,
+  runJobIngestSweep,
+  FREE_SWEEP_CRON,
+  runFreeSweep,
+} from "../tools/jobhunt/sweep-runner.js";
+
+// Re-exported so existing import sites (and tests) that read these off
+// scheduler.ts keep resolving after the move to sweep-runner.ts (2026-08-06).
+export { JOB_SWEEP_CRON, runJobIngestSweep };
 
 const log = childLogger({ module: "scheduler" });
 
@@ -248,6 +258,7 @@ export async function recoverStrandedReminders(): Promise<void> {
   }
 }
 
+<<<<<<< HEAD
 // 01:30 UTC = 07:00 IST, every THIRD day (founder decision, 2026-08-02). The
 // feed bills per job RETURNED, so cadence changes only how often we re-buy the
 // same posting: the 2026-08-02 sweep was billed for 32 of which ZERO were new,
@@ -360,6 +371,11 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
       log.error({ err: (err as Error).message }, "Job ingest sweep cron error"),
     );
   });
+  cron.schedule(FREE_SWEEP_CRON, () => {
+    runFreeSweep().catch((err) =>
+      log.error({ err: (err as Error).message }, "Free board sweep cron error"),
+    );
+  });
   cron.schedule("* * * * *", () => {
     runScheduledPostSweep().catch((err) =>
       log.error({ err: (err as Error).message }, "Scheduled post sweep cron error"),
@@ -389,7 +405,7 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
     );
   });
   log.info(
-    "Scheduler started — stale-approval check (daily 9am), self-audit sweep (every 3 days 8am), RAG optimization (weekly Sun 3am), budget alerts (hourly), brain sync (daily 2am), job ingest (daily 1:30am UTC), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
+    "Scheduler started — stale-approval check (daily 9am), self-audit sweep (every 3 days 8am), RAG optimization (weekly Sun 3am), budget alerts (hourly), brain sync (daily 2am), job ingest (daily 1:30am UTC), free board sweep (every 30 minutes), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
       (taskExecutor ? ", scheduled-task sweep (every minute)" : ""),
   );
 }

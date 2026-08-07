@@ -44,6 +44,19 @@ export function parseRowArg(raw: string): number | null {
   return n >= 1 ? n : null;
 }
 
+/**
+ * Which sections each command addresses, in the words the brief prints them in.
+ *
+ * `/draft` spans two since 2026-08-06: DO TODAY and the stretch section share
+ * one continuous numbering, because a row flagged only on the years bar needs an
+ * APPLICATION, not a question. Naming only the first would tell the founder his
+ * row is missing from a section it was never in.
+ */
+const COMMAND_SECTIONS: Readonly<Record<string, string>> = {
+  draft: "DO TODAY / A STRETCH WORTH APPLYING TO",
+  ask: "ONE QUESTION AWAY",
+};
+
 /** What to say when the number does not resolve. Never a silent no-op. */
 export function unresolvedMessage(command: string, rank: number | null): string {
   if (rank === null) {
@@ -53,7 +66,7 @@ export function unresolvedMessage(command: string, rank: number | null): string 
     );
   }
   return (
-    `No row ${rank} in the latest brief's ${command === "draft" ? "DO TODAY" : "ONE QUESTION AWAY"} ` +
+    `No row ${rank} in the latest brief's ${COMMAND_SECTIONS[command] ?? "actionable"} ` +
     `section.\n\nThe numbers come from the most recent brief only. Ask me for the job brief to ` +
     `get a current list.`
   );
@@ -145,7 +158,7 @@ export interface JobhuntCommandDeps {
 async function handleRowCommand(
   ctx: Context,
   command: "draft" | "ask",
-  section: BriefSection,
+  sections: readonly BriefSection[],
   compose: (row: JobApplication) => string,
   deps: JobhuntCommandDeps,
 ): Promise<void> {
@@ -155,7 +168,16 @@ async function handleRowCommand(
     return;
   }
 
-  const row = await getApplicationByBriefRank(section, rank);
+  // Tried in order, and at most one can match: the sections that share a
+  // command also share one continuous numbering, pinned by `persistBriefRanks`
+  // at render time. Still a pure lookup on stored (section, rank) pairs — no
+  // model, no fuzzy match, and a miss is a refusal rather than a near-miss.
+  let row: JobApplication | null = null;
+  for (const section of sections) {
+    row = await getApplicationByBriefRank(section, rank);
+    if (row) break;
+  }
+
   if (!row) {
     await ctx.reply(unresolvedMessage(command, rank));
     return;
@@ -165,12 +187,19 @@ async function handleRowCommand(
   await deps.runKernelText(ctx, compose(row));
 }
 
-/** `/draft N` — write the application for row N of DO TODAY. */
+/**
+ * `/draft N` — write the application for row N of DO TODAY or the stretch section.
+ *
+ * Both, because both end in an application. A row flagged only on the years bar
+ * is not a question for the employer — asking whether "5+ years" is firm invites
+ * a pre-emptive rejection on the one gate written as a wish — and before
+ * 2026-08-06 those rows had no path to `/draft` at all.
+ */
 export async function handleDraft(ctx: Context, deps: JobhuntCommandDeps): Promise<void> {
-  await handleRowCommand(ctx, "draft", "do_today", draftInstruction, deps);
+  await handleRowCommand(ctx, "draft", ["do_today", "stretch"], draftInstruction, deps);
 }
 
 /** `/ask N` — write the one question that unblocks row N of ONE QUESTION AWAY. */
 export async function handleAsk(ctx: Context, deps: JobhuntCommandDeps): Promise<void> {
-  await handleRowCommand(ctx, "ask", "ask", askInstruction, deps);
+  await handleRowCommand(ctx, "ask", ["ask"], askInstruction, deps);
 }

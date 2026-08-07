@@ -985,6 +985,27 @@ export const jobApplications = agentsSchema.table(
     stage: text("stage").notNull().default("screened"),
 
     applied_at: timestamp("applied_at", { withTimezone: true }),
+
+    /**
+     * When the founder looked at this row and decided NOT to apply.
+     *
+     * A SEPARATE COLUMN FROM `applied_at`, never a shared status. Both remove a
+     * row from the apply queue, so one field would serve the queue perfectly —
+     * and would destroy the only number this pipeline exists to move. "Applied
+     * and heard nothing" and "read it and passed" are opposite facts: the first
+     * is a live lead and evidence the screening is aimed correctly, the second
+     * is evidence it is not. Collapsed, the apply rate loses its denominator.
+     *
+     * It must also stay out of `applied_at` because that column drives the
+     * re-apply staleness rule (`isStaleEnoughToReapply`, screen.ts): stamping a
+     * skip there would suppress a role the founder passed on in March and would
+     * happily take in September.
+     *
+     * Written only by the Mac apply client — the machine never submits an
+     * application (ADR-009), so it learns either fact only from a founder click.
+     * NULL on both = still in the queue.
+     */
+    skipped_at: timestamp("skipped_at", { withTimezone: true }),
     last_contact_at: timestamp("last_contact_at", { withTimezone: true }),
     /** Count of follow-ups sent — the Monday review follows up at day 7, then 14. */
     followups_sent: integer("followups_sent").notNull().default(0),
@@ -1064,6 +1085,8 @@ export const jobApplications = agentsSchema.table(
     stageIdx: index("ja_stage_idx").on(t.tenant_id, t.stage, t.last_contact_at),
     /** The brief's hot path: one track's passing postings. */
     trackVerdictIdx: index("ja_track_verdict_idx").on(t.tenant_id, t.track, t.salary_status),
+    /** The apply queue's hot path: unhandled rows, best first. */
+    applyQueueIdx: index("ja_apply_queue_idx").on(t.tenant_id, t.applied_at, t.brief_rank),
   }),
 );
 

@@ -1,0 +1,19 @@
+<!doctype html><html><body>
+<h1>Greenhouse-style application</h1>
+<form>
+  <input id="first_name" name="job_application[first_name]" placeholder="First name">
+  <input id="last_name" name="job_application[last_name]" placeholder="Last name">
+  <input id="email" name="job_application[email]" type="email" placeholder="Email">
+  <input id="phone" name="job_application[phone]" placeholder="Phone">
+  <input id="resume" type="file" name="job_application[resume]">
+  <textarea id="cover_letter" name="job_application[cover_letter]"></textarea>
+  <select id="work_auth"><option value="">--</option><option value="yes">Yes</option></select>
+  <button type="submit" id="real-submit">Submit Application</button>
+</form>
+<script>
+  document.getElementById('real-submit').addEventListener('click', function (e) {
+    e.preventDefault();
+    window.__SUBMITTED__ = true;
+  });
+</script>
+</body></html>
