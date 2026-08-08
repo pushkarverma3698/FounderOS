@@ -55,6 +55,8 @@ import {
   vpsRun,
   jobState,
   opsState,
+  writeArtifact,
+  deliverArtifact,
 } from "./agent-tools.js";
 import { generateImageTool, listBrandAssetsTool } from "./agent-tools/creative.js";
 import {
@@ -70,7 +72,6 @@ import { listWorkflows } from "./agent-tools/workflows.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
 import { searchMemoryTool } from "../tools/memory.js";
-import { writeArtifact } from "../tools/artifact.js";
 import { listPendingSignals } from "./agent-tools/pending-signals.js";
 import { MCP_BRIDGE_ENABLED, MCP_BRIDGE_MANIFEST } from "../core/config.js";
 import type { BridgeManifest } from "../mcp/bridge-manifest.js";
@@ -97,14 +98,14 @@ type AnyTool = any;
 import { synthesizeSkill } from "./agent-tools.js";
 
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, writeArtifact, listWorkflows, synthesizeSkill, jobState, opsState],
+  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, writeArtifact, listWorkflows, synthesizeSkill, jobState, opsState, deliverArtifact],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
   engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal, vpsRun, synthesizeSkill],
   marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal, generateImageTool, listBrandAssetsTool, listScheduledPosts, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool],
   sales: [createSendEmailTool("sales"), searchWeb, searchKnowledge, searchTuricksBrain],
-  personal: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain],
-  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobBrief, createSendEmailTool("jobhunt"), searchPersonalRag, jobState],
+  personal: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain, writeArtifact, deliverArtifact],
+  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobBrief, createSendEmailTool("jobhunt"), searchPersonalRag, jobState, writeArtifact, deliverArtifact],
 };
 
 /** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops). */
@@ -153,6 +154,7 @@ export const HITL_GATED_TOOLS = new Set([
   // entirely by SKILL_SYNTHESIS_ENABLED (kernel-boot); this entry is the second
   // lock, so enabling the flag still never means an unattended code write.
   "synthesize_skill",
+  "deliver_artifact",
 ]);
 
 /**
