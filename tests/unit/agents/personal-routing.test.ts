@@ -5,10 +5,12 @@
  *   "Send the text.txt file on my desktop" → supervisor responded "Okay"
  *   without routing to personal or calling any tool (toolErrors: 0).
  *
- * These tests verify the PERSONAL_PROMPT and MARKETING_PROMPT routing rules deterministically
- * classify personal-routing triggers. They are pure string/routing tests —
- * no LLM calls (the routing logic is in the prompt, but we test the routing
- * scorer logic + prompt routing strings from routeFromMessages).
+ * These tests verify the WORKER half of that guard: PERSONAL_PROMPT must force
+ * a tool call rather than a plausible answer. Pure string assertions, no LLM.
+ *
+ * The ROUTER half lived in SUPERVISOR_PROMPT, deleted in P6 with the supervisor
+ * itself. Its v3 descendant is the planner's direct-reply clause, guarded in
+ * tests/unit/kernel/planner-prompt.test.ts.
  *
  * The golden-tasks eval covers end-to-end routing with a live model.
  * These unit tests catch PROMPT REGRESSION for personal routing keywords.
