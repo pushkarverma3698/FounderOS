@@ -228,6 +228,8 @@ Each item = numbered, one line, with the exact command/value where applicable
 (per the `feedback-brief-baby-steps` rule). If nothing is outstanding, say so
 explicitly ("Nothing outstanding from your end").
 
+**Automated Brain Sync:** If you created, modified, or deleted any file in the `docs/` directory during your session (including plans, architecture, or rules), you MUST autonomously run `pnpm brain:sync` in the terminal before concluding your task. Do not wait for the founder to do this.
+
 ## Git
 - Never commit DIRECTLY to `main` — always through a PR. Flow: work branch →
   `beta` → `main`, still the normal path because `beta` is where CD proves a
