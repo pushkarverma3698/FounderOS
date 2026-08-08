@@ -24,6 +24,7 @@ vi.mock("../../../src/db/queries.js", () => ({
   getTodayCostUsd: vi.fn(async () => 0),
   logLlmCost: vi.fn(async () => ({})),
   insertScheduledTask: vi.fn(async () => ({ id: "task-1" })),
+  writeTaskOutcome: vi.fn(async () => ({})),
 }));
 vi.mock("../../../src/infra/halt.js", () => ({
   readHalt: vi.fn(async () => null),

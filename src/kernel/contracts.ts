@@ -259,6 +259,12 @@ export function validatePlannerDecision(input: unknown): Validation<PlannerDecis
 
 // ── Step result (discriminated — the supervisor branches on status, not prose) ─
 
+export const ObservedResultSchema = z.object({
+  kind: z.enum(["file", "http", "record", "commit", "message"]),
+  evidence: z.string(),
+});
+export type ObservedResult = z.infer<typeof ObservedResultSchema>;
+
 export const StepResultSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("ok"),
@@ -266,6 +272,7 @@ export const StepResultSchema = z.discriminatedUnion("status", [
     /** MUST validate against the envelope's expected.schema_ref (validateStepResult). */
     output: z.unknown(),
     tool_receipts: z.array(ToolReceiptSchema).default([]),
+    observed: ObservedResultSchema.optional(),
   }),
   z.object({
     status: z.literal("failed"),
