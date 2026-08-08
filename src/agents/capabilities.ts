@@ -98,14 +98,14 @@ type AnyTool = any;
 import { synthesizeSkill } from "./agent-tools.js";
 
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, writeArtifact, listWorkflows, synthesizeSkill, jobState, opsState, deliverArtifact],
+  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
-  engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal, vpsRun, synthesizeSkill],
-  marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal, generateImageTool, listBrandAssetsTool, listScheduledPosts, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool],
-  sales: [createSendEmailTool("sales"), searchWeb, searchKnowledge, searchTuricksBrain],
-  personal: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain, writeArtifact, deliverArtifact],
-  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobBrief, createSendEmailTool("jobhunt"), searchPersonalRag, jobState, writeArtifact, deliverArtifact],
+  engineering: [projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill],
+  marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts],
+  sales: [searchWeb],
+  personal: [readFile, listDir, runShell, browser, searchPersonalRag],
+  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobState, writeArtifact, deliverArtifact],
 };
 
 /** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops). */
@@ -139,22 +139,16 @@ export const HITL_GATED_TOOLS = new Set([
   "schedule_task",
   "draft_linkedin_reply",
   "draft_connection_note",
-  "github_write",
-  "write_file",
   "run_shell",
   "browser",
-  "send_file",
   "claude_code",
   "vps_run",
   "deploy_static_site",
   "project_workflow",
   "create_calendar_event",
   "record_event",
-  // Authors + compiles TypeScript into the running app's source tree. Gated OFF
-  // entirely by SKILL_SYNTHESIS_ENABLED (kernel-boot); this entry is the second
-  // lock, so enabling the flag still never means an unattended code write.
-  "synthesize_skill",
   "deliver_artifact",
+  "synthesize_skill",
 ]);
 
 /**

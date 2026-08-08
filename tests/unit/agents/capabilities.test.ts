@@ -61,7 +61,6 @@ describe("buildCapabilityManifest", () => {
 
   it("marks HITL-gated tools with an asterisk", () => {
     expect(manifest).toContain("claude_code*");
-    expect(manifest).toContain("github_write*");
     expect(manifest).toContain("send_email*");
   });
 
