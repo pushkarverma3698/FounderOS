@@ -10,7 +10,7 @@ import { existsSync, statSync } from "node:fs";
 import type { StepResult, TaskEnvelope } from "./contracts.js";
 
 export interface StepVerifier {
-  verify(output: unknown, envelope: TaskEnvelope): Promise<{ ok: boolean; error?: string }>;
+  verify(output: unknown, envelope: TaskEnvelope, result?: StepResult): Promise<{ ok: boolean; error?: string }>;
 }
 
 const TEMPLATE_PLACEHOLDER_REGEX = /\{\{[\w\s_-]+\}\}|\[\s*[A-Z][a-z]+(\s+[A-Z][a-z]+)*\s*\]/;
@@ -21,28 +21,31 @@ const FILE_DELIVERY_KEYWORDS = /\b(csv|spreadsheet|export|file|attachment|downlo
 /**
  * Phase 4 deliverable-aware verification.
  * If the step objective mentions a file/csv/export, the tool_receipts MUST include
- * write_artifact (file created) and deliver_artifact (file sent to Telegram).
+ * write_artifact (file created) and/or deliver_artifact (file sent to Telegram).
  * Prevents the agent from pasting raw data inline and claiming "Mission complete".
  */
 function verifyDeliverableIfRequested(
   output: unknown,
   envelope: TaskEnvelope,
+  result?: StepResult,
 ): { ok: boolean; error?: string } {
   if (!FILE_DELIVERY_KEYWORDS.test(envelope.objective)) return { ok: true };
 
-  // Extract tool receipts from the step result (the output object is the parsed
-  // model output, but we need the receipts from the enclosing StepResult —
-  // however, the verifier only receives `output` and `envelope`. The receipts
-  // live on the StepResult *wrapping* this output. We check the serialised
-  // output for evidence of artifact tool calls as a heuristic, since the
-  // verifier interface doesn't expose receipts directly.)
-  const text = typeof output === "object" && output !== null ? JSON.stringify(output) : String(output);
+  // 1. Direct tool receipt verification (ground truth)
+  if (result && "tool_receipts" in result && Array.isArray(result.tool_receipts)) {
+    const receipts = result.tool_receipts;
+    const hasWrite = receipts.some((r) => r.tool === "write_artifact" && r.ok);
+    const hasDeliver = receipts.some((r) => r.tool === "deliver_artifact" && r.ok);
+    if (hasWrite || hasDeliver) {
+      return { ok: true };
+    }
+  }
 
-  // If the output itself mentions an artifact path or a delivered file, the
-  // tools were called — accept it.
+  // 2. Output text heuristic fallback
+  const text = typeof output === "object" && output !== null ? JSON.stringify(output) : String(output);
   const hasArtifactEvidence =
     /artifact_?root|write_artifact|deliver_artifact/i.test(text) ||
-    /\.csv|\.json|\.txt|\.md/i.test(text) && /deliver|attach|sent.*file/i.test(text);
+    (/\.csv|\.json|\.txt|\.md/i.test(text) && /deliver|attach|sent.*file|created.*file/i.test(text));
 
   if (!hasArtifactEvidence) {
     return {
@@ -90,7 +93,7 @@ export const VERIFIERS: Record<string, StepVerifier> = {
   },
 
   admin: {
-    async verify(output, envelope) {
+    async verify(output, envelope, result) {
       const text = typeof output === "object" && output !== null ? JSON.stringify(output) : String(output);
       const match = /path["']?\s*:\s*["']([^"']+)["']/.exec(text) || /written successfully to ([^\s]+)/.exec(text);
       if (match && match[1]) {
@@ -104,14 +107,14 @@ export const VERIFIERS: Record<string, StepVerifier> = {
         }
       }
       // Phase 4: deliverable-aware check — if the objective asks for a file, receipts must prove it
-      const deliverableCheck = verifyDeliverableIfRequested(output, envelope);
+      const deliverableCheck = verifyDeliverableIfRequested(output, envelope, result);
       if (!deliverableCheck.ok) return deliverableCheck;
       return { ok: true };
     },
   },
 
   jobhunt: {
-    async verify(output, envelope) {
+    async verify(output, envelope, result) {
       if (typeof output === "object" && output !== null) {
         const obj = output as Record<string, unknown>;
         if ("rows" in obj && Array.isArray(obj.rows) && !("count" in obj)) {
@@ -119,7 +122,7 @@ export const VERIFIERS: Record<string, StepVerifier> = {
         }
       }
       // Phase 4: deliverable-aware check — if the objective asks for a file, receipts must prove it
-      const deliverableCheck = verifyDeliverableIfRequested(output, envelope);
+      const deliverableCheck = verifyDeliverableIfRequested(output, envelope, result);
       if (!deliverableCheck.ok) return deliverableCheck;
       return { ok: true };
     },
@@ -168,7 +171,7 @@ export async function verifyStepResult(result: StepResult, envelope: TaskEnvelop
   if (!verifier) return result;
 
   try {
-    const check = await verifier.verify(result.output, envelope);
+    const check = await verifier.verify(result.output, envelope, result);
     if (!check.ok) {
       return {
         status: "failed",

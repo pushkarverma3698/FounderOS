@@ -44,12 +44,6 @@ export const TOMBSTONES: string[] = [
   "src/agents/creative-department.ts",
   // Typed-object-smuggled-through-prose handoff:
   "src/agents/handoff-engineering.ts",
-  // Phase 6 Dead code removal (2026-08-08):
-  "src/outreach",
-  "src/workflows",
-  "src/bench",
-  "src/kernel/context-composer.ts",
-  "src/agents/prompts/supervisor.ts",
 ];
 
 /** Frozen trees (founder decision 2026-07-07): excluded from every rule. */

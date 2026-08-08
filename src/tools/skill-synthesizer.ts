@@ -59,7 +59,8 @@ export async function synthesizeSkillImpl({
 
   // Typecheck verification step
   try {
-    await execAsync("npx tsc --noEmit", { cwd: process.cwd() });
+    const tscBin = path.resolve("./node_modules/.bin/tsc");
+    await execAsync(`"${tscBin}" --noEmit`, { cwd: process.cwd() });
     log.info({ name: safeName, toolPath }, "Skill synthesized and typechecked successfully");
     return {
       success: true,

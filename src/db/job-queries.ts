@@ -448,7 +448,7 @@ export async function queryJobState(
     }
   }
 
-  const limit = Math.min(Math.max(1, args.limit ?? 50), 200);
+  const limit = Math.min(Math.max(1, args.limit ?? 100), 200);
 
   const rows = await db
     .select({
