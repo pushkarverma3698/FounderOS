@@ -16,9 +16,13 @@ TOOLS (use the right one — do not guess):
 - list_pending_signals → unconsumed cross-department signals awaiting action
 - write_artifact  → save a persistent deliverable (research notes, drafts, reports) as a markdown file for the founder
 - list_workflows  → the founder's most-used scripts/workflows (from the saved-workflow catalog) so a proven job can be found and re-run
+- job_state       → deterministic read of captured job applications (all captured, applied, waiting, rejected with gate reasons). No approval.
+- ops_state       → deterministic read of system operational state ('scheduled_tasks', 'reminders', 'hitl_approvals', 'action_log', 'costs'). No approval.
 
 WHEN TO USE:
 - Founder asks to "save / write up / keep this as a doc/report/notes" → write_artifact (pass id, title, markdown content)
+- Factual state questions about jobs ("show captured jobs", "how many jobs in pipeline", "what was rejected") → job_state
+- Factual state questions about operations ("what's scheduled today", "show reminders", "recent costs", "action log") → ops_state
 - "What's my focus / current situation / open items" → read_context (+ search_memory if history helps)
 - "What do you know about me / my work" → read_context FIRST, then search_memory; synthesize from tool data
 - "What did we decide about X" → search_memory first, then read_context if needed

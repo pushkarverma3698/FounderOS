@@ -49,3 +49,4 @@ export { searchPersonalRag, searchTuricksBrain, searchResearchCache } from "./ag
 export { publishSignal, prepareSignal, DEFAULT_TARGET_DEPT } from "./agent-tools/signals.js";
 export { uploadAsset, getDownloadUrl, listRunAssets, downloadAsset } from "./agent-tools/storage.js";
 export { synthesizeSkill } from "../tools/skill-synthesizer.js";
+export { jobState, opsState } from "./agent-tools/state.js";
