@@ -69,27 +69,10 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
 - **Fix the schema, not the code**: if a task fails on ambiguous requirements,
   the planner asks for the missing field; never guess data.
 - **Bug fixes start with a failing test** (PR template section is mandatory).
-- **Deep-ideate, then self-critique from multiple angles (rule #25)**: before acting
-  on any non-trivial task, generate real alternatives and argue against your own
-  first answer. Three checks are mandatory, in this order:
-  1. **Does it already exist?** Grep before you build. (2026-07-29: a recurrence
-     module was written from scratch while `nextRecurrence` already sat in
-     `src/core/time.ts` — and the existing one was *better*, with real IANA
-     timezone handling instead of a fixed offset.)
-  2. **What is the binding constraint?** Optimising a downstream variable while an
-     upstream one is unverified is the most expensive mistake available. Name the
-     constraint before choosing the work.
-  3. **What would make this wrong?** State the strongest counter-argument to your
-     own plan and answer it, or adopt it.
-  Recommend one option with reasons; never present an unranked survey. If a
-  conclusion rests on an assumption, verify the assumption or label it unverified.
-- **Build for the OUTCOME, not the instruction (rule #26 — founder directive,
-  2026-08-01)**: every request names a symptom and guesses a remedy. Before
-  writing anything, answer three questions in order: *what outcome does this
-  serve · what is the binding constraint on that outcome · does the requested
-  change move that constraint*. If the answer to the third is no, say so and name
-  what would — then build that too. Deliver the literal ask in full regardless;
-  the outcome lens decides HOW and WHAT ELSE, never WHETHER.
+- **Execution vs Architecture Mode (rule #25)**: Claude operates in two modes. 
+  - **Execute Mode (Default):** For explicit instructions, bug fixes, or basic tasks, optimize for speed and low token usage. Do NOT brainstorm, argue against yourself, or write out constraints. Just build the request directly and immediately.
+  - **Architecture Mode:** ONLY when tackling major systemic changes or when the founder explicitly asks for design options, you must deep-ideate: check if it already exists, name the binding constraint, and state what would make your plan wrong.
+- **Build for the OUTCOME (rule #26 — founder directive, 2026-08-01)**: Keep the ultimate goal in mind. If an instruction clearly won't achieve the user's underlying goal, mention it concisely and fix the root cause too. However, do NOT write out a mandatory 3-question essay before coding. Rapid execution is the priority.
   - Every deliverable must end in something the founder can ACT ON — a ranked
     shortlist, a draft, a decision, a number that changes a choice. A log of what
     happened is not an outcome. If ignoring the output costs nothing and emits no
@@ -159,8 +142,8 @@ unenforced, and is expected to decay.
   instruction to the executor. Checklist: `docs/antigravity/README.md` § "Before you dispatch".
   **Enforced by:** nothing yet. Candidate for a fitness rule once the failure modes are stable.
 
-- **#33 — Never dismiss or reject claims from other AIs out of hand; deep-research and accept valid feedback.**
-  Claims, critique, or findings from other AIs (subagents, peer models, automated reviewers, or external AI agents) must never be rejected or dismissed out of hand. Perform thorough, deep research and empirical verification against codebase evidence before reaching any conclusion. If the claim or feedback proves valid upon investigation, accept and integrate it fully without defensive bias.
+- **#33 — Objectively assess feedback without deep-research bloat.**
+  When receiving claims, critique, or findings from other AIs (subagents, peer models, automated reviewers) or the founder, assess them objectively. Do NOT launch into unprompted "deep research" or over-complicate the verification. If the feedback is straightforward or easily verifiable, just fix it.
   **Enforced by:** Judgement & empirical verification loop.
 
 ## File map
@@ -269,3 +252,20 @@ The v2 system (LLM supervisor + regex pre-router + regex execution guards) was
 audited and replaced 2026-07-08 — see `ZERO-BASE-AUDIT.md` (4 live failure
 traces), `JARVIS-ARCHITECTURE.md` (the contract-first design), and
 `docs/PROOF.md` (the living scoreboard).
+
+## Content Generation (No AI Slop)
+
+**Mandatory Skill Usage:** Whenever you are generating, preparing, or drafting any content intended for public platforms (e.g., comments, posts, articles, social media, emails), you MUST use and strictly follow the `no-ai-slop` skill located at `/Users/pushkarverma/Projects/githubtools/no-ai-slop/SKILL.md`. 
+**Why:** Nothing we publish on our platforms should look like AI-generated content. You must ensure all outputs are highly authentic, human-like, and completely free of typical AI "slop" (e.g., overly formal tone, unnecessary emojis, generic corporate speak, predictable structures).
+
+## Implementation Plans & Memory
+
+All implementation plans generated by Claude Code, Antigravity, or any agent MUST be saved with organized, descriptive filenames in the `docs/plans/` directory (e.g., `docs/plans/YYYY-MM-DD-feature-name.md`).
+**Why:** Storing all plans centrally with semantic names drastically improves RAG retrieval, allowing future agents to intelligently learn from past architectural decisions and execution contexts. Do not store plans in scattered scratch directories or with generic names like `plan.md`.
+
+## Cross-Agent Awareness (The "What is everyone doing?" rule)
+
+Before starting any complex task, you MUST research what other agents have recently worked on or are currently working on. You do this by:
+1. Querying `turicks-brain` for recent session summaries.
+2. Listing and reading the most recent implementation plans in `docs/plans/`.
+**Why:** You are part of a swarm. Knowing the recent architectural changes and in-flight plans of your peer agents prevents you from duplicating work, reverting deliberate changes, or breaking dependent systems.

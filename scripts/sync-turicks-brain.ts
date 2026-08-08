@@ -200,6 +200,62 @@ function collectDocs(rootDir: string): DocEntry[] {
     });
   }
 
+  // ── Implementation Plans ────────────────────────────────────────────────────
+  const plansDir = join(root, "docs/plans");
+  if (existsSync(plansDir)) {
+    for (const file of readdirSync(plansDir).filter((f) => f.endsWith(".md"))) {
+      docs.push({
+        entry_type: "plan",
+        title: titleFromFilename(file),
+        content: readFile(join(plansDir, file)),
+        source: `docs/plans/${file}`,
+        tags: ["plan", "implementation", "memory", "agent-context"],
+      });
+    }
+  }
+
+  // ── Antigravity Standards ───────────────────────────────────────────────────
+  const antigravityDir = join(root, "docs/antigravity");
+  if (existsSync(antigravityDir)) {
+    for (const file of readdirSync(antigravityDir).filter((f) => f.endsWith(".md"))) {
+      docs.push({
+        entry_type: "standards",
+        title: titleFromFilename(file),
+        content: readFile(join(antigravityDir, file)),
+        source: `docs/antigravity/${file}`,
+        tags: ["standards", "binding-rules", "antigravity"],
+      });
+    }
+  }
+
+  // ── Process & Git Flow ──────────────────────────────────────────────────────
+  const processDir = join(root, "docs/process");
+  if (existsSync(processDir)) {
+    for (const file of readdirSync(processDir).filter((f) => f.endsWith(".md"))) {
+      docs.push({
+        entry_type: "process",
+        title: titleFromFilename(file),
+        content: readFile(join(processDir, file)),
+        source: `docs/process/${file}`,
+        tags: ["process", "git-flow", "ci"],
+      });
+    }
+  }
+
+  // ── Rules & Checklists ──────────────────────────────────────────────────────
+  const rulesDir = join(root, "docs/rules");
+  if (existsSync(rulesDir)) {
+    for (const file of readdirSync(rulesDir).filter((f) => f.endsWith(".md"))) {
+      docs.push({
+        entry_type: "rules",
+        title: titleFromFilename(file),
+        content: readFile(join(rulesDir, file)),
+        source: `docs/rules/${file}`,
+        tags: ["rules", "checklists", "conventions"],
+      });
+    }
+  }
+
   return docs;
 }
 

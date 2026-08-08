@@ -24,6 +24,11 @@ from .adapters import field_map_for, planned_fills
 from .profile import ApplyProfile, load_profile, missing_resumes
 from .sync import QueueJob, SyncError, load_queue, push_outcomes
 
+class BrowserClosedError(RuntimeError):
+    """Raised when the browser window is closed by the user during interactive form filling."""
+    pass
+
+
 #: Per-field fill timeout. Short: a selector that is not on this page should
 #: cost a moment, not ten seconds times four fields times twenty jobs.
 FILL_TIMEOUT_MS = 4000
