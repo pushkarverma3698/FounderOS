@@ -27,11 +27,7 @@ jobs:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - run: pnpm verify:arch
-      - run: pnpm verify:wiring
-      - run: pnpm verify:runtime-assets
-      - run: pnpm build:all
+      - run: pnpm ci:quality
 
   unit-tests:
     name: Unit + regression tests

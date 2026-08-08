@@ -30,6 +30,7 @@
     "verify:wiring": "node --import tsx/esm scripts/verify-wiring.ts",
     "verify:runtime-assets": "node --import tsx/esm scripts/verify-runtime-assets.ts",
     "gate": "pnpm lint && pnpm build:all && pnpm verify:runtime-assets && pnpm verify:wiring && pnpm verify:arch && pnpm test",
+    "ci:quality": "pnpm lint && pnpm build:all && pnpm verify:runtime-assets && pnpm verify:wiring && pnpm verify:arch",
     "predeploy": "pnpm gate",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file=.env node_modules/drizzle-kit/bin.cjs migrate",
