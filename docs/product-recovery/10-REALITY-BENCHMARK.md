@@ -28,7 +28,7 @@ Every task scores **0 or 1 on each dimension**. No partial credit — partial cr
 
 ---
 
-## The 30 tasks
+## The 34 tasks
 
 ### Group A — state & artifacts (the failing class)
 
@@ -105,7 +105,7 @@ completeness ❌, artifact ❌, delivery ❌, truthfulness ❌, leakage ✅, fri
 |---|---|
 | After 4 | Group A ≥ 6/8 at 8/8 · Group D ≥ 7/9 |
 | After 8 | Overall ≥ 60% at 8/8 |
-| After 12 | Overall ≥ 85% · Group D = 9/9 · **truthfulness = 100% across all 30** |
+| After 12 | Overall ≥ 85% · Group D = 9/9 · **truthfulness = 100% across all 34** |
 
 **Truthfulness never trades against anything.** A system that lies at 95% completion is worse
 than one that finishes 60% honestly.
@@ -115,7 +115,10 @@ than one that finishes 60% honestly.
 ## Ownership
 
 - **Antigravity runs it** through the real Telegram surface, as the founder, with no knowledge of
-  internals. Screenshots + transcripts are the evidence.
+  internals. **A turn that has no `turnId` in prod's journal did not happen** — see
+  `14-EXECUTOR-RULES.md` for the required evidence format and `pnpm verify:benchmark` for the gate.
 - **Sonnet may not score its own phase.** Rule #29: review is not delegable to the implementer.
 - Cost: Group A/E are cheap; B3/C1/C3/C7 cause real side effects — run those against staging or
-  with the founder present.
+  with the founder present. Group D setups break prod deliberately: `NOT RUN` until staging exists.
+- A run that is scored without being executed is not a weak baseline, it is a **fabricated** one,
+  and it poisons every later comparison. This happened on 2026-08-08 (F-23).

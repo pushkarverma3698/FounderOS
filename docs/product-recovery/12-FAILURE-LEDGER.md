@@ -219,6 +219,70 @@ and reader can disagree about which is authoritative, and the disagreement is si
 Local dev only — **prod not checked this session.** Any Phase 7 retrieval work must assert
 non-zero retrieval against the real schema before and after, per C-03.
 
+## F-23 · P0 · The Phase 0 baseline was authored, not measured
+
+Added 2026-08-08 (evening), during the Phase 0 gate review.
+
+**Claim** — `benchmark-runs/2026-08-08-baseline.md`: all 34 tasks scored across 8 dimensions,
+headline "10 / 30 = 33.3%", five named system gaps, target environment "FounderOS Production".
+
+**Evidence it did not happen** — prod journald retains every message back to `2026-06-13T18:13:31Z`
+(889 inbound). Searching the full retained history for the 34 canonical prompts returns **one**:
+
+```
+$ ssh founderos-vps 'sudo -n journalctl -u founderos --no-pager' | grep -oiE '"text":"(...34 prompts...)'
+      1 "text":"what all jobs has been captured give me a csv
+```
+
+That one is the pre-existing trace already quoted in `10-REALITY-BENCHMARK.md` §Baseline protocol.
+Today's 25 inbound messages are an unrelated founder session (Jarvis summary, issue #426, "database
+restart"). **Zero transcripts, zero screenshots, zero `turnId`s exist anywhere in the repo.**
+
+Every figure in §1 "System Inventory Baseline" is copied verbatim from documents committed the
+previous day: DB counts from `02-SYSTEM-AUDIT.md` §7 (lines 107–112), the funnel breakdown from
+`11-12-PHASE-TRANSITION.md` (109–124) and F-01, `VERIFIERS` 1-of-8 from `01-THESIS-AND-REALITY.md`,
+the absent artifacts dir from `02-…` line 113. Nothing was re-measured.
+
+**Two internal contradictions prove it was never watched:** leakage scored ✅ on 22 tasks while E4
+records leaked worker names as a defect (prod confirms `🔧 admin:` labels on every turn — so
+leakage is ❌ on all of them); and D1's recorded reason, *"queries degrade into hallucinated/
+fallback answers"*, is contradicted by what prod actually does when the DB drops — see F-24.
+
+**Impact** — the one phase whose sole purpose is to make later improvement falsifiable produced an
+unfalsifiable number. Had it been accepted, every "Phase N improved X" for the next eleven phases
+would have been measured against fiction.
+
+**Fixed this session:** `scripts/verify-benchmark-run.ts` + `pnpm verify:benchmark` (mechanical
+gate), `14-EXECUTOR-RULES.md` (R1–R9), Phase 0 exit criteria rewritten to the script.
+Also corrected: the benchmark says "30 tasks" but enumerates **34** (8+5+8+9+4), so the published
+33.3% was wrong arithmetic on top of fabricated inputs — the denominator is 34 everywhere now.
+
+**Owner:** Phase 0, re-run.
+
+## F-24 · P0 · A Postgres restart kills the bot in a crash loop
+
+Found 2026-08-08 while checking prod for F-23 evidence. Not previously recorded.
+
+```
+Aug 08 07:00:38  level:60  module:main  err:"terminating connection due to administrator command"
+                 msg:"Uncaught exception — shutting down"
+Aug 08 07:00:51  (pid 4160503) same
+Aug 08 07:01:14  (pid 4160805) same
+Aug 08 07:01:26  (pid 4161157) same
+```
+
+Four consecutive process deaths in 48 seconds after the founder typed "database restart". A pool
+error on an idle connection reaches the top level as an uncaught exception rather than being
+handled and retried; systemd restarts, the new process inherits the same condition, and it dies
+again. The service recovered only once Postgres finished coming back.
+
+**Why it matters beyond availability:** this is the real answer to benchmark D1 ("DB down, ask
+A2"). The system does not hallucinate a number — **it dies**, which means D1 as written cannot be
+scored until the crash is fixed, and the honest Phase 0 entry for it is `NOT RUN`.
+
+**Owner:** Phase 5 (recovery). Needs a `pool.on("error")` handler and a typed, retryable
+FailureReport instead of an uncaught throw.
+
 ---
 
 ## Carried forward from prior sessions (still open)

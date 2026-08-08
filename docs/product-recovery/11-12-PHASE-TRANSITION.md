@@ -60,13 +60,16 @@ green, changed nothing."
 **6. Root cause.** All measurement is at contract level (did the step match its schema), none at
 objective level.
 
-**7. Target state.** A committed baseline file with 30 tasks × 8 dimensions.
+**7. Target state.** A committed baseline file with 34 tasks × 8 dimensions.
 
 **8. Changes.**
 - Create `docs/product-recovery/benchmark-runs/` .
-- Antigravity executes all 30 tasks from `10-REALITY-BENCHMARK.md` through real Telegram.
-- Record per-dimension scores, transcripts, screenshots.
+- Antigravity executes all 34 tasks from `10-REALITY-BENCHMARK.md` through real Telegram, in the
+  evidence format of `14-EXECUTOR-RULES.md` § Benchmark evidence format.
+- Export the raw prod journal covering the run window to `<run>.md.evidence.jsonl`. Every
+  `turnId` in the scorecard must appear in it.
 - Capture prod funnel snapshot: 24h of `free-ingest` log lines + the four DB counts in `02-…` §7.
+  Re-measure them — the figures in `02-…` are from 2026-08-08 and must not be recopied (R3).
 
 **9. Preserve.** Everything. **No code changes in this phase.**
 
@@ -76,8 +79,26 @@ objective level.
 
 **12. Reality tests.** The benchmark itself.
 
-**13. Exit criteria.** Baseline file committed with all 30 tasks scored, ≥1 transcript each.
+**13. Exit criteria.**
+
+```bash
+pnpm verify:benchmark docs/product-recovery/benchmark-runs/<date>-baseline.md
+```
+
+exits 0, **and** the run file plus its `.evidence.jsonl` are committed. The script requires, per
+task: the canonical prompt, an ISO-8601 instant, a unique `turnId` that appears in a prod journald
+export the runner did not author, a verbatim reply, and dimension scores that sum to the stated
+total. A task that could not be run is `NOT RUN — <reason>`; that is honest and is not counted
+against the run.
+
 Group A1 is expected at 3/8 — if it scores higher, re-audit before proceeding.
+
+> **First attempt REJECTED, 2026-08-08.** A complete 34-task scorecard was produced by reading the
+> repository instead of using the product: 33 of the 34 prompts had never been sent to the bot in
+> prod's entire retained history (back to 2026-06-13), zero transcripts existed, and the whole
+> inventory section was copied out of `02-SYSTEM-AUDIT.md`. The rejected file is kept at
+> `benchmark-runs/2026-08-08-baseline.md`, stamped, as the specimen of this failure mode.
+> **Read `14-EXECUTOR-RULES.md` before re-running.**
 
 **14. Dependencies.** None.
 
@@ -367,7 +388,7 @@ whole HITL ordering. **This substrate is why Phase 4 is cheap — do not refacto
 
 **12. Reality tests.** All of Group D. **D1 (DB down → never invents a number) is the gate.**
 
-**13. Exit criteria.** Group D ≥ 7/9 at 8/8, **truthfulness = 100% across all 30 tasks**.
+**13. Exit criteria.** Group D ≥ 7/9 at 8/8, **truthfulness = 100% across all 34 tasks**.
 No task in the suite receives a success claim for an objective that did not complete.
 
 **14. Dependencies.** Phases 2, 3.
@@ -636,7 +657,7 @@ Evidence is not leakage; a Python invocation is.
 **11. Tests.** Reply-linter table: leaked commands/paths/worker names rejected, legitimate
 receipts and founder-requested paths allowed.
 
-**12. Reality tests.** **E4 across all 30 tasks** — zero leaks. Plus E1, E2, E3.
+**12. Reality tests.** **E4 across all 34 tasks** — zero leaks. Plus E1, E2, E3.
 
 **13. Exit criteria.** E4 = 0 leaks across the whole suite. E1/E2/E3 at 8/8. Linter wired into the
 gateway reply path.
@@ -775,7 +796,7 @@ each added during a repair.
 
 | Metric | Phase 0 | Phase 12 |
 |---|---|---|
-| Objective completion (30 tasks, 8/8) | *baseline* | ≥ 85% |
+| Objective completion (34 tasks, 8/8) | *baseline* | ≥ 85% |
 | Truthfulness | *baseline* | **100%** |
 | Planner catalog slots | 79 | ≤ 60 |
 | Max tools per worker | 18 | ≤ 12 |

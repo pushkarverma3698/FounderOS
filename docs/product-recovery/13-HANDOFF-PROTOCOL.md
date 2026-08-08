@@ -43,13 +43,18 @@ alone (rule #28: approval authorizes work, it does not verify it).
 
 | Load | Do not load |
 |---|---|
-| `10-REALITY-BENCHMARK.md` | any phase document |
-| The task IDs this phase gates on | the audit docs |
-| Telegram access | the repository |
+| `14-EXECUTOR-RULES.md` — **first, every time** | any phase document |
+| `10-REALITY-BENCHMARK.md` | the audit docs |
+| The task IDs this phase gates on | the repository |
+| Telegram access + `ssh founderos-vps` (reads only, for turnIds) | |
 
 **Antigravity must not know how the phase was implemented.** It behaves as the founder: types
 sentences, records what happens. Knowing the implementation is how a validator learns to
 accommodate it.
+
+**And it must not substitute the repository for the product.** The one measured failure of this
+role (Phase 0, 2026-08-08) was a full scorecard derived from source code, with 33 of 34 prompts
+never sent. `14-EXECUTOR-RULES.md` exists because of it and `pnpm verify:benchmark` enforces it.
 
 ---
 
@@ -114,6 +119,8 @@ hours defending a design will not overturn it on new evidence.
 | Fixing unrelated bugs mid-phase | untraceable diffs |
 | Building a second X because the first is hard to find | ContextComposer (F-10) |
 | Declaring done on green tests | F-03, the entire reason for this program |
+| **Validator scores from source code instead of running the product** | **F-23, Phase 0** |
+| **Recopying a prior document's numbers as a fresh measurement** | **F-23, Phase 0** |
 
 ---
 

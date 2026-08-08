@@ -62,10 +62,26 @@ const log = childLogger({ module: "jobhunt:free-ingest" });
  * The overlap it creates is free: a posting seen in an earlier sweep is already
  * in the tracker and is dropped before it costs a body fetch.
  */
-export const FREE_LANE_MAX_AGE_HOURS = 6;
+/**
+ * How far back a posting may have been published and still be a candidate.
+ * Default: 720h (30 days) to drain standing inventory once. Deduplication is
+ * handled by keepUnseen (tracker lookup), while age bounds relevance.
+ */
+export const FREE_LANE_MAX_AGE_HOURS = Number(process.env["FREE_LANE_MAX_AGE_HOURS"] ?? 720);
 
 /** Bound on the tracker lookups. Small queries, but not worth 400 at once. */
 const LOOKUP_CONCURRENCY = 12;
+
+export interface FreeFunnel {
+  readonly seen: number;
+  readonly undated: number;
+  readonly stale: number;
+  readonly offTrack: number;
+  readonly offMarket: number;
+  readonly known: number;
+  readonly bodyless: number;
+  readonly screened: number;
+}
 
 export interface FreeIngestResult {
   /** Postings the boards returned, before any filter. */
@@ -79,6 +95,8 @@ export interface FreeIngestResult {
   readonly notes: readonly string[];
   readonly boardsPolled: number;
   readonly sweepId: string;
+  /** Structured per-stage funnel summary. */
+  readonly funnel: FreeFunnel;
 }
 
 function hoursSince(date: Date, now: Date): number {
@@ -88,6 +106,12 @@ function hoursSince(date: Date, now: Date): number {
 interface FilterOutcome {
   readonly kept: readonly FreeCandidate[];
   readonly notes: readonly string[];
+  readonly counts: {
+    readonly undated: number;
+    readonly stale: number;
+    readonly offTrack: number;
+    readonly offMarket: number;
+  };
 }
 
 /**
@@ -139,7 +163,7 @@ export function filterCandidates(
   if (offMarket > 0) notes.push(`${offMarket} postings were outside the Netherlands and India`);
   if (undated > 0) notes.push(`${undated} postings stated no publication date and were skipped`);
 
-  return { kept, notes };
+  return { kept, notes, counts: { undated, stale, offTrack, offMarket } };
 }
 
 /**
@@ -212,6 +236,17 @@ export async function runFreeIngest(
   if (known > 0) notes.push(`${known} postings were already in the tracker`);
   if (bodyless > 0) notes.push(`${bodyless} postings had no readable description and were skipped`);
 
+  const funnel: FreeFunnel = {
+    seen: sweep.candidates.length,
+    undated: filtered.counts.undated,
+    stale: filtered.counts.stale,
+    offTrack: filtered.counts.offTrack,
+    offMarket: filtered.counts.offMarket,
+    known,
+    bodyless,
+    screened: postings.length,
+  };
+
   // RECORDED EVEN THOUGH IT IS FREE, and recorded as zero rather than omitted. A
   // lane that writes no ledger row is indistinguishable from a lane that did not
   // run, and this one runs unattended forty-eight times a day.
@@ -229,6 +264,7 @@ export async function runFreeIngest(
 
   log.info(
     {
+      funnel,
       boards: boards.length,
       seen: sweep.candidates.length,
       screened: postings.length,
@@ -245,5 +281,6 @@ export async function runFreeIngest(
     notes,
     boardsPolled: sweep.boardsPolled,
     sweepId,
+    funnel,
   };
 }
