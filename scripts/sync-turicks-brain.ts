@@ -170,6 +170,26 @@ function collectDocs(rootDir: string): DocEntry[] {
     }
   }
 
+  // ── Implementation plans + the product-recovery program ─────────────────────
+  // CLAUDE.md tells every agent to query the brain for recent plans before
+  // starting work. Until 2026-08-08 neither directory was on this allowlist, so
+  // `brain:sync` reported "inserted / updated / ✅ complete" while ingesting
+  // ZERO plans — a green mechanism with the outcome missing, which is the same
+  // failure shape the product-recovery audit was opened to fix.
+  for (const dir of ["docs/plans", "docs/product-recovery"]) {
+    const planDir = join(root, dir);
+    if (!existsSync(planDir)) continue;
+    for (const f of readdirSync(planDir).filter((f) => f.endsWith(".md"))) {
+      docs.push({
+        entry_type: "plan",
+        title: titleFromFilename(f),
+        content: readFile(join(planDir, f)),
+        source: `${dir}/${f}`,
+        tags: ["plan", "implementation", dir.replace("docs/", "")],
+      });
+    }
+  }
+
   // ── Study docs (case study, strategy, research) — all .md ────────────────────
   const studyDir = join(root, "docs/study");
   if (existsSync(studyDir)) {
