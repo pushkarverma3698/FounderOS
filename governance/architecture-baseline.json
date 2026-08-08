@@ -4,5 +4,5 @@
   "fail-open-catch": 11,
   "loc-budget": 6,
   "regex-routing": 0,
-  "orphan-subsystem": 3
+  "orphan-subsystem": 0
 }
