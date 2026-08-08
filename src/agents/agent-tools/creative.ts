@@ -113,7 +113,7 @@ export const generateImageTool = tool(
       model: img.model,
       tier: img.tier,
       usd: img.usd,
-      note: "Use get_download_url to share this image. Drafts are internal — publish via comms/marketing (HITL).",
+      note: "The image is stored in S3 under s3_key. Drafts are internal — publish via comms/marketing (HITL).",
     });
   },
   {
