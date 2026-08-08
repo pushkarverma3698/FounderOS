@@ -126,6 +126,21 @@ function collectDocs(rootDir: string): DocEntry[] {
     }
   }
 
+  // ── Market Intelligence ─────────────────────────────────────────────────────
+  const marketIntelDir = join(root, "docs/market-intel");
+  if (existsSync(marketIntelDir)) {
+    for (const file of readdirSync(marketIntelDir).filter((f) => f.endsWith(".md") && f !== "README.md")) {
+      const content = readFile(join(marketIntelDir, file));
+      docs.push({
+        entry_type: "market_intel",
+        title: titleFromFilename(file),
+        content,
+        source: `docs/market-intel/${file}`,
+        tags: ["market", "competitor", "intelligence", "strategy"],
+      });
+    }
+  }
+
   // ── Roadmap (business + FounderOS direction) ─────────────────────────────────
   const roadmapDoc = join(root, "docs/ROADMAP.md");
   if (existsSync(roadmapDoc)) {

@@ -201,11 +201,12 @@ describe("WorkflowAction type", () => {
 
 describe("read_file truncation", () => {
   it("returns full content for files under 6000 chars", async () => {
-    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { mkdtempSync, writeFileSync, mkdirSync } = await import("node:fs");
     const { join } = await import("node:path");
     const { homedir } = await import("node:os");
     const { projectWorkflowTool } = await import("../../../src/tools/project-workflow.js");
 
+    mkdirSync(join(homedir(), "Projects"), { recursive: true });
     const dir = mkdtempSync(join(homedir(), "Projects/founderos-test-"));
     const small = "x".repeat(100);
     writeFileSync(join(dir, "small.ts"), small);
@@ -216,11 +217,12 @@ describe("read_file truncation", () => {
   });
 
   it("truncates files over 6000 chars with a clear notice", async () => {
-    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { mkdtempSync, writeFileSync, mkdirSync } = await import("node:fs");
     const { join } = await import("node:path");
     const { homedir } = await import("node:os");
     const { projectWorkflowTool } = await import("../../../src/tools/project-workflow.js");
 
+    mkdirSync(join(homedir(), "Projects"), { recursive: true });
     const dir = mkdtempSync(join(homedir(), "Projects/founderos-test-"));
     const large = "y".repeat(8_500);
     writeFileSync(join(dir, "large.ts"), large);

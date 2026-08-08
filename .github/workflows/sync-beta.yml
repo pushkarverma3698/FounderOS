@@ -22,7 +22,7 @@ jobs:
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin beta main
+          git fetch origin beta:refs/remotes/origin/beta main:refs/remotes/origin/main
           BETA_SHA="$(git rev-parse origin/beta)"
           MAIN_SHA="$(git rev-parse origin/main)"
           if [ "$BETA_SHA" = "$MAIN_SHA" ]; then
