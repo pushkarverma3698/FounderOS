@@ -1,0 +1,14 @@
+{
+  "first_name": "Pushkar",
+  "last_name": "Verma",
+  "email": "you@example.com",
+  "phone": "+31 6 00000000",
+  "linkedin": "https://www.linkedin.com/in/pushkar",
+  "website": "",
+  "default_resume": "/Users/pushkarverma/Projects/founderos/mac-client/your-cv.pdf",
+  "resumes": {
+    "backend": "/Users/pushkarverma/Projects/founderos/mac-client/cv-backend.pdf",
+    "frontend": "/Users/pushkarverma/Projects/founderos/mac-client/cv-frontend.pdf",
+    "fullstack": "/Users/pushkarverma/Projects/founderos/mac-client/your-cv.pdf"
+  }
+}

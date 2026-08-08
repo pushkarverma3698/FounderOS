@@ -46,7 +46,9 @@ class FieldMap:
     full_name: tuple[str, ...] = ()
     email: tuple[str, ...] = ()
     phone: tuple[str, ...] = ()
-    resume: tuple[str, ...] = ('input[type="file"]',)
+    linkedin: tuple[str, ...] = ()
+    website: tuple[str, ...] = ()
+    resume: tuple[str, ...] = ('#resume', 'input[id="resume"]', 'input[aria-label*="Resume"]', 'input[aria-label*="CV"]', 'input[type="file"]')
 
 
 GREENHOUSE = FieldMap(
@@ -54,6 +56,9 @@ GREENHOUSE = FieldMap(
     last_name=("#last_name", 'input[name="job_application[last_name]"]', 'input[autocomplete="family-name"]'),
     email=("#email", 'input[name="job_application[email]"]', 'input[type="email"]'),
     phone=("#phone", 'input[name="job_application[phone]"]', 'input[type="tel"]'),
+    linkedin=('input[aria-label="LinkedIn Profile"]', 'input[name*="linkedin"]', 'input[id*="linkedin"]'),
+    website=('input[aria-label="Website"]', 'input[name*="website"]', 'input[id*="website"]'),
+    resume=('#resume', 'input[id="resume"]', 'input[type="file"]'),
 )
 
 # Lever asks for ONE name field. Filling first and last separately here would
@@ -62,6 +67,8 @@ LEVER = FieldMap(
     full_name=('input[name="name"]', "#name"),
     email=('input[name="email"]', "#email", 'input[type="email"]'),
     phone=('input[name="phone"]', "#phone", 'input[type="tel"]'),
+    linkedin=('input[name="urls[LinkedIn]"]', 'input[name*="linkedin"]'),
+    website=('input[name="urls[Portfolio]"]', 'input[name="urls[Other]"]'),
     resume=('input[name="resume"]', 'input[type="file"]'),
 )
 
@@ -71,6 +78,9 @@ ASHBY = FieldMap(
     full_name=('input[name="_systemfield_name"]', 'input[aria-label="Name"]'),
     email=('input[name="_systemfield_email"]', 'input[type="email"]'),
     phone=('input[name="_systemfield_phone"]', 'input[type="tel"]'),
+    linkedin=('input[name*="linkedin"]', 'input[aria-label*="LinkedIn"]'),
+    website=('input[name*="website"]', 'input[aria-label*="Website"]'),
+    resume=('input[type="file"]',),
 )
 
 FIELD_MAPS = {"greenhouse": GREENHOUSE, "lever": LEVER, "ashby": ASHBY}
@@ -101,4 +111,8 @@ def planned_fills(field_map: FieldMap, profile) -> list[tuple[str, tuple[str, ..
         plan.append(("email", field_map.email, profile.email))
     if field_map.phone:
         plan.append(("phone", field_map.phone, profile.phone))
+    if field_map.linkedin and getattr(profile, "linkedin", None):
+        plan.append(("linkedin", field_map.linkedin, profile.linkedin))
+    if field_map.website and getattr(profile, "website", None):
+        plan.append(("website", field_map.website, profile.website))
     return plan

@@ -47,6 +47,7 @@ function briefRow(over: Partial<BriefRow> = {}): BriefRow {
     track: "backend",
     verdict: "flag",
     route: "hsm",
+    country: "NL",
     url: null,
     overlap: { matched: [], missing: [], asked: 0, ratio: 0 },
     liveness: "unverifiable",

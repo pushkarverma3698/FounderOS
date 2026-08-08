@@ -165,8 +165,8 @@ describe("formatIngestSummary", () => {
     const out = formatIngestSummary({
       fetched: 2,
       lines: [
-        { company: "Alpha", title: "AI Engineer", outcome: "pass", detail: "clean" },
-        { company: "Beta", title: "AI Engineer", outcome: "reject", detail: "not a sponsor" },
+        { company: "Alpha", title: "AI Engineer", outcome: "pass", detail: "clean", isNew: true },
+        { company: "Beta", title: "AI Engineer", outcome: "reject", detail: "not a sponsor", isNew: true },
       ],
     });
     expect(out).toContain("2 postings screened");
@@ -179,7 +179,7 @@ describe("formatIngestSummary", () => {
   it("omits groups with no members", () => {
     const out = formatIngestSummary({
       fetched: 1,
-      lines: [{ company: "Alpha", title: "AI Engineer", outcome: "pass", detail: "clean" }],
+      lines: [{ company: "Alpha", title: "AI Engineer", outcome: "pass", detail: "clean", isNew: true }],
     });
     expect(out).not.toContain("FAILED TO SCREEN");
   });

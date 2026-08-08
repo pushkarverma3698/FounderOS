@@ -87,7 +87,7 @@ describe("runFreeSweep", () => {
     await runFreeSweep();
 
     expect(mockSendToChat).toHaveBeenCalledOnce();
-    const [text] = mockSendToChat.mock.calls[0]!;
+    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("Aquablu B.V.");
     expect(text).toContain("Embedded Software Engineer");
   });
@@ -121,7 +121,7 @@ describe("runFreeSweep", () => {
     mockRunFreeIngest.mockResolvedValue(result({ lines }));
     await runFreeSweep();
 
-    const [text] = mockSendToChat.mock.calls[0]!;
+    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("8 new role");
     expect(text).toContain("Company 0");
     expect(text).toContain("Company 2");
@@ -136,7 +136,7 @@ describe("runFreeSweep", () => {
     mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
     await runFreeSweep();
 
-    const [text] = mockSendToChat.mock.calls[0]!;
+    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
     expect(text).not.toMatch(/\/draft \d/);
     expect(text).toContain("docs.google.com/spreadsheets");
   });
@@ -168,23 +168,24 @@ describe("runFreeSweep", () => {
     await runFreeSweep();
 
     expect(mockSendToChat).toHaveBeenCalledOnce();
-    expect(mockSendToChat.mock.calls[0]![0]).toContain("Aquablu B.V.");
+    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
+    expect(text).toContain("Aquablu B.V.");
   });
 
   it("folds an export failure into the alert rather than sending a second message", async () => {
     // Two notifications for one event is how a channel becomes noise — and the
     // unconfigured case would otherwise nag twice per sweep until setup.
     mockExportJobSheet.mockResolvedValue({
-      ok: false as const,
-      skipped: true as const,
+      ok: false,
+      skipped: true,
       reason: "JOBHUNT_SHEET_ID is not set",
-    });
+    } as any);
     mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
 
     await runFreeSweep();
 
     expect(mockSendToChat).toHaveBeenCalledOnce();
-    const [text] = mockSendToChat.mock.calls[0]!;
+    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("Aquablu B.V.");
     expect(text).toContain("not set up yet");
   });
@@ -209,7 +210,7 @@ describe("runFreeSweep", () => {
     await runFreeSweep();
 
     expect(mockSendToChat).toHaveBeenCalledOnce();
-    const [text] = mockSendToChat.mock.calls[0]!;
+    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("alive");
     expect(text).toContain("285");
     vi.useRealTimers();
@@ -225,7 +226,7 @@ describe("runFreeSweep", () => {
     await runFreeSweep();
 
     expect(mockSendToChat).toHaveBeenCalledOnce();
-    const [text] = mockSendToChat.mock.calls[0]!;
+    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("greenhouse/a");
     expect(text).toContain("lever/b");
     expect(text).toContain("ashby/c");

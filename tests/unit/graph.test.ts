@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import graph from "../../.claude/graph.json";
+import graph from "../../.claude/graph.json" with { type: "json" };
 
 describe("Knowledge Graph (Graphify)", () => {
   it("should have all 8 departments (admin + 7 operational)", () => {
@@ -87,12 +87,8 @@ describe("Knowledge Graph (Graphify)", () => {
       const fromNode = graph.nodes.find((n) => n.id === edge.from);
       const toNode = graph.nodes.find((n) => n.id === edge.to);
 
-      expect(fromNode).toBeDefined(
-        `Edge from ${edge.from} references undefined node`
-      );
-      expect(toNode).toBeDefined(
-        `Edge to ${edge.to} references undefined node`
-      );
+      expect(fromNode, `Edge from ${edge.from} references undefined node`).toBeDefined();
+      expect(toNode, `Edge to ${edge.to} references undefined node`).toBeDefined();
     });
   });
 
@@ -106,7 +102,7 @@ describe("Knowledge Graph (Graphify)", () => {
 
     depts.forEach((dept) => {
       const edge = graph.edges.find((e) => e.from === dept.id && e.to === supervisor?.id);
-      expect(edge).toBeDefined(`Department ${dept.name} not connected to Supervisor`);
+      expect(edge, `Department ${dept.name} not connected to Supervisor`).toBeDefined();
     });
   });
 
@@ -118,10 +114,7 @@ describe("Knowledge Graph (Graphify)", () => {
       const assignedToDept = graph.edges.some(
         (e) => e.from === tool.id && e.type === "belongs_to"
       );
-      expect(assignedToDept).toBe(
-        true,
-        `Tool ${tool.name} not assigned to any department`
-      );
+      expect(assignedToDept, `Tool ${tool.name} not assigned to any department`).toBe(true);
     });
   });
 
@@ -138,7 +131,7 @@ describe("Knowledge Graph (Graphify)", () => {
 
     sensitiveTools.forEach((toolName) => {
       const tool = graph.nodes.find((n) => n.type === "tool" && n.name === toolName);
-      expect(tool).toBeDefined(`Sensitive tool ${toolName} missing from graph`);
+      expect(tool, `Sensitive tool ${toolName} missing from graph`).toBeDefined();
       expect(tool?.description).toMatch(/HITL|gated|approval/i);
     });
   });

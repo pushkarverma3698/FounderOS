@@ -14,33 +14,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gate:
-    name: gate
+  quality:
+    name: Type check + lint + wiring
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm gate
-      - run: pnpm test:smoke
-
-  # --- Legacy names for branch protection (no second install) ---
-  quality:
-    name: Type check + lint + wiring
-    needs: gate
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "Covered by gate job"
+      - run: pnpm lint
+      - run: pnpm verify:arch
+      - run: pnpm verify:wiring
+      - run: pnpm verify:runtime-assets
+      - run: pnpm build:all
 
   unit-tests:
     name: Unit + regression tests
-    needs: gate
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Covered by gate job"
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+
+  gate:
+    name: gate
+    needs: [quality, unit-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:smoke

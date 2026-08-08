@@ -9,8 +9,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── DB query mocks ────────────────────────────────────────────────────────────
 
-const mockSearchEpisodicMemory = vi.fn(async () => []);
-const mockSearchKnowledgeEntries = vi.fn(async () => []);
+const mockSearchEpisodicMemory = vi.fn(async (): Promise<any[]> => []);
+const mockSearchKnowledgeEntries = vi.fn(async (): Promise<any[]> => []);
 const mockGetFounderContext = vi.fn(async () => ({}));
 const mockInsertEpisodicEvent = vi.fn(async () => "test-id-1");
 
@@ -179,13 +179,13 @@ describe("recordEventTool", () => {
       event_type: "decision",
       occurred_at: "2026-06-04T09:00:00Z",
     });
-    const call = mockInsertEpisodicEvent.mock.calls[0]?.[0] as Record<string, unknown>;
+    const [call] = (mockInsertEpisodicEvent.mock.calls[0] ?? []) as [Record<string, unknown>?];
     expect(call).toMatchObject({
       title: "Sprint planning done",
       event_type: "decision",
       tenant_id: expect.any(String),
     });
-    expect(Array.isArray(call["tags"])).toBe(true);
+    expect(Array.isArray(call?.["tags"])).toBe(true);
   });
 
   it("uses current timestamp when occurred_at is omitted", async () => {
@@ -197,8 +197,8 @@ describe("recordEventTool", () => {
       event_type: "conversation",
     });
     const after = new Date();
-    const call = mockInsertEpisodicEvent.mock.calls[0]?.[0] as Record<string, unknown>;
-    const occurred = call["occurred_at"] as Date;
+    const [call] = (mockInsertEpisodicEvent.mock.calls[0] ?? []) as [Record<string, unknown>?];
+    const occurred = call?.["occurred_at"] as Date;
     expect(occurred.getTime()).toBeGreaterThanOrEqual(before.getTime());
     expect(occurred.getTime()).toBeLessThanOrEqual(after.getTime());
   });

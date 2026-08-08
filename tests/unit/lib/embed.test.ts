@@ -11,8 +11,8 @@ describe("embedText", () => {
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ embedding: [0.1, 0.2, 0.3] }) });
     const v = await embedText("hello");
     expect(v).toEqual([0.1, 0.2, 0.3]);
-    const [, init] = mockFetch.mock.calls[0];
-    expect(JSON.parse(init.body)).toMatchObject({ model: "nomic-embed-text", prompt: "hello" });
+    const [url, init] = mockFetch.mock.calls[0] ?? [];
+    expect(JSON.parse(init?.body as string)).toMatchObject({ model: "nomic-embed-text", prompt: "hello" });
   });
 
   it("throws a clear error when Ollama is unreachable", async () => {

@@ -1,5 +1,27 @@
 # AGENTS.md
 
+> **Writing code in this repo?** `docs/antigravity/STANDARDS.md` is binding: purity and I/O
+> placement, resolved-specifier reachability, named constants, loud-over-silent failure handling,
+> test discipline, and the CI hard gates. This file covers git policy and environment; that one
+> covers how the code is written. Read it before the first edit, not after a review.
+
+## Precedence
+
+```text
+1. Founder instruction in chat                  ← always wins
+2. CI fitness rules (verify-architecture.ts)    ← the only BINDING layer
+3. docs/antigravity/STANDARDS.md                ← how code is written
+4. CLAUDE.md / AGENTS.md / GEMINI.md            ← role-specific operating instructions
+5. Everything else                              ← reference
+```
+
+A rule which is not enforced by layer 2 is a convention, and a rule that is enforced cannot be satisfied by argument.
+
+Layer 5 reference material lives in [`docs/rules/`](docs/rules/) — notably the 8-point new-tool
+checklist in `TOOL-STANDARDS.md`, plus `PROGRAMMING-RULES.md`, `TESTING-RULES.md` and
+`TEST-PYRAMID.md`. `.cursorrules` used to be the only pointer to them; it is now a pointer file,
+so this is.
+
 ## Engineering principle — reason before code
 
 Every change must answer **why** before **what**:
@@ -7,7 +29,13 @@ Every change must answer **why** before **what**:
 1. **Name the problem** — What fails today? What breaks if we don't act?
 2. **Name the stable boundary** — What should NOT change when a vendor/SDK drifts? (Usually: tool names, HITL gates, idempotency, department wiring.)
 3. **Minimize blast radius** — Prefer an adapter/env flag over rewriting tools, prompts, or graph structure.
-4. **Prove the real path** — Unit tests mock the provider dispatch layer; prod claims need boot probes or live evidence.
+4. **Grounding & Memory-First Reasoning** — Reason strictly over repo data, DB memory (`founder_context`, `turicks-brain`, `failure_lessons`), and live code. Never use ungrounded world assumptions to overcomplicate tasks.
+
+## Experience & Outcome Over Code Purity (⚠️ NON-NEGOTIABLE)
+- The primary metric for FounderOS is **Founder Friction Saved & Real-World Outcome Quality**—not abstract code aesthetics or theoretical refactoring.
+- Every self-improvement cron and audit must analyze 3 days of real turn transcripts, user feedback, hallucination signatures, and execution friction, storing findings into `failure_lessons` and `turicks-brain`.
+
+5. **Prove the real path** — Unit tests mock the provider dispatch layer; prod claims need boot probes or live evidence.
 
 **Integration rule (ADR-029):** Tools call `src/infra/providers/` — never Composio, gws, or platform REST directly. Swap `GMAIL_BACKEND`, `LINKEDIN_BACKEND` via env; departments unchanged.
 
@@ -115,7 +143,7 @@ this only records the gotchas.
 - Needs Postgres + `GOOGLE_GENERATIVE_AI_API_KEY` in `.env`. Skips Telegram (no 409 with prod bot).
 
 ### Running / testing
-- Tests are keyless: `pnpm test` (vitest, ~1100 tests). Lint: `pnpm lint` (tsc --noEmit).
+- Tests are keyless: `pnpm test` (vitest, ~2540 tests). Lint: `pnpm lint` (tsc --noEmit).
   Build: `pnpm build:all` (backend `tsc` + `apps/jarvis` Vite). Dev run: `pnpm dev`.
   Health: `curl localhost:3001/health`.
 - `pnpm eval` / `pnpm test:integration` need a **real** Gemini key + live Postgres.
@@ -140,3 +168,28 @@ pnpm predeploy   # = lint + build:all + verify:wiring + test
 **Agent rule:** Never say "deployed" or "ready for prod" until `pnpm predeploy` is
 green on the branch you are merging. CI and the deploy workflow both run `build:all`.
 If you did not run it, label the claim **NOT VERIFIED**.
+
+## End-of-session handoff (ALWAYS)
+
+**Automated Brain Sync:** If you created, modified, or deleted any file in the `docs/` directory during your session (including plans, architecture, or rules), you MUST autonomously run `pnpm brain:sync` in the terminal before concluding your task. Do not wait for the founder to do this.
+
+## Strategic Mandate (Maximum Output)
+
+We are building a system designed to decisively outcompete the market. You must ruthlessly prioritize execution speed, shipping revenue-generating features, and leveraging competitor intelligence over endless internal theoretical refactoring. If a task does not tangibly move the needle or provide a market advantage, flag it immediately and pivot to building.
+
+## Content Generation (No AI Slop)
+
+**Mandatory Skill Usage:** Whenever you are generating, preparing, or drafting any content intended for public platforms (e.g., comments, posts, articles, social media, emails), you MUST use and strictly follow the `no-ai-slop` skill located at `/Users/pushkarverma/Projects/githubtools/no-ai-slop/SKILL.md`. 
+**Why:** Nothing we publish on our platforms should look like AI-generated content. You must ensure all outputs are highly authentic, human-like, and completely free of typical AI "slop" (e.g., overly formal tone, unnecessary emojis, generic corporate speak, predictable structures).
+
+## Implementation Plans & Memory
+
+All implementation plans generated by Claude Code, Antigravity, or any agent MUST be saved with organized, descriptive filenames in the `docs/plans/` directory (e.g., `docs/plans/YYYY-MM-DD-feature-name.md`).
+**Why:** Storing all plans centrally with semantic names drastically improves RAG retrieval, allowing future agents to intelligently learn from past architectural decisions and execution contexts. Do not store plans in scattered scratch directories or with generic names like `plan.md`.
+
+## Cross-Agent Awareness (The "What is everyone doing?" rule)
+
+Before starting any complex task, you MUST research what other agents have recently worked on or are currently working on. You do this by:
+1. Querying `turicks-brain` for recent session summaries.
+2. Listing and reading the most recent implementation plans in `docs/plans/`.
+**Why:** You are part of a swarm. Knowing the recent architectural changes and in-flight plans of your peer agents prevents you from duplicating work, reverting deliberate changes, or breaking dependent systems.

@@ -129,18 +129,18 @@ describe("routesToScreen", () => {
 describe("bestOutcome", () => {
   it("prefers a pass on any route over a reject on another", () => {
     const chosen = bestOutcome([
-      { route: "hsm", verdict: { status: "reject" as const, reasons: [] } },
-      { route: "remote-contract", verdict: { status: "pass" as const, reasons: [] } },
+      { route: "hsm", verdict: { status: "reject" as const, reasons: [], gates: [] } },
+      { route: "remote-contract", verdict: { status: "pass" as const, reasons: [], gates: [] } },
     ]);
-    expect(chosen.route).toBe("remote-contract");
+    expect(chosen?.route).toBe("remote-contract");
   });
 
   it("prefers a flag over a reject", () => {
     const chosen = bestOutcome([
-      { route: "hsm", verdict: { status: "reject" as const, reasons: [] } },
-      { route: "remote-contract", verdict: { status: "flag" as const, reasons: [] } },
+      { route: "hsm", verdict: { status: "reject" as const, reasons: [], gates: [] } },
+      { route: "remote-contract", verdict: { status: "flag" as const, reasons: [], gates: [] } },
     ]);
-    expect(chosen.verdict.status).toBe("flag");
+    expect(chosen?.verdict.status).toBe("flag");
   });
 });
 
