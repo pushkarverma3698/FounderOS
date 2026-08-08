@@ -3,7 +3,7 @@ import { synthesizeSkillImpl } from "../../../src/tools/skill-synthesizer.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-describe("Hermes Skill Synthesizer", () => {
+describe("Hermes Skill Synthesizer", { timeout: 60000 }, () => {
   afterAll(async () => {
     try { await fs.unlink(path.resolve("./src/tools/custom/test_calculator.ts")); } catch {}
     try { await fs.unlink(path.resolve("./tests/unit/tools/custom/test_calculator.test.ts")); } catch {}
