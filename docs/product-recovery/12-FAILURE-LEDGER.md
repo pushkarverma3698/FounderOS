@@ -18,8 +18,15 @@ Corroboration: `job_applications` 39 rows in 8 days; `free-ats-ingest` 5 rows; `
 null` = **2** lifetime; prod trace 05:31:57Z `cv_gaps` → *"built from 1 passing posting(s)"*.
 
 **Impact** — the flagship autonomous capability produces nothing while reporting continuous work.
-**Not yet root-caused.** Drop occurs in `filterCandidates` (age/track/country), `keepUnseen`, or
-`hydrateDescriptions` — `src/tools/jobhunt/free-ingest.ts:194-207`.
+
+**ROOT-CAUSED 2026-08-08** via `scripts/diagnose-free-funnel.ts` (read-only, all 285 live boards):
+the `FREE_LANE_MAX_AGE_HOURS = 6` gate drops **18,865 of 18,888 (99.9%)**; the 5 survivors then
+fail the track classifier, leaving 0. The gate's premise — *"older than 6h ⇒ seen in an earlier
+sweep"* — was never true, because the gate itself rejected the back catalogue before `keepUnseen`
+could record it. **A bootstrap deadlock.** Measured supply: 7d → 34, 30d → 132.
+
+The deeper defect is that an **age gate is being used as a dedup mechanism**. Widening the window
+alone reproduces the same bug at a larger number.
 
 **Owner:** Phase 1.
 

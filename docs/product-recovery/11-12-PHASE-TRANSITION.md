@@ -103,6 +103,31 @@ Aug 08 09:30:19  jobhunt:free-ingest  boards=285  seen=20554  screened=0  failed
 - `applied_at is not null`: **2**
 - prod trace 05:31:57Z — `cv_gaps`: *"built from 1 passing posting(s) — TOO SMALL TO ACT ON"*
 
+**ROOT CAUSE — measured 2026-08-08, `scripts/diagnose-free-funnel.ts` against all 285 live boards:**
+
+```
+18,888 fetched
+  ├─ undated          18   0.1%
+  ├─ stale >6h    18,865  99.9%   ← the gate
+  ├─ off-track         5   0.0%   (all five 0-6h survivors died here)
+  ├─ off-market        0   0.0%
+  └─ KEPT              0   0.0%
+```
+
+Age distribution of the boards' own inventory: `0-6h: 5` · `6-24h: 272` · `1-3d: 641` ·
+`3-7d: 796` · `7-30d: 4,277` · `>30d: 12,879`.
+
+`FREE_LANE_MAX_AGE_HOURS = 6`. Its stated premise is *"older than 6h ⇒ seen in an earlier
+sweep"* — and that premise was **never true**. The gate rejected the back catalogue before
+`keepUnseen` could record it, so nothing older than 6h ever became "seen". **A bootstrap
+deadlock, not a threshold that is merely tight.** The lane can only ever catch a posting
+published inside a 6-hour window, and the boards surface 5 such postings out of 18,888.
+
+Measured supply at wider windows (same script, `--age`): **7d → 34** · **30d → 132**.
+
+> The instrumentation work below is still required — it is what stops this recurring and what
+> proves the fix on the metered lane too. But **do not re-derive the root cause; it is above.**
+
 **4. Current state.** `runFreeIngest` (`src/tools/jobhunt/free-ingest.ts:194`):
 `sweepBoards` → `filterCandidates` → `keepUnseen` → `hydrateDescriptions` → `screenBatch`.
 `filterCandidates` returns per-reason drop counts in `notes[]`. On a quiet sweep those notes are
@@ -129,8 +154,17 @@ is fixed and new rows appear.
 - `sweep-heartbeat.ts` `formatAlivePing`: include the top drop reason and its count.
 - Add a `ZERO_PASS_STREAK` threshold (suggest 6 sweeps = 3h): emit a distinct
   *"the funnel is closed at stage X"* alert. **Not** a generic warning.
-- **Then, driven by the numbers**, fix the dominant stage. Do not guess in advance.
+- **Fix the freshness gate.** Its premise is false (see Evidence). Two parts, and the second is
+  the one that actually matters:
+  - Replace the 6h cutoff with a window wide enough to admit the standing inventory once
+    (30d → 132 candidates; 7d → 34). **Founder decides the number** — it is a
+    quality-vs-volume call, not an engineering one.
+  - **Make `keepUnseen` the dedup mechanism, not the age gate.** Age should bound *relevance*,
+    never stand in for *"have I seen this"*. Conflating the two is what created the deadlock, and
+    a wider window alone leaves the same bug one number further out.
 - Re-run the metered sweep manually once to confirm the fix on the paid lane too.
+- Watch the first sweep after the change: ~132 rows will hit screening at once. That is the
+  back catalogue draining, and it happens exactly once.
 
 **9. Preserve.** The `isNew` dedup logic, the heartbeat interval design, the zero-LLM property,
 the "a total failure still sends" guarantee. All correct.
