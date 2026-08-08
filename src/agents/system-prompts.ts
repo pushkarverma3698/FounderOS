@@ -4,7 +4,7 @@
  * One tight prompt per role, each in its own file under ./prompts/ so a
  * developer can open exactly the prompt they need:
  *
- *   prompts/supervisor.ts   — the router (SUPERVISOR_PROMPT, buildSupervisorPrompt)
+ *
  *   prompts/research.ts      — RESEARCH_PROMPT
  *   prompts/comms.ts         — buildCommsPrompt (date-injected)
  *   prompts/engineering.ts   — ENGINEERING_PROMPT

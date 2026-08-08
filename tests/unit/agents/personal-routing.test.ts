@@ -5,7 +5,7 @@
  *   "Send the text.txt file on my desktop" → supervisor responded "Okay"
  *   without routing to personal or calling any tool (toolErrors: 0).
  *
- * These tests verify the SUPERVISOR_PROMPT routing rules deterministically
+ * These tests verify the PERSONAL_PROMPT and MARKETING_PROMPT routing rules deterministically
  * classify personal-routing triggers. They are pure string/routing tests —
  * no LLM calls (the routing logic is in the prompt, but we test the routing
  * scorer logic + prompt routing strings from routeFromMessages).
