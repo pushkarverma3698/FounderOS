@@ -32,6 +32,7 @@
  * so the first run behaves exactly like every later one.
  */
 
+import { randomUUID } from "node:crypto";
 import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import { findApplicationByDedupeKey } from "../../db/job-queries.js";
@@ -185,7 +186,7 @@ export async function runFreeIngest(
   } = {},
 ): Promise<FreeIngestResult> {
   const now = opts.now ?? new Date();
-  const sweepId = `free-${now.toISOString()}`;
+  const sweepId = randomUUID();
   const boards = opts.boards ?? getFreeBoards();
 
   const sweep = await sweepBoards(boards);
