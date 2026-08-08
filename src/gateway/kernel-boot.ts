@@ -85,6 +85,13 @@ const PROMPTS: Record<(typeof WORKERS)[number], string | (() => string)> = {
  */
 function isUnconfiguredTool(toolName: string): boolean {
   if (toolName === "vps_run") return resolveVpsRunConfig() === null;
+  // synthesize_skill writes + compiles TypeScript into the running app's source
+  // tree. Withheld unless explicitly enabled (2026-08-08 audit, F-07) — the same
+  // "don't offer what can't safely run" reasoning as vps_run above.
+  // Read from process.env at CALL time, not from the frozen `env` object: the
+  // flag has to be flippable inside a test, and a security gate nobody can test
+  // both ways is a gate nobody can prove is closed.
+  if (toolName === "synthesize_skill") return process.env["SKILL_SYNTHESIS_ENABLED"] !== "true";
   return false;
 }
 

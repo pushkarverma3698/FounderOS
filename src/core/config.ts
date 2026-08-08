@@ -113,6 +113,14 @@ export const envSchema = z.object({
   /** Path to the bridge manifest (servers + per-server write allowlist). */
   MCP_BRIDGE_MANIFEST: z.string().default("mcp-bridge.json"),
 
+  // ── Autonomous skill synthesis (2026-08-08 audit, F-07) ─────────────────────
+  /** Allow `synthesize_skill` to write and compile TypeScript into the running
+   *  application's source tree. Default OFF: on prod that tool turned an LLM's
+   *  output into a live executable capability with no approval gate and no
+   *  sandbox. Off means the tool is never even offered to a worker, so the model
+   *  cannot pick it and burn a turn discovering it is disabled. */
+  SKILL_SYNTHESIS_ENABLED: z.enum(["true", "false"]).default("false"),
+
   // Global halt (kill switch) — optional flag-file path override.
   // Default: $HOME/.founderos/HALT (resolved in src/infra/halt.ts).
   HALT_FLAG_PATH: z.string().transform(v => v || undefined).optional(),
@@ -282,6 +290,13 @@ export const MCP_BRIDGE_ENABLED = env.MCP_BRIDGE_ENABLED === "true";
 
 /** Filesystem path to the external MCP bridge manifest. */
 export const MCP_BRIDGE_MANIFEST = env.MCP_BRIDGE_MANIFEST;
+
+/**
+ * Whether `synthesize_skill` may author executable code into `src/tools/custom`.
+ * OFF by default. Even when ON the tool is HITL-gated, so enabling the flag
+ * grants the capability, never an unattended write.
+ */
+export const SKILL_SYNTHESIS_ENABLED = env.SKILL_SYNTHESIS_ENABLED === "true";
 
 /**
  * Local rerank stage after hybrid RAG fusion (spec §1.1 F5). Default OFF — it

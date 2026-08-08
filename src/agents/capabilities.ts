@@ -147,6 +147,10 @@ export const HITL_GATED_TOOLS = new Set([
   "project_workflow",
   "create_calendar_event",
   "record_event",
+  // Authors + compiles TypeScript into the running app's source tree. Gated OFF
+  // entirely by SKILL_SYNTHESIS_ENABLED (kernel-boot); this entry is the second
+  // lock, so enabling the flag still never means an unattended code write.
+  "synthesize_skill",
 ]);
 
 /**
