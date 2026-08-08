@@ -37,6 +37,7 @@
     "setup": "node --env-file=.env --import tsx/esm scripts/setup-db.ts",
     "brain:sync": "node --env-file=.env --import tsx/esm scripts/sync-turicks-brain.ts",
     "ingest:chats": "node --env-file=.env --import tsx/esm scripts/ingest-external-chats.ts",
+    "ingest:claude": "node --env-file=.env --import tsx/esm scripts/ingest-claude-sessions.ts",
     "personal:sync": "node --env-file=.env --import tsx/esm scripts/sync-personal-rag.ts",
     "graph:gen": "node --env-file=.env --import tsx/esm scripts/generate-knowledge-graph.ts",
     "proof:scoreboard": "node --import tsx/esm scripts/proof-scoreboard.ts",
