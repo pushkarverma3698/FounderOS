@@ -27,7 +27,6 @@
  * This file is a barrel: importers keep using `./system-prompts.js` unchanged.
  */
 
-export { SUPERVISOR_PROMPT, buildSupervisorPrompt } from "./prompts/supervisor.js";
 export { ADMIN_PROMPT } from "./prompts/admin.js";
 export { RESEARCH_PROMPT } from "./prompts/research.js";
 export { buildCommsPrompt } from "./prompts/comms.js";

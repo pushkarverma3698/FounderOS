@@ -104,14 +104,6 @@ describe("buildCapabilityManifest", () => {
   });
 });
 
-describe("SUPERVISOR_PROMPT embeds the generated manifest", () => {
-  it("contains the auto-generated capability header", async () => {
-    const { SUPERVISOR_PROMPT } = await import("../../../src/agents/system-prompts.js");
-    expect(SUPERVISOR_PROMPT).toContain("CAPABILITIES (auto-generated from the live tool registry");
-    expect(SUPERVISOR_PROMPT).toContain("claude_code*");
-  });
-});
-
 describe("stripBridgedTools — idempotent live reload (Tier 3)", () => {
   const nativeA = { name: "send_email" };
   const nativeB = { name: "search_web" };

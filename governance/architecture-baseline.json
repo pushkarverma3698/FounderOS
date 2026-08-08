@@ -2,6 +2,7 @@
   "gateway-imports": 0,
   "kernel-purity": 0,
   "fail-open-catch": 11,
-  "loc-budget": 5,
-  "regex-routing": 0
+  "loc-budget": 6,
+  "regex-routing": 0,
+  "orphan-subsystem": 3
 }

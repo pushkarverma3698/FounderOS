@@ -44,6 +44,12 @@ export const TOMBSTONES: string[] = [
   "src/agents/creative-department.ts",
   // Typed-object-smuggled-through-prose handoff:
   "src/agents/handoff-engineering.ts",
+  // Phase 6 Dead code removal (2026-08-08):
+  "src/outreach",
+  "src/workflows",
+  "src/bench",
+  "src/kernel/context-composer.ts",
+  "src/agents/prompts/supervisor.ts",
 ];
 
 /** Frozen trees (founder decision 2026-07-07): excluded from every rule. */
@@ -214,6 +220,38 @@ export function checkRatchet(results: RuleResult[], baseline: Baseline): { ok: b
   return { ok, report };
 }
 
+export function ruleOrphanSubsystem(files: Array<{ rel: string; text: string }>): RuleResult {
+  const violations: Violation[] = [];
+  const srcDirs = readdirSync(join(ROOT, "src")).filter((f) => {
+    const st = statSync(join(ROOT, "src", f));
+    return st.isDirectory() && !f.startsWith(".");
+  });
+
+  for (const dir of srcDirs) {
+    const prefix = `src/${dir}/`;
+    let isImported = false;
+    for (const { rel, text } of files) {
+      if (rel.startsWith(prefix)) continue; // ignore internal references
+      for (const spec of importsOf(text)) {
+        const resolved = resolveImport(rel, spec);
+        if (resolved?.startsWith(prefix) || resolved === `src/${dir}`) {
+          isImported = true;
+          break;
+        }
+      }
+      if (isImported) break;
+    }
+    if (!isImported) {
+      violations.push({
+        rule: "orphan-subsystem",
+        file: prefix,
+        detail: `directory has zero external importers in src/`,
+      });
+    }
+  }
+  return { rule: "orphan-subsystem", violations };
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export function runAllRules(): RuleResult[] {
@@ -224,6 +262,7 @@ export function runAllRules(): RuleResult[] {
     ruleFailOpenCatch(files),
     ruleLocBudget(files),
     ruleRegexRouting(files),
+    ruleOrphanSubsystem(files),
   ];
 }
 
