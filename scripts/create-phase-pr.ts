@@ -14,12 +14,16 @@
  *   pnpm tsx scripts/create-phase-pr.ts --phase 1 --title "fix(jobhunt): repair free lane age deadlock"
  */
 
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
+const cleanEnv = { ...process.env };
+delete cleanEnv.GH_TOKEN;
+delete cleanEnv.GITHUB_TOKEN;
+
 function run(cmd: string): string {
-  return execSync(cmd, { encoding: "utf8", stdio: ["pipe", "pipe", "inherit"] }).trim();
+  return execSync(cmd, { encoding: "utf8", env: cleanEnv, stdio: ["pipe", "pipe", "inherit"] }).trim();
 }
 
 function arg(flag: string): string | undefined {
@@ -46,7 +50,7 @@ async function main(): Promise<void> {
 
   if (!skipGate) {
     console.log("🔍 Running pnpm gate validation...");
-    execSync("pnpm gate", { stdio: "inherit" });
+    execSync("pnpm gate", { stdio: "inherit", env: cleanEnv });
   }
 
   console.log("🔄 Fetching and merging latest origin/beta...");
@@ -73,9 +77,9 @@ async function main(): Promise<void> {
 - Verification script executed & green.
 
 ### Reviewer Instructions (Claude Code)
-1. Run \`gh pr checkout <PR_NUMBER>\` or inspect diff \`gh pr diff <PR_NUMBER>\`
+1. Run \`gh pr checkout PR_NUMBER\` or inspect diff \`gh pr diff PR_NUMBER\`
 2. Perform adversarial review: look for race conditions, false successes, unhandled side-effects.
-3. If approved, run \`gh pr review <PR_NUMBER> --approve -b "Phase ${phase} adversarial review passed."\`
+3. If approved, run \`gh pr review PR_NUMBER --approve -b "Phase ${phase} adversarial review passed."\`
 4. If fixes needed, push commits directly to \`${branch}\` or comment.
 `;
 
@@ -84,9 +88,11 @@ async function main(): Promise<void> {
     : `fix(phase-${phase}): ${rawTitle}`;
 
   console.log("📝 Creating GitHub Draft PR to beta...");
-  const prUrl = run(
-    `gh pr create --base beta --head ${branch} --draft --title ${JSON.stringify(prTitle)} --body ${JSON.stringify(body)}`
-  );
+  const prUrl = execFileSync(
+    "gh",
+    ["pr", "create", "--base", "beta", "--head", branch, "--draft", "--title", prTitle, "--body", body],
+    { encoding: "utf8", env: cleanEnv }
+  ).trim();
 
   console.log("\n================================================================================");
   console.log(`✅ Draft PR Created Successfully!`);
