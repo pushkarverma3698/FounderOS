@@ -14,7 +14,7 @@
  */
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { getModel } from "../src/agents/model.js";
-import { buildCoreAgentPrompt } from "../src/agents/system-prompts.js";
+import { JOBHUNT_PROMPT } from "../src/agents/system-prompts.js";
 import { buildCapabilityManifest } from "../src/agents/capabilities.js";
 
 function usageOf(res: unknown): Record<string, unknown> {
@@ -32,9 +32,9 @@ async function main() {
   console.log("Probing Gemini 2.5 Flash Implicit Caching...");
   console.log("--------------------------------------------");
 
-  const model = getModel("flash");
+  const model = getModel();
   const manifest = buildCapabilityManifest();
-  const sys = new SystemMessage(buildCoreAgentPrompt(manifest));
+  const sys = new SystemMessage(`${JOBHUNT_PROMPT}\n\n${manifest}`);
   const prefix = sys.content as string;
   console.log(`[probe] stable prefix chars=${prefix.length} (~${Math.ceil(prefix.length / 4)} tok)\n`);
 
