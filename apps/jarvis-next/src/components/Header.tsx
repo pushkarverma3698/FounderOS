@@ -1,187 +1,178 @@
-import React, { useState, useEffect } from 'react';
-import { Volume2, VolumeX, Mic, MicOff, RefreshCw, Cpu, Database, Activity } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Volume2, VolumeX, Mic, MicOff, Radio } from 'lucide-react';
 import { soundEngine } from '../audio/soundEngine';
-import { voiceEngine } from '../audio/voiceEngine';
+import { voiceEngine, type VoicePersona } from '../audio/voiceEngine';
 
 interface HeaderProps {
   mode: 'LIVE' | 'REPLAY';
   onToggleMode: () => void;
   systemStatus: 'ok' | 'degraded' | 'syncing';
-  spendToday: number;
   dbStatus: string;
+  /** Whether the kernel gateway is answering at all. */
+  gateway: 'connecting' | 'online' | 'offline';
   onVoiceInput?: (text: string) => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({
+const PERSONAS: { id: VoicePersona; label: string }[] = [
+  { id: 'JARVIS', label: 'JARVIS · BRITISH EXEC' },
+  { id: 'CYBERPUNK', label: 'CYBERPUNK · HIGH ENERGY' },
+  { id: 'SARKY_CTO', label: 'SARKY CTO · SARCASTIC' },
+];
+
+export function Header({
   mode,
   onToggleMode,
   systemStatus,
-  spendToday,
   dbStatus,
+  gateway,
   onVoiceInput,
-}) => {
-  const [timeStr, setTimeStr] = useState('');
+}: HeaderProps) {
+  const [clock, setClock] = useState('');
   const [soundMuted, setSoundMuted] = useState(soundEngine.isMuted());
   const [voiceMuted, setVoiceMuted] = useState(voiceEngine.isMuted());
-  const [isListening, setIsListening] = useState(false);
+  const [listening, setListening] = useState(false);
 
   useEffect(() => {
-    const timer = setInterval(() => {
+    const tick = () => {
       const d = new Date();
-      setTimeStr(
-        d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
-        ' IST (' + d.toISOString().slice(0, 10) + ')'
-      );
-    }, 1000);
+      setClock(d.toLocaleTimeString('en-GB', { hour12: false }));
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    const unsubscribe = voiceEngine.subscribe((state) => {
-      setIsListening(state.isListening);
-    });
-    return unsubscribe;
-  }, []);
+  useEffect(() => voiceEngine.subscribe((s) => setListening(s.isListening)), []);
 
-  const toggleSound = () => {
-    const next = !soundMuted;
-    setSoundMuted(next);
-    soundEngine.setMuted(next);
-    if (!next) soundEngine.click();
-  };
+  const offline = gateway === 'offline';
+  const connecting = gateway === 'connecting';
+  const degraded = systemStatus !== 'ok';
 
-  const toggleVoice = () => {
-    const next = !voiceMuted;
-    setVoiceMuted(next);
-    voiceEngine.setMuted(next);
-    if (!next) voiceEngine.speak('Voice telemetry enabled.');
-  };
-
-  const handleStartListening = () => {
-    soundEngine.click();
-    voiceEngine.speak('Listening for voice command...');
-    voiceEngine.listen((transcript) => {
-      if (onVoiceInput) {
-        onVoiceInput(transcript);
-      }
-    });
-  };
+  // "Cannot reach the kernel" outranks any cached health reading.
+  const statusLabel = offline
+    ? 'UNREACHABLE'
+    : connecting
+    ? 'CONNECTING'
+    : degraded
+    ? 'DEGRADED'
+    : 'NOMINAL';
+  const statusTone = offline || degraded ? 'text-signal' : connecting ? 'text-chrome/50' : 'text-accent';
 
   return (
-    <header className="h-[60px] bg-[#03060c]/90 border-b border-[#5eead4]/30 backdrop-blur-md px-4 flex items-center justify-between z-30 sticky top-0">
-      {/* Brand & System Identifier */}
-      <div className="flex items-center space-x-3">
-        <div className="relative flex items-center justify-center w-8 h-8 rounded border border-[#5eead4]/40 bg-[#0b1624] shadow-[0_0_15px_rgba(94,234,212,0.4)]">
-          <Cpu className="w-5 h-5 text-[#5eead4] animate-pulse" />
-        </div>
-        <div>
-          <div className="flex items-center space-x-2">
-            <span className="font-display font-bold text-base tracking-widest text-[#dbeaf0]">FOUNDEROS</span>
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#5eead4]/10 text-[#5eead4] border border-[#5eead4]/30 uppercase">
-              JARVIS v2035
-            </span>
-          </div>
-          <p className="text-[10px] font-mono text-slate-400 tracking-wider">EXECUTIVE INTELLIGENCE COMMAND KERNEL</p>
-        </div>
+    <header className="h-14 shrink-0 border-b border-accent/12 bg-void/80 backdrop-blur-xl px-4 flex items-center justify-between z-50 relative">
+      {/* Identity */}
+      <div className="flex items-center gap-3">
+        <span className="grid place-items-center w-8 h-8 border border-accent/40 bg-accent/8">
+          <span className="w-2 h-2 bg-accent animate-breathe" style={{ boxShadow: '0 0 12px var(--accent)' }} />
+        </span>
+        <span className="flex flex-col leading-none">
+          <span className="value-heavy text-[15px] tracking-[0.26em] text-chrome">FOUNDEROS</span>
+          <span className="label-micro mt-1">headless kernel · 1 supervisor · 7 react depts</span>
+        </span>
       </div>
 
-      {/* Center Metrics & Telemetry */}
-      <div className="hidden md:flex items-center space-x-6 font-mono text-xs">
-        <div className="flex items-center space-x-2 px-3 py-1 rounded bg-[#0b1624]/60 border border-slate-700/60">
-          <Activity className="w-3.5 h-3.5 text-[#5eead4]" />
-          <span className="text-slate-400">STATUS:</span>
-          <span className={`font-bold ${systemStatus === 'ok' ? 'text-[#5eead4]' : 'text-amber-400'}`}>
-            {systemStatus === 'ok' ? 'NOMINAL' : 'DEGRADED'}
+      {/* Telemetry strip */}
+      <div className="hidden lg:flex items-center gap-6 font-mono text-[10px]">
+        <span className="flex items-center gap-2">
+          <span className="label-micro">kernel</span>
+          <span className={`${statusTone} font-medium`}>{statusLabel}</span>
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="label-micro">db</span>
+          <span className={offline || connecting ? 'text-chrome/30 font-light' : 'text-chrome/75 font-light'}>
+            {dbStatus.toUpperCase()}
           </span>
-        </div>
-
-        <div className="flex items-center space-x-2 px-3 py-1 rounded bg-[#0b1624]/60 border border-slate-700/60">
-          <Database className="w-3.5 h-3.5 text-indigo-400" />
-          <span className="text-slate-400">DB:</span>
-          <span className="text-[#dbeaf0] font-semibold">{dbStatus.toUpperCase()}</span>
-        </div>
-
-        <div className="flex items-center space-x-2 px-3 py-1 rounded bg-[#0b1624]/60 border border-slate-700/60">
-          <span className="text-slate-400">SPEND TODAY:</span>
-          <span className="text-[#5eead4] font-bold">${spendToday.toFixed(4)}</span>
-        </div>
-
-        <div className="text-slate-400 font-mono text-[11px] tracking-widest">
-          {timeStr || '00:00:00 IST'}
-        </div>
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="label-micro">utc</span>
+          <span className="text-chrome/75 font-light tabular-nums tracking-widest">{clock}</span>
+        </span>
       </div>
 
-      {/* Controls & Mode Selector */}
-      <div className="flex items-center space-x-3">
-        {/* Voice Command Mic Trigger Button */}
+      {/* Controls */}
+      <div className="flex items-center gap-2">
         <button
-          onClick={handleStartListening}
-          title="Speak to Jarvis (Voice Input)"
-          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded font-mono text-xs font-bold border transition-all ${
-            isListening
-              ? 'border-amber-400 text-black bg-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.6)] animate-pulse'
-              : 'border-[#5eead4]/40 text-[#5eead4] bg-[#5eead4]/10 hover:bg-[#5eead4]/20'
+          onClick={() => {
+            soundEngine.click();
+            voiceEngine.listen((t) => onVoiceInput?.(t));
+          }}
+          title="Speak to Jarvis"
+          className={`flex items-center gap-1.5 px-3 py-1.5 border font-mono text-[10px] font-medium tracking-[0.16em] transition-all ${
+            listening
+              ? 'bg-signal text-void border-signal'
+              : 'border-accent/35 text-accent hover:bg-accent/10'
           }`}
         >
-          <Mic className="w-3.5 h-3.5" />
-          <span>{isListening ? 'LISTENING...' : 'VOICE COMMAND'}</span>
+          <Mic className="w-3 h-3" />
+          {listening ? 'LISTENING' : 'VOICE'}
         </button>
 
-        {/* Audio Toggles */}
         <button
-          onClick={toggleSound}
-          title={soundMuted ? 'Unmute Sound Effects' : 'Mute Sound Effects'}
-          className={`p-1.5 rounded border transition-colors ${
+          onClick={() => {
+            const next = !soundMuted;
+            setSoundMuted(next);
+            soundEngine.setMuted(next);
+            if (!next) soundEngine.click();
+          }}
+          title={soundMuted ? 'Unmute effects' : 'Mute effects'}
+          className={`p-1.5 border transition-colors ${
             soundMuted
-              ? 'border-slate-700 text-slate-500 hover:text-slate-300'
-              : 'border-[#5eead4]/40 text-[#5eead4] bg-[#5eead4]/10'
+              ? 'border-accent/12 text-chrome/25 hover:text-chrome/60'
+              : 'border-accent/35 text-accent'
           }`}
         >
-          {soundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          {soundMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
         </button>
 
         <button
-          onClick={toggleVoice}
-          title={voiceMuted ? 'Enable Voice Feedback' : 'Disable Voice Feedback'}
-          className={`p-1.5 rounded border transition-colors ${
+          onClick={() => {
+            const next = !voiceMuted;
+            setVoiceMuted(next);
+            voiceEngine.setMuted(next);
+            if (!next) voiceEngine.speak('Voice telemetry enabled.');
+          }}
+          title={voiceMuted ? 'Enable voice feedback' : 'Disable voice feedback'}
+          className={`p-1.5 border transition-colors ${
             voiceMuted
-              ? 'border-slate-700 text-slate-500 hover:text-slate-300'
-              : 'border-indigo-400/40 text-indigo-400 bg-indigo-400/10'
+              ? 'border-accent/12 text-chrome/25 hover:text-chrome/60'
+              : 'border-accent/35 text-accent'
           }`}
         >
-          {voiceMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+          {voiceMuted ? <MicOff className="w-3.5 h-3.5" /> : <Radio className="w-3.5 h-3.5" />}
         </button>
 
-        {/* Persona Selector Dropdown */}
         <select
           value={voiceEngine.getPersona()}
           onChange={(e) => {
-            const persona = e.target.value as any;
+            const persona = e.target.value as VoicePersona;
             voiceEngine.setPersona(persona);
             soundEngine.click();
             voiceEngine.speak(`Persona switched to ${persona}.`);
           }}
-          className="bg-[#0b1624] border border-[#5eead4]/40 text-[#5eead4] font-mono text-xs font-bold rounded px-2 py-1.5 outline-none hover:border-[#5eead4] cursor-pointer"
-          title="Select Voice Persona & Humor Style"
+          title="Voice persona"
+          className="bg-panel border border-accent/25 text-accent font-mono text-[10px] font-light tracking-wider px-2 py-1.5 outline-none hover:border-accent/60 cursor-pointer"
         >
-          <option value="JARVIS">🇬🇧 JARVIS (British Executive)</option>
-          <option value="CYBERPUNK">⚡ CYBERPUNK 2035 (High Energy)</option>
-          <option value="SARKY_CTO">😏 SARKY CTO (Sarcastic Engineer)</option>
+          {PERSONAS.map((p) => (
+            <option key={p.id} value={p.id} className="bg-panel">
+              {p.label}
+            </option>
+          ))}
         </select>
 
-        {/* Live / Replay Mode Toggle */}
         <button
           onClick={onToggleMode}
-          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded font-mono text-xs font-bold border transition-all ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 font-mono text-[10px] font-bold tracking-[0.16em] border transition-all ${
             mode === 'LIVE'
-              ? 'border-[#5eead4] text-black bg-[#5eead4] shadow-[0_0_15px_rgba(94,234,212,0.4)]'
-              : 'border-amber-400/50 text-amber-400 bg-amber-400/10 hover:bg-amber-400/20'
+              ? 'bg-accent text-void border-accent'
+              : 'border-signal/50 text-signal hover:bg-signal/10'
           }`}
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${mode === 'LIVE' ? 'animate-spin' : ''}`} />
-          <span>{mode === 'LIVE' ? 'LIVE TELEMETRY' : 'REPLAY MODE'}</span>
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${mode === 'LIVE' ? 'bg-void animate-breathe' : 'bg-signal'}`}
+          />
+          {mode === 'LIVE' ? 'LIVE' : 'REPLAY'}
         </button>
       </div>
     </header>
   );
-};
+}
