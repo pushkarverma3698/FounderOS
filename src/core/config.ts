@@ -235,7 +235,7 @@ export const RUN_BUDGET_USD = env.RUN_BUDGET_USD;
 export const RUN_BUDGET_TOKENS = env.RUN_BUDGET_TOKENS;
 
 /** Parse a positive-integer env var, falling back to a default for unset/garbage. */
-function intEnv(key: string, fallback: number): number {
+export function intEnv(key: string, fallback: number): number {
   const n = Number(process.env[key]);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }

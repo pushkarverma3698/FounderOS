@@ -35,6 +35,7 @@
 import { randomUUID } from "node:crypto";
 import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
+import { intEnv } from "../../core/config.js";
 import { findApplicationByDedupeKey } from "../../db/job-queries.js";
 import type { RawPosting } from "./ats-source.js";
 import { FREE_PRICING } from "./cost.js";
@@ -51,23 +52,24 @@ const log = childLogger({ module: "jobhunt:free-ingest" });
 
 /**
  * How far back a posting may have been published and still be a candidate.
- *
- * Deliberately much wider than the 30-minute polling interval. The window is the
- * lane's tolerance for its own downtime: at six hours a deploy, a restart or a
- * host outage lasting most of a morning costs nothing, because the next sweep
- * still sees everything published while the lane was dark. Narrowing it to match
- * the interval would make every missed sweep a permanent hole, and a permanent
- * hole in a feed nobody is invoicing is invisible.
- *
- * The overlap it creates is free: a posting seen in an earlier sweep is already
- * in the tracker and is dropped before it costs a body fetch.
- */
-/**
- * How far back a posting may have been published and still be a candidate.
  * Default: 720h (30 days) to drain standing inventory once. Deduplication is
  * handled by keepUnseen (tracker lookup), while age bounds relevance.
+ *
+ * Deliberately much wider than the 30-minute polling interval. The window is the
+ * lane's tolerance for its own downtime: a deploy, a restart or a host outage
+ * costs nothing, because the next sweep still sees everything published while the
+ * lane was dark. Narrowing it to match the interval would make every missed sweep
+ * a permanent hole, and a permanent hole in a feed nobody is invoicing is
+ * invisible. The overlap it creates is free: a posting seen in an earlier sweep
+ * is already in the tracker and is dropped before it costs a body fetch.
+ *
+ * Parsed with intEnv, NOT `Number(process.env[...] ?? 720)`. `??` only catches
+ * unset; a present-but-blank `FREE_LANE_MAX_AGE_HOURS=` in a .env parses to 0,
+ * every posting becomes stale, and the lane silently returns to screening zero —
+ * the exact defect this window was widened to fix. intEnv rejects 0, NaN and
+ * negatives and falls back, so the failure direction is "too wide", never "dark".
  */
-export const FREE_LANE_MAX_AGE_HOURS = Number(process.env["FREE_LANE_MAX_AGE_HOURS"] ?? 720);
+export const FREE_LANE_MAX_AGE_HOURS = intEnv("FREE_LANE_MAX_AGE_HOURS", 720);
 
 /** Bound on the tracker lookups. Small queries, but not worth 400 at once. */
 const LOOKUP_CONCURRENCY = 12;
