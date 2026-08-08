@@ -15,7 +15,7 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { webSearchTool } from "../../tools/web-search.js";
 import { scrapeUrl, ragSearch, crawlSite, type ScrapeResult } from "../../tools/apify.js";
-import { fetchYoutubeTranscript } from "../../tools/agent-reach.js";
+import { fetchYoutubeTranscript, fetchV2exTopics } from "../../tools/agent-reach.js";
 import { getCachedScrape, setCachedScrape, ingestResearch } from "../../infra/research-memory.js";
 import { recordEventTool } from "../../tools/memory.js";
 import { childLogger } from "../../infra/logger.js";
@@ -273,6 +273,40 @@ export const youtubeTranscript = tool(
       "Saved to research memory (searchable later via search_research_cache). Read-only — no approval needed.",
     schema: z.object({
       url: z.string().describe("YouTube URL or 11-character video id, e.g. https://youtube.com/watch?v=abc12345678"),
+    }),
+  },
+);
+
+// ── v2ex_topics ───────────────────────────────────────────────────────────────
+
+export const v2exTopics = tool(
+  async ({ kind, node_name }) => {
+    const res = await fetchV2exTopics(kind ?? "hot", node_name ?? undefined);
+    if (!res.ok) return `V2EX topics fetch failed: ${res.error}`;
+
+    const pages: ScrapeResult[] = res.data.map((t) => ({
+      url: t.url,
+      title: `[${t.node.title}] ${t.title}`,
+      markdown: `## ${t.title}\n\nNode: ${t.node.title} (@${t.node.name}) | Author: @${t.member.username} | Replies: ${t.replies}\n\n${t.content}\n\nSource: ${t.url}`,
+      retrieved_at: new Date().toISOString(),
+    }));
+
+    await persist(`v2ex:${kind ?? "hot"}:${node_name ?? ""}`, pages);
+    logResearchEvent("V2EX Trends", `Fetched ${pages.length} V2EX topics`, "v2ex_topics");
+
+    return pages
+      .slice(0, 10)
+      .map((p, i) => `${i + 1}. ${p.title}\n   ${p.url}\n   ${p.markdown.slice(0, 300)}…`)
+      .join("\n\n");
+  },
+  {
+    name: "v2ex_topics",
+    description:
+      "Fetch community tech trends, job posts, and hot topics from V2EX (keyless, free public API). " +
+      "Use to monitor tech trends, developer discussions, and hiring posts. Saved to research memory.",
+    schema: z.object({
+      kind: z.enum(["hot", "node"]).optional().describe("Topic type: 'hot' for global hot topics, 'node' for node-specific topics (default 'hot')"),
+      node_name: z.string().optional().describe("Node slug if kind='node', e.g. 'jobs', 'python', 'tech', 'programmers'"),
     }),
   },
 );

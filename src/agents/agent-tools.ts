@@ -24,7 +24,7 @@
  */
 
 export { hitlGate, idemKey, type ApprovalRequest } from "./agent-tools/hitl.js";
-export { searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript } from "./agent-tools/research.js";
+export { searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics } from "./agent-tools/research.js";
 export { scanAiVisibility, getGapScans } from "./agent-tools/gap-scan.js";
 export {
   createSendEmailTool,

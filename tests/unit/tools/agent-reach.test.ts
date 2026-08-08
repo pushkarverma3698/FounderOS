@@ -21,6 +21,7 @@ import {
   pickSubtitleFile,
   fetchYoutubeTranscript,
   readPageViaJina,
+  fetchV2exTopics,
   agentReachTool,
   TRANSCRIPT_MAX_CHARS,
   SUB_LANGS_PRIMARY,
@@ -404,5 +405,82 @@ describe("agentReachTool (UnifiedTool contract)", () => {
     // Assert
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/Not a YouTube URL/);
+  });
+});
+
+// ── fetchV2exTopics ───────────────────────────────────────────────────────────
+
+describe("fetchV2exTopics", () => {
+  it("fetches hot topics by default and maps payload fields", async () => {
+    // Arrange
+    const payload = [
+      {
+        id: 101,
+        title: "AI Engineer hiring trends in 2026",
+        url: "https://www.v2ex.com/t/101",
+        content: "Discussing LLM skills",
+        replies: 42,
+        node: { name: "jobs", title: "Jobs" },
+        member: { username: "techlead" },
+        created: 1700000000,
+      },
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 })));
+
+    // Act
+    const res = await fetchV2exTopics();
+
+    // Assert
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.data).toHaveLength(1);
+      expect(res.data[0]?.title).toBe("AI Engineer hiring trends in 2026");
+      expect(res.data[0]?.node.name).toBe("jobs");
+      expect(res.data[0]?.member.username).toBe("techlead");
+    }
+  });
+
+  it("constructs node-specific API URL when kind='node'", async () => {
+    // Arrange
+    const fetchSpy = vi.fn(async () => new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    // Act
+    const res = await fetchV2exTopics("node", "python");
+
+    // Assert
+    expect(res.ok).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://www.v2ex.com/api/topics/show.json?node_name=python",
+      expect.objectContaining({ headers: { "User-Agent": "agent-reach/1.0" } }),
+    );
+  });
+
+  it("fails soft on HTTP errors (e.g. 500)", async () => {
+    // Arrange
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Server Error", { status: 500 })));
+
+    // Act
+    const res = await fetchV2exTopics();
+
+    // Assert
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toMatch(/HTTP 500/);
+    }
+  });
+
+  it("fails soft on non-array payload", async () => {
+    // Arrange
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "bad request" }), { status: 200 })));
+
+    // Act
+    const res = await fetchV2exTopics();
+
+    // Assert
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toMatch(/non-array payload/);
+    }
   });
 });

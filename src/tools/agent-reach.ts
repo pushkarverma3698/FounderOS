@@ -316,6 +316,60 @@ export async function readPageViaJina(
   }
 }
 
+// ── V2EX Topics (keyless public API) ──────────────────────────────────────────
+
+export interface V2exTopic {
+  id: number;
+  title: string;
+  url: string;
+  content: string;
+  replies: number;
+  node: { name: string; title: string };
+  member: { username: string };
+  created: number;
+}
+
+export async function fetchV2exTopics(
+  kind: "hot" | "node" = "hot",
+  nodeName?: string,
+): Promise<{ ok: true; data: V2exTopic[] } | { ok: false; error: string }> {
+  let targetUrl = "https://www.v2ex.com/api/topics/hot.json";
+  if (kind === "node" && nodeName) {
+    targetUrl = `https://www.v2ex.com/api/topics/show.json?node_name=${encodeURIComponent(nodeName)}`;
+  }
+  try {
+    const res = await fetch(targetUrl, {
+      headers: { "User-Agent": "agent-reach/1.0" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+      return { ok: false, error: `V2EX API returned HTTP ${res.status}` };
+    }
+    const json = (await res.json()) as unknown;
+    if (!Array.isArray(json)) {
+      return { ok: false, error: "V2EX API returned non-array payload" };
+    }
+    const topics: V2exTopic[] = json.map((item: Record<string, unknown>) => ({
+      id: Number(item["id"] ?? 0),
+      title: String(item["title"] ?? ""),
+      url: String(item["url"] ?? ""),
+      content: String(item["content"] ?? ""),
+      replies: Number(item["replies"] ?? 0),
+      node: {
+        name: String((item["node"] as Record<string, unknown>)?.[ "name" ] ?? ""),
+        title: String((item["node"] as Record<string, unknown>)?.[ "title" ] ?? ""),
+      },
+      member: {
+        username: String((item["member"] as Record<string, unknown>)?.[ "username" ] ?? ""),
+      },
+      created: Number(item["created"] ?? 0),
+    }));
+    return { ok: true, data: topics };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 // ── UnifiedTool ───────────────────────────────────────────────────────────────
 
 export const agentReachTool: UnifiedTool = {
