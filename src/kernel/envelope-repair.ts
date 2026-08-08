@@ -41,8 +41,8 @@ export function repairEnvelopeExpected(
   return normalizeUnknownSchemaRef(normalizeExpectedKind(val), isKnownSchemaRef);
 }
 
-/** Safe default tool budget when the planner omits it (mid of the 1–6 range). */
-export const DEFAULT_STEP_MAX_TOOL_CALLS = 3;
+/** Safe default tool budget when the planner omits it (mid of the 1–15 range). */
+export const DEFAULT_STEP_MAX_TOOL_CALLS = 8;
 
 /**
  * Fill a step's `constraints` when the planner model drops the field or one of

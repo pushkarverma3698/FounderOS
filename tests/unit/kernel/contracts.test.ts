@@ -270,7 +270,7 @@ describe("plan validation", () => {
 
   it("rejects empty, oversized, and hostile inputs without throwing", () => {
     expect(validatePlan(plan([])).ok).toBe(false);
-    expect(validatePlan(plan(Array.from({ length: 9 }, (_, i) => envelope({ step_id: `s${i}` })))).ok).toBe(false);
+    expect(validatePlan(plan(Array.from({ length: 13 }, (_, i) => envelope({ step_id: `s${i}` })))).ok).toBe(false);
     expect(validatePlan(null).ok).toBe(false);
     expect(validatePlan("a plan, trust me").ok).toBe(false);
     expect(validatePlan({ schema_version: 99, goal: "g", steps: [envelope()] }).ok).toBe(false);

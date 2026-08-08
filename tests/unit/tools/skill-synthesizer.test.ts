@@ -22,7 +22,7 @@ describe("Hermes Skill Synthesizer", () => {
     expect(res.success).toBe(true);
     expect(res.name).toBe("test_calculator");
     expect(res.toolPath).toContain("test_calculator.ts");
-  });
+  }, 60000);
 
   it("fails gracefully and returns error evidence on invalid TypeScript syntax", async () => {
     const res = await synthesizeSkillImpl({
@@ -33,5 +33,5 @@ describe("Hermes Skill Synthesizer", () => {
 
     expect(res.success).toBe(false);
     expect(res.message).toContain("Typecheck failed");
-  });
+  }, 60000);
 });

@@ -132,8 +132,8 @@ export function overrideDecision(worker: WorkerId, task: string): PlannerDecisio
 }
 
 /** Truncation bounds for history entries — keep checkpoints and prompts small. */
-export const HISTORY_INPUT_MAX_CHARS = 600;
-export const HISTORY_REPLY_MAX_CHARS = 1500;
+export const HISTORY_INPUT_MAX_CHARS = 3000;
+export const HISTORY_REPLY_MAX_CHARS = 6000;
 
 /**
  * Summarize the PREVIOUS turn still sitting in the checkpointed state:

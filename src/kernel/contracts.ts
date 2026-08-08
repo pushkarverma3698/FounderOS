@@ -211,8 +211,8 @@ export function repairWrappedOutput(parsed: unknown, ref: string): unknown {
 
 // ── Task envelope (the ONLY thing a worker sees) ──────────────────────────────
 
-export const MAX_TOOL_CALLS_PER_STEP = 6;
-export const MAX_PLAN_STEPS = 8;
+export const MAX_TOOL_CALLS_PER_STEP = 15;
+export const MAX_PLAN_STEPS = 12;
 
 export const TaskEnvelopeSchema = z.preprocess(
   // Fill dropped `constraints` (weak-model failure) before field validation.
