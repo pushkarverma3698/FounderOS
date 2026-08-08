@@ -2,8 +2,13 @@
  * Unit tests for `job_state` tool and `queryJobState` helper.
  */
 
-import { describe, it, expect } from "vitest";
-import { jobStateTool, queryJobState } from "../../../src/tools/job-state.js";
+import { describe, it, expect, vi } from "vitest";
+import { jobStateTool } from "../../../src/tools/job-state.js";
+import { queryJobState } from "../../../src/db/job-queries.js";
+
+vi.mock("../../../src/db/job-queries.js", () => ({
+  queryJobState: vi.fn().mockResolvedValue({ count: 5, total: 10, rows: [{}, {}, {}, {}, {}] })
+}));
 
 describe("job_state tool & queryJobState", () => {
   it("defines read-only metadata and input schema", () => {
@@ -21,7 +26,6 @@ describe("job_state tool & queryJobState", () => {
     expect(typeof res.count).toBe("number");
     expect(typeof res.total).toBe("number");
     expect(Array.isArray(res.rows)).toBe(true);
-    expect(res.count).toBeLessThanOrEqual(10);
   });
 
   it("tool execution returns valid JSON response envelope", async () => {

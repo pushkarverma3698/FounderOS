@@ -2,8 +2,14 @@
  * Unit tests for `ops_state` tool and `queryOpsState` helper.
  */
 
-import { describe, it, expect } from "vitest";
-import { opsStateTool, queryOpsState } from "../../../src/tools/ops-state.js";
+import { describe, it, expect, vi } from "vitest";
+import { opsStateTool } from "../../../src/tools/ops-state.js";
+import { queryOpsState } from "../../../src/db/queries.js";
+
+vi.mock("../../../src/db/queries.js", async (importOriginal) => {
+  const { mockQueriesModule } = await import("../../helpers/mock-db.js");
+  return mockQueriesModule();
+});
 
 describe("ops_state tool & queryOpsState", () => {
   it("defines input schema and scopes", () => {

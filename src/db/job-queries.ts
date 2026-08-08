@@ -13,7 +13,7 @@
  * gap-scan-queries.ts and account-queries.ts).
  */
 
-import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql, gte } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { jobApplications, type JobApplication, type NewJobApplication } from "./schema.js";
 
@@ -396,3 +396,81 @@ export async function recordTailoringResult(
   return saved ?? null;
 }
 
+
+export interface JobStateArgs {
+  readonly stage?: string;
+  readonly section?: string;
+  readonly source?: string;
+  readonly applied?: boolean;
+  readonly since?: string;
+  readonly fullDetails?: boolean;
+  readonly limit?: number;
+}
+
+export type CuratedJobRow = Pick<
+  JobApplication,
+  "id" | "company" | "title" | "stage" | "salary_status" | "applied_at" | "created_at" | "url" | "track"
+> & { readonly gate_json?: unknown };
+
+export async function queryJobState(
+  args: JobStateArgs = {},
+  tenantId: string = DEFAULT_TENANT,
+): Promise<{ count: number; total: number; rows: Array<CuratedJobRow | JobApplication> }> {
+  const db = getDb();
+
+  // Total count (unfiltered)
+  const [totalRow] = await db
+    .select({ total: sql<number>`count(*)` })
+    .from(jobApplications)
+    .where(eq(jobApplications.tenant_id, tenantId));
+  const total = Number(totalRow?.total ?? 0);
+
+  const conditions = [eq(jobApplications.tenant_id, tenantId)];
+
+  if (args.stage) {
+    conditions.push(eq(jobApplications.stage, args.stage));
+  }
+  if (args.section) {
+    conditions.push(eq(jobApplications.brief_section, args.section));
+  }
+  if (args.source) {
+    conditions.push(eq(jobApplications.route, args.source));
+  }
+  if (args.applied === true) {
+    conditions.push(isNotNull(jobApplications.applied_at));
+  } else if (args.applied === false) {
+    conditions.push(isNull(jobApplications.applied_at));
+  }
+  if (args.since) {
+    const sinceDate = new Date(args.since);
+    if (!isNaN(sinceDate.getTime())) {
+      conditions.push(gte(jobApplications.created_at, sinceDate));
+    }
+  }
+
+  const limit = Math.min(Math.max(1, args.limit ?? 50), 200);
+
+  const rows = await db
+    .select({
+      id: jobApplications.id,
+      company: jobApplications.company,
+      title: jobApplications.title,
+      stage: jobApplications.stage,
+      salary_status: jobApplications.salary_status,
+      applied_at: jobApplications.applied_at,
+      created_at: jobApplications.created_at,
+      url: jobApplications.url,
+      track: jobApplications.track,
+      gate_json: jobApplications.gate_json,
+    })
+    .from(jobApplications)
+    .where(and(...conditions))
+    .orderBy(desc(jobApplications.created_at))
+    .limit(limit);
+
+  return {
+    count: rows.length,
+    total,
+    rows,
+  };
+}
