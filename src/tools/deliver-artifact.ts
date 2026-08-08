@@ -79,6 +79,10 @@ export const deliverArtifactTool: UnifiedTool = {
       return {
         success: true,
         data: JSON.stringify(result, null, 2),
+        observed: {
+          kind: "message",
+          evidence: `delivered:${result.filename}:${result.bytes}`,
+        },
       };
     } catch (err) {
       return {

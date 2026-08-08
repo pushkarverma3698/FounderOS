@@ -214,6 +214,10 @@ export const opsStateTool: UnifiedTool = {
       return {
         success: true,
         data: JSON.stringify(result, null, 2),
+        observed: {
+          kind: "record",
+          evidence: `scope:${result.scope},count:${result.count},total:${result.total}`,
+        },
       };
     } catch (err) {
       return {

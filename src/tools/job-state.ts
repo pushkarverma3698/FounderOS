@@ -150,6 +150,10 @@ export const jobStateTool: UnifiedTool = {
       return {
         success: true,
         data: JSON.stringify(result, null, 2),
+        observed: {
+          kind: "record",
+          evidence: `count:${result.count},total:${result.total}`,
+        },
       };
     } catch (err) {
       return {

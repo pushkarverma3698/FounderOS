@@ -95,6 +95,10 @@ export const writeArtifactTool: UnifiedTool = {
       return {
         success: true,
         data: JSON.stringify(result, null, 2),
+        observed: {
+          kind: "file",
+          evidence: `${result.path}:${result.bytes}`,
+        },
       };
     } catch (err) {
       return {
