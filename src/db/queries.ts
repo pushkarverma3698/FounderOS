@@ -17,10 +17,12 @@ import { tokenizeQuery, rankByTerms } from "./keyword-search.js";
  */
 const CANDIDATE_FACTOR = 6;
 const MAX_CANDIDATES = 60;
+const DEFAULT_TENANT = "turicks";
 import {
   actionLog,
   deptSignals,
   hitlApprovals,
+  jobIngestRuns,
   outboundLeads,
   aiCallCosts,
   doNotContact,
