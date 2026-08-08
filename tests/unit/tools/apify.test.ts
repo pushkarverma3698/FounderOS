@@ -103,11 +103,11 @@ describe("runActorSync", () => {
     const res = await runActorSync(RAG_BROWSER_ACTOR, { query: "q", maxResults: 1 }, 1000);
 
     expect(res).toEqual({ ok: true, items: [{ markdown: "x", url: "https://a.com" }] });
-    const [url, init] = mockFetch.mock.calls[0];
+    const [url, init] = mockFetch.mock.calls[0] ?? [];
     expect(String(url)).toContain(`/acts/${RAG_BROWSER_ACTOR}/run-sync-get-dataset-items`);
-    expect(init.method).toBe("POST");
-    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer apify_test");
-    expect(JSON.parse(init.body as string)).toEqual({ query: "q", maxResults: 1 });
+    expect(init?.method).toBe("POST");
+    expect((init?.headers as Record<string, string>)["Authorization"]).toBe("Bearer apify_test");
+    expect(JSON.parse(init?.body as string)).toEqual({ query: "q", maxResults: 1 });
   });
 
   it("returns ok:false with the status on a non-2xx response", async () => {
@@ -226,9 +226,10 @@ describe("scrapeUrl", () => {
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect(res.source).toBe("apify");
-      expect(res.data[0]!.markdown).toBe("full text");
+      expect(res.data[0]?.markdown).toBe("full text");
     }
-    expect(String(mockFetch.mock.calls[0][0])).toContain(RAG_BROWSER_ACTOR);
+    const [callUrl1] = mockFetch.mock.calls[0] ?? [];
+    expect(String(callUrl1)).toContain(RAG_BROWSER_ACTOR);
   });
 
   it("falls back to fetch when Apify returns no items", async () => {
@@ -249,7 +250,8 @@ describe("scrapeUrl", () => {
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.source).toBe("fetch");
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(String(mockFetch.mock.calls[0][0])).toBe("https://a.com");
+    const [callUrl2] = mockFetch.mock.calls[0] ?? [];
+    expect(String(callUrl2)).toBe("https://a.com");
   });
 
   it("honors SCRAPE_BACKEND=fetch even when a token is present", async () => {
@@ -259,7 +261,55 @@ describe("scrapeUrl", () => {
     const res = await scrapeUrl("https://a.com");
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.source).toBe("fetch");
-    expect(String(mockFetch.mock.calls[0][0])).toBe("https://a.com");
+    const [callUrl3] = mockFetch.mock.calls[0] ?? [];
+    expect(String(callUrl3)).toBe("https://a.com");
+  });
+
+  // ── Jina Reader: last-resort tier (agent-reach's keyless web backend) ───────
+
+  it("falls back to Jina Reader when the fetch tier fails", async () => {
+    // Arrange — no token, so tier 1 is skipped; plain fetch is blocked (403).
+    mockFetch
+      .mockResolvedValueOnce(htmlResponse("blocked", false, 403))
+      .mockResolvedValueOnce(htmlResponse("Title: Recovered\n\nreal body text", true, 200));
+
+    // Act
+    const res = await scrapeUrl("https://a.com");
+
+    // Assert
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.source).toBe("jina");
+    expect(res.data[0]?.title).toBe("Recovered");
+    expect(res.data[0]?.markdown).toContain("real body text");
+    const [jinaUrl] = mockFetch.mock.calls[1] ?? [];
+    expect(String(jinaUrl)).toBe("https://r.jina.ai/https://a.com/");
+  });
+
+  it("does NOT call Jina when the fetch tier already succeeded", async () => {
+    // Arrange
+    mockFetch.mockResolvedValueOnce(htmlResponse("<title>T</title><p>body</p>"));
+
+    // Act
+    await scrapeUrl("https://a.com");
+
+    // Assert — the extra tier must stay free when it isn't needed.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports the fetch tier's error when Jina also fails", async () => {
+    // Arrange — both downstream tiers blocked.
+    mockFetch
+      .mockResolvedValueOnce(htmlResponse("blocked", false, 403))
+      .mockResolvedValueOnce(htmlResponse("nope", false, 502));
+
+    // Act
+    const res = await scrapeUrl("https://a.com");
+
+    // Assert — the surfaced error names the component the caller can act on.
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toContain("HTTP 403");
   });
 });
 
@@ -298,7 +348,8 @@ describe("crawlSite", () => {
     const res = await crawlSite("https://docs.x", 5);
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.source).toBe("apify");
-    expect(String(mockFetch.mock.calls[0][0])).toContain(CONTENT_CRAWLER_ACTOR);
+    const [callUrl4] = mockFetch.mock.calls[0] ?? [];
+    expect(String(callUrl4)).toContain(CONTENT_CRAWLER_ACTOR);
   });
 
   it("falls back to a single-page fetch when no token is set", async () => {

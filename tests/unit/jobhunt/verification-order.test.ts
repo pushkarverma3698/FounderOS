@@ -34,19 +34,19 @@ describe("verificationTargets", () => {
     // The exact live failure: flags outranked every pass on overlap and
     // consumed the whole budget.
     const scored = [row("flag-hi", "flag", 18), row("pass-lo", "pass", 2)];
-    expect(verificationTargets(scored, 1).map((s) => s.row.id)).toEqual(["pass-lo"]);
+    expect((verificationTargets(scored, 1) as Array<{ row: { id: string } }>).map((s) => s.row.id)).toEqual(["pass-lo"]);
   });
 
   it("orders passes among themselves by overlap", () => {
     const scored = [row("p-lo", "pass", 3), row("p-hi", "pass", 9)];
-    expect(verificationTargets(scored, 2).map((s) => s.row.id)).toEqual(["p-hi", "p-lo"]);
+    expect((verificationTargets(scored, 2) as Array<{ row: { id: string } }>).map((s) => s.row.id)).toEqual(["p-hi", "p-lo"]);
   });
 
   it("still verifies flags once every pass has a slot", () => {
     // Flags are not abandoned — a flag the founder resolves becomes an
     // application, so a dead one is still worth knowing about.
     const scored = [row("f1", "flag", 15), row("p1", "pass", 1)];
-    expect(verificationTargets(scored, 5).map((s) => s.row.id)).toEqual(["p1", "f1"]);
+    expect((verificationTargets(scored, 5) as Array<{ row: { id: string } }>).map((s) => s.row.id)).toEqual(["p1", "f1"]);
   });
 
   it("never returns more than the budget", () => {
@@ -61,7 +61,7 @@ describe("verificationTargets", () => {
   it("does not spend the budget on rejects", () => {
     // A reject is a legal bar. Whether it is still open changes no decision.
     const scored = [row("rej", "reject", 20), row("p", "pass", 1)];
-    expect(verificationTargets(scored, 8).map((s) => s.row.id)).toEqual(["p"]);
+    expect((verificationTargets(scored, 8) as Array<{ row: { id: string } }>).map((s) => s.row.id)).toEqual(["p"]);
   });
 });
 

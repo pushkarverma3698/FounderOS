@@ -376,9 +376,8 @@ describe("gapScannerTool.execute", () => {
     expect(mockLogLlmCost).toHaveBeenCalledWith(
       expect.objectContaining({ agent: "research", tier: "gap-scan" }),
     );
-    // Cost must be proportional to the completed calls (2 prompts × 1 surface × 1 run).
-    const logged = mockLogLlmCost.mock.calls[0]![0] as { cost_usd: string };
-    expect(Number(logged.cost_usd)).toBeGreaterThan(0);
+    const [logged] = (mockLogLlmCost.mock.calls[0] ?? []) as [{ cost_usd?: string }?];
+    expect(Number(logged?.cost_usd)).toBeGreaterThan(0);
   });
 
   it("fails OPEN on a budget-read error — a DB blip must not block a read-only scan", async () => {

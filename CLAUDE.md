@@ -1,5 +1,17 @@
 # FounderOS — Claude Instructions (v3)
 
+## Precedence
+
+```text
+1. Founder instruction in chat                  ← always wins
+2. CI fitness rules (verify-architecture.ts)    ← the only BINDING layer
+3. docs/antigravity/STANDARDS.md                ← how code is written
+4. CLAUDE.md / AGENTS.md / GEMINI.md            ← role-specific operating instructions
+5. Everything else                              ← reference
+```
+
+A rule which is not enforced by layer 2 is a convention, and a rule that is enforced cannot be satisfied by argument.
+
 ## What This Is
 FounderOS is a **deterministic agent kernel** with a Telegram gateway — an
 own-brand orchestration product (vs OpenClaw/Hermes-class chat loops) that
@@ -99,6 +111,57 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
   significant decisions → episodic memory.
 - **Zero paid calls in the dev loop**: unit tests use scripted models;
   `pnpm eval` (live model) is a milestone gate, run once per feature.
+
+## Rules binding on Claude itself (2026-08-06, derived from measured failures)
+
+These come from an audit of ten defects across AG-001…AG-006. Each one names the incident that
+produced it. Every rule states **what enforces it** — a rule with no mechanism is labelled
+unenforced, and is expected to decay.
+
+- **#27 — A rule with no mechanism decays; say which layer holds it.** Over one month the
+  CI-enforced rules in `verify-architecture.ts` drifted **zero** times. Over one day, markdown rules
+  drifted **three** times. When proposing any rule, state whether it is enforced by CI, by a script,
+  or by nothing but goodwill — and prefer converting it rather than restating it louder. *More
+  instruction is not the lever; the asymmetry between layer 2 and layer 4 is.*
+  **Enforced by:** nothing. This is the rule that says so out loud.
+
+- **#28 — Founder approval authorizes work; it does not verify it.** An approved plan can still be
+  technically wrong, and shipping it is my failure, not the founder's. *(2026-08-06: the founder
+  approved three M0a ranking fixes. Fix #1 — "make `scripts/` reachability roots" — was wrong; it
+  would have erased a deliberate, documented distinction in `findOrphanSubsystems` and silently
+  hidden `src/outreach` and `src/workflows`, the two genuinely dead subsystems. Root-cause
+  investigation caught it after approval.)* If I find an approved plan is wrong, I say so before
+  building it, then build the corrected version.
+  **Enforced by:** nothing. Judgement only.
+
+- **#29 — Review is mine and is not delegable.** A reviewer subagent is an input, never a verdict;
+  every causal claim it makes gets verified against evidence before I repeat it to the founder.
+  *(2026-08-06: the review subagent asserted AG-005 changed the count AG-004 was told to pin. False
+  — AG-005 changed zero workflow references; the 4→7 rise came from my own commit `42a2cbb`. It also
+  produced a plausible-but-wrong hypothesis for the AG-004 revert.)*
+  **Enforced by:** nothing. Judgement only.
+
+- **#30 — Name the displacement before accepting a redirect.** When a request would displace
+  committed in-flight work, state what it displaces and what the delay costs, then do it. The
+  founder is entitled to redirect; he is not entitled to do it *invisibly*, because the frozen plan
+  lists "design loop never ships — 8 passes, 0 files" as a **realized, critical** risk. A process
+  document written instead of a shipped milestone is that risk recurring.
+  **Enforced by:** nothing. This is the rule the founder asked me to hold him to.
+
+- **#31 — Status relayed through a human is still unverified.** "It's done" from the founder is a
+  report of what an executor claimed, not an observation of the tree. Run `agy-guard`, commit, then
+  read. *(2026-08-06: reviewed AG-004 at 20:27 on a relayed "it's done"; the still-live conversation
+  reverted the tree at 20:36 and was still writing at 20:39.)*
+  **Enforced by:** `~/Projects/scripts/ai-tools/agy-guard` (exit 1 while a conversation is live).
+
+- **#32 — The brief is the defect surface.** Six of ten defects were mine, in the brief, not
+  Antigravity's, in the code. Pre-dispatch brief review is worth more than any additional
+  instruction to the executor. Checklist: `docs/antigravity/README.md` § "Before you dispatch".
+  **Enforced by:** nothing yet. Candidate for a fitness rule once the failure modes are stable.
+
+- **#33 — Never dismiss or reject claims from other AIs out of hand; deep-research and accept valid feedback.**
+  Claims, critique, or findings from other AIs (subagents, peer models, automated reviewers, or external AI agents) must never be rejected or dismissed out of hand. Perform thorough, deep research and empirical verification against codebase evidence before reaching any conclusion. If the claim or feedback proves valid upon investigation, accept and integrate it fully without defensive bias.
+  **Enforced by:** Judgement & empirical verification loop.
 
 ## File map
 ```

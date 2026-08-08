@@ -178,7 +178,7 @@ describe("withModelFallbacks — resolution budget + per-attempt deadlines (2026
   // The chain must be time-bounded end to end.
   it("caps a HUNG fallback with the attempt deadline and moves to the next", async () => {
     const primary = failingModel(quotaError());
-    const hungFallback: KernelBindableModel = { invoke: vi.fn(() => new Promise(() => {})) };
+    const hungFallback = { invoke: vi.fn(async () => new Promise<AIMessage>(() => {})) } as unknown as KernelBindableModel;
     const liveFallback = okModel("fallback-1");
     const model = withModelFallbacks(primary, [hungFallback, liveFallback], "kernel", {
       attemptTimeoutMs: 20,
@@ -218,7 +218,7 @@ describe("withModelFallbacks — resolution budget + per-attempt deadlines (2026
     // Composed exactly as kernel-boot layers it: fallbacks(retry(primary), [fb]).
     // Before the fix this hung until the 300s watchdog; now it must reject on
     // its own, quickly, with a retriable timeout the caller can classify.
-    const hung = (): KernelBindableModel => ({ invoke: vi.fn(() => new Promise(() => {})) });
+    const hung = (): KernelBindableModel => ({ invoke: vi.fn(() => new Promise(() => {})) }) as unknown as KernelBindableModel;
     const primary = hung();
     const fallback = hung();
     const composed = withModelFallbacks(

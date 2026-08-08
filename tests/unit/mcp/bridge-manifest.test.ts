@@ -34,11 +34,13 @@ describe("bridgeManifestSchema", () => {
     const parsed = bridgeManifestSchema.parse({
       servers: { blender: { command: "uvx", args: ["blender-mcp"], department: "personal" } },
     });
-    const entry = parsed.servers["blender"] as McpServerEntry;
-    expect(entry.command).toBe("uvx");
-    expect(entry.write).toEqual([]);
+    const entry = parsed.servers["blender"]!;
     expect(entry.transport).toBe("stdio");
-    expect(entry.env).toEqual([]);
+    if (entry.transport === "stdio") {
+      expect(entry.command).toBe("uvx");
+      expect(entry.write).toEqual([]);
+      expect(entry.env).toEqual([]);
+    }
   });
 
   it("rejects a server missing the command field", () => {

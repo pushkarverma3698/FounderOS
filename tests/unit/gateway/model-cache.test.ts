@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { AIMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, type BaseMessage, type MessageContent } from "@langchain/core/messages";
 import { withLlmCache, type LlmCachePort } from "../../../src/gateway/model-cache.js";
 import type { KernelBindableModel } from "../../../src/kernel/index.js";
 
@@ -21,7 +21,7 @@ function fakePort(): LlmCachePort & { store: Map<string, unknown> } {
   return {
     store,
     async get(key) {
-      return (store.get(key) as { content: unknown } | undefined) ?? null;
+      return (store.get(key) as { content: MessageContent } | undefined) ?? null;
     },
     async set(key, value) {
       store.set(key, value);

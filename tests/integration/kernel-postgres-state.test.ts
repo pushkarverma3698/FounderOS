@@ -248,7 +248,8 @@ describe.runIf(pgUp)("v3 kernel run-loop ↔ Postgres state integrity", () => {
 
     // The transport fired exactly once, with the payload from turn 1.
     expect(h.providerSendEmail).toHaveBeenCalledTimes(1);
-    expect(h.providerSendEmail.mock.calls[0]![0]).toMatchObject({
+    const [firstCallArg] = (h.providerSendEmail.mock.calls[0] ?? []) as [Record<string, unknown>?];
+    expect(firstCallArg).toMatchObject({
       to: EMAIL_TO,
       subject: EMAIL_SUBJECT,
     });

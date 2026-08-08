@@ -50,7 +50,8 @@ describe("runReminderSweep", () => {
     mockClaimDue.mockResolvedValue([dueReminder()]);
     await runReminderSweep();
     expect(mockSendToChat).toHaveBeenCalledOnce();
-    expect(mockSendToChat.mock.calls[0]![0]).toContain("call the accountant");
+    const [firstMsg] = (mockSendToChat.mock.calls[0] ?? []) as [string?];
+    expect(firstMsg).toContain("call the accountant");
     expect(mockMarkFired).toHaveBeenCalledWith("rem1", expect.any(Date));
     expect(mockAdvance).not.toHaveBeenCalled();
   });
@@ -68,7 +69,8 @@ describe("runReminderSweep", () => {
   it("escapes HTML in the reminder text", async () => {
     mockClaimDue.mockResolvedValue([dueReminder({ text: "ping <b>me</b> & co" })]);
     await runReminderSweep();
-    expect(mockSendToChat.mock.calls[0]![0]).toContain("ping &lt;b&gt;me&lt;/b&gt; &amp; co");
+    const [escapedMsg] = (mockSendToChat.mock.calls[0] ?? []) as [string?];
+    expect(escapedMsg).toContain("ping &lt;b&gt;me&lt;/b&gt; &amp; co");
   });
 
   it("continues the sweep when one reminder's send throws", async () => {

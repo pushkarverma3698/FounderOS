@@ -72,8 +72,9 @@ describe("gateMcpTool — write tools", () => {
 
     expect(hitlGate).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledTimes(1);
-    // gate fired before the side effect
-    expect(hitlGate.mock.invocationCallOrder[0]).toBeLessThan(invoke.mock.invocationCallOrder[0]);
+    const gateOrder = hitlGate.mock.invocationCallOrder[0] ?? 0;
+    const invokeOrder = invoke.mock.invocationCallOrder[0] ?? 0;
+    expect(gateOrder).toBeLessThan(invokeOrder);
     expect(writeAuditEntry).toHaveBeenCalledTimes(1);
     expect(out).toContain("✅ mcp__blender__execute_blender_code done");
   });

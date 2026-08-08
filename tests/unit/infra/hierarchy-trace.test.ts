@@ -23,9 +23,9 @@ describe("TraceCallback hierarchy seams", () => {
     const trace = startTurn({ chatId: 1, kind: "message", promptHash: "abc" });
     const cb = new TraceCallback(trace);
 
-    await cb.handleChainStart({ id: ["langgraph", "supervisor"] }, {}, "r1", undefined, [], {}, "supervisor");
-    await cb.handleChainStart({ id: ["langgraph", "engineering"] }, {}, "r2", "r1", [], {}, "engineering");
-    await cb.handleChainStart({ id: ["langgraph", "devops"] }, {}, "r3", "r2", [], {}, "devops");
+    await cb.handleChainStart({ lc: 1, type: "not_implemented", id: ["langgraph", "supervisor"] }, {}, "r1", undefined, [], {}, "supervisor");
+    await cb.handleChainStart({ lc: 1, type: "not_implemented", id: ["langgraph", "engineering"] }, {}, "r2", "r1", [], {}, "engineering");
+    await cb.handleChainStart({ lc: 1, type: "not_implemented", id: ["langgraph", "devops"] }, {}, "r3", "r2", [], {}, "devops");
 
     const enters = events.filter((e) => e.seam === "hierarchy.enter");
     expect(enters.map((e) => e.data?.["depth"])).toEqual([0, 1, 2]);

@@ -163,7 +163,8 @@ describe("handleDraft (resolution path)", () => {
     await handleDraft({ match: "2", reply } as never, { runKernelText });
 
     expect(runKernelText).toHaveBeenCalledOnce();
-    expect(runKernelText.mock.calls[0]![1]).toContain("Aquablu B.V");
+    const [, callText] = (runKernelText.mock.calls[0] ?? []) as unknown as [unknown, string?];
+    expect(callText).toContain("Aquablu B.V");
     expect(reply).not.toHaveBeenCalled();
   });
 
@@ -183,11 +184,12 @@ describe("handleDraft (resolution path)", () => {
     await handleDraft({ match: "3", reply } as never, { runKernelText });
 
     expect(runKernelText).toHaveBeenCalledOnce();
-    expect(runKernelText.mock.calls[0]![1]).toContain("Aquablu B.V");
+    const callArgs = runKernelText.mock.calls[0] as unknown as [string, string];
+    expect(callArgs[1]).toContain("Aquablu B.V");
     // It must be a DRAFT instruction, never the question prompt: asking an
     // employer whether its five-year bar is firm invites the pre-emptive
     // rejection the stretch band exists to avoid.
-    expect(runKernelText.mock.calls[0]![1]).toContain("Draft a tailored application");
+    expect(callArgs[1]).toContain("Draft a tailored application");
     expect(reply).not.toHaveBeenCalled();
   });
 
@@ -203,7 +205,8 @@ describe("handleDraft (resolution path)", () => {
 
     expect(runKernelText).not.toHaveBeenCalled();
     expect(reply).toHaveBeenCalledOnce();
-    expect(String(reply.mock.calls[0]![0])).toContain("No row 9");
+    const [replyArg1] = (reply.mock.calls[0] ?? []) as [unknown?];
+    expect(String(replyArg1)).toContain("No row 9");
   });
 
   it("never reaches the database on an unparseable argument", async () => {
@@ -217,6 +220,7 @@ describe("handleDraft (resolution path)", () => {
     });
 
     expect(getApplicationByBriefRank).not.toHaveBeenCalled();
-    expect(String(reply.mock.calls[0]![0])).toContain("Usage:");
+    const [replyArg2] = (reply.mock.calls[0] ?? []) as [unknown?];
+    expect(String(replyArg2)).toContain("Usage:");
   });
 });

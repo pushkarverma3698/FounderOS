@@ -41,13 +41,16 @@ class ApplyProfile:
     linkedin: str | None = None
     website: str | None = None
 
-    def resume_for(self, track: str) -> str | None:
-        """The PDF for this track, or the default. Never another track's file.
+    def resume_for(self, track: str, job_id: str | None = None) -> str | None:
+        """The PDF for this track, or the default, or the per-job tailored PDF.
 
-        A frontend resume uploaded to an AI role is a worse outcome than no
-        upload: the founder would not notice, and the employer reads it as his
-        considered application.
+        Prefers a per-job tailored PDF from .queue/{job_id}/tailored_cv.pdf when present.
         """
+        if job_id:
+            queue_dir = Path(__file__).resolve().parent.parent / ".queue" / job_id
+            tailored = queue_dir / "tailored_cv.pdf"
+            if tailored.is_file():
+                return str(tailored)
         return self.resumes.get(track) or self.default_resume
 
 
@@ -90,8 +93,8 @@ def load_profile(path: Path = DEFAULT_PROFILE_PATH) -> ApplyProfile:
     )
 
 
-def missing_resumes(profile: ApplyProfile, tracks: list[str]) -> list[str]:
-    """Tracks in this queue whose resume file is absent from disk.
+def missing_resumes(profile: ApplyProfile, jobs: list[any] | list[str]) -> list[str]:
+    """Jobs/tracks in this queue whose resume file is absent from disk.
 
     Checked BEFORE the browser opens rather than at the upload. Discovering it
     mid-session means the founder has already reviewed a form he cannot submit,
@@ -99,10 +102,19 @@ def missing_resumes(profile: ApplyProfile, tracks: list[str]) -> list[str]:
     thing this tool exists to save.
     """
     problems: list[str] = []
-    for track in sorted(set(tracks)):
-        candidate = profile.resume_for(track)
-        if not candidate:
-            problems.append(f"{track}: no resume configured")
-        elif not Path(candidate).expanduser().is_file():
-            problems.append(f"{track}: file not found — {candidate}")
+    if jobs and hasattr(jobs[0], "track"):
+        for job in jobs:
+            job_id = getattr(job, "id", None)
+            candidate = profile.resume_for(job.track, job_id)
+            if not candidate:
+                problems.append(f"{getattr(job, 'company', job.track)} ({job.track}): no resume configured")
+            elif not Path(candidate).expanduser().is_file():
+                problems.append(f"{getattr(job, 'company', job.track)} ({job.track}): file not found — {candidate}")
+    else:
+        for track in sorted(set(jobs)):
+            candidate = profile.resume_for(track)
+            if not candidate:
+                problems.append(f"{track}: no resume configured")
+            elif not Path(candidate).expanduser().is_file():
+                problems.append(f"{track}: file not found — {candidate}")
     return problems

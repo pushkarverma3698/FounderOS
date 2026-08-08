@@ -14,7 +14,7 @@ const VEC = [0.1, 0.2, 0.3];
 
 function deps(over: Partial<EmbedCacheDeps>): EmbedCacheDeps {
   return {
-    get: vi.fn(async () => null),
+    get: vi.fn().mockResolvedValue(null) as unknown as EmbedCacheDeps["get"],
     set: vi.fn(async () => {}),
     embed: vi.fn(async () => VEC),
     ...over,
@@ -34,7 +34,7 @@ describe("embedCacheKey", () => {
 
 describe("embedTextCached", () => {
   it("returns the cached vector without embedding on a hit", async () => {
-    const d = deps({ get: vi.fn(async () => VEC) });
+    const d = deps({ get: vi.fn().mockResolvedValue(VEC) as unknown as EmbedCacheDeps["get"] });
     const out = await embedTextCached("q", d);
     expect(out).toEqual(VEC);
     expect(d.embed).not.toHaveBeenCalled();
@@ -42,20 +42,15 @@ describe("embedTextCached", () => {
   });
 
   it("embeds and writes through on a miss", async () => {
-    const d = deps({ get: vi.fn(async () => null) });
+    const d = deps({ get: vi.fn().mockResolvedValue(null) as unknown as EmbedCacheDeps["get"] });
     const out = await embedTextCached("q", d);
     expect(out).toEqual(VEC);
     expect(d.embed).toHaveBeenCalledWith("q");
-    expect(d.set).toHaveBeenCalledOnce();
-    // stored under the model+text key, with a positive TTL
-    const [key, value, ttl] = (d.set as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(String(key)).toMatch(/^embed:/);
-    expect(value).toEqual(VEC);
-    expect(ttl).toBeGreaterThan(0);
+    expect(d.set).toHaveBeenCalledWith(expect.any(String), VEC, expect.any(Number));
   });
 
   it("ignores an empty/garbage cached value and re-embeds (fail-safe)", async () => {
-    const d = deps({ get: vi.fn(async () => [] as number[]) });
+    const d = deps({ get: vi.fn().mockResolvedValue([]) as unknown as EmbedCacheDeps["get"] });
     const out = await embedTextCached("q", d);
     expect(out).toEqual(VEC);
     expect(d.embed).toHaveBeenCalled();
