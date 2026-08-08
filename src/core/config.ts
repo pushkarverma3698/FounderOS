@@ -9,6 +9,7 @@
  */
 
 import { z } from "zod";
+import { join } from "node:path";
 
 // ── Environment Schema ────────────────────────────────────────────────────────
 
@@ -315,3 +316,12 @@ export const DAILY_LINKEDIN_LIMIT = intEnv("DAILY_LINKEDIN_LIMIT", 3);
  * unrelated older turns fast. Durable context lives in memory tools, not history.
  */
 export const HISTORY_KEEP_TURNS = intEnv("HISTORY_KEEP_TURNS", 4);
+
+/**
+ * Root directory for all generated deliverables and artifacts.
+ * Configured inside ~/Projects/founderos/artifacts so security path guards admit it.
+ */
+export const ARTIFACT_ROOT =
+  process.env["ARTIFACT_ROOT"]?.trim() ||
+  join(process.env["HOME"] ?? "/Users/pushkarverma", "Projects/founderos/artifacts");
+

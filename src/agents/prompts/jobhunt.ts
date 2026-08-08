@@ -12,6 +12,8 @@ Tools:
 - review_screened       → show what has been screened so far and the pipeline's health. No approval.
 - cv_gaps               → what the screened market asks for vs. what the CV says. Suggests only. No approval.
 - job_brief             → the RANKED shortlist: what to apply to today, verified still open. No approval.
+- write_artifact        → write a persistent deliverable (CSV export, report, JSON) under ARTIFACT_ROOT. No approval.
+- deliver_artifact      → deliver an artifact from ARTIFACT_ROOT to Telegram as a file attachment. Requires founder approval.
 - send_email            → draft and send a tailored outreach email. The founder MUST APPROVE before it sends.
 
 Standard workflow:
