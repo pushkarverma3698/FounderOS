@@ -50,19 +50,19 @@ async def fill_form(page, job: QueueJob, profile: ApplyProfile) -> tuple[list[st
         pass
 
     if field_map is None:
-        plan = []
-        resume_selectors = ()
-    else:
-        plan = planned_fills(field_map, profile)
-        resume_selectors = field_map.resume
+        # An unrecognised ATS gets zero automation, not a best-effort guess —
+        # the heuristic resolver below is for filling GAPS in a map we already
+        # trust, not for deciding on its own that an unknown form is safe to
+        # touch.
+        return [], ["this ATS is not one we know — every field is yours"]
+
+    plan = planned_fills(field_map, profile)
+    resume_selectors = field_map.resume
 
     fallback_plan, fallback_resume = await resolve_fallback_fields(page, profile, plan)
     plan.extend(fallback_plan)
     if fallback_resume and not resume_selectors:
         resume_selectors = (fallback_resume,)
-
-    if not plan and not resume_selectors:
-        return [], ["this ATS is not one we know — every field is yours"]
 
     for label, selectors, value in plan:
         if not value.strip():
@@ -235,18 +235,17 @@ def main() -> int:
 
     problems = missing_resumes(profile, jobs)
     if problems:
+        # One job missing a resume must not block every other job in the
+        # queue — refusing to start over a single row was the old behaviour,
+        # and it cost a whole day's queue for one bad row. Skip only the rows
+        # that are actually missing a resume; they are reported, not silently
+        # dropped, and come back once the resume is on disk.
         print("⚠ The following jobs are missing required resumes and will be skipped:")
         for problem in problems:
             print(f"    {problem}")
-        
-        # Filter out jobs that are missing resumes
-        valid_jobs = []
-        for job in jobs:
-            if not missing_resumes(profile, [job]):
-                valid_jobs.append(job)
-        
-        jobs = valid_jobs
-        
+
+        jobs = [job for job in jobs if not missing_resumes(profile, [job])]
+
         if not jobs:
             print("✗ No jobs left in the queue with valid resumes. Refusing to start.")
             return 1
