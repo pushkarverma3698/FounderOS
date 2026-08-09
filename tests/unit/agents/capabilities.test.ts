@@ -5,6 +5,8 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   DEPARTMENT_TOOLS,
   SUPERVISOR_TOOLS,
@@ -121,6 +123,32 @@ describe("buildCapabilityManifest", () => {
       if (allNames.includes(tool)) {
         expect(HITL_GATED_TOOLS.has(tool), `Side-effecting tool '${tool}' must be HITL-gated`).toBe(true);
       }
+    }
+  });
+
+  it("imports no tool it never places in a department or sub-agent cluster", () => {
+    const source = readFileSync(fileURLToPath(new URL("../../../src/agents/capabilities.ts", import.meta.url)), "utf8");
+    const imported = [...source.matchAll(/^import\s*\{([^}]+)\}\s*from/gms)]
+      .flatMap((m) => m[1]!.split(","))
+      .map((s) => s.trim().split(/\s+as\s+/).pop()!.trim())
+      .filter((s) => s.length > 0 && !s.startsWith("type "));
+    const body = source.replace(/^import[\s\S]*?from\s+"[^"]+";$/gm, "");
+    const orphans = imported.filter((name) => !new RegExp(`\\b${name}\\b`).test(body));
+    // 2026-08-06: P7 siloed github_write out of every department and P7-B restored
+    // only githubRead — but the import stayed, leaving a tool nothing could reach
+    // and lint could not see (no-unused-vars does not flag it here).
+    expect(orphans, `imported but never registered: ${orphans.join(", ")}`).toEqual([]);
+  });
+
+  it("github_write stays out of the declared set unless it is also HITL-gated", () => {
+    const allNames = Object.values(DEPARTMENT_TOOLS)
+      .flat()
+      .map((t: { name: string }) => t.name);
+    // P7 (5623eff) removed it from engineering; P7-B (7d163a9) restored read only.
+    // Re-adding it is a product decision, but it must not arrive ungated: the tool
+    // has an inline hitlGate(), and the declared set is what renders the `*`.
+    if (allNames.includes("github_write")) {
+      expect(HITL_GATED_TOOLS.has("github_write"), "github_write must be declared HITL-gated").toBe(true);
     }
   });
 
