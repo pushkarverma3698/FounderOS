@@ -65,6 +65,7 @@ gumroad-packs/
 mac-client/.venv*/
 mac-client/apply-profile.json
 mac-client/.queue/
+mac-client/*.pdf
 
 # Python bytecode from the Mac client
 __pycache__/

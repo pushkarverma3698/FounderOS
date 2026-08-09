@@ -71,8 +71,43 @@
     }
 
     target.click();
+
     // Give the page a moment to accept the submission before we navigate away.
-    setTimeout(() => window.founderosDecision("applied"), 1200);
+    // Poll for a confirmation signal: URL change, success text, or form removal.
+    const startUrl = window.location.href;
+    const startTime = Date.now();
+    const timeoutMs = 5000;
+    
+    const checkConfirmation = () => {
+      if (Date.now() - startTime > timeoutMs) {
+        decided = false;
+        submit.disabled = false;
+        skip.disabled = false;
+        submit.innerHTML = "SUBMIT &amp; NEXT →";
+        summary.innerHTML +=
+          '<div style="color:#FFCC66;font-size:13px;margin-top:4px;">Submit didn\'t confirm automatically. Check the page and press SKIP or SUBMIT again.</div>';
+        return;
+      }
+      
+      const currentUrl = window.location.href;
+      if (currentUrl !== startUrl && !currentUrl.includes("#")) {
+        return window.founderosDecision("applied");
+      }
+      
+      const text = document.body.innerText.toLowerCase();
+      if (text.includes("thank you") || text.includes("application received") || text.includes("application submitted")) {
+        return window.founderosDecision("applied");
+      }
+      
+      // If the submit button detached from the DOM, it's a good sign the form submitted.
+      if (!document.body.contains(target)) {
+        return window.founderosDecision("applied");
+      }
+      
+      setTimeout(checkConfirmation, 300);
+    };
+    
+    setTimeout(checkConfirmation, 500);
   };
 
   function lock(label) {
