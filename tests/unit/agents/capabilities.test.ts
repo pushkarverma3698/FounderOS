@@ -86,10 +86,41 @@ describe("buildCapabilityManifest", () => {
     expect(manifest).toMatch(/pnpm mcp/);
   });
 
-  it("HITL set covers every side-effecting tool name present in departments", () => {
+  it("HITL set must cover all known side-effecting tools and have no orphaned gates", () => {
     const allNames = Object.values(DEPARTMENT_TOOLS).flat().map((t: { name: string }) => t.name);
+    
+    // 1. Every tool listed in HITL_GATED_TOOLS must actually be registered in a department
     for (const gated of HITL_GATED_TOOLS) {
       expect(allNames, `${gated} exists in a department`).toContain(gated);
+    }
+    
+    // 2. Every reachable tool that causes an external or durable side effect MUST be HITL-gated
+    const sideEffectingTools = [
+      "send_email",
+      "vps_run",
+      "write_file",
+      "send_file",
+      "deploy_static_site",
+      "claude_code",
+      "project_workflow",
+      "run_shell",
+      "linkedin_post",
+      "schedule_social_post",
+      "draft_linkedin_reply",
+      "draft_connection_note",
+      "create_calendar_event",
+      "schedule_task",
+      "record_event",
+      "deliver_artifact",
+      "browser",
+      "synthesize_skill"
+    ];
+    
+    for (const tool of sideEffectingTools) {
+      // If the tool is reachable in any department, it MUST be in the HITL set
+      if (allNames.includes(tool)) {
+        expect(HITL_GATED_TOOLS.has(tool), `Side-effecting tool '${tool}' must be HITL-gated`).toBe(true);
+      }
     }
   });
 

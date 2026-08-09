@@ -98,21 +98,21 @@ type AnyTool = any;
 import { synthesizeSkill } from "./agent-tools.js";
 
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill],
+  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
-  engineering: [projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill],
-  marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts],
-  sales: [searchWeb],
-  personal: [readFile, listDir, runShell, browser, searchPersonalRag],
-  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobState, writeArtifact, deliverArtifact],
+  engineering: [projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead],
+  marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
+  sales: [searchWeb, createSendEmailTool("sales"), searchKnowledge],
+  personal: [readFile, listDir, runShell, browser, searchPersonalRag, sendFile, writeFile],
+  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobState, writeArtifact, deliverArtifact, jobBrief, createSendEmailTool("jobhunt")],
 };
 
 /** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops). */
 export const ENGINEERING_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
   coder: [claudeCode, githubRead, synthesizeSkill],
   qa: [claudeCode, githubRead],
-  devops: [githubWrite, projectWorkflow],
+  devops: [claudeCode, projectWorkflow],
 };
 
 /** Marketing sub-domain tool clusters (ADR-027 pattern). */
@@ -149,6 +149,8 @@ export const HITL_GATED_TOOLS = new Set([
   "record_event",
   "deliver_artifact",
   "synthesize_skill",
+  "write_file",
+  "send_file",
 ]);
 
 /**
