@@ -140,6 +140,32 @@ describe("buildCapabilityManifest", () => {
     expect(orphans, `imported but never registered: ${orphans.join(", ")}`).toEqual([]);
   });
 
+  it("the RAG placement docblock matches where the RAG tools actually are", () => {
+    // The docblock claimed searchPersonalRag → personal + jobhunt and
+    // searchTuricksBrain → personal + research + sales + marketing long after P7
+    // (5623eff) reduced both to a single department each. A capability registry
+    // whose own comment is wrong is the exact failure this file exists to prevent.
+    const toolNameOf: Record<string, string> = {
+      searchPersonalRag: "search_personal_rag",
+      searchTuricksBrain: "search_turicks_brain",
+    };
+    const source = readFileSync(fileURLToPath(new URL("../../../src/agents/capabilities.ts", import.meta.url)), "utf8");
+    const documented = [...source.matchAll(/^\s*\*\s*(searchPersonalRag|searchTuricksBrain)\s*→\s*(.+)$/gm)];
+    expect(documented.length, "both RAG tools are documented").toBe(2);
+
+    for (const [, ident, rhs] of documented) {
+      const claimed = rhs!
+        .split("+")
+        .map((s) => s.trim())
+        .sort();
+      const actual = Object.entries(DEPARTMENT_TOOLS)
+        .filter(([, tools]) => tools.some((t: { name: string }) => t.name === toolNameOf[ident!]))
+        .map(([dept]) => dept)
+        .sort();
+      expect(claimed, `${ident} docblock says "${rhs}" but the registry says "${actual.join(" + ")}"`).toEqual(actual);
+    }
+  });
+
   it("github_write stays out of the declared set unless it is also HITL-gated", () => {
     const allNames = Object.values(DEPARTMENT_TOOLS)
       .flat()
