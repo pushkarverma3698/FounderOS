@@ -39,13 +39,18 @@ export function findSlop(text: string): SlopViolation[] {
     }
   }
 
-  // Check for colon reveals (A noun phrase, a colon, then a lowercase dramatic reveal)
-  const colonRevealRegex = /[^.!?]+:\s+[a-z][^.!?]+/g;
-  const colonMatches = text.match(colonRevealRegex);
-  if (colonMatches) {
-    // we just flag the presence
-    for (const m of colonMatches) {
-      violations.push({ rule: "Colon reveal", matchedText: m });
+  // Check for colon reveals (a noun phrase, a colon, then a lowercase dramatic
+  // reveal) — e.g. "The real secret: nobody tells you this." Scoped to a
+  // single line and skipped for markdown list/header lines, because those
+  // carry structured CV content ("- Languages: typescript, python, go") that
+  // this pattern would otherwise misfire on.
+  const colonRevealRegex = /^[^\n:]{15,}:\s+[a-z][^\n.!?]{15,}[.!?]/;
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (/^([-*•]|\d+[.)]|#)/.test(trimmed)) continue;
+    const match = trimmed.match(colonRevealRegex);
+    if (match) {
+      violations.push({ rule: "Colon reveal", matchedText: match[0] });
     }
   }
 
