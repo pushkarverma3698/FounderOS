@@ -5,46 +5,19 @@
  *   "Send the text.txt file on my desktop" → supervisor responded "Okay"
  *   without routing to personal or calling any tool (toolErrors: 0).
  *
- * These tests verify the SUPERVISOR_PROMPT routing rules deterministically
- * classify personal-routing triggers. They are pure string/routing tests —
- * no LLM calls (the routing logic is in the prompt, but we test the routing
- * scorer logic + prompt routing strings from routeFromMessages).
+ * These tests verify the WORKER half of that guard: PERSONAL_PROMPT must force
+ * a tool call rather than a plausible answer. Pure string assertions, no LLM.
+ *
+ * The ROUTER half lived in SUPERVISOR_PROMPT, deleted in P6 with the supervisor
+ * itself. Its v3 descendant is the planner's direct-reply clause, guarded in
+ * tests/unit/kernel/planner-prompt.test.ts.
  *
  * The golden-tasks eval covers end-to-end routing with a live model.
  * These unit tests catch PROMPT REGRESSION for personal routing keywords.
  */
 
 import { describe, it, expect } from "vitest";
-import { SUPERVISOR_PROMPT, PERSONAL_PROMPT } from "../../../src/agents/system-prompts.js";
-
-describe("SUPERVISOR_PROMPT — personal routing keywords", () => {
-  it("contains explicit routing for 'send me / attach / share file' requests", () => {
-    const prompt = SUPERVISOR_PROMPT.toLowerCase();
-    // Must have "send me" or "attach" or "share" mapped to personal
-    expect(prompt).toMatch(/send.*file|attach.*file|share.*file/);
-  });
-
-  it("contains CANNOT rule preventing supervisor from answering file questions itself", () => {
-    expect(SUPERVISOR_PROMPT).toMatch(/NO filesystem|NEVER say.*can't run|Route to personal/i);
-  });
-
-  it("contains routing rule for Desktop / home folder patterns", () => {
-    const prompt = SUPERVISOR_PROMPT.toLowerCase();
-    expect(prompt).toMatch(/desktop|downloads|documents|home folder|~ path/);
-  });
-
-  it("contains routing rule for follow-up messages (Attach it, Where is it)", () => {
-    expect(SUPERVISOR_PROMPT).toMatch(/Attach it|Now run it|Where is it/i);
-  });
-
-  it("routing rules include jobhunt as a department", () => {
-    expect(SUPERVISOR_PROMPT).toContain("jobhunt");
-  });
-
-  it("tech stack mention includes correct GitHub URL", () => {
-    expect(SUPERVISOR_PROMPT).toContain("github.com/pushkarverma3698/FounderOS");
-  });
-});
+import { PERSONAL_PROMPT } from "../../../src/agents/system-prompts.js";
 
 describe("PERSONAL_PROMPT — mandatory tool usage", () => {
   it("contains MANDATORY TOOL USAGE section", () => {

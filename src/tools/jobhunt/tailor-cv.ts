@@ -15,6 +15,7 @@ import { childLogger } from "../../infra/logger.js";
 import { readFullCvText } from "../career.js";
 import { extractSkillTerms } from "./skills.js";
 import { overlapScore } from "./overlap.js";
+import { findSlop } from "./slop-rules.js";
 
 const log = childLogger({ module: "tool:tailor_cv" });
 
@@ -119,11 +120,52 @@ Generate the complete, ATS-tailored Markdown CV now.
       : JSON.stringify(response.content);
 
     // Clean up markdown block tags if the LLM wrapped the output in ```markdown ... ```
-    const cleanedMarkdown = content
+    let cleanedMarkdown = content
       .replace(/^```markdown\s*/i, "")
       .replace(/^```\s*/i, "")
       .replace(/```\s*$/i, "")
       .trim();
+
+    let violations = findSlop(cleanedMarkdown);
+    if (violations.length > 0) {
+      log.warn({ violations: violations.length, company: opts.companyName }, "Slop violations found, requesting one revision");
+      
+      const revisionPrompt = `Your previous output contained AI cliches or banned patterns.
+Please fix the following violations. Do NOT fully rewrite the CV, just fix these specific lines:
+
+${violations.map(v => `- Rule: ${v.rule}\n  Matched text: "${v.matchedText}"`).join("\n\n")}
+
+Output the corrected full Markdown CV.`;
+
+      const revisionResponse = await model.invoke([
+        { role: "system", content: TAILORING_SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+        { role: "assistant", content: content },
+        { role: "user", content: revisionPrompt },
+      ]);
+
+      const revContent = typeof revisionResponse.content === "string" 
+        ? revisionResponse.content 
+        : JSON.stringify(revisionResponse.content);
+        
+      cleanedMarkdown = revContent
+        .replace(/^```markdown\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
+        
+      violations = findSlop(cleanedMarkdown);
+      if (violations.length > 0) {
+        log.error({ violations: violations.length, company: opts.companyName }, "Slop violations persist after revision");
+        return {
+          success: false,
+          matchedSkills: overlap.matched,
+          missingSkills: overlap.missing,
+          initialOverlapRatio: overlap.ratio,
+          error: `CV still contains AI slop after revision: ${violations.map(v => v.matchedText).join(", ")}`
+        };
+      }
+    }
 
     return {
       success: true,

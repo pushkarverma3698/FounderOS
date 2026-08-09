@@ -249,7 +249,7 @@ export async function runFreeSweep(): Promise<void> {
   // rows 48 times a day spends API quota to produce no change, and it would
   // overwrite the `Applied` column between a founder's click and his next sync.
   if (newPasses.length === 0) {
-    const { next, ping } = afterQuietSweep(heartbeat, result.boardsPolled, now, lastSheetLink);
+    const { next, ping } = afterQuietSweep(heartbeat, result.boardsPolled, result.funnel, now, lastSheetLink);
     heartbeat = next;
     if (ping !== null) await sendToChat(ping);
     return;

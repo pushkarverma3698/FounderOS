@@ -14,6 +14,7 @@
  *   R4 loc-budget        no src file over 400 lines
  *   R5 regex-routing     exported *_RE control-flow regexes outside the kernel
  *   R6 tombstones        deleted slop modules must STAY deleted (hard fail)
+ *   R7 orphan-subsystem  every src/ subsystem is imported by src/ or a script
  *
  * Usage:
  *   node --import tsx/esm scripts/verify-architecture.ts            # verify
@@ -80,6 +81,19 @@ function srcFiles(): Array<{ rel: string; text: string }> {
   return walk(join(ROOT, "src"))
     .map((f) => relative(ROOT, f))
     .filter((rel) => !FROZEN.some((p) => rel.startsWith(p)))
+    .map((rel) => ({ rel, text: readFileSync(join(ROOT, rel), "utf8") }));
+}
+
+/**
+ * Files scanned for reachability only — never treated as subsystems themselves.
+ * package.json runs scripts/, so they are explicit entrypoints: a subsystem
+ * imported only by a script is reachable, not dead.
+ */
+function scriptFiles(): Array<{ rel: string; text: string }> {
+  const dir = join(ROOT, "scripts");
+  if (!existsSync(dir)) return [];
+  return walk(dir)
+    .map((f) => relative(ROOT, f))
     .map((rel) => ({ rel, text: readFileSync(join(ROOT, rel), "utf8") }));
 }
 
@@ -214,6 +228,50 @@ export function checkRatchet(results: RuleResult[], baseline: Baseline): { ok: b
   return { ok, report };
 }
 
+/**
+ * R7 — a src/ subsystem nothing can reach is dead weight that reads as live.
+ *
+ * "Reach" means imported from outside its own directory by another src/ module
+ * OR by a script in `roots`. Counting src/ importers alone names src/proof and
+ * src/eval dead — both are live via `pnpm proof:*` and `pnpm eval` — and a CI
+ * gate that publishes live subsystems as deletable is worse than no gate.
+ *
+ * Directories are derived from `files`, so a directory holding only ambient
+ * .d.ts declarations (src/types) is not a subsystem: nothing imports a global
+ * declaration, and deleting it breaks the build.
+ */
+export function ruleOrphanSubsystem(
+  files: Array<{ rel: string; text: string }>,
+  roots: Array<{ rel: string; text: string }> = [],
+): RuleResult {
+  const subsystems = new Set<string>();
+  for (const { rel } of files) {
+    const [root, dir, ...rest] = rel.split("/");
+    if (root !== "src" || rest.length === 0) continue; // top-level file, not a subsystem
+    subsystems.add(dir!);
+  }
+
+  const violations: Violation[] = [];
+  for (const dir of subsystems) {
+    const prefix = `src/${dir}/`;
+    const isReachable = [...files, ...roots].some(
+      ({ rel, text }) =>
+        !rel.startsWith(prefix) && // ignore internal references
+        importsOf(text).some((spec) => {
+          const resolved = resolveImport(rel, spec);
+          return resolved?.startsWith(prefix) || resolved === `src/${dir}`;
+        }),
+    );
+    if (isReachable) continue;
+    violations.push({
+      rule: "orphan-subsystem",
+      file: prefix,
+      detail: "nothing outside the directory imports it, and no script entrypoint reaches it",
+    });
+  }
+  return { rule: "orphan-subsystem", violations };
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export function runAllRules(): RuleResult[] {
@@ -224,6 +282,7 @@ export function runAllRules(): RuleResult[] {
     ruleFailOpenCatch(files),
     ruleLocBudget(files),
     ruleRegexRouting(files),
+    ruleOrphanSubsystem(files, scriptFiles()),
   ];
 }
 

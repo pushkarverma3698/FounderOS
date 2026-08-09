@@ -19,7 +19,7 @@ vi.mock("../../../src/tools/jobhunt/indeed-source.js", async (orig) => {
 });
 
 const {
-  classifyHttpStatus,
+  classifyResponse,
   livenessReason,
   mapWithConcurrencyLimit,
   verifyLiveness,
@@ -32,32 +32,33 @@ beforeEach(() => {
   mockLookup.mockResolvedValue(new Map());
 });
 
-describe("classifyHttpStatus", () => {
+const defaultReq = { requestedUrl: "https://example.com/job/1", finalUrl: "https://example.com/job/1", redirected: false };
+
+describe("classifyResponse", () => {
   it("treats 404 and 410 as gone", () => {
-    expect(classifyHttpStatus(404)).toBe("expired");
-    expect(classifyHttpStatus(410)).toBe("expired");
+    expect(classifyResponse({ ...defaultReq, status: 404 })).toBe("expired");
+    expect(classifyResponse({ ...defaultReq, status: 410 })).toBe("expired");
   });
 
   it("treats 2xx as live", () => {
-    expect(classifyHttpStatus(200)).toBe("live");
+    expect(classifyResponse({ ...defaultReq, status: 200 })).toBe("live");
   });
 
   it("does NOT treat a redirect as gone", () => {
     // Many ATS platforms redirect a live posting to its canonical URL. Reading
     // that as a closure would expire half the pipeline in one sweep.
-    expect(classifyHttpStatus(301)).toBe("live");
-    expect(classifyHttpStatus(302)).toBe("live");
+    expect(classifyResponse({ ...defaultReq, status: 200, redirected: true, finalUrl: "https://example.com/job/1/" })).toBe("live");
   });
 
   it("treats server errors and rate limits as unverifiable, not expired", () => {
     // A 503 is the site's problem, not the job's.
-    expect(classifyHttpStatus(500)).toBe("unverifiable");
-    expect(classifyHttpStatus(503)).toBe("unverifiable");
-    expect(classifyHttpStatus(429)).toBe("unverifiable");
+    expect(classifyResponse({ ...defaultReq, status: 500 })).toBe("unverifiable");
+    expect(classifyResponse({ ...defaultReq, status: 503 })).toBe("unverifiable");
+    expect(classifyResponse({ ...defaultReq, status: 429 })).toBe("unverifiable");
   });
 
   it("treats a 403 as unverifiable — a bot block is not a closed job", () => {
-    expect(classifyHttpStatus(403)).toBe("unverifiable");
+    expect(classifyResponse({ ...defaultReq, status: 403 })).toBe("unverifiable");
   });
 });
 

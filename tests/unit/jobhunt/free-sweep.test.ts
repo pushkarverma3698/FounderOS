@@ -63,6 +63,16 @@ function result(overrides: Partial<FreeIngestResult> = {}): FreeIngestResult {
     notes: [],
     boardsPolled: 2,
     sweepId: "free-test",
+    funnel: {
+      seen: 10,
+      undated: 0,
+      stale: 0,
+      offTrack: 0,
+      offMarket: 0,
+      known: 0,
+      bodyless: 0,
+      screened: 5,
+    },
     ...overrides,
   };
 }

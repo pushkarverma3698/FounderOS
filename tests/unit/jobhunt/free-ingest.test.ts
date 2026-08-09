@@ -10,7 +10,7 @@
  * from outside.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { filterCandidates, FREE_LANE_MAX_AGE_HOURS } from "../../../src/tools/jobhunt/free-ingest.js";
 import type { FreeCandidate } from "../../../src/tools/jobhunt/free-ats-mappers.js";
 import type { FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
@@ -74,6 +74,57 @@ describe("filterCandidates — freshness", () => {
     const { kept } = filterCandidates([withinDefault, beyondDefault], NOW);
 
     expect(kept).toEqual([withinDefault]);
+  });
+});
+
+describe("FREE_LANE_MAX_AGE_HOURS — env parsing", () => {
+  /**
+   * REGRESSION. The window was widened to 30 days because a 6h window dropped
+   * 18,865 of 18,884 live postings and the lane screened zero. The first fix
+   * read the override as `Number(process.env[...] ?? 720)`, which restores that
+   * outcome from a single blank line in a .env: `??` only substitutes for
+   * `undefined`, so `FREE_LANE_MAX_AGE_HOURS=` parses to `Number("")` === 0,
+   * every posting is older than the window, and the lane goes dark with a green
+   * test suite and no error anywhere.
+   *
+   * A misparse must therefore fail WIDE (fall back to 720), never NARROW. Zero
+   * is not a legal window; it is the shape of a mistake.
+   */
+  const ORIGINAL = process.env["FREE_LANE_MAX_AGE_HOURS"];
+
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env["FREE_LANE_MAX_AGE_HOURS"];
+    else process.env["FREE_LANE_MAX_AGE_HOURS"] = ORIGINAL;
+    vi.resetModules();
+  });
+
+  async function windowFor(raw: string | undefined): Promise<number> {
+    if (raw === undefined) delete process.env["FREE_LANE_MAX_AGE_HOURS"];
+    else process.env["FREE_LANE_MAX_AGE_HOURS"] = raw;
+    vi.resetModules();
+    const mod = await import("../../../src/tools/jobhunt/free-ingest.js");
+    return mod.FREE_LANE_MAX_AGE_HOURS;
+  }
+
+  it.each([
+    ["unset", undefined],
+    ["blank", ""],
+    ["whitespace", "   "],
+    ["zero", "0"],
+    ["negative", "-6"],
+    ["non-numeric", "30d"],
+  ])("falls back to 720h when the override is %s", async (_label, raw) => {
+    await expect(windowFor(raw)).resolves.toBe(720);
+  });
+
+  it("honours a deliberate numeric override", async () => {
+    await expect(windowFor("48")).resolves.toBe(48);
+  });
+
+  it("never yields a window that would drop every posting", async () => {
+    for (const raw of [undefined, "", "   ", "0", "-6", "30d", "48"]) {
+      expect(await windowFor(raw)).toBeGreaterThan(0);
+    }
   });
 });
 

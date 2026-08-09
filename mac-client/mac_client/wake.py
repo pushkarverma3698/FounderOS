@@ -37,15 +37,6 @@ def main() -> int:
         return 1
 
     print(f"✓ {len(jobs)} job(s) synced and announced")
-
-    if jobs:
-        # Automatically launch interactive browser session when jobs are ready
-        import subprocess
-        from pathlib import Path
-        command_file = Path(__file__).resolve().parent.parent / "run-apply.command"
-        if command_file.is_file():
-            subprocess.run(["open", "-a", "Terminal", str(command_file)], check=False)
-
     return 0
 
 

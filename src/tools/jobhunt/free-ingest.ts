@@ -35,6 +35,7 @@
 import { randomUUID } from "node:crypto";
 import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
+import { intEnv } from "../../core/config.js";
 import { findApplicationByDedupeKey } from "../../db/job-queries.js";
 import type { RawPosting } from "./ats-source.js";
 import { FREE_PRICING } from "./cost.js";
@@ -51,21 +52,38 @@ const log = childLogger({ module: "jobhunt:free-ingest" });
 
 /**
  * How far back a posting may have been published and still be a candidate.
+ * Default: 720h (30 days) to drain standing inventory once. Deduplication is
+ * handled by keepUnseen (tracker lookup), while age bounds relevance.
  *
  * Deliberately much wider than the 30-minute polling interval. The window is the
- * lane's tolerance for its own downtime: at six hours a deploy, a restart or a
- * host outage lasting most of a morning costs nothing, because the next sweep
- * still sees everything published while the lane was dark. Narrowing it to match
- * the interval would make every missed sweep a permanent hole, and a permanent
- * hole in a feed nobody is invoicing is invisible.
+ * lane's tolerance for its own downtime: a deploy, a restart or a host outage
+ * costs nothing, because the next sweep still sees everything published while the
+ * lane was dark. Narrowing it to match the interval would make every missed sweep
+ * a permanent hole, and a permanent hole in a feed nobody is invoicing is
+ * invisible. The overlap it creates is free: a posting seen in an earlier sweep
+ * is already in the tracker and is dropped before it costs a body fetch.
  *
- * The overlap it creates is free: a posting seen in an earlier sweep is already
- * in the tracker and is dropped before it costs a body fetch.
+ * Parsed with intEnv, NOT `Number(process.env[...] ?? 720)`. `??` only catches
+ * unset; a present-but-blank `FREE_LANE_MAX_AGE_HOURS=` in a .env parses to 0,
+ * every posting becomes stale, and the lane silently returns to screening zero —
+ * the exact defect this window was widened to fix. intEnv rejects 0, NaN and
+ * negatives and falls back, so the failure direction is "too wide", never "dark".
  */
-export const FREE_LANE_MAX_AGE_HOURS = 6;
+export const FREE_LANE_MAX_AGE_HOURS = intEnv("FREE_LANE_MAX_AGE_HOURS", 720);
 
 /** Bound on the tracker lookups. Small queries, but not worth 400 at once. */
 const LOOKUP_CONCURRENCY = 12;
+
+export interface FreeFunnel {
+  readonly seen: number;
+  readonly undated: number;
+  readonly stale: number;
+  readonly offTrack: number;
+  readonly offMarket: number;
+  readonly known: number;
+  readonly bodyless: number;
+  readonly screened: number;
+}
 
 export interface FreeIngestResult {
   /** Postings the boards returned, before any filter. */
@@ -79,6 +97,8 @@ export interface FreeIngestResult {
   readonly notes: readonly string[];
   readonly boardsPolled: number;
   readonly sweepId: string;
+  /** Structured per-stage funnel summary. */
+  readonly funnel: FreeFunnel;
 }
 
 function hoursSince(date: Date, now: Date): number {
@@ -88,6 +108,12 @@ function hoursSince(date: Date, now: Date): number {
 interface FilterOutcome {
   readonly kept: readonly FreeCandidate[];
   readonly notes: readonly string[];
+  readonly counts: {
+    readonly undated: number;
+    readonly stale: number;
+    readonly offTrack: number;
+    readonly offMarket: number;
+  };
 }
 
 /**
@@ -139,7 +165,7 @@ export function filterCandidates(
   if (offMarket > 0) notes.push(`${offMarket} postings were outside the Netherlands and India`);
   if (undated > 0) notes.push(`${undated} postings stated no publication date and were skipped`);
 
-  return { kept, notes };
+  return { kept, notes, counts: { undated, stale, offTrack, offMarket } };
 }
 
 /**
@@ -212,6 +238,17 @@ export async function runFreeIngest(
   if (known > 0) notes.push(`${known} postings were already in the tracker`);
   if (bodyless > 0) notes.push(`${bodyless} postings had no readable description and were skipped`);
 
+  const funnel: FreeFunnel = {
+    seen: sweep.candidates.length,
+    undated: filtered.counts.undated,
+    stale: filtered.counts.stale,
+    offTrack: filtered.counts.offTrack,
+    offMarket: filtered.counts.offMarket,
+    known,
+    bodyless,
+    screened: postings.length,
+  };
+
   // RECORDED EVEN THOUGH IT IS FREE, and recorded as zero rather than omitted. A
   // lane that writes no ledger row is indistinguishable from a lane that did not
   // run, and this one runs unattended forty-eight times a day.
@@ -229,6 +266,7 @@ export async function runFreeIngest(
 
   log.info(
     {
+      funnel,
       boards: boards.length,
       seen: sweep.candidates.length,
       screened: postings.length,
@@ -245,5 +283,6 @@ export async function runFreeIngest(
     notes,
     boardsPolled: sweep.boardsPolled,
     sweepId,
+    funnel,
   };
 }
