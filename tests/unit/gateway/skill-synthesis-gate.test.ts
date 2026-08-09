@@ -8,10 +8,27 @@
  * Two independent locks, one test each:
  *   1. SKILL_SYNTHESIS_ENABLED off  → the tool is never OFFERED to a worker.
  *   2. even when offered            → it is HITL-gated, so no unattended write.
+ *
+ * Lock 2 is asserted against the RUNTIME gate, not against membership in
+ * HITL_GATED_TOOLS. That set has no runtime effect whatsoever — it only feeds
+ * the capability manifest's `*` rendering and the wiring check — so a
+ * membership assertion passes happily while the tool writes to disk ungated.
+ * It did: from 2026-08-08 until the P7-B review, `synthesize_skill` sat in the
+ * set with no hitlGate() call anywhere in its implementation.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { buildWorkerSpecs } from "../../../src/gateway/kernel-boot.js";
-import { HITL_GATED_TOOLS } from "../../../src/agents/capabilities.js";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+
+const mockInterrupt = vi.fn();
+
+vi.mock("@langchain/langgraph", async (orig) => {
+  const actual = await (orig() as Promise<Record<string, unknown>>);
+  return { ...actual, interrupt: mockInterrupt };
+});
+
+const { buildWorkerSpecs } = await import("../../../src/gateway/kernel-boot.js");
+const { synthesizeSkill } = await import("../../../src/tools/skill-synthesizer.js");
 
 function toolNamesFor(workerId: string): string[] {
   const w = buildWorkerSpecs().find((s) => s.id === workerId);
@@ -22,6 +39,7 @@ describe("synthesize_skill — production safety gate", () => {
   const original = process.env["SKILL_SYNTHESIS_ENABLED"];
   beforeEach(() => {
     delete process.env["SKILL_SYNTHESIS_ENABLED"];
+    vi.clearAllMocks();
   });
   afterEach(() => {
     if (original === undefined) delete process.env["SKILL_SYNTHESIS_ENABLED"];
@@ -44,7 +62,35 @@ describe("synthesize_skill — production safety gate", () => {
     expect(toolNamesFor("engineering")).toContain("synthesize_skill");
   });
 
-  it("is HITL-gated, so enabling the flag still never means an unattended code write", () => {
-    expect(HITL_GATED_TOOLS.has("synthesize_skill")).toBe(true);
+  // ── Lock 2: the RUNTIME gate ───────────────────────────────────────────────
+
+  it("asks the founder for approval before synthesizing — interrupt fires with the real action", async () => {
+    mockInterrupt.mockReturnValue("rejected");
+
+    await synthesizeSkill.invoke({
+      name: "gate_probe_approved",
+      description: "runtime gate probe",
+      tsCode: "export const probe = 1;\n",
+    });
+
+    expect(mockInterrupt).toHaveBeenCalledOnce();
+    expect(mockInterrupt.mock.calls[0]?.[0]).toMatchObject({
+      kind: "approval",
+      action: "synthesize_skill",
+    });
+  });
+
+  it("rejection writes NOTHING to the source tree — the gate precedes the first fs write", async () => {
+    mockInterrupt.mockReturnValue("rejected");
+    const toolPath = path.resolve("./src/tools/custom/gate_probe_rejected.ts");
+
+    const result = await synthesizeSkill.invoke({
+      name: "gate_probe_rejected",
+      description: "runtime gate probe",
+      tsCode: "export const probe = 1;\n",
+    });
+
+    expect(result).toBe("❌ Rejected by founder.");
+    await expect(fs.access(toolPath)).rejects.toThrow();
   });
 });

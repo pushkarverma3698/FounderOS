@@ -70,7 +70,7 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     id: "eng-create-issue",
     input: "Create a GitHub issue on pushkarverma3698/FounderOS titled 'Add eval harness CI'.",
     expectedRoute: "engineering",
-    expectedTools: ["github_write"],
+    expectedTools: ["claude_code"],
     expectsHitl: true,
   },
 
@@ -197,7 +197,7 @@ export const GOLDEN_TASKS: GoldenTask[] = [
     id: "eng-build-feature",
     input: "Create a new GitHub issue on pushkarverma3698/FounderOS titled 'feat: add job-hunt golden eval tasks' with a body describing the test.",
     expectedRoute: "engineering",
-    expectedTools: ["github_write"],
+    expectedTools: ["claude_code"],
     expectsHitl: true,
   },
 
