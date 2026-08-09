@@ -21,9 +21,9 @@
  *   - checkpoint fresh          → stale missions stay paused, never spontaneously re-run
  *
  * Re-running the interrupted node is safe by construction: external sends are
- * idempotency-keyed and gated behind interrupt() BEFORE any side effect
- * (src/kernel/tool-adapter.ts pins the ordering), so a resumed step can at
- * worst repeat read-only work.
+ * idempotency-keyed and gated behind interrupt() BEFORE any side effect — each
+ * side-effecting tool in src/agents/agent-tools/ calls hitlGate() inline, in
+ * that order — so a resumed step can at worst repeat read-only work.
  */
 
 import { TENANT, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS, OFFICE_RECURSION_LIMIT } from "../core/config.js";
