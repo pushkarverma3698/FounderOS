@@ -128,9 +128,9 @@ Read-only tools (search, list, read) do NOT need `hitlGate`.
 
 ---
 
-### ✅ 6. Wire into the correct department in `src/agents/office.ts`
+### ✅ 6. Wire into the correct department in `src/agents/capabilities.ts`
 
-Add the exported tool to the right `createReactAgent({ tools: [...] })` call.
+Add the exported tool to the right entry of `DEPARTMENT_TOOLS`.
 **Do not add to `src/tools/index.ts`** — that registry is dead code and is not used by the agent.
 
 ---
