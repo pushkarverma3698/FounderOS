@@ -14,7 +14,7 @@
  */
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { getModel } from "../src/agents/model.js";
-import { buildSupervisorPrompt } from "../src/agents/system-prompts.js";
+import { JOBHUNT_PROMPT } from "../src/agents/system-prompts.js";
 import { buildCapabilityManifest } from "../src/agents/capabilities.js";
 
 function usageOf(res: unknown): Record<string, unknown> {
@@ -23,16 +23,19 @@ function usageOf(res: unknown): Record<string, unknown> {
     usage_metadata: r.usage_metadata ?? null,
     response_usage:
       (r.response_metadata?.["usage_metadata"] as unknown) ??
-      (r.response_metadata?.["tokenUsage"] as unknown) ??
+      (r.response_metadata?.["usage"] as unknown) ??
       null,
   };
 }
 
 async function main() {
+  console.log("Probing Gemini 2.5 Flash Implicit Caching...");
+  console.log("--------------------------------------------");
+
   const model = getModel();
-  // Realistic, large, STABLE prefix (the actual production supervisor prefix).
-  const prefix = `${buildSupervisorPrompt()}\n\n${buildCapabilityManifest()}`;
-  const sys = new SystemMessage(prefix);
+  const manifest = buildCapabilityManifest();
+  const sys = new SystemMessage(`${JOBHUNT_PROMPT}\n\n${manifest}`);
+  const prefix = sys.content as string;
   console.log(`[probe] stable prefix chars=${prefix.length} (~${Math.ceil(prefix.length / 4)} tok)\n`);
 
   const questions = [

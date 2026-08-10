@@ -307,6 +307,43 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
       return;
     }
 
+    if (req.method === "GET" && urlPath === "/api/v1/jobhunt/queue") {
+      void getPgPool().query(`
+        SELECT id, company, title, track, url, brief_rank, brief_section, tailored_cv_s3_key
+        FROM agents.job_applications
+        WHERE tenant_id = 'turicks'
+          AND brief_section IN ('do_today','stretch')
+          AND applied_at IS NULL
+          AND skipped_at IS NULL
+          AND url IS NOT NULL
+        ORDER BY brief_rank
+      `).then((resDb) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(resDb.rows));
+      }).catch((err) => {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && urlPath.startsWith("/api/v1/jobhunt/") && urlPath.endsWith("/skip")) {
+      const id = urlPath.split("/")[4];
+      if (id) {
+        void getPgPool().query(
+          "UPDATE agents.job_applications SET skipped_at = now(), updated_at = now() WHERE id = $1 AND skipped_at IS NULL", 
+          [id]
+        ).then(() => {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ status: "skipped" }));
+        }).catch((err) => {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        return;
+      }
+    }
+
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "not_found" }));
   });

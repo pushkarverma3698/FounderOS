@@ -13,6 +13,7 @@ import {
   ruleFailOpenCatch,
   ruleLocBudget,
   ruleRegexRouting,
+  ruleOrphanSubsystem,
   checkRatchet,
   LOC_BUDGET,
 } from "../../../scripts/verify-architecture.js";
@@ -108,6 +109,44 @@ describe("R5 regex-routing", () => {
     const res = ruleRegexRouting(files);
     expect(res.violations).toHaveLength(1);
     expect(res.violations[0]!.file).toBe("src/gateway/guard.ts");
+  });
+});
+
+describe("R7 orphan-subsystem", () => {
+  const flagged = (
+    files: Array<{ rel: string; text: string }>,
+    roots: Array<{ rel: string; text: string }> = [],
+  ) => ruleOrphanSubsystem(files, roots).violations.map((v) => v.file);
+
+  const entry = f("src/index.ts", `import { s } from "./kernel/graph.js";`);
+  const kernel = f("src/kernel/graph.ts", `export const s = 1;`);
+
+  it("flags a subsystem nothing outside it imports", () => {
+    const files = [entry, kernel, f("src/ghost/index.ts", `import { a } from "./a.js";`)];
+    expect(flagged(files)).toEqual(["src/ghost/"]);
+  });
+
+  it("clears a subsystem imported by another src module", () => {
+    const files = [
+      f("src/index.ts", `import { b } from "./gateway/boot.js";`),
+      f("src/gateway/boot.ts", `import { run } from "../ghost/index.js";`),
+      f("src/ghost/index.ts", `import { a } from "./a.js";`),
+    ];
+    expect(flagged(files)).toEqual([]);
+  });
+
+  // The src/proof regression: script-only subsystems are LIVE (pnpm proof:*,
+  // pnpm eval). A rule counting src/ importers alone named them deletable.
+  it("clears a subsystem reached only by a script entrypoint", () => {
+    const files = [f("src/proof/render.ts", `export const x = 1;`)];
+    const roots = [f("scripts/proof-scoreboard.ts", `import { r } from "../src/proof/render.js";`)];
+    expect(flagged(files, roots)).toEqual([]);
+    // …and it is the script that saves it, not a loophole in the rule.
+    expect(flagged(files)).toEqual(["src/proof/"]);
+  });
+
+  it("does not treat top-level src files as subsystems", () => {
+    expect(flagged([entry, kernel])).toEqual([]);
   });
 });
 

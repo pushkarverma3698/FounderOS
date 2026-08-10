@@ -52,12 +52,22 @@ export function envelopeMessage(envelope: TaskEnvelope, results: StepResult[]): 
   );
 }
 
-/** Deterministic founder-facing failure reply — fail loud, name the component. */
-export function formatFailureReply(failure: FailureReport): string {
+/** Deterministic founder-facing failure reply — fail loud, name completed steps + blocked component. */
+export function formatFailureReply(failure: FailureReport, results: StepResult[] = []): string {
+  const okResults = results.filter((r) => r.status === "ok");
   const lines = [
     `⚠️ Task stopped at step "${failure.step_id}" — ${failure.stage} failure in ${failure.component}.`,
     failure.message,
   ];
+
+  if (okResults.length > 0) {
+    lines.push(`\nCompleted steps before failure:`);
+    for (const r of okResults) {
+      const summary = typeof r.output === "string" ? r.output.slice(0, 150) : JSON.stringify(r.output).slice(0, 150);
+      lines.push(`• Step "${r.step_id}": ${summary}`);
+    }
+  }
+
   if (failure.evidence) lines.push(`Evidence: ${failure.evidence.slice(0, 400)}`);
   lines.push(
     failure.stage === "hitl_rejected"
@@ -117,7 +127,7 @@ export function dispatch(state: KernelStateType): KernelUpdate {
       message: "Dispatch reached with no plan — planner contract violated.",
       retryable: false,
     };
-    return { mission: { ...mission, status: "failed" }, failure, reply: formatFailureReply(failure) };
+    return { mission: { ...mission, status: "failed" }, failure, reply: formatFailureReply(failure, results) };
   }
 
   const okStepIds = new Set(results.filter(r => r.status === "ok").map(r => r.step_id));
@@ -175,7 +185,7 @@ export function dispatch(state: KernelStateType): KernelUpdate {
     return {
       mission: { ...mission, status: "failed", cursor: nextStepIdx },
       failure: failureReport,
-      reply: formatFailureReply(failureReport),
+      reply: formatFailureReply(failureReport, results),
     };
   }
 
@@ -184,7 +194,7 @@ export function dispatch(state: KernelStateType): KernelUpdate {
     return {
       mission: { ...mission, status: "failed" },
       failure: failedStep.failure,
-      reply: formatFailureReply(failedStep.failure),
+      reply: formatFailureReply(failedStep.failure, results),
     };
   }
 

@@ -57,6 +57,10 @@ export function mockQueriesModule() {
 
     // G4: Daily outbound quota (Postgres-backed) — default 0 so tests pass under limit
     getDailyOutboundCount: vi.fn().mockResolvedValue(0),
+
+    // State tools
+    queryJobState: vi.fn().mockResolvedValue({ count: 0, total: 0, rows: [] }),
+    queryOpsState: vi.fn().mockImplementation(async (args) => ({ count: 0, total: 0, scope: args.scope, rows: [] })),
   };
 }
 
@@ -93,6 +97,8 @@ export function mockQueriesDownModule() {
     publishDeptEvent: throwDb,
     consumePendingEvents: throwDb,
     getDailyOutboundCount: throwDb,
+    queryJobState: throwDb,
+    queryOpsState: throwDb,
   };
 }
 
@@ -127,5 +133,10 @@ export function mockSlowQueriesModule(delayMs: number) {
     publishDeptEvent: slow(undefined),
     consumePendingEvents: slow([]),
     getDailyOutboundCount: slow(0),
+    queryJobState: slow({ count: 0, total: 0, rows: [] }),
+    queryOpsState: vi.fn().mockImplementation(async (args) => {
+      await new Promise(r => setTimeout(r, delayMs));
+      return { count: 0, total: 0, scope: args.scope, rows: [] };
+    }),
   };
 }

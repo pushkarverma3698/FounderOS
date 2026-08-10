@@ -19,10 +19,16 @@
  *  5. pnpm gate green (lint + build + wiring + arch + tests)
  */
 
+export interface ObservedResult {
+  kind: "file" | "http" | "record" | "commit" | "message";
+  evidence: string;
+}
+
 export interface ToolResult {
   success: boolean;
   data?: unknown;
   error?: string;
+  observed?: ObservedResult;
 }
 
 export interface ToolInputSchema {

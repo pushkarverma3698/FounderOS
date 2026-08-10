@@ -72,7 +72,44 @@ export interface LivenessResult {
  * closure would expire half the pipeline. 5xx and 429 are the site's problem,
  * not the job's.
  */
-export function classifyHttpStatus(status: number): Liveness {
+export function classifyResponse(input: { status: number; requestedUrl: string; finalUrl: string; redirected: boolean }): Liveness {
+  const { status, requestedUrl, finalUrl, redirected } = input;
+
+  if (redirected) {
+    try {
+      const finalUrlObj = new URL(finalUrl);
+      const reqUrlObj = new URL(requestedUrl);
+
+      // Explicit error/expired markers
+      const errorMarkers = ["error=true", "/not-found", "/expired"];
+      if (errorMarkers.some((marker) => finalUrl.includes(marker))) {
+        return "expired";
+      }
+
+      // If it redirects to the board root, listing, or search page without the specific job identifier
+      // A heuristic: if the original path had multiple segments, and final drops them
+      // For ATS, if final path is exactly "/", "/jobs", "/careers", or the hostname is different
+      const finalPath = finalUrlObj.pathname.replace(/\/$/, "");
+      if (finalPath === "" || finalPath === "/jobs" || finalPath === "/careers") {
+        return "expired";
+      }
+      
+      // If the final URL still contains the requested URL's last path segment, it's a canonicalization
+      const reqSegments = reqUrlObj.pathname.split("/").filter(Boolean);
+      if (reqSegments.length > 0) {
+        const lastSegment = reqSegments[reqSegments.length - 1];
+        if (lastSegment && finalUrlObj.pathname.includes(lastSegment)) {
+          return "live";
+        }
+      }
+      
+      // Otherwise it's ambiguous
+      return "unverifiable";
+    } catch {
+      return "unverifiable";
+    }
+  }
+
   if (status === 404 || status === 410) return "expired";
   if (status >= 200 && status < 400) return "live";
   return "unverifiable";
@@ -96,8 +133,14 @@ async function checkUrl(url: string): Promise<{ liveness: Liveness; detail: stri
   const timer = setTimeout(() => controller.abort(), URL_CHECK_TIMEOUT_MS);
   try {
     const response = await fetch(url, { method: "GET", signal: controller.signal, redirect: "follow" });
-    const verdict = { liveness: classifyHttpStatus(response.status), detail: `HTTP ${response.status}` };
-    // ONLY THE STATUS IS EVER READ, so the body has to be thrown away
+    const liveness = classifyResponse({
+      status: response.status,
+      requestedUrl: url,
+      finalUrl: response.url,
+      redirected: response.redirected
+    });
+    const verdict = { liveness, detail: `HTTP ${response.status} (redirected: ${response.redirected}, final: ${response.url})` };
+    // ONLY THE STATUS/URL IS EVER READ, so the body has to be thrown away
     // explicitly. Under Node's undici an unread body holds the socket and
     // buffers the whole page until GC — and `clearTimeout` below fires the
     // moment the headers arrive, so that download is covered by no timeout at

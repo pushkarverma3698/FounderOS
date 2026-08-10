@@ -3,6 +3,13 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { SIGNAL_CONTRACTS } from "./signals.js";
 import {
+  coerceTextSummary,
+  coerceResearchFindings,
+  coerceLinkedinPost,
+  coerceActionSummary,
+  coerceDataGeneric,
+} from "./output-coercion.js";
+import {
   EXPECTED_KINDS,
   kindFromSchemaRef,
   repairEnvelopeExpected,
@@ -72,51 +79,6 @@ export function stableStringify(value: unknown): string {
     }
     return v;
   });
-}
-
-function coerceTextSummary(val: unknown): unknown {
-  if (typeof val === "string") return { text: val };
-  if (val && typeof val === "object" && !Array.isArray(val) && !("text" in val)) {
-    const summary = (val as Record<string, unknown>)["summary"];
-    if (typeof summary === "string") return { text: summary };
-  }
-  return val;
-}
-
-function coerceResearchFindings(val: unknown): unknown {
-  if (val && typeof val === "object" && !Array.isArray(val)) {
-    const obj = val as Record<string, unknown>;
-    if ("text" in obj && !("summary" in obj) && typeof obj.text === "string") {
-      return { ...obj, summary: obj.text };
-    }
-  }
-  return val;
-}
-
-function coerceLinkedinPost(val: unknown): unknown {
-  if (val && typeof val === "object" && !Array.isArray(val)) {
-    const obj = val as Record<string, unknown>;
-    if ("text" in obj && !("body" in obj) && typeof obj.text === "string") {
-      return { ...obj, body: obj.text };
-    }
-  }
-  return val;
-}
-
-function coerceActionSummary(val: unknown): unknown {
-  if (val && typeof val === "object" && !Array.isArray(val)) {
-    const obj = val as Record<string, unknown>;
-    if ("text" in obj && !("summary" in obj) && typeof obj.text === "string") {
-      return { ...obj, summary: obj.text };
-    }
-  }
-  return val;
-}
-
-function coerceDataGeneric(val: unknown): unknown {
-  if (typeof val === "string") return { data: val };
-  if (val && typeof val === "object" && !Array.isArray(val)) return val;
-  return val;
 }
 
 export const OUTPUT_CONTRACTS: Record<string, z.ZodTypeAny> = {
@@ -270,6 +232,12 @@ export function validatePlannerDecision(input: unknown): Validation<PlannerDecis
 
 // ── Step result (discriminated — the supervisor branches on status, not prose) ─
 
+export const ObservedResultSchema = z.object({
+  kind: z.enum(["file", "http", "record", "commit", "message"]),
+  evidence: z.string(),
+});
+export type ObservedResult = z.infer<typeof ObservedResultSchema>;
+
 export const StepResultSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("ok"),
@@ -277,6 +245,7 @@ export const StepResultSchema = z.discriminatedUnion("status", [
     /** MUST validate against the envelope's expected.schema_ref (validateStepResult). */
     output: z.unknown(),
     tool_receipts: z.array(ToolReceiptSchema).default([]),
+    observed: ObservedResultSchema.optional(),
   }),
   z.object({
     status: z.literal("failed"),
