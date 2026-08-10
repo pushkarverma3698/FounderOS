@@ -99,6 +99,29 @@ grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
 mv .env.patched .env
 chmod 600 .env
 echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-flash-latest"
+
+# Pin the job-sweep spend controls. Both were unset in production until
+# 2026-08-05, and both defaulted quietly rather than loudly:
+#
+#   APIFY_PLAN unset  → currentPlan() falls back to "free". Correct for this
+#     account today, so the ledger happened to be right — but the moment the plan
+#     changes, every cost this system reports is silently wrong, which is exactly
+#     what the cost module was written to stop. Pinned so it is a stated fact.
+#
+#   JOBHUNT_MONTHLY_CAP_USD unset → the sweep had no ceiling it could refuse to
+#     cross. Apify is on the FREE plan with a $5 hard platform cap SHARED with the
+#     research actors; on 2026-08-06 a single sweep spent $0.997 and produced
+#     nothing, taking the cycle to $4.28 of $5. $2 leaves the research tools their
+#     share. Raise it here, not on the box — a hand-edited .env is wiped by the
+#     next PROD_DOTENV render.
+grep -v -E '^(APIFY_PLAN|JOBHUNT_MONTHLY_CAP_USD)=' .env > .env.patched || true
+{
+  printf '%s\n' 'APIFY_PLAN=free'
+  printf '%s\n' 'JOBHUNT_MONTHLY_CAP_USD=2.00'
+} >> .env.patched
+mv .env.patched .env
+chmod 600 .env
+echo "==> Patched .env: APIFY_PLAN=free, JOBHUNT_MONTHLY_CAP_USD=2.00"
 # Primary model key — forwarded from a GitHub secret so a PROD_DOTENV re-render
 # can never wipe it. Without this the direct-Gemini path 401s.
 if [ -n "${GOOGLE_GENERATIVE_AI_API_KEY:-}" ]; then

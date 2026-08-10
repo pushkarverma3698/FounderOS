@@ -1,121 +1,19 @@
-# FounderOS — Rules for Human Developers & AI Coding Agents (Cursor, Antigravity, Claude)
-#
-# FounderOS is a deterministic agent kernel with a Telegram gateway that runs
-# Turicks agency operations. The core is FROZEN: you extend it by adding tools
-# and prompts at the declared extension points, never by rewiring the kernel.
-# CI enforces most of this file (scripts/verify-architecture.ts). Violations
-# fail the merge gate — do not attempt to route around them.
+# .cursorrules pointer
 
-## 0. The one orchestration path (do not add another)
+This file is intentionally a pointer, not a rulebook, because four competing sources of truth caused drift.
 
-message → plan (LLM: PlannerDecision) → dispatch (PURE CODE supervisor)
-        → worker (isolated TaskEnvelope, capped tools, ToolReceipts)
-        → collect (Zod-validated StepResult) → … → synthesize → reply + receipts
+## Precedence
 
-- Every boundary is a Zod contract in `src/kernel/contracts.ts` (TaskEnvelope,
-  Plan, StepResult, FailureReport, ToolReceipt). A contract mismatch is a
-  terminal typed failure — never retry-and-hope, never loosen the schema.
-- Action claims require successful ToolReceipts (`validateStepResult`). The
-  synthesizer only ever sees validated results. Do not bypass this to "make
-  the reply nicer" — it is the zero-hallucination mechanism.
-- Routing, parsing, and guards are pure unit-tested functions. NEVER implement
-  behavior as prompt instructions when a pure function can enforce it.
+```text
+1. Founder instruction in chat                  ← always wins
+2. CI fitness rules (verify-architecture.ts)    ← the only BINDING layer
+3. docs/antigravity/STANDARDS.md                ← how code is written
+4. CLAUDE.md / AGENTS.md / GEMINI.md            ← role-specific operating instructions
+5. Everything else                              ← reference
+```
 
-## 1. Where new code goes (extension points — the ONLY places you add features)
+A rule which is not enforced by layer 2 is a convention, and a rule that is enforced cannot be satisfied by argument.
 
-| You are adding…            | Put it in…                                        |
-|----------------------------|---------------------------------------------------|
-| A new external tool        | `src/tools/{name}.ts` implementing `UnifiedTool`  |
-| Its LangChain wrapper      | `src/agents/agent-tools/{domain}.ts`              |
-| Its department assignment  | `src/agents/capabilities.ts` (single source of truth) |
-| A worker prompt change     | `src/agents/prompts/{department}.ts`              |
-| A provider integration     | `src/infra/providers/` (ADR-029: tools call providers, never Composio/REST directly) |
-| A DB table/query           | `src/db/schema.ts` + `src/db/queries/` + drizzle migration |
-| A proof/report renderer    | `src/proof/`                                      |
-| Tests                      | `tests/unit/**` mirroring the src path            |
-
-New tool = the 8-point checklist in `docs/rules/TOOL-STANDARDS.md`. Short form:
-1. `src/tools/{name}.ts` — pure `UnifiedTool`, no LangChain/LangGraph imports,
-   returns `ToolResult { success, data?, error? }`. Soft-fail with an
-   actionable `error`; never throw for expected provider failures.
-2. `tests/unit/tools/{name}.test.ts` — mock the provider; test the failure
-   paths (wrong field names and phantom successes are the historical bugs).
-3. Wrapper in `src/agents/agent-tools/{domain}.ts`. Side-effecting tools get
-   the HITL gate: DB row BEFORE interrupt(), side effects only after approval,
-   idempotency-key check before every external send, audit row only on real
-   success (`src/kernel/tool-adapter.ts` pins this ordering — do not reorder).
-4. Register in `src/agents/capabilities.ts`. Capability text is GENERATED from
-   this table — never hand-write "what can you do" prose.
-5. `pnpm gate` green (lint + build + wiring + arch + tests).
-
-## 2. Immutable core (read, do not modify without an ADR + founder approval)
-
-- `src/kernel/*` — contracts, supervisor, graph, tool-adapter, state
-- `src/gateway/kernel-boot.ts` — the ONLY composition root (models, tools,
-  checkpointer are injected here; the kernel itself is a library)
-- `src/infra/hitl.ts`, `src/infra/checkpointer.ts`
-- `governance/architecture-baseline.json` — the debt ratchet; it may only
-  shrink. Never hand-edit it upward.
-
-## 3. Anti-slop invariants (CI fails your PR if you break these)
-
-1. TOMBSTONES: killed v2 modules stay dead — office.ts, office-run,
-   execution-guard, pre-router, fast-paths, domain subgraphs. Do not recreate
-   them under any name.
-2. Import direction: contracts ← kernel ← gateway. Kernel imports only
-   kernel/core/db/infra/tools. Gateway never imports into kernel.
-3. LOC budget: no src file over 400 lines. Split before you hit it.
-4. Every fail-open catch needs `// allow-failopen: <reason>`.
-5. No `any`, no `@ts-ignore`, no `console.log` (use `childLogger`). Fix the
-   type, not the compiler.
-
-## 4. Type-safety & style
-
-- TypeScript strict. Zod-validate at every system boundary (user input,
-  provider responses, DB reads feeding contracts).
-- Immutability: return new objects, never mutate inputs.
-- Temperature 0 everywhere; determinism is a feature, not a preference.
-- Errors classify by HTTP status class (`src/agents/model.ts`):
-  5xx/429/transport → retriable (jittered backoff in
-  `src/gateway/model-retry.ts`); 404 → model fallback; 401/403 → fail LOUD.
-- Never silently swallow errors. FailureReports name the real component.
-
-## 5. Testing (the dev loop is $0 — this is non-negotiable)
-
-- `pnpm test` uses scripted/mocked models only. A unit test that makes a real
-  LLM/API call is a bug, full stop.
-- Bug fixes start with a failing test (PR template section is mandatory).
-- The full kernel graph runs offline: extend
-  `tests/unit/kernel/kernel-e2e.test.ts` patterns for new flows.
-- `pnpm eval` (live, paid) is a once-per-feature milestone gate, not a
-  debugging loop. `pnpm qa:telegram` is production acceptance, run before
-  release only.
-- "Done" = the verification command run fresh with output shown (rule #24).
-  Anything else is "NOT VERIFIED — <reason>". Say so explicitly.
-
-## 6. Git & PR policy (CI-enforced by .github/workflows/branch-policy.yml)
-
-- NEVER commit to `main`. NEVER open a PR targeting `main` (only the
-  `beta → main` promotion PR, opened/merged by the founder).
-- Flow: cut `cursor/*` or `feat/*` from a fresh `beta` → PR to `beta` →
-  founder promotes `beta → main` → CD deploys.
-- Every PR carries evidence: fresh `pnpm gate` output, and live-path proof or
-  an explicit NOT VERIFIED with the reason.
-- Conventional commits (`feat:`, `fix:`, `chore:`, …). Surgical diffs only —
-  no drive-by refactors, no reformatting untouched lines.
-
-## 7. Data & config discipline
-
-- No hardcoded secrets, model names, or thresholds — env vars via
-  `src/core/config.ts`; validate presence at boot (`src/infra/boot-validate.ts`).
-- If a task fails on ambiguous requirements, fix the schema (planner asks for
-  the missing field). Never guess data.
-- Docs/ADR changes → `pnpm brain:sync` so the RAG brain stays truthful.
-- Threads are never wiped except by explicit founder `/reset`.
-
-## 8. When in doubt
-
-Read, in order: CLAUDE.md → AGENTS.md → docs/rules/PROGRAMMING-RULES.md →
-docs/rules/TOOL-STANDARDS.md → JARVIS-ARCHITECTURE.md. If the answer isn't
-there, ask the founder — do not invent a new pattern. Simplicity beats
-cleverness; if a simpler approach exists, propose it before building.
+- [docs/antigravity/STANDARDS.md](docs/antigravity/STANDARDS.md)
+- [AGENTS.md](AGENTS.md)
+- [CLAUDE.md](CLAUDE.md)

@@ -31,6 +31,7 @@ import {
   digestToolResult,
   hashToolArgs,
   repairTextSummaryOutput,
+  repairDataGenericOutput,
   validateStepResult,
   repairWrappedOutput,
   type StepResult,
@@ -353,7 +354,11 @@ export async function collect(state: KernelStateType): Promise<KernelUpdate> {
   // Live T01 repair: for the pure-text contract, a prose finalize IS the
   // payload — salvage it instead of failing an honest answer (contracts.ts).
   const parsed =
-    step.expected.schema_ref === "text.summary" ? repairTextSummaryOutput(repairedRaw, text) : repairedRaw;
+    step.expected.schema_ref === "text.summary"
+      ? repairTextSummaryOutput(repairedRaw, text)
+      : step.expected.schema_ref === "data.generic"
+      ? repairDataGenericOutput(repairedRaw, text)
+      : repairedRaw;
 
   const failedValidation = (message: string): KernelUpdate => ({
     results: [

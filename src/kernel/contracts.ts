@@ -113,6 +113,12 @@ function coerceActionSummary(val: unknown): unknown {
   return val;
 }
 
+function coerceDataGeneric(val: unknown): unknown {
+  if (typeof val === "string") return { data: val };
+  if (val && typeof val === "object" && !Array.isArray(val)) return val;
+  return val;
+}
+
 export const OUTPUT_CONTRACTS: Record<string, z.ZodTypeAny> = {
   "text.summary": z.preprocess(coerceTextSummary, z.object({ text: z.string().min(1) })),
   "research.findings": z.preprocess(
@@ -129,7 +135,7 @@ export const OUTPUT_CONTRACTS: Record<string, z.ZodTypeAny> = {
   }),
   "draft.linkedin_post": z.preprocess(coerceLinkedinPost, z.object({ body: z.string().min(1) })),
   "action.summary": z.preprocess(coerceActionSummary, z.object({ summary: z.string().min(1) })),
-  "data.generic": z.record(z.unknown()),
+  "data.generic": z.preprocess(coerceDataGeneric, z.record(z.unknown())),
   ...Object.fromEntries(Object.entries(SIGNAL_CONTRACTS).map(([k, v]) => [`signal.${k}`, v])),
 };
 
@@ -140,6 +146,11 @@ export function isOutputSchemaRef(ref: string): boolean {
 export function repairTextSummaryOutput(parsed: unknown, rawText: string): unknown {
   if (OUTPUT_CONTRACTS["text.summary"]!.safeParse(parsed).success) return parsed;
   return rawText.trim().length > 0 ? { text: rawText } : parsed;
+}
+
+export function repairDataGenericOutput(parsed: unknown, rawText: string): unknown {
+  if (OUTPUT_CONTRACTS["data.generic"]!.safeParse(parsed).success) return parsed;
+  return rawText.trim().length > 0 ? { data: rawText } : parsed;
 }
 
 export function getSchemaTemplate(ref: string): string {

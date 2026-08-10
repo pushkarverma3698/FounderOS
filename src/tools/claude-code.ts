@@ -89,9 +89,16 @@ export const EXECUTION_DIRECTIVE =
   "in your final report — never stop at file creation. Deliver the whole task in this one run; " +
   "do not defer running it to a separate step. Keep the final report concise.";
 
-/** Append the standing execution directive to a brief (idempotent — never double-appends). */
+export const GROUNDING_MEMORY_DIRECTIVE =
+  "\n\n---\nGrounding Directive (always): Reason strictly over repository files, turicks-brain memory, " +
+  "failure_lessons, and live codebase state. Combine your parametric coding intelligence with the " +
+  "founder's exact codebase context instead of overcomplicating tasks with ungrounded generic world assumptions.";
+
+/** Append standing execution and grounding directives to a brief (idempotent). */
 export function withExecutionDirective(task: string): string {
-  return task.includes(EXECUTION_DIRECTIVE) ? task : task + EXECUTION_DIRECTIVE;
+  let res = task.includes(EXECUTION_DIRECTIVE) ? task : task + EXECUTION_DIRECTIVE;
+  if (!res.includes(GROUNDING_MEMORY_DIRECTIVE)) res += GROUNDING_MEMORY_DIRECTIVE;
+  return res;
 }
 
 // ── Workspace policy ──────────────────────────────────────────────────────────

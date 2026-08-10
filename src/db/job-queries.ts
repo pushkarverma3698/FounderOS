@@ -274,8 +274,14 @@ export async function listRecentApplications(
     .limit(opts.limit ?? 20);
 }
 
-/** Sections of the brief a founder can address by number. */
-export type BriefSection = "do_today" | "ask";
+/**
+ * Sections of the brief a founder can address by number.
+ *
+ * `do_today` and `stretch` share ONE continuous numbering: the stretch ranks
+ * start where do-today's stop, so `/draft N` reaches exactly one row across
+ * both. `ask` numbers itself from 1 because `/ask` addresses only that section.
+ */
+export type BriefSection = "do_today" | "stretch" | "ask";
 
 /**
  * Pin the numbering the founder just read.
@@ -361,3 +367,32 @@ export async function getApplicationByBriefRank(
     .limit(1);
   return rows[0] ?? null;
 }
+
+/** List applications clearing gates that do not have a tailored CV yet. */
+export async function listUntailoredApplications(
+  opts: { limit?: number; tenantId?: string } = {},
+): Promise<JobApplication[]> {
+  return getDb().select().from(jobApplications).where(and(
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    eq(jobApplications.stage, "screened"),
+    inArray(jobApplications.salary_status, ["pass", "flag"]),
+    sql`${jobApplications.tailor_status} IS NULL OR ${jobApplications.tailor_status} = 'pending'`,
+  )).orderBy(desc(jobApplications.created_at)).limit(opts.limit ?? 20);
+}
+
+/** Update CV tailoring status and S3 asset references for an application. */
+export async function recordTailoringResult(
+  id: string,
+  opts: { tailorStatus: "tailored" | "failed" | "tailoring"; tailoredCvS3Key?: string; tailoredDocxS3Key?: string; coverLetterS3Key?: string; notes?: string },
+): Promise<JobApplication | null> {
+  const [saved] = await getDb().update(jobApplications).set({
+    tailor_status: opts.tailorStatus,
+    ...(opts.tailoredCvS3Key ? { tailored_cv_s3_key: opts.tailoredCvS3Key } : {}),
+    ...(opts.tailoredDocxS3Key ? { tailored_docx_s3_key: opts.tailoredDocxS3Key } : {}),
+    ...(opts.coverLetterS3Key ? { cover_letter_s3_key: opts.coverLetterS3Key } : {}),
+    ...(opts.notes !== undefined ? { notes: opts.notes } : {}),
+    updated_at: new Date(),
+  }).where(eq(jobApplications.id, id)).returning();
+  return saved ?? null;
+}
+

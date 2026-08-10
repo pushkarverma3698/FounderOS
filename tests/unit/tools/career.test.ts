@@ -44,7 +44,7 @@ describe("readCvTool", () => {
   });
 
   it("has input_schema with query field", () => {
-    expect(readCvTool.input_schema.properties["query"]).toBeDefined();
+    expect(readCvTool.input_schema?.properties["query"]).toBeDefined();
   });
 
   it("returns text content when API responds successfully", async () => {
@@ -145,9 +145,9 @@ describe("searchJobsTool", () => {
   });
 
   it("has input_schema with query and optional location", () => {
-    const props = searchJobsTool.input_schema.properties;
-    expect(props["query"]).toBeDefined();
-    expect(props["location"]).toBeDefined();
+    const props = searchJobsTool.input_schema?.properties;
+    expect(props?.["query"]).toBeDefined();
+    expect(props?.["location"]).toBeDefined();
   });
 
   // search_jobs now delegates to webSearchTool (Gemini grounding → DuckDuckGo

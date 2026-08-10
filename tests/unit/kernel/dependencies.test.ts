@@ -45,8 +45,9 @@ describe("supervisor dispatch dependencies", () => {
     const state = stateWith([s1, s2], []);
 
     const update = dispatch(state);
-    expect(update.mission?.cursor).toBe(0);
-    expect(update.mission?.status).toBe("executing");
+    const mission = update.mission as { cursor?: number; status?: string } | undefined;
+    expect(mission?.cursor).toBe(0);
+    expect(mission?.status).toBe("executing");
     // Seeds s1 scratchpad
     expect((update.scratch as Record<string, any>)["s1"]).toBeDefined();
   });
@@ -57,7 +58,8 @@ describe("supervisor dispatch dependencies", () => {
     const state = stateWith([s1, s2], []);
     
     const update = dispatch(state);
-    expect(update.mission?.cursor).toBe(0);
+    const mission = update.mission as { cursor?: number; status?: string } | undefined;
+    expect(mission?.cursor).toBe(0);
   });
 
   it("executes s2 when s1 is completed successfully", () => {
@@ -66,8 +68,9 @@ describe("supervisor dispatch dependencies", () => {
     const state = stateWith([s1, s2], [makeOkResult("s1")]);
 
     const update = dispatch(state);
-    expect(update.mission?.cursor).toBe(1);
-    expect(update.mission?.status).toBe("executing");
+    const mission = update.mission as { cursor?: number; status?: string } | undefined;
+    expect(mission?.cursor).toBe(1);
+    expect(mission?.status).toBe("executing");
     expect((update.scratch as Record<string, any>)["s2"]).toBeDefined();
   });
 
@@ -77,6 +80,7 @@ describe("supervisor dispatch dependencies", () => {
     const state = stateWith([s1, s2], [makeOkResult("s1"), makeOkResult("s2")]);
 
     const update = dispatch(state);
-    expect(update.mission?.status).toBe("synthesizing");
+    const mission = update.mission as { cursor?: number; status?: string } | undefined;
+    expect(mission?.status).toBe("synthesizing");
   });
 });

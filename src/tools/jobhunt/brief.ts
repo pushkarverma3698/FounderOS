@@ -30,51 +30,51 @@
 import { cmd, esc } from "./telegram-format.js";
 import { renderLegend, type BriefRow } from "./brief-row.js";
 import {
-  allocateByMarket,
   isTooSenior,
   renderFilterNotes,
   renderMarketBlocks,
   renderRejectLine,
   renderSpend,
   renderTrends,
-  PER_MARKET_ASK,
-  PER_MARKET_DO_TODAY,
   type SpendLine,
   type TrendRow,
 } from "./brief-sections.js";
+import {
+  isAskableRow,
+  isDoTodayRow,
+  isStretchRow,
+  selectAskable,
+  selectDoToday,
+  selectStretch,
+} from "./brief-select.js";
 
 // Re-exported so the transport keeps one import site for the escape helper.
 export { toTelegramSafe, splitForTelegram, TELEGRAM_MAX_CHARS } from "./telegram-format.js";
 export { renderRow, renderLegend } from "./brief-row.js";
-export type { BriefRow } from "./brief-row.js";
+export type { BriefRow, BriefSection } from "./brief-row.js";
 // The reject-line, trends and spend renderers moved to brief-sections.ts on
 // 2026-08-01 when this file crossed its size budget. Re-exported so every
 // existing import site — and every test — keeps resolving here.
 export { isTooSenior } from "./brief-sections.js";
 export type { TrendRow, SpendLine } from "./brief-sections.js";
+// Section membership and the caps moved to brief-select.ts on 2026-08-06, when a
+// third actionable section pushed this file against the 400-line budget. Same
+// precedent as brief-sections.ts: re-exported so every import site and every
+// test keeps resolving here.
+export {
+  isAskableRow,
+  isDoTodayRow,
+  isStretchRow,
+  selectAskable,
+  selectDoToday,
+  selectStretch,
+  ASK_CAP,
+  DO_TODAY_CAP,
+  STRETCH_CAP,
+} from "./brief-select.js";
 
 /** A horizontal rule. Telegram has no <hr>, and a run of box characters reads as one. */
 const RULE = "━━━━━━━━━━━━━━━━━━━━━";
-
-/**
- * How many rows each actionable section prints IN FULL.
- *
- * Raised from 3 on 2026-08-01 (founder direction: "even if telegram message
- * doesn't give all the result in one message give in 2 or 3 messages so that we
- * can read everything and decide").
- *
- * Ten full rows across the two sections lands at roughly four Telegram messages.
- * The first attempt at this used ten PER section and produced nine messages
- * against the real table — which satisfies the letter of "show me everything"
- * and defeats the point of it: a wall of text nobody reads is the same outcome
- * as a brief that hid the row. The complaint that started this was never about
- * the cap; it was that the reasons were unreadable.
- *
- * When the cap bites the brief SAYS SO with the count. A silent truncation is
- * the failure this pipeline keeps being wrong about.
- */
-export const DO_TODAY_CAP = 6;
-export const ASK_CAP = 4;
 
 /**
  * How many rejected rows are NAMED. The rest are counted.
@@ -113,39 +113,11 @@ function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-/**
- * DO TODAY: passed every gate AND confirmed still open.
- *
- * `unverifiable` does not qualify — but it does not disqualify the row from the
- * brief either; it lands in the ASK section with the reason stated. Silently
- * dropping a role because a network call failed is the failure direction this
- * pipeline exists to avoid.
- */
-export function selectDoToday(rows: readonly BriefRow[]): BriefRow[] {
-  return allocateByMarket(
-    rows.filter((r) => r.verdict === "pass" && r.liveness === "live"),
-    PER_MARKET_DO_TODAY,
-    DO_TODAY_CAP,
-  );
-}
-
-/**
- * ONE QUESTION AWAY: a single unresolved gate stands between this and an
- * application, and the founder can settle it by asking the employer.
- *
- * A PASS whose liveness could not be confirmed belongs here too: it is one
- * check away from actionable, and that check is "is this still open?".
- */
-export function selectAskable(rows: readonly BriefRow[]): BriefRow[] {
-  return allocateByMarket(
-    rows.filter(
-      (r) =>
-        r.liveness !== "expired" &&
-        (r.verdict === "flag" || (r.verdict === "pass" && r.liveness !== "live")),
-    ),
-    PER_MARKET_ASK,
-    ASK_CAP,
-  );
+/** How many rows each actionable section HAS, before any cap is applied. */
+interface SectionTotals {
+  readonly doToday: number;
+  readonly stretch: number;
+  readonly askable: number;
 }
 
 /** "…and 7 more" — stated with the number, never a silent cut. */
@@ -162,9 +134,19 @@ function overflowNote(total: number, shown: number, what: string): string {
  * where reading stops — with the company each one targets means the last thing
  * on screen is a list of things to do, not a summary of things that happened.
  */
-function renderNextActions(doToday: readonly BriefRow[], askable: readonly BriefRow[]): string {
+function renderNextActions(
+  doToday: readonly BriefRow[],
+  stretch: readonly BriefRow[],
+  askable: readonly BriefRow[],
+): string {
   const lines = [
     ...doToday.map((r, i) => `${cmd(`/draft ${i + 1}`)} — apply to ${esc(r.company)}`),
+    // Numbered as a CONTINUATION of do-today, because `/draft` resolves across
+    // both sections as one run. Restarting at 1 would make `/draft 1` ambiguous.
+    ...stretch.map(
+      (r, i) =>
+        `${cmd(`/draft ${doToday.length + i + 1}`)} — apply to ${esc(r.company)} (a stretch on years)`,
+    ),
     ...askable.map((r, i) => `${cmd(`/ask ${i + 1}`)} — draft the question for ${esc(r.company)}`),
   ];
 
@@ -196,10 +178,23 @@ function renderNextActions(doToday: readonly BriefRow[], askable: readonly Brief
  */
 export function formatDailyBrief(input: BriefInput): string {
   const doToday = selectDoToday(input.rows);
+  const stretch = selectStretch(input.rows);
   const askable = selectAskable(input.rows);
-  const allPassLive = input.rows.filter((r) => r.verdict === "pass" && r.liveness === "live").length;
 
-  const sections: string[] = [renderHeader(input, doToday.length, askable.length)];
+  // ONE RULE FOR EVERY NUMBER IN THIS MESSAGE: a count is the true UNCAPPED
+  // population, and the cap only ever appears as an explicit "+ N more not
+  // shown". The reject sections have always worked that way; ASK did not, and
+  // when the 2026-08-06 Experience change started routing rescued rows there,
+  // the fifth one was printed nowhere and counted nowhere — under a header that
+  // says verbatim "Nothing is cut — read to the end". As a REJECT that same row
+  // had been counted and named. The change made its own rescues less visible.
+  const totals: SectionTotals = {
+    doToday: input.rows.filter(isDoTodayRow).length,
+    stretch: input.rows.filter(isStretchRow).length,
+    askable: input.rows.filter(isAskableRow).length,
+  };
+
+  const sections: string[] = [renderHeader(input, totals)];
 
   if (input.failures.length > 0) {
     // Above everything actionable. A partial run that reads like a full one is a
@@ -215,18 +210,35 @@ export function formatDailyBrief(input: BriefInput): string {
   sections.push(
     doToday.length === 0
       ? `<b>✅ APPLY TODAY (0)</b>\nNothing cleared every check <i>and</i> verified still open.`
-      : `<b>✅ APPLY TODAY (${doToday.length})</b>\n` +
+      : `<b>✅ APPLY TODAY (${totals.doToday})</b>\n` +
           `<i>Every check below cleared. The only thing left is writing it.</i>\n\n` +
-          renderMarketBlocks(doToday, "/draft") +
-          overflowNote(allPassLive, doToday.length, "ready to apply to"),
+          renderMarketBlocks(doToday, "/draft", "do_today") +
+          overflowNote(totals.doToday, doToday.length, "ready to apply to"),
   );
+
+  // Between APPLY TODAY and ONE QUESTION AWAY, and carrying `/draft` rather than
+  // `/ask`: the years bar is not a question for the employer. Asking whether
+  // "5+ years" is firm invites a pre-emptive rejection on the one gate that is
+  // written as a wish (experience.ts, 2026-08-06). These rows need an
+  // application, and their numbering continues DO TODAY's for that reason.
+  if (stretch.length > 0) {
+    sections.push(
+      `<b>🪜 A STRETCH WORTH APPLYING TO (${totals.stretch})</b>\n` +
+        `<i>Every check cleared except the years — they ask for more than your ~3.5 ` +
+        `shipped. That is a wish, not a wall, and applying early is what makes it ` +
+        `land. Nothing here needs a question first.</i>\n\n` +
+        renderMarketBlocks(stretch, "/draft", "stretch", doToday.length + 1) +
+        overflowNote(totals.stretch, stretch.length, "stretch roles"),
+    );
+  }
 
   if (askable.length > 0) {
     sections.push(
-      `<b>❓ ONE QUESTION AWAY (${askable.length})</b>\n` +
+      `<b>❓ ONE QUESTION AWAY (${totals.askable})</b>\n` +
         `<i>Each has exactly one check we could not settle from the ad. ` +
         `Asking the employer settles it.</i>\n\n` +
-        renderMarketBlocks(askable, "/ask"),
+        renderMarketBlocks(askable, "/ask", "ask") +
+        overflowNote(totals.askable, askable.length, "roles one question away"),
     );
   }
 
@@ -288,7 +300,7 @@ export function formatDailyBrief(input: BriefInput): string {
   const legend = renderLegend(input.rows);
   if (legend.length > 0) sections.push(legend);
 
-  sections.push(renderNextActions(doToday, askable));
+  sections.push(renderNextActions(doToday, stretch, askable));
 
   return sections.join(`\n\n${RULE}\n\n`);
 }
@@ -301,21 +313,28 @@ export function formatDailyBrief(input: BriefInput): string {
  * statement about the founder's next hour, and it is the number that determines
  * whether the rest of the message gets opened at all.
  */
-function renderHeader(input: BriefInput, doToday: number, askable: number): string {
+function renderHeader(input: BriefInput, totals: SectionTotals): string {
   const date = input.date.toISOString().slice(0, 10);
   const trackSummary = Object.entries(input.perTrack)
     .filter(([, n]) => n > 0)
     .map(([track, n]) => `${esc(track)} ${n}`)
     .join(" · ");
 
-  const verdict =
-    doToday > 0
-      ? `<b>${doToday} to apply to today</b>`
-      : askable > 0
-        ? `<b>0 ready to send</b> · ${askable} one question away`
-        : `<b>Nothing actionable today</b>`;
+  // The stretch count is here for the same reason the section exists: a header
+  // reading "Nothing actionable today" above three roles the founder can apply
+  // to right now denies the message printed underneath it, which is the same
+  // class of defect as hiding those rows.
+  const standing = [
+    totals.stretch > 0 ? `${totals.stretch} worth a stretch` : "",
+    totals.askable > 0 ? `${totals.askable} one question away` : "",
+  ].filter((part) => part.length > 0);
 
-  const counts = doToday > 0 && askable > 0 ? `${verdict} · ${askable} one question away` : verdict;
+  const counts =
+    totals.doToday > 0
+      ? [`<b>${totals.doToday} to apply to today</b>`, ...standing].join(" · ")
+      : standing.length > 0
+        ? [`<b>0 ready to send</b>`, ...standing].join(" · ")
+        : `<b>Nothing actionable today</b>`;
 
   return (
     `<b>🎯 JOB BRIEF</b> · ${date}\n` +

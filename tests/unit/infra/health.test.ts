@@ -50,7 +50,7 @@ describe("health server", () => {
   it("buildHealthReport includes rag health with status + counts (never throws when DB down)", async () => {
     const report = await buildHealthReport();
     expect(report.checks).toHaveProperty("rag");
-    const rag = report.checks.rag as Record<string, unknown>;
+    const rag = report.checks.rag;
     // DB is down in unit tests — rag must report unavailable, not throw
     expect(["ok", "empty", "unavailable"]).toContain(rag["status"]);
     expect(typeof rag["knowledge_entries"]).toBe("number");

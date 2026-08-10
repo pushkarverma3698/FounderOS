@@ -49,6 +49,23 @@ export const INDEED_PRICING: Readonly<Record<ApifyPlan, FeedPricing>> = {
 };
 
 /**
+ * Direct polling of Greenhouse, Lever and Ashby board endpoints — genuinely free.
+ *
+ * Zero on every plan because there is no actor, no key and no quota: these are
+ * public JSON endpoints served by the ATS platforms themselves.
+ *
+ * PRICED AT ZERO RATHER THAN LEFT OUT. A lane with no pricing entry could not
+ * write a ledger row, and a lane that writes no ledger row is indistinguishable
+ * from one that never ran — which for something sweeping unattended every thirty
+ * minutes is the failure mode that hides longest. A zero here is a measurement.
+ */
+export const FREE_PRICING: Readonly<Record<ApifyPlan, FeedPricing>> = {
+  free: { perStartUsd: 0, perJobUsd: 0 },
+  silver: { perStartUsd: 0, perJobUsd: 0 },
+  gold: { perStartUsd: 0, perJobUsd: 0 },
+};
+
+/**
  * The plan we are actually on. Read from the environment so upgrading Apify is a
  * config change rather than a code change — and so the ledger stops lying about
  * the cost the same day the plan changes, not whenever someone remembers.

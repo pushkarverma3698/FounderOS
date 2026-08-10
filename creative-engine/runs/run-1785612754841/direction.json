@@ -1,0 +1,42 @@
+{
+  "brandName": "The Studio",
+  "vibe": "dark-tech",
+  "platePrompt": "MACRO SHOT. A single futuristic metallic device hovering in the center of a dark void, casting electric blue glowing light. Geometric shadows, clean lines. Pure black background. Cinematic lighting. Shot on Sony A7R V, 90mm macro, f/1.4.",
+  "tokens": {
+    "palette": {
+      "bg": "#050508",
+      "text": "#e8eaf0",
+      "muted": "rgba(232, 234, 240, 0.45)",
+      "accent": "#3b82f6"
+    },
+    "type": {
+      "display": {
+        "family": "Inter",
+        "weight": 800,
+        "tracking": -40
+      },
+      "utility": {
+        "family": "JetBrains Mono",
+        "weight": 400,
+        "tracking": 100
+      },
+      "scale": [
+        60,
+        18,
+        14,
+        12
+      ]
+    },
+    "accent": "#3b82f6"
+  },
+  "copy": {
+    "kicker": "LAUNCH INITIATED",
+    "headline": "TURICKS",
+    "subheadline": "The future of autonomous systems.",
+    "dateVenue": "",
+    "price": "",
+    "cta": "DISCOVER MORE",
+    "url": "",
+    "itemCode": "T01_STORY_2035"
+  }
+}

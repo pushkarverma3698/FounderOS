@@ -59,7 +59,7 @@ describe("provider-probes", () => {
   });
 
   it("probeComposioGmail returns unconfigured without API key", async () => {
-    mockGetComposioApiKey.mockReturnValue(undefined);
+    mockGetComposioApiKey.mockReturnValue(undefined as unknown as string);
     const { probeComposioGmail } = await import("../../../src/infra/provider-probes.js");
     const r = await probeComposioGmail(5_000);
     expect(r.status).toBe("unconfigured");
@@ -120,7 +120,7 @@ describe("provider-probes", () => {
   });
 
   it("probeLinkedInComposio returns unconfigured without an API key (unchanged behavior)", async () => {
-    mockGetComposioApiKey.mockReturnValue(undefined);
+    mockGetComposioApiKey.mockReturnValue(undefined as unknown as string);
     const { probeLinkedInComposio } = await import("../../../src/infra/provider-probes.js");
     const r = await probeLinkedInComposio(5_000);
     expect(r.status).toBe("unconfigured");
@@ -134,6 +134,7 @@ describe("provider-probes", () => {
       calendar_backend: "gws",
       linkedin_backend: "direct",
       composio_gmail: { status: "unconfigured", detail: "skip" },
+      googleapis_gmail: { status: "unconfigured", detail: "skip" },
       gws_gmail: { status: "up", detail: "gws ok" },
       active_gmail: { status: "up", detail: "gws ok" },
       active_calendar: { status: "up", detail: "gws ok" },

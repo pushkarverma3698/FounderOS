@@ -16,6 +16,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  isEphemeralLockPath,
   isProcessAlive,
   readPidFile,
   acquireSingleInstanceLock,
@@ -155,5 +156,36 @@ describe("waitForProcessExit", () => {
       pollMs: 1,
     });
     expect(ok).toBe(false);
+  });
+});
+
+describe("isEphemeralLockPath — the PrivateTmp trap", () => {
+  /**
+   * The lock was on /tmp/founderos.pid while deploy/founderos.service sets
+   * PrivateTmp=true, so every restart got a fresh empty /tmp and the lock was
+   * never read back. Verified on the box 2026-08-09: the host had no
+   * /tmp/founderos.pid, only a per-invocation copy under /proc/<pid>/root/tmp.
+   */
+  it("flags /tmp — wiped on every service start under PrivateTmp", () => {
+    expect(isEphemeralLockPath("/tmp/founderos.pid")).toBe(true);
+  });
+
+  it("flags /var/tmp and macOS's /private/tmp", () => {
+    expect(isEphemeralLockPath("/var/tmp/founderos.pid")).toBe(true);
+    expect(isEphemeralLockPath("/private/tmp/founderos.pid")).toBe(true);
+    expect(isEphemeralLockPath("/private/var/tmp/founderos.pid")).toBe(true);
+  });
+
+  it("accepts the persistent path the unit file now pins", () => {
+    expect(isEphemeralLockPath("/opt/founderos-data/founderos.pid")).toBe(false);
+  });
+
+  it("accepts other persistent locations", () => {
+    expect(isEphemeralLockPath("/run/founderos/founderos.pid")).toBe(false);
+    expect(isEphemeralLockPath("/opt/founderos/tmp/founderos.pid")).toBe(false);
+  });
+
+  it("does not flag a path that merely contains the substring tmp", () => {
+    expect(isEphemeralLockPath("/opt/tmpdata/founderos.pid")).toBe(false);
   });
 });

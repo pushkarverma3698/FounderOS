@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 import { AIMessage } from "@langchain/core/messages";
 import { collect } from "../../../src/kernel/worker.js";
-import { TaskEnvelopeSchema, type TaskEnvelope } from "../../../src/kernel/contracts.js";
+import { TaskEnvelopeSchema, type TaskEnvelope, type StepResult } from "../../../src/kernel/contracts.js";
 import type { KernelStateType } from "../../../src/kernel/state.js";
 
 const envelope = (over: Partial<TaskEnvelope> = {}): TaskEnvelope =>
@@ -38,7 +38,8 @@ describe("collect — prose finalize repair (live T01 regression)", () => {
   it("wraps a prose finalize into {text} for text.summary and validates ok", async () => {
     const prose = "Linear is a project management tool for software teams. It tracks issues and cycles.";
     const update = await collect(stateWith(envelope(), prose));
-    const result = update.results?.[0];
+    const results = update.results as StepResult[] | undefined;
+    const result = results?.[0];
     expect(result?.status).toBe("ok");
     if (result?.status === "ok") expect(result.output).toEqual({ text: prose });
   });
@@ -46,7 +47,8 @@ describe("collect — prose finalize repair (live T01 regression)", () => {
   it("does NOT wrap prose for structured contracts (research.findings still fails loud)", async () => {
     const step = envelope({ expected: { kind: "data", schema_ref: "research.findings" } });
     const update = await collect(stateWith(step, "here are my findings as prose"));
-    const result = update.results?.[0];
+    const results = update.results as StepResult[] | undefined;
+    const result = results?.[0];
     // Depending on jsonrepair's salvage the failure is "did not finalize" or a
     // schema mismatch — either way it MUST fail loud, never silently wrap.
     expect(result?.status).toBe("failed");
@@ -59,14 +61,16 @@ describe("collect — prose finalize repair (live T01 regression)", () => {
   it("prose wrap NEVER bypasses the action-receipt gate", async () => {
     const step = envelope({ expected: { kind: "action_receipt", schema_ref: "text.summary" } });
     const update = await collect(stateWith(step, "email sent, all done!"));
-    const result = update.results?.[0];
+    const results = update.results as StepResult[] | undefined;
+    const result = results?.[0];
     expect(result?.status).toBe("failed");
     if (result?.status === "failed") expect(result.failure.message).toMatch(/receipt/);
   });
 
   it("still fails when the worker produced no final text at all", async () => {
     const update = await collect(stateWith(envelope(), ""));
-    expect(update.results?.[0]?.status).toBe("failed");
+    const results = update.results as StepResult[] | undefined;
+    expect(results?.[0]?.status).toBe("failed");
   });
 });
 
@@ -91,7 +95,8 @@ describe("collect — parts-array finalize (live d211fb74 regression)", () => {
     const update = await collect(
       stateWithContent(envelope(), [{ type: "text", text: "The pending action is the LinkedIn approval." }]),
     );
-    const result = update.results?.[0];
+    const results = update.results as StepResult[] | undefined;
+    const result = results?.[0];
     expect(result?.status).toBe("ok");
     if (result?.status === "ok") {
       expect(result.output).toEqual({ text: "The pending action is the LinkedIn approval." });
@@ -105,7 +110,8 @@ describe("collect — parts-array finalize (live d211fb74 regression)", () => {
         { type: "text", text: '{"summary":"Linear ships fast","sources":[{"title":"Linear blog"}]}' },
       ]),
     );
-    const result = update.results?.[0];
+    const results = update.results as StepResult[] | undefined;
+    const result = results?.[0];
     expect(result?.status).toBe("ok");
   });
 });
@@ -131,7 +137,8 @@ describe("collect — output unwrapping and coercion (battery test failures)", (
       }
     });
     const update = await collect(stateWith(step, wrapped));
-    const result = update.results?.[0];
+    const results = update.results as StepResult[] | undefined;
+    const result = results?.[0];
     expect(result?.status).toBe("ok");
     if (result?.status === "ok") {
       expect(result.output).toEqual({
@@ -149,7 +156,8 @@ describe("collect — output unwrapping and coercion (battery test failures)", (
       }
     });
     const update = await collect(stateWith(step, wrapped));
-    const result = update.results?.[0];
+    const results = update.results as StepResult[] | undefined;
+    const result = results?.[0];
     expect(result?.status).toBe("ok");
     if (result?.status === "ok") {
       expect(result.output).toEqual({
@@ -164,7 +172,8 @@ describe("collect — output unwrapping and coercion (battery test failures)", (
       text: "This is a great new feature in FounderOS!"
     });
     const update = await collect(stateWith(step, payload));
-    const result = update.results?.[0];
+    const results = update.results as StepResult[] | undefined;
+    const result = results?.[0];
     expect(result?.status).toBe("ok");
     if (result?.status === "ok") {
       expect(result.output).toEqual({
@@ -179,7 +188,8 @@ describe("collect — output unwrapping and coercion (battery test failures)", (
       text: "Removed old logs"
     });
     const update = await collect(stateWith(step, payload));
-    const result = update.results?.[0];
+    const results = update.results as StepResult[] | undefined;
+    const result = results?.[0];
     expect(result?.status).toBe("ok");
     if (result?.status === "ok") {
       expect(result.output).toEqual({
@@ -195,7 +205,8 @@ describe("collect — output unwrapping and coercion (battery test failures)", (
       sources: []
     });
     const update = await collect(stateWith(step, payload));
-    const result = update.results?.[0];
+    const results = update.results as StepResult[] | undefined;
+    const result = results?.[0];
     expect(result?.status).toBe("ok");
     if (result?.status === "ok") {
       expect(result.output).toEqual({

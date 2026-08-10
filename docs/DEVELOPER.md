@@ -4,14 +4,32 @@
 > companion to `docs/rules/PROGRAMMING-RULES.md` — it explains the *why* and shows
 > concrete examples of every extension point.
 
+> ## ⚠️ SECTIONS 4–6 DESCRIBE THE v2 ARCHITECTURE. DO NOT FOLLOW THEM.
+>
+> v2 (LLM supervisor + `createSupervisor` + sub-supervisors) was audited and replaced on
+> **2026-07-08** — see `ZERO-BASE-AUDIT.md` and `JARVIS-ARCHITECTURE.md`. The files these
+> sections tell you to edit no longer exist, and two of them are CI **tombstones**:
+> re-creating `src/agents/office.ts` fails `pnpm verify:arch` outright.
+>
+> | Section | Status | v3 truth |
+> |---|---|---|
+> | 4 Adding a Department | **stale** | departments are `DEPARTMENT_TOOLS` in `src/agents/capabilities.ts`; prompts in `src/agents/prompts/` |
+> | 5 Adding a Domain (sub-supervisor) | **deleted concept** | there are no supervisors or domains. One graph: plan → dispatch → agent → collect → synthesize (`src/kernel/graph.ts`) |
+> | 6 Adding a Workflow (SOP) | **deleted** | `src/workflows/` was removed in Phase 6 (zero importers). Reusable scripts live in the `saved_workflows` table, listed by the `list_workflows` tool |
+> | Any "SUPERVISOR routing table" / `buildSupervisorPrompt()` step | **deleted** | routing is `buildPlannerPrompt` in `src/kernel/planner.ts`; the planner reads each worker's tool names from the catalog |
+>
+> Sections 1–3 and 7–10 were corrected to v3 on 2026-08-09 and are current;
+> `docs/rules/TOOL-INTEGRATION-PLAYBOOK.md` is the maintained path for adding a tool.
+> **Sections 4–6 still need a v3 rewrite — that is its own task, not part of a phase.**
+
 ## Table of Contents
 
 1. [Architecture in 60 seconds](#architecture-in-60-seconds)
 2. [Local dev setup](#local-dev-setup)
 3. [Adding a Tool](#adding-a-tool)
-4. [Adding a Department](#adding-a-department)
-5. [Adding a Domain (nested sub-supervisor)](#adding-a-domain-nested-sub-supervisor)
-6. [Adding a Workflow (SOP)](#adding-a-workflow-sop)
+4. [Adding a Department](#adding-a-department) — ⚠️ v2, do not follow
+5. [Adding a Domain (nested sub-supervisor)](#adding-a-domain-nested-sub-supervisor) — ⚠️ v2, concept deleted
+6. [Adding a Workflow (SOP)](#adding-a-workflow-sop) — ⚠️ v2, `src/workflows/` deleted
 7. [Adding a Telegram Command](#adding-a-telegram-command)
 8. [Adding golden eval tasks](#adding-golden-eval-tasks)
 9. [Verification ritual](#verification-ritual)
@@ -25,33 +43,34 @@
 Telegram message
       │
       ▼
-gateway/telegram.ts          ← grammy handler, HITL resume, history trim
+gateway/telegram.ts          ← grammy transport
+gateway/kernel-run.ts        ← run loop: lock → gates → invoke → HITL card / reply
       │
       ▼
-pre-router.ts (optional)     ← deterministic keyword hint (not LLM)
+kernel/graph.ts              ← ONE StateGraph, six nodes, no prebuilt supervisor
       │
-      ▼
-agents/office.ts             ← LangGraph createSupervisor (Gemini 2.5 Flash)
-      │
-      ├── research dept       ← createReactAgent + tools[search_web]
-      ├── comms dept          ← createReactAgent + tools[send_email, read_emails, …]
-      ├── engineering dept    ← createReactAgent (or CTO subgraph) + tools[github_r/w, claude_code]
-      ├── marketing dept      ← createReactAgent + tools[linkedin_post, search_web]
-      ├── sales dept          ← createReactAgent + tools[search_web, send_email]
-      ├── personal dept       ← createReactAgent + tools[read_file, write_file, run_shell, …]
-      └── jobhunt dept        ← createReactAgent + tools[read_cv, search_jobs, send_email]
+      ├── plan         kernel/planner.ts      LLM #1 → PlannerDecision: direct reply OR typed Plan
+      ├── dispatch     kernel/supervisor.ts   PURE CODE: plan[cursor] → TaskEnvelope
+      ├── agent ⇄ tools  kernel/worker.ts     worker sees ONLY its envelope; capped tools; ToolReceipts
+      ├── collect      kernel/graph.ts        PURE: StepResult validated against OUTPUT_CONTRACTS
+      └── synthesize   kernel/synthesizer.ts  LLM #2, sees validated results only → reply + receipts
+                                              (cursor++ loops back to dispatch until the plan is done)
 ```
+
+Which worker carries which tools is `DEPARTMENT_TOOLS` in `src/agents/capabilities.ts`
+(admin · research · comms · engineering · marketing · sales · personal · jobhunt); their
+prompts are one file each under `src/agents/prompts/`.
 
 **Three hard rules about this diagram:**
 
-1. **Compile once** — `buildOffice(checkpointer)` is called ONCE per process. Never inside
-   a request handler. The singleton is `getOffice()` in `index.ts`.
-2. **Prompts are functions** — `buildSupervisorPrompt()` and `buildCommsPrompt()` return
-   strings with `new Date()` injected. Pass them as **function references** to
-   `createTrimmedPrompt`, not pre-evaluated strings, or the date freezes at boot.
-3. **Context isolation** — `outputMode: "last_message"` is pinned on every supervisor and
-   sub-supervisor. A department's internal tool calls never appear in the supervisor's
-   history. Do NOT change this.
+1. **Contracts are the architecture** — every boundary (`TaskEnvelope`, `Plan`, `StepResult`,
+   `FailureReport`, `ToolReceipt`) is Zod-validated in `src/kernel/contracts.ts`. A mismatch is
+   a terminal, typed failure — never a retry-and-hope.
+2. **One composition root** — models, tools and the checkpointer are injected by
+   `src/gateway/kernel-boot.ts`, and only there. That is why the whole graph runs offline in CI
+   at $0 (`tests/unit/kernel/kernel-e2e.test.ts`).
+3. **Context isolation** — a worker sees its envelope and nothing else: not the conversation,
+   not other steps' tool calls. Do NOT widen it.
 
 ---
 
@@ -219,18 +238,13 @@ export {
 } from "./agent-tools/research.js";
 ```
 
-### Layer 5 — Department (`src/agents/office.ts`)
+### Layer 5 — Department (`src/agents/capabilities.ts`)
 
 ```typescript
-// Inside the research dept createReactAgent call:
-const research = createReactAgent({
-  llm: getModel(),
-  tools: [
-    searchWebAgent,
-    myToolAgent,       // ← add here
-  ],
-  // ...
-});
+// DEPARTMENT_TOOLS is the single source of truth for who carries what.
+export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
+  research: [searchWeb, /* … */ myToolAgent],   // ← add here
+};
 ```
 
 ### Layer 6 — Prompts (`src/agents/system-prompts.ts`)
@@ -244,12 +258,13 @@ const research = createReactAgent({
 - my_tool: Does X given Y — use when the founder asks about Z`
 ```
 
-**6b — Add the trigger to the SUPERVISOR routing table:**
+**6b — Routing (usually nothing to do):**
 
-```typescript
-// In buildSupervisorPrompt() routing table:
-`| research | "search", "find", "look up", "Z query", "my_tool trigger phrase" |`
-```
+The planner reads every worker's tool names straight from the catalog, so a tool wired at
+Layer 5 is already routable. Add a rule to `buildPlannerPrompt` (`src/kernel/planner.ts`)
+ONLY when the trigger phrase is genuinely ambiguous between two workers — and guard it with
+a case in `tests/unit/kernel/planner-prompt.test.ts`, the way the FounderOS-self-knowledge
+and draft-is-not-send rules are guarded.
 
 ### Forget → Error table
 
@@ -258,9 +273,8 @@ const research = createReactAgent({
 | Layer 1 test | Soft-fail bug (wrong field names ship silently) |
 | Layer 3 wrapper | Tool exists but agents can't see it — dead code |
 | Layer 4 barrel | `tsc` error: `'myToolAgent' is not exported from '...'` (loud, good) |
-| Layer 5 dept tools array | Tool built but no agent has it — never invoked |
-| Layer 6a dept prompt | Agent has the tool but never uses it — "I can't do that" |
-| Layer 6b routing table | Supervisor routes the request elsewhere |
+| Layer 5 `DEPARTMENT_TOOLS` | Tool built but no worker has it — never invoked |
+| Layer 6a dept prompt | Worker has the tool but never uses it — "I can't do that" (`pnpm verify:wiring` warns) |
 
 ---
 
@@ -617,11 +631,11 @@ pnpm eval          # golden set must hold
 
 | Invariant | Where enforced | What breaks |
 |-----------|---------------|-------------|
-| `outputMode: "last_message"` on all supervisors | `assertContextIsolation()` called at boot | Context leakage — tool calls pollute parent history |
-| `buildOffice()` called ONCE | `getOffice()` singleton in `index.ts` | Graph re-compiled per request → cold start + checkpoint loss |
+| A worker sees only its `TaskEnvelope` | `src/kernel/worker.ts` + `contracts.ts` | Context leakage — other steps' tool calls pollute the worker's history |
+| Models/tools/checkpointer injected once | `src/gateway/kernel-boot.ts`, the only composition root | Graph re-compiled per request → cold start + checkpoint loss |
 | HITL before every external send | `hitlGate()` in agent-tool wrappers | Emails/posts/pushes fire without approval |
 | Idempotency before every send | `hasBeenAudited()` + `writeAuditEntry()` | Double-sends on retry |
-| Prompt functions passed as references | `createTrimmedPrompt(buildSupervisorPrompt, …)` | Date frozen at boot time |
+| Date-injecting prompts passed as references | `createTrimmedPrompt(buildCommsPrompt, …)` | Date frozen at boot time |
 | ES module `.js` extension on every import | tsc / NodeNext | Runtime `ERR_MODULE_NOT_FOUND` |
 | Zod optional fields include `.nullable()` | Rule #7 | LangChain SDK throws on undefined tool args |
 | Tool never throws | `try/catch` in every tool body | Single tool failure crashes the whole ReAct loop |
@@ -635,6 +649,6 @@ pnpm eval          # golden set must hold
 - `docs/rules/TESTING-RULES.md` — test quality rules + 8-point template
 - `docs/guides/ARCHITECTURE.md` — system design and data flows
 - `docs/decisions/` — ADRs explaining *why* architectural choices were made
-- `src/agents/engineering-domain.ts` — reference impl for nested sub-supervisors
+- `src/kernel/graph.ts` — the one orchestration path, end to end
 - `src/tools/email.ts` — reference impl for HITL + idempotency in a tool
 - `src/tools/web-search.ts` — reference impl for a read-only (no HITL) tool

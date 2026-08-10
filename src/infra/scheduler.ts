@@ -33,6 +33,8 @@ import {
 import { nextRecurrence } from "../core/time.js";
 import { providerLinkedInPost } from "./providers/index.js";
 import { sendToChat } from "./telegram-send.js";
+import { runSelfAuditSweep } from "../evolution/audit-sweep.js";
+import { runRagOptimizationSweep } from "./rag-optimization-sweep.js";
 import { childLogger } from "./logger.js";
 import { TENANT, env } from "../core/config.js";
 import type { ScheduledPost, ScheduledTask } from "../db/schema.js";
@@ -44,6 +46,16 @@ import {
 } from "./daily-budget.js";
 import { getBudgetAlertsState, recordBudgetAlertSent } from "./daily-budget-alerts.js";
 import { sweepStaleCheckpoints } from "./checkpointer.js";
+import {
+  JOB_SWEEP_CRON,
+  runJobIngestSweep,
+  FREE_SWEEP_CRON,
+  runFreeSweep,
+} from "../tools/jobhunt/sweep-runner.js";
+
+// Re-exported so existing import sites (and tests) that read these off
+// scheduler.ts keep resolving after the move to sweep-runner.ts (2026-08-06).
+export { JOB_SWEEP_CRON, runJobIngestSweep };
 
 const log = childLogger({ module: "scheduler" });
 
@@ -246,109 +258,7 @@ export async function recoverStrandedReminders(): Promise<void> {
   }
 }
 
-// 01:30 UTC = 07:00 IST, every THIRD day (founder decision, 2026-08-02). The
-// feed bills per job RETURNED, so cadence changes only how often we re-buy the
-// same posting: the 2026-08-02 sweep was billed for 32 of which ZERO were new,
-// and daily bought that inventory three times over ($14.05/mo against $4.68).
-export const JOB_SWEEP_CRON = "30 1 */3 * *";
 
-/**
- * Every third day — sweep every source pool, screen everything, send a BRIEF.
- *
- * Zero-LLM: the fetch is HTTP, every gate is pure code, and ranking is a set
- * intersection, so this runs unattended without touching the model budget.
- *
- * What the founder receives is a ranked shortlist with one command per row, not
- * a log of verdicts. The previous version screened flawlessly and produced zero
- * applications for weeks: screening was never the binding constraint, and a
- * report that costs nothing to ignore will be ignored.
- *
- * A total failure still sends. A sweep that goes quiet is indistinguishable from
- * a market with no jobs in it, and that ambiguity is exactly why the founder
- * would stop trusting the number.
- */
-export async function runJobIngestSweep(): Promise<void> {
-  const { runPooledIngest } = await import("../tools/jobhunt/ingest.js");
-  const { buildDailyBrief } = await import("../tools/jobhunt/daily-brief.js");
-  const { toTelegramSafe, splitForTelegram } = await import("../tools/jobhunt/brief.js");
-
-  const result = await runPooledIngest({
-    limit: JOB_INGEST_DAILY_LIMIT,
-    includeIndeed: true,
-  });
-
-  if (result.fetched === 0 && result.failures.length > 0) {
-    log.warn({ failures: result.failures }, "Daily job ingest failed on every source");
-    // Escaped, not raw: sendToChat defaults to parse_mode "HTML", and real job
-    // titles carry "&" and "<" ("Bloom & Wild Group", prod 2026-07-31). Telegram
-    // rejects the WHOLE message on an unparseable entity — the alert must not
-    // fail on the alert's own content.
-    await sendToChat(
-      toTelegramSafe(`⚠ Job sweep failed — nothing was screened today.\n${result.failures.join("\n")}`),
-    );
-    return;
-  }
-
-  log.info(
-    { fetched: result.fetched, failures: result.failures.length },
-    "Daily job ingest complete",
-  );
-
-  try {
-    // NOT escaped here. The brief renders its own Telegram HTML and escapes every
-    // value at the point it is interpolated (see telegram-format.ts) — running a
-    // whole-message escape over it would print "&lt;b&gt;" at the founder rather
-    // than bolding anything, which is the exact "message is not formatted"
-    // complaint that started this.
-    //
-    // Chunked because Telegram rejects a body over 4,096 characters outright, and
-    // nothing in the send path splits. Before this, a brief that finally had
-    // enough supply to be worth reading would have been dropped whole — and the
-    // failure would have looked like a sweep that found nothing.
-    const brief = await buildDailyBrief({
-      screened: result.fetched,
-      failures: result.failures,
-      // Kept apart from `failures` all the way through. A day that correctly
-      // skipped eight expired listings is a working day, and printing that under
-      // "incomplete run" would teach the founder to distrust a healthy sweep.
-      notes: result.notes,
-    });
-    for (const part of splitForTelegram(brief)) {
-      await sendToChat(part);
-    }
-  } catch (err) {
-    // The postings ARE screened and recorded by this point. Losing the brief must
-    // not read as losing the sweep, so say which one actually failed.
-    log.error({ err: (err as Error).message }, "Daily brief render failed");
-    // Escaped too: this is the path that runs BECAUSE the brief failed, so an
-    // unescaped error message here would lose the founder the fallback as well.
-    await sendToChat(
-      toTelegramSafe(
-        `⚠ Screened ${result.fetched} posting(s), but the brief could not be built: ` +
-          `${(err as Error).message}\nThe screening results are recorded — run /jobs to read them.`,
-      ),
-    );
-  }
-}
-
-/**
- * Daily ATS volume, as a TOTAL split evenly across the sweep's ATS queries.
- *
- * The number was 30 and it capped nothing. The sweep runs one query per
- * (pool × track) and the actor rejects any limit below 10, so the real budget is
- * `max(10, floor(total / queries))` per query — and at 30 across 8 queries that
- * floor won every time. The sweep was quietly free to fetch 100 postings while
- * a constant named DAILY_LIMIT said 30. A budget that does not bind is worse
- * than no budget: it is a number the founder would reason about that has no
- * relationship to what is spent.
- *
- * 80 across 8 ATS queries is 10 each — the floor, stated honestly. With the two
- * Indeed queries the sweep's ceiling is 100 postings a day, and at the FREE-tier
- * ATS price ($0.01/start + $0.012/job) that is at most ~$1.06/day. What it
- * ACTUALLY costs is now recorded per query in `job_ingest_runs` and printed in
- * the brief, so this comment can never quietly become fiction again.
- */
-const JOB_INGEST_DAILY_LIMIT = 80;
 
 export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }): void {
   cron.schedule("0 9 * * *", () => {
@@ -374,6 +284,11 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
       log.error({ err: (err as Error).message }, "Job ingest sweep cron error"),
     );
   });
+  cron.schedule(FREE_SWEEP_CRON, () => {
+    runFreeSweep().catch((err) =>
+      log.error({ err: (err as Error).message }, "Free board sweep cron error"),
+    );
+  });
   cron.schedule("* * * * *", () => {
     runScheduledPostSweep().catch((err) =>
       log.error({ err: (err as Error).message }, "Scheduled post sweep cron error"),
@@ -392,8 +307,18 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
       );
     });
   }
+  cron.schedule("0 8 */3 * *", () => {
+    runSelfAuditSweep().catch((err) =>
+      log.error({ err: (err as Error).message }, "3-day self-audit sweep cron error"),
+    );
+  });
+  cron.schedule("0 3 * * 0", () => {
+    runRagOptimizationSweep().catch((err) =>
+      log.error({ err: (err as Error).message }, "Weekly RAG optimization sweep cron error"),
+    );
+  });
   log.info(
-    "Scheduler started — stale-approval check (daily 9am), budget alerts (hourly), brain sync (daily 2am), job ingest (daily 1:30am UTC), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
+    "Scheduler started — stale-approval check (daily 9am), self-audit sweep (every 3 days 8am), RAG optimization (weekly Sun 3am), budget alerts (hourly), brain sync (daily 2am), job ingest (daily 1:30am UTC), free board sweep (every 30 minutes), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
       (taskExecutor ? ", scheduled-task sweep (every minute)" : ""),
   );
 }

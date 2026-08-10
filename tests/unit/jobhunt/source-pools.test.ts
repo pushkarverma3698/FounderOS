@@ -65,7 +65,7 @@ describe("source pools", () => {
   });
 
   it("sends a location filter for both Netherlands-based pools", () => {
-    for (const pool of ["nl-onsite", "nl-remote"] satisfies SourcePool[]) {
+    for (const pool of ["nl-onsite", "nl-remote"] as unknown as SourcePool[]) {
       const input = buildAtsInput(POOL_QUERIES[pool]);
       expect(input["locationSearch"]).toEqual(["Netherlands"]);
     }
