@@ -213,3 +213,56 @@ describe("filterCandidates — note discipline", () => {
     }
   });
 });
+
+describe("filterCandidates — a 10h+ unseen posting survives on age alone", () => {
+  /**
+   * THE FOUNDER-REQUESTED REGRESSION (2026-08-10).
+   *
+   * The 6h window was not merely too tight, it was disjoint from the data: across
+   * 285 live registry boards, 18,846 candidates, the YOUNGEST posting was 10.3
+   * hours old and the median was 62 days. Prod recorded 64 sweeps, 1,306,522
+   * postings requested, 0 screened. These cases pin the exact ages that used to
+   * return nothing, so a future narrowing of the window fails here first rather
+   * than in a silent sweep.
+   *
+   * Deduplication is `keepUnseen`'s job, not the window's — these candidates are
+   * UNSEEN, and age must not be what removes them.
+   */
+  const AGES_THAT_RETURNED_ZERO = [10.3, 12, 24, 48, 72, 218, 719];
+
+  it.each(AGES_THAT_RETURNED_ZERO)("keeps an unseen posting %sh old", (hours) => {
+    const posting = candidate({ postedAt: new Date(NOW.getTime() - hours * 3_600_000) });
+
+    const { kept } = filterCandidates([posting], NOW);
+
+    expect(kept).toEqual([posting]);
+  });
+
+  it("keeps the exact 10.3h posting that was the youngest on the whole registry", () => {
+    const youngest = candidate({ postedAt: new Date(NOW.getTime() - 10.3 * 3_600_000) });
+
+    const { kept, notes } = filterCandidates([youngest], NOW);
+
+    expect(kept).toEqual([youngest]);
+    expect(notes.join(" ")).not.toMatch(/older than/);
+  });
+
+  it("drops a 10h posting for TRACK, never for age — the reason must name the real cause", () => {
+    const offTrack = candidate({
+      title: "Warehouse Associate",
+      postedAt: new Date(NOW.getTime() - 10 * 3_600_000),
+    });
+
+    const { kept, notes } = filterCandidates([offTrack], NOW);
+
+    expect(kept).toEqual([]);
+    expect(notes.some((n) => n.includes("not an engineering track"))).toBe(true);
+    expect(notes.join(" ")).not.toMatch(/older than/);
+  });
+
+  it("the default window admits everything the boards actually publish", () => {
+    // p90 across the live registry was 8,281h; the default must at minimum admit
+    // the median (1,478h) so a normal board is not 50% invisible.
+    expect(FREE_LANE_MAX_AGE_HOURS).toBeGreaterThan(720 - 1);
+  });
+});

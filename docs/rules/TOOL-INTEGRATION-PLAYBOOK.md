@@ -110,9 +110,9 @@ Test-first
 Five layers
 - [ ] L1 tool body returns {success,error}, never throws past boundary
 - [ ] L2 agent wrapper (interrupt() BEFORE side-effect if it writes)
-- [ ] L3 added to the correct department tools[] in office.ts
-- [ ] L4 department prompt: tool listed + when-to-use + output formatting
-- [ ] L5 supervisor prompt: routing rule for the trigger phrase
+- [ ] L3 added to the correct DEPARTMENT_TOOLS entry in capabilities.ts
+- [ ] L4 department prompt (src/agents/prompts/<dept>.ts): tool listed + when-to-use + output formatting
+- [ ] L5 planner: usually a no-op (catalog-driven) — add a buildPlannerPrompt rule only if the trigger is ambiguous between two workers
 Verify
 - [ ] pnpm test green + tsc clean
 - [ ] Live: /reset → trigger phrase → correct toolErrors signal in logs

@@ -13,6 +13,7 @@ const mockGetReadme = vi.fn();
 const mockCreateOrUpdateFileContents = vi.fn();
 const mockIssuesCreate = vi.fn();
 const mockReposCreate = vi.fn();
+const mockListCommits = vi.fn();
 
 vi.mock("octokit", () => {
   return {
@@ -25,6 +26,7 @@ vi.mock("octokit", () => {
           getReadme: mockGetReadme,
           createOrUpdateFileContents: mockCreateOrUpdateFileContents,
           createForAuthenticatedUser: mockReposCreate,
+          listCommits: mockListCommits,
         },
         issues: { create: mockIssuesCreate },
       },
@@ -156,5 +158,70 @@ describe("githubTool — create_issue", () => {
     expect(result.success).toBe(true);
     const data = result.data as Record<string, unknown>;
     expect(data.issue_number).toBe(42);
+  });
+});
+
+describe("githubTool — list_commits ref default", () => {
+  /**
+   * THE REGRESSION. `sha` defaulted to the literal "gemini/antigravityChanges",
+   * a working branch that does not exist on the repo. Every list_commits call
+   * that did not name a ref therefore asked GitHub for commits on a missing
+   * branch and came back 404 Not Found — four times on 2026-08-08 alone, so
+   * "what shipped recently?" never worked. Omitting `sha` entirely makes GitHub
+   * use the repository's own default branch, which is the answer the caller
+   * wanted; hardcoding ANY branch name here is wrong, because the tool is
+   * repo-agnostic and `main` is not universal either.
+   */
+  beforeEach(() => {
+    process.env["GITHUB_TOKEN"] = "ghp_test";
+    mockListCommits.mockReset();
+    mockListCommits.mockResolvedValue({
+      data: [
+        {
+          sha: "abcdef1234567890",
+          commit: { message: "feat: a thing\n\nbody", author: { name: "Ada", date: "2026-08-08" } },
+        },
+      ],
+    });
+  });
+
+  it("omits `sha` when the caller names no ref, so the repo default branch is used", async () => {
+    const result = await githubTool.execute({
+      action: "list_commits",
+      owner: "pushkarverma3698",
+      repo: "FounderOS",
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockListCommits).toHaveBeenCalledTimes(1);
+    const passed = mockListCommits.mock.calls[0]![0] as Record<string, unknown>;
+    expect(passed).not.toHaveProperty("sha");
+  });
+
+  it("never sends the retired gemini/antigravityChanges branch", async () => {
+    await githubTool.execute({ action: "list_commits", owner: "o", repo: "r" });
+
+    const passed = mockListCommits.mock.calls[0]![0] as Record<string, unknown>;
+    expect(JSON.stringify(passed)).not.toContain("antigravityChanges");
+  });
+
+  it("still honours an explicit `sha`", async () => {
+    await githubTool.execute({ action: "list_commits", owner: "o", repo: "r", sha: "beta" });
+
+    expect(mockListCommits.mock.calls[0]![0]).toMatchObject({ sha: "beta" });
+  });
+
+  it("still honours an explicit `ref` as the alias for sha", async () => {
+    await githubTool.execute({ action: "list_commits", owner: "o", repo: "r", ref: "v1.2.0" });
+
+    expect(mockListCommits.mock.calls[0]![0]).toMatchObject({ sha: "v1.2.0" });
+  });
+
+  it("returns the commit summary shape the synthesizer reads", async () => {
+    const result = await githubTool.execute({ action: "list_commits", owner: "o", repo: "r" });
+
+    expect(result.data).toEqual([
+      { sha: "abcdef12", message: "feat: a thing", author: "Ada", date: "2026-08-08" },
+    ]);
   });
 });
