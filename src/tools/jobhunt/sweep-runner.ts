@@ -222,6 +222,9 @@ export async function runFreeSweep(): Promise<void> {
     {
       boardsPolled: result.boardsPolled,
       seen: result.seen,
+      offTrack: result.counts.offTrack,
+      offMarket: result.counts.offMarket,
+      relevant: result.counts.kept,
       screened: result.screened,
       failures: result.failures.length,
     },

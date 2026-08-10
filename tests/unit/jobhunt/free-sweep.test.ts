@@ -58,6 +58,7 @@ function result(overrides: Partial<FreeIngestResult> = {}): FreeIngestResult {
   return {
     seen: 10,
     screened: 5,
+    counts: { seen: 10, offTrack: 3, offMarket: 2, kept: 5 },
     lines: [],
     failures: [],
     notes: [],

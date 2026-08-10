@@ -19,17 +19,25 @@
  * register and the salary parser over every warehouse and concept-artist vacancy
  * on 238 boards, forty-eight times a day.
  *
- * So this lane filters on three cheap, local facts before screening — is it
- * recent, is it an engineering track, is it in a market we can work in — and
- * every one of those filters RETURNS ITS COUNT, which the caller reports as
- * notes. "1,412 postings were not an engineering track" is a sentence about the
- * boards; a silent drop would be a sentence about nothing.
+ * So this lane filters on two cheap, local facts before screening — is it an
+ * engineering track, is it in a market we can work in — and every one of those
+ * filters RETURNS ITS COUNT, which the caller reports as notes AND logs as
+ * numbers. "1,412 postings were not an engineering track" is a sentence about
+ * the boards; a silent drop would be a sentence about nothing.
  *
- * COLD START is handled by the freshness window, not by the tracker. The first
- * sweep of a 238-board registry sees roughly 16,000 live postings, and treating
- * every one of them as new would flood the brief on day one and bury the handful
- * that actually matter. Only postings published inside the window are candidates,
- * so the first run behaves exactly like every later one.
+ * THERE IS NO FRESHNESS WINDOW, AND THE ONE THAT USED TO BE HERE IS WHY THIS
+ * LANE PRODUCED NOTHING (fixed 2026-08-09). A six-hour publication window sat in
+ * front of these filters on the theory that it bounded the lane's own downtime.
+ * Measured against 60 live boards it discarded everything: of 8,621 candidates
+ * the YOUNGEST was 10.3 hours old and the median was 62 days, so the window kept
+ * zero — as did 24h. Across 64 production sweeps that is 1,306,522 postings
+ * fetched and not one screened, while the log line said "Free ingest complete".
+ * Boards do not republish on our polling interval, and `first_published` is the
+ * original publication date, not a heartbeat.
+ *
+ * COLD START and re-screening are handled by `keepUnseen` — the tracker — which
+ * is the honest form of the question the window was pretending to ask. "Have we
+ * already got this one?" is answered by what we stored, never by a clock.
  */
 
 import { randomUUID } from "node:crypto";
@@ -49,21 +57,6 @@ import { classifyTrack } from "./tracks.js";
 
 const log = childLogger({ module: "jobhunt:free-ingest" });
 
-/**
- * How far back a posting may have been published and still be a candidate.
- *
- * Deliberately much wider than the 30-minute polling interval. The window is the
- * lane's tolerance for its own downtime: at six hours a deploy, a restart or a
- * host outage lasting most of a morning costs nothing, because the next sweep
- * still sees everything published while the lane was dark. Narrowing it to match
- * the interval would make every missed sweep a permanent hole, and a permanent
- * hole in a feed nobody is invoicing is invisible.
- *
- * The overlap it creates is free: a posting seen in an earlier sweep is already
- * in the tracker and is dropped before it costs a body fetch.
- */
-export const FREE_LANE_MAX_AGE_HOURS = 6;
-
 /** Bound on the tracker lookups. Small queries, but not worth 400 at once. */
 const LOOKUP_CONCURRENCY = 12;
 
@@ -72,6 +65,8 @@ export interface FreeIngestResult {
   readonly seen: number;
   /** Postings that survived every filter and reached the gates. */
   readonly screened: number;
+  /** Per-filter tallies, so a caller can tell WHICH stage emptied the funnel. */
+  readonly counts: FilterCounts;
   readonly lines: readonly IngestLine[];
   /** One entry per board that failed. An outage must read as an outage. */
   readonly failures: readonly string[];
@@ -81,45 +76,42 @@ export interface FreeIngestResult {
   readonly sweepId: string;
 }
 
-function hoursSince(date: Date, now: Date): number {
-  return (now.getTime() - date.getTime()) / 3_600_000;
+/**
+ * Per-filter tallies for the log line.
+ *
+ * ALWAYS PRESENT, INCLUDING THE ZEROES — unlike `notes`, which are suppressed at
+ * zero so the founder never reads "0 postings were …". A filter missing from the
+ * log is indistinguishable from a filter that dropped nothing, and that exact
+ * ambiguity is what let a lane discarding 100% of its input log
+ * "Free ingest complete" 64 times without anyone noticing.
+ */
+export interface FilterCounts {
+  readonly seen: number;
+  readonly offTrack: number;
+  readonly offMarket: number;
+  readonly kept: number;
 }
 
 interface FilterOutcome {
   readonly kept: readonly FreeCandidate[];
   readonly notes: readonly string[];
+  readonly counts: FilterCounts;
 }
 
 /**
- * The three cheap filters, applied in order and each one counted.
+ * The two cheap filters, applied in order and each one counted.
  *
- * Pure: a `now` is passed in rather than read, so the freshness boundary is
- * testable to the hour without waiting for one.
- *
- * An undated posting is DROPPED, not kept. Every one of these platforms states a
- * publication date, so a missing one means a malformed row — and treating unknown
- * age as fresh is exactly how a three-year-old listing reaches the top of a brief
- * that promised the founder new roles.
+ * Pure and time-independent. Age is deliberately NOT consulted: whether we have
+ * seen a posting before is the tracker's question (`keepUnseen`), and a posting's
+ * publication date says nothing about whether we already hold it. An undated
+ * posting is therefore kept — with no age gate there is nothing for a missing
+ * date to fail.
  */
-export function filterCandidates(
-  candidates: readonly FreeCandidate[],
-  now: Date,
-  maxAgeHours: number = FREE_LANE_MAX_AGE_HOURS,
-): FilterOutcome {
-  let undated = 0;
-  let stale = 0;
+export function filterCandidates(candidates: readonly FreeCandidate[]): FilterOutcome {
   let offTrack = 0;
   let offMarket = 0;
 
   const kept = candidates.filter((candidate) => {
-    if (candidate.postedAt === null) {
-      undated += 1;
-      return false;
-    }
-    if (hoursSince(candidate.postedAt, now) > maxAgeHours) {
-      stale += 1;
-      return false;
-    }
     if (classifyTrack(candidate.title) === null) {
       offTrack += 1;
       return false;
@@ -134,12 +126,14 @@ export function filterCandidates(
   });
 
   const notes: string[] = [];
-  if (stale > 0) notes.push(`${stale} postings older than ${maxAgeHours}h — seen in an earlier sweep`);
   if (offTrack > 0) notes.push(`${offTrack} postings were not an engineering track`);
   if (offMarket > 0) notes.push(`${offMarket} postings were outside the Netherlands and India`);
-  if (undated > 0) notes.push(`${undated} postings stated no publication date and were skipped`);
 
-  return { kept, notes };
+  return {
+    kept,
+    notes,
+    counts: { seen: candidates.length, offTrack, offMarket, kept: kept.length },
+  };
 }
 
 /**
@@ -181,16 +175,13 @@ async function keepUnseen(
 export async function runFreeIngest(
   opts: {
     readonly boards?: readonly FreeBoard[];
-    readonly now?: Date;
-    readonly maxAgeHours?: number;
   } = {},
 ): Promise<FreeIngestResult> {
-  const now = opts.now ?? new Date();
   const sweepId = randomUUID();
   const boards = opts.boards ?? getFreeBoards();
 
   const sweep = await sweepBoards(boards);
-  const filtered = filterCandidates(sweep.candidates, now, opts.maxAgeHours);
+  const filtered = filterCandidates(sweep.candidates);
   const { unseen, known } = await keepUnseen(filtered.kept);
   const hydrated = await hydrateDescriptions(unseen);
 
@@ -227,10 +218,21 @@ export async function runFreeIngest(
     ...(sweep.failures.length > 0 ? { error: sweep.failures.slice(0, 3).join("; ") } : {}),
   });
 
+  // THE FUNNEL IS LOGGED IN FULL, one field per stage, every run. The previous
+  // line carried only seen/screened/failed, so a lane dropping 100% of its input
+  // at a filter looked exactly like a lane finding nothing on a quiet morning.
+  // Whichever number collapses to zero, the field above it now names the stage
+  // that did it.
   log.info(
     {
       boards: boards.length,
-      seen: sweep.candidates.length,
+      seen: filtered.counts.seen,
+      offTrack: filtered.counts.offTrack,
+      offMarket: filtered.counts.offMarket,
+      relevant: filtered.counts.kept,
+      alreadyTracked: known,
+      unseen: unseen.length,
+      bodyless,
       screened: postings.length,
       failed: sweep.failures.length,
     },
@@ -240,6 +242,7 @@ export async function runFreeIngest(
   return {
     seen: sweep.candidates.length,
     screened: postings.length,
+    counts: filtered.counts,
     lines,
     failures: sweep.failures,
     notes,
