@@ -9,12 +9,17 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   DEPARTMENT_TOOLS,
+  ENGINEERING_SUBAGENT_TOOLS,
+  MARKETING_SUBAGENT_TOOLS,
+  ADMIN_SUBAGENT_TOOLS,
   SUPERVISOR_TOOLS,
   HITL_GATED_TOOLS,
   buildCapabilityManifest,
   mergeBridgedTools,
   stripBridgedTools,
 } from "../../../src/agents/capabilities.js";
+import { readdirSync } from "node:fs";
+import * as path from "node:path";
 
 describe("DEPARTMENT_TOOLS registry", () => {
   it("declares all 8 departments (admin worker + 7 operational)", () => {
@@ -88,15 +93,30 @@ describe("buildCapabilityManifest", () => {
     expect(manifest).toMatch(/pnpm mcp/);
   });
 
-  it("HITL set must cover all known side-effecting tools and have no orphaned gates", () => {
-    const allNames = Object.values(DEPARTMENT_TOOLS).flat().map((t: { name: string }) => t.name);
-    
-    // 1. Every tool listed in HITL_GATED_TOOLS must actually be registered in a department
+});
+
+describe("HITL Security Invariant", () => {
+  it("Reachability: every tool in HITL_GATED_TOOLS appears in at least one declared department or sub-agent registry", () => {
+    const declaredNames = new Set<string>([
+      ...Object.values(DEPARTMENT_TOOLS).flat().map((t: { name: string }) => t.name),
+      ...Object.values(ENGINEERING_SUBAGENT_TOOLS).flat().map((t: { name: string }) => t.name),
+      ...Object.values(MARKETING_SUBAGENT_TOOLS).flat().map((t: { name: string }) => t.name),
+      ...Object.values(ADMIN_SUBAGENT_TOOLS).flat().map((t: { name: string }) => t.name),
+    ]);
+
     for (const gated of HITL_GATED_TOOLS) {
-      expect(allNames, `${gated} exists in a department`).toContain(gated);
+      expect(declaredNames.has(gated), `HITL_GATED_TOOLS lists "${gated}" but it does not appear in any declared registry`).toBe(true);
     }
-    
-    // 2. Every reachable tool that causes an external or durable side effect MUST be HITL-gated
+  });
+
+  it("Coverage: every declared side-effecting tool (external send, spend, irreversible write, write outside ARTIFACT_ROOT) is HITL protected", () => {
+    const declaredNames = new Set<string>([
+      ...Object.values(DEPARTMENT_TOOLS).flat().map((t: { name: string }) => t.name),
+      ...Object.values(ENGINEERING_SUBAGENT_TOOLS).flat().map((t: { name: string }) => t.name),
+      ...Object.values(MARKETING_SUBAGENT_TOOLS).flat().map((t: { name: string }) => t.name),
+      ...Object.values(ADMIN_SUBAGENT_TOOLS).flat().map((t: { name: string }) => t.name),
+    ]);
+
     const sideEffectingTools = [
       "send_email",
       "vps_run",
@@ -117,12 +137,31 @@ describe("buildCapabilityManifest", () => {
       "browser",
       "synthesize_skill"
     ];
-    
+
     for (const tool of sideEffectingTools) {
-      // If the tool is reachable in any department, it MUST be in the HITL set
-      if (allNames.includes(tool)) {
-        expect(HITL_GATED_TOOLS.has(tool), `Side-effecting tool '${tool}' must be HITL-gated`).toBe(true);
+      if (declaredNames.has(tool)) {
+        expect(HITL_GATED_TOOLS.has(tool), `Declared side-effecting tool '${tool}' must be in HITL_GATED_TOOLS`).toBe(true);
       }
+    }
+  });
+
+  it("Enforcement: every tool listed in HITL_GATED_TOOLS has an actual hitlGate({ action: '<name>' }) enforcement point in code", () => {
+    const toolsDir = fileURLToPath(new URL("../../../src/agents/agent-tools", import.meta.url));
+    const extraToolsDir = fileURLToPath(new URL("../../../src/tools", import.meta.url));
+
+    function getFiles(dir: string): string[] {
+      const entries = readdirSync(dir, { recursive: true, withFileTypes: true });
+      return entries
+        .filter((e) => e.isFile() && e.name.endsWith(".ts"))
+        .map((e) => path.join(e.parentPath ?? dir, e.name));
+    }
+
+    const sourceFiles = [...getFiles(toolsDir), ...getFiles(extraToolsDir)];
+    const sourceCode = sourceFiles.map((f) => readFileSync(f, "utf8")).join("\n");
+
+    for (const gated of HITL_GATED_TOOLS) {
+      const pattern = new RegExp(`hitlGate\\s*\\(\\s*(?:\\{[^}]*|\\n)*action:\\s*["']${gated}["']`, "m");
+      expect(pattern.test(sourceCode), `Tool '${gated}' is in HITL_GATED_TOOLS but lacks a hitlGate({ action: "${gated}" }) enforcement point in source code`).toBe(true);
     }
   });
 

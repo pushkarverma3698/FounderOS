@@ -66,12 +66,12 @@ describe("Graphify Auto-Hook", () => {
     it("should provide context for find operations", () => {
       const result = handlePreToolUse({
         tool: "find",
-        args: { query: "github_write" },
+        args: { query: "claude_code" },
       });
 
       expect(result).not.toBeNull();
       expect(result?.context).toBeDefined();
-      expect(result?.context).toContain("github_write");
+      expect(result?.context).toContain("claude_code");
     });
 
     it("should handle missing arguments gracefully", () => {
@@ -149,10 +149,10 @@ describe("Graphify Utility Functions", () => {
     it("should show HITL gate info for sensitive operations", () => {
       const result = handlePreToolUse({
         tool: "grep",
-        args: { pattern: "github_write" },
+        args: { pattern: "claude_code" },
       });
 
-      expect(result?.context).toContain("github_write");
+      expect(result?.context).toContain("claude_code");
       expect(result?.context).toContain("HITL");
     });
 
