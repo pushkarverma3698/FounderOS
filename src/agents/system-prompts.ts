@@ -4,7 +4,7 @@
  * One tight prompt per role, each in its own file under ./prompts/ so a
  * developer can open exactly the prompt they need:
  *
- *   prompts/supervisor.ts   — the router (SUPERVISOR_PROMPT, buildSupervisorPrompt)
+ *
  *   prompts/research.ts      — RESEARCH_PROMPT
  *   prompts/comms.ts         — buildCommsPrompt (date-injected)
  *   prompts/engineering.ts   — ENGINEERING_PROMPT
@@ -27,7 +27,6 @@
  * This file is a barrel: importers keep using `./system-prompts.js` unchanged.
  */
 
-export { SUPERVISOR_PROMPT, buildSupervisorPrompt } from "./prompts/supervisor.js";
 export { ADMIN_PROMPT } from "./prompts/admin.js";
 export { RESEARCH_PROMPT } from "./prompts/research.js";
 export { buildCommsPrompt } from "./prompts/comms.js";

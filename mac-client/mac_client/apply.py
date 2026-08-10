@@ -35,16 +35,11 @@ PAGE_RECYCLE_EVERY = 25
 OVERLAY_JS = Path(__file__).resolve().parent / "overlay.js"
 
 
-async def fill_form(page, job: QueueJob, profile: ApplyProfile) -> tuple[list[str], list[str]]:
-    """Fill what we can. Returns (filled labels, skipped labels).
+from .resolver import resolve_fallback_fields
 
-    Both lists reach the overlay. A form that was silently half-completed is one
-    the founder submits believing it was whole — so the badge says exactly which
-    fields the tool touched and which it left for him.
-    """
+async def fill_form(page, job: QueueJob, profile: ApplyProfile) -> tuple[list[str], list[str]]:
+    """Fill what we can. Returns (filled labels, skipped labels)."""
     field_map = field_map_for(job.url)
-    if field_map is None:
-        return [], ["this ATS is not one we know — every field is yours"]
 
     filled: list[str] = []
     skipped: list[str] = []
@@ -54,7 +49,22 @@ async def fill_form(page, job: QueueJob, profile: ApplyProfile) -> tuple[list[st
     except Exception:
         pass
 
-    for label, selectors, value in planned_fills(field_map, profile):
+    if field_map is None:
+        # An unrecognised ATS gets zero automation, not a best-effort guess —
+        # the heuristic resolver below is for filling GAPS in a map we already
+        # trust, not for deciding on its own that an unknown form is safe to
+        # touch.
+        return [], ["this ATS is not one we know — every field is yours"]
+
+    plan = planned_fills(field_map, profile)
+    resume_selectors = field_map.resume
+
+    fallback_plan, fallback_resume = await resolve_fallback_fields(page, profile, plan)
+    plan.extend(fallback_plan)
+    if fallback_resume and not resume_selectors:
+        resume_selectors = (fallback_resume,)
+
+    for label, selectors, value in plan:
         if not value.strip():
             skipped.append(f"{label} (not in your profile)")
             continue
@@ -64,7 +74,7 @@ async def fill_form(page, job: QueueJob, profile: ApplyProfile) -> tuple[list[st
             skipped.append(f"{label} (no matching field on this form)")
 
     resume = profile.resume_for(job.track, job.id)
-    if resume and await _upload_first(page, field_map.resume, resume):
+    if resume and resume_selectors and await _upload_first(page, resume_selectors, resume):
         filled.append(f"resume ({Path(resume).name})")
     else:
         skipped.append("resume (no upload field found)")
@@ -106,9 +116,20 @@ async def _upload_first(page, selectors: tuple[str, ...], path: str) -> bool:
     return False
 
 
+from .liveness import classify_response
+
 async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str) -> str:
     """Open one job, fill it, and wait for the founder. Returns the outcome."""
-    await page.goto(job.url, wait_until="domcontentloaded")
+    response = await page.goto(job.url, wait_until="domcontentloaded")
+    
+    if response:
+        redirected = response.request.redirected_from is not None
+        liveness = classify_response(response.status, job.url, page.url, redirected)
+        if liveness == "expired":
+            print(f"  [SKIPPED] Posting no longer available (caught at open).")
+            ledger.record(job.id, ledger.SKIPPED, company=job.company, title=job.title)
+            return ledger.SKIPPED
+
     filled, skipped = await fill_form(page, job, profile)
 
     try:
@@ -214,12 +235,20 @@ def main() -> int:
 
     problems = missing_resumes(profile, jobs)
     if problems:
-        # Refusing to start is the point. Discovering a missing PDF at job three
-        # means the founder has already reviewed a form he cannot submit.
-        print("✗ Refusing to start — the queue needs resumes that are not on disk:")
+        # One job missing a resume must not block every other job in the
+        # queue — refusing to start over a single row was the old behaviour,
+        # and it cost a whole day's queue for one bad row. Skip only the rows
+        # that are actually missing a resume; they are reported, not silently
+        # dropped, and come back once the resume is on disk.
+        print("⚠ The following jobs are missing required resumes and will be skipped:")
         for problem in problems:
             print(f"    {problem}")
-        return 1
+
+        jobs = [job for job in jobs if not missing_resumes(profile, [job])]
+
+        if not jobs:
+            print("✗ No jobs left in the queue with valid resumes. Refusing to start.")
+            return 1
 
     print(f"{len(jobs)} job(s) queued. The browser will open one at a time.")
     tally = asyncio.run(run_queue(jobs, profile))

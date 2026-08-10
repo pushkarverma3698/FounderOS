@@ -9,13 +9,12 @@
  * Where each tool lives:
  *   agent-tools/hitl.ts        → hitlGate, ApprovalRequest, idemKey (shared core)
  *   agent-tools/research.ts    → searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript
- *   agent-tools/rag.ts         → searchResearchCache (web findings store)
+ *   agent-tools/rag.ts         → searchResearchCache, searchPersonalRag, searchTuricksBrain
  *   agent-tools/comms.ts       → sendEmail, linkedinPost, createCalendarEvent, readEmails
  *   agent-tools/engineering.ts → githubRead, githubWrite, projectWorkflow, claudeCode
  *   agent-tools/personal.ts    → readFile, listDir, sendFile, writeFile, runShell, browser
  *   agent-tools/jobhunt.ts     → readCv, searchJobs
  *   agent-tools/memory.ts      → recordEvent
- *   agent-tools/rag.ts         → searchPersonalRag, searchTuricksBrain
  *
  * HITL contract (read by the Telegram gateway):
  *   interrupt({ kind: "approval", action, title, summary, preview, args })
@@ -47,5 +46,6 @@ export { readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobB
 export { recordEvent } from "./agent-tools/memory.js";
 export { searchPersonalRag, searchTuricksBrain, searchResearchCache } from "./agent-tools/rag.js";
 export { publishSignal, prepareSignal, DEFAULT_TARGET_DEPT } from "./agent-tools/signals.js";
-export { uploadAsset, getDownloadUrl, listRunAssets, downloadAsset } from "./agent-tools/storage.js";
+
 export { synthesizeSkill } from "../tools/skill-synthesizer.js";
+export { jobState, opsState, writeArtifact, deliverArtifact } from "./agent-tools/state.js";

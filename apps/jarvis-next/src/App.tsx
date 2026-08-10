@@ -15,6 +15,7 @@ import { DEPARTMENTS, SUPERVISOR } from './lib/departments';
 import { isStreaming, type DepartmentNodeData } from './types/graph';
 import { soundEngine } from './audio/soundEngine';
 import { voiceEngine } from './audio/voiceEngine';
+import { QueueTab } from './components/QueueTab';
 
 const INITIAL_HITL: HitlItem[] = [
   {
@@ -383,7 +384,11 @@ export function App() {
             </>
           )}
 
-          {activeTab !== 'CORE' && (
+          {activeTab === 'QUEUE' && (
+            <QueueTab />
+          )}
+
+          {activeTab !== 'CORE' && activeTab !== 'QUEUE' && (
             <div className="absolute inset-0 overflow-y-auto p-6">
               <TabPanel tab={activeTab} departments={departments} spendToday={spendToday} totalTurns={totalTurns} />
             </div>

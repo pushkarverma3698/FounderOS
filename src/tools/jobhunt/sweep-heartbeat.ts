@@ -21,12 +21,16 @@
 
 import { esc } from "./telegram-format.js";
 import type { IngestLine } from "./ingest-batch.js";
+import type { FreeFunnel } from "./free-ingest.js";
 
 /** How long a quiet lane may go without saying anything at all. */
 export const ALIVE_PING_INTERVAL_MS = 3 * 60 * 60 * 1000;
 
 /** Rows named individually in a new-roles alert before it summarises the rest. */
 export const NEW_ROWS_NAMED = 3;
+
+/** Number of consecutive 0-pass sweeps before raising a closed-funnel alert. */
+export const ZERO_PASS_STREAK_THRESHOLD = 6;
 
 export interface HeartbeatState {
   /** Sweeps that found nothing since the last message of any kind. */
@@ -35,47 +39,91 @@ export interface HeartbeatState {
   readonly boardsPolled: number;
   /** When the founder last heard from this lane, epoch ms. */
   readonly lastMessageAt: number;
+  /** Consecutive sweeps where 0 candidates reached screening/passed. */
+  readonly zeroPassStreak: number;
+  /** Last sweep's funnel diagnostic snapshot. */
+  readonly lastFunnel: FreeFunnel | null;
 }
 
 export function initialHeartbeat(now: Date): HeartbeatState {
-  return { quietSweeps: 0, boardsPolled: 0, lastMessageAt: now.getTime() };
+  return { quietSweeps: 0, boardsPolled: 0, lastMessageAt: now.getTime(), zeroPassStreak: 0, lastFunnel: null };
+}
+
+/** Identify the dominant drop stage from a funnel snapshot. */
+export function topDropReason(funnel: FreeFunnel | null | undefined): { reason: string; count: number } | null {
+  if (!funnel) return null;
+  const stages: Array<{ reason: string; count: number }> = [
+    { reason: "stale age cutoff", count: funnel.stale },
+    { reason: "off-track title", count: funnel.offTrack },
+    { reason: "outside target market", count: funnel.offMarket },
+    { reason: "already known in tracker", count: funnel.known },
+    { reason: "undated publication", count: funnel.undated },
+    { reason: "no body description", count: funnel.bodyless },
+  ];
+  stages.sort((a, b) => b.count - a.count);
+  return stages[0] && stages[0].count > 0 ? stages[0] : null;
 }
 
 /**
  * Fold a sweep that found nothing into the state, and say whether it is time to
- * prove the lane is alive.
- *
- * Returns the ping text rather than sending it — the caller owns the transport,
- * and a function that both decides and sends cannot be tested without one.
+ * prove the lane is alive or raise a zero-pass streak alert.
  */
 export function afterQuietSweep(
   state: HeartbeatState,
   boardsPolled: number,
-  now: Date,
-  sheetLink: string | null,
+  arg3?: Date | FreeFunnel | null,
+  arg4?: Date | string | null,
+  arg5?: string | null,
 ): { readonly next: HeartbeatState; readonly ping: string | null } {
+  let funnel: FreeFunnel | null = null;
+  let currentNow: Date;
+  let sheetLink: string | null = null;
+
+  if (arg3 instanceof Date) {
+    currentNow = arg3;
+    sheetLink = (arg4 as string | null) ?? null;
+  } else {
+    funnel = arg3 ?? null;
+    currentNow = (arg4 as Date) ?? new Date();
+    sheetLink = arg5 ?? null;
+  }
+
+  const zeroPass = funnel ? funnel.screened === 0 : true;
+  const newStreak = zeroPass ? state.zeroPassStreak + 1 : 0;
+
   const pending: HeartbeatState = {
     quietSweeps: state.quietSweeps + 1,
     boardsPolled: state.boardsPolled + boardsPolled,
     lastMessageAt: state.lastMessageAt,
+    zeroPassStreak: newStreak,
+    lastFunnel: funnel ?? state.lastFunnel,
   };
 
-  if (now.getTime() - state.lastMessageAt < ALIVE_PING_INTERVAL_MS) {
+  // Zero-pass streak alert: if funnel drops 100% for N consecutive sweeps, raise alert once at threshold
+  if (newStreak === ZERO_PASS_STREAK_THRESHOLD) {
+    const top = topDropReason(funnel ?? state.lastFunnel);
+    const dropClause = top ? ` (dominant drop stage: ${top.count} ${top.reason})` : "";
+    const ping =
+      `⚠ <b>Job lane funnel alert</b> — 0 candidates passed for ${newStreak} consecutive sweeps` +
+      `${dropClause}. The funnel may be restricted or closed.`;
+    return {
+      next: { ...pending, lastMessageAt: currentNow.getTime() },
+      ping,
+    };
+  }
+
+  if (currentNow.getTime() - state.lastMessageAt < ALIVE_PING_INTERVAL_MS) {
     return { next: pending, ping: null };
   }
 
   return {
-    next: initialHeartbeat(now),
+    next: initialHeartbeat(currentNow),
     ping: formatAlivePing(pending, sheetLink),
   };
 }
 
 /**
  * Record that the founder was just told something real.
- *
- * A new-roles alert proves the lane is alive as conclusively as a ping does, so
- * it resets the clock. Otherwise a busy morning would earn him an alert AND a
- * "still alive" ping ten minutes later.
  */
 export function afterSpokenSweep(now: Date): HeartbeatState {
   return initialHeartbeat(now);
@@ -83,28 +131,20 @@ export function afterSpokenSweep(now: Date): HeartbeatState {
 
 /**
  * The quiet-period ping.
- *
- * Carries the boards-polled count because "alive" on its own is the claim, and
- * the count is the evidence. A ping that said only "alive" would still be sent
- * by a lane whose registry had shrunk to nothing.
  */
 export function formatAlivePing(state: HeartbeatState, sheetLink: string | null): string {
   const sweeps = state.quietSweeps;
+  const top = topDropReason(state.lastFunnel);
+  const dropInfo = top ? ` Top drop reason: ${top.count.toLocaleString()} ${top.reason}.` : "";
   return (
     `✅ <b>Job lane alive</b> — ${sweeps} sweep${sweeps === 1 ? "" : "s"} since the last update, ` +
-    `${state.boardsPolled.toLocaleString()} board checks, nothing new that cleared screening.` +
+    `${state.boardsPolled.toLocaleString()} board checks, nothing new that cleared screening.${dropInfo}` +
     (sheetLink ? `\n${sheetLink}` : "")
   );
 }
 
 /**
  * The alert for rows that are BOTH new and worth acting on.
- *
- * No `/draft` numbers in the message itself. Those are pinned by the ranking
- * that runs before the export, and the numbers live in the Sheet next to the
- * row they belong to — printing a second set here would give the founder two
- * numbering schemes for the same jobs and no way to tell which one `/draft`
- * meant.
  */
 export function formatNewRowsAlert(
   passes: readonly IngestLine[],

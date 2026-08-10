@@ -1,7 +1,7 @@
 {
   "name": "founderos",
   "version": "0.1.0",
-  "description": "FounderOS \u2014 Multi-agent AI operating system for Turicks",
+  "description": "FounderOS — Multi-agent AI operating system for Turicks",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -20,7 +20,6 @@
     "test:smoke": "ALLOW_NETWORK=1 node --import tsx/esm scripts/smoke.ts",
     "test:ci": "vitest run",
     "eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
-    "outreach:reflect": "node --import tsx/esm scripts/run-outreach-reflection.ts",
     "qa:telegram": "ALLOW_NETWORK=1 node --env-file=.env --import tsx/esm scripts/e2e-telegram-qa.ts run all --approve",
     "lint": "tsc --noEmit && tsc -p tsconfig.test.json",
     "verify:arch": "node --import tsx/esm scripts/verify-architecture.ts",
@@ -46,7 +45,10 @@
     "gap:scan": "node --env-file=.env --import tsx/esm scripts/gap-scan.ts",
     "mcp:probe": "node --env-file=.env --import tsx/esm scripts/mcp-bridge-probe.ts",
     "rag:probe": "node --env-file=.env --import tsx/esm scripts/probe-rag.ts",
-    "mcp": "LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/index.ts"
+    "mcp": "LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/index.ts",
+    "verify:benchmark": "node --import tsx/esm scripts/verify-benchmark-run.ts",
+    "pr:create": "node --env-file=.env --import tsx/esm scripts/create-phase-pr.ts",
+    "pr:review": "node --env-file=.env --import tsx/esm scripts/claude-review-pr.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",

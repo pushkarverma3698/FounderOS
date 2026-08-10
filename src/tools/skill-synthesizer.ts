@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { childLogger } from "../infra/logger.js";
+import { hitlGate } from "../infra/hitl.js";
 
 const execAsync = promisify(exec);
 const log = childLogger({ module: "tool:skill-synthesizer" });
@@ -59,7 +60,8 @@ export async function synthesizeSkillImpl({
 
   // Typecheck verification step
   try {
-    await execAsync("npx tsc --noEmit", { cwd: process.cwd() });
+    const tscBin = path.resolve("./node_modules/.bin/tsc");
+    await execAsync(`"${tscBin}" --noEmit`, { cwd: process.cwd() });
     log.info({ name: safeName, toolPath }, "Skill synthesized and typechecked successfully");
     return {
       success: true,
@@ -84,7 +86,24 @@ export async function synthesizeSkillImpl({
 }
 
 export const synthesizeSkill = tool(
-  async (args) => {
+  async (args, config) => {
+    // HITL BEFORE the first filesystem write (rule #3). synthesizeSkillImpl writes
+    // TypeScript into the running app's own source tree, so approval has to fire
+    // here, ahead of it — SKILL_SYNTHESIS_ENABLED (kernel-boot) only decides
+    // whether the tool is OFFERED, and membership in HITL_GATED_TOOLS has no
+    // runtime effect at all. This call is the second lock those two describe.
+    const rejected = await hitlGate(
+      {
+        action: "synthesize_skill",
+        title: `🧬 Synthesize new tool "${args.name}"?`,
+        summary: `Writes ${args.tsCode.length} chars of TypeScript into src/tools/custom/ — the running app's source tree`,
+        preview: args.tsCode.slice(0, 2000),
+        args: { name: args.name, description: args.description },
+      },
+      config,
+    );
+    if (rejected) return rejected;
+
     const result = await synthesizeSkillImpl(args);
     return result.message;
   },

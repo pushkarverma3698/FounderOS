@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { writeArtifact } from "../../../src/tools/artifact.js";
+import { ARTIFACT_ROOT } from "../../../src/core/config.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-const ARTIFACTS_ROOT = path.resolve("./artifacts");
+const ARTIFACTS_ROOT = ARTIFACT_ROOT;
 
 describe("writeArtifact tool", () => {
   const threadId = "test_thread_123";

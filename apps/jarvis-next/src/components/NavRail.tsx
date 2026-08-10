@@ -1,14 +1,15 @@
-import { Network, Layers, Cpu, Activity, PieChart } from 'lucide-react';
+import { Network, Layers, Cpu, Activity, PieChart, ListOrdered } from 'lucide-react';
 import { soundEngine } from '../audio/soundEngine';
 
-export type RailTab = 'CORE' | 'PLAN' | 'ORG' | 'SYS' | 'DATA';
+export type RailTab = 'CORE' | 'PLAN' | 'ORG' | 'SYS' | 'DATA' | 'QUEUE';
 
-const NAV_ITEMS: { id: RailTab; label: string; num: string; icon: typeof Network }[] = [
+const NAV_ITEMS: { id: RailTab; label: string; num: string; icon: any }[] = [
   { id: 'CORE', label: 'Graph orchestrator', num: '01', icon: Network },
   { id: 'PLAN', label: 'Typed execution', num: '02', icon: Layers },
   { id: 'ORG', label: 'Capability matrix', num: '03', icon: Cpu },
   { id: 'SYS', label: 'Failure & health', num: '04', icon: Activity },
   { id: 'DATA', label: 'Cost scoreboard', num: '05', icon: PieChart },
+  { id: 'QUEUE', label: 'Job hunt queue', num: '06', icon: ListOrdered },
 ];
 
 interface NavRailProps {

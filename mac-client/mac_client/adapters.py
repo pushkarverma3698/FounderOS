@@ -56,8 +56,8 @@ GREENHOUSE = FieldMap(
     last_name=("#last_name", 'input[name="job_application[last_name]"]', 'input[autocomplete="family-name"]'),
     email=("#email", 'input[name="job_application[email]"]', 'input[type="email"]'),
     phone=("#phone", 'input[name="job_application[phone]"]', 'input[type="tel"]'),
-    linkedin=('input[aria-label="LinkedIn Profile"]', 'input[name*="linkedin"]', 'input[id*="linkedin"]'),
-    website=('input[aria-label="Website"]', 'input[name*="website"]', 'input[id*="website"]'),
+    linkedin=('input[aria-label="LinkedIn Profile"]', 'input[name*="linkedin"]', 'input[id*="linkedin"]', 'input[aria-label*="LinkedIn" i]', 'input[placeholder*="LinkedIn" i]'),
+    website=('input[aria-label="Website"]', 'input[name*="website"]', 'input[id*="website"]', 'input[aria-label*="Website" i]', 'input[placeholder*="Website" i]'),
     resume=('#resume', 'input[id="resume"]', 'input[type="file"]'),
 )
 

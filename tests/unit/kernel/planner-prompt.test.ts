@@ -29,6 +29,16 @@ describe("buildPlannerPrompt — FounderOS self-knowledge routing", () => {
     expect(prompt).toContain("read_context");
     expect(prompt).toContain("search_memory");
   });
+
+  // Ported from the deleted SUPERVISOR_PROMPT guard (2026-06-04: "Send the
+  // text.txt file on my desktop" → the router answered "Okay", planned nothing
+  // and called no tool). v3 has no supervisor; the planner's direct-reply path
+  // is where that failure would recur, so the clause forbidding it is the guard.
+  it("forbids answering a founder question directly instead of planning a step", () => {
+    const prompt = buildPlannerPrompt(catalog);
+    expect(prompt).toMatch(/are NOT direct replies/i);
+    expect(prompt).toMatch(/never answer from priors/i);
+  });
 });
 
 describe("buildPlannerPrompt — draft is not send (live 89188cd5)", () => {

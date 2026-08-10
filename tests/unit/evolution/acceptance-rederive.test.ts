@@ -69,10 +69,10 @@ describe("M0a acceptance — analyzers re-derive the 2026-08-06 hand audit", () 
   it("re-derives the orphaned subsystems (cohesive internally, unreachable externally)", () => {
     const orphaned = new Set(findOrphanSubsystems(files).map((f) => f.subject));
 
-    // src/outreach and src/workflows import their own modules, so file-level
+    // src/eval and src/proof import their own modules, so file-level
     // orphan detection cannot see them — only subgraph-level detection can.
-    expect(orphaned).toContain("src/outreach/");
-    expect(orphaned).toContain("src/workflows/");
+    expect(orphaned).toContain("src/eval/");
+    expect(orphaned).toContain("src/proof/");
     // The kernel is obviously reachable; a sensor that flags it is broken.
     expect(orphaned).not.toContain("src/kernel/");
   });
