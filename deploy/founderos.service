@@ -26,6 +26,16 @@ Environment=PATH=/home/founderos/.local/bin:/usr/local/bin:/usr/bin:/bin
 # lets the correct default apply even if .env contains a stale Mac placeholder.
 Environment=HOME=/home/founderos
 
+# THE SINGLE-INSTANCE LOCK MUST NOT LIVE IN /tmp. `PrivateTmp=true` below gives
+# every service START its own empty /tmp, so the default lock path
+# (/tmp/founderos.pid) is destroyed and recreated on each restart: the new
+# process reads no PID file, concludes no previous instance exists, and can
+# never detect or SIGTERM a stale poller. Verified on the box 2026-08-09 —
+# /tmp/founderos.pid was absent from the host and present only inside
+# /proc/<pid>/root/tmp. Pointing it at the persistent data dir makes the lock
+# survive restarts, which is the only condition under which it does anything.
+Environment=FOUNDEROS_PID_FILE=/opt/founderos-data/founderos.pid
+
 # Secrets live in /opt/founderos/.env (chmod 600, NEVER committed).
 # package.json `start` already passes --env-file=.env, but we also point
 # EnvironmentFile here so systemctl status / journald see non-secret config.
