@@ -13,6 +13,17 @@
  * A prior naive substring implementation matched "ing" inside "Consulting" and
  * "Holding" and produced 1,427 false positives. Hence exact-match-on-normalised
  * plus explicit token-subset detection, never a raw `includes`.
+ *
+ * Token subsets alone then overshot the other way. 3,381 register entries reduce
+ * to a single identity token, and many of those tokens are category words rather
+ * than names ("netherlands" in 1,002 entries, "systems" in 123). So "Analytics in
+ * HR B.V." was inherited as a candidate by every company with "Analytics" in its
+ * name, and 44.7% of real company names came back `uncertain` — a queue the
+ * founder cannot read. The fix is in `matchSponsor`: the direction where a
+ * register entry sits INSIDE a longer ad name now requires the entry to be
+ * identifying. Measured on the real register: real names 44.7% → 23.7%
+ * uncertain, unrelated-name noise 53% → ~0%, with recall on abbreviated register
+ * names unchanged (97% still uncertain, none newly rejected).
  */
 
 /** normalised name → the canonical registered name it came from. */
@@ -84,6 +95,48 @@ function isTokenSubset(inner: readonly string[], outer: readonly string[]): bool
 }
 
 /**
+ * How many register entries a token may appear in and still count as an identity.
+ *
+ * Measured, not guessed (`scripts/jobhunt-sponsor-uncertain-rate.ts`): 10 is ~0.08%
+ * of the ~12.9k register and sits at the knee. At 25 the noise returns ("analytics"
+ * slips back in); at 3 the false-negative rate on real register entries doubles,
+ * 0.73% → 1.30%, for no measurable gain in precision.
+ */
+const MAX_IDENTIFYING_ENTRIES = 10;
+
+/**
+ * token → how many register entries carry it. Derived from the index rather than
+ * a hand-kept stopword list, so it tracks the register as it is re-scraped each
+ * month. Memoised per index: one O(entries) pass, and the index itself is built
+ * once per process (`sponsor-registry.ts`).
+ */
+const frequencyCache = new WeakMap<SponsorIndex, ReadonlyMap<string, number>>();
+
+function tokenFrequency(index: SponsorIndex): ReadonlyMap<string, number> {
+  const memo = frequencyCache.get(index);
+  if (memo) return memo;
+
+  const frequency = new Map<string, number>();
+  for (const key of index.keys()) {
+    for (const token of new Set(identityTokens(key))) {
+      frequency.set(token, (frequency.get(token) ?? 0) + 1);
+    }
+  }
+  frequencyCache.set(index, frequency);
+  return frequency;
+}
+
+/**
+ * Does this register entry actually name a company, as opposed to describing a
+ * category? Two words are an identity even when both are common ("Systems Alpha");
+ * one word is an identity only when few other entries share it.
+ */
+function isIdentifying(tokens: readonly string[], frequency: ReadonlyMap<string, number>): boolean {
+  if (tokens.length >= 2) return true;
+  return tokens.some((t) => (frequency.get(t) ?? 0) <= MAX_IDENTIFYING_ENTRIES);
+}
+
+/**
  * Decide whether a job ad's company name corresponds to a register entry.
  *
  * Exact normalised match → `sponsor`. Any partial overlap in either direction →
@@ -113,11 +166,24 @@ export function matchSponsor(companyName: string, index: SponsorIndex): SponsorM
   }
 
   const queryTokens = identityTokens(normalised);
+  const frequency = tokenFrequency(index);
   const candidates: string[] = [];
 
   for (const [key, registered] of index) {
     const keyTokens = identityTokens(key);
-    if (isTokenSubset(queryTokens, keyTokens) || isTokenSubset(keyTokens, queryTokens)) {
+
+    // The ad gives less name than the register does ("ASML" for "ASML Netherlands
+    // B.V."). Abbreviation is how postings normally write employers, so this
+    // direction stays wide open — it is the recall path.
+    if (isTokenSubset(queryTokens, keyTokens)) {
+      candidates.push(registered);
+      continue;
+    }
+
+    // The register entry sits inside a longer ad name ("Analytics in HR B.V."
+    // inside "Kwyjibo Analytics"). Only meaningful when the entry names a company;
+    // a lone category word here is a coincidence, not a lead.
+    if (isTokenSubset(keyTokens, queryTokens) && isIdentifying(keyTokens, frequency)) {
       candidates.push(registered);
     }
   }
