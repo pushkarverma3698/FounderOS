@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { verifyStepResult } from "../../../src/kernel/verify.js";
 import { TaskEnvelopeSchema, StepResultSchema, type TaskEnvelope } from "../../../src/kernel/contracts.js";
 import type { StepResult } from "../../../src/kernel/contracts.js";
@@ -20,6 +23,9 @@ const makeOkResult = (output: unknown): StepResult => ({
   output,
   tool_receipts: [],
 });
+
+const tmpDir = mkdtempSync(join(tmpdir(), "founderos-verify-"));
+afterAll(() => rmSync(tmpDir, { recursive: true, force: true }));
 
 describe("verifyStepResult", () => {
   it("passes valid drafts without placeholders", async () => {
@@ -216,6 +222,39 @@ describe("verifyStepResult", () => {
       expect(verified.status).toBe("failed");
       if (verified.status === "failed") {
         expect(verified.failure.message).toContain("zero source URLs");
+      }
+    });
+
+    it("admin verifier accepts an object output whose text names a real path", async () => {
+      const filePath = join(tmpDir, "q3_notes.md");
+      writeFileSync(filePath, "# Q3 notes\n");
+      const envelope = makeEnvelope({
+        worker: "admin",
+        objective: "Save the q3 notes artifact",
+        expected: { kind: "data", schema_ref: "text.summary" },
+      });
+      // worker.ts finalizes with parsed JSON, so the verifier sees an OBJECT, not a plain string
+      const result = makeOkResult({
+        text: `✅ Artifact "q3_notes" (10 bytes, format: md) written successfully to ${filePath}`,
+      });
+      const verified = await verifyStepResult(result, envelope);
+      expect(verified.status).toBe("ok");
+    });
+
+    it("admin verifier still fails when the named path does not exist", async () => {
+      const missingPath = join(tmpDir, "does_not_exist.md");
+      const envelope = makeEnvelope({
+        worker: "admin",
+        objective: "Save the q3 notes artifact",
+        expected: { kind: "data", schema_ref: "text.summary" },
+      });
+      const result = makeOkResult({ text: `written successfully to ${missingPath}` });
+      const verified = await verifyStepResult(result, envelope);
+      expect(verified.status).toBe("failed");
+      if (verified.status === "failed") {
+        expect(verified.failure.message).toContain("does not exist on disk");
+        expect(verified.failure.message).toContain(missingPath);
+        expect(verified.failure.message).not.toContain('"}');
       }
     });
 
