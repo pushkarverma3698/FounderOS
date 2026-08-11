@@ -3,7 +3,7 @@
 ## Graph Overview
 - **Nodes:** 94 (8 depts, 67 tools, 9 services)
 - **Edges:** 114
-- **Generated:** 2026-08-10T06:32:55.530Z
+- **Generated:** 2026-08-11T09:43:05.747Z
 
 ## Departments (8)
 - **admin**: admin_agent
