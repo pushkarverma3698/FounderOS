@@ -1,0 +1,3 @@
+# Dispatcher Smoke Test
+
+AGENT-DISPATCH-SMOKE-MARKER
