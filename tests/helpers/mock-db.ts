@@ -60,6 +60,65 @@ export function mockQueriesModule() {
   };
 }
 
+// ── Drizzle client mock ───────────────────────────────────────────────────────
+
+interface MockQueryChain {
+  from: () => MockQueryChain;
+  where: () => MockQueryChain;
+  orderBy: () => MockQueryChain;
+  limit: () => MockQueryChain;
+  then: (
+    onOk: (rows: readonly unknown[]) => unknown,
+    onErr?: (err: unknown) => unknown,
+  ) => Promise<unknown>;
+}
+
+/**
+ * Stub for `src/db/client.ts`'s `getDb()`.
+ *
+ * Most tools reach the database through `src/db/queries.ts` and are mocked with
+ * `mockQueriesModule` above. A few (job_state, ops_state) build drizzle queries
+ * inline instead, so they need the client itself stubbed or their "unit" tests
+ * open a real connection — which fails in CI, because ci.yml runs no Postgres
+ * service.
+ *
+ * Every such query is a `.select(...).from(...)...` chain awaited exactly once,
+ * so each chain method returns itself and the chain is thenable. Each test sets
+ * its own queue with `setQueryResults(...)` IN CALL ORDER, so tests do not
+ * inherit each other's leftovers; a query past the end of the queue resolves
+ * to `[]`.
+ *
+ * Usage — note the deferred import, which is what lets the lazy `vi.mock`
+ * factory see `stub`:
+ *
+ *   const stub = createDrizzleClientStub();
+ *   vi.mock("../../../src/db/client.js", () => ({ getDb: stub.getDb }));
+ *   const { queryOpsState } = await import("../../../src/tools/ops-state.js");
+ */
+export function createDrizzleClientStub() {
+  let queue: (readonly unknown[])[] = [];
+
+  const setQueryResults = (...results: (readonly unknown[])[]): void => {
+    queue = [...results];
+  };
+
+  const getDb = vi.fn(() => ({
+    select: (): MockQueryChain => {
+      const rows = queue.shift() ?? [];
+      const chain: MockQueryChain = {
+        from: () => chain,
+        where: () => chain,
+        orderBy: () => chain,
+        limit: () => chain,
+        then: (onOk, onErr) => Promise.resolve(rows).then(onOk, onErr),
+      };
+      return chain;
+    },
+  }));
+
+  return { getDb, setQueryResults };
+}
+
 // ── DB-Down Mock ──────────────────────────────────────────────────────────────
 
 /**
