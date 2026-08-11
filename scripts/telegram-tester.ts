@@ -149,8 +149,8 @@ async function waitForReplies(
       lastReplyAt = Date.now();
       printMessage(toPrintable(msg));
     }
-    // Stop early once the bot has replied and gone quiet for 3 poll cycles.
-    if (seen.size > 0 && Date.now() - lastReplyAt > POLL_INTERVAL_MS * 3) break;
+    // Stop early once the bot has replied and gone quiet for 30 seconds.
+    if (seen.size > 0 && Date.now() - lastReplyAt > 30_000) break;
   }
   if (seen.size === 0) console.log(`(no reply within ${waitS}s)`);
 }
