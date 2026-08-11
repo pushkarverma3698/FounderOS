@@ -95,9 +95,12 @@ export const VERIFIERS: Record<string, StepVerifier> = {
   admin: {
     async verify(output, envelope, result) {
       const text = typeof output === "object" && output !== null ? JSON.stringify(output) : String(output);
-      const match = /path["']?\s*:\s*["']([^"']+)["']/.exec(text) || /written successfully to ([^\s]+)/.exec(text);
+      // Worker output is normally an object, so `text` is JSON — the capture must stop at the
+      // JSON quote and any trailing punctuation, or existsSync() sees `…/notes.md"}` and fails.
+      const match =
+        /path["']?\s*:\s*["']([^"']+)["']/.exec(text) || /written successfully to ([^\s"'\\]+)/.exec(text);
       if (match && match[1]) {
-        const filePath = match[1];
+        const filePath = match[1].replace(/[.,;:)\]}]+$/, "");
         if (!existsSync(filePath)) {
           return { ok: false, error: `Admin artifact path does not exist on disk: ${filePath}` };
         }
