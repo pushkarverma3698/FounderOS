@@ -5,14 +5,21 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   DEPARTMENT_TOOLS,
+  ENGINEERING_SUBAGENT_TOOLS,
+  MARKETING_SUBAGENT_TOOLS,
+  ADMIN_SUBAGENT_TOOLS,
   SUPERVISOR_TOOLS,
   HITL_GATED_TOOLS,
   buildCapabilityManifest,
   mergeBridgedTools,
   stripBridgedTools,
 } from "../../../src/agents/capabilities.js";
+import { readdirSync } from "node:fs";
+import * as path from "node:path";
 
 describe("DEPARTMENT_TOOLS registry", () => {
   it("declares all 8 departments (admin worker + 7 operational)", () => {
@@ -86,15 +93,30 @@ describe("buildCapabilityManifest", () => {
     expect(manifest).toMatch(/pnpm mcp/);
   });
 
-  it("HITL set must cover all known side-effecting tools and have no orphaned gates", () => {
-    const allNames = Object.values(DEPARTMENT_TOOLS).flat().map((t: { name: string }) => t.name);
-    
-    // 1. Every tool listed in HITL_GATED_TOOLS must actually be registered in a department
+});
+
+describe("HITL Security Invariant", () => {
+  it("Reachability: every tool in HITL_GATED_TOOLS appears in at least one declared department or sub-agent registry", () => {
+    const declaredNames = new Set<string>([
+      ...Object.values(DEPARTMENT_TOOLS).flat().map((t: { name: string }) => t.name),
+      ...Object.values(ENGINEERING_SUBAGENT_TOOLS).flat().map((t: { name: string }) => t.name),
+      ...Object.values(MARKETING_SUBAGENT_TOOLS).flat().map((t: { name: string }) => t.name),
+      ...Object.values(ADMIN_SUBAGENT_TOOLS).flat().map((t: { name: string }) => t.name),
+    ]);
+
     for (const gated of HITL_GATED_TOOLS) {
-      expect(allNames, `${gated} exists in a department`).toContain(gated);
+      expect(declaredNames.has(gated), `HITL_GATED_TOOLS lists "${gated}" but it does not appear in any declared registry`).toBe(true);
     }
-    
-    // 2. Every reachable tool that causes an external or durable side effect MUST be HITL-gated
+  });
+
+  it("Coverage: every declared side-effecting tool (external send, spend, irreversible write, write outside ARTIFACT_ROOT) is HITL protected", () => {
+    const declaredNames = new Set<string>([
+      ...Object.values(DEPARTMENT_TOOLS).flat().map((t: { name: string }) => t.name),
+      ...Object.values(ENGINEERING_SUBAGENT_TOOLS).flat().map((t: { name: string }) => t.name),
+      ...Object.values(MARKETING_SUBAGENT_TOOLS).flat().map((t: { name: string }) => t.name),
+      ...Object.values(ADMIN_SUBAGENT_TOOLS).flat().map((t: { name: string }) => t.name),
+    ]);
+
     const sideEffectingTools = [
       "send_email",
       "vps_run",
@@ -115,12 +137,83 @@ describe("buildCapabilityManifest", () => {
       "browser",
       "synthesize_skill"
     ];
-    
+
     for (const tool of sideEffectingTools) {
-      // If the tool is reachable in any department, it MUST be in the HITL set
-      if (allNames.includes(tool)) {
-        expect(HITL_GATED_TOOLS.has(tool), `Side-effecting tool '${tool}' must be HITL-gated`).toBe(true);
+      if (declaredNames.has(tool)) {
+        expect(HITL_GATED_TOOLS.has(tool), `Declared side-effecting tool '${tool}' must be in HITL_GATED_TOOLS`).toBe(true);
       }
+    }
+  });
+
+  it("Enforcement: every tool listed in HITL_GATED_TOOLS has an actual hitlGate({ action: '<name>' }) enforcement point in code", () => {
+    const toolsDir = fileURLToPath(new URL("../../../src/agents/agent-tools", import.meta.url));
+    const extraToolsDir = fileURLToPath(new URL("../../../src/tools", import.meta.url));
+
+    function getFiles(dir: string): string[] {
+      const entries = readdirSync(dir, { recursive: true, withFileTypes: true });
+      return entries
+        .filter((e) => e.isFile() && e.name.endsWith(".ts"))
+        .map((e) => path.join(e.parentPath ?? dir, e.name));
+    }
+
+    const sourceFiles = [...getFiles(toolsDir), ...getFiles(extraToolsDir)];
+    const sourceCode = sourceFiles.map((f) => readFileSync(f, "utf8")).join("\n");
+
+    for (const gated of HITL_GATED_TOOLS) {
+      const pattern = new RegExp(`hitlGate\\s*\\(\\s*(?:\\{[^}]*|\\n)*action:\\s*["']${gated}["']`, "m");
+      expect(pattern.test(sourceCode), `Tool '${gated}' is in HITL_GATED_TOOLS but lacks a hitlGate({ action: "${gated}" }) enforcement point in source code`).toBe(true);
+    }
+  });
+
+  it("imports no tool it never places in a department or sub-agent cluster", () => {
+    const source = readFileSync(fileURLToPath(new URL("../../../src/agents/capabilities.ts", import.meta.url)), "utf8");
+    const imported = [...source.matchAll(/^import\s*\{([^}]+)\}\s*from/gms)]
+      .flatMap((m) => m[1]!.split(","))
+      .map((s) => s.trim().split(/\s+as\s+/).pop()!.trim())
+      .filter((s) => s.length > 0 && !s.startsWith("type "));
+    const body = source.replace(/^import[\s\S]*?from\s+"[^"]+";$/gm, "");
+    const orphans = imported.filter((name) => !new RegExp(`\\b${name}\\b`).test(body));
+    // 2026-08-06: P7 siloed github_write out of every department and P7-B restored
+    // only githubRead — but the import stayed, leaving a tool nothing could reach
+    // and lint could not see (no-unused-vars does not flag it here).
+    expect(orphans, `imported but never registered: ${orphans.join(", ")}`).toEqual([]);
+  });
+
+  it("the RAG placement docblock matches where the RAG tools actually are", () => {
+    // The docblock claimed searchPersonalRag → personal + jobhunt and
+    // searchTuricksBrain → personal + research + sales + marketing long after P7
+    // (5623eff) reduced both to a single department each. A capability registry
+    // whose own comment is wrong is the exact failure this file exists to prevent.
+    const toolNameOf: Record<string, string> = {
+      searchPersonalRag: "search_personal_rag",
+      searchTuricksBrain: "search_turicks_brain",
+    };
+    const source = readFileSync(fileURLToPath(new URL("../../../src/agents/capabilities.ts", import.meta.url)), "utf8");
+    const documented = [...source.matchAll(/^\s*\*\s*(searchPersonalRag|searchTuricksBrain)\s*→\s*(.+)$/gm)];
+    expect(documented.length, "both RAG tools are documented").toBe(2);
+
+    for (const [, ident, rhs] of documented) {
+      const claimed = rhs!
+        .split("+")
+        .map((s) => s.trim())
+        .sort();
+      const actual = Object.entries(DEPARTMENT_TOOLS)
+        .filter(([, tools]) => tools.some((t: { name: string }) => t.name === toolNameOf[ident!]))
+        .map(([dept]) => dept)
+        .sort();
+      expect(claimed, `${ident} docblock says "${rhs}" but the registry says "${actual.join(" + ")}"`).toEqual(actual);
+    }
+  });
+
+  it("github_write stays out of the declared set unless it is also HITL-gated", () => {
+    const allNames = Object.values(DEPARTMENT_TOOLS)
+      .flat()
+      .map((t: { name: string }) => t.name);
+    // P7 (5623eff) removed it from engineering; P7-B (7d163a9) restored read only.
+    // Re-adding it is a product decision, but it must not arrive ungated: the tool
+    // has an inline hitlGate(), and the declared set is what renders the `*`.
+    if (allNames.includes("github_write")) {
+      expect(HITL_GATED_TOOLS.has("github_write"), "github_write must be declared HITL-gated").toBe(true);
     }
   });
 

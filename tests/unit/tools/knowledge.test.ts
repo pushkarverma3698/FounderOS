@@ -139,7 +139,8 @@ describe("searchKnowledge — empty results", () => {
   it("tells the model not to fabricate and points to fallback search tools", async () => {
     const result = await searchKnowledge.invoke({ query: "test" });
     expect(result).toContain("Do NOT fabricate");
-    expect(result).toContain("search_turicks_brain");
+    expect(result).toContain("search_web");
+    expect(result).not.toContain("search_turicks_brain");
   });
 
   it("includes the entry_type filter in the empty message when type was specified", async () => {

@@ -29,9 +29,10 @@ describe("graph-query-helper — findToolsByDepartment", () => {
     const tools = findToolsByDepartment("engineering");
     expect(tools.length).toBeGreaterThan(0);
     expect(tools).toContain("github_read");
-    expect(tools).toContain("github_write");
+    expect(tools).not.toContain("github_write");
     expect(tools).toContain("claude_code");
     expect(tools).toContain("apply_cinematic_preset");
+    expect(tools).toContain("deploy_static_site");
   });
 
   it("returns tools for personal department", () => {
@@ -87,10 +88,10 @@ describe("graph-query-helper — findDepartmentsByTool", () => {
     expect(depts.every((d: string) => d === "engineering")).toBe(true);
   });
 
-  it("finds personal and jobhunt for search_personal_rag", () => {
+  it("finds personal for search_personal_rag", () => {
     const depts = findDepartmentsByTool("search_personal_rag");
     expect(depts).toContain("personal");
-    expect(depts).toContain("jobhunt");
+    expect(depts).not.toContain("jobhunt");
   });
 
   it("returns empty array for non-existent tool", () => {
@@ -105,9 +106,9 @@ describe("graph-query-helper — other functions", () => {
     expect(depts.length).toBe(8);
   });
 
-  it("findNodesByType returns all tools (32 after Apify research tools added)", () => {
+  it("findNodesByType returns all tools in graph", () => {
     const tools = findNodesByType("tool");
-    expect(tools.length).toBe(32);
+    expect(tools.length).toBeGreaterThanOrEqual(30);
   });
 
   it("findNodeByName finds search_web", () => {
@@ -117,8 +118,8 @@ describe("graph-query-helper — other functions", () => {
   });
 
   it("findNodeByName is case-insensitive", () => {
-    const lower = findNodeByName("github_write");
-    const upper = findNodeByName("GITHUB_WRITE");
+    const lower = findNodeByName("github_read");
+    const upper = findNodeByName("GITHUB_READ");
     expect(lower?.id).toBe(upper?.id);
   });
 

@@ -49,7 +49,7 @@ describe("Knowledge Graph (Graphify)", () => {
     expect(toolNames).toContain("search_web");
     expect(toolNames).toContain("send_email");
     expect(toolNames).toContain("github_read");
-    expect(toolNames).toContain("github_write");
+    expect(toolNames).toContain("claude_code");
     expect(toolNames).toContain("read_file");
     expect(toolNames).toContain("run_shell");
     expect(toolNames).toContain("browser");
@@ -120,7 +120,7 @@ describe("Knowledge Graph (Graphify)", () => {
 
   it("should validate HITL gates for sensitive tools", () => {
     const sensitiveTools = [
-      "github_write",
+      "claude_code",
       "write_file",
       "run_shell",
       "browser",
