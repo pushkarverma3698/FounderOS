@@ -4,32 +4,25 @@
 > companion to `docs/rules/PROGRAMMING-RULES.md` — it explains the *why* and shows
 > concrete examples of every extension point.
 
-> ## ⚠️ SECTIONS 4–6 DESCRIBE THE v2 ARCHITECTURE. DO NOT FOLLOW THEM.
->
-> v2 (LLM supervisor + `createSupervisor` + sub-supervisors) was audited and replaced on
-> **2026-07-08** — see `ZERO-BASE-AUDIT.md` and `JARVIS-ARCHITECTURE.md`. The files these
-> sections tell you to edit no longer exist, and two of them are CI **tombstones**:
-> re-creating `src/agents/office.ts` fails `pnpm verify:arch` outright.
->
-> | Section | Status | v3 truth |
-> |---|---|---|
-> | 4 Adding a Department | **stale** | departments are `DEPARTMENT_TOOLS` in `src/agents/capabilities.ts`; prompts in `src/agents/prompts/` |
-> | 5 Adding a Domain (sub-supervisor) | **deleted concept** | there are no supervisors or domains. One graph: plan → dispatch → agent → collect → synthesize (`src/kernel/graph.ts`) |
-> | 6 Adding a Workflow (SOP) | **deleted** | `src/workflows/` was removed in Phase 6 (zero importers). Reusable scripts live in the `saved_workflows` table, listed by the `list_workflows` tool |
-> | Any "SUPERVISOR routing table" / `buildSupervisorPrompt()` step | **deleted** | routing is `buildPlannerPrompt` in `src/kernel/planner.ts`; the planner reads each worker's tool names from the catalog |
->
-> Sections 1–3 and 7–10 were corrected to v3 on 2026-08-09 and are current;
-> `docs/rules/TOOL-INTEGRATION-PLAYBOOK.md` is the maintained path for adding a tool.
-> **Sections 4–6 still need a v3 rewrite — that is its own task, not part of a phase.**
+> **Historical note (v2 → v3, 2026-07-08).** If you arrive here from an old branch, an
+> archived doc, or an LLM that learned this repo before July: the v2 architecture — an LLM
+> supervisor built with `createSupervisor`, a `buildSupervisorPrompt()` routing table, nested
+> sub-supervisor "domains", a regex `pre-router.ts`, and natural-language SOPs in
+> `src/workflows/` — **no longer exists**. It was audited and replaced (see `ZERO-BASE-AUDIT.md`
+> and `JARVIS-ARCHITECTURE.md`); `src/workflows/` was deleted in Phase 6 with zero importers.
+> Several of those modules are CI **tombstones** (`scripts/verify-architecture.ts` rule R6):
+> re-creating `src/agents/office.ts`, `pre-router.ts`, or `engineering-domain.ts` fails
+> `pnpm verify:arch` outright, with no ratchet and no exemption. Nothing below describes v2 —
+> this paragraph is the only place it is mentioned.
 
 ## Table of Contents
 
 1. [Architecture in 60 seconds](#architecture-in-60-seconds)
 2. [Local dev setup](#local-dev-setup)
 3. [Adding a Tool](#adding-a-tool)
-4. [Adding a Department](#adding-a-department) — ⚠️ v2, do not follow
-5. [Adding a Domain (nested sub-supervisor)](#adding-a-domain-nested-sub-supervisor) — ⚠️ v2, concept deleted
-6. [Adding a Workflow (SOP)](#adding-a-workflow-sop) — ⚠️ v2, `src/workflows/` deleted
+4. [Adding a Department](#adding-a-department)
+5. [Adding a step type (output contract)](#adding-a-step-type-output-contract)
+6. [The workflow catalog (`saved_workflows`)](#the-workflow-catalog-saved_workflows)
 7. [Adding a Telegram Command](#adding-a-telegram-command)
 8. [Adding golden eval tasks](#adding-golden-eval-tasks)
 9. [Verification ritual](#verification-ritual)
@@ -280,244 +273,344 @@ and draft-is-not-send rules are guarded.
 
 ## Adding a Department
 
-The widest blast radius: **10 files + 1 optional**. Work through them in order.
+A department **is** a worker. There is no agent object to construct and no supervisor to
+register with: `buildWorkerSpecs()` in `src/gateway/kernel-boot.ts` assembles every worker at
+boot from three tables (id, description+prompt, tools), and `src/kernel/graph.ts` runs all of
+them through the same six nodes. Adding one means adding rows, not wiring a new topology.
 
-**Rule: Only add a department if it has ≥2 unique tools that no other dept owns.**
-An agent that only calls tools owned by another dept belongs in that dept.
+**Rule: only add a department if it owns ≥2 tools no other department owns.** A worker whose
+tools all live elsewhere adds a routing decision without adding a capability — the planner now
+has two defensible answers to the same request, which is how routing becomes non-deterministic.
+*(Convention only. Nothing in CI enforces this — rule #27: say which layer holds a rule.)*
 
-### Step-by-step
+### Step-by-step — 6 required, 3 optional
 
-#### 1. System prompt (`src/agents/system-prompts.ts`)
+#### 1. Register the worker id (`src/kernel/contracts.ts`) — do this FIRST
 
 ```typescript
-// a) New dept prompt:
-export const ANALYTICS_PROMPT = `
-You are the analytics agent for FounderOS.
-…
-TOOLS YOU HAVE:
-- query_metrics: Run a metrics query
+export const WORKERS = [
+  "admin", "research", "comms", "engineering", "marketing", "sales", "personal", "jobhunt",
+  "analytics",   // ← add
+] as const;
+```
+
+`WorkerIdSchema = z.enum(WORKERS)` validates `TaskEnvelope.worker`, so until the id is here the
+planner cannot route to the department at all: the envelope fails Zod and the step comes back as
+a typed `validation` FailureReport.
+
+Do this step first on purpose. `DESCRIPTIONS` and `PROMPTS` in `kernel-boot.ts` are typed
+`Record<(typeof WORKERS)[number], …>`, so adding the id turns each remaining wiring step below
+into a `tsc` error rather than a silent gap.
+
+#### 2. Prompt file (`src/agents/prompts/analytics.ts`)
+
+One file per department — `prompts/admin.ts` is the reference for shape.
+
+```typescript
+/**
+ * Analytics department prompt — warehouse metrics and reporting.
+ * Workers execute; managers route (ADR-028).
+ */
+
+export const ANALYTICS_PROMPT = `You are the Analytics department for Turicks / FounderOS.
+
+SCOPE: Metrics queries and reporting.
+You do NOT send email, post on LinkedIn, run shell, browse, or modify GitHub.
+
+TOOLS (use the right one — do not guess):
+- query_metrics → run a metrics query against the warehouse
+
+OUTPUT: return exactly the JSON shape named by your envelope's expected.schema_ref.
 `;
-
-// b) Add a row to the SUPERVISOR routing table inside buildSupervisorPrompt():
-`| analytics | "metrics", "dashboard", "report", "trend", "analytics" |`
-
-// c) Add the dept's tools to the TOOL OWNERSHIP block:
-`analytics: [query_metrics]`
 ```
 
-#### 2. Department agent (`src/agents/office.ts`)
+Keep an explicit "you do NOT…" line, and never claim a capability that isn't a real tool from
+step 4. The capability manifest the planner reads is *generated* from the tool arrays
+(`buildCapabilityManifest()`), so hand-written prose that contradicts it is exactly how the bot
+came to claim it had no browser on 2026-06-09.
+
+#### 3. Barrel export (`src/agents/system-prompts.ts`)
 
 ```typescript
-import { ANALYTICS_PROMPT } from "./system-prompts.js";
-import { queryMetricsAgent } from "./agent-tools.js";
-
-// Build the agent (BEFORE the supervisor is built):
-const analytics = createReactAgent({
-  llm: getModel(),
-  tools: [queryMetricsAgent],
-  messageModifier: createTrimmedPrompt(ANALYTICS_PROMPT, subAgentBudget),
-  name: "analytics",
-});
-
-// Add to the supervisor:
-const supervisor = await createSupervisor({
-  agents: [research, comms, engineering, marketing, sales, personal, jobhunt, analytics],
-  // …
-});
-
-// Update the log.info("Office compiled…") line to include "analytics"
+export { ANALYTICS_PROMPT } from "./prompts/analytics.js";
 ```
 
-#### 3. Eval types (`src/eval/types.ts`)
+#### 4. Tools (`src/agents/capabilities.ts`)
+
+`DEPARTMENT_TOOLS` is the single source of truth for who carries what.
+
+```typescript
+export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
+  // …
+  analytics: [queryMetricsAgent],   // ← add
+};
+```
+
+If any tool writes or sends, it must *also* call `hitlGate()` inside its wrapper **and** be
+listed in `HITL_GATED_TOOLS` in this same file. Those are two different mechanisms — see the
+warning under the Forget → Error table.
+
+#### 5. Description + prompt binding (`src/gateway/kernel-boot.ts`)
+
+```typescript
+const DESCRIPTIONS: Record<(typeof WORKERS)[number], string> = {
+  // …
+  analytics: "Warehouse metrics queries, dashboards, and reporting.",
+};
+
+const PROMPTS: Record<(typeof WORKERS)[number], string | (() => string)> = {
+  // …
+  analytics: ANALYTICS_PROMPT,
+};
+```
+
+`DESCRIPTIONS[id]`, plus the tool names from step 4, **is** the routing table — the planner
+builds its worker catalog from them. There is no separate routing prompt to edit, and no regex
+router (`pre-router.ts` is a tombstone). Write the description as the thing you want routed to
+you.
+
+Pass a **function** rather than a string if the prompt injects the current date, the way `comms`
+does with `buildCommsPrompt` — a bare string is evaluated once at boot and freezes the date.
+
+#### 6. Eval type + golden task (`src/eval/types.ts`, `src/eval/golden-tasks.ts`)
 
 ```typescript
 export type Department =
-  | "research" | "comms" | "engineering" | "marketing"
-  | "sales" | "personal" | "jobhunt"
+  | "admin" | "research" | "comms" | "engineering"
+  | "marketing" | "sales" | "personal" | "jobhunt"
   | "analytics";   // ← add
 ```
 
-#### 4. Eval invoker (`src/eval/office-invoker.ts`)
-
-```typescript
-const DEPARTMENTS = new Set<Department>([
-  "research", "comms", "engineering", "marketing",
-  "sales", "personal", "jobhunt",
-  "analytics",  // ← add
-]);
-```
-
-#### 5. Golden tasks (`src/eval/golden-tasks.ts`)
-
 ```typescript
 {
-  id: "analytics-dashboard",
+  id: "analytics-weekly-metrics",
   input: "Show me the top metrics for last week",
-  expectedDept: "analytics",
+  expectedRoute: "analytics",
   expectedTools: ["query_metrics"],
-  mustContain: ["metric", "last week"],
 },
 ```
 
-#### 6. `/q` command (`src/gateway/commands.ts`)
+`src/eval/kernel-invoker.ts` reads the observed route from `plan.steps[0].worker`, so
+`expectedRoute` is scored against real planner output, not a stub.
+
+#### Optional 7 — Output verifier (`src/kernel/verify.ts`)
+
+`VERIFIERS` is keyed by worker id; a worker with no entry is simply not verified. Add one when
+the department can produce a plausible-looking output that is actually wrong — a path that
+doesn't exist on disk, a draft still holding `{{placeholders}}`, a count that was never taken.
 
 ```typescript
-// In handleDirectQ, add to valid dept list:
-const VALID_DEPTS = ["research","comms","engineering","marketing","sales","personal","jobhunt","analytics"];
-
-// In handleCommands help text, add:
-`analytics — run metrics queries and build dashboards`
+export const VERIFIERS: Record<string, StepVerifier> = {
+  // …
+  analytics: {
+    async verify(output) {
+      // Reject a "result" with no rows AND no explicit zero — silence is not a finding.
+      return { ok: true };
+    },
+  },
+};
 ```
 
-#### 7. Startup banner (`src/index.ts`)
+#### Optional 8 — Startup capability message (`src/gateway/capability-message.ts`)
 
-```typescript
-log.info("Office compiled: research · comms · engineering · marketing · sales · personal · jobhunt · analytics");
-```
+`buildRestartMessage()` hard-codes `8 departments ready` and the `·`-separated list. This is
+hand-maintained prose that nothing generates and nothing checks — update the count *and* the
+list, or `/start` under-reports what the founder actually has.
+
+#### Optional 9 — Golden-set rerun
+
+If the new department's description overlaps an existing one, run `pnpm eval` once and confirm
+no existing task's route flipped. Overlapping descriptions are the main cause of routing drift.
 
 ### Forget → Error table
 
 | If you forget… | You get… |
 |----------------|----------|
-| Routing row in supervisor prompt | Supervisor never routes there — dept is dead code |
-| Agent in `createSupervisor` agents array | `RuntimeError: unknown agent "analytics"` on first route |
-| `Department` union in `types.ts` | tsc error in eval (loud) |
-| `DEPARTMENTS` Set in `office-invoker.ts` | Eval logs `null` dept; every golden task fails silently |
-| `/q` valid-depts list | `/q analytics …` returns "unknown department" |
+| `WORKERS` in `contracts.ts` | Planner names the worker, `WorkerIdSchema` rejects the envelope → typed `validation` FailureReport; the step never runs (loud, and it names the component) |
+| `DESCRIPTIONS` / `PROMPTS` in `kernel-boot.ts` | `tsc` error: `Record<WorkerId, …>` is missing a key (loud, good — this is why step 1 comes first) |
+| Prompt file or its barrel export | `tsc` error at the `kernel-boot.ts` import (loud) |
+| `DEPARTMENT_TOOLS` entry | `buildWorkerSpecs()` falls back to `?? []` — the worker boots with **zero tools**. The planner routes to it and it can do nothing but apologise |
+| `Department` union in `eval/types.ts` | `tsc` error in the eval harness (loud) |
+| A golden task | No regression guard: routing can drift to another department and nothing fails |
+| `capability-message.ts` line | `/start` tells the founder a department doesn't exist. Silent — no test covers this string |
+| **`hitlGate()` inside a write tool's wrapper** | **The tool fires with no approval.** `HITL_GATED_TOOLS` does *not* gate anything by itself — it only renders the `*` marker in the capability manifest and feeds `pnpm verify:wiring`. The real gate is the `hitlGate()` call in the wrapper (`src/infra/hitl.ts`) |
+| Listing a gated tool in `HITL_GATED_TOOLS` | `pnpm verify:wiring` catches only the *reverse* direction — a name listed but carried by no department ("dead gate"). A write tool that is gated nowhere and listed nowhere passes every check. This is the one silent, dangerous failure on this page: check it by hand |
 
 ---
 
-## Adding a Domain (nested sub-supervisor)
+## Adding a step type (output contract)
 
-A domain groups related departments under a sub-supervisor so the root supervisor
-only sees the domain, not individual departments. Use when ≥3 departments share
-context or need coordinated handoffs.
+**You do not add nodes to the graph.** `src/kernel/graph.ts` has exactly six —
+`plan · dispatch · agent · tools · collect · synthesize` — and that count is the architecture,
+not a starting point. Nesting a sub-graph under a node is the v2 mistake this kernel exists to
+undo; `src/agents/engineering-domain.ts` is a CI tombstone precisely so it cannot come back.
 
-**Example:** The CTO engineering domain (`src/agents/engineering-domain.ts`) groups
-`coder`, `qa`, and `devops` under a sub-supervisor and exposes a single `engineering`
-node to the root supervisor.
+What you extend instead is the **output contract registry**. A plan step declares
+`expected.schema_ref`; `collect` validates the worker's output against the matching Zod schema
+in `OUTPUT_CONTRACTS` and turns a mismatch into a typed failure. Adding a step type = adding a
+contract. That is the only "new kind of step" the kernel has.
 
-### When to create a domain
+The registry ships with: `text.summary`, `research.findings`, `draft.email`,
+`draft.linkedin_post`, `action.summary`, `data.generic`, plus one `signal.<event>` per entry in
+`SIGNAL_CONTRACTS`.
 
-- 3+ departments with related tools and prompts
-- Departments need HITL nested inside a workflow (not just at the leaf tool level)
-- You want the root supervisor isolated from internal engineering routing decisions
+### Step-by-step — 4 files
 
-### File to copy and adapt
-
-`src/agents/engineering-domain.ts` is the reference implementation. Mirror its structure:
+#### 1. The schema (`src/kernel/contracts.ts`)
 
 ```typescript
-// src/agents/analytics-domain.ts
-import { createSupervisor } from "@langchain/langgraph-supervisor";
-import { createReactAgent } from "@langchain/langgraph/prebuilt";
-import { createTrimmedPrompt } from "../infra/context-manager.js";
-import { getModel } from "./model.js";
-import { assertContextIsolation } from "./context-isolation.js";
+export const OUTPUT_CONTRACTS: Record<string, z.ZodTypeAny> = {
+  // …
+  "data.metrics": z.object({
+    metric: z.string().min(1),
+    value: z.number(),
+    period: z.string().min(1),
+  }),
+};
+```
 
-// Domain sub-agents (e.g. dataFetcher, chartBuilder)
-const dataFetcher = createReactAgent({ … });
-const chartBuilder = createReactAgent({ … });
+The key's **prefix decides the step kind**, deterministically and without the model's help
+(`kindFromSchemaRef` in `src/kernel/envelope-repair.ts`):
 
-// Domain supervisor prompt (routes between sub-agents)
-const ANALYTICS_DOMAIN_PROMPT = `You are the analytics domain supervisor…`;
+| `schema_ref` prefix | `expected.kind` | Consequence |
+|---|---|---|
+| `draft.*` | `draft` | Output is a draft for founder review |
+| `action.summary` | `action_receipt` | **`validateStepResult` refuses the step unless at least one `tool_receipt.ok` is true** |
+| anything else | `data` | Plain validated data |
 
-export async function buildAnalyticsDomain() {
-  const domain = await createSupervisor({
-    agents: [dataFetcher, chartBuilder],
-    llm: getModel(),
-    prompt: ANALYTICS_DOMAIN_PROMPT,
-    outputMode: "last_message",   // NEVER change this
-  });
+Choose the prefix deliberately: `action_receipt` is the zero-hallucination mechanism. A step
+that claims work was done but carries no successful receipt is rejected, not trusted.
 
-  assertContextIsolation(domain, "analytics-domain");
-  return domain;
+#### 2. Optional coercion (`src/kernel/output-coercion.ts`)
+
+Weak models return `"just the text"` or `{ result: {...} }` where a schema wants a specific
+object. Rather than loosening the schema, normalise first and keep the schema strict:
+
+```typescript
+export function coerceMetrics(val: unknown): unknown {
+  if (typeof val === "string") return { metric: val, value: 0, period: "unknown" };
+  return val;
 }
 ```
 
-Then in `office.ts`, replace the flat `analytics` agent with the compiled domain:
+Then wrap the entry: `z.preprocess(coerceMetrics, z.object({ … }))`.
+
+Coercion must be **pure and total** — never throw on hostile input, just hand the value back
+unchanged and let Zod produce the typed failure.
+
+#### 3. Prompt template (`getSchemaTemplate()` in `src/kernel/contracts.ts`)
 
 ```typescript
-import { buildAnalyticsDomain } from "./analytics-domain.js";
+case "data.metrics":
+  return `{\n  "metric": "string",\n  "value": "number",\n  "period": "string"\n}`;
+```
 
-// In buildOffice() — call once at compile time:
-const analyticsDomain = await buildAnalyticsDomain();
+This is what the worker is literally shown as the shape to emit. Skip it and the worker gets
+`{}`, guesses, and fails validation on a contract it was never told about.
 
-const supervisor = await createSupervisor({
-  agents: [ …, analyticsDomain.compile() ],
+#### 4. Test (`tests/unit/kernel/contracts.test.ts`)
+
+Cover the accept case, one reject case, and — if you added coercion — the raw shape it repairs.
+
+### Special case: a cross-department signal
+
+Signals need no `OUTPUT_CONTRACTS` edit. Add the payload schema to `SIGNAL_CONTRACTS` in
+`src/kernel/signals.ts` and it is spread into the registry automatically as `signal.<key>`:
+
+```typescript
+export const SIGNAL_CONTRACTS = {
   // …
-});
+  metrics_anomaly: MetricsAnomalyPayload,
+} satisfies Record<SignalEventType, z.ZodTypeAny>;
 ```
 
-**Critical:** `assertContextIsolation()` must be called on every supervisor and
-sub-supervisor. It enforces `outputMode: "last_message"` and throws at startup if it
-was accidentally omitted.
-
-### Feature flag pattern (env-gated promotion)
-
-For gradual rollout, gate the domain behind an env var (see `ENGINEERING_SUBGRAPH`):
-
-```typescript
-// office.ts
-const useAnalyticsDomain = process.env["ANALYTICS_SUBGRAPH"] === "true";
-
-const analyticsNode = useAnalyticsDomain
-  ? (await buildAnalyticsDomain()).compile()
-  : createReactAgent({ … flat analytics … });
-```
-
-This keeps the domain behind a flag until verified live, without blocking merging.
-
----
-
-## Adding a Workflow (SOP)
-
-A workflow is a sequence of natural-language steps that the existing office executes.
-No new tools, no new routing — just a recipe that the supervisor already understands.
-
-**3 files only.**
-
-### Step 1 — Register the workflow (`src/workflows/registry.ts`)
-
-```typescript
-{
-  id: "weekly_outreach_batch",
-  name: "Weekly Outreach Batch",
-  description: "ICP-score prospects, draft cold outreach, queue for approval",
-  params: ["company"],    // ← slot names used in steps
-  steps: [
-    "Search for recent news about {company} and their tech stack",
-    "Score {company} against Turicks ICP (AI-first, 10-200 employees, Series A/B)",
-    "Draft a personalised cold email to {company}. Use search_web for contact info.",
-    "Queue the draft for founder approval before sending",
-  ],
-},
-```
-
-### Step 2 — Unit test (`tests/unit/workflows/registry.test.ts`)
-
-```typescript
-it("weekly_outreach_batch exists with correct params", () => {
-  const wf = getWorkflow("weekly_outreach_batch");
-  expect(wf).toBeDefined();
-  expect(wf!.params).toContain("company");
-  expect(wf!.steps).toHaveLength(4);
-});
-```
-
-### Step 3 — Document it (`MEMORY.md` or `docs/` entry)
-
-One line in MEMORY.md:
-```
-- Workflow `weekly_outreach_batch`: ICP-score + draft + HITL queue. Params: company.
-```
+Add the key to `SIGNAL_EVENT_TYPES` in the same file or the `satisfies` clause fails `tsc`.
 
 ### Forget → Error table
 
 | If you forget… | You get… |
 |----------------|----------|
-| `id` in registry | `/run weekly_outreach_batch` → "unknown workflow" |
-| Param name mismatch | Step template has `{company}` but params declared as `name` → slot never filled |
+| `OUTPUT_CONTRACTS` entry | The planner's envelope fails Zod at `schema_ref.refine` → `unknown output schema_ref`; the step never dispatches (loud) |
+| `getSchemaTemplate()` case | Worker is shown `{}`, invents a shape, and `collect` rejects it — looks like a flaky model, is actually a missing template |
+| Wrong prefix (`data.*` for a real action) | Action claims are accepted **with no tool receipt**. Silent, and it is the exact failure the receipt rule exists to prevent |
+| Coercion that throws | A malformed model output crashes the node instead of becoming a typed `validation` failure |
+| `SIGNAL_EVENT_TYPES` when adding a signal | `tsc` error on the `satisfies` clause (loud) |
+
+---
+
+## The workflow catalog (`saved_workflows`)
+
+**Workflows are not authored — they are recorded.** There is no registry file to add a recipe
+to, and no `/run <workflow>` command. A workflow row appears when a real job *succeeds*: after
+`vps_run` or `claude_code` returns, the wrapper writes the command to `agents.saved_workflows`
+so tomorrow's agent can find a proven job and re-run it instead of re-deriving it.
+
+This replaced the hand-written natural-language SOPs that used to live in a registry file, which
+were deleted in Phase 6 with zero importers — nothing ever ran them.
+
+### The three pieces
+
+| Piece | Where |
+|---|---|
+| Table | `savedWorkflows` — `src/db/schema.ts:1302` |
+| Write path | `recordWorkflowRun()` — `src/db/queries.ts:1488` |
+| Read path | `topWorkflows()` → `list_workflows` tool (admin worker) — `src/agents/agent-tools/workflows.ts` |
+
+Identity is a content hash, not a name: `workflowSignature(tool, command, image)` in
+`src/tools/workflow-catalog.ts`. The upsert targets `(tenant_id, signature)`, so re-running the
+same command increments `run_count` instead of inserting a duplicate — which is what makes
+"our most-used workflows" a plain `ORDER BY run_count DESC` rather than a curated list somebody
+has to maintain.
+
+### The extension point: making a new tool catalog its runs
+
+This is the only thing you actually add here. If you write a tool that executes a
+founder-reusable job, catalog it — **after** the run has already succeeded.
+
+```typescript
+// In the agent-tool wrapper, AFTER writeAuditEntry():
+// allow-failopen: workflow cataloging is an index, never a dependency
+await recordWorkflowRun({
+  tenant_id: TENANT,
+  slug: slugifyWorkflow(command, brief ?? undefined),
+  signature: workflowSignature("my_tool", command, image ?? undefined),
+  tool: "my_tool",
+  command,
+  ...(brief ? { brief } : {}),
+  s3_keys: artifacts.map((a) => a.s3_key),   // [] if the tool produces no S3 artifacts
+  last_run_id: runId,
+}).catch((err) => log.warn({ err: String(err) }, "my_tool: workflow catalog write failed (non-fatal)"));
+```
+
+Four rules, all load-bearing:
+
+1. **After success, never before.** The job is already done and its artifacts are already
+   durable. Cataloguing is an index built on top of that fact.
+2. **`.catch()` it.** A catalog write must never turn a finished job into a failed one.
+3. **Tag the catch `// allow-failopen: <reason>`.** CI rule R3 in
+   `scripts/verify-architecture.ts` fails the build on an untagged swallow — a silent `.catch`
+   is indistinguishable from a bug.
+4. **Spread optionals conditionally** (`...(brief ? { brief } : {})`). `exactOptionalPropertyTypes`
+   rejects an explicit `undefined`.
+
+`src/agents/agent-tools/vps-run.ts:68` and `src/agents/agent-tools/engineering.ts:402` are the
+two live examples — copy whichever is closer.
+
+### Reading the catalog
+
+`list_workflows` is read-only, needs no approval, and is carried by the **admin** worker. It
+renders most-run-first with run count, last-used timestamp, and whether outputs reached S3.
+Ask for it in plain language ("what do we run a lot?"); there is no slash command.
+
+### Forget → Error table
+
+| If you forget… | You get… |
+|----------------|----------|
+| `recordWorkflowRun` in a new executor tool | The job runs fine and vanishes. Nothing breaks, nothing is logged, and the workflow is silently un-findable tomorrow — the failure this table exists to make visible |
+| `.catch()` on the call | A DB blip converts a **successful, already-billed** job into a reported failure |
+| `// allow-failopen:` tag | `pnpm verify:arch` fails on rule R3 (loud, good) |
+| Awaiting it *before* the work | A catalog row that claims a run that never happened |
+| Varying the command string run-to-run | A new `signature` every time → `run_count` stays 1 and "most used" ranks nothing |
 
 ---
 
