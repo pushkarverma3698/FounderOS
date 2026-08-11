@@ -225,8 +225,44 @@ describe("Positive Path CSV Verification & Delivery Matrix (P4/P5)", () => {
       expect(verified.status).toBe("failed");
       if (verified.status === "failed") {
         expect(verified.failure.stage).toBe("validation");
-        expect(verified.failure.message).toContain("no artifact was written or delivered");
+        expect(verified.failure.message).toContain("no successful deliver_artifact receipt");
       }
+    });
+
+    // 9. Prose CLAIMING delivery cannot substitute for the receipt.
+    // The jobhunt prompt orders the worker to say "deliver_artifact", so the words
+    // "deliver"/"attachment" in a finalize are the cheapest thing a model can emit —
+    // receipts are the only evidence that survives that.
+    it.each([
+      ["claims delivery outright", "Exported 182 jobs to captured_jobs.csv and delivered it to you as a Telegram attachment."],
+      ["names the tool it did not call", "Wrote captured_jobs.csv. Next I would call deliver_artifact."],
+      ["says it is ready to deliver", "The CSV export jobs.csv is ready to deliver."],
+    ])("Case 9: write_artifact + prose that %s is still FAILED", async (_label, text) => {
+      const envelope = makeEnvelope({ objective: "What jobs have been captured? Give me a CSV." });
+      const result: StepResult = {
+        status: "ok",
+        step_id: "s1",
+        output: { text },
+        tool_receipts: [
+          { tool: "job_state", args_hash: "h1", result_digest: "d1", ok: true, at: new Date().toISOString() },
+          { tool: "write_artifact", args_hash: "h2", result_digest: "d2", ok: true, at: new Date().toISOString() },
+        ],
+      };
+      const verified = await verifyStepResult(result, envelope);
+      expect(verified.status).toBe("failed");
+    });
+
+    // 10. Zero tool calls at all — prose alone must never pass.
+    it("Case 10: no tool calls and prose claiming an attachment is FAILED", async () => {
+      const envelope = makeEnvelope({ objective: "Give me a CSV of captured jobs" });
+      const result: StepResult = {
+        status: "ok",
+        step_id: "s1",
+        output: { text: "Sent the file jobs.csv as an attachment." },
+        tool_receipts: [],
+      };
+      const verified = await verifyStepResult(result, envelope);
+      expect(verified.status).toBe("failed");
     });
   });
 });

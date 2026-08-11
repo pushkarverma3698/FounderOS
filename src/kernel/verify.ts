@@ -18,44 +18,58 @@ const TEMPLATE_PLACEHOLDER_REGEX = /\{\{[\w\s_-]+\}\}|\[\s*[A-Z][a-z]+(\s+[A-Z][
 /** Keywords in an objective that signal the founder expects a file deliverable. */
 const FILE_DELIVERY_KEYWORDS = /\b(csv|spreadsheet|export|file|attachment|download)\b/i;
 
+/** No artifact at all — nothing was written and nothing was sent. */
+const NO_ARTIFACT_ERROR =
+  "Objective requested a file deliverable (CSV/export/spreadsheet) but no artifact was " +
+  "written or delivered. Use write_artifact to create the file, then deliver_artifact to " +
+  "send it. Do NOT paste data inline.";
+
+/** File exists on disk but never reached the founder. Names the missing step precisely. */
+const NOT_DELIVERED_ERROR =
+  "Objective requested a file deliverable (CSV/export/spreadsheet) but there is no successful " +
+  "deliver_artifact receipt. write_artifact only writes the file to disk — you MUST then call " +
+  "deliver_artifact with that path to send it as a Telegram attachment. A filesystem path in " +
+  "your reply is NOT delivery, and inline data is NOT delivery.";
+
 /**
  * Phase 4 deliverable-aware verification.
- * If the step objective mentions a file/csv/export, the tool_receipts MUST include
- * write_artifact (file created) and/or deliver_artifact (file sent to Telegram).
+ * If the step objective mentions a file/csv/export, the tool_receipts must prove it.
  * Prevents the agent from pasting raw data inline and claiming "Mission complete".
+ *
+ * `requireDelivery` (jobhunt) demands a deliver_artifact receipt: a founder asking for
+ * a CSV wants the attachment, not a path on the VPS. Admin stays lenient because its
+ * own prompt routes "save / write up / keep this as a doc" to write_artifact alone.
  */
 function verifyDeliverableIfRequested(
   output: unknown,
   envelope: TaskEnvelope,
   result?: StepResult,
+  requireDelivery = false,
 ): { ok: boolean; error?: string } {
   if (!FILE_DELIVERY_KEYWORDS.test(envelope.objective)) return { ok: true };
 
-  // 1. Direct tool receipt verification (ground truth)
+  // Receipts are ground truth — recorded BY CODE at the call site (kernel/worker.ts),
+  // so the model cannot write one. Whenever the receipts channel exists (always, on the
+  // real path: worker.ts populates tool_receipts for every step) it is the ONLY evidence
+  // that counts. The model's own prose must never rescue a missing delivery: the jobhunt
+  // prompt orders the worker to say "deliver_artifact", which makes those words the
+  // cheapest token it can emit and worthless as proof.
   if (result && "tool_receipts" in result && Array.isArray(result.tool_receipts)) {
     const receipts = result.tool_receipts;
     const hasDeliver = receipts.some((r) => r.tool === "deliver_artifact" && r.ok);
-    if (hasDeliver) {
-      return { ok: true };
-    }
+    if (hasDeliver) return { ok: true };
+    const hasWrite = receipts.some((r) => r.tool === "write_artifact" && r.ok);
+    if (!hasWrite) return { ok: false, error: NO_ARTIFACT_ERROR };
+    // Written but not sent — the retry has to name the ONE missing call, or the
+    // model re-writes the file it already has instead of delivering it.
+    return requireDelivery ? { ok: false, error: NOT_DELIVERED_ERROR } : { ok: true };
   }
 
-  // 2. Output text heuristic fallback
+  // No receipts channel at all (callers outside the worker path): text is all there is.
   const text = typeof output === "object" && output !== null ? JSON.stringify(output) : String(output);
-  const hasArtifactEvidence =
-    /deliver_artifact/i.test(text) ||
-    (/\.csv|\.json|\.txt|\.md/i.test(text) && /deliver|attach|sent.*file/i.test(text));
-
-  if (!hasArtifactEvidence) {
-    return {
-      ok: false,
-      error:
-        "Objective requested a file deliverable (CSV/export/spreadsheet) but no artifact was " +
-        "written or delivered. Use write_artifact to create the file, then deliver_artifact to " +
-        "send it. Do NOT paste data inline.",
-    };
+  if (!/deliver_artifact/i.test(text)) {
+    return { ok: false, error: requireDelivery ? NOT_DELIVERED_ERROR : NO_ARTIFACT_ERROR };
   }
-
   return { ok: true };
 }
 
@@ -120,8 +134,9 @@ export const VERIFIERS: Record<string, StepVerifier> = {
           return { ok: false, error: "Job state result missing explicit count field." };
         }
       }
-      // Phase 4: deliverable-aware check — if the objective asks for a file, receipts must prove it
-      const deliverableCheck = verifyDeliverableIfRequested(output, envelope, result);
+      // Phase 4 + P7-B: a founder asking for a CSV wants the attachment, so jobhunt
+      // requires a deliver_artifact receipt — write_artifact alone is not delivery.
+      const deliverableCheck = verifyDeliverableIfRequested(output, envelope, result, true);
       if (!deliverableCheck.ok) return deliverableCheck;
       return { ok: true };
     },

@@ -125,6 +125,49 @@ describe("verifyStepResult", () => {
       }
     });
 
+    // Delivery strictness is scoped to jobhunt. Admin's own prompt routes
+    // "save / write up / export / keep this as a doc" to write_artifact alone —
+    // forcing deliver_artifact there would raise a Telegram approval card for a
+    // file the founder only asked to save.
+    it("admin: passes a save-to-file objective on write_artifact alone", async () => {
+      const envelope = makeEnvelope({
+        worker: "admin",
+        objective: "Save the Q3 ops notes as a markdown file",
+        expected: { kind: "data", schema_ref: "text.summary" },
+      });
+      const result: StepResult = {
+        status: "ok",
+        step_id: "s1",
+        output: { text: "Artifact q3_notes written." },
+        tool_receipts: [
+          { tool: "write_artifact", args_hash: "h1", result_digest: "d1", ok: true, at: new Date().toISOString() },
+        ],
+      };
+      const verified = await verifyStepResult(result, envelope);
+      expect(verified.status).toBe("ok");
+    });
+
+    it("admin: still fails a file objective when nothing was written at all", async () => {
+      const envelope = makeEnvelope({
+        worker: "admin",
+        objective: "Export the action log to a csv",
+        expected: { kind: "data", schema_ref: "text.summary" },
+      });
+      const result: StepResult = {
+        status: "ok",
+        step_id: "s1",
+        output: { text: "date,event\n2026-08-11,deploy" },
+        tool_receipts: [
+          { tool: "ops_state", args_hash: "h1", result_digest: "d1", ok: true, at: new Date().toISOString() },
+        ],
+      };
+      const verified = await verifyStepResult(result, envelope);
+      expect(verified.status).toBe("failed");
+      if (verified.status === "failed") {
+        expect(verified.failure.message).toContain("no artifact was written or delivered");
+      }
+    });
+
     it("passes non-deliverable requests even without artifact receipts", async () => {
       const envelope = makeEnvelope({
         worker: "jobhunt",
