@@ -66,7 +66,7 @@ describe("verifyStepResult", () => {
   });
 
   describe("deliverable verification matrix (Phase 4)", () => {
-    it("passes when CSV is requested and write_artifact receipt is present", async () => {
+    it("fails when CSV is requested and write_artifact receipt is present without deliver_artifact", async () => {
       const envelope = makeEnvelope({
         worker: "jobhunt",
         objective: "Export captured jobs to a CSV file",
@@ -82,7 +82,7 @@ describe("verifyStepResult", () => {
         ],
       };
       const verified = await verifyStepResult(result, envelope);
-      expect(verified.status).toBe("ok");
+      expect(verified.status).toBe("failed");
     });
 
     it("passes when file is requested and deliver_artifact receipt is present", async () => {

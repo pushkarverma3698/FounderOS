@@ -83,6 +83,7 @@ describe("Positive Path CSV Verification & Delivery Matrix (P4/P5)", () => {
         tool_receipts: [
           { tool: "job_state", args_hash: "h1", result_digest: "d_3_rows", ok: true, at: new Date().toISOString() },
           { tool: "write_artifact", args_hash: "h2", result_digest: "d_csv", ok: true, at: new Date().toISOString() },
+          { tool: "deliver_artifact", args_hash: "h3", result_digest: "d_tg", ok: true, at: new Date().toISOString() },
         ],
       };
       const verified = await verifyStepResult(result, envelope);
@@ -204,6 +205,27 @@ describe("Positive Path CSV Verification & Delivery Matrix (P4/P5)", () => {
         const diagRetry = retryMessage(envelope, verified.failure, 2);
         expect(diagRetry.content).toContain("DIAGNOSTIC RETRY");
         expect(diagRetry.content).toContain("use a DIFFERENT tool or DIFFERENT arguments");
+      }
+    });
+
+    // 8. CSV written but not delivered (P7-B Regression Test)
+    it("Case 8: CSV written but deliver_artifact missing is FAILED by verifier", async () => {
+      const envelope = makeEnvelope({ objective: "What jobs have been captured? Give me a CSV." });
+      const result: StepResult = {
+        status: "ok",
+        step_id: "s1",
+        output: { text: "Mission complete. CSV File Path: /home/founderos/Projects/founderos/artifacts/turicks_6775330211/job_applications_export.csv" },
+        tool_receipts: [
+          { tool: "job_state", args_hash: "h1", result_digest: "d1", ok: true, at: new Date().toISOString() },
+          { tool: "review_screened", args_hash: "h2", result_digest: "d2", ok: true, at: new Date().toISOString() },
+          { tool: "write_artifact", args_hash: "h3", result_digest: "d3", ok: true, at: new Date().toISOString() },
+        ],
+      };
+      const verified = await verifyStepResult(result, envelope);
+      expect(verified.status).toBe("failed");
+      if (verified.status === "failed") {
+        expect(verified.failure.stage).toBe("validation");
+        expect(verified.failure.message).toContain("no artifact was written or delivered");
       }
     });
   });

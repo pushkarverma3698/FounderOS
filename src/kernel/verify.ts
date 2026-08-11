@@ -34,9 +34,8 @@ function verifyDeliverableIfRequested(
   // 1. Direct tool receipt verification (ground truth)
   if (result && "tool_receipts" in result && Array.isArray(result.tool_receipts)) {
     const receipts = result.tool_receipts;
-    const hasWrite = receipts.some((r) => r.tool === "write_artifact" && r.ok);
     const hasDeliver = receipts.some((r) => r.tool === "deliver_artifact" && r.ok);
-    if (hasWrite || hasDeliver) {
+    if (hasDeliver) {
       return { ok: true };
     }
   }
@@ -44,8 +43,8 @@ function verifyDeliverableIfRequested(
   // 2. Output text heuristic fallback
   const text = typeof output === "object" && output !== null ? JSON.stringify(output) : String(output);
   const hasArtifactEvidence =
-    /artifact_?root|write_artifact|deliver_artifact/i.test(text) ||
-    (/\.csv|\.json|\.txt|\.md/i.test(text) && /deliver|attach|sent.*file|created.*file/i.test(text));
+    /deliver_artifact/i.test(text) ||
+    (/\.csv|\.json|\.txt|\.md/i.test(text) && /deliver|attach|sent.*file/i.test(text));
 
   if (!hasArtifactEvidence) {
     return {
