@@ -565,22 +565,31 @@ meaningful new capability.
 
 ```typescript
 {
-  id: "analytics-weekly-metrics",          // unique, kebab-case
-  input: "Show me top metrics for last week",
-  expectedDept: "analytics",               // must match Department union
-  expectedTools: ["query_metrics"],        // at least one required tool
-  mustContain: ["metric"],                 // strings the reply must contain
-  mustNotContain: ["error", "can't"],      // strings the reply must NOT contain
-  maxTurns: 4,                             // abort if agent loops (default 6)
+  id: "research-pricing-tiers",              // unique, kebab-case
+  input: "Research Stripe's pricing tiers and summarise them.",
+  expectedRoute: "research",                 // must match the Department union in src/eval/types.ts
+  expectedTools: ["search_web"],             // optional — subset match: every listed tool must be observed
+  expectsHitl: false,                        // optional — true only when the task must hit the approval gate
+  note: "covers the read-only research path" // optional — shown in the report
 },
 ```
+
+`GoldenTask` (`src/eval/types.ts`) has exactly these fields: `id`, `input`,
+`expectedRoute`, and the optional `expectedTools`, `expectsHitl`, `note`. There is
+no reply-text assertion — scoring covers routing, tool selection, and HITL
+coverage only (`src/eval/scoring.ts`). Omit an optional field rather than
+over-specifying it: an expectation you are not confident about makes a failure
+noise instead of signal.
 
 **Run eval:**
 
 ```bash
 pnpm eval                  # full suite — needs Gemini key + live DB
-pnpm eval --filter analytics   # subset (if supported by your eval runner)
 ```
+
+`scripts/run-eval.ts` reads no arguments; there is no subset/filter flag. To run a
+subset, temporarily narrow `GOLDEN_TASKS` or call `runEval()` directly with your
+own array.
 
 A failing golden task after your change means routing or tool selection regressed.
 Fix prompts (system-prompts.ts) before committing.
