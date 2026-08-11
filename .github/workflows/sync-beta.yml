@@ -1,38 +1,53 @@
 name: Sync beta
 
-# After every main push (including beta→main promotion), fast-forward beta when
-# it is strictly behind main so the next promotion PR is never blocked.
+# After every main push (including beta→main promotion), bring beta back up to
+# main so the next promotion PR is never blocked.
+#
+# 2026-08-10: this job used to `git push origin beta` directly. beta is a
+# protected branch — required PRs, 2 required status checks, enforce_admins on —
+# so every run since that protection landed died with
+#   GH006: Protected branch update failed ... Changes must be made through a
+#   pull request.  ! [remote rejected] beta -> beta
+# beta silently froze 125 commits behind main and the work → beta → main ladder
+# stopped running. The fix is to use the mechanism the protection requires: open
+# a sync PR. Its head is main's HEAD, whose two required checks already ran on
+# the push event, so it is mergeable without a second CI cycle.
 on:
   push:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
+  pull-requests: write
 
 jobs:
   sync:
-    name: Fast-forward beta to main
+    name: Open beta sync PR
     runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, '[skip beta-sync]')"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
           git fetch origin beta:refs/remotes/origin/beta main:refs/remotes/origin/main
-          BETA_SHA="$(git rev-parse origin/beta)"
-          MAIN_SHA="$(git rev-parse origin/main)"
-          if [ "$BETA_SHA" = "$MAIN_SHA" ]; then
-            echo "beta already matches main — nothing to sync"
+
+          if git merge-base --is-ancestor origin/main origin/beta; then
+            echo "beta already contains main — nothing to sync"
             exit 0
           fi
-          if ! git merge-base --is-ancestor origin/beta origin/main; then
-            echo "beta has commits not in main — skip auto-sync (merge beta→main first)"
+
+          EXISTING="$(gh pr list --base beta --head main --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$EXISTING" ]; then
+            echo "sync PR #${EXISTING} is already open — it tracks main and will pick up this push"
             exit 0
           fi
-          git checkout beta
-          git merge --ff-only origin/main
-          git push origin beta
+
+          gh pr create \
+            --base beta \
+            --head main \
+            --title "chore: sync beta with main" \
+            --body "Automated by \`.github/workflows/sync-beta.yml\`. beta is behind main; merging this keeps the work → beta → main ladder usable. Opened as a PR rather than pushed, because beta is protected and rejects direct pushes."

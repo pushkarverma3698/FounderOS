@@ -60,7 +60,7 @@ export const searchKnowledge = tool(
     }
 
     if (results.length === 0) {
-      return `No knowledge entries found for "${query}"${entry_type ? ` (type: ${entry_type})` : ""}. The turicks-brain may not have this — try \`search_turicks_brain\` (semantic) or \`search_web\`. Do NOT fabricate an answer; tell the founder the knowledge base has no entry for this.`;
+      return `No knowledge entries found for "${query}"${entry_type ? ` (type: ${entry_type})` : ""}. The turicks-brain may not have this — try \`search_web\`. Do NOT fabricate an answer; report the missing information to the founder rather than fabricate or substitute unrelated context.`;
     }
 
     return results

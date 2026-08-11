@@ -90,6 +90,23 @@ describe("getSponsorIndex", () => {
     const match = matchSponsor("Zzyzx Widgetworks", getSponsorIndex());
     expect(match.verdict).toBe("not-sponsor");
   });
+
+  test("an unknown company sharing only a category word is rejected, not queued", () => {
+    // Both were live failures against this register: "Analytics in HR B.V." and
+    // "H.I. Systems" reduce to one category word each, so every company with
+    // "Analytics" or "Systems" in its name inherited them as candidates and went
+    // to the approval queue. The threshold that stops this is absolute (a token
+    // in <=10 of ~12.9k entries), so it can only be pinned on the real register.
+    expect(matchSponsor("Kwyjibo Analytics", getSponsorIndex()).verdict).toBe("not-sponsor");
+    expect(matchSponsor("Fnordling Systems", getSponsorIndex()).verdict).toBe("not-sponsor");
+  });
+
+  test("a genuine abbreviation of a register entry still reaches a human", () => {
+    // The cost asymmetry: quieting the queue must not turn real sponsors away.
+    const match = matchSponsor("ASML", getSponsorIndex());
+    expect(match.verdict).toBe("uncertain");
+    expect(match.candidates.join(" ")).toContain("ASML");
+  });
 });
 
 /**

@@ -57,7 +57,9 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
 ## Non-negotiable rules (carried from v2, all still enforced)
 - **HITL**: DB row BEFORE interrupt() (`src/infra/hitl.ts`); side effects only
   after approval; idempotency key check before every external send; audit row
-  only on real success (`src/kernel/tool-adapter.ts` pins the ordering).
+  only on real success. The ordering is pinned by each side-effecting tool in
+  `src/agents/agent-tools/`, which calls `hitlGate()` inline — there is no single
+  adapter, and `HITL_GATED_TOOLS` is a declaration for rendering, not a gate.
 - **Determinism**: temp 0; routing/parsing/guards are pure unit-tested
   functions, never prompt instructions; CI runs the golden set twice —
   plans must be identical.
@@ -166,7 +168,7 @@ unenforced, and is expected to decay.
 ## File map
 ```
 src/kernel/            — contracts, signals, state, planner, supervisor (pure),
-                         worker, synthesizer, graph, tool-adapter, index
+                         worker, synthesizer, graph, verify, index
 src/gateway/kernel-boot.ts — composition root (models+tools+checkpointer → kernel)
 src/gateway/kernel-run.ts  — run loop: lock → gates → invoke → HITL card/reply
 src/gateway/telegram.ts    — grammy transport; commands.ts — 7 essential commands

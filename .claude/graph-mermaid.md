@@ -15,34 +15,68 @@ graph TB
   tool_search_memory["search_memory"]:::tool
   tool_record_event["record_event"]:::tool
   tool_list_pending_signals["list_pending_signals"]:::tool
+  tool_schedule_task["schedule_task"]:::tool
+  tool_list_scheduled["list_scheduled"]:::tool
+  tool_edit_scheduled["edit_scheduled"]:::tool
+  tool_set_reminder["set_reminder"]:::tool
+  tool_list_reminders["list_reminders"]:::tool
+  tool_edit_reminder["edit_reminder"]:::tool
+  tool_list_workflows["list_workflows"]:::tool
+  tool_synthesize_skill["synthesize_skill"]:::tool
+  tool_ops_state["ops_state"]:::tool
+  tool_write_artifact["write_artifact"]:::tool
+  tool_deliver_artifact["deliver_artifact"]:::tool
   tool_search_web["search_web"]:::tool
   tool_scrape_url["scrape_url"]:::tool
   tool_deep_research["deep_research"]:::tool
   tool_crawl_site["crawl_site"]:::tool
+  tool_youtube_transcript["youtube_transcript"]:::tool
+  tool_v2ex_topics["v2ex_topics"]:::tool
   tool_search_research_cache["search_research_cache"]:::tool
   tool_search_knowledge["search_knowledge"]:::tool
   tool_search_turicks_brain["search_turicks_brain"]:::tool
   tool_publish_signal["publish_signal"]:::tool
+  tool_scan_ai_visibility["scan_ai_visibility"]:::tool
+  tool_get_gap_scans["get_gap_scans"]:::tool
   tool_send_email["send_email"]:::tool
   tool_read_emails["read_emails"]:::tool
   tool_create_calendar_event["create_calendar_event"]:::tool
-  tool_github_read["github_read"]:::tool
-  tool_github_write["github_write"]:::tool
+  tool_schedule_social_post["schedule_social_post"]:::tool
+  tool_list_scheduled_posts["list_scheduled_posts"]:::tool
   tool_project_workflow["project_workflow"]:::tool
   tool_claude_code["claude_code"]:::tool
   tool_apply_cinematic_preset["apply_cinematic_preset"]:::tool
   tool_deploy_static_site["deploy_static_site"]:::tool
-  tool_apply_cinematic_preset["apply_cinematic_preset"]:::tool
+  tool_vps_run["vps_run"]:::tool
+  tool_github_read["github_read"]:::tool
   tool_linkedin_post["linkedin_post"]:::tool
+  tool_linkedin_get_my_posts["linkedin_get_my_posts"]:::tool
+  tool_linkedin_analytics["linkedin_analytics"]:::tool
+  tool_linkedin_read_comments["linkedin_read_comments"]:::tool
+  tool_draft_linkedin_reply["draft_linkedin_reply"]:::tool
+  tool_draft_connection_note["draft_connection_note"]:::tool
+  tool_generate_image["generate_image"]:::tool
+  tool_list_brand_assets["list_brand_assets"]:::tool
+  tool_list_video_brands["list_video_brands"]:::tool
+  tool_compile_video_brief["compile_video_brief"]:::tool
+  tool_compile_shot_list["compile_shot_list"]:::tool
+  tool_plan_video_production["plan_video_production"]:::tool
+  tool_video_production_status["video_production_status"]:::tool
   tool_read_file["read_file"]:::tool
   tool_list_dir["list_dir"]:::tool
-  tool_send_file["send_file"]:::tool
-  tool_write_file["write_file"]:::tool
   tool_run_shell["run_shell"]:::tool
   tool_browser["browser"]:::tool
   tool_search_personal_rag["search_personal_rag"]:::tool
+  tool_send_file["send_file"]:::tool
+  tool_write_file["write_file"]:::tool
   tool_read_cv["read_cv"]:::tool
   tool_search_jobs["search_jobs"]:::tool
+  tool_ingest_jobs["ingest_jobs"]:::tool
+  tool_screen_job["screen_job"]:::tool
+  tool_review_screened["review_screened"]:::tool
+  tool_cv_gaps["cv_gaps"]:::tool
+  tool_job_state["job_state"]:::tool
+  tool_job_brief["job_brief"]:::tool
   service_supervisor["Supervisor"]:::service
   service_telegam["Telegram Gateway"]:::service
   service_hitl["HITL (Human-in-the-loop)"]:::service
@@ -65,46 +99,79 @@ graph TB
   tool_search_memory -->|belongs_to| dept_admin
   tool_record_event -->|belongs_to| dept_admin
   tool_list_pending_signals -->|belongs_to| dept_admin
+  tool_schedule_task -->|belongs_to| dept_admin
+  tool_list_scheduled -->|belongs_to| dept_admin
+  tool_edit_scheduled -->|belongs_to| dept_admin
+  tool_set_reminder -->|belongs_to| dept_admin
+  tool_list_reminders -->|belongs_to| dept_admin
+  tool_edit_reminder -->|belongs_to| dept_admin
+  tool_list_workflows -->|belongs_to| dept_admin
+  tool_synthesize_skill -->|belongs_to| dept_admin
+  tool_ops_state -->|belongs_to| dept_admin
+  tool_write_artifact -->|belongs_to| dept_admin
+  tool_deliver_artifact -->|belongs_to| dept_admin
   tool_search_web -->|belongs_to| dept_research
   tool_scrape_url -->|belongs_to| dept_research
   tool_deep_research -->|belongs_to| dept_research
   tool_crawl_site -->|belongs_to| dept_research
+  tool_youtube_transcript -->|belongs_to| dept_research
+  tool_v2ex_topics -->|belongs_to| dept_research
   tool_search_research_cache -->|belongs_to| dept_research
   tool_search_knowledge -->|belongs_to| dept_research
   tool_search_turicks_brain -->|belongs_to| dept_research
   tool_publish_signal -->|belongs_to| dept_research
+  tool_scan_ai_visibility -->|belongs_to| dept_research
+  tool_get_gap_scans -->|belongs_to| dept_research
   tool_send_email -->|belongs_to| dept_comms
   tool_read_emails -->|belongs_to| dept_comms
   tool_create_calendar_event -->|belongs_to| dept_comms
-  tool_github_read -->|belongs_to| dept_engineering
-  tool_github_write -->|belongs_to| dept_engineering
+  tool_schedule_social_post -->|belongs_to| dept_comms
+  tool_list_scheduled_posts -->|belongs_to| dept_comms
   tool_project_workflow -->|belongs_to| dept_engineering
   tool_claude_code -->|belongs_to| dept_engineering
   tool_apply_cinematic_preset -->|belongs_to| dept_engineering
   tool_deploy_static_site -->|belongs_to| dept_engineering
-  tool_apply_cinematic_preset -->|belongs_to| dept_engineering
-  tool_publish_signal -->|belongs_to| dept_engineering
-  tool_search_web -->|belongs_to| dept_marketing
+  tool_vps_run -->|belongs_to| dept_engineering
+  tool_synthesize_skill -->|belongs_to| dept_engineering
+  tool_github_read -->|belongs_to| dept_engineering
   tool_linkedin_post -->|belongs_to| dept_marketing
+  tool_linkedin_get_my_posts -->|belongs_to| dept_marketing
+  tool_linkedin_analytics -->|belongs_to| dept_marketing
+  tool_linkedin_read_comments -->|belongs_to| dept_marketing
+  tool_draft_linkedin_reply -->|belongs_to| dept_marketing
+  tool_draft_connection_note -->|belongs_to| dept_marketing
+  tool_generate_image -->|belongs_to| dept_marketing
+  tool_list_brand_assets -->|belongs_to| dept_marketing
+  tool_list_video_brands -->|belongs_to| dept_marketing
+  tool_compile_video_brief -->|belongs_to| dept_marketing
+  tool_compile_shot_list -->|belongs_to| dept_marketing
+  tool_plan_video_production -->|belongs_to| dept_marketing
+  tool_video_production_status -->|belongs_to| dept_marketing
+  tool_list_scheduled_posts -->|belongs_to| dept_marketing
+  tool_search_web -->|belongs_to| dept_marketing
   tool_search_knowledge -->|belongs_to| dept_marketing
-  tool_search_turicks_brain -->|belongs_to| dept_marketing
   tool_publish_signal -->|belongs_to| dept_marketing
-  tool_send_email -->|belongs_to| dept_sales
   tool_search_web -->|belongs_to| dept_sales
+  tool_send_email -->|belongs_to| dept_sales
   tool_search_knowledge -->|belongs_to| dept_sales
-  tool_search_turicks_brain -->|belongs_to| dept_sales
   tool_read_file -->|belongs_to| dept_personal
   tool_list_dir -->|belongs_to| dept_personal
-  tool_send_file -->|belongs_to| dept_personal
-  tool_write_file -->|belongs_to| dept_personal
   tool_run_shell -->|belongs_to| dept_personal
   tool_browser -->|belongs_to| dept_personal
   tool_search_personal_rag -->|belongs_to| dept_personal
-  tool_search_turicks_brain -->|belongs_to| dept_personal
+  tool_send_file -->|belongs_to| dept_personal
+  tool_write_file -->|belongs_to| dept_personal
   tool_read_cv -->|belongs_to| dept_jobhunt
   tool_search_jobs -->|belongs_to| dept_jobhunt
+  tool_ingest_jobs -->|belongs_to| dept_jobhunt
+  tool_screen_job -->|belongs_to| dept_jobhunt
+  tool_review_screened -->|belongs_to| dept_jobhunt
+  tool_cv_gaps -->|belongs_to| dept_jobhunt
+  tool_job_state -->|belongs_to| dept_jobhunt
+  tool_write_artifact -->|belongs_to| dept_jobhunt
+  tool_deliver_artifact -->|belongs_to| dept_jobhunt
+  tool_job_brief -->|belongs_to| dept_jobhunt
   tool_send_email -->|belongs_to| dept_jobhunt
-  tool_search_personal_rag -->|belongs_to| dept_jobhunt
   dept_admin -->|calls| service_supervisor
   dept_admin -->|calls| service_telegam
   dept_research -->|calls| service_supervisor

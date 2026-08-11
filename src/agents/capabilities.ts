@@ -1,11 +1,12 @@
 /**
  * FounderOS — Capability Registry (single source of truth)
  * =========================================================
- * ONE place that declares which tools each department carries. Both the office
- * graph (office.ts) and the supervisor's self-knowledge text are generated
- * from this table, so "what can you do?" answers can never drift from reality
- * again (on 2026-06-09 the bot claimed it had no browser and didn't know what
- * MCP was — both false — because capability text was hand-maintained prose).
+ * ONE place that declares which tools each department carries. Both the kernel's
+ * worker specs (buildWorkerSpecs in gateway/kernel-boot.ts) and the supervisor's
+ * self-knowledge text are generated from this table, so "what can you do?"
+ * answers can never drift from reality again (on 2026-06-09 the bot claimed it
+ * had no browser and didn't know what MCP was — both false — because capability
+ * text was hand-maintained prose).
  */
 
 import {
@@ -28,7 +29,6 @@ import {
   listScheduledPosts,
   createCalendarEvent,
   githubRead,
-  githubWrite,
   readFile,
   listDir,
   sendFile,
@@ -83,17 +83,21 @@ import type { BridgedTools } from "../mcp/client.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTool = any;
 
-/** Department → tools. office.ts builds each ReAct agent from THESE arrays.
+/** Department → tools. buildWorkerSpecs() builds each kernel worker from THESE
+ * arrays (minus anything isUnconfiguredTool withholds).
  *
- * searchPersonalRag  → personal + jobhunt
- *   Career/CV data is needed for jobhunt (CV-to-JD semantic matching) as well as
- *   personal ("what are my skills?"). Kept off research/sales/marketing —
- *   career data is founder-private, not business-public (ADR-013/015).
+ * RAG placement, as P7 (5623eff) left it — one retrieval surface per corpus, so
+ * two workers can never answer the same question from different indexes:
  *
- * searchTuricksBrain → personal + research + sales + marketing
- *   Business knowledge (strategy, ADRs, brand, founder profile) is cross-cutting.
- *   Research needs it for context, sales for ICP/messaging, marketing for brand
- *   alignment. Engineering and comms don't query business strategy.
+ * searchPersonalRag  → personal
+ *   Career/CV data is founder-private, not business-public (ADR-013/015).
+ *   jobhunt used to carry it too; P7 removed that overlap — jobhunt reads the CV
+ *   through readCv/cvGaps, which is the path its prompts actually name.
+ *
+ * searchTuricksBrain → research
+ *   Business knowledge (strategy, ADRs, brand, founder profile). P7 narrowed this
+ *   from personal+research+sales+marketing to research alone; sales and marketing
+ *   keep searchKnowledge for the same material.
  */
 import { synthesizeSkill } from "./agent-tools.js";
 
