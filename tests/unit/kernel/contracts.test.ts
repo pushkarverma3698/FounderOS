@@ -15,6 +15,7 @@ import {
   validateStepResult,
   hashToolArgs,
   digestToolResult,
+  repairDataGenericOutput,
   stableStringify,
   KERNEL_SCHEMA_VERSION,
   SIGNAL_EVENT_TYPES,
@@ -361,5 +362,12 @@ describe("receipt hashing determinism", () => {
     const d2 = digestToolResult({ ok: false });
     expect(d1).not.toBe(d2);
     expect(d1).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("repairDataGenericOutput", () => {
+  it("wraps raw prose markdown text into { data: text } when model outputs non-JSON prose", () => {
+    const repaired = repairDataGenericOutput(null, "Here are the recent changes to FounderOS:\n- AG-007\n- M0a");
+    expect(repaired).toEqual({ data: "Here are the recent changes to FounderOS:\n- AG-007\n- M0a" });
   });
 });

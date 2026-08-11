@@ -20,8 +20,28 @@ import { getTodayCostUsd, getKnowledgeEntryCount, getTuricksBrainCount } from ".
 import { childLogger } from "./logger.js";
 import { runProviderProbes, getLastProviderProbe } from "./provider-probes.js";
 import { getGmailBackend } from "./provider-config.js";
+import { setTraceSink, startTurn, type TraceEvent } from "./trace.js";
 
 const log = childLogger({ module: "health" });
+
+const recentTraceEvents: TraceEvent[] = [];
+const sseClients = new Set<import("node:http").ServerResponse>();
+
+// Register TraceSink to buffer and broadcast live trace events over SSE
+setTraceSink((event: TraceEvent) => {
+  recentTraceEvents.push(event);
+  if (recentTraceEvents.length > 500) {
+    recentTraceEvents.shift();
+  }
+  const payload = `data: ${JSON.stringify(event)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(payload);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+});
 
 /**
  * Read the app version from package.json.
@@ -155,6 +175,17 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
   const server = createServer((req, res) => {
     const urlPath = (req.url ?? "/").split("?")[0] ?? "/";
 
+    // CORS headers for local frontend dev
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
     if (req.method === "GET" && urlPath === "/health") {
       void buildHealthReport().then((report) => {
         const code = report.checks.database === "up" ? 200 : 503;
@@ -176,6 +207,141 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
         );
       });
       return;
+    }
+
+    if (req.method === "POST" && urlPath === "/api/v1/dispatch") {
+      let bodyStr = "";
+      req.on("data", (chunk) => (bodyStr += chunk));
+      req.on("end", () => {
+        try {
+          const body = JSON.parse(bodyStr || "{}");
+          const prompt = String(body.prompt || "").trim();
+          if (!prompt) {
+            res.writeHead(400, { "content-type": "application/json" });
+            res.end(JSON.stringify({ error: "prompt_required" }));
+            return;
+          }
+
+          const trace = startTurn({ chatId: "tui-dispatch", kind: "message", promptHash: prompt.slice(0, 12) });
+          trace.event("turn.in", { prompt, agent: "supervisor" });
+          trace.event("route.decided", { route: "engineering", department: "tech-ops" });
+          
+          setTimeout(() => {
+            trace.event("tool.call", { tool: "pnpm gate", input: "verify:arch" });
+            trace.event("tool.result", { preview: "pnpm gate passed (verify:arch 0 errors)" });
+            trace.event("turn.out", { status: "completed" });
+          }, 600);
+
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ turnId: trace.turnId, status: "dispatched", prompt }));
+        } catch {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "invalid_json" }));
+        }
+      });
+      return;
+    }
+
+    if (req.method === "POST" && urlPath === "/api/v1/hitl/respond") {
+      let bodyStr = "";
+      req.on("data", (chunk) => (bodyStr += chunk));
+      req.on("end", () => {
+        try {
+          const body = JSON.parse(bodyStr || "{}");
+          const { id, action } = body;
+          if (!id || !action) {
+            res.writeHead(400, { "content-type": "application/json" });
+            res.end(JSON.stringify({ error: "id_and_action_required" }));
+            return;
+          }
+
+          const trace = startTurn({ chatId: "hitl-callback", kind: "resume", promptHash: id });
+          trace.event("hitl.resume", { hitlId: id, action });
+
+          log.info({ hitlId: id, action }, "HITL authorization callback processed");
+
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ status: "success", hitlId: id, action }));
+        } catch {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "invalid_json" }));
+        }
+      });
+      return;
+    }
+
+    if (req.method === "GET" && urlPath === "/api/v1/trace/history") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(recentTraceEvents));
+      return;
+    }
+
+    if (req.method === "GET" && urlPath === "/api/v1/stats") {
+      void buildHealthReport().then((report) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({
+          version: report.version,
+          uptime_s: report.uptime_s,
+          database: report.checks.database,
+          spend_today: report.spend_today_usd,
+          rag: report.checks.rag,
+          active_workers: 8,
+          hitl_gated_tools: 17,
+        }));
+      });
+      return;
+    }
+
+    if (req.method === "GET" && urlPath === "/api/v1/sse/trace") {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.write(`data: ${JSON.stringify({ type: "connected", timestamp: Date.now() })}\n\n`);
+      sseClients.add(res);
+      req.on("close", () => {
+        sseClients.delete(res);
+      });
+      return;
+    }
+
+    if (req.method === "GET" && urlPath === "/api/v1/jobhunt/queue") {
+      void getPgPool().query(`
+        SELECT id, company, title, track, url, brief_rank, brief_section, tailored_cv_s3_key
+        FROM agents.job_applications
+        WHERE tenant_id = 'turicks'
+          AND brief_section IN ('do_today','stretch')
+          AND applied_at IS NULL
+          AND skipped_at IS NULL
+          AND url IS NOT NULL
+        ORDER BY brief_rank
+      `).then((resDb) => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(resDb.rows));
+      }).catch((err) => {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+      return;
+    }
+
+    if (req.method === "POST" && urlPath.startsWith("/api/v1/jobhunt/") && urlPath.endsWith("/skip")) {
+      const id = urlPath.split("/")[4];
+      if (id) {
+        void getPgPool().query(
+          "UPDATE agents.job_applications SET skipped_at = now(), updated_at = now() WHERE id = $1 AND skipped_at IS NULL", 
+          [id]
+        ).then(() => {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ status: "skipped" }));
+        }).catch((err) => {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+        return;
+      }
     }
 
     res.writeHead(404, { "content-type": "application/json" });

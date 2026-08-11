@@ -53,6 +53,70 @@ function titleFromFilename(filename: string): string {
     .replace(/_/g, " ");
 }
 
+/**
+ * Sections that are banner-marked "DO NOT FOLLOW" in the doc but must NEVER be
+ * chunked into the brain.
+ *
+ * A reader sees the banner at the top of the file; a retrieved CHUNK does not.
+ * chunkText splits at 1800 chars, so DEVELOPER.md's warning (lines 7–23) lands in
+ * chunk 0 while the v2 procedure it warns about lands in chunks 7–13 — an agent
+ * asking "how do I add a department" would get `createSupervisor` steps and
+ * `src/agents/office.ts`, a CI tombstone whose re-creation fails `pnpm verify:arch`.
+ * Ingesting these verbatim would undo the 2026-08-09 correction in the one channel
+ * agents actually read from, while `brain:sync` still printed ✅.
+ *
+ * Remove an entry here in the same commit that rewrites the section to v3.
+ */
+export const STALE_SECTIONS: Record<string, readonly string[]> = {
+  "docs/DEVELOPER.md": [
+    "## Adding a Department",
+    "## Adding a Domain (nested sub-supervisor)",
+    "## Adding a Workflow (SOP)",
+  ],
+  "docs/rules/PROGRAMMING-RULES.md": [
+    "## Wiring Map 2 — Add a Department",
+    "## Wiring Map 3 — Add a Workflow (SOP)",
+  ],
+};
+
+/**
+ * Drop each named section (heading → next heading of the same or higher level),
+ * leaving a one-line marker so a retrieved neighbouring chunk still shows that
+ * something was deliberately withheld rather than never written.
+ *
+ * Throws when a listed heading is absent: a rename must fail the sync loudly, not
+ * silently re-admit v2 procedure into retrieval.
+ */
+export function stripStaleSections(content: string, source: string): string {
+  const headings = STALE_SECTIONS[source];
+  if (!headings) return content;
+
+  const lines = content.split("\n");
+  const dropped = new Set<number>();
+
+  for (const heading of headings) {
+    const start = lines.findIndex((l) => l.trim() === heading);
+    if (start === -1) {
+      throw new Error(
+        `${source}: stale-section heading "${heading}" not found. If it was rewritten ` +
+          `to v3, delete it from STALE_SECTIONS in this file; if it was renamed, update it there.`,
+      );
+    }
+    const level = (lines[start]!.match(/^#+/) ?? ["#"])[0].length;
+    let end = start + 1;
+    while (end < lines.length && !new RegExp(`^#{1,${level}}\\s`).test(lines[end]!)) end++;
+    for (let i = start + 1; i < end; i++) dropped.add(i);
+  }
+
+  return lines
+    .map((line, i) => {
+      if (!dropped.has(i)) return line;
+      return dropped.has(i - 1) ? null : "_(v2 procedure — withheld from retrieval; see the banner in this file.)_";
+    })
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
 function collectDocs(rootDir: string): DocEntry[] {
   const docs: DocEntry[] = [];
   const root = join(process.cwd(), rootDir);
@@ -126,6 +190,21 @@ function collectDocs(rootDir: string): DocEntry[] {
     }
   }
 
+  // ── Market Intelligence ─────────────────────────────────────────────────────
+  const marketIntelDir = join(root, "docs/market-intel");
+  if (existsSync(marketIntelDir)) {
+    for (const file of readdirSync(marketIntelDir).filter((f) => f.endsWith(".md") && f !== "README.md")) {
+      const content = readFile(join(marketIntelDir, file));
+      docs.push({
+        entry_type: "market_intel",
+        title: titleFromFilename(file),
+        content,
+        source: `docs/market-intel/${file}`,
+        tags: ["market", "competitor", "intelligence", "strategy"],
+      });
+    }
+  }
+
   // ── Roadmap (business + FounderOS direction) ─────────────────────────────────
   const roadmapDoc = join(root, "docs/ROADMAP.md");
   if (existsSync(roadmapDoc)) {
@@ -151,6 +230,57 @@ function collectDocs(rootDir: string): DocEntry[] {
         source: `docs/phases/${file}`,
         tags: ["phase", `phase-${phaseNum}`, "progress"],
         metadata: { phase_number: parseInt(phaseNum) },
+      });
+    }
+  }
+
+  // ── Engineering rules + the developer guide ─────────────────────────────────
+  // Precedence layer 4 (CLAUDE.md): these are what an agent follows to add a tool
+  // or a department. Until 2026-08-09 they were the only agent-facing docs absent
+  // from this manifest, so the brain could answer "what did we decide" but not
+  // "how do I do it" — the 2026-08-09 corrections were invisible to retrieval.
+  // Known-stale sections are withheld by STALE_SECTIONS above, not ingested raw.
+  const rulesDir = join(root, "docs/rules");
+  if (existsSync(rulesDir)) {
+    for (const f of readdirSync(rulesDir).filter((f) => f.endsWith(".md"))) {
+      const source = `docs/rules/${f}`;
+      docs.push({
+        entry_type: "rule",
+        title: titleFromFilename(f),
+        content: stripStaleSections(readFile(join(rulesDir, f)), source),
+        source,
+        tags: ["rule", "procedure", "engineering", "how-to"],
+      });
+    }
+  }
+
+  const developerGuide = join(root, "docs/DEVELOPER.md");
+  if (existsSync(developerGuide)) {
+    docs.push({
+      entry_type: "rule",
+      title: "FounderOS Developer Guide",
+      content: stripStaleSections(readFile(developerGuide), "docs/DEVELOPER.md"),
+      source: "docs/DEVELOPER.md",
+      tags: ["rule", "procedure", "engineering", "how-to", "onboarding"],
+    });
+  }
+
+  // ── Implementation plans + the product-recovery program ─────────────────────
+  // CLAUDE.md tells every agent to query the brain for recent plans before
+  // starting work. Until 2026-08-08 neither directory was on this allowlist, so
+  // `brain:sync` reported "inserted / updated / ✅ complete" while ingesting
+  // ZERO plans — a green mechanism with the outcome missing, which is the same
+  // failure shape the product-recovery audit was opened to fix.
+  for (const dir of ["docs/plans", "docs/product-recovery"]) {
+    const planDir = join(root, dir);
+    if (!existsSync(planDir)) continue;
+    for (const f of readdirSync(planDir).filter((f) => f.endsWith(".md"))) {
+      docs.push({
+        entry_type: "plan",
+        title: titleFromFilename(f),
+        content: readFile(join(planDir, f)),
+        source: `${dir}/${f}`,
+        tags: ["plan", "implementation", dir.replace("docs/", "")],
       });
     }
   }
@@ -385,7 +515,11 @@ async function main() {
   process.exit(failures > 0 ? 1 : 0);
 }
 
-main().catch((err) => {
-  console.error("Fatal:", err);
-  process.exit(1);
-});
+// Run only as a CLI — the pure helpers above are imported by unit tests, and an
+// import must never start a sync (same guard as scripts/verify-architecture.ts).
+if (process.argv[1]?.endsWith("sync-turicks-brain.ts")) {
+  main().catch((err) => {
+    console.error("Fatal:", err);
+    process.exit(1);
+  });
+}

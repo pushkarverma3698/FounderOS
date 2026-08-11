@@ -25,6 +25,7 @@
 
 import { childLogger } from "../infra/logger.js";
 import { stripHtml } from "./web-search.js";
+import { readPageViaJina } from "./agent-reach.js";
 import { env } from "../core/config.js";
 
 const log = childLogger({ module: "tool:apify" });
@@ -49,7 +50,7 @@ export interface ScrapeResult {
 }
 
 export type ScrapeOutcome =
-  | { ok: true; data: ScrapeResult[]; source: "apify" | "fetch" }
+  | { ok: true; data: ScrapeResult[]; source: "apify" | "fetch" | "jina" }
   | { ok: false; error: string };
 
 // ── Low-level: run an Apify actor synchronously ───────────────────────────────
@@ -81,7 +82,26 @@ export async function runActorSync(
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
-      return { ok: false, error: `Apify actor ${actorId} returned HTTP ${response.status}` };
+      // The BODY, not just the status. Apify puts the actual complaint there —
+      // which input key it rejected, which value was out of range. On 2026-08-03
+      // the NL query failed with a bare "returned HTTP 400" recorded, and that
+      // sentence is undiagnosable: it cannot distinguish a malformed input from
+      // a rate limit from an actor that changed its schema. Truncated because an
+      // error string ends up in a Telegram message and a database column.
+      let detail = "";
+      try {
+        detail = await response.text();
+      } catch {
+        // allow-failopen: the STATUS is the finding; the body is the detail. A
+        // body we cannot read must never cost us the status code too, which is
+        // what turns a diagnosable 400 into "response.text is not a function".
+        detail = "";
+      }
+      const suffix = detail.trim() ? `: ${detail.trim().slice(0, 500)}` : "";
+      return {
+        ok: false,
+        error: `Apify actor ${actorId} returned HTTP ${response.status}${suffix}`,
+      };
     }
     const json = (await response.json()) as unknown;
     if (!Array.isArray(json)) {
@@ -202,7 +222,23 @@ export async function scrapeUrl(url: string, timeoutMs = DEFAULT_SCRAPE_TIMEOUT_
       log.warn({ url, error: run.error }, "Apify scrape failed — trying fetch fallback");
     }
   }
-  return fetchToMarkdown(url);
+  const fetched = await fetchToMarkdown(url);
+  if (fetched.ok) return fetched;
+
+  // Last resort: Jina Reader (agent-reach's keyless web backend). Reaches pages
+  // that block a plain fetch or render their body via JS, with no token. Only
+  // runs once the two cheaper tiers have already failed.
+  const jina = await readPageViaJina(url);
+  if (jina.ok) {
+    log.info({ url }, "scrapeUrl: recovered via Jina Reader after fetch fallback failed");
+    return {
+      ok: true,
+      data: [{ url, title: jina.title, markdown: jina.markdown.slice(0, MARKDOWN_MAX), retrieved_at: new Date().toISOString() }],
+      source: "jina",
+    };
+  }
+  // Report the fetch tier's error — it names the component the caller can act on.
+  return fetched;
 }
 
 /**

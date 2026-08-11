@@ -3,6 +3,13 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { SIGNAL_CONTRACTS } from "./signals.js";
 import {
+  coerceTextSummary,
+  coerceResearchFindings,
+  coerceLinkedinPost,
+  coerceActionSummary,
+  coerceDataGeneric,
+} from "./output-coercion.js";
+import {
   EXPECTED_KINDS,
   kindFromSchemaRef,
   repairEnvelopeExpected,
@@ -74,45 +81,6 @@ export function stableStringify(value: unknown): string {
   });
 }
 
-function coerceTextSummary(val: unknown): unknown {
-  if (typeof val === "string") return { text: val };
-  if (val && typeof val === "object" && !Array.isArray(val) && !("text" in val)) {
-    const summary = (val as Record<string, unknown>)["summary"];
-    if (typeof summary === "string") return { text: summary };
-  }
-  return val;
-}
-
-function coerceResearchFindings(val: unknown): unknown {
-  if (val && typeof val === "object" && !Array.isArray(val)) {
-    const obj = val as Record<string, unknown>;
-    if ("text" in obj && !("summary" in obj) && typeof obj.text === "string") {
-      return { ...obj, summary: obj.text };
-    }
-  }
-  return val;
-}
-
-function coerceLinkedinPost(val: unknown): unknown {
-  if (val && typeof val === "object" && !Array.isArray(val)) {
-    const obj = val as Record<string, unknown>;
-    if ("text" in obj && !("body" in obj) && typeof obj.text === "string") {
-      return { ...obj, body: obj.text };
-    }
-  }
-  return val;
-}
-
-function coerceActionSummary(val: unknown): unknown {
-  if (val && typeof val === "object" && !Array.isArray(val)) {
-    const obj = val as Record<string, unknown>;
-    if ("text" in obj && !("summary" in obj) && typeof obj.text === "string") {
-      return { ...obj, summary: obj.text };
-    }
-  }
-  return val;
-}
-
 export const OUTPUT_CONTRACTS: Record<string, z.ZodTypeAny> = {
   "text.summary": z.preprocess(coerceTextSummary, z.object({ text: z.string().min(1) })),
   "research.findings": z.preprocess(
@@ -129,7 +97,7 @@ export const OUTPUT_CONTRACTS: Record<string, z.ZodTypeAny> = {
   }),
   "draft.linkedin_post": z.preprocess(coerceLinkedinPost, z.object({ body: z.string().min(1) })),
   "action.summary": z.preprocess(coerceActionSummary, z.object({ summary: z.string().min(1) })),
-  "data.generic": z.record(z.unknown()),
+  "data.generic": z.preprocess(coerceDataGeneric, z.record(z.unknown())),
   ...Object.fromEntries(Object.entries(SIGNAL_CONTRACTS).map(([k, v]) => [`signal.${k}`, v])),
 };
 
@@ -140,6 +108,11 @@ export function isOutputSchemaRef(ref: string): boolean {
 export function repairTextSummaryOutput(parsed: unknown, rawText: string): unknown {
   if (OUTPUT_CONTRACTS["text.summary"]!.safeParse(parsed).success) return parsed;
   return rawText.trim().length > 0 ? { text: rawText } : parsed;
+}
+
+export function repairDataGenericOutput(parsed: unknown, rawText: string): unknown {
+  if (OUTPUT_CONTRACTS["data.generic"]!.safeParse(parsed).success) return parsed;
+  return rawText.trim().length > 0 ? { data: rawText } : parsed;
 }
 
 export function getSchemaTemplate(ref: string): string {
@@ -259,6 +232,12 @@ export function validatePlannerDecision(input: unknown): Validation<PlannerDecis
 
 // ── Step result (discriminated — the supervisor branches on status, not prose) ─
 
+export const ObservedResultSchema = z.object({
+  kind: z.enum(["file", "http", "record", "commit", "message"]),
+  evidence: z.string(),
+});
+export type ObservedResult = z.infer<typeof ObservedResultSchema>;
+
 export const StepResultSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("ok"),
@@ -266,6 +245,7 @@ export const StepResultSchema = z.discriminatedUnion("status", [
     /** MUST validate against the envelope's expected.schema_ref (validateStepResult). */
     output: z.unknown(),
     tool_receipts: z.array(ToolReceiptSchema).default([]),
+    observed: ObservedResultSchema.optional(),
   }),
   z.object({
     status: z.literal("failed"),

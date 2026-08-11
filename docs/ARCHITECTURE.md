@@ -143,7 +143,7 @@ and the [case studies](turicks-case-studies/) for why every one of these exists.
 
 | Layer | Path | Role |
 |-------|------|------|
-| Kernel | `src/kernel/` | contracts, planner, supervisor (pure), worker, synthesizer, graph, tool-adapter |
+| Kernel | `src/kernel/` | contracts, planner, supervisor (pure), worker, synthesizer, graph, verify |
 | Composition | `src/gateway/kernel-boot.ts` | the only place providers are wired |
 | Run loop | `src/gateway/kernel-run.ts` | lock → gates → invoke → HITL card / reply |
 | Transport | `src/gateway/telegram.ts` | grammY bot + commands |

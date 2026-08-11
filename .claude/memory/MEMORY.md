@@ -199,6 +199,39 @@ docs/diagrams/                 — Mermaid system + pipeline diagrams
 
 ## Critical Gotchas
 
+### [2026-08-06] NEVER resolve a runtime data file by counting directories up
+- `tsconfig.json` sets **no `rootDir`** and includes both `src/**` and `scripts/**`, so tsc
+  infers the repo as the common root and emits **`dist/src/…`** — one level deeper than the
+  source tree. `resolve(dirname(fileURLToPath(import.meta.url)), "../../..")` from
+  `src/tools/jobhunt/` gives the repo root; from `dist/src/tools/jobhunt/` it gives `dist/`.
+- **This broke production for 4 days (2026-08-02 → 08-06).** The IND sponsor register
+  resolved to `<repo>/dist/docs/…`, `getSponsorRegister()` threw ENOENT on *every* posting,
+  and 4 sweeps bought ~$1.77 of Apify postings for zero rows.
+- **All 2498 tests passed the whole time** — `tsx` runs the source tree where the arithmetic
+  is correct. `lint`, `test`, `verify:wiring`, `verify:arch` all agreed the code was fine.
+  Nothing in the gate executed the built artefact.
+- **Do instead:** `resolveRepoRoot()` in `src/tools/jobhunt/sponsor-registry.ts` — searches
+  upward for `package.json`, correct in both layouts. Add every new runtime data file to
+  `ASSETS` in `scripts/verify-runtime-assets.ts` (runs in `pnpm gate`, loads through `dist/`).
+
+### [2026-08-06] A count that doesn't sum to its total will hide an outage
+- `tally()` counted 3 of `IngestLine.outcome`'s 5 values. `duplicate`/`error` inflated
+  `screened` and appeared nowhere, so "27 screened, 0/0/0" was indistinguishable from a
+  market with nothing in it. That ambiguity is what hid the ENOENT bug for 4 days.
+- The sweep also logged `"failures":0, msg:"Pooled job ingest complete"` at **info** while
+  every posting failed. Screening errors fed neither `failures` nor the brief.
+- Invariant now: `passed+flagged+rejected+duplicates+errored === screened`, and screening
+  errors land in `job_ingest_runs.screen_error` + the brief + an error-level log.
+
+### [2026-08-06] The job sweep's budget is in DOLLARS, not postings
+- `JOB_INGEST_DAILY_LIMIT` never bound: the actor rejects a limit below 10, so 12 ATS
+  queries buy up to 120 regardless of the number. It silently stopped binding when the
+  India pool took the sweep from 8 queries to 12.
+- Real cap: `src/tools/jobhunt/spend-gate.ts`, checked before the first actor call.
+  `JOBHUNT_MONTHLY_CAP_USD` (default $2), cycle = Apify's 11th→10th, not calendar month.
+- Apify FREE plan = **$5 hard platform cap shared with the research actors**. Hitting it
+  stops both, and a feed returning nothing looks exactly like an empty market.
+
 ### LangGraph node naming
 - Never name a node the same as a state annotation key. LangGraph compile() throws at runtime with:
   `X is already being used as a state attribute (a.k.a. a channel), cannot also be used as a node name`

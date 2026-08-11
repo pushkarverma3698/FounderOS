@@ -23,6 +23,23 @@ const log = childLogger({ module: "single-instance" });
 /** Default lock location — matches the documented restart workflow. */
 export const DEFAULT_PID_FILE = process.env["FOUNDEROS_PID_FILE"] ?? "/tmp/founderos.pid";
 
+/**
+ * Is this lock path erased between service restarts?
+ *
+ * systemd's `PrivateTmp=true` — which deploy/founderos.service sets for
+ * hardening — gives every service START a fresh, empty /tmp. A lock kept there
+ * therefore vanishes on each restart, so the new process always reads "no
+ * previous instance" and the lock silently protects nothing. That was the state
+ * of production until 2026-08-09: the host had no /tmp/founderos.pid at all,
+ * only a per-invocation copy inside /proc/<pid>/root/tmp.
+ *
+ * The lock path is configured by FOUNDEROS_PID_FILE; this predicate exists so a
+ * regression is loud at boot instead of silent until the next double-poll.
+ */
+export function isEphemeralLockPath(pidFile: string): boolean {
+  return /^\/(?:private\/)?(?:var\/)?tmp\//.test(pidFile);
+}
+
 /** Liveness probe: `kill(pid, 0)` throws ESRCH if the process is gone. */
 export function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -71,6 +88,14 @@ export function acquireSingleInstanceLock(opts: AcquireLockOptions = {}): Acquir
   const pidFile = opts.pidFile ?? DEFAULT_PID_FILE;
   const isAlive = opts._isAlive ?? isProcessAlive;
   const kill = opts._kill ?? ((pid: number, sig: NodeJS.Signals) => process.kill(pid, sig));
+
+  if (process.env["NODE_ENV"] === "production" && isEphemeralLockPath(pidFile)) {
+    log.warn(
+      { pidFile },
+      "Single-instance lock is on an ephemeral path — under systemd PrivateTmp it is wiped every " +
+        "restart and protects nothing. Set FOUNDEROS_PID_FILE to a persistent path.",
+    );
+  }
 
   const existing = readPidFile(pidFile);
   let replacedPid: number | null = null;

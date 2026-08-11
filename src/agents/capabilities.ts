@@ -1,11 +1,12 @@
 /**
  * FounderOS — Capability Registry (single source of truth)
  * =========================================================
- * ONE place that declares which tools each department carries. Both the office
- * graph (office.ts) and the supervisor's self-knowledge text are generated
- * from this table, so "what can you do?" answers can never drift from reality
- * again (on 2026-06-09 the bot claimed it had no browser and didn't know what
- * MCP was — both false — because capability text was hand-maintained prose).
+ * ONE place that declares which tools each department carries. Both the kernel's
+ * worker specs (buildWorkerSpecs in gateway/kernel-boot.ts) and the supervisor's
+ * self-knowledge text are generated from this table, so "what can you do?"
+ * answers can never drift from reality again (on 2026-06-09 the bot claimed it
+ * had no browser and didn't know what MCP was — both false — because capability
+ * text was hand-maintained prose).
  */
 
 import {
@@ -13,6 +14,8 @@ import {
   scrapeUrlTool,
   deepResearch,
   crawlSiteTool,
+  youtubeTranscript,
+  v2exTopics,
   searchResearchCache,
   createSendEmailTool,
   readEmails,
@@ -26,7 +29,6 @@ import {
   listScheduledPosts,
   createCalendarEvent,
   githubRead,
-  githubWrite,
   readFile,
   listDir,
   sendFile,
@@ -35,8 +37,11 @@ import {
   browser,
   readCv,
   searchJobs,
+  ingestJobs,
   screenJob,
   reviewScreened,
+  cvGaps,
+  jobBrief,
   projectWorkflow,
   claudeCode,
   applyCinematicPreset,
@@ -48,6 +53,10 @@ import {
   scanAiVisibility,
   getGapScans,
   vpsRun,
+  jobState,
+  opsState,
+  writeArtifact,
+  deliverArtifact,
 } from "./agent-tools.js";
 import { generateImageTool, listBrandAssetsTool } from "./agent-tools/creative.js";
 import {
@@ -63,7 +72,6 @@ import { listWorkflows } from "./agent-tools/workflows.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
 import { searchMemoryTool } from "../tools/memory.js";
-import { writeArtifact } from "../tools/artifact.js";
 import { listPendingSignals } from "./agent-tools/pending-signals.js";
 import { MCP_BRIDGE_ENABLED, MCP_BRIDGE_MANIFEST } from "../core/config.js";
 import type { BridgeManifest } from "../mcp/bridge-manifest.js";
@@ -75,36 +83,53 @@ import type { BridgedTools } from "../mcp/client.js";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTool = any;
 
-/** Department → tools. office.ts builds each ReAct agent from THESE arrays.
+/** Department → tools. buildWorkerSpecs() builds each kernel worker from THESE
+ * arrays (minus anything isUnconfiguredTool withholds).
  *
- * searchPersonalRag  → personal + jobhunt
- *   Career/CV data is needed for jobhunt (CV-to-JD semantic matching) as well as
- *   personal ("what are my skills?"). Kept off research/sales/marketing —
- *   career data is founder-private, not business-public (ADR-013/015).
+ * RAG placement, as P7 (5623eff) left it — one retrieval surface per corpus, so
+ * two workers can never answer the same question from different indexes:
  *
- * searchTuricksBrain → personal + research + sales + marketing
- *   Business knowledge (strategy, ADRs, brand, founder profile) is cross-cutting.
- *   Research needs it for context, sales for ICP/messaging, marketing for brand
- *   alignment. Engineering and comms don't query business strategy.
+ * searchPersonalRag  → personal
+ *   Career/CV data is founder-private, not business-public (ADR-013/015).
+ *   jobhunt used to carry it too; P7 removed that overlap — jobhunt reads the CV
+ *   through readCv/cvGaps, which is the path its prompts actually name.
+ *
+ * searchTuricksBrain → research
+ *   Business knowledge (strategy, ADRs, brand, founder profile). P7 narrowed this
+ *   from personal+research+sales+marketing to research alone; sales and marketing
+ *   keep searchKnowledge for the same material.
  */
+import { synthesizeSkill } from "./agent-tools.js";
+
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, writeArtifact, listWorkflows],
-  research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
+  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact],
+  research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
-  engineering: [githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, publishSignal, vpsRun],
-  marketing: [searchWeb, linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, searchKnowledge, searchTuricksBrain, publishSignal, generateImageTool, listBrandAssetsTool, listScheduledPosts, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool],
-  sales: [createSendEmailTool("sales"), searchWeb, searchKnowledge, searchTuricksBrain],
-  personal: [readFile, listDir, sendFile, writeFile, runShell, browser, searchPersonalRag, searchTuricksBrain],
-  jobhunt: [readCv, searchJobs, screenJob, reviewScreened, createSendEmailTool("jobhunt"), searchPersonalRag],
+  engineering: [projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead],
+  marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
+  sales: [searchWeb, createSendEmailTool("sales"), searchKnowledge],
+  personal: [readFile, listDir, runShell, browser, searchPersonalRag, sendFile, writeFile],
+  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobState, writeArtifact, deliverArtifact, jobBrief, createSendEmailTool("jobhunt")],
 };
 
-/** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops).
- *  Kept here so the capability manifest stays the single source of truth when the
- *  engineering department is promoted to a sub-supervisor (ADR-027, engineering-domain.ts). */
+/** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops). */
 export const ENGINEERING_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
-  coder: [claudeCode, githubRead],
+  coder: [claudeCode, githubRead, synthesizeSkill],
   qa: [claudeCode, githubRead],
-  devops: [githubWrite, projectWorkflow],
+  devops: [claudeCode, projectWorkflow],
+};
+
+/** Marketing sub-domain tool clusters (ADR-027 pattern). */
+export const MARKETING_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
+  social: [linkedinPost, linkedinAnalytics, draftLinkedInReply, draftConnectionNote, listScheduledPosts],
+  video: [compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listVideoBrandsTool],
+  creative: [generateImageTool, listBrandAssetsTool],
+};
+
+/** Admin sub-domain tool clusters (ADR-027 pattern). */
+export const ADMIN_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
+  scheduling: [scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder],
+  memory_context: [readContext, updateContext, searchMemoryTool, recordEvent, writeArtifact, synthesizeSkill],
 };
 
 /** Supervisors route via handoffs only — no business tools (ADR-028). */
@@ -118,17 +143,18 @@ export const HITL_GATED_TOOLS = new Set([
   "schedule_task",
   "draft_linkedin_reply",
   "draft_connection_note",
-  "github_write",
-  "write_file",
   "run_shell",
   "browser",
-  "send_file",
   "claude_code",
   "vps_run",
   "deploy_static_site",
   "project_workflow",
   "create_calendar_event",
   "record_event",
+  "deliver_artifact",
+  "synthesize_skill",
+  "write_file",
+  "send_file",
 ]);
 
 /**

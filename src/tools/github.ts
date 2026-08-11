@@ -285,8 +285,20 @@ export const githubTool: UnifiedTool = {
         case "list_commits": {
           const owner = args["owner"] as string;
           const repo = args["repo"] as string;
+          // NO DEFAULT REF. This used to fall back to "gemini/antigravityChanges",
+          // a working branch that no longer exists, so every call that did not
+          // name a ref — i.e. every ordinary "what shipped recently?" — came back
+          // 404 Not Found. Omitting `sha` makes GitHub answer for the repository's
+          // OWN default branch, which is what the caller meant; hardcoding `main`
+          // instead would only move the bug to the next repo that uses `master`.
+          const sha = (args["sha"] as string) ?? (args["ref"] as string);
           if (!owner || !repo) return { success: false, error: "list_commits requires owner and repo" };
-          const { data: commits } = await octokit.rest.repos.listCommits({ owner, repo, per_page: 20 });
+          const { data: commits } = await octokit.rest.repos.listCommits({
+            owner,
+            repo,
+            per_page: 20,
+            ...(sha ? { sha } : {}),
+          });
           return {
             success: true,
             data: commits.map((c) => ({

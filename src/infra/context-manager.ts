@@ -257,7 +257,7 @@ function prepareMessages(
  *
  * Accepts a string OR a zero-arg factory function. Pass a factory when the
  * prompt must stay fresh across a long-running process — e.g. buildCommsPrompt
- * and buildSupervisorPrompt inject today's date, so they must be re-evaluated
+ * injects today's date, so it must be re-evaluated
  * on every LLM call (not frozen at office compile time). Static prompts can
  * pass a plain string.
  *

@@ -1,0 +1,219 @@
+/**
+ * FounderOS — where a posting actually is
+ * =======================================
+ * The campaign runs in TWO markets — the Netherlands (relocation, permit-bound)
+ * and India (local hire, no permit at all) — and almost every gate downstream
+ * branches on which one a posting belongs to. So this answer has to be a FACT,
+ * and until 2026-08-01 it was an inference.
+ *
+ * WHAT WENT WRONG. `extractRoute` returned `hsm` — "Netherlands, highly skilled
+ * migrant" — whenever the ad said "on-site", "hybrid" or "office-based". Not one
+ * of those words names a country. An Indian ad saying "hybrid" was therefore
+ * filed as a Dutch role, screened against Dutch immigration law, and stored with
+ * a Dutch permit basis; nine rows from the Indeed **IN** feed sat in production
+ * exactly that way. Meanwhile a Colombian posting whose location could not be
+ * read reached rank 2 of APPLY TODAY on the strength of a Dutch partner permit.
+ *
+ * WHY THE FIX IS NOT A BETTER REGEX. The fetcher already knew. It had queried
+ * Indeed IN rather than Indeed NL; the ATS feed returns `locations_derived` on
+ * every posting. That knowledge was discarded on the way into the screener so
+ * the screener could re-derive it from prose — replacing a fact with a guess.
+ * The country now travels WITH the posting, and the ad's wording is consulted
+ * only where nothing was fetched.
+ *
+ * `other` and `unknown` are deliberately different answers. "This job is in
+ * Colombia" is a finding that narrows the lawful bases to one; "we could not
+ * tell where this job is" is an open question that has to be asked. Collapsing
+ * them is how the Bogotá row looked identical to a Dutch one.
+ *
+ * Pure: no I/O, no model, no network.
+ */
+
+/** NL and IN are the campaign's markets. `other` is a place; `unknown` is not. */
+export type PostingCountry = "NL" | "IN" | "other" | "unknown";
+
+/**
+ * Strings that occupy the location field without naming a place.
+ *
+ * These must read as `unknown`, not as `other`. "Remote" is the absence of a
+ * location, and treating it as a third country would narrow the lawful bases on
+ * the strength of a word that says nothing about geography at all.
+ */
+const NON_PLACE = new Set([
+  "remote",
+  "remote worldwide",
+  "worldwide",
+  "anywhere",
+  "work from anywhere",
+  "global",
+  "globally",
+  "international",
+  "various",
+  "multiple locations",
+  "emea",
+  "apac",
+  "europe",
+  "eu",
+  "n/a",
+  "na",
+  "unknown",
+  "tbd",
+]);
+
+/**
+ * Country names, in the spellings the two feeds actually emit.
+ *
+ * Matched on WORD BOUNDARIES, which is load-bearing: a substring test files
+ * every Indianapolis role as an Indian local hire and then applies a rupee pay
+ * yardstick to a dollar salary. `\bindia\b` does not match "Indiana".
+ *
+ * The two-letter ISO codes are deliberately absent. A feed's location string
+ * spells countries out ("Amsterdam, North Holland, Netherlands"), and `\bin\b`
+ * would match the preposition in "Remote in Europe" and file a European contract
+ * role as an Indian local hire. Where a code IS the source of truth — the Indeed
+ * query knows it asked for NL or IN — it is stamped on the posting directly and
+ * never round-trips through this function.
+ */
+const NL_NAMES = ["netherlands", "the netherlands", "nederland", "holland"];
+const IN_NAMES = ["india", "bharat"];
+
+/**
+ * Hub cities, for the rows that arrive with a city and no country.
+ *
+ * The ATS feed populates `cities_derived` when `locations_derived` is empty, so
+ * a posting can reach us as the bare string "Bangalore". Falling through to
+ * `unknown` there would put a plainly Indian role into the "we don't know where
+ * this is" queue and make the founder answer a question the feed already knew.
+ *
+ * Only unambiguous city names appear. A city that is also a common word, or that
+ * exists in several countries, stays out — a wrong country here is worse than an
+ * unknown one, because `unknown` asks and a wrong answer asserts.
+ */
+const NL_CITIES = [
+  "amsterdam",
+  "rotterdam",
+  "utrecht",
+  "eindhoven",
+  "den haag",
+  "the hague",
+  "groningen",
+  "tilburg",
+  "almere",
+  "breda",
+  "nijmegen",
+  "haarlem",
+  "arnhem",
+  "amersfoort",
+  "delft",
+  "leiden",
+  "zwolle",
+  "maastricht",
+  "hilversum",
+];
+
+const IN_CITIES = [
+  "bengaluru",
+  "bangalore",
+  "hyderabad",
+  "pune",
+  "mumbai",
+  "chennai",
+  "new delhi",
+  "delhi",
+  "noida",
+  "gurgaon",
+  "gurugram",
+  "kolkata",
+  "ahmedabad",
+  "jaipur",
+  "indore",
+  "chandigarh",
+  "kochi",
+  "coimbatore",
+  "thiruvananthapuram",
+  "bhubaneswar",
+];
+
+/** Word-boundary test for any phrase in the list. */
+function mentionsAny(haystack: string, phrases: readonly string[]): boolean {
+  return phrases.some((phrase) => {
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\b${escaped}\\b`, "i").test(haystack);
+  });
+}
+
+/**
+ * Read a country out of a feed's location string.
+ *
+ * The two markets are checked before the fallback, and the fallback is `other`
+ * rather than `unknown`: a string that names somewhere, is not the Netherlands
+ * and is not India, HAS told us something — that neither market applies — and
+ * that is exactly the finding the Bogotá row needed and did not get.
+ */
+export function countryFromLocation(location: string): PostingCountry {
+  const text = location.trim();
+  if (text.length === 0) return "unknown";
+  if (NON_PLACE.has(text.toLowerCase())) return "unknown";
+
+  if (mentionsAny(text, NL_NAMES) || mentionsAny(text, NL_CITIES)) return "NL";
+  if (mentionsAny(text, IN_NAMES) || mentionsAny(text, IN_CITIES)) return "IN";
+
+  return "other";
+}
+
+/**
+ * Country codes Indeed puts in its own hostname: `in.indeed.com`, `nl.indeed.com`.
+ *
+ * The leading label is which country Indeed SERVED the posting for — a fact
+ * about the row, not a reading of its text. That makes this a legitimate second
+ * source for the country, and the only one available for rows screened before
+ * the column existed: twelve production rows carry an Indeed URL and no country,
+ * and eight of them are on `in.indeed.com` while still recording a Dutch
+ * partner permit as what makes them lawful.
+ *
+ * Deliberately narrow. Only the two markets are recognised, and only as the
+ * FIRST label of the host — `www.indeed.com` and `boards.greenhouse.io` say
+ * nothing about geography and must come back `unknown`, not `other`.
+ */
+const HOST_COUNTRY: Record<string, PostingCountry> = { in: "IN", nl: "NL" };
+
+/**
+ * Read a country out of a posting URL, or `unknown`.
+ *
+ * Never returns `other`: a hostname that is not one of the two country domains
+ * has told us nothing, which is different from telling us the job is elsewhere.
+ */
+export function countryFromUrl(url: string | null | undefined): PostingCountry {
+  if (!url) return "unknown";
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return "unknown";
+  }
+  const [label, ...rest] = host.split(".");
+  // Only on a country-subdomain of a job board — `nl.example.com` is somebody's
+  // Dutch marketing site, not evidence about where a role sits.
+  if (!label || rest.length < 2) return "unknown";
+  if (!host.endsWith("indeed.com")) return "unknown";
+  return HOST_COUNTRY[label] ?? "unknown";
+}
+
+/** The country in the words the founder reads, for a gate's evidence line. */
+export function countryName(country: PostingCountry): string {
+  if (country === "NL") return "the Netherlands";
+  if (country === "IN") return "India";
+  if (country === "other") return "a country outside both your markets";
+  return "an unstated location";
+}
+
+/**
+ * Narrow an arbitrary stored string to the union.
+ *
+ * Rows written before the column existed carry NULL, and a cast would let that
+ * reach the renderer as a country. Anything not positively one of the four is
+ * `unknown`, which is what "nobody recorded this" is called here.
+ */
+export function toPostingCountry(value: unknown): PostingCountry {
+  return value === "NL" || value === "IN" || value === "other" ? value : "unknown";
+}

@@ -194,7 +194,10 @@ describe("sponsorGate — staleness downgrades only the negative", () => {
     expect(gate.status).toBe("pass");
   });
 
-  it("rejects confidently when the register is fresh", async () => {
+  it("flags — never rejects — an absent company even when the register is fresh", async () => {
+    // A fresh register makes "absent today" TRUE, but absence is not permanent:
+    // an employer can become a recognised sponsor for a candidate they want.
+    // Founder decision, 2026-07-31 — the gate reports, the human decides.
     const { sponsorGate } = await import("../../../src/tools/jobhunt/screen.js");
 
     const gate = sponsorGate(
@@ -202,6 +205,7 @@ describe("sponsorGate — staleness downgrades only the negative", () => {
       registerStaleness(new Date("2026-07-20T00:00:00Z"), NOW),
     );
 
-    expect(gate.status).toBe("reject");
+    expect(gate.status).toBe("flag");
+    expect(gate.evidence).toContain("could still become one");
   });
 });

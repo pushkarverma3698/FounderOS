@@ -14,8 +14,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock DB queries before importing tools
 const mockGetFounderContext = vi.fn(async () => ({}));
 const mockUpsertFounderContext = vi.fn(async () => {});
-const mockSearchKnowledgeEntries = vi.fn(async () => []);
-const mockGetKnowledgeByType = vi.fn(async () => []);
+const mockSearchKnowledgeEntries = vi.fn(async (): Promise<any[]> => []);
+const mockGetKnowledgeByType = vi.fn(async (): Promise<any[]> => []);
 
 vi.mock("../../../src/db/queries.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);

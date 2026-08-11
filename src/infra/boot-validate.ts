@@ -15,6 +15,8 @@
  */
 
 import { buildBootReport, type BootCapabilityInput } from "./boot-report.js";
+import { existsSync, mkdirSync, accessSync, constants } from "node:fs";
+import { ARTIFACT_ROOT } from "../core/config.js";
 
 export interface BootValidationInput extends BootCapabilityInput {
   DATABASE_URL?: string | undefined;
@@ -33,6 +35,20 @@ const present = (v: string | undefined): boolean => typeof v === "string" && v.t
 const TELEGRAM_TOKEN_SHAPE = /^\d+:[A-Za-z0-9_-]+$/;
 
 /**
+ * Validate that ARTIFACT_ROOT exists and is writable.
+ */
+export function assertArtifactRootWritable(dir: string = ARTIFACT_ROOT): void {
+  try {
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    accessSync(dir, constants.W_OK);
+  } catch (err) {
+    throw new Error(`ARTIFACT_ROOT (${dir}) is unwritable: ${(err as Error).message}`);
+  }
+}
+
+/**
  * Validate the runtime config needed for the bot to actually function.
  * Returns ALL problems (does not throw) so every misconfig is visible at once.
  *
@@ -42,6 +58,12 @@ const TELEGRAM_TOKEN_SHAPE = /^\d+:[A-Za-z0-9_-]+$/;
 export function validateBootConfig(env: BootValidationInput): BootValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
+
+  try {
+    assertArtifactRootWritable();
+  } catch (e) {
+    errors.push((e as Error).message);
+  }
 
   // ── LLM: the selected provider MUST have a matching key (else office is dead) ─
   const report = buildBootReport(env);

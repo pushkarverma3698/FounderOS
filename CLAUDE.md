@@ -1,5 +1,17 @@
 # FounderOS — Claude Instructions (v3)
 
+## Precedence
+
+```text
+1. Founder instruction in chat                  ← always wins
+2. CI fitness rules (verify-architecture.ts)    ← the only BINDING layer
+3. docs/antigravity/STANDARDS.md                ← how code is written
+4. CLAUDE.md / AGENTS.md / GEMINI.md            ← role-specific operating instructions
+5. Everything else                              ← reference
+```
+
+A rule which is not enforced by layer 2 is a convention, and a rule that is enforced cannot be satisfied by argument.
+
 ## What This Is
 FounderOS is a **deterministic agent kernel** with a Telegram gateway — an
 own-brand orchestration product (vs OpenClaw/Hermes-class chat loops) that
@@ -45,7 +57,9 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
 ## Non-negotiable rules (carried from v2, all still enforced)
 - **HITL**: DB row BEFORE interrupt() (`src/infra/hitl.ts`); side effects only
   after approval; idempotency key check before every external send; audit row
-  only on real success (`src/kernel/tool-adapter.ts` pins the ordering).
+  only on real success. The ordering is pinned by each side-effecting tool in
+  `src/agents/agent-tools/`, which calls `hitlGate()` inline — there is no single
+  adapter, and `HITL_GATED_TOOLS` is a declaration for rendering, not a gate.
 - **Determinism**: temp 0; routing/parsing/guards are pure unit-tested
   functions, never prompt instructions; CI runs the golden set twice —
   plans must be identical.
@@ -71,15 +85,90 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
      own plan and answer it, or adopt it.
   Recommend one option with reasons; never present an unranked survey. If a
   conclusion rests on an assumption, verify the assumption or label it unverified.
+- **Build for the OUTCOME, not the instruction (rule #26 — founder directive,
+  2026-08-01)**: every request names a symptom and guesses a remedy. Before
+  writing anything, answer three questions in order: *what outcome does this
+  serve · what is the binding constraint on that outcome · does the requested
+  change move that constraint*. If the answer to the third is no, say so and name
+  what would — then build that too. Deliver the literal ask in full regardless;
+  the outcome lens decides HOW and WHAT ELSE, never WHETHER.
+  - Every deliverable must end in something the founder can ACT ON — a ranked
+    shortlist, a draft, a decision, a number that changes a choice. A log of what
+    happened is not an outcome. If ignoring the output costs nothing and emits no
+    signal, the design is wrong, however many tests pass.
+  - Anything shown to the founder must be legible to someone who has never read
+    the code. An internal label nobody defined ("Sponsor", "partially overlaps",
+    "not checked") is not information. Print every reason, in bullets, with its
+    own result — and split the Telegram message rather than hide a row.
+  - Never discard collected data because it is currently useless. A senior role
+    we will not apply to is still evidence about the market and about our own
+    filters; a filtered-out row and an empty market are indistinguishable from
+    outside, and that ambiguity has already cost this pipeline weeks. Reject
+    inside the pipeline where the reason is stored and shown, never before it.
+  - Two failures produced this rule: a screener that ran flawlessly for weeks and
+    produced zero applications (2026-07-31 — screening was never the constraint),
+    and the first real brief, which was unreadable because it displayed a PASSING
+    check as the reason a role needed attention (2026-08-01).
 - **Memory is the source of truth**: docs/ADR changes → `pnpm brain:sync`;
   significant decisions → episodic memory.
 - **Zero paid calls in the dev loop**: unit tests use scripted models;
   `pnpm eval` (live model) is a milestone gate, run once per feature.
 
+## Rules binding on Claude itself (2026-08-06, derived from measured failures)
+
+These come from an audit of ten defects across AG-001…AG-006. Each one names the incident that
+produced it. Every rule states **what enforces it** — a rule with no mechanism is labelled
+unenforced, and is expected to decay.
+
+- **#27 — A rule with no mechanism decays; say which layer holds it.** Over one month the
+  CI-enforced rules in `verify-architecture.ts` drifted **zero** times. Over one day, markdown rules
+  drifted **three** times. When proposing any rule, state whether it is enforced by CI, by a script,
+  or by nothing but goodwill — and prefer converting it rather than restating it louder. *More
+  instruction is not the lever; the asymmetry between layer 2 and layer 4 is.*
+  **Enforced by:** nothing. This is the rule that says so out loud.
+
+- **#28 — Founder approval authorizes work; it does not verify it.** An approved plan can still be
+  technically wrong, and shipping it is my failure, not the founder's. *(2026-08-06: the founder
+  approved three M0a ranking fixes. Fix #1 — "make `scripts/` reachability roots" — was wrong; it
+  would have erased a deliberate, documented distinction in `findOrphanSubsystems` and silently
+  hidden `src/outreach` and `src/workflows`, the two genuinely dead subsystems. Root-cause
+  investigation caught it after approval.)* If I find an approved plan is wrong, I say so before
+  building it, then build the corrected version.
+  **Enforced by:** nothing. Judgement only.
+
+- **#29 — Review is mine and is not delegable.** A reviewer subagent is an input, never a verdict;
+  every causal claim it makes gets verified against evidence before I repeat it to the founder.
+  *(2026-08-06: the review subagent asserted AG-005 changed the count AG-004 was told to pin. False
+  — AG-005 changed zero workflow references; the 4→7 rise came from my own commit `42a2cbb`. It also
+  produced a plausible-but-wrong hypothesis for the AG-004 revert.)*
+  **Enforced by:** nothing. Judgement only.
+
+- **#30 — Name the displacement before accepting a redirect.** When a request would displace
+  committed in-flight work, state what it displaces and what the delay costs, then do it. The
+  founder is entitled to redirect; he is not entitled to do it *invisibly*, because the frozen plan
+  lists "design loop never ships — 8 passes, 0 files" as a **realized, critical** risk. A process
+  document written instead of a shipped milestone is that risk recurring.
+  **Enforced by:** nothing. This is the rule the founder asked me to hold him to.
+
+- **#31 — Status relayed through a human is still unverified.** "It's done" from the founder is a
+  report of what an executor claimed, not an observation of the tree. Run `agy-guard`, commit, then
+  read. *(2026-08-06: reviewed AG-004 at 20:27 on a relayed "it's done"; the still-live conversation
+  reverted the tree at 20:36 and was still writing at 20:39.)*
+  **Enforced by:** `~/Projects/scripts/ai-tools/agy-guard` (exit 1 while a conversation is live).
+
+- **#32 — The brief is the defect surface.** Six of ten defects were mine, in the brief, not
+  Antigravity's, in the code. Pre-dispatch brief review is worth more than any additional
+  instruction to the executor. Checklist: `docs/antigravity/README.md` § "Before you dispatch".
+  **Enforced by:** nothing yet. Candidate for a fitness rule once the failure modes are stable.
+
+- **#33 — Never dismiss or reject claims from other AIs out of hand; deep-research and accept valid feedback.**
+  Claims, critique, or findings from other AIs (subagents, peer models, automated reviewers, or external AI agents) must never be rejected or dismissed out of hand. Perform thorough, deep research and empirical verification against codebase evidence before reaching any conclusion. If the claim or feedback proves valid upon investigation, accept and integrate it fully without defensive bias.
+  **Enforced by:** Judgement & empirical verification loop.
+
 ## File map
 ```
 src/kernel/            — contracts, signals, state, planner, supervisor (pure),
-                         worker, synthesizer, graph, tool-adapter, index
+                         worker, synthesizer, graph, verify, index
 src/gateway/kernel-boot.ts — composition root (models+tools+checkpointer → kernel)
 src/gateway/kernel-run.ts  — run loop: lock → gates → invoke → HITL card/reply
 src/gateway/telegram.ts    — grammy transport; commands.ts — 7 essential commands
@@ -158,11 +247,24 @@ Each item = numbered, one line, with the exact command/value where applicable
 (per the `feedback-brief-baby-steps` rule). If nothing is outstanding, say so
 explicitly ("Nothing outstanding from your end").
 
+**Automated Brain Sync:** If you created, modified, or deleted any file in the `docs/` directory during your session (including plans, architecture, or rules), you MUST autonomously run `pnpm brain:sync` in the terminal before concluding your task. Do not wait for the founder to do this.
+
 ## Git
-- Never commit to `main`. Flow: work branch → `beta` → `main`
-  (CI-enforced by `.github/workflows/branch-policy.yml`). Only humans merge to
-  `main`. The former `stable` tier was retired — see ADR-045; production is a
-  two-stage promotion, not three.
+- Never commit DIRECTLY to `main` — always through a PR. Flow: work branch →
+  `beta` → `main`, still the normal path because `beta` is where CD proves a
+  change before prod sees it.
+- **Claude may merge to `main` itself** (founder directive, 2026-08-01). The
+  previous "founder merges only" rule and the CI ladder that enforced it
+  (`.github/workflows/branch-policy.yml`, now deleted) were removed: work sat
+  finished-but-undeployed for days waiting on a human click, and prod ran stale
+  code while the fix for it was already green on `beta`. Waiting was the larger
+  risk, not the merge.
+- What still gates a merge: branch protection on `main` requires both CI checks
+  ("Type check + lint + wiring", "Unit + regression tests") to pass. Merge on
+  red is never acceptable.
+- After merging to `main`, WATCH THE DEPLOY and verify prod actually moved.
+  A merge is not a deploy, and CD silently failing was how prod stayed on
+  `a966e9a` for a full day.
 - Evidence in every PR: fresh `pnpm gate` output + live-path proof (or an
   explicit NOT VERIFIED with the reason).
 
@@ -171,3 +273,24 @@ The v2 system (LLM supervisor + regex pre-router + regex execution guards) was
 audited and replaced 2026-07-08 — see `ZERO-BASE-AUDIT.md` (4 live failure
 traces), `JARVIS-ARCHITECTURE.md` (the contract-first design), and
 `docs/PROOF.md` (the living scoreboard).
+
+## Strategic Mandate (Maximum Output)
+
+We are building a system designed to decisively outcompete the market. You must ruthlessly prioritize execution speed, shipping revenue-generating features, and leveraging competitor intelligence over endless internal theoretical refactoring. If a task does not tangibly move the needle or provide a market advantage, flag it immediately and pivot to building.
+
+## Content Generation (No AI Slop)
+
+**Mandatory Skill Usage:** Whenever you are generating, preparing, or drafting any content intended for public platforms (e.g., comments, posts, articles, social media, emails), you MUST use and strictly follow the `no-ai-slop` skill located at `/Users/pushkarverma/Projects/githubtools/no-ai-slop/SKILL.md`. 
+**Why:** Nothing we publish on our platforms should look like AI-generated content. You must ensure all outputs are highly authentic, human-like, and completely free of typical AI "slop" (e.g., overly formal tone, unnecessary emojis, generic corporate speak, predictable structures).
+
+## Implementation Plans & Memory
+
+All implementation plans generated by Claude Code, Antigravity, or any agent MUST be saved with organized, descriptive filenames in the `docs/plans/` directory (e.g., `docs/plans/YYYY-MM-DD-feature-name.md`).
+**Why:** Storing all plans centrally with semantic names drastically improves RAG retrieval, allowing future agents to intelligently learn from past architectural decisions and execution contexts. Do not store plans in scattered scratch directories or with generic names like `plan.md`.
+
+## Cross-Agent Awareness (The "What is everyone doing?" rule)
+
+Before starting any complex task, you MUST research what other agents have recently worked on or are currently working on. You do this by:
+1. Querying `turicks-brain` for recent session summaries.
+2. Listing and reading the most recent implementation plans in `docs/plans/`.
+**Why:** You are part of a swarm. Knowing the recent architectural changes and in-flight plans of your peer agents prevents you from duplicating work, reverting deliberate changes, or breaking dependent systems.

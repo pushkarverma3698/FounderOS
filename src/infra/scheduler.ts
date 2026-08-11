@@ -33,6 +33,8 @@ import {
 import { nextRecurrence } from "../core/time.js";
 import { providerLinkedInPost } from "./providers/index.js";
 import { sendToChat } from "./telegram-send.js";
+import { runSelfAuditSweep } from "../evolution/audit-sweep.js";
+import { runRagOptimizationSweep } from "./rag-optimization-sweep.js";
 import { childLogger } from "./logger.js";
 import { TENANT, env } from "../core/config.js";
 import type { ScheduledPost, ScheduledTask } from "../db/schema.js";
@@ -44,6 +46,16 @@ import {
 } from "./daily-budget.js";
 import { getBudgetAlertsState, recordBudgetAlertSent } from "./daily-budget-alerts.js";
 import { sweepStaleCheckpoints } from "./checkpointer.js";
+import {
+  JOB_SWEEP_CRON,
+  runJobIngestSweep,
+  FREE_SWEEP_CRON,
+  runFreeSweep,
+} from "../tools/jobhunt/sweep-runner.js";
+
+// Re-exported so existing import sites (and tests) that read these off
+// scheduler.ts keep resolving after the move to sweep-runner.ts (2026-08-06).
+export { JOB_SWEEP_CRON, runJobIngestSweep };
 
 const log = childLogger({ module: "scheduler" });
 
@@ -246,6 +258,8 @@ export async function recoverStrandedReminders(): Promise<void> {
   }
 }
 
+
+
 export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }): void {
   cron.schedule("0 9 * * *", () => {
     sendStaleApprovalReminder().catch((err) =>
@@ -265,6 +279,16 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
   cron.schedule("0 2 * * *", () => {
     runBrainSync().catch((err) => log.error({ err: (err as Error).message }, "Auto brain sync cron error"));
   });
+  cron.schedule(JOB_SWEEP_CRON, () => {
+    runJobIngestSweep().catch((err) =>
+      log.error({ err: (err as Error).message }, "Job ingest sweep cron error"),
+    );
+  });
+  cron.schedule(FREE_SWEEP_CRON, () => {
+    runFreeSweep().catch((err) =>
+      log.error({ err: (err as Error).message }, "Free board sweep cron error"),
+    );
+  });
   cron.schedule("* * * * *", () => {
     runScheduledPostSweep().catch((err) =>
       log.error({ err: (err as Error).message }, "Scheduled post sweep cron error"),
@@ -283,8 +307,18 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
       );
     });
   }
+  cron.schedule("0 8 */3 * *", () => {
+    runSelfAuditSweep().catch((err) =>
+      log.error({ err: (err as Error).message }, "3-day self-audit sweep cron error"),
+    );
+  });
+  cron.schedule("0 3 * * 0", () => {
+    runRagOptimizationSweep().catch((err) =>
+      log.error({ err: (err as Error).message }, "Weekly RAG optimization sweep cron error"),
+    );
+  });
   log.info(
-    "Scheduler started — stale-approval check (daily 9am), budget alerts (hourly), brain sync (daily 2am), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
+    "Scheduler started — stale-approval check (daily 9am), self-audit sweep (every 3 days 8am), RAG optimization (weekly Sun 3am), budget alerts (hourly), brain sync (daily 2am), job ingest (daily 1:30am UTC), free board sweep (every 30 minutes), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
       (taskExecutor ? ", scheduled-task sweep (every minute)" : ""),
   );
 }

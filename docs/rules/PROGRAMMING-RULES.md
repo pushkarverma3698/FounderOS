@@ -34,8 +34,8 @@ A tool is only "integrated" when **all 6 layers** are wired. Miss one → silent
 | 2 | **Unit test** | `tests/unit/tools/{name}.test.ts` | Mock Composio/HTTP. Test happy + soft-fail + thrown (TESTING-RULES Rule 6). |
 | 3 | **Agent wrapper** | `src/agents/agent-tools/{dept}.ts` | LangChain `tool()` + `hitlGate()` if it writes. Export it. |
 | 4 | **Barrel** | `src/agents/agent-tools.ts` | Add the new tool to the `export { ... }` line for its dept module. |
-| 5 | **Department** | `src/agents/office.ts` | Add the tool to the right department's `tools: [...]` array. |
-| 6 | **Prompt** | `src/agents/system-prompts.ts` | Tell the dept agent it has the tool (dept prompt) AND add the trigger to the SUPERVISOR routing table. |
+| 5 | **Department** | `src/agents/capabilities.ts` | Add the tool to the right entry of `DEPARTMENT_TOOLS`. |
+| 6 | **Prompt** | `src/agents/prompts/{dept}.ts` | Tell the dept agent it has the tool + when to use it. Routing is usually a no-op: `buildPlannerPrompt` (`src/kernel/planner.ts`) reads each worker's tool names from the catalog. |
 
 **Optional 7th layer:** `src/mcp/server.ts` — only if the tool is **read-only** and worth exposing to Claude Code / Cursor. Add to `FOUNDEROS_MCP_TOOLS` + the switch in `executeMcpTool`.
 
@@ -45,10 +45,9 @@ A tool is only "integrated" when **all 6 layers** are wired. Miss one → silent
 |----------------|----------|
 | Layer 2 (test) | The field-name bug class — wrong Composio params ship to production (calendar `start.dateTime` bug). |
 | Layer 3 (wrapper) | Tool exists but agents can't call it — it's not a LangChain tool. |
-| Layer 4 (barrel) | `office.ts` import fails: `'X' has no exported member`. tsc error (loud — good). |
+| Layer 4 (barrel) | `capabilities.ts` import fails: `'X' has no exported member`. tsc error (loud — good). |
 | Layer 5 (department) | Tool is built but no agent has it — dead code, never invoked. |
-| Layer 6 dept prompt | Agent has the tool but never uses it ("I can't do that") — the silent bug. |
-| Layer 6 routing | Supervisor never routes the trigger phrase to that dept — request goes elsewhere. |
+| Layer 6 dept prompt | Agent has the tool but never uses it ("I can't do that") — the silent bug. `pnpm verify:wiring` warns when a department carries a tool its prompt never mentions. |
 
 ### Order to work in
 
@@ -59,6 +58,20 @@ A tool is only "integrated" when **all 6 layers** are wired. Miss one → silent
 ---
 
 ## Wiring Map 2 — Add a Department
+
+> ### ⚠️ v2 — DO NOT FOLLOW. Kept for history until a v3 rewrite lands.
+>
+> Steps 4–6 name `src/agents/office.ts` and `createSupervisor`, and step 8 names
+> `src/eval/office-invoker.ts`. None of those files exist; `office.ts` is a CI
+> **tombstone** — re-creating it fails `pnpm verify:arch` outright.
+>
+> **v3 truth:** a department is an entry in `DEPARTMENT_TOOLS`
+> (`src/agents/capabilities.ts`) plus a prompt in `src/agents/prompts/`. There is no
+> supervisor and no routing table — `buildPlannerPrompt` (`src/kernel/planner.ts`)
+> reads each worker's tool names from the catalog.
+>
+> This map is excluded from `pnpm brain:sync` so retrieval cannot serve it as
+> current procedure. Writing the v3 replacement is its own task.
 
 The widest blast radius: **10 files**. This is the one that bites hardest.
 
@@ -93,6 +106,19 @@ The widest blast radius: **10 files**. This is the one that bites hardest.
 ---
 
 ## Wiring Map 3 — Add a Workflow (SOP)
+
+> ### ⚠️ ORPHANED — DO NOT FOLLOW. This procedure produces dead code.
+>
+> `src/workflows/` still exists on `main`, but nothing imports it — verified zero
+> importers outside its own tests, which is why Phase 6 deletes the directory. The
+> last line below ("routed through the existing office") describes the v2 office,
+> replaced 2026-07-08.
+>
+> **v3 truth:** reusable scripts live in the `saved_workflows` table and are listed
+> by the `list_workflows` tool — not in a source registry.
+>
+> This map is excluded from `pnpm brain:sync` so retrieval cannot serve it as
+> current procedure.
 
 The simplest — **3 touch points**.
 

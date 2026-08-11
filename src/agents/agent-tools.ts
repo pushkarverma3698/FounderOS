@@ -8,14 +8,13 @@
  *
  * Where each tool lives:
  *   agent-tools/hitl.ts        → hitlGate, ApprovalRequest, idemKey (shared core)
- *   agent-tools/research.ts    → searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool
- *   agent-tools/rag.ts         → searchResearchCache (web findings store)
+ *   agent-tools/research.ts    → searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript
+ *   agent-tools/rag.ts         → searchResearchCache, searchPersonalRag, searchTuricksBrain
  *   agent-tools/comms.ts       → sendEmail, linkedinPost, createCalendarEvent, readEmails
  *   agent-tools/engineering.ts → githubRead, githubWrite, projectWorkflow, claudeCode
  *   agent-tools/personal.ts    → readFile, listDir, sendFile, writeFile, runShell, browser
  *   agent-tools/jobhunt.ts     → readCv, searchJobs
  *   agent-tools/memory.ts      → recordEvent
- *   agent-tools/rag.ts         → searchPersonalRag, searchTuricksBrain
  *
  * HITL contract (read by the Telegram gateway):
  *   interrupt({ kind: "approval", action, title, summary, preview, args })
@@ -24,7 +23,7 @@
  */
 
 export { hitlGate, idemKey, type ApprovalRequest } from "./agent-tools/hitl.js";
-export { searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool } from "./agent-tools/research.js";
+export { searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics } from "./agent-tools/research.js";
 export { scanAiVisibility, getGapScans } from "./agent-tools/gap-scan.js";
 export {
   createSendEmailTool,
@@ -43,8 +42,10 @@ export {
 export { githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite } from "./agent-tools/engineering.js";
 export { vpsRun } from "./agent-tools/vps-run.js";
 export { readFile, listDir, sendFile, writeFile, runShell, browser } from "./agent-tools/personal.js";
-export { readCv, searchJobs, screenJob, reviewScreened } from "./agent-tools/jobhunt.js";
+export { readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobBrief } from "./agent-tools/jobhunt.js";
 export { recordEvent } from "./agent-tools/memory.js";
 export { searchPersonalRag, searchTuricksBrain, searchResearchCache } from "./agent-tools/rag.js";
 export { publishSignal, prepareSignal, DEFAULT_TARGET_DEPT } from "./agent-tools/signals.js";
-export { uploadAsset, getDownloadUrl, listRunAssets, downloadAsset } from "./agent-tools/storage.js";
+
+export { synthesizeSkill } from "../tools/skill-synthesizer.js";
+export { jobState, opsState, writeArtifact, deliverArtifact } from "./agent-tools/state.js";

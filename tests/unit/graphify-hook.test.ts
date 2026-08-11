@@ -4,7 +4,7 @@ import {
   loadGraph,
   findRelatedNodes,
   findConnections,
-} from "../../.claude/graphify-hook";
+} from "../../.claude/graphify-hook.js";
 
 describe("Graphify Auto-Hook", () => {
   let graph: ReturnType<typeof loadGraph>;
@@ -66,12 +66,12 @@ describe("Graphify Auto-Hook", () => {
     it("should provide context for find operations", () => {
       const result = handlePreToolUse({
         tool: "find",
-        args: { query: "github_write" },
+        args: { query: "claude_code" },
       });
 
       expect(result).not.toBeNull();
       expect(result?.context).toBeDefined();
-      expect(result?.context).toContain("github_write");
+      expect(result?.context).toContain("claude_code");
     });
 
     it("should handle missing arguments gracefully", () => {
@@ -93,17 +93,24 @@ describe("Graphify Auto-Hook", () => {
     });
   });
 
+describe("Graphify Utility Functions", () => {
+  let graph: ReturnType<typeof loadGraph>;
+
+  beforeAll(() => {
+    graph = loadGraph();
+  });
+
   describe("findRelatedNodes", () => {
-    it("should find nodes by name", () => {
+    it("should find nodes by exact name", () => {
       const results = findRelatedNodes("search_web");
       expect(results.length).toBeGreaterThan(0);
-      expect(results[0].name).toBe("search_web");
+      expect(results[0]?.name).toBe("search_web");
     });
 
     it("should find nodes by type", () => {
       const results = findRelatedNodes("tool", "tool");
       expect(results.length).toBeGreaterThan(0);
-      expect(results.every((r) => r.type === "tool")).toBe(true);
+      expect(results.every((r: any) => r.type === "tool")).toBe(true);
     });
 
     it("should find nodes by description", () => {
@@ -120,7 +127,7 @@ describe("Graphify Auto-Hook", () => {
 
   describe("findConnections", () => {
     it("should find connections from a node", () => {
-      const deptResearch = graph.nodes.find((n) => n.id === "dept_research");
+      const deptResearch = graph.nodes.find((n: any) => n.id === "dept_research");
       if (!deptResearch) throw new Error("dept_research not found");
 
       const connections = findConnections(deptResearch.id);
@@ -128,7 +135,7 @@ describe("Graphify Auto-Hook", () => {
     });
 
     it("should find connections to a node", () => {
-      const toolSearch = graph.nodes.find((n) => n.id === "tool_search_web");
+      const toolSearch = graph.nodes.find((n: any) => n.id === "tool_search_web");
       if (!toolSearch) throw new Error("tool_search_web not found");
 
       const connections = findConnections(toolSearch.id);
@@ -142,10 +149,10 @@ describe("Graphify Auto-Hook", () => {
     it("should show HITL gate info for sensitive operations", () => {
       const result = handlePreToolUse({
         tool: "grep",
-        args: { pattern: "github_write" },
+        args: { pattern: "claude_code" },
       });
 
-      expect(result?.context).toContain("github_write");
+      expect(result?.context).toContain("claude_code");
       expect(result?.context).toContain("HITL");
     });
 
@@ -178,4 +185,5 @@ describe("Graphify Auto-Hook", () => {
 
     expect(result).toBeNull();
   });
+});
 });

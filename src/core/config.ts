@@ -9,6 +9,7 @@
  */
 
 import { z } from "zod";
+import { join } from "node:path";
 
 // ── Environment Schema ────────────────────────────────────────────────────────
 
@@ -36,6 +37,19 @@ export const envSchema = z.object({
   /** Founder-facing timezone (IANA). The server stays UTC; this is the zone the
    *  planner resolves bare times in and reminders/tasks display in. See core/time.ts. */
   APP_TIMEZONE: z.string().default("Asia/Kolkata"),
+
+  /**
+   * The job Sheet the founder actually works from (ADR: apply loop, 2026-08-06).
+   *
+   * BOTH OPTIONAL, and the export is skipped unless both are set. The sweep
+   * that writes the Sheet also screens the postings and records them, and a
+   * missing spreadsheet id must not stop that — losing the export costs a view
+   * of the data, while failing the sweep costs the data. The skip is logged and
+   * announced, never silent: a lane that quietly stopped publishing looks
+   * exactly like a market with no jobs in it.
+   */
+  JOBHUNT_SHEET_ID: z.string().transform(v => v || undefined).optional(),
+  GOOGLE_SHEETS_CREDENTIALS_PATH: z.string().transform(v => v || undefined).optional(),
 
   // Tool keys — optional; tools fail loudly when key is missing
   COMPOSIO_API_KEY: z.string().transform(v => v || undefined).optional(),
@@ -99,6 +113,14 @@ export const envSchema = z.object({
   MCP_BRIDGE_ENABLED: z.enum(["true", "false"]).default("false"),
   /** Path to the bridge manifest (servers + per-server write allowlist). */
   MCP_BRIDGE_MANIFEST: z.string().default("mcp-bridge.json"),
+
+  // ── Autonomous skill synthesis (2026-08-08 audit, F-07) ─────────────────────
+  /** Allow `synthesize_skill` to write and compile TypeScript into the running
+   *  application's source tree. Default OFF: on prod that tool turned an LLM's
+   *  output into a live executable capability with no approval gate and no
+   *  sandbox. Off means the tool is never even offered to a worker, so the model
+   *  cannot pick it and burn a turn discovering it is disabled. */
+  SKILL_SYNTHESIS_ENABLED: z.enum(["true", "false"]).default("false"),
 
   // Global halt (kill switch) — optional flag-file path override.
   // Default: $HOME/.founderos/HALT (resolved in src/infra/halt.ts).
@@ -214,7 +236,7 @@ export const RUN_BUDGET_USD = env.RUN_BUDGET_USD;
 export const RUN_BUDGET_TOKENS = env.RUN_BUDGET_TOKENS;
 
 /** Parse a positive-integer env var, falling back to a default for unset/garbage. */
-function intEnv(key: string, fallback: number): number {
+export function intEnv(key: string, fallback: number): number {
   const n = Number(process.env[key]);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
@@ -271,6 +293,13 @@ export const MCP_BRIDGE_ENABLED = env.MCP_BRIDGE_ENABLED === "true";
 export const MCP_BRIDGE_MANIFEST = env.MCP_BRIDGE_MANIFEST;
 
 /**
+ * Whether `synthesize_skill` may author executable code into `src/tools/custom`.
+ * OFF by default. Even when ON the tool is HITL-gated, so enabling the flag
+ * grants the capability, never an unattended write.
+ */
+export const SKILL_SYNTHESIS_ENABLED = env.SKILL_SYNTHESIS_ENABLED === "true";
+
+/**
  * Local rerank stage after hybrid RAG fusion (spec §1.1 F5). Default OFF — it
  * adds an Ollama (qwen2.5:7b) call per query and must be live-verified on the VPS
  * before production. Fail-open by design: when disabled or when the model is
@@ -315,3 +344,12 @@ export const DAILY_LINKEDIN_LIMIT = intEnv("DAILY_LINKEDIN_LIMIT", 3);
  * unrelated older turns fast. Durable context lives in memory tools, not history.
  */
 export const HISTORY_KEEP_TURNS = intEnv("HISTORY_KEEP_TURNS", 4);
+
+/**
+ * Root directory for all generated deliverables and artifacts.
+ * Configured inside ~/Projects/founderos/artifacts so security path guards admit it.
+ */
+export const ARTIFACT_ROOT =
+  process.env["ARTIFACT_ROOT"]?.trim() ||
+  join(process.env["HOME"] ?? "/Users/pushkarverma", "Projects/founderos/artifacts");
+

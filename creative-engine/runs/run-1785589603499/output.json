@@ -1,0 +1,22 @@
+{
+  "status": "completed",
+  "intent": "Create a world-class graphic for this brief: Poster for a wellness event for www.thehealthplace.in in Bangalore to sell online tickets",
+  "moodboard": "Modernist organic health aesthetics, deep emerald and warm ivory, elegant high-contrast serif typography, tactile paper grain texture.",
+  "plate": {
+    "id": "plate-b7b7ff9e",
+    "path": "runs/plates/b7b7ff9ecec96f0d578538223db90493152de02ee1ba6c0e739584b59418b66e.png",
+    "model": "fal-ai/nano-banana",
+    "reservedScore": 0.19645833333333335
+  },
+  "typography": {
+    "headline": "THE HEALTH PLACE",
+    "subheadline": "BANGALORE WELLNESS SUMMIT",
+    "cta": "TICKETS AVAILABLE ONLINE",
+    "url": "www.thehealthplace.in"
+  },
+  "polish": {
+    "lightWrap": true,
+    "tactileDisplacement": "risograph_paper_grain",
+    "particles": "subtle_dust_motes"
+  }
+}

@@ -96,6 +96,10 @@ export async function handleCommands(ctx: Context): Promise<void> {
       "/reset — clear this thread's mission state",
       "/halt · /resume — emergency stop / restart",
       "",
+      "<b>From the daily job brief</b>",
+      "/draft &lt;n&gt; — write the application for row n of DO TODAY or A STRETCH WORTH APPLYING TO",
+      "/ask &lt;n&gt; — write the question that unblocks row n of ONE QUESTION AWAY",
+      "",
       "Everything else is natural language — the planner routes it.",
     ].join("\n"),
     { parse_mode: "HTML" },
@@ -226,4 +230,20 @@ export async function handleConnect(ctx: Context): Promise<void> {
     log.error({ err: (err as Error).message }, "/connect failed");
     await ctx.reply(`❌ /connect failed: ${safeHtml((err as Error).message)}`, { parse_mode: "HTML" });
   }
+}
+
+/**
+ * What to say when the founder types a slash command that does not exist.
+ *
+ * Silence was the old behaviour and it is the one unacceptable answer: the brief
+ * hands out "/draft 1", and before those commands existed that tap produced no
+ * reply, no error and no log the founder could see.
+ */
+export function unknownCommandReply(text: string): string {
+  const typed = text.trim().split(/\s+/)[0] ?? "/";
+  return (
+    `${typed} isn't a command I know.\n\n` +
+    "Try /commands for the list, or just say what you want in plain English — " +
+    "the planner routes it."
+  );
 }

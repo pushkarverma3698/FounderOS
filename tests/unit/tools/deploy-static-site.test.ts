@@ -2,7 +2,7 @@
  * Unit tests for deploy_static_site tool — path guards, URL building, copy logic.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -18,6 +18,10 @@ import {
   validateStaticArtifact,
 } from "../../../src/tools/deploy-static-site.js";
 import { projectRoot } from "../../../src/tools/project-workflow.js";
+
+beforeAll(() => {
+  mkdirSync(projectRoot(), { recursive: true });
+});
 
 describe("deploy slug validation", () => {
   it("accepts valid slugs", () => {

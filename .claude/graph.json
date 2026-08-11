@@ -148,6 +148,83 @@
       "file": "src/tools/*.ts"
     },
     {
+      "id": "tool_schedule_task",
+      "type": "tool",
+      "name": "schedule_task",
+      "description": "schedule_task tool [HITL]",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_list_scheduled",
+      "type": "tool",
+      "name": "list_scheduled",
+      "description": "list_scheduled tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_edit_scheduled",
+      "type": "tool",
+      "name": "edit_scheduled",
+      "description": "edit_scheduled tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_set_reminder",
+      "type": "tool",
+      "name": "set_reminder",
+      "description": "set_reminder tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_list_reminders",
+      "type": "tool",
+      "name": "list_reminders",
+      "description": "list_reminders tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_edit_reminder",
+      "type": "tool",
+      "name": "edit_reminder",
+      "description": "edit_reminder tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_list_workflows",
+      "type": "tool",
+      "name": "list_workflows",
+      "description": "list_workflows tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_synthesize_skill",
+      "type": "tool",
+      "name": "synthesize_skill",
+      "description": "synthesize_skill tool [HITL]",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_ops_state",
+      "type": "tool",
+      "name": "ops_state",
+      "description": "ops_state tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_write_artifact",
+      "type": "tool",
+      "name": "write_artifact",
+      "description": "write_artifact tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_deliver_artifact",
+      "type": "tool",
+      "name": "deliver_artifact",
+      "description": "deliver_artifact tool [HITL]",
+      "file": "src/tools/*.ts"
+    },
+    {
       "id": "tool_search_web",
       "type": "tool",
       "name": "search_web",
@@ -173,6 +250,20 @@
       "type": "tool",
       "name": "crawl_site",
       "description": "crawl_site tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_youtube_transcript",
+      "type": "tool",
+      "name": "youtube_transcript",
+      "description": "youtube_transcript tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_v2ex_topics",
+      "type": "tool",
+      "name": "v2ex_topics",
+      "description": "v2ex_topics tool",
       "file": "src/tools/*.ts"
     },
     {
@@ -204,6 +295,20 @@
       "file": "src/tools/*.ts"
     },
     {
+      "id": "tool_scan_ai_visibility",
+      "type": "tool",
+      "name": "scan_ai_visibility",
+      "description": "scan_ai_visibility tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_get_gap_scans",
+      "type": "tool",
+      "name": "get_gap_scans",
+      "description": "get_gap_scans tool",
+      "file": "src/tools/*.ts"
+    },
+    {
       "id": "tool_send_email",
       "type": "tool",
       "name": "send_email",
@@ -225,17 +330,17 @@
       "file": "src/tools/*.ts"
     },
     {
-      "id": "tool_github_read",
+      "id": "tool_schedule_social_post",
       "type": "tool",
-      "name": "github_read",
-      "description": "Read GitHub repos, issues, and PRs",
+      "name": "schedule_social_post",
+      "description": "schedule_social_post tool [HITL]",
       "file": "src/tools/*.ts"
     },
     {
-      "id": "tool_github_write",
+      "id": "tool_list_scheduled_posts",
       "type": "tool",
-      "name": "github_write",
-      "description": "Write to GitHub (PR, commit, push) — HITL-gated [HITL]",
+      "name": "list_scheduled_posts",
+      "description": "list_scheduled_posts tool",
       "file": "src/tools/*.ts"
     },
     {
@@ -256,7 +361,7 @@
       "id": "tool_apply_cinematic_preset",
       "type": "tool",
       "name": "apply_cinematic_preset",
-      "description": "apply_cinematic_preset tool",
+      "description": "Copy a cinematic-web preset scaffold (neon/glass/terminal/minimal) into ~/Projects before claude_code customises it",
       "file": "src/tools/*.ts"
     },
     {
@@ -267,10 +372,108 @@
       "file": "src/tools/*.ts"
     },
     {
+      "id": "tool_vps_run",
+      "type": "tool",
+      "name": "vps_run",
+      "description": "vps_run tool [HITL]",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_github_read",
+      "type": "tool",
+      "name": "github_read",
+      "description": "Read GitHub repos, issues, and PRs",
+      "file": "src/tools/*.ts"
+    },
+    {
       "id": "tool_linkedin_post",
       "type": "tool",
       "name": "linkedin_post",
       "description": "Post to LinkedIn via Composio — brand-validator + Claude judge then HITL-gated [HITL]",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_linkedin_get_my_posts",
+      "type": "tool",
+      "name": "linkedin_get_my_posts",
+      "description": "linkedin_get_my_posts tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_linkedin_analytics",
+      "type": "tool",
+      "name": "linkedin_analytics",
+      "description": "linkedin_analytics tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_linkedin_read_comments",
+      "type": "tool",
+      "name": "linkedin_read_comments",
+      "description": "linkedin_read_comments tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_draft_linkedin_reply",
+      "type": "tool",
+      "name": "draft_linkedin_reply",
+      "description": "draft_linkedin_reply tool [HITL]",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_draft_connection_note",
+      "type": "tool",
+      "name": "draft_connection_note",
+      "description": "draft_connection_note tool [HITL]",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_generate_image",
+      "type": "tool",
+      "name": "generate_image",
+      "description": "generate_image tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_list_brand_assets",
+      "type": "tool",
+      "name": "list_brand_assets",
+      "description": "list_brand_assets tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_list_video_brands",
+      "type": "tool",
+      "name": "list_video_brands",
+      "description": "list_video_brands tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_compile_video_brief",
+      "type": "tool",
+      "name": "compile_video_brief",
+      "description": "compile_video_brief tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_compile_shot_list",
+      "type": "tool",
+      "name": "compile_shot_list",
+      "description": "compile_shot_list tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_plan_video_production",
+      "type": "tool",
+      "name": "plan_video_production",
+      "description": "plan_video_production tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_video_production_status",
+      "type": "tool",
+      "name": "video_production_status",
+      "description": "video_production_status tool",
       "file": "src/tools/*.ts"
     },
     {
@@ -285,20 +488,6 @@
       "type": "tool",
       "name": "list_dir",
       "description": "List a single directory level on the founder's laptop (path-guarded)",
-      "file": "src/tools/*.ts"
-    },
-    {
-      "id": "tool_send_file",
-      "type": "tool",
-      "name": "send_file",
-      "description": "Attach a laptop file into Telegram — HITL-gated [HITL]",
-      "file": "src/tools/*.ts"
-    },
-    {
-      "id": "tool_write_file",
-      "type": "tool",
-      "name": "write_file",
-      "description": "Write files to the laptop — HITL-gated [HITL]",
       "file": "src/tools/*.ts"
     },
     {
@@ -323,6 +512,20 @@
       "file": "src/tools/*.ts"
     },
     {
+      "id": "tool_send_file",
+      "type": "tool",
+      "name": "send_file",
+      "description": "Attach a laptop file into Telegram — HITL-gated [HITL]",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_write_file",
+      "type": "tool",
+      "name": "write_file",
+      "description": "Write files to the laptop — HITL-gated [HITL]",
+      "file": "src/tools/*.ts"
+    },
+    {
       "id": "tool_read_cv",
       "type": "tool",
       "name": "read_cv",
@@ -334,6 +537,48 @@
       "type": "tool",
       "name": "search_jobs",
       "description": "Search job listings via web search (Gemini grounding / DuckDuckGo)",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_ingest_jobs",
+      "type": "tool",
+      "name": "ingest_jobs",
+      "description": "ingest_jobs tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_screen_job",
+      "type": "tool",
+      "name": "screen_job",
+      "description": "screen_job tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_review_screened",
+      "type": "tool",
+      "name": "review_screened",
+      "description": "review_screened tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_cv_gaps",
+      "type": "tool",
+      "name": "cv_gaps",
+      "description": "cv_gaps tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_job_state",
+      "type": "tool",
+      "name": "job_state",
+      "description": "job_state tool",
+      "file": "src/tools/*.ts"
+    },
+    {
+      "id": "tool_job_brief",
+      "type": "tool",
+      "name": "job_brief",
+      "description": "job_brief tool",
       "file": "src/tools/*.ts"
     },
     {
@@ -400,11 +645,11 @@
       "file": "src/infra/judge.ts"
     },
     {
-      "id": "interface_office_state",
+      "id": "interface_kernel_state",
       "type": "interface",
-      "name": "OfficeState",
-      "description": "LangGraph annotation schema for agent state",
-      "file": "src/agents/state.ts"
+      "name": "KernelState",
+      "description": "LangGraph annotation schema for kernel graph state",
+      "file": "src/kernel/state.ts"
     },
     {
       "id": "interface_unified_tool",
@@ -481,6 +726,61 @@
       "type": "belongs_to"
     },
     {
+      "from": "tool_schedule_task",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_list_scheduled",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_edit_scheduled",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_set_reminder",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_list_reminders",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_edit_reminder",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_list_workflows",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_synthesize_skill",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_ops_state",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_write_artifact",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_deliver_artifact",
+      "to": "dept_admin",
+      "type": "belongs_to"
+    },
+    {
       "from": "tool_search_web",
       "to": "dept_research",
       "type": "belongs_to"
@@ -497,6 +797,16 @@
     },
     {
       "from": "tool_crawl_site",
+      "to": "dept_research",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_youtube_transcript",
+      "to": "dept_research",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_v2ex_topics",
       "to": "dept_research",
       "type": "belongs_to"
     },
@@ -521,6 +831,16 @@
       "type": "belongs_to"
     },
     {
+      "from": "tool_scan_ai_visibility",
+      "to": "dept_research",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_get_gap_scans",
+      "to": "dept_research",
+      "type": "belongs_to"
+    },
+    {
       "from": "tool_send_email",
       "to": "dept_comms",
       "type": "belongs_to"
@@ -536,13 +856,13 @@
       "type": "belongs_to"
     },
     {
-      "from": "tool_github_read",
-      "to": "dept_engineering",
+      "from": "tool_schedule_social_post",
+      "to": "dept_comms",
       "type": "belongs_to"
     },
     {
-      "from": "tool_github_write",
-      "to": "dept_engineering",
+      "from": "tool_list_scheduled_posts",
+      "to": "dept_comms",
       "type": "belongs_to"
     },
     {
@@ -566,13 +886,18 @@
       "type": "belongs_to"
     },
     {
-      "from": "tool_publish_signal",
+      "from": "tool_vps_run",
       "to": "dept_engineering",
       "type": "belongs_to"
     },
     {
-      "from": "tool_search_web",
-      "to": "dept_marketing",
+      "from": "tool_synthesize_skill",
+      "to": "dept_engineering",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_github_read",
+      "to": "dept_engineering",
       "type": "belongs_to"
     },
     {
@@ -581,12 +906,77 @@
       "type": "belongs_to"
     },
     {
-      "from": "tool_search_knowledge",
+      "from": "tool_linkedin_get_my_posts",
       "to": "dept_marketing",
       "type": "belongs_to"
     },
     {
-      "from": "tool_search_turicks_brain",
+      "from": "tool_linkedin_analytics",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_linkedin_read_comments",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_draft_linkedin_reply",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_draft_connection_note",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_generate_image",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_list_brand_assets",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_list_video_brands",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_compile_video_brief",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_compile_shot_list",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_plan_video_production",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_video_production_status",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_list_scheduled_posts",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_search_web",
+      "to": "dept_marketing",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_search_knowledge",
       "to": "dept_marketing",
       "type": "belongs_to"
     },
@@ -596,22 +986,17 @@
       "type": "belongs_to"
     },
     {
-      "from": "tool_send_email",
-      "to": "dept_sales",
-      "type": "belongs_to"
-    },
-    {
       "from": "tool_search_web",
       "to": "dept_sales",
       "type": "belongs_to"
     },
     {
-      "from": "tool_search_knowledge",
+      "from": "tool_send_email",
       "to": "dept_sales",
       "type": "belongs_to"
     },
     {
-      "from": "tool_search_turicks_brain",
+      "from": "tool_search_knowledge",
       "to": "dept_sales",
       "type": "belongs_to"
     },
@@ -622,16 +1007,6 @@
     },
     {
       "from": "tool_list_dir",
-      "to": "dept_personal",
-      "type": "belongs_to"
-    },
-    {
-      "from": "tool_send_file",
-      "to": "dept_personal",
-      "type": "belongs_to"
-    },
-    {
-      "from": "tool_write_file",
       "to": "dept_personal",
       "type": "belongs_to"
     },
@@ -651,7 +1026,12 @@
       "type": "belongs_to"
     },
     {
-      "from": "tool_search_turicks_brain",
+      "from": "tool_send_file",
+      "to": "dept_personal",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_write_file",
       "to": "dept_personal",
       "type": "belongs_to"
     },
@@ -666,12 +1046,47 @@
       "type": "belongs_to"
     },
     {
-      "from": "tool_send_email",
+      "from": "tool_ingest_jobs",
       "to": "dept_jobhunt",
       "type": "belongs_to"
     },
     {
-      "from": "tool_search_personal_rag",
+      "from": "tool_screen_job",
+      "to": "dept_jobhunt",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_review_screened",
+      "to": "dept_jobhunt",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_cv_gaps",
+      "to": "dept_jobhunt",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_job_state",
+      "to": "dept_jobhunt",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_write_artifact",
+      "to": "dept_jobhunt",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_deliver_artifact",
+      "to": "dept_jobhunt",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_job_brief",
+      "to": "dept_jobhunt",
+      "type": "belongs_to"
+    },
+    {
+      "from": "tool_send_email",
       "to": "dept_jobhunt",
       "type": "belongs_to"
     },
@@ -818,7 +1233,7 @@
   ],
   "metadata": {
     "projectName": "FounderOS",
-    "generatedAt": "2026-06-24T15:24:21.220Z",
+    "generatedAt": "2026-08-11T09:43:05.747Z",
     "departments": {
       "admin": [
         "admin_agent"
@@ -851,33 +1266,68 @@
       "search_memory": "Unified memory search across knowledge + episodic stores — supervisor only",
       "record_event": "Record a durable episodic-memory event — HITL-gated, supervisor only [HITL]",
       "list_pending_signals": "list_pending_signals tool",
+      "schedule_task": "schedule_task tool [HITL]",
+      "list_scheduled": "list_scheduled tool",
+      "edit_scheduled": "edit_scheduled tool",
+      "set_reminder": "set_reminder tool",
+      "list_reminders": "list_reminders tool",
+      "edit_reminder": "edit_reminder tool",
+      "list_workflows": "list_workflows tool",
+      "synthesize_skill": "synthesize_skill tool [HITL]",
+      "ops_state": "ops_state tool",
+      "write_artifact": "write_artifact tool",
+      "deliver_artifact": "deliver_artifact tool [HITL]",
       "search_web": "Search the web via Gemini grounding (DuckDuckGo fallback)",
       "scrape_url": "scrape_url tool",
       "deep_research": "deep_research tool",
       "crawl_site": "crawl_site tool",
+      "youtube_transcript": "youtube_transcript tool",
+      "v2ex_topics": "v2ex_topics tool",
       "search_research_cache": "search_research_cache tool",
       "search_knowledge": "Keyword search over turicks-brain knowledge_entries (no LLM cost)",
       "search_turicks_brain": "Semantic vector search over turicks_brain (business/strategy) via Ollama + pgvector",
       "publish_signal": "Publish a typed cross-department signal to dept_signals (Postgres, async sweep)",
+      "scan_ai_visibility": "scan_ai_visibility tool",
+      "get_gap_scans": "get_gap_scans tool",
       "send_email": "Send email via Composio Gmail (HITL-gated) [HITL]",
       "read_emails": "Read the founder's Gmail inbox (read-only, no approval)",
       "create_calendar_event": "Create a Google Calendar event via Composio (HITL-gated) [HITL]",
-      "github_read": "Read GitHub repos, issues, and PRs",
-      "github_write": "Write to GitHub (PR, commit, push) — HITL-gated [HITL]",
+      "schedule_social_post": "schedule_social_post tool [HITL]",
+      "list_scheduled_posts": "list_scheduled_posts tool",
       "project_workflow": "Run git/npm workflows in ~/Projects — HITL-gated [HITL]",
       "claude_code": "Full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — HITL-gated [HITL]",
-      "apply_cinematic_preset": "apply_cinematic_preset tool",
+      "apply_cinematic_preset": "Copy a cinematic-web preset scaffold (neon/glass/terminal/minimal) into ~/Projects before claude_code customises it",
       "deploy_static_site": "deploy_static_site tool [HITL]",
+      "vps_run": "vps_run tool [HITL]",
+      "github_read": "Read GitHub repos, issues, and PRs",
       "linkedin_post": "Post to LinkedIn via Composio — brand-validator + Claude judge then HITL-gated [HITL]",
+      "linkedin_get_my_posts": "linkedin_get_my_posts tool",
+      "linkedin_analytics": "linkedin_analytics tool",
+      "linkedin_read_comments": "linkedin_read_comments tool",
+      "draft_linkedin_reply": "draft_linkedin_reply tool [HITL]",
+      "draft_connection_note": "draft_connection_note tool [HITL]",
+      "generate_image": "generate_image tool",
+      "list_brand_assets": "list_brand_assets tool",
+      "list_video_brands": "list_video_brands tool",
+      "compile_video_brief": "compile_video_brief tool",
+      "compile_shot_list": "compile_shot_list tool",
+      "plan_video_production": "plan_video_production tool",
+      "video_production_status": "video_production_status tool",
       "read_file": "Read files from the founder's laptop (path-guarded, secrets blocked)",
       "list_dir": "List a single directory level on the founder's laptop (path-guarded)",
-      "send_file": "Attach a laptop file into Telegram — HITL-gated [HITL]",
-      "write_file": "Write files to the laptop — HITL-gated [HITL]",
       "run_shell": "Run shell commands on the laptop — HITL-gated [HITL]",
       "browser": "Safari automation on the founder's Mac — HITL-gated [HITL]",
       "search_personal_rag": "Semantic vector search over personal-rag (CV/career) via Ollama + pgvector",
+      "send_file": "Attach a laptop file into Telegram — HITL-gated [HITL]",
+      "write_file": "Write files to the laptop — HITL-gated [HITL]",
       "read_cv": "Read the founder's CV from personal-rag (read-only)",
-      "search_jobs": "Search job listings via web search (Gemini grounding / DuckDuckGo)"
+      "search_jobs": "Search job listings via web search (Gemini grounding / DuckDuckGo)",
+      "ingest_jobs": "ingest_jobs tool",
+      "screen_job": "screen_job tool",
+      "review_screened": "review_screened tool",
+      "cv_gaps": "cv_gaps tool",
+      "job_state": "job_state tool",
+      "job_brief": "job_brief tool"
     }
   }
 }

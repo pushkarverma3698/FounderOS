@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1080, height=1350, initial-scale=1.0">
+  <title>Poster Quiet</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      width: 1080px;
+      height: 1350px;
+      overflow: hidden;
+      font-family: system-ui, sans-serif;
+      background: #0d130e;
+      color: #ffffff;
+    }
+    .post {
+      position: relative;
+      width: 1080px;
+      height: 1350px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 60px;
+      background-color: #0d130e;
+      background-size: cover;
+      background-position: center;
+    }
+
+    /* Dual gradient scrims */
+    .scrim-top {
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 50%;
+      background: linear-gradient(180deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0) 100%);
+      pointer-events: none;
+      display: block;
+    }
+    .scrim-bottom {
+      position: absolute;
+      bottom: 0; left: 0; right: 0; height: 45%;
+      background: linear-gradient(0deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.5) 60%, rgba(0,0,0,0) 100%);
+      pointer-events: none;
+      display: block;
+    }
+
+    .content-top {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      opacity: 1;
+    }
+    .kicker {
+      font-family: monospace;
+      font-size: 20px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #a0aab0;
+    }
+    .headline {
+      font-size: 72px;
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -0.028em;
+      text-transform: uppercase;
+      color: #ffffff;
+    }
+    .subheadline {
+      font-size: 24px;
+      line-height: 1.4;
+      color: #a0aab0;
+      max-width: 80%;
+      margin-top: 8px;
+    }
+
+    .content-bottom {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      opacity: 1;
+    }
+    .meta-rail {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      font-family: monospace;
+      font-size: 22px;
+      border-top: 1px solid rgba(255,255,255,0.2);
+      padding-top: 20px;
+      color: #ffffff;
+    }
+    .meta-left {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .price-tag {
+      font-size: 38px;
+      font-weight: 700;
+      color: #ffffff;
+      text-align: right;
+    }
+    .cta-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: #ff5c47;
+      color: #ffffff;
+      padding: 22px 32px;
+      border-radius: 40px;
+      font-weight: 800;
+      font-size: 22px;
+      letter-spacing: 0.05em;
+    }
+    .cta-url {
+      font-family: monospace;
+      font-size: 18px;
+      font-weight: 500;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div class="post">
+    <div class="scrim-top"></div>
+    <div class="scrim-bottom"></div>
+
+    <div class="content-top">
+      <div class="kicker" data-slot="kicker">THE HEALTH PLACE — SEMINAR</div>
+      <div class="headline" data-slot="headline">WHO IS REALLY IN CONTROL OF YOUR HEALTH?</div>
+      <div class="subheadline" data-slot="subheadline">Two hours on your body, your mind, and the habits quietly deciding both.</div>
+    </div>
+
+    <div class="content-bottom">
+      <div class="meta-rail">
+        <div class="meta-left">
+          <div data-slot="dateVenue">Sun 2 Aug · 10:30 AM</div>
+        </div>
+        <div class="price-tag" data-slot="price">₹1,000</div>
+      </div>
+      <div class="cta-bar">
+        <div data-slot="cta">REGISTER NOW</div>
+        <div class="cta-url" data-slot="url">konfhub.com/health-empowerment</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

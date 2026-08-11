@@ -35,7 +35,7 @@ describe("withTurnTimeout", () => {
     const guarded = withTurnTimeout(hang, 1234, "guard-retry");
     const assertion = guarded.catch((e) => e as TurnTimeoutError);
     await vi.advanceTimersByTimeAsync(1234);
-    const err = await assertion;
+    const err = (await assertion) as TurnTimeoutError;
     expect(err).toBeInstanceOf(TurnTimeoutError);
     expect(err.ms).toBe(1234);
     expect(err.label).toBe("guard-retry");

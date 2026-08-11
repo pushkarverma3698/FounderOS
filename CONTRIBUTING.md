@@ -67,7 +67,7 @@ feat/* (cut from beta) → PR → beta → PR → main (CD deploy)
 ```
 
 1. Cut branches from **`beta`**, not from `main`.
-2. Open PRs to **`beta`** — CI + branch-policy workflow must pass.
+2. Open PRs to **`beta`** — CI must pass.
 3. Only the founder merges **`beta` → `main`**.
 4. Never commit to `main` directly. Only humans merge.
 

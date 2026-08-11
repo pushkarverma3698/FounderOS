@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1080, height=1350, initial-scale=1.0">
+  <title>Poster Quiet V2</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&family=Space+Grotesk:wght@500;700&display=swap');
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      width: 1080px;
+      height: 1350px;
+      overflow: hidden;
+      font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+      background: #09120d;
+      color: #f2f7f4;
+      -webkit-font-smoothing: antialiased;
+    }
+    .post {
+      position: relative;
+      width: 1080px;
+      height: 1350px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 56px;
+      background-color: #09120d;
+      background-size: cover;
+      background-position: center;
+    }
+
+    /* Ambient Depth Scrims */
+    .scrim-top {
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 55%;
+      background: linear-gradient(180deg, rgba(10,12,16,0.92) 0%, rgba(10,12,16,0.6) 50%, rgba(10,12,16,0) 100%);
+      pointer-events: none;
+      display: block;
+    }
+    .scrim-bottom {
+      position: absolute;
+      bottom: 0; left: 0; right: 0; height: 50%;
+      background: linear-gradient(0deg, rgba(10,12,16,0.95) 0%, rgba(10,12,16,0.65) 60%, rgba(10,12,16,0) 100%);
+      pointer-events: none;
+      display: block;
+    }
+
+    /* 2026 Tactile SVG Grain Overlay */
+    .noise-overlay {
+      position: absolute;
+      inset: 0;
+      background: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 1;
+      display: block;
+    }
+
+    /* Glassmorphic Top Card */
+    .content-top {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      opacity: 1;
+      background: rgba(10, 12, 16, 0.45);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 28px;
+      padding: 36px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    }
+
+    .kicker {
+      font-family: 'Space Grotesk', monospace;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #2ecc71;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-badge {
+      width: 10px;
+      height: 10px;
+      background-color: #2ecc71;
+      border-radius: 50%;
+      box-shadow: 0 0 12px #2ecc71;
+    }
+
+    .headline {
+      font-size: 64px;
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      text-transform: uppercase;
+      color: #f2f7f4;
+      text-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+      word-wrap: break-word;
+    }
+
+    .subheadline {
+      font-size: 20px;
+      font-weight: 500;
+      line-height: 1.45;
+      color: rgba(242, 247, 244, 0.75);
+      max-width: 95%;
+    }
+
+    /* Glassmorphic Bottom Rail */
+    .content-bottom {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      opacity: 1;
+      background: rgba(10, 12, 16, 0.5);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 28px;
+      padding: 32px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    }
+
+    .meta-rail {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: 'Space Grotesk', monospace;
+      font-size: 18px;
+      color: #f2f7f4;
+    }
+
+    .meta-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+
+    .price-tag {
+      font-size: 32px;
+      font-weight: 800;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      color: #2ecc71;
+      text-shadow: 0 0 16px rgba(0, 240, 255, 0.3);
+    }
+
+    .cta-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(135deg, #2ecc71 0%, #00a8ff 100%);
+      color: #0a0c10;
+      padding: 20px 32px;
+      border-radius: 100px;
+      font-weight: 800;
+      font-size: 20px;
+      letter-spacing: 0.04em;
+      box-shadow: 0 8px 24px rgba(0, 240, 255, 0.3);
+    }
+
+    .cta-url {
+      font-family: 'Space Grotesk', monospace;
+      font-size: 16px;
+      font-weight: 700;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div class="post">
+    <div class="scrim-top"></div>
+    <div class="scrim-bottom"></div>
+    <div class="noise-overlay"></div>
+
+    <div class="content-top">
+      <div class="kicker" data-slot="kicker"><span class="brand-badge"></span>LUXURY BOTANICALS — EXCLUSIVE LAUNCH</div>
+      <div class="headline" data-slot="headline">REVEAL YOUR NATURAL RADIANCE</div>
+      <div class="subheadline" data-slot="subheadline">100% pure organic serum engineered for deep cell hydration and timeless youth.</div>
+    </div>
+
+    <div class="content-bottom">
+      <div class="meta-rail">
+        <div class="meta-left">
+          <div data-slot="dateVenue">20% OFF · EARLY ACCESS</div>
+        </div>
+        <div class="price-tag" data-slot="price">SAVE 20%</div>
+      </div>
+      <div class="cta-bar">
+        <div data-slot="cta">CLAIM ACCESS</div>
+        <div class="cta-url" data-slot="url">radiance.com/serum</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

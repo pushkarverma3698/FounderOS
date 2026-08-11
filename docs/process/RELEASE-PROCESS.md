@@ -37,7 +37,7 @@ Ties to CLAUDE.md rules #19, #23, #24.
 
 | Stage | Gate | Who |
 |---|---|---|
-| `feat/*` → `beta` | Definition of Done above; CI green; branch-policy pass | agent/human opens PR |
+| `feat/*` → `beta` | Definition of Done above; CI green | agent/human opens PR |
 | `beta` (continuous) | Integration + `pnpm eval` (routing/tool/HITL golden set, no regression); live MTProto QA on the **beta** behaviour for any HITL/gateway change | whoever merged |
 | `beta` → `main` | Thursday freeze passed; full beta verification green; Friday release checklist started | **founder merges** → CD deploys |
 | post-`main` | Deploy log green (Password synced OK, no `28P01`, `/health` ok); post-deploy audit | automatic + founder |

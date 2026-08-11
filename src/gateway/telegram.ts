@@ -24,9 +24,12 @@ import {
   handleResume,
   handleCommands,
   handleConnect,
+  unknownCommandReply,
 } from "./commands.js";
+import { handleAsk, handleDraft } from "./jobhunt-commands.js";
 import { registerMediaHandlers } from "./media.js";
 import { runKernelText, resumeKernel } from "./kernel-run.js";
+import { isConflictError, conflictBackoffMs, CONFLICT_MAX_ATTEMPTS } from "./telegram-poll.js";
 
 // media.ts and tests import safeHtml from here — keep the path stable.
 export { safeHtml } from "./approval-card.js";
@@ -50,10 +53,19 @@ export function registerHandlers(bot: Bot): void {
   bot.command("budget", (ctx: Context) => handleBudget(ctx));
   bot.command("connect", (ctx: Context) => handleConnect(ctx));
   bot.command("commands", (ctx: Context) => handleCommands(ctx));
+  bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
+  bot.command("ask", (ctx: Context) => handleAsk(ctx, { runKernelText }));
 
   bot.on("message:text", async (ctx: Context) => {
     const text = ctx.message?.text ?? "";
-    if (text.startsWith("/")) return;
+    if (text.startsWith("/")) {
+      // Registered commands never reach here (grammy matched them first), so
+      // anything left is one the founder typed that does not exist. Returning
+      // silently is the worst available answer: he acted, and the system gave
+      // no sign it had heard him. /draft 1 read exactly like a dead bot.
+      await ctx.reply(unknownCommandReply(text));
+      return;
+    }
     if (!text.trim()) return; // ignore empty / whitespace-only messages
     // Telegram `message.date` is epoch SECONDS (the send time); receivedAt is
     // our clock. Both formatted to readable UTC so logs never show a raw epoch.
@@ -93,14 +105,52 @@ export async function sendToChat(text: string, parseMode: "HTML" | "Markdown" = 
   await bot.api.sendMessage(env.TELEGRAM_CHAT_ID, text, { parse_mode: parseMode });
 }
 
+/**
+ * Poll until stopped, surviving a transient 409.
+ *
+ * A 409 says another consumer holds the token. Exiting on it — which is what
+ * this used to do — hands the problem to `Restart=always` and produces a crash
+ * loop rather than a recovery; 2026-08-08/09 cost 29 restarts that way. Every
+ * OTHER polling failure is still fatal on the first occurrence: an expired
+ * token or a DNS failure does not heal by waiting, and a bot that quietly
+ * retries forever is indistinguishable from a bot nobody is running.
+ */
+async function pollUntilStopped(bot: Bot, sleep: (ms: number) => Promise<void>): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      log.info("Telegram bot starting (long polling)…");
+      await bot.start();
+      return; // clean shutdown via stopBot()
+    } catch (err) {
+      if (!isConflictError(err)) {
+        log.error({ err: (err as Error).message }, "Bot polling crashed");
+        process.exit(1);
+      }
+      if (attempt >= CONFLICT_MAX_ATTEMPTS) {
+        log.error(
+          { attempts: attempt, err: (err as Error).message },
+          "Another getUpdates consumer still holds this bot token after every retry — exiting loudly rather than sitting silent",
+        );
+        process.exit(1);
+      }
+      const waitMs = conflictBackoffMs(attempt);
+      log.warn(
+        { attempt, maxAttempts: CONFLICT_MAX_ATTEMPTS, waitMs },
+        "Another getUpdates consumer holds this bot token — backing off, not exiting",
+      );
+      // The runner is left half-started by a failed start(); reset it before
+      // retrying or grammY rejects the next start() as "already running".
+      // allow-failopen: stopping a runner that never started throws, and that throw must not mask the conflict being handled — the retry is the recovery, and an unusable bot still exits at the attempt cap.
+      await bot.stop().catch(() => undefined);
+      await sleep(waitMs);
+    }
+  }
+}
+
 export async function startBot(): Promise<void> {
   const bot = getBot();
   registerHandlers(bot);
-  log.info("Telegram bot starting (long polling)…");
-  bot.start().catch((err) => {
-    log.error({ err: (err as Error).message }, "Bot polling crashed");
-    process.exit(1);
-  });
+  void pollUntilStopped(bot, (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 }
 
 export async function stopBot(): Promise<void> {

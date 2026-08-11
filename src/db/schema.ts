@@ -964,6 +964,19 @@ export const jobApplications = agentsSchema.table(
     salary_status: text("salary_status").notNull(),
     salary_evidence: text("salary_evidence"),
 
+    /**
+     * Every gate WITH its own status: `[{gate, status, evidence}, …]`.
+     *
+     * `salary_evidence` above is the same information flattened to one pipe-joined
+     * string, and a flat string cannot say WHICH check failed. The brief read
+     * position instead of status and printed reason #1 as the row's headline, so a
+     * role flagged on salary was labelled with its PASSING sponsor line — the
+     * founder's first real brief was unreadable for exactly this reason. Stored as
+     * text rather than jsonb: it is only ever read whole, and text keeps the
+     * migration a plain ADD COLUMN on a live table.
+     */
+    gate_json: text("gate_json"),
+
     /** 0–1 CV-to-JD fit, with the matched/missing skills that produced it. */
     fit_score: numeric("fit_score"),
     fit_evidence: text("fit_evidence"),
@@ -972,11 +985,95 @@ export const jobApplications = agentsSchema.table(
     stage: text("stage").notNull().default("screened"),
 
     applied_at: timestamp("applied_at", { withTimezone: true }),
+
+    /**
+     * When the founder looked at this row and decided NOT to apply.
+     *
+     * A SEPARATE COLUMN FROM `applied_at`, never a shared status. Both remove a
+     * row from the apply queue, so one field would serve the queue perfectly —
+     * and would destroy the only number this pipeline exists to move. "Applied
+     * and heard nothing" and "read it and passed" are opposite facts: the first
+     * is a live lead and evidence the screening is aimed correctly, the second
+     * is evidence it is not. Collapsed, the apply rate loses its denominator.
+     *
+     * It must also stay out of `applied_at` because that column drives the
+     * re-apply staleness rule (`isStaleEnoughToReapply`, screen.ts): stamping a
+     * skip there would suppress a role the founder passed on in March and would
+     * happily take in September.
+     *
+     * Written only by the Mac apply client — the machine never submits an
+     * application (ADR-009), so it learns either fact only from a founder click.
+     * NULL on both = still in the queue.
+     */
+    skipped_at: timestamp("skipped_at", { withTimezone: true }),
     last_contact_at: timestamp("last_contact_at", { withTimezone: true }),
     /** Count of follow-ups sent — the Monday review follows up at day 7, then 14. */
     followups_sent: integer("followups_sent").notNull().default(0),
 
     notes: text("notes"),
+
+    /**
+     * The posting body, verbatim. Kept because the skill dictionary
+     * (src/tools/jobhunt/skills-dictionary.ts) will gain terms over time, and
+     * without the source text every signal recorded before a term was added is
+     * unrecoverable — the history would silently under-count the new term.
+     */
+    description: text("description"),
+    /** When the employer published it (from the ATS feed), not when we saw it. */
+    posted_at: timestamp("posted_at", { withTimezone: true }),
+    /** manual | ats-ingest | indeed-ingest — how the posting reached the gates. */
+    source: text("source").notNull().default("manual"),
+
+    /** ai | backend | frontend | unclassified — from the title, deterministically. */
+    track: text("track").notNull().default("unclassified"),
+
+    /**
+     * NL | IN | other | unknown — where the FETCHER said the job is.
+     *
+     * Never re-derived from the ad's wording. Route classification used to read
+     * the prose, so "hybrid" in an Indian posting was taken as proof of a Dutch
+     * office and nine Indeed-IN rows were stored under a Dutch permit basis. The
+     * feed always knew; the value was being thrown away before the screener ran.
+     *
+     * `other` and `unknown` are distinct. "This is in Colombia" narrows the
+     * lawful bases to one; "we could not tell" is a question that must be asked.
+     */
+    country: text("country"),
+
+    /** The feed's location string, verbatim — the evidence behind `country`. */
+    location: text("location"),
+
+    /** The source's own id — Indeed's job key is what its liveness lookup takes. */
+    external_id: text("external_id"),
+
+    /**
+     * unknown | live | expired | unverifiable.
+     *
+     * `unverifiable` is a distinct value, not a synonym for expired: a network
+     * failure that reads as "this job is dead" removes a real opportunity and
+     * emits no signal that it did.
+     */
+    liveness: text("liveness").notNull().default("unknown"),
+    liveness_checked_at: timestamp("liveness_checked_at", { withTimezone: true }),
+
+    /**
+     * Where this row appeared in the LAST brief, and at what number.
+     *
+     * Pinned at render time so `/draft 2` resolves to the row the founder was
+     * looking at. Re-deriving the order on demand would silently retarget the
+     * command when liveness or new screens reshuffle the list.
+     */
+    brief_section: text("brief_section"),
+    brief_rank: integer("brief_rank"),
+
+    /** pending | tailoring | tailored | failed — CV generation state. */
+    tailor_status: text("tailor_status"),
+    /** S3 key to the generated, JD-tailored CV PDF. */
+    tailored_cv_s3_key: text("tailored_cv_s3_key"),
+    /** S3 key to the generated DOCX variant. */
+    tailored_docx_s3_key: text("tailored_docx_s3_key"),
+    /** S3 key to the pre-drafted cover letter. */
+    cover_letter_s3_key: text("cover_letter_s3_key"),
 
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
@@ -986,11 +1083,164 @@ export const jobApplications = agentsSchema.table(
     dedupeUniq: uniqueIndex("ja_dedupe_uniq").on(t.tenant_id, t.dedupe_key),
     /** Monday review hot path: live applications ordered by staleness. */
     stageIdx: index("ja_stage_idx").on(t.tenant_id, t.stage, t.last_contact_at),
+    /** The brief's hot path: one track's passing postings. */
+    trackVerdictIdx: index("ja_track_verdict_idx").on(t.tenant_id, t.track, t.salary_status),
+    /** The apply queue's hot path: unhandled rows, best first. */
+    applyQueueIdx: index("ja_apply_queue_idx").on(t.tenant_id, t.applied_at, t.brief_rank),
   }),
 );
 
 export type JobApplication = typeof jobApplications.$inferSelect;
 export type NewJobApplication = typeof jobApplications.$inferInsert;
+
+// ── cv_signals ────────────────────────────────────────────────────────────────
+
+/**
+ * What the reachable market actually asks for, accumulated one posting at a time.
+ *
+ * Only postings that PASS the screening gates contribute. That restriction is
+ * the whole value of the table: the market at large is noise, while the roles
+ * Pushkar can legally hold are the only population his CV needs to match.
+ *
+ * It informs the CV; it never edits it. There is deliberately no write path from
+ * here to personal-rag (ADR-015 — read-only) or to any CV document. `cv_gaps`
+ * reports the difference and the founder decides what is true.
+ *
+ * `seen_count` is postings, NOT mentions — see src/tools/jobhunt/skills.ts.
+ */
+export const cvSignals = agentsSchema.table(
+  "cv_signals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+
+    /** Canonical term as the founder reads it, e.g. 'Kubernetes'. */
+    term: text("term").notNull(),
+
+    /** language | framework | infra | data | ai | practice | unknown. */
+    category: text("category").notNull(),
+
+    /**
+     * ai | backend | frontend | unclassified — which market asked for it.
+     *
+     * Part of the identity, not a label. Blended into one bucket, "Python 60%"
+     * could be 100% of AI roles and 0% of frontend and the report could not tell
+     * the difference — so the finding could not be acted on either way.
+     */
+    track: text("track").notNull().default("unclassified"),
+
+    /** Number of DISTINCT passing postings that asked for this. */
+    seen_count: integer("seen_count").notNull().default(0),
+
+    first_seen_at: timestamp("first_seen_at", { withTimezone: true }).defaultNow(),
+    last_seen_at: timestamp("last_seen_at", { withTimezone: true }).defaultNow(),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    /** One row per (track, term) — the count is a running total, not an event log. */
+    trackTermUniq: uniqueIndex("cv_signals_track_term_uniq").on(t.tenant_id, t.track, t.term),
+    /** Gap report hot path: most-demanded first, within one track. */
+    trackRankIdx: index("cv_signals_track_rank_idx").on(t.tenant_id, t.track, t.seen_count),
+  }),
+);
+
+export type CvSignal = typeof cvSignals.$inferSelect;
+export type NewCvSignal = typeof cvSignals.$inferInsert;
+
+// ── job_ingest_runs ───────────────────────────────────────────────────────────
+
+/**
+ * One row per paid feed call, with what it cost and what it bought.
+ *
+ * The founder asked on 2026-08-01 how many times the pipeline runs and what it
+ * costs, and the honest answer had to be reconstructed by hand from actor
+ * pricing pages and a reading of the cron schedule. That is a question about our
+ * own system that our own system could not answer, and the reconstruction is
+ * stale the moment a query count changes.
+ *
+ * `estimated_cost_usd` is ESTIMATED and named so. Apify bills per event on its
+ * own ledger and this table never sees that invoice; what it holds is our
+ * arithmetic over the posted per-job and per-start prices. It is right for
+ * spotting the day a sweep doubled, and it is not an accounting record.
+ */
+export const jobIngestRuns = agentsSchema.table(
+  "job_ingest_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+
+    /** Groups every query of one sweep, so a day's cost is one GROUP BY. */
+    sweep_id: uuid("sweep_id").notNull(),
+
+    /** ats | indeed — which feed was billed. */
+    feed: text("feed").notNull(),
+    /** The pool or country this query covered, e.g. "netherlands" or "NL". */
+    pool: text("pool").notNull(),
+    /** ai | fullstack | backend | frontend, or "all" for a feed we cannot split. */
+    track: text("track").notNull(),
+
+    /** What we asked for, and what came back. A gap between them is a finding. */
+    requested: integer("requested").notNull(),
+    returned: integer("returned").notNull().default(0),
+
+    /**
+     * Postings that reached the gates, and how they came out.
+     *
+     * These five MUST sum to `screened`. Until 2026-08-05 only the first three
+     * existed, so postings that came back `duplicate` or `error` were counted
+     * in `screened` and nowhere else — and a sweep where every posting threw
+     * looked identical to a market with nothing in it. That is how a total
+     * screening outage ran unnoticed from 2026-08-02 to 2026-08-05.
+     */
+    screened: integer("screened").notNull().default(0),
+    passed: integer("passed").notNull().default(0),
+    flagged: integer("flagged").notNull().default(0),
+    rejected: integer("rejected").notNull().default(0),
+    duplicates: integer("duplicates").notNull().default(0),
+    errored: integer("errored").notNull().default(0),
+
+    /**
+     * Why the postings in `errored` failed — the commonest message of the batch.
+     *
+     * Distinct from `error` below, which is the FETCH failing. This column is
+     * the gates failing on postings that arrived fine. Both can be null on the
+     * same row while every posting still failed, which was precisely the blind
+     * spot: the message existed in memory on every line and was never written
+     * down.
+     */
+    screen_error: text("screen_error"),
+
+    /**
+     * Postings this query found that the tracker had never seen.
+     *
+     * The only column here that says whether the money bought anything.
+     * `returned` is what the feed BILLED us for, and on 2026-08-02 a sweep was
+     * billed for 32 postings of which zero were new. Recorded per QUERY, not
+     * per sweep, because "which pool still finds new roles" is what decides
+     * where to cut cost — and that is not recoverable from job_applications,
+     * which never records which query found a row.
+     */
+    fresh: integer("fresh").notNull().default(0),
+
+    /** Our arithmetic over the posted per-job + per-start prices. Not an invoice. */
+    estimated_cost_usd: numeric("estimated_cost_usd").notNull().default("0"),
+
+    /** Null on success. A failed query still gets a row — it was still billed a start. */
+    error: text("error"),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    /** "what did this month cost" — the question the table exists to answer. */
+    tenantDayIdx: index("jir_tenant_day_idx").on(t.tenant_id, t.created_at),
+    sweepIdx: index("jir_sweep_idx").on(t.sweep_id),
+  }),
+);
+
+export type JobIngestRun = typeof jobIngestRuns.$inferSelect;
+export type NewJobIngestRun = typeof jobIngestRuns.$inferInsert;
 
 // ── failure_lessons ───────────────────────────────────────────────────────────
 

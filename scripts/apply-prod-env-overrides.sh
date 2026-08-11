@@ -27,7 +27,10 @@ cd "$APP_DIR"
 #   otherwise DELETE or BLANK a working key. 2026-07-12: the post-#325 render
 #   wiped on-box APIFY_TOKEN + STORAGE_*/AWS_* (S3 went LIVE→MISSING between
 #   boots) because they were not listed here.
-PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND APIFY_TOKEN SCRAPE_BACKEND STORAGE_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY STORAGE_ENDPOINT_URL WEB_GATEWAY_TOKEN GWS_BIN MEM0_API_KEY REDIS_URL GOOGLE_APPLICATION_CREDENTIALS OFFICE_TURN_TIMEOUT_MS MCP_BRIDGE_ENABLED"
+#   2026-08-01: PERSONAL_CV_DIR/PERSONAL_CV_PATH point at on-box files that only
+#   exist on the VPS. Losing them does not fail loudly — every posting simply
+#   scores 0 overlap and the ranked brief silently degrades to arbitrary order.
+PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND APIFY_TOKEN SCRAPE_BACKEND STORAGE_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY STORAGE_ENDPOINT_URL WEB_GATEWAY_TOKEN GWS_BIN MEM0_API_KEY REDIS_URL GOOGLE_APPLICATION_CREDENTIALS OFFICE_TURN_TIMEOUT_MS MCP_BRIDGE_ENABLED PERSONAL_CV_DIR PERSONAL_CV_PATH"
 
 if [ -n "${PROD_DOTENV:-}" ]; then
   umask 077
@@ -96,6 +99,29 @@ grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
 mv .env.patched .env
 chmod 600 .env
 echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-flash-latest"
+
+# Pin the job-sweep spend controls. Both were unset in production until
+# 2026-08-05, and both defaulted quietly rather than loudly:
+#
+#   APIFY_PLAN unset  → currentPlan() falls back to "free". Correct for this
+#     account today, so the ledger happened to be right — but the moment the plan
+#     changes, every cost this system reports is silently wrong, which is exactly
+#     what the cost module was written to stop. Pinned so it is a stated fact.
+#
+#   JOBHUNT_MONTHLY_CAP_USD unset → the sweep had no ceiling it could refuse to
+#     cross. Apify is on the FREE plan with a $5 hard platform cap SHARED with the
+#     research actors; on 2026-08-06 a single sweep spent $0.997 and produced
+#     nothing, taking the cycle to $4.28 of $5. $2 leaves the research tools their
+#     share. Raise it here, not on the box — a hand-edited .env is wiped by the
+#     next PROD_DOTENV render.
+grep -v -E '^(APIFY_PLAN|JOBHUNT_MONTHLY_CAP_USD)=' .env > .env.patched || true
+{
+  printf '%s\n' 'APIFY_PLAN=free'
+  printf '%s\n' 'JOBHUNT_MONTHLY_CAP_USD=2.00'
+} >> .env.patched
+mv .env.patched .env
+chmod 600 .env
+echo "==> Patched .env: APIFY_PLAN=free, JOBHUNT_MONTHLY_CAP_USD=2.00"
 # Primary model key — forwarded from a GitHub secret so a PROD_DOTENV re-render
 # can never wipe it. Without this the direct-Gemini path 401s.
 if [ -n "${GOOGLE_GENERATIVE_AI_API_KEY:-}" ]; then

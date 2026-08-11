@@ -65,7 +65,7 @@ Before merging a PR that adds or modifies a tool:
 - [ ] Integration test covers the real function call + error path
 - [ ] `pnpm test` green (unit + integration)
 - [ ] `pnpm lint` clean
-- [ ] Tool is wired in `agent-tools.ts` + `office.ts` + `system-prompts.ts` (see PROGRAMMING-RULES.md)
+- [ ] Tool is wired in `agent-tools.ts` + `capabilities.ts` (`DEPARTMENT_TOOLS`) + `src/agents/prompts/<dept>.ts` (see PROGRAMMING-RULES.md)
 
 ## Why This Rule Exists
 

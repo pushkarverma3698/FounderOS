@@ -44,8 +44,9 @@ function loadGraph(): Graph {
       "graph.json"
     );
     const graphData = fs.readFileSync(graphPath, "utf-8");
-    cachedGraph = JSON.parse(graphData);
-    return cachedGraph;
+    const parsed = JSON.parse(graphData);
+    cachedGraph = parsed;
+    return parsed ?? { nodes: [], edges: [], metadata: { departments: {}, tools: {} } };
   } catch (err) {
     console.warn("⚠️ Could not load graph.json:", err instanceof Error ? err.message : err);
     return { nodes: [], edges: [], metadata: { departments: {}, tools: {} } };

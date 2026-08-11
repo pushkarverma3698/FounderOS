@@ -13,7 +13,7 @@
  * gap-scan-queries.ts and account-queries.ts).
  */
 
-import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql, gte } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { jobApplications, type JobApplication, type NewJobApplication } from "./schema.js";
 
@@ -88,9 +88,23 @@ export async function recordScreenedApplication(
         url: row.url ?? null,
         soft_dedupe_key: row.soft_dedupe_key ?? null,
         route: row.route ?? "hsm",
+        track: row.track ?? "unclassified",
+        external_id: row.external_id ?? null,
         sponsor_verdict: row.sponsor_verdict,
         salary_status: row.salary_status,
         salary_evidence: row.salary_evidence ?? null,
+        // Must be in the UPDATE set, not only in the INSERT. Every posting the
+        // sweep sees twice takes the conflict branch, and on 2026-08-01 a
+        // backfill re-screened all 53 stored rows, reported the new verdicts
+        // correctly, and left `gate_json` NULL on every one of them — the column
+        // was only ever written on a first insert. A field that silently stops
+        // being written on the second sighting is the worst kind of half-working.
+        gate_json: row.gate_json ?? null,
+        // In the UPDATE set for the same reason gate_json is: a re-sighted
+        // posting takes the conflict branch, and a column written only on first
+        // insert stops being maintained the moment a feed returns a row twice.
+        country: row.country ?? null,
+        location: row.location ?? null,
         fit_score: row.fit_score ?? null,
         fit_evidence: row.fit_evidence ?? null,
         notes: row.notes ?? null,
@@ -168,6 +182,85 @@ export async function listScreenedApplications(
     .limit(opts.limit ?? 25);
 }
 
+/**
+ * How many postings cleared every gate — the denominator for the CV gap report.
+ *
+ * Reported next to every percentage, because "68% of postings" over 4 postings
+ * and over 400 are the same number and mean entirely different things. Without
+ * the sample size the report invites a CV rewrite on three data points.
+ */
+export async function countPassingApplications(
+  opts: { track?: string; tenantId?: string } = {},
+): Promise<number> {
+  const db = getDb();
+  const conditions = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    eq(jobApplications.salary_status, "pass"),
+  ];
+  // The denominator must match the numerator's population. A per-track gap
+  // report divided by the all-track count understates every percentage.
+  if (opts.track) conditions.push(eq(jobApplications.track, opts.track));
+
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(jobApplications)
+    .where(and(...conditions));
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * Screened-but-not-yet-engaged rows — the population the daily brief ranks.
+ *
+ * Restricted to `stage = 'screened'` so a role already drafted or applied to
+ * never reappears in DO TODAY, and ordered newest-first so a capped read takes
+ * the freshest postings rather than an arbitrary slice.
+ */
+export async function listActionableApplications(
+  opts: { verdicts?: readonly string[]; limit?: number; tenantId?: string } = {},
+): Promise<JobApplication[]> {
+  const db = getDb();
+  return db
+    .select()
+    .from(jobApplications)
+    .where(
+      and(
+        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+        eq(jobApplications.stage, "screened"),
+        inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
+      ),
+    )
+    .orderBy(desc(jobApplications.created_at))
+    .limit(opts.limit ?? 100);
+}
+
+/**
+ * Record a liveness result.
+ *
+ * `expired` moves the row out of the actionable pool AND writes the reason, so
+ * a posting that vanishes from the brief can always be explained. Nothing is
+ * silently dropped — an unexplained disappearance is indistinguishable from a
+ * bug in the ranking.
+ */
+export async function recordLiveness(
+  id: string,
+  liveness: "live" | "expired" | "unverifiable",
+  opts: { reason?: string; checkedAt?: Date } = {},
+): Promise<JobApplication | null> {
+  const db = getDb();
+  const [saved] = await db
+    .update(jobApplications)
+    .set({
+      liveness,
+      liveness_checked_at: opts.checkedAt ?? new Date(),
+      ...(liveness === "expired" ? { stage: "expired" } : {}),
+      ...(opts.reason ? { notes: opts.reason } : {}),
+      updated_at: new Date(),
+    })
+    .where(eq(jobApplications.id, id))
+    .returning();
+  return saved ?? null;
+}
+
 /** Most recently screened roles, newest first — the daily-sweep read-back. */
 export async function listRecentApplications(
   opts: { limit?: number; tenantId?: string } = {},
@@ -179,4 +272,205 @@ export async function listRecentApplications(
     .where(eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT))
     .orderBy(desc(jobApplications.created_at))
     .limit(opts.limit ?? 20);
+}
+
+/**
+ * Sections of the brief a founder can address by number.
+ *
+ * `do_today` and `stretch` share ONE continuous numbering: the stretch ranks
+ * start where do-today's stop, so `/draft N` reaches exactly one row across
+ * both. `ask` numbers itself from 1 because `/ask` addresses only that section.
+ */
+export type BriefSection = "do_today" | "stretch" | "ask";
+
+/**
+ * Pin the numbering the founder just read.
+ *
+ * Every render CLEARS the previous set first: a stale rank from yesterday's
+ * brief would answer `/draft 3` with a role that is no longer on the list, which
+ * is worse than answering "there is no 3" — the founder cannot tell the
+ * difference from a correct answer.
+ */
+export async function recordBriefRanks(
+  entries: ReadonlyArray<{ id: string; section: BriefSection; rank: number }>,
+  opts: { tenantId?: string } = {},
+): Promise<void> {
+  const db = getDb();
+  const tenantId = opts.tenantId ?? DEFAULT_TENANT;
+
+  await db
+    .update(jobApplications)
+    .set({ brief_section: null, brief_rank: null })
+    .where(
+      and(eq(jobApplications.tenant_id, tenantId), isNotNull(jobApplications.brief_section)),
+    );
+
+  for (const entry of entries) {
+    await db
+      .update(jobApplications)
+      .set({ brief_section: entry.section, brief_rank: entry.rank })
+      .where(and(eq(jobApplications.tenant_id, tenantId), eq(jobApplications.id, entry.id)));
+  }
+}
+
+/**
+ * Persist the CV-to-posting fit the brief just computed.
+ *
+ * The `fit_score` / `fit_evidence` columns were declared when the table was
+ * created and never once written to — every row in production carried NULL while
+ * the number was recomputed from scratch on every render and thrown away. That
+ * makes "did the market's demands drift away from my CV?" unanswerable, because
+ * nothing anywhere holds yesterday's score.
+ *
+ * Written here rather than at screening time on purpose: the score needs the
+ * TRACK's CV, which the brief already loads once per run. Computing it inside
+ * `screenPosting` would re-read a CV file per posting to store the same number.
+ */
+export async function recordFitScores(
+  entries: ReadonlyArray<{ id: string; score: number; evidence: string }>,
+): Promise<void> {
+  const db = getDb();
+  for (const entry of entries) {
+    await db
+      .update(jobApplications)
+      .set({
+        fit_score: entry.score.toFixed(4),
+        fit_evidence: entry.evidence.slice(0, 1000),
+        updated_at: new Date(),
+      })
+      .where(eq(jobApplications.id, entry.id));
+  }
+}
+
+/**
+ * Resolve `/draft 2` to the row that was printed as 2.
+ *
+ * Returns null rather than a best guess. A command that quietly drafts for the
+ * wrong company is far more expensive than one that says it cannot find row 2.
+ */
+export async function getApplicationByBriefRank(
+  section: BriefSection,
+  rank: number,
+  opts: { tenantId?: string } = {},
+): Promise<JobApplication | null> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(jobApplications)
+    .where(
+      and(
+        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+        eq(jobApplications.brief_section, section),
+        eq(jobApplications.brief_rank, rank),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** List applications clearing gates that do not have a tailored CV yet. */
+export async function listUntailoredApplications(
+  opts: { limit?: number; tenantId?: string } = {},
+): Promise<JobApplication[]> {
+  return getDb().select().from(jobApplications).where(and(
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    eq(jobApplications.stage, "screened"),
+    inArray(jobApplications.salary_status, ["pass", "flag"]),
+    sql`${jobApplications.tailor_status} IS NULL OR ${jobApplications.tailor_status} = 'pending'`,
+  )).orderBy(desc(jobApplications.created_at)).limit(opts.limit ?? 20);
+}
+
+/** Update CV tailoring status and S3 asset references for an application. */
+export async function recordTailoringResult(
+  id: string,
+  opts: { tailorStatus: "tailored" | "failed" | "tailoring"; tailoredCvS3Key?: string; tailoredDocxS3Key?: string; coverLetterS3Key?: string; notes?: string },
+): Promise<JobApplication | null> {
+  const [saved] = await getDb().update(jobApplications).set({
+    tailor_status: opts.tailorStatus,
+    ...(opts.tailoredCvS3Key ? { tailored_cv_s3_key: opts.tailoredCvS3Key } : {}),
+    ...(opts.tailoredDocxS3Key ? { tailored_docx_s3_key: opts.tailoredDocxS3Key } : {}),
+    ...(opts.coverLetterS3Key ? { cover_letter_s3_key: opts.coverLetterS3Key } : {}),
+    ...(opts.notes !== undefined ? { notes: opts.notes } : {}),
+    updated_at: new Date(),
+  }).where(eq(jobApplications.id, id)).returning();
+  return saved ?? null;
+}
+
+
+export interface JobStateArgs {
+  readonly stage?: string;
+  readonly section?: string;
+  readonly source?: string;
+  readonly applied?: boolean;
+  readonly since?: string;
+  readonly fullDetails?: boolean;
+  readonly limit?: number;
+}
+
+export type CuratedJobRow = Pick<
+  JobApplication,
+  "id" | "company" | "title" | "stage" | "salary_status" | "applied_at" | "created_at" | "url" | "track"
+> & { readonly gate_json?: unknown };
+
+export async function queryJobState(
+  args: JobStateArgs = {},
+  tenantId: string = DEFAULT_TENANT,
+): Promise<{ count: number; total: number; rows: Array<CuratedJobRow | JobApplication> }> {
+  const db = getDb();
+
+  // Total count (unfiltered)
+  const [totalRow] = await db
+    .select({ total: sql<number>`count(*)` })
+    .from(jobApplications)
+    .where(eq(jobApplications.tenant_id, tenantId));
+  const total = Number(totalRow?.total ?? 0);
+
+  const conditions = [eq(jobApplications.tenant_id, tenantId)];
+
+  if (args.stage) {
+    conditions.push(eq(jobApplications.stage, args.stage));
+  }
+  if (args.section) {
+    conditions.push(eq(jobApplications.brief_section, args.section));
+  }
+  if (args.source) {
+    conditions.push(eq(jobApplications.route, args.source));
+  }
+  if (args.applied === true) {
+    conditions.push(isNotNull(jobApplications.applied_at));
+  } else if (args.applied === false) {
+    conditions.push(isNull(jobApplications.applied_at));
+  }
+  if (args.since) {
+    const sinceDate = new Date(args.since);
+    if (!isNaN(sinceDate.getTime())) {
+      conditions.push(gte(jobApplications.created_at, sinceDate));
+    }
+  }
+
+  const limit = Math.min(Math.max(1, args.limit ?? 100), 200);
+
+  const rows = await db
+    .select({
+      id: jobApplications.id,
+      company: jobApplications.company,
+      title: jobApplications.title,
+      stage: jobApplications.stage,
+      salary_status: jobApplications.salary_status,
+      applied_at: jobApplications.applied_at,
+      created_at: jobApplications.created_at,
+      url: jobApplications.url,
+      track: jobApplications.track,
+      gate_json: jobApplications.gate_json,
+    })
+    .from(jobApplications)
+    .where(and(...conditions))
+    .orderBy(desc(jobApplications.created_at))
+    .limit(limit);
+
+  return {
+    count: rows.length,
+    total,
+    rows,
+  };
 }

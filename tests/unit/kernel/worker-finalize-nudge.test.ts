@@ -80,7 +80,8 @@ describe("makeAgentNode — budget-exhausted finalize nudge", () => {
     const agent = makeAgentNode(model, { research: spec });
     const update = await agent(stateWith([new HumanMessage("envelope"), toolMsg("out")]));
 
-    const appended = update.scratch?.["s1"] as { set?: BaseMessage[] } | BaseMessage[] | undefined;
+    const scratch = update.scratch as Record<string, unknown> | undefined;
+    const appended = scratch?.["s1"] as { set?: BaseMessage[] } | BaseMessage[] | undefined;
     const written = Array.isArray(appended) ? appended : (appended?.set ?? []);
     // Only the model's response is appended — no nudge leaks into checkpointed state.
     expect(written).toHaveLength(1);
