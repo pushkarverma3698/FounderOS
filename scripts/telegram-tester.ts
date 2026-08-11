@@ -75,6 +75,17 @@ interface PrintableMessage {
   out: boolean;
   text: string;
   buttons: string[];
+  /** Set when the message carries a real Telegram document attachment (not a photo/voice note). */
+  document: { fileName: string; mimeType: string; bytes: number } | null;
+}
+
+/** "(media)" alone can't tell an actual file attachment from a photo/voice note — acceptance tests need to know which. */
+function documentInfo(msg: Api.Message): PrintableMessage["document"] {
+  const media = msg.media;
+  if (!(media instanceof Api.MessageMediaDocument) || !(media.document instanceof Api.Document)) return null;
+  const doc = media.document;
+  const nameAttr = doc.attributes.find((a): a is Api.DocumentAttributeFilename => a instanceof Api.DocumentAttributeFilename);
+  return { fileName: nameAttr?.fileName ?? "(unnamed)", mimeType: doc.mimeType, bytes: Number(doc.size) };
 }
 
 function toPrintable(msg: Api.Message): PrintableMessage {
@@ -89,13 +100,14 @@ function toPrintable(msg: Api.Message): PrintableMessage {
       }
     }
   }
-  return { id: msg.id, out: msg.out === true, text: msg.message ?? "(media)", buttons };
+  return { id: msg.id, out: msg.out === true, text: msg.message ?? "(media)", buttons, document: documentInfo(msg) };
 }
 
 function printMessage(m: PrintableMessage): void {
   const who = m.out ? "👤 tester" : "🤖 bot";
   console.log(`\n#${m.id} ${who}`);
   console.log(m.text.length > 1_500 ? m.text.slice(0, 1_500) + "…" : m.text);
+  if (m.document) console.log(`   📎 document: ${m.document.fileName} (${m.document.mimeType}, ${m.document.bytes}B)`);
   if (m.buttons.length > 0) console.log(`   buttons: ${m.buttons.join(" ")}`);
 }
 
@@ -149,8 +161,8 @@ async function waitForReplies(
       lastReplyAt = Date.now();
       printMessage(toPrintable(msg));
     }
-    // Stop early once the bot has replied and gone quiet for 3 poll cycles.
-    if (seen.size > 0 && Date.now() - lastReplyAt > POLL_INTERVAL_MS * 3) break;
+    // Stop early once the bot has replied and gone quiet for 30 seconds.
+    if (seen.size > 0 && Date.now() - lastReplyAt > 30_000) break;
   }
   if (seen.size === 0) console.log(`(no reply within ${waitS}s)`);
 }
