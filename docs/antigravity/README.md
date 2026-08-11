@@ -3,6 +3,12 @@
 **Purpose:** Antigravity is the implementation engine for wide-and-shallow work. Claude writes the
 brief and reviews the result; Antigravity writes the code. This folder holds the briefs.
 
+**Two dispatch paths now exist.** Hand-authored briefs below are still how Claude delegates
+laptop-side, conversation-context work. For issue-driven, fully unattended work (GitHub Issue →
+Antigravity → PR → Claude review → fix → CI, no founder relay), see
+[ISSUE-DRIVEN-CONTRACT.md](ISSUE-DRIVEN-CONTRACT.md) and the `agent:*` label state machine it
+defines — driven by the VPS `agent-dispatch` cron, the issue-queue counterpart to `pr-brain`.
+
 > **Contractors build the factory. Once the factory runs, the factory improves itself.**
 > Every brief here is Phase 0 bootstrap work. When FounderOS can plan and dispatch its own next
 > milestone, these briefs stop being written by hand — see
