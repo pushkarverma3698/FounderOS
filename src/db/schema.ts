@@ -1406,6 +1406,135 @@ export const reminders = agentsSchema.table(
 export type Reminder = typeof reminders.$inferSelect;
 export type NewReminder = typeof reminders.$inferInsert;
 
+// ── evolution_runs / evolution_findings (self-audit memory) ───────────────────
+
+/**
+ * M0a Evolution Engine — self-audit run + finding memory.
+ *
+ * Before this table, every `runSelfAudit()` (src/evolution/audit-sweep.ts)
+ * started from zero: it could not tell a brand-new finding from one seen 40
+ * times, or one that was fixed and has now regressed. See
+ * docs/plans/2026-08-12-self-improvement-audit.md §3 "Cut 2".
+ *
+ * `evolution_runs` is one row per audit/acting invocation. `analyzers_run`
+ * records which analyzer FUNCTION NAMES actually executed that run (e.g.
+ * `["findDeadExports", "findCostHotspots"]`) — a static-only run and a run
+ * where telemetry was skipped (dead Postgres) both produce fewer entries here
+ * than a full run. This is what makes "a finding was absent from a run"
+ * interpretable: absence only means something for an analyzer whose name is
+ * in this list for that run (src/evolution/persist-findings.ts).
+ */
+export const EVOLUTION_LOOPS = ["audit", "acting"] as const;
+export type EvolutionLoop = (typeof EVOLUTION_LOOPS)[number];
+
+export const evolutionRuns = agentsSchema.table("evolution_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenant_id: text("tenant_id").notNull(),
+
+  started_at: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Null until the run completes (or fails) — see persist-findings.ts. */
+  finished_at: timestamp("finished_at", { withTimezone: true }),
+
+  commit_sha: text("commit_sha"),
+  /** 'audit' = Loop A (report-only, already scheduled) · 'acting' = Loop B (writes code). */
+  loop: text("loop").notNull(),
+
+  findings_count: integer("findings_count").notNull().default(0),
+  /** Free text outcome, e.g. "completed" | "failed: <reason>". Not an enum: the
+   *  failure text itself is the useful part, per the founder-legibility rule. */
+  outcome: text("outcome"),
+
+  /** Analyzer function names that actually executed this run — see doc comment above. */
+  analyzers_run: jsonb("analyzers_run").$type<string[]>().notNull().default([]),
+});
+
+export type EvolutionRun = typeof evolutionRuns.$inferSelect;
+export type NewEvolutionRun = typeof evolutionRuns.$inferInsert;
+
+export const EVOLUTION_FINDING_STATUSES = ["open", "resolved", "regressed"] as const;
+export type EvolutionFindingStatus = (typeof EVOLUTION_FINDING_STATUSES)[number];
+
+/**
+ * One row per (tenant, fingerprint) — the identity of a recurring finding
+ * across runs, independent of cosmetic wording changes in its evidence text.
+ *
+ * `fingerprint` (src/evolution/fingerprint.ts) hashes `kind + location +
+ * subject`, NOT `evidence`: evidence is the human-readable sentence an
+ * analyzer composes fresh every run and routinely embeds volatile numbers
+ * (a dollar amount, a line count, a percentage) that change between runs
+ * without the underlying defect changing at all — hashing it would fracture
+ * one persistent finding into a new row every run, which is the exact
+ * failure this table exists to prevent. `subject` is included (the brief
+ * that specified this table said "kind + location + normalised detail", but
+ * `Finding` has no separate `detail` field — `location` alone collides for
+ * `unused-dependency` findings, which never set it, and for multiple
+ * `dead-export` findings in the same file; `subject` is this shape's actual
+ * structured identity field, so it stands in for "detail" here. See
+ * src/evolution/fingerprint.ts for the full reasoning.)
+ *
+ * `detail` stores the raw `evidence` text for display — it is written, never
+ * hashed.
+ *
+ * `analyzer` is the analyzer function name that produced this finding
+ * (e.g. "findDeadExports"). It is required for the resolution rule below:
+ * `kind` is NOT 1:1 with analyzer (both `findOrphanModules` and
+ * `findOrphanSubsystems` emit kind "orphan-module"), so only `analyzer`
+ * lets a later run know whose absence is meaningful.
+ *
+ * Status machine (src/evolution/persist-findings.ts):
+ *   open      — seen, not resolved.
+ *   resolved  — the analyzer that found it ran again (its name is in that
+ *               run's `evolution_runs.analyzers_run`) and no longer produced
+ *               a finding with this fingerprint. Absence when the analyzer
+ *               did NOT run means nothing and leaves the row untouched —
+ *               a skipped analyzer must never look like a fixed defect.
+ *   regressed — a `resolved` finding reappeared in a later run. This is the
+ *               mechanism that makes "a finding recurring as inaction after
+ *               being marked fixed" visible, instead of silently bumping
+ *               times_seen on a row nobody would think to re-check.
+ */
+export const evolutionFindings = agentsSchema.table(
+  "evolution_findings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+
+    /** Stable identity hash — see doc comment above and fingerprint.ts. */
+    fingerprint: text("fingerprint").notNull(),
+
+    kind: text("kind").notNull(),
+    severity: text("severity").notNull(),
+    /** `file:line` or a directory prefix where applicable; null for e.g. unused-dependency. */
+    location: text("location"),
+    /** The finding's structured identity within its kind — see doc comment above. */
+    subject: text("subject").notNull(),
+    /** Analyzer function name that produced this finding — see doc comment above. */
+    analyzer: text("analyzer").notNull(),
+    /** Raw `Finding.evidence` text, for display. Never hashed into the fingerprint. */
+    detail: text("detail").notNull(),
+
+    first_seen_at: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    last_seen_at: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    times_seen: integer("times_seen").notNull().default(1),
+
+    /** 'open' | 'resolved' | 'regressed' — see doc comment above. */
+    status: text("status").notNull().default("open"),
+    resolved_at: timestamp("resolved_at", { withTimezone: true }),
+
+    /** The run that most recently saw (or, for a resolution, last touched) this finding. */
+    run_id: uuid("run_id").references(() => evolutionRuns.id),
+  },
+  (t) => ({
+    /** Upsert hot path: one row per (tenant, fingerprint) — see persist-findings.ts. */
+    tenantFingerprintIdx: uniqueIndex("ef_tenant_fingerprint_idx").on(t.tenant_id, t.fingerprint),
+    /** Resolution-path lookup: "this analyzer's prior open/regressed rows". */
+    tenantAnalyzerIdx: index("ef_tenant_analyzer_idx").on(t.tenant_id, t.analyzer, t.status),
+  }),
+);
+
+export type EvolutionFinding = typeof evolutionFindings.$inferSelect;
+export type NewEvolutionFinding = typeof evolutionFindings.$inferInsert;
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
 export const interruptRegistry = hitlApprovals;

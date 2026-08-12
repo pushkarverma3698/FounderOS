@@ -7,7 +7,7 @@
  * Pattern: verbs + domain — createInterrupt, resolveInterrupt, logCost, checkIdempotency
  */
 
-import { and, count, desc, eq, gt, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, lt, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { tokenizeQuery, rankByTerms } from "./keyword-search.js";
 
@@ -38,6 +38,8 @@ import {
   reminders,
   failureLessons,
   savedWorkflows,
+  evolutionRuns,
+  evolutionFindings,
   type FailureLessonRow,
   type SavedWorkflow,
   type Reminder,
@@ -1542,6 +1544,145 @@ export async function bumpFailureLessonApplied(id: string): Promise<void> {
     .update(failureLessons)
     .set({ times_applied: sql`${failureLessons.times_applied} + 1` })
     .where(eq(failureLessons.id, id));
+}
+
+// ── evolution_runs / evolution_findings (self-audit memory) ───────────────────
+// See src/db/schema.ts for the status machine and src/evolution/persist-findings.ts
+// for the orchestration these functions back.
+
+/** Open a run row. Returns the new run's id. */
+export async function startEvolutionRun(data: {
+  tenant_id: string;
+  commit_sha: string | null;
+  loop: "audit" | "acting";
+  analyzers_run: string[];
+}): Promise<string> {
+  const db = getDb();
+  const [row] = await db
+    .insert(evolutionRuns)
+    .values({
+      tenant_id: data.tenant_id,
+      commit_sha: data.commit_sha,
+      loop: data.loop,
+      analyzers_run: data.analyzers_run,
+    })
+    .returning({ id: evolutionRuns.id });
+  if (!row) throw new Error("startEvolutionRun: insert returned no rows");
+  return row.id;
+}
+
+/** Close a run row once every finding in it has been upserted. */
+export async function finishEvolutionRun(
+  runId: string,
+  data: { findings_count: number; outcome: string },
+): Promise<void> {
+  const db = getDb();
+  await db
+    .update(evolutionRuns)
+    .set({ finished_at: new Date(), findings_count: data.findings_count, outcome: data.outcome })
+    .where(eq(evolutionRuns.id, runId));
+}
+
+/** Prior state for a batch of fingerprints — the read persist-findings.ts diffs against. */
+export async function getEvolutionFindingsByFingerprint(
+  tenantId: string,
+  fingerprints: readonly string[],
+): Promise<Array<{ fingerprint: string; status: string; times_seen: number }>> {
+  if (fingerprints.length === 0) return [];
+  const db = getDb();
+  return db
+    .select({
+      fingerprint: evolutionFindings.fingerprint,
+      status: evolutionFindings.status,
+      times_seen: evolutionFindings.times_seen,
+    })
+    .from(evolutionFindings)
+    .where(
+      and(eq(evolutionFindings.tenant_id, tenantId), inArray(evolutionFindings.fingerprint, [...fingerprints])),
+    );
+}
+
+/**
+ * Upsert one finding by (tenant, fingerprint): first sighting inserts at
+ * `status='open', times_seen=1`; every repeat bumps `times_seen` and, if the
+ * row was `resolved`, flips it to `regressed` and clears `resolved_at` — a
+ * finding that reappears after being marked fixed must never silently look
+ * like ordinary recurrence. The CASE expressions run inside Postgres so the
+ * transition is atomic with the increment, not a separate read-then-write.
+ */
+export async function upsertEvolutionFinding(data: {
+  tenant_id: string;
+  fingerprint: string;
+  kind: string;
+  subject: string;
+  severity: string;
+  location: string | null;
+  detail: string;
+  analyzer: string;
+  run_id: string;
+}): Promise<void> {
+  const db = getDb();
+  await db
+    .insert(evolutionFindings)
+    .values({
+      tenant_id: data.tenant_id,
+      fingerprint: data.fingerprint,
+      kind: data.kind,
+      subject: data.subject,
+      severity: data.severity,
+      location: data.location,
+      detail: data.detail,
+      analyzer: data.analyzer,
+      run_id: data.run_id,
+      last_seen_at: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [evolutionFindings.tenant_id, evolutionFindings.fingerprint],
+      set: {
+        times_seen: sql`${evolutionFindings.times_seen} + 1`,
+        last_seen_at: new Date(),
+        run_id: data.run_id,
+        severity: data.severity,
+        subject: data.subject,
+        location: data.location,
+        detail: data.detail,
+        analyzer: data.analyzer,
+        status: sql`CASE WHEN ${evolutionFindings.status} = 'resolved' THEN 'regressed' ELSE ${evolutionFindings.status} END`,
+        resolved_at: sql`CASE WHEN ${evolutionFindings.status} = 'resolved' THEN NULL ELSE ${evolutionFindings.resolved_at} END`,
+      },
+    });
+}
+
+/**
+ * Coverage-gated resolution: mark `resolved` every `open`/`regressed` finding
+ * previously attributed to `analyzer` whose fingerprint is NOT in
+ * `currentFingerprints` — i.e. the analyzer ran again (coverage) and this
+ * time did not reproduce it. An empty `currentFingerprints` (the analyzer ran
+ * and found nothing at all) resolves every remaining open/regressed row for
+ * that analyzer. Callers must only invoke this for analyzers that actually
+ * ran this cycle — never for one that was skipped (see persist-findings.ts).
+ */
+export async function resolveMissingEvolutionFindings(
+  tenantId: string,
+  analyzer: string,
+  currentFingerprints: readonly string[],
+): Promise<Array<{ fingerprint: string }>> {
+  const db = getDb();
+  const stillOpenOrRegressed = or(
+    eq(evolutionFindings.status, "open"),
+    eq(evolutionFindings.status, "regressed"),
+  );
+  const base = and(eq(evolutionFindings.tenant_id, tenantId), eq(evolutionFindings.analyzer, analyzer), stillOpenOrRegressed);
+  const where =
+    currentFingerprints.length > 0
+      ? and(base, notInArray(evolutionFindings.fingerprint, [...currentFingerprints]))
+      : base;
+
+  return db
+    .update(evolutionFindings)
+    .set({ status: "resolved", resolved_at: new Date() })
+    .where(where)
+    .returning({ fingerprint: evolutionFindings.fingerprint });
 }
 
 // ── Activity Summary (action_log) ─────────────────────────────────────────────
