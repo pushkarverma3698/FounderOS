@@ -229,6 +229,7 @@ describe("runFreeSweep", () => {
   it("fires the outage alert when every board failed and nothing was screened", async () => {
     mockRunFreeIngest.mockResolvedValue(
       result({
+        seen: 0,
         screened: 0,
         failures: ["greenhouse/a: HTTP 500", "lever/b: HTTP 500", "ashby/c: HTTP 500", "greenhouse/d: HTTP 500"],
       }),

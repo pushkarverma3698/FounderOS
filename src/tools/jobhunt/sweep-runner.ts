@@ -228,13 +228,14 @@ export async function runFreeSweep(): Promise<void> {
     "Free board sweep complete",
   );
 
-  if (result.failures.length > 0 && result.screened === 0) {
+  if (result.failures.length > 0 && result.seen === 0) {
     // Same guard as runJobIngestSweep's, one layer down: a sweep where every
     // board failed and nothing was screened must not read like a market with no
     // jobs in it.
     log.warn({ failures: result.failures }, "Free board sweep failed on every board");
     await sendToChat(
       esc(
+
         `⚠ Free job lane failed — nothing was screened this sweep.\n` +
           result.failures.slice(0, OUTAGE_ALERT_BOARD_CAP).join("\n"),
       ),
