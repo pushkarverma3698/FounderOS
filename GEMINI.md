@@ -40,6 +40,15 @@ pnpm verify:arch
 The list lives in [STANDARDS.md §11](docs/antigravity/STANDARDS.md) and is not repeated here — a
 partial copy is how the four files this repo just consolidated drifted apart in the first place.
 
+## Branching
+
+One branch per unit of work, cut fresh from `origin/main`, PR'd to `beta`. The rules —
+naming, lifetime, merge targets, and the narrow hotfix exception — live in
+[BRANCHING-STRATEGY.md](docs/antigravity/BRANCHING-STRATEGY.md) and are **binding on you**,
+not just on Claude. Same reason as above: pointer, not a partial copy.
+
+Branch **before** the first edit. Never leave unrelated work sitting uncommitted on `main`.
+
 ## End-of-session handoff (ALWAYS)
 
 **Automated Brain Sync:** If you created, modified, or deleted any file in the `docs/` directory during your session (including plans, architecture, or rules), you MUST autonomously run `pnpm brain:sync` in the terminal before concluding your task. Do not wait for the founder to do this.
