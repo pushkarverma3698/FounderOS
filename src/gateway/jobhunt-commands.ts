@@ -16,7 +16,7 @@
  *
  * Neither command sends anything. They compose an instruction and hand it to the
  * ordinary kernel turn, so drafting an email still stops at the HITL card
- * (ADR-009: the machine never submits an application).
+ * (ADR-018: the machine never submits an application).
  */
 
 import type { Context } from "grammy";
