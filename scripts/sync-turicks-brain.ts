@@ -14,12 +14,14 @@
  *
  * Idempotent:
  *   - knowledge_entries: title as upsert key; bumps version on content change.
- *   - turicks_brain: per-source refresh (delete this source's chunks, re-insert).
+ *   - turicks_brain: per-source refresh (delete this source's chunks, re-insert),
+ *     SKIPPED entirely when every chunk already carries this content's sha256.
  *
  * Requires: Ollama running with nomic-embed-text pulled, Postgres + pgvector up.
  */
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, basename } from "node:path";
 import { sql } from "drizzle-orm";
 import { getDb } from "../src/db/client.js";
@@ -30,6 +32,32 @@ import { embedText, embedTexts, chunkText } from "../src/lib/embed.js";
 /** Postgres vector literal: number[] → "[1,2,3]". */
 function toVector(embedding: number[]): string {
   return `[${embedding.join(",")}]`;
+}
+
+/**
+ * Fingerprint of a doc's content, stored on every chunk it produces. This is the
+ * key that lets an unchanged doc skip re-embedding on the next sync.
+ */
+export function contentSha(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+/**
+ * Whether a source's vector chunks must be re-embedded, given how many rows
+ * already carry this content's sha and how many chunks the content produces.
+ *
+ * Until 2026-08-12 every sync re-embedded every chunk of every doc, changed or
+ * not. Ollama on the VPS serializes embeds at ~1.1s each, so a no-op sync cost
+ * ~555 round trips (~10 min) — which is what blew the deploy's 10-minute SSH
+ * budget and killed the remote script mid-flight.
+ *
+ * A PARTIAL match must still refresh: a run killed mid-insert leaves fewer rows
+ * than the content expects, and calling that current would pin a truncated doc
+ * in retrieval forever.
+ */
+export function needsChunkRefresh(matchingChunks: number, expectedChunks: number): boolean {
+  if (expectedChunks === 0) return false;
+  return matchingChunks !== expectedChunks;
 }
 
 interface DocEntry {
@@ -337,7 +365,10 @@ function collectDocs(rootDir: string): DocEntry[] {
 
 async function upsertEntry(
   entry: DocEntry,
-  docEmbedding: number[] | null,
+  /** Lazy: called ONLY when a row actually needs a doc-level vector written.
+   *  Eagerly embedding here cost one Ollama round trip per doc per sync even
+   *  when the row was unchanged and already had a vector. */
+  embedDoc: (() => Promise<number[]>) | null,
 ): Promise<{ action: "inserted" | "updated" | "skipped"; id: string }> {
   const db = getDb();
   const existing = await db
@@ -367,13 +398,17 @@ async function upsertEntry(
         is_current: true,
       })
       .returning({ id: knowledgeEntries.id });
-    if (docEmbedding) await setKnowledgeEmbedding(row!.id, docEmbedding);
+    if (embedDoc) await setKnowledgeEmbedding(row!.id, await embedDoc());
     return { action: "inserted", id: row!.id };
   }
 
   const current = existing[0]!;
   if (current.content === entry.content) {
-    if (docEmbedding) await setKnowledgeEmbedding(current.id, docEmbedding);
+    // Unchanged row: only embed if the vector is actually missing (a sync that
+    // died before this column was written, or a keyword-only run).
+    if (embedDoc && current.embedding === null) {
+      await setKnowledgeEmbedding(current.id, await embedDoc());
+    }
     return { action: "skipped", id: current.id };
   }
 
@@ -397,7 +432,7 @@ async function upsertEntry(
       is_current: true,
     })
     .returning({ id: knowledgeEntries.id });
-  if (docEmbedding) await setKnowledgeEmbedding(row!.id, docEmbedding);
+  if (embedDoc) await setKnowledgeEmbedding(row!.id, await embedDoc());
 
   return { action: "updated", id: row!.id };
 }
@@ -414,11 +449,26 @@ async function setKnowledgeEmbedding(id: string, embedding: number[]): Promise<v
  * Refresh a single source's chunks in the turicks_brain vector table.
  * Idempotent: deletes any existing chunks for this source_path, then inserts
  * freshly-embedded chunks. This is the store search_turicks_brain queries.
+ *
+ * Cheap when nothing changed: one COUNT query decides. Every chunk carries the
+ * sha256 of the doc it came from, so "all expected chunks already present with
+ * this sha" ⇒ nothing to do, and the (chunks + 1) Ollama round trips are skipped.
  */
-async function syncVectorChunks(entry: DocEntry): Promise<number> {
+async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refreshed: boolean }> {
   const db = getDb();
   const chunks = chunkText(entry.content);
-  if (chunks.length === 0) return 0;
+  if (chunks.length === 0) return { chunks: 0, refreshed: false };
+
+  const sha = contentSha(entry.content);
+  const counted = await db.execute(sql`
+    SELECT count(*)::int AS n FROM turicks_brain
+    WHERE metadata->>'source_path' = ${entry.source}
+      AND metadata->>'content_sha' = ${sha}
+  `);
+  const matching = Number((counted[0] as { n: number | string } | undefined)?.n ?? 0);
+  if (!needsChunkRefresh(matching, chunks.length)) {
+    return { chunks: chunks.length, refreshed: false };
+  }
 
   const embeddings = await embedTexts(chunks);
 
@@ -435,13 +485,14 @@ async function syncVectorChunks(entry: DocEntry): Promise<number> {
       tags: entry.tags,
       chunk_index: i,
       chunk_count: chunks.length,
+      content_sha: sha,
     };
     await db.execute(sql`
       INSERT INTO turicks_brain (content, metadata, embedding)
       VALUES (${chunks[i]!}, ${JSON.stringify(metadata)}::jsonb, ${toVector(embeddings[i]!)}::vector)
     `);
   }
-  return chunks.length;
+  return { chunks: chunks.length, refreshed: true };
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -478,25 +529,28 @@ async function main() {
   let updated = 0;
   let skipped = 0;
   let totalChunks = 0;
+  let currentDocs = 0;
   let failures = 0;
 
   for (const doc of docs) {
     try {
-      const docEmbedding = keywordOnly
+      const embedDoc = keywordOnly
         ? null
-        : await embedText(`${doc.title}\n\n${doc.content.slice(0, 4000)}`);
-      const { action } = await upsertEntry(doc, docEmbedding);
+        : () => embedText(`${doc.title}\n\n${doc.content.slice(0, 4000)}`);
+      const { action } = await upsertEntry(doc, embedDoc);
 
       let chunks = 0;
+      let refreshed = false;
       if (!keywordOnly) {
-        chunks = await syncVectorChunks(doc);
-        totalChunks += chunks;
+        ({ chunks, refreshed } = await syncVectorChunks(doc));
+        if (refreshed) totalChunks += chunks;
+        else currentDocs++;
       }
 
       const icon = action === "inserted" ? "✅" : action === "updated" ? "🔄" : "—";
       console.log(
         `${icon} [${action}] ${doc.entry_type}: ${doc.title}` +
-          (keywordOnly ? "" : `  (${chunks} chunks)`),
+          (keywordOnly ? "" : `  (${chunks} chunks${refreshed ? " embedded" : " already current"})`),
       );
       if (action === "inserted") inserted++;
       else if (action === "updated") updated++;
@@ -509,7 +563,10 @@ async function main() {
 
   console.log(
     `\n✅ Sync complete: ${inserted} inserted, ${updated} updated, ${skipped} skipped` +
-      (keywordOnly ? " (keyword-only)" : ` · ${totalChunks} vector chunks embedded into turicks_brain`) +
+      (keywordOnly
+        ? " (keyword-only)"
+        : ` · ${totalChunks} vector chunks embedded into turicks_brain` +
+          ` · ${currentDocs} docs already current (no embedding needed)`) +
       (failures > 0 ? ` · ${failures} FAILED` : ""),
   );
   process.exit(failures > 0 ? 1 : 0);
