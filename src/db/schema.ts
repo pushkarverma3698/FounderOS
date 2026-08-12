@@ -1002,7 +1002,7 @@ export const jobApplications = agentsSchema.table(
      * happily take in September.
      *
      * Written only by the Mac apply client — the machine never submits an
-     * application (ADR-009), so it learns either fact only from a founder click.
+     * application (ADR-018), so it learns either fact only from a founder click.
      * NULL on both = still in the queue.
      */
     skipped_at: timestamp("skipped_at", { withTimezone: true }),
