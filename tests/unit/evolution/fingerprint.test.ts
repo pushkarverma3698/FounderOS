@@ -68,8 +68,8 @@ describe("computeFingerprint", () => {
   });
 
   it("two different findings with no location (unused-dependency-shaped) do not collide", () => {
-    const a = computeFingerprint({ kind: "unused-dependency", subject: "lodash", evidence: "e", severity: "medium" });
-    const b = computeFingerprint({ kind: "unused-dependency", subject: "axios", evidence: "e", severity: "medium" });
+    const a = computeFingerprint({ kind: "unused-dependency", subject: "lodash" });
+    const b = computeFingerprint({ kind: "unused-dependency", subject: "axios" });
     expect(a).not.toBe(b);
   });
 
@@ -86,8 +86,8 @@ describe("computeFingerprint", () => {
   it("does not let a shifted boundary between fields forge a collision", () => {
     // kind="a", location="bc" vs kind="ab", location="c" — a naive plain-concat
     // join would hash both to "abc"; the separator must prevent that.
-    const a = computeFingerprint({ kind: "dead-export" as Finding["kind"], location: "bc", subject: "s", evidence: "", severity: "low" });
-    const b = computeFingerprint({ kind: "dead-export" as Finding["kind"], location: "c", subject: "s", evidence: "", severity: "low" });
+    const a = computeFingerprint({ kind: "dead-export" as Finding["kind"], location: "bc", subject: "s" });
+    const b = computeFingerprint({ kind: "dead-export" as Finding["kind"], location: "c", subject: "s" });
     expect(a).not.toBe(b);
   });
 });
