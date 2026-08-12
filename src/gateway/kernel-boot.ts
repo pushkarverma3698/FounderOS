@@ -32,6 +32,7 @@ import { withModelRetry } from "./model-retry.js";
 import { withLlmCache } from "./model-cache.js";
 import { env } from "../core/config.js";
 import { DEPARTMENT_TOOLS, applyMcpBridge } from "../agents/capabilities.js";
+import { applySkillSynthesisLoader } from "../agents/skill-loader.js";
 import { resolveVpsRunConfig } from "../tools/vps-run.js";
 import { getCheckpointer } from "../infra/checkpointer.js";
 import { getFailureLesson, upsertFailureLesson, bumpFailureLessonApplied } from "../db/queries.js";
@@ -210,6 +211,11 @@ let _kernel: CompiledKernel | undefined;
 export async function getKernel(): Promise<CompiledKernel> {
   if (_kernel) return _kernel;
   await applyMcpBridge(); // merge external MCP tools before specs read DEPARTMENT_TOOLS
+  // Same phase, same ordering constraint, right after applyMcpBridge so the
+  // synthesized-tool collision check also sees any already-bridged MCP names.
+  // No-op (not even a readdir) unless SKILL_SYNTHESIS_ENABLED — see
+  // src/agents/skill-loader.ts for the full untrusted-input discipline.
+  await applySkillSynthesisLoader();
   const checkpointer = await getCheckpointer();
   _kernel = buildProductionKernel(checkpointer as unknown as BaseCheckpointSaver);
   log.info(`Kernel compiled: planner + pure supervisor + ${WORKERS.length} workers + synthesizer`);

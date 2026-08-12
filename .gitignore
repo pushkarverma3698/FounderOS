@@ -59,6 +59,11 @@ gumroad-packs/
 # One-off board-registry maintenance run artifacts (scripts/jobhunt-board-registry.ts)
 .board-registry/
 
+# Boot-time compilation cache for synthesize_skill-authored tools
+# (src/agents/skill-loader.ts) — regenerated from src/tools/custom/ on every
+# boot, never source of truth.
+.synthesized-cache/
+
 # Mac apply client: local venv, the founder's real identity/resume paths, and
 # the synced queue + outcome ledger. apply-profile.json is PERSONAL DATA and
 # .queue/ holds row ids from production — neither belongs in git.
