@@ -1,6 +1,6 @@
 """The browser queue: one job on screen, pre-filled, waiting for your decision.
 
-THE MACHINE NEVER SUBMITS ON ITS OWN (ADR-009). It fills the fields it can
+THE MACHINE NEVER SUBMITS UNATTENDED (ADR-018). It fills the fields it can
 verify from the profile, leaves everything else blank, and stops. The click that
 presses the employer's real submit button is the founder's, and it is the same
 click that records the application — so the ledger cannot drift from reality in
