@@ -6,13 +6,21 @@
 #
 # Idempotent and fail-loud: any step before the restart failing aborts the
 # deploy and the OLD instance keeps running. The restart happens immediately
-# after migrations — best-effort steps (brain:sync, seed-founder-context, the
-# MCP/Slack/S3 diagnostic checks) run AFTER the new code is already live, so a
-# slow or hanging RAG sync can never block shipping a working bot. That used to
-# not be true: brain:sync ran before the restart, and when it got slow enough
-# to exceed the CI action's 10-minute SSH timeout, the whole remote script was
-# killed mid-flight — including the restart, which came after it — leaving
-# prod on stale code across several consecutive "green" deploys (2026-08-11/12).
+# after migrations — best-effort steps (seed-founder-context, the MCP/Slack/S3
+# diagnostic checks) run AFTER the new code is already live, and each is bounded
+# so it cannot consume the SSH budget.
+#
+# Two 2026-08-12 fixes, in order:
+#   1. brain:sync ran BEFORE the restart. When it grew slow enough to exceed the
+#      CI action's 10-minute SSH timeout, the whole remote script was killed
+#      mid-flight — including the restart, which came after it — leaving prod on
+#      stale code across several consecutive "green" deploys (#455).
+#   2. Moved after the restart, brain:sync still ate the rest of the budget and
+#      was killed every run: the deploy JOB reported RED on a production that had
+#      updated correctly, and the RAG store was never actually refreshed. It is
+#      no longer run here at all. It runs on its own schedule, with its own
+#      30-minute budget, in .github/workflows/brain-sync.yml. A deploy's job
+#      status now reflects only whether PRODUCTION came up healthy.
 set -euo pipefail
 
 APP_DIR="/opt/founderos"
@@ -60,7 +68,7 @@ done
 
 # Ensure Ollama is running. docker compose up -d starts it, but if the container
 # was stopped manually (or the Ollama service crashed), restart it explicitly.
-# This is the most common cause of empty turicks_brain: brain:sync ran while
+# This is the most common cause of an empty turicks_brain: a brain sync ran while
 # Ollama was down and silently emitted 0 embeddings.
 echo "==> Ensuring Ollama container is running"
 if ! docker ps --filter "name=founderos-ollama" --filter "status=running" --quiet | grep -q .; then
@@ -78,8 +86,9 @@ for i in {1..30}; do
   fi
   echo "    waiting for ollama ($i/30)"; sleep 2
 done
-# Best-effort: Ollama only powers RAG embeddings. If it's down, brain:sync warns
-# below and the bot still deploys — don't abort a working bot for a RAG sidecar.
+# Best-effort: Ollama only powers RAG embeddings (query-time search plus the
+# out-of-band brain sync). If it's down the bot still deploys — don't abort a
+# working bot for a RAG sidecar.
 if ! curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
   echo "    WARNING: Ollama not up in 60s — RAG embeddings will be skipped." >&2
   echo "             Fix: docker start founderos-ollama && ollama pull nomic-embed-text" >&2
@@ -153,34 +162,31 @@ fi
 
 # ---------------------------------------------------------------------------
 # Everything below here runs AFTER the new code is already live and healthy.
-# All of it is best-effort: it must never be able to block or delay shipping
-# a working bot, however long it takes or however it fails.
+# All of it is best-effort AND bounded: it must never be able to block or delay
+# shipping a working bot, nor turn a good deploy red, however it fails.
+#
+# NOTHING here may be unbounded. The SSH action gives the whole script one
+# 10-minute budget; an open-ended step at the tail spends the budget the restart
+# needed, and once the budget is gone the action reports failure even though
+# production is live and healthy. `timeout` on every command is the mechanism.
 # ---------------------------------------------------------------------------
 
-# Populate the turicks_brain pgvector store from docs/ (embeds via local Ollama).
-# BEST-EFFORT (not fatal): a RAG-sync hiccup must never block shipping a working
-# bot. RAG degrades gracefully — query-time anti-fabricate sentinel (2026-06-15
-# fix) handles a thin/empty store. Re-run `pnpm brain:sync` out-of-band if warned.
-echo "==> Syncing turicks-brain vector store (brain:sync) — best-effort, post-restart"
-if pnpm brain:sync; then
-  echo "    brain:sync OK"
-else
-  echo "    WARNING: brain:sync failed — RAG may be stale/empty. Bot still deploys; re-run once Ollama is healthy." >&2
-fi
-
+# turicks_brain is NOT synced here — see the header. Report what the store holds
+# so a stale/empty brain is visible on every deploy, then move on.
 EMBEDDED="$(docker exec founderos-postgres psql -U founderos -d founderos -tAc \
   "SELECT count(*) FROM brain.turicks_brain WHERE embedding IS NOT NULL;" 2>/dev/null | tr -d ' ' || true)"
 if [ -z "$EMBEDDED" ] || [ "$EMBEDDED" -le 0 ] 2>/dev/null; then
-  echo "    WARNING: turicks_brain has 0 embedded rows — RAG answers stay thin until brain:sync succeeds." >&2
+  echo "    WARNING: turicks_brain has 0 embedded rows — RAG answers stay thin until a brain sync runs." >&2
+  echo "             Run it: gh workflow run brain-sync.yml   (or on the box: pnpm brain:sync)" >&2
 else
-  echo "    turicks_brain embedded rows: $EMBEDDED"
+  echo "    turicks_brain embedded rows: $EMBEDDED (refreshed by .github/workflows/brain-sync.yml)"
 fi
 
-echo "==> Seeding founder context (idempotent) — best-effort"
-if node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts; then
+echo "==> Seeding founder context (idempotent) — best-effort, 120s cap"
+if timeout 120 node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts; then
   echo "    seed-founder-context OK"
 else
-  echo "    WARNING: seed-founder-context failed — founder context may be stale. Bot still deploys." >&2
+  echo "    WARNING: seed-founder-context failed or timed out — founder context may be stale. Bot still deploys." >&2
 fi
 
 echo "==> Checking MCP bridge runtime dependencies"
