@@ -4,8 +4,15 @@
 #
 #   ssh founderos@host 'cd /opt/founderos && ./deploy/deploy.sh'
 #
-# Idempotent and fail-loud: any step failing aborts the deploy and the OLD
-# instance keeps running (systemd is only restarted at the very end).
+# Idempotent and fail-loud: any step before the restart failing aborts the
+# deploy and the OLD instance keeps running. The restart happens immediately
+# after migrations — best-effort steps (brain:sync, seed-founder-context, the
+# MCP/Slack/S3 diagnostic checks) run AFTER the new code is already live, so a
+# slow or hanging RAG sync can never block shipping a working bot. That used to
+# not be true: brain:sync ran before the restart, and when it got slow enough
+# to exceed the CI action's 10-minute SSH timeout, the whole remote script was
+# killed mid-flight — including the restart, which came after it — leaving
+# prod on stale code across several consecutive "green" deploys (2026-08-11/12).
 set -euo pipefail
 
 APP_DIR="/opt/founderos"
@@ -106,11 +113,55 @@ docker exec founderos-postgres psql -U founderos -d founderos -c "ALTER USER fou
 echo "==> Running migrations"
 pnpm db:migrate
 
+echo "==> Restarting service (single-instance lock makes this safe)"
+sudo systemctl restart founderos
+
+# Poll for health rather than a single shot: v3 boot binds the health server
+# only AFTER compiling the kernel + bridging MCP child servers (blender/slack/
+# deepwiki spawn at startup once MCP_BRIDGE_ENABLED=true), which pushes first-
+# healthy to ~7s — a lone `sleep 5 && curl` races the boot and reports a false
+# failure on an otherwise-successful deploy (2026-07-13). Same {1..30} idiom as
+# the Postgres/Ollama readiness loops above.
+echo "==> Waiting for health (up to 60s — v3 boot spawns MCP bridge child servers)"
+HEALTHY=""
+for i in {1..30}; do
+  if curl -fsS http://127.0.0.1:3001/health >/dev/null 2>&1; then
+    HEALTHY=1
+    echo "==> Deploy OK — /health is green (after $((i * 2))s)"
+    break
+  fi
+  sleep 2
+done
+if [ -z "$HEALTHY" ]; then
+  echo "!! /health did NOT come up in 60s — check: journalctl -u founderos -n 50" >&2
+  exit 1
+fi
+
+# Secondary surfaces — the JARVIS web UI is not the core product (the Telegram
+# bot is). Warn, don't abort, if they're down.
+if curl -fsS http://127.0.0.1:3001/api/v1/health >/dev/null; then
+  echo "==> JARVIS web gateway OK — /api/v1/health"
+else
+  echo "    WARNING: /api/v1/health failed — JARVIS web UI may be down (core bot is up)." >&2
+fi
+
+if curl -fsS http://127.0.0.1:3001/ | grep -qi 'html\|jarvis\|root'; then
+  echo "==> JARVIS UI OK — GET / serves SPA"
+else
+  echo "    (v3: web SPA removed — health endpoint only)" >&2
+fi
+
+# ---------------------------------------------------------------------------
+# Everything below here runs AFTER the new code is already live and healthy.
+# All of it is best-effort: it must never be able to block or delay shipping
+# a working bot, however long it takes or however it fails.
+# ---------------------------------------------------------------------------
+
 # Populate the turicks_brain pgvector store from docs/ (embeds via local Ollama).
 # BEST-EFFORT (not fatal): a RAG-sync hiccup must never block shipping a working
 # bot. RAG degrades gracefully — query-time anti-fabricate sentinel (2026-06-15
 # fix) handles a thin/empty store. Re-run `pnpm brain:sync` out-of-band if warned.
-echo "==> Syncing turicks-brain vector store (brain:sync) — best-effort"
+echo "==> Syncing turicks-brain vector store (brain:sync) — best-effort, post-restart"
 if pnpm brain:sync; then
   echo "    brain:sync OK"
 else
@@ -190,42 +241,4 @@ if [ -n "$GEMINI_KEY_VAL" ]; then
   fi
 else
   echo "    GOOGLE_GENERATIVE_AI_API_KEY not set — skipping storage check"
-fi
-
-echo "==> Restarting service (single-instance lock makes this safe)"
-sudo systemctl restart founderos
-
-# Poll for health rather than a single shot: v3 boot binds the health server
-# only AFTER compiling the kernel + bridging MCP child servers (blender/slack/
-# deepwiki spawn at startup once MCP_BRIDGE_ENABLED=true), which pushes first-
-# healthy to ~7s — a lone `sleep 5 && curl` races the boot and reports a false
-# failure on an otherwise-successful deploy (2026-07-13). Same {1..30} idiom as
-# the Postgres/Ollama readiness loops above.
-echo "==> Waiting for health (up to 60s — v3 boot spawns MCP bridge child servers)"
-HEALTHY=""
-for i in {1..30}; do
-  if curl -fsS http://127.0.0.1:3001/health >/dev/null 2>&1; then
-    HEALTHY=1
-    echo "==> Deploy OK — /health is green (after $((i * 2))s)"
-    break
-  fi
-  sleep 2
-done
-if [ -z "$HEALTHY" ]; then
-  echo "!! /health did NOT come up in 60s — check: journalctl -u founderos -n 50" >&2
-  exit 1
-fi
-
-# Secondary surfaces — the JARVIS web UI is not the core product (the Telegram
-# bot is). Warn, don't abort, if they're down.
-if curl -fsS http://127.0.0.1:3001/api/v1/health >/dev/null; then
-  echo "==> JARVIS web gateway OK — /api/v1/health"
-else
-  echo "    WARNING: /api/v1/health failed — JARVIS web UI may be down (core bot is up)." >&2
-fi
-
-if curl -fsS http://127.0.0.1:3001/ | grep -qi 'html\|jarvis\|root'; then
-  echo "==> JARVIS UI OK — GET / serves SPA"
-else
-  echo "    (v3: web SPA removed — health endpoint only)" >&2
 fi
