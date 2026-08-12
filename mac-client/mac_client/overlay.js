@@ -59,21 +59,127 @@
     if (!target) {
       // Never record an application we could not send. The founder finishes
       // this one by hand; saying so is the only honest option.
-      decided = false;
-      submit.disabled = false;
-      skip.disabled = false;
-      submit.innerHTML = "SUBMIT &amp; NEXT →";
-      summary.innerHTML +=
-        '<div style="color:#FF6B6B;font-size:13px">Could not find this form\'s submit ' +
-        "button — submit it yourself, then press SKIP to move on (it is recorded as " +
-        "not-applied, so it will come back tomorrow).</div>";
+      giveBack(
+        'Could not find this form\'s submit button — submit it yourself, then ' +
+          "press SKIP to move on (it is recorded as not-applied, so it will come " +
+          "back tomorrow).",
+      );
       return;
     }
 
+    // ADR-018: a form the browser itself would refuse to submit is never
+    // clicked. The founder finishes it — a guessed answer here is worse than
+    // no answer.
+    const form = target.closest("form");
+    if (form && !form.checkValidity()) {
+      const invalidNames = [...form.querySelectorAll(":invalid")]
+        .map((el) => el.name || el.id || el.placeholder || "a field")
+        .join(", ");
+      giveBack(`This form needs ${escapeHtml(invalidNames)} before it can be submitted.`);
+      return;
+    }
+
+    // A submission we can neither confirm nor rule out is left unconfirmed,
+    // never defaulted to "applied" (ADR-018). Two independent alarms:
+    //   - a JS alert/confirm/prompt is how many forms surface "fix this field"
+    //     synchronously, and would otherwise hang the automation waiting on a
+    //     native dialog, so it is intercepted rather than left to block.
+    //   - new page text matching an error pattern that was NOT present before
+    //     the click — diffed against a pre-click snapshot so boilerplate copy
+    //     that happens to contain the word "error" elsewhere on the page never
+    //     produces a false alarm.
+    let dialogSeen = false;
+    const originalAlert = window.alert;
+    const originalConfirm = window.confirm;
+    const originalPrompt = window.prompt;
+    window.alert = () => {
+      dialogSeen = true;
+    };
+    window.confirm = () => {
+      dialogSeen = true;
+      return false;
+    };
+    window.prompt = () => {
+      dialogSeen = true;
+      return null;
+    };
+
+    const beforeText = document.body.innerText.toLowerCase();
+    const startUrl = window.location.href;
+    const startTime = Date.now();
+    // Matches the original flat 1200ms wait in the worst case (no signal seen
+    // at all) — verification must not make the common, error-free path any
+    // slower than the version it replaces.
+    const settleMs = 1200;
+
+    const newText = () => {
+      const after = document.body.innerText.toLowerCase();
+      return after.length > beforeText.length && !beforeText.includes(after)
+        ? after
+        : after.slice(beforeText.length > 0 && after.startsWith(beforeText) ? beforeText.length : 0);
+    };
+
+    const failureSignal = () => {
+      if (dialogSeen) return "a dialog appeared after submitting";
+      const added = newText();
+      const failWords = ["error", "required", "please fill", "please enter", "invalid", "try again", "already associated", "failed"];
+      const hit = failWords.find((w) => added.includes(w));
+      return hit ? `the page said: "${escapeHtml(excerptAround(added, hit))}"` : null;
+    };
+
+    const successSignal = () => {
+      if (window.location.href !== startUrl && !window.location.href.includes("#")) return true;
+      const added = newText();
+      const okWords = ["thank you", "application received", "application submitted", "successfully submitted"];
+      if (okWords.some((w) => added.includes(w))) return true;
+      if (!document.body.contains(target)) return true;
+      return false;
+    };
+
+    const restoreDialogs = () => {
+      window.alert = originalAlert;
+      window.confirm = originalConfirm;
+      window.prompt = originalPrompt;
+    };
+
     target.click();
-    // Give the page a moment to accept the submission before we navigate away.
-    setTimeout(() => window.founderosDecision("applied"), 1200);
+
+    const poll = () => {
+      const failed = failureSignal();
+      if (failed) {
+        restoreDialogs();
+        giveBack(`This form was not submitted — ${failed}. Fix it and press SUBMIT again.`);
+        return;
+      }
+      if (successSignal()) {
+        restoreDialogs();
+        window.founderosDecision("applied");
+        return;
+      }
+      if (Date.now() - startTime > settleMs) {
+        // No failure was seen either — the safest read of a form that gave no
+        // visible signal at all is that the employer's handler ran clean.
+        restoreDialogs();
+        window.founderosDecision("applied");
+        return;
+      }
+      setTimeout(poll, 100);
+    };
+    setTimeout(poll, 100);
   };
+
+  function giveBack(message) {
+    decided = false;
+    submit.disabled = false;
+    skip.disabled = false;
+    submit.innerHTML = "SUBMIT &amp; NEXT →";
+    summary.innerHTML += `<div style="color:#FF6B6B;font-size:13px">${message}</div>`;
+  }
+
+  function excerptAround(text, word) {
+    const idx = text.indexOf(word);
+    return text.slice(Math.max(0, idx - 10), idx + word.length + 30).trim();
+  }
 
   function lock(label) {
     submit.disabled = true;
