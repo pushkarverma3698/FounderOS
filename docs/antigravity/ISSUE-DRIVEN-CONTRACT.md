@@ -2,8 +2,9 @@
 
 **How a GitHub Issue becomes a PR without a human relaying messages between Antigravity and
 Claude.** Read this together with [STANDARDS.md](STANDARDS.md) (how code is written — referenced,
-not restated here) and [CLAUDE_REVIEWER_INSTRUCTIONS.md](CLAUDE_REVIEWER_INSTRUCTIONS.md) (the
-review side of this same loop, run by `pr-brain`).
+not restated here), [BRANCHING-STRATEGY.md](BRANCHING-STRATEGY.md) (one branch per issue, never
+shared, never resurrected), and [CLAUDE_REVIEWER_INSTRUCTIONS.md](CLAUDE_REVIEWER_INSTRUCTIONS.md)
+(the review side of this same loop, run by `pr-brain`).
 
 ## The state machine
 

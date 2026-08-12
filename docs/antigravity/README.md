@@ -8,6 +8,8 @@ laptop-side, conversation-context work. For issue-driven, fully unattended work 
 Antigravity → PR → Claude review → fix → CI, no founder relay), see
 [ISSUE-DRIVEN-CONTRACT.md](ISSUE-DRIVEN-CONTRACT.md) and the `agent:*` label state machine it
 defines — driven by the VPS `agent-dispatch` cron, the issue-queue counterpart to `pr-brain`.
+Both paths (and Claude's own work in this repo) follow one shared rule now:
+[BRANCHING-STRATEGY.md](BRANCHING-STRATEGY.md) — one branch per unit of work, always.
 
 > **Contractors build the factory. Once the factory runs, the factory improves itself.**
 > Every brief here is Phase 0 bootstrap work. When FounderOS can plan and dispatch its own next
