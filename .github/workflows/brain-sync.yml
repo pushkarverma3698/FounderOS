@@ -1,0 +1,72 @@
+name: Brain Sync
+
+# Refresh the turicks_brain pgvector store on the VPS from the docs/ tree that
+# production is currently running.
+#
+# Why this is its own workflow and not a deploy step: brain:sync embeds through
+# Ollama on the box, which serializes requests. A full re-embed takes ~10 minutes
+# — longer than the whole SSH budget the Deploy job gets. Run inside a deploy it
+# was killed every single time, which (a) reported RED on deploys that had put
+# production live correctly, and (b) meant the store was never actually refreshed,
+# only partially rewritten before the kill (2026-08-12, run 31557142284).
+#
+# It is deliberately INDEPENDENT of Deploy: this workflow failing says nothing
+# about whether production shipped, and a deploy can never be turned red by a
+# RAG sync again. RAG also degrades gracefully — the query-time anti-fabricate
+# sentinel handles a thin or stale store, so lateness here is not an outage.
+on:
+  schedule:
+    # 03:17 UTC daily — off-peak, and not on the hour (GitHub's cron queue is
+    # busiest at :00, which delays runs).
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # Never let two syncs embed into the same store at once. Do NOT cancel a run
+  # in progress: it is mid-way through delete+insert per source, and killing it
+  # is exactly the truncation the content-sha check has to repair afterwards.
+  group: brain-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: brain:sync on VPS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run brain:sync over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script_stop: true
+          # 30m, same as vps-verify.yml. A full cold re-embed is ~10m; with the
+          # content-sha skip an unchanged tree is seconds. The margin is for a
+          # first run after a doc-wide edit.
+          command_timeout: "30m"
+          script: |
+            set -euo pipefail
+            cd /opt/founderos
+            # NO git operations here. /opt/founderos is the tree founderos.service
+            # runs from — switching its branch takes production down. This syncs
+            # the docs production is actually running, which is what the brain
+            # should reflect.
+            echo "==> HEAD: $(git rev-parse --short HEAD)"
+
+            # Ollama must be up or brain:sync aborts before writing (by design —
+            # it refuses to write keyword rows with no vectors).
+            if ! curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+              echo "    ollama not responding — starting founderos-ollama"
+              docker start founderos-ollama 2>/dev/null || \
+                docker compose -f deploy/stack.compose.yml up -d ollama
+              for i in {1..30}; do
+                curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && break
+                echo "    waiting for ollama ($i/30)"; sleep 2
+              done
+            fi
+
+            pnpm brain:sync
+
+            docker exec founderos-postgres psql -U founderos -d founderos -tAc \
+              "SELECT 'embedded rows: ' || count(*) FROM brain.turicks_brain WHERE embedding IS NOT NULL;"

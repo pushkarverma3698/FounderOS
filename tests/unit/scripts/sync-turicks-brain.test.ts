@@ -9,7 +9,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { stripStaleSections, STALE_SECTIONS } from "../../../scripts/sync-turicks-brain.js";
+import {
+  stripStaleSections,
+  STALE_SECTIONS,
+  contentSha,
+  needsChunkRefresh,
+} from "../../../scripts/sync-turicks-brain.js";
 
 const DOC = "docs/rules/PROGRAMMING-RULES.md";
 const STALE_HEADING = "## Wiring Map 2 — Add a Department";
@@ -115,5 +120,44 @@ describe("STALE_SECTIONS manifest", () => {
       "docs/DEVELOPER.md",
       "docs/rules/PROGRAMMING-RULES.md",
     ]);
+  });
+});
+
+/**
+ * The re-embed decision. Every sync used to re-embed every chunk of every doc,
+ * changed or not — ~1.1s per chunk on the VPS, ~10 minutes for a no-op run, which
+ * exceeded the deploy's SSH budget and got the remote script killed mid-flight
+ * (2026-08-12). These pin the skip, and — the case that actually matters — pin
+ * that a PARTIALLY written source is never mistaken for a current one.
+ */
+describe("needsChunkRefresh", () => {
+  it("skips when every expected chunk is already stored under this content's sha", () => {
+    expect(needsChunkRefresh(7, 7)).toBe(false);
+  });
+
+  it("refreshes when the source has no chunks under this sha (content changed, or first sync)", () => {
+    expect(needsChunkRefresh(0, 7)).toBe(true);
+  });
+
+  it("refreshes a PARTIAL write — a killed run leaves fewer rows than the content needs", () => {
+    expect(needsChunkRefresh(3, 7)).toBe(true);
+  });
+
+  it("refreshes when more rows match than expected (chunker settings changed)", () => {
+    expect(needsChunkRefresh(9, 7)).toBe(true);
+  });
+
+  it("has nothing to do for empty content", () => {
+    expect(needsChunkRefresh(0, 0)).toBe(false);
+  });
+});
+
+describe("contentSha", () => {
+  it("is stable for identical content, so an unchanged doc keeps matching its stored chunks", () => {
+    expect(contentSha("# Doc\n\nbody")).toBe(contentSha("# Doc\n\nbody"));
+  });
+
+  it("changes on any edit, so a changed doc always re-embeds", () => {
+    expect(contentSha("# Doc\n\nbody")).not.toBe(contentSha("# Doc\n\nbody."));
   });
 });
