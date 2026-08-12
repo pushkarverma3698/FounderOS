@@ -1427,7 +1427,14 @@ export async function rescheduleReminder(id: string, newTime: Date): Promise<Rem
 
 // ── failure_lessons (Hermes learning seam — kernel LessonStore backing) ───────
 
-/** One lesson per (tenant, worker, signature) — the retry-injection lookup. */
+/**
+ * One lesson per (tenant, worker, signature) — the retry-injection lookup.
+ * Gated on `times_resolved > 0`: a row that exists purely from occurrence
+ * writes (a signature seen but never yet resolved) is real evidence for the
+ * evolution/telemetry surfaces, but it is NOT "a lesson" — injecting it would
+ * tell a retry "this was previously overcome" when it never was. A lesson
+ * must be a proven resolution.
+ */
 export async function getFailureLesson(
   tenantId: string,
   worker: string,
@@ -1442,6 +1449,7 @@ export async function getFailureLesson(
         eq(failureLessons.tenant_id, tenantId),
         eq(failureLessons.worker, worker),
         eq(failureLessons.signature, signature),
+        gt(failureLessons.times_resolved, 0),
       ),
     )
     .limit(1);
@@ -1449,9 +1457,12 @@ export async function getFailureLesson(
 }
 
 /**
- * Record a resolution: first occurrence inserts, repeats bump times_seen and
- * refresh the resolving context — the newest successful correction is the one
- * future retries should imitate.
+ * Record a RESOLUTION: a retry that just settled `ok` for this signature.
+ * First occurrence inserts, repeats bump `times_resolved` and refresh the
+ * resolving context — the newest successful correction is the one future
+ * retries should imitate. This is the resolution axis only — it does NOT
+ * touch `times_seen` (bumped separately, on every occurrence, by
+ * recordFailureOccurrence below; see src/kernel/lessons.ts Hook 1 vs Hook 2).
  */
 export async function upsertFailureLesson(data: {
   tenant_id: string;
@@ -1462,17 +1473,68 @@ export async function upsertFailureLesson(data: {
   resolved_with_tools: string[];
 }): Promise<void> {
   const db = getDb();
+  const now = new Date();
   await db
     .insert(failureLessons)
-    .values({ ...data, last_resolved_at: new Date() })
+    .values({
+      ...data,
+      times_seen: 1,
+      times_resolved: 1,
+      first_seen_at: now,
+      last_seen_at: now,
+      last_resolved_at: now,
+    })
+    .onConflictDoUpdate({
+      target: [failureLessons.tenant_id, failureLessons.worker, failureLessons.signature],
+      set: {
+        times_resolved: sql`${failureLessons.times_resolved} + 1`,
+        component: data.component,
+        objective: data.objective,
+        resolved_with_tools: data.resolved_with_tools,
+        last_resolved_at: now,
+      },
+    });
+}
+
+/**
+ * Record an OCCURRENCE: this signature was just seen on the failure path,
+ * whether or not the retry it's about to feed later succeeds. Bumps
+ * `times_seen` and `last_seen_at` on every call, including the first (an
+ * occurrence with no prior resolution is still a real row — the point of this
+ * function is that a signature that fails N times with zero successful
+ * retries no longer writes zero rows). Never touches `times_resolved`,
+ * `resolved_with_tools`, `component`, or `objective` on the update path — the
+ * resolution axis is owned by upsertFailureLesson above.
+ */
+export async function recordFailureOccurrence(data: {
+  tenant_id: string;
+  worker: string;
+  signature: string;
+  component: string;
+  objective: string;
+}): Promise<void> {
+  const db = getDb();
+  const now = new Date();
+  await db
+    .insert(failureLessons)
+    .values({
+      tenant_id: data.tenant_id,
+      worker: data.worker,
+      signature: data.signature,
+      component: data.component,
+      objective: data.objective,
+      resolved_with_tools: [],
+      times_seen: 1,
+      times_resolved: 0,
+      first_seen_at: now,
+      last_seen_at: now,
+      last_resolved_at: now,
+    })
     .onConflictDoUpdate({
       target: [failureLessons.tenant_id, failureLessons.worker, failureLessons.signature],
       set: {
         times_seen: sql`${failureLessons.times_seen} + 1`,
-        component: data.component,
-        objective: data.objective,
-        resolved_with_tools: data.resolved_with_tools,
-        last_resolved_at: new Date(),
+        last_seen_at: now,
       },
     });
 }

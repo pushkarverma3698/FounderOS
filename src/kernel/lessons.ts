@@ -6,11 +6,14 @@
  * same blind way next month. This module makes the retry seam LEARN, by code:
  *
  *   - when a retry is dispatched, the failure message is normalized into a
- *     stable signature and a lesson for (worker, signature) is looked up in
- *     the injected LessonStore — a hit is appended to the retry envelope as
- *     one deterministic message (prior evidence, not a prompt rewrite);
- *   - when the retried step then validates OK, the (worker, signature →
- *     tools that resolved it) pair is recorded for every future turn.
+ *     stable signature; the OCCURRENCE is recorded unconditionally (`times_seen`
+ *     — every sighting counts, resolved or not), then a lesson for (worker,
+ *     signature) is looked up in the injected LessonStore — a hit is appended
+ *     to the retry envelope as one deterministic message (prior evidence, not
+ *     a prompt rewrite);
+ *   - when the retried step then validates OK, the RESOLUTION is recorded
+ *     separately (`times_resolved`) — the (worker, signature → tools that
+ *     resolved it) pair, for every future turn.
  *
  * Kernel-library rules hold: the store is INJECTED (Postgres in prod, fakes
  * in CI), the decorator wraps the pure dispatch without touching its logic,
@@ -58,17 +61,36 @@ export interface FailureLesson {
   objective: string;
   /** Tools whose successful receipts backed the resolving attempt. */
   resolved_with_tools: string[];
-  /** How many times this signature has been seen (recorded) so far. */
+  /** Total occurrences of this signature seen so far — resolved or not. */
   times_seen: number;
+  /** Of those occurrences, how many a retry subsequently resolved. */
+  times_resolved: number;
   /** ISO timestamp of the last successful resolution. */
   last_resolved_at: string;
+}
+
+/** What gets written on the FAILURE path — every sighting, whether or not it later resolves. */
+export interface FailureOccurrence {
+  worker: string;
+  signature: string;
+  component: string;
+  /** Objective of the step that saw this failure (context for the model). */
+  objective: string;
 }
 
 export interface LessonStore {
   /** Best lesson for this (worker, signature), or null. Must not throw upward. */
   lookup(worker: string, signature: string): Promise<FailureLesson | null>;
-  /** Record/refresh a resolution. Must not throw upward. */
-  record(lesson: Omit<FailureLesson, "times_seen" | "last_resolved_at">): Promise<void>;
+  /** Record/refresh a RESOLUTION (a retry that just settled ok). Must not throw upward. */
+  record(lesson: Omit<FailureLesson, "times_seen" | "times_resolved" | "last_resolved_at">): Promise<void>;
+  /**
+   * Record an OCCURRENCE (the failure path — a retry is about to be
+   * dispatched for this signature). Called on EVERY failure, independent of
+   * whether the retry later succeeds — this is what stops a signature that
+   * fails identically N times with zero successful retries from writing zero
+   * rows. Must not throw upward.
+   */
+  recordOccurrence(occurrence: FailureOccurrence): Promise<void>;
 }
 
 /** The one deterministic sentence injected into a retry envelope on a lesson hit. */
@@ -157,11 +179,24 @@ export function makeLessonDispatch(lessons?: LessonStore) {
           component: failed.failure.component,
           objective: step.objective,
         };
+        // Look up FIRST so the injected message reports history strictly
+        // prior to this failure, then record THIS occurrence — order doesn't
+        // change final counts, only what "seen N×" means at injection time.
         let lesson: FailureLesson | null = null;
         try {
           lesson = await lessons.lookup(step.worker, signature);
         } catch {
           /* allow-failopen: a lesson lookup blip must never break the retry it decorates */
+        }
+        try {
+          await lessons.recordOccurrence({
+            worker: step.worker,
+            signature,
+            component: failed.failure.component,
+            objective: step.objective,
+          });
+        } catch {
+          /* allow-failopen: occurrence persistence is an accelerant; a store blip must never break the turn */
         }
         if (lesson && out.scratch && typeof out.scratch === "object" && !Array.isArray(out.scratch)) {
           const stepScratch = (out.scratch as Record<string, any>)[step.step_id];
