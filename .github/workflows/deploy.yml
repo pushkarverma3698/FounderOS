@@ -20,35 +20,103 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
-    env:
-      PROD_DOTENV: ${{ secrets.PROD_DOTENV }}
-      GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
-      LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_AUTHOR_URN }}
-      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-      SLACK_TEAM_ID: ${{ secrets.SLACK_TEAM_ID }}
-      LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
     steps:
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          script_stop: true
-          command_timeout: "10m"
-          envs: PROD_DOTENV,GOOGLE_GENERATIVE_AI_API_KEY,OPENROUTER_API_KEY,LINKEDIN_ACCESS_TOKEN,LINKEDIN_AUTHOR_URN,SLACK_BOT_TOKEN,SLACK_TEAM_ID,LANGCHAIN_API_KEY
-          script: |
-            set -euo pipefail
-            cd /opt/founderos
-            if [ -d .git/refs/heads/cursor ]; then
-              rm -rf .git/refs/heads/cursor 2>/dev/null || true
-            fi
-            find .git -name '*.lock' -delete 2>/dev/null || true
-            git fetch --quiet origin main
-            git checkout --force --detach origin/main 2>/dev/null || git checkout -B main origin/main
-            chmod +x scripts/apply-prod-env-overrides.sh deploy/deploy.sh 2>/dev/null || true
-            bash scripts/apply-prod-env-overrides.sh
-            ./deploy/deploy.sh
+      # Secrets reach the VPS over stdin, NEVER as command-line arguments.
+      #
+      # This step used appleboy/ssh-action with `envs:` until 2026-08-12. That
+      # input forwards variables by prepending literal `export VAR=value`
+      # statements to the remote command string, so the entire base64 PROD_DOTENV
+      # blob — which decodes to the complete production .env — sat in the VPS
+      # process table for the whole deploy, readable by any local user running
+      # `ps`/`pgrep` (CWE-214, reproduced live on 2026-08-12).
+      #
+      # Now the remote command line carries only the non-secret script text. The
+      # values travel through the ssh channel as stdin and are read into the
+      # remote shell's environment, which is exposed only through
+      # /proc/<pid>/environ (mode 0400, owner-only) — never through the
+      # world-readable /proc/<pid>/cmdline.
+      #
+      # Do not reintroduce `envs:`, and never interpolate a secret into the ssh
+      # command string or into any argument of a command run on the box.
+      - name: Deploy over SSH (secrets via stdin, never argv)
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          PROD_DOTENV: ${{ secrets.PROD_DOTENV }}
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          LINKEDIN_AUTHOR_URN: ${{ secrets.LINKEDIN_AUTHOR_URN }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_TEAM_ID: ${{ secrets.SLACK_TEAM_ID }}
+          LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          KEY_FILE="$(mktemp)"
+          SCRIPT_FILE="$(mktemp)"
+          chmod 600 "$KEY_FILE"
+          trap 'rm -f "$KEY_FILE" "$SCRIPT_FILE"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_FILE"
+
+          # The remote script contains NO secrets, so passing it as an argument is
+          # fine — it is exactly what used to be the `script:` input. Quoted
+          # heredoc, so the runner expands nothing inside it. It goes to a file
+          # rather than `$(cat <<'EOF')` because a heredoc inside a command
+          # substitution does not parse on bash 3.2, and that would make this
+          # step unverifiable outside a runner.
+          cat > "$SCRIPT_FILE" <<'REMOTE'
+          set -euo pipefail
+          umask 077
+
+          # Read the KEY=base64(VALUE) stream off stdin into the environment.
+          # Plain assignment (not `export VAR=$(...)`) so that a decode failure is
+          # not masked by the export builtin's own exit status under `set -e`.
+          while read -r __line; do
+            [ -n "$__line" ] || continue
+            __key="${__line%%=*}"
+            __dec="$(printf '%s' "${__line#*=}" | base64 -d)"
+            export "$__key=$__dec"
+          done
+          unset __line __key __dec
+
+          cd /opt/founderos
+          if [ -d .git/refs/heads/cursor ]; then
+            rm -rf .git/refs/heads/cursor 2>/dev/null || true
+          fi
+          find .git -name '*.lock' -delete 2>/dev/null || true
+          git fetch --quiet origin main
+          git checkout --force --detach origin/main 2>/dev/null || git checkout -B main origin/main
+          chmod +x scripts/apply-prod-env-overrides.sh deploy/deploy.sh 2>/dev/null || true
+          bash scripts/apply-prod-env-overrides.sh </dev/null
+          ./deploy/deploy.sh </dev/null
+          REMOTE
+
+          # One line per secret, value base64-encoded so the stream stays
+          # single-line and binary-safe and the remote side needs no eval.
+          # `printf` is a bash builtin and `base64` reads stdin, so nothing lands
+          # in argv on the runner either.
+          emit() {
+            printf '%s=%s\n' "$1" "$(printf '%s' "${2-}" | base64 -w0)"
+          }
+
+          {
+            emit PROD_DOTENV                  "$PROD_DOTENV"
+            emit GOOGLE_GENERATIVE_AI_API_KEY "$GOOGLE_GENERATIVE_AI_API_KEY"
+            emit OPENROUTER_API_KEY           "$OPENROUTER_API_KEY"
+            emit LINKEDIN_ACCESS_TOKEN        "$LINKEDIN_ACCESS_TOKEN"
+            emit LINKEDIN_AUTHOR_URN          "$LINKEDIN_AUTHOR_URN"
+            emit SLACK_BOT_TOKEN              "$SLACK_BOT_TOKEN"
+            emit SLACK_TEAM_ID                "$SLACK_TEAM_ID"
+            emit LANGCHAIN_API_KEY            "$LANGCHAIN_API_KEY"
+          } | timeout 10m ssh \
+                -i "$KEY_FILE" \
+                -p "${DEPLOY_PORT:-22}" \
+                -o BatchMode=yes \
+                -o StrictHostKeyChecking=accept-new \
+                -o ConnectTimeout=30 \
+                "$DEPLOY_USER@$DEPLOY_HOST" \
+                "$(cat "$SCRIPT_FILE")"
