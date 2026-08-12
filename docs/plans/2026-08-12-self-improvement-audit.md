@@ -133,7 +133,8 @@ the analyzers that produce HIGH severity in the reporting path.
 
 ### Cut 2 — Findings are never persisted, so nothing can compound
 
-**Verified:** there is no findings table in `src/db/schema.ts` (27 tables, none of them), and
+**Verified:** there is no findings table anywhere in the schema — 26 `.table()` declarations in
+`src/db/schema.ts` plus 2 `pgTable()` in `src/db/schema/entity-graph-schema.ts`, none of them — and
 there is **no `insert` anywhere in `src/evolution/` or either entry script.**
 
 Every self-audit starts from zero. The system cannot distinguish:
