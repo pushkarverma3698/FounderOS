@@ -106,7 +106,16 @@ DB_PASS=$(printf '%s' "$DB_URL" | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|')
 # "postgres" (that role does not exist in this cluster, so the old `-U postgres`
 # silently failed every deploy, leaving the password drifted → migrations 28P01).
 # Local socket auth is trust for the superuser, so no password is needed here.
-docker exec founderos-postgres psql -U founderos -d founderos -c "ALTER USER founderos WITH PASSWORD '$DB_PASS';" \
+# The statement goes in over STDIN, not as a `-c` argument: `psql -c "ALTER USER
+# ... PASSWORD '...'"` puts the production DB password in this container's argv,
+# i.e. in the world-readable process table of the box for as long as the command
+# runs (CWE-214, same defect class as the deploy.yml `envs:` leak fixed
+# 2026-08-12). `printf` is a bash builtin, so the password never becomes an argv
+# entry here either. ON_ERROR_STOP keeps the non-zero exit that the `-c` form
+# gave us — without it psql exits 0 on a failed statement and the ok/WARNING
+# branches below would both lie.
+printf "ALTER USER founderos WITH PASSWORD '%s';\n" "$DB_PASS" \
+  | docker exec -i founderos-postgres psql -v ON_ERROR_STOP=1 -U founderos -d founderos \
   && echo "    Password synced OK" \
   || echo "    WARNING: could not sync password (migration may fail)"
 
