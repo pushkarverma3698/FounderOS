@@ -253,6 +253,15 @@ describe("runFreeSweep", () => {
     expect(mockSendToChat).not.toHaveBeenCalled();
   });
 
+  it("does not fire the outage alert when a board failed and seen > 0 but nothing was screened (the false positive fix)", async () => {
+    mockRunFreeIngest.mockResolvedValue(
+      result({ seen: 20551, screened: 0, failures: ["greenhouse/crcevans: HTTP 404"], lines: [] }),
+    );
+    await runFreeSweep();
+
+    expect(mockSendToChat).not.toHaveBeenCalled();
+  });
+
   it("does not reject when the underlying ingest throws", async () => {
     mockRunFreeIngest.mockRejectedValue(new Error("network down"));
 
