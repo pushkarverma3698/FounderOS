@@ -57,7 +57,8 @@ cursor/* or feat/*  →  beta  →  main (CD deploys)
 
 | Action | Rule |
 |--------|------|
-| Cut branch from | `beta` (fetch + pull first) |
+| Cut branch from | **fresh `origin/main`** — not `beta`. `beta` may hold someone else's unmerged work, and cutting from it drags that into your PR. `sync-beta.yml` keeps `beta` level with `main`, so this costs you nothing. |
+| Naming + one-branch-per-task | `docs/antigravity/BRANCHING-STRATEGY.md` — **binding**, and it applies to you exactly as it applies to Claude |
 | Open PR to | **`beta`** always |
 | Merge to `main` | Allowed, via a `beta → main` promotion PR, once CI is green |
 | Merge on red CI | **Never.** Branch protection on `main` still requires both checks |
@@ -66,9 +67,9 @@ cursor/* or feat/*  →  beta  →  main (CD deploys)
 ### When creating a PR
 
 ```bash
-# 1. Start clean: pull latest beta and checkout your branch
-git fetch origin beta && git checkout beta && git pull origin beta
-git checkout -b cursor/my-task-d523
+# 1. Start clean: cut a fresh branch from origin/main (same as the VPS dispatcher does)
+git fetch origin main
+git checkout -B cursor/my-task-d523 origin/main
 
 # 2. ... perform work ...
 
