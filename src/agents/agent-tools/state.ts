@@ -103,19 +103,19 @@ export const writeArtifact = tool(
 
 export const deliverArtifact = tool(
   async ({ path: filePath, caption }, config) => {
-    try {
-      const rejected = await hitlGate(
-        {
-          action: "deliver_artifact",
-          title: `📄 Deliver artifact to Telegram?`,
-          summary: `Deliver artifact at ${filePath}`,
-          preview: filePath,
-          args: { path: filePath },
-        },
-        config,
-      );
-      if (rejected) return rejected;
+    const rejected = await hitlGate(
+      {
+        action: "deliver_artifact",
+        title: `📄 Deliver artifact to Telegram?`,
+        summary: `Deliver artifact at ${filePath}`,
+        preview: filePath,
+        args: { path: filePath },
+      },
+      config,
+    );
+    if (rejected) return rejected;
 
+    try {
       const result = await deliverArtifactFile({
         path: filePath,
         caption: caption ?? undefined,
