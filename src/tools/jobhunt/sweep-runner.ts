@@ -107,7 +107,7 @@ export async function runJobIngestSweep(): Promise<void> {
     await sendToChat(
       toTelegramSafe(
         `⚠ Screened ${result.fetched} posting(s), but the ranking could not be built: ` +
-          `${(err as Error).message}\nThe screening results are recorded — run /jobs to read them.`,
+          `${(err as Error).message}\nThe screening results are recorded — ask for the job brief to read them.`,
       ),
     );
   }
@@ -139,7 +139,7 @@ async function publishSheet(): Promise<{ link: string | null; notice: string | n
     link: null,
     notice: esc(
       exported.skipped
-        ? `⚠ The job sheet is not set up yet (${exported.reason}) — results are recorded, run /jobs to read them.`
+        ? `⚠ The job sheet is not set up yet (${exported.reason}) — results are recorded, ask for the job brief to read them.`
         : `⚠ The job sheet could not be updated: ${exported.reason}`,
     ),
   };
