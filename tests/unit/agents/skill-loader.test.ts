@@ -12,8 +12,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
+const mockLog = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
 vi.mock("../../../src/infra/logger.js", () => ({
-  childLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  childLogger: () => mockLog,
 }));
 
 import {
@@ -96,6 +97,8 @@ describe("skill-loader — flag on", () => {
   });
 
   it("degrades to zero tools (never throws) when the directory does not exist", async () => {
+    mockLog.info.mockClear();
+    mockLog.error.mockClear();
     const deps = makeDeps({
       readdir: vi.fn(async () => {
         throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -103,6 +106,27 @@ describe("skill-loader — flag on", () => {
     });
     const outcome = await loadSynthesizedSkills(new Set(), deps);
     expect(outcome).toEqual({ loaded: [], skippedCount: 0 });
+    // ENOENT is the ordinary steady state (no skill ever synthesized) — quiet, not an error log.
+    expect(mockLog.info).toHaveBeenCalledOnce();
+    expect(mockLog.error).not.toHaveBeenCalled();
+  });
+
+  it("logs LOUDLY (error, not info) when the directory read fails for a reason OTHER than ENOENT", async () => {
+    mockLog.info.mockClear();
+    mockLog.error.mockClear();
+    const deps = makeDeps({
+      readdir: vi.fn(async () => {
+        throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+      }),
+    });
+    const outcome = await loadSynthesizedSkills(new Set(), deps);
+    // Still degrades gracefully — a permission error must never crash boot.
+    expect(outcome).toEqual({ loaded: [], skippedCount: 0 });
+    // But it must NOT be logged at the same quiet level as the ordinary
+    // "nothing synthesized yet" case — an EACCES/EPERM here means the loader
+    // is silently blind, and that has to be visible in logs.
+    expect(mockLog.error).toHaveBeenCalledOnce();
+    expect(mockLog.info).not.toHaveBeenCalled();
   });
 
   it("skips (does not crash) a module that throws on import", async () => {

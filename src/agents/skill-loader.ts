@@ -204,12 +204,18 @@ export async function loadSynthesizedSkills(
     entries = await deps.readdir(CUSTOM_TOOLS_DIR);
   } catch (err) {
     // ENOENT — no skill has ever been synthesized yet — is the ordinary
-    // steady state, not a failure. Everything else is still non-fatal: a
+    // steady state, not a failure. Everything else is still non-fatal (a
     // synthesis pipeline that can't read its own output directory degrades
-    // to "zero synthesized tools loaded", never to a broken boot.
-    log.info(
+    // to "zero synthesized tools loaded", never to a broken boot) but IS
+    // worth surfacing loudly: an EPERM/EACCES here means the loader is
+    // silently blind, which log.info would bury in normal operation.
+    const code = (err as NodeJS.ErrnoException).code;
+    const level = code === "ENOENT" ? "info" : "error";
+    log[level](
       { dir: CUSTOM_TOOLS_DIR, err: (err as Error).message },
-      "Synthesized-tools directory unreadable (or does not exist yet) — zero tools loaded",
+      code === "ENOENT"
+        ? "Synthesized-tools directory does not exist yet — zero tools loaded"
+        : "Synthesized-tools directory unreadable (not a missing-directory error) — zero tools loaded",
     );
     return { loaded: [], skippedCount: 0 };
   }
