@@ -226,9 +226,10 @@ describe("runFreeSweep", () => {
     vi.useRealTimers();
   });
 
-  it("fires the outage alert when every board failed and nothing was screened", async () => {
+  it("fires the outage alert when boards failed and the sweep fetched nothing at all", async () => {
     mockRunFreeIngest.mockResolvedValue(
       result({
+        seen: 0,
         screened: 0,
         failures: ["greenhouse/a: HTTP 500", "lever/b: HTTP 500", "ashby/c: HTTP 500", "greenhouse/d: HTTP 500"],
       }),
@@ -246,6 +247,15 @@ describe("runFreeSweep", () => {
   it("does not fire the outage alert when boards failed but some postings were still screened", async () => {
     mockRunFreeIngest.mockResolvedValue(
       result({ screened: 3, failures: ["greenhouse/a: HTTP 500"], lines: [line({ isNew: false })] }),
+    );
+    await runFreeSweep();
+
+    expect(mockSendToChat).not.toHaveBeenCalled();
+  });
+
+  it("does not fire the outage alert when a board failed and seen > 0 but nothing was screened (the false positive fix)", async () => {
+    mockRunFreeIngest.mockResolvedValue(
+      result({ seen: 20551, screened: 0, failures: ["greenhouse/crcevans: HTTP 404"], lines: [] }),
     );
     await runFreeSweep();
 
