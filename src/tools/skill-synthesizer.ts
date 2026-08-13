@@ -17,8 +17,22 @@ import { hitlGate } from "../infra/hitl.js";
 const execAsync = promisify(exec);
 const log = childLogger({ module: "tool:skill-synthesizer" });
 
-const CUSTOM_TOOLS_DIR = path.resolve("./src/tools/custom");
+/** Exported so the boot-time loader (src/agents/skill-loader.ts) scans the
+ *  SAME directory this writes to — one path, never two constants to drift. */
+export const CUSTOM_TOOLS_DIR = path.resolve("./src/tools/custom");
 const CUSTOM_TESTS_DIR = path.resolve("./tests/unit/tools/custom");
+
+/**
+ * The one sanitizer for a synthesized tool's identifier. Exported so the
+ * loader re-derives a tool's registered name from its filename at LOAD time
+ * with the exact same function used at WRITE time here — untrusted-input
+ * discipline: the loader must never trust what a file on disk claims about
+ * its own name, only what this deterministic function says given the
+ * filename it actually has.
+ */
+export function sanitizeSkillName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+}
 
 async function ensureDir(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });
@@ -43,7 +57,7 @@ export async function synthesizeSkillImpl({
   tsCode: string;
   testCode?: string;
 }): Promise<SkillSynthesisResult> {
-  const safeName = name.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+  const safeName = sanitizeSkillName(name);
   await ensureDir(CUSTOM_TOOLS_DIR);
   await ensureDir(CUSTOM_TESTS_DIR);
 
@@ -63,12 +77,21 @@ export async function synthesizeSkillImpl({
     const tscBin = path.resolve("./node_modules/.bin/tsc");
     await execAsync(`"${tscBin}" --noEmit`, { cwd: process.cwd() });
     log.info({ name: safeName, toolPath }, "Skill synthesized and typechecked successfully");
+    // Read at CALL time, not from the frozen `env` export (src/core/config.ts) —
+    // same reasoning as kernel-boot.ts's isUnconfiguredTool: a flag nobody can
+    // flip inside a test is a flag nobody can prove reflects reality, and the
+    // message below has to be honest about whichever state is live RIGHT NOW,
+    // not whatever it was when this process booted.
+    const loaderEnabled = process.env["SKILL_SYNTHESIS_ENABLED"] === "true";
+    const registrationNote = loaderEnabled
+      ? `It will be loaded and made callable by src/agents/skill-loader.ts starting from the NEXT process restart — it is not callable this turn (SKILL_SYNTHESIS_ENABLED is currently ON).`
+      : `SKILL_SYNTHESIS_ENABLED is currently OFF, so the boot-time loader (src/agents/skill-loader.ts) will NOT load it even after a restart — nothing will make it callable until that flag is flipped on.`;
     return {
       success: true,
       name: safeName,
       toolPath,
       testPath,
-      message: `✅ Skill "${safeName}" successfully synthesized, typechecked, and saved to ${toolPath}.`,
+      message: `✅ Skill "${safeName}" synthesized and typechecked, saved to ${toolPath}. ${registrationNote}`,
     };
   } catch (err: any) {
     log.error({ name: safeName, err: err?.stderr || err?.message }, "Skill synthesis typecheck failed");
@@ -109,7 +132,12 @@ export const synthesizeSkill = tool(
   },
   {
     name: "synthesize_skill",
-    description: "Synthesize and register a new custom TypeScript tool module with automatic typechecking and verification.",
+    description:
+      "Author and typecheck a new custom TypeScript tool module, saved to src/tools/custom/. " +
+      "This does NOT register it as a callable tool this turn: a boot-time loader " +
+      "(src/agents/skill-loader.ts) validates and merges it into the live tool set on the " +
+      "NEXT process restart, only if SKILL_SYNTHESIS_ENABLED is on at that boot. The result " +
+      "message states which of those is currently true.",
     schema: z.object({
       name: z.string().describe("Snake_case identifier for the tool (e.g. scrape_competitor_pricing)"),
       description: z.string().describe("Human-readable description of what the synthesized tool does"),

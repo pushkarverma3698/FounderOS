@@ -58,5 +58,13 @@ export interface LessonRow {
   readonly signature: string;
   readonly component: string;
   readonly times_seen: number;
+  /**
+   * Occurrences a retry actually resolved. REQUIRED by findUnappliedLessons:
+   * since 2026-08-12 the table also holds occurrence-only rows (a signature
+   * that failed repeatedly and was never fixed), which have no lesson to
+   * apply — see the analyzer for why treating them as unapplied lessons is a
+   * false positive.
+   */
+  readonly times_resolved: number;
   readonly times_applied: number;
 }
