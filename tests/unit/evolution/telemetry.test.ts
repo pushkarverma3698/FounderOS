@@ -34,11 +34,15 @@ const lessonRow = (
   component: string,
   times_seen: number,
   times_applied: number,
+  // Defaults to a PROVEN lesson (resolved at least once), which is what every
+  // pre-2026-08-12 row was and what these fixtures were written to describe.
+  times_resolved = 1,
 ): LessonRow => ({
   worker,
   signature,
   component,
   times_seen,
+  times_resolved,
   times_applied,
 });
 
@@ -154,6 +158,7 @@ describe("findUnappliedLessons", () => {
     });
     expect(findings[0]?.evidence).toContain("4 times");
     expect(findings[0]?.evidence).toContain("never been injected");
+    expect(findings[0]?.evidence).toContain("known fix");
   });
 
   it("sorts by times_seen descending — the worst broken lesson reads first", () => {
@@ -182,5 +187,41 @@ describe("findUnappliedLessons", () => {
     ];
 
     expect(findUnappliedLessons(rows)).toEqual([]);
+  });
+
+  // REGRESSION (2026-08-12): the occurrence axis introduced rows with
+  // times_resolved = 0 — a signature that failed repeatedly and was NEVER
+  // fixed. There is no lesson to inject, and getFailureLesson deliberately
+  // refuses to return them, so reporting them as "never injected" would flag
+  // the injection gate working correctly as a high-severity defect. These rows
+  // are the COMMON case, so unfiltered they would swamp the audit report.
+  it("does NOT flag an occurrence-only row (times_resolved: 0) — no fix exists to inject", () => {
+    const rows: LessonRow[] = [
+      lessonRow("sales_worker", "SIG_NEVER_FIXED", "src/tools/sales.ts", 40, 0, 0),
+    ];
+
+    expect(findUnappliedLessons(rows)).toEqual([]);
+  });
+
+  it("still flags a PROVEN lesson (times_resolved > 0) that is never injected", () => {
+    const rows: LessonRow[] = [
+      lessonRow("sales_worker", "SIG_HAS_FIX", "src/tools/sales.ts", 9, 0, 3),
+    ];
+
+    const findings = findUnappliedLessons(rows);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe("high");
+    expect(findings[0]?.evidence).toContain("resolved 3");
+  });
+
+  it("separates the two axes: occurrence-only rows are dropped, proven ones kept", () => {
+    const rows: LessonRow[] = [
+      lessonRow("a", "SIG_NEVER_FIXED", "c", 99, 0, 0),
+      lessonRow("b", "SIG_HAS_FIX", "c", 5, 0, 2),
+      lessonRow("c", "SIG_ALSO_NEVER", "c", 60, 0, 0),
+    ];
+
+    expect(findUnappliedLessons(rows).map((f) => f.subject)).toEqual(["b:SIG_HAS_FIX"]);
   });
 });
