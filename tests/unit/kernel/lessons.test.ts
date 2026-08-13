@@ -390,18 +390,48 @@ describe("occurrence scope (lower-bound semantics)", () => {
     failure: { ...(FAILED_RESULT as any).failure, retryable: false },
   };
 
-  it("does NOT record an occurrence for a NON-RETRYABLE failure (dispatch builds no retry)", async () => {
+  it("records an occurrence for a NON-RETRYABLE failure (Hook 3, terminal branch)", async () => {
     const store = fakeStore();
     const node = makeLessonDispatch(store);
     await node(stateWith({ results: [nonRetryable], attempts: { s1: 1 } }));
-    expect(store.recordOccurrence).not.toHaveBeenCalled();
+    expect(store.recordOccurrence).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT record an occurrence for the FINAL attempt of an exhausted step", async () => {
+  it("records an occurrence for the FINAL attempt of an exhausted step (Hook 3)", async () => {
     const store = fakeStore();
     const node = makeLessonDispatch(store);
     await node(stateWith({ results: [FAILED_RESULT], attempts: { s1: MAX_ATTEMPTS_PER_STEP } }));
+    expect(store.recordOccurrence).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts a failure EXACTLY once — retry and terminal branches never both fire", async () => {
+    const store = fakeStore();
+    const node = makeLessonDispatch(store);
+    // retryable with budget -> Hook 2 only
+    await node(stateWith({ results: [FAILED_RESULT], attempts: { s1: 1 } }));
+    expect(store.recordOccurrence).toHaveBeenCalledTimes(1);
+    // exhausted -> Hook 3 only
+    await node(stateWith({ results: [FAILED_RESULT], attempts: { s1: MAX_ATTEMPTS_PER_STEP } }));
+    expect(store.recordOccurrence).toHaveBeenCalledTimes(2);
+  });
+
+  it("records NOTHING when the step succeeded", async () => {
+    const store = fakeStore();
+    const node = makeLessonDispatch(store);
+    await node(stateWith({ results: [OK_RESULT], attempts: { s1: 1 } }));
     expect(store.recordOccurrence).not.toHaveBeenCalled();
+  });
+
+  it("a step failing all MAX_ATTEMPTS times records one occurrence per failure", async () => {
+    const store = statefulFakeStore();
+    const node = makeLessonDispatch(store);
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS_PER_STEP; attempt++) {
+      await node(stateWith({ results: [FAILED_RESULT], attempts: { s1: attempt } }));
+    }
+    expect(store.recordOccurrence).toHaveBeenCalledTimes(MAX_ATTEMPTS_PER_STEP);
+    const row = [...store.rows.values()][0];
+    expect(row?.times_seen).toBe(MAX_ATTEMPTS_PER_STEP);
+    expect(row?.times_resolved ?? 0).toBe(0);
   });
 
   it("DOES record an occurrence for a retryable failure with attempts remaining", async () => {

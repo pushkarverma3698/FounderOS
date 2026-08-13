@@ -12,18 +12,21 @@
  *     envelope as one deterministic message (prior evidence, not a prompt
  *     rewrite);
  *
- * SCOPE OF `times_seen` — read this before answering "how often does X fail":
- * the occurrence write lives on the RETRY-DISPATCH path (Hook 2), so it counts
- * failures that ENTERED THE RETRY SEAM, not all failures. Two shapes are
- * deliberately NOT counted, because dispatch never builds a retry for them
- * (src/kernel/supervisor.ts:165 — `last.failure.retryable && attempt <
- * MAX_ATTEMPTS_PER_STEP`):
- *   - a NON-RETRYABLE failure (retryable: false) — recorded 0 times;
- *   - the FINAL attempt of an exhausted step — a step that fails all
- *     MAX_ATTEMPTS_PER_STEP times records MAX_ATTEMPTS_PER_STEP - 1
- *     occurrences, because the terminal failure has no retry after it.
- * So `times_seen` is a lower bound on failures, exact for the retry seam.
- * Pinned by "AUDIT scope" tests in tests/unit/kernel/lessons.test.ts.
+ * SCOPE OF `times_seen` — it counts EVERY observed step failure. Two hooks
+ * write it, and a given failure takes exactly one of them:
+ *   - Hook 2, when dispatch builds a retry (retryable, attempts remaining);
+ *   - Hook 3, when dispatch instead terminates the mission (non-retryable, or
+ *     attempts exhausted).
+ * Until 2026-08-13 only Hook 2 existed, which made the counter a lower bound
+ * blind to non-retryable failures — precisely the ones the kernel judged
+ * unfixable by retry, and so precisely the ones that need a code change. That
+ * bias fed the self-improvement analyzers, so it is a correctness property, not
+ * a precision nicety. Pinned by "occurrence scope" tests in
+ * tests/unit/kernel/lessons.test.ts.
+ *
+ * Known limit: if a turn is interrupted and resumed from a checkpoint such that
+ * dispatch re-observes the same failed result, that failure is counted twice.
+ * Both hooks share this exposure; it is not introduced by Hook 3.
  *   - when the retried step then validates OK, the RESOLUTION is recorded
  *     separately (`times_resolved`) — the (worker, signature → tools that
  *     resolved it) pair, for every future turn.
@@ -222,6 +225,35 @@ export function makeLessonDispatch(lessons?: LessonStore) {
               set: [...stepScratch.set, new HumanMessage(lessonMessage(lesson))],
             };
           }
+        }
+      }
+    }
+
+    // Hook 3 — the step failed TERMINALLY: no retry was built, so Hook 2 never
+    // saw it. Without this the occurrence axis is blind to exactly the failures
+    // that most need a fix: a NON-RETRYABLE failure (the kernel decided no retry
+    // could help — contract mismatch, auth, bad config) recorded nothing at all,
+    // and a step that exhausted its attempts undercounted its last one.
+    //
+    // Cannot double-count: dispatch takes EITHER the retry branch (Hook 2) or the
+    // terminal branch (here) for a given observation, never both — see
+    // src/kernel/supervisor.ts, where the retry `return` precedes the terminal
+    // one. `collect -> dispatch` is an unconditional edge (src/kernel/graph.ts),
+    // so dispatch always observes the failing result exactly once.
+    const terminal = out.mission && "status" in out.mission ? (out.mission as Mission) : undefined;
+    if (!isRetry && terminal?.status === "failed") {
+      const step = state.mission.plan?.steps[terminal.cursor];
+      const failed = step ? latestResultFor(step.step_id, state.results) : undefined;
+      if (step && failed?.status === "failed") {
+        try {
+          await lessons.recordOccurrence({
+            worker: step.worker,
+            signature: normalizeFailureSignature(failed.failure.message),
+            component: failed.failure.component,
+            objective: step.objective,
+          });
+        } catch {
+          /* allow-failopen: occurrence persistence is an accelerant; a store blip must never break the turn */
         }
       }
     }
