@@ -229,14 +229,17 @@ export async function runFreeSweep(): Promise<void> {
   );
 
   if (result.failures.length > 0 && result.seen === 0) {
-    // Same guard as runJobIngestSweep's, one layer down: a sweep where every
-    // board failed and nothing was screened must not read like a market with no
-    // jobs in it.
-    log.warn({ failures: result.failures }, "Free board sweep failed on every board");
+    // Same guard as runJobIngestSweep's, one layer down: a sweep that fetched
+    // NOTHING while boards were failing must not read like a market with no jobs
+    // in it. The predicate is `seen`, not `screened`, because a single dead board
+    // among healthy ones still yields postings — one 404 next to 20,551 fetched
+    // rows fired this alert every 30 minutes until it was the noise, not the
+    // signal. `seen === 0` is the only state where the failures are the reason
+    // there is nothing to report.
+    log.warn({ failures: result.failures }, "Free board sweep fetched nothing while boards were failing");
     await sendToChat(
       esc(
-
-        `⚠ Free job lane failed — nothing was screened this sweep.\n` +
+        `⚠ Free job lane failed — nothing was fetched this sweep.\n` +
           result.failures.slice(0, OUTAGE_ALERT_BOARD_CAP).join("\n"),
       ),
     );

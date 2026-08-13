@@ -226,7 +226,7 @@ describe("runFreeSweep", () => {
     vi.useRealTimers();
   });
 
-  it("fires the outage alert when every board failed and nothing was screened", async () => {
+  it("fires the outage alert when boards failed and the sweep fetched nothing at all", async () => {
     mockRunFreeIngest.mockResolvedValue(
       result({
         seen: 0,
