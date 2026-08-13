@@ -67,6 +67,7 @@ export async function collectLessonRows(): Promise<LessonRow[]> {
       signature: failureLessons.signature,
       component: failureLessons.component,
       times_seen: failureLessons.times_seen,
+      times_resolved: failureLessons.times_resolved,
       times_applied: failureLessons.times_applied,
     })
     .from(failureLessons);
@@ -76,6 +77,7 @@ export async function collectLessonRows(): Promise<LessonRow[]> {
     signature: r.signature,
     component: r.component,
     times_seen: r.times_seen,
+    times_resolved: r.times_resolved,
     times_applied: r.times_applied,
   }));
 }

@@ -122,6 +122,14 @@ export const envSchema = z.object({
    *  cannot pick it and burn a turn discovering it is disabled. */
   SKILL_SYNTHESIS_ENABLED: z.enum(["true", "false"]).default("false"),
 
+  // ── Evolution findings persistence (Task 3, 2026-08-13) ─────────────────────
+  /** Write each self-audit run's findings to evolution_runs/evolution_findings
+   *  so recurrence and regressions survive across runs. Default OFF: the tables
+   *  exist on prod but nothing has ever written to them, so the first run with
+   *  this ON establishes the baseline every later run diffs against. The report
+   *  itself is unaffected by this flag — only the database writes are gated. */
+  EVOLUTION_PERSIST_FINDINGS: z.enum(["true", "false"]).default("false"),
+
   // Global halt (kill switch) — optional flag-file path override.
   // Default: $HOME/.founderos/HALT (resolved in src/infra/halt.ts).
   HALT_FLAG_PATH: z.string().transform(v => v || undefined).optional(),
@@ -298,6 +306,15 @@ export const MCP_BRIDGE_MANIFEST = env.MCP_BRIDGE_MANIFEST;
  * grants the capability, never an unattended write.
  */
 export const SKILL_SYNTHESIS_ENABLED = env.SKILL_SYNTHESIS_ENABLED === "true";
+
+/**
+ * Whether a self-audit run persists its findings to evolution_runs /
+ * evolution_findings. OFF by default. Consumers read `process.env` at call time
+ * rather than this frozen constant (see src/evolution/run-audit.ts) so the flag
+ * can be flipped per-run in tests; this export exists so the boot report and any
+ * future config surface can show the value the process started with.
+ */
+export const EVOLUTION_PERSIST_FINDINGS = env.EVOLUTION_PERSIST_FINDINGS === "true";
 
 /**
  * Local rerank stage after hybrid RAG fusion (spec §1.1 F5). Default OFF — it

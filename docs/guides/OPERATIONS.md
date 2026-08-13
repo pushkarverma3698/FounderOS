@@ -134,6 +134,10 @@ npx drizzle-kit migrate
 psql $DATABASE_URL -c "DELETE FROM checkpoints WHERE thread_id LIKE 'turicks:6775330211%';"
 
 # Sync docs to turicks-brain knowledge base
+# Requires: .env present in cwd with DATABASE_URL set (copy .env.example if
+# missing) + Ollama running with nomic-embed-text pulled. Missing/unset
+# DATABASE_URL now exits with a message naming the exact fix instead of a
+# bare `node: .env: not found` — see scripts/lib/require-env.ts.
 pnpm brain:sync
 ```
 

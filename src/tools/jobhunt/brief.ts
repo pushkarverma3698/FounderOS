@@ -18,7 +18,7 @@
  *      on the list. Telegram's 4,096-character limit is handled by SPLITTING the
  *      message, never by hiding a row — `splitForTelegram` exists for that.
  *   3. ONE COMMAND PER ROW. `/draft 1` produces the application. Still
- *      HITL-gated, never auto-sent (ADR-009).
+ *      HITL-gated, never auto-sent (ADR-018).
  *   4. IT REMEMBERS, and it prices itself. "absent from your CV for 14 days",
  *      "6 roles undrafted for 5 days", "$0.24 spent today". Ignoring the brief
  *      was silent; making it loud is the whole point.

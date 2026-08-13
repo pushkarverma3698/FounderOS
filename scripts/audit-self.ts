@@ -1,13 +1,19 @@
 /**
  * M0a — self-audit runner (`pnpm audit:self`).
  * =============================================
- * Runs the Evolution Engine's analyzers against THIS repository and prints the
- * result. Until this existed, every analyzer was proven only against fixtures its
- * own author wrote — 62 green tests over code that had never once seen the real
- * tree. This is the entry point that makes the sensor falsifiable.
+ * The CLI VIEW of the self-audit. Until this existed, every analyzer was proven
+ * only against fixtures its own author wrote — 62 green tests over code that had
+ * never once seen the real tree. This is the entry point that makes the sensor
+ * falsifiable.
  *
  * Deliberately NOT part of `pnpm gate`. It is a sensor, not a gate: the moment a
  * finding can fail a build, the incentive becomes arguing the number down.
+ *
+ * The orchestration itself lives in src/evolution/run-audit.ts and is shared with
+ * the cron acting loop (src/evolution/audit-sweep.ts). Keeping one runner is the
+ * fix for a real defect: when this file owned the logic, the cron path re-derived
+ * it and lost `skippedReason`, so a telemetry tier that never ran reported to the
+ * founder as a telemetry tier that came back clean.
  *
  * Two tiers:
  *   static    — filesystem only, always runs.
@@ -16,79 +22,10 @@
  *               never look the same from outside.
  */
 
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-
-import { collectDependencies, collectSourceFiles } from "../src/evolution/collect.js";
-import {
-  findDeadExports,
-  findOrphanModules,
-  findOrphanSubsystems,
-  findUnusedDependencies,
-} from "../src/evolution/analyzers/dead-code.js";
-import {
-  findFilesNearLocBudget,
-  findOversizedPrompts,
-  findUntestedModules,
-} from "../src/evolution/analyzers/code-health.js";
-import { rankFindings } from "../src/evolution/rank.js";
-import { renderReport } from "../src/evolution/report.js";
+import { runSelfAudit, persistAuditRun, TELEMETRY_ANALYZERS } from "../src/evolution/run-audit.js";
+import { renderAuditMessage } from "../src/evolution/audit-message.js";
+import { repoRoot } from "../src/evolution/repo-root.js";
 import type { Finding } from "../src/evolution/types.js";
-
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-
-/** Filesystem-only analyzers. No database, no network, no excuses. */
-function runStaticAnalyzers(): Finding[] {
-  const files = collectSourceFiles(ROOT, "src");
-  const testFiles = collectSourceFiles(ROOT, "tests");
-  const dependencies = collectDependencies(ROOT);
-
-  return [
-    ...findDeadExports(files),
-    ...findOrphanModules(files),
-    ...findOrphanSubsystems(files),
-    ...findUnusedDependencies(files, dependencies),
-    ...findOversizedPrompts(files),
-    ...findUntestedModules(files, testFiles),
-    ...findFilesNearLocBudget(files),
-  ];
-}
-
-/**
- * Database-backed analyzers. Imported dynamically so that a missing DATABASE_URL
- * or a dead Postgres cannot stop the static half from running — the failure is
- * reported, not swallowed.
- */
-async function runTelemetryAnalyzers(): Promise<{
-  readonly findings: Finding[];
-  readonly skippedReason: string | null;
-}> {
-  try {
-    const [collect, analyzers] = await Promise.all([
-      import("../src/evolution/collect-telemetry.js"),
-      import("../src/evolution/analyzers/telemetry.js"),
-    ]);
-
-    const [costRows, lessonRows] = await Promise.all([
-      collect.collectCostRows(),
-      collect.collectLessonRows(),
-    ]);
-
-    return {
-      findings: [
-        ...analyzers.findCostHotspots(costRows),
-        ...analyzers.findRecurringFailures(lessonRows),
-        ...analyzers.findUnappliedLessons(lessonRows),
-      ],
-      skippedReason: null,
-    };
-  } catch (error) {
-    return {
-      findings: [],
-      skippedReason: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
 
 /** One line per finding — the audit view, where nothing is ever withheld. */
 function renderFullList(findings: readonly Finding[]): string {
@@ -101,38 +38,45 @@ function renderFullList(findings: readonly Finding[]): string {
     .join("\n");
 }
 
-export async function runSelfAudit(): Promise<string> {
-  const staticFindings = runStaticAnalyzers();
-  const telemetry = await runTelemetryAnalyzers();
-  const ranked = rankFindings([...staticFindings, ...telemetry.findings]);
-  return renderReport(ranked);
-}
-
 async function main(): Promise<void> {
-  const staticFindings = runStaticAnalyzers();
-  const telemetry = await runTelemetryAnalyzers();
-  const ranked = rankFindings([...staticFindings, ...telemetry.findings]);
+  const run = await runSelfAudit(repoRoot());
+  const persistence = await persistAuditRun(run);
 
-  console.log(`FounderOS self-audit — ${ranked.length} findings\n`);
-  console.log(`STATIC     ${staticFindings.length} findings (filesystem)`);
+  const staticCount = run.staticResults.reduce((n, r) => n + r.findings.length, 0);
+  const telemetryCount = run.telemetryResults.reduce((n, r) => n + r.findings.length, 0);
 
-  if (telemetry.skippedReason === null) {
-    console.log(`TELEMETRY  ${telemetry.findings.length} findings (database)\n`);
+  console.log(`FounderOS self-audit — ${run.ranked.length} findings\n`);
+  console.log(`STATIC     ${staticCount} findings (filesystem)`);
+
+  if (run.telemetrySkippedReason === null) {
+    console.log(`TELEMETRY  ${telemetryCount} findings (database)\n`);
   } else {
     console.log(
-      `TELEMETRY  SKIPPED — cost-hotspot, recurring-failure and unapplied-lesson\n` +
+      `TELEMETRY  SKIPPED — ${TELEMETRY_ANALYZERS.join(", ")}\n` +
         `           did NOT run. This is not a clean result, it is no result.\n` +
-        `           Reason: ${telemetry.skippedReason}\n`,
+        `           Reason: ${run.telemetrySkippedReason}\n`,
     );
   }
 
-  if (ranked.length > 0) {
+  if (persistence.state === "disabled") {
+    console.log("PERSIST    OFF (EVOLUTION_PERSIST_FINDINGS != true) — nothing written, no recurrence delta\n");
+  } else if (persistence.result.persisted) {
+    const r = persistence.result;
+    console.log(
+      `PERSIST    run ${r.runId} — ${r.newCount} new, ${r.recurringCount} recurring, ` +
+        `${r.regressedCount} regressed, ${r.resolvedCount} resolved\n`,
+    );
+  } else {
+    console.log(`PERSIST    FAILED — ${persistence.result.error}\n`);
+  }
+
+  if (run.ranked.length > 0) {
     console.log("All findings, ranked:");
-    console.log(renderFullList(ranked));
+    console.log(renderFullList(run.ranked));
   }
 
   console.log("\n─── Telegram message as the founder would receive it ───\n");
-  console.log(renderReport(ranked));
+  console.log(renderAuditMessage(run, persistence));
 
   // Always exit 0: this reports, it does not gate.
   await import("../src/db/client.js")
