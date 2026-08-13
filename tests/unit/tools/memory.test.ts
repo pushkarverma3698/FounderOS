@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockSearchEpisodicMemory = vi.fn(async (): Promise<any[]> => []);
 const mockSearchKnowledgeEntries = vi.fn(async (): Promise<any[]> => []);
+const mockSearchConversations = vi.fn(async (): Promise<any[]> => []);
 const mockGetFounderContext = vi.fn(async () => ({}));
 const mockInsertEpisodicEvent = vi.fn(async () => "test-id-1");
 
@@ -20,6 +21,7 @@ vi.mock("../../../src/db/queries.js", async (orig) => {
     ...actual,
     searchEpisodicMemory: mockSearchEpisodicMemory,
     searchKnowledgeEntries: mockSearchKnowledgeEntries,
+    searchConversations: mockSearchConversations,
     getFounderContext: mockGetFounderContext,
     insertEpisodicEvent: mockInsertEpisodicEvent,
   };
@@ -33,10 +35,63 @@ describe("searchMemoryTool", () => {
   beforeEach(() => {
     mockSearchEpisodicMemory.mockClear();
     mockSearchKnowledgeEntries.mockClear();
+    mockSearchConversations.mockClear();
     mockGetFounderContext.mockClear();
     mockSearchEpisodicMemory.mockResolvedValue([]);
     mockSearchKnowledgeEntries.mockResolvedValue([]);
+    mockSearchConversations.mockResolvedValue([]);
     mockGetFounderContext.mockResolvedValue({});
+  });
+
+  // ── conversations tier ─────────────────────────────────────────────────────
+  // The enum advertised `conversations` in both the Zod schema and the MCP
+  // inputSchema, and no branch implemented it. Nine rows sat in
+  // agents.conversations and every one of them was unreachable — a live call
+  // with type:"conversations" answered "No memory found" for a query that
+  // matched a stored summary verbatim.
+
+  const CONVERSATION_ROW = {
+    thread_id: "turicks:jarvis-cinematic",
+    summary: "I'm FounderOS — Pushkar's AI chief of staff, built on Turicks infrastructure.",
+    topics: ["founderos", "identity"],
+    message_count: 5,
+    last_message_at: new Date("2026-06-22T12:00:00Z"),
+  };
+
+  it("returns conversation history when type=conversations", async () => {
+    mockSearchConversations.mockResolvedValue([CONVERSATION_ROW]);
+
+    const result = await searchMemoryTool.invoke({ query: "founderos", type: "conversations" });
+
+    expect(result).not.toContain("No memory found");
+    expect(result).toContain("chief of staff");
+    expect(result).toContain("turicks:jarvis-cinematic");
+  });
+
+  it("searches conversations under type=all", async () => {
+    mockSearchConversations.mockResolvedValue([CONVERSATION_ROW]);
+
+    const result = await searchMemoryTool.invoke({ query: "founderos" });
+
+    expect(mockSearchConversations).toHaveBeenCalled();
+    expect(result).toContain("chief of staff");
+  });
+
+  it("filters by type=conversations — skips episodic and knowledge", async () => {
+    mockSearchConversations.mockResolvedValue([CONVERSATION_ROW]);
+
+    await searchMemoryTool.invoke({ query: "founderos", type: "conversations" });
+
+    expect(mockSearchEpisodicMemory).not.toHaveBeenCalled();
+    expect(mockSearchKnowledgeEntries).not.toHaveBeenCalled();
+  });
+
+  it("shows the message count so an empty thread is distinguishable from a full one", async () => {
+    mockSearchConversations.mockResolvedValue([CONVERSATION_ROW]);
+
+    const result = await searchMemoryTool.invoke({ query: "founderos", type: "conversations" });
+
+    expect(result).toContain("5 message");
   });
 
   it("returns a no-results message when all sources are empty", async () => {

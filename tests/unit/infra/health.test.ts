@@ -30,6 +30,25 @@ afterEach(() => {
   server = undefined;
 });
 
+/**
+ * Wait for the server to actually be listening.
+ *
+ * startHealthServer (src/infra/health.ts:363) calls `server.listen(port, cb)`
+ * and returns the server SYNCHRONOUSLY — the socket is not bound yet when it
+ * returns. These tests used to bridge that with a fixed `setTimeout(100)`,
+ * which a loaded CI runner can outrun: the fetch then fails with
+ * ECONNREFUSED (observed 2026-08-13 on run 31664074052, on a PR that does not
+ * touch health at all). Waiting for the real 'listening' event is
+ * deterministic regardless of runner load.
+ */
+function awaitListening(s: Server): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (s.listening) return resolve();
+    s.once("listening", () => resolve());
+    s.once("error", reject);
+  });
+}
+
 async function get(port: number, path: string) {
   const res = await fetch(`http://127.0.0.1:${port}${path}`);
   const body = (await res.json()) as Record<string, unknown>;
@@ -72,7 +91,7 @@ describe("health server", () => {
   it("GET /health returns JSON with checks (503 when DB down in tests)", async () => {
     const port = 39411;
     server = startHealthServer(port);
-    await new Promise((r) => setTimeout(r, 100));
+    await awaitListening(server);
     const { status, body } = await get(port, "/health");
     expect([200, 503]).toContain(status);
     expect((body.checks as Record<string, string>).database).toMatch(/up|down/);
@@ -83,7 +102,7 @@ describe("health server", () => {
   it("GET /metrics returns spend + uptime", async () => {
     const port = 39412;
     server = startHealthServer(port);
-    await new Promise((r) => setTimeout(r, 100));
+    await awaitListening(server);
     const { status, body } = await get(port, "/metrics");
     expect(status).toBe(200);
     expect(body).toHaveProperty("spend_today_usd");
@@ -95,7 +114,7 @@ describe("health server", () => {
     const emptyRoot = mkdtempSync(join(tmpdir(), "jarvis-empty-"));
     process.env["JARVIS_DIST_ROOT"] = emptyRoot;
     server = startHealthServer(port);
-    await new Promise((r) => setTimeout(r, 100));
+    await awaitListening(server);
     const { status } = await get(port, "/nope");
     expect(status).toBe(404);
     rmSync(emptyRoot, { recursive: true, force: true });

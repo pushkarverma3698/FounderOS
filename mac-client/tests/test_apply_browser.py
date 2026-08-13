@@ -213,6 +213,32 @@ async def test_the_founder_can_still_skip_after_a_failed_submit(page, monkeypatc
     assert await page.evaluate("document.querySelector('#founderos-bar') !== null") is True
 
 
+async def test_an_unmet_required_field_blocks_the_click_entirely(page, monkeypatch):
+    # ADR-018: a form the browser itself would refuse to submit must never be
+    # clicked, let alone recorded as applied. The founder finishes the field.
+    decided, recorded = await drive(
+        page, "required-field-missing.html", "https://boards.greenhouse.io/x/jobs/1", "SUBMIT", monkeypatch
+    )
+    assert decided == []
+    assert recorded == []
+    assert await page.evaluate("window.__SUBMITTED__ === undefined") is True
+    text = await page.inner_text("#founderos-bar")
+    assert "work_auth_text" in text or "required" in text.lower()
+
+
+async def test_a_visible_validation_error_is_not_recorded_as_applied(page, monkeypatch):
+    # ADR-018 (D2 regression guard): the site accepted the click but rejected
+    # the submission and said so on the page. Recording "applied" here is the
+    # exact false-positive this ADR exists to close.
+    decided, recorded = await drive(
+        page, "validation-error-shown.html", "https://boards.greenhouse.io/x/jobs/1", "SUBMIT", monkeypatch
+    )
+    assert decided == []
+    assert recorded == []
+    text = await page.inner_text("#founderos-bar")
+    assert "already associated" in text.lower()
+
+
 async def test_a_second_click_cannot_submit_twice(page, monkeypatch):
     await open_fixture(page, "greenhouse.html")
     calls: list[str] = []

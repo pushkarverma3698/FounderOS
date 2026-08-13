@@ -6,11 +6,30 @@
  * same blind way next month. This module makes the retry seam LEARN, by code:
  *
  *   - when a retry is dispatched, the failure message is normalized into a
- *     stable signature and a lesson for (worker, signature) is looked up in
- *     the injected LessonStore — a hit is appended to the retry envelope as
- *     one deterministic message (prior evidence, not a prompt rewrite);
- *   - when the retried step then validates OK, the (worker, signature →
- *     tools that resolved it) pair is recorded for every future turn.
+ *     stable signature; the OCCURRENCE is recorded (`times_seen`) whether or
+ *     not that retry later succeeds, then a lesson for (worker, signature) is
+ *     looked up in the injected LessonStore — a hit is appended to the retry
+ *     envelope as one deterministic message (prior evidence, not a prompt
+ *     rewrite);
+ *
+ * SCOPE OF `times_seen` — it counts EVERY observed step failure. Two hooks
+ * write it, and a given failure takes exactly one of them:
+ *   - Hook 2, when dispatch builds a retry (retryable, attempts remaining);
+ *   - Hook 3, when dispatch instead terminates the mission (non-retryable, or
+ *     attempts exhausted).
+ * Until 2026-08-13 only Hook 2 existed, which made the counter a lower bound
+ * blind to non-retryable failures — precisely the ones the kernel judged
+ * unfixable by retry, and so precisely the ones that need a code change. That
+ * bias fed the self-improvement analyzers, so it is a correctness property, not
+ * a precision nicety. Pinned by "occurrence scope" tests in
+ * tests/unit/kernel/lessons.test.ts.
+ *
+ * Known limit: if a turn is interrupted and resumed from a checkpoint such that
+ * dispatch re-observes the same failed result, that failure is counted twice.
+ * Both hooks share this exposure; it is not introduced by Hook 3.
+ *   - when the retried step then validates OK, the RESOLUTION is recorded
+ *     separately (`times_resolved`) — the (worker, signature → tools that
+ *     resolved it) pair, for every future turn.
  *
  * Kernel-library rules hold: the store is INJECTED (Postgres in prod, fakes
  * in CI), the decorator wraps the pure dispatch without touching its logic,
@@ -58,17 +77,40 @@ export interface FailureLesson {
   objective: string;
   /** Tools whose successful receipts backed the resolving attempt. */
   resolved_with_tools: string[];
-  /** How many times this signature has been seen (recorded) so far. */
+  /**
+   * Occurrences of this signature that entered the retry seam, resolved or
+   * not. A lower bound on total failures — see the SCOPE note in the module
+   * header for the two shapes it deliberately excludes.
+   */
   times_seen: number;
+  /** Of those occurrences, how many a retry subsequently resolved. */
+  times_resolved: number;
   /** ISO timestamp of the last successful resolution. */
   last_resolved_at: string;
+}
+
+/** What gets written on the FAILURE path — every retried sighting, whether or not it later resolves. */
+export interface FailureOccurrence {
+  worker: string;
+  signature: string;
+  component: string;
+  /** Objective of the step that saw this failure (context for the model). */
+  objective: string;
 }
 
 export interface LessonStore {
   /** Best lesson for this (worker, signature), or null. Must not throw upward. */
   lookup(worker: string, signature: string): Promise<FailureLesson | null>;
-  /** Record/refresh a resolution. Must not throw upward. */
-  record(lesson: Omit<FailureLesson, "times_seen" | "last_resolved_at">): Promise<void>;
+  /** Record/refresh a RESOLUTION (a retry that just settled ok). Must not throw upward. */
+  record(lesson: Omit<FailureLesson, "times_seen" | "times_resolved" | "last_resolved_at">): Promise<void>;
+  /**
+   * Record an OCCURRENCE (the failure path — a retry is about to be
+   * dispatched for this signature). Called on EVERY failure, independent of
+   * whether the retry later succeeds — this is what stops a signature that
+   * fails identically N times with zero successful retries from writing zero
+   * rows. Must not throw upward.
+   */
+  recordOccurrence(occurrence: FailureOccurrence): Promise<void>;
 }
 
 /** The one deterministic sentence injected into a retry envelope on a lesson hit. */
@@ -157,11 +199,24 @@ export function makeLessonDispatch(lessons?: LessonStore) {
           component: failed.failure.component,
           objective: step.objective,
         };
+        // Look up FIRST so the injected message reports history strictly
+        // prior to this failure, then record THIS occurrence — order doesn't
+        // change final counts, only what "seen N×" means at injection time.
         let lesson: FailureLesson | null = null;
         try {
           lesson = await lessons.lookup(step.worker, signature);
         } catch {
           /* allow-failopen: a lesson lookup blip must never break the retry it decorates */
+        }
+        try {
+          await lessons.recordOccurrence({
+            worker: step.worker,
+            signature,
+            component: failed.failure.component,
+            objective: step.objective,
+          });
+        } catch {
+          /* allow-failopen: occurrence persistence is an accelerant; a store blip must never break the turn */
         }
         if (lesson && out.scratch && typeof out.scratch === "object" && !Array.isArray(out.scratch)) {
           const stepScratch = (out.scratch as Record<string, any>)[step.step_id];
@@ -170,6 +225,35 @@ export function makeLessonDispatch(lessons?: LessonStore) {
               set: [...stepScratch.set, new HumanMessage(lessonMessage(lesson))],
             };
           }
+        }
+      }
+    }
+
+    // Hook 3 — the step failed TERMINALLY: no retry was built, so Hook 2 never
+    // saw it. Without this the occurrence axis is blind to exactly the failures
+    // that most need a fix: a NON-RETRYABLE failure (the kernel decided no retry
+    // could help — contract mismatch, auth, bad config) recorded nothing at all,
+    // and a step that exhausted its attempts undercounted its last one.
+    //
+    // Cannot double-count: dispatch takes EITHER the retry branch (Hook 2) or the
+    // terminal branch (here) for a given observation, never both — see
+    // src/kernel/supervisor.ts, where the retry `return` precedes the terminal
+    // one. `collect -> dispatch` is an unconditional edge (src/kernel/graph.ts),
+    // so dispatch always observes the failing result exactly once.
+    const terminal = out.mission && "status" in out.mission ? (out.mission as Mission) : undefined;
+    if (!isRetry && terminal?.status === "failed") {
+      const step = state.mission.plan?.steps[terminal.cursor];
+      const failed = step ? latestResultFor(step.step_id, state.results) : undefined;
+      if (step && failed?.status === "failed") {
+        try {
+          await lessons.recordOccurrence({
+            worker: step.worker,
+            signature: normalizeFailureSignature(failed.failure.message),
+            component: failed.failure.component,
+            objective: step.objective,
+          });
+        } catch {
+          /* allow-failopen: occurrence persistence is an accelerant; a store blip must never break the turn */
         }
       }
     }
