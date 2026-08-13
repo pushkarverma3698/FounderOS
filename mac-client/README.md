@@ -3,7 +3,7 @@
 The last mile: the VPS finds and screens the jobs, this opens each one with the
 form already filled and waits for you to decide.
 
-**The machine never submits an application** (ADR-009). It fills what it can
+**The machine never submits unattended, and never records `applied` without confirming it** (ADR-018). It fills what it can
 verify, leaves everything else blank, and advances only when you click.
 
 ## Install (once)

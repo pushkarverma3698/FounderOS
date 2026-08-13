@@ -26,6 +26,27 @@ export function assertAllowedRagTable(table: string): asserts table is RagTable 
   }
 }
 
+/** The schema these stores actually live in — see {@link ragTableRef}. */
+const RAG_SCHEMA = "brain";
+
+/**
+ * Resolve a RAG table to an explicit `brain.<table>` reference.
+ *
+ * These queries used to name the table unqualified and let `search_path` resolve
+ * it. The dev database holds an empty `agents.turicks_brain` alongside the real
+ * `brain.turicks_brain`, and the connection sets
+ * `search_path=agents,brain,public` — so `FROM turicks_brain` bound to the empty
+ * copy and every vector search returned zero rows. No error, no warning: the
+ * caller cannot tell "nothing matched" from "you queried the wrong table".
+ *
+ * Qualifying the schema removes the ambiguity entirely rather than depending on
+ * table ordering in a session variable set somewhere else.
+ */
+export function ragTableRef(table: RagTable): { schema: string; table: RagTable } {
+  assertAllowedRagTable(table);
+  return { schema: RAG_SCHEMA, table };
+}
+
 /**
  * Return the top-k rows from `table` nearest to `queryEmbedding` by cosine
  * distance. score = 1 - cosine_distance.
@@ -41,7 +62,7 @@ export async function searchRagTable(
   // sql.identifier() safely quotes the (already allowlisted) table name.
   const rows = await db.execute(sql`
     SELECT content, metadata, 1 - (embedding <=> ${vec}::vector) AS score
-    FROM ${sql.identifier(table)}
+    FROM ${sql.identifier(RAG_SCHEMA)}.${sql.identifier(table)}
     WHERE embedding IS NOT NULL
     ORDER BY embedding <=> ${vec}::vector
     LIMIT ${limit}
@@ -88,7 +109,7 @@ export async function keywordSearchRagTable(
 
   const rows = await db.execute(sql`
     SELECT content, metadata
-    FROM ${sql.identifier(table)}
+    FROM ${sql.identifier(RAG_SCHEMA)}.${sql.identifier(table)}
     WHERE ${whereOr}
     LIMIT ${candidateLimit}
   `);
