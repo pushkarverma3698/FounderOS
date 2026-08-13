@@ -69,7 +69,12 @@ const workers: WorkerSpec[] = [
   { id: "research", description: "web research", prompt: "You are the research worker.", tools: [searchTool] },
 ];
 
-/** In-memory LessonStore — the exact contract kernel-boot's Postgres store implements. */
+/**
+ * In-memory LessonStore — the exact contract kernel-boot's Postgres store
+ * implements, including the split axes: `times_seen` bumps on EVERY
+ * occurrence (recordOccurrence — the failure path, resolved or not),
+ * `times_resolved` bumps only on an actual resolution (record).
+ */
 function memoryStore(): LessonStore & { rows: Map<string, FailureLesson> } {
   const rows = new Map<string, FailureLesson>();
   return {
@@ -77,12 +82,27 @@ function memoryStore(): LessonStore & { rows: Map<string, FailureLesson> } {
     async lookup(worker, signature) {
       return rows.get(`${worker}:${signature}`) ?? null;
     },
+    async recordOccurrence(occurrence) {
+      const key = `${occurrence.worker}:${occurrence.signature}`;
+      const prev = rows.get(key);
+      rows.set(key, {
+        worker: occurrence.worker,
+        signature: occurrence.signature,
+        component: occurrence.component,
+        objective: occurrence.objective,
+        resolved_with_tools: prev?.resolved_with_tools ?? [],
+        times_seen: (prev?.times_seen ?? 0) + 1,
+        times_resolved: prev?.times_resolved ?? 0,
+        last_resolved_at: prev?.last_resolved_at ?? "1970-01-01T00:00:00.000Z",
+      });
+    },
     async record(lesson) {
       const key = `${lesson.worker}:${lesson.signature}`;
       const prev = rows.get(key);
       rows.set(key, {
         ...lesson,
-        times_seen: (prev?.times_seen ?? 0) + 1,
+        times_seen: prev?.times_seen ?? 1,
+        times_resolved: (prev?.times_resolved ?? 0) + 1,
         last_resolved_at: "2026-07-12T00:00:00.000Z",
       });
     },
@@ -129,6 +149,9 @@ describe("failure-lesson learning loop E2E (real graph)", () => {
     expect(lesson.signature).toBe(
       normalizeFailureSignature("Output does not satisfy \"research.findings\" — summary: Required"),
     );
+    // One failure (occurrence) + one successful retry (resolution).
+    expect(lesson.times_seen).toBe(1);
+    expect(lesson.times_resolved).toBe(1);
 
     // Mission 1 itself saw NO lesson (store was empty at its retry).
     const m1RetryMsgs = w1.received[1]!.map((m) => String(m.content)).join("\n");
@@ -141,11 +164,16 @@ describe("failure-lesson learning loop E2E (real graph)", () => {
 
     const m2RetryMsgs = w2.received[1]!.map((m) => String(m.content)).join("\n");
     expect(m2RetryMsgs).toContain("RETRY 1 of 2"); // the normal (non-final) retry instruction…
-    expect(m2RetryMsgs).toContain("KNOWN FAILURE PATTERN (seen 1×"); // …plus the learned lesson
+    // Lesson lookup happens BEFORE this occurrence is recorded, so the
+    // injected message reports mission 1's history only ("seen 1×" — the
+    // resolution mission 1 recorded), not mission 2's own in-flight failure.
+    expect(m2RetryMsgs).toContain("KNOWN FAILURE PATTERN (seen 1×");
     expect(m2RetryMsgs).toContain("Find the latest LangGraph news");
 
-    // The second resolution re-recorded → times_seen ratchets.
-    expect([...store.rows.values()][0]!.times_seen).toBe(2);
+    // Mission 2 adds a second occurrence AND a second resolution.
+    const finalLesson = [...store.rows.values()][0]!;
+    expect(finalLesson.times_seen).toBe(2);
+    expect(finalLesson.times_resolved).toBe(2);
   });
 
   it("a mission with no failures records nothing and injects nothing", async () => {
