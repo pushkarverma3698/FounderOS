@@ -25,6 +25,7 @@ import { z } from "zod";
 import {
   searchEpisodicMemory,
   searchKnowledgeEntries,
+  searchConversations,
   getFounderContext,
   insertEpisodicEvent,
 } from "../db/queries.js";
@@ -71,7 +72,21 @@ export const searchMemoryTool = tool(
       }
     }
 
-    // 3. Founder context — text-contains search across keys + values
+    // 3. Conversation threads (what was actually discussed, and when)
+    if (type === "all" || type === "conversations") {
+      const threads = await searchConversations(TENANT, query, 4);
+      if (threads.length > 0) {
+        const formatted = threads.map((t) => {
+          const date = t.last_message_at ? t.last_message_at.toISOString().slice(0, 10) : "undated";
+          const topics = (t.topics ?? []).join(", ");
+          const summary = t.summary ? `\n   ${t.summary.slice(0, 250)}` : "\n   (no summary recorded)";
+          return `[${t.thread_id}] ${t.message_count} message(s) _(${date})_${summary}${topics ? `\n   Topics: ${topics}` : ""}`;
+        });
+        sections.push(`**Conversations:**\n${formatted.join("\n\n")}`);
+      }
+    }
+
+    // 4. Founder context — text-contains search across keys + values
     if (type === "all" || type === "context") {
       const ctx = await getFounderContext(TENANT);
       if (Object.keys(ctx).length > 0) {
@@ -101,7 +116,7 @@ export const searchMemoryTool = tool(
       }
     }
 
-    // 4. mem0 semantic search (supplemental — runs when MEM0_API_KEY is set)
+    // 5. mem0 semantic search (supplemental — runs when MEM0_API_KEY is set)
     const mem0 = getMem0Client();
     if (mem0 && (type === "all" || type === "episodic")) {
       const hits = await mem0.search(query, 5);
@@ -139,6 +154,7 @@ export const searchMemoryTool = tool(
             "'all' (default) searches everything. " +
             "'episodic' = past events + decisions. " +
             "'knowledge' = turicks-brain ADRs + brand + case studies. " +
+            "'conversations' = recorded Telegram threads (summary + topics). " +
             "'context' = current business state (clients, priorities).",
         ),
     }),
