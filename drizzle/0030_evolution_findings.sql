@@ -1,4 +1,16 @@
 -- Evolution Engine self-audit memory (src/db/schema.ts, src/evolution/persist-findings.ts).
+--
+-- NUMBERED 0030, NOT 0029, DELIBERATELY: drizzle/0029_lesson_occurrence_tracking.sql
+-- was authored in parallel on a sibling branch (same remediation plan, separate PR).
+-- Both originally claimed idx 29 with an identical `when`, so the only line that
+-- differed in their _journal.json entries was `"tag"` — git therefore produced a
+-- ONE-LINE conflict, and the natural "keep both sides" resolution yields a single
+-- entry carrying a DUPLICATE "tag" key. JSON parsers keep the last one, so one
+-- migration silently vanishes from the journal and is never applied — the exact
+-- inert-migration failure mode that cost 11 days of production breakage (see the
+-- header of tests/unit/db/schema-migration-parity.test.ts). Distinct idx + `when`
+-- makes the conflict multi-line, so "keep both" is both obvious and correct.
+--
 -- Closes "Cut 2" from docs/plans/2026-08-12-self-improvement-audit.md §3: no
 -- findings table existed anywhere, so every audit run started from zero and
 -- could not tell a brand-new finding from one seen 40 times, or one that was
