@@ -12,6 +12,11 @@
  *     running the CLI ever saw "TELEMETRY SKIPPED".
  *
  * These tests exist to keep "did not run" and "came back clean" distinguishable.
+ *
+ * SCOPE: this file only ever covered the RAG half. The `runSelfAudit` defect
+ * named above was still live when it was written and stayed untested here; it is
+ * fixed and pinned in tests/unit/evolution/{run-audit,audit-message,audit-sweep}
+ * .test.ts (Task 3, 2026-08-13), which own the self-audit half of this contract.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
