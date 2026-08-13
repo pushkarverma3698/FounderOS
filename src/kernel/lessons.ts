@@ -6,11 +6,24 @@
  * same blind way next month. This module makes the retry seam LEARN, by code:
  *
  *   - when a retry is dispatched, the failure message is normalized into a
- *     stable signature; the OCCURRENCE is recorded unconditionally (`times_seen`
- *     — every sighting counts, resolved or not), then a lesson for (worker,
- *     signature) is looked up in the injected LessonStore — a hit is appended
- *     to the retry envelope as one deterministic message (prior evidence, not
- *     a prompt rewrite);
+ *     stable signature; the OCCURRENCE is recorded (`times_seen`) whether or
+ *     not that retry later succeeds, then a lesson for (worker, signature) is
+ *     looked up in the injected LessonStore — a hit is appended to the retry
+ *     envelope as one deterministic message (prior evidence, not a prompt
+ *     rewrite);
+ *
+ * SCOPE OF `times_seen` — read this before answering "how often does X fail":
+ * the occurrence write lives on the RETRY-DISPATCH path (Hook 2), so it counts
+ * failures that ENTERED THE RETRY SEAM, not all failures. Two shapes are
+ * deliberately NOT counted, because dispatch never builds a retry for them
+ * (src/kernel/supervisor.ts:165 — `last.failure.retryable && attempt <
+ * MAX_ATTEMPTS_PER_STEP`):
+ *   - a NON-RETRYABLE failure (retryable: false) — recorded 0 times;
+ *   - the FINAL attempt of an exhausted step — a step that fails all
+ *     MAX_ATTEMPTS_PER_STEP times records MAX_ATTEMPTS_PER_STEP - 1
+ *     occurrences, because the terminal failure has no retry after it.
+ * So `times_seen` is a lower bound on failures, exact for the retry seam.
+ * Pinned by "AUDIT scope" tests in tests/unit/kernel/lessons.test.ts.
  *   - when the retried step then validates OK, the RESOLUTION is recorded
  *     separately (`times_resolved`) — the (worker, signature → tools that
  *     resolved it) pair, for every future turn.
@@ -61,7 +74,11 @@ export interface FailureLesson {
   objective: string;
   /** Tools whose successful receipts backed the resolving attempt. */
   resolved_with_tools: string[];
-  /** Total occurrences of this signature seen so far — resolved or not. */
+  /**
+   * Occurrences of this signature that entered the retry seam, resolved or
+   * not. A lower bound on total failures — see the SCOPE note in the module
+   * header for the two shapes it deliberately excludes.
+   */
   times_seen: number;
   /** Of those occurrences, how many a retry subsequently resolved. */
   times_resolved: number;
@@ -69,7 +86,7 @@ export interface FailureLesson {
   last_resolved_at: string;
 }
 
-/** What gets written on the FAILURE path — every sighting, whether or not it later resolves. */
+/** What gets written on the FAILURE path — every retried sighting, whether or not it later resolves. */
 export interface FailureOccurrence {
   worker: string;
   signature: string;

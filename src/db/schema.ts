@@ -1273,8 +1273,10 @@ export const failureLessons = agentsSchema.table(
     resolved_with_tools: jsonb("resolved_with_tools").$type<string[]>().notNull().default([]),
 
     /**
-     * `times_seen` = total occurrences of this signature (bumped on EVERY
-     * failure, resolved or not — see src/kernel/lessons.ts Hook 2). `times_resolved`
+     * `times_seen` = occurrences of this signature that entered the RETRY SEAM,
+     * resolved or not (see src/kernel/lessons.ts Hook 2 and its SCOPE note — it
+     * is a LOWER BOUND on failures: non-retryable failures and the final attempt
+     * of an exhausted step are not counted). `times_resolved`
      * = the subset of those occurrences a later retry actually fixed (what
      * `times_seen` meant before 2026-08-12; see drizzle/0029). Do not conflate
      * either with `times_applied`, which counts lesson-INJECTIONS into retries
@@ -1289,7 +1291,7 @@ export const failureLessons = agentsSchema.table(
 
     /** First time this signature was ever seen (set once, never updated). */
     first_seen_at: timestamp("first_seen_at", { withTimezone: true }),
-    /** Most recent occurrence, resolved or not (updated on every occurrence). */
+    /** Most recent counted occurrence, resolved or not (updated on every occurrence write). */
     last_seen_at: timestamp("last_seen_at", { withTimezone: true }),
 
     /** Most recent successful resolution — meaningful for the resolution axis only. */

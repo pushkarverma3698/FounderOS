@@ -374,4 +374,41 @@ describe("makeLessonDispatch", () => {
     const row = store.rows.get(`research:${LESSON.signature}`);
     expect(row?.times_resolved ?? 0).toBe(0);
   });
+
+// ── AUDIT scope: what `times_seen` does and does NOT count ────────────────────
+//
+// The occurrence write lives on the RETRY-DISPATCH path, so `times_seen` counts
+// failures that ENTERED THE RETRY SEAM — a lower bound on total failures, not a
+// count of them. These tests pin that boundary so the module header's SCOPE note
+// and the schema comment cannot silently drift from the code. If a future change
+// makes occurrences unconditional, these are the tests to update — deliberately,
+// together with the docs.
+describe("occurrence scope (lower-bound semantics)", () => {
+  const nonRetryable: StepResult = {
+    status: "failed",
+    step_id: "s1",
+    failure: { ...(FAILED_RESULT as any).failure, retryable: false },
+  };
+
+  it("does NOT record an occurrence for a NON-RETRYABLE failure (dispatch builds no retry)", async () => {
+    const store = fakeStore();
+    const node = makeLessonDispatch(store);
+    await node(stateWith({ results: [nonRetryable], attempts: { s1: 1 } }));
+    expect(store.recordOccurrence).not.toHaveBeenCalled();
+  });
+
+  it("does NOT record an occurrence for the FINAL attempt of an exhausted step", async () => {
+    const store = fakeStore();
+    const node = makeLessonDispatch(store);
+    await node(stateWith({ results: [FAILED_RESULT], attempts: { s1: MAX_ATTEMPTS_PER_STEP } }));
+    expect(store.recordOccurrence).not.toHaveBeenCalled();
+  });
+
+  it("DOES record an occurrence for a retryable failure with attempts remaining", async () => {
+    const store = fakeStore();
+    const node = makeLessonDispatch(store);
+    await node(stateWith({ results: [FAILED_RESULT], attempts: { s1: 1 } }));
+    expect(store.recordOccurrence).toHaveBeenCalledTimes(1);
+  });
+});
 });
