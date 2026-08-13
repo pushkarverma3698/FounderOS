@@ -14,7 +14,10 @@ import {
   STALE_SECTIONS,
   contentSha,
   needsChunkRefresh,
+  isPlanSyncSource,
+  PLAN_SYNC_DIRS,
 } from "../../../scripts/sync-turicks-brain.js";
+import { missingEnvFileMessage, missingVarMessage } from "../../../scripts/lib/require-env.js";
 
 const DOC = "docs/rules/PROGRAMMING-RULES.md";
 const STALE_HEADING = "## Wiring Map 2 — Add a Department";
@@ -159,5 +162,62 @@ describe("contentSha", () => {
 
   it("changes on any edit, so a changed doc always re-embeds", () => {
     expect(contentSha("# Doc\n\nbody")).not.toBe(contentSha("# Doc\n\nbody."));
+  });
+});
+
+/**
+ * Pins the fix for the 2026-08-08 gap this file's own header comment
+ * documents (scripts/sync-turicks-brain.ts:308-311): docs/plans and
+ * docs/product-recovery were absent from the sync allowlist, so `brain:sync`
+ * reported success while ingesting zero plans. This exercises the allowlist
+ * predicate directly — no Postgres/Ollama required — so a future regression
+ * (e.g. a rename that drops a dir from PLAN_SYNC_DIRS) fails a fast unit test
+ * instead of only showing up as a silent zero-plans sync in production.
+ */
+describe("isPlanSyncSource", () => {
+  it("accepts a docs/plans/*.md path — the exact case this allowlist exists for", () => {
+    expect(isPlanSyncSource("docs/plans/2026-08-12-self-improvement-audit.md")).toBe(true);
+  });
+
+  it("accepts a docs/product-recovery/*.md path (the other allowlisted dir)", () => {
+    expect(isPlanSyncSource("docs/product-recovery/12-FAILURE-LEDGER.md")).toBe(true);
+  });
+
+  it("rejects a non-.md file in an allowlisted dir", () => {
+    expect(isPlanSyncSource("docs/plans/notes.txt")).toBe(false);
+  });
+
+  it("rejects a .md file outside both allowlisted dirs", () => {
+    expect(isPlanSyncSource("docs/decisions/001-why-langgraph.md")).toBe(false);
+  });
+
+  it("rejects a nested .md file — collectDocs' readdirSync is non-recursive", () => {
+    expect(isPlanSyncSource("docs/plans/sub/nested.md")).toBe(false);
+  });
+
+  it("PLAN_SYNC_DIRS still lists exactly the two directories this test covers", () => {
+    expect([...PLAN_SYNC_DIRS].sort()).toEqual(["docs/plans", "docs/product-recovery"]);
+  });
+});
+
+/**
+ * brain:sync used to fail with a bare `node: .env: not found` (missing file)
+ * or an opaque zod stack trace (file present, DATABASE_URL unset) — see
+ * scripts/lib/require-env.ts's header comment. These pin the two messages by
+ * name; the CLI-only guard itself is exercised in the PR's manual
+ * verification (it must not fire on import, or every test in this file that
+ * imports sync-turicks-brain.js would exit(1) before running).
+ */
+describe("require-env messages", () => {
+  it("names the missing .env file and the fix", () => {
+    const msg = missingEnvFileMessage("/repo/.env");
+    expect(msg).toContain("/repo/.env not found");
+    expect(msg).toContain("cp .env.example .env");
+  });
+
+  it("names the missing variable and the fix", () => {
+    const msg = missingVarMessage("DATABASE_URL");
+    expect(msg).toContain("DATABASE_URL is not set");
+    expect(msg).toContain(".env.example");
   });
 });
