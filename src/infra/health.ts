@@ -20,7 +20,11 @@ import { getTodayCostUsd, getKnowledgeEntryCount, getTuricksBrainCount } from ".
 import { childLogger } from "./logger.js";
 import { runProviderProbes, getLastProviderProbe } from "./provider-probes.js";
 import { getGmailBackend } from "./provider-config.js";
-import { setTraceSink, startTurn, type TraceEvent } from "./trace.js";
+// startTurn is deliberately NOT imported: the health server has no path that
+// runs a real turn, so it must never mint a trace turnId. See the /api/v1/dispatch
+// and /api/v1/hitl/respond handlers below for the forgery this prevents.
+import { setTraceSink, type TraceEvent } from "./trace.js";
+import { handleDispatch, handleHitlRespond } from "./health-api-stubs.js";
 
 const log = childLogger({ module: "health" });
 
@@ -209,64 +213,15 @@ export function startHealthServer(port = Number(process.env["HEALTH_PORT"] ?? 30
       return;
     }
 
+    // Two stub routes that must never claim work they did not do — see
+    // src/infra/health-api-stubs.ts for what each one used to fabricate.
     if (req.method === "POST" && urlPath === "/api/v1/dispatch") {
-      let bodyStr = "";
-      req.on("data", (chunk) => (bodyStr += chunk));
-      req.on("end", () => {
-        try {
-          const body = JSON.parse(bodyStr || "{}");
-          const prompt = String(body.prompt || "").trim();
-          if (!prompt) {
-            res.writeHead(400, { "content-type": "application/json" });
-            res.end(JSON.stringify({ error: "prompt_required" }));
-            return;
-          }
-
-          const trace = startTurn({ chatId: "tui-dispatch", kind: "message", promptHash: prompt.slice(0, 12) });
-          trace.event("turn.in", { prompt, agent: "supervisor" });
-          trace.event("route.decided", { route: "engineering", department: "tech-ops" });
-          
-          setTimeout(() => {
-            trace.event("tool.call", { tool: "pnpm gate", input: "verify:arch" });
-            trace.event("tool.result", { preview: "pnpm gate passed (verify:arch 0 errors)" });
-            trace.event("turn.out", { status: "completed" });
-          }, 600);
-
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ turnId: trace.turnId, status: "dispatched", prompt }));
-        } catch {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: "invalid_json" }));
-        }
-      });
+      handleDispatch(req, res);
       return;
     }
 
     if (req.method === "POST" && urlPath === "/api/v1/hitl/respond") {
-      let bodyStr = "";
-      req.on("data", (chunk) => (bodyStr += chunk));
-      req.on("end", () => {
-        try {
-          const body = JSON.parse(bodyStr || "{}");
-          const { id, action } = body;
-          if (!id || !action) {
-            res.writeHead(400, { "content-type": "application/json" });
-            res.end(JSON.stringify({ error: "id_and_action_required" }));
-            return;
-          }
-
-          const trace = startTurn({ chatId: "hitl-callback", kind: "resume", promptHash: id });
-          trace.event("hitl.resume", { hitlId: id, action });
-
-          log.info({ hitlId: id, action }, "HITL authorization callback processed");
-
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ status: "success", hitlId: id, action }));
-        } catch {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: "invalid_json" }));
-        }
-      });
+      handleHitlRespond(req, res);
       return;
     }
 
