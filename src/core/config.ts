@@ -130,6 +130,13 @@ export const envSchema = z.object({
    *  itself is unaffected by this flag — only the database writes are gated. */
   EVOLUTION_PERSIST_FINDINGS: z.enum(["true", "false"]).default("false"),
 
+  // ── TUI dispatch demo stub (2026-08-13 endpoint-integrity audit) ────────────
+  /** Enable POST /api/v1/dispatch, a demo stub for scripts/tui-dashboard.ts that
+   *  does NOT invoke the kernel. Default OFF: it used to mint a trace turnId and
+   *  emit hardcoded seam events into journald, which is the channel
+   *  `pnpm verify:benchmark` trusts to prove a turn really happened. */
+  TUI_DISPATCH_ENABLED: z.enum(["true", "false"]).default("false"),
+
   // Global halt (kill switch) — optional flag-file path override.
   // Default: $HOME/.founderos/HALT (resolved in src/infra/halt.ts).
   HALT_FLAG_PATH: z.string().transform(v => v || undefined).optional(),
@@ -315,6 +322,14 @@ export const SKILL_SYNTHESIS_ENABLED = env.SKILL_SYNTHESIS_ENABLED === "true";
  * future config surface can show the value the process started with.
  */
 export const EVOLUTION_PERSIST_FINDINGS = env.EVOLUTION_PERSIST_FINDINGS === "true";
+
+/**
+ * Whether the TUI dispatch demo stub (POST /api/v1/dispatch) answers at all.
+ * OFF by default. It never invokes the kernel; enabling it only makes the TUI
+ * dashboard's prompt box return 200 instead of 404. `src/infra/health.ts` reads
+ * `process.env` at request time rather than this frozen constant.
+ */
+export const TUI_DISPATCH_ENABLED = env.TUI_DISPATCH_ENABLED === "true";
 
 /**
  * Local rerank stage after hybrid RAG fusion (spec §1.1 F5). Default OFF — it
