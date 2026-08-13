@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { synthesizeSkillImpl } from "../../../src/tools/skill-synthesizer.js";
+import { synthesizeSkillImpl, synthesizeSkill } from "../../../src/tools/skill-synthesizer.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -33,5 +33,22 @@ describe("Hermes Skill Synthesizer", { timeout: 60000 }, () => {
 
     expect(res.success).toBe(false);
     expect(res.message).toContain("Typecheck failed");
+  });
+
+  // ── Truth-in-advertising: the tool's stated capability must match what it
+  // actually does now that src/agents/skill-loader.ts is real (2026-08-12
+  // remediation of the "register" claim that used to be a lie). This checks
+  // the static description only (no real tsc invocation needed — see
+  // skill-synthesizer-load-message.test.ts for the success-message wording,
+  // which mocks tsc so it doesn't pay the ~60-70s real-typecheck cost twice
+  // more in this suite). ──────────────────────────────────────────────────
+  it("description never claims synthesis alone registers a callable tool", () => {
+    const description = (synthesizeSkill as unknown as { description: string }).description;
+    // "does NOT register" / "NEXT process restart" are the load-bearing
+    // truthful claims; a bare "register" verb with no such qualifier nearby
+    // is exactly the 2026-08-12-audit-flagged lie.
+    expect(description).toMatch(/does NOT register/i);
+    expect(description).toContain("NEXT process restart");
+    expect(description).toContain("SKILL_SYNTHESIS_ENABLED");
   });
 });

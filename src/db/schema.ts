@@ -1002,7 +1002,7 @@ export const jobApplications = agentsSchema.table(
      * happily take in September.
      *
      * Written only by the Mac apply client — the machine never submits an
-     * application (ADR-009), so it learns either fact only from a founder click.
+     * application (ADR-018), so it learns either fact only from a founder click.
      * NULL on both = still in the queue.
      */
     skipped_at: timestamp("skipped_at", { withTimezone: true }),
@@ -1272,10 +1272,29 @@ export const failureLessons = agentsSchema.table(
     /** Tool names whose successful receipts backed the resolving attempt. */
     resolved_with_tools: jsonb("resolved_with_tools").$type<string[]>().notNull().default([]),
 
-    /** Occurrences recorded (resolutions), and injections into retries. */
+    /**
+     * `times_seen` = occurrences of this signature that entered the RETRY SEAM,
+     * resolved or not (see src/kernel/lessons.ts Hook 2 and its SCOPE note — it
+     * is a LOWER BOUND on failures: non-retryable failures and the final attempt
+     * of an exhausted step are not counted). `times_resolved`
+     * = the subset of those occurrences a later retry actually fixed (what
+     * `times_seen` meant before 2026-08-12; see drizzle/0029). Do not conflate
+     * either with `times_applied`, which counts lesson-INJECTIONS into retries
+     * (bumpFailureLessonApplied) — a third, unrelated axis.
+     */
     times_seen: integer("times_seen").notNull().default(1),
+    times_resolved: integer("times_resolved").notNull().default(0),
     times_applied: integer("times_applied").notNull().default(0),
 
+    /** True only for rows backfilled by drizzle/0029's migration UPDATE. */
+    migrated_from_v1: boolean("migrated_from_v1").notNull().default(false),
+
+    /** First time this signature was ever seen (set once, never updated). */
+    first_seen_at: timestamp("first_seen_at", { withTimezone: true }),
+    /** Most recent counted occurrence, resolved or not (updated on every occurrence write). */
+    last_seen_at: timestamp("last_seen_at", { withTimezone: true }),
+
+    /** Most recent successful resolution — meaningful for the resolution axis only. */
     last_resolved_at: timestamp("last_resolved_at", { withTimezone: true }).notNull().defaultNow(),
     created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

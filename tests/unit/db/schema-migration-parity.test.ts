@@ -189,7 +189,13 @@ describe("schema ⇄ migration parity", () => {
     };
     const registered = new Set(journal.entries.map((e) => e.tag));
     const onDisk = readdirSync(DRIZZLE_DIR)
-      .filter((f) => f.endsWith(".sql"))
+      // *.down.sql companions (e.g. 0029_lesson_occurrence_tracking.down.sql) are
+      // deliberately NOT journal-driven — this repo's drizzle-kit journal is
+      // forward-only, so a down migration is a documented manual `psql -f`
+      // reverse script, never something drizzle-kit itself applies. Registering
+      // one in the journal would make the forward runner execute it as a
+      // "migration" and DROP the columns it exists to let a human restore.
+      .filter((f) => f.endsWith(".sql") && !f.endsWith(".down.sql"))
       .map((f) => f.replace(/\.sql$/, ""));
     const inert = onDisk.filter((tag) => !registered.has(tag));
     expect(inert, `Migration files not in _journal.json are never applied: ${inert.join(", ")}`).toEqual([]);

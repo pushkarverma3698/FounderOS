@@ -135,20 +135,38 @@ export function findRecurringFailures(rows: readonly LessonRow[]): Finding[] {
 }
 
 /**
- * Identify lessons that have been seen >=3 times but never applied (times_applied === 0).
- * Sorted by times_seen descending — every finding here is high severity, so the
- * order is what tells the reader which broken lesson is costing the most.
+ * Identify PROVEN lessons that have been seen >=3 times but never applied
+ * (times_applied === 0). Sorted by times_seen descending — every finding here
+ * is high severity, so the order is what tells the reader which broken lesson
+ * is costing the most.
+ *
+ * `times_resolved > 0` IS PART OF THE DEFINITION, not an optimisation. Before
+ * 2026-08-12 failure_lessons held resolutions only, so every row carried a
+ * known fix and "seen a lot, never injected" always meant a real injection
+ * defect. The occurrence axis added rows for signatures that failed repeatedly
+ * and were NEVER resolved — those rows have no fix to inject, and
+ * getFailureLesson deliberately refuses to return them (`gt(times_resolved,
+ * 0)` in src/db/queries.ts). Flagging them here would report the injection
+ * gate WORKING as a high-severity defect, and occurrence-only rows are the
+ * common case, so they would have dominated the founder's audit report — the
+ * "a PASSING check shown as the reason something needs attention" failure that
+ * CLAUDE.md rule #26 was written after.
  */
 export function findUnappliedLessons(rows: readonly LessonRow[]): Finding[] {
   const unapplied = rows
-    .filter((row) => row.times_seen >= UNAPPLIED_LESSON_MIN_SEEN && row.times_applied === 0)
+    .filter(
+      (row) =>
+        row.times_resolved > 0 && row.times_seen >= UNAPPLIED_LESSON_MIN_SEEN && row.times_applied === 0,
+    )
     .slice()
     .sort((a, b) => b.times_seen - a.times_seen);
 
   return unapplied.map((row) => ({
     kind: "unapplied-lesson",
     subject: `${row.worker}:${row.signature}`,
-    evidence: `Lesson for ${row.worker}:${row.signature} has been seen ${row.times_seen} times but has never been injected into a retry.`,
+    evidence:
+      `Lesson for ${row.worker}:${row.signature} has a known fix (resolved ${row.times_resolved}× by a retry) ` +
+      `and the failure has been seen ${row.times_seen} times, but the lesson has never been injected into a retry.`,
     severity: "high",
   }));
 }

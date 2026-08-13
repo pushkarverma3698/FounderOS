@@ -34,7 +34,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file=.env node_modules/drizzle-kit/bin.cjs migrate",
     "setup": "node --env-file=.env --import tsx/esm scripts/setup-db.ts",
-    "brain:sync": "node --env-file=.env --import tsx/esm scripts/sync-turicks-brain.ts",
+    "brain:sync": "node --import tsx/esm scripts/sync-turicks-brain.ts",
     "ingest:chats": "node --env-file=.env --import tsx/esm scripts/ingest-external-chats.ts",
     "ingest:claude": "node --env-file=.env --import tsx/esm scripts/ingest-claude-sessions.ts",
     "personal:sync": "node --env-file=.env --import tsx/esm scripts/sync-personal-rag.ts",
