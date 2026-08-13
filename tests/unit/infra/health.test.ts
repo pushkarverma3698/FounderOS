@@ -49,6 +49,22 @@ function awaitListening(s: Server): Promise<void> {
   });
 }
 
+/**
+ * Start on an ephemeral port and return the port the OS actually assigned.
+ *
+ * These tests used to hardcode 39411–39413. Linux's ephemeral range is
+ * 32768–60999, so those three numbers are ones the kernel is free to hand to
+ * ANY other socket in the run — and once a sibling test file started binding
+ * port 0, it did: `listen EADDRINUSE :::39412` on CI run 31686753514, in a test
+ * neither PR touched. A hardcoded port inside the ephemeral range is a race
+ * against the whole suite, and asking for 0 removes the class outright.
+ */
+async function startOnEphemeralPort(): Promise<{ s: Server; port: number }> {
+  const s = startHealthServer(0);
+  await awaitListening(s);
+  return { s, port: (s.address() as { port: number }).port };
+}
+
 async function get(port: number, path: string) {
   const res = await fetch(`http://127.0.0.1:${port}${path}`);
   const body = (await res.json()) as Record<string, unknown>;
@@ -89,9 +105,8 @@ describe("health server", () => {
   });
 
   it("GET /health returns JSON with checks (503 when DB down in tests)", async () => {
-    const port = 39411;
-    server = startHealthServer(port);
-    await awaitListening(server);
+    const { s, port } = await startOnEphemeralPort();
+    server = s;
     const { status, body } = await get(port, "/health");
     expect([200, 503]).toContain(status);
     expect((body.checks as Record<string, string>).database).toMatch(/up|down/);
@@ -100,9 +115,8 @@ describe("health server", () => {
   });
 
   it("GET /metrics returns spend + uptime", async () => {
-    const port = 39412;
-    server = startHealthServer(port);
-    await awaitListening(server);
+    const { s, port } = await startOnEphemeralPort();
+    server = s;
     const { status, body } = await get(port, "/metrics");
     expect(status).toBe(200);
     expect(body).toHaveProperty("spend_today_usd");
@@ -110,11 +124,10 @@ describe("health server", () => {
   });
 
   it("unknown path returns 404 when JARVIS dist unavailable", async () => {
-    const port = 39413;
     const emptyRoot = mkdtempSync(join(tmpdir(), "jarvis-empty-"));
     process.env["JARVIS_DIST_ROOT"] = emptyRoot;
-    server = startHealthServer(port);
-    await awaitListening(server);
+    const { s, port } = await startOnEphemeralPort();
+    server = s;
     const { status } = await get(port, "/nope");
     expect(status).toBe(404);
     rmSync(emptyRoot, { recursive: true, force: true });
