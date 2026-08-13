@@ -18,7 +18,17 @@
  *     SKIPPED entirely when every chunk already carries this content's sha256.
  *
  * Requires: Ollama running with nomic-embed-text pulled, Postgres + pgvector up.
+ *
+ * Required env (loaded from .env in cwd — see scripts/lib/require-env.ts):
+ *   DATABASE_URL   PostgreSQL connection string (.env.example has the local-dev
+ *                  default; ask the founder for the prod value — never commit it).
+ * Missing .env, or DATABASE_URL unset within it, exits(1) with a named-variable
+ * message instead of the bare `node: .env: not found` this used to throw.
  */
+
+// MUST be the first import — see scripts/lib/require-env.ts for why (it exits
+// before ../src/db/client.js's eager env parse can throw an opaque error).
+import "./lib/require-env.js";
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -143,6 +153,34 @@ export function stripStaleSections(content: string, source: string): string {
     })
     .filter((line): line is string => line !== null)
     .join("\n");
+}
+
+/**
+ * Directories synced wholesale — every top-level `.md` file in each becomes a
+ * `plan` knowledge entry. CLAUDE.md's "Cross-Agent Awareness" rule tells every
+ * agent to check recent plans before starting work, so a doc landing here must
+ * actually reach `brain:sync`'s output, not just this source tree.
+ *
+ * Until 2026-08-08 neither directory was on this allowlist (see the comment at
+ * the loop below) — `brain:sync` reported success while ingesting zero plans.
+ */
+export const PLAN_SYNC_DIRS = ["docs/plans", "docs/product-recovery"] as const;
+
+/**
+ * True when `sourcePath` (repo-root-relative, e.g. "docs/plans/foo.md") is a
+ * direct `.md` child of one of PLAN_SYNC_DIRS — i.e. the next `brain:sync` run
+ * will pick it up. Pure and exported so a unit test can pin the allowlist
+ * without a live Postgres/Ollama (see tests/unit/scripts/sync-turicks-brain.test.ts).
+ *
+ * Mirrors collectDocs' actual scan below: readdirSync is non-recursive, so a
+ * file nested one directory deeper (e.g. "docs/plans/sub/foo.md") is correctly
+ * NOT picked up — matched here too, not just filtered by prefix.
+ */
+export function isPlanSyncSource(sourcePath: string): boolean {
+  return PLAN_SYNC_DIRS.some((dir) => {
+    const rest = sourcePath.startsWith(`${dir}/`) ? sourcePath.slice(dir.length + 1) : null;
+    return rest !== null && rest.endsWith(".md") && !rest.includes("/");
+  });
 }
 
 function collectDocs(rootDir: string): DocEntry[] {
@@ -299,10 +337,10 @@ function collectDocs(rootDir: string): DocEntry[] {
   // `brain:sync` reported "inserted / updated / ✅ complete" while ingesting
   // ZERO plans — a green mechanism with the outcome missing, which is the same
   // failure shape the product-recovery audit was opened to fix.
-  for (const dir of ["docs/plans", "docs/product-recovery"]) {
+  for (const dir of PLAN_SYNC_DIRS) {
     const planDir = join(root, dir);
     if (!existsSync(planDir)) continue;
-    for (const f of readdirSync(planDir).filter((f) => f.endsWith(".md"))) {
+    for (const f of readdirSync(planDir).filter((f) => isPlanSyncSource(`${dir}/${f}`))) {
       docs.push({
         entry_type: "plan",
         title: titleFromFilename(f),
