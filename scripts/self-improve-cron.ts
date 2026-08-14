@@ -1,35 +1,42 @@
 /**
- * FounderOS — Self-Improving Autonomous Runner Script
- * ===================================================
- * Reads saved data (turicks_brain transcripts, failure_lessons, self-audit findings),
- * constructs a targeted engineering prompt prioritized by Founder Friction Saved &
- * Execution Outcome Quality, and invokes Claude Code CLI (claude -p) automatically.
+ * FounderOS — Self-Improvement Acting Loop (manual entry point)
+ * =============================================================
+ * `pnpm self-improve:run` — the same loop the scheduler fires every third day
+ * at 09:00 (src/infra/scheduler.ts), runnable by hand.
  *
- * Runs on schedule (every 3 days) or on demand.
- * Usage: pnpm self-improve:run
+ * ## What changed on 2026-08-13, and why
+ *
+ * This script used to invoke the Claude Code CLI with `--permission-mode
+ * acceptEdits` against `process.cwd()` and let it edit the repository directly.
+ * That could not work on either host — `resolveExecutorCwd`
+ * (src/tools/claude-code.ts) refuses the FounderOS repo on the laptop and
+ * refuses `/opt/founderos` on prod for being outside `~/Projects` — so the
+ * "loop that acts" had only ever been capable of printing an error. Verified by
+ * running the guard on both.
+ *
+ * It now files ONE GitHub issue for the top actionable finding and lets the
+ * existing unattended pipeline do the work: `agent-dispatch` (VPS, every 15 min)
+ * claims it and Antigravity implements it in an isolated workspace, `pr-brain`
+ * (every 20 min) reviews the resulting draft PR. The founder acts only at the
+ * merge. See src/evolution/dispatch-findings.ts for the full rationale.
+ *
+ * The orchestration lives in `src/` so it can be unit-tested and so the
+ * scheduler can call it without importing from `scripts/` — the import
+ * direction that made the audit cron and the audit CLI drift into two different
+ * renderers (src/evolution/audit-sweep.ts).
  */
 
-import { resolve } from "node:path";
-import { claudeCodeTool } from "../src/tools/claude-code.js";
-import { collectSourceFiles } from "../src/evolution/collect.js";
-import {
-  findDeadExports,
-  findOrphanModules,
-} from "../src/evolution/analyzers/dead-code.js";
-import {
-  findOversizedPrompts,
-  findUntestedModules,
-} from "../src/evolution/analyzers/code-health.js";
-import { rankFindings } from "../src/evolution/rank.js";
+import { runSelfImprovementDispatch } from "../src/evolution/dispatch-findings.js";
+import { renderDispatchMessage } from "../src/evolution/dispatch-message.js";
 import { sendToChat } from "../src/infra/telegram-send.js";
 import { syncConversationSessions } from "./sync-conversation-session.js";
 
-const ROOT = resolve(process.cwd());
-
 export async function runSelfImprovementLoop(): Promise<void> {
-  console.log("=== FounderOS Autonomous Self-Improvement Loop ===");
+  console.log("=== FounderOS Self-Improvement Acting Loop ===");
 
-  // 1. Sync conversation session transcripts to DB memory
+  // Laptop-only, and deliberately not part of the scheduled path: this reads
+  // Claude Code transcripts from ~/.claude/projects, which exist on this machine
+  // and not on the VPS. Kept here so `pnpm self-improve:run` still syncs them.
   try {
     const sessionRes = await syncConversationSessions();
     console.log(`Synced ${sessionRes.synced} conversation sessions into DB memory.`);
@@ -37,68 +44,15 @@ export async function runSelfImprovementLoop(): Promise<void> {
     console.warn("Session sync failed (continuing):", (err as Error).message);
   }
 
-  // 2. Gather static audit findings
-  const files = collectSourceFiles(ROOT, "src");
-  const testFiles = collectSourceFiles(ROOT, "tests");
-  const staticFindings = [
-    ...findDeadExports(files),
-    ...findOrphanModules(files),
-    ...findOversizedPrompts(files),
-    ...findUntestedModules(files, testFiles),
-  ];
-  const ranked = rankFindings(staticFindings);
-  const topFindings = ranked.slice(0, 3);
+  const outcome = await runSelfImprovementDispatch();
 
-  if (topFindings.length === 0) {
-    console.log("No high-priority codebase findings. System is healthy!");
-    await sendToChat("✅ <b>Autonomous Self-Improvement Audit</b>: 0 code issues detected. System healthy!", "HTML");
-    return;
+  console.log(`\nOutcome: ${outcome.state}`);
+  if (outcome.state === "filed") {
+    console.log(`Filed #${outcome.issueNumber}: ${outcome.url}`);
+    console.log(`  ${outcome.finding.kind} · ${outcome.finding.severity} · ${outcome.finding.subject}`);
   }
 
-  // 3. Construct Claude Code prompt
-  const findingSummaries = topFindings
-    .map((f, i) => `${i + 1}. [${f.severity.toUpperCase()}] ${f.kind} on ${f.subject}: ${f.evidence}`)
-    .join("\n");
-
-  const prompt = [
-    `You are the autonomous FounderOS engineering agent. Address these high-priority codebase findings to maximize Founder Friction Saved and Execution Outcome Quality:`,
-    ``,
-    findingSummaries,
-    ``,
-    `Rules:`,
-    `1. Maintain strict type safety (tsc --noEmit clean).`,
-    `2. Keep files under 400 LOC budget limit.`,
-    `3. Reason before code and minimize blast radius.`,
-    `4. Verify with pnpm gate before finishing.`,
-  ].join("\n");
-
-  console.log("\nConstructed Claude Code Directive:");
-  console.log(prompt);
-
-  await sendToChat(
-    `🛠 <b>Autonomous Self-Improvement Initiated</b>\n\nInvoking Claude Code on ${topFindings.length} findings:\n${findingSummaries}`,
-    "HTML"
-  );
-
-  // 4. Run Claude Code CLI headless
-  const result = await claudeCodeTool.execute({
-    task: prompt,
-    cwd: ROOT,
-  });
-
-  if (result.success) {
-    console.log("Claude Code execution succeeded!");
-    await sendToChat(
-      `✅ <b>Autonomous Self-Improvement Succeeded</b>\n\n${String(result.data).slice(0, 500)}`,
-      "HTML"
-    );
-  } else {
-    console.error("Claude Code execution failed:", result.error);
-    await sendToChat(
-      `⚠️ <b>Autonomous Self-Improvement Encountered Error</b>: ${result.error?.slice(0, 300)}`,
-      "HTML"
-    );
-  }
+  await sendToChat(renderDispatchMessage(outcome), "HTML");
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
