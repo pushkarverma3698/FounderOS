@@ -145,7 +145,15 @@ export type PersistenceOutcome =
 
 /**
  * Persist one run's findings, gated on `EVOLUTION_PERSIST_FINDINGS` (default
- * OFF, read at call time so a test can flip it per-run).
+ * ON, read at call time so a test can flip it per-run — opt OUT with the
+ * literal string "false", same convention as `isDispatchEnabled()`).
+ *
+ * It shipped opt-IN so the first enabled run would deliberately establish the
+ * baseline. That happened, and then the flag stayed off in prod for a worse
+ * reason: the founder appended the line to /opt/founderos/.env by hand on
+ * 2026-08-13 and the next deploy re-rendered .env from the PROD_DOTENV secret
+ * and erased it. Recurrence tracking was silently inert for a day. A default is
+ * the only setting that survives a deploy without a secret rotation.
  *
  * ONLY the analyzers that actually ran are passed through. When the telemetry
  * tier is skipped its analyzers are absent from `analyzerResults` entirely, so
@@ -158,7 +166,7 @@ export async function persistAuditRun(
   run: AuditRunResult,
   opts: { readonly commitSha?: string | null } = {},
 ): Promise<PersistenceOutcome> {
-  if (process.env["EVOLUTION_PERSIST_FINDINGS"] !== "true") return { state: "disabled" };
+  if (process.env["EVOLUTION_PERSIST_FINDINGS"] === "false") return { state: "disabled" };
 
   const result = await persistFindingsForRun({
     tenantId: AUDIT_TENANT,

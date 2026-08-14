@@ -123,12 +123,11 @@ export const envSchema = z.object({
   SKILL_SYNTHESIS_ENABLED: z.enum(["true", "false"]).default("false"),
 
   // ── Evolution findings persistence (Task 3, 2026-08-13) ─────────────────────
-  /** Write each self-audit run's findings to evolution_runs/evolution_findings
-   *  so recurrence and regressions survive across runs. Default OFF: the tables
-   *  exist on prod but nothing has ever written to them, so the first run with
-   *  this ON establishes the baseline every later run diffs against. The report
-   *  itself is unaffected by this flag — only the database writes are gated. */
-  EVOLUTION_PERSIST_FINDINGS: z.enum(["true", "false"]).default("false"),
+  /** Gate the evolution_runs/evolution_findings writes that make recurrence
+   *  visible; the report itself is unaffected. Default ON since 2026-08-14 —
+   *  opt out with "false". Why it flipped: persistAuditRun in
+   *  src/evolution/run-audit.ts, which is also the code that reads it. */
+  EVOLUTION_PERSIST_FINDINGS: z.enum(["true", "false"]).default("true"),
 
   // ── Self-improvement acting loop (Task 6, 2026-08-13) ───────────────────────
   /** Whether the 3-day acting loop may file a GitHub issue (max 1/run, deduped by

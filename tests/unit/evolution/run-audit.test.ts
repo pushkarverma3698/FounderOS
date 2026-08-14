@@ -101,21 +101,28 @@ describe("runSelfAudit — coverage is reported, never assumed", () => {
 });
 
 describe("persistAuditRun — flag-gated, and coverage-honest when it writes", () => {
-  it("writes nothing at all when the flag is unset (default OFF)", async () => {
+  it("writes when the flag is unset (default ON — survives a deploy re-rendering .env)", async () => {
     const run = await runSelfAudit(root);
 
     const outcome = await persistAuditRun(run);
 
-    expect(outcome.state).toBe("disabled");
-    expect(persistFindingsForRun).not.toHaveBeenCalled();
+    expect(outcome.state).toBe("attempted");
+    expect(persistFindingsForRun).toHaveBeenCalled();
   });
 
-  it("writes nothing when the flag is any value other than \"true\"", async () => {
-    process.env["EVOLUTION_PERSIST_FINDINGS"] = "1";
+  it("opts out only on the literal string \"false\"", async () => {
+    process.env["EVOLUTION_PERSIST_FINDINGS"] = "false";
     const run = await runSelfAudit(root);
 
     expect((await persistAuditRun(run)).state).toBe("disabled");
     expect(persistFindingsForRun).not.toHaveBeenCalled();
+  });
+
+  it("does not treat an unrecognised value as an opt-out", async () => {
+    process.env["EVOLUTION_PERSIST_FINDINGS"] = "1";
+    const run = await runSelfAudit(root);
+
+    expect((await persistAuditRun(run)).state).toBe("attempted");
   });
 
   it("passes all ten analyzers as coverage when both tiers ran", async () => {
