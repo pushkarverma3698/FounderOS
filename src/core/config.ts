@@ -130,6 +130,17 @@ export const envSchema = z.object({
    *  itself is unaffected by this flag — only the database writes are gated. */
   EVOLUTION_PERSIST_FINDINGS: z.enum(["true", "false"]).default("false"),
 
+  // ── Self-improvement acting loop (Task 6, 2026-08-13) ───────────────────────
+  /** Whether the 3-day acting loop may file a GitHub issue (max 1/run, deduped by
+   *  finding fingerprint) for the agent dispatcher. Default ON, unlike the flags
+   *  above: this is the only loop that turns an audit into work, and one that
+   *  ships disabled is inert by construction. Rationale + kill-switch semantics:
+   *  src/evolution/dispatch-findings.ts, which reads process.env at call time. */
+  SELF_IMPROVE_DISPATCH_ENABLED: z.enum(["true", "false"]).default("true"),
+  /** Must match the `ISSUE_REPO` the VPS `agent-dispatch` cron watches, or issues
+   *  are filed where nothing will ever claim them. */
+  SELF_IMPROVE_ISSUE_REPO: z.string().default("pushkarverma3698/FounderOS"),
+
   // ── TUI dispatch demo stub (2026-08-13 endpoint-integrity audit) ────────────
   /** Enable POST /api/v1/dispatch, a demo stub for scripts/tui-dashboard.ts that
    *  does NOT invoke the kernel. Default OFF: it used to mint a trace turnId and
