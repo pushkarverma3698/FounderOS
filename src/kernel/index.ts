@@ -57,7 +57,7 @@ export {
   fallbackSynthesisReply,
   SYNTH_STEP_OUTPUT_MAX_CHARS,
 } from "./synthesizer.js";
-export { redactInternalPaths } from "./founder-text.js";
+export { redactInternalPaths, redactInternalIdentifiers } from "./founder-text.js";
 export {
   clampToolOutput,
   pruneScratchForModel,
