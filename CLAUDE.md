@@ -253,10 +253,6 @@ explicitly ("Nothing outstanding from your end").
 - Never commit DIRECTLY to `main` — always through a PR. Flow: work branch →
   `beta` → `main`, still the normal path because `beta` is where CD proves a
   change before prod sees it.
-- **One branch per unit of work, always** — see
-  `docs/antigravity/BRANCHING-STRATEGY.md` for naming, lifetime, and the
-  dispatcher/Antigravity/Claude-agnostic rules. Branch before the first edit,
-  never let unrelated work accumulate uncommitted on `main`.
 - **Claude may merge to `main` itself** (founder directive, 2026-08-01). The
   previous "founder merges only" rule and the CI ladder that enforced it
   (`.github/workflows/branch-policy.yml`, now deleted) were removed: work sat
@@ -269,6 +265,10 @@ explicitly ("Nothing outstanding from your end").
 - After merging to `main`, WATCH THE DEPLOY and verify prod actually moved.
   A merge is not a deploy, and CD silently failing was how prod stayed on
   `a966e9a` for a full day.
+- **Agent branches are task-specific, short-lived, PR-backed, and deleted after merge.** No
+  permanent `claude/*`, `cursor/*`, or `antigravity/*` branches — a branch under those prefixes is
+  fine mid-task (e.g. an open PR) but should not outlive its PR. This was already the practice;
+  writing it down so it stays the practice.
 - Evidence in every PR: fresh `pnpm gate` output + live-path proof (or an
   explicit NOT VERIFIED with the reason).
 
