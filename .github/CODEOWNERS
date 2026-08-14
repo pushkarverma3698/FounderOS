@@ -1,5 +1,10 @@
 # FounderOS — code owners
-# `main` requires @pushkarverma3698 approval (branch protection + require_code_owner_reviews).
+# `main` branch protection does NOT set require_code_owner_reviews (required_approving_review_count: 0,
+# verified via `gh api repos/.../branches/main/protection`). The real enforcement is GitHub's refusal
+# of same-account self-approval: a PR author can never approve their own PR, which is what makes the
+# pr-brain/pr-adversary draft→ready transition a meaningful pass signal instead of a formality.
+# Claude may approve and merge to `main` autonomously per CLAUDE.md's 2026-08-01 "Claude may merge to
+# main itself" directive — that authority is not gated by this file.
 # Cloud agents and CI open PRs to `beta`; only the founder promotes `beta → main`.
 # (The former `stable` tier was retired — production is two-stage: feat/* → beta → main. See ADR-045.)
 
