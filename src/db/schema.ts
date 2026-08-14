@@ -1554,6 +1554,43 @@ export const evolutionFindings = agentsSchema.table(
 export type EvolutionFinding = typeof evolutionFindings.$inferSelect;
 export type NewEvolutionFinding = typeof evolutionFindings.$inferInsert;
 
+// ── private_group_chat_messages ───────────────────────────────────────────────
+
+/**
+ * Persistent store for private group chat messages sent through the gateway.
+ * One row per message. Used for audit, replay, and search across group chats.
+ *
+ * `metadata` carries any gateway-specific envelope fields (chat_id, platform,
+ * message_id, etc.) without requiring schema changes per integration.
+ */
+export const privateGroupChatMessages = agentsSchema.table(
+  "private_group_chat_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    /** Sender's username or handle as reported by the gateway. */
+    username: text("username").notNull(),
+
+    /** Full message text. */
+    message: text("message").notNull(),
+
+    /** When the message was sent (gateway-provided, not insert time). */
+    timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
+
+    /** Arbitrary gateway envelope fields — chat_id, platform, message_id, etc. */
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  },
+  (t) => ({
+    /** Look up all messages from a user. */
+    usernameIdx: index("pgcm_username_idx").on(t.username),
+    /** Time-ordered retrieval and range queries. */
+    timestampIdx: index("pgcm_timestamp_idx").on(t.timestamp),
+  }),
+);
+
+export type PrivateGroupChatMessage = typeof privateGroupChatMessages.$inferSelect;
+export type NewPrivateGroupChatMessage = typeof privateGroupChatMessages.$inferInsert;
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
 export const interruptRegistry = hitlApprovals;
