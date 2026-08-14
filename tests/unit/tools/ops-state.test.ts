@@ -22,7 +22,15 @@ describe("ops_state tool & queryOpsState", () => {
       "hitl_approvals",
       "action_log",
       "costs",
+      "job_runs",
     ]);
+  });
+
+  it("points a spend question at the costs scope, and sweep counts at job_runs", () => {
+    // Reality Benchmark A5: the agent asked for 'costs' and got sweep throughput,
+    // so it truthfully reported no cost data while ai_call_costs held the spend.
+    expect(opsStateTool.description).toContain("money spent on AI calls");
+    expect(opsStateTool.description).toContain("job sweep throughput");
   });
 
   it("queries ops state for action_log", async () => {

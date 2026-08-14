@@ -1873,7 +1873,15 @@ export async function closeMission(
     .where(eq(missions.mission_id, missionId));
 }
 
-export type OpsScope = "scheduled_tasks" | "reminders" | "hitl_approvals" | "action_log" | "costs";
+export type OpsScope =
+  | "scheduled_tasks"
+  | "reminders"
+  | "hitl_approvals"
+  | "action_log"
+  /** Money: ai_call_costs, aggregated by model + agent. */
+  | "costs"
+  /** Sweep throughput: job_ingest_runs (requested/returned/screened/passed). */
+  | "job_runs";
 
 export interface OpsStateArgs {
   readonly scope: OpsScope;
@@ -1885,7 +1893,14 @@ export interface OpsStateArgs {
 export async function queryOpsState(
   args: OpsStateArgs,
   tenantId: string = DEFAULT_TENANT,
-): Promise<{ count: number; total: number; scope: OpsScope; rows: Record<string, unknown>[] }> {
+): Promise<{
+  count: number;
+  total: number;
+  scope: OpsScope;
+  /** Present on the `costs` scope only — the headline figures the founder asked for. */
+  totals?: { calls: number; cost_usd: number; tokens_in: number; tokens_out: number };
+  rows: Record<string, unknown>[];
+}> {
   const db = getDb();
   const limit = Math.min(Math.max(1, args.limit ?? 50), 200);
   const sinceDate = args.since ? new Date(args.since) : undefined;
@@ -1988,7 +2003,59 @@ export async function queryOpsState(
       return { count: rows.length, total, scope: args.scope, rows: rows as unknown as Record<string, unknown>[] };
     }
 
+    // "What did it cost?" means money. Until 2026-08-14 this scope read
+    // job_ingest_runs — sweep throughput, which carries no dollar figure — so the
+    // agent correctly reported that costs "were not logged" while ai_call_costs
+    // held the real spend. Reality Benchmark A5 caught it. The throughput read is
+    // not lost; it moved to the `job_runs` scope below.
     case "costs": {
+      const [t] = await db.select({ total: sql<number>`count(*)` }).from(aiCallCosts).where(eq(aiCallCosts.tenant_id, tenantId));
+      const total = Number(t?.total ?? 0);
+
+      const conds = [eq(aiCallCosts.tenant_id, tenantId)];
+      if (validSince) conds.push(gte(aiCallCosts.created_at, validSince));
+
+      const [totals] = await db
+        .select({
+          calls: sql<number>`count(*)`,
+          cost_usd: sql<string>`COALESCE(SUM(${aiCallCosts.cost_usd}), 0)`,
+          tokens_in: sql<number>`COALESCE(SUM(${aiCallCosts.tokens_in}), 0)`,
+          tokens_out: sql<number>`COALESCE(SUM(${aiCallCosts.tokens_out}), 0)`,
+        })
+        .from(aiCallCosts)
+        .where(and(...conds));
+
+      // Per model+agent, dearest first — the breakdown that answers "where did it go".
+      const rows = await db
+        .select({
+          model: aiCallCosts.model,
+          agent: aiCallCosts.agent,
+          calls: sql<number>`count(*)`,
+          cost_usd: sql<string>`SUM(${aiCallCosts.cost_usd})`,
+          tokens_in: sql<number>`SUM(${aiCallCosts.tokens_in})`,
+          tokens_out: sql<number>`SUM(${aiCallCosts.tokens_out})`,
+        })
+        .from(aiCallCosts)
+        .where(and(...conds))
+        .groupBy(aiCallCosts.model, aiCallCosts.agent)
+        .orderBy(desc(sql`SUM(${aiCallCosts.cost_usd})`))
+        .limit(limit);
+
+      return {
+        count: rows.length,
+        total,
+        scope: args.scope,
+        totals: {
+          calls: Number(totals?.calls ?? 0),
+          cost_usd: Number(totals?.cost_usd ?? 0),
+          tokens_in: Number(totals?.tokens_in ?? 0),
+          tokens_out: Number(totals?.tokens_out ?? 0),
+        },
+        rows: rows as unknown as Record<string, unknown>[],
+      };
+    }
+
+    case "job_runs": {
       const [t] = await db.select({ total: sql<number>`count(*)` }).from(jobIngestRuns).where(eq(jobIngestRuns.tenant_id, tenantId));
       const total = Number(t?.total ?? 0);
 
