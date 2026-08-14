@@ -6,6 +6,7 @@
  *   deliver_artifact— deliver generated artifact to Telegram as file attachment (HITL-gated)
  */
 
+import { basename } from "node:path";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { jobStateTool } from "../../tools/job-state.js";
@@ -61,7 +62,12 @@ export const opsState = tool(
     name: "ops_state",
     description: opsStateTool.description,
     schema: z.object({
-      scope: z.enum(["scheduled_tasks", "reminders", "hitl_approvals", "action_log", "costs"]).describe("Operational scope to query."),
+      scope: z
+        .enum(["scheduled_tasks", "reminders", "hitl_approvals", "action_log", "costs", "job_runs"])
+        .describe(
+          "Operational scope. 'costs' = money spent on AI calls (dollar totals + per-model breakdown) — " +
+            "use it for any spend/budget/cost question. 'job_runs' = job sweep throughput counts.",
+        ),
       status: z.string().optional().nullable().describe("Filter by status."),
       since: z.string().optional().nullable().describe("Filter timestamp >= ISO string."),
       limit: z.number().optional().nullable().describe("Max rows to return (default 50, max 200)."),
@@ -106,9 +112,12 @@ export const deliverArtifact = tool(
     const rejected = await hitlGate(
       {
         action: "deliver_artifact",
-        title: `📄 Deliver artifact to Telegram?`,
-        summary: `Deliver artifact at ${filePath}`,
-        preview: filePath,
+        title: `📄 Send you this file?`,
+        // The card is founder-facing: name the file, not the server layout.
+        // `args` still carries the full path — that is the internal record the
+        // resume path re-executes from, and it is not rendered on the card.
+        summary: `Send "${basename(filePath)}" to this chat`,
+        preview: basename(filePath),
         args: { path: filePath },
       },
       config,

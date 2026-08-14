@@ -20,6 +20,7 @@ import { messageContentText } from "./message-text.js";
 import { isKernelTerminalError } from "./errors.js";
 import { clampToolOutput } from "./tool-output-guard.js";
 import { missionSatisfied } from "./mission-satisfaction.js";
+import { redactInternalPaths } from "./founder-text.js";
 import { writeTaskOutcome } from "../db/queries.js";
 import { childLogger } from "../infra/logger.js";
 
@@ -36,14 +37,43 @@ const SYNTHESIZER_PROMPT = [
   `Be concise and direct. Plain text (Telegram-friendly), no markdown headers.`,
 ].join("\n");
 
-/** Deterministic receipts block — code-generated proof lines, not model prose. */
+/** Successful receipts across every ok step, in execution order. */
+function okReceipts(results: StepResult[]): ToolReceipt[] {
+  return results.flatMap((r) => (r.status === "ok" ? r.tool_receipts.filter((t) => t.ok) : []));
+}
+
+/**
+ * INTERNAL receipts block — code-generated proof lines, not model prose.
+ *
+ * Names tools, args hashes and result digests. This is the auditable record and
+ * it is NOT appended to the founder's reply; it exists for the trace, the logs
+ * and anything that has to reconstruct what actually ran. Use
+ * `founderReceiptsBlock` for anything a human reads.
+ */
 export function receiptsBlock(results: StepResult[]): string {
-  const receipts: ToolReceipt[] = results.flatMap((r) =>
-    r.status === "ok" ? r.tool_receipts.filter((t) => t.ok) : [],
-  );
+  const receipts = okReceipts(results);
   if (receipts.length === 0) return "";
   const lines = receipts.map((t) => `✓ ${t.tool} @ ${t.at} · args ${t.args_hash.slice(0, 8)} · result ${t.result_digest.slice(0, 8)}`);
   return `\n\n—\nAction receipts:\n${lines.join("\n")}`;
+}
+
+/**
+ * FOUNDER-FACING receipts block.
+ *
+ * Same guarantee as the internal one — every claim above this line is backed by
+ * a recorded execution — carried by a count instead of a tool inventory. Tool
+ * names, hashes and timestamps-per-call are internal detail: they cost the
+ * founder attention, tell them nothing they can act on, and are the single
+ * largest scorer against the product in the reality benchmark (22 of 24 replies
+ * failed the leakage dimension on this block alone, 2026-08-14).
+ *
+ * The mechanism is untouched. Only the audience changed.
+ */
+export function founderReceiptsBlock(results: StepResult[]): string {
+  const count = okReceipts(results).length;
+  if (count === 0) return "";
+  const noun = count === 1 ? "action" : "actions";
+  return `\n\n—\n✓ ${count} ${noun} completed and verified`;
 }
 
 /** Per-step char cap in the deterministic fallback reply (Telegram-friendly). */
@@ -109,7 +139,7 @@ export function makeSynthesizeNode(model: KernelChatModel) {
 
     return {
       mission: { ...state.mission, status: "done" },
-      reply: text.trim() + receiptsBlock(state.results),
+      reply: redactInternalPaths(text.trim()) + founderReceiptsBlock(state.results),
     };
   };
 }
