@@ -12,9 +12,21 @@ shared, never resurrected), and [CLAUDE_REVIEWER_INSTRUCTIONS.md](CLAUDE_REVIEWE
 agent:ready → agent:working → agent:review → (merged | agent:blocked | agent:failed)
 ```
 
-`agent:ready` is an **explicit intake gate**, applied by a human (or a future FounderOS tool) only
-once an issue actually satisfies the template in `.github/ISSUE_TEMPLATE/agent-task.md`. Nothing
-scans for or auto-applies this label. Everything downstream of it is unattended.
+`agent:ready` is an **explicit intake gate**, applied only once an issue actually satisfies the
+template in `.github/ISSUE_TEMPLATE/agent-task.md`. Everything downstream of it is unattended.
+
+Two things may apply it, and nothing else scans for it:
+
+1. **A human**, on any issue.
+2. **The self-improvement acting loop** (`src/evolution/dispatch-findings.ts`), which renders a
+   template-shaped body from one ranked self-audit finding. It is bounded by construction: **at most
+   one issue per run**, deduplicated on the finding's fingerprint against its own `evolution:auto`
+   history (read with `state: "all"`, so a closed issue still suppresses a re-file), and findings
+   whose resolution is a *decision* rather than an implementation — `cost-hotspot`,
+   `orphan-module`, `dead-export`, `oversized-prompt`, `loc-pressure` — are never dispatched at all.
+   They still appear in the audit report; only the robot handoff is withheld.
+
+First unattended use: issue #491, 2026-08-14T05:29:43Z.
 
 ## Division of authority — read this before anything else
 
@@ -24,10 +36,16 @@ did.** Its only questions are mechanical: is there an eligible issue, is there a
 PR, is a lease stale, has the retry budget run out. "A PR exists" is a dispatch signal, not a
 verdict.
 
-**Claude, via `pr-brain`, is the sole review authority.** Its evidence-backed verdict — PASS,
-BLOCKER + fix, or CHANGES_REQUESTED — is what determines whether work continues, not anything the
-dispatcher or Antigravity itself claims. This mirrors the standing rule in
-[README.md](README.md#review-discipline--non-negotiable): the executor is never its own grader.
+**Claude, via `pr-brain`, is the sole review authority.** Its evidence-backed verdict is what
+determines whether work continues, not anything the dispatcher or Antigravity itself claims. This
+mirrors the standing rule in [README.md](README.md#review-discipline--non-negotiable): the executor
+is never its own grader.
+
+The verdict is one of exactly four outcomes, defined in
+[ADR-046](../decisions/046-operating-model-freeze.md#the-four-review-outcomes): **PASS**,
+**NON-BLOCKER** (named but never blocking), **BLOCKER — Claude fixes** (smallest correct fix pushed
+to the PR branch), **BLOCKER — needs a decision** (`--request-changes`, which returns the work to
+Antigravity through dispatcher Pass B). Silence is not an outcome.
 
 ## The 20-step contract (what Antigravity does inside each invocation)
 

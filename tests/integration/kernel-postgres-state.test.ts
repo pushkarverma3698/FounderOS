@@ -271,8 +271,8 @@ describe.runIf(pgUp)("v3 kernel run-loop ↔ Postgres state integrity", () => {
     // Founder-facing reply: synthesized text + code-side receipts block
     // (placeholder + final reply).
     expect(sent).toHaveLength(2);
-    expect(sent.at(-1)!.text).toContain("Action receipts");
-    expect(sent.at(-1)!.text).toContain("send_email");
+    expect(sent.at(-1)!.text).toContain("completed and verified");
+    expect(sent.at(-1)!.text).not.toContain("send_email");
 
     // State was NOT dropped: the thread still holds the turn-1 mission, done.
     const kernel = await getKernel();
