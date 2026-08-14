@@ -12,6 +12,7 @@ import {
   buildKernel,
   getPendingKernelApproval,
   hashToolArgs,
+  receiptsBlock,
   KERNEL_SCHEMA_VERSION,
   type KernelBindableModel,
   type KernelTool,
@@ -131,8 +132,12 @@ describe("kernel E2E (scripted models, real graph)", () => {
       expect(r0.tool_receipts[0]!.ok).toBe(true);
       expect(r0.tool_receipts[0]!.args_hash).toBe(hashToolArgs({ query: "LangGraph news" }));
     }
-    expect(res.reply).toContain("Action receipts");
-    expect(res.reply).toContain("search_web");
+    // Founder sees the verification claim, never the tool inventory.
+    expect(res.reply).toContain("1 action completed and verified");
+    expect(res.reply).not.toContain("search_web");
+    expect(res.reply).not.toContain("Action receipts");
+    // The internal record is untouched and still names the tool.
+    expect(receiptsBlock(res.results)).toContain("search_web");
     // 1 planner + 2 worker + 1 synth — bounded, measured.
     expect(planner.calls + worker.calls + synth.calls).toBe(4);
   });
@@ -201,7 +206,7 @@ describe("kernel E2E (scripted models, real graph)", () => {
     expect(res.mission.status).toBe("done");
     const r0 = res.results[0]!;
     if (r0.status === "ok") expect(r0.tool_receipts[0]!.ok).toBe(true);
-    expect(res.reply).toContain("Action receipts");
+    expect(res.reply).toContain("completed and verified");
   });
 
   it("HITL reject: typed hitl_rejected failure, NO side effect, state PRESERVED (no thread wipe)", async () => {

@@ -34,6 +34,7 @@ vi.mock("../../../src/infra/halt.js", () => ({
 import {
   buildKernel,
   digestToolResult,
+  receiptsBlock,
   KERNEL_SCHEMA_VERSION,
   TOOL_OUTPUT_MAX_CHARS,
   TOOL_OUTPUT_TRUNCATED_MARKER,
@@ -42,7 +43,7 @@ import {
   type KernelTool,
   type WorkerSpec,
 } from "../../../src/kernel/index.js";
-import { runKernelText } from "../../../src/gateway/kernel-run.js";
+import { runKernelText, threadIdFor } from "../../../src/gateway/kernel-run.js";
 
 let currentKernel: CompiledKernel;
 
@@ -141,11 +142,16 @@ describe("Ironclad fire drill (Telegram gateway → real kernel graph)", () => {
     expect(seen.length).toBeLessThan(TOOL_OUTPUT_MAX_CHARS + 400);
     expect(seen).toContain(TOOL_OUTPUT_TRUNCATED_MARKER);
 
-    // Ground truth unchanged: the receipts block carries the FULL-payload digest.
+    // Ground truth unchanged: the INTERNAL receipts carry the FULL-payload digest,
+    // even though the founder's reply never shows a digest or a tool name.
     const finalReply = replies.at(-1)!;
     expect(finalReply).toContain("Competitor pricing: $99/mo.");
-    expect(finalReply).toContain("Action receipts");
-    expect(finalReply).toContain(digestToolResult(hugePayload).slice(0, 8));
+    expect(finalReply).toContain("completed and verified");
+    expect(finalReply).not.toContain("scrape_site");
+    expect(finalReply).not.toContain(digestToolResult(hugePayload).slice(0, 8));
+
+    const state = await currentKernel.getState({ configurable: { thread_id: threadIdFor(101) } });
+    expect(receiptsBlock(state.values.results)).toContain(digestToolResult(hugePayload).slice(0, 8));
   });
 
   it("recovers from a HALLUCINATED tool call — rejected in-band, model self-corrects, turn completes", async () => {
@@ -173,9 +179,14 @@ describe("Ironclad fire drill (Telegram gateway → real kernel graph)", () => {
 
     const finalReply = replies.at(-1)!;
     expect(finalReply).toContain("There are 3 competitors.");
-    // Only the REAL tool earned a receipt.
-    expect(finalReply).toContain("search_web");
-    expect(finalReply).not.toContain("make_coffee");
+    expect(finalReply).toContain("1 action completed and verified");
+
+    // Only the REAL tool earned a receipt — asserted on the internal record,
+    // which is where tool identity lives now.
+    const state = await currentKernel.getState({ configurable: { thread_id: threadIdFor(102) } });
+    const internal = receiptsBlock(state.values.results);
+    expect(internal).toContain("search_web");
+    expect(internal).not.toContain("make_coffee");
   });
 
   it("repairs MALFORMED worker JSON (trailing comma) instead of dropping the task", async () => {

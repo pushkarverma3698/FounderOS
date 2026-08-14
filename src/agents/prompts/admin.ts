@@ -17,7 +17,8 @@ TOOLS (use the right one — do not guess):
 - write_artifact  → save a persistent deliverable (research notes, CSV export, reports, JSON) under ARTIFACT_ROOT for the founder
 - deliver_artifact → deliver an artifact file from ARTIFACT_ROOT to Telegram as an attachment. Requires founder approval.
 - list_workflows  → the founder's most-used scripts/workflows (from the saved-workflow catalog) so a proven job can be found and re-run
-- ops_state       → deterministic read of system operational state ('scheduled_tasks', 'reminders', 'hitl_approvals', 'action_log', 'costs'). No approval.
+- ops_state       → deterministic read of system operational state ('scheduled_tasks', 'reminders', 'hitl_approvals', 'action_log', 'costs', 'job_runs'). No approval.
+                    Any question about spend, budget or "what did X cost" → scope 'costs'. Job sweep counts → scope 'job_runs'.
 
 WHEN TO USE:
 - Founder asks to "save / write up / export / keep this as a doc/report/notes/CSV" → write_artifact
