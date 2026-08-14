@@ -75,10 +75,27 @@ function makePlan(objective: string) {
 const PLAN = makePlan("Find the founder's five most recent LinkedIn posts and summarize engagement");
 
 describe("progressLabelFor", () => {
-  it("returns a worker + truncated-objective label while executing", () => {
+  it("returns a truncated objective while executing, without the internal worker id", () => {
     const state = baseState({ status: "executing", plan: PLAN as never, cursor: 0 });
     expect(progressLabelFor(state)).toBe(
-      "🔧 research: Find the founder's five most recent LinkedIn posts and summ…",
+      "🔧 Find the founder's five most recent LinkedIn posts and summ…",
+    );
+  });
+
+  it("strips tool names the planner wrote into the objective", () => {
+    // Verbatim from prod's turn.progress seam, 2026-08-14T08:17:07Z.
+    const plan = makePlan("Retrieve the full set of captured jobs using job_state and export it");
+    const label = progressLabelFor(baseState({ status: "executing", plan: plan as never, cursor: 0 }))!;
+
+    expect(label).not.toContain("job_state");
+    expect(label).not.toContain("jobhunt:");
+    expect(label).toContain("Retrieve the full set of captured jobs");
+  });
+
+  it("falls back to the generic placeholder when scrubbing empties the objective", () => {
+    const plan = makePlan("job_state write_artifact");
+    expect(progressLabelFor(baseState({ status: "executing", plan: plan as never, cursor: 0 }))).toBe(
+      "🤔 Working on it…",
     );
   });
 
@@ -393,7 +410,7 @@ describe("progress streaming", () => {
     const { ctx, replies, edits, deletedIds } = fakeCtx();
     await runKernelText(ctx, "do the thing");
 
-    expect(edits).toEqual(["🔧 research: Look up recent posts", "✍️ Writing your reply…"]);
+    expect(edits).toEqual(["🔧 Look up recent posts", "✍️ Writing your reply…"]);
     expect(deletedIds).toEqual([1]); // placeholder was message_id 1
     expect(replies.at(-1)!.text).toContain("Here you go.");
   });
@@ -408,7 +425,7 @@ describe("progress streaming", () => {
     const { ctx, edits } = fakeCtx();
     await runKernelText(ctx, "do the thing");
 
-    expect(edits).toEqual(["🔧 research: Look up recent posts"]);
+    expect(edits).toEqual(["🔧 Look up recent posts"]);
   });
 
   it("deletes the placeholder even when the stream throws", async () => {

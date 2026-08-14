@@ -13,7 +13,7 @@ import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { TENANT, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS, OFFICE_RECURSION_LIMIT } from "../core/config.js";
 import { withTurnTimeout, TurnTimeoutError } from "./turn-timeout.js";
 import { getKernel } from "./kernel-boot.js";
-import { kernelReply, getPendingKernelApproval } from "../kernel/index.js";
+import { kernelReply, getPendingKernelApproval, redactInternalPaths, redactInternalIdentifiers } from "../kernel/index.js";
 import type { ApprovalRequest } from "../infra/hitl.js";
 import { formatApprovalCard, safeHtml } from "./approval-card.js";
 import { markdownToTelegramHtml, splitForTelegram } from "./format.js";
@@ -113,11 +113,11 @@ export function progressLabelFor(state: KernelStateType): string | null {
   if (mission.status === "executing") {
     const step = mission.plan?.steps[mission.cursor];
     if (!step) return null;
-    const objective =
-      step.objective.length > PROGRESS_OBJECTIVE_MAX
-        ? `${step.objective.slice(0, PROGRESS_OBJECTIVE_MAX - 1)}…`
-        : step.objective;
-    return `🔧 ${step.worker}: ${objective}`;
+    // Worker id is internal routing; the objective is planner prose that names
+    // tools. Both are scrubbed — rationale in kernel/founder-text.ts.
+    const clean = redactInternalIdentifiers(redactInternalPaths(step.objective));
+    if (!clean) return PROGRESS_PLACEHOLDER_TEXT;
+    return `🔧 ${clean.length > PROGRESS_OBJECTIVE_MAX ? `${clean.slice(0, PROGRESS_OBJECTIVE_MAX - 1)}…` : clean}`;
   }
   if (mission.status === "synthesizing") return "✍️ Writing your reply…";
   return null;
