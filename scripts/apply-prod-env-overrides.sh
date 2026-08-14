@@ -93,12 +93,12 @@ fi
 # probed 200 in 0.5s while gemini-3-flash-preview probed 200 in 39s (degraded).
 grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
 {
-  printf '%s\n' 'AGENT_MODEL=google-genai:gemini-flash-latest'
-  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-3.1-flash-lite,google-genai:gemini-3-flash-preview,openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free'
+  printf '%s\n' 'AGENT_MODEL=google-genai:gemini-3.1-flash-lite'
+  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-3-flash-preview,openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
-echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-flash-latest"
+echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-3.1-flash-lite"
 
 # Pin the job-sweep spend controls. Both were unset in production until
 # 2026-08-05, and both defaulted quietly rather than loudly:

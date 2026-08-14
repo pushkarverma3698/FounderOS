@@ -92,8 +92,10 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
 
   it("still pins the production model and stable fallbacks", () => {
     const rendered = render("", SNAPSHOT_BASE + "AGENT_MODEL=something-else\n");
-    expect(valueOf(rendered, "AGENT_MODEL")).toBe("google-genai:gemini-flash-latest");
-    expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain("google-genai:");
+    expect(valueOf(rendered, "AGENT_MODEL")).toBe("google-genai:gemini-3.1-flash-lite");
+    expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain("google-genai:gemini-3-flash-preview");
+    // Explicitly avoids OpenRouter unless free models are used, per the policy.
+    expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain("openrouter:meta-llama/llama-3.3-70b-instruct:free");
   });
 
   it("preserves on-box MCP_BRIDGE_ENABLED absent from PROD_DOTENV", () => {
