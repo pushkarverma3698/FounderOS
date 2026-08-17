@@ -108,8 +108,12 @@ describe("POST /api/v1/dispatch — the demo stub is off by default", () => {
     const port = await start();
 
     await post(port, "/api/v1/dispatch", { prompt: "anything" });
-    // Give the old setTimeout(600) script more than enough time to have fired.
-    await new Promise((r) => setTimeout(r, 50));
+    // The old handler emitted turn.in and route.decided SYNCHRONOUSLY, then
+    // tool.call / tool.result / turn.out from a setTimeout(600). Waiting past
+    // that timer is what makes this test cover the deferred half too — at 50ms
+    // it only ever caught the synchronous events, so three of the four
+    // assertions below were passing vacuously.
+    await new Promise((r) => setTimeout(r, 700));
 
     const seams = emitted.map((e) => e.seam);
     expect(seams).not.toContain("route.decided");
