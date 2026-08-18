@@ -173,7 +173,7 @@ const OUTAGE_ALERT_BOARD_CAP = 3;
  * this constant is just where that decision is pinned, so changing the cadence
  * is one edit here instead of a string buried in a `cron.schedule` call.
  */
-export const FREE_SWEEP_CRON = "*/30 * * * *";
+export const FREE_SWEEP_CRON = "0 0 * * *";
 
 /**
  * The lane's memory of when it last said anything.
