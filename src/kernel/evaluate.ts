@@ -17,7 +17,7 @@
 
 import type { StepResult, TaskEnvelope } from "./contracts.js";
 import type { KernelStateType, KernelUpdate } from "./state.js";
-import { recordAnswerEvaluation, type CompletedTurn } from "../infra/answer-eval.js";
+import { recordAnswerEvaluation, type AnswerEvalDeps, type CompletedTurn } from "../infra/answer-eval.js";
 import type { AnswerJudgeStep } from "../infra/judge.js";
 
 /** Per-step output chars carried into the evaluation; the judge clamps again on its own budget. */
@@ -62,9 +62,17 @@ export function toCompletedTurn(state: KernelStateType): CompletedTurn {
 /**
  * Fire the evaluation and return. Writes no state channels — the returned update
  * is empty by design, so this node cannot alter the reply even by accident.
+ *
+ * `deps` exists so a test can supply a fake judge and a fake writer; production
+ * passes none and gets the real free-tier judge plus the real table.
  */
-export function evaluateNode(state: KernelStateType): KernelUpdate {
-  const turn = toCompletedTurn(state);
-  if (turn.reply.trim().length > 0) recordAnswerEvaluation(turn);
-  return {};
+export function makeEvaluateNode(deps: AnswerEvalDeps = {}) {
+  return function evaluate(state: KernelStateType): KernelUpdate {
+    const turn = toCompletedTurn(state);
+    if (turn.reply.trim().length > 0) recordAnswerEvaluation(turn, deps);
+    return {};
+  };
 }
+
+/** The production node — real judge, real table. */
+export const evaluateNode = makeEvaluateNode();
