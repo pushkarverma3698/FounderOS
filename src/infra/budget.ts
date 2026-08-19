@@ -54,6 +54,15 @@ export interface CostAttribution {
  */
 const attributionStore = new AsyncLocalStorage<CostAttribution>();
 
+/**
+ * Actor recorded when a call arrives with no attribution scope — an LLM call the
+ * kernel-boot model wrappers did not wrap. Deliberately NOT a real worker id, so
+ * the gap stays visible in the ledger instead of being absorbed by a real spender.
+ */
+export const UNATTRIBUTED_AGENT = "kernel";
+/** Stage recorded for the same case. */
+export const UNATTRIBUTED_STAGE = "unattributed";
+
 /** Run `fn` with `attribution` visible to any cost accrual that happens inside it. */
 export function withCostAttribution<T>(attribution: CostAttribution, fn: () => T): T {
   return attributionStore.run(attribution, fn);

@@ -123,7 +123,7 @@ const WORKER_BY_TOOLSET = new WeakMap<object, string>();
  * A worker turn with no tools bound (tool budget spent — the finalize turn)
  * keeps the stage-level actor "worker": under-precise, never wrong.
  */
-function withCostIdentity(
+export function withCostIdentity(
   model: KernelBindableModel,
   attribution: CostAttribution,
 ): KernelBindableModel {

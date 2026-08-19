@@ -18,7 +18,7 @@ import type { ApprovalRequest } from "../infra/hitl.js";
 import { formatApprovalCard, safeHtml } from "./approval-card.js";
 import { markdownToTelegramHtml, splitForTelegram } from "./format.js";
 import { getPendingInterrupt, resolveInterrupt, getTodayCostUsd, logLlmCost } from "../db/queries.js";
-import { BudgetExceededError, BudgetGuardCallback, createRunBudget, type AccruedCall } from "../infra/budget.js";
+import { BudgetExceededError, BudgetGuardCallback, createRunBudget, UNATTRIBUTED_AGENT, UNATTRIBUTED_STAGE, type AccruedCall } from "../infra/budget.js";
 import { assertDailyBudgetAllowsRun, DailyBudgetExceededError } from "../infra/daily-budget.js";
 import { readHalt, formatHaltNotice } from "../infra/halt.js";
 import { startTurn } from "../infra/trace.js";
@@ -60,24 +60,11 @@ export function threadIdFor(chatId: number | string): string {
 }
 
 /**
- * Actor written when a call arrives with no attribution scope — i.e. an LLM
- * call the kernel-boot model wrappers did not wrap. Kept distinct from a real
- * worker id so the gap is visible in the ledger instead of being absorbed into
- * one of the real spenders.
- */
-export const UNATTRIBUTED_AGENT = "kernel";
-/** Stage written for the same case. */
-export const UNATTRIBUTED_STAGE = "unattributed";
-
-/**
  * Persist one LLM call to ai_call_costs. The daily budget cap
  * (assertDailyBudgetAllowsRun → getTodayCostUsd) and the cost ledger
  * (pnpm proof:costs, /budget) read this table — without this sink both see $0.
  * Fire-and-forget: a DB blip must never break a founder turn.
- *
- * `agent` = the actor that spent it (worker id such as "jobhunt", else
- * "planner"/"synthesizer"/"worker"); `tier` = the kernel stage. See
- * src/db/schema.ts aiCallCosts for the column contract.
+ * `agent` = the actor, `tier` = the kernel stage (src/db/schema.ts aiCallCosts).
  */
 export function kernelCostSink(call: AccruedCall): void {
   void logLlmCost({
