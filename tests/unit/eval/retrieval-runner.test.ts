@@ -12,6 +12,7 @@ import { describe, it, expect } from "vitest";
 import {
   UNKNOWN_CORPUS,
   isTrustworthy,
+  renderAblationReport,
   renderRetrievalReport,
   runRetrievalEval,
   type Retriever,
@@ -28,8 +29,8 @@ import {
 } from "../../../src/eval/retrieval-golden.js";
 
 const CASES: readonly RetrievalGoldenCase[] = [
-  { id: "c1", query: "why LangGraph", expectedDocs: ["a.md"], rationale: "fixture" },
-  { id: "c2", query: "why drizzle", expectedDocs: ["b.md"], rationale: "fixture" },
+  { id: "c1", query: "why LangGraph", expectedDocs: ["a.md"], style: "topical", rationale: "fx" },
+  { id: "c2", query: "why drizzle", expectedDocs: ["b.md"], style: "disjoint", rationale: "fx" },
 ];
 
 const CLEAN_CORPUS: RetrievalCorpusContext = {
@@ -216,6 +217,74 @@ describe("renderRetrievalReport", () => {
   });
 });
 
+// ── renderAblationReport ──────────────────────────────────────────────────────
+
+describe("renderAblationReport", () => {
+  const laneReport = (lane: "hybrid" | "vector-only" | "keyword-only", topicalHit: boolean) =>
+    aggregateRetrieval(
+      [
+        scoreRetrievalCase(CASES[0]!, {
+          rankedDocs: topicalHit ? ["a.md"] : ["x.md"],
+          mode: lane === "keyword-only" ? "keyword" : lane === "vector-only" ? "vector" : "hybrid",
+        }),
+        scoreRetrievalCase(CASES[1]!, {
+          rankedDocs: ["b.md"],
+          mode: lane === "keyword-only" ? "keyword" : lane === "vector-only" ? "vector" : "hybrid",
+        }),
+      ],
+      CLEAN_CORPUS,
+      5,
+      lane,
+    );
+
+  it("puts every lane in one table with a per-style column pair", () => {
+    const md = renderAblationReport([
+      laneReport("hybrid", true),
+      laneReport("vector-only", true),
+      laneReport("keyword-only", false),
+    ]);
+
+    expect(md).toContain("Retrieval Ablation");
+    expect(md).toContain("| hybrid |");
+    expect(md).toContain("| vector-only |");
+    expect(md).toContain("| keyword-only |");
+    expect(md).toContain("topical recall@k");
+    expect(md).toContain("disjoint recall@k");
+  });
+
+  it("flags which lanes were not a clean measurement instead of comparing silently", () => {
+    const degraded = aggregateRetrieval(
+      [
+        scoreRetrievalCase(CASES[0]!, {
+          rankedDocs: ["a.md"],
+          mode: "keyword-fallback",
+          degradedReason: "ollama down",
+        }),
+      ],
+      CLEAN_CORPUS,
+      5,
+      "hybrid",
+    );
+
+    const md = renderAblationReport([degraded, laneReport("keyword-only", true)]);
+
+    expect(md).toContain("1 of 2 lanes did not produce a clean measurement");
+    expect(md).toContain("hybrid");
+  });
+
+  it("appends each lane's own full report below the comparison", () => {
+    const md = renderAblationReport([laneReport("hybrid", true)]);
+
+    expect(md).toContain("# Lane: hybrid");
+    expect(md).toContain("## By query style");
+    expect(md).toContain("## All cases");
+  });
+
+  it("says so rather than rendering an empty table when no lane ran", () => {
+    expect(renderAblationReport([])).toContain("No retrieval lanes were run");
+  });
+});
+
 // ── the shipped golden set ────────────────────────────────────────────────────
 
 describe("RETRIEVAL_GOLDEN_SET", () => {
@@ -228,6 +297,13 @@ describe("RETRIEVAL_GOLDEN_SET", () => {
       expect(c.expectedDocs.length, `no expected docs in ${c.id}`).toBeGreaterThan(0);
       expect(c.rationale.trim().length, `no rationale in ${c.id}`).toBeGreaterThan(0);
     }
+  });
+
+  it("contains both authoring styles, so the ablation has something to compare", () => {
+    const styles = new Set(RETRIEVAL_GOLDEN_SET.map((c) => c.style));
+
+    expect(styles.has("topical")).toBe(true);
+    expect(styles.has("disjoint")).toBe(true);
   });
 
   it("expects only repository-relative markdown paths, never a row id", () => {

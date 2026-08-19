@@ -29,13 +29,32 @@
  *     or 0 when none appears. MRR is the mean over scorable cases.
  */
 
-import type { RetrievalGoldenCase } from "./retrieval-golden.js";
+import {
+  RETRIEVAL_STYLES,
+  type RetrievalGoldenCase,
+  type RetrievalStyle,
+} from "./retrieval-golden.js";
 
 /** Cutoff for the headline metric. Retrieval is measured at what the agent sees. */
 export const RETRIEVAL_TOP_K = 5;
 
-/** Which retrieval signals actually produced the hits (mirrors HybridMode). */
-export type RetrievalMode = "hybrid" | "vector" | "keyword-fallback";
+/**
+ * Which retrieval signals actually produced the hits.
+ *
+ * `keyword` and `keyword-fallback` are deliberately DIFFERENT things and must
+ * never be collapsed: `keyword` means keyword search was chosen (the ablation
+ * lane), `keyword-fallback` means it was forced because the embedder was down.
+ * The first is a measurement; the second is a degradation. Only the second
+ * makes a run untrustworthy.
+ */
+export type RetrievalMode = "hybrid" | "vector" | "keyword" | "keyword-fallback";
+
+/**
+ * Which retrieval path a run deliberately exercised. Running the same golden set
+ * through all three is the ablation: if `keyword-only` matches `hybrid`, the
+ * embeddings contributed nothing measurable on that set.
+ */
+export type RetrievalLane = "hybrid" | "vector-only" | "keyword-only";
 
 /** What one retrieval call actually returned. */
 export interface RetrievalObservation {
@@ -66,9 +85,20 @@ export interface RetrievalCaseResult {
   readonly degraded: boolean;
 }
 
+/** recall/MRR for one slice of the golden set (one authoring style). */
+export interface StyleSummary {
+  readonly style: RetrievalStyle;
+  /** Scorable cases of this style. 0 means the style contributed no evidence. */
+  readonly cases: number;
+  readonly meanRecallAtK: number;
+  readonly mrr: number;
+}
+
 /** The full retrieval report. */
 export interface RetrievalReport {
   readonly generatedAt: string;
+  /** Which retrieval path this report measured. */
+  readonly lane: RetrievalLane;
   /** Cutoff the metrics were computed at. */
   readonly k: number;
   /** Cases that returned results and were scored. */
@@ -87,6 +117,12 @@ export interface RetrievalReport {
   readonly corpusChunks: number | null;
   /** Distinct documents in that corpus, or null when it could not be counted. */
   readonly corpusDocs: number | null;
+  /**
+   * recall/MRR split by how each query was authored. Reported separately
+   * because averaging title-derived and vocabulary-disjoint queries into one
+   * number hides the only interesting effect in the data.
+   */
+  readonly byStyle: readonly StyleSummary[];
   readonly results: readonly RetrievalCaseResult[];
 }
 
@@ -190,6 +226,30 @@ export function scoreRetrievalCase(
   };
 }
 
+/**
+ * Split scored cases by authoring style. Computed over cases that actually ran
+ * (errored cases excluded, consistent with the headline metrics). A style with
+ * no scorable case is omitted rather than reported as 0% — an absent slice and
+ * a slice that scored zero are different facts.
+ */
+export function summarizeByStyle(
+  results: readonly RetrievalCaseResult[],
+): StyleSummary[] {
+  const scorable = results.filter((r) => !r.retrievalError);
+  const summaries: StyleSummary[] = [];
+  for (const style of RETRIEVAL_STYLES) {
+    const slice = scorable.filter((r) => r.goldenCase.style === style);
+    if (slice.length === 0) continue;
+    summaries.push({
+      style,
+      cases: slice.length,
+      meanRecallAtK: mean(slice.map((r) => r.recallAtK)),
+      mrr: mean(slice.map((r) => r.reciprocalRank)),
+    });
+  }
+  return summaries;
+}
+
 /** Context the report needs that scoring cannot derive from the cases alone. */
 export interface RetrievalCorpusContext {
   readonly corpusChunks: number | null;
@@ -206,11 +266,13 @@ export function aggregateRetrieval(
   results: readonly RetrievalCaseResult[],
   corpus: RetrievalCorpusContext,
   k: number = RETRIEVAL_TOP_K,
+  lane: RetrievalLane = "hybrid",
   now: Date = new Date(),
 ): RetrievalReport {
   const scorable = results.filter((r) => !r.retrievalError);
   return {
     generatedAt: now.toISOString(),
+    lane,
     k,
     scoredCases: scorable.length,
     meanRecallAtK: mean(scorable.map((r) => r.recallAtK)),
@@ -220,6 +282,7 @@ export function aggregateRetrieval(
     missingGoldenDocs: corpus.missingGoldenDocs,
     corpusChunks: corpus.corpusChunks,
     corpusDocs: corpus.corpusDocs,
+    byStyle: summarizeByStyle(results),
     results,
   };
 }

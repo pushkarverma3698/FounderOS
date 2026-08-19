@@ -26,6 +26,7 @@ import {
   scoreRetrievalCase,
   type RetrievalCaseResult,
   type RetrievalCorpusContext,
+  type RetrievalLane,
   type RetrievalObservation,
   type RetrievalReport,
 } from "./retrieval-scoring.js";
@@ -35,6 +36,13 @@ export type { RetrievalObservation, RetrievalReport } from "./retrieval-scoring.
 
 /** Runs one golden query and reports the ranked documents retrieval returned. */
 export type Retriever = (query: string, k: number) => Promise<RetrievalObservation>;
+
+/** Human label for each ablation lane, used in the comparison table. */
+export const LANE_LABELS: Readonly<Record<RetrievalLane, string>> = {
+  hybrid: "hybrid (vector ⊕ keyword, RRF) — what production runs",
+  "vector-only": "vector-only (embeddings, no keyword)",
+  "keyword-only": "keyword-only (ILIKE term overlap, no embeddings)",
+};
 
 /** Corpus context with no measurement — used when the corpus could not be counted. */
 export const UNKNOWN_CORPUS: RetrievalCorpusContext = {
@@ -53,6 +61,7 @@ export async function runRetrievalEval(
   retrieve: Retriever,
   corpus: RetrievalCorpusContext = UNKNOWN_CORPUS,
   k: number = RETRIEVAL_TOP_K,
+  lane: RetrievalLane = "hybrid",
 ): Promise<RetrievalReport> {
   const results: RetrievalCaseResult[] = [];
   for (const goldenCase of cases) {
@@ -68,7 +77,7 @@ export async function runRetrievalEval(
     }
     results.push(scoreRetrievalCase(goldenCase, observation, k));
   }
-  return aggregateRetrieval(results, corpus, k);
+  return aggregateRetrieval(results, corpus, k, lane);
 }
 
 /**
@@ -151,6 +160,28 @@ function denominator(report: RetrievalReport): string[] {
   ];
 }
 
+/**
+ * recall/MRR split by how each query was authored. This is the section that
+ * decides what the headline number is evidence OF: a `topical` score is a smoke
+ * test, a `disjoint` score is the real signal.
+ */
+function styleBreakdown(report: RetrievalReport): string[] {
+  if (report.byStyle.length === 0) return [];
+  return [
+    "## By query style",
+    "",
+    "| style | cases | recall@" + report.k + " | MRR | what this measures |",
+    "|---|---|---|---|---|",
+    ...report.byStyle.map((s) => {
+      const meaning =
+        s.style === "topical"
+          ? "query quotes the target's own title — near-guaranteed, a smoke test"
+          : "query derived from body content, no title vocabulary — the real signal";
+      return `| ${s.style} | ${s.cases} | ${pct(s.meanRecallAtK)} | ${s.mrr.toFixed(3)} | ${meaning} |`;
+    }),
+  ];
+}
+
 /** Cases that retrieval missed entirely, then partial hits — the fix list. */
 function misses(report: RetrievalReport): string[] {
   const ranked = report.results
@@ -217,11 +248,79 @@ export function renderRetrievalReport(report: RetrievalReport): string {
     `| recall@${report.k} | ${pct(report.meanRecallAtK)} | ${report.scoredCases} scored queries |`,
     `| MRR (top-${report.k}) | ${report.mrr.toFixed(3)} | ${report.scoredCases} scored queries |`,
     "",
+    ...styleBreakdown(report),
+    "",
     ...denominator(report),
     "",
     ...misses(report),
     "",
     ...caseTable(report),
     "",
+  ].join("\n");
+}
+
+/**
+ * The ablation: the same golden set scored through every retrieval lane, side by
+ * side, split by query style.
+ *
+ * The interpretation is fixed BEFORE the numbers are seen, so the table cannot be
+ * read to taste:
+ *   - keyword-only ≈ hybrid on a slice ⇒ that slice is lexically solvable and the
+ *     embeddings contribute nothing measurable on it. That is a fact about the
+ *     golden set, not a defect in retrieval.
+ *   - vector-only materially below hybrid ⇒ fusion is earning its cost.
+ *   - hybrid above both ⇒ the two signals are complementary, which is the whole
+ *     premise of RRF fusion.
+ */
+export function renderAblationReport(reports: readonly RetrievalReport[]): string {
+  if (reports.length === 0) return "No retrieval lanes were run.\n";
+
+  const styles = reports[0]!.byStyle.map((s) => s.style);
+  const header = ["| lane", "overall recall@k", "overall MRR"]
+    .concat(styles.flatMap((s) => [`${s} recall@k`, `${s} MRR`]))
+    .join(" | ");
+  const divider = `|${"---|".repeat(3 + styles.length * 2)}`;
+
+  const rows = reports.map((r) => {
+    const cells = [
+      `| ${r.lane}`,
+      pct(r.meanRecallAtK),
+      r.mrr.toFixed(3),
+      ...styles.flatMap((style) => {
+        const s = r.byStyle.find((b) => b.style === style);
+        return s ? [pct(s.meanRecallAtK), s.mrr.toFixed(3)] : ["–", "–"];
+      }),
+    ];
+    return `${cells.join(" | ")} |`;
+  });
+
+  const untrustworthy = reports.filter((r) => !isTrustworthy(r));
+  const warning =
+    untrustworthy.length > 0
+      ? [
+          "",
+          `> ⚠️ ${untrustworthy.length} of ${reports.length} lanes did not produce a clean ` +
+            `measurement (${untrustworthy.map((r) => r.lane).join(", ")}). Read each lane's own ` +
+            "section below before comparing the rows above.",
+        ]
+      : [];
+
+  return [
+    "# FounderOS — Retrieval Ablation (recall@k + MRR by lane and query style)",
+    "",
+    `_Generated: ${reports[0]!.generatedAt}_`,
+    "",
+    "The same golden set, scored through each retrieval lane. If keyword-only matches hybrid on a",
+    "style, the embeddings contributed nothing measurable on those queries.",
+    "",
+    `${header} |`,
+    divider,
+    ...rows,
+    ...warning,
+    "",
+    "Lanes:",
+    ...reports.map((r) => `- **${r.lane}** — ${LANE_LABELS[r.lane]}`),
+    "",
+    ...reports.flatMap((r) => ["---", "", `# Lane: ${r.lane}`, "", renderRetrievalReport(r)]),
   ].join("\n");
 }

@@ -30,11 +30,13 @@ import {
   RETRIEVAL_TOP_K,
   findMissingGoldenDocs,
   toRankedDocIds,
+  type RetrievalLane,
   type RetrievalObservation,
+  type RetrievalReport,
 } from "../src/eval/retrieval-scoring.js";
 import {
   isTrustworthy,
-  renderRetrievalReport,
+  renderAblationReport,
   runRetrievalEval,
   type Retriever,
 } from "../src/eval/retrieval-runner.js";
@@ -72,7 +74,7 @@ async function vectorSearch(table: RagTable, query: string, topK: number) {
 const DEPS: HybridDeps = { vectorSearch, keywordSearch: keywordSearchRagTable };
 
 /** The live retriever: production's hybrid path, projected to ranked documents. */
-const liveRetriever: Retriever = async (query, k): Promise<RetrievalObservation> => {
+const hybridRetriever: Retriever = async (query, k): Promise<RetrievalObservation> => {
   const result = await hybridRagSearch(TABLE, query, k, DEPS);
   if ("error" in result) {
     return {
@@ -86,6 +88,44 @@ const liveRetriever: Retriever = async (query, k): Promise<RetrievalObservation>
     mode: result.mode,
     ...(result.degradedReason ? { degradedReason: result.degradedReason } : {}),
   };
+};
+
+/**
+ * Ablation lane: embeddings only, keyword signal removed. Calls the same
+ * vector path the hybrid retriever uses, just without fusing keyword results —
+ * the mode-forcing lives here in the collector, never in the retrieval
+ * implementation, which this task may not change.
+ */
+const vectorOnlyRetriever: Retriever = async (query, k): Promise<RetrievalObservation> => {
+  try {
+    const hits = await vectorSearch(TABLE, query, k);
+    return { rankedDocs: toRankedDocIds(hits), mode: "vector" };
+  } catch (err) {
+    const stage = err instanceof RagStageError ? err.stage : "query";
+    return {
+      rankedDocs: [],
+      mode: "vector",
+      error: `${stage}: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+};
+
+/**
+ * Ablation lane: keyword term-overlap only, no embeddings. Mode is `keyword`
+ * (chosen), NOT `keyword-fallback` (forced by a dead embedder) — collapsing the
+ * two would make a deliberate measurement indistinguishable from a degradation.
+ */
+const keywordOnlyRetriever: Retriever = async (query, k): Promise<RetrievalObservation> => {
+  try {
+    const hits = await keywordSearchRagTable(TABLE, query, k);
+    return { rankedDocs: toRankedDocIds(hits), mode: "keyword" };
+  } catch (err) {
+    return {
+      rankedDocs: [],
+      mode: "keyword",
+      error: `query: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 };
 
 interface CorpusFacts {
@@ -126,20 +166,29 @@ async function readCorpusFacts(): Promise<CorpusFacts> {
   }
 }
 
+/** The three lanes of the ablation, in report order. Production runs lane 1. */
+const LANES: ReadonlyArray<{ lane: RetrievalLane; retrieve: Retriever }> = [
+  { lane: "hybrid", retrieve: hybridRetriever },
+  { lane: "vector-only", retrieve: vectorOnlyRetriever },
+  { lane: "keyword-only", retrieve: keywordOnlyRetriever },
+];
+
 async function main(): Promise<void> {
   const corpusFacts = await readCorpusFacts();
-  const report = await runRetrievalEval(
-    RETRIEVAL_GOLDEN_SET,
-    liveRetriever,
-    {
-      corpusChunks: corpusFacts.chunks,
-      corpusDocs: corpusFacts.docs,
-      missingGoldenDocs: findMissingGoldenDocs(RETRIEVAL_GOLDEN_SET, corpusFacts.paths),
-    },
-    RETRIEVAL_TOP_K,
-  );
+  const corpus = {
+    corpusChunks: corpusFacts.chunks,
+    corpusDocs: corpusFacts.docs,
+    missingGoldenDocs: findMissingGoldenDocs(RETRIEVAL_GOLDEN_SET, corpusFacts.paths),
+  };
 
-  const rendered = renderRetrievalReport(report);
+  const reports: RetrievalReport[] = [];
+  for (const { lane, retrieve } of LANES) {
+    reports.push(
+      await runRetrievalEval(RETRIEVAL_GOLDEN_SET, retrieve, corpus, RETRIEVAL_TOP_K, lane),
+    );
+  }
+
+  const rendered = renderAblationReport(reports);
   process.stdout.write(`${rendered}\n`);
 
   const out = resolve(REPORT_PATH);
@@ -147,7 +196,7 @@ async function main(): Promise<void> {
   process.stdout.write(`Report written to ${out}\n`);
 
   await closeDatabaseConnections().catch(() => undefined); // allow-failopen: eval teardown
-  process.exit(isTrustworthy(report) ? 0 : 1);
+  process.exit(reports.every(isTrustworthy) ? 0 : 1);
 }
 
 main().catch((err) => {

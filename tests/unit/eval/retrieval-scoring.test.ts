@@ -19,6 +19,7 @@ import {
   recallAtK,
   reciprocalRank,
   scoreRetrievalCase,
+  summarizeByStyle,
   toRankedDocIds,
   type RetrievalCorpusContext,
   type RetrievalObservation,
@@ -29,6 +30,7 @@ const goldenCase = (over: Partial<RetrievalGoldenCase> = {}): RetrievalGoldenCas
   id: "c1",
   query: "why did we choose LangGraph",
   expectedDocs: ["docs/decisions/001-why-langgraph.md"],
+  style: "topical",
   rationale: "fixture",
   ...over,
 });
@@ -189,6 +191,17 @@ describe("scoreRetrievalCase", () => {
     expect(result.recallAtK).toBe(1);
   });
 
+  it("does NOT mark a deliberate keyword-only ablation run as degraded", () => {
+    // `keyword` (lane chosen) and `keyword-fallback` (embedder died) must never
+    // collapse — one is a measurement, the other is a degradation.
+    const result = scoreRetrievalCase(
+      goldenCase({ expectedDocs: ["want.md"] }),
+      obs({ rankedDocs: ["want.md"], mode: "keyword" }),
+    );
+
+    expect(result.degraded).toBe(false);
+  });
+
   it("zeroes an errored case and flags it rather than scoring it as a miss", () => {
     const result = scoreRetrievalCase(
       goldenCase(),
@@ -207,6 +220,45 @@ describe("scoreRetrievalCase", () => {
     );
 
     expect(result.retrievalError).toBe(false);
+  });
+});
+
+// ── summarizeByStyle ──────────────────────────────────────────────────────────
+
+describe("summarizeByStyle", () => {
+  const topicalHit = scoreRetrievalCase(
+    goldenCase({ id: "t1", style: "topical", expectedDocs: ["want.md"] }),
+    obs({ rankedDocs: ["want.md"] }),
+  );
+  const disjointMiss = scoreRetrievalCase(
+    goldenCase({ id: "d1", style: "disjoint", expectedDocs: ["want.md"] }),
+    obs({ rankedDocs: ["other.md"] }),
+  );
+
+  it("keeps the two styles apart instead of averaging them into one number", () => {
+    // A single mean would read 50% and hide that the title-derived query passed
+    // while the vocabulary-disjoint one failed — the only interesting fact here.
+    const summaries = summarizeByStyle([topicalHit, disjointMiss]);
+
+    expect(summaries).toHaveLength(2);
+    expect(summaries[0]).toMatchObject({ style: "topical", cases: 1, meanRecallAtK: 1, mrr: 1 });
+    expect(summaries[1]).toMatchObject({ style: "disjoint", cases: 1, meanRecallAtK: 0, mrr: 0 });
+  });
+
+  it("OMITS a style with no scorable case rather than reporting it as 0%", () => {
+    // "absent" and "scored zero" are different facts and must not look the same.
+    const summaries = summarizeByStyle([topicalHit]);
+
+    expect(summaries.map((s) => s.style)).toEqual(["topical"]);
+  });
+
+  it("excludes errored cases from the style slices too", () => {
+    const disjointError = scoreRetrievalCase(
+      goldenCase({ id: "d2", style: "disjoint" }),
+      obs({ error: "embed: ollama unreachable" }),
+    );
+
+    expect(summarizeByStyle([topicalHit, disjointError]).map((s) => s.style)).toEqual(["topical"]);
   });
 });
 
@@ -265,6 +317,13 @@ describe("aggregateRetrieval", () => {
     expect(report.scoredCases).toBe(0);
     expect(report.meanRecallAtK).toBe(0);
     expect(report.mrr).toBe(0);
+  });
+
+  it("records which lane produced the report, defaulting to hybrid", () => {
+    expect(aggregateRetrieval([hit], CLEAN_CORPUS).lane).toBe("hybrid");
+    expect(aggregateRetrieval([hit], CLEAN_CORPUS, RETRIEVAL_TOP_K, "keyword-only").lane).toBe(
+      "keyword-only",
+    );
   });
 
   it("carries the corpus denominator and missing golden docs into the report", () => {
