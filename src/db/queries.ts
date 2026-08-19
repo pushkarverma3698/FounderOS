@@ -550,6 +550,142 @@ export async function getRecentOutcomes(agentId: string, limit = 4) {
     .limit(limit);
 }
 
+// ── Turn latency percentiles (agent_results.latency_ms) ──────────────────────
+//
+// The invariant this section holds is the one from src/infra/rag-optimization-sweep.ts:
+// **a metric computed over almost nothing and a metric computed over everything must
+// never look the same from outside.** A P95 over 3 of 400 rows is not the system's P95,
+// so coverage travels with the numbers and "no measured rows" is a distinct return
+// branch, not a percentile of zero.
+
+/** Median. Named because tests assert against the constant, not the literal. */
+export const LATENCY_P50 = 0.5;
+/** Tail latency — the number an SLO is written against. */
+export const LATENCY_P95 = 0.95;
+/** Worst-case tail — catches the slow path a P95 hides. */
+export const LATENCY_P99 = 0.99;
+
+/** The raw aggregate row. `unknown` because pg returns int8/numeric as strings. */
+export interface TurnLatencyAggregateRow {
+  readonly total_rows: unknown;
+  readonly measured_rows: unknown;
+  readonly p50_ms: unknown;
+  readonly p95_ms: unknown;
+  readonly p99_ms: unknown;
+}
+
+export interface TurnLatencyPercentiles {
+  /** Every agent_results row in the window, measured or not. */
+  readonly totalRows: number;
+  /** Rows with a non-NULL latency_ms — the only rows the percentiles are computed over. */
+  readonly measuredRows: number;
+  /** Rows excluded because latency_ms was NULL. */
+  readonly excludedRows: number;
+  /** measuredRows / totalRows, 0–100, one decimal. */
+  readonly coveragePercent: number;
+  readonly p50Ms: number;
+  readonly p95Ms: number;
+  readonly p99Ms: number;
+  /** Full sentence with the real numbers — safe to print to the founder verbatim. */
+  readonly summary: string;
+}
+
+/**
+ * Either real percentiles, or the reason there are none. Encoding the empty case in
+ * the return type is what stops a caller rendering "P95: 0ms" for a window that
+ * measured nothing.
+ */
+export type TurnLatencyResult =
+  | { readonly ok: true; readonly percentiles: TurnLatencyPercentiles }
+  | { readonly ok: false; readonly reason: string };
+
+/** Parse a pg aggregate cell to a finite number, or `null`. Never returns NaN. */
+function finiteOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * PURE: turn one aggregate row into a result. No I/O, no clock — unit-testable
+ * against an object literal, which is why the SQL and the interpretation are split.
+ */
+export function summarizeTurnLatency(
+  row: TurnLatencyAggregateRow | undefined,
+  days: number,
+): TurnLatencyResult {
+  const window = `the last ${days} day${days === 1 ? "" : "s"}`;
+  if (!row) return { ok: false, reason: `No aggregate row returned for ${window}.` };
+
+  const totalRows = finiteOrNull(row.total_rows);
+  const measuredRows = finiteOrNull(row.measured_rows);
+  if (totalRows === null || measuredRows === null) {
+    return { ok: false, reason: `Row counts for ${window} were unreadable, so no latency can be reported.` };
+  }
+  if (totalRows === 0) {
+    return { ok: false, reason: `No turns were recorded at all in ${window}, so there is no latency to measure.` };
+  }
+  if (measuredRows === 0) {
+    return {
+      ok: false,
+      reason: `${totalRows} turns were recorded in ${window} but none carries a latency_ms value, so no percentile can be computed.`,
+    };
+  }
+
+  const p50Ms = finiteOrNull(row.p50_ms);
+  const p95Ms = finiteOrNull(row.p95_ms);
+  const p99Ms = finiteOrNull(row.p99_ms);
+  if (p50Ms === null || p95Ms === null || p99Ms === null) {
+    return {
+      ok: false,
+      reason: `${measuredRows} measured turns in ${window} produced a non-numeric percentile, so the result is not trustworthy.`,
+    };
+  }
+
+  const excludedRows = totalRows - measuredRows;
+  const coveragePercent = Math.round((measuredRows / totalRows) * 1000) / 10;
+  const summary =
+    `Turn latency over ${window}: P50 ${Math.round(p50Ms)}ms · P95 ${Math.round(p95Ms)}ms · P99 ${Math.round(p99Ms)}ms, ` +
+    `computed over ${measuredRows} of ${totalRows} recorded turns (${coveragePercent}% coverage; ` +
+    `${excludedRows} excluded for having no latency_ms).`;
+
+  return { ok: true, percentiles: { totalRows, measuredRows, excludedRows, coveragePercent, p50Ms, p95Ms, p99Ms, summary } };
+}
+
+/**
+ * COLLECTOR: P50/P95/P99 turn latency from `agent_results` over the last N days.
+ *
+ * Percentiles come from Postgres `percentile_cont`, which ignores NULL `latency_ms`
+ * natively; `COUNT(*)` vs `COUNT(latency_ms)` is what recovers the excluded count so
+ * the caller can see how much of the window the number actually covers.
+ */
+export async function getTurnLatencyPercentiles(
+  tenantId: string = DEFAULT_TENANT,
+  days = 7,
+): Promise<TurnLatencyResult> {
+  const db = getDb();
+  const since = new Date(Date.now() - days * 86_400_000);
+
+  const [row] = await db
+    .select({
+      total_rows: sql<string>`COUNT(*)`,
+      measured_rows: sql<string>`COUNT(${agentResults.latency_ms})`,
+      p50_ms: sql<string | null>`percentile_cont(${LATENCY_P50}) WITHIN GROUP (ORDER BY ${agentResults.latency_ms})`,
+      p95_ms: sql<string | null>`percentile_cont(${LATENCY_P95}) WITHIN GROUP (ORDER BY ${agentResults.latency_ms})`,
+      p99_ms: sql<string | null>`percentile_cont(${LATENCY_P99}) WITHIN GROUP (ORDER BY ${agentResults.latency_ms})`,
+    })
+    .from(agentResults)
+    .where(
+      and(
+        eq(agentResults.tenant_id, tenantId),
+        gt(agentResults.created_at, since),
+      ),
+    );
+
+  return summarizeTurnLatency(row, days);
+}
+
 // ── Dept Signals (dept_signals) — Cross-Department ───────────────────────────
 
 /** Publish a cross-department signal. */
