@@ -16,8 +16,10 @@ import type { LLMResult } from "@langchain/core/outputs";
 import {
   BudgetTracker,
   BudgetGuardCallback,
-  withCostAttribution,
-  currentCostAttribution,
+  costAttributionMetadata,
+  attributionFromMetadata,
+  COST_AGENT_METADATA_KEY,
+  COST_STAGE_METADATA_KEY,
   type AccruedCall,
 } from "../../../src/infra/budget.js";
 
@@ -31,46 +33,61 @@ function llmResult(promptTokens: number, completionTokens: number): LLMResult {
 
 const CAPS = { maxUsd: 100, maxTokens: 1_000_000 };
 
-describe("withCostAttribution / currentCostAttribution", () => {
-  it("exposes the attribution to code running inside the scope", () => {
-    const seen = withCostAttribution({ agent: "jobhunt", stage: "worker" }, () =>
-      currentCostAttribution(),
-    );
-    expect(seen).toEqual({ agent: "jobhunt", stage: "worker" });
+describe("costAttributionMetadata / attributionFromMetadata", () => {
+  it("round-trips an attribution through run metadata", () => {
+    const meta = costAttributionMetadata({ agent: "jobhunt", stage: "worker" });
+    expect(meta).toEqual({ [COST_AGENT_METADATA_KEY]: "jobhunt", [COST_STAGE_METADATA_KEY]: "worker" });
+    expect(attributionFromMetadata(meta)).toEqual({ agent: "jobhunt", stage: "worker" });
   });
 
-  it("returns undefined OUTSIDE any scope — an unattributed call must not borrow someone else's identity", () => {
-    withCostAttribution({ agent: "planner", stage: "planner" }, () => undefined);
-    expect(currentCostAttribution()).toBeUndefined();
+  it("preserves other metadata keys around it", () => {
+    const meta = { langgraph_node: "agent", ...costAttributionMetadata({ agent: "research", stage: "worker" }) };
+    expect(attributionFromMetadata(meta)).toEqual({ agent: "research", stage: "worker" });
   });
 
-  it("survives an await inside the scope", async () => {
-    const seen = await withCostAttribution({ agent: "research", stage: "worker" }, async () => {
-      await new Promise((r) => setTimeout(r, 1));
-      return currentCostAttribution();
-    });
-    expect(seen).toEqual({ agent: "research", stage: "worker" });
+  it("returns undefined for absent, empty, or unrelated metadata", () => {
+    expect(attributionFromMetadata(undefined)).toBeUndefined();
+    expect(attributionFromMetadata({})).toBeUndefined();
+    expect(attributionFromMetadata({ langgraph_node: "agent" })).toBeUndefined();
   });
 
-  it("restores the outer attribution when a nested scope exits", () => {
-    const seen = withCostAttribution({ agent: "planner", stage: "planner" }, () => {
-      withCostAttribution({ agent: "jobhunt", stage: "worker" }, () => currentCostAttribution());
-      return currentCostAttribution();
-    });
-    expect(seen).toEqual({ agent: "planner", stage: "planner" });
+  it("does NOT accept a half-populated payload — a missing stage is unattributed, not guessed", () => {
+    expect(attributionFromMetadata({ [COST_AGENT_METADATA_KEY]: "jobhunt" })).toBeUndefined();
+    expect(attributionFromMetadata({ [COST_STAGE_METADATA_KEY]: "worker" })).toBeUndefined();
+  });
+
+  it("rejects a stage that is not one of the three kernel nodes", () => {
+    expect(
+      attributionFromMetadata({
+        [COST_AGENT_METADATA_KEY]: "jobhunt",
+        [COST_STAGE_METADATA_KEY]: "sideways",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("rejects a non-string or empty agent", () => {
+    expect(
+      attributionFromMetadata({ [COST_AGENT_METADATA_KEY]: "", [COST_STAGE_METADATA_KEY]: "worker" }),
+    ).toBeUndefined();
+    expect(
+      attributionFromMetadata({ [COST_AGENT_METADATA_KEY]: 7, [COST_STAGE_METADATA_KEY]: "worker" }),
+    ).toBeUndefined();
   });
 });
 
-describe("BudgetGuardCallback attribution passthrough", () => {
-  it("stamps the in-scope attribution onto the accrued call", async () => {
-    const calls: AccruedCall[] = [];
-    const cb = new BudgetGuardCallback(new BudgetTracker(CAPS), "gemini-2.5-flash", (c) =>
-      calls.push(c),
-    );
+const RUN_A = "11111111-1111-4111-8111-111111111111";
+const RUN_B = "22222222-2222-4222-8222-222222222222";
 
-    await withCostAttribution({ agent: "jobhunt", stage: "worker" }, () =>
-      cb.handleLLMEnd(llmResult(1000, 500)),
+describe("BudgetGuardCallback attribution passthrough", () => {
+  it("stamps the attribution recorded at start onto the accrued call", async () => {
+    const calls: AccruedCall[] = [];
+    const cb = new BudgetGuardCallback(new BudgetTracker(CAPS), "gemini-2.5-flash", (c) => calls.push(c));
+
+    await cb.handleChatModelStart(
+      {}, [], RUN_A, undefined, undefined, undefined,
+      costAttributionMetadata({ agent: "jobhunt", stage: "worker" }),
     );
+    await cb.handleLLMEnd(llmResult(1000, 500), RUN_A);
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.attribution).toEqual({ agent: "jobhunt", stage: "worker" });
@@ -78,42 +95,73 @@ describe("BudgetGuardCallback attribution passthrough", () => {
     expect(calls[0]!.outputTokens).toBe(500);
   });
 
-  it("leaves attribution undefined when the call happens outside any stage scope", async () => {
+  it("keeps two interleaved runs apart by runId", async () => {
     const calls: AccruedCall[] = [];
-    const cb = new BudgetGuardCallback(new BudgetTracker(CAPS), "gemini-2.5-flash", (c) =>
-      calls.push(c),
-    );
+    const cb = new BudgetGuardCallback(new BudgetTracker(CAPS), "gemini-2.5-flash", (c) => calls.push(c));
 
-    await cb.handleLLMEnd(llmResult(10, 10));
+    await cb.handleChatModelStart(
+      {}, [], RUN_A, undefined, undefined, undefined,
+      costAttributionMetadata({ agent: "jobhunt", stage: "worker" }),
+    );
+    await cb.handleChatModelStart(
+      {}, [], RUN_B, undefined, undefined, undefined,
+      costAttributionMetadata({ agent: "planner", stage: "planner" }),
+    );
+    // End them in the OPPOSITE order to prove the pairing is by id, not order.
+    await cb.handleLLMEnd(llmResult(10, 10), RUN_B);
+    await cb.handleLLMEnd(llmResult(20, 20), RUN_A);
+
+    expect(calls.map((c) => c.attribution?.agent)).toEqual(["planner", "jobhunt"]);
+  });
+
+  it("leaves attribution undefined when the call carried no metadata", async () => {
+    const calls: AccruedCall[] = [];
+    const cb = new BudgetGuardCallback(new BudgetTracker(CAPS), "gemini-2.5-flash", (c) => calls.push(c));
+
+    await cb.handleChatModelStart({}, [], RUN_A);
+    await cb.handleLLMEnd(llmResult(10, 10), RUN_A);
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.attribution).toBeUndefined();
   });
 
-  it("attributes two calls in different scopes to different spenders", async () => {
+  it("does not reuse a consumed attribution for a later unattributed run", async () => {
     const calls: AccruedCall[] = [];
-    const cb = new BudgetGuardCallback(new BudgetTracker(CAPS), "gemini-2.5-flash", (c) =>
-      calls.push(c),
-    );
+    const cb = new BudgetGuardCallback(new BudgetTracker(CAPS), "gemini-2.5-flash", (c) => calls.push(c));
 
-    await withCostAttribution({ agent: "planner", stage: "planner" }, () =>
-      cb.handleLLMEnd(llmResult(100, 100)),
+    await cb.handleChatModelStart(
+      {}, [], RUN_A, undefined, undefined, undefined,
+      costAttributionMetadata({ agent: "jobhunt", stage: "worker" }),
     );
-    await withCostAttribution({ agent: "synthesizer", stage: "synthesizer" }, () =>
-      cb.handleLLMEnd(llmResult(200, 200)),
-    );
+    await cb.handleLLMEnd(llmResult(10, 10), RUN_A);
+    await cb.handleLLMEnd(llmResult(10, 10), RUN_A);
 
-    expect(calls.map((c) => c.attribution?.agent)).toEqual(["planner", "synthesizer"]);
-    expect(calls.map((c) => c.attribution?.stage)).toEqual(["planner", "synthesizer"]);
+    expect(calls.map((c) => c.attribution?.agent)).toEqual(["jobhunt", undefined]);
+  });
+
+  it("drops the pending entry when the call errors, so it cannot be billed later", async () => {
+    const calls: AccruedCall[] = [];
+    const cb = new BudgetGuardCallback(new BudgetTracker(CAPS), "gemini-2.5-flash", (c) => calls.push(c));
+
+    await cb.handleChatModelStart(
+      {}, [], RUN_A, undefined, undefined, undefined,
+      costAttributionMetadata({ agent: "jobhunt", stage: "worker" }),
+    );
+    await cb.handleLLMError(new Error("503"), RUN_A);
+    await cb.handleLLMEnd(llmResult(10, 10), RUN_A);
+
+    expect(calls[0]!.attribution).toBeUndefined();
   });
 
   it("still accrues into the tracker — attribution must not change budget behaviour", async () => {
     const tracker = new BudgetTracker(CAPS);
     const cb = new BudgetGuardCallback(tracker, "gemini-2.5-flash");
 
-    await withCostAttribution({ agent: "jobhunt", stage: "worker" }, () =>
-      cb.handleLLMEnd(llmResult(1000, 1000)),
+    await cb.handleChatModelStart(
+      {}, [], RUN_A, undefined, undefined, undefined,
+      costAttributionMetadata({ agent: "jobhunt", stage: "worker" }),
     );
+    await cb.handleLLMEnd(llmResult(1000, 1000), RUN_A);
 
     expect(tracker.summary.totalTokens).toBe(2000);
     expect(tracker.summary.totalUsd).toBeGreaterThan(0);

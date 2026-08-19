@@ -2,9 +2,10 @@
  * Gateway-side cost attribution (AG-009).
  *
  * Two behaviours are covered here:
- *  1. withCostIdentity — the kernel-boot wrapper that opens the attribution
- *     scope. It knows the STAGE at construction and learns the WORKER from the
- *     exact tool array the kernel's agent node passes to bindTools().
+ *  1. withCostIdentity — the kernel-boot wrapper that attaches the attribution
+ *     to the invoke config as run metadata. It knows the STAGE at construction
+ *     and learns the WORKER from the exact tool array the kernel's agent node
+ *     passes to bindTools().
  *  2. kernelCostSink — the row it hands to logLlmCost now carries the real
  *     actor and stage instead of the constants "kernel" / "primary".
  *
@@ -13,9 +14,15 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { AIMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import type { RunnableConfig } from "@langchain/core/runnables";
+import { FakeListChatModel } from "@langchain/core/utils/testing";
+import { awaitAllCallbacks } from "@langchain/core/callbacks/promises";
 import {
-  currentCostAttribution,
+  BudgetGuardCallback,
+  BudgetTracker,
+  attributionFromMetadata,
+  type AccruedCall,
   UNATTRIBUTED_AGENT,
   UNATTRIBUTED_STAGE,
   type CostAttribution,
@@ -35,15 +42,18 @@ const { withCostIdentity, buildWorkerSpecs } = await import("../../../src/gatewa
 const { kernelCostSink } = await import("../../../src/gateway/kernel-run.js");
 
 /**
- * A model that records the attribution visible at the moment it is invoked —
- * exactly where BudgetGuardCallback.handleLLMEnd reads it.
+ * A model that records the attribution carried in the run metadata it is invoked
+ * with — exactly the payload LangChain hands to the callback's start hook.
  */
 function spyModel(seen: (CostAttribution | undefined)[]): KernelBindableModel {
-  const record = async (): Promise<AIMessage> => {
-    seen.push(currentCostAttribution());
+  const record = async (_messages: unknown, config?: RunnableConfig): Promise<AIMessage> => {
+    seen.push(attributionFromMetadata(config?.metadata));
     return new AIMessage("ok");
   };
-  return { invoke: record, bindTools: () => ({ invoke: record }) };
+  return {
+    invoke: record as KernelBindableModel["invoke"],
+    bindTools: () => ({ invoke: record as KernelBindableModel["invoke"] }),
+  };
 }
 
 describe("withCostIdentity", () => {
@@ -97,6 +107,123 @@ describe("withCostIdentity", () => {
     await model.invoke([]);
 
     expect(seen[0]!.stage).toBe("synthesizer");
+  });
+
+  it("sets ONLY metadata, so the ambient callbacks on the config survive", async () => {
+    const seenConfig: (RunnableConfig | undefined)[] = [];
+    const model = withCostIdentity(
+      {
+        invoke: (async (_m: unknown, config?: RunnableConfig) => {
+          seenConfig.push(config);
+          return new AIMessage("ok");
+        }) as KernelBindableModel["invoke"],
+      },
+      { agent: "planner", stage: "planner" },
+    );
+
+    await model.invoke([]);
+
+    expect(Object.keys(seenConfig[0] ?? {})).toEqual(["metadata"]);
+  });
+});
+
+/**
+ * REGRESSION (AG-009 review): attribution must survive LangChain's REAL callback
+ * dispatch, not just a direct handleLLMEnd() call.
+ *
+ * @langchain/core dispatches handlers through a module-level p-queue with
+ * concurrency 1 whenever `awaitHandlers` is false — and it is false here,
+ * because it is set from LANGCHAIN_CALLBACKS_BACKGROUND === "false" and that
+ * variable is unset in this repo (see callbacks/base.js and
+ * singletons/callbacks.js). Queued handlers therefore run detached from the
+ * caller's async context: the first task runs in the caller's context and the
+ * rest drain from that task's continuation, inheriting ITS context.
+ *
+ * So an AsyncLocalStorage-based identity silently bills every concurrent call to
+ * whichever one happened to open the queue. Nothing is "lost" — the ledger just
+ * gets confident wrong data, which is the worst available failure. The identity
+ * therefore travels as DATA on the call (run metadata, correlated by runId),
+ * where dispatch timing cannot touch it.
+ *
+ * Concurrency is reachable in production: withChatTurnLock serialises one chat,
+ * but a scheduled task (scheduled-task-run.ts:136) or a mission resume
+ * (mission-resume.ts:165) can overlap a live turn from another chat.
+ */
+describe("attribution under REAL LangChain callback dispatch", () => {
+  const CAPS = { maxUsd: 1000, maxTokens: 10_000_000 };
+
+  it("attributes three SEQUENTIAL invocations to their own spenders", async () => {
+    const accrued: AccruedCall[] = [];
+    const cb = new BudgetGuardCallback(new BudgetTracker(CAPS), "fake", (c) => accrued.push(c));
+    const raw = new FakeListChatModel({ responses: ["ok", "ok", "ok"], callbacks: [cb] });
+
+    for (const agent of ["alpha", "beta", "gamma"]) {
+      await withCostIdentity(raw as unknown as KernelBindableModel, { agent, stage: "worker" }).invoke([
+        new HumanMessage("hi"),
+      ]);
+    }
+    await awaitAllCallbacks();
+
+    expect(accrued.map((c) => c.attribution?.agent)).toEqual(["alpha", "beta", "gamma"]);
+  });
+
+  it("attributes three CONCURRENT invocations to their own spenders", async () => {
+    const accrued: AccruedCall[] = [];
+    const cb = new BudgetGuardCallback(new BudgetTracker(CAPS), "fake", (c) => accrued.push(c));
+    const raw = new FakeListChatModel({ responses: ["ok", "ok", "ok"], callbacks: [cb] });
+
+    await Promise.all(
+      ["alpha", "beta", "gamma"].map((agent) =>
+        withCostIdentity(raw as unknown as KernelBindableModel, { agent, stage: "worker" }).invoke([
+          new HumanMessage("hi"),
+        ]),
+      ),
+    );
+    await awaitAllCallbacks();
+
+    expect(accrued).toHaveLength(3);
+    expect(accrued.map((c) => c.attribution?.agent).sort()).toEqual(["alpha", "beta", "gamma"]);
+  });
+
+  it("attributes concurrent calls from DIFFERENT stages without bleeding across them", async () => {
+    const accrued: AccruedCall[] = [];
+    const cb = new BudgetGuardCallback(new BudgetTracker(CAPS), "fake", (c) => accrued.push(c));
+    const raw = new FakeListChatModel({ responses: ["ok", "ok", "ok", "ok"], callbacks: [cb] });
+    const model = (agent: string, stage: "planner" | "worker" | "synthesizer") =>
+      withCostIdentity(raw as unknown as KernelBindableModel, { agent, stage });
+
+    await Promise.all([
+      model("planner", "planner").invoke([new HumanMessage("a")]),
+      model("jobhunt", "worker").invoke([new HumanMessage("b")]),
+      model("research", "worker").invoke([new HumanMessage("c")]),
+      model("synthesizer", "synthesizer").invoke([new HumanMessage("d")]),
+    ]);
+    await awaitAllCallbacks();
+
+    const pairs = accrued.map((c) => `${c.attribution?.agent}/${c.attribution?.stage}`).sort();
+    expect(pairs).toEqual([
+      "jobhunt/worker",
+      "planner/planner",
+      "research/worker",
+      "synthesizer/synthesizer",
+    ]);
+  });
+
+  it("leaves a call made through an UNWRAPPED model unattributed rather than borrowing an identity", async () => {
+    const accrued: AccruedCall[] = [];
+    const cb = new BudgetGuardCallback(new BudgetTracker(CAPS), "fake", (c) => accrued.push(c));
+    const raw = new FakeListChatModel({ responses: ["ok", "ok"], callbacks: [cb] });
+
+    await Promise.all([
+      withCostIdentity(raw as unknown as KernelBindableModel, {
+        agent: "jobhunt",
+        stage: "worker",
+      }).invoke([new HumanMessage("a")]),
+      raw.invoke([new HumanMessage("b")]),
+    ]);
+    await awaitAllCallbacks();
+
+    expect(accrued.map((c) => c.attribution?.agent).sort()).toEqual(["jobhunt", undefined]);
   });
 });
 

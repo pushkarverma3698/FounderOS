@@ -20,7 +20,8 @@ import {
   type WorkerSpec,
   WORKERS,
 } from "../kernel/index.js";
-import { withCostAttribution, type CostAttribution, type CostStage } from "../infra/budget.js";
+import { costAttributionMetadata, type CostAttribution, type CostStage } from "../infra/budget.js";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import {
   buildFallbackModels,
   getModel,
@@ -115,10 +116,23 @@ function isUnconfiguredTool(toolName: string): boolean {
 const WORKER_BY_TOOLSET = new WeakMap<object, string>();
 
 /**
- * Wrap a kernel model so every LLM call it makes is accrued under `attribution`
- * (see src/infra/budget.ts). Identity is known HERE, at construction: the
- * kernel is handed a distinct model per stage, and bindTools() reveals which
- * worker is about to run.
+ * A model whose invoke accepts a run config — i.e. a real LangChain Runnable.
+ * withCostIdentity must sit INNERMOST, directly around such a model, because
+ * the retry/fallback/cache wrappers take messages only and cannot forward a
+ * config down to the provider call.
+ */
+interface ConfigurableModel extends KernelBindableModel {
+  invoke(messages: Parameters<KernelChatModel["invoke"]>[0], config?: RunnableConfig): ReturnType<KernelChatModel["invoke"]>;
+}
+
+/**
+ * Wrap a kernel model so every LLM call it makes carries `attribution` as run
+ * METADATA (see src/infra/budget.ts for why metadata and not an async-local
+ * scope). Identity is known HERE, at construction: the kernel is handed a
+ * distinct model per stage, and bindTools() reveals which worker is about to run.
+ *
+ * Only `metadata` is set, so ensureConfig's key-by-key overlay leaves the
+ * ambient callbacks — including the BudgetGuardCallback itself — untouched.
  *
  * A worker turn with no tools bound (tool budget spent — the finalize turn)
  * keeps the stage-level actor "worker": under-precise, never wrong.
@@ -127,8 +141,10 @@ export function withCostIdentity(
   model: KernelBindableModel,
   attribution: CostAttribution,
 ): KernelBindableModel {
+  const metadata = costAttributionMetadata(attribution);
+  const configurable = model as ConfigurableModel;
   return {
-    invoke: (messages) => withCostAttribution(attribution, () => model.invoke(messages)),
+    invoke: (messages) => configurable.invoke(messages, { metadata }),
     bindTools(tools: KernelTool[]): KernelChatModel {
       const worker = WORKER_BY_TOOLSET.get(tools);
       const bound = model.bindTools ? model.bindTools(tools) : model;
@@ -232,36 +248,37 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
   // Retry-with-jitter sits INSIDE the fallback chain: a transient 429/529 on
   // the primary is absorbed with backoff before a fallback (different model,
   // different answers) has to take over. Auth/404 pass straight through.
-  // Cost attribution sits OUTERMOST so it covers the cache, the fallback chain
-  // and the retry layer alike — a fallback model's spend belongs to the same
-  // stage that asked for it, and the `model` column already records which
-  // model actually answered.
+  // Cost attribution sits INNERMOST, directly around each real provider model:
+  // it attaches run metadata to the invoke config, and the retry/fallback/cache
+  // wrappers take messages only, so a config attached further out would never
+  // reach the provider call. The fallback models are wrapped with the SAME
+  // identity — a fallback's spend belongs to the stage that asked for it, and
+  // the `model` column already records which model actually answered.
   const identify = (stage: CostStage, agent: string) =>
     (m: KernelBindableModel): KernelBindableModel => withCostIdentity(m, { agent, stage });
+  const asPlanner = identify("planner", "planner");
+  const asWorker = identify("worker", "worker");
+  const asSynthesizer = identify("synthesizer", "synthesizer");
   return buildKernel({
-    plannerModel: identify("planner", "planner")(
-      cachePlanner(
-        withModelFallbacks(
-          withModelRetry(getModel() as unknown as KernelBindableModel, { label: "planner" }),
-          fallbacks,
-          "planner",
-        ),
-      ),
-    ),
-    workerModel: identify("worker", "worker")(
+    plannerModel: cachePlanner(
       withModelFallbacks(
-        withModelRetry(getWorkerModel() as unknown as KernelBindableModel, { label: "worker" }),
-        fallbacks,
-        "worker",
+        withModelRetry(asPlanner(getModel() as unknown as KernelBindableModel), { label: "planner" }),
+        fallbacks.map((m) => asPlanner(m)),
+        "planner",
       ),
     ),
-    synthesizerModel: identify("synthesizer", "synthesizer")(
-      cacheSynth(
-        withModelFallbacks(
-          withModelRetry(getWorkerModel() as unknown as KernelBindableModel, { label: "synthesizer" }),
-          fallbacks,
-          "synthesizer",
-        ),
+    workerModel: withModelFallbacks(
+      withModelRetry(asWorker(getWorkerModel() as unknown as KernelBindableModel), { label: "worker" }),
+      fallbacks.map((m) => asWorker(m)),
+      "worker",
+    ),
+    synthesizerModel: cacheSynth(
+      withModelFallbacks(
+        withModelRetry(asSynthesizer(getWorkerModel() as unknown as KernelBindableModel), {
+          label: "synthesizer",
+        }),
+        fallbacks.map((m) => asSynthesizer(m)),
+        "synthesizer",
       ),
     ),
     workers: buildWorkerSpecs(),
