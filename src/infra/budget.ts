@@ -18,8 +18,51 @@
  *                 https://www.anthropic.com/pricing (June 2026)
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { LLMResult } from "@langchain/core/outputs";
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
+
+// ── Cost attribution scope ────────────────────────────────────────────────────
+
+/** The kernel node that spent the money. Persisted to ai_call_costs.tier. */
+export type CostStage = "planner" | "worker" | "synthesizer";
+
+/**
+ * Who spent one LLM call.
+ * - `agent` is the ACTOR: a worker id ("jobhunt", "research", …) when the model
+ *   was bound to that worker's tools, otherwise the stage-level actor
+ *   ("planner" / "synthesizer" / "worker"). Persisted to ai_call_costs.agent,
+ *   matching the actor-name convention already written by src/tools/
+ *   gap-scan-budget.ts ("research") and src/agents/agent-tools/creative.ts
+ *   ("creative").
+ * - `stage` is the kernel node. Persisted to ai_call_costs.tier.
+ */
+export interface CostAttribution {
+  readonly agent: string;
+  readonly stage: CostStage;
+}
+
+/**
+ * BudgetGuardCallback is attached ONCE per run (kernel-run, scheduled-task-run,
+ * mission-resume), so it cannot know which graph node invoked the model. The
+ * identity IS known at model-construction time — kernel-boot builds a distinct
+ * model per stage — so the wrapper that owns that knowledge opens this scope
+ * around invoke() and the callback reads it at accrual.
+ *
+ * Async-local rather than a module-level variable: two runs can be in flight in
+ * the same process and a plain global would cross-attribute their spend.
+ */
+const attributionStore = new AsyncLocalStorage<CostAttribution>();
+
+/** Run `fn` with `attribution` visible to any cost accrual that happens inside it. */
+export function withCostAttribution<T>(attribution: CostAttribution, fn: () => T): T {
+  return attributionStore.run(attribution, fn);
+}
+
+/** The attribution in scope for the call being accrued, or undefined outside any stage. */
+export function currentCostAttribution(): CostAttribution | undefined {
+  return attributionStore.getStore();
+}
 
 // ── Model pricing table ───────────────────────────────────────────────────────
 
@@ -192,6 +235,20 @@ export class BudgetExceededError extends Error {
 
 // ── LangChain callback integration ───────────────────────────────────────────
 
+/** One accrued LLM call, as handed to the per-call sink. */
+export interface AccruedCall {
+  readonly model: string;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly usd: number;
+  /**
+   * Who spent it. Undefined when the call happened outside any stage scope —
+   * the sink must record that as unattributed rather than guess, otherwise one
+   * stage silently absorbs another's spend.
+   */
+  readonly attribution?: CostAttribution;
+}
+
 /**
  * LangChain callback handler that accrues cost after each LLM call and throws
  * BudgetExceededError if the cap is breached. Attach to an office.invoke() call:
@@ -213,12 +270,7 @@ export class BudgetGuardCallback extends BaseCallbackHandler {
      * rows into ai_call_costs — the daily budget cap and the cost ledger read
      * that table, so leaving this unset makes both blind. Must not throw.
      */
-    private readonly onAccrue?: (call: {
-      model: string;
-      inputTokens: number;
-      outputTokens: number;
-      usd: number;
-    }) => void,
+    private readonly onAccrue?: (call: AccruedCall) => void,
   ) {
     super();
   }
@@ -263,6 +315,7 @@ export class BudgetGuardCallback extends BaseCallbackHandler {
       inputTokens,
       outputTokens,
       usd: estimateCost(inputTokens, outputTokens, actualModel),
+      attribution: currentCostAttribution(),
     });
 
     const check = this.tracker.check();

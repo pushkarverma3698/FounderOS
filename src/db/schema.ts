@@ -102,7 +102,19 @@ export const aiCallCosts = agentsSchema.table(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenant_id: text("tenant_id").notNull(),
+    /**
+     * WHO spent it — the actor, never the stage. Kernel calls write the worker
+     * id ("jobhunt", "research", …) when the model was bound to that worker's
+     * tools, else the stage-level actor ("planner" | "synthesizer" | "worker");
+     * "kernel" means the call could not be attributed. Non-kernel writers use
+     * the same convention: "research" (gap scan), "creative" (image gen).
+     */
     agent: text("agent").notNull(),
+    /**
+     * WHICH STAGE spent it — "planner" | "worker" | "synthesizer" for kernel
+     * calls, "unattributed" when the stage was unknown. Non-kernel writers use
+     * their own sub-classification ("gap-scan", an image tier).
+     */
     tier: text("tier").notNull(),
     model: text("model").notNull(),
     tokens_in: integer("tokens_in").notNull(),

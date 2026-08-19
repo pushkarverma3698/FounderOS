@@ -15,10 +15,12 @@ import {
   buildKernel,
   type CompiledKernel,
   type KernelBindableModel,
+  type KernelChatModel,
   type KernelTool,
   type WorkerSpec,
   WORKERS,
 } from "../kernel/index.js";
+import { withCostAttribution, type CostAttribution, type CostStage } from "../infra/budget.js";
 import {
   buildFallbackModels,
   getModel,
@@ -101,12 +103,47 @@ function isUnconfiguredTool(toolName: string): boolean {
   return false;
 }
 
+/**
+ * Which worker a given tool ARRAY belongs to. The kernel's agent node calls
+ * `model.bindTools(spec.tools)` with the very array built below, so a lookup
+ * keyed on that array names the spender exactly — no string matching, no
+ * guessing from prompt text. WeakMap so a rebuilt spec set is collectable.
+ *
+ * Registered in buildWorkerSpecs(), read in withCostIdentity(); both live in
+ * this file so the two ends cannot drift apart unseen.
+ */
+const WORKER_BY_TOOLSET = new WeakMap<object, string>();
+
+/**
+ * Wrap a kernel model so every LLM call it makes is accrued under `attribution`
+ * (see src/infra/budget.ts). Identity is known HERE, at construction: the
+ * kernel is handed a distinct model per stage, and bindTools() reveals which
+ * worker is about to run.
+ *
+ * A worker turn with no tools bound (tool budget spent — the finalize turn)
+ * keeps the stage-level actor "worker": under-precise, never wrong.
+ */
+function withCostIdentity(
+  model: KernelBindableModel,
+  attribution: CostAttribution,
+): KernelBindableModel {
+  return {
+    invoke: (messages) => withCostAttribution(attribution, () => model.invoke(messages)),
+    bindTools(tools: KernelTool[]): KernelChatModel {
+      const worker = WORKER_BY_TOOLSET.get(tools);
+      const bound = model.bindTools ? model.bindTools(tools) : model;
+      return withCostIdentity(bound as KernelBindableModel, worker ? { ...attribution, agent: worker } : attribution);
+    },
+  };
+}
+
 export function buildWorkerSpecs(): WorkerSpec[] {
   return WORKERS.map((id) => {
     const prompt = PROMPTS[id];
     const tools = (DEPARTMENT_TOOLS[id] ?? []).filter(
       (t) => !isUnconfiguredTool((t as { name?: string }).name ?? ""),
     );
+    WORKER_BY_TOOLSET.set(tools, id);
     return {
       id,
       description: DESCRIPTIONS[id],
@@ -195,24 +232,36 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
   // Retry-with-jitter sits INSIDE the fallback chain: a transient 429/529 on
   // the primary is absorbed with backoff before a fallback (different model,
   // different answers) has to take over. Auth/404 pass straight through.
+  // Cost attribution sits OUTERMOST so it covers the cache, the fallback chain
+  // and the retry layer alike — a fallback model's spend belongs to the same
+  // stage that asked for it, and the `model` column already records which
+  // model actually answered.
+  const identify = (stage: CostStage, agent: string) =>
+    (m: KernelBindableModel): KernelBindableModel => withCostIdentity(m, { agent, stage });
   return buildKernel({
-    plannerModel: cachePlanner(
-      withModelFallbacks(
-        withModelRetry(getModel() as unknown as KernelBindableModel, { label: "planner" }),
-        fallbacks,
-        "planner",
+    plannerModel: identify("planner", "planner")(
+      cachePlanner(
+        withModelFallbacks(
+          withModelRetry(getModel() as unknown as KernelBindableModel, { label: "planner" }),
+          fallbacks,
+          "planner",
+        ),
       ),
     ),
-    workerModel: withModelFallbacks(
-      withModelRetry(getWorkerModel() as unknown as KernelBindableModel, { label: "worker" }),
-      fallbacks,
-      "worker",
-    ),
-    synthesizerModel: cacheSynth(
+    workerModel: identify("worker", "worker")(
       withModelFallbacks(
-        withModelRetry(getWorkerModel() as unknown as KernelBindableModel, { label: "synthesizer" }),
+        withModelRetry(getWorkerModel() as unknown as KernelBindableModel, { label: "worker" }),
         fallbacks,
-        "synthesizer",
+        "worker",
+      ),
+    ),
+    synthesizerModel: identify("synthesizer", "synthesizer")(
+      cacheSynth(
+        withModelFallbacks(
+          withModelRetry(getWorkerModel() as unknown as KernelBindableModel, { label: "synthesizer" }),
+          fallbacks,
+          "synthesizer",
+        ),
       ),
     ),
     workers: buildWorkerSpecs(),
