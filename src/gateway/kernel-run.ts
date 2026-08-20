@@ -23,6 +23,7 @@ import { assertDailyBudgetAllowsRun, DailyBudgetExceededError } from "../infra/d
 import { readHalt, formatHaltNotice } from "../infra/halt.js";
 import { startTurn } from "../infra/trace.js";
 import { TraceCallback } from "../infra/trace-callback.js";
+import { kernelPromptHash } from "./prompt-version.js";
 import { logger } from "../infra/logger.js";
 import { isModelFallbackError } from "../agents/model.js";
 import { enqueueTurnAutoRetry } from "./auto-retry.js";
@@ -185,7 +186,7 @@ async function streamKernelTurn(
 export async function runKernelText(ctx: Context, text: string): Promise<void> {
   const chatId = ctx.chat?.id ?? "unknown";
   await withChatTurnLock(chatId, async () => {
-    const trace = startTurn({ chatId: String(chatId), kind: "message", promptHash: "kernel-v3" });
+    const trace = startTurn({ chatId: String(chatId), kind: "message", promptHash: kernelPromptHash() });
     let foldCtx: { kernel: FoldableKernel; config: unknown } | undefined;
     try {
       const halt = await readHalt();
@@ -257,7 +258,7 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
   const chatId = ctx.chat?.id ?? "unknown";
   await withChatTurnLock(chatId, async () => {
     const threadId = threadIdFor(chatId);
-    const trace = startTurn({ chatId: String(chatId), kind: "resume", promptHash: "kernel-v3" });
+    const trace = startTurn({ chatId: String(chatId), kind: "resume", promptHash: kernelPromptHash() });
     let foldCtx: { kernel: FoldableKernel; config: unknown } | undefined;
     try {
       const pending = await getPendingInterrupt(threadId);

@@ -39,6 +39,7 @@ import { assertDailyBudgetAllowsRun, DailyBudgetExceededError } from "../infra/d
 import { readHalt } from "../infra/halt.js";
 import { startTurn } from "../infra/trace.js";
 import { TraceCallback } from "../infra/trace-callback.js";
+import { kernelPromptHash } from "./prompt-version.js";
 import { logger } from "../infra/logger.js";
 import { withChatTurnLock, threadIdFor, kernelCostSink } from "./kernel-run.js";
 import { recordFailedTurnInHistory, type FoldableKernel } from "./failed-turn-fold.js";
@@ -157,7 +158,7 @@ export async function resumeInterruptedMission(chatId: string): Promise<boolean>
       throw err;
     }
 
-    const trace = startTurn({ chatId, kind: "resume", promptHash: "kernel-v3" });
+    const trace = startTurn({ chatId, kind: "resume", promptHash: kernelPromptHash() });
     const config = {
       configurable: { thread_id: threadId },
       recursionLimit: OFFICE_RECURSION_LIMIT,
