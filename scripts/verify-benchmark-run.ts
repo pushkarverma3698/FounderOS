@@ -20,8 +20,15 @@
 
 import { readFileSync, existsSync } from "node:fs";
 
-/** The canonical 34. Groups A/B/C/E carry founder wording; D carries a setup. */
-const CANONICAL: Record<string, string> = {
+/**
+ * The canonical 34. Groups A/B/C/E carry founder wording; D carries a setup.
+ *
+ * EXPORTED so scripts/run-benchmark.ts sends exactly the strings this file
+ * checks. If the runner kept its own copy, a one-word drift would fail every
+ * task with "prompt does not match the canonical wording" after the founder had
+ * already spent the session collecting replies. One list, one source.
+ */
+export const CANONICAL: Record<string, string> = {
   A1: "what all jobs has been captured give me a csv",
   A2: "how many jobs are in the pipeline",
   A3: "which ones have i already applied to",
@@ -227,4 +234,9 @@ function main(): void {
   console.log("\nPASS — every task is corroborated by a real turn.");
 }
 
-main();
+// Guarded so CANONICAL can be imported (scripts/run-benchmark.ts sends exactly
+// these strings). Unguarded, `import` ran main() and exited the importing
+// process with code 2 for want of an argv.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
+}
