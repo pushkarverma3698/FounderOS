@@ -205,7 +205,13 @@ export async function getTodayCostUsd(tenantId: string): Promise<number> {
   return parseFloat(row?.total ?? "0");
 }
 
-/** Per-model cost breakdown for the last N days. */
+/**
+ * Per-model cost breakdown for the last N days, split by the WORKER that spent
+ * it (`agent`) and the kernel stage it spent it in (`tier`). Before AG-009 the
+ * kernel wrote constants into both columns, so every row collapsed into one
+ * "kernel" line; grouping by stage as well as actor is what makes
+ * "a jobhunt screen costs X, a research task costs Y" answerable.
+ */
 export async function getCostBreakdown(tenantId: string, days = 7) {
   const db = getDb();
   const since = new Date(Date.now() - days * 86_400_000);
@@ -214,6 +220,7 @@ export async function getCostBreakdown(tenantId: string, days = 7) {
     .select({
       model: aiCallCosts.model,
       agent: aiCallCosts.agent,
+      stage: aiCallCosts.tier,
       calls: sql<number>`COUNT(*)`,
       total_tokens_in: sql<number>`SUM(${aiCallCosts.tokens_in})`,
       total_tokens_out: sql<number>`SUM(${aiCallCosts.tokens_out})`,
@@ -226,7 +233,7 @@ export async function getCostBreakdown(tenantId: string, days = 7) {
         gt(aiCallCosts.created_at, since),
       ),
     )
-    .groupBy(aiCallCosts.model, aiCallCosts.agent)
+    .groupBy(aiCallCosts.model, aiCallCosts.agent, aiCallCosts.tier)
     .orderBy(desc(sql`SUM(${aiCallCosts.cost_usd})`));
 }
 
