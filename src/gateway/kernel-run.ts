@@ -13,7 +13,7 @@ import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { TENANT, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS, OFFICE_RECURSION_LIMIT } from "../core/config.js";
 import { withTurnTimeout, TurnTimeoutError } from "./turn-timeout.js";
 import { getKernel } from "./kernel-boot.js";
-import { kernelReply, getPendingKernelApproval, redactInternalPaths, redactInternalIdentifiers } from "../kernel/index.js";
+import { kernelReply, getPendingKernelApproval } from "../kernel/index.js";
 import type { ApprovalRequest } from "../infra/hitl.js";
 import { formatApprovalCard, safeHtml } from "./approval-card.js";
 import { markdownToTelegramHtml, splitForTelegram } from "./format.js";
@@ -28,7 +28,11 @@ import { logger } from "../infra/logger.js";
 import { isModelFallbackError } from "../agents/model.js";
 import { enqueueTurnAutoRetry } from "./auto-retry.js";
 import { recordFailedTurnInHistory, type FoldableKernel } from "./failed-turn-fold.js";
-import type { KernelStateType } from "../kernel/index.js";
+import { streamKernelTurn, progressLabelFor } from "./kernel-progress.js";
+
+// Progress streaming lives in ./kernel-progress.ts; re-exported so the gateway's
+// public surface (and its tests) keep addressing kernel-run.
+export { progressLabelFor };
 
 const log = logger.child({ module: "kernel-run" });
 
@@ -98,88 +102,6 @@ async function sendReply(ctx: Context, text: string): Promise<void> {
 async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promise<void> {
   const card = formatApprovalCard(approval);
   await ctx.reply(card.html, { parse_mode: "HTML", reply_markup: card.keyboard });
-}
-
-// ── Progress streaming ─────────────────────────────────────────────────────
-
-const PROGRESS_OBJECTIVE_MAX = 60;
-
-/**
- * Step-level progress label for the CURRENT state, or null when nothing is
- * worth showing (planning/failed/done, or a malformed cursor — mirrors
- * dispatch's own bounds check rather than throwing).
- */
-export function progressLabelFor(state: KernelStateType): string | null {
-  const { mission } = state;
-  if (!mission) return null; // first streamed snapshot, before the plan node has run
-  if (mission.status === "executing") {
-    const step = mission.plan?.steps[mission.cursor];
-    if (!step) return null;
-    // Worker id is internal routing; the objective is planner prose that names
-    // tools. Both are scrubbed — rationale in kernel/founder-text.ts.
-    const clean = redactInternalIdentifiers(redactInternalPaths(step.objective));
-    if (!clean) return PROGRESS_PLACEHOLDER_TEXT;
-    return `🔧 ${clean.length > PROGRESS_OBJECTIVE_MAX ? `${clean.slice(0, PROGRESS_OBJECTIVE_MAX - 1)}…` : clean}`;
-  }
-  if (mission.status === "synthesizing") return "✍️ Writing your reply…";
-  return null;
-}
-
-const PROGRESS_PLACEHOLDER_TEXT = "🤔 Working on it…";
-
-/** Runs a Telegram progress call and swallows any failure — a progress ping is cosmetic; the turn must not die on a Telegram blip. */
-async function silently(op: string, fn: () => Promise<unknown>): Promise<void> {
-  try {
-    await fn();
-  } catch (err) {
-    log.warn({ err: String(err) }, `Progress placeholder ${op} failed`); // allow-failopen: progress ping is cosmetic; the turn must not die on a Telegram blip
-  }
-}
-
-/**
- * Sends one placeholder message, edits it as progressLabelFor(state) changes
- * while streaming the kernel turn, and deletes it once the turn ends
- * (success, HITL pause, or error).
- */
-async function streamKernelTurn(
-  ctx: Context,
-  trace: ReturnType<typeof startTurn>,
-  streamPromise: Promise<AsyncIterable<unknown>>,
-): Promise<KernelStateType> {
-  let placeholderId: number | undefined;
-  await silently("send", async () => {
-    placeholderId = (await ctx.reply(PROGRESS_PLACEHOLDER_TEXT)).message_id;
-  });
-
-  let lastLabel: string | null = null;
-  let lastState: KernelStateType | undefined;
-
-  try {
-    const streamIter = await streamPromise;
-    for await (const state of streamIter) {
-      lastState = state as KernelStateType;
-      const label = progressLabelFor(lastState);
-      if (label === null || label === lastLabel) continue;
-      lastLabel = label;
-      trace.event("turn.progress", { label });
-      const id = placeholderId;
-      if (id !== undefined && ctx.chat) {
-        const chatId = ctx.chat.id;
-        await silently("edit", () => ctx.api.editMessageText(chatId, id, label));
-      }
-    }
-  } finally {
-    const id = placeholderId;
-    if (id !== undefined && ctx.chat) {
-      const chatId = ctx.chat.id;
-      await silently("delete", () => ctx.api.deleteMessage(chatId, id));
-    }
-  }
-
-  if (!lastState) {
-    throw new Error("kernel.stream produced no state — this should be unreachable (graph always yields at least once)");
-  }
-  return lastState;
 }
 
 // ── One text turn ──────────────────────────────────────────────────────────────
