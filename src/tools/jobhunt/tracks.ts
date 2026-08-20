@@ -93,72 +93,27 @@ export const TRACK_TITLES: Record<RoleTrack, readonly string[]> = {
 };
 
 /**
- * PAID vocabulary vs FREE vocabulary — TRACK_TITLES above and this list do two
- * different jobs, and giving them opposite widths is the point, not an
- * inconsistency.
- *
- * TRACK_TITLES feeds `titleSearch` to a metered Apify actor capped at
- * `MIN_ATS_LIMIT` (10) postings per query — in the last production sweep 5 of
- * 12 queries came back at exactly that cap. The cap is binding: adding a
- * phrase to TRACK_TITLES does not buy more postings, it makes more title
- * shapes compete for the same 10 slots. So it stays narrow.
- *
- * `classifyTrack` below does not query anything — it labels a posting the feed
- * already returned. That is pure local string work, free regardless of list
- * size, so it can be as wide as real title vocabulary actually is. Before this
- * list, "Software Development Engineer II" — the standard India/SDE title,
- * and it does NOT contain the substring "software engineer" because
- * "development" sits between the two halves — plus DevOps, SRE, cloud,
- * Python/Java/web-developer titles all returned null and were logged as
- * "unclassified", even though they had already been fetched and paid for.
- * That gap gets worse once the free job-board polling lane (added after this
- * paid pipeline) starts fetching whole boards unfiltered: every one of these
- * shapes will show up and needs a real track, not "unclassified".
- *
- * Terms here are plain lowercase with no `:*` suffix — that suffix is feed
- * search syntax and means nothing to a local string match. They are matched
- * with word boundaries, not `includes()`: several are short acronyms ("sde",
- * "sre") that `includes()` would also find inside unrelated words
- * ("misdeeds", "misreads"). TRACK_TITLES keeps plain `includes()` — its
- * phrases are long enough that a false positive is not realistic, and
- * changing how it matches now would risk reclassifying a title that already
- * classifies correctly today.
+ * The FREE classifier's vocabulary lives in track-vocabulary.ts and is
+ * re-exported here so every existing import site keeps resolving. The lists
+ * moved when measurement pushed this file past its budget; the reason they are
+ * a separate module rather than a longer one is that they have the opposite
+ * economics to TRACK_TITLES above — see that file's header.
  */
-export const TRACK_CLASSIFY_TERMS: Record<RoleTrack, readonly string[]> = {
-  ai: [
-    "ml engineer",
-    "nlp engineer",
-    "computer vision engineer",
-    "deep learning engineer",
-    "ai/ml engineer",
-  ],
-  fullstack: ["full stack developer", "mern developer", "mern stack developer"],
-  backend: [
-    "software development engineer",
-    "sde",
-    "devops engineer",
-    "devops",
-    "site reliability engineer",
-    "sre",
-    "cloud engineer",
-    "infrastructure engineer",
-    "systems engineer",
-    "python developer",
-    "java developer",
-    "golang developer",
-    "go developer",
-    "node developer",
-    "api engineer",
-  ],
-  frontend: [
-    "web developer",
-    "javascript developer",
-    "typescript developer",
-    "angular developer",
-    "vue developer",
-    "ui developer",
-  ],
-};
+export {
+  TRACK_CLASSIFY_TERMS,
+  TRACK_QUALIFIERS,
+  GENERIC_ENGINEERING_TERMS,
+  GENERIC_FALLBACK_TRACK,
+} from "./track-vocabulary.js";
+
+import {
+  TRACK_CLASSIFY_TERMS,
+  TRACK_QUALIFIERS,
+  GENERIC_ENGINEERING_TERMS,
+  GENERIC_FALLBACK_TRACK,
+  GENERIC_PAID_PHRASES,
+  ROLE_NOUNS,
+} from "./track-vocabulary.js";
 
 /**
  * Priority order. Since 2026-08-01 every track gets its OWN query and its own
@@ -194,9 +149,19 @@ function escapeForRegExp(value: string): string {
  * ("sde", "sre") that plain `includes()` also finds mid-word — see the
  * TRACK_CLASSIFY_TERMS comment for the concrete false positives this avoids.
  * It has never contained a bare "go"; the term is "go developer".
+ *
+ * NOT `\b`, which is defined against word characters and therefore cannot see
+ * the edge of a term that BEGINS or ENDS in punctuation: `\b\.net\b` never
+ * matches ".NET Developer" (there is no word boundary before a dot preceded by
+ * a space) and `\bc#\b` never matches "C# Developer". Since half the language
+ * qualifiers are spelled with punctuation, the boundary is expressed directly
+ * as "not flanked by an alphanumeric", and only on the side where the term's
+ * own edge is alphanumeric — so ".net" still matches inside "ASP.NET".
  */
 function matchesAsWholeWord(normalisedTitle: string, term: string): boolean {
-  return new RegExp(`\\b${escapeForRegExp(term)}\\b`).test(normalisedTitle);
+  const left = /^[a-z0-9]/i.test(term) ? "(?<![a-z0-9])" : "";
+  const right = /[a-z0-9]$/i.test(term) ? "(?![a-z0-9])" : "";
+  return new RegExp(`${left}${escapeForRegExp(term)}${right}`).test(normalisedTitle);
 }
 
 /**
@@ -220,14 +185,35 @@ function matchesAsWholeWord(normalisedTitle: string, term: string): boolean {
  */
 export function classifyTrack(title: string): RoleTrack | null {
   const normalised = title.toLowerCase();
+
+  // Pass 1 — a track's OWN vocabulary, unchanged, minus the two paid phrases
+  // that name no track (see GENERIC_PAID_PHRASES).
   for (const track of TRACK_PRIORITY) {
-    const matchedPaidPhrase = TRACK_TITLES[track].some((phrase) =>
-      normalised.includes(phrase.replace(/:\*$/, "").toLowerCase()),
-    );
+    const matchedPaidPhrase = TRACK_TITLES[track].some((phrase) => {
+      const term = phrase.replace(/:\*$/, "").toLowerCase();
+      return !GENERIC_PAID_PHRASES.has(term) && normalised.includes(term);
+    });
     const matchedClassifyTerm = TRACK_CLASSIFY_TERMS[track].some((term) =>
       matchesAsWholeWord(normalised, term),
     );
     if (matchedPaidPhrase || matchedClassifyTerm) return track;
   }
+
+  // Pass 2 — a track qualifier PAIRED with a role noun. Both are required:
+  // "Frontend" alone is a topic and "Engineer" alone is any engineer at all,
+  // and it is the pairing that admits "Frontend Software Engineer" while
+  // still refusing "UX Designer" and "Senior Electrical Engineer".
+  if (ROLE_NOUNS.some((noun) => matchesAsWholeWord(normalised, noun))) {
+    for (const track of TRACK_PRIORITY) {
+      if (TRACK_QUALIFIERS[track].some((q) => matchesAsWholeWord(normalised, q))) return track;
+    }
+  }
+
+  // Pass 3 — a software title that genuinely names no track. LAST, so it can
+  // never outrank a specific match; that ordering is the whole fix.
+  if (GENERIC_ENGINEERING_TERMS.some((term) => matchesAsWholeWord(normalised, term))) {
+    return GENERIC_FALLBACK_TRACK;
+  }
+
   return null;
 }

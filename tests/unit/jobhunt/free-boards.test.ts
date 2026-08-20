@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { writeFileSync, mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -17,7 +17,10 @@ import {
   getFreeBoards,
   resetFreeBoardsCache,
   boardsPathFrom,
+  discoveredBoardsPathFrom,
+  registerDiscoveredBoard,
   FREE_BOARDS_PATH,
+  FREE_ATS_DISCOVERED_PATH,
   FREE_ATS_PLATFORMS,
   MIN_EXPECTED_BOARDS,
 } from "../../../src/tools/jobhunt/free-boards.js";
@@ -221,6 +224,109 @@ describe("boardsPathFrom", () => {
 
   it("falls back to the repo-relative registry when no override is set", () => {
     expect(boardsPathFrom({})).toBe(FREE_BOARDS_PATH);
+  });
+});
+
+describe("discoveredBoardsPathFrom", () => {
+  it("honours the FREE_ATS_DISCOVERED_PATH override", () => {
+    expect(discoveredBoardsPathFrom({ FREE_ATS_DISCOVERED_PATH: "/tmp/discovered.csv" })).toBe(
+      "/tmp/discovered.csv",
+    );
+  });
+
+  it("falls back to the /opt/founderos-data default — outside the git tree", () => {
+    expect(discoveredBoardsPathFrom({})).toBe(FREE_ATS_DISCOVERED_PATH);
+  });
+});
+
+describe("registerDiscoveredBoard + getFreeBoards merge", () => {
+  let dir: string;
+  let curatedPath: string;
+  let discoveredPath: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "free-boards-discovered-test-"));
+    curatedPath = join(dir, "curated.csv");
+    discoveredPath = join(dir, "discovered.csv");
+    const rows = Array.from(
+      { length: MIN_EXPECTED_BOARDS + 1 },
+      (_, i) => `Board${i},greenhouse,board${i},NL`,
+    );
+    writeFileSync(curatedPath, [HEADER, ...rows].join("\n"));
+    process.env["FREE_ATS_BOARDS_PATH"] = curatedPath;
+    process.env["FREE_ATS_DISCOVERED_PATH"] = discoveredPath;
+    resetFreeBoardsCache();
+  });
+
+  afterEach(() => {
+    delete process.env["FREE_ATS_BOARDS_PATH"];
+    delete process.env["FREE_ATS_DISCOVERED_PATH"];
+    resetFreeBoardsCache();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("getFreeBoards works with no discovered file at all — missing is harmless, not fatal", () => {
+    expect(existsSync(discoveredPath)).toBe(false);
+    const boards = getFreeBoards();
+    expect(boards.length).toBe(MIN_EXPECTED_BOARDS + 1);
+  });
+
+  it("creates the file with a header on the first discovery", async () => {
+    await registerDiscoveredBoard({
+      name: "Dalsem B.V.",
+      ats: "recruitee",
+      token: "dalsem",
+      markets: ["NL"],
+    });
+
+    expect(existsSync(discoveredPath)).toBe(true);
+    const content = readFileSync(discoveredPath, "utf8");
+    expect(content.split("\n")[0]).toBe(HEADER);
+    expect(content).toContain("Dalsem B.V.,recruitee,dalsem,NL");
+  });
+
+  it("a discovered board is polled after the next getFreeBoards call", async () => {
+    await registerDiscoveredBoard({
+      name: "Dalsem B.V.",
+      ats: "recruitee",
+      token: "dalsem",
+      markets: ["NL"],
+    });
+
+    const boards = getFreeBoards();
+    expect(boards).toHaveLength(MIN_EXPECTED_BOARDS + 2);
+    expect(boards.find((b) => b.token === "dalsem" && b.ats === "recruitee")).toBeDefined();
+  });
+
+  it("curated wins on a token collision — hand-verified data beats an auto-harvest guess", async () => {
+    await registerDiscoveredBoard({
+      name: "Impostor Name",
+      ats: "greenhouse",
+      token: "board0", // already curated above
+      markets: ["IN"],
+    });
+
+    const boards = getFreeBoards();
+    expect(boards).toHaveLength(MIN_EXPECTED_BOARDS + 1); // no growth — collision, not addition
+    const row = boards.find((b) => b.token === "board0")!;
+    expect(row.name).toBe("Board0");
+    expect(row.markets).toEqual(["NL"]);
+  });
+
+  it("appending a second discovery does not clobber the first", async () => {
+    await registerDiscoveredBoard({ name: "Dalsem B.V.", ats: "recruitee", token: "dalsem", markets: ["NL"] });
+    await registerDiscoveredBoard({ name: "Ravo Holding B.V.", ats: "recruitee", token: "ravo", markets: ["NL"] });
+
+    const boards = getFreeBoards();
+    expect(boards.find((b) => b.token === "dalsem")).toBeDefined();
+    expect(boards.find((b) => b.token === "ravo")).toBeDefined();
+  });
+
+  it("quotes a discovered company name containing a comma", async () => {
+    await registerDiscoveredBoard({ name: "Zeeco, Inc.", ats: "lever", token: "zeeco", markets: ["IN"] });
+
+    const boards = getFreeBoards();
+    expect(boards.find((b) => b.token === "zeeco")!.name).toBe("Zeeco, Inc.");
   });
 });
 

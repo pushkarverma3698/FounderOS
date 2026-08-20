@@ -13,6 +13,8 @@ import {
   mapGreenhouseJobs,
   mapLeverPostings,
   mapAshbyJobs,
+  mapRecruiteeOffers,
+  decodeJobBody,
   parsePostedAt,
   toRawPosting,
   type FreeCandidate,
@@ -221,6 +223,94 @@ describe("mapAshbyJobs", () => {
   it.each(GARBAGE)("returns [] rather than throwing on garbage input: %p", (garbage) => {
     expect(() => mapAshbyJobs(garbage, board({ ats: "ashby" }))).not.toThrow();
     expect(mapAshbyJobs(garbage, board({ ats: "ashby" }))).toEqual([]);
+  });
+});
+
+describe("mapRecruiteeOffers", () => {
+  // Field names and shapes verified live against a real board 2026-08-20
+  // (dalsem.recruitee.com) — not guessed from documentation.
+  const wellFormed = {
+    offers: [
+      {
+        id: 2636955,
+        title: "Senior Elektra Engineer",
+        careers_url: "https://werkenbijdalsem.nl/o/senior-elektra-engineer",
+        careers_apply_url: "https://werkenbijdalsem.nl/o/senior-elektra-engineer/c/new",
+        location: "Den Hoorn, Zuid-Holland, Nederland",
+        published_at: "2026-06-12 07:28:07 UTC",
+        description: "<p><strong>Vacature</strong></p><p>We use C++.</p>",
+        requirements: "<p>5 years experience required.</p>",
+        status: "published",
+      },
+    ],
+  };
+
+  it("maps a well-formed payload to the right fields", () => {
+    const [candidate] = mapRecruiteeOffers(wellFormed, board({ ats: "recruitee" }));
+
+    expect(candidate).toBeDefined();
+    expect(candidate!.externalId).toBe("2636955");
+    expect(candidate!.title).toBe("Senior Elektra Engineer");
+    // The posting page, not the form that skips straight to applying.
+    expect(candidate!.url).toBe("https://werkenbijdalsem.nl/o/senior-elektra-engineer");
+    expect(candidate!.location).toBe("Den Hoorn, Zuid-Holland, Nederland");
+    expect(candidate!.postedAt?.toISOString()).toBe("2026-06-12T07:28:07.000Z");
+  });
+
+  it("concatenates description and requirements, HTML-decoded", () => {
+    const [candidate] = mapRecruiteeOffers(wellFormed, board({ ats: "recruitee" }));
+    // Tags become whitespace, not nothing — "We use C++." and "5 years" must
+    // never glue to an adjacent word the way a naive strip would.
+    expect(candidate!.description).toContain("We use C++.");
+    expect(candidate!.description).toContain("5 years experience required.");
+  });
+
+  it("falls back to careers_apply_url when careers_url is absent", () => {
+    const [candidate] = mapRecruiteeOffers(
+      { offers: [{ ...wellFormed.offers[0]!, careers_url: "" }] },
+      board({ ats: "recruitee" }),
+    );
+    expect(candidate!.url).toBe("https://werkenbijdalsem.nl/o/senior-elektra-engineer/c/new");
+  });
+
+  it("excludes a row with a non-published status", () => {
+    const draft = { offers: [{ ...wellFormed.offers[0]!, status: "draft" }] };
+    expect(mapRecruiteeOffers(draft, board({ ats: "recruitee" }))).toEqual([]);
+  });
+
+  it("keeps a row with status absent — the endpoint is public and unauthenticated", () => {
+    const noStatus = { offers: [{ ...wellFormed.offers[0]!, status: undefined }] };
+    expect(mapRecruiteeOffers(noStatus, board({ ats: "recruitee" }))).toHaveLength(1);
+  });
+
+  it("skips a row missing an id, a title, or a URL", () => {
+    const base = wellFormed.offers[0]!;
+    const noId = { offers: [{ ...base, id: undefined }] };
+    const noTitle = { offers: [{ ...base, title: "" }] };
+    const noUrl = { offers: [{ ...base, careers_url: "", careers_apply_url: "" }] };
+
+    expect(mapRecruiteeOffers(noId, board({ ats: "recruitee" }))).toEqual([]);
+    expect(mapRecruiteeOffers(noTitle, board({ ats: "recruitee" }))).toEqual([]);
+    expect(mapRecruiteeOffers(noUrl, board({ ats: "recruitee" }))).toEqual([]);
+  });
+
+  it.each(GARBAGE)("returns [] rather than throwing on garbage input: %p", (garbage) => {
+    expect(() => mapRecruiteeOffers(garbage, board({ ats: "recruitee" }))).not.toThrow();
+    expect(mapRecruiteeOffers(garbage, board({ ats: "recruitee" }))).toEqual([]);
+  });
+});
+
+describe("decodeJobBody", () => {
+  it("turns a tag boundary into whitespace, never nothing", () => {
+    // The defect this exists to prevent: stripping `</p><p>` to "" glues the
+    // last word of one paragraph to the first of the next, and "5 years"
+    // arriving as "experience5 years" is invisible to the years regex.
+    expect(decodeJobBody("<p>experience</p><p>5 years</p>")).toBe("experience 5 years");
+  });
+
+  it("decodes HTML entities, &amp; last so it cannot double-decode", () => {
+    expect(decodeJobBody("Sales &amp; Marketing")).toBe("Sales & Marketing");
+    expect(decodeJobBody("&amp;lt;script&amp;gt;")).toBe("&lt;script&gt;");
   });
 });
 

@@ -66,6 +66,26 @@ vi.mock("../../../src/tools/jobhunt/indeed-source.js", async (orig) => {
   return { ...actual, fetchIndeedPostings: mockFetchIndeed };
 });
 
+/**
+ * The token harvest reads the free-board registry and writes to a file
+ * outside the repo — both real I/O this unit test must not touch. Every
+ * existing test above never triggers either call at all (their posting URLs
+ * are `example.com`, matching no ATS pattern), so this mock only matters to
+ * the harvest-specific tests at the bottom of this file.
+ */
+const mockGetFreeBoards = vi.fn(
+  (): Array<{ name: string; ats: string; token: string; markets: string[] }> => [],
+);
+const mockRegisterDiscoveredBoard = vi.fn(async () => {});
+vi.mock("../../../src/tools/jobhunt/free-boards.js", async (orig) => {
+  const actual = await (orig() as Promise<Record<string, unknown>>);
+  return {
+    ...actual,
+    getFreeBoards: mockGetFreeBoards,
+    registerDiscoveredBoard: mockRegisterDiscoveredBoard,
+  };
+});
+
 const { runPooledIngest, INGEST_SOURCE } = await import("../../../src/tools/jobhunt/ingest.js");
 const { POOL_ORDER } = await import("../../../src/tools/jobhunt/ats-source.js");
 const { INDEED_SOURCE } = await import("../../../src/tools/jobhunt/indeed-source.js");
@@ -333,5 +353,113 @@ describe("runPooledIngest", () => {
     const result = await runPooledIngest({ limit: 30 });
 
     expect(result.failures.some((f) => f.includes("failed to screen"))).toBe(false);
+  });
+});
+
+describe("runPooledIngest — token harvest", () => {
+  it("discovers a new board from a posting's URL and writes it once", async () => {
+    mockFetchAts.mockResolvedValue({
+      ok: true,
+      postings: [posting({ url: "https://boards.greenhouse.io/newco/jobs/1" })],
+    });
+
+    const result = await runPooledIngest({ limit: 30 });
+
+    // markets: ["NL"] — the "netherlands" pool runs first in POOL_ORDER and
+    // the fixture posting sets no country of its own, so POOL_COUNTRY's
+    // fallback resolves it to NL before the harvest ever sees it.
+    expect(result.newBoards).toEqual([
+      { name: "Acme BV", ats: "greenhouse", token: "newco", markets: ["NL"] },
+    ]);
+    expect(mockRegisterDiscoveredBoard).toHaveBeenCalledTimes(1);
+    expect(mockRegisterDiscoveredBoard).toHaveBeenCalledWith(
+      expect.objectContaining({ ats: "greenhouse", token: "newco" }),
+    );
+  });
+
+  it("harvests from a posting the gates REJECT — the whole point of moving the hook here", async () => {
+    mockFetchAts.mockResolvedValue({
+      ok: true,
+      postings: [posting({ url: "https://jobs.lever.co/rejected-co/1" })],
+    });
+    mockScreenPosting.mockResolvedValue({
+      kind: "screened",
+      company: "Acme BV",
+      title: "AI Engineer",
+      route: "hsm",
+      track: "ai",
+      verdict: { status: "reject", reasons: ["Sponsor: not on the register"] },
+      routesTried: 1,
+      match: { verdict: "not-sponsor", candidates: [], evidence: "no match" },
+      nearDuplicates: [],
+    });
+
+    const result = await runPooledIngest({ limit: 30 });
+
+    expect(result.newBoards).toHaveLength(1);
+  });
+
+  it("never re-discovers a board the registry already knows", async () => {
+    mockGetFreeBoards.mockReturnValueOnce([
+      { name: "Stripe", ats: "greenhouse", token: "stripe", markets: [] },
+    ]);
+    mockFetchAts.mockResolvedValue({
+      ok: true,
+      postings: [posting({ url: "https://boards.greenhouse.io/stripe/jobs/1" })],
+    });
+
+    const result = await runPooledIngest({ limit: 30 });
+
+    expect(result.newBoards).toHaveLength(0);
+    expect(mockRegisterDiscoveredBoard).not.toHaveBeenCalled();
+  });
+
+  it("dedupes the same new board seen across multiple pool/track queries in one sweep", async () => {
+    mockFetchAts.mockResolvedValue({
+      ok: true,
+      postings: [posting({ url: "https://boards.greenhouse.io/newco/jobs/1" })],
+    });
+
+    await runPooledIngest({ limit: 30 });
+
+    // fetchAts is called once per (pool × track); the same URL comes back
+    // every time in this fixture, and it must still be written only once.
+    expect(mockFetchAts.mock.calls.length).toBeGreaterThan(1);
+    expect(mockRegisterDiscoveredBoard).toHaveBeenCalledTimes(1);
+  });
+
+  it("a broken free-board registry skips the harvest, never the sweep", async () => {
+    mockGetFreeBoards.mockImplementationOnce(() => {
+      throw new Error("registry parsed only 4 boards");
+    });
+    mockFetchAts.mockResolvedValue({
+      ok: true,
+      postings: [posting({ url: "https://boards.greenhouse.io/newco/jobs/1" })],
+    });
+
+    const result = await runPooledIngest({ limit: 30 });
+
+    expect(result.fetched).toBeGreaterThan(0);
+    expect(result.failures.some((f) => /registry/i.test(f))).toBe(false);
+  });
+
+  it("a write failure is logged, not surfaced as a sweep failure", async () => {
+    mockRegisterDiscoveredBoard.mockRejectedValueOnce(new Error("EACCES"));
+    mockFetchAts.mockResolvedValue({
+      ok: true,
+      postings: [posting({ url: "https://boards.greenhouse.io/newco/jobs/1" })],
+    });
+
+    const result = await runPooledIngest({ limit: 30 });
+
+    expect(result.newBoards).toHaveLength(0);
+    expect(result.failures).toEqual([]);
+  });
+
+  it("a posting matching no known ATS pattern discovers nothing", async () => {
+    mockFetchAts.mockResolvedValue({ ok: true, postings: [posting()] }); // example.com
+    const result = await runPooledIngest({ limit: 30 });
+    expect(result.newBoards).toHaveLength(0);
+    expect(mockRegisterDiscoveredBoard).not.toHaveBeenCalled();
   });
 });

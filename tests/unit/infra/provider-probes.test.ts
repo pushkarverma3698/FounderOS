@@ -127,6 +127,16 @@ describe("provider-probes", () => {
   });
 
   it("formatProviderStatusLine includes backend names", async () => {
+    // formatProviderStatusLine calls getGmailBackend()/getLinkedInBackend()
+    // LIVE — it ignores report.gmail_backend/linkedin_backend below entirely
+    // — and those read process.env directly (falling back to this repo's real
+    // .env file on disk when unset). Pin them explicitly so this test asserts
+    // the function's behavior, not whatever backend this dev machine has
+    // configured.
+    const prevGmail = process.env["GMAIL_BACKEND"];
+    const prevLinkedin = process.env["LINKEDIN_BACKEND"];
+    process.env["GMAIL_BACKEND"] = "gws";
+    process.env["LINKEDIN_BACKEND"] = "direct";
     const { formatProviderStatusLine } = await import("../../../src/infra/provider-probes.js");
     const line = formatProviderStatusLine({
       checked_at: new Date().toISOString(),
@@ -143,5 +153,10 @@ describe("provider-probes", () => {
     expect(line).toContain("gws");
     expect(line).toContain("direct");
     expect(line).toContain("🟢");
+
+    if (prevGmail === undefined) delete process.env["GMAIL_BACKEND"];
+    else process.env["GMAIL_BACKEND"] = prevGmail;
+    if (prevLinkedin === undefined) delete process.env["LINKEDIN_BACKEND"];
+    else process.env["LINKEDIN_BACKEND"] = prevLinkedin;
   });
 });

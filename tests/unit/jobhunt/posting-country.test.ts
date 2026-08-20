@@ -156,3 +156,68 @@ describe("extractRoute — a fetched country outranks the ad's wording", () => {
     expect(extractRoute("We are hiring an engineer.")).toBe("unclear");
   });
 });
+
+describe("countryFromLocation — the coverage measured as missing on 2026-08-20", () => {
+  // Every case here comes from a 4,412-posting sample of the live free
+  // registry. A location the pipeline reads as `other` is dropped BEFORE
+  // screening, so each of these was a real posting thrown away for a spelling.
+
+  it("recognises the Indian cities that were being filed as another country", () => {
+    // 15 postings in one 90-board sample carried these and were dropped.
+    expect(countryFromLocation("Lucknow")).toBe("IN");
+    expect(countryFromLocation("Lucknow, Uttar Pradesh")).toBe("IN");
+    expect(countryFromLocation("Varanasi")).toBe("IN");
+    expect(countryFromLocation("Bareilly")).toBe("IN");
+    expect(countryFromLocation("Mysore")).toBe("IN");
+    expect(countryFromLocation("Nashik")).toBe("IN");
+    expect(countryFromLocation("Tirupati")).toBe("IN");
+    expect(countryFromLocation("Vadodara")).toBe("IN");
+    expect(countryFromLocation("Surat")).toBe("IN");
+  });
+
+  it("recognises Dutch locations beyond the first nineteen cities", () => {
+    // "Schiphol-Rijk" is an office park fifteen minutes from Amsterdam and was
+    // being read as a country outside both markets.
+    expect(countryFromLocation("Schiphol-Rijk")).toBe("NL");
+    expect(countryFromLocation("Hoofddorp")).toBe("NL");
+    expect(countryFromLocation("Den Bosch")).toBe("NL");
+    expect(countryFromLocation("Enschede")).toBe("NL");
+    expect(countryFromLocation("Zoetermeer")).toBe("NL");
+  });
+
+  it("reads a location whose every word names nowhere as unknown, not elsewhere", () => {
+    // Bare "Remote" was already `unknown` (kept and screened). Decorated
+    // versions of the same non-fact fell through to `other` and were dropped,
+    // so identical postings got opposite treatment on punctuation alone.
+    expect(countryFromLocation("Remote - Europe")).toBe("unknown");
+    expect(countryFromLocation("Remote-EMEA")).toBe("unknown");
+    expect(countryFromLocation("EU (Remote)")).toBe("unknown");
+    expect(countryFromLocation("Remote Globally")).toBe("unknown");
+    expect(countryFromLocation("Remote in Europe")).toBe("unknown");
+  });
+
+  it("reads a bare country code, which only the whole-string case makes safe", () => {
+    // The two-letter codes stay out of the name lists because `\bin\b` matches
+    // the preposition in "Remote in Europe". When the code IS the entire field
+    // there is no preposition to confuse — and one live board emits exactly "IN".
+    expect(countryFromLocation("IN")).toBe("IN");
+    expect(countryFromLocation("NL")).toBe("NL");
+    expect(countryFromLocation("nl")).toBe("NL");
+  });
+
+  it("REGRESSION: widening the lists did not start claiming wrong countries", () => {
+    // Each of these is a place that shares a name with, or reads like, one of
+    // the newly added entries. A wrong country asserts; an unknown one asks.
+    expect(countryFromLocation("Hasselt, Limburg, Belgium")).toBe("other");
+    expect(countryFromLocation("Bergen, Norway")).toBe("other");
+    expect(countryFromLocation("Salem, Oregon")).toBe("other");
+    expect(countryFromLocation("Punjab, Pakistan")).toBe("other");
+    expect(countryFromLocation("Indianapolis, Indiana")).toBe("other");
+    expect(countryFromLocation("Auckland, New Zealand")).toBe("other");
+    // Still names a country, so it must NOT collapse into "nowhere".
+    expect(countryFromLocation("Remote, United States")).toBe("other");
+    expect(countryFromLocation("Remote, United Kingdom")).toBe("other");
+    // And a real market survives the decoration it always did.
+    expect(countryFromLocation("Remote - Netherlands")).toBe("NL");
+  });
+});

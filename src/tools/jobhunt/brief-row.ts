@@ -241,8 +241,13 @@ export function renderRow(
   const meta =
     `    <i>${esc(where)} · ${esc(row.track)} track · basis: ${esc(row.route)} · ` +
     `seen ${row.ageDays === 0 ? "today" : `${row.ageDays}d ago`}</i>`;
+  // /applied shares do_today/stretch's numbering (handleApplied resolves
+  // against the same two sections `/draft` does) — printing it next to an ASK
+  // row would show a command that resolves a DIFFERENT row under the same
+  // number, since ASK numbers its own section independently.
   const action = command
-    ? `\n    ▸ ${cmd(`${command} ${index}`)}`
+    ? `\n    ▸ ${cmd(`${command} ${index}`)}` +
+      (section === "do_today" || section === "stretch" ? ` · ${cmd(`/applied ${index}`)}` : "")
     : "";
 
   return (

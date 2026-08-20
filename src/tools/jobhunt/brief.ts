@@ -102,6 +102,14 @@ export interface BriefInput {
   readonly notes?: readonly string[];
   /** Today's feed spend. Omitted when the ledger is unavailable, never faked. */
   readonly spend?: SpendLine;
+  /**
+   * Otherwise-actionable rows excluded from `rows` for being past `maxAgeHours`.
+   * Optional so the many tests unrelated to freshness don't all need updating;
+   * defaults to 0 in the renderer, same as an unset `notes`.
+   */
+  readonly agedOut?: number;
+  /** The freshness window `rows` was filtered against, in hours. Defaults to 24. */
+  readonly maxAgeHours?: number;
 }
 
 function pluralDays(n: number): string {
@@ -336,10 +344,20 @@ function renderHeader(input: BriefInput, totals: SectionTotals): string {
         ? [`<b>0 ready to send</b>`, ...standing].join(" · ")
         : `<b>Nothing actionable today</b>`;
 
+  // Printed even at 0/0 — an empty queue must read as "no fresh jobs right
+  // now", never be silently indistinguishable from a broken sweep. That
+  // ambiguity is what erased the previous screening log's credibility.
+  const maxAgeHours = input.maxAgeHours ?? 24;
+  const agedOut = input.agedOut ?? 0;
+  const freshness =
+    `<i>${plural(input.rows.length, "fresh role", "fresh roles")} in the queue ` +
+    `(< ${maxAgeHours}h old) · ${plural(agedOut, "older role", "older roles")} aged out</i>\n`;
+
   return (
     `<b>🎯 JOB BRIEF</b> · ${date}\n` +
     `${counts}\n` +
     `<i>${input.screened} screened${trackSummary.length > 0 ? ` · ${trackSummary}` : ""}</i>\n` +
+    freshness +
     // No number promised. The part count depends on how many roles are standing,
     // and the header is rendered before the split knows — a stated "2–3" was
     // wrong the first time it met the real table (6 parts, 53 rows).
