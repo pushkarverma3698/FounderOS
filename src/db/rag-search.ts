@@ -82,8 +82,17 @@ export async function searchRagTable(
  * Keyword search over the SAME rag table as {@link searchRagTable}, using only
  * the `content` column (schema-safe — no tsvector/GIN assumption). The query is
  * tokenised into significant terms; rows matching ANY term are fetched (ILIKE
- * OR), then ranked in JS by term overlap. This is the keyword half of hybrid
- * retrieval (spec §1.1 F2) and the fallback when the embedder is down (F1).
+ * OR), ranked by term overlap IN SQL, and only then truncated. This is the
+ * keyword half of hybrid retrieval (spec §1.1 F2) and the fallback when the
+ * embedder is down (F1).
+ *
+ * The ranking has to happen in SQL because the pre-filter is what truncates.
+ * This query used to apply `LIMIT` to an unordered OR-match, which let Postgres
+ * return ANY rows that matched a single term; `rankByTerms` then ranked that
+ * arbitrary sample precisely. Measured on prod 2026-08-19: one golden query
+ * matched 255 of 478 chunks, 20 survived at random, and keyword-only recall@5
+ * was 0.0% across all 37 golden queries — with no error and no empty result to
+ * make it visible. See tests/unit/db/keyword-rag-ranking.test.ts.
  *
  * `score` is the fraction of query terms present (0–1) — a rough relevance that
  * RRF ignores (it fuses by rank), but that keeps the RagHit shape meaningful for
@@ -99,7 +108,7 @@ export async function keywordSearchRagTable(
   if (terms.length === 0) return []; // nothing significant to match on
 
   const limit = Math.min(Math.max(topK, 1), 10);
-  const candidateLimit = Math.min(limit * 4, 40); // over-fetch, then rank precisely
+  const candidateLimit = Math.min(limit * 4, 40); // over-fetch the BEST rows, then refine in JS
 
   // OR the per-term ILIKE patterns. Terms are alphanumeric (tokenizeQuery strips
   // punctuation) and still passed as bound params — never interpolated.
@@ -107,10 +116,17 @@ export async function keywordSearchRagTable(
   let whereOr = patterns[0]!;
   for (let i = 1; i < patterns.length; i++) whereOr = sql`${whereOr} OR ${patterns[i]!}`;
 
+  // The SQL mirror of scoreByTerms: one CASE arm per term, summed. Ordering by
+  // it makes the LIMIT keep the highest-overlap rows instead of arbitrary ones.
+  const arms = terms.map((t) => sql`(CASE WHEN content ILIKE ${"%" + t + "%"} THEN 1 ELSE 0 END)`);
+  let matchCount = arms[0]!;
+  for (let i = 1; i < arms.length; i++) matchCount = sql`${matchCount} + ${arms[i]!}`;
+
   const rows = await db.execute(sql`
-    SELECT content, metadata
+    SELECT content, metadata, ${matchCount} AS match_count
     FROM ${sql.identifier(RAG_SCHEMA)}.${sql.identifier(table)}
     WHERE ${whereOr}
+    ORDER BY match_count DESC, content
     LIMIT ${candidateLimit}
   `);
 
