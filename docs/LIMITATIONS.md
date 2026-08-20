@@ -1,332 +1,328 @@
 # FounderOS — Limitations & Tech Debt
 
-> A senior-engineer review of the live system (2026-06-14). Honest accounting of
-> what's deferred, where the scaling ceilings are, and what a future developer
-> should know **before** they trust or extend a given subsystem.
+> Honest accounting of what is deferred, where the ceilings are, and what a
+> developer should know **before** trusting or extending a subsystem.
 >
-> Severity: **HIGH** (fix before scaling) · **MEDIUM** (address opportunistically)
-> · **LOW** (note, no urgency). Nothing here is a correctness bug in the current
-> single-tenant deployment — these are constraints and debt, not breakage.
+> **Rewritten 2026-08-19 against the v3 kernel.** The previous revision was
+> dated 2026-06-14 and described a system that no longer exists: "a prebuilt
+> LangGraph supervisor + 7 ReAct departments, one model, ~13.9k LOC, 989 green
+> tests." That architecture was audited and replaced on 2026-07-08 —
+> `src/agents/office.ts` is now a **CI tombstone** that fails the build if
+> recreated. Roughly half the old entries pointed at modules that had been
+> deleted for six weeks. A stale limitations doc is worse than none: it is the
+> first file a reviewer opens, and it was describing the wrong system with
+> total confidence.
+>
+> Severity: **HIGH** (fix before scaling) · **MEDIUM** (address
+> opportunistically) · **LOW** (note, no urgency).
+
+## Measured state (2026-08-19, counted not remembered)
+
+| Measure | Value |
+|---|---|
+| Source files / LOC | 293 files · 49,747 LOC |
+| Test suite | 286 files · **3,036 tests**, offline, $0 |
+| Behavioural golden tasks | 46 (`src/eval/golden-tasks.ts`) |
+| DB tables | 24 (`src/db/schema.ts`) |
+| Side-effecting tool modules / HITL-gated | 20 / **9** |
+| Architecture ratchet | gateway-imports 0 · kernel-purity 0 · regex-routing 0 · orphan-subsystem 0 · fail-open-catch 11 · loc-budget 6 |
 
 ## Review verdict
 
-The architecture is **appropriately simple for what it is**: a prebuilt LangGraph
-supervisor + 7 ReAct departments, one model, compiled once, ~13.9k LOC of source,
-989 green tests. The complexity that exists is **mostly load-bearing** — the dense
-spots (`model.ts`, the `office-run.ts` guards) each map to a documented production
-incident with a regression test. The right move now is *documentation and
-guardrails*, not aggressive rewriting; cutting the defensive layers would
-re-introduce already-fixed P0s. The simplification opportunities below are real but
-deliberately deferred because each one trades a small clarity win for a
-reliability/churn risk on a live system.
+The v3 kernel is **strong on mechanism and weak on measurement.** The
+contract-first design does real work: routing is a validated typed `Plan` rather
+than parsed prose, action claims require code-recorded receipts, failures are
+typed `FailureReport`s naming a component, and HITL writes its DB row before
+`interrupt()`. Those are the parts that survive scrutiny.
+
+What is missing is almost entirely **instrumentation**. The system can tell you
+it is up; it largely cannot tell you how well it is doing. There is no latency
+percentile, no retrieval quality metric, no per-task cost attribution, and no
+measurement of whether the self-improvement loop improves anything. Several of
+these are one query away from existing, because the columns were declared and
+never written.
+
+The second theme is **claims outrunning mechanisms** (CLAUDE.md #27). Three
+separate files asserted a PII-scrubbing guarantee that no code implemented; a
+trace field designed to version prompts carried a constant. These are not
+correctness bugs today, but each is a statement a reader would reasonably
+believe. Where a guarantee cannot be built, the honest move is to refuse the
+capability, not to document the guarantee — the pattern set by
+`src/infra/health-api-stubs.ts`.
 
 ---
 
-## 1. The 6-layer manual tool-wiring chain — **HIGH**
+# A. Measurement gaps
 
-Adding one tool touches 6 files in lockstep (`tools/{name}.ts` → test → wrapper →
-barrel → `capabilities.ts` → `system-prompts.ts`), with **no compile-time
-enforcement** that they stay in sync. This is the single biggest source of the
-"errors kept recurring" history (MEMORY.md): forget a layer, get a runtime error.
+## A1. No latency percentiles — **HIGH**
 
-- **Partly mitigated:** `capabilities.ts` is now the single source of truth, and the
-  supervisor capability manifest auto-generates from it — so "what can you do?" can
-  no longer drift. The wiring maps in `docs/rules/PROGRAMMING-RULES.md` document the
-  exact sequence.
-- **Still missing:** a build-time assertion that every tool in `DEPARTMENT_TOOLS`
-  has (a) a wrapper, (b) a barrel export, and (c) a prompt mention. A small
-  `scripts/verify-wiring.ts` run in CI would convert a class of runtime failures
-  into a red build.
-- **Why deferred:** it's net-new code (fails the YAGNI/reuse filter today at 7
-  departments); revisit when department count or contributor count grows.
+`p50` / `p95` / `percentile` appear **zero times** in the repo.
+`agent_results.latency_ms` is declared (`src/db/schema.ts:277`) and written by
+nothing: the only caller of `writeTaskOutcome` (`src/kernel/synthesizer.ts:130`)
+passes five fields and omits `latency_ms`, `cost_usd`, and `tools_used`. Every
+row ever written has all three NULL.
 
-## 2. Model layer drift — **RESOLVED, LIVE VERIFICATION PENDING**
+No plumbing is needed — `TurnRecord.received_at` is already in kernel state.
 
-The old `FounderChatModel` wrapper was deleted in ADR-028. `model.ts` now returns
-plain LangChain provider models selected by provider-prefixed `AGENT_MODEL` values,
-and department failover uses LangChain's official `modelFallbackMiddleware`.
+- **In flight:** brief `docs/antigravity/AG-008-turn-latency-percentiles.md`.
 
-- **Resolved:** custom `bindTools`, manual `_generate` retry/fallback, OpenRouter
-  special-case execution, and synthetic "success" responses are gone.
-- **Current default:** `openrouter:openai/gpt-4o-mini` while Gemini credits are
-  depleted.
-- **Still required before claiming prod fixed:** live MTProto route → tool call →
-  HITL approve/reject → matching `action_log` evidence with real provider keys.
+## A2. Cost is attributable to a day, not a task — **HIGH**
 
-## 3. `any`-typed tool arrays — **MEDIUM**
+`ai_call_costs` is well shaped for attribution (`agent`, `tier`, and a `lead_id`
+FK commented "enables per-lead cost attribution"). The kernel writes constants
+into two of those and never sets the third: `kernelCostSink`
+(`src/gateway/kernel-run.ts:69`) hardcodes `agent: "kernel"`, `tier: "primary"`
+for every call. Planner, workers and synthesizer are indistinguishable in the
+ledger.
 
-`capabilities.ts` types tools as `AnyTool = any` because LangChain tool generics are
-heterogeneous across departments. Tests check `.name` + invokability, so the runtime
-contract holds, but there's no static guarantee a non-tool object can't be added to
-a department array.
+Daily spend and budget caps work correctly. "What does a job screen cost versus
+a research task" does not.
 
-- **Path:** a minimal structural type (`{ name: string; invoke: (...) => unknown }`)
-  would catch the realistic mistake without fighting LangChain's generics.
-- **Why deferred:** documented trade-off ("typing the union precisely buys nothing
-  and fights every LangChain minor release") — true today; the structural-type
-  middle ground is the future improvement.
+- **In flight:** brief `docs/antigravity/AG-009-cost-attribution.md`.
 
-## 4. Single-instance, polling gateway — **MEDIUM (scaling ceiling)**
+## A3. No retrieval evaluation — **HIGH**
 
-The bot is a single grammy long-poll process guarded by a PID-file lock
-(`single-instance.ts`). This is correct and 409-safe for one founder, but it is a
-hard horizontal-scaling ceiling: you cannot run two instances, and a restart has a
-brief poll-drain window (mitigated by `waitForProcessExit` + SIGKILL).
+Zero occurrences of `recall@`, `nDCG`, `MRR`, `faithfulness`, or `groundedness`.
+No golden retrieval set exists. The only relevance signal in the system is
+`score` = fraction of query terms present (`src/db/rag-search.ts:88`), which its
+own comment calls "a rough relevance."
 
-- **Implication for Phase E (SaaS):** multi-tenant will require webhooks + a shared
-  state store and per-tenant thread isolation. The thread-id scheme (`TENANT:chatId`)
-  already anticipates this, but the gateway transport does not.
-- **Why fine now:** single-tenant by design (ADR-021, `main` IS production).
+Retrieval *failure* is handled well (keyword fallback with a visible
+"Semantic search unavailable" banner; `src/infra/rag-optimization-sweep.ts`
+refuses to render an empty store as full coverage). Retrieval *quality* is
+unmeasured. We can prove retrieval is up; we cannot prove it is good.
 
-## 5. Postgres-only durable path; Redis unwired — **LOW**
+- **In flight:** brief `docs/antigravity/AG-010-retrieval-eval-harness.md`.
 
-`infra/redis.ts` exists (cache, quotas, prompt-hash) but is **not on the boot path**.
-Idempotency (via `action_log`) *is* live and does prevent duplicate sends.
+## A4. The behavioural eval scores structure, never output quality — **MEDIUM**
 
-**Suppression check status — WIRED (Postgres-backed):**
-`isSuppressed()` is called in the shared `sendEmail` tool (`src/agents/agent-tools/comms.ts:141`)
-after HITL approval, before every outbound send. Covers comms + sales + jobhunt departments.
-The `do_not_contact` table is in Postgres (not Redis) — durable, GDPR/CAN-SPAM compliant.
+The 46 golden tasks score three things: routing, tool selection, HITL coverage.
+All three are structural. Nothing scores whether an answer was *correct*.
+`pnpm eval` can tell you a request reached the right worker and cannot tell you
+the founder got a useful reply.
 
-**Quota check status — NOT WIRED:**
-`incrQuota()` exists in `redis.ts` but is not called on any send path. There is no daily
-send ceiling enforced. For one founder sending a handful of emails this is acceptable;
-before any volume outbound it is a **HIGH** gap.
+Two secondary problems in the same harness:
+- `src/eval/types.ts` still documents "the office", "7 ReAct departments", and
+  "the supervisor" — vocabulary from the tombstoned v2. It compiles only because
+  `Department` and `WORKERS` happen to list the same eight strings.
+- Tasks remain hardcoded with no registry, versioning, or set selection
+  (carried over from the previous revision; still accurate).
 
-- **Gap:** outbound email has no enforced daily quota. Suppression is active; rate-limiting is not.
-- **Action when outbound scales:** call `incrQuota()` from the shared `sendEmail` path after the
-  suppression check. Use a Postgres-backed counter (more durable than Redis on restart) — see G4.
+## A5. `judge.ts` is under-deployed — **MEDIUM**
 
-## 6. Config validity vs. presence — **MEDIUM**
+`src/infra/judge.ts` already does what a reviewer probes for: a **different
+model family** from the agent (specifically to avoid LLM-as-judge identity
+bias), temperature 0, deterministic verdict parsing, fail-open so infra failure
+never blocks the founder. It has **one caller** — `judgeOutbound` from
+`src/agents/agent-tools/comms.ts:34`, grading outbound brand voice.
 
-`config.ts` validates that env keys are *present* (Zod), not that they are *valid*.
-The 2026-06-14 prod incident (every LLM call `400 API_KEY_INVALID`) passed startup
-because the stale keys existed. A startup smoke-call (one cheap Gemini ping, one
-Composio whoami) behind a flag would catch dead keys at deploy time instead of on the
-first founder message.
+It never sees an answer given to the founder. The mechanism is built and pointed
+somewhere narrow.
 
-- **Why deferred:** adds a deploy-time external dependency; needs a `--skip-smoke`
-  escape for offline/CI. Worth doing before the next key rotation.
+- **In flight:** brief `docs/antigravity/AG-011-answer-quality-judge.md`.
 
-## 7. Composio integration fragility — **MEDIUM**
+## A6. Inline guardrails exist; async evaluation does not — **MEDIUM**
 
-Email / LinkedIn / Calendar all route through Composio with hardcoded-default
-connection ids (env-overridable). A single invalid Composio key takes down three
-departments' send paths at once, and the failure only surfaces at send time. As of
-the last QA, the Composio key was invalid in both dev and prod (email/linkedin/
-calendar down) — see MEMORY.md.
+FounderOS has real inline guardrails: `flagDangerousCommand`, `hitlGate`, budget
+caps, `MAX_TOOL_CALLS_PER_STEP`. It has **zero** async evaluators. The two are
+different instruments — a guardrail blocks a specific failure inline on a
+millisecond budget; an evaluator scores quality off the hot path — and only one
+side is built. Closing this rides on A5.
 
-- **Action:** treat Composio connectivity as a monitored dependency (health probe +
-  `/status` surfacing), and consider a direct-API fallback for the highest-value path
-  (Gmail) so one vendor outage doesn't silence all outbound.
-- **Strategic direction (ADR-041):** do NOT expand Composio. New external integrations
-  (social, tools) go through the MCP client bridge (`src/mcp/client.ts`), where a dead
-  server isolates to its own tools instead of cascading across three departments.
-  Composio stays as-is for Gmail/LinkedIn/Calendar; social migrates to MCP opportunistically.
+## A7. Self-improvement is unmeasured — **MEDIUM**
 
-## 8. Dead-export candidates (verify before removing) — **LOW**
+`src/evolution/` collects telemetry, ranks findings, persists them, and files a
+GitHub issue. `rank.ts` orders by `SEVERITY_RANK` and `KIND_PRIORITY` —
+**author-assigned labels, not measured impact**. There is no baseline and no
+before/after, so there is no evidence that a shipped finding improved anything.
 
-`ts-prune` flags several exports as unused (parts of the `queries.ts` named-query
-API, `redis.ts` helpers, `composio.ts` connection constants, `context-manager`
-helpers). Most are **intentional API surface** (the query layer is meant to be the
-single SQL boundary; redis is SaaS-phase). A focused pass with `knip` + manual
-confirmation could remove the genuinely-orphaned ones, but this was **not done here**
-because on a live system the risk (removing something a test or dynamic path needs)
-outweighs the ~tens-of-lines win. Do it as its own small, test-gated PR.
+This is the failure mode CLAUDE.md #26 names directly. Recommended posture: say
+"unmeasured" out loud rather than building a measurement layer nobody asked for.
+An unfalsifiable improvement loop is worse than an honestly labelled one.
 
-## 9. Eval is non-deterministic at temp 0 — **LOW (known, accepted)**
+## A8. Traces are not persisted — **MEDIUM**
 
-Even at temperature 0, `pnpm eval` scores 79–90% across runs because Gemini capacity
-noise reshuffles which tasks fail (the *routing* layer is unit-proven and holds; the
-variance is in live model availability, not logic). Don't treat a single eval run as
-a regression signal — the durable guarantee is the deterministic pre-router unit
-tests, not the eval percentage.
+`startTurn` emits seam events into an **in-memory 500-event ring buffer**
+(`src/infra/health.ts:35`) broadcast over SSE. Nothing durable. A restart loses
+everything. journald is the de-facto trace store — `scripts/verify-benchmark-run.ts`
+reads it for corroboration, which works but is not a tracing story.
 
 ---
 
-## What was simplified in this pass (2026-06-14)
+# B. Claims that outran their mechanisms
 
-- Documentation-first: added `docs/diagrams/` (8 hand-authored mermaid flows) as the
-  fast on-ramp for any developer — the highest-leverage "make it understandable" win.
-- Fixed a mis-placed docstring in `model.ts` (the `isNoCandidatesError` doc had
-  drifted above `isEmptyContentsError`).
-- **Deliberately did not** rewrite the defensive subsystems (`model.ts`,
-  `office-run.ts` guards) — see the verdict above. Simple ≠ stripped of hard-won
-  safety; on a live system the simplest *reliable* architecture is the one whose
-  complexity is documented, tested, and traceable to an incident.
+## B1. PII-scrubbing was documented and not implemented — **FIXED 2026-08-19**
 
-## 9. Context Isolation (Phase 1) — No Runtime Validation — **MEDIUM**
+`src/infra/telemetry.ts` asserted it installed "a PII scrubber that runs before
+any span is exported." It installed none — `scrubPii`/`scrubObject` had exactly
+one consumer, the local pino path at `src/infra/trace.ts:89`. With
+`LANGCHAIN_TRACING_V2=true`, LangChain reads that variable itself and uploads
+full run I/O to LangSmith: for FounderOS, the founder's email bodies, CV,
+recruiter addresses and job applications.
 
-The `outputMode: "last_message"` pin in office.ts enforces context isolation, but
-**only if the property is never accidentally changed to "full_history"**. There is no
-runtime validation that rejects "full_history" mode; the promise relies on:
-- Explicit pinning in code (office.ts line 142)
-- Tests that would break if changed (office-guard.test.ts)
-- Code review discipline
+Latent, never live — the flag defaults to `false`. Two further copies of the
+same claim were found by sweep (`.env.example:130`, `src/db/schema.ts:148`).
 
-A single PR that removes the pin or changes the value _will not crash tests_ (the
-tests would have to explicitly validate the mode). Mitigation: add an explicit
-startup assertion that pins the mode.
+Fixed by refusing the export rather than faking the guarantee: langsmith 0.2.15
+accepts an anonymizer only as a `Client` constructor option and LangChain builds
+its own `Client`, so a global scrubber is unprovable. A refusal now **clears the
+tracing env vars**, because logging "disabled" would not stop LangChain.
 
-- **Action:** `if (office.supervisor.outputMode !== "last_message") throw new Error(...)`
+**Not a gap, deliberately:** model *input* is not scrubbed. The agent must see
+`alex@acme.com` to email Alex. The provider is a required processor; the
+observability export is optional, which is why only the latter is gated.
 
-## 10. Signal Schemas (Phase 2) — No Runtime Versioning — **MEDIUM**
+## B2. `promptHash` was a constant — **FIXED 2026-08-19**
 
-Signals are validated at publish and consume time against `SIGNAL_CONTRACTS`, but
-**there is no schema versioning**. If you change a schema (e.g., make a field
-required), old signals in the database that don't match the new schema will:
-- Fail validation during the sweep
-- Be marked consumed (poison pill) to not loop forever
-- Leave no durable record that they failed
+`activePromptHash()` was written and unit-tested to catch prompt regressions and
+had zero callers; all four `startTurn` sites passed the literal `"kernel-v3"`.
+Now hashes the real corpus (planner prompt + every worker prompt).
 
-Mitigation: Before changing a schema, write a backfill migration that updates
-existing signals. See Phase 4 commit c289e50 for the pattern.
+## B3. `HITL_GATED_TOOLS` gates nothing — **MEDIUM, open**
 
-- **Action:** Add a `schema_version` field to dept_signals; migrations transform old signals before consuming.
+The declared list is used for **rendering**, not enforcement. The real gate is
+`hitlGate()` called inline inside each side-effecting tool — present in **9 of
+20** modules in `src/agents/agent-tools/`. Nothing structurally prevents a new
+side-effecting tool from shipping ungated, and nothing reconciles the declared
+list against the enforced one.
 
-## 11. Judge Memoization (Phase 3) — Single Redis Key Namespace — **LOW**
-
-Judge caches drafts for 60 minutes using a cache key based on hash(content). If two
-different tools (linkedin_post and send_email) produce identical copy, they reuse the
-same cached judgment. This is correct semantics (same copy, same evaluation) but
-could cause false confidence if one tool's context is slightly different (e.g.,
-LinkedIn-specific restrictions the email draft doesn't have).
-
-- **Action:** Include tool_name in the cache key: `judge:${hash(content)}:${tool_name}`
-
-## 12. Memory System (Phase C) — Keyword-Only Search — **MEDIUM**
-
-`search_knowledge` and `search_personal_rag` are keyword-based (ILIKE) with no
-semantic ranking. Queries like "LangGraph patterns" return good results because
-"LangGraph" is a literal word in the docs, but semantic similarity queries (e.g.,
-"multi-agent orchestration") may miss relevant documents that use different
-terminology.
-
-- **Roadmap:** Phase E will migrate to Chroma for semantic search + ranking.
-- **Workaround:** Add keyword aliases or query synonyms to the documents.
-
-## 13. Eval Harness (Golden Tasks) — Hardcoded, Not Managed — **MEDIUM**
-
-The 24 golden tasks for eval (routing, tool-selection, HITL coverage) are hardcoded
-in `src/eval/golden-tasks.ts`. There is no task registry, no versioning, and no
-facility to add new golden tasks without editing source. This is deliberate (golden
-tasks are sacred — they must be curated carefully), but it means:
-- Adding a new department requires manually adding 2-3 new golden tasks
-- No way to disable a task without a code change
-- No ability to A/B test different task sets across branches
-
-- **Action:** Consider a YAML registry + a `--golden-task-set` flag for branch-based customization.
-
-## 14. Nested Supervisor (Phase 5) — Not Yet in Production — **MEDIUM**
-
-The hierarchy proof (revenue-domain.ts) demonstrates that nesting works to 3 levels,
-but **it is not wired into the live office graph**. This is intentional:
-- Real business trigger needed (revenue dept > marketing + sales)
-- Full MTProto QA required before promoting (not just unit tests)
-- Token budget impacts unknown at 2-3 nesting levels
-
-If you promote Phase 5 to production:
-- Sub-supervisors MUST pin `outputMode: "last_message"` (now enforced at runtime by
-  `assertContextIsolation` — a `"full_history"` change throws at office build; see G5 below)
-- Monitor token consumption (each level adds ~500 tokens of overhead)
-- Test full HITL flow on real Telegram (not just unit tests)
+This is also the honest answer to "where is your policy engine": distributed
+across tools, with the declaration decorative. A fitness rule asserting every
+tool in `HITL_GATED_TOOLS` actually calls `hitlGate()` would convert a
+discipline into a build failure. **Recommended next fitness rule.**
 
 ---
 
-## Architecture audit — 2026-06-16 (senior agentic-AI review)
+# C. Architecture and scaling
 
-Full gaps/limitations review at the "final architecture" freeze point. Verdict:
-**well-built single-tenant system; the gaps cluster in (1) failover, (2) single-process /
-single-tenant scaling ceiling, and (3) guarantees enforced by discipline not runtime.**
-Four were fixed immediately (PR `feat/stabilization-hardening-g1-g2-g5-g9`); the rest are
-tracked here as the pre-scale hardening backlog. **None are correctness bugs today; all
-become incidents at scale.**
+## C1. Single-process, single-instance polling transport — **HIGH at scale**
 
-**Fixed 2026-06-16:**
-- **G1 — OpenRouter failover unarmed in prod (was CRITICAL).** Cross-provider fallback in
-  `model.ts` is gated on `OPENROUTER_API_KEY`; unset in prod = Gemini outage takes the whole
-  office down (it was firing — credits depleted). Boot now warns loudly. **Remaining ops
-  action: set `OPENROUTER_API_KEY` in prod `PROD_DOTENV` + verify a turn lands on GPT-4o-mini.**
-- **G2 — `consumePendingEvents` non-atomic (was HIGH).** Now `FOR UPDATE SKIP LOCKED`, true
-  exactly-once under concurrency. Verified live on real Postgres.
-- **G5 — context isolation enforced by convention (was HIGH).** `assertContextIsolation` now
-  throws on any `outputMode` ≠ `"last_message"`; structural test forbids the `full_history`
-  literal under `src/agents`.
-- **G9 — ghost `hitl_approvals` rows (was MEDIUM).** Pending approvals are now cancelled on
-  reject / abort / wedge / `/reset`, so the daily stale-reminder can't nag about a wiped thread.
+A single grammy long-poll process behind a PID lock (`src/infra/single-instance.ts`).
+Correct and 409-safe for one founder; a hard horizontal ceiling. Turns serialize
+per chat (`withChatTurnLock`), so there is head-of-line blocking the moment there
+is more than one user. The data layer is scale-ready (`TENANT:chatId` thread
+ids); the transport is not.
 
-**Fixed 2026-06-21 (audit hardening pass):**
-- **G4 — no daily send-quota ceiling — FIXED.** `getDailyOutboundCount()` added to `queries.ts`
-  (Postgres-backed, counts `action_log` rows since midnight UTC). `sendEmail` and `linkedinPost`
-  both check quota before HITL. Limits: `DAILY_EMAIL_LIMIT=20`, `DAILY_LINKEDIN_LIMIT=3`
-  (env-overridable). Redis not used — Postgres is durable through restarts.
-- **G6 — budget mis-prices fallback models — FIXED.** `normalizeModelId()` added to `budget.ts`
-  strips provider prefix (`openrouter:google/gemini-2.5-flash` → `gemini-2.5-flash`) so
-  `MODEL_COSTS` lookup now resolves correctly. `handleLLMEnd` reads `generationInfo.model` per-call
-  when available, falling back to `this.modelId`. Judge calls (separate Claude model) remain
-  outside the per-run budget guard (fail-open, tiny — 512 max tokens, ~$0.0002/call).
-- **G7 — `is503Error` false-positive on "500" substring — FIXED.** Changed to `/\b500\b/` etc.
-  word-boundary regex. Regression tests added to `model.test.ts`.
-- **G10 — shell injection detection extended — FIXED.** `flagDangerousCommand` in `path-guard.ts`
-  now also flags `curl|bash`, `wget|sh`, base64-encoded payload pipes, cron/init writes, and
-  exfiltration patterns (piping sensitive paths to external endpoints). These surface as
-  "⚠️ DANGEROUS" on the HITL card — the founder still approves; the flag is informational.
-- **§11 — Judge cache key single namespace — FIXED.** Cache key is now `channel:tool:hash(text)`,
-  preventing a linkedin_post judgment from being reused for a send_email with identical copy.
+- **Pre-multi-tenant re-platform:** job queue (pg-boss/BullMQ) + webhooks.
 
-**Remaining deferred backlog (do BEFORE scaling levers):**
-- **G3 — single-process transport is the scaling wall — HIGH.** PID-lock + grammy long-poll +
-  inline ≤14s backoff serialize all work (head-of-line blocking at multi-user). Data layer is
-  scale-ready; transport is not. Pre-Phase-E re-platform: job queue (BullMQ/pg-boss) + webhooks.
-  (Extends §4.)
-- **G8 — brand-retry counter is process-local — ACCEPTED.** `brand-retry.ts` Map resets on
-  restart. Accepted for single-tenant single-process (restart mid-oscillation is seconds-rare).
-  Fix for Phase E: TTL'd Postgres row keyed by thread+channel.
-- **G11 — CTO subgraph unit-proven, not live-proven — LOW.** Before `ENGINEERING_SUBGRAPH=1`:
-  run the full MTProto `e2e-telegram-qa.ts` against the nested topology. (Extends §14.)
-- **G12 — Monday-brief LLM bypasses budget guard — LOW.** `getSchedulerOffice()` singleton is
-  fixed; remaining gap is the brief LLM call has no budget tracking or halt switch. Runs once/week
-  with a 5-minute hard timeout — acceptable for now.
+## C2. No ACL on retrieval — **LOW today, HIGH at multi-tenant**
 
-**Do NOT change (already textbook):** idempotency on external sends · HITL pure-before-gate
-contract · Postgres checkpointer · compile-once office singleton · `maxRetries:0` on the Google
-SDK · two-gate brand→judge (different model family, fail-open).
+`src/db/rag-search.ts` has no tenant or permission filter. The store boundary
+(ADR-013/015, `ALLOWED_RAG_TABLES`) separates personal from business data by
+*table*, which is the right call at single-tenant, but there is no row-level
+authorization. Not a bug now; a blocker for any second user.
+
+## C3. No blue-green index swap — **MEDIUM**
+
+`brain:sync` re-embeds in place. A bad sync degrades retrieval with no
+pre-cutover evaluation and no rollback. Compounded by a known failure mode:
+brain grounding silently no-ops when Postgres is down. Depends on A3 — you
+cannot gate a cutover on a retrieval metric that does not exist.
+
+## C4. Degradation is error-triggered, never latency-triggered — **MEDIUM**
+
+The failure path is genuinely good: `withModelRetry` (3 attempts, jittered
+backoff, 45s attempt deadline, 90s budget), `withModelFallbacks`, and a status
+taxonomy where 5xx/429 retry, 404 falls back, and 401/403 fail loud — the last
+deliberately excluded because the fallback shares the key.
+
+There is no latency-triggered degradation to a smaller model or cached response,
+because nothing measures latency (A1).
+
+## C5. `AnyTool = any` — **MEDIUM**
+
+`src/agents/capabilities.ts:84` types tool arrays as `any` because LangChain tool
+generics are heterogeneous. Tests check `.name` and invokability so the runtime
+contract holds, but nothing statically prevents a non-tool entering a department
+array. A minimal structural type (`{ name: string; invoke: (...) => unknown }`)
+would catch the realistic mistake without fighting LangChain minors.
+
+## C6. Prompt-injection defense is blast-radius, not detection — **MEDIUM**
+
+Retrieved RAG chunks, web-search results, MCP tool output, and email text all
+enter model context **unscanned**. The defense is HITL at the side-effect
+boundary: injected instructions can influence a draft but cannot send it.
+
+That is a legitimate and arguably correct position — detection is unreliable and
+containment is not — but it should be a *stated* design choice rather than an
+absence. Coverage today is one golden task
+(`src/eval/golden-tasks.ts:312`, `adversarial-prompt-injection`) exercising the
+comms-send path only. Related awareness is real and scattered:
+`src/infra/path-guard.ts` (untrusted email/web text in scope),
+`src/agents/skill-loader.ts` (untrusted-input discipline),
+`src/mcp/bridge-classify.ts` (untrusted server annotations are hints, not
+guarantees).
+
+## C7. Composio remains a shared failure domain — **MEDIUM**
+
+Unchanged from the previous revision and still accurate: one invalid Composio key
+takes down multiple send paths at once, surfacing only at send time.
+**Direction (ADR-041): do not expand Composio.** New integrations go through the
+MCP bridge, where a dead server isolates to its own tools.
+
+## C8. No memory decay — **LOW today**
+
+`episodic_memory`, `founder_context`, and `failure_lessons` have no TTL, decay,
+supersession, or relevance-weighted eviction. Memory grows monotonically. The
+only expiry anywhere is `RESEARCH_CACHE_TTL_SECONDS` on a Redis scrape cache;
+the nearest relative is `src/kernel/lessons.ts`, which discards a lesson
+candidate once its retry settles — step-scoped, not memory decay.
+
+Checkpoints *are* bounded (`CHECKPOINT_TTL_DAYS`, daily sweep). Low urgency at
+current corpus size; revisit before the store affects retrieval precision.
 
 ---
 
-## Design intent clarifications (not bugs)
+# D. Resolved since the 2026-06-14 revision
 
-### Rule #4 — now matches reality (updated 2026-06-16)
+Kept as a short ledger so nobody re-files them. Each verified against the tree
+on 2026-08-19.
 
-CLAUDE.md Rule #4 states: "Always write to the `hitl_approvals` table BEFORE calling LangGraph
-`interrupt()`."
+| Old item | Status |
+|---|---|
+| 6-layer tool wiring has no build-time check | **RESOLVED** — `scripts/verify-wiring.ts` exists and runs in `pnpm gate` |
+| Config validates presence, not validity | **RESOLVED** — `src/infra/boot-validate.ts` + `src/infra/provider-probes.ts` |
+| Memory search is keyword-only (ILIKE) | **RESOLVED** — pgvector `<=>` semantic search live in `src/db/rag-search.ts` |
+| No daily outbound send quota | **RESOLVED** (G4) — Postgres-backed `getDailyOutboundCount()` |
+| Judge cache key collides across tools | **RESOLVED** (§11) — key is `channel:tool:hash(text)` |
+| Model layer drift / `FounderChatModel` | **RESOLVED** — ADR-028; plain provider models + fallback middleware |
+| Context isolation enforced by convention (office.ts) | **DEAD** — `office.ts` is a CI tombstone |
+| Nested supervisor not in production (revenue-domain.ts) | **DEAD** — tombstoned |
+| Signal schema versioning (dept_signals) | **DORMANT** — table has no production writer |
+| Redis LLM cache is dead code | **NOT TRUE** — `withLlmCache` is wired at `kernel-boot.ts:180,188` |
 
-**The code now does exactly this** (PRs #88/#92). `hitlGate` (`src/agents/agent-tools/hitl.ts`)
-checks `getPendingInterrupt(threadId)` and, if none exists, calls `createInterrupt(...)` to insert
-the pending `hitl_approvals` row **before** calling `interrupt()`. On LangGraph re-execution it
-skips the duplicate insert. The row is later resolved (approved/rejected/expired/cancelled) on the
-callback paths.
+---
 
-Two independent guarantees now hold together:
-- **Checkpointer persistence** — the LangGraph Postgres checkpointer persists the paused interrupt
-  node, so a crash/restart resumes correctly.
-- **DB-backed approval row** — written before `interrupt()`, so the daily stale-approval sweep and
-  boot-time orphan cleanup can reason about pending cards (and clear orphans with no DB row).
+# E. Design intent — not bugs
 
-An earlier revision of this doc claimed "the real code does not do this" — that was stale; this
-note was corrected when the pre-write landed.
+These look like gaps and are deliberate. Do not "fix" them without reading the
+reasoning first.
 
-### H3 — brand-retry in-memory counter (accepted design choice)
+- **Idempotency before every external send**, HITL row before `interrupt()`,
+  audit row only on real success. Textbook; leave alone.
+- **Postgres checkpointer + compile-once kernel singleton.**
+- **Two-gate brand → judge on a different model family, fail-open.** The
+  fail-open is intentional: the human gate is the real control, and a judge
+  outage must never block the founder.
+- **`action_log.payload` is stored verbatim.** First-party Postgres; an audit row
+  that redacts the recipient of the email it attests to is not an audit row.
+- **`temperature: 0` everywhere.** Non-zero as a default is a P0.
+- **Failures are never wiped from a thread.** Only `/reset`, by explicit founder
+  command.
+- **`brand-retry` counter is process-local** — accepted for single-tenant;
+  TTL'd Postgres row is the multi-tenant fix.
 
-`src/infra/brand-retry.ts` uses a process-scope `Map` to count retry attempts. A process restart
-mid-oscillation resets the counter, which could theoretically bypass the convergence cap.
+---
 
-This is **accepted** because:
-- Brand validation oscillation happens within seconds of a single ReAct turn
-- A deploy mid-oscillation (a few seconds) is extremely rare
-- The oscillation cap (`BRAND_MAX_RETRIES=2`) exists to prevent runaway loops, not to survive
-  multi-process deployments
+## How to keep this file honest
 
-**Permanent fix path (when needed):** move the counter to a TTL'd Postgres row keyed by
-`thread_id + channel` (see G8 above). This is the right fix for Phase E multi-tenant.
+The previous revision rotted because nothing checked it. Two habits, in order of
+value:
 
+1. **Prefer a fitness rule to a paragraph.** Over one month the CI-enforced
+   rules in `scripts/verify-architecture.ts` drifted zero times; markdown rules
+   drifted three times in a day (CLAUDE.md #27). B3 is the best current
+   candidate for promotion.
+2. **When an entry is fixed, move it to section D with the file that proves it.**
+   An entry with no file path is a memory, and memories are what made the last
+   revision wrong.
