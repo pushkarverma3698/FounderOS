@@ -21,6 +21,70 @@
 import type { LLMResult } from "@langchain/core/outputs";
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 
+// ── Cost attribution ──────────────────────────────────────────────────────────
+
+/** The kernel node that spent the money. Persisted to ai_call_costs.tier. */
+export type CostStage = "planner" | "worker" | "synthesizer";
+
+/**
+ * Who spent one LLM call. `agent` is the ACTOR — a worker id ("jobhunt",
+ * "research", …) when the model was bound to that worker's tools, else the
+ * stage-level actor — matching the convention gap-scan-budget.ts ("research")
+ * and creative.ts ("creative") already write. `stage` is the kernel node.
+ * Persisted to ai_call_costs.agent and .tier respectively.
+ */
+export interface CostAttribution {
+  readonly agent: string;
+  readonly stage: CostStage;
+}
+
+/**
+ * Actor recorded when a call carries no attribution — an LLM call the
+ * kernel-boot model wrappers did not wrap. Deliberately NOT a real worker id, so
+ * the gap stays visible in the ledger instead of being absorbed by a real spender.
+ */
+export const UNATTRIBUTED_AGENT = "kernel";
+/** Stage recorded for the same case. */
+export const UNATTRIBUTED_STAGE = "unattributed";
+
+/**
+ * Run-metadata keys the attribution travels under, correlated to an accrual by
+ * runId. It must ride on the call as DATA: @langchain/core queues callback
+ * handlers on a shared p-queue unless LANGCHAIN_CALLBACKS_BACKGROUND === "false"
+ * (unset here), so handlers run detached from the caller's async context and an
+ * AsyncLocalStorage identity reads back wrong for every CONCURRENT call —
+ * silently, with nothing flagged. Full rationale and the regression that proves
+ * it: tests/unit/gateway/cost-attribution.test.ts, "attribution under REAL
+ * LangChain callback dispatch".
+ */
+export const COST_AGENT_METADATA_KEY = "cost_agent";
+/** @see COST_AGENT_METADATA_KEY */
+export const COST_STAGE_METADATA_KEY = "cost_stage";
+
+/** The three kernel nodes that can spend. Anything else is not a stage we wrote. */
+const COST_STAGES: readonly string[] = ["planner", "worker", "synthesizer"];
+const isCostStage = (value: unknown): value is CostStage =>
+  typeof value === "string" && COST_STAGES.includes(value);
+
+/** Render an attribution as run metadata for a model invoke config. */
+export function costAttributionMetadata(attribution: CostAttribution): Record<string, string> {
+  return { [COST_AGENT_METADATA_KEY]: attribution.agent, [COST_STAGE_METADATA_KEY]: attribution.stage };
+}
+
+/**
+ * Recover an attribution from a run's metadata. Returns undefined unless BOTH
+ * keys are present and the stage is one we know — a half-populated payload is
+ * reported as unattributed rather than guessed at.
+ */
+export function attributionFromMetadata(
+  metadata?: Record<string, unknown>,
+): CostAttribution | undefined {
+  const agent = metadata?.[COST_AGENT_METADATA_KEY];
+  const stage = metadata?.[COST_STAGE_METADATA_KEY];
+  if (typeof agent !== "string" || agent.length === 0 || !isCostStage(stage)) return undefined;
+  return { agent, stage };
+}
+
 // ── Model pricing table ───────────────────────────────────────────────────────
 
 /** Cost per million tokens (USD). */
@@ -192,6 +256,20 @@ export class BudgetExceededError extends Error {
 
 // ── LangChain callback integration ───────────────────────────────────────────
 
+/** One accrued LLM call, as handed to the per-call sink. */
+export interface AccruedCall {
+  readonly model: string;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly usd: number;
+  /**
+   * Who spent it. Undefined when the call carried no attribution metadata; the
+   * sink records that as unattributed rather than guessing, otherwise one stage
+   * silently absorbs another's spend.
+   */
+  readonly attribution?: CostAttribution;
+}
+
 /**
  * LangChain callback handler that accrues cost after each LLM call and throws
  * BudgetExceededError if the cap is breached. Attach to an office.invoke() call:
@@ -213,17 +291,44 @@ export class BudgetGuardCallback extends BaseCallbackHandler {
      * rows into ai_call_costs — the daily budget cap and the cost ledger read
      * that table, so leaving this unset makes both blind. Must not throw.
      */
-    private readonly onAccrue?: (call: {
-      model: string;
-      inputTokens: number;
-      outputTokens: number;
-      usd: number;
-    }) => void,
+    private readonly onAccrue?: (call: AccruedCall) => void,
   ) {
     super();
   }
 
-  override async handleLLMEnd(output: LLMResult): Promise<void> {
+  /**
+   * Started-but-not-ended runs, keyed by the runId LangChain passes to BOTH the
+   * start and end hooks as a direct argument. Cleared on end and on error; the
+   * handler is per-run, so an aborted call cannot leak past its turn.
+   */
+  private readonly pendingAttribution = new Map<string, CostAttribution>();
+
+  private rememberAttribution(runId: string, metadata?: Record<string, unknown>): void {
+    const attribution = attributionFromMetadata(metadata);
+    if (attribution) this.pendingAttribution.set(runId, attribution);
+  }
+
+  /** Chat models dispatch here; LangChain falls back to handleLLMStart if absent. */
+  override async handleChatModelStart(
+    _llm: unknown, _messages: unknown, runId: string, _parentRunId?: string,
+    _extraParams?: Record<string, unknown>, _tags?: string[], metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    this.rememberAttribution(runId, metadata);
+  }
+
+  override async handleLLMStart(
+    _llm: unknown, _prompts: string[], runId: string, _parentRunId?: string,
+    _extraParams?: Record<string, unknown>, _tags?: string[], metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    this.rememberAttribution(runId, metadata);
+  }
+
+  /** A failed call never reaches handleLLMEnd — drop its entry so the map cannot grow. */
+  override async handleLLMError(_err: unknown, runId: string): Promise<void> {
+    this.pendingAttribution.delete(runId);
+  }
+
+  override async handleLLMEnd(output: LLMResult, runId?: string): Promise<void> {
     // Extract token usage from multiple possible locations in the LangChain output.
     // Gemini puts it in llmOutput.usage or in generation[0].generationInfo.usage_metadata.
     const llmOut = output.llmOutput as Record<string, unknown> | undefined;
@@ -257,12 +362,17 @@ export class BudgetGuardCallback extends BaseCallbackHandler {
       (llmOut?.["model"] as string | undefined) ??
       this.modelId;
 
+    // Correlated by runId, NOT by async context — see COST_AGENT_METADATA_KEY.
+    const attribution = runId === undefined ? undefined : this.pendingAttribution.get(runId);
+    if (runId !== undefined) this.pendingAttribution.delete(runId);
+
     this.tracker.accrue(inputTokens, outputTokens, actualModel);
     this.onAccrue?.({
       model: actualModel,
       inputTokens,
       outputTokens,
       usd: estimateCost(inputTokens, outputTokens, actualModel),
+      attribution,
     });
 
     const check = this.tracker.check();
