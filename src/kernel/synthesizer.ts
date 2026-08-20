@@ -43,6 +43,34 @@ function okReceipts(results: StepResult[]): ToolReceipt[] {
 }
 
 /**
+ * Distinct tool names recorded across every ok step — the `tools_used` column of
+ * `agent_results`. Deliberately NOT filtered to `t.ok`: a tool that was invoked
+ * and failed was still used, and under-reporting a sensor is worse than no sensor
+ * (STANDARDS §4). Same shape as `src/eval/kernel-invoker.ts:38`.
+ */
+export function toolsUsed(results: StepResult[]): string[] {
+  const tools = results.flatMap((r) => (r.status === "ok" ? r.tool_receipts.map((t) => t.tool) : []));
+  return [...new Set(tools)];
+}
+
+/**
+ * Wall-clock turn latency in ms — `now` minus the turn's `received_at`.
+ *
+ * Pure: the clock is a parameter, never read here. Returns `null` rather than a
+ * `NaN`, a negative number, or a throw for a missing/unparseable/future timestamp,
+ * because a poisoned telemetry value is indistinguishable from a real one once it
+ * is in the column, and this is written on the founder's live turn path.
+ */
+export function turnLatencyMs(receivedAt: string | undefined | null, now: number): number | null {
+  if (typeof receivedAt !== "string" || receivedAt.length === 0) return null;
+  const startedAt = Date.parse(receivedAt);
+  if (!Number.isFinite(startedAt) || !Number.isFinite(now)) return null;
+  const elapsed = now - startedAt;
+  if (elapsed < 0) return null;
+  return Math.round(elapsed);
+}
+
+/**
  * INTERNAL receipts block — code-generated proof lines, not model prose.
  *
  * Names tools, args hashes and result digests. This is the auditable record and
@@ -133,6 +161,8 @@ export function makeSynthesizeNode(model: KernelChatModel) {
       outcome: satisfaction.ok ? "succeeded" : "failed",
       decision_summary: text.slice(0, 1000),
       tenant_id: "turicks",
+      latency_ms: turnLatencyMs(state.turn?.received_at, Date.now()),
+      tools_used: toolsUsed(state.results),
     }).catch((err) => {
       log.warn({ err: (err as Error).message }, "writeTaskOutcome failed (non-fatal)");
     });

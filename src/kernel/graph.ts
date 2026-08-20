@@ -3,7 +3,10 @@
  * ======================================
  * plan (LLM) → dispatch (pure) → agent (LLM) ⇄ tools → collect (pure)
  *                     ↑______________________________________|
- *                     └→ synthesize (LLM) → END      └→ finish (failure reply)
+ *                     └→ synthesize (LLM) → evaluate → END   └→ finish (failure reply)
+ *
+ * `evaluate` is the async answer-quality sink: it starts a judge call and returns
+ * immediately without awaiting it, so it scores the turn without delaying it.
  *
  * Everything is injected (models, worker specs, checkpointer) — the kernel
  * never constructs a provider client or reads env, which is what makes the
@@ -23,6 +26,7 @@ import { routeAfterDispatch, routeAfterPlan } from "./supervisor.js";
 import { makeLessonDispatch, type LessonStore } from "./lessons.js";
 import { makeAgentNode, makeToolsNode, routeAfterAgent, collect, type KernelBindableModel, type WorkerSpec } from "./worker.js";
 import { makeSynthesizeNode } from "./synthesizer.js";
+import { evaluateNode } from "./evaluate.js";
 
 export interface KernelConfig {
   plannerModel: KernelChatModel;
@@ -54,13 +58,15 @@ export function buildKernel(config: KernelConfig) {
     .addNode("tools", makeToolsNode(specs))
     .addNode("collect", collect)
     .addNode("synthesize", makeSynthesizeNode(config.synthesizerModel))
+    .addNode("evaluate", evaluateNode)
     .addEdge(START, "plan")
     .addConditionalEdges("plan", routeAfterPlan, { dispatch: "dispatch", finish: END })
     .addConditionalEdges("dispatch", routeAfterDispatch, { agent: "agent", synthesize: "synthesize", finish: END })
     .addConditionalEdges("agent", routeAfterAgent, { tools: "tools", collect: "collect" })
     .addEdge("tools", "agent")
     .addEdge("collect", "dispatch")
-    .addEdge("synthesize", END);
+    .addEdge("synthesize", "evaluate")
+    .addEdge("evaluate", END);
 
   return config.checkpointer ? graph.compile({ checkpointer: config.checkpointer }) : graph.compile();
 }

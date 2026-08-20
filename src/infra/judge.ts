@@ -209,3 +209,188 @@ export async function judgeOutbound(
   _cache.set(key, { verdict, at: now() });
   return verdict;
 }
+
+// ── Answer-quality judge (ASYNC EVALUATOR — never a gate) ──────────────────────
+//
+// `judgeOutbound` above is a GUARD: inline, before a send, critique on a human
+// approval card. Below is an EVALUATOR: it scores a reply the founder has ALREADY
+// been given, off the reply path, recorded and never enforced. Same model, same
+// temperature 0 — opposite failure direction, which is why it cannot share
+// `parseJudgeVerdict`. A guard that can't read its judge must fail OPEN or it
+// blocks the founder; an evaluator that fails open to a passing score makes "the
+// judge was down" and "the answer was grounded" the same stored row. An unreadable
+// verdict here is `not_evaluated` WITH the reason — `rag-optimization-sweep.ts`.
+
+/** Score floor for every answer dimension (0 = the dimension completely failed). */
+export const ANSWER_SCORE_MIN = 0;
+/** Score ceiling for every answer dimension (100 = the dimension is fully met). */
+export const ANSWER_SCORE_MAX = 100;
+/** Per-step output chars shown to the judge — beyond this it is context bloat, not evidence. */
+export const ANSWER_JUDGE_STEP_MAX_CHARS = 1_500;
+/** Reply chars shown to the judge. A founder reply longer than this is already a defect. */
+export const ANSWER_JUDGE_REPLY_MAX_CHARS = 4_000;
+
+/** One executed plan step, narrowed to what the judge can actually reason about. */
+export interface AnswerJudgeStep {
+  readonly stepId: string;
+  readonly objective: string;
+  readonly status: "ok" | "failed";
+  /** Serialized `StepResult.output` (ok) or the failure evidence (failed). */
+  readonly output: string;
+}
+
+export interface AnswerJudgeInput {
+  readonly goal: string;
+  readonly reply: string;
+  readonly steps: readonly AnswerJudgeStep[];
+}
+
+/**
+ * The three dimensions, scored separately and never collapsed into one number.
+ * groundedness = every factual claim is backed by a step result this turn produced;
+ * relevance = the reply answers the planned goal; completeness = no planned step
+ * was left unaddressed. `critique` names the weakest one ("" if the judge gave none).
+ */
+export interface AnswerScores {
+  readonly groundedness: number;
+  readonly relevance: number;
+  readonly completeness: number;
+  readonly critique: string;
+}
+
+/**
+ * Either three real scores, or the reason there are none. Encoding the failure in
+ * the return type is what makes it impossible for a caller to store an outage as
+ * a passing evaluation.
+ */
+export type AnswerJudgement =
+  | { readonly status: "evaluated"; readonly scores: AnswerScores }
+  | { readonly status: "not_evaluated"; readonly reason: string };
+
+/** `provider:model` actually in force — recorded beside each verdict so a model swap is visible. */
+export function judgeModelLabel(): string {
+  const { provider, model } = resolveJudgeModelId();
+  return `${provider}:${model}`;
+}
+
+function clamp(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…[truncated]` : text;
+}
+
+function buildAnswerJudgePrompt(input: AnswerJudgeInput): string {
+  const steps = input.steps.map(
+    (s) => `- ${s.stepId} [${s.status}] objective: ${s.objective}\n  result: ${clamp(s.output, ANSWER_JUDGE_STEP_MAX_CHARS)}`,
+  );
+  return [
+    "You are an independent evaluator of an AI assistant's answer, which a different",
+    "model wrote. You are NOT a gate — it was already delivered, so grade honestly.",
+    "",
+    "Score three dimensions SEPARATELY, each an integer 0-100:",
+    "  groundedness — is EVERY factual claim in the answer supported by a step result below?",
+    "                 A claim with no supporting step result is the most serious defect here.",
+    "  relevance    — does the answer address the stated goal?",
+    "  completeness — was any planned step left unaddressed in the answer?",
+    "",
+    `GOAL: ${input.goal}`,
+    "",
+    steps.length > 0 ? `STEP RESULTS (the only ground truth):\n${steps.join("\n")}` : "STEP RESULTS: none were produced.",
+    "",
+    "ANSWER:",
+    '"""',
+    clamp(input.reply, ANSWER_JUDGE_REPLY_MAX_CHARS),
+    '"""',
+    "",
+    'Reply with ONLY compact JSON: {"groundedness":<int>,"relevance":<int>,"completeness":<int>,',
+    '"critique":"<one sentence naming the weakest dimension and why>"}.',
+  ].join("\n");
+}
+
+/** Read one score field: must be a finite number inside the range, else the whole verdict is unusable. */
+function readScore(value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(n)) return null;
+  const rounded = Math.round(n);
+  if (rounded < ANSWER_SCORE_MIN || rounded > ANSWER_SCORE_MAX) return null;
+  return rounded;
+}
+
+/**
+ * Parse the answer judge's reply. Total, and FAIL-VISIBLE: anything short of three
+ * in-range scores is `not_evaluated` with the reason — never a default score.
+ */
+export function parseAnswerJudgement(raw: string): AnswerJudgement {
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return { status: "not_evaluated", reason: "judge reply contained no JSON object" };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    return { status: "not_evaluated", reason: "judge reply was not valid JSON" };
+  }
+  const obj = parsed as Record<string, unknown>;
+  const groundedness = readScore(obj["groundedness"]);
+  const relevance = readScore(obj["relevance"]);
+  const completeness = readScore(obj["completeness"]);
+  const missing = ([["groundedness", groundedness], ["relevance", relevance], ["completeness", completeness]] as const)
+    .filter(([, score]) => score === null)
+    .map(([name]) => name);
+  if (groundedness === null || relevance === null || completeness === null) {
+    return {
+      status: "not_evaluated",
+      reason: `judge returned no usable score for: ${missing.join(", ")} (each must be an integer ${ANSWER_SCORE_MIN}-${ANSWER_SCORE_MAX})`,
+    };
+  }
+  const critique = typeof obj["critique"] === "string" ? obj["critique"].trim() : "";
+  return { status: "evaluated", scores: { groundedness, relevance, completeness, critique } };
+}
+
+const _answerCache = new Map<string, { judgement: AnswerJudgement; at: number }>();
+
+/** Test seam: clear the answer-verdict memo so cases don't leak into each other. */
+export function _resetAnswerJudgeCache(): void {
+  _answerCache.clear();
+}
+
+/**
+ * Score a reply the founder has already received. Runs on the SAME different-family,
+ * temperature-0, free-tier judge as `judgeOutbound` — one model resolution path, one
+ * cache shape, one set of provider keys.
+ *
+ * This function must never be awaited on the reply path; see `src/infra/answer-eval.ts`.
+ */
+export async function judgeAnswer(
+  input: AnswerJudgeInput,
+  opts: { model?: JudgeModel; now?: () => number } = {},
+): Promise<AnswerJudgement> {
+  const now = opts.now ?? Date.now;
+  const injected = opts.model;
+
+  if (!injected && !isJudgeEnabled()) {
+    return {
+      status: "not_evaluated",
+      reason: `no API key configured for judge model ${judgeModelLabel()} — the turn was never scored`,
+    };
+  }
+
+  const key = `answer:${hash(`${input.goal} ${input.reply}`)}`;
+  const cached = _answerCache.get(key);
+  if (cached && now() - cached.at < JUDGE_CACHE_TTL_MS) return cached.judgement;
+
+  let judgement: AnswerJudgement;
+  try {
+    const model = injected ?? getJudgeModel();
+    const res = await model.invoke(buildAnswerJudgePrompt(input));
+    const content = typeof res.content === "string" ? res.content : JSON.stringify(res.content);
+    judgement = parseAnswerJudgement(content);
+  } catch (err) {
+    judgement = { status: "not_evaluated", reason: `judge model call failed — ${(err as Error).message}` };
+  }
+
+  if (judgement.status === "not_evaluated") {
+    // Loud, and NOT cached: a transient outage must not pin "unscored" for the whole TTL.
+    log.warn({ reason: judgement.reason, model: judgeModelLabel() }, "Answer evaluation did not produce scores");
+    return judgement;
+  }
+  _answerCache.set(key, { judgement, at: now() });
+  return judgement;
+}
