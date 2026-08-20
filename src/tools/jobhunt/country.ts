@@ -109,6 +109,79 @@ const NL_CITIES = [
   "zwolle",
   "maastricht",
   "hilversum",
+  // Added 2026-08-20. "Schiphol-Rijk" was being filed as a country outside both
+  // markets — an office park fifteen minutes from Amsterdam. The rest are the
+  // other Dutch employment centres, added at the same time so the next one is
+  // not found the same way. `\bschiphol\b` matches "Schiphol-Rijk" because a
+  // hyphen is a word boundary.
+  "schiphol",
+  "hoofddorp",
+  "amstelveen",
+  "diemen",
+  "zaandam",
+  "purmerend",
+  "hoorn",
+  "alkmaar",
+  "lelystad",
+  "apeldoorn",
+  "deventer",
+  "enschede",
+  "hengelo",
+  "zutphen",
+  "doetinchem",
+  "harderwijk",
+  "leeuwarden",
+  "drachten",
+  "sneek",
+  "heerenveen",
+  "assen",
+  "emmen",
+  "meppel",
+  "hoogeveen",
+  "zoetermeer",
+  "rijswijk",
+  "delfgauw",
+  "wassenaar",
+  "katwijk",
+  "noordwijk",
+  "dordrecht",
+  "gouda",
+  "schiedam",
+  "vlaardingen",
+  "barendrecht",
+  "gorinchem",
+  "nieuwegein",
+  "houten",
+  "woerden",
+  "veenendaal",
+  "wageningen",
+  "zeist",
+  "soest",
+  "den bosch",
+  "'s-hertogenbosch",
+  "hertogenbosch",
+  "helmond",
+  "veldhoven",
+  "oosterhout",
+  "roosendaal",
+  "bergen op zoom",
+  "venlo",
+  "roermond",
+  "sittard",
+  "heerlen",
+  "waalwijk",
+  "tiel",
+  // Provinces. "Holland" is already an NL_NAME, so Noord-/Zuid-Holland need no
+  // entry. Limburg is DELIBERATELY absent: it is a province of Belgium too, and
+  // "Hasselt, Limburg, Belgium" appeared in the live sample — a wrong country is
+  // worse than an unknown one.
+  "noord-brabant",
+  "north brabant",
+  "gelderland",
+  "overijssel",
+  "friesland",
+  "drenthe",
+  "flevoland",
 ];
 
 const IN_CITIES = [
@@ -132,6 +205,69 @@ const IN_CITIES = [
   "coimbatore",
   "thiruvananthapuram",
   "bhubaneswar",
+  // Added 2026-08-20 from measurement, not from a list: in one 90-board sample
+  // these eight spellings — Lucknow, Varanasi, Bareilly, Mysore, Nashik,
+  // Tirupati, Vadodara, Surat — carried 15 postings that were filed as "a
+  // country outside both your markets" and dropped before screening. India is
+  // the market he actually lives in.
+  "lucknow",
+  "varanasi",
+  "bareilly",
+  "mysore",
+  "mysuru",
+  "nashik",
+  "tirupati",
+  "vadodara",
+  "surat",
+  "nagpur",
+  "visakhapatnam",
+  "vizag",
+  "trivandrum",
+  "mohali",
+  "bhopal",
+  "rajkot",
+  "faridabad",
+  "ghaziabad",
+  "thane",
+  "navi mumbai",
+  "whitefield",
+  "hinjewadi",
+  "madurai",
+  "tiruchirappalli",
+  "guwahati",
+  "patna",
+  "kanpur",
+  "dehradun",
+  "udaipur",
+  "vijayawada",
+  "raipur",
+  "ludhiana",
+  "amritsar",
+  "agra",
+  "meerut",
+  "gandhinagar",
+  "hubli",
+  "warangal",
+  "vellore",
+  "jodhpur",
+  // States and regions, which Indian feeds append far more often than Dutch
+  // ones do ("Lucknow, Uttar Pradesh"). Punjab is DELIBERATELY absent — it is a
+  // province of Pakistan under the same name. So is Salem, which is a city in
+  // Oregon and in Massachusetts before it is one in Tamil Nadu.
+  "maharashtra",
+  "karnataka",
+  "tamil nadu",
+  "telangana",
+  "uttar pradesh",
+  "gujarat",
+  "haryana",
+  "west bengal",
+  "kerala",
+  "rajasthan",
+  "andhra pradesh",
+  "madhya pradesh",
+  "odisha",
+  "delhi ncr",
 ];
 
 /** Word-boundary test for any phrase in the list. */
@@ -153,12 +289,56 @@ function mentionsAny(haystack: string, phrases: readonly string[]): boolean {
 export function countryFromLocation(location: string): PostingCountry {
   const text = location.trim();
   if (text.length === 0) return "unknown";
-  if (NON_PLACE.has(text.toLowerCase())) return "unknown";
+
+  // A location field whose ENTIRE contents is a country code. The two-letter
+  // codes are excluded from NL_NAMES/IN_NAMES because `\bin\b` matches the
+  // preposition in "Remote in Europe" — but there is no preposition to confuse
+  // when the code is the whole string. One live board emits exactly "IN".
+  const lower = text.toLowerCase();
+  if (lower === "nl") return "NL";
+  if (lower === "in") return "IN";
+
+  if (NON_PLACE.has(lower)) return "unknown";
 
   if (mentionsAny(text, NL_NAMES) || mentionsAny(text, NL_CITIES)) return "NL";
   if (mentionsAny(text, IN_NAMES) || mentionsAny(text, IN_CITIES)) return "IN";
 
+  // Every word is a non-place word, so the string names no country at all.
+  //
+  // Checked AFTER the two markets, so "Remote — Netherlands" is still NL. It
+  // exists because NON_PLACE above is an exact match on the whole string, which
+  // made "Remote" read as `unknown` (kept, screened) while "Remote - Europe",
+  // "Remote-EMEA" and "EU (Remote)" read as `other` (dropped before screening) —
+  // the same fact about a posting getting opposite treatment on decoration
+  // alone. `other` is a claim that the job is somewhere specific and that the
+  // somewhere is neither market; none of these strings supports that claim.
+  if (namesNoPlace(lower)) return "unknown";
+
   return "other";
+}
+
+/**
+ * Words that can fill a location field without narrowing where a job is.
+ *
+ * Single tokens, because this is applied per-word to strings the exact-match
+ * NON_PLACE set cannot cover. "united"/"states"/"kingdom" are absent on
+ * purpose: those DO name a country, and reading "Remote, United States" as
+ * `unknown` would put a US-only role back into a queue it was correctly
+ * excluded from.
+ */
+const NON_PLACE_WORDS = new Set([
+  "remote", "remotely", "hybrid", "onsite", "on", "site", "office", "based",
+  "anywhere", "worldwide", "world", "wide", "global", "globally",
+  "international", "distributed", "flexible", "various", "multiple",
+  "location", "locations", "emea", "apac", "latam", "europe", "european",
+  "eu", "any", "all", "na", "n", "a", "tbd", "tba", "unknown", "other",
+  "home", "wfh", "field", "or", "and", "the", "in",
+]);
+
+/** True when every word in `lower` is a non-place word — so it names nowhere. */
+function namesNoPlace(lower: string): boolean {
+  const tokens = lower.split(/[^a-z0-9]+/).filter((t) => t.length > 0);
+  return tokens.length > 0 && tokens.every((t) => NON_PLACE_WORDS.has(t));
 }
 
 /**

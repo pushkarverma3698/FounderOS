@@ -13,6 +13,17 @@ describe("provider-config", () => {
     delete process.env["LINKEDIN_BACKEND"];
     delete process.env["PROVIDER_SMOKE_AT_BOOT"];
     delete process.env["NODE_ENV"];
+    // envOr() falls back to reading the real .env FILE off disk when
+    // process.env is unset (a deliberate PROD_DOTENV-parity fallback, see
+    // readKeyFromEnvFile in provider-config.ts) — so deleting process.env
+    // above is not enough to simulate "unset" on its own. Without this mock
+    // every "defaults to X" test below actually asserts on this developer's
+    // local .env contents, not on the function's real default.
+    vi.doMock("node:fs", () => ({
+      readFileSync: () => {
+        throw new Error("no .env — test isolation");
+      },
+    }));
   });
 
   afterEach(() => {

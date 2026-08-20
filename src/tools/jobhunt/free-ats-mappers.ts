@@ -64,6 +64,29 @@ function asId(value: unknown): string {
 }
 
 /**
+ * Decode an HTML job body (Greenhouse's per-posting fetch, Recruitee's
+ * `description`/`requirements`) into prose the gates can read.
+ *
+ * The gates read prose — years of experience, language requirements, salary — so
+ * tags become whitespace rather than being deleted: stripping `</p><p>` without a
+ * separator glues the last word of one paragraph to the first of the next, and
+ * "5 years" arriving as "experience5 years" is invisible to the years regex.
+ */
+export function decodeJobBody(html: string): string {
+  return html
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    // `&amp;` last, or "&amp;lt;" would decode twice into a real tag.
+    .replace(/&amp;/g, "&")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Parse a publication timestamp from whatever the platform used.
  *
  * ISO strings with an offset (Greenhouse: `2025-04-23T04:30:41-04:00`) and epoch
@@ -190,6 +213,53 @@ export function mapAshbyJobs(payload: unknown, board: FreeBoard): FreeCandidate[
   });
 }
 
+/**
+ * Recruitee: `/api/offers/` — `{ offers: [...] }`, body included, split across
+ * `description` and `requirements`. Verified live against a real board
+ * 2026-08-20 (`dalsem.recruitee.com`): `careers_url` is the human posting
+ * page (often the company's own white-labelled domain, e.g.
+ * `werkenbijdalsem.nl/o/...`), distinct from `careers_apply_url`, which skips
+ * straight to the application form.
+ */
+export function mapRecruiteeOffers(payload: unknown, board: FreeBoard): FreeCandidate[] {
+  const root = asRecord(payload);
+  const offers = Array.isArray(root?.["offers"]) ? (root["offers"] as unknown[]) : [];
+
+  return offers.flatMap((raw) => {
+    const offer = asRecord(raw);
+    if (offer === null) return [];
+    // The endpoint is public and unauthenticated, so drafts should never
+    // appear — filtered anyway, matching Ashby's isListed guard, because a
+    // wrong assumption about a third party's API costs nothing to check here.
+    if (offer["status"] !== undefined && offer["status"] !== "published") return [];
+
+    const externalId = asId(offer["id"]);
+    const title = asText(offer["title"]);
+    const url = asText(offer["careers_url"]) || asText(offer["careers_apply_url"]);
+    if (externalId.length === 0 || title.length === 0 || url.length === 0) return [];
+
+    // Both sections are employer-authored HTML and either can carry the
+    // gates read (years, salary, language, sponsor mentions) — concatenated
+    // so nothing is silently dropped, decoded the same way Greenhouse's
+    // hydrated body is.
+    const body = [decodeJobBody(asText(offer["description"])), decodeJobBody(asText(offer["requirements"]))]
+      .filter((s) => s.length > 0)
+      .join("\n\n");
+
+    return [
+      {
+        board,
+        externalId,
+        title,
+        url,
+        location: asText(offer["location"]),
+        postedAt: parsePostedAt(offer["published_at"]),
+        description: body || null,
+      },
+    ];
+  });
+}
+
 export const FREE_MAPPERS: Record<
   FreeBoard["ats"],
   (payload: unknown, board: FreeBoard) => FreeCandidate[]
@@ -197,6 +267,7 @@ export const FREE_MAPPERS: Record<
   greenhouse: mapGreenhouseJobs,
   lever: mapLeverPostings,
   ashby: mapAshbyJobs,
+  recruitee: mapRecruiteeOffers,
 };
 
 /**

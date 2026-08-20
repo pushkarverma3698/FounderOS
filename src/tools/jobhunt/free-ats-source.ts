@@ -27,7 +27,7 @@
 import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import type { FreeBoard } from "./free-boards.js";
-import { FREE_MAPPERS, type FreeCandidate } from "./free-ats-mappers.js";
+import { FREE_MAPPERS, decodeJobBody, type FreeCandidate } from "./free-ats-mappers.js";
 
 const log = childLogger({ module: "jobhunt:free-ats" });
 
@@ -70,6 +70,8 @@ export function boardUrl(board: FreeBoard): string {
       return `https://api.lever.co/v0/postings/${token}?mode=json`;
     case "ashby":
       return `https://api.ashbyhq.com/posting-api/job-board/${token}`;
+    case "recruitee":
+      return `https://${token}.recruitee.com/api/offers/`;
   }
 }
 
@@ -193,24 +195,9 @@ export async function hydrateDescriptions(
   });
 }
 
-/**
- * Greenhouse returns the body as HTML with entity-encoded markup.
- *
- * The gates read prose — years of experience, language requirements, salary — so
- * tags become whitespace rather than being deleted: stripping `</p><p>` without a
- * separator glues the last word of one paragraph to the first of the next, and
- * "5 years" arriving as "experience5 years" is invisible to the years regex.
- */
-export function decodeJobBody(html: string): string {
-  return html
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ")
-    // `&amp;` last, or "&amp;lt;" would decode twice into a real tag.
-    .replace(/&amp;/g, "&")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+// decodeJobBody moved to free-ats-mappers.ts (2026-08-20) — Recruitee's
+// mapper needs the same tag-to-space HTML decode this Greenhouse hydration
+// step does, and mappers has no network dependency this file could import
+// back from. Re-exported (imported above) so this module's existing public
+// surface, and its tests, keep resolving unchanged.
+export { decodeJobBody };

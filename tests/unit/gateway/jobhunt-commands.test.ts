@@ -10,7 +10,9 @@
  * company the founder never chose.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import {
   parseRowArg,
   unresolvedMessage,
@@ -18,6 +20,8 @@ import {
   askInstruction,
 } from "../../../src/gateway/jobhunt-commands.js";
 import { unknownCommandReply } from "../../../src/gateway/commands.js";
+import { threadIdFor } from "../../../src/gateway/kernel-run.js";
+import { ARTIFACT_ROOT } from "../../../src/core/config.js";
 import type { JobApplication } from "../../../src/db/schema.js";
 
 const ROW = {
@@ -148,27 +152,65 @@ describe("unknownCommandReply", () => {
 });
 
 describe("handleDraft (resolution path)", () => {
-  beforeEach(() => vi.resetModules());
+  const chatId = 424242;
+  const artifactDir = path.join(ARTIFACT_ROOT, threadIdFor(chatId).replace(/[^a-zA-Z0-9_.-]/g, "_"));
 
-  it("runs a kernel turn for the row pinned at that rank", async () => {
+  beforeEach(() => vi.resetModules());
+  afterEach(async () => {
+    await fs.rm(artifactDir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("tailors a real PDF and hands only the SEND to a kernel turn", async () => {
+    // Tailoring and rendering happen outside the kernel (deterministic, no side
+    // effects); only deliver_artifact — which is HITL-gated — runs through a
+    // kernel turn, so the founder still taps to approve every outbound file.
     vi.doMock("../../../src/db/job-queries.js", () => ({
       getApplicationByBriefRank: vi.fn(async (section: string, rank: number) =>
         section === "do_today" && rank === 2 ? ROW : null,
       ),
+      recordTailoringResult: vi.fn(async () => null),
     }));
+    vi.doMock("../../../src/tools/jobhunt/tailor-cv.js", () => ({
+      tailorCv: vi.fn(async () => ({
+        success: true,
+        tailoredMarkdown: "# Aquablu Tailored CV",
+        matchedSkills: ["C++"],
+        missingSkills: [],
+        initialOverlapRatio: 0.6,
+      })),
+    }));
+    vi.doMock("../../../src/tools/jobhunt/cv-renderer.js", () => ({
+      renderCvToPdf: vi.fn(async () => ({ pdfBuffer: Buffer.from("%PDF-fake"), htmlString: "<html></html>" })),
+    }));
+    vi.doMock("../../../src/infra/storage/s3-client.js", () => ({
+      uploadFile: vi.fn(async () => "ready-applications/2026-08-20/aquablu/key.pdf"),
+    }));
+
     const { handleDraft } = await import("../../../src/gateway/jobhunt-commands.js");
     const runKernelText = vi.fn(async () => undefined);
     const reply = vi.fn(async () => undefined);
 
-    await handleDraft({ match: "2", reply } as never, { runKernelText });
+    await handleDraft({ match: "2", chat: { id: chatId }, reply } as never, { runKernelText });
 
     expect(runKernelText).toHaveBeenCalledOnce();
     const [, callText] = (runKernelText.mock.calls[0] ?? []) as unknown as [unknown, string?];
+    expect(callText).toContain("deliver_artifact");
+    expect(callText).toContain(artifactDir);
     expect(callText).toContain("Aquablu B.V");
-    expect(reply).not.toHaveBeenCalled();
+    // Never the free-text draft path on the success branch.
+    expect(callText).not.toContain("Draft a tailored application");
+
+    // Only the "tailoring…" ack — a failure notice never fires on a success run.
+    expect(reply).toHaveBeenCalledOnce();
+    const [ackText] = (reply.mock.calls[0] ?? []) as unknown as [string?];
+    expect(ackText).toContain("Tailoring your CV");
+
+    const written = await fs.readdir(artifactDir);
+    expect(written.length).toBe(1);
+    expect(written[0]).toMatch(/^cv-aquablu.*\.pdf$/);
   });
 
-  it("resolves a stretch row when DO TODAY holds no row at that rank", async () => {
+  it("falls back to a text draft, and says so, when tailoring fails", async () => {
     // The stretch section carries `/draft`, not `/ask` — a years flag is an
     // application to write, not a question to send. Its ranks continue from DO
     // TODAY, so the same integer reaches exactly one row across both sections.
@@ -176,12 +218,23 @@ describe("handleDraft (resolution path)", () => {
       getApplicationByBriefRank: vi.fn(async (section: string, rank: number) =>
         section === "stretch" && rank === 3 ? ROW : null,
       ),
+      recordTailoringResult: vi.fn(async () => null),
     }));
+    vi.doMock("../../../src/tools/jobhunt/tailor-cv.js", () => ({
+      tailorCv: vi.fn(async () => ({
+        success: false,
+        matchedSkills: [],
+        missingSkills: [],
+        initialOverlapRatio: 0,
+        error: "LLM invocation failed: network blocked in tests",
+      })),
+    }));
+
     const { handleDraft } = await import("../../../src/gateway/jobhunt-commands.js");
     const runKernelText = vi.fn(async () => undefined);
     const reply = vi.fn(async () => undefined);
 
-    await handleDraft({ match: "3", reply } as never, { runKernelText });
+    await handleDraft({ match: "3", chat: { id: chatId }, reply } as never, { runKernelText });
 
     expect(runKernelText).toHaveBeenCalledOnce();
     const callArgs = runKernelText.mock.calls[0] as unknown as [string, string];
@@ -190,7 +243,13 @@ describe("handleDraft (resolution path)", () => {
     // employer whether its five-year bar is firm invites the pre-emptive
     // rejection the stretch band exists to avoid.
     expect(callArgs[1]).toContain("Draft a tailored application");
-    expect(reply).not.toHaveBeenCalled();
+
+    // Ack, then an explicit "this failed, falling back" notice — a founder
+    // reading only the last message must know a text draft, not a PDF, is
+    // what's about to arrive.
+    expect(reply).toHaveBeenCalledTimes(2);
+    const [fallbackText] = (reply.mock.calls[1] ?? []) as unknown as [string?];
+    expect(fallbackText).toContain("Couldn't build a tailored PDF");
   });
 
   it("replies instead of drafting when the rank does not resolve", async () => {

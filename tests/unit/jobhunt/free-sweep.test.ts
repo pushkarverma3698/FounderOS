@@ -269,10 +269,10 @@ describe("runFreeSweep", () => {
     expect(mockSendToChat).not.toHaveBeenCalled();
   });
 
-  it("FREE_SWEEP_CRON is a valid 5-field cron expression firing daily at midnight", () => {
+  it("FREE_SWEEP_CRON is a valid 5-field cron expression firing every 30 minutes", () => {
     const fields = FREE_SWEEP_CRON.split(" ");
     expect(fields).toHaveLength(5);
-    expect(fields[0]).toBe("0");
-    expect(fields[1]).toBe("0");
+    expect(fields[0]).toBe("*/30");
+    expect(fields[1]).toBe("*");
   });
 });

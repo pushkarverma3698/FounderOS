@@ -14,6 +14,7 @@
  */
 
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql, gte } from "drizzle-orm";
+import { intEnv } from "../core/config.js";
 import { getDb } from "./client.js";
 import { jobApplications, type JobApplication, type NewJobApplication } from "./schema.js";
 
@@ -21,6 +22,14 @@ const DEFAULT_TENANT = "turicks";
 
 /** Stages that represent a live application a human may still hear back from. */
 export const LIVE_STAGES = ["drafted", "awaiting_approval", "applied", "replied"] as const;
+
+/**
+ * How old a screened posting can be and still show in the apply queue.
+ *
+ * A posting past this age already has hundreds of applicants — showing it is
+ * noise, not opportunity. Env-tunable so the window can move without a deploy.
+ */
+export const APPLY_QUEUE_MAX_AGE_HOURS = intEnv("APPLY_QUEUE_MAX_AGE_HOURS", 24);
 
 /** Look up a previously screened role by its dedupe identity. */
 export async function findApplicationByDedupeKey(
@@ -121,7 +130,22 @@ export async function recordScreenedApplication(
 export async function updateApplicationStage(
   id: string,
   stage: string,
-  opts: { appliedAt?: Date; lastContactAt?: Date; notes?: string } = {},
+  opts: {
+    appliedAt?: Date;
+    lastContactAt?: Date;
+    notes?: string;
+    /**
+     * Drop the row's pinned brief number as well.
+     *
+     * Set by `/applied`, because the number and the row outlive the reason the
+     * number existed: the brief prints "3. Acme → /draft 3 · /applied 3", and
+     * once 3 has been applied to, `/draft 3` still resolves to it and silently
+     * tailors a second CV for a company he has already written to. Clearing the
+     * rank makes the second attempt say "no row 3 in the latest brief" — a
+     * refusal he can read, rather than a duplicate he cannot see.
+     */
+    clearBriefRank?: boolean;
+  } = {},
 ): Promise<JobApplication | null> {
   const db = getDb();
   const [saved] = await db
@@ -131,6 +155,7 @@ export async function updateApplicationStage(
       ...(opts.appliedAt ? { applied_at: opts.appliedAt } : {}),
       ...(opts.lastContactAt ? { last_contact_at: opts.lastContactAt } : {}),
       ...(opts.notes !== undefined ? { notes: opts.notes } : {}),
+      ...(opts.clearBriefRank ? { brief_section: null, brief_rank: null } : {}),
       updated_at: new Date(),
     })
     .where(eq(jobApplications.id, id))
@@ -214,11 +239,33 @@ export async function countPassingApplications(
  * Restricted to `stage = 'screened'` so a role already drafted or applied to
  * never reappears in DO TODAY, and ordered newest-first so a capped read takes
  * the freshest postings rather than an arbitrary slice.
+ *
+ * Bounded to `APPLY_QUEUE_MAX_AGE_HOURS` — a posting older than that already
+ * has hundreds of applicants elsewhere. Aged-out rows are filtered here, never
+ * deleted: they stay in the table as market evidence and for `recordLiveness`.
+ *
+ * AGE IS MEASURED ON `posted_at`, FALLING BACK TO `created_at`. Not every
+ * source states a publication date: `screen_job` — the founder pasting a
+ * posting he found himself — records `posted_at` as NULL by design, because
+ * inventing a date for it would be fabricating the one fact this window turns
+ * on. A bare `posted_at >= cutoff` treats those rows as unknown rather than
+ * true (Postgres three-valued logic), so every job the founder screened by
+ * hand would vanish from his own queue the moment he screened it, and be
+ * counted as "aged out" while he was still reading it. `created_at` is when we
+ * first stored the row, which for a hand-pasted posting is the same minute he
+ * found it — the honest floor on its age, not a guess at its real one.
  */
 export async function listActionableApplications(
-  opts: { verdicts?: readonly string[]; limit?: number; tenantId?: string } = {},
+  opts: {
+    verdicts?: readonly string[];
+    limit?: number;
+    tenantId?: string;
+    maxAgeHours?: number;
+  } = {},
 ): Promise<JobApplication[]> {
   const db = getDb();
+  const maxAgeHours = opts.maxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
+  const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
   return db
     .select()
     .from(jobApplications)
@@ -227,10 +274,57 @@ export async function listActionableApplications(
         eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
         eq(jobApplications.stage, "screened"),
         inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
+        freshEnough(cutoff),
       ),
     )
     .orderBy(desc(jobApplications.created_at))
     .limit(opts.limit ?? 100);
+}
+
+/**
+ * The freshness predicate, written once so the queue and its aged-out counter
+ * can never disagree about which rows are which.
+ *
+ * A row satisfying neither is exactly the complement of this, so
+ * `countAgedOutApplications` negates it rather than restating it — two
+ * hand-written predicates would drift, and the drift would surface as
+ * "0 fresh · 0 aged out" on a table with 300 rows in it.
+ */
+function freshEnough(cutoff: Date) {
+  return sql`coalesce(${jobApplications.posted_at}, ${jobApplications.created_at}) >= ${cutoff}`;
+}
+
+/**
+ * How many otherwise-actionable rows `listActionableApplications` just excluded
+ * for age.
+ *
+ * Exists so the brief can print "12 fresh · 319 aged out" instead of a bare
+ * count. Without it, an empty queue is indistinguishable between "no new jobs
+ * today" and "the lane is broken" — the exact ambiguity this pipeline has
+ * already lost weeks to (see `JOB_SWEEP_CRON` in sweep-runner.ts).
+ */
+export async function countAgedOutApplications(
+  opts: {
+    verdicts?: readonly string[];
+    tenantId?: string;
+    maxAgeHours?: number;
+  } = {},
+): Promise<number> {
+  const db = getDb();
+  const maxAgeHours = opts.maxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
+  const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(jobApplications)
+    .where(
+      and(
+        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+        eq(jobApplications.stage, "screened"),
+        inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
+        sql`NOT (${freshEnough(cutoff)})`,
+      ),
+    );
+  return Number(row?.n ?? 0);
 }
 
 /**

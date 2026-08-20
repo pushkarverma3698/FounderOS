@@ -41,13 +41,6 @@ describe("M0a acceptance — analyzers re-derive the 2026-08-06 hand audit", () 
     expect(dead).toContain("updateMissionPhase");
   });
 
-  it("re-derives that jobhunt cannot record an application outcome", () => {
-    const dead = new Set(findDeadExports(files).map((f) => f.subject));
-
-    // 7,756 LOC of jobhunt that structurally cannot close its own loop.
-    expect(dead).toContain("updateApplicationStage");
-  });
-
   it("re-derives the unused production dependencies", () => {
     const unused = new Set(findUnusedDependencies(files, deps).map((f) => f.subject));
 
