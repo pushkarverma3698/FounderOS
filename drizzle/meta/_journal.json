@@ -232,6 +232,13 @@
       "when": 1786500000000,
       "tag": "0032_private_group_chat_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786590000000,
+      "tag": "0033_drop_private_group_chat_messages",
+      "breakpoints": true
     }
   ]
 }
