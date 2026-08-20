@@ -53,9 +53,11 @@ export {
 export {
   makeSynthesizeNode,
   receiptsBlock,
+  founderReceiptsBlock,
   fallbackSynthesisReply,
   SYNTH_STEP_OUTPUT_MAX_CHARS,
 } from "./synthesizer.js";
+export { redactInternalPaths, redactInternalIdentifiers } from "./founder-text.js";
 export {
   clampToolOutput,
   pruneScratchForModel,

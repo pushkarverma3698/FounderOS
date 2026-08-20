@@ -45,9 +45,24 @@ Check for:
 - **Missing Ratchets / Wiring:** Were new tools declared in `DEPARTMENT_TOOLS` as raw `UnifiedTool` objects instead of LangChain `tool(...)` instances?
 - **Base Drift:** Is the branch behind `origin/beta`? If so, run `git fetch origin beta && git merge origin/beta`.
 
+### Step 3b: Classify Every Finding by Severity
+
+Every finding from Step 3 gets tagged exactly one of:
+
+- **BLOCKER** — prevents acceptance. Correctness failure, security boundary violation, production
+  regression, broken acceptance criterion, false-positive verification (a claim of success with no
+  evidence behind it), missing required execution path, or an architectural change explicitly
+  forbidden by the task.
+- **NON-BLOCKER** — a legitimate issue that does not prevent acceptance. Cleanup, maintainability,
+  documentation, optional improvement.
+- **PASS** — no BLOCKER findings remain.
+
+NON-BLOCKER findings are reported (as a PR comment) but never turn Step 4 into Case A or Case C —
+only a BLOCKER does. Do not use NON-BLOCKER findings as a lever for scope creep on the PR.
+
 ### Step 4: Fix or Approve
 
-#### Case A — Defect Found (Self-Fixing):
+#### Case A — BLOCKER Found (Self-Fixing):
 1. Write unit test or fix code directly in the branch.
 2. Run `pnpm gate` until 100% green.
 3. Commit & push:
@@ -61,10 +76,10 @@ Check for:
    gh pr review <PR_NUMBER> --comment -b "Applied fix for <issue> directly to branch and verified pnpm gate green."
    ```
 
-#### Case B — Verification Passed 100% Green:
+#### Case B — PASS (no BLOCKERs; NON-BLOCKERs, if any, don't gate):
 1. Issue formal approval:
    ```bash
-   gh pr review <PR_NUMBER> --approve -b "Adversarial review passed. Verified pnpm gate 100% green and empirical logic sound."
+   gh pr review <PR_NUMBER> --approve -b "Adversarial review passed. Verified pnpm gate 100% green and empirical logic sound. NON-BLOCKER notes (if any): <list, or 'none'>."
    ```
 2. Convert Draft PR to Ready for Review (or merge to `beta` if founder approved):
    ```bash

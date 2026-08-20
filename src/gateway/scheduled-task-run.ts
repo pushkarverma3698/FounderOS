@@ -32,6 +32,7 @@ import { assertDailyBudgetAllowsRun, DailyBudgetExceededError } from "../infra/d
 import { readHalt } from "../infra/halt.js";
 import { startTurn } from "../infra/trace.js";
 import { TraceCallback } from "../infra/trace-callback.js";
+import { kernelPromptHash } from "./prompt-version.js";
 import { logger } from "../infra/logger.js";
 import { withChatTurnLock, threadIdFor, kernelCostSink } from "./kernel-run.js";
 import { recordFailedTurnInHistory } from "./failed-turn-fold.js";
@@ -127,7 +128,7 @@ export async function runDueScheduledTask(task: ScheduledTask): Promise<void> {
       throw err;
     }
 
-    const trace = startTurn({ chatId, kind: "scheduled", promptHash: "kernel-v3" });
+    const trace = startTurn({ chatId, kind: "scheduled", promptHash: kernelPromptHash() });
     const kernel = await getKernel();
     const config = {
       configurable: { thread_id: threadIdFor(chatId) },

@@ -226,9 +226,10 @@ describe("runFreeSweep", () => {
     vi.useRealTimers();
   });
 
-  it("fires the outage alert when every board failed and nothing was screened", async () => {
+  it("fires the outage alert when boards failed and the sweep fetched nothing at all", async () => {
     mockRunFreeIngest.mockResolvedValue(
       result({
+        seen: 0,
         screened: 0,
         failures: ["greenhouse/a: HTTP 500", "lever/b: HTTP 500", "ashby/c: HTTP 500", "greenhouse/d: HTTP 500"],
       }),
@@ -252,6 +253,15 @@ describe("runFreeSweep", () => {
     expect(mockSendToChat).not.toHaveBeenCalled();
   });
 
+  it("does not fire the outage alert when a board failed and seen > 0 but nothing was screened (the false positive fix)", async () => {
+    mockRunFreeIngest.mockResolvedValue(
+      result({ seen: 20551, screened: 0, failures: ["greenhouse/crcevans: HTTP 404"], lines: [] }),
+    );
+    await runFreeSweep();
+
+    expect(mockSendToChat).not.toHaveBeenCalled();
+  });
+
   it("does not reject when the underlying ingest throws", async () => {
     mockRunFreeIngest.mockRejectedValue(new Error("network down"));
 
@@ -259,9 +269,10 @@ describe("runFreeSweep", () => {
     expect(mockSendToChat).not.toHaveBeenCalled();
   });
 
-  it("FREE_SWEEP_CRON is a valid 5-field cron expression firing every 30 minutes", () => {
+  it("FREE_SWEEP_CRON is a valid 5-field cron expression firing daily at midnight", () => {
     const fields = FREE_SWEEP_CRON.split(" ");
     expect(fields).toHaveLength(5);
-    expect(fields[0]).toBe("*/30");
+    expect(fields[0]).toBe("0");
+    expect(fields[1]).toBe("0");
   });
 });

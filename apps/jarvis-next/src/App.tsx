@@ -185,25 +185,55 @@ export function App() {
   }, []);
 
   /* ---------------- HITL resolution ---------------- */
+  /**
+   * Only report an approval the server actually performed.
+   *
+   * This used to fire and forget: it dropped the pending card and painted
+   * "Approved: shell execution" regardless of what came back. The server's
+   * /api/v1/hitl/respond has no resume path and now answers 501 — so the button
+   * showed a green authorization for a side effect that never happened, which is
+   * the same lie the endpoint itself was just fixed for. A card that stays put
+   * with a stated reason is strictly safer than a false success.
+   */
   const resolveHitl = useCallback((id: string, action: 'approve' | 'reject') => {
-    void fetch('/api/v1/hitl/respond', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, action }),
-    }).catch(() => {});
+    void (async () => {
+      let detail = 'the approval endpoint is unreachable';
+      try {
+        const res = await fetch('/api/v1/hitl/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, action }),
+        });
+        if (res.ok) {
+          setPendingHitl((prev) => prev.filter((i) => i.id !== id));
+          setDepartments((prev) =>
+            prev.map((d) =>
+              d.id === 'exec'
+                ? {
+                    ...d,
+                    status: action === 'approve' ? 'SUCCESS' : 'IDLE',
+                    lastAction: action === 'approve' ? 'Approved: shell execution' : 'Rejected by founder',
+                  }
+                : d
+            )
+          );
+          return;
+        }
+        const body = (await res.json().catch(() => ({}))) as { detail?: string };
+        detail = body.detail ?? `the approval endpoint returned ${res.status}`;
+      } catch {
+        /* keep the default detail — the request never reached the server */
+      }
 
-    setPendingHitl((prev) => prev.filter((i) => i.id !== id));
-    setDepartments((prev) =>
-      prev.map((d) =>
-        d.id === 'exec'
-          ? {
-              ...d,
-              status: action === 'approve' ? 'SUCCESS' : 'IDLE',
-              lastAction: action === 'approve' ? 'Approved: shell execution' : 'Rejected by founder',
-            }
-          : d
-      )
-    );
+      // The item stays pending on purpose: nothing was authorized, so the gate
+      // is still open and must keep looking open.
+      soundEngine.warning();
+      setDepartments((prev) =>
+        prev.map((d) =>
+          d.id === 'exec' ? { ...d, status: 'IDLE', lastAction: `Not authorized — ${detail}` } : d
+        )
+      );
+    })();
   }, []);
 
   const totalTurns = departments.reduce((a, d) => a + d.receiptCount, supervisor.receiptCount);

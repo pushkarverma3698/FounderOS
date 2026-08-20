@@ -102,7 +102,19 @@ export const aiCallCosts = agentsSchema.table(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenant_id: text("tenant_id").notNull(),
+    /**
+     * WHO spent it — the actor, never the stage. Kernel calls write the worker
+     * id ("jobhunt", "research", …) when the model was bound to that worker's
+     * tools, else the stage-level actor ("planner" | "synthesizer" | "worker");
+     * "kernel" means the call could not be attributed. Non-kernel writers use
+     * the same convention: "research" (gap scan), "creative" (image gen).
+     */
     agent: text("agent").notNull(),
+    /**
+     * WHICH STAGE spent it — "planner" | "worker" | "synthesizer" for kernel
+     * calls, "unattributed" when the stage was unknown. Non-kernel writers use
+     * their own sub-classification ("gap-scan", an image tier).
+     */
     tier: text("tier").notNull(),
     model: text("model").notNull(),
     tokens_in: integer("tokens_in").notNull(),
@@ -145,7 +157,19 @@ export const actionLog = agentsSchema.table(
      */
     idempotency_key: text("idempotency_key").unique(),
 
-    /** Full payload for audit trail — PII scrubbed by telemetry layer */
+    /**
+     * Full payload for the audit trail, stored VERBATIM.
+     *
+     * It is NOT scrubbed. The previous comment here claimed "PII scrubbed by
+     * telemetry layer"; that layer only ever scrubbed the local pino/trace path
+     * (src/infra/telemetry.ts), never this insert — both writers pass raw
+     * `.values(data)`.
+     *
+     * Verbatim is the correct behaviour, not a gap: this is first-party
+     * Postgres on our own box, and an audit row that redacts the recipient of
+     * an email it is attesting to would not be an audit row. The boundary worth
+     * guarding is third-party EXPORT, which src/infra/telemetry.ts gates.
+     */
     payload: jsonb("payload"),
 
     created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -1553,6 +1577,77 @@ export const evolutionFindings = agentsSchema.table(
 
 export type EvolutionFinding = typeof evolutionFindings.$inferSelect;
 export type NewEvolutionFinding = typeof evolutionFindings.$inferInsert;
+
+// ── answer_evaluations (async answer-quality verdicts) ───────────────────────
+
+/**
+ * One row per completed turn, written ASYNCHRONOUSLY by `src/infra/answer-eval.ts`
+ * after the founder already has the reply. This is an evaluator's record, never a
+ * gate: a bad score here has never blocked and must never block a reply.
+ *
+ * `status` is the load-bearing column:
+ *   evaluated      — the judge returned three scores; they are in the score columns.
+ *   not_evaluated  — the judge was unreachable, unparseable, or unconfigured. Every
+ *                    score column is NULL and `not_evaluated_reason` says why.
+ *
+ * The three dimensions are stored SEPARATELY and are never averaged into one
+ * number: a reply can answer the goal perfectly (relevance 100) while asserting a
+ * fact no step result supports (groundedness 0), and that is precisely the failure
+ * this table exists to make visible. Groundedness is the machine-checkable
+ * complement to the kernel's receipts mechanism — read it first.
+ *
+ * Never compute a pass rate over all rows: `WHERE status = 'evaluated'` or the
+ * denominator silently absorbs every turn the judge never saw.
+ */
+export const answerEvaluations = agentsSchema.table(
+  "answer_evaluations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+
+    /** Trace turn id — the same correlation id the logs carry. */
+    turn_id: text("turn_id").notNull(),
+    thread_id: text("thread_id").notNull(),
+
+    /** 'evaluated' | 'not_evaluated' — see doc comment above. */
+    status: text("status").notNull(),
+    /** Full sentence naming why no scores exist. NULL iff status = 'evaluated'. */
+    not_evaluated_reason: text("not_evaluated_reason"),
+
+    /** 0-100, NULL when not evaluated. A NULL can never read as a pass. */
+    groundedness: integer("groundedness"),
+    relevance: integer("relevance"),
+    completeness: integer("completeness"),
+    /** One sentence from the judge naming the weakest dimension. */
+    critique: text("critique"),
+
+    /** Truncated copies so a row is readable on its own, without a checkpoint join. */
+    goal: text("goal").notNull(),
+    reply: text("reply").notNull(),
+    /** How many steps the plan had — completeness is meaningless without it. */
+    planned_steps: integer("planned_steps").notNull().default(0),
+
+    /** `provider:model` of the judge, so a model swap is visible in the data. */
+    judge_model: text("judge_model").notNull(),
+
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    /** "recent verdicts for this tenant", the read path for any quality report. */
+    tenantCreatedIdx: index("ae_tenant_created_idx").on(t.tenant_id, t.created_at),
+    /** "which turns never got scored" — the outage query, kept cheap on purpose. */
+    tenantStatusIdx: index("ae_tenant_status_idx").on(t.tenant_id, t.status),
+    /**
+     * Lookup by turn. NOT unique on purpose: a HITL resume re-runs synthesis under
+     * the SAME turn id, producing a second, different answer. A unique index would
+     * throw on the post-approval answer — the one that actually reached the founder.
+     */
+    turnIdx: index("ae_turn_idx").on(t.turn_id),
+  }),
+);
+
+export type AnswerEvaluation = typeof answerEvaluations.$inferSelect;
+export type NewAnswerEvaluation = typeof answerEvaluations.$inferInsert;
 
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them

@@ -123,12 +123,29 @@ export const envSchema = z.object({
   SKILL_SYNTHESIS_ENABLED: z.enum(["true", "false"]).default("false"),
 
   // ── Evolution findings persistence (Task 3, 2026-08-13) ─────────────────────
-  /** Write each self-audit run's findings to evolution_runs/evolution_findings
-   *  so recurrence and regressions survive across runs. Default OFF: the tables
-   *  exist on prod but nothing has ever written to them, so the first run with
-   *  this ON establishes the baseline every later run diffs against. The report
-   *  itself is unaffected by this flag — only the database writes are gated. */
-  EVOLUTION_PERSIST_FINDINGS: z.enum(["true", "false"]).default("false"),
+  /** Gate the evolution_runs/evolution_findings writes that make recurrence
+   *  visible; the report itself is unaffected. Default ON since 2026-08-14 —
+   *  opt out with "false". Why it flipped: persistAuditRun in
+   *  src/evolution/run-audit.ts, which is also the code that reads it. */
+  EVOLUTION_PERSIST_FINDINGS: z.enum(["true", "false"]).default("true"),
+
+  // ── Self-improvement acting loop (Task 6, 2026-08-13) ───────────────────────
+  /** Whether the 3-day acting loop may file a GitHub issue (max 1/run, deduped by
+   *  finding fingerprint) for the agent dispatcher. Default ON, unlike the flags
+   *  above: this is the only loop that turns an audit into work, and one that
+   *  ships disabled is inert by construction. Rationale + kill-switch semantics:
+   *  src/evolution/dispatch-findings.ts, which reads process.env at call time. */
+  SELF_IMPROVE_DISPATCH_ENABLED: z.enum(["true", "false"]).default("true"),
+  /** Must match the `ISSUE_REPO` the VPS `agent-dispatch` cron watches, or issues
+   *  are filed where nothing will ever claim them. */
+  SELF_IMPROVE_ISSUE_REPO: z.string().default("pushkarverma3698/FounderOS"),
+
+  // ── TUI dispatch demo stub (2026-08-13 endpoint-integrity audit) ────────────
+  /** Enable POST /api/v1/dispatch, a demo stub for scripts/tui-dashboard.ts that
+   *  does NOT invoke the kernel. Default OFF: it used to mint a trace turnId and
+   *  emit hardcoded seam events into journald, which is the channel
+   *  `pnpm verify:benchmark` trusts to prove a turn really happened. */
+  TUI_DISPATCH_ENABLED: z.enum(["true", "false"]).default("false"),
 
   // Global halt (kill switch) — optional flag-file path override.
   // Default: $HOME/.founderos/HALT (resolved in src/infra/halt.ts).
@@ -315,6 +332,14 @@ export const SKILL_SYNTHESIS_ENABLED = env.SKILL_SYNTHESIS_ENABLED === "true";
  * future config surface can show the value the process started with.
  */
 export const EVOLUTION_PERSIST_FINDINGS = env.EVOLUTION_PERSIST_FINDINGS === "true";
+
+/**
+ * Whether the TUI dispatch demo stub (POST /api/v1/dispatch) answers at all.
+ * OFF by default. It never invokes the kernel; enabling it only makes the TUI
+ * dashboard's prompt box return 200 instead of 404. `src/infra/health.ts` reads
+ * `process.env` at request time rather than this frozen constant.
+ */
+export const TUI_DISPATCH_ENABLED = env.TUI_DISPATCH_ENABLED === "true";
 
 /**
  * Local rerank stage after hybrid RAG fusion (spec §1.1 F5). Default OFF — it

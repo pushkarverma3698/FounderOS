@@ -24,15 +24,18 @@ export const opsStateTool: UnifiedTool = {
   name: "ops_state",
   description:
     "Deterministic read of system operational state from Postgres. " +
-    "Scopes available: 'scheduled_tasks', 'reminders', 'hitl_approvals', 'action_log', 'costs'. " +
-    "Returns { count, total, scope, rows }.",
+    "Scopes: 'scheduled_tasks', 'reminders', 'hitl_approvals', 'action_log', " +
+    "'costs' (money spent on AI calls — dollar totals and per-model breakdown), " +
+    "'job_runs' (job sweep throughput — requested/returned/screened/passed counts). " +
+    "Use 'costs' for any question about spend, budget or what something cost. " +
+    "Returns { count, total, scope, rows }; 'costs' also returns { totals }.",
 
   input_schema: {
     type: "object",
     properties: {
       scope: {
         type: "string",
-        enum: ["scheduled_tasks", "reminders", "hitl_approvals", "action_log", "costs"],
+        enum: ["scheduled_tasks", "reminders", "hitl_approvals", "action_log", "costs", "job_runs"],
         description: "The operational scope to query.",
       },
       status: {

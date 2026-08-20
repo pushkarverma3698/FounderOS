@@ -112,26 +112,37 @@
     // slower than the version it replaces.
     const settleMs = 1200;
 
-    const newText = () => {
-      const after = document.body.innerText.toLowerCase();
-      return after.length > beforeText.length && !beforeText.includes(after)
-        ? after
-        : after.slice(beforeText.length > 0 && after.startsWith(beforeText) ? beforeText.length : 0);
+    const countOccurrences = (str, word) => {
+      let count = 0;
+      let pos = 0;
+      while (true) {
+        pos = str.indexOf(word, pos);
+        if (pos >= 0) {
+          count++;
+          pos += word.length;
+        } else break;
+      }
+      return count;
     };
 
     const failureSignal = () => {
       if (dialogSeen) return "a dialog appeared after submitting";
-      const added = newText();
+      
+      const after = document.body.innerText.toLowerCase();
       const failWords = ["error", "required", "please fill", "please enter", "invalid", "try again", "already associated", "failed"];
-      const hit = failWords.find((w) => added.includes(w));
-      return hit ? `the page said: "${escapeHtml(excerptAround(added, hit))}"` : null;
+      
+      const hit = failWords.find((w) => countOccurrences(after, w) > countOccurrences(beforeText, w));
+      return hit ? `the page said: "${escapeHtml(excerptAround(after, hit))}"` : null;
     };
 
     const successSignal = () => {
       if (window.location.href !== startUrl && !window.location.href.includes("#")) return true;
-      const added = newText();
+      
+      const after = document.body.innerText.toLowerCase();
       const okWords = ["thank you", "application received", "application submitted", "successfully submitted"];
-      if (okWords.some((w) => added.includes(w))) return true;
+      
+      if (okWords.some((w) => countOccurrences(after, w) > countOccurrences(beforeText, w))) return true;
+      
       if (!document.body.contains(target)) return true;
       return false;
     };

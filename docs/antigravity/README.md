@@ -3,14 +3,6 @@
 **Purpose:** Antigravity is the implementation engine for wide-and-shallow work. Claude writes the
 brief and reviews the result; Antigravity writes the code. This folder holds the briefs.
 
-**Two dispatch paths now exist.** Hand-authored briefs below are still how Claude delegates
-laptop-side, conversation-context work. For issue-driven, fully unattended work (GitHub Issue →
-Antigravity → PR → Claude review → fix → CI, no founder relay), see
-[ISSUE-DRIVEN-CONTRACT.md](ISSUE-DRIVEN-CONTRACT.md) and the `agent:*` label state machine it
-defines — driven by the VPS `agent-dispatch` cron, the issue-queue counterpart to `pr-brain`.
-Both paths (and Claude's own work in this repo) follow one shared rule now:
-[BRANCHING-STRATEGY.md](BRANCHING-STRATEGY.md) — one branch per unit of work, always.
-
 > **Contractors build the factory. Once the factory runs, the factory improves itself.**
 > Every brief here is Phase 0 bootstrap work. When FounderOS can plan and dispatch its own next
 > milestone, these briefs stop being written by hand — see
@@ -57,8 +49,16 @@ Each brief still restates the specifics.
 
 ## Dispatching
 
+A brief may originate two ways: hand-authored as `AG-NNN-*.md` in this folder (Claude writes it,
+as below), or as a GitHub Issue opened with the **Antigravity task** template
+(`.github/ISSUE_TEMPLATE/antigravity-task.yml`), which asks for the same five fields. Either way,
+reference the source in the dispatch title and in the PR body (`Fixes #N` for an issue) so GitHub
+carries the link, not just this conversation.
+
 Prerequisite: the Antigravity **GUI must be running with this workspace open** —
-`agentapi new-conversation` needs a server-side `project_id`. Laptop only; never cron or VPS.
+`agentapi new-conversation` needs a server-side `project_id` issued by that running instance.
+This is a structural requirement of `agentapi`, not a policy choice — there is no headless mode to
+enable, so dispatch is laptop-only; never cron or VPS.
 
 ```bash
 ~/Projects/scripts/ai-tools/agy new --model=pro --title="AG-001 M0a static analyzers" "$(cat docs/antigravity/AG-001-m0a-static-analyzers.md)"
