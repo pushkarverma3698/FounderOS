@@ -40,6 +40,7 @@ import { TRACK_PRIORITY, TRACK_TITLES, type RoleTrack } from "./tracks.js";
 import { dedupePostings, screenBatch, INGEST_SOURCE, type IngestLine } from "./ingest-batch.js";
 import { recordQueryCost } from "./ingest-ledger.js";
 import { ATS_PRICING, INDEED_PRICING, estimateQueryCost } from "./cost.js";
+import { startBoardHarvest, collectBoardTokens, flushBoardHarvest, type DiscoveredBoard } from "./board-harvest.js";
 import { checkSweepBudget } from "./spend-gate.js";
 
 // Re-exported so every existing import site keeps resolving here. The batch
@@ -111,6 +112,7 @@ export interface PooledIngest {
   readonly perTrack: Readonly<Record<RoleTrack, number>>;
   /** Groups this sweep's rows in `job_ingest_runs`, so a day's cost is one query. */
   readonly sweepId: string;
+  readonly newBoards: readonly DiscoveredBoard[]; // new registry rows — see board-harvest.ts
 }
 
 /**
@@ -170,6 +172,7 @@ export async function runPooledIngest(opts: {
       notes: [],
       perTrack: Object.fromEntries(TRACK_PRIORITY.map((t) => [t, 0])) as Record<RoleTrack, number>,
       sweepId,
+      newBoards: [],
     };
   }
 
@@ -189,6 +192,7 @@ export async function runPooledIngest(opts: {
     number
   >;
 
+  const harvest = startBoardHarvest(sweepId); // see board-harvest.ts
   // EVERY TRACK GETS ITS OWN QUERY AND ITS OWN BUDGET.
   //
   // Until 2026-08-01 all twelve title phrases went into ONE `titleSearch` with
@@ -244,6 +248,7 @@ export async function runPooledIngest(opts: {
         source: INGEST_SOURCE,
         country: p.country && p.country !== "unknown" ? p.country : POOL_COUNTRY[pool],
       }));
+      collectBoardTokens(harvest, batch); // fetch boundary, before dedupe/screening
       const { unique, collapsed } = dedupePostings(batch);
       if (collapsed > 0) {
         notes.push(
@@ -375,6 +380,7 @@ export async function runPooledIngest(opts: {
   }
 
   const fresh = lines.filter((l) => l.isNew).length;
+  const newBoards = await flushBoardHarvest(harvest, sweepId);
 
   log.info(
     {
@@ -385,8 +391,9 @@ export async function runPooledIngest(opts: {
       pools: POOL_ORDER.length,
       failures: failures.length,
       notes: notes.length,
+      newBoardsDiscovered: newBoards.length,
     },
     "Pooled job ingest complete",
   );
-  return { fetched, fresh, lines, failures, notes, perTrack, sweepId };
+  return { fetched, fresh, lines, failures, notes, perTrack, sweepId, newBoards };
 }

@@ -26,7 +26,7 @@ import {
   handleConnect,
   unknownCommandReply,
 } from "./commands.js";
-import { handleAsk, handleDraft } from "./jobhunt-commands.js";
+import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
 import { registerMediaHandlers } from "./media.js";
 import { runKernelText, resumeKernel } from "./kernel-run.js";
 import { isConflictError, conflictBackoffMs, CONFLICT_MAX_ATTEMPTS } from "./telegram-poll.js";
@@ -55,6 +55,7 @@ export function registerHandlers(bot: Bot): void {
   bot.command("commands", (ctx: Context) => handleCommands(ctx));
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
   bot.command("ask", (ctx: Context) => handleAsk(ctx, { runKernelText }));
+  bot.command("applied", (ctx: Context) => handleApplied(ctx));
 
   bot.on("message:text", async (ctx: Context) => {
     const text = ctx.message?.text ?? "";

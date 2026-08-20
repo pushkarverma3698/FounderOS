@@ -12,7 +12,12 @@
  */
 
 import { childLogger } from "../../infra/logger.js";
-import { listActionableApplications, recordLiveness } from "../../db/job-queries.js";
+import {
+  listActionableApplications,
+  countAgedOutApplications,
+  recordLiveness,
+  APPLY_QUEUE_MAX_AGE_HOURS,
+} from "../../db/job-queries.js";
 import { summariseSpend } from "../../db/job-run-queries.js";
 import { compareOverlap, overlapScore, type OverlapResult } from "./overlap.js";
 import { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
@@ -162,9 +167,16 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
   // behalf were invisible to him, which is the whole complaint. They cost nothing
   // to show: one line each, and `verificationTargets` still refuses to spend the
   // liveness budget on them.
-  const applications = await listActionableApplications({
-    verdicts: ["pass", "flag", "reject"],
-  });
+  const verdicts = ["pass", "flag", "reject"] as const;
+  const applications = await listActionableApplications({ verdicts });
+  let agedOut = 0;
+  try {
+    agedOut = await countAgedOutApplications({ verdicts });
+  } catch (err) {
+    // allow-failopen: the freshness line is context, not the deliverable. Losing
+    // the whole brief over a count query would trade the shortlist for a footnote.
+    log.warn({ err: (err as Error).message }, "Aged-out count unavailable — freshness line will read 0");
+  }
   const { cvs, unreadable } = loadTrackCvs();
   const scored = rankRows(applications, cvs, now);
 
@@ -260,6 +272,8 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     trends: await buildTrends(cvs, now),
     failures: [...(opts.failures ?? []), ...cvFailure, ...untrackedNote],
     notes: opts.notes ?? [],
+    agedOut,
+    maxAgeHours: APPLY_QUEUE_MAX_AGE_HOURS,
     ...(spend ? { spend } : {}),
   };
 

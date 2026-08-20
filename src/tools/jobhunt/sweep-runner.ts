@@ -18,6 +18,7 @@
 import { childLogger } from "../../infra/logger.js";
 import { sendToChat } from "../../infra/telegram-send.js";
 import { esc } from "./telegram-format.js";
+import type { DiscoveredBoard } from "./board-token.js";
 import {
   afterQuietSweep,
   afterSpokenSweep,
@@ -26,6 +27,26 @@ import {
 } from "./sweep-heartbeat.js";
 
 const log = childLogger({ module: "scheduler" });
+
+/** Names shown before the line falls back to a bare count. */
+const NEW_BOARDS_NAME_CAP = 5;
+
+/**
+ * "+3 new companies now polled: Speechify, IMC, Roadie" — one extra line
+ * inside the sweep's existing message, never its own notification. Two
+ * messages for one event is how a channel becomes noise (see `publishSheet`
+ * below, which states the same rule for the sheet-export failure line).
+ */
+export function newBoardsLine(newBoards: readonly DiscoveredBoard[]): string {
+  if (newBoards.length === 0) return "";
+  const names = newBoards
+    .slice(0, NEW_BOARDS_NAME_CAP)
+    .map((b) => esc(b.name))
+    .join(", ");
+  const overflow = newBoards.length > NEW_BOARDS_NAME_CAP ? ` +${newBoards.length - NEW_BOARDS_NAME_CAP} more` : "";
+  const plural = newBoards.length === 1 ? "company" : "companies";
+  return `\n<i>+${newBoards.length} new ${plural} now polled: ${names}${overflow}</i>`;
+}
 
 // 01:30 UTC = 07:00 IST, every THIRD day (founder decision, 2026-08-02). The
 // feed bills per job RETURNED, so cadence changes only how often we re-buy the
@@ -95,8 +116,9 @@ export async function runJobIngestSweep(): Promise<void> {
     // The metered sweep has no alert of its own to carry the line — it runs
     // every third day and the founder should hear from it either way.
     await sendToChat(
-      notice ??
-        `📊 <b>Screened ${result.fetched} posting(s)</b> — the job sheet is up to date.\n${link}`,
+      (notice ??
+        `📊 <b>Screened ${result.fetched} posting(s)</b> — the job sheet is up to date.\n${link}`) +
+        newBoardsLine(result.newBoards),
     );
   } catch (err) {
     // The postings ARE screened and recorded by this point. Losing the ranking
@@ -173,7 +195,7 @@ const OUTAGE_ALERT_BOARD_CAP = 3;
  * this constant is just where that decision is pinned, so changing the cadence
  * is one edit here instead of a string buried in a `cron.schedule` call.
  */
-export const FREE_SWEEP_CRON = "0 0 * * *";
+export const FREE_SWEEP_CRON = "*/30 * * * *";
 
 /**
  * The lane's memory of when it last said anything.
