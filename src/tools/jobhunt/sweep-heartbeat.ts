@@ -139,9 +139,23 @@ export function formatAlivePing(state: HeartbeatState, sheetLink: string | null)
   return (
     `✅ <b>Job lane alive</b> — ${sweeps} sweep${sweeps === 1 ? "" : "s"} since the last update, ` +
     `${state.boardsPolled.toLocaleString()} board checks, nothing new that cleared screening.${dropInfo}` +
-    (sheetLink ? `\n${sheetLink}` : "")
+    (sheetLink ? `\n${sheetLink}` : "") +
+    `\n${NEXT_STEP_LINE}`
   );
 }
+
+/**
+ * What to do next, named as commands rather than implied.
+ *
+ * UNCONDITIONAL, and that is the point. Until 2026-08-21 this tail was a Google
+ * Sheet link — and because the Sheet was never configured, `sheetLink` was null
+ * on every sweep and the founder was told to "ask for the job brief", which is a
+ * phrase, not a control. `/draft` and `/applied` were not invoked once in seven
+ * days of logs. An alert whose call to action is a sentence someone has to
+ * rephrase is an alert that ends in nothing.
+ */
+export const NEXT_STEP_LINE =
+  "→ /jobs for the ranked list · /csv for the file · /draft &lt;n&gt; to apply";
 
 /**
  * The alert for rows that are BOTH new and worth acting on.
@@ -154,14 +168,15 @@ export function formatNewRowsAlert(
   const rows = named.map((p) => `• ${esc(p.company)} — ${esc(p.title)}`).join("\n");
   const rest =
     passes.length > NEW_ROWS_NAMED
-      ? `\n<i>+ ${passes.length - NEW_ROWS_NAMED} more in the sheet.</i>`
+      ? `\n<i>+ ${passes.length - NEW_ROWS_NAMED} more.</i>`
       : "";
 
   return (
     `🆕 <b>${passes.length} new role${passes.length === 1 ? "" : "s"} passed screening</b>\n` +
     rows +
     rest +
-    (sheetLink ? `\n\n${sheetLink}` : "\n\nAsk for the job brief for the full ranking.")
+    (sheetLink ? `\n\n${sheetLink}` : "") +
+    `\n\n${NEXT_STEP_LINE}`
   );
 }
 

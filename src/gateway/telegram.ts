@@ -27,6 +27,8 @@ import {
   unknownCommandReply,
 } from "./commands.js";
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
+import { handleCsv, handleJobs } from "./jobhunt-view.js";
+import { splitForTelegram } from "../tools/jobhunt/telegram-format.js";
 import { registerMediaHandlers } from "./media.js";
 import { runKernelText, resumeKernel } from "./kernel-run.js";
 import { isConflictError, conflictBackoffMs, CONFLICT_MAX_ATTEMPTS } from "./telegram-poll.js";
@@ -56,6 +58,16 @@ export function registerHandlers(bot: Bot): void {
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
   bot.command("ask", (ctx: Context) => handleAsk(ctx, { runKernelText }));
   bot.command("applied", (ctx: Context) => handleApplied(ctx));
+  // The renderer is dynamically imported so this transport file never pulls the
+  // brief's database and liveness dependencies into the bot's startup path.
+  // `splitForTelegram` is pure formatting and imported normally.
+  bot.command("jobs", (ctx: Context) =>
+    handleJobs(ctx, {
+      buildBrief: async () => (await import("../tools/jobhunt/daily-brief.js")).buildDailyBrief(),
+      split: splitForTelegram,
+    }),
+  );
+  bot.command("csv", (ctx: Context) => handleCsv(ctx));
 
   bot.on("message:text", async (ctx: Context) => {
     const text = ctx.message?.text ?? "";

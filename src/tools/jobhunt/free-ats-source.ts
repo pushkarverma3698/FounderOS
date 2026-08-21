@@ -22,6 +22,13 @@
  *      host is down is the pipeline failing at the moment it is unattended.
  *   3. A request that hangs is bounded. No timeout means one slow host stalls a
  *      sweep that is supposed to finish inside its 30-minute window.
+ *
+ * A FOURTH, ADDED 2026-08-21: a board that rate-limited us is asked again, not
+ * written off. Recruitee limits the CALLER rather than the board, so 36 of 113
+ * boards failed on every single sweep from the VPS and lowering the in-flight
+ * limit to 1 only moved that to 15 — a third of the Dutch registry permanently
+ * unreachable, and invisible, because the ledger only ever stored the first
+ * three failure strings and those were always the same harmless 404s.
  */
 
 import { childLogger } from "../../infra/logger.js";
@@ -69,6 +76,61 @@ export const PLATFORM_CONCURRENCY: Readonly<Record<FreeAts, number>> = {
   lever: BOARD_CONCURRENCY,
   ashby: BOARD_CONCURRENCY,
   recruitee: 2,
+};
+
+/**
+ * How many times one board is asked before it counts as failed.
+ *
+ * Three, not more. The sweep polls 623 boards inside a 30-minute window, and the
+ * failure this bounds is a rate limit that clears in a second or two — a fourth
+ * attempt buys almost nothing and costs every board in the queue behind it.
+ */
+export const BOARD_ATTEMPTS = 3;
+
+/** Base unit of the backoff. Recruitee's window clears well inside a second. */
+const RETRY_BASE_MS = 400;
+
+/**
+ * Statuses worth asking again.
+ *
+ * 429 is the one that matters and the reason this exists. The 5xx family is
+ * included because a host that is briefly down is not a dead board, and the
+ * alternative reading — treating it as one — is how a healthy company silently
+ * leaves the registry. EVERYTHING ELSE IS NOT RETRIED, and 404 is the case that
+ * proves the rule: a rotated token 404s forever, so retrying it is pure delay
+ * charged to every board still queued behind it.
+ */
+const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
+
+/** Carries the HTTP status so the retry decision is made on the code, not on a string. */
+class HttpStatusError extends Error {
+  constructor(readonly status: number) {
+    super(`HTTP ${status}`);
+    this.name = "HttpStatusError";
+  }
+}
+
+/**
+ * How long to wait before attempt `attempt + 1`, in ms.
+ *
+ * Exponential with FULL JITTER, and the jitter is not cosmetic: `PLATFORM_
+ * CONCURRENCY.recruitee` sends boards at the limiter in a steady stream, so a
+ * fixed backoff would retry them in lockstep and reproduce the same burst that
+ * earned the 429. `random` is a parameter rather than a call to Math.random so
+ * the growth and the ceiling are assertable without a flaky test.
+ */
+export function retryDelayMs(attempt: number, random: number): number {
+  const ceiling = RETRY_BASE_MS * 2 ** (attempt - 1);
+  return Math.round(ceiling * (0.5 + 0.5 * random));
+}
+
+/** Injectable wait, so the retry tests do not spend real seconds proving a delay. */
+export interface FetchBoardDeps {
+  readonly sleep: (ms: number) => Promise<void>;
+}
+
+const realSleep: FetchBoardDeps = {
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
 
 export type BoardFetch =
@@ -125,7 +187,7 @@ async function fetchJson(url: string, timeoutMs: number): Promise<unknown> {
       // Read the status before discarding the body, then discard it: an
       // unconsumed body holds the socket open under undici until GC.
       void response.body?.cancel();
-      throw new Error(`HTTP ${response.status}`);
+      throw new HttpStatusError(response.status);
     }
     return await response.json();
   } finally {
@@ -134,14 +196,46 @@ async function fetchJson(url: string, timeoutMs: number): Promise<unknown> {
 }
 
 /**
- * Fetch and normalise one board.
+ * Whether asking this host again could plausibly produce a different answer.
+ *
+ * A non-HTTP throw is a transport failure or our own abort — a socket reset or a
+ * host that took longer than BOARD_TIMEOUT_MS — and those are transient by
+ * nature, so they retry. Only a definite HTTP answer outside RETRYABLE_STATUSES
+ * is taken as final.
+ */
+function isRetryable(err: unknown): boolean {
+  return err instanceof HttpStatusError ? RETRYABLE_STATUSES.has(err.status) : true;
+}
+
+/**
+ * Fetch and normalise one board, retrying the answers that mean "ask again".
  *
  * Returns a typed failure rather than throwing, because the caller's job is to
  * COUNT failures, not to be interrupted by them.
+ *
+ * THE MAPPER RUNS OUTSIDE THE RETRY. Normalisation is pure and deterministic, so
+ * a mapper that throws will throw identically three times — retrying it would
+ * turn one of our own bugs into three times the traffic at a third party.
  */
-export async function fetchBoard(board: FreeBoard): Promise<BoardFetch> {
+export async function fetchBoard(
+  board: FreeBoard,
+  deps: FetchBoardDeps = realSleep,
+): Promise<BoardFetch> {
+  let payload: unknown;
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      payload = await fetchJson(boardUrl(board), BOARD_TIMEOUT_MS);
+      break;
+    } catch (err) {
+      if (attempt >= BOARD_ATTEMPTS || !isRetryable(err)) {
+        return { ok: false, board, error: (err as Error).message };
+      }
+      await deps.sleep(retryDelayMs(attempt, Math.random()));
+    }
+  }
+
   try {
-    const payload = await fetchJson(boardUrl(board), BOARD_TIMEOUT_MS);
     return { ok: true, board, candidates: FREE_MAPPERS[board.ats](payload, board) };
   } catch (err) {
     return { ok: false, board, error: (err as Error).message };
@@ -153,6 +247,43 @@ export interface BoardSweep {
   /** One entry per board that failed, named so a rotated token is findable. */
   readonly failures: readonly string[];
   readonly boardsPolled: number;
+}
+
+/** Patterns beyond this are folded into a "+N more" tail rather than dropped. */
+const SUMMARY_PATTERN_CAP = 6;
+
+/**
+ * Every failure in the sweep, as counts per (platform, reason).
+ *
+ * REPLACES `failures.slice(0, 3)`, which was the reporting half of the bug this
+ * module's fourth failure rule describes: the ledger stored three strings, and
+ * because the sweep polls Greenhouse first those three were always the same
+ * harmless 404s. Thirty-six Recruitee rate limits per sweep never once appeared
+ * anywhere the founder looks.
+ *
+ * Counts rather than names, because the founder's question is "is a platform
+ * broken", not "which of 623 tokens". The names are still in the logs, and
+ * `failures` itself is untouched for the callers that want them. Bounded on
+ * purpose: a total outage must write a readable line to the ledger, not 623 of
+ * them.
+ */
+export function summariseFailures(failures: readonly string[]): string {
+  if (failures.length === 0) return "";
+
+  const counts = new Map<string, number>();
+  for (const failure of failures) {
+    // Our own format, produced in sweepBoards: "<ats>/<token>: <error>".
+    const match = /^([^/]+)\/[^:]*:\s*(.*)$/.exec(failure);
+    const key = match ? `${match[1]} ${match[2]}` : failure;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const ranked = [...counts].sort((a, b) => b[1] - a[1]);
+  const shown = ranked.slice(0, SUMMARY_PATTERN_CAP).map(([key, n]) => `${key} ×${n}`);
+  const hidden = ranked.length - shown.length;
+  if (hidden > 0) shown.push(`+${hidden} other pattern(s)`);
+
+  return `${failures.length} board(s) failed: ${shown.join("; ")}`;
 }
 
 /**

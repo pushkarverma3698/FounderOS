@@ -43,7 +43,7 @@ import { countryFromLocation } from "./country.js";
 import { dedupeKey } from "./filters.js";
 import { getFreeBoards, type FreeBoard } from "./free-boards.js";
 import { toRawPosting, type FreeCandidate } from "./free-ats-mappers.js";
-import { hydrateDescriptions, sweepBoards } from "./free-ats-source.js";
+import { hydrateDescriptions, sweepBoards, summariseFailures } from "./free-ats-source.js";
 import { screenBatch, type IngestLine } from "./ingest-batch.js";
 import { recordQueryCost } from "./ingest-ledger.js";
 import { classifyTrack } from "./tracks.js";
@@ -261,7 +261,12 @@ export async function runFreeIngest(
     returned: postings.length,
     pricing: FREE_PRICING,
     lines,
-    ...(sweep.failures.length > 0 ? { error: sweep.failures.slice(0, 3).join("; ") } : {}),
+    // Counts per (platform, reason), NOT the first three strings. The sweep polls
+    // Greenhouse first, so "first three" was always the same three harmless 404s
+    // and 36 Recruitee rate limits a sweep never reached the founder — the
+    // reporting half of the defect `free-ats-source.ts` describes as its fourth
+    // failure rule.
+    ...(sweep.failures.length > 0 ? { error: summariseFailures(sweep.failures) } : {}),
   });
 
   log.info(
