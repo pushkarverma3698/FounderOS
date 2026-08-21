@@ -1,9 +1,15 @@
 /**
- * Unit tests — every self-improvement job is actually registered on a cron.
+ * Unit tests — every scheduled job is actually registered on a cron.
  * ========================================================================
  * `startScheduler` had no test at all, so a job could be written, imported and
  * never scheduled with nothing failing. These assertions pin the schedule the
  * founder was told about in the startup log line.
+ *
+ * The self-audit sweep, self-improvement dispatch, weekly RAG optimization,
+ * and the metered job-ingest sweep are DELIBERATELY absent from
+ * EXPECTED_CRONS (disabled 2026-08-21, see scheduler.ts's file header) — this
+ * test would otherwise silently re-permit any of them coming back without a
+ * conscious edit here too.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -19,7 +25,14 @@ const EXPECTED_CRONS = {
   "hourly budget alert": "0 * * * *",
   "checkpoint TTL sweep": "30 3 * * *",
   "nightly brain sync": "0 2 * * *",
+  "free board sweep": "*/30 * * * *",
+} as const;
+
+/** Disabled 2026-08-21 — must NOT be registered. */
+const DISABLED_CRONS = {
+  "metered job ingest": "30 1 */3 * *",
   "3-day self-audit sweep": "0 8 */3 * *",
+  "3-day self-improvement dispatch": "0 9 */3 * *",
   "weekly RAG optimization": "0 3 * * 0",
 } as const;
 
@@ -27,7 +40,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("startScheduler — self-improvement jobs are wired, not merely written", () => {
+describe("startScheduler — jobs are wired, not merely written", () => {
   it("registers every promised cron expression", () => {
     startScheduler();
 
@@ -49,11 +62,12 @@ describe("startScheduler — self-improvement jobs are wired, not merely written
     expect(withExecutor).toBe(withoutExecutor + 1);
   });
 
-  it("schedules the self-audit every 3 days and the RAG sweep weekly on Sunday", () => {
+  it("does not register the disabled paid/self-improvement crons", () => {
     startScheduler();
     const registered = mockSchedule.mock.calls.map((call) => call[0] as string);
 
-    expect(registered).toContain("0 8 */3 * *");
-    expect(registered).toContain("0 3 * * 0");
+    for (const [name, expression] of Object.entries(DISABLED_CRONS)) {
+      expect(registered, `${name} (${expression}) must NOT be scheduled`).not.toContain(expression);
+    }
   });
 });
