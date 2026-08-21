@@ -53,7 +53,10 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
   },
   {
     command: "draft",
-    description: "draft n — tailor a CV for row n and send it to you to approve",
+    // Names all three forms. A bulk command nobody knows about is a bulk
+    // command nobody uses, and the whole point of adding it was that 543
+    // screened roles had produced two applications one row at a time.
+    description: "draft n | draft 1,3,5 | draft all — tailor a CV + cover letter and the apply link",
     group: "jobs",
   },
   {
