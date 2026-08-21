@@ -11,6 +11,16 @@
  *  - budget threshold alerts: 80%/100% of the daily cap, deduped per day
  *  - checkpoint TTL sweep: bounds agents.checkpoints growth
  *  - nightly brain:sync: prevents the empty-RAG production outage class
+ *
+ * DISABLED 2026-08-21 (founder directive — paid crons producing no acted-on
+ * output): the metered job-ingest sweep (JOB_SWEEP_CRON, $0.46/run — the free
+ * board sweep above already covers discovery), the self-audit sweep
+ * (audit-sweep.ts — findings were never persisted, `writeTaskOutcome` had zero
+ * callers), the self-improvement dispatch (dispatch-sweep.ts — blocked on
+ * `resolveExecutorCwd` refusing both hosts, entirely inert), and the weekly RAG
+ * optimization sweep (rag-optimization-sweep.ts). The functions and their unit
+ * tests are untouched — only the `cron.schedule()` registration was removed —
+ * so re-enabling any one of them is a one-line change in `startScheduler`.
  */
 
 import cron from "node-cron";
@@ -33,9 +43,6 @@ import {
 import { nextRecurrence } from "../core/time.js";
 import { providerLinkedInPost } from "./providers/index.js";
 import { sendToChat } from "./telegram-send.js";
-import { runSelfAuditSweep } from "../evolution/audit-sweep.js";
-import { runSelfImprovementSweep } from "../evolution/dispatch-sweep.js";
-import { runRagOptimizationSweep } from "./rag-optimization-sweep.js";
 import { childLogger } from "./logger.js";
 import { TENANT, env } from "../core/config.js";
 import type { ScheduledPost, ScheduledTask } from "../db/schema.js";
@@ -280,11 +287,6 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
   cron.schedule("0 2 * * *", () => {
     runBrainSync().catch((err) => log.error({ err: (err as Error).message }, "Auto brain sync cron error"));
   });
-  cron.schedule(JOB_SWEEP_CRON, () => {
-    runJobIngestSweep().catch((err) =>
-      log.error({ err: (err as Error).message }, "Job ingest sweep cron error"),
-    );
-  });
   cron.schedule(FREE_SWEEP_CRON, () => {
     runFreeSweep().catch((err) =>
       log.error({ err: (err as Error).message }, "Free board sweep cron error"),
@@ -308,26 +310,8 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
       );
     });
   }
-  cron.schedule("0 8 */3 * *", () => {
-    runSelfAuditSweep().catch((err) =>
-      log.error({ err: (err as Error).message }, "3-day self-audit sweep cron error"),
-    );
-  });
-  // One hour after the audit REPORTS, the acting loop hands at most one finding
-  // to the issue dispatcher. The gap is deliberate: the founder reads the full
-  // audit first and can kill a finding before it becomes unattended work.
-  cron.schedule("0 9 */3 * *", () => {
-    runSelfImprovementSweep().catch((err) =>
-      log.error({ err: (err as Error).message }, "3-day self-improvement dispatch cron error"),
-    );
-  });
-  cron.schedule("0 3 * * 0", () => {
-    runRagOptimizationSweep().catch((err) =>
-      log.error({ err: (err as Error).message }, "Weekly RAG optimization sweep cron error"),
-    );
-  });
   log.info(
-    "Scheduler started — stale-approval check (daily 9am), self-audit sweep (every 3 days 8am), self-improvement dispatch (every 3 days 9am), RAG optimization (weekly Sun 3am), budget alerts (hourly), brain sync (daily 2am), job ingest (daily 1:30am UTC), free board sweep (every 30 minutes), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
+    "Scheduler started — stale-approval check (daily 9am), budget alerts (hourly), brain sync (daily 2am), free board sweep (every 30 minutes), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
       (taskExecutor ? ", scheduled-task sweep (every minute)" : ""),
   );
 }
