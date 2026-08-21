@@ -11,12 +11,8 @@
  */
 
 import { getApplicationByBriefRank } from "../src/db/job-queries.js";
-import {
-  parseRowArg,
-  unresolvedMessage,
-  askInstruction,
-  draftInstruction,
-} from "../src/gateway/jobhunt-commands.js";
+import { parseRowArg, unresolvedMessage } from "../src/gateway/jobhunt-commands.js";
+import { askInstruction, draftInstruction } from "../src/gateway/jobhunt-instructions.js";
 
 const RULE = "─".repeat(78);
 

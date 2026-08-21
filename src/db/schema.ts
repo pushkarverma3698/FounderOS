@@ -1248,6 +1248,29 @@ export const jobIngestRuns = agentsSchema.table(
      */
     fresh: integer("fresh").notNull().default(0),
 
+    /**
+     * WHERE THE POSTINGS WENT — the six stages `filterCandidates` and
+     * `keepUnseen` drop rows at, in the order they run.
+     *
+     * `runFreeIngest` has always built this struct and always thrown it away at
+     * the database boundary, so the only record of it was a log line. On
+     * 2026-08-21 answering "are we dropping roles?" needed `journalctl` on the
+     * production box and a regex, and the answer turned out to be worth a lot:
+     * `stale` was discarding 24,446 postings per sweep against 554 rows held
+     * lifetime, which means ≥23,892 open roles had never been screened once.
+     *
+     * A funnel that lives only in a log is a funnel nobody queries. Null on the
+     * metered lane, which does not compute these — null means "not measured
+     * here", never zero.
+     */
+    seen: integer("seen"),
+    undated: integer("undated"),
+    stale: integer("stale"),
+    off_track: integer("off_track"),
+    off_market: integer("off_market"),
+    known: integer("known"),
+    bodyless: integer("bodyless"),
+
     /** Our arithmetic over the posted per-job + per-start prices. Not an invoice. */
     estimated_cost_usd: numeric("estimated_cost_usd").notNull().default("0"),
 

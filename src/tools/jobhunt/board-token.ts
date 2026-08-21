@@ -57,6 +57,12 @@ const PATTERNS: readonly TokenPattern[] = [
   { ats: "lever", re: /^https?:\/\/jobs(?:\.eu)?\.lever\.co\/([^/?#]+)/i },
   { ats: "ashby", re: /^https?:\/\/jobs\.ashbyhq\.com\/([^/?#]+)/i },
   { ats: "recruitee", re: /^https?:\/\/([a-z0-9-]+)\.recruitee\.com(?:\/|$|\?)/i },
+  { ats: "smartrecruiters", re: /^https?:\/\/jobs\.smartrecruiters\.com\/([^/?#]+)/i },
+  // The `/j/` segment is REQUIRED, not decoration. Workable also serves
+  // `apply.workable.com/j/<id>` with no account in the path; without this the
+  // capture group takes the literal "j" and registers a board called `j` that
+  // polls nothing forever.
+  { ats: "workable", re: /^https?:\/\/apply\.workable\.com\/([^/?#]+)\/j\//i },
 ];
 
 /**

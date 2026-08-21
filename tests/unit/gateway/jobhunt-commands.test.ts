@@ -13,12 +13,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { parseRowArg, unresolvedMessage } from "../../../src/gateway/jobhunt-commands.js";
 import {
-  parseRowArg,
-  unresolvedMessage,
   draftInstruction,
   askInstruction,
-} from "../../../src/gateway/jobhunt-commands.js";
+} from "../../../src/gateway/jobhunt-instructions.js";
 import { unknownCommandReply } from "../../../src/gateway/commands.js";
 import { threadIdFor } from "../../../src/gateway/kernel-run.js";
 import { ARTIFACT_ROOT } from "../../../src/core/config.js";
@@ -222,13 +221,14 @@ describe("handleDraft (resolution path)", () => {
     // Never the free-text draft path on the success branch.
     expect(callText).not.toContain("Draft a tailored application");
 
-    // Two messages on a success run: the "tailoring…" ack, then the cover
-    // letter. A failure notice never fires. UPDATED 2026-08-21 — this asserted
-    // exactly one reply, which was true only while `/draft` sent a CV and
-    // nothing else. `cover_letter_s3_key` had been in the schema unwritten
-    // since the table was created; an application with an empty letter box is
-    // a self-inflicted rejection on a role that cleared every gate.
-    expect(reply).toHaveBeenCalledTimes(2);
+    // THREE messages on a success run: the "tailoring…" ack, the cover letter,
+    // then the packet message carrying the apply link. A failure notice never
+    // fires. UPDATED 2026-08-21 (twice): it asserted one reply while `/draft`
+    // sent only a CV, then two once the cover letter landed. The third exists
+    // because prod had 543 screened rows, 2 applications and not one
+    // `deliver_artifact` in the action log — a PDF with no next step is where
+    // this pipeline was stalling.
+    expect(reply).toHaveBeenCalledTimes(3);
     const [ackText] = (reply.mock.calls[0] ?? []) as unknown as [string?];
     expect(ackText).toContain("Tailoring your CV");
 
@@ -239,6 +239,13 @@ describe("handleDraft (resolution path)", () => {
     // the form and the letter gets pasted into a box.
     expect(letterText).toContain("<pre>");
     expect(letterText).not.toMatch(/⚠/);
+
+    // The packet message: where the form is, and how to close the row out. The
+    // rank in `/applied 2` must be the rank the founder typed, not the row's
+    // database id or its position in some other list.
+    const [packetText] = (reply.mock.calls[2] ?? []) as unknown as [string?];
+    expect(packetText).toContain("Aquablu");
+    expect(packetText).toContain("/applied 2");
 
     const written = await fs.readdir(artifactDir);
     expect(written.length).toBe(1);
