@@ -274,7 +274,7 @@ export async function listActionableApplications(
         eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
         eq(jobApplications.stage, "screened"),
         inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
-        freshEnough(cutoff),
+        applyQueueFreshnessSql(cutoff),
       ),
     )
     .orderBy(desc(jobApplications.created_at))
@@ -289,9 +289,24 @@ export async function listActionableApplications(
  * `countAgedOutApplications` negates it rather than restating it — two
  * hand-written predicates would drift, and the drift would surface as
  * "0 fresh · 0 aged out" on a table with 300 rows in it.
+ *
+ * THE CUTOFF IS BOUND AS AN ISO STRING WITH AN EXPLICIT CAST, never as a Date.
+ * A Date is safe through `eq()`/`gte()` because the column tells drizzle how to
+ * serialise it; a raw `sql` template has no such context, so postgres.js
+ * received an untyped Date and threw
+ * `The "string" argument must be of type string ... Received an instance of Date`
+ * on every call. Both queries below use this predicate, so for 15 hours on
+ * 2026-08-20/21 `buildDailyBrief` threw before it could rank anything: the
+ * founder's queue froze on its last good ranking while 16 Dutch
+ * recognised-sponsor roles that had cleared every gate were screened, stored,
+ * and never shown to him. `runFreeSweep` catches the throw and publishes
+ * anyway, so from Telegram it looked like an ordinary quiet sweep.
+ *
+ * Exported ONLY so `tests/unit/db/apply-queue-freshness.test.ts` can assert the
+ * bound parameter is a string without needing a database.
  */
-function freshEnough(cutoff: Date) {
-  return sql`coalesce(${jobApplications.posted_at}, ${jobApplications.created_at}) >= ${cutoff}`;
+export function applyQueueFreshnessSql(cutoff: Date) {
+  return sql`coalesce(${jobApplications.posted_at}, ${jobApplications.created_at}) >= ${cutoff.toISOString()}::timestamptz`;
 }
 
 /**
@@ -321,7 +336,7 @@ export async function countAgedOutApplications(
         eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
         eq(jobApplications.stage, "screened"),
         inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
-        sql`NOT (${freshEnough(cutoff)})`,
+        sql`NOT (${applyQueueFreshnessSql(cutoff)})`,
       ),
     );
   return Number(row?.n ?? 0);
