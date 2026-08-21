@@ -9,7 +9,7 @@
 import type { Context } from "grammy";
 import { recordTailoringResult } from "../db/job-queries.js";
 import { buildCoverLetter, type CoverLetterModel } from "../tools/jobhunt/cover-letter.js";
-import { getWorkerModel } from "../agents/model.js";
+import { invokeWorkerWithFallbacks } from "../agents/worker-invoke.js";
 import { uploadFile } from "../infra/storage/s3-client.js";
 import { safeHtml } from "./approval-card.js";
 import { childLogger } from "../infra/logger.js";
@@ -42,10 +42,12 @@ export async function sendCoverLetter(
   // cover-letter.ts is deliberately ignorant of LangChain so its tests cost
   // nothing and run offline. The role/content pairs it speaks map onto
   // LangChain's tuple message form here, at the one place that knows both.
-  const worker = getWorkerModel();
-  const model: CoverLetterModel = {
-    invoke: (messages) => worker.invoke(messages.map((m) => [m.role, m.content] as const)),
-  };
+  //
+  // Through the fallback chain, not the bare primary: this used to call
+  // `getWorkerModel().invoke` directly, so a Gemini 503 cost the letter even
+  // though two working fallbacks were configured on the same key (prod,
+  // 2026-08-21). The CV half had the identical bug.
+  const model: CoverLetterModel = { invoke: (messages) => invokeWorkerWithFallbacks(messages) };
 
   const result = await buildCoverLetter(
     {
