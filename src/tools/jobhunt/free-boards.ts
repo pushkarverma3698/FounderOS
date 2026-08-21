@@ -60,17 +60,37 @@ import { REPO_ROOT, parseCsvLine } from "./sponsor-registry.js";
  * `recruitee/netconomy` = Netconomy Netherlands B.V., `recruitee/ravo` = Ravo
  * Holding B.V.).
  *
- * Personio deliberately excluded: its public XML feed is verified live and
- * real, but carries no per-posting URL, and every human-facing path under
- * `<token>.jobs.personio.de/` — `/job/<id>`, the bare board root — redirects
- * to personio.com's marketing homepage rather than the posting or even the
- * board listing (checked against two live customer boards, 2026-08-20). A
- * posting whose "apply" link dead-ends at a generic page is worse than not
- * having it. Homerun was not probed live in this pass.
+ * SmartRecruiters and Workable added 2026-08-21, both public JSON APIs. Joining
+ * the 12,883-row register against their published corpora measured 145 and 86
+ * IND-sponsor boards respectively.
+ *
+ * PERSONIO REMAINS EXCLUDED, but the earlier reason recorded here was wrong and
+ * is corrected rather than repeated: `<token>.jobs.personio.de/job/<id>` does
+ * redirect (307), but the `.com` host does not — `1komma5grad.jobs.personio.com/
+ * job/781758` resolves 200 (checked live 2026-08-21). The real obstacle is the
+ * feed. `search.json` returns no description on any job (verified empty across
+ * two boards, 319 postings and 2), no URL and no date, so the only complete
+ * source is `/xml`: a different fetch path, an XML parser, and roughly 2 MB per
+ * company because bodies are inlined. Across the 78 IND-sponsor Personio boards
+ * that is ~156 MB every thirty minutes. Worth doing, not worth doing alongside
+ * two JSON mappers. Homerun was not probed live in this pass.
  */
-export type FreeAts = "greenhouse" | "lever" | "ashby" | "recruitee";
+export type FreeAts =
+  | "greenhouse"
+  | "lever"
+  | "ashby"
+  | "recruitee"
+  | "smartrecruiters"
+  | "workable";
 
-export const FREE_ATS_PLATFORMS: readonly FreeAts[] = ["greenhouse", "lever", "ashby", "recruitee"];
+export const FREE_ATS_PLATFORMS: readonly FreeAts[] = [
+  "greenhouse",
+  "lever",
+  "ashby",
+  "recruitee",
+  "smartrecruiters",
+  "workable",
+];
 
 /**
  * Which market a board was sourced FOR — a provenance note, not a claim about
@@ -164,14 +184,16 @@ function csvField(value: string): string {
  * A registry that loads but yields a handful of rows is the 2026-08-02 sponsor
  * outage wearing a different mask: the lane would run, report success, and poll
  * almost nothing — and a thin registry and a quiet market produce the same number
- * at the far end. The real file holds 623 boards; anything under 500 means the
+ * at the far end. The real file holds 858 boards; anything under 700 means the
  * parse or the file is wrong, and it must fail loudly at the gate.
  *
- * Raised 200 → 500 on 2026-08-20 alongside the sponsor-board import. A floor left
- * at 200 would have gone on passing while two thirds of the registry silently
- * failed to parse, which is precisely the reading this constant exists to deny.
+ * Raised 200 → 500 on 2026-08-20 alongside the sponsor-board import, then
+ * 500 → 700 on 2026-08-21 when SmartRecruiters and Workable took the registry
+ * from 623 to 858. A floor that is not moved with the file stops being a floor:
+ * left at 200 it would have gone on passing while two thirds of the registry
+ * silently failed to parse, which is precisely the reading it exists to deny.
  */
-export const MIN_EXPECTED_BOARDS = 500;
+export const MIN_EXPECTED_BOARDS = 700;
 
 function toFreeAts(value: string): FreeAts | null {
   const normalised = value.trim().toLowerCase();

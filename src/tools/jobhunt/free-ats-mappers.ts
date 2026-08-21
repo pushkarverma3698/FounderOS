@@ -260,6 +260,94 @@ export function mapRecruiteeOffers(payload: unknown, board: FreeBoard): FreeCand
   });
 }
 
+/**
+ * SmartRecruiters: `/v1/companies/{token}/postings` — `{ content: [...] }`.
+ *
+ * Verified live 2026-08-21 against `1huddle`. Two things are unlike the other
+ * platforms and both are handled here rather than downstream:
+ *
+ * · THE LIST CARRIES NO BODY, exactly like Greenhouse, so `description` is left
+ *   null and `hydrateDescriptions` fetches it from the per-posting endpoint.
+ * · THE LIST CARRIES NO URL. Only the per-posting response has `postingUrl`,
+ *   and a candidate with no URL is dropped by the mapper contract — so the
+ *   public form is built here. `jobs.smartrecruiters.com/{token}/{id}` resolves
+ *   200 without the title slug that `postingUrl` appends (checked live).
+ */
+export function mapSmartRecruitersPostings(payload: unknown, board: FreeBoard): FreeCandidate[] {
+  const root = asRecord(payload);
+  const postings = Array.isArray(root?.["content"]) ? (root["content"] as unknown[]) : [];
+
+  return postings.flatMap((raw) => {
+    const posting = asRecord(raw);
+    if (posting === null) return [];
+
+    const externalId = asId(posting["id"]);
+    const title = asText(posting["name"]);
+    if (externalId.length === 0 || title.length === 0) return [];
+
+    // `fullLocation` is the one field the country gate can read as prose
+    // ("Amsterdam, Netherlands"); city/region alone would leave the country to
+    // be guessed, which this pipeline refuses to do.
+    const location = asRecord(posting["location"]);
+    return [
+      {
+        board,
+        externalId,
+        title,
+        url: `https://jobs.smartrecruiters.com/${board.token}/${externalId}`,
+        location: asText(location?.["fullLocation"]) || asText(location?.["city"]),
+        postedAt: parsePostedAt(posting["releasedDate"]),
+        description: null,
+      },
+    ];
+  });
+}
+
+/**
+ * Workable: `/api/v1/widget/accounts/{token}?details=true` — `{ jobs: [...] }`.
+ *
+ * Verified live 2026-08-21 against `1000heads`. The whole posting arrives in one
+ * response, body included, so Workable needs no hydration round trip at all.
+ *
+ * The payload's TOP-LEVEL `description` is the company blurb, not a posting.
+ * Only `jobs[]` is read — mistaking the two would put one fake row on every
+ * Workable board in the registry.
+ */
+export function mapWorkableJobs(payload: unknown, board: FreeBoard): FreeCandidate[] {
+  const root = asRecord(payload);
+  const jobs = Array.isArray(root?.["jobs"]) ? (root["jobs"] as unknown[]) : [];
+
+  return jobs.flatMap((raw) => {
+    const job = asRecord(raw);
+    if (job === null) return [];
+
+    const externalId = asId(job["shortcode"]);
+    const title = asText(job["title"]);
+    // `url` is the public posting; `application_url` skips to the form. Either
+    // is somewhere the founder can apply, so a missing first is not a lost row.
+    const url = asText(job["url"]) || asText(job["application_url"]);
+    if (externalId.length === 0 || title.length === 0 || url.length === 0) return [];
+
+    // No single location field. Assembled from the parts, empties dropped, so a
+    // remote role with no city does not render as ", , United States".
+    const location = [asText(job["city"]), asText(job["state"]), asText(job["country"])]
+      .filter((part) => part.length > 0)
+      .join(", ");
+
+    return [
+      {
+        board,
+        externalId,
+        title,
+        url,
+        location,
+        postedAt: parsePostedAt(job["published_on"]),
+        description: decodeJobBody(asText(job["description"])) || null,
+      },
+    ];
+  });
+}
+
 export const FREE_MAPPERS: Record<
   FreeBoard["ats"],
   (payload: unknown, board: FreeBoard) => FreeCandidate[]
@@ -268,6 +356,8 @@ export const FREE_MAPPERS: Record<
   lever: mapLeverPostings,
   ashby: mapAshbyJobs,
   recruitee: mapRecruiteeOffers,
+  smartrecruiters: mapSmartRecruitersPostings,
+  workable: mapWorkableJobs,
 };
 
 /**

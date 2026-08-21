@@ -37,6 +37,55 @@ export function esc(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** Every tag Telegram's HTML parse mode accepts. Anything else is text. */
+const TELEGRAM_TAGS =
+  "b|strong|i|em|u|ins|s|strike|del|span|tg-spoiler|tg-emoji|a|code|pre|blockquote";
+
+/** An opening or closing tag from that set, attributes included. */
+const TELEGRAM_TAG = new RegExp(`^</?(?:${TELEGRAM_TAGS})(?:\\s[^<>]*)?>`, "i");
+
+/**
+ * Escape every angle bracket that is not part of a tag Telegram understands.
+ *
+ * THE BACKSTOP `esc()` CANNOT BE. `esc()` guards values — company names, titles,
+ * gate evidence — at the point they are interpolated, and it does that job well.
+ * It cannot guard the template around them, because that template is written by
+ * us and is therefore trusted. On 2026-08-21 that trust was misplaced: the brief
+ * header read `(< 24h old)`, a `<` followed by a space, and Telegram answered
+ * `400: Unsupported start tag "" at byte offset 177`.
+ *
+ * The reason this warrants a mechanism rather than a one-character fix is the
+ * blast radius. Telegram does not drop the bad character or the bad row — it
+ * refuses the entire sendMessage. One byte of punctuation cost the founder a
+ * 16 KB shortlist, on the one command he has for seeing what to apply to, and
+ * it did so for every invocation until someone read the logs.
+ *
+ * Applied at the split, which is the last thing that touches a brief before it
+ * becomes a Telegram call, so both delivery paths — `/jobs` and the sweep push —
+ * are covered by one call site. Idempotent: markup we really emit passes
+ * through byte-identical, and `&lt;` is left alone rather than double-escaped.
+ */
+export function escapeStrayAngles(html: string): string {
+  let out = "";
+  for (let i = 0; i < html.length; i += 1) {
+    const char = html[i] as string;
+    if (char !== "<" && char !== ">") {
+      out += char;
+      continue;
+    }
+    const tag = char === "<" ? TELEGRAM_TAG.exec(html.slice(i)) : null;
+    if (tag) {
+      // Copied whole, including its own ">", so the closing bracket of a real
+      // tag is never mistaken for a stray one on the next iteration.
+      out += tag[0];
+      i += tag[0].length - 1;
+      continue;
+    }
+    out += char === "<" ? "&lt;" : "&gt;";
+  }
+  return out;
+}
+
 /**
  * Retained name for the whole-message escape.
  *
@@ -94,6 +143,10 @@ export function splitForTelegram(
   text: string,
   max: number = TELEGRAM_MAX_CHARS,
 ): string[] {
+  // Sanitised first, so a stray bracket costs one character rather than the
+  // whole message — see `escapeStrayAngles`. Done here because this is the last
+  // pure step before the transport, and both brief delivery paths pass through it.
+  text = escapeStrayAngles(text);
   if (text.length <= max) return [text];
 
   const parts: string[] = [];

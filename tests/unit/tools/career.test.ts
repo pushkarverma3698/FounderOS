@@ -94,16 +94,22 @@ describe("readCvTool", () => {
 
   // ── L6: Actionable error when both sources fail ───────────────────────────
 
-  it("returns success:false with uvicorn start instructions when both API and wiki fail", async () => {
-    // Force API fetch to fail
+  // UPDATED 2026-08-21. This asserted the error said "uvicorn" — i.e. that it
+  // told the reader to start a Python service in ~/Projects/personal-rag. On the
+  // production VPS that directory does not exist, so the one instruction the
+  // founder received was one he could not carry out, from a machine he was not
+  // sitting at. The error now names every source that was tried and the env var
+  // that fixes it, which is actionable on either machine.
+  it("names every source it tried when they all fail, not one laptop-only remedy", async () => {
     const mockFetch = vi.fn().mockRejectedValueOnce(new Error("ECONNREFUSED"));
     vi.stubGlobal("fetch", mockFetch);
-    // Force wiki read to fail
     mockReadFileSync.mockImplementation(() => { throw new Error("ENOENT: no such file or directory"); });
 
     const result = await readCvTool.execute({ query: "anything" });
     expect(result.success).toBe(false);
-    expect(result.error).toContain("uvicorn");
+    expect(result.error).not.toContain("uvicorn");
+    expect(result.error).toContain("PERSONAL_CV_DIR");
+    expect(result.error).toMatch(/wiki/i);
   });
 
   it("never exposes raw financial or credential data in output", async () => {
