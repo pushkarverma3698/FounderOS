@@ -10,7 +10,7 @@
  *  4. Human voice — avoids AI buzzword cliches.
  */
 
-import { getWorkerModel } from "../../agents/model.js";
+import { invokeWorkerWithFallbacks } from "../../agents/worker-invoke.js";
 import { childLogger } from "../../infra/logger.js";
 import { readFullCvText } from "../career.js";
 import { extractSkillTerms } from "./skills.js";
@@ -109,8 +109,11 @@ Generate the complete, ATS-tailored Markdown CV now.
 `;
 
   try {
-    const model = getWorkerModel();
-    const response = await model.invoke([
+    // NOT `getWorkerModel().invoke` — that is the bare primary with no chain.
+    // Prod 2026-08-21: three tailoring attempts died on gemini-flash-latest 503
+    // while two configured fallbacks answered on the same key in the same
+    // second. See src/agents/worker-invoke.ts.
+    const response = await invokeWorkerWithFallbacks([
       { role: "system", content: TAILORING_SYSTEM_PROMPT },
       { role: "user", content: userPrompt },
     ]);
@@ -137,7 +140,7 @@ ${violations.map(v => `- Rule: ${v.rule}\n  Matched text: "${v.matchedText}"`).j
 
 Output the corrected full Markdown CV.`;
 
-      const revisionResponse = await model.invoke([
+      const revisionResponse = await invokeWorkerWithFallbacks([
         { role: "system", content: TAILORING_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
         { role: "assistant", content: content },
