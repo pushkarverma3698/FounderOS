@@ -14,6 +14,7 @@ import { cancelPendingApprovals, getTodayCostUsd, getCostBreakdown } from "../db
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { buildWelcomeMessage } from "./capability-message.js";
+import { buildCommandsHelp } from "./command-menu.js";
 import { safeHtml } from "./approval-card.js";
 import { TENANT, DAILY_BUDGET_USD, MCP_BRIDGE_ENABLED, MCP_BRIDGE_MANIFEST } from "../core/config.js";
 import { assessDailyBudget, formatBudgetDashboard, getRunBudgetCaps } from "../infra/daily-budget.js";
@@ -86,30 +87,16 @@ export async function handleResume(ctx: Context): Promise<void> {
   await ctx.reply("▶️ Resumed — the kernel accepts turns again.");
 }
 
+/**
+ * `/commands` — the full list, rendered from `COMMAND_MENU`.
+ *
+ * The text used to live here as a hand-maintained array, which is how `/start`
+ * came to advertise twelve deleted commands. There is now exactly one list
+ * (src/gateway/command-menu.ts) and a test that checks it against the real
+ * `bot.command(...)` registrations, so this surface cannot drift from the bot.
+ */
 export async function handleCommands(ctx: Context): Promise<void> {
-  await ctx.reply(
-    [
-      // JOBS FIRST. This is the lane the founder actually uses daily, and it sat
-      // under an "MCP registry" line for weeks while /draft went un-typed seven
-      // days running. A help screen is a ranking, not an inventory.
-      "<b>Jobs — the daily loop</b>",
-      "/jobs — rank the queue now and show it (checks the top roles are still open)",
-      "/csv — the apply queue as a spreadsheet file · <code>/csv all</code> for everything screened",
-      "/draft &lt;n&gt; — tailor a CV PDF for row n and send it to you to approve",
-      "/ask &lt;n&gt; — write the one question that unblocks row n",
-      "/applied &lt;n&gt; — mark row n applied and drop it off the queue",
-      "",
-      "<b>System</b>",
-      "/status — system health + pending approvals",
-      "/budget — today's spend vs the daily cap",
-      "/connect — search &amp; add an MCP server from the registry",
-      "/reset — clear this thread's mission state",
-      "/halt · /resume — emergency stop / restart",
-      "",
-      "Everything else is natural language — the planner routes it.",
-    ].join("\n"),
-    { parse_mode: "HTML" },
-  );
+  await ctx.reply(buildCommandsHelp(), { parse_mode: "HTML" });
 }
 
 // ── /connect — registry discovery + install (ADR-041 Tier 3) ─────────────────
