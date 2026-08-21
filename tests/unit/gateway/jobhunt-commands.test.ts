@@ -185,6 +185,28 @@ describe("handleDraft (resolution path)", () => {
     vi.doMock("../../../src/infra/storage/s3-client.js", () => ({
       uploadFile: vi.fn(async () => "ready-applications/2026-08-20/aquablu/key.pdf"),
     }));
+    // Scripted, never live. `/draft` now writes a cover letter as well as the
+    // CV, and an unmocked worker here would put a paid provider call in the
+    // dev loop — which the cost rules forbid outright.
+    vi.doMock("../../../src/agents/model.js", () => ({
+      getWorkerModel: vi.fn(() => ({
+        invoke: vi.fn(async () => ({
+          content: [
+            "Dear Hiring Team,",
+            "",
+            "I read the Embedded Software Engineer posting at Aquablu B.V and the water",
+            "treatment control work is close to what I have been building.",
+            "",
+            "At Turicks I wrote the firmware-adjacent control loop in C++ and kept it",
+            "running on hardware in the field for eighteen months without a rollback.",
+            "",
+            "I am available from September and would like to talk.",
+            "",
+            "Pushkar Verma",
+          ].join("\n"),
+        })),
+      })),
+    }));
 
     const { handleDraft } = await import("../../../src/gateway/jobhunt-commands.js");
     const runKernelText = vi.fn(async () => undefined);
@@ -200,10 +222,23 @@ describe("handleDraft (resolution path)", () => {
     // Never the free-text draft path on the success branch.
     expect(callText).not.toContain("Draft a tailored application");
 
-    // Only the "tailoring…" ack — a failure notice never fires on a success run.
-    expect(reply).toHaveBeenCalledOnce();
+    // Two messages on a success run: the "tailoring…" ack, then the cover
+    // letter. A failure notice never fires. UPDATED 2026-08-21 — this asserted
+    // exactly one reply, which was true only while `/draft` sent a CV and
+    // nothing else. `cover_letter_s3_key` had been in the schema unwritten
+    // since the table was created; an application with an empty letter box is
+    // a self-inflicted rejection on a role that cleared every gate.
+    expect(reply).toHaveBeenCalledTimes(2);
     const [ackText] = (reply.mock.calls[0] ?? []) as unknown as [string?];
     expect(ackText).toContain("Tailoring your CV");
+
+    const [letterText] = (reply.mock.calls[1] ?? []) as unknown as [string?];
+    expect(letterText).toContain("Cover letter");
+    expect(letterText).toContain("Aquablu");
+    // Delivered as copyable text, not a second file: the CV gets uploaded to
+    // the form and the letter gets pasted into a box.
+    expect(letterText).toContain("<pre>");
+    expect(letterText).not.toMatch(/⚠/);
 
     const written = await fs.readdir(artifactDir);
     expect(written.length).toBe(1);
