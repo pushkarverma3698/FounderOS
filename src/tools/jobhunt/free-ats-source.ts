@@ -35,6 +35,11 @@ import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import type { FreeAts, FreeBoard } from "./free-boards.js";
 import { FREE_MAPPERS, decodeJobBody, type FreeCandidate } from "./free-ats-mappers.js";
+import { boardUrl, jobBodyUrl, extractBody } from "./free-ats-endpoints.js";
+
+// Re-exported so this module's public surface — and every test and caller that
+// already imports from it — keeps resolving after the 2026-08-21 split.
+export { boardUrl, jobBodyUrl, extractBody };
 
 const log = childLogger({ module: "jobhunt:free-ats" });
 
@@ -76,6 +81,14 @@ export const PLATFORM_CONCURRENCY: Readonly<Record<FreeAts, number>> = {
   lever: BOARD_CONCURRENCY,
   ashby: BOARD_CONCURRENCY,
   recruitee: 2,
+  // Both start at the default. Recruitee's 2 was tuned against a measured 429
+  // rate; guessing a lower number for a platform we have not yet seen throttle
+  // would slow the sweep to prevent a problem nobody has observed. If either
+  // starts 429ing, the retry-with-backoff added on 2026-08-21 absorbs it and
+  // `summariseFailures` reports it by platform, which is how Recruitee's own
+  // rate limit became visible in the first place.
+  smartrecruiters: BOARD_CONCURRENCY,
+  workable: BOARD_CONCURRENCY,
 };
 
 /**
@@ -136,28 +149,6 @@ const realSleep: FetchBoardDeps = {
 export type BoardFetch =
   | { readonly ok: true; readonly board: FreeBoard; readonly candidates: readonly FreeCandidate[] }
   | { readonly ok: false; readonly board: FreeBoard; readonly error: string };
-
-/**
- * Where each platform serves a board's postings.
- *
- * Pure, so the URL contract is asserted in tests rather than discovered in
- * production. Tokens are URL-encoded: Ashby slugs contain dots and mixed case
- * (`abstraction.games`), and one containing a slash would otherwise rewrite the
- * path it is supposed to be a segment of.
- */
-export function boardUrl(board: FreeBoard): string {
-  const token = encodeURIComponent(board.token);
-  switch (board.ats) {
-    case "greenhouse":
-      return `https://boards-api.greenhouse.io/v1/boards/${token}/jobs`;
-    case "lever":
-      return `https://api.lever.co/v0/postings/${token}?mode=json`;
-    case "ashby":
-      return `https://api.ashbyhq.com/posting-api/job-board/${token}`;
-    case "recruitee":
-      return `https://${token}.recruitee.com/api/offers/`;
-  }
-}
 
 /**
  * Where one Greenhouse posting's body lives.
@@ -346,13 +337,14 @@ export async function hydrateDescriptions(
   return mapWithConcurrencyLimit(candidates, BOARD_CONCURRENCY, async (candidate) => {
     if (candidate.description !== null) return candidate;
 
+    const url = jobBodyUrl(candidate.board, candidate.externalId);
+    // Null means the platform inlines its bodies, so a null description here is
+    // a posting that genuinely has none — not one we failed to fetch.
+    if (url === null) return candidate;
+
     try {
-      const payload = (await fetchJson(
-        greenhouseJobUrl(candidate.board, candidate.externalId),
-        DESCRIPTION_TIMEOUT_MS,
-      )) as Record<string, unknown>;
-      const content = typeof payload["content"] === "string" ? payload["content"] : "";
-      return { ...candidate, description: decodeJobBody(content) || null };
+      const payload = (await fetchJson(url, DESCRIPTION_TIMEOUT_MS)) as Record<string, unknown>;
+      return { ...candidate, description: extractBody(candidate.board.ats, payload) || null };
     } catch (err) {
       log.warn(
         { board: candidate.board.token, id: candidate.externalId, err: (err as Error).message },
