@@ -30,6 +30,7 @@ import {
 } from "../db/job-queries.js";
 import { blockingGates, parseGates } from "../tools/jobhunt/gates.js";
 import { tailorCv } from "../tools/jobhunt/tailor-cv.js";
+import { sendCoverLetter } from "./cover-letter-delivery.js";
 import { renderCvToPdf } from "../tools/jobhunt/cv-renderer.js";
 import { uploadFile } from "../infra/storage/s3-client.js";
 import { ARTIFACT_ROOT } from "../core/config.js";
@@ -254,7 +255,7 @@ async function archiveTailoredCv(row: JobApplication, pdfBuffer: Buffer): Promis
 async function buildTailoredPdf(
   ctx: Context,
   row: JobApplication,
-): Promise<{ ok: true; path: string } | { ok: false; reason: string }> {
+): Promise<{ ok: true; path: string; cvMarkdown: string } | { ok: false; reason: string }> {
   if (!row.description || row.description.trim().length < MIN_DESCRIPTION_CHARS) {
     return { ok: false, reason: "this posting has no usable description on file" };
   }
@@ -279,7 +280,10 @@ async function buildTailoredPdf(
     if (stats.size === 0) throw new Error("PDF render produced 0 bytes");
 
     await archiveTailoredCv(row, rendered.pdfBuffer);
-    return { ok: true, path: pdfPath };
+    // The tailored markdown, not the base CV, is what the cover letter is
+    // written from: it is already aligned to this posting, so the letter and the
+    // CV cannot end up emphasising different things about the same person.
+    return { ok: true, path: pdfPath, cvMarkdown: tailored.tailoredMarkdown };
   } catch (err) {
     const reason = (err as Error).message;
     await recordTailoringResult(row.id, { tailorStatus: "failed", notes: `PDF render failed: ${reason}` }).catch(
@@ -328,6 +332,8 @@ export async function handleDraft(ctx: Context, deps: JobhuntCommandDeps): Promi
     await deps.runKernelText(ctx, draftInstruction(row));
     return;
   }
+
+  await sendCoverLetter(ctx, row, pdf.cvMarkdown);
 
   await deps.runKernelText(
     ctx,
