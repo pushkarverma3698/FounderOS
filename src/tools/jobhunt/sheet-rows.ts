@@ -19,6 +19,7 @@
 
 import type { JobApplication } from "../../db/schema.js";
 import { parseGates } from "./gates.js";
+import { routeLabel } from "./permit-routes.js";
 
 /** Queue tab header. Order is the reading order: who, what, then why to trust it. */
 export const QUEUE_HEADER = [
@@ -27,6 +28,13 @@ export const QUEUE_HEADER = [
   "Role",
   "Track",
   "Where",
+  // ADDED 2026-08-21. The queue said where a role was and whether the employer
+  // was a recognised sponsor, but never which permit basis was actually carrying
+  // the row — and that stopped being a detail the day the partner permit became
+  // "applied for, awaiting decision". A Dutch row carried only by a pending
+  // permit and one carried by an HSM sponsorship are different bets, and the
+  // file gave the founder no way to tell them apart.
+  "Permit basis",
   "Posted",
   "Still open?",
   "Sponsor",
@@ -135,6 +143,10 @@ export function queueRow(row: JobApplication, now: Date): Cell[] {
     row.title,
     row.track,
     row.location ?? row.country ?? "",
+    // Live, not stored — see `routeLabel`. A permit basis is a fact about the
+    // founder and it changes; a row screened last week must not keep asserting a
+    // right to work that is now pending.
+    routeLabel(row.route),
     postedCell(row.posted_at, now),
     livenessCell(row.liveness),
     sponsorCell(row.sponsor_verdict),

@@ -32,6 +32,7 @@ import { countryName, type PostingCountry } from "./country.js";
 import { cmd, esc, link } from "./telegram-format.js";
 import { GATE_GLOSSARY, gateMark, type Gate } from "./gates.js";
 import type { Liveness } from "./liveness.js";
+import { routeLabel } from "./permit-routes.js";
 
 /**
  * Which actionable section a row is being printed under.
@@ -238,8 +239,13 @@ export function renderRow(
   // applies. The feed's own string is quoted where there is one, so the market
   // this row was filed under is checkable rather than asserted.
   const where = row.location?.trim() ? row.location.trim() : countryName(row.country);
+  // `routeLabel`, not the raw stored `route`: a permit basis is a fact about the
+  // founder and it changes (the partner permit is applied for and pending as of
+  // 2026-08-21). Rendering it live corrects the whole queue the moment the fact
+  // changes, instead of leaving already-screened rows asserting a settled right
+  // to work for the 24 hours it takes them to age out.
   const meta =
-    `    <i>${esc(where)} · ${esc(row.track)} track · basis: ${esc(row.route)} · ` +
+    `    <i>${esc(where)} · ${esc(row.track)} track · basis: ${esc(routeLabel(row.route))} · ` +
     `seen ${row.ageDays === 0 ? "today" : `${row.ageDays}d ago`}</i>`;
   // /applied shares do_today/stretch's numbering (handleApplied resolves
   // against the same two sections `/draft` does) — printing it next to an ASK
