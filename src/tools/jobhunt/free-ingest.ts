@@ -160,7 +160,14 @@ export function filterCandidates(
   });
 
   const notes: string[] = [];
-  if (stale > 0) notes.push(`${stale} postings older than ${maxAgeHours}h — seen in an earlier sweep`);
+  // NOT "seen in an earlier sweep". That was the wording until 2026-08-21 and it
+  // is a claim this function cannot make: it runs AHEAD of `keepUnseen` and has
+  // no database knowledge at all. Production settled it — 554 rows in
+  // `job_applications` lifetime against 24,446 dropped here every thirty
+  // minutes, so at most 554 of them had ever been seen and the rest were open
+  // roles nobody had ever looked at. A note that explains a drop away is worse
+  // than no note, because it stops anyone asking what is behind the number.
+  if (stale > 0) notes.push(`${stale} postings older than ${maxAgeHours}h — not screened`);
   if (offTrack > 0) notes.push(`${offTrack} postings were not an engineering track`);
   if (offMarket > 0) notes.push(`${offMarket} postings were outside the Netherlands and India`);
   if (undated > 0) notes.push(`${undated} postings stated no publication date and were skipped`);
@@ -261,6 +268,20 @@ export async function runFreeIngest(
     returned: postings.length,
     pricing: FREE_PRICING,
     lines,
+    // The funnel goes to the DATABASE now, not only to journalctl. It was built
+    // here and dropped at the ledger boundary until 2026-08-21, which is why
+    // "are we dropping roles?" needed a log regex on the production box to
+    // answer — and why nobody had noticed that `stale` was discarding 24,446
+    // never-seen postings a sweep.
+    funnel: {
+      seen: funnel.seen,
+      undated: funnel.undated,
+      stale: funnel.stale,
+      offTrack: funnel.offTrack,
+      offMarket: funnel.offMarket,
+      known: funnel.known,
+      bodyless: funnel.bodyless,
+    },
     // Counts per (platform, reason), NOT the first three strings. The sweep polls
     // Greenhouse first, so "first three" was always the same three harmless 404s
     // and 36 Recruitee rate limits a sweep never reached the founder — the

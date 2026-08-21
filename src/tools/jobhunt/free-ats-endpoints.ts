@@ -12,8 +12,9 @@
  * barely changes; the first changes every time a platform is added.
  */
 
-import type { FreeBoard } from "./free-boards.js";
+import type { FreeAts, FreeBoard } from "./free-boards.js";
 import { decodeJobBody } from "./free-ats-mappers.js";
+import { extractBoardToken } from "./board-token.js";
 
 /**
  * Where each platform serves a board's postings.
@@ -110,5 +111,55 @@ export function extractBody(ats: FreeBoard["ats"], payload: Record<string, unkno
   }
   // Greenhouse: a single `content` field of escaped HTML.
   return typeof payload["content"] === "string" ? decodeJobBody(payload["content"]) : "";
+}
+
+/**
+ * How each platform gets from "read the ad" to "fill the form".
+ *
+ * Every one of these is one hop, and every one of them is a hop the founder
+ * currently makes by hand: open the posting, scroll, find the button. A
+ * `/draft` that delivers a tailored CV and then asks him to go hunting for the
+ * form has done the hard 95% and left the part that decides whether an
+ * application exists.
+ */
+const APPLY_PATH: Readonly<Record<FreeAts, string>> = {
+  // The form is rendered on the posting page behind an anchor, not a route.
+  greenhouse: "#app",
+  lever: "/apply",
+  ashby: "/application",
+  recruitee: "/c/new",
+  // SmartRecruiters serves the form inline on the posting itself — there is no
+  // second URL, and inventing one would 404.
+  smartrecruiters: "",
+  workable: "/apply",
+};
+
+/**
+ * The URL that opens the application FORM for a posting, or null.
+ *
+ * Null is a real answer and the caller must handle it: a company's own careers
+ * page, an aggregator, a white-labelled Recruitee domain, or a Greenhouse board
+ * fronted behind `?gh_jid=` on the employer's own host all reach us as posting
+ * URLs we cannot map. Appending "/apply" to those produces a link that LOOKS
+ * authoritative and 404s — worse than no button, because the founder taps it
+ * once, finds nothing, and stops trusting the row. Fall back to the posting URL
+ * at the call site, where that decision is visible.
+ *
+ * Pure and total, because it runs once per row of every brief and one malformed
+ * URL must not cost the other rows their button.
+ */
+export function applyUrlFor(postingUrl: string): string | null {
+  if (typeof postingUrl !== "string" || postingUrl.trim().length === 0) return null;
+
+  const board = extractBoardToken(postingUrl);
+  if (board === null) return null;
+
+  const suffix = APPLY_PATH[board.ats];
+  const url = postingUrl.replace(/\/+$/, "");
+  if (suffix.length === 0) return url;
+  // Idempotent: a URL that already ends in the apply path is returned as-is
+  // rather than growing a second copy of it. Postings reach us from the feed
+  // and from `/draft` re-runs, and doubling the suffix breaks the link.
+  return url.endsWith(suffix) ? url : `${url}${suffix}`;
 }
 

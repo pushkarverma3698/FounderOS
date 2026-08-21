@@ -7,6 +7,16 @@
  *   review_screened — audit what the gates decided (the only view of silent rejects)
  *   cv_gaps     — what the screened market asks for vs. what the CV says
  *   job_brief   — the ranked shortlist: what to apply to today, verified still open
+ *   tailor_cv   — the ONLY way to produce a tailored CV: real base CV → PDF on disk
+ *
+ * WHY tailor_cv IS HERE. Until 2026-08-21 this list had no tool that could
+ * produce a document. When the founder typed "apply all of them by drafting
+ * proper resumes for each job", the model reached for `write_artifact` and wrote
+ * a markdown blob out of its own context — 90 seconds after `read_cv` had failed
+ * on the box, so with ZERO CV input — and reported it as tailored resumes.
+ * Registering the real engine is what makes that fabrication impossible rather
+ * than merely discouraged: `tailor_cv` cannot return without `readFullCvText`
+ * succeeding, and a receipt is the only thing the synthesizer ever sees.
  */
 
 import { tool } from "@langchain/core/tools";
@@ -17,12 +27,13 @@ import { reviewScreenedTool } from "../../tools/jobhunt/review.js";
 import { ingestJobsTool } from "../../tools/jobhunt/ingest-tool.js";
 import { cvGapsTool } from "../../tools/jobhunt/gaps.js";
 import { jobBriefTool } from "../../tools/jobhunt/daily-brief.js";
+import { tailorCvTool } from "../../tools/jobhunt/tailor-tool.js";
 
 // ── Job-Hunt: read CV from personal-rag (read-only, NO approval) ─────────────
 
 export const readCv = tool(
-  async ({ query }) => {
-    const res = await readCvTool.execute({ query });
+  async ({ query, track }) => {
+    const res = await readCvTool.execute({ query, ...(track ? { track } : {}) });
     if (!res.success) return `CV read failed: ${res.error}`;
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
   },
@@ -33,6 +44,42 @@ export const readCv = tool(
       query: z.string().describe(
         "What to look up from the CV/background. E.g. 'LangGraph experience', 'TypeScript projects', 'salary expectations'"
       ),
+      // The underlying tool has accepted a track since the per-track CVs were
+      // written; this wrapper never passed it, so every kernel read hit the
+      // shared master. A backend posting compared against the master CV reads
+      // as a worse match than it is.
+      track: z
+        .string()
+        .optional()
+        .nullable()
+        .describe("Which CV to read: ai, backend, frontend or fullstack. Omit for the shared master."),
+    }),
+  },
+);
+
+// ── Job-Hunt: tailor the real CV to one posting (writes a local file only) ───
+//
+// No HITL. It produces a PDF on disk and nothing leaves the box — the gate
+// fires on `deliver_artifact`, which is the tool that actually sends it.
+
+export const tailorCvForRow = tool(
+  async ({ rank }, config) => {
+    // Same plumbing write_artifact uses: the thread decides which directory the
+    // PDF lands in, and it comes from the kernel rather than from the model.
+    const thread_id = (config?.configurable?.["thread_id"] as string | undefined) ?? "default";
+    const res = await tailorCvTool.execute({ rank, thread_id });
+    if (!res.success) return `Tailoring failed: ${res.error}`;
+    return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
+  },
+  {
+    name: "tailor_cv",
+    description: tailorCvTool.description,
+    schema: z.object({
+      rank: z
+        .number()
+        .int()
+        .min(1)
+        .describe("The row number from the latest job brief — the number printed next to the role."),
     }),
   },
 );
