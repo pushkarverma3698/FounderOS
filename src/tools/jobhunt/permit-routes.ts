@@ -162,6 +162,29 @@ export function gateProfile(basis: PermitBasis): GateProfile {
   return PROFILES[basis];
 }
 
+/**
+ * The founder-facing name of a stored `route`, resolved AT RENDER TIME.
+ *
+ * Deliberately not read from the row's stored gate evidence, and the distinction
+ * is the whole point. Gate evidence is a record of what was decided about a
+ * POSTING when it was screened, and freezing it is correct — re-deriving it
+ * later would let today's rules rewrite yesterday's verdict.
+ *
+ * A permit basis is not that. It is a fact about the PERSON, and it changes: the
+ * partner permit went from "confirmed" to "applied for, awaiting decision"
+ * between one screening run and the next. A row screened before that change
+ * would otherwise keep telling the founder his right to work is settled, on a
+ * shortlist he is about to act on. Rendering it live means the whole queue
+ * corrects the moment the fact does, instead of over the 24 hours it takes the
+ * old rows to age out.
+ *
+ * Unknown values pass through unchanged: a legacy or hand-entered route is
+ * printed as it was stored rather than silently relabelled.
+ */
+export function routeLabel(route: string): string {
+  return route in PROFILES ? PROFILES[route as PermitBasis].label : route;
+}
+
 export function isLiveBasis(basis: PermitBasis): boolean {
   return LIVE_PERMIT_BASES.includes(basis);
 }
