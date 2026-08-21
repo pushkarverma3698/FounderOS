@@ -103,6 +103,35 @@ describe("invokeWorkerWithFallbacks", () => {
     await expect(invoke()).rejects.toThrow(/503/);
   });
 
+  // A provider that HANGS is not a provider that errors, and the first version
+  // of this module only handled the second. Prod 2026-08-21: a live tailor_cv
+  // run sat in `model.invoke` for the full 280s timeout and never reached the
+  // chain — the exact reason gateway/model-fallback.ts carries a deadline.
+  it("treats a hanging attempt as a failure and moves on", async () => {
+    primary.mockImplementation(() => new Promise(() => undefined));
+    fallbackA.mockResolvedValue({ content: "from flash-lite" });
+
+    const { invokeWorkerWithFallbacks } = await import("../../../src/agents/worker-invoke.js");
+    const res = await invokeWorkerWithFallbacks([{ role: "user", content: "hi" }], {
+      attemptTimeoutMs: 40,
+    });
+
+    expect(res.content).toBe("from flash-lite");
+  });
+
+  it("times out a hanging fallback too, rather than stalling the chain", async () => {
+    primary.mockRejectedValue(providerError(503));
+    fallbackA.mockImplementation(() => new Promise(() => undefined));
+    fallbackB.mockResolvedValue({ content: "from the last one" });
+
+    const { invokeWorkerWithFallbacks } = await import("../../../src/agents/worker-invoke.js");
+    const res = await invokeWorkerWithFallbacks([{ role: "user", content: "hi" }], {
+      attemptTimeoutMs: 40,
+    });
+
+    expect(res.content).toBe("from the last one");
+  });
+
   it("propagates the primary error when no fallbacks are configured", async () => {
     vi.doMock("../../../src/agents/model.js", async (importOriginal) => {
       const actual = await importOriginal<typeof import("../../../src/agents/model.js")>();

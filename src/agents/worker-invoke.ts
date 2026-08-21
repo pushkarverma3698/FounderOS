@@ -44,6 +44,42 @@ export interface InvokableModel {
 }
 
 /**
+ * Hard deadline per attempt.
+ *
+ * A provider that HANGS is not a provider that errors, and only the second kind
+ * reaches a catch block. Prod 2026-08-21: a live `tailor_cv` run sat inside
+ * `model.invoke` for a full 280 seconds and never reached the chain at all,
+ * while two healthy fallbacks waited behind it. Matches
+ * `FALLBACK_ATTEMPT_TIMEOUT_MS` in gateway/model-fallback.ts, which exists for
+ * exactly this reason one layer up.
+ */
+export const ATTEMPT_TIMEOUT_MS = 45_000;
+
+export interface InvokeOptions {
+  /** Overridable so tests do not wait 45 real seconds to prove a timeout. */
+  readonly attemptTimeoutMs?: number;
+}
+
+/** Resolve, or reject once the deadline passes. Timer always cleared. */
+async function withDeadline(
+  attempt: Promise<{ content: unknown }>,
+  ms: number,
+  label: string,
+): Promise<{ content: unknown }> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      attempt,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * Invoke the worker model, walking `AGENT_FALLBACK_MODELS` on a retriable error.
  *
  * Throws the PRIMARY's error when the whole chain is down, never the last
@@ -54,24 +90,29 @@ export interface InvokableModel {
  */
 export async function invokeWorkerWithFallbacks(
   messages: readonly WorkerTurn[],
+  opts: InvokeOptions = {},
 ): Promise<{ content: unknown }> {
   const payload = messages.map((m) => [m.role, m.content] as const);
+  const timeoutMs = opts.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS;
   const primary = getWorkerModel() as unknown as InvokableModel;
 
   let primaryError: unknown;
   try {
-    return await primary.invoke(payload);
+    return await withDeadline(primary.invoke(payload), timeoutMs, "primary model");
   } catch (err) {
     // An auth failure is not load. Falling through would spend the chain hiding
     // a misconfiguration that only gets more expensive the longer it is hidden.
-    if (!isModelFallbackError(err)) throw err;
+    // A TIMEOUT always falls through: a provider that never answers is exactly
+    // the case the chain exists for, and `isModelFallbackError` cannot see it
+    // because there is no status code on a promise that simply never settles.
+    if (!isTimeout(err) && !isModelFallbackError(err)) throw err;
     primaryError = err;
   }
 
   const fallbacks = buildFallbackModels() as unknown as InvokableModel[];
   for (const [i, model] of fallbacks.entries()) {
     try {
-      const result = await model.invoke(payload);
+      const result = await withDeadline(model.invoke(payload), timeoutMs, `fallback ${i + 1}`);
       log.warn(
         { position: i + 1, of: fallbacks.length, cause: (primaryError as Error).message.slice(0, 160) },
         "Worker primary failed — a fallback model answered",
@@ -86,4 +127,9 @@ export async function invokeWorkerWithFallbacks(
   }
 
   throw primaryError;
+}
+
+/** A deadline rejection, which carries no HTTP status for `isModelFallbackError` to read. */
+function isTimeout(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("timed out after");
 }
