@@ -36,6 +36,9 @@ function okResponse(body: unknown) {
   return { ok: true, status: 200, json: async () => body };
 }
 
+/** Retryable statuses now cost real backoff; these tests assert outcomes, not delays. */
+const noSleep = { sleep: async () => {} };
+
 function errorResponse(status: number) {
   return { ok: false, status, json: async () => ({}), body: { cancel: async () => {} } };
 }
@@ -92,25 +95,27 @@ describe("greenhouseJobUrl", () => {
 
 describe("fetchBoard", () => {
   it("returns { ok: false, error } on a non-2xx response — never throws", async () => {
-    mockFetch.mockResolvedValueOnce(errorResponse(500));
+    // Persistent, not `Once`: a 500 is retried (free-board-retry.test.ts), so a
+    // single queued response would leave the second attempt reading `undefined`.
+    mockFetch.mockResolvedValue(errorResponse(500));
 
-    const result = await fetchBoard(board());
+    const result = await fetchBoard(board(), noSleep);
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("500");
   });
 
   it("returns { ok: false, error } on a network rejection — never throws", async () => {
-    mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    mockFetch.mockRejectedValue(new Error("ECONNREFUSED"));
 
-    const result = await fetchBoard(board());
+    const result = await fetchBoard(board(), noSleep);
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("ECONNREFUSED");
   });
 
   it("returns { ok: false, error } on malformed JSON — never throws", async () => {
-    mockFetch.mockResolvedValueOnce({
+    mockFetch.mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => {
@@ -118,7 +123,7 @@ describe("fetchBoard", () => {
       },
     });
 
-    const result = await fetchBoard(board());
+    const result = await fetchBoard(board(), noSleep);
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/unexpected token/i);

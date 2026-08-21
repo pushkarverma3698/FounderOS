@@ -100,15 +100,33 @@ const PROFILES: Record<PermitBasis, GateProfile> = {
       "Highly skilled migrant: the employer must be an IND recognised sponsor and must pay " +
       "at least the salary criterion. Both are legal conditions of the permit.",
   },
+  /**
+   * APPLIED FOR, DECISION PENDING — founder, 2026-08-21: "for partner permit
+   * screen those jobs also as it is currently applied and waiting for the
+   * decision."
+   *
+   * So the screening is unchanged: these roles stay in, because a decision that
+   * lands next month is worth having a shortlist ready for. What changed is that
+   * the words say so. `basesForPosting` screens an NL role under BOTH bases and
+   * `bestOutcome` keeps the better one, and this basis needs no sponsor and has
+   * no salary floor — so it wins every Dutch row it touches, and before this the
+   * founder read "partner-permit route · neither gate can void the role" as a
+   * settled fact about a permit he does not hold yet.
+   *
+   * That is the difference between a shortlist and a shortlist he can trust: a
+   * row carried only by this basis is an application he can send, on a right to
+   * work that is not yet granted.
+   */
   "partner-permit": {
     sponsorRequired: false,
     salaryFloorApplies: false,
     payReference: "eur",
     dutchLanguageApplies: true,
-    label: "partner-permit route",
+    label: "partner-permit route (application pending)",
     basis:
-      "Partner permit: free access to the labour market. No recognised sponsor is needed and " +
-      "no IND salary criterion applies, so neither gate can void the role.",
+      "Partner permit — APPLIED FOR, awaiting the IND decision. Once granted it gives free " +
+      "access to the labour market, so no recognised sponsor and no IND salary criterion " +
+      "apply. Until then this role is reachable only if that decision comes through.",
   },
   "remote-contract": {
     sponsorRequired: false,
