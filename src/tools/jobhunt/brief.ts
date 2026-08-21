@@ -351,7 +351,10 @@ function renderHeader(input: BriefInput, totals: SectionTotals): string {
   const agedOut = input.agedOut ?? 0;
   const freshness =
     `<i>${plural(input.rows.length, "fresh role", "fresh roles")} in the queue ` +
-    `(< ${maxAgeHours}h old) · ${plural(agedOut, "older role", "older roles")} aged out</i>\n`;
+    // "&lt;", not "<". A bare "<" followed by a space is an empty start tag to
+    // Telegram, which rejects the WHOLE message rather than the character —
+    // this line alone took /jobs down on 2026-08-21. See escapeStrayAngles().
+    `(&lt; ${maxAgeHours}h old) · ${plural(agedOut, "older role", "older roles")} aged out</i>\n`;
 
   return (
     `<b>🎯 JOB BRIEF</b> · ${date}\n` +

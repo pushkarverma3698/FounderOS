@@ -28,6 +28,7 @@ import {
 } from "./commands.js";
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
 import { handleCsv, handleJobs } from "./jobhunt-view.js";
+import { COMMAND_MENU, telegramCommandPayload } from "./command-menu.js";
 import { splitForTelegram } from "../tools/jobhunt/telegram-format.js";
 import { registerMediaHandlers } from "./media.js";
 import { runKernelText, resumeKernel } from "./kernel-run.js";
@@ -160,9 +161,27 @@ async function pollUntilStopped(bot: Bot, sleep: (ms: number) => Promise<void>):
   }
 }
 
+/**
+ * Publish the ☰ menu Telegram renders next to the message box.
+ *
+ * Best-effort on purpose. This is discoverability, not function: every command
+ * still works if the call fails, and a bot that refuses to start because it
+ * could not update a menu is strictly worse than one with a stale menu. Logged
+ * at warn so a persistent failure is still visible rather than assumed.
+ */
+async function publishCommandMenu(bot: Bot): Promise<void> {
+  try {
+    await bot.api.setMyCommands(telegramCommandPayload());
+    log.info({ count: COMMAND_MENU.length }, "Telegram command menu published");
+  } catch (err) {
+    log.warn({ err: (err as Error).message }, "Could not publish the command menu — commands still work");
+  }
+}
+
 export async function startBot(): Promise<void> {
   const bot = getBot();
   registerHandlers(bot);
+  await publishCommandMenu(bot);
   void pollUntilStopped(bot, (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 }
 

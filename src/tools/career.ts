@@ -74,6 +74,13 @@ export const readCvTool: UnifiedTool = {
           "What to look up. E.g. 'LangGraph experience', 'salary expectations', 'TypeScript projects', 'AI agent skills'. " +
           "Omit or use 'general overview' to get a full career summary.",
       },
+      track: {
+        type: "string",
+        description:
+          "Optional discipline whose CV to read: ai, backend, frontend, or fullstack. " +
+          "Pass it when drafting for a specific role — each track has its own CV, and the " +
+          "shared master is used when this is omitted.",
+      },
     },
     required: [],
   },
@@ -122,49 +129,101 @@ export const readCvTool: UnifiedTool = {
       log.debug({ query }, "personal-rag API unavailable, falling back to wiki.md");
     }
 
-    // ── Fallback: read wiki.md directly ──────────────────────────────────────
-    try {
-      const wiki = readFileSync(WIKI_FALLBACK_PATH, "utf-8");
-
-      // Very basic keyword filter: split into sections and return matching lines
-      const queryLower = query.toLowerCase();
-      const lines = wiki.split("\n");
-      const relevant: string[] = [];
-      let inRelevantSection = false;
-
-      for (const line of lines) {
-        const lineLower = line.toLowerCase();
-        if (line.startsWith("#")) {
-          inRelevantSection = queryLower.split(" ").some((kw) => kw.length > 3 && lineLower.includes(kw));
-        }
-        if (
-          inRelevantSection ||
-          queryLower.split(" ").some((kw) => kw.length > 3 && lineLower.includes(kw))
-        ) {
-          relevant.push(line);
-        }
-      }
-
-      const excerpt =
-        relevant.length > 0
-          ? relevant.slice(0, 60).join("\n")
-          : wiki.slice(0, 2000); // fallback to first 2000 chars of wiki
-
-      log.debug({ query, lines: relevant.length }, "wiki.md fallback used");
+    // ── Fallback 1: the CV the founder maintains ─────────────────────────────
+    //
+    // AHEAD OF THE WIKI, DELIBERATELY. This used to go straight to wiki.md, and
+    // on the production VPS that meant straight to ENOENT: there is no
+    // ~/Projects/personal-rag on the box and there never will be, while four
+    // complete per-track CVs sat in PERSONAL_CV_DIR the whole time. On
+    // 2026-08-21 the founder asked in natural language for an application and
+    // got "Start personal-rag with: cd ~/Projects/personal-rag && uvicorn …" —
+    // an instruction addressed to a laptop he was not sitting at.
+    //
+    // The order is also a correctness fix on its own. The wiki is synthesized
+    // from chat transcripts by a local model and was observed on 2026-07-31
+    // stating the wrong employer, the wrong title and dates off by a year. What
+    // this tool returns becomes claims in a real job application, so when both
+    // sources can answer, the document the founder maintains wins.
+    const cv = readFullCvText(args["track"] as string | undefined);
+    if (cv.ok) {
+      log.debug({ query, path: cv.path }, "CV file used");
       return {
         success: true,
-        data: `CV data (wiki fallback) for "${query}":\n\n${excerpt}`,
+        data: `CV data for "${query}" (source: ${cv.path}):\n\n${excerptFor(cv.text, query)}`,
+      };
+    }
+
+    // ── Fallback 2: the synthesized wiki ─────────────────────────────────────
+    // Still here because on the laptop it is sometimes the only local source,
+    // and demoting it must not mean deleting it. Labelled in the payload so the
+    // model knows the provenance is weaker than a CV.
+    try {
+      const wiki = readFileSync(WIKI_FALLBACK_PATH, "utf-8");
+      log.debug({ query }, "wiki.md fallback used");
+      return {
+        success: true,
+        data: `CV data (wiki fallback — synthesized, verify before quoting) for "${query}":\n\n${excerptFor(wiki, query)}`,
       };
     } catch (err) {
-      const msg = (err as Error).message;
-      log.error({ query, err: msg }, "Both personal-rag API and wiki.md failed");
+      log.error(
+        { query, cvError: cv.error, wikiError: (err as Error).message },
+        "personal-rag, the CV files and wiki.md all failed",
+      );
       return {
         success: false,
-        error: "CV data unavailable. Start personal-rag with: cd ~/Projects/personal-rag && uvicorn api:app --port 8765 — then try again.",
+        // Names the fix available on the machine that emitted the error, and
+        // reports what was actually tried rather than a single guessed cause.
+        error:
+          `CV data unavailable — no source could be read.\n${cv.error}\n\n` +
+          `The wiki fallback also failed: ${(err as Error).message}`,
       };
     }
   },
 };
+
+/**
+ * The lines of `text` that relate to `query`, or a leading excerpt if none do.
+ *
+ * A blunt keyword filter, and blunt is the right level here: the caller is a
+ * model that will read whatever comes back, and the cost of returning a little
+ * too much context is far below the cost of returning nothing because the
+ * matcher was clever. Words of three characters or fewer are ignored so "and",
+ * "the" and "for" do not match every line in the document.
+ *
+ * A matched heading pulls in the section beneath it, and — the part that matters
+ * on a real CV — SUB-headings do not close it. The previous version reset on any
+ * line starting with "#", so a query for "experience" matched `## Experience`
+ * and then lost every role under it the moment it reached `### Turicks`. It
+ * returned the heading and nothing else. That was invisible against the wiki,
+ * which is flat, and became load-bearing the moment this started reading a real
+ * CV with nested sections.
+ */
+function excerptFor(text: string, query: string): string {
+  const keywords = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word.length > 3);
+
+  const relevant: string[] = [];
+  /** Depth of the heading that opened the current section, or null outside one. */
+  let sectionDepth: number | null = null;
+
+  for (const line of text.split("\n")) {
+    const lower = line.toLowerCase();
+    const heading = /^(#+)\s/.exec(line);
+    if (heading) {
+      const depth = (heading[1] as string).length;
+      // Deeper than the open section means we are still inside it. Same level or
+      // shallower ends it, and the new heading is judged on its own merits.
+      if (sectionDepth === null || depth <= sectionDepth) {
+        sectionDepth = keywords.some((kw) => lower.includes(kw)) ? depth : null;
+      }
+    }
+    if (sectionDepth !== null || keywords.some((kw) => lower.includes(kw))) relevant.push(line);
+  }
+
+  return relevant.length > 0 ? relevant.slice(0, 60).join("\n") : text.slice(0, 2000);
+}
 
 // ── Full CV text (for whole-document analysis, not search) ───────────────────
 
