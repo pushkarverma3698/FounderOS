@@ -238,10 +238,13 @@ describe("runFreeSweep", () => {
 
     expect(mockSendToChat).toHaveBeenCalledOnce();
     const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
-    expect(text).toContain("greenhouse/a");
-    expect(text).toContain("lever/b");
-    expect(text).toContain("ashby/c");
-    expect(text).not.toContain("greenhouse/d"); // capped at 3 named boards
+    // Counts per (platform, reason), and EVERY failure counted — the old version
+    // named the first three boards and silently dropped the fourth, which is how
+    // 36 Recruitee rate limits a sweep stayed invisible for a day.
+    expect(text).toContain("4 board(s) failed");
+    expect(text).toMatch(/greenhouse[^;]*500[^;]*2/);
+    expect(text).toContain("lever");
+    expect(text).toContain("ashby");
   });
 
   it("does not fire the outage alert when boards failed but some postings were still screened", async () => {

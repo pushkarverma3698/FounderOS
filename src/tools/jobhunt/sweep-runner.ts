@@ -186,9 +186,6 @@ async function publishSheet(): Promise<{ link: string | null; notice: string | n
  */
 const JOB_INGEST_DAILY_LIMIT = 80;
 
-/** Failed boards named in the free-sweep outage alert before it stops listing. */
-const OUTAGE_ALERT_BOARD_CAP = 3;
-
 /**
  * Every 30 minutes. `free-ats-source.ts` already states the reasoning for the
  * interval itself (closes the metered feed's 19.6-hour median lag to minutes);
@@ -259,10 +256,14 @@ export async function runFreeSweep(): Promise<void> {
     // signal. `seen === 0` is the only state where the failures are the reason
     // there is nothing to report.
     log.warn({ failures: result.failures }, "Free board sweep fetched nothing while boards were failing");
+    // Counts per (platform, reason) rather than the first three names: on a total
+    // outage the three that happen to sort first say nothing about the cause, and
+    // "recruitee HTTP 429 ×36" says all of it in five words.
+    const { summariseFailures } = await import("./free-ats-source.js");
     await sendToChat(
       esc(
         `⚠ Free job lane failed — nothing was fetched this sweep.\n` +
-          result.failures.slice(0, OUTAGE_ALERT_BOARD_CAP).join("\n"),
+          summariseFailures(result.failures),
       ),
     );
     return;
