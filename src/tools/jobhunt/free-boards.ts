@@ -16,12 +16,18 @@
  * 30-minute sweep. Against the metered feed's median 19.6-hour lag from
  * publication to ingest, polling the board itself closes that gap to minutes.
  *
- * KNOWN SKEW, stated because a silent one would be worse. This list was extracted
- * from a public dataset that leaned heavily toward gaming companies, so the board
- * mix is not a neutral sample of either market. The yield figures above were
- * measured against THIS list and already carry the skew. Growing the registry —
- * probing the IND recognised-sponsor register for board tokens is the obvious
- * next source — is deliberately follow-on work, not smuggled in here.
+ * KNOWN SKEW, stated because a silent one would be worse. The original 285 rows
+ * were extracted from a public dataset that leaned heavily toward gaming
+ * companies, so that slice is not a neutral sample of either market, and the
+ * yield figures above were measured against it and carry the skew.
+ *
+ * 338 rows were added on 2026-08-20 by `scripts/jobhunt-import-sponsor-boards.ts`,
+ * which JOINS the IND recognised-sponsor register to published ATS company→token
+ * corpora rather than guessing slugs and probing for them. Every one of those is
+ * an IND-recognised sponsor, verified live before it was written. Their `name`
+ * column deliberately carries the ATS corpus's company name, NOT the registered
+ * one — see the warning in board-import.ts, because this column is what
+ * free-ats-mappers.ts screens postings under.
  *
  * The file is DATA, not code, so adding a company is an edit to a CSV rather than
  * a deploy. `scripts/verify-runtime-assets.ts` proves it still resolves from the
@@ -158,10 +164,14 @@ function csvField(value: string): string {
  * A registry that loads but yields a handful of rows is the 2026-08-02 sponsor
  * outage wearing a different mask: the lane would run, report success, and poll
  * almost nothing — and a thin registry and a quiet market produce the same number
- * at the far end. The real file holds 238 boards; anything under 200 means the
+ * at the far end. The real file holds 623 boards; anything under 500 means the
  * parse or the file is wrong, and it must fail loudly at the gate.
+ *
+ * Raised 200 → 500 on 2026-08-20 alongside the sponsor-board import. A floor left
+ * at 200 would have gone on passing while two thirds of the registry silently
+ * failed to parse, which is precisely the reading this constant exists to deny.
  */
-export const MIN_EXPECTED_BOARDS = 200;
+export const MIN_EXPECTED_BOARDS = 500;
 
 function toFreeAts(value: string): FreeAts | null {
   const normalised = value.trim().toLowerCase();

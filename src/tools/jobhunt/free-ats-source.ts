@@ -26,7 +26,7 @@
 
 import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
-import type { FreeBoard } from "./free-boards.js";
+import type { FreeAts, FreeBoard } from "./free-boards.js";
 import { FREE_MAPPERS, decodeJobBody, type FreeCandidate } from "./free-ats-mappers.js";
 
 const log = childLogger({ module: "jobhunt:free-ats" });
@@ -48,6 +48,28 @@ export const DESCRIPTION_TIMEOUT_MS = 10_000;
  * JSON API to serve.
  */
 export const BOARD_CONCURRENCY = 8;
+
+/**
+ * Per-platform in-flight limits, because the platforms do not tolerate the same
+ * rate.
+ *
+ * MEASURED 2026-08-20, on the first full sweep after the sponsor-board import took
+ * the registry from 285 to 623: 40 boards failed, and 34 of those were Recruitee
+ * answering HTTP 429. Recruitee serves each customer from its own subdomain but
+ * rate-limits the caller, so eight in flight is a burst it refuses — the same 26
+ * boards came back healthy at two during the import's retry pass.
+ *
+ * Groups run in parallel, so the ceiling is the sum (26) rather than 8. That is
+ * MORE total traffic and LESS per origin: before this, all eight in-flight slots
+ * could land on boards-api.greenhouse.io at once. Each platform is now bounded on
+ * its own terms.
+ */
+export const PLATFORM_CONCURRENCY: Readonly<Record<FreeAts, number>> = {
+  greenhouse: BOARD_CONCURRENCY,
+  lever: BOARD_CONCURRENCY,
+  ashby: BOARD_CONCURRENCY,
+  recruitee: 2,
+};
 
 export type BoardFetch =
   | { readonly ok: true; readonly board: FreeBoard; readonly candidates: readonly FreeCandidate[] }
@@ -142,7 +164,22 @@ export interface BoardSweep {
  * quiet", which are the two readings this pipeline has historically confused.
  */
 export async function sweepBoards(boards: readonly FreeBoard[]): Promise<BoardSweep> {
-  const results = await mapWithConcurrencyLimit(boards, BOARD_CONCURRENCY, fetchBoard);
+  // Grouped by platform so each is bounded at its own rate (PLATFORM_CONCURRENCY).
+  // Groups run concurrently, so a slow platform never serialises behind another.
+  const byPlatform = new Map<FreeAts, FreeBoard[]>();
+  for (const board of boards) {
+    const group = byPlatform.get(board.ats);
+    if (group) group.push(board);
+    else byPlatform.set(board.ats, [board]);
+  }
+
+  const results = (
+    await Promise.all(
+      [...byPlatform].map(([ats, group]) =>
+        mapWithConcurrencyLimit(group, PLATFORM_CONCURRENCY[ats], fetchBoard),
+      ),
+    )
+  ).flat();
 
   const candidates: FreeCandidate[] = [];
   const failures: string[] = [];
