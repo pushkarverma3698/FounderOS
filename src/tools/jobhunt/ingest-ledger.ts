@@ -35,6 +35,27 @@ export interface LedgerEntry {
   readonly pricing: Readonly<Record<ApifyPlan, FeedPricing>>;
   readonly lines?: readonly IngestLine[];
   readonly error?: string;
+  /**
+   * Where the postings this query DIDN'T screen went.
+   *
+   * Optional because only the free lane computes a funnel; the metered lane
+   * leaves these null, and null means "not measured here" rather than zero.
+   * Until 2026-08-21 `runFreeIngest` built this struct and dropped it at the
+   * database boundary, so the only record was a log line — and answering "are
+   * we dropping roles?" needed journalctl on the production box.
+   */
+  readonly funnel?: IngestFunnel;
+}
+
+/** The six stages a free-lane posting can be dropped at, in the order they run. */
+export interface IngestFunnel {
+  readonly seen: number;
+  readonly undated: number;
+  readonly stale: number;
+  readonly offTrack: number;
+  readonly offMarket: number;
+  readonly known: number;
+  readonly bodyless: number;
 }
 
 export interface IngestTally {
@@ -122,6 +143,17 @@ export async function recordQueryCost(entry: LedgerEntry): Promise<void> {
       requested: entry.requested,
       returned: entry.returned,
       ...counts,
+      ...(entry.funnel
+        ? {
+            seen: entry.funnel.seen,
+            undated: entry.funnel.undated,
+            stale: entry.funnel.stale,
+            off_track: entry.funnel.offTrack,
+            off_market: entry.funnel.offMarket,
+            known: entry.funnel.known,
+            bodyless: entry.funnel.bodyless,
+          }
+        : {}),
       estimated_cost_usd: toLedgerAmount(estimateQueryCost(entry.pricing, entry.returned)),
       ...(screenError ? { screen_error: screenError } : {}),
       ...(entry.error ? { error: entry.error } : {}),
