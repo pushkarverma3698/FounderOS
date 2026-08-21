@@ -12,9 +12,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-const { boardUrl, greenhouseJobUrl, fetchBoard, sweepBoards, decodeJobBody } = await import(
-  "../../../src/tools/jobhunt/free-ats-source.js"
-);
+const {
+  boardUrl,
+  greenhouseJobUrl,
+  fetchBoard,
+  sweepBoards,
+  decodeJobBody,
+  PLATFORM_CONCURRENCY,
+} = await import("../../../src/tools/jobhunt/free-ats-source.js");
 import type { FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
 function board(overrides: Partial<FreeBoard> = {}): FreeBoard {
@@ -224,6 +229,34 @@ describe("sweepBoards", () => {
     expect(sweep.boardsPolled).toBe(5);
     expect(sweep.failures).toHaveLength(1);
     expect(sweep.failures[0]).toContain("t2");
+  });
+
+  it("never exceeds a platform's own in-flight limit", async () => {
+    // Recruitee answers HTTP 429 to a burst of eight (measured 2026-08-20: 34 of
+    // 40 sweep failures were Recruitee 429s right after the registry grew to 623).
+    // If this cap regresses, a third of the Dutch boards fail on every sweep.
+    const inFlight = new Map<string, number>();
+    const peak = new Map<string, number>();
+
+    mockFetch.mockImplementation(async (url: string) => {
+      const ats = url.includes("recruitee") ? "recruitee" : "greenhouse";
+      const now = (inFlight.get(ats) ?? 0) + 1;
+      inFlight.set(ats, now);
+      peak.set(ats, Math.max(peak.get(ats) ?? 0, now));
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight.set(ats, now - 1);
+      return okResponse(ats === "recruitee" ? { offers: [] } : { jobs: [] });
+    });
+
+    await sweepBoards([
+      ...Array.from({ length: 12 }, (_, i) => board({ ats: "recruitee", token: `r${i}` })),
+      ...Array.from({ length: 12 }, (_, i) => board({ ats: "greenhouse", token: `g${i}` })),
+    ]);
+
+    expect(peak.get("recruitee")).toBeLessThanOrEqual(PLATFORM_CONCURRENCY.recruitee);
+    expect(peak.get("greenhouse")).toBeLessThanOrEqual(PLATFORM_CONCURRENCY.greenhouse);
+    // The platforms must run in parallel, not one group after the other.
+    expect(peak.get("greenhouse")).toBeGreaterThan(PLATFORM_CONCURRENCY.recruitee);
   });
 });
 

@@ -55,7 +55,7 @@ export interface SponsorMatch {
 // "Exploding Kittens" in the paid feed) into two rows. Only TRAILING tokens are
 // stripped, and never the last one standing, so "Co & Co Amsterdam" keeps its
 // name.
-const LEGAL_SUFFIX_TOKENS = new Set([
+export const LEGAL_SUFFIX_TOKENS = new Set([
   ...["b", "v", "n", "bv", "nv", "cv", "vof"],
   ...["inc", "llc", "corp", "corporation", "co"],
   ...["ltd", "limited", "plc"],
