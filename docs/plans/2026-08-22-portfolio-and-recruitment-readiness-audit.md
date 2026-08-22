@@ -234,9 +234,9 @@ FounderOS can make that exact claim truthfully. It currently makes it nowhere a 
 
 | # | Action | Time | Why now |
 |---|---|---|---|
-| A1 | Add `.gitattributes` marking `creative-engine/runs/`, `runs/`, `.data/`, `assets/cinematic-presets/`, `apps/jarvis-next/public/` as `linguist-generated`; `git rm -r --cached` the run artifacts and `eng.traineddata`, add to `.gitignore` | 30 m | Language badge flips HTML → TypeScript. First three seconds. |
-| A2 | Close the ~14 noise issues; keep #426, #498, #474 and the dependency findings | 20 m | Second thing a stranger clicks. |
-| A3 | Run `pnpm proof:scoreboard` and `pnpm proof:costs`; set the tests badge to **3,465** (verified in CI, see P4) or swap in the live GitHub Actions badge | 30 m | Removes the badge-vs-PROOF.md contradiction, and generates the missing cost page. |
+| A1 | ~~`.gitattributes` + untrack the run artifacts~~ **DONE** `29b084c` — 157 files untracked (86 MB), tracked HTML 36 → 15, TypeScript now outweighs unmarked HTML 4.79 MB : 33 KB. `eng.traineddata` deliberately kept (see below) | 30 m | Language badge flips HTML → TypeScript. First three seconds. |
+| A2 | ~~Close the noise issues~~ **DONE** — 10 closed (#344 #96 #83 #58 #47 #109 #110 #248 #59 #260), **20 → 10 open**, every survivor a real work item | 20 m | Second thing a stranger clicks. |
+| A3 | ~~Fix the badge~~ **PARTLY DONE** `29b084c` — tests badge now reads **3,465** and links to live CI, plus a real CI status badge that cannot go stale; all four in-text `1,800+` claims corrected. **Still yours:** `pnpm proof:scoreboard` + `pnpm proof:costs` (need deps + DB) | 30 m | Removes the badge-vs-PROOF.md contradiction, and generates the missing cost page. |
 | A4 | Put three visuals at the top of the README: `01-system-architecture` mermaid inline, one real Telegram screenshot of an HITL approval card, one of a `FailureReport` | 2 h | The single highest-ROI change in this document. |
 | A5 | Pin the repo; write a GitHub profile README; confirm both commit emails are attached to the account | 30 m | Recovers ~170 commits of visible history. |
 | A6 | Drop or reframe the turicks.com link in the README | 10 m | Stops routing AI reviewers to a school-SaaS agency page. |
@@ -259,6 +259,17 @@ FounderOS can make that exact claim truthfully. It currently makes it nowhere a 
 | C2 | Warm-intro lane: for each shortlisted sponsor, surface a LinkedIn path before the cold apply, and hold the cold apply until it is declined | 1–2 d | Highest-converting channel, currently 0% of the design, and cold-applying first burns it. |
 | C3 | Enforce the 24-hour apply queue and rank to a **15-row daily cap** | 0.5 d | Matches machine output to the human click budget that is the actual ceiling. |
 | C4 | One page of interview prep against the probes the 2026-07-29 plan already identified: StateGraph, checkpointers, HITL, determinism, and "your prompt changed vs the model changed underneath you" | 0.5 d | The constraint immediately after an application lands. Nothing addresses it today. |
+
+### One approved item I did not do, and why
+
+A1 as written said to untrack `eng.traineddata` (5.2 MB). I left it tracked.
+
+It is a tesseract.js model cache read through `creative-engine/src/metrics/ocrReadback.ts`;
+untracking it makes the first OCR run depend on a network download, and being binary it
+contributes nothing to language detection either way. So the cost was a real behaviour change
+and the benefit toward the approved goal was zero. Marked `linguist-generated binary` instead.
+Flagging it rather than silently following the plan — approval authorizes work, it does not
+verify it (rule #28).
 
 ### Explicitly not recommended
 
