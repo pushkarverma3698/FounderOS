@@ -155,7 +155,13 @@ exist.
 
 For a project whose entire pitch is *evidence over assertion*, the one number on the badge
 disagreeing with the page it links to is the worst possible inconsistency to leave in place.
-*(True current count unverified — `node_modules` absent in this sandbox.)*
+
+**Resolved 2026-08-22 from CI.** The PR carrying this document ran `pnpm test` green on
+`aef0f37`: **3,465 tests across 317 files, 121s**
+([job 96991211519](https://github.com/pushkarverma3698/FounderOS/actions/runs/32556417601/job/96991211519)).
+So the badge is not inflated — it *understates* the number by roughly half, and `PROOF.md` is
+stale by 2,252 tests. Underclaiming is the less damaging direction, but "1,800+" against a real
+3,465 is still a number nobody can reproduce from the linked page. Set the badge to 3,465.
 
 ### P5 · The Issues tab is the second thing people click — MEDIUM, 20 minutes
 
@@ -230,7 +236,7 @@ FounderOS can make that exact claim truthfully. It currently makes it nowhere a 
 |---|---|---|---|
 | A1 | Add `.gitattributes` marking `creative-engine/runs/`, `runs/`, `.data/`, `assets/cinematic-presets/`, `apps/jarvis-next/public/` as `linguist-generated`; `git rm -r --cached` the run artifacts and `eng.traineddata`, add to `.gitignore` | 30 m | Language badge flips HTML → TypeScript. First three seconds. |
 | A2 | Close the ~14 noise issues; keep #426, #498, #474 and the dependency findings | 20 m | Second thing a stranger clicks. |
-| A3 | Run `pnpm proof:scoreboard` and `pnpm proof:costs`; replace the static badge with the live GitHub Actions CI badge | 30 m | Removes the badge-vs-PROOF.md contradiction, and generates the missing cost page. |
+| A3 | Run `pnpm proof:scoreboard` and `pnpm proof:costs`; set the tests badge to **3,465** (verified in CI, see P4) or swap in the live GitHub Actions badge | 30 m | Removes the badge-vs-PROOF.md contradiction, and generates the missing cost page. |
 | A4 | Put three visuals at the top of the README: `01-system-architecture` mermaid inline, one real Telegram screenshot of an HITL approval card, one of a `FailureReport` | 2 h | The single highest-ROI change in this document. |
 | A5 | Pin the repo; write a GitHub profile README; confirm both commit emails are attached to the account | 30 m | Recovers ~170 commits of visible history. |
 | A6 | Drop or reframe the turicks.com link in the README | 10 m | Stops routing AI reviewers to a school-SaaS agency page. |
@@ -268,8 +274,8 @@ FounderOS can make that exact claim truthfully. It currently makes it nowhere a 
 - **No database access.** No `ssh` binary in this sandbox, so the funnel numbers (334→2, queue ages,
   the 198-hour metered-lane outage) come from `docs/plans/2026-08-20-…` and are two days old.
   Re-check with `/jobs` before Monday.
-- **No `node_modules`.** `pnpm test` was not run, so the true test count — 1,213, 1,800+, or
-  neither — is unverified. A3 resolves it.
+- ~~**No `node_modules`.** `pnpm test` was not run, so the true test count is unverified.~~
+  **Resolved** — CI ran it green on this PR's head: 3,465 tests, 317 files. See P4.
 - **The CVs were not read.** They live outside the repository. R6 and A7 stand on that gap.
 - **Salary and immigration figures** are from ind.nl-derived third-party guides. Verify at ind.nl
   before quoting one in a negotiation.
