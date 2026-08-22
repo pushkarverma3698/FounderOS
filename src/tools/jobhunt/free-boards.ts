@@ -64,16 +64,27 @@ import { REPO_ROOT, parseCsvLine } from "./sponsor-registry.js";
  * the 12,883-row register against their published corpora measured 145 and 86
  * IND-sponsor boards respectively.
  *
- * PERSONIO REMAINS EXCLUDED, but the earlier reason recorded here was wrong and
- * is corrected rather than repeated: `<token>.jobs.personio.de/job/<id>` does
- * redirect (307), but the `.com` host does not — `1komma5grad.jobs.personio.com/
- * job/781758` resolves 200 (checked live 2026-08-21). The real obstacle is the
- * feed. `search.json` returns no description on any job (verified empty across
- * two boards, 319 postings and 2), no URL and no date, so the only complete
- * source is `/xml`: a different fetch path, an XML parser, and roughly 2 MB per
- * company because bodies are inlined. Across the 78 IND-sponsor Personio boards
- * that is ~156 MB every thirty minutes. Worth doing, not worth doing alongside
- * two JSON mappers. Homerun was not probed live in this pass.
+ * PERSONIO added 2026-08-22, and the objection recorded here before it is worth
+ * keeping because every fact in it was right and the conclusion still did not
+ * hold. `search.json` does carry no description, no URL and no date (re-verified,
+ * 318 postings), so `/xml` is the only complete source, and it is ~2.26 MB per
+ * board — 156 MB per sweep across 78 boards, which is what kept it out.
+ *
+ * That figure assumed every sweep re-downloads every board. Personio serves an
+ * `ETag` and answers `If-None-Match` with a 0-byte 304 (verified live), and a
+ * board changes maybe once a day, so the steady-state cost is a few hundred
+ * bytes per unchanged board. The blocker was never the feed size; it was fetching
+ * unconditionally. See free-ats-cache.ts.
+ *
+ * HOMERUN REMAINS EXCLUDED, now for a stated reason rather than an unprobed one
+ * (2026-08-22). It has no public JSON API — developers.homerun.co requires Bearer
+ * auth — and no `homerun.csv` exists in the ATS corpus every other platform's
+ * tokens come from (404). Every `<token>.homerun.co` probed redirects to
+ * `404.homerun.co/working_at/<token>`, so there is no way to tell a real board
+ * from a typo. Adding it would mean guessing slugs, which is exactly what
+ * probe-sponsor-boards.ts forbids: a wrong board is worse than no board. It
+ * unblocks the moment a token corpus exists, or a sponsor's posting URL is seen
+ * in the wild and harvested.
  */
 export type FreeAts =
   | "greenhouse"
@@ -81,7 +92,8 @@ export type FreeAts =
   | "ashby"
   | "recruitee"
   | "smartrecruiters"
-  | "workable";
+  | "workable"
+  | "personio";
 
 export const FREE_ATS_PLATFORMS: readonly FreeAts[] = [
   "greenhouse",
@@ -90,6 +102,7 @@ export const FREE_ATS_PLATFORMS: readonly FreeAts[] = [
   "recruitee",
   "smartrecruiters",
   "workable",
+  "personio",
 ];
 
 /**

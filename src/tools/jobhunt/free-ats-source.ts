@@ -91,6 +91,13 @@ export const PLATFORM_CONCURRENCY: Readonly<Record<FreeAts, number>> = {
   // rate limit became visible in the first place.
   smartrecruiters: BOARD_CONCURRENCY,
   workable: BOARD_CONCURRENCY,
+  // Deliberately below the default. Personio is the one platform whose board
+  // response is megabytes rather than kilobytes, so in-flight requests here cost
+  // memory as well as sockets: eight concurrent 2.26 MB bodies is ~18 MB of
+  // buffers on a box that also runs Postgres and Ollama. Most sweeps revalidate
+  // to a 0-byte 304 and never allocate, so the ceiling only binds on the sweep
+  // after a board actually changes — which is exactly when it should.
+  personio: 3,
 };
 
 /**

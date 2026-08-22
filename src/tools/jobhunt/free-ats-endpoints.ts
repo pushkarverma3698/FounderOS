@@ -45,6 +45,11 @@ export function boardUrl(board: FreeBoard): string {
       // `details=true` is what makes the body arrive with the list, which is
       // what saves Workable a hydration request per posting.
       return `https://apply.workable.com/api/v1/widget/accounts/${token}?details=true`;
+    case "personio":
+      // NOT `search.json`, which looks like the JSON sibling of this and is the
+      // trap: it answers 200 with every posting and an empty description on all
+      // of them, no date and no URL. See personio-xml.ts.
+      return `https://${token}.jobs.personio.com/xml`;
   }
 }
 
@@ -65,6 +70,7 @@ export const WIRE_FORMAT: Readonly<Record<FreeAts, WireFormat>> = {
   recruitee: "json",
   smartrecruiters: "json",
   workable: "json",
+  personio: "xml",
 };
 
 /** One SmartRecruiters page. Above any single board's live openings in the registry. */
@@ -98,6 +104,9 @@ export function jobBodyUrl(board: FreeBoard, externalId: string): string | null 
     case "ashby":
     case "recruitee":
     case "workable":
+    // Personio inlines every description in the board feed itself — that is the
+    // whole reason the feed is 2.26 MB and the whole reason it is worth caching.
+    case "personio":
       return null;
   }
 }
@@ -151,6 +160,8 @@ const APPLY_PATH: Readonly<Record<FreeAts, string>> = {
   // second URL, and inventing one would 404.
   smartrecruiters: "",
   workable: "/apply",
+  // Personio serves the form on the posting page itself; there is no second URL.
+  personio: "",
 };
 
 /**

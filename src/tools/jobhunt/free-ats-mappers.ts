@@ -23,6 +23,7 @@
  * requirements", which is a confident wrong answer.
  */
 
+import { mapPersonioPositions } from "./personio-xml.js";
 import type { RawPosting } from "./ats-source.js";
 import { countryFromLocation } from "./country.js";
 import type { FreeBoard } from "./free-boards.js";
@@ -358,6 +359,7 @@ export const FREE_MAPPERS: Record<
   recruitee: mapRecruiteeOffers,
   smartrecruiters: mapSmartRecruitersPostings,
   workable: mapWorkableJobs,
+  personio: mapPersonioPositions,
 };
 
 /**

@@ -24,6 +24,13 @@
  * bad board must not cost the other 77 their sweep.
  */
 
+import type { FreeBoard } from "./free-boards.js";
+import {
+  decodeJobBody,
+  parsePostedAt,
+  type FreeCandidate,
+} from "./free-ats-mappers.js";
+
 /** One posting, exactly as the feed states it — no interpretation yet. */
 export interface PersonioPosition {
   readonly id: string;
@@ -153,4 +160,49 @@ function sectionsToBody(subtree: string): string {
   }
 
   return parts.join("\n\n").trim();
+}
+
+/**
+ * Personio positions → the candidate shape the rest of the lane understands.
+ *
+ * Lives here rather than in free-ats-mappers.ts for two reasons: that file is at
+ * 385 of its 400-line budget, and everything this function needs to know is
+ * Personio-specific and already in this module.
+ *
+ * THE URL IS CONSTRUCTED, not read. The feed carries no per-posting URL at all —
+ * the one field `search.json` and `/xml` agree on omitting. `<token>.jobs.
+ * personio.com/job/<id>` resolves 200 (verified live 2026-08-22 against two real
+ * ids on `1komma5grad`), which matters because a candidate with no URL is
+ * dropped by the mapper contract and would take all 318 postings with it.
+ *
+ * An earlier note in probe-sponsor-boards.ts recorded that these URLs "redirect
+ * to personio.com's marketing page". That was true of the `.de` host and is not
+ * true of `.com`; corrected there rather than worked around here.
+ */
+export function mapPersonioPositions(payload: unknown, board: FreeBoard): FreeCandidate[] {
+  // The transport hands XML through as a string. Anything else is a wire-format
+  // mismatch, which is a bug in WIRE_FORMAT rather than a bad board.
+  if (typeof payload !== "string") return [];
+
+  const token = encodeURIComponent(board.token);
+
+  return parsePersonioPositions(payload).flatMap((position) => {
+    if (position.name.length === 0) return [];
+
+    // `office` is the position's own; `additionalOffices` is deliberately not
+    // folded in. A role listed in Hamburg AND Amsterdam screens on the country
+    // its own office states, and joining them would let a German posting match
+    // the NL market on a secondary office it merely also accepts.
+    return [
+      {
+        board,
+        externalId: position.id,
+        title: position.name,
+        url: `https://${token}.jobs.personio.com/job/${encodeURIComponent(position.id)}`,
+        location: position.office,
+        postedAt: parsePostedAt(position.createdAt),
+        description: decodeJobBody(position.body) || null,
+      },
+    ];
+  });
 }
