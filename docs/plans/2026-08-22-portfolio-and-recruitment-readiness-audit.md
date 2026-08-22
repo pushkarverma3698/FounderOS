@@ -185,12 +185,28 @@ Also: commits are split across two author emails (176 + 170) plus 24 authored by
 `Claude <noreply@anthropic.com>`. If `pushkar3698@gmail.com` is not attached to the GitHub
 account, roughly half the contribution history is invisible on his profile.
 
-### P7 · Docs describe an architecture that was deleted — MEDIUM, 1 hour
+### P7 · `ROADMAP.md` describes an architecture that was deleted — MEDIUM, 1 hour
 
-`ROADMAP.md` and `LIMITATIONS.md` still speak in v2 vocabulary — "departments", "office", "ReAct"
-— for a system whose whole story is that it deleted them. `LIMITATIONS.md` is linked from the
-README as honest accounting, so a careful reviewer, which is exactly the reviewer worth impressing,
-finds the least accurate document in the repo.
+**This finding was half wrong when first written, and the correction is more useful than the
+finding.** It originally named `ROADMAP.md` *and* `LIMITATIONS.md`, on the strength of a keyword
+count: both mention "departments", "office" and "ReAct".
+
+Reading them rather than grepping them (2026-08-22):
+
+- **`LIMITATIONS.md` is not rot.** It was deliberately rewritten against the v3 kernel on
+  2026-08-19, and every v2 mention in it is an explicit tombstone or historical record — its own
+  header says the previous revision "described a system that no longer exists". It is one of the
+  better documents in the repo. Only its measured-state counts were stale.
+- **`ROADMAP.md` is genuinely stale**, and worse than the original finding suggested. Dated
+  2026-06-17, it lists "v2 Architecture (7 ReAct departments)" under **Shipped & Locked**, says
+  "Architecture is locked — only add tools and hierarchy from now on" three weeks before the
+  architecture was replaced, and offers "Rearchitect supervisor" as a deliberate defer. It claims
+  1,098 tests against a real 3,499 and tells contributors a human reviews before merge, reversed
+  by founder directive on 2026-08-01. None of it is presented as history.
+
+The lesson generalises past this row: a finding produced by counting keywords and not verified is
+the same class of error this audit exists to catch. Both files are fixed on the follow-up branch —
+`LIMITATIONS.md` by refreshing its numbers, `ROADMAP.md` by rewriting it.
 
 ### P8 · Everything is TypeScript — MEDIUM, structural, not fixable by Monday
 
@@ -248,8 +264,8 @@ FounderOS can make that exact claim truthfully. It currently makes it nowhere a 
 |---|---|---|---|
 | B1 | **Evidence Console, S1 + S2 only.** One public URL: replayed kernel trace + receipt ledger with the break-it button. Nothing else from the ten surfaces. | 2–3 d | The highest-value item in the audit. Scope is the whole lesson — the ten-surface version got zero. |
 | B2 | Publish the numbers: cost/run, p50/p95 latency, days live, turns, failures. Data already exists in `ai_call_costs` and the seam journal | 0.5 d | "Missing cost/latency analysis" is a named credibility-killer. |
-| B3 | Rewrite `EVAL.md` as regression-from-incident — each golden case linked to the production failure that created it — and link it from the README's first screen | 0.5 d | Top-cited hiring signal; he has it and it is buried. |
-| B4 | Purge v2 vocabulary from `ROADMAP.md` and `LIMITATIONS.md` | 1 h | The careful reviewer is the one worth impressing. |
+| B3 | ~~Rewrite `EVAL.md`~~ **DONE** — new `docs/EVAL.md` (method), linked from the README's first screen. Corrected two README claims on the way: CI does not run the golden set, and the root `EVAL.md` it linked as "Full eval" is a pre-v3 report showing 79% | 0.5 d | Top-cited hiring signal; he has it and it was buried. |
+| B4 | ~~Purge v2 vocabulary from `ROADMAP.md` and `LIMITATIONS.md`~~ **DONE** — `ROADMAP.md` rewritten against v3; `LIMITATIONS.md` needed only a number refresh, not a purge (see P7) | 1 h | The careful reviewer is the one worth impressing. |
 
 ### Lane C — week 1–2 (the machine)
 
