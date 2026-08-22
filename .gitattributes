@@ -1,0 +1,26 @@
+# Language detection
+# =================
+# GitHub's language badge is computed by linguist over every tracked file. Without
+# this file it read "HTML" on a TypeScript project, because generated run output
+# (rendered pages, plates, masks) outnumbered the source it was rendered by.
+#
+# `linguist-generated` also collapses these paths in diffs, which is right for
+# machine-written output nobody reviews line by line.
+
+# Creative-engine and video CLI output — written by `--outdir`, never edited.
+creative-engine/runs/**   linguist-generated=true
+runs/**                   linguist-generated=true
+.data/**                  linguist-generated=true
+
+# Brainstorm transcripts captured by tooling.
+.superpowers/**           linguist-generated=true
+
+# Render templates shipped as data, not as application source.
+assets/cinematic-presets/** linguist-vendored=true
+
+# Test fixtures: real and required, but they are captured third-party markup,
+# not code this project authors.
+mac-client/tests/fixtures/** linguist-vendored=true
+
+# Tesseract language data — a binary model cache, not source.
+eng.traineddata           linguist-generated=true binary
