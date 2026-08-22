@@ -30,7 +30,7 @@ I shipped this system three times before I shipped it right.
 | **State persistence** | Postgres-checkpointed graph; approval rows written *before* `interrupt()` | Crash mid-approval → restart → pending action survives |
 | **Zero-hallucination actions** | `ToolReceipt` required for every action claim; synthesizer only sees validated results | `kernel-e2e: fabricated action` — unproven claims rejected |
 | **Crash-safe human-in-the-loop** | Durable record before interrupt; idempotency key before every send | Process crash during approval → no double-send, no lost state |
-| **Deterministic evaluation** | Temp 0, scripted models offline, golden set run twice | 1,800+ tests at $0; byte-identical plans in CI |
+| **Deterministic evaluation** | Temp 0, scripted models offline, pure-function routing | Byte-identical plans asserted in CI at $0 — [how this is evaluated](docs/EVAL.md) |
 | **Architecture-debt ratchet** | CI-enforced baseline that may only shrink | `regex-routing = 0`, `gateway-imports = 0`, `kernel-purity = 0` |
 | **Idempotent side effects** | Dedup key checked before every external send | Retry can never double-send an email |
 | **Typed failure taxonomy** | `FailureReport` = stage + component + evidence + retryable | Threads never silently wiped; founder always sees the real error |
@@ -92,12 +92,12 @@ I shipped this system three times before I shipped it right.
 | Tier | What | Cost | When |
 |------|------|------|------|
 | `pnpm test` | 1,800+ unit/kernel tests, scripted models | $0 | Every commit |
-| `pnpm eval` | 29 golden tasks, 3 scoring dimensions (routing 90%, tools 96%, HITL 89%) | ~$0.10 | Per feature branch |
+| `pnpm eval` | 46 golden tasks, 3 scoring dimensions (routing · tools · HITL) | ~$0.10 | Per feature branch |
 | `pnpm qa:telegram` | 22-task MTProto founder-simulation against live bot | ~$0.50 | Pre-deploy acceptance |
 
 **What the eval catches:** routing misclassification (e.g., "draft cold outreach + research first" routed to `research` instead of `sales`), tool drops (LinkedIn post planned but no tool called), unnecessary HITL triggers on read-only tasks, and complete routing failures.
 
-*Scoreboard: [PROOF.md](docs/PROOF.md) · Full eval: [EVAL.md](EVAL.md)*
+*Method — what is scored and what is not: [docs/EVAL.md](docs/EVAL.md) · Scoreboard: [PROOF.md](docs/PROOF.md) · Last recorded run: [EVAL.md](EVAL.md) (2026-06-11, pre-v3 — regenerate with `pnpm eval`)*
 
 ---
 
@@ -210,6 +210,7 @@ pnpm dev
 | Document | What you'll find |
 |----------|-----------------|
 | [Case Studies: v1→v2→v3](docs/turicks-case-studies/) | 5 engineering war stories, including the 77-regex lie detector and the empty-braces handoff |
+| [**How this system is evaluated**](docs/EVAL.md) | What is scored and what is not: determinism in CI, the golden set, retrieval recall@5/MRR, and why an infra error is never a routing miss |
 | [Seam Failures Log](docs/SEAM-FAILURES.md) | 6 production bugs with signature → evidence → fix → prevention |
 | [Architecture Diagrams (10)](docs/diagrams/) | Mermaid diagrams grounded in source, with file paths linked inline |
 | [Proof Scoreboard](docs/PROOF.md) | Regenerable evidence: 1,800+ tests, kernel guarantees, debt ratchet |
