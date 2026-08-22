@@ -48,6 +48,25 @@ export function boardUrl(board: FreeBoard): string {
   }
 }
 
+/**
+ * What a platform's board endpoint returns on the wire.
+ *
+ * Every platform here speaks JSON today. The distinction exists because the
+ * transport has to decide between `response.json()` and `response.text()` before
+ * a mapper ever sees the payload, and a platform whose only complete feed is XML
+ * is a question of fact about that platform — which is what this file records.
+ */
+export type WireFormat = "json" | "xml";
+
+export const WIRE_FORMAT: Readonly<Record<FreeAts, WireFormat>> = {
+  greenhouse: "json",
+  lever: "json",
+  ashby: "json",
+  recruitee: "json",
+  smartrecruiters: "json",
+  workable: "json",
+};
+
 /** One SmartRecruiters page. Above any single board's live openings in the registry. */
 const SMARTRECRUITERS_PAGE = 100;
 
