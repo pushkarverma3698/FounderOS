@@ -7,7 +7,7 @@ Everything in this repository exists because I wanted to answer one question: *h
 FounderOS is a deterministic, contract-first agent kernel that takes real business actions — email, LinkedIn, GitHub, shell — safely, with founder approval and a code-recorded receipt for every one. It runs my studio ([Turicks](https://turicks.com)) end-to-end over Telegram. But the interesting part isn't what it does — it's the engineering problems I had to solve to make it reliable.
 
 [![CI](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-3%2C465%20offline%20%240-brightgreen.svg)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-3%2C499%20offline%20%240-brightgreen.svg)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ---
@@ -31,7 +31,7 @@ I shipped this system three times before I shipped it right.
 | **State persistence** | Postgres-checkpointed graph; approval rows written *before* `interrupt()` | Crash mid-approval → restart → pending action survives |
 | **Zero-hallucination actions** | `ToolReceipt` required for every action claim; synthesizer only sees validated results | `kernel-e2e: fabricated action` — unproven claims rejected |
 | **Crash-safe human-in-the-loop** | Durable record before interrupt; idempotency key before every send | Process crash during approval → no double-send, no lost state |
-| **Deterministic evaluation** | Temp 0, scripted models offline, pure-function routing | 3,465 tests at $0; byte-identical plans asserted in CI — [how this is evaluated](docs/EVAL.md) |
+| **Deterministic evaluation** | Temp 0, scripted models offline, pure-function routing | 3,499 tests at $0; byte-identical plans asserted in CI — [how this is evaluated](docs/EVAL.md) |
 | **Architecture-debt ratchet** | CI-enforced baseline that may only shrink | `regex-routing = 0`, `gateway-imports = 0`, `kernel-purity = 0` |
 | **Idempotent side effects** | Dedup key checked before every external send | Retry can never double-send an email |
 | **Typed failure taxonomy** | `FailureReport` = stage + component + evidence + retryable | Threads never silently wiped; founder always sees the real error |
@@ -92,7 +92,7 @@ I shipped this system three times before I shipped it right.
 
 | Tier | What | Cost | When |
 |------|------|------|------|
-| `pnpm test` | 3,465 unit/kernel tests across 317 files, scripted models | $0 | Every commit |
+| `pnpm test` | 3,499 unit/kernel tests across 321 files, scripted models | $0 | Every commit |
 | `pnpm eval` | 46 golden tasks, 3 scoring dimensions (routing · tools · HITL) | ~$0.10 | Per feature branch |
 | `pnpm qa:telegram` | 22-task MTProto founder-simulation against live bot | ~$0.50 | Pre-deploy acceptance |
 
