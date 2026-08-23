@@ -2,8 +2,8 @@
  * Ollama local model client.
  *
  * Token-saving integration per CLAUDE.md "Local Model Routing" rules:
- *   - JSON extraction / code gen → qwen2.5-coder:7b
- *   - General reasoning / fast   → qwen2.5:7b
+ *   - JSON extraction / code gen → llama3.2:3b
+ *   - General reasoning / fast   → llama3.2:3b
  *   - Embeddings                 → nomic-embed-text
  *
  * Both functions degrade gracefully — any error returns null so callers
@@ -23,12 +23,12 @@ const TIMEOUT_MS = 8_000; // 8 s — fast models should never take longer
  */
 export const OLLAMA_MODEL_MAP: Record<string, string> = {
   // Text / code generation
-  code: "qwen2.5-coder:7b",
-  json: "qwen2.5:7b",
-  fast: "qwen2.5:7b",
+  code: "llama3.2:3b",
+  json: "llama3.2:3b",
+  fast: "llama3.2:3b",
   // Convenience aliases used internally
-  classify: "qwen2.5:7b",
-  summarize: "qwen2.5:7b",
+  classify: "llama3.2:3b",
+  summarize: "llama3.2:3b",
   // Embeddings (used by ollamaEmbed)
   embed: "nomic-embed-text",
 };
