@@ -15,7 +15,8 @@ export default {
         dim: 'rgba(190,225,235,0.45)',
       },
       fontFamily: {
-        display: ['Chakra Petch', 'system-ui', 'sans-serif'],
+        display: ['Outfit', 'system-ui', 'sans-serif'],
+        sans: ['Inter', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
       },
       animation: {

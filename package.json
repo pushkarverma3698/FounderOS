@@ -26,6 +26,7 @@
     "verify:arch": "node --import tsx/esm scripts/verify-architecture.ts",
     "audit:self": "node --env-file=.env --import tsx/esm scripts/audit-self.ts",
     "jobhunt:import-boards": "node --env-file=.env --import tsx/esm scripts/jobhunt-import-sponsor-boards.ts",
+    "jobhunt:grow-funding": "node --env-file=.env --import tsx/esm scripts/jobhunt-funding-grow.ts",
     "session:sync": "node --env-file=.env --import tsx/esm scripts/sync-conversation-session.ts",
     "self-improve:run": "node --env-file=.env --import tsx/esm scripts/self-improve-cron.ts",
     "verify:wiring": "node --import tsx/esm scripts/verify-wiring.ts",
