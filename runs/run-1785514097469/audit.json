@@ -1,9 +1,0 @@
-{
-  "runId": "run-1785514097469",
-  "createdAt": "2026-07-31T16:08:34.110Z",
-  "spentUsd": 0.003,
-  "cheapIters": 4,
-  "expensiveIters": 1,
-  "selectedScore": 0.898,
-  "modelId": "fal-ai/flux/schnell"
-}
