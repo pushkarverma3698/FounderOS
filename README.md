@@ -6,7 +6,8 @@ Everything in this repository exists because I wanted to answer one question: *h
 
 FounderOS is a deterministic, contract-first agent kernel that takes real business actions — email, LinkedIn, GitHub, shell — safely, with founder approval and a code-recorded receipt for every one. It runs my studio ([Turicks](https://turicks.com)) end-to-end over Telegram. But the interesting part isn't what it does — it's the engineering problems I had to solve to make it reliable.
 
-[![Tests](https://img.shields.io/badge/tests-1800%2B%20offline%20%240-brightgreen.svg)](docs/PROOF.md)
+[![CI](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-3%2C465%20offline%20%240-brightgreen.svg)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ---
@@ -30,7 +31,7 @@ I shipped this system three times before I shipped it right.
 | **State persistence** | Postgres-checkpointed graph; approval rows written *before* `interrupt()` | Crash mid-approval → restart → pending action survives |
 | **Zero-hallucination actions** | `ToolReceipt` required for every action claim; synthesizer only sees validated results | `kernel-e2e: fabricated action` — unproven claims rejected |
 | **Crash-safe human-in-the-loop** | Durable record before interrupt; idempotency key before every send | Process crash during approval → no double-send, no lost state |
-| **Deterministic evaluation** | Temp 0, scripted models offline, golden set run twice | 1,800+ tests at $0; byte-identical plans in CI |
+| **Deterministic evaluation** | Temp 0, scripted models offline, golden set run twice | 3,465 tests at $0; byte-identical plans in CI |
 | **Architecture-debt ratchet** | CI-enforced baseline that may only shrink | `regex-routing = 0`, `gateway-imports = 0`, `kernel-purity = 0` |
 | **Idempotent side effects** | Dedup key checked before every external send | Retry can never double-send an email |
 | **Typed failure taxonomy** | `FailureReport` = stage + component + evidence + retryable | Threads never silently wiped; founder always sees the real error |
@@ -91,7 +92,7 @@ I shipped this system three times before I shipped it right.
 
 | Tier | What | Cost | When |
 |------|------|------|------|
-| `pnpm test` | 1,800+ unit/kernel tests, scripted models | $0 | Every commit |
+| `pnpm test` | 3,465 unit/kernel tests across 317 files, scripted models | $0 | Every commit |
 | `pnpm eval` | 29 golden tasks, 3 scoring dimensions (routing 90%, tools 96%, HITL 89%) | ~$0.10 | Per feature branch |
 | `pnpm qa:telegram` | 22-task MTProto founder-simulation against live bot | ~$0.50 | Pre-deploy acceptance |
 
@@ -212,7 +213,7 @@ pnpm dev
 | [Case Studies: v1→v2→v3](docs/turicks-case-studies/) | 5 engineering war stories, including the 77-regex lie detector and the empty-braces handoff |
 | [Seam Failures Log](docs/SEAM-FAILURES.md) | 6 production bugs with signature → evidence → fix → prevention |
 | [Architecture Diagrams (10)](docs/diagrams/) | Mermaid diagrams grounded in source, with file paths linked inline |
-| [Proof Scoreboard](docs/PROOF.md) | Regenerable evidence: 1,800+ tests, kernel guarantees, debt ratchet |
+| [Proof Scoreboard](docs/PROOF.md) | Regenerable evidence: kernel guarantees, debt ratchet, cost ledger |
 | [Limitations & Tech Debt](docs/LIMITATIONS.md) | Honest accounting of scaling ceilings, deferred work, and accepted risks |
 | [JARVIS Architecture](JARVIS-ARCHITECTURE.md) | The v3 contract-first kernel design spec |
 | [Zero-Base Audit](ZERO-BASE-AUDIT.md) | 4 live failure traces from the v2→v3 rebuild |
