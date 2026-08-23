@@ -45,8 +45,33 @@ export function boardUrl(board: FreeBoard): string {
       // `details=true` is what makes the body arrive with the list, which is
       // what saves Workable a hydration request per posting.
       return `https://apply.workable.com/api/v1/widget/accounts/${token}?details=true`;
+    case "personio":
+      // NOT `search.json`, which looks like the JSON sibling of this and is the
+      // trap: it answers 200 with every posting and an empty description on all
+      // of them, no date and no URL. See personio-xml.ts.
+      return `https://${token}.jobs.personio.com/xml`;
   }
 }
+
+/**
+ * What a platform's board endpoint returns on the wire.
+ *
+ * Every platform here speaks JSON today. The distinction exists because the
+ * transport has to decide between `response.json()` and `response.text()` before
+ * a mapper ever sees the payload, and a platform whose only complete feed is XML
+ * is a question of fact about that platform — which is what this file records.
+ */
+export type WireFormat = "json" | "xml";
+
+export const WIRE_FORMAT: Readonly<Record<FreeAts, WireFormat>> = {
+  greenhouse: "json",
+  lever: "json",
+  ashby: "json",
+  recruitee: "json",
+  smartrecruiters: "json",
+  workable: "json",
+  personio: "xml",
+};
 
 /** One SmartRecruiters page. Above any single board's live openings in the registry. */
 const SMARTRECRUITERS_PAGE = 100;
@@ -79,6 +104,9 @@ export function jobBodyUrl(board: FreeBoard, externalId: string): string | null 
     case "ashby":
     case "recruitee":
     case "workable":
+    // Personio inlines every description in the board feed itself — that is the
+    // whole reason the feed is 2.26 MB and the whole reason it is worth caching.
+    case "personio":
       return null;
   }
 }
@@ -132,6 +160,8 @@ const APPLY_PATH: Readonly<Record<FreeAts, string>> = {
   // second URL, and inventing one would 404.
   smartrecruiters: "",
   workable: "/apply",
+  // Personio serves the form on the posting page itself; there is no second URL.
+  personio: "",
 };
 
 /**

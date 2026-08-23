@@ -1,137 +1,143 @@
 # FounderOS — Roadmap & Strategic Direction
 
-*For Pushkar Verma, Turicks AI Agency. Updated: 2026-06-17.*
+*For Pushkar Verma, Turicks. Updated: 2026-08-22.*
 
-> 🟢 **PRODUCTION LIVE** since 2026-06-14. Running 24/7 on Hetzner VPS with GitHub Actions auto-deployment. **Architecture is locked.** Next work: add tools and hierarchy only.
+> 🟢 **PRODUCTION LIVE** since 2026-06-14 — Hetzner VPS, systemd, GitHub Actions CD.
+> Architecture is **v3 (contract-first kernel)** since 2026-07-08.
 
 ---
 
 ## What FounderOS Is
 
-**A single-user AI operating system that takes real business actions — safely.**
+**A deterministic agent kernel that takes real business actions — safely — with a Telegram gateway.**
 
-You message it via Telegram → it routes to the right department → the agent does real work (searches, drafts, sends) → asks for your approval before anything leaves → all actions audited in Postgres.
+A message becomes a typed `Plan`. Pure code — not a model — walks that plan and hands each
+step to a worker as a `TaskEnvelope`. Workers call tools; every tool call is recorded as a
+`ToolReceipt`. Results are validated against an output contract before a synthesizer is
+allowed to describe them. Anything that leaves the building stops at a human approval first.
 
-**Key properties:**
-- **Production-grade:** 1,098 unit tests (100% green), 29 golden-task eval suite (90% routing), 99.8% uptime
-- **Crash-safe HITL:** pending approvals survive process restarts (Postgres checkpointer)
-- **Deterministic:** temperature 0, routing in pure code (not prompts)
-- **Auditable:** every action logged with idempotency key (no double-sends)
-- **Confined:** path-guard prevents file access outside `$HOME`, secrets blocked even on read
+```
+message → plan → dispatch (pure) → agent ⇄ tools → collect → synthesize → reply + receipts
+```
+
+**The properties that matter, and the mechanism behind each:**
+
+| Property | Mechanism, not intention |
+|---|---|
+| Deterministic | temp 0; routing/parsing/guards are unit-tested pure functions. CI runs the golden set twice and diffs the plans |
+| Zero-hallucinated actions | an action claim needs a successful receipt (`validateStepResult`); the synthesizer only ever sees validated results |
+| Crash-safe approvals | the DB row is written **before** `interrupt()`; pending approvals survive restarts (Postgres checkpointer) |
+| No double-sends | idempotency key checked before every external send; the audit row is written only on real success |
+| Failures name a component | `FailureReport` = stage · component · evidence · retryable, always shown to the founder |
+| Debt can only shrink | `governance/architecture-baseline.json` ratchet, enforced in CI |
 
 ---
 
-## Current Status (Phase D — Revenue Flywheel)
+## Measured state (2026-08-22, counted not remembered)
 
-### Shipped & Locked ✅
+| Measure | Value |
+|---|---|
+| Test suite | 321 files · **3,499 tests**, offline, $0 |
+| Source | 316 files · 55,510 LOC |
+| DB tables | 29 |
+| Behavioural golden tasks | 46 |
+| Free ATS boards polled | **923** across 7 platforms, every 30 min, at $0 |
+| Architecture ratchet | gateway-imports 0 · kernel-purity 0 · regex-routing 0 · orphan-subsystem 0 |
 
-**v2 Architecture (7 ReAct departments):**
-- research [search_web, search_knowledge]
-- comms [send_email, read_emails]
-- engineering [github_read, github_write, claude_code]
-- marketing [linkedin_post]
-- sales [search_web, send_email]
-- personal [file, shell, browser, write_file]
-- jobhunt [search_jobs, read_cv, send_email]
+Full honest accounting, including what is deferred and where the ceilings are:
+**[LIMITATIONS.md](LIMITATIONS.md)**.
 
-**Phases 1-6 Hardening (complete):**
-- Phase 1: Context isolation + per-turn token measurement
-- Phase 2: Typed inter-department contracts (dept_signals, Zod validation)
-- Phase 3: Claude-as-judge quality gate (two-gate system: brand-validator → Claude judge)
-- Phase 4: Durable async signals (Postgres dept_signals table, hourly sweep)
-- Phase 5: Hierarchy proof (nested HITL on prebuilt supervisors, 3-level interrupt/resume proven at unit level; **NOT wired in the live office graph** — gated on real business trigger + full MTProto QA, see LIMITATIONS.md §14)
-- Phase 6: Security rules operationalized (context isolation + typed handoffs enforced)
+---
 
-**Production Infrastructure:**
-- Hetzner VPS, systemd service, GitHub Actions CD pipeline
-- Postgres checkpointer (Postgres-backed LangGraph state)
-- Redis (optional — NOT on boot path; `incrQuota()` + cache functions defined but not called; bot starts clean without it)
-- Ollama for local embeddings
-- LangSmith for telemetry and cost tracking
+## Current work — the job hunt is the product
 
-### Current Work (Phase D-Bis — Proof & Distribution)
+The system's first real user is its author, and the job it has to do is get him hired in the
+Netherlands. That is the priority through Q3, and it is also the best available proof that
+the kernel works on something with a consequence.
 
-1. **Cinematic Launch Experience** — web design service via existing depts (marketing + engineering + sales)
-2. **3 proof showcases** → `proof.turicks.com` (see `docs/strategy/05-SHOWCASE-BRIEF.md`)
-3. **Proof Drops + LinkedIn build-in-public** — 2–3 custom artifacts/week to AI/dev-tool target list
-4. **FounderOS wiring** — prompts, `design_brief_ready` / `site_deployed` signals (ADR-032)
+**The constraint is not supply.** 923 boards feed a pipeline that has stored 554 screened
+applications and submitted 2. Everything upstream of "apply" is finished and over-built;
+everything downstream is thin.
 
-Strategy: [docs/strategy/](strategy/) · Phase doc: [PHASE-D-BIS-PROOF-AND-DISTRIBUTION.md](phases/PHASE-D-BIS-PROOF-AND-DISTRIBUTION.md)
+Ranked by effect on applications submitted:
 
-### What NOT to do (Intentional Defers)
+1. **Outcome instrumentation** — nothing records what comes back. `stage` supports
+   `replied`/`rejected`/`dormant` and no code path ever transitions them, so response rate,
+   time-to-response and per-company outcome are all unmeasurable. Until this exists, every
+   other improvement here is a guess.
+2. **Follow-up** — `followups_sent` and `last_contact_at` are declared in the schema with a
+   comment describing a day-7/day-14 nudge that nothing implements.
+3. **Warm intros** — the pipeline is 100% cold ATS submission, the lowest-converting channel
+   there is, into a recognised-sponsor pool small enough to exhaust.
+4. **A public evidence surface** — the kernel scores on nearly every 2026 AI-engineer hiring
+   rubric item (eval design, checkpointing, HITL, cost ledger, CI gates, weeks of production)
+   and exposes none of it. Designed 2026-07-29, still unbuilt; `proof.turicks.com` does not
+   resolve.
+
+Audit and sequencing: `docs/plans/2026-08-22-portfolio-and-recruitment-readiness-audit.md`
+(not linked: it arrives on a separate PR, and a link that 404s is worse than a path).
+
+---
+
+## What NOT to do (intentional defers)
 
 | ❌ Deferred | ✅ Why |
-|----------|--------|
-| **SaaS pivot** | Gated on 4+ weeks stable production use — achieve that first, then multi-tenancy |
-| **Rearchitect supervisor** | Architecture is locked — only add tools and hierarchy from now on |
-| **Budget guard npm package** | Deprioritized for core reliability — can extract later |
-| **Real RAG (pgvector)** | **Code live; data NOT guaranteed** — pgvector + Ollama embeddings wired; `pnpm brain:sync` required post-deploy to populate `turicks_brain`. Run `SELECT COUNT(*) FROM brain.turicks_brain` to verify. Falls back to keyword-only (`knowledge_entries`) if Ollama unavailable |
-| **Safari-MCP browser** | Deferred in ADR-012; personal.browser works fine for current use |
-| **Multi-provider cascade** | One good model (Gemini 2.5 Flash) > custom cascade — OpenRouter fallback for 503s |
+|---|---|
+| **SaaS pivot / multi-tenancy** | Gated on the single-user system producing a real outcome first. It has not yet produced the one it was built for |
+| **More job sources** | 923 boards against 2 submitted applications. More supply is the most expensive way to avoid the actual problem |
+| **Rewriting the agent layer in Python** | The market hires TypeScript for AI engineering; the gap is a CV claim and one artifact, not a rewrite |
+| **All ten proof surfaces** | The ten-surface design shipped zero in three weeks. Two surfaces shipped beat ten designed |
+| **Homerun ATS** | No public API, no token corpus, and every subdomain probe is indistinguishable from a typo. Guessing slugs is forbidden — a wrong board is worse than no board. Unblocks when a corpus exists or a posting URL is harvested in the wild |
+| **Safari-MCP browser** | ADR-012; `personal.browser` covers current use |
 
 ---
 
-## Next Phase (Phase E — SaaS Pivot) — DEFERRED
+## Metrics that matter
 
-**Prerequisite:** 4+ weeks of stable production use (Phases D must deliver real revenue signal first).
-
-**Scope:**
-- Multi-tenancy: auth layer (Clerk/Auth.js), per-user Composio entities, billing (Stripe/Lemon)
-- Web interface: Next.js app on app.turicks.com, real-time streaming, audit dashboard
-- More tools: Slack, Stripe, Airtable — now added via the **MCP client bridge** (ADR-041),
-  not hand-written native tools or expanded Composio. Add a server = 1 manifest entry
-  (Wiring Map 5). Notion deferred — Apify (ADR-037) already lands research in the DB.
-
-**Estimated:** 4-6 weeks of real work. Not started until Phase D proves the product.
-
----
-
-## Metrics That Matter
-
-**Primary:** Actions taken per week (emails, GitHub issues, LinkedIn posts, searches).
+**Primary, and currently 2:** applications actually submitted per week.
 
 **Secondary:**
-- Uptime (target: 99.5%)
-- P95 response latency (<3s for real-time actions)
-- Eval routing accuracy (target: 90%+)
-- Test coverage (target: 80%+ on new code)
-- Zero data loss on crashes (Postgres checkpointer)
+- Reply rate per 100 applications *(unmeasurable today — see item 1 above)*
+- Fresh roles surfaced within 24h of publication
+- Cost per run, and daily spend against `BUDGET_DAILY_USD`
+- Uptime, and turns completed without a `FailureReport`
 
-**Not tracked:** LOC, test count, model family count. Only: real work done.
-
----
-
-## How to Contribute
-
-1. **Read** [docs/README.md](README.md) — master index of all docs
-2. **Follow** [docs/rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) — wiring maps for adding tools/hierarchy
-3. **Write tests first** — [docs/rules/TESTING-RULES.md](rules/TESTING-RULES.md) for patterns
-4. **Run** `pnpm test` to verify green
-5. **Create PR** against `main` (human reviews before merge)
+**Not tracked:** LOC, test count, board count. Those are inputs. A board polled is not a job
+applied for, and the gap between the two is this project's whole problem.
 
 ---
 
-## Business Context
+## How to contribute
 
-### Turicks (The Autonomous Studio)
-- Solo founder: Pushkar Verma
-- ICP: AI/dev-tool startups (seed–Series A)
-- Revenue model: $8K+ Cinematic Launch Experience, $5K/mo retainer, Gumroad packs
-- Website: turicks.com · Proof gallery: proof.turicks.com (planned)
-
-### Products on FounderOS
-1. **FounderOS** (delivery OS → SaaS Phase E)
-2. **Cinematic Web** (`cinematic-web` — Gumroad presets → DFY tier → SaaS deferred)
-3. **Gumroad packs:** ICP kit, brand-voice kit, LangGraph starter, cinematic premium pack
+1. **Read** [docs/README.md](README.md) — the documentation index
+2. **Follow** [rules/PROGRAMMING-RULES.md](rules/PROGRAMMING-RULES.md) — wiring maps for adding tools
+3. **Start with a failing test** — every bug fix does; [rules/TESTING-RULES.md](rules/TESTING-RULES.md)
+4. **Run** `pnpm gate` — lint, build, wiring, architecture, tests
+5. **Open a PR.** Branch protection on `main` requires both CI checks. Claude may merge its own
+   green PRs (founder directive, 2026-08-01 — work sat finished-but-undeployed waiting on a
+   human click while prod ran stale code). Merging on red is never acceptable, and a merge is
+   not a deploy: watch CD and verify prod actually moved.
 
 ---
 
-## See Also
+## Business context
 
-- **[Root README.md](../README.md)** — What it does, architecture, eval results
-- **[docs/README.md](README.md)** — Documentation index
-- **[docs/guides/DEPLOYMENT.md](guides/DEPLOYMENT.md)** — Production runbook
-- **[docs/decisions/](decisions/)** — All architecture decisions (ADRs 001–032+)
-- **[docs/strategy/](strategy/)** — Autonomous Studio GTM + web design service
-- **[docs/study/](study/)** — Learning path (foundations → deep dive → lessons)
-- **[LIMITATIONS.md](LIMITATIONS.md)** — Honest tech-debt and deferred work
+### Turicks
+- Solo founder: Pushkar Verma · ICP: AI/dev-tool startups (seed–Series A)
+- Website: turicks.com · Proof gallery: proof.turicks.com — **planned, does not resolve**
+
+### Built on FounderOS
+1. **FounderOS** — the kernel, and the thing running the job hunt
+2. **video-factory** — client social-video engine ([VIDEO-FACTORY.md](VIDEO-FACTORY.md))
+3. **cinematic-web** — Gumroad presets → DFY tier
+
+---
+
+## See also
+
+- **[Root README.md](../README.md)** — what it does, architecture, eval results
+- **[PROOF.md](PROOF.md)** — regenerable scoreboard (`pnpm proof:scoreboard`)
+- **[LIMITATIONS.md](LIMITATIONS.md)** — honest tech-debt and deferred work
+- **[SEAM-FAILURES.md](SEAM-FAILURES.md)** — production failures and what each one taught
+- **[decisions/](decisions/)** — ADRs
+- **[guides/DEPLOYMENT.md](guides/DEPLOYMENT.md)** — production runbook

@@ -7,7 +7,7 @@ Everything in this repository exists because I wanted to answer one question: *h
 FounderOS is a deterministic, contract-first agent kernel that takes real business actions — email, LinkedIn, GitHub, shell — safely, with founder approval and a code-recorded receipt for every one. It runs my studio ([Turicks](https://turicks.com)) end-to-end over Telegram. But the interesting part isn't what it does — it's the engineering problems I had to solve to make it reliable.
 
 [![CI](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-3%2C465%20offline%20%240-brightgreen.svg)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-3%2C499%20offline%20%240-brightgreen.svg)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ---
@@ -31,7 +31,7 @@ I shipped this system three times before I shipped it right.
 | **State persistence** | Postgres-checkpointed graph; approval rows written *before* `interrupt()` | Crash mid-approval → restart → pending action survives |
 | **Zero-hallucination actions** | `ToolReceipt` required for every action claim; synthesizer only sees validated results | `kernel-e2e: fabricated action` — unproven claims rejected |
 | **Crash-safe human-in-the-loop** | Durable record before interrupt; idempotency key before every send | Process crash during approval → no double-send, no lost state |
-| **Deterministic evaluation** | Temp 0, scripted models offline, golden set run twice | 3,465 tests at $0; byte-identical plans in CI |
+| **Deterministic evaluation** | Temp 0, scripted models offline, pure-function routing | 3,499 tests at $0; byte-identical plans asserted in CI — [how this is evaluated](docs/EVAL.md) |
 | **Architecture-debt ratchet** | CI-enforced baseline that may only shrink | `regex-routing = 0`, `gateway-imports = 0`, `kernel-purity = 0` |
 | **Idempotent side effects** | Dedup key checked before every external send | Retry can never double-send an email |
 | **Typed failure taxonomy** | `FailureReport` = stage + component + evidence + retryable | Threads never silently wiped; founder always sees the real error |
@@ -92,13 +92,13 @@ I shipped this system three times before I shipped it right.
 
 | Tier | What | Cost | When |
 |------|------|------|------|
-| `pnpm test` | 3,465 unit/kernel tests across 317 files, scripted models | $0 | Every commit |
-| `pnpm eval` | 29 golden tasks, 3 scoring dimensions (routing 90%, tools 96%, HITL 89%) | ~$0.10 | Per feature branch |
+| `pnpm test` | 3,499 unit/kernel tests across 321 files, scripted models | $0 | Every commit |
+| `pnpm eval` | 46 golden tasks, 3 scoring dimensions (routing · tools · HITL) | ~$0.10 | Per feature branch |
 | `pnpm qa:telegram` | 22-task MTProto founder-simulation against live bot | ~$0.50 | Pre-deploy acceptance |
 
 **What the eval catches:** routing misclassification (e.g., "draft cold outreach + research first" routed to `research` instead of `sales`), tool drops (LinkedIn post planned but no tool called), unnecessary HITL triggers on read-only tasks, and complete routing failures.
 
-*Scoreboard: [PROOF.md](docs/PROOF.md) · Full eval: [EVAL.md](EVAL.md)*
+*Method — what is scored and what is not: [docs/EVAL.md](docs/EVAL.md) · Scoreboard: [PROOF.md](docs/PROOF.md) · Last recorded run: [EVAL.md](EVAL.md) (2026-06-11, pre-v3 — regenerate with `pnpm eval`)*
 
 ---
 
@@ -211,6 +211,7 @@ pnpm dev
 | Document | What you'll find |
 |----------|-----------------|
 | [Case Studies: v1→v2→v3](docs/turicks-case-studies/) | 5 engineering war stories, including the 77-regex lie detector and the empty-braces handoff |
+| [**How this system is evaluated**](docs/EVAL.md) | What is scored and what is not: determinism in CI, the golden set, retrieval recall@5/MRR, and why an infra error is never a routing miss |
 | [Seam Failures Log](docs/SEAM-FAILURES.md) | 6 production bugs with signature → evidence → fix → prevention |
 | [Architecture Diagrams (10)](docs/diagrams/) | Mermaid diagrams grounded in source, with file paths linked inline |
 | [Proof Scoreboard](docs/PROOF.md) | Regenerable evidence: kernel guarantees, debt ratchet, cost ledger |
