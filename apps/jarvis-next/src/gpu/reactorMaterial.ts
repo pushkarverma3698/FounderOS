@@ -141,18 +141,18 @@ export function createReactorMaterial(): ReactorHandles {
   const accent = vec3(0.0, 0.9, 1.0);
   const signal = vec3(1.0, 0.69, 0.13);
   const tint = mix(accent, signal, gated);
-  const brightness = float(0.22)
-    .add(activity.mul(0.5))
-    .add(uSpend.mul(0.22))
-    .add(meta.z.mul(0.12));
+  const brightness = float(0.3)
+    .add(activity.mul(0.6))
+    .add(uSpend.mul(0.3))
+    .add(meta.z.mul(0.2));
 
   // Additive blending accumulates: with hundreds of thousands of overlapping
   // points, a brightness near 1 drives every channel to saturation and the field
   // reads white instead of cyan. Keep per-particle intensity low and let density
   // do the work — that is also what makes density legible as spend.
   material.colorNode = tint.mul(brightness);
-  material.opacityNode = float(0.16).add(activity.mul(0.3));
-  material.sizeNode = float(1.0).add(meta.z.mul(1.2)).add(activity.mul(1.1));
+  material.opacityNode = float(0.08).add(activity.mul(0.25));
+  material.sizeNode = float(1.8).add(meta.z.mul(1.5)).add(activity.mul(1.5));
 
   return {
     material,

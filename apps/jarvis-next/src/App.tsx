@@ -253,7 +253,7 @@ export function App() {
   );
 
   return (
-    <div className="h-screen flex flex-col bg-void text-chrome font-display overflow-hidden">
+    <div className="h-screen flex flex-col bg-void text-chrome font-sans overflow-hidden mesh-bg">
       <Header
         mode={mode}
         onToggleMode={() => setMode((m) => (m === 'LIVE' ? 'REPLAY' : 'LIVE'))}
@@ -265,28 +265,28 @@ export function App() {
 
       {/* The founder must never mistake seeded demo state for live kernel state. */}
       {gateway === 'offline' && (
-        <div className="shrink-0 flex items-center gap-3 px-4 py-1.5 bg-signal/12 border-b border-signal/35 z-40 relative">
-          <span className="w-1.5 h-1.5 rounded-full bg-signal animate-breathe shrink-0" />
-          <span className="font-mono text-[10px] tracking-[0.14em] text-signal font-medium">
-            KERNEL GATEWAY UNREACHABLE
+        <div className="shrink-0 flex items-center gap-3 px-6 py-2 bg-signal/10 border-b border-signal/20 z-40 relative backdrop-blur-md">
+          <span className="w-1.5 h-1.5 rounded-full bg-signal animate-breathe shrink-0 shadow-[0_0_10px_rgba(255,176,32,0.6)]" />
+          <span className="font-sans font-bold text-[11px] tracking-[0.2em] text-signal uppercase">
+            Kernel Gateway Unreachable
           </span>
-          <span className="font-mono font-light text-[10px] text-chrome/50">
+          <span className="font-mono font-light text-[11px] text-white/50">
             localhost:3001 refused the connection — everything below is seeded demo
             state, not live telemetry. Dispatch is disabled.
           </span>
         </div>
       )}
 
-      <div className="flex-1 flex min-h-0 relative z-10">
+      <div className="flex-1 flex min-h-0 relative z-10 p-4 gap-4">
         <NavRail activeTab={activeTab} onSelectTab={setActiveTab} />
 
-        <main className="flex-1 relative min-w-0 overflow-hidden">
+        <main className="flex-1 relative min-w-0 overflow-hidden rounded-2xl border border-white/5 bg-black/20 shadow-2xl backdrop-blur-sm">
           {activeTab === 'CORE' && (
             <>
               {/* The volume. Full-bleed behind everything; the instrument
                   columns float over it rather than carving space out of it. */}
               <ReactorErrorBoundary>
-                <div className="absolute inset-0 xl:left-[258px] xl:right-[318px]">
+                <div className="absolute inset-0 xl:left-[270px] xl:right-[330px]">
                   <Suspense fallback={<div className="absolute inset-0 grid-floor" />}>
                     <ReactorStage
                       departments={departments}
@@ -306,26 +306,26 @@ export function App() {
               {/* Supervisor identity, pinned to the core at screen centre */}
               <button
                 onClick={() => inspectNode(supervisor)}
-                className="absolute left-1/2 xl:left-[calc(50%-30px)] top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-1.5 focus:outline-none group"
+                className="absolute left-1/2 xl:left-[calc(50%-30px)] top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-2 focus:outline-none group"
               >
-                <span className="hud-panel ticks flex items-center gap-2.5 px-3.5 py-1.5 group-hover:border-accent transition-colors">
+                <span className="flex items-center gap-3 px-5 py-2.5 rounded-full border border-white/10 bg-black/40 backdrop-blur-xl group-hover:border-accent/50 group-hover:bg-black/60 transition-all shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
                   <span
-                    className="w-1.5 h-1.5 rounded-full animate-breathe"
+                    className="w-2 h-2 rounded-full animate-ping"
                     style={{
                       background: pendingHitl.length ? 'var(--signal)' : 'var(--accent)',
-                      boxShadow: `0 0 10px ${pendingHitl.length ? 'var(--signal)' : 'var(--accent)'}`,
+                      boxShadow: `0 0 15px ${pendingHitl.length ? 'var(--signal)' : 'var(--accent)'}`,
                     }}
                   />
-                  <span className="value-heavy text-[12px] tracking-[0.2em] text-chrome">
-                    SUPERVISOR
+                  <span className="font-sans font-bold text-[13px] tracking-[0.25em] text-white uppercase">
+                    Supervisor
                   </span>
-                  <span className="font-mono text-[9px] font-medium tracking-widest text-accent">
+                  <span className="font-mono text-[10px] font-semibold tracking-widest text-accent px-2 py-0.5 bg-accent/10 rounded">
                     {supervisor.status}
                   </span>
                 </span>
-                <span className="label-micro">
+                <span className="label-micro px-3 py-1 bg-black/40 rounded-full border border-white/5 backdrop-blur-md">
                   stamped receipts
-                  <span className="text-accent font-medium ml-1.5 tabular-nums">
+                  <span className="text-accent font-semibold ml-2 tabular-nums">
                     {supervisor.receiptCount}
                   </span>
                 </span>
@@ -334,7 +334,7 @@ export function App() {
               <CommandBar onDispatch={dispatchTurn} disabled={gateway === 'offline'} />
 
               {/* Left instrument column */}
-              <div className="hidden xl:block absolute left-4 top-4 w-[238px] z-40">
+              <div className="hidden xl:block absolute left-6 top-6 w-[240px] z-40">
                 <GlassMetricCards
                   layout="stack"
                   todaySpend={spendToday}
@@ -347,7 +347,7 @@ export function App() {
               </div>
 
               {/* HITL gate — bottom-left, escalates to amber when pending */}
-              <div className="hidden xl:block absolute left-4 bottom-4 w-[238px] h-[212px] z-40">
+              <div className="hidden xl:block absolute left-6 bottom-6 w-[240px] h-[240px] z-40">
                 <HitlTerminal
                   pendingItems={pendingHitl}
                   onApprove={(id) => resolveHitl(id, 'approve')}
@@ -356,39 +356,41 @@ export function App() {
               </div>
 
               {/* Right instrument column — live seam trace */}
-              <div className="hidden xl:flex absolute right-4 top-4 bottom-4 w-[298px] z-40 flex-col gap-2">
-                <div className="hud-panel ticks px-3 py-2 shrink-0">
-                  <span className="label-micro block">Routing load</span>
-                  <span className="flex items-baseline gap-2 mt-0.5">
-                    <span className="value-heavy text-[24px] text-accent text-glow leading-none">
-                      {activeCount}
+              <div className="hidden xl:flex absolute right-6 top-6 bottom-6 w-[310px] z-40 flex-col gap-4">
+                <div className="hud-panel p-5 shrink-0 flex flex-col gap-3">
+                  <div className="flex justify-between items-end">
+                    <span className="label-micro block">Routing load</span>
+                    <span className="font-mono font-light text-[10px] text-white/40">
+                      {activeCount} / {departments.length} streaming
                     </span>
-                    <span className="font-mono font-light text-[9px] text-chrome/35">
-                      / {departments.length} departments streaming
+                  </div>
+                  <span className="flex items-baseline gap-1">
+                    <span className="font-sans font-bold text-[32px] text-accent text-glow leading-none">
+                      {Math.round((activeCount / Math.max(1, departments.length)) * 100)}%
                     </span>
                   </span>
-                  <span className="mt-2 flex gap-1">
+                  <span className="flex gap-1.5 h-1.5">
                     {departments.map((d) => (
                       <span
                         key={d.id}
                         title={`${d.name} — ${d.status}`}
-                        className={`h-1 flex-1 transition-colors ${
+                        className={`h-full rounded-full flex-1 transition-colors ${
                           d.status === 'HITL_PAUSE'
-                            ? 'bg-signal'
+                            ? 'bg-signal shadow-[0_0_8px_rgba(255,176,32,0.5)]'
                             : isStreaming(d.status)
-                            ? 'bg-accent'
-                            : 'bg-accent/15'
+                            ? 'bg-accent shadow-[0_0_8px_rgba(0,229,255,0.5)]'
+                            : 'bg-white/10'
                         }`}
                       />
                     ))}
                   </span>
 
                   {/* Measured, not claimed: the budget the frame monitor settled on. */}
-                  <span className="mt-2.5 pt-2 border-t border-accent/10 flex items-center justify-between font-mono font-light text-[9px]">
-                    <span className="text-chrome/35 uppercase tracking-[0.16em]">
+                  <span className="pt-3 border-t border-white/10 flex items-center justify-between font-mono font-medium text-[10px]">
+                    <span className="text-white/40 uppercase tracking-[0.16em]">
                       {perf.backend}
                     </span>
-                    <span className="text-chrome/35 tabular-nums">
+                    <span className="text-white/60 tabular-nums">
                       <span className={perf.fps >= 55 ? 'text-accent' : 'text-signal'}>
                         {perf.fps || '—'}
                       </span>
@@ -419,7 +421,7 @@ export function App() {
           )}
 
           {activeTab !== 'CORE' && activeTab !== 'QUEUE' && (
-            <div className="absolute inset-0 overflow-y-auto p-6">
+            <div className="absolute inset-0 overflow-y-auto p-8">
               <TabPanel tab={activeTab} departments={departments} spendToday={spendToday} totalTurns={totalTurns} />
             </div>
           )}
@@ -455,12 +457,12 @@ function TabPanel({ tab, departments, spendToday, totalTurns }: TabPanelProps) {
       : '05 · Cost scoreboard';
 
   return (
-    <section className="max-w-5xl space-y-4">
-      <h2 className="value-heavy text-[15px] tracking-[0.2em] text-accent text-glow">{heading}</h2>
+    <section className="max-w-5xl space-y-6">
+      <h2 className="font-sans font-bold text-[18px] tracking-[0.15em] text-accent text-glow uppercase">{heading}</h2>
 
       {tab === 'PLAN' && (
-        <div className="hud-panel ticks p-5 font-mono font-light text-[11px] text-chrome/70 space-y-2">
-          <p className="text-chrome/50">
+        <div className="hud-panel p-6 font-mono text-[12px] text-white/70 space-y-4">
+          <p className="text-white/50 mb-4">
             Plans execute deterministically. Every step is bound by cursor limits, budget ceilings
             and prompt-hash verification.
           </p>
@@ -470,7 +472,7 @@ function TabPanel({ tab, departments, spendToday, totalTurns }: TabPanelProps) {
             ['DETERMINISM HASH', '09a2f1b8c091 · 100% match'],
             ['TEMPERATURE', '0'],
           ].map(([k, v]) => (
-            <div key={k} className="flex justify-between border-b border-accent/8 pb-1.5">
+            <div key={k} className="flex justify-between border-b border-white/5 pb-2">
               <span className="label-micro">{k}</span>
               <span className="text-accent">{v}</span>
             </div>
@@ -479,12 +481,12 @@ function TabPanel({ tab, departments, spendToday, totalTurns }: TabPanelProps) {
       )}
 
       {tab === 'ORG' && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {departments.map((d) => (
-            <div key={d.id} className="hud-panel ticks p-3">
-              <span className="block value-heavy text-[12px] text-chrome">{d.name}</span>
-              <span className="block label-micro mt-1">{d.department}</span>
-              <span className="block mt-2 font-mono text-[9px] text-accent/70">
+            <div key={d.id} className="hud-panel p-4 flex flex-col gap-1 hover:border-accent/30 transition-colors">
+              <span className="block font-sans font-bold text-[14px] text-white tracking-wide">{d.name}</span>
+              <span className="block label-micro">{d.department}</span>
+              <span className="block mt-3 font-mono text-[10px] text-accent/70 bg-accent/5 px-2 py-1 rounded inline-block w-fit border border-accent/10">
                 context isolation: enforced
               </span>
             </div>
@@ -493,13 +495,13 @@ function TabPanel({ tab, departments, spendToday, totalTurns }: TabPanelProps) {
       )}
 
       {tab === 'SYS' && (
-        <div className="hud-panel ticks p-5 space-y-3">
-          <p className="font-mono font-light text-[11px] text-chrome/60">
+        <div className="hud-panel p-6 space-y-4">
+          <p className="font-mono text-[12px] text-white/60">
             FailureReport sensors report stage, component, evidence and retryability.
           </p>
-          <div className="flex items-center gap-2 border border-accent/25 bg-accent/6 px-3 py-2">
-            <span className="w-1.5 h-1.5 bg-accent animate-breathe" />
-            <span className="font-mono text-[11px] text-accent">
+          <div className="flex items-center gap-3 border border-accent/20 bg-accent/5 px-4 py-3 rounded-lg">
+            <span className="w-2 h-2 rounded-full bg-accent animate-breathe shadow-[0_0_10px_rgba(0,229,255,0.5)]" />
+            <span className="font-mono text-[12px] text-accent">
               zero failures reported in the last 24 hours
             </span>
           </div>
@@ -507,16 +509,16 @@ function TabPanel({ tab, departments, spendToday, totalTurns }: TabPanelProps) {
       )}
 
       {tab === 'DATA' && (
-        <div className="hud-panel ticks p-5 grid grid-cols-2 gap-5">
-          <div>
+        <div className="hud-panel p-6 grid grid-cols-2 gap-6">
+          <div className="flex flex-col gap-1">
             <span className="label-micro block">spend today</span>
-            <span className="value-heavy text-[30px] text-accent text-glow">
+            <span className="font-sans font-bold text-[36px] text-accent text-glow">
               ${spendToday.toFixed(4)}
             </span>
           </div>
-          <div>
+          <div className="flex flex-col gap-1">
             <span className="label-micro block">stamped turns</span>
-            <span className="value-heavy text-[30px] text-accent text-glow">{totalTurns}</span>
+            <span className="font-sans font-bold text-[36px] text-accent text-glow">{totalTurns}</span>
           </div>
         </div>
       )}

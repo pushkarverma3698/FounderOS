@@ -266,6 +266,26 @@ export async function recoverStrandedReminders(): Promise<void> {
   }
 }
 
+/** Daily 2am — Sweep funding news and grow the free-lane board registry (zero-LLM). */
+export async function runFundingGrowerSweep(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    log.info("Starting funding registry grower sweep");
+    const child = spawn("node", ["--import", "tsx/esm", "scripts/jobhunt-funding-grow.ts"], { stdio: "ignore", detached: false });
+    child.on("exit", (code) => {
+      if (code === 0) {
+        log.info("Funding registry grower sweep completed");
+      } else {
+        log.error({ code }, "Funding registry grower sweep failed");
+      }
+      resolve();
+    });
+    child.on("error", (err) => {
+      log.error({ err: err.message }, "Funding registry grower spawn error");
+      resolve();
+    });
+  });
+}
+
 
 
 export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }): void {
@@ -286,6 +306,9 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
   });
   cron.schedule("0 2 * * *", () => {
     runBrainSync().catch((err) => log.error({ err: (err as Error).message }, "Auto brain sync cron error"));
+  });
+  cron.schedule("0 2 * * *", () => {
+    runFundingGrowerSweep().catch((err) => log.error({ err: (err as Error).message }, "Funding registry grower cron error"));
   });
   cron.schedule(FREE_SWEEP_CRON, () => {
     runFreeSweep().catch((err) =>

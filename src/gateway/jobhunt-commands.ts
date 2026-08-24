@@ -181,7 +181,7 @@ export function packetMessage(packet: ApplicationPacket, rank: number): string {
     `Permit basis: ${safeHtml(row.route)} · matches ${overlap}\n` +
     (top.length > 0 ? `Lead with: ${safeHtml(top)}\n` : "") +
     `\n${linkLine}\n\n` +
-    `<i>When it is submitted, send</i> <code>/applied ${rank}</code> <i>to clear it from the queue.</i>`
+    `<i>To clear this from your queue, apply in the browser and send</i> <code>/applied ${rank}</code><i>. Or, leave it in the queue and run the <b>Mac Client</b> to auto-apply using this tailored CV.</i>`
   );
 }
 
