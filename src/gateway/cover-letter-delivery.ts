@@ -18,6 +18,18 @@ import type { JobApplication } from "../db/schema.js";
 const log = childLogger({ module: "gateway:cover-letter" });
 
 /**
+ * True, reusable facts the CV doesn't always carry. Founder's own words,
+ * condensed from his 2026-08-24 cover letter draft — not generated.
+ */
+const FOUNDER_CONTEXT =
+  "I have been working for myself since February 2026 — I co-founded a small " +
+  "engineering studio that has not yet taken on clients, and I ran a " +
+  "guesthouse in Himachal Pradesh which I am closing in November 2026. Both " +
+  "were real work. I am looking to come back into a team and can start " +
+  "immediately. I am relocating to the Netherlands and am eligible for the " +
+  "IND highly skilled migrant permit.";
+
+/**
  * Write the cover letter and put it in the chat, ready to paste.
  *
  * SENT AS TEXT, NOT A FILE, because of how an application is actually
@@ -56,6 +68,7 @@ export async function sendCoverLetter(
       jobDescription: row.description ?? "",
       track: row.track,
       cvText: cvMarkdown,
+      founderContext: FOUNDER_CONTEXT,
     },
     model,
   );

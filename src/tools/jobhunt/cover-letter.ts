@@ -49,6 +49,12 @@ export interface CoverLetterOptions {
   readonly track?: string;
   /** The CV this letter must not exceed. Every claim comes from here. */
   readonly cvText: string;
+  /**
+   * True, founder-authored facts that are not always in the CV — relocation
+   * status, the self-employment story. Same trust tier as the CV: named as a
+   * source in the prompt, nothing invented beyond it either.
+   */
+  readonly founderContext?: string;
 }
 
 /** One turn of the conversation, in the shape LangChain accepts directly. */
@@ -118,8 +124,13 @@ export function coverLetterPrompt(options: CoverLetterOptions): string {
     "POSTING:",
     options.jobDescription.slice(0, POSTING_CHARS),
     "",
-    "CV — the only source of fact. Nothing outside this may appear in the letter:",
+    "CV — the only source of fact about work history and skills. Nothing about work history or skills outside this may appear in the letter:",
     options.cvText,
+    "",
+    options.founderContext
+      ? "ADDITIONAL CONTEXT, also a true source of fact — use at most one relevant detail from this, not all of them:"
+      : "",
+    options.founderContext ?? "",
     "",
     `Write the cover letter for ${options.jobTitle} at ${options.companyName} now.`,
   ]
