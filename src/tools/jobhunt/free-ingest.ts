@@ -42,8 +42,23 @@ import { FREE_PRICING } from "./cost.js";
 import { countryFromLocation } from "./country.js";
 import { dedupeKey } from "./filters.js";
 import { getFreeBoards, type FreeBoard } from "./free-boards.js";
-import { toRawPosting, type FreeCandidate } from "./free-ats-mappers.js";
-import { hydrateDescriptions, sweepBoards, summariseFailures } from "./free-ats-source.js";
+import { hydrateDescriptions, sweepBoards, summariseFailures, type FreeCandidate } from "./free-ats-source.js";
+
+export const FREE_INGEST_SOURCE = "free-ats-ingest";
+
+export function toRawPosting(candidate: FreeCandidate, description: string): RawPosting {
+  return {
+    company: candidate.board.name,
+    title: candidate.title,
+    url: candidate.url,
+    description,
+    location: candidate.location,
+    postedAt: candidate.postedAt,
+    source: FREE_INGEST_SOURCE,
+    externalId: candidate.externalId,
+    country: countryFromLocation(candidate.location),
+  };
+}
 import { screenBatch, type IngestLine } from "./ingest-batch.js";
 import { recordQueryCost } from "./ingest-ledger.js";
 import { classifyTrack } from "./tracks.js";

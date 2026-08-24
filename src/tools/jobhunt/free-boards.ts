@@ -117,13 +117,23 @@ export const FREE_ATS_PLATFORMS: readonly FreeAts[] = [
  */
 export type BoardMarket = "NL" | "IN";
 
+export type MonitoringTier = "TIER_0_ATS_API" | "TIER_1_SITEMAP" | "TIER_2_HTTP" | "TIER_3_MAC";
+
 export interface FreeBoard {
   readonly name: string;
   readonly ats: FreeAts;
   /** The board's slug in its platform's URL. Case-sensitive on Ashby. */
   readonly token: string;
   readonly markets: readonly BoardMarket[];
+  
+  // Future expanded fields for the intelligence graph:
+  readonly domain?: string;
+  readonly careersUrl?: string;
+  readonly sitemapUrl?: string;
+  readonly monitoringTier?: MonitoringTier;
 }
+
+export type CompanySource = FreeBoard;
 
 export const FREE_BOARDS_PATH = resolve(REPO_ROOT, "docs/strategy/data/free-ats-boards.csv");
 

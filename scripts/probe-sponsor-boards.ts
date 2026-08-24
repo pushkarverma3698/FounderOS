@@ -35,7 +35,7 @@ import { readFileSync } from "node:fs";
 import { registerPathFrom, parseSponsorCsv } from "../src/tools/jobhunt/sponsor-registry.js";
 import { getFreeBoards, registerDiscoveredBoard, FREE_ATS_PLATFORMS, type FreeAts, type FreeBoard } from "../src/tools/jobhunt/free-boards.js";
 import { boardUrl } from "../src/tools/jobhunt/free-ats-source.js";
-import { FREE_MAPPERS } from "../src/tools/jobhunt/free-ats-mappers.js";
+import { getAdapter } from "../src/tools/jobhunt/adapters/index.js";
 import { mapWithConcurrencyLimit } from "../src/core/concurrency.js";
 
 /** Legal-entity words stripped before slugging — none of them appear in a board token. */
@@ -81,7 +81,9 @@ async function probeOne(name: string, slug: string, ats: FreeAts): Promise<Probe
     const payload = await res.json();
     // A real hit, not just a 200: the board must actually parse into at
     // least one posting the same mapper the live sweep uses would accept.
-    const candidates = FREE_MAPPERS[ats](payload, board);
+    const adapter = getAdapter(ats);
+    if (!adapter) return null;
+    const candidates = adapter.listJobs(payload, board);
     return candidates.length > 0 ? { name, ats, token: slug } : null;
   } catch {
     return null;

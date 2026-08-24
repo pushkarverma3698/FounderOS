@@ -12,7 +12,7 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { filterCandidates, FREE_LANE_MAX_AGE_HOURS } from "../../../src/tools/jobhunt/free-ingest.js";
-import type { FreeCandidate } from "../../../src/tools/jobhunt/free-ats-mappers.js";
+import type { FreeCandidate } from "../../../src/tools/jobhunt/free-ats-source.js";
 import type { FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
 const BOARD: FreeBoard = { name: "Acme B.V.", ats: "greenhouse", token: "acme", markets: ["NL"] };

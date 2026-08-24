@@ -1,0 +1,16 @@
+[shell_environment_policy]
+inherit = "core"
+
+[shell_environment_policy.set]
+GRAPHIFY_ENABLED = "1"
+ANTHROPIC_BASE_URL = "http://127.0.0.1:8787"
+ENABLE_TOOL_SEARCH = "true"
+
+[mcp_servers.founderos]
+command = "node"
+args = [
+    "--env-file=.env",
+    "--import",
+    "tsx/esm",
+    "src/mcp/index.ts",
+]

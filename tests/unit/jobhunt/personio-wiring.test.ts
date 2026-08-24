@@ -8,9 +8,9 @@
 
 import { describe, it, expect } from "vitest";
 
-import { boardUrl, jobBodyUrl, applyUrlFor, WIRE_FORMAT } from "../../../src/tools/jobhunt/free-ats-endpoints.js";
+import { getAdapter } from "../../../src/tools/jobhunt/adapters/index.js";
+import { personioAdapter } from "../../../src/tools/jobhunt/adapters/personio.js";
 import { extractBoardToken } from "../../../src/tools/jobhunt/board-token.js";
-import { FREE_MAPPERS } from "../../../src/tools/jobhunt/free-ats-mappers.js";
 import { PLATFORM_CONCURRENCY } from "../../../src/tools/jobhunt/free-ats-source.js";
 import { FREE_ATS_PLATFORMS, type FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
@@ -22,21 +22,23 @@ const board: FreeBoard = {
 };
 
 describe("personio — platform registration", () => {
+  const adapter = personioAdapter;
+
   it("is a known platform with a mapper and a concurrency limit", () => {
     expect(FREE_ATS_PLATFORMS).toContain("personio");
-    expect(FREE_MAPPERS.personio).toBeTypeOf("function");
+    expect(getAdapter("personio")).toBe(personioAdapter);
     expect(PLATFORM_CONCURRENCY.personio).toBeGreaterThan(0);
   });
 
   it("polls /xml, never search.json", () => {
     // search.json answers 200 with every posting and an empty description on
     // all of them — the failure would look like a healthy board with no bodies.
-    expect(boardUrl(board)).toBe("https://1komma5grad.jobs.personio.com/xml");
-    expect(WIRE_FORMAT.personio).toBe("xml");
+    expect(adapter.getBoardUrl(board)).toBe("https://1komma5grad.jobs.personio.com/xml");
+    expect(adapter.getWireFormat()).toBe("xml");
   });
 
   it("needs no hydration request — the board feed already carries every body", () => {
-    expect(jobBodyUrl(board, "781758")).toBeNull();
+    expect(adapter.getJobUrl(board, "781758")).toBeNull();
   });
 
   it("recovers the token from a posting URL on either host", () => {
@@ -58,11 +60,12 @@ describe("personio — platform registration", () => {
 
   it("points the apply button at the posting itself rather than inventing a route", () => {
     const url = "https://1komma5grad.jobs.personio.com/job/781758";
-    expect(applyUrlFor(url)).toBe(url);
+    expect(adapter.applyUrlFor(url, board)).toBe(url);
   });
 });
 
-describe("mapPersonioPositions", () => {
+describe("PersonioAdapter", () => {
+  const adapter = personioAdapter;
   const FEED = `<workzag-jobs><position>
     <id>781758</id><office>Amsterdam</office><name>Platform Engineer</name>
     <jobDescriptions><jobDescription><name>Role</name>
@@ -72,7 +75,7 @@ describe("mapPersonioPositions", () => {
   </position></workzag-jobs>`;
 
   it("builds a linkable candidate the screener can act on", () => {
-    const [row] = FREE_MAPPERS.personio(FEED, board);
+    const [row] = adapter.listJobs(FEED, board);
     expect(row).toMatchObject({
       externalId: "781758",
       title: "Platform Engineer",
@@ -83,19 +86,19 @@ describe("mapPersonioPositions", () => {
   });
 
   it("delivers the body as prose the gates can read", () => {
-    const [row] = FREE_MAPPERS.personio(FEED, board);
+    const [row] = adapter.listJobs(FEED, board);
     expect(row?.description).toContain("5 years of experience");
     expect(row?.description).not.toContain("<p>");
   });
 
   it("drops a position with no title rather than emitting an unreadable row", () => {
-    expect(FREE_MAPPERS.personio(FEED.replace("<name>Platform Engineer</name>", ""), board)).toHaveLength(0);
+    expect(adapter.listJobs(FEED.replace("<name>Platform Engineer</name>", ""), board)).toHaveLength(0);
   });
 
   it("returns nothing when handed a non-string payload", () => {
     // A wire-format mismatch is a bug in WIRE_FORMAT, not a bad board — it must
     // not throw and take the rest of the sweep's boards with it.
-    expect(FREE_MAPPERS.personio({ jobs: [] }, board)).toEqual([]);
-    expect(FREE_MAPPERS.personio(null, board)).toEqual([]);
+    expect(adapter.listJobs({ jobs: [] }, board)).toEqual([]);
+    expect(adapter.listJobs(null, board)).toEqual([]);
   });
 });

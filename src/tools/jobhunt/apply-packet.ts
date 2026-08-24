@@ -39,7 +39,17 @@ import {
 import type { JobApplication } from "../../db/schema.js";
 import { tailorCv } from "./tailor-cv.js";
 import { renderCvToPdf } from "./cv-renderer.js";
-import { applyUrlFor } from "./free-ats-endpoints.js";
+import { extractBoardToken } from "./board-token.js";
+import { getAdapter } from "./adapters/index.js";
+
+export function getApplyUrl(url: string, company: string): string | null {
+  if (!url) return null;
+  const token = extractBoardToken(url);
+  if (!token) return null;
+  const adapter = getAdapter(token.ats);
+  if (!adapter) return null;
+  return adapter.applyUrlFor(url, { name: company, ats: token.ats, token: token.token, markets: [] });
+}
 
 const log = childLogger({ module: "jobhunt:apply-packet" });
 
@@ -158,7 +168,7 @@ export async function buildApplicationPacket(
 
     await archiveTailoredCv(row, rendered.pdfBuffer);
 
-    const formUrl = applyUrlFor(row.url ?? "");
+    const formUrl = getApplyUrl(row.url ?? "", row.company);
     return {
       ok: true,
       packet: {

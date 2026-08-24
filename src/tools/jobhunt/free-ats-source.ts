@@ -36,12 +36,31 @@ import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import type { FreeAts, FreeBoard } from "./free-boards.js";
 import { createEtagCache, type EtagCache } from "./free-ats-cache.js";
 import { HttpStatusError, fetchJson, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
-import { FREE_MAPPERS, decodeJobBody, type FreeCandidate } from "./free-ats-mappers.js";
-import { boardUrl, jobBodyUrl, extractBody } from "./free-ats-endpoints.js";
+import { getAdapter } from "./adapters/index.js";
+import { decodeJobBody, type NormalizedJob as FreeCandidate } from "./adapters/types.js";
 
 // Re-exported so this module's public surface — and every test and caller that
 // already imports from it — keeps resolving after the 2026-08-21 split.
-export { boardUrl, jobBodyUrl, extractBody };
+export function boardUrl(board: FreeBoard): string {
+  const adapter = getAdapter(board.ats);
+  if (!adapter) throw new Error(`Unknown adapter: ${board.ats}`);
+  return adapter.getBoardUrl(board);
+}
+
+export function jobBodyUrl(board: FreeBoard, externalId: string): string | null {
+  const adapter = getAdapter(board.ats);
+  if (!adapter) throw new Error(`Unknown adapter: ${board.ats}`);
+  return adapter.getJobUrl(board, externalId);
+}
+
+export function extractBody(ats: FreeAts, payload: Record<string, unknown>): string {
+  const adapter = getAdapter(ats);
+  if (!adapter) throw new Error(`Unknown adapter: ${ats}`);
+  return adapter.extractBody(payload);
+}
+
+// Ensure type is exported for backwards compatibility with tests and callers
+export type { FreeCandidate };
 
 const log = childLogger({ module: "jobhunt:free-ats" });
 
@@ -183,14 +202,19 @@ export async function fetchBoard(
   board: FreeBoard,
   deps: FetchBoardDeps = realSleep,
 ): Promise<BoardFetch> {
+  const adapter = getAdapter(board.ats);
+  if (!adapter) {
+    return { ok: false, board, error: `Unknown adapter for platform: ${board.ats}` };
+  }
+
   let payload: unknown;
 
   for (let attempt = 1; ; attempt++) {
     try {
       payload = await fetchPayload(
-        boardUrl(board),
+        adapter.getBoardUrl(board),
         BOARD_TIMEOUT_MS,
-        wireFormatFor(board.ats),
+        adapter.getWireFormat(),
         boardCache,
       );
       break;
@@ -203,7 +227,7 @@ export async function fetchBoard(
   }
 
   try {
-    return { ok: true, board, candidates: FREE_MAPPERS[board.ats](payload, board) };
+    return { ok: true, board, candidates: adapter.listJobs(payload, board) };
   } catch (err) {
     return { ok: false, board, error: (err as Error).message };
   }
@@ -313,14 +337,17 @@ export async function hydrateDescriptions(
   return mapWithConcurrencyLimit(candidates, BOARD_CONCURRENCY, async (candidate) => {
     if (candidate.description !== null) return candidate;
 
-    const url = jobBodyUrl(candidate.board, candidate.externalId);
+    const adapter = getAdapter(candidate.board.ats);
+    if (!adapter) return candidate;
+
+    const url = adapter.getJobUrl(candidate.board, candidate.externalId);
     // Null means the platform inlines its bodies, so a null description here is
     // a posting that genuinely has none — not one we failed to fetch.
     if (url === null) return candidate;
 
     try {
       const payload = (await fetchJson(url, DESCRIPTION_TIMEOUT_MS)) as Record<string, unknown>;
-      return { ...candidate, description: extractBody(candidate.board.ats, payload) || null };
+      return { ...candidate, description: adapter.extractBody(payload) || null };
     } catch (err) {
       log.warn(
         { board: candidate.board.token, id: candidate.externalId, err: (err as Error).message },

@@ -11,8 +11,10 @@
  */
 
 import type { EtagCache } from "./free-ats-cache.js";
-import { WIRE_FORMAT, type WireFormat } from "./free-ats-endpoints.js";
 import type { FreeAts } from "./free-boards.js";
+import { getAdapter } from "./adapters/index.js";
+
+export type WireFormat = "json" | "xml";
 
 /** Carries the HTTP status so the retry decision is made on the code, not on a string. */
 export class HttpStatusError extends Error {
@@ -29,7 +31,9 @@ export async function fetchJson(url: string, timeoutMs: number): Promise<unknown
 
 /** The wire format a platform's board endpoint speaks. */
 export function wireFormatFor(ats: FreeAts): WireFormat {
-  return WIRE_FORMAT[ats];
+  const adapter = getAdapter(ats);
+  if (!adapter) throw new Error(`Unknown ATS platform: ${ats}`);
+  return adapter.getWireFormat();
 }
 
 /**
