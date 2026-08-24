@@ -1,0 +1,27 @@
+{
+  "_captured": "2026-08-24, live: https://jobs.ashbyhq.com/wetravel/da929e4f-e4ab-411a-bb83-5d7cf45748db/application",
+  "ats": "ashby",
+  "fields": [
+    { "selector": "#_systemfield_name", "type": "text", "label": "Name", "required": true },
+    { "selector": "#_systemfield_email", "type": "email", "label": "Email", "required": true },
+    { "selector": "input[name=\"ddcbc52a-5a4f-4d22-93f1-e2ee9d9a88e9\"]", "type": "tel", "label": "Phone Number", "required": false },
+    { "selector": "#_systemfield_resume", "type": "file", "label": "Resume", "required": true },
+    { "selector": "input[name=\"868fb0e0-2ac1-40fd-b110-2fa963e8b3e5\"]", "type": "text", "label": "LinkedIn URL", "required": true },
+    { "selector": "textarea[name=\"44362c08-4761-4352-a90a-82a36971808e\"]", "type": "textarea", "label": "Why are you interested in this position?", "required": true },
+    { "selector": "input[name=\"9f4b6439-bbbf-4e50-a5d6-72e9ca9a3d1b\"]", "type": "number", "label": "What is your annual salary expectation?", "required": true },
+    {
+      "selector": "input[name=\"3698616e-ce71-431d-bbf4-6a1da28efd48__systemfield_data_consent_ack\"]",
+      "type": "checkbox",
+      "label": "I agree",
+      "required": false,
+      "isConsent": true
+    },
+    {
+      "selector": "div.g-recaptcha, textarea[name=\"g-recaptcha-response\"]",
+      "type": "captcha",
+      "label": "",
+      "required": false,
+      "isCaptcha": true
+    }
+  ]
+}

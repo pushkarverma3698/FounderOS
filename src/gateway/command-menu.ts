@@ -60,6 +60,11 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "jobs",
   },
   {
+    command: "apply",
+    description: "apply n — fill the real application form and show you a screenshot before anything submits",
+    group: "jobs",
+  },
+  {
     command: "ask",
     description: "ask n — write the one question that unblocks row n",
     group: "jobs",

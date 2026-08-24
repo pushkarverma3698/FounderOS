@@ -1,0 +1,12 @@
+{
+  "_captured": "2026-08-24, live: https://ockto.recruitee.com/o/senior-site-reliability-engineer",
+  "ats": "recruitee",
+  "fields": [
+    { "selector": "input[name=\"candidate.name\"]", "type": "text", "label": "Full name", "required": true },
+    { "selector": "input[name=\"candidate.email\"]", "type": "email", "label": "Email address", "required": true },
+    { "selector": "input[name=\"candidate.phone\"]", "type": "tel", "label": "Phone number", "required": true },
+    { "selector": "input[name=\"candidate.photo\"]", "type": "file", "label": "Photo", "required": false },
+    { "selector": "input[name=\"candidate.cv\"]", "type": "file", "label": "CV or resume", "required": true },
+    { "selector": "input[name=\"candidate.coverLetterFile\"]", "type": "file", "label": "Cover letter", "required": false }
+  ]
+}
