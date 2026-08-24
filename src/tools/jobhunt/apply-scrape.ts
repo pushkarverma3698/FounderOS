@@ -152,6 +152,14 @@ export async function scrapeFormFields(page: Page): Promise<FormField[]> {
   for (const r of raw) {
     if (!r.hasFormAttr) continue; // stray inputs outside the actual application form
     if (r.type === "hidden" || r.type === "submit" || r.type === "button") continue;
+    // Neither name nor id: no selector can ever target this element again.
+    // Found live on Greenhouse (gitlab, reltio postings, 2026-08-24): the
+    // country autocomplete renders a second, nameless/idless auxiliary input
+    // next to the real `id="country"` field. Without this skip it fell
+    // through to `input[name=""]` — a selector that can never match the
+    // right element — and surfaced as a phantom duplicate "Country*" in the
+    // unanswered list on every single fill attempt, never once fillable.
+    if (r.type !== "radio" && r.type !== "checkbox" && !r.name && !r.id) continue;
 
     const locator = page.locator("input, select, textarea").nth(r.idx);
     const label = await labelFor(page, locator, r.id);
