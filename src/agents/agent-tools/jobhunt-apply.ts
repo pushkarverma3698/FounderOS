@@ -27,7 +27,7 @@ import { z } from "zod";
 import { getApplicationById, updateApplicationStage } from "../../db/job-queries.js";
 import { writeAuditEntry } from "../../db/queries.js";
 import { readApplyProfile } from "../../tools/jobhunt/apply-profile.js";
-import { submitApplyFlow } from "../../tools/jobhunt/apply-headless.js";
+import { previewApplyFlow, submitApplyFlow } from "../../tools/jobhunt/apply-headless.js";
 import { childLogger } from "../../infra/logger.js";
 import { idemKey, hitlGate } from "./hitl.js";
 import { TENANT } from "../../core/config.js";
@@ -47,8 +47,10 @@ export const submitApplication = tool(
     }
 
     // Idempotent to repeat on interrupt() replay: fills the form again with the
-    // same values, sends nothing, submits nothing.
-    const filled = await submitApplyFlowSafely(row.url, profileRead.profile, row.id);
+    // same values, sends nothing, submits nothing. MUST be the preview flow, not
+    // submitApplyFlow — the latter clicks the real Submit button, and this call
+    // runs before hitlGate() below has resolved anything.
+    const filled = await previewFlowSafely(row.url, profileRead.profile, row.id);
     if (!filled.ok) {
       return `Could not prepare the form for ${row.company}: ${filled.reason}`;
     }
@@ -117,6 +119,22 @@ export const submitApplication = tool(
     }),
   },
 );
+
+/** Pre-gate pass: fills the form, never clicks submit. Safe to repeat on interrupt() replay. */
+async function previewFlowSafely(
+  url: string,
+  profile: Parameters<typeof previewApplyFlow>[1],
+  jobId: string,
+): Promise<{ ok: true; result: Awaited<ReturnType<typeof previewApplyFlow>> & { ok: true } } | { ok: false; reason: string }> {
+  try {
+    const result = await previewApplyFlow(url, profile, {});
+    if (!result.ok) return { ok: false, reason: result.reason };
+    return { ok: true, result };
+  } catch (err) {
+    log.error({ jobId, err: (err as Error).message }, "previewApplyFlow threw");
+    return { ok: false, reason: (err as Error).message };
+  }
+}
 
 async function submitApplyFlowSafely(
   url: string,
