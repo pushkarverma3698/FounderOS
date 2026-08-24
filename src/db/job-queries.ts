@@ -26,26 +26,29 @@ export const LIVE_STAGES = ["drafted", "awaiting_approval", "applied", "replied"
 /**
  * How old a screened posting can be and still show in the apply queue.
  *
- * SEVEN DAYS, raised from ONE on 2026-08-24. The argument for 24 was that a
- * posting past a day already has hundreds of applicants, so showing it is noise
- * — and the freshness advantage is real; it is the whole reason the free lane
- * polls boards every thirty minutes.
+ * TWENTY-FOUR HOURS. Briefly raised to 168 (seven days) on 2026-08-24 and
+ * reverted the same day on founder direction: a posting past a day already has
+ * hundreds of applicants, and the free lane's only reason to exist is that it
+ * reaches a posting while it is still hours old — encouraging an application on
+ * a six-day-old one works against that. "We need to apply the fresh postings
+ * everyday," not drain a week of standing inventory.
  *
- * What the argument missed is that this window does not rank, it EXCLUDES, and
- * exclusion here is total: the brief only ranks what this query returns, and
- * `brief_section` — written from that ranking — is the only thing `/draft` and
- * `mac-client/sync.py` can resolve. Production the morning it changed: 464
- * screened actionable rows, 73 inside 7 days, 17 inside 72 hours, **3 inside
- * 24**. Fifty-two Dutch recognised-sponsor salary-passes were in the table, 11
- * confirmed still open, and none of them reachable by any command the founder
- * has. Lifetime applications: 2.
+ * The reach problem the 168h change was solving was real but had the wrong
+ * fix. Production, 2026-08-24 08:xx, BEFORE either change: 464 screened
+ * actionable rows, only 3 inside 24h, because `persistBriefRanks` pinned a
+ * rank over the CAPPED display selection — so even the 3 that qualified could
+ * collide with `DO_TODAY_CAP + STRETCH_CAP` on a busier day. That bug is fixed
+ * independently in brief-select.ts (`order*` vs `select*`, a prefix relationship
+ * rather than a second filter) and stays fixed with THIS window: every row
+ * inside 24h now gets a rank, not just the first nine.
  *
- * Freshness is preserved where it belongs — rows still sort with the newest
- * first, and DO TODAY still requires a live check — so a day-old posting is
- * read first and a six-day-old one is merely reachable rather than invisible.
- * Env-tunable so the window can move without a deploy.
+ * The rest of the reach came from supply, not from widening what counts as
+ * fresh: the board registry grew 923 → 1,297 boards the same day (#559), and
+ * measured immediately after, 24h alone held 37 actionable rows — no window
+ * change required to reach them once they existed. Env-tunable so the window
+ * can move without a deploy.
  */
-export const APPLY_QUEUE_MAX_AGE_HOURS = intEnv("APPLY_QUEUE_MAX_AGE_HOURS", 168);
+export const APPLY_QUEUE_MAX_AGE_HOURS = intEnv("APPLY_QUEUE_MAX_AGE_HOURS", 24);
 
 /** Look up a previously screened role by its dedupe identity. */
 export async function findApplicationByDedupeKey(
