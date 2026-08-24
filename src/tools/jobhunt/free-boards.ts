@@ -93,7 +93,10 @@ export type FreeAts =
   | "recruitee"
   | "smartrecruiters"
   | "workable"
-  | "personio";
+  | "personio"
+  | "workday"
+  | "teamtailor"
+  | "bamboohr";
 
 export const FREE_ATS_PLATFORMS: readonly FreeAts[] = [
   "greenhouse",
@@ -103,6 +106,9 @@ export const FREE_ATS_PLATFORMS: readonly FreeAts[] = [
   "smartrecruiters",
   "workable",
   "personio",
+  "workday",
+  "teamtailor",
+  "bamboohr",
 ];
 
 /**

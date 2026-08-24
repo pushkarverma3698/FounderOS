@@ -48,6 +48,7 @@ import {
   summariseFailures,
   type FreeCandidate,
 } from "./free-ats-source.js";
+import { getAdapter } from "./adapters/index.js";
 import { screenBatch, type IngestLine } from "./ingest-batch.js";
 import { recordQueryCost } from "./ingest-ledger.js";
 import { classifyTrack } from "./tracks.js";
@@ -158,13 +159,25 @@ export function filterCandidates(
   let offMarket = 0;
 
   const kept = candidates.filter((candidate) => {
-    if (candidate.postedAt === null) {
-      undated += 1;
-      return false;
-    }
-    if (hoursSince(candidate.postedAt, now) > maxAgeHours) {
-      stale += 1;
-      return false;
+    // A `dateOnlyInDetail` platform (BambooHR) states no date on the list
+    // payload by construction — see adapters/bamboohr.ts. Judging freshness here
+    // would drop every one of its postings as `undated` before hydration ever
+    // runs, which is exactly what makes those boards worth nothing. Its date
+    // check is deferred to `applyDeferredFreshness`, once the detail fetch has
+    // actually supplied one; track and market are still judged here, same as
+    // every other platform.
+    const deferDate = getAdapter(candidate.board.ats)?.dateOnlyInDetail === true;
+
+    if (!deferDate) {
+      const postedAt = candidate.postedAt;
+      if (postedAt === null) {
+        undated += 1;
+        return false;
+      }
+      if (hoursSince(postedAt, now) > maxAgeHours) {
+        stale += 1;
+        return false;
+      }
     }
     if (classifyTrack(candidate.title) === null) {
       offTrack += 1;
@@ -226,6 +239,40 @@ async function keepUnseen(
 }
 
 /**
+ * The freshness check `filterCandidates` deferred for `dateOnlyInDetail`
+ * platforms, run now that hydration has (maybe) supplied a real date.
+ *
+ * Counted into the SAME undated/stale reasons `filterCandidates` uses rather
+ * than a new pair of buckets — a second, differently-named bucket for "dropped
+ * for the same reason, just later" would be exactly the ambiguity this pipeline
+ * has already lost weeks to, wearing a new label.
+ */
+function applyDeferredFreshness(
+  hydrated: readonly FreeCandidate[],
+  now: Date,
+  maxAgeHours: number,
+): { kept: FreeCandidate[]; undated: number; stale: number } {
+  let undated = 0;
+  let stale = 0;
+
+  const kept = hydrated.filter((candidate) => {
+    if (getAdapter(candidate.board.ats)?.dateOnlyInDetail !== true) return true;
+
+    if (candidate.postedAt === null) {
+      undated += 1;
+      return false;
+    }
+    if (hoursSince(candidate.postedAt, now) > maxAgeHours) {
+      stale += 1;
+      return false;
+    }
+    return true;
+  });
+
+  return { kept, undated, stale };
+}
+
+/**
  * Run one free sweep.
  *
  * `boards` is injectable so a test can drive the whole path over two boards
@@ -246,10 +293,12 @@ export async function runFreeIngest(
   const filtered = filterCandidates(sweep.candidates, now, opts.maxAgeHours);
   const { unseen, known } = await keepUnseen(filtered.kept);
   const hydrated = await hydrateDescriptions(unseen);
+  const maxAgeHours = opts.maxAgeHours ?? FREE_LANE_MAX_AGE_HOURS;
+  const deferred = applyDeferredFreshness(hydrated, now, maxAgeHours);
 
   const postings: RawPosting[] = [];
   let bodyless = 0;
-  for (const candidate of hydrated) {
+  for (const candidate of deferred.kept) {
     if (candidate.description === null || candidate.description.trim().length === 0) {
       // Screening an empty body would read as "this employer stated no
       // requirements", and every gate would wave it through on that basis.
@@ -262,13 +311,24 @@ export async function runFreeIngest(
   const lines = await screenBatch(postings);
 
   const notes = [...filtered.notes];
+  if (deferred.stale > 0) {
+    notes.push(
+      `${deferred.stale} postings older than ${maxAgeHours}h — not screened (date resolved after fetch)`,
+    );
+  }
+  if (deferred.undated > 0) {
+    notes.push(`${deferred.undated} postings had no publication date even after fetch — skipped`);
+  }
   if (known > 0) notes.push(`${known} postings were already in the tracker`);
   if (bodyless > 0) notes.push(`${bodyless} postings had no readable description and were skipped`);
 
   const funnel: FreeFunnel = {
     seen: sweep.candidates.length,
-    undated: filtered.counts.undated,
-    stale: filtered.counts.stale,
+    // Each reason has ONE true total regardless of which stage caught it: most
+    // platforms resolve undated/stale before hydration, dateOnlyInDetail
+    // platforms resolve it after. See applyDeferredFreshness.
+    undated: filtered.counts.undated + deferred.undated,
+    stale: filtered.counts.stale + deferred.stale,
     offTrack: filtered.counts.offTrack,
     offMarket: filtered.counts.offMarket,
     known,
