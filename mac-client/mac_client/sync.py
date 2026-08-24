@@ -96,6 +96,58 @@ def run_remote(sql: str) -> str:
     return done.stdout.strip()
 
 
+#: Where the profile lives on the VPS. THE SOURCE OF TRUTH, founder's call
+#: 2026-08-24, so `/profile` in Telegram edits the same file the browser session
+#: fills forms from. A second hand-maintained copy on the laptop is how the
+#: client ends up typing an address he changed three weeks ago.
+REMOTE_PROFILE_PATH = "/opt/founderos-data/apply-profile.json"
+
+
+def fetch_profile() -> str | None:
+    """The apply profile as it stands on the VPS, or None if there is none yet.
+
+    None is a real answer, not a failure: the founder may not have run
+    ``/profile`` yet, and the local file — if he wrote one by hand — must keep
+    working. What is NOT tolerated is a partial or unparseable pull silently
+    replacing a good local profile, so this validates before returning.
+    """
+    command = ["ssh", SSH_HOST, f"sudo -n cat {REMOTE_PROFILE_PATH}"]
+    try:
+        done = subprocess.run(
+            command, capture_output=True, text=True, timeout=SSH_TIMEOUT_S, check=False
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    if done.returncode != 0 or not done.stdout.strip():
+        return None
+    try:
+        json.loads(done.stdout)
+    except json.JSONDecodeError:
+        # A truncated read is worse than no read: it would overwrite a working
+        # profile with something `load_profile` then rejects, and the founder
+        # would see "missing: first_name" on a file he never touched.
+        return None
+    return done.stdout
+
+
+def sync_profile(path: Path | None = None) -> bool:
+    """Write the VPS profile over the local one. True when it was updated.
+
+    Returns rather than raises, and the caller reports it — the queue is still
+    worth syncing when the profile pull fails, and a stale profile is a visible
+    problem (`load_profile` names every missing field) rather than a silent one.
+    """
+    target = path or (QUEUE_DIR.parent / "apply-profile.json")
+    remote = fetch_profile()
+    if remote is None:
+        return False
+    if target.exists() and target.read_text() == remote:
+        return False
+    target.write_text(remote)
+    target.chmod(0o600)
+    return True
+
+
 def fetch_queue() -> list[QueueJob]:
     """The ranked queue, best first."""
     payload = run_remote(QUEUE_SQL)

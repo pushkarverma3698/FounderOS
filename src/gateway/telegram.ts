@@ -27,6 +27,7 @@ import {
   unknownCommandReply,
 } from "./commands.js";
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
+import { handleProfile } from "./profile-commands.js";
 import { handleCsv, handleJobs } from "./jobhunt-view.js";
 import { COMMAND_MENU, telegramCommandPayload } from "./command-menu.js";
 import { splitForTelegram } from "../tools/jobhunt/telegram-format.js";
@@ -59,6 +60,7 @@ export function registerHandlers(bot: Bot): void {
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
   bot.command("ask", (ctx: Context) => handleAsk(ctx, { runKernelText }));
   bot.command("applied", (ctx: Context) => handleApplied(ctx));
+  bot.command("profile", (ctx: Context) => handleProfile(ctx));
   // The renderer is dynamically imported so this transport file never pulls the
   // brief's database and liveness dependencies into the bot's startup path.
   // `splitForTelegram` is pure formatting and imported normally.

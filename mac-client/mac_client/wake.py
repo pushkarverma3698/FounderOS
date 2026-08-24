@@ -12,10 +12,21 @@ ever called it, because the LaunchAgent was never written.
 from __future__ import annotations
 
 from . import notify
-from .sync import SyncError, fetch_queue, save_queue
+from .sync import SyncError, fetch_queue, save_queue, sync_profile
 
 
 def main() -> int:
+    # BEFORE the queue, and never fatal. The VPS holds the profile the founder
+    # edits with `/profile`, and a browser session that fills forms from a
+    # laptop copy he changed three weeks ago is worse than one that fills from
+    # today's. If the pull fails the local copy stands and `load_profile` still
+    # names anything missing, so the failure direction is loud.
+    try:
+        if sync_profile():
+            print("✓ apply profile updated from the VPS")
+    except OSError as err:
+        print(f"⚠ could not refresh the apply profile ({err}) — using the local copy")
+
     try:
         jobs = fetch_queue()
         save_queue(jobs)
