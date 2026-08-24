@@ -17,7 +17,7 @@
 import { childLogger } from "../../infra/logger.js";
 import { recordBriefRanks, recordFitScores } from "../../db/job-queries.js";
 import { formatOverlap, type OverlapResult } from "./overlap.js";
-import { selectAskable, selectDoToday, selectStretch } from "./brief-select.js";
+import { orderAskable, orderDoToday, orderStretch } from "./brief-select.js";
 import type { BriefRow } from "./brief-row.js";
 import type { JobApplication } from "../../db/schema.js";
 
@@ -35,17 +35,44 @@ const log = childLogger({ module: "jobhunt:brief-persist" });
  *
  * Failure is tolerated but reported — see the module header.
  */
-export async function persistBriefRanks(rows: readonly BriefRow[]): Promise<void> {
-  const doToday = selectDoToday(rows);
-  const entries = [
+export interface BriefRankEntry {
+  readonly id: string;
+  readonly section: "do_today" | "stretch" | "ask";
+  readonly rank: number;
+}
+
+/**
+ * The numbering, as data — every qualifying row, not only the printed ones.
+ *
+ * PINNED OVER THE UNCAPPED ORDERING (`order*`), not the display slice
+ * (`select*`). The cap decides how much of the message the founder reads; it
+ * must not decide how much of his own queue he can address. Until 2026-08-24 it
+ * decided both, and the measurable result was 464 screened rows against 3 that
+ * `/draft` — or `mac-client/sync.py`, which reads this very column — could
+ * reach.
+ *
+ * Stretch continues from the FULL do-today length, not the displayed one.
+ * Numbering it from `DO_TODAY_CAP + 1` would hand two different rows the same
+ * number, and `ja_brief_rank_uniq` would reject the second write — losing the
+ * row silently, which is the failure direction this codebase keeps paying for.
+ *
+ * Pure and exported so the property can be asserted without a database.
+ */
+export function briefRankEntries(rows: readonly BriefRow[]): BriefRankEntry[] {
+  const doToday = orderDoToday(rows);
+  return [
     ...doToday.map((r, i) => ({ id: r.id, section: "do_today" as const, rank: i + 1 })),
-    ...selectStretch(rows).map((r, i) => ({
+    ...orderStretch(rows).map((r, i) => ({
       id: r.id,
       section: "stretch" as const,
       rank: doToday.length + i + 1,
     })),
-    ...selectAskable(rows).map((r, i) => ({ id: r.id, section: "ask" as const, rank: i + 1 })),
+    ...orderAskable(rows).map((r, i) => ({ id: r.id, section: "ask" as const, rank: i + 1 })),
   ];
+}
+
+export async function persistBriefRanks(rows: readonly BriefRow[]): Promise<void> {
+  const entries = briefRankEntries(rows);
   try {
     await recordBriefRanks(entries);
   } catch (err) {

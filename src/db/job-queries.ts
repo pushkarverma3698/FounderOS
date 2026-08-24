@@ -26,10 +26,26 @@ export const LIVE_STAGES = ["drafted", "awaiting_approval", "applied", "replied"
 /**
  * How old a screened posting can be and still show in the apply queue.
  *
- * A posting past this age already has hundreds of applicants — showing it is
- * noise, not opportunity. Env-tunable so the window can move without a deploy.
+ * SEVEN DAYS, raised from ONE on 2026-08-24. The argument for 24 was that a
+ * posting past a day already has hundreds of applicants, so showing it is noise
+ * — and the freshness advantage is real; it is the whole reason the free lane
+ * polls boards every thirty minutes.
+ *
+ * What the argument missed is that this window does not rank, it EXCLUDES, and
+ * exclusion here is total: the brief only ranks what this query returns, and
+ * `brief_section` — written from that ranking — is the only thing `/draft` and
+ * `mac-client/sync.py` can resolve. Production the morning it changed: 464
+ * screened actionable rows, 73 inside 7 days, 17 inside 72 hours, **3 inside
+ * 24**. Fifty-two Dutch recognised-sponsor salary-passes were in the table, 11
+ * confirmed still open, and none of them reachable by any command the founder
+ * has. Lifetime applications: 2.
+ *
+ * Freshness is preserved where it belongs — rows still sort with the newest
+ * first, and DO TODAY still requires a live check — so a day-old posting is
+ * read first and a six-day-old one is merely reachable rather than invisible.
+ * Env-tunable so the window can move without a deploy.
  */
-export const APPLY_QUEUE_MAX_AGE_HOURS = intEnv("APPLY_QUEUE_MAX_AGE_HOURS", 24);
+export const APPLY_QUEUE_MAX_AGE_HOURS = intEnv("APPLY_QUEUE_MAX_AGE_HOURS", 168);
 
 /** Look up a previously screened role by its dedupe identity. */
 export async function findApplicationByDedupeKey(
@@ -490,6 +506,16 @@ export async function listUntailoredApplications(
 }
 
 /** Update CV tailoring status and S3 asset references for an application. */
+/**
+ * Record how a CV tailoring attempt ended.
+ *
+ * THE REASON GOES TO `tailor_note`, NOT `notes`. `notes` is also written by
+ * `recordLiveness`, which runs on every brief render — far more often than a
+ * tailoring attempt — so a reason written there survives only until the next
+ * `/jobs`. Production, 2026-08-24: 16 rows had `tailor_status='failed'` and 14
+ * of them explained themselves with a liveness sentence. See the column's own
+ * comment in schema.ts and drizzle/0035_tailor_note.sql.
+ */
 export async function recordTailoringResult(
   id: string,
   opts: { tailorStatus: "tailored" | "failed" | "tailoring"; tailoredCvS3Key?: string; tailoredDocxS3Key?: string; coverLetterS3Key?: string; notes?: string },
@@ -499,7 +525,7 @@ export async function recordTailoringResult(
     ...(opts.tailoredCvS3Key ? { tailored_cv_s3_key: opts.tailoredCvS3Key } : {}),
     ...(opts.tailoredDocxS3Key ? { tailored_docx_s3_key: opts.tailoredDocxS3Key } : {}),
     ...(opts.coverLetterS3Key ? { cover_letter_s3_key: opts.coverLetterS3Key } : {}),
-    ...(opts.notes !== undefined ? { notes: opts.notes } : {}),
+    ...(opts.notes !== undefined ? { tailor_note: opts.notes } : {}),
     updated_at: new Date(),
   }).where(eq(jobApplications.id, id)).returning();
   return saved ?? null;

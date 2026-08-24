@@ -1092,6 +1092,19 @@ export const jobApplications = agentsSchema.table(
 
     /** pending | tailoring | tailored | failed — CV generation state. */
     tailor_status: text("tailor_status"),
+    /**
+     * Why the last tailoring attempt ended the way it did.
+     *
+     * ITS OWN COLUMN because `notes` has two writers. `recordTailoringResult`
+     * wrote the failure reason there and `recordLiveness` overwrites the same
+     * column with its own sentence on every brief render — so of 16 rows that
+     * carried `tailor_status = 'failed'` in production on 2026-08-24, **14 read
+     * "Confirmed still open: HTTP 200"**, which is a true statement about a
+     * different question and tells nobody why the CV never got built. The two
+     * surviving reasons were a Gemini 5xx and a missing Chromium, i.e. exactly
+     * the two things worth knowing.
+     */
+    tailor_note: text("tailor_note"),
     /** S3 key to the generated, JD-tailored CV PDF. */
     tailored_cv_s3_key: text("tailored_cv_s3_key"),
     /** S3 key to the generated DOCX variant. */
