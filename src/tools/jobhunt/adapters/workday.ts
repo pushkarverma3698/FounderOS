@@ -19,7 +19,7 @@
  * postings", not "an arbitrary slice".
  */
 
-import { AtsAdapter, BoardPaging, BoardRequest, NormalizedJob } from "./types.js";
+import { AtsAdapter, BoardPaging, BoardRequest, NormalizedJob, decodeJobBody } from "./types.js";
 import { FreeBoard } from "../free-boards.js";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -189,8 +189,12 @@ export const workdayAdapter: AtsAdapter = {
   },
 
   extractBody(payload: Record<string, unknown>): string {
+    // jobDescription is raw HTML, same defect as Greenhouse's extractBody —
+    // fixed alongside it 2026-08-24 (see that adapter's comment for the
+    // production evidence). Every other adapter's body-reading path already
+    // runs decodeJobBody; this one and Greenhouse's were the two exceptions.
     const info = asRecord(payload["jobPostingInfo"]);
-    return asText(info?.["jobDescription"]);
+    return decodeJobBody(asText(info?.["jobDescription"]));
   },
 
   applyUrlFor(postingUrl: string, _board: FreeBoard): string | null {
