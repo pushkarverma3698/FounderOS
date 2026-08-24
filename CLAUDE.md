@@ -213,8 +213,8 @@ prod 401s). Fallback chain: same-key paid Gemini first
 (`google-genai:gemini-3-flash-preview`, `google-genai:gemini-3.1-flash-lite` —
 live-verified serving + tool-calling during the 2026-07-13 gemini-3.5-flash 503
 storm), then FREE OpenRouter last resort (founder directive: no paid OpenRouter
-fallback): `openrouter:meta-llama/llama-3.3-70b-instruct:free`,
-`openrouter:qwen/qwen3-next-80b-a3b-instruct:free`. Temperature 0, planner+workers
+fallback): `openrouter:google/gemma-4-31b-it:free`,
+`openrouter:z-ai/glm-5.2:free`. Temperature 0, planner+workers
 (`WORKER_AGENT_MODEL` splits them). Budget caps enforced (`BUDGET_DAILY_USD`,
 `RUN_BUDGET_USD`). Provider errors classify by HTTP status class
 (`httpStatusOf`/`is503Error`/`isModelFallbackError` in `src/agents/model.ts`):
