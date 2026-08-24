@@ -69,6 +69,15 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     description: "applied n — mark row n applied and drop it off the queue",
     group: "jobs",
   },
+  {
+    // In the jobs group, not system: it is the thing that decides what lands in
+    // an employer's form, and it belongs beside the commands that open one.
+    command: "profile",
+    // No angle brackets: this string is sent to Telegram's setMyCommands, which
+    // takes plain text and does not parse HTML (see command-menu.test.ts).
+    description: "What every application form gets filled from. profile set phone +31… changes one field",
+    group: "jobs",
+  },
   // ── System ────────────────────────────────────────────────────────────────
   { command: "status", description: "System health and pending approvals", group: "system" },
   { command: "budget", description: "Today's spend against the daily cap", group: "system" },
