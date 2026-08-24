@@ -93,7 +93,10 @@ export type FreeAts =
   | "recruitee"
   | "smartrecruiters"
   | "workable"
-  | "personio";
+  | "personio"
+  | "workday"
+  | "teamtailor"
+  | "bamboohr";
 
 export const FREE_ATS_PLATFORMS: readonly FreeAts[] = [
   "greenhouse",
@@ -103,6 +106,9 @@ export const FREE_ATS_PLATFORMS: readonly FreeAts[] = [
   "smartrecruiters",
   "workable",
   "personio",
+  "workday",
+  "teamtailor",
+  "bamboohr",
 ];
 
 /**
@@ -117,13 +123,23 @@ export const FREE_ATS_PLATFORMS: readonly FreeAts[] = [
  */
 export type BoardMarket = "NL" | "IN";
 
+export type MonitoringTier = "TIER_0_ATS_API" | "TIER_1_SITEMAP" | "TIER_2_HTTP" | "TIER_3_MAC";
+
 export interface FreeBoard {
   readonly name: string;
   readonly ats: FreeAts;
   /** The board's slug in its platform's URL. Case-sensitive on Ashby. */
   readonly token: string;
   readonly markets: readonly BoardMarket[];
+  
+  // Future expanded fields for the intelligence graph:
+  readonly domain?: string;
+  readonly careersUrl?: string;
+  readonly sitemapUrl?: string;
+  readonly monitoringTier?: MonitoringTier;
 }
+
+export type CompanySource = FreeBoard;
 
 export const FREE_BOARDS_PATH = resolve(REPO_ROOT, "docs/strategy/data/free-ats-boards.csv");
 
@@ -202,11 +218,13 @@ function csvField(value: string): string {
  *
  * Raised 200 → 500 on 2026-08-20 alongside the sponsor-board import, then
  * 500 → 700 on 2026-08-21 when SmartRecruiters and Workable took the registry
- * from 623 to 858. A floor that is not moved with the file stops being a floor:
+ * from 623 to 858, then 700 → 1100 on 2026-08-24 when Workday, Teamtailor and
+ * BambooHR (plus organic growth on the existing 7 platforms) took it from 923
+ * to 1,297. A floor that is not moved with the file stops being a floor:
  * left at 200 it would have gone on passing while two thirds of the registry
  * silently failed to parse, which is precisely the reading it exists to deny.
  */
-export const MIN_EXPECTED_BOARDS = 700;
+export const MIN_EXPECTED_BOARDS = 1100;
 
 function toFreeAts(value: string): FreeAts | null {
   const normalised = value.trim().toLowerCase();

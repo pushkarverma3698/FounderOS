@@ -22,11 +22,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import {
-  mapSmartRecruitersPostings,
-  mapWorkableJobs,
-  FREE_MAPPERS,
-} from "../../../src/tools/jobhunt/free-ats-mappers.js";
+import { getAdapter } from "../../../src/tools/jobhunt/adapters/index.js";
+import { smartrecruitersAdapter } from "../../../src/tools/jobhunt/adapters/smartrecruiters.js";
+import { workableAdapter } from "../../../src/tools/jobhunt/adapters/workable.js";
 import { boardUrl, jobBodyUrl, PLATFORM_CONCURRENCY } from "../../../src/tools/jobhunt/free-ats-source.js";
 import type { FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
@@ -84,13 +82,15 @@ const WK_PAYLOAD = {
   ],
 };
 
-describe("mapSmartRecruitersPostings", () => {
+describe("smartrecruitersAdapter", () => {
+  const adapter = smartrecruitersAdapter;
+
   it("maps every posting in the payload", () => {
-    expect(mapSmartRecruitersPostings(SR_PAYLOAD, SR_BOARD)).toHaveLength(2);
+    expect(adapter.listJobs(SR_PAYLOAD, SR_BOARD)).toHaveLength(2);
   });
 
   it("reads the id, the title and the date the posting was released", () => {
-    const [first] = mapSmartRecruitersPostings(SR_PAYLOAD, SR_BOARD);
+    const [first] = adapter.listJobs(SR_PAYLOAD, SR_BOARD);
     expect(first?.externalId).toBe("744000056465632");
     expect(first?.title).toBe("Associate, Internship Team");
     expect(first?.postedAt?.toISOString()).toBe("2025-04-29T17:58:57.823Z");
@@ -98,39 +98,41 @@ describe("mapSmartRecruitersPostings", () => {
 
   it("builds the public posting URL, since the list endpoint does not carry one", () => {
     // Verified live 2026-08-21: /{company}/{id} resolves 200 without the slug.
-    const [first] = mapSmartRecruitersPostings(SR_PAYLOAD, SR_BOARD);
+    const [first] = adapter.listJobs(SR_PAYLOAD, SR_BOARD);
     expect(first?.url).toBe("https://jobs.smartrecruiters.com/1huddle/744000056465632");
   });
 
   it("uses the full location string, which is what the country gate reads", () => {
-    const [, second] = mapSmartRecruitersPostings(SR_PAYLOAD, SR_BOARD);
+    const [, second] = adapter.listJobs(SR_PAYLOAD, SR_BOARD);
     expect(second?.location).toBe("Amsterdam, Netherlands");
   });
 
   it("leaves the description null so hydration fetches the real body", () => {
     // The list endpoint carries no body at all — same as Greenhouse.
-    const [first] = mapSmartRecruitersPostings(SR_PAYLOAD, SR_BOARD);
+    const [first] = adapter.listJobs(SR_PAYLOAD, SR_BOARD);
     expect(first?.description).toBeNull();
   });
 
   it("skips a row with no id or no title rather than emitting a broken one", () => {
     const broken = { content: [{ id: "", name: "Ghost" }, { id: "1", name: "" }] };
-    expect(mapSmartRecruitersPostings(broken, SR_BOARD)).toEqual([]);
+    expect(adapter.listJobs(broken, SR_BOARD)).toEqual([]);
   });
 
   it("returns nothing for a payload that is not a posting list", () => {
-    expect(mapSmartRecruitersPostings({ error: "not found" }, SR_BOARD)).toEqual([]);
-    expect(mapSmartRecruitersPostings(null, SR_BOARD)).toEqual([]);
+    expect(adapter.listJobs({ error: "not found" }, SR_BOARD)).toEqual([]);
+    expect(adapter.listJobs(null, SR_BOARD)).toEqual([]);
   });
 });
 
-describe("mapWorkableJobs", () => {
+describe("workableAdapter", () => {
+  const adapter = workableAdapter;
+
   it("maps the jobs array", () => {
-    expect(mapWorkableJobs(WK_PAYLOAD, WK_BOARD)).toHaveLength(1);
+    expect(adapter.listJobs(WK_PAYLOAD, WK_BOARD)).toHaveLength(1);
   });
 
   it("reads id, title, url and date from the widget payload", () => {
-    const [job] = mapWorkableJobs(WK_PAYLOAD, WK_BOARD);
+    const [job] = adapter.listJobs(WK_PAYLOAD, WK_BOARD);
     expect(job?.externalId).toBe("E4335D00D8");
     expect(job?.title).toBe("Account Director");
     expect(job?.url).toBe("https://apply.workable.com/j/E4335D00D8");
@@ -138,12 +140,12 @@ describe("mapWorkableJobs", () => {
   });
 
   it("assembles a location from the parts, because there is no single field", () => {
-    const [job] = mapWorkableJobs(WK_PAYLOAD, WK_BOARD);
+    const [job] = adapter.listJobs(WK_PAYLOAD, WK_BOARD);
     expect(job?.location).toBe("New York, New York, United States");
   });
 
   it("carries the description, so Workable needs no hydration round trip", () => {
-    const [job] = mapWorkableJobs(WK_PAYLOAD, WK_BOARD);
+    const [job] = adapter.listJobs(WK_PAYLOAD, WK_BOARD);
     expect(job?.description).toContain("Account Director will lead");
     // Decoded the same way every other body is: tags become spaces, entities resolve.
     expect(job?.description).not.toContain("<p>");
@@ -152,26 +154,26 @@ describe("mapWorkableJobs", () => {
   it("does not mistake the account description for a job", () => {
     // The payload's top-level `description` is the company blurb. Reading it as
     // a posting would put one fake row on every Workable board in the registry.
-    const jobs = mapWorkableJobs(WK_PAYLOAD, WK_BOARD);
-    expect(jobs.every((j) => !j.title.includes("social transformation"))).toBe(true);
+    const jobs = adapter.listJobs(WK_PAYLOAD, WK_BOARD);
+    expect(jobs.every((j: any) => !j.title.includes("social transformation"))).toBe(true);
   });
 
   it("falls back to the apply URL when the posting URL is missing", () => {
     const payload = { jobs: [{ ...WK_PAYLOAD.jobs[0], url: "" }] };
-    const [job] = mapWorkableJobs(payload, WK_BOARD);
+    const [job] = adapter.listJobs(payload, WK_BOARD);
     expect(job?.url).toBe("https://apply.workable.com/j/E4335D00D8/apply");
   });
 
   it("returns nothing for a payload with no jobs array", () => {
-    expect(mapWorkableJobs({ name: "x" }, WK_BOARD)).toEqual([]);
-    expect(mapWorkableJobs(null, WK_BOARD)).toEqual([]);
+    expect(adapter.listJobs({ name: "x" }, WK_BOARD)).toEqual([]);
+    expect(adapter.listJobs(null, WK_BOARD)).toEqual([]);
   });
 });
 
 describe("the sweep knows about both platforms", () => {
   it("registers a mapper for each", () => {
-    expect(FREE_MAPPERS.smartrecruiters).toBe(mapSmartRecruitersPostings);
-    expect(FREE_MAPPERS.workable).toBe(mapWorkableJobs);
+    expect(getAdapter("smartrecruiters")).toBe(smartrecruitersAdapter);
+    expect(getAdapter("workable")).toBe(workableAdapter);
   });
 
   it("builds the list URL for each", () => {
@@ -190,7 +192,7 @@ describe("the sweep knows about both platforms", () => {
   });
 
   it("gives every platform a concurrency, so a new one cannot default to unlimited", () => {
-    for (const ats of Object.keys(FREE_MAPPERS)) {
+    for (const ats of ["smartrecruiters", "workable"]) {
       expect(PLATFORM_CONCURRENCY[ats as keyof typeof PLATFORM_CONCURRENCY]).toBeGreaterThan(0);
     }
   });

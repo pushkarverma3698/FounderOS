@@ -71,7 +71,7 @@ describe("parseBoardRegistry", () => {
     const csv = [
       HEADER,
       "Alpha,greenhouse,alpha,NL",
-      "Weird Co,workday,weird,NL",
+      "Weird Co,notaplatform,weird,NL",
       "Beta,lever,beta,IN",
     ].join("\n");
 

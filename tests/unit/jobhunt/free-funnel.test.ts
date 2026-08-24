@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { filterCandidates, type FreeFunnel } from "../../../src/tools/jobhunt/free-ingest.js";
 import { afterQuietSweep, ZERO_PASS_STREAK_THRESHOLD, topDropReason, type HeartbeatState } from "../../../src/tools/jobhunt/sweep-heartbeat.js";
-import type { FreeCandidate } from "../../../src/tools/jobhunt/free-ats-mappers.js";
+import type { FreeCandidate } from "../../../src/tools/jobhunt/free-ats-source.js";
 import type { FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
 const BOARD: FreeBoard = { name: "Test Board", ats: "greenhouse", token: "test", markets: ["NL"] };

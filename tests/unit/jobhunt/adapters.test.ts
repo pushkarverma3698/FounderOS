@@ -9,16 +9,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import {
-  mapGreenhouseJobs,
-  mapLeverPostings,
-  mapAshbyJobs,
-  mapRecruiteeOffers,
-  decodeJobBody,
-  parsePostedAt,
-  toRawPosting,
-  type FreeCandidate,
-} from "../../../src/tools/jobhunt/free-ats-mappers.js";
+import { greenhouseAdapter } from "../../../src/tools/jobhunt/adapters/greenhouse.js";
+import { leverAdapter } from "../../../src/tools/jobhunt/adapters/lever.js";
+import { ashbyAdapter } from "../../../src/tools/jobhunt/adapters/ashby.js";
+import { recruiteeAdapter } from "../../../src/tools/jobhunt/adapters/recruitee.js";
+import { decodeJobBody, parsePostedAt, type NormalizedJob as FreeCandidate } from "../../../src/tools/jobhunt/adapters/types.js";
+import { toRawPosting } from "../../../src/tools/jobhunt/free-ingest.js";
 import type { FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
 function board(overrides: Partial<FreeBoard> = {}): FreeBoard {
@@ -33,7 +29,8 @@ function board(overrides: Partial<FreeBoard> = {}): FreeBoard {
 
 const GARBAGE: readonly unknown[] = [null, undefined, "a bare string", [1, 2, 3], { foo: "bar" }];
 
-describe("mapGreenhouseJobs", () => {
+describe("greenhouseAdapter", () => {
+  const adapter = greenhouseAdapter;
   const wellFormed = {
     jobs: [
       {
@@ -48,7 +45,7 @@ describe("mapGreenhouseJobs", () => {
   };
 
   it("maps a well-formed payload to the right fields", () => {
-    const [candidate] = mapGreenhouseJobs(wellFormed, board());
+    const [candidate] = adapter.listJobs(wellFormed, board());
 
     expect(candidate).toBeDefined();
     expect(candidate!.externalId).toBe("12345");
@@ -58,7 +55,7 @@ describe("mapGreenhouseJobs", () => {
   });
 
   it("returns description: null — the list endpoint carries no body", () => {
-    const [candidate] = mapGreenhouseJobs(wellFormed, board());
+    const [candidate] = adapter.listJobs(wellFormed, board());
     expect(candidate!.description).toBeNull();
   });
 
@@ -78,7 +75,7 @@ describe("mapGreenhouseJobs", () => {
       ],
     };
 
-    const [candidate] = mapGreenhouseJobs(payload, board());
+    const [candidate] = adapter.listJobs(payload, board());
 
     expect(candidate!.postedAt?.toISOString()).toBe("2020-01-01T00:00:00.000Z");
   });
@@ -89,18 +86,19 @@ describe("mapGreenhouseJobs", () => {
     const noTitle = { jobs: [{ ...base, title: "" }] };
     const noUrl = { jobs: [{ ...base, absolute_url: "" }] };
 
-    expect(mapGreenhouseJobs(noId, board())).toEqual([]);
-    expect(mapGreenhouseJobs(noTitle, board())).toEqual([]);
-    expect(mapGreenhouseJobs(noUrl, board())).toEqual([]);
+    expect(adapter.listJobs(noId, board())).toEqual([]);
+    expect(adapter.listJobs(noTitle, board())).toEqual([]);
+    expect(adapter.listJobs(noUrl, board())).toEqual([]);
   });
 
   it.each(GARBAGE)("returns [] rather than throwing on garbage input: %p", (garbage) => {
-    expect(() => mapGreenhouseJobs(garbage, board())).not.toThrow();
-    expect(mapGreenhouseJobs(garbage, board())).toEqual([]);
+    expect(() => adapter.listJobs(garbage, board())).not.toThrow();
+    expect(adapter.listJobs(garbage, board())).toEqual([]);
   });
 });
 
-describe("mapLeverPostings", () => {
+describe("leverAdapter", () => {
+  const adapter = leverAdapter;
   const wellFormed = [
     {
       id: "abc-123",
@@ -114,7 +112,7 @@ describe("mapLeverPostings", () => {
   ];
 
   it("maps a well-formed payload to the right fields — title lives at `text`", () => {
-    const [candidate] = mapLeverPostings(wellFormed, board({ ats: "lever" }));
+    const [candidate] = adapter.listJobs(wellFormed, board({ ats: "lever" }));
 
     expect(candidate).toBeDefined();
     expect(candidate!.externalId).toBe("abc-123");
@@ -124,17 +122,17 @@ describe("mapLeverPostings", () => {
   });
 
   it("carries a real description, unlike Greenhouse", () => {
-    const [candidate] = mapLeverPostings(wellFormed, board({ ats: "lever" }));
+    const [candidate] = adapter.listJobs(wellFormed, board({ ats: "lever" }));
     expect(candidate!.description).toBe("Full plain-text description.");
   });
 
   it("reads postedAt from createdAt (epoch milliseconds)", () => {
-    const [candidate] = mapLeverPostings(wellFormed, board({ ats: "lever" }));
+    const [candidate] = adapter.listJobs(wellFormed, board({ ats: "lever" }));
     expect(candidate!.postedAt?.getTime()).toBe(1_735_689_600_000);
   });
 
   it("falls back to applyUrl when hostedUrl is absent", () => {
-    const [candidate] = mapLeverPostings(
+    const [candidate] = adapter.listJobs(
       [{ ...wellFormed[0]!, hostedUrl: "" }],
       board({ ats: "lever" }),
     );
@@ -147,18 +145,19 @@ describe("mapLeverPostings", () => {
     const noTitle = [{ ...base, text: "" }];
     const noUrl = [{ ...base, hostedUrl: "", applyUrl: "" }];
 
-    expect(mapLeverPostings(noId, board({ ats: "lever" }))).toEqual([]);
-    expect(mapLeverPostings(noTitle, board({ ats: "lever" }))).toEqual([]);
-    expect(mapLeverPostings(noUrl, board({ ats: "lever" }))).toEqual([]);
+    expect(adapter.listJobs(noId, board({ ats: "lever" }))).toEqual([]);
+    expect(adapter.listJobs(noTitle, board({ ats: "lever" }))).toEqual([]);
+    expect(adapter.listJobs(noUrl, board({ ats: "lever" }))).toEqual([]);
   });
 
   it.each(GARBAGE)("returns [] rather than throwing on garbage input: %p", (garbage) => {
-    expect(() => mapLeverPostings(garbage, board({ ats: "lever" }))).not.toThrow();
-    expect(mapLeverPostings(garbage, board({ ats: "lever" }))).toEqual([]);
+    expect(() => adapter.listJobs(garbage, board({ ats: "lever" }))).not.toThrow();
+    expect(adapter.listJobs(garbage, board({ ats: "lever" }))).toEqual([]);
   });
 });
 
-describe("mapAshbyJobs", () => {
+describe("ashbyAdapter", () => {
+  const adapter = ashbyAdapter;
   const wellFormed = {
     jobs: [
       {
@@ -175,7 +174,7 @@ describe("mapAshbyJobs", () => {
   };
 
   it("maps a well-formed payload to the right fields", () => {
-    const [candidate] = mapAshbyJobs(wellFormed, board({ ats: "ashby" }));
+    const [candidate] = adapter.listJobs(wellFormed, board({ ats: "ashby" }));
 
     expect(candidate).toBeDefined();
     expect(candidate!.externalId).toBe("xyz-789");
@@ -186,12 +185,12 @@ describe("mapAshbyJobs", () => {
   });
 
   it("carries a real description, unlike Greenhouse", () => {
-    const [candidate] = mapAshbyJobs(wellFormed, board({ ats: "ashby" }));
+    const [candidate] = adapter.listJobs(wellFormed, board({ ats: "ashby" }));
     expect(candidate!.description).toBe("Full plain-text description.");
   });
 
   it("falls back to applyUrl when jobUrl is absent", () => {
-    const [candidate] = mapAshbyJobs(
+    const [candidate] = adapter.listJobs(
       { jobs: [{ ...wellFormed.jobs[0]!, jobUrl: "" }] },
       board({ ats: "ashby" }),
     );
@@ -200,13 +199,13 @@ describe("mapAshbyJobs", () => {
 
   it("excludes rows with isListed: false — unlisted drafts are not applyable", () => {
     const unlisted = { jobs: [{ ...wellFormed.jobs[0]!, isListed: false }] };
-    expect(mapAshbyJobs(unlisted, board({ ats: "ashby" }))).toEqual([]);
+    expect(adapter.listJobs(unlisted, board({ ats: "ashby" }))).toEqual([]);
   });
 
   it("keeps a row with isListed: true and one with isListed absent", () => {
     const noFlag = { jobs: [{ ...wellFormed.jobs[0]!, isListed: undefined }] };
-    expect(mapAshbyJobs(noFlag, board({ ats: "ashby" }))).toHaveLength(1);
-    expect(mapAshbyJobs(wellFormed, board({ ats: "ashby" }))).toHaveLength(1);
+    expect(adapter.listJobs(noFlag, board({ ats: "ashby" }))).toHaveLength(1);
+    expect(adapter.listJobs(wellFormed, board({ ats: "ashby" }))).toHaveLength(1);
   });
 
   it("skips a row missing an id, a title, or a URL", () => {
@@ -215,18 +214,19 @@ describe("mapAshbyJobs", () => {
     const noTitle = { jobs: [{ ...base, title: "" }] };
     const noUrl = { jobs: [{ ...base, jobUrl: "", applyUrl: "" }] };
 
-    expect(mapAshbyJobs(noId, board({ ats: "ashby" }))).toEqual([]);
-    expect(mapAshbyJobs(noTitle, board({ ats: "ashby" }))).toEqual([]);
-    expect(mapAshbyJobs(noUrl, board({ ats: "ashby" }))).toEqual([]);
+    expect(adapter.listJobs(noId, board({ ats: "ashby" }))).toEqual([]);
+    expect(adapter.listJobs(noTitle, board({ ats: "ashby" }))).toEqual([]);
+    expect(adapter.listJobs(noUrl, board({ ats: "ashby" }))).toEqual([]);
   });
 
   it.each(GARBAGE)("returns [] rather than throwing on garbage input: %p", (garbage) => {
-    expect(() => mapAshbyJobs(garbage, board({ ats: "ashby" }))).not.toThrow();
-    expect(mapAshbyJobs(garbage, board({ ats: "ashby" }))).toEqual([]);
+    expect(() => adapter.listJobs(garbage, board({ ats: "ashby" }))).not.toThrow();
+    expect(adapter.listJobs(garbage, board({ ats: "ashby" }))).toEqual([]);
   });
 });
 
-describe("mapRecruiteeOffers", () => {
+describe("recruiteeAdapter", () => {
+  const adapter = recruiteeAdapter;
   // Field names and shapes verified live against a real board 2026-08-20
   // (dalsem.recruitee.com) — not guessed from documentation.
   const wellFormed = {
@@ -246,7 +246,7 @@ describe("mapRecruiteeOffers", () => {
   };
 
   it("maps a well-formed payload to the right fields", () => {
-    const [candidate] = mapRecruiteeOffers(wellFormed, board({ ats: "recruitee" }));
+    const [candidate] = adapter.listJobs(wellFormed, board({ ats: "recruitee" }));
 
     expect(candidate).toBeDefined();
     expect(candidate!.externalId).toBe("2636955");
@@ -258,7 +258,7 @@ describe("mapRecruiteeOffers", () => {
   });
 
   it("concatenates description and requirements, HTML-decoded", () => {
-    const [candidate] = mapRecruiteeOffers(wellFormed, board({ ats: "recruitee" }));
+    const [candidate] = adapter.listJobs(wellFormed, board({ ats: "recruitee" }));
     // Tags become whitespace, not nothing — "We use C++." and "5 years" must
     // never glue to an adjacent word the way a naive strip would.
     expect(candidate!.description).toContain("We use C++.");
@@ -266,7 +266,7 @@ describe("mapRecruiteeOffers", () => {
   });
 
   it("falls back to careers_apply_url when careers_url is absent", () => {
-    const [candidate] = mapRecruiteeOffers(
+    const [candidate] = adapter.listJobs(
       { offers: [{ ...wellFormed.offers[0]!, careers_url: "" }] },
       board({ ats: "recruitee" }),
     );
@@ -275,12 +275,12 @@ describe("mapRecruiteeOffers", () => {
 
   it("excludes a row with a non-published status", () => {
     const draft = { offers: [{ ...wellFormed.offers[0]!, status: "draft" }] };
-    expect(mapRecruiteeOffers(draft, board({ ats: "recruitee" }))).toEqual([]);
+    expect(adapter.listJobs(draft, board({ ats: "recruitee" }))).toEqual([]);
   });
 
   it("keeps a row with status absent — the endpoint is public and unauthenticated", () => {
     const noStatus = { offers: [{ ...wellFormed.offers[0]!, status: undefined }] };
-    expect(mapRecruiteeOffers(noStatus, board({ ats: "recruitee" }))).toHaveLength(1);
+    expect(adapter.listJobs(noStatus, board({ ats: "recruitee" }))).toHaveLength(1);
   });
 
   it("skips a row missing an id, a title, or a URL", () => {
@@ -289,14 +289,14 @@ describe("mapRecruiteeOffers", () => {
     const noTitle = { offers: [{ ...base, title: "" }] };
     const noUrl = { offers: [{ ...base, careers_url: "", careers_apply_url: "" }] };
 
-    expect(mapRecruiteeOffers(noId, board({ ats: "recruitee" }))).toEqual([]);
-    expect(mapRecruiteeOffers(noTitle, board({ ats: "recruitee" }))).toEqual([]);
-    expect(mapRecruiteeOffers(noUrl, board({ ats: "recruitee" }))).toEqual([]);
+    expect(adapter.listJobs(noId, board({ ats: "recruitee" }))).toEqual([]);
+    expect(adapter.listJobs(noTitle, board({ ats: "recruitee" }))).toEqual([]);
+    expect(adapter.listJobs(noUrl, board({ ats: "recruitee" }))).toEqual([]);
   });
 
   it.each(GARBAGE)("returns [] rather than throwing on garbage input: %p", (garbage) => {
-    expect(() => mapRecruiteeOffers(garbage, board({ ats: "recruitee" }))).not.toThrow();
-    expect(mapRecruiteeOffers(garbage, board({ ats: "recruitee" }))).toEqual([]);
+    expect(() => adapter.listJobs(garbage, board({ ats: "recruitee" }))).not.toThrow();
+    expect(adapter.listJobs(garbage, board({ ats: "recruitee" }))).toEqual([]);
   });
 });
 

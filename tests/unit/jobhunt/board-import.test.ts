@@ -23,7 +23,7 @@ import {
 import type { FreeAts, FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
 const corpus = (rows: readonly [string, string][]): AtsCorpusRow[] =>
-  rows.map(([name, slug]) => ({ name, slug }));
+  rows.map(([name, slug]) => ({ name, slug, url: "" }));
 
 const board = (ats: FreeAts, token: string): FreeBoard => ({
   name: token,
@@ -91,14 +91,14 @@ describe("parseAtsCorpus", () => {
     ].join("\n");
 
     expect(parseAtsCorpus(csv)).toEqual([
-      { name: "Mollie", slug: "mollie" },
-      { name: "12Build", slug: "12build" },
+      { name: "Mollie", slug: "mollie", url: "https://jobs.ashbyhq.com/mollie" },
+      { name: "12Build", slug: "12build", url: "https://12build.recruitee.com" },
     ]);
   });
 
   it("honours quoted names containing commas", () => {
     const csv = ['name,slug,url', '"Plaid, B.V.",plaid,https://x'].join("\n");
-    expect(parseAtsCorpus(csv)).toEqual([{ name: "Plaid, B.V.", slug: "plaid" }]);
+    expect(parseAtsCorpus(csv)).toEqual([{ name: "Plaid, B.V.", slug: "plaid", url: "https://x" }]);
   });
 
   it("skips malformed rows instead of throwing", () => {
@@ -106,7 +106,7 @@ describe("parseAtsCorpus", () => {
     const csv = ["name,slug,url", ",noname,https://x", "No Slug,,https://y", "Ok,ok,https://z"].join(
       "\n",
     );
-    expect(parseAtsCorpus(csv)).toEqual([{ name: "Ok", slug: "ok" }]);
+    expect(parseAtsCorpus(csv)).toEqual([{ name: "Ok", slug: "ok", url: "https://z" }]);
   });
 });
 
@@ -185,6 +185,33 @@ describe("joinSponsorBoards", () => {
     const found = joinSponsorBoards(
       sponsors,
       new Map([["ashby", corpus([["Unrelated Startup", "unrelated"]])]]),
+      [],
+    );
+    expect(found).toEqual([]);
+  });
+
+  it("derives the Workday token from the URL, not the lossy slug", () => {
+    // The corpus's own `slug` column reads "mollie/mollie" and never says which
+    // Workday datacenter (wd1, wd3, wd5, wd12 …) the tenant lives on — only the
+    // URL does. See board-import.ts:tokenForCorpusRow.
+    const found = joinSponsorBoards(
+      sponsors,
+      new Map([
+        [
+          "workday",
+          [{ name: "Mollie", slug: "mollie/mollie", url: "https://mollie.wd3.myworkdayjobs.com/mollie" }],
+        ],
+      ]),
+      [],
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]?.token).toBe("mollie/wd3/mollie");
+  });
+
+  it("drops a Workday row whose URL will not parse, rather than writing a dead token", () => {
+    const found = joinSponsorBoards(
+      sponsors,
+      new Map([["workday", [{ name: "Mollie", slug: "mollie/mollie", url: "not-a-url" }]]]),
       [],
     );
     expect(found).toEqual([]);
