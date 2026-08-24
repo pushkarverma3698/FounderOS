@@ -247,7 +247,7 @@ async function keepUnseen(
  * for the same reason, just later" would be exactly the ambiguity this pipeline
  * has already lost weeks to, wearing a new label.
  */
-function applyDeferredFreshness(
+export function applyDeferredFreshness(
   hydrated: readonly FreeCandidate[],
   now: Date,
   maxAgeHours: number,

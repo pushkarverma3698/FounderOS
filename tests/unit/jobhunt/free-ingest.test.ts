@@ -11,11 +11,23 @@
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { filterCandidates, FREE_LANE_MAX_AGE_HOURS } from "../../../src/tools/jobhunt/free-ingest.js";
+import {
+  filterCandidates,
+  applyDeferredFreshness,
+  FREE_LANE_MAX_AGE_HOURS,
+} from "../../../src/tools/jobhunt/free-ingest.js";
 import type { FreeCandidate } from "../../../src/tools/jobhunt/free-ats-source.js";
 import type { FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
 const BOARD: FreeBoard = { name: "Acme B.V.", ats: "greenhouse", token: "acme", markets: ["NL"] };
+
+/** BambooHR is the only `dateOnlyInDetail` platform — see adapters/bamboohr.ts. */
+const DEFERRED_BOARD: FreeBoard = {
+  name: "Acme B.V.",
+  ats: "bamboohr",
+  token: "acme",
+  markets: ["NL"],
+};
 
 function candidate(overrides: Partial<FreeCandidate> = {}): FreeCandidate {
   return {
@@ -142,6 +154,107 @@ describe("filterCandidates — undated postings", () => {
     expect(undatedNote).toContain("1 postings");
     expect(staleNote).toContain("1 postings");
     expect(undatedNote).not.toBe(staleNote);
+  });
+});
+
+describe("filterCandidates — a platform whose date only exists on the detail payload", () => {
+  /**
+   * THE DEFECT THIS PREVENTS (2026-08-24). BambooHR's `/careers/list` carries no
+   * date field at all — the date lives only on `/careers/{id}/detail`. Because
+   * this filter runs BEFORE hydration, judging freshness here would count every
+   * BambooHR posting as `undated` and drop it, so 85 sponsor boards would be
+   * polled forever and yield nothing — and silently, because "no fresh roles"
+   * and "we discarded them all" print identically.
+   *
+   * Track and market are still judged here, where title and location ARE
+   * present, so the deferral costs no extra detail fetches on the ~87% that were
+   * going to be dropped anyway.
+   */
+  it("KEEPS an undated posting from a dateOnlyInDetail board instead of dropping it", () => {
+    const undatedBamboo = candidate({ board: DEFERRED_BOARD, postedAt: null });
+
+    const { kept, notes } = filterCandidates([undatedBamboo], NOW, 6);
+
+    expect(kept).toEqual([undatedBamboo]);
+    expect(notes).toEqual([]);
+  });
+
+  it("still drops it for track — deferral applies to the DATE only", () => {
+    const offTrack = candidate({
+      board: DEFERRED_BOARD,
+      postedAt: null,
+      title: "Warehouse Associate",
+    });
+
+    const { kept, notes } = filterCandidates([offTrack], NOW, 6);
+
+    expect(kept).toEqual([]);
+    expect(notes.some((n) => n.includes("not an engineering track"))).toBe(true);
+  });
+
+  it("still drops it for market — deferral applies to the DATE only", () => {
+    const offMarket = candidate({
+      board: DEFERRED_BOARD,
+      postedAt: null,
+      location: "Berlin, Germany",
+    });
+
+    expect(filterCandidates([offMarket], NOW, 6).kept).toEqual([]);
+  });
+
+  it("does NOT defer for an ordinary platform — greenhouse undated is still dropped here", () => {
+    const undatedGreenhouse = candidate({ board: BOARD, postedAt: null });
+
+    expect(filterCandidates([undatedGreenhouse], NOW, 6).kept).toEqual([]);
+  });
+});
+
+describe("applyDeferredFreshness — the second half of that deferral", () => {
+  it("drops a deferred posting that hydration revealed to be stale", () => {
+    const stale = candidate({
+      board: DEFERRED_BOARD,
+      postedAt: new Date("2026-08-06T00:00:00Z"), // 12h old against a 6h window
+    });
+
+    const { kept, stale: staleCount } = applyDeferredFreshness([stale], NOW, 6);
+
+    expect(kept).toEqual([]);
+    expect(staleCount).toBe(1);
+  });
+
+  it("keeps a deferred posting that hydration revealed to be fresh", () => {
+    const fresh = candidate({
+      board: DEFERRED_BOARD,
+      postedAt: new Date("2026-08-06T10:00:00Z"), // 2h old
+    });
+
+    const { kept, stale, undated } = applyDeferredFreshness([fresh], NOW, 6);
+
+    expect(kept).toEqual([fresh]);
+    expect(stale).toBe(0);
+    expect(undated).toBe(0);
+  });
+
+  it("drops a deferred posting still undated after hydration — never assumes fresh", () => {
+    const stillUndated = candidate({ board: DEFERRED_BOARD, postedAt: null });
+
+    const { kept, undated } = applyDeferredFreshness([stillUndated], NOW, 6);
+
+    expect(kept).toEqual([]);
+    expect(undated).toBe(1);
+  });
+
+  it("passes an ordinary platform's postings through untouched, whatever their date", () => {
+    // Their freshness was already settled by filterCandidates; re-judging here
+    // would double-count them in the funnel.
+    const ordinaryStale = candidate({ board: BOARD, postedAt: new Date("2020-01-01T00:00:00Z") });
+    const ordinaryUndated = candidate({ board: BOARD, postedAt: null, url: "u2" });
+
+    const { kept, stale, undated } = applyDeferredFreshness([ordinaryStale, ordinaryUndated], NOW, 6);
+
+    expect(kept).toEqual([ordinaryStale, ordinaryUndated]);
+    expect(stale).toBe(0);
+    expect(undated).toBe(0);
   });
 });
 
