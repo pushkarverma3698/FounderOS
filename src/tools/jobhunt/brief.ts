@@ -170,10 +170,17 @@ function renderNextActions(
     );
   }
 
+  const applyInstructions = (
+    `\n\n<b>🚀 HOW TO APPLY (2 WAYS)</b>\n` +
+    `<b>1. The Fast Way:</b> Type ${cmd(`/draft all`)} to auto-tailor CVs for all jobs above. Once drafted, open your terminal and run <code>cd mac-client && .venv/bin/python -m mac_client.apply</code> to blast through the queue with your tailored PDFs.\n` +
+    `<b>2. The Manual Way:</b> Type ${cmd(`/draft <number>`)} (e.g. ${cmd(`/draft 1`)}) to get the tailored PDF and a direct application link. Apply in your browser, then type ${cmd(`/applied 1`)} to clear it from the queue.`
+  );
+
   return (
     `<b>▶️ DO THIS NEXT</b>\n` +
     lines.join("\n") +
-    `\n<i>Or just ask — “show me the job brief”, “what gaps are in my CV?”</i>`
+    applyInstructions +
+    `\n\n<i>Or just ask — “show me the job brief”, “what gaps are in my CV?”</i>`
   );
 }
 

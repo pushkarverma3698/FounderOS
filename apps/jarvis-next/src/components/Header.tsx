@@ -56,90 +56,94 @@ export function Header({
     : degraded
     ? 'DEGRADED'
     : 'NOMINAL';
-  const statusTone = offline || degraded ? 'text-signal' : connecting ? 'text-chrome/50' : 'text-accent';
+  const statusTone = offline || degraded ? 'text-signal drop-shadow-[0_0_8px_rgba(255,176,32,0.8)]' : connecting ? 'text-white/50' : 'text-accent drop-shadow-[0_0_8px_rgba(0,229,255,0.8)]';
 
   return (
-    <header className="h-14 shrink-0 border-b border-accent/12 bg-void/80 backdrop-blur-xl px-4 flex items-center justify-between z-50 relative">
+    <header className="h-16 mx-4 mt-4 shrink-0 border border-white/5 bg-black/40 rounded-2xl backdrop-blur-xl px-6 flex items-center justify-between z-50 relative shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
       {/* Identity */}
-      <div className="flex items-center gap-3">
-        <span className="grid place-items-center w-8 h-8 border border-accent/40 bg-accent/8">
-          <span className="w-2 h-2 bg-accent animate-breathe" style={{ boxShadow: '0 0 12px var(--accent)' }} />
+      <div className="flex items-center gap-4">
+        <span className="grid place-items-center w-10 h-10 rounded-xl border border-accent/20 bg-accent/10 shadow-[inset_0_0_15px_rgba(0,229,255,0.1)]">
+          <span className="w-2.5 h-2.5 rounded-full bg-accent animate-breathe shadow-[0_0_12px_rgba(0,229,255,0.8)]" />
         </span>
-        <span className="flex flex-col leading-none">
-          <span className="value-heavy text-[15px] tracking-[0.26em] text-chrome">FOUNDEROS</span>
-          <span className="label-micro mt-1">headless kernel · 1 supervisor · 7 react depts</span>
+        <span className="flex flex-col justify-center">
+          <span className="font-sans font-bold text-[18px] tracking-[0.2em] text-white">FOUNDEROS</span>
+          <span className="font-mono text-[9px] text-white/50 uppercase tracking-widest mt-0.5">headless kernel · 1 supervisor · 7 react depts</span>
         </span>
       </div>
 
       {/* Telemetry strip */}
-      <div className="hidden lg:flex items-center gap-6 font-mono text-[10px]">
+      <div className="hidden lg:flex items-center gap-8 font-mono text-[11px] bg-black/30 px-6 py-2 rounded-full border border-white/5">
         <span className="flex items-center gap-2">
-          <span className="label-micro">kernel</span>
-          <span className={`${statusTone} font-medium`}>{statusLabel}</span>
+          <span className="text-white/40">kernel</span>
+          <span className={`${statusTone} font-bold tracking-wide`}>{statusLabel}</span>
         </span>
+        <span className="w-px h-3 bg-white/10" />
         <span className="flex items-center gap-2">
-          <span className="label-micro">db</span>
-          <span className={offline || connecting ? 'text-chrome/30 font-light' : 'text-chrome/75 font-light'}>
+          <span className="text-white/40">db</span>
+          <span className={`${offline || connecting ? 'text-white/30' : 'text-white/80'} font-medium tracking-wide`}>
             {dbStatus.toUpperCase()}
           </span>
         </span>
+        <span className="w-px h-3 bg-white/10" />
         <span className="flex items-center gap-2">
-          <span className="label-micro">utc</span>
-          <span className="text-chrome/75 font-light tabular-nums tracking-widest">{clock}</span>
+          <span className="text-white/40">utc</span>
+          <span className="text-white/80 font-medium tabular-nums tracking-widest">{clock}</span>
         </span>
       </div>
 
       {/* Controls */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         <button
           onClick={() => {
             soundEngine.click();
             voiceEngine.listen((t) => onVoiceInput?.(t));
           }}
           title="Speak to Jarvis"
-          className={`flex items-center gap-1.5 px-3 py-1.5 border font-mono text-[10px] font-medium tracking-[0.16em] transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-sans text-[11px] font-bold tracking-[0.1em] transition-all shadow-lg ${
             listening
-              ? 'bg-signal text-void border-signal'
-              : 'border-accent/35 text-accent hover:bg-accent/10'
+              ? 'bg-signal text-black border border-signal shadow-[0_0_15px_rgba(255,176,32,0.4)]'
+              : 'border border-accent/30 text-accent hover:bg-accent/10 hover:border-accent/60'
           }`}
         >
-          <Mic className="w-3 h-3" />
+          <Mic className="w-3.5 h-3.5" />
           {listening ? 'LISTENING' : 'VOICE'}
         </button>
 
-        <button
-          onClick={() => {
-            const next = !soundMuted;
-            setSoundMuted(next);
-            soundEngine.setMuted(next);
-            if (!next) soundEngine.click();
-          }}
-          title={soundMuted ? 'Unmute effects' : 'Mute effects'}
-          className={`p-1.5 border transition-colors ${
-            soundMuted
-              ? 'border-accent/12 text-chrome/25 hover:text-chrome/60'
-              : 'border-accent/35 text-accent'
-          }`}
-        >
-          {soundMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-        </button>
+        <div className="flex bg-black/40 p-1 rounded-lg border border-white/5 gap-1">
+          <button
+            onClick={() => {
+              const next = !soundMuted;
+              setSoundMuted(next);
+              soundEngine.setMuted(next);
+              if (!next) soundEngine.click();
+            }}
+            title={soundMuted ? 'Unmute effects' : 'Mute effects'}
+            className={`p-2 rounded-md transition-all ${
+              soundMuted
+                ? 'text-white/30 hover:text-white/60 hover:bg-white/5'
+                : 'text-accent bg-accent/10 shadow-[0_0_10px_rgba(0,229,255,0.2)]'
+            }`}
+          >
+            {soundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
 
-        <button
-          onClick={() => {
-            const next = !voiceMuted;
-            setVoiceMuted(next);
-            voiceEngine.setMuted(next);
-            if (!next) voiceEngine.speak('Voice telemetry enabled.');
-          }}
-          title={voiceMuted ? 'Enable voice feedback' : 'Disable voice feedback'}
-          className={`p-1.5 border transition-colors ${
-            voiceMuted
-              ? 'border-accent/12 text-chrome/25 hover:text-chrome/60'
-              : 'border-accent/35 text-accent'
-          }`}
-        >
-          {voiceMuted ? <MicOff className="w-3.5 h-3.5" /> : <Radio className="w-3.5 h-3.5" />}
-        </button>
+          <button
+            onClick={() => {
+              const next = !voiceMuted;
+              setVoiceMuted(next);
+              voiceEngine.setMuted(next);
+              if (!next) voiceEngine.speak('Voice telemetry enabled.');
+            }}
+            title={voiceMuted ? 'Enable voice feedback' : 'Disable voice feedback'}
+            className={`p-2 rounded-md transition-all ${
+              voiceMuted
+                ? 'text-white/30 hover:text-white/60 hover:bg-white/5'
+                : 'text-accent bg-accent/10 shadow-[0_0_10px_rgba(0,229,255,0.2)]'
+            }`}
+          >
+            {voiceMuted ? <MicOff className="w-4 h-4" /> : <Radio className="w-4 h-4" />}
+          </button>
+        </div>
 
         <select
           value={voiceEngine.getPersona()}
@@ -150,10 +154,10 @@ export function Header({
             voiceEngine.speak(`Persona switched to ${persona}.`);
           }}
           title="Voice persona"
-          className="bg-panel border border-accent/25 text-accent font-mono text-[10px] font-light tracking-wider px-2 py-1.5 outline-none hover:border-accent/60 cursor-pointer"
+          className="bg-black/40 border border-white/5 rounded-lg text-accent font-sans text-[11px] font-semibold tracking-wider px-3 py-2 outline-none hover:border-accent/40 cursor-pointer transition-colors"
         >
           {PERSONAS.map((p) => (
-            <option key={p.id} value={p.id} className="bg-panel">
+            <option key={p.id} value={p.id} className="bg-[#111] text-white">
               {p.label}
             </option>
           ))}
@@ -161,14 +165,14 @@ export function Header({
 
         <button
           onClick={onToggleMode}
-          className={`flex items-center gap-1.5 px-3 py-1.5 font-mono text-[10px] font-bold tracking-[0.16em] border transition-all ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg font-sans text-[11px] font-bold tracking-[0.15em] border transition-all ${
             mode === 'LIVE'
-              ? 'bg-accent text-void border-accent'
-              : 'border-signal/50 text-signal hover:bg-signal/10'
+              ? 'bg-accent/20 text-accent border-accent/40 shadow-[0_0_15px_rgba(0,229,255,0.2)]'
+              : 'border-signal/40 text-signal bg-signal/10 hover:bg-signal/20'
           }`}
         >
           <span
-            className={`w-1.5 h-1.5 rounded-full ${mode === 'LIVE' ? 'bg-void animate-breathe' : 'bg-signal'}`}
+            className={`w-2 h-2 rounded-full ${mode === 'LIVE' ? 'bg-accent animate-breathe shadow-[0_0_8px_rgba(0,229,255,0.8)]' : 'bg-signal shadow-[0_0_8px_rgba(255,176,32,0.8)]'}`}
           />
           {mode === 'LIVE' ? 'LIVE' : 'REPLAY'}
         </button>

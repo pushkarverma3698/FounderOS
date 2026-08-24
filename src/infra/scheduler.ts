@@ -266,6 +266,26 @@ export async function recoverStrandedReminders(): Promise<void> {
   }
 }
 
+/** Daily 2am — Sweep funding news and grow the free-lane board registry (zero-LLM). */
+export async function runFundingGrowerSweep(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    log.info("Starting funding registry grower sweep");
+    const child = spawn("node", ["--import", "tsx/esm", "scripts/jobhunt-funding-grow.ts"], { stdio: "ignore", detached: false });
+    child.on("exit", (code) => {
+      if (code === 0) {
+        log.info("Funding registry grower sweep completed");
+      } else {
+        log.error({ code }, "Funding registry grower sweep failed");
+      }
+      resolve();
+    });
+    child.on("error", (err) => {
+      log.error({ err: err.message }, "Funding registry grower spawn error");
+      resolve();
+    });
+  });
+}
+
 
 
 export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }): void {
@@ -287,6 +307,9 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
   cron.schedule("0 2 * * *", () => {
     runBrainSync().catch((err) => log.error({ err: (err as Error).message }, "Auto brain sync cron error"));
   });
+  cron.schedule("0 2 * * *", () => {
+    runFundingGrowerSweep().catch((err) => log.error({ err: (err as Error).message }, "Funding registry grower cron error"));
+  });
   cron.schedule(FREE_SWEEP_CRON, () => {
     runFreeSweep().catch((err) =>
       log.error({ err: (err as Error).message }, "Free board sweep cron error"),
@@ -302,6 +325,12 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
       log.error({ err: (err as Error).message }, "Reminder sweep cron error"),
     );
   });
+  cron.schedule("0 10 1 * *", () => {
+    sendToChat(
+      "⏰ <b>Monthly Reminder:</b> Time to refresh the ATS sponsor boards registry! Run <code>pnpm jobhunt:import-boards</code> on your laptop to discover and register new companies.",
+      "HTML",
+    ).catch((err) => log.error({ err: (err as Error).message }, "Monthly import-boards reminder failed"));
+  });
   const taskExecutor = opts?.taskExecutor;
   if (taskExecutor) {
     cron.schedule("* * * * *", () => {
@@ -311,7 +340,7 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
     });
   }
   log.info(
-    "Scheduler started — stale-approval check (daily 9am), budget alerts (hourly), brain sync (daily 2am), free board sweep (every 30 minutes), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute)" +
+    "Scheduler started — stale-approval check (daily 9am), budget alerts (hourly), brain sync (daily 2am), free board sweep (every 30 minutes), checkpoint sweep (daily 3:30am), scheduled-post + reminder sweeps (every minute), import-boards reminder (monthly)" +
       (taskExecutor ? ", scheduled-task sweep (every minute)" : ""),
   );
 }
