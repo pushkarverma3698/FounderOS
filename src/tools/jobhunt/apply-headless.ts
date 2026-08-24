@@ -82,6 +82,7 @@ async function runFillPass(
   try {
     const fields = await scrapeFormFields(session.page);
     if (fields.length === 0) {
+      log.warn({ url, ats }, "Scraped zero fillable fields");
       await session.close();
       return { ok: false, reason: "no fillable fields found on the page — the form may need a click to reveal it, or the page did not load", ats };
     }

@@ -265,6 +265,20 @@ export interface DriverSession {
  * `{width:440, height:48}` only after clicking that second button.
  */
 async function revealFormIfNeeded(page: Page, ats: SupportedAts): Promise<void> {
+  if (ats === "ashby") {
+    // `domcontentloaded` on the `/application` URL fires before Ashby's React
+    // app hydrates the form — same race Recruitee hits below. Wait for a
+    // system field id that is part of Ashby's own platform template (present
+    // on every Ashby application form), not this posting's custom questions.
+    await page
+      .locator('[id="_systemfield_name"]')
+      .first()
+      .waitFor({ state: "visible", timeout: 8_000 })
+      // allow-failopen: if the field never appears, scrapeFormFields still runs and honestly reports zero/partial fields rather than hanging.
+      .catch(() => undefined);
+    return;
+  }
+
   if (ats !== "recruitee") return;
 
   // `domcontentloaded` (the navigation's own waitUntil) fires before
@@ -276,8 +290,9 @@ async function revealFormIfNeeded(page: Page, ats: SupportedAts): Promise<void> 
   // text landed on a dead handler under `domcontentloaded` and worked
   // reliably once `networkidle` was reached first. Scoped to this function
   // rather than the page's own navigation `waitUntil`, so Greenhouse/Lever/
-  // Ashby/Workable — which land on a working form directly — are not slowed
-  // down waiting for network idle they do not need.
+  // Workable — which land on a working form directly — are not slowed down
+  // waiting for network idle they do not need. Ashby gets its own branch
+  // above (a URL-based reveal, not a click — see `ashbyApplicationUrl`).
   // allow-failopen: a page with a persistent poll/websocket may never go idle; the click attempt below still runs regardless.
   await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => undefined);
 
@@ -312,11 +327,34 @@ async function revealFormIfNeeded(page: Page, ats: SupportedAts): Promise<void> 
     .catch(() => undefined);
 }
 
+/**
+ * Ashby's posting URL renders an overview page with NO application fields —
+ * the form lives on a separate `/application` route (a distinct tab href,
+ * not a same-page reveal). Found live, 2026-08-24: `/apply 1` against a real
+ * Altura posting scraped 0 fields on the base URL; navigating straight to
+ * `<url>/application` found the genuine 46-field form (`_systemfield_name`,
+ * `_systemfield_resume`, EEO groups). This is Ashby's own platform template,
+ * not specific to this posting.
+ */
+function ashbyApplicationUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (!u.pathname.endsWith("/application")) {
+      u.pathname = `${u.pathname.replace(/\/$/, "")}/application`;
+    }
+    return u.toString();
+  } catch {
+    // allow-failopen: an unparseable URL falls through unchanged — scrapeFormFields still reports honestly (zero fields) rather than throwing here.
+    return url;
+  }
+}
+
 /** Open a fresh browser + page at `url`, on platform `ats`. Caller MUST call `close()`. */
 export async function openApplyPage(url: string, ats: SupportedAts): Promise<DriverSession> {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 1600 } });
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  const target = ats === "ashby" ? ashbyApplicationUrl(url) : url;
+  await page.goto(target, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await revealFormIfNeeded(page, ats);
   return {
     page,
