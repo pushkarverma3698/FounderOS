@@ -75,11 +75,15 @@ function stretchRow(id: string, country: BriefRow["country"] = "NL"): BriefRow {
 }
 
 describe("the freshness window bounds relevance, not reach", () => {
-  it("defaults to 7 days, not 1", () => {
-    // 24h left 461 of 464 screened rows outside every command. 168 is the
-    // founder's call, 2026-08-24: fresh rows still sort first, and nothing
-    // screened is invisible.
-    expect(APPLY_QUEUE_MAX_AGE_HOURS).toBe(168);
+  it("stays at 24 hours — the free lane's whole reason to exist", () => {
+    // Briefly raised to 168 (seven days) on 2026-08-24 to work around a
+    // SEPARATE bug (persistBriefRanks pinning ranks over the capped display —
+    // see the ordering tests below, which is the actual fix that stuck) and
+    // reverted the same day on founder direction: a six-day-old posting
+    // already has hundreds of applicants, and encouraging /draft on it works
+    // against the only reason this lane polls every 30 minutes. "We need to
+    // apply the fresh postings everyday."
+    expect(APPLY_QUEUE_MAX_AGE_HOURS).toBe(24);
   });
 });
 

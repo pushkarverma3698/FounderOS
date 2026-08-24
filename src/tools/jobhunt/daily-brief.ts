@@ -64,14 +64,15 @@ export { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
  * `verificationTargets` below already spends every PASS before any FLAG, so
  * the extra headroom goes to flags once every pass is covered.
  *
- * RAISED AGAIN, 25 → 60, ON 2026-08-24, in the same change that widened
- * `APPLY_QUEUE_MAX_AGE_HOURS` from 24 to 168. Those two numbers are coupled and
- * the coupling is easy to miss: `isDoTodayRow` admits only `pass && live`, so
- * whichever of them is smaller is the real size of APPLY TODAY. Widening the
- * window to ~73 actionable rows while leaving the budget at 25 would have moved
- * the ceiling from the window to here and looked, from Telegram, exactly like
- * the market being thin — which is the reading this pipeline has already lost
- * weeks to.
+ * RAISED AGAIN, 25 → 60, ON 2026-08-24. `APPLY_QUEUE_MAX_AGE_HOURS` moved to
+ * 168 and back to 24 the same day (see its own comment in job-queries.ts); this
+ * budget did not move back with it, because the two are coupled in only ONE
+ * direction: `isDoTodayRow` admits only `pass && live`, so whichever of the
+ * window's pool and this budget is smaller is the real size of APPLY TODAY. A
+ * budget bigger than the pool costs nothing — it simply checks everything the
+ * window returns. Measured immediately after the board registry grew 923 →
+ * 1,297 (#559), 24h alone held 37 actionable rows, comfortably inside 60; the
+ * headroom is there for whatever a bigger sweep finds tomorrow.
  *
  * `URL_CHECK_CONCURRENCY` stays at 6. Raising it would shorten the worst case,
  * but its 6 is not arbitrary — liveness.ts argues it from same-host bursts,
