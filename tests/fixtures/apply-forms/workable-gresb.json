@@ -1,0 +1,29 @@
+{
+  "_captured": "2026-08-24, live: https://apply.workable.com/gresb/j/A5B057E570/apply/",
+  "ats": "workable",
+  "fields": [
+    { "selector": "#firstname", "type": "text", "label": "First name", "required": true },
+    { "selector": "#lastname", "type": "text", "label": "Last name", "required": true },
+    { "selector": "#email", "type": "email", "label": "Email", "required": true },
+    { "selector": "input[name=\"phone\"]", "type": "tel", "label": "Phone", "required": false },
+    { "selector": "textarea[name=\"summary\"]", "type": "textarea", "label": "Summary", "required": false },
+    { "selector": "input[name=\"resume\"]", "type": "file", "label": "Resume", "required": true },
+    { "selector": "textarea[name=\"cover_letter\"]", "type": "textarea", "label": "Cover letter", "required": true },
+    {
+      "selector": "input[name=\"QA_12298266\"]",
+      "type": "radio-group",
+      "label": "Are you currently based in / willing to commute daily to Amsterdam, without relocation support?",
+      "required": true,
+      "options": ["YES", "NO"]
+    },
+    {
+      "selector": "input[name=\"QA_12298267\"]",
+      "type": "radio-group",
+      "label": "Do you currently have the right to work in the Netherlands?",
+      "required": true,
+      "options": ["YES", "NO"],
+      "isEligibility": true
+    },
+    { "selector": "input[name=\"gdpr\"]", "type": "checkbox", "label": "", "required": false, "isConsent": true }
+  ]
+}

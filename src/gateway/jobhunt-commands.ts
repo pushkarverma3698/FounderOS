@@ -98,6 +98,7 @@ export function parseDraftArg(raw: string): { rows: number[]; all: boolean } | n
  */
 const COMMAND_SECTIONS: Readonly<Record<string, string>> = {
   draft: "DO TODAY / A STRETCH WORTH APPLYING TO",
+  apply: "DO TODAY / A STRETCH WORTH APPLYING TO",
   applied: "DO TODAY / A STRETCH WORTH APPLYING TO",
   ask: "ONE QUESTION AWAY",
 };

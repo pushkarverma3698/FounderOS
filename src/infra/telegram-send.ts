@@ -78,3 +78,23 @@ export async function sendDocument(
   });
   log.info({ chatId, filename }, "Document sent to Telegram");
 }
+
+/**
+ * Send an in-memory image as a Telegram photo.
+ *
+ * Takes a Buffer, not a path — `apply_headless`'s screenshot never touches
+ * disk, so there is nothing to path-guard and nothing to clean up after. Used
+ * for the filled-form preview: informational, like `sendDocument`, not gated
+ * behind HITL — showing the founder what a form looks like is not an external
+ * action on his behalf, only telling him about a submit click is.
+ */
+export async function sendPhoto(
+  png: Buffer,
+  opts: { chatId?: string | number; caption?: string; filename?: string } = {},
+): Promise<void> {
+  const chatId = opts.chatId ?? defaultChatId();
+  await api().sendPhoto(chatId, new InputFile(png, opts.filename ?? "form-preview.png"), {
+    ...(opts.caption ? { caption: opts.caption } : {}),
+  });
+  log.info({ chatId, bytes: png.length }, "Photo sent to Telegram");
+}

@@ -1,0 +1,12 @@
+{
+  "_captured": "NOT live-captured. Reconstructed from mac-client/mac_client/adapters.py's LEVER field map (mac-client's own live-verified selectors, in production use since 2026-08-06). Lever's standard form is well-documented and consistent across customers, unlike Ashby/Workable which vary per-account.",
+  "ats": "lever",
+  "fields": [
+    { "selector": "input[name=\"name\"], #name", "type": "text", "label": "Full Name", "required": true },
+    { "selector": "input[name=\"email\"], #email", "type": "email", "label": "Email", "required": true },
+    { "selector": "input[name=\"phone\"], #phone", "type": "tel", "label": "Phone", "required": false },
+    { "selector": "input[name=\"resume\"]", "type": "file", "label": "Resume/CV", "required": true },
+    { "selector": "input[name=\"urls[LinkedIn]\"]", "type": "text", "label": "LinkedIn", "required": false },
+    { "selector": "input[name=\"urls[Portfolio]\"]", "type": "text", "label": "Portfolio", "required": false }
+  ]
+}

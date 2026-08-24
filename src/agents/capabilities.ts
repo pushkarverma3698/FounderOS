@@ -43,6 +43,7 @@ import {
   cvGaps,
   jobBrief,
   tailorCvForRow,
+  submitApplication,
   projectWorkflow,
   claudeCode,
   applyCinematicPreset,
@@ -110,7 +111,7 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
   sales: [searchWeb, createSendEmailTool("sales"), searchKnowledge],
   personal: [readFile, listDir, runShell, browser, searchPersonalRag, sendFile, writeFile],
-  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobState, tailorCvForRow, writeArtifact, deliverArtifact, jobBrief, createSendEmailTool("jobhunt")],
+  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobState, tailorCvForRow, writeArtifact, deliverArtifact, jobBrief, submitApplication, createSendEmailTool("jobhunt")],
 };
 
 /** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops). */
@@ -153,6 +154,7 @@ export const HITL_GATED_TOOLS = new Set([
   "create_calendar_event",
   "record_event",
   "deliver_artifact",
+  "submit_application",
   "synthesize_skill",
   "write_file",
   "send_file",

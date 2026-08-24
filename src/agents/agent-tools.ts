@@ -43,6 +43,7 @@ export { githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPre
 export { vpsRun } from "./agent-tools/vps-run.js";
 export { readFile, listDir, sendFile, writeFile, runShell, browser } from "./agent-tools/personal.js";
 export { readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobBrief, tailorCvForRow } from "./agent-tools/jobhunt.js";
+export { submitApplication } from "./agent-tools/jobhunt-apply.js";
 export { recordEvent } from "./agent-tools/memory.js";
 export { searchPersonalRag, searchTuricksBrain, searchResearchCache } from "./agent-tools/rag.js";
 export { publishSignal, prepareSignal, DEFAULT_TARGET_DEPT } from "./agent-tools/signals.js";
