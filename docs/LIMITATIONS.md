@@ -16,16 +16,20 @@
 > Severity: **HIGH** (fix before scaling) · **MEDIUM** (address
 > opportunistically) · **LOW** (note, no urgency).
 
-## Measured state (2026-08-19, counted not remembered)
+## Measured state (2026-08-22, counted not remembered)
 
-| Measure | Value |
-|---|---|
-| Source files / LOC | 293 files · 49,747 LOC |
-| Test suite | 286 files · **3,036 tests**, offline, $0 |
-| Behavioural golden tasks | 46 (`src/eval/golden-tasks.ts`) |
-| DB tables | 24 (`src/db/schema.ts`) |
-| Side-effecting tool modules / HITL-gated | 20 / **9** |
-| Architecture ratchet | gateway-imports 0 · kernel-purity 0 · regex-routing 0 · orphan-subsystem 0 · fail-open-catch 11 · loc-budget 6 |
+| Measure | Value | Δ since 2026-08-19 |
+|---|---|---|
+| Source files / LOC | 316 files · 55,510 LOC | +23 files · +5,763 |
+| Test suite | 321 files · **3,499 tests**, offline, $0 | +463 tests |
+| Behavioural golden tasks | 46 (`src/eval/golden-tasks.ts`) | — |
+| DB tables | 29 (`src/db/schema.ts`) | +5 |
+| Side-effecting tool modules / HITL-gated | 20 / **9** | — |
+| Free ATS boards polled | 923 across 7 platforms | +65 (Personio) |
+| Architecture ratchet | gateway-imports 0 · kernel-purity 0 · regex-routing 0 · orphan-subsystem 0 · fail-open-catch 11 · loc-budget 6 | unchanged |
+
+Counts are from `git ls-files`, a full `vitest run` and `verify-architecture.ts` in
+one session on 2026-08-22, not from the previous revision plus arithmetic.
 
 ## Review verdict
 

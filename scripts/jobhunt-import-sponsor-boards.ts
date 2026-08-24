@@ -63,9 +63,9 @@ const CORPUS_BASE =
  * produce the same number of candidates at the far end, and that ambiguity is the
  * exact failure `MIN_EXPECTED_BOARDS` already guards against on our own registry.
  * Set at roughly 70% of the row counts observed on 2026-08-20 (greenhouse 6,032 ·
- * lever 2,403 · ashby 3,449 · recruitee 1,165) and 2026-08-21 (smartrecruiters
- * 2,747 · workable 4,268), so ordinary upstream churn passes and a fetch that
- * silently returned a fragment does not.
+ * lever 2,403 · ashby 3,449 · recruitee 1,165), 2026-08-21 (smartrecruiters
+ * 2,747 · workable 4,268) and 2026-08-22 (personio 2,463), so ordinary upstream
+ * churn passes and a fetch that silently returned a fragment does not.
  */
 const CORPUS_FLOORS: Readonly<Record<FreeAts, number>> = {
   greenhouse: 4000,
@@ -74,6 +74,7 @@ const CORPUS_FLOORS: Readonly<Record<FreeAts, number>> = {
   recruitee: 800,
   smartrecruiters: 1900,
   workable: 2900,
+  personio: 1700,
 };
 
 const FETCH_TIMEOUT_MS = 30_000;

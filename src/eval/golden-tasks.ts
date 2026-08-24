@@ -1,12 +1,20 @@
 /**
  * FounderOS — Golden Eval Tasks
  * ==============================
- * A fixed, representative set of inputs covering all six departments and the
- * HITL gate. This is the regression baseline: `pnpm eval` runs each through the
- * live office and scores routing, tool selection, and approval-gate coverage.
+ * A fixed, representative set of inputs covering every worker route and the HITL
+ * gate. This is the behavioural regression baseline: `pnpm eval` runs each one
+ * through the live kernel and scores routing, tool selection and approval-gate
+ * coverage.
  *
  * Expectations are conservative — set only where we are confident — so a failure
  * is a real signal, not a flaky over-specification. Add cases as behaviour grows.
+ *
+ * "the live office" and "six departments" until 2026-08-22: v2 vocabulary for a
+ * graph tombstoned on 2026-07-08, flagged in LIMITATIONS.md and corrected here.
+ * The routes are the kernel's worker routes; `Department` and `WORKERS` listing
+ * the same strings is a coincidence of naming, not a surviving subsystem.
+ *
+ * Provenance and what each dimension is for: docs/EVAL.md.
  */
 
 import type { GoldenTask } from "./types.js";

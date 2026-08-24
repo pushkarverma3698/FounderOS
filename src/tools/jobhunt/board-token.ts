@@ -63,6 +63,15 @@ const PATTERNS: readonly TokenPattern[] = [
   // capture group takes the literal "j" and registers a board called `j` that
   // polls nothing forever.
   { ats: "workable", re: /^https?:\/\/apply\.workable\.com\/([^/?#]+)\/j\//i },
+  // Both hosts, because Personio serves the same board from `.com` and `.de` and
+  // a sponsor's posting can reach us as either. The token is the SUBDOMAIN, like
+  // Recruitee — and `jobs` is excluded so the bare `jobs.personio.com` marketing
+  // host cannot register a board called `jobs` that polls nothing forever, the
+  // same defect the Workable `/j/` segment exists to prevent.
+  {
+    ats: "personio",
+    re: /^https?:\/\/(?!jobs\.)([a-z0-9-]+)\.jobs\.personio\.(?:com|de)(?:\/|$|\?)/i,
+  },
 ];
 
 /**

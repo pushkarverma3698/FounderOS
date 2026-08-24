@@ -14,7 +14,7 @@ vi.stubGlobal("fetch", mockFetch);
 
 const {
   boardUrl,
-  greenhouseJobUrl,
+  jobBodyUrl,
   fetchBoard,
   sweepBoards,
   decodeJobBody,
@@ -79,15 +79,15 @@ describe("boardUrl", () => {
   });
 });
 
-describe("greenhouseJobUrl", () => {
+describe("jobBodyUrl (greenhouse)", () => {
   it("builds the per-posting URL correctly", () => {
-    expect(greenhouseJobUrl(board({ ats: "greenhouse", token: "acme" }), "12345")).toBe(
+    expect(jobBodyUrl(board({ ats: "greenhouse", token: "acme" }), "12345")).toBe(
       "https://boards-api.greenhouse.io/v1/boards/acme/jobs/12345",
     );
   });
 
   it("URL-encodes both the token and the externalId", () => {
-    expect(greenhouseJobUrl(board({ ats: "greenhouse", token: "foo/bar" }), "12 34")).toBe(
+    expect(jobBodyUrl(board({ ats: "greenhouse", token: "foo/bar" }), "12 34")).toBe(
       "https://boards-api.greenhouse.io/v1/boards/foo%2Fbar/jobs/12%2034",
     );
   });
