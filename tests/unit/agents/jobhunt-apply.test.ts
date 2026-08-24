@@ -48,6 +48,11 @@ vi.mock("../../../src/tools/jobhunt/apply-profile.js", () => ({
   readApplyProfile: vi.fn().mockResolvedValue({ ok: true, profile: { first_name: "Test" } }),
 }));
 
+const mockDownloadFile = vi.fn();
+vi.mock("../../../src/infra/storage/s3-client.js", () => ({
+  downloadFile: (...args: unknown[]) => mockDownloadFile(...args),
+}));
+
 const previewResult = {
   ok: true as const,
   ats: "greenhouse" as const,
@@ -71,6 +76,7 @@ describe("submit_application — click ordering around the HITL gate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetApplicationById.mockResolvedValue(ROW);
+    mockDownloadFile.mockResolvedValue(Buffer.from("fake-pdf-bytes"));
     mockPreviewApplyFlow.mockResolvedValue(previewResult);
     mockSubmitApplyFlow.mockResolvedValue({
       ok: true,
@@ -159,5 +165,65 @@ describe("submit_application — click ordering around the HITL gate", () => {
     expect(mockPreviewApplyFlow).not.toHaveBeenCalled();
     expect(mockSubmitApplyFlow).not.toHaveBeenCalled();
     expect(String(result)).toContain("already marked applied");
+  });
+});
+
+describe("submit_application — resume attachment", () => {
+  // Found live, 2026-08-24: both fill passes ran with an empty RowFacts
+  // ({}), so the resume field always fell to "ask" — every real submission
+  // would have gone out with no resume, on every platform, even though
+  // /apply N's own first preview (a separate call, with the freshly-rendered
+  // local path still in scope) attached one correctly. The tailored CV was
+  // never missing — apply-packet.ts already persists it to S3 via
+  // recordTailoringResult's tailoredCvS3Key; this tool just never read it
+  // back to re-attach it for its OWN fill passes.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetApplicationById.mockResolvedValue({ ...ROW, tailored_cv_s3_key: "ready-applications/2026-08-24/altura/x_tailored_cv.pdf" });
+    mockDownloadFile.mockResolvedValue(Buffer.from("fake-pdf-bytes"));
+    mockPreviewApplyFlow.mockResolvedValue(previewResult);
+    mockSubmitApplyFlow.mockResolvedValue({
+      ok: true,
+      ats: "greenhouse",
+      summary: previewResult.summary,
+      unansweredQuestions: previewResult.unansweredQuestions,
+      outcome: { clicked: true, confirmed: true, evidence: "URL changed" },
+    });
+  });
+
+  it("downloads the tailored CV from S3 and threads a real local path into both fill passes", async () => {
+    mockInterrupt.mockReturnValue("approved");
+    await submitApplication.invoke({ job_id: ROW.id }, CONFIG);
+
+    expect(mockDownloadFile).toHaveBeenCalledWith("ready-applications/2026-08-24/altura/x_tailored_cv.pdf");
+    expect(mockDownloadFile).toHaveBeenCalledTimes(2); // once pre-gate, once post-approval — no cached path carried across the HITL wait
+
+    const [, , previewRow] = mockPreviewApplyFlow.mock.calls[0] as [unknown, unknown, { resumePath?: string }];
+    const [, , submitRow] = mockSubmitApplyFlow.mock.calls[0] as [unknown, unknown, { resumePath?: string }];
+    expect(previewRow.resumePath).toMatch(/resume-.*\.pdf$/);
+    expect(submitRow.resumePath).toMatch(/resume-.*\.pdf$/);
+  });
+
+  it("a row with no tailored CV on file submits with resumePath undefined, never crashes", async () => {
+    mockGetApplicationById.mockResolvedValue({ ...ROW, tailored_cv_s3_key: null });
+    mockInterrupt.mockReturnValue("rejected");
+
+    const result = await submitApplication.invoke({ job_id: ROW.id }, CONFIG);
+
+    expect(mockDownloadFile).not.toHaveBeenCalled();
+    const [, , previewRow] = mockPreviewApplyFlow.mock.calls[0] as [unknown, unknown, { resumePath?: string }];
+    expect(previewRow.resumePath).toBeUndefined();
+    expect(String(result)).toContain("Not submitted");
+  });
+
+  it("an S3 download failure falls back to no resume rather than failing the whole submission", async () => {
+    mockDownloadFile.mockRejectedValue(new Error("NoSuchKey"));
+    mockInterrupt.mockReturnValue("rejected");
+
+    const result = await submitApplication.invoke({ job_id: ROW.id }, CONFIG);
+
+    const [, , previewRow] = mockPreviewApplyFlow.mock.calls[0] as [unknown, unknown, { resumePath?: string }];
+    expect(previewRow.resumePath).toBeUndefined();
+    expect(String(result)).toContain("Not submitted"); // did not throw — degraded gracefully
   });
 });
