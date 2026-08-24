@@ -2,7 +2,7 @@
  * Local rerank stage (spec §1.1 F5).
  * ==================================
  * After hybrid fusion, optionally reorder the top passages with a local model
- * (qwen2.5:7b via Ollama). Fusion gives a good order from two cheap signals;
+ * (llama3.2:3b via Ollama). Fusion gives a good order from two cheap signals;
  * a rerank pass reads the actual passages against the query and can sharpen the
  * top-k. It is strictly an ACCELERANT — flag-gated OFF by default
  * (RAG_RERANK_ENABLED) and fail-open: if the model is down or unparseable, the
