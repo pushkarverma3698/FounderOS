@@ -20,6 +20,14 @@ const log = childLogger({ module: "gateway:cover-letter" });
 /**
  * True, reusable facts the CV doesn't always carry. Founder's own words,
  * condensed from his 2026-08-24 cover letter draft — not generated.
+ *
+ * Unrelated to the `founder_context` DB table/`getFounderContext` in
+ * db/schema.ts + db/queries.ts (that one is a mutable, agent-writable
+ * business-state cache; this is a static, code-authored identity fact).
+ *
+ * REVIEW BY 2026-11-30: this string asserts the guesthouse closes in
+ * November 2026. Past that date it is a false claim sent to real companies —
+ * update or remove the guesthouse sentence.
  */
 const FOUNDER_CONTEXT =
   "I have been working for myself since February 2026 — I co-founded a small " +
