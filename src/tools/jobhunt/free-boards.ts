@@ -218,11 +218,13 @@ function csvField(value: string): string {
  *
  * Raised 200 → 500 on 2026-08-20 alongside the sponsor-board import, then
  * 500 → 700 on 2026-08-21 when SmartRecruiters and Workable took the registry
- * from 623 to 858. A floor that is not moved with the file stops being a floor:
+ * from 623 to 858, then 700 → 1100 on 2026-08-24 when Workday, Teamtailor and
+ * BambooHR (plus organic growth on the existing 7 platforms) took it from 923
+ * to 1,297. A floor that is not moved with the file stops being a floor:
  * left at 200 it would have gone on passing while two thirds of the registry
  * silently failed to parse, which is precisely the reading it exists to deny.
  */
-export const MIN_EXPECTED_BOARDS = 700;
+export const MIN_EXPECTED_BOARDS = 1100;
 
 function toFreeAts(value: string): FreeAts | null {
   const normalised = value.trim().toLowerCase();
