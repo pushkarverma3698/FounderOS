@@ -105,7 +105,7 @@ async function labelFor(page: Page, el: import("playwright").Locator, id: string
  * into ONE field with `options` — the shape a real Greenhouse/Workable
  * multi-choice question always takes.
  */
-export async function scrapeFormFields(page: Page): Promise<FormField[]> {
+export async function scrapeFormFields(page: Page, ats: SupportedAts): Promise<FormField[]> {
   const raw = await page.evaluate(() => {
     const isCaptcha = (el: Element): boolean =>
       /recaptcha|h-captcha|hcaptcha/i.test(el.className) ||
@@ -150,7 +150,13 @@ export async function scrapeFormFields(page: Page): Promise<FormField[]> {
   const groupedNames = new Set<string>();
 
   for (const r of raw) {
-    if (!r.hasFormAttr) continue; // stray inputs outside the actual application form
+    // Stray inputs outside the actual application form — EXCEPT on Ashby,
+    // which has no <form> element on the page at all (confirmed live,
+    // 2026-08-24: 46 genuine fields, zero `document.querySelectorAll("form")`
+    // matches, on the real Altura/application posting). Every field on an
+    // Ashby application route belongs to the application; there is no
+    // sibling widget on that route to accidentally pick up.
+    if (ats !== "ashby" && !r.hasFormAttr) continue;
     if (r.type === "hidden" || r.type === "submit" || r.type === "button") continue;
     // Neither name nor id: no selector can ever target this element again.
     // Found live on Greenhouse (gitlab, reltio postings, 2026-08-24): the
