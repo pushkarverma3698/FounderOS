@@ -42,7 +42,17 @@ import { FREE_PRICING } from "./cost.js";
 import { countryFromLocation } from "./country.js";
 import { dedupeKey } from "./filters.js";
 import { getFreeBoards, type FreeBoard } from "./free-boards.js";
-import { hydrateDescriptions, sweepBoards, summariseFailures, type FreeCandidate } from "./free-ats-source.js";
+import {
+  hydrateDescriptions,
+  sweepBoards,
+  summariseFailures,
+  type FreeCandidate,
+} from "./free-ats-source.js";
+import { screenBatch, type IngestLine } from "./ingest-batch.js";
+import { recordQueryCost } from "./ingest-ledger.js";
+import { classifyTrack } from "./tracks.js";
+
+const log = childLogger({ module: "jobhunt:free-ingest" });
 
 export const FREE_INGEST_SOURCE = "free-ats-ingest";
 
@@ -59,11 +69,6 @@ export function toRawPosting(candidate: FreeCandidate, description: string): Raw
     country: countryFromLocation(candidate.location),
   };
 }
-import { screenBatch, type IngestLine } from "./ingest-batch.js";
-import { recordQueryCost } from "./ingest-ledger.js";
-import { classifyTrack } from "./tracks.js";
-
-const log = childLogger({ module: "jobhunt:free-ingest" });
 
 /**
  * How far back a posting may have been published and still be a candidate.
