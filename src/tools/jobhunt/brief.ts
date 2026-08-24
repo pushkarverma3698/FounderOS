@@ -43,10 +43,12 @@ import {
   isAskableRow,
   isDoTodayRow,
   isStretchRow,
+  orderDoToday,
   selectAskable,
   selectDoToday,
   selectStretch,
 } from "./brief-select.js";
+import { overflowNote, renderNextActions } from "./brief-actions.js";
 
 // Re-exported so the transport keeps one import site for the escape helper.
 export { toTelegramSafe, splitForTelegram, TELEGRAM_MAX_CHARS } from "./telegram-format.js";
@@ -57,6 +59,11 @@ export type { BriefRow, BriefSection } from "./brief-row.js";
 // existing import site — and every test — keeps resolving here.
 export { isTooSenior } from "./brief-sections.js";
 export type { TrendRow, SpendLine } from "./brief-sections.js";
+// The DO-THIS-NEXT block, the overflow notes and the Mac client's command line
+// moved to brief-actions.ts on 2026-08-24, when widening the apply queue from
+// 24h to 7d pushed this file past its 400-line budget. Same precedent, same
+// re-export, so every import site keeps resolving here.
+export { MAC_CLIENT_COMMAND, overflowNote, renderNextActions } from "./brief-actions.js";
 // Section membership and the caps moved to brief-select.ts on 2026-08-06, when a
 // third actionable section pushed this file against the 400-line budget. Same
 // precedent as brief-sections.ts: re-exported so every import site and every
@@ -65,6 +72,9 @@ export {
   isAskableRow,
   isDoTodayRow,
   isStretchRow,
+  orderAskable,
+  orderDoToday,
+  orderStretch,
   selectAskable,
   selectDoToday,
   selectStretch,
@@ -75,6 +85,7 @@ export {
 
 /** A horizontal rule. Telegram has no <hr>, and a run of box characters reads as one. */
 const RULE = "━━━━━━━━━━━━━━━━━━━━━";
+
 
 /**
  * How many rejected rows are NAMED. The rest are counted.
@@ -128,61 +139,7 @@ interface SectionTotals {
   readonly askable: number;
 }
 
-/** "…and 7 more" — stated with the number, never a silent cut. */
-function overflowNote(total: number, shown: number, what: string): string {
-  if (total <= shown) return "";
-  return `\n\n<i>+ ${total - shown} more ${what} not shown here. Ask for the job brief again after clearing these.</i>`;
-}
 
-/**
- * The closing block: every command the founder can run right now, spelled out.
- *
- * The brief's whole purpose is to end in an action, and "▸ /draft 1" buried
- * beside row one is easy to scroll past. Collecting the commands at the bottom —
- * where reading stops — with the company each one targets means the last thing
- * on screen is a list of things to do, not a summary of things that happened.
- */
-function renderNextActions(
-  doToday: readonly BriefRow[],
-  stretch: readonly BriefRow[],
-  askable: readonly BriefRow[],
-): string {
-  const lines = [
-    ...doToday.map((r, i) => `${cmd(`/draft ${i + 1}`)} — apply to ${esc(r.company)}`),
-    // Numbered as a CONTINUATION of do-today, because `/draft` resolves across
-    // both sections as one run. Restarting at 1 would make `/draft 1` ambiguous.
-    ...stretch.map(
-      (r, i) =>
-        `${cmd(`/draft ${doToday.length + i + 1}`)} — apply to ${esc(r.company)} (a stretch on years)`,
-    ),
-    ...askable.map((r, i) => `${cmd(`/ask ${i + 1}`)} — draft the question for ${esc(r.company)}`),
-  ];
-
-  // ONLY REAL COMMANDS APPEAR AS COMMANDS. `/draft` and `/ask` are registered on
-  // the bot (gateway/telegram.ts); nothing else is. Printing a plausible-looking
-  // `/jobs` would hand the founder something that silently does nothing, which is
-  // a worse failure than a plain sentence — it looks like the pipeline is broken.
-  if (lines.length === 0) {
-    return (
-      `<b>▶️ DO THIS NEXT</b>\n` +
-      `Nothing is actionable today, so the useful move is upstream — just ask:\n` +
-      `<i>“show me the job brief”</i> · <i>“what gaps are in my CV?”</i>`
-    );
-  }
-
-  const applyInstructions = (
-    `\n\n<b>🚀 HOW TO APPLY (2 WAYS)</b>\n` +
-    `<b>1. The Fast Way:</b> Type ${cmd(`/draft all`)} to auto-tailor CVs for all jobs above. Once drafted, open your terminal and run <code>cd mac-client && .venv/bin/python -m mac_client.apply</code> to blast through the queue with your tailored PDFs.\n` +
-    `<b>2. The Manual Way:</b> Type ${cmd(`/draft <number>`)} (e.g. ${cmd(`/draft 1`)}) to get the tailored PDF and a direct application link. Apply in your browser, then type ${cmd(`/applied 1`)} to clear it from the queue.`
-  );
-
-  return (
-    `<b>▶️ DO THIS NEXT</b>\n` +
-    lines.join("\n") +
-    applyInstructions +
-    `\n\n<i>Or just ask — “show me the job brief”, “what gaps are in my CV?”</i>`
-  );
-}
 
 /**
  * Render the brief.
@@ -195,6 +152,14 @@ export function formatDailyBrief(input: BriefInput): string {
   const doToday = selectDoToday(input.rows);
   const stretch = selectStretch(input.rows);
   const askable = selectAskable(input.rows);
+
+  // The stretch section's numbers continue DO TODAY's over the FULL ordering,
+  // not over what DO TODAY printed — because that is what `briefRankEntries`
+  // pinned, and the printed number has to be the pinned rank or `/draft 12`
+  // tailors for the wrong company. It is why the numbers can jump from "6" to
+  // "48": rows 7–47 exist, are addressable, and are in `/csv`. The overflow
+  // note below says so rather than leaving the gap to be discovered.
+  const doTodayTotal = orderDoToday(input.rows).length;
 
   // ONE RULE FOR EVERY NUMBER IN THIS MESSAGE: a count is the true UNCAPPED
   // population, and the cap only ever appears as an explicit "+ N more not
@@ -242,8 +207,8 @@ export function formatDailyBrief(input: BriefInput): string {
         `<i>Every check cleared except the years — they ask for more than your ~3.5 ` +
         `shipped. That is a wish, not a wall, and applying early is what makes it ` +
         `land. Nothing here needs a question first.</i>\n\n` +
-        renderMarketBlocks(stretch, "/draft", "stretch", doToday.length + 1) +
-        overflowNote(totals.stretch, stretch.length, "stretch roles"),
+        renderMarketBlocks(stretch, "/draft", "stretch", doTodayTotal + 1) +
+        overflowNote(totals.stretch, stretch.length, "stretch roles", doTodayTotal + 1),
     );
   }
 
@@ -315,7 +280,7 @@ export function formatDailyBrief(input: BriefInput): string {
   const legend = renderLegend(input.rows);
   if (legend.length > 0) sections.push(legend);
 
-  sections.push(renderNextActions(doToday, stretch, askable));
+  sections.push(renderNextActions(doToday, stretch, askable, doTodayTotal));
 
   return sections.join(`\n\n${RULE}\n\n`);
 }

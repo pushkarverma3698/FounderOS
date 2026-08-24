@@ -31,6 +31,7 @@ import {
   DRAFT_SECTIONS,
   type ApplicationPacket,
 } from "../tools/jobhunt/apply-packet.js";
+import { MAC_CLIENT_COMMAND } from "../tools/jobhunt/brief.js";
 import { ARTIFACT_ROOT } from "../core/config.js";
 import { threadIdFor } from "./kernel-run.js";
 import { safeHtml } from "./approval-card.js";
@@ -55,6 +56,7 @@ export function parseRowArg(raw: string): number | null {
 
 /** How many rows one `/draft all` will tailor before it stops. */
 export const BULK_DRAFT_CAP = 6;
+
 
 /**
  * Parse the argument of `/draft` into the list of rows to build.
@@ -181,7 +183,8 @@ export function packetMessage(packet: ApplicationPacket, rank: number): string {
     `Permit basis: ${safeHtml(row.route)} · matches ${overlap}\n` +
     (top.length > 0 ? `Lead with: ${safeHtml(top)}\n` : "") +
     `\n${linkLine}\n\n` +
-    `<i>To clear this from your queue, apply in the browser and send</i> <code>/applied ${rank}</code><i>. Or, leave it in the queue and run the <b>Mac Client</b> to auto-apply using this tailored CV.</i>`
+    `<i>Apply in the browser, then send</i> <code>/applied ${rank}</code><i> to clear it.</i>\n` +
+    `<i>Or leave it queued and run</i> <code>${MAC_CLIENT_COMMAND}</code><i> on your Mac — it opens each queued role with the form already filled and waits for your click.</i>`
   );
 }
 

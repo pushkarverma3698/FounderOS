@@ -12,6 +12,7 @@
  */
 
 import { childLogger } from "../../infra/logger.js";
+import { intEnv } from "../../core/config.js";
 import {
   listActionableApplications,
   countAgedOutApplications,
@@ -62,8 +63,24 @@ export { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
  * timeout. Checked through a bounded pool instead, the wider budget is safe.
  * `verificationTargets` below already spends every PASS before any FLAG, so
  * the extra headroom goes to flags once every pass is covered.
+ *
+ * RAISED AGAIN, 25 → 60, ON 2026-08-24, in the same change that widened
+ * `APPLY_QUEUE_MAX_AGE_HOURS` from 24 to 168. Those two numbers are coupled and
+ * the coupling is easy to miss: `isDoTodayRow` admits only `pass && live`, so
+ * whichever of them is smaller is the real size of APPLY TODAY. Widening the
+ * window to ~73 actionable rows while leaving the budget at 25 would have moved
+ * the ceiling from the window to here and looked, from Telegram, exactly like
+ * the market being thin — which is the reading this pipeline has already lost
+ * weeks to.
+ *
+ * `URL_CHECK_CONCURRENCY` stays at 6. Raising it would shorten the worst case,
+ * but its 6 is not arbitrary — liveness.ts argues it from same-host bursts,
+ * since one ATS host serves many companies and a burst at one host turns a live
+ * posting into `unverifiable`, which defeats the check. At 6, sixty targets is
+ * ~15s typically and ~100s only if every host times out, which is itself an
+ * outage rather than a slow day.
  */
-export const VERIFY_TOP_N = 25;
+export const VERIFY_TOP_N = intEnv("VERIFY_TOP_N", 60);
 
 function ageInDays(from: Date | null | undefined, now: Date): number {
   if (!from) return 0;
