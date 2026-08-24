@@ -2,7 +2,15 @@ import React, { useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { cn } from "../../lib/utils";
 
-interface MagneticButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+type ConflictingHandlers =
+  | "onDrag"
+  | "onDragStart"
+  | "onDragEnd"
+  | "onAnimationStart"
+  | "onAnimationEnd";
+
+interface MagneticButtonProps
+  extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, ConflictingHandlers> {
   children: React.ReactNode;
   intensity?: number;
 }

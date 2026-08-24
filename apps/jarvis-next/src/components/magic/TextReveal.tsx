@@ -1,4 +1,4 @@
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { cn } from "../../lib/utils";
 
 interface TextRevealProps {
@@ -18,7 +18,7 @@ export function TextReveal({ text, className, delay = 0 }: TextRevealProps) {
     }),
   };
 
-  const child = {
+  const child: Variants = {
     visible: {
       opacity: 1,
       y: 0,
