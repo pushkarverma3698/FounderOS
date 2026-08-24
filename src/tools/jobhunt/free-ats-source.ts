@@ -34,6 +34,8 @@
 import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import type { FreeAts, FreeBoard } from "./free-boards.js";
+import { createEtagCache, type EtagCache } from "./free-ats-cache.js";
+import { HttpStatusError, fetchJson, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
 import { FREE_MAPPERS, decodeJobBody, type FreeCandidate } from "./free-ats-mappers.js";
 import { boardUrl, jobBodyUrl, extractBody } from "./free-ats-endpoints.js";
 
@@ -89,6 +91,13 @@ export const PLATFORM_CONCURRENCY: Readonly<Record<FreeAts, number>> = {
   // rate limit became visible in the first place.
   smartrecruiters: BOARD_CONCURRENCY,
   workable: BOARD_CONCURRENCY,
+  // Deliberately below the default. Personio is the one platform whose board
+  // response is megabytes rather than kilobytes, so in-flight requests here cost
+  // memory as well as sockets: eight concurrent 2.26 MB bodies is ~18 MB of
+  // buffers on a box that also runs Postgres and Ollama. Most sweeps revalidate
+  // to a 0-byte 304 and never allocate, so the ceiling only binds on the sweep
+  // after a board actually changes — which is exactly when it should.
+  personio: 3,
 };
 
 /**
@@ -115,14 +124,6 @@ const RETRY_BASE_MS = 400;
  */
 const RETRYABLE_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
 
-/** Carries the HTTP status so the retry decision is made on the code, not on a string. */
-class HttpStatusError extends Error {
-  constructor(readonly status: number) {
-    super(`HTTP ${status}`);
-    this.name = "HttpStatusError";
-  }
-}
-
 /**
  * How long to wait before attempt `attempt + 1`, in ms.
  *
@@ -146,45 +147,15 @@ const realSleep: FetchBoardDeps = {
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
 
+/**
+ * Shared across the whole process, because a cache scoped to one sweep would be
+ * empty on every sweep and revalidate nothing.
+ */
+const boardCache: EtagCache = createEtagCache();
+
 export type BoardFetch =
   | { readonly ok: true; readonly board: FreeBoard; readonly candidates: readonly FreeCandidate[] }
   | { readonly ok: false; readonly board: FreeBoard; readonly error: string };
-
-/**
- * Where one Greenhouse posting's body lives.
- *
- * Only Greenhouse needs this. Its list endpoint carries no body, and asking for
- * bodies inline (`?content=true`) returned 742 KB for one 52-job board — a
- * payload that does not belong in a half-hourly sweep across 142 boards. So the
- * body is fetched per posting, and only for the few that already survived the
- * freshness and relevance filters.
- */
-export function greenhouseJobUrl(board: FreeBoard, externalId: string): string {
-  return (
-    `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board.token)}` +
-    `/jobs/${encodeURIComponent(externalId)}`
-  );
-}
-
-async function fetchJson(url: string, timeoutMs: number): Promise<unknown> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: { accept: "application/json" },
-    });
-    if (!response.ok) {
-      // Read the status before discarding the body, then discard it: an
-      // unconsumed body holds the socket open under undici until GC.
-      void response.body?.cancel();
-      throw new HttpStatusError(response.status);
-    }
-    return await response.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /**
  * Whether asking this host again could plausibly produce a different answer.
@@ -216,7 +187,12 @@ export async function fetchBoard(
 
   for (let attempt = 1; ; attempt++) {
     try {
-      payload = await fetchJson(boardUrl(board), BOARD_TIMEOUT_MS);
+      payload = await fetchPayload(
+        boardUrl(board),
+        BOARD_TIMEOUT_MS,
+        wireFormatFor(board.ats),
+        boardCache,
+      );
       break;
     } catch (err) {
       if (attempt >= BOARD_ATTEMPTS || !isRetryable(err)) {

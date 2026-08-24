@@ -1,4 +1,6 @@
 import type { CSSProperties } from 'react';
+import { SpotlightCard } from './magic/SpotlightCard';
+import { AnimatedCounter } from './magic/AnimatedCounter';
 
 interface GlassMetricCardsProps {
   todaySpend: number;
@@ -6,16 +8,10 @@ interface GlassMetricCardsProps {
   avgLatencyMs: number;
   evalPassRate: number;
   systemStatus: string;
-  /** When the gateway is unreachable these numbers are stale — say so. */
   gateway: 'connecting' | 'online' | 'offline';
-  /** 'row' floats the readouts horizontally; 'stack' pins them to an edge column. */
   layout?: 'row' | 'stack';
 }
 
-/**
- * Instrument readouts. Every value uses the single accent — the only colour
- * change is `signal`, and only when the kernel is genuinely degraded.
- */
 export function GlassMetricCards({
   todaySpend,
   totalTurns,
@@ -28,15 +24,12 @@ export function GlassMetricCards({
   const degraded = systemStatus !== 'ok';
   const offline = gateway === 'offline';
 
-  // With the gateway down every figure here is a cached guess. Showing "NOMINAL"
-  // next to a header that reads UNREACHABLE is the same defect as the header bug,
-  // one layer down — so these read as stale rather than current.
   const readouts = offline
     ? [
-        { label: 'Kernel', value: 'NO SIGNAL', sub: 'gateway unreachable', alert: true },
-        { label: 'Spend today', value: '—', sub: 'last seen $' + todaySpend.toFixed(4), alert: false },
-        { label: 'Stamped turns', value: '—', sub: 'last seen ' + totalTurns, alert: false },
-        { label: 'Kernel latency', value: '—', sub: 'no response', alert: false },
+        { label: 'Kernel', value: 'NO SIGNAL', sub: 'gateway unreachable', alert: true, isNumber: false },
+        { label: 'Spend today', value: todaySpend, sub: 'last seen $' + todaySpend.toFixed(4), alert: false, isNumber: true, prefix: '$', decimals: 4 },
+        { label: 'Stamped turns', value: totalTurns, sub: 'last seen ' + totalTurns, alert: false, isNumber: true },
+        { label: 'Kernel latency', value: '—', sub: 'no response', alert: false, isNumber: false },
       ]
     : [
         {
@@ -44,49 +37,62 @@ export function GlassMetricCards({
           value: gateway === 'connecting' ? 'CONNECTING' : degraded ? 'DEGRADED' : 'NOMINAL',
           sub: 'postgres · checkpointer',
           alert: degraded,
+          isNumber: false
         },
         {
           label: 'Spend today',
-          value: `$${todaySpend.toFixed(4)}`,
+          value: todaySpend,
           sub: 'cap $5.0000 / day',
           alert: todaySpend > 5,
+          isNumber: true,
+          prefix: '$',
+          decimals: 4
         },
         {
           label: 'Stamped turns',
-          value: totalTurns.toString(),
+          value: totalTurns,
           sub: `$${(todaySpend / (totalTurns || 1)).toFixed(4)} avg`,
           alert: false,
+          isNumber: true
         },
         {
           label: 'Kernel latency',
-          value: `${avgLatencyMs}ms`,
+          value: avgLatencyMs,
           sub: `eval pass ${evalPassRate.toFixed(1)}%`,
           alert: avgLatencyMs > 500,
+          isNumber: true,
+          suffix: 'ms'
         },
       ];
 
   return (
-    <div className={layout === 'row' ? 'flex items-stretch gap-2' : 'flex flex-col gap-2'}>
+    <div className={layout === 'row' ? 'flex items-stretch gap-4' : 'flex flex-col gap-4'}>
       {readouts.map((r, i) => (
-        <div
+        <SpotlightCard
           key={r.label}
-          style={{ '--d': `${i * 55}ms` } as CSSProperties}
-          className={`hud-panel ticks rise-in px-3 py-2 ${layout === 'row' ? 'flex-1' : 'w-full'} ${
-            r.alert ? 'hud-panel-signal' : ''
-          }`}
+          spotlightColor={r.alert ? "rgba(255, 176, 32, 0.25)" : "rgba(0, 229, 255, 0.15)"}
+          className={`${layout === 'row' ? 'flex-1' : 'w-full'} ${r.alert ? 'hud-panel-signal' : 'hud-panel'}`}
         >
           <span className="label-micro block">{r.label}</span>
           <span
-            className={`block value-heavy text-[20px] leading-tight mt-0.5 ${
+            className={`block value-heavy text-[24px] leading-tight mt-1 ${
               r.alert ? 'text-signal text-glow-signal' : 'text-accent text-glow'
             }`}
           >
-            {r.value}
+            {r.isNumber ? (
+              <span className="flex items-baseline">
+                {r.prefix && <span>{r.prefix}</span>}
+                <AnimatedCounter value={r.value as number} decimals={r.decimals} />
+                {r.suffix && <span>{r.suffix}</span>}
+              </span>
+            ) : (
+              r.value
+            )}
           </span>
-          <span className="block font-mono font-light text-[9px] text-chrome/35 mt-0.5 truncate">
+          <span className="block font-mono font-medium text-[11px] text-chrome/50 mt-1 truncate">
             {r.sub}
           </span>
-        </div>
+        </SpotlightCard>
       ))}
     </div>
   );

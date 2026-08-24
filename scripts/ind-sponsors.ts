@@ -101,7 +101,7 @@ function toCsv(rows: readonly Sponsor[]): string {
   return [stamp, "name,kvk", ...rows.map((r) => `${esc(r.name)},${r.kvk}`)].join("\n");
 }
 
-async function main(): Promise<void> {
+export async function fetchAndSaveSponsors(): Promise<readonly Sponsor[]> {
   const res = await fetch(REGISTER_URL, {
     headers: { "user-agent": "Mozilla/5.0 (research; personal job search)" },
   });
@@ -115,6 +115,12 @@ async function main(): Promise<void> {
   mkdirSync(dirname(OUT_CSV), { recursive: true });
   writeFileSync(OUT_CSV, toCsv(rows), "utf8");
   console.log(`✓ ${rows.length} sponsors → ${OUT_CSV}`);
+  
+  return rows;
+}
+
+async function main(): Promise<void> {
+  const rows = await fetchAndSaveSponsors();
 
   if (process.argv.includes("--match")) {
     const { watch, signal } = shortlist(rows);

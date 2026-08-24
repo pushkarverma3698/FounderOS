@@ -312,7 +312,8 @@ export async function browserAction(
   // AppleScript / Safari (macOS)
   const script = buildBrowserScript(action, opts);
   try {
-    const { stdout, stderr } = await execAsync(`osascript -e ${JSON.stringify(script)}`, {
+    const args = script.split("\n").map(line => `-e ${JSON.stringify(line)}`).join(" ");
+    const { stdout, stderr } = await execAsync(`osascript ${args}`, {
       timeout: SHELL_TIMEOUT_MS,
       maxBuffer: MAX_OUTPUT,
     });

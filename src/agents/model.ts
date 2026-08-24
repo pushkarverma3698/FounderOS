@@ -49,6 +49,7 @@ const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
   "qwen/qwen-2.5-72b-instruct:free": "openrouter/free",
   "qwen/qwen3-next-80b-a3b-instruct:free": "openrouter/free",
   "qwen/qwen3-next-80b-a3b-instruct": "openrouter/free",
+  "nousresearch/hermes-3-llama-3.1-405b:free": "openrouter/free",
   "deepseek/deepseek-r1:free": "openrouter/free",
 };
 
