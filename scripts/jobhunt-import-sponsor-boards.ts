@@ -75,6 +75,11 @@ const CORPUS_FLOORS: Readonly<Record<FreeAts, number>> = {
   smartrecruiters: 1900,
   workable: 2900,
   personio: 1700,
+  // Added 2026-08-24 at ~70% of the rows observed that day: workday 3,530 ·
+  // teamtailor 1,464 · bamboohr 5,632.
+  workday: 2400,
+  teamtailor: 1000,
+  bamboohr: 3900,
 };
 
 const FETCH_TIMEOUT_MS = 30_000;

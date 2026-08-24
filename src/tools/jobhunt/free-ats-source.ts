@@ -36,12 +36,31 @@ import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import type { FreeAts, FreeBoard } from "./free-boards.js";
 import { createEtagCache, type EtagCache } from "./free-ats-cache.js";
 import { HttpStatusError, fetchJson, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
-import { FREE_MAPPERS, decodeJobBody, type FreeCandidate } from "./free-ats-mappers.js";
-import { boardUrl, jobBodyUrl, extractBody } from "./free-ats-endpoints.js";
+import { getAdapter } from "./adapters/index.js";
+import { decodeJobBody, type NormalizedJob as FreeCandidate } from "./adapters/types.js";
 
 // Re-exported so this module's public surface — and every test and caller that
 // already imports from it — keeps resolving after the 2026-08-21 split.
-export { boardUrl, jobBodyUrl, extractBody };
+export function boardUrl(board: FreeBoard): string {
+  const adapter = getAdapter(board.ats);
+  if (!adapter) throw new Error(`Unknown adapter: ${board.ats}`);
+  return adapter.getBoardUrl(board);
+}
+
+export function jobBodyUrl(board: FreeBoard, externalId: string): string | null {
+  const adapter = getAdapter(board.ats);
+  if (!adapter) throw new Error(`Unknown adapter: ${board.ats}`);
+  return adapter.getJobUrl(board, externalId);
+}
+
+export function extractBody(ats: FreeAts, payload: Record<string, unknown>): string {
+  const adapter = getAdapter(ats);
+  if (!adapter) throw new Error(`Unknown adapter: ${ats}`);
+  return adapter.extractBody(payload);
+}
+
+// Ensure type is exported for backwards compatibility with tests and callers
+export type { FreeCandidate };
 
 const log = childLogger({ module: "jobhunt:free-ats" });
 
@@ -98,6 +117,18 @@ export const PLATFORM_CONCURRENCY: Readonly<Record<FreeAts, number>> = {
   // to a 0-byte 304 and never allocate, so the ceiling only binds on the sweep
   // after a board actually changes — which is exactly when it should.
   personio: 3,
+  // Below the default because Workday is the only platform that spends MULTIPLE
+  // requests per board (limit is capped at 20, so a 100-posting board is five
+  // POSTs). At the default this would be up to 8 × 5 requests in flight against
+  // hosts that all sit behind a handful of Workday datacenters. Four keeps the
+  // per-origin burst in the same range as every other platform's single GET.
+  workday: 4,
+  teamtailor: BOARD_CONCURRENCY,
+  // Below the default for the opposite reason to Personio's: BambooHR is the one
+  // platform that must fetch a DETAIL payload before it can even judge freshness
+  // (dateOnlyInDetail), so its true request count per sweep is the highest of the
+  // three added on 2026-08-24 despite having the fewest boards.
+  bamboohr: 4,
 };
 
 /**
@@ -183,27 +214,46 @@ export async function fetchBoard(
   board: FreeBoard,
   deps: FetchBoardDeps = realSleep,
 ): Promise<BoardFetch> {
-  let payload: unknown;
+  const adapter = getAdapter(board.ats);
+  if (!adapter) {
+    return { ok: false, board, error: `Unknown adapter for platform: ${board.ats}` };
+  }
 
-  for (let attempt = 1; ; attempt++) {
-    try {
-      payload = await fetchPayload(
-        boardUrl(board),
-        BOARD_TIMEOUT_MS,
-        wireFormatFor(board.ats),
-        boardCache,
-      );
-      break;
-    } catch (err) {
-      if (attempt >= BOARD_ATTEMPTS || !isRetryable(err)) {
-        return { ok: false, board, error: (err as Error).message };
+  const format = adapter.getWireFormat();
+  const paging = adapter.paging;
+  const payloads: unknown[] = [];
+
+  try {
+    for (let page = 0; page < (paging?.maxPages ?? 1); page++) {
+      const offset = page * (paging?.pageSize ?? 0);
+      const request = adapter.getBoardRequest?.(board, offset);
+      const url = request?.url ?? adapter.getBoardUrl(board);
+
+      let payload: unknown;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          payload = await fetchPayload(url, BOARD_TIMEOUT_MS, format, boardCache, request);
+          break;
+        } catch (err) {
+          if (attempt >= BOARD_ATTEMPTS || !isRetryable(err)) throw err;
+          await deps.sleep(retryDelayMs(attempt, Math.random()));
+        }
       }
-      await deps.sleep(retryDelayMs(attempt, Math.random()));
+      payloads.push(payload);
+
+      // Stop at the real end of the board rather than always spending maxPages.
+      // An unknown total stops after this page: guessing there is more would poll
+      // a third party for nothing on every board that does not report one.
+      if (!paging) break;
+      const total = adapter.totalFrom?.(payload) ?? null;
+      if (total === null || offset + paging.pageSize >= total) break;
     }
+  } catch (err) {
+    return { ok: false, board, error: (err as Error).message };
   }
 
   try {
-    return { ok: true, board, candidates: FREE_MAPPERS[board.ats](payload, board) };
+    return { ok: true, board, candidates: payloads.flatMap((p) => adapter.listJobs(p, board)) };
   } catch (err) {
     return { ok: false, board, error: (err as Error).message };
   }
@@ -313,14 +363,21 @@ export async function hydrateDescriptions(
   return mapWithConcurrencyLimit(candidates, BOARD_CONCURRENCY, async (candidate) => {
     if (candidate.description !== null) return candidate;
 
-    const url = jobBodyUrl(candidate.board, candidate.externalId);
+    const adapter = getAdapter(candidate.board.ats);
+    if (!adapter) return candidate;
+
+    const url = adapter.getJobUrl(candidate.board, candidate.externalId);
     // Null means the platform inlines its bodies, so a null description here is
     // a posting that genuinely has none — not one we failed to fetch.
     if (url === null) return candidate;
 
     try {
       const payload = (await fetchJson(url, DESCRIPTION_TIMEOUT_MS)) as Record<string, unknown>;
-      return { ...candidate, description: extractBody(candidate.board.ats, payload) || null };
+      // For a `dateOnlyInDetail` platform this is the FIRST point at which the
+      // posting's real publication date exists. Everything before it treated the
+      // date as unknown rather than as absent, deliberately.
+      const postedAt = adapter.postedAtFromDetail?.(payload) ?? candidate.postedAt;
+      return { ...candidate, postedAt, description: adapter.extractBody(payload) || null };
     } catch (err) {
       log.warn(
         { board: candidate.board.token, id: candidate.externalId, err: (err as Error).message },

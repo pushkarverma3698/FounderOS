@@ -20,6 +20,7 @@
  */
 
 import type { FreeAts, FreeBoard } from "./free-boards.js";
+import { workdayTokenFromUrl } from "./adapters/workday.js";
 import { LEGAL_SUFFIX_TOKENS } from "./sponsor-match.js";
 import { parseCsvLine } from "./sponsor-registry.js";
 
@@ -27,6 +28,15 @@ import { parseCsvLine } from "./sponsor-registry.js";
 export interface AtsCorpusRow {
   readonly name: string;
   readonly slug: string;
+  /**
+   * The board's public URL. Empty when the corpus omits it.
+   *
+   * Kept because Workday's `slug` is lossy: it reads `tenant/site` and drops the
+   * datacenter, which is NOT derivable — the corpus carries at least ten distinct
+   * values (wd1, wd3, wd5, wd12, wd103, wd501 …) and only this column says which.
+   * Every other platform ignores it.
+   */
+  readonly url: string;
 }
 
 /** A board the join proposes polling, before it has been verified live. */
@@ -118,14 +128,29 @@ export function parseAtsCorpus(csv: string): AtsCorpusRow[] {
 
   // Row 0 is the header (`name,slug,url`).
   for (const line of lines.slice(1)) {
-    const [name, slug] = parseCsvLine(line);
+    const [name, slug, url] = parseCsvLine(line);
     const trimmedName = (name ?? "").trim();
     const trimmedSlug = (slug ?? "").trim();
     if (trimmedName.length === 0 || trimmedSlug.length === 0) continue;
-    rows.push({ name: trimmedName, slug: trimmedSlug });
+    rows.push({ name: trimmedName, slug: trimmedSlug, url: (url ?? "").trim() });
   }
 
   return rows;
+}
+
+/**
+ * The registry token for one corpus row.
+ *
+ * Every platform but Workday stores the corpus slug verbatim. Workday packs
+ * `tenant/wdN/site` because its slug alone cannot address a board — see
+ * `workdayTokenFromUrl`. A row whose URL will not parse yields null and is
+ * DROPPED by the join rather than written with a slug that would 404 on every
+ * sweep forever: a dead token is worse than a missing one, because it reports as
+ * a failing board rather than an absent company.
+ */
+export function tokenForCorpusRow(ats: FreeAts, row: AtsCorpusRow): string | null {
+  if (ats !== "workday") return row.slug;
+  return workdayTokenFromUrl(row.url);
 }
 
 /**
@@ -163,11 +188,14 @@ export function joinSponsorBoards(
       const matchedSponsor = index.get(boardMatchKey(row.name));
       if (matchedSponsor === undefined) continue;
 
-      const key = `${ats}:${row.slug.toLowerCase()}`;
+      const token = tokenForCorpusRow(ats, row);
+      if (token === null) continue;
+
+      const key = `${ats}:${token.toLowerCase()}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
-      candidates.push({ name: row.name, ats, token: row.slug, matchedSponsor });
+      candidates.push({ name: row.name, ats, token, matchedSponsor });
     }
   }
 

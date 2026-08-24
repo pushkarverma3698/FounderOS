@@ -26,7 +26,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { boardUrl } from "../src/tools/jobhunt/free-ats-endpoints.js";
+import { boardUrl } from "../src/tools/jobhunt/free-ats-source.js";
 import {
   boardsPathFrom,
   parseBoardRegistry,

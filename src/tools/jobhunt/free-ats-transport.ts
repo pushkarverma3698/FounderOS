@@ -11,8 +11,11 @@
  */
 
 import type { EtagCache } from "./free-ats-cache.js";
-import { WIRE_FORMAT, type WireFormat } from "./free-ats-endpoints.js";
 import type { FreeAts } from "./free-boards.js";
+import { getAdapter } from "./adapters/index.js";
+import type { BoardRequest } from "./adapters/types.js";
+
+export type WireFormat = "json" | "xml";
 
 /** Carries the HTTP status so the retry decision is made on the code, not on a string. */
 export class HttpStatusError extends Error {
@@ -29,7 +32,9 @@ export async function fetchJson(url: string, timeoutMs: number): Promise<unknown
 
 /** The wire format a platform's board endpoint speaks. */
 export function wireFormatFor(ats: FreeAts): WireFormat {
-  return WIRE_FORMAT[ats];
+  const adapter = getAdapter(ats);
+  if (!adapter) throw new Error(`Unknown ATS platform: ${ats}`);
+  return adapter.getWireFormat();
 }
 
 /**
@@ -49,15 +54,24 @@ export async function fetchPayload(
   timeoutMs: number,
   format: WireFormat,
   cache: EtagCache | null,
+  request?: BoardRequest,
 ): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const method = request?.method ?? "GET";
+  // A POST carries its page offset in the BODY while the URL stays constant, so a
+  // URL-keyed validator cache would serve page 1's payload for every later page.
+  // Conditional requests are a GET-only optimisation here, deliberately.
+  const validators = method === "GET" ? (cache?.headersFor(url) ?? {}) : {};
   try {
     const response = await fetch(url, {
+      method,
       signal: controller.signal,
+      ...(request?.body === undefined ? {} : { body: request.body }),
       headers: {
         accept: format === "json" ? "application/json" : "application/xml, text/xml",
-        ...(cache?.headersFor(url) ?? {}),
+        ...(request?.body === undefined ? {} : { "content-type": "application/json" }),
+        ...validators,
       },
     });
 
