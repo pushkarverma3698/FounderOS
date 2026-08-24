@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from playwright.async_api import async_playwright
 
 from . import ledger
-from .adapters import field_map_for, planned_fills
+from .adapters import ats_for_url, field_map_for, planned_fills
 from .profile import ApplyProfile, load_profile, missing_resumes
 from .sync import QueueJob, SyncError, load_queue, push_outcomes
 
@@ -118,10 +119,41 @@ async def _upload_first(page, selectors: tuple[str, ...], path: str) -> bool:
 
 from .liveness import classify_response
 
+
+def ashby_application_url(url: str) -> str:
+    """Ashby's posting URL renders an overview page with NO application
+    fields at all — the real form lives on a separate `/application` route
+    (a distinct tab href, not a same-page reveal). Found live, 2026-08-25:
+    every fill attempt against a real Ashby posting (Altura) timed out
+    waiting for selectors that were correct — `_systemfield_name` etc. really
+    are Ashby's field names — because the page loaded here never had any
+    `<input>` on it. Same root cause and same fix as the VPS TypeScript
+    pipeline's `ashbyApplicationUrl` in apply-driver.ts (2026-08-24/25); this
+    is a separate Python implementation that never got the port.
+    """
+    parts = urlsplit(url)
+    path = parts.path.rstrip("/")
+    if not path.endswith("/application"):
+        path = f"{path}/application"
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+
+
 async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str) -> str:
     """Open one job, fill it, and wait for the founder. Returns the outcome."""
-    response = await page.goto(job.url, wait_until="domcontentloaded")
-    
+    is_ashby = ats_for_url(job.url) == "ashby"
+    target_url = ashby_application_url(job.url) if is_ashby else job.url
+    response = await page.goto(target_url, wait_until="domcontentloaded")
+
+    if is_ashby:
+        # `domcontentloaded` fires before Ashby's React app hydrates the
+        # form — same race already documented on the TS side. Wait for a
+        # stable system-field id rather than a fixed sleep; if it never
+        # appears, fill_form still runs and honestly reports what it finds.
+        try:
+            await page.locator('[name="_systemfield_name"]').first.wait_for(state="visible", timeout=8000)
+        except Exception:
+            pass
+
     if response:
         redirected = response.request.redirected_from is not None
         liveness = classify_response(response.status, job.url, page.url, redirected)
