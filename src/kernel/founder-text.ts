@@ -55,6 +55,18 @@ export function redactInternalPaths(text: string): string {
 const SNAKE_CASE_IDENTIFIER = /\b[a-z]{2,}(?:_[a-z0-9]{2,})+\b/g;
 
 /**
+ * A `key="value"` fragment — the shape of a tool call's literal argument list,
+ * never of planner-written prose. Stripping the identifier out of ordinary
+ * prose (`… using job_state and …`) still reads as English; stripping one out
+ * of `job_id="b87ad902-…"` leaves a bare `="b87ad902-…"` with nothing before
+ * it. Found live, 2026-08-24: `/apply N`'s synthetic instruction to the kernel
+ * ("Call the submit_application tool now with job_id=\"…\"") is code-shaped,
+ * not prose, and the identifier strip left `🔧 Call the tool with ="b87ad902-…"`
+ * on screen for the few seconds before the placeholder was deleted.
+ */
+const ORPHANED_ASSIGNMENT = /=\s*["']/;
+
+/**
  * Drop internal identifiers from a short founder-facing label.
  *
  * Deliberately NOT applied to synthesized replies. In a reply the founder may
@@ -64,7 +76,13 @@ const SNAKE_CASE_IDENTIFIER = /\b[a-z]{2,}(?:_[a-z0-9]{2,})+\b/g;
  * them into step objectives. Proven on prod 2026-08-14: the `turn.progress`
  * seam emitted `🔧 jobhunt: Retrieve the full set of captured jobs using
  * job_state and …`, leaking both a worker id and a tool name in one line.
+ *
+ * A result that still contains a `key="value"` fragment after stripping means
+ * the source text was a literal tool-call argument list, not prose — falls
+ * back to "" so the caller's own placeholder text is shown instead of a
+ * sentence with a dangling `=`.
  */
 export function redactInternalIdentifiers(text: string): string {
-  return text.replace(SNAKE_CASE_IDENTIFIER, "").replace(/\s{2,}/g, " ").trim();
+  const clean = text.replace(SNAKE_CASE_IDENTIFIER, "").replace(/\s{2,}/g, " ").trim();
+  return ORPHANED_ASSIGNMENT.test(clean) ? "" : clean;
 }
