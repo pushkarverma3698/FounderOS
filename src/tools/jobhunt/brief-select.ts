@@ -116,14 +116,44 @@ export function isAskableRow(row: BriefRow): boolean {
   return row.verdict === "flag" || (row.verdict === "pass" && row.liveness !== "live");
 }
 
+/**
+ * THE CAP BOUNDS WHAT IS PRINTED, NEVER WHAT IS ADDRESSABLE.
+ *
+ * Until 2026-08-24 there was only the capped form, and `persistBriefRanks`
+ * pinned ranks over it — so `/draft` could reach at most `DO_TODAY_CAP +
+ * STRETCH_CAP` rows no matter how many had cleared every gate, and
+ * `mac-client/sync.py`, which reads `brief_section IN ('do_today','stretch')`,
+ * could not see the rest either. Production, that morning: 464 screened
+ * actionable rows, 3 reachable, 52 Dutch recognised-sponsor salary-passes
+ * sitting in the table, 2 applications lifetime.
+ *
+ * So `order*` is the RANKING — every qualifying row, in the founder's order —
+ * and `select*` is the DISPLAY, a plain prefix of it. A prefix rather than a
+ * second filter on purpose: the printed number is the row's index in the
+ * ordering, so display being a prefix is what makes "the third row on screen"
+ * and "the row pinned as 3" the same row by construction. A filtered subset
+ * would renumber the message and `/draft 3` would tailor for the wrong company.
+ */
+export function orderDoToday(rows: readonly BriefRow[]): BriefRow[] {
+  return allocateByMarket(rows.filter(isDoTodayRow), PER_MARKET_DO_TODAY, Number.MAX_SAFE_INTEGER);
+}
+
+export function orderStretch(rows: readonly BriefRow[]): BriefRow[] {
+  return allocateByMarket(rows.filter(isStretchRow), PER_MARKET_STRETCH, Number.MAX_SAFE_INTEGER);
+}
+
+export function orderAskable(rows: readonly BriefRow[]): BriefRow[] {
+  return allocateByMarket(rows.filter(isAskableRow), PER_MARKET_ASK, Number.MAX_SAFE_INTEGER);
+}
+
 export function selectDoToday(rows: readonly BriefRow[]): BriefRow[] {
-  return allocateByMarket(rows.filter(isDoTodayRow), PER_MARKET_DO_TODAY, DO_TODAY_CAP);
+  return orderDoToday(rows).slice(0, DO_TODAY_CAP);
 }
 
 export function selectStretch(rows: readonly BriefRow[]): BriefRow[] {
-  return allocateByMarket(rows.filter(isStretchRow), PER_MARKET_STRETCH, STRETCH_CAP);
+  return orderStretch(rows).slice(0, STRETCH_CAP);
 }
 
 export function selectAskable(rows: readonly BriefRow[]): BriefRow[] {
-  return allocateByMarket(rows.filter(isAskableRow), PER_MARKET_ASK, ASK_CAP);
+  return orderAskable(rows).slice(0, ASK_CAP);
 }
