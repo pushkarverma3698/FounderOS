@@ -80,7 +80,7 @@ async function runFillPass(
 
   const session = await openApplyPage(url, ats);
   try {
-    const fields = await scrapeFormFields(session.page);
+    const fields = await scrapeFormFields(session.page, ats);
     if (fields.length === 0) {
       log.warn({ url, ats }, "Scraped zero fillable fields");
       await session.close();
