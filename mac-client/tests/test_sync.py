@@ -128,3 +128,82 @@ def test_save_then_load_round_trips(tmp_path):
                      url="https://x/1", brief_rank=1)]
     sync.save_queue(jobs, path)
     assert sync.load_queue(path)[0].company == "Adyen"
+
+
+def test_fetch_s3_artifact_writes_the_file_on_success(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: FakeRun(stdout=b"PDF-BYTES-LONGER-THAN-MIN-BYTES")
+    )
+    dest = tmp_path / "sub" / "tailored_cv.pdf"
+    ok = sync._fetch_s3_artifact("some/key.pdf", dest, min_bytes=10)
+    assert ok is True
+    assert dest.read_bytes() == b"PDF-BYTES-LONGER-THAN-MIN-BYTES"
+
+
+def test_fetch_s3_artifact_rejects_a_short_or_failed_response(tmp_path, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeRun(returncode=1, stdout=b""))
+    dest = tmp_path / "tailored_cv.pdf"
+    ok = sync._fetch_s3_artifact("some/key.pdf", dest, min_bytes=10)
+    assert ok is False
+    assert not dest.exists()
+
+
+def test_fetch_s3_artifact_skips_an_already_cached_file(tmp_path, monkeypatch):
+    dest = tmp_path / "tailored_cv.pdf"
+    dest.write_bytes(b"already here")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not run"))
+    ok = sync._fetch_s3_artifact("some/key.pdf", dest, min_bytes=10)
+    assert ok is True
+
+
+def test_fetch_s3_artifact_creates_the_parent_directory(tmp_path, monkeypatch):
+    # Regression guard: the first draft of this helper dropped the mkdir the
+    # inline code it replaced already had, which would fail write_bytes for
+    # any job whose directory wasn't already created by an earlier fetch.
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeRun(stdout=b"x" * 50))
+    dest = tmp_path / "brand-new-job-dir" / "cover_letter.txt"
+    assert not dest.parent.exists()
+    ok = sync._fetch_s3_artifact("some/key.txt", dest, min_bytes=20)
+    assert ok is True
+    assert dest.read_bytes() == b"x" * 50
+
+
+def test_fetch_s3_artifact_against_the_cvs_real_call_shape(tmp_path, monkeypatch):
+    # save_queue() calls this with min_bytes=100 for the CV specifically —
+    # exercise that exact threshold, not just the letter's smaller one.
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeRun(stdout=b"%PDF-1.4" + b"x" * 100))
+    dest = tmp_path / "tailored_cv.pdf"
+    assert sync._fetch_s3_artifact("cv/key.pdf", dest, min_bytes=100) is True
+    # A response only just over the letter's threshold (20) must still be
+    # rejected at the CV's real threshold (100) — proves min_bytes is honoured
+    # per call, not hardcoded inside the helper.
+    dest2 = tmp_path / "too_short.pdf"
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeRun(stdout=b"x" * 50))
+    assert sync._fetch_s3_artifact("cv/key2.pdf", dest2, min_bytes=100) is False
+
+
+def test_queue_job_round_trips_the_cover_letter_key(tmp_path, monkeypatch):
+    # save_queue() now also attempts a real S3 fetch for any job carrying
+    # either key — mock subprocess so this stays a $0, offline test like
+    # every other test in this file that touches subprocess.
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeRun(returncode=1))
+    path = tmp_path / "queue.json"
+    jobs = [
+        QueueJob(
+            id="a", company="Adyen", title="SRE", track="backend",
+            url="https://x/1", brief_rank=1,
+            tailored_cv_s3_key="ready-applications/x/cv.pdf",
+            cover_letter_s3_key="ready-applications/x/cover_letter.txt",
+        )
+    ]
+    sync.save_queue(jobs, path)
+    loaded = sync.load_queue(path)
+    assert loaded[0].cover_letter_s3_key == "ready-applications/x/cover_letter.txt"
+
+
+def test_from_row_maps_the_cover_letter_key():
+    row = {"id": "a", "company": "Adyen", "title": "SRE", "track": "backend",
+           "url": "https://x/1", "brief_rank": 1,
+           "cover_letter_s3_key": "ready-applications/x/cover_letter.txt"}
+    job = QueueJob.from_row(row)
+    assert job.cover_letter_s3_key == "ready-applications/x/cover_letter.txt"
