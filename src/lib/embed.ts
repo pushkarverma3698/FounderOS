@@ -118,7 +118,7 @@ export function chunkText(text: string, maxChars = 1800, overlap = 200): string[
         currentHeadings.pop();
       }
       currentHeadings.push({ level, text: title });
-      lastIndex = match.index;
+      lastIndex = match.index + match[0].length;
     }
   }
 
