@@ -104,6 +104,15 @@ def run_remote(sql: str) -> str:
 #: client ends up typing an address he changed three weeks ago.
 REMOTE_PROFILE_PATH = "/opt/founderos-data/apply-profile.json"
 
+#: aws CLI has neither credentials nor a bucket name without this. Both only
+#: ever reach the Node process via systemd's EnvironmentFile= — never an SSH
+#: login shell. Found live, 2026-08-25: every _fetch_s3_artifact call failed
+#: silently (aws: command not found, and even once installed, $STORAGE_BUCKET
+#: was empty) for both the cover letter and the pre-existing tailored CV —
+#: the function's designed-to-be-silent failure mode had hidden a fetch that
+#: had never once worked.
+REMOTE_ENV_FILE = "/opt/founderos/.env"
+
 
 def fetch_profile() -> str | None:
     """The apply profile as it stands on the VPS, or None if there is none yet.
@@ -171,7 +180,11 @@ def _fetch_s3_artifact(s3_key: str, dest_path: Path, min_bytes: int) -> bool:
         return True
     try:
         dest_path.parent.mkdir(parents=True, exist_ok=True)
-        cmd = ["ssh", SSH_HOST, f'aws s3 cp "s3://$STORAGE_BUCKET/{s3_key}" -']
+        cmd = [
+            "ssh", SSH_HOST,
+            f'set -a; source {REMOTE_ENV_FILE}; set +a; '
+            f'aws s3 cp "s3://$STORAGE_BUCKET/{s3_key}" -',
+        ]
         proc = subprocess.run(cmd, capture_output=True, timeout=30, check=False)
         if proc.returncode == 0 and len(proc.stdout) > min_bytes:
             dest_path.write_bytes(proc.stdout)

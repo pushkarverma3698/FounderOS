@@ -168,6 +168,27 @@ def test_fetch_s3_artifact_creates_the_parent_directory(tmp_path, monkeypatch):
     assert dest.read_bytes() == b"x" * 50
 
 
+def test_fetch_s3_artifact_sources_the_env_file_before_calling_aws(tmp_path, monkeypatch):
+    # Found live, 2026-08-25: this fetch failed on every call, on any machine,
+    # because a bare SSH shell has neither the aws CLI's credentials nor
+    # $STORAGE_BUCKET — both only ever reach the Node process via systemd's
+    # EnvironmentFile=. Silent-failure-by-design (this function's whole
+    # contract) hid a fetch that had never once worked, for the CV as much as
+    # the cover letter. This test pins the fix so it can't regress unnoticed
+    # the same way.
+    captured_cmd = []
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda cmd, **k: captured_cmd.append(cmd) or FakeRun(stdout=b"x" * 50),
+    )
+    sync._fetch_s3_artifact("some/key.txt", tmp_path / "out.txt", min_bytes=20)
+    ssh_payload = captured_cmd[0][-1]
+    assert f"source {sync.REMOTE_ENV_FILE}" in ssh_payload
+    assert "aws s3 cp" in ssh_payload
+    # The source must run BEFORE the aws call, or $STORAGE_BUCKET is still unset.
+    assert ssh_payload.index("source") < ssh_payload.index("aws s3 cp")
+
+
 def test_fetch_s3_artifact_against_the_cvs_real_call_shape(tmp_path, monkeypatch):
     # save_queue() calls this with min_bytes=100 for the CV specifically —
     # exercise that exact threshold, not just the letter's smaller one.
