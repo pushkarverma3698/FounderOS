@@ -15,6 +15,7 @@ otherwise.
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -23,7 +24,7 @@ from playwright.async_api import async_playwright
 from . import ledger
 from .adapters import ats_for_url, field_map_for, planned_fills
 from .profile import ApplyProfile, load_profile, missing_resumes
-from .sync import QueueJob, SyncError, load_queue, push_outcomes
+from .sync import QueueJob, SyncError, QUEUE_DIR, load_queue, push_outcomes
 
 #: Per-field fill timeout. Short: a selector that is not on this page should
 #: cost a moment, not ten seconds times four fields times twenty jobs.
@@ -117,6 +118,18 @@ async def _upload_first(page, selectors: tuple[str, ...], path: str) -> bool:
     return False
 
 
+def copy_to_clipboard(text: str) -> bool:
+    """Best-effort, macOS only (pbcopy) — this client only runs on the
+    founder's Mac. Never raises: a clipboard failure must not stop the job
+    from opening, only cost the founder one manual copy.
+    """
+    try:
+        subprocess.run(["pbcopy"], input=text.encode(), timeout=5, check=True)
+        return True
+    except Exception:
+        return False
+
+
 from .liveness import classify_response
 
 
@@ -188,6 +201,14 @@ async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str)
         # which is the normal case on a recycled page.
         pass
 
+    cover_letter_path = QUEUE_DIR / job.id / "cover_letter.txt"
+    cover_letter_copied = False
+    if cover_letter_path.is_file():
+        try:
+            cover_letter_copied = copy_to_clipboard(cover_letter_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            cover_letter_copied = False
+
     await page.evaluate(
         OVERLAY_JS.read_text(),
         {
@@ -196,6 +217,7 @@ async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str)
             "title": job.title,
             "filled": filled,
             "skipped": skipped,
+            "cover_letter_copied": cover_letter_copied,
         },
     )
 

@@ -56,6 +56,12 @@ node --version && pnpm --version     # confirm
 # sqlite3 — needed by the one-time Chroma→pgvector migration script
 sudo apt-get install -y sqlite3
 
+# awscli — the mac-client apply tool fetches tailored CVs/cover letters by
+# SSHing in and running `aws s3 cp`. Missing this (found live, 2026-08-25)
+# fails that fetch silently on every call — the founder sees no tailored
+# CV/letter and nothing says why.
+sudo apt-get install -y awscli
+
 # Docker (for Postgres + Ollama)
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker founderos   # re-login after this
