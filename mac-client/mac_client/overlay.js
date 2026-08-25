@@ -233,5 +233,9 @@
   bar.append(summary, skip, submit);
   document.body.appendChild(bar);
   // Job pages are long; the bar is fixed, but the page must not sit under it.
-  document.body.style.paddingBottom = "96px";
+  // Computed from the real rendered height (not a fixed guess) so it stays
+  // correct regardless of how many status lines or how long the company/title/
+  // skipped-list text is — a fixed number clipped real content the moment this
+  // bar grew past what it was sized for.
+  document.body.style.paddingBottom = `${bar.getBoundingClientRect().height + 16}px`;
 };
