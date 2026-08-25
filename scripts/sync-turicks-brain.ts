@@ -396,6 +396,21 @@ function collectDocs(rootDir: string): DocEntry[] {
     });
   }
 
+  // ── Session Logs (Episodic Memory) ─────────────────────────────────────────
+  const sessionsDir = join(root, "docs/sessions");
+  if (existsSync(sessionsDir)) {
+    for (const file of readdirSync(sessionsDir).filter((f) => f.endsWith(".md"))) {
+      const content = readFile(join(sessionsDir, file));
+      docs.push({
+        entry_type: "session",
+        title: titleFromFilename(file),
+        content,
+        source: `docs/sessions/${file}`,
+        tags: ["session", "episodic-memory", "metrics"],
+      });
+    }
+  }
+
   return docs;
 }
 
@@ -499,7 +514,7 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
 
   const sha = contentSha(entry.content);
   const counted = await db.execute(sql`
-    SELECT count(*)::int AS n FROM turicks_brain
+    SELECT count(*)::int AS n FROM brain.turicks_brain
     WHERE metadata->>'source_path' = ${entry.source}
       AND metadata->>'content_sha' = ${sha}
   `);
@@ -512,7 +527,7 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
 
   // Remove prior chunks for this source (idempotent re-run).
   await db.execute(
-    sql`DELETE FROM turicks_brain WHERE metadata->>'source_path' = ${entry.source}`,
+    sql`DELETE FROM brain.turicks_brain WHERE metadata->>'source_path' = ${entry.source}`,
   );
 
   for (let i = 0; i < chunks.length; i++) {
@@ -526,7 +541,7 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
       content_sha: sha,
     };
     await db.execute(sql`
-      INSERT INTO turicks_brain (content, metadata, embedding)
+      INSERT INTO brain.turicks_brain (content, metadata, embedding)
       VALUES (${chunks[i]!}, ${JSON.stringify(metadata)}::jsonb, ${toVector(embeddings[i]!)}::vector)
     `);
   }
@@ -595,7 +610,7 @@ async function main() {
       else skipped++;
     } catch (err) {
       failures++;
-      console.error(`❌ Failed: ${doc.title} — ${(err as Error).message}`);
+      console.error(`❌ Failed: ${doc.title}`, err);
     }
   }
 

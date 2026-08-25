@@ -132,6 +132,56 @@ describe("invokeWorkerWithFallbacks", () => {
     expect(res.content).toBe("from the last one");
   });
 
+  // T1c, 2026-08-25: tailorCv and buildCoverLetter both call this function
+  // with NEITHER callbacks NOR metadata attached, so every tailoring call was
+  // invisible to ai_call_costs and therefore to the daily budget cap — even
+  // though the kernel's own graph has attached BudgetGuardCallback since the
+  // beginning. This is the wiring that closes that gap. (BudgetGuardCallback's
+  // own cost math already has dedicated coverage in
+  // tests/unit/infra/budget.test.ts — these tests are about the wiring, not
+  // re-proving that arithmetic.)
+  //
+  // Placed BEFORE "propagates the primary error when no fallbacks are
+  // configured", deliberately: that test's `vi.doMock(...buildFallbackModels:
+  // () => [])` outlives `beforeEach`'s `vi.resetModules()` for whatever runs
+  // after it in the same file, so a fallback-path test placed later would
+  // silently see an empty fallback chain and fail on an unrelated cause.
+  describe("cost attribution", () => {
+    it("passes no cost config to invoke when no attribution is given", async () => {
+      primary.mockResolvedValue({ content: "ok" });
+      await invoke();
+      expect(primary.mock.calls[0]?.[1]).toBeUndefined();
+    });
+
+    it("attaches cost metadata and a budget callback when attribution is given", async () => {
+      const { invokeWorkerWithFallbacks } = await import("../../../src/agents/worker-invoke.js");
+      const { BudgetGuardCallback } = await import("../../../src/infra/budget.js");
+      primary.mockResolvedValue({ content: "ok" });
+
+      await invokeWorkerWithFallbacks([{ role: "user", content: "hi" }], {
+        attribution: { agent: "jobhunt", stage: "worker" },
+      });
+
+      const config = primary.mock.calls[0]?.[1] as { metadata?: Record<string, string>; callbacks?: unknown[] };
+      expect(config.metadata).toEqual({ cost_agent: "jobhunt", cost_stage: "worker" });
+      expect(config.callbacks).toHaveLength(1);
+      expect(config.callbacks?.[0]).toBeInstanceOf(BudgetGuardCallback);
+    });
+
+    it("carries the same cost config through to a fallback attempt", async () => {
+      const { invokeWorkerWithFallbacks } = await import("../../../src/agents/worker-invoke.js");
+      primary.mockRejectedValue(providerError(503));
+      fallbackA.mockResolvedValue({ content: "from flash-lite" });
+
+      await invokeWorkerWithFallbacks([{ role: "user", content: "hi" }], {
+        attribution: { agent: "jobhunt", stage: "worker" },
+      });
+
+      const config = fallbackA.mock.calls[0]?.[1] as { metadata?: Record<string, string> };
+      expect(config.metadata).toEqual({ cost_agent: "jobhunt", cost_stage: "worker" });
+    });
+  });
+
   it("propagates the primary error when no fallbacks are configured", async () => {
     vi.doMock("../../../src/agents/model.js", async (importOriginal) => {
       const actual = await importOriginal<typeof import("../../../src/agents/model.js")>();

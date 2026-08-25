@@ -176,8 +176,23 @@ def _fetch_s3_artifact(s3_key: str, dest_path: Path, min_bytes: int) -> bool:
     failure — a missing artifact must never stop the rest of the queue from
     syncing, the same reasoning save_queue() already applies to the CV.
     """
+    ok, _reason = _fetch_s3_artifact_verbose(s3_key, dest_path, min_bytes)
+    return ok
+
+
+def _fetch_s3_artifact_verbose(s3_key: str, dest_path: Path, min_bytes: int) -> tuple[bool, str | None]:
+    """Same contract as `_fetch_s3_artifact`, but keeps WHY on failure instead
+    of discarding it.
+
+    T1a, 2026-08-25: the bool-only version made a failed fetch indistinguishable
+    from "nothing to fetch" — `save_queue` called it and threw the result away,
+    so a tailored CV that silently never arrived looked identical to one that
+    arrived fine, right up until the generic PDF shipped in its place. This is
+    what `save_queue` now reports through, and what `_fetch_s3_artifact` above
+    still is for callers that only need the boolean.
+    """
     if dest_path.exists():
-        return True
+        return True, None
     try:
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         cmd = [
@@ -188,23 +203,40 @@ def _fetch_s3_artifact(s3_key: str, dest_path: Path, min_bytes: int) -> bool:
         proc = subprocess.run(cmd, capture_output=True, timeout=30, check=False)
         if proc.returncode == 0 and len(proc.stdout) > min_bytes:
             dest_path.write_bytes(proc.stdout)
-            return True
-    except Exception:
-        pass
-    return False
+            return True, None
+        stderr = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
+        reason = stderr[:200] if stderr else f"empty or too-short response ({len(proc.stdout)} bytes, need >{min_bytes})"
+        return False, reason
+    except subprocess.TimeoutExpired:
+        return False, "ssh timed out after 30s"
+    except Exception as err:  # noqa: BLE001 — a fetch must never crash the rest of the sync
+        return False, str(err)[:200]
 
 
-def save_queue(jobs: list[QueueJob], path: Path = QUEUE_PATH) -> None:
-    """Cache the queue so the browser session does not need the network."""
+def save_queue(jobs: list[QueueJob], path: Path = QUEUE_PATH) -> list[tuple[str, str]]:
+    """Cache the queue so the browser session does not need the network.
+
+    Returns one (company, reason) pair per S3 artifact that failed to fetch.
+    T1a: this used to call `_fetch_s3_artifact` and discard the result, so a
+    fetch that never worked was indistinguishable from one that never ran —
+    the caller (`wake.py`) folds this into what the founder is told, instead.
+    A fetch failure never blocks the rest of the queue from syncing.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps([j.__dict__ for j in jobs], indent=2))
 
+    failures: list[tuple[str, str]] = []
     for job in jobs:
         job_dir = path.parent / job.id
         if job.tailored_cv_s3_key:
-            _fetch_s3_artifact(job.tailored_cv_s3_key, job_dir / "tailored_cv.pdf", min_bytes=100)
+            ok, reason = _fetch_s3_artifact_verbose(job.tailored_cv_s3_key, job_dir / "tailored_cv.pdf", min_bytes=100)
+            if not ok:
+                failures.append((job.company, f"tailored CV — {reason}"))
         if job.cover_letter_s3_key:
-            _fetch_s3_artifact(job.cover_letter_s3_key, job_dir / "cover_letter.txt", min_bytes=20)
+            ok, reason = _fetch_s3_artifact_verbose(job.cover_letter_s3_key, job_dir / "cover_letter.txt", min_bytes=20)
+            if not ok:
+                failures.append((job.company, f"cover letter — {reason}"))
+    return failures
 
 
 def load_queue(path: Path = QUEUE_PATH) -> list[QueueJob]:

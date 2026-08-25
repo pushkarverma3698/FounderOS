@@ -12,7 +12,54 @@ it, say so and drop it (rule #26).
 
 ---
 
-## STATUS UPDATE — 2026-08-25 12:0x UTC (read this before anything else)
+## ⚠ THIS BRIEF IS COMPLETE — 2026-08-25 18:0x UTC
+
+**Executed and merged as PR #576 (`ab0c170`). Do not work it again.** What remains is one task and
+it is T6, promoted below.
+
+| Task | Final state |
+|---|---|
+| T1a — swallowed S3 fetch / `$STORAGE_BUCKET` | **DONE** `3672c58`, `89c6b69` |
+| T1b — silent generic substitution | **DONE** `e659826` — `uses_tailored_cv()` + three-state overlay label |
+| T1c — bulk tailoring cron | **BUILT THEN REJECTED** `400d145` → `fff7340`. Correct call — see below |
+| T2 — retire the VPS lane | **DONE, founder decision** `e7f1288` + orphan sweep + CI tombstones |
+| T3 — reply tracking | **DONE** `c7dfcd2` — `pipeline-followup.ts`, `/replied`, `/rejected` |
+| T4 — Recruitee + Workable | **DONE** `761084e` |
+| T5 — cover letter to the Mac | **DONE** `f0b2aa4`, `c2f3cf2`, `dc80f0a` |
+| **T6 — fabrication guard** | **NOT DONE — now the only thing blocking both throughput and safety** |
+
+### What the execution measured
+
+- **4 of 62 queue rows carried a tailored CV**; 58 fell back to generic with no warning anywhere.
+- **`tailorCv()` fabricates: 36 invented claims across 4 CVs** (Kubernetes, PyTorch, Domain-Driven
+  Design, FastAPI) against a base CV that contains none of them. `findSlop()` is a banned-word list,
+  not a claim check.
+
+### Why T1c was rejected, and why that was right
+
+Tailoring is a deliberate act triggered by `/draft N`, not a background job — and running an
+unguarded fabricating tailor on a 30-minute cadence over a 606-row backlog would spend the IND
+sponsor pool, which is finite and non-renewable, on fabricated résumés. I proposed T1c; rejecting it
+was the correct call, and the safety argument only became visible because the executing session ran
+it against real rows first, as this brief instructed.
+
+The condition for revisiting is stated in `fff7340`: *"Do not re-add the batch cron without a
+fabrication guard in front of it."*
+
+### T6 is now the whole job — promoted from "only after T1–T3"
+
+Build the entity check: ~40 lines that extract capitalised entity spans and `YYYY` / `Mon YYYY`
+tokens from the tailored output, assert each appears in the base CV, and fail the packet naming the
+offending span. Same shape as `validateStepResult`. Then re-add the batch cron behind it — that
+closes the risk and lifts the throughput ceiling in one change. Wire `humanise.ts` (still zero
+callers) while you are in there.
+
+**Verified independently against the merged tree, 2026-08-25:** `tailor-cv.ts` gained only
+cost-attribution metadata in this batch. No claim check exists.
+
+---
+
+## Superseded status update — 2026-08-25 12:0x UTC (kept for the record)
 
 `main` moved from `ce99ff6` to `3637f4e` while this brief was being written. Another session shipped
 11 commits that land squarely on it. **Re-scoped below; do not work the original T1a or T5.**
