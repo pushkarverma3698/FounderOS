@@ -63,4 +63,24 @@ describe("chunkText", () => {
     // The break should keep "Second paragraph" intact in a later chunk.
     expect(chunks.some((c) => c.includes("Second paragraph body."))).toBe(true);
   });
+
+  it("prefixes each section with its heading breadcrumb, without duplicating the raw heading line", () => {
+    const md = "# Title\n\nIntro content.\n\n## Sub A\n\nBody of sub A.\n\n## Sub B\n\nBody of sub B.\n";
+    const chunks = chunkText(md, 1800, 200);
+
+    expect(chunks).toEqual([
+      "Title\n\nIntro content.",
+      "Title › Sub A\n\nBody of sub A.",
+      "Title › Sub B\n\nBody of sub B.",
+    ]);
+    // The raw "## Sub A" markdown must not survive into the chunk body — the
+    // breadcrumb prefix already carries that title cleanly.
+    for (const c of chunks) expect(c).not.toMatch(/^#{1,3}\s/m);
+  });
+
+  it("builds a breadcrumb from nested headings and resets it on a sibling heading", () => {
+    const md = "# A\n\n## B\n\ntext1\n\n## C\n\ntext2\n";
+    const chunks = chunkText(md, 1800, 200);
+    expect(chunks).toEqual(["A › B\n\ntext1", "A › C\n\ntext2"]);
+  });
 });
