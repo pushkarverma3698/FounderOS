@@ -29,12 +29,20 @@
   const coverLetterLine = data.cover_letter_copied
     ? `<div style="opacity:.75;font-size:13px;color:#8FD19E">📋 Cover letter copied to clipboard</div>`
     : `<div style="opacity:.75;font-size:13px;color:#FFCC66">No cover letter yet — ask the bot to draft one for ${escapeHtml(data.company)}</div>`;
+  // THE SILENT SUBSTITUTION this line exists to stop: a tailored CV that never
+  // arrived falls back to the generic resume, which uploads fine and looks
+  // identical to a real tailored one unless this says otherwise — right where
+  // the founder is about to press SUBMIT.
+  const resumeLine = data.tailored_cv_missing
+    ? `<div style="font-size:13px;color:#FF6B6B">⚠️ Generic CV — the tailored one for this role never arrived</div>`
+    : "";
   summary.innerHTML =
     `<div style="font-weight:600;margin-bottom:2px">${data.position} — ` +
     `${escapeHtml(data.company)} · ${escapeHtml(data.title)}</div>` +
     `<div style="opacity:.75;font-size:13px">Filled: ${escapeHtml(filled)}</div>` +
     `<div style="opacity:.75;font-size:13px;color:#FFCC66">Left for you: ${escapeHtml(skipped)}</div>` +
-    coverLetterLine;
+    coverLetterLine +
+    resumeLine;
 
   const skip = button("SKIP", "#2A2F36", "#fff");
   const submit = button("SUBMIT &amp; NEXT →", "#00A65A", "#fff");

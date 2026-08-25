@@ -53,6 +53,26 @@ class ApplyProfile:
                 return str(tailored)
         return self.resumes.get(track) or self.default_resume
 
+    def tailored_cv_missing(self, job) -> bool:
+        """True when this row was promised a tailored CV and it did not arrive.
+
+        THE SILENT SUBSTITUTION this guards against: ``resume_for`` falls back to
+        the generic resume whenever the tailored PDF is absent, and a generic
+        resume passes every file-exists check — so a fetch that never ran or
+        failed looked identical to a row that was never tailored at all. The
+        difference is ``tailored_cv_s3_key``: a row with one was PROMISED a
+        tailored CV; a row without one was never queued for tailoring, and the
+        generic fallback for it is correct, not a problem.
+        """
+        s3_key = getattr(job, "tailored_cv_s3_key", None)
+        if not s3_key:
+            return False
+        job_id = getattr(job, "id", None)
+        if not job_id:
+            return True
+        tailored = Path(__file__).resolve().parent.parent / ".queue" / job_id / "tailored_cv.pdf"
+        return not tailored.is_file()
+
 
 def load_profile(path: Path = DEFAULT_PROFILE_PATH) -> ApplyProfile:
     """Read and validate the profile, or raise with the exact thing to fix."""
@@ -110,6 +130,14 @@ def missing_resumes(profile: ApplyProfile, jobs: list[any] | list[str]) -> list[
                 problems.append(f"{getattr(job, 'company', job.track)} ({job.track}): no resume configured")
             elif not Path(candidate).expanduser().is_file():
                 problems.append(f"{getattr(job, 'company', job.track)} ({job.track}): file not found — {candidate}")
+            elif profile.tailored_cv_missing(job):
+                # candidate resolved to something real (the generic fallback),
+                # but this row was promised a TAILORED one that never arrived —
+                # the fallback would otherwise ship silently.
+                problems.append(
+                    f"{getattr(job, 'company', job.track)} ({job.track}): tailored CV never arrived "
+                    "— will fall back to the generic resume unless fixed"
+                )
     else:
         for track in sorted(set(jobs)):
             candidate = profile.resume_for(track)
@@ -118,3 +146,19 @@ def missing_resumes(profile: ApplyProfile, jobs: list[any] | list[str]) -> list[
             elif not Path(candidate).expanduser().is_file():
                 problems.append(f"{track}: file not found — {candidate}")
     return problems
+
+
+def resume_unusable(profile: ApplyProfile, job) -> bool:
+    """True only when there is NOTHING this row could upload at all.
+
+    The one condition allowed to remove a job from today's browser queue
+    (`apply.py`'s pre-flight filter). A row whose tailored CV is merely
+    missing still has the generic PDF to fall back to — `missing_resumes`
+    reports that as a problem so it is announced, but it is a problem worth
+    showing, not a reason to silently drop the job for a day when it could
+    still be sent today with the founder's knowledge.
+    """
+    candidate = profile.resume_for(job.track, getattr(job, "id", None))
+    if not candidate:
+        return True
+    return not Path(candidate).expanduser().is_file()
