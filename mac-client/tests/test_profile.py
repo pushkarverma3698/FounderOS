@@ -136,6 +136,29 @@ def test_missing_resumes_is_quiet_when_the_row_never_had_a_tailored_cv(tmp_path)
     assert missing_resumes(profile, [job]) == []
 
 
+def test_uses_tailored_cv_is_false_for_a_row_that_was_never_tailored(tmp_path):
+    # QA, 2026-08-25: the FIRST version of this fix only warned when a tailored
+    # CV was promised (tailored_cv_s3_key set) and then missing. Measured
+    # against the real queue that covered 4 rows out of 62 — the other 58 had
+    # never been tailored at all, uploaded the generic CV, and the overlay said
+    # NOTHING. That is the same silent substitution T1b exists to stop, just in
+    # a different shape: what the founder needs to know at SUBMIT time is
+    # "is this the tailored CV or not", regardless of why.
+    cv = tmp_path / "generic.pdf"
+    cv.write_bytes(b"%PDF-1.4 real enough")
+    path = write(tmp_path, {**VALID, "default_resume": str(cv)})
+    profile = load_profile(path)
+    job = QueueJob(
+        id="qa-never-tailored-0000-0000-0000-000000000004",
+        company="Visa", title="Software Engineer", track="ai",
+        url="https://x", brief_rank=1, tailored_cv_s3_key=None,
+    )
+    # Not a "problem" (nothing is broken), but it IS a generic CV and the
+    # overlay must be able to say so.
+    assert profile.tailored_cv_missing(job) is False
+    assert profile.uses_tailored_cv(job) is False
+
+
 def test_resume_unusable_is_true_with_no_candidate_at_all():
     # Bypass load_profile's own "no resume at all" refusal by constructing the
     # dataclass directly — this test is about resume_unusable, not load_profile.

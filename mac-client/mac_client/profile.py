@@ -53,6 +53,24 @@ class ApplyProfile:
                 return str(tailored)
         return self.resumes.get(track) or self.default_resume
 
+    def uses_tailored_cv(self, job) -> bool:
+        """True when this job will upload its OWN tailored PDF.
+
+        The question the founder actually needs answered at SUBMIT time is "is
+        this the tailored CV, or the generic one" — which is NOT the same
+        question as `tailored_cv_missing` below. A row that was never queued
+        for tailoring at all is not a *fault*, but it still uploads the generic
+        CV, and staying quiet about it is the same silent substitution T1b
+        exists to stop. Measured against the real queue on 2026-08-25: 4 of 62
+        rows carried a tailored CV; the other 58 fell back to generic with no
+        warning shown anywhere.
+        """
+        job_id = getattr(job, "id", None)
+        if not job_id:
+            return False
+        tailored = Path(__file__).resolve().parent.parent / ".queue" / job_id / "tailored_cv.pdf"
+        return tailored.is_file()
+
     def tailored_cv_missing(self, job) -> bool:
         """True when this row was promised a tailored CV and it did not arrive.
 

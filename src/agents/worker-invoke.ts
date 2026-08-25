@@ -140,7 +140,13 @@ export async function invokeWorkerWithFallbacks(
   const invokeConfig = opts.attribution
     ? {
         metadata: costAttributionMetadata(opts.attribution),
-        callbacks: [new BudgetGuardCallback(createRunBudget(), process.env["WORKER_AGENT_MODEL"] ?? process.env["AGENT_MODEL"] ?? "", costSink)],
+        // `||`, NOT `??`: prod sets `WORKER_AGENT_MODEL=` (an EMPTY STRING, not
+        // unset), and `??` only falls through on null/undefined — so the
+        // nullish version passed "" as the model id and the cost row would be
+        // priced with DEFAULT_COST whenever a provider response carried no
+        // model name of its own. Measured on prod 2026-08-25. Same class of
+        // bug as jq's `//` not catching "" (2026-08-08).
+        callbacks: [new BudgetGuardCallback(createRunBudget(), process.env["WORKER_AGENT_MODEL"] || process.env["AGENT_MODEL"] || "", costSink)],
       }
     : undefined;
 

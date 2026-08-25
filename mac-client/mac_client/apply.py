@@ -219,6 +219,7 @@ async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str)
             "skipped": skipped,
             "cover_letter_copied": cover_letter_copied,
             "tailored_cv_missing": profile.tailored_cv_missing(job),
+            "uses_tailored_cv": profile.uses_tailored_cv(job),
         },
     )
 
