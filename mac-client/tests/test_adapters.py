@@ -26,6 +26,11 @@ def test_recognises_each_supported_platform():
     assert ats_for_url("https://job-boards.greenhouse.io/x/jobs/2") == "greenhouse"
     assert ats_for_url("https://jobs.lever.co/mollie/abc") == "lever"
     assert ats_for_url("https://jobs.ashbyhq.com/altura/xyz") == "ashby"
+    # T4, 2026-08-25: any Workable/Recruitee posting used to reach the founder's
+    # queue with ats_for_url() returning None — a blank form, no autofill at all,
+    # even though the VPS side has scraped both platforms all along.
+    assert ats_for_url("https://apply.workable.com/gresb/j/A5B057E570/apply/") == "workable"
+    assert ats_for_url("https://ockto.recruitee.com/o/senior-site-reliability-engineer") == "recruitee"
 
 
 def test_an_unknown_host_returns_none_rather_than_a_guess():
@@ -58,6 +63,33 @@ def test_the_plan_carries_the_real_values():
     plan = dict((label, value) for label, _, value in planned_fills(FIELD_MAPS["greenhouse"], PROFILE))
     assert plan["email"] == "p@example.com"
     assert plan["first name"] == "Pushkar"
+
+
+def test_workable_gets_split_name_fields():
+    # tests/fixtures/apply-forms/workable-gresb.json: #firstname / #lastname,
+    # two separate fields — same shape as Greenhouse, not Lever's single name.
+    labels = [label for label, _, _ in planned_fills(FIELD_MAPS["workable"], PROFILE)]
+    assert "first name" in labels and "last name" in labels
+    assert "name" not in labels
+
+
+def test_recruitee_gets_one_name_field_not_two():
+    # tests/fixtures/apply-forms/recruitee-ockto.json: input[name="candidate.name"],
+    # one field — same shape as Lever, filling first/last separately would leave
+    # the surname in a box that does not exist.
+    labels = [label for label, _, _ in planned_fills(FIELD_MAPS["recruitee"], PROFILE)]
+    assert "name" in labels
+    assert "first name" not in labels
+
+
+def test_workable_and_recruitee_plans_carry_the_real_values():
+    workable_plan = dict((label, value) for label, _, value in planned_fills(FIELD_MAPS["workable"], PROFILE))
+    assert workable_plan["email"] == "p@example.com"
+    assert workable_plan["first name"] == "Pushkar"
+
+    recruitee_plan = dict((label, value) for label, _, value in planned_fills(FIELD_MAPS["recruitee"], PROFILE))
+    assert recruitee_plan["email"] == "p@example.com"
+    assert recruitee_plan["name"] == "Pushkar Verma"
 
 
 def test_no_adapter_offers_to_fill_a_free_text_or_authorisation_field():
