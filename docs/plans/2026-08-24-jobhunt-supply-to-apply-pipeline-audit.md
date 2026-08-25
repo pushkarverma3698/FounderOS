@@ -547,3 +547,54 @@ it is the product, and nobody has read it.
   F4 against the real `buildFillPlan` and a live-captured fixture.
 - **Base CV still invisible.**
 - **Probabilities are judgement.** I defend the ordering, not the absolute numbers.
+
+---
+
+# REV 3 — 2026-08-25: F1 confirmed empirically, half fixed
+
+`main` moved `ce99ff6` → `3637f4e`. Another session shipped 11 commits into the Mac lane, and one of
+them settles the single claim rev 2 could not verify.
+
+**Rev 2's F1 was right, and understated it.** From the new comment at `mac-client/sync.py:104-112`:
+
+> *"Found live, 2026-08-25: every `_fetch_s3_artifact` call failed silently (`aws: command not
+> found`, and even once installed, `$STORAGE_BUCKET` was empty) for both the cover letter and the
+> pre-existing tailored CV — the function's designed-to-be-silent failure mode had hidden a fetch
+> that had never once worked."*
+
+Rev 2 argued from the call graph that "almost no row carries a tailored CV". The measured answer is
+**zero rows ever have**. `awscli` was not installed on the VPS at all. Every application the Mac lane
+has ever sent used the generic CV.
+
+This is the clearest possible vindication of the finding *and* of why it was rated critical: three
+correct comments about failing loudly sat in neighbouring files while a bare `except Exception: pass`
+hid a fetch that had never worked once. Rule #27, exactly.
+
+## What is now fixed
+
+| Rev 2 finding | State |
+|---|---|
+| F1 half one — swallowed fetch / `$STORAGE_BUCKET` | **FIXED** — `3672c58` sources `/opt/founderos/.env`; `89c6b69` pins the command; `awscli` added to `docs/guides/DEPLOYMENT.md` |
+| F4 — cover letter never reaches the founder at the form | **FIXED, well** — `f0b2aa4` syncs it from S3 beside the CV, `c2f3cf2` copies it to the clipboard on open, `dc80f0a` shows in the overlay whether one was found, with decode/permission guards (`923eb71`, `c1d86a2`) |
+
+## What is still open, and now sharper
+
+- **F1 half two — the silent substitution.** `_fetch_s3_artifact` now returns a bool and
+  `save_queue` **discards it at both call sites** (`sync.py:205`, `sync.py:207`). `profile.py` is
+  unchanged, so `resume_for()` still substitutes the generic résumé and `missing_resumes()` still
+  reports "no problems". Now that the fetch *can* succeed, whether a row ships tailored or generic is
+  a live per-row outcome that nothing reports — worse to leave than when it always failed.
+- **F1 half three — nothing tailors in bulk.** `processUntailoredApplications` still has zero callers.
+- **F2 — two live lanes.** `telegram.ts` still registers `/apply`; `capabilities.ts` still lists
+  `submitApplication`. Unchanged.
+- **F3 — reply tracking.** Unchanged, zero writers.
+- **F5 — 3-ATS coverage.** `_HOST_MARKERS` unchanged; Recruitee and Workable still unreachable.
+
+## Revised probability
+
+Unchanged at ~10% today — the tailored CV still does not reliably ship. But the distance to the next
+band shrank: F1a and F4 were two of the five things standing between here and ~30%, and both are
+done. Finishing F1b + F1c is now roughly a day.
+
+Execution brief updated in place: `docs/plans/2026-08-25-jobhunt-apply-completion-brief.md`
+(T1a and T5 marked DONE; T1b promoted to START HERE).
