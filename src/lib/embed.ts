@@ -83,36 +83,80 @@ export async function embedTextCached(
   return vec;
 }
 
-/**
- * Split text into overlapping character chunks for embedding.
- * nomic-embed-text silently truncates long input (~2k token window), so a
- * single embed of a large doc loses its tail. Chunking keeps every section
- * retrievable. Splits on paragraph boundaries where possible to avoid cutting
- * mid-sentence.
- */
 export function chunkText(text: string, maxChars = 1800, overlap = 200): string[] {
   const clean = text.trim();
-  if (clean.length <= maxChars) return clean.length > 0 ? [clean] : [];
+  if (clean.length === 0) return [];
+
+  const chunks: string[] = [];
+  const headingRegex = /^(#{1,3})\s+(.*)$/gm;
+  const matches = [...clean.matchAll(headingRegex)];
+
+  if (matches.length === 0) {
+    return _chunkString(clean, "", maxChars, overlap);
+  }
+
+  let currentHeadings: { level: number; text: string }[] = [];
+  let lastIndex = 0;
+
+  for (let i = 0; i <= matches.length; i++) {
+    const match = i < matches.length ? matches[i]! : null;
+    const sectionEnd = match ? match.index : clean.length;
+
+    if (sectionEnd > lastIndex) {
+      const content = clean.slice(lastIndex, sectionEnd).trim();
+      if (content) {
+        const titlePath = currentHeadings.map((h) => h.text).join(" › ");
+        chunks.push(..._chunkString(content, titlePath, maxChars, overlap));
+      }
+    }
+
+    if (match) {
+      const level = match[1]!.length;
+      const title = match[2]!.trim();
+
+      while (currentHeadings.length > 0 && currentHeadings[currentHeadings.length - 1]!.level >= level) {
+        currentHeadings.pop();
+      }
+      currentHeadings.push({ level, text: title });
+      lastIndex = match.index;
+    }
+  }
+
+  return chunks;
+}
+
+function _chunkString(text: string, titlePath: string, maxChars: number, overlap: number): string[] {
+  const clean = text.trim();
+  if (clean.length === 0) return [];
+
+  const prefix = titlePath ? `${titlePath}\n\n` : "";
+  const effectiveMax = Math.max(100, maxChars - prefix.length);
+
+  if (clean.length <= effectiveMax) {
+    return [prefix + clean];
+  }
 
   const chunks: string[] = [];
   let start = 0;
   while (start < clean.length) {
-    let end = Math.min(start + maxChars, clean.length);
-    // Prefer to break on a paragraph/sentence boundary inside the last 25%.
+    let end = Math.min(start + effectiveMax, clean.length);
     if (end < clean.length) {
       const window = clean.slice(start, end);
       const breakAt = Math.max(
         window.lastIndexOf("\n\n"),
         window.lastIndexOf(". "),
-        window.lastIndexOf("\n"),
+        window.lastIndexOf("\n")
       );
-      if (breakAt > maxChars * 0.75) end = start + breakAt + 1;
+      if (breakAt > effectiveMax * 0.75) end = start + breakAt + 1;
     }
-    chunks.push(clean.slice(start, end).trim());
+    const chunkContent = clean.slice(start, end).trim();
+    if (chunkContent.length > 0) {
+      chunks.push(prefix + chunkContent);
+    }
     if (end >= clean.length) break;
-    start = end - overlap; // overlap so context isn't lost at the seam
+    start = end - overlap;
   }
-  return chunks.filter((c) => c.length > 0);
+  return chunks;
 }
 
 /** Embed many strings with bounded concurrency (avoids hammering Ollama). */

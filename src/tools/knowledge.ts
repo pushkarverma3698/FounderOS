@@ -78,7 +78,7 @@ export const searchKnowledge = tool(
     schema: z.object({
       query: z.string().describe("Keyword search query — what to look for"),
       entry_type: z
-        .enum(["adr", "brand", "case_study", "strategy", "strategic_pillar", "phase", "founder_profile"])
+        .enum(["adr", "brand", "case_study", "strategy", "strategic_pillar", "phase", "founder_profile", "session"])
         .optional()
         .nullable()
         .describe("Optional: filter by content type"),
