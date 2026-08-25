@@ -45,6 +45,11 @@ export const TOMBSTONES: string[] = [
   "src/agents/creative-department.ts",
   // Typed-object-smuggled-through-prose handoff:
   "src/agents/handoff-engineering.ts",
+  // The VPS apply-submit lane (founder decision, 2026-08-25): the Mac client
+  // (mac-client/mac_client/apply.py — the founder's own click submits) is the
+  // one apply lane now. /apply (src/gateway/apply-commands.ts, deleted) and
+  // submitApplication both retired the same day.
+  "src/agents/agent-tools/jobhunt-apply.ts",
 ];
 
 /** Frozen trees (founder decision 2026-07-07): excluded from every rule. */
