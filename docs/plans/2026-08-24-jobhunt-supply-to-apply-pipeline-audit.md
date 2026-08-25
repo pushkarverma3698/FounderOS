@@ -693,6 +693,14 @@ to roughly **30%** — with the caveat that the throughput ceiling is now the fo
 rate, because bulk tailoring is correctly disabled until the guard exists. Building the guard is what
 converts ~30% into the ~45% band, and it is about a day.
 
+## Verified fresh on the merged tree (rev 4)
+
+`pnpm lint` clean · `pnpm verify:arch` 6/6 green, **`orphan-subsystem` still 0 after the tombstones**
+· `pnpm test` **329 files, 3,614 tests passed** (146s) · `pytest mac-client/tests` **80 passed, 13
+errors** — the 13 are the same environmental playwright-browser mismatch this container has always
+had. 80 + 13 = 93, which reconciles exactly with the executing session's reported 93/93 on a Mac with
+browsers installed.
+
 ## Rev 4 limits
 
 - **The two headline numbers (4/62 rows, 36 fabricated claims) are from the other session's QA**, not
