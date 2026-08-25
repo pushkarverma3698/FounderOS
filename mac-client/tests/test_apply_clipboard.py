@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import subprocess
 
-import pytest
-
 from mac_client.apply import copy_to_clipboard
 
 
@@ -24,6 +22,8 @@ def test_copy_to_clipboard_returns_true_on_success(monkeypatch):
     args, kwargs = calls[0]
     assert args[0] == ["pbcopy"]
     assert kwargs["input"] == b"Dear hiring team,"
+    assert kwargs["timeout"] == 5
+    assert kwargs["check"] is True
 
 
 def test_copy_to_clipboard_returns_false_rather_than_raising(monkeypatch):
