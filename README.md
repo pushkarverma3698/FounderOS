@@ -22,6 +22,34 @@ I shipped this system three times before I shipped it right.
 
 **v3** deleted two of the three routers, replaced detection with prevention, and made CI enforce that the complexity can't creep back. The full autopsy — including where I fell for AI slop and how I dug out — lives in [the case studies](docs/turicks-case-studies/).
 
+### Architecture Overview
+```mermaid
+graph TD
+    subgraph Gateway [Gateway]
+        TG[Telegram Bot]
+    end
+
+    subgraph Kernel [Agent Kernel v3]
+        SUP[Supervisor Node]
+        W_SALES[Sales Dept]
+        W_ENG[Engineering Dept]
+        W_RES[Research Dept]
+        
+        SUP -->|Route| W_SALES
+        SUP -->|Route| W_ENG
+        SUP -->|Route| W_RES
+    end
+
+    subgraph Data [RAG & State]
+        PG[(Postgres)]
+        VEC[(pgvector)]
+        REDIS[(Redis Cache)]
+    end
+
+    TG <-->|Events| Kernel
+    Kernel <--> Data
+```
+
 ---
 
 ## Production Problems Solved
