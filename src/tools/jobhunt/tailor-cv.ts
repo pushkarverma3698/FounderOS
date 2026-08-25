@@ -113,10 +113,13 @@ Generate the complete, ATS-tailored Markdown CV now.
     // Prod 2026-08-21: three tailoring attempts died on gemini-flash-latest 503
     // while two configured fallbacks answered on the same key in the same
     // second. See src/agents/worker-invoke.ts.
-    const response = await invokeWorkerWithFallbacks([
-      { role: "system", content: TAILORING_SYSTEM_PROMPT },
-      { role: "user", content: userPrompt },
-    ]);
+    const response = await invokeWorkerWithFallbacks(
+      [
+        { role: "system", content: TAILORING_SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+      { attribution: { agent: "jobhunt", stage: "worker" } },
+    );
 
     const content = typeof response.content === "string" 
       ? response.content 
@@ -140,12 +143,15 @@ ${violations.map(v => `- Rule: ${v.rule}\n  Matched text: "${v.matchedText}"`).j
 
 Output the corrected full Markdown CV.`;
 
-      const revisionResponse = await invokeWorkerWithFallbacks([
-        { role: "system", content: TAILORING_SYSTEM_PROMPT },
-        { role: "user", content: userPrompt },
-        { role: "assistant", content: content },
-        { role: "user", content: revisionPrompt },
-      ]);
+      const revisionResponse = await invokeWorkerWithFallbacks(
+        [
+          { role: "system", content: TAILORING_SYSTEM_PROMPT },
+          { role: "user", content: userPrompt },
+          { role: "assistant", content: content },
+          { role: "user", content: revisionPrompt },
+        ],
+        { attribution: { agent: "jobhunt", stage: "worker" } },
+      );
 
       const revContent = typeof revisionResponse.content === "string" 
         ? revisionResponse.content 

@@ -45,12 +45,17 @@ def send(text: str) -> None:
         raise NotifyError(f"could not reach Telegram: {err}") from err
 
 
-def queue_ready_message(count: int, top: list[str]) -> str:
+def queue_ready_message(count: int, top: list[str], fetch_failures: list[tuple[str, str]] = ()) -> str:
     """What the founder reads when he opens the laptop.
 
     Names the first few roles rather than only counting them. "12 jobs ready" is
     a number he can defer; "12 ready — Adyen, Booking, Mollie" is a reason to
     start now, which is the entire point of sending anything at all.
+
+    T1a: `fetch_failures` (company, reason) surfaces here rather than only in
+    the terminal — the terminal is not open when the founder reads this on his
+    phone, and a fetch that failed silently is exactly the bug this line exists
+    to end.
     """
     if count == 0:
         # Deliberately still a message. Silence after a wake is ambiguous — it
@@ -59,11 +64,30 @@ def queue_ready_message(count: int, top: list[str]) -> str:
 
     named = "\n".join(f"• {row}" for row in top[:3])
     more = f"\n<i>+ {count - 3} more</i>" if count > 3 else ""
+    failure_lines = "\n".join(f"• {company}: {reason}" for company, reason in fetch_failures)
+    failure_block = (
+        f"\n\n⚠️ <b>{len(fetch_failures)} artifact fetch(es) failed</b>\n{failure_lines}"
+        if fetch_failures
+        else ""
+    )
     return (
         f"🎯 <b>{count} job{'s' if count != 1 else ''} ready to apply</b>\n"
-        f"{named}{more}\n\n"
+        f"{named}{more}{failure_block}\n\n"
         "<code>cd ~/Projects/founderos/mac-client && .venv/bin/python -m mac_client.apply</code>"
     )
+
+
+def session_summary_message(applied: int, skipped: int, errored: int = 0) -> str:
+    """What the founder's main channel hears after an apply session.
+
+    Before this (concern #2, 2026-08-25), the only place this ever appeared was
+    the terminal `apply.py` was run from — Telegram, his main channel, never
+    heard a single application or skip until the next brief or `/jobs`.
+    """
+    parts = [f"{applied} applied", f"{skipped} skipped"]
+    if errored:
+        parts.append(f"{errored} errored")
+    return f"📨 <b>Apply session done</b> — {', '.join(parts)}."
 
 
 def sync_failed_message(reason: str) -> str:

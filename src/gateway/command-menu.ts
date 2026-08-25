@@ -60,11 +60,6 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "jobs",
   },
   {
-    command: "apply",
-    description: "apply n — fill the real application form and show you a screenshot before anything submits",
-    group: "jobs",
-  },
-  {
     command: "ask",
     description: "ask n — write the one question that unblocks row n",
     group: "jobs",
@@ -72,6 +67,16 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
   {
     command: "applied",
     description: "applied n — mark row n applied and drop it off the queue",
+    group: "jobs",
+  },
+  {
+    command: "replied",
+    description: "replied n — mark row n of your live applications as replied to",
+    group: "jobs",
+  },
+  {
+    command: "rejected",
+    description: "rejected n — mark row n of your live applications as rejected",
     group: "jobs",
   },
   {

@@ -29,6 +29,15 @@
 
 import { childLogger } from "../infra/logger.js";
 import { buildFallbackModels, getWorkerModel, isModelFallbackError } from "./model.js";
+import {
+  BudgetGuardCallback,
+  costAttributionMetadata,
+  createRunBudget,
+  type AccruedCall,
+  type CostAttribution,
+} from "../infra/budget.js";
+import { logLlmCost } from "../db/queries.js";
+import { TENANT } from "../core/config.js";
 
 const log = childLogger({ module: "agents:worker-invoke" });
 
@@ -40,7 +49,28 @@ export interface WorkerTurn {
 
 /** The narrow slice of a chat model a one-shot completion needs. */
 export interface InvokableModel {
-  invoke(messages: unknown): Promise<{ content: unknown }>;
+  invoke(messages: unknown, config?: unknown): Promise<{ content: unknown }>;
+}
+
+/**
+ * Persist one LLM call to ai_call_costs — the one-shot-call twin of
+ * `kernelCostSink` in gateway/kernel-run.ts. Not imported from there: R1
+ * (verify-architecture.ts) forbids anything outside src/gateway from
+ * importing gateway modules, same rule this file's header already explains
+ * for `gateway/model-fallback.ts`. Fire-and-forget, same reasoning as the
+ * kernel's sink — a DB blip must never fail a tailoring call that already
+ * succeeded.
+ */
+function costSink(call: AccruedCall): void {
+  void logLlmCost({
+    tenant_id: TENANT,
+    agent: call.attribution?.agent ?? "kernel",
+    tier: call.attribution?.stage ?? "unattributed",
+    model: call.model,
+    tokens_in: call.inputTokens,
+    tokens_out: call.outputTokens,
+    cost_usd: call.usd.toFixed(6),
+  }).catch((err) => log.warn({ err: String(err) }, "ai_call_costs write failed")); // allow-failopen: cost row is telemetry
 }
 
 /**
@@ -58,6 +88,13 @@ export const ATTEMPT_TIMEOUT_MS = 45_000;
 export interface InvokeOptions {
   /** Overridable so tests do not wait 45 real seconds to prove a timeout. */
   readonly attemptTimeoutMs?: number;
+  /**
+   * Who is spending this call. Omit it and the call is invisible to
+   * ai_call_costs and the daily budget cap — exactly the gap T1c
+   * (2026-08-25) closed for tailorCv/buildCoverLetter, which previously
+   * called this function with neither callbacks nor metadata attached.
+   */
+  readonly attribution?: CostAttribution;
 }
 
 /** Resolve, or reject once the deadline passes. Timer always cleared. */
@@ -96,9 +133,26 @@ export async function invokeWorkerWithFallbacks(
   const timeoutMs = opts.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS;
   const primary = getWorkerModel() as unknown as InvokableModel;
 
+  // One tracker for this whole call (primary + any fallback attempts) when
+  // attribution is given — each ai_call_costs row still carries the model
+  // that actually answered (BudgetGuardCallback reads it from the response,
+  // not from this constructor arg), so a fallback still attributes correctly.
+  const invokeConfig = opts.attribution
+    ? {
+        metadata: costAttributionMetadata(opts.attribution),
+        // `||`, NOT `??`: prod sets `WORKER_AGENT_MODEL=` (an EMPTY STRING, not
+        // unset), and `??` only falls through on null/undefined — so the
+        // nullish version passed "" as the model id and the cost row would be
+        // priced with DEFAULT_COST whenever a provider response carried no
+        // model name of its own. Measured on prod 2026-08-25. Same class of
+        // bug as jq's `//` not catching "" (2026-08-08).
+        callbacks: [new BudgetGuardCallback(createRunBudget(), process.env["WORKER_AGENT_MODEL"] || process.env["AGENT_MODEL"] || "", costSink)],
+      }
+    : undefined;
+
   let primaryError: unknown;
   try {
-    return await withDeadline(primary.invoke(payload), timeoutMs, "primary model");
+    return await withDeadline(primary.invoke(payload, invokeConfig), timeoutMs, "primary model");
   } catch (err) {
     // An auth failure is not load. Falling through would spend the chain hiding
     // a misconfiguration that only gets more expensive the longer it is hidden.
@@ -112,7 +166,7 @@ export async function invokeWorkerWithFallbacks(
   const fallbacks = buildFallbackModels() as unknown as InvokableModel[];
   for (const [i, model] of fallbacks.entries()) {
     try {
-      const result = await withDeadline(model.invoke(payload), timeoutMs, `fallback ${i + 1}`);
+      const result = await withDeadline(model.invoke(payload, invokeConfig), timeoutMs, `fallback ${i + 1}`);
       log.warn(
         { position: i + 1, of: fallbacks.length, cause: (primaryError as Error).message.slice(0, 160) },
         "Worker primary failed — a fallback model answered",

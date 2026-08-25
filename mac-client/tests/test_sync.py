@@ -228,6 +228,53 @@ def test_queue_job_round_trips_the_cover_letter_key(tmp_path, monkeypatch):
     assert loaded[0].cover_letter_s3_key == "ready-applications/x/cover_letter.txt"
 
 
+def test_save_queue_reports_a_failed_tailored_cv_fetch_instead_of_swallowing_it(tmp_path, monkeypatch):
+    # T1a. Before this fix save_queue() called _fetch_s3_artifact and threw the
+    # bool away — a fetch that failed looked identical to one that succeeded.
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **k: FakeRun(returncode=1, stderr=b"NoSuchKey: The specified key does not exist."),
+    )
+    jobs = [
+        QueueJob(id="a", company="Ockto", title="SRE", track="backend",
+                 url="https://x/1", brief_rank=1, tailored_cv_s3_key="tailored/ockto.pdf")
+    ]
+    failures = sync.save_queue(jobs, tmp_path / "queue.json")
+    assert len(failures) == 1
+    company, reason = failures[0]
+    assert company == "Ockto"
+    assert "tailored CV" in reason
+    assert "NoSuchKey" in reason
+
+
+def test_save_queue_reports_nothing_when_every_fetch_succeeds(tmp_path, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeRun(stdout=b"x" * 150))
+    jobs = [
+        QueueJob(id="a", company="Ockto", title="SRE", track="backend",
+                 url="https://x/1", brief_rank=1, tailored_cv_s3_key="tailored/ockto.pdf")
+    ]
+    assert sync.save_queue(jobs, tmp_path / "queue.json") == []
+
+
+def test_save_queue_reports_nothing_for_a_job_with_no_s3_keys_at_all(tmp_path, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("should not run"))
+    jobs = [
+        QueueJob(id="a", company="Ockto", title="SRE", track="backend", url="https://x/1", brief_rank=1)
+    ]
+    assert sync.save_queue(jobs, tmp_path / "queue.json") == []
+
+
+def test_fetch_s3_artifact_verbose_carries_stderr_when_bool_helper_would_lose_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: FakeRun(returncode=1, stderr=b"Access Denied")
+    )
+    ok, reason = sync._fetch_s3_artifact_verbose("k", tmp_path / "out.pdf", min_bytes=10)
+    assert ok is False
+    assert reason == "Access Denied"
+    # The bool-only wrapper other callers still use must keep working unchanged.
+    assert sync._fetch_s3_artifact("k", tmp_path / "out2.pdf", min_bytes=10) is False
+
+
 def test_from_row_maps_the_cover_letter_key():
     row = {"id": "a", "company": "Adyen", "title": "SRE", "track": "backend",
            "url": "https://x/1", "brief_rank": 1,

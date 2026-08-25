@@ -43,7 +43,6 @@ import {
   cvGaps,
   jobBrief,
   tailorCvForRow,
-  submitApplication,
   projectWorkflow,
   claudeCode,
   applyCinematicPreset,
@@ -111,7 +110,10 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
   sales: [searchWeb, createSendEmailTool("sales"), searchKnowledge],
   personal: [readFile, listDir, runShell, browser, searchPersonalRag, sendFile, writeFile],
-  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobState, tailorCvForRow, writeArtifact, deliverArtifact, jobBrief, submitApplication, createSendEmailTool("jobhunt")],
+  // submitApplication (VPS-lane submit) retired 2026-08-25 — founder decision,
+  // the Mac client (mac-client/mac_client/apply.py) is the one apply lane now.
+  // Tombstoned in verify-architecture.ts so it cannot return by accident.
+  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobState, tailorCvForRow, writeArtifact, deliverArtifact, jobBrief, createSendEmailTool("jobhunt")],
 };
 
 /** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops). */
@@ -154,7 +156,6 @@ export const HITL_GATED_TOOLS = new Set([
   "create_calendar_event",
   "record_event",
   "deliver_artifact",
-  "submit_application",
   "synthesize_skill",
   "write_file",
   "send_file",

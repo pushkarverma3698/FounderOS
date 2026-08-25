@@ -21,6 +21,24 @@
  * optimization sweep (rag-optimization-sweep.ts). The functions and their unit
  * tests are untouched — only the `cron.schedule()` registration was removed —
  * so re-enabling any one of them is a one-line change in `startScheduler`.
+ *
+ * NEVER ADDED — bulk CV auto-tailoring (T1c, drafted 2026-08-25, never wired):
+ * a cron that called `processUntailoredApplications()` on the do_today/stretch
+ * queue was written and CI-tested, then rejected before merge on founder
+ * review, for two reasons. Product: tailoring is a deliberate act the founder
+ * triggers with `/draft N` on Telegram — a queue row without a tailored CV is
+ * supposed to say so honestly (the Mac client overlay's three-state resume
+ * label does this), not have one silently manufactured for it. Safety: QA
+ * against 4 real queue rows found `tailorCv()` fabricates skills the base CV
+ * does not contain (Kubernetes, PyTorch, Domain-Driven Design, FastAPI — 36
+ * invented claims across 4 CVs), and no guard catches it — `findSlop()` is a
+ * banned-word list, not an entity/claim check. Running that unguarded against
+ * a 600-row backlog on a 30-minute cadence would have spent a finite,
+ * non-renewable resource (the IND sponsor pool) on fabricated resumes. The
+ * function (`src/tools/jobhunt/tailor-worker.ts`) and its tests are kept —
+ * `/draft` and `/apply` still call the same underlying `tailorCv()` per row —
+ * but nothing calls the batch entry point. Do not re-add this cron without a
+ * fabrication guard in front of it.
  */
 
 import cron from "node-cron";
@@ -60,6 +78,7 @@ import {
   FREE_SWEEP_CRON,
   runFreeSweep,
 } from "../tools/jobhunt/sweep-runner.js";
+import { runPipelineDigest, runFollowupSweep } from "../tools/jobhunt/pipeline-followup.js";
 
 // Re-exported so existing import sites (and tests) that read these off
 // scheduler.ts keep resolving after the move to sweep-runner.ts (2026-08-06).
@@ -314,6 +333,23 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
     runFreeSweep().catch((err) =>
       log.error({ err: (err as Error).message }, "Free board sweep cron error"),
     );
+  });
+  // T3, 2026-08-25: listLiveApplications() existed, tested, with zero callers —
+  // "how many applications, how many replies" had no answer without a manual
+  // query. Monday 9am, matching the function's own "Monday pipeline review" doc.
+  cron.schedule("0 9 * * 1", () => {
+    runPipelineDigest().catch((err) =>
+      log.error({ err: (err as Error).message }, "Pipeline digest cron error"),
+    );
+  });
+  // T3, 2026-08-25: followups_sent existed, unused, since it was added. Daily
+  // at 9am — cheap (one query, no LLM) even on days it finds nothing due.
+  cron.schedule("0 9 * * *", () => {
+    runFollowupSweep()
+      .then((outcome) => {
+        if (outcome.sent > 0 || outcome.failed > 0) log.info(outcome, "Follow-up nudge sweep complete");
+      })
+      .catch((err) => log.error({ err: (err as Error).message }, "Follow-up nudge sweep cron error"));
   });
   cron.schedule("* * * * *", () => {
     runScheduledPostSweep().catch((err) =>

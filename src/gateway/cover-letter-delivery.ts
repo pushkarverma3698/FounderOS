@@ -67,7 +67,10 @@ export async function sendCoverLetter(
   // `getWorkerModel().invoke` directly, so a Gemini 503 cost the letter even
   // though two working fallbacks were configured on the same key (prod,
   // 2026-08-21). The CV half had the identical bug.
-  const model: CoverLetterModel = { invoke: (messages) => invokeWorkerWithFallbacks(messages) };
+  const model: CoverLetterModel = {
+    invoke: (messages) =>
+      invokeWorkerWithFallbacks(messages, { attribution: { agent: "jobhunt", stage: "worker" } }),
+  };
 
   const result = await buildCoverLetter(
     {

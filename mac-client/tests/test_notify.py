@@ -46,6 +46,33 @@ def test_the_message_carries_the_command_to_start():
     assert "mac_client.apply" in notify.queue_ready_message(3, ["A — B"])
 
 
+def test_fetch_failures_are_folded_into_the_queue_ready_message():
+    # T1a: the terminal is not open when the founder reads this on his phone —
+    # a fetch failure has to reach the message he actually sees.
+    text = notify.queue_ready_message(5, ["Adyen — SRE"], [("Ockto", "tailored CV — Access Denied")])
+    assert "1 artifact fetch" in text
+    assert "Ockto" in text
+    assert "Access Denied" in text
+
+
+def test_no_failure_block_when_nothing_failed():
+    text = notify.queue_ready_message(5, ["Adyen — SRE"])
+    assert "artifact fetch" not in text
+
+
+def test_session_summary_names_applied_and_skipped():
+    # Concern #2, 2026-08-25: before this, Telegram never heard about an apply
+    # session at all — only the terminal it was run from did.
+    text = notify.session_summary_message(3, 2)
+    assert "3 applied" in text
+    assert "2 skipped" in text
+
+
+def test_session_summary_includes_errors_only_when_there_were_any():
+    assert "errored" not in notify.session_summary_message(3, 2)
+    assert "1 errored" in notify.session_summary_message(3, 2, 1)
+
+
 def test_a_failed_sync_never_reads_as_an_empty_queue():
     text = notify.sync_failed_message("Host unreachable")
     assert "failed" in text.lower()
