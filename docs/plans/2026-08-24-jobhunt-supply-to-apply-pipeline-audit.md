@@ -1,5 +1,9 @@
 # Job pipeline audit — supply → apply, end to end
 
+> **Superseded in part by REV 2 (2026-08-25), appended at the end of this file.** The apply flow
+> moved to `mac-client`. F1 below is no longer the default path (see rev 2 F4); F2 is half fixed
+> (rev 2 F3); F3 and F7 are revised. Rev 1 is kept intact as the record of what was found first.
+
 Date: 2026-08-24 · Author: Claude (gatekeeper review) · Status: findings, awaiting founder decision
 Commit audited: `ce99ff6` on `main`
 Artifact: https://claude.ai/code/artifact/ab633e44-f760-4e1a-859f-de176dbc1e5c
@@ -309,3 +313,237 @@ Two things to raise before an interview:
 - **The base CV is invisible**, as it was to the 2026-08-22 audit.
 - **The probability table is judgement.** I defend the ordering; the absolute numbers are calibrated guesses.
 - **Market figures are secondary sources** — which is exactly why F9 asks for a primary-source check.
+
+---
+
+# REV 2 — 2026-08-25: the apply flow moved to the Mac
+
+Re-audited after the apply flow shifted from the VPS headless driver to `mac-client`.
+Artifact (same URL, updated): https://claude.ai/code/artifact/ab633e44-f760-4e1a-859f-de176dbc1e5c
+
+**`main` has not moved** — still `ce99ff6`, zero commits since rev 1, no branch ahead of it more
+recently than this one, only this PR and a beta sync open. So the shift is visible in already-merged
+code, not in new work: `b7235c6` (VPS Ashby route, 08-24) and `a0117b1` (same fix ported to
+mac-client, 08-25 00:55) show both lanes maintained in parallel on the same day.
+
+## Verified fresh in rev 2
+
+`pnpm lint` clean · `pnpm verify:arch` 6/6 green · `pnpm test` 3,617 passing across 327 files ·
+`python3 -m pytest mac-client/tests -q` → **53 passed, 13 errors**, all 13 environmental (the
+pip-installed playwright does not match this container's pre-installed browsers), including a passing
+`test_the_cover_letter_and_work_authorisation_are_left_alone`.
+
+**3,617 TypeScript tests and 53 Python tests pass, and the tailored CV still does not reach the
+employer by default.** Both suites test their own side of a seam neither crosses.
+
+## The two lanes, side by side
+
+| Dimension | VPS `/apply N` | Mac `mac-client` |
+|---|---|---|
+| Who presses Submit | The machine, after an HITL card | **The founder, in his own browser** |
+| ATS driven | 5 (GH, Lever, Ashby, Workable, Recruitee) | 3 (GH, Lever, Ashby) |
+| Boards reachable | 721 / 1,297 (56%) | **514 / 1,297 (40%)** |
+| Cover letter | CV markdown pasted in, blank at submit | Deliberately blank, stated + tested |
+| Résumé | Tailored PDF from S3 per submit | Tailored if present, else **silently generic** |
+| Unknown ATS | Refuses, points at `/draft` | Opens it, fills nothing, says so |
+| Outcome recorded | On confirmed submit only | **Crash-safe JSONL ledger, flushed per click** |
+| Queue definition | `stage='screened'` + 24h | `brief_section IN (do_today,stretch)`, no age bound |
+| Still wired? | **Yes** — `telegram.ts:62`, `capabilities.ts:114` | Yes — the intended primary |
+
+The shift **added** a lane; it did not retire one.
+
+---
+
+## Revised findings
+
+### F1 · CRITICAL · The tailored CV does not reach the employer by default (NEW)
+
+Two independently-reasonable decisions compound into one silent failure.
+
+**Half one — almost no row has a tailored CV.** `tailored_cv_s3_key` is written in exactly two
+places: `apply-packet.ts:120`, reached only when the founder personally runs `/draft N`, `/apply N`
+or the `tailor_cv` tool *per row*; and `tailor-worker.ts:73` inside `processUntailoredApplications`,
+which has **zero callers** in `src/` and `scripts/` and no cron. In a 20-job Mac session only the
+rows he individually pre-drafted carry one — which defeats the point of a batch queue.
+
+**Half two — a failed fetch is swallowed.** `mac-client/mac_client/sync.py:168-181` guards on
+`returncode == 0 and len(stdout) > 100` and wraps it in a bare `except Exception: pass`.
+
+Then `profile.resume_for()` falls back to the track/default résumé and `missing_resumes()` — the
+preflight built to catch résumé problems before the browser opens — reports no problem, because a
+file *is* there. Proven against the real functions:
+
+```
+SCENARIO A — S3 fetch succeeded, tailored PDF on disk
+   resume_for -> tailored_cv.pdf      preflight -> no problems
+SCENARIO B — S3 fetch failed (the `except Exception: pass` path)
+   resume_for -> generic_ai_cv.pdf    preflight -> no problems
+```
+
+The overlay shows the filename and nothing else — the only tell, in a list scanned at speed.
+
+*Unverified:* `$STORAGE_BUCKET` in that command is expanded by the **remote non-interactive** shell,
+which frequently does not load the profile that sets it. If unset the path is `s3:///key`, the copy
+fails, and per half two nothing is reported. No VPS access to confirm.
+
+**Fix:** delete the bare `except` and report the row + reason; make `resume_for` refuse to substitute
+silently when `tailored_cv_s3_key` was set but the PDF is absent; wire
+`processUntailoredApplications` into `startScheduler` after each sweep's ranking pass.
+
+### F2 · CRITICAL · Two live apply lanes that disagree, and no tombstone (NEW)
+
+`telegram.ts:62` still registers `bot.command("apply", …)`; `capabilities.ts:114` still lists
+`submitApplication`, so the kernel can select it from plain English, not just a typed command. Both
+lanes are reachable and disagree on five of the eight rows above.
+
+This repo has a CI-enforced tombstone list (`office-run`, `execution-guard`, `pre-router`,
+`fast-paths`) that fails the build if a killed module returns. It has no entry for the VPS apply
+driver — because the driver was not killed, it was quietly demoted.
+
+**Fix:** decide which lane is the product. If Mac: unregister `/apply`, drop `submitApplication`,
+tombstone the driver. If both: one shared fill plan and one queue definition.
+
+### F3 · CRITICAL · Records `applied` reliably now; still cannot record a reply (REVISED — half fixed)
+
+**Credit first.** The Mac lane fixes the front half of rev 1's F2: `ledger.py` appends one JSONL line
+per click and flushes before the queue advances, the outcome is recorded in the same handler the
+click reaches, and `push_outcomes` is idempotent by `IS NULL` guard. A dead laptop at job nineteen of
+twenty loses nothing. Better than the VPS lane had.
+
+The back half is untouched — still zero writers/callers: `followups_sent`, stages
+`replied`/`rejected`/`dormant`, `listLiveApplications()`, `countApplied()`, any
+`email → job_applications` link.
+
+So it can now say how many applications went out and still not whether any worked — including the
+question F1 raises: *does the tailored CV outperform the generic one?* No instrument could answer it.
+
+### F4 · HIGH · Rev 1's cover-letter defect is not fixed, only demoted (WAS F1)
+
+`apply-commands.ts:88` still passes `coverLetterText: packet.cvMarkdown`; `submit_application` still
+builds `RowFacts` as `{ resumePath }` only. Against the live Workable fixture where the field is
+`required: true`: preview `kind=value` with the CV markdown, submit `kind=ask` (blank), filled
+6/10 vs 5/10. Downgraded because it is no longer the default path; not closed, because F2 shows it is
+still reachable — and a defect on a demoted-but-wired path is worse, since nobody watches it.
+
+**The Mac lane's answer is better.** `adapters.py` declares cover letters, work-authorisation and
+demographic questions deliberately absent, with the reason written down and a passing test holding it
+there. Correct call. It leaves one seam: the letter is generated, slop-checked, archived and
+delivered *to Telegram* while the founder is looking at a browser on his Mac.
+
+**Fix:** kill the VPS path; write `cover_letter.txt` into `.queue/{job_id}/` beside the CV and give
+the overlay a copy button. He still pastes it — from the screen he is on.
+
+### F5 · HIGH · The shift narrows apply coverage; gap widened 44% → 60% (REVISED, worse)
+
+| Lane | Boards appliable | Share | Not appliable |
+|---|---:|---:|---|
+| VPS — 5 ATS | 721 | 56% | 576 |
+| Mac — 3 ATS | **514** | **40%** | **783** |
+
+Recruitee (113) and Workable (94) are lost. Recruitee stings: it was added on 2026-08-20 *because*
+GH+Lever+Ashby matched 0.36% of the IND sponsor register while NL-native platforms matched 2.50%,
+with named verified hits (`recruitee/dalsem`, `recruitee/netconomy`, `recruitee/ravo`) — Dutch
+recognised sponsors, the exact companies that can carry the permit.
+
+**Fix:** port two `FieldMap` entries into `adapters.py` using selectors `apply-fill.ts` already
+captured live. A port, not a discovery exercise. +207 boards.
+
+### F6 · HIGH · `brief_rank` churn — now structural (REVISED, worse)
+
+`runFreeSweep` re-pins `brief_section`/`brief_rank` up to 48×/day. The Mac `QUEUE_SQL` selects
+`WHERE brief_section IN ('do_today','stretch') ORDER BY brief_rank` — **the queue is defined entirely
+by two columns rewritten every half hour.** Mitigated within a session: the client caches to
+`.queue/queue.json` and the browser reads the cache, so the race is between sync and session, not
+inside one.
+
+**Fix:** stamp each brief render with an id; record which brief the sync pulled.
+
+### F7 · HIGH · CV "zero hallucination" is a prompt instruction (UNCHANGED)
+
+Only `findSlop()` runs on the output. Nothing checks that employers/dates/titles in the tailored CV
+appear in the base CV. `humanise.ts` (136 lines, threshold, full test file) still has zero callers.
+
+### F8 · MEDIUM · ATS keyword claim never measured (UNCHANGED)
+
+`overlapScore()` runs on the base CV only. F1 sharpens it: if most rows ship generic anyway, the
+pipeline pays a model call per application for a lift it neither verifies nor delivers.
+
+### F9 · MEDIUM · Three "mark applied" implementations — primary is now psql over SSH (REVISED)
+
+`updateApplicationStage()` (now secondary) · raw SQL in `health.ts` (`/skip` only, still no
+`/applied` route) · raw SQL in `mac-client/sync.py` over SSH — **now the path that writes the number
+the project exists to move.** Plus dead `markApplied`/`markSkipped`/`countApplied`. Credit:
+`sync.py:_uuid()` rejects non-UUIDs before the shell and says why it is the second line of defence.
+
+**Fix:** an HTTP `/api/v1/jobhunt/outcomes` route backed by the existing tested functions;
+`push_outcomes` POSTs to it.
+
+### F10 · LOW · IND constant staleness (UNCHANGED)
+
+`HSM_UNDER_30_MONTHLY_EUR = 4357`, re-indexed 1 Jan / 1 Jul, no CI alarm. Check ind.nl, add a dated
+assertion failing after 2027-01-01.
+
+---
+
+## What is excellent in the new lane
+
+- **The crash-safe ledger.** One JSONL line per click, flushed before the queue advances, recorded in
+  the same handler the click reaches, idempotent push. Best-reasoned component added since rev 1.
+- **Refusal as design, now in two languages.** `chooseEligibility` typed to `choose|ask` on the VPS;
+  cover letters / work-auth / demographics deliberately absent on the Mac, `None` a first-class
+  answer for an unknown ATS, and a `DENY_TERMS` list so the heuristic resolver cannot wander into a
+  visa or salary box.
+- **The Ashby `/application` discovery**, found live and ported across lanes with a comment naming the
+  other implementation — proper cross-lane defect propagation, and also the clearest evidence that
+  maintaining two lanes is costing real time.
+- **The wake flow that refuses to hijack the screen** — sync, message, stop, with the founder's
+  decision and its date in the file.
+
+## Revised probability
+
+| State | Estimate |
+|---|---:|
+| As it stands today (generic CV by default, no reply tracking, 40% appliable) | **~10%** |
+| F1 fixed (~1 day) | ~30% |
+| F1 + F3 + F5 (~3–4 days) | ~45% |
+| + warm intros + sustained 15/week | ~65% |
+
+The shift did not change the ceiling and moved the floor slightly up: it removes the
+machine-submits risk and makes throughput a function of actual clicking, which is the honest
+constraint. It did not make the pipeline send its best work or learn from what comes back.
+
+## Portfolio readiness — revised
+
+The repository is still strong, and the migration **adds** a story worth telling: *"I built the
+autonomous version, ran it, and moved the submit back to a human click — here is the ADR and here is
+what the machine still does."* Choosing less autonomy on purpose, with reasoning written down, reads
+as judgement.
+
+The pipeline as the showcased piece is still not ready, and rev 2 adds a second question you would
+not want asked: *"did it send the tailored CV?"* Today, on most rows, no — and nothing would have
+told you. For a project whose thesis is evidence over assertion, that is the wrong defect to carry.
+
+## Recommended order (revised)
+
+1. **F1** — make the tailored CV actually ship (~1 day). Highest value per hour.
+2. **F2** — retire the VPS lane loudly, or unify the two (~half a day).
+3. **F3** — close the funnel's back half (~1 day).
+4. **F5** — port Recruitee + Workable into `adapters.py` (~half a day, +16% of registry).
+5. **F4** — put the cover letter in the overlay (~half a day).
+6. **F7 + F8** — entity check, wire `humanise.ts`, re-score overlap (~1 day).
+7. **F9 + F6** — one outcome writer, brief-id snapshots (~1 day).
+
+**Founder-only:** read the `ai`-track base CV. Until F1 is fixed the generic CV is not the fallback,
+it is the product, and nobody has read it.
+
+## Rev 2 limits
+
+- **Could not see in-flight work.** `main` unmoved, no newer branch, only this PR and a beta sync
+  open. Another session mid-change in its own container is invisible here; rev 2 describes
+  `ce99ff6` as committed. Anything shipped after supersedes this.
+- **No production DB, no SSH.** Cannot count how many rows currently carry a `tailored_cv_s3_key`
+  (which would size F1 exactly rather than argue it from the call graph), nor check `$STORAGE_BUCKET`.
+- **No live browser run on either lane.** F1 proven against the real `resume_for`/`missing_resumes`;
+  F4 against the real `buildFillPlan` and a live-captured fixture.
+- **Base CV still invisible.**
+- **Probabilities are judgement.** I defend the ordering, not the absolute numbers.
