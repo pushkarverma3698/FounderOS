@@ -183,10 +183,16 @@ def test_fetch_s3_artifact_sources_the_env_file_before_calling_aws(tmp_path, mon
     )
     sync._fetch_s3_artifact("some/key.txt", tmp_path / "out.txt", min_bytes=20)
     ssh_payload = captured_cmd[0][-1]
-    assert f"source {sync.REMOTE_ENV_FILE}" in ssh_payload
-    assert "aws s3 cp" in ssh_payload
-    # The source must run BEFORE the aws call, or $STORAGE_BUCKET is still unset.
-    assert ssh_payload.index("source") < ssh_payload.index("aws s3 cp")
+    # Assert the exact command rather than loose substrings: a plausible-looking
+    # "simplification" that drops `set -a` still sources the file and still puts
+    # `source` before `aws s3 cp`, so those checks alone would pass while silently
+    # reintroducing the credentials half of the original bug — $STORAGE_BUCKET
+    # resolves via plain shell substitution either way, but AWS_ACCESS_KEY_ID does
+    # not reach a child process without `set -a` actually exporting it first.
+    assert ssh_payload == (
+        f'set -a; source {sync.REMOTE_ENV_FILE}; set +a; '
+        f'aws s3 cp "s3://$STORAGE_BUCKET/some/key.txt" -'
+    )
 
 
 def test_fetch_s3_artifact_against_the_cvs_real_call_shape(tmp_path, monkeypatch):
