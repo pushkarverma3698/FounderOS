@@ -26,11 +26,15 @@
   summary.style.cssText = "flex:1;min-width:0";
   const filled = data.filled.length ? data.filled.join(", ") : "nothing";
   const skipped = data.skipped.length ? data.skipped.join("; ") : "nothing";
+  const coverLetterLine = data.cover_letter_copied
+    ? `<div style="opacity:.75;font-size:13px;color:#8FD19E">📋 Cover letter copied to clipboard</div>`
+    : `<div style="opacity:.75;font-size:13px;color:#FFCC66">No cover letter yet — ask the bot to draft one for ${escapeHtml(data.company)}</div>`;
   summary.innerHTML =
     `<div style="font-weight:600;margin-bottom:2px">${data.position} — ` +
     `${escapeHtml(data.company)} · ${escapeHtml(data.title)}</div>` +
     `<div style="opacity:.75;font-size:13px">Filled: ${escapeHtml(filled)}</div>` +
-    `<div style="opacity:.75;font-size:13px;color:#FFCC66">Left for you: ${escapeHtml(skipped)}</div>`;
+    `<div style="opacity:.75;font-size:13px;color:#FFCC66">Left for you: ${escapeHtml(skipped)}</div>` +
+    coverLetterLine;
 
   const skip = button("SKIP", "#2A2F36", "#fff");
   const submit = button("SUBMIT &amp; NEXT →", "#00A65A", "#fff");
