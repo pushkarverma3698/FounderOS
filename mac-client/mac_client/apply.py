@@ -206,7 +206,7 @@ async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str)
     if cover_letter_path.is_file():
         try:
             cover_letter_copied = copy_to_clipboard(cover_letter_path.read_text(encoding="utf-8"))
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             cover_letter_copied = False
 
     await page.evaluate(
