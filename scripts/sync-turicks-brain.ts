@@ -183,6 +183,17 @@ export function isPlanSyncSource(sourcePath: string): boolean {
   });
 }
 
+/**
+ * True when `filename` (a bare name inside docs/sessions/, e.g. "2026-08-25-
+ * foo.md") is a real session log the sessions walker below should ingest.
+ * Excludes TEMPLATE.md — the empty scaffold session logs are authored from —
+ * which `f.endsWith(".md")` alone would otherwise match, ingesting a blank
+ * "session" entry into turicks_brain on every sync.
+ */
+export function isSessionLogFile(filename: string): boolean {
+  return filename.endsWith(".md") && filename !== "TEMPLATE.md";
+}
+
 function collectDocs(rootDir: string): DocEntry[] {
   const docs: DocEntry[] = [];
   const root = join(process.cwd(), rootDir);
@@ -399,7 +410,7 @@ function collectDocs(rootDir: string): DocEntry[] {
   // ── Session Logs (Episodic Memory) ─────────────────────────────────────────
   const sessionsDir = join(root, "docs/sessions");
   if (existsSync(sessionsDir)) {
-    for (const file of readdirSync(sessionsDir).filter((f) => f.endsWith(".md"))) {
+    for (const file of readdirSync(sessionsDir).filter(isSessionLogFile)) {
       const content = readFile(join(sessionsDir, file));
       docs.push({
         entry_type: "session",
