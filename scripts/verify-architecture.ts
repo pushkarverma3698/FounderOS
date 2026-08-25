@@ -50,6 +50,17 @@ export const TOMBSTONES: string[] = [
   // one apply lane now. /apply (src/gateway/apply-commands.ts, deleted) and
   // submitApplication both retired the same day.
   "src/agents/agent-tools/jobhunt-apply.ts",
+  "src/gateway/apply-commands.ts",
+  // The VPS Playwright driver those two called (orphan sweep, 2026-08-25):
+  // apply-headless.ts's previewApplyFlow/submitApplyFlow had exactly the two
+  // callers above, both already gone; apply-driver.ts and apply-scrape.ts had
+  // no caller once apply-headless.ts was; apply-fill.ts's decision logic (the
+  // eligibility/consent/captcha rules) had no remaining caller once all three
+  // were dead, its own selectors already ported into mac-client's adapters.py.
+  "src/tools/jobhunt/apply-headless.ts",
+  "src/tools/jobhunt/apply-driver.ts",
+  "src/tools/jobhunt/apply-scrape.ts",
+  "src/tools/jobhunt/apply-fill.ts",
 ];
 
 /** Frozen trees (founder decision 2026-07-07): excluded from every rule. */

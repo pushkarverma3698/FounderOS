@@ -21,6 +21,24 @@
  * optimization sweep (rag-optimization-sweep.ts). The functions and their unit
  * tests are untouched — only the `cron.schedule()` registration was removed —
  * so re-enabling any one of them is a one-line change in `startScheduler`.
+ *
+ * NEVER ADDED — bulk CV auto-tailoring (T1c, drafted 2026-08-25, never wired):
+ * a cron that called `processUntailoredApplications()` on the do_today/stretch
+ * queue was written and CI-tested, then rejected before merge on founder
+ * review, for two reasons. Product: tailoring is a deliberate act the founder
+ * triggers with `/draft N` on Telegram — a queue row without a tailored CV is
+ * supposed to say so honestly (the Mac client overlay's three-state resume
+ * label does this), not have one silently manufactured for it. Safety: QA
+ * against 4 real queue rows found `tailorCv()` fabricates skills the base CV
+ * does not contain (Kubernetes, PyTorch, Domain-Driven Design, FastAPI — 36
+ * invented claims across 4 CVs), and no guard catches it — `findSlop()` is a
+ * banned-word list, not an entity/claim check. Running that unguarded against
+ * a 600-row backlog on a 30-minute cadence would have spent a finite,
+ * non-renewable resource (the IND sponsor pool) on fabricated resumes. The
+ * function (`src/tools/jobhunt/tailor-worker.ts`) and its tests are kept —
+ * `/draft` and `/apply` still call the same underlying `tailorCv()` per row —
+ * but nothing calls the batch entry point. Do not re-add this cron without a
+ * fabrication guard in front of it.
  */
 
 import cron from "node-cron";
@@ -60,7 +78,6 @@ import {
   FREE_SWEEP_CRON,
   runFreeSweep,
 } from "../tools/jobhunt/sweep-runner.js";
-import { processUntailoredApplications } from "../tools/jobhunt/tailor-worker.js";
 import { runPipelineDigest, runFollowupSweep } from "../tools/jobhunt/pipeline-followup.js";
 
 // Re-exported so existing import sites (and tests) that read these off
@@ -316,31 +333,6 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
     runFreeSweep().catch((err) =>
       log.error({ err: (err as Error).message }, "Free board sweep cron error"),
     );
-  });
-  // T1c, 2026-08-25: processUntailoredApplications had zero callers anywhere,
-  // so a queued job the founder did not personally /draft got the GENERIC CV,
-  // silently — confirmed live, 4/59 of the actual do_today/stretch queue
-  // carried a tailored CV. 5 minutes after FREE_SWEEP_CRON's :00/:30 ticks, so
-  // this cycle's buildDailyBrief (inside runFreeSweep) has already ranked
-  // fresh rows into brief_section before untailoredPrioritySql looks for them.
-  cron.schedule("5,35 * * * *", () => {
-    processUntailoredApplications()
-      .then(async (outcome) => {
-        if (outcome.processed === 0) return;
-        log.info(outcome, "CV tailoring batch complete");
-        if (outcome.failed > 0) {
-          const names = outcome.details
-            .filter((d) => d.status === "failed")
-            .map((d) => d.company)
-            .slice(0, 5)
-            .join(", ");
-          await sendToChat(
-            `⚠️ CV tailoring: ${outcome.failed}/${outcome.processed} failed (${names}) — those rows will keep the generic CV until retried.`,
-            "HTML",
-          ).catch((err) => log.error({ err: (err as Error).message }, "Could not report tailoring failures"));
-        }
-      })
-      .catch((err) => log.error({ err: (err as Error).message }, "CV tailoring batch cron error"));
   });
   // T3, 2026-08-25: listLiveApplications() existed, tested, with zero callers —
   // "how many applications, how many replies" had no answer without a manual

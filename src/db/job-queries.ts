@@ -541,28 +541,6 @@ export async function getApplicationByBriefRank(
 }
 
 /**
- * Look up a row by its stable id.
- *
- * `submit_application` needs this rather than a rank: it is resolved once by
- * `/apply N` and the id is threaded through a HITL gate that may wait minutes
- * to 24h (`HITL_TTL_MS`) before the founder approves. A rank is not stable
- * across that gap — the brief can re-rank in between — so re-resolving by rank
- * at submit time could submit the wrong company's application.
- */
-export async function getApplicationById(
-  id: string,
-  opts: { tenantId?: string } = {},
-): Promise<JobApplication | null> {
-  const db = getDb();
-  const rows = await db
-    .select()
-    .from(jobApplications)
-    .where(and(eq(jobApplications.id, id), eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT)))
-    .limit(1);
-  return rows[0] ?? null;
-}
-
-/**
  * do_today/stretch first — that is the exact population the Mac apply queue
  * reads (mac-client/mac_client/sync.py QUEUE_SQL). A plain created_at
  * ordering could spend `listUntailoredApplications`'s whole limited batch on
