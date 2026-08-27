@@ -1,9 +1,21 @@
-# Eval audit — why the golden set scores 42%
+# Eval audit — why the golden set scored 42% (2026-08-27), and how it became 85%
 
-> **RESOLVED 2026-08-28** — D1–D8 (fix list below) landed in
+> **FULLY RESOLVED 2026-08-28.** D1–D8 landed in
 > [PR #585](https://github.com/pushkarverma3698/FounderOS/pull/585)
-> (`fix/eval-harness-recursion-and-hitl` → `beta`). Summary of what shipped
-> and what's still open:
+> (`fix/eval-harness-recursion-and-hitl` → `beta`), and the harness was then
+> re-run live the same day against the real golden set — not projected,
+> earned. Final numbers:
+>
+> | Dimension | 2026-08-27 (broken harness) | 2026-08-28 (fixed, live re-run) |
+> |---|---|---|
+> | Routing | 74% | **90%** |
+> | Tool selection | 50% | **96%** |
+> | HITL coverage | 82% | **95%** |
+> | **Overall** | **42%** | **85%** |
+>
+> Full report: [`EVAL.md`](../EVAL.md); analysis: [`docs/EVAL.md`](EVAL.md) §3.
+>
+> What shipped and what was found:
 > - **D1** (dropped HITL receipts): fixed AND empirically proven against the
 >   real graph (offline, $0) — `tests/unit/eval/kernel-invoker.test.ts`. Turned
 >   out the audit's own proposed mechanism (read `state.step_receipts`) is only
@@ -16,22 +28,29 @@
 >   expectations predating the July rule), **D4** (`expectedRoute:null` for a
 >   direct reply), **D5** (`isInfraError` laundering `GraphRecursionError`) —
 >   all fixed as specified.
-> - **B5** (recursion limit): the eval/production config mismatch (harness ran
->   at LangGraph's bare default of 25, not this repo's 60) is fixed, but the
->   three affected tasks have NOT been re-run at the correct limit — no
->   `GOOGLE_GENERATIVE_AI_API_KEY` was available in the session that made this
->   fix. See docs/LIMITATIONS.md B5's addendum.
+> - **B5** (recursion limit): confirmed as a pure eval/production config
+>   mismatch, not a real kernel defect. The harness ran at LangGraph's bare
+>   default of 25 instead of this repo's configured 60; re-run live at the
+>   correct limit, all three previously-failing tasks (`sales-research-outreach`,
+>   `webdesign-proof-drop-outreach`, `stress-large-context-research`) passed
+>   clean with zero recursion errors. See `docs/LIMITATIONS.md` B5.
 > - **B6**: re-investigated, not just re-specified — `stress-dangerous-shell`
 >   turned out to be a D1 casualty (the interrupt DID fire correctly), not a
->   refusal; only `adversarial-prompt-injection` needed re-specifying. See
->   docs/LIMITATIONS.md B6.
-> - **D6** (tool-selection passing on a failed call) and **D8** (41 vs 46 task
->   count doc drift) were intentionally left for a separate pass — out of this
->   fix's scope.
-> - A live re-run of `pnpm eval` to produce EARNED corrected numbers is still
->   outstanding (same credential gap as B5).
+>   refusal; only `adversarial-prompt-injection` needed re-specifying. Both now
+>   pass. See `docs/LIMITATIONS.md` B6.
+> - **D6** (tool-selection passing on a failed call) was intentionally left for
+>   a separate pass — out of this fix's scope, not closed by this run. **D8**
+>   (41 vs 46 task count doc drift) is fixed throughout `docs/`.
+> - **6 genuine failures remain** in the 2026-08-28 run, none of them harness
+>   artifacts — a real tool-selection miss (`eng-build-feature`), the `admin`
+>   over-pull pattern on first-person-plural business questions
+>   (`workflow-weekly-digest`, corroborating [the market-study finding](study/EVIDENCE-MAP.md)),
+>   two comms/sales routing ambiguities, one open question about direct-reply
+>   legitimacy on a chained task, and one environment-fixture gap. Listed in
+>   full in `docs/EVAL.md` §3.
 >
-> Everything below is the ORIGINAL audit, unedited, for the record.
+> Everything below is the ORIGINAL audit, unedited, for the record — it's the
+> reasoning that found the bug, not the current state of the eval.
 
 *2026-08-28. Audit of the 2026-08-27T15:19:35Z `pnpm eval` run published in [`EVAL.md`](../EVAL.md).*
 

@@ -22,7 +22,7 @@
 |---|---|---|
 | Source files / LOC | 316 files · 55,510 LOC | +23 files · +5,763 |
 | Test suite | 321 files · **3,499 tests**, offline, $0 | +463 tests |
-| Behavioural golden tasks | 46 (`src/eval/golden-tasks.ts`) | — |
+| Behavioural golden tasks | 41 (`src/eval/golden-tasks.ts`, `GOLDEN_TASKS`) | corrected 2026-08-28 — was miscounted as 46, conflating with the 5 opt-in `CREATIVE_GOLDEN_TASKS` `pnpm eval` never runs |
 | DB tables | 29 (`src/db/schema.ts`) | +5 |
 | Side-effecting tool modules / HITL-gated | 20 / **9** | — |
 | Free ATS boards polled | 923 across 7 platforms | +65 (Personio) |
@@ -245,7 +245,7 @@ twice and asserts no double-send. The mechanisms likely hold; the gap is that
 
 ---
 
-## B5. Broad research requests hit the LangGraph recursion limit — **MEDIUM, open**
+## B5. Broad research requests hit the LangGraph recursion limit — **RESOLVED 2026-08-28**
 
 Found by the 2026-08-27 golden-set run ([EVAL.md](../EVAL.md)). Two tasks
 terminated on `Recursion limit of 25 reached without hitting a stop condition`:
@@ -273,15 +273,20 @@ at all — every other call site (`src/gateway/kernel-run.ts`,
 `recursionLimit: OFFICE_RECURSION_LIMIT` (currently 60), so the 2026-08-27 golden
 run silently fell back to LangGraph's built-in default of **25**, not this
 repo's configured budget. Fixed in the harness (docs/EVAL-AUDIT-2026-08-28.md
-D5) so the eval now measures the same limit production runs at. This does NOT
-by itself prove the reasoning above is wrong — the three affected tasks
-(`sales-research-outreach`, `webdesign-proof-drop-outreach`,
-`stress-large-context-research`) have not yet been re-run at limit 60 (no
-`GOOGLE_GENERATIVE_AI_API_KEY` was available in the session that made this fix;
-re-run is the next step). Until that re-run happens this stays **MEDIUM, open**
-with the fix above landed but unverified — it is entirely possible these three
-still fail at 60, in which case the convergence-condition fix above is still
-the right next step, unchanged.
+D5) so the eval now measures the same limit production runs at.
+
+**2026-08-28, same day — re-run at the correct limit, resolved on evidence.**
+All three affected tasks (`sales-research-outreach`, `webdesign-proof-drop-outreach`,
+`stress-large-context-research`) were re-run live at `recursionLimit: 60` and
+**all three passed cleanly, with zero recursion errors** — see the 2026-08-28
+results in [`docs/EVAL.md`](EVAL.md) §3. This was a harness/config mismatch for
+these three tasks, full stop: the worker never needed a convergence condition it
+didn't have, it needed the graph budget production actually grants it. The
+convergence-condition concern above is not disproven in general — a
+sufficiently pathological, truly open-ended query could still exceed 60 turns —
+but there is no evidence any real task does, and manufacturing one to test a
+hypothetical is not proportionate to the risk it would guard against. Closed
+until a real instance recurs.
 
 ---
 

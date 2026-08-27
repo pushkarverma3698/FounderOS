@@ -95,19 +95,20 @@ remove. **Target: 13 AI-track roles first**, then the 40 backend.
 
 ## P1 — Highest portfolio leverage
 
-### 3. Fix the eval harness, then re-run
+### 3. Fix the eval harness, then re-run — **DONE 2026-08-28**
 
-The published golden-set score is 42%. [The audit](../EVAL-AUDIT-2026-08-28.md) proves at least
-15 of 25 failures are harness defects — the invoker discards tool receipts from any step that
-pauses at a HITL gate, so a HITL-heavy agent is measured by an instrument blind to HITL.
+The published golden-set score was 42%. [The audit](../EVAL-AUDIT-2026-08-28.md) proved at
+least 15 of 25 failures were harness defects — the invoker discarded tool receipts from any
+step that paused at a HITL gate, so a HITL-heavy agent was measured by an instrument blind to
+HITL. [PR #585](https://github.com/pushkarverma3698/FounderOS/pull/585) fixed all 6 harness
+defects (proven with new tests against the real graph, not asserted), and the golden set was
+re-run live the same day: **routing 90%, tool selection 96%, HITL 95%, overall 85%** — see
+[`docs/EVAL.md`](../EVAL.md) §3 for the full breakdown and the 6 genuine gaps the fix made
+visible.
 
-**Why this is P1 and not P2:** 36.2% of AI postings ask for evaluation, and a *published 42%*
-is worse than no number at a glance. Fix the harness (small, pure-function changes), re-run once
-(~$1), and the same document becomes the strongest artifact in the repo: a harness that caught
-its own bug, with the corrected number **earned rather than asserted**.
-
-Sequence: persist the plan in `Observation` → fix receipt collection → fix routing scoring →
-re-specify the stale expectations → narrow `isInfraError` → re-run.
+This landed exactly as predicted below: the document is now the strongest artifact in the
+repo, a harness that caught its own bug with a corrected number **earned by re-run**, not
+projected.
 
 ### 4. Close the Python gap — the largest measured mismatch
 

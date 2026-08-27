@@ -88,12 +88,25 @@ settles. A HITL-heavy agent was being measured by an instrument blind to HITL.
 **Also found, in the other direction.** `isInfraError` treated *any* thrown error as a provider
 outage, so three genuine recursion-limit crashes were excluded from scoring. The number was
 flattered as well as deflated — and that is written down too.
-**Insight.** At least 15 of 25 failures were the instrument. Six were the agent.
-**Where:** [`docs/EVAL-AUDIT-2026-08-28.md`](../EVAL-AUDIT-2026-08-28.md).
+**Fix, proven not asserted.** The obvious fix ("read the in-flight receipts") turned out to be
+only half the mechanism — a gated tool that's a step's *only* call produces zero receipts even
+mid-interrupt, because every HITL tool calls `interrupt()` before doing any work. The real fix
+reads a second source, the pending interrupt's own payload, and a new test drives the actual
+LangGraph graph through both shapes to prove it, offline, at $0.
+**Re-run live the same day.** Routing 74%→90%, tool selection 50%→96%, HITL 82%→95%, overall
+**42%→85%**. The three recursion-limit failures — resolved, not just reclassified: re-run at
+production's real limit (60, not the eval's silent default of 25), all three passed clean.
+**Insight.** At least 15 of 25 original failures were the instrument. The corrected run still
+surfaces 6 genuine, nameable gaps — a real tool-selection miss, an `admin`-over-pull pattern on
+business questions, two comms/sales routing ambiguities — because fixing the instrument didn't
+just raise the number, it's what made the real gaps visible for the first time.
+**Where:** [`docs/EVAL-AUDIT-2026-08-28.md`](../EVAL-AUDIT-2026-08-28.md),
+[`docs/EVAL.md`](../EVAL.md) §3.
 
-> **Say this out loud in the interview:** the corrected numbers are stated there as *projected*,
-> not published, because they haven't been earned by a re-run yet. Refusing to quote your own
-> better number until it's measured is the point of the story.
+> **Say this out loud in the interview:** I didn't quote the better number until I'd re-run it —
+> the audit stated 61% proven / ~76% projected and refused to publish either as fact. The 85%
+> that actually shipped came in higher than even the optimistic projection, which is the honest
+> way to be surprised: after measuring, not instead of it.
 
 ---
 
