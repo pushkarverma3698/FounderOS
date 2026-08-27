@@ -27,7 +27,11 @@ jobs:
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       AGENT_MODEL: "google-genai:gemini-2.5-flash"
-      AGENT_FALLBACK_MODELS: "openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free"
+      # 2026-08-27: both prior entries (meta-llama/llama-3.3-70b-instruct:free,
+      # qwen/qwen3-next-80b-a3b-instruct:free) 404 — OpenRouter retired their
+      # free tiers. Replaced with the pair PR #580 live-curl-verified the same
+      # day (200, real tool_calls, cost=0) for prod's AGENT_FALLBACK_MODELS.
+      AGENT_FALLBACK_MODELS: "openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:minimax/minimax-m2.7:free"
       DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
       TELEGRAM_BOT_TOKEN: "ci:placeholder"
       TELEGRAM_CHAT_ID: "000000000"
