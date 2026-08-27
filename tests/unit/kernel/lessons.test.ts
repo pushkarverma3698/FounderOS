@@ -72,6 +72,7 @@ const FAILED_RESULT: StepResult = {
     message: "Output does not satisfy research.findings — summary: Required",
     retryable: true,
   },
+  tool_receipts: [],
 };
 
 const OK_RESULT: StepResult = {
@@ -388,6 +389,7 @@ describe("occurrence scope (lower-bound semantics)", () => {
     status: "failed",
     step_id: "s1",
     failure: { ...(FAILED_RESULT as any).failure, retryable: false },
+    tool_receipts: [],
   };
 
   it("records an occurrence for a NON-RETRYABLE failure (Hook 3, terminal branch)", async () => {

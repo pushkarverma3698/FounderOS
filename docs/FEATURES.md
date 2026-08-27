@@ -66,6 +66,12 @@ Career pipeline.
 - `read_cv`, `search_jobs`, `send_email` 🔒
 - `search_personal_rag` — CV-to-JD semantic matching
 
+**This is the single largest production consumer of the kernel** — the tool set above is
+deliberately small (least privilege), but the pipeline behind it is 81 files / ~14.8k LOC:
+board discovery across 900+ ATS boards, lawful-sponsorship and salary screening, CV tailoring,
+and a founder-click-to-submit apply flow. It runs daily against real postings, not fixtures.
+Full pipeline: [docs/JOBHUNT.md](JOBHUNT.md).
+
 ---
 
 ## Cross-cutting features (how they work)
@@ -78,10 +84,10 @@ Postgres, a pending approval **survives a process restart**. The side effect run
 only after an approved resume. → [diagram 03](diagrams/03-hitl-flow.md),
 [HITL matrix](guides/HITL-MATRIX.md).
 
-### Zero-hallucination action claims
+### Action claims grounded in receipts, not model output
 An action step must return a code-recorded `ToolReceipt` with `ok: true`, or the
-result is rejected as unproven. The synthesizer sees only validated results, so it
-cannot claim an action that didn't happen. → [diagram 07](diagrams/07-receipt-and-zero-hallucination.md).
+result is rejected as unproven. The synthesizer is fed only validated results, never
+raw tool output, so it cannot claim an action that didn't happen. → [diagram 07](diagrams/07-receipt-and-zero-hallucination.md).
 
 ### Idempotent sends
 Before any external send, a deterministic, tenant-scoped, content-addressed

@@ -251,6 +251,13 @@ export const StepResultSchema = z.discriminatedUnion("status", [
     status: z.literal("failed"),
     step_id: z.string().min(1),
     failure: FailureReportSchema,
+    /**
+     * Receipts earned before the step failed (e.g. a tool ran, then a later
+     * validation/model error terminated the step). Optional + defaulted so
+     * every existing producer of a "failed" StepResult stays valid without
+     * changes; consumers that don't care can keep ignoring it.
+     */
+    tool_receipts: z.array(ToolReceiptSchema).default([]),
   }),
 ]);
 export type StepResult = z.infer<typeof StepResultSchema>;

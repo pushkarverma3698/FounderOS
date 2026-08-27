@@ -135,6 +135,7 @@ export function makeAgentNode(model: KernelBindableModel, specs: Record<string, 
               message: `No worker spec registered for "${step.worker}".`,
               retryable: false,
             },
+            tool_receipts: [],
           } satisfies StepResult,
         ],
       };
@@ -177,6 +178,7 @@ export function makeAgentNode(model: KernelBindableModel, specs: Record<string, 
               message: `Worker model call failed: ${describeInterceptedError(err)}`,
               retryable: true,
             },
+            tool_receipts: state.step_receipts[step.step_id] ?? [], // carries forward receipts from an earlier round of this step
           } satisfies StepResult,
         ],
       };
@@ -338,6 +340,7 @@ export async function collect(state: KernelStateType): Promise<KernelUpdate> {
             message: "Founder rejected the approval — the gated action was not executed.",
             retryable: false,
           },
+          tool_receipts: state.step_receipts[step.step_id] ?? [], // the rejected call itself earns no receipt (throws inside hitlGate())
         },
       ],
     };
@@ -373,6 +376,7 @@ export async function collect(state: KernelStateType): Promise<KernelUpdate> {
           evidence: text.slice(0, 300),
           retryable: true,
         },
+        tool_receipts: state.step_receipts[step.step_id] ?? [],
       },
     ],
   });

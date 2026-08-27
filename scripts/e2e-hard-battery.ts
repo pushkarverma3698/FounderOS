@@ -48,7 +48,25 @@ import { aiCallCosts } from "../src/db/schema.js";
 
 // Layer-B judge model (rule #6 — a different model family from the Gemini
 // drafter). A cheap PAID OpenRouter open-source slug avoids the free-tier
-// 50-RPD 429 that aborted a prior run. Set BEFORE the module is imported.
+// unreliability that aborted a prior run (429s under an 18-task back-to-back
+// workload; re-verified 2026-08-27 — see below). Set BEFORE the module is
+// imported.
+//
+// 2026-08-27: OPENROUTER_API_KEY currently has a $0 credit balance (confirmed
+// live: total_credits=30, total_usage=30.58), so this paid default 402s on
+// every call right now and Layer B silently degrades to fail-open "skipped"
+// (visible per-task in `notes`, NOT in the top-line WORKS/BROKEN scoreboard).
+// This is a BILLING gap, not a code bug — do not "fix" it by swapping to a
+// free slug: both current OpenRouter free-tier judge candidates were
+// live-tested against this file's actual judge prompt at maxTokens=256 and
+// failed for this specific workload —
+//   openrouter:nvidia/nemotron-3-super-120b-a12b:free  → reasoning model,
+//     burns the whole token budget on chain-of-thought, finish_reason:
+//     "length", NEVER emits the JSON verdict (always fail-open "not JSON").
+//   openrouter:minimax/minimax-m2.7:free  → completes fine standalone, but
+//     429s on the second call within seconds — the shared free pool cannot
+//     sustain this file's up-to-18-task sequential judge workload.
+// Top-up needed: https://openrouter.ai/settings/credits (a run costs cents).
 if (!process.env["JUDGE_MODEL"]?.trim()) {
   process.env["JUDGE_MODEL"] = "openrouter:openai/gpt-oss-120b";
 }
