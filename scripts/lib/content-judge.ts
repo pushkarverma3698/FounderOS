@@ -37,8 +37,13 @@ export type ContentVerdict =
 /** A dimension at or below this score fails the content gate. */
 export const FAIL_THRESHOLD = 2;
 
-const JUDGE_MODEL =
-  process.env["JUDGE_MODEL"]?.trim() || "openrouter:meta-llama/llama-3.3-70b-instruct:free";
+// 2026-08-27: meta-llama/llama-3.3-70b-instruct:free 404s — OpenRouter retired
+// its free tier. nvidia/nemotron-3-super-120b-a12b:free is live-curl-verified
+// (200, cost=0, clean JSON on the exact judge prompt below). Free OpenRouter
+// models rotate without notice — re-verify with
+// scripts/probe-openrouter-free-models.ts before trusting this default again.
+export const JUDGE_MODEL =
+  process.env["JUDGE_MODEL"]?.trim() || "openrouter:nvidia/nemotron-3-super-120b-a12b:free";
 
 const DIMENSIONS: (keyof ContentScores)[] = [
   "execution",
