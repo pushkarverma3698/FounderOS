@@ -16,10 +16,15 @@ saying plainly what the production data says instead:
   ↓
  61 Netherlands roles that are sponsor-verified AND clear the salary floor
   ↓
- 22 tailored CVs generated
+  6 tailored CVs actually rendered (16 more attempts failed before rendering)
   ↓
   2 applications sent            ← lifetime, across the whole pipeline
 ```
+
+*(Corrected 2026-08-28 — see the note in P0-1 below. The figure "22" published in this
+document on 2026-08-27 conflated `tailor_status IS NOT NULL` — 6 successes + 16 failed
+attempts — with the count of CVs that actually rendered. Only 6 real tailored-CV PDFs have
+ever existed in production.)*
 
 **59 of 61 qualified, sponsor-checked, salary-clearing Dutch roles have never been applied to.**
 Thirteen of the 61 are AI-track. A portfolio improves the conversion rate of applications that
@@ -40,33 +45,45 @@ Everything below is ranked against that.
 
 ## P0 — Blocking, do before anything else
 
-### 1. The CV tailoring pipeline can fabricate credentials, and nothing checks it
+### 1. The CV tailoring pipeline could fabricate credentials — **FIXED 2026-08-28**
 
-**This blocks P0-2 and it is the highest-risk item in the repository.**
+`src/tools/jobhunt/tailor-cv.ts` protected against fabrication with **prompt instructions
+only** (lines 43–44: never invent titles, employers, dates, degrees; never claim untouched
+skills). The only post-generation check was `findSlop` — a *style* linter. There was **no
+verification that a claim in the tailored CV appears in the base CV**, which violated this
+repository's own core principle (CLAUDE.md: *"guards are pure unit-tested functions, never
+prompt instructions"*).
 
-`src/tools/jobhunt/tailor-cv.ts` protects against fabrication with **prompt instructions only**
-(lines 43–44: never invent titles, employers, dates, degrees; never claim untouched skills).
-The only post-generation check is `findSlop` — a *style* linter. There is **no verification that
-a claim in the tailored CV appears in the base CV.**
+**Fixed by [PR #584](https://github.com/pushkarverma3698/FounderOS/pull/584):**
+`verifyCvClaims()` (`src/tools/jobhunt/cv-claim-guard.ts`) — a pure, unit-tested function
+checking five claim types (technologies, employers, titles, dates, degrees) against the base
+CV, wired into `tailorCv()` so a fabricated claim now blocks the tailoring output instead of
+shipping it.
 
-Two reasons this is severe:
+**The retroactive audit — run 2026-08-28, read-only, against real production data:**
+the "22 tailored CVs" figure in the original finding was wrong — that counted `tailor_status
+IS NOT NULL`, which includes 16 attempts that *failed* before ever rendering a CV. Only **6**
+tailored-CV PDFs have ever actually existed in production. Running the new guard against all
+6 (via `pdf-parse` to extract text from the stored PDFs, since the raw markdown is never
+persisted separately):
 
-1. **22 tailored CVs already exist** and every application sent so far used an unverified one.
-   A prior measurement found 36 fabricated claims across 4 sampled CVs.
-2. **It violates this repository's own core principle.** CLAUDE.md: *"routing/parsing/guards are
-   pure unit-tested functions, never prompt instructions."* The kernel exists because prompt
-   instructions are not a mechanism — and the single most consequential guard in the product is
-   a prompt instruction.
+**6 of 6 flagged.** Confirmed fabrications include the exact terms from the original
+2026-08-25 measurement (Kubernetes, C#, Domain-Driven Design) plus new ones (Vector Database,
+ETL, Microservices, Distributed Systems) not present anywhere in the base CV. **None of the 6
+have been applied to yet** (`applied_at` is null on all 6) — the fabrication risk was real but
+contained; nothing fabricated has reached a real employer through this path. The 2 applications
+sent to date used a different lane and are not implicated by this specific audit.
 
-**Action:** a pure function `verifyCvClaims(tailored, base)` that extracts claim-bearing spans
-(employers, titles, dates, degrees, named technologies) and fails any not grounded in the base
-CV. ~40 lines, unit-testable at $0, blocks the render on failure. Then re-verify the 22 existing
-CVs before reuse.
+**Action required from the founder:** do not approve sending any of these 6 as-is. Re-run
+`tailorCv()` for each — the new guard will now either produce a clean CV or refuse and name
+the specific ungrounded claim.
 
 **Why it's also the best interview story available:** "I found my own system's most important
 guard was a prompt, not a function, in the one place a hallucination has legal consequences —
-and I fixed it with the same mechanism the rest of the kernel uses." That is Tier-3
-(hallucination control, 5.6% of postings) demonstrated on a real stake.
+audited it against real production data, found the fabrication rate was 100% on what actually
+shipped, confirmed nothing fabricated had gone out yet, and fixed it with the same mechanism
+the rest of the kernel uses." That is Tier-3 (hallucination control, 5.6% of postings)
+demonstrated on a real, measured stake — not a hypothetical one.
 
 ### 2. Send the 59 applications
 
@@ -78,19 +95,20 @@ remove. **Target: 13 AI-track roles first**, then the 40 backend.
 
 ## P1 — Highest portfolio leverage
 
-### 3. Fix the eval harness, then re-run
+### 3. Fix the eval harness, then re-run — **DONE 2026-08-28**
 
-The published golden-set score is 42%. [The audit](../EVAL-AUDIT-2026-08-28.md) proves at least
-15 of 25 failures are harness defects — the invoker discards tool receipts from any step that
-pauses at a HITL gate, so a HITL-heavy agent is measured by an instrument blind to HITL.
+The published golden-set score was 42%. [The audit](../EVAL-AUDIT-2026-08-28.md) proved at
+least 15 of 25 failures were harness defects — the invoker discarded tool receipts from any
+step that paused at a HITL gate, so a HITL-heavy agent was measured by an instrument blind to
+HITL. [PR #585](https://github.com/pushkarverma3698/FounderOS/pull/585) fixed all 6 harness
+defects (proven with new tests against the real graph, not asserted), and the golden set was
+re-run live the same day: **routing 90%, tool selection 96%, HITL 95%, overall 85%** — see
+[`docs/EVAL.md`](../EVAL.md) §3 for the full breakdown and the 6 genuine gaps the fix made
+visible.
 
-**Why this is P1 and not P2:** 36.2% of AI postings ask for evaluation, and a *published 42%*
-is worse than no number at a glance. Fix the harness (small, pure-function changes), re-run once
-(~$1), and the same document becomes the strongest artifact in the repo: a harness that caught
-its own bug, with the corrected number **earned rather than asserted**.
-
-Sequence: persist the plan in `Observation` → fix receipt collection → fix routing scoring →
-re-specify the stale expectations → narrow `isInfraError` → re-run.
+This landed exactly as predicted below: the document is now the strongest artifact in the
+repo, a harness that caught its own bug with a corrected number **earned by re-run**, not
+projected.
 
 ### 4. Close the Python gap — the largest measured mismatch
 
