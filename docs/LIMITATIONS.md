@@ -310,6 +310,35 @@ either way, and did here.
 
 ---
 
+## B7. `tailorCv()`'s only fabrication guard was a prompt instruction — **FIXED 2026-08-28**
+
+`src/tools/jobhunt/tailor-cv.ts` asked the model, in its system prompt, to
+"NEVER fabricate or invent job titles, employer names, employment dates,
+degrees, or certifications." That sentence was the entire defense — the only
+post-generation check imported was `findSlop`, a banned-word/style linter with
+no notion of what the base CV actually says. A 2026-08-25 measurement found 36
+fabricated claims across 4 sampled tailored CVs (invented Kubernetes, PyTorch,
+Domain-Driven Design and FastAPI experience the base CV never states). 22
+tailored CVs existed in production under this unguarded path, generated before
+this fix, and at least 2 real applications had already been sent using its
+output.
+
+Fixed by `src/tools/jobhunt/cv-claim-guard.ts` (`verifyCvClaims`), a pure,
+unit-tested function in the same style as `validateStepResult`
+(`src/kernel/contracts.ts`) and `overlapScore`/`extractSkillTerms` in the same
+directory: no model call, deterministic, $0. It checks five claim types —
+technologies/skills (via the existing `extractSkillTerms`), employers and
+titles named in work-history headings, dates in any of the formats a CV
+actually uses, and degrees/certifications in the EDUCATION section — against
+the base CV's full text, and `tailorCv()` now refuses to return a tailored CV
+that fails it, naming the specific violations rather than a generic failure.
+
+**Not retroactive.** This fix does not re-check the 22 CVs already generated
+or the 2 applications already sent — that is a separate, explicitly deferred
+follow-up, not this fix's job.
+
+---
+
 # C. Architecture and scaling
 
 ## C1. Single-process, single-instance polling transport — **HIGH at scale**
