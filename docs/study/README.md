@@ -5,6 +5,29 @@
 
 ---
 
+## 🎯 Hiring & market study (2026-08)
+
+A four-part study of the 2026 AI-engineering market, measured from **911 real job postings that
+FounderOS's own pipeline collected** — then mapped back onto what this repository can prove.
+The measuring instrument is the portfolio piece.
+
+| Doc | What it is |
+|---|---|
+| **[MARKET-2026-AI-ENGINEER.md](MARKET-2026-AI-ENGINEER.md)** | The research. 911 postings / 4 weeks / 623 boards: what AI roles actually demand, by frequency; seniority reality; NL vs India; triangulated against published data |
+| **[EVIDENCE-MAP.md](EVIDENCE-MAP.md)** | Requirement → mechanism → file path → production number. Every demand marked ✅ / 🟡 / ❌, gaps included |
+| **[PORTFOLIO-GAPS-AND-ACTIONS.md](PORTFOLIO-GAPS-AND-ACTIONS.md)** | Ranked actions. Leads with the finding that the binding constraint is **not** the portfolio |
+| **[INTERVIEW-BRIEF.md](INTERVIEW-BRIEF.md)** | Six headline numbers, five incident-led stories, the hard questions with honest answers |
+
+Headline findings: **20%** of AI postings want agents + evaluation + production together (the
+exact intersection this repo occupies) · only **2.4%** target juniors, independently matching a
+published 2.5% figure · the Netherlands over-indexes on every differentiator we hold, including
+**2.5× more human-in-the-loop** than India · Python appears in **70.1%** of postings and this
+codebase is TypeScript, which is the largest measured gap.
+
+Reproduce any table: `scripts/sql/market-skill-frequency.sql`, `market-cuts.sql`, `prod-metrics.sql`.
+
+---
+
 ## Understand the current architecture (v3)
 
 The v2 study sequence described an architecture that no longer exists. The authoritative, up-to-date material now lives at the root and in the docs index:

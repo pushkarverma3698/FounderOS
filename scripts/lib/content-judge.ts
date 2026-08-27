@@ -18,6 +18,8 @@
  * unit tests, not trusted as free-form prose.
  */
 
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOpenAI } from "@langchain/openai";
 
 /** The five angles the judge scores, each 1 (broken) … 5 (excellent). */
@@ -110,7 +112,7 @@ function buildPrompt(taskPrompt: string, reply: string): string {
   ].join("\n");
 }
 
-function buildModel(): ChatOpenAI | null {
+function buildModel(): BaseChatModel | null {
   const raw = JUDGE_MODEL.includes(":") ? JUDGE_MODEL : `openrouter:${JUDGE_MODEL}`;
   const sep = raw.indexOf(":");
   const provider = raw.slice(0, sep);
@@ -130,7 +132,17 @@ function buildModel(): ChatOpenAI | null {
     if (!process.env["OPENAI_API_KEY"]) return null;
     return new ChatOpenAI({ model, temperature: 0, maxTokens: 256, maxRetries: 1 });
   }
-  return null; // anthropic/google-genai not wired here — fail-open
+  if (provider === "google-genai") {
+    if (!process.env["GOOGLE_GENERATIVE_AI_API_KEY"]) return null;
+    return new ChatGoogleGenerativeAI({
+      model,
+      temperature: 0,
+      maxOutputTokens: 256,
+      maxRetries: 1,
+      apiKey: process.env["GOOGLE_GENERATIVE_AI_API_KEY"],
+    });
+  }
+  return null; // anthropic not wired here — fail-open
 }
 
 /**
