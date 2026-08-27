@@ -29,7 +29,7 @@ def main() -> int:
 
     try:
         jobs = fetch_queue()
-        save_queue(jobs)
+        fetch_failures = save_queue(jobs)
     except SyncError as err:
         # Reported, never swallowed. A sync that failed and a queue that is
         # empty produce the same silence, and only one of them is fine.
@@ -40,9 +40,16 @@ def main() -> int:
             print(f"✗ could not report the failure either: {notify_err}")
         return 1
 
+    if fetch_failures:
+        # T1a: printed here too — the terminal is what's open right now, and
+        # Telegram is what's open later. Both must say it, neither is enough alone.
+        print(f"⚠ {len(fetch_failures)} artifact fetch(es) failed:")
+        for company, reason in fetch_failures:
+            print(f"    {company}: {reason}")
+
     top = [f"{j.company} — {j.title}" for j in jobs]
     try:
-        notify.send(notify.queue_ready_message(len(jobs), top))
+        notify.send(notify.queue_ready_message(len(jobs), top, fetch_failures))
     except notify.NotifyError as err:
         print(f"⚠ queue synced ({len(jobs)} jobs) but Telegram failed: {err}")
         return 1

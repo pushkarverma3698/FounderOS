@@ -12,7 +12,8 @@ import json
 
 import pytest
 
-from mac_client.profile import ProfileError, load_profile, missing_resumes
+from mac_client.profile import ApplyProfile, ProfileError, load_profile, missing_resumes, resume_unusable
+from mac_client.sync import QueueJob
 
 VALID = {
     "first_name": "Pushkar",
@@ -87,3 +88,110 @@ def test_missing_resumes_is_empty_when_every_file_exists(tmp_path):
     path = write(tmp_path, {**VALID, "default_resume": str(cv)})
     profile = load_profile(path)
     assert missing_resumes(profile, ["ai", "backend"]) == []
+
+
+def test_missing_resumes_flags_a_tailored_cv_that_never_arrived(tmp_path):
+    # THE SILENT SUBSTITUTION. A generic resume IS on disk, so the naive check
+    # ("is there a file?") says everything is fine — but this row was promised
+    # a tailored CV (tailored_cv_s3_key is set) and the S3 fetch either never
+    # ran or failed. That must be reported, not silently absorbed by the
+    # generic fallback. job_id is a fresh id with no .queue/ dir on disk, which
+    # IS the "the fetch never landed" state — no mocking needed.
+    cv = tmp_path / "generic.pdf"
+    cv.write_bytes(b"%PDF-1.4 real enough")
+    path = write(tmp_path, {**VALID, "default_resume": str(cv)})
+    profile = load_profile(path)
+    job = QueueJob(
+        id="t1b-missing-00000000-0000-0000-0000-000000000001",
+        company="Ockto",
+        title="Senior Backend Engineer",
+        track="ai",
+        url="https://ockto.recruitee.com/o/senior-backend",
+        brief_rank=1,
+        tailored_cv_s3_key="tailored/ockto-senior-backend.pdf",
+    )
+    problems = missing_resumes(profile, [job])
+    assert len(problems) == 1
+    assert "Ockto" in problems[0]
+    assert "tailored" in problems[0].lower()
+
+
+def test_missing_resumes_is_quiet_when_the_row_never_had_a_tailored_cv(tmp_path):
+    # Must not regress: a row with no tailored_cv_s3_key at all (never
+    # queued for tailoring) is correctly served by the generic resume, and
+    # that is not a problem worth reporting.
+    cv = tmp_path / "generic.pdf"
+    cv.write_bytes(b"%PDF-1.4 real enough")
+    path = write(tmp_path, {**VALID, "default_resume": str(cv)})
+    profile = load_profile(path)
+    job = QueueJob(
+        id="t1b-no-tailoring-00000000-0000-0000-0000-000000000002",
+        company="Mollie",
+        title="Backend Engineer",
+        track="ai",
+        url="https://jobs.lever.co/mollie/abc",
+        brief_rank=2,
+        tailored_cv_s3_key=None,
+    )
+    assert missing_resumes(profile, [job]) == []
+
+
+def test_uses_tailored_cv_is_false_for_a_row_that_was_never_tailored(tmp_path):
+    # QA, 2026-08-25: the FIRST version of this fix only warned when a tailored
+    # CV was promised (tailored_cv_s3_key set) and then missing. Measured
+    # against the real queue that covered 4 rows out of 62 — the other 58 had
+    # never been tailored at all, uploaded the generic CV, and the overlay said
+    # NOTHING. That is the same silent substitution T1b exists to stop, just in
+    # a different shape: what the founder needs to know at SUBMIT time is
+    # "is this the tailored CV or not", regardless of why.
+    cv = tmp_path / "generic.pdf"
+    cv.write_bytes(b"%PDF-1.4 real enough")
+    path = write(tmp_path, {**VALID, "default_resume": str(cv)})
+    profile = load_profile(path)
+    job = QueueJob(
+        id="qa-never-tailored-0000-0000-0000-000000000004",
+        company="Visa", title="Software Engineer", track="ai",
+        url="https://x", brief_rank=1, tailored_cv_s3_key=None,
+    )
+    # Not a "problem" (nothing is broken), but it IS a generic CV and the
+    # overlay must be able to say so.
+    assert profile.tailored_cv_missing(job) is False
+    assert profile.uses_tailored_cv(job) is False
+
+
+def test_resume_unusable_is_true_with_no_candidate_at_all():
+    # Bypass load_profile's own "no resume at all" refusal by constructing the
+    # dataclass directly — this test is about resume_unusable, not load_profile.
+    profile = ApplyProfile(**{**VALID, "resumes": {}, "default_resume": None,
+                               "linkedin": None, "website": None})
+    job = QueueJob(id="x", company="Acme", title="Eng", track="ai", url="https://x", brief_rank=1)
+    assert resume_unusable(profile, job) is True
+
+
+def test_resume_unusable_is_true_when_the_configured_file_is_absent(tmp_path):
+    path = write(tmp_path, {**VALID, "default_resume": str(tmp_path / "gone.pdf")})
+    profile = load_profile(path)
+    job = QueueJob(id="x", company="Acme", title="Eng", track="ai", url="https://x", brief_rank=1)
+    assert resume_unusable(profile, job) is True
+
+
+def test_resume_unusable_is_false_when_only_the_tailored_one_is_missing(tmp_path):
+    # This is the queue-filter side of the T1b fix: a row that fell back to a
+    # REAL generic PDF must stay in today's queue — missing_resumes() still
+    # reports it (tested above), but resume_unusable() must not, or the job
+    # would be silently dropped instead of silently mis-sent, trading one
+    # silent failure for another.
+    cv = tmp_path / "generic.pdf"
+    cv.write_bytes(b"%PDF-1.4 real enough")
+    path = write(tmp_path, {**VALID, "default_resume": str(cv)})
+    profile = load_profile(path)
+    job = QueueJob(
+        id="t1b-unusable-check-00000000-0000-0000-0000-000000000003",
+        company="Booking",
+        title="Engineer",
+        track="ai",
+        url="https://x",
+        brief_rank=3,
+        tailored_cv_s3_key="tailored/booking.pdf",
+    )
+    assert resume_unusable(profile, job) is False
