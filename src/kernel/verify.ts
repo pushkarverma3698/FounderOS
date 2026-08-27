@@ -201,6 +201,9 @@ export async function verifyStepResult(result: StepResult, envelope: TaskEnvelop
           evidence: typeof result.output === "string" ? result.output.slice(0, 300) : JSON.stringify(result.output).slice(0, 300),
           retryable: true,
         },
+        // `result` is the "ok" branch here (guarded above) — its real receipts
+        // carry forward instead of being dropped by this post-hoc failure.
+        tool_receipts: result.tool_receipts,
       };
     }
   } catch (err) {
@@ -214,6 +217,7 @@ export async function verifyStepResult(result: StepResult, envelope: TaskEnvelop
         message: `Verifier threw error: ${(err as Error).message}`,
         retryable: true,
       },
+      tool_receipts: result.tool_receipts,
     };
   }
 

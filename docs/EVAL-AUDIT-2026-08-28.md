@@ -1,5 +1,38 @@
 # Eval audit — why the golden set scores 42%
 
+> **RESOLVED 2026-08-28** — D1–D8 (fix list below) landed in
+> [PR #585](https://github.com/pushkarverma3698/FounderOS/pull/585)
+> (`fix/eval-harness-recursion-and-hitl` → `beta`). Summary of what shipped
+> and what's still open:
+> - **D1** (dropped HITL receipts): fixed AND empirically proven against the
+>   real graph (offline, $0) — `tests/unit/eval/kernel-invoker.test.ts`. Turned
+>   out the audit's own proposed mechanism (read `state.step_receipts`) is only
+>   HALF the fix: a gated tool that is a step's ONLY call produces zero
+>   receipts even mid-interrupt (every HITL tool calls `interrupt()` before
+>   doing any work), proven by direct probe against `buildKernel`. The
+>   complete fix also reads the pending interrupt's own `{action: "<tool>"}`
+>   payload. See `src/eval/kernel-invoker.ts`'s doc comment for both mechanisms.
+> - **D2** (routing scored on `steps[0]` only), **D3** (draft-vs-send
+>   expectations predating the July rule), **D4** (`expectedRoute:null` for a
+>   direct reply), **D5** (`isInfraError` laundering `GraphRecursionError`) —
+>   all fixed as specified.
+> - **B5** (recursion limit): the eval/production config mismatch (harness ran
+>   at LangGraph's bare default of 25, not this repo's 60) is fixed, but the
+>   three affected tasks have NOT been re-run at the correct limit — no
+>   `GOOGLE_GENERATIVE_AI_API_KEY` was available in the session that made this
+>   fix. See docs/LIMITATIONS.md B5's addendum.
+> - **B6**: re-investigated, not just re-specified — `stress-dangerous-shell`
+>   turned out to be a D1 casualty (the interrupt DID fire correctly), not a
+>   refusal; only `adversarial-prompt-injection` needed re-specifying. See
+>   docs/LIMITATIONS.md B6.
+> - **D6** (tool-selection passing on a failed call) and **D8** (41 vs 46 task
+>   count doc drift) were intentionally left for a separate pass — out of this
+>   fix's scope.
+> - A live re-run of `pnpm eval` to produce EARNED corrected numbers is still
+>   outstanding (same credential gap as B5).
+>
+> Everything below is the ORIGINAL audit, unedited, for the record.
+
 *2026-08-28. Audit of the 2026-08-27T15:19:35Z `pnpm eval` run published in [`EVAL.md`](../EVAL.md).*
 
 **Verdict: 42% is mostly not a measurement of the agent.** Of the 25 listed failures,

@@ -13,6 +13,7 @@ import {
   validatePlan,
   validateEnvelope,
   validateStepResult,
+  StepResultSchema,
   hashToolArgs,
   digestToolResult,
   repairDataGenericOutput,
@@ -348,6 +349,54 @@ describe("validateStepResult — the zero-hallucination gate", () => {
   it("is total on hostile input", () => {
     expect(validateStepResult(null, envelope()).ok).toBe(false);
     expect(validateStepResult({ status: "maybe" }, envelope()).ok).toBe(false);
+  });
+});
+
+// The failed branch used to have NO tool_receipts field at all — a step that
+// failed after a tool ran lost the receipt entirely (docs/EVAL-AUDIT-2026-08-28.md
+// D1). These pin the fix: additive, defaulted, and doesn't disturb a caller
+// that never mentions the field.
+describe("StepResultSchema — failed branch carries tool_receipts (D1)", () => {
+  it("accepts a failed result that omits tool_receipts and defaults it to []", () => {
+    const res = StepResultSchema.safeParse({
+      status: "failed",
+      step_id: "s1",
+      failure: { step_id: "s1", stage: "tool", component: "x", message: "boom", retryable: true },
+    });
+    expect(res.success).toBe(true);
+    if (res.success && res.data.status === "failed") {
+      expect(res.data.tool_receipts).toEqual([]);
+    }
+  });
+
+  it("accepts a failed result that carries real receipts earned before it failed", () => {
+    const res = StepResultSchema.safeParse({
+      status: "failed",
+      step_id: "s1",
+      failure: { step_id: "s1", stage: "validation", component: "x", message: "bad output", retryable: true },
+      tool_receipts: [receipt(true)],
+    });
+    expect(res.success).toBe(true);
+    if (res.success && res.data.status === "failed") {
+      expect(res.data.tool_receipts).toHaveLength(1);
+      expect(res.data.tool_receipts[0]!.tool).toBe("send_email");
+    }
+  });
+
+  it("validateStepResult still passes a failed result through untouched by output validation", () => {
+    const res = validateStepResult(
+      {
+        status: "failed",
+        step_id: "s1",
+        failure: { step_id: "s1", stage: "tool", component: "x", message: "boom", retryable: true },
+        tool_receipts: [receipt(true)],
+      },
+      envelope(),
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok && res.value.status === "failed") {
+      expect(res.value.tool_receipts).toHaveLength(1);
+    }
   });
 });
 
