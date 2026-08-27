@@ -1,10 +1,10 @@
 # FounderOS Proof Scoreboard
 
-_Generated 2026-07-08T16:07:55.446Z · commit `199ec8f` · regenerate with `pnpm proof:scoreboard`_
+_Generated 2026-08-27T10:40:09.076Z · commit `27a40eb` · regenerate with `pnpm proof:scoreboard`_
 
 ## Deterministic test suite (offline, $0)
 
-✅ 1213 tests / 120 files — all green
+✅ 3611 tests / 329 files — all green
 
 ## Kernel guarantees (each one is an executable scenario, not a claim)
 
@@ -22,5 +22,6 @@ _Generated 2026-07-08T16:07:55.446Z · commit `199ec8f` · regenerate with `pnpm
 | gateway-imports | 0 ✅ |
 | kernel-purity | 0 ✅ |
 | fail-open-catch | 11 |
-| loc-budget | 5 |
+| loc-budget | 6 |
 | regex-routing | 0 ✅ |
+| orphan-subsystem | 0 ✅ |

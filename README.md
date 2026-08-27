@@ -4,11 +4,33 @@
 
 Everything in this repository exists because I wanted to answer one question: *how do you build AI systems that survive production?*
 
-FounderOS is a deterministic, contract-first agent kernel that takes real business actions — email, LinkedIn, GitHub, shell — safely, with founder approval and a code-recorded receipt for every one. It runs my studio ([Turicks](https://turicks.com)) end-to-end over Telegram. But the interesting part isn't what it does — it's the engineering problems I had to solve to make it reliable.
+FounderOS is a deterministic, contract-first agent kernel that takes real business actions — email, LinkedIn, GitHub, shell — safely, with founder approval and a code-recorded receipt for every one. It runs my studio ([Turicks](https://turicks.com)) end-to-end over Telegram, and it runs my own job search — screening thousands of live postings a week and drafting applications for my approval (`src/tools/jobhunt/`, the single largest production consumer of the kernel). But the interesting part isn't what it does — it's the engineering problems I had to solve to make it reliable.
 
 [![CI](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-3%2C499%20offline%20%240-brightgreen.svg)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-3%2C611%20offline%20%240-brightgreen.svg)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+---
+
+## Proof, in production
+
+Not a demo. These are rows in a Postgres database on a live VPS, reproducible with
+[`scripts/sql/prod-metrics.sql`](scripts/sql/prod-metrics.sql).
+
+| | |
+|---|---|
+| **229 human approvals** — 131 approved, **36 rejected** | The approval gate is real, and it has blocked things |
+| **80 real side effects executed** | 24 shell runs · 13 code sessions · 11 GitHub issues · 6 LinkedIn posts · 6 emails · 1 job application · 1 site deploy |
+| **1,843 LLM calls · $2.53 · $0.0014 mean** | Per-call cost attribution across 8 models |
+| **3,611 tests · 337 files · $0 per run** | The full agent graph runs offline in CI — scripted models, no paid calls |
+| **97.3% recall@5 · 0.855 MRR** | Hybrid retrieval, measured — and reranking measured then **rejected** on the evidence |
+| **`regex-routing: 0` · `kernel-purity: 0`** | A CI-enforced architecture-debt ratchet that may only shrink |
+
+**Why these numbers and not others:** I measured the 2026 AI-engineering market from **911 real
+job postings this system collected itself** — 20% of AI roles want agents *and* evaluation *and*
+production together, and only 7.3% ask for human-in-the-loop, which is the rarest thing here.
+The study, including where this repo falls short, is in
+**[docs/study/](docs/study/README.md#-hiring--market-study-2026-08)**.
 
 ---
 
@@ -23,32 +45,28 @@ I shipped this system three times before I shipped it right.
 **v3** deleted two of the three routers, replaced detection with prevention, and made CI enforce that the complexity can't creep back. The full autopsy — including where I fell for AI slop and how I dug out — lives in [the case studies](docs/turicks-case-studies/).
 
 ### Architecture Overview
+
+One typed pipeline, not a supervisor routing to departments — see [Challenge 1](#challenge-1-how-do-you-stop-multi-agent-systems-from-becoming-impossible-to-debug) for why that distinction is the whole point.
+
 ```mermaid
-graph TD
-    subgraph Gateway [Gateway]
-        TG[Telegram Bot]
-    end
+graph LR
+    TG[Telegram] --> PLAN["plan (LLM)"]
+    PLAN --> DISP["dispatch<br/>(pure code)"]
+    DISP --> AGENT["worker ⇄ tools<br/>(isolated envelope)"]
+    AGENT -->|side effect?| HITL{{"HITL approval"}}
+    HITL -->|approved| AGENT
+    AGENT --> COLL["collect<br/>(validate receipts)"]
+    COLL -->|next step| DISP
+    COLL -->|plan done| SYNTH["synthesize (LLM)"]
+    SYNTH --> TG
 
-    subgraph Kernel [Agent Kernel v3]
-        SUP[Supervisor Node]
-        W_SALES[Sales Dept]
-        W_ENG[Engineering Dept]
-        W_RES[Research Dept]
-        
-        SUP -->|Route| W_SALES
-        SUP -->|Route| W_ENG
-        SUP -->|Route| W_RES
-    end
-
-    subgraph Data [RAG & State]
-        PG[(Postgres)]
-        VEC[(pgvector)]
-        REDIS[(Redis Cache)]
-    end
-
-    TG <-->|Events| Kernel
-    Kernel <--> Data
+    PG[("Postgres<br/>checkpoint + receipts + approvals")]
+    DISP -.-> PG
+    HITL -.-> PG
+    COLL -.-> PG
 ```
+
+Full detail, with the tools/infra/data layers: [docs/diagrams/01-system-architecture.mmd](docs/diagrams/01-system-architecture.mmd).
 
 ---
 
@@ -57,9 +75,9 @@ graph TD
 | Problem | Mechanism | Evidence |
 |---------|-----------|----------|
 | **State persistence** | Postgres-checkpointed graph; approval rows written *before* `interrupt()` | Crash mid-approval → restart → pending action survives |
-| **Zero-hallucination actions** | `ToolReceipt` required for every action claim; synthesizer only sees validated results | `kernel-e2e: fabricated action` — unproven claims rejected |
+| **Action claims grounded in receipts, not model output** | `ToolReceipt` required for every action claim; the synthesizer is fed only validated `StepResult`s, never raw tool output | `kernel-e2e: fabricated action` — unproven claims rejected |
 | **Crash-safe human-in-the-loop** | Durable record before interrupt; idempotency key before every send | Process crash during approval → no double-send, no lost state |
-| **Deterministic evaluation** | Temp 0, scripted models offline, pure-function routing | 3,499 tests at $0; byte-identical plans asserted in CI — [how this is evaluated](docs/EVAL.md) |
+| **Deterministic evaluation** | Temp 0, scripted models offline, pure-function routing | 3,611 tests at $0; byte-identical plans asserted in CI — [how this is evaluated](docs/EVAL.md) |
 | **Architecture-debt ratchet** | CI-enforced baseline that may only shrink | `regex-routing = 0`, `gateway-imports = 0`, `kernel-purity = 0` |
 | **Idempotent side effects** | Dedup key checked before every external send | Retry can never double-send an email |
 | **Typed failure taxonomy** | `FailureReport` = stage + component + evidence + retryable | Threads never silently wiped; founder always sees the real error |
@@ -120,7 +138,7 @@ graph TD
 
 | Tier | What | Cost | When |
 |------|------|------|------|
-| `pnpm test` | 3,499 unit/kernel tests across 321 files, scripted models | $0 | Every commit |
+| `pnpm test` | 3,611 unit/kernel tests across 329 files, scripted models | $0 | Every commit |
 | `pnpm eval` | 46 golden tasks, 3 scoring dimensions (routing · tools · HITL) | ~$0.10 | Per feature branch |
 | `pnpm qa:telegram` | 22-task MTProto founder-simulation against live bot | ~$0.50 | Pre-deploy acceptance |
 

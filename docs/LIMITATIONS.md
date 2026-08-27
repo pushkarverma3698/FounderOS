@@ -31,6 +31,32 @@
 Counts are from `git ls-files`, a full `vitest run` and `verify-architecture.ts` in
 one session on 2026-08-22, not from the previous revision plus arithmetic.
 
+## Ratchet debt, named (2026-08-27)
+
+The two non-zero ratchet rows above are real files, not just counts. Naming them is
+what makes "we track our own debt" a checkable claim instead of a slogan.
+
+**`loc-budget` (6 files over the 400-line CI budget), ranked by size:**
+
+| File | Lines | Note |
+|---|---|---|
+| `src/db/queries.ts` | 2,233 | Worst offender — 5.6× budget; the natural split is by domain (jobhunt / agent / brain queries) |
+| `src/db/schema.ts` | 1,696 | 29 tables in one file; Drizzle allows multi-file schemas |
+| `src/db/job-queries.ts` | 676 | |
+| `src/agents/agent-tools/comms.ts` | 668 | |
+| `src/agents/agent-tools/engineering.ts` | 550 | |
+| `src/eval/golden-tasks.ts` | 422 | Barely over; likely a data-file exemption candidate rather than a split |
+
+Not split in this pass deliberately — `src/db/queries.ts` and `schema.ts` sit on the
+kernel's hot path (every checkpoint read/write), and a mechanical split under time
+pressure is how a "simplification" becomes the next production incident.
+
+**`fail-open-catch` (11 untagged `.catch(() => …)` swallows)** — each either needs the
+`allow-failopen: <reason>` tag the CI rule requires, or a real fix. Find the current
+list with `grep -rn "\.catch(() =>" src/` cross-referenced against
+`scripts/verify-architecture.ts`'s tagging check; 12 of the 23 raw matches already
+carry a reason, these 11 don't.
+
 ## Review verdict
 
 The v3 kernel is **strong on mechanism and weak on measurement.** The
@@ -84,19 +110,23 @@ a research task" does not.
 
 - **In flight:** brief `docs/antigravity/AG-009-cost-attribution.md`.
 
-## A3. No retrieval evaluation — **HIGH**
+## A3. No retrieval evaluation — **RESOLVED 2026-08-27**
 
-Zero occurrences of `recall@`, `nDCG`, `MRR`, `faithfulness`, or `groundedness`.
-No golden retrieval set exists. The only relevance signal in the system is
-`score` = fraction of query terms present (`src/db/rag-search.ts:88`), which its
-own comment calls "a rough relevance."
+Built since this was written: a 37-case golden set scored for recall@5 and MRR
+across four lanes (`src/eval/retrieval-golden.ts`, `retrieval-scoring.ts`,
+`scripts/run-retrieval-eval.ts` — `pnpm eval:retrieval`, $0). First published
+run: hybrid 97.3% recall@5 / 0.855 MRR, beating vector-only and keyword-only by
+25–33 points on the harder (disjoint) query slice — see
+[docs/EVAL.md §4](EVAL.md) for the full ablation and why reranking is measured
+and off by default rather than untested and on. Brief:
+`docs/antigravity/AG-010-retrieval-eval-harness.md`.
 
 Retrieval *failure* is handled well (keyword fallback with a visible
 "Semantic search unavailable" banner; `src/infra/rag-optimization-sweep.ts`
-refuses to render an empty store as full coverage). Retrieval *quality* is
-unmeasured. We can prove retrieval is up; we cannot prove it is good.
-
-- **In flight:** brief `docs/antigravity/AG-010-retrieval-eval-harness.md`.
+refuses to render an empty store as full coverage), and retrieval *quality* is
+now measured too. What's still open: the golden set is hand-authored (37 cases,
+one corpus) and not in CI — it costs a live embedding pass against real data, so
+it runs when someone remembers, same shape as A4's live-eval gap.
 
 ## A4. The behavioural eval scores structure, never output quality — **MEDIUM**
 
@@ -194,6 +224,62 @@ This is also the honest answer to "where is your policy engine": distributed
 across tools, with the declaration decorative. A fitness rule asserting every
 tool in `HITL_GATED_TOOLS` actually calls `hitlGate()` would convert a
 discipline into a build failure. **Recommended next fitness rule.**
+
+## B4. THREAT-MODEL.md's mitigations are asserted, not executed — **MEDIUM, open**
+
+[THREAT-MODEL.md](THREAT-MODEL.md) names 8 threats (T1–T8) and a mitigation for
+each. Exactly one has an executable test: T1 (prompt injection) via
+`adversarial-prompt-injection` in `src/eval/golden-tasks.ts`, and that exercises
+the comms-send path only. T3 (path traversal), T4 (replay/duplicate side
+effects), T6 (a worker calling a tool outside its allowlist), and T7 (a loop
+driving cost past budget) are each covered by unit tests for the *underlying
+mechanism* (`path-guard`, idempotency checks, capability sets, budget caps) —
+but nothing tests them as an attack: no test tries to make a worker call an
+out-of-scope tool and asserts it's refused, or replays a Telegram callback
+twice and asserts no double-send. The mechanisms likely hold; the gap is that
+"likely" instead of a red-team-style test per threat.
+
+- **Recommended shape:** one test per named threat in a
+  `tests/unit/security/` suite, each asserting the specific bypass fails —
+  not new mechanism, just proof the existing one holds under adversarial input.
+
+---
+
+## B5. Broad research requests hit the LangGraph recursion limit — **MEDIUM, open**
+
+Found by the 2026-08-27 golden-set run ([EVAL.md](../EVAL.md)). Two tasks
+terminated on `Recursion limit of 25 reached without hitting a stop condition`:
+
+| task | input shape |
+|---|---|
+| `sales-research-outreach` | research a company, *then* draft outreach from the findings |
+| `stress-large-context-research` | "search broadly and summarise" across a whole market |
+
+Both are open-ended research where the worker keeps searching instead of
+converging, until LangGraph cuts the graph off. The turn fails with a typed
+error rather than a wrong answer, so it is loud rather than silent — but the
+founder gets nothing back, and the cost of the wasted loops is already spent.
+
+Raising `recursionLimit` is the tempting fix and the wrong one: it buys more
+loops for a worker that has no stopping rule, so it converts a fast failure into
+an expensive one. The real fix is a convergence condition on research workers (a
+search-call budget per step, or a "you have enough to answer" check), which is
+why this is recorded here rather than patched.
+
+---
+
+## B6. Two adversarial golden tasks penalise correct refusals — **LOW, open**
+
+Also from the 2026-08-27 run. `adversarial-prompt-injection` and
+`stress-dangerous-shell` assert the agent *attempts* a dangerous action and is
+caught by the HITL gate. The agent instead refuses outright — safer — and is
+scored as failing. The assertions encode "attempt then pause" as the only
+correct shape, when "refuse" is at least as good.
+
+The failing scores were **published as-is** in the 2026-08-27 report rather than
+re-scored by hand; the expectations should be widened to accept a refusal, and
+the number regenerated by a real run. Noted so the next reader of that report
+knows two of its failures are the test's fault, not the system's.
 
 ---
 
