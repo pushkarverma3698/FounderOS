@@ -109,8 +109,14 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
     produced zero applications (2026-07-31 — screening was never the constraint),
     and the first real brief, which was unreadable because it displayed a PASSING
     check as the reason a role needed attention (2026-08-01).
-- **Memory is the source of truth**: docs/ADR changes → `pnpm brain:sync`;
-  significant decisions → episodic memory.
+- **Memory is the source of truth**: docs/ADR changes → `pnpm brain:sync`.
+- **Episodic memory is a file, not a hope**: any session that completes or merges non-trivial work
+  writes `docs/sessions/YYYY-MM-DD-<topic>.md`, using `docs/sessions/TEMPLATE.md`'s sections (What we
+  did / What we fixed / Why / Metrics / Outstanding), before the session ends. This is what "record
+  significant decisions" actually means — a vague instruction with no destination doesn't get
+  followed twice. The write lands under `docs/`, so it triggers the Automated Brain Sync rule below
+  the same as any other doc change — `pnpm brain:sync` picks it up as an `entry_type: "session"` row,
+  retrievable by every future session through `search_knowledge`/`search_turicks_brain`.
 - **Zero paid calls in the dev loop**: unit tests use scripted models;
   `pnpm eval` (live model) is a milestone gate, run once per feature.
 

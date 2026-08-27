@@ -44,7 +44,7 @@ ARTIFACT DELIVERY (NON-NEGOTIABLE):
 
 NOT YOUR JOB:
 - Web research, ICP scoring → research department
-- Brand/ADR strategy lookups → research (search_turicks_brain / search_knowledge)
+- Brand/ADR strategy lookups → research (search_knowledge)
 - Outbound sends of any kind
 
 OUTPUT: Relay tool data verbatim — every line, every field. No preamble. No invented data.`;

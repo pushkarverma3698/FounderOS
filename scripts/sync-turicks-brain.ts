@@ -183,6 +183,17 @@ export function isPlanSyncSource(sourcePath: string): boolean {
   });
 }
 
+/**
+ * True when `filename` (a bare name inside docs/sessions/, e.g. "2026-08-25-
+ * foo.md") is a real session log the sessions walker below should ingest.
+ * Excludes TEMPLATE.md — the empty scaffold session logs are authored from —
+ * which `f.endsWith(".md")` alone would otherwise match, ingesting a blank
+ * "session" entry into turicks_brain on every sync.
+ */
+export function isSessionLogFile(filename: string): boolean {
+  return filename.endsWith(".md") && filename !== "TEMPLATE.md";
+}
+
 function collectDocs(rootDir: string): DocEntry[] {
   const docs: DocEntry[] = [];
   const root = join(process.cwd(), rootDir);
@@ -399,7 +410,7 @@ function collectDocs(rootDir: string): DocEntry[] {
   // ── Session Logs (Episodic Memory) ─────────────────────────────────────────
   const sessionsDir = join(root, "docs/sessions");
   if (existsSync(sessionsDir)) {
-    for (const file of readdirSync(sessionsDir).filter((f) => f.endsWith(".md"))) {
+    for (const file of readdirSync(sessionsDir).filter(isSessionLogFile)) {
       const content = readFile(join(sessionsDir, file));
       docs.push({
         entry_type: "session",
@@ -418,10 +429,6 @@ function collectDocs(rootDir: string): DocEntry[] {
 
 async function upsertEntry(
   entry: DocEntry,
-  /** Lazy: called ONLY when a row actually needs a doc-level vector written.
-   *  Eagerly embedding here cost one Ollama round trip per doc per sync even
-   *  when the row was unchanged and already had a vector. */
-  embedDoc: (() => Promise<number[]>) | null,
 ): Promise<{ action: "inserted" | "updated" | "skipped"; id: string }> {
   const db = getDb();
   const existing = await db
@@ -451,17 +458,11 @@ async function upsertEntry(
         is_current: true,
       })
       .returning({ id: knowledgeEntries.id });
-    if (embedDoc) await setKnowledgeEmbedding(row!.id, await embedDoc());
     return { action: "inserted", id: row!.id };
   }
 
   const current = existing[0]!;
   if (current.content === entry.content) {
-    // Unchanged row: only embed if the vector is actually missing (a sync that
-    // died before this column was written, or a keyword-only run).
-    if (embedDoc && current.embedding === null) {
-      await setKnowledgeEmbedding(current.id, await embedDoc());
-    }
     return { action: "skipped", id: current.id };
   }
 
@@ -485,17 +486,8 @@ async function upsertEntry(
       is_current: true,
     })
     .returning({ id: knowledgeEntries.id });
-  if (embedDoc) await setKnowledgeEmbedding(row!.id, await embedDoc());
 
   return { action: "updated", id: row!.id };
-}
-
-/** Set the doc-level embedding column on a knowledge_entries row (hybrid search). */
-async function setKnowledgeEmbedding(id: string, embedding: number[]): Promise<void> {
-  const db = getDb();
-  await db.execute(
-    sql`UPDATE knowledge_entries SET embedding = ${toVector(embedding)}::vector WHERE id = ${id}`,
-  );
 }
 
 /**
@@ -587,10 +579,7 @@ async function main() {
 
   for (const doc of docs) {
     try {
-      const embedDoc = keywordOnly
-        ? null
-        : () => embedText(`${doc.title}\n\n${doc.content.slice(0, 4000)}`);
-      const { action } = await upsertEntry(doc, embedDoc);
+      const { action } = await upsertEntry(doc);
 
       let chunks = 0;
       let refreshed = false;
