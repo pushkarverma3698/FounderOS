@@ -547,3 +547,166 @@ it is the product, and nobody has read it.
   F4 against the real `buildFillPlan` and a live-captured fixture.
 - **Base CV still invisible.**
 - **Probabilities are judgement.** I defend the ordering, not the absolute numbers.
+
+---
+
+# REV 3 — 2026-08-25: F1 confirmed empirically, half fixed
+
+`main` moved `ce99ff6` → `3637f4e`. Another session shipped 11 commits into the Mac lane, and one of
+them settles the single claim rev 2 could not verify.
+
+**Rev 2's F1 was right, and understated it.** From the new comment at `mac-client/sync.py:104-112`:
+
+> *"Found live, 2026-08-25: every `_fetch_s3_artifact` call failed silently (`aws: command not
+> found`, and even once installed, `$STORAGE_BUCKET` was empty) for both the cover letter and the
+> pre-existing tailored CV — the function's designed-to-be-silent failure mode had hidden a fetch
+> that had never once worked."*
+
+Rev 2 argued from the call graph that "almost no row carries a tailored CV". The measured answer is
+**zero rows ever have**. `awscli` was not installed on the VPS at all. Every application the Mac lane
+has ever sent used the generic CV.
+
+This is the clearest possible vindication of the finding *and* of why it was rated critical: three
+correct comments about failing loudly sat in neighbouring files while a bare `except Exception: pass`
+hid a fetch that had never worked once. Rule #27, exactly.
+
+## What is now fixed
+
+| Rev 2 finding | State |
+|---|---|
+| F1 half one — swallowed fetch / `$STORAGE_BUCKET` | **FIXED** — `3672c58` sources `/opt/founderos/.env`; `89c6b69` pins the command; `awscli` added to `docs/guides/DEPLOYMENT.md` |
+| F4 — cover letter never reaches the founder at the form | **FIXED, well** — `f0b2aa4` syncs it from S3 beside the CV, `c2f3cf2` copies it to the clipboard on open, `dc80f0a` shows in the overlay whether one was found, with decode/permission guards (`923eb71`, `c1d86a2`) |
+
+## What is still open, and now sharper
+
+- **F1 half two — the silent substitution.** `_fetch_s3_artifact` now returns a bool and
+  `save_queue` **discards it at both call sites** (`sync.py:205`, `sync.py:207`). `profile.py` is
+  unchanged, so `resume_for()` still substitutes the generic résumé and `missing_resumes()` still
+  reports "no problems". Now that the fetch *can* succeed, whether a row ships tailored or generic is
+  a live per-row outcome that nothing reports — worse to leave than when it always failed.
+- **F1 half three — nothing tailors in bulk.** `processUntailoredApplications` still has zero callers.
+- **F2 — two live lanes.** `telegram.ts` still registers `/apply`; `capabilities.ts` still lists
+  `submitApplication`. Unchanged.
+- **F3 — reply tracking.** Unchanged, zero writers.
+- **F5 — 3-ATS coverage.** `_HOST_MARKERS` unchanged; Recruitee and Workable still unreachable.
+
+## Revised probability
+
+Unchanged at ~10% today — the tailored CV still does not reliably ship. But the distance to the next
+band shrank: F1a and F4 were two of the five things standing between here and ~30%, and both are
+done. Finishing F1b + F1c is now roughly a day.
+
+Execution brief updated in place: `docs/plans/2026-08-25-jobhunt-apply-completion-brief.md`
+(T1a and T5 marked DONE; T1b promoted to START HERE).
+
+---
+
+# REV 4 — 2026-08-25: the brief was executed; the constraint moved to fabrication
+
+`main` moved `3637f4e` → `ab0c170` (PR #576). A fresh session picked up
+`docs/plans/2026-08-25-jobhunt-apply-completion-brief.md` and shipped nearly all of it. The founder
+made the T2 call. One task was built and then **rejected on review**, for a reason that is now the
+most important finding in this document.
+
+## What shipped
+
+| Brief task | State | Evidence |
+|---|---|---|
+| T1a — swallowed S3 fetch / `$STORAGE_BUCKET` | **DONE** | `3672c58`, `89c6b69` |
+| T1b — silent generic substitution | **DONE** | `e659826` — `uses_tailored_cv()` + a three-state overlay label |
+| T1c — bulk tailoring cron | **BUILT, THEN REJECTED** | `400d145` then `fff7340` — see below |
+| T2 — retire the VPS lane | **DONE, founder decision** | `e7f1288` + `fff7340` orphan sweep |
+| T3 — reply tracking | **DONE** | `c7dfcd2` — `pipeline-followup.ts`, `/replied`, `/rejected` |
+| T4 — Recruitee + Workable | **DONE** | `761084e` |
+| T5 — cover letter to the Mac | **DONE** (earlier batch) | `f0b2aa4`, `c2f3cf2`, `dc80f0a` |
+
+Verified in the merged tree, not taken on report:
+
+- `/apply` is gone from `telegram.ts`; `/replied` and `/rejected` are registered in its place.
+- `submitApplication` is gone from `capabilities.ts:113`, with the founder decision named in the comment.
+- `verify-architecture.ts` now tombstones `apply-commands.ts`, `apply-headless.ts`, `apply-driver.ts`,
+  `apply-scrape.ts`, `apply-fill.ts` — so rev 2's F2 is closed *by mechanism*, not by intention.
+  That is the exact remedy F2 asked for.
+- `pipeline-followup.ts` implements the weekly digest and the day-7/14 nudge as deterministic
+  zero-LLM sweeps — the right lane for it.
+
+**Rev 2's F1, F2, F3, F4 and F5 are all now closed or materially closed.**
+
+## The two numbers that came out of it
+
+The brief's whole purpose was to produce measurements this audit could not make. It did:
+
+1. **4 of 62 queue rows carried a tailored CV. The other 58 fell back to generic with no warning
+   shown anywhere.** (`profile.py`, `uses_tailored_cv` docstring, measured against the real queue.)
+   Rev 2 argued this from the call graph; rev 3 recorded that the fetch had never once worked; rev 4
+   has the row count.
+
+2. **`tailorCv()` invents skills the base CV does not contain — 36 fabricated claims across 4 CVs**
+   (Kubernetes, PyTorch, Domain-Driven Design, FastAPI), found in end-to-end QA against real queue
+   rows. Nothing catches it: `findSlop()` is a banned-word list, not a claim check.
+
+## Why T1c was rejected, and why that is correct
+
+`fff7340` removed the bulk-tailoring cron that `400d145` had just added. Two reasons, both good:
+
+- **Founder judgement:** tailoring is a deliberate act triggered by `/draft N`, not something that
+  should happen to a queue row silently in the background. T1b's three-state overlay label already
+  makes an untailored row honest without manufacturing a CV for it.
+- **Safety:** running an unguarded fabricating tailor on a 30-minute cadence against a 606-row
+  backlog would spend the IND sponsor pool — finite and non-renewable — on fabricated résumés.
+
+I proposed T1c and I think rejecting it was right. Rule #28 in the other direction: my brief
+authorized the work and did not verify it was safe. The safety argument only became visible once
+someone ran it against real rows, which the brief told them to do first. That is the process working.
+
+The commit is explicit about the condition for revisiting: *"Do not re-add the batch cron without a
+fabrication guard in front of it."*
+
+## The constraint has moved
+
+Every finding this audit opened with is closed. The binding constraint is now **F7 — the CV's
+"zero hallucination" rule is a prompt instruction, not a mechanism** — which rev 1 rated High and
+which is now measured at 36 fabricated claims across 4 CVs.
+
+Independently verified against the merged tree: `tailor-cv.ts` gained only cost-attribution metadata
+in this batch. **No fabrication guard exists.** The consequence is now two-sided:
+
+- it **blocks throughput** — bulk tailoring cannot be re-enabled without it, so the pipeline is
+  capped at whatever the founder personally `/draft`s;
+- it **is a live risk on every manual `/draft`** — a fabricated skill on a CV is something he will be
+  interviewed about, on the record.
+
+This is the same asymmetry rev 1 named: a misread salary figure earned `extract.ts`, 383 lines of
+pure parser with its own suite, while a fabricated employment claim is protected by a sentence in a
+system prompt. Rule #27, still unpaid.
+
+**Recommendation, and it is now the only one that matters:** build the entity check (rev 2's F7 fix,
+brief T6). ~40 lines — extract capitalised entity spans and `YYYY` / `Mon YYYY` tokens from the
+tailored output, assert each appears in the base CV, fail the packet naming the offending span. Same
+shape as `validateStepResult`. Then re-add the batch cron behind it, and the throughput ceiling lifts
+at the same time as the risk closes.
+
+## Revised probability
+
+Rev 3 said ~10% today, ~30% with F1 fixed. F1 is fixed, and F2–F5 with it, so the honest number moves
+to roughly **30%** — with the caveat that the throughput ceiling is now the founder's own `/draft`
+rate, because bulk tailoring is correctly disabled until the guard exists. Building the guard is what
+converts ~30% into the ~45% band, and it is about a day.
+
+## Verified fresh on the merged tree (rev 4)
+
+`pnpm lint` clean · `pnpm verify:arch` 6/6 green, **`orphan-subsystem` still 0 after the tombstones**
+· `pnpm test` **329 files, 3,614 tests passed** (146s) · `pytest mac-client/tests` **80 passed, 13
+errors** — the 13 are the same environmental playwright-browser mismatch this container has always
+had. 80 + 13 = 93, which reconciles exactly with the executing session's reported 93/93 on a Mac with
+browsers installed.
+
+## Rev 4 limits
+
+- **The two headline numbers (4/62 rows, 36 fabricated claims) are from the other session's QA**, not
+  measured by me — I have no database access and no model budget here. I verified the *code state*
+  they describe: `tailor-cv.ts` has no claim check, `uses_tailored_cv` exists, the tombstones are
+  real. The counts I am relaying.
+- **No live application has been sent yet** as far as this tree can show. The funnel numbers in
+  Section 02 remain at their 2026-08-20 values.
+
