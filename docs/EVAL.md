@@ -130,16 +130,60 @@ independent metrics and is always the harshest view.
 A harness that finds a product bug *and* a bug in its own test set on the same run is doing its
 job. One that reports 95% on the architecture it was written for is usually measuring itself.
 
-> **Follow-up (2026-08-28).** A root-cause audit of this run —
-> [EVAL-AUDIT-2026-08-28.md](EVAL-AUDIT-2026-08-28.md) — found that **at least 15 of the 25
-> failures are defects in the harness or in expectations written before the v3 rewrite**, not in
-> the agent. The largest: the eval invoker reads tool receipts only from *settled* steps, so
-> every task that pauses at a HITL gate records zero tools — the report contradicts itself on
-> nine rows, scoring `hitl ✅` and `tools ❌ [none]` simultaneously. The audit also finds the
-> number is flattered in one place: `isInfraError` excluded three genuine recursion crashes as
-> if they were provider outages. Corrected figures are stated there as *proven* (61% overall) vs.
-> *projected* (≈76%), and neither is published here until the harness is fixed and re-run. The
-> numbers in this section remain exactly what the runner produced.
+This 42% is kept here, unedited, as the historical record of a real run — not deleted and not
+adjusted by hand. It was superseded the next day; read on for what happened to it.
+
+### Results — 2026-08-28 (the harness fixed and re-run)
+
+[EVAL-AUDIT-2026-08-28.md](EVAL-AUDIT-2026-08-28.md) audited the run above and found the 42%
+was mostly measuring the harness, not the agent: the invoker discarded tool receipts from any
+step that paused at a HITL gate (contradicting itself on 9 rows — `hitl ✅` alongside
+`tools ❌ [none]`), scored routing on only the first step of a plan, and treated a genuine
+`GraphRecursionError` as an excluded infra failure. [PR #585](https://github.com/pushkarverma3698/FounderOS/pull/585)
+fixed all of it — proven with a new test that drives the real `buildKernel` graph through both
+receipt-loss shapes, not asserted — and [PR #584](https://github.com/pushkarverma3698/FounderOS/pull/584)
+landed the same day (unrelated: a CV-fabrication guard for the jobhunt lane). Full generated
+report: [`EVAL.md`](../EVAL.md).
+
+| Dimension | Passed | Total | Accuracy |
+|---|---|---|---|
+| Routing | 37 | 41 | **90%** |
+| Tool selection | 26 | 27 | **96%** |
+| HITL coverage | 38 | 40 | **95%** |
+| **Overall** (all three must pass) | **35** | **41** | **85%** |
+
+Zero tasks excluded as infra errors — every one of the 41 ran clean.
+
+**The three recursion-limit failures are fully resolved, not just reclassified.** The eval
+invoker had never set `recursionLimit` at all, so it silently ran at LangGraph's bare default of
+25 instead of this repo's configured 60 — `sales-research-outreach`, `webdesign-proof-drop-outreach`,
+and `stress-large-context-research` all pass cleanly at the correct limit, with no recursion
+error. [LIMITATIONS.md](LIMITATIONS.md) B5 is closed on that evidence, not assumed.
+
+**What's real and still open** — 6 failures, none of them harness artifacts:
+
+1. **`eng-build-feature`** — asked to create a GitHub issue; gathered context
+   (`search_memory`, `read_context`, `project_workflow`) instead of calling `claude_code`
+   directly. A genuine tool-selection miss, not a routing miss — the agent over-investigates a
+   fairly directive request.
+2. **`workflow-weekly-digest`** routed to `admin` instead of `research`, and fired HITL when
+   none was expected. This matches a pattern already named in
+   [the market-study evidence map](study/EVIDENCE-MAP.md): first-person-plural business
+   questions ("what **we** accomplished") pull the planner toward the memory/context worker.
+3. **`demo-comms-hitl`** and **`stress-cross-dept-chain`** both landed one worker off
+   (`sales`/`research` instead of `comms`) — genuine comms/sales boundary ambiguity on
+   outbound-flavored drafting requests, not a harness defect.
+4. **`multi-step-chain`** got a direct reply (no plan) instead of routing to `comms` — arguably
+   defensible under the same reply-vs-plan logic that legitimizes `eng-write-code`'s direct
+   reply, but the task still expects a `comms` step and wasn't re-specified that way. Open
+   question, not resolved either way.
+5. **`personal-send-file`** didn't fire HITL — `~/Desktop/report.pdf` doesn't exist on the eval
+   host, so the tool exits before reaching the gate. An environment fixture gap, not a code
+   defect (named as low-value in the original audit's ranked fix list).
+
+None of these were visible in the 42% run — they were buried under receipt loss and a wrong
+recursion limit. Fixing the measuring instrument didn't just raise the number; it's what made
+these six real, nameable gaps visible in the first place.
 
 ---
 
@@ -255,11 +299,11 @@ pnpm proof:scoreboard     # regenerate docs/PROOF.md from a fresh run
 ### A note on the report file
 
 `pnpm eval` writes its results to **`EVAL.md` at the repository root** — that file is
-generated output, not prose, so it is never hand-edited. The copy currently committed is from
-**2026-06-11** and predates the v3 kernel: it scores 29 tasks and asks "did the supervisor pick
-the right department?", vocabulary for a graph tombstoned on 2026-07-08. It is left in place
-rather than deleted because regenerating it needs a live paid run, and a deleted artifact and a
-never-run one look identical. Treat it as a historical run until `pnpm eval` is run again.
+generated output, not prose, so it is never hand-edited. The committed copy is from the
+2026-08-28 run in §3 above (41 tasks, 85% overall) — the previous copy, from 2026-06-11,
+predated the v3 kernel and scored a graph tombstoned on 2026-07-08; it stayed committed for six
+weeks specifically so a deleted artifact and a never-run one wouldn't look identical. Treat the
+root file as current until `pnpm eval` is run again.
 
 This document — the method — is maintained by hand and is current.
 
