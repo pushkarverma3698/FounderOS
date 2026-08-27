@@ -13,7 +13,7 @@
  * gap-scan-queries.ts and account-queries.ts).
  */
 
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql, gte } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, lte, sql, gte } from "drizzle-orm";
 import { intEnv } from "../core/config.js";
 import { getDb } from "./client.js";
 import { jobApplications, type JobApplication, type NewJobApplication } from "./schema.js";
@@ -26,26 +26,29 @@ export const LIVE_STAGES = ["drafted", "awaiting_approval", "applied", "replied"
 /**
  * How old a screened posting can be and still show in the apply queue.
  *
- * SEVEN DAYS, raised from ONE on 2026-08-24. The argument for 24 was that a
- * posting past a day already has hundreds of applicants, so showing it is noise
- * — and the freshness advantage is real; it is the whole reason the free lane
- * polls boards every thirty minutes.
+ * TWENTY-FOUR HOURS. Briefly raised to 168 (seven days) on 2026-08-24 and
+ * reverted the same day on founder direction: a posting past a day already has
+ * hundreds of applicants, and the free lane's only reason to exist is that it
+ * reaches a posting while it is still hours old — encouraging an application on
+ * a six-day-old one works against that. "We need to apply the fresh postings
+ * everyday," not drain a week of standing inventory.
  *
- * What the argument missed is that this window does not rank, it EXCLUDES, and
- * exclusion here is total: the brief only ranks what this query returns, and
- * `brief_section` — written from that ranking — is the only thing `/draft` and
- * `mac-client/sync.py` can resolve. Production the morning it changed: 464
- * screened actionable rows, 73 inside 7 days, 17 inside 72 hours, **3 inside
- * 24**. Fifty-two Dutch recognised-sponsor salary-passes were in the table, 11
- * confirmed still open, and none of them reachable by any command the founder
- * has. Lifetime applications: 2.
+ * The reach problem the 168h change was solving was real but had the wrong
+ * fix. Production, 2026-08-24 08:xx, BEFORE either change: 464 screened
+ * actionable rows, only 3 inside 24h, because `persistBriefRanks` pinned a
+ * rank over the CAPPED display selection — so even the 3 that qualified could
+ * collide with `DO_TODAY_CAP + STRETCH_CAP` on a busier day. That bug is fixed
+ * independently in brief-select.ts (`order*` vs `select*`, a prefix relationship
+ * rather than a second filter) and stays fixed with THIS window: every row
+ * inside 24h now gets a rank, not just the first nine.
  *
- * Freshness is preserved where it belongs — rows still sort with the newest
- * first, and DO TODAY still requires a live check — so a day-old posting is
- * read first and a six-day-old one is merely reachable rather than invisible.
- * Env-tunable so the window can move without a deploy.
+ * The rest of the reach came from supply, not from widening what counts as
+ * fresh: the board registry grew 923 → 1,297 boards the same day (#559), and
+ * measured immediately after, 24h alone held 37 actionable rows — no window
+ * change required to reach them once they existed. Env-tunable so the window
+ * can move without a deploy.
  */
-export const APPLY_QUEUE_MAX_AGE_HOURS = intEnv("APPLY_QUEUE_MAX_AGE_HOURS", 168);
+export const APPLY_QUEUE_MAX_AGE_HOURS = intEnv("APPLY_QUEUE_MAX_AGE_HOURS", 24);
 
 /** Look up a previously screened role by its dedupe identity. */
 export async function findApplicationByDedupeKey(
@@ -198,6 +201,50 @@ export async function listLiveApplications(
     )
     .orderBy(asc(jobApplications.last_contact_at))
     .limit(opts.limit ?? 50);
+}
+
+/**
+ * `stage = 'applied'` rows gone quiet long enough to nudge — day 7 for the
+ * first follow-up, day 14 for the second, never a third. `followups_sent`
+ * (schema.ts, unused before T3, 2026-08-25) IS the checkpoint: 0 sent means
+ * only the 7-day threshold applies, 1 sent means only the 14-day threshold
+ * applies, so the same row is never re-offered a nudge it already got.
+ *
+ * `last_contact_at IS NOT NULL` excludes every row from before T3 shipped —
+ * `handleApplied`/`handleReplied`/`handleRejected` are what stamp it now;
+ * a row with no stamped contact date has no reliable "days since" to measure.
+ */
+export async function listFollowupCandidates(
+  opts: { tenantId?: string; now?: Date } = {},
+): Promise<JobApplication[]> {
+  const now = opts.now ?? new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const db = getDb();
+  return db
+    .select()
+    .from(jobApplications)
+    .where(
+      and(
+        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+        eq(jobApplications.stage, "applied"),
+        isNotNull(jobApplications.last_contact_at),
+        or(
+          and(eq(jobApplications.followups_sent, 0), lte(jobApplications.last_contact_at, sevenDaysAgo)),
+          and(eq(jobApplications.followups_sent, 1), lte(jobApplications.last_contact_at, fourteenDaysAgo)),
+        ),
+      ),
+    )
+    .orderBy(asc(jobApplications.last_contact_at));
+}
+
+/** Record that a follow-up nudge went out — the checkpoint `listFollowupCandidates` reads. */
+export async function incrementFollowupsSent(id: string, tenantId: string = DEFAULT_TENANT): Promise<void> {
+  const db = getDb();
+  await db
+    .update(jobApplications)
+    .set({ followups_sent: sql`${jobApplications.followups_sent} + 1`, updated_at: new Date() })
+    .where(and(eq(jobApplications.id, id), eq(jobApplications.tenant_id, tenantId)));
 }
 
 /**
@@ -493,6 +540,20 @@ export async function getApplicationByBriefRank(
   return rows[0] ?? null;
 }
 
+/**
+ * do_today/stretch first — that is the exact population the Mac apply queue
+ * reads (mac-client/mac_client/sync.py QUEUE_SQL). A plain created_at
+ * ordering could spend `listUntailoredApplications`'s whole limited batch on
+ * rows the founder will not see today while the queue in front of him stays
+ * untailored — T1c (2026-08-25) exists specifically to close that gap.
+ *
+ * Exported ONLY so its SQL shape is testable without a database, same as
+ * applyQueueFreshnessSql above.
+ */
+export function untailoredPrioritySql() {
+  return sql`CASE WHEN ${jobApplications.brief_section} IN ('do_today','stretch') THEN 0 ELSE 1 END`;
+}
+
 /** List applications clearing gates that do not have a tailored CV yet. */
 export async function listUntailoredApplications(
   opts: { limit?: number; tenantId?: string } = {},
@@ -502,7 +563,11 @@ export async function listUntailoredApplications(
     eq(jobApplications.stage, "screened"),
     inArray(jobApplications.salary_status, ["pass", "flag"]),
     sql`${jobApplications.tailor_status} IS NULL OR ${jobApplications.tailor_status} = 'pending'`,
-  )).orderBy(desc(jobApplications.created_at)).limit(opts.limit ?? 20);
+  )).orderBy(
+    untailoredPrioritySql(),
+    asc(jobApplications.brief_rank),
+    desc(jobApplications.created_at),
+  ).limit(opts.limit ?? 20);
 }
 
 /** Update CV tailoring status and S3 asset references for an application. */

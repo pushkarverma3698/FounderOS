@@ -59,6 +59,25 @@ describe("greenhouseAdapter", () => {
     expect(candidate!.description).toBeNull();
   });
 
+  describe("extractBody", () => {
+    it("strips the HTML — regression against production data", () => {
+      // Fragment trimmed from a real prod row (GitLab, 2026-08-24):
+      // job_applications.description stored this markup VERBATIM before the
+      // fix, because extractBody was the one adapter (with Workday) whose
+      // detail-endpoint body never ran through decodeJobBody — every other
+      // adapter's body-reading path already did. It leaked into the
+      // Experience gate's "Their words" quotes on real brief rows.
+      const detail = {
+        content: '<div class="content-intro"><p>GitLab is the intelligent orchestration platform.</p></div>',
+      };
+      expect(adapter.extractBody(detail)).toBe("GitLab is the intelligent orchestration platform.");
+    });
+
+    it("returns empty for a payload with no content field, not a throw", () => {
+      expect(adapter.extractBody({})).toBe("");
+    });
+  });
+
   it("uses first_published, NOT updated_at, for postedAt", () => {
     // A deliberate decision: updated_at moves on every edit, so using it would
     // re-date an old posting as new whenever anyone fixes a typo.

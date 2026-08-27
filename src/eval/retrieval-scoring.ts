@@ -51,10 +51,11 @@ export type RetrievalMode = "hybrid" | "vector" | "keyword" | "keyword-fallback"
 
 /**
  * Which retrieval path a run deliberately exercised. Running the same golden set
- * through all three is the ablation: if `keyword-only` matches `hybrid`, the
- * embeddings contributed nothing measurable on that set.
+ * through all four is the ablation: if `keyword-only` matches `hybrid`, the
+ * embeddings contributed nothing measurable on that set; if `hybrid+rerank`
+ * matches `hybrid`, the local reranker isn't earning its latency.
  */
-export type RetrievalLane = "hybrid" | "vector-only" | "keyword-only";
+export type RetrievalLane = "hybrid" | "vector-only" | "keyword-only" | "hybrid+rerank";
 
 /** What one retrieval call actually returned. */
 export interface RetrievalObservation {

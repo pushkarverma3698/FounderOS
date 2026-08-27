@@ -42,6 +42,8 @@ import {
 } from "../src/eval/retrieval-runner.js";
 import { hybridRagSearch, RagStageError, type HybridDeps } from "../src/db/rag-hybrid.js";
 import { keywordSearchRagTable, searchRagTable, type RagTable } from "../src/db/rag-search.js";
+import { rerankHits } from "../src/db/rag-rerank.js";
+import { RERANK_CANDIDATE_POOL } from "../src/db/rag-query.js";
 import { embedTextCached } from "../src/lib/embed.js";
 import { db, closeDatabaseConnections } from "../src/db/client.js";
 
@@ -128,6 +130,27 @@ const keywordOnlyRetriever: Retriever = async (query, k): Promise<RetrievalObser
   }
 };
 
+/**
+ * Ablation lane: hybrid fusion, then local rerank (llama3.2:3b via Ollama) over
+ * a wider candidate pool — what production runs when RAG_RERANK=true. This
+ * composes hybridRagSearch + rerankHits directly (mirroring src/db/rag-query.ts)
+ * rather than calling runRagSearch, because runRagSearch reads the RAG_RERANK
+ * env var internally — this script needs both lanes in ONE run, not a process
+ * restart with a different env var per lane.
+ */
+const hybridRerankRetriever: Retriever = async (query, k): Promise<RetrievalObservation> => {
+  const result = await hybridRagSearch(TABLE, query, Math.max(k, RERANK_CANDIDATE_POOL), DEPS);
+  if ("error" in result) {
+    return { rankedDocs: [], mode: "vector", error: `${result.error.stage}: ${result.error.message}` };
+  }
+  const reranked = await rerankHits(query, result.hits, k);
+  return {
+    rankedDocs: toRankedDocIds(reranked),
+    mode: result.mode,
+    ...(result.degradedReason ? { degradedReason: result.degradedReason } : {}),
+  };
+};
+
 interface CorpusFacts {
   readonly chunks: number | null;
   readonly docs: number | null;
@@ -166,12 +189,39 @@ async function readCorpusFacts(): Promise<CorpusFacts> {
   }
 }
 
-/** The three lanes of the ablation, in report order. Production runs lane 1. */
+/** The four lanes of the ablation, in report order. Production runs lane 1
+ *  today; lane 4 is what production would run with RAG_RERANK=true. */
 const LANES: ReadonlyArray<{ lane: RetrievalLane; retrieve: Retriever }> = [
   { lane: "hybrid", retrieve: hybridRetriever },
   { lane: "vector-only", retrieve: vectorOnlyRetriever },
   { lane: "keyword-only", retrieve: keywordOnlyRetriever },
+  { lane: "hybrid+rerank", retrieve: hybridRerankRetriever },
 ];
+
+/**
+ * Wrap a retriever to record wall-clock latency per call into `durationsMs`.
+ * Latency is a collector concern (real I/O timing), not a scoring concern —
+ * kept out of src/eval/retrieval-scoring.ts so that module stays pure and
+ * testable with array literals, per its own docstring.
+ */
+function withLatency(retrieve: Retriever, durationsMs: number[]): Retriever {
+  return async (query, k) => {
+    const start = performance.now();
+    try {
+      return await retrieve(query, k);
+    } finally {
+      durationsMs.push(performance.now() - start);
+    }
+  };
+}
+
+/** p95 over recorded latencies, or null when nothing was recorded. */
+function p95Ms(durationsMs: readonly number[]): number | null {
+  if (durationsMs.length === 0) return null;
+  const sorted = [...durationsMs].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.ceil(0.95 * sorted.length) - 1);
+  return sorted[idx]!;
+}
 
 async function main(): Promise<void> {
   const corpusFacts = await readCorpusFacts();
@@ -182,13 +232,34 @@ async function main(): Promise<void> {
   };
 
   const reports: RetrievalReport[] = [];
+  const latencyByLane = new Map<RetrievalLane, number[]>();
   for (const { lane, retrieve } of LANES) {
+    const durationsMs: number[] = [];
+    latencyByLane.set(lane, durationsMs);
     reports.push(
-      await runRetrievalEval(RETRIEVAL_GOLDEN_SET, retrieve, corpus, RETRIEVAL_TOP_K, lane),
+      await runRetrievalEval(
+        RETRIEVAL_GOLDEN_SET,
+        withLatency(retrieve, durationsMs),
+        corpus,
+        RETRIEVAL_TOP_K,
+        lane,
+      ),
     );
   }
 
-  const rendered = renderAblationReport(reports);
+  const latencyTable = [
+    "## Latency (p95, per-query wall clock)",
+    "",
+    "| lane | p95 |",
+    "|---|---|",
+    ...LANES.map(({ lane }) => {
+      const p95 = p95Ms(latencyByLane.get(lane) ?? []);
+      return `| ${lane} | ${p95 === null ? "n/a" : `${p95.toFixed(0)}ms`} |`;
+    }),
+    "",
+  ].join("\n");
+
+  const rendered = `${renderAblationReport(reports)}\n${latencyTable}`;
   process.stdout.write(`${rendered}\n`);
 
   const out = resolve(REPORT_PATH);

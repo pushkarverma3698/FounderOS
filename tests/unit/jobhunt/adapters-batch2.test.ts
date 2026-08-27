@@ -66,11 +66,16 @@ describe("workdayAdapter", () => {
 
   describe("extractBody", () => {
     // Trimmed from a live GET of the same posting's detail endpoint.
-    it("reads jobPostingInfo.jobDescription", () => {
+    it("reads jobPostingInfo.jobDescription AND strips the HTML", () => {
+      // Regression: prior to 2026-08-24 this returned the raw markup
+      // untouched, which real production rows confirmed — job_applications
+      // .description stored literal "<p>Owns GL accounting…</p>" tags. That
+      // leaked into the Experience gate's "Their words" quotes, CV-overlap
+      // keyword matching, and CV tailoring input for every Workday posting.
       const detail = {
-        jobPostingInfo: { id: "8d73b44f", title: "Senior Accountant", jobDescription: "<p>Owns GL accounting…</p>" },
+        jobPostingInfo: { id: "8d73b44f", title: "Senior Accountant", jobDescription: "<p>Owns GL accounting<br/>and reporting.</p>" },
       };
-      expect(workdayAdapter.extractBody(detail)).toBe("<p>Owns GL accounting…</p>");
+      expect(workdayAdapter.extractBody(detail)).toBe("Owns GL accounting and reporting.");
     });
   });
 

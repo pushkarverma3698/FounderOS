@@ -39,9 +39,10 @@ export type Retriever = (query: string, k: number) => Promise<RetrievalObservati
 
 /** Human label for each ablation lane, used in the comparison table. */
 export const LANE_LABELS: Readonly<Record<RetrievalLane, string>> = {
-  hybrid: "hybrid (vector ⊕ keyword, RRF) — what production runs",
+  hybrid: "hybrid (vector ⊕ keyword, RRF) — what production runs today",
   "vector-only": "vector-only (embeddings, no keyword)",
   "keyword-only": "keyword-only (ILIKE term overlap, no embeddings)",
+  "hybrid+rerank": "hybrid, then local rerank (llama3.2:3b) over a top-20 pool — RAG_RERANK=true",
 };
 
 /** Corpus context with no measurement — used when the corpus could not be counted. */

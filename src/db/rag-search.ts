@@ -19,6 +19,11 @@ export interface RagHit {
   score: number; // cosine similarity in [0,1], higher = closer
 }
 
+/** Metadata-column equality filter, ANDed onto a search's WHERE clause. */
+export interface RagFilter {
+  entry_type?: string;
+}
+
 /** Throws if `table` is not one of the two allowed RAG tables. */
 export function assertAllowedRagTable(table: string): asserts table is RagTable {
   if (!ALLOWED_RAG_TABLES.has(table as RagTable)) {
@@ -55,15 +60,19 @@ export async function searchRagTable(
   table: RagTable,
   queryEmbedding: number[],
   topK: number,
+  opts?: { filter?: RagFilter },
 ): Promise<RagHit[]> {
   assertAllowedRagTable(table);
   const vec = `[${queryEmbedding.join(",")}]`;
   const limit = Math.min(Math.max(topK, 1), 10);
+  const entryType = opts?.filter?.entry_type;
+  const filterClause = entryType ? sql`AND metadata->>'entry_type' = ${entryType}` : sql``;
   // sql.identifier() safely quotes the (already allowlisted) table name.
   const rows = await db.execute(sql`
     SELECT content, metadata, 1 - (embedding <=> ${vec}::vector) AS score
     FROM ${sql.identifier(RAG_SCHEMA)}.${sql.identifier(table)}
     WHERE embedding IS NOT NULL
+    ${filterClause}
     ORDER BY embedding <=> ${vec}::vector
     LIMIT ${limit}
   `);
@@ -102,6 +111,7 @@ export async function keywordSearchRagTable(
   table: RagTable,
   query: string,
   topK: number,
+  opts?: { filter?: RagFilter },
 ): Promise<RagHit[]> {
   assertAllowedRagTable(table);
   const terms = tokenizeQuery(query);
@@ -116,6 +126,9 @@ export async function keywordSearchRagTable(
   let whereOr = patterns[0]!;
   for (let i = 1; i < patterns.length; i++) whereOr = sql`${whereOr} OR ${patterns[i]!}`;
 
+  const entryType = opts?.filter?.entry_type;
+  const filterClause = entryType ? sql`AND metadata->>'entry_type' = ${entryType}` : sql``;
+
   // The SQL mirror of scoreByTerms: one CASE arm per term, summed. Ordering by
   // it makes the LIMIT keep the highest-overlap rows instead of arbitrary ones.
   const arms = terms.map((t) => sql`(CASE WHEN content ILIKE ${"%" + t + "%"} THEN 1 ELSE 0 END)`);
@@ -125,7 +138,8 @@ export async function keywordSearchRagTable(
   const rows = await db.execute(sql`
     SELECT content, metadata, ${matchCount} AS match_count
     FROM ${sql.identifier(RAG_SCHEMA)}.${sql.identifier(table)}
-    WHERE ${whereOr}
+    WHERE (${whereOr})
+    ${filterClause}
     ORDER BY match_count DESC, content
     LIMIT ${candidateLimit}
   `);

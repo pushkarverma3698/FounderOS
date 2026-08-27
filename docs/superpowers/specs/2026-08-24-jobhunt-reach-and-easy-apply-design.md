@@ -76,6 +76,18 @@ letter) and 40 spread across 7 custom questions.
 Fresh rows still sort first, so the speed advantage is kept; nothing screened is
 invisible.
 
+> **Reverted the same day, founder direction.** Shipped as 168, then walked back
+> to 24 within hours: "we shouldn't apply for 7 day window as 7 day old jobs are
+> already stale. We need to apply the fresh postings everyday." Correct —
+> encouraging `/draft` on a six-day-old posting works against the one thing the
+> free lane exists to buy (see `docs/JOBHUNT-FREE-LANE.md`: the advantage IS the
+> hours between posting and discovery). 1.2 below is the fix that actually
+> mattered and it does not depend on 1.1: with the rank/display split alone, and
+> the board registry grown 923 → 1,297 the same day (#559), 24h held **37**
+> actionable rows measured immediately after — no window change required to
+> reach them. Left here rather than deleted so the reasoning that turned out
+> wrong stays legible, not just the reasoning that stuck.
+
 **1.2 Decouple rank assignment from display cap.** Today `persistBriefRanks` pins
 ranks only over the *capped* selection, so `/draft` can address at most
 `DO_TODAY_CAP + STRETCH_CAP` = 10 rows. Change: `selectDoToday`/`selectStretch`

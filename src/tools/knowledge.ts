@@ -1,8 +1,11 @@
 /**
  * FounderOS — Knowledge Search Tool (turicks-brain)
  * ===================================================
- * Full-text search over the `knowledge_entries` table — the Postgres-backed
- * turicks-brain store synced via `pnpm brain:sync`.
+ * Search over `turicks_brain` — the pgvector-backed knowledge base synced via
+ * `pnpm brain:sync`. Delegates to the same hybrid (vector ⊕ keyword, RRF-fused)
+ * engine as search_turicks_brain (src/db/rag-query.ts) — both tools query the
+ * identical table through the identical engine; this tool adds an entry_type
+ * filter, the other adds a wider top_k.
  *
  * Content types stored:
  *   adr            — Architecture Decision Records (e.g. ADR-002: Use Composio)
@@ -16,60 +19,51 @@
  *   research  — "what have we done for FinTech clients?" → case studies
  *   sales     — "what's our positioning against [competitor]?" → ADR / brand
  *   marketing — "what's our brand voice rule for LinkedIn?" → brand entries
- *
- * Search is ILIKE keyword match — no embedding cost. Good for known-term lookup.
- * For semantic ("find content about uncertainty") use search_web instead.
  */
 
 import { tool } from "@langchain/core/tools";
-import { TENANT } from "../core/config.js";
 import { z } from "zod";
-import { searchKnowledgeEntries, getKnowledgeByType } from "../db/queries.js";
+import { runRagSearch } from "../db/rag-query.js";
+import { ragErrorMessage, renderRagSuccess } from "../db/retrieval-result.js";
 import { withToolErrorBoundary } from "../agents/tool-result.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:knowledge" });
 
+const TOP_K = 5;
 
 export const searchKnowledge = tool(
   async ({ query, entry_type }) =>
-    withToolErrorBoundary("db", "query turicks_brain (knowledge_entries) in Postgres", async () => {
-    log.debug({ query, entry_type }, "Knowledge search");
+    withToolErrorBoundary("db", "query turicks_brain (hybrid) in Postgres", async () => {
+      log.debug({ query, entry_type }, "Knowledge search");
 
-    // Keyword-search-first. `entry_type` is a FORGIVING post-filter, never a
-    // query-dropping replacement. The old behaviour ran getKnowledgeByType and
-    // ignored `query`, so a model that guessed a type with zero rows (e.g.
-    // "strategic_pillar" when prod was synced from a script that labelled the
-    // same content "strategy") got an empty result and then HALLUCINATED an
-    // answer (prod 2026-06-15: fabricated Turicks ICP). We always run the keyword
-    // search, filter by type when asked, and fall back to the unfiltered keyword
-    // hits if the type filter wipes everything — real content over a false miss.
-    const hasQuery = query.trim().length > 0;
-    let results: Array<{ title: string; content: string; tags: string[] | null; entry_type?: string }>;
+      let result = await runRagSearch(
+        "turicks_brain",
+        query,
+        TOP_K,
+        entry_type ? { filter: { entry_type } } : undefined,
+      );
 
-    if (entry_type && !hasQuery) {
-      results = await getKnowledgeByType(TENANT, entry_type, 5);
-    } else {
-      const matches = await searchKnowledgeEntries(TENANT, query, 15);
-      if (entry_type) {
-        const filtered = matches.filter((r) => r.entry_type === entry_type);
-        results = (filtered.length > 0 ? filtered : matches).slice(0, 5);
-      } else {
-        results = matches.slice(0, 5);
+      // entry_type is a FORGIVING post-filter, never a query-dropping
+      // replacement. A model that guesses a type with zero rows (e.g.
+      // "strategic_pillar" when content was synced as "strategy") must not get
+      // an empty result and then HALLUCINATE an answer (prod 2026-06-15:
+      // fabricated Turicks ICP). If the filtered search comes back empty, retry
+      // unfiltered before reporting nothing found — real content over a false miss.
+      if (entry_type && !("error" in result) && result.hits.length === 0) {
+        const unfiltered = await runRagSearch("turicks_brain", query, TOP_K);
+        if (!("error" in unfiltered)) result = unfiltered;
       }
-    }
 
-    if (results.length === 0) {
-      return `No knowledge entries found for "${query}"${entry_type ? ` (type: ${entry_type})` : ""}. The turicks-brain may not have this — try \`search_web\`. Do NOT fabricate an answer; report the missing information to the founder rather than fabricate or substitute unrelated context.`;
-    }
+      if ("error" in result) {
+        return ragErrorMessage("turicks-brain", result.error);
+      }
 
-    return results
-      .map((r, i) => {
-        const tags = (r.tags ?? []).join(", ");
-        const preview = r.content.slice(0, 400).replace(/\n+/g, " ");
-        return `${i + 1}. [${r.entry_type ?? entry_type ?? ""}] ${r.title}${tags ? `\n   Tags: ${tags}` : ""}\n   ${preview}${r.content.length > 400 ? "…" : ""}`;
-      })
-      .join("\n\n");
+      if (result.hits.length === 0) {
+        return `No knowledge entries found for "${query}"${entry_type ? ` (type: ${entry_type})` : ""}. The turicks-brain may not have this — try \`search_web\`. Do NOT fabricate an answer; report the missing information to the founder rather than fabricate or substitute unrelated context.`;
+      }
+
+      return renderRagSuccess(result, query, "Turicks Brain", "source_path");
     }),
   {
     name: "search_knowledge",
@@ -78,7 +72,7 @@ export const searchKnowledge = tool(
     schema: z.object({
       query: z.string().describe("Keyword search query — what to look for"),
       entry_type: z
-        .enum(["adr", "brand", "case_study", "strategy", "strategic_pillar", "phase", "founder_profile"])
+        .enum(["adr", "brand", "case_study", "strategy", "strategic_pillar", "phase", "founder_profile", "session"])
         .optional()
         .nullable()
         .describe("Optional: filter by content type"),

@@ -15,14 +15,16 @@ otherwise.
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from playwright.async_api import async_playwright
 
-from . import ledger
-from .adapters import field_map_for, planned_fills
-from .profile import ApplyProfile, load_profile, missing_resumes
-from .sync import QueueJob, SyncError, load_queue, push_outcomes
+from . import ledger, notify
+from .adapters import ats_for_url, field_map_for, planned_fills
+from .profile import ApplyProfile, load_profile, missing_resumes, resume_unusable
+from .sync import QueueJob, SyncError, QUEUE_DIR, load_queue, push_outcomes
 
 #: Per-field fill timeout. Short: a selector that is not on this page should
 #: cost a moment, not ten seconds times four fields times twenty jobs.
@@ -116,12 +118,55 @@ async def _upload_first(page, selectors: tuple[str, ...], path: str) -> bool:
     return False
 
 
+def copy_to_clipboard(text: str) -> bool:
+    """Best-effort, macOS only (pbcopy) — this client only runs on the
+    founder's Mac. Never raises: a clipboard failure must not stop the job
+    from opening, only cost the founder one manual copy.
+    """
+    try:
+        subprocess.run(["pbcopy"], input=text.encode(), timeout=5, check=True)
+        return True
+    except Exception:
+        return False
+
+
 from .liveness import classify_response
+
+
+def ashby_application_url(url: str) -> str:
+    """Ashby's posting URL renders an overview page with NO application
+    fields at all — the real form lives on a separate `/application` route
+    (a distinct tab href, not a same-page reveal). Found live, 2026-08-25:
+    every fill attempt against a real Ashby posting (Altura) timed out
+    waiting for selectors that were correct — `_systemfield_name` etc. really
+    are Ashby's field names — because the page loaded here never had any
+    `<input>` on it. Same root cause and same fix as the VPS TypeScript
+    pipeline's `ashbyApplicationUrl` in apply-driver.ts (2026-08-24/25); this
+    is a separate Python implementation that never got the port.
+    """
+    parts = urlsplit(url)
+    path = parts.path.rstrip("/")
+    if not path.endswith("/application"):
+        path = f"{path}/application"
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+
 
 async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str) -> str:
     """Open one job, fill it, and wait for the founder. Returns the outcome."""
-    response = await page.goto(job.url, wait_until="domcontentloaded")
-    
+    is_ashby = ats_for_url(job.url) == "ashby"
+    target_url = ashby_application_url(job.url) if is_ashby else job.url
+    response = await page.goto(target_url, wait_until="domcontentloaded")
+
+    if is_ashby:
+        # `domcontentloaded` fires before Ashby's React app hydrates the
+        # form — same race already documented on the TS side. Wait for a
+        # stable system-field id rather than a fixed sleep; if it never
+        # appears, fill_form still runs and honestly reports what it finds.
+        try:
+            await page.locator('[name="_systemfield_name"]').first.wait_for(state="visible", timeout=8000)
+        except Exception:
+            pass
+
     if response:
         redirected = response.request.redirected_from is not None
         liveness = classify_response(response.status, job.url, page.url, redirected)
@@ -156,6 +201,14 @@ async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str)
         # which is the normal case on a recycled page.
         pass
 
+    cover_letter_path = QUEUE_DIR / job.id / "cover_letter.txt"
+    cover_letter_copied = False
+    if cover_letter_path.is_file():
+        try:
+            cover_letter_copied = copy_to_clipboard(cover_letter_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            cover_letter_copied = False
+
     await page.evaluate(
         OVERLAY_JS.read_text(),
         {
@@ -164,6 +217,9 @@ async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str)
             "title": job.title,
             "filled": filled,
             "skipped": skipped,
+            "cover_letter_copied": cover_letter_copied,
+            "tailored_cv_missing": profile.tailored_cv_missing(job),
+            "uses_tailored_cv": profile.uses_tailored_cv(job),
         },
     )
 
@@ -244,7 +300,13 @@ def main() -> int:
         for problem in problems:
             print(f"    {problem}")
 
-        jobs = [job for job in jobs if not missing_resumes(profile, [job])]
+        # Only a HARD blocker (no candidate resume at all, or the configured
+        # file is absent) removes a job from today's queue. A row that merely
+        # fell back to the generic CV (tailored_cv_s3_key set, tailored PDF
+        # absent) still has something real to upload — it stays in the queue
+        # and the overlay announces the fallback at decision time instead
+        # (see tailored_cv_missing below).
+        jobs = [job for job in jobs if not resume_unusable(profile, job)]
 
         if not jobs:
             print("✗ No jobs left in the queue with valid resumes. Refusing to start.")
@@ -261,6 +323,15 @@ def main() -> int:
         print(f"⚠ {tally[ledger.APPLIED]} applied, but the VPS push failed ({err}).\n"
               "  They are on disk and will be pushed on the next run.")
         return 1
+
+    # Concern #2, 2026-08-25: nothing called notify.send() after a session
+    # before this. Never fatal — the session already succeeded and is recorded
+    # on the VPS; a Telegram outage must not turn that into a failed exit code.
+    try:
+        notify.send(notify.session_summary_message(tally[ledger.APPLIED], tally[ledger.SKIPPED], tally["error"]))
+    except notify.NotifyError as err:
+        print(f"⚠ session recorded, but Telegram failed: {err}")
+
     return 0
 
 

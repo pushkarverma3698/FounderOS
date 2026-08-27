@@ -98,6 +98,7 @@ export function parseDraftArg(raw: string): { rows: number[]; all: boolean } | n
  */
 const COMMAND_SECTIONS: Readonly<Record<string, string>> = {
   draft: "DO TODAY / A STRETCH WORTH APPLYING TO",
+  apply: "DO TODAY / A STRETCH WORTH APPLYING TO",
   applied: "DO TODAY / A STRETCH WORTH APPLYING TO",
   ask: "ONE QUESTION AWAY",
 };
@@ -327,8 +328,13 @@ export async function handleApplied(ctx: Context): Promise<void> {
     return;
   }
 
+  const now = new Date();
   const updated = await updateApplicationStage(row.id, "applied", {
-    appliedAt: new Date(),
+    appliedAt: now,
+    // Starts the follow-up clock (T3, 2026-08-25): listFollowupCandidates
+    // measures "days since last_contact_at" to decide when a day-7/day-14
+    // nudge is due, and the day WE applied is the natural day zero for that.
+    lastContactAt: now,
     clearBriefRank: true,
   });
   if (!updated) {

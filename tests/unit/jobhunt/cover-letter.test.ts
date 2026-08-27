@@ -241,6 +241,26 @@ describe("coverLetterPrompt", () => {
   });
 });
 
+describe("coverLetterPrompt — founder context", () => {
+  const BASE = {
+    companyName: "Altura",
+    jobTitle: "Senior Backend Engineer",
+    jobDescription: "We build tender-spotting software.",
+    cvText: "PUSHKAR VERMA\nBackend Engineer",
+  };
+
+  it("includes founderContext as a separate, clearly-bounded fact source when present", () => {
+    const prompt = coverLetterPrompt({ ...BASE, founderContext: "Relocating to the Netherlands." });
+    expect(prompt).toContain("Relocating to the Netherlands.");
+    expect(prompt).toContain("ADDITIONAL CONTEXT");
+  });
+
+  it("omits the ADDITIONAL CONTEXT section entirely when founderContext is not given", () => {
+    const prompt = coverLetterPrompt(BASE);
+    expect(prompt).not.toContain("ADDITIONAL CONTEXT");
+  });
+});
+
 describe("the letter is delivered as text, not a file", () => {
   it("is short enough to paste into an application form", async () => {
     const result = await buildCoverLetter(options, scriptedModel(CLEAN_LETTER));

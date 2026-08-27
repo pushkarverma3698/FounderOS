@@ -110,6 +110,9 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
   sales: [searchWeb, createSendEmailTool("sales"), searchKnowledge],
   personal: [readFile, listDir, runShell, browser, searchPersonalRag, sendFile, writeFile],
+  // submitApplication (VPS-lane submit) retired 2026-08-25 — founder decision,
+  // the Mac client (mac-client/mac_client/apply.py) is the one apply lane now.
+  // Tombstoned in verify-architecture.ts so it cannot return by accident.
   jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobState, tailorCvForRow, writeArtifact, deliverArtifact, jobBrief, createSendEmailTool("jobhunt")],
 };
 

@@ -1,4 +1,4 @@
-import { AtsAdapter, NormalizedJob, parsePostedAt } from "./types.js";
+import { AtsAdapter, NormalizedJob, parsePostedAt, decodeJobBody } from "./types.js";
 import { FreeBoard } from "../free-boards.js";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -63,7 +63,16 @@ export const greenhouseAdapter: AtsAdapter = {
   },
 
   extractBody(payload: Record<string, unknown>): string {
-    return typeof payload["content"] === "string" ? payload["content"] : "";
+    // `content` is raw HTML — measured live 2026-08-24 on prod rows:
+    // "&lt;div class=&quot;content-intro&quot;&gt;&lt;p&gt;GitLab is…" stored
+    // verbatim in job_applications.description. Every other adapter that reads
+    // a body off a detail payload (SmartRecruiters, BambooHR, Teamtailor,
+    // Recruitee, Workable, Personio) runs it through decodeJobBody; Greenhouse
+    // — the largest single platform in the registry at 300 of 1,297 boards —
+    // was the one exception, and the tag soup leaked into the Experience
+    // gate's "Their words" quotes, CV-overlap keyword matching, and CV
+    // tailoring input for every Greenhouse posting the free lane ever hydrated.
+    return decodeJobBody(typeof payload["content"] === "string" ? payload["content"] : "");
   },
 
   applyUrlFor(postingUrl: string, _board: FreeBoard): string | null {

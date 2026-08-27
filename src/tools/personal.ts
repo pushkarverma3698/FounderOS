@@ -22,12 +22,13 @@
  */
 
 import { promises as fs } from "node:fs";
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import { resolveSafePath, redactSecrets } from "../infra/path-guard.js";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const MAX_OUTPUT = 100_000; // cap captured output / file reads (chars)
 const MAX_READ_BYTES = MAX_OUTPUT * 4; // worst-case UTF-8: 4 bytes per char
@@ -309,11 +310,13 @@ export async function browserAction(
     return playwrightBrowserAction(action, opts);
   }
 
-  // AppleScript / Safari (macOS)
+  // AppleScript / Safari (macOS). execFile (not exec) so osascript's args never
+  // pass through /bin/sh -c — shell metacharacters in opts.url/opts.js (e.g. from
+  // an indirect prompt injection) cannot be interpreted as shell syntax.
   const script = buildBrowserScript(action, opts);
+  const args = script.split("\n").flatMap((line) => ["-e", line]);
   try {
-    const args = script.split("\n").map(line => `-e ${JSON.stringify(line)}`).join(" ");
-    const { stdout, stderr } = await execAsync(`osascript ${args}`, {
+    const { stdout, stderr } = await execFileAsync("osascript", args, {
       timeout: SHELL_TIMEOUT_MS,
       maxBuffer: MAX_OUTPUT,
     });

@@ -10,7 +10,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { redactInternalPaths, founderReceiptsBlock, receiptsBlock } from "../../../src/kernel/index.js";
+import {
+  redactInternalPaths,
+  redactInternalIdentifiers,
+  founderReceiptsBlock,
+  receiptsBlock,
+} from "../../../src/kernel/index.js";
 import type { StepResult, ToolReceipt } from "../../../src/kernel/contracts.js";
 
 function receipt(tool: string): ToolReceipt {
@@ -59,6 +64,27 @@ describe("redactInternalPaths", () => {
   it("is a no-op on text with no absolute path", () => {
     const text = "297 jobs are in the pipeline. None are blocked.";
     expect(redactInternalPaths(text)).toBe(text);
+  });
+});
+
+describe("redactInternalIdentifiers", () => {
+  it("removes a snake_case identifier from ordinary prose, still readable", () => {
+    const text = "jobhunt: Retrieve the full set of captured jobs using job_state and summarise them.";
+    expect(redactInternalIdentifiers(text)).toBe("jobhunt: Retrieve the full set of captured jobs using and summarise them.");
+  });
+
+  it("falls back to empty string for a code-shaped key=\"value\" instruction, rather than leaving a dangling '='", () => {
+    // Found live, 2026-08-24: /apply N's synthetic kernel instruction is a
+    // literal tool call, not prose. Stripping the identifier alone left
+    // `Call the tool with ="b87ad902-…"` visible in Telegram for a few seconds.
+    const text = 'Call the submit_application tool now with job_id="b87ad902-eddb-4a2c-b7cd-6ca877f674c7".';
+    expect(redactInternalIdentifiers(text)).toBe("");
+    expect(redactInternalIdentifiers(text)).not.toContain("=");
+  });
+
+  it("is a no-op on prose with no snake_case identifier", () => {
+    const text = "Ranking your queue and checking the top roles are still open.";
+    expect(redactInternalIdentifiers(text)).toBe(text);
   });
 });
 

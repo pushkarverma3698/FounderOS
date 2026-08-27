@@ -26,11 +26,29 @@
   summary.style.cssText = "flex:1;min-width:0";
   const filled = data.filled.length ? data.filled.join(", ") : "nothing";
   const skipped = data.skipped.length ? data.skipped.join("; ") : "nothing";
+  const coverLetterLine = data.cover_letter_copied
+    ? `<div style="opacity:.75;font-size:13px;color:#8FD19E">📋 Cover letter copied to clipboard</div>`
+    : `<div style="opacity:.75;font-size:13px;color:#FFCC66">No cover letter yet — ask the bot to draft one for ${escapeHtml(data.company)}</div>`;
+  // THE SILENT SUBSTITUTION this line exists to stop: the generic resume
+  // uploads fine and looks identical to a real tailored one unless this says
+  // otherwise — right where the founder is about to press SUBMIT.
+  //
+  // THREE states, not two. Measured against the real queue 2026-08-25: only 4
+  // of 62 rows carried a tailored CV. Warning only on the promised-then-missing
+  // case (red) would have left the other 58 silently generic — the same defect
+  // in a different shape. What he needs to know is which CV is attached.
+  const resumeLine = data.tailored_cv_missing
+    ? `<div style="font-size:13px;color:#FF6B6B">⚠️ Generic CV — the tailored one for this role FAILED to download</div>`
+    : data.uses_tailored_cv
+      ? `<div style="opacity:.75;font-size:13px;color:#8FD19E">📄 Tailored CV for this role attached</div>`
+      : `<div style="font-size:13px;color:#FFCC66">📄 Generic CV — no tailored one exists for this role yet</div>`;
   summary.innerHTML =
     `<div style="font-weight:600;margin-bottom:2px">${data.position} — ` +
     `${escapeHtml(data.company)} · ${escapeHtml(data.title)}</div>` +
     `<div style="opacity:.75;font-size:13px">Filled: ${escapeHtml(filled)}</div>` +
-    `<div style="opacity:.75;font-size:13px;color:#FFCC66">Left for you: ${escapeHtml(skipped)}</div>`;
+    `<div style="opacity:.75;font-size:13px;color:#FFCC66">Left for you: ${escapeHtml(skipped)}</div>` +
+    coverLetterLine +
+    resumeLine;
 
   const skip = button("SKIP", "#2A2F36", "#fff");
   const submit = button("SUBMIT &amp; NEXT →", "#00A65A", "#fff");
@@ -229,5 +247,9 @@
   bar.append(summary, skip, submit);
   document.body.appendChild(bar);
   // Job pages are long; the bar is fixed, but the page must not sit under it.
-  document.body.style.paddingBottom = "96px";
+  // Computed from the real rendered height (not a fixed guess) so it stays
+  // correct regardless of how many status lines or how long the company/title/
+  // skipped-list text is — a fixed number clipped real content the moment this
+  // bar grew past what it was sized for.
+  document.body.style.paddingBottom = `${bar.getBoundingClientRect().height + 16}px`;
 };

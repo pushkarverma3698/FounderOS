@@ -20,6 +20,8 @@ _HOST_MARKERS = (
     ("greenhouse", ("greenhouse.io", "boards.greenhouse.io", "job-boards.greenhouse.io")),
     ("lever", ("lever.co", "jobs.lever.co")),
     ("ashby", ("ashbyhq.com", "jobs.ashbyhq.com")),
+    ("workable", ("workable.com", "apply.workable.com")),
+    ("recruitee", ("recruitee.com",)),
 )
 
 
@@ -83,7 +85,38 @@ ASHBY = FieldMap(
     resume=('input[type="file"]',),
 )
 
-FIELD_MAPS = {"greenhouse": GREENHOUSE, "lever": LEVER, "ashby": ASHBY}
+# Selectors are live-captured, not guessed: tests/fixtures/apply-forms/
+# workable-gresb.json (apply.workable.com/gresb, 2026-08-24). That form also
+# has a cover-letter textarea, two work-authorisation radio groups and a GDPR
+# checkbox — deliberately absent below, same discipline as every other map
+# here (see test_no_adapter_offers_to_fill_a_free_text_or_authorisation_field).
+WORKABLE = FieldMap(
+    first_name=("#firstname",),
+    last_name=("#lastname",),
+    email=("#email", 'input[type="email"]'),
+    phone=('input[name="phone"]', 'input[type="tel"]'),
+    resume=('input[name="resume"]', 'input[type="file"]'),
+)
+
+# Recruitee asks for ONE name field, like Lever. Selectors are live-captured:
+# tests/fixtures/apply-forms/recruitee-ockto.json (ockto.recruitee.com,
+# 2026-08-24) — a Dutch IND-recognised sponsor board (per the sponsor-registry
+# join, 2026-08-20). That form also has a photo upload and an optional
+# cover-letter file input — left unfilled, same as every other map here.
+RECRUITEE = FieldMap(
+    full_name=('input[name="candidate.name"]',),
+    email=('input[name="candidate.email"]', 'input[type="email"]'),
+    phone=('input[name="candidate.phone"]', 'input[type="tel"]'),
+    resume=('input[name="candidate.cv"]', 'input[type="file"]'),
+)
+
+FIELD_MAPS = {
+    "greenhouse": GREENHOUSE,
+    "lever": LEVER,
+    "ashby": ASHBY,
+    "workable": WORKABLE,
+    "recruitee": RECRUITEE,
+}
 
 
 def field_map_for(url: str) -> FieldMap | None:
