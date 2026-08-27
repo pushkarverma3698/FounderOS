@@ -20,8 +20,27 @@ import type {
   EvalReport,
 } from "./types.js";
 
-/** Did the supervisor route to the expected department? */
+/**
+ * Did the supervisor route to the expected department?
+ *
+ * `expectedRoute: null` means a DIRECT REPLY is the correct outcome (the
+ * planner's documented reply-vs-plan fork, src/kernel/planner.ts) — passes
+ * only when no plan/worker was produced at all.
+ *
+ * Otherwise, the expected worker may legitimately be a LATER step of a
+ * correct multi-step plan (e.g. `[research, comms]` when `comms` is
+ * expected) — checking only the first step marks a correct plan wrong
+ * (docs/EVAL-AUDIT-2026-08-28.md D2, `stress-cross-dept-chain`). Prefer the
+ * full plan when the invoker recorded one; fall back to the single
+ * first-step `route` for older/stubbed observations that never set `steps`.
+ */
 export function scoreRouting(task: GoldenTask, obs: Observation): boolean {
+  if (task.expectedRoute === null) {
+    return obs.route === null && (obs.steps === undefined || obs.steps.length === 0);
+  }
+  if (obs.steps && obs.steps.length > 0) {
+    return obs.steps.some((s) => s.worker === task.expectedRoute);
+  }
   return obs.route === task.expectedRoute;
 }
 
@@ -44,12 +63,60 @@ export function scoreHitl(task: GoldenTask, obs: Observation): boolean {
 }
 
 /**
- * Was this an infrastructure failure (a captured error) rather than a model
- * decision? The runner sets `obs.error` only when the invoker throws — e.g. a
- * 503 that exhausted every retry/fallback. Such a task is NOT a routing miss.
+ * Message-shape patterns for a genuine INFRASTRUCTURE failure — mirrors the
+ * classification already used in production (`is503Error`/`isModelFallbackError`,
+ * src/agents/model.ts) and the per-call timeout (`ModelCallTimeoutError`,
+ * src/gateway/model-deadline.ts). `makeKernelInvoker`'s catch stores only
+ * `err.message` as a plain string (see kernel-invoker.ts), so structured
+ * fields like `.code`/`.status` are gone by the time this runs — these
+ * patterns are chosen to still be recognizable from the message text alone.
+ *
+ * Deliberately NOT matched: a `GraphRecursionError` ("Recursion limit of 25
+ * reached without hitting a stop condition…") is a BEHAVIOURAL failure — the
+ * worker never converged — not a provider outage, and must count as a real
+ * routing/tool miss rather than being excluded (docs/EVAL-AUDIT-2026-08-28.md
+ * D5 / docs/LIMITATIONS.md B5). The previous version of this function treated
+ * ANY non-empty error as infra, which laundered exactly that crash class into
+ * an exclusion.
+ */
+const INFRA_ERROR_PATTERNS: RegExp[] = [
+  // HTTP 5xx/408/429 — word-boundary matches, same idiom as is503Error.
+  /\b(?:500|501|502|503|504|408|429)\b/,
+  // Provider-message idioms is503Error also matches on text.
+  /high demand/i,
+  /Service Unavailable/i,
+  /Internal Server Error/i,
+  /rate.?limit/i,
+  /RESOURCE_EXHAUSTED/,
+  // Transport-level failures (is503Error's TRANSPORT_CODES + message idioms).
+  /ECONNRESET/,
+  /ECONNREFUSED/,
+  /ETIMEDOUT/,
+  /EAI_AGAIN/,
+  /EPIPE/,
+  /socket hang up/i,
+  /fetch failed/i,
+  /network (?:error|timeout)/i,
+  // ModelCallTimeoutError's own message (model-deadline.ts) — carries no HTTP
+  // status or the string "ETIMEDOUT", only this wording + a `.code` property
+  // that doesn't survive being flattened to a string message.
+  /transport timeout/i,
+  // Logged when withModelRetry gives up and surfaces the last provider error
+  // (gateway/model-retry.ts) — the error itself already matches a pattern
+  // above in practice, but match the phrase too in case it's ever embedded.
+  /retry budget exhausted/i,
+];
+
+/**
+ * Was this an infrastructure failure (a captured error whose SHAPE is a
+ * provider outage/timeout) rather than a model or kernel decision? The runner
+ * sets `obs.error` only when the invoker throws. A shape match here means the
+ * task is excluded from capability metrics as transient infra; anything else
+ * — including a recursion-limit crash — counts as a real capability miss.
  */
 export function isInfraError(obs: Observation): boolean {
-  return typeof obs.error === "string" && obs.error.trim().length > 0;
+  if (typeof obs.error !== "string" || obs.error.trim().length === 0) return false;
+  return INFRA_ERROR_PATTERNS.some((re) => re.test(obs.error!));
 }
 
 /** Score one task across all three dimensions. */
