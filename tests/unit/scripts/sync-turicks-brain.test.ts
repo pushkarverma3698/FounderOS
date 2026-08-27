@@ -16,6 +16,7 @@ import {
   needsChunkRefresh,
   isPlanSyncSource,
   PLAN_SYNC_DIRS,
+  isSessionLogFile,
 } from "../../../scripts/sync-turicks-brain.js";
 import { missingEnvFileMessage, missingVarMessage } from "../../../scripts/lib/require-env.js";
 
@@ -197,6 +198,26 @@ describe("isPlanSyncSource", () => {
 
   it("PLAN_SYNC_DIRS still lists exactly the two directories this test covers", () => {
     expect([...PLAN_SYNC_DIRS].sort()).toEqual(["docs/plans", "docs/product-recovery"]);
+  });
+});
+
+/**
+ * TEMPLATE.md (docs/sessions/TEMPLATE.md) is the empty scaffold real session
+ * logs are authored from — `f.endsWith(".md")` alone would ingest it as a
+ * blank "session" knowledge entry on every brain:sync. This predicate is what
+ * the sessions walker filters on (scripts/sync-turicks-brain.ts).
+ */
+describe("isSessionLogFile", () => {
+  it("accepts a real session log", () => {
+    expect(isSessionLogFile("2026-08-25-rag-pipeline-upgrade.md")).toBe(true);
+  });
+
+  it("rejects TEMPLATE.md specifically", () => {
+    expect(isSessionLogFile("TEMPLATE.md")).toBe(false);
+  });
+
+  it("rejects a non-.md file", () => {
+    expect(isSessionLogFile("notes.txt")).toBe(false);
   });
 });
 

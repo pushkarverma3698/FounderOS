@@ -10,6 +10,7 @@
  */
 import { z } from "zod";
 import type { RagHit } from "./rag-search.js";
+import type { HybridOk } from "./rag-hybrid.js";
 
 export const RetrievalResultSchema = z.object({
   /** Where the chunk came from — a file path, URL, or doc id. Never empty. */
@@ -59,4 +60,56 @@ export function renderRetrieval(results: readonly RetrievalResult[], query: stri
       return `${i + 1}. ${r.citation}${type} (score ${r.score.toFixed(2)})\n${r.chunk}`;
     })
     .join("\n\n");
+}
+
+/**
+ * Discriminated failure so a tool can report the REAL failing component. Every
+ * error case flows through here so a missing table, an empty store, or a DB
+ * outage never gets mislabeled as "Ollama unavailable" (see ragErrorMessage) —
+ * that mislabeling cost a production debugging session (CLAUDE.md rule #22).
+ */
+export interface RagFailure {
+  stage: "embed" | "query";
+  message: string;
+}
+
+/**
+ * Render a successful hybrid result. Hits are projected into validated
+ * RetrievalResults (F4) so citations render mechanically from real retrieved
+ * sources; a degraded (keyword-only) run is banner-flagged so the founder never
+ * mistakes thin results for the full set.
+ */
+export function renderRagSuccess(result: HybridOk, query: string, label: string, sourceField: string): string {
+  const suffix =
+    result.mode === "hybrid" ? ", hybrid" : result.mode === "keyword-fallback" ? ", keyword-only" : "";
+  const banner =
+    result.mode === "keyword-fallback"
+      ? `⚠️ Semantic search unavailable (${result.degradedReason}) — showing keyword matches only; recall may be reduced.\n\n`
+      : "";
+  // Validate at the boundary: a malformed/source-less hit is dropped, never
+  // rendered as a citable source (F4 — hallucinated sources become a typed miss).
+  const results = result.hits
+    .map((h) => RetrievalResultSchema.safeParse(toRetrievalResult(h, sourceField)))
+    .filter((p) => p.success)
+    .map((p) => p.data);
+  return (
+    `${banner}${label} search for "${query}" (${results.length} results${suffix}):\n\n` +
+    renderRetrieval(results, query)
+  );
+}
+
+/** Build an accurate, actionable error that names the REAL failing component. */
+export function ragErrorMessage(store: string, failure: RagFailure): string {
+  if (failure.stage === "embed") {
+    return (
+      `${store} search failed: could not embed the query — Ollama is unavailable. ` +
+      `Check the ollama container is up and 'nomic-embed-text' is pulled. (${failure.message})`
+    );
+  }
+  // stage === "query": Postgres/pgvector problem — do NOT blame Ollama.
+  return (
+    `${store} search failed: the vector store query errored (Postgres/pgvector), not Ollama. ` +
+    `Check the pgvector extension is installed and the table exists + is populated ` +
+    `(run 'pnpm brain:sync'). (${failure.message})`
+  );
 }
