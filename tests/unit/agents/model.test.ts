@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { ChatAnthropic } from "@langchain/anthropic";
-import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
 import {
   DEFAULT_AGENT_MODEL,
@@ -63,7 +63,7 @@ describe("model id parsing", () => {
   });
 
   it("keeps legacy unprefixed names working by inference", () => {
-    expect(parseModelId("gemini-2.5-flash").provider).toBe("google-genai");
+    expect(parseModelId("gemini-2.5-flash").provider).toBe("google-vertexai");
     expect(parseModelId("claude-haiku-4-5").provider).toBe("anthropic");
     expect(parseModelId("gpt-4o-mini").provider).toBe("openai");
   });
@@ -117,7 +117,7 @@ describe("getModel provider selection", () => {
 
   it("returns a Google model for google-genai ids", () => {
     process.env["AGENT_MODEL"] = "google-genai:gemini-2.5-flash";
-    expect(getModel()).toBeInstanceOf(ChatGoogleGenerativeAI);
+    expect(getModel()).toBeInstanceOf(ChatVertexAI);
   });
 
   it("returns an Anthropic model for anthropic ids", () => {
@@ -165,9 +165,9 @@ describe("fallback middleware config", () => {
   });
 
   it("skips fallback models whose API keys are absent (prod-safe boot)", () => {
-    process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5,google-genai:gemini-2.0-flash";
+    process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5,openai:gpt-4o-mini";
     delete process.env["ANTHROPIC_API_KEY"];
-    delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
+    delete process.env["OPENAI_API_KEY"];
     expect(() => getSupervisorModel()).not.toThrow();
     expect(getModelFallbackMiddleware()).toEqual([]);
   });

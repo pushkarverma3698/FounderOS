@@ -10,13 +10,13 @@
 
 import { ChatAnthropic } from "@langchain/anthropic";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
 import { modelFallbackMiddleware } from "langchain";
 
 export const RETRY_BACKOFF_MS = [2_000, 4_000, 8_000] as const;
 
-export type ModelProvider = "google-genai" | "openai" | "anthropic" | "openrouter";
+export type ModelProvider = "google-vertexai" | "google-genai" | "openai" | "anthropic" | "openrouter";
 
 export interface ParsedModelId {
   provider: ModelProvider;
@@ -175,7 +175,7 @@ export function resolveTemperature(): number {
 
 function inferLegacyProvider(model: string): ModelProvider {
   const lower = model.toLowerCase();
-  if (lower.includes("gemini")) return "google-genai";
+  if (lower.includes("gemini")) return "google-vertexai";
   if (lower.includes("claude")) return "anthropic";
   return "openai";
 }
@@ -198,9 +198,9 @@ export function parseModelId(modelId: string): ParsedModelId {
     throw new Error(`Model id "${modelId}" is missing the model name after the provider prefix.`);
   }
 
-  if (!["google-genai", "openai", "anthropic", "openrouter"].includes(provider)) {
+  if (!["google-vertexai", "google-genai", "openai", "anthropic", "openrouter"].includes(provider)) {
     throw new Error(
-      `Unsupported AGENT_MODEL provider "${provider}". Use google-genai:, openai:, anthropic:, or openrouter:.`,
+      `Unsupported AGENT_MODEL provider "${provider}". Use google-vertexai:, openai:, anthropic:, or openrouter:. (google-genai is supported as an alias for google-vertexai)`,
     );
   }
 
@@ -272,16 +272,13 @@ function buildModel(
 ): BaseChatModel | null {
   const optional = opts.optional ?? false;
 
-  if (parsed.provider === "google-genai") {
-    if (!process.env["GOOGLE_GENERATIVE_AI_API_KEY"]) {
-      if (optional) return null;
-      throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is required for google-genai: models.");
-    }
-    return new ChatGoogleGenerativeAI({
+  if (parsed.provider === "google-vertexai" || parsed.provider === "google-genai") {
+    // Vertex AI uses Application Default Credentials. 
+    // It will automatically pick up GOOGLE_APPLICATION_CREDENTIALS or run on GCP infrastructure without keys.
+    return new ChatVertexAI({
       model: parsed.model,
       temperature,
       maxRetries: 2,
-      apiKey: process.env["GOOGLE_GENERATIVE_AI_API_KEY"],
     });
   }
 
