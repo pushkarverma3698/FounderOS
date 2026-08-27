@@ -91,10 +91,22 @@ fi
 # one working fallback behind two dead ids during an active flash-latest 503
 # storm. Restored the policy chain; gemini-3.1-flash-lite sits first because it
 # probed 200 in 0.5s while gemini-3-flash-preview probed 200 in 39s (degraded).
+# 2026-08-27: BOTH openrouter tail entries (meta-llama/llama-3.3-70b-instruct:free
+# AND qwen/qwen3-next-80b-a3b-instruct:free) now 404 — OpenRouter deprecated their
+# free tiers ("This model is currently unavailable for free... use this slug
+# instead: <paid-id>"). That meant the entire OpenRouter half of the chain was
+# dead: if both paid Gemini fallbacks failed (as in the 2026-07-13 503 storm),
+# there was nothing left to fall back to. OPENROUTER_API_KEY also has a $0 credit
+# balance right now, so only :free-suffixed slugs work at all. Replaced with
+# nvidia/nemotron-3-super-120b-a12b:free and minimax/minimax-m2.7:free — both
+# live-curl-verified today: 200 response, real tool_calls returned, cost=0. Free
+# OpenRouter models rotate/deprecate without notice (this is that failure mode
+# recurring) — re-verify with `scripts/probe-openrouter-free-models.ts` before
+# trusting this list again.
 grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
 {
   printf '%s\n' 'AGENT_MODEL=google-genai:gemini-flash-latest'
-  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-3.1-flash-lite,google-genai:gemini-3-flash-preview,openrouter:meta-llama/llama-3.3-70b-instruct:free,openrouter:qwen/qwen3-next-80b-a3b-instruct:free'
+  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-3.1-flash-lite,google-genai:gemini-3-flash-preview,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:minimax/minimax-m2.7:free'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
