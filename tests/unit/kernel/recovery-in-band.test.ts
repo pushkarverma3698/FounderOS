@@ -65,6 +65,7 @@ describe("Phase 5 — Recovery and Objective Ownership", () => {
             message: "Unresolved placeholder in draft",
             retryable: false,
           },
+          tool_receipts: [],
         },
       ],
       attempts: { s1: 1, s2: 1, s3: 1 },

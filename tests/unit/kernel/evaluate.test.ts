@@ -74,6 +74,7 @@ describe("toCompletedTurn", () => {
         status: "failed",
         step_id: "s1",
         failure: { step_id: "s1", stage: "tool", component: "src/tools/email.ts", message: "SMTP 550", retryable: false },
+        tool_receipts: [],
       }],
       "I could not send it.",
     );

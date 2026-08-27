@@ -29,8 +29,13 @@ export interface GoldenTask {
   id: string;
   /** The user message sent into the office. */
   input: string;
-  /** The department the supervisor should route to. */
-  expectedRoute: Department;
+  /**
+   * The department the supervisor should route to, or `null` when a DIRECT
+   * REPLY (no plan, no worker at all) is the correct outcome — the planner's
+   * documented fork (src/kernel/planner.ts) between a direct reply and a typed
+   * Plan is architecture, not a routing miss (docs/EVAL-AUDIT-2026-08-28.md D4).
+   */
+  expectedRoute: Department | null;
   /**
    * Tools the department is expected to use. Subset match: the task passes if
    * every listed tool appears in the observed tool calls. Omit when routing is
@@ -46,16 +51,51 @@ export interface GoldenTask {
   note?: string;
 }
 
+/** One step of the plan the planner actually produced. */
+export interface PlanStepObservation {
+  worker: Department;
+  objective: string;
+}
+
+/** One observed tool invocation, including calls that failed or are paused on approval. */
+export interface ToolCallObservation {
+  tool: string;
+  ok: boolean;
+}
+
 /** What we actually observed from running one task through the office. */
 export interface Observation {
-  /** Department actually routed to (from a `transfer_to_*` handoff), or null. */
+  /**
+   * Worker of the FIRST plan step, or null when the planner replied directly
+   * or the run errored before a plan existed. Kept for backward compatibility
+   * with older scoring/report code; prefer `steps` for the full sequence —
+   * see scoreRouting in scoring.ts, which checks the whole plan.
+   */
   route: Department | null;
-  /** Tool names actually invoked during the run. */
+  /**
+   * Tool names actually invoked during the run (deduped), regardless of
+   * whether the call succeeded — see `toolCalls` for per-call outcomes.
+   */
   tools: string[];
   /** Whether the run paused on a HITL `interrupt()`. */
   hadInterrupt: boolean;
   /** Optional error captured while running the task. */
   error?: string;
+  /**
+   * The full plan step sequence (worker + objective), in order. Undefined or
+   * empty when the planner produced a direct reply (no plan) or the run
+   * errored before a plan existed. Lets scoring ask "does the expected worker
+   * appear ANYWHERE in the plan" instead of only the first step
+   * (docs/EVAL-AUDIT-2026-08-28.md D2).
+   */
+  steps?: PlanStepObservation[];
+  /**
+   * Every observed tool call, INCLUDING calls that failed or paused on a HITL
+   * gate before finishing — a superset of `tools` kept so a report can
+   * distinguish "called but failed" from "never called" without re-running
+   * the task (docs/EVAL-AUDIT-2026-08-28.md D7).
+   */
+  toolCalls?: ToolCallObservation[];
 }
 
 /** A single golden task after scoring. */

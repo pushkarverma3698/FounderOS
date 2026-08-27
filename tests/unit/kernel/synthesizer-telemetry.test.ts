@@ -25,6 +25,7 @@ function failedStep(step_id: string): StepResult {
     step_id,
     status: "failed",
     failure: { step_id, stage: "tool", component: "test", message: "boom", retryable: false },
+    tool_receipts: [],
   };
 }
 

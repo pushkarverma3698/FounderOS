@@ -146,6 +146,7 @@ describe("Positive Path CSV Verification & Delivery Matrix (P4/P5)", () => {
         status: "failed",
         step_id: "s1",
         failure,
+        tool_receipts: [],
       };
 
       const envelope = makeEnvelope();
