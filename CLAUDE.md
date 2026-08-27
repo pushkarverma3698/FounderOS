@@ -212,15 +212,21 @@ pnpm proof:case-study <thread>  # anonymized case study from a checkpoint
 ```
 
 ## Model policy
-Production (pinned by `scripts/apply-prod-env-overrides.sh`, 2026-07-13):
+Production (pinned by `scripts/apply-prod-env-overrides.sh`, 2026-08-27):
 `AGENT_MODEL=google-genai:gemini-flash-latest` (direct Gemini — proven to tool-call
 cleanly on-box; requires the `GOOGLE_GENERATIVE_AI_API_KEY` GitHub secret, else
 prod 401s). Fallback chain: same-key paid Gemini first
 (`google-genai:gemini-3-flash-preview`, `google-genai:gemini-3.1-flash-lite` —
 live-verified serving + tool-calling during the 2026-07-13 gemini-3.5-flash 503
 storm), then FREE OpenRouter last resort (founder directive: no paid OpenRouter
-fallback): `openrouter:google/gemma-4-31b-it:free`,
-`openrouter:z-ai/glm-5.2:free`. Temperature 0, planner+workers
+fallback): `openrouter:nvidia/nemotron-3-super-120b-a12b:free`,
+`openrouter:minimax/minimax-m2.7:free` (2026-08-27: replaced
+`google/gemma-4-31b-it:free` + `z-ai/glm-5.2:free` — those weren't dead but were
+just documented here, never actually written into `apply-prod-env-overrides.sh`,
+which still had the PRIOR retired pair (`meta-llama/llama-3.3-70b-instruct:free` +
+`qwen/qwen3-next-80b-a3b-instruct:free`, both 404 as of today). Keep this line and
+the script in sync — that drift is exactly how prod ran with a fully-dead
+OpenRouter fallback tail for weeks.) Temperature 0, planner+workers
 (`WORKER_AGENT_MODEL` splits them). Budget caps enforced (`BUDGET_DAILY_USD`,
 `RUN_BUDGET_USD`). Provider errors classify by HTTP status class
 (`httpStatusOf`/`is503Error`/`isModelFallbackError` in `src/agents/model.ts`):

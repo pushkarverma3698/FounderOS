@@ -95,6 +95,30 @@ describe("model id parsing", () => {
       "openrouter:google/gemini-flash-latest",
     );
   });
+
+  // 2026-08-27: DEPRECATED_MODEL_ALIASES used to redirect dead OpenRouter
+  // free-tier slugs to a literal "openrouter/free" — never a real model id
+  // (verified against the live OpenRouter catalog). That laundered a
+  // debuggable 404 (the real dead slug) into a still-broken 404 under a fake
+  // name, which is strictly worse for diagnosis. Free-tier liveness rots too
+  // fast for a static table to guess a replacement; the real defense is
+  // scripts/probe-openrouter-free-models.ts run as a pre-deploy check. These
+  // ids should now pass through unchanged so a 404 names the real culprit.
+  it("no longer launders known-dead OpenRouter free-tier slugs into a fake 'openrouter/free' id", () => {
+    const deadSlugs = [
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "meta-llama/llama-3.3-70b-instruct",
+      "qwen/qwen-2.5-72b-instruct:free",
+      "qwen/qwen3-next-80b-a3b-instruct:free",
+      "qwen/qwen3-next-80b-a3b-instruct",
+      "nousresearch/hermes-3-llama-3.1-405b:free",
+      "deepseek/deepseek-r1:free",
+      "google/gemini-2.5-flash:free",
+    ];
+    for (const slug of deadSlugs) {
+      expect(normalizeModelId(`openrouter:${slug}`)).toBe(`openrouter:${slug}`);
+    }
+  });
 });
 
 describe("getModel provider selection", () => {
@@ -162,6 +186,20 @@ describe("fallback middleware config", () => {
       "anthropic:claude-haiku-4-5",
     ]);
     expect(getModelFallbackMiddleware()).toHaveLength(1);
+  });
+
+  // 2026-08-27: getConfiguredModelId()/getWorkerModelId() normalize deprecated
+  // ids; getFallbackModelIds() never did — AGENT_FALLBACK_MODELS was the one
+  // place a retired slug (meta-llama/llama-3.3-70b-instruct:free,
+  // qwen/qwen3-next-80b-a3b-instruct:free) actually lived in prod, and the
+  // alias table gave it zero protection. Fixed so the same renames apply here.
+  it("normalizes deprecated ids inside AGENT_FALLBACK_MODELS, not just AGENT_MODEL/WORKER_AGENT_MODEL", () => {
+    process.env["AGENT_FALLBACK_MODELS"] =
+      "google-genai:gemini-2.5-flash-preview-05-20,openrouter:openai/gpt-4o-mini";
+    expect(getFallbackModelIds()).toEqual([
+      "google-genai:gemini-2.5-flash",
+      "openrouter:openai/gpt-4o-mini",
+    ]);
   });
 
   it("skips fallback models whose API keys are absent (prod-safe boot)", () => {
