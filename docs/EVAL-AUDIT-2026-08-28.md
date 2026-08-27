@@ -1,7 +1,8 @@
 # Eval audit — why the golden set scores 42%
 
 > **RESOLVED 2026-08-28** — D1–D8 (fix list below) landed in
-> `fix/eval-harness-recursion-and-hitl` (PR: see repo). Summary of what shipped
+> [PR #585](https://github.com/pushkarverma3698/FounderOS/pull/585)
+> (`fix/eval-harness-recursion-and-hitl` → `beta`). Summary of what shipped
 > and what's still open:
 > - **D1** (dropped HITL receipts): fixed AND empirically proven against the
 >   real graph (offline, $0) — `tests/unit/eval/kernel-invoker.test.ts`. Turned
