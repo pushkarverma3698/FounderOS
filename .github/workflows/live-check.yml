@@ -25,7 +25,12 @@ jobs:
           --health-retries 10
     env:
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+      GCP_VERTEX_SA_KEY: ${{ secrets.GCP_VERTEX_SA_KEY }}
+      GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/.vertex-sa.json
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      # Still google-genai: by default — flip to google-vertexai:gemini-flash-latest
+      # to milestone-test the Vertex path once GCP_VERTEX_SA_KEY/GCP_PROJECT_ID are set.
       AGENT_MODEL: "google-genai:gemini-2.5-flash"
       # 2026-08-27: both prior entries (meta-llama/llama-3.3-70b-instruct:free,
       # qwen/qwen3-next-80b-a3b-instruct:free) 404 — OpenRouter retired their
@@ -51,6 +56,9 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: touch .env
+      - name: Materialize Vertex AI service-account key
+        if: env.GCP_VERTEX_SA_KEY != ''
+        run: printf '%s' "$GCP_VERTEX_SA_KEY" > "$GOOGLE_APPLICATION_CREDENTIALS"
       - name: Migrate DB
         run: node --env-file=.env --import tsx/esm scripts/setup-db.ts
       - run: pnpm test:integration

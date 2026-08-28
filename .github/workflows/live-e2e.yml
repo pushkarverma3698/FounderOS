@@ -24,6 +24,11 @@ jobs:
           --health-retries 10
     env:
       GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+      GCP_VERTEX_SA_KEY: ${{ secrets.GCP_VERTEX_SA_KEY }}
+      GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/.vertex-sa.json
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      # Still google-genai: by default — flip to google-vertexai:gemini-flash-latest
+      # to milestone-test the Vertex path once GCP_VERTEX_SA_KEY/GCP_PROJECT_ID are set.
       AGENT_MODEL: "google-genai:gemini-2.5-flash"
       DATABASE_URL: "postgresql://founderos:founderos@localhost:5432/founderos"
       TELEGRAM_BOT_TOKEN: "ci:placeholder"
@@ -46,6 +51,9 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: touch .env
+      - name: Materialize Vertex AI service-account key
+        if: env.GCP_VERTEX_SA_KEY != ''
+        run: printf '%s' "$GCP_VERTEX_SA_KEY" > "$GOOGLE_APPLICATION_CREDENTIALS"
       - name: Migrate DB
         run: node --env-file=.env --import tsx/esm scripts/setup-db.ts
       - name: Live kernel proof

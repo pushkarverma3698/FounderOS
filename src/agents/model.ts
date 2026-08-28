@@ -11,12 +11,13 @@
 import { ChatAnthropic } from "@langchain/anthropic";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
 import { modelFallbackMiddleware } from "langchain";
 
 export const RETRY_BACKOFF_MS = [2_000, 4_000, 8_000] as const;
 
-export type ModelProvider = "google-genai" | "openai" | "anthropic" | "openrouter";
+export type ModelProvider = "google-vertexai" | "google-genai" | "openai" | "anthropic" | "openrouter";
 
 export interface ParsedModelId {
   provider: ModelProvider;
@@ -181,7 +182,10 @@ export function resolveTemperature(): number {
 
 function inferLegacyProvider(model: string): ModelProvider {
   const lower = model.toLowerCase();
-  if (lower.includes("gemini")) return "google-genai";
+  // Bare "gemini*" ids (no provider prefix) default to Vertex AI — the
+  // production-reliable path (see buildModel). google-genai: still works when
+  // explicitly prefixed.
+  if (lower.includes("gemini")) return "google-vertexai";
   if (lower.includes("claude")) return "anthropic";
   return "openai";
 }
@@ -204,9 +208,9 @@ export function parseModelId(modelId: string): ParsedModelId {
     throw new Error(`Model id "${modelId}" is missing the model name after the provider prefix.`);
   }
 
-  if (!["google-genai", "openai", "anthropic", "openrouter"].includes(provider)) {
+  if (!["google-vertexai", "google-genai", "openai", "anthropic", "openrouter"].includes(provider)) {
     throw new Error(
-      `Unsupported AGENT_MODEL provider "${provider}". Use google-genai:, openai:, anthropic:, or openrouter:.`,
+      `Unsupported AGENT_MODEL provider "${provider}". Use google-vertexai:, google-genai:, openai:, anthropic:, or openrouter:.`,
     );
   }
 
@@ -282,6 +286,30 @@ function buildModel(
   opts: { optional?: boolean } = {},
 ): BaseChatModel | null {
   const optional = opts.optional ?? false;
+
+  if (parsed.provider === "google-vertexai") {
+    // Vertex AI authenticates via a GCP service-account key, never an API key.
+    // Fail loud here rather than let ChatVertexAI fall through to ambient ADC
+    // discovery (gcloud login file / GCE metadata) — that path only "works" on
+    // a machine that happens to have a personal gcloud session and silently
+    // breaks on any host that doesn't (prod has neither gcloud nor an ADC file).
+    const credsPath = process.env["GOOGLE_APPLICATION_CREDENTIALS"];
+    const project = process.env["GOOGLE_CLOUD_PROJECT"];
+    if (!credsPath || !project) {
+      if (optional) return null;
+      const missing = [!credsPath && "GOOGLE_APPLICATION_CREDENTIALS", !project && "GOOGLE_CLOUD_PROJECT"]
+        .filter(Boolean)
+        .join(" and ");
+      throw new Error(`${missing} required for google-vertexai: models (GCP service-account auth).`);
+    }
+    return new ChatVertexAI({
+      model: parsed.model,
+      temperature,
+      maxRetries: 2,
+      authOptions: { keyFilename: credsPath, projectId: project },
+      location: process.env["GOOGLE_CLOUD_LOCATION"]?.trim() || "us-central1",
+    });
+  }
 
   if (parsed.provider === "google-genai") {
     if (!process.env["GOOGLE_GENERATIVE_AI_API_KEY"]) {

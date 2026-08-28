@@ -257,3 +257,28 @@ if [ -n "$GEMINI_KEY_VAL" ]; then
 else
   echo "    GOOGLE_GENERATIVE_AI_API_KEY not set — skipping storage check"
 fi
+
+echo "==> Checking Vertex AI credentials (google-vertexai: primary model provider)"
+# The 2026-08-28 vertex-migration audit found the prior attempt at this swap
+# would have 401'd every model call in prod: ChatVertexAI's constructor doesn't
+# validate auth, so a missing service-account file only surfaces on the first
+# real request. This check makes that failure visible at deploy time instead.
+AGENT_MODEL_VAL="$(grep -E '^AGENT_MODEL=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+if [ "${AGENT_MODEL_VAL#google-vertexai:}" != "$AGENT_MODEL_VAL" ]; then
+  SA_PATH_VAL="$(grep -E '^GOOGLE_APPLICATION_CREDENTIALS=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  PROJECT_VAL="$(grep -E '^GOOGLE_CLOUD_PROJECT=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)"
+  if [ -z "$SA_PATH_VAL" ] || [ ! -f "$SA_PATH_VAL" ]; then
+    echo "    WARNING: AGENT_MODEL=$AGENT_MODEL_VAL but GOOGLE_APPLICATION_CREDENTIALS" >&2
+    echo "             is unset or points at a missing file ($SA_PATH_VAL) — every model" >&2
+    echo "             call will fail auth. Set GCP_VERTEX_SA_KEY as a deploy secret and redeploy." >&2
+  elif ! node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$SA_PATH_VAL" >/dev/null 2>&1; then
+    echo "    WARNING: GOOGLE_APPLICATION_CREDENTIALS ($SA_PATH_VAL) is not valid JSON — Vertex AI auth will fail." >&2
+  elif [ -z "$PROJECT_VAL" ]; then
+    echo "    WARNING: AGENT_MODEL=$AGENT_MODEL_VAL but GOOGLE_CLOUD_PROJECT is unset — Vertex AI auth will fail." >&2
+    echo "             Set GCP_PROJECT_ID as a deploy secret and redeploy." >&2
+  else
+    echo "    GOOGLE_APPLICATION_CREDENTIALS present + valid JSON, GOOGLE_CLOUD_PROJECT=$PROJECT_VAL — Vertex AI ready"
+  fi
+else
+  echo "    AGENT_MODEL=$AGENT_MODEL_VAL (not google-vertexai:) — skipping Vertex AI check"
+fi
