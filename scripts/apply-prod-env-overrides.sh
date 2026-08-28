@@ -6,8 +6,15 @@
 #
 # Inputs (env vars forwarded by appleboy/ssh-action):
 #   PROD_DOTENV          — base64-encoded full .env (required for DATABASE_URL)
-#   GOOGLE_GENERATIVE_AI_API_KEY — primary model key (AGENT_MODEL pins to
-#                          google-genai:gemini-flash-latest); MUST be set or prod 401s
+#   GOOGLE_GENERATIVE_AI_API_KEY — AI Studio key for image-gen/web-search/gap-scanner
+#                          (see src/tools/{image-gen,web-search,gap-scanner}.ts)
+#   GCP_VERTEX_SA_KEY    — raw Vertex AI service-account JSON (primary model auth;
+#                          once flipped, AGENT_MODEL pins to
+#                          google-vertexai:gemini-2.5-flash — Vertex does NOT
+#                          support AI Studio's "-latest" rolling aliases, live-
+#                          verified 2026-08-29); written to
+#                          $APP_DIR/secrets/google-vertex-sa.json
+#   GCP_PROJECT_ID       — GCP project id the service account above belongs to
 #   OPENROUTER_API_KEY   — free-tier fallback path key
 #   LINKEDIN_ACCESS_TOKEN — optional override
 #   LINKEDIN_AUTHOR_URN   — optional override
@@ -30,7 +37,7 @@ cd "$APP_DIR"
 #   2026-08-01: PERSONAL_CV_DIR/PERSONAL_CV_PATH point at on-box files that only
 #   exist on the VPS. Losing them does not fail loudly — every posting simply
 #   scores 0 overlap and the ranked brief silently degrades to arbitrary order.
-PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND APIFY_TOKEN SCRAPE_BACKEND STORAGE_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY STORAGE_ENDPOINT_URL WEB_GATEWAY_TOKEN GWS_BIN MEM0_API_KEY REDIS_URL GOOGLE_APPLICATION_CREDENTIALS OFFICE_TURN_TIMEOUT_MS MCP_BRIDGE_ENABLED PERSONAL_CV_DIR PERSONAL_CV_PATH"
+PRESERVE_IF_MISSING="FIRECRAWL_API_KEY COMPOSIO_API_KEY GMAIL_BACKEND APIFY_TOKEN SCRAPE_BACKEND STORAGE_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY STORAGE_ENDPOINT_URL WEB_GATEWAY_TOKEN GWS_BIN MEM0_API_KEY REDIS_URL GOOGLE_APPLICATION_CREDENTIALS GOOGLE_CLOUD_PROJECT GOOGLE_CLOUD_LOCATION OFFICE_TURN_TIMEOUT_MS MCP_BRIDGE_ENABLED PERSONAL_CV_DIR PERSONAL_CV_PATH"
 
 if [ -n "${PROD_DOTENV:-}" ]; then
   umask 077
@@ -134,15 +141,49 @@ grep -v -E '^(APIFY_PLAN|JOBHUNT_MONTHLY_CAP_USD)=' .env > .env.patched || true
 mv .env.patched .env
 chmod 600 .env
 echo "==> Patched .env: APIFY_PLAN=free, JOBHUNT_MONTHLY_CAP_USD=2.00"
-# Primary model key — forwarded from a GitHub secret so a PROD_DOTENV re-render
-# can never wipe it. Without this the direct-Gemini path 401s.
+# AI Studio key — forwarded from a GitHub secret so a PROD_DOTENV re-render can
+# never wipe it. Still required: image-gen/web-search/gap-scanner call
+# generativelanguage.googleapis.com directly with this key (not migrated to
+# Vertex — see docs/plans/ for the scope boundary).
 if [ -n "${GOOGLE_GENERATIVE_AI_API_KEY:-}" ]; then
   grep -v -E '^GOOGLE_GENERATIVE_AI_API_KEY=' .env > .env.patched || true
   printf 'GOOGLE_GENERATIVE_AI_API_KEY=%s\n' "$GOOGLE_GENERATIVE_AI_API_KEY" >> .env.patched
   mv .env.patched .env
   chmod 600 .env
-  echo "==> Patched .env: GOOGLE_GENERATIVE_AI_API_KEY refreshed (primary model)"
+  echo "==> Patched .env: GOOGLE_GENERATIVE_AI_API_KEY refreshed (image-gen/web-search/gap-scanner)"
 fi
+
+# Vertex AI service-account key — primary model auth (google-vertexai:
+# provider, src/agents/model.ts). Forwarded from a GitHub secret so a
+# PROD_DOTENV re-render can never wipe it (GOOGLE_APPLICATION_CREDENTIALS is
+# also in PRESERVE_IF_MISSING above for the same reason — this block is what
+# bootstraps it on the FIRST deploy, before there's an on-box value to
+# preserve). There is no ambient gcloud/ADC fallback on this box: a missing or
+# stale file here means the primary model fails loud with a clear "GOOGLE_
+# APPLICATION_CREDENTIALS required" error (src/agents/model.ts buildModel),
+# not a silent auth failure at the first real request.
+if [ -n "${GCP_VERTEX_SA_KEY:-}" ]; then
+  mkdir -p "$APP_DIR/secrets"
+  chmod 700 "$APP_DIR/secrets"
+  printf '%s' "$GCP_VERTEX_SA_KEY" > "$APP_DIR/secrets/google-vertex-sa.json"
+  chmod 600 "$APP_DIR/secrets/google-vertex-sa.json"
+  grep -v -E '^GOOGLE_APPLICATION_CREDENTIALS=' .env > .env.patched || true
+  printf 'GOOGLE_APPLICATION_CREDENTIALS=%s/secrets/google-vertex-sa.json\n' "$APP_DIR" >> .env.patched
+  mv .env.patched .env
+  chmod 600 .env
+  echo "==> Patched .env: GOOGLE_APPLICATION_CREDENTIALS refreshed (Vertex AI service account)"
+fi
+if [ -n "${GCP_PROJECT_ID:-}" ]; then
+  grep -v -E '^(GOOGLE_CLOUD_PROJECT|GOOGLE_CLOUD_LOCATION)=' .env > .env.patched || true
+  {
+    printf 'GOOGLE_CLOUD_PROJECT=%s\n' "$GCP_PROJECT_ID"
+    printf 'GOOGLE_CLOUD_LOCATION=us-central1\n'
+  } >> .env.patched
+  mv .env.patched .env
+  chmod 600 .env
+  echo "==> Patched .env: GOOGLE_CLOUD_PROJECT=$GCP_PROJECT_ID, GOOGLE_CLOUD_LOCATION=us-central1"
+fi
+
 if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   grep -v -E '^OPENROUTER_API_KEY=' .env > .env.patched || true
   printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" >> .env.patched
