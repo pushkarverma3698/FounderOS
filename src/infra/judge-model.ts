@@ -15,10 +15,11 @@
 import { ChatAnthropic } from "@langchain/anthropic";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
 
 /** Judge providers we support. Kept local so infra/ doesn't depend on agents/. */
-export type JudgeProvider = "anthropic" | "openrouter" | "openai" | "google-genai";
+export type JudgeProvider = "anthropic" | "openrouter" | "openai" | "google-genai" | "google-vertexai";
 
 /**
  * Critic model id. Override with JUDGE_MODEL. Default = a FREE OpenRouter model
@@ -38,7 +39,7 @@ export function resolveJudgeModelId(): { provider: JudgeProvider; model: string 
   const sep = raw.indexOf(":");
   const provider = raw.slice(0, sep) as JudgeProvider;
   const model = raw.slice(sep + 1).trim();
-  const valid: JudgeProvider[] = ["anthropic", "openrouter", "openai", "google-genai"];
+  const valid: JudgeProvider[] = ["anthropic", "openrouter", "openai", "google-genai", "google-vertexai"];
   if (!valid.includes(provider) || !model) {
     // Unrecognized override → safe default (free OpenRouter Llama).
     return { provider: "openrouter", model: "meta-llama/llama-3.3-70b-instruct:free" };
@@ -58,6 +59,8 @@ export function isJudgeEnabled(): boolean {
       return Boolean(process.env["OPENAI_API_KEY"]);
     case "google-genai":
       return Boolean(process.env["GOOGLE_GENERATIVE_AI_API_KEY"]);
+    case "google-vertexai":
+      return Boolean(process.env["GOOGLE_APPLICATION_CREDENTIALS"]) && Boolean(process.env["GOOGLE_CLOUD_PROJECT"]);
     default:
       return false;
   }
@@ -85,6 +88,17 @@ export function getJudgeModel(): BaseChatModel {
         maxOutputTokens: 512,
         maxRetries: 2,
         apiKey: process.env["GOOGLE_GENERATIVE_AI_API_KEY"],
+      });
+    } else if (provider === "google-vertexai") {
+      _model = new ChatVertexAI({
+        model,
+        temperature: 0,
+        maxRetries: 2,
+        authOptions: {
+          keyFilename: process.env["GOOGLE_APPLICATION_CREDENTIALS"],
+          projectId: process.env["GOOGLE_CLOUD_PROJECT"],
+        },
+        location: process.env["GOOGLE_CLOUD_LOCATION"]?.trim() || "us-central1",
       });
     } else {
       // openai judges route via the standard OpenAI client.

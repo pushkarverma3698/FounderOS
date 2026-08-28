@@ -26,6 +26,23 @@ describe("buildBootReport", () => {
     expect(find(report, "LLM (selected provider)").live).toBe(true);
   });
 
+  // 2026-08-28: vertex-migration audit — boot-report must check the RIGHT
+  // credential for the RIGHT provider (GCP service-account, not an API key),
+  // or it reports a false LIVE while the real model call fails auth.
+  it("reports LLM as MISSING when google-vertexai selected but GCP credentials absent", () => {
+    const report = buildBootReport({ AGENT_MODEL: "google-vertexai:gemini-2.5-flash" });
+    expect(find(report, "LLM (selected provider)").live).toBe(false);
+  });
+
+  it("supports Gemini when AGENT_MODEL selects google-vertexai with GCP credentials present", () => {
+    const report = buildBootReport({
+      AGENT_MODEL: "google-vertexai:gemini-2.5-flash",
+      GOOGLE_APPLICATION_CREDENTIALS: "/opt/founderos/secrets/google-vertex-sa.json",
+      GOOGLE_CLOUD_PROJECT: "founderos-prod",
+    });
+    expect(find(report, "LLM (selected provider)").live).toBe(true);
+  });
+
   it("reports LinkedIn direct as MISSING without token + URN", () => {
     const report = buildBootReport({});
     expect(find(report, "LinkedIn (direct API)").live).toBe(false);

@@ -21,6 +21,8 @@ export interface BootCapabilityInput {
   AGENT_MODEL?: string | undefined;
   AGENT_FALLBACK_MODELS?: string | undefined;
   GOOGLE_GENERATIVE_AI_API_KEY?: string | undefined;
+  GOOGLE_APPLICATION_CREDENTIALS?: string | undefined;
+  GOOGLE_CLOUD_PROJECT?: string | undefined;
   OPENAI_API_KEY?: string | undefined;
   ANTHROPIC_API_KEY?: string | undefined;
   OPENROUTER_API_KEY?: string | undefined;
@@ -55,12 +57,15 @@ const selectedModel = (env: BootCapabilityInput): string =>
   env.AGENT_MODEL?.trim() || "openrouter:openai/gpt-4o-mini";
 const selectedProvider = (model: string): string => {
   if (model.includes(":")) return model.split(":", 1)[0]!;
-  if (model.includes("gemini")) return "google-genai";
+  // Mirrors src/agents/model.ts inferLegacyProvider: bare "gemini*" ids default
+  // to Vertex AI, the production-reliable path.
+  if (model.includes("gemini")) return "google-vertexai";
   if (model.includes("claude")) return "anthropic";
   return "openai";
 };
 const hasProviderKey = (env: BootCapabilityInput, provider: string): boolean => {
   if (provider === "google-genai") return has(env.GOOGLE_GENERATIVE_AI_API_KEY);
+  if (provider === "google-vertexai") return has(env.GOOGLE_APPLICATION_CREDENTIALS) && has(env.GOOGLE_CLOUD_PROJECT);
   if (provider === "anthropic") return has(env.ANTHROPIC_API_KEY);
   if (provider === "openrouter") return has(env.OPENROUTER_API_KEY);
   if (provider === "openai") return has(env.OPENAI_API_KEY);

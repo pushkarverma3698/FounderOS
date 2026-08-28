@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
 import {
   DEFAULT_AGENT_MODEL,
@@ -55,6 +56,13 @@ describe("model id parsing", () => {
       model: "gemini-2.5-flash",
       id: "google-genai:gemini-2.5-flash",
     });
+    // gemini-2.5-flash, not gemini-flash-latest: Vertex AI does not support AI
+    // Studio's rolling "-latest" aliases (404, live-verified 2026-08-29).
+    expect(parseModelId("google-vertexai:gemini-2.5-flash")).toEqual({
+      provider: "google-vertexai",
+      model: "gemini-2.5-flash",
+      id: "google-vertexai:gemini-2.5-flash",
+    });
     expect(parseModelId("openrouter:openai/gpt-4o-mini")).toEqual({
       provider: "openrouter",
       model: "openai/gpt-4o-mini",
@@ -62,8 +70,11 @@ describe("model id parsing", () => {
     });
   });
 
+  // 2026-08-28: bare "gemini*" ids default to google-vertexai (the production-
+  // reliable path — see vertex-migration audit). google-genai: still works when
+  // explicitly prefixed, tested above.
   it("keeps legacy unprefixed names working by inference", () => {
-    expect(parseModelId("gemini-2.5-flash").provider).toBe("google-genai");
+    expect(parseModelId("gemini-2.5-flash").provider).toBe("google-vertexai");
     expect(parseModelId("claude-haiku-4-5").provider).toBe("anthropic");
     expect(parseModelId("gpt-4o-mini").provider).toBe("openai");
   });
@@ -131,6 +142,9 @@ describe("getModel provider selection", () => {
     delete process.env["AGENT_MODEL"];
     delete process.env["AGENT_TEMPERATURE"];
     delete process.env["OPENROUTER_API_KEY"];
+    delete process.env["GOOGLE_APPLICATION_CREDENTIALS"];
+    delete process.env["GOOGLE_CLOUD_PROJECT"];
+    delete process.env["GOOGLE_CLOUD_LOCATION"];
   });
 
   it("returns an OpenRouter-backed ChatOpenAI model by default", () => {
@@ -142,6 +156,26 @@ describe("getModel provider selection", () => {
   it("returns a Google model for google-genai ids", () => {
     process.env["AGENT_MODEL"] = "google-genai:gemini-2.5-flash";
     expect(getModel()).toBeInstanceOf(ChatGoogleGenerativeAI);
+  });
+
+  // 2026-08-28: the vertex-migration audit found the prior attempt at this
+  // swap silently relied on ambient gcloud ADC discovery — worked on a laptop
+  // with a personal gcloud session, broke on prod (no gcloud, no ADC file).
+  // These two tests are the fail-loud contract that replaces it: construct
+  // ChatVertexAI ONLY with explicit authOptions/project, and throw a named
+  // error rather than fall through to ADC when either is missing.
+  it("returns a Vertex AI model for google-vertexai ids when credentials are configured", () => {
+    process.env["AGENT_MODEL"] = "google-vertexai:gemini-2.5-flash";
+    process.env["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/does-not-need-to-exist-for-construction.json";
+    process.env["GOOGLE_CLOUD_PROJECT"] = "test-project";
+    expect(getModel()).toBeInstanceOf(ChatVertexAI);
+  });
+
+  it("throws naming exactly what's missing for google-vertexai ids without GCP credentials", () => {
+    process.env["AGENT_MODEL"] = "google-vertexai:gemini-2.5-flash";
+    delete process.env["GOOGLE_APPLICATION_CREDENTIALS"];
+    delete process.env["GOOGLE_CLOUD_PROJECT"];
+    expect(() => getModel()).toThrow(/GOOGLE_APPLICATION_CREDENTIALS and GOOGLE_CLOUD_PROJECT required/);
   });
 
   it("returns an Anthropic model for anthropic ids", () => {
@@ -206,6 +240,15 @@ describe("fallback middleware config", () => {
     process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5,google-genai:gemini-2.0-flash";
     delete process.env["ANTHROPIC_API_KEY"];
     delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
+    expect(() => getSupervisorModel()).not.toThrow();
+    expect(getModelFallbackMiddleware()).toEqual([]);
+  });
+
+  it("skips google-vertexai fallback models whose GCP credentials are absent (prod-safe boot)", () => {
+    process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5,google-vertexai:gemini-2.5-flash-lite";
+    delete process.env["ANTHROPIC_API_KEY"];
+    delete process.env["GOOGLE_APPLICATION_CREDENTIALS"];
+    delete process.env["GOOGLE_CLOUD_PROJECT"];
     expect(() => getSupervisorModel()).not.toThrow();
     expect(getModelFallbackMiddleware()).toEqual([]);
   });
