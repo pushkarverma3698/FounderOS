@@ -24,8 +24,18 @@
  * Historical documents — docs/plans/, docs/sessions/, ADRs, archives — describe a
  * past state on purpose and are exempt by design, not by oversight.
  *
+ * KNOWN GAP, stated rather than hidden. This proves the docs agree with
+ * docs/PROOF.md; it does NOT prove PROOF.md is itself fresh. Add tests without
+ * running `pnpm proof:scoreboard` and every check here still passes while the
+ * published test count quietly falls behind. Closing it properly means asserting
+ * against a live `vitest run`, and a static count of tests/ files does not
+ * substitute — vitest's include/exclude config means the on-disk file count (339)
+ * and the executed one (332) legitimately differ. Until then, regenerating the
+ * scoreboard stays a step in the release flow, not something CI guarantees.
+ *
  * Usage:
  *   node --import tsx/esm scripts/verify-doc-claims.ts
+ *   node --import tsx/esm scripts/verify-doc-claims.ts --fix
  */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";

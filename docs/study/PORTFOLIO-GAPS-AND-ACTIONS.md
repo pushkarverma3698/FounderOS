@@ -177,7 +177,17 @@ Costs money, so it runs manually, so behavioural regressions can reach `main`. N
 `docs/EVAL.md` §6. A cheap middle path: run the golden set on a **schedule** (weekly) rather than
 per-commit, with the report committed.
 
-### 8. LangFuse / LangSmith (2.3%)
+### 8. The doc-claim gate proves consistency, not freshness
+
+`scripts/verify-doc-claims.ts` (added 2026-08-28) proves the docs agree with
+`docs/PROOF.md`. It does **not** prove `PROOF.md` is itself current: add tests without running
+`pnpm proof:scoreboard` and every check still passes while the published test count quietly
+falls behind. Closing it means asserting against a live `vitest run` — a static count of
+`tests/` files won't substitute, because vitest's include/exclude rules make the on-disk count
+(339) and the executed count (332) legitimately differ. Regenerating the scoreboard is a
+release-flow step, not a CI guarantee. Named here rather than left as an assumed guarantee.
+
+### 9. LangFuse / LangSmith (2.3%)
 
 Low demand; first-party telemetry already covers it. **Recommend not doing this** — it would be
 resume-driven development, and the measured demand doesn't justify it.
