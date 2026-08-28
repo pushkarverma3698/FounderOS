@@ -14,16 +14,17 @@ Use these six. They are specific, verifiable, and each one implies a mechanism.
 | **229 human approvals in production — 131 approved, 36 rejected** | The HITL gate is real and has *blocked* things. 7.3% of AI postings ask for HITL | `agents.hitl_approvals`, 2026-06-16 → 2026-08-27 |
 | **80 real side effects executed** — 24 shell runs, 13 code sessions, 11 GitHub issues, 6 LinkedIn posts, 6 emails, 1 job application, 1 site deploy | It takes real actions, not demo actions | `agents.action_log` |
 | **1,843 LLM calls · $2.53 total · $0.001373 mean · 8 models** | Per-call cost attribution in production. 6.8% of postings ask for cost optimisation | `agents.ai_call_costs`, 2026-07-04 → 2026-08-24 |
-| **3,611 tests · 337 files · $0 per run** | The full agent graph runs offline in CI. Scripted models, no paid calls | `pnpm test` |
+| **3,649 tests · 332 files · $0 per run** | The full agent graph runs offline in CI. Scripted models, no paid calls | `pnpm test` |
 | **97.3% recall@5 / 0.855 MRR** on hybrid retrieval, beating vector-only by 33 points on the hard slice | RAG measured, not hoped for. 35.6% of postings ask for RAG | `pnpm eval:retrieval`, 1,214 chunks |
 | **`regex-routing: 0`, `kernel-purity: 0`, `gateway-imports: 0`** — CI fails if any rises | Architecture debt is ratcheted, not aspirational | `governance/architecture-baseline.json` |
 
-**Scale, if asked:** 334 TypeScript source files / 57,688 LOC, 51 tool modules, 8 workers,
-51 ADRs, 20 database tables, 623 ATS boards polled, 911 job postings ingested in 4 weeks.
+**Scale, if asked:** 335 TypeScript source files / 58,141 LOC, 51 tool modules, 8 workers,
+50 ADRs, 29 database tables, 1,297 ATS boards polled across 10 platforms, 911 job postings
+ingested in 4 weeks.
 
 ---
 
-## 2. The five stories
+## 2. The six stories
 
 Each is a real incident with a mechanism as the punchline. Lead with the failure — hiring
 managers screen for people who have *watched agents fail in production*, and one posting in this
@@ -108,6 +109,35 @@ just raise the number, it's what made the real gaps visible for the first time.
 > that actually shipped came in higher than even the optimistic projection, which is the honest
 > way to be surprised: after measuring, not instead of it.
 
+### Story 6 — "My CV writer put Kubernetes on my résumé"
+
+**Setup.** The job pipeline tailors my CV to each posting before I approve sending it. This is
+the one place in the system where a hallucination has legal consequences, not just embarrassing
+ones.
+**Failure.** The only thing standing between the model and a fabricated credential was a *prompt
+instruction* — "never claim skills the base CV doesn't have." The single post-generation check
+was a style linter. That violates the rule the rest of this codebase is built on: guards are pure
+unit-tested functions, never prompt instructions. I had written the rule and then not applied it
+in the highest-stakes place in the repo.
+**Measurement.** I built `verifyCvClaims()` and ran it backwards over every tailored CV that had
+ever rendered in production. **6 of 6 contained claims absent from my actual CV** — Kubernetes,
+C#, Domain-Driven Design, Snowflake, ETL. Zero of the 6 had been sent (`applied_at` null on all
+six), so the risk was real but contained.
+**The part I didn't expect.** I re-ran all 6 through the fixed pipeline. One came back clean. The
+other five stayed blocked — so I read my own base CV to check whether the guard was over-firing.
+It wasn't: those five postings want Python, SQL, Java, C# and .NET, and **none of those words
+appear anywhere in my CV.** The guard hadn't caught a prompting problem. It had caught a
+*matching* problem two stages upstream — the screener had passed jobs I don't qualify for, and
+fabrication was the model's only way to satisfy an impossible instruction.
+**Insight.** A guard that keeps firing is telling you something about the system above it. If I
+had "fixed" this by loosening the check, I'd have hidden a screening bug behind a résumé that
+lied.
+**Mechanism.** `verifyCvClaims()` — pure, deterministic, $0, 11 unit tests, checks five claim
+types (technologies, employers, titles, dates, degrees) against the base CV and blocks the output
+rather than warning about it.
+**Where:** `src/tools/jobhunt/cv-claim-guard.ts`,
+[PORTFOLIO-GAPS-AND-ACTIONS.md](PORTFOLIO-GAPS-AND-ACTIONS.md) P0-1.
+
 ---
 
 ## 3. Questions to expect, and the honest answer
@@ -134,22 +164,37 @@ synthesizer never sees raw tool output. That mechanism exists because v1 shipped
 and I audited it — Story 1.
 
 **"How do you evaluate it?"**
-Four layers: 3,611 offline behavioural tests at $0 with scripted models; a determinism gate that
+Four layers: 3,649 offline behavioural tests at $0 with scripted models; a determinism gate that
 requires byte-identical plans across two threads; a 41-task golden set on a live model; and a
 retrieval ablation with recall@5/MRR. Then volunteer Story 5 — that the golden set had a bug and
 I published the audit.
 
 **"What's broken right now?"**
-Have the list ready, it reads as strength: the eval harness defects (audited, being fixed), an
-unbounded worker loop that hits LangGraph's recursion limit on very broad research tasks, six
-files over the 400-line budget and 11 untagged fail-open catches — **both counted in CI and
-allowed only to shrink** — and a CV tailoring guard that is currently a prompt instruction
-rather than a pure function, which violates my own rule and is the next thing I'm fixing.
-`docs/LIMITATIONS.md` lists them by ID.
+Have the list ready, it reads as strength. Four things, none of them hidden:
+
+1. **Six source files over my own 400-line CI budget and 11 untagged fail-open catches.** Both
+   are *counted in CI and allowed only to shrink* — `src/db/queries.ts` is 2,233 lines and sits
+   on the checkpointer's hot path, so I did not split it under time pressure.
+2. **The golden set is not in CI** — it costs money, so it runs manually, so a behavioural
+   regression can reach `main` between runs. The honest middle path (weekly schedule, report
+   committed) is written down and not yet built.
+3. **Six genuine eval failures** at 85%, each nameable: one real tool-selection miss, an
+   `admin`-over-`pull` routing pattern on business questions, two comms/sales ambiguities.
+   These only became visible *after* I fixed the harness — the broken instrument was hiding them.
+4. **Python.** 70% of the postings I measured ask for it; this is TypeScript. Closing it with a
+   Python client for the MCP surface, not a rewrite.
+
+`docs/LIMITATIONS.md` lists all of them by ID with severities.
+
+*Two things that were on this list yesterday and are not any more, worth saying because the
+mechanism is the point:* the eval harness defects (fixed and re-run, Story 5) and a CV tailoring
+guard that was a **prompt instruction rather than a pure function** — a direct violation of my
+own architecture rule, in the one place a hallucination has legal consequences. It is now
+`verifyCvClaims()`, a pure unit-tested function. See Story 6.
 
 **"You built this alone — how do I know you can work in a team?"**
 The repo runs a written operating contract: every change goes through a PR to `beta` with a
-merge gate, an adversarial review step that must produce one of four explicit verdicts, 51 ADRs
+merge gate, an adversarial review step that must produce one of four explicit verdicts, 50 ADRs
 recording why decisions were made, and session records under `docs/sessions/`. The process
 exists precisely so the reasoning survives the author.
 
@@ -162,7 +207,7 @@ Give them this order and nothing else:
 1. **[README.md](../../README.md)** — the architecture diagram and the six numbers
 2. **[docs/EVAL.md](../EVAL.md)** — how it's evaluated, with published results
 3. **[docs/LIMITATIONS.md](../LIMITATIONS.md)** — what's broken, by ID
-4. **[docs/decisions/README.md](../decisions/README.md)** — 51 ADRs, the 10 most relevant first
+4. **[docs/decisions/README.md](../decisions/README.md)** — 50 ADRs, the 10 most relevant first
 
 If they only click one, it should be `docs/EVAL.md`: it's the one that shows measurement rather
 than assertion, and per the market data, evaluation is asked for by 36.2% of AI-track postings.
@@ -175,7 +220,7 @@ than assertion, and per the market data, evaluation is asked for by 36.2% of AI-
 > LangGraph kernel that has taken 80 real actions — emails, LinkedIn posts, GitHub issues, shell
 > commands, a job application — behind 229 human approvals, 36 of which I rejected. Every action
 > claim requires a receipt, so it can't report work it didn't do. Retrieval is hybrid pgvector +
-> keyword fusion measured at 97.3% recall@5. The whole graph runs offline in 3,611 tests at $0,
+> keyword fusion measured at 97.3% recall@5. The whole graph runs offline in 3,649 tests at $0,
 > and CI enforces an architecture-debt ratchet that can only shrink. I shipped it three times
 > before I shipped it right, and the autopsies are in the repo.
 

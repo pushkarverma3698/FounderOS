@@ -21,8 +21,9 @@ explicitly gate to **Phase-E**.
 honestly. Do **not** build Phase-E SaaS items (per-user rate limits, SOC2, blue-green/
 canary, pgbouncer, ELK/Datadog, on-call rotation, 10× load/chaos). Rationale: YAGNI +
 the feature triple-filter (real outcome · closes a named hiring gap · mostly reuse).
-Building SaaS theater for a one-user bot fails all three. The full mapping lives in
-[`PRODUCTION-HARDENING-TRIAGE-2026-06-12.md`](../PRODUCTION-HARDENING-TRIAGE-2026-06-12.md).
+Building SaaS theater for a one-user bot fails all three. The full mapping lived in
+`PRODUCTION-HARDENING-TRIAGE-2026-06-12.md`, since removed; the surviving operational
+detail is in [PRODUCTION.md](../PRODUCTION.md).
 
 **2. Kill switch = flag-file, not Redis.** The prompt specified a Redis key
 (`founderos:global:halt`). FounderOS marks Redis `[SaaS-PHASE: no boot dep]`. We back
