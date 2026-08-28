@@ -1,6 +1,6 @@
 # FounderOS — Roadmap & Strategic Direction
 
-*For Pushkar Verma, Turicks. Updated: 2026-08-22.*
+*For Pushkar Verma, Turicks. Updated: 2026-08-28.*
 
 > 🟢 **PRODUCTION LIVE** since 2026-06-14 — Hetzner VPS, systemd, GitHub Actions CD.
 > Architecture is **v3 (contract-first kernel)** since 2026-07-08.
@@ -33,16 +33,17 @@ message → plan → dispatch (pure) → agent ⇄ tools → collect → synthes
 
 ---
 
-## Measured state (2026-08-22, counted not remembered)
+## Measured state (2026-08-28, counted not remembered)
 
 | Measure | Value |
 |---|---|
-| Test suite | 321 files · **3,499 tests**, offline, $0 |
-| Source | 316 files · 55,510 LOC |
+| Test suite | 332 files · **3,649 tests**, offline, $0 |
+| Source | 335 files · 58,141 LOC |
 | DB tables | 29 |
-| Behavioural golden tasks | 46 |
-| Free ATS boards polled | **923** across 7 platforms, every 30 min, at $0 |
-| Architecture ratchet | gateway-imports 0 · kernel-purity 0 · regex-routing 0 · orphan-subsystem 0 |
+| Behavioural golden tasks | 41 |
+| Golden-set score (live model) | **85%** — routing 90% · tools 96% · HITL 95% |
+| Free ATS boards polled | **1,297** across 10 platforms, every 30 min, at $0 |
+| Architecture ratchet | gateway-imports 0 · kernel-purity 0 · regex-routing 0 · orphan-subsystem 0 · fail-open-catch 11 · loc-budget 6 |
 
 Full honest accounting, including what is deferred and where the ceilings are:
 **[LIMITATIONS.md](LIMITATIONS.md)**.
@@ -55,7 +56,7 @@ The system's first real user is its author, and the job it has to do is get him 
 Netherlands. That is the priority through Q3, and it is also the best available proof that
 the kernel works on something with a consequence.
 
-**The constraint is not supply.** 923 boards feed a pipeline that has stored 554 screened
+**The constraint is not supply.** 1,297 boards feed a pipeline that has stored 554 screened
 applications and submitted 2. Everything upstream of "apply" is finished and over-built;
 everything downstream is thin.
 
@@ -84,7 +85,7 @@ Audit and sequencing: `docs/plans/2026-08-22-portfolio-and-recruitment-readiness
 | ❌ Deferred | ✅ Why |
 |---|---|
 | **SaaS pivot / multi-tenancy** | Gated on the single-user system producing a real outcome first. It has not yet produced the one it was built for |
-| **More job sources** | 923 boards against 2 submitted applications. More supply is the most expensive way to avoid the actual problem |
+| **More job sources** | 1,297 boards against 2 submitted applications. More supply is the most expensive way to avoid the actual problem |
 | **Rewriting the agent layer in Python** | The market hires TypeScript for AI engineering; the gap is a CV claim and one artifact, not a rewrite |
 | **All ten proof surfaces** | The ten-surface design shipped zero in three weeks. Two surfaces shipped beat ten designed |
 | **Homerun ATS** | No public API, no token corpus, and every subdomain probe is indistinguishable from a typo. Guessing slugs is forbidden — a wrong board is worse than no board. Unblocks when a corpus exists or a posting URL is harvested in the wild |

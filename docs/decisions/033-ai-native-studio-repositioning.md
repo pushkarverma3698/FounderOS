@@ -56,6 +56,6 @@ Phase doc: `docs/phases/PHASE-D-BIS-PROOF-AND-DISTRIBUTION.md`
 
 ## References
 
-- [docs/plans/2026-06-17-LATEST-SESSION-PLAN.md](../plans/2026-06-17-LATEST-SESSION-PLAN.md) — source session plan
+- `docs/plans/2026-06-17-LATEST-SESSION-PLAN.md` — source session plan, since removed
 - ADR-014 (job-first-public-ready) — partially superseded on GTM sequencing
 - ADR-011 (portfolio-as-product) — still valid for build-in-public; niche sharpened here

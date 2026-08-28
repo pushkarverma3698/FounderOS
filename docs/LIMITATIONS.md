@@ -16,20 +16,22 @@
 > Severity: **HIGH** (fix before scaling) · **MEDIUM** (address
 > opportunistically) · **LOW** (note, no urgency).
 
-## Measured state (2026-08-22, counted not remembered)
+## Measured state (2026-08-28, counted not remembered)
 
-| Measure | Value | Δ since 2026-08-19 |
+| Measure | Value | Δ since 2026-08-22 |
 |---|---|---|
-| Source files / LOC | 316 files · 55,510 LOC | +23 files · +5,763 |
-| Test suite | 321 files · **3,499 tests**, offline, $0 | +463 tests |
+| Source files / LOC | 335 files · 58,141 LOC | +19 files · +2,631 |
+| Test suite | 332 files · **3,649 tests**, offline, $0 | +146 tests |
 | Behavioural golden tasks | 41 (`src/eval/golden-tasks.ts`, `GOLDEN_TASKS`) | corrected 2026-08-28 — was miscounted as 46, conflating with the 5 opt-in `CREATIVE_GOLDEN_TASKS` `pnpm eval` never runs |
 | DB tables | 29 (`src/db/schema.ts`) | +5 |
 | Side-effecting tool modules / HITL-gated | 20 / **9** | — |
-| Free ATS boards polled | 923 across 7 platforms | +65 (Personio) |
+| Free ATS boards polled | 1,297 across 10 platforms | +374 |
 | Architecture ratchet | gateway-imports 0 · kernel-purity 0 · regex-routing 0 · orphan-subsystem 0 · fail-open-catch 11 · loc-budget 6 | unchanged |
 
 Counts are from `git ls-files`, a full `vitest run` and `verify-architecture.ts` in
-one session on 2026-08-22, not from the previous revision plus arithmetic.
+one session on 2026-08-28, not from the previous revision plus arithmetic. Since
+2026-08-28 they are also **enforced**: `scripts/verify-doc-claims.ts` runs in
+`pnpm gate` and fails the build if a documented count drifts from the measured one.
 
 ## Ratchet debt, named (2026-08-27)
 
@@ -130,7 +132,7 @@ it runs when someone remembers, same shape as A4's live-eval gap.
 
 ## A4. The behavioural eval scores structure, never output quality — **MEDIUM**
 
-The 46 golden tasks score three things: routing, tool selection, HITL coverage.
+The 41 golden tasks score three things: routing, tool selection, HITL coverage.
 All three are structural. Nothing scores whether an answer was *correct*.
 `pnpm eval` can tell you a request reached the right worker and cannot tell you
 the founder got a useful reply.
