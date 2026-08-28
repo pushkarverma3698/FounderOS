@@ -310,5 +310,5 @@ silent success.
 
 ---
 
-*See also: [03-production-hardening.md](./03-production-hardening.md) for the phase-by-phase
-story of how these guardrails were built.*
+*See also: [PRODUCTION.md](../PRODUCTION.md) for how these guardrails run on the live VPS, and
+[LIMITATIONS.md](../LIMITATIONS.md) for the ones that are still open.*

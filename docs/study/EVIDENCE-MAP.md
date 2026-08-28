@@ -24,11 +24,11 @@ Read this as a hiring manager would: **can the candidate point at the thing, and
 |---|---|---|---|
 | **Agents / agentic systems** | 61.0% | ✅ | 8 typed workers behind one orchestration path; `src/kernel/graph.ts`, `contracts.ts`. Not a chat loop — a `Plan` is Zod-validated data dispatched by **pure code**, not an LLM supervisor |
 | **LLM integration** | 59.3% | ✅ | Injected models, 8 distinct providers used in prod (`agents.ai_call_costs`), temp 0, typed error taxonomy in `src/agents/model.ts` |
-| **System design / architecture** | 53.7% | ✅ | 51 ADRs in `docs/decisions/`; three rewrites documented with the autopsy that forced each (`ZERO-BASE-AUDIT.md`) |
-| **Scalability** | 45.2% | 🟡 | 623 ATS boards polled, 890 ingest runs/month, single-VPS. Horizontal scale is **not** demonstrated |
+| **System design / architecture** | 53.7% | ✅ | 50 ADRs in `docs/decisions/`; three rewrites documented with the autopsy that forced each (`ZERO-BASE-AUDIT.md`) |
+| **Scalability** | 45.2% | 🟡 | 1,297 ATS boards polled, 890 ingest runs/month, single-VPS. Horizontal scale is **not** demonstrated |
 | **REST / API design** | 43.5% | ✅ | MCP server surface (`src/mcp/`), health API, Telegram gateway; 51 tool modules behind one `ToolResult` envelope |
 | **Production systems** | 39.5% | ✅ | Live on a VPS since 2026-06; systemd + Docker + GitHub Actions CD; `docs/guides/DEPLOYMENT.md` |
-| **Testing** | 39.5% | ✅ | **3,611 tests across 337 files, $0 per run** — scripted models let the full graph run in CI without paid calls |
+| **Testing** | 39.5% | ✅ | **3,649 tests across 332 files, $0 per run** — scripted models let the full graph run in CI without paid calls |
 | **Evaluation / evals** | **36.2%** | ✅ | Two harnesses: 41-task golden set (`pnpm eval`) and a retrieval ablation (`pnpm eval:retrieval`). Plus [an audit of the eval itself](../EVAL-AUDIT-2026-08-28.md) |
 | **RAG / retrieval** | **35.6%** | ✅ | Hybrid pgvector + keyword via **reciprocal rank fusion** (`src/db/rrf.ts`, `rag-hybrid.ts`); **97.3% recall@5 / 0.855 MRR** measured over 1,214 chunks |
 | **Security** | 36.7% | ✅ | `src/infra/path-guard.ts`, prompt-injection guard (incident SF-2), `docs/THREAT-MODEL.md` |
@@ -41,7 +41,7 @@ Read this as a hiring manager would: **can the candidate point at the thing, and
 
 | demand | % | status | proof |
 |---|---|---|---|
-| **CI/CD** | 32.8% | ✅ | `pnpm gate` = lint + build + wiring + arch + 3,611 tests; branch → beta → main with CD to prod |
+| **CI/CD** | 32.8% | ✅ | `pnpm gate` = lint + build + wiring + arch + 3,649 tests; branch → beta → main with CD to prod |
 | **Monitoring / observability** | 32.8 / 27.1% | ✅ | `src/infra/telemetry.ts`, `trace-callback.ts`, `health.ts`, `boot-report.ts`; per-call cost rows in `ai_call_costs` |
 | **Vector database** | 26.0% | ✅ | pgvector in Postgres — **3.4% of postings name pgvector specifically**, so this is rarer vocabulary than it looks |
 | **LangChain** | 25.4% | ✅ | LangChain tool wrappers throughout `src/agents/agent-tools/` |
@@ -125,7 +125,7 @@ Remediation and sequencing: [PORTFOLIO-GAPS-AND-ACTIONS.md](PORTFOLIO-GAPS-AND-A
 
 > A production LangGraph agent kernel where every external action requires human approval,
 > every action claim requires a receipt, retrieval is measured at 97.3% recall@5, complexity is
-> ratcheted in CI, and the whole graph runs offline in 3,611 tests at $0 — with 229 real
+> ratcheted in CI, and the whole graph runs offline in 3,649 tests at $0 — with 229 real
 > approvals and 80 real side effects behind it.
 
 Every clause is a link in this document.
