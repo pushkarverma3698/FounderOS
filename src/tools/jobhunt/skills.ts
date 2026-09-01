@@ -35,6 +35,16 @@ export interface ExtractedSignal {
   readonly category: SignalCategory;
 }
 
+/** Canonical term → category, built once so lookups don't rescan the dictionary. */
+const TERM_CATEGORY: ReadonlyMap<string, SkillCategory> = new Map(
+  SKILL_DICTIONARY.map((entry) => [entry.term, entry.category]),
+);
+
+/** The dictionary category a matched term belongs to, or undefined for anything not in it. */
+export function categoryOf(term: string): SkillCategory | undefined {
+  return TERM_CATEGORY.get(term);
+}
+
 /** Bound the text we scan so one pathological posting can't stall the sweep. */
 const MAX_SCAN_CHARS = 40_000;
 

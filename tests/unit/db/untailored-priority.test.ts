@@ -36,10 +36,15 @@ function columnNamesOf(fragment: { queryChunks: readonly unknown[] }): string[] 
 }
 
 describe("untailoredPrioritySql", () => {
-  it("ranks brief_section against the same two values the Mac apply queue reads", () => {
+  it("ranks brief_section against the same values the Mac apply queue reads", () => {
     const text = sqlTextOf(untailoredPrioritySql());
     expect(text).toContain("do_today");
     expect(text).toContain("stretch");
+    // Added 2026-09-01 alongside APPLYABLE_SECTIONS (apply-queries.ts) and
+    // QUEUE_SQL (mac-client/mac_client/sync.py) — a standing row is addressable
+    // by the same /draft command do_today/stretch are, so it needs the same
+    // tailoring priority or the Mac queue would show it with no PDF ready.
+    expect(text).toContain("standing");
   });
 
   it("keys off the brief_section column", () => {

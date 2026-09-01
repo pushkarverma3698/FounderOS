@@ -17,7 +17,7 @@
 import { childLogger } from "../../infra/logger.js";
 import { recordBriefRanks, recordFitScores } from "../../db/job-queries.js";
 import { formatOverlap, type OverlapResult } from "./overlap.js";
-import { orderAskable, orderDoToday, orderStretch } from "./brief-select.js";
+import { orderAskable, orderDoToday, orderStanding, orderStretch } from "./brief-select.js";
 import type { BriefRow } from "./brief-row.js";
 import type { JobApplication } from "../../db/schema.js";
 
@@ -26,18 +26,20 @@ const log = childLogger({ module: "jobhunt:brief-persist" });
 /**
  * Store which row the founder will read as "1", "2", "3" in each section.
  *
- * THE STRETCH SECTION CONTINUES DO TODAY'S NUMBERING rather than restarting,
- * because `/draft` addresses both: a row flagged only on the years bar needs an
- * application, not a question, so it carries `/draft` like a do-today row does.
- * `renderMarketBlocks` prints those rows from the same offset, so the printed
- * number and the pinned rank agree by construction rather than by two functions
- * happening to compute the same thing.
+ * THE STRETCH AND STANDING SECTIONS CONTINUE DO TODAY'S NUMBERING rather than
+ * restarting, because `/draft` addresses all three: a row flagged only on the
+ * years bar needs an application, not a question, and a row that aged out of
+ * the fresh window but was re-confirmed live needs the identical thing — so
+ * both carry `/draft` like a do-today row does. `renderMarketBlocks` prints
+ * those rows from the same offset, so the printed number and the pinned rank
+ * agree by construction rather than by two functions happening to compute the
+ * same thing.
  *
  * Failure is tolerated but reported — see the module header.
  */
 export interface BriefRankEntry {
   readonly id: string;
-  readonly section: "do_today" | "stretch" | "ask";
+  readonly section: "do_today" | "stretch" | "ask" | "standing";
   readonly rank: number;
 }
 
@@ -51,28 +53,45 @@ export interface BriefRankEntry {
  * `/draft` — or `mac-client/sync.py`, which reads this very column — could
  * reach.
  *
- * Stretch continues from the FULL do-today length, not the displayed one.
- * Numbering it from `DO_TODAY_CAP + 1` would hand two different rows the same
- * number, and `ja_brief_rank_uniq` would reject the second write — losing the
- * row silently, which is the failure direction this codebase keeps paying for.
+ * Stretch and standing both continue from the FULL do-today length (standing
+ * from do-today's length PLUS stretch's), not the displayed one. Numbering
+ * either from a CAPPED offset would hand two different rows the same number,
+ * and `ja_brief_rank_uniq` would reject the second write — losing the row
+ * silently, which is the failure direction this codebase keeps paying for.
+ *
+ * `standingRows` is a separate array, not a slice of `rows` — see brief-select.ts's
+ * module comment on why standing membership is a separate query rather than a
+ * predicate over `rows`.
  *
  * Pure and exported so the property can be asserted without a database.
  */
-export function briefRankEntries(rows: readonly BriefRow[]): BriefRankEntry[] {
+export function briefRankEntries(
+  rows: readonly BriefRow[],
+  standingRows: readonly BriefRow[] = [],
+): BriefRankEntry[] {
   const doToday = orderDoToday(rows);
+  const stretch = orderStretch(rows);
   return [
     ...doToday.map((r, i) => ({ id: r.id, section: "do_today" as const, rank: i + 1 })),
-    ...orderStretch(rows).map((r, i) => ({
+    ...stretch.map((r, i) => ({
       id: r.id,
       section: "stretch" as const,
       rank: doToday.length + i + 1,
     })),
     ...orderAskable(rows).map((r, i) => ({ id: r.id, section: "ask" as const, rank: i + 1 })),
+    ...orderStanding(standingRows).map((r, i) => ({
+      id: r.id,
+      section: "standing" as const,
+      rank: doToday.length + stretch.length + i + 1,
+    })),
   ];
 }
 
-export async function persistBriefRanks(rows: readonly BriefRow[]): Promise<void> {
-  const entries = briefRankEntries(rows);
+export async function persistBriefRanks(
+  rows: readonly BriefRow[],
+  standingRows: readonly BriefRow[] = [],
+): Promise<void> {
+  const entries = briefRankEntries(rows, standingRows);
   try {
     await recordBriefRanks(entries);
   } catch (err) {

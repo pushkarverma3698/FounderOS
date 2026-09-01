@@ -75,7 +75,7 @@ def test_the_queue_only_asks_for_unhandled_actionable_rows():
     # a question, not a submission; a handled row must not come back.
     assert "applied_at IS NULL" in sync.QUEUE_SQL
     assert "skipped_at IS NULL" in sync.QUEUE_SQL
-    assert "'do_today','stretch'" in sync.QUEUE_SQL
+    assert "'do_today','stretch','standing'" in sync.QUEUE_SQL
     assert "'ask'" not in sync.QUEUE_SQL
 
 
