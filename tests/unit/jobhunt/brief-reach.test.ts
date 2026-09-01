@@ -168,4 +168,47 @@ describe("briefRankEntries — what gets pinned", () => {
     const ids = briefRankEntries(rows).map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
+
+  describe("standing — the aged-out-but-reconfirmed-live pool", () => {
+    it("numbers standing from do-today's length PLUS stretch's, not do-today's alone", () => {
+      // The bug a partial fix would ship: numbering standing from
+      // `doToday.length + 1` would collide with stretch's own ranks the
+      // moment both sections were non-empty on the same day.
+      const rows = [
+        ...Array.from({ length: 4 }, (_, i) => passRow(`p${i + 1}`)),
+        ...Array.from({ length: 2 }, (_, i) => stretchRow(`s${i + 1}`)),
+      ];
+      const standingRows = Array.from({ length: 3 }, (_, i) => passRow(`st${i + 1}`));
+      const standing = briefRankEntries(rows, standingRows).filter((e) => e.section === "standing");
+
+      expect(standing.map((e) => e.rank)).toEqual([7, 8, 9]);
+    });
+
+    it("standing rows are addressable even when do-today and stretch are both empty", () => {
+      const standingRows = Array.from({ length: 2 }, (_, i) => passRow(`st${i + 1}`));
+      const entries = briefRankEntries([], standingRows);
+      expect(entries.map((e) => ({ section: e.section, rank: e.rank }))).toEqual([
+        { section: "standing", rank: 1 },
+        { section: "standing", rank: 2 },
+      ]);
+    });
+
+    it("defaults to no standing rows when the caller omits the second argument", () => {
+      // buildDailyBrief always passes it, but every call site that predates
+      // this feature must keep compiling and keep behaving identically.
+      const rows = Array.from({ length: 3 }, (_, i) => passRow(`p${i + 1}`));
+      expect(briefRankEntries(rows).some((e) => e.section === "standing")).toBe(false);
+    });
+
+    it("never issues the same rank twice within the standing section", () => {
+      const rows = Array.from({ length: 20 }, (_, i) => passRow(`p${i + 1}`, i % 2 === 0 ? "NL" : "IN"));
+      const standingRows = Array.from({ length: 15 }, (_, i) =>
+        passRow(`st${i + 1}`, i % 2 === 0 ? "NL" : "IN"),
+      );
+      const ranks = briefRankEntries(rows, standingRows)
+        .filter((e) => e.section === "standing")
+        .map((e) => e.rank);
+      expect(new Set(ranks).size).toBe(ranks.length);
+    });
+  });
 });

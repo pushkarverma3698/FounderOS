@@ -105,6 +105,7 @@ const MARKET_NOTE: Record<Market, string> = {
 export const PER_MARKET_DO_TODAY = 3;
 export const PER_MARKET_ASK = 2;
 export const PER_MARKET_STRETCH = 2;
+export const PER_MARKET_STANDING = 3;
 
 /**
  * Take up to `perMarket` from each market in order, then spill the remainder.
