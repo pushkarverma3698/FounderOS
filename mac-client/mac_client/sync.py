@@ -38,7 +38,7 @@ FROM (
   SELECT id, company, title, track, url, brief_rank, brief_section, tailored_cv_s3_key, cover_letter_s3_key
   FROM agents.job_applications
   WHERE tenant_id = 'turicks'
-    AND brief_section IN ('do_today','stretch')
+    AND brief_section IN ('do_today','stretch','standing')
     AND applied_at IS NULL
     AND skipped_at IS NULL
     AND url IS NOT NULL

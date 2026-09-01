@@ -29,8 +29,16 @@ const DEFAULT_TENANT = "turicks";
  * action is a question, not a submission — putting them in the apply queue
  * would hand the founder a pre-filled form for a role whose blocking doubt
  * nobody has answered yet.
+ *
+ * `standing` (added 2026-09-01) IS present: those rows cleared the identical
+ * bar `do_today` did — pass, re-confirmed live — and are older than the fresh
+ * window for no reason that bears on whether to apply. Leaving it out here
+ * would repeat the exact reach bug this section's own module comment warns
+ * against: a second, SQL-side notion of "actionable" that silently disagrees
+ * with brief-select.ts the moment a new section is added to one and not the
+ * other. `mac-client/mac_client/sync.py`'s QUEUE_SQL reads this same list.
  */
-export const APPLYABLE_SECTIONS = ["do_today", "stretch"] as const;
+export const APPLYABLE_SECTIONS = ["do_today", "stretch", "standing"] as const;
 
 /** How many screened rows the Log tab carries. Enough to audit, bounded so the write stays one call. */
 export const LOG_TAB_ROWS = 500;

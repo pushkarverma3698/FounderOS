@@ -75,6 +75,9 @@ export function renderNextActions(
   askable: readonly BriefRow[],
   /** The UNCAPPED do-today count — the offset `briefRankEntries` pinned against. */
   doTodayTotal: number,
+  standing: readonly BriefRow[] = [],
+  /** The UNCAPPED stretch count — standing continues from do-today + stretch. */
+  stretchTotal = stretch.length,
 ): string {
   const lines = [
     ...doToday.map((r, i) => `${cmd(`/draft ${i + 1}`)} — apply to ${esc(r.company)}`),
@@ -83,6 +86,12 @@ export function renderNextActions(
     ...stretch.map(
       (r, i) =>
         `${cmd(`/draft ${doTodayTotal + i + 1}`)} — apply to ${esc(r.company)} (a stretch on years)`,
+    ),
+    // Continues from do-today + stretch for the same reason: one `/draft`
+    // numbering across every section it resolves against.
+    ...standing.map(
+      (r, i) =>
+        `${cmd(`/draft ${doTodayTotal + stretchTotal + i + 1}`)} — apply to ${esc(r.company)} (older, re-confirmed open)`,
     ),
     ...askable.map((r, i) => `${cmd(`/ask ${i + 1}`)} — draft the question for ${esc(r.company)}`),
   ];

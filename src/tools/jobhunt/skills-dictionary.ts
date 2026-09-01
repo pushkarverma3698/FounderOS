@@ -30,6 +30,35 @@ export type SkillCategory =
   | "ai"
   | "practice";
 
+/**
+ * How much a matched term counts toward ranking, by category.
+ *
+ * Measured, 2026-09-01: on raw matched-count, "Schuberg Philis — Windows DevOps
+ * Engineer" (4/7: Azure, CI/CD, Linux, Mentoring) outranked "Flow Traders — AI
+ * Engineer" (10/18: LangGraph, RAG, LLM, Prompt Engineering, AI Agents, Docker,
+ * AWS, Azure, CI/CD, Observability) on fit score, because every matched term
+ * counted the same regardless of whether it named a technology or described a
+ * process every posting mentions. "Mentoring" and "Observability" are real
+ * skills but they do not distinguish one candidate from another the way a named
+ * language, framework or AI technology does — nearly every engineering posting
+ * asks for some version of them.
+ *
+ * `practice` is downweighted for that reason; every other category counts at
+ * full value. This is not "AI outranks backend" — a track's own CV is compared
+ * against that track's own postings, so an AI posting only wins against a
+ * backend one when it names more of what the CV actually states. The fix is
+ * category-neutral: it lowers the weight of generic process vocabulary
+ * wherever it appears, in every track.
+ */
+export const SKILL_CATEGORY_WEIGHT: Readonly<Record<SkillCategory, number>> = {
+  language: 1,
+  framework: 1,
+  infra: 1,
+  data: 1,
+  ai: 1,
+  practice: 0.35,
+};
+
 export interface SkillTerm {
   /** Canonical display form — what the founder reads in the gap report. */
   readonly term: string;

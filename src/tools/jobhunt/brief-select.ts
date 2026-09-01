@@ -17,6 +17,15 @@
  * exactly one `brief_section` in the table, so a row qualifying for two would
  * have one of its ranks overwritten and lose a command it was printed with.
  * DO TODAY takes passes; STRETCH and ASK split the flags between them.
+ *
+ * STANDING is disjoint by a DIFFERENT construction: it is not a predicate over
+ * `rows` at all, because `rows` only ever holds the fresh (< 24h) population —
+ * `listActionableApplications` (job-queries.ts) never fetches anything older.
+ * Standing rows come from `listStandingApplications`, a SEPARATE query for the
+ * aged-out-but-reconfirmed-live population, so the two sets cannot overlap:
+ * one query's WHERE clause is the freshness window, the other's is its literal
+ * negation. `orderStanding` below takes that already-selected array directly —
+ * there is no membership predicate to write, because the query already is one.
  */
 
 import { blockingGates } from "./gates.js";
@@ -24,6 +33,7 @@ import {
   allocateByMarket,
   PER_MARKET_ASK,
   PER_MARKET_DO_TODAY,
+  PER_MARKET_STANDING,
   PER_MARKET_STRETCH,
 } from "./brief-sections.js";
 import type { BriefRow } from "./brief-row.js";
@@ -58,6 +68,16 @@ export const ASK_CAP = 4;
  * whatever it cannot show is stated as a number rather than dropped.
  */
 export const STRETCH_CAP = 4;
+
+/**
+ * The standing section's cap, matched to DO_TODAY_CAP.
+ *
+ * These rows cleared the identical bar DO TODAY did — pass, re-confirmed
+ * live — and exist to fix the exact reach gap measured 2026-09-01: 63 of 64
+ * qualified Netherlands rows sat outside the 24h window, invisible to every
+ * command. They deserve the same display budget as the section they mirror.
+ */
+export const STANDING_CAP = 6;
 
 /** The gate name the stretch band is defined against. Matched on name, never on prose. */
 const EXPERIENCE_GATE = "Experience";
@@ -146,6 +166,15 @@ export function orderAskable(rows: readonly BriefRow[]): BriefRow[] {
   return allocateByMarket(rows.filter(isAskableRow), PER_MARKET_ASK, Number.MAX_SAFE_INTEGER);
 }
 
+/**
+ * `standingRows` arrives pre-selected by `listStandingApplications` — no
+ * predicate to apply here, only the market allocation every other section
+ * gets, so `/draft` numbering and market grouping stay uniform across sections.
+ */
+export function orderStanding(standingRows: readonly BriefRow[]): BriefRow[] {
+  return allocateByMarket(standingRows, PER_MARKET_STANDING, Number.MAX_SAFE_INTEGER);
+}
+
 export function selectDoToday(rows: readonly BriefRow[]): BriefRow[] {
   return orderDoToday(rows).slice(0, DO_TODAY_CAP);
 }
@@ -156,4 +185,8 @@ export function selectStretch(rows: readonly BriefRow[]): BriefRow[] {
 
 export function selectAskable(rows: readonly BriefRow[]): BriefRow[] {
   return orderAskable(rows).slice(0, ASK_CAP);
+}
+
+export function selectStanding(standingRows: readonly BriefRow[]): BriefRow[] {
+  return orderStanding(standingRows).slice(0, STANDING_CAP);
 }

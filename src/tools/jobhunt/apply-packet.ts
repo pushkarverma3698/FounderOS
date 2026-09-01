@@ -60,9 +60,10 @@ export const MIN_DESCRIPTION_CHARS = 50;
  * The sections `/draft` and `tailor_cv` both address, in the words the brief
  * prints them in. They share ONE continuous numbering, pinned by
  * `persistBriefRanks` at render time, because a row flagged only on the years
- * bar needs an APPLICATION, not a question.
+ * bar needs an APPLICATION, not a question — and a standing row (aged out of
+ * the fresh window but re-confirmed live) needs the identical thing.
  */
-export const DRAFT_SECTIONS: readonly BriefSection[] = ["do_today", "stretch"];
+export const DRAFT_SECTIONS: readonly BriefSection[] = ["do_today", "stretch", "standing"];
 
 export interface ApplicationPacket {
   readonly row: JobApplication;
