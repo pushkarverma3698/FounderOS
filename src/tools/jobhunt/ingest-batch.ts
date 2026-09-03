@@ -71,8 +71,15 @@ export async function screenBatch(
         description: posting.description,
         ...(posting.url ? { url: posting.url } : {}),
         ...(posting.postedAt ? { postedAt: posting.postedAt } : {}),
+        // WHERE THE JOB IS, carried from the fetch. This is the value that used
+        // to be dropped here: the feed knew the country, the screener then
+        // re-guessed it from the ad's prose, and "hybrid" in an Indian posting
+        // became a claim about a Dutch office.
         ...(posting.country ? { country: posting.country } : {}),
         ...(posting.location ? { location: posting.location } : {}),
+        // The posting's OWN provenance, not this module's. An Indeed row screened
+        // through here must not be recorded as an ATS row: liveness verification
+        // reads that field to decide which check to run.
         source: posting.source ?? INGEST_SOURCE,
         ...(posting.externalId ? { externalId: posting.externalId } : {}),
         ...(profile ? { profile } : {}),

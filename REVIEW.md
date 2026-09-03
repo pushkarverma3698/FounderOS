@@ -277,3 +277,165 @@ Per the handoff's own constraint ("report findings before making changes if the
 change would alter behavior for Pushkar's existing live profile") and CLAUDE.md
 § Ask-Never-Assume, these are reported, not guessed at.
 
+---
+
+# 8. Remediation — 2026-09-04 (Claude, after founder confirmation)
+
+The founder supplied the two blocking facts and directed the branch be made
+production-ready:
+
+> **"she's on zoekjaar, dob is 07 april 2001."**
+> **"do all things what all is required yourself what is right and make this branch prod-ready."**
+
+## 8.1 Zoekjaar changes the screening basis, not just a config value
+
+The orientation year gives **free access to the Dutch labour market**: no
+recognised sponsor, no work permit, no IND salary criterion, for the duration of
+the permit. The branch encoded the opposite — `permitBases: ["hsm",
+"partner-permit"]`, which ran the IND recognised-sponsor register against every
+Dutch employer and would have rejected the large majority of a market she can
+lawfully work in today. The `partner-permit` basis, which the branch's only
+end-to-end test relied on to produce a `pass`, is a permit she has never held.
+
+`zoekjaar` is now a first-class `PermitBasis` with its own gate profile
+(`permit-routes.ts`): `sponsorRequired: false`, `salaryFloorApplies: false`,
+`dutchLanguageApplies: true`. It sits in `NL_BASES` and is deliberately **absent
+from `UNCLEAR_BASES`** — it is now the most permissive Dutch basis in the set, so
+letting it carry a posting whose location nobody established would put a Bogotá
+role back into APPLY TODAY, the 2026-08-01 defect wearing a new permit.
+
+`hsm` stays as her second basis rather than being replaced. The orientation year
+is time-boxed and non-renewable, so a role reachable only on `zoekjaar` ends when
+the permit does; screening under both means the route label tells the founder
+which one carried it.
+
+**Conservatism stated, not hidden:** the IND publishes a *reduced* HSM salary
+criterion for orientation-year switchers. This codebase has no verified figure
+for it, so the `hsm` basis uses the standard under-30 number from `criteria.ts`.
+That is the strict direction and it costs nothing in reach — `bestOutcome` takes
+the `zoekjaar` verdict for anything the stricter basis flags — but the `hsm`
+signal is pessimistic until someone verifies the reduced figure on ind.nl.
+
+## 8.2 Two more dead fields, found while wiring the confirmed facts
+
+- **`profile.dob` had zero readers.** `criterionOn` defaulted to `FOUNDER_DOB`,
+  so the wife would have been screened against Pushkar's age band. Threaded
+  through `screenSalaryFacts(facts, { route, dob: profile.dob })`. Her confirmed
+  DOB (2001-04-07) puts her under-30 until 2031-04-07.
+- **`visaRequiresSponsor` deleted.** Whether the sponsor register applies is a
+  property of the BASIS, not of the candidate; the field was never read and §2 #7
+  claimed it was the guard.
+
+## 8.3 Fixes applied
+
+| # | Finding | Fix |
+|---|---------|-----|
+| A2/A5 | Wrong permit basis, placeholder DOB | `zoekjaar` basis added; wife profile set to `["zoekjaar","hsm"]`, dob 2001-04-07; dob threaded into the pay gate |
+| A1 | Sweeps never ran a second profile | `runFreeSweep` polls the 1,297 boards **once** and loops `listProfiles()`; `runPooledIngest` takes a profile and derives its tracks + billed pools from it; `screenBatch` carries the profile at all 5 call sites; per-profile heartbeats so a busy lane cannot suppress a quiet one's ping |
+| A3 | `/draft N` could open the wrong person's row | `resolveBriefRow` scoped to a profile; every gateway command takes a selector |
+| A6 | Mixed queues on `/jobs`, `/csv`, the Sheet | `profileCondition` defaults to `DEFAULT_PROFILE_ID`; new `jobhunt-profile-arg.ts` adds `/jobs wife`, `/csv wife`, `/draft wife 3`, `/applied wife 2`. An unrecognised word is **refused**, never silently defaulted |
+| A7 | mac-client had no profile awareness | `apply-profile.json` gains `profile_id`; `QUEUE_SQL` scoped to it, with a strict `[a-z0-9-]` allowlist because `run_remote` shells out to `psql -c` |
+| A8 | `if (profileId)` fail-open | Replaced with `profileCondition(scope)`, defaulting to the default **profile**; `ALL_PROFILES` is an explicit opt-out |
+| A9 | `as any`, `profile_id!`, unparsed Zod | Root-caused: `HarvestableSighting.country` was a stale closed union. Widened it and removed the cast. `profile_id` is now `NOT NULL`, so the `!` assertions are gone. `registerProfile` **parses** against the schema and rejects a `trackPriority` naming an undefined track |
+| A10 | Tech-locked callers | `gaps.ts`, `brief-trends.ts`, `ats-mappers.ts`, `free-ingest.ts` all take a profile; `scan_cv_gaps` exposes a `profile` argument |
+| A11 | `profile.id === "pushkar-nl-tech"` branch | Removed; the note is built from `profile.candidateName` and `trackPriority` |
+| A12 | Deleted incident comments | Restored in `screen.ts`, `ingest-batch.ts`, `free-ingest.ts`, `job-queries.ts`, `brief-cv.ts`, `permit-routes.ts`; the unrelated `schema.ts` indentation churn reverted |
+| A14 | Nullable `profile_id` | Migration backfills then `SET NOT NULL` — a NULL does not conflict in a unique index, so the dedupe gate would silently have become a no-op |
+
+**Not fixed, because it cannot be:** A4. The wife's CV files do not exist. Every
+path in `wife-nl-finance.ts` and `apply-profile-wife.example.json` points at a
+file that is not on disk. `readFullCvText` fails loudly rather than substituting
+Pushkar's CV, so the failure direction is correct — but until those files exist
+her rows will rank with 0 overlap and `/draft wife N` will refuse.
+
+## 8.4 New tests (24), each locking a defect this review found
+
+- `tests/unit/jobhunt/multi-profile-isolation.test.ts` (11) — zoekjaar gates,
+  basis selection per profile, `UNCLEAR_BASES` exclusion, unknown-basis
+  degradation to the strictest gates, dob-driven age bands, registry validation.
+- `tests/unit/jobhunt/sweep-multi-profile.test.ts` (6) — the boards are polled
+  **once**, every registered profile is screened from that one poll, each gets
+  its own ranking, one profile's failure does not stop the others.
+- `tests/unit/jobhunt/profile-arg.test.ts` (7) — selector aliases, reserved
+  keywords, and that a typo is refused rather than silently defaulted.
+- `mac-client/tests/test_sync.py` (+2) — the queue is scoped to one profile, and
+  a `profile_id` that is not an id is refused rather than escaped.
+
+## 8.5 Verification
+
+`pnpm gate`, run fresh after the last edit — **exit 0**:
+
+```
+$ pnpm lint && pnpm build:all && pnpm verify:runtime-assets && pnpm verify:wiring && pnpm verify:arch && pnpm test
+$ tsc --noEmit && tsc -p tsconfig.test.json
+$ tsc -p tsconfig.json
+✓ IND recognised-sponsor register: 12,858 entries
+✓ Free ATS board registry: 1297 boards
+✅ Wiring check passed — registry is fully wired (14 warning(s)).
+✓ gateway-imports: 0 (= baseline)
+✓ kernel-purity: 0 (= baseline)
+✓ fail-open-catch: 11 (= baseline)
+✓ loc-budget: 6 (= baseline)
+✓ regex-routing: 0 (= baseline)
+✓ orphan-subsystem: 0 (= baseline)
+Architecture gates green.
+ Test Files  333 passed (333)
+      Tests  3641 passed (3641)
+GATE_EXIT=0
+```
+
+`mac-client`: 67 passed (`pytest tests/test_sync.py test_profile.py test_ledger.py
+test_notify.py test_adapters.py`). The three `test_apply_*.py` modules were not
+run — they import `playwright`, which is not installed in this environment. That
+is a pre-existing condition of the sandbox, not a result of this change, and none
+of those modules were touched.
+
+**The LOC ratchet was the only gate that caught a real regression in this work.**
+Threading the profile pushed `free-ingest.ts` to 433 and `ingest.ts` to 431
+against a budget of 400. Extracted `free-ingest-filters.ts`, `ingest-pools.ts`
+and `jobhunt-profile-arg.ts` rather than raising the baseline.
+
+**Not verified against production.** Nothing here has run against the live
+database or a real board sweep. Migration `0036` has not been applied anywhere.
+The claims above are about the offline gate only — see §8.7.
+
+**Cost note.** The free lane is unchanged in cost: one board poll, and screening
+is pure code. The metered lane now fans out per profile, but `poolsForProfile`
+restricts a Netherlands-only candidate to the NL pool, so her sweep is 3 queries
+(3 finance tracks × 1 pool) against Pushkar's 8. The binding ceiling is still
+`spend-gate.ts`, in dollars, before the first actor call.
+
+
+## 8.6 Still blocking a real application for her
+
+These are not code defects. They are facts and files only the founder can supply,
+and until they exist the pipeline will screen and rank her roles correctly and
+then refuse at the last step — loudly, which is the right direction, but refuse.
+
+1. **Her CV files.** `mac-client/cv/` holds only Pushkar's five PDFs.
+   `cv-wife-base.md`, `cv-wife-financial-analyst.md`, `cv-wife-accountant.md`,
+   `cv-wife-auditor.md` (and the `.pdf` variants named in
+   `apply-profile-wife.example.json`) do not exist. `readFullCvText` fails loudly
+   rather than falling back to his CV — so her rows will rank at 0 overlap and
+   `/draft wife N` will refuse rather than tailor the wrong person's resume.
+2. **Her legal name and contact details.** `candidateName: "Wife"` reaches the
+   agent prompt and the application packet; the example JSON carries
+   `wife@example.com` and `+31 6 0000 0000`.
+3. **The reduced HSM criterion for orientation-year switchers** is not in
+   `criteria.ts`. The `hsm` basis uses the standard under-30 figure. That is the
+   strict direction and costs nothing in reach — `bestOutcome` takes the
+   `zoekjaar` verdict for anything the stricter basis flags — but the `hsm`
+   signal is pessimistic until the reduced figure is verified on ind.nl and added
+   as a new dated row (never by editing the existing one).
+
+## 8.7 What is NOT verified
+
+Rule #24 applies. Everything in §8.5 is the offline gate. Specifically **not**
+established by this session:
+
+- Migration `0036` has not been applied to any database, dev or prod.
+- No real board sweep has run for `wife-nl-finance`; the multi-profile fan-out is
+  proven by `sweep-multi-profile.test.ts` against mocks, not by a live sweep.
+- No row with `profile_id = 'wife-nl-finance'` exists anywhere.
+- The mac-client's scoped `QUEUE_SQL` has not been run against the live VPS.
+- `scripts/jobhunt-rescreen-profile.ts` has not been run against the 12k pool.

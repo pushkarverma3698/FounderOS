@@ -14,9 +14,12 @@ reported zero jobs forever, and the error was swallowed.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from .profile import DEFAULT_PROFILE_ID
 
 SSH_HOST = "founderos-vps"
 PSQL = "sudo -n docker exec founderos-postgres psql -U founderos -d founderos -t -A -c"
@@ -32,12 +35,18 @@ SSH_TIMEOUT_S = 60
 #: in the queue"; `brief_section` is written by brief-select.ts and is the only
 #: place that decides which rows are actionable — re-deciding it here would
 #: create a second answer that drifts from the Sheet's.
-QUEUE_SQL = """
+#: SCOPED TO ONE CANDIDATE. Both profiles number their brief from 1 and both
+#: write `do_today` rows, so without the profile_id predicate this client pulls
+#: two people's queues into one list and uploads whichever resume its own
+#: profile maps the track to — a finance role applied to with a backend CV. The
+#: id comes from apply-profile.json, never from a default baked in here.
+QUEUE_SQL_TEMPLATE = """
 SELECT coalesce(json_agg(row_to_json(q) ORDER BY q.brief_rank), '[]'::json)
 FROM (
   SELECT id, company, title, track, url, brief_rank, brief_section, tailored_cv_s3_key, cover_letter_s3_key
   FROM agents.job_applications
   WHERE tenant_id = 'turicks'
+    AND profile_id = '{profile_id}'
     AND brief_section IN ('do_today','stretch')
     AND applied_at IS NULL
     AND skipped_at IS NULL
@@ -45,6 +54,21 @@ FROM (
   ORDER BY brief_rank
 ) q
 """
+
+
+def _queue_sql(profile_id: str) -> str:
+    """Interpolated, not parameterised, because run_remote shells out to psql -c.
+
+    The id is therefore validated against a strict allowlist first: anything but
+    lowercase letters, digits and dashes is refused outright rather than escaped,
+    so a hand-edited apply-profile.json can never reach psql as SQL.
+    """
+    if not re.fullmatch(r"[a-z0-9-]{1,64}", profile_id or ""):
+        raise SyncError(
+            f"profile_id {profile_id!r} is not a valid JobSearchProfile id "
+            "(lowercase letters, digits and dashes only). Fix apply-profile.json."
+        )
+    return QUEUE_SQL_TEMPLATE.format(profile_id=profile_id)
 
 
 class SyncError(RuntimeError):
@@ -159,9 +183,14 @@ def sync_profile(path: Path | None = None) -> bool:
     return True
 
 
-def fetch_queue() -> list[QueueJob]:
-    """The ranked queue, best first."""
-    payload = run_remote(QUEUE_SQL)
+def fetch_queue(profile_id: str = DEFAULT_PROFILE_ID) -> list[QueueJob]:
+    """The ranked queue for ONE candidate, best first.
+
+    The id is passed IN rather than read from the profile here: this module must
+    stay usable without a filled-in apply-profile.json, and the caller (wake.py)
+    already loads the profile for the form fields anyway.
+    """
+    payload = run_remote(_queue_sql(profile_id))
     if not payload:
         raise SyncError("the queue query returned nothing at all — that is a failure, not an empty queue")
     try:
@@ -255,6 +284,9 @@ def push_outcomes(applied_ids: list[str], skipped_ids: list[str]) -> int:
     """
     statements = []
     if applied_ids:
+        # Ids are UUIDs the queue query itself returned, and `_uuid` refuses
+        # anything that is not one — so a row belonging to the other profile
+        # cannot be reached here without first having been fetched.
         ids = ",".join(f"'{_uuid(i)}'" for i in applied_ids)
         statements.append(
             "UPDATE agents.job_applications SET applied_at = now(), stage = 'applied', "

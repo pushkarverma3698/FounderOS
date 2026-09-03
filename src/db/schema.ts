@@ -961,7 +961,15 @@ export const jobApplications = agentsSchema.table(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenant_id: text("tenant_id").notNull(),
-    profile_id: text("profile_id").default("pushkar-nl-tech"),
+    /**
+     * WHICH CANDIDATE this row was screened for.
+     *
+     * NOT NULL with a default, and both halves matter. A NULL does not conflict
+     * in a unique index, so a nullable profile_id would silently disable
+     * `ja_dedupe_uniq` — the one gate that makes double-applying structurally
+     * impossible — for any row that failed to set it.
+     */
+    profile_id: text("profile_id").notNull().default("pushkar-nl-tech"),
 
     /** Normalised `company::role` — the identity that prevents double-applying. */
     dedupe_key: text("dedupe_key").notNull(),
@@ -1516,8 +1524,8 @@ export const EVOLUTION_LOOPS = ["audit", "acting"] as const;
 export type EvolutionLoop = (typeof EVOLUTION_LOOPS)[number];
 
 export const evolutionRuns = agentsSchema.table("evolution_runs", {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenant_id: text("tenant_id").notNull(),
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenant_id: text("tenant_id").notNull(),
 
   started_at: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   /** Null until the run completes (or fails) — see persist-findings.ts. */

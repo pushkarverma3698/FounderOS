@@ -192,7 +192,11 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
     };
   }
 
-  // WHERE THE JOB IS, AS A FETCHED FACT.
+  // WHERE THE JOB IS, AS A FETCHED FACT. The caller's explicit country wins (the
+  // Indeed sweep knows whether it queried NL or IN); otherwise it is read off the
+  // feed's own location string. Only when neither exists does anything downstream
+  // fall back to the ad's wording — which is what used to file Indian roles as
+  // Dutch ones on the strength of the word "hybrid".
   const country = input.country ?? countryFromLocation(input.location ?? "", profile);
   const facts = extractPostingFacts(description, country);
 
@@ -206,8 +210,15 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   const match = matchSponsor(company, register.index);
   const language = screenLanguage(description);
 
+  // Screen under every basis that could lawfully carry this posting; the best
+  // outcome wins. A role rejected on one basis and reachable on another is a real
+  // opportunity, and the single-basis design discarded it without a trace.
+  // Level and body-completeness do not vary by permit basis, so they are built
+  // once and shared across the routes rather than recomputed per route.
   const experience = experienceGate(description, title, profile);
   const posting = postingGate(description);
+  // Where the job sits is a fact about the posting, not about any one basis, so
+  // it is reported once for all of them — see locationGate in screen-gates.ts.
   const location = locationGate(country, facts.route);
 
   // The IND recognised-sponsor register is Dutch-immigration-specific. A basis
@@ -221,12 +232,17 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
 
   const outcomes = routesToScreen(facts.route, profile).map((route) => {
     const gProfile = gateProfile(route);
+    // Each market is judged by its own numbers. A rupee figure against a euro
+    // reference is not approximately right, it is a different currency — so the
+    // pay gate is SELECTED by the basis rather than parameterised by it.
     const pay: Gate =
       gProfile.payReference === "inr"
         ? { gate: "Pay", ...screenIndianPay(facts.pay, (profile.minInrLpaFloor ?? 15) * 100_000) }
         : {
             gate: gProfile.salaryFloorApplies ? "Salary" : "Rate",
-            ...screenSalaryFacts(facts.salary, { route }),
+            // The CANDIDATE's date of birth, not the founder's — the IND floor
+            // steps up 36% at thirty and the band is a fact about the person.
+            ...screenSalaryFacts(facts.salary, { route, dob: profile.dob }),
           };
     const runSponsorGate = gProfile.sponsorRequired && targetsNetherlands;
     const gates: Gate[] = [
@@ -234,6 +250,9 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
       ...(location ? [location] : []),
       runSponsorGate ? sponsorGate(match, stale) : basisGate(gProfile),
       pay,
+      // Omitted entirely where it cannot apply. "✅ No Dutch-language requirement
+      // mentioned" on a Bangalore posting is a cleared check about a language
+      // nobody asked for — noise wearing the costume of information.
       ...(gProfile.dutchLanguageApplies ? [{ gate: "Language", ...language }] : []),
       experience,
     ];
@@ -242,6 +261,9 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
 
   const chosen = bestOutcome(outcomes);
 
+  // Derived here rather than taken from the caller, for the same reason the
+  // gates are: `screen_job` and `ingest_jobs` must classify identically, and a
+  // caller-supplied track would drift silently between the two paths.
   const track = classifyTrack(title, profile) ?? UNCLASSIFIED_TRACK;
 
   try {

@@ -3,7 +3,23 @@
  * ==================================================================
  * Target market: Netherlands
  * Profession: Finance / Accounting / Financial Analysis
- * Visa status: Job search visa (Orientation Year / Zoekjaar), switching to HSM sponsorship
+ *
+ * PERMIT — confirmed by the founder, 2026-09-04: "she's on zoekjaar".
+ *
+ * The orientation year gives free access to the Dutch labour market: no
+ * recognised sponsor, no work permit, no IND salary criterion. That is why
+ * `zoekjaar` leads `permitBases` — it is what makes a role reachable TODAY, and
+ * screening her under `hsm` alone (as this file did until 2026-09-04) applied the
+ * recognised-sponsor register to every Dutch employer and rejected most of a
+ * market she can lawfully work in.
+ *
+ * `hsm` stays second because the orientation year is time-boxed and
+ * non-renewable. Screening under both means the verdict says which basis carried
+ * the role, so a job that ends with the permit is visibly different from one an
+ * employer could sponsor afterwards.
+ *
+ * NOT CONFIRMED, and therefore not asserted anywhere: she has never held a
+ * partner permit, so that basis is deliberately absent.
  */
 
 import type { JobSearchProfile } from "../profile-config.js";
@@ -11,17 +27,25 @@ import type { JobSearchProfile } from "../profile-config.js";
 export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
   id: "wife-nl-finance",
   tenantId: "turicks",
+  // PLACEHOLDER — the founder has not supplied her legal name. It reaches the
+  // agent prompt and the application packet, so it must be replaced before any
+  // application is sent. See docs/sessions/2026-09-04-multi-profile-jobhunt.md.
   candidateName: "Wife",
-  dob: new Date("1998-01-01T00:00:00Z"),
-  
+  // Confirmed by the founder, 2026-09-04: 7 April 2001. This selects the IND age
+  // band in criteria.ts (under-30 until 2031-04-07), which is a legal threshold —
+  // it was a 1998-01-01 placeholder until today.
+  dob: new Date("2001-04-07T00:00:00Z"),
+
   experienceYears: 2.0,
   maxYearsDemanded: 4,
   maxYearsStretch: 5,
 
-  visaRequiresSponsor: true, // HSM sponsorship required for work permit transition
-  permitBases: ["hsm", "partner-permit"],
-  
-  under30MonthlyEurFloor: 4357, // IND 2026 under-30 HSM threshold
+  permitBases: ["zoekjaar", "hsm"],
+
+  // Display copies of the criteria.ts figures, for prompt text only. The binding
+  // floor is looked up by date and dob in criteria.ts, and it does not apply at
+  // all while she is on the zoekjaar basis.
+  under30MonthlyEurFloor: 4357,
   over30MonthlyEurFloor: 5942,
 
   targetCountries: [

@@ -73,10 +73,13 @@ def test_rows_parse_in_rank_order_with_their_fields(monkeypatch):
 def test_the_queue_only_asks_for_unhandled_actionable_rows():
     # Both halves matter: `ask` rows have an unresolved gate and their action is
     # a question, not a submission; a handled row must not come back.
-    assert "applied_at IS NULL" in sync.QUEUE_SQL
-    assert "skipped_at IS NULL" in sync.QUEUE_SQL
-    assert "'do_today','stretch'" in sync.QUEUE_SQL
-    assert "'ask'" not in sync.QUEUE_SQL
+    assert "applied_at IS NULL" in sync.QUEUE_SQL_TEMPLATE
+    assert "skipped_at IS NULL" in sync.QUEUE_SQL_TEMPLATE
+    assert "'do_today','stretch'" in sync.QUEUE_SQL_TEMPLATE
+    assert "'ask'" not in sync.QUEUE_SQL_TEMPLATE
+    # And it is scoped to ONE candidate: without this the client pulls both
+    # profiles' rows and uploads its own resume to whichever it reaches.
+    assert "profile_id = " in sync.QUEUE_SQL_TEMPLATE
 
 
 def test_push_is_idempotent_by_is_null_guard(monkeypatch):
@@ -281,3 +284,24 @@ def test_from_row_maps_the_cover_letter_key():
            "cover_letter_s3_key": "ready-applications/x/cover_letter.txt"}
     job = QueueJob.from_row(row)
     assert job.cover_letter_s3_key == "ready-applications/x/cover_letter.txt"
+
+
+def test_the_queue_is_scoped_to_the_profile_the_client_applies_for():
+    # The failure this prevents: two candidates share one tenant and both write
+    # `do_today` rows, so an unscoped query hands this client the other person's
+    # finance roles and uploads a backend CV to them.
+    sql = sync._queue_sql("wife-nl-finance")
+    assert "profile_id = 'wife-nl-finance'" in sql
+    assert "pushkar" not in sql
+
+
+def test_a_profile_id_that_is_not_an_id_is_refused_rather_than_escaped():
+    # run_remote shells out to psql -c, so the id is interpolated. Anything but
+    # [a-z0-9-] is refused outright — a hand-edited apply-profile.json must not
+    # be able to reach psql as SQL.
+    for bad in ["'; DROP TABLE agents.job_applications; --", "a b", "UPPER", ""]:
+        try:
+            sync._queue_sql(bad)
+        except sync.SyncError:
+            continue
+        raise AssertionError(f"{bad!r} was accepted")

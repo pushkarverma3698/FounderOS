@@ -23,6 +23,12 @@ import type { Context } from "grammy";
 import * as path from "node:path";
 import { updateApplicationStage, type BriefSection } from "../db/job-queries.js";
 import { listApplyQueue } from "../db/apply-queries.js";
+import {
+  resolveProfileArg,
+  isProfileArgMiss,
+  profileMissMessage,
+} from "./jobhunt-profile-arg.js";
+import type { JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import { askInstruction, draftInstruction } from "./jobhunt-instructions.js";
 import { sendCoverLetter } from "./cover-letter-delivery.js";
 import {
@@ -208,13 +214,21 @@ export function packetMessage(packet: ApplicationPacket, rank: number): string {
  * and race the same `tailor_status` column.
  */
 export async function handleDraft(ctx: Context, deps: JobhuntCommandDeps): Promise<void> {
-  const parsed = parseDraftArg(ctx.match?.toString() ?? "");
+  // "all" belongs to parseDraftArg, so it is reserved before the profile lookup.
+  const selected = resolveProfileArg(ctx.match?.toString() ?? "", ["all"], (rest) =>
+    parseDraftArg(rest) !== null,
+  );
+  if (isProfileArgMiss(selected)) {
+    await ctx.reply(profileMissMessage(selected));
+    return;
+  }
+  const parsed = parseDraftArg(selected.rest);
   if (parsed === null) {
     await ctx.reply(unresolvedMessage("draft", null));
     return;
   }
 
-  const ranks = parsed.all ? await liveDraftRanks() : parsed.rows;
+  const ranks = parsed.all ? await liveDraftRanks(selected.profile) : parsed.rows;
   if (ranks.length === 0) {
     await ctx.reply(
       parsed.all
@@ -233,7 +247,7 @@ export async function handleDraft(ctx: Context, deps: JobhuntCommandDeps): Promi
   }
 
   for (const [i, rank] of capped.entries()) {
-    await draftOneRow(ctx, rank, deps, capped.length > 1 ? `${i + 1}/${capped.length} · ` : "");
+    await draftOneRow(ctx, rank, deps, capped.length > 1 ? `${i + 1}/${capped.length} · ` : "", selected.profile);
   }
 }
 
@@ -245,8 +259,8 @@ export async function handleDraft(ctx: Context, deps: JobhuntCommandDeps): Promi
  * silently skip rows or spend a model call resolving numbers that point at
  * nothing.
  */
-async function liveDraftRanks(): Promise<number[]> {
-  const queue = await listApplyQueue();
+async function liveDraftRanks(profile: JobSearchProfile): Promise<number[]> {
+  const queue = await listApplyQueue(profile.tenantId, profile.id);
   return queue
     .map((row) => row.brief_rank)
     .filter((rank): rank is number => typeof rank === "number")
@@ -259,8 +273,9 @@ async function draftOneRow(
   rank: number,
   deps: JobhuntCommandDeps,
   progress: string,
+  profile: JobSearchProfile,
 ): Promise<void> {
-  const row = await resolveBriefRow(rank);
+  const row = await resolveBriefRow(rank, DRAFT_SECTIONS, profile);
   if (!row) {
     await ctx.reply(unresolvedMessage("draft", rank));
     return;
@@ -316,13 +331,18 @@ export async function handleAsk(ctx: Context, deps: JobhuntCommandDeps): Promise
  * change with nothing for a model to compose or approve.
  */
 export async function handleApplied(ctx: Context): Promise<void> {
-  const rank = parseRowArg(ctx.match?.toString() ?? "");
+  const selected = resolveProfileArg(ctx.match?.toString() ?? "", [], (rest) => parseRowArg(rest) !== null);
+  if (isProfileArgMiss(selected)) {
+    await ctx.reply(profileMissMessage(selected));
+    return;
+  }
+  const rank = parseRowArg(selected.rest);
   if (rank === null) {
     await ctx.reply(unresolvedMessage("applied", null));
     return;
   }
 
-  const row = await resolveBriefRow(rank, DRAFT_SECTIONS);
+  const row = await resolveBriefRow(rank, DRAFT_SECTIONS, selected.profile);
   if (!row) {
     await ctx.reply(unresolvedMessage("applied", rank));
     return;

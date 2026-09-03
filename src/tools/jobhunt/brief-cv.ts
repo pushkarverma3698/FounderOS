@@ -53,7 +53,10 @@ export function loadTrackCvs(
   // A row whose title matched no track is stored as "unclassified", and every
   // row screened before tracks existed carries that value. Without an entry here
   // the map lookup misses, the CV text is "", and EVERY such row scores 0/N —
-  // a ranking built from no comparison, printed with no warning.
+  // a ranking built from no comparison, printed with no warning. Production's
+  // first real brief showed "0/21 skills" on all three rows for exactly this
+  // reason. The profile's base CV is the honest comparison for a row with no
+  // track, and it is what `readFullCvText` returns when asked for no track.
   const masterPaths = profile.baseCvPath ? [profile.baseCvPath] : undefined;
   const master = readFullCvText(undefined, masterPaths);
   if (master.ok) cvs.set(UNCLASSIFIED_TRACK, master.text);

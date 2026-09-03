@@ -303,7 +303,7 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     screened: opts.screened ?? applications.length,
     perTrack,
     rows,
-    trends: await buildTrends(cvs, now),
+    trends: await buildTrends(cvs, now, profile),
     failures: [...(opts.failures ?? []), ...cvFailure, ...untrackedNote],
     notes: opts.notes ?? [],
     agedOut,

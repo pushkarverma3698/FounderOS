@@ -34,11 +34,24 @@ export const JobSearchProfileSchema = z.object({
   maxYearsDemanded: z.number(),
   maxYearsStretch: z.number(),
 
-  // Visa & legal permit
-  visaRequiresSponsor: z.boolean(),
-  permitBases: z.array(z.string()), // e.g. ["hsm", "partner-permit", "remote-contract", "india-local"]
-  
-  // Salary criteria
+  /**
+   * The permit bases this candidate actually holds, strongest-commitment first.
+   *
+   * A DECLARED FACT about a person — never inferred. There is deliberately no
+   * `visaRequiresSponsor` boolean beside it: whether the IND recognised-sponsor
+   * register applies is a property of the BASIS (see `gateProfile` in
+   * permit-routes.ts), not of the candidate. A profile-level flag was tried and
+   * removed on 2026-09-04 because nothing read it while the review that shipped
+   * it claimed it gated the register lookup.
+   *
+   * Values must be `PermitBasis` strings; typed as `string` here only to keep
+   * permit-routes.ts → profile-config.ts a one-way import. Unknown values are
+   * rejected by `basesForPosting`, which falls back to the strictest gates.
+   */
+  permitBases: z.array(z.string()).nonempty(),
+
+  // Salary criteria. The BINDING figures live in criteria.ts (the dated IND
+  // table); these are display copies for prompt text and must match it.
   under30MonthlyEurFloor: z.number().optional(),
   over30MonthlyEurFloor: z.number().optional(),
   minInrLpaFloor: z.number().optional(),
@@ -77,9 +90,8 @@ export const PUSHKAR_PROFILE: JobSearchProfile = {
   maxYearsDemanded: 4,
   maxYearsStretch: 6,
 
-  visaRequiresSponsor: true,
   permitBases: ["hsm", "partner-permit", "remote-contract", "india-local"],
-  
+
   under30MonthlyEurFloor: 4357,
   over30MonthlyEurFloor: 5942,
   minInrLpaFloor: 15,
@@ -159,24 +171,62 @@ export const PUSHKAR_PROFILE: JobSearchProfile = {
 
 import { WIFE_FINANCE_PROFILE } from "./profiles/wife-nl-finance.js";
 
-/** Registry of active profiles */
-const PROFILES: Record<string, JobSearchProfile> = {
-  [PUSHKAR_PROFILE.id]: PUSHKAR_PROFILE,
-  [WIFE_FINANCE_PROFILE.id]: WIFE_FINANCE_PROFILE,
-};
+/**
+ * The profile every unqualified call resolves to.
+ *
+ * Named rather than implicit on purpose. Callers that mean "Pushkar" now say so,
+ * and a caller that forgot to pass a profile is indistinguishable from one that
+ * meant the default — which is exactly how the first pass at this shipped seven
+ * DB helpers whose "default" was *no filter at all*, spanning every profile.
+ */
+export const DEFAULT_PROFILE_ID = "pushkar-nl-tech";
 
-export function registerProfile(profile: JobSearchProfile): void {
-  PROFILES[profile.id] = profile;
+/** Registry of active profiles. */
+const PROFILES: Record<string, JobSearchProfile> = {};
+
+/**
+ * Validate and register a profile.
+ *
+ * Parsed against the schema rather than merely typed by it. A `JobSearchProfile`
+ * annotation is erased at runtime, so before this the Zod schema described the
+ * shape without ever checking it — a profile with an empty `permitBases` or a
+ * `trackPriority` naming a track it does not define would have been caught only
+ * by whatever crashed first, screening runs later.
+ */
+export function registerProfile(profile: JobSearchProfile): JobSearchProfile {
+  const parsed = JobSearchProfileSchema.parse(profile);
+  for (const trackId of parsed.trackPriority) {
+    if (!parsed.tracks[trackId]) {
+      throw new Error(
+        `Profile "${parsed.id}" lists "${trackId}" in trackPriority but defines no such track. ` +
+          `A brief built from it would read a CV for a track that does not exist and score every row 0.`,
+      );
+    }
+  }
+  PROFILES[parsed.id] = parsed;
+  return parsed;
 }
 
-export function getProfile(id: string = PUSHKAR_PROFILE.id): JobSearchProfile {
+registerProfile(PUSHKAR_PROFILE);
+registerProfile(WIFE_FINANCE_PROFILE);
+
+export function getProfile(id: string = DEFAULT_PROFILE_ID): JobSearchProfile {
   const profile = PROFILES[id];
   if (!profile) {
-    throw new Error(`JobSearchProfile not found for id: "${id}". Registered profiles: ${Object.keys(PROFILES).join(", ")}`);
+    throw new Error(
+      `JobSearchProfile not found for id: "${id}". Registered profiles: ${Object.keys(PROFILES).join(", ")}`,
+    );
   }
   return profile;
 }
 
+/**
+ * Every registered profile.
+ *
+ * This is what the sweeps iterate. A profile that is registered but never swept
+ * produces nothing, which is indistinguishable from an empty market — so adding
+ * a profile here is what puts it into production, and there is no second switch.
+ */
 export function listProfiles(): JobSearchProfile[] {
   return Object.values(PROFILES);
 }

@@ -12,6 +12,7 @@ ever called it, because the LaunchAgent was never written.
 from __future__ import annotations
 
 from . import notify
+from .profile import load_profile
 from .sync import SyncError, fetch_queue, save_queue, sync_profile
 
 
@@ -28,7 +29,10 @@ def main() -> int:
         print(f"⚠ could not refresh the apply profile ({err}) — using the local copy")
 
     try:
-        jobs = fetch_queue()
+        # WHOSE queue. Read from the same apply-profile.json that supplies the
+        # form fields and the resume, so the rows fetched and the CV uploaded to
+        # them can never come from two different candidates.
+        jobs = fetch_queue(load_profile().profile_id)
         fetch_failures = save_queue(jobs)
     except SyncError as err:
         # Reported, never swallowed. A sync that failed and a queue that is

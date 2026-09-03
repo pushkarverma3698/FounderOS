@@ -26,7 +26,20 @@
 import type { PostingRoute } from "./extract.js";
 import { getProfile, type JobSearchProfile } from "./profile-config.js";
 
-export type PermitBasis = "hsm" | "partner-permit" | "remote-contract" | "india-local";
+export type PermitBasis = "hsm" | "partner-permit" | "remote-contract" | "india-local" | "zoekjaar";
+
+/** Every basis this module knows how to gate. Used to reject unknown bases loudly. */
+export const KNOWN_PERMIT_BASES: readonly PermitBasis[] = [
+  "hsm",
+  "partner-permit",
+  "remote-contract",
+  "india-local",
+  "zoekjaar",
+];
+
+export function isKnownPermitBasis(value: string): value is PermitBasis {
+  return (KNOWN_PERMIT_BASES as readonly string[]).includes(value);
+}
 
 /**
  * The bases Pushkar can actually use, confirmed by him on 2026-07-31, extended
@@ -45,7 +58,7 @@ export const LIVE_PERMIT_BASES: readonly PermitBasis[] = [
 ];
 
 /** Bases usable for a role based in the Netherlands (a remote contract is not one). */
-const NL_BASES: readonly PermitBasis[] = ["hsm", "partner-permit"];
+const NL_BASES: readonly PermitBasis[] = ["hsm", "partner-permit", "zoekjaar"];
 
 /**
  * The bases still open when nobody has established WHERE the job is.
@@ -60,8 +73,14 @@ const NL_BASES: readonly PermitBasis[] = ["hsm", "partner-permit"];
  *
  * Being in India is a POSITIVE FINDING from the fetcher (country === "IN"),
  * never a fallback for ignorance.
+ *
+ * `zoekjaar` is absent for the same reason and it is the newer half of the rule.
+ * It clears both the sponsor gate and the salary floor, so it is now the most
+ * permissive Dutch basis in the set — and it is only lawful for a role that is
+ * actually IN the Netherlands. Letting it carry an unlocated posting would put a
+ * Bogotá role back into APPLY TODAY, this time on an orientation-year permit.
  */
-const UNCLEAR_BASES: readonly PermitBasis[] = [...NL_BASES, "remote-contract"];
+const UNCLEAR_BASES: readonly PermitBasis[] = ["hsm", "partner-permit", "remote-contract"];
 
 export interface GateProfile {
   /** Whether the employer must appear in the IND recognised-sponsor register. */
@@ -138,6 +157,37 @@ const PROFILES: Record<PermitBasis, GateProfile> = {
     basis: "Remote contract worked from India — no Dutch permit is involved.",
   },
   /**
+   * ORIENTATION YEAR (zoekjaar) — confirmed by the founder about his wife,
+   * 2026-09-04: "she's on zoekjaar".
+   *
+   * This is the most permissive Dutch basis there is, and it is permissive as a
+   * matter of law rather than as a modelling convenience. A zoekjaar holder has
+   * free access to the Dutch labour market for the duration of the permit: the
+   * employer needs no recognised-sponsor status, needs no work permit, and no
+   * IND salary criterion attaches. Screening her under `hsm` instead — which is
+   * what this branch did until today — applied the recognised-sponsor register
+   * to every Dutch employer and rejected the large majority of a market she can
+   * lawfully work in right now. Those rejections would have been invisible.
+   *
+   * WHAT IT DOES NOT DO: it does not last. The orientation year is time-boxed
+   * and non-renewable, so a role reachable ONLY on this basis is a role that
+   * ends when the permit does. That is why `basesForPosting` screens an NL role
+   * under `hsm` as well for this profile rather than instead of it — a row that
+   * clears both is worth more than one that clears only this, and the founder
+   * sees which of the two carried it in the route label.
+   */
+  zoekjaar: {
+    sponsorRequired: false,
+    salaryFloorApplies: false,
+    payReference: "eur",
+    dutchLanguageApplies: true,
+    label: "orientation year (zoekjaar)",
+    basis:
+      "Orientation year (zoekjaar) — free access to the Dutch labour market while the permit " +
+      "runs: no recognised sponsor and no IND salary criterion apply. Time-boxed and " +
+      "non-renewable, so check whether the employer could also sponsor an HSM permit after it.",
+  },
+  /**
    * The second market, live since 2026-08-01.
    *
    * Nothing legal stands between him and an Indian role: he is in India and needs
@@ -186,13 +236,26 @@ export function routeLabel(route: string): string {
   return route in PROFILES ? PROFILES[route as PermitBasis].label : route;
 }
 
+/**
+ * Whether a basis is one THIS candidate actually holds.
+ *
+ * Reads `profile.permitBases`, which is a declared fact about a person and is
+ * never inferred from documents. Getting it wrong in the permissive direction
+ * spends applications on roles the candidate cannot hold; in the restrictive
+ * direction it silently discards roles they can. Change a profile's list only on
+ * the founder's say-so.
+ */
 export function isLiveBasis(basis: PermitBasis, profile: JobSearchProfile = getProfile()): boolean {
-  const allowed = profile.permitBases as readonly PermitBasis[];
-  return allowed.includes(basis);
+  return profile.permitBases.includes(basis);
 }
 
 /**
  * Which bases to screen a posting under.
+ *
+ * A posting is screened under EVERY basis that could lawfully carry it, and the
+ * best outcome wins (see `bestOutcome` in screen.ts). Screening under one basis
+ * and calling it the answer is what produced confident rejections of roles that
+ * were reachable another way.
  */
 export function basesForPosting(route: PostingRoute, profile: JobSearchProfile = getProfile()): PermitBasis[] {
   const candidates: readonly PermitBasis[] =
@@ -201,10 +264,23 @@ export function basesForPosting(route: PostingRoute, profile: JobSearchProfile =
       : route === "hsm"
         ? NL_BASES
         : route === "india"
-          ? ["india-local"]
+          ? // An Indian role is screened ONLY as an Indian local hire. Adding the
+            // remote-contract basis alongside it would put a euro pay yardstick
+            // beside a rupee one on the same posting and let the kinder of the two
+            // win — the two markets are judged by their own numbers or not at all.
+            ["india-local"]
           : UNCLEAR_BASES;
 
   const live = candidates.filter((b) => isLiveBasis(b, profile));
+  if (live.length > 0) return live;
 
-  return live.length > 0 ? live : [(profile.permitBases[0] as PermitBasis) ?? "hsm"];
+  // Never return nothing: a posting screened under no basis would be recorded
+  // with no verdict at all, which reads as "considered and found wanting" when in
+  // fact nothing looked at it. The fallback is the profile's OWN first declared
+  // basis so a non-Dutch profile is never silently judged by Dutch law, and it
+  // degrades to HSM — the strictest gates in the set — when that list is empty or
+  // names a basis this module has no gate profile for. Either way the failure
+  // direction is a visible reject, not a silent pass.
+  const declared = profile.permitBases.find(isKnownPermitBasis);
+  return [declared ?? "hsm"];
 }

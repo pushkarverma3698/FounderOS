@@ -18,6 +18,7 @@
 import { childLogger } from "../../infra/logger.js";
 import { sendToChat } from "../../infra/telegram-send.js";
 import { esc } from "./telegram-format.js";
+import { DEFAULT_PROFILE_ID, type JobSearchProfile } from "./profile-config.js";
 import type { DiscoveredBoard } from "./board-token.js";
 import {
   afterQuietSweep,
@@ -203,11 +204,26 @@ export const FREE_SWEEP_CRON = "*/30 * * * *";
  * when he most wants to know the lane came back up. Persisting it would suppress
  * that.
  */
-let heartbeat = initialHeartbeat(new Date());
+const heartbeats = new Map<string, ReturnType<typeof initialHeartbeat>>();
+
+/**
+ * Per profile, because the ping answers "is YOUR lane alive". One shared clock
+ * would let a busy lane's alert suppress the quiet lane's heartbeat, and the
+ * candidate with nothing coming through is precisely the one who needs to know
+ * the difference between "no jobs" and "nothing ran".
+ */
+function heartbeatFor(profileId: string): ReturnType<typeof initialHeartbeat> {
+  const existing = heartbeats.get(profileId);
+  if (existing) return existing;
+  const fresh = initialHeartbeat(new Date());
+  heartbeats.set(profileId, fresh);
+  return fresh;
+}
 
 /** Test seam: reset the ping clock so a suite is not order-dependent. */
 export function resetHeartbeat(now: Date = new Date()): void {
-  heartbeat = initialHeartbeat(now);
+  heartbeats.clear();
+  heartbeats.set(DEFAULT_PROFILE_ID, initialHeartbeat(now));
 }
 
 /**
@@ -222,23 +238,58 @@ export function resetHeartbeat(now: Date = new Date()): void {
  * cost this pipeline weeks (see `JOB_SWEEP_CRON` above).
  */
 export async function runFreeSweep(): Promise<void> {
+  const { sweepBoards } = await import("./free-ats-source.js");
+  const { getFreeBoards } = await import("./free-boards.js");
+  const { listProfiles } = await import("./profile-config.js");
+
+  // POLLED ONCE, SCREENED FOR EVERYONE. The board sweep is the expensive half of
+  // this lane and its result says nothing about which candidate is looking, so a
+  // second profile costs only the body fetches its own filters keep. Doing it
+  // per profile instead would poll 1,297 boards twice every thirty minutes for
+  // identical data — and it is the reason a second candidate was affordable at
+  // all. Everything downstream of here is per profile: the filters, the tracker
+  // dedupe, the verdicts, the ranking and the alert.
+  let sweep: Awaited<ReturnType<typeof sweepBoards>>;
+  try {
+    sweep = await sweepBoards(getFreeBoards());
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "Free board sweep crashed before it could poll anything");
+    return;
+  }
+
+  for (const profile of listProfiles()) {
+    // One profile's failure must not take the others down with it. A crash here
+    // is already logged loudly by the helper; swallowing it at the loop keeps
+    // the second candidate's lane running when the first one breaks.
+    await runFreeSweepForProfile(profile, sweep);
+  }
+}
+
+async function runFreeSweepForProfile(
+  profile: JobSearchProfile,
+  sweep: Awaited<ReturnType<typeof import("./free-ats-source.js").sweepBoards>>,
+): Promise<void> {
   const { runFreeIngest } = await import("./free-ingest.js");
 
   let result: Awaited<ReturnType<typeof runFreeIngest>>;
   try {
-    result = await runFreeIngest();
+    result = await runFreeIngest({ profile, sweep });
   } catch (err) {
     // Called by the cron (which wraps every sweep in its own `.catch()`, same
     // as the rest of startScheduler) AND directly by callers/tests. Either way
     // this runs unattended 48 times a day, so a crash must be loud in the logs
     // and must not reject — the founder's next signal is the next tick, not a
     // Node "unhandled rejection" nobody is watching for.
-    log.error({ err: (err as Error).message }, "Free board sweep crashed before it could screen anything");
+    log.error(
+      { err: (err as Error).message, profile: profile.id },
+      "Free board sweep crashed before it could screen anything",
+    );
     return;
   }
 
   log.info(
     {
+      profile: profile.id,
       boardsPolled: result.boardsPolled,
       seen: result.seen,
       screened: result.screened,
@@ -255,14 +306,17 @@ export async function runFreeSweep(): Promise<void> {
     // rows fired this alert every 30 minutes until it was the noise, not the
     // signal. `seen === 0` is the only state where the failures are the reason
     // there is nothing to report.
-    log.warn({ failures: result.failures }, "Free board sweep fetched nothing while boards were failing");
+    log.warn(
+      { failures: result.failures, profile: profile.id },
+      "Free board sweep fetched nothing while boards were failing",
+    );
     // Counts per (platform, reason) rather than the first three names: on a total
     // outage the three that happen to sort first say nothing about the cause, and
     // "recruitee HTTP 429 ×36" says all of it in five words.
     const { summariseFailures } = await import("./free-ats-source.js");
     await sendToChat(
       esc(
-        `⚠ Free job lane failed — nothing was fetched this sweep.\n` +
+        `⚠ Free job lane failed for ${profile.candidateName} — nothing was fetched this sweep.\n` +
           summariseFailures(result.failures),
       ),
     );
@@ -276,8 +330,14 @@ export async function runFreeSweep(): Promise<void> {
   // rows 48 times a day spends API quota to produce no change, and it would
   // overwrite the `Applied` column between a founder's click and his next sync.
   if (newPasses.length === 0) {
-    const { next, ping } = afterQuietSweep(heartbeat, result.boardsPolled, result.funnel, now, lastSheetLink);
-    heartbeat = next;
+    const { next, ping } = afterQuietSweep(
+      heartbeatFor(profile.id),
+      result.boardsPolled,
+      result.funnel,
+      now,
+      lastSheetLink,
+    );
+    heartbeats.set(profile.id, next);
     if (ping !== null) await sendToChat(ping);
     return;
   }
@@ -287,7 +347,7 @@ export async function runFreeSweep(): Promise<void> {
   // those — exporting first would publish the new rows unranked and unnumbered.
   const { buildDailyBrief } = await import("./daily-brief.js");
   try {
-    await buildDailyBrief({ screened: result.screened, failures: result.failures, notes: [] });
+    await buildDailyBrief({ screened: result.screened, failures: result.failures, notes: [], profile });
   } catch (err) {
     // The rows are screened and stored. An unranked Sheet is still worth
     // publishing — it just carries blank `#` cells, which is visibly wrong
@@ -295,10 +355,15 @@ export async function runFreeSweep(): Promise<void> {
     log.error({ err: (err as Error).message }, "Ranking failed before free-lane export");
   }
 
-  const { link, notice } = await publishSheet();
-  lastSheetLink = link;
-  await sendToChat(formatNewRowsAlert(newPasses, link ?? notice));
-  heartbeat = afterSpokenSweep(now);
+  // The Sheet is a single document and belongs to the default profile. A second
+  // candidate's rows reach the founder through her own brief alert and `/jobs
+  // <profile>`, not by being interleaved into a spreadsheet whose `Applied`
+  // column he clicks on Pushkar's behalf.
+  const { link, notice } =
+    profile.id === DEFAULT_PROFILE_ID ? await publishSheet() : { link: lastSheetLink, notice: null };
+  if (profile.id === DEFAULT_PROFILE_ID) lastSheetLink = link;
+  await sendToChat(formatNewRowsAlert(newPasses, link ?? notice, profile.candidateName));
+  heartbeats.set(profile.id, afterSpokenSweep(now));
 }
 
 /**

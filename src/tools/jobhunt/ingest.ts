@@ -34,9 +34,17 @@ import {
   POOL_ORDER,
   POOL_QUERIES,
   type RawPosting,
+  type SourcePool,
 } from "./ats-source.js";
 import { fetchIndeedPostings, type IndeedCountry } from "./indeed-source.js";
 import { TRACK_PRIORITY, TRACK_TITLES, type RoleTrack } from "./tracks.js";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
+import {
+  poolsForProfile,
+  INDEED_COUNTRIES,
+  INDEED_REMOTE,
+  INDEED_MAX_AGE_DAYS,
+} from "./ingest-pools.js";
 import { dedupePostings, screenBatch, INGEST_SOURCE, type IngestLine } from "./ingest-batch.js";
 import { recordQueryCost } from "./ingest-ledger.js";
 import { ATS_PRICING, INDEED_PRICING, estimateQueryCost } from "./cost.js";
@@ -46,41 +54,10 @@ import { checkSweepBudget } from "./spend-gate.js";
 // Re-exported so every existing import site keeps resolving here. The batch
 // screening moved to ingest-batch.ts on 2026-08-01 when this file crossed its
 // size budget; nothing about its behaviour moved with it.
-export { dedupePostings, screenBatch, INGEST_SOURCE } from "./ingest-batch.js";
+export { dedupePostings, screenBatch, INGEST_SOURCE };
 export type { IngestLine, IngestSummary, IngestResult } from "./ingest-batch.js";
 
 const log = childLogger({ module: "tool:ingest_jobs" });
-
-/**
- * NL for the remote-with-a-Dutch-office pool; IN for the remote-contract pool.
- *
- * Deliberately not US or global: a US company hiring a contractor in India is
- * income, not a step toward the Netherlands (founder decision, 2026-07-31), and
- * mixing the two would blur what the campaign is actually measuring.
- */
-const INDEED_COUNTRIES: readonly IndeedCountry[] = ["NL", "IN"];
-
-/**
- * Whether each country's Indeed query is restricted to remote roles.
- *
- * NL stays remote-only: a Dutch on-site role is already covered by the ATS
- * `netherlands` pool, and what Indeed adds there is the remote-contract channel.
- *
- * IN IS DELIBERATELY UNRESTRICTED, and this is a correction. Until 2026-08-01
- * both countries were pinned to `remote: "remote"`, so every on-site and hybrid
- * role in Bangalore, Hyderabad, Pune, NCR and Mumbai was unreachable — not
- * rejected, never asked for. He LIVES in India; on-site there is not a
- * compromise, it is most of the market. An unasked market and an empty one
- * produce the same zero, which is the failure direction this codebase treats as
- * the expensive one.
- */
-const INDEED_REMOTE: Record<IndeedCountry, "remote" | undefined> = {
-  NL: "remote",
-  IN: undefined,
-};
-
-/** The actor cannot apply `fromDays` alongside its remote filter, so we cut here. */
-const INDEED_MAX_AGE_DAYS = 3;
 
 export interface PooledIngest {
   readonly fetched: number;
@@ -137,9 +114,19 @@ export interface PooledIngest {
 export async function runPooledIngest(opts: {
   limit: number;
   includeIndeed?: boolean;
+  profile?: JobSearchProfile;
 }): Promise<PooledIngest> {
   const sweepId = randomUUID();
-  const queries = POOL_ORDER.length * TRACK_PRIORITY.length;
+  const profile = opts.profile ?? getProfile();
+  // THE PROFILE'S OWN TRACKS AND MARKETS, not the module's. The fan-out is one
+  // billed actor run per (pool × track), so querying a finance candidate against
+  // four engineering title sets in India would spend real money to fetch roles
+  // she cannot take — and, worse, would never ask for the ones she can. The
+  // dollar ceiling that actually binds is still spend-gate.ts, before the first
+  // call.
+  const tracks = profile.trackPriority;
+  const pools = poolsForProfile(profile);
+  const queries = Math.max(1, pools.length * tracks.length);
   const perQuery = Math.max(MIN_ATS_LIMIT, Math.floor(opts.limit / queries));
   const lines: IngestLine[] = [];
   const failures: string[] = [];
@@ -170,7 +157,7 @@ export async function runPooledIngest(opts: {
       lines: [],
       failures: [budget.reason],
       notes: [],
-      perTrack: Object.fromEntries(TRACK_PRIORITY.map((t) => [t, 0])) as Record<RoleTrack, number>,
+      perTrack: Object.fromEntries(tracks.map((t) => [t, 0])) as Record<RoleTrack, number>,
       sweepId,
       newBoards: [],
     };
@@ -187,7 +174,7 @@ export async function runPooledIngest(opts: {
   // Derived from TRACK_PRIORITY rather than written out, so adding a track can
   // never leave a counter silently missing — which would report that track as
   // "0 postings" forever regardless of what the feed actually returned.
-  const perTrack = Object.fromEntries(TRACK_PRIORITY.map((t) => [t, 0])) as Record<
+  const perTrack = Object.fromEntries(tracks.map((t) => [t, 0])) as Record<
     RoleTrack,
     number
   >;
@@ -212,11 +199,11 @@ export async function runPooledIngest(opts: {
   // bought in `job_ingest_runs` — "we spent $0.13 on frontend and every row was
   // rejected on the level bar" is an actionable sentence, and it is unavailable
   // once the postings have been tipped into a shared array.
-  for (const pool of POOL_ORDER) {
-    for (const track of TRACK_PRIORITY) {
+  for (const pool of pools) {
+    for (const track of tracks) {
       const result = await fetchAtsPostings({
         ...POOL_QUERIES[pool],
-        titles: TRACK_TITLES[track],
+        titles: profile.tracks[track]?.titles ?? TRACK_TITLES[track] ?? [],
         timeRange: "24h",
         limit: perQuery,
       });
@@ -246,7 +233,7 @@ export async function runPooledIngest(opts: {
       const batch = result.postings.map((p) => ({
         ...p,
         source: INGEST_SOURCE,
-        country: (p.country && p.country !== "unknown" ? p.country : POOL_COUNTRY[pool] ?? "unknown") as any,
+        country: p.country && p.country !== "unknown" ? p.country : POOL_COUNTRY[pool],
       }));
       collectBoardTokens(harvest, batch); // fetch boundary, before dedupe/screening
       const { unique, collapsed } = dedupePostings(batch);
@@ -256,7 +243,7 @@ export async function runPooledIngest(opts: {
             `the same role more than once. Billed for, screened once.`,
         );
       }
-      const batchLines = await screenBatch(unique);
+      const batchLines = await screenBatch(unique, profile);
       lines.push(...batchLines);
       await recordQueryCost({
         sweepId,
@@ -341,7 +328,7 @@ export async function runPooledIngest(opts: {
             `returned more than once. Billed for, screened once.`,
         );
       }
-      const batchLines = await screenBatch(unique);
+      const batchLines = await screenBatch(unique, profile);
       lines.push(...batchLines);
       await recordQueryCost({
         sweepId,
@@ -358,9 +345,9 @@ export async function runPooledIngest(opts: {
 
   // A track that fetched nothing is reported. Zero rows for frontend used to be
   // indistinguishable from never having asked for frontend.
-  for (const track of TRACK_PRIORITY) {
+  for (const track of tracks) {
     if (perTrack[track] === 0) {
-      failures.push(`Track "${track}": 0 postings across all ${POOL_ORDER.length} pools.`);
+      failures.push(`Track "${track}": 0 postings across all ${pools.length} pools.`);
     }
   }
 
@@ -388,7 +375,7 @@ export async function runPooledIngest(opts: {
       fetched,
       fresh,
       perTrack,
-      pools: POOL_ORDER.length,
+      pools: pools.length,
       failures: failures.length,
       notes: notes.length,
       newBoardsDiscovered: newBoards.length,

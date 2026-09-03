@@ -40,7 +40,7 @@ import type { JobApplication } from "../../db/schema.js";
 import { tailorCv } from "./tailor-cv.js";
 import { renderCvToPdf } from "./cv-renderer.js";
 import { extractBoardToken } from "./board-token.js";
-import { getProfile } from "./profile-config.js";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
 import { getAdapter } from "./adapters/index.js";
 
 export function getApplyUrl(url: string, company: string): string | null {
@@ -93,9 +93,17 @@ export type PacketResult =
 export async function resolveBriefRow(
   rank: number,
   sections: readonly BriefSection[] = DRAFT_SECTIONS,
+  profile: JobSearchProfile = getProfile(),
 ): Promise<JobApplication | null> {
   for (const section of sections) {
-    const row = await getApplicationByBriefRank(section, rank);
+    // SCOPED TO ONE CANDIDATE. Both profiles number their own brief from 1, so
+    // an unscoped lookup makes `/draft 3` a coin flip between two people's row
+    // 3 — and the cost of losing it is a tailored application sent about the
+    // wrong company, on the wrong CV, under the wrong right to work.
+    const row = await getApplicationByBriefRank(section, rank, {
+      tenantId: profile.tenantId,
+      profileId: profile.id,
+    });
     if (row) return row;
   }
   return null;

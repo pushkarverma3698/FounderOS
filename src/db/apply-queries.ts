@@ -18,6 +18,7 @@
 
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "./client.js";
+import { ALL_PROFILES, profileCondition, type ProfileScope } from "./job-queries.js";
 import { jobApplications, type JobApplication } from "./schema.js";
 
 const DEFAULT_TENANT = "turicks";
@@ -44,7 +45,7 @@ export const LOG_TAB_ROWS = 500;
  */
 export async function listApplyQueue(
   tenantId: string = DEFAULT_TENANT,
-  profileId?: string,
+  profileId?: ProfileScope,
 ): Promise<JobApplication[]> {
   const db = getDb();
   const conditions = [
@@ -53,7 +54,8 @@ export async function listApplyQueue(
     isNull(jobApplications.applied_at),
     isNull(jobApplications.skipped_at),
   ];
-  if (profileId) conditions.push(eq(jobApplications.profile_id!, profileId));
+  const profileWhere = profileCondition(profileId);
+  if (profileWhere) conditions.push(profileWhere);
   return db
     .select()
     .from(jobApplications)
@@ -71,13 +73,17 @@ export async function listApplyQueue(
  */
 export async function listRecentlyScreened(
   tenantId: string = DEFAULT_TENANT,
+  profileId?: ProfileScope,
   limit: number = LOG_TAB_ROWS,
 ): Promise<JobApplication[]> {
   const db = getDb();
+  const conditions = [eq(jobApplications.tenant_id, tenantId)];
+  const profileWhere = profileCondition(profileId);
+  if (profileWhere) conditions.push(profileWhere);
   return db
     .select()
     .from(jobApplications)
-    .where(eq(jobApplications.tenant_id, tenantId))
+    .where(and(...conditions))
     .orderBy(desc(jobApplications.created_at))
     .limit(limit);
 }

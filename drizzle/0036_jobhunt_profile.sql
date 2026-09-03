@@ -11,6 +11,15 @@
 ALTER TABLE agents.job_applications
 ADD COLUMN IF NOT EXISTS profile_id text DEFAULT 'pushkar-nl-tech';
 
+-- Backfill, then forbid NULL. A NULL does not conflict in a unique index, so a
+-- nullable profile_id would silently disable ja_dedupe_uniq for any row that
+-- failed to set one — turning the gate that prevents double-applying into a
+-- no-op without a single error. Postgres >= 11 fills existing rows from the
+-- DEFAULT on ADD COLUMN, so the UPDATE is only for a re-run against a table
+-- where the column already existed and was nullable.
+UPDATE agents.job_applications SET profile_id = 'pushkar-nl-tech' WHERE profile_id IS NULL;
+ALTER TABLE agents.job_applications ALTER COLUMN profile_id SET NOT NULL;
+
 -- Drop old unique constraint (previously only tenant_id + dedupe_key).
 DROP INDEX IF EXISTS agents.ja_dedupe_uniq;
 

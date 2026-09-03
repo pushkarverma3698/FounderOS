@@ -163,6 +163,7 @@ export const NEXT_STEP_LINE =
 export function formatNewRowsAlert(
   passes: readonly IngestLine[],
   sheetLink: string | null,
+  candidateName?: string,
 ): string {
   const named = passes.slice(0, NEW_ROWS_NAMED);
   const rows = named.map((p) => `• ${esc(p.company)} — ${esc(p.title)}`).join("\n");
@@ -171,8 +172,14 @@ export function formatNewRowsAlert(
       ? `\n<i>+ ${passes.length - NEW_ROWS_NAMED} more.</i>`
       : "";
 
+  // NAMED once there is more than one candidate. Two identical "3 new roles
+  // passed screening" alerts thirty minutes apart, for two different people, is
+  // a channel the founder learns to ignore — and acting on the wrong one costs
+  // an application.
+  const who = candidateName ? ` for ${esc(candidateName)}` : "";
+
   return (
-    `🆕 <b>${passes.length} new role${passes.length === 1 ? "" : "s"} passed screening</b>\n` +
+    `🆕 <b>${passes.length} new role${passes.length === 1 ? "" : "s"} passed screening${who}</b>\n` +
     rows +
     rest +
     (sheetLink ? `\n\n${sheetLink}` : "") +

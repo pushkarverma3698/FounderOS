@@ -23,13 +23,19 @@ vi.mock("../../../src/db/cv-signal-queries.js", () => ({
   listSignals: vi.fn(async () => []),
 }));
 
+/** What `recordScreenedApplication` was actually asked to store. */
+const recorded: Array<Record<string, unknown>> = [];
+
 vi.mock("../../../src/db/job-queries.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
   return {
     ...actual,
     findApplicationByDedupeKey: vi.fn(async () => null),
     findApplicationsBySoftKey: vi.fn(async () => []),
-    recordScreenedApplication: vi.fn(async (row: Record<string, unknown>) => ({ id: "ja1", ...row })),
+    recordScreenedApplication: vi.fn(async (row: Record<string, unknown>) => {
+      recorded.push(row);
+      return { id: "ja1", ...row };
+    }),
   };
 });
 
@@ -149,7 +155,18 @@ describe("Manual QA Audit — Multi-Profile Verification", () => {
       expect(result.track).toBe("financial-analyst");
       expect(result.verdict.status).toBe("pass");
       expect(result.company).toBe("ING Bank");
-      expect(result.route).toBe("partner-permit");
+      // ZOEKJAAR, not partner-permit. She holds an orientation-year permit and
+      // has never held a partner permit; the earlier expectation asserted a
+      // pass carried by a right to work she does not have. On the zoekjaar
+      // basis the sponsor gate and the salary floor both correctly stand down.
+      expect(result.route).toBe("zoekjaar");
     }
+
+    // The row is STORED under her profile. This was claimed as verified before
+    // it was true: the mock swallowed the argument and nothing asserted it, so
+    // `profile_id` could have been absent and every test still passed.
+    const row = recorded.at(-1);
+    expect(row?.["profile_id"]).toBe("wife-nl-finance");
+    expect(row?.["tenant_id"]).toBe("turicks");
   });
 });
