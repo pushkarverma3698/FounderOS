@@ -170,3 +170,31 @@ export const SKILL_DICTIONARY: readonly SkillTerm[] = [
   { term: "Mentoring", category: "practice", aliases: ["mentoring", "mentorship", "coaching junior"] },
   { term: "Stakeholder Management", category: "practice", aliases: ["stakeholder management", "stakeholders"] },
 ];
+
+export const FINANCE_SKILL_DICTIONARY: readonly SkillTerm[] = [
+  { term: "IFRS", category: "practice", aliases: ["ifrs", "international financial reporting standards"] },
+  { term: "GAAP", category: "practice", aliases: ["gaap", "dutch gaap", "us gaap"] },
+  { term: "Financial Modeling", category: "practice", aliases: ["financial modeling", "financial modelling", "dcf", "valuation"] },
+  { term: "Financial Analysis", category: "practice", aliases: ["financial analysis", "fp&a", "variance analysis"] },
+  { term: "Budgeting & Forecasting", category: "practice", aliases: ["budgeting", "forecasting", "budgeting and forecasting", "cash flow forecasting"] },
+  { term: "SAP", category: "framework", aliases: ["sap", "sap erp", "sap s/4hana"] },
+  { term: "Excel / Advanced Excel", category: "framework", aliases: ["excel", "advanced excel", "vlookup", "pivot tables", "macros", "vba"] },
+  { term: "Power BI", category: "framework", aliases: ["power bi", "powerbi"] },
+  { term: "Tableau", category: "framework", aliases: ["tableau"] },
+  { term: "Oracle / Netsuite", category: "framework", aliases: ["oracle", "netsuite", "oracle netsuite"] },
+  { term: "QuickBooks", category: "framework", aliases: ["quickbooks", "qbo"] },
+  { term: "Xero", category: "framework", aliases: ["xero"] },
+  { term: "Auditing", category: "practice", aliases: ["audit", "auditing", "internal audit", "external audit", "statutory audit"] },
+  { term: "Tax Compliance", category: "practice", aliases: ["tax compliance", "vat", "btw", "corporate tax", "transfer pricing"] },
+  { term: "Accounts Payable", category: "practice", aliases: ["accounts payable", "ap", "p2p", "procure to pay"] },
+  { term: "Accounts Receivable", category: "practice", aliases: ["accounts receivable", "ar", "o2c", "order to cash"] },
+  { term: "General Ledger", category: "practice", aliases: ["general ledger", "gl", "month-end close", "year-end close"] },
+  { term: "Reconciliation", category: "practice", aliases: ["reconciliation", "bank reconciliation", "balance sheet reconciliation"] },
+  { term: "Treasury & Cash Management", category: "practice", aliases: ["treasury", "cash management", "liquidity management"] },
+  { term: "Risk & Compliance", category: "practice", aliases: ["risk management", "internal controls", "sox", "compliance"] },
+];
+
+export function getSkillDictionary(name: string = "tech"): readonly SkillTerm[] {
+  if (name === "finance") return FINANCE_SKILL_DICTIONARY;
+  return SKILL_DICTIONARY;
+}

@@ -37,6 +37,7 @@ import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import { intEnv } from "../../core/config.js";
 import { findApplicationByDedupeKey } from "../../db/job-queries.js";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
 import type { RawPosting } from "./ats-source.js";
 import { FREE_PRICING } from "./cost.js";
 import { countryFromLocation } from "./country.js";
@@ -152,6 +153,7 @@ export function filterCandidates(
   candidates: readonly FreeCandidate[],
   now: Date,
   maxAgeHours: number = FREE_LANE_MAX_AGE_HOURS,
+  profile: JobSearchProfile = getProfile(),
 ): FilterOutcome {
   let undated = 0;
   let stale = 0;
@@ -185,7 +187,7 @@ export function filterCandidates(
     }
     // `unknown` stays: a remote posting frequently states no country, and
     // discarding those would drop the most reachable roles on the board.
-    if (countryFromLocation(candidate.location) === "other") {
+    if (countryFromLocation(candidate.location, profile) === "other") {
       offMarket += 1;
       return false;
     }
@@ -193,16 +195,22 @@ export function filterCandidates(
   });
 
   const notes: string[] = [];
-  // NOT "seen in an earlier sweep". That was the wording until 2026-08-21 and it
-  // is a claim this function cannot make: it runs AHEAD of `keepUnseen` and has
-  // no database knowledge at all. Production settled it — 554 rows in
-  // `job_applications` lifetime against 24,446 dropped here every thirty
-  // minutes, so at most 554 of them had ever been seen and the rest were open
-  // roles nobody had ever looked at. A note that explains a drop away is worse
-  // than no note, because it stops anyone asking what is behind the number.
   if (stale > 0) notes.push(`${stale} postings older than ${maxAgeHours}h — not screened`);
-  if (offTrack > 0) notes.push(`${offTrack} postings were not an engineering track`);
-  if (offMarket > 0) notes.push(`${offMarket} postings were outside the Netherlands and India`);
+  if (offTrack > 0) {
+    notes.push(
+      profile.skillsDictionaryName === "tech"
+        ? `${offTrack} postings were not an engineering track`
+        : `${offTrack} postings were not in a target track`,
+    );
+  }
+  if (offMarket > 0) {
+    if (profile.id === "pushkar-nl-tech") {
+      notes.push(`${offMarket} postings were outside the Netherlands and India`);
+    } else {
+      const marketList = profile.targetCountries.map((c) => c.names[0] ?? c.code).join(", ");
+      notes.push(`${offMarket} postings were outside target markets (${marketList})`);
+    }
+  }
   if (undated > 0) notes.push(`${undated} postings stated no publication date and were skipped`);
 
   return { kept, notes, counts: { undated, stale, offTrack, offMarket } };
@@ -210,11 +218,6 @@ export function filterCandidates(
 
 /**
  * Drop candidates the tracker has already stored.
- *
- * THIS LANE IS A FIRST-SEEN DETECTOR. Re-screening a posting it already caught
- * buys nothing and costs a body fetch against a third-party host every thirty
- * minutes — and refreshing verdicts on known rows is already the metered sweep's
- * job. Keeping it here would be the same work done twice, less well.
  */
 async function keepUnseen(
   candidates: readonly FreeCandidate[],

@@ -40,6 +40,7 @@ import type { JobApplication } from "../../db/schema.js";
 import { tailorCv } from "./tailor-cv.js";
 import { renderCvToPdf } from "./cv-renderer.js";
 import { extractBoardToken } from "./board-token.js";
+import { getProfile } from "./profile-config.js";
 import { getAdapter } from "./adapters/index.js";
 
 export function getApplyUrl(url: string, company: string): string | null {
@@ -147,11 +148,16 @@ export async function buildApplicationPacket(
     return { ok: false, reason: "this posting has no usable description on file" };
   }
 
+  // Resolve the profile the row was screened under — without this, drafting a
+  // packet for a Wife row would tailor against Pushkar's default tech CV.
+  const profile = row.profile_id ? getProfile(row.profile_id) : getProfile();
+
   const tailored = await tailorCv({
     jobDescription: row.description,
     companyName: row.company,
     jobTitle: row.title,
     track: row.track,
+    profile,
   });
   if (!tailored.success || !tailored.tailoredMarkdown) {
     return { ok: false, reason: tailored.error ?? "CV tailoring failed" };

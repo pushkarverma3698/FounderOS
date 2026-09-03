@@ -1,0 +1,25 @@
+{
+  "first_name": "Wife",
+  "last_name": "Verma",
+  "email": "wife@example.com",
+  "phone": "+31 6 0000 0000",
+  "linkedin": "https://www.linkedin.com/in/example",
+  "website": "",
+  "default_resume": "/Users/pushkarverma/Projects/founderos/mac-client/cv/cv-wife-base.pdf",
+  "resumes": {
+    "financial-analyst": "/Users/pushkarverma/Projects/founderos/mac-client/cv/cv-wife-financial-analyst.pdf",
+    "accountant": "/Users/pushkarverma/Projects/founderos/mac-client/cv/cv-wife-accountant.pdf",
+    "auditor": "/Users/pushkarverma/Projects/founderos/mac-client/cv/cv-wife-auditor.pdf"
+  },
+  "answers": {
+    "location_city": "Amsterdam",
+    "location_country": "Netherlands",
+    "work_authorization": "orientation-year-permit",
+    "work_authorization_detail": "Currently holding Orientation Year (Zoekjaar) permit, requires HSM sponsorship transition",
+    "salary_floor_eur_year": 52284,
+    "years_experience": 2.0,
+    "notice_period_days": 0,
+    "needs_relocation": false,
+    "willing_to_relocate": true
+  }
+}

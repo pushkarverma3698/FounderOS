@@ -121,7 +121,7 @@ describe("fullstack is its own track with its own budget", () => {
     // A track with no phrases would fetch nothing and report "0 postings",
     // indistinguishable from an empty market.
     for (const track of TRACK_PRIORITY) {
-      expect(TRACK_TITLES[track].length, track).toBeGreaterThan(0);
+      expect(TRACK_TITLES[track]?.length, track).toBeGreaterThan(0);
     }
   });
 });

@@ -15,6 +15,7 @@ import { childLogger } from "../../infra/logger.js";
 import type { RawPosting } from "./ats-source.js";
 import { dedupeKey } from "./filters.js";
 import { screenPosting } from "./screen.js";
+import type { JobSearchProfile } from "./profile-config.js";
 
 const log = childLogger({ module: "tool:ingest_jobs" });
 
@@ -56,7 +57,10 @@ export type IngestResult =
  * screenings because the tenth had a malformed body would be the pipeline
  * failing at exactly the moment it is supposed to be unattended.
  */
-export async function screenBatch(postings: readonly RawPosting[]): Promise<IngestLine[]> {
+export async function screenBatch(
+  postings: readonly RawPosting[],
+  profile?: JobSearchProfile,
+): Promise<IngestLine[]> {
   const lines: IngestLine[] = [];
 
   for (const posting of postings) {
@@ -67,17 +71,11 @@ export async function screenBatch(postings: readonly RawPosting[]): Promise<Inge
         description: posting.description,
         ...(posting.url ? { url: posting.url } : {}),
         ...(posting.postedAt ? { postedAt: posting.postedAt } : {}),
-        // WHERE THE JOB IS, carried from the fetch. This is the value that used
-        // to be dropped here: the feed knew the country, the screener then
-        // re-guessed it from the ad's prose, and "hybrid" in an Indian posting
-        // became a claim about a Dutch office.
         ...(posting.country ? { country: posting.country } : {}),
         ...(posting.location ? { location: posting.location } : {}),
-        // The posting's OWN provenance, not this module's. An Indeed row screened
-        // through here must not be recorded as an ATS row: liveness verification
-        // reads that field to decide which check to run.
         source: posting.source ?? INGEST_SOURCE,
         ...(posting.externalId ? { externalId: posting.externalId } : {}),
+        ...(profile ? { profile } : {}),
       });
 
       if (outcome.kind === "error") {

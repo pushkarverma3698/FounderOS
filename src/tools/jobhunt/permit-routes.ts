@@ -24,6 +24,7 @@
  */
 
 import type { PostingRoute } from "./extract.js";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
 
 export type PermitBasis = "hsm" | "partner-permit" | "remote-contract" | "india-local";
 
@@ -185,37 +186,25 @@ export function routeLabel(route: string): string {
   return route in PROFILES ? PROFILES[route as PermitBasis].label : route;
 }
 
-export function isLiveBasis(basis: PermitBasis): boolean {
-  return LIVE_PERMIT_BASES.includes(basis);
+export function isLiveBasis(basis: PermitBasis, profile: JobSearchProfile = getProfile()): boolean {
+  const allowed = profile.permitBases as readonly PermitBasis[];
+  return allowed.includes(basis);
 }
 
 /**
  * Which bases to screen a posting under.
- *
- * A posting is screened under EVERY basis that could lawfully carry it, and the
- * best outcome wins (see `bestOutcome` in screen.ts). Screening under one basis
- * and calling it the answer is what produced confident rejections of roles that
- * were reachable another way.
  */
-export function basesForPosting(route: PostingRoute): PermitBasis[] {
+export function basesForPosting(route: PostingRoute, profile: JobSearchProfile = getProfile()): PermitBasis[] {
   const candidates: readonly PermitBasis[] =
     route === "remote-contract"
       ? ["remote-contract"]
       : route === "hsm"
         ? NL_BASES
         : route === "india"
-          ? // An Indian role is screened ONLY as an Indian local hire. Adding the
-            // remote-contract basis alongside it would put a euro pay yardstick
-            // beside a rupee one on the same posting and let the kinder of the two
-            // win — the two markets are judged by their own numbers or not at all.
-            ["india-local"]
+          ? ["india-local"]
           : UNCLEAR_BASES;
 
-  const live = candidates.filter(isLiveBasis);
+  const live = candidates.filter((b) => isLiveBasis(b, profile));
 
-  // Never return nothing: a posting screened under no basis would be recorded
-  // with no verdict at all, which reads as "considered and found wanting" when
-  // in fact nothing looked at it. Falling back to HSM keeps the strictest gates
-  // in play, so the failure direction is a visible reject, not a silent pass.
-  return live.length > 0 ? live : ["hsm"];
+  return live.length > 0 ? live : [(profile.permitBases[0] as PermitBasis) ?? "hsm"];
 }

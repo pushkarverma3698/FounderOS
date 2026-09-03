@@ -19,6 +19,8 @@
  * signal that rejecting it was wrong.
  */
 
+import { TENANT } from "../../core/config.js";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
 import { childLogger } from "../../infra/logger.js";
 import { matchSponsor, type SponsorMatch } from "./sponsor-match.js";
 import { getSponsorRegister, registerStaleness } from "./sponsor-registry.js";
@@ -63,8 +65,8 @@ export type { Gate, ScreenVerdict } from "./gates.js";
 const ENGAGED_STAGES = new Set(["drafted", "awaiting_approval", "applied", "replied"]);
 
 /** Which concrete routes to screen a posting under. `unclear` gets both. */
-export function routesToScreen(route: PostingRoute): ScreenRoute[] {
-  return basesForPosting(route);
+export function routesToScreen(route: PostingRoute, profile: JobSearchProfile = getProfile()): ScreenRoute[] {
+  return basesForPosting(route, profile);
 }
 
 /**
@@ -110,6 +112,8 @@ export interface PostingInput {
   readonly country?: PostingCountry;
   /** The feed's own location string, when there is one. Read only if `country` is absent. */
   readonly location?: string;
+  /** Profile context for multi-profile screening. */
+  readonly profile?: JobSearchProfile;
 }
 
 export type ScreenOutcome =
@@ -153,6 +157,7 @@ export type ScreenOutcome =
  * be invisible: both paths would keep returning confident verdicts.
  */
 export async function screenPosting(input: PostingInput): Promise<ScreenOutcome> {
+  const profile = input.profile ?? getProfile();
   const company = input.company.trim();
   const title = input.title.trim();
   if (company.length === 0 || title.length === 0) {
@@ -167,8 +172,8 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   let existing: JobApplication | null = null;
   let nearDuplicates: JobApplication[] = [];
   try {
-    existing = await findApplicationByDedupeKey(key);
-    nearDuplicates = await findApplicationsBySoftKey(softKey, key);
+    existing = await findApplicationByDedupeKey(key, profile.tenantId ?? TENANT, profile.id);
+    nearDuplicates = await findApplicationsBySoftKey(softKey, key, profile.tenantId ?? TENANT, profile.id);
   } catch (err) {
     return { kind: "error", message: `Application tracker unreachable: ${(err as Error).message}` };
   }
@@ -187,12 +192,8 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
     };
   }
 
-  // WHERE THE JOB IS, AS A FETCHED FACT. The caller's explicit country wins (the
-  // Indeed sweep knows whether it queried NL or IN); otherwise it is read off the
-  // feed's own location string. Only when neither exists does anything downstream
-  // fall back to the ad's wording — which is what used to file Indian roles as
-  // Dutch ones on the strength of the word "hybrid".
-  const country = input.country ?? countryFromLocation(input.location ?? "");
+  // WHERE THE JOB IS, AS A FETCHED FACT.
+  const country = input.country ?? countryFromLocation(input.location ?? "", profile);
   const facts = extractPostingFacts(description, country);
 
   let register: ReturnType<typeof getSponsorRegister>;
@@ -205,38 +206,35 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   const match = matchSponsor(company, register.index);
   const language = screenLanguage(description);
 
-  // Screen under every basis that could lawfully carry this posting; the best
-  // outcome wins. A role rejected on one basis and reachable on another is a real
-  // opportunity, and the single-basis design discarded it without a trace.
-  // Level and body-completeness do not vary by permit basis, so they are built
-  // once and shared across the routes rather than recomputed per route.
-  const experience = experienceGate(description, title);
+  const experience = experienceGate(description, title, profile);
   const posting = postingGate(description);
-  // Where the job sits is a fact about the posting, not about any one basis, so
-  // it is reported once for all of them — see locationGate in screen-gates.ts.
   const location = locationGate(country, facts.route);
 
-  const outcomes = routesToScreen(facts.route).map((route) => {
-    const profile = gateProfile(route);
-    // Each market is judged by its own numbers. A rupee figure against a euro
-    // reference is not approximately right, it is a different currency — so the
-    // pay gate is SELECTED by the basis rather than parameterised by it.
+  // The IND recognised-sponsor register is Dutch-immigration-specific. A basis
+  // marked sponsorRequired (currently only "hsm") is only meaningful for a
+  // profile that actually targets the Netherlands — a future profile targeting
+  // Germany/UK/US with its own "hsm"-shaped basis must not be screened against
+  // Dutch law. Guarded here rather than in permit-routes.ts because the register
+  // itself (sponsor-registry.ts) is hardcoded to the IND CSV; this flag is the
+  // seam that stops it from running for a market it has no data for.
+  const targetsNetherlands = profile.targetCountries.some((c) => c.code === "NL");
+
+  const outcomes = routesToScreen(facts.route, profile).map((route) => {
+    const gProfile = gateProfile(route);
     const pay: Gate =
-      profile.payReference === "inr"
-        ? { gate: "Pay", ...screenIndianPay(facts.pay) }
+      gProfile.payReference === "inr"
+        ? { gate: "Pay", ...screenIndianPay(facts.pay, (profile.minInrLpaFloor ?? 15) * 100_000) }
         : {
-            gate: profile.salaryFloorApplies ? "Salary" : "Rate",
+            gate: gProfile.salaryFloorApplies ? "Salary" : "Rate",
             ...screenSalaryFacts(facts.salary, { route }),
           };
+    const runSponsorGate = gProfile.sponsorRequired && targetsNetherlands;
     const gates: Gate[] = [
       ...(posting ? [posting] : []),
       ...(location ? [location] : []),
-      profile.sponsorRequired ? sponsorGate(match, stale) : basisGate(profile),
+      runSponsorGate ? sponsorGate(match, stale) : basisGate(gProfile),
       pay,
-      // Omitted entirely where it cannot apply. "✅ No Dutch-language requirement
-      // mentioned" on a Bangalore posting is a cleared check about a language
-      // nobody asked for — noise wearing the costume of information.
-      ...(profile.dutchLanguageApplies ? [{ gate: "Language", ...language }] : []),
+      ...(gProfile.dutchLanguageApplies ? [{ gate: "Language", ...language }] : []),
       experience,
     ];
     return { route, verdict: combineVerdict(gates) };
@@ -244,14 +242,12 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
 
   const chosen = bestOutcome(outcomes);
 
-  // Derived here rather than taken from the caller, for the same reason the
-  // gates are: `screen_job` and `ingest_jobs` must classify identically, and a
-  // caller-supplied track would drift silently between the two paths.
-  const track = classifyTrack(title) ?? UNCLASSIFIED_TRACK;
+  const track = classifyTrack(title, profile) ?? UNCLASSIFIED_TRACK;
 
   try {
     await recordScreenedApplication({
-      tenant_id: "turicks",
+      tenant_id: profile.tenantId ?? TENANT,
+      profile_id: profile.id,
       dedupe_key: key,
       soft_dedupe_key: softKey,
       company,
@@ -293,7 +289,7 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   // jobs that would be rejected on the sponsor gate anyway.
   if (chosen.verdict.status === "pass") {
     try {
-      await recordSignals(signalsForPosting(description, company), { track });
+      await recordSignals(signalsForPosting(description, company, profile.skillsDictionaryName), { track });
     } catch (err) {
       // allow-failopen: a lost frequency count must never discard a screening
       // verdict. The verdict is the decision; signals are the running average.

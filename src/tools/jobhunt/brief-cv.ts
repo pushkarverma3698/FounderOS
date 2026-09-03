@@ -15,37 +15,47 @@
 import { childLogger } from "../../infra/logger.js";
 import { readFullCvText } from "../career.js";
 import { TRACK_PRIORITY } from "./tracks.js";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
 
 const log = childLogger({ module: "jobhunt:brief-cv" });
 
 /**
  * Per-track CV text, read once per brief rather than once per row.
  *
+ * Iterates `profile.trackPriority` (not the hardcoded tech TRACK_PRIORITY), so
+ * a non-tech profile (e.g. Wife's finance tracks) reads its own CVs. Without
+ * this, every profile's brief iterated Pushkar's 4 tech tracks regardless of
+ * which candidate the brief was being built for.
+ *
  * Returns the tracks it could NOT read alongside the ones it could. Without that
  * list the failure is silent: a missing CV scores every posting at 0 overlap, so
  * the brief still renders a confident-looking order built from no comparison at
  * all. A log line does not reach the founder; a brief line does.
  */
-export function loadTrackCvs(): { cvs: Map<string, string>; unreadable: string[] } {
+export function loadTrackCvs(
+  profile: JobSearchProfile = getProfile(),
+): { cvs: Map<string, string>; unreadable: string[] } {
   const cvs = new Map<string, string>();
   const unreadable: string[] = [];
-  for (const track of TRACK_PRIORITY) {
-    const cv = readFullCvText(track);
-    if (cv.ok) cvs.set(track, cv.text);
+  const trackIds = profile.trackPriority.length > 0 ? profile.trackPriority : TRACK_PRIORITY;
+
+  for (const trackId of trackIds) {
+    const trackConfig = profile.tracks[trackId];
+    const explicitPaths = trackConfig?.cvPath ? [trackConfig.cvPath] : undefined;
+    const cv = readFullCvText(trackId, explicitPaths);
+    if (cv.ok) cvs.set(trackId, cv.text);
     else {
-      unreadable.push(track);
-      log.warn({ track, error: cv.error }, "Track CV unreadable — overlap unavailable");
+      unreadable.push(trackId);
+      log.warn({ track: trackId, error: cv.error }, "Track CV unreadable — overlap unavailable");
     }
   }
 
   // A row whose title matched no track is stored as "unclassified", and every
   // row screened before tracks existed carries that value. Without an entry here
   // the map lookup misses, the CV text is "", and EVERY such row scores 0/N —
-  // a ranking built from no comparison, printed with no warning. Production's
-  // first real brief showed "0/21 skills" on all three rows for exactly this
-  // reason. The shared master CV is the honest comparison for a row with no
-  // track, and it is what `readFullCvText()` returns when asked for no track.
-  const master = readFullCvText();
+  // a ranking built from no comparison, printed with no warning.
+  const masterPaths = profile.baseCvPath ? [profile.baseCvPath] : undefined;
+  const master = readFullCvText(undefined, masterPaths);
   if (master.ok) cvs.set(UNCLASSIFIED_TRACK, master.text);
   else {
     unreadable.push(UNCLASSIFIED_TRACK);

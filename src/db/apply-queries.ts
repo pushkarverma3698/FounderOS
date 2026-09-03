@@ -42,19 +42,22 @@ export const LOG_TAB_ROWS = 500;
  * in the queue" — see the columns' comment in schema.ts for why those are two
  * facts rather than one status.
  */
-export async function listApplyQueue(tenantId: string = DEFAULT_TENANT): Promise<JobApplication[]> {
+export async function listApplyQueue(
+  tenantId: string = DEFAULT_TENANT,
+  profileId?: string,
+): Promise<JobApplication[]> {
   const db = getDb();
+  const conditions = [
+    eq(jobApplications.tenant_id, tenantId),
+    inArray(jobApplications.brief_section, [...APPLYABLE_SECTIONS]),
+    isNull(jobApplications.applied_at),
+    isNull(jobApplications.skipped_at),
+  ];
+  if (profileId) conditions.push(eq(jobApplications.profile_id!, profileId));
   return db
     .select()
     .from(jobApplications)
-    .where(
-      and(
-        eq(jobApplications.tenant_id, tenantId),
-        inArray(jobApplications.brief_section, [...APPLYABLE_SECTIONS]),
-        isNull(jobApplications.applied_at),
-        isNull(jobApplications.skipped_at),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(asc(jobApplications.brief_rank));
 }
 

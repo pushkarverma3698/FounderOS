@@ -36,6 +36,7 @@ import {
 } from "./brief.js";
 import type { JobApplication } from "../../db/schema.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
 
 const log = childLogger({ module: "jobhunt:daily-brief" });
 
@@ -118,10 +119,11 @@ export function rankRows(
   applications: readonly JobApplication[],
   cvs: ReadonlyMap<string, string>,
   now: Date,
+  profile: JobSearchProfile = getProfile(),
 ): Array<{ row: JobApplication; overlap: OverlapResult }> {
   const scored = applications.map((row) => ({
     row,
-    overlap: overlapScore(row.description ?? "", cvs.get(row.track) ?? ""),
+    overlap: overlapScore(row.description ?? "", cvs.get(row.track) ?? "", profile.skillsDictionaryName),
   }));
   scored.sort((a, b) => compareOverlap(a.overlap, b.overlap));
   log.debug({ ranked: scored.length, now: now.toISOString() }, "Brief rows ranked");
@@ -168,6 +170,12 @@ export interface BriefOptions {
   readonly now?: Date;
   /** Skip network liveness checks — used by tests and by a $0 dry run. */
   readonly skipLiveness?: boolean;
+  /**
+   * Which candidate profile to build the brief for. Defaults to Pushkar's
+   * profile. Without this, every profile's brief read Pushkar's CVs and tech
+   * skills, and ranking wrote over the shared (un-scoped) brief_rank column.
+   */
+  readonly profile?: JobSearchProfile;
 }
 
 /**
@@ -178,6 +186,7 @@ export interface BriefOptions {
  */
 export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> {
   const now = opts.now ?? new Date();
+  const profile = opts.profile ?? getProfile();
   // REJECTS ARE READ BACK TOO (founder direction, 2026-08-01: "store all the data
   // we are collecting even if it is senior and of no use to us"). The brief has
   // always had a NOT LAWFUL section and it was always empty, because this query
@@ -186,17 +195,24 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
   // to show: one line each, and `verificationTargets` still refuses to spend the
   // liveness budget on them.
   const verdicts = ["pass", "flag", "reject"] as const;
-  const applications = await listActionableApplications({ verdicts });
+  // profileId scoping is what keeps Wife's brief from mixing in Pushkar's rows
+  // (and vice versa) — listActionableApplications filters by tenant_id alone
+  // when profileId is omitted, so multi-profile callers must always pass it.
+  const applications = await listActionableApplications({
+    verdicts,
+    tenantId: profile.tenantId,
+    profileId: profile.id,
+  });
   let agedOut = 0;
   try {
-    agedOut = await countAgedOutApplications({ verdicts });
+    agedOut = await countAgedOutApplications({ verdicts, tenantId: profile.tenantId, profileId: profile.id });
   } catch (err) {
     // allow-failopen: the freshness line is context, not the deliverable. Losing
     // the whole brief over a count query would trade the shortlist for a footnote.
     log.warn({ err: (err as Error).message }, "Aged-out count unavailable — freshness line will read 0");
   }
-  const { cvs, unreadable } = loadTrackCvs();
-  const scored = rankRows(applications, cvs, now);
+  const { cvs, unreadable } = loadTrackCvs(profile);
+  const scored = rankRows(applications, cvs, now, profile);
 
   const liveness = new Map<string, Liveness>();
   if (!opts.skipLiveness && scored.length > 0) {
@@ -299,7 +315,7 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
   // and get the same `rows` the renderer does, so what is stored is exactly what
   // is printed. Deriving it again when /draft fires would retarget the command
   // silently.
-  await persistBriefRanks(rows);
+  await persistBriefRanks(rows, { profileId: profile.id });
   await persistFitScores(scored);
 
   return formatDailyBrief(input);

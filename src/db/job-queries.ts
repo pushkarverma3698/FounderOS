@@ -50,46 +50,47 @@ export const LIVE_STAGES = ["drafted", "awaiting_approval", "applied", "replied"
  */
 export const APPLY_QUEUE_MAX_AGE_HOURS = intEnv("APPLY_QUEUE_MAX_AGE_HOURS", 24);
 
-/** Look up a previously screened role by its dedupe identity. */
+/**
+ * Look up a previously screened role by its dedupe identity, scoped to a
+ * specific profile_id so Wife and Pushkar can independently screen the same posting.
+ *
+ * Bug fixed 2026-09-03: previously searched only (tenant_id, dedupe_key), which
+ * caused cross-profile false-duplicate blocking — any posting Pushkar screened
+ * would appear as a duplicate for Wife's queue.
+ */
 export async function findApplicationByDedupeKey(
   dedupeKey: string,
   tenantId: string = DEFAULT_TENANT,
+  profileId?: string,
 ): Promise<JobApplication | null> {
   const db = getDb();
-  const rows = await db
-    .select()
-    .from(jobApplications)
-    .where(and(eq(jobApplications.tenant_id, tenantId), eq(jobApplications.dedupe_key, dedupeKey)))
-    .limit(1);
+  const conditions = [
+    eq(jobApplications.tenant_id, tenantId),
+    eq(jobApplications.dedupe_key, dedupeKey),
+  ];
+  if (profileId) conditions.push(eq(jobApplications.profile_id!, profileId));
+  const rows = await db.select().from(jobApplications).where(and(...conditions)).limit(1);
   return rows[0] ?? null;
 }
 
 /**
  * Roles whose title WORDS match an already-screened role at the same company,
- * excluding the exact key itself.
- *
- * This exists to catch the re-post: "Senior AI Engineer" and "AI Engineer
- * (Senior)" are one job with two spellings, and the exact-key constraint sees
- * two. It returns candidates for a human warning rather than blocking, because
- * token-set equality is not sound enough to forfeit an application on.
+ * excluding the exact key itself. Scoped to profile_id to avoid cross-profile noise.
  */
 export async function findApplicationsBySoftKey(
   softKey: string,
   excludeDedupeKey: string,
   tenantId: string = DEFAULT_TENANT,
+  profileId?: string,
 ): Promise<JobApplication[]> {
   const db = getDb();
-  return db
-    .select()
-    .from(jobApplications)
-    .where(
-      and(
-        eq(jobApplications.tenant_id, tenantId),
-        eq(jobApplications.soft_dedupe_key, softKey),
-        ne(jobApplications.dedupe_key, excludeDedupeKey),
-      ),
-    )
-    .limit(5);
+  const conditions = [
+    eq(jobApplications.tenant_id, tenantId),
+    eq(jobApplications.soft_dedupe_key, softKey),
+    ne(jobApplications.dedupe_key, excludeDedupeKey),
+  ];
+  if (profileId) conditions.push(eq(jobApplications.profile_id!, profileId));
+  return db.select().from(jobApplications).where(and(...conditions)).limit(5);
 }
 
 /**
@@ -108,7 +109,10 @@ export async function recordScreenedApplication(
     .insert(jobApplications)
     .values(row)
     .onConflictDoUpdate({
-      target: [jobApplications.tenant_id, jobApplications.dedupe_key],
+      // Updated from (tenant_id, dedupe_key) → (tenant_id, profile_id, dedupe_key)
+      // to match the ja_dedupe_uniq index update in migration 0036. Without this,
+      // re-screening Wife's job would incorrectly resolve to Pushkar's conflict target.
+      target: [jobApplications.tenant_id, jobApplications.profile_id!, jobApplications.dedupe_key],
       set: {
         company: row.company,
         registered_name: row.registered_name ?? null,
@@ -323,23 +327,24 @@ export async function listActionableApplications(
     verdicts?: readonly string[];
     limit?: number;
     tenantId?: string;
+    profileId?: string;
     maxAgeHours?: number;
   } = {},
 ): Promise<JobApplication[]> {
   const db = getDb();
   const maxAgeHours = opts.maxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
   const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+  const conditions = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    eq(jobApplications.stage, "screened"),
+    inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
+    applyQueueFreshnessSql(cutoff),
+  ];
+  if (opts.profileId) conditions.push(eq(jobApplications.profile_id!, opts.profileId));
   return db
     .select()
     .from(jobApplications)
-    .where(
-      and(
-        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
-        eq(jobApplications.stage, "screened"),
-        inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
-        applyQueueFreshnessSql(cutoff),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(desc(jobApplications.created_at))
     .limit(opts.limit ?? 100);
 }
@@ -385,23 +390,24 @@ export async function countAgedOutApplications(
   opts: {
     verdicts?: readonly string[];
     tenantId?: string;
+    profileId?: string;
     maxAgeHours?: number;
   } = {},
 ): Promise<number> {
   const db = getDb();
   const maxAgeHours = opts.maxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
   const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+  const conditions = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    eq(jobApplications.stage, "screened"),
+    inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
+    sql`NOT (${applyQueueFreshnessSql(cutoff)})`,
+  ];
+  if (opts.profileId) conditions.push(eq(jobApplications.profile_id!, opts.profileId));
   const [row] = await db
     .select({ n: sql<number>`count(*)` })
     .from(jobApplications)
-    .where(
-      and(
-        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
-        eq(jobApplications.stage, "screened"),
-        inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
-        sql`NOT (${applyQueueFreshnessSql(cutoff)})`,
-      ),
-    );
+    .where(and(...conditions));
   return Number(row?.n ?? 0);
 }
 
@@ -465,17 +471,23 @@ export type BriefSection = "do_today" | "stretch" | "ask";
  */
 export async function recordBriefRanks(
   entries: ReadonlyArray<{ id: string; section: BriefSection; rank: number }>,
-  opts: { tenantId?: string } = {},
+  opts: { tenantId?: string; profileId?: string } = {},
 ): Promise<void> {
   const db = getDb();
   const tenantId = opts.tenantId ?? DEFAULT_TENANT;
 
+  // Clear ranks for this profile only — without profileId scoping, running Wife's
+  // brief would wipe Pushkar's brief_rank values and vice versa.
+  const clearConditions = [
+    eq(jobApplications.tenant_id, tenantId),
+    isNotNull(jobApplications.brief_section),
+  ];
+  if (opts.profileId) clearConditions.push(eq(jobApplications.profile_id!, opts.profileId));
+
   await db
     .update(jobApplications)
     .set({ brief_section: null, brief_rank: null })
-    .where(
-      and(eq(jobApplications.tenant_id, tenantId), isNotNull(jobApplications.brief_section)),
-    );
+    .where(and(...clearConditions));
 
   for (const entry of entries) {
     await db
@@ -523,20 +535,16 @@ export async function recordFitScores(
 export async function getApplicationByBriefRank(
   section: BriefSection,
   rank: number,
-  opts: { tenantId?: string } = {},
+  opts: { tenantId?: string; profileId?: string } = {},
 ): Promise<JobApplication | null> {
   const db = getDb();
-  const rows = await db
-    .select()
-    .from(jobApplications)
-    .where(
-      and(
-        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
-        eq(jobApplications.brief_section, section),
-        eq(jobApplications.brief_rank, rank),
-      ),
-    )
-    .limit(1);
+  const conditions = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    eq(jobApplications.brief_section, section),
+    eq(jobApplications.brief_rank, rank),
+  ];
+  if (opts.profileId) conditions.push(eq(jobApplications.profile_id!, opts.profileId));
+  const rows = await db.select().from(jobApplications).where(and(...conditions)).limit(1);
   return rows[0] ?? null;
 }
 

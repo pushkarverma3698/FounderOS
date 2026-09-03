@@ -238,7 +238,7 @@ export async function runPooledIngest(opts: {
         continue;
       }
 
-      perTrack[track] += result.postings.length;
+      perTrack[track] = (perTrack[track] ?? 0) + result.postings.length;
       fetched += result.postings.length;
       // The row's OWN location wins; the pool's country is the fallback for a
       // posting the feed gave no location for. A "netherlands" query can return
@@ -246,7 +246,7 @@ export async function runPooledIngest(opts: {
       const batch = result.postings.map((p) => ({
         ...p,
         source: INGEST_SOURCE,
-        country: p.country && p.country !== "unknown" ? p.country : POOL_COUNTRY[pool],
+        country: (p.country && p.country !== "unknown" ? p.country : POOL_COUNTRY[pool] ?? "unknown") as any,
       }));
       collectBoardTokens(harvest, batch); // fetch boundary, before dedupe/screening
       const { unique, collapsed } = dedupePostings(batch);

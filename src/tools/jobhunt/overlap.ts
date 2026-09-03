@@ -45,9 +45,9 @@ export interface OverlapResult {
  * that nothing was measured. Ranking an unmeasured posting to the top of DO
  * TODAY would put the least legible role in front of the founder first.
  */
-export function overlapScore(description: string, cvText: string): OverlapResult {
-  const asked = extractSkillTerms(description).map((s) => s.term);
-  const cvTerms = new Set(extractSkillTerms(cvText).map((s) => s.term));
+export function overlapScore(description: string, cvText: string, dictionaryName = "tech"): OverlapResult {
+  const asked = extractSkillTerms(description, dictionaryName).map((s) => s.term);
+  const cvTerms = new Set(extractSkillTerms(cvText, dictionaryName).map((s) => s.term));
 
   const matched = asked.filter((t) => cvTerms.has(t));
   const missing = asked.filter((t) => !cvTerms.has(t));

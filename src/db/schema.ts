@@ -961,6 +961,7 @@ export const jobApplications = agentsSchema.table(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenant_id: text("tenant_id").notNull(),
+    profile_id: text("profile_id").default("pushkar-nl-tech"),
 
     /** Normalised `company::role` — the identity that prevents double-applying. */
     dedupe_key: text("dedupe_key").notNull(),
@@ -1116,14 +1117,22 @@ export const jobApplications = agentsSchema.table(
     updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (t) => ({
-    /** The gate that makes double-applying structurally impossible. */
-    dedupeUniq: uniqueIndex("ja_dedupe_uniq").on(t.tenant_id, t.dedupe_key),
+    /**
+     * The gate that makes double-applying structurally impossible.
+     * Scoped to (tenant_id, profile_id, dedupe_key) so that the same posting
+     * can be screened independently for different candidates (e.g. Pushkar vs Wife).
+     * Previously (tenant_id, dedupe_key) — screening Wife's job would overwrite
+     * Pushkar's record for the same company/title.
+     */
+    dedupeUniq: uniqueIndex("ja_dedupe_uniq").on(t.tenant_id, t.profile_id, t.dedupe_key),
     /** Monday review hot path: live applications ordered by staleness. */
     stageIdx: index("ja_stage_idx").on(t.tenant_id, t.stage, t.last_contact_at),
     /** The brief's hot path: one track's passing postings. */
     trackVerdictIdx: index("ja_track_verdict_idx").on(t.tenant_id, t.track, t.salary_status),
     /** The apply queue's hot path: unhandled rows, best first. */
     applyQueueIdx: index("ja_apply_queue_idx").on(t.tenant_id, t.applied_at, t.brief_rank),
+    /** Multi-profile filtering — added with profile_id column (0036). */
+    profileIdx: index("ja_profile_idx").on(t.tenant_id, t.profile_id, t.brief_section, t.brief_rank),
   }),
 );
 
@@ -1507,8 +1516,8 @@ export const EVOLUTION_LOOPS = ["audit", "acting"] as const;
 export type EvolutionLoop = (typeof EVOLUTION_LOOPS)[number];
 
 export const evolutionRuns = agentsSchema.table("evolution_runs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  tenant_id: text("tenant_id").notNull(),
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
 
   started_at: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   /** Null until the run completes (or fails) — see persist-findings.ts. */

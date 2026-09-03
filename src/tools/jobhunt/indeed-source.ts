@@ -91,7 +91,7 @@ export type IndeedFetch =
 export function buildKeywordQuery(tracks: readonly RoleTrack[] = TRACK_PRIORITY): string {
   const ordered = TRACK_PRIORITY.filter((t) => tracks.includes(t));
   const phrases = [
-    ...new Set(ordered.flatMap((t) => TRACK_TITLES[t].map((p) => p.replace(/:\*$/, "")))),
+    ...new Set(ordered.flatMap((t) => (TRACK_TITLES[t] ?? []).map((p) => p.replace(/:\*$/, "")))),
   ];
   if (phrases.length === 0) return "";
   const titles = phrases.map((p) => `"${p}"`).join(" or ");

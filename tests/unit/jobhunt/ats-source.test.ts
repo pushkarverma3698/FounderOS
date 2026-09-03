@@ -191,9 +191,9 @@ describe("role tracks", () => {
     // first consume that budget, so priority order is not cosmetic — it decides
     // which market actually gets screened.
     const { TRACK_TITLES } = await import("../../../src/tools/jobhunt/tracks.js");
-    expect(DEFAULT_TITLES[0]).toBe(TRACK_TITLES.ai[0]);
-    const firstBackend = DEFAULT_TITLES.indexOf(TRACK_TITLES.backend[0]!);
-    const lastAi = DEFAULT_TITLES.indexOf(TRACK_TITLES.ai[TRACK_TITLES.ai.length - 1]!);
+    expect(DEFAULT_TITLES[0]).toBe(TRACK_TITLES.ai![0]);
+    const firstBackend = DEFAULT_TITLES.indexOf(TRACK_TITLES.backend![0]!);
+    const lastAi = DEFAULT_TITLES.indexOf(TRACK_TITLES.ai![TRACK_TITLES.ai!.length - 1]!);
     expect(lastAi).toBeLessThan(firstBackend);
   });
 
@@ -206,7 +206,7 @@ describe("role tracks", () => {
     const { titlesForTracks, TRACK_TITLES } = await import(
       "../../../src/tools/jobhunt/tracks.js"
     );
-    expect(titlesForTracks(["frontend"])).toEqual([...TRACK_TITLES.frontend]);
+    expect(titlesForTracks(["frontend"])).toEqual([...(TRACK_TITLES.frontend ?? [])]);
   });
 
   it("de-duplicates titles shared across tracks", async () => {

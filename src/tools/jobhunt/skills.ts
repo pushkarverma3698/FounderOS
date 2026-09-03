@@ -25,7 +25,7 @@
  * above a frequency threshold — see gaps.ts.
  */
 
-import { SKILL_DICTIONARY, type SkillCategory, type SkillTerm } from "./skills-dictionary.js";
+import { getSkillDictionary, type SkillCategory, type SkillTerm } from "./skills-dictionary.js";
 
 /** Dictionary categories plus the bucket for terms it has never heard of. */
 export type SignalCategory = SkillCategory | "unknown";
@@ -50,30 +50,52 @@ function aliasPattern(alias: string): RegExp {
   return new RegExp(`(?<![a-z0-9])${escapeRegex(alias)}(?![a-z0-9])`);
 }
 
-/** Compiled once at module load — the sweep re-uses these across every posting. */
-const COMPILED: ReadonlyArray<{ entry: SkillTerm; patterns: readonly RegExp[] }> =
-  SKILL_DICTIONARY.map((entry) => ({
+type Compiled = ReadonlyArray<{ entry: SkillTerm; patterns: readonly RegExp[] }>;
+
+/** Compiled once per dictionary name, lazily, and cached — the sweep re-uses
+ *  these across every posting. Multi-profile: "tech" (default) and "finance"
+ *  each get their own compiled set so screening one profile never matches the
+ *  other's vocabulary. */
+const compiledByDictionary = new Map<string, Compiled>();
+const knownSurfaceFormsByDictionary = new Map<string, ReadonlySet<string>>();
+
+function getCompiled(dictionaryName: string): Compiled {
+  const cached = compiledByDictionary.get(dictionaryName);
+  if (cached) return cached;
+  const dictionary = getSkillDictionary(dictionaryName);
+  const compiled = dictionary.map((entry) => ({
     entry,
     patterns: entry.aliases.map(aliasPattern),
   }));
+  compiledByDictionary.set(dictionaryName, compiled);
+  return compiled;
+}
 
-/** Every canonical term and alias, lowercased — used to suppress known terms
- *  from the unknown pass. */
-const KNOWN_SURFACE_FORMS: ReadonlySet<string> = new Set(
-  SKILL_DICTIONARY.flatMap((e) => [e.term.toLowerCase(), ...e.aliases]),
-);
+function getKnownSurfaceForms(dictionaryName: string): ReadonlySet<string> {
+  const cached = knownSurfaceFormsByDictionary.get(dictionaryName);
+  if (cached) return cached;
+  const dictionary = getSkillDictionary(dictionaryName);
+  const forms = new Set(dictionary.flatMap((e) => [e.term.toLowerCase(), ...e.aliases]));
+  knownSurfaceFormsByDictionary.set(dictionaryName, forms);
+  return forms;
+}
 
 /**
  * Extract the dictionary terms a posting asks for. Returns a de-duplicated,
  * stably ordered list (dictionary order), so two runs over the same text
  * produce byte-identical output.
+ *
+ * `dictionaryName` selects the vocabulary — "tech" (default, Pushkar's profile)
+ * or "finance" (Wife's profile). Without this parameter, screening Wife's
+ * finance postings against the tech dictionary returns zero matched skills for
+ * every posting, so every role ranks last in the overlap-scored brief.
  */
-export function extractSkillTerms(description: string): ExtractedSignal[] {
+export function extractSkillTerms(description: string, dictionaryName = "tech"): ExtractedSignal[] {
   const haystack = description.slice(0, MAX_SCAN_CHARS).toLowerCase();
   if (haystack.trim().length === 0) return [];
 
   const found: ExtractedSignal[] = [];
-  for (const { entry, patterns } of COMPILED) {
+  for (const { entry, patterns } of getCompiled(dictionaryName)) {
     if (patterns.some((p) => p.test(haystack))) {
       found.push({ term: entry.term, category: entry.category });
     }
@@ -122,10 +144,11 @@ const TOKEN_SPLIT = /[^A-Za-z0-9.+#-]+/;
  * the shape test and would otherwise be indistinguishable from a real emerging
  * technology in the report.
  */
-export function extractUnknownTerms(description: string, companyName = ""): string[] {
+export function extractUnknownTerms(description: string, companyName = "", dictionaryName = "tech"): string[] {
   const companyTokens = new Set(
     companyName.split(TOKEN_SPLIT).filter(Boolean).map((t) => t.toLowerCase()),
   );
+  const knownSurfaceForms = getKnownSurfaceForms(dictionaryName);
 
   const seen = new Set<string>();
   const out: string[] = [];
@@ -136,7 +159,7 @@ export function extractUnknownTerms(description: string, companyName = ""): stri
 
     const lower = token.toLowerCase();
     if (seen.has(lower)) continue;
-    if (KNOWN_SURFACE_FORMS.has(lower)) continue;
+    if (knownSurfaceForms.has(lower)) continue;
     if (UNKNOWN_STOPWORDS.has(lower)) continue;
     if (companyTokens.has(lower)) continue;
 
@@ -153,10 +176,11 @@ export function extractUnknownTerms(description: string, companyName = ""): stri
 export function signalsForPosting(
   description: string,
   companyName = "",
+  dictionaryName = "tech",
 ): ExtractedSignal[] {
   return [
-    ...extractSkillTerms(description),
-    ...extractUnknownTerms(description, companyName).map((term) => ({
+    ...extractSkillTerms(description, dictionaryName),
+    ...extractUnknownTerms(description, companyName, dictionaryName).map((term) => ({
       term,
       category: "unknown" as const,
     })),

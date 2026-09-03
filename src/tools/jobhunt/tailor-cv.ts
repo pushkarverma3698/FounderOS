@@ -16,6 +16,7 @@ import { readFullCvText } from "../career.js";
 import { extractSkillTerms } from "./skills.js";
 import { overlapScore } from "./overlap.js";
 import { findSlop } from "./slop-rules.js";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
 
 const log = childLogger({ module: "tool:tailor_cv" });
 
@@ -25,6 +26,13 @@ export interface TailorCvOptions {
   readonly companyName: string;
   readonly jobTitle: string;
   readonly track?: string;
+  /**
+   * Which candidate profile this tailoring is for. Defaults to Pushkar's
+   * profile. Without this, tailoring a CV for Wife's finance roles would read
+   * Pushkar's tech CV directory (career.ts CV_DIR/CV_PATH), producing a
+   * tailored "CV" built from the wrong person's background.
+   */
+  readonly profile?: JobSearchProfile;
 }
 
 export interface TailorCvResult {
@@ -56,11 +64,20 @@ CRITICAL CONSTRAINTS (VIOLATING THESE WILL DISQUALIFY THE RESUME):
 `;
 
 export async function tailorCv(opts: TailorCvOptions): Promise<TailorCvResult> {
-  const track = opts.track ?? "ai";
-  
+  const profile = opts.profile ?? getProfile();
+  const trackConfig = opts.track ? profile.tracks[opts.track] : undefined;
+  const track = opts.track ?? profile.trackPriority[0] ?? "ai";
+
   let baseCvText = opts.cvText;
   if (!baseCvText) {
-    const fullCv = readFullCvText(track);
+    // Explicit per-track CV path (e.g. Wife's mac-client/cv/cv-wife-*.md), then
+    // the profile's base CV, then the default track-based lookup. Without this,
+    // every profile's tailoring silently read Pushkar's CV_DIR/CV_PATH.
+    const explicitPaths = [
+      ...(trackConfig?.cvPath ? [trackConfig.cvPath] : []),
+      ...(profile.baseCvPath ? [profile.baseCvPath] : []),
+    ];
+    const fullCv = readFullCvText(track, explicitPaths.length > 0 ? explicitPaths : undefined);
     if (!fullCv.ok) {
       return {
         success: false,
@@ -73,8 +90,8 @@ export async function tailorCv(opts: TailorCvOptions): Promise<TailorCvResult> {
     baseCvText = fullCv.text;
   }
 
-  const overlap = overlapScore(opts.jobDescription, baseCvText);
-  const askedTerms = extractSkillTerms(opts.jobDescription).map((s) => s.term);
+  const overlap = overlapScore(opts.jobDescription, baseCvText, profile.skillsDictionaryName);
+  const askedTerms = extractSkillTerms(opts.jobDescription, profile.skillsDictionaryName).map((s) => s.term);
 
   log.info(
     {

@@ -253,6 +253,13 @@
       "when": 1787500000000,
       "tag": "0035_tailor_note",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1788000000000,
+      "tag": "0036_jobhunt_profile",
+      "breakpoints": true
     }
   ]
 }
