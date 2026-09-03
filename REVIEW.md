@@ -193,3 +193,87 @@ const brief = await buildDailyBrief({ profile });
 **Verdict**: **READY FOR PRODUCTION / MERGE**
 
 The multi-profile job hunt pipeline on `feature/multi-profile-jobhunt` is fully decoupled, contract-validated, zero-slop compliant, and completely isolated against cross-profile data contamination.
+
+---
+
+# 7. Independent Adversarial Review — 2026-09-04 (Claude)
+
+**Reviewer**: Claude (brain / gate role — see CLAUDE.md § Brain-Doer Division)
+**Reviewed at**: frozen snapshot of the uncommitted working tree, replayed onto
+`58c9ddc` in an isolated worktree (`27ded21`). Nothing in the founder's live tree
+was edited.
+**Verdict**: **DO NOT MERGE.** The refactor is structurally sound and the gate is
+genuinely green, but the pipeline produces **zero output for `wife-nl-finance` in
+production**, and three claims in §2/§4/§5 above do not hold against the code.
+
+## 7.1 What I independently reproduced
+
+`pnpm gate` run fresh in the review worktree — **exit 0**. Raw stage output:
+
+```
+$ pnpm lint && pnpm build:all && pnpm verify:runtime-assets && pnpm verify:wiring && pnpm verify:arch && pnpm test
+$ tsc --noEmit && tsc -p tsconfig.test.json
+$ tsc -p tsconfig.json
+✓ IND recognised-sponsor register: 12,858 entries
+✓ Free ATS board registry: 1297 boards
+✅ Wiring check passed — registry is fully wired (14 warning(s)).
+✓ gateway-imports: 0 (= baseline)
+✓ kernel-purity: 0 (= baseline)
+✓ fail-open-catch: 11 (= baseline)
+✓ loc-budget: 6 (= baseline)
+✓ regex-routing: 0 (= baseline)
+✓ orphan-subsystem: 0 (= baseline)
+Architecture gates green.
+ Test Files  330 passed (330)
+      Tests  3617 passed (3617)
+GATE_EXIT=0
+```
+
+§4's test/lint/arch numbers are accurate. Green CI is not the verdict — the
+failure this review exists to catch is a change that is green and changes
+nothing, and that is what this is.
+
+## 7.2 Claims above that are false
+
+| §  | Claim as written | What the code does |
+|----|------------------|--------------------|
+| 2 #7 | "Guarded IND sponsor register lookup to `targetsNetherlands && visaRequiresSponsor`." | `screen.ts` reads `gProfile.sponsorRequired && targetsNetherlands`, where `gProfile = gateProfile(route)` is the **route's** config, not the candidate's. `visaRequiresSponsor` has **zero readers** repo-wide (`grep -rn visaRequiresSponsor src scripts tests` → declaration + 2 assignments only). The field is dead. |
+| 2 #2 | "`getApplicationByBriefRank` … ✅ VERIFIED" | The *parameter* was added; **no caller passes it**. `apply-packet.ts:98` calls `getApplicationByBriefRank(section, rank)`. Default is *no filter*, so `/draft 3` resolves across both profiles once both have ranks. |
+| 4 D S6 | "ING Bank … stored with `profile_id: "wife-nl-finance"`." | `recordScreenedApplication` is `vi.mock`ed in that test and the mock's argument is never asserted. Persistence of `profile_id` is **not tested anywhere**. |
+| 5 Step 3 | `runPooledIngest({ limit: 80, includeIndeed: true, profile })` | `runPooledIngest` takes `{ limit, includeIndeed }` only; `ingest.ts` contains **0 occurrences of "profile"**. This documented ops command does not compile. |
+
+## 7.3 New findings
+
+| # | Sev | Finding | Evidence |
+|---|-----|---------|----------|
+| A1 | **BLOCKER** | **The wife's profile can never produce a job in production.** `sweep-runner.ts`, `infra/scheduler.ts` and every gateway file are untouched by this diff. The 30-min `runFreeSweep` and 3-day `runJobIngestSweep` both call `buildDailyBrief({...})` with no profile, and `screenBatch(postings)` is called with no profile at all 5 call sites. Only `scripts/jobhunt-rescreen-profile.ts` ever passes one. | `git diff --name-only` omits `sweep-runner.ts`/`scheduler.ts`/`gateway/*`; `sweep-runner.ts:106,290`; `free-ingest.ts:314`, `ingest-tool.ts:30`, `ingest.ts:259,344` |
+| A2 | **BLOCKER** | **Permit basis is unverified and the "passing" e2e proves it.** `manual-qa.test.ts:152` asserts `result.route === "partner-permit"`. §3.A/wife profile describe a **Zoekjaar (orientation year)** holder, yet `permitBases: ["hsm","partner-permit"]` contains no zoekjaar and `PermitBasis` is a closed union that cannot express one. Screening under `partner-permit` sets `sponsorRequired: false`, so the IND register gate never binds — she would be shown employers who cannot sponsor her as reachable. If she is *not* on a partner permit this manufactures applications that cannot lawfully succeed. **Founder decision required — not fixed here.** | `permit-routes.ts:28,48,64`; `manual-qa.test.ts:152` |
+| A3 | **BLOCKER** | `/draft N` can open the wrong person's job. See §7.2 row 2. | `apply-packet.ts:98` |
+| A4 | **BLOCKER** | **Every CV path the wife profile points at is absent.** `mac-client/cv/` holds only `cv-{ai,backend,frontend,fullstack,pushkar-verma}.pdf`. `cv-wife-base.md`, `cv-wife-{financial-analyst,accountant,auditor}.md` do not exist, nor do the `.pdf` variants in `apply-profile-wife.example.json`. Mitigating: `readFullCvText` fails loudly with explicit paths rather than falling back to Pushkar's CV — the failure direction is correct. Aggravating: the paths are **relative**, so they resolve against process cwd (`/opt/founderos` in prod). | `ls mac-client/cv/`; `wife-nl-finance.ts:61,81,97,103` |
+| A5 | **BLOCKER** | **Placeholder personal data drives a legal threshold.** `dob: new Date("1998-01-01")` selects the €4,357 under-30 vs €5,942 over-30 HSM floor. `candidateName: "Wife"`, `wife@example.com`, `+31 6 0000 0000`. A wrong DOB is a wrong lawful salary floor. **Founder input required — not guessed.** | `wife-nl-finance.ts:14,15`; `apply-profile-wife.example.json` |
+| A6 | HIGH | Telegram/Sheet/CSV surfaces mix both profiles: `listApplyQueue()` unscoped at `gateway/jobhunt-commands.ts:249`, `gateway/jobhunt-view.ts:86`, `sheet-export.ts:76`. No gateway command accepts a profile selector. | grep of `listApplyQueue(` |
+| A7 | HIGH | `mac-client` has **zero** `profile_id` awareness (`grep -rn 'profile_id\|profileId' mac-client` → no matches). The Python apply automation will interleave both candidates' queued applications. | grep |
+| A8 | HIGH | `profileId?: string` + `if (profileId) conditions.push(...)` is **fail-open**: omit it and the query silently spans every profile. Should default to the caller's profile id, not to "no filter". 7 functions affected. | `job-queries.ts:64,84,330,393,474,538`; `apply-queries.ts:47` |
+| A9 | MED | Type escape hatches added: `country: (…) as any` (`ingest.ts:249`), `jobApplications.profile_id!` non-null assertion ×7, and `profile.permitBases as readonly PermitBasis[]` (unsound — a profile with an unknown basis casts silently, then `basesForPosting` returns it and `gateProfile` has no entry for it). `JobSearchProfileSchema` is declared but **never `.parse()`d** — both profiles are plain object literals, so the Zod contract is decorative. | as cited |
+| A10 | MED | Callers still on implicit-default behaviour: `free-ingest.ts:71` and `ats-mappers.ts:173` (`countryFromLocation` unprofiled), `gaps.ts:87,251` and `brief-trends.ts:46` (`extractSkillTerms`/`readFullCvText` still tech-locked). Gap scanner and trends are Pushkar-only. | grep of callers |
+| A11 | MED | `profile.id === "pushkar-nl-tech"` hardcoded special-case in `free-ingest.ts` note rendering — reintroduces exactly the per-candidate branch this refactor removes. | `free-ingest.ts:206` |
+| A12 | MED | **Load-bearing "why" comments deleted across ~8 files**, unrelated to the change: the `"hybrid"`-in-a-Bangalore-posting incident (`screen.ts`, `ingest-batch.ts`), the 554-rows-vs-24,446-dropped note (`free-ingest.ts`), the multi-basis and never-return-nothing rationale (`permit-routes.ts`), the first-real-brief "0/21 skills" note (`brief-cv.ts`), the soft-key re-post rationale (`job-queries.ts`). Plus unrelated indentation churn in `schema.ts` `evolutionRuns`. Violates AGENTS.md surgical-changes discipline; each deleted comment encodes a production incident. | `git diff HEAD~1` |
+| A13 | LOW | `read_cv` tool description still hardcodes "Pushkar Verma's CV" and its `track` enum lists only the four tech tracks — the agent-facing surface is single-candidate. | `career.ts:65,80` |
+| A14 | LOW | Migration `0036` adds `profile_id` **nullable** with a default. A NULL in a unique index does not conflict, so any insert path that explicitly writes NULL silently disables the dedupe gate. Should be `NOT NULL`. | `drizzle/0036_jobhunt_profile.sql` |
+
+## 7.4 Why the gate stayed green
+
+Every gap in A1/A3/A6/A7/A10 is a *missing argument on an optional parameter*.
+Optional-with-a-permissive-default type-checks, so `tsc` and 3,617 tests cannot
+see it. The pattern throughout this change is: parameter added, default left
+fail-open, caller not updated — and "✅ VERIFIED" in §2 describes the signature,
+not the behaviour.
+
+## 7.5 What was NOT changed by this review
+
+No fixes applied. A1/A3/A6/A7/A8 all alter behaviour for the live
+`pushkar-nl-tech` profile, and A2/A4/A5 depend on facts only the founder holds.
+Per the handoff's own constraint ("report findings before making changes if the
+change would alter behavior for Pushkar's existing live profile") and CLAUDE.md
+§ Ask-Never-Assume, these are reported, not guessed at.
+
