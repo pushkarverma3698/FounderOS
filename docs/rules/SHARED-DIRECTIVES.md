@@ -1,6 +1,6 @@
 # Shared directives — binding on EVERY agent (Claude, Antigravity, Cursor, dispatcher)
 
-> This is the single copy of the four directives that used to be pasted byte-identically into
+> This is the single copy of the directives that used to be pasted byte-identically into
 > `CLAUDE.md`, `AGENTS.md` and `GEMINI.md`. `GEMINI.md` already warned that "a partial copy is
 > how the four files this repo just consolidated drifted apart" — these blocks were exactly that
 > shape. Edit here; the three role files point at this file and must not restate it.
@@ -25,3 +25,8 @@ Before starting any complex task, you MUST research what other agents have recen
 1. Querying `turicks-brain` for recent session summaries.
 2. Listing and reading the most recent implementation plans in `docs/plans/`.
 **Why:** You are part of a swarm. Knowing the recent architectural changes and in-flight plans of your peer agents prevents you from duplicating work, reverting deliberate changes, or breaking dependent systems.
+
+## Experience & Outcome Over Code Purity (⚠️ NON-NEGOTIABLE)
+
+The primary metric for FounderOS is **Founder Friction Saved & Real-World Outcome Quality** — not abstract code aesthetics or theoretical refactoring. Every self-improvement cron and audit must analyze 3 days of real turn transcripts, user feedback, hallucination signatures, and execution friction, storing findings into `failure_lessons` and `turicks-brain`.
+**Why:** consolidated here 2026-09-05. This directive was pasted into `AGENTS.md` and `GEMINI.md` but **not** `CLAUDE.md` — so the one agent that reviews the others was the only one not bound by it. In `AGENTS.md` the paste also landed mid-list, splitting numbered items 4 and 5. That asymmetry is the failure mode this whole file exists to stop.

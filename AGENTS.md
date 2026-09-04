@@ -30,11 +30,6 @@ Every change must answer **why** before **what**:
 2. **Name the stable boundary** — What should NOT change when a vendor/SDK drifts? (Usually: tool names, HITL gates, idempotency, department wiring.)
 3. **Minimize blast radius** — Prefer an adapter/env flag over rewriting tools, prompts, or graph structure.
 4. **Grounding & Memory-First Reasoning** — Reason strictly over repo data, DB memory (`founder_context`, `turicks-brain`, `failure_lessons`), and live code. Never use ungrounded world assumptions to overcomplicate tasks.
-
-## Experience & Outcome Over Code Purity (⚠️ NON-NEGOTIABLE)
-- The primary metric for FounderOS is **Founder Friction Saved & Real-World Outcome Quality**—not abstract code aesthetics or theoretical refactoring.
-- Every self-improvement cron and audit must analyze 3 days of real turn transcripts, user feedback, hallucination signatures, and execution friction, storing findings into `failure_lessons` and `turicks-brain`.
-
 5. **Prove the real path** — Unit tests mock the provider dispatch layer; prod claims need boot probes or live evidence.
 
 **Integration rule (ADR-029):** Tools call `src/infra/providers/` — never Composio, gws, or platform REST directly. Swap `GMAIL_BACKEND`, `LINKEDIN_BACKEND` via env; departments unchanged.
@@ -176,12 +171,13 @@ If you did not run it, label the claim **NOT VERIFIED**.
 
 ## Shared directives (binding, single copy)
 
-Four directives apply to every agent in this repo and are **not repeated here** — restating them
+Five directives apply to every agent in this repo and are **not repeated here** — restating them
 is how they drift:
 
 1. **Strategic Mandate** — ship revenue-moving work over internal refactoring
 2. **Content Generation (No AI Slop)** — the `no-ai-slop` skill is mandatory for anything public
 3. **Implementation Plans & Memory** — plans go to `docs/plans/YYYY-MM-DD-feature-name.md`
 4. **Cross-Agent Awareness** — check `turicks-brain` + recent `docs/plans/` before complex work
+5. **Experience & Outcome Over Code Purity** — the metric is founder friction saved, not code aesthetics
 
 Full text, with the reasoning for each: [docs/rules/SHARED-DIRECTIVES.md](docs/rules/SHARED-DIRECTIVES.md). Read it before your first substantive action.
