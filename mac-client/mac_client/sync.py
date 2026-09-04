@@ -126,7 +126,18 @@ def run_remote(sql: str) -> str:
 #: 2026-08-24, so `/profile` in Telegram edits the same file the browser session
 #: fills forms from. A second hand-maintained copy on the laptop is how the
 #: client ends up typing an address he changed three weeks ago.
-REMOTE_PROFILE_PATH = "/opt/founderos-data/apply-profile.json"
+#: SCOPED TO ONE CANDIDATE, same reason QUEUE_SQL_TEMPLATE is: the default
+#: profile keeps this exact path (existing installs, and the /profile
+#: Telegram command on the TS side, both already point at it), any other
+#: profile gets its own sibling file — matching applyProfilePathFor in
+#: src/tools/jobhunt/apply-profile.ts, which this must not drift from.
+_APPLY_PROFILE_DIR = "/opt/founderos-data"
+
+
+def _remote_profile_path(profile_id: str) -> str:
+    if profile_id == DEFAULT_PROFILE_ID:
+        return f"{_APPLY_PROFILE_DIR}/apply-profile.json"
+    return f"{_APPLY_PROFILE_DIR}/apply-profile-{profile_id}.json"
 
 #: aws CLI has neither credentials nor a bucket name without this. Both only
 #: ever reach the Node process via systemd's EnvironmentFile= — never an SSH
@@ -138,7 +149,7 @@ REMOTE_PROFILE_PATH = "/opt/founderos-data/apply-profile.json"
 REMOTE_ENV_FILE = "/opt/founderos/.env"
 
 
-def fetch_profile() -> str | None:
+def fetch_profile(profile_id: str = DEFAULT_PROFILE_ID) -> str | None:
     """The apply profile as it stands on the VPS, or None if there is none yet.
 
     None is a real answer, not a failure: the founder may not have run
@@ -146,7 +157,12 @@ def fetch_profile() -> str | None:
     working. What is NOT tolerated is a partial or unparseable pull silently
     replacing a good local profile, so this validates before returning.
     """
-    command = ["ssh", SSH_HOST, f"sudo -n cat {REMOTE_PROFILE_PATH}"]
+    if not re.fullmatch(r"[a-z0-9-]{1,64}", profile_id or ""):
+        # Same allowlist as _queue_sql, for the same reason: this id reaches a
+        # shell command below.
+        return None
+    remote_path = _remote_profile_path(profile_id)
+    command = ["ssh", SSH_HOST, f"sudo -n cat {remote_path}"]
     try:
         done = subprocess.run(
             command, capture_output=True, text=True, timeout=SSH_TIMEOUT_S, check=False
@@ -165,15 +181,21 @@ def fetch_profile() -> str | None:
     return done.stdout
 
 
-def sync_profile(path: Path | None = None) -> bool:
+def sync_profile(path: Path | None = None, profile_id: str = DEFAULT_PROFILE_ID) -> bool:
     """Write the VPS profile over the local one. True when it was updated.
 
     Returns rather than raises, and the caller reports it — the queue is still
     worth syncing when the profile pull fails, and a stale profile is a visible
     problem (`load_profile` names every missing field) rather than a silent one.
+
+    `path` stays the first positional argument — existing callers (and this
+    module's own test suite) already call it that way. The LOCAL target is
+    always the one file this install reads from (`apply-profile.json`); it is
+    the REMOTE side that varies by `profile_id`. One install serves one
+    candidate; `profile_id` says which VPS file to pull, not where to put it.
     """
     target = path or (QUEUE_DIR.parent / "apply-profile.json")
-    remote = fetch_profile()
+    remote = fetch_profile(profile_id)
     if remote is None:
         return False
     if target.exists() and target.read_text() == remote:

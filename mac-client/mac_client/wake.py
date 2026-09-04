@@ -12,8 +12,23 @@ ever called it, because the LaunchAgent was never written.
 from __future__ import annotations
 
 from . import notify
-from .profile import load_profile
+from .profile import DEFAULT_PROFILE_ID, ProfileError, load_profile
 from .sync import SyncError, fetch_queue, save_queue, sync_profile
+
+
+def _current_profile_id() -> str:
+    """Which candidate this install serves — read BEFORE syncing.
+
+    The VPS keeps one profile file per candidate (see _remote_profile_path in
+    sync.py); syncing before knowing which one would pull the DEFAULT profile
+    onto an install that has already been set up for someone else. A brand new
+    install with no local file yet has nothing to read its identity from, so
+    it defaults the same way load_profile itself does.
+    """
+    try:
+        return load_profile().profile_id
+    except ProfileError:
+        return DEFAULT_PROFILE_ID
 
 
 def main() -> int:
@@ -22,8 +37,9 @@ def main() -> int:
     # laptop copy he changed three weeks ago is worse than one that fills from
     # today's. If the pull fails the local copy stands and `load_profile` still
     # names anything missing, so the failure direction is loud.
+    profile_id = _current_profile_id()
     try:
-        if sync_profile():
+        if sync_profile(profile_id=profile_id):
             print("✓ apply profile updated from the VPS")
     except OSError as err:
         print(f"⚠ could not refresh the apply profile ({err}) — using the local copy")
