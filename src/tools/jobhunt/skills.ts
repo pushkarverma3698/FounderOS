@@ -25,7 +25,13 @@
  * above a frequency threshold — see gaps.ts.
  */
 
-import { getSkillDictionary, type SkillCategory, type SkillTerm } from "./skills-dictionary.js";
+import {
+  FINANCE_SKILL_DICTIONARY,
+  getSkillDictionary,
+  SKILL_DICTIONARY,
+  type SkillCategory,
+  type SkillTerm,
+} from "./skills-dictionary.js";
 
 /** Dictionary categories plus the bucket for terms it has never heard of. */
 export type SignalCategory = SkillCategory | "unknown";
@@ -33,6 +39,24 @@ export type SignalCategory = SkillCategory | "unknown";
 export interface ExtractedSignal {
   readonly term: string;
   readonly category: SignalCategory;
+}
+
+/**
+ * Canonical term → category, built once so lookups don't rescan the dictionary.
+ *
+ * Built from the UNION of every profile's dictionary, not just the tech one —
+ * `categoryOf` takes no profile argument, so a term-only lookup must resolve
+ * correctly regardless of which profile matched it. Term names are namespaced
+ * by profession in practice (finance terms like "IFRS" don't collide with tech
+ * ones), so a union is safe as well as simple.
+ */
+const TERM_CATEGORY: ReadonlyMap<string, SkillCategory> = new Map(
+  [...SKILL_DICTIONARY, ...FINANCE_SKILL_DICTIONARY].map((entry) => [entry.term, entry.category]),
+);
+
+/** The dictionary category a matched term belongs to, or undefined for anything not in it. */
+export function categoryOf(term: string): SkillCategory | undefined {
+  return TERM_CATEGORY.get(term);
 }
 
 /** Bound the text we scan so one pathological posting can't stall the sweep. */

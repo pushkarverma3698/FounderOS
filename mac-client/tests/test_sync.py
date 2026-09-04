@@ -75,7 +75,7 @@ def test_the_queue_only_asks_for_unhandled_actionable_rows():
     # a question, not a submission; a handled row must not come back.
     assert "applied_at IS NULL" in sync.QUEUE_SQL_TEMPLATE
     assert "skipped_at IS NULL" in sync.QUEUE_SQL_TEMPLATE
-    assert "'do_today','stretch'" in sync.QUEUE_SQL_TEMPLATE
+    assert "'do_today','stretch','standing'" in sync.QUEUE_SQL_TEMPLATE
     assert "'ask'" not in sync.QUEUE_SQL_TEMPLATE
     # And it is scoped to ONE candidate: without this the client pulls both
     # profiles' rows and uploads its own resume to whichever it reaches.

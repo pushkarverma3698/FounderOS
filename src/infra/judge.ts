@@ -17,14 +17,13 @@
  * pure function with a unit test, not trusted as free-form prose.
  */
 
-import { ChatAnthropic } from "@langchain/anthropic";
-import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { ChatOpenAI } from "@langchain/openai";
 import type { Channel } from "./brand-validator.js";
+import { getJudgeModel, isJudgeEnabled, resolveJudgeModelId } from "./judge-model.js";
 import { childLogger } from "./logger.js";
 
-/** Judge providers we support. Kept local so infra/ doesn't depend on agents/. */
-type JudgeProvider = "anthropic" | "openrouter" | "openai" | "google-genai";
+// Provider wiring lives in judge-model.ts; re-exported so importers and the
+// existing test seams keep their current entry point.
+export { isJudgeEnabled, _resetJudgeModel } from "./judge-model.js";
 
 const log = childLogger({ module: "judge" });
 
@@ -35,78 +34,8 @@ export interface JudgeModel {
   invoke(messages: unknown): Promise<{ content: unknown }>;
 }
 
-/**
- * Critic model id. Override with JUDGE_MODEL. Default = a FREE OpenRouter model
- * from a DIFFERENT family than the Gemini drafter (rule #6 anti-sycophancy) so
- * the critic can't rubber-stamp its own generation — and costs $0 (no paid
- * Anthropic call on every outbound draft). Llama-3.3-70b follows the compact-JSON
- * instruction reliably; deepseek-r1:free also works but is chattier.
- * Accepts a provider-prefixed id (openrouter:/anthropic:/openai:/google-genai:);
- * a bare id is treated as OpenRouter for free-tier convenience.
- */
-const JUDGE_MODEL =
-  process.env["JUDGE_MODEL"]?.trim() || "openrouter:meta-llama/llama-3.3-70b-instruct:free";
 /** Memoize a verdict for this long so the interrupt() re-execution is a cache hit. */
 const JUDGE_CACHE_TTL_MS = 5 * 60_000;
-
-/** Resolve the judge model id, defaulting a bare id to the OpenRouter free tier. */
-function resolveJudgeModelId(): { provider: JudgeProvider; model: string } {
-  const raw = JUDGE_MODEL.includes(":") ? JUDGE_MODEL : `openrouter:${JUDGE_MODEL}`;
-  const sep = raw.indexOf(":");
-  const provider = raw.slice(0, sep) as JudgeProvider;
-  const model = raw.slice(sep + 1).trim();
-  const valid: JudgeProvider[] = ["anthropic", "openrouter", "openai", "google-genai"];
-  if (!valid.includes(provider) || !model) {
-    // Unrecognized override → safe default (free OpenRouter Llama).
-    return { provider: "openrouter", model: "meta-llama/llama-3.3-70b-instruct:free" };
-  }
-  return { provider, model };
-}
-
-/** True if the configured judge provider has its API key set (else gate 2 = no-op pass). */
-export function isJudgeEnabled(): boolean {
-  const { provider } = resolveJudgeModelId();
-  switch (provider) {
-    case "anthropic":
-      return Boolean(process.env["ANTHROPIC_API_KEY"]);
-    case "openrouter":
-      return Boolean(process.env["OPENROUTER_API_KEY"]);
-    case "openai":
-      return Boolean(process.env["OPENAI_API_KEY"]);
-    case "google-genai":
-      return Boolean(process.env["GOOGLE_GENERATIVE_AI_API_KEY"]);
-    default:
-      return false;
-  }
-}
-
-let _model: BaseChatModel | undefined;
-function getJudgeModel(): BaseChatModel {
-  if (!_model) {
-    const { provider, model } = resolveJudgeModelId();
-    if (provider === "anthropic") {
-      _model = new ChatAnthropic({ model, temperature: 0, maxTokens: 512 });
-    } else if (provider === "openrouter") {
-      _model = new ChatOpenAI({
-        model,
-        temperature: 0,
-        maxTokens: 512,
-        maxRetries: 2,
-        apiKey: process.env["OPENROUTER_API_KEY"] || "missing-openrouter-key",
-        configuration: { baseURL: "https://openrouter.ai/api/v1" },
-      });
-    } else {
-      // openai / google-genai judges are uncommon; route via the standard OpenAI client.
-      _model = new ChatOpenAI({ model, temperature: 0, maxTokens: 512, maxRetries: 2 });
-    }
-  }
-  return _model;
-}
-
-/** Test seam: drop the memoized model so a JUDGE_MODEL change is picked up. */
-export function _resetJudgeModel(): void {
-  _model = undefined;
-}
 
 // ── Prompt ─────────────────────────────────────────────────────────────────────
 

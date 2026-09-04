@@ -18,6 +18,7 @@ import {
   formatDailyBrief,
   selectAskable,
   selectDoToday,
+  selectStanding,
   STALE_UNDRAFTED_DAYS,
   type BriefInput,
   type BriefRow,
@@ -83,6 +84,16 @@ describe("selectAskable", () => {
       row({ id: "b", verdict: "flag", liveness: "expired" }),
     ];
     expect(selectAskable(rows).map((r) => r.id)).toEqual(["a"]);
+  });
+});
+
+describe("selectStanding", () => {
+  it("takes every row it is given — membership was already decided by the query", () => {
+    // Unlike selectDoToday/selectStretch/selectAskable, there is no predicate
+    // here: listStandingApplications (job-queries.ts) already filtered to
+    // pass + live + aged-out before this function ever sees a row.
+    const rows = [row({ id: "a" }), row({ id: "b", verdict: "flag" })];
+    expect(selectStanding(rows).map((r) => r.id)).toEqual(["a", "b"]);
   });
 });
 
@@ -231,5 +242,59 @@ describe("formatDailyBrief", () => {
 
   it("renders deterministically", () => {
     expect(formatDailyBrief(input())).toBe(formatDailyBrief(input()));
+  });
+
+  describe("the standing section — reach fix, 2026-09-01", () => {
+    it("does not print the section when there is nothing standing", () => {
+      const out = formatDailyBrief(input());
+      expect(out).not.toContain("STILL OPEN, OLDER");
+    });
+
+    it("prints a standing row with a /draft command continuing past do-today and stretch", () => {
+      const out = formatDailyBrief(
+        input({
+          rows: [row({ id: "a", verdict: "pass" })],
+          standing: [row({ id: "b", company: "KPN", ageDays: 6 })],
+        }),
+      );
+      expect(out).toContain("STILL OPEN, OLDER THAN TODAY (1)");
+      expect(out).toContain("KPN");
+      // do-today's one row is "1"; standing continues from there, so "2".
+      expect(out).toContain("/draft 2");
+    });
+
+    it("continues numbering past BOTH do-today and stretch when both are present", () => {
+      const out = formatDailyBrief(
+        input({
+          rows: [
+            row({ id: "a", verdict: "pass" }),
+            row({
+              id: "b",
+              verdict: "flag",
+              gates: [{ gate: "Experience", status: "flag", evidence: "Asks for 5+ years." }],
+            }),
+          ],
+          standing: [row({ id: "c", company: "Flow Traders", ageDays: 9 })],
+        }),
+      );
+      // do-today "1", stretch "2", so standing must be "3" — not "2", which
+      // would collide with the stretch row already printed as /draft 2.
+      expect(out).toContain("/draft 3");
+      expect(out).toContain("Flow Traders");
+    });
+
+    it("counts standing separately in the header rather than folding it into APPLY TODAY", () => {
+      const out = formatDailyBrief(
+        input({ rows: [], standing: [row({ id: "b" })] }),
+      );
+      expect(out).toContain("0 ready to send");
+      expect(out).toContain("1 still open, older");
+      expect(out).not.toContain("APPLY TODAY (1)");
+    });
+
+    it("explains itself as the same bar as APPLY TODAY, not a lesser one", () => {
+      const out = formatDailyBrief(input({ rows: [], standing: [row({ id: "b" })] }));
+      expect(out).toContain("same bar as APPLY TODAY");
+    });
   });
 });

@@ -16,16 +16,16 @@ import { intEnv } from "../../core/config.js";
 import {
   listActionableApplications,
   countAgedOutApplications,
+  listStandingApplications,
   recordLiveness,
   APPLY_QUEUE_MAX_AGE_HOURS,
 } from "../../db/job-queries.js";
 import { summariseSpend } from "../../db/job-run-queries.js";
 import { compareOverlap, overlapScore, type OverlapResult } from "./overlap.js";
 import { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
-import { parseGates } from "./gates.js";
-import { toPostingCountry } from "./country.js";
 import { buildTrends } from "./brief-trends.js";
 import { verifyLiveness, type Liveness } from "./liveness.js";
+import { toBriefRow, toLiveness } from "./brief-assemble.js";
 import { persistBriefRanks, persistFitScores } from "./brief-persist.js";
 import {
   formatDailyBrief,
@@ -84,29 +84,9 @@ export { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
  */
 export const VERIFY_TOP_N = intEnv("VERIFY_TOP_N", 60);
 
-function ageInDays(from: Date | null | undefined, now: Date): number {
-  if (!from) return 0;
-  return Math.max(0, Math.floor((now.getTime() - from.getTime()) / 86_400_000));
-}
-
-/** The only values `Liveness` actually has. Anything else is not knowledge. */
-const LIVENESS_VALUES: readonly string[] = ["live", "expired", "unverifiable"];
-
-/**
- * Narrow a stored liveness string to the union, honestly.
- *
- * `row.liveness as Liveness` was an unchecked cast, and production carried
- * `"unknown"` — the column's own default — on every row. That value is outside
- * the union, so it reached the renderer and was displayed as "closed": the brief
- * announced that three live roles had shut, on the strength of a check that had
- * never run. Anything not positively one of the three collapses to
- * `unverifiable`, which is what "we don't know" is called here.
- */
-export function toLiveness(value: unknown): Liveness {
-  return typeof value === "string" && LIVENESS_VALUES.includes(value)
-    ? (value as Liveness)
-    : "unverifiable";
-}
+// Re-exported: liveness-unknown.test.ts and anything else that imports
+// `toLiveness` from this module keeps resolving after the move.
+export { toLiveness, toBriefRow } from "./brief-assemble.js";
 
 /**
  * Rank the actionable pool by stack overlap.
@@ -238,37 +218,27 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
   const perTrack: Record<string, number> = {};
   for (const { row } of scored) perTrack[row.track] = (perTrack[row.track] ?? 0) + 1;
 
-  const rows: BriefRow[] = scored.map(({ row, overlap }) => {
-    const { gates, legacy } = parseGates(row);
-    // A row verified in THIS run was checked seconds ago; anything else is as
-    // old as its stored timestamp says, and the brief must not round that to
-    // "today". Null when no check has ever run against it.
-    const livenessAgeDays = liveness.has(row.id)
-      ? 0
-      : row.liveness_checked_at
-        ? ageInDays(row.liveness_checked_at, now)
-        : null;
-    return {
-      id: row.id,
-      company: row.company,
-      title: row.title,
-      track: row.track,
-      verdict: row.salary_status,
-      route: row.route,
-      // Read off the stored column, never re-derived. Rows screened before the
-      // column existed carry NULL and come back `unknown`, which is the truth
-      // about them — they were filed by a pipeline that recorded no country.
-      country: toPostingCountry(row.country),
-      location: row.location,
-      url: row.url,
-      overlap,
-      liveness: liveness.get(row.id) ?? toLiveness(row.liveness),
-      gates,
-      legacyGates: legacy,
-      ageDays: ageInDays(row.created_at, now),
-      livenessAgeDays,
-    };
-  });
+  const rows: BriefRow[] = scored.map(({ row, overlap }) => toBriefRow(row, overlap, now, liveness));
+
+  // The standing pool: pass, re-confirmed live, aged out of the fresh window —
+  // see listStandingApplications's own comment for why age alone stopped being
+  // the right proxy for "worth applying to". Never run through `verifyLiveness`
+  // here: it already IS a liveness-verified population, and re-checking sixty
+  // more URLs every run just to confirm what the query already guarantees would
+  // spend the same budget `VERIFY_TOP_N` exists to ration.
+  let standingRows: BriefRow[] = [];
+  let standingScored: Array<{ row: JobApplication; overlap: OverlapResult }> = [];
+  try {
+    const standingApplications = await listStandingApplications({ profileId: profile.id });
+    standingScored = rankRows(standingApplications, cvs, now);
+    standingRows = standingScored.map(({ row, overlap }) =>
+      toBriefRow(row, overlap, now, new Map()),
+    );
+  } catch (err) {
+    // allow-failopen: standing is an addition to the brief, not its core. A
+    // query failure here must not cost the founder DO TODAY.
+    log.warn({ err: (err as Error).message }, "Standing pool unavailable — section omitted");
+  }
 
   // An unreadable CV is not a cosmetic warning: it zeroes every overlap score
   // for that track, so the ranking stops being a ranking. It belongs with the
@@ -303,6 +273,7 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     screened: opts.screened ?? applications.length,
     perTrack,
     rows,
+    standing: standingRows,
     trends: await buildTrends(cvs, now, profile),
     failures: [...(opts.failures ?? []), ...cvFailure, ...untrackedNote],
     notes: opts.notes ?? [],
@@ -312,11 +283,11 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
   };
 
   // Pin the numbering BEFORE returning the text. The section selectors are pure
-  // and get the same `rows` the renderer does, so what is stored is exactly what
-  // is printed. Deriving it again when /draft fires would retarget the command
-  // silently.
-  await persistBriefRanks(rows, { profileId: profile.id });
-  await persistFitScores(scored);
+  // and get the same `rows`/`standingRows` the renderer does, so what is
+  // stored is exactly what is printed. Deriving it again when /draft fires
+  // would retarget the command silently.
+  await persistBriefRanks(rows, standingRows, { profileId: profile.id });
+  await persistFitScores([...scored, ...standingScored]);
 
   return formatDailyBrief(input);
 }

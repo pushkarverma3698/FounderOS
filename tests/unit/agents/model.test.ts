@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
 import {
@@ -55,6 +56,13 @@ describe("model id parsing", () => {
       model: "gemini-2.5-flash",
       id: "google-genai:gemini-2.5-flash",
     });
+    // gemini-2.5-flash, not gemini-flash-latest: Vertex AI does not support AI
+    // Studio's rolling "-latest" aliases (404, live-verified 2026-08-29).
+    expect(parseModelId("google-vertexai:gemini-2.5-flash")).toEqual({
+      provider: "google-vertexai",
+      model: "gemini-2.5-flash",
+      id: "google-vertexai:gemini-2.5-flash",
+    });
     expect(parseModelId("openrouter:openai/gpt-4o-mini")).toEqual({
       provider: "openrouter",
       model: "openai/gpt-4o-mini",
@@ -62,6 +70,9 @@ describe("model id parsing", () => {
     });
   });
 
+  // 2026-08-28: bare "gemini*" ids default to google-vertexai (the production-
+  // reliable path — see vertex-migration audit). google-genai: still works when
+  // explicitly prefixed, tested above.
   it("keeps legacy unprefixed names working by inference", () => {
     expect(parseModelId("gemini-2.5-flash").provider).toBe("google-vertexai");
     expect(parseModelId("claude-haiku-4-5").provider).toBe("anthropic");
@@ -95,6 +106,30 @@ describe("model id parsing", () => {
       "openrouter:google/gemini-flash-latest",
     );
   });
+
+  // 2026-08-27: DEPRECATED_MODEL_ALIASES used to redirect dead OpenRouter
+  // free-tier slugs to a literal "openrouter/free" — never a real model id
+  // (verified against the live OpenRouter catalog). That laundered a
+  // debuggable 404 (the real dead slug) into a still-broken 404 under a fake
+  // name, which is strictly worse for diagnosis. Free-tier liveness rots too
+  // fast for a static table to guess a replacement; the real defense is
+  // scripts/probe-openrouter-free-models.ts run as a pre-deploy check. These
+  // ids should now pass through unchanged so a 404 names the real culprit.
+  it("no longer launders known-dead OpenRouter free-tier slugs into a fake 'openrouter/free' id", () => {
+    const deadSlugs = [
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "meta-llama/llama-3.3-70b-instruct",
+      "qwen/qwen-2.5-72b-instruct:free",
+      "qwen/qwen3-next-80b-a3b-instruct:free",
+      "qwen/qwen3-next-80b-a3b-instruct",
+      "nousresearch/hermes-3-llama-3.1-405b:free",
+      "deepseek/deepseek-r1:free",
+      "google/gemini-2.5-flash:free",
+    ];
+    for (const slug of deadSlugs) {
+      expect(normalizeModelId(`openrouter:${slug}`)).toBe(`openrouter:${slug}`);
+    }
+  });
 });
 
 describe("getModel provider selection", () => {
@@ -107,6 +142,10 @@ describe("getModel provider selection", () => {
     delete process.env["AGENT_MODEL"];
     delete process.env["AGENT_TEMPERATURE"];
     delete process.env["OPENROUTER_API_KEY"];
+    delete process.env["GOOGLE_APPLICATION_CREDENTIALS"];
+    delete process.env["GOOGLE_CLOUD_PROJECT"];
+    delete process.env["GOOGLE_CLOUD_LOCATION"];
+    delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   });
 
   it("returns an OpenRouter-backed ChatOpenAI model by default", () => {
@@ -115,9 +154,32 @@ describe("getModel provider selection", () => {
     expect((model as unknown as { temperature: number }).temperature).toBe(0);
   });
 
-  it("returns a Google model for google-genai ids", () => {
+  it("returns its own Google GenAI model for google-genai ids, not an alias for Vertex", () => {
+    // google-genai has a real, distinct implementation (ChatGoogleGenerativeAI,
+    // API-key auth) — it stopped being a Vertex alias once that landed.
     process.env["AGENT_MODEL"] = "google-genai:gemini-2.5-flash";
+    process.env["GOOGLE_GENERATIVE_AI_API_KEY"] = "test-key";
+    expect(getModel()).toBeInstanceOf(ChatGoogleGenerativeAI);
+  });
+
+  // 2026-08-28: the vertex-migration audit found the prior attempt at this
+  // swap silently relied on ambient gcloud ADC discovery — worked on a laptop
+  // with a personal gcloud session, broke on prod (no gcloud, no ADC file).
+  // These two tests are the fail-loud contract that replaces it: construct
+  // ChatVertexAI ONLY with explicit authOptions/project, and throw a named
+  // error rather than fall through to ADC when either is missing.
+  it("returns a Vertex AI model for google-vertexai ids when credentials are configured", () => {
+    process.env["AGENT_MODEL"] = "google-vertexai:gemini-2.5-flash";
+    process.env["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/does-not-need-to-exist-for-construction.json";
+    process.env["GOOGLE_CLOUD_PROJECT"] = "test-project";
     expect(getModel()).toBeInstanceOf(ChatVertexAI);
+  });
+
+  it("throws naming exactly what's missing for google-vertexai ids without GCP credentials", () => {
+    process.env["AGENT_MODEL"] = "google-vertexai:gemini-2.5-flash";
+    delete process.env["GOOGLE_APPLICATION_CREDENTIALS"];
+    delete process.env["GOOGLE_CLOUD_PROJECT"];
+    expect(() => getModel()).toThrow(/GOOGLE_APPLICATION_CREDENTIALS and GOOGLE_CLOUD_PROJECT required/);
   });
 
   it("returns an Anthropic model for anthropic ids", () => {
@@ -164,10 +226,33 @@ describe("fallback middleware config", () => {
     expect(getModelFallbackMiddleware()).toHaveLength(1);
   });
 
+  // 2026-08-27: getConfiguredModelId()/getWorkerModelId() normalize deprecated
+  // ids; getFallbackModelIds() never did — AGENT_FALLBACK_MODELS was the one
+  // place a retired slug (meta-llama/llama-3.3-70b-instruct:free,
+  // qwen/qwen3-next-80b-a3b-instruct:free) actually lived in prod, and the
+  // alias table gave it zero protection. Fixed so the same renames apply here.
+  it("normalizes deprecated ids inside AGENT_FALLBACK_MODELS, not just AGENT_MODEL/WORKER_AGENT_MODEL", () => {
+    process.env["AGENT_FALLBACK_MODELS"] =
+      "google-genai:gemini-2.5-flash-preview-05-20,openrouter:openai/gpt-4o-mini";
+    expect(getFallbackModelIds()).toEqual([
+      "google-genai:gemini-2.5-flash",
+      "openrouter:openai/gpt-4o-mini",
+    ]);
+  });
+
   it("skips fallback models whose API keys are absent (prod-safe boot)", () => {
     process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5,openai:gpt-4o-mini";
     delete process.env["ANTHROPIC_API_KEY"];
     delete process.env["OPENAI_API_KEY"];
+    expect(() => getSupervisorModel()).not.toThrow();
+    expect(getModelFallbackMiddleware()).toEqual([]);
+  });
+
+  it("skips google-vertexai fallback models whose GCP credentials are absent (prod-safe boot)", () => {
+    process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5,google-vertexai:gemini-2.5-flash-lite";
+    delete process.env["ANTHROPIC_API_KEY"];
+    delete process.env["GOOGLE_APPLICATION_CREDENTIALS"];
+    delete process.env["GOOGLE_CLOUD_PROJECT"];
     expect(() => getSupervisorModel()).not.toThrow();
     expect(getModelFallbackMiddleware()).toEqual([]);
   });

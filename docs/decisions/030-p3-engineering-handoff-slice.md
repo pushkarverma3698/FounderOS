@@ -2,7 +2,7 @@
 
 - **Date:** 2026-06-17
 - **Status:** Accepted (beta)
-- **Follows:** [ADR-029](029-p2-engineering-subgraph-wired.md), [ADR-022](../decisions/022-typed-inter-department-contracts.md) pattern
+- **Follows:** [ADR-029](029-p2-engineering-subgraph-wired.md), [ADR-022](022-typed-interdept-contracts.md) pattern
 
 ## Context
 

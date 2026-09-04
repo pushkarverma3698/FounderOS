@@ -96,6 +96,7 @@ describe("renderCaseStudy", () => {
         status: "failed",
         step_id: "s1",
         failure: { step_id: "s1", stage: "tool", component: "search_web", message: "quota for bob@x.io hit", retryable: true },
+        tool_receipts: [],
       },
     ];
     const md = renderCaseStudy({ mission, results: failed });

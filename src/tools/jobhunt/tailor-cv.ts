@@ -17,6 +17,7 @@ import { extractSkillTerms } from "./skills.js";
 import { overlapScore } from "./overlap.js";
 import { findSlop } from "./slop-rules.js";
 import { getProfile, type JobSearchProfile } from "./profile-config.js";
+import { verifyCvClaims } from "./cv-claim-guard.js";
 
 const log = childLogger({ module: "tool:tailor_cv" });
 
@@ -191,6 +192,30 @@ Output the corrected full Markdown CV.`;
           error: `CV still contains AI slop after revision: ${violations.map(v => v.matchedText).join(", ")}`
         };
       }
+    }
+
+    // The prompt above TELLS the model never to fabricate — a wish, not a
+    // guard (CLAUDE.md "Determinism": guards must be pure functions, never
+    // prompt instructions). This is the guard: a deterministic, $0 check of
+    // every named technology, employer, title, date and degree against the
+    // base CV, run AFTER the slop gate so a caught fabrication doesn't waste
+    // a revision round on style. See cv-claim-guard.ts for exactly what it
+    // does and does not catch.
+    const claimCheck = verifyCvClaims(cleanedMarkdown, baseCvText);
+    if (!claimCheck.ok) {
+      log.error(
+        { company: opts.companyName, violations: claimCheck.violations.length },
+        "Tailored CV makes claims the base CV does not support — refusing to send it",
+      );
+      return {
+        success: false,
+        matchedSkills: overlap.matched,
+        missingSkills: overlap.missing,
+        initialOverlapRatio: overlap.ratio,
+        error: `Tailored CV contains ungrounded claims not present in the base CV: ${claimCheck.violations
+          .map((v) => `[${v.kind}] ${v.reason}`)
+          .join("; ")}`,
+      };
     }
 
     return {

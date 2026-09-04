@@ -32,6 +32,7 @@ New to the story? The **[case studies](turicks-case-studies/)** and **[blog](tur
 | [../ZERO-BASE-AUDIT.md](../ZERO-BASE-AUDIT.md) | The v2 autopsy (4 traced live failures) that mandated v3 |
 | [../ARCHITECTURE_LEDGER.md](../ARCHITECTURE_LEDGER.md) | Running ledger of production-readiness passes (v2 and v3) |
 | [PROOF.md](PROOF.md) | **Living scoreboard** — deterministic suite, kernel guarantees, debt ratchet (`pnpm proof:scoreboard`) |
+| [EVAL-AUDIT-2026-08-28.md](EVAL-AUDIT-2026-08-28.md) | **Root-cause audit of the golden-set eval** — separating harness defects from agent defects, with a ranked fix list |
 
 ---
 
@@ -45,6 +46,7 @@ New to the story? The **[case studies](turicks-case-studies/)** and **[blog](tur
 | [HITL-MATRIX.md](guides/HITL-MATRIX.md) | Every HITL-gated tool, gate patterns, observability |
 | [MEMORY-OPERATIONS.md](guides/MEMORY-OPERATIONS.md) | turicks-brain + personal-rag: populate, query, troubleshoot |
 | [MCP-SERVERS.md](guides/MCP-SERVERS.md) | MCP client bridge + read-only MCP server surface |
+| [../docs/JOBHUNT.md](JOBHUNT.md) | **The largest production consumer of the kernel** — board discovery, screening, CV tailoring, founder-click-to-submit apply flow |
 | [../docs/VPS-MCP-SETUP.md](VPS-MCP-SETUP.md) | Wiring MCP servers on the production VPS |
 | [FAQ.md](FAQ.md) | Recurring questions, answered plainly |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common failures and where to look (reading a typed `FailureReport`) |
@@ -77,15 +79,14 @@ Client-facing video engine: [VIDEO-FACTORY.md](VIDEO-FACTORY.md) · [VIDEO-PIPEL
 
 ## 🧭 Decisions — Architecture Decision Records
 
-All significant decisions live in [decisions/](decisions/). ADRs are **append-only history** — some record choices that later changed (e.g. ADR-010's v2 rebuild, superseded by v3; ADR-045 retiring the stable tier). They are kept as the decision trail, not as current instructions. Read them for *why*, read CLAUDE.md for *now*.
+All 50 decisions live in [decisions/](decisions/README.md), spanning three rewrites. ADRs are
+**append-only history** — most record choices about the v1/v2 department-supervisor architecture
+that was superseded on 2026-07-08. They are kept as the decision trail, not as current
+instructions. Read them for *why*, read CLAUDE.md for *now*.
 
-| ADR | Decision |
-|-----|----------|
-| [001](decisions/001-why-langgraph.md) | LangGraph JS — stateful graphs, native HITL, Postgres checkpointing |
-| [032](decisions/032-deterministic-anti-hallucination-guards.md) | Deterministic anti-hallucination (predecessor to the v3 receipt model) |
-| [041](decisions/041-mcp-client-bridge.md) | MCP client bridge |
-| [043](decisions/043-checkpoint-ttl-and-idempotency-window.md) | Checkpoint TTL + idempotency window |
-| [045](decisions/045-retire-stable-tier.md) | Retire the stable tier — two-stage promotion (beta → main) |
+**[decisions/README.md](decisions/README.md)** tags every ADR Current / Superseded / Historical
+context and leads with the 10 most interview-relevant ones — start there rather than reading
+chronologically.
 
 ---
 
@@ -97,17 +98,7 @@ All significant decisions live in [decisions/](decisions/). ADRs are **append-on
 | [turicks-blog/](turicks-blog/) | **Opinion-led posts** riding the AI-slop moment + a ready-to-post [LinkedIn kit](turicks-blog/linkedin-kit.md) for every piece |
 | [study/CASE-STUDY-LOG.md](study/CASE-STUDY-LOG.md) | Append-only build-in-public log (milestones, decisions, metrics) |
 | [study/POSTMORTEM-eval-outputMode.md](study/POSTMORTEM-eval-outputMode.md) | Bug postmortem: eval tool-detection via `handleToolStart` |
-
----
-
-## 🎯 Strategy — Turicks GTM
-
-| Doc | Purpose |
-|-----|---------|
-| [strategy/README.md](strategy/README.md) | Index — AI-native studio positioning |
-| [strategy/00-VISION-AUTONOMOUS-STUDIO.md](strategy/00-VISION-AUTONOMOUS-STUDIO.md) | North star, category, moat |
-| [strategy/02-OFFER-AND-PRICING.md](strategy/02-OFFER-AND-PRICING.md) | Offer + pricing ladder |
-| [strategy/03-GTM-ACQUISITION-ENGINE.md](strategy/03-GTM-ACQUISITION-ENGINE.md) | Build-in-public, Proof Drops, referrals |
+| **[study/](study/README.md#-hiring--market-study-2026-08)** | **2026 AI-engineering market study** — 911 real postings this system collected, mapped onto what the repo proves ([market](study/MARKET-2026-AI-ENGINEER.md) · [evidence map](study/EVIDENCE-MAP.md) · [actions](study/PORTFOLIO-GAPS-AND-ACTIONS.md) · [interview brief](study/INTERVIEW-BRIEF.md)) |
 
 ---
 
@@ -120,7 +111,7 @@ All significant decisions live in [decisions/](decisions/). ADRs are **append-on
 | [process/](process/) | Branch model + release process (branch → beta → main) |
 | [research/](research/) | Forward-looking research (RAG, MCP ecosystem, multi-model) |
 | [plans/](plans/) | Active plans (dated one-shot session plans are pruned) |
-| [phases/](phases/) | Phase delivery docs (active phases only) |
+| [sessions/](sessions/) | Episodic session records — what was done, fixed, and why |
 
 ---
 

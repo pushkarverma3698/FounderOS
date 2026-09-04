@@ -5,8 +5,11 @@
  * undifferentiated queue: on 2026-07-31 it screened 17 postings and 13 of them
  * needed founder attention, in no order, which is a list rather than a decision.
  *
- * WHAT IT IS: the count of skill terms a posting asks for that the CV also
- * states, over the number of terms the posting asks for.
+ * WHAT IT IS: the (category-weighted) count of skill terms a posting asks for
+ * that the CV also states, over the number of terms the posting asks for. Raw
+ * counting ranked "Mentoring" and "Agile" the same as "LangGraph" and "RAG",
+ * which let a generic infra-and-process-heavy posting outrank one that actually
+ * named the founder's specialisation (see `compareOverlap`).
  *
  * WHAT IT IS NOT: a fit score. It knows nothing about seniority, team, domain,
  * compensation, or whether Pushkar would want the job. It is named "overlap" for
@@ -21,7 +24,8 @@
  * Pure: no model call, no network, no DB. $0 and deterministic.
  */
 
-import { extractSkillTerms } from "./skills.js";
+import { categoryOf, extractSkillTerms } from "./skills.js";
+import { SKILL_CATEGORY_WEIGHT } from "./skills-dictionary.js";
 
 export interface OverlapResult {
   /** Terms in both the posting and the CV. */
@@ -71,15 +75,36 @@ export interface RankableRow {
 }
 
 /**
- * Order for the brief: matched-term count first, then ratio, then the row's own
- * order.
+ * How much a set of matched terms counts toward ranking.
  *
- * Raw count leads deliberately. A posting asking for three things the CV has all
- * three of scores 1.0, and a posting asking for twelve of which the CV has nine
- * scores 0.75 — the second is the better lead, because it is a bigger role with
- * more surface to write about. Ratio breaks ties among equal counts.
+ * Sums each term's category weight (`SKILL_CATEGORY_WEIGHT`), defaulting to 1
+ * for anything not in the dictionary — matched terms always come from
+ * `extractSkillTerms`, so this only matters for hand-built test fixtures using
+ * fake term names, which then behave exactly like the old raw count.
+ */
+function weightOf(terms: readonly string[]): number {
+  return terms.reduce((sum, term) => {
+    const category = categoryOf(term);
+    return sum + (category ? SKILL_CATEGORY_WEIGHT[category] : 1);
+  }, 0);
+}
+
+/**
+ * Order for the brief: WEIGHTED matched-term count first, then ratio, then the
+ * row's own order.
+ *
+ * Weighted, not raw, count leads. Measured, 2026-09-01: on a raw count a
+ * Windows DevOps posting matching Azure/CI-CD/Linux/Mentoring outranked an AI
+ * Engineer posting matching LangGraph/RAG/LLM/Prompt Engineering/AI Agents —
+ * every matched term counted the same, so four generic infra-and-process terms
+ * beat five terms naming the candidate's actual specialisation. Weighting by
+ * category (skills-dictionary.ts) fixes that without picking one track over
+ * another: a bigger, more substantive match still leads, same as before —
+ * "9/12 leads 3/3" — it just no longer treats "Mentoring" as equal to
+ * "LangGraph". Ratio still breaks ties among equal weight.
  */
 export function compareOverlap(a: OverlapResult, b: OverlapResult): number {
-  if (b.matched.length !== a.matched.length) return b.matched.length - a.matched.length;
+  const byWeight = weightOf(b.matched) - weightOf(a.matched);
+  if (byWeight !== 0) return byWeight;
   return b.ratio - a.ratio;
 }

@@ -44,10 +44,12 @@ describe("M0a acceptance — analyzers re-derive the 2026-08-06 hand audit", () 
   it("re-derives the unused production dependencies", () => {
     const unused = new Set(findUnusedDependencies(files, deps).map((f) => f.subject));
 
-    expect(unused).toContain("@langchain/langgraph-supervisor");
-    expect(unused).toContain("mem0ai");
+    // @langchain/langgraph-supervisor, mem0ai, and opossum were amputated
+    // (2026-08-27 portfolio audit) — removed from package.json entirely, so
+    // the analyzer can no longer find them as candidates. Their absence here
+    // IS the signal the fix landed, per this file's own characterization-test
+    // contract above.
     expect(unused).toContain("hono");
-    expect(unused).toContain("opossum");
     expect(unused).toContain("bottleneck");
   });
 

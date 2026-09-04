@@ -47,7 +47,7 @@ FROM (
   FROM agents.job_applications
   WHERE tenant_id = 'turicks'
     AND profile_id = '{profile_id}'
-    AND brief_section IN ('do_today','stretch')
+    AND brief_section IN ('do_today','stretch','standing')
     AND applied_at IS NULL
     AND skipped_at IS NULL
     AND url IS NOT NULL

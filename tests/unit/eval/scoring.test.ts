@@ -15,6 +15,7 @@ import {
   scoreHitl,
   scoreTask,
   aggregate,
+  isInfraError,
 } from "../../../src/eval/scoring.js";
 import type { GoldenTask, Observation, TaskResult } from "../../../src/eval/types.js";
 
@@ -40,6 +41,69 @@ describe("scoreRouting", () => {
 
   it("is false when nothing was routed (null)", () => {
     expect(scoreRouting(task, obs({ route: null }))).toBe(false);
+  });
+});
+
+// ── scoreRouting: whole-plan match (docs/EVAL-AUDIT-2026-08-28.md D2) ────────────
+// A correct multi-step plan like [research, comms] was scored wrong whenever the
+// expectation named the SECOND worker, because only steps[0] was checked.
+
+describe("scoreRouting — whole plan, not just steps[0]", () => {
+  it("passes when the expected worker is a LATER step of a correct plan", () => {
+    const task: GoldenTask = { id: "chain", input: "research then email", expectedRoute: "comms" };
+    const observation = obs({
+      route: "research",
+      steps: [
+        { worker: "research", objective: "look up the company" },
+        { worker: "comms", objective: "send the summary" },
+      ],
+    });
+    expect(scoreRouting(task, observation)).toBe(true);
+  });
+
+  it("still fails when the expected worker never appears anywhere in the plan", () => {
+    const task: GoldenTask = { id: "chain2", input: "research then email", expectedRoute: "sales" };
+    const observation = obs({
+      route: "research",
+      steps: [
+        { worker: "research", objective: "look up the company" },
+        { worker: "comms", objective: "send the summary" },
+      ],
+    });
+    expect(scoreRouting(task, observation)).toBe(false);
+  });
+
+  it("falls back to the single `route` field when the observation never set `steps` (older/stubbed observations)", () => {
+    const task: GoldenTask = { id: "no-steps", input: "check emails", expectedRoute: "comms" };
+    expect(scoreRouting(task, obs({ route: "comms" }))).toBe(true);
+    expect(scoreRouting(task, obs({ route: "research" }))).toBe(false);
+  });
+
+  it("treats an empty steps array the same as no plan — falls back to route", () => {
+    const task: GoldenTask = { id: "empty-steps", input: "check emails", expectedRoute: "comms" };
+    expect(scoreRouting(task, obs({ route: "comms", steps: [] }))).toBe(true);
+  });
+});
+
+// ── scoreRouting: expectedRoute:null means "a direct reply is correct" (D4) ─────
+
+describe("scoreRouting — direct-reply expectation (expectedRoute: null)", () => {
+  const task: GoldenTask = { id: "direct", input: "write me a function", expectedRoute: null };
+
+  it("passes when the planner replied directly (no route, no plan)", () => {
+    expect(scoreRouting(task, obs({ route: null }))).toBe(true);
+  });
+
+  it("fails when a plan was produced instead of a direct reply", () => {
+    const observation = obs({
+      route: "engineering",
+      steps: [{ worker: "engineering", objective: "write the function" }],
+    });
+    expect(scoreRouting(task, observation)).toBe(false);
+  });
+
+  it("fails when route is non-null even without a steps array", () => {
+    expect(scoreRouting(task, obs({ route: "engineering" }))).toBe(false);
   });
 });
 
@@ -227,5 +291,51 @@ describe("INFRA_ERROR handling", () => {
     ]);
     expect(report.infraErrors).toBe(0);
     expect(report.routing.total).toBe(1);
+  });
+});
+
+// ── isInfraError narrowing (docs/EVAL-AUDIT-2026-08-28.md D5) ────────────────────
+// The old version treated ANY non-empty error string as infrastructure, which
+// laundered a real behavioural crash (an unbounded worker loop hitting
+// LangGraph's recursion limit) into an exclusion — the published report was
+// flattered by three genuine failures being hidden, not just deflated by fifteen
+// harness bugs. A GraphRecursionError must count as a real capability miss.
+
+describe("isInfraError — narrowed to real infra shapes", () => {
+  it("classifies a genuine provider outage as infra", () => {
+    expect(isInfraError(obs({ error: "503 Service Unavailable" }))).toBe(true);
+    expect(isInfraError(obs({ error: "GoogleGenerativeAI Error: [429 Too Many Requests]" }))).toBe(true);
+    expect(isInfraError(obs({ error: "fetch failed" }))).toBe(true);
+    expect(isInfraError(obs({ error: "socket hang up" }))).toBe(true);
+  });
+
+  it("classifies the per-call timeout (ModelCallTimeoutError's message) as infra", () => {
+    // Exact wording from src/gateway/model-deadline.ts — the structured `.code
+    // === \"ETIMEDOUT\"` property does not survive being flattened to a plain
+    // string message by the invoker's catch, so the message text itself must
+    // be recognizable.
+    expect(isInfraError(obs({ error: "Model call exceeded 45000ms (planner) — treating as a transport timeout." }))).toBe(true);
+  });
+
+  it("classifies a retry-budget-exhausted message as infra", () => {
+    expect(isInfraError(obs({ error: "Retry budget exhausted — surfacing the provider error to the fallback chain" }))).toBe(true);
+  });
+
+  it("does NOT classify a GraphRecursionError as infra — it is a behavioural failure", () => {
+    // Exact wording LangGraph throws (node_modules/@langchain/langgraph/dist/pregel/index.js).
+    const message =
+      'Recursion limit of 25 reached without hitting a stop condition. You can increase the ' +
+      'limit by setting the "recursionLimit" config key.';
+    expect(isInfraError(obs({ error: message }))).toBe(false);
+  });
+
+  it("does NOT classify an ordinary planning/validation failure message as infra", () => {
+    expect(isInfraError(obs({ error: "Planner did not return JSON." }))).toBe(false);
+    expect(isInfraError(obs({ error: "Worker did not finalize with JSON for \"text.summary\"." }))).toBe(false);
+  });
+
+  it("is false when there is no error at all", () => {
+    expect(isInfraError(obs({}))).toBe(false);
+    expect(isInfraError(obs({ error: "" }))).toBe(false);
   });
 });

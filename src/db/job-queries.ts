@@ -444,6 +444,74 @@ export async function countAgedOutApplications(
 }
 
 /**
+ * How stale a `liveness_checked_at` may be and still back a STANDING row.
+ *
+ * A row enters the standing pool once it ages out of `listActionableApplications`
+ * — it stops being re-verified from that point on, because the brief pipeline
+ * only spends its liveness budget on the fresh window (`VERIFY_TOP_N`,
+ * daily-brief.ts). A "live" value left unbound would get more confident-looking
+ * with every day it sat unchecked, which is backwards. Seven days bounds the
+ * claim: a row that hasn't been re-confirmed inside a week silently drops out
+ * of standing rather than keep asserting a week-old fact as current.
+ */
+export const STANDING_LIVENESS_MAX_HOURS = intEnv("STANDING_LIVENESS_MAX_HOURS", 168);
+
+/**
+ * The reach fix for the 24h freshness window (2026-09-01).
+ *
+ * `APPLY_QUEUE_MAX_AGE_HOURS` exists so APPLY TODAY stays "today's fresh
+ * finds" rather than draining a week of standing inventory (its own docblock).
+ * That reasoning is sound for postings nobody has looked at again — but it also
+ * hides every posting the pipeline has ALREADY confirmed, this week, is still
+ * accepting applications. Measured 2026-09-01: 64 Netherlands recognised-sponsor
+ * salary-pass rows in the table, 18 of them liveness-verified live, 1 inside the
+ * 24h window. `liveness = 'live'` is a stronger "is this worth applying to"
+ * signal than `posted_at` age — it is a direct, recent confirmation rather than
+ * an inference from a timestamp — so this pool trades the age filter for that
+ * stronger one instead of just widening the window and re-admitting postings
+ * nobody has re-checked.
+ *
+ * Deliberately narrower than `listActionableApplications`: PASS only (no FLAG),
+ * because these rows are meant to read as ready to send, same bar as
+ * `isDoTodayRow` — a standing row that still needed a question would be the
+ * confusing kind of "actionable."
+ */
+export async function listStandingApplications(
+  opts: {
+    tenantId?: string;
+    profileId?: ProfileScope;
+    maxAgeHours?: number;
+    livenessMaxHours?: number;
+    limit?: number;
+  } = {},
+): Promise<JobApplication[]> {
+  const db = getDb();
+  const maxAgeHours = opts.maxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
+  const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+  const livenessCutoff = new Date(
+    Date.now() - (opts.livenessMaxHours ?? STANDING_LIVENESS_MAX_HOURS) * 60 * 60 * 1000,
+  );
+  const conditions = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    eq(jobApplications.stage, "screened"),
+    eq(jobApplications.salary_status, "pass"),
+    eq(jobApplications.liveness, "live"),
+    gte(jobApplications.liveness_checked_at, livenessCutoff),
+    sql`NOT (${applyQueueFreshnessSql(cutoff)})`,
+  ];
+  const profileWhere = profileCondition(opts.profileId);
+  if (profileWhere) conditions.push(profileWhere);
+  return db
+    .select()
+    .from(jobApplications)
+    .where(
+      and(...conditions),
+    )
+    .orderBy(desc(jobApplications.liveness_checked_at))
+    .limit(opts.limit ?? 50);
+}
+
+/**
  * Record a liveness result.
  *
  * `expired` moves the row out of the actionable pool AND writes the reason, so
@@ -487,11 +555,12 @@ export async function listRecentApplications(
 /**
  * Sections of the brief a founder can address by number.
  *
- * `do_today` and `stretch` share ONE continuous numbering: the stretch ranks
- * start where do-today's stop, so `/draft N` reaches exactly one row across
- * both. `ask` numbers itself from 1 because `/ask` addresses only that section.
+ * `do_today`, `stretch` and `standing` share ONE continuous numbering: each
+ * starts where the previous stops, so `/draft N` reaches exactly one row
+ * across all three. `ask` numbers itself from 1 because `/ask` addresses only
+ * that section.
  */
-export type BriefSection = "do_today" | "stretch" | "ask";
+export type BriefSection = "do_today" | "stretch" | "ask" | "standing";
 
 /**
  * Pin the numbering the founder just read.
@@ -593,7 +662,7 @@ export async function getApplicationByBriefRank(
  * applyQueueFreshnessSql above.
  */
 export function untailoredPrioritySql() {
-  return sql`CASE WHEN ${jobApplications.brief_section} IN ('do_today','stretch') THEN 0 ELSE 1 END`;
+  return sql`CASE WHEN ${jobApplications.brief_section} IN ('do_today','stretch','standing') THEN 0 ELSE 1 END`;
 }
 
 /** List applications clearing gates that do not have a tailored CV yet. */

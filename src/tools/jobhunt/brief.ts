@@ -44,9 +44,12 @@ import {
   isDoTodayRow,
   isStretchRow,
   orderDoToday,
+  orderStretch,
+  orderStanding,
   selectAskable,
   selectDoToday,
   selectStretch,
+  selectStanding,
 } from "./brief-select.js";
 import { overflowNote, renderNextActions } from "./brief-actions.js";
 
@@ -74,12 +77,15 @@ export {
   isStretchRow,
   orderAskable,
   orderDoToday,
+  orderStanding,
   orderStretch,
   selectAskable,
   selectDoToday,
+  selectStanding,
   selectStretch,
   ASK_CAP,
   DO_TODAY_CAP,
+  STANDING_CAP,
   STRETCH_CAP,
 } from "./brief-select.js";
 
@@ -106,6 +112,13 @@ export interface BriefInput {
   readonly screened: number;
   readonly perTrack: Readonly<Record<string, number>>;
   readonly rows: readonly BriefRow[];
+  /**
+   * Pass, re-confirmed live, but older than `maxAgeHours` — a separate pool
+   * from `rows` (job-queries.ts's `listStandingApplications`), not a subset of
+   * it. Optional so the many tests unrelated to this section don't all need
+   * updating; defaults to empty, same pattern as `agedOut`/`notes`.
+   */
+  readonly standing?: readonly BriefRow[];
   readonly trends: readonly TrendRow[];
   /** Pools that failed this run — an outage must read as an outage, never as an empty market. */
   readonly failures: readonly string[];
@@ -137,6 +150,7 @@ interface SectionTotals {
   readonly doToday: number;
   readonly stretch: number;
   readonly askable: number;
+  readonly standing: number;
 }
 
 
@@ -152,14 +166,17 @@ export function formatDailyBrief(input: BriefInput): string {
   const doToday = selectDoToday(input.rows);
   const stretch = selectStretch(input.rows);
   const askable = selectAskable(input.rows);
+  const standing = selectStanding(input.standing ?? []);
 
-  // The stretch section's numbers continue DO TODAY's over the FULL ordering,
-  // not over what DO TODAY printed — because that is what `briefRankEntries`
-  // pinned, and the printed number has to be the pinned rank or `/draft 12`
-  // tailors for the wrong company. It is why the numbers can jump from "6" to
-  // "48": rows 7–47 exist, are addressable, and are in `/csv`. The overflow
-  // note below says so rather than leaving the gap to be discovered.
+  // The stretch and standing sections' numbers continue DO TODAY's over the
+  // FULL ordering, not over what DO TODAY printed — because that is what
+  // `briefRankEntries` pinned, and the printed number has to be the pinned
+  // rank or `/draft 12` tailors for the wrong company. It is why the numbers
+  // can jump from "6" to "48": rows 7–47 exist, are addressable, and are in
+  // `/csv`. The overflow note below says so rather than leaving the gap to be
+  // discovered.
   const doTodayTotal = orderDoToday(input.rows).length;
+  const stretchTotal = orderStretch(input.rows).length;
 
   // ONE RULE FOR EVERY NUMBER IN THIS MESSAGE: a count is the true UNCAPPED
   // population, and the cap only ever appears as an explicit "+ N more not
@@ -172,6 +189,7 @@ export function formatDailyBrief(input: BriefInput): string {
     doToday: input.rows.filter(isDoTodayRow).length,
     stretch: input.rows.filter(isStretchRow).length,
     askable: input.rows.filter(isAskableRow).length,
+    standing: orderStanding(input.standing ?? []).length,
   };
 
   const sections: string[] = [renderHeader(input, totals)];
@@ -209,6 +227,27 @@ export function formatDailyBrief(input: BriefInput): string {
         `land. Nothing here needs a question first.</i>\n\n` +
         renderMarketBlocks(stretch, "/draft", "stretch", doTodayTotal + 1) +
         overflowNote(totals.stretch, stretch.length, "stretch roles", doTodayTotal + 1),
+    );
+  }
+
+  // Same bar as APPLY TODAY — pass, verified live — placed after it because it
+  // is the SAME kind of ready-to-send row, just older than the 24h window and
+  // re-confirmed rather than freshly found. Above ONE QUESTION AWAY: a standing
+  // row needs nothing further, and an ask row still needs an answer, so the
+  // stronger candidate reads first. Numbering continues do-today + stretch —
+  // see briefRankEntries (brief-persist.ts).
+  if (standing.length > 0) {
+    sections.push(
+      `<b>📌 STILL OPEN, OLDER THAN TODAY (${totals.standing})</b>\n` +
+        `<i>Cleared every check same as APPLY TODAY. These aged out of the ${input.maxAgeHours ?? 24}h ` +
+        `window, so we checked again — still accepting applications as of the last check.</i>\n\n` +
+        renderMarketBlocks(standing, "/draft", "standing", doTodayTotal + stretchTotal + 1) +
+        overflowNote(
+          totals.standing,
+          standing.length,
+          "older roles still open",
+          doTodayTotal + stretchTotal + 1,
+        ),
     );
   }
 
@@ -277,10 +316,10 @@ export function formatDailyBrief(input: BriefInput): string {
 
   if (input.spend) sections.push(renderSpend(input.spend));
 
-  const legend = renderLegend(input.rows);
+  const legend = renderLegend([...input.rows, ...(input.standing ?? [])]);
   if (legend.length > 0) sections.push(legend);
 
-  sections.push(renderNextActions(doToday, stretch, askable, doTodayTotal));
+  sections.push(renderNextActions(doToday, stretch, askable, doTodayTotal, standing, stretchTotal));
 
   return sections.join(`\n\n${RULE}\n\n`);
 }
@@ -300,20 +339,23 @@ function renderHeader(input: BriefInput, totals: SectionTotals): string {
     .map(([track, n]) => `${esc(track)} ${n}`)
     .join(" · ");
 
-  // The stretch count is here for the same reason the section exists: a header
-  // reading "Nothing actionable today" above three roles the founder can apply
-  // to right now denies the message printed underneath it, which is the same
-  // class of defect as hiding those rows.
-  const standing = [
+  // The stretch/standing/askable counts are here for the same reason those
+  // sections exist: a header reading "Nothing actionable today" above roles
+  // the founder can apply to right now denies the message printed underneath
+  // it, which is the same class of defect as hiding those rows. Named
+  // `secondaryCounts`, not `standing` — that word already means something
+  // different lower in this file (the STILL OPEN, OLDER section's rows).
+  const secondaryCounts = [
     totals.stretch > 0 ? `${totals.stretch} worth a stretch` : "",
+    totals.standing > 0 ? `${totals.standing} still open, older` : "",
     totals.askable > 0 ? `${totals.askable} one question away` : "",
   ].filter((part) => part.length > 0);
 
   const counts =
     totals.doToday > 0
-      ? [`<b>${totals.doToday} to apply to today</b>`, ...standing].join(" · ")
-      : standing.length > 0
-        ? [`<b>0 ready to send</b>`, ...standing].join(" · ")
+      ? [`<b>${totals.doToday} to apply to today</b>`, ...secondaryCounts].join(" · ")
+      : secondaryCounts.length > 0
+        ? [`<b>0 ready to send</b>`, ...secondaryCounts].join(" · ")
         : `<b>Nothing actionable today</b>`;
 
   // Printed even at 0/0 — an empty queue must read as "no fresh jobs right

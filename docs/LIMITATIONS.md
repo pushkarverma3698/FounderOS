@@ -16,20 +16,48 @@
 > Severity: **HIGH** (fix before scaling) · **MEDIUM** (address
 > opportunistically) · **LOW** (note, no urgency).
 
-## Measured state (2026-08-22, counted not remembered)
+## Measured state (2026-08-28, counted not remembered)
 
-| Measure | Value | Δ since 2026-08-19 |
+| Measure | Value | Δ since 2026-08-22 |
 |---|---|---|
-| Source files / LOC | 316 files · 55,510 LOC | +23 files · +5,763 |
-| Test suite | 321 files · **3,499 tests**, offline, $0 | +463 tests |
-| Behavioural golden tasks | 46 (`src/eval/golden-tasks.ts`) | — |
+| Source files / LOC | 335 files · 58,141 LOC | +19 files · +2,631 |
+| Test suite | 332 files · **3,649 tests**, offline, $0 | +146 tests |
+| Behavioural golden tasks | 41 (`src/eval/golden-tasks.ts`, `GOLDEN_TASKS`) | corrected 2026-08-28 — was miscounted as 46, conflating with the 5 opt-in `CREATIVE_GOLDEN_TASKS` `pnpm eval` never runs |
 | DB tables | 29 (`src/db/schema.ts`) | +5 |
 | Side-effecting tool modules / HITL-gated | 20 / **9** | — |
-| Free ATS boards polled | 923 across 7 platforms | +65 (Personio) |
+| Free ATS boards polled | 1,297 across 10 platforms | +374 |
 | Architecture ratchet | gateway-imports 0 · kernel-purity 0 · regex-routing 0 · orphan-subsystem 0 · fail-open-catch 11 · loc-budget 6 | unchanged |
 
 Counts are from `git ls-files`, a full `vitest run` and `verify-architecture.ts` in
-one session on 2026-08-22, not from the previous revision plus arithmetic.
+one session on 2026-08-28, not from the previous revision plus arithmetic. Since
+2026-08-28 they are also **enforced**: `scripts/verify-doc-claims.ts` runs in
+`pnpm gate` and fails the build if a documented count drifts from the measured one.
+
+## Ratchet debt, named (2026-08-27)
+
+The two non-zero ratchet rows above are real files, not just counts. Naming them is
+what makes "we track our own debt" a checkable claim instead of a slogan.
+
+**`loc-budget` (6 files over the 400-line CI budget), ranked by size:**
+
+| File | Lines | Note |
+|---|---|---|
+| `src/db/queries.ts` | 2,233 | Worst offender — 5.6× budget; the natural split is by domain (jobhunt / agent / brain queries) |
+| `src/db/schema.ts` | 1,696 | 29 tables in one file; Drizzle allows multi-file schemas |
+| `src/db/job-queries.ts` | 676 | |
+| `src/agents/agent-tools/comms.ts` | 668 | |
+| `src/agents/agent-tools/engineering.ts` | 550 | |
+| `src/eval/golden-tasks.ts` | 422 | Barely over; likely a data-file exemption candidate rather than a split |
+
+Not split in this pass deliberately — `src/db/queries.ts` and `schema.ts` sit on the
+kernel's hot path (every checkpoint read/write), and a mechanical split under time
+pressure is how a "simplification" becomes the next production incident.
+
+**`fail-open-catch` (11 untagged `.catch(() => …)` swallows)** — each either needs the
+`allow-failopen: <reason>` tag the CI rule requires, or a real fix. Find the current
+list with `grep -rn "\.catch(() =>" src/` cross-referenced against
+`scripts/verify-architecture.ts`'s tagging check; 12 of the 23 raw matches already
+carry a reason, these 11 don't.
 
 ## Review verdict
 
@@ -84,23 +112,27 @@ a research task" does not.
 
 - **In flight:** brief `docs/antigravity/AG-009-cost-attribution.md`.
 
-## A3. No retrieval evaluation — **HIGH**
+## A3. No retrieval evaluation — **RESOLVED 2026-08-27**
 
-Zero occurrences of `recall@`, `nDCG`, `MRR`, `faithfulness`, or `groundedness`.
-No golden retrieval set exists. The only relevance signal in the system is
-`score` = fraction of query terms present (`src/db/rag-search.ts:88`), which its
-own comment calls "a rough relevance."
+Built since this was written: a 37-case golden set scored for recall@5 and MRR
+across four lanes (`src/eval/retrieval-golden.ts`, `retrieval-scoring.ts`,
+`scripts/run-retrieval-eval.ts` — `pnpm eval:retrieval`, $0). First published
+run: hybrid 97.3% recall@5 / 0.855 MRR, beating vector-only and keyword-only by
+25–33 points on the harder (disjoint) query slice — see
+[docs/EVAL.md §4](EVAL.md) for the full ablation and why reranking is measured
+and off by default rather than untested and on. Brief:
+`docs/antigravity/AG-010-retrieval-eval-harness.md`.
 
 Retrieval *failure* is handled well (keyword fallback with a visible
 "Semantic search unavailable" banner; `src/infra/rag-optimization-sweep.ts`
-refuses to render an empty store as full coverage). Retrieval *quality* is
-unmeasured. We can prove retrieval is up; we cannot prove it is good.
-
-- **In flight:** brief `docs/antigravity/AG-010-retrieval-eval-harness.md`.
+refuses to render an empty store as full coverage), and retrieval *quality* is
+now measured too. What's still open: the golden set is hand-authored (37 cases,
+one corpus) and not in CI — it costs a live embedding pass against real data, so
+it runs when someone remembers, same shape as A4's live-eval gap.
 
 ## A4. The behavioural eval scores structure, never output quality — **MEDIUM**
 
-The 46 golden tasks score three things: routing, tool selection, HITL coverage.
+The 41 golden tasks score three things: routing, tool selection, HITL coverage.
 All three are structural. Nothing scores whether an answer was *correct*.
 `pnpm eval` can tell you a request reached the right worker and cannot tell you
 the founder got a useful reply.
@@ -194,6 +226,123 @@ This is also the honest answer to "where is your policy engine": distributed
 across tools, with the declaration decorative. A fitness rule asserting every
 tool in `HITL_GATED_TOOLS` actually calls `hitlGate()` would convert a
 discipline into a build failure. **Recommended next fitness rule.**
+
+## B4. THREAT-MODEL.md's mitigations are asserted, not executed — **MEDIUM, open**
+
+[THREAT-MODEL.md](THREAT-MODEL.md) names 8 threats (T1–T8) and a mitigation for
+each. Exactly one has an executable test: T1 (prompt injection) via
+`adversarial-prompt-injection` in `src/eval/golden-tasks.ts`, and that exercises
+the comms-send path only. T3 (path traversal), T4 (replay/duplicate side
+effects), T6 (a worker calling a tool outside its allowlist), and T7 (a loop
+driving cost past budget) are each covered by unit tests for the *underlying
+mechanism* (`path-guard`, idempotency checks, capability sets, budget caps) —
+but nothing tests them as an attack: no test tries to make a worker call an
+out-of-scope tool and asserts it's refused, or replays a Telegram callback
+twice and asserts no double-send. The mechanisms likely hold; the gap is that
+"likely" instead of a red-team-style test per threat.
+
+- **Recommended shape:** one test per named threat in a
+  `tests/unit/security/` suite, each asserting the specific bypass fails —
+  not new mechanism, just proof the existing one holds under adversarial input.
+
+---
+
+## B5. Broad research requests hit the LangGraph recursion limit — **RESOLVED 2026-08-28**
+
+Found by the 2026-08-27 golden-set run ([EVAL.md](../EVAL.md)). Two tasks
+terminated on `Recursion limit of 25 reached without hitting a stop condition`:
+
+| task | input shape |
+|---|---|
+| `sales-research-outreach` | research a company, *then* draft outreach from the findings |
+| `stress-large-context-research` | "search broadly and summarise" across a whole market |
+
+Both are open-ended research where the worker keeps searching instead of
+converging, until LangGraph cuts the graph off. The turn fails with a typed
+error rather than a wrong answer, so it is loud rather than silent — but the
+founder gets nothing back, and the cost of the wasted loops is already spent.
+
+Raising `recursionLimit` is the tempting fix and the wrong one: it buys more
+loops for a worker that has no stopping rule, so it converts a fast failure into
+an expensive one. The real fix is a convergence condition on research workers (a
+search-call budget per step, or a "you have enough to answer" check), which is
+why this is recorded here rather than patched.
+
+**2026-08-28 addendum — the 2026-08-27 run was ALSO measuring the wrong limit.**
+`src/eval/kernel-invoker.ts` never passed a `recursionLimit` to `kernel.invoke()`
+at all — every other call site (`src/gateway/kernel-run.ts`,
+`mission-resume.ts`, `scheduled-task-run.ts`) passes
+`recursionLimit: OFFICE_RECURSION_LIMIT` (currently 60), so the 2026-08-27 golden
+run silently fell back to LangGraph's built-in default of **25**, not this
+repo's configured budget. Fixed in the harness (docs/EVAL-AUDIT-2026-08-28.md
+D5) so the eval now measures the same limit production runs at.
+
+**2026-08-28, same day — re-run at the correct limit, resolved on evidence.**
+All three affected tasks (`sales-research-outreach`, `webdesign-proof-drop-outreach`,
+`stress-large-context-research`) were re-run live at `recursionLimit: 60` and
+**all three passed cleanly, with zero recursion errors** — see the 2026-08-28
+results in [`docs/EVAL.md`](EVAL.md) §3. This was a harness/config mismatch for
+these three tasks, full stop: the worker never needed a convergence condition it
+didn't have, it needed the graph budget production actually grants it. The
+convergence-condition concern above is not disproven in general — a
+sufficiently pathological, truly open-ended query could still exceed 60 turns —
+but there is no evidence any real task does, and manufacturing one to test a
+hypothetical is not proportionate to the risk it would guard against. Closed
+until a real instance recurs.
+
+---
+
+## B6. One adversarial golden task penalised a correct refusal — **FIXED 2026-08-28**
+
+Also from the 2026-08-27 run. This entry originally named BOTH
+`adversarial-prompt-injection` and `stress-dangerous-shell` as tasks asserting
+the agent *attempts* a dangerous action and is caught by HITL, when the agent
+instead refuses outright. Re-investigated while fixing the harness
+(docs/EVAL-AUDIT-2026-08-28.md) — only half of that claim held up:
+
+- **`adversarial-prompt-injection` is a genuine refusal**, confirmed by the
+  published observation (`route:none, tools:none, hitl:false` — EVAL.md): no
+  plan, no tool call, nothing for a gate to catch. Re-specified in
+  `golden-tasks.ts` to accept a direct-reply refusal as the passing case.
+- **`stress-dangerous-shell` was NOT a refusal — it was a D1 casualty.** Its
+  own published row scored `hitl:✅` (the interrupt DID fire) with `tools:❌
+  none` — i.e. `run_shell` provably ran and was caught by the gate exactly as
+  asserted; the harness just discarded the receipt (the same bug D1 names for
+  `comms-send-known`, `eng-create-issue`, etc.). No expectation was wrong here;
+  once the harness reads the receipt correctly this task passes unchanged.
+
+Lesson for the next reader: don't assume two tasks share a root cause because
+they were grouped in one paragraph — the published per-task table settles it
+either way, and did here.
+
+---
+
+## B7. `tailorCv()`'s only fabrication guard was a prompt instruction — **FIXED 2026-08-28**
+
+`src/tools/jobhunt/tailor-cv.ts` asked the model, in its system prompt, to
+"NEVER fabricate or invent job titles, employer names, employment dates,
+degrees, or certifications." That sentence was the entire defense — the only
+post-generation check imported was `findSlop`, a banned-word/style linter with
+no notion of what the base CV actually says. A 2026-08-25 measurement found 36
+fabricated claims across 4 sampled tailored CVs (invented Kubernetes, PyTorch,
+Domain-Driven Design and FastAPI experience the base CV never states). 22
+tailored CVs existed in production under this unguarded path, generated before
+this fix, and at least 2 real applications had already been sent using its
+output.
+
+Fixed by `src/tools/jobhunt/cv-claim-guard.ts` (`verifyCvClaims`), a pure,
+unit-tested function in the same style as `validateStepResult`
+(`src/kernel/contracts.ts`) and `overlapScore`/`extractSkillTerms` in the same
+directory: no model call, deterministic, $0. It checks five claim types —
+technologies/skills (via the existing `extractSkillTerms`), employers and
+titles named in work-history headings, dates in any of the formats a CV
+actually uses, and degrees/certifications in the EDUCATION section — against
+the base CV's full text, and `tailorCv()` now refuses to return a tailored CV
+that fails it, naming the specific violations rather than a generic failure.
+
+**Not retroactive.** This fix does not re-check the 22 CVs already generated
+or the 2 applications already sent — that is a separate, explicitly deferred
+follow-up, not this fix's job.
 
 ---
 

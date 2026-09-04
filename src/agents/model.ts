@@ -10,6 +10,7 @@
 
 import { ChatAnthropic } from "@langchain/anthropic";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
 import { modelFallbackMiddleware } from "langchain";
@@ -43,14 +44,20 @@ const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
   // gemini-flash-latest is Google's rolling alias to the current model.
   "google/gemini-2.5-flash": "google/gemini-flash-latest",
   "gemini-2.5-flash": "gemini-flash-latest",
-  "google/gemini-2.5-flash:free": "google/gemma-4-31b-it:free",
-  "meta-llama/llama-3.3-70b-instruct:free": "openrouter/free",
-  "meta-llama/llama-3.3-70b-instruct": "openrouter/free",
-  "qwen/qwen-2.5-72b-instruct:free": "openrouter/free",
-  "qwen/qwen3-next-80b-a3b-instruct:free": "openrouter/free",
-  "qwen/qwen3-next-80b-a3b-instruct": "openrouter/free",
-  "nousresearch/hermes-3-llama-3.1-405b:free": "openrouter/free",
-  "deepseek/deepseek-r1:free": "openrouter/free",
+  // 2026-08-27: dropped the OpenRouter free-tier dead-slug entries that used
+  // to live here (meta-llama/llama-3.3-70b-instruct:free,
+  // qwen/qwen3-next-80b-a3b-instruct:free, etc.). They all pointed at
+  // "openrouter/free" or "google/gemma-4-31b-it:free" — guesses at "whatever
+  // free model is alive today" baked into a compile-time table. That's the
+  // wrong mechanism: free-tier slugs rot on a ~2-3 week cycle (this table was
+  // patched three times, 08-06/08-23/08-27, chasing it) and a stale guess is
+  // no better than the dead id it replaces — worse, actually: it swaps a
+  // debuggable 404 (the real slug) for a still-broken 404 under a fake name
+  // ("openrouter/free" was never a real OpenRouter model id). Live liveness
+  // can only be established by calling the API, which is what
+  // scripts/probe-openrouter-free-models.ts does as a pre-deploy check.
+  // Aliases below stay because they're real, vendor-documented renames with a
+  // guaranteed-live successor, not guesses.
 };
 
 export function normalizeModelId(modelId: string): string {
@@ -175,6 +182,9 @@ export function resolveTemperature(): number {
 
 function inferLegacyProvider(model: string): ModelProvider {
   const lower = model.toLowerCase();
+  // Bare "gemini*" ids (no provider prefix) default to Vertex AI — the
+  // production-reliable path (see buildModel). google-genai: still works when
+  // explicitly prefixed.
   if (lower.includes("gemini")) return "google-vertexai";
   if (lower.includes("claude")) return "anthropic";
   return "openai";
@@ -200,7 +210,7 @@ export function parseModelId(modelId: string): ParsedModelId {
 
   if (!["google-vertexai", "google-genai", "openai", "anthropic", "openrouter"].includes(provider)) {
     throw new Error(
-      `Unsupported AGENT_MODEL provider "${provider}". Use google-vertexai:, openai:, anthropic:, or openrouter:. (google-genai is supported as an alias for google-vertexai)`,
+      `Unsupported AGENT_MODEL provider "${provider}". Use google-vertexai:, google-genai:, openai:, anthropic:, or openrouter:.`,
     );
   }
 
@@ -213,10 +223,15 @@ export function getConfiguredModelId(): string {
 }
 
 export function getFallbackModelIds(): string[] {
+  // normalizeModelId() applies here too — previously only getConfiguredModelId()
+  // and getWorkerModelId() normalized, so AGENT_FALLBACK_MODELS (the one place
+  // a retired slug actually lived in prod) got zero protection from the alias
+  // table above.
   return (process.env["AGENT_FALLBACK_MODELS"] ?? "")
     .split(",")
     .map((m) => m.trim())
-    .filter((m) => m.length > 0);
+    .filter((m) => m.length > 0)
+    .map(normalizeModelId);
 }
 
 export function getModel(): BaseChatModel {
@@ -272,10 +287,38 @@ function buildModel(
 ): BaseChatModel | null {
   const optional = opts.optional ?? false;
 
-  if (parsed.provider === "google-vertexai" || parsed.provider === "google-genai") {
-    // Vertex AI uses Application Default Credentials. 
-    // It will automatically pick up GOOGLE_APPLICATION_CREDENTIALS or run on GCP infrastructure without keys.
+  if (parsed.provider === "google-vertexai") {
+    // Vertex AI authenticates via a GCP service-account key, never an API key.
+    // Fail loud here rather than let ChatVertexAI fall through to ambient ADC
+    // discovery (gcloud login file / GCE metadata) — that path only "works" on
+    // a machine that happens to have a personal gcloud session and silently
+    // breaks on any host that doesn't (prod has neither gcloud nor an ADC file).
+    const credsPath = process.env["GOOGLE_APPLICATION_CREDENTIALS"];
+    const project = process.env["GOOGLE_CLOUD_PROJECT"];
+    if (!credsPath || !project) {
+      if (optional) return null;
+      const missing = [!credsPath && "GOOGLE_APPLICATION_CREDENTIALS", !project && "GOOGLE_CLOUD_PROJECT"]
+        .filter(Boolean)
+        .join(" and ");
+      throw new Error(`${missing} required for google-vertexai: models (GCP service-account auth).`);
+    }
     return new ChatVertexAI({
+      model: parsed.model,
+      temperature,
+      maxRetries: 2,
+      authOptions: { keyFilename: credsPath, projectId: project },
+      location: process.env["GOOGLE_CLOUD_LOCATION"]?.trim() || "us-central1",
+    });
+  }
+
+  if (parsed.provider === "google-genai") {
+    const apiKey = process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
+    if (!apiKey) {
+      if (optional) return null;
+      throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is required for google-genai: models.");
+    }
+    return new ChatGoogleGenerativeAI({
+      apiKey,
       model: parsed.model,
       temperature,
       maxRetries: 2,

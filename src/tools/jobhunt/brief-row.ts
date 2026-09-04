@@ -49,7 +49,7 @@ import { routeLabel } from "./permit-routes.js";
  * Values match the vocabulary `persistBriefRanks` writes to `brief_section`,
  * so the printed reason and the stored row describe themselves the same way.
  */
-export type BriefSection = "do_today" | "stretch" | "ask";
+export type BriefSection = "do_today" | "stretch" | "ask" | "standing";
 
 export interface BriefRow {
   readonly id: string;
@@ -158,7 +158,10 @@ export function whyLine(row: BriefRow, section: BriefSection): string {
   const blocking = row.gates.filter((g) => g.status === row.verdict);
 
   if (row.verdict === "pass") {
-    return `✅ <b>Why it's here:</b> every check below cleared. Nothing is blocking an application.`;
+    return section === "standing"
+      ? `✅ <b>Why it's here:</b> every check cleared, same bar as APPLY TODAY — this one is older ` +
+        `than today's fresh window, but we checked again and it is still accepting applications.`
+      : `✅ <b>Why it's here:</b> every check below cleared. Nothing is blocking an application.`;
   }
   if (blocking.length === 0) {
     return `❓ <b>Why it's here:</b> the verdict is "${esc(row.verdict)}" but no check explains it — that is our bug, not the employer's.`;
@@ -247,13 +250,15 @@ export function renderRow(
   const meta =
     `    <i>${esc(where)} · ${esc(row.track)} track · basis: ${esc(routeLabel(row.route))} · ` +
     `seen ${row.ageDays === 0 ? "today" : `${row.ageDays}d ago`}</i>`;
-  // /applied shares do_today/stretch's numbering (handleApplied resolves
-  // against the same two sections `/draft` does) — printing it next to an ASK
-  // row would show a command that resolves a DIFFERENT row under the same
+  // /applied shares do_today/stretch/standing's numbering (handleApplied
+  // resolves against the same sections `/draft` does) — printing it next to an
+  // ASK row would show a command that resolves a DIFFERENT row under the same
   // number, since ASK numbers its own section independently.
   const action = command
     ? `\n    ▸ ${cmd(`${command} ${index}`)}` +
-      (section === "do_today" || section === "stretch" ? ` · ${cmd(`/applied ${index}`)}` : "")
+      (section === "do_today" || section === "stretch" || section === "standing"
+        ? ` · ${cmd(`/applied ${index}`)}`
+        : "")
     : "";
 
   return (
