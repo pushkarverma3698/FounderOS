@@ -11,6 +11,7 @@ import {
   resolveProfileArg,
   isProfileArgMiss,
   profileMissMessage,
+  withForcedProfileToken,
 } from "../../../src/gateway/jobhunt-profile-arg.js";
 
 function ok(raw: string, reserved: readonly string[] = []) {
@@ -68,5 +69,34 @@ describe("resolveProfileArg", () => {
 
   it("is case-insensitive", () => {
     expect(ok("WIFE").profile.id).toBe("wife-nl-finance");
+  });
+});
+
+describe("withForcedProfileToken", () => {
+  it("prepends the token to whatever argument followed the command", () => {
+    const ctx = { match: "1,3,5" } as { match?: string };
+    withForcedProfileToken(ctx as never, "wife");
+    expect(ctx.match).toBe("wife 1,3,5");
+  });
+
+  it("leaves just the token when the command had no argument", () => {
+    const ctx = { match: "" } as { match?: string };
+    withForcedProfileToken(ctx as never, "wife");
+    expect(ctx.match).toBe("wife");
+  });
+
+  it("treats an undefined match the same as empty", () => {
+    const ctx = {} as { match?: string };
+    withForcedProfileToken(ctx as never, "wife");
+    expect(ctx.match).toBe("wife");
+  });
+
+  it("round-trips through resolveProfileArg exactly like typing the token by hand", () => {
+    const ctx = { match: "1" } as { match?: string };
+    withForcedProfileToken(ctx as never, "wife");
+    const resolved = ok(ctx.match ?? "");
+    expect(resolved.profile.id).toBe("wife-nl-finance");
+    expect(resolved.rest).toBe("1");
+    expect(resolved.explicit).toBe(true);
   });
 });

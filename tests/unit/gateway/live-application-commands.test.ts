@@ -92,4 +92,55 @@ describe("handleReplied / handleRejected", () => {
     const [replyArg] = (reply.mock.calls[0] ?? []) as [unknown?];
     expect(String(replyArg)).toContain("Usage:");
   });
+
+  // T4, 2026-09-05: neither command resolved a profile at all before this —
+  // listLiveApplications only filtered by tenant, so with a second candidate
+  // registered "row 2" could point at either person's application.
+  it("scopes the live-application list to the named profile", async () => {
+    const listLiveApplications = vi.fn(async () => [LIVE_ROW]);
+    vi.doMock("../../../src/db/job-queries.js", () => ({
+      listLiveApplications,
+      updateApplicationStage: vi.fn(async () => LIVE_ROW),
+    }));
+    const { handleReplied } = await import("../../../src/gateway/live-application-commands.js");
+    const reply = vi.fn(async () => undefined);
+
+    await handleReplied({ match: "wife 1", reply } as never);
+
+    expect(listLiveApplications).toHaveBeenCalledWith(
+      expect.objectContaining({ profileId: "wife-nl-finance", tenantId: "turicks" }),
+    );
+  });
+
+  it("bare (no profile named) still scopes to the default profile, not every profile merged", async () => {
+    const listLiveApplications = vi.fn(async () => [LIVE_ROW]);
+    vi.doMock("../../../src/db/job-queries.js", () => ({
+      listLiveApplications,
+      updateApplicationStage: vi.fn(async () => LIVE_ROW),
+    }));
+    const { handleRejected } = await import("../../../src/gateway/live-application-commands.js");
+    const reply = vi.fn(async () => undefined);
+
+    await handleRejected({ match: "1", reply } as never);
+
+    expect(listLiveApplications).toHaveBeenCalledWith(
+      expect.objectContaining({ profileId: "pushkar-nl-tech" }),
+    );
+  });
+
+  it("refuses an unrecognised profile word rather than guessing whose row it means", async () => {
+    const listLiveApplications = vi.fn();
+    vi.doMock("../../../src/db/job-queries.js", () => ({
+      listLiveApplications,
+      updateApplicationStage: vi.fn(),
+    }));
+    const { handleReplied } = await import("../../../src/gateway/live-application-commands.js");
+    const reply = vi.fn(async () => undefined);
+
+    await handleReplied({ match: "bogus 1", reply } as never);
+
+    expect(listLiveApplications).not.toHaveBeenCalled();
+    const [replyArg] = (reply.mock.calls[0] ?? []) as [unknown?];
+    expect(String(replyArg)).toContain("bogus");
+  });
 });

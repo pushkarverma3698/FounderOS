@@ -22,6 +22,7 @@
 import type { Context } from "grammy";
 import { updateApplicationStage, listLiveApplications } from "../db/job-queries.js";
 import { parseRowArg } from "./jobhunt-commands.js";
+import { resolveProfileArg, isProfileArgMiss, profileMissMessage } from "./jobhunt-profile-arg.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "gateway:live-application-commands" });
@@ -44,13 +45,27 @@ async function handleLiveApplicationCommand(
   command: "replied" | "rejected",
   stage: "replied" | "rejected",
 ): Promise<void> {
-  const rank = parseRowArg(ctx.match?.toString() ?? "");
+  // A second profile means the live-applications list is per-candidate, same
+  // as /jobs, /csv, /draft and /applied — without this, row N came from a
+  // list merging both candidates' applications, so marking "row 2" could
+  // silently touch the wrong person's application.
+  const selected = resolveProfileArg(ctx.match?.toString() ?? "", [], (rest) => parseRowArg(rest) !== null);
+  if (isProfileArgMiss(selected)) {
+    await ctx.reply(profileMissMessage(selected));
+    return;
+  }
+
+  const rank = parseRowArg(selected.rest);
   if (rank === null || rank < 1) {
     await ctx.reply(unresolvedLiveApplicationMessage(command, rank));
     return;
   }
 
-  const live = await listLiveApplications({ limit: 200 });
+  const live = await listLiveApplications({
+    limit: 200,
+    tenantId: selected.profile.tenantId,
+    profileId: selected.profile.id,
+  });
   const row = live[rank - 1];
   if (!row) {
     await ctx.reply(unresolvedLiveApplicationMessage(command, rank));
@@ -63,7 +78,10 @@ async function handleLiveApplicationCommand(
     return;
   }
 
-  log.info({ command, rank, company: row.company, id: row.id }, `Application marked ${stage}`);
+  log.info(
+    { command, rank, company: row.company, id: row.id, profile: selected.profile.id },
+    `Application marked ${stage}`,
+  );
   const verb = stage === "replied" ? "replied" : "rejected";
   await ctx.reply(`✅ Marked ${verb} — ${row.company} (${row.title}).`);
 }
