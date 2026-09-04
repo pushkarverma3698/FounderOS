@@ -10,8 +10,8 @@ import { tokenizeQuery, scoreByTerms, rankByTerms } from "./keyword-search.js";
 
 // research_cache holds business-public web findings (not personal data), so it
 // sits alongside turicks_brain on the right side of the ADR-013/015 firewall.
-export const ALLOWED_RAG_TABLES = new Set(["personal_rag", "turicks_brain", "research_cache"] as const);
-export type RagTable = "personal_rag" | "turicks_brain" | "research_cache";
+export const ALLOWED_RAG_TABLES = new Set(["personal_rag", "turicks_brain", "brain_memories", "research_cache"] as const);
+export type RagTable = "personal_rag" | "turicks_brain" | "brain_memories" | "research_cache";
 
 export interface RagHit {
   content: string;
@@ -153,4 +153,40 @@ export async function keywordSearchRagTable(
     metadata: c.metadata,
     score: Math.min(1, scoreByTerms(c.content, terms) / terms.length),
   }));
+}
+
+/** Unified Brain Search Interface */
+import { hybridRagSearch, HybridResult, RagStageError } from "./rag-hybrid.js";
+import { embedText } from "../lib/embed.js";
+
+export interface SearchBrainOptions {
+  query: string;
+  topK?: number;
+  filters?: RagFilter;
+  /** Defaults to "turicks_brain" */
+  table?: RagTable;
+}
+
+/**
+ * Standardized search contract (ADR-038).
+ * Wraps hybridRagSearch, automatically managing embeddings and keywords.
+ * All clients (FounderOS, MCP) should use this single entry point.
+ */
+export async function searchBrain(opts: SearchBrainOptions): Promise<HybridResult> {
+  const topK = opts.topK ?? 5;
+  const table = opts.table ?? "turicks_brain";
+
+  return hybridRagSearch(table, opts.query, topK, {
+    vectorSearch: async (tbl, q, k) => {
+      try {
+        const queryEmbedding = await embedText(q);
+        return await searchRagTable(tbl, queryEmbedding, k, { filter: opts.filters });
+      } catch (err) {
+        throw new RagStageError("embed", err instanceof Error ? err.message : String(err));
+      }
+    },
+    keywordSearch: async (tbl, q, k) => {
+      return await keywordSearchRagTable(tbl, q, k, { filter: opts.filters });
+    },
+  });
 }

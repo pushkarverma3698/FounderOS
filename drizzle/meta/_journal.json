@@ -10,24 +10,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 1,
       "version": "7",
       "when": 1779880000000,
       "tag": "0001_rename_tables",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -38,24 +24,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 3,
       "version": "7",
       "when": 1779880200000,
       "tag": "0003_founder_context",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -66,24 +38,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 5,
       "version": "7",
       "when": 1779880400000,
       "tag": "0005_pgvector",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -94,24 +52,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 7,
       "version": "7",
       "when": 1779880600000,
       "tag": "0007_missions",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -122,24 +66,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 9,
       "version": "7",
       "when": 1779880800000,
       "tag": "0009_research_cache",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -150,24 +80,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 11,
       "version": "7",
       "when": 1779890100000,
       "tag": "0011_scheduled_posts",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -178,24 +94,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 13,
       "version": "7",
       "when": 1783950000000,
       "tag": "0013_scheduled_tasks",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -206,24 +108,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 15,
       "version": "7",
       "when": 1784050000000,
       "tag": "0015_saved_workflows",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -234,24 +122,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 17,
       "version": "7",
       "when": 1784150000000,
       "tag": "0017_job_applications",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -262,24 +136,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 19,
       "version": "7",
       "when": 1784170000000,
       "tag": "0019_cv_signals",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -290,24 +150,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 21,
       "version": "7",
       "when": 1785530000000,
       "tag": "0021_job_brief_ranks",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -318,24 +164,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 23,
       "version": "7",
       "when": 1785690000000,
       "tag": "0023_jobhunt_country",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -346,24 +178,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 25,
       "version": "7",
       "when": 1785870000000,
       "tag": "0025_jobhunt_screen_failures",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -374,24 +192,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 27,
       "version": "7",
       "when": 1786050000000,
       "tag": "0027_scheduled_tasks_recurrence",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -402,24 +206,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 29,
       "version": "7",
       "when": 1786230000000,
       "tag": "0029_lesson_occurrence_tracking",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -430,24 +220,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 31,
       "version": "7",
       "when": 1786410000000,
       "tag": "0031_answer_evaluations",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -458,24 +234,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 33,
       "version": "7",
       "when": 1786590000000,
       "tag": "0033_drop_private_group_chat_messages",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {
@@ -486,24 +248,10 @@
       "breakpoints": true
     },
     {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
-      "breakpoints": true
-    },
-    {
       "idx": 35,
       "version": "7",
       "when": 1787500000000,
       "tag": "0035_tailor_note",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "7",
-      "when": 1789000000000,
-      "tag": "0037_brain_memories",
       "breakpoints": true
     },
     {

@@ -42,6 +42,6 @@ describe("rag-search isolation guard", () => {
   });
 
   it("exposes exactly the allowed tables", () => {
-    expect([...ALLOWED_RAG_TABLES].sort()).toEqual(["personal_rag", "research_cache", "turicks_brain"]);
+    expect([...ALLOWED_RAG_TABLES].sort()).toEqual(["brain_memories", "personal_rag", "research_cache", "turicks_brain"]);
   });
 });

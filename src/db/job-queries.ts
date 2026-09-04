@@ -260,26 +260,29 @@ export async function listLiveApplications(
  * a row with no stamped contact date has no reliable "days since" to measure.
  */
 export async function listFollowupCandidates(
-  opts: { tenantId?: string; now?: Date } = {},
+  opts: { tenantId?: string; now?: Date; profileId?: ProfileScope } = {},
 ): Promise<JobApplication[]> {
   const now = opts.now ?? new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
   const db = getDb();
+  const conditions = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    eq(jobApplications.stage, "applied"),
+    isNotNull(jobApplications.last_contact_at),
+    or(
+      and(eq(jobApplications.followups_sent, 0), lte(jobApplications.last_contact_at, sevenDaysAgo)),
+      and(eq(jobApplications.followups_sent, 1), lte(jobApplications.last_contact_at, fourteenDaysAgo)),
+    ),
+  ];
+  if (opts.profileId !== undefined) {
+    const profileWhere = profileCondition(opts.profileId);
+    if (profileWhere) conditions.push(profileWhere);
+  }
   return db
     .select()
     .from(jobApplications)
-    .where(
-      and(
-        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
-        eq(jobApplications.stage, "applied"),
-        isNotNull(jobApplications.last_contact_at),
-        or(
-          and(eq(jobApplications.followups_sent, 0), lte(jobApplications.last_contact_at, sevenDaysAgo)),
-          and(eq(jobApplications.followups_sent, 1), lte(jobApplications.last_contact_at, fourteenDaysAgo)),
-        ),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(asc(jobApplications.last_contact_at));
 }
 

@@ -20,13 +20,14 @@ export const FOUNDER_DOB = new Date("1998-06-03T00:00:00Z");
 /** Hours per year used to convert an annual floor to an hourly contract rate. */
 export const FULL_TIME_HOURS_PER_YEAR = 2080;
 
-export type HsmBand = "under-30" | "over-30";
+export type HsmBand = "under-30" | "over-30" | "reduced";
 
 interface CriterionWindow {
   readonly from: string;
   readonly to: string;
   readonly under30Monthly: number;
   readonly over30Monthly: number;
+  readonly reducedMonthly: number;
 }
 
 /**
@@ -35,7 +36,7 @@ interface CriterionWindow {
  * rewrites the history of every verdict already recorded.
  */
 const CRITERIA: readonly CriterionWindow[] = [
-  { from: "2026-01-01", to: "2026-12-31", under30Monthly: 4357, over30Monthly: 5942 },
+  { from: "2026-01-01", to: "2026-12-31", under30Monthly: 4357, over30Monthly: 5942, reducedMonthly: 3122 },
 ];
 
 export interface SalaryCriterion {
@@ -59,13 +60,13 @@ export function bandOn(date: Date, dob: Date = FOUNDER_DOB): HsmBand {
  * verified window. Null means "unknown", never "zero" — a zero floor would pass
  * every posting.
  */
-export function criterionOn(date: Date, dob: Date = FOUNDER_DOB): SalaryCriterion | null {
+export function criterionOn(date: Date, dob: Date = FOUNDER_DOB, isOrientationYearSwitcher: boolean = false): SalaryCriterion | null {
   const iso = date.toISOString().slice(0, 10);
   const window = CRITERIA.find((w) => iso >= w.from && iso <= w.to);
   if (!window) return null;
 
-  const band = bandOn(date, dob);
-  const monthly = band === "under-30" ? window.under30Monthly : window.over30Monthly;
+  const band = isOrientationYearSwitcher ? "reduced" : bandOn(date, dob);
+  const monthly = band === "reduced" ? window.reducedMonthly : band === "under-30" ? window.under30Monthly : window.over30Monthly;
   const annualBase = monthly * 12;
 
   return {

@@ -248,7 +248,7 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
             gate: gProfile.salaryFloorApplies ? "Salary" : "Rate",
             // The CANDIDATE's date of birth, not the founder's — the IND floor
             // steps up 36% at thirty and the band is a fact about the person.
-            ...screenSalaryFacts(facts.salary, { route, dob: profile.dob }),
+            ...screenSalaryFacts(facts.salary, { route, dob: profile.dob, isOrientationYearSwitcher: profile.permitBases.includes("zoekjaar") }),
           };
     const runSponsorGate = gProfile.sponsorRequired && targetsNetherlands;
     const gates: Gate[] = [

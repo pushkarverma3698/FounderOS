@@ -47,9 +47,10 @@ function daysSince(date: Date | null, now: Date): number {
  * ordering (stalest contact first) — see jobhunt-commands.ts for why brief_rank
  * cannot be reused here (it is cleared the moment a row is marked applied).
  */
-export function formatPipelineDigest(rows: readonly JobApplication[], now: Date = new Date()): string {
+export function formatPipelineDigest(rows: readonly JobApplication[], now: Date = new Date(), profile?: { candidateName: string }): string {
+  const nameLabel = profile ? ` (${profile.candidateName})` : "";
   if (rows.length === 0) {
-    return "📭 <b>Pipeline review</b>\n\nNothing live right now — every application has been marked replied, rejected, or is still in today's queue.";
+    return `📭 <b>Pipeline review${nameLabel}</b>\n\nNothing live right now — every application has been marked replied, rejected, or is still in today's queue.`;
   }
 
   const lines = rows.map((row, i) => {
@@ -60,7 +61,7 @@ export function formatPipelineDigest(rows: readonly JobApplication[], now: Date 
   });
 
   return (
-    `📋 <b>Pipeline review — ${rows.length} live</b>\n\n` +
+    `📋 <b>Pipeline review${nameLabel} — ${rows.length} live</b>\n\n` +
     lines.join("\n\n") +
     `\n\n<i>Numbers are only valid against this list — if it's changed, ask for a fresh review.</i>`
   );
@@ -68,19 +69,27 @@ export function formatPipelineDigest(rows: readonly JobApplication[], now: Date 
 
 /** Runs the digest sweep and sends it. Fire-and-forget from the cron's perspective. */
 export async function runPipelineDigest(): Promise<void> {
-  const rows = await listLiveApplications({ limit: 50 });
-  await sendToChat(formatPipelineDigest(rows), "HTML");
+  const { listProfiles } = await import("./profile-config.js");
+  const profiles = listProfiles();
+
+  for (const profile of profiles) {
+    const rows = await listLiveApplications({ limit: 50, profileId: profile.id });
+    if (rows.length > 0 || profiles.length === 1) {
+      await sendToChat(formatPipelineDigest(rows, new Date(), profile), "HTML");
+    }
+  }
 }
 
 /** Plain templated nudge — no LLM call. `nudgeNumber` only changes the tone, not the facts. */
-export function formatFollowupNudge(row: JobApplication, nudgeNumber: 1 | 2, now: Date = new Date()): string {
+export function formatFollowupNudge(row: JobApplication, nudgeNumber: 1 | 2, now: Date = new Date(), profile?: { candidateName: string }): string {
   const days = daysSince(row.last_contact_at ?? row.applied_at, now);
-  const heading = nudgeNumber === 1 ? "🔔 Follow-up due (day 7)" : "🔔 Second follow-up due (day 14)";
+  const heading = nudgeNumber === 1 ? `🔔 Follow-up due (day 7)` : `🔔 Second follow-up due (day 14)`;
+  const nameLabel = profile ? ` — for ${profile.candidateName}` : "";
   const draft =
     `Hi — following up on my application for the ${row.title} role, submitted ${days} days ago. ` +
     `Happy to answer any questions in the meantime — is there an update on next steps?`;
   return (
-    `${heading} — <b>${esc(row.company)}</b> (${esc(row.title)})\n\n` +
+    `${heading}${nameLabel} — <b>${esc(row.company)}</b> (${esc(row.title)})\n\n` +
     `Draft to send:\n<i>${esc(draft)}</i>\n\n` +
     `Then <code>/replied</code> if they answer, or leave it — day 14 gets one more nudge, then it goes quiet.`
   );
@@ -97,22 +106,26 @@ export interface FollowupSweepOutcome {
  * reasoning every other sweep in this codebase already applies.
  */
 export async function runFollowupSweep(now: Date = new Date()): Promise<FollowupSweepOutcome> {
-  const candidates = await listFollowupCandidates({ now });
+  const { listProfiles } = await import("./profile-config.js");
+  const profiles = listProfiles();
   let sent = 0;
   let failed = 0;
 
-  for (const row of candidates) {
-    const nudgeNumber: 1 | 2 = row.followups_sent === 0 ? 1 : 2;
-    try {
-      await sendToChat(formatFollowupNudge(row, nudgeNumber, now), "HTML");
-      await incrementFollowupsSent(row.id, row.tenant_id);
-      sent += 1;
-    } catch (err) {
-      failed += 1;
-      log.error(
-        { err: (err as Error).message, company: row.company, id: row.id },
-        "Follow-up nudge failed to send — not marking it sent, will retry next sweep",
-      );
+  for (const profile of profiles) {
+    const candidates = await listFollowupCandidates({ now, profileId: profile.id });
+    for (const row of candidates) {
+      const nudgeNumber: 1 | 2 = row.followups_sent === 0 ? 1 : 2;
+      try {
+        await sendToChat(formatFollowupNudge(row, nudgeNumber, now, profile), "HTML");
+        await incrementFollowupsSent(row.id, row.tenant_id);
+        sent += 1;
+      } catch (err) {
+        failed += 1;
+        log.error(
+          { err: (err as Error).message, company: row.company, id: row.id },
+          "Follow-up nudge failed to send — not marking it sent, will retry next sweep",
+        );
+      }
     }
   }
 

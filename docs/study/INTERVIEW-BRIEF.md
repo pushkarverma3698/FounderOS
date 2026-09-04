@@ -18,8 +18,8 @@ Use these six. They are specific, verifiable, and each one implies a mechanism.
 | **97.3% recall@5 / 0.855 MRR** on hybrid retrieval, beating vector-only by 33 points on the hard slice | RAG measured, not hoped for. 35.6% of postings ask for RAG | `pnpm eval:retrieval`, 1,214 chunks |
 | **`regex-routing: 0`, `kernel-purity: 0`, `gateway-imports: 0`** — CI fails if any rises | Architecture debt is ratcheted, not aspirational | `governance/architecture-baseline.json` |
 
-**Scale, if asked:** 341 TypeScript source files / 58,141 LOC, 51 tool modules, 8 workers,
-50 ADRs, 29 database tables, 1,297 ATS boards polled across 10 platforms, 911 job postings
+**Scale, if asked:** 343 TypeScript source files / 58,141 LOC, 51 tool modules, 8 workers,
+51 ADRs, 29 database tables, 1,297 ATS boards polled across 10 platforms, 911 job postings
 ingested in 4 weeks.
 
 ---
@@ -194,7 +194,7 @@ own architecture rule, in the one place a hallucination has legal consequences. 
 
 **"You built this alone — how do I know you can work in a team?"**
 The repo runs a written operating contract: every change goes through a PR to `beta` with a
-merge gate, an adversarial review step that must produce one of four explicit verdicts, 50 ADRs
+merge gate, an adversarial review step that must produce one of four explicit verdicts, 51 ADRs
 recording why decisions were made, and session records under `docs/sessions/`. The process
 exists precisely so the reasoning survives the author.
 
@@ -207,7 +207,7 @@ Give them this order and nothing else:
 1. **[README.md](../../README.md)** — the architecture diagram and the six numbers
 2. **[docs/EVAL.md](../EVAL.md)** — how it's evaluated, with published results
 3. **[docs/LIMITATIONS.md](../LIMITATIONS.md)** — what's broken, by ID
-4. **[docs/decisions/README.md](../decisions/README.md)** — 50 ADRs, the 10 most relevant first
+4. **[docs/decisions/README.md](../decisions/README.md)** — 51 ADRs, the 10 most relevant first
 
 If they only click one, it should be `docs/EVAL.md`: it's the one that shows measurement rather
 than assertion, and per the market data, evaluation is asked for by 36.2% of AI-track postings.

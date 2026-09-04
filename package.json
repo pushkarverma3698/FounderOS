@@ -51,6 +51,7 @@
     "mcp:probe": "node --env-file=.env --import tsx/esm scripts/mcp-bridge-probe.ts",
     "rag:probe": "node --env-file=.env --import tsx/esm scripts/probe-rag.ts",
     "mcp": "LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/index.ts",
+    "mcp:brain": "LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/turicks-brain.ts",
     "benchmark:run": "node --env-file=.env --import tsx/esm scripts/run-benchmark.ts run",
     "benchmark:turnids": "node --import tsx/esm scripts/run-benchmark.ts turnids",
     "verify:benchmark": "node --import tsx/esm scripts/verify-benchmark-run.ts",

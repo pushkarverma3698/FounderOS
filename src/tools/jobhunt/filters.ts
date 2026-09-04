@@ -176,7 +176,7 @@ function ambiguityNotes(facts: SalaryFacts): string[] {
  */
 export function screenSalaryFacts(
   facts: SalaryFacts,
-  opts: { route?: ScreenRoute; now?: Date; dob?: Date } = {},
+  opts: { route?: ScreenRoute; now?: Date; dob?: Date; isOrientationYearSwitcher?: boolean } = {},
 ): ScreenResult {
   const now = opts.now ?? new Date();
   const floorApplies = gateProfile(opts.route ?? "hsm").salaryFloorApplies;
@@ -184,7 +184,7 @@ export function screenSalaryFacts(
   // birthday, so reading it off the wrong person's date of birth produces a
   // confidently wrong legal floor. This defaulted to the founder's DOB for every
   // profile until 2026-09-04.
-  const criterion: SalaryCriterion | null = criterionOn(now, opts.dob);
+  const criterion: SalaryCriterion | null = criterionOn(now, opts.dob, opts.isOrientationYearSwitcher);
 
   // An unverified criterion only matters where the criterion is a legal condition.
   // On a partner permit or a remote contract there is no floor to be stale about,
