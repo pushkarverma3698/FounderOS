@@ -86,12 +86,10 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
   Recommend one option with reasons; never present an unranked survey. If a
   conclusion rests on an assumption, verify the assumption or label it unverified.
 - **Build for the OUTCOME, not the instruction (rule #26 — founder directive,
-  2026-08-01)**: every request names a symptom and guesses a remedy. Before
-  writing anything, answer three questions in order: *what outcome does this
-  serve · what is the binding constraint on that outcome · does the requested
-  change move that constraint*. If the answer to the third is no, say so and name
-  what would — then build that too. Deliver the literal ask in full regardless;
-  the outcome lens decides HOW and WHAT ELSE, never WHETHER.
+  2026-08-01)**: the general form of this rule — the three questions, and the
+  2026-07-31 screener that produced zero applications — lives in the global
+  `~/.claude/CLAUDE.md` § "Outcome-Driven, Not Instruction-Driven" and is not
+  restated here. What is FounderOS-specific:
   - Every deliverable must end in something the founder can ACT ON — a ranked
     shortlist, a draft, a decision, a number that changes a choice. A log of what
     happened is not an outcome. If ignoring the output costs nothing and emits no
@@ -105,11 +103,9 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
     filters; a filtered-out row and an empty market are indistinguishable from
     outside, and that ambiguity has already cost this pipeline weeks. Reject
     inside the pipeline where the reason is stored and shown, never before it.
-  - Two failures produced this rule: a screener that ran flawlessly for weeks and
-    produced zero applications (2026-07-31 — screening was never the constraint),
-    and the first real brief, which was unreadable because it displayed a PASSING
-    check as the reason a role needed attention (2026-08-01).
-- **Memory is the source of truth**: docs/ADR changes → `pnpm brain:sync`.
+  - The second failure behind this rule is FounderOS-local: the first real jobhunt
+    brief was unreadable because it displayed a PASSING check as the reason a role
+    needed attention (2026-08-01).
 - **Episodic memory is a file, not a hope**: any session that completes or merges non-trivial work
   writes `docs/sessions/YYYY-MM-DD-<topic>.md`, using `docs/sessions/TEMPLATE.md`'s sections (What we
   did / What we fixed / Why / Metrics / Outstanding), before the session ends. This is what "record
@@ -117,8 +113,25 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
   followed twice. The write lands under `docs/`, so it triggers the Automated Brain Sync rule below
   the same as any other doc change — `pnpm brain:sync` picks it up as an `entry_type: "session"` row,
   retrievable by every future session through `search_knowledge`/`search_turicks_brain`.
-- **Zero paid calls in the dev loop**: unit tests use scripted models;
-  `pnpm eval` (live model) is a milestone gate, run once per feature.
+- **Zero paid calls in the dev loop** (⚠️ NON-NEGOTIABLE). This rule lives here, not in the global
+  `~/.claude/CLAUDE.md`, because every command it names exists only in this repo — carrying it
+  globally billed ~475 tokens to every session in every project for a rule that could not apply.
+
+  | Zone | What runs | Allowed cost |
+  |---|---|---|
+  | Dev loop (write → test → fix) | `pnpm test` (scripted models) + `nomic-embed-text` dedup | **$0** |
+  | Integration check (pre-PR) | free OpenRouter model | **$0** |
+  | Live verification (PR-ready only) | real Gemini / MTProto QA | once per PR |
+
+  1. A unit or integration test that makes a real LLM call is a **bug**. Tests use mocks, always.
+  2. `scripts/probe-*.ts` and `scripts/e2e-telegram-qa.ts` spend Gemini tokens — never run them
+     iteratively. Write a failing unit test, fix it, then run the probe ONCE to confirm.
+  3. While iterating set `AGENT_MODEL=openrouter:google/gemini-2.5-flash-preview-05-20:free`
+     (fallback `openrouter:deepseek/deepseek-r1:free`). Never a `google-genai:*` model in the loop.
+  4. `pnpm eval` is a milestone gate, not a debugging tool — once per feature, not once per attempt.
+     `pnpm qa:telegram` runs exactly once: tests green, lint clean, PR about to go up.
+  5. If a bug needs a live call to reproduce it, capture it in a unit test first; the live call only
+     confirms the fix.
 
 ## Rules binding on Claude itself (2026-08-06, derived from measured failures)
 
@@ -212,25 +225,19 @@ pnpm proof:case-study <thread>  # anonymized case study from a checkpoint
 ```
 
 ## Model policy
-Production (pinned by `scripts/apply-prod-env-overrides.sh`, 2026-08-27):
-`AGENT_MODEL=google-genai:gemini-flash-latest` (direct Gemini — proven to tool-call
-cleanly on-box; requires the `GOOGLE_GENERATIVE_AI_API_KEY` GitHub secret, else
-prod 401s). Fallback chain: same-key paid Gemini first
-(`google-genai:gemini-3-flash-preview`, `google-genai:gemini-3.1-flash-lite` —
-live-verified serving + tool-calling during the 2026-07-13 gemini-3.5-flash 503
-storm), then FREE OpenRouter last resort (founder directive: no paid OpenRouter
-fallback): `openrouter:nvidia/nemotron-3-super-120b-a12b:free`,
-`openrouter:minimax/minimax-m2.7:free` (2026-08-27: replaced
-`google/gemma-4-31b-it:free` + `z-ai/glm-5.2:free` — those weren't dead but were
-just documented here, never actually written into `apply-prod-env-overrides.sh`,
-which still had the PRIOR retired pair (`meta-llama/llama-3.3-70b-instruct:free` +
-`qwen/qwen3-next-80b-a3b-instruct:free`, both 404 as of today). Keep this line and
-the script in sync — that drift is exactly how prod ran with a fully-dead
-OpenRouter fallback tail for weeks.) Temperature 0, planner+workers
-(`WORKER_AGENT_MODEL` splits them). Budget caps enforced (`BUDGET_DAILY_USD`,
-`RUN_BUDGET_USD`). Provider errors classify by HTTP status class
-(`httpStatusOf`/`is503Error`/`isModelFallbackError` in `src/agents/model.ts`):
-5xx/429/transport → retriable; 404 → model fallback; 401/403 → fail loud.
+**The model chain is deliberately NOT listed here.** `scripts/apply-prod-env-overrides.sh`
+(`AGENT_MODEL` / `AGENT_FALLBACK_MODELS`) is the single source — read it. Mirroring the list into
+markdown is exactly how prod ran a fully-dead OpenRouter fallback tail for weeks: the doc was
+updated, the script never was, and nothing compared them.
+
+Shape (stable; the slugs are not): `AGENT_MODEL` = direct paid Gemini — needs the
+`GOOGLE_GENERATIVE_AI_API_KEY` GitHub secret or prod 401s. `AGENT_FALLBACK_MODELS` = same-key paid
+Gemini first, FREE OpenRouter last (founder directive: **no paid OpenRouter fallback, ever**).
+
+Temperature 0; `WORKER_AGENT_MODEL` splits planner from workers. Budget caps enforced
+(`BUDGET_DAILY_USD`, `RUN_BUDGET_USD`). Provider errors classify by HTTP status class
+(`httpStatusOf`/`is503Error`/`isModelFallbackError` in `src/agents/model.ts`): 5xx/429/transport →
+retriable; 404 → model fallback; 401/403 → fail loud.
 
 ## Prod VPS access (full root — for fixing prod directly)
 Claude Code has **full unattended root control of the production VPS** via its
@@ -277,10 +284,13 @@ explicitly ("Nothing outstanding from your end").
 - After merging to `main`, WATCH THE DEPLOY and verify prod actually moved.
   A merge is not a deploy, and CD silently failing was how prod stayed on
   `a966e9a` for a full day.
-- **Agent branches are task-specific, short-lived, PR-backed, and deleted after merge.** No
-  permanent `claude/*`, `cursor/*`, or `antigravity/*` branches — a branch under those prefixes is
-  fine mid-task (e.g. an open PR) but should not outlive its PR. This was already the practice;
-  writing it down so it stays the practice.
+- **Branch naming is binding and enforced.** `docs/antigravity/BRANCHING-STRATEGY.md`
+  § "Naming grammar" is the single source; `pnpm verify:branch` (inside `pnpm gate`) fails a
+  malformed name. Shape: `<type>/<slug>`, or `<agent>/<type>-<slug>` when the harness owns the
+  prefix. **Never keep a harness codename** — the moment Claude Code hands you
+  `claude/sweet-pike-6b0c3c`, run `git branch -m claude/<type>-<subject-slug>` before the first
+  push. Agent branches (`claude/*`, `cursor/*`, `antigravity/*`) are task-specific, short-lived,
+  PR-backed, and deleted after merge; none of them is ever permanent.
 - Evidence in every PR: fresh `pnpm gate` output + live-path proof (or an
   explicit NOT VERIFIED with the reason).
 
@@ -290,23 +300,15 @@ audited and replaced 2026-07-08 — see `ZERO-BASE-AUDIT.md` (4 live failure
 traces), `JARVIS-ARCHITECTURE.md` (the contract-first design), and
 `docs/PROOF.md` (the living scoreboard).
 
-## Strategic Mandate (Maximum Output)
+## Shared directives (binding, single copy)
 
-We are building a system designed to decisively outcompete the market. You must ruthlessly prioritize execution speed, shipping revenue-generating features, and leveraging competitor intelligence over endless internal theoretical refactoring. If a task does not tangibly move the needle or provide a market advantage, flag it immediately and pivot to building.
+Five directives apply to every agent in this repo and are **not repeated here** — restating them
+is how they drift:
 
-## Content Generation (No AI Slop)
+1. **Strategic Mandate** — ship revenue-moving work over internal refactoring
+2. **Content Generation (No AI Slop)** — the `no-ai-slop` skill is mandatory for anything public
+3. **Implementation Plans & Memory** — plans go to `docs/plans/YYYY-MM-DD-feature-name.md`
+4. **Cross-Agent Awareness** — check `turicks-brain` + recent `docs/plans/` before complex work
+5. **Experience & Outcome Over Code Purity** — the metric is founder friction saved, not code aesthetics
 
-**Mandatory Skill Usage:** Whenever you are generating, preparing, or drafting any content intended for public platforms (e.g., comments, posts, articles, social media, emails), you MUST use and strictly follow the `no-ai-slop` skill located at `/Users/pushkarverma/Projects/githubtools/no-ai-slop/SKILL.md`. 
-**Why:** Nothing we publish on our platforms should look like AI-generated content. You must ensure all outputs are highly authentic, human-like, and completely free of typical AI "slop" (e.g., overly formal tone, unnecessary emojis, generic corporate speak, predictable structures).
-
-## Implementation Plans & Memory
-
-All implementation plans generated by Claude Code, Antigravity, or any agent MUST be saved with organized, descriptive filenames in the `docs/plans/` directory (e.g., `docs/plans/YYYY-MM-DD-feature-name.md`).
-**Why:** Storing all plans centrally with semantic names drastically improves RAG retrieval, allowing future agents to intelligently learn from past architectural decisions and execution contexts. Do not store plans in scattered scratch directories or with generic names like `plan.md`.
-
-## Cross-Agent Awareness (The "What is everyone doing?" rule)
-
-Before starting any complex task, you MUST research what other agents have recently worked on or are currently working on. You do this by:
-1. Querying `turicks-brain` for recent session summaries.
-2. Listing and reading the most recent implementation plans in `docs/plans/`.
-**Why:** You are part of a swarm. Knowing the recent architectural changes and in-flight plans of your peer agents prevents you from duplicating work, reverting deliberate changes, or breaking dependent systems.
+Full text, with the reasoning for each: [docs/rules/SHARED-DIRECTIVES.md](docs/rules/SHARED-DIRECTIVES.md). Read it before your first substantive action.

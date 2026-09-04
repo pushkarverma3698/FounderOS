@@ -1,7 +1,7 @@
 {
   "name": "founderos",
   "version": "0.1.0",
-  "description": "FounderOS — Multi-agent AI operating system for Turicks",
+  "description": "FounderOS \u2014 Multi-agent AI operating system for Turicks",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -33,7 +33,7 @@
     "self-improve:run": "node --env-file=.env --import tsx/esm scripts/self-improve-cron.ts",
     "verify:wiring": "node --import tsx/esm scripts/verify-wiring.ts",
     "verify:runtime-assets": "node --import tsx/esm scripts/verify-runtime-assets.ts",
-    "gate": "pnpm lint && pnpm build:all && pnpm verify:runtime-assets && pnpm verify:wiring && pnpm verify:arch && pnpm verify:doc-claims && pnpm test",
+    "gate": "pnpm verify:branch && pnpm lint && pnpm build:all && pnpm verify:runtime-assets && pnpm verify:wiring && pnpm verify:arch && pnpm verify:doc-claims && pnpm test",
     "ci:quality": "pnpm lint && pnpm build:all && pnpm verify:runtime-assets && pnpm verify:wiring && pnpm verify:arch",
     "predeploy": "pnpm gate",
     "db:generate": "drizzle-kit generate",
@@ -55,7 +55,8 @@
     "benchmark:turnids": "node --import tsx/esm scripts/run-benchmark.ts turnids",
     "verify:benchmark": "node --import tsx/esm scripts/verify-benchmark-run.ts",
     "pr:create": "node --env-file=.env --import tsx/esm scripts/create-phase-pr.ts",
-    "pr:review": "node --env-file=.env --import tsx/esm scripts/claude-review-pr.ts"
+    "pr:review": "node --env-file=.env --import tsx/esm scripts/claude-review-pr.ts",
+    "verify:branch": "bash scripts/verify-branch-name.sh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
