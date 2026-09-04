@@ -29,7 +29,8 @@ import {
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
 import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
-import { handleCsv, handleJobs } from "./jobhunt-view.js";
+import { handleCsv, handleJobs, type JobsViewDeps } from "./jobhunt-view.js";
+import { withForcedProfileToken } from "./jobhunt-profile-arg.js";
 import { COMMAND_MENU, telegramCommandPayload } from "./command-menu.js";
 import { splitForTelegram } from "../tools/jobhunt/telegram-format.js";
 import { registerMediaHandlers } from "./media.js";
@@ -59,22 +60,29 @@ export function registerHandlers(bot: Bot): void {
   bot.command("connect", (ctx: Context) => handleConnect(ctx));
   bot.command("commands", (ctx: Context) => handleCommands(ctx));
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
+  bot.command("wife_draft", (ctx: Context) => handleDraft(withForcedProfileToken(ctx, "wife"), { runKernelText }));
   bot.command("ask", (ctx: Context) => handleAsk(ctx, { runKernelText }));
+  bot.command("wife_ask", (ctx: Context) => handleAsk(withForcedProfileToken(ctx, "wife"), { runKernelText }));
   bot.command("applied", (ctx: Context) => handleApplied(ctx));
+  bot.command("wife_applied", (ctx: Context) => handleApplied(withForcedProfileToken(ctx, "wife")));
   bot.command("replied", (ctx: Context) => handleReplied(ctx));
+  bot.command("wife_replied", (ctx: Context) => handleReplied(withForcedProfileToken(ctx, "wife")));
   bot.command("rejected", (ctx: Context) => handleRejected(ctx));
+  bot.command("wife_rejected", (ctx: Context) => handleRejected(withForcedProfileToken(ctx, "wife")));
   bot.command("profile", (ctx: Context) => handleProfile(ctx));
+  bot.command("wife_profile", (ctx: Context) => handleProfile(withForcedProfileToken(ctx, "wife")));
   // The renderer is dynamically imported so this transport file never pulls the
   // brief's database and liveness dependencies into the bot's startup path.
   // `splitForTelegram` is pure formatting and imported normally.
-  bot.command("jobs", (ctx: Context) =>
-    handleJobs(ctx, {
-      buildBrief: async (profile) =>
-        (await import("../tools/jobhunt/daily-brief.js")).buildDailyBrief({ profile }),
-      split: splitForTelegram,
-    }),
-  );
+  const jobsDeps: JobsViewDeps = {
+    buildBrief: async (profile) =>
+      (await import("../tools/jobhunt/daily-brief.js")).buildDailyBrief({ profile }),
+    split: splitForTelegram,
+  };
+  bot.command("jobs", (ctx: Context) => handleJobs(ctx, jobsDeps));
+  bot.command("wife_jobs", (ctx: Context) => handleJobs(withForcedProfileToken(ctx, "wife"), jobsDeps));
   bot.command("csv", (ctx: Context) => handleCsv(ctx));
+  bot.command("wife_csv", (ctx: Context) => handleCsv(withForcedProfileToken(ctx, "wife")));
 
   bot.on("message:text", async (ctx: Context) => {
     const text = ctx.message?.text ?? "";
