@@ -27,7 +27,7 @@ import { getSponsorRegister, registerStaleness } from "./sponsor-registry.js";
 import { extractPostingFacts, type PostingRoute } from "./extract.js";
 import { countryFromLocation, type PostingCountry } from "./country.js";
 import { screenIndianPay } from "./pay-india.js";
-import { basesForPosting, gateProfile, isLiveBasis, routeLabel } from "./permit-routes.js";
+import { basesForPosting, gateProfile, isLiveBasis, nonLiveBasisRejectGate } from "./permit-routes.js";
 import { THIN_BODY_CHARS, postingGate, basisGate, locationGate, sponsorGate } from "./screen-gates.js";
 import {
   dedupeKey,
@@ -231,22 +231,11 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   const targetsNetherlands = profile.targetCountries.some((c) => c.code === "NL");
 
   const outcomes = routesToScreen(facts.route, profile).map((route) => {
-    // basesForPosting returns a NON-live basis when the posting's route is
-    // DEFINITE (a known market) and matches nothing this profile actually
-    // holds — so the route is still recorded, but under no fabricated
-    // sponsor/salary/language gates for a basis that does not apply to this
-    // person. Found live, 2026-09-04: without this check a Bangalore posting
-    // was carried under "zoekjaar", a Dutch permit, with evidence claiming
-    // free access to a labour market the posting is not even in.
+    // A non-live basis here means a DEFINITE route matched nothing this
+    // profile holds (see nonLiveBasisRejectGate) — found live, 2026-09-04,
+    // carrying a Bangalore posting under a Dutch permit.
     if (!isLiveBasis(route, profile)) {
-      const reject: Gate = {
-        gate: "Basis",
-        status: "reject",
-        evidence:
-          `This role's market (${routeLabel(route)}) is not one you have a legal basis for — ` +
-          `your declared bases are ${profile.permitBases.join(", ")}.`,
-      };
-      return { route, verdict: combineVerdict([reject]) };
+      return { route, verdict: combineVerdict([nonLiveBasisRejectGate(route, profile)]) };
     }
     const gProfile = gateProfile(route);
     // Each market is judged by its own numbers. A rupee figure against a euro

@@ -214,6 +214,29 @@ export function gateProfile(basis: PermitBasis): GateProfile {
 }
 
 /**
+ * The gate to record when `basesForPosting` returns a basis this profile does
+ * not actually hold live (a DEFINITE route matched none of the profile's
+ * bases). A single reject, not the normal sponsor/salary/language set — none
+ * of those gates mean anything for a basis the candidate doesn't have.
+ *
+ * Kept here rather than inline in screen.ts's outcomes loop so that file's
+ * per-route branch stays a one-line call under the LOC budget; the gate
+ * shape itself belongs beside the PROFILES it is describing a mismatch with.
+ */
+export function nonLiveBasisRejectGate(
+  route: PermitBasis,
+  profile: JobSearchProfile,
+): { gate: string; status: "reject"; evidence: string } {
+  return {
+    gate: "Basis",
+    status: "reject",
+    evidence:
+      `This role's market (${routeLabel(route)}) is not one you have a legal basis for — ` +
+      `your declared bases are ${profile.permitBases.join(", ")}.`,
+  };
+}
+
+/**
  * The founder-facing name of a stored `route`, resolved AT RENDER TIME.
  *
  * Deliberately not read from the row's stored gate evidence, and the distinction
