@@ -31,7 +31,7 @@ export interface ParsedModelId {
 // set AGENT_MODEL silently degraded to a model that chats instead of calling
 // tools. Dev/CI always set AGENT_MODEL explicitly; this only bites on misconfig,
 // where Gemini Flash is the far safer failure mode.
-export const DEFAULT_AGENT_MODEL = "openrouter:google/gemini-flash-latest";
+export const DEFAULT_AGENT_MODEL = "omnirouter:auto/gemini";
 
 /** Retired OpenRouter / Google model ids → current stable ids. */
 const DEPRECATED_MODEL_ALIASES: Record<string, string> = {

@@ -55,7 +55,8 @@
     "benchmark:turnids": "node --import tsx/esm scripts/run-benchmark.ts turnids",
     "verify:benchmark": "node --import tsx/esm scripts/verify-benchmark-run.ts",
     "pr:create": "node --env-file=.env --import tsx/esm scripts/create-phase-pr.ts",
-    "pr:review": "node --env-file=.env --import tsx/esm scripts/claude-review-pr.ts"
+    "pr:review": "node --env-file=.env --import tsx/esm scripts/claude-review-pr.ts",
+    "pr:review-opencode": "node --env-file=.env --import tsx/esm scripts/opencode-review-pr.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",

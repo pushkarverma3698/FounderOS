@@ -1,21 +1,15 @@
 import { getModel } from './src/agents/model.js';
 
 const modelsToTest = [
-  "omnirouter:antigravity/claude-sonnet-5",
-  "omnirouter:antigravity/claude-opus-4-6-thinking",
-  "omnirouter:antigravity/claude-sonnet-4-6",
+  "omnirouter:auto/gemini",
+  "omnirouter:cw/claude-sonnet-5",
+  "omnirouter:cc/claude-sonnet-5-high",
   "omnirouter:antigravity/gemini-3.5-flash-low",
-  "omnirouter:antigravity/gemini-3.5-flash-medium",
-  "omnirouter:antigravity/gemini-3.5-flash-high",
-  "omnirouter:antigravity/gemini-3-pro-preview",
-  "omnirouter:antigravity/gemini-3.1-pro-high",
+  "omnirouter:antigravity/gemini-3.6-flash-high",
+  "omnirouter:antigravity/gemini-pro-agent",
   "omnirouter:antigravity/gemini-3.1-pro-low",
-  "omnirouter:antigravity/gemini-3.1-flash-lite",
-  "omnirouter:antigravity/gemini-2.5-pro",
-  "omnirouter:antigravity/gemini-2.5-flash",
-  "omnirouter:antigravity/gemini-2.5-flash-lite",
-  "omnirouter:antigravity/gemini-2.5-flash-thinking",
-  "omnirouter:antigravity/gpt-oss-120b-medium"
+  "omnirouter:tllm/gemini_3_pro",
+  "omnirouter:tllm/gemini_2_5_pro"
 ];
 
 const timeout = (ms: number) => new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout (${ms}ms)`)), ms));
