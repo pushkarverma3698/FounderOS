@@ -105,24 +105,93 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         "Financial Planning & Analysis:*",
         "Financial Planning and Analysis:*",
         "Business Controller:*",
+        "Business Controller Analyst:*",
         "Finance Business Partner:*",
+        "Business Finance Partner:*",
+        "Business Finance Analyst:*",
         "Financial Analyst:*",
         "Finance Analyst:*",
         "Financial Controller:*",
         "Management Accountant:*",
         "Reporting Analyst:*",
+        "Financial Reporting Analyst:*",
+        "Accounting and Reporting Analyst:*",
+        "Finance Consultant:*",
+        "Financial Consultant:*",
+        // Founder-supplied list, 2026-09-04: "Business development" reads as
+        // sales/BD elsewhere, but scoped to Finance it names a distinct,
+        // real title (corporate-finance-adjacent growth/partnership analysis),
+        // not the generic bare word — kept as the two-word compound only.
+        "Business Development Analyst:*",
       ],
       classifyTerms: [
         "fp&a",
         "fp&a analyst",
         "financial planning and analysis",
         "business controller",
+        "business controller analyst",
         "finance business partner",
+        "business finance partner",
+        "business finance",
         "financial analyst",
         "finance analyst",
         "financial controller",
         "management accountant",
         "reporting analyst",
+        "financial reporting",
+        "accounting and reporting",
+        "finance consultant",
+        "financial consultant",
+        "business development analyst",
+      ],
+    },
+    "finance-ops": {
+      id: "finance-ops",
+      name: "Finance Operations (RTR / OTC / PTP) / Credit / Tax & Treasury",
+      cvPath: "mac-client/cv/cv-wife-base.md",
+      // Founder-supplied list, 2026-09-04. Distinct shared-services discipline
+      // from FP&A, and a strong fit on her CURRENT role: HBS Finance Business
+      // Services is exactly RTR/OTC/PTP-adjacent territory. Researched against
+      // live postings, not guessed — RTR/Record-to-Report, OTC/Order-to-Cash and
+      // PTP/Procure-to-Pay are the three named shared-services process areas
+      // (confirmed via Accenture, SAP process docs); "transactional finance" is
+      // a team/function name more than a standalone title, so it is a
+      // classifyTerm here rather than a `titles` entry. "Due diligence analyst"
+      // and "customer due diligence analyst" are established NL listings
+      // (efinancialcareers.nl, togetherabroad.nl) distinct from her existing
+      // compliance-kyc CDD titles — kept here because due diligence in this
+      // context is transaction/credit-side, not AML-side.
+      titles: [
+        "RTR Analyst:*",
+        "Record to Report Analyst:*",
+        "OTC Analyst:*",
+        "Order to Cash Analyst:*",
+        "PTP Analyst:*",
+        "Procure to Pay Analyst:*",
+        "Credit Analyst:*",
+        "Credit Review Analyst:*",
+        "Tax Analyst:*",
+        "Treasury Analyst:*",
+        "Due Diligence Analyst:*",
+        "Customer Due Diligence Analyst:*",
+      ],
+      classifyTerms: [
+        // Bare 3-letter acronyms deliberately excluded from classifyTerms
+        // (whole-word match against free-text descriptions, not just titles) —
+        // "OTC" collides with over-the-counter trading/pharma, "PTP" and "RTR"
+        // are common enough elsewhere to risk noise. The full phrases below are
+        // unambiguous; the acronym forms still work via `titles`' substring
+        // match against the posting's own title text.
+        "record to report",
+        "order to cash",
+        "procure to pay",
+        "transactional finance",
+        "credit analyst",
+        "credit review",
+        "tax analyst",
+        "treasury analyst",
+        "due diligence",
+        "customer due diligence",
       ],
     },
     "compliance-kyc": {
@@ -163,19 +232,31 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
       // ranked below fpa and compliance-kyc for that reason.
       titles: [
         "Internal Auditor:*",
+        "Junior Internal Auditor:*",
+        "Junior Audit Associate:*",
         "Audit Associate:*",
         "Audit Assistant:*",
         "External Auditor:*",
+        "Statutory Auditor:*",
+        "Forensic Auditor:*",
+        "Forensic Accountant:*",
         "Risk & Controls Analyst:*",
+        "Financial Risk Analyst:*",
         "Internal Controls Analyst:*",
       ],
       classifyTerms: [
         "internal auditor",
+        "junior internal auditor",
+        "junior audit associate",
         "audit associate",
         "audit assistant",
         "external auditor",
+        "statutory audit",
+        "forensic audit",
+        "forensic accountant",
         "auditor",
         "risk and controls",
+        "financial risk",
         "internal controls analyst",
       ],
     },
@@ -204,7 +285,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
     },
   },
 
-  trackPriority: ["fpa", "compliance-kyc", "auditor", "accountant"],
+  trackPriority: ["fpa", "finance-ops", "compliance-kyc", "auditor", "accountant"],
   skillsDictionaryName: "finance",
   baseCvPath: "mac-client/cv/cv-wife-base.md",
 };

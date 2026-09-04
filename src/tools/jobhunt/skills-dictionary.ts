@@ -207,6 +207,15 @@ export const FINANCE_SKILL_DICTIONARY: readonly SkillTerm[] = [
   { term: "Management Reporting", category: "practice", aliases: ["management reporting", "mis reporting", "mis"] },
   { term: "Business Case Modeling", category: "practice", aliases: ["business case", "business case modeling", "business case modelling"] },
   { term: "Headcount / FTE Planning", category: "practice", aliases: ["headcount planning", "fte tracker", "fte phasing", "workforce planning"] },
+
+  // Added 2026-09-04, founder-supplied role list: AP/AR above already alias
+  // P2P/procure-to-pay and O2C/order-to-cash, but nothing aliased Record-to-Report
+  // — the third leg of the same shared-services trio — until now.
+  { term: "Record to Report (RTR)", category: "practice", aliases: ["record to report", "rtr", "r2r"] },
+  { term: "Credit Analysis", category: "practice", aliases: ["credit analysis", "credit risk", "credit review"] },
+  // Distinct from "client due diligence" under KYC/AML above: that is AML-side
+  // (know-your-customer), this is transaction/credit-side (M&A, lending).
+  { term: "Due Diligence", category: "practice", aliases: ["due diligence", "financial due diligence"] },
 ];
 
 export function getSkillDictionary(name: string = "tech"): readonly SkillTerm[] {

@@ -46,13 +46,22 @@ describe("permit basis — zoekjaar is a real basis, not an HSM approximation", 
     expect(basesForPosting("unclear", WIFE_FINANCE_PROFILE)).not.toContain("zoekjaar");
   });
 
-  it("degrades to the strictest gates when a profile names a basis we cannot gate", () => {
+  it("never lets a profile with an ungateable basis get a silent pass on a definite route", () => {
     // A future profile could declare a permit this module has no GateProfile
-    // for. Screening it under nothing would record a verdict nobody computed,
-    // so the fallback is HSM — the strictest set — and the failure direction is
-    // a visible reject rather than a silent pass.
+    // for. Screening it under nothing would record a verdict nobody computed.
+    //
+    // 2026-09-04: this used to assert `basesForPosting` pre-picked "hsm" alone
+    // as a strict-but-silent substitute. That substitution is exactly the bug
+    // that let a Bangalore posting pass under a Dutch permit for wife-nl-finance
+    // (a real, narrower profile) — the fix removes basis substitution for a
+    // DEFINITE route entirely: the real (non-live) candidates come back
+    // unfiltered, and screen.ts rejects honestly once it checks `isLiveBasis`.
+    // What must hold is the intent this test was protecting — no silent pass —
+    // not the specific array shape.
     const foreign = { ...WIFE_FINANCE_PROFILE, permitBases: ["blaue-karte"] as [string, ...string[]] };
-    expect(basesForPosting("hsm", foreign)).toEqual(["hsm"]);
+    const bases = basesForPosting("hsm", foreign);
+    expect(bases.length).toBeGreaterThan(0);
+    for (const basis of bases) expect(isLiveBasis(basis, foreign)).toBe(false);
   });
 });
 

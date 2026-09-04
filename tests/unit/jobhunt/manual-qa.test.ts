@@ -78,6 +78,32 @@ describe("Manual QA Audit — Multi-Profile Verification", () => {
     expect(classifyTrack(techTitle, wife)).toBeNull(); // Unclassified for Wife
   });
 
+  it("Scenario 3b: finance-ops (RTR/OTC/PTP, credit, tax & treasury, due diligence) classifies distinctly", () => {
+    // Founder-supplied role list, 2026-09-04. finance-ops is a distinct
+    // shared-services discipline from fpa/compliance-kyc/auditor/accountant.
+    const wife = getProfile("wife-nl-finance");
+
+    expect(classifyTrack("RTR Analyst", wife)).toBe("finance-ops");
+    expect(classifyTrack("Order to Cash Analyst", wife)).toBe("finance-ops");
+    expect(classifyTrack("Procure to Pay Analyst", wife)).toBe("finance-ops");
+    expect(classifyTrack("Credit Analyst", wife)).toBe("finance-ops");
+    expect(classifyTrack("Treasury Analyst", wife)).toBe("finance-ops");
+    expect(classifyTrack("Due Diligence Analyst", wife)).toBe("finance-ops");
+
+    // Junior/forensic auditor titles land in auditor, not finance-ops or
+    // compliance-kyc — an easy place for a new track's keywords to collide.
+    expect(classifyTrack("Junior Internal Auditor", wife)).toBe("auditor");
+    expect(classifyTrack("Forensic Accountant", wife)).toBe("auditor");
+
+    // "Client Due Diligence" (AML/KYC-side) is NOT the same posting as
+    // "Due Diligence Analyst" (finance-ops/transaction-side) — confirms the
+    // two due-diligence keyword sets don't collapse into one track.
+    expect(classifyTrack("KYC Analyst", wife)).toBe("compliance-kyc");
+
+    // Unchanged from Pushkar's tech tracks.
+    expect(classifyTrack("RTR Analyst", getProfile("pushkar-nl-tech"))).toBeNull();
+  });
+
   it("Scenario 4: Experience gate thresholds differ by profile", () => {
     const pushkar = getProfile("pushkar-nl-tech");
     const wife = getProfile("wife-nl-finance");
@@ -168,5 +194,39 @@ describe("Manual QA Audit — Multi-Profile Verification", () => {
     const row = recorded.at(-1);
     expect(row?.["profile_id"]).toBe("wife-nl-finance");
     expect(row?.["tenant_id"]).toBe("turicks");
+  });
+
+  it("Scenario 7: an India-market posting rejects for her rather than passing under a Dutch permit", async () => {
+    // Found live on a real VPS sim run, 2026-09-04: a Bangalore posting passed
+    // under route "zoekjaar" — her Dutch orientation-year permit, evidence text
+    // "free access to the Dutch labour market" — on a job that is not in the
+    // Dutch labour market. She holds zoekjaar+hsm, never india-local.
+    const wife = getProfile("wife-nl-finance");
+
+    const description = `
+      We are looking for a Financial Planning & Analysis Analyst to join our team
+      in Bangalore. 3-5 years of post-qualification experience required.
+    `;
+
+    const result = await screenPosting({
+      company: "Abb",
+      title: "Financial Planning & Analysis Analyst",
+      description,
+      location: "Bangalore, Karnataka, India",
+      country: "IN",
+      profile: wife,
+    });
+
+    expect(result.kind).toBe("screened");
+    if (result.kind === "screened") {
+      expect(result.verdict.status).toBe("reject");
+      // Not carried under a Dutch permit basis that has nothing to do with
+      // an India-market posting.
+      expect(result.route).not.toBe("zoekjaar");
+      expect(result.route).not.toBe("hsm");
+      const basisGate = result.verdict.gates.find((g) => g.gate === "Basis");
+      expect(basisGate?.status).toBe("reject");
+      expect(basisGate?.evidence).not.toContain("Dutch labour market");
+    }
   });
 });

@@ -258,6 +258,7 @@ export function isLiveBasis(basis: PermitBasis, profile: JobSearchProfile = getP
  * were reachable another way.
  */
 export function basesForPosting(route: PostingRoute, profile: JobSearchProfile = getProfile()): PermitBasis[] {
+  const isDefiniteRoute = route !== "unclear";
   const candidates: readonly PermitBasis[] =
     route === "remote-contract"
       ? ["remote-contract"]
@@ -274,13 +275,28 @@ export function basesForPosting(route: PostingRoute, profile: JobSearchProfile =
   const live = candidates.filter((b) => isLiveBasis(b, profile));
   if (live.length > 0) return live;
 
-  // Never return nothing: a posting screened under no basis would be recorded
-  // with no verdict at all, which reads as "considered and found wanting" when in
-  // fact nothing looked at it. The fallback is the profile's OWN first declared
-  // basis so a non-Dutch profile is never silently judged by Dutch law, and it
-  // degrades to HSM — the strictest gates in the set — when that list is empty or
-  // names a basis this module has no gate profile for. Either way the failure
-  // direction is a visible reject, not a silent pass.
+  // A DEFINITE route (the fetcher established the market — hsm/india/remote)
+  // that matches none of this profile's live bases must NOT fall back to
+  // "whatever basis this profile happens to hold" — that basis has nothing to
+  // do with the posting's actual, known market. Found live, 2026-09-04: an
+  // Wife-nl-finance profile (permitBases zoekjaar+hsm, no india-local) hit a
+  // Bangalore-country="IN" posting, and the old fallback below carried it as
+  // "zoekjaar" — a Dutch orientation-year permit — with evidence text reading
+  // "free access to the Dutch labour market" on a role that is not in the
+  // Dutch labour market. Returning the untouched (non-live) candidate here
+  // instead lets the caller (screen.ts) detect the mismatch via `isLiveBasis`
+  // and reject honestly, rather than silently relabelling a definite finding.
+  if (isDefiniteRoute) return [...candidates];
+
+  // The genuinely ambiguous case: `route === "unclear"` and none of UNCLEAR_BASES
+  // is live for this profile. Never return nothing — a posting screened under no
+  // basis would be recorded with no verdict at all, which reads as "considered
+  // and found wanting" when in fact nothing looked at it. The fallback is the
+  // profile's OWN first declared basis so a non-Dutch profile is never silently
+  // judged by Dutch law, and it degrades to HSM — the strictest gates in the
+  // set — when that list is empty or names a basis this module has no gate
+  // profile for. Either way the failure direction is a visible reject, not a
+  // silent pass.
   const declared = profile.permitBases.find(isKnownPermitBasis);
   return [declared ?? "hsm"];
 }
