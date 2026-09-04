@@ -106,7 +106,17 @@ async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promis
 
 // ── One text turn ──────────────────────────────────────────────────────────────
 
-export async function runKernelText(ctx: Context, text: string): Promise<void> {
+/**
+ * `profileId` names whose row this turn is about — set by jobhunt-commands.ts
+ * whenever the instruction text was composed FOR a specific candidate's row
+ * (draft/ask). It rides in `configurable.profile_id`, the same per-invocation
+ * channel `thread_id` already uses, and lets the jobhunt worker's system
+ * prompt (kernel-boot.ts's `promptForProfile`) name the right candidate for
+ * THIS turn without rebuilding the kernel, which is compiled once and reused
+ * forever. Omitted (the general free-text path) means "no override" — the
+ * worker keeps the default-profile prompt it always had.
+ */
+export async function runKernelText(ctx: Context, text: string, profileId?: string): Promise<void> {
   const chatId = ctx.chat?.id ?? "unknown";
   await withChatTurnLock(chatId, async () => {
     const trace = startTurn({ chatId: String(chatId), kind: "message", promptHash: kernelPromptHash() });
@@ -125,7 +135,10 @@ export async function runKernelText(ctx: Context, text: string): Promise<void> {
 
       const kernel = await getKernel();
       const config = {
-        configurable: { thread_id: threadIdFor(chatId) },
+        configurable: {
+          thread_id: threadIdFor(chatId),
+          ...(profileId ? { profile_id: profileId } : {}),
+        },
         recursionLimit: OFFICE_RECURSION_LIMIT,
         callbacks: [makeBudgetCallback(), new TraceCallback(trace)],
       };
