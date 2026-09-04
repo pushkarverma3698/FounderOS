@@ -18,7 +18,7 @@
 
 import type { Context } from "grammy";
 import {
-  APPLY_PROFILE_PATH,
+  applyProfilePathFor,
   parseApplyProfile,
   readApplyProfile,
   renderApplyProfile,
@@ -27,6 +27,7 @@ import {
 } from "../tools/jobhunt/apply-profile.js";
 import { childLogger } from "./../infra/logger.js";
 import { safeHtml } from "./approval-card.js";
+import { isProfileArgMiss, profileMissMessage, resolveProfileArg } from "./jobhunt-profile-arg.js";
 
 const log = childLogger({ module: "gateway:profile-commands" });
 
@@ -70,27 +71,37 @@ export function parseProfileCommand(raw: string): ProfileCommand {
 const USAGE =
   "<b>/profile</b> — show what every application form gets filled from.\n" +
   "<b>/profile set &lt;field&gt; &lt;value&gt;</b> — change one field.\n\n" +
+  "With a second candidate registered, name whose: <code>/profile wife</code>, " +
+  "<code>/profile wife set phone +31 6 12345678</code>.\n\n" +
   "Examples:\n" +
   "<code>/profile set phone +31 6 12345678</code>\n" +
   "<code>/profile set answers.years_experience 4</code>\n" +
   "<code>/profile set answers.work_authorization requires-sponsorship</code>";
 
-/** `/profile` and `/profile set <field> <value>`. */
+/** `/profile`, `/profile set <field> <value>`, and `/profile <who> [set <field> <value>]`. */
 export async function handleProfile(ctx: Context): Promise<void> {
-  const command = parseProfileCommand(ctx.match?.toString() ?? "");
+  const arg = resolveProfileArg(ctx.match?.toString() ?? "", ["set"]);
+  if (isProfileArgMiss(arg)) {
+    await ctx.reply(safeHtml(profileMissMessage(arg)));
+    return;
+  }
+
+  const path = applyProfilePathFor(arg.profile.id);
+  const who = arg.explicit ? `${arg.profile.candidateName}'s ` : "";
+  const command = parseProfileCommand(arg.rest);
 
   if (command.kind === "usage") {
     await ctx.reply(`${safeHtml(command.reason)}\n\n${USAGE}`, { parse_mode: "HTML" });
     return;
   }
 
-  const current = await readApplyProfile();
+  const current = await readApplyProfile(path);
 
   if (command.kind === "show") {
     await ctx.reply(
       current.ok
         ? renderApplyProfile(current.profile)
-        : `No usable apply profile — ${safeHtml(current.reason)}.\n\n` +
+        : `No usable ${who}apply profile — ${safeHtml(current.reason)}.\n\n` +
             `Nothing can fill a form until this exists. Set the four an ATS always asks for:\n` +
             `<code>/profile set first_name …</code>, <code>last_name</code>, <code>email</code>, <code>phone</code>.`,
       { parse_mode: "HTML", link_preview_options: { is_disabled: true } },
@@ -104,8 +115,8 @@ export async function handleProfile(ctx: Context): Promise<void> {
   // form came back empty.
   if (!current.ok) {
     await ctx.reply(
-      `Can't edit — the profile is unreadable: ${safeHtml(current.reason)}.\n` +
-        `Fix ${safeHtml(APPLY_PROFILE_PATH)} on the box, or send /profile to see the state.`,
+      `Can't edit — the ${who}profile is unreadable: ${safeHtml(current.reason)}.\n` +
+        `Fix ${safeHtml(path)} on the box, or send /profile to see the state.`,
       { parse_mode: "HTML" },
     );
     return;
@@ -131,16 +142,16 @@ export async function handleProfile(ctx: Context): Promise<void> {
   }
 
   try {
-    await writeApplyProfile(edited.next);
+    await writeApplyProfile(edited.next, path);
   } catch (err) {
     await ctx.reply(`Couldn't save the profile: ${safeHtml((err as Error).message)}. Nothing changed.`);
     return;
   }
 
-  log.info({ field: command.path }, "Apply profile field updated");
+  log.info({ profileId: arg.profile.id, field: command.path }, "Apply profile field updated");
   await ctx.reply(
-    `✅ <code>${safeHtml(command.path)}</code> is now <code>${safeHtml(command.value)}</code>.\n\n` +
-      `<i>Your Mac picks this up on the next wake, or run the apply client to pull it now.</i>`,
+    `✅ ${who}<code>${safeHtml(command.path)}</code> is now <code>${safeHtml(command.value)}</code>.\n\n` +
+      `<i>${who ? "Their" : "Your"} Mac picks this up on the next wake, or run the apply client to pull it now.</i>`,
     { parse_mode: "HTML" },
   );
 }

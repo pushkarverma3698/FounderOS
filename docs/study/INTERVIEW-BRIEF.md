@@ -18,7 +18,7 @@ Use these six. They are specific, verifiable, and each one implies a mechanism.
 | **97.3% recall@5 / 0.855 MRR** on hybrid retrieval, beating vector-only by 33 points on the hard slice | RAG measured, not hoped for. 35.6% of postings ask for RAG | `pnpm eval:retrieval`, 1,214 chunks |
 | **`regex-routing: 0`, `kernel-purity: 0`, `gateway-imports: 0`** — CI fails if any rises | Architecture debt is ratcheted, not aspirational | `governance/architecture-baseline.json` |
 
-**Scale, if asked:** 336 TypeScript source files / 58,141 LOC, 51 tool modules, 8 workers,
+**Scale, if asked:** 341 TypeScript source files / 58,141 LOC, 51 tool modules, 8 workers,
 50 ADRs, 29 database tables, 1,297 ATS boards polled across 10 platforms, 911 job postings
 ingested in 4 weeks.
 

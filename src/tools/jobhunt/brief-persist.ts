@@ -90,10 +90,15 @@ export function briefRankEntries(
 export async function persistBriefRanks(
   rows: readonly BriefRow[],
   standingRows: readonly BriefRow[] = [],
+  opts: { profileId?: string } = {},
 ): Promise<void> {
   const entries = briefRankEntries(rows, standingRows);
   try {
-    await recordBriefRanks(entries);
+    // profileId scoping: without it, ranking Wife's queue clears Pushkar's
+    // brief_section/brief_rank (and vice versa) — see recordBriefRanks in
+    // job-queries.ts, which only clears the invoking profile's previous ranks
+    // when profileId is passed.
+    await recordBriefRanks(entries, { profileId: opts.profileId });
   } catch (err) {
     // allow-failopen: the brief itself is the deliverable. A lost rank makes
     // /draft say "I can't find row N", which is loud and recoverable.

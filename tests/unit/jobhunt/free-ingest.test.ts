@@ -189,7 +189,7 @@ describe("filterCandidates — a platform whose date only exists on the detail p
     const { kept, notes } = filterCandidates([offTrack], NOW, 6);
 
     expect(kept).toEqual([]);
-    expect(notes.some((n) => n.includes("not an engineering track"))).toBe(true);
+    expect(notes.some((n) => n.includes("matched none of Pushkar Verma's tracks"))).toBe(true);
   });
 
   it("still drops it for market — deferral applies to the DATE only", () => {
@@ -265,7 +265,7 @@ describe("filterCandidates — track", () => {
     const { kept, notes } = filterCandidates([unclassifiable], NOW, 6);
 
     expect(kept).toEqual([]);
-    expect(notes.some((n) => n.includes("1 postings were not an engineering track"))).toBe(true);
+    expect(notes.some((n) => n.includes("1 postings matched none of Pushkar Verma's tracks"))).toBe(true);
   });
 });
 
@@ -276,7 +276,7 @@ describe("filterCandidates — market", () => {
     const { kept, notes } = filterCandidates([other], NOW, 6);
 
     expect(kept).toEqual([]);
-    expect(notes.some((n) => n.includes("1 postings were outside the Netherlands and India"))).toBe(
+    expect(notes.some((n) => n.includes("1 postings were outside Netherlands or India"))).toBe(
       true,
     );
   });
@@ -308,7 +308,7 @@ describe("filterCandidates — note discipline", () => {
     const { notes } = filterCandidates([passes, offTrack], NOW, 6);
 
     expect(notes).toHaveLength(1);
-    expect(notes[0]).toContain("not an engineering track");
+    expect(notes[0]).toContain("matched none of Pushkar Verma's tracks");
   });
 
   it("every note names a non-zero count", () => {
@@ -369,7 +369,7 @@ describe("filterCandidates — a 10h+ unseen posting survives on age alone", () 
     const { kept, notes } = filterCandidates([offTrack], NOW);
 
     expect(kept).toEqual([]);
-    expect(notes.some((n) => n.includes("not an engineering track"))).toBe(true);
+    expect(notes.some((n) => n.includes("matched none of Pushkar Verma's tracks"))).toBe(true);
     expect(notes.join(" ")).not.toMatch(/older than/);
   });
 

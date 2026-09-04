@@ -312,15 +312,16 @@ function buildModel(
   }
 
   if (parsed.provider === "google-genai") {
-    if (!process.env["GOOGLE_GENERATIVE_AI_API_KEY"]) {
+    const apiKey = process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
+    if (!apiKey) {
       if (optional) return null;
       throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is required for google-genai: models.");
     }
     return new ChatGoogleGenerativeAI({
+      apiKey,
       model: parsed.model,
       temperature,
       maxRetries: 2,
-      apiKey: process.env["GOOGLE_GENERATIVE_AI_API_KEY"],
     });
   }
 

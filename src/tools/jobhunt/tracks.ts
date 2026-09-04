@@ -23,7 +23,12 @@
  * level down. It is also the track his CV matches most directly: three years of
  * React + Node + Postgres, shipped.
  */
-export type RoleTrack = "ai" | "fullstack" | "backend" | "frontend";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
+
+/**
+ * RoleTrack — string track identifier e.g. "ai", "fullstack", "backend", "frontend", "fpa", "compliance-kyc".
+ */
+export type RoleTrack = string;
 
 /**
  * TITLES ARE MATCHED AS SUBSTRINGS, NOT PREFIXES.
@@ -135,7 +140,7 @@ export const TRACK_PRIORITY: readonly RoleTrack[] = [
 /** Titles for the given tracks, in priority order, de-duplicated. */
 export function titlesForTracks(tracks: readonly RoleTrack[]): string[] {
   const ordered = TRACK_PRIORITY.filter((t) => tracks.includes(t));
-  return [...new Set(ordered.flatMap((t) => TRACK_TITLES[t]))];
+  return [...new Set(ordered.flatMap((t) => TRACK_TITLES[t] ?? []))];
 }
 
 /** Escapes regex metacharacters so a term can be embedded literally in a RegExp. */
@@ -183,36 +188,54 @@ function matchesAsWholeWord(normalisedTitle: string, term: string): boolean {
  * report for two tracks at once: the term is counted where it does not belong
  * and missing where it does.
  */
-export function classifyTrack(title: string): RoleTrack | null {
+export function classifyTrack(
+  title: string,
+  profile: JobSearchProfile = getProfile(),
+): RoleTrack | null {
   const normalised = title.toLowerCase();
 
-  // Pass 1 — a track's OWN vocabulary, unchanged, minus the two paid phrases
-  // that name no track (see GENERIC_PAID_PHRASES).
-  for (const track of TRACK_PRIORITY) {
-    const matchedPaidPhrase = TRACK_TITLES[track].some((phrase) => {
+  const trackPriority = profile.trackPriority;
+  const tracks = profile.tracks;
+
+  // Pass 1 — profile track titles and classify terms
+  for (const trackId of trackPriority) {
+    const trackConfig = tracks[trackId];
+    if (!trackConfig) continue;
+
+    const matchedTitlePhrase = trackConfig.titles.some((phrase) => {
       const term = phrase.replace(/:\*$/, "").toLowerCase();
       return !GENERIC_PAID_PHRASES.has(term) && normalised.includes(term);
     });
-    const matchedClassifyTerm = TRACK_CLASSIFY_TERMS[track].some((term) =>
+
+    const matchedClassifyTerm = trackConfig.classifyTerms.some((term) =>
       matchesAsWholeWord(normalised, term),
     );
-    if (matchedPaidPhrase || matchedClassifyTerm) return track;
+
+    if (matchedTitlePhrase || matchedClassifyTerm) return trackId;
   }
 
-  // Pass 2 — a track qualifier PAIRED with a role noun. Both are required:
-  // "Frontend" alone is a topic and "Engineer" alone is any engineer at all,
-  // and it is the pairing that admits "Frontend Software Engineer" while
-  // still refusing "UX Designer" and "Senior Electrical Engineer".
-  if (ROLE_NOUNS.some((noun) => matchesAsWholeWord(normalised, noun))) {
+  // Fallback to legacy tech classification only for tech profiles
+  if (profile.skillsDictionaryName === "tech") {
     for (const track of TRACK_PRIORITY) {
-      if (TRACK_QUALIFIERS[track].some((q) => matchesAsWholeWord(normalised, q))) return track;
+      const matchedPaidPhrase = TRACK_TITLES[track]?.some((phrase) => {
+        const term = phrase.replace(/:\*$/, "").toLowerCase();
+        return !GENERIC_PAID_PHRASES.has(term) && normalised.includes(term);
+      });
+      const matchedClassifyTerm = TRACK_CLASSIFY_TERMS[track]?.some((term) =>
+        matchesAsWholeWord(normalised, term),
+      );
+      if (matchedPaidPhrase || matchedClassifyTerm) return track;
     }
-  }
 
-  // Pass 3 — a software title that genuinely names no track. LAST, so it can
-  // never outrank a specific match; that ordering is the whole fix.
-  if (GENERIC_ENGINEERING_TERMS.some((term) => matchesAsWholeWord(normalised, term))) {
-    return GENERIC_FALLBACK_TRACK;
+    if (ROLE_NOUNS.some((noun) => matchesAsWholeWord(normalised, noun))) {
+      for (const track of TRACK_PRIORITY) {
+        if (TRACK_QUALIFIERS[track]?.some((q) => matchesAsWholeWord(normalised, q))) return track;
+      }
+    }
+
+    if (GENERIC_ENGINEERING_TERMS.some((term) => matchesAsWholeWord(normalised, term))) {
+      return GENERIC_FALLBACK_TRACK;
+    }
   }
 
   return null;

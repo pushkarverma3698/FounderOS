@@ -16,6 +16,7 @@
  */
 
 import { childLogger } from "../../infra/logger.js";
+import { TENANT } from "../../core/config.js";
 import { recordIngestRun } from "../../db/job-run-queries.js";
 import { estimateQueryCost, toLedgerAmount, type ApifyPlan, type FeedPricing } from "./cost.js";
 import type { IngestLine } from "./ingest.js";
@@ -135,7 +136,7 @@ export async function recordQueryCost(entry: LedgerEntry): Promise<void> {
 
   try {
     await recordIngestRun({
-      tenant_id: "turicks",
+      tenant_id: TENANT,
       sweep_id: entry.sweepId,
       feed: entry.feed,
       pool: entry.pool,

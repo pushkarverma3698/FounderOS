@@ -6,6 +6,13 @@
 .vps-access.local
 artifacts/
 
+# Candidate CVs — real names, contact details, work history. Same class of
+# secret as .env: never committed, always local/prod filesystem data (see
+# data/local_docs/, mac-client/cv/, PERSONAL_CV_DIR in profile-config.ts).
+# mac-client/apply-profile.json is covered separately below.
+data/local_docs/
+mac-client/cv/
+
 # Dependencies
 node_modules/
 .pnpm-store/

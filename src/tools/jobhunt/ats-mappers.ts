@@ -11,6 +11,7 @@
  * suffixes) be regression-tested without a network call.
  */
 
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
 import { countryFromLocation } from "./country.js";
 import type { RawPosting } from "./ats-source.js";
 
@@ -129,7 +130,10 @@ export function detectFeedError(items: readonly unknown[]): string | null {
  * the body; screening an empty body would produce a verdict from no evidence,
  * which is the one failure mode this pipeline exists to prevent.
  */
-export function mapAtsItems(items: readonly unknown[]): RawPosting[] {
+export function mapAtsItems(
+  items: readonly unknown[],
+  profile: JobSearchProfile = getProfile(),
+): RawPosting[] {
   const postings: RawPosting[] = [];
   for (const raw of items) {
     const item = asRecord(raw);
@@ -170,7 +174,7 @@ export function mapAtsItems(items: readonly unknown[]): RawPosting[] {
       // feed did not supply comes back `unknown`, which is an honest answer and
       // gets flagged downstream — it is not rounded to the Netherlands because
       // the body happened to contain the word "hybrid".
-      country: countryFromLocation(location),
+      country: countryFromLocation(location, profile),
       postedAt: parseDate(item["date_posted"] ?? item["datePosted"] ?? item["date_created"]),
     });
   }

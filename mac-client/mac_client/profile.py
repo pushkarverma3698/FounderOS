@@ -28,6 +28,13 @@ class ProfileError(RuntimeError):
     """The profile is missing or unusable. Always names the path and the fix."""
 
 
+#: Which candidate this client applies for. Must match a JobSearchProfile id in
+#: src/tools/jobhunt/profile-config.ts — it is what scopes the queue query, and a
+#: mismatch silently pulls the OTHER candidate's rows and uploads this profile's
+#: resume to them.
+DEFAULT_PROFILE_ID = "pushkar-nl-tech"
+
+
 @dataclass(frozen=True)
 class ApplyProfile:
     first_name: str
@@ -40,6 +47,8 @@ class ApplyProfile:
     default_resume: str | None
     linkedin: str | None = None
     website: str | None = None
+    #: The job_applications.profile_id whose queue this client may act on.
+    profile_id: str = DEFAULT_PROFILE_ID
 
     def resume_for(self, track: str, job_id: str | None = None) -> str | None:
         """The PDF for this track, or the default, or the per-job tailored PDF.
@@ -128,6 +137,7 @@ def load_profile(path: Path = DEFAULT_PROFILE_PATH) -> ApplyProfile:
         default_resume=str(default_resume) if default_resume else None,
         linkedin=raw.get("linkedin"),
         website=raw.get("website"),
+        profile_id=str(raw.get("profile_id") or DEFAULT_PROFILE_ID).strip(),
     )
 
 

@@ -15,6 +15,7 @@ import { childLogger } from "../../infra/logger.js";
 import type { RawPosting } from "./ats-source.js";
 import { dedupeKey } from "./filters.js";
 import { screenPosting } from "./screen.js";
+import type { JobSearchProfile } from "./profile-config.js";
 
 const log = childLogger({ module: "tool:ingest_jobs" });
 
@@ -56,7 +57,10 @@ export type IngestResult =
  * screenings because the tenth had a malformed body would be the pipeline
  * failing at exactly the moment it is supposed to be unattended.
  */
-export async function screenBatch(postings: readonly RawPosting[]): Promise<IngestLine[]> {
+export async function screenBatch(
+  postings: readonly RawPosting[],
+  profile?: JobSearchProfile,
+): Promise<IngestLine[]> {
   const lines: IngestLine[] = [];
 
   for (const posting of postings) {
@@ -78,6 +82,7 @@ export async function screenBatch(postings: readonly RawPosting[]): Promise<Inge
         // reads that field to decide which check to run.
         source: posting.source ?? INGEST_SOURCE,
         ...(posting.externalId ? { externalId: posting.externalId } : {}),
+        ...(profile ? { profile } : {}),
       });
 
       if (outcome.kind === "error") {

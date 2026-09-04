@@ -32,7 +32,8 @@
 
 import { z } from "zod";
 import * as fs from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { DEFAULT_PROFILE_ID } from "./profile-config.js";
 
 /**
  * What the founder may state about his own right to work.
@@ -102,6 +103,21 @@ export type ApplyProfile = z.infer<typeof applyProfileSchema>;
 export const APPLY_PROFILE_PATH =
   process.env["APPLY_PROFILE_PATH"]?.trim() ||
   join(process.env["FOUNDEROS_DATA_ROOT"]?.trim() || "/opt/founderos-data", "apply-profile.json");
+
+/**
+ * Where THIS candidate's apply profile lives.
+ *
+ * The default profile keeps the exact original path — `APPLY_PROFILE_PATH` is
+ * also an env var override, and changing what it resolves to for the one
+ * candidate every existing install already points at would silently orphan
+ * their real file. Any OTHER profile gets its own sibling file in the same
+ * directory, named by id, so a second candidate never reads or writes the
+ * first one's name, email or resume paths.
+ */
+export function applyProfilePathFor(profileId: string): string {
+  if (profileId === DEFAULT_PROFILE_ID) return APPLY_PROFILE_PATH;
+  return join(dirname(APPLY_PROFILE_PATH), `apply-profile-${profileId}.json`);
+}
 
 export type ProfileRead =
   | { readonly ok: true; readonly profile: ApplyProfile; readonly raw: Record<string, unknown> }
