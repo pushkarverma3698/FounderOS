@@ -86,12 +86,10 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
   Recommend one option with reasons; never present an unranked survey. If a
   conclusion rests on an assumption, verify the assumption or label it unverified.
 - **Build for the OUTCOME, not the instruction (rule #26 — founder directive,
-  2026-08-01)**: every request names a symptom and guesses a remedy. Before
-  writing anything, answer three questions in order: *what outcome does this
-  serve · what is the binding constraint on that outcome · does the requested
-  change move that constraint*. If the answer to the third is no, say so and name
-  what would — then build that too. Deliver the literal ask in full regardless;
-  the outcome lens decides HOW and WHAT ELSE, never WHETHER.
+  2026-08-01)**: the general form of this rule — the three questions, and the
+  2026-07-31 screener that produced zero applications — lives in the global
+  `~/.claude/CLAUDE.md` § "Outcome-Driven, Not Instruction-Driven" and is not
+  restated here. What is FounderOS-specific:
   - Every deliverable must end in something the founder can ACT ON — a ranked
     shortlist, a draft, a decision, a number that changes a choice. A log of what
     happened is not an outcome. If ignoring the output costs nothing and emits no
@@ -105,10 +103,9 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
     filters; a filtered-out row and an empty market are indistinguishable from
     outside, and that ambiguity has already cost this pipeline weeks. Reject
     inside the pipeline where the reason is stored and shown, never before it.
-  - Two failures produced this rule: a screener that ran flawlessly for weeks and
-    produced zero applications (2026-07-31 — screening was never the constraint),
-    and the first real brief, which was unreadable because it displayed a PASSING
-    check as the reason a role needed attention (2026-08-01).
+  - The second failure behind this rule is FounderOS-local: the first real jobhunt
+    brief was unreadable because it displayed a PASSING check as the reason a role
+    needed attention (2026-08-01).
 - **Memory is the source of truth**: docs/ADR changes → `pnpm brain:sync`.
 - **Episodic memory is a file, not a hope**: any session that completes or merges non-trivial work
   writes `docs/sessions/YYYY-MM-DD-<topic>.md`, using `docs/sessions/TEMPLATE.md`'s sections (What we
@@ -277,10 +274,13 @@ explicitly ("Nothing outstanding from your end").
 - After merging to `main`, WATCH THE DEPLOY and verify prod actually moved.
   A merge is not a deploy, and CD silently failing was how prod stayed on
   `a966e9a` for a full day.
-- **Agent branches are task-specific, short-lived, PR-backed, and deleted after merge.** No
-  permanent `claude/*`, `cursor/*`, or `antigravity/*` branches — a branch under those prefixes is
-  fine mid-task (e.g. an open PR) but should not outlive its PR. This was already the practice;
-  writing it down so it stays the practice.
+- **Branch naming is binding and enforced.** `docs/antigravity/BRANCHING-STRATEGY.md`
+  § "Naming grammar" is the single source; `pnpm verify:branch` (inside `pnpm gate`) fails a
+  malformed name. Shape: `<type>/<slug>`, or `<agent>/<type>-<slug>` when the harness owns the
+  prefix. **Never keep a harness codename** — the moment Claude Code hands you
+  `claude/sweet-pike-6b0c3c`, run `git branch -m claude/<type>-<subject-slug>` before the first
+  push. Agent branches (`claude/*`, `cursor/*`, `antigravity/*`) are task-specific, short-lived,
+  PR-backed, and deleted after merge; none of them is ever permanent.
 - Evidence in every PR: fresh `pnpm gate` output + live-path proof (or an
   explicit NOT VERIFIED with the reason).
 
@@ -290,23 +290,14 @@ audited and replaced 2026-07-08 — see `ZERO-BASE-AUDIT.md` (4 live failure
 traces), `JARVIS-ARCHITECTURE.md` (the contract-first design), and
 `docs/PROOF.md` (the living scoreboard).
 
-## Strategic Mandate (Maximum Output)
+## Shared directives (binding, single copy)
 
-We are building a system designed to decisively outcompete the market. You must ruthlessly prioritize execution speed, shipping revenue-generating features, and leveraging competitor intelligence over endless internal theoretical refactoring. If a task does not tangibly move the needle or provide a market advantage, flag it immediately and pivot to building.
+Four directives apply to every agent in this repo and are **not repeated here** — restating them
+is how they drift:
 
-## Content Generation (No AI Slop)
+1. **Strategic Mandate** — ship revenue-moving work over internal refactoring
+2. **Content Generation (No AI Slop)** — the `no-ai-slop` skill is mandatory for anything public
+3. **Implementation Plans & Memory** — plans go to `docs/plans/YYYY-MM-DD-feature-name.md`
+4. **Cross-Agent Awareness** — check `turicks-brain` + recent `docs/plans/` before complex work
 
-**Mandatory Skill Usage:** Whenever you are generating, preparing, or drafting any content intended for public platforms (e.g., comments, posts, articles, social media, emails), you MUST use and strictly follow the `no-ai-slop` skill located at `/Users/pushkarverma/Projects/githubtools/no-ai-slop/SKILL.md`. 
-**Why:** Nothing we publish on our platforms should look like AI-generated content. You must ensure all outputs are highly authentic, human-like, and completely free of typical AI "slop" (e.g., overly formal tone, unnecessary emojis, generic corporate speak, predictable structures).
-
-## Implementation Plans & Memory
-
-All implementation plans generated by Claude Code, Antigravity, or any agent MUST be saved with organized, descriptive filenames in the `docs/plans/` directory (e.g., `docs/plans/YYYY-MM-DD-feature-name.md`).
-**Why:** Storing all plans centrally with semantic names drastically improves RAG retrieval, allowing future agents to intelligently learn from past architectural decisions and execution contexts. Do not store plans in scattered scratch directories or with generic names like `plan.md`.
-
-## Cross-Agent Awareness (The "What is everyone doing?" rule)
-
-Before starting any complex task, you MUST research what other agents have recently worked on or are currently working on. You do this by:
-1. Querying `turicks-brain` for recent session summaries.
-2. Listing and reading the most recent implementation plans in `docs/plans/`.
-**Why:** You are part of a swarm. Knowing the recent architectural changes and in-flight plans of your peer agents prevents you from duplicating work, reverting deliberate changes, or breaking dependent systems.
+Full text, with the reasoning for each: [docs/rules/SHARED-DIRECTIVES.md](docs/rules/SHARED-DIRECTIVES.md). Read it before your first substantive action.

@@ -22,12 +22,70 @@ branch before the first edit, not after.
 | `feat/<slug>` | Claude or founder, new capability | fresh `origin/main` (or `beta` if stacking on unmerged infra) | until merged |
 | `fix/<slug>` | Claude or founder, bug fix | fresh `origin/main` | until merged |
 | `hotfix/<slug>` | Claude or founder, prod is broken *right now* | fresh `origin/main` | until merged (hours, not days) |
-| `chore/<slug>` | Claude or founder, non-behavioral (docs, deps, cleanup) | fresh `origin/main` | until merged |
+| `chore/<slug>` | Claude or founder, non-behavioral (deps, cleanup) | fresh `origin/main` | until merged |
 | `docs/<slug>` | Claude or founder, documentation only | fresh `origin/main` | until merged |
-| Human-authored Antigravity briefs (`AG-NNN`) | whatever branch name the dispatching session picks — see `README.md` | fresh `origin/main` | until merged |
+| `refactor/<slug>` | Claude or founder, behavior-preserving restructure | fresh `origin/main` | until merged |
+| `test/<slug>` | Claude or founder, tests only | fresh `origin/main` | until merged |
+| `claude/<type>-<slug>` | a Claude Code session (harness cuts the branch) | fresh `origin/main` | until the PR merges — **then deleted** |
+| `cursor/<type>-<slug>` | a Cursor session | fresh `origin/main` | until the PR merges — **then deleted** |
+| `antigravity/<type>-<slug>` | an Antigravity laptop conversation | fresh `origin/main` | until the PR merges — **then deleted** |
+| Human-authored Antigravity briefs (`AG-NNN`) | the dispatching session picks an `antigravity/<type>-<slug>` name — see `README.md` | fresh `origin/main` | until merged |
 
 `main` and `beta` are never committed to directly by anyone or anything. That rule already existed
 in `CLAUDE.md`'s Git section — this doc is the "how," not a replacement for it.
+
+The three agent prefixes are **task-specific and short-lived**: a `claude/*`, `cursor/*` or
+`antigravity/*` branch is fine while its PR is open and must not outlive it. There are no permanent
+agent branches.
+
+## Naming grammar — BINDING
+
+```
+<type>/<slug>                 humans, and any agent that can choose its own branch name
+<agent>/<type>-<slug>         when the harness insists on owning the prefix
+task/issue-<N>-<slug>         the VPS dispatcher only
+```
+
+- `<type>` ∈ `feat` · `fix` · `hotfix` · `chore` · `docs` · `refactor` · `test` — the same verbs as
+  the commit convention, so a branch name and its commits agree.
+- `<agent>` ∈ `claude` · `cursor` · `antigravity`.
+- `<slug>` is lowercase kebab-case, **2–5 words that name the subject of the work**, `[a-z0-9-]`
+  only. A trailing harness-generated hash (`-ac9712`) is allowed and ignored.
+- Whole name ≤ 60 characters. No dates, no author names, no `-v2` / `-new` / `-final`, no `WIP`.
+
+**A branch name is read by a human deciding whether to open the PR.** It must answer "what is in
+here?" without opening it. `fix/jobhunt-cv-claim-guard` does. `claude/sweet-pike-6b0c3c` does not.
+
+### The banned shape: harness codenames
+
+Claude Code and Cursor will invent a random two-word codename when you do not give them one. This
+repo has already merged **five** of them — `claude/sweet-pike-6b0c3c`,
+`claude/wonderful-spence-d76aa2`, `claude/sad-burnell-86737c`, `claude/funny-fermat-552ryl`,
+`claude/portfolio-ai-audit-kjik0f` — and the git history of a codename branch is unsearchable
+afterwards: nothing in `sweet-pike` recalls what shipped in it.
+
+**If the harness handed you a codename, rename it before the first push:**
+
+```bash
+git branch -m claude/fix-jobhunt-cv-claim-guard
+```
+
+Do it before the push, not after — renaming a pushed branch orphans the remote ref and any PR
+already opened against it.
+
+### Examples
+
+| ✅ | ❌ | why the bad one fails |
+|---|---|---|
+| `fix/jobhunt-cv-claim-guard` | `fix/bug` | slug names nothing |
+| `feat/rag-pipeline-upgrade` | `claude/wonderful-spence-d76aa2` | harness codename |
+| `claude/docs-branch-naming-rules` | `claude/branch-naming-audit-ac9712` | missing `<type>-` after the agent prefix |
+| `chore/prune-merged-branches` | `chore/cleanup-2026-09-05` | dates belong in git, not the name |
+| `task/issue-412-cost-attribution` | `Feat/Cost_Attribution` | uppercase + underscores |
+
+**Enforced by:** `scripts/verify-branch-name.sh`, run as part of `pnpm gate` (per rule #27 — a
+rule with no mechanism decays). It is a no-op on `main`, `beta`, and detached CI checkouts, so it
+only ever fires on a work branch you are about to push.
 
 ## Where a branch merges to
 
