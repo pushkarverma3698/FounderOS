@@ -81,7 +81,7 @@ describe("COMMAND_MENU — agrees with what the bot actually answers", () => {
 
 describe("buildCommandsHelp — the same list, rendered for chat", () => {
   it("names every command in the menu", () => {
-    const help = buildCommandsHelp();
+    const help = buildCommandsHelp().join("\n");
     for (const entry of COMMAND_MENU) {
       expect(help).toContain(`/${entry.command}`);
     }
@@ -89,12 +89,12 @@ describe("buildCommandsHelp — the same list, rendered for chat", () => {
 
   it("escapes placeholders so Telegram does not read them as tags", () => {
     // "/draft <n>" sent as HTML is the exact defect that killed /jobs.
-    const help = buildCommandsHelp();
+    const help = buildCommandsHelp().join("\n");
     expect(help).not.toMatch(/<n>/);
     expect(help).toContain("&lt;n&gt;");
   });
 
   it("tells him the menu button exists — otherwise he still has to remember", () => {
-    expect(buildCommandsHelp()).toMatch(/menu/i);
+    expect(buildCommandsHelp().join("\n")).toMatch(/menu/i);
   });
 });
