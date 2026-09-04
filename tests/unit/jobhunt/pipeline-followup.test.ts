@@ -98,7 +98,7 @@ describe("formatFollowupNudge", () => {
 
 describe("runPipelineDigest", () => {
   it("reads listLiveApplications and sends the formatted digest", async () => {
-    listLiveApplications.mockResolvedValue([row()]);
+    listLiveApplications.mockResolvedValueOnce([row()]).mockResolvedValue([]);
     await runPipelineDigest();
     expect(sendToChat).toHaveBeenCalledTimes(1);
     const [sentText] = (sendToChat.mock.calls[0] ?? []) as [string?];
@@ -108,7 +108,7 @@ describe("runPipelineDigest", () => {
 
 describe("runFollowupSweep", () => {
   it("sends a nudge and increments followups_sent for each candidate", async () => {
-    listFollowupCandidates.mockResolvedValue([row({ followups_sent: 0 }), row({ id: "2", followups_sent: 1 })]);
+    listFollowupCandidates.mockResolvedValueOnce([row({ followups_sent: 0 }), row({ id: "2", followups_sent: 1 })]).mockResolvedValue([]);
     sendToChat.mockResolvedValue(undefined);
     incrementFollowupsSent.mockResolvedValue(undefined);
 
@@ -120,7 +120,7 @@ describe("runFollowupSweep", () => {
   });
 
   it("one failed send does not stop the rest, and does not increment for the failed row", async () => {
-    listFollowupCandidates.mockResolvedValue([row({ id: "a" }), row({ id: "b" })]);
+    listFollowupCandidates.mockResolvedValueOnce([row({ id: "a" }), row({ id: "b" })]).mockResolvedValue([]);
     sendToChat.mockRejectedValueOnce(new Error("Telegram down")).mockResolvedValueOnce(undefined);
 
     const outcome = await runFollowupSweep(NOW);
