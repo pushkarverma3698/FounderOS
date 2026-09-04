@@ -83,16 +83,20 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
   // "Specialist" vs "Officer") must each be enumerated rather than assumed
   // interchangeable — Dutch postings do not use them as synonyms.
   //
-  // No per-track `cvPath`: she has exactly one real CV (`baseCvPath` below,
-  // titled "FP&A" by her but covering her full background). Every track falls
-  // back to it, same as Pushkar's profile. Setting a per-track path to a file
-  // that does not exist would make three of four tracks fail loudly instead of
-  // screening — correct behaviour for a MISSING tailored CV, wrong for one that
-  // was never made in the first place.
+  // Every track's `cvPath` points at the SAME file (`baseCvPath` below — she has
+  // one real CV, not four). This is NOT optional the way it looks: omitting it
+  // does not fall back to `baseCvPath`. `loadTrackCvs` (brief-cv.ts) only reads
+  // `baseCvPath` for a row that matched NO track; a row that matched fpa,
+  // compliance-kyc, auditor or accountant resolves through `cvPathsForTrack`,
+  // which falls back to the GLOBAL `PERSONAL_CV_DIR`/`PERSONAL_CV_PATH` env
+  // vars — Pushkar's own CV. Found live, 2026-09-04: without this, her tracked
+  // rows (i.e. her whole queue) would have scored gap-overlap against his
+  // skills, not hers.
   tracks: {
     fpa: {
       id: "fpa",
       name: "FP&A / Business Controlling",
+      cvPath: "mac-client/cv/cv-wife-base.md",
       // Her current role (HBS: management reporting, business case modelling,
       // FTE/headcount planning, Power BI dashboards) and the CV's own title.
       // Strongest direct fit — live experience, not just coursework.
@@ -124,6 +128,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
     "compliance-kyc": {
       id: "compliance-kyc",
       name: "Regulatory Compliance / KYC-AML",
+      cvPath: "mac-client/cv/cv-wife-base.md",
       // 22 months across two roles at TIDE — her second-strongest direct fit,
       // and a distinct job market from FP&A, not a subset of "auditor".
       titles: [
@@ -153,6 +158,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
     auditor: {
       id: "auditor",
       name: "Auditor / Internal Controls",
+      cvPath: "mac-client/cv/cv-wife-base.md",
       // Matches her MSc major (Auditing) rather than direct work history —
       // ranked below fpa and compliance-kyc for that reason.
       titles: [
@@ -176,6 +182,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
     accountant: {
       id: "accountant",
       name: "Accountant / General Ledger",
+      cvPath: "mac-client/cv/cv-wife-base.md",
       // Weakest direct fit — no dedicated bookkeeping role on her CV, only
       // IFRS/statutory-reporting exposure via HBS and coursework. Kept as the
       // widest net, lowest priority.
