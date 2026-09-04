@@ -37,7 +37,7 @@ import { childLogger } from "../infra/logger.js";
 import { isProjectPath } from "./project-workflow.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
-const log = childLogger({ module: "tool:claude-code" });
+const log = childLogger({ module: "tool:opencode" });
 
 // ── Binary discovery ──────────────────────────────────────────────────────────
 
