@@ -575,3 +575,127 @@ mac-client pytest  →  95 passed (incl. 13 real-browser Playwright)
 - The zoekjaar gate profile encodes my reading of Dutch policy — no source in
   this repo establishes it. Worth one confirmation on ind.nl before her first
   application.
+
+# 10. Real identity, real keywords, production reality check — 2026-09-04 (Claude)
+
+The founder supplied her real CV (`Tashi_CV_FP&A.pdf`) and cover letter. This
+section: wires her real identity, replaces the placeholder track vocabulary with
+titles researched against live Dutch/EU postings, confirms the single-table
+architecture, and reports actual production state (checked live over SSH, not
+assumed).
+
+## 10.1 Identity
+
+`candidateName` is now **Tashi Goyal** — the "Wife" placeholder is gone from the
+agent prompt and the application packet. Her real CV is transcribed to
+`mac-client/cv/cv-wife-base.md`, matching the markdown structure `cv-renderer.ts`
+expects (`#`/`##`/`##`/`-` bullets). **Not committed** — `.gitignore` now excludes
+`mac-client/cv/` and `data/local_docs/` explicitly (same class of secret as
+`.env`), mirroring how Pushkar's own `cv-master.md` was already never in git.
+
+`experienceYears` moved from a placeholder `2.0` to a **computed** `2.4`, shown
+in-file: TIDE Analyst (Oct 2022–Dec 2023, 15mo) + Senior Analyst (Jan–Aug 2024,
+8mo) + HBS Finance Intern (Mar 2026–present, 6mo, counted at full weight because
+her CV describes owning a controlled deliverable and reporting to two directors,
+not observation work) = 29 months. Flagged as a judgment call, not asserted as
+fact — the conservative floor (TIDE only) is 1.9 and is stated alongside it.
+
+Her real email/phone/LinkedIn are known (from the CV) but were **not** written
+into any git-tracked file — `mac-client/apply-profile.json` is where they belong,
+and that file is gitignored, local-only, founder-created PII, same boundary the
+codebase already draws around Pushkar's own contact details. The `.example.json`
+template got the values needed to fill it in correctly; see §10.6.
+
+## 10.2 Tracks — replaced, not patched
+
+The shipped tracks (`financial-analyst` / `accountant` / `auditor`, generic
+titles, no KYC/AML at all) undercounted her real background: 22 of her ~29
+months were in regulatory operations & controls (KYC), a job market with almost
+no title overlap with "Financial Analyst". Two live searches (2026-09-04)
+against current Dutch/NL job-board listings, not assumption:
+
+- FP&A-adjacent: FP&A Analyst, Business Controller, Finance Business Partner,
+  Financial Analyst, Finance Analyst, Financial Controller, Management
+  Accountant, Reporting Analyst.
+- KYC/AML-adjacent: KYC Analyst, AML Analyst, CDD Analyst, Compliance Analyst,
+  Anti-Money Laundering Analyst, KYC Specialist, Client Onboarding Specialist.
+
+New track set, reordered by evidenced fit (live experience first, coursework
+last): `fpa` → `compliance-kyc` (**new**) → `auditor` → `accountant`. No
+per-track `cvPath`: she has exactly one real CV, so every track falls back to
+`baseCvPath`, same convention as Pushkar's profile — three tracks pointing at
+files that were never going to exist is not "correct fail-loud", it's a stale
+expectation.
+
+`FINANCE_SKILL_DICTIONARY` gained 10 entries her CV evidences and the dictionary
+was missing entirely: Power Query, SQL, Python, R/RStudio (Python and SQL exist
+in the TECH dictionary only — `getSkillDictionary` picks one list by name, not a
+union, so they had zero chance of matching on a finance-profile gap scan before
+this), COSO, KYC/AML, FATCA/MiFID/EMIR, Management Reporting, Business Case
+Modeling, Headcount/FTE Planning.
+
+## 10.3 Live keyword A/B — same poll, old vocabulary vs new
+
+`scripts/verify-multi-profile-live.ts` §2b screens the identical 1,297-board
+poll under both track sets (each run under a scratch `profile_id` — see the
+in-code comment on the bug this caught: the first version of this comparison
+reused her real `"wife-nl-finance"` id for the "after" arm, and because §2 above
+it had already screened and persisted her real rows, `keepUnseen`'s dedupe found
+every posting already in the tracker and reported `screened=0`. Fixed by giving
+both arms scratch ids and deleting their rows afterward — real methodology
+mistake, caught by looking at the number instead of trusting the code path).
+
+| | old (3 tracks, no KYC/AML, exp=2.0) | new (4 tracks incl. compliance-kyc, exp=2.4) |
+|---|---|---|
+| screened | 64 | **107** |
+| pass | 40 | **55** |
+
+**43 postings the old keyword set never reached a verdict on at all** — not
+flagged, not rejected, invisible — mostly `compliance-kyc` roles: Bluevine India
+AML Analyst II (×2), Capco KYC Funds BA, Anthos Fund & Asset Management Junior
+AML/KYC Analyst, WeTravel Client Onboarding Specialist.
+
+## 10.4 Confirmed: one table, not two
+
+`agents.job_applications` is the only table either profile ever writes to —
+scoped by the `profile_id` column added in migration `0036`, not a second
+schema object. No `job_applications_wife` or equivalent exists anywhere in
+`src/db/schema.ts`, the dev database, or production (§10.5 confirms production
+has neither the column nor a second table — it has no multi-profile code at
+all). This was a real architectural choice, not an oversight: a candidate row
+without a full duplicate table means every cross-cutting query (the daily
+sweep's `known` dedupe, `/csv all`, liveness re-verification, cost accounting)
+works for a fifth or fiftieth profile without a second code path — see §11.1.
+
+## 10.5 Production, checked live over SSH — not assumed
+
+```
+ssh founderos-vps 'cd /opt/founderos && git log -1'
+  → 0578396  2026-09-01 18:16:53  "Merge pull request #600 from beta"
+  → service ActiveEnterTimestamp: 2026-09-01 12:51:01 UTC
+
+docker exec founderos-postgres psql ... '\d agents.job_applications'
+  → no profile_id column. No ja_dedupe_uniq scoped by profile. Single-profile schema.
+```
+
+**Multi-profile has never been deployed. There is nothing to "test in
+production" yet** — prod is running the pre-multi-profile code from
+2026-09-01, three days before this branch existed. Reporting this directly
+rather than fabricating a production test: the honest state is zero rows for
+either profile in prod, because the column they'd be scoped by does not exist
+there. Deploying is a hard-to-reverse, shared-state action (it is the live bot)
+and was not part of this session's instruction, so it was not done — see §11.3
+for what deploying would take.
+
+## 10.6 What's still outstanding after this pass
+
+1. Her real email/phone/LinkedIn need to go into `mac-client/apply-profile.json`
+   (gitignored, founder-creates-it) — the `.example.json` template is correct
+   and ready to copy; the founder has the real values from her CV.
+2. Migration `0036` (including the `ja_brief_rank_uniq` fix from §9.2) has run
+   against dev Postgres only, never prod.
+3. The reduced HSM salary criterion for orientation-year switchers is still
+   unverified against ind.nl (unchanged from §8.6/§9.6).
+4. `mac-client/cv/cv-wife-base.md` exists locally in this worktree for
+   verification only — it is gitignored and will not travel with a `git push`;
+   whoever runs the mac-client apply queue needs the same file on that machine.

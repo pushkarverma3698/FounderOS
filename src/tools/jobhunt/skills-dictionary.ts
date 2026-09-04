@@ -192,6 +192,21 @@ export const FINANCE_SKILL_DICTIONARY: readonly SkillTerm[] = [
   { term: "Reconciliation", category: "practice", aliases: ["reconciliation", "bank reconciliation", "balance sheet reconciliation"] },
   { term: "Treasury & Cash Management", category: "practice", aliases: ["treasury", "cash management", "liquidity management"] },
   { term: "Risk & Compliance", category: "practice", aliases: ["risk management", "internal controls", "sox", "compliance"] },
+
+  // Added 2026-09-04 from a real CV (Tashi Goyal): tools and frameworks the
+  // tech dictionary already has (Python, SQL) don't reach finance-profile
+  // screening, because getSkillDictionary picks ONE list by name, not a union —
+  // so they had zero chance of matching here until added directly.
+  { term: "Power Query", category: "framework", aliases: ["power query"] },
+  { term: "SQL", category: "framework", aliases: ["sql", "structured query language"] },
+  { term: "Python", category: "framework", aliases: ["python"] },
+  { term: "R / RStudio", category: "framework", aliases: ["rstudio", "r studio", " r programming"] },
+  { term: "COSO Framework", category: "practice", aliases: ["coso", "coso framework"] },
+  { term: "KYC / AML", category: "practice", aliases: ["kyc", "aml", "anti-money laundering", "know your customer", "cdd", "client due diligence"] },
+  { term: "FATCA / MiFID / EMIR", category: "practice", aliases: ["fatca", "mifid", "emir"] },
+  { term: "Management Reporting", category: "practice", aliases: ["management reporting", "mis reporting", "mis"] },
+  { term: "Business Case Modeling", category: "practice", aliases: ["business case", "business case modeling", "business case modelling"] },
+  { term: "Headcount / FTE Planning", category: "practice", aliases: ["headcount planning", "fte tracker", "fte phasing", "workforce planning"] },
 ];
 
 export function getSkillDictionary(name: string = "tech"): readonly SkillTerm[] {

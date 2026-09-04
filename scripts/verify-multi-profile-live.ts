@@ -117,6 +117,79 @@ async function counterfactual(): Promise<void> {
   console.log("\n  (counterfactual rows deleted — they are not real leads)");
 }
 
+/**
+ * The exact `tracks`/`trackPriority`/`experienceYears` the wife profile shipped
+ * with before 2026-09-04's CV-driven update — three generic titles, no KYC/AML
+ * track at all, 2.0 years. Frozen here (not imported) so this comparison stays
+ * meaningful even after the live profile changes again.
+ */
+function oldWifeProfile(current: JobSearchProfile): JobSearchProfile {
+  return {
+    ...current,
+    id: "cf-old-wife-tracks",
+    experienceYears: 2.0,
+    tracks: {
+      "financial-analyst": {
+        id: "financial-analyst",
+        name: "Financial Analyst",
+        titles: ["Financial Analyst:*", "FP&A Analyst:*", "Finance Analyst:*", "Business Analyst Finance:*", "Financial Controller:*"],
+        classifyTerms: ["financial analyst", "fp&a analyst", "finance analyst", "financial controller", "junior financial analyst"],
+      },
+      accountant: {
+        id: "accountant",
+        name: "Accountant / General Ledger",
+        titles: ["Accountant:*", "Financial Accountant:*", "GL Accountant:*", "General Ledger Accountant:*", "Staff Accountant:*", "Junior Accountant:*"],
+        classifyTerms: ["accountant", "financial accountant", "gl accountant", "staff accountant", "junior accountant"],
+      },
+      auditor: {
+        id: "auditor",
+        name: "Auditor / Internal Controls",
+        titles: ["Internal Auditor:*", "Audit Associate:*", "Risk & Compliance Analyst:*"],
+        classifyTerms: ["internal auditor", "audit associate", "auditor", "compliance analyst"],
+      },
+    },
+    trackPriority: ["financial-analyst", "accountant", "auditor"],
+  };
+}
+
+async function keywordBeforeAfter(sweep: Awaited<ReturnType<typeof sweepBoards>>): Promise<void> {
+  const current = getProfile("wife-nl-finance");
+  // BOTH arms run under scratch profile ids, never the real "wife-nl-finance" —
+  // otherwise whichever arm runs second finds every posting the first arm
+  // already screened sitting in the dedupe tracker under her real id and
+  // "screens" zero of them. Section 2 above already persisted her real rows
+  // under "wife-nl-finance"; reusing that id here silently zeroed this
+  // comparison the first time this ran (screened=0, pass=0) until this fix.
+  const before = await runFreeIngest({ profile: oldWifeProfile(current), sweep, maxAgeHours: MAX_AGE_HOURS });
+  const after = await runFreeIngest({
+    profile: { ...current, id: "cf-new-wife-tracks" },
+    sweep,
+    maxAgeHours: MAX_AGE_HOURS,
+  });
+
+  const passCount = (r: typeof before) => r.lines.filter((l) => l.outcome === "pass").length;
+  console.log(
+    `  BEFORE (3 tracks, no KYC/AML, exp=2.0)  offTrack=${before.funnel.offTrack} ` +
+      `screened=${before.funnel.screened} pass=${passCount(before)}`,
+  );
+  console.log(
+    `  AFTER  (4 tracks incl. compliance-kyc, exp=2.4)  offTrack=${after.funnel.offTrack} ` +
+      `screened=${after.funnel.screened} pass=${passCount(after)}`,
+  );
+
+  const beforeKeys = new Set(before.lines.map((l) => `${l.company}::${l.title}`));
+  const newlyCaught = after.lines.filter((l) => !beforeKeys.has(`${l.company}::${l.title}`));
+  console.log(`\n  ${newlyCaught.length} postings the OLD keyword set never even reached a verdict on:`);
+  for (const line of newlyCaught.slice(0, 12)) {
+    console.log(`   ${line.outcome.toUpperCase().padEnd(5)} ${line.company} — ${line.title}`);
+  }
+
+  await db.execute(
+    sql`delete from agents.job_applications where profile_id in ('cf-old-wife-tracks', 'cf-new-wife-tracks')`,
+  );
+  console.log("\n  (both counterfactual arms deleted — they are not real leads)");
+}
+
 async function main(): Promise<void> {
   const profiles = listProfiles();
   hr("0. REGISTRY");
@@ -162,6 +235,9 @@ async function main(): Promise<void> {
       console.log(`   REJ   ${line.company} — ${line.title} :: ${line.detail}`);
     }
   }
+
+  hr("2b. KEYWORD RESEARCH — old track vocabulary vs new, same poll");
+  await keywordBeforeAfter(sweep);
 
   hr("3. WHAT ACTUALLY LANDED IN POSTGRES");
   const rows = await db.execute(

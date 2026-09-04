@@ -50,7 +50,7 @@ describe("Manual QA Audit — Multi-Profile Verification", () => {
     expect(wife.id).toBe("wife-nl-finance");
     expect(wife.skillsDictionaryName).toBe("finance");
     expect(pushkar.skillsDictionaryName).toBe("tech");
-    expect(wife.experienceYears).toBe(2.0);
+    expect(wife.experienceYears).toBe(2.4);
     expect(pushkar.experienceYears).toBe(3.5);
   });
 
@@ -74,7 +74,7 @@ describe("Manual QA Audit — Multi-Profile Verification", () => {
     expect(classifyTrack(techTitle, pushkar)).toBe("ai");
     expect(classifyTrack(financeTitle, pushkar)).toBeNull(); // Unclassified for Pushkar
 
-    expect(classifyTrack(financeTitle, wife)).toBe("financial-analyst");
+    expect(classifyTrack(financeTitle, wife)).toBe("fpa");
     expect(classifyTrack(techTitle, wife)).toBeNull(); // Unclassified for Wife
   });
 
@@ -91,7 +91,7 @@ describe("Manual QA Audit — Multi-Profile Verification", () => {
     expect(pushkarVerdict.status).toBe("flag");
     expect(pushkarVerdict.evidence).toContain("3.5");
 
-    // Wife (2.0y exp, maxDemanded=4, maxStretch=5): 5y is a STRETCH -> flag
+    // Wife (2.4y exp, maxDemanded=4, maxStretch=5): 5y is a STRETCH -> flag
     expect(wifeVerdict.status).toBe("flag");
     expect(wifeVerdict.evidence).toContain("2");
   });
@@ -152,7 +152,7 @@ describe("Manual QA Audit — Multi-Profile Verification", () => {
 
     expect(result.kind).toBe("screened");
     if (result.kind === "screened") {
-      expect(result.track).toBe("financial-analyst");
+      expect(result.track).toBe("fpa");
       expect(result.verdict.status).toBe("pass");
       expect(result.company).toBe("ING Bank");
       // ZOEKJAAR, not partner-permit. She holds an orientation-year permit and

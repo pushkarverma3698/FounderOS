@@ -26,7 +26,7 @@
 import { getProfile, type JobSearchProfile } from "./profile-config.js";
 
 /**
- * RoleTrack — string track identifier e.g. "ai", "fullstack", "backend", "frontend", "accounting", "financial-analyst".
+ * RoleTrack — string track identifier e.g. "ai", "fullstack", "backend", "frontend", "fpa", "compliance-kyc".
  */
 export type RoleTrack = string;
 
