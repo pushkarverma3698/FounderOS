@@ -306,7 +306,7 @@ async function main(): Promise<void> {
       // an accounting role out of a backend engineer's resume.
       const message = (err as Error).message;
       console.log(`  ${profile.id.padEnd(18)} FAILED LOUDLY: ${message.slice(0, 150)}`);
-      const wrongPerson = profiles.find((p) => p.id !== profile.id && message.includes(p.baseCvPath));
+      const wrongPerson = profiles.find((p) => p.id !== profile.id && p.baseCvPath && message.includes(p.baseCvPath));
       if (wrongPerson) throw new Error(`LEAK: ${profile.id} reached for ${wrongPerson.id}'s CV`);
     }
   }
