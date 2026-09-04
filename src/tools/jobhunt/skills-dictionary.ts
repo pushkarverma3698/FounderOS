@@ -199,3 +199,55 @@ export const SKILL_DICTIONARY: readonly SkillTerm[] = [
   { term: "Mentoring", category: "practice", aliases: ["mentoring", "mentorship", "coaching junior"] },
   { term: "Stakeholder Management", category: "practice", aliases: ["stakeholder management", "stakeholders"] },
 ];
+
+export const FINANCE_SKILL_DICTIONARY: readonly SkillTerm[] = [
+  { term: "IFRS", category: "practice", aliases: ["ifrs", "international financial reporting standards"] },
+  { term: "GAAP", category: "practice", aliases: ["gaap", "dutch gaap", "us gaap"] },
+  { term: "Financial Modeling", category: "practice", aliases: ["financial modeling", "financial modelling", "dcf", "valuation"] },
+  { term: "Financial Analysis", category: "practice", aliases: ["financial analysis", "fp&a", "variance analysis"] },
+  { term: "Budgeting & Forecasting", category: "practice", aliases: ["budgeting", "forecasting", "budgeting and forecasting", "cash flow forecasting"] },
+  { term: "SAP", category: "framework", aliases: ["sap", "sap erp", "sap s/4hana"] },
+  { term: "Excel / Advanced Excel", category: "framework", aliases: ["excel", "advanced excel", "vlookup", "pivot tables", "macros", "vba"] },
+  { term: "Power BI", category: "framework", aliases: ["power bi", "powerbi"] },
+  { term: "Tableau", category: "framework", aliases: ["tableau"] },
+  { term: "Oracle / Netsuite", category: "framework", aliases: ["oracle", "netsuite", "oracle netsuite"] },
+  { term: "QuickBooks", category: "framework", aliases: ["quickbooks", "qbo"] },
+  { term: "Xero", category: "framework", aliases: ["xero"] },
+  { term: "Auditing", category: "practice", aliases: ["audit", "auditing", "internal audit", "external audit", "statutory audit"] },
+  { term: "Tax Compliance", category: "practice", aliases: ["tax compliance", "vat", "btw", "corporate tax", "transfer pricing"] },
+  { term: "Accounts Payable", category: "practice", aliases: ["accounts payable", "ap", "p2p", "procure to pay"] },
+  { term: "Accounts Receivable", category: "practice", aliases: ["accounts receivable", "ar", "o2c", "order to cash"] },
+  { term: "General Ledger", category: "practice", aliases: ["general ledger", "gl", "month-end close", "year-end close"] },
+  { term: "Reconciliation", category: "practice", aliases: ["reconciliation", "bank reconciliation", "balance sheet reconciliation"] },
+  { term: "Treasury & Cash Management", category: "practice", aliases: ["treasury", "cash management", "liquidity management"] },
+  { term: "Risk & Compliance", category: "practice", aliases: ["risk management", "internal controls", "sox", "compliance"] },
+
+  // Added 2026-09-04 from a real CV (Tashi Goyal): tools and frameworks the
+  // tech dictionary already has (Python, SQL) don't reach finance-profile
+  // screening, because getSkillDictionary picks ONE list by name, not a union —
+  // so they had zero chance of matching here until added directly.
+  { term: "Power Query", category: "framework", aliases: ["power query"] },
+  { term: "SQL", category: "framework", aliases: ["sql", "structured query language"] },
+  { term: "Python", category: "framework", aliases: ["python"] },
+  { term: "R / RStudio", category: "framework", aliases: ["rstudio", "r studio", " r programming"] },
+  { term: "COSO Framework", category: "practice", aliases: ["coso", "coso framework"] },
+  { term: "KYC / AML", category: "practice", aliases: ["kyc", "aml", "anti-money laundering", "know your customer", "cdd", "client due diligence"] },
+  { term: "FATCA / MiFID / EMIR", category: "practice", aliases: ["fatca", "mifid", "emir"] },
+  { term: "Management Reporting", category: "practice", aliases: ["management reporting", "mis reporting", "mis"] },
+  { term: "Business Case Modeling", category: "practice", aliases: ["business case", "business case modeling", "business case modelling"] },
+  { term: "Headcount / FTE Planning", category: "practice", aliases: ["headcount planning", "fte tracker", "fte phasing", "workforce planning"] },
+
+  // Added 2026-09-04, founder-supplied role list: AP/AR above already alias
+  // P2P/procure-to-pay and O2C/order-to-cash, but nothing aliased Record-to-Report
+  // — the third leg of the same shared-services trio — until now.
+  { term: "Record to Report (RTR)", category: "practice", aliases: ["record to report", "rtr", "r2r"] },
+  { term: "Credit Analysis", category: "practice", aliases: ["credit analysis", "credit risk", "credit review"] },
+  // Distinct from "client due diligence" under KYC/AML above: that is AML-side
+  // (know-your-customer), this is transaction/credit-side (M&A, lending).
+  { term: "Due Diligence", category: "practice", aliases: ["due diligence", "financial due diligence"] },
+];
+
+export function getSkillDictionary(name: string = "tech"): readonly SkillTerm[] {
+  if (name === "finance") return FINANCE_SKILL_DICTIONARY;
+  return SKILL_DICTIONARY;
+}

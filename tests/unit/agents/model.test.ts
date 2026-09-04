@@ -145,6 +145,7 @@ describe("getModel provider selection", () => {
     delete process.env["GOOGLE_APPLICATION_CREDENTIALS"];
     delete process.env["GOOGLE_CLOUD_PROJECT"];
     delete process.env["GOOGLE_CLOUD_LOCATION"];
+    delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   });
 
   it("returns an OpenRouter-backed ChatOpenAI model by default", () => {
@@ -153,8 +154,11 @@ describe("getModel provider selection", () => {
     expect((model as unknown as { temperature: number }).temperature).toBe(0);
   });
 
-  it("returns a Google model for google-genai ids", () => {
+  it("returns its own Google GenAI model for google-genai ids, not an alias for Vertex", () => {
+    // google-genai has a real, distinct implementation (ChatGoogleGenerativeAI,
+    // API-key auth) — it stopped being a Vertex alias once that landed.
     process.env["AGENT_MODEL"] = "google-genai:gemini-2.5-flash";
+    process.env["GOOGLE_GENERATIVE_AI_API_KEY"] = "test-key";
     expect(getModel()).toBeInstanceOf(ChatGoogleGenerativeAI);
   });
 
@@ -237,9 +241,9 @@ describe("fallback middleware config", () => {
   });
 
   it("skips fallback models whose API keys are absent (prod-safe boot)", () => {
-    process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5,google-genai:gemini-2.0-flash";
+    process.env["AGENT_FALLBACK_MODELS"] = "anthropic:claude-haiku-4-5,openai:gpt-4o-mini";
     delete process.env["ANTHROPIC_API_KEY"];
-    delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
+    delete process.env["OPENAI_API_KEY"];
     expect(() => getSupervisorModel()).not.toThrow();
     expect(getModelFallbackMiddleware()).toEqual([]);
   });

@@ -69,7 +69,8 @@ export function registerHandlers(bot: Bot): void {
   // `splitForTelegram` is pure formatting and imported normally.
   bot.command("jobs", (ctx: Context) =>
     handleJobs(ctx, {
-      buildBrief: async () => (await import("../tools/jobhunt/daily-brief.js")).buildDailyBrief(),
+      buildBrief: async (profile) =>
+        (await import("../tools/jobhunt/daily-brief.js")).buildDailyBrief({ profile }),
       split: splitForTelegram,
     }),
   );

@@ -25,6 +25,7 @@ import { listSignals } from "../../db/cv-signal-queries.js";
 import { countPassingApplications } from "../../db/job-queries.js";
 import { readFullCvText } from "../career.js";
 import { TRACK_PRIORITY } from "./tracks.js";
+import { getProfile, DEFAULT_PROFILE_ID, type JobSearchProfile } from "./profile-config.js";
 import { extractSkillTerms } from "./skills.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 
@@ -83,8 +84,14 @@ export function buildGapReport(
   signals: readonly SignalRow[],
   cvText: string,
   sampleSize: number,
+  profile: JobSearchProfile = getProfile(),
 ): GapReport {
-  const cvTerms = new Set(extractSkillTerms(cvText).map((s) => s.term));
+  // The CANDIDATE's vocabulary. Read through the tech dictionary, a finance CV
+  // matches nothing and every finance term the market asks for is reported as a
+  // gap — a report that is confidently wrong in both directions at once.
+  const cvTerms = new Set(
+    extractSkillTerms(cvText, profile.skillsDictionaryName).map((s) => s.term),
+  );
   const floor = Math.max(1, Math.ceil(sampleSize * MIN_SHARE_TO_REPORT));
 
   const known = signals.filter((s) => s.category !== "unknown");
@@ -213,6 +220,13 @@ export const cvGapsTool: UnifiedTool = {
           "Which career track to report on: ai, backend, or frontend. Each has its own CV " +
           "and its own market, so a gap is only meaningful within one of them. Defaults to ai.",
       },
+      profile: {
+        type: "string",
+        description:
+          "Which candidate profile to report for (e.g. pushkar-nl-tech, wife-nl-finance). " +
+          "Selects the CV and the skill vocabulary the gaps are measured against. Defaults " +
+          "to pushkar-nl-tech.",
+      },
     },
     required: [],
   },
@@ -248,10 +262,16 @@ export const cvGapsTool: UnifiedTool = {
     // matching excerpts; a gap report is a claim about what the CV does NOT say,
     // and absence can only be read off the complete document. An unreadable or
     // implausibly short CV fails loudly rather than making every term look missing.
-    const cv = readFullCvText(track);
+    const profile = getProfile((args["profile"] as string | undefined) ?? DEFAULT_PROFILE_ID);
+    const trackCvPath = track ? profile.tracks[track]?.cvPath : undefined;
+    const explicitPaths = [
+      ...(trackCvPath ? [trackCvPath] : []),
+      ...(profile.baseCvPath ? [profile.baseCvPath] : []),
+    ];
+    const cv = readFullCvText(track, explicitPaths.length > 0 ? explicitPaths : undefined);
     if (!cv.ok) return { success: false, error: cv.error };
 
-    const report = buildGapReport(signals, cv.text, sampleSize);
+    const report = buildGapReport(signals, cv.text, sampleSize, profile);
     log.info(
       { track, sampleSize, missing: report.missing.length, confirmed: report.confirmed.length },
       "CV gap report built",

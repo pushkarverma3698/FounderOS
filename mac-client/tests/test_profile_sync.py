@@ -100,3 +100,55 @@ def test_a_bad_pull_leaves_no_file_behind_when_there_was_none(monkeypatch, tmp_p
 
     assert sync.sync_profile(target) is False
     assert not target.exists()
+
+
+def _stub_run_capturing(monkeypatch, result):
+    """Like _stub_run, but records the command each call was given."""
+    calls: list[list[str]] = []
+
+    def fake(command, *_args, **_kwargs):
+        calls.append(command)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(subprocess, "run", fake)
+    return calls
+
+
+class TestRemoteProfilePathIsScopedPerCandidate:
+    """Found live, 2026-09-04: REMOTE_PROFILE_PATH was one hardcoded path —
+    a second candidate's mac-client install would have pulled and overwritten
+    the FIRST candidate's real profile on every wake. Must match
+    applyProfilePathFor in src/tools/jobhunt/apply-profile.ts exactly.
+    """
+
+    def test_the_default_profile_keeps_the_original_path_unchanged(self, monkeypatch, tmp_path):
+        calls = _stub_run_capturing(monkeypatch, _Done(0, VALID))
+        sync.sync_profile(tmp_path / "apply-profile.json")
+
+        cmd = calls[0][2]
+        assert "/opt/founderos-data/apply-profile.json" in cmd
+        assert "apply-profile-" not in cmd
+
+    def test_a_second_profile_gets_its_own_remote_file(self, monkeypatch, tmp_path):
+        calls = _stub_run_capturing(monkeypatch, _Done(0, VALID))
+        sync.sync_profile(tmp_path / "apply-profile.json", profile_id="wife-nl-finance")
+
+        cmd = calls[0][2]
+        assert "/opt/founderos-data/apply-profile-wife-nl-finance.json" in cmd
+
+    def test_two_profiles_never_resolve_to_the_same_remote_file(self):
+        assert sync._remote_profile_path("pushkar-nl-tech") != sync._remote_profile_path(
+            "wife-nl-finance"
+        )
+
+    def test_an_invalid_profile_id_is_refused_before_it_reaches_a_shell_command(
+        self, monkeypatch, tmp_path
+    ):
+        # Same allowlist as _queue_sql, for the same reason: this id is
+        # interpolated into an ssh command string.
+        calls = _stub_run_capturing(monkeypatch, _Done(0, VALID))
+        result = sync.fetch_profile("../../etc/passwd")
+        assert result is None
+        assert calls == []

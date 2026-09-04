@@ -18,6 +18,7 @@
 
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "./client.js";
+import { ALL_PROFILES, profileCondition, type ProfileScope } from "./job-queries.js";
 import { jobApplications, type JobApplication } from "./schema.js";
 
 const DEFAULT_TENANT = "turicks";
@@ -50,19 +51,23 @@ export const LOG_TAB_ROWS = 500;
  * in the queue" — see the columns' comment in schema.ts for why those are two
  * facts rather than one status.
  */
-export async function listApplyQueue(tenantId: string = DEFAULT_TENANT): Promise<JobApplication[]> {
+export async function listApplyQueue(
+  tenantId: string = DEFAULT_TENANT,
+  profileId?: ProfileScope,
+): Promise<JobApplication[]> {
   const db = getDb();
+  const conditions = [
+    eq(jobApplications.tenant_id, tenantId),
+    inArray(jobApplications.brief_section, [...APPLYABLE_SECTIONS]),
+    isNull(jobApplications.applied_at),
+    isNull(jobApplications.skipped_at),
+  ];
+  const profileWhere = profileCondition(profileId);
+  if (profileWhere) conditions.push(profileWhere);
   return db
     .select()
     .from(jobApplications)
-    .where(
-      and(
-        eq(jobApplications.tenant_id, tenantId),
-        inArray(jobApplications.brief_section, [...APPLYABLE_SECTIONS]),
-        isNull(jobApplications.applied_at),
-        isNull(jobApplications.skipped_at),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(asc(jobApplications.brief_rank));
 }
 
@@ -76,13 +81,17 @@ export async function listApplyQueue(tenantId: string = DEFAULT_TENANT): Promise
  */
 export async function listRecentlyScreened(
   tenantId: string = DEFAULT_TENANT,
+  profileId?: ProfileScope,
   limit: number = LOG_TAB_ROWS,
 ): Promise<JobApplication[]> {
   const db = getDb();
+  const conditions = [eq(jobApplications.tenant_id, tenantId)];
+  const profileWhere = profileCondition(profileId);
+  if (profileWhere) conditions.push(profileWhere);
   return db
     .select()
     .from(jobApplications)
-    .where(eq(jobApplications.tenant_id, tenantId))
+    .where(and(...conditions))
     .orderBy(desc(jobApplications.created_at))
     .limit(limit);
 }

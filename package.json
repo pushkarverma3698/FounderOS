@@ -26,6 +26,7 @@
     "verify:arch": "node --import tsx/esm scripts/verify-architecture.ts",
     "verify:doc-claims": "node --import tsx/esm scripts/verify-doc-claims.ts",
     "audit:self": "node --env-file=.env --import tsx/esm scripts/audit-self.ts",
+    "jobhunt:verify-multi-profile": "ALLOW_NETWORK=1 node --env-file=.env --import tsx/esm scripts/verify-multi-profile-live.ts",
     "jobhunt:import-boards": "node --env-file=.env --import tsx/esm scripts/jobhunt-import-sponsor-boards.ts",
     "jobhunt:grow-funding": "node --env-file=.env --import tsx/esm scripts/jobhunt-funding-grow.ts",
     "session:sync": "node --env-file=.env --import tsx/esm scripts/sync-conversation-session.ts",

@@ -43,6 +43,7 @@
 import type { ScreenStatus } from "./filters.js";
 import type { Gate } from "./gates.js";
 import { isEarlyCareerTitle } from "./seniority.js";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
 
 /**
  * The most years a posting may demand and still be a straightforward pass.
@@ -161,14 +162,22 @@ export function extractExperienceDemand(description: string): ExperienceDemand {
  * inside the pipeline costs one row and buys a reason on the record; dropping
  * outside it saved nothing and destroyed the evidence.
  */
-export function experienceGate(description: string, title: string): Gate {
+export function experienceGate(
+  description: string,
+  title: string,
+  profile: JobSearchProfile = getProfile(),
+): Gate {
+  const yearsShipped = profile.experienceYears;
+  const maxDemanded = profile.maxYearsDemanded;
+  const maxStretch = profile.maxYearsStretch;
+
   if (isEarlyCareerTitle(title)) {
     return {
       gate: "Experience",
       status: "reject",
       evidence:
         `"${title}" is an internship, graduate scheme or working-student role — ` +
-        `an entry programme, not a role for someone ~3.5 years in. Kept on record ` +
+        `an entry programme, not a role for someone ~${yearsShipped} years in. Kept on record ` +
         `so the day's spend is auditable, but not worth an application.`,
     };
   }
@@ -186,9 +195,9 @@ export function experienceGate(description: string, title: string): Gate {
   }
 
   const status: ScreenStatus =
-    demand.minYears > MAX_YEARS_STRETCH
+    demand.minYears > maxStretch
       ? "reject"
-      : demand.minYears > MAX_YEARS_DEMANDED
+      : demand.minYears > maxDemanded
         ? "flag"
         : "pass";
 
@@ -198,7 +207,7 @@ export function experienceGate(description: string, title: string): Gate {
       status,
       evidence:
         `Asks for ${demand.minYears} years minimum — clear of even a stretch from ` +
-        `your ~3.5 shipped. Their words: "${demand.evidence}". Skipped: this is a ` +
+        `your ~${yearsShipped} shipped. Their words: "${demand.evidence}". Skipped: this is a ` +
         `genuine level mismatch, not a stretch worth applying into.`,
     };
   }
@@ -208,7 +217,7 @@ export function experienceGate(description: string, title: string): Gate {
       gate: "Experience",
       status,
       evidence:
-        `Asks for ${demand.minYears} years minimum; you have ~3.5 shipped. Their ` +
+        `Asks for ${demand.minYears} years minimum; you have ~${yearsShipped} shipped. Their ` +
         `words: "${demand.evidence}". The bar is above your years but within ` +
         `reach — apply if the stack matches, and apply early.`,
     };
@@ -218,7 +227,7 @@ export function experienceGate(description: string, title: string): Gate {
     gate: "Experience",
     status,
     evidence:
-      `Asks for ${demand.minYears} year(s) — within reach of your ~3.5 shipped. ` +
+      `Asks for ${demand.minYears} year(s) — within reach of your ~${yearsShipped} shipped. ` +
       `Their words: "${demand.evidence}".` +
       (isSeniorTitle(title)
         ? ` The title says senior, but the stated bar is what counts here, not the label.`

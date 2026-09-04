@@ -25,6 +25,12 @@
 
 import { InputFile, type Context } from "grammy";
 import { listApplyQueue, listRecentlyScreened } from "../db/apply-queries.js";
+import {
+  resolveProfileArg,
+  isProfileArgMiss,
+  profileMissMessage,
+} from "./jobhunt-profile-arg.js";
+import { DEFAULT_PROFILE_ID, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 import { buildQueueTab, buildLogTab } from "../tools/jobhunt/sheet-rows.js";
 import { toCsv } from "../tools/jobhunt/csv-export.js";
 import { childLogger } from "../infra/logger.js";
@@ -82,8 +88,15 @@ export interface CsvPayload {
  * Sheet's column choices were made carefully and reviewed, and a second set of
  * headers would drift from them silently.
  */
-export async function buildJobsCsv(kind: CsvKind, now: Date = new Date()): Promise<CsvPayload> {
-  const rows = kind === "queue" ? await listApplyQueue() : await listRecentlyScreened();
+export async function buildJobsCsv(
+  kind: CsvKind,
+  now: Date = new Date(),
+  profileId: string = DEFAULT_PROFILE_ID,
+): Promise<CsvPayload> {
+  const rows =
+    kind === "queue"
+      ? await listApplyQueue(undefined, profileId)
+      : await listRecentlyScreened(undefined, profileId);
   const table = kind === "queue" ? buildQueueTab(rows, now) : buildLogTab(rows, now);
   return {
     csv: toCsv(table),
@@ -95,10 +108,17 @@ export async function buildJobsCsv(kind: CsvKind, now: Date = new Date()): Promi
 
 /** `/csv` — the apply queue as a file. `/csv all` — everything screened, rejects included. */
 export async function handleCsv(ctx: Context): Promise<void> {
-  const kind = parseCsvKind(ctx.match?.toString() ?? "");
+  // "all" is this command's own word for the log tab — reserved so it is never
+  // read as a profile name.
+  const selected = resolveProfileArg(ctx.match?.toString() ?? "", ["all", "queue"]);
+  if (isProfileArgMiss(selected)) {
+    await ctx.reply(profileMissMessage(selected));
+    return;
+  }
+  const kind = parseCsvKind(selected.rest);
   try {
-    const payload = await buildJobsCsv(kind);
-    log.info({ kind, rows: payload.rows }, "CSV export requested");
+    const payload = await buildJobsCsv(kind, new Date(), selected.profile.id);
+    log.info({ kind, rows: payload.rows, profile: selected.profile.id }, "CSV export requested");
     await ctx.replyWithDocument(new InputFile(Buffer.from(payload.csv, "utf8"), payload.filename), {
       caption: payload.caption,
     });
@@ -114,7 +134,7 @@ export async function handleCsv(ctx: Context): Promise<void> {
 
 export interface JobsViewDeps {
   /** Rebuilds the ranking and returns the rendered brief. Injected for testing. */
-  readonly buildBrief: () => Promise<string>;
+  readonly buildBrief: (profile: JobSearchProfile) => Promise<string>;
   /** Splits an HTML brief into Telegram-sized messages. */
   readonly split: (text: string) => string[];
 }
@@ -128,9 +148,15 @@ export interface JobsViewDeps {
  * whole thing twice.
  */
 export async function handleJobs(ctx: Context, deps: JobsViewDeps): Promise<void> {
-  await ctx.reply("🔍 Ranking your queue and checking the top roles are still open…");
+  const selected = resolveProfileArg(ctx.match?.toString() ?? "");
+  if (isProfileArgMiss(selected)) {
+    await ctx.reply(profileMissMessage(selected));
+    return;
+  }
+  const whose = selected.explicit ? `${selected.profile.candidateName}'s` : "your";
+  await ctx.reply(`🔍 Ranking ${whose} queue and checking the top roles are still open…`);
   try {
-    const brief = await deps.buildBrief();
+    const brief = await deps.buildBrief(selected.profile);
     for (const chunk of deps.split(brief)) {
       await ctx.reply(chunk, { parse_mode: "HTML" });
     }

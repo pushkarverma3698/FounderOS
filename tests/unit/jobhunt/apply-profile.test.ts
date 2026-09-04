@@ -19,10 +19,13 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  APPLY_PROFILE_PATH,
+  applyProfilePathFor,
   parseApplyProfile,
   renderApplyProfile,
   setProfileField,
 } from "../../../src/tools/jobhunt/apply-profile.js";
+import { DEFAULT_PROFILE_ID } from "../../../src/tools/jobhunt/profile-config.js";
 import { parseProfileCommand } from "../../../src/gateway/profile-commands.js";
 
 const VALID = {
@@ -159,5 +162,24 @@ describe("parseProfileCommand", () => {
 
   it("refuses a verb it does not know instead of guessing", () => {
     expect(parseProfileCommand("delete phone").kind).toBe("usage");
+  });
+});
+
+describe("applyProfilePathFor", () => {
+  it("keeps the default candidate's original path exactly, unchanged", () => {
+    // APPLY_PROFILE_PATH is also an env var override every existing install
+    // may already point at — a second file for the SAME id would silently
+    // orphan a real, already-working profile.
+    expect(applyProfilePathFor(DEFAULT_PROFILE_ID)).toBe(APPLY_PROFILE_PATH);
+  });
+
+  it("gives a second candidate their own sibling file, named by id", () => {
+    const path = applyProfilePathFor("wife-nl-finance");
+    expect(path).not.toBe(APPLY_PROFILE_PATH);
+    expect(path).toContain("apply-profile-wife-nl-finance.json");
+    // Same directory as the default — one data root, not a second one.
+    expect(path.slice(0, path.lastIndexOf("/"))).toBe(
+      APPLY_PROFILE_PATH.slice(0, APPLY_PROFILE_PATH.lastIndexOf("/")),
+    );
   });
 });

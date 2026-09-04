@@ -17,6 +17,7 @@
 import { countPassingApplications } from "../../db/job-queries.js";
 import { listSignals } from "../../db/cv-signal-queries.js";
 import { TRACK_PRIORITY } from "./tracks.js";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
 import { extractSkillTerms } from "./skills.js";
 import type { TrendRow } from "./brief.js";
 
@@ -33,17 +34,25 @@ function ageInDays(from: Date | null | undefined, now: Date): number {
 export async function buildTrends(
   cvs: ReadonlyMap<string, string>,
   now: Date,
+  profile: JobSearchProfile = getProfile(),
 ): Promise<TrendRow[]> {
   const trends: TrendRow[] = [];
 
-  for (const track of TRACK_PRIORITY) {
+  // The profile's own tracks and vocabulary. Iterating the module's tech
+  // TRACK_PRIORITY for a finance candidate counts signals for tracks she has no
+  // rows in, and reads her CV through a dictionary that matches none of it.
+  const tracks = profile.trackPriority.length > 0 ? profile.trackPriority : TRACK_PRIORITY;
+
+  for (const track of tracks) {
     const sampleSize = await countPassingApplications({ track });
     if (sampleSize === 0) continue;
 
     const signals = await listSignals({ track, limit: 40 });
     const cvText = cvs.get(track);
     const cvTerms =
-      cvText === undefined ? null : new Set(extractSkillTerms(cvText).map((s) => s.term));
+      cvText === undefined
+        ? null
+        : new Set(extractSkillTerms(cvText, profile.skillsDictionaryName).map((s) => s.term));
 
     for (const signal of signals) {
       if (signal.category === "unknown") continue;

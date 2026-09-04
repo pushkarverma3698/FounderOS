@@ -16,6 +16,7 @@ import {
   LIVE_PERMIT_BASES,
   type PermitBasis,
 } from "../../../src/tools/jobhunt/permit-routes.js";
+import { WIFE_FINANCE_PROFILE } from "../../../src/tools/jobhunt/profiles/wife-nl-finance.js";
 
 describe("gateProfile", () => {
   it("applies the sponsor requirement and the salary floor only on the HSM basis", () => {
@@ -89,6 +90,23 @@ describe("basesForPosting", () => {
         expect(isLiveBasis(basis)).toBe(true);
       }
     }
+  });
+
+  it("REGRESSION: a definite-route posting outside a profile's bases is NOT relabelled under an unrelated basis the profile does hold", () => {
+    // wife-nl-finance holds zoekjaar+hsm (both Dutch), never india-local. Found
+    // live, 2026-09-04: a Bangalore, country=IN posting was carried under
+    // "zoekjaar" — a Dutch orientation-year permit — because the old fallback
+    // substituted the profile's own first declared basis for ANY unmatched
+    // definite route. The posting's market (India) has nothing to do with a
+    // Dutch permit; the correct signal is "not a basis this profile holds",
+    // not a fabricated Dutch pass.
+    const bases = basesForPosting("india", WIFE_FINANCE_PROFILE);
+    expect(bases).toEqual(["india-local"]);
+    expect(bases).not.toContain("zoekjaar");
+    // The whole point: this basis is NOT live for her, which is what lets
+    // screen.ts detect the mismatch and reject honestly instead of scoring
+    // sponsor/salary/language gates for a basis that does not apply to her.
+    expect(isLiveBasis("india-local", WIFE_FINANCE_PROFILE)).toBe(false);
   });
 
   it("returns at least one basis for every posting route", () => {

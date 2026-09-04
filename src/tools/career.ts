@@ -247,6 +247,17 @@ export function cvPathsForTrack(track?: string): string[] {
 }
 
 /**
+ * Resolve the candidate list for a track, but with an explicit override list
+ * prepended. Used by multi-profile callers (tailor-cv.ts, daily-brief.ts) that
+ * know a specific profile's CV path (e.g. Wife's `mac-client/cv/cv-wife-*.md`)
+ * and must never silently fall back to Pushkar's default CV_PATH/CV_DIR.
+ */
+export function cvPathsForProfile(explicitPaths: readonly string[], track?: string): string[] {
+  if (explicitPaths.length > 0) return [...explicitPaths];
+  return cvPathsForTrack(track);
+}
+
+/**
  * Read the WHOLE CV document.
  *
  * `readCvTool` answers a QUERY — personal-rag returns its top 5 chunks, and the
@@ -265,8 +276,10 @@ export function cvPathsForTrack(track?: string): string[] {
  * master. It never falls back to ANOTHER track — a frontend report built on the
  * AI CV would invent gaps and hide real ones at the same time.
  */
-export function readFullCvText(track?: string): CvTextResult {
-  const candidates = cvPathsForTrack(track);
+export function readFullCvText(track?: string, explicitPaths?: readonly string[]): CvTextResult {
+  const candidates = explicitPaths && explicitPaths.length > 0
+    ? [...explicitPaths]
+    : cvPathsForTrack(track);
   const failures: string[] = [];
 
   for (const path of candidates) {

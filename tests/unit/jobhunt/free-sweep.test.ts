@@ -18,6 +18,28 @@ vi.mock("../../../src/tools/jobhunt/free-ingest.js", () => ({
   runFreeIngest: mockRunFreeIngest,
 }));
 
+// The board poll moved OUT of runFreeIngest and into runFreeSweep on 2026-09-04
+// (poll once, screen for every profile). Unmocked it would really hit 1,297
+// boards and time this suite out.
+vi.mock("../../../src/tools/jobhunt/free-ats-source.js", async (orig) => ({
+  ...(await (orig() as Promise<Record<string, unknown>>)),
+  sweepBoards: vi.fn(async () => ({ candidates: [], failures: [], boardsPolled: 0 })),
+}));
+vi.mock("../../../src/tools/jobhunt/free-boards.js", async (orig) => ({
+  ...(await (orig() as Promise<Record<string, unknown>>)),
+  getFreeBoards: () => [],
+}));
+
+// ONE profile, deliberately. These tests are about WHICH message the founder
+// gets for a given lane outcome; the fan-out across profiles is a different
+// question and is tested on its own in sweep-multi-profile.test.ts. Leaving both
+// profiles registered here would double every assertion for no added coverage.
+vi.mock("../../../src/tools/jobhunt/profile-config.js", async (orig) => {
+  const actual = (await orig()) as Record<string, unknown>;
+  const pushkar = actual["PUSHKAR_PROFILE"];
+  return { ...actual, listProfiles: () => [pushkar] };
+});
+
 const mockSendToChat = vi.fn(async () => {});
 vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToChat: mockSendToChat }));
 

@@ -29,8 +29,10 @@
  * Pure: no I/O, no model, no network.
  */
 
-/** NL and IN are the campaign's markets. `other` is a place; `unknown` is not. */
-export type PostingCountry = "NL" | "IN" | "other" | "unknown";
+import { getProfile, type JobSearchProfile, type CountryConfig } from "./profile-config.js";
+
+/** NL and IN are default markets; any ISO alpha-2 or string is supported. `other` is a place; `unknown` is not. */
+export type PostingCountry = string;
 
 /**
  * Strings that occupy the location field without naming a place.
@@ -286,34 +288,31 @@ function mentionsAny(haystack: string, phrases: readonly string[]): boolean {
  * and is not India, HAS told us something — that neither market applies — and
  * that is exactly the finding the Bogotá row needed and did not get.
  */
-export function countryFromLocation(location: string): PostingCountry {
+export function countryFromLocation(
+  location: string,
+  profile: JobSearchProfile = getProfile(),
+): PostingCountry {
   const text = location.trim();
   if (text.length === 0) return "unknown";
 
-  // A location field whose ENTIRE contents is a country code. The two-letter
-  // codes are excluded from NL_NAMES/IN_NAMES because `\bin\b` matches the
-  // preposition in "Remote in Europe" — but there is no preposition to confuse
-  // when the code is the whole string. One live board emits exactly "IN".
   const lower = text.toLowerCase();
-  if (lower === "nl") return "NL";
-  if (lower === "in") return "IN";
+
+  // Check direct country code match
+  for (const c of profile.targetCountries) {
+    if (lower === c.code.toLowerCase()) return c.code;
+  }
 
   if (NON_PLACE.has(lower)) return "unknown";
 
+  // Check each configured target country in the profile
+  for (const c of profile.targetCountries) {
+    if (mentionsAny(text, c.names) || mentionsAny(text, c.cities)) return c.code;
+  }
+
+  // Fallback to hardcoded NL/IN lists if profile target countries did not catch it
   if (mentionsAny(text, NL_NAMES) || mentionsAny(text, NL_CITIES)) return "NL";
   if (mentionsAny(text, IN_NAMES) || mentionsAny(text, IN_CITIES)) return "IN";
-
-  // Every word is a non-place word, so the string names no country at all.
-  //
-  // Checked AFTER the two markets, so "Remote — Netherlands" is still NL. It
-  // exists because NON_PLACE above is an exact match on the whole string, which
-  // made "Remote" read as `unknown` (kept, screened) while "Remote - Europe",
-  // "Remote-EMEA" and "EU (Remote)" read as `other` (dropped before screening) —
-  // the same fact about a posting getting opposite treatment on decoration
-  // alone. `other` is a claim that the job is somewhere specific and that the
-  // somewhere is neither market; none of these strings supports that claim.
   if (namesNoPlace(lower)) return "unknown";
-
   return "other";
 }
 

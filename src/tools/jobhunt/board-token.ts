@@ -14,6 +14,7 @@
  */
 
 import type { BoardMarket, FreeAts } from "./free-boards.js";
+import type { PostingCountry } from "./country.js";
 
 export interface ExtractedBoardToken {
   readonly ats: FreeAts;
@@ -35,7 +36,13 @@ export interface DiscoveredBoard {
 export interface HarvestableSighting {
   readonly url: string | null | undefined;
   readonly company: string;
-  readonly country?: "NL" | "IN" | "other" | "unknown" | null;
+  /**
+   * ISO alpha-2, or "other"/"unknown". Widened from a fixed NL|IN union when
+   * countries became a per-profile config (country.ts): a profile targeting
+   * Germany produces "DE" here, and the closed union was the reason an `as any`
+   * cast appeared at the one call site that still fed it.
+   */
+  readonly country?: PostingCountry | null;
 }
 
 interface TokenPattern {
