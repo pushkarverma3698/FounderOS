@@ -22,11 +22,6 @@ A rule which is not enforced by layer 2 is a convention, and a rule that is enfo
 - Reason strictly over repo data, DB memory (`founder_context`, `turicks-brain`, `failure_lessons`), and live code.
 - Never use ungrounded generic world assumptions to overcomplicate tasks.
 
-## Experience & Outcome Over Code Purity (⚠️ NON-NEGOTIABLE)
-
-- The primary metric for FounderOS is **Founder Friction Saved & Real-World Outcome Quality**—not abstract code aesthetics or theoretical refactoring.
-- Every self-improvement cron and audit must analyze 3 days of real turn transcripts, user feedback, hallucination signatures, and execution friction, storing findings into `failure_lessons` and `turicks-brain`.
-
 ## Commands
 
 ```bash
@@ -61,12 +56,13 @@ malformed one, so a bad name blocks your own gate before it ever reaches review.
 
 ## Shared directives (binding, single copy)
 
-Four directives apply to every agent in this repo and are **not repeated here** — restating them
+Five directives apply to every agent in this repo and are **not repeated here** — restating them
 is how they drift:
 
 1. **Strategic Mandate** — ship revenue-moving work over internal refactoring
 2. **Content Generation (No AI Slop)** — the `no-ai-slop` skill is mandatory for anything public
 3. **Implementation Plans & Memory** — plans go to `docs/plans/YYYY-MM-DD-feature-name.md`
 4. **Cross-Agent Awareness** — check `turicks-brain` + recent `docs/plans/` before complex work
+5. **Experience & Outcome Over Code Purity** — the metric is founder friction saved, not code aesthetics
 
 Full text, with the reasoning for each: [docs/rules/SHARED-DIRECTIVES.md](docs/rules/SHARED-DIRECTIVES.md). Read it before your first substantive action.
