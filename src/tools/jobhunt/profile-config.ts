@@ -66,8 +66,10 @@ export const JobSearchProfileSchema = z.object({
   // Skills & Vocabulary
   skillsDictionaryName: z.string().default("tech"), // "tech" | "finance"
   
-  // Base CV
-  baseCvPath: z.string(),
+  // Base CV — optional: every read site (brief-cv.ts, gaps.ts, tailor-cv.ts)
+  // already treats an absent value as "fall back to PERSONAL_CV_PATH/_DIR",
+  // which is the correct behavior for a profile with no candidate-specific CV.
+  baseCvPath: z.string().optional(),
   
   // Delivery/Reporting
   sheetId: z.string().optional(),
@@ -166,7 +168,6 @@ export const PUSHKAR_PROFILE: JobSearchProfile = {
 
   trackPriority: ["ai", "fullstack", "backend", "frontend"],
   skillsDictionaryName: "tech",
-  baseCvPath: "data/local_docs/cv-master.md",
 };
 
 import { WIFE_FINANCE_PROFILE } from "./profiles/wife-nl-finance.js";
