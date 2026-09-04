@@ -1,4 +1,4 @@
-# 2026-09-05 — wife_* Telegram commands + two missed-profile bugs
+# 2026-09-05 — wife_* Telegram commands + three missed-profile bugs
 
 ## What we did
 
@@ -49,28 +49,74 @@ wrong for a second profile, not just hard to discover. Shipping the new
 `/wife_ask` itself misleading (it would have kept answering about his brief),
 so the fix was load-bearing for the ask, not scope creep.
 
+## What we fixed (part 2 — same day, found via live prod logs)
+
+The founder tapped `/wife_draft 1` in Telegram right after part 1 deployed.
+The row resolved correctly (ING · Financial Risk Specialist — her track), but
+tailoring failed CV-fabrication validation ("Stakeholder Management" not in
+her base CV) and fell through to the free-text kernel-draft path. **That
+draft came back signed "Pushkar Verma."**
+
+Root cause, several layers deeper than part 1's bugs: the kernel compiles
+once and reuses every `WorkerSpec.prompt` forever (`getKernel()`'s own doc
+comment: "rule #2"). `JOBHUNT_PROMPT` was baked in at **process boot** from
+`buildJobhuntPrompt()` called with no argument — defaulting to the founder's
+own profile. So *every* jobhunt kernel turn, for either candidate, ran under
+a system prompt permanently declaring "You are the Job-Hunt department for
+Pushkar Verma... read_cv → read Pushkar Verma's CV...". Part 1's fixes made
+the ROW resolve to the right person; the WORKER'S OWN IDENTITY never varied
+per turn at all.
+
+Fix (PR #607): `WorkerSpec` gained an optional `promptForProfile(profileId)`
+override, resolved per-turn from `configurable.profile_id` — the same
+per-invocation config channel `thread_id` already rides (precedented:
+`makeToolsNode` already reads `config` this way for HITL gates). No kernel
+rebuild needed; every other department is completely unaffected since none
+of them set this field. `resolveWorkerPrompt` lives in `worker-protocol.ts`
+(not a new file) — that file exists specifically for the LOC-ratchet split
+pattern, and reusing it kept `worker.ts` at exactly 400 lines instead of
+adding a fourth small kernel file.
+
+**Known remaining gap, explicitly not fixed:** `read_cv` the *tool* is still
+hardcoded to Pushkar's CV via `PERSONAL_CV_PATH`/`PERSONAL_CV_DIR` — it
+queries `personal-rag`, which has zero concept of Tashi Goyal. The prompt now
+correctly says "read Tashi Goyal's CV," but the tool would still hand back
+**Pushkar's actual CV content** — a fallback draft for her row could now
+carry the right name with the wrong skills, a subtler failure than before.
+Fixing it needs `career.ts`'s CV-sourcing rewritten to read a profile's
+`baseCvPath` file directly (mirroring what `tailor-cv.ts`'s already-correct
+success path does) — a materially different, larger change, deliberately not
+rushed into this same PR.
+
 ## Metrics
 
-- `pnpm gate`: lint + build + wiring + arch fitness (all 6 gates at
-  baseline) + full test suite — 3717/3717 passed, 338 files.
-- 9 files changed, 262 insertions, 21 deletions (PR #604, squash-merged to
-  `main` at `3026c1f`).
-- Deploy verified live on the VPS: `git rev-parse HEAD` = `3026c1f`,
-  `ActiveEnterTimestamp` moved to a fresh restart (not a stale tree match),
-  `dist/` contains the new command wiring, and the boot log shows
+- Part 1 (PR #604): 9 files changed, 262 insertions, 21 deletions.
+  Squash-merged to `main` at `3026c1f`.
+- Session doc (PR #605): 1 file, 76 insertions. Merged at `237092a`.
+- Part 2 (PR #607): 8 files changed, 239 insertions, 10 deletions.
+  Squash-merged to `main` at `28b9370`.
+- `pnpm gate` fresh on part 2: lint + build + wiring + arch fitness (all 6
+  gates at baseline, `loc-budget: 6 = baseline`) + full suite — **3726/3726
+  passed**, 340 files.
+- Both deploys verified live on the VPS the same way: `git rev-parse HEAD`
+  matched, `ActiveEnterTimestamp` showed a fresh restart (not a stale tree
+  match — checked seconds, not just "close enough"), `dist/` contained the
+  new code, no new errors in the following minutes. Part 1's boot log showed
   `"Telegram command menu published","count":24` (16 original + 8 new).
-  No new errors in the first 5 minutes post-restart (the only errors logged
-  were pre-existing Gmail/Calendar OAuth probe failures, unrelated).
 
 ## Outstanding
 
 1. Live Telegram tap-test: confirm `/wife_jobs` and `/wife_draft 1` resolve
-   Tashi Goyal's queue when actually typed in the chat (founder-only — needs
-   his phone).
-2. `pipeline-followup.ts`'s day-7/day-14 nudge digest still merges both
-   profiles' live applications (same root cause as the bug fixed here,
-   deliberately left out of this PR's scope). Worth a follow-up if the wife's
-   applications reach that stage.
-3. Wife's sweeps were screening 0 roles per pass as of 2026-09-04 19:01 UTC
+   Tashi Goyal's queue, and that a fallback draft (if one recurs) names her
+   correctly — founder-only, needs his phone.
+2. **`read_cv` the tool is still hardcoded to Pushkar's CV** (see "part 2"
+   above) — the next real gap in this lane. Needs `career.ts` to serve a
+   second profile's `baseCvPath` file directly instead of querying
+   `personal-rag`.
+3. `pipeline-followup.ts`'s day-7/day-14 nudge digest still merges both
+   profiles' live applications (same root cause as one of part 1's bugs,
+   deliberately left out of scope). Worth a follow-up once her applications
+   reach that stage.
+4. Wife's sweeps were screening 0 roles per pass as of 2026-09-04 19:01 UTC
    (vs. Pushkar's occasional 1) — unrelated to this change, flagged in the
    prior session, still unresolved.
