@@ -219,20 +219,31 @@ export async function updateApplicationStage(
 /**
  * The Monday pipeline review: live applications, stalest contact first, so the
  * ones that have gone silent longest surface at the top.
+ *
+ * `profileId` is OPT-IN: omitting it keeps the pre-2026-09-05 behavior (every
+ * profile in the tenant, merged) for callers that were never scoped to begin
+ * with — `pipeline-followup.ts`'s digest is the one still relying on that.
+ * `/replied` and `/rejected` (live-application-commands.ts) pass it explicitly
+ * now, because a merged, interleaved list numbered "row N" made those two
+ * commands able to mark the wrong candidate's application — the same failure
+ * `profileCondition` exists to prevent everywhere else it's used.
  */
 export async function listLiveApplications(
-  opts: { limit?: number; tenantId?: string } = {},
+  opts: { limit?: number; tenantId?: string; profileId?: ProfileScope } = {},
 ): Promise<JobApplication[]> {
   const db = getDb();
+  const conditions = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    inArray(jobApplications.stage, [...LIVE_STAGES]),
+  ];
+  if (opts.profileId !== undefined) {
+    const profileWhere = profileCondition(opts.profileId);
+    if (profileWhere) conditions.push(profileWhere);
+  }
   return db
     .select()
     .from(jobApplications)
-    .where(
-      and(
-        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
-        inArray(jobApplications.stage, [...LIVE_STAGES]),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(asc(jobApplications.last_contact_at))
     .limit(opts.limit ?? 50);
 }

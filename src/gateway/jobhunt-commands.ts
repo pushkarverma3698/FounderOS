@@ -136,19 +136,31 @@ async function handleRowCommand(
   compose: (row: JobApplication) => string,
   deps: JobhuntCommandDeps,
 ): Promise<void> {
-  const rank = parseRowArg(ctx.match?.toString() ?? "");
+  // Unlike /draft, this never resolved a profile — /ask always read
+  // Pushkar's brief regardless of what was typed. With a second profile
+  // registered, "wife" has to be honored here the same way /draft honors it.
+  const selected = resolveProfileArg(ctx.match?.toString() ?? "", [], (rest) => parseRowArg(rest) !== null);
+  if (isProfileArgMiss(selected)) {
+    await ctx.reply(profileMissMessage(selected));
+    return;
+  }
+
+  const rank = parseRowArg(selected.rest);
   if (rank === null) {
     await ctx.reply(unresolvedMessage(command, null));
     return;
   }
 
-  const row = await resolveBriefRow(rank, sections);
+  const row = await resolveBriefRow(rank, sections, selected.profile);
   if (!row) {
     await ctx.reply(unresolvedMessage(command, rank));
     return;
   }
 
-  log.info({ command, rank, company: row.company, id: row.id }, "Brief row command resolved");
+  log.info(
+    { command, rank, company: row.company, id: row.id, profile: selected.profile.id },
+    "Brief row command resolved",
+  );
   await deps.runKernelText(ctx, compose(row));
 }
 

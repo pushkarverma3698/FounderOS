@@ -47,8 +47,18 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "jobs",
   },
   {
+    command: "wife_jobs",
+    description: "Rank your wife's queue now and show the shortlist",
+    group: "jobs",
+  },
+  {
     command: "csv",
     description: "Download the apply queue as a spreadsheet. /csv all for everything screened",
+    group: "jobs",
+  },
+  {
+    command: "wife_csv",
+    description: "Download your wife's apply queue as a spreadsheet. /wife_csv all for everything screened",
     group: "jobs",
   },
   {
@@ -60,8 +70,18 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "jobs",
   },
   {
+    command: "wife_draft",
+    description: "wife_draft n | wife_draft 1,3,5 | wife_draft all — tailor your wife's CV + cover letter and the apply link",
+    group: "jobs",
+  },
+  {
     command: "ask",
     description: "ask n — write the one question that unblocks row n",
+    group: "jobs",
+  },
+  {
+    command: "wife_ask",
+    description: "wife_ask n — write the one question that unblocks row n of your wife's queue",
     group: "jobs",
   },
   {
@@ -70,13 +90,28 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "jobs",
   },
   {
+    command: "wife_applied",
+    description: "wife_applied n — mark row n of your wife's queue applied and drop it off",
+    group: "jobs",
+  },
+  {
     command: "replied",
     description: "replied n — mark row n of your live applications as replied to",
     group: "jobs",
   },
   {
+    command: "wife_replied",
+    description: "wife_replied n — mark row n of your wife's live applications as replied to",
+    group: "jobs",
+  },
+  {
     command: "rejected",
     description: "rejected n — mark row n of your live applications as rejected",
+    group: "jobs",
+  },
+  {
+    command: "wife_rejected",
+    description: "wife_rejected n — mark row n of your wife's live applications as rejected",
     group: "jobs",
   },
   {
@@ -86,6 +121,11 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     // No angle brackets: this string is sent to Telegram's setMyCommands, which
     // takes plain text and does not parse HTML (see command-menu.test.ts).
     description: "What every application form gets filled from. profile set phone +31… changes one field",
+    group: "jobs",
+  },
+  {
+    command: "wife_profile",
+    description: "What your wife's application forms get filled from. wife_profile set phone +31… changes one field",
     group: "jobs",
   },
   // ── System ────────────────────────────────────────────────────────────────
