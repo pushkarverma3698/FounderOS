@@ -96,7 +96,13 @@ export async function handleResume(ctx: Context): Promise<void> {
  * `bot.command(...)` registrations, so this surface cannot drift from the bot.
  */
 export async function handleCommands(ctx: Context): Promise<void> {
-  await ctx.reply(buildCommandsHelp(), { parse_mode: "HTML" });
+  const parts = buildCommandsHelp();
+  for (let i = 0; i < parts.length; i += 1) {
+    await ctx.reply(parts[i] as string, {
+      parse_mode: "HTML",
+      disable_notification: i > 0,
+    });
+  }
 }
 
 // ── /connect — registry discovery + install (ADR-041 Tier 3) ─────────────────

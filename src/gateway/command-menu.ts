@@ -145,7 +145,7 @@ export function telegramCommandPayload(): { command: string; description: string
 }
 
 /**
- * The `/commands` message.
+ * The `/commands` message sequence.
  *
  * Rendered from the same array so the chat text cannot drift from the menu.
  * Descriptions are escaped on the way in — they are plain text by contract, and
@@ -153,24 +153,43 @@ export function telegramCommandPayload(): { command: string; description: string
  * `escapeStrayAngles`). Placeholders are re-rendered as "&lt;n&gt;" so they read
  * as placeholders rather than as literal argument names.
  */
-export function buildCommandsHelp(): string {
-  const render = (group: MenuCommand["group"]): string[] =>
-    COMMAND_MENU.filter((entry) => entry.group === group).map((entry) => {
-      const detail = esc(entry.description).replace(
-        new RegExp(`^${entry.command} n —`),
-        "&lt;n&gt; —",
-      );
-      return `/${entry.command} ${detail.startsWith("&lt;n&gt;") ? detail : `— ${detail}`}`;
-    });
+export function buildCommandsHelp(): string[] {
+  const parts: string[] = [];
 
-  return [
-    "<b>Jobs — the daily loop</b>",
-    ...render("jobs"),
-    "",
-    "<b>System</b>",
-    ...render("system"),
-    "",
-    "All of these are in the ☰ menu button next to the message box, so you never have to remember them.",
-    "Everything else is natural language — the planner routes it.",
-  ].join("\n");
+  const formatDetail = (entry: MenuCommand) => {
+    const detail = esc(entry.description).replace(
+      new RegExp(`^${entry.command} n —`),
+      "&lt;n&gt; —",
+    );
+    return detail.startsWith("&lt;n&gt;") ? detail : `${detail}`;
+  };
+
+  parts.push("<b>Jobs — the daily loop</b>");
+  
+  const jobsCommands = COMMAND_MENU.filter((e) => e.group === "jobs");
+  for (let i = 0; i < jobsCommands.length; i += 2) {
+    const entry = jobsCommands[i] as MenuCommand;
+    const wifeEntry = jobsCommands[i + 1] as MenuCommand | undefined;
+    
+    let msg = `🔹 <b>/${entry.command}</b>\n<i>${formatDetail(entry)}</i>`;
+    if (wifeEntry && wifeEntry.command === `wife_${entry.command}`) {
+      msg += `\n\n🔸 <b>/${wifeEntry.command}</b>\n<i>${formatDetail(wifeEntry)}</i>`;
+    } else if (wifeEntry) {
+      // If the strict pairing is ever broken, process it as a single entry next loop.
+      i -= 1;
+    }
+    parts.push(msg);
+  }
+
+  parts.push("<b>System</b>");
+  const systemCommands = COMMAND_MENU.filter((e) => e.group === "system");
+  for (const entry of systemCommands) {
+    parts.push(`⚙️ <b>/${entry.command}</b>\n<i>${formatDetail(entry)}</i>`);
+  }
+
+  parts.push(
+    "💡 All of these are in the ☰ menu button next to the message box, so you never have to remember them.\n\nEverything else is natural language — the planner routes it."
+  );
+
+  return parts;
 }
