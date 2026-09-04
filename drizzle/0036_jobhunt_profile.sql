@@ -30,3 +30,24 @@ ON agents.job_applications (tenant_id, profile_id, dedupe_key);
 -- Multi-profile read index (brief rank lookups scoped to one profile's queue).
 CREATE INDEX IF NOT EXISTS ja_profile_idx
 ON agents.job_applications (tenant_id, profile_id, brief_section, brief_rank);
+
+-- THE BRIEF RANK INDEX HAS TO MOVE TOO, and missing it cost a whole live run.
+--
+-- 0021 pinned one row per (tenant, section, rank) so `/draft 3` could never be
+-- ambiguous. That is still exactly right — but with two candidates it is one row
+-- per (tenant, PROFILE, section, rank), because both briefs number their own
+-- list from 1. Left as it was, the second profile to rank collides on rank 1 of
+-- do_today and `recordBriefRanks` throws.
+--
+-- The failure is invisible from outside: the brief still renders in full, the
+-- founder still reads "1. Alpha Sense … → /draft wife 1", and only the write of
+-- the numbers is lost — so every /draft against it answers "no row". A brief
+-- that is fully correct on screen and unusable on the next command is precisely
+-- the "runs flawlessly, produces nothing" failure this pipeline already had once.
+--
+-- Not IF NOT EXISTS: the index EXISTS, with the wrong columns. It must be
+-- dropped and rebuilt or the old definition silently stands.
+DROP INDEX IF EXISTS agents.ja_brief_rank_uniq;
+CREATE UNIQUE INDEX ja_brief_rank_uniq
+ON agents.job_applications (tenant_id, profile_id, brief_section, brief_rank)
+WHERE brief_section IS NOT NULL;

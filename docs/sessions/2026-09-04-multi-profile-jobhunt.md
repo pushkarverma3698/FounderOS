@@ -41,13 +41,21 @@ The founder confirmed: **she is on a zoekjaar (orientation year) permit, born
 7 April 2001.** The branch encoded `permitBases: ["hsm", "partner-permit"]`.
 
 A zoekjaar holder has free access to the Dutch labour market — no recognised
-sponsor, no work permit, no IND salary criterion. Screening her under `hsm` ran
-the IND recognised-sponsor register against every Dutch employer and would have
-rejected most of a market she can lawfully work in today, invisibly. And the
-branch's only end-to-end test asserted a `pass` carried by `partner-permit` — a
-permit she has never held, whose gate profile happens to clear both the sponsor
-check and the salary floor. The test was green *because* it screened her under
-someone else's right to work.
+sponsor, no work permit, no IND salary criterion. The branch's only end-to-end
+test asserted a `pass` carried by `partner-permit` — a permit she has never held,
+whose gate profile happens to clear both the sponsor check and the salary floor.
+The test was green *because* it screened her under someone else's right to work.
+
+**Correction, after live testing.** My first account of this said the shipped
+config "would have rejected most of a market she can lawfully work in". That was
+wrong. `partner-permit` was *masking* `hsm`, so the shipped config mostly reached
+the right verdict — by way of a false statement about her immigration status,
+printed to the founder as the reason. Three arms of the same real posting, run
+live: `hsm`+`partner-permit` → PASS on a permit she does not hold;
+`hsm` alone → FLAG (sponsor + salary); `zoekjaar`+`hsm` → PASS, correctly
+explained. The reach argument was about the middle arm, which was never the
+shipped state. The real defect — a fabricated legal basis rendered as evidence —
+is bad enough without the exaggeration.
 
 `zoekjaar` is now a real `PermitBasis` with its own gate profile, in `NL_BASES`
 and deliberately **not** in `UNCLEAR_BASES` — it is now the most permissive Dutch
@@ -135,3 +143,56 @@ of 400. Extracted `free-ingest-filters.ts`, `ingest-pools.ts` and
 5. **Migration 0036 has not been run anywhere.** It backfills `profile_id` then
    sets `NOT NULL` — a NULL does not conflict in a unique index, so a nullable
    column would have silently turned the double-apply gate into a no-op.
+
+## Live verification (same session, after the fixes)
+
+Everything under "Outstanding" that said "not verified" was then run for real.
+`scripts/verify-multi-profile-live.ts` (`pnpm jobhunt:verify-multi-profile`) polls
+real boards, screens both profiles off one poll, and reads the database back. $0:
+the free lane's screening path imports no model.
+
+- **1,297 boards, 47,115 postings, one poll, 176s.** Pushkar 928 screened, Wife 66.
+- **43 of her 66 PASSED** — Alpha Sense Associate Financial Analyst, Capco
+  Financial Analyst, Dyson Lead VAT Accountant, four Compliance Analyst roles.
+  Routes: 62 `zoekjaar`, 6 `hsm`. Before this branch the number was structurally zero.
+- **Zero cross-profile leakage** on every query, `/draft`, `/csv`, and the
+  mac-client queue. `/draft 1` → his Nebius row, `/draft wife 1` → her Dyson row.
+- mac-client: **95 pytest passed**, including 13 real-browser Playwright tests.
+
+### The blocker only a live run could find
+
+`0021` created `ja_brief_rank_uniq` on `(tenant_id, brief_section, brief_rank)`.
+`0036` rebuilt `ja_dedupe_uniq` with `profile_id` and missed this one. Both briefs
+number from 1, so the second profile to rank collided on `do_today` rank 1 and
+`recordBriefRanks` threw — every run, deterministically.
+
+Invisible from outside: her brief rendered in full, 14,000 characters, correct
+numbers on screen, and only the *write* of those numbers was lost inside a tagged
+fail-open. That fail-open's comment argues a lost rank is "loud and recoverable" —
+true with one profile, false with two, where every `/draft wife N` fails forever.
+
+The application code was already correct; the constraint lived only in SQL, and
+the unit suite mocks the database. `tsc`, 3,600 tests and six ratchets stayed
+green throughout. `tests/unit/db/job-applications-unique-indexes.test.ts` now
+replays every migration's DDL and fails if any surviving unique index on
+`job_applications` lacks `profile_id`.
+
+### A defect I introduced, caught by the same run
+
+With the sweep injectable, `runFreeIngest` logged the *registry* size rather than
+what was polled — and `runFreeSweep` always injects, so production would have
+reported `boards: 1297` on every sweep. Now logs `sweep.boardsPolled`.
+
+### Checked and clean
+
+`IngestLine.detail` is `reasons[0]` (reason-by-position, the 2026-08-01 defect
+shape) but has no consumer in `sweep-runner.ts` or `src/gateway/` — it never
+reaches the founder. Rank clearing is profile-scoped. Missing CVs fail loudly
+naming HER files, with no fallback to Pushkar's at any point.
+
+### Still not verified
+
+Nothing has been applied to production — `0036` has run against the dev Postgres
+only. No application has been sent for her, and none can be until her CVs exist.
+The zoekjaar gate profile encodes my reading of Dutch policy; no source in this
+repo establishes it.

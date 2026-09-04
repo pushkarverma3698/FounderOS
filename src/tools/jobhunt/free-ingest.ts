@@ -185,9 +185,11 @@ export async function runFreeIngest(
   const now = opts.now ?? new Date();
   const sweepId = randomUUID();
   const profile = opts.profile ?? getProfile();
-  const boards = opts.boards ?? getFreeBoards();
-
-  const sweep = opts.sweep ?? (await sweepBoards(boards));
+  // The registry is read ONLY when this call has to poll for itself. Reading it
+  // eagerly makes a caller that already holds a sweep depend on a file it never
+  // uses — and `getFreeBoards()` throws on a thin registry by design, so that
+  // dependency could fail a screening run that needed no boards at all.
+  const sweep = opts.sweep ?? (await sweepBoards(opts.boards ?? getFreeBoards()));
   const filtered = filterCandidates(sweep.candidates, now, opts.maxAgeHours, profile);
   const { unseen, known } = await keepUnseen(filtered.kept, profile);
   const hydrated = await hydrateDescriptions(unseen);
@@ -271,7 +273,11 @@ export async function runFreeIngest(
   log.info(
     {
       funnel,
-      boards: boards.length,
+      // WHAT WAS POLLED, not what is on file. Since the sweep became injectable
+      // (one poll shared by every profile) the registry size and the poll size
+      // are different numbers, and `runFreeSweep` always injects — so logging
+      // the registry here reported 1,297 boards on a run that polled 8.
+      boards: sweep.boardsPolled,
       seen: sweep.candidates.length,
       screened: postings.length,
       failed: sweep.failures.length,

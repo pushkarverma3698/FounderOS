@@ -292,10 +292,32 @@ production-ready:
 The orientation year gives **free access to the Dutch labour market**: no
 recognised sponsor, no work permit, no IND salary criterion, for the duration of
 the permit. The branch encoded the opposite — `permitBases: ["hsm",
-"partner-permit"]`, which ran the IND recognised-sponsor register against every
-Dutch employer and would have rejected the large majority of a market she can
-lawfully work in today. The `partner-permit` basis, which the branch's only
+"partner-permit"]` — and the `partner-permit` basis, which the branch's only
 end-to-end test relied on to produce a `pass`, is a permit she has never held.
+
+> **Correction (2026-09-04, after live testing).** An earlier draft of this
+> section, and the first summary I gave the founder, said the shipped config
+> "would have rejected the large majority of a market she can lawfully work in".
+> **That was wrong, and the live counterfactual disproves it.** `partner-permit`
+> has `sponsorRequired: false` and `salaryFloorApplies: false`, so it was
+> *masking* `hsm` — the shipped config mostly produced the RIGHT verdict. The
+> real defect is narrower and different in kind: it produced the right verdict
+> **for a fabricated reason**, printing "Partner permit — APPLIED FOR, awaiting
+> the IND decision" to the founder as the legal basis for a person who has never
+> applied for one. Three arms of the same real posting, run live
+> (`pnpm jobhunt:verify-multi-profile`, §9):
+>
+> | permitBases | verdict | route | why |
+> |---|---|---|---|
+> | `hsm`+`partner-permit` (as shipped) | PASS | `partner-permit` | on a permit she does not hold |
+> | `hsm` alone (shipped, false permit removed) | **FLAG** | `hsm` | Sponsor flag + Salary flag |
+> | `zoekjaar`+`hsm` (as fixed) | PASS | `zoekjaar` | correct, and correctly explained |
+>
+> The middle row is what the reach argument was actually about: `hsm` alone does
+> flag broadly. But that was never the shipped state, so claiming lost reach
+> overstated the case. The defect that IS real — a false statement about a
+> person's immigration status, rendered as evidence — is bad on its own terms and
+> did not need the exaggeration.
 
 `zoekjaar` is now a first-class `PermitBasis` with its own gate profile
 (`permit-routes.ts`): `sponsorRequired: false`, `salaryFloorApplies: false`,
@@ -439,3 +461,117 @@ established by this session:
 - No row with `profile_id = 'wife-nl-finance'` exists anywhere.
 - The mac-client's scoped `QUEUE_SQL` has not been run against the live VPS.
 - `scripts/jobhunt-rescreen-profile.ts` has not been run against the 12k pool.
+
+# 9. Live verification — 2026-09-04 (Claude)
+
+§8.7 said none of this had been run. It has now. Every number below came from a
+real run against a real Postgres and 1,297 real job boards; the harness is
+committed as `scripts/verify-multi-profile-live.ts` (`pnpm jobhunt:verify-multi-profile`).
+
+**Cost: $0.** The free lane's screening path imports no model — `screenPosting`
+is pure code plus a Postgres write. Verified by inspection before running, not
+assumed.
+
+## 9.1 What was run
+
+| # | Check | Result |
+|---|---|---|
+| 1 | `0036` applied to dev Postgres | 348 rows backfilled to `pushkar-nl-tech`, `NOT NULL` set, both indexes built |
+| 2 | `0036` re-applied | idempotent, exit 0 |
+| 3 | Journal registration | `0036_jobhunt_profile` at idx 36 — it will actually run on deploy |
+| 4 | Full board sweep | **1,297 boards, 47,115 postings, 13 failures, 176s, ONE poll** |
+| 5 | Both profiles screened off that one poll | Pushkar 928 screened · **Wife 66 screened** |
+| 6 | Rows in Postgres | `pushkar-nl-tech` 1,297 · **`wife-nl-finance` 68** |
+| 7 | Cross-profile leak | `foreignRows=0` for both, on every query |
+| 8 | `/draft N` | `1` → Nebius (his) · `wife 1` → Dyson Lead VAT Accountant (hers) |
+| 9 | `/csv` | his queue 30 / log 500 · hers queue 10 / log 68 · **0 foreign names** |
+| 10 | mac-client `QUEUE_SQL` | scoped; his 30 rows, hers 10, neither sees the other |
+| 11 | Gateway selector, 9 inputs | all correct, including `wfie 3` **refused** |
+| 12 | mac-client pytest | **95 passed**, incl. 13 real-browser Playwright tests |
+| 13 | `pnpm gate` | green — see §9.5 |
+
+**The outcome number: 43 of her 66 screened postings PASSED.** Real, current,
+lawfully-reachable Dutch finance roles — Alpha Sense Associate Financial Analyst,
+Capco Financial Analyst, four Compliance Analyst roles, Dyson Lead VAT Accountant.
+Routes recorded: **62 `zoekjaar`, 6 `hsm`**. Before this branch the number was
+structurally zero.
+
+Pushkar's profile is unchanged in behaviour: 525 pass / 250 flag / 153 reject
+across `india-local` (597), `partner-permit` (305), `hsm` (27), `remote-contract` (20).
+
+## 9.2 A blocker that only the live run could find
+
+`recordBriefRanks` threw for the second profile, **every run, deterministically**:
+
+```
+jobhunt:brief-persist  err: "duplicate key value violates unique constraint \"ja_brief_rank_uniq\""
+```
+
+`0021` created that index on `(tenant_id, brief_section, brief_rank)`. `0036`
+rebuilt `ja_dedupe_uniq` with `profile_id` and **missed this one**. Both briefs
+number their own list from 1, so whoever ranked second collided on `do_today`
+rank 1 and lost its entire ranking.
+
+The failure is invisible from outside. Her brief rendered in full — 14,000
+characters, correct rows, correct numbers on screen — and only the *write* of
+those numbers was lost, inside a tagged fail-open whose comment reads "a lost
+rank makes /draft say 'I can't find row N', which is loud and recoverable". That
+reasoning was written when there was one profile. With two it was neither loud
+nor recoverable: the founder reads `1. Dyson — Lead VAT Accountant → /draft wife 1`,
+types it, and is told there is no row — every time, forever.
+
+Fixed in `0036` (DROP then CREATE — `IF NOT EXISTS` would have found the name
+taken and silently kept the wrong definition). After the fix: her ranks persist
+(`do_today` 10, `ask` 1) and `/draft wife 1` resolves to her own row.
+
+**Why nothing else could have caught it.** The application code was already
+correct — `recordBriefRanks` and `getApplicationByBriefRank` both scope by
+profile. The constraint existed only in SQL, the unit suite mocks the database,
+and the write is fail-open. `tsc`, 3,600 tests and six ratchets all stayed green.
+
+`tests/unit/db/job-applications-unique-indexes.test.ts` now replays every
+migration's DDL in order and fails if **any** surviving unique index on
+`job_applications` lacks `profile_id` — so the next one is caught on the commit
+that adds it. Verified RED before the fix (naming
+`ja_brief_rank_uniq (0021_job_brief_ranks.sql)`) and GREEN after.
+
+## 9.3 A defect I introduced, caught by the same run
+
+With the sweep injectable, `runFreeIngest` logged `boards: boards.length` — the
+*registry* size. `runFreeSweep` always injects, so production would have reported
+`boards: 1297` on every sweep regardless of what was polled (the run that polled
+8 said 1,297). Now logs `sweep.boardsPolled`. Also made the registry read lazy:
+a caller holding a sweep no longer depends on a file it never uses, and
+`getFreeBoards()` throws by design on a thin registry.
+
+## 9.4 Checked and found clean
+
+- **`IngestLine.detail` is `reasons[0]`** — reason-by-position, the 2026-08-01
+  defect shape. Traced every consumer: it is not referenced in `sweep-runner.ts`
+  or anywhere in `src/gateway/`. It never reaches the founder; the brief renders
+  from `gate_json`. No change made.
+- **Rank clearing is profile-scoped.** Building her brief does not wipe his
+  `brief_rank` values — confirmed in code and by his ranks surviving her run.
+- **Missing CVs fail loudly and name HER files** (`cv-wife-financial-analyst.md`,
+  `cv-wife-accountant.md`, `cv-wife-auditor.md`, `cv-wife-base.md`). No silent
+  fallback to Pushkar's CV at any point. This is the property that matters most
+  while her CVs are still missing.
+
+## 9.5 Gate
+
+```
+pnpm gate  →  exit 0
+tsc --noEmit  →  0 errors
+mac-client pytest  →  95 passed (incl. 13 real-browser Playwright)
+```
+
+## 9.6 Still NOT verified
+
+- **Nothing has been applied to production.** `0036` has run against the dev
+  Postgres only. Prod still has the old `ja_dedupe_uniq` and `ja_brief_rank_uniq`.
+- **No application has been sent for her**, and none can be until her CVs exist.
+- The **reduced HSM criterion for orientation-year switchers** is still unverified
+  (§8.6 item 3).
+- The zoekjaar gate profile encodes my reading of Dutch policy — no source in
+  this repo establishes it. Worth one confirmation on ind.nl before her first
+  application.
