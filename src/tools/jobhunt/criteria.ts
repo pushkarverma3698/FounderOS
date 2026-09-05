@@ -34,6 +34,15 @@ interface CriterionWindow {
  * Verified against ind.nl for calendar 2026 (campaign doc §Constraints).
  * ADD A NEW ROW each January rather than editing one — an edited row silently
  * rewrites the history of every verdict already recorded.
+ *
+ * `reducedMonthly` is the IND *verlaagd salariscriterium* — the floor for someone
+ * moving to a highly-skilled-migrant permit within three years of a Dutch
+ * orientation year or degree. €3,122/month, re-verified against
+ * ind.nl/en/required-amounts-income-requirements on 2026-09-05, alongside the
+ * two standard bands (4,357 / 5,942) already in this row. It arrived on
+ * 2026-09-05 with no source recorded, under a comment asserting verification —
+ * a legal floor 28% below the standard one, deciding which of his wife's
+ * applications are lawful to send.
  */
 const CRITERIA: readonly CriterionWindow[] = [
   { from: "2026-01-01", to: "2026-12-31", under30Monthly: 4357, over30Monthly: 5942, reducedMonthly: 3122 },

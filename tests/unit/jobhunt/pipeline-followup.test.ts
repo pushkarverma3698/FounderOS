@@ -104,6 +104,18 @@ describe("runPipelineDigest", () => {
     const [sentText] = (sendToChat.mock.calls[0] ?? []) as [string?];
     expect(sentText).toContain("Ockto");
   });
+
+  it("still speaks once when NO profile has live rows", async () => {
+    // Per-profile digests were introduced with a `rows.length > 0` skip, which
+    // means an all-empty pipeline sends nothing at all. From Telegram that is
+    // indistinguishable from a crashed cron — the failure that cost this
+    // pipeline fifteen silent hours on 2026-08-21.
+    listLiveApplications.mockResolvedValue([]);
+    await runPipelineDigest();
+    expect(sendToChat).toHaveBeenCalledTimes(1);
+    const [sentText] = (sendToChat.mock.calls[0] ?? []) as [string?];
+    expect(sentText).toContain("Nothing live right now");
+  });
 });
 
 describe("runFollowupSweep", () => {

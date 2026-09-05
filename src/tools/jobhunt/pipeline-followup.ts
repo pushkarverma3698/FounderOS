@@ -48,7 +48,7 @@ function daysSince(date: Date | null, now: Date): number {
  * cannot be reused here (it is cleared the moment a row is marked applied).
  */
 export function formatPipelineDigest(rows: readonly JobApplication[], now: Date = new Date(), profile?: { candidateName: string }): string {
-  const nameLabel = profile ? ` (${profile.candidateName})` : "";
+  const nameLabel = profile ? ` (${esc(profile.candidateName)})` : "";
   if (rows.length === 0) {
     return `📭 <b>Pipeline review${nameLabel}</b>\n\nNothing live right now — every application has been marked replied, rejected, or is still in today's queue.`;
   }
@@ -67,24 +67,41 @@ export function formatPipelineDigest(rows: readonly JobApplication[], now: Date 
   );
 }
 
-/** Runs the digest sweep and sends it. Fire-and-forget from the cron's perspective. */
+/**
+ * Runs the digest sweep and sends it. Fire-and-forget from the cron's perspective.
+ *
+ * One message per profile that has live rows — a combined list cannot be acted
+ * on, because `/replied N` re-runs a per-profile query and the Nth row would not
+ * be the Nth line.
+ *
+ * When NO profile has live rows the digest still speaks, exactly once. Skipping
+ * both is what a crashed cron looks like from Telegram, and this pipeline has
+ * already lost fifteen hours to a sweep that failed silently (2026-08-21). A
+ * quiet "nothing live" costs one message and keeps the absence of one
+ * meaningful.
+ */
 export async function runPipelineDigest(): Promise<void> {
   const { listProfiles } = await import("./profile-config.js");
   const profiles = listProfiles();
+  let spoke = false;
 
   for (const profile of profiles) {
     const rows = await listLiveApplications({ limit: 50, profileId: profile.id });
-    if (rows.length > 0 || profiles.length === 1) {
-      await sendToChat(formatPipelineDigest(rows, new Date(), profile), "HTML");
-    }
+    if (rows.length === 0) continue;
+    await sendToChat(formatPipelineDigest(rows, new Date(), profile), "HTML");
+    spoke = true;
+  }
+
+  if (!spoke) {
+    await sendToChat(formatPipelineDigest([], new Date()), "HTML");
   }
 }
 
 /** Plain templated nudge — no LLM call. `nudgeNumber` only changes the tone, not the facts. */
 export function formatFollowupNudge(row: JobApplication, nudgeNumber: 1 | 2, now: Date = new Date(), profile?: { candidateName: string }): string {
   const days = daysSince(row.last_contact_at ?? row.applied_at, now);
-  const heading = nudgeNumber === 1 ? `🔔 Follow-up due (day 7)` : `🔔 Second follow-up due (day 14)`;
-  const nameLabel = profile ? ` — for ${profile.candidateName}` : "";
+  const heading = nudgeNumber === 1 ? "🔔 Follow-up due (day 7)" : "🔔 Second follow-up due (day 14)";
+  const nameLabel = profile ? ` — for ${esc(profile.candidateName)}` : "";
   const draft =
     `Hi — following up on my application for the ${row.title} role, submitted ${days} days ago. ` +
     `Happy to answer any questions in the meantime — is there an update on next steps?`;

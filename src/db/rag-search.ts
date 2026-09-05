@@ -163,7 +163,7 @@ export interface SearchBrainOptions {
   query: string;
   topK?: number;
   filters?: RagFilter;
-  /** Defaults to "turicks_brain" */
+  /** Defaults to "brain_memories" — the store brain:sync writes (ADR-038). */
   table?: RagTable;
 }
 
@@ -174,7 +174,7 @@ export interface SearchBrainOptions {
  */
 export async function searchBrain(opts: SearchBrainOptions): Promise<HybridResult> {
   const topK = opts.topK ?? 5;
-  const table = opts.table ?? "turicks_brain";
+  const table = opts.table ?? "brain_memories";
 
   return hybridRagSearch(table, opts.query, topK, {
     vectorSearch: async (tbl, q, k) => {
