@@ -135,11 +135,14 @@ no source, under a comment asserting verification.
 
 | | |
 |---|---|
-| `pnpm gate` on the integration head | **exit 0** — 344 files · 3,747 tests |
-| Tests added | 21 (7 brain parity, 3 command-menu, 1 digest silence, rest existing) |
+| `pnpm gate` on the integration head | **exit 0** — 341 test files · **3,742 tests** |
+| Baseline on the brain branch as handed over | exit 0 — 340 files · 3,726 tests |
+| Tests added | 16 (12 brain-store parity, 3 command-menu, 1 digest silence) |
+| Tests corrected | 2 (stale `turicks_brain` pins that stayed green through the split) |
 | Branches before / after | 14 / 2 (`main`, `beta`) |
 | Open PRs before / after | 4 / 0 |
-| Blockers found after a "no BLOCKERs remain" handoff | 1 |
+| Blockers found after a "no BLOCKERs remain" handoff | 1, three-way |
+| Brain rows at risk of going unreadable | 4,018, of which 2,642 transcripts |
 | Migrations added | `0038_brain_backfill.sql` |
 
 ## Outstanding
