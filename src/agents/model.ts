@@ -17,7 +17,7 @@ import { modelFallbackMiddleware } from "langchain";
 
 export const RETRY_BACKOFF_MS = [2_000, 4_000, 8_000] as const;
 
-export type ModelProvider = "google-vertexai" | "google-genai" | "openai" | "anthropic" | "openrouter";
+export type ModelProvider = "google-vertexai" | "google-genai" | "openai" | "anthropic" | "openrouter" | "omnirouter";
 
 export interface ParsedModelId {
   provider: ModelProvider;
@@ -208,9 +208,9 @@ export function parseModelId(modelId: string): ParsedModelId {
     throw new Error(`Model id "${modelId}" is missing the model name after the provider prefix.`);
   }
 
-  if (!["google-vertexai", "google-genai", "openai", "anthropic", "openrouter"].includes(provider)) {
+  if (!["google-vertexai", "google-genai", "openai", "anthropic", "openrouter", "omnirouter"].includes(provider)) {
     throw new Error(
-      `Unsupported AGENT_MODEL provider "${provider}". Use google-vertexai:, google-genai:, openai:, anthropic:, or openrouter:.`,
+      `Unsupported AGENT_MODEL provider "${provider}". Use google-vertexai:, google-genai:, openai:, anthropic:, openrouter:, or omnirouter:.`,
     );
   }
 
@@ -349,6 +349,22 @@ function buildModel(
       maxRetries: 2,
       apiKey: apiKey || "missing-openrouter-key",
       configuration: { baseURL: "https://openrouter.ai/api/v1" },
+    });
+  }
+
+  if (parsed.provider === "omnirouter") {
+    // OmniRouter runs on the laptop. Hardcoding 127.0.0.1 here means the prod
+    // VPS — where nothing listens on 20128 — resolves this to a connection
+    // refused on every call, and the fallback chain cannot rescue it because a
+    // dead local proxy is not a provider error class. The override exists so
+    // the box that runs the bot can say where its router is, or say it has none.
+    return new ChatOpenAI({
+      model: parsed.model,
+      temperature,
+      maxRetries: 2,
+      // A local proxy authenticates by being local; the SDK still demands a value.
+      apiKey: process.env["OMNIROUTER_API_KEY"] || "omnirouter-local",
+      configuration: { baseURL: process.env["OMNIROUTER_BASE_URL"] || "http://127.0.0.1:20128/v1" },
     });
   }
 
