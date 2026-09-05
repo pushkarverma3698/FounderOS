@@ -56,8 +56,23 @@ export interface HybridDeps {
   keywordSearch: (table: RagTable, query: string, topK: number) => Promise<RagHit[]>;
 }
 
-function errText(reason: unknown): string {
-  return reason instanceof Error ? reason.message : String(reason);
+/**
+ * Readable text for any thrown value. Exported because every RAG stage must
+ * label its failure the same way.
+ *
+ * The AggregateError branch is load-bearing: Node's happy-eyeballs connect
+ * reports a refused Postgres as `AggregateError` over the IPv6 and IPv4
+ * attempts, and that wrapper's own `.message` is the empty string. Returning it
+ * verbatim rendered a dead database as "Search failed at stage embed: " in the
+ * IDE brain MCP — an outage that reads as blank.
+ */
+export function errText(reason: unknown): string {
+  if (reason instanceof AggregateError && reason.errors.length > 0) {
+    const causes = reason.errors.map((e) => errText(e)).filter(Boolean);
+    if (causes.length > 0) return causes.join("; ");
+  }
+  if (reason instanceof Error) return reason.message || reason.name;
+  return String(reason);
 }
 
 /**
