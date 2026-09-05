@@ -336,6 +336,7 @@ async function runFreeSweepForProfile(
       result.funnel,
       now,
       lastSheetLink,
+      profile
     );
     heartbeats.set(profile.id, next);
     if (ping !== null) await sendToChat(ping);

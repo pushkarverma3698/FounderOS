@@ -29,7 +29,7 @@ import {
   agentResults,
   founderContext,
   knowledgeEntries,
-  turicksBrain,
+  brainMemories,
   conversations,
   episodicMemory,
   missions,
@@ -968,16 +968,20 @@ export async function getKnowledgeEntryCount(tenantId: string): Promise<number> 
 }
 
 /**
- * Count turicks_brain vector rows. A zero count means brain:sync has never
+ * Count brain vector rows. A zero count means brain:sync has never
  * been run — this is the silent failure class that caused the 2026-06-15 RAG
  * outage. The health endpoint reports this separately from getKnowledgeEntryCount
  * because the two tables serve different purposes:
  *   knowledge_entries = structured docs (ADRs, brand, strategy)
- *   turicks_brain     = embedded vector chunks for semantic search
+ *   brain_memories    = embedded vector chunks for semantic search (ADR-038)
+ *
+ * Counts the table retrieval actually reads. It counted `turicks_brain` while
+ * brain:sync wrote `brain_memories`, which would have reported a healthy store
+ * from rows no search could return.
  */
 export async function getTuricksBrainCount(): Promise<number> {
   const db = getDb();
-  const [row] = await db.select({ n: count() }).from(turicksBrain);
+  const [row] = await db.select({ n: count() }).from(brainMemories);
   return Number(row?.n ?? 0);
 }
 

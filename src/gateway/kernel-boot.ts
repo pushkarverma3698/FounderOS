@@ -56,6 +56,8 @@ import {
   PERSONAL_PROMPT,
   JOBHUNT_PROMPT,
 } from "../agents/system-prompts.js";
+import { buildJobhuntPrompt } from "../agents/prompts/jobhunt.js";
+import { getProfile } from "../tools/jobhunt/profile-config.js";
 import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "kernel-boot" });
@@ -81,6 +83,20 @@ const PROMPTS: Record<(typeof WORKERS)[number], string | (() => string)> = {
   sales: SALES_PROMPT,
   personal: PERSONAL_PROMPT,
   jobhunt: JOBHUNT_PROMPT,
+};
+
+/**
+ * Per-turn prompt override, keyed by the profile id a Telegram command already
+ * resolved (jobhunt-profile-arg.ts). `PROMPTS.jobhunt` above is baked in once
+ * at boot (rule #2: compile once, reuse forever) and always describes the
+ * default profile — without this, EVERY jobhunt turn, for either candidate,
+ * ran under a prompt still naming the first one, which is how a `/wife_draft`
+ * fallback draft came back signed with the wrong candidate's name (2026-09-05).
+ * Only jobhunt needs this; every other department's prompt has no per-candidate
+ * identity baked into it.
+ */
+const PROMPT_FOR_PROFILE: Partial<Record<(typeof WORKERS)[number], (profileId: string) => string>> = {
+  jobhunt: (profileId) => buildJobhuntPrompt(getProfile(profileId)),
 };
 
 /**
@@ -164,6 +180,7 @@ export function buildWorkerSpecs(): WorkerSpec[] {
       id,
       description: DESCRIPTIONS[id],
       prompt: typeof prompt === "function" ? prompt() : prompt,
+      promptForProfile: PROMPT_FOR_PROFILE[id],
       tools: tools as unknown as KernelTool[],
     };
   });

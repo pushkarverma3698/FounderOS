@@ -181,6 +181,35 @@ describe("runKernelText", () => {
     expect(replies.at(-1)!.text).toContain("All done.");
   });
 
+  // T4, 2026-09-05: the jobhunt worker's system prompt is baked in once at
+  // kernel boot and always named the default profile — a fallback draft for
+  // the second candidate's row came back signed with the wrong name. This is
+  // the channel that fixes it: the caller-named profile rides in
+  // `configurable.profile_id`, the same per-invocation config `thread_id`
+  // already uses, so no kernel rebuild is needed.
+  it("carries a caller-provided profileId as configurable.profile_id", async () => {
+    const { ctx } = fakeCtx();
+    await runKernelText(ctx, "draft this row", "wife-nl-finance");
+
+    const [, config] = fakeKernel.stream.mock.calls[0]! as unknown as [
+      unknown,
+      { configurable: { thread_id: string; profile_id?: string } },
+    ];
+    expect(config.configurable.thread_id).toBe("turicks:777");
+    expect(config.configurable.profile_id).toBe("wife-nl-finance");
+  });
+
+  it("omits profile_id entirely when no profile was named (the general free-text path)", async () => {
+    const { ctx } = fakeCtx();
+    await runKernelText(ctx, "hello kernel");
+
+    const [, config] = fakeKernel.stream.mock.calls[0]! as unknown as [
+      unknown,
+      { configurable: Record<string, unknown> },
+    ];
+    expect("profile_id" in config.configurable).toBe(false);
+  });
+
   it("hands the kernel stream an AbortSignal so a deadline ABORTS the run instead of orphaning it", async () => {
     const { ctx } = fakeCtx();
     await runKernelText(ctx, "hello kernel");

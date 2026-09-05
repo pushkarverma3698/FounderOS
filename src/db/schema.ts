@@ -432,6 +432,43 @@ export const turicksBrain = brainSchema.table(
 );
 
 /**
+ * Unified canonical brain store (ADR-038).
+ * Replaces fragmented Chroma syncs and provides a single RAG source of truth
+ * with rich provenance and lifecycle management.
+ */
+export const brainMemories = brainSchema.table(
+  "brain_memories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull().default("turicks"),
+    
+    /** e.g., conversation, decision, architecture, bug, solution, project_state, research, document, code_knowledge, preference, task */
+    memory_type: text("memory_type").notNull(),
+    content: text("content").notNull(),
+    embedding: vector("embedding", { dimensions: 768 }),
+    
+    source: text("source"),
+    source_id: text("source_id"),
+    project: text("project"),
+    
+    importance: numeric("importance", { precision: 4, scale: 3 }),
+    confidence: numeric("confidence", { precision: 4, scale: 3 }),
+    
+    /** ACTIVE | STALE | SUPERSEDED | ARCHIVED */
+    status: text("status").notNull().default("ACTIVE"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+    
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    tenantTypeIdx: index("bm_tenant_type_idx").on(t.tenant_id, t.memory_type),
+    statusIdx: index("bm_status_idx").on(t.status),
+    projectIdx: index("bm_project_idx").on(t.project),
+  }),
+);
+
+/**
  * research_cache — durable memory of web pages scraped by the research dept
  * (Apify rag-web-browser / website-content-crawler). Kept SEPARATE from the
  * curated turicks_brain so raw web content never pollutes hand-synced strategy
@@ -454,6 +491,8 @@ export type PersonalRagRow = typeof personalRag.$inferSelect;
 export type NewPersonalRagRow = typeof personalRag.$inferInsert;
 export type TuricksBrainRow = typeof turicksBrain.$inferSelect;
 export type NewTuricksBrainRow = typeof turicksBrain.$inferInsert;
+export type BrainMemoryRow = typeof brainMemories.$inferSelect;
+export type NewBrainMemoryRow = typeof brainMemories.$inferInsert;
 export type ResearchCacheRow = typeof researchCache.$inferSelect;
 export type NewResearchCacheRow = typeof researchCache.$inferInsert;
 

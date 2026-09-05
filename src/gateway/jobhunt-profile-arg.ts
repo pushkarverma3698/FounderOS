@@ -17,6 +17,7 @@
  * company about the wrong person.
  */
 
+import type { Context } from "grammy";
 import { getProfile, listProfiles, DEFAULT_PROFILE_ID, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
 
 export interface ProfileArg {
@@ -104,6 +105,22 @@ export function resolveProfileArg(
 
 export function isProfileArgMiss(value: ProfileArg | ProfileArgMiss): value is ProfileArgMiss {
   return "unknown" in value;
+}
+
+/**
+ * Force a profile token onto `ctx.match` before delegating to a command's
+ * normal handler — what `/wife_jobs` runs, so it behaves exactly like
+ * `/jobs wife` instead of a second, parallel parser that could drift from it.
+ *
+ * `ctx.match` is a plain writable string on grammy's Context — the same
+ * property its own `bot.command()` middleware sets — so overwriting it in
+ * place, rather than cloning ctx, leaves every other binding (ctx.reply,
+ * ctx.chat, …) untouched.
+ */
+export function withForcedProfileToken(ctx: Context, token: string): Context {
+  const rest = ctx.match?.toString() ?? "";
+  ctx.match = rest.length > 0 ? `${token} ${rest}` : token;
+  return ctx;
 }
 
 /** What the founder is told when the selector did not resolve. */

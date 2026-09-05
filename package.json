@@ -1,7 +1,7 @@
 {
   "name": "founderos",
   "version": "0.1.0",
-  "description": "FounderOS — Multi-agent AI operating system for Turicks",
+  "description": "FounderOS \u2014 Multi-agent AI operating system for Turicks",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -31,7 +31,6 @@
     "jobhunt:grow-funding": "node --env-file=.env --import tsx/esm scripts/jobhunt-funding-grow.ts",
     "session:sync": "node --env-file=.env --import tsx/esm scripts/sync-conversation-session.ts",
     "self-improve:run": "node --env-file=.env --import tsx/esm scripts/self-improve-cron.ts",
-    "verify:branch": "bash scripts/verify-branch-name.sh",
     "verify:wiring": "node --import tsx/esm scripts/verify-wiring.ts",
     "verify:runtime-assets": "node --import tsx/esm scripts/verify-runtime-assets.ts",
     "gate": "pnpm verify:branch && pnpm lint && pnpm build:all && pnpm verify:runtime-assets && pnpm verify:wiring && pnpm verify:arch && pnpm verify:doc-claims && pnpm test",
@@ -52,11 +51,14 @@
     "mcp:probe": "node --env-file=.env --import tsx/esm scripts/mcp-bridge-probe.ts",
     "rag:probe": "node --env-file=.env --import tsx/esm scripts/probe-rag.ts",
     "mcp": "LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/index.ts",
+    "mcp:brain": "LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/turicks-brain.ts",
     "benchmark:run": "node --env-file=.env --import tsx/esm scripts/run-benchmark.ts run",
     "benchmark:turnids": "node --import tsx/esm scripts/run-benchmark.ts turnids",
     "verify:benchmark": "node --import tsx/esm scripts/verify-benchmark-run.ts",
     "pr:create": "node --env-file=.env --import tsx/esm scripts/create-phase-pr.ts",
-    "pr:review": "node --env-file=.env --import tsx/esm scripts/claude-review-pr.ts"
+    "pr:review": "node --env-file=.env --import tsx/esm scripts/claude-review-pr.ts",
+    "verify:branch": "bash scripts/verify-branch-name.sh",
+    "pr:review-opencode": "node --env-file=.env --import tsx/esm scripts/opencode-review-pr.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
