@@ -18,15 +18,23 @@
 -- The hash matches contentSha() in scripts/sync-turicks-brain.ts (sha256 over
 -- UTF-8 bytes, hex) so the sync's "already present, skip re-embedding" path
 -- keeps working over backfilled rows instead of re-embedding the whole corpus.
+--
+-- TWO metadata shapes live in turicks_brain, because three scripts write it:
+--   sync-turicks-brain.ts    → source_path + entry_type   (docs/, 1,376 rows)
+--   ingest-claude-sessions.ts→ source      + doc_type     (transcripts, 2,642)
+--   sync-conversation-session.ts → source  + doc_type     (no embedding)
+-- Measured on the dev DB 2026-09-05: 2,642 of 4,018 rows — 66% of the brain —
+-- carry NO source_path. Reading only that key would drop the entire
+-- conversation memory on the floor, so both keys are coalesced.
 
 INSERT INTO "brain"."brain_memories"
   (tenant_id, memory_type, content, embedding, source, source_id, status, metadata, created_at)
 SELECT
   'turicks',
-  COALESCE(NULLIF(tb.metadata->>'entry_type', ''), 'document'),
+  COALESCE(NULLIF(tb.metadata->>'entry_type', ''), NULLIF(tb.metadata->>'doc_type', ''), 'document'),
   tb.content,
   tb.embedding,
-  tb.metadata->>'source_path',
+  COALESCE(NULLIF(tb.metadata->>'source_path', ''), NULLIF(tb.metadata->>'source', '')),
   encode(sha256(convert_to(tb.content, 'UTF8')), 'hex'),
   'ACTIVE',
   COALESCE(tb.metadata, '{}'::jsonb),

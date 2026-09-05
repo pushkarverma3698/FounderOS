@@ -52,15 +52,44 @@ for weeks.
 It survived all 3,726 tests because the unit suite mocks the database, and no
 test asserted the writer and the readers agree on a name.
 
-- `drizzle/0038_brain_backfill.sql` carries the corpus across, idempotent on the
-  chunk's own sha256 (matching `contentSha()`, so the sync's skip-re-embedding
-  path keeps working), and adds the **HNSW index 0037 omitted** — `turicks_brain`
-  has had one since `0005_pgvector`; without it every semantic search over the
-  new table is a sequential scan.
+**The dev database showed the split already live**: `brain.turicks_brain` held
+**4,018** embedded chunks, `brain.brain_memories` held **1,308**. Two brains,
+same box, same day.
+
+And it was a three-way split, not two. Two more writers — `pnpm ingest:claude`
+(`scripts/ingest-claude-sessions.ts`) and `pnpm session:sync`
+(`scripts/sync-conversation-session.ts`) — were never mentioned in ADR-038 and
+still targeted `turicks_brain`. They own **2,642 of the 4,018 rows, 66% of the
+corpus**: the Claude and Antigravity session transcripts. Repointing readers
+without them would have made the entire conversation memory invisible instead of
+fixing anything, and their metadata uses different keys (`source`/`doc_type`, not
+`source_path`/`entry_type`), so a backfill written against the doc shape alone
+would have landed all 2,642 with a NULL source.
+
+- All three writers now target `brain_memories`.
 - All five readers now name `brain_memories`.
+- `drizzle/0038_brain_backfill.sql` carries the corpus across, coalescing both
+  metadata shapes, idempotent on the chunk's own sha256 (matching `contentSha()`,
+  so the sync's skip-re-embedding path keeps working), and adds the **HNSW index
+  0037 omitted** — `turicks_brain` has had one since `0005_pgvector`; without it
+  every semantic search over the new table is a sequential scan.
 - `tests/unit/db/brain-store-parity.test.ts` pins write ⇄ read parity as a
   source-text contract, because a mocked DB cannot see a table name. Verified RED
   against the pre-fix readers (3 failures), GREEN after.
+
+**Migration proven against real data**, on a schema-isolated copy of the dev
+database (no superuser, so `CREATE DATABASE … TEMPLATE` was unavailable; the
+tables were cloned into a `migtest` schema and dropped afterwards):
+
+| check | result |
+|---|---|
+| rows carried | 1,308 → **4,608** (+3,300; 718 already present by content sha) |
+| second run | **`INSERT 0`** — idempotent |
+| rows with NULL source | **0** |
+| Claude / Antigravity transcripts carried | 2,267 / 164 |
+| rows missing an embedding | 0 |
+| planner on a k-NN query | `Index Scan using …_bm_embedding_idx` |
+| top-3 neighbours of an ADR chunk | 1.000 / 0.802 / 0.798, all ADRs |
 
 **2. `/commands` sent 19 Telegram messages.** One per command pair, one per
 system command, plus two bare section headings — 2,258 characters across 19

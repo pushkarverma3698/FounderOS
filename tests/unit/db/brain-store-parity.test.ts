@@ -40,23 +40,31 @@ function ragSearchTables(source: string): string[] {
   return [...source.matchAll(/runRagSearch\(\s*"([a-z_]+)"/g)].map((m) => m[1]!);
 }
 
-describe("brain store parity — the writer and the readers name the same table", () => {
-  const WRITER = "scripts/sync-turicks-brain.ts";
+/**
+ * THREE scripts write the brain, not one. ADR-038 moved only the first and left
+ * the other two behind — measured on the dev DB 2026-09-05, those two owned
+ * 2,642 of 4,018 rows, 66% of the corpus. Repointing readers without them would
+ * have made the entire conversation memory invisible instead of fixing anything.
+ */
+const WRITERS = [
+  "scripts/sync-turicks-brain.ts", // docs/ → source_path + entry_type
+  "scripts/ingest-claude-sessions.ts", // Claude transcripts → source + doc_type
+  "scripts/sync-conversation-session.ts", // Antigravity transcripts, no embedding
+] as const;
 
-  it("brain:sync writes exactly one brain table", () => {
-    const inserts = [...read(WRITER).matchAll(/INSERT INTO brain\.([a-z_]+)/g)].map((m) => m[1]!);
+describe("brain store parity — the writers and the readers name the same table", () => {
+  it.each(WRITERS)("%s writes exactly one brain table, and it is brain_memories", (writer) => {
+    const inserts = [...read(writer).matchAll(/INSERT INTO brain\.([a-z_]+)/g)].map((m) => m[1]!);
     expect(inserts.length).toBeGreaterThan(0);
     expect([...new Set(inserts)]).toEqual(["brain_memories"]);
   });
 
-  it("brain:sync reads and deletes from the table it writes", () => {
-    const source = read(WRITER);
-    const written = "brain_memories";
-    // A DELETE or COUNT against a different table than the INSERT is how a
-    // sync silently stops being idempotent: it clears rows nobody serves and
-    // leaves duplicates in the store retrieval actually reads.
-    for (const table of sqlTables(source)) {
-      expect(table).toBe(written);
+  it.each(WRITERS)("%s reads and deletes from the table it writes", (writer) => {
+    // A DELETE or watermark COUNT against a different table than the INSERT is
+    // how a sync silently stops being idempotent: it clears rows nobody serves
+    // and duplicates into the store retrieval actually reads.
+    for (const table of sqlTables(read(writer))) {
+      expect(table).toBe("brain_memories");
     }
   });
 
@@ -98,5 +106,18 @@ describe("brain store parity — the writer and the readers name the same table"
     // sequential scan; turicks_brain has had an HNSW index since 0005_pgvector.
     expect(backfill).toMatch(/CREATE INDEX IF NOT EXISTS "brain_memories_embedding_idx"/);
     expect(backfill).toMatch(/hnsw \(embedding vector_cosine_ops\)/);
+  });
+
+  it("the backfill reads BOTH metadata shapes, so transcripts are not dropped", () => {
+    // 2,642 of 4,018 rows on the dev DB carry no source_path — they are Claude
+    // and Antigravity session transcripts, keyed on `source`/`doc_type` by the
+    // other two writers. Coalescing only the doc-sync keys would land them with
+    // a NULL source and no usable type, which is how 66% of the brain goes
+    // missing without a single error.
+    const backfill = read("drizzle/0038_brain_backfill.sql");
+    expect(backfill).toContain("tb.metadata->>'source_path'");
+    expect(backfill).toContain("tb.metadata->>'source'");
+    expect(backfill).toContain("tb.metadata->>'entry_type'");
+    expect(backfill).toContain("tb.metadata->>'doc_type'");
   });
 });

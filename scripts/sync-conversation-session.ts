@@ -3,7 +3,7 @@
  * ==========================================================
  * Reads session transcripts from local Antigravity (brain/<conversation-id>)
  * and Claude Code logs (~/.claude/logs), extracts key decisions, user objectives,
- * and friction events, and persists them into turicks_brain + failure_lessons.
+ * and friction events, and persists them into brain_memories + failure_lessons.
  *
  * Ensures session memories are NEVER lost across local and VPS environments.
  * Usage: pnpm session:sync
@@ -77,23 +77,23 @@ export async function syncConversationSessions(): Promise<{ synced: number; entr
         `Tools used (${toolCallsSeen.length}): ${[...new Set(toolCallsSeen)].join(", ") || "none"}`,
       ].join("\n");
 
-      // Upsert into brain.turicks_brain if DB is connected
+      // Upsert into brain.brain_memories if DB is connected
       const source = `antigravity-session:${convId}`;
       try {
         const db = getDb();
         await db.execute(sql`
-          DELETE FROM brain.turicks_brain WHERE metadata->>'source' = ${source};
+          DELETE FROM brain.brain_memories WHERE source = ${source};
         `);
 
         await db.execute(sql`
-          INSERT INTO brain.turicks_brain (content, metadata)
-          VALUES (${content}, ${JSON.stringify({
+          INSERT INTO brain.brain_memories (tenant_id, memory_type, content, metadata, source, status)
+          VALUES (${"turicks"}, ${"session_transcript"}, ${content}, ${JSON.stringify({
             source,
             doc_type: "session_transcript",
             conv_id: convId,
             title,
             updated_at: new Date().toISOString(),
-          })}::jsonb);
+          })}::jsonb, ${source}, ${"ACTIVE"});
         `);
       } catch (dbErr) {
         // Fallback to local JSON memory store when DB is down locally
@@ -116,7 +116,7 @@ export async function syncConversationSessions(): Promise<{ synced: number; entr
 async function main(): Promise<void> {
   console.log("Syncing Antigravity & Claude Code conversation session transcripts...");
   const res = await syncConversationSessions();
-  console.log(`Successfully synced ${res.synced} conversation sessions into turicks_brain memory!`);
+  console.log(`Successfully synced ${res.synced} conversation sessions into brain_memories!`);
   for (const e of res.entries.slice(0, 5)) {
     console.log(`  • ${e}`);
   }

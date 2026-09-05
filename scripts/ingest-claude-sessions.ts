@@ -124,10 +124,10 @@ export function collectDocuments(projectFilter?: string): Document[] {
 async function loadStoredWatermarks(): Promise<Map<string, number>> {
   const db = getDb();
   const rows = await db.execute(sql`
-    SELECT metadata->>'source' AS source,
+    SELECT source,
            max(metadata->>'updated_at') AS updated_at
-    FROM brain.turicks_brain
-    WHERE metadata->>'source' LIKE 'claude-%'
+    FROM brain.brain_memories
+    WHERE source LIKE 'claude-%'
     GROUP BY 1
   `);
 
@@ -146,7 +146,7 @@ async function storeDocument(doc: Document): Promise<number> {
   const embeddings = await embedTexts(chunks);
 
   await db.execute(sql`
-    DELETE FROM brain.turicks_brain WHERE metadata->>'source' = ${doc.source}
+    DELETE FROM brain.brain_memories WHERE source = ${doc.source}
   `);
 
   for (let i = 0; i < chunks.length; i++) {
@@ -164,8 +164,16 @@ async function storeDocument(doc: Document): Promise<number> {
     });
 
     await db.execute(sql`
-      INSERT INTO brain.turicks_brain (content, metadata, embedding)
-      VALUES (${chunk}, ${metadata}::jsonb, ${`[${vector.join(",")}]`}::vector)
+      INSERT INTO brain.brain_memories (tenant_id, memory_type, content, metadata, embedding, source, status)
+      VALUES (
+        'turicks',
+        ${doc.docType},
+        ${chunk},
+        ${metadata}::jsonb,
+        ${`[${vector.join(",")}]`}::vector,
+        ${doc.source},
+        'ACTIVE'
+      )
     `);
   }
   return chunks.length;
@@ -230,7 +238,7 @@ async function main(): Promise<void> {
     dryRun,
   });
 
-  console.log(`${dryRun ? "[dry run] " : ""}Claude work → brain.turicks_brain`);
+  console.log(`${dryRun ? "[dry run] " : ""}Claude work → brain.brain_memories`);
   console.log(`  documents scanned : ${report.scanned}`);
   console.log(`  unchanged, skipped: ${report.skipped}`);
   console.log(`  ${dryRun ? "would ingest      " : "ingested          "}: ${dryRun ? report.scanned - report.skipped : report.ingested}`);
