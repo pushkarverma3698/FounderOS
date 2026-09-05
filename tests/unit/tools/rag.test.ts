@@ -231,12 +231,14 @@ describe("searchTuricksBrainTool", () => {
     expect(result.data).toContain("ADR-001.md");
   });
 
-  it("calls searchRagTable with 'turicks_brain' table and correct top_k", async () => {
+  it("calls searchRagTable with the 'brain_memories' table and correct top_k", async () => {
+    // The tool keeps its name (golden sets key on it) but the store moved under
+    // it in ADR-038. See tests/unit/db/brain-store-parity.
     mockSuccess([]);
     await searchTuricksBrainTool.execute({ query: "ICP strategy", top_k: 2 });
 
     expect(mockSearchRagTable).toHaveBeenCalledOnce();
-    expect(mockSearchRagTable.mock.calls[0]![0]).toBe("turicks_brain");
+    expect(mockSearchRagTable.mock.calls[0]![0]).toBe("brain_memories");
     expect(mockSearchRagTable.mock.calls[0]![2]).toBe(2);
   });
 
