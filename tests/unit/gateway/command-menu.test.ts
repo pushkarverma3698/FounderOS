@@ -19,6 +19,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { COMMAND_MENU, buildCommandsHelp } from "../../../src/gateway/command-menu.js";
+import { TELEGRAM_MAX_CHARS } from "../../../src/tools/jobhunt/telegram-format.js";
 
 /** The commands actually wired up, read from the transport file itself. */
 function registeredCommands(): string[] {
@@ -81,7 +82,7 @@ describe("COMMAND_MENU — agrees with what the bot actually answers", () => {
 
 describe("buildCommandsHelp — the same list, rendered for chat", () => {
   it("names every command in the menu", () => {
-    const help = buildCommandsHelp();
+    const help = buildCommandsHelp().join("\n");
     for (const entry of COMMAND_MENU) {
       expect(help).toContain(`/${entry.command}`);
     }
@@ -89,12 +90,40 @@ describe("buildCommandsHelp — the same list, rendered for chat", () => {
 
   it("escapes placeholders so Telegram does not read them as tags", () => {
     // "/draft <n>" sent as HTML is the exact defect that killed /jobs.
-    const help = buildCommandsHelp();
+    const help = buildCommandsHelp().join("\n");
     expect(help).not.toMatch(/<n>/);
     expect(help).toContain("&lt;n&gt;");
   });
 
   it("tells him the menu button exists — otherwise he still has to remember", () => {
-    expect(buildCommandsHelp()).toMatch(/menu/i);
+    expect(buildCommandsHelp().join("\n")).toMatch(/menu/i);
+  });
+
+  it("sends a handful of messages, not one per command", () => {
+    // handleCommands awaits these in a tight loop and this bot registers no
+    // throttler and no auto-retry, so the count IS the flood risk. The first
+    // split rendered one message per command: 19 sends for 2,258 characters,
+    // two of them a bare section heading.
+    const parts = buildCommandsHelp();
+    expect(parts.length).toBeLessThanOrEqual(4);
+    expect(parts.length).toBeGreaterThan(1);
+  });
+
+  it("keeps every message inside Telegram's hard character cap", () => {
+    // A section that outgrows 4,096 is rejected whole — the founder gets an
+    // error instead of the half of the list that would have fitted.
+    for (const part of buildCommandsHelp()) {
+      expect(part.length).toBeLessThan(TELEGRAM_MAX_CHARS);
+      expect(part.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it("pairs each job command with its wife_ counterpart in the same message", () => {
+    // They are the same action against two candidates. Splitting them across
+    // messages is what made the paired list unreadable.
+    const [jobsMessage] = buildCommandsHelp();
+    for (const entry of COMMAND_MENU.filter((e) => e.group === "jobs")) {
+      expect(jobsMessage).toContain(`/${entry.command}`);
+    }
   });
 });

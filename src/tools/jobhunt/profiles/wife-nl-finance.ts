@@ -28,6 +28,8 @@
 
 import type { JobSearchProfile } from "../profile-config.js";
 
+const WIFE_CV_PATH = process.env["WIFE_CV_PATH"] ?? "/opt/founderos-data/cv/cv-wife-base.md";
+
 export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
   id: "wife-nl-finance",
   tenantId: "turicks",
@@ -96,7 +98,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
     fpa: {
       id: "fpa",
       name: "FP&A / Business Controlling",
-      cvPath: "/opt/founderos-data/cv/cv-wife-base.md",
+      cvPath: WIFE_CV_PATH,
       // Her current role (HBS: management reporting, business case modelling,
       // FTE/headcount planning, Power BI dashboards) and the CV's own title.
       // Strongest direct fit — live experience, not just coursework.
@@ -148,7 +150,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
     "finance-ops": {
       id: "finance-ops",
       name: "Finance Operations (RTR / OTC / PTP) / Credit / Tax & Treasury",
-      cvPath: "/opt/founderos-data/cv/cv-wife-base.md",
+      cvPath: WIFE_CV_PATH,
       // Founder-supplied list, 2026-09-04. Distinct shared-services discipline
       // from FP&A, and a strong fit on her CURRENT role: HBS Finance Business
       // Services is exactly RTR/OTC/PTP-adjacent territory. Researched against
@@ -197,7 +199,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
     "compliance-kyc": {
       id: "compliance-kyc",
       name: "Regulatory Compliance / KYC-AML",
-      cvPath: "/opt/founderos-data/cv/cv-wife-base.md",
+      cvPath: WIFE_CV_PATH,
       // 22 months across two roles at TIDE — her second-strongest direct fit,
       // and a distinct job market from FP&A, not a subset of "auditor".
       titles: [
@@ -227,7 +229,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
     auditor: {
       id: "auditor",
       name: "Auditor / Internal Controls",
-      cvPath: "/opt/founderos-data/cv/cv-wife-base.md",
+      cvPath: WIFE_CV_PATH,
       // Matches her MSc major (Auditing) rather than direct work history —
       // ranked below fpa and compliance-kyc for that reason.
       titles: [
@@ -263,7 +265,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
     accountant: {
       id: "accountant",
       name: "Accountant / General Ledger",
-      cvPath: "/opt/founderos-data/cv/cv-wife-base.md",
+      cvPath: WIFE_CV_PATH,
       // Weakest direct fit — no dedicated bookkeeping role on her CV, only
       // IFRS/statutory-reporting exposure via HBS and coursework. Kept as the
       // widest net, lowest priority.
@@ -287,5 +289,5 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
 
   trackPriority: ["fpa", "finance-ops", "compliance-kyc", "auditor", "accountant"],
   skillsDictionaryName: "finance",
-  baseCvPath: "/opt/founderos-data/cv/cv-wife-base.md",
+  baseCvPath: WIFE_CV_PATH,
 };

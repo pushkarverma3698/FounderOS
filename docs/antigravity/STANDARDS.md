@@ -216,3 +216,7 @@ already read the failing state. The review described a tree that no longer exist
 
 Corollary — **you are done when you stop writing, not when you say so.** Do not touch the working
 tree after your close-out report. A reviewer may already be reading it.
+
+## 14. Service Verification (OmniRouter & External Services)
+Whenever diagnosing HTTP status errors (like 429, 404, or 503) from a local gateway or service such as OmniRouter, **you must explicitly verify that the service process itself is running and listening on its expected port (e.g., `curl -s http://127.0.0.1:20128/health` or `lsof -i :20128`) before confirming the diagnosis.**
+Do not assume that an HTTP 429 indicates the service is down; an active HTTP response means the service is alive but upstream credentials/rate limits are exhausted. Always check the service health locally before concluding why errors are occurring.

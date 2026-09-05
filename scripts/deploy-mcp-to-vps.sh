@@ -87,8 +87,8 @@ mkdir -p /root/.claude
 echo "Setting up environment file permissions..."
 chmod 600 /root/.founderos/vps-env.sh
 
-echo "Installing global MCP dependencies..."
-npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-github 2>/dev/null || true
+echo "Installing global MCP and CLI dependencies..."
+npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-github opencode-ai 2>/dev/null || true
 
 echo "✅ VPS configuration complete!"
 echo ""

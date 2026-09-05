@@ -45,8 +45,8 @@ export async function inspectRagHealth(): Promise<RagHealthResult> {
   try {
     const res = await db.execute(sql`
       SELECT
-        (SELECT count(*) FROM brain.turicks_brain)::int AS total_chunks,
-        (SELECT count(*) FROM brain.turicks_brain WHERE embedding IS NULL)::int AS null_embeddings,
+        (SELECT count(*) FROM brain.brain_memories)::int AS total_chunks,
+        (SELECT count(*) FROM brain.brain_memories WHERE embedding IS NULL)::int AS null_embeddings,
         (SELECT count(*) FROM brain.knowledge_entries WHERE embedding IS NULL)::int AS unindexed_entries;
     `);
 
@@ -101,7 +101,7 @@ export function renderRagReport(result: RagHealthResult): string {
     return [
       title,
       ``,
-      `⚠️ <b>The vector store is EMPTY</b> — 0 chunks in <code>brain.turicks_brain</code>.`,
+      `⚠️ <b>The vector store is EMPTY</b> — 0 chunks in <code>brain.brain_memories</code>.`,
       `Nothing can be retrieved. This is a failure of ingestion, not of coverage.`,
       ``,
       `<i>Run <code>pnpm brain:sync</code> to populate it.</i>`,

@@ -1,8 +1,9 @@
 /**
  * FounderOS — Knowledge Search Tool (turicks-brain)
  * ===================================================
- * Search over `turicks_brain` — the pgvector-backed knowledge base synced via
- * `pnpm brain:sync`. Delegates to the same hybrid (vector ⊕ keyword, RRF-fused)
+ * Search over `brain_memories` — the pgvector-backed knowledge base synced via
+ * `pnpm brain:sync` (ADR-038; the store was `turicks_brain` until 0038 carried
+ * the corpus across). Delegates to the same hybrid (vector ⊕ keyword, RRF-fused)
  * engine as search_turicks_brain (src/db/rag-query.ts) — both tools query the
  * identical table through the identical engine; this tool adds an entry_type
  * filter, the other adds a wider top_k.
@@ -34,11 +35,11 @@ const TOP_K = 5;
 
 export const searchKnowledge = tool(
   async ({ query, entry_type }) =>
-    withToolErrorBoundary("db", "query turicks_brain (hybrid) in Postgres", async () => {
+    withToolErrorBoundary("db", "query brain_memories (hybrid) in Postgres", async () => {
       log.debug({ query, entry_type }, "Knowledge search");
 
       let result = await runRagSearch(
-        "turicks_brain",
+        "brain_memories",
         query,
         TOP_K,
         entry_type ? { filter: { entry_type } } : undefined,
@@ -51,7 +52,7 @@ export const searchKnowledge = tool(
       // fabricated Turicks ICP). If the filtered search comes back empty, retry
       // unfiltered before reporting nothing found — real content over a false miss.
       if (entry_type && !("error" in result) && result.hits.length === 0) {
-        const unfiltered = await runRagSearch("turicks_brain", query, TOP_K);
+        const unfiltered = await runRagSearch("brain_memories", query, TOP_K);
         if (!("error" in unfiltered)) result = unfiltered;
       }
 
