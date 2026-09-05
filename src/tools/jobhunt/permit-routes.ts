@@ -295,7 +295,7 @@ export function basesForPosting(route: PostingRoute, profile: JobSearchProfile =
             ["india-local"]
           : UNCLEAR_BASES;
 
-  const live = candidates.filter((b) => isLiveBasis(b, profile));
+  const live = (profile.permitBases as PermitBasis[]).filter((b) => candidates.includes(b));
   if (live.length > 0) return live;
 
   // A DEFINITE route (the fetcher established the market — hsm/india/remote)

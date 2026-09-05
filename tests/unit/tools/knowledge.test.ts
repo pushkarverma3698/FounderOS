@@ -75,12 +75,16 @@ beforeEach(() => {
 // ── Delegation + filter shape ──────────────────────────────────────────────────
 
 describe("searchKnowledge — delegates to the hybrid engine", () => {
-  it("queries the turicks_brain table", async () => {
+  it("queries the brain_memories table — the one brain:sync writes", async () => {
+    // Was pinned to turicks_brain, and stayed green while ADR-038 moved the
+    // writer to brain_memories and left this reader behind. A table name pinned
+    // on the reader alone cannot catch that; tests/unit/db/brain-store-parity
+    // asserts the two agree.
     mockSuccess([makeHit()]);
     await searchKnowledge.invoke({ query: "composio" });
 
     expect(mockVector).toHaveBeenCalledOnce();
-    expect(mockVector.mock.calls[0]![0]).toBe("turicks_brain");
+    expect(mockVector.mock.calls[0]![0]).toBe("brain_memories");
   });
 
   it("embeds the exact query via the Redis-cached embedder", async () => {

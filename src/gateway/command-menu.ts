@@ -47,8 +47,18 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "jobs",
   },
   {
+    command: "wife_jobs",
+    description: "Rank your wife's queue now and show the shortlist",
+    group: "jobs",
+  },
+  {
     command: "csv",
     description: "Download the apply queue as a spreadsheet. /csv all for everything screened",
+    group: "jobs",
+  },
+  {
+    command: "wife_csv",
+    description: "Download your wife's apply queue as a spreadsheet. /wife_csv all for everything screened",
     group: "jobs",
   },
   {
@@ -60,8 +70,18 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "jobs",
   },
   {
+    command: "wife_draft",
+    description: "wife_draft n | wife_draft 1,3,5 | wife_draft all — tailor your wife's CV + cover letter and the apply link",
+    group: "jobs",
+  },
+  {
     command: "ask",
     description: "ask n — write the one question that unblocks row n",
+    group: "jobs",
+  },
+  {
+    command: "wife_ask",
+    description: "wife_ask n — write the one question that unblocks row n of your wife's queue",
     group: "jobs",
   },
   {
@@ -70,13 +90,28 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "jobs",
   },
   {
+    command: "wife_applied",
+    description: "wife_applied n — mark row n of your wife's queue applied and drop it off",
+    group: "jobs",
+  },
+  {
     command: "replied",
     description: "replied n — mark row n of your live applications as replied to",
     group: "jobs",
   },
   {
+    command: "wife_replied",
+    description: "wife_replied n — mark row n of your wife's live applications as replied to",
+    group: "jobs",
+  },
+  {
     command: "rejected",
     description: "rejected n — mark row n of your live applications as rejected",
+    group: "jobs",
+  },
+  {
+    command: "wife_rejected",
+    description: "wife_rejected n — mark row n of your wife's live applications as rejected",
     group: "jobs",
   },
   {
@@ -86,6 +121,11 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     // No angle brackets: this string is sent to Telegram's setMyCommands, which
     // takes plain text and does not parse HTML (see command-menu.test.ts).
     description: "What every application form gets filled from. profile set phone +31… changes one field",
+    group: "jobs",
+  },
+  {
+    command: "wife_profile",
+    description: "What your wife's application forms get filled from. wife_profile set phone +31… changes one field",
     group: "jobs",
   },
   // ── System ────────────────────────────────────────────────────────────────
@@ -105,32 +145,50 @@ export function telegramCommandPayload(): { command: string; description: string
 }
 
 /**
- * The `/commands` message.
+ * The `/commands` message sequence — ONE message per section, in send order.
  *
  * Rendered from the same array so the chat text cannot drift from the menu.
  * Descriptions are escaped on the way in — they are plain text by contract, and
  * an unescaped "&" or "<" here would cost the whole message (see
  * `escapeStrayAngles`). Placeholders are re-rendered as "&lt;n&gt;" so they read
  * as placeholders rather than as literal argument names.
+ *
+ * Sections, not commands. One message per command reads well in a mockup and
+ * badly in a chat: it was 19 messages for 2,258 characters, four of them under
+ * 60, two of them a bare section heading. `handleCommands` awaits them in a
+ * tight loop and this bot registers no throttler or auto-retry, so a burst that
+ * size is also the shape Telegram answers with 429 — a help command that
+ * half-sends and then throws. Three messages keep the per-command formatting
+ * and stay far inside TELEGRAM_MAX_CHARS (largest section ≈ 1.6k of 4,096).
  */
-export function buildCommandsHelp(): string {
-  const render = (group: MenuCommand["group"]): string[] =>
-    COMMAND_MENU.filter((entry) => entry.group === group).map((entry) => {
-      const detail = esc(entry.description).replace(
-        new RegExp(`^${entry.command} n —`),
-        "&lt;n&gt; —",
-      );
-      return `/${entry.command} ${detail.startsWith("&lt;n&gt;") ? detail : `— ${detail}`}`;
+export function buildCommandsHelp(): string[] {
+  const formatDetail = (entry: MenuCommand): string =>
+    esc(entry.description).replace(new RegExp(`^${entry.command} n —`), "&lt;n&gt; —");
+
+  const jobs = COMMAND_MENU.filter((e) => e.group === "jobs");
+  const system = COMMAND_MENU.filter((e) => e.group === "system");
+
+  // His command and its wife_ counterpart belong in one block — they are the
+  // same action against two candidates, and separating them is what made the
+  // paired list unreadable in the first place.
+  const jobLines = jobs
+    .filter((e) => !e.command.startsWith("wife_"))
+    .map((entry) => {
+      const partner = jobs.find((e) => e.command === `wife_${entry.command}`);
+      const own = `🔹 <b>/${entry.command}</b>\n<i>${formatDetail(entry)}</i>`;
+      return partner ? `${own}\n🔸 <b>/${partner.command}</b>\n<i>${formatDetail(partner)}</i>` : own;
     });
 
-  return [
-    "<b>Jobs — the daily loop</b>",
-    ...render("jobs"),
-    "",
-    "<b>System</b>",
-    ...render("system"),
-    "",
-    "All of these are in the ☰ menu button next to the message box, so you never have to remember them.",
-    "Everything else is natural language — the planner routes it.",
-  ].join("\n");
+  // Any wife_ command whose base is missing would otherwise vanish silently.
+  const orphans = jobs
+    .filter((e) => e.command.startsWith("wife_") && !jobs.some((b) => `wife_${b.command}` === e.command))
+    .map((entry) => `🔸 <b>/${entry.command}</b>\n<i>${formatDetail(entry)}</i>`);
+
+  const parts: string[] = [
+    ["<b>Jobs — the daily loop</b>", ...jobLines, ...orphans].join("\n\n"),
+    ["<b>System</b>", ...system.map((e) => `⚙️ <b>/${e.command}</b>\n<i>${formatDetail(e)}</i>`)].join("\n\n"),
+    "💡 All of these are in the ☰ menu button next to the message box, so you never have to remember them.\n\nEverything else is natural language — the planner routes it.",
+  ];
+
+  return parts;
 }

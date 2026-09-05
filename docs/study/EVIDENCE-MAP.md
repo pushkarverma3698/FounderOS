@@ -24,7 +24,7 @@ Read this as a hiring manager would: **can the candidate point at the thing, and
 |---|---|---|---|
 | **Agents / agentic systems** | 61.0% | ✅ | 8 typed workers behind one orchestration path; `src/kernel/graph.ts`, `contracts.ts`. Not a chat loop — a `Plan` is Zod-validated data dispatched by **pure code**, not an LLM supervisor |
 | **LLM integration** | 59.3% | ✅ | Injected models, 8 distinct providers used in prod (`agents.ai_call_costs`), temp 0, typed error taxonomy in `src/agents/model.ts` |
-| **System design / architecture** | 53.7% | ✅ | 50 ADRs in `docs/decisions/`; three rewrites documented with the autopsy that forced each (`ZERO-BASE-AUDIT.md`) |
+| **System design / architecture** | 53.7% | ✅ | 51 ADRs in `docs/decisions/`; three rewrites documented with the autopsy that forced each (`ZERO-BASE-AUDIT.md`) |
 | **Scalability** | 45.2% | 🟡 | 1,297 ATS boards polled, 890 ingest runs/month, single-VPS. Horizontal scale is **not** demonstrated |
 | **REST / API design** | 43.5% | ✅ | MCP server surface (`src/mcp/`), health API, Telegram gateway; 51 tool modules behind one `ToolResult` envelope |
 | **Production systems** | 39.5% | ✅ | Live on a VPS since 2026-06; systemd + Docker + GitHub Actions CD; `docs/guides/DEPLOYMENT.md` |

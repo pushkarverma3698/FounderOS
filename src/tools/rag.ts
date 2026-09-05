@@ -8,7 +8,7 @@
  *   searchPersonalRagTool     — searches personal_rag (pgvector table).
  *                               Career, CV, background, skills, payslips, certs.
  *
- *   searchTuricksBrainTool    — searches turicks_brain (pgvector table).
+ *   searchTuricksBrainTool    — searches brain_memories (pgvector table, ADR-038).
  *                               Business decisions, strategy, ADRs, chats, notes.
  *                               search_knowledge (src/tools/knowledge.ts) hits
  *                               the same table through the same engine.
@@ -116,7 +116,7 @@ export const searchTuricksBrainTool: UnifiedTool = {
     }
     const topK = Math.min(Math.max(Number(args["top_k"] ?? 5), 1), 10);
 
-    const result = await runRagSearch("turicks_brain", query, topK);
+    const result = await runRagSearch("brain_memories", query, topK);
 
     if ("error" in result) {
       return { success: false, error: ragErrorMessage("turicks-brain", result.error) };

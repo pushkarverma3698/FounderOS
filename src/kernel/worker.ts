@@ -39,7 +39,7 @@ import {
   type ToolReceipt,
   type WorkerId,
 } from "./contracts.js";
-import { finalizeNudge, workerProtocol } from "./worker-protocol.js";
+import { finalizeNudge, workerProtocol, resolveWorkerPrompt } from "./worker-protocol.js";
 import type { KernelStateType, KernelUpdate } from "./state.js";
 import type { KernelChatModel } from "./planner.js";
 import { messageContentText } from "./message-text.js";
@@ -63,7 +63,7 @@ export interface WorkerSpec {
   id: WorkerId;
   description: string;
   prompt: string;
-  tools: KernelTool[];
+  tools: KernelTool[]; promptForProfile?: (profileId: string) => string; // per-turn override — see worker-protocol.ts
 }
 
 /**
@@ -118,7 +118,7 @@ export function turnReceipts(state: KernelStateType): ToolReceipt[] {
 
 /** LLM node: one model turn for the active step. */
 export function makeAgentNode(model: KernelBindableModel, specs: Record<string, WorkerSpec>) {
-  return async function agent(state: KernelStateType): Promise<KernelUpdate> {
+  return async function agent(state: KernelStateType, config?: RunnableConfig): Promise<KernelUpdate> {
     const step = currentStep(state);
     const spec = specs[step.worker];
     if (!spec) {
@@ -143,7 +143,7 @@ export function makeAgentNode(model: KernelBindableModel, specs: Record<string, 
 
     const scratch = state.scratch[step.step_id] ?? [];
     const remaining = Math.max(0, step.constraints.max_tool_calls - executedToolCalls(scratch));
-    const system = new SystemMessage(spec.prompt + workerProtocol(step, remaining));
+    const system = new SystemMessage(resolveWorkerPrompt(spec, config) + workerProtocol(step, remaining));
     const bindable = remaining > 0 && spec.tools.length > 0 && model.bindTools
       ? model.bindTools(spec.tools)
       : model;

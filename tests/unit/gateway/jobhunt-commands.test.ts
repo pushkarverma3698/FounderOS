@@ -325,3 +325,57 @@ describe("handleDraft (resolution path)", () => {
     expect(String(replyArg2)).toContain("Usage:");
   });
 });
+
+describe("handleAsk (resolution path)", () => {
+  beforeEach(() => vi.resetModules());
+
+  // T4, 2026-09-05: /ask never resolved a profile at all before this — it
+  // always read Pushkar's brief regardless of what was typed, unlike /draft
+  // which already honored "wife". This closed that gap.
+  it("resolves the named profile's brief, not always the default", async () => {
+    const getApplicationByBriefRank = vi.fn(async (_section: string, _rank: number, opts: { profileId?: string }) =>
+      opts.profileId === "wife-nl-finance" ? ROW : null,
+    );
+    vi.doMock("../../../src/db/job-queries.js", () => ({ getApplicationByBriefRank }));
+    const { handleAsk } = await import("../../../src/gateway/jobhunt-commands.js");
+    const runKernelText = vi.fn(async () => undefined);
+    const reply = vi.fn(async () => undefined);
+
+    await handleAsk({ match: "wife 1", reply } as never, { runKernelText });
+
+    expect(getApplicationByBriefRank).toHaveBeenCalledWith(
+      "ask",
+      1,
+      expect.objectContaining({ profileId: "wife-nl-finance" }),
+    );
+    expect(runKernelText).toHaveBeenCalledOnce();
+  });
+
+  it("bare /ask still resolves the default profile's brief", async () => {
+    const getApplicationByBriefRank = vi.fn(async () => ROW);
+    vi.doMock("../../../src/db/job-queries.js", () => ({ getApplicationByBriefRank }));
+    const { handleAsk } = await import("../../../src/gateway/jobhunt-commands.js");
+    const reply = vi.fn(async () => undefined);
+
+    await handleAsk({ match: "1", reply } as never, { runKernelText: vi.fn(async () => undefined) });
+
+    expect(getApplicationByBriefRank).toHaveBeenCalledWith(
+      "ask",
+      1,
+      expect.objectContaining({ profileId: "pushkar-nl-tech" }),
+    );
+  });
+
+  it("refuses an unrecognised profile word rather than guessing whose row it means", async () => {
+    const getApplicationByBriefRank = vi.fn();
+    vi.doMock("../../../src/db/job-queries.js", () => ({ getApplicationByBriefRank }));
+    const { handleAsk } = await import("../../../src/gateway/jobhunt-commands.js");
+    const reply = vi.fn(async () => undefined);
+
+    await handleAsk({ match: "bogus 1", reply } as never, { runKernelText: vi.fn(async () => undefined) });
+
+    expect(getApplicationByBriefRank).not.toHaveBeenCalled();
+    const [replyArg] = (reply.mock.calls[0] ?? []) as [unknown?];
+    expect(String(replyArg)).toContain("bogus");
+  });
+});

@@ -219,20 +219,31 @@ export async function updateApplicationStage(
 /**
  * The Monday pipeline review: live applications, stalest contact first, so the
  * ones that have gone silent longest surface at the top.
+ *
+ * `profileId` is OPT-IN: omitting it keeps the pre-2026-09-05 behavior (every
+ * profile in the tenant, merged) for callers that were never scoped to begin
+ * with — `pipeline-followup.ts`'s digest is the one still relying on that.
+ * `/replied` and `/rejected` (live-application-commands.ts) pass it explicitly
+ * now, because a merged, interleaved list numbered "row N" made those two
+ * commands able to mark the wrong candidate's application — the same failure
+ * `profileCondition` exists to prevent everywhere else it's used.
  */
 export async function listLiveApplications(
-  opts: { limit?: number; tenantId?: string } = {},
+  opts: { limit?: number; tenantId?: string; profileId?: ProfileScope } = {},
 ): Promise<JobApplication[]> {
   const db = getDb();
+  const conditions = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    inArray(jobApplications.stage, [...LIVE_STAGES]),
+  ];
+  if (opts.profileId !== undefined) {
+    const profileWhere = profileCondition(opts.profileId);
+    if (profileWhere) conditions.push(profileWhere);
+  }
   return db
     .select()
     .from(jobApplications)
-    .where(
-      and(
-        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
-        inArray(jobApplications.stage, [...LIVE_STAGES]),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(asc(jobApplications.last_contact_at))
     .limit(opts.limit ?? 50);
 }
@@ -249,26 +260,29 @@ export async function listLiveApplications(
  * a row with no stamped contact date has no reliable "days since" to measure.
  */
 export async function listFollowupCandidates(
-  opts: { tenantId?: string; now?: Date } = {},
+  opts: { tenantId?: string; now?: Date; profileId?: ProfileScope } = {},
 ): Promise<JobApplication[]> {
   const now = opts.now ?? new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
   const db = getDb();
+  const conditions = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    eq(jobApplications.stage, "applied"),
+    isNotNull(jobApplications.last_contact_at),
+    or(
+      and(eq(jobApplications.followups_sent, 0), lte(jobApplications.last_contact_at, sevenDaysAgo)),
+      and(eq(jobApplications.followups_sent, 1), lte(jobApplications.last_contact_at, fourteenDaysAgo)),
+    ),
+  ];
+  if (opts.profileId !== undefined) {
+    const profileWhere = profileCondition(opts.profileId);
+    if (profileWhere) conditions.push(profileWhere);
+  }
   return db
     .select()
     .from(jobApplications)
-    .where(
-      and(
-        eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
-        eq(jobApplications.stage, "applied"),
-        isNotNull(jobApplications.last_contact_at),
-        or(
-          and(eq(jobApplications.followups_sent, 0), lte(jobApplications.last_contact_at, sevenDaysAgo)),
-          and(eq(jobApplications.followups_sent, 1), lte(jobApplications.last_contact_at, fourteenDaysAgo)),
-        ),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(asc(jobApplications.last_contact_at));
 }
 

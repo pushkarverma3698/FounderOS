@@ -506,8 +506,8 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
 
   const sha = contentSha(entry.content);
   const counted = await db.execute(sql`
-    SELECT count(*)::int AS n FROM brain.turicks_brain
-    WHERE metadata->>'source_path' = ${entry.source}
+    SELECT count(*)::int AS n FROM brain.brain_memories
+    WHERE source = ${entry.source}
       AND metadata->>'content_sha' = ${sha}
   `);
   const matching = Number((counted[0] as { n: number | string } | undefined)?.n ?? 0);
@@ -519,7 +519,7 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
 
   // Remove prior chunks for this source (idempotent re-run).
   await db.execute(
-    sql`DELETE FROM brain.turicks_brain WHERE metadata->>'source_path' = ${entry.source}`,
+    sql`DELETE FROM brain.brain_memories WHERE source = ${entry.source}`,
   );
 
   for (let i = 0; i < chunks.length; i++) {
@@ -533,8 +533,17 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
       content_sha: sha,
     };
     await db.execute(sql`
-      INSERT INTO brain.turicks_brain (content, metadata, embedding)
-      VALUES (${chunks[i]!}, ${JSON.stringify(metadata)}::jsonb, ${toVector(embeddings[i]!)}::vector)
+      INSERT INTO brain.brain_memories (tenant_id, memory_type, content, metadata, embedding, source, source_id, status)
+      VALUES (
+        'turicks',
+        ${entry.entry_type},
+        ${chunks[i]!},
+        ${JSON.stringify(metadata)}::jsonb,
+        ${toVector(embeddings[i]!)}::vector,
+        ${entry.source},
+        ${contentSha(chunks[i]!)},
+        'ACTIVE'
+      )
     `);
   }
   return { chunks: chunks.length, refreshed: true };

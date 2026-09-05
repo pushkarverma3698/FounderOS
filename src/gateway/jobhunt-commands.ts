@@ -126,7 +126,7 @@ export function unresolvedMessage(command: string, rank: number | null): string 
 
 export interface JobhuntCommandDeps {
   /** The normal kernel turn — same path a typed message takes. */
-  readonly runKernelText: (ctx: Context, text: string) => Promise<void>;
+  readonly runKernelText: (ctx: Context, text: string, profileId?: string) => Promise<void>;
 }
 
 async function handleRowCommand(
@@ -136,20 +136,32 @@ async function handleRowCommand(
   compose: (row: JobApplication) => string,
   deps: JobhuntCommandDeps,
 ): Promise<void> {
-  const rank = parseRowArg(ctx.match?.toString() ?? "");
+  // Unlike /draft, this never resolved a profile — /ask always read
+  // Pushkar's brief regardless of what was typed. With a second profile
+  // registered, "wife" has to be honored here the same way /draft honors it.
+  const selected = resolveProfileArg(ctx.match?.toString() ?? "", [], (rest) => parseRowArg(rest) !== null);
+  if (isProfileArgMiss(selected)) {
+    await ctx.reply(profileMissMessage(selected));
+    return;
+  }
+
+  const rank = parseRowArg(selected.rest);
   if (rank === null) {
     await ctx.reply(unresolvedMessage(command, null));
     return;
   }
 
-  const row = await resolveBriefRow(rank, sections);
+  const row = await resolveBriefRow(rank, sections, selected.profile);
   if (!row) {
     await ctx.reply(unresolvedMessage(command, rank));
     return;
   }
 
-  log.info({ command, rank, company: row.company, id: row.id }, "Brief row command resolved");
-  await deps.runKernelText(ctx, compose(row));
+  log.info(
+    { command, rank, company: row.company, id: row.id, profile: selected.profile.id },
+    "Brief row command resolved",
+  );
+  await deps.runKernelText(ctx, compose(row), selected.profile.id);
 }
 
 /** The per-thread directory a tailored CV lands in before delivery. */
@@ -281,7 +293,10 @@ async function draftOneRow(
     return;
   }
 
-  log.info({ command: "draft", rank, company: row.company, id: row.id }, "Brief row command resolved");
+  log.info(
+    { command: "draft", rank, company: row.company, id: row.id, profile: profile.id },
+    "Brief row command resolved",
+  );
   await ctx.reply(`📝 ${progress}Tailoring your CV for ${row.company}… this takes 20–40s.`);
 
   const built = await buildApplicationPacket(row, artifactDirFor(ctx));
@@ -293,7 +308,11 @@ async function draftOneRow(
     await ctx.reply(
       `⚠ Couldn't build a tailored PDF for ${row.company} (${built.reason.slice(0, 200)}) — drafting a text application instead.`,
     );
-    await deps.runKernelText(ctx, draftInstruction(row));
+    // profile.id — not the default. Without it this kernel turn ran under the
+    // jobhunt worker's boot-time prompt, which always named the FIRST
+    // registered candidate: a fallback draft for the second candidate's row
+    // came back signed with the wrong person's name (2026-09-05, ING/Tashi).
+    await deps.runKernelText(ctx, draftInstruction(row), profile.id);
     return;
   }
 
@@ -305,6 +324,7 @@ async function draftOneRow(
     `Call the deliver_artifact tool now with path="${packet.pdfPath}" and caption="Tailored CV — ${row.company} — ${row.title}". ` +
       `Do not do anything else — do not read the file, do not summarize it, do not compose any other message. ` +
       `Just call that one tool with exactly those two arguments.`,
+    profile.id,
   );
 
   // AFTER the delivery turn, not before: this message carries the apply link and

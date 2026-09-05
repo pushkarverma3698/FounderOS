@@ -7,7 +7,20 @@
  */
 
 import { HumanMessage } from "@langchain/core/messages";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import { getSchemaTemplate, type TaskEnvelope } from "./contracts.js";
+import type { WorkerSpec } from "./worker.js";
+
+/**
+ * Per-turn override for `configurable.profile_id` (WorkerSpec.promptForProfile)
+ * — `spec.prompt` is baked in at kernel boot and reused forever (rule #2), so
+ * a department whose prompt names one candidate needs this to correctly
+ * address a second one within a single turn. Only jobhunt sets it today.
+ */
+export function resolveWorkerPrompt(spec: WorkerSpec, config?: RunnableConfig): string {
+  const profileId = config?.configurable?.["profile_id"] as string | undefined;
+  return profileId && spec.promptForProfile ? spec.promptForProfile(profileId) : spec.prompt;
+}
 
 /** Terminal-turn nudge (transient; never stored) forcing a JSON finalize from the tool results already gathered. */
 export function finalizeNudge(step: TaskEnvelope): HumanMessage {
