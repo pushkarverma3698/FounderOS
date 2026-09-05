@@ -15,13 +15,18 @@ In this engineering session, Antigravity executed several critical bug fixes acr
    - Wrapped `runFollowupSweep()` inside `src/tools/jobhunt/pipeline-followup.ts` with a `listProfiles()` loop so follow-up nudges are isolated per candidate profile instead of indiscriminately grouped.
    - Updated test mocks in `tests/unit/jobhunt/pipeline-followup.test.ts` using `mockResolvedValueOnce()` to avoid artificially bloating candidate sweep metrics during the isolated profile looping.
 
-2. **Multi-Profile Isolation & Permit Bug Fix**:
+2. **Job Pipeline UX (Sweep Heartbeat Disambiguation)**:
+   - Updated `afterQuietSweep` and `formatAlivePing` in `src/tools/jobhunt/sweep-heartbeat.ts` to accept a candidate profile object.
+   - Pings like "✅ Job lane alive" and "⚠ Job lane funnel alert" now correctly suffix the candidate's name (e.g. `✅ Job lane alive for Wife`), preventing Telegram from deduplicating identical messages when both candidate sweeps return 0 new roles and ensuring the founder knows which job lane reported in.
+   - Wired the `profile` object through `src/tools/jobhunt/sweep-runner.ts` during the 30-minute cron sweep.
+
+3. **Multi-Profile Isolation & Permit Bug Fix**:
    - Removed `zoekjaar` from the `UNCLEAR_BASES` fallback list in `src/tools/jobhunt/permit-routes.ts`. This strictly enforces the comment directive that orientation-year permits must not be applied to un-located postings, fixing the bug where remote/ambiguous jobs mistakenly assumed Dutch residency permissions.
 
-3. **CV Path Local Dev Overrides (`wife-nl-finance.ts`)**:
+4. **CV Path Local Dev Overrides (`wife-nl-finance.ts`)**:
    - Reverted a hardcoded test-only path check that was breaking `brief-cv-profile-isolation.test.ts`. Replaced it with a safe `process.env["WIFE_CV_PATH"]` fallback. This safely allows local dev overrides while ensuring the production default (`/opt/founderos-data/cv/...`) passes unit isolation tests without crashing.
 
-4. **Missing Database Migration Parity**:
+5. **Missing Database Migration Parity**:
    - The `brain.brain_memories` table was present in `schema.ts` but lacked its `0037_brain_memories.sql` migration, causing the `schema-migration-parity.test.ts` gate to fail.
    - Restored `0037_brain_memories.sql` and manually linked it into Drizzle's `drizzle/meta/_journal.json`.
    - Verified the migration using `pnpm db:migrate` and successfully executed a `pnpm brain:sync` to populate the new unified RAG memory system.
@@ -58,6 +63,8 @@ YOUR MANDATE:
 2. Conduct an adversarial code audit on the changes made to:
    - src/db/job-queries.ts
    - src/tools/jobhunt/pipeline-followup.ts
+   - src/tools/jobhunt/sweep-runner.ts
+   - src/tools/jobhunt/sweep-heartbeat.ts
    - src/tools/jobhunt/permit-routes.ts
    - src/tools/jobhunt/profiles/wife-nl-finance.ts
    - drizzle/0037_brain_memories.sql & drizzle/meta/_journal.json
