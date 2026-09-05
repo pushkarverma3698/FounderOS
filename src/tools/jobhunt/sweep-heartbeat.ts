@@ -74,18 +74,22 @@ export function afterQuietSweep(
   arg3?: Date | FreeFunnel | null,
   arg4?: Date | string | null,
   arg5?: string | null,
+  arg6?: { candidateName: string } | null,
 ): { readonly next: HeartbeatState; readonly ping: string | null } {
   let funnel: FreeFunnel | null = null;
   let currentNow: Date;
   let sheetLink: string | null = null;
+  let profile: { candidateName: string } | null = null;
 
   if (arg3 instanceof Date) {
     currentNow = arg3;
     sheetLink = (arg4 as string | null) ?? null;
+    profile = (arg5 as { candidateName: string } | null) ?? null;
   } else {
     funnel = arg3 ?? null;
     currentNow = (arg4 as Date) ?? new Date();
     sheetLink = arg5 ?? null;
+    profile = arg6 ?? null;
   }
 
   const zeroPass = funnel ? funnel.screened === 0 : true;
@@ -99,12 +103,14 @@ export function afterQuietSweep(
     lastFunnel: funnel ?? state.lastFunnel,
   };
 
+  const who = profile?.candidateName ? ` for ${esc(profile.candidateName)}` : "";
+
   // Zero-pass streak alert: if funnel drops 100% for N consecutive sweeps, raise alert once at threshold
   if (newStreak === ZERO_PASS_STREAK_THRESHOLD) {
     const top = topDropReason(funnel ?? state.lastFunnel);
     const dropClause = top ? ` (dominant drop stage: ${top.count} ${top.reason})` : "";
     const ping =
-      `⚠ <b>Job lane funnel alert</b> — 0 candidates passed for ${newStreak} consecutive sweeps` +
+      `⚠ <b>Job lane funnel alert${who}</b> — 0 candidates passed for ${newStreak} consecutive sweeps` +
       `${dropClause}. The funnel may be restricted or closed.`;
     return {
       next: { ...pending, lastMessageAt: currentNow.getTime() },
@@ -118,7 +124,7 @@ export function afterQuietSweep(
 
   return {
     next: initialHeartbeat(currentNow),
-    ping: formatAlivePing(pending, sheetLink),
+    ping: formatAlivePing(pending, sheetLink, profile),
   };
 }
 
@@ -132,12 +138,13 @@ export function afterSpokenSweep(now: Date): HeartbeatState {
 /**
  * The quiet-period ping.
  */
-export function formatAlivePing(state: HeartbeatState, sheetLink: string | null): string {
+export function formatAlivePing(state: HeartbeatState, sheetLink: string | null, profile?: { candidateName: string } | null): string {
   const sweeps = state.quietSweeps;
   const top = topDropReason(state.lastFunnel);
   const dropInfo = top ? ` Top drop reason: ${top.count.toLocaleString()} ${top.reason}.` : "";
+  const who = profile?.candidateName ? ` for ${esc(profile.candidateName)}` : "";
   return (
-    `✅ <b>Job lane alive</b> — ${sweeps} sweep${sweeps === 1 ? "" : "s"} since the last update, ` +
+    `✅ <b>Job lane alive${who}</b> — ${sweeps} sweep${sweeps === 1 ? "" : "s"} since the last update, ` +
     `${state.boardsPolled.toLocaleString()} board checks, nothing new that cleared screening.${dropInfo}` +
     (sheetLink ? `\n${sheetLink}` : "") +
     `\n${NEXT_STEP_LINE}`
