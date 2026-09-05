@@ -145,51 +145,50 @@ export function telegramCommandPayload(): { command: string; description: string
 }
 
 /**
- * The `/commands` message sequence.
+ * The `/commands` message sequence — ONE message per section, in send order.
  *
  * Rendered from the same array so the chat text cannot drift from the menu.
  * Descriptions are escaped on the way in — they are plain text by contract, and
  * an unescaped "&" or "<" here would cost the whole message (see
  * `escapeStrayAngles`). Placeholders are re-rendered as "&lt;n&gt;" so they read
  * as placeholders rather than as literal argument names.
+ *
+ * Sections, not commands. One message per command reads well in a mockup and
+ * badly in a chat: it was 19 messages for 2,258 characters, four of them under
+ * 60, two of them a bare section heading. `handleCommands` awaits them in a
+ * tight loop and this bot registers no throttler or auto-retry, so a burst that
+ * size is also the shape Telegram answers with 429 — a help command that
+ * half-sends and then throws. Three messages keep the per-command formatting
+ * and stay far inside TELEGRAM_MAX_CHARS (largest section ≈ 1.6k of 4,096).
  */
 export function buildCommandsHelp(): string[] {
-  const parts: string[] = [];
+  const formatDetail = (entry: MenuCommand): string =>
+    esc(entry.description).replace(new RegExp(`^${entry.command} n —`), "&lt;n&gt; —");
 
-  const formatDetail = (entry: MenuCommand) => {
-    const detail = esc(entry.description).replace(
-      new RegExp(`^${entry.command} n —`),
-      "&lt;n&gt; —",
-    );
-    return detail.startsWith("&lt;n&gt;") ? detail : `${detail}`;
-  };
+  const jobs = COMMAND_MENU.filter((e) => e.group === "jobs");
+  const system = COMMAND_MENU.filter((e) => e.group === "system");
 
-  parts.push("<b>Jobs — the daily loop</b>");
-  
-  const jobsCommands = COMMAND_MENU.filter((e) => e.group === "jobs");
-  for (let i = 0; i < jobsCommands.length; i += 2) {
-    const entry = jobsCommands[i] as MenuCommand;
-    const wifeEntry = jobsCommands[i + 1] as MenuCommand | undefined;
-    
-    let msg = `🔹 <b>/${entry.command}</b>\n<i>${formatDetail(entry)}</i>`;
-    if (wifeEntry && wifeEntry.command === `wife_${entry.command}`) {
-      msg += `\n\n🔸 <b>/${wifeEntry.command}</b>\n<i>${formatDetail(wifeEntry)}</i>`;
-    } else if (wifeEntry) {
-      // If the strict pairing is ever broken, process it as a single entry next loop.
-      i -= 1;
-    }
-    parts.push(msg);
-  }
+  // His command and its wife_ counterpart belong in one block — they are the
+  // same action against two candidates, and separating them is what made the
+  // paired list unreadable in the first place.
+  const jobLines = jobs
+    .filter((e) => !e.command.startsWith("wife_"))
+    .map((entry) => {
+      const partner = jobs.find((e) => e.command === `wife_${entry.command}`);
+      const own = `🔹 <b>/${entry.command}</b>\n<i>${formatDetail(entry)}</i>`;
+      return partner ? `${own}\n🔸 <b>/${partner.command}</b>\n<i>${formatDetail(partner)}</i>` : own;
+    });
 
-  parts.push("<b>System</b>");
-  const systemCommands = COMMAND_MENU.filter((e) => e.group === "system");
-  for (const entry of systemCommands) {
-    parts.push(`⚙️ <b>/${entry.command}</b>\n<i>${formatDetail(entry)}</i>`);
-  }
+  // Any wife_ command whose base is missing would otherwise vanish silently.
+  const orphans = jobs
+    .filter((e) => e.command.startsWith("wife_") && !jobs.some((b) => `wife_${b.command}` === e.command))
+    .map((entry) => `🔸 <b>/${entry.command}</b>\n<i>${formatDetail(entry)}</i>`);
 
-  parts.push(
-    "💡 All of these are in the ☰ menu button next to the message box, so you never have to remember them.\n\nEverything else is natural language — the planner routes it."
-  );
+  const parts: string[] = [
+    ["<b>Jobs — the daily loop</b>", ...jobLines, ...orphans].join("\n\n"),
+    ["<b>System</b>", ...system.map((e) => `⚙️ <b>/${e.command}</b>\n<i>${formatDetail(e)}</i>`)].join("\n\n"),
+    "💡 All of these are in the ☰ menu button next to the message box, so you never have to remember them.\n\nEverything else is natural language — the planner routes it.",
+  ];
 
   return parts;
 }
