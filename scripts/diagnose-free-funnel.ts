@@ -14,11 +14,24 @@
  *   pnpm tsx scripts/diagnose-free-funnel.ts            # all boards
  *   pnpm tsx scripts/diagnose-free-funnel.ts --boards 25
  *   pnpm tsx scripts/diagnose-free-funnel.ts --age 168   # widen the window
+ *   pnpm tsx scripts/diagnose-free-funnel.ts --profile wife-nl-finance
+ *
+ * It reports the BODY stage too (2026-09-06), because that is where prod was
+ * actually losing everything — see `reportBodyStage`.
  */
 
 import { getFreeBoards } from "../src/tools/jobhunt/free-boards.js";
-import { sweepBoards } from "../src/tools/jobhunt/free-ats-source.js";
-import { FREE_LANE_MAX_AGE_HOURS } from "../src/tools/jobhunt/free-ingest.js";
+import {
+  sweepBoards,
+  hydrateDescriptions,
+  type FreeCandidate,
+} from "../src/tools/jobhunt/free-ats-source.js";
+import { getProfile } from "../src/tools/jobhunt/profile-config.js";
+import {
+  FREE_LANE_MAX_AGE_HOURS,
+  filterCandidates,
+  bodylessCause,
+} from "../src/tools/jobhunt/free-ingest.js";
 import { classifyTrack } from "../src/tools/jobhunt/tracks.js";
 import { countryFromLocation } from "../src/tools/jobhunt/country.js";
 
@@ -29,6 +42,10 @@ function arg(flag: string): string | undefined {
 
 const boardLimit = Number(arg("--boards") ?? 0);
 const maxAgeHours = Number(arg("--age") ?? FREE_LANE_MAX_AGE_HOURS);
+const profileId = arg("--profile");
+
+/** Enough samples to spot a pattern, few enough to read in a terminal. */
+const BODY_SAMPLE_CAP = 12;
 
 function hoursSince(d: Date, now: Date): number {
   return (now.getTime() - d.getTime()) / 3_600_000;
@@ -126,6 +143,53 @@ async function main(): Promise<void> {
   console.log(
     `\nVERDICT: ${kept === 0 ? "FUNNEL CLOSED — nothing reaches screening." : `${kept} candidate(s) would reach dedupe.`}\n`,
   );
+
+  await reportBodyStage(sweep.candidates, now);
+}
+
+/**
+ * The stage the funnel above stops one step short of.
+ *
+ * On 2026-09-06 prod dropped 100% of its survivors here — 7 of 7 for one
+ * profile, 1 of 1 for the other, on every sweep for thirty hours — under a
+ * single count called `bodyless`, which conflates four different causes: the
+ * platform has no adapter, the adapter inlines bodies and the list payload had
+ * none, the detail fetch failed, or the employer really did post an empty body.
+ * Only the last is the market's fault. This prints which one it is, per
+ * platform, with URLs to open.
+ */
+async function reportBodyStage(candidates: readonly FreeCandidate[], now: Date): Promise<void> {
+  const profile = getProfile(profileId);
+  const filtered = filterCandidates(candidates, now, maxAgeHours, profile);
+  console.log(`BODY STAGE — profile ${profile.id} (${filtered.kept.length} kept by the filters)`);
+  if (filtered.kept.length === 0) return;
+
+  const hydrated = await hydrateDescriptions(filtered.kept);
+  const byCause = new Map<string, number>();
+  const samples: string[] = [];
+
+  for (const candidate of hydrated) {
+    const cause = hasBody(candidate) ? "ok" : bodylessCause(candidate);
+    const key = `${candidate.board.ats}/${cause}`;
+    byCause.set(key, (byCause.get(key) ?? 0) + 1);
+    if (cause !== "ok" && samples.length < BODY_SAMPLE_CAP) {
+      samples.push(`  ${cause.padEnd(14)} ${candidate.board.ats.padEnd(15)} ${candidate.url}`);
+    }
+  }
+
+  for (const [key, n] of [...byCause].sort((a, b) => b[1] - a[1])) {
+    console.log(`  ${key.padEnd(32)} ${String(n).padStart(5)}`);
+  }
+  if (samples.length > 0) {
+    console.log("\nBODYLESS SAMPLES (open one — is the posting really empty?)");
+    for (const s of samples) console.log(s);
+  }
+  console.log("");
+}
+
+/** The same predicate `runFreeIngest` drops on — kept identical on purpose. */
+function hasBody(candidate: FreeCandidate): boolean {
+  return candidate.description !== null && candidate.description.trim().length > 0;
 }
 
 main().catch((err) => {
