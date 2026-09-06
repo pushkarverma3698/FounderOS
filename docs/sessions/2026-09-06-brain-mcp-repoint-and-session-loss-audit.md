@@ -179,9 +179,20 @@ session had to do.
    at `b396416`. Antigravity was live in that tree during this session
    (`agy-guard` exit 1), so it was left alone. The brain MCP runs from this path,
    so until it returns to `main` the IDE brain runs pre-review code.
-4. **The local Postgres container is down**, so the repointed MCP is verified only
-   as far as a correct, legible connection error. End-to-end retrieval is unproven
-   on this laptop today — **NOT VERIFIED** for a real search result.
+4. **The local Postgres container is down**, so on this laptop the repointed MCP is
+   verified only as far as a correct, legible connection error — end-to-end
+   retrieval is **NOT VERIFIED here**. It *is* verified on prod, where Postgres and
+   Ollama are both up: after the deploy of `525db32`, `search_memory` over
+   `brain.brain_memories` returned a real scored hit —
+
+   ```
+   --- Result 1 (Score: 0.711) ---
+   Type: session | Source: docs/sessions/2026-09-05-branch-naming-and-instruction-audit.md
+   ```
+
+   which exercises the whole chain at once: Ollama embed → HNSW index → the
+   unified table #615 repointed → the backfill's coalesced metadata (`entry_type`
+   and `source_path` both populated) → the MCP tool. The laptop needs only Docker.
 5. Items 1, 3, 4 and 5 of the 2026-09-05 outstanding list (`opencode.ts` fork,
    `eval-brain.ts` measures no recall, `opencode-ai` installed on the VPS,
    `omni_router/` outside `docs/`) are untouched and still open.
