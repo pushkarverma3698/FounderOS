@@ -94,6 +94,18 @@ describe("brain store parity — the writers and the readers name the same table
     expect(tables).not.toContain("turicks_brain");
   });
 
+  it("the CI post-sync check counts the table brain:sync writes", () => {
+    // 2026-09-06: this was the one surface the parity contract did not cover, so
+    // it was the one that survived ADR-038. `brain-sync.yml` verified the sync by
+    // counting `brain.turicks_brain` — the table the writer had stopped touching.
+    // It printed a healthy "embedded rows: 1352" on a run that had just inserted
+    // into a store then holding 1372. A post-sync check that reads a frozen table
+    // cannot fail, whatever the sync did, which makes it worse than no check.
+    const workflow = read(".github/workflows/brain-sync.yml");
+    expect(sqlTables(workflow)).toContain("brain_memories");
+    expect(sqlTables(workflow)).not.toContain("turicks_brain");
+  });
+
   it("searchBrain defaults to the table brain:sync writes", () => {
     expect(read("src/db/rag-search.ts")).toContain(`opts.table ?? "brain_memories"`);
   });
