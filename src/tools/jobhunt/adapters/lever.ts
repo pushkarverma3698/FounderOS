@@ -1,4 +1,4 @@
-import { AtsAdapter, NormalizedJob, parsePostedAt } from "./types.js";
+import { AtsAdapter, NormalizedJob, parsePostedAt, decodeJobBody } from "./types.js";
 import { FreeBoard } from "../free-boards.js";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -15,6 +15,43 @@ function asId(value: unknown): string {
   if (typeof value === "string") return value.trim();
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return "";
+}
+
+/**
+ * Lever states a body in THREE different places and fills a different one per
+ * posting. All three are read, in decreasing order of how clean the text is.
+ *
+ * MEASURED LIVE, 2026-09-06, on the postings production was losing: extreme-
+ * networks served `descriptionPlain: ""` with a full HTML `description`;
+ * brillio-2 served both empty with the whole posting in `lists`, Lever's
+ * structured requirement blocks. Reading only `descriptionPlain` made every one
+ * of them arrive bodyless, and `runFreeIngest` drops a bodyless posting before
+ * it is screened — so this single omission was six of the seven postings that
+ * survived every other filter, on every sweep, for thirty hours.
+ *
+ * Returns null, never "", when the employer genuinely posted nothing: that is
+ * the one case the `bodyless` drop is actually for.
+ */
+function leverBody(job: Record<string, unknown>): string | null {
+  const plain = asText(job["descriptionPlain"]);
+  if (plain.length > 0) return plain;
+
+  const html = decodeJobBody(asText(job["description"]));
+  if (html.length > 0) return html;
+
+  const lists = Array.isArray(job["lists"]) ? job["lists"] : [];
+  const blocks = lists.flatMap((entry) => {
+    const list = asRecord(entry);
+    if (list === null) return [];
+    // The heading is kept: "Requirements" and "Benefits" are what tell the
+    // screening gates which bullets are demands and which are perks.
+    const heading = asText(list["text"]);
+    const content = decodeJobBody(asText(list["content"]));
+    if (content.length === 0) return [];
+    return [heading.length > 0 ? `${heading}\n${content}` : content];
+  });
+
+  return blocks.length > 0 ? blocks.join("\n\n") : null;
 }
 
 export const leverAdapter: AtsAdapter = {
@@ -51,7 +88,15 @@ export const leverAdapter: AtsAdapter = {
           url,
           location: asText(categories?.["location"]),
           postedAt: parsePostedAt(job["createdAt"]),
-          description: asText(job["descriptionPlain"]) || null,
+          // `descriptionPlain` FIRST, `description` SECOND — not either-or.
+          // Lever fills the plain field for most postings and leaves it EMPTY on
+          // a real share of them while serving the full body as HTML
+          // (measured live on extremenetworks and brillio-2, 2026-09-06).
+          // Reading only the plain field made those arrive bodyless, and
+          // `runFreeIngest` drops a bodyless posting before it is ever screened
+          // — six of the seven postings that survived every other filter in
+          // production, silently, on every sweep for thirty hours.
+          description: leverBody(job),
         },
       ];
     });

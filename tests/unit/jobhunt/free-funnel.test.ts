@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import { filterCandidates, type FreeFunnel } from "../../../src/tools/jobhunt/free-ingest.js";
-import { afterQuietSweep, ZERO_PASS_STREAK_THRESHOLD, topDropReason, type HeartbeatState } from "../../../src/tools/jobhunt/sweep-heartbeat.js";
+import { afterQuietSweep, ZERO_PASS_STREAK_THRESHOLD, funnelClosingStage, type HeartbeatState } from "../../../src/tools/jobhunt/sweep-heartbeat.js";
 import type { FreeCandidate } from "../../../src/tools/jobhunt/free-ats-source.js";
 import type { FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
@@ -45,8 +45,16 @@ describe("Phase 1 — filterCandidates structured counts", () => {
   });
 });
 
-describe("Phase 1 — topDropReason & zero-pass streak alert", () => {
-  it("identifies the dominant drop stage from funnel", () => {
+describe("Phase 1 — funnelClosingStage & zero-pass streak alert", () => {
+  // CHANGED 2026-09-06, from "the stage with the largest count" to "the stage
+  // that took the survivors to zero". The old rule reported `stale` on every
+  // real production funnel — it is the first filter and 53% of a 47,000-posting
+  // sweep is always older than the window — which reads exactly the same on a
+  // healthy day as during a total outage. The alert exists only to explain a
+  // CLOSED funnel, and the stage that closed it is the one the founder can act
+  // on. During the 2026-09-06 outage the old rule would have named 25,139 stale
+  // postings while the actual closer was 7 bodyless ones.
+  it("names the stage that took the survivors to zero, not the biggest one", () => {
     const funnel: FreeFunnel = {
       seen: 100,
       undated: 2,
@@ -58,8 +66,38 @@ describe("Phase 1 — topDropReason & zero-pass streak alert", () => {
       screened: 0,
     };
 
-    const top = topDropReason(funnel);
-    expect(top).toEqual({ reason: "stale age cutoff", count: 85 });
+    expect(funnelClosingStage(funnel)).toEqual({ reason: "outside target market", count: 3 });
+  });
+
+  it("names bodyless on the real production funnel that closed the lane", () => {
+    // Verbatim from agents.job_ingest_runs, 2026-09-06 09:01 UTC, wife-nl-finance.
+    const funnel: FreeFunnel = {
+      seen: 46991,
+      undated: 1476,
+      stale: 25139,
+      offTrack: 20005,
+      offMarket: 312,
+      known: 58,
+      bodyless: 1,
+      screened: 0,
+    };
+
+    expect(funnelClosingStage(funnel)).toEqual({ reason: "no body description", count: 1 });
+  });
+
+  it("returns null when the funnel is not closed", () => {
+    const funnel: FreeFunnel = {
+      seen: 100,
+      undated: 0,
+      stale: 90,
+      offTrack: 5,
+      offMarket: 0,
+      known: 0,
+      bodyless: 0,
+      screened: 5,
+    };
+
+    expect(funnelClosingStage(funnel)).toBeNull();
   });
 
   it("does not emit zero-pass streak alert at N-1 (5 sweeps)", () => {
@@ -83,7 +121,7 @@ describe("Phase 1 — topDropReason & zero-pass streak alert", () => {
     expect(state.zeroPassStreak).toBe(ZERO_PASS_STREAK_THRESHOLD - 1);
   });
 
-  it("emits zero-pass streak alert at N (6 sweeps) naming top drop reason", () => {
+  it("emits zero-pass streak alert at N (6 sweeps) naming the closing stage", () => {
     const funnel: FreeFunnel = {
       seen: 100,
       undated: 0,
@@ -99,8 +137,11 @@ describe("Phase 1 — topDropReason & zero-pass streak alert", () => {
     const res = afterQuietSweep(state, 10, funnel, NOW);
     expect(res.ping).not.toBeNull();
     expect(res.ping).toContain("Job lane funnel alert");
-    expect(res.ping).toContain("stale age cutoff");
-    expect(res.ping).toContain("95");
+    // The closer is off-track (5 survivors of 100 reached it and none got past),
+    // NOT the 95 stale postings that never had a chance of being screened.
+    expect(res.ping).toContain("off-track title");
+    expect(res.ping).toContain("5");
+    expect(res.ping).not.toContain("stale age cutoff");
   });
 });
 
