@@ -1,19 +1,31 @@
 // src/tools/b2b/rule-extractor.ts
 import type { SerperOrganicResult } from "./serper-client";
 
+export type TargetRole = "hr" | "leadership";
+
 const RECRUITER_KEYWORD_RE =
   /recruiter|talent acquisition|hr business partner|human resources|people operations|hiring manager/i;
 
-// Checked in order — first match wins. This lets you tell a Technical
-// Recruiter from a generic HR Manager when a company has both indexed,
-// instead of just noting "some title matched."
-export const TITLE_PRIORITY = [
+const LEADERSHIP_KEYWORD_RE =
+  /founder|co-founder|ceo|chief executive officer|owner|managing director|director/i;
+
+// Checked in order — first match wins.
+export const HR_TITLE_PRIORITY = [
   "technical recruiter",
   "talent acquisition",
   "recruiter",
   "hr business partner",
   "people operations",
   "human resources",
+];
+
+export const LEADERSHIP_TITLE_PRIORITY = [
+  "founder",
+  "co-founder",
+  "ceo",
+  "owner",
+  "managing director",
+  "director"
 ];
 
 export interface ExtractedCandidate {
@@ -39,9 +51,10 @@ export function parseNameFromUrl(url: string): string | null {
   return parts.map((p) => p[0].toUpperCase() + p.slice(1)).join(" ");
 }
 
-export function parseTitleFromText(title: string, snippet: string | undefined): string | null {
+export function parseTitleFromText(title: string, snippet: string | undefined, role: TargetRole): string | null {
   const combined = `${title} ${snippet ?? ""}`.toLowerCase();
-  return TITLE_PRIORITY.find((t) => combined.includes(t)) ?? null;
+  const priorityList = role === "hr" ? HR_TITLE_PRIORITY : LEADERSHIP_TITLE_PRIORITY;
+  return priorityList.find((t) => combined.includes(t)) ?? null;
 }
 
 export function companyMatches(text: string, cleanCompanyName: string): boolean {
@@ -52,7 +65,8 @@ export function companyMatches(text: string, cleanCompanyName: string): boolean 
 // is that they're fixed and auditable, not "the LLM felt 0.8 confident."
 export function scoreCandidate(
   result: SerperOrganicResult,
-  cleanCompanyName: string
+  cleanCompanyName: string,
+  role: TargetRole
 ): ExtractedCandidate | null {
   const name = parseNameFromUrl(result.link);
   if (!name) return null; // no name, no candidate
@@ -60,7 +74,7 @@ export function scoreCandidate(
   const evidence: string[] = ["name parsed from LinkedIn URL slug"];
   let confidence = 0.6;
 
-  const title = parseTitleFromText(result.title, result.snippet);
+  const title = parseTitleFromText(result.title, result.snippet, role);
   if (title) {
     confidence += 0.2;
     evidence.push(`title matched "${title}"`);
@@ -72,9 +86,10 @@ export function scoreCandidate(
     evidence.push(`company name "${cleanCompanyName}" found in result text`);
   }
 
-  if (RECRUITER_KEYWORD_RE.test(combinedText)) {
+  const keywordRe = role === "hr" ? RECRUITER_KEYWORD_RE : LEADERSHIP_KEYWORD_RE;
+  if (keywordRe.test(combinedText)) {
     confidence += 0.1;
-    evidence.push("recruiting-related keyword present");
+    evidence.push(`${role}-related keyword present`);
   }
 
   return {

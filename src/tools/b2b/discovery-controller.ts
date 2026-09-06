@@ -3,7 +3,7 @@ import { db } from "../../db/client";
 import { recruiterLeads } from "./schema";
 import { generateDorks } from "./dork-generator";
 import { serperSearch } from "./serper-client";
-import { scoreCandidate, type ExtractedCandidate } from "./rule-extractor";
+import { scoreCandidate, type ExtractedCandidate, type TargetRole } from "./rule-extractor";
 import { extractAmbiguousBatch, type AmbiguousItem } from "./llm-batch-extractor";
 
 const ACCEPT_THRESHOLD = 0.85;
@@ -22,39 +22,46 @@ async function resolveCompany(
   cleanCompanyName: string,
   ambiguousOut: PendingAmbiguous[]
 ): Promise<ExtractedCandidate | null> {
-  const dorks = generateDorks(cleanCompanyName);
   const seenByUrl = new Map<string, ExtractedCandidate>();
+  
+  // Two-pass cascade: try HR first, if that fails, try Leadership
+  const rolesToTry: TargetRole[] = ["hr", "leadership"];
+  
+  for (const role of rolesToTry) {
+    const dorks = generateDorks(cleanCompanyName, role);
 
-  for (const dork of dorks) {
-    const response = await serperSearch(dork);
-    const organic = response.organic ?? [];
-    if (organic.length === 0) continue; // this dork was empty — the next, looser template takes over
+    for (const dork of dorks) {
+      const response = await serperSearch(dork);
+      const organic = response.organic ?? [];
+      if (organic.length === 0) continue; // this dork was empty — the next, looser template takes over
 
-    for (const result of organic) {
-      const candidate = scoreCandidate(result, cleanCompanyName);
-      if (!candidate) continue;
+      for (const result of organic) {
+        const candidate = scoreCandidate(result, cleanCompanyName, role);
+        if (!candidate) continue;
 
-      const existing = seenByUrl.get(candidate.linkedinUrl);
-      if (existing) {
-        // The same person surfaced via a second, independent dork — that
-        // agreement is itself evidence (this is the "+0.1 if multiple
-        // results agree" signal from the original brainstorm).
-        existing.confidence = Math.min(existing.confidence + 0.1, 1.0);
-        existing.evidence.push("confirmed by a second, independent search query");
-      } else {
-        seenByUrl.set(candidate.linkedinUrl, candidate);
-      }
+        const existing = seenByUrl.get(candidate.linkedinUrl);
+        if (existing) {
+          existing.confidence = Math.min(existing.confidence + 0.1, 1.0);
+          existing.evidence.push("confirmed by a second, independent search query");
+        } else {
+          seenByUrl.set(candidate.linkedinUrl, candidate);
+        }
 
-      if (seenByUrl.get(candidate.linkedinUrl)!.confidence >= ACCEPT_THRESHOLD) {
-        return seenByUrl.get(candidate.linkedinUrl)!; // early stop — no further dorks, no LLM
+        if (seenByUrl.get(candidate.linkedinUrl)!.confidence >= ACCEPT_THRESHOLD) {
+          return seenByUrl.get(candidate.linkedinUrl)!; // early stop
+        }
       }
     }
+    
+    // If we finished a role's dorks and have some ambiguous candidates that scored decently,
+    // we could break early to avoid querying leadership if we're fairly sure about an HR person.
+    // But to be robust, we'll let it collect all and pick the absolute best one at the end.
   }
 
-  const best = [...seenByUrl.values()].sort((a, b) => b.confidence - a.confidence)[0];
+  const best = Array.from(seenByUrl.values()).sort((a, b) => b.confidence - a.confidence)[0];
   if (best && best.confidence >= AMBIGUOUS_FLOOR) {
     ambiguousOut.push({
-      index: ambiguousOut.length, // placeholder — reset per actual LLM batch, see below
+      index: ambiguousOut.length,
       cleanCompanyName,
       title: best.title ?? "",
       link: best.linkedinUrl,
@@ -62,7 +69,7 @@ async function resolveCompany(
     });
   }
 
-  return null; // below AMBIGUOUS_FLOOR entirely — genuinely nothing findable this way
+  return null; // below AMBIGUOUS_FLOOR entirely
 }
 
 export async function runDiscoveryBatch(companies: string[]) {
@@ -86,7 +93,8 @@ export async function runDiscoveryBatch(companies: string[]) {
 
     for (const result of results) {
       if (!result.name) continue; // the LLM also couldn't confirm a real person — drop it
-      const original = batch[result.index];
+      const original = batch.find(b => b.index === result.index);
+      if (!original) continue;
       accepted.push({
         company: original.cleanCompanyName,
         candidate: {

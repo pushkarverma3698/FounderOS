@@ -17,22 +17,32 @@ const RECRUITING_TITLES = [
   "human resources",
 ];
 
-export function generateDorks(cleanCompanyName: string): string[] {
+import type { TargetRole } from "./rule-extractor";
+
+export function generateDorks(cleanCompanyName: string, target: TargetRole = "hr"): string[] {
   const safeName = cleanCompanyName.replace(/[@#]/g, "");
-  const titleClause = `"recruiter"`;
 
+  if (target === "hr") {
+    return [
+      // 1. Tightest: LinkedIn profile pages, company name + a recruiting title
+      `"linkedin.com/in" "${safeName}" "recruiter"`,
+      // 2. Loosen the title requirement
+      `"linkedin.com/in" "${safeName}" "recruiting"`,
+      // 3. Drop the site: restriction — small companies with thin LinkedIn SEO
+      `"${safeName}" "recruiter" linkedin`,
+      // 4. Last resort: company + generic HR term, no LinkedIn restriction at all
+      `"${safeName}" "HR" contact`,
+    ];
+  }
+
+  // TargetRole === "leadership"
   return [
-    // 1. Tightest: LinkedIn profile pages, company name + a recruiting title
-    `"linkedin.com/in" "${safeName}" ${titleClause}`,
-
-    // 2. Loosen the title requirement
-    `"linkedin.com/in" "${safeName}" "recruiting"`,
-
-    // 3. Drop the site: restriction — small companies with thin LinkedIn SEO
-    //    sometimes surface via a different indexed page first
-    `"${safeName}" ${titleClause} linkedin`,
-
-    // 4. Last resort: company + generic HR term, no LinkedIn restriction at all
-    `"${safeName}" "HR" contact`,
+    `"linkedin.com/in" "${safeName}" "Founder"`,
+    `"linkedin.com/in" "${safeName}" "CEO"`,
+    `"linkedin.com/in" "${safeName}" "Owner"`,
+    `"linkedin.com/in" "${safeName}" "Managing Director"`,
+    // Looser fallback for leadership
+    `"${safeName}" "Founder" linkedin`,
+    `"${safeName}" "Owner" contact`,
   ];
 }
