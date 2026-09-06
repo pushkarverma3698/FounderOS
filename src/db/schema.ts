@@ -1750,3 +1750,4 @@ export const leadPipeline = outboundLeads;
 export const suppressionList = doNotContact;
 export const taskOutcomes = agentResults;
 export const deptEvents = deptSignals;
+export * from "../tools/b2b/schema";
