@@ -175,3 +175,48 @@ export function applyDeferredFreshness(
 
   return { kept, undated, stale };
 }
+
+/**
+ * Why a posting reached screening with no body — the distinction the funnel's
+ * `bodyless` count throws away.
+ *
+ * Only one of these four is the employer's doing. The other three are ours, and
+ * on 2026-09-06 one of them (`inlined-empty`, Lever serving its body as HTML
+ * while the mapper read only `descriptionPlain`) closed the entire free lane for
+ * thirty hours while the count said nothing but "7".
+ */
+export function bodylessCause(candidate: FreeCandidate): string {
+  const adapter = getAdapter(candidate.board.ats);
+  // A board on a platform we never wrote a mapper for. Ours to fix.
+  if (!adapter) return "no-adapter";
+  // The platform inlines bodies, so there is no detail URL to blame: either the
+  // list mapper missed the field or the posting really is empty. Ours to check.
+  if (adapter.getJobUrl(candidate.board, candidate.externalId) === null) return "inlined-empty";
+  // The detail fetch ran and produced nothing — a timeout, a 404, or a genuinely
+  // empty posting. `hydrateDescriptions` logs the fetch failures separately.
+  return "detail-empty";
+}
+
+/**
+ * One note that says which platform lost the postings and why.
+ *
+ * Returns null rather than an empty string when nothing was dropped: the caller
+ * pushes the result into a notes list, and an empty note is a line of nothing in
+ * the founder's brief.
+ */
+export function summariseBodyless(dropped: readonly FreeCandidate[]): string | null {
+  if (dropped.length === 0) return null;
+
+  const counts = new Map<string, number>();
+  for (const candidate of dropped) {
+    const key = `${candidate.board.ats} ${bodylessCause(candidate)}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const breakdown = [...counts]
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, n]) => `${key} ×${n}`)
+    .join(", ");
+
+  return `${dropped.length} postings had no readable description and were skipped (${breakdown})`;
+}

@@ -49,19 +49,51 @@ export function initialHeartbeat(now: Date): HeartbeatState {
   return { quietSweeps: 0, boardsPolled: 0, lastMessageAt: now.getTime(), zeroPassStreak: 0, lastFunnel: null };
 }
 
-/** Identify the dominant drop stage from a funnel snapshot. */
-export function topDropReason(funnel: FreeFunnel | null | undefined): { reason: string; count: number } | null {
-  if (!funnel) return null;
+/**
+ * The stage that took the survivors to ZERO — not the stage with the biggest
+ * count.
+ *
+ * Those are different questions and only one of them is actionable. `stale` is
+ * the first filter and is the largest stage on every real sweep this lane has
+ * ever run (25,139 of 46,991 on 2026-09-06), on a healthy day and during a total
+ * outage alike — a number that reads identically in both states says nothing
+ * about either. This alert exists ONLY to explain a closed funnel, so it must
+ * name the gate the last survivor died at.
+ *
+ * MEASURED, 2026-09-06: the free lane produced zero rows for thirty hours while
+ * seven postings a sweep reached the final gate and were dropped as `bodyless`
+ * (six Lever postings whose HTML body the mapper did not read). Under the old
+ * rule this alert would have blamed 25,139 stale postings and sent the founder
+ * to the freshness window, which was working correctly.
+ *
+ * Returns null when the funnel is not closed: a lane that screened something has
+ * nothing to explain.
+ */
+export function funnelClosingStage(
+  funnel: FreeFunnel | null | undefined,
+): { reason: string; count: number } | null {
+  if (!funnel || funnel.screened > 0) return null;
+
+  // PIPELINE ORDER, not any other order — the walk below is only meaningful if
+  // it matches the order runFreeIngest actually applies the gates in.
   const stages: Array<{ reason: string; count: number }> = [
+    { reason: "undated publication", count: funnel.undated },
     { reason: "stale age cutoff", count: funnel.stale },
     { reason: "off-track title", count: funnel.offTrack },
     { reason: "outside target market", count: funnel.offMarket },
     { reason: "already known in tracker", count: funnel.known },
-    { reason: "undated publication", count: funnel.undated },
     { reason: "no body description", count: funnel.bodyless },
   ];
-  stages.sort((a, b) => b.count - a.count);
-  return stages[0] && stages[0].count > 0 ? stages[0] : null;
+
+  let remaining = funnel.seen;
+  let closer: { reason: string; count: number } | null = null;
+  for (const stage of stages) {
+    if (stage.count === 0) continue;
+    remaining -= stage.count;
+    closer = stage;
+    if (remaining <= 0) break;
+  }
+  return closer;
 }
 
 /**
@@ -107,8 +139,8 @@ export function afterQuietSweep(
 
   // Zero-pass streak alert: if funnel drops 100% for N consecutive sweeps, raise alert once at threshold
   if (newStreak === ZERO_PASS_STREAK_THRESHOLD) {
-    const top = topDropReason(funnel ?? state.lastFunnel);
-    const dropClause = top ? ` (dominant drop stage: ${top.count} ${top.reason})` : "";
+    const top = funnelClosingStage(funnel ?? state.lastFunnel);
+    const dropClause = top ? ` (the last ${top.count} died at: ${top.reason})` : "";
     const ping =
       `⚠ <b>Job lane funnel alert${who}</b> — 0 candidates passed for ${newStreak} consecutive sweeps` +
       `${dropClause}. The funnel may be restricted or closed.`;
@@ -140,8 +172,8 @@ export function afterSpokenSweep(now: Date): HeartbeatState {
  */
 export function formatAlivePing(state: HeartbeatState, sheetLink: string | null, profile?: { candidateName: string } | null): string {
   const sweeps = state.quietSweeps;
-  const top = topDropReason(state.lastFunnel);
-  const dropInfo = top ? ` Top drop reason: ${top.count.toLocaleString()} ${top.reason}.` : "";
+  const top = funnelClosingStage(state.lastFunnel);
+  const dropInfo = top ? ` The last ${top.count.toLocaleString()} died at: ${top.reason}.` : "";
   const who = profile?.candidateName ? ` for ${esc(profile.candidateName)}` : "";
   return (
     `✅ <b>Job lane alive${who}</b> — ${sweeps} sweep${sweeps === 1 ? "" : "s"} since the last update, ` +
