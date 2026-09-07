@@ -1,9 +1,25 @@
 /**
- * Import IND-sponsor job boards from published ATS corpora
- * =========================================================
- * Grows the free lane's board registry by JOINING the recognised-sponsor register
- * to open-source company→token mappings, instead of guessing slugs and probing
+ * Import job boards from published ATS corpora
+ * =============================================
+ * Grows the free lane's board registry by JOINING a list of real employers to
+ * open-source company→token mappings, instead of guessing slugs and probing
  * four ATS domains with them (`scripts/probe-sponsor-boards.ts`, superseded).
+ *
+ * TWO employer lists, one join, one verification path:
+ *
+ *   default        the IND recognised-sponsor register (12.9k legal entities)
+ *   --employers    docs/strategy/data/nl-finance-employers.csv (curated brands)
+ *
+ * The second exists because the first cannot see Dutch finance. Measured
+ * 2026-09-07: of 4,511 postings sampled across 120 registered boards, 177 were
+ * located in the Netherlands at all and Tashi Goyal's FP&A/audit/KYC classifier
+ * matched 73 — five of them in-market. The registry is overwhelmingly tech
+ * companies on Greenhouse/Lever/Ashby, and a tech company in NL posts roughly one
+ * junior finance role per fifty engineering ones. The employers who DO hire FP&A
+ * and KYC at 0-4 years are registered under names the register writes and no board
+ * ever does — `Coöperatieve Rabobank U.A.` versus a Workday corpus row reading
+ * `Rabobank`; `Deloitte Accountants` versus `Deloitte Netherlands`. Both of those
+ * boards were sitting unmatched in a corpus this script already downloads.
  *
  * MEASURED 2026-08-20, live, against the 12,883-row register:
  *   probing gh/lever/ashby   → 0.36% hit rate, ~46 boards, never reached prod
@@ -24,6 +40,8 @@
  *
  *   pnpm jobhunt:import-boards --dry-run
  *   pnpm jobhunt:import-boards
+ *   pnpm jobhunt:import-boards --employers --dry-run
+ *   pnpm jobhunt:import-boards --employers
  *
  * `--env-file=.env` is required (it is baked into the pnpm script) only because
  * verification reuses `fetchBoard`, which pulls in the logger and therefore the
@@ -35,11 +53,16 @@
  */
 
 import { readFileSync, appendFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { mapWithConcurrencyLimit } from "../src/core/concurrency.js";
 import {
+  boardMatchKey,
+  joinEmployerBoards,
   joinSponsorBoards,
   parseAtsCorpus,
+  parseEmployerList,
+  stripSiteSuffix,
   toBoardCsvRows,
   type AtsCorpusRow,
   type CandidateBoard,
@@ -49,9 +72,30 @@ import {
   parseBoardRegistry,
   FREE_ATS_PLATFORMS,
   type FreeAts,
+  type FreeBoard,
 } from "../src/tools/jobhunt/free-boards.js";
+import { countryFromLocation } from "../src/tools/jobhunt/country.js";
 import { fetchBoard, BOARD_CONCURRENCY } from "../src/tools/jobhunt/free-ats-source.js";
-import { parseSponsorCsv, registerPathFrom } from "../src/tools/jobhunt/sponsor-registry.js";
+import { WIFE_FINANCE_PROFILE } from "../src/tools/jobhunt/profiles/wife-nl-finance.js";
+import {
+  parseSponsorCsv,
+  registerPathFrom,
+  REPO_ROOT,
+} from "../src/tools/jobhunt/sponsor-registry.js";
+
+const NL_FINANCE_EMPLOYERS_PATH = resolve(
+  REPO_ROOT,
+  "docs/strategy/data/nl-finance-employers.csv",
+);
+
+/**
+ * The profile whose country vocabulary decides what "in the Netherlands" means
+ * here. Borrowed rather than re-derived: it is the only NL-ONLY profile in the
+ * repo, and `countryFromLocation` reads its city list — so this check answers the
+ * question with exactly the strings the free lane will screen these boards under,
+ * not with a second hand-written list of Dutch place names that could drift.
+ */
+const NL_ONLY_PROFILE = WIFE_FINANCE_PROFILE;
 
 const CORPUS_BASE =
   "https://raw.githubusercontent.com/kalil0321/ats-scrapers/main/ats-companies";
@@ -118,6 +162,8 @@ interface Verified {
   readonly board: CandidateBoard;
   readonly live: boolean;
   readonly error: string | null;
+  /** How many of the postings this board returned are located in the Netherlands. */
+  readonly nlPostings: number;
 }
 
 /**
@@ -145,9 +191,12 @@ async function pollOnce(board: CandidateBoard): Promise<Verified> {
     token: board.token,
     markets: ["NL"],
   });
-  return result.ok
-    ? { board, live: true, error: null }
-    : { board, live: false, error: result.error };
+  if (!result.ok) return { board, live: false, error: result.error, nlPostings: 0 };
+
+  const nlPostings = result.candidates.filter(
+    (c) => countryFromLocation(c.location, NL_ONLY_PROFILE) === "NL",
+  ).length;
+  return { board, live: true, error: null, nlPostings };
 }
 
 /**
@@ -186,8 +235,43 @@ async function verifyLive(candidates: readonly CandidateBoard[]): Promise<Verifi
   return [...results.values()];
 }
 
-async function main(): Promise<void> {
-  const dryRun = process.argv.includes("--dry-run");
+/**
+ * Load whichever employer list this run joins against, and say how big it is.
+ *
+ * Both branches refuse an empty list for the same reason: joining against nothing
+ * imports nothing and reads, from the far end, exactly like a market with no
+ * employers left to add.
+ */
+interface JoinSource {
+  readonly describe: string;
+  readonly join: (
+    existing: readonly FreeBoard[],
+    corpora: ReadonlyMap<FreeAts, readonly AtsCorpusRow[]>,
+  ) => CandidateBoard[];
+  /**
+   * The names worth reporting as UNMATCHED afterwards. Populated for the curated
+   * list only: 118 hand-written brands that found no board is the single most
+   * useful thing this run can tell whoever maintains that file, while 12.9k
+   * unmatched legal entities is the register's normal state and says nothing.
+   */
+  readonly reportUnmatched: readonly string[];
+}
+
+function loadJoin(employerMode: boolean): JoinSource {
+  if (employerMode) {
+    const brands = parseEmployerList(readFileSync(NL_FINANCE_EMPLOYERS_PATH, "utf8"));
+    if (brands.length === 0) {
+      throw new Error(
+        `The employer list at ${NL_FINANCE_EMPLOYERS_PATH} parsed to zero entries. ` +
+          `Joining against an empty list would import nothing and look like a covered market.`,
+      );
+    }
+    return {
+      describe: `Employers: ${brands.length} curated NL finance brands (${NL_FINANCE_EMPLOYERS_PATH})`,
+      join: (existing, corpora) => joinEmployerBoards(brands, corpora, existing),
+      reportUnmatched: brands.map((b) => b.name),
+    };
+  }
 
   const registerPath = registerPathFrom();
   const sponsors = parseSponsorCsv(readFileSync(registerPath, "utf8"));
@@ -197,7 +281,59 @@ async function main(): Promise<void> {
         `Joining against an empty register would import nothing and look like an empty market.`,
     );
   }
-  console.log(`Register: ${sponsors.length} recognised sponsors (${registerPath})`);
+  return {
+    describe: `Register: ${sponsors.length} recognised sponsors (${registerPath})`,
+    join: (existing, corpora) => joinSponsorBoards(sponsors, corpora, existing),
+    reportUnmatched: [],
+  };
+}
+
+/**
+ * Say what happened to every brand that produced no NEW candidate — and split
+ * the two reasons apart, because they ask for opposite work.
+ *
+ * `already polled` means the list is doing its job and the registry got there
+ * first; nothing to do. `NO CORPUS ROW` means the employer is unreachable by this
+ * mechanism at all — it is on an ATS whose company→token corpus we do not
+ * download (SuccessFactors, Taleo, a bespoke careers site), and no amount of
+ * editing this list will find it. Collapsing the two into one "unmatched" count
+ * is how a wall gets mistaken for a typo: the founder's rule is that a label
+ * nobody defined is not information.
+ *
+ * Printed IN FULL. A truncated list sorted by collection order reports the least
+ * interesting entries by construction.
+ */
+function reportBrandCoverage(
+  brands: readonly string[],
+  candidates: readonly CandidateBoard[],
+  corpora: ReadonlyMap<FreeAts, readonly AtsCorpusRow[]>,
+): void {
+  const corpusKeys = new Set<string>();
+  for (const rows of corpora.values()) {
+    for (const row of rows) corpusKeys.add(boardMatchKey(stripSiteSuffix(row.name)));
+  }
+
+  const matched = new Set(candidates.map((c) => c.matchedSponsor));
+  const rest = brands.filter((name) => !matched.has(name));
+  const absent = rest.filter((name) => !corpusKeys.has(boardMatchKey(name)));
+  const covered = rest.filter((name) => corpusKeys.has(boardMatchKey(name)));
+
+  console.log(
+    `\nBrand coverage: ${matched.size} produced a new candidate · ` +
+      `${covered.length} already polled · ${absent.length} have NO CORPUS ROW`,
+  );
+  console.log(`\n  No corpus row on any of the ${corpora.size} platforms — unreachable without a new adapter:`);
+  for (const name of absent) console.log(`    ${name}`);
+  console.log(`\n  Already in the registry:`);
+  for (const name of covered) console.log(`    ${name}`);
+}
+
+async function main(): Promise<void> {
+  const dryRun = process.argv.includes("--dry-run");
+  const employerMode = process.argv.includes("--employers");
+
+  const source = loadJoin(employerMode);
+  console.log(source.describe);
 
   const registryPath = boardsPathFrom();
   const existing = parseBoardRegistry(readFileSync(registryPath, "utf8"));
@@ -209,11 +345,18 @@ async function main(): Promise<void> {
     corpora.set(ats, await fetchCorpus(ats));
   }
 
-  const candidates = joinSponsorBoards(sponsors, corpora, existing);
+  const candidates = source.join(existing, corpora);
   console.log(`\nJoin: ${candidates.length} new candidate boards`);
   for (const ats of FREE_ATS_PLATFORMS) {
     const n = candidates.filter((c) => c.ats === ats).length;
     if (n > 0) console.log(`  ${ats.padEnd(12)} ${String(n).padStart(4)}`);
+  }
+  for (const c of candidates) {
+    console.log(`    ${c.ats}/${c.token}  (${c.name})  ← ${c.matchedSponsor}`);
+  }
+
+  if (source.reportUnmatched.length > 0) {
+    reportBrandCoverage(source.reportUnmatched, candidates, corpora);
   }
 
   if (candidates.length === 0) {
@@ -223,12 +366,38 @@ async function main(): Promise<void> {
 
   console.log(`\nVerifying all ${candidates.length} live (concurrency ${BOARD_CONCURRENCY})…`);
   const verified = await verifyLive(candidates);
-  const live = verified.filter((v) => v.live).map((v) => v.board);
   const dead = verified.filter((v) => !v.live);
 
-  console.log(`  live: ${live.length}   dead: ${dead.length}`);
+  console.log(`  live: ${verified.length - dead.length}   dead: ${dead.length}`);
   for (const d of dead) {
     console.log(`    dead  ${d.board.ats}/${d.board.token}  (${d.board.name}) — ${d.error}`);
+  }
+
+  // In employer mode the join key is a BRAND, and a brand is not a country. It
+  // cannot tell `Deloitte Netherlands` from `Deloitte Nordic`, `Deloitte AT` or
+  // the `Deloitte` on SmartRecruiters that turns out to be Australia — all four
+  // reduce to the same key, and all four are live. The postings themselves can:
+  // a board that answered with work in Amsterdam, Utrecht or Rotterdam is the
+  // Dutch entity's board, and one that answered with none is another country's.
+  //
+  // Reported by name, never silently dropped, and NOT permanent — this import is
+  // re-runnable, so a genuinely Dutch employer that happened to be between
+  // vacancies today is picked up by the next run rather than blacklisted. The
+  // sponsor-register mode does not apply this filter: its rows are Dutch legal
+  // entities by construction, and it has 858 boards of history behind it.
+  const offMarket = employerMode ? verified.filter((v) => v.live && v.nlPostings === 0) : [];
+  const live = verified
+    .filter((v) => v.live && (!employerMode || v.nlPostings > 0))
+    .map((v) => v.board);
+
+  if (employerMode) {
+    console.log(`  with NL postings: ${live.length}   live but no NL postings: ${offMarket.length}`);
+    for (const v of verified.filter((x) => x.live && x.nlPostings > 0)) {
+      console.log(`    keep  ${v.board.ats}/${v.board.token}  (${v.board.name}) — ${v.nlPostings} NL`);
+    }
+    for (const v of offMarket) {
+      console.log(`    skip  ${v.board.ats}/${v.board.token}  (${v.board.name}) — 0 NL postings`);
+    }
   }
 
   const rows = toBoardCsvRows(live);

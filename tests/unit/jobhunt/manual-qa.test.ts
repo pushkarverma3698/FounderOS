@@ -90,6 +90,16 @@ describe("Manual QA Audit — Multi-Profile Verification", () => {
     expect(classifyTrack("Treasury Analyst", wife)).toBe("finance-ops");
     expect(classifyTrack("Due Diligence Analyst", wife)).toBe("finance-ops");
 
+    // Added 2026-09-07, and ONLY these two. The track-coverage audit ran her
+    // classifier over 4,511 live postings; of the 174 Dutch ones it dropped,
+    // exactly one was finance-shaped and inside her 0-4-year range — a "Finance
+    // Operations Specialist" in Utrecht. Everything else was CFO/Director/Head-of
+    // or quant risk. The seniority prefix is not enumerated because `titles`
+    // matches as a substring.
+    expect(classifyTrack("Finance Operations Specialist", wife)).toBe("finance-ops");
+    expect(classifyTrack("Finance Operations Analyst", wife)).toBe("finance-ops");
+    expect(classifyTrack("Senior Finance Operations Specialist", wife)).toBe("finance-ops");
+
     // Junior/forensic auditor titles land in auditor, not finance-ops or
     // compliance-kyc — an easy place for a new track's keywords to collide.
     expect(classifyTrack("Junior Internal Auditor", wife)).toBe("auditor");

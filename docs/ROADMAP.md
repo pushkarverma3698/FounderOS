@@ -56,7 +56,7 @@ The system's first real user is its author, and the job it has to do is get him 
 Netherlands. That is the priority through Q3, and it is also the best available proof that
 the kernel works on something with a consequence.
 
-**The constraint is not supply.** 1,297 boards feed a pipeline that has stored 554 screened
+**The constraint is not supply.** 1,312 boards feed a pipeline that has stored 554 screened
 applications and submitted 2. Everything upstream of "apply" is finished and over-built;
 everything downstream is thin.
 
@@ -85,7 +85,7 @@ Audit and sequencing: `docs/plans/2026-08-22-portfolio-and-recruitment-readiness
 | ❌ Deferred | ✅ Why |
 |---|---|
 | **SaaS pivot / multi-tenancy** | Gated on the single-user system producing a real outcome first. It has not yet produced the one it was built for |
-| **More job sources** | 1,297 boards against 2 submitted applications. More supply is the most expensive way to avoid the actual problem |
+| **More job sources** | 1,312 boards against 2 submitted applications. More supply is the most expensive way to avoid the actual problem |
 | **Rewriting the agent layer in Python** | The market hires TypeScript for AI engineering; the gap is a CV claim and one artifact, not a rewrite |
 | **All ten proof surfaces** | The ten-surface design shipped zero in three weeks. Two surfaces shipped beat ten designed |
 | **Homerun ATS** | No public API, no token corpus, and every subdomain probe is indistinguishable from a typo. Guessing slugs is forbidden — a wrong board is worse than no board. Unblocks when a corpus exists or a posting URL is harvested in the wild |
