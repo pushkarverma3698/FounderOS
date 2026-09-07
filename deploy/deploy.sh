@@ -180,15 +180,17 @@ fi
 # production is live and healthy. `timeout` on every command is the mechanism.
 # ---------------------------------------------------------------------------
 
-# turicks_brain is NOT synced here — see the header. Report what the store holds
+# brain_memories is NOT synced here — see the header. Report what the store holds
 # so a stale/empty brain is visible on every deploy, then move on.
+# (brain.turicks_brain is the frozen pre-ADR-038 table — checking it here always
+# reported 0 and masked a healthy brain_memories store; see #620.)
 EMBEDDED="$(docker exec founderos-postgres psql -U founderos -d founderos -tAc \
-  "SELECT count(*) FROM brain.turicks_brain WHERE embedding IS NOT NULL;" 2>/dev/null | tr -d ' ' || true)"
+  "SELECT count(*) FROM brain.brain_memories WHERE embedding IS NOT NULL;" 2>/dev/null | tr -d ' ' || true)"
 if [ -z "$EMBEDDED" ] || [ "$EMBEDDED" -le 0 ] 2>/dev/null; then
-  echo "    WARNING: turicks_brain has 0 embedded rows — RAG answers stay thin until a brain sync runs." >&2
+  echo "    WARNING: brain_memories has 0 embedded rows — RAG answers stay thin until a brain sync runs." >&2
   echo "             Run it: gh workflow run brain-sync.yml   (or on the box: pnpm brain:sync)" >&2
 else
-  echo "    turicks_brain embedded rows: $EMBEDDED (refreshed by .github/workflows/brain-sync.yml)"
+  echo "    brain_memories embedded rows: $EMBEDDED (refreshed by .github/workflows/brain-sync.yml)"
 fi
 
 echo "==> Seeding founder context (idempotent) — best-effort, 120s cap"
