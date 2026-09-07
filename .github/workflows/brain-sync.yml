@@ -68,5 +68,9 @@ jobs:
 
             pnpm brain:sync
 
+            # brain_memories, NOT turicks_brain: ADR-038 moved the writer, and this
+            # check was left behind reading the abandoned table. It printed a
+            # healthy, frozen 1352 on 2026-09-06 while the live store held 1372 —
+            # a post-sync verification that could never fall, whatever the sync did.
             docker exec founderos-postgres psql -U founderos -d founderos -tAc \
-              "SELECT 'embedded rows: ' || count(*) FROM brain.turicks_brain WHERE embedding IS NOT NULL;"
+              "SELECT 'embedded rows: ' || count(*) FROM brain.brain_memories WHERE embedding IS NOT NULL;"

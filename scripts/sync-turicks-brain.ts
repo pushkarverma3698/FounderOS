@@ -5,16 +5,18 @@
  * and upserts them into the turicks-brain stores:
  *   1. knowledge_entries — keyword/title search (one versioned row per doc) +
  *      a doc-level embedding for hybrid search.
- *   2. turicks_brain     — the pgvector store the agents query via
- *      search_turicks_brain. Each doc is CHUNKED and every chunk embedded via
- *      local Ollama (nomic-embed-text, 768-dim). RAG text never leaves the box.
+ *   2. brain_memories    — the pgvector store the agents query via
+ *      search_turicks_brain / search_knowledge (ADR-038 moved this off the old
+ *      `turicks_brain` table; that table is frozen and read by nothing). Each doc
+ *      is CHUNKED and every chunk embedded via local Ollama (nomic-embed-text,
+ *      768-dim). RAG text never leaves the box.
  *
  * Run after any architectural decision, brand update, or phase completion:
  *   pnpm brain:sync
  *
  * Idempotent:
  *   - knowledge_entries: title as upsert key; bumps version on content change.
- *   - turicks_brain: per-source refresh (delete this source's chunks, re-insert),
+ *   - brain_memories: per-source refresh (delete this source's chunks, re-insert),
  *     SKIPPED entirely when every chunk already carries this content's sha256.
  *
  * Requires: Ollama running with nomic-embed-text pulled, Postgres + pgvector up.
@@ -188,7 +190,7 @@ export function isPlanSyncSource(sourcePath: string): boolean {
  * foo.md") is a real session log the sessions walker below should ingest.
  * Excludes TEMPLATE.md — the empty scaffold session logs are authored from —
  * which `f.endsWith(".md")` alone would otherwise match, ingesting a blank
- * "session" entry into turicks_brain on every sync.
+ * "session" entry into brain_memories on every sync.
  */
 export function isSessionLogFile(filename: string): boolean {
   return filename.endsWith(".md") && filename !== "TEMPLATE.md";
@@ -491,7 +493,7 @@ async function upsertEntry(
 }
 
 /**
- * Refresh a single source's chunks in the turicks_brain vector table.
+ * Refresh a single source's chunks in the brain_memories vector table.
  * Idempotent: deletes any existing chunks for this source_path, then inserts
  * freshly-embedded chunks. This is the store search_turicks_brain queries.
  *
@@ -556,10 +558,10 @@ async function main() {
 
   if (keywordOnly) {
     console.log(
-      "🧠 Syncing docs to knowledge_entries (keyword-only — no Ollama, no turicks_brain vectors)…\n",
+      "🧠 Syncing docs to knowledge_entries (keyword-only — no Ollama, no brain_memories vectors)…\n",
     );
   } else {
-    console.log("🧠 Syncing docs to turicks-brain (knowledge_entries + turicks_brain vectors)…\n");
+    console.log("🧠 Syncing docs to turicks-brain (knowledge_entries + brain_memories vectors)…\n");
 
     // Fail loud + early if Ollama can't embed — otherwise we'd write keyword rows
     // with no vectors and the vector search would silently stay empty (the exact
@@ -616,7 +618,7 @@ async function main() {
     `\n✅ Sync complete: ${inserted} inserted, ${updated} updated, ${skipped} skipped` +
       (keywordOnly
         ? " (keyword-only)"
-        : ` · ${totalChunks} vector chunks embedded into turicks_brain` +
+        : ` · ${totalChunks} vector chunks embedded into brain_memories` +
           ` · ${currentDocs} docs already current (no embedding needed)`) +
       (failures > 0 ? ` · ${failures} FAILED` : ""),
   );

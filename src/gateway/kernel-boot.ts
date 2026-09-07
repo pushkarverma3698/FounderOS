@@ -63,7 +63,7 @@ import { childLogger } from "../infra/logger.js";
 const log = childLogger({ module: "kernel-boot" });
 
 /** Worker routing descriptions for the planner catalog (formerly office.ts). */
-const DESCRIPTIONS: Record<(typeof WORKERS)[number], string> = {
+export const DESCRIPTIONS: Record<(typeof WORKERS)[number], string> = {
   admin: "Business context, episodic memory, recording decisions, pending cross-department signals.",
   research: "Web facts, news, company/market research, ICP scoring, internal Turicks knowledge lookups.",
   comms: "Reading inbox, known-contact email, Google Calendar work.",
@@ -71,7 +71,13 @@ const DESCRIPTIONS: Record<(typeof WORKERS)[number], string> = {
   marketing: "LinkedIn posts, content strategy, comment replies, Turicks brand copy, image generation (draft + final), brand asset library.",
   sales: "Prospect research tied to cold outreach, unknown-company outreach, sales emails.",
   personal: "Files, directories, shell, browser, and laptop operations on the founder's machine.",
-  jobhunt: "Job searches, CV/resume work, applications, hiring-manager outreach.",
+  // NAMES BOTH CANDIDATES. This string is what the planner routes on, and
+  // "CV/resume work" alone lost to `personal` for "What is Tashi's CV
+  // background?" — a question about a PERSON reads as personal, and that
+  // department's toolbox has no read_cv, so it searched the founder's own
+  // personal-rag, found nothing, and reported her CV missing (prod, 2026-09-07).
+  jobhunt:
+    "Job searches, CV/resume work, applications, hiring-manager outreach. OWNS every question about what is on a CV — work history, education, employers, skills, salary expectations — for EITHER candidate: Pushkar Verma and Tashi Goyal (his wife, FP&A/finance). Anything naming Tashi belongs here, never personal or research.",
 };
 
 const PROMPTS: Record<(typeof WORKERS)[number], string | (() => string)> = {

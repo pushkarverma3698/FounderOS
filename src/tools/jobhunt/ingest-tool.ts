@@ -18,18 +18,31 @@ import { childLogger } from "../../infra/logger.js";
 import { fetchAtsPostings, type AtsQuery } from "./ats-source.js";
 import { screenBatch, type IngestResult } from "./ingest.js";
 import { formatIngestSummary } from "./ingest-format.js";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 
 const log = childLogger({ module: "tool:ingest_jobs" });
 
 /** Fetch → screen → summarise. The whole pipeline in one call. */
-export async function runJobIngest(query: AtsQuery = {}): Promise<IngestResult> {
-  const fetched = await fetchAtsPostings(query);
+export async function runJobIngest(
+  query: AtsQuery = {},
+  profile: JobSearchProfile = getProfile(),
+): Promise<IngestResult> {
+  const effectiveQuery: AtsQuery = {
+    ...query,
+    // The PROFILE'S own track titles when the caller didn't say — never the
+    // module-wide tech default. Without this an on-demand pull for a second
+    // candidate fetched Pushkar's AI/backend/frontend postings and correctly
+    // rejected every one as off-track, which reads exactly like "no jobs."
+    titles: query.titles ?? profile.trackPriority.flatMap((t) => profile.tracks[t]?.titles ?? []),
+  };
+  const fetched = await fetchAtsPostings(effectiveQuery);
   if (!fetched.ok) return { ok: false, error: fetched.error };
 
-  const lines = await screenBatch(fetched.postings);
+  const lines = await screenBatch(fetched.postings, profile);
   log.info(
     {
+      profile: profile.id,
       fetched: fetched.postings.length,
       pass: lines.filter((l) => l.outcome === "pass").length,
       reject: lines.filter((l) => l.outcome === "reject").length,
@@ -76,6 +89,12 @@ export const ingestJobsTool: UnifiedTool = {
           "Array of employer names to restrict to — this is how the IND recognised-sponsor " +
           "register is used as a target list rather than only as a filter.",
       },
+      profileId: {
+        type: "string",
+        description:
+          "Registered profile id to pull for (e.g. wife-nl-finance) — sets both the default " +
+          "title search and the screening criteria. Omit for the founder's own.",
+      },
     },
     required: [],
   },
@@ -94,7 +113,8 @@ export const ingestJobsTool: UnifiedTool = {
         : {}),
     };
 
-    const result = await runJobIngest(query);
+    const profile = getProfile(args["profileId"] as string | undefined);
+    const result = await runJobIngest(query, profile);
     if (!result.ok) {
       return {
         success: false,

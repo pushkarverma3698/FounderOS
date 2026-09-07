@@ -43,6 +43,23 @@ vi.mock("../../../src/tools/jobhunt/profile-config.js", async (orig) => {
 const mockSendToChat = vi.fn(async () => {});
 vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToChat: mockSendToChat }));
 
+// Heartbeat state moved from an in-process Map to job_lane_heartbeats
+// (2026-09-07 — see sweep-runner.ts's doc comment). Faked here the same
+// shape, still in-memory, so this suite needs no real Postgres.
+const mockHeartbeatStore = new Map<string, unknown>();
+const mockLoadLaneHeartbeat = vi.fn(async (profileId: string) => mockHeartbeatStore.get(profileId) ?? null);
+const mockSaveLaneHeartbeat = vi.fn(async (profileId: string, state: unknown) => {
+  mockHeartbeatStore.set(profileId, state);
+});
+const mockClearLaneHeartbeats = vi.fn(async () => {
+  mockHeartbeatStore.clear();
+});
+vi.mock("../../../src/db/job-heartbeat-queries.js", () => ({
+  loadLaneHeartbeat: mockLoadLaneHeartbeat,
+  saveLaneHeartbeat: mockSaveLaneHeartbeat,
+  clearLaneHeartbeats: mockClearLaneHeartbeats,
+}));
+
 // Ranking and export both touch the database and the Sheets API. Neither is
 // what these tests are about — they are about WHICH messages the founder gets —
 // and leaving them real would make the suite need a DB and a credential.
@@ -100,12 +117,12 @@ function result(overrides: Partial<FreeIngestResult> = {}): FreeIngestResult {
 }
 
 describe("runFreeSweep", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    // The alive-ping clock is process state that survives between tests. Without
-    // this reset the suite would be order-dependent: a test that runs after a
-    // simulated three-hour gap would inherit a due ping.
-    resetHeartbeat(new Date());
+    // The alive-ping clock is persisted state that survives between tests.
+    // Without this reset the suite would be order-dependent: a test that runs
+    // after a simulated three-hour gap would inherit a due ping.
+    await resetHeartbeat(new Date());
     mockExportJobSheet.mockResolvedValue({
       ok: true as const,
       queued: 3,
@@ -233,7 +250,7 @@ describe("runFreeSweep", () => {
   });
 
   it("proves it is alive after three quiet hours, naming the boards it checked", async () => {
-    resetHeartbeat(new Date("2026-08-06T00:00:00Z"));
+    await resetHeartbeat(new Date("2026-08-06T00:00:00Z"));
     vi.setSystemTime(new Date("2026-08-06T03:30:00Z"));
     mockRunFreeIngest.mockResolvedValue(
       result({ lines: [line({ isNew: false })], boardsPolled: 285 }),

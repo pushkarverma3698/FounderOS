@@ -25,7 +25,13 @@ import {
   afterSpokenSweep,
   formatNewRowsAlert,
   initialHeartbeat,
+  type HeartbeatState,
 } from "./sweep-heartbeat.js";
+import {
+  clearLaneHeartbeats,
+  loadLaneHeartbeat,
+  saveLaneHeartbeat,
+} from "../../db/job-heartbeat-queries.js";
 
 const log = childLogger({ module: "scheduler" });
 
@@ -196,15 +202,21 @@ const JOB_INGEST_DAILY_LIMIT = 80;
 export const FREE_SWEEP_CRON = "*/30 * * * *";
 
 /**
- * The lane's memory of when it last said anything.
+ * The lane's memory of when it last said anything — persisted in
+ * `agents.job_lane_heartbeats` (job-heartbeat-queries.ts), not an in-process
+ * Map.
  *
- * Module state rather than a database row on purpose: it is a fact about THIS
- * process's conversation with the founder, and a restart honestly resets it —
- * the first sweep after a deploy then pings within the hour, which is exactly
- * when he most wants to know the lane came back up. Persisting it would suppress
- * that.
+ * 2026-09-07: it USED to be a Map, on the reasoning that a restart honestly
+ * resetting it was fine — the first sweep after a deploy pings within the
+ * hour. That assumed restarts are rare; measured, prod restarted 18 times in
+ * 3 days. `ALIVE_PING_INTERVAL_MS` (sweep-heartbeat.ts) needs 3 CONTINUOUS
+ * hours without a restart to ever fire, which a high-volume profile never
+ * notices — its real "new roles passed" alerts fire far more often than that
+ * — but a thin-market profile can go silent indefinitely with zero signal
+ * the lane is even running: Tashi's last passing role was 2026-09-04, three
+ * days of restarts before this was found, with neither a real alert nor a
+ * single heartbeat ping in between. See schema.ts's job_lane_heartbeats.
  */
-const heartbeats = new Map<string, ReturnType<typeof initialHeartbeat>>();
 
 /**
  * Per profile, because the ping answers "is YOUR lane alive". One shared clock
@@ -212,18 +224,15 @@ const heartbeats = new Map<string, ReturnType<typeof initialHeartbeat>>();
  * candidate with nothing coming through is precisely the one who needs to know
  * the difference between "no jobs" and "nothing ran".
  */
-function heartbeatFor(profileId: string): ReturnType<typeof initialHeartbeat> {
-  const existing = heartbeats.get(profileId);
-  if (existing) return existing;
-  const fresh = initialHeartbeat(new Date());
-  heartbeats.set(profileId, fresh);
-  return fresh;
+async function heartbeatFor(profileId: string): Promise<HeartbeatState> {
+  const existing = await loadLaneHeartbeat(profileId);
+  return existing ?? initialHeartbeat(new Date());
 }
 
-/** Test seam: reset the ping clock so a suite is not order-dependent. */
-export function resetHeartbeat(now: Date = new Date()): void {
-  heartbeats.clear();
-  heartbeats.set(DEFAULT_PROFILE_ID, initialHeartbeat(now));
+/** Test/ops seam: reset every profile's ping clock so a suite is not order-dependent. */
+export async function resetHeartbeat(now: Date = new Date()): Promise<void> {
+  await clearLaneHeartbeats();
+  await saveLaneHeartbeat(DEFAULT_PROFILE_ID, initialHeartbeat(now));
 }
 
 /**
@@ -331,14 +340,14 @@ async function runFreeSweepForProfile(
   // overwrite the `Applied` column between a founder's click and his next sync.
   if (newPasses.length === 0) {
     const { next, ping } = afterQuietSweep(
-      heartbeatFor(profile.id),
+      await heartbeatFor(profile.id),
       result.boardsPolled,
       result.funnel,
       now,
       lastSheetLink,
       profile
     );
-    heartbeats.set(profile.id, next);
+    await saveLaneHeartbeat(profile.id, next);
     if (ping !== null) await sendToChat(ping);
     return;
   }
@@ -364,7 +373,7 @@ async function runFreeSweepForProfile(
     profile.id === DEFAULT_PROFILE_ID ? await publishSheet() : { link: lastSheetLink, notice: null };
   if (profile.id === DEFAULT_PROFILE_ID) lastSheetLink = link;
   await sendToChat(formatNewRowsAlert(newPasses, link ?? notice, profile.candidateName));
-  heartbeats.set(profile.id, afterSpokenSweep(now));
+  await saveLaneHeartbeat(profile.id, afterSpokenSweep(now));
 }
 
 /**

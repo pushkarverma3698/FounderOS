@@ -46,6 +46,7 @@ import { getFreeBoards, type FreeBoard } from "./free-boards.js";
 import {
   filterCandidates,
   applyDeferredFreshness,
+  summariseBodyless,
   FREE_LANE_MAX_AGE_HOURS,
 } from "./free-ingest-filters.js";
 
@@ -56,6 +57,8 @@ import {
 export {
   filterCandidates,
   applyDeferredFreshness,
+  summariseBodyless,
+  bodylessCause,
   FREE_LANE_MAX_AGE_HOURS,
   type FilterOutcome,
 } from "./free-ingest-filters.js";
@@ -197,16 +200,20 @@ export async function runFreeIngest(
   const deferred = applyDeferredFreshness(hydrated, now, maxAgeHours);
 
   const postings: RawPosting[] = [];
-  let bodyless = 0;
+  // The dropped CANDIDATES, not a counter. A count cannot say which platform
+  // lost them, and this gate quietly ate 100% of the lane's output for thirty
+  // hours on 2026-09-06 while reporting the number 7.
+  const bodylessDropped: FreeCandidate[] = [];
   for (const candidate of deferred.kept) {
     if (candidate.description === null || candidate.description.trim().length === 0) {
       // Screening an empty body would read as "this employer stated no
       // requirements", and every gate would wave it through on that basis.
-      bodyless += 1;
+      bodylessDropped.push(candidate);
       continue;
     }
     postings.push(toRawPosting(candidate, candidate.description, profile));
   }
+  const bodyless = bodylessDropped.length;
 
   const lines = await screenBatch(postings, profile);
 
@@ -220,7 +227,17 @@ export async function runFreeIngest(
     notes.push(`${deferred.undated} postings had no publication date even after fetch — skipped`);
   }
   if (known > 0) notes.push(`${known} postings were already in the tracker`);
-  if (bodyless > 0) notes.push(`${bodyless} postings had no readable description and were skipped`);
+  const bodylessNote = summariseBodyless(bodylessDropped);
+  if (bodylessNote !== null) {
+    notes.push(bodylessNote);
+    // WARN, not info. Every posting that reached this gate had already passed
+    // freshness, track, market and the tracker — it is one of the handful of
+    // roles the whole sweep exists to find, and losing it is never routine.
+    log.warn(
+      { profile: profile.id, bodyless, detail: bodylessNote },
+      "Postings reached screening with no body and were dropped",
+    );
+  }
 
   const funnel: FreeFunnel = {
     seen: sweep.candidates.length,

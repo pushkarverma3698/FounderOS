@@ -30,6 +30,20 @@ vi.mock("../../../src/tools/jobhunt/sheet-export.js", () => ({
   exportJobSheet: async () => ({ ok: true, url: "https://sheet" }),
 }));
 
+// Heartbeat state moved from an in-process Map to job_lane_heartbeats
+// (2026-09-07 — see sweep-runner.ts's doc comment). Faked here the same
+// shape, still in-memory, so this suite needs no real Postgres.
+const mockHeartbeatStore = new Map<string, unknown>();
+vi.mock("../../../src/db/job-heartbeat-queries.js", () => ({
+  loadLaneHeartbeat: vi.fn(async (profileId: string) => mockHeartbeatStore.get(profileId) ?? null),
+  saveLaneHeartbeat: vi.fn(async (profileId: string, state: unknown) => {
+    mockHeartbeatStore.set(profileId, state);
+  }),
+  clearLaneHeartbeats: vi.fn(async () => {
+    mockHeartbeatStore.clear();
+  }),
+}));
+
 const { runFreeSweep, resetHeartbeat } = await import("../../../src/tools/jobhunt/sweep-runner.js");
 const { listProfiles } = await import("../../../src/tools/jobhunt/profile-config.js");
 
@@ -50,9 +64,9 @@ function ingestResult(overrides: Record<string, unknown> = {}) {
 }
 
 describe("runFreeSweep", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
-    resetHeartbeat(new Date("2026-09-04T00:00:00Z"));
+    await resetHeartbeat(new Date("2026-09-04T00:00:00Z"));
     sweepBoards.mockResolvedValue(BOARD_SWEEP);
     runFreeIngest.mockResolvedValue(ingestResult());
     buildDailyBrief.mockResolvedValue("brief");

@@ -14,6 +14,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   filterCandidates,
   applyDeferredFreshness,
+  summariseBodyless,
   FREE_LANE_MAX_AGE_HOURS,
 } from "../../../src/tools/jobhunt/free-ingest.js";
 import type { FreeCandidate } from "../../../src/tools/jobhunt/free-ats-source.js";
@@ -377,5 +378,41 @@ describe("filterCandidates — a 10h+ unseen posting survives on age alone", () 
     // p90 across the live registry was 8,281h; the default must at minimum admit
     // the median (1,478h) so a normal board is not 50% invisible.
     expect(FREE_LANE_MAX_AGE_HOURS).toBeGreaterThan(720 - 1);
+  });
+});
+
+/**
+ * The last gate, and until 2026-09-06 the only one that dropped postings under a
+ * single count with no cause attached. It ate 100% of the free lane's survivors
+ * for thirty hours — six Lever postings and one Personio one — and reported them
+ * as the bare number 7. "7 postings had no readable description" reads like an
+ * employer's fault; `lever inlined-empty ×6` reads like ours, which it was.
+ */
+describe("summariseBodyless — a drop that names its own cause", () => {
+  it("splits the count by platform and cause instead of reporting a bare number", () => {
+    const note = summariseBodyless([
+      candidate({ board: { ...BOARD, ats: "lever" }, url: "u1" }),
+      candidate({ board: { ...BOARD, ats: "lever" }, url: "u2" }),
+      candidate({ board: { ...BOARD, ats: "greenhouse" }, url: "u3" }),
+    ]);
+
+    expect(note).toContain("3 postings had no readable description");
+    expect(note).toContain("lever inlined-empty ×2");
+    expect(note).toContain("greenhouse detail-empty ×1");
+  });
+
+  it("names an unregistered platform as ours to fix, not as an empty posting", () => {
+    // Cast because `FreeAts` is a closed union and the registry parser rejects
+    // anything outside it — so today this can only happen by adding a platform
+    // to the union without writing its adapter. That is precisely the mistake
+    // worth catching by name rather than as "the employer posted nothing".
+    const unregistered = "jobvite" as FreeBoard["ats"];
+    const note = summariseBodyless([candidate({ board: { ...BOARD, ats: unregistered }, url: "u1" })]);
+
+    expect(note).toContain("jobvite no-adapter ×1");
+  });
+
+  it("returns null when nothing was dropped, so the caller adds no note", () => {
+    expect(summariseBodyless([])).toBeNull();
   });
 });

@@ -100,6 +100,45 @@ describe("hybridRagSearch", () => {
     expect(res.error.stage).toBe("query");
   });
 
+  /**
+   * 2026-09-06: the IDE brain MCP answered a live search with
+   * `Search failed at stage embed: ` — an empty message. Node's happy-eyeballs
+   * connect wraps a refused Postgres in an AggregateError, whose own `.message`
+   * is the empty string, and `errText` returned it verbatim. A brain that
+   * reports its own outage as blank text is the 2026-08-07 shadow-table failure
+   * again: broken retrieval that reads as merely unhelpful.
+   */
+  it("still names the cause when the failure is an AggregateError (empty .message)", async () => {
+    const refused = new AggregateError([
+      new Error("connect ECONNREFUSED ::1:5432"),
+      new Error("connect ECONNREFUSED 127.0.0.1:5432"),
+    ]);
+    expect(refused.message).toBe(""); // the trap this pins
+
+    const res = await hybridRagSearch("brain_memories", "q", 5, deps({
+      vectorSearch: async () => {
+        throw refused;
+      },
+      keywordSearch: async () => {
+        throw refused;
+      },
+    }));
+    if (!("error" in res)) throw new Error("expected error");
+    expect(res.error.message).not.toBe("");
+    expect(res.error.message).toMatch(/ECONNREFUSED/);
+  });
+
+  it("labels a degraded keyword fallback legibly even for an AggregateError", async () => {
+    const res = await hybridRagSearch("brain_memories", "q", 5, deps({
+      vectorSearch: async () => {
+        throw new AggregateError([new Error("connect ECONNREFUSED ::1:5432")]);
+      },
+      keywordSearch: async () => [hit("K1")],
+    }));
+    if (!("hits" in res)) throw new Error("expected hits");
+    expect(res.degradedReason).toMatch(/ECONNREFUSED/);
+  });
+
   it("an empty corpus is not an error — zero hits, mode hybrid", async () => {
     const res = await hybridRagSearch("research_cache", "q", 5, deps({}));
     if (!("hits" in res)) throw new Error("expected hits");

@@ -21,6 +21,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { childLogger } from "../infra/logger.js";
 import { webSearchTool, type SearchResult } from "./web-search.js";
+import { getProfile, DEFAULT_PROFILE_ID } from "./jobhunt/profile-config.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:career" });
@@ -61,10 +62,10 @@ const CV_DIR = process.env["PERSONAL_CV_DIR"]
 
 export const readCvTool: UnifiedTool = {
   name: "read_cv",
+  // NAMES BOTH CANDIDATES ON PURPOSE — the planner routes on this sentence, so a capability it omits does not exist. See tests/unit/tools/career-profile-scoping.test.ts for the prod trace that proved it (2026-09-07).
   description:
-    "Read Pushkar Verma's CV, career background, and skills from his personal knowledge base. " +
-    "Use for: understanding experience relevant to a job description, answering 'what skills do we have', " +
-    "fetching salary expectations, work history, or portfolio signals. Read-only, no approval needed.",
+    "Read a candidate's CV, career background, and skills. Serves BOTH candidates: Pushkar Verma (the founder, the default) and Tashi Goyal (profileId 'wife-nl-finance'). ALWAYS use this — never memory or context — to answer what is on someone's CV, their work history, education, employers, skills or salary expectations, and to understand experience relevant to a job description. " +
+    "Pass profileId when the question names anyone other than the founder. Read-only, no approval needed.",
   input_schema: {
     type: "object",
     properties: {
@@ -81,6 +82,11 @@ export const readCvTool: UnifiedTool = {
           "Pass it when drafting for a specific role — each track has its own CV, and the " +
           "shared master is used when this is omitted.",
       },
+      profileId: {
+        type: "string",
+        description:
+          "Registered profile id to read the CV for (e.g. wife-nl-finance). Omit for the founder's own.",
+      },
     },
     required: [],
   },
@@ -88,6 +94,25 @@ export const readCvTool: UnifiedTool = {
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
     const raw = (args["query"] as string | undefined) ?? "";
     const query = raw.trim().length > 0 ? raw : "general background, skills, and portfolio";
+    const track = args["track"] as string | undefined;
+    const profileId = args["profileId"] as string | undefined;
+
+    // personal-rag and wiki.md are structurally Pushkar's OWN data — a second
+    // profile skips both and reads its own CV file, loud-refusing rather than
+    // falling back to his, same rule readFullCvText already applies to the wiki.
+    if (profileId && profileId !== DEFAULT_PROFILE_ID) {
+      const profile = getProfile(profileId);
+      const trackCvPath = track ? profile.tracks[track]?.cvPath : undefined;
+      const explicitPaths = [...(trackCvPath ? [trackCvPath] : []), ...(profile.baseCvPath ? [profile.baseCvPath] : [])];
+      const cv = readFullCvText(track, explicitPaths.length > 0 ? explicitPaths : undefined);
+      if (!cv.ok) {
+        return { success: false, error: `CV data unavailable for ${profile.candidateName}: ${cv.error}` };
+      }
+      return {
+        success: true,
+        data: `CV data for "${query}" (${profile.candidateName}, source: ${cv.path}):\n\n${excerptFor(cv.text, query)}`,
+      };
+    }
 
     // ── Try personal-rag REST API first ──────────────────────────────────────
     try {
@@ -144,7 +169,7 @@ export const readCvTool: UnifiedTool = {
     // stating the wrong employer, the wrong title and dates off by a year. What
     // this tool returns becomes claims in a real job application, so when both
     // sources can answer, the document the founder maintains wins.
-    const cv = readFullCvText(args["track"] as string | undefined);
+    const cv = readFullCvText(track);
     if (cv.ok) {
       log.debug({ query, path: cv.path }, "CV file used");
       return {

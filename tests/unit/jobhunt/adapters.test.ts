@@ -145,6 +145,64 @@ describe("leverAdapter", () => {
     expect(candidate!.description).toBe("Full plain-text description.");
   });
 
+  // REGRESSION, 2026-09-06. Lever serves `descriptionPlain: ""` alongside a full
+  // HTML `description` on a real share of its postings — measured live on
+  // extremenetworks and brillio-2. Reading only the plain field made every one of
+  // them arrive with a null body, and `runFreeIngest` drops a bodyless posting
+  // before screening. In production that was 6 of the 7 postings that survived
+  // every other filter, on every sweep for thirty hours: the whole free lane's
+  // output, lost to one missing fallback.
+  it("falls back to the HTML description when Lever leaves descriptionPlain empty", () => {
+    const [candidate] = adapter.listJobs(
+      [
+        {
+          ...wellFormed[0]!,
+          descriptionPlain: "",
+          description: "<div><p>We need a <b>Backend Engineer</b>.</p></div>",
+        },
+      ],
+      board({ ats: "lever" }),
+    );
+
+    expect(candidate!.description).toContain("We need a");
+    expect(candidate!.description).toContain("Backend Engineer");
+    expect(candidate!.description).not.toContain("<div>");
+  });
+
+  // Third field, same defect. Live on brillio-2, 2026-09-06: BOTH description
+  // fields empty and the entire posting carried in `lists`, Lever's structured
+  // requirement blocks. Two of the three body fields were unread.
+  it("falls back to the `lists` blocks when both description fields are empty", () => {
+    const [candidate] = adapter.listJobs(
+      [
+        {
+          ...wellFormed[0]!,
+          descriptionPlain: "",
+          description: "",
+          lists: [
+            { text: "Requirements", content: "<ul><li>5 years of Go</li></ul>" },
+            { text: "Benefits", content: "<ul><li>Pension</li></ul>" },
+          ],
+        },
+      ],
+      board({ ats: "lever" }),
+    );
+
+    expect(candidate!.description).toContain("Requirements");
+    expect(candidate!.description).toContain("5 years of Go");
+    expect(candidate!.description).toContain("Benefits");
+    expect(candidate!.description).not.toContain("<li>");
+  });
+
+  it("still reports a genuinely empty posting as bodyless", () => {
+    const [candidate] = adapter.listJobs(
+      [{ ...wellFormed[0]!, descriptionPlain: "", description: "", lists: [] }],
+      board({ ats: "lever" }),
+    );
+
+    expect(candidate!.description).toBeNull();
+  });
+
   it("reads postedAt from createdAt (epoch milliseconds)", () => {
     const [candidate] = adapter.listJobs(wellFormed, board({ ats: "lever" }));
     expect(candidate!.postedAt?.getTime()).toBe(1_735_689_600_000);

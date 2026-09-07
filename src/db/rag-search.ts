@@ -156,7 +156,7 @@ export async function keywordSearchRagTable(
 }
 
 /** Unified Brain Search Interface */
-import { hybridRagSearch, HybridResult, RagStageError } from "./rag-hybrid.js";
+import { hybridRagSearch, HybridResult, RagStageError, errText } from "./rag-hybrid.js";
 import { embedText } from "../lib/embed.js";
 
 export interface SearchBrainOptions {
@@ -177,12 +177,20 @@ export async function searchBrain(opts: SearchBrainOptions): Promise<HybridResul
   const table = opts.table ?? "brain_memories";
 
   return hybridRagSearch(table, opts.query, topK, {
+    // Embed and query are caught separately: the stage is what tells the reader
+    // whether to restart Ollama or restart Postgres, so one try around both
+    // reported every dead database as a dead embedder.
     vectorSearch: async (tbl, q, k) => {
+      let queryEmbedding: number[];
       try {
-        const queryEmbedding = await embedText(q);
+        queryEmbedding = await embedText(q);
+      } catch (err) {
+        throw new RagStageError("embed", errText(err));
+      }
+      try {
         return await searchRagTable(tbl, queryEmbedding, k, { filter: opts.filters });
       } catch (err) {
-        throw new RagStageError("embed", err instanceof Error ? err.message : String(err));
+        throw new RagStageError("query", errText(err));
       }
     },
     keywordSearch: async (tbl, q, k) => {
