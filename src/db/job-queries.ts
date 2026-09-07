@@ -730,6 +730,12 @@ export interface JobStateArgs {
   readonly since?: string;
   readonly fullDetails?: boolean;
   readonly limit?: number;
+  /**
+   * Defaults to DEFAULT_PROFILE_ID via `profileCondition`, same as every
+   * other query in this file — never "no filter". Pass `ALL_PROFILES`
+   * explicitly for a genuinely cross-candidate count.
+   */
+  readonly profileId?: ProfileScope;
 }
 
 export type CuratedJobRow = Pick<
@@ -743,7 +749,12 @@ export async function queryJobState(
 ): Promise<{ count: number; total: number; rows: Array<CuratedJobRow | JobApplication> }> {
   const db = getDb();
 
-  // Total count (unfiltered)
+  // Total count (unfiltered) — deliberately spans every profile, a denominator
+  // rather than an answer. This was the one query in the file that never
+  // gained profile scoping at all: `rows`/`count` below silently mixed both
+  // candidates' queues until now (2026-09-07) — see profile-config.ts's
+  // "seven DB helpers whose default was no filter at all" history; this was
+  // the eighth.
   const [totalRow] = await db
     .select({ total: sql<number>`count(*)` })
     .from(jobApplications)
@@ -751,6 +762,8 @@ export async function queryJobState(
   const total = Number(totalRow?.total ?? 0);
 
   const conditions = [eq(jobApplications.tenant_id, tenantId)];
+  const profileWhere = profileCondition(args.profileId);
+  if (profileWhere) conditions.push(profileWhere);
 
   if (args.stage) {
     conditions.push(eq(jobApplications.stage, args.stage));

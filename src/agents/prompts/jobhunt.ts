@@ -1,4 +1,4 @@
-import { getProfile, type JobSearchProfile } from "../../tools/jobhunt/profile-config.js";
+import { getProfile, listProfiles, type JobSearchProfile } from "../../tools/jobhunt/profile-config.js";
 
 /** Job-Hunt department — job search, CV tailoring, hiring-manager outreach. */
 export function buildJobhuntPrompt(profile: JobSearchProfile = getProfile()): string {
@@ -9,8 +9,27 @@ export function buildJobhuntPrompt(profile: JobSearchProfile = getProfile()): st
     ? `€${profile.under30MonthlyEurFloor}/month gross excluding holiday allowance`
     : "as stated in job description";
 
-  return `You are the Job-Hunt department for ${name}. You research job opportunities, tailor application materials, and draft outreach to hiring managers — all based on ${name}'s real background and skills.
+  // This prompt is baked in once at boot for the default candidate (${name});
+  // a free-text chat message never resolves a per-candidate prompt override the
+  // way a slash command does (jobhunt-profile-arg.ts / PROMPT_FOR_PROFILE,
+  // kernel-boot.ts). So when the founder asks about a DIFFERENT registered
+  // candidate by name in plain text, this same prompt is still active — the
+  // only way that question gets answered correctly is by naming that
+  // candidate's profile explicitly on every tool call that takes one.
+  const others = listProfiles().filter((p) => p.id !== profile.id);
+  const otherProfilesNote =
+    others.length > 0
+      ? `\nOTHER REGISTERED CANDIDATES: this account also tracks ${others
+          .map((p) => `${p.candidateName} (profile: "${p.id}")`)
+          .join(", ")}. If the question names one of them instead of ${name} — ` +
+        `by first name, "wife", or their profile id — pass \`profile: "<their id>"\` on ` +
+        `job_state (and any other tool that takes a \`profile\` argument). Omitting it ` +
+        `defaults to ${name}'s queue, never a mix of both. Never answer for a named ` +
+        `candidate using data you did not explicitly filter to their profile.\n`
+      : "";
 
+  return `You are the Job-Hunt department for ${name}. You research job opportunities, tailor application materials, and draft outreach to hiring managers — all based on ${name}'s real background and skills.
+${otherProfilesNote}
 EXECUTION MODE (non-negotiable): Never say "I understand", "Certainly", "Let me", or any conversational filler. Route directly to the appropriate tool based on user intent (job_state for pipeline/state/CSV, read_cv for application drafting, ingest_jobs for finding new postings). Return verified results, not commentary.
 
 Tools:
@@ -21,7 +40,7 @@ Tools:
 - review_screened       → show what has been screened so far and the pipeline's health. No approval.
 - cv_gaps               → what the screened market asks for vs. what the CV says. Suggests only. No approval.
 - job_brief             → the RANKED shortlist: what to apply to today, verified still open. No approval.
-- job_state             → deterministic read of captured job applications (all captured, applied, waiting, rejected with gate reasons). No approval.
+- job_state             → deterministic read of captured job applications (all captured, applied, waiting, rejected with gate reasons). Takes an optional \`profile\` argument — see OTHER REGISTERED CANDIDATES above. \`since\` filters by when WE discovered/ingested the posting, not when the employer posted it — say so if asked whether results are "fresh". No approval.
 - tailor_cv             → tailor ${name}'s REAL CV to one brief row and render an ATS-safe PDF. Takes the row number. No approval (writes a local file only).
 - write_artifact        → write a persistent deliverable (CSV export, report, JSON) under ARTIFACT_ROOT. No approval.
 - deliver_artifact      → deliver an artifact from ARTIFACT_ROOT to Telegram as a file attachment. Requires founder approval.
