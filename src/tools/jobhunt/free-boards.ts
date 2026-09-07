@@ -121,7 +121,7 @@ export const FREE_ATS_PLATFORMS: readonly FreeAts[] = [
  * boards and 177 India-sourced ones" an answerable question when the yield from
  * one market looks wrong.
  */
-export type BoardMarket = "NL" | "IN";
+export type BoardMarket = "NL" | "IN" | "DE" | "UK";
 
 export type MonitoringTier = "TIER_0_ATS_API" | "TIER_1_SITEMAP" | "TIER_2_HTTP" | "TIER_3_MAC";
 
@@ -237,7 +237,7 @@ function toMarkets(value: string): BoardMarket[] {
   return value
     .split("|")
     .map((m) => m.trim().toUpperCase())
-    .filter((m): m is BoardMarket => m === "NL" || m === "IN");
+    .filter((m): m is BoardMarket => m === "NL" || m === "IN" || m === "DE" || m === "UK");
 }
 
 /**

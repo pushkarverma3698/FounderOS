@@ -19,7 +19,7 @@
  * free-boards.ts (parse) and free-ats-source.ts (poll).
  */
 
-import type { FreeAts, FreeBoard } from "./free-boards.js";
+import type { BoardMarket, FreeAts, FreeBoard } from "./free-boards.js";
 import { workdayTokenFromUrl } from "./adapters/workday.js";
 import { LEGAL_SUFFIX_TOKENS } from "./sponsor-match.js";
 import { parseCsvLine } from "./sponsor-registry.js";
@@ -353,11 +353,13 @@ function csvField(value: string): string {
 /**
  * Render candidates as registry rows.
  *
- * `markets` is always NL: every candidate came from the Dutch recognised-sponsor
- * register, and that column records where a board was SOURCED FROM, never where
- * its postings are. The country of a posting is still decided from the posting's
+ * `markets` records where a board was SOURCED FROM, never where its postings are.
+ * Defaults to NL. The country of a posting is still decided from the posting's
  * own location string.
  */
-export function toBoardCsvRows(boards: readonly CandidateBoard[]): string[] {
-  return boards.map((b) => `${csvField(b.name)},${b.ats},${csvField(b.token)},NL`);
+export function toBoardCsvRows(
+  boards: readonly CandidateBoard[],
+  market: BoardMarket = "NL",
+): string[] {
+  return boards.map((b) => `${csvField(b.name)},${b.ats},${csvField(b.token)},${market}`);
 }

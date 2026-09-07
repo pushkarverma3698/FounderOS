@@ -140,11 +140,13 @@ export function harvestNewBoardTokens(
       name: posting.company,
       ats: extracted.ats,
       token: extracted.token,
-      // Only a POSITIVE NL/IN carries through — "other" or "unknown" writes
-      // an empty markets column rather than defaulting to NL, the exact
-      // defect that filed every unclassified company as Dutch in an earlier
-      // draft of this harvester.
-      markets: posting.country === "NL" || posting.country === "IN" ? [posting.country] : [],
+      markets:
+        posting.country === "NL" ||
+        posting.country === "IN" ||
+        posting.country === "DE" ||
+        posting.country === "UK"
+          ? [posting.country]
+          : [],
     });
   }
 
