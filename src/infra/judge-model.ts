@@ -25,13 +25,32 @@ export type JudgeProvider = "anthropic" | "openrouter" | "openai" | "google-gena
  * Critic model id. Override with JUDGE_MODEL. Default = a FREE OpenRouter model
  * from a DIFFERENT family than the Gemini drafter (rule #6 anti-sycophancy) so
  * the critic can't rubber-stamp its own generation — and costs $0 (no paid
- * Anthropic call on every outbound draft). Llama-3.3-70b follows the compact-JSON
- * instruction reliably; deepseek-r1:free also works but is chattier.
+ * Anthropic call on every outbound draft).
  * Accepts a provider-prefixed id (openrouter:/anthropic:/openai:/google-genai:);
  * a bare id is treated as OpenRouter for free-tier convenience.
+ *
+ * 2026-09-07: llama-3.3-70b-instruct:free (and separately, content-judge.ts's
+ * own default, nvidia/nemotron-3-super-120b-a12b:free) were both DEAD — 404s
+ * or provider errors, live-reconfirmed with scripts/probe-openrouter-free-models.ts.
+ * Root-caused from a real production trace: judgeAnswer logged "Answer
+ * evaluation did not produce scores" on every single jobhunt turn that day,
+ * silently. `judgeOutbound` (the actual send-time gate for outbound copy, gate
+ * 2 after brand-validator) shares this same model resolution — it had been
+ * failing open (auto-pass, no critique) for as long as the slug was dead, with
+ * nothing surfacing it, since a judge outage and a real pass look identical
+ * from the fail-open contract by design.
+ *
+ * minimax/minimax-m2.7:free replaces it — live-verified (2026-09-07) to
+ * return clean, parseable JSON on the actual judge prompt. It is a reasoning
+ * model that CANNOT disable reasoning (OpenRouter 400s on `reasoning:
+ * {enabled:false}` for this endpoint) and burns 400-600+ tokens on it before
+ * ever emitting the answer — at the old maxTokens:512 it silently returned
+ * EMPTY content (reasoning consumed the whole budget) on the real judge
+ * prompt, which is why maxTokens is now 3000 below. Free OpenRouter models
+ * rotate without notice: re-verify with scripts/probe-openrouter-free-models.ts
+ * before trusting this default again.
  */
-const JUDGE_MODEL =
-  process.env["JUDGE_MODEL"]?.trim() || "openrouter:meta-llama/llama-3.3-70b-instruct:free";
+const JUDGE_MODEL = process.env["JUDGE_MODEL"]?.trim() || "openrouter:minimax/minimax-m2.7:free";
 
 /** Resolve the judge model id, defaulting a bare id to the OpenRouter free tier. */
 export function resolveJudgeModelId(): { provider: JudgeProvider; model: string } {
@@ -41,8 +60,8 @@ export function resolveJudgeModelId(): { provider: JudgeProvider; model: string 
   const model = raw.slice(sep + 1).trim();
   const valid: JudgeProvider[] = ["anthropic", "openrouter", "openai", "google-genai", "google-vertexai"];
   if (!valid.includes(provider) || !model) {
-    // Unrecognized override → safe default (free OpenRouter Llama).
-    return { provider: "openrouter", model: "meta-llama/llama-3.3-70b-instruct:free" };
+    // Unrecognized override → safe default (free OpenRouter, live-verified 2026-09-07).
+    return { provider: "openrouter", model: "minimax/minimax-m2.7:free" };
   }
   return { provider, model };
 }
@@ -76,7 +95,11 @@ export function getJudgeModel(): BaseChatModel {
       _model = new ChatOpenAI({
         model,
         temperature: 0,
-        maxTokens: 512,
+        // 3000, not 512: free-tier OpenRouter models are frequently
+        // reasoning models that cannot disable reasoning and spend 400-600+
+        // tokens on it before the answer — at 512 the default judge model
+        // silently returned empty content on every real call (2026-09-07).
+        maxTokens: 3000,
         maxRetries: 2,
         apiKey: process.env["OPENROUTER_API_KEY"] || "missing-openrouter-key",
         configuration: { baseURL: "https://openrouter.ai/api/v1" },

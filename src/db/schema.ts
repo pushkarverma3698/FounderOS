@@ -1741,6 +1741,46 @@ export const answerEvaluations = agentsSchema.table(
 export type AnswerEvaluation = typeof answerEvaluations.$inferSelect;
 export type NewAnswerEvaluation = typeof answerEvaluations.$inferInsert;
 
+// ── job_lane_heartbeats ─────────────────────────────────────────────────────────
+
+/**
+ * One row per profile: "when did the free-jobhunt lane last say anything to
+ * the founder about this candidate, and what has it seen since."
+ *
+ * 2026-09-07: this state lived ONLY in an in-process `Map` (sweep-runner.ts),
+ * on the reasoning that a restart honestly resetting it was fine — the first
+ * sweep after a deploy pings within the hour anyway. That reasoning assumed
+ * restarts are rare. Measured: prod restarted 18 times in 3 days, 4 of them in
+ * 7 minutes during one deploy. The 3-hour "prove the lane is alive" ping
+ * (ALIVE_PING_INTERVAL_MS, sweep-heartbeat.ts) needs 3 CONTINUOUS hours
+ * without a restart to ever fire — which a high-volume profile never notices
+ * (its real "new roles passed" alerts fire far more often than that), but a
+ * thin-market profile can go silent indefinitely: Tashi's last passing role
+ * was 2026-09-04, three days before this was found, with zero alerts and zero
+ * heartbeat pings the whole time. This table is that state, persisted, so a
+ * restart no longer erases the founder's only proof a quiet lane is running.
+ */
+export const jobLaneHeartbeats = agentsSchema.table("job_lane_heartbeats", {
+  /** One row per candidate; not tenant-scoped because profile_id is already unique. */
+  profile_id: text("profile_id").primaryKey(),
+
+  /** Sweeps that found nothing worth interrupting for, since the last message. */
+  quiet_sweeps: integer("quiet_sweeps").notNull().default(0),
+  /** Boards polled across those sweeps — proof work happened, not just silence. */
+  boards_polled: integer("boards_polled").notNull().default(0),
+  /** When the founder last heard from this lane, of any kind. */
+  last_message_at: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Consecutive sweeps where 0 candidates reached screening. */
+  zero_pass_streak: integer("zero_pass_streak").notNull().default(0),
+  /** Last sweep's funnel diagnostic, for the closing-stage explanation on the next alert. */
+  last_funnel: jsonb("last_funnel").$type<Record<string, number | null> | null>(),
+
+  updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type JobLaneHeartbeat = typeof jobLaneHeartbeats.$inferSelect;
+export type NewJobLaneHeartbeat = typeof jobLaneHeartbeats.$inferInsert;
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
 export const interruptRegistry = hitlApprovals;
