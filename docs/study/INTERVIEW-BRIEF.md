@@ -19,7 +19,7 @@ Use these six. They are specific, verifiable, and each one implies a mechanism.
 | **`regex-routing: 0`, `kernel-purity: 0`, `gateway-imports: 0`** — CI fails if any rises | Architecture debt is ratcheted, not aspirational | `governance/architecture-baseline.json` |
 
 **Scale, if asked:** 345 TypeScript source files / 58,141 LOC, 51 tool modules, 8 workers,
-51 ADRs, 29 database tables, 1,297 ATS boards polled across 10 platforms, 911 job postings
+51 ADRs, 29 database tables, 1,312 ATS boards polled across 10 platforms, 911 job postings
 ingested in 4 weeks.
 
 ---

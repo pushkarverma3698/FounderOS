@@ -1,0 +1,147 @@
+# Dutch employers that hire FP&A / audit / KYC / accounting at 0-4 years.
+# Curated 2026-09-07. Turned into board-registry rows by
+#   pnpm jobhunt:import-boards --employers --dry-run
+# which exact-key joins this list to the ten published ATS corpora, polls every
+# candidate, and keeps only the boards that answer with Dutch postings.
+#
+# A row here is a BRAND, written the way an ATS board writes it — not the IND
+# registered legal name. `Coöperatieve Rabobank U.A.` is the register's name and
+# matches nothing; `Rabobank` is what sits in the Workday corpus.
+#
+# One employer may therefore need SEVERAL rows, because the corpora do not agree
+# on what to call it: Shell's board is filed under `Work at Shell`, KLM's under
+# `KLM Careers`, Vopak's under `Royal Vopak`, NIBC's under `Nibcatwork`. Each of
+# those four was found by scanning the corpora for the brand as a substring and
+# then confirmed by the postings the board actually returned — none is a guess.
+#
+# `CSC` is deliberately ABSENT. The trust-and-fund-administration business that
+# now owns Intertrust has no row in any of the ten corpora, and the three rows
+# that do key to `csc` are Columbia Sportswear, CSC Generation and Finland's IT
+# Center for Science. A three-letter brand cannot be joined on a name.
+name,sector
+Deloitte,accountancy
+PwC,accountancy
+PricewaterhouseCoopers,accountancy
+EY,accountancy
+Ernst & Young,accountancy
+KPMG,accountancy
+BDO,accountancy
+Mazars,accountancy
+Forvis Mazars,accountancy
+Grant Thornton,accountancy
+Baker Tilly,accountancy
+Crowe,accountancy
+RSM,accountancy
+Moore,accountancy
+Flynth,accountancy
+Alvarez & Marsal,accountancy
+Protiviti,accountancy
+Accon avm,accountancy
+Visser & Visser,accountancy
+ABN AMRO,bank
+Rabobank,bank
+NIBC,bank
+NIBC Bank,bank
+Nibcatwork,bank
+de Volksbank,bank
+SNS Bank,bank
+Triodos Bank,bank
+Triodos,bank
+Van Lanschot Kempen,bank
+Van Lanschot,bank
+Knab,bank
+Bitvavo,bank
+BNP Paribas,bank
+Deutsche Bank,bank
+Citco,trust-fund-admin
+TMF Group,trust-fund-admin
+Intertrust,trust-fund-admin
+Vistra,trust-fund-admin
+IQ-EQ,trust-fund-admin
+Alter Domus,trust-fund-admin
+Circle Partners,trust-fund-admin
+NN Group,insurer-pension
+Nationale-Nederlanden,insurer-pension
+Aegon,insurer-pension
+Achmea,insurer-pension
+a.s.r.,insurer-pension
+ASR Nederland,insurer-pension
+Athora,insurer-pension
+PGGM,insurer-pension
+MN,insurer-pension
+Blue Sky Group,insurer-pension
+Cardano,insurer-pension
+Allianz,insurer-pension
+Zilveren Kruis,insurer-pension
+Menzis,insurer-pension
+CZ,insurer-pension
+VGZ,insurer-pension
+Van Lanschot Investment Management,insurer-pension
+NN Investment Partners,insurer-pension
+Heineken,shared-services
+Shell,shared-services
+Work at Shell,shared-services
+AkzoNobel,shared-services
+Akzo Nobel,shared-services
+Ahold Delhaize,shared-services
+DSM-Firmenich,shared-services
+dsm-firmenich,shared-services
+KLM,shared-services
+KLM Careers,shared-services
+Air France-KLM,shared-services
+Danone,shared-services
+FrieslandCampina,shared-services
+Vopak,shared-services
+Royal Vopak,shared-services
+Aalberts,shared-services
+Wolters Kluwer,shared-services
+Signify,shared-services
+NXP,shared-services
+Arcadis,shared-services
+Boskalis,shared-services
+SBM Offshore,shared-services
+Fugro,shared-services
+TenneT,shared-services
+Eneco,shared-services
+Vattenfall,shared-services
+Alliander,shared-services
+Stedin,shared-services
+PostNL,shared-services
+KPN,shared-services
+VodafoneZiggo,shared-services
+Coca-Cola Europacific Partners,shared-services
+Just Eat Takeaway,shared-services
+Elsevier,shared-services
+RELX,shared-services
+ASM International,shared-services
+VDL Groep,shared-services
+Euronext,trading
+Flow Traders,trading
+Optiver,trading
+IMC Trading,trading
+Da Vinci Derivatives,trading
+All Options,trading
+Backbase,fintech
+Ohpen,fintech
+MultiSafepay,fintech
+Buckaroo,fintech
+Rapyd,fintech
+ComplyAdvantage,fintech
+Fenergo,fintech
+Accenture,consultancy
+Sia Partners,consultancy
+Roland Berger,consultancy
+Kearney,consultancy
+Riverty,consultancy
+Michael Page,staffing-finance
+Robert Half,staffing-finance
+Hays,staffing-finance
+Walters People,staffing-finance
+Robert Walters,staffing-finance
+Undutchables,staffing-finance
+Blue Lynx,staffing-finance
+YER,staffing-finance
+Yacht,staffing-finance
+Projob,staffing-finance
+Adams Multilingual Recruitment,staffing-finance
+Abroad Experience,staffing-finance
