@@ -67,6 +67,24 @@ describe("read_cv — profileId argument", () => {
     expect(props).toHaveProperty("profileId");
   });
 
+  it("says in its DESCRIPTION that it serves the second candidate, not only in its schema", () => {
+    // MEASURED IN PROD, 2026-09-07, over real Telegram. Asked "What is Tashi CV
+    // background and what jobs is she looking for?", the planner called
+    // read_context and search_memory twice, never this tool, and answered
+    // "CV Background: Missing" — about /opt/founderos-data/cv/cv-wife-base.md,
+    // which exists and which `execute` below already reads correctly.
+    //
+    // The schema had `profileId`; the description said "Read Pushkar Verma's CV"
+    // and stopped there. The planner routes on the DESCRIPTION, so a capability
+    // absent from that sentence does not exist. Fixing the schema without fixing
+    // the sentence is what made the previous session's fix invisible in the only
+    // place the founder can see it.
+    const description = readCvTool.description;
+    expect(description).toMatch(/tashi/i);
+    expect(description).toContain("wife-nl-finance");
+    expect(description).toMatch(/profileId/);
+  });
+
   it("does not call personal-rag at all for a non-default profile — that API is the founder's own knowledge base", async () => {
     const mockFetch = vi.fn();
     vi.stubGlobal("fetch", mockFetch);
