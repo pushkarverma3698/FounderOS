@@ -272,4 +272,48 @@ describe("verifyLiveness", () => {
     ]);
     fetchSpy.mockRestore();
   });
+
+  // ── Soft-404 body scan must not invert the asymmetry (2026-09-08) ───────────
+  // Scanning the page body for "no longer accepting applications" is a useful
+  // signal and a terrible verdict: the match runs over 15KB of raw HTML, which
+  // on any ATS board includes related-jobs widgets, JSON-LD for OTHER postings,
+  // and template copy. A substring hit is ambiguity, and this module resolves
+  // ambiguity toward keeping the row — see the header, and this file's own
+  // docblock: "never to `expired`. If that ever inverts, these are the tests
+  // that catch it."
+
+  const softClosedPage = `<html><body>
+    <h1>Senior Backend Engineer — still open, apply below</h1>
+    <aside class="related-roles">
+      <p>Data Analyst — this position has been filled</p>
+      <p>Product Manager — no longer accepting applications</p>
+    </aside>
+  </body></html>`;
+
+  it("does NOT expire a live posting because closed copy appears somewhere in its HTML", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(softClosedPage, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }),
+    );
+
+    const results = await verifyLiveness([
+      { id: "a", url: "https://jobs.example.com/still-open", source: "ats-ingest" },
+    ]);
+
+    expect(results[0]!.liveness).not.toBe("expired");
+    fetchSpy.mockRestore();
+  });
+
+  it("surfaces the closed-copy match as unverifiable, and says what it saw", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(softClosedPage, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }),
+    );
+
+    const results = await verifyLiveness([
+      { id: "a", url: "https://jobs.example.com/still-open", source: "ats-ingest" },
+    ]);
+
+    expect(results[0]!.liveness).toBe("unverifiable");
+    expect(results[0]!.reason).toContain("no longer accepting applications");
+    fetchSpy.mockRestore();
+  });
 });

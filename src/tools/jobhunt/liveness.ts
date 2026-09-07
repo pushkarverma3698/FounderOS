@@ -34,6 +34,24 @@ export type Liveness = JobKeyStatus;
 const URL_CHECK_TIMEOUT_MS = 10_000;
 
 /**
+ * Copy an ATS renders on a closed posting it still serves with HTTP 200.
+ *
+ * Deliberately literal full sentences, not keywords: "closed" or "filled" alone
+ * match navigation chrome on nearly every board.
+ */
+const SOFT_CLOSE_PHRASES = [
+  "this job has been closed",
+  "this job is no longer available",
+  "job posting has expired",
+  "no longer accepting applications",
+  "position is closed",
+  "this position has been filled",
+] as const;
+
+/** How much of a posting page to scan for soft-close copy. */
+const SOFT_CLOSE_SCAN_CHARS = 15_000;
+
+/**
  * Cap on simultaneous URL checks.
  *
  * These are independent GETs against unrelated third-party ATS hosts, so
@@ -149,26 +167,39 @@ async function checkUrl(url: string): Promise<{ liveness: Liveness; detail: stri
       redirected: response.redirected,
     });
 
-    if (liveness === "live") {
-      const contentType = response.headers.get("content-type") ?? "";
-      if (contentType.includes("text/html")) {
-        try {
-          const bodyText = (await response.text()).slice(0, 15_000).toLowerCase();
-          if (
-            bodyText.includes("this job has been closed") ||
-            bodyText.includes("this job is no longer available") ||
-            bodyText.includes("job posting has expired") ||
-            bodyText.includes("no longer accepting applications") ||
-            bodyText.includes("position is closed") ||
-            bodyText.includes("this position has been filled")
-          ) {
-            liveness = "expired";
-            return { liveness, detail: `Job closed on page: HTTP 200 (${response.url})` };
-          }
-        } catch {
-          /* ignore read failures */
+    // Soft-404 scan: an ATS that answers 200 for a closed posting is common, and
+    // the status alone cannot see it. The scan is EVIDENCE, not a verdict.
+    //
+    // The match runs over raw HTML, which on a real board page also carries
+    // related-role widgets, JSON-LD for other postings, and template copy — so a
+    // hit is ambiguous about WHICH role it describes. Per the header, ambiguity
+    // resolves toward keeping the row and saying so out loud, which means
+    // `unverifiable` (row survives, founder is told what was seen), never
+    // `expired` (row leaves the brief silently). Downgrading here costs at most
+    // one wasted application; the other direction loses a live role forever.
+    //
+    // Cost of the scan: this is the one path that reads a body rather than
+    // cancelling it, so a live HTML posting is downloaded in full before the
+    // slice. Bounded by URL_CHECK_CONCURRENCY pages in flight and by the timeout
+    // above, which stays armed until the `finally` — but it is not free, and it
+    // is why the scan is gated on `live` + text/html rather than run always.
+    if (liveness === "live" && (response.headers.get("content-type") ?? "").includes("text/html")) {
+      try {
+        const bodyText = (await response.text()).slice(0, SOFT_CLOSE_SCAN_CHARS).toLowerCase();
+        const matched = SOFT_CLOSE_PHRASES.find((phrase) => bodyText.includes(phrase));
+        if (matched) {
+          return {
+            liveness: "unverifiable",
+            detail: `HTTP 200, but the page says "${matched}" (${response.url}) — check it before applying`,
+          };
         }
+      } catch {
+        // A body we could not read is not evidence about the posting. Release
+        // the socket and fall through to the status-only verdict rather than
+        // inventing a closure.
+        await releaseBody(response);
       }
+      return { liveness, detail: `HTTP ${response.status} (redirected: ${response.redirected}, final: ${response.url})` };
     }
 
     const verdict = { liveness, detail: `HTTP ${response.status} (redirected: ${response.redirected}, final: ${response.url})` };

@@ -70,13 +70,13 @@ export function markdownToTelegramHtml(md: string): string {
   text = text.replace(/```[a-zA-Z0-9_-]*\n?([\s\S]*?)```/g, (_m, code: string) => {
     const body = escapeHtml(code.replace(/\n$/, ""));
     codeBlocks.push(`<pre>${body}</pre>`);
-    return ` CB${codeBlocks.length - 1} `;
+    return `\u0000CB${codeBlocks.length - 1}\u0000`;
   });
 
   // 2. Extract inline code: `...`
   text = text.replace(/`([^`\n]+)`/g, (_m, code: string) => {
     inlineCodes.push(`<code>${escapeHtml(code)}</code>`);
-    return ` IC${inlineCodes.length - 1} `;
+    return `\u0000IC${inlineCodes.length - 1}\u0000`;
   });
 
   // 2b. Extract Markdown tables → aligned monospace <pre> placeholder (Telegram
@@ -86,7 +86,7 @@ export function markdownToTelegramHtml(md: string): string {
   // 2c. Wrap bare filenames in code chips so Telegram doesn't autolink .md/.py as TLDs
   text = text.replace(/(?<![`"'\/a-zA-Z0-9_.-])([a-zA-Z0-9_-]+\.(?:md|py|sh|ts|js|json|yml|yaml|png|jpg|pdf))(?![`"'\/a-zA-Z0-9_.-])/g, (_m, filename: string) => {
     inlineCodes.push(`<code>${escapeHtml(filename)}</code>`);
-    return ` IC${inlineCodes.length - 1} `;
+    return `\u0000IC${inlineCodes.length - 1}\u0000`;
   });
 
   // 3. Escape everything else so literal <, >, & are safe.
@@ -121,9 +121,9 @@ export function markdownToTelegramHtml(md: string): string {
   text = text.replace(/(^|[^\w_])_([^\s_](?:[^_\n]*?[^\s_])?)_(?![\w_])/g, "$1<i>$2</i>");
 
   // 9. Restore placeholders (inline code, tables, code blocks).
-  text = text.replace(/ TB(\d+) /g, (_m, i: string) => tableBlocks[Number(i)]!);
-  text = text.replace(/ IC(\d+) /g, (_m, i: string) => inlineCodes[Number(i)]!);
-  text = text.replace(/ CB(\d+) /g, (_m, i: string) => codeBlocks[Number(i)]!);
+  text = text.replace(/\u0000TB(\d+)\u0000/g, (_m, i: string) => tableBlocks[Number(i)]!);
+  text = text.replace(/\u0000IC(\d+)\u0000/g, (_m, i: string) => inlineCodes[Number(i)]!);
+  text = text.replace(/\u0000CB(\d+)\u0000/g, (_m, i: string) => codeBlocks[Number(i)]!);
 
   return collapseNestedTags(text);
 }
@@ -146,7 +146,7 @@ function splitRow(line: string): string[] {
 }
 
 /**
- * Replace each Markdown table (header + separator + body rows) with a ` TB{n} `
+ * Replace each Markdown table (header + separator + body rows) with a `\u0000TB{n}\u0000`
  * placeholder whose content is a column-aligned, escaped <pre> block.
  */
 function extractTables(input: string, store: string[]): string {
@@ -158,7 +158,7 @@ function extractTables(input: string, store: string[]): string {
       let j = i + 2;
       while (j < lines.length && isTableRow(lines[j]!)) rows.push(lines[j++]!);
       store.push(renderTable(rows));
-      out.push(` TB${store.length - 1} `);
+      out.push(`\u0000TB${store.length - 1}\u0000`);
       i = j - 1;
     } else {
       out.push(lines[i]!);

@@ -140,18 +140,27 @@ export function afterQuietSweep(
   // Zero-pass streak alert: if funnel drops 100% for N consecutive sweeps, raise alert once at threshold
   if (newStreak === ZERO_PASS_STREAK_THRESHOLD) {
     const top = funnelClosingStage(funnel ?? state.lastFunnel);
-    // If the reason survivors reached zero is strictly because all candidates were already known in the tracker,
-    // that means the market had no new postings — the funnel is healthy and deduping, not restricted or closed.
-    if (top?.reason !== "already known in tracker") {
-      const dropClause = top ? ` (the last ${top.count} died at: ${top.reason})` : "";
-      const ping =
-        `⚠ <b>Job lane funnel alert${who}</b> — 0 candidates passed for ${newStreak} consecutive sweeps` +
-        `${dropClause}. The funnel may be restricted or closed.`;
-      return {
-        next: { ...pending, lastMessageAt: currentNow.getTime() },
-        ping,
-      };
-    }
+    const dropClause = top ? ` (the last ${top.count} died at: ${top.reason})` : "";
+    // Only the DIAGNOSIS varies by closing stage, never whether the alert fires.
+    //
+    // A dedup-only streak does not support "the funnel may be restricted or
+    // closed" — every posting the sweep saw was one we already had. But it is
+    // not evidence of health either: a board fetch frozen on a stale cache is
+    // indistinguishable, from inside the funnel, from a genuinely flat market.
+    // Suppressing the alert there would not defer it, it would delete it — the
+    // guard is a strict `=== THRESHOLD`, so the streak then runs 7, 8, 9… and
+    // never gets another chance until a sweep actually passes something.
+    const diagnosis =
+      top?.reason === "already known in tracker"
+        ? "No NEW postings reached screening — either the market is flat or board fetches are serving stale data."
+        : "The funnel may be restricted or closed.";
+    const ping =
+      `⚠ <b>Job lane funnel alert${who}</b> — 0 candidates passed for ${newStreak} consecutive sweeps` +
+      `${dropClause}. ${diagnosis}`;
+    return {
+      next: { ...pending, lastMessageAt: currentNow.getTime() },
+      ping,
+    };
   }
 
   if (currentNow.getTime() - state.lastMessageAt < ALIVE_PING_INTERVAL_MS) {

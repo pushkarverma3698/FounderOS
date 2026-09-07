@@ -137,6 +137,34 @@ describe("markdownToTelegramHtml", () => {
     expect(out).toContain("<code>README.md</code>");
     expect(out).toContain("<code>primes.py</code>");
   });
+
+  // ── Regression: placeholder sentinels must be unforgeable (2026-09-08) ───────
+  // The extract/restore passes stash code blocks, inline code and tables behind
+  // a placeholder token. If that token is spellable in ordinary prose, any reply
+  // that happens to contain it is silently rewritten on the way to Telegram.
+  // Measured before the fix: "See spec IC7 for details." rendered as
+  // "See specundefinedfor details." — the founder reads the word "undefined".
+
+  it("does not substitute a code span into prose that happens to read like a placeholder", () => {
+    const out = markdownToTelegramHtml("Use `x` then note IC0 in prose.");
+    expect(out).toBe("Use <code>x</code> then note IC0 in prose.");
+  });
+
+  it("never emits 'undefined' for an out-of-range placeholder written by the model", () => {
+    for (const md of ["See spec IC7 for details.", "Row CB0 of the table.", "Item TB3 shipped."]) {
+      const out = markdownToTelegramHtml(md);
+      expect(out).not.toContain("undefined");
+      expect(out).toBe(md);
+    }
+  });
+
+  it("keeps placeholder sentinels out of the rendered output", () => {
+    const out = markdownToTelegramHtml("```\ncode\n```\nand `inline` here");
+    expect(out).not.toMatch(/\u0000/);
+    expect(out).not.toMatch(/(CB|IC|TB)\d+/);
+    expect(out).toContain("<pre>code</pre>");
+    expect(out).toContain("<code>inline</code>");
+  });
 });
 
 describe("splitForTelegram", () => {

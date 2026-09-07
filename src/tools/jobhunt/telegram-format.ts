@@ -95,6 +95,34 @@ export function escapeStrayAngles(html: string): string {
  */
 export const toTelegramSafe = esc;
 
+/** Trailing characters prose and markdown leak onto a URL, minus ")". */
+const LEAKED_TRAILING = new Set(["]", ">", ".", ",", ";", ":"]);
+
+/**
+ * Trim punctuation that ran into a URL from the text around it.
+ *
+ * ")" is handled separately because it is the one character that is BOTH common
+ * leakage (`[label](url)`) and legitimately part of a path — Workday and Workable
+ * append bracketed location and stack qualifiers, e.g. `.../Amsterdam-(HQ)`. A
+ * closing paren is only leakage when it is unbalanced; cutting a balanced one
+ * manufactures a 404, which is the exact defect this sanitizer exists to remove.
+ */
+function stripLeakedTrailingPunctuation(url: string): string {
+  let out = url;
+  for (;;) {
+    const last = out.at(-1);
+    if (last === undefined) return out;
+    if (last === ")") {
+      const opens = (out.match(/\(/g) ?? []).length;
+      const closes = (out.match(/\)/g) ?? []).length;
+      if (closes <= opens) return out;
+    } else if (!LEAKED_TRAILING.has(last)) {
+      return out;
+    }
+    out = out.slice(0, -1);
+  }
+}
+
 /**
  * Sanitize a URL for Telegram HTML:
  * - Strip trailing brackets, parentheses, and punctuation leaked from markdown or prose
@@ -103,7 +131,7 @@ export const toTelegramSafe = esc;
  */
 export function sanitizeTelegramUrl(rawUrl: string | null | undefined): string | null {
   if (!rawUrl || typeof rawUrl !== "string") return null;
-  const cleaned = rawUrl.trim().replace(/[\]\)\>\.,;:]+$/, "");
+  const cleaned = stripLeakedTrailingPunctuation(rawUrl.trim());
   try {
     const parsed = new URL(cleaned);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;

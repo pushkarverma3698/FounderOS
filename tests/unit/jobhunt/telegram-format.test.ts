@@ -65,6 +65,22 @@ describe("link", () => {
       '<a href="https://github.com/pushkarverma3698/FounderOS">FounderOS</a>',
     );
   });
+
+  // A ")" at the end of a URL is only markdown leakage when it is UNBALANCED.
+  // Cutting a balanced one manufactures a 404 — the same dead link this whole
+  // sanitizer exists to remove. Workday and Workable both put bracketed location
+  // and stack qualifiers at the end of a path.
+  it("keeps a balanced trailing parenthesis that is part of the path", () => {
+    expect(link("Role", "https://myworkdayjobs.com/careers/job/Amsterdam-(HQ)")).toBe(
+      '<a href="https://myworkdayjobs.com/careers/job/Amsterdam-%28HQ%29">Role</a>',
+    );
+  });
+
+  it("still strips an unbalanced trailing parenthesis leaked by markdown", () => {
+    expect(link("Role", "https://jobs.example.com/view/123)")).toBe(
+      '<a href="https://jobs.example.com/view/123">Role</a>',
+    );
+  });
 });
 
 describe("cmd", () => {
