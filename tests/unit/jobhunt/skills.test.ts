@@ -118,3 +118,40 @@ describe("unknown-term noise found in the first live run", () => {
     expect(terms("Experience with SQLAlchemy")).toContain("SQLAlchemy");
   });
 });
+
+describe("a plural in the source text still names the skill", () => {
+  /**
+   * MEASURED IN PROD, 2026-09-07, driving `/draft 1` through real Telegram.
+   * The KPN application was blocked by `verifyCvClaims` with: `[technology]
+   * "Vector Database" appears in the tailored CV but extractSkillTerms finds no
+   * mention of it anywhere in the base CV`.
+   *
+   * It was there. `/opt/founderos-data/cv/ai/cv.md` line 75 reads "…embeddings,
+   * vector databases, pgvector…". The alias matcher is
+   * `(?<![a-z0-9])vector database(?![a-z0-9])`, and the trailing "s" of the
+   * plural fails the lookahead — so the SINGULAR form in the tailored CV matched
+   * and the PLURAL form in the base CV did not, and a truthful claim was
+   * reported as a fabrication.
+   *
+   * This is not a cosmetic miss. `verifyCvClaims` blocks the tailored PDF, which
+   * is the artefact the whole supply→apply chain exists to produce: 21 of 22
+   * tailor attempts in prod had failed at this gate, against 2 applications ever
+   * sent. A guard biased toward "prove it's fabricated" must not be defeated by
+   * an English plural.
+   */
+  it("finds a dictionary term written in the plural", () => {
+    expect(terms("RAG and hybrid retrieval, embeddings, vector databases, pgvector")).toContain(
+      "Vector Database",
+    );
+  });
+
+  it("still finds the singular", () => {
+    expect(terms("Built a vector database for retrieval")).toContain("Vector Database");
+  });
+
+  it("does not match a longer unrelated word that merely starts the same way", () => {
+    // The boundary still has to hold: "Kubernetes" must not be found in
+    // "Kubernetesque", and a plural allowance must not open that door.
+    expect(terms("We run Kubernetesque tooling")).not.toContain("Kubernetes");
+  });
+});

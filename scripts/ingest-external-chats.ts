@@ -2,7 +2,10 @@
  * FounderOS — Mass Chat Ingestion Script (ChatGPT, Claude, Gemini)
  * =================================================================
  * Ingests exported chat histories (conversations.json from OpenAI/Claude,
- * or Gemini export JSON files) into brain.turicks_brain pgvector store.
+ * or Gemini export JSON files) into brain.brain_memories pgvector store —
+ * the table search_turicks_brain / search_knowledge actually read (ADR-038).
+ * This script wrote into the retired brain.turicks_brain table until
+ * 2026-09-07: every export ingested through it was silently unsearchable.
  *
  * Usage:
  *   npx tsx --env-file=.env scripts/ingest-external-chats.ts <path-to-export-dir-or-file>
@@ -128,7 +131,7 @@ export async function ingestChatExport(targetPath: string): Promise<number> {
       const source = `chat-export:${conv.title.slice(0, 40)}`;
 
       await db.execute(sql`
-        DELETE FROM brain.turicks_brain WHERE metadata->>'source' = ${source};
+        DELETE FROM brain.brain_memories WHERE metadata->>'source' = ${source};
       `);
 
       for (let i = 0; i < chunks.length; i++) {
@@ -146,13 +149,13 @@ export async function ingestChatExport(targetPath: string): Promise<number> {
 
         if (emb) {
           await db.execute(sql`
-            INSERT INTO brain.turicks_brain (content, metadata, embedding)
-            VALUES (${chunk}, ${meta}::jsonb, ${emb}::vector);
+            INSERT INTO brain.brain_memories (tenant_id, memory_type, content, metadata, embedding, source, status)
+            VALUES ('turicks', 'conversation', ${chunk}, ${meta}::jsonb, ${emb}::vector, ${source}, 'ACTIVE');
           `);
         } else {
           await db.execute(sql`
-            INSERT INTO brain.turicks_brain (content, metadata)
-            VALUES (${chunk}, ${meta}::jsonb);
+            INSERT INTO brain.brain_memories (tenant_id, memory_type, content, metadata, source, status)
+            VALUES ('turicks', 'conversation', ${chunk}, ${meta}::jsonb, ${source}, 'ACTIVE');
           `);
         }
       }
@@ -171,7 +174,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }
   const count = await ingestChatExport(target);
-  console.log(`Successfully ingested ${count} chat conversations into turicks_brain pgvector store!`);
+  console.log(`Successfully ingested ${count} chat conversations into brain_memories pgvector store!`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

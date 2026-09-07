@@ -141,6 +141,11 @@ so the review is not a formality on top of the work, it *is* the quality mechani
 | [AG-006](AG-006-rank-and-report.md) | M0a output surface — `rankFindings` + `renderReport` | M0a | **merged** — reviewed 2026-08-06: zero spec violations; three fixes applied on review (evidence-granular truncation, `localeCompare`→codepoint, plural) |
 | [AG-007](AG-007-typecheck-tests.md) | Bring `tests/` under `pnpm lint` — 109 errors / 34 files | cross-cutting | **merged** — verified 2026-08-06: tsconfig.test.json added, 109 type errors across 34 test files fixed, zero `any` or `@ts-ignore` bypasses, `pnpm gate` 100% green |
 | [Handoff M0b](CLAUDE-CODE-HANDOFF-AG-007-M0A.md) | Handoff Brief to Claude Code for M0b (Mission & Outcome DB Persistence) | M0b | **ready to dispatch** — all AG-007 & M0a work completed, 2,550 tests green, prompt ready |
+| [AG-008](AG-008-turn-latency-percentiles.md) | Populate `agent_results` telemetry, expose P50/P95 turn latency | observability | **merged & shipped** — PR #512, live on prod `32902f0` since 2026-08-20 |
+| [AG-009](AG-009-cost-attribution.md) | Attribute LLM cost to the worker that spent it | observability | **merged & shipped** — PR #513, live-verified same day: `agents.ai_call_costs` carries real `agent`/`tier` identity post-deploy |
+| [AG-010](AG-010-retrieval-eval-harness.md) | Retrieval eval: golden set, recall@k, RAG triad | eval infrastructure | **merged & shipped** — PR #514; found prod keyword RAG at 0% recall (no `ORDER BY` before `LIMIT`), fixed separately by PR #523 the same day |
+| [AG-011](AG-011-answer-quality-judge.md) | Point the existing judge at answer quality (async evaluator) | eval infrastructure | **merged & shipped** — PR #515, live on prod `32902f0` since 2026-08-20 |
+| [AG-012](AG-012-pr-review-canonical-protocol.md) | Make `pnpm pr:review` invoke the canonical `pr-adversary` skill, not a stale copy | cross-cutting (Brain/Doer tooling) | **ready to dispatch** — written 2026-09-07 |
 
 ### AG-004 must be rewritten before it is re-dispatched
 

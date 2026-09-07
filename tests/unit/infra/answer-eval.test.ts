@@ -116,7 +116,7 @@ describe("judgeAnswer", () => {
     expect(j.status).toBe("not_evaluated");
     if (j.status === "not_evaluated") {
       expect(j.reason).toMatch(/no API key configured/i);
-      expect(j.reason).toMatch(/llama/i);
+      expect(j.reason).toMatch(/minimax/i);
     }
   });
 

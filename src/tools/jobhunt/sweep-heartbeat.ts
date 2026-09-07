@@ -155,7 +155,19 @@ export function afterQuietSweep(
   }
 
   return {
-    next: initialHeartbeat(currentNow),
+    // The ping resets ONLY what it just reported — the quiet-sweep counters and
+    // the clock. `zeroPassStreak` deliberately survives it.
+    //
+    // It did not until 2026-09-07, when `initialHeartbeat` zeroed the streak
+    // here too, and the two rules beat against each other: streak reaches 6 →
+    // ⚠ funnel alert → three hours later an unrelated liveness ping clears the
+    // streak → six more quiet sweeps → the same ⚠ alert again, for ever.
+    // Measured in the founder's real chat over 5.7 days (MTProto, 800 messages):
+    // 13 alerts for Pushkar and 6 for Tashi on a median 6.5-hour cycle, in a
+    // window where Pushkar's lane passed 83 genuine new roles. A closed funnel
+    // is one event and gets one alert; only a sweep that actually passes
+    // something (`zeroPass === false`, at the top of this function) reopens it.
+    next: { ...initialHeartbeat(currentNow), zeroPassStreak: newStreak, lastFunnel: pending.lastFunnel },
     ping: formatAlivePing(pending, sheetLink, profile),
   };
 }

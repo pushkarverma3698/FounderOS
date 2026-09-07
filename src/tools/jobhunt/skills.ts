@@ -69,9 +69,22 @@ function escapeRegex(literal: string): string {
 /**
  * Alias → anchored matcher. Boundaries are "not alphanumeric" rather than \b
  * because \b sits between "c" and "+", so /\bc\+\+\b/ never matches "C++".
+ *
+ * The optional trailing `s` accepts the plural, and it is load-bearing rather
+ * than tidy. MEASURED IN PROD 2026-09-07: `/opt/founderos-data/cv/ai/cv.md`
+ * lists "vector databases", the tailored CV wrote "Vector Database", the
+ * trailing "s" failed the lookahead — and `verifyCvClaims` reported a truthful,
+ * grounded skill as a fabricated claim and blocked the application PDF. 21 of
+ * 22 tailor attempts had failed at that gate against 2 applications ever sent,
+ * so an English plural was sitting on the last mile of the whole pipeline.
+ *
+ * Only `s`, never `es`: "es" would let a two-letter alias like "go" match
+ * "goes", and a language name colliding with a common verb is exactly the false
+ * positive the lookarounds exist to prevent. Aliases needing "es" (there are
+ * none today) should be spelled out in the dictionary instead.
  */
 function aliasPattern(alias: string): RegExp {
-  return new RegExp(`(?<![a-z0-9])${escapeRegex(alias)}(?![a-z0-9])`);
+  return new RegExp(`(?<![a-z0-9])${escapeRegex(alias)}s?(?![a-z0-9])`);
 }
 
 type Compiled = ReadonlyArray<{ entry: SkillTerm; patterns: readonly RegExp[] }>;

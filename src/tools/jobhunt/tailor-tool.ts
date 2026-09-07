@@ -26,6 +26,7 @@ import * as path from "node:path";
 import { ARTIFACT_ROOT } from "../../core/config.js";
 import { childLogger } from "../../infra/logger.js";
 import { buildApplicationPacket, resolveBriefRow } from "./apply-packet.js";
+import { getProfile } from "./profile-config.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 
 const log = childLogger({ module: "tool:tailor_cv" });
@@ -50,6 +51,14 @@ export const tailorCvTool: UnifiedTool = {
         type: "string",
         description: "Conversation thread — supplied by the kernel, not by the model.",
       },
+      profileId: {
+        type: "string",
+        description:
+          "Whose brief this row number came from — a registered profile id (e.g. " +
+          "wife-nl-finance), already resolved from free text by the caller. Both candidates " +
+          "number their brief from 1, so this is required to tailor the right row: omitting " +
+          "it defaults to the founder's own brief, never a guess between the two.",
+      },
     },
     required: ["rank"],
   },
@@ -63,7 +72,8 @@ export const tailorCvTool: UnifiedTool = {
       };
     }
 
-    const row = await resolveBriefRow(rank);
+    const profileId = args["profileId"] as string | undefined;
+    const row = await resolveBriefRow(rank, undefined, profileId ? getProfile(profileId) : undefined);
     if (!row) {
       // A refusal, never a nearest match. The cost of guessing is a tailored
       // application written about the wrong company.

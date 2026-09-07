@@ -42,17 +42,17 @@ fi
 echo ""
 echo "==> Brain row counts"
 docker exec founderos-postgres psql -U founderos -d founderos -c \
-  "SELECT 'turicks_brain' AS tbl, count(*) FROM brain.turicks_brain
-   UNION ALL SELECT 'embedded', count(*) FROM brain.turicks_brain WHERE embedding IS NOT NULL
+  "SELECT 'brain_memories' AS tbl, count(*) FROM brain.brain_memories
+   UNION ALL SELECT 'embedded', count(*) FROM brain.brain_memories WHERE embedding IS NOT NULL
    UNION ALL SELECT 'knowledge_entries', count(*) FROM brain.knowledge_entries
    UNION ALL SELECT 'founder_context', count(*) FROM agents.founder_context;" || fail "DB count query failed"
 
 EMBEDDED="$(docker exec founderos-postgres psql -U founderos -d founderos -tAc \
-  "SELECT count(*) FROM brain.turicks_brain WHERE embedding IS NOT NULL;" 2>/dev/null | tr -d ' ')"
+  "SELECT count(*) FROM brain.brain_memories WHERE embedding IS NOT NULL;" 2>/dev/null | tr -d ' ')"
 if [ -z "$EMBEDDED" ] || [ "$EMBEDDED" -le 0 ] 2>/dev/null; then
-  fail "turicks_brain has 0 embedded rows"
+  fail "brain_memories has 0 embedded rows"
 else
-  echo "✅ turicks_brain embedded: $EMBEDDED"
+  echo "✅ brain_memories embedded: $EMBEDDED"
 fi
 
 # Live RAG probe

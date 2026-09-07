@@ -4,7 +4,13 @@
 
 import { describe, it, expect } from "vitest";
 import { filterCandidates, type FreeFunnel } from "../../../src/tools/jobhunt/free-ingest.js";
-import { afterQuietSweep, ZERO_PASS_STREAK_THRESHOLD, funnelClosingStage, type HeartbeatState } from "../../../src/tools/jobhunt/sweep-heartbeat.js";
+import {
+  ALIVE_PING_INTERVAL_MS,
+  afterQuietSweep,
+  ZERO_PASS_STREAK_THRESHOLD,
+  funnelClosingStage,
+  type HeartbeatState,
+} from "../../../src/tools/jobhunt/sweep-heartbeat.js";
 import type { FreeCandidate } from "../../../src/tools/jobhunt/free-ats-source.js";
 import type { FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
@@ -142,6 +148,83 @@ describe("Phase 1 — funnelClosingStage & zero-pass streak alert", () => {
     expect(res.ping).toContain("off-track title");
     expect(res.ping).toContain("5");
     expect(res.ping).not.toContain("stale age cutoff");
+  });
+
+  it("does not re-raise the funnel alert after an alive ping — it fires ONCE per closure", () => {
+    // MEASURED IN THE FOUNDER'S REAL CHAT, 2026-09-07 (MTProto, 800 messages over
+    // 5.7 days): the ⚠ funnel alert went out 13 times for Pushkar and 6 times for
+    // Tashi, on a median 6.5-hour cycle — inside a window where Pushkar's lane
+    // ALSO delivered 83 genuine "new roles passed" alerts. An alert that says the
+    // funnel "may be restricted or closed" while the funnel is passing roles every
+    // thirty minutes is the noise this file's own header warns about, and it fired
+    // on the exact cadence the two rules beat against each other at.
+    //
+    // The mechanism: the alive-ping path returned `initialHeartbeat(now)`, which
+    // zeroes `zeroPassStreak` along with the quiet-sweep counters. So the streak
+    // climbed to 6, alerted, was reset three hours later by an unrelated liveness
+    // ping, and climbed to 6 again — for ever, on a healthy lane.
+    //
+    // The streak may only be cleared by a sweep that actually passed something
+    // (`zeroPass === false`, handled at the top of afterQuietSweep). Saying "still
+    // nothing new" must never be mistaken for "something got through".
+    const funnel: FreeFunnel = {
+      seen: 100, undated: 0, stale: 95, offTrack: 5,
+      offMarket: 0, known: 0, bodyless: 0, screened: 0,
+    };
+
+    let state: HeartbeatState = {
+      quietSweeps: 0, boardsPolled: 0, lastMessageAt: NOW.getTime(),
+      zeroPassStreak: 0, lastFunnel: null,
+    };
+    let clock = NOW.getTime();
+    const alerts: string[] = [];
+    const pings: string[] = [];
+
+    // 48 half-hourly quiet sweeps = a full day of a lane that passes nothing.
+    for (let i = 0; i < 48; i++) {
+      clock += 30 * 60 * 1000;
+      const res = afterQuietSweep(state, 10, funnel, new Date(clock));
+      state = res.next;
+      if (res.ping === null) continue;
+      if (res.ping.includes("funnel alert")) alerts.push(res.ping);
+      else pings.push(res.ping);
+    }
+
+    // The liveness ping must still fire — silencing the lane is the opposite
+    // failure and is what the heartbeat exists to prevent.
+    expect(pings.length).toBeGreaterThan(0);
+    // …but the closure is one event, so it is announced once.
+    expect(alerts).toHaveLength(1);
+    // And the streak keeps counting across the pings rather than restarting.
+    expect(state.zeroPassStreak).toBe(48);
+  });
+
+  it("clears the zero-pass streak only when a sweep actually passes something", () => {
+    const closed: FreeFunnel = {
+      seen: 100, undated: 0, stale: 95, offTrack: 5,
+      offMarket: 0, known: 0, bodyless: 0, screened: 0,
+    };
+    const open: FreeFunnel = { ...closed, offTrack: 4, screened: 1 };
+
+    let state: HeartbeatState = {
+      quietSweeps: 0, boardsPolled: 0, lastMessageAt: NOW.getTime(),
+      zeroPassStreak: ZERO_PASS_STREAK_THRESHOLD, lastFunnel: closed,
+    };
+
+    // A sweep that screened something resets the streak even though nothing
+    // reached the founder (screened > 0, but no NEW pass — still a quiet sweep).
+    state = afterQuietSweep(state, 10, open, new Date(NOW.getTime() + 1_000)).next;
+    expect(state.zeroPassStreak).toBe(0);
+
+    // …and a later alive ping still does not resurrect a false alert.
+    const res = afterQuietSweep(
+      state,
+      10,
+      closed,
+      new Date(NOW.getTime() + ALIVE_PING_INTERVAL_MS + 2_000),
+    );
+    expect(res.ping).not.toBeNull();
+    expect(res.ping).not.toContain("funnel alert");
   });
 });
 

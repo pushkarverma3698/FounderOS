@@ -375,16 +375,22 @@ export const screenJobTool: UnifiedTool = {
           "The posting text, VERBATIM and unsummarised. Salary, hours, language requirement " +
           "and remote/on-site status are all parsed from this. Do not paraphrase figures.",
       },
+      profileId: {
+        type: "string",
+        description: "Registered profile id to screen for (e.g. wife-nl-finance) — salary floor, permit basis and track differ per candidate. Omit for the founder's own.",
+      },
     },
     required: ["company", "title", "description"],
   },
 
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
+    const profileId = args["profileId"] as string | undefined;
     const outcome = await screenPosting({
       company: String(args["company"] ?? ""),
       title: String(args["title"] ?? ""),
       description: String(args["description"] ?? ""),
       ...(args["url"] ? { url: String(args["url"]) } : {}),
+      ...(profileId ? { profile: getProfile(profileId) } : {}),
       source: "manual",
     });
     if (outcome.kind === "error") return { success: false, error: outcome.message };

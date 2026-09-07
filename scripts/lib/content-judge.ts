@@ -39,13 +39,17 @@ export type ContentVerdict =
 /** A dimension at or below this score fails the content gate. */
 export const FAIL_THRESHOLD = 2;
 
-// 2026-08-27: meta-llama/llama-3.3-70b-instruct:free 404s — OpenRouter retired
-// its free tier. nvidia/nemotron-3-super-120b-a12b:free is live-curl-verified
-// (200, cost=0, clean JSON on the exact judge prompt below). Free OpenRouter
-// models rotate without notice — re-verify with
+// 2026-08-27: meta-llama/llama-3.3-70b-instruct:free 404d — OpenRouter retired
+// its free tier. Swapped to nvidia/nemotron-3-super-120b-a12b:free.
+// 2026-09-07: nemotron was ALSO dead (provider error), live-reconfirmed with
+// scripts/probe-openrouter-free-models.ts — same rotation, second time in two
+// weeks. Swapped to minimax/minimax-m2.7:free, live-verified (2026-09-07,
+// same day as src/infra/judge-model.ts's identical fix) to return clean JSON
+// on the real prompt below, PROVIDED maxTokens is high enough — see buildModel.
+// Free OpenRouter models rotate without notice — re-verify with
 // scripts/probe-openrouter-free-models.ts before trusting this default again.
 export const JUDGE_MODEL =
-  process.env["JUDGE_MODEL"]?.trim() || "openrouter:nvidia/nemotron-3-super-120b-a12b:free";
+  process.env["JUDGE_MODEL"]?.trim() || "openrouter:minimax/minimax-m2.7:free";
 
 const DIMENSIONS: (keyof ContentScores)[] = [
   "execution",
@@ -127,7 +131,11 @@ function buildModel(): BaseChatModel | null {
     return new ChatOpenAI({
       model,
       temperature: 0,
-      maxTokens: 256,
+      // 3000, not 256: the default is a reasoning model that cannot disable
+      // reasoning and spends 400-600+ tokens on it before the answer — at 256
+      // it silently returned empty content on the real prompt (2026-09-07),
+      // same failure class as src/infra/judge-model.ts.
+      maxTokens: 3000,
       maxRetries: 1,
       apiKey: process.env["OPENROUTER_API_KEY"],
       configuration: { baseURL: "https://openrouter.ai/api/v1" },
@@ -135,7 +143,7 @@ function buildModel(): BaseChatModel | null {
   }
   if (provider === "openai") {
     if (!process.env["OPENAI_API_KEY"]) return null;
-    return new ChatOpenAI({ model, temperature: 0, maxTokens: 256, maxRetries: 1 });
+    return new ChatOpenAI({ model, temperature: 0, maxTokens: 3000, maxRetries: 1 });
   }
   if (provider === "google-genai") {
     if (!process.env["GOOGLE_GENERATIVE_AI_API_KEY"]) return null;

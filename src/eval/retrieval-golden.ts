@@ -1,13 +1,15 @@
 /**
  * FounderOS — Retrieval Golden Set (data only)
  * =============================================
- * A fixed set of queries against `brain.turicks_brain`, each paired with the
- * document(s) a correct retriever MUST return. This file holds data and the one
- * type that describes it — no logic. Scoring lives in retrieval-scoring.ts.
+ * A fixed set of queries against `brain.brain_memories` (renamed from
+ * `turicks_brain` by ADR-038, 2026-09-05 — same rows, migrated across),
+ * each paired with the document(s) a correct retriever MUST return. This file
+ * holds data and the one type that describes it — no logic. Scoring lives in
+ * retrieval-scoring.ts.
  *
  * How this set was built (so it can be rebuilt honestly):
- *   - The corpus was measured on 2026-08-19 against production:
- *     478 chunks across 113 distinct documents.
+ *   - The corpus was measured on 2026-08-19 against production (then still
+ *     named `turicks_brain`): 478 chunks across 113 distinct documents.
  *   - Every `expectedDocs` entry below was copied from a `source_path` that
  *     actually exists in that corpus. None were invented, and the runner
  *     re-checks their presence at run time (see findMissingGoldenDocs) so a
