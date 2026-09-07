@@ -48,7 +48,7 @@ const context = {
     "7 departments: admin (read_context, update_context), research (search_web, search_knowledge, search_turicks_brain), comms (send_email*, read_emails), engineering (github_read, github_write*, claude_code*, deploy_static_site*), marketing (search_web, search_knowledge, search_turicks_brain, linkedin_post*, publish_signal), sales (search_web, search_knowledge, search_turicks_brain, send_email*, publish_signal), personal (file/shell/browser*, path-guarded), jobhunt (search_jobs, read_cv, send_email*). * = HITL-gated",
 
   founderos_key_features:
-    "Dual turicks-brain (knowledge_entries keyword + turicks_brain pgvector semantic), execution guards (ADR-032 anti-fabrication), crash-safe HITL (Postgres checkpointing), idempotency audit log, typed dept_signals (design_brief_ready, site_deployed), JARVIS web gateway on :3001, deploy_static_site for proof.turicks.com showcases",
+    "Dual turicks-brain (knowledge_entries keyword + brain_memories pgvector semantic, ADR-038), execution guards (ADR-032 anti-fabrication), crash-safe HITL (Postgres checkpointing), idempotency audit log, typed dept_signals (design_brief_ready, site_deployed), JARVIS web gateway on :3001, deploy_static_site for proof.turicks.com showcases",
 
   // ── Business context (ADR-033 / Phase D-Bis — locked 2026-06-17) ───────────
   turicks_services:

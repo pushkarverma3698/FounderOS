@@ -32,13 +32,13 @@ chmod +x deploy/deploy.sh scripts/vps-prod-stabilize.sh 2>/dev/null || true
 echo ""
 echo "==> DB row counts (evidence)"
 docker exec founderos-postgres psql -U founderos -d founderos -c \
-  "SELECT 'turicks_brain' AS tbl, count(*) FROM brain.turicks_brain
-   UNION ALL SELECT 'embedded', count(*) FROM brain.turicks_brain WHERE embedding IS NOT NULL
+  "SELECT 'brain_memories' AS tbl, count(*) FROM brain.brain_memories
+   UNION ALL SELECT 'embedded', count(*) FROM brain.brain_memories WHERE embedding IS NOT NULL
    UNION ALL SELECT 'knowledge_entries', count(*) FROM brain.knowledge_entries
    UNION ALL SELECT 'founder_context', count(*) FROM agents.founder_context;" || true
 
 echo ""
-echo "==> Sample turicks_brain query (live RAG path)"
+echo "==> Sample brain_memories query (live RAG path)"
 node --env-file=.env --import tsx/esm -e "
 import { searchTuricksBrainTool } from './src/tools/rag.js';
 const r = await searchTuricksBrainTool.execute({ query: 'Turicks ICP ideal customer profile', top_k: 3 });
