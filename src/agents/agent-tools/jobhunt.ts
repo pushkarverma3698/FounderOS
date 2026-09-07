@@ -63,8 +63,14 @@ const PROFILE_ARG_DESCRIPTION =
 // ── Job-Hunt: read CV from personal-rag (read-only, NO approval) ─────────────
 
 export const readCv = tool(
-  async ({ query, track }) => {
-    const res = await readCvTool.execute({ query, ...(track ? { track } : {}) });
+  async ({ query, track, profile }) => {
+    const resolved = resolveProfileArg(profile);
+    if (resolved.error) return resolved.error;
+    const res = await readCvTool.execute({
+      query,
+      ...(track ? { track } : {}),
+      ...(resolved.profileId ? { profileId: resolved.profileId } : {}),
+    });
     if (!res.success) return `CV read failed: ${res.error}`;
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
   },
@@ -84,6 +90,7 @@ export const readCv = tool(
         .optional()
         .nullable()
         .describe("Which CV to read: ai, backend, frontend or fullstack. Omit for the shared master."),
+      profile: z.string().optional().nullable().describe(PROFILE_ARG_DESCRIPTION),
     }),
   },
 );
@@ -154,13 +161,16 @@ export const searchJobs = tool(
 // nothing is applied to. The HITL gate stays where it belongs, on send_email.
 
 export const ingestJobs = tool(
-  async ({ limit, time_range, titles, locations, organizations }) => {
+  async ({ limit, time_range, titles, locations, organizations, profile }) => {
+    const resolved = resolveProfileArg(profile);
+    if (resolved.error) return resolved.error;
     const res = await ingestJobsTool.execute({
       ...(limit != null ? { limit } : {}),
       ...(time_range ? { time_range } : {}),
       ...(titles ? { titles } : {}),
       ...(locations ? { locations } : {}),
       ...(organizations ? { organizations } : {}),
+      ...(resolved.profileId ? { profileId: resolved.profileId } : {}),
     });
     if (!res.success) return `Job ingest failed: ${res.error}`;
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
@@ -179,7 +189,7 @@ export const ingestJobs = tool(
         .array(z.string())
         .optional()
         .nullable()
-        .describe("Title phrases, ':*' is a prefix wildcard, e.g. ['AI Engineer:*']"),
+        .describe("Title phrases, ':*' is a prefix wildcard, e.g. ['AI Engineer:*']. Omit to use the named profile's own titles."),
       locations: z
         .array(z.string())
         .optional()
@@ -190,6 +200,14 @@ export const ingestJobs = tool(
         .optional()
         .nullable()
         .describe("Restrict to named employers, e.g. recognised sponsors to target"),
+      profile: z
+        .string()
+        .optional()
+        .nullable()
+        .describe(
+          "Which candidate to pull postings for — sets both the default title search and the " +
+            "screening criteria. " + PROFILE_ARG_DESCRIPTION,
+        ),
     }),
   },
 );

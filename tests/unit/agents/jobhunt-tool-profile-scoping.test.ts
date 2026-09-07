@@ -44,15 +44,18 @@ vi.mock("../../../src/tools/jobhunt/daily-brief.js", () => ({
   jobBriefTool: { description: "mock job_brief", execute: mockJobBriefExecute },
 }));
 
+const mockReadCvExecute = vi.fn(async () => ({ success: true as const, data: "cv" }));
 vi.mock("../../../src/tools/career.js", () => ({
-  readCvTool: { description: "mock read_cv", execute: vi.fn() },
+  readCvTool: { description: "mock read_cv", execute: mockReadCvExecute },
   searchJobsTool: { description: "mock search_jobs", execute: vi.fn() },
 }));
+
+const mockIngestJobsExecute = vi.fn(async () => ({ success: true as const, data: "ingested" }));
 vi.mock("../../../src/tools/jobhunt/ingest-tool.js", () => ({
-  ingestJobsTool: { description: "mock ingest_jobs", execute: vi.fn() },
+  ingestJobsTool: { description: "mock ingest_jobs", execute: mockIngestJobsExecute },
 }));
 
-const { screenJob, tailorCvForRow, reviewScreened, cvGaps, jobBrief } = await import(
+const { screenJob, tailorCvForRow, reviewScreened, cvGaps, jobBrief, readCv, ingestJobs } = await import(
   "../../../src/agents/agent-tools/jobhunt.js"
 );
 
@@ -125,5 +128,51 @@ describe("jobhunt agent-tool wrappers — profile argument", () => {
     expect(mockJobBriefExecute).toHaveBeenCalledWith(
       expect.objectContaining({ profileId: "wife-nl-finance" }),
     );
+  });
+
+  it("read_cv forwards a resolved profileId — omitted for two years, so a free-text question about a second candidate answered from Pushkar's own background", async () => {
+    mockReadCvExecute.mockClear();
+    await readCv.invoke({ query: "FP&A experience", profile: "Tashi" });
+    expect(mockReadCvExecute).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "FP&A experience", profileId: "wife-nl-finance" }),
+    );
+  });
+
+  it("read_cv omits profileId entirely when no profile is named", async () => {
+    mockReadCvExecute.mockClear();
+    await readCv.invoke({ query: "TypeScript experience" });
+    expect(mockReadCvExecute).toHaveBeenCalledWith(
+      expect.not.objectContaining({ profileId: expect.anything() }),
+    );
+  });
+
+  it("read_cv refuses an unrecognised profile loudly instead of guessing", async () => {
+    mockReadCvExecute.mockClear();
+    const res = await readCv.invoke({ query: "anything", profile: "someone-unregistered" });
+    expect(res).toContain("someone-unregistered");
+    expect(mockReadCvExecute).not.toHaveBeenCalled();
+  });
+
+  it("ingest_jobs forwards a resolved profileId — the on-demand pull used Pushkar's tech titles for every candidate", async () => {
+    mockIngestJobsExecute.mockClear();
+    await ingestJobs.invoke({ profile: "wife-nl-finance" });
+    expect(mockIngestJobsExecute).toHaveBeenCalledWith(
+      expect.objectContaining({ profileId: "wife-nl-finance" }),
+    );
+  });
+
+  it("ingest_jobs omits profileId entirely when no profile is named", async () => {
+    mockIngestJobsExecute.mockClear();
+    await ingestJobs.invoke({});
+    expect(mockIngestJobsExecute).toHaveBeenCalledWith(
+      expect.not.objectContaining({ profileId: expect.anything() }),
+    );
+  });
+
+  it("ingest_jobs refuses an unrecognised profile loudly instead of guessing", async () => {
+    mockIngestJobsExecute.mockClear();
+    const res = await ingestJobs.invoke({ profile: "someone-unregistered" });
+    expect(res).toContain("someone-unregistered");
+    expect(mockIngestJobsExecute).not.toHaveBeenCalled();
   });
 });
