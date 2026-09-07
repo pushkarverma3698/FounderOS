@@ -96,6 +96,24 @@ export function escapeStrayAngles(html: string): string {
 export const toTelegramSafe = esc;
 
 /**
+ * Sanitize a URL for Telegram HTML:
+ * - Strip trailing brackets, parentheses, and punctuation leaked from markdown or prose
+ * - Ensure scheme is http: or https:
+ * - Encode parentheses (%28, %29) so Telegram's client parser doesn't break at ')'
+ */
+export function sanitizeTelegramUrl(rawUrl: string | null | undefined): string | null {
+  if (!rawUrl || typeof rawUrl !== "string") return null;
+  const cleaned = rawUrl.trim().replace(/[\]\)\>\.,;:]+$/, "");
+  try {
+    const parsed = new URL(cleaned);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.href.replace(/\(/g, "%28").replace(/\)/g, "%29");
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A label linked to the posting, or the bare label when there is no URL.
  *
  * The URL is checked rather than trusted. It arrives from a job feed, and an
@@ -106,13 +124,9 @@ export const toTelegramSafe = esc;
 export function link(label: string, url: string | null): string {
   const safeLabel = esc(label);
   if (!url) return safeLabel;
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return safeLabel;
-    return `<a href="${esc(parsed.toString())}">${safeLabel}</a>`;
-  } catch {
-    return safeLabel;
-  }
+  const safeUrl = sanitizeTelegramUrl(url);
+  if (!safeUrl) return safeLabel;
+  return `<a href="${esc(safeUrl)}">${safeLabel}</a>`;
 }
 
 /**

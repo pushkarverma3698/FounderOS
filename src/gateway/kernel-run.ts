@@ -92,10 +92,15 @@ function makeBudgetCallback(): BudgetGuardCallback {
 async function sendReply(ctx: Context, text: string): Promise<void> {
   const html = markdownToTelegramHtml(text);
   for (const chunk of splitForTelegram(html)) {
-    await ctx.reply(chunk, { parse_mode: "HTML" }).catch(async () => {
-      // Telegram rejected the HTML (edge-case entities) — send plain, never drop.
-      await ctx.reply(text.slice(0, 4000));
-    });
+    try {
+      await ctx.reply(chunk, { parse_mode: "HTML" });
+    } catch {
+      // Telegram rejected the HTML (edge-case entities) — send this chunk plain, never drop or truncate.
+      const plain = chunk.replace(/<[^>]*>/g, "");
+      for (const sub of splitForTelegram(plain)) {
+        await ctx.reply(sub);
+      }
+    }
   }
 }
 

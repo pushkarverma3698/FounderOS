@@ -132,20 +132,46 @@ async function checkUrl(url: string): Promise<{ liveness: Liveness; detail: stri
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), URL_CHECK_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { method: "GET", signal: controller.signal, redirect: "follow" });
-    const liveness = classifyResponse({
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    let liveness = classifyResponse({
       status: response.status,
       requestedUrl: url,
       finalUrl: response.url,
-      redirected: response.redirected
+      redirected: response.redirected,
     });
+
+    if (liveness === "live") {
+      const contentType = response.headers.get("content-type") ?? "";
+      if (contentType.includes("text/html")) {
+        try {
+          const bodyText = (await response.text()).slice(0, 15_000).toLowerCase();
+          if (
+            bodyText.includes("this job has been closed") ||
+            bodyText.includes("this job is no longer available") ||
+            bodyText.includes("job posting has expired") ||
+            bodyText.includes("no longer accepting applications") ||
+            bodyText.includes("position is closed") ||
+            bodyText.includes("this position has been filled")
+          ) {
+            liveness = "expired";
+            return { liveness, detail: `Job closed on page: HTTP 200 (${response.url})` };
+          }
+        } catch {
+          /* ignore read failures */
+        }
+      }
+    }
+
     const verdict = { liveness, detail: `HTTP ${response.status} (redirected: ${response.redirected}, final: ${response.url})` };
-    // ONLY THE STATUS/URL IS EVER READ, so the body has to be thrown away
-    // explicitly. Under Node's undici an unread body holds the socket and
-    // buffers the whole page until GC — and `clearTimeout` below fires the
-    // moment the headers arrive, so that download is covered by no timeout at
-    // all. 2026-08-06 widened this from 8 sequential requests to 25 across a
-    // 6-way pool, which puts up to six full job pages in memory at once.
     await releaseBody(response);
     return verdict;
   } catch (err) {

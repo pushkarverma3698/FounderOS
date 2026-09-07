@@ -53,6 +53,18 @@ describe("link", () => {
       '<a href="https://x.test/j">Data &amp; AI Lead</a>',
     );
   });
+
+  it("encodes parentheses in URLs to avoid Telegram parser truncation", () => {
+    expect(link("Workable Job", "https://jobs.workable.com/view/123/remote-engineer-(typescript)-in-boston")).toBe(
+      '<a href="https://jobs.workable.com/view/123/remote-engineer-%28typescript%29-in-boston">Workable Job</a>',
+    );
+  });
+
+  it("strips trailing markdown brackets and punctuation that leak into URLs", () => {
+    expect(link("FounderOS", "https://github.com/pushkarverma3698/FounderOS]")).toBe(
+      '<a href="https://github.com/pushkarverma3698/FounderOS">FounderOS</a>',
+    );
+  });
 });
 
 describe("cmd", () => {

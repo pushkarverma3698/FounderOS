@@ -140,14 +140,18 @@ export function afterQuietSweep(
   // Zero-pass streak alert: if funnel drops 100% for N consecutive sweeps, raise alert once at threshold
   if (newStreak === ZERO_PASS_STREAK_THRESHOLD) {
     const top = funnelClosingStage(funnel ?? state.lastFunnel);
-    const dropClause = top ? ` (the last ${top.count} died at: ${top.reason})` : "";
-    const ping =
-      `⚠ <b>Job lane funnel alert${who}</b> — 0 candidates passed for ${newStreak} consecutive sweeps` +
-      `${dropClause}. The funnel may be restricted or closed.`;
-    return {
-      next: { ...pending, lastMessageAt: currentNow.getTime() },
-      ping,
-    };
+    // If the reason survivors reached zero is strictly because all candidates were already known in the tracker,
+    // that means the market had no new postings — the funnel is healthy and deduping, not restricted or closed.
+    if (top?.reason !== "already known in tracker") {
+      const dropClause = top ? ` (the last ${top.count} died at: ${top.reason})` : "";
+      const ping =
+        `⚠ <b>Job lane funnel alert${who}</b> — 0 candidates passed for ${newStreak} consecutive sweeps` +
+        `${dropClause}. The funnel may be restricted or closed.`;
+      return {
+        next: { ...pending, lastMessageAt: currentNow.getTime() },
+        ping,
+      };
+    }
   }
 
   if (currentNow.getTime() - state.lastMessageAt < ALIVE_PING_INTERVAL_MS) {

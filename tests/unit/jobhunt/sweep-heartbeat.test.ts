@@ -76,6 +76,31 @@ describe("afterQuietSweep", () => {
     const due = afterQuietSweep(initialHeartbeat(START), 1, at(ALIVE_PING_INTERVAL_MS), null);
     expect(due.ping).toContain("alive");
   });
+
+  it("suppresses closed-funnel alert when candidates only died at 'already known in tracker'", () => {
+    let state = initialHeartbeat(START);
+    const funnelWithKnownOnly = {
+      seen: 19,
+      undated: 0,
+      stale: 0,
+      offTrack: 0,
+      offMarket: 0,
+      known: 19,
+      bodyless: 0,
+      screened: 0,
+      passed: 0,
+    };
+    for (let i = 1; i <= 5; i++) {
+      const step = afterQuietSweep(state, 285, funnelWithKnownOnly, at(i * 30 * 60 * 1000), LINK);
+      expect(step.ping).toBeNull();
+      state = step.next;
+    }
+    const step6 = afterQuietSweep(state, 285, funnelWithKnownOnly, at(6 * 30 * 60 * 1000), LINK);
+    expect(step6.ping).not.toContain("funnel alert");
+    expect(step6.ping).toContain("Job lane alive");
+    state = step6.next;
+    expect(state.zeroPassStreak).toBe(6);
+  });
 });
 
 describe("afterSpokenSweep", () => {

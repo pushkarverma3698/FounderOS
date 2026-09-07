@@ -114,6 +114,29 @@ describe("markdownToTelegramHtml", () => {
     expect(out).not.toContain("**");
     expect(out).not.toMatch(/^- /m);
   });
+
+  it("converts LaTeX math expressions into readable plain text", () => {
+    const md = "Calculation: $$\\text{Duration} = \\frac{13,000}{21.2} \\approx 613\\text{ seconds}$$ fits in window.";
+    const out = markdownToTelegramHtml(md);
+    expect(out).not.toContain("$$");
+    expect(out).not.toContain("\\text");
+    expect(out).not.toContain("\\frac");
+    expect(out).toContain("Duration = (13,000 / 21.2) ≈ 613 seconds");
+  });
+
+  it("handles bracketed bare URLs cleanly without leaking closing bracket into href", () => {
+    const md = "Check repo at [https://github.com/pushkarverma3698/FounderOS]";
+    const out = markdownToTelegramHtml(md);
+    expect(out).toContain('<a href="https://github.com/pushkarverma3698/FounderOS">https://github.com/pushkarverma3698/FounderOS</a>');
+    expect(out).not.toContain("FounderOS]");
+  });
+
+  it("wraps bare filenames in code chips to prevent Telegram autolinking .md/.py as TLDs", () => {
+    const md = "Files created: README.md and primes.py in root.";
+    const out = markdownToTelegramHtml(md);
+    expect(out).toContain("<code>README.md</code>");
+    expect(out).toContain("<code>primes.py</code>");
+  });
 });
 
 describe("splitForTelegram", () => {
