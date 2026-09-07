@@ -128,6 +128,29 @@ export function cmd(command: string): string {
 }
 
 /**
+ * Clip plain text to `max` characters on a word boundary.
+ *
+ * PROD 2026-09-07: `/draft 1` failed the CV claim guard and the founder's
+ * Telegram message read `... [technology] "TD)` — a bare `.slice(0, 200)` had
+ * bisected a word and taken the rest of the ungrounded-claims list with it, so
+ * the one thing the message existed to tell him was the one thing it did not
+ * say. Backing up to the last space costs at most a word and keeps the text
+ * readable; the ellipsis says out loud that there is more.
+ *
+ * Plain text only — this backs over `<` and `>` blindly and would leave a
+ * dangling tag. Use `splitForTelegram` for rendered HTML.
+ */
+export function truncateAtWord(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max);
+  const lastSpace = head.lastIndexOf(" ");
+  // Only honour a boundary in the last quarter — an early one would throw away
+  // most of the message to save one bisected word.
+  const cut = lastSpace > max * 0.75 ? head.slice(0, lastSpace) : head;
+  return `${cut.trimEnd()}…`;
+}
+
+/**
  * Split a rendered message into Telegram-sized parts, never mid-tag.
  *
  * Nothing in the send path chunks, so before this existed a brief over 4,096
