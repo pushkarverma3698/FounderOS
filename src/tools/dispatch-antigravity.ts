@@ -13,7 +13,16 @@
  *   - Issues are the ONLY dispatch mechanism for Antigravity.
  *   - The issue must contain all required sections (Goal, Scope, Verification, etc.)
  *     so the headless executor can run with zero conversation history.
- *   - Pinned to ISSUE_REPO (pushkarverma3698/FounderOS).
+ *
+ * TARGET REPO IS NOT PINNED, AND THAT IS WORTH KNOWING. `repo` is a caller-supplied
+ * argument that takes precedence over ISSUE_REPO, so the model can name any
+ * repository this GITHUB_TOKEN can write to — and an issue is public content.
+ * Two things contain it, neither of them this file: the HITL card prints the
+ * resolved slug in its summary, so the founder approves a named target rather
+ * than a blank one; and the VPS `agent-dispatch` daemon is pinned by its own
+ * crontab (ISSUE_REPO=pushkarverma3698/FounderOS), so an issue opened anywhere
+ * else is inert rather than executed. Tighten to an allowlist here if the token's
+ * scope ever widens.
  */
 
 import { Octokit } from "octokit";
