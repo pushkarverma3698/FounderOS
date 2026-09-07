@@ -40,6 +40,7 @@ export {
   readEmails,
 } from "./agent-tools/comms.js";
 export { githubRead, githubWrite, projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite } from "./agent-tools/engineering.js";
+export { dispatchAntigravityTask } from "./agent-tools/antigravity.js";
 export { vpsRun } from "./agent-tools/vps-run.js";
 export { readFile, listDir, sendFile, writeFile, runShell, browser } from "./agent-tools/personal.js";
 export { readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobBrief, tailorCvForRow } from "./agent-tools/jobhunt.js";

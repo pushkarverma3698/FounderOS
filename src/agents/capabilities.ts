@@ -45,6 +45,7 @@ import {
   tailorCvForRow,
   projectWorkflow,
   claudeCode,
+  dispatchAntigravityTask,
   applyCinematicPreset,
   deployStaticSite,
   recordEvent,
@@ -106,7 +107,7 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
-  engineering: [projectWorkflow, claudeCode, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead],
+  engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead],
   marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
   sales: [searchWeb, createSendEmailTool("sales"), searchKnowledge],
   personal: [readFile, listDir, runShell, browser, searchPersonalRag, sendFile, writeFile],
@@ -118,7 +119,7 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
 
 /** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops). */
 export const ENGINEERING_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
-  coder: [claudeCode, githubRead, synthesizeSkill],
+  coder: [claudeCode, dispatchAntigravityTask, githubRead, synthesizeSkill],
   qa: [claudeCode, githubRead],
   devops: [claudeCode, projectWorkflow],
 };
@@ -150,6 +151,7 @@ export const HITL_GATED_TOOLS = new Set([
   "run_shell",
   "browser",
   "claude_code",
+  "dispatch_antigravity_task",
   "vps_run",
   "deploy_static_site",
   "project_workflow",
@@ -244,6 +246,7 @@ export function buildCapabilityManifest(): string {
     "- supervisor (you): handoffs only — route to departments; you have NO business tools",
     "Notes:",
     "- claude_code = a full Claude Code coding agent (files, shell, git, gh) in an isolated workspace — engineering's primary executor for any build/code/repo task.",
+    "- dispatch_antigravity_task = dispatches an engineering/code task to Google Antigravity on the VPS by creating a structured issue on pushkarverma3698/FounderOS with label agent:ready. The VPS agent-dispatch loop claims it within 15 min and opens a draft PR.",
     "- apply_cinematic_preset = copies cinematic-web preset scaffold (neon/glass/terminal/minimal) before landing page builds.",
     "- browser = Safari automation on the founder's Mac (personal dept).",
     "- list_video_brands / compile_video_brief = the Video Factory (video-factory/): brand-token registry + deterministic production briefs for client social videos; execution/rendering runs locally via claude_code at $0 API cost.",
