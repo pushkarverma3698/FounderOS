@@ -16,7 +16,6 @@ import { intEnv } from "../../core/config.js";
 import {
   listActionableApplications,
   countAgedOutApplications,
-  listStandingApplications,
   recordLiveness,
   APPLY_QUEUE_MAX_AGE_HOURS,
 } from "../../db/job-queries.js";
@@ -220,25 +219,18 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
 
   const rows: BriefRow[] = scored.map(({ row, overlap }) => toBriefRow(row, overlap, now, liveness));
 
-  // The standing pool: pass, re-confirmed live, aged out of the fresh window —
-  // see listStandingApplications's own comment for why age alone stopped being
-  // the right proxy for "worth applying to". Never run through `verifyLiveness`
-  // here: it already IS a liveness-verified population, and re-checking sixty
-  // more URLs every run just to confirm what the query already guarantees would
-  // spend the same budget `VERIFY_TOP_N` exists to ration.
-  let standingRows: BriefRow[] = [];
-  let standingScored: Array<{ row: JobApplication; overlap: OverlapResult }> = [];
-  try {
-    const standingApplications = await listStandingApplications({ profileId: profile.id });
-    standingScored = rankRows(standingApplications, cvs, now);
-    standingRows = standingScored.map(({ row, overlap }) =>
-      toBriefRow(row, overlap, now, new Map()),
-    );
-  } catch (err) {
-    // allow-failopen: standing is an addition to the brief, not its core. A
-    // query failure here must not cost the founder DO TODAY.
-    log.warn({ err: (err as Error).message }, "Standing pool unavailable — section omitted");
-  }
+  // Reverted 2026-09-07 (founder decision): back to a strict 24h window. The
+  // standing pool (postings older than APPLY_QUEUE_MAX_AGE_HOURS, kept alive up
+  // to STANDING_LIVENESS_MAX_HOURS as long as re-verified live) was the
+  // 2026-09-01 "reach fix" — it kept good roles visible instead of discarding
+  // them at 24h, but it also meant the brief was dominated by old roles (442
+  // standing vs 35 fresh for one profile) rather than reading as "today's fresh
+  // finds". The founder chose fresh-only over reach. `listStandingApplications`,
+  // `selectStanding`/`orderStanding` (brief-select.ts) and the STANDING render
+  // block (brief.ts) are now dead code, left in place rather than torn out —
+  // this call site is the only thing that fed them.
+  const standingRows: BriefRow[] = [];
+  const standingScored: Array<{ row: JobApplication; overlap: OverlapResult }> = [];
 
   // An unreadable CV is not a cosmetic warning: it zeroes every overlap score
   // for that track, so the ranking stops being a ranking. It belongs with the
