@@ -62,10 +62,10 @@ const CV_DIR = process.env["PERSONAL_CV_DIR"]
 
 export const readCvTool: UnifiedTool = {
   name: "read_cv",
+  // NAMES BOTH CANDIDATES ON PURPOSE — the planner routes on this sentence, so a capability it omits does not exist. See tests/unit/tools/career-profile-scoping.test.ts for the prod trace that proved it (2026-09-07).
   description:
-    "Read Pushkar Verma's CV, career background, and skills from his personal knowledge base. " +
-    "Use for: understanding experience relevant to a job description, answering 'what skills do we have', " +
-    "fetching salary expectations, work history, or portfolio signals. Read-only, no approval needed.",
+    "Read a candidate's CV, career background, and skills. Serves BOTH candidates: Pushkar Verma (the founder, the default) and Tashi Goyal (profileId 'wife-nl-finance'). ALWAYS use this — never memory or context — to answer what is on someone's CV, their work history, education, employers, skills or salary expectations, and to understand experience relevant to a job description. " +
+    "Pass profileId when the question names anyone other than the founder. Read-only, no approval needed.",
   input_schema: {
     type: "object",
     properties: {
