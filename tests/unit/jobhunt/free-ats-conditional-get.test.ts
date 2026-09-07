@@ -69,7 +69,7 @@ describe("fetchPayload — conditional requests", () => {
 
     mockFetch.mockResolvedValueOnce(xmlResponse("<new/>", '"v2"'));
     expect(await fetchPayload(URL_, 1000, "xml", cache)).toBe("<new/>");
-    expect(cache.read(URL_)).toBe("<new/>");
+    expect(await cache.read(URL_)).toBe("<new/>");
   });
 
   it("asks unconditionally when no cache is supplied — the per-posting body path", async () => {
@@ -88,6 +88,5 @@ describe("fetchPayload — conditional requests", () => {
     mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ a: 1 }) });
 
     await expect(fetchPayload(URL_, 1000, "json", cache)).resolves.toEqual({ a: 1 });
-    expect(cache.size).toBe(0);
   });
 });

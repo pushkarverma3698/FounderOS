@@ -64,28 +64,44 @@ function toAggregatorJob(raw: ArbeitnowJob): AggregatorJob | null {
   };
 }
 
+const COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+let lastFetchTime = 0;
+
 async function fetchPage(page: number): Promise<ArbeitnowResponse | null> {
-  try {
-    const url = `https://www.arbeitnow.com/api/job-board-api?page=${page}`;
-    const response = await fetch(url, {
-      headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!response.ok) {
-      console.warn(`arbeitnow: page ${page} returned HTTP ${response.status}`);
-      return null;
+  const url = `https://www.arbeitnow.com/api/job-board-api?page=${page}`;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (response.ok) {
+        return (await response.json()) as ArbeitnowResponse;
+      }
+      if (response.status === 429 || response.status >= 500) {
+        console.warn(`arbeitnow: page ${page} HTTP ${response.status}, attempt ${attempt}/3`);
+        await sleep(process.env.NODE_ENV === "test" ? 1 : PAGE_DELAY_MS * attempt * 2);
+        continue;
+      }
+      return null; // Not retryable (e.g. 404)
+    } catch (err) {
+      console.warn(`arbeitnow: page ${page} network err, attempt ${attempt}/3 —`, err instanceof Error ? err.message : String(err));
+      await sleep(process.env.NODE_ENV === "test" ? 1 : PAGE_DELAY_MS * attempt * 2);
     }
-    return (await response.json()) as ArbeitnowResponse;
-  } catch (err) {
-    console.warn(`arbeitnow: page ${page} failed —`, err instanceof Error ? err.message : String(err));
-    return null;
   }
+  return null;
 }
 
 export function createArbeitnowSource(): AggregatorSource {
   return {
     name: "arbeitnow",
     async fetchJobs(): Promise<readonly AggregatorJob[]> {
+      const now = Date.now();
+      if (now - lastFetchTime < COOLDOWN_MS && process.env.NODE_ENV !== "test") {
+        return [];
+      }
+      lastFetchTime = now;
+
       const jobs: AggregatorJob[] = [];
 
       for (let page = 1; page <= MAX_PAGES; page++) {

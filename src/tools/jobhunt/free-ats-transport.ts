@@ -19,7 +19,10 @@ export type WireFormat = "json" | "xml";
 
 /** Carries the HTTP status so the retry decision is made on the code, not on a string. */
 export class HttpStatusError extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    readonly retryAfterMs?: number,
+  ) {
     super(`HTTP ${status}`);
     this.name = "HttpStatusError";
   }
@@ -62,7 +65,7 @@ export async function fetchPayload(
   // A POST carries its page offset in the BODY while the URL stays constant, so a
   // URL-keyed validator cache would serve page 1's payload for every later page.
   // Conditional requests are a GET-only optimisation here, deliberately.
-  const validators = method === "GET" ? (cache?.headersFor(url) ?? {}) : {};
+  const validators = method === "GET" && cache ? await cache.headersFor(url) : {};
   try {
     const response = await fetch(url, {
       method,
@@ -75,28 +78,35 @@ export async function fetchPayload(
       },
     });
 
-    // 304 is a SUCCESS, not a miss: the board is unchanged and the payload we
-    // already hold is the current answer. `headersFor` only offers a validator
-    // while the matching payload is still resident, so this cannot return
-    // undefined for an evicted entry.
     if (response.status === 304 && cache) {
       void response.body?.cancel();
-      return cache.read(url);
+      return await cache.read(url);
     }
 
     if (!response.ok) {
-      // Read the status before discarding the body, then discard it: an
-      // unconsumed body holds the socket open under undici until GC.
       void response.body?.cancel();
-      throw new HttpStatusError(response.status);
+      const retryAfter = response.headers?.get("retry-after");
+      let retryAfterMs: number | undefined;
+      if (retryAfter) {
+        const asSec = parseInt(retryAfter, 10);
+        if (!Number.isNaN(asSec)) {
+          retryAfterMs = asSec * 1000;
+        } else {
+          const asDate = new Date(retryAfter).getTime();
+          if (!Number.isNaN(asDate)) {
+            retryAfterMs = Math.max(0, asDate - Date.now());
+          }
+        }
+      }
+      throw new HttpStatusError(response.status, retryAfterMs);
     }
 
     const payload = format === "json" ? await response.json() : await response.text();
-    // Optional chaining is load-bearing, not defensive noise. A throw inside this
-    // try is indistinguishable from a transport failure to `isRetryable`, so a
-    // response that simply carries no headers would be retried three times and
-    // then reported as a broken board. No headers just means nothing to cache.
-    cache?.store(url, response.headers?.get("etag"), payload);
+    
+    if (cache) {
+      await cache.store(url, response.headers?.get("etag"), payload);
+    }
+    
     return payload;
   } finally {
     clearTimeout(timer);

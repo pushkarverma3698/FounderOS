@@ -81,31 +81,47 @@ function toAggregatorJob(raw: HimalayasJob): AggregatorJob | null {
   };
 }
 
-async function fetchPage(cursor: string | null): Promise<HimalayasResponse | null> {
-  try {
-    const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
-    if (cursor) params.set("cursor", cursor);
-    const url = `https://himalayas.app/jobs/api?${params.toString()}`;
+const COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
+let lastFetchTime = 0;
 
-    const response = await fetch(url, {
-      headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!response.ok) {
-      console.warn(`himalayas: HTTP ${response.status}`);
+async function fetchPage(cursor: string | null): Promise<HimalayasResponse | null> {
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+  if (cursor) params.set("cursor", cursor);
+  const url = `https://himalayas.app/jobs/api?${params.toString()}`;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (response.ok) {
+        return (await response.json()) as HimalayasResponse;
+      }
+      if (response.status === 429 || response.status >= 500) {
+        console.warn(`himalayas: HTTP ${response.status}, attempt ${attempt}/3`);
+        await sleep(PAGE_DELAY_MS * attempt * 2);
+        continue;
+      }
       return null;
+    } catch (err) {
+      console.warn(`himalayas: network err, attempt ${attempt}/3 —`, err instanceof Error ? err.message : String(err));
+      await sleep(PAGE_DELAY_MS * attempt * 2);
     }
-    return (await response.json()) as HimalayasResponse;
-  } catch (err) {
-    console.warn(`himalayas: fetch failed —`, err instanceof Error ? err.message : String(err));
-    return null;
   }
+  return null;
 }
 
 export function createHimalayasSource(): AggregatorSource {
   return {
     name: "himalayas",
     async fetchJobs(): Promise<readonly AggregatorJob[]> {
+      const now = Date.now();
+      if (now - lastFetchTime < COOLDOWN_MS && process.env.NODE_ENV !== "test") {
+        return [];
+      }
+      lastFetchTime = now;
+
       const jobs: AggregatorJob[] = [];
       let cursor: string | null = null;
 

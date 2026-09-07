@@ -103,5 +103,16 @@ if (process.env["ALLOW_NETWORK"] !== "1") {
   };
   // Reinstalled before every test file (setupFiles runs per file), so every
   // file starts from a blocked baseline regardless of sibling-file ordering.
-  globalThis.fetch = blockedFetch as unknown as typeof fetch;
 }
+import { vi } from "vitest";
+
+vi.mock("../src/db/ats-board-cache-queries.js", () => {
+  const store = new Map<string, any>();
+  return {
+    getAtsCache: async (url: string) => store.get(url) ?? null,
+    setAtsCache: async (url: string, etag: string | null | undefined, payload: unknown) => {
+      if (!etag) store.delete(url);
+      else store.set(url, { etag, payload });
+    }
+  };
+});

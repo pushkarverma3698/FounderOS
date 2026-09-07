@@ -67,34 +67,49 @@ function toAggregatorJob(raw: JobicyJob): AggregatorJob | null {
   };
 }
 
+const COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours
+let lastFetchTime = 0;
+
 export function createJobicySource(): AggregatorSource {
   return {
     name: "jobicy",
     async fetchJobs(): Promise<readonly AggregatorJob[]> {
-      try {
-        const url = `https://jobicy.com/api/v2/remote-jobs?count=${COUNT}&geo=europe`;
-        const response = await fetch(url, {
-          headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        });
-        if (!response.ok) {
-          console.warn(`jobicy: HTTP ${response.status}`);
-          return [];
-        }
-        const data = (await response.json()) as JobicyResponse;
-        if (!data.jobs) return [];
-
-        const jobs: AggregatorJob[] = [];
-        for (const raw of data.jobs) {
-          const job = toAggregatorJob(raw);
-          if (job !== null) jobs.push(job);
-        }
-        return jobs;
-      } catch (err) {
-        // allow-failopen: aggregator failure must not block the sweep
-        console.warn(`jobicy: fetch failed —`, err instanceof Error ? err.message : String(err));
+      const now = Date.now();
+      if (now - lastFetchTime < COOLDOWN_MS && process.env.NODE_ENV !== "test") {
         return [];
       }
+      lastFetchTime = now;
+
+      const url = `https://jobicy.com/api/v2/remote-jobs?count=${COUNT}&geo=europe`;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const response = await fetch(url, {
+            headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+            signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+          });
+          if (response.ok) {
+            const data = (await response.json()) as JobicyResponse;
+            if (!data.jobs) return [];
+    
+            const jobs: AggregatorJob[] = [];
+            for (const raw of data.jobs) {
+              const job = toAggregatorJob(raw);
+              if (job !== null) jobs.push(job);
+            }
+            return jobs;
+          }
+          if (response.status === 429 || response.status >= 500) {
+            console.warn(`jobicy: HTTP ${response.status}, attempt ${attempt}/3`);
+            await new Promise(r => setTimeout(r, process.env.NODE_ENV === "test" ? 1 : attempt * 2000));
+            continue;
+          }
+          return [];
+        } catch (err) {
+          console.warn(`jobicy: network err, attempt ${attempt}/3 —`, err instanceof Error ? err.message : String(err));
+          await new Promise(r => setTimeout(r, process.env.NODE_ENV === "test" ? 1 : attempt * 2000));
+        }
+      }
+      return [];
     },
   };
 }

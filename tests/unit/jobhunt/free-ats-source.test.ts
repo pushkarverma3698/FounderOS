@@ -209,7 +209,13 @@ describe("sweepBoards", () => {
       board({ ats: "lever", token: "b" }),
       board({ ats: "ashby", token: "c" }),
     ];
-    mockFetch.mockResolvedValue(errorResponse(500));
+    // The staggerMs (100ms for greenhouse) means workers start slowly.
+    // If we return instantly, concurrency never builds up above 1.
+    // Slow down the fetch so multiple workers are in-flight at once.
+    mockFetch.mockImplementation(async () => {
+      await new Promise(r => setTimeout(r, 100));
+      return { ok: false, status: 500 };
+    });
 
     const sweep = await sweepBoards(boards);
 
@@ -248,7 +254,7 @@ describe("sweepBoards", () => {
       const now = (inFlight.get(ats) ?? 0) + 1;
       inFlight.set(ats, now);
       peak.set(ats, Math.max(peak.get(ats) ?? 0, now));
-      await new Promise((r) => setTimeout(r, 5));
+      await new Promise((r) => setTimeout(r, 300));
       inFlight.set(ats, now - 1);
       return okResponse(ats === "recruitee" ? { offers: [] } : { jobs: [] });
     });

@@ -68,10 +68,18 @@ function toAggregatorJob(raw: RemotiveJob): AggregatorJob | null {
   };
 }
 
+const COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours
+let lastFetchTime = 0;
+
 export function createRemotiveSource(): AggregatorSource {
   return {
     name: "remotive",
     async fetchJobs(): Promise<readonly AggregatorJob[]> {
+      const now = Date.now();
+      if (now - lastFetchTime < COOLDOWN_MS && process.env.NODE_ENV !== "test") {
+        return [];
+      }
+      lastFetchTime = now;
       try {
         const url = `https://remotive.com/api/remote-jobs?category=${CATEGORY}&limit=${LIMIT}`;
         const response = await fetch(url, {
