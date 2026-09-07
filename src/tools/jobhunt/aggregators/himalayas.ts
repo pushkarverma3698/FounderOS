@@ -37,13 +37,16 @@ interface HimalayasJob {
   readonly salaryCurrency?: string;
   readonly minSalary?: number;
   readonly maxSalary?: number;
+  readonly applicationLink?: string;
   readonly applicationUrl?: string;
-  readonly pubDate?: string; // ISO date string
+  readonly guid?: string;
+  readonly pubDate?: number | string;
   readonly categories?: readonly string[];
 }
 
 interface HimalayasResponse {
   readonly jobs?: readonly HimalayasJob[];
+  readonly nextCursor?: string | null;
   readonly meta?: {
     readonly total?: number;
     readonly nextCursor?: string | null;
@@ -53,11 +56,13 @@ interface HimalayasResponse {
 function toAggregatorJob(raw: HimalayasJob): AggregatorJob | null {
   const title = (raw.title ?? "").trim();
   const company = (raw.companyName ?? "").trim();
-  const url = (raw.applicationUrl ?? "").trim();
+  const url = (raw.applicationLink ?? raw.applicationUrl ?? raw.guid ?? "").trim();
   if (title.length === 0 || company.length === 0 || url.length === 0) return null;
 
   let postedAt: Date | null = null;
-  if (typeof raw.pubDate === "string" && raw.pubDate.trim().length > 0) {
+  if (typeof raw.pubDate === "number") {
+    postedAt = new Date(raw.pubDate * 1000);
+  } else if (typeof raw.pubDate === "string" && raw.pubDate.trim().length > 0) {
     const parsed = new Date(raw.pubDate.trim());
     postedAt = Number.isNaN(parsed.getTime()) ? null : parsed;
   }
@@ -113,7 +118,7 @@ export function createHimalayasSource(): AggregatorSource {
           if (job !== null) jobs.push(job);
         }
 
-        cursor = response.meta?.nextCursor ?? null;
+        cursor = response.nextCursor ?? response.meta?.nextCursor ?? null;
         if (!cursor) break;
         if (page < MAX_PAGES - 1) await sleep(PAGE_DELAY_MS);
       }

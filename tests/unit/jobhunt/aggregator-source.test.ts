@@ -133,21 +133,22 @@ describe("himalayas adapter", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("parses cursor-paginated response", async () => {
+  it("parses cursor-paginated response with applicationLink and unix pubDate", async () => {
     const page1 = {
       jobs: [
         {
           id: "abc",
           title: "Full Stack Dev",
           companyName: "HimCorp",
-          applicationUrl: "https://himalayas.app/jobs/abc/apply",
+          applicationLink: "https://himalayas.app/jobs/abc/apply",
           description: "Build full stack",
           locationRestrictions: ["Netherlands", "Germany"],
-          pubDate: "2024-09-01",
+          pubDate: 1725148800,
           categories: ["engineering"],
         },
       ],
-      meta: { total: 1, nextCursor: null },
+      nextCursor: null,
+      totalCount: 1,
     };
 
     globalThis.fetch = vi.fn().mockResolvedValueOnce({
