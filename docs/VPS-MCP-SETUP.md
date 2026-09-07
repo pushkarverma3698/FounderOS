@@ -11,24 +11,6 @@ This guide covers deploying and managing MCP servers on the production VPS for F
 
 ---
 
-## 🚀 Quick Deploy (Local)
-
-From your Mac:
-
-```bash
-cd ~/Projects/founderos
-./scripts/deploy-mcp-to-vps.sh
-```
-
-This will:
-1. Upload `.mcp.json` to VPS
-2. Upload `settings.json` to VPS
-3. Create environment setup template
-4. Install npm MCP packages
-5. Set proper permissions
-
----
-
 ## 📋 Manual VPS Setup
 
 ### Step 1: SSH into VPS
@@ -273,7 +255,6 @@ gh api user
 ## 📝 Deployment Checklist
 
 - [ ] SSH key verified: `ls ~/.ssh/founderos_deploy`
-- [ ] Run deploy script: `./scripts/deploy-mcp-to-vps.sh`
 - [ ] SSH into VPS and verify files uploaded
 - [ ] Edit `/root/.founderos/vps-env.sh` with real API keys
 - [ ] Source environment: `source ~/.bashrc`
