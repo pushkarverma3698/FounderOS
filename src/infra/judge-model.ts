@@ -40,17 +40,29 @@ export type JudgeProvider = "anthropic" | "openrouter" | "openai" | "google-gena
  * nothing surfacing it, since a judge outage and a real pass look identical
  * from the fail-open contract by design.
  *
- * minimax/minimax-m2.7:free replaces it — live-verified (2026-09-07) to
- * return clean, parseable JSON on the actual judge prompt. It is a reasoning
- * model that CANNOT disable reasoning (OpenRouter 400s on `reasoning:
- * {enabled:false}` for this endpoint) and burns 400-600+ tokens on it before
- * ever emitting the answer — at the old maxTokens:512 it silently returned
- * EMPTY content (reasoning consumed the whole budget) on the real judge
- * prompt, which is why maxTokens is now 3000 below. Free OpenRouter models
- * rotate without notice: re-verify with scripts/probe-openrouter-free-models.ts
- * before trusting this default again.
+ * minimax/minimax-m2.7:free was the 2026-09-07 replacement and lasted hours.
+ * It 404'd in production the SAME EVENING it was deployed — 21:54:47, 21:56:14,
+ * 21:57:15, once per outbound reply — and OpenRouter's own error says why:
+ * "This model is unavailable for free. The paid version is available now."
+ * Re-confirmed by hand on 2026-09-08: the slug is absent from
+ * `GET /api/v1/models` entirely.
+ *
+ * THREE slugs in three weeks. The lesson is not "pick a better free model" —
+ * it is that this gate fails open, so a withdrawn slug is invisible. That is
+ * now fixed in the OTHER direction: judge-health.ts counts consecutive
+ * failures and the hourly scheduler tells the founder once per outage episode.
+ * The slug below will die too; the difference is that we will hear about it.
+ *
+ * nvidia/nemotron-3-super-120b-a12b:free — live-verified 2026-09-08 against the
+ * real judge prompt using prod's own key: HTTP 200, clean parseable JSON on the
+ * first attempt, and the correct verdict on a deliberately slop-y draft. A
+ * different family from the Gemini drafter, so rule #6 (generator ≠ critic)
+ * still holds. maxTokens stays 3000: free-tier models are frequently reasoning
+ * models that cannot disable reasoning and spend 400-600+ tokens before the
+ * answer, which at 512 returns silently EMPTY content.
  */
-const JUDGE_MODEL = process.env["JUDGE_MODEL"]?.trim() || "openrouter:minimax/minimax-m2.7:free";
+const JUDGE_MODEL =
+  process.env["JUDGE_MODEL"]?.trim() || "openrouter:nvidia/nemotron-3-super-120b-a12b:free";
 
 /** Resolve the judge model id, defaulting a bare id to the OpenRouter free tier. */
 export function resolveJudgeModelId(): { provider: JudgeProvider; model: string } {
@@ -60,8 +72,8 @@ export function resolveJudgeModelId(): { provider: JudgeProvider; model: string 
   const model = raw.slice(sep + 1).trim();
   const valid: JudgeProvider[] = ["anthropic", "openrouter", "openai", "google-genai", "google-vertexai"];
   if (!valid.includes(provider) || !model) {
-    // Unrecognized override → safe default (free OpenRouter, live-verified 2026-09-07).
-    return { provider: "openrouter", model: "minimax/minimax-m2.7:free" };
+    // Unrecognized override → safe default (free OpenRouter, live-verified 2026-09-08).
+    return { provider: "openrouter", model: "nvidia/nemotron-3-super-120b-a12b:free" };
   }
   return { provider, model };
 }

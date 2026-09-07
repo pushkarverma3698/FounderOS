@@ -195,7 +195,67 @@ export async function runProviderProbes(): Promise<ProviderProbeReport> {
   return report;
 }
 
-export async function runProviderSmokeAtBoot(): Promise<void> {
+// ── Credential failures (the only ones worth waking the founder for) ──────────
+
+/**
+ * Substrings that mean the GRANT is dead, not the network.
+ *
+ * Deliberately narrow. A refresh token that has been revoked or has expired
+ * cannot self-heal — only the founder can re-authorise it — while a timeout or
+ * a 503 will be gone by the next probe. Alerting on the second kind is how an
+ * alert channel gets muted, and a muted channel is worse than none.
+ */
+const CREDENTIAL_FAILURE_MARKERS = [
+  "invalid_grant",
+  "invalid_client",
+  "unauthorized",
+  "authentication failed",
+  "expired or revoked",
+  "401",
+  "403",
+];
+
+/** True when a probe's `detail` describes a dead credential rather than a blip. */
+export function isCredentialFailure(detail: string | undefined): boolean {
+  if (!detail) return false;
+  const lower = detail.toLowerCase();
+  return CREDENTIAL_FAILURE_MARKERS.some((marker) => lower.includes(marker));
+}
+
+/** Probe name → what the founder actually lost. `active_gmail` means nothing to him. */
+const CAPABILITY_LABEL: Record<string, string> = {
+  active_gmail: "Gmail (reading and sending email)",
+  active_calendar: "Calendar (reading and creating events)",
+  active_linkedin: "LinkedIn (posting and comments)",
+};
+
+export interface ProviderAuthFailure {
+  readonly provider: string;
+  readonly detail: string | undefined;
+}
+
+/**
+ * One message covering every capability whose credential died, or "" for none.
+ *
+ * One message, not one per capability: Gmail and Calendar share a grant, so
+ * they fail together and always did — production logged the identical
+ * `invalid_grant` for both, twice, on 2026-09-04 and 2026-09-06.
+ */
+export function formatProviderAuthAlert(failures: readonly ProviderAuthFailure[]): string {
+  if (failures.length === 0) return "";
+  const lost = failures.map((f) => `• ${CAPABILITY_LABEL[f.provider] ?? f.provider}`).join("\n");
+  const cause = failures[0]?.detail?.split("\n").pop()?.trim().slice(0, 300) ?? "unknown";
+  return (
+    `🔑 <b>Google sign-in expired — these stopped working:</b>\n${lost}\n\n` +
+    `Everything else is fine; only the connection is. It cannot fix itself — ` +
+    `the account has to be re-authorised by you.\n` +
+    `<code>${cause.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`
+  );
+}
+
+export async function runProviderSmokeAtBoot(
+  notify: (html: string) => Promise<void> = defaultNotify,
+): Promise<void> {
   log.info("Running provider smoke probes…");
   const report = await runProviderProbes();
   const tag = (s: ProviderStatus) => (s === "up" ? "UP" : s === "down" ? "DOWN" : "SKIP");
@@ -206,15 +266,35 @@ export async function runProviderSmokeAtBoot(): Promise<void> {
       `linkedin=${report.linkedin_backend}/${tag(report.active_linkedin.status)}`,
   );
 
+  const authFailures: ProviderAuthFailure[] = [];
   for (const [name, cap] of [
     ["active_gmail", report.active_gmail],
     ["active_calendar", report.active_calendar],
     ["active_linkedin", report.active_linkedin],
   ] as const) {
-    if (cap.status === "down") {
+    if (cap.status !== "down") continue;
+    if (isCredentialFailure(cap.detail)) {
+      // error, not warn: a dead grant is a standing outage needing a human,
+      // and it stayed invisible for days at warn (issue #426 item 4).
+      log.error({ provider: name, detail: cap.detail }, "Active provider DOWN — credential expired or revoked");
+      authFailures.push({ provider: name, detail: cap.detail });
+    } else {
       log.warn({ provider: name, detail: cap.detail }, "Active provider probe DOWN");
     }
   }
+
+  if (authFailures.length > 0) {
+    await notify(formatProviderAuthAlert(authFailures)).catch((err) =>
+      // allow-failopen: a Telegram blip must not stop boot; the error line above is already written
+      log.warn({ err: (err as Error).message }, "Provider auth alert send failed"),
+    );
+  }
+}
+
+/** Lazy import so provider-probes stays usable in tests without the Telegram stack. */
+async function defaultNotify(html: string): Promise<void> {
+  const { sendToChat } = await import("./telegram-send.js");
+  await sendToChat(html, "HTML");
 }
 
 export function formatProviderStatusLine(report: ProviderProbeReport | null): string {
