@@ -4,7 +4,8 @@
  *   pnpm eval:retrieval
  *
  * Measures recall@5 and MRR for the retrieval golden set against
- * `brain.turicks_brain`, using the SAME hybrid path production uses
+ * `brain.brain_memories` — the table production actually reads (ADR-038) —
+ * using the SAME hybrid path production uses
  * (`hybridRagSearch` = pgvector vector search ⊕ keyword ILIKE, fused with RRF).
  * $0: embeddings come from local Ollama, ranking is arithmetic, no LLM is called.
  *
@@ -47,8 +48,14 @@ import { RERANK_CANDIDATE_POOL } from "../src/db/rag-query.js";
 import { embedTextCached } from "../src/lib/embed.js";
 import { db, closeDatabaseConnections } from "../src/db/client.js";
 
-/** The store under measurement. The golden set is authored against this table. */
-const TABLE: RagTable = "turicks_brain";
+/**
+ * The store under measurement. The golden set was authored against
+ * `turicks_brain` (pre-ADR-038); this now points at `brain_memories`, the
+ * table production actually reads since #620 — 0038_brain_backfill.sql
+ * copied every row across, so the golden set's expected documents are
+ * still present here.
+ */
+const TABLE: RagTable = "brain_memories";
 
 /** Where the rendered report is written, alongside the existing eval-report.md. */
 const REPORT_PATH = "retrieval-eval-report.md";
@@ -166,7 +173,7 @@ async function readCorpusFacts(): Promise<CorpusFacts> {
   try {
     const rows = (await db.execute(sql`
       SELECT metadata->>'source_path' AS source_path, count(*)::int AS chunks
-      FROM brain.turicks_brain
+      FROM brain.brain_memories
       GROUP BY 1
     `)) as unknown as Array<{ source_path: string | null; chunks: number }>;
 

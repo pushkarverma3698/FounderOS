@@ -43,42 +43,47 @@ export async function runStateChecks(tenant: string): Promise<StateFinding[]> {
   }
 
   // 2. Vector RAG store populated? Empty-but-present is a silent fabrication source.
-  const ragRows = await count(`SELECT count(*)::int AS n FROM turicks_brain`);
+  // Schema-qualified deliberately: the 2026-08-07 incident was an unqualified
+  // `turicks_brain` resolving to an empty `agents.turicks_brain` shadow table
+  // instead of the real `brain.turicks_brain` (see rag-search.test.ts). Same
+  // table this checks is now `brain.brain_memories` (ADR-038, #620) — the one
+  // search_turicks_brain / search_knowledge actually read.
+  const ragRows = await count(`SELECT count(*)::int AS n FROM brain.brain_memories`);
   if (ragRows === null) {
     findings.push({
       type: "empty_store",
       severity: "high",
       summary:
-        "turicks_brain count query FAILED — Postgres/pgvector unreachable or table missing (NOT an Ollama problem).",
-      evidence: ["count(*) FROM turicks_brain threw"],
+        "brain_memories count query FAILED — Postgres/pgvector unreachable or table missing (NOT an Ollama problem).",
+      evidence: ["count(*) FROM brain.brain_memories threw"],
     });
   } else if (ragRows === 0) {
     findings.push({
       type: "empty_store",
       severity: "high",
       summary:
-        "turicks_brain (RAG) has 0 rows — Postgres/pgvector empty, run `pnpm brain:sync`.",
-      evidence: ["SELECT count(*) FROM turicks_brain → 0"],
+        "brain_memories (RAG) has 0 rows — Postgres/pgvector empty, run `pnpm brain:sync`.",
+      evidence: ["SELECT count(*) FROM brain.brain_memories → 0"],
     });
   } else {
     // 3. Rows present but embeddings NULL → vector search silently returns
     //    nothing → the same fabrication class. Verify DATA, not just presence.
     const missingEmbeddings = await count(
-      `SELECT count(*)::int AS n FROM turicks_brain WHERE embedding IS NULL`,
+      `SELECT count(*)::int AS n FROM brain.brain_memories WHERE embedding IS NULL`,
     );
     if (missingEmbeddings === null) {
       findings.push({
         type: "empty_store",
         severity: "high",
         summary:
-          "turicks_brain embedding-coverage query FAILED — Postgres/pgvector error (NOT an Ollama problem).",
-        evidence: ["count(*) FROM turicks_brain WHERE embedding IS NULL threw"],
+          "brain_memories embedding-coverage query FAILED — Postgres/pgvector error (NOT an Ollama problem).",
+        evidence: ["count(*) FROM brain.brain_memories WHERE embedding IS NULL threw"],
       });
     } else if (missingEmbeddings > 0) {
       findings.push({
         type: "empty_store",
         severity: "high",
-        summary: `turicks_brain has ${missingEmbeddings}/${ragRows} rows with NULL embedding — vector search degraded, re-run \`pnpm brain:sync\`.`,
+        summary: `brain_memories has ${missingEmbeddings}/${ragRows} rows with NULL embedding — vector search degraded, re-run \`pnpm brain:sync\`.`,
         evidence: [`embedding IS NULL count = ${missingEmbeddings}`],
       });
     }

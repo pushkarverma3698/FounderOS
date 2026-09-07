@@ -56,6 +56,8 @@ import { aiCallCosts } from "../src/db/schema.js";
 // live: total_credits=30, total_usage=30.58), so this paid default 402s on
 // every call right now and Layer B silently degrades to fail-open "skipped"
 // (visible per-task in `notes`, NOT in the top-line WORKS/BROKEN scoreboard).
+// Re-confirmed live 2026-09-07: still total_credits=30, total_usage=30.58 —
+// unchanged in 11 days, still needs a human top-up.
 // This is a BILLING gap, not a code bug — do not "fix" it by swapping to a
 // free slug: both current OpenRouter free-tier judge candidates were
 // live-tested against this file's actual judge prompt at maxTokens=256 and
@@ -63,9 +65,14 @@ import { aiCallCosts } from "../src/db/schema.js";
 //   openrouter:nvidia/nemotron-3-super-120b-a12b:free  → reasoning model,
 //     burns the whole token budget on chain-of-thought, finish_reason:
 //     "length", NEVER emits the JSON verdict (always fail-open "not JSON").
+//     2026-09-07: now DEAD outright (provider error) — not just token-starved.
 //   openrouter:minimax/minimax-m2.7:free  → completes fine standalone, but
 //     429s on the second call within seconds — the shared free pool cannot
-//     sustain this file's up-to-18-task sequential judge workload.
+//     sustain this file's up-to-18-task sequential judge workload. This IS
+//     content-judge.ts's bare default as of 2026-09-07 (at maxTokens 3000,
+//     which fixed the empty-content failure minimax hit at 256) — safe for
+//     lighter, non-sequential callers, but still wrong for THIS file for the
+//     rate-limit reason above, which a bigger token budget does not change.
 // Top-up needed: https://openrouter.ai/settings/credits (a run costs cents).
 if (!process.env["JUDGE_MODEL"]?.trim()) {
   process.env["JUDGE_MODEL"] = "openrouter:openai/gpt-oss-120b";
