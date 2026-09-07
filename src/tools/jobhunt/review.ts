@@ -14,7 +14,7 @@
  */
 
 import { childLogger } from "../../infra/logger.js";
-import { listScreenedApplications } from "../../db/job-queries.js";
+import { listScreenedApplications, type ProfileScope } from "../../db/job-queries.js";
 import { getSponsorRegister, registerStaleness } from "./sponsor-registry.js";
 import { criterionOn } from "./criteria.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
@@ -64,6 +64,13 @@ export const reviewScreenedTool: UnifiedTool = {
         description: "Filter to 'hsm' or 'remote-contract'. Omit for both.",
       },
       limit: { type: "number", description: "How many rows to show (default 25)." },
+      profileId: {
+        type: "string",
+        description:
+          "Which candidate's queue to review — a registered profile id (e.g. wife-nl-finance), " +
+          "already resolved from free text by the caller. Omit for the founder's own queue, " +
+          "never a mix of every candidate's rows.",
+      },
     },
     required: [],
   },
@@ -72,6 +79,7 @@ export const reviewScreenedTool: UnifiedTool = {
     const verdict = args["verdict"] as string | undefined;
     const route = args["route"] as string | undefined;
     const limit = Math.min(Number(args["limit"] ?? 25) || 25, 100);
+    const profileId = args["profileId"] as ProfileScope | undefined;
 
     if (verdict && !VALID_VERDICTS.has(verdict)) {
       return { success: false, error: `verdict must be one of: pass, flag, reject (got "${verdict}").` };
@@ -87,8 +95,9 @@ export const reviewScreenedTool: UnifiedTool = {
         ...(verdict ? { verdict } : {}),
         ...(route ? { route } : {}),
         limit,
+        profileId,
       });
-      all = await listScreenedApplications({ limit: 500 });
+      all = await listScreenedApplications({ limit: 500, profileId });
     } catch (err) {
       return { success: false, error: `Application tracker unreachable: ${(err as Error).message}` };
     }

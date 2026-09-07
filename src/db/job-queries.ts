@@ -301,14 +301,23 @@ export async function incrementFollowupsSent(id: string, tenantId: string = DEFA
  * The audit surface for the gates themselves. A stale register or a broken regex
  * shows up as a reject rate that jumps, and without a way to read rejects back
  * there is nothing anywhere that would reveal it.
+ *
+ * 2026-09-07: had no profile scoping at all — the one query in this file that
+ * never adopted `profileCondition`. Every call mixed both candidates' rows,
+ * confirmed live: `review_screened` reported "500 postings on record" from a
+ * production call that named no profile, when neither candidate individually
+ * had anywhere near that many. Defaults to DEFAULT_PROFILE_ID like every
+ * other query here — never "no filter".
  */
 export async function listScreenedApplications(
-  opts: { verdict?: string; route?: string; limit?: number; tenantId?: string } = {},
+  opts: { verdict?: string; route?: string; limit?: number; tenantId?: string; profileId?: ProfileScope } = {},
 ): Promise<JobApplication[]> {
   const db = getDb();
   const conditions = [eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT)];
   if (opts.verdict) conditions.push(eq(jobApplications.salary_status, opts.verdict));
   if (opts.route) conditions.push(eq(jobApplications.route, opts.route));
+  const profileWhere = profileCondition(opts.profileId);
+  if (profileWhere) conditions.push(profileWhere);
 
   return db
     .select()

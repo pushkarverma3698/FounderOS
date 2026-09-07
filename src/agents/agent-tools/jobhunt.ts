@@ -28,6 +28,37 @@ import { ingestJobsTool } from "../../tools/jobhunt/ingest-tool.js";
 import { cvGapsTool } from "../../tools/jobhunt/gaps.js";
 import { jobBriefTool } from "../../tools/jobhunt/daily-brief.js";
 import { tailorCvTool } from "../../tools/jobhunt/tailor-tool.js";
+import { listProfiles, resolveProfileToken } from "../../tools/jobhunt/profile-config.js";
+
+/**
+ * Resolve free text (as the LLM extracts it from the founder's message, e.g.
+ * "Tashi", "wife", "wife-nl-finance") to a registered profile id.
+ *
+ * 2026-09-07: every tool in this file except `job_brief`'s `skip_liveness`
+ * sibling either had no profile parameter at all, or had one at the
+ * `UnifiedTool` layer that this wrapper never exposed to the model — so a
+ * free-text question naming a second candidate silently ran against the
+ * founder's own queue (or, for job_state/review_screened, a query with no
+ * profile filter at all, mixing both). `undefined` here means "not named" —
+ * every callsite below leaves the underlying tool's own default (the
+ * founder's own queue) in force, never "every candidate". An unrecognised
+ * name is a LOUD refusal, not a guess — same rule jobhunt-profile-arg.ts
+ * already applies to slash commands: the cost of guessing wrong is a
+ * tailored application, or a screening verdict, produced for the wrong
+ * person.
+ */
+function resolveProfileArg(raw: string | null | undefined): { profileId?: string; error?: string } {
+  if (raw === undefined || raw === null || raw.trim() === "") return {};
+  const resolved = resolveProfileToken(raw);
+  if (resolved) return { profileId: resolved };
+  const known = listProfiles().map((p) => p.id).join(", ");
+  return { error: `Unknown profile "${raw}". Known profiles: ${known}.` };
+}
+
+/** Every wrapper below shares the same description for this field. */
+const PROFILE_ARG_DESCRIPTION =
+  "Which candidate this is about, when the question names one — a first name, 'wife', " +
+  "or a profile id (e.g. wife-nl-finance). Omit for the founder's own queue.";
 
 // ── Job-Hunt: read CV from personal-rag (read-only, NO approval) ─────────────
 
@@ -63,11 +94,17 @@ export const readCv = tool(
 // fires on `deliver_artifact`, which is the tool that actually sends it.
 
 export const tailorCvForRow = tool(
-  async ({ rank }, config) => {
+  async ({ rank, profile }, config) => {
     // Same plumbing write_artifact uses: the thread decides which directory the
     // PDF lands in, and it comes from the kernel rather than from the model.
     const thread_id = (config?.configurable?.["thread_id"] as string | undefined) ?? "default";
-    const res = await tailorCvTool.execute({ rank, thread_id });
+    const resolved = resolveProfileArg(profile);
+    if (resolved.error) return resolved.error;
+    const res = await tailorCvTool.execute({
+      rank,
+      thread_id,
+      ...(resolved.profileId ? { profileId: resolved.profileId } : {}),
+    });
     if (!res.success) return `Tailoring failed: ${res.error}`;
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
   },
@@ -80,6 +117,15 @@ export const tailorCvForRow = tool(
         .int()
         .min(1)
         .describe("The row number from the latest job brief — the number printed next to the role."),
+      profile: z
+        .string()
+        .optional()
+        .nullable()
+        .describe(
+          "Whose brief this row number came from. Both candidates number their brief from " +
+            "1, so this is required to tailor the right row — omitting it defaults to the " +
+            "founder's own brief, never a guess between the two.",
+        ),
     }),
   },
 );
@@ -154,12 +200,15 @@ export const ingestJobs = tool(
 // effect and its whole purpose is to run before a human looks at anything.
 
 export const screenJob = tool(
-  async ({ company, title, url, description }) => {
+  async ({ company, title, url, description, profile }) => {
+    const resolved = resolveProfileArg(profile);
+    if (resolved.error) return resolved.error;
     const res = await screenJobTool.execute({
       company,
       title,
       description,
       ...(url ? { url } : {}),
+      ...(resolved.profileId ? { profileId: resolved.profileId } : {}),
     });
     if (!res.success) return `Job screening failed: ${res.error}`;
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
@@ -181,6 +230,15 @@ export const screenJob = tool(
             "and remote/on-site status are parsed from it in code — do not paraphrase or " +
             "convert any figures yourself.",
         ),
+      profile: z
+        .string()
+        .optional()
+        .nullable()
+        .describe(
+          "Which candidate to screen this posting for. The verdict depends on this — salary " +
+            "floor, permit basis and track priorities all differ per candidate. " +
+            PROFILE_ARG_DESCRIPTION,
+        ),
     }),
   },
 );
@@ -188,11 +246,14 @@ export const screenJob = tool(
 // ── Job-Hunt: audit what the gates have been deciding (read-only) ────────────
 
 export const reviewScreened = tool(
-  async ({ verdict, route, limit }) => {
+  async ({ verdict, route, limit, profile }) => {
+    const resolved = resolveProfileArg(profile);
+    if (resolved.error) return resolved.error;
     const res = await reviewScreenedTool.execute({
       ...(verdict ? { verdict } : {}),
       ...(route ? { route } : {}),
       ...(limit != null ? { limit } : {}),
+      ...(resolved.profileId ? { profileId: resolved.profileId } : {}),
     });
     if (!res.success) return `Screening review failed: ${res.error}`;
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
@@ -204,6 +265,7 @@ export const reviewScreened = tool(
       verdict: z.enum(["pass", "flag", "reject"]).optional().nullable().describe("Filter to one outcome"),
       route: z.enum(["hsm", "remote-contract"]).optional().nullable().describe("Filter to one route"),
       limit: z.number().optional().nullable().describe("Rows to show (default 25, max 100)"),
+      profile: z.string().optional().nullable().describe(PROFILE_ARG_DESCRIPTION),
     }),
   },
 );
@@ -211,10 +273,15 @@ export const reviewScreened = tool(
 // ── Job-Hunt: CV vs. the screened market (read-only, suggests only) ──────────
 
 export const cvGaps = tool(
-  async ({ category, track }) => {
+  async ({ category, track, profile }) => {
+    const resolved = resolveProfileArg(profile);
+    if (resolved.error) return resolved.error;
     const res = await cvGapsTool.execute({
       ...(category ? { category } : {}),
       ...(track ? { track } : {}),
+      // cvGapsTool's own arg key is "profile" (already a resolved id), not
+      // "profileId" — matching its existing, already-shipped UnifiedTool schema.
+      ...(resolved.profileId ? { profile: resolved.profileId } : {}),
     });
     if (!res.success) return `CV gap report failed: ${res.error}`;
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
@@ -233,6 +300,7 @@ export const cvGaps = tool(
         .optional()
         .nullable()
         .describe("Which career track's CV and market to compare. Defaults to ai"),
+      profile: z.string().optional().nullable().describe(PROFILE_ARG_DESCRIPTION),
     }),
   },
 );
@@ -240,9 +308,12 @@ export const cvGaps = tool(
 // ── Job-Hunt: the ranked brief — what to apply to today (read-only) ──────────
 
 export const jobBrief = tool(
-  async ({ skip_liveness }) => {
+  async ({ skip_liveness, profile }) => {
+    const resolved = resolveProfileArg(profile);
+    if (resolved.error) return resolved.error;
     const res = await jobBriefTool.execute({
       ...(skip_liveness != null ? { skip_liveness } : {}),
+      ...(resolved.profileId ? { profileId: resolved.profileId } : {}),
     });
     if (!res.success) return `Job brief failed: ${res.error}`;
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
@@ -256,6 +327,7 @@ export const jobBrief = tool(
         .optional()
         .nullable()
         .describe("Skip the still-open check — faster, but rows read 'couldn't confirm'"),
+      profile: z.string().optional().nullable().describe(PROFILE_ARG_DESCRIPTION),
     }),
   },
 );

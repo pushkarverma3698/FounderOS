@@ -331,14 +331,23 @@ export const jobBriefTool: UnifiedTool = {
         description:
           "Skip the still-open check. Faster, but rows will read 'couldn't confirm'.",
       },
+      profileId: {
+        type: "string",
+        description:
+          "Whose brief to build — a registered profile id (e.g. wife-nl-finance), already " +
+          "resolved from free text by the caller. Omit for the founder's own brief, never a " +
+          "mix of every candidate's rows.",
+      },
     },
     required: [],
   },
 
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
     try {
+      const profileId = args["profileId"] as string | undefined;
       const brief = await buildDailyBrief({
         ...(args["skip_liveness"] === true ? { skipLiveness: true } : {}),
+        ...(profileId ? { profile: getProfile(profileId) } : {}),
       });
       return { success: true, data: brief };
     } catch (err) {
