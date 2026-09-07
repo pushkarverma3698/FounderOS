@@ -141,3 +141,35 @@ describe("createEtagCache", () => {
     expect(cache.getEntry("https://x.test/a")?.failureCount).toBe(1);
   });
 });
+
+describe("warmFromEntries — the LRU cap", () => {
+  // `store()` evicts down to maxEntries; warming did not, so a restart loaded
+  // every row the table held regardless of the cap. Harmless at 1,297 boards
+  // against a 2,000 default and NOT harmless the moment the registry grows past
+  // it — PR #639 takes it to 3,223. Each entry holds a full board payload, so
+  // the overshoot is memory, silently, on the box that runs the sweep.
+  it("respects maxEntries when warming from the database", () => {
+    const cache = createEtagCache({ maxEntries: 3 });
+    cache.warmFromEntries(
+      Array.from({ length: 10 }, (_, i) => ({
+        url: `https://boards.example.com/${i}`,
+        etag: `"e${i}"`,
+        payload: JSON.stringify({ jobs: [i] }),
+      })),
+    );
+    expect(cache.size).toBe(3);
+  });
+
+  it("keeps the most recently warmed entries, not the oldest", () => {
+    const cache = createEtagCache({ maxEntries: 2 });
+    cache.warmFromEntries(
+      Array.from({ length: 5 }, (_, i) => ({
+        url: `https://boards.example.com/${i}`,
+        etag: `"e${i}"`,
+        payload: JSON.stringify({ jobs: [i] }),
+      })),
+    );
+    expect(cache.read("https://boards.example.com/4")).toEqual({ jobs: [4] });
+    expect(cache.read("https://boards.example.com/0")).toBeUndefined();
+  });
+});

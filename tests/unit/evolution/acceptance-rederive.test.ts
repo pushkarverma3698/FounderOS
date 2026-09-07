@@ -50,7 +50,14 @@ describe("M0a acceptance — analyzers re-derive the 2026-08-06 hand audit", () 
     // IS the signal the fix landed, per this file's own characterization-test
     // contract above.
     expect(unused).toContain("hono");
-    expect(unused).toContain("bottleneck");
+
+    // `bottleneck` left this list on 2026-09-08, in the direction opposite to
+    // the amputations above: it stopped being unused because something finally
+    // imported it. src/tools/jobhunt/free-ats-rate-limiter.ts builds the
+    // per-ATS token buckets on it. Per this file's characterization contract,
+    // that is the signal the wiring landed, and the assertion is updated rather
+    // than the analyzer.
+    expect(unused).not.toContain("bottleneck");
   });
 
   it("does NOT report dependencies that are genuinely imported", () => {

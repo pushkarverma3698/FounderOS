@@ -132,6 +132,23 @@ export function createEtagCache(optionsOrMax: number | EtagCacheOptions = DEFAUL
   const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
   const entries = new Map<string, CacheEntry>();
 
+  /**
+   * Drop least-recently-written entries until the map fits its cap.
+   *
+   * Shared by `store` and `warmFromEntries` because both grow the map and only
+   * one of them used to shrink it. Each entry holds a whole board payload, so a
+   * warm that ignored the cap turned every process start into an unbounded load
+   * of the entire table — invisible while the registry was smaller than the cap,
+   * and a memory regression on the sweep box the moment it was not.
+   */
+  function evictOverflow(): void {
+    while (entries.size > maxEntries) {
+      const oldest = entries.keys().next();
+      if (oldest.done === true) break;
+      entries.delete(oldest.value);
+    }
+  }
+
   return {
     headersFor(url: string): Record<string, string> {
       const hit = entries.get(url);
@@ -197,12 +214,7 @@ export function createEtagCache(optionsOrMax: number | EtagCacheOptions = DEFAUL
 
       entries.delete(url);
       entries.set(url, entry);
-
-      while (entries.size > maxEntries) {
-        const oldest = entries.keys().next();
-        if (oldest.done === true) break;
-        entries.delete(oldest.value);
-      }
+      evictOverflow();
 
       if (options.onSave) {
         try {
@@ -278,6 +290,7 @@ export function createEtagCache(optionsOrMax: number | EtagCacheOptions = DEFAUL
           lastCheckedAt: rec.last_checked_at ? new Date(rec.last_checked_at) : new Date(),
         });
       }
+      evictOverflow();
     },
 
     get size(): number {
