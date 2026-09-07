@@ -231,3 +231,26 @@ export function getProfile(id: string = DEFAULT_PROFILE_ID): JobSearchProfile {
 export function listProfiles(): JobSearchProfile[] {
   return Object.values(PROFILES);
 }
+
+/**
+ * Resolve free text (as an LLM or a founder would type it) to a registered
+ * profile id — the id itself, any dash-separated segment of it, or the
+ * candidate's first name, case-insensitively. Returns null on no match or on
+ * an alias two profiles would both claim, so a caller must treat null as
+ * "ask, don't guess" rather than fall through to a default.
+ */
+export function resolveProfileToken(token: string): string | null {
+  const normalized = token.trim().toLowerCase();
+  if (!normalized) return null;
+  const index = new Map<string, string | null>();
+  for (const profile of listProfiles()) {
+    const first = profile.candidateName.trim().split(/\s+/)[0] ?? "";
+    const aliases = [profile.id, ...profile.id.split("-"), first]
+      .map((a) => a.toLowerCase())
+      .filter((a) => a.length > 1);
+    for (const alias of aliases) {
+      index.set(alias, index.has(alias) && index.get(alias) !== profile.id ? null : profile.id);
+    }
+  }
+  return index.get(normalized) ?? null;
+}

@@ -106,7 +106,7 @@ function caveats(report: RetrievalReport): string[] {
   const lines: string[] = [];
   if (report.corpusChunks === null) {
     lines.push(
-      "**Corpus not counted.** The run could not read the size of `brain.turicks_brain`, " +
+      "**Corpus not counted.** The run could not read the size of `brain.brain_memories`, " +
         "so the denominator behind every number below is unknown.",
     );
   }
@@ -153,7 +153,7 @@ function denominator(report: RetrievalReport): string[] {
   return [
     "## What was measured",
     "",
-    `- Corpus (\`brain.turicks_brain\`): ${corpus}`,
+    `- Corpus (\`brain.brain_memories\`): ${corpus}`,
     `- Golden cases run: ${report.results.length} (${report.scoredCases} scored, ` +
       `${report.retrievalErrors} errored)`,
     `- Cutoff: top-${report.k} chunks, projected to the distinct documents the agent would see`,

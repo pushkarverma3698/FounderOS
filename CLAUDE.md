@@ -68,6 +68,20 @@ message → plan (LLM #1: PlannerDecision — direct reply OR typed Plan)
   sufficient — exercise the real path (gateway → kernel → tool → reply →
   action_log row) before claiming anything works. Unverifiable ⇒ say
   "NOT VERIFIED — reason".
+  - **"Gateway" means the real Telegram transport, not a shortcut that starts
+    one layer in.** Calling a tool's `.execute()` directly over SSH proves the
+    tool; it does not prove the planner routed to it, the prompt passed the
+    right profile, or the reply the founder actually sees is correct — that gap
+    is exactly where the 2026-09-06/07 bugs (`job_state`, the dead judge model,
+    the missing Tashi heartbeat) lived, undetected by tool-level tests alone.
+    **Founder directive, 2026-09-07: after fixing and unit-testing anything in
+    the jobhunt/gateway path, drive it through Telegram before calling it
+    done.** `scripts/lib/mtproto.ts` sends as the founder and reads the bot's
+    real reply (one-time setup: `TELEGRAM_TESTER_API_ID`/`_API_HASH`/`_SESSION`
+    in `.env` — absent as of 2026-09-07; see `scripts/telegram-tester.ts
+    login`). Until that exists, SSH tool-level execution is a fallback, not a
+    substitute — say so explicitly, and ask the founder to send the real
+    message himself when the gap matters.
 - **Fix the schema, not the code**: if a task fails on ambiguous requirements,
   the planner asks for the missing field; never guess data.
 - **Bug fixes start with a failing test** (PR template section is mandatory).

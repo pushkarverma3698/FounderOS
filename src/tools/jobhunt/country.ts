@@ -309,9 +309,10 @@ export function countryFromLocation(
     if (mentionsAny(text, c.names) || mentionsAny(text, c.cities)) return c.code;
   }
 
-  // Fallback to hardcoded NL/IN lists if profile target countries did not catch it
-  if (mentionsAny(text, NL_NAMES) || mentionsAny(text, NL_CITIES)) return "NL";
-  if (mentionsAny(text, IN_NAMES) || mentionsAny(text, IN_CITIES)) return "IN";
+  // Fallback to the hardcoded NL/IN lists (wider than any profile's own), but ONLY for a market this profile targets. Unscoped, it re-admitted a market the candidate cannot lawfully work in — see tests/unit/jobhunt/posting-country.test.ts for the measured prod case (2026-09-07).
+  const targets = new Set(profile.targetCountries.map((c) => c.code));
+  if (targets.has("NL") && (mentionsAny(text, NL_NAMES) || mentionsAny(text, NL_CITIES))) return "NL";
+  if (targets.has("IN") && (mentionsAny(text, IN_NAMES) || mentionsAny(text, IN_CITIES))) return "IN";
   if (namesNoPlace(lower)) return "unknown";
   return "other";
 }

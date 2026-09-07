@@ -39,12 +39,12 @@ chmod +x deploy/deploy.sh
 echo ""
 echo "==> Post-deploy: knowledge store row counts"
 docker exec founderos-postgres psql -U founderos -d founderos -tAc \
-  "SELECT 'turicks_brain', count(*) FROM brain.turicks_brain;" 2>/dev/null || \
+  "SELECT 'brain_memories', count(*) FROM brain.brain_memories;" 2>/dev/null || \
   docker exec founderos-postgres psql -U founderos -d founderos -tAc \
-  "SELECT count(*) FROM brain.turicks_brain;" 2>/dev/null || echo "!! turicks_brain query failed"
+  "SELECT count(*) FROM brain.brain_memories;" 2>/dev/null || echo "!! brain_memories query failed"
 
 docker exec founderos-postgres psql -U founderos -d founderos -tAc \
-  "SELECT 'turicks_brain_embedded', count(*) FROM brain.turicks_brain WHERE embedding IS NOT NULL;" 2>/dev/null || true
+  "SELECT 'brain_memories_embedded', count(*) FROM brain.brain_memories WHERE embedding IS NOT NULL;" 2>/dev/null || true
 
 docker exec founderos-postgres psql -U founderos -d founderos -tAc \
   "SELECT 'knowledge_entries', count(*) FROM brain.knowledge_entries;" 2>/dev/null || \
@@ -110,12 +110,12 @@ curl -sf http://127.0.0.1:3001/api/v1/health | head -c 400 || { echo "!! /api/v1
 echo ""
 
 EMBEDDED="$(docker exec founderos-postgres psql -U founderos -d founderos -tAc \
-  "SELECT count(*) FROM brain.turicks_brain WHERE embedding IS NOT NULL;" 2>/dev/null | tr -d ' ')"
+  "SELECT count(*) FROM brain.brain_memories WHERE embedding IS NOT NULL;" 2>/dev/null | tr -d ' ')"
 if [ -n "$EMBEDDED" ] && [ "$EMBEDDED" -gt 0 ] 2>/dev/null; then
   echo "========================================================================"
-  echo "✅ PROD STABILIZE OK — turicks_brain embedded rows: $EMBEDDED"
+  echo "✅ PROD STABILIZE OK — brain_memories embedded rows: $EMBEDDED"
   echo "========================================================================"
 else
-  echo "!! turicks_brain still has 0 embedded rows — RAG will fail" >&2
+  echo "!! brain_memories still has 0 embedded rows — RAG will fail" >&2
   exit 1
 fi

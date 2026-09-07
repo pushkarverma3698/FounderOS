@@ -73,6 +73,16 @@ async function connect(requireSession: boolean): Promise<TelegramClient> {
 interface PrintableMessage {
   id: number;
   out: boolean;
+  /**
+   * When Telegram accepted the message, ISO-8601.
+   *
+   * Dropped until 2026-09-07, which made this reader unable to answer the only
+   * question a chat transcript is uniquely good for: HOW OFTEN did the bot say
+   * this? Message ids are not a clock — they advance per message, not per
+   * minute — so "the funnel alert fires every six hours" was unmeasurable from
+   * the founder's actual chat, and the alert had been repeating unnoticed.
+   */
+  date: string;
   text: string;
   buttons: string[];
   /** Set when the message carries a real Telegram document attachment (not a photo/voice note). */
@@ -100,12 +110,20 @@ function toPrintable(msg: Api.Message): PrintableMessage {
       }
     }
   }
-  return { id: msg.id, out: msg.out === true, text: msg.message ?? "(media)", buttons, document: documentInfo(msg) };
+  return {
+    id: msg.id,
+    out: msg.out === true,
+    // MTProto reports seconds; Date wants milliseconds.
+    date: new Date(msg.date * 1000).toISOString(),
+    text: msg.message ?? "(media)",
+    buttons,
+    document: documentInfo(msg),
+  };
 }
 
 function printMessage(m: PrintableMessage): void {
   const who = m.out ? "👤 tester" : "🤖 bot";
-  console.log(`\n#${m.id} ${who}`);
+  console.log(`\n#${m.id} ${m.date} ${who}`);
   console.log(m.text.length > 1_500 ? m.text.slice(0, 1_500) + "…" : m.text);
   if (m.document) console.log(`   📎 document: ${m.document.fileName} (${m.document.mimeType}, ${m.document.bytes}B)`);
   if (m.buttons.length > 0) console.log(`   buttons: ${m.buttons.join(" ")}`);

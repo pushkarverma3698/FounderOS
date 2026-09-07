@@ -25,6 +25,7 @@ import {
   countryName,
 } from "../../../src/tools/jobhunt/country.js";
 import { extractRoute } from "../../../src/tools/jobhunt/extract.js";
+import { getProfile } from "../../../src/tools/jobhunt/profile-config.js";
 
 describe("countryFromLocation — reading the feed's own location string", () => {
   it("recognises the Netherlands from a city, region, country phrase", () => {
@@ -219,5 +220,47 @@ describe("countryFromLocation — the coverage measured as missing on 2026-08-20
     expect(countryFromLocation("Remote, United Kingdom")).toBe("other");
     // And a real market survives the decoration it always did.
     expect(countryFromLocation("Remote - Netherlands")).toBe("NL");
+  });
+});
+
+describe("the NL/IN fallback is scoped to the profile's own markets", () => {
+  /**
+   * MEASURED IN PROD, 2026-09-07. Tashi's profile targets the Netherlands and
+   * nothing else — she is on a zoekjaar, and has no basis to work in India. Her
+   * tracker nonetheless held 56 Indian rows against 16 Dutch ones, and `/jobs
+   * tashi` rendered "Nothing actionable today" above a list of 14 roles all
+   * rejected as "This role's market (India, local hire) is not one you have a
+   * legal basis for".
+   *
+   * The route in: `countryFromLocation` walked the profile's target countries,
+   * missed, and then fell through to a HARDCODED NL/IN pair that predates
+   * multi-profile. "Hyderabad, India" came back as `IN` — a real market code, so
+   * `filterCandidates` (which drops only `other`) kept it, the body was fetched,
+   * the gates ran, and the legal gate rejected it. Every stage after the filter
+   * did its job correctly on a row that should never have reached them.
+   *
+   * The fallback still exists — the hardcoded city lists are wider than any
+   * profile's — but it may only speak for a market the profile actually targets.
+   */
+  it("does not label a posting IN for a profile that does not target India", () => {
+    const nlOnly = getProfile("wife-nl-finance");
+    expect(countryFromLocation("Hyderabad, India", nlOnly)).toBe("other");
+    expect(countryFromLocation("Bengaluru, Karnataka, India", nlOnly)).toBe("other");
+    expect(countryFromLocation("Gurugram", nlOnly)).toBe("other");
+  });
+
+  it("still reads the markets that profile DOES target", () => {
+    const nlOnly = getProfile("wife-nl-finance");
+    expect(countryFromLocation("Amsterdam, Netherlands", nlOnly)).toBe("NL");
+    // Via the hardcoded NL city list, which is wider than the profile's own.
+    expect(countryFromLocation("Remote - Netherlands", nlOnly)).toBe("NL");
+    expect(countryFromLocation("Berlin, Germany", nlOnly)).toBe("other");
+  });
+
+  it("leaves the dual-market profile exactly as it was", () => {
+    // Pushkar declares both NL and IN, so the fallback is unchanged for him.
+    expect(countryFromLocation("Hyderabad, India")).toBe("IN");
+    expect(countryFromLocation("Amsterdam, Netherlands")).toBe("NL");
+    expect(countryFromLocation("Bogotá, Colombia")).toBe("other");
   });
 });

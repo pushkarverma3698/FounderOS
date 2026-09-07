@@ -18,8 +18,8 @@ echo "--- DB row counts ---"
 $PG -c "
 SELECT
   'knowledge_entries=' || (SELECT count(*)::text FROM brain.knowledge_entries) ||
-  ' turicks_brain=' || (SELECT count(*)::text FROM brain.turicks_brain) ||
-  ' null_emb=' || (SELECT count(*)::text FROM brain.turicks_brain WHERE embedding IS NULL) ||
+  ' brain_memories=' || (SELECT count(*)::text FROM brain.brain_memories) ||
+  ' null_emb=' || (SELECT count(*)::text FROM brain.brain_memories WHERE embedding IS NULL) ||
   ' personal_rag=' || (SELECT count(*)::text FROM brain.personal_rag);
 "
 echo ""

@@ -15,6 +15,7 @@
  *
  *   node --import tsx/esm scripts/audit-track-coverage.ts --boards 60
  *   node --import tsx/esm scripts/audit-track-coverage.ts --boards 60 --json
+ *   node --import tsx/esm scripts/audit-track-coverage.ts --boards 60 --profile tashi
  *
  * Free: these are the same unauthenticated endpoints the sweep already polls.
  */
@@ -23,6 +24,11 @@ import { getFreeBoards } from "../src/tools/jobhunt/free-boards.js";
 import { sweepBoards } from "../src/tools/jobhunt/free-ats-source.js";
 import { classifyTrack } from "../src/tools/jobhunt/tracks.js";
 import { countryFromLocation } from "../src/tools/jobhunt/country.js";
+import {
+  getProfile,
+  resolveProfileToken,
+  type JobSearchProfile,
+} from "../src/tools/jobhunt/profile-config.js";
 
 function argValue(flag: string, fallback: number): number {
   const args = process.argv.slice(2);
@@ -31,6 +37,38 @@ function argValue(flag: string, fallback: number): number {
   const raw = args[i + 1] ?? args[i]?.split("=")[1];
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function argText(flag: string): string | null {
+  const args = process.argv.slice(2);
+  const i = args.indexOf(flag);
+  if (i === -1) {
+    const inline = args.find((a) => a.startsWith(`${flag}=`));
+    return inline ? (inline.split("=")[1] ?? null) : null;
+  }
+  return args[i + 1] ?? null;
+}
+
+/**
+ * Which candidate's vocabulary to measure.
+ *
+ * Defaulted silently until 2026-09-07, which made this script structurally
+ * unable to answer the question it exists for on the SECOND profile: both
+ * `classifyTrack` and `countryFromLocation` fall back to the default profile,
+ * so an audit run while asking "why does Tashi's lane pass so few roles?"
+ * measured Pushkar's tracks against Pushkar's markets and reported a healthy
+ * funnel. An unknown token exits rather than defaulting — quietly auditing the
+ * wrong person is the exact failure this replaces.
+ */
+function resolveAuditProfile(): JobSearchProfile {
+  const token = argText("--profile");
+  if (token === null) return getProfile();
+  const id = resolveProfileToken(token);
+  if (id === null) {
+    console.error(`Unknown --profile "${token}". Pass a profile id, an id segment, or a first name.`);
+    process.exit(1);
+  }
+  return getProfile(id);
 }
 
 /** Evenly spread the sample across the registry so it is not 60 Greenhouse boards. */
@@ -43,9 +81,12 @@ function sample<T>(items: readonly T[], n: number): T[] {
 async function main(): Promise<void> {
   const boardCount = argValue("--boards", 60);
   const asJson = process.argv.includes("--json");
+  const profile = resolveAuditProfile();
   const boards = sample(getFreeBoards(), boardCount);
 
-  console.error(`Polling ${boards.length} of ${getFreeBoards().length} boards…`);
+  console.error(
+    `Polling ${boards.length} of ${getFreeBoards().length} boards for ${profile.candidateName} (${profile.id})…`,
+  );
   const sweep = await sweepBoards(boards);
 
   const unclassified = new Map<string, number>();
@@ -53,14 +94,14 @@ async function main(): Promise<void> {
   let offMarket = 0;
 
   for (const candidate of sweep.candidates) {
-    const track = classifyTrack(candidate.title);
+    const track = classifyTrack(candidate.title, profile);
     if (track === null) {
       const key = candidate.title.toLowerCase().trim();
       unclassified.set(key, (unclassified.get(key) ?? 0) + 1);
       continue;
     }
     classified.set(track, (classified.get(track) ?? 0) + 1);
-    if (countryFromLocation(candidate.location) === "other") offMarket += 1;
+    if (countryFromLocation(candidate.location, profile) === "other") offMarket += 1;
   }
 
   const ranked = [...unclassified.entries()].sort((a, b) => b[1] - a[1]);
@@ -72,10 +113,11 @@ async function main(): Promise<void> {
     for (const candidate of sweep.candidates) {
       console.log(
         JSON.stringify({
+          profile: profile.id,
           title: candidate.title,
           location: candidate.location,
-          track: classifyTrack(candidate.title),
-          country: countryFromLocation(candidate.location),
+          track: classifyTrack(candidate.title, profile),
+          country: countryFromLocation(candidate.location, profile),
         }),
       );
     }
@@ -87,7 +129,11 @@ async function main(): Promise<void> {
   for (const [track, n] of [...classified.entries()].sort((a, b) => b[1] - a[1])) {
     console.log(`  ${track}: ${n}`);
   }
-  console.log(`  (of classified, ${offMarket} were outside NL/IN)`);
+  // Named from the profile, not hardcoded "NL/IN": Tashi's profile targets NL
+  // only, and printing a market she is not screened for would misreport the
+  // discard as a filter she does not have.
+  const markets = profile.targetCountries.map((c) => c.code).join("/");
+  console.log(`  (of classified, ${offMarket} were outside ${markets})`);
 
   console.log(`\n── top 120 unclassified titles ──`);
   for (const [title, n] of ranked.slice(0, 120)) {
