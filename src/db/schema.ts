@@ -1781,6 +1781,47 @@ export const jobLaneHeartbeats = agentsSchema.table("job_lane_heartbeats", {
 export type JobLaneHeartbeat = typeof jobLaneHeartbeats.$inferSelect;
 export type NewJobLaneHeartbeat = typeof jobLaneHeartbeats.$inferInsert;
 
+// ── ats_board_cache ───────────────────────────────────────────────────────────
+
+/**
+ * Persistent ATS board metadata and conditional GET cache.
+ *
+ * Survives process restarts so the free-board sweep doesn't unconditionally
+ * re-fetch ~1,300 boards on boot. Tracks ETag, Last-Modified, payload, HTTP status,
+ * and failure count per board URL.
+ */
+export const atsBoardCache = agentsSchema.table("ats_board_cache", {
+  /** The board's list endpoint URL — unique identifier across ATS platforms. */
+  url: text("url").primaryKey(),
+
+  /** HTTP ETag validator from the last 200 response. */
+  etag: text("etag"),
+
+  /** HTTP Last-Modified validator from the last 200 response. */
+  last_modified: text("last_modified"),
+
+  /** SHA-256 hex digest of the raw payload for quick drift detection. */
+  payload_hash: text("payload_hash"),
+
+  /** Full serialized payload text (JSON or XML) to serve on HTTP 304 after restart. */
+  payload: text("payload"),
+
+  /** HTTP status code from the last check (e.g. 200, 304, 429). */
+  status: integer("status"),
+
+  /** Consecutive failure count for this board. */
+  failure_count: integer("failure_count").notNull().default(0),
+
+  /** When this board was last checked by the free lane. */
+  last_checked_at: timestamp("last_checked_at", { withTimezone: true }).notNull().defaultNow(),
+
+  /** When this cache row was created or updated. */
+  updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type AtsBoardCache = typeof atsBoardCache.$inferSelect;
+export type NewAtsBoardCache = typeof atsBoardCache.$inferInsert;
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
 export const interruptRegistry = hitlApprovals;

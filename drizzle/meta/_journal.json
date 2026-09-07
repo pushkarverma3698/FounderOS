@@ -281,6 +281,13 @@
       "when": 1789200000000,
       "tag": "0039_job_lane_heartbeats",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1789300000000,
+      "tag": "0040_ats_board_cache",
+      "breakpoints": true
     }
   ]
 }

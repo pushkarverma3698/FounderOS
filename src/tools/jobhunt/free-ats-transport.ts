@@ -17,11 +17,36 @@ import type { BoardRequest } from "./adapters/types.js";
 
 export type WireFormat = "json" | "xml";
 
-/** Carries the HTTP status so the retry decision is made on the code, not on a string. */
+/**
+ * Parse an HTTP Retry-After header into milliseconds to wait.
+ * Handles both delta-seconds ("120") and HTTP-date ("Wed, 21 Oct 2026 07:28:00 GMT").
+ */
+export function parseRetryAfterHeader(header: string | null | undefined): number | null {
+  if (typeof header !== "string") return null;
+  const trimmed = header.trim();
+  if (trimmed.length === 0) return null;
+
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = parseInt(trimmed, 10);
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : null;
+  }
+
+  const dateMs = Date.parse(trimmed);
+  if (!Number.isNaN(dateMs)) {
+    return Math.max(0, dateMs - Date.now());
+  }
+
+  return null;
+}
+
+/** Carries the HTTP status and parsed Retry-After so retries respect server directives. */
 export class HttpStatusError extends Error {
-  constructor(readonly status: number) {
+  readonly retryAfterMs: number | null;
+
+  constructor(readonly status: number, retryAfterHeader?: string | null) {
     super(`HTTP ${status}`);
     this.name = "HttpStatusError";
+    this.retryAfterMs = parseRetryAfterHeader(retryAfterHeader);
   }
 }
 
@@ -81,14 +106,17 @@ export async function fetchPayload(
     // undefined for an evicted entry.
     if (response.status === 304 && cache) {
       void response.body?.cancel();
+      cache.touch(url, 304);
       return cache.read(url);
     }
 
     if (!response.ok) {
       // Read the status before discarding the body, then discard it: an
       // unconsumed body holds the socket open under undici until GC.
+      const retryAfter = response.headers?.get("retry-after");
       void response.body?.cancel();
-      throw new HttpStatusError(response.status);
+      cache?.recordFailure(url, response.status);
+      throw new HttpStatusError(response.status, retryAfter);
     }
 
     const payload = format === "json" ? await response.json() : await response.text();
@@ -96,7 +124,9 @@ export async function fetchPayload(
     // try is indistinguishable from a transport failure to `isRetryable`, so a
     // response that simply carries no headers would be retried three times and
     // then reported as a broken board. No headers just means nothing to cache.
-    cache?.store(url, response.headers?.get("etag"), payload);
+    const etag = response.headers?.get("etag");
+    const lastModified = response.headers?.get("last-modified");
+    cache?.store(url, etag, lastModified, payload, response.status);
     return payload;
   } finally {
     clearTimeout(timer);

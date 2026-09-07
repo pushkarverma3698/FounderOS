@@ -75,4 +75,69 @@ describe("createEtagCache", () => {
     expect(cache.read("c")).toBe("C");
     expect(cache.read("b")).toBeUndefined();
   });
+
+  it("stores and offers Last-Modified as If-Modified-Since", () => {
+    const cache = createEtagCache();
+    cache.store("https://x.test/feed", null, "Wed, 21 Oct 2026 07:28:00 GMT", "<feed/>");
+
+    expect(cache.headersFor("https://x.test/feed")).toEqual({
+      "if-modified-since": "Wed, 21 Oct 2026 07:28:00 GMT",
+    });
+    expect(cache.read("https://x.test/feed")).toBe("<feed/>");
+  });
+
+  it("offers both If-None-Match and If-Modified-Since when both are present", () => {
+    const cache = createEtagCache();
+    cache.store("https://x.test/feed", '"etag-123"', "Wed, 21 Oct 2026 07:28:00 GMT", "<feed/>");
+
+    expect(cache.headersFor("https://x.test/feed")).toEqual({
+      "if-none-match": '"etag-123"',
+      "if-modified-since": "Wed, 21 Oct 2026 07:28:00 GMT",
+    });
+  });
+
+  it("warms the in-memory cache from persistent DB records", () => {
+    const cache = createEtagCache();
+    cache.warmFromEntries([
+      {
+        url: "https://x.test/board1",
+        etag: '"v1"',
+        last_modified: "Wed, 21 Oct 2026 07:28:00 GMT",
+        payload_hash: "abcd",
+        payload: JSON.stringify({ jobs: [1, 2] }),
+        status: 200,
+        failure_count: 0,
+        last_checked_at: new Date(),
+      },
+    ]);
+
+    expect(cache.size).toBe(1);
+    expect(cache.headersFor("https://x.test/board1")).toEqual({
+      "if-none-match": '"v1"',
+      "if-modified-since": "Wed, 21 Oct 2026 07:28:00 GMT",
+    });
+    expect(cache.read("https://x.test/board1")).toEqual({ jobs: [1, 2] });
+  });
+
+  it("updates metadata on touch and tracks failures on recordFailure", () => {
+    const onTouch = (url: string, status: number) => {
+      expect(url).toBe("https://x.test/a");
+      expect(status).toBe(304);
+    };
+    const onFailure = (url: string, status?: number) => {
+      expect(url).toBe("https://x.test/a");
+      expect(status).toBe(429);
+    };
+
+    const cache = createEtagCache({ onTouch, onFailure });
+    cache.store("https://x.test/a", '"e1"', "A");
+
+    cache.touch("https://x.test/a", 304);
+    expect(cache.getEntry("https://x.test/a")?.status).toBe(304);
+    expect(cache.getEntry("https://x.test/a")?.failureCount).toBe(0);
+
+    cache.recordFailure("https://x.test/a", 429);
+    expect(cache.getEntry("https://x.test/a")?.status).toBe(429);
+    expect(cache.getEntry("https://x.test/a")?.failureCount).toBe(1);
+  });
 });

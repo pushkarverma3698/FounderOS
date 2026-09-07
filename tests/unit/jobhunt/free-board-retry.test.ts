@@ -22,8 +22,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-const { fetchBoard, retryDelayMs, summariseFailures, BOARD_ATTEMPTS } = await import(
-  "../../../src/tools/jobhunt/free-ats-source.js"
+const {
+  fetchBoard,
+  retryDelayMs,
+  summariseFailures,
+  BOARD_ATTEMPTS,
+  MAX_RETRY_AFTER_MS,
+} = await import("../../../src/tools/jobhunt/free-ats-source.js");
+const { parseRetryAfterHeader } = await import(
+  "../../../src/tools/jobhunt/free-ats-transport.js"
 );
 import type { FreeBoard } from "../../../src/tools/jobhunt/free-boards.js";
 
@@ -32,9 +39,12 @@ function board(overrides: Partial<FreeBoard> = {}): FreeBoard {
 }
 
 const okResponse = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-const errorResponse = (status: number) => ({
+const errorResponse = (status: number, headers: Record<string, string> = {}) => ({
   ok: false,
   status,
+  headers: {
+    get: (name: string) => headers[name.toLowerCase()] ?? null,
+  },
   json: async () => ({}),
   body: { cancel: async () => {} },
 });
@@ -96,6 +106,67 @@ describe("fetchBoard — retrying a rate-limited board", () => {
 
     expect(result.ok).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("honors Retry-After header on HTTP 429", async () => {
+    let sleptFor = 0;
+    const trackingSleep = {
+      sleep: async (ms: number) => {
+        sleptFor = ms;
+      },
+    };
+
+    mockFetch
+      .mockResolvedValueOnce(errorResponse(429, { "retry-after": "5" }))
+      .mockResolvedValueOnce(okResponse({ offers: [] }));
+
+    const result = await fetchBoard(board(), trackingSleep);
+
+    expect(result.ok).toBe(true);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    // Should sleep for at least 5000ms (the Retry-After value), rather than 200-400ms jitter
+    expect(sleptFor).toBeGreaterThanOrEqual(5000);
+  });
+
+  it("caps excessively large Retry-After values to MAX_RETRY_AFTER_MS", async () => {
+    let sleptFor = 0;
+    const trackingSleep = {
+      sleep: async (ms: number) => {
+        sleptFor = ms;
+      },
+    };
+
+    mockFetch
+      .mockResolvedValueOnce(errorResponse(429, { "retry-after": "999999" }))
+      .mockResolvedValueOnce(okResponse({ offers: [] }));
+
+    const result = await fetchBoard(board(), trackingSleep);
+
+    expect(result.ok).toBe(true);
+    expect(sleptFor).toBe(MAX_RETRY_AFTER_MS);
+  });
+});
+
+describe("parseRetryAfterHeader", () => {
+  it("parses integer seconds into milliseconds", () => {
+    expect(parseRetryAfterHeader("120")).toBe(120_000);
+    expect(parseRetryAfterHeader("5")).toBe(5_000);
+    expect(parseRetryAfterHeader("0")).toBe(0);
+  });
+
+  it("parses valid HTTP-date strings into future delta milliseconds", () => {
+    const future = new Date(Date.now() + 10_000).toUTCString();
+    const parsed = parseRetryAfterHeader(future);
+    expect(parsed).toBeGreaterThan(0);
+    expect(parsed).toBeLessThanOrEqual(10_500);
+  });
+
+  it("returns null on null, undefined, empty or invalid strings", () => {
+    expect(parseRetryAfterHeader(null)).toBeNull();
+    expect(parseRetryAfterHeader(undefined)).toBeNull();
+    expect(parseRetryAfterHeader("")).toBeNull();
+    expect(parseRetryAfterHeader("   ")).toBeNull();
+    expect(parseRetryAfterHeader("invalid-date-or-seconds")).toBeNull();
   });
 });
 
