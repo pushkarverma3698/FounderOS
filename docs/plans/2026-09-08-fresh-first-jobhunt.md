@@ -210,7 +210,51 @@ From the truth audit. Nothing is hallucinated; five things are mislabelled.
 
 | id | Task | Why it is ranked here |
 |---|---|---|
-| **C1** | **Fix + repoint the company grower.** Diagnose the nightly `code:1` (stderr capture now deployed — tomorrow's 02:00 run will name it), and add finance-employer sources: IND recognised-sponsor register, Dutch accountancy/audit directories, EU finance job boards. Not funding news. | **The single highest-value item in this plan.** It is the only compounding lever: it adds employers every night, forever, and today it adds zero. |
+| **C1** | **Fix + repoint the company grower.** Full diagnosis below — the constraint is the 12,000 IND recognised-sponsor employers we cannot reach because we have no ATS coordinates for them. The current grower looks at tech-startup funding news + six startup ATSs, so it structurally cannot discover finance employers. It also fails nightly with `code:1` — stderr capture is now deployed (`child-run.ts`), so tomorrow's 02:00 run will name the cause. Then: repoint it at finance sources (IND register lookup, accountancy/audit directories, SuccessFactors tenant discovery) instead of funding news. | **The single highest-value item in this plan.** It is the only compounding lever: it adds employers every night, forever, and today it adds zero. |
+
+#### C1 — The full diagnosis
+
+**Why Tashi's lane is thin: a 12,000-employer gap.**
+
+The IND recognised-sponsor register lists ~12,000 employers legally allowed to sponsor visa-based hiring in the Netherlands. We have zero of their board URLs. Here's the flow:
+
+```
+IND pool                                12,000+ employers
+  ↓
+Published ATS corpora (10 platforms)    2,700+ unique companies
+  ↓
+Overlap (matched by name)                ~300 employers
+  ↓
+GAP — no ATS coordinates                11,700 employers unreachable
+```
+
+We cannot poll an employer if we don't know which ATS platform they use or what their tenant slug is. For Workday, that's the difference between knowing `capri.wd1.myworkdayjobs.com` and seeing "Capri" in a company list with no idea where to probe.
+
+**The grower's job is to discover those coordinates.** Every night it should:
+1. Look up IND employer names against published ATS corpora
+2. Guess missing ones from professional registers (Dutch accountancy and audit directories; EU finance job boards where employers post)
+3. Probe for their ATS endpoints
+4. Add any hits to the registry
+
+**What it actually does:**
+- Scrapes four tech-startup funding news sources (YourStory, Inc42, Silicon Canals, EU-Startups)
+- Probes six startup-favoured ATSs (Greenhouse, Lever, Ashby, Recruitee, SmartRecruiters, Workable)
+- Discovers zero companies per night (measured 09-06, 09-07, 09-08)
+
+It structurally cannot reach PwC, EY, Deloitte, ABN AMRO, Rabobank or any Dutch accountancy — they don't appear in startup funding news and they aren't on Greenhouse.
+
+**The nightly failure (code:1, every night):**
+- `runMaintenanceChild` in `scheduler.ts` spawns the grower
+- It used to swallow stderr, so three days of `code:1` said nothing about the cause
+- `child-run.ts` now captures stderr tail — tomorrow's 02:00 UTC run will name it
+- When hand-run with env loaded, it exits 0 but discovers 0 boards (personio platform aborts after 12 unknown responses)
+
+**The fix sequence:**
+1. Tomorrow 02:00, read the stderr from prod logs
+2. Fix the immediate cause (likely a failing import or a misconfigured API key)
+3. Repoint the sources: instead of funding news, query the IND register + accountancy directories + SuccessFactors tenant list
+4. Verify it discovers ≥1 new boards per night from non-tech employers (measured)
+5. Validate that Tashi's brief includes roles from newly-added employers within 24h
 | **C2** | Import the 10 already-reachable employers (Grant Thornton, Crowe, NN Group, Shell, RELX, KLM, Fenergo, MN, All Options, ComplyAdvantage) + variant-pass re-join. | ~1h, $0, no new code. |
 | **C3** | Adaptive paging — page while postings are inside the freshness window. Recovers backlog on 763 truncated boards (ING cuts at 6 days, AECOM at 2). | Helps both lanes; helps a *new* board most, which is what C1 produces. |
 | **C4** | Measure EU finance supply per country. Deliverable is a number, not code. | The Dutch-language finding (35%) raises its value. |
