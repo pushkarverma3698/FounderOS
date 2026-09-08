@@ -210,28 +210,52 @@ export const NEXT_STEP_LINE =
 
 /**
  * The alert for rows that are BOTH new and worth acting on.
+ *
+ * TAKES FLAGS AS WELL AS PASSES, since 2026-09-08 (founder: "the roles should be
+ * alerted every time we pass them, whenever we find new roles"). The caller used
+ * to filter to `outcome === "pass"`, which for the NL-finance lane is close to
+ * nothing — her employers are largely not IND-recognised sponsors and Dutch ads
+ * routinely state no salary, so most of her rows carry a flag, land in ASK, get
+ * ranked into her brief and were never announced. Measured 2026-09-07: two roles
+ * ranked, zero messages, and the liveness ping saying "nothing new that cleared
+ * screening" directly above them.
+ *
+ * The headline no longer says "passed screening", because for a flagged row that
+ * would be false — the one thing this whole lane may not do. It says how many
+ * were found and splits them, so the count is honest and the split is the part
+ * the founder acts on: a clear row takes `/draft`, a flagged one takes a question.
  */
 export function formatNewRowsAlert(
-  passes: readonly IngestLine[],
+  rows: readonly IngestLine[],
   sheetLink: string | null,
   candidateName?: string,
 ): string {
-  const named = passes.slice(0, NEW_ROWS_NAMED);
-  const rows = named.map((p) => `• ${esc(p.company)} — ${esc(p.title)}`).join("\n");
-  const rest =
-    passes.length > NEW_ROWS_NAMED
-      ? `\n<i>+ ${passes.length - NEW_ROWS_NAMED} more.</i>`
-      : "";
+  const named = rows.slice(0, NEW_ROWS_NAMED);
+  // The mark is the row's own status, so a flagged company is visibly a question
+  // rather than a recommendation.
+  const lines = named
+    .map((r) => `${r.outcome === "pass" ? "✅" : "❓"} ${esc(r.company)} — ${esc(r.title)}`)
+    .join("\n");
+  const rest = rows.length > NEW_ROWS_NAMED ? `\n<i>+ ${rows.length - NEW_ROWS_NAMED} more.</i>` : "";
 
-  // NAMED once there is more than one candidate. Two identical "3 new roles
-  // passed screening" alerts thirty minutes apart, for two different people, is
-  // a channel the founder learns to ignore — and acting on the wrong one costs
-  // an application.
+  // NAMED once there is more than one candidate. Two identical "3 new roles"
+  // alerts thirty minutes apart, for two different people, is a channel the
+  // founder learns to ignore — and acting on the wrong one costs an application.
   const who = candidateName ? ` for ${esc(candidateName)}` : "";
 
+  const cleared = rows.filter((r) => r.outcome === "pass").length;
+  const asking = rows.length - cleared;
+  const split = [
+    cleared > 0 ? `${cleared} cleared every check` : null,
+    asking > 0 ? `${asking} need${asking === 1 ? "s" : ""} a question first` : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+
   return (
-    `🆕 <b>${passes.length} new role${passes.length === 1 ? "" : "s"} passed screening${who}</b>\n` +
-    rows +
+    `🆕 <b>${rows.length} new role${rows.length === 1 ? "" : "s"}${who}</b>\n` +
+    `<i>${split}</i>\n` +
+    lines +
     rest +
     (sheetLink ? `\n\n${sheetLink}` : "") +
     `\n\n${NEXT_STEP_LINE}`

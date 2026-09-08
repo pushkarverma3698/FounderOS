@@ -121,8 +121,9 @@ describe("profile registry", () => {
     // The market has to move with the basis — one without the other is what her
     // 56 fetched-screened-rejected india-local rows look like.
     expect(WIFE_FINANCE_PROFILE.targetCountries.map((c) => c.code)).toEqual(["NL", "IN"]);
-    // No INR line borrowed from the founder; see the profile's own comment.
-    expect(WIFE_FINANCE_PROFILE.minInrLpaFloor).toBeUndefined();
+    // ₹20 LPA, stated by the founder 2026-09-08 — and distinct from his own ₹15,
+    // which she silently inherited until that day.
+    expect(WIFE_FINANCE_PROFILE.minInrLpaFloor).toBe(20);
   });
 });
 

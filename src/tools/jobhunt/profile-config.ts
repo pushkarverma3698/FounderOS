@@ -52,6 +52,29 @@ export const JobSearchProfileSchema = z.object({
    */
   permitBases: z.array(z.string()).nonempty(),
 
+  /**
+   * How far back the brief will look for this candidate, in hours.
+   *
+   * Absent = the global `APPLY_QUEUE_MAX_AGE_HOURS` (24). Set it where the lane's
+   * supply rate makes 24 hours the wrong question — see `queueWindowFor`.
+   */
+  applyQueueMaxAgeHours: z.number().optional(),
+
+  /**
+   * The last day the IND *verlaagd salariscriterium* applies to this candidate.
+   *
+   * A DATE, not a flag. The reduced criterion (€3,122/month against €4,357) is
+   * available for three years after a Dutch orientation year or qualifying
+   * degree — it is time-boxed by law. It was selected from
+   * `permitBases.includes("zoekjaar")` until 2026-09-08, which is permanent by
+   * construction and therefore could never expire, in the silent-permissive
+   * direction: roles cleared below the lawful floor with nothing said.
+   *
+   * ABSENT MEANS THE STANDARD BAND. This asserts a fact about a person's recent
+   * history, so it needs a date to be claimed at all.
+   */
+  reducedCriterionUntil: z.date().optional(),
+
   // Salary criteria. The BINDING figures live in criteria.ts (the dated IND
   // table); these are display copies for prompt text and must match it.
   under30MonthlyEurFloor: z.number().optional(),

@@ -84,8 +84,12 @@ describe("she does not inherit the founder's ₹15 LPA line", () => {
    * rather than borrowing one. Adding a screening criterion nobody asked for is
    * the thing this repo forbids outright.
    */
-  it("declares no INR floor until the founder sets one", () => {
-    expect(wife.minInrLpaFloor).toBeUndefined();
+  it("declares her OWN line — ₹20 LPA — not the founder's ₹15", () => {
+    // Stated by the founder 2026-09-08. Safe to set only because the alert now
+    // carries flagged rows: the pay gate flags below the line and never rejects,
+    // so the number reaches the HR conversation without muting the queue.
+    expect(wife.minInrLpaFloor).toBe(20);
+    expect(getProfile("pushkar-nl-tech").minInrLpaFloor).toBe(15);
   });
 
   it("passes a stated Indian salary when no personal line is set, and prints it", () => {
