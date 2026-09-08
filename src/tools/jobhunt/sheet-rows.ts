@@ -44,13 +44,33 @@ export const QUEUE_HEADER = [
   "Link",
 ] as const;
 
-/** Log tab header — the audit trail, rejects included. */
+/**
+ * Log tab header — the audit trail, rejects included.
+ *
+ * WIDENED 2026-09-09, on the founder's instruction. It carried eight columns:
+ * no rank, no permit basis, no pay, no sponsor verdict, no liveness. So the
+ * file that holds EVERY screened row — the only one that reaches past the
+ * ranked queue — was also the one you could not decide from, and the answer to
+ * "which of these can I actually apply to" lived only in the other tab.
+ *
+ * It now carries the Queue's decision columns plus the two only the log has
+ * (`Verdict`, `Applied`). A row with no `brief_rank` prints an empty `#` rather
+ * than a fabricated position — see `compareByRank`.
+ */
 export const LOG_HEADER = [
+  "#",
   "Screened",
   "Company",
   "Role",
   "Verdict",
+  "Track",
   "Where",
+  "Permit basis",
+  "Posted",
+  "Still open?",
+  "Sponsor",
+  "Pay",
+  "Years asked",
   "Why",
   "Applied",
   "Link",
@@ -157,26 +177,64 @@ export function queueRow(row: JobApplication, now: Date): Cell[] {
   ];
 }
 
-/** One Log row. Carries rejects — that is the point of the tab. */
+/**
+ * One Log row. Carries rejects — that is the point of the tab.
+ *
+ * Shares every decision cell with `queueRow` by calling the same helpers, so
+ * "Sponsor" cannot come to mean one thing in one file and another in the other.
+ */
 export function logRow(row: JobApplication, now: Date): Cell[] {
   return [
+    row.brief_rank ?? "",
     row.created_at ? postedCell(row.created_at, now) : "",
     row.company,
     row.title,
     row.brief_section ?? "not shortlisted",
+    row.track,
     row.location ?? row.country ?? "",
+    routeLabel(row.route),
+    postedCell(row.posted_at, now),
+    livenessCell(row.liveness),
+    sponsorCell(row.sponsor_verdict),
+    row.salary_status === "pass" ? "meets the bar" : (row.salary_evidence ?? "not stated"),
+    yearsCell(row),
     whyCell(row),
     row.applied_at ? "applied" : row.skipped_at ? "skipped" : "",
     row.url ?? "",
   ];
 }
 
-/** Full Queue tab payload, header included. */
+/**
+ * Ranked rows first, in rank order; everything unranked after, newest first.
+ *
+ * WHY UNRANKED ROWS ARE NOT DROPPED OR RENUMBERED. `brief_rank` is only written
+ * for rows the last brief loaded (`BRIEF_QUEUE_LIMIT`), and for rows that
+ * cleared enough gates to be ranked at all. Renumbering them here would produce
+ * a `#` that `/draft` cannot resolve; dropping them would turn the audit trail
+ * into a second copy of the queue. They sort last and print an empty `#`.
+ */
+export function compareByRank(a: JobApplication, b: JobApplication): number {
+  const aRank = a.brief_rank;
+  const bRank = b.brief_rank;
+  if (aRank !== null && bRank !== null) return aRank - bRank;
+  if (aRank !== null) return -1;
+  if (bRank !== null) return 1;
+  return (b.created_at?.getTime() ?? 0) - (a.created_at?.getTime() ?? 0);
+}
+
+/** Full Queue tab payload, header included. Already rank-ordered by the query. */
 export function buildQueueTab(rows: readonly JobApplication[], now: Date): Cell[][] {
   return [[...QUEUE_HEADER], ...rows.map((r) => queueRow(r, now))];
 }
 
-/** Full Log tab payload, header included. */
+/**
+ * Full Log tab payload, header included, sorted by pinned rank.
+ *
+ * Sorted HERE rather than in the query because the log's own query orders by
+ * screening time — which is the right order for an audit trail and the wrong
+ * one for a file you apply from. `compareByRank` keeps both: rank order at the
+ * top, screening order underneath it.
+ */
 export function buildLogTab(rows: readonly JobApplication[], now: Date): Cell[][] {
-  return [[...LOG_HEADER], ...rows.map((r) => logRow(r, now))];
+  return [[...LOG_HEADER], ...[...rows].sort(compareByRank).map((r) => logRow(r, now))];
 }
