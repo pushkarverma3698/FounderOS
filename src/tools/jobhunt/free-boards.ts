@@ -112,6 +112,30 @@ export const FREE_ATS_PLATFORMS: readonly FreeAts[] = [
 ];
 
 /**
+ * The platforms a DISCOVERY sweep may probe from a company name alone.
+ *
+ * Every ATS above takes a single opaque slug for a board token, except Workday,
+ * whose URL needs three coordinates (`<tenant>/<wdN>/<site>`) that exist only in
+ * a corpus row's `url` column — no normalisation of "Oxford Quantum Circuits"
+ * can produce them, so `workdayAdapter.getBoardUrl` throws rather than guess.
+ *
+ * That throw is correct at the adapter and was fatal at the caller. The funding
+ * grower probes every platform with a headline-derived slug inside a
+ * `Promise.all` over all ten hosts, so the first Workday token aborted the whole
+ * night's batch and discarded every other company found with it. It ran and
+ * failed identically on 2026-09-03, -04, -05 and -07, and because the scheduler
+ * spawned it with `stdio: "ignore"` the only trace was `{"code":1}`.
+ *
+ * Discovery loses nothing by skipping Workday: it could never have produced a
+ * usable token. Workday boards enter through `pnpm jobhunt:import-boards`,
+ * which reads the real URL. INGESTION still polls all of FREE_ATS_PLATFORMS —
+ * this list narrows probing, never harvesting.
+ */
+export const NAME_DERIVABLE_ATS: readonly FreeAts[] = FREE_ATS_PLATFORMS.filter(
+  (ats) => ats !== "workday",
+);
+
+/**
  * Which market a board was sourced FOR — a provenance note, not a claim about
  * where its postings are.
  *

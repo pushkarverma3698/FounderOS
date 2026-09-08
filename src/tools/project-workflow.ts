@@ -4,12 +4,15 @@
  * Gives the engineering agent the ability to BUILD FounderOS features and open PRs.
  *
  * Three actions:
- *   read_file   — read a file within ~/Projects (no HITL, immediate)
- *   list_files  — list a directory within ~/Projects (no HITL, immediate)
- *   run_command — run a shell command within ~/Projects (HITL-gated)
+ *   read_file   — read a file within an allowed root (no HITL, immediate)
+ *   list_files  — list a directory within an allowed root (no HITL, immediate)
+ *   run_command — run a shell command within an allowed root (HITL-gated)
  *
  * SECURITY:
- *   - Path guard: only ~/Projects/** allowed (separate from personal $HOME guard)
+ *   - Path guard: only the roots in `projectRoots()` — `~/Projects` plus the
+ *     RUNNING APP's own tree (`/opt/founderos` in production, where the agent
+ *     could previously not read one line of its own source; issue #426 item 5).
+ *     Both are derived from the process, never from a tool argument.
  *   - Secret patterns blocked even for reads (.env, *.pem, .ssh, .aws, .gnupg)
  *   - Dangerous commands flagged in the HITL approval card (rm -rf, force-push to main, dd, mkfs)
  *   - run_command is ALWAYS HITL-gated (no exceptions)
@@ -25,8 +28,9 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
-import { readFileSync, readdirSync } from "node:fs";
-import { join, resolve, normalize } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join, resolve, normalize } from "node:path";
+import { fileURLToPath } from "node:url";
 import { childLogger } from "../infra/logger.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
@@ -42,6 +46,68 @@ export function projectRoot(): string {
   return join(home, "Projects");
 }
 
+/**
+ * Where the code currently executing lives, found by walking up from this
+ * module to the nearest `package.json`.
+ *
+ * Derived from the PROCESS, never from a tool argument — an agent cannot widen
+ * its own sandbox by asking. Returns null if no package.json is found (a bundled
+ * or relocated build), in which case the roots below are unchanged.
+ */
+function runningAppRoot(): string | null {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let up = 0; up < 8; up++) {
+    if (existsSync(join(dir, "package.json"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
+ * Every root a project path may live under.
+ *
+ * WHY THERE IS MORE THAN ONE. `projectRoot()` is `$HOME/Projects`, which on
+ * production is `/home/founderos/Projects` — a directory containing
+ * `artifacts/` and nothing else. The deployed application runs from
+ * `/opt/founderos`. So the engineering agent's `read_file` and `list_files`,
+ * used from inside a live conversation, could not reach one line of the system
+ * they were being asked about. That is issue #426 item 5, open since
+ * 2026-08-08, and it is why the 2026-09-06 "why is /jobs giving stale jobs?"
+ * investigation ended with "the root cause could not be determined" — the agent
+ * was asked to diagnose itself with its own source outside the sandbox.
+ *
+ * Adding the running app's root widens WHERE, and nothing else: SECRET_PATTERNS
+ * still blocks `.env`/keys/credentials inside it, traversal is still normalised
+ * away, everything outside these roots is still denied, and `run_command`
+ * remains HITL-gated without exception.
+ *
+ * On the dev laptop the app already sits under `~/Projects`, so this is a
+ * one-element list there and the behaviour is unchanged.
+ */
+export function projectRoots(): string[] {
+  const roots = [projectRoot()];
+  const app = runningAppRoot();
+  if (app && !roots.some((r) => app === r || app.startsWith(`${r}/`))) roots.push(app);
+  return roots;
+}
+
+/**
+ * Where `run_command` runs when the caller names no cwd.
+ *
+ * The running app's own tree, when that is not already under `~/Projects` —
+ * i.e. `/opt/founderos` on production. It used to be `~/Projects/founderos`
+ * unconditionally, a directory that does not exist on the prod box, so every
+ * default-cwd command there failed before it ran.
+ */
+export function defaultWorkflowCwd(): string {
+  const roots = projectRoots();
+  const appRoot = roots[1];
+  if (appRoot) return appRoot;
+  return join(roots[0]!, "founderos");
+}
+
 /** Expand a leading ~ to $HOME. */
 export function expandHomeInPath(p: string): string {
   const home = process.env["HOME"] ?? "/Users/pushkarverma";
@@ -51,16 +117,25 @@ export function expandHomeInPath(p: string): string {
 }
 
 /**
- * Resolve a user-supplied path relative to ~/Projects (not process.cwd()).
- * Supports absolute paths, ~/, and bare names like "cinematic-demo".
+ * Resolve a user-supplied path against the project roots (not process.cwd()).
+ * Supports absolute paths, ~/, and bare names like "cinematic-demo" or "src".
+ *
+ * A relative path resolves against the first root where it EXISTS, so `src`
+ * means the running app's `src` on production and the same thing on the laptop.
+ * When it exists nowhere the primary root wins, which keeps the "not found"
+ * error pointing at the directory the caller most likely meant.
  */
 export function resolveProjectPath(rawPath: string): string {
-  const root = projectRoot();
   const expanded = expandHomeInPath(rawPath.trim());
   if (expanded.startsWith("/")) {
     return normalize(resolve(expanded));
   }
-  return normalize(resolve(join(root, expanded)));
+  const roots = projectRoots();
+  for (const root of roots) {
+    const candidate = normalize(resolve(join(root, expanded)));
+    if (existsSync(candidate)) return candidate;
+  }
+  return normalize(resolve(join(roots[0]!, expanded)));
 }
 
 /** Secret patterns that are ALWAYS blocked (read or write). */
@@ -76,17 +151,17 @@ const SECRET_PATTERNS = [
 ];
 
 /**
- * Returns true if the given (absolute) path is allowed under the project root.
- * Blocks: traversal, anything outside ~/Projects, and secret file patterns.
+ * Returns true if the given (absolute) path is allowed under ANY project root.
+ * Blocks: traversal, anything outside the roots, and secret file patterns.
  */
 export function isProjectPath(path: string): boolean {
-  const root = projectRoot();
   const normalized = normalize(resolve(path));
 
-  // Must be within the project root
-  if (!normalized.startsWith(root + "/") && normalized !== root) return false;
+  // Must be within one of the roots (see projectRoots for why there are two).
+  const inARoot = projectRoots().some((root) => normalized === root || normalized.startsWith(`${root}/`));
+  if (!inARoot) return false;
 
-  // Block secret filename patterns
+  // Block secret filename patterns — unchanged by the extra root.
   const filename = normalized.split("/").pop() ?? "";
   if (SECRET_PATTERNS.some((p) => p.test(filename) || p.test(normalized))) return false;
 
@@ -148,7 +223,8 @@ export const projectWorkflowTool: UnifiedTool = {
   name: "project_workflow",
   description:
     "The engineering department's primary BUILD tool. Lets the agent read code, run tests, " +
-    "create branches, write files, commit, push, and open PRs — all within ~/Projects. " +
+    "create branches, write files, commit, push, and open PRs — within ~/Projects and the " +
+    "running application's own tree (so it can read the code it is executing). " +
     "Actions: read_file (instant), list_files (instant), run_command (HITL-gated). " +
     "Use run_command for: writing files (via shell), pnpm test, git operations, gh pr create.",
   input_schema: {
@@ -165,11 +241,11 @@ export const projectWorkflowTool: UnifiedTool = {
       },
       path: {
         type: "string",
-        description: "File or directory path for read_file / list_files. Absolute or relative to ~/Projects.",
+        description: "File or directory path for read_file / list_files. Absolute, or relative to an allowed root (a relative path resolves against the root where it exists, so \"src\" reaches the running app's source).",
       },
       cwd: {
         type: "string",
-        description: "Working directory for run_command (default: ~/Projects/founderos). Must be within ~/Projects.",
+        description: "Working directory for run_command (default: the running app's own root). Must be within an allowed root.",
       },
     },
     required: ["action"],
@@ -178,19 +254,20 @@ export const projectWorkflowTool: UnifiedTool = {
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
     const action = args["action"] as WorkflowAction;
     const root = projectRoot();
-    const home = process.env["HOME"] ?? "/Users/pushkarverma";
-    const defaultCwd = join(home, "Projects/founderos");
+    const defaultCwd = defaultWorkflowCwd();
 
     // ── read_file ─────────────────────────────────────────────────────────────
     if (action === "read_file") {
       const rawPath = args["path"] as string | undefined;
       if (!rawPath) return { success: false, error: "read_file requires a path argument." };
 
-      const abs = rawPath.startsWith("/") ? rawPath : join(root, rawPath);
+      const abs = resolveProjectPath(rawPath);
       if (!isProjectPath(abs)) {
         return {
           success: false,
-          error: `Access denied: ${abs} is outside ~/Projects or matches a blocked pattern.`,
+          error:
+            `Access denied: ${abs} is outside the allowed roots ` +
+            `(${projectRoots().join(", ")}) or matches a blocked secret pattern.`,
         };
       }
 
@@ -210,13 +287,13 @@ export const projectWorkflowTool: UnifiedTool = {
 
     // ── list_files ────────────────────────────────────────────────────────────
     if (action === "list_files") {
-      const rawPath = (args["path"] as string | undefined) ?? root;
-      const abs = rawPath.startsWith("/") ? rawPath : join(root, rawPath);
+      const rawPath = args["path"] as string | undefined;
+      const abs = rawPath === undefined ? root : resolveProjectPath(rawPath);
 
       if (!isProjectPath(abs) && abs !== root) {
         return {
           success: false,
-          error: `Access denied: ${abs} is outside ~/Projects.`,
+          error: `Access denied: ${abs} is outside the allowed roots (${projectRoots().join(", ")}).`,
         };
       }
 

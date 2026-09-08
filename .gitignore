@@ -92,3 +92,4 @@ runs/
 
 # Local brainstorming-tool runtime state (PID files, session HTML) — never source
 .superpowers/
+.funding-grow/

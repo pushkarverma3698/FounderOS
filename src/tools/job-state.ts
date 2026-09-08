@@ -28,6 +28,80 @@ import { listProfiles, resolveProfileToken } from "./jobhunt/profile-config.js";
 /** "all" / "both" / "everyone" — the founder or the LLM asking for every candidate at once. */
 const ALL_PROFILES_TOKENS = new Set(["all", "both", "everyone", "everybody"]);
 
+// ── section vs track: two vocabularies that used to fail silently ─────────────
+
+/**
+ * The only four values `job_applications.brief_section` ever holds.
+ *
+ * Nothing enforced this before. `section` was passed through raw to an `eq()`,
+ * so any other spelling returned `{ count: 0 }` with `success: true` — a
+ * *filter miss* rendered identically to *an empty market*. Two spellings were
+ * near-certain to be tried, and both were: the display headings this tool's own
+ * description advertised ("DO TODAY", "ONE QUESTION AWAY"), which no row has
+ * ever carried, and a value off `job_brief`'s track line ("accountant 4 · fpa
+ * 7"), which is a different column entirely. On 2026-09-07 that second miss
+ * sent a live run through repeated retries against a mismatch that was never a
+ * data fact, and it was the token budget — not an error — that ended it.
+ */
+const BRIEF_SECTIONS = ["do_today", "stretch", "ask", "standing"] as const;
+
+/**
+ * Display heading → stored value, for the spellings a founder or a worker can
+ * actually see. These are read off the rendered brief and off this tool's own
+ * description, so accepting them is not leniency — it is closing the gap that
+ * produced the silence.
+ */
+const SECTION_ALIASES: Record<string, (typeof BRIEF_SECTIONS)[number]> = {
+  do_today: "do_today",
+  dotoday: "do_today",
+  "do today": "do_today",
+  "apply today": "do_today",
+  today: "do_today",
+  stretch: "stretch",
+  ask: "ask",
+  "one question away": "ask",
+  "one question": "ask",
+  question: "ask",
+  standing: "standing",
+};
+
+/** Normalise a `section` argument, or explain the miss in the words that fix it. */
+function resolveSection(raw: string | undefined): { section?: string; error?: string } {
+  if (raw === undefined) return {};
+  const key = raw.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  const resolved = SECTION_ALIASES[key] ?? SECTION_ALIASES[key.replace(/ /g, "_")];
+  if (resolved) return { section: resolved };
+  return {
+    error:
+      `Unknown section "${raw}". \`section\` is the brief priority bucket and holds only: ` +
+      `${BRIEF_SECTIONS.join(", ")} (headings "DO TODAY" / "ONE QUESTION AWAY" also accepted). ` +
+      `If you meant the role classification job_brief prints ("accountant 4 · fpa 7 · auditor 1"), ` +
+      `that is the \`track\` argument, not \`section\`. Known tracks: ${knownTracks().join(", ")}.`,
+  };
+}
+
+/** Every track id any registered profile defines, plus the classifier's own miss value. */
+function knownTracks(): string[] {
+  const ids = new Set<string>(["unclassified"]);
+  for (const profile of listProfiles()) {
+    for (const id of Object.keys(profile.tracks)) ids.add(id);
+  }
+  return [...ids].sort();
+}
+
+/** Validate a `track` argument against what the profiles actually define. */
+function resolveTrack(raw: string | undefined): { track?: string; error?: string } {
+  if (raw === undefined) return {};
+  const normalized = raw.trim().toLowerCase();
+  const known = knownTracks();
+  if (known.includes(normalized)) return { track: normalized };
+  return {
+    error:
+      `Unknown track "${raw}". Known tracks: ${known.join(", ")}. ` +
+      `If you meant the brief priority bucket, that is \`section\`: ${BRIEF_SECTIONS.join(", ")}.`,
+  };
+}
+
 /**
  * `undefined` = no `profile` arg given → `queryJobState` defaults to
  * DEFAULT_PROFILE_ID, same as every other jobhunt query (profileCondition).
@@ -71,7 +145,18 @@ export const jobStateTool: UnifiedTool = {
       },
       section: {
         type: "string",
-        description: "Filter by brief section (e.g. 'DO TODAY', 'STRETCH', 'ONE QUESTION AWAY').",
+        description:
+          "Filter by brief PRIORITY BUCKET. One of: do_today, stretch, ask, standing " +
+          "(the headings 'DO TODAY' / 'ONE QUESTION AWAY' are accepted too). " +
+          "This is NOT the role classification — for 'accountant', 'fpa', 'ai', use `track`. " +
+          "An unrecognised value is refused, never silently answered with 0 rows.",
+      },
+      track: {
+        type: "string",
+        description:
+          "Filter by ROLE CLASSIFICATION — the column job_brief prints as " +
+          "'accountant 4 · fpa 7 · auditor 1'. Use this whenever the question names a kind " +
+          "of role rather than a priority bucket.",
       },
       source: {
         type: "string",
@@ -102,11 +187,20 @@ export const jobStateTool: UnifiedTool = {
       if (profile.error) {
         return { success: false, error: profile.error };
       }
+      const section = resolveSection(args["section"] as string | undefined);
+      if (section.error) {
+        return { success: false, error: section.error };
+      }
+      const track = resolveTrack(args["track"] as string | undefined);
+      if (track.error) {
+        return { success: false, error: track.error };
+      }
 
       const result = await queryJobState({
         profileId: profile.profileId,
         stage: args["stage"] as string | undefined,
-        section: args["section"] as string | undefined,
+        section: section.section,
+        track: track.track,
         source: args["source"] as string | undefined,
         applied: typeof args["applied"] === "boolean" ? (args["applied"] as boolean) : undefined,
         since: args["since"] as string | undefined,
