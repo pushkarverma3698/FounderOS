@@ -164,15 +164,27 @@ const VERIFY_PRIORITY: Record<string, number> = { pass: 0, flag: 1 };
 export function verificationTargets<T extends { row: { salary_status: string }; overlap: OverlapResult }>(
   scored: readonly T[],
   budget: number,
+  opts: { prefer?: (candidate: T) => boolean } = {},
 ): T[] {
-  return scored
-    .filter((s) => s.row.salary_status in VERIFY_PRIORITY)
-    .sort((a, b) => {
-      const byVerdict =
-        VERIFY_PRIORITY[a.row.salary_status]! - VERIFY_PRIORITY[b.row.salary_status]!;
-      return byVerdict !== 0 ? byVerdict : compareOverlap(a.overlap, b.overlap);
-    })
-    .slice(0, budget);
+  // ROWS THE MESSAGE WILL PRINT COME FIRST, whatever their verdict rank.
+  //
+  // ADDED 2026-09-09. The budget was spent over the WHOLE ranked queue while the
+  // scope filter that decides what prints ran afterwards — so `/today` on a
+  // large queue could verify sixty roles from last week and print six from this
+  // morning with "not checked" beside every one. The founder's instruction was
+  // that the links he is shown are verified; that means the shown rows are the
+  // ones that must be bought first, and only then everything else.
+  const prefer = opts.prefer;
+  const eligible = scored.filter((s) => s.row.salary_status in VERIFY_PRIORITY);
+  const byPriority = (a: T, b: T): number => {
+    const byVerdict = VERIFY_PRIORITY[a.row.salary_status]! - VERIFY_PRIORITY[b.row.salary_status]!;
+    return byVerdict !== 0 ? byVerdict : compareOverlap(a.overlap, b.overlap);
+  };
+  if (!prefer) return [...eligible].sort(byPriority).slice(0, budget);
+
+  const visible = eligible.filter(prefer).sort(byPriority);
+  const rest = eligible.filter((s) => !prefer(s)).sort(byPriority);
+  return [...visible, ...rest].slice(0, budget);
 }
 
 export interface BriefOptions {
@@ -229,7 +241,11 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
 
   const liveness = new Map<string, Liveness>();
   if (!opts.skipLiveness && scored.length > 0) {
-    const targets = verificationTargets(scored, VERIFY_TOP_N).map(({ row }) => ({
+    const targets = verificationTargets(scored, VERIFY_TOP_N, {
+      // The same predicate the visibility filter below uses, so the rows this
+      // message prints are the rows the budget is spent on first.
+      prefer: ({ row }) => inScope(row, scope, now),
+    }).map(({ row }) => ({
       id: row.id,
       url: row.url,
       source: row.source,

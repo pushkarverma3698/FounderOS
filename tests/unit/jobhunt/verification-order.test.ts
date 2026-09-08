@@ -63,6 +63,46 @@ describe("verificationTargets", () => {
     const scored = [row("rej", "reject", 20), row("p", "pass", 1)];
     expect((verificationTargets(scored, 8) as Array<{ row: { id: string } }>).map((s) => s.row.id)).toEqual(["p"]);
   });
+
+  // ── The rows the message will actually print come first (2026-09-09) ───────
+  //
+  // The budget was spent over the WHOLE ranked queue while the scope filter
+  // that decides what prints ran afterwards. So `/today` on a large queue could
+  // verify sixty roles from last week and print six from this morning with
+  // "not checked" beside every one — the founder reading a shortlist whose
+  // links were, by construction, the ones nobody checked.
+
+  it("buys the visible rows before anything else, whatever their verdict rank", () => {
+    const scored = [row("hidden-pass", "pass", 20), row("shown-flag", "flag", 1)];
+    const targets = verificationTargets(scored, 1, {
+      prefer: (s) => (s as { row: { id: string } }).row.id === "shown-flag",
+    }) as Array<{ row: { id: string } }>;
+    expect(targets.map((s) => s.row.id)).toEqual(["shown-flag"]);
+  });
+
+  it("keeps the verdict-then-overlap order inside the visible group", () => {
+    const scored = [row("v-flag", "flag", 20), row("v-pass", "pass", 1), row("hidden", "pass", 19)];
+    const visible = new Set(["v-flag", "v-pass"]);
+    const targets = verificationTargets(scored, 3, {
+      prefer: (s) => visible.has((s as { row: { id: string } }).row.id),
+    }) as Array<{ row: { id: string } }>;
+    expect(targets.map((s) => s.row.id)).toEqual(["v-pass", "v-flag", "hidden"]);
+  });
+
+  it("spends what the visible rows did not use on the rest of the queue", () => {
+    // Budget left over is not thrown away — the next `/jobs` reads these.
+    const scored = [row("shown", "pass", 5), row("other-a", "pass", 9), row("other-b", "flag", 2)];
+    const targets = verificationTargets(scored, 3, {
+      prefer: (s) => (s as { row: { id: string } }).row.id === "shown",
+    }) as Array<{ row: { id: string } }>;
+    expect(targets.map((s) => s.row.id)).toEqual(["shown", "other-a", "other-b"]);
+  });
+
+  it("behaves exactly as before when no preference is given", () => {
+    const scored = [row("flag-hi", "flag", 18), row("pass-lo", "pass", 2)];
+    const withOut = verificationTargets(scored, 2) as Array<{ row: { id: string } }>;
+    expect(withOut.map((s) => s.row.id)).toEqual(["pass-lo", "flag-hi"]);
+  });
 });
 
 describe("trimToSentence", () => {

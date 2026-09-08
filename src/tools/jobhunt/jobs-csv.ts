@@ -35,6 +35,10 @@ import type { UnifiedTool, ToolResult } from "../index.js";
 import { buildQueueTab, buildLogTab } from "./sheet-rows.js";
 import { toCsv } from "./csv-export.js";
 import { listProfiles, resolveProfileScope } from "./profile-config.js";
+import { briefRequestFromArgs, isProfileMiss, scopeFor } from "./brief-resolver.js";
+import { inScope } from "./brief-queue.js";
+import { refreshLiveness } from "./liveness-refresh.js";
+import { lastFreshView } from "../../db/job-heartbeat-queries.js";
 
 /** Which table the file holds. Mirrors `/csv` so the two never disagree. */
 export type JobsCsvKind = "queue" | "log";
@@ -78,8 +82,11 @@ export const exportJobsCsvTool: JobsCsvTool = {
     "Write the captured job rows to a CSV file, built in code straight from Postgres. " +
     "THE ONLY way to produce a jobs CSV — never compose CSV text yourself and never pass it to " +
     "write_artifact: the apply links must be copied from the database, not retyped. " +
-    "Takes the same filters as job_state (profile, kind, stage, section, track, applied, since). " +
-    "Returns { path, rows, rowsWithUrl } — pass `path` to deliver_artifact to send it.",
+    "Takes the same filters as job_state (profile, kind, stage, section, track, applied, since), " +
+    "plus the same verb/range/axis job_brief takes — so 'CSV of what Tashi got today' needs no " +
+    "date arithmetic from you. Every apply link is re-checked against the employer's site before " +
+    "the file is written. Returns { path, rows, rowsWithUrl, linksVerified } — pass `path` to " +
+    "deliver_artifact to send it.",
 
   input_schema: {
     type: "object",
@@ -95,14 +102,42 @@ export const exportJobsCsvTool: JobsCsvTool = {
         enum: ["queue", "log"],
         description:
           "'log' (default) = everything screened, rejects included, with the apply link. " +
-          "'queue' = the ranked shortlist only, numbered as /draft takes it.",
+          "'queue' = the ranked shortlist only, numbered as /draft takes it. Both now carry " +
+          "rank, permit basis, pay, sponsor status and the still-open check.",
+      },
+      verb: {
+        type: "string",
+        enum: ["jobs", "today", "fresh"],
+        description:
+          "jobs = everything on file (the default). today = only roles the employer published " +
+          "in the last 24h. fresh = only what has arrived since he last asked for 'fresh'. " +
+          "PREFER THIS over computing a `since` timestamp yourself.",
+      },
+      range: {
+        type: "string",
+        description:
+          "How far back, in his own words: '2d', '48h', '2 days', 'this week'. Omit unless he " +
+          "named one. Ignored when verb='today'.",
+      },
+      axis: {
+        type: "string",
+        enum: ["posted", "found"],
+        description:
+          "Which date `range` applies to. 'posted' = when the employer published it (default). " +
+          "'found' = when we first stored it — use for 'found', 'founded', 'discovered'.",
       },
       stage: { type: "string", description: "Filter by stage (e.g. 'screened', 'applied', 'rejected')." },
       section: { type: "string", description: "Brief priority bucket: do_today | stretch | ask | standing." },
       track: { type: "string", description: "Role classification (e.g. 'accountant', 'fpa', 'ai')." },
       applied: { type: "boolean", description: "true = applied only, false = not yet applied." },
-      since: { type: "string", description: "Only rows discovered on/after this ISO timestamp." },
+      since: { type: "string", description: "Only rows discovered on/after this ISO timestamp. Prefer verb/range." },
       limit: { type: "number", description: "Max rows (default 200, the table maximum)." },
+      skip_liveness: {
+        type: "boolean",
+        description:
+          "Skip re-checking the apply links. Faster, but rows show their last known state. " +
+          "Only when he explicitly asks for speed over confirmation.",
+      },
       id: { type: "string", description: "Artifact filename stem (default: jobs_export)." },
     },
   },
@@ -112,6 +147,25 @@ export const exportJobsCsvTool: JobsCsvTool = {
     if (profile.error) return { success: false, error: profile.error };
 
     const kind = resolveKind(args["kind"]);
+
+    // The same resolver the slash commands parse with. A `verb` the model did
+    // not send leaves `scope` undefined, which is exactly the old behaviour.
+    const request = briefRequestFromArgs({
+      who: profile.profileId === ALL_PROFILES ? undefined : (profile.profileId as string | undefined),
+      verb: args["verb"] as string | undefined,
+      range: args["range"] as string | undefined,
+      axis: args["axis"] as string | undefined,
+    });
+    const wantsScope = Boolean(args["verb"] ?? args["range"] ?? args["axis"]);
+    const scope =
+      wantsScope && !isProfileMiss(request)
+        ? scopeFor(request, {
+            lastFreshView:
+              request.verb === "fresh" && profile.profileId !== ALL_PROFILES
+                ? await lastFreshView(profile.profileId as string)
+                : null,
+          })
+        : undefined;
 
     try {
       const { rows, total } = await queryJobState({
@@ -140,8 +194,29 @@ export const exportJobsCsvTool: JobsCsvTool = {
       }
 
       const now = new Date();
-      const table = kind === "queue" ? buildQueueTab(full, now) : buildLogTab(full, now);
-      const rowsWithUrl = countRowsWithUrl(full);
+
+      // SCOPED, THEN VERIFIED, THEN WRITTEN. The verb/range filter runs in
+      // memory rather than in SQL because `queryJobState`'s `since` is a single
+      // axis on `created_at`; `inScope` is the same predicate the brief uses,
+      // so "posted today" means one thing across the file and the screen.
+      const scoped = scope ? full.filter((row) => inScope(row, scope, now)) : full;
+      if (scoped.length === 0) {
+        return {
+          success: false,
+          error:
+            `No rows fall inside ${scope?.label ?? "that window"} — the CSV would be 0 rows, so ` +
+            `nothing was written. ${full.length} row(s) matched the other filters; widen the range.`,
+        };
+      }
+
+      const refreshed = args["skip_liveness"] === true
+        ? { rows: scoped, verified: 0, alreadyFresh: 0, skipped: 0 }
+        : await refreshLiveness(scoped, { now });
+      const rendered = refreshed.rows;
+
+      const table = kind === "queue" ? buildQueueTab(rendered, now) : buildLogTab(rendered, now);
+      const rowsWithUrl = countRowsWithUrl(rendered);
+      const linksVerified = refreshed.verified + refreshed.alreadyFresh;
 
       const written = await writeArtifactFile(
         {
@@ -155,7 +230,16 @@ export const exportJobsCsvTool: JobsCsvTool = {
       return {
         success: true,
         data: JSON.stringify(
-          { path: written.path, bytes: written.bytes, kind, rows: full.length, rowsWithUrl },
+          {
+            path: written.path,
+            bytes: written.bytes,
+            kind,
+            scope: scope?.label ?? "everything on file",
+            rows: rendered.length,
+            rowsWithUrl,
+            linksVerified,
+            linksUnverified: rendered.length - linksVerified,
+          },
           null,
           2,
         ),
@@ -163,7 +247,9 @@ export const exportJobsCsvTool: JobsCsvTool = {
           kind: "file",
           // The counts ride on the receipt so a reply claiming "with direct
           // application URLs included" can be checked against what was written.
-          evidence: `${written.path}:${written.bytes}:rows:${full.length}:with_url:${rowsWithUrl}`,
+          evidence:
+            `${written.path}:${written.bytes}:rows:${rendered.length}` +
+            `:with_url:${rowsWithUrl}:verified:${linksVerified}`,
         },
       };
     } catch (err) {
