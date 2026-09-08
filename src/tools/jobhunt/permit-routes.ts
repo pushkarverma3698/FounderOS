@@ -49,6 +49,14 @@ export function isKnownPermitBasis(value: string): value is PermitBasis {
  * from documents and must not be: getting it wrong in the permissive direction
  * spends applications on roles he cannot hold, and in the restrictive direction
  * silently discards roles he can. Change it only on his say-so.
+ *
+ * ⚠ NOTHING IN `src` READS THIS. Every runtime decision goes through
+ * `profile.permitBases` (see `basesForPosting` / `isLiveBasis` below) — this
+ * constant survived the move to per-profile bases and is now referenced only by
+ * two tests, which therefore assert a rule production does not apply. Kept, not
+ * deleted, because it is also the record of what the founder declared and when;
+ * treat it as documentation, and never as the thing that decides a verdict.
+ * Flagged by the 2026-09-08 QA pass.
  */
 export const LIVE_PERMIT_BASES: readonly PermitBasis[] = [
   "hsm",

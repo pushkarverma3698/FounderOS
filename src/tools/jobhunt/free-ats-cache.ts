@@ -19,15 +19,15 @@
  *
  * ONLY BOARD LISTS. Per-posting body URLs are fetched once and essentially never
  * re-asked, so caching them would grow the map for no hit rate.
+ *
+ * NOT "BOUNDED" ANY MORE, and this header said it was until 2026-09-08. The cache
+ * moved to Postgres (`agents.ats_board_cache`) and the in-process LRU that the
+ * word described went with it — `DEFAULT_MAX_ENTRIES` and `CacheEntry` sat here
+ * afterwards with zero references, describing a limit nothing enforced. Measured
+ * that day: 1,770 rows / 124 MB, stable, 2 dead tuples, autovacuum keeping up on
+ * every sweep. It is stable because the URL key set is fixed, NOT because
+ * anything prunes it — if the key set ever churns, nothing here will notice.
  */
-
-/** Bounded because the registry grows: 858 boards today, and nothing prunes it. */
-const DEFAULT_MAX_ENTRIES = 2_000;
-
-interface CacheEntry {
-  readonly etag: string;
-  readonly payload: unknown;
-}
 
 import { getAtsCache, setAtsCache } from "../../db/ats-board-cache-queries.js";
 
