@@ -22,6 +22,7 @@ import {
   type BriefRow,
 } from "../../../src/tools/jobhunt/brief.js";
 import { BRIEF_QUEUE_LIMIT } from "../../../src/tools/jobhunt/daily-brief.js";
+import { scopeMayBeIncomplete } from "../../../src/tools/jobhunt/brief-queue.js";
 
 function row(id: string): BriefRow {
   return {
@@ -99,5 +100,40 @@ describe("A2 — a cut is stated with both numbers", () => {
     const rendered = formatDailyBrief(input({ rows }));
     expect(rendered).toContain("12 roles in your queue");
     expect(rendered).not.toContain("Showing the");
+  });
+});
+
+describe("A2 — a narrow verb cannot silently see past the read's horizon", () => {
+  const NOW = new Date("2026-09-08T12:00:00Z");
+  function loaded(daysBack: number[]) {
+    return daysBack.map((d) => ({ created_at: new Date(NOW.getTime() - d * 86_400_000) }));
+  }
+
+  it("says nothing when the read returned everything", () => {
+    // 300 of 300: no horizon exists, so no scope can fall past it.
+    expect(scopeMayBeIncomplete(loaded([0, 5, 30]), 3, { windowHours: 24 }, NOW)).toBe(false);
+  });
+
+  it("says nothing when the scope is newer than the oldest row loaded", () => {
+    // PROD, 2026-09-08: 1,676 rows, 500 read, and the oldest 24h-fresh row sat
+    // at position 339 — so `/today` is complete today even though the read is
+    // truncated. It must not cry wolf about that.
+    expect(scopeMayBeIncomplete(loaded([0, 1, 3]), 1676, { windowHours: 24 }, NOW)).toBe(false);
+  });
+
+  it("warns when the scope reaches back past the oldest row loaded", () => {
+    // The read stopped 3 days back; a 7-day window is asking about days 3–7
+    // that were never loaded. Under a scope the header prints no cut notice,
+    // so without this the loss is completely silent.
+    expect(scopeMayBeIncomplete(loaded([0, 1, 3]), 1676, { windowHours: 168 }, NOW)).toBe(true);
+  });
+
+  it("warns on an absolute cutoff older than the horizon, the way /fresh asks", () => {
+    const since = new Date(NOW.getTime() - 10 * 86_400_000);
+    expect(scopeMayBeIncomplete(loaded([0, 2]), 1676, { since }, NOW)).toBe(true);
+  });
+
+  it("stays silent for an unbounded scope — the header states that cut itself", () => {
+    expect(scopeMayBeIncomplete(loaded([0, 90]), 1676, { windowHours: null }, NOW)).toBe(false);
   });
 });

@@ -515,6 +515,41 @@ export async function countActionableApplications(opts: ActionableScope = {}): P
  * today" and "the lane is broken" — the exact ambiguity this pipeline has
  * already lost weeks to (see `JOB_SWEEP_CRON` in sweep-runner.ts).
  */
+/**
+ * The pinned `brief_rank` for a set of postings, keyed by their dedupe identity.
+ *
+ * What the sweep's new-roles alert reads so each named row can carry its own
+ * `/draft N` (B6). Keyed on `dedupe_key` because that is the identity the table
+ * itself uses — matching on company+title here would be a second notion of "the
+ * same posting", and the one thing that must never happen is two answers to
+ * that question disagreeing while a tailored application rides on it.
+ *
+ * Rows with no rank are simply absent from the map, and the alert prints them
+ * without a command. Ranking is fail-open (brief-persist.ts), so "not numbered"
+ * is a real state rather than an impossible one.
+ */
+export async function briefRanksByDedupeKey(
+  keys: readonly string[],
+  opts: { tenantId?: string; profileId?: ProfileScope } = {},
+): Promise<Map<string, number>> {
+  if (keys.length === 0) return new Map();
+  const db = getDb();
+  const conditions = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    inArray(jobApplications.dedupe_key, [...keys]),
+    isNotNull(jobApplications.brief_rank),
+  ];
+  const profileWhere = profileCondition(opts.profileId);
+  if (profileWhere) conditions.push(profileWhere);
+  const rows = await db
+    .select({ key: jobApplications.dedupe_key, rank: jobApplications.brief_rank })
+    .from(jobApplications)
+    .where(and(...conditions));
+  return new Map(
+    rows.flatMap((r) => (typeof r.rank === "number" ? [[r.key, r.rank] as [string, number]] : [])),
+  );
+}
+
 export async function countAgedOutApplications(opts: ActionableScope = {}): Promise<number> {
   // An UNBOUNDED scope ages nothing out, and the honest answer is 0 rather than
   // a query whose WHERE clause is `NOT (nothing)`. `/jobs` runs unbounded by

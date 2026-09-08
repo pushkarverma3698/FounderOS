@@ -41,14 +41,39 @@ export interface MenuCommand {
 
 export const COMMAND_MENU: readonly MenuCommand[] = [
   // ── The daily loop ────────────────────────────────────────────────────────
+  //
+  // THREE VERBS OVER ONE QUEUE, in the order the founder reads them: what has
+  // arrived since he last looked, what employers published today, everything on
+  // file. They share one ranking and one set of row numbers, so /draft 3 means
+  // the same role after any of them — see BriefRow.rank.
+  {
+    command: "fresh",
+    description: "What has arrived since you last looked. fresh 2d for a window",
+    group: "jobs",
+  },
+  {
+    command: "wife_fresh",
+    description: "What has arrived in your wife's queue since you last looked",
+    group: "jobs",
+  },
+  {
+    command: "today",
+    description: "Only roles an employer published in the last 24h",
+    group: "jobs",
+  },
+  {
+    command: "wife_today",
+    description: "Only roles an employer published in the last 24h, for your wife",
+    group: "jobs",
+  },
   {
     command: "jobs",
-    description: "Rank the queue now and show the shortlist",
+    description: "Everything on file, freshest first. jobs 3d to limit it by age",
     group: "jobs",
   },
   {
     command: "wife_jobs",
-    description: "Rank your wife's queue now and show the shortlist",
+    description: "Your wife's whole queue, freshest first. wife_jobs 3d to limit it by age",
     group: "jobs",
   },
   {
@@ -187,7 +212,12 @@ export function buildCommandsHelp(): string[] {
   const parts: string[] = [
     ["<b>Jobs — the daily loop</b>", ...jobLines, ...orphans].join("\n\n"),
     ["<b>System</b>", ...system.map((e) => `⚙️ <b>/${e.command}</b>\n<i>${formatDetail(e)}</i>`)].join("\n\n"),
-    "💡 All of these are in the ☰ menu button next to the message box, so you never have to remember them.\n\nEverything else is natural language — the planner routes it.",
+    "💡 All of these are in the ☰ menu button next to the message box, so you never have to remember them.\n\n" +
+      "<b>Plain English works too, and hits the same code.</b>\n" +
+      "<i>“tashi's jobs” · “what did we find in the last 2 days” · “roles posted this week” · " +
+      "“tashi's last 2 days jobs founded”</i>\n\n" +
+      "<b>posted</b> is when the employer published it. <b>found</b> is when we first saw it. " +
+      "They differ when a new job board is added, and every row prints both.",
   ];
 
   return parts;

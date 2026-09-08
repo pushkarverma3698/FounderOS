@@ -85,6 +85,57 @@ export function windowDateOf(
   return axis === "found" ? row.created_at : (row.posted_at ?? row.created_at);
 }
 
+/**
+ * The absolute cutoff a scope resolves to, or null when it has none.
+ *
+ * One place computes it, so `inScope` and the truncation check below can never
+ * disagree about where a scope's boundary is.
+ */
+export function scopeCutoff(
+  scope: { windowHours?: number | null; since?: Date | undefined },
+  now: Date,
+): Date | null {
+  if (scope.since) return scope.since;
+  if (scope.windowHours === null || scope.windowHours === undefined) return null;
+  return new Date(now.getTime() - scope.windowHours * 3_600_000);
+}
+
+/**
+ * Whether the read limit could have hidden rows this scope asked for.
+ *
+ * THE SILENT LOSS THIS CLOSES. Since 2026-09-08 the queue is read ONCE and
+ * unbounded (so every verb shares one numbering) and then filtered in memory.
+ * That read is capped at BRIEF_QUEUE_LIMIT and ordered `created_at DESC`, so it
+ * sees back only as far as the oldest row it returned. A narrow scope whose
+ * cutoff reaches PAST that horizon is asking about rows the read never loaded —
+ * and, unlike `/jobs`, it gets no header cut notice, because under a scope the
+ * displayed count and the queue total describe different populations.
+ *
+ * MEASURED ON PROD, 2026-09-08: 1,676 actionable rows for the founder against a
+ * 500-row read, so the read IS truncated — and 345 rows were created in the last
+ * 24h, with the oldest 24h-fresh row at position 339. Complete today, at 69% of
+ * the limit. This function is what makes the day it stops being complete loud
+ * instead of silent.
+ *
+ * Returns false when the read was not truncated at all: everything is loaded, so
+ * no scope can miss anything.
+ */
+export function scopeMayBeIncomplete(
+  loaded: ReadonlyArray<Pick<JobApplication, "created_at">>,
+  totalQualifying: number | undefined,
+  scope: { windowHours?: number | null; since?: Date | undefined },
+  now: Date,
+): boolean {
+  if (totalQualifying === undefined || totalQualifying <= loaded.length) return false;
+  const cutoff = scopeCutoff(scope, now);
+  if (cutoff === null) return false;
+  const horizon = loaded.reduce<Date | null>(
+    (oldest, row) => (row.created_at && (!oldest || row.created_at < oldest) ? row.created_at : oldest),
+    null,
+  );
+  return horizon !== null && cutoff.getTime() < horizon.getTime();
+}
+
 /** Whether one row falls inside a display scope. Pure; `now` is passed. */
 export function inScope(
   row: Pick<JobApplication, "posted_at" | "created_at">,

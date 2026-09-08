@@ -14,7 +14,7 @@
 import { childLogger } from "../../infra/logger.js";
 import { intEnv } from "../../core/config.js";
 import { recordLiveness, type QueueAxis } from "../../db/job-queries.js";
-import { inScope, loadBriefQueue, todaysSpend } from "./brief-queue.js";
+import { inScope, loadBriefQueue, scopeMayBeIncomplete, todaysSpend } from "./brief-queue.js";
 import { compareOverlap, overlapScore, type OverlapResult } from "./overlap.js";
 import { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
 import { buildTrends } from "./brief-trends.js";
@@ -295,6 +295,19 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
   // one, which is a weaker comparison than the ranking implies. Said out loud,
   // because a number that is quietly less trustworthy than it looks is the kind
   // of thing that gets acted on for weeks.
+  // A narrow verb cannot see past the read's horizon, and unlike `/jobs` it
+  // gets no header cut notice. Reported as a FAILURE line rather than a note,
+  // because that block already carries the right sentence — "today's numbers are
+  // a floor, not a measurement" — and this is exactly that situation.
+  const truncationNote = scopeMayBeIncomplete(applications, queued, scope, now)
+    ? [
+        `This list was drawn from the newest ${applications.length} of ${queued} rows in your ` +
+          `queue, and it asks about a window older than the oldest of those. Roles inside the ` +
+          `window may be missing from it. Send /csv for the whole queue, or raise ` +
+          `BRIEF_QUEUE_LIMIT.`,
+      ]
+    : [];
+
   const untracked = rows.filter((row) => row.track === UNCLASSIFIED_TRACK).length;
   const untrackedNote =
     untracked > 0
@@ -323,7 +336,7 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     rows,
     standing: standingRows,
     trends: await buildTrends(cvs, now, profile),
-    failures: [...(opts.failures ?? []), ...cvFailure, ...untrackedNote],
+    failures: [...(opts.failures ?? []), ...truncationNote, ...cvFailure, ...untrackedNote],
     notes: opts.notes ?? [],
     agedOut,
     maxAgeHours,

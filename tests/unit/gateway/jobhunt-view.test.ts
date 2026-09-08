@@ -28,6 +28,19 @@ function fakeCtx() {
   return { ctx, replies };
 }
 
+/**
+ * The two `/fresh`-only deps, stubbed for the `/jobs` tests below.
+ *
+ * REQUIRED ON THE TYPE, not optional, even though `/jobs` never calls them.
+ * `JobsViewDeps` is what wires all three verbs in telegram.ts; making the
+ * marker source optional would let `/fresh` be registered with no marker at
+ * all, and it would degrade silently into a second `/jobs` rather than fail.
+ */
+const FRESH_STUBS = {
+  lastFreshView: async () => null,
+  recordFreshView: async () => {},
+};
+
 describe("parseCsvKind", () => {
   it("defaults a bare /csv to the apply queue — the thing he acts on", () => {
     expect(parseCsvKind("")).toBe("queue");
@@ -71,7 +84,7 @@ describe("handleJobs", () => {
   it("says it is working before a slow ranking, so the founder does not retry it", async () => {
     const { ctx, replies } = fakeCtx();
 
-    await handleJobs(ctx, { buildBrief: async () => "brief", split: (t) => [t] });
+    await handleJobs(ctx, { buildBrief: async () => "brief", split: (t) => [t], ...FRESH_STUBS });
 
     expect(replies[0]).toMatch(/ranking/i);
   });
@@ -82,6 +95,7 @@ describe("handleJobs", () => {
     await handleJobs(ctx, {
       buildBrief: async () => "a".repeat(10_000),
       split: () => ["part one", "part two", "part three"],
+      ...FRESH_STUBS,
     });
 
     expect(replies).toContain("part one");
@@ -96,6 +110,7 @@ describe("handleJobs", () => {
         throw new Error("column posted_at does not exist");
       },
       split: (t) => [t],
+      ...FRESH_STUBS,
     });
 
     const last = replies.at(-1)!;

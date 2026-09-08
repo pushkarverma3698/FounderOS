@@ -19,7 +19,8 @@
  * without a clock, a network, or a bot.
  */
 
-import { esc } from "./telegram-format.js";
+import { cmd, esc, link } from "./telegram-format.js";
+import { dedupeKey } from "./filters.js";
 import type { IngestLine } from "./ingest-batch.js";
 import type { FreeFunnel } from "./free-ingest.js";
 
@@ -300,6 +301,23 @@ export interface NewRowsAlertOptions {
    * ping for them would double the sweep's notification count.
    */
   readonly backfill?: number;
+  /**
+   * `dedupeKey(company, title)` → the row's persisted `brief_rank`.
+   *
+   * THE PINNED RANK, never a number invented for this message. `/jobs`,
+   * `/today` and `/fresh` all print the same one (B5), so a fourth numbering
+   * here would resolve `/draft 1` to whatever the queue has at 1 — a tailored
+   * application about the wrong company, sent from a tap.
+   *
+   * Keyed on `dedupeKey` because that is the identity the database uses; an
+   * alert row and a stored row are the same posting or they are not, and no
+   * second notion of sameness is allowed to decide it.
+   *
+   * A missing entry prints no command. Ranking runs before this and is
+   * fail-open, so "we could not number it" is a state that happens, and the
+   * honest rendering of it is a company name with nothing to tap.
+   */
+  readonly ranks?: ReadonlyMap<string, number>;
 }
 
 export function formatNewRowsAlert(
@@ -310,9 +328,16 @@ export function formatNewRowsAlert(
 ): string {
   const named = rows.slice(0, NEW_ROWS_NAMED);
   // The mark is the row's own status, so a flagged company is visibly a question
-  // rather than a recommendation.
+  // rather than a recommendation. The title is the LINK and `/draft N` follows
+  // it, so the ping → application path is one tap instead of four steps through
+  // `/jobs` (B6).
   const lines = named
-    .map((r) => `${r.outcome === "pass" ? "✅" : "❓"} ${esc(r.company)} — ${esc(r.title)}`)
+    .map((r) => {
+      const mark = r.outcome === "pass" ? "✅" : "❓";
+      const rank = opts.ranks?.get(dedupeKey(r.company, r.title));
+      const action = rank === undefined ? "" : ` · ${cmd(`/draft ${rank}`)}`;
+      return `${mark} <b>${esc(r.company)}</b> — ${link(r.title, r.url ?? null)}${action}`;
+    })
     .join("\n");
   const rest = rows.length > NEW_ROWS_NAMED ? `\n<i>+ ${rows.length - NEW_ROWS_NAMED} more.</i>` : "";
   const backfill =

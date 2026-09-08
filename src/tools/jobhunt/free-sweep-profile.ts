@@ -215,10 +215,30 @@ export async function runFreeSweepForProfile(
   // the quiet line — no 🆕, no per-row names, no interrupt — because it is news
   // about our coverage, not about the market. Both halves get one message, with
   // the backfill count folded into it.
+  // READ BACK AFTER RANKING, so each named row carries the number `/draft`
+  // actually resolves. Fail-open: a lookup that throws costs the commands on
+  // the alert, not the alert — the founder still learns the roles exist, and
+  // `/jobs` still numbers them. Printing a guessed number instead would be the
+  // one outcome worse than printing none.
+  let ranks: Map<string, number> = new Map();
+  try {
+    const { briefRanksByDedupeKey } = await import("../../db/job-queries.js");
+    const { dedupeKey } = await import("./filters.js");
+    ranks = await briefRanksByDedupeKey(
+      newRoles.map((r) => dedupeKey(r.company, r.title)),
+      { tenantId: profile.tenantId, profileId: profile.id },
+    );
+  } catch (err) {
+    // allow-failopen: see above — the alert is the deliverable, `/draft N` is
+    // the shortcut, and a missing shortcut is visible while a wrong one is not.
+    log.warn({ err: (err as Error).message, profile: profile.id }, "Brief ranks unavailable for alert");
+  }
+
   const message =
     newRoles.length > 0
       ? formatNewRowsAlert(newRoles, link ?? notice, profile.candidateName, {
           backfill: backfill.length,
+          ranks,
         })
       : formatBackfillLine(backfill.length, profile.candidateName);
   try {
