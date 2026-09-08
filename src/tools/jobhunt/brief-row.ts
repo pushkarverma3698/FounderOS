@@ -30,9 +30,10 @@
 import { formatOverlap, type OverlapResult } from "./overlap.js";
 import { countryName, type PostingCountry } from "./country.js";
 import { cmd, esc, link } from "./telegram-format.js";
-import { GATE_GLOSSARY, gateMark, type Gate } from "./gates.js";
+import { gateGlossary, gateMark, type Gate } from "./gates.js";
 import type { Liveness } from "./liveness.js";
 import { routeLabel } from "./permit-routes.js";
+import { getProfile, type JobSearchProfile } from "./profile-config.js";
 
 /**
  * Which actionable section a row is being printed under.
@@ -279,9 +280,13 @@ export function renderRow(
  * nothing. The founder's question was "what is this? sponsor?" — that question
  * has an answer, and it belongs in the message that raised it.
  */
-export function renderLegend(rows: readonly BriefRow[]): string {
+export function renderLegend(
+  rows: readonly BriefRow[],
+  profile: JobSearchProfile = getProfile(),
+  now: Date = new Date(),
+): string {
   const present = new Set(rows.flatMap((r) => r.gates.map((g) => g.gate)));
-  const defined = Object.entries(GATE_GLOSSARY).filter(([gate]) => present.has(gate));
+  const defined = Object.entries(gateGlossary(profile, now)).filter(([gate]) => present.has(gate));
   if (defined.length === 0) return "";
 
   return (

@@ -30,7 +30,7 @@ import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import type { FreeAts, FreeBoard } from "./free-boards.js";
 import { createEtagCache, type EtagCache } from "./free-ats-cache.js";
-import { HttpStatusError, fetchJson, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
+import { HttpStatusError, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
 import { getAdapter } from "./adapters/index.js";
 import { decodeJobBody, type NormalizedJob as FreeCandidate } from "./adapters/types.js";
 
@@ -61,9 +61,6 @@ const log = childLogger({ module: "jobhunt:free-ats" });
 
 /** One board's list endpoint. Whole-board payloads, so more generous than a HEAD. */
 export const BOARD_TIMEOUT_MS = 20_000;
-
-/** One Greenhouse posting's body. Small payload, so a tighter bound. */
-export const DESCRIPTION_TIMEOUT_MS = 10_000;
 
 /**
  * How many boards to poll at once.
@@ -350,45 +347,12 @@ export async function sweepBoards(boards: readonly FreeBoard[]): Promise<BoardSw
   return { candidates, failures, boardsPolled: boards.length };
 }
 
-/**
- * Fill in the bodies Greenhouse withheld.
- *
- * Candidates that already have a description (Lever, Ashby) pass through
- * untouched and cost nothing. A body that cannot be fetched leaves the candidate
- * with `description: null`, and the caller drops it with a reason — screening a
- * posting on an empty body would read as "this employer stated no requirements",
- * which every gate would then wave through.
- */
-export async function hydrateDescriptions(
-  candidates: readonly FreeCandidate[],
-): Promise<FreeCandidate[]> {
-  return mapWithConcurrencyLimit(candidates, BOARD_CONCURRENCY, async (candidate) => {
-    if (candidate.description !== null) return candidate;
-
-    const adapter = getAdapter(candidate.board.ats);
-    if (!adapter) return candidate;
-
-    const url = adapter.getJobUrl(candidate.board, candidate.externalId);
-    // Null means the platform inlines its bodies, so a null description here is
-    // a posting that genuinely has none — not one we failed to fetch.
-    if (url === null) return candidate;
-
-    try {
-      const payload = (await fetchJson(url, DESCRIPTION_TIMEOUT_MS)) as Record<string, unknown>;
-      // For a `dateOnlyInDetail` platform this is the FIRST point at which the
-      // posting's real publication date exists. Everything before it treated the
-      // date as unknown rather than as absent, deliberately.
-      const postedAt = adapter.postedAtFromDetail?.(payload) ?? candidate.postedAt;
-      return { ...candidate, postedAt, description: adapter.extractBody(payload) || null };
-    } catch (err) {
-      log.warn(
-        { board: candidate.board.token, id: candidate.externalId, err: (err as Error).message },
-        "Could not fetch posting body",
-      );
-      return candidate;
-    }
-  });
-}
+// hydrateDescriptions and DESCRIPTION_TIMEOUT_MS moved to free-ats-hydrate.ts
+// (2026-09-08) — merging the detail payload's LOCATION into the candidate, the
+// fix for a Paris vacancy that reached a Netherlands-only brief, pushed this file
+// past the 400-line budget. Re-exported so every existing import site and test
+// keeps resolving here, same as the transport and mapper splits before it.
+export { hydrateDescriptions, DESCRIPTION_TIMEOUT_MS } from "./free-ats-hydrate.js";
 
 // decodeJobBody moved to free-ats-mappers.ts (2026-08-20) — Recruitee's
 // mapper needs the same tag-to-space HTML decode this Greenhouse hydration

@@ -23,6 +23,9 @@
  */
 
 import type { ScreenStatus } from "./filters.js";
+import type { JobSearchProfile } from "./profile-config.js";
+import { criterionOn } from "./criteria.js";
+import { gateProfile, isKnownPermitBasis, type PermitBasis } from "./permit-routes.js";
 
 /** One check, its outcome, and the evidence that produced it. */
 export interface Gate {
@@ -150,36 +153,95 @@ function safeJsonParse(text: string): unknown {
 // ── Presentation vocabulary ───────────────────────────────────────────────────
 
 /**
- * What each gate NAME means, in the words the founder would use.
+ * What each gate NAME means, in the words the founder would use — FOR THE
+ * CANDIDATE WHOSE BRIEF THIS IS.
  *
  * The brief used to print a bare gate label — "Sponsor" — followed by register
  * prose, and the founder's question was literally "what is this? sponsor?".
  * A label nobody defined is not information. These strings are the definition,
  * printed once per brief in the legend.
+ *
+ * IT WAS A CONSTANT UNTIL 2026-09-08, and every number in it was the founder's.
+ * Rendered against the second candidate's real gate set that day, four of five
+ * lines were false about her: "your ~3.5 years shipped" (she has 2.4),
+ * "€4,357/month, under-30 band" (her rows are screened against the €3,122
+ * reduced criterion), "only a recognised sponsor can hire you" (her leading
+ * basis needs none), and a Location line naming a market she did not target.
+ *
+ * A legend defined with another person's CV and another person's permit is worse
+ * than an undefined label: it is confidently wrong, on the one block of the brief
+ * whose whole job is to explain the rest. So every figure here is now READ from
+ * the profile and from the criterion actually in force, never written down twice.
  */
-export const GATE_GLOSSARY: Readonly<Record<string, string>> = {
-  Sponsor:
-    "Is this employer on the IND recognised-sponsor register? Only a recognised " +
-    "sponsor can hire you on a highly skilled migrant permit.",
-  Basis:
-    "Which permit or contract makes this role lawful for you at all — sponsored " +
-    "relocation, partner permit, or a remote contract from India.",
-  Salary:
-    "Does the pay clear the permit's legal floor (€4,357/month base, under-30 band)? " +
-    "Below it the permit cannot be issued, however much they want you.",
-  Rate: "Is the day rate or salary worth taking on a remote contract, where no permit floor applies.",
-  Pay:
-    "Indian roles only. Does the pay reach your ₹15 LPA line — YOUR preference, not a " +
-    "legal bar. Below it the role is still lawful and still applicable; it just gets a " +
-    "second look before you spend an application on it.",
-  Language: "Does the posting require Dutch. If it does, you cannot be shortlisted.",
-  Experience: "How many years the posting explicitly demands, versus your ~3.5 years shipped.",
-  Location:
-    "Where the job actually is — taken from the feed, not guessed from the ad. Only " +
-    "appears when the answer is neither the Netherlands nor India, or when nobody " +
-    "recorded one, because then every basis below is an assumption rather than a finding.",
-  Posting: "Whether we actually received enough of the job ad to judge it.",
-};
+export function gateGlossary(
+  profile: JobSearchProfile,
+  now: Date = new Date(),
+): Readonly<Record<string, string>> {
+  const criterion = criterionOn(now, profile.dob, profile.permitBases.includes("zoekjaar"));
+  // Stated rather than asserted when the table has lapsed — `screenSalaryFacts`
+  // flags in exactly that case, so the legend must not claim a floor it cannot
+  // name (criteria.ts covers one calendar year at a time, by design).
+  const floor = criterion
+    ? `€${criterion.monthly.toLocaleString("en-US")}/month base, ${criterion.band} band`
+    : "no verified criterion for today's date — every salary check is currently a flag";
+
+  const markets = profile.targetCountries.map((c) => countryLabel(c)).join(" nor ");
+
+  // Bases this candidate holds that need NO recognised sponsor. Naming them is
+  // what stops the Sponsor line reading as a bar on a permit that has none.
+  const sponsorFree = profile.permitBases
+    .filter((b) => isKnownPermitBasis(b) && !gateProfile(b).sponsorRequired)
+    .map((b) => gateProfile(b as PermitBasis).label);
+  const sponsorClause =
+    sponsorFree.length > 0
+      ? ` It does not apply on every basis you hold — ${listOf(sponsorFree)} ` +
+        `${sponsorFree.length === 1 ? "needs" : "need"} no sponsor at all, and each row's own ` +
+        `route says which basis carried it.`
+      : "";
+
+  const payLine =
+    profile.minInrLpaFloor === undefined
+      ? "Indian roles only. No personal pay line is set for you, so the ad's figure is " +
+        "printed and nothing is flagged on it. Ask for one to be set if you want roles " +
+        "below a number to get a second look."
+      : `Indian roles only. Does the pay reach your ₹${profile.minInrLpaFloor} LPA line — YOUR ` +
+        "preference, not a legal bar. Below it the role is still lawful and still applicable; " +
+        "it just gets a second look before you spend an application on it.";
+
+  return {
+    Sponsor:
+      "Is this employer on the IND recognised-sponsor register? Only a recognised " +
+      `sponsor can hire you on a highly skilled migrant permit.${sponsorClause}`,
+    Basis:
+      "Which permit or contract makes this role lawful for you at all — " +
+      `${listOf(profile.permitBases.filter(isKnownPermitBasis).map((b) => gateProfile(b).label))}.`,
+    Salary:
+      `Does the pay clear the permit's legal floor (${floor})? ` +
+      "Below it the permit cannot be issued, however much they want you.",
+    Rate: "Is the day rate or salary worth taking on a remote contract, where no permit floor applies.",
+    Pay: payLine,
+    Language: "Does the posting require Dutch. If it does, you cannot be shortlisted.",
+    Experience: `How many years the posting explicitly demands, versus your ~${profile.experienceYears} years shipped.`,
+    Location:
+      "Where the job actually is — taken from the feed, not guessed from the ad. Only " +
+      `appears when the answer is ${markets.length > 0 ? `neither ${markets}` : "outside your markets"}, or when nobody ` +
+      "recorded one, because then every basis below is an assumption rather than a finding.",
+    Posting: "Whether we actually received enough of the job ad to judge it.",
+  };
+}
+
+/** "the Netherlands" reads as a place in a sentence; the raw config key does not. */
+function countryLabel(country: { readonly code: string; readonly names: readonly string[] }): string {
+  const first = country.names[0] ?? country.code;
+  const titled = first.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  return titled === "Netherlands" ? "the Netherlands" : titled;
+}
+
+/** "a", "a nor b", "a, b nor c" — Oxford-free, matching the legend's register. */
+function listOf(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
 
 /** The mark that precedes a gate line. Status is the ONLY input. */
 export function gateMark(status: ScreenStatus): string {
