@@ -124,7 +124,7 @@ function toPrintable(msg: Api.Message): PrintableMessage {
 function printMessage(m: PrintableMessage): void {
   const who = m.out ? "👤 tester" : "🤖 bot";
   console.log(`\n#${m.id} ${m.date} ${who}`);
-  console.log(m.text.length > 1_500 ? m.text.slice(0, 1_500) + "…" : m.text);
+  console.log(m.text);
   if (m.document) console.log(`   📎 document: ${m.document.fileName} (${m.document.mimeType}, ${m.document.bytes}B)`);
   if (m.buttons.length > 0) console.log(`   buttons: ${m.buttons.join(" ")}`);
 }
