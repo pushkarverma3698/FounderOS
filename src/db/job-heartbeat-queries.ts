@@ -64,6 +64,48 @@ export async function saveLaneHeartbeat(profileId: string, state: HeartbeatState
     });
 }
 
+/**
+ * When the founder last ran `/fresh` for this candidate, or null if never.
+ *
+ * Read separately from `loadLaneHeartbeat` rather than folded into
+ * `HeartbeatState`, because the two have opposite writers: the sweep writes the
+ * heartbeat 48 times a day and must never touch this, and `/fresh` writes this
+ * and must never touch the heartbeat. One combined upsert would let each clear
+ * the other's field — the sweep silently resetting the marker would turn every
+ * `/fresh` into a `/jobs` and nothing would report it.
+ */
+export async function lastFreshView(profileId: string): Promise<Date | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ at: jobLaneHeartbeats.fresh_viewed_at })
+    .from(jobLaneHeartbeats)
+    .where(eq(jobLaneHeartbeats.profile_id, profileId))
+    .limit(1);
+  return row?.at ?? null;
+}
+
+/**
+ * Stamp "the founder has now seen everything up to here".
+ *
+ * Inserts a row when the profile has no heartbeat yet — a candidate whose lane
+ * has never swept still has a founder who can type `/fresh`, and failing that
+ * first call would make the command look broken on exactly the profile that
+ * needs it most.
+ */
+export async function recordFreshView(profileId: string, at: Date): Promise<void> {
+  const db = getDb();
+  await db
+    .insert(jobLaneHeartbeats)
+    .values({ profile_id: profileId, fresh_viewed_at: at, updated_at: new Date() })
+    .onConflictDoUpdate({
+      target: jobLaneHeartbeats.profile_id,
+      // ONLY these two columns. Touching the heartbeat's own fields here would
+      // reset the alive-ping clock from a read-only command and buy three hours
+      // of silence on a lane the founder just asked about.
+      set: { fresh_viewed_at: at, updated_at: new Date() },
+    });
+}
+
 /** Test/ops seam: wipe every profile's heartbeat state. */
 export async function clearLaneHeartbeats(): Promise<void> {
   const db = getDb();

@@ -29,7 +29,13 @@ import {
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
 import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
-import { handleCsv, handleJobs, type JobsViewDeps } from "./jobhunt-view.js";
+import {
+  handleCsv,
+  handleFresh,
+  handleJobs,
+  handleToday,
+  type JobsViewDeps,
+} from "./jobhunt-view.js";
 import { withForcedProfileToken } from "./jobhunt-profile-arg.js";
 import { COMMAND_MENU, telegramCommandPayload } from "./command-menu.js";
 import { splitForTelegram } from "../tools/jobhunt/telegram-format.js";
@@ -75,12 +81,20 @@ export function registerHandlers(bot: Bot): void {
   // brief's database and liveness dependencies into the bot's startup path.
   // `splitForTelegram` is pure formatting and imported normally.
   const jobsDeps: JobsViewDeps = {
-    buildBrief: async (profile) =>
-      (await import("../tools/jobhunt/daily-brief.js")).buildDailyBrief({ profile }),
+    buildBrief: async (profile, scope) =>
+      (await import("../tools/jobhunt/daily-brief.js")).buildDailyBrief({ profile, scope }),
     split: splitForTelegram,
+    lastFreshView: async (profileId) =>
+      (await import("../db/job-heartbeat-queries.js")).lastFreshView(profileId),
+    recordFreshView: async (profileId, at) =>
+      (await import("../db/job-heartbeat-queries.js")).recordFreshView(profileId, at),
   };
   bot.command("jobs", (ctx: Context) => handleJobs(ctx, jobsDeps));
   bot.command("wife_jobs", (ctx: Context) => handleJobs(withForcedProfileToken(ctx, "wife"), jobsDeps));
+  bot.command("today", (ctx: Context) => handleToday(ctx, jobsDeps));
+  bot.command("wife_today", (ctx: Context) => handleToday(withForcedProfileToken(ctx, "wife"), jobsDeps));
+  bot.command("fresh", (ctx: Context) => handleFresh(ctx, jobsDeps));
+  bot.command("wife_fresh", (ctx: Context) => handleFresh(withForcedProfileToken(ctx, "wife"), jobsDeps));
   bot.command("csv", (ctx: Context) => handleCsv(ctx));
   bot.command("wife_csv", (ctx: Context) => handleCsv(withForcedProfileToken(ctx, "wife")));
 

@@ -73,7 +73,16 @@ describe("COMMAND_MENU — agrees with what the bot actually answers", () => {
   });
 
   it("puts the jobs loop at the top, where the menu is read", () => {
-    const first = COMMAND_MENU.slice(0, 5).map((e) => e.command);
+    // Counted over the FOUNDER'S OWN commands, ignoring the paired `wife_`
+    // entries that sit beside each one: the property is "the daily loop leads",
+    // and after the 2026-09-08 surface change (three read verbs instead of one)
+    // a flat slice of five would be testing how many candidates are registered
+    // rather than what the menu leads with.
+    const first = COMMAND_MENU.filter((e) => !e.command.startsWith("wife_"))
+      .slice(0, 5)
+      .map((e) => e.command);
+    expect(first).toContain("fresh");
+    expect(first).toContain("today");
     expect(first).toContain("jobs");
     expect(first).toContain("csv");
     expect(first).toContain("draft");
