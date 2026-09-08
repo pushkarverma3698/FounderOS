@@ -2,7 +2,21 @@
 
 **Milestone:** jobhunt supply (`wife-nl-finance` profile's binding constraint)
 **Branch:** `feat/successfactors-adapter` — cut from fresh `origin/beta`. PR base: `beta`.
-**Status:** scoped, not dispatched
+**Status:** ⚠ ON HOLD — its central number did not survive measurement (2026-09-08)
+
+> **DO NOT DISPATCH AS WRITTEN.** This brief says "85 of 126 NL finance employers are on
+> SuccessFactors". Re-measured against the same 1,393-row corpus it cites, using exact normalised
+> name matching, the figure is **7** (Vistra, Heineken, AkzoNobel, DSM-Firmenich, SBM Offshore — two
+> of the nine raw hits are duplicate spellings). A deliberately loose matcher put it at 13.
+>
+> Meanwhile **10** of her missing employers are on platforms this repo ALREADY polls — Grant
+> Thornton, Crowe, NN Group, Shell and RELX on Workday, KLM and Fenergo on Workable, MN, All Options,
+> ComplyAdvantage — reachable for the cost of ten CSV rows and no new code, and **77 (82% of the
+> gap)** are on none of the eleven published corpora at all.
+>
+> So this adapter is not the biggest remaining lever for her lane. Full measurement and the ranked
+> alternative: [docs/sessions/2026-09-08-jobhunt-supply-audit.md](../sessions/2026-09-08-jobhunt-supply-audit.md).
+> Founder call required before any dispatch.
 **Read [STANDARDS.md](STANDARDS.md) in full before writing any code. It is binding.**
 **Read [docs/plans/2026-09-08-successfactors-adapter-for-tashi-supply.md](../plans/2026-09-08-successfactors-adapter-for-tashi-supply.md) first — it has the full reasoning this brief assumes.**
 
@@ -43,7 +57,7 @@ node --import tsx/esm scripts/jobhunt-import-sponsor-boards.ts --employers-path 
 |---|---|
 | SuccessFactors corpus size | 1,393 companies |
 | Confirmed live example | HEINEKEN, `career5.successfactors.eu`, company `C0000032666P`, 715 total jobs (all regions, unfiltered) |
-| Her gap employers with no adapter today | 85 of 126 |
+| Her gap employers with no adapter today | ~~85 of 126~~ — **7**, re-measured 2026-09-08 (see the hold notice above) |
 | Existing adapters this repo has for reference | 10 — read `adapters/workday.ts` first, it is the other POST-based, paged, non-REST-shaped one |
 
 **The one thing you must answer before writing the adapter, not after:** is
