@@ -27,11 +27,12 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { boardUrl } from "../src/tools/jobhunt/free-ats-source.js";
+import { countPostings } from "../src/tools/jobhunt/board-probe.js";
 import {
   boardsPathFrom,
   parseBoardRegistry,
   registerDiscoveredBoard,
-  FREE_ATS_PLATFORMS,
+  NAME_DERIVABLE_ATS,
   type FreeAts,
   type FreeBoard,
   type BoardMarket,
@@ -56,6 +57,7 @@ function log(message: string): void {
 type Probe =
   | { readonly kind: "alive" }
   | { readonly kind: "absent"; readonly status: number }
+  | { readonly kind: "empty" }
   | { readonly kind: "unknown"; readonly detail: string };
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -68,10 +70,19 @@ async function probeOnce(url: string): Promise<Probe> {
       signal: controller.signal,
       headers: { accept: "application/json", "user-agent": USER_AGENT },
     });
-    void res.body?.cancel();
-    if (res.ok) return { kind: "alive" };
-    if (res.status === 404 || res.status === 410) return { kind: "absent", status: res.status };
-    return { kind: "unknown", detail: `HTTP ${res.status}` };
+    if (res.status === 404 || res.status === 410) {
+      void res.body?.cancel();
+      return { kind: "absent", status: res.status };
+    }
+    if (!res.ok) {
+      void res.body?.cancel();
+      return { kind: "unknown", detail: `HTTP ${res.status}` };
+    }
+    // A discovered board is only worth registering if it HAS postings: for a
+    // guessed slug, "200 with zero jobs" and "no such tenant" are the same fact,
+    // and both cost a poll every 30 minutes forever once written.
+    const postings = countPostings(await res.text());
+    return postings === 0 ? { kind: "empty" } : { kind: "alive" };
   } catch (err) {
     return { kind: "unknown", detail: (err as Error).message };
   } finally {
@@ -130,6 +141,10 @@ interface HostResult {
   readonly probed: number;
   readonly hits: number;
   readonly unknown: number;
+  /** Tokens this platform's adapter refused to build a URL from — skipped, never fatal. */
+  readonly unmappable: number;
+  /** 200 responses carrying zero postings — a guessed slug that is not a board. */
+  readonly empty: number;
   readonly aborted: boolean;
 }
 
@@ -143,12 +158,29 @@ async function sweepHost(
   let done = 0;
   let hits = 0;
   let unknown = 0;
+  let unmappable = 0;
+  let empty = 0;
   const started = Date.now();
 
   const results = await mapWithConcurrencyLimit(tokens, HOST_CONCURRENCY, async (token) => {
     if (aborted) return "skipped" as const;
 
-    const result = await probe(boardUrl(candidateBoard(ats, token)));
+    // A token an adapter refuses to build a URL from is ONE dead token, never a
+    // dead night. Until 2026-09-08 this call sat bare inside the mapper: the
+    // first Workday slug threw out through mapWithConcurrencyLimit and the
+    // Promise.all over every host, killing the whole sweep. NAME_DERIVABLE_ATS
+    // now keeps that specific case out; this catch is what makes the next
+    // unforeseen one a logged skip instead of four silent nights.
+    let url: string;
+    try {
+      url = boardUrl(candidateBoard(ats, token));
+    } catch (err) {
+      unmappable += 1;
+      if (unmappable <= 3) log(`   ${ats}: cannot build a URL for "${token}" — ${(err as Error).message}`);
+      return "unmappable" as const;
+    }
+
+    const result = await probe(url);
     done += 1;
 
     if (result.kind === "unknown") {
@@ -160,6 +192,7 @@ async function sweepHost(
       }
     } else {
       consecutiveUnknown = 0;
+      if (result.kind === "empty") empty += 1;
       if (result.kind === "alive") {
         hits += 1;
         onHit(ats, token);
@@ -174,7 +207,7 @@ async function sweepHost(
     return "done" as const;
   });
 
-  return { ats, probed: results.filter((r) => r === "done").length, hits, unknown, aborted };
+  return { ats, probed: results.filter((r) => r === "done").length, hits, unknown, unmappable, empty, aborted };
 }
 
 function csvField(value: string): string {
@@ -236,7 +269,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  log(`probing ${FREE_ATS_PLATFORMS.length} platforms in parallel, ${HOST_CONCURRENCY} workers each`);
+  log(`probing ${NAME_DERIVABLE_ATS.length} name-derivable platforms in parallel, ${HOST_CONCURRENCY} workers each`);
 
   const found: Hit[] = [];
   const onHit = (ats: FreeAts, token: string): void => {
@@ -245,13 +278,26 @@ async function main(): Promise<void> {
   };
 
   const started = Date.now();
-  const hostResults = await Promise.all(
-    FREE_ATS_PLATFORMS.map((ats) => sweepHost(ats, tokens, onHit)),
+  // allSettled, not all: sweepHost is defended per token, but one host
+  // rejecting for any unforeseen reason must not discard the other nine hosts'
+  // results the way it did every night from 2026-09-03 to 2026-09-07.
+  const settled = await Promise.allSettled(
+    NAME_DERIVABLE_ATS.map((ats) => sweepHost(ats, tokens, onHit)),
   );
+  const hostResults: HostResult[] = [];
+  for (const [i, outcome] of settled.entries()) {
+    if (outcome.status === "fulfilled") {
+      hostResults.push(outcome.value);
+      continue;
+    }
+    const ats = NAME_DERIVABLE_ATS[i]!;
+    log(`!! ${ats}: host sweep failed — ${String(outcome.reason)}`);
+    hostResults.push({ ats, probed: 0, hits: 0, unknown: 0, unmappable: 0, empty: 0, aborted: true });
+  }
   log(`discovery finished in ${Math.round((Date.now() - started) / 60_000)} min`);
 
   const best = new Map<string, Hit>();
-  for (const ats of FREE_ATS_PLATFORMS) {
+  for (const ats of NAME_DERIVABLE_ATS) {
     for (const hit of found) {
       if (hit.ats === ats && !best.has(hit.token)) best.set(hit.token, hit);
     }
@@ -316,7 +362,11 @@ async function main(): Promise<void> {
     console.log(`registry        ${existing.length} → ${existing.length + rows.length}`);
   }
   for (const host of hostResults) {
-    console.log(`  ${host.ats.padEnd(11)} probed ${host.probed}, unknown ${host.unknown}${host.aborted ? " — ABORTED" : ""}`);
+    console.log(
+      `  ${host.ats.padEnd(11)} probed ${host.probed}, unknown ${host.unknown}` +
+        `${host.empty > 0 ? `, empty ${host.empty}` : ""}` +
+        `${host.unmappable > 0 ? `, unmappable ${host.unmappable}` : ""}${host.aborted ? " — ABORTED" : ""}`,
+    );
   }
   console.log(`\nunconfirmed greenhouse (dropped): ${unconfirmed.length}`);
   console.log(`report: ${reportPath}`);

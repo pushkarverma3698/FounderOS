@@ -465,8 +465,21 @@ async function main(): Promise<void> {
     console.log(`    dead  ${d.board.ats}/${d.board.token}  (${d.board.name}) — ${d.error}`);
   }
 
-  // In NL employer mode the join key is a BRAND, and a brand is not a country.
-  // We gate by NL postings to avoid pulling in non-Dutch regional entities.
+  // In employer mode the join key is a BRAND, and a brand is not a country. It
+  // cannot tell `Deloitte Netherlands` from `Deloitte Nordic`, `Deloitte AT` or
+  // the `Deloitte` on SmartRecruiters that turns out to be Australia — all four
+  // reduce to the same key, and all four are live. The postings themselves can:
+  // a board that answered with work in the target market is the right entity's
+  // board, and one that answered with none is another country's. Scoped to NL
+  // employer mode specifically: the IN/DE/UK employer lists key on national
+  // corpora (in-tech, de-tech, UK sponsor register) that don't share this
+  // cross-region brand collision the same way, and the sponsor-register mode
+  // does not apply this filter at all — its rows are legal entities in the
+  // target country by construction.
+  //
+  // Reported by name, never silently dropped, and NOT permanent — this import is
+  // re-runnable, so a genuinely in-market employer that happened to be between
+  // vacancies today is picked up by the next run rather than blacklisted.
   const offMarket = source.isEmployerMode && source.market === "NL"
     ? verified.filter((v) => v.live && v.nlPostings === 0)
     : [];

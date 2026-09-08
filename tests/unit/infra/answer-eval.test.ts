@@ -14,6 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   judgeAnswer,
+  judgeModelLabel,
   parseAnswerJudgement,
   _resetAnswerJudgeCache,
   ANSWER_SCORE_MAX,
@@ -116,7 +117,11 @@ describe("judgeAnswer", () => {
     expect(j.status).toBe("not_evaluated");
     if (j.status === "not_evaluated") {
       expect(j.reason).toMatch(/no API key configured/i);
-      expect(j.reason).toMatch(/minimax/i);
+      // Assert the CONFIGURED model, not a hardcoded vendor. This line used to
+      // read /minimax/i and broke the day the dead slug was replaced — a test
+      // that fails on a correct fix teaches people to skip updating it, which
+      // is the opposite of what a judge-model regression test is for.
+      expect(j.reason).toContain(judgeModelLabel());
     }
   });
 
