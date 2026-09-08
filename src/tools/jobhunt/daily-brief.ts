@@ -13,12 +13,8 @@
 
 import { childLogger } from "../../infra/logger.js";
 import { intEnv } from "../../core/config.js";
-import {
-  listActionableApplications,
-  countAgedOutApplications,
-  recordLiveness,
-  queueWindowFor,
-} from "../../db/job-queries.js";
+import { recordLiveness } from "../../db/job-queries.js";
+import { loadBriefQueue } from "./brief-queue.js";
 import { summariseSpend } from "../../db/job-run-queries.js";
 import { compareOverlap, overlapScore, type OverlapResult } from "./overlap.js";
 import { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
@@ -28,6 +24,7 @@ import { toBriefRow, toLiveness } from "./brief-assemble.js";
 import { persistBriefRanks, persistFitScores } from "./brief-persist.js";
 import {
   formatDailyBrief,
+  SPEND_WINDOW_DAYS,
   type BriefInput,
   type BriefRow,
   type SpendLine,
@@ -82,6 +79,11 @@ export { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
  * outage rather than a slow day.
  */
 export const VERIFY_TOP_N = intEnv("VERIFY_TOP_N", 60);
+
+// The queue read — its limit, its verdict set and the two counts that describe
+// it — moved to brief-queue.ts on 2026-09-08, when A2 pushed this file past its
+// 400-line budget. Re-exported so existing import sites keep resolving here.
+export { BRIEF_QUEUE_LIMIT, BRIEF_VERDICTS, loadBriefQueue } from "./brief-queue.js";
 
 // Re-exported: liveness-unknown.test.ts and anything else that imports
 // `toLiveness` from this module keeps resolving after the move.
@@ -166,39 +168,7 @@ export interface BriefOptions {
 export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> {
   const now = opts.now ?? new Date();
   const profile = opts.profile ?? getProfile();
-  // REJECTS ARE READ BACK TOO (founder direction, 2026-08-01: "store all the data
-  // we are collecting even if it is senior and of no use to us"). The brief has
-  // always had a NOT LAWFUL section and it was always empty, because this query
-  // defaulted to pass+flag — so the roles the pipeline threw away on the founder's
-  // behalf were invisible to him, which is the whole complaint. They cost nothing
-  // to show: one line each, and `verificationTargets` still refuses to spend the
-  // liveness budget on them.
-  const verdicts = ["pass", "flag", "reject"] as const;
-  // profileId scoping is what keeps Wife's brief from mixing in Pushkar's rows
-  // (and vice versa) — listActionableApplications filters by tenant_id alone
-  // when profileId is omitted, so multi-profile callers must always pass it.
-  // WHOSE window. A single global here capped the second candidate's brief at
-  // her market's daily publication rate — see queueWindowFor.
-  const maxAgeHours = queueWindowFor(profile);
-  const applications = await listActionableApplications({
-    verdicts,
-    tenantId: profile.tenantId,
-    profileId: profile.id,
-    maxAgeHours,
-  });
-  let agedOut = 0;
-  try {
-    agedOut = await countAgedOutApplications({
-      verdicts,
-      tenantId: profile.tenantId,
-      profileId: profile.id,
-      maxAgeHours,
-    });
-  } catch (err) {
-    // allow-failopen: the freshness line is context, not the deliverable. Losing
-    // the whole brief over a count query would trade the shortlist for a footnote.
-    log.warn({ err: (err as Error).message }, "Aged-out count unavailable — freshness line will read 0");
-  }
+  const { applications, queued, agedOut, maxAgeHours } = await loadBriefQueue(profile);
   const { cvs, unreadable } = loadTrackCvs(profile);
   const scored = rankRows(applications, cvs, now, profile);
 
@@ -271,7 +241,13 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
 
   const input: BriefInput = {
     date: now,
-    screened: opts.screened ?? applications.length,
+    // NO FALLBACK TO `applications.length` (A3, 2026-09-08). That default is
+    // what printed the apply-queue size under the word "screened" on every
+    // typed /jobs — a claim about the machine made from a number about the
+    // founder's queue. Undefined omits the line; only a caller that ran a sweep
+    // knows this figure.
+    ...(opts.screened === undefined ? {} : { screened: opts.screened }),
+    ...(queued === undefined ? {} : { queued }),
     perTrack,
     rows,
     standing: standingRows,
@@ -312,10 +288,10 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
  * comes back. Recorded here rather than silently left as an implication.
  */
 async function todaysSpend(now: Date): Promise<SpendLine | undefined> {
-  // Three days, matching the sweep cadence. A 24-hour window on a sweep that
-  // runs every third day reports "$0.00" on two mornings out of three, which
-  // reads as a free pipeline rather than as a window that missed the run.
-  const since = new Date(now.getTime() - 3 * 86_400_000);
+  // SPEND_WINDOW_DAYS, not a literal 3 — the heading in brief-sections.ts reads
+  // off the same constant. They were two independent numbers and the heading
+  // said "WHAT TODAY COST" over a three-day sum for weeks (A4).
+  const since = new Date(now.getTime() - SPEND_WINDOW_DAYS * 86_400_000);
   try {
     const window = await summariseSpend(since);
     return window.runs === 0
@@ -324,7 +300,11 @@ async function todaysSpend(now: Date): Promise<SpendLine | undefined> {
           runs: window.runs,
           returned: window.returned,
           costUsd: window.costUsd,
-          failed: window.failed,
+          // `summariseSpend.failed` counts ledger rows with a non-null `error`.
+          // Renamed at this boundary rather than in the query, because the query
+          // is honest about the column it filters on; it was the RENDERER that
+          // called those runs failed. See SpendLine.runsWithErrors.
+          runsWithErrors: window.failed,
           fresh: window.fresh,
         };
   } catch (err) {

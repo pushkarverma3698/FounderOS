@@ -34,8 +34,10 @@ import { DEFAULT_PROFILE_ID, type JobSearchProfile } from "./profile-config.js";
 import {
   afterQuietSweep,
   afterSpokenSweep,
+  formatBackfillLine,
   formatNewRowsAlert,
   initialHeartbeat,
+  splitByPublishFreshness,
   type HeartbeatState,
 } from "./sweep-heartbeat.js";
 import { loadLaneHeartbeat, saveLaneHeartbeat } from "../../db/job-heartbeat-queries.js";
@@ -147,15 +149,28 @@ export async function runFreeSweepForProfile(
   // open question, and for the NL-finance lane it is most of them — filtering to
   // `pass` meant her lane could rank roles into her brief and stay silent.
   // `reject` stays out: those are legally void, not pending.
-  const newRoles = result.lines.filter(
+  const stored = result.lines.filter(
     (line) => line.isNew && (line.outcome === "pass" || line.outcome === "flag"),
   );
   const now = new Date();
 
+  // SPLIT ON PUBLICATION AGE, not on `isNew` (A5, 2026-09-08). `isNew` is a
+  // fact about our tracker; a board joining the registry makes a month of its
+  // back catalogue "new" to us, and every one of those rows used to ping as 🆕.
+  // `newRoles` is what interrupts; `backfill` is counted and reported, never
+  // dropped — see splitByPublishFreshness.
+  const { fresh: newRoles, backfill } = splitByPublishFreshness(stored, now);
+
   // A sweep that found nothing does not touch the Sheet. Rewriting identical
   // rows 48 times a day spends API quota to produce no change, and it would
   // overwrite the `Applied` column between a founder's click and his next sync.
-  if (newRoles.length === 0) {
+  //
+  // THE PREDICATE IS `stored`, NOT `newRoles`. A sweep that stored only
+  // backfill has genuinely done work: those rows need ranking or `/draft`
+  // cannot address them, and the founder is owed the count. Gating on the fresh
+  // half alone would have made a forty-role board import indistinguishable from
+  // a dead sweep.
+  if (stored.length === 0) {
     const { next, ping } = afterQuietSweep(
       await heartbeatFor(profile.id),
       result.boardsPolled,
@@ -195,11 +210,27 @@ export async function runFreeSweepForProfile(
   // founder never received and buy another three hours of silence — the "quiet
   // lane and broken lane look identical" failure this heartbeat exists to
   // prevent. Leaving it unspoken is honest: the next quiet roll-up still pings.
+  //
+  // WHICH message depends on which half the sweep produced. Backfill alone gets
+  // the quiet line — no 🆕, no per-row names, no interrupt — because it is news
+  // about our coverage, not about the market. Both halves get one message, with
+  // the backfill count folded into it.
+  const message =
+    newRoles.length > 0
+      ? formatNewRowsAlert(newRoles, link ?? notice, profile.candidateName, {
+          backfill: backfill.length,
+        })
+      : formatBackfillLine(backfill.length, profile.candidateName);
   try {
-    await sendToChat(formatNewRowsAlert(newRoles, link ?? notice, profile.candidateName));
+    await sendToChat(message);
   } catch (err) {
     log.error(
-      { err: (err as Error).message, profile: profile.id, newRoles: newRoles.length },
+      {
+        err: (err as Error).message,
+        profile: profile.id,
+        newRoles: newRoles.length,
+        backfill: backfill.length,
+      },
       "New-roles alert could not be delivered — heartbeat deliberately left unspoken",
     );
     return;

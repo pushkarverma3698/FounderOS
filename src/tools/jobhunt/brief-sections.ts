@@ -43,13 +43,36 @@ export interface SpendLine {
   readonly runs: number;
   readonly returned: number;
   readonly costUsd: number;
-  readonly failed: number;
+  /**
+   * Collection runs whose ledger row carries a non-null `error`.
+   *
+   * NAMED FOR WHAT IT COUNTS, since 2026-09-08. It was `failed`, and the line
+   * printed "280 of them failed and were still billed for starting" — three
+   * false claims from one word. `free-ingest.ts` writes ONE ledger row per
+   * sweep and sets `error` to `summariseFailures(sweep.failures)`, so a row
+   * carrying an error is a sweep that ran, screened, and hit a 404 or a 429
+   * somewhere among 3,223 boards. It did not fail, and on the free lane
+   * (`FREE_PRICING` = $0) nothing was billed for it either.
+   */
+  readonly runsWithErrors: number;
   /**
    * Postings the tracker had never seen. The only number here that says whether
    * the money bought anything — `returned` is what we were BILLED for.
    */
   readonly fresh: number;
 }
+
+/**
+ * How many days `todaysSpend` sums, and how many the heading claims.
+ *
+ * ONE CONSTANT FOR BOTH. They were two independent numbers — a `3 * 86_400_000`
+ * cutoff in daily-brief.ts and the words "WHAT TODAY COST" here — and they
+ * disagreed for weeks with nothing to notice it. Three days matches the sweep
+ * cadence this window was sized for; a 24-hour window on a lane that does not
+ * sweep every day reports "$0.00" on the quiet mornings, which reads as a free
+ * pipeline rather than as a window that missed the run.
+ */
+export const SPEND_WINDOW_DAYS = 3;
 
 function pluralDays(n: number): string {
   return n === 1 ? "1 day" : `${n} days`;
@@ -238,17 +261,25 @@ export function renderTrends(trends: readonly TrendRow[]): string {
 }
 
 /**
- * What today cost.
+ * What collection cost over the last SPEND_WINDOW_DAYS.
  *
  * Printed in the brief rather than left in a table, because a cost nobody sees
  * is a cost nobody governs — and until 2026-08-01 the only way to answer "what
  * does this cost" was arithmetic by hand over the actor pricing pages.
+ *
+ * Every clause below states what it is about. That is the whole of the A4 fix:
+ * the numbers were right on 2026-09-08 and every label around them was wrong.
  */
 export function renderSpend(spend: SpendLine): string {
-  const failed =
-    spend.failed > 0
-      ? ` <b>${spend.failed} of them failed</b> and were still billed for starting.`
+  // A PARTIAL RUN IS NOT A FAILED RUN. See SpendLine.runsWithErrors for what
+  // this actually counts and what it used to claim.
+  const errors =
+    spend.runsWithErrors > 0
+      ? `\n<i>⚠ ${plural(spend.runsWithErrors, "run", "runs")} hit at least one ATS ` +
+        `board error and returned partial results — that many boards' postings are ` +
+        `missing from the totals above, not from the market.</i>`
       : "";
+
   // A SWEEP THAT BOUGHT NOTHING NEW MUST NOT READ AS A NORMAL MORNING. On
   // 2026-08-02 the sweep returned 32 postings for $0.4682 and every one was
   // already stored; the line said "for 32 postings" and looked like any other
@@ -256,16 +287,25 @@ export function renderSpend(spend: SpendLine): string {
   // `fresh` is the only part of it that was worth paying for — and a zero
   // stated as a bare digit is exactly the kind of quiet that has cost this
   // pipeline weeks before.
+  //
+  // THREE BRANCHES, NOT TWO. `fresh === returned` used to fall into the "some
+  // were new" branch and print "the rest already in your list" about an empty
+  // set — which on the free lane, where every posting reaching the ledger is
+  // new, is every single day.
   const yielded =
     spend.fresh === 0
       ? ` <b>None of them new</b> — every posting was already in your list, ` +
-        `so today's fetch bought nothing the pipeline did not already have.`
-      : ` <b>${spend.fresh} new</b>, the rest already in your list.`;
+        `so this window's fetching bought nothing the pipeline did not already have.`
+      : spend.fresh >= spend.returned
+        ? ` <b>All ${spend.fresh} new.</b>`
+        : ` <b>${spend.fresh} new</b>, the rest already in your list.`;
+
   return (
-    `<b>💰 WHAT TODAY COST</b>\n` +
-    `$${spend.costUsd.toFixed(2)} across ${plural(spend.runs, "feed call", "feed calls")}, ` +
-    `for ${plural(spend.returned, "posting", "postings")}.${yielded}${failed}\n` +
-    `<i>Estimated from the actors' posted per-job prices, not from an invoice.</i>`
+    `<b>💰 LAST ${SPEND_WINDOW_DAYS} DAYS</b>\n` +
+    `$${spend.costUsd.toFixed(2)} across ${plural(spend.runs, "collection run", "collection runs")}, ` +
+    `for ${plural(spend.returned, "posting", "postings")}.${yielded}${errors}\n` +
+    `<i>Tenant-wide: every candidate's lane on one line, because the ledger records no ` +
+    `profile. Estimated from the actors' posted per-job prices, not from an invoice.</i>`
   );
 }
 

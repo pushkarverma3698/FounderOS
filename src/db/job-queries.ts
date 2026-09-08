@@ -13,7 +13,7 @@
  * gap-scan-queries.ts and account-queries.ts).
  */
 
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, lte, sql, gte } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, lte, sql, gte, type SQL } from "drizzle-orm";
 import { intEnv } from "../core/config.js";
 import { getDb } from "./client.js";
 import { DEFAULT_PROFILE_ID } from "../tools/jobhunt/profile-config.js";
@@ -392,6 +392,25 @@ export async function countPassingApplications(
  * first stored the row, which for a hand-pasted posting is the same minute he
  * found it — the honest floor on its age, not a guess at its real one.
  */
+export function actionableConditions(opts: {
+  verdicts?: readonly string[];
+  tenantId?: string;
+  profileId?: ProfileScope;
+  maxAgeHours?: number;
+}): SQL[] {
+  const maxAgeHours = opts.maxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
+  const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+  const conditions: SQL[] = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    eq(jobApplications.stage, "screened"),
+    inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
+    applyQueueFreshnessSql(cutoff),
+  ];
+  const profileWhere = profileCondition(opts.profileId);
+  if (profileWhere) conditions.push(profileWhere);
+  return conditions;
+}
+
 export async function listActionableApplications(
   opts: {
     verdicts?: readonly string[];
@@ -402,20 +421,10 @@ export async function listActionableApplications(
   } = {},
 ): Promise<JobApplication[]> {
   const db = getDb();
-  const maxAgeHours = opts.maxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
-  const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
-  const conditions = [
-    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
-    eq(jobApplications.stage, "screened"),
-    inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
-    applyQueueFreshnessSql(cutoff),
-  ];
-  const profileWhere = profileCondition(opts.profileId);
-  if (profileWhere) conditions.push(profileWhere);
   return db
     .select()
     .from(jobApplications)
-    .where(and(...conditions))
+    .where(and(...actionableConditions(opts)))
     .orderBy(desc(jobApplications.created_at))
     .limit(opts.limit ?? 100);
 }
@@ -446,6 +455,32 @@ export async function listActionableApplications(
  */
 export function applyQueueFreshnessSql(cutoff: Date) {
   return sql`coalesce(${jobApplications.posted_at}, ${jobApplications.created_at}) >= ${cutoff.toISOString()}::timestamptz`;
+}
+
+/**
+ * How many rows `listActionableApplications` WOULD return without its limit.
+ *
+ * The same predicate, counted rather than selected, so the brief can say
+ * "showing the newest 500 of 640" instead of quietly returning 500. Built from
+ * `actionableConditions` alongside the list itself for the reason
+ * `applyQueueFreshnessSql` gives about its own pair: two hand-written copies of
+ * one predicate drift, and the drift surfaces as a cut notice on a run that cut
+ * nothing, or silence on a run that cut sixty-six rows.
+ */
+export async function countActionableApplications(
+  opts: {
+    verdicts?: readonly string[];
+    tenantId?: string;
+    profileId?: ProfileScope;
+    maxAgeHours?: number;
+  } = {},
+): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(jobApplications)
+    .where(and(...actionableConditions(opts)));
+  return Number(row?.n ?? 0);
 }
 
 /**

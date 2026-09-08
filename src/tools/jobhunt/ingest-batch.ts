@@ -36,6 +36,18 @@ export interface IngestLine {
    * duplicate is by definition not new.
    */
   readonly isNew: boolean;
+  /**
+   * When the EMPLOYER published it, or null when the source stated no date.
+   *
+   * Carried since 2026-09-08 because `isNew` above is a fact about our tracker
+   * and the 🆕 alert was firing on it. Those two agree on a steady day and
+   * diverge the moment a board is added to the registry: every posting on a new
+   * board is `isNew`, including ones published a month ago. The alert splits on
+   * THIS field now — see splitByPublishFreshness (sweep-heartbeat.ts).
+   */
+  readonly postedAt?: Date | null;
+  /** The posting's link, so an alert can carry the action instead of a name. */
+  readonly url?: string | null;
 }
 
 export interface IngestSummary {
@@ -64,6 +76,13 @@ export async function screenBatch(
   const lines: IngestLine[] = [];
 
   for (const posting of postings) {
+    // Off the POSTING, not off the screening outcome. The employer's date and
+    // the apply link are facts the fetch already established; asking
+    // `screenPosting` to hand them back would widen ScreenOutcome for data it
+    // only ever passes through. Present on every branch below — including the
+    // error one — because a row that failed to screen is still a row whose age
+    // and link we know.
+    const provenance = { postedAt: posting.postedAt ?? null, url: posting.url ?? null };
     try {
       const outcome = await screenPosting({
         company: posting.company,
@@ -92,6 +111,7 @@ export async function screenBatch(
           outcome: "error",
           detail: outcome.message,
           isNew: false,
+          ...provenance,
         });
       } else if (outcome.kind === "duplicate") {
         lines.push({
@@ -100,6 +120,7 @@ export async function screenBatch(
           outcome: "duplicate",
           detail: `already in pipeline at stage "${outcome.stage}"`,
           isNew: false,
+          ...provenance,
         });
       } else {
         lines.push({
@@ -108,6 +129,7 @@ export async function screenBatch(
           outcome: outcome.verdict.status,
           detail: outcome.verdict.reasons[0] ?? outcome.route,
           isNew: outcome.isNew,
+          ...provenance,
         });
       }
     } catch (err) {
@@ -117,6 +139,7 @@ export async function screenBatch(
         outcome: "error",
         detail: (err as Error).message,
         isNew: false,
+        ...provenance,
       });
     }
   }

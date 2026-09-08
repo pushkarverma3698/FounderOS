@@ -32,6 +32,73 @@ export const NEW_ROWS_NAMED = 3;
 /** Number of consecutive 0-pass sweeps before raising a closed-funnel alert. */
 export const ZERO_PASS_STREAK_THRESHOLD = 6;
 
+/**
+ * How recently the EMPLOYER must have published a role for it to interrupt.
+ *
+ * 24 hours, and deliberately not `APPLY_QUEUE_MAX_AGE_HOURS`. That constant is
+ * per-candidate and as wide as 14 days for the low-supply lane, because a
+ * fortnight-old Dutch finance role is still worth showing in a brief the
+ * founder chose to open. This one governs an INTERRUPTION, and the bar for
+ * taking someone's attention is not the bar for appearing on a list he asked
+ * for. Both lanes ping on the same "published since yesterday" rule.
+ */
+export const PUBLISH_FRESH_HOURS = 24;
+
+/**
+ * Split newly-stored rows into the ones worth an interrupt and the ones worth a line.
+ *
+ * `isNew` — the flag this alert used to fire on — is a fact about OUR tracker
+ * (`existing === null`, screen.ts). It agrees with "newly published" on an
+ * ordinary day, because median discovery lag is twelve minutes, and stops
+ * agreeing the moment a board joins the registry: every posting on a new board
+ * is `isNew`, including the ones published a month ago. The registry went
+ * 1,312 → 3,223 on 2026-09-08, and the sweeps after that import announced
+ * month-old roles as 🆕.
+ *
+ * A NULL PUBLICATION DATE COUNTS AS FRESH. An unknown date is not evidence of
+ * age, and demoting it would silence every source that omits the field —
+ * including `screen_job`, the founder pasting a posting he just found, which is
+ * the one row he already knows is current. The same asymmetry `brief-assemble`
+ * applies to `postedDays`: unknown is stated, never resolved against us.
+ *
+ * Pure, and takes `now`, like everything else in this file.
+ */
+export function splitByPublishFreshness(
+  rows: readonly IngestLine[],
+  now: Date,
+  windowHours: number = PUBLISH_FRESH_HOURS,
+): { readonly fresh: IngestLine[]; readonly backfill: IngestLine[] } {
+  const cutoff = now.getTime() - windowHours * 3_600_000;
+  const fresh: IngestLine[] = [];
+  const backfill: IngestLine[] = [];
+  for (const row of rows) {
+    (!row.postedAt || row.postedAt.getTime() >= cutoff ? fresh : backfill).push(row);
+  }
+  return { fresh, backfill };
+}
+
+/**
+ * The quiet half: roles we can now see that the employer published a while ago.
+ *
+ * NO EMOJI, NO "NEW", NO PER-ROW NAMES. Backfill is a fact about our coverage
+ * improving, not about the market moving, and it arrives in bursts of forty
+ * when a board is imported. Given the 🆕 treatment it would be the loudest
+ * thing in the channel on precisely the days it matters least.
+ *
+ * It is still PRINTED. Discovering forty roles and mentioning none of them is
+ * the silent drop this pipeline has paid for repeatedly — and it ends in a
+ * command, because a line the founder cannot act on is a line he will learn to
+ * skip.
+ */
+export function formatBackfillLine(count: number, candidateName?: string): string {
+  const who = candidateName ? ` to ${esc(candidateName)}'s list` : " to your list";
+  return (
+    `+ ${count} older ${count === 1 ? "role" : "roles"} added${who} ` +
+    `<i>(published more than ${PUBLISH_FRESH_HOURS}h ago, newly visible to us).</i>\n` +
+    `→ /jobs to see them ranked.`
+  );
+}
+
 export interface HeartbeatState {
   /** Sweeps that found nothing since the last message of any kind. */
   readonly quietSweeps: number;
@@ -225,10 +292,21 @@ export const NEXT_STEP_LINE =
  * were found and splits them, so the count is honest and the split is the part
  * the founder acts on: a clear row takes `/draft`, a flagged one takes a question.
  */
+export interface NewRowsAlertOptions {
+  /**
+   * Roles found in the same sweep that the employer published more than
+   * PUBLISH_FRESH_HOURS ago. Counted here rather than sent as a second message:
+   * dropping them when fresh rows exist would be a silent loss, and a separate
+   * ping for them would double the sweep's notification count.
+   */
+  readonly backfill?: number;
+}
+
 export function formatNewRowsAlert(
   rows: readonly IngestLine[],
   sheetLink: string | null,
   candidateName?: string,
+  opts: NewRowsAlertOptions = {},
 ): string {
   const named = rows.slice(0, NEW_ROWS_NAMED);
   // The mark is the row's own status, so a flagged company is visibly a question
@@ -237,6 +315,11 @@ export function formatNewRowsAlert(
     .map((r) => `${r.outcome === "pass" ? "✅" : "❓"} ${esc(r.company)} — ${esc(r.title)}`)
     .join("\n");
   const rest = rows.length > NEW_ROWS_NAMED ? `\n<i>+ ${rows.length - NEW_ROWS_NAMED} more.</i>` : "";
+  const backfill =
+    (opts.backfill ?? 0) > 0
+      ? `\n<i>+ ${opts.backfill} older ${opts.backfill === 1 ? "role" : "roles"} also added ` +
+        `(published earlier, newly visible to us).</i>`
+      : "";
 
   // NAMED once there is more than one candidate. Two identical "3 new roles"
   // alerts thirty minutes apart, for two different people, is a channel the
@@ -257,6 +340,7 @@ export function formatNewRowsAlert(
     `<i>${split}</i>\n` +
     lines +
     rest +
+    backfill +
     (sheetLink ? `\n\n${sheetLink}` : "") +
     `\n\n${NEXT_STEP_LINE}`
   );
