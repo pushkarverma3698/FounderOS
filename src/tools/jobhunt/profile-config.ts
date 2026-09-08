@@ -7,6 +7,8 @@
 
 import { z } from "zod";
 
+import { INDIA_MARKET } from "./profiles/markets.js";
+
 export const ProfileTrackSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -119,24 +121,10 @@ export const PUSHKAR_PROFILE: JobSearchProfile = {
       ],
       atsLocations: ["Netherlands"],
     },
-    {
-      code: "IN",
-      names: ["india", "bharat"],
-      cities: [
-        "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "chennai", "new delhi",
-        "delhi", "noida", "gurgaon", "gurugram", "kolkata", "ahmedabad", "jaipur", "indore",
-        "chandigarh", "kochi", "coimbatore", "thiruvananthapuram", "bhubaneswar", "lucknow",
-        "varanasi", "bareilly", "mysore", "mysuru", "nashik", "tirupati", "vadodara", "surat",
-        "nagpur", "visakhapatnam", "vizag", "trivandrum", "mohali", "bhopal", "rajkot",
-        "faridabad", "ghaziabad", "thane", "navi mumbai", "whitefield", "hinjewadi",
-        "madurai", "tiruchirappalli", "guwahati", "patna", "kanpur", "dehradun", "udaipur",
-        "vijayawada", "raipur", "ludhiana", "amritsar", "agra", "meerut", "gandhinagar",
-        "hubli", "warangal", "vellore", "jodhpur", "maharashtra", "karnataka", "tamil nadu",
-        "telangana", "uttar pradesh", "gujarat", "haryana", "west bengal", "kerala",
-        "rajasthan", "andhra pradesh", "madhya pradesh", "odisha", "delhi ncr",
-      ],
-      atsLocations: ["India"],
-    },
+    // Moved to profiles/markets.ts on 2026-09-08, unchanged, when a second
+    // profile started targeting the same market — see that file for why a
+    // country definition is not a property of the candidate.
+    INDIA_MARKET,
   ],
 
   tracks: {

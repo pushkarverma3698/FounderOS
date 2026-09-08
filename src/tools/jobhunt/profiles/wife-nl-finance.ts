@@ -27,6 +27,7 @@
  */
 
 import type { JobSearchProfile } from "../profile-config.js";
+import { INDIA_MARKET } from "./markets.js";
 
 const WIFE_CV_PATH = process.env["WIFE_CV_PATH"] ?? "/opt/founderos-data/cv/cv-wife-base.md";
 
@@ -53,7 +54,22 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
   maxYearsDemanded: 4,
   maxYearsStretch: 5,
 
-  permitBases: ["zoekjaar", "hsm"],
+  // `india-local` added 2026-09-08 on the founder's own words: "Tashi will also
+  // apply in india". A declared fact about a person, exactly like the zoekjaar
+  // above — never inferred, and it must be BOTH here and in `targetCountries`:
+  // the market decides whether an Indian posting survives `filterCandidates` at
+  // all, the basis decides whether it is screenable once it does. Her 56 existing
+  // `india-local` rows are what one without the other looks like — fetched,
+  // screened, and rejected as "not a market you have a legal basis for".
+  //
+  // ASSUMED — unverified: that she holds the right to work in India without a
+  // permit, which is what this basis asserts (see permit-routes.ts). The founder
+  // stated the intent to apply, not the immigration status behind it. Say so if
+  // that is wrong; it changes which gates run, not just which rows appear.
+  //
+  // Kept LAST because the ordering is strongest-commitment-first and her Dutch
+  // bases are the live ones today.
+  permitBases: ["zoekjaar", "hsm", "india-local"],
 
   // Display copies of the criteria.ts figures, for prompt text only. The binding
   // floor is looked up by date and dob in criteria.ts, and it does not apply at
@@ -61,6 +77,16 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
   under30MonthlyEurFloor: 4357,
   over30MonthlyEurFloor: 5942,
 
+  // `minInrLpaFloor` is DELIBERATELY ABSENT, and its absence is load-bearing.
+  // The ₹15 LPA line is the founder's own preference, chosen by him from stated
+  // options on 2026-08-01 (pay-india.ts says so in as many words) and pitched at
+  // the tech market. Until 2026-09-08 `screen.ts` read it as
+  // `profile.minInrLpaFloor ?? 15`, so declaring nothing meant inheriting his —
+  // which for a finance analyst at 2.4 years would flag essentially every Indian
+  // posting she saw, and a flagged row lands in ASK, which the free lane's alert
+  // never announces. Her India lane would have been silent on a number nobody set
+  // for her. `screenIndianPay` now takes `null` and says the line is unset rather
+  // than borrowing one. Set this the day the founder states a figure.
   targetCountries: [
     {
       code: "NL",
@@ -75,6 +101,9 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
       ],
       atsLocations: ["Netherlands"],
     },
+    // Netherlands stays FIRST: `marketOf`/`MARKET_ORDER` render the brief in
+    // this order, and the relocation is what the Dutch lane is for.
+    INDIA_MARKET,
   ],
 
   // Keyword sets researched against live Dutch/EU postings (2026-09-04) — not
@@ -228,6 +257,19 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         "Client Onboarding Specialist:*",
         "Regulatory Operations:*",
       ],
+      // "cdd" REMOVED as a bare acronym, 2026-09-08. In French postings CDD is
+      // *contrat à durée déterminée* — the standard fixed-term contract — and it
+      // appears in the TITLE of every such vacancy, so `matchesAsWholeWord` found
+      // it flanked by spaces every time. Measured on prod that day: three Michael
+      // Kors shop-floor vacancies in Paris and Toulon classified into this track,
+      // and "Vendeur(se) avec expérience CDD 28h" reached brief_rank 2 of an `ask`
+      // section that had three ranked rows in total.
+      //
+      // Costs nothing to drop: "CDD Analyst:*" stays in `titles` above, which is a
+      // substring match against the posting's own title and does not fire on the
+      // bare acronym. "kyc" and "aml" stay — neither is a common word in a
+      // European job title. This is the same rule `finance-ops` already states for
+      // OTC/PTP/RTR, applied to the track that was missed.
       classifyTerms: [
         "kyc analyst",
         "aml analyst",
@@ -238,7 +280,6 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         "client onboarding",
         "kyc",
         "aml",
-        "cdd",
       ],
     },
     auditor: {

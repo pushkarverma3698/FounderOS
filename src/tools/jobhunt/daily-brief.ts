@@ -271,6 +271,10 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     notes: opts.notes ?? [],
     agedOut,
     maxAgeHours: APPLY_QUEUE_MAX_AGE_HOURS,
+    // WHOSE brief. The legend quotes this candidate's years, salary criterion,
+    // permit bases and markets — and printed the founder's on everyone's until
+    // 2026-09-08, because `GATE_GLOSSARY` was a module constant.
+    profile,
     ...(spend ? { spend } : {}),
   };
 

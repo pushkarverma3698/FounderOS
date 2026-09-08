@@ -188,6 +188,33 @@ export const workdayAdapter: AtsAdapter = {
     return `${cxs(coords)}${externalId}`;
   },
 
+  /**
+   * The two fields the list payload withheld, out of the detail payload
+   * `extractBody` below already reads.
+   *
+   * Verified live 2026-09-08 against
+   * `capri.wd1.myworkdayjobs.com/wday/cxs/capri/michael_kors/job/Paris/…`:
+   * `jobPostingInfo.location = "Paris"` and
+   * `jobPostingInfo.country = { descriptor: "France", id: … }`. The list payload's
+   * `locationsText` was empty for the same posting, which is what let a French
+   * retail vacancy into a Netherlands-only queue.
+   *
+   * `country.descriptor` is preferred over the URL path (`/job/Paris/…`) on
+   * purpose: the path is a slug the tenant chose and is not guaranteed to be a
+   * place, while `descriptor` is the field Workday populates for this.
+   */
+  locationFromDetail(payload: Record<string, unknown>): string | null {
+    const info = asRecord(payload["jobPostingInfo"]);
+    const location = asText(info?.["location"]);
+    return location.length > 0 ? location : null;
+  },
+
+  countryFromDetail(payload: Record<string, unknown>): string | null {
+    const info = asRecord(payload["jobPostingInfo"]);
+    const descriptor = asText(asRecord(info?.["country"])?.["descriptor"]);
+    return descriptor.length > 0 ? descriptor : null;
+  },
+
   extractBody(payload: Record<string, unknown>): string {
     // jobDescription is raw HTML, same defect as Greenhouse's extractBody —
     // fixed alongside it 2026-08-24 (see that adapter's comment for the
