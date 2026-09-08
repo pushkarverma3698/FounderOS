@@ -255,6 +255,9 @@ It structurally cannot reach PwC, EY, Deloitte, ABN AMRO, Rabobank or any Dutch 
 3. Repoint the sources: instead of funding news, query the IND register + accountancy directories + SuccessFactors tenant list
 4. Verify it discovers ≥1 new boards per night from non-tech employers (measured)
 5. Validate that Tashi's brief includes roles from newly-added employers within 24h
+
+| id | Task | Why it is ranked here |
+|---|---|---|
 | **C2** | Import the 10 already-reachable employers (Grant Thornton, Crowe, NN Group, Shell, RELX, KLM, Fenergo, MN, All Options, ComplyAdvantage) + variant-pass re-join. | ~1h, $0, no new code. |
 | **C3** | Adaptive paging — page while postings are inside the freshness window. Recovers backlog on 763 truncated boards (ING cuts at 6 days, AECOM at 2). | Helps both lanes; helps a *new* board most, which is what C1 produces. |
 | **C4** | Measure EU finance supply per country. Deliverable is a number, not code. | The Dutch-language finding (35%) raises its value. |
