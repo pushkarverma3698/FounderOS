@@ -27,6 +27,16 @@ An exhaustive empirical audit was conducted on the full production Telegram chat
    - **Parenthesis / Markdown Truncation**: URLs with parentheses (e.g. Workable URLs containing `-(typescript)-`) were truncated at the first `)` by Telegram's markdown/URL parser.
    - **Bracket Leaks**: Markdown square brackets leaked into URLs (`[https://github.com/pushkarverma3698/FounderOS]`), causing 404s when tapped.
 
+> **Counting caveat (added in review, 2026-09-08).** The category counts above and in
+> § 1 do **not** reconcile with the headline 68, and the raw dump they were derived
+> from is deliberately not committed (it is the founder's private chat), so they
+> could not be re-derived in review. The status breakdown sums to 73, the § 1 table
+> sums to 96 with the 43 filename pseudo-links excluded from "unique HTTP URLs", and
+> the PR body says 22 bracket leaks where § 1 lists 10 with 10 message IDs. Treat the
+> **shapes** as the finding — hallucinated ATS URLs, bracket/paren leakage, filename
+> autolinks, stale postings, missing User-Agent — and the **magnitudes as unverified**.
+> Every fix in this PR is justified by the shape, none by the count.
+
 2. **Systemic Bot Bugs Identified:**
    - **Spam Loop #1 (pr-brain auth alert)**: The notification `🧠 pr-brain STOPPED on founder-os: Claude Code auth expired` repeated **1,590 times** (every 20 minutes for weeks), consuming over 21% of the entire chat history.
    - **Spam Loop #2 (Reboot broadcasts)**: `🚀 FounderOS is back online` broadcasted **373 times** to the founder's chat on every container restart, health check, or crash recovery.

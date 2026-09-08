@@ -138,6 +138,18 @@ describe("markdownToTelegramHtml", () => {
     expect(out).toContain("<code>primes.py</code>");
   });
 
+  // A filename that sits inside a URL is not prose. Chipping it injects a <code>
+  // tag into the href and produces exactly the dead link this PR exists to remove.
+  it("does not chip a filename that lives inside a URL query string", () => {
+    const out = markdownToTelegramHtml("[JD](https://jobs.example.com/apply?file=brief.pdf)");
+    expect(out).toBe('<a href="https://jobs.example.com/apply?file=brief.pdf">JD</a>');
+  });
+
+  it("does not chip a filename after '=' or '#' in a bare URL", () => {
+    const out = markdownToTelegramHtml("Grab https://x.example.com/dl?name=cv.pdf#anchor.md now");
+    expect(out).not.toContain("<code>");
+  });
+
   // ── Regression: placeholder sentinels must be unforgeable (2026-09-08) ───────
   // The extract/restore passes stash code blocks, inline code and tables behind
   // a placeholder token. If that token is spellable in ordinary prose, any reply

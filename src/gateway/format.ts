@@ -83,8 +83,12 @@ export function markdownToTelegramHtml(md: string): string {
   //     has no table support; raw pipes render broken).
   text = extractTables(text, tableBlocks);
 
-  // 2c. Wrap bare filenames in code chips so Telegram doesn't autolink .md/.py as TLDs
-  text = text.replace(/(?<![`"'\/a-zA-Z0-9_.-])([a-zA-Z0-9_-]+\.(?:md|py|sh|ts|js|json|yml|yaml|png|jpg|pdf))(?![`"'\/a-zA-Z0-9_.-])/g, (_m, filename: string) => {
+  // 2c. Wrap bare filenames in code chips so Telegram doesn't autolink .md/.py as TLDs.
+  //     The lookbehind also excludes "=", "?", "&" and "#" because those precede a
+  //     filename only inside a URL (…/dl?name=cv.pdf#anchor.md). Chipping there would
+  //     splice a <code> tag into the href and manufacture the exact dead link this
+  //     pass exists to remove — a "/" guard alone does not reach the query string.
+  text = text.replace(/(?<![`"'\/=?&#a-zA-Z0-9_.-])([a-zA-Z0-9_-]+\.(?:md|py|sh|ts|js|json|yml|yaml|png|jpg|pdf))(?![`"'\/a-zA-Z0-9_.-])/g, (_m, filename: string) => {
     inlineCodes.push(`<code>${escapeHtml(filename)}</code>`);
     return `\u0000IC${inlineCodes.length - 1}\u0000`;
   });
