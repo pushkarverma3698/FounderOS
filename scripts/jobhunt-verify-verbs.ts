@@ -24,7 +24,7 @@
  *   node --env-file=.env --import tsx/esm scripts/jobhunt-verify-verbs.ts [profileId]
  */
 
-import { listActionableApplications } from "../src/db/job-queries.js";
+import { listActionableApplications, countActionableApplications } from "../src/db/job-queries.js";
 import { loadTrackCvs } from "../src/tools/jobhunt/brief-cv.js";
 import { rankRows, BRIEF_QUEUE_LIMIT, BRIEF_VERDICTS } from "../src/tools/jobhunt/daily-brief.js";
 import { inScope, scopeMayBeIncomplete } from "../src/tools/jobhunt/brief-queue.js";
@@ -54,6 +54,15 @@ async function main(): Promise<void> {
     limit: BRIEF_QUEUE_LIMIT,
   });
 
+  // The same uncapped total buildDailyBrief measures, so the header's cut
+  // notice renders here exactly as it will in the real message.
+  const queued = await countActionableApplications({
+    verdicts: BRIEF_VERDICTS,
+    tenantId: profile.tenantId,
+    profileId: profile.id,
+    maxAgeHours: null,
+  });
+
   const { cvs } = loadTrackCvs(profile);
   const scored = rankRows(applications, cvs, now, profile);
   // No liveness: it is network-bound and this rehearsal is about which rows
@@ -65,7 +74,7 @@ async function main(): Promise<void> {
   const numbered = attachBriefRanks(allRows, briefRankEntries(allRows));
 
   console.log(`\n=== ${profile.candidateName} (${profile.id}) ===`);
-  console.log(`read ${applications.length} rows (limit ${BRIEF_QUEUE_LIMIT})`);
+  console.log(`read ${applications.length} of ${queued} actionable rows (limit ${BRIEF_QUEUE_LIMIT})`);
   console.log(`NOT WRITTEN: brief_rank, fresh_viewed_at — prod still runs the old code.\n`);
 
   for (const verb of VERBS) {
@@ -92,7 +101,11 @@ async function main(): Promise<void> {
       trends: [],
       failures: [],
       scopeLabel: scope.label,
-      maxAgeHours: scope.windowHours,
+      outsideScope: allRows.length - rows.length,
+      maxAgeHours: scope.windowHours ?? null,
+      // Same gate the real builder applies: the uncapped total describes the
+      // same population as the rows only when nothing was filtered out.
+      ...(rows.length === allRows.length ? { queued } : {}),
       profile,
     });
 
@@ -101,7 +114,7 @@ async function main(): Promise<void> {
     console.log(`   axis        : ${scope.axis}`);
     console.log(`   rows shown  : ${rows.length} of ${allRows.length}`);
     console.log(`   ranks       : ${ranks.slice(0, 12).join(", ")}${ranks.length > 12 ? " …" : ""}`);
-    console.log(`   truncation? : ${scopeMayBeIncomplete(applications, applications.length + 1, scope, now)}`);
+    console.log(`   truncation? : ${scopeMayBeIncomplete(applications, queued, scope, now)}`);
     console.log(`   parts       : ${splitForTelegram(rendered).length}`);
     console.log(`   header      :`);
     for (const l of rendered.split("\n").slice(0, 6)) console.log(`      ${l}`);

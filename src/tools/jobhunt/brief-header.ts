@@ -48,7 +48,16 @@ export interface HeaderInput {
   readonly screened?: number | undefined;
   /** Rows qualifying inside the window, UNCAPPED. Undefined when the count query failed. */
   readonly queued?: number | undefined;
+  /**
+   * Rows the DATABASE READ excluded for age.
+   *
+   * Structurally 0 since the read went unbounded (2026-09-08) and kept only for
+   * the renderer tests that predate the scope surface. `outsideScope` is what
+   * actually describes a modern brief.
+   */
   readonly agedOut?: number | undefined;
+  /** Ranked rows this list's own scope excluded — see queueLine. */
+  readonly outsideScope?: number | undefined;
   /** The window in hours, or null when the read carried no age limit. */
   readonly maxAgeHours?: number | null | undefined;
   /**
@@ -129,22 +138,26 @@ export function renderHeader(input: HeaderInput, totals: SectionTotals): string 
  * on, and calling it by the machine's word for an upstream stage is A3.
  */
 function queueLine(input: HeaderInput): string {
-  const agedOut = input.agedOut ?? 0;
   // "&lt;", not "<". A bare "<" followed by a space is an empty start tag to
   // Telegram, which rejects the WHOLE message rather than the character — this
   // line alone took /jobs down on 2026-08-21. See escapeStrayAngles().
   const scope =
     input.scopeLabel ??
-    (input.maxAgeHours === null
-      ? "everything on file"
-      : `&lt; ${input.maxAgeHours ?? 24}h old`);
-  // The aged-out count is meaningless under an unbounded read — nothing aged
-  // out of a window there is none of — so it is omitted rather than printed as
-  // a confident 0.
+    (input.maxAgeHours === null ? "everything on file" : `&lt; ${input.maxAgeHours ?? 24}h old`);
+
+  // WHAT THIS LIST LEFT OUT, and it must be about THIS list.
+  //
+  // `outsideScope` is the count of ranked rows a narrower verb excluded —
+  // `/today` showing 166 of 500 owes the founder the other 334, or an empty
+  // afternoon and a narrow window read identically. It is preferred over
+  // `agedOut`, which counted rows the DATABASE READ excluded and is now
+  // structurally 0: the read went unbounded on 2026-09-08 so that every verb
+  // could share one numbering, and a query that excludes nothing ages nothing
+  // out. Printing that 0 next to a 24h window would assert there is nothing
+  // older, on a queue with 1,510 older rows in it.
+  const outside = input.outsideScope ?? input.agedOut ?? 0;
   const excluded =
-    input.maxAgeHours === null && input.scopeLabel === undefined
-      ? ""
-      : ` · ${plural(agedOut, "older role", "older roles")} aged out`;
+    outside > 0 ? ` · ${plural(outside, "more role", "more roles")} outside this window` : "";
   return `<i>${plural(input.rowsLoaded, "role", "roles")} in your queue (${scope})${excluded}</i>`;
 }
 

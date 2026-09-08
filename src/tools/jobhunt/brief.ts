@@ -154,6 +154,8 @@ export interface BriefInput {
   readonly maxAgeHours?: number | null;
   /** What this list is, in words — see HeaderInput.scopeLabel. */
   readonly scopeLabel?: string;
+  /** Ranked rows this list's scope excluded — see HeaderInput.outsideScope. */
+  readonly outsideScope?: number;
   /**
    * How many rows qualified inside the window IN TOTAL, before the read limit.
    *
@@ -224,6 +226,7 @@ export function formatDailyBrief(input: BriefInput): string {
         screened: input.screened,
         queued: input.queued,
         agedOut: input.agedOut,
+        outsideScope: input.outsideScope,
         maxAgeHours: input.maxAgeHours,
         scopeLabel: input.scopeLabel,
       },

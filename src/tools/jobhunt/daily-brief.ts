@@ -339,7 +339,10 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     failures: [...(opts.failures ?? []), ...truncationNote, ...cvFailure, ...untrackedNote],
     notes: opts.notes ?? [],
     agedOut,
-    maxAgeHours,
+    // What THIS list excluded, measured on the ranked population rather than on
+    // the read. `/today` showing 166 of 500 owes the founder the other 334.
+    outsideScope: allRows.length - rows.length,
+    maxAgeHours: scope.windowHours ?? (scope.since ? null : maxAgeHours),
     // What this list EXCLUDED, in words. UX rule 2 of the fresh-first plan: a
     // list that does not name its own scope is the T-2 defect again — the
     // founder cannot tell an empty market from a narrow window.
