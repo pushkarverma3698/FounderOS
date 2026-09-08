@@ -734,6 +734,12 @@ export async function recordTailoringResult(
 export interface JobStateArgs {
   readonly stage?: string;
   readonly section?: string;
+  /**
+   * `job_applications.track` — the classification `job_brief` prints
+   * ("accountant 4 · fpa 7 · auditor 1"). A DIFFERENT column from `section`,
+   * and the one a caller reading that line actually means; see job-state.ts.
+   */
+  readonly track?: string;
   readonly source?: string;
   readonly applied?: boolean;
   readonly since?: string;
@@ -780,6 +786,9 @@ export async function queryJobState(
   if (args.section) {
     conditions.push(eq(jobApplications.brief_section, args.section));
   }
+  if (args.track) {
+    conditions.push(eq(jobApplications.track, args.track));
+  }
   if (args.source) {
     conditions.push(eq(jobApplications.route, args.source));
   }
@@ -796,24 +805,33 @@ export async function queryJobState(
   }
 
   const limit = Math.min(Math.max(1, args.limit ?? 100), 200);
+  const where = and(...conditions);
+  const newestFirst = desc(jobApplications.created_at);
 
-  const rows = await db
-    .select({
-      id: jobApplications.id,
-      company: jobApplications.company,
-      title: jobApplications.title,
-      stage: jobApplications.stage,
-      salary_status: jobApplications.salary_status,
-      applied_at: jobApplications.applied_at,
-      created_at: jobApplications.created_at,
-      url: jobApplications.url,
-      track: jobApplications.track,
-      gate_json: jobApplications.gate_json,
-    })
-    .from(jobApplications)
-    .where(and(...conditions))
-    .orderBy(desc(jobApplications.created_at))
-    .limit(limit);
+  // `fullDetails` was declared in JobStateArgs and never read: the select below
+  // was unconditionally the curated 10, so `job_state({fullDetails:true})`
+  // answered "all 40 DB columns" with the same 10 and said nothing. Every
+  // caller needing `url`, `posted_at`, `liveness` or `brief_rank` — the CSV
+  // export among them — was quietly handed a row that did not contain them.
+  const rows = args.fullDetails
+    ? await db.select().from(jobApplications).where(where).orderBy(newestFirst).limit(limit)
+    : await db
+        .select({
+          id: jobApplications.id,
+          company: jobApplications.company,
+          title: jobApplications.title,
+          stage: jobApplications.stage,
+          salary_status: jobApplications.salary_status,
+          applied_at: jobApplications.applied_at,
+          created_at: jobApplications.created_at,
+          url: jobApplications.url,
+          track: jobApplications.track,
+          gate_json: jobApplications.gate_json,
+        })
+        .from(jobApplications)
+        .where(where)
+        .orderBy(newestFirst)
+        .limit(limit);
 
   return {
     count: rows.length,

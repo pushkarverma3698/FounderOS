@@ -98,3 +98,81 @@ describe("job_state tool & queryJobState", () => {
     expect(vi.mocked(queryJobState)).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * `section` vs `track` — two vocabularies, one silent zero (2026-09-07 prod).
+ *
+ * `brief_section` holds `do_today | stretch | ask | standing`. The tool's own
+ * description advertised the DISPLAY headings ("DO TODAY", "ONE QUESTION
+ * AWAY"), which no row has ever carried, and `job_brief` prints the `track`
+ * column ("accountant 4 · fpa 7"). Every one of those spellings passed straight
+ * through to an `eq()` and returned 0 rows with `success: true` — so the worker
+ * read an empty result as "nothing matches", retried other spellings, and
+ * burned the run's whole token budget reconciling a mismatch that was never a
+ * data fact. Silence was the defect; these pin the loudness.
+ */
+describe("job_state — section is validated, track is its own filter", () => {
+  it("accepts the display heading a founder would read off the brief", async () => {
+    vi.mocked(queryJobState).mockClear();
+    const res = await jobStateTool.execute({ section: "DO TODAY" });
+    expect(res.success).toBe(true);
+    expect(vi.mocked(queryJobState)).toHaveBeenCalledWith(
+      expect.objectContaining({ section: "do_today" }),
+    );
+  });
+
+  it('accepts "ONE QUESTION AWAY" as the ask section', async () => {
+    vi.mocked(queryJobState).mockClear();
+    await jobStateTool.execute({ section: "ONE QUESTION AWAY" });
+    expect(vi.mocked(queryJobState)).toHaveBeenCalledWith(
+      expect.objectContaining({ section: "ask" }),
+    );
+  });
+
+  it("passes a canonical DB value through unchanged", async () => {
+    vi.mocked(queryJobState).mockClear();
+    await jobStateTool.execute({ section: "stretch" });
+    expect(vi.mocked(queryJobState)).toHaveBeenCalledWith(
+      expect.objectContaining({ section: "stretch" }),
+    );
+  });
+
+  it("refuses a TRACK passed as a section, and names the argument that does work", async () => {
+    vi.mocked(queryJobState).mockClear();
+    const res = await jobStateTool.execute({ section: "accountant" });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.error).toContain("accountant");
+      expect(res.error).toContain("do_today");
+      expect(res.error).toContain("track");
+    }
+    // The point of the fix: no query is issued, so no empty result can be
+    // mistaken for "the market has none of these".
+    expect(vi.mocked(queryJobState)).not.toHaveBeenCalled();
+  });
+
+  it("filters by track when track is what was meant", async () => {
+    vi.mocked(queryJobState).mockClear();
+    const res = await jobStateTool.execute({ track: "accountant" });
+    expect(res.success).toBe(true);
+    expect(vi.mocked(queryJobState)).toHaveBeenCalledWith(
+      expect.objectContaining({ track: "accountant" }),
+    );
+  });
+
+  it("refuses an unknown track loudly, listing the tracks that exist", async () => {
+    vi.mocked(queryJobState).mockClear();
+    const res = await jobStateTool.execute({ track: "astronaut" });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.error).toContain("astronaut");
+      expect(res.error).toContain("accountant");
+    }
+    expect(vi.mocked(queryJobState)).not.toHaveBeenCalled();
+  });
+
+  it("exposes track in the input schema so the worker can reach it", () => {
+    const props = jobStateTool.input_schema?.properties as Record<string, unknown> | undefined;
+    expect(props).toHaveProperty("track");
+  });
+});

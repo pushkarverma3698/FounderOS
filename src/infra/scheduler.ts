@@ -42,7 +42,7 @@
  */
 
 import cron from "node-cron";
-import { spawn } from "node:child_process";
+import { runMaintenanceChild } from "./child-run.js";
 import {
   getPendingInterrupt,
   getTodayCostUsd,
@@ -71,6 +71,7 @@ import {
   getDailyBudgetCapUsd,
 } from "./daily-budget.js";
 import { getBudgetAlertsState, recordBudgetAlertSent } from "./daily-budget-alerts.js";
+import { sendJudgeOutageAlertIfNeeded } from "./judge-alert.js";
 import { sweepStaleCheckpoints } from "./checkpointer.js";
 import {
   JOB_SWEEP_CRON,
@@ -126,24 +127,12 @@ export async function runCheckpointSweep(): Promise<void> {
 
 /** Nightly — pnpm brain:sync so the RAG store can never silently go stale/empty. */
 export async function runBrainSync(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const child = spawn("pnpm", ["brain:sync"], { stdio: "ignore", detached: false });
-    child.on("exit", (code) => {
-      if (code === 0) {
-        log.info("Auto brain sync completed");
-      } else {
-        log.error({ code }, "Auto brain sync failed");
-        sendToChat(`⚠️ Nightly brain:sync exited with code ${code}`, "HTML").catch((err) =>
-          log.warn({ err: (err as Error).message }, "brain sync alert send failed"),
-        );
-      }
-      resolve();
-    });
-    child.on("error", (err) => {
-      log.error({ err: err.message }, "Auto brain sync spawn error");
-      resolve();
-    });
-  });
+  const { code } = await runMaintenanceChild("pnpm", ["brain:sync"], "Auto brain sync");
+  if (code !== 0) {
+    await sendToChat(`⚠️ Nightly brain:sync exited with code ${code}`, "HTML").catch((err) =>
+      log.warn({ err: (err as Error).message }, "brain sync alert send failed"),
+    ); // allow-failopen: a Telegram blip must not fail the sweep that already logged its cause
+  }
 }
 
 /**
@@ -285,27 +274,20 @@ export async function recoverStrandedReminders(): Promise<void> {
   }
 }
 
-/** Daily 2am — Sweep funding news and grow the free-lane board registry (zero-LLM). */
+/**
+ * Daily 2am — Sweep funding news and grow the free-lane board registry (zero-LLM).
+ *
+ * stderr is CAPTURED (see child-run.ts): this sweep crashed nightly from
+ * 2026-09-03 to 2026-09-07 and prod recorded only `{"code":1}` each time.
+ */
 export async function runFundingGrowerSweep(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    log.info("Starting funding registry grower sweep");
-    const child = spawn("node", ["--import", "tsx/esm", "scripts/jobhunt-funding-grow.ts"], { stdio: "ignore", detached: false });
-    child.on("exit", (code) => {
-      if (code === 0) {
-        log.info("Funding registry grower sweep completed");
-      } else {
-        log.error({ code }, "Funding registry grower sweep failed");
-      }
-      resolve();
-    });
-    child.on("error", (err) => {
-      log.error({ err: err.message }, "Funding registry grower spawn error");
-      resolve();
-    });
-  });
+  log.info("Starting funding registry grower sweep");
+  await runMaintenanceChild(
+    "node",
+    ["--import", "tsx/esm", "scripts/jobhunt-funding-grow.ts"],
+    "Funding registry grower sweep",
+  );
 }
-
-
 
 export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }): void {
   cron.schedule("0 9 * * *", () => {
@@ -316,6 +298,9 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
   cron.schedule("0 * * * *", () => {
     sendDailyBudgetAlertIfNeeded().catch((err) =>
       log.error({ err: (err as Error).message }, "Daily budget alert check failed"),
+    );
+    sendJudgeOutageAlertIfNeeded().catch((err) =>
+      log.error({ err: (err as Error).message }, "Judge outage alert check failed"),
     );
   });
   cron.schedule("30 3 * * *", () => {

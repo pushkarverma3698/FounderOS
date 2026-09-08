@@ -55,6 +55,7 @@ import {
   getGapScans,
   vpsRun,
   jobState,
+  exportJobsCsv,
   opsState,
   writeArtifact,
   deliverArtifact,
@@ -113,7 +114,7 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   // submitApplication (VPS-lane submit) retired 2026-08-25 — founder decision,
   // the Mac client (mac-client/mac_client/apply.py) is the one apply lane now.
   // Tombstoned in verify-architecture.ts so it cannot return by accident.
-  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobState, tailorCvForRow, writeArtifact, deliverArtifact, jobBrief, createSendEmailTool("jobhunt")],
+  jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobState, exportJobsCsv, tailorCvForRow, writeArtifact, deliverArtifact, jobBrief, createSendEmailTool("jobhunt")],
 };
 
 /** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops). */
