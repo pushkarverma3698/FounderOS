@@ -21,6 +21,8 @@
  *   - Live tests: get real keys loaded from .env (hits real providers)
  */
 
+import { vi } from "vitest";
+
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import os from "node:os";
@@ -105,3 +107,21 @@ if (process.env["ALLOW_NETWORK"] !== "1") {
   // file starts from a blocked baseline regardless of sibling-file ordering.
   globalThis.fetch = blockedFetch as unknown as typeof fetch;
 }
+
+/**
+ * In-memory stand-in for the board cache table.
+ *
+ * Global because the free-board sweep reaches it transitively from several
+ * suites, and a unit run has no Postgres. Deliberately narrow — read and write
+ * of one Map — so it cannot hide a behaviour a test meant to exercise.
+ */
+vi.mock("../src/db/ats-board-cache-queries.js", () => {
+  const store = new Map<string, { etag: string; payload: unknown }>();
+  return {
+    getAtsCache: async (url: string) => store.get(url) ?? null,
+    setAtsCache: async (url: string, etag: string | null | undefined, payload: unknown) => {
+      if (typeof etag !== "string" || etag.length === 0) store.delete(url);
+      else store.set(url, { etag, payload });
+    },
+  };
+});
