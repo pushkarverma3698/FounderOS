@@ -27,6 +27,21 @@ export interface FundingSignal {
   readonly headline: string;
 }
 
+/**
+ * One `<item><title>` from an RSS feed, CDATA-wrapped or not.
+ *
+ * Some publishers serve their feed but block their category HTML at the edge —
+ * EU-Startups answers `/feed/` with 200 and `/category/funding/` with 403 to
+ * every user-agent tried, browser headers included. A feed is also a cleaner
+ * source than a rendered page: one title per item, no nav or teaser markup.
+ */
+export const RSS_TITLE_PATTERN =
+  /<item[\s>][\s\S]*?<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/gi;
+
+/** Headline shape every source shares: "<Company> raises/secures/bags …". */
+const FUNDING_HEADLINE =
+  /^([A-Z][\w\s&.-]+?)\s+(?:raises?|secures?|bags?|closes?|lands?|nabs?|gets?|snags?|receives?)/i;
+
 export const FUNDING_SOURCES: readonly FundingSource[] = [
   {
     name: "YourStory",
@@ -36,11 +51,14 @@ export const FUNDING_SOURCES: readonly FundingSource[] = [
     fundingPattern: /^([A-Z][\w\s&.-]+?)\s+(?:raises?|secures?|bags?|closes?|lands?|nabs?|gets?|snags?|receives?)/i,
   },
   {
+    // `/buzz/funding-alert/` returned 404 for at least 2026-09-03 → 09-07 (the
+    // section was retired); `/tag/funding/` is the live equivalent, verified
+    // 2026-09-08: HTTP 200, 43 headings, 5 signals extracted.
     name: "Inc42",
-    url: "https://inc42.com/buzz/funding-alert/",
+    url: "https://inc42.com/tag/funding/",
     market: "IN",
     titlePattern: /<h[23][^>]*>([\s\S]*?)<\/h[23]>/gi,
-    fundingPattern: /^([A-Z][\w\s&.-]+?)\s+(?:raises?|secures?|bags?|closes?|lands?|nabs?|gets?|snags?|receives?)/i,
+    fundingPattern: FUNDING_HEADLINE,
   },
   {
     name: "Silicon Canals",
@@ -50,11 +68,16 @@ export const FUNDING_SOURCES: readonly FundingSource[] = [
     fundingPattern: /^([A-Z][\w\s&.-]+?)\s+(?:raises?|secures?|bags?|closes?|lands?|nabs?|gets?|snags?|receives?)/i,
   },
   {
+    // `/category/funding/` returns 403 to every user-agent tried, including a
+    // full Chrome header set — an edge block, not a bot-UA problem, so there is
+    // nothing to negotiate. The site-wide feed answers 200 to the plain bot UA
+    // (verified 2026-09-08: 10 items, 5 signals), so the feed it is: it costs
+    // topic targeting and buys the source back.
     name: "EU-Startups",
-    url: "https://www.eu-startups.com/category/funding/",
+    url: "https://www.eu-startups.com/feed/",
     market: "NL",
-    titlePattern: /<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/gi,
-    fundingPattern: /^([A-Z][\w\s&.-]+?)\s+(?:raises?|secures?|bags?|closes?|lands?|nabs?|gets?|snags?|receives?)/i,
+    titlePattern: RSS_TITLE_PATTERN,
+    fundingPattern: FUNDING_HEADLINE,
   },
 ];
 
