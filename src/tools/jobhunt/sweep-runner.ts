@@ -15,23 +15,20 @@
  * register the cron and swallow the promise, same as every other job it runs.
  */
 
+import { randomUUID } from "node:crypto";
+
 import { childLogger } from "../../infra/logger.js";
+import { collectBoardTokens, flushBoardHarvest, startBoardHarvest } from "./board-harvest.js";
 import { sendToChat } from "../../infra/telegram-send.js";
 import { esc } from "./telegram-format.js";
-import { DEFAULT_PROFILE_ID, type JobSearchProfile } from "./profile-config.js";
+import { DEFAULT_PROFILE_ID } from "./profile-config.js";
 import type { DiscoveredBoard } from "./board-token.js";
-import {
-  afterQuietSweep,
-  afterSpokenSweep,
-  formatNewRowsAlert,
-  initialHeartbeat,
-  type HeartbeatState,
-} from "./sweep-heartbeat.js";
-import {
-  clearLaneHeartbeats,
-  loadLaneHeartbeat,
-  saveLaneHeartbeat,
-} from "../../db/job-heartbeat-queries.js";
+import { initialHeartbeat } from "./sweep-heartbeat.js";
+import { clearLaneHeartbeats, saveLaneHeartbeat } from "../../db/job-heartbeat-queries.js";
+// The per-candidate half of the free sweep, split out 2026-09-08 for the
+// 400-line budget. `publishSheet` went with it because the free lane is its
+// main caller; the metered sweep below imports it back.
+import { publishSheet, runFreeSweepForProfile, setLastSheetLink } from "./free-sweep-profile.js";
 
 const log = childLogger({ module: "scheduler" });
 
@@ -119,7 +116,7 @@ export async function runJobIngestSweep(): Promise<void> {
       notes: result.notes,
     });
     const { link, notice } = await publishSheet();
-    lastSheetLink = link;
+    setLastSheetLink(link);
     // The metered sweep has no alert of its own to carry the line — it runs
     // every third day and the founder should hear from it either way.
     await sendToChat(
@@ -140,38 +137,6 @@ export async function runJobIngestSweep(): Promise<void> {
       ),
     );
   }
-}
-
-/**
- * Rebuild the Sheet and report either its link or why there isn't one.
- *
- * SENDS NOTHING. It returns one line for the caller to append to whatever
- * message it was already sending, because the two non-success paths coincide
- * exactly with the moments the founder is being messaged anyway — and an export
- * problem delivered as its own ⚠ would mean two notifications per sweep, every
- * sweep, until he set the spreadsheet up. Two messages for one event is how a
- * channel becomes noise.
- *
- * The two failures stay distinct in wording because they need opposite actions:
- * "not set up" is a step he has not taken, "could not be updated" is an outage.
- * Neither is ever silent — a lane that quietly stopped publishing looks exactly
- * like a market with no jobs in it.
- */
-async function publishSheet(): Promise<{ link: string | null; notice: string | null }> {
-  const { exportJobSheet } = await import("./sheet-export.js");
-  const { sheetLine } = await import("./sweep-heartbeat.js");
-
-  const exported = await exportJobSheet();
-  if (exported.ok) return { link: sheetLine(exported.url), notice: null };
-
-  return {
-    link: null,
-    notice: esc(
-      exported.skipped
-        ? `⚠ The job sheet is not set up yet (${exported.reason}) — results are recorded, ask for the job brief to read them.`
-        : `⚠ The job sheet could not be updated: ${exported.reason}`,
-    ),
-  };
 }
 
 /**
@@ -201,34 +166,6 @@ const JOB_INGEST_DAILY_LIMIT = 80;
  */
 export const FREE_SWEEP_CRON = "*/30 * * * *";
 
-/**
- * The lane's memory of when it last said anything — persisted in
- * `agents.job_lane_heartbeats` (job-heartbeat-queries.ts), not an in-process
- * Map.
- *
- * 2026-09-07: it USED to be a Map, on the reasoning that a restart honestly
- * resetting it was fine — the first sweep after a deploy pings within the
- * hour. That assumed restarts are rare; measured, prod restarted 18 times in
- * 3 days. `ALIVE_PING_INTERVAL_MS` (sweep-heartbeat.ts) needs 3 CONTINUOUS
- * hours without a restart to ever fire, which a high-volume profile never
- * notices — its real "new roles passed" alerts fire far more often than that
- * — but a thin-market profile can go silent indefinitely with zero signal
- * the lane is even running: Tashi's last passing role was 2026-09-04, three
- * days of restarts before this was found, with neither a real alert nor a
- * single heartbeat ping in between. See schema.ts's job_lane_heartbeats.
- */
-
-/**
- * Per profile, because the ping answers "is YOUR lane alive". One shared clock
- * would let a busy lane's alert suppress the quiet lane's heartbeat, and the
- * candidate with nothing coming through is precisely the one who needs to know
- * the difference between "no jobs" and "nothing ran".
- */
-async function heartbeatFor(profileId: string): Promise<HeartbeatState> {
-  const existing = await loadLaneHeartbeat(profileId);
-  return existing ?? initialHeartbeat(new Date());
-}
-
 /** Test/ops seam: reset every profile's ping clock so a suite is not order-dependent. */
 export async function resetHeartbeat(now: Date = new Date()): Promise<void> {
   await clearLaneHeartbeats();
@@ -247,9 +184,11 @@ export async function resetHeartbeat(now: Date = new Date()): Promise<void> {
  * cost this pipeline weeks (see `JOB_SWEEP_CRON` above).
  */
 export async function runFreeSweep(): Promise<void> {
+  const sweepId = randomUUID();
   const { sweepBoards } = await import("./free-ats-source.js");
   const { getFreeBoards } = await import("./free-boards.js");
   const { listProfiles } = await import("./profile-config.js");
+  const { sweepAggregators } = await import("./aggregator-source.js");
 
   // POLLED ONCE, SCREENED FOR EVERYONE. The board sweep is the expensive half of
   // this lane and its result says nothing about which candidate is looking, so a
@@ -266,122 +205,66 @@ export async function runFreeSweep(): Promise<void> {
     return;
   }
 
+  // AGGREGATOR SWEEP — runs AFTER the board sweep, merges results in. Fails
+  // open: aggregator outages must never block the 1,297-board ATS sweep that
+  // has always worked without them. Board token harvesting logged separately.
+  try {
+    const aggResult = await sweepAggregators();
+    if (aggResult.candidates.length > 0) {
+      sweep = {
+        candidates: [...sweep.candidates, ...aggResult.candidates],
+        failures: [...sweep.failures, ...aggResult.failures],
+        boardsPolled: sweep.boardsPolled,
+      };
+    }
+    // PERSISTED, not just counted. Until 2026-09-08 this branch logged the
+    // number and dropped it: `harvestedTokens` is `{ats, token}` and
+    // `registerDiscoveredBoard` needs a name and markets, so there was no way to
+    // write it even if someone had tried. Meanwhile the only caller of the
+    // harvest lifecycle was `ingest.ts` — the metered sweep, whose cron was
+    // removed on 2026-08-21. Net effect: the registry's self-growth mechanism had
+    // not written a board since, and `/opt/founderos-data/free-ats-discovered.csv`
+    // did not exist on the box. The monthly "run pnpm jobhunt:import-boards"
+    // reminder in scheduler.ts was the only thing still growing it.
+    //
+    // Harvested from the CANDIDATES rather than from `harvestedTokens`, because
+    // those carry the company name `harvestNewBoardTokens` needs. `country` is
+    // left off deliberately: a positive market is a finding, and the aggregator's
+    // location string has not been resolved against this candidate's markets at
+    // this point — an empty `markets` column is the honest answer.
+    const harvest = startBoardHarvest(sweepId);
+    collectBoardTokens(
+      harvest,
+      aggResult.candidates.map((c) => ({ url: c.url, company: c.board.name })),
+    );
+    const discovered = await flushBoardHarvest(harvest, sweepId);
+    if (discovered.length > 0) {
+      log.info(
+        { boards: discovered.length, tokens: aggResult.harvestedTokens.length },
+        "Aggregator URLs grew the free-board registry",
+      );
+    }
+  } catch (err) {
+    // allow-failopen: aggregator crash must not block the board sweep
+    log.warn({ err: (err as Error).message }, "Aggregator sweep failed — ATS boards unaffected");
+  }
+
   for (const profile of listProfiles()) {
-    // One profile's failure must not take the others down with it. A crash here
-    // is already logged loudly by the helper; swallowing it at the loop keeps
-    // the second candidate's lane running when the first one breaks.
-    await runFreeSweepForProfile(profile, sweep);
+    // THIS TRY/CATCH IS THE POINT, and until 2026-09-08 the comment here claimed
+    // it while the code did not have it. `runFreeSweepForProfile` guards its own
+    // ingest and ranking calls; `publishSheet`, `sendToChat` (which rethrows by
+    // design) and `saveLaneHeartbeat` were unguarded. The default profile runs
+    // first, so one Telegram failure on his alert meant the second candidate was
+    // never screened and `runFreeSweep` rejected into the cron's `.catch()`: one
+    // log line, whole tick gone. The suite missed it because its one test for
+    // this property injected at the site already covered.
+    try {
+      await runFreeSweepForProfile(profile, sweep);
+    } catch (err) {
+      log.error(
+        { err: (err as Error).message, profile: profile.id },
+        "Profile lane failed after screening — the remaining profiles still run",
+      );
+    }
   }
 }
-
-async function runFreeSweepForProfile(
-  profile: JobSearchProfile,
-  sweep: Awaited<ReturnType<typeof import("./free-ats-source.js").sweepBoards>>,
-): Promise<void> {
-  const { runFreeIngest } = await import("./free-ingest.js");
-
-  let result: Awaited<ReturnType<typeof runFreeIngest>>;
-  try {
-    result = await runFreeIngest({ profile, sweep });
-  } catch (err) {
-    // Called by the cron (which wraps every sweep in its own `.catch()`, same
-    // as the rest of startScheduler) AND directly by callers/tests. Either way
-    // this runs unattended 48 times a day, so a crash must be loud in the logs
-    // and must not reject — the founder's next signal is the next tick, not a
-    // Node "unhandled rejection" nobody is watching for.
-    log.error(
-      { err: (err as Error).message, profile: profile.id },
-      "Free board sweep crashed before it could screen anything",
-    );
-    return;
-  }
-
-  log.info(
-    {
-      profile: profile.id,
-      boardsPolled: result.boardsPolled,
-      seen: result.seen,
-      screened: result.screened,
-      failures: result.failures.length,
-    },
-    "Free board sweep complete",
-  );
-
-  if (result.failures.length > 0 && result.seen === 0) {
-    // Same guard as runJobIngestSweep's, one layer down: a sweep that fetched
-    // NOTHING while boards were failing must not read like a market with no jobs
-    // in it. The predicate is `seen`, not `screened`, because a single dead board
-    // among healthy ones still yields postings — one 404 next to 20,551 fetched
-    // rows fired this alert every 30 minutes until it was the noise, not the
-    // signal. `seen === 0` is the only state where the failures are the reason
-    // there is nothing to report.
-    log.warn(
-      { failures: result.failures, profile: profile.id },
-      "Free board sweep fetched nothing while boards were failing",
-    );
-    // Counts per (platform, reason) rather than the first three names: on a total
-    // outage the three that happen to sort first say nothing about the cause, and
-    // "recruitee HTTP 429 ×36" says all of it in five words.
-    const { summariseFailures } = await import("./free-ats-source.js");
-    await sendToChat(
-      esc(
-        `⚠ Free job lane failed for ${profile.candidateName} — nothing was fetched this sweep.\n` +
-          summariseFailures(result.failures),
-      ),
-    );
-    return;
-  }
-
-  const newPasses = result.lines.filter((line) => line.outcome === "pass" && line.isNew);
-  const now = new Date();
-
-  // A sweep that found nothing does not touch the Sheet. Rewriting identical
-  // rows 48 times a day spends API quota to produce no change, and it would
-  // overwrite the `Applied` column between a founder's click and his next sync.
-  if (newPasses.length === 0) {
-    const { next, ping } = afterQuietSweep(
-      await heartbeatFor(profile.id),
-      result.boardsPolled,
-      result.funnel,
-      now,
-      lastSheetLink,
-      profile
-    );
-    await saveLaneHeartbeat(profile.id, next);
-    if (ping !== null) await sendToChat(ping);
-    return;
-  }
-
-  // Ranked BEFORE exported. `buildDailyBrief` is what writes `brief_section`
-  // and `brief_rank`, and the Sheet's `#` column and the apply queue both read
-  // those — exporting first would publish the new rows unranked and unnumbered.
-  const { buildDailyBrief } = await import("./daily-brief.js");
-  try {
-    await buildDailyBrief({ screened: result.screened, failures: result.failures, notes: [], profile });
-  } catch (err) {
-    // The rows are screened and stored. An unranked Sheet is still worth
-    // publishing — it just carries blank `#` cells, which is visibly wrong
-    // rather than quietly wrong.
-    log.error({ err: (err as Error).message }, "Ranking failed before free-lane export");
-  }
-
-  // The Sheet is a single document and belongs to the default profile. A second
-  // candidate's rows reach the founder through her own brief alert and `/jobs
-  // <profile>`, not by being interleaved into a spreadsheet whose `Applied`
-  // column he clicks on Pushkar's behalf.
-  const { link, notice } =
-    profile.id === DEFAULT_PROFILE_ID ? await publishSheet() : { link: lastSheetLink, notice: null };
-  if (profile.id === DEFAULT_PROFILE_ID) lastSheetLink = link;
-  await sendToChat(formatNewRowsAlert(newPasses, link ?? notice, profile.candidateName));
-  await saveLaneHeartbeat(profile.id, afterSpokenSweep(now));
-}
-
-/**
- * The Sheet link, remembered between sweeps.
- *
- * The alive-ping wants to carry it, and a quiet sweep never calls the export —
- * so without this the ping would either have to run an export purely to learn
- * a URL that has not changed since the spreadsheet was created, or go out
- * without the link the founder needs to act on it.
- */
-let lastSheetLink: string | null = null;

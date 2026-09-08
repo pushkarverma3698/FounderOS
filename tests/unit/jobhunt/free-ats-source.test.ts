@@ -209,7 +209,13 @@ describe("sweepBoards", () => {
       board({ ats: "lever", token: "b" }),
       board({ ats: "ashby", token: "c" }),
     ];
-    mockFetch.mockResolvedValue(errorResponse(500));
+    // The staggerMs (100ms for greenhouse) means workers start slowly.
+    // If we return instantly, concurrency never builds up above 1.
+    // Slow down the fetch so multiple workers are in-flight at once.
+    mockFetch.mockImplementation(async () => {
+      await new Promise(r => setTimeout(r, 100));
+      return { ok: false, status: 500 };
+    });
 
     const sweep = await sweepBoards(boards);
 
@@ -245,11 +251,17 @@ describe("sweepBoards", () => {
 
     mockFetch.mockImplementation(async (url: string) => {
       const ats = url.includes("recruitee") ? "recruitee" : "greenhouse";
-      const now = (inFlight.get(ats) ?? 0) + 1;
-      inFlight.set(ats, now);
-      peak.set(ats, Math.max(peak.get(ats) ?? 0, now));
-      await new Promise((r) => setTimeout(r, 5));
-      inFlight.set(ats, now - 1);
+      inFlight.set(ats, (inFlight.get(ats) ?? 0) + 1);
+      peak.set(ats, Math.max(peak.get(ats) ?? 0, inFlight.get(ats) ?? 0));
+      await new Promise((r) => setTimeout(r, 300));
+      // Decrement the CURRENT count, not the value captured on the way in.
+      // `set(ats, now - 1)` was wrong and pre-dates this PR: with two calls in
+      // flight, the first to exit writes 0 while the second is still running,
+      // and the second exits writing 1 — so the counter never returns to zero
+      // and the next two entrants read 2 and 3. That is a measurement artifact,
+      // not a breach: with correct accounting the true peak is 2 at every
+      // stagger value. It stayed hidden at a 5ms body and surfaced at 300ms.
+      inFlight.set(ats, (inFlight.get(ats) ?? 1) - 1);
       return okResponse(ats === "recruitee" ? { offers: [] } : { jobs: [] });
     });
 

@@ -13,28 +13,26 @@
 
 import { childLogger } from "../../infra/logger.js";
 import { intEnv } from "../../core/config.js";
-import {
-  listActionableApplications,
-  countAgedOutApplications,
-  recordLiveness,
-  APPLY_QUEUE_MAX_AGE_HOURS,
-} from "../../db/job-queries.js";
-import { summariseSpend } from "../../db/job-run-queries.js";
+import { recordLiveness, type QueueAxis } from "../../db/job-queries.js";
+import { inScope, loadBriefQueue, scopeMayBeIncomplete, todaysSpend } from "./brief-queue.js";
 import { compareOverlap, overlapScore, type OverlapResult } from "./overlap.js";
 import { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
 import { buildTrends } from "./brief-trends.js";
 import { verifyLiveness, type Liveness } from "./liveness.js";
 import { toBriefRow, toLiveness } from "./brief-assemble.js";
-import { persistBriefRanks, persistFitScores } from "./brief-persist.js";
+import {
+  attachBriefRanks,
+  briefRankEntries,
+  persistBriefRanks,
+  persistFitScores,
+} from "./brief-persist.js";
 import {
   formatDailyBrief,
   type BriefInput,
   type BriefRow,
-  type SpendLine,
   type TrendRow,
 } from "./brief.js";
 import type { JobApplication } from "../../db/schema.js";
-import type { UnifiedTool, ToolResult } from "../index.js";
 import { getProfile, type JobSearchProfile } from "./profile-config.js";
 
 const log = childLogger({ module: "jobhunt:daily-brief" });
@@ -83,12 +81,47 @@ export { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
  */
 export const VERIFY_TOP_N = intEnv("VERIFY_TOP_N", 60);
 
+// The queue read — its limit, its verdict set and the two counts that describe
+// it — moved to brief-queue.ts on 2026-09-08, when A2 pushed this file past its
+// 400-line budget. Re-exported so existing import sites keep resolving here.
+export { BRIEF_QUEUE_LIMIT, BRIEF_VERDICTS, loadBriefQueue } from "./brief-queue.js";
+
 // Re-exported: liveness-unknown.test.ts and anything else that imports
 // `toLiveness` from this module keeps resolving after the move.
 export { toLiveness, toBriefRow } from "./brief-assemble.js";
 
 /**
- * Rank the actionable pool by stack overlap.
+ * How many whole days ago the EMPLOYER published a row.
+ *
+ * `posted_at` falling back to `created_at` — the same coalesce
+ * `applyQueueFreshnessSql` filters on, so the order and the window agree about
+ * what "old" means. A posting the founder pasted himself carries no `posted_at`
+ * and is as fresh as the minute he found it, which is the truth about it.
+ *
+ * DAY GRANULARITY, not minutes. Minute-level freshness would make the ranking a
+ * reverse-chronological list and throw away CV overlap entirely; day buckets put
+ * today's roles above last week's and let the match decide inside a day.
+ */
+function publishedDaysAgo(row: JobApplication, now: Date): number {
+  const at = row.posted_at ?? row.created_at;
+  if (!at) return 0;
+  return Math.max(0, Math.floor((now.getTime() - at.getTime()) / 86_400_000));
+}
+
+/**
+ * Rank the actionable pool: freshest day first, best CV overlap inside a day.
+ *
+ * FRESHNESS LEADS, since 2026-09-08 (founder decision). `/jobs` carries no age
+ * limit now, and overlap alone over an unbounded population fills APPLY TODAY's
+ * six slots with whatever matches the CV best across all time — which is the
+ * "442 standing vs 35 fresh" brief rejected on 2026-09-07. Ordering by
+ * publication day first keeps the lifted limit from costing what the limit was
+ * protecting: the reach is there, and today's roles are still on top.
+ *
+ * For the founder's own lane this changes almost nothing — his 24h window
+ * already holds 166 rows, so nearly everything sits in the day-0 bucket and
+ * overlap decides as it always has. It matters for the wider view and for the
+ * low-supply lane, where a fortnight of roles is one list.
  *
  * A row whose track has no readable CV scores zero overlap rather than being
  * dropped. It still appears, just not at the top — losing an opportunity because
@@ -103,10 +136,11 @@ export function rankRows(
   const scored = applications.map((row) => ({
     row,
     overlap: overlapScore(row.description ?? "", cvs.get(row.track) ?? "", profile.skillsDictionaryName),
+    freshness: publishedDaysAgo(row, now),
   }));
-  scored.sort((a, b) => compareOverlap(a.overlap, b.overlap));
+  scored.sort((a, b) => a.freshness - b.freshness || compareOverlap(a.overlap, b.overlap));
   log.debug({ ranked: scored.length, now: now.toISOString() }, "Brief rows ranked");
-  return scored;
+  return scored.map(({ row, overlap }) => ({ row, overlap }));
 }
 
 /**
@@ -155,41 +189,41 @@ export interface BriefOptions {
    * skills, and ranking wrote over the shared (un-scoped) brief_rank column.
    */
   readonly profile?: JobSearchProfile;
+  /**
+   * WHICH SLICE OF THE RANKED QUEUE TO PRINT. Omitted = all of it (`/jobs`).
+   *
+   * A DISPLAY FILTER, never a second query. The queue is read once, unbounded,
+   * and ranked once, so `/jobs`, `/today` and `/fresh` all address rows by the
+   * same `brief_rank` — see BriefRow.rank for what a per-verb ranking would cost.
+   */
+  readonly scope?: BriefDisplayScope;
+}
+
+export interface BriefDisplayScope {
+  readonly windowHours?: number | null;
+  /** An absolute cutoff — `/fresh`'s "since you last looked", not a range. */
+  readonly since?: Date | undefined;
+  readonly axis?: QueueAxis;
+  /** How the header names this slice: "posted in the last 24h", "everything on file". */
+  readonly label?: string;
 }
 
 /**
- * Build today's brief: read → rank → verify → render.
+ * Build the brief: read → rank → verify → number → filter → render.
  *
  * Liveness runs AFTER ranking and only on the top slice, so the check lands
  * exactly where a wrong answer is most expensive and nowhere it would be waste.
+ * With fresh-first ranking that slice is the freshest rows, which is also where
+ * "is it still open?" changes an answer.
+ *
+ * NUMBERING IS PINNED BEFORE FILTERING, deliberately. The rank belongs to the
+ * whole queue; the scope only decides how much of it this message shows.
  */
 export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> {
   const now = opts.now ?? new Date();
   const profile = opts.profile ?? getProfile();
-  // REJECTS ARE READ BACK TOO (founder direction, 2026-08-01: "store all the data
-  // we are collecting even if it is senior and of no use to us"). The brief has
-  // always had a NOT LAWFUL section and it was always empty, because this query
-  // defaulted to pass+flag — so the roles the pipeline threw away on the founder's
-  // behalf were invisible to him, which is the whole complaint. They cost nothing
-  // to show: one line each, and `verificationTargets` still refuses to spend the
-  // liveness budget on them.
-  const verdicts = ["pass", "flag", "reject"] as const;
-  // profileId scoping is what keeps Wife's brief from mixing in Pushkar's rows
-  // (and vice versa) — listActionableApplications filters by tenant_id alone
-  // when profileId is omitted, so multi-profile callers must always pass it.
-  const applications = await listActionableApplications({
-    verdicts,
-    tenantId: profile.tenantId,
-    profileId: profile.id,
-  });
-  let agedOut = 0;
-  try {
-    agedOut = await countAgedOutApplications({ verdicts, tenantId: profile.tenantId, profileId: profile.id });
-  } catch (err) {
-    // allow-failopen: the freshness line is context, not the deliverable. Losing
-    // the whole brief over a count query would trade the shortlist for a footnote.
-    log.warn({ err: (err as Error).message }, "Aged-out count unavailable — freshness line will read 0");
-  }
+  const scope = opts.scope ?? {};
+  const { applications, queued, agedOut, maxAgeHours } = await loadBriefQueue(profile);
   const { cvs, unreadable } = loadTrackCvs(profile);
   const scored = rankRows(applications, cvs, now, profile);
 
@@ -214,10 +248,23 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     }
   }
 
-  const perTrack: Record<string, number> = {};
-  for (const { row } of scored) perTrack[row.track] = (perTrack[row.track] ?? 0) + 1;
+  // RANKED OVER THE WHOLE QUEUE, then numbered, then filtered. The three steps
+  // are in this order so a row's number is a property of the queue rather than
+  // of whichever verb happened to print it.
+  const allRows: BriefRow[] = scored.map(({ row, overlap }) => toBriefRow(row, overlap, now, liveness));
+  const rankEntries = briefRankEntries(allRows);
+  const numbered = attachBriefRanks(allRows, rankEntries);
 
-  const rows: BriefRow[] = scored.map(({ row, overlap }) => toBriefRow(row, overlap, now, liveness));
+  const visible = new Set(
+    scored.filter(({ row }) => inScope(row, scope, now)).map(({ row }) => row.id),
+  );
+  const rows = numbered.filter((row) => visible.has(row.id));
+
+  // Per-track counts describe WHAT IS SHOWN. Counting the whole queue under a
+  // header that prints a slice of it is the "same number, two nouns" defect A3
+  // closed one line above.
+  const perTrack: Record<string, number> = {};
+  for (const row of rows) perTrack[row.track] = (perTrack[row.track] ?? 0) + 1;
 
   // Reverted 2026-09-07 (founder decision): back to a strict 24h window. The
   // standing pool (postings older than APPLY_QUEUE_MAX_AGE_HOURS, kept alive up
@@ -248,7 +295,20 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
   // one, which is a weaker comparison than the ranking implies. Said out loud,
   // because a number that is quietly less trustworthy than it looks is the kind
   // of thing that gets acted on for weeks.
-  const untracked = scored.filter(({ row }) => row.track === UNCLASSIFIED_TRACK).length;
+  // A narrow verb cannot see past the read's horizon, and unlike `/jobs` it
+  // gets no header cut notice. Reported as a FAILURE line rather than a note,
+  // because that block already carries the right sentence — "today's numbers are
+  // a floor, not a measurement" — and this is exactly that situation.
+  const truncationNote = scopeMayBeIncomplete(applications, queued, scope, now)
+    ? [
+        `This list was drawn from the newest ${applications.length} of ${queued} rows in your ` +
+          `queue, and it asks about a window older than the oldest of those. Roles inside the ` +
+          `window may be missing from it. Send /csv for the whole queue, or raise ` +
+          `BRIEF_QUEUE_LIMIT.`,
+      ]
+    : [];
+
+  const untracked = rows.filter((row) => row.track === UNCLASSIFIED_TRACK).length;
   const untrackedNote =
     untracked > 0
       ? [
@@ -262,101 +322,58 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
 
   const input: BriefInput = {
     date: now,
-    screened: opts.screened ?? applications.length,
+    // NO FALLBACK TO `applications.length` (A3, 2026-09-08). That default is
+    // what printed the apply-queue size under the word "screened" on every
+    // typed /jobs — a claim about the machine made from a number about the
+    // founder's queue. Undefined omits the line; only a caller that ran a sweep
+    // knows this figure.
+    ...(opts.screened === undefined ? {} : { screened: opts.screened }),
+    // The uncapped total describes THE SAME POPULATION the rows do. Under a
+    // scope the rows are a filtered slice, so the queue count is the slice's
+    // own size and a cut notice would be about a cut that did not happen.
+    ...(queued === undefined || rows.length !== allRows.length ? {} : { queued }),
     perTrack,
     rows,
     standing: standingRows,
     trends: await buildTrends(cvs, now, profile),
-    failures: [...(opts.failures ?? []), ...cvFailure, ...untrackedNote],
+    failures: [...(opts.failures ?? []), ...truncationNote, ...cvFailure, ...untrackedNote],
     notes: opts.notes ?? [],
     agedOut,
-    maxAgeHours: APPLY_QUEUE_MAX_AGE_HOURS,
+    // What THIS list excluded, measured on the ranked population rather than on
+    // the read. `/today` showing 166 of 500 owes the founder the other 334.
+    outsideScope: allRows.length - rows.length,
+    maxAgeHours: scope.windowHours ?? (scope.since ? null : maxAgeHours),
+    // What this list EXCLUDED, in words. UX rule 2 of the fresh-first plan: a
+    // list that does not name its own scope is the T-2 defect again — the
+    // founder cannot tell an empty market from a narrow window.
+    ...(scope.label ? { scopeLabel: scope.label } : {}),
+    // WHOSE brief. The legend quotes this candidate's years, salary criterion,
+    // permit bases and markets — and printed the founder's on everyone's until
+    // 2026-09-08, because `GATE_GLOSSARY` was a module constant.
+    profile,
     ...(spend ? { spend } : {}),
   };
 
-  // Pin the numbering BEFORE returning the text. The section selectors are pure
-  // and get the same `rows`/`standingRows` the renderer does, so what is
-  // stored is exactly what is printed. Deriving it again when /draft fires
-  // would retarget the command silently.
-  await persistBriefRanks(rows, standingRows, { profileId: profile.id });
+  // Pin the numbering BEFORE returning the text, and pin it over `allRows` —
+  // the whole ranked queue, NOT the scoped slice this message prints.
+  //
+  // The scoped slice is what `/today` and `/fresh` show; the rank is what
+  // `/draft` resolves. If a narrow verb persisted its own numbering, running
+  // `/fresh` would renumber the founder's entire queue from 1 and every number
+  // in the `/jobs` message still on his screen would point at a different
+  // company. Same numbering source as the rows carry (`attachBriefRanks`
+  // consumed these identical entries above), so printed number and pinned rank
+  // agree by construction rather than by two functions computing the same thing.
+  await persistBriefRanks(allRows, standingRows, {
+    profileId: profile.id,
+    entries: rankEntries,
+  });
   await persistFitScores([...scored, ...standingScored]);
 
   return formatDailyBrief(input);
 }
 
-/**
- * Today's feed spend, or nothing.
- *
- * Returns undefined rather than zero when the ledger cannot be read. "$0.00
- * spent today" is a claim, and a claim made because a query failed is the kind
- * of quiet wrongness that gets believed for a month.
- */
-async function todaysSpend(now: Date): Promise<SpendLine | undefined> {
-  // Three days, matching the sweep cadence. A 24-hour window on a sweep that
-  // runs every third day reports "$0.00" on two mornings out of three, which
-  // reads as a free pipeline rather than as a window that missed the run.
-  const since = new Date(now.getTime() - 3 * 86_400_000);
-  try {
-    const window = await summariseSpend(since);
-    return window.runs === 0
-      ? undefined
-      : {
-          runs: window.runs,
-          returned: window.returned,
-          costUsd: window.costUsd,
-          failed: window.failed,
-          fresh: window.fresh,
-        };
-  } catch (err) {
-    // allow-failopen: the cost line is context, and losing the whole brief over
-    // an unreadable ledger would trade the deliverable for a footnote.
-    log.warn({ err: (err as Error).message }, "Spend summary unavailable — cost line omitted");
-    return undefined;
-  }
-}
-
-export const jobBriefTool: UnifiedTool = {
-  name: "job_brief",
-  description:
-    "Show the ranked job brief: which screened roles to apply to TODAY, ordered by how " +
-    "much of the posting's stack the CV already covers, each verified still open. Use when " +
-    "the founder asks what to apply to, what's in the pipeline, what to do about jobs, or " +
-    "for today's shortlist. Reads what ingest_jobs already screened — it does not fetch. " +
-    "Read-only, no approval needed, no model spend.",
-  input_schema: {
-    type: "object",
-    properties: {
-      skip_liveness: {
-        type: "boolean",
-        description:
-          "Skip the still-open check. Faster, but rows will read 'couldn't confirm'.",
-      },
-      profileId: {
-        type: "string",
-        description:
-          "Whose brief to build — a registered profile id (e.g. wife-nl-finance), already " +
-          "resolved from free text by the caller. Omit for the founder's own brief, never a " +
-          "mix of every candidate's rows.",
-      },
-    },
-    required: [],
-  },
-
-  async execute(args: Record<string, unknown>): Promise<ToolResult> {
-    try {
-      const profileId = args["profileId"] as string | undefined;
-      const brief = await buildDailyBrief({
-        ...(args["skip_liveness"] === true ? { skipLiveness: true } : {}),
-        ...(profileId ? { profile: getProfile(profileId) } : {}),
-      });
-      return { success: true, data: brief };
-    } catch (err) {
-      return {
-        success: false,
-        error:
-          `Could not build the job brief: ${(err as Error).message}. ` +
-          "Nothing was changed — screening results, if any, are still recorded.",
-      };
-    }
-  },
-};
+// `job_brief` — the English surface — moved to brief-tool.ts on 2026-09-08,
+// when the B-block scope plumbing pushed this file past its 400-line budget.
+// Re-exported so kernel-boot and every existing import site keep resolving here.
+export { jobBriefTool } from "./brief-tool.js";

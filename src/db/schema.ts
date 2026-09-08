@@ -1775,18 +1775,34 @@ export const jobLaneHeartbeats = agentsSchema.table("job_lane_heartbeats", {
   /** Last sweep's funnel diagnostic, for the closing-stage explanation on the next alert. */
   last_funnel: jsonb("last_funnel").$type<Record<string, number | null> | null>(),
 
+  /**
+   * When the founder last ran `/fresh` for this candidate.
+   *
+   * The marker `/fresh` is a delta AGAINST — rows with `created_at` after this
+   * are the ones he has not seen yet. NULL until the first run, which is why
+   * `scopeFor` shows everything that once and says so rather than inventing a
+   * window.
+   *
+   * ON THIS TABLE, not a new one: the grain is identical (one row per candidate,
+   * lane state that outlives a process) and `loadLaneHeartbeat`/`saveLaneHeartbeat`
+   * already keep it. It is deliberately NOT written by `saveLaneHeartbeat` —
+   * that upsert runs 48 times a day from the sweep and would clear a founder's
+   * marker on the next tick.
+   */
+  fresh_viewed_at: timestamp("fresh_viewed_at", { withTimezone: true }),
+
   updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export type JobLaneHeartbeat = typeof jobLaneHeartbeats.$inferSelect;
 export type NewJobLaneHeartbeat = typeof jobLaneHeartbeats.$inferInsert;
 
+export const atsBoardCache = agentsSchema.table("ats_board_cache", {
+  url: text("url").primaryKey(),
+  etag: text("etag"),
+  payload: jsonb("payload").notNull(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
-export const interruptRegistry = hitlApprovals;
-export const llmCosts = aiCallCosts;
-export const auditLog = actionLog;
-export const leadPipeline = outboundLeads;
-export const suppressionList = doNotContact;
-export const taskOutcomes = agentResults;
-export const deptEvents = deptSignals;

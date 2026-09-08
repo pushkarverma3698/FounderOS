@@ -18,7 +18,7 @@ import type { ApprovalRequest } from "../infra/hitl.js";
 import { formatApprovalCard, safeHtml } from "./approval-card.js";
 import { markdownToTelegramHtml, splitForTelegram } from "./format.js";
 import { getPendingInterrupt, resolveInterrupt, getTodayCostUsd, logLlmCost } from "../db/queries.js";
-import { BudgetExceededError, BudgetGuardCallback, createRunBudget, UNATTRIBUTED_AGENT, UNATTRIBUTED_STAGE, type AccruedCall } from "../infra/budget.js";
+import { BudgetExceededError, enforceRunBudget, UNATTRIBUTED_AGENT, UNATTRIBUTED_STAGE, type AccruedCall } from "../infra/budget.js";
 import { assertDailyBudgetAllowsRun, DailyBudgetExceededError } from "../infra/daily-budget.js";
 import { readHalt, formatHaltNotice } from "../infra/halt.js";
 import { startTurn } from "../infra/trace.js";
@@ -83,8 +83,31 @@ export function kernelCostSink(call: AccruedCall): void {
   }).catch((err) => log.warn({ err: String(err) }, "ai_call_costs write failed")); // allow-failopen: cost row is telemetry; the turn must not die on a DB blip
 }
 
-function makeBudgetCallback(): BudgetGuardCallback {
-  return new BudgetGuardCallback(createRunBudget(), process.env["AGENT_MODEL"] ?? "", kernelCostSink);
+/**
+ * The run's spend cap, as an AbortSignal.
+ *
+ * NOT just a callback. Until 2026-09-08 the cap was enforced by throwing from
+ * `BudgetGuardCallback.handleLLMEnd`, and LangChain catches whatever a callback
+ * handler throws — so `catch (err instanceof BudgetExceededError)` below could
+ * never fire, and a real turn (7dd021d8, 2026-09-07) breached the 100k-token
+ * cap five times and kept calling tools after each one. Enforcement now rides
+ * the same signal the turn timeout uses, which the framework does honour.
+ */
+function makeRunBudget(): ReturnType<typeof enforceRunBudget> {
+  return enforceRunBudget(process.env["AGENT_MODEL"] ?? "", kernelCostSink);
+}
+
+/**
+ * What actually stopped this turn.
+ *
+ * A budget abort surfaces from LangChain as a generic AbortError, which reads
+ * to the founder as an unexplained crash. A turn timeout keeps its own identity
+ * — it is the more specific fact, and reporting a deadline as a spend cap would
+ * send him to /budget for a problem that is not there.
+ */
+function failureFor(err: unknown, budget: ReturnType<typeof enforceRunBudget>): unknown {
+  if (err instanceof TurnTimeoutError) return err;
+  return budget.breachError() ?? err;
 }
 
 // ── Reply / card senders ───────────────────────────────────────────────────────
@@ -126,6 +149,7 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
   await withChatTurnLock(chatId, async () => {
     const trace = startTurn({ chatId: String(chatId), kind: "message", promptHash: kernelPromptHash() });
     let foldCtx: { kernel: FoldableKernel; config: unknown } | undefined;
+    let budget: ReturnType<typeof enforceRunBudget> | undefined;
     try {
       const halt = await readHalt();
       if (halt) {
@@ -139,20 +163,22 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
       );
 
       const kernel = await getKernel();
+      budget = makeRunBudget();
       const config = {
         configurable: {
           thread_id: threadIdFor(chatId),
           ...(profileId ? { profile_id: profileId } : {}),
         },
         recursionLimit: OFFICE_RECURSION_LIMIT,
-        callbacks: [makeBudgetCallback(), new TraceCallback(trace)],
+        callbacks: [budget.callback, new TraceCallback(trace)],
       };
       foldCtx = { kernel: kernel as unknown as FoldableKernel, config };
       trace.event("turn.in", { textPreview: text.slice(0, 120) });
 
-      // On deadline the run is ABORTED, not abandoned — the signal goes only to
-      // stream() so the post-timeout fold/getState still work on a clean config.
-      const abort = new AbortController();
+      // On deadline OR on a blown budget the run is ABORTED, not abandoned —
+      // the signal goes only to stream() so the post-timeout fold/getState
+      // still work on a clean config.
+      const abort = budget;
       const res = await withTurnTimeout(
         streamKernelTurn(
           ctx,
@@ -185,10 +211,13 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
       trace.event("turn.out", { replyPreview: reply.slice(0, 200) });
       await sendReply(ctx, reply);
     } catch (err) {
-      trace.event("turn.error", { message: err instanceof Error ? err.message.slice(0, 400) : String(err) });
-      if (foldCtx) await recordFailedTurnInHistory(foldCtx.kernel, foldCtx.config, err);
+      const failure = budget ? failureFor(err, budget) : err;
+      trace.event("turn.error", {
+        message: failure instanceof Error ? failure.message.slice(0, 400) : String(failure),
+      });
+      if (foldCtx) await recordFailedTurnInHistory(foldCtx.kernel, foldCtx.config, failure);
       // A live text turn can be replayed verbatim, so provider exhaustion auto-retries.
-      await replyForError(ctx, err, { chatId: String(chatId), text, turnId: trace.turnId });
+      await replyForError(ctx, failure, { chatId: String(chatId), text, turnId: trace.turnId });
     }
   });
 }
@@ -201,21 +230,23 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
     const threadId = threadIdFor(chatId);
     const trace = startTurn({ chatId: String(chatId), kind: "resume", promptHash: kernelPromptHash() });
     let foldCtx: { kernel: FoldableKernel; config: unknown } | undefined;
+    let budget: ReturnType<typeof enforceRunBudget> | undefined;
     try {
       const pending = await getPendingInterrupt(threadId);
       if (pending) {
         await resolveInterrupt(pending.interrupt_id, decision);
       }
       const kernel = await getKernel();
+      budget = makeRunBudget();
       const config = {
         configurable: { thread_id: threadId },
         recursionLimit: OFFICE_RECURSION_LIMIT,
-        callbacks: [makeBudgetCallback(), new TraceCallback(trace)],
+        callbacks: [budget.callback, new TraceCallback(trace)],
       };
       foldCtx = { kernel: kernel as unknown as FoldableKernel, config };
       trace.event("hitl.resume", { decision });
 
-      const abort = new AbortController();
+      const abort = budget;
       const res = await withTurnTimeout(
         streamKernelTurn(
           ctx,
@@ -253,9 +284,12 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
       trace.event("turn.out", { replyPreview: reply.slice(0, 200) });
       await sendReply(ctx, reply);
     } catch (err) {
-      trace.event("turn.error", { message: err instanceof Error ? err.message.slice(0, 400) : String(err) });
-      if (foldCtx) await recordFailedTurnInHistory(foldCtx.kernel, foldCtx.config, err);
-      await replyForError(ctx, err);
+      const failure = budget ? failureFor(err, budget) : err;
+      trace.event("turn.error", {
+        message: failure instanceof Error ? failure.message.slice(0, 400) : String(failure),
+      });
+      if (foldCtx) await recordFailedTurnInHistory(foldCtx.kernel, foldCtx.config, failure);
+      await replyForError(ctx, failure);
     }
   });
 }

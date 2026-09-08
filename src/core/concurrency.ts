@@ -36,6 +36,7 @@ export async function mapWithConcurrencyLimit<T, R>(
   items: readonly T[],
   limit: number,
   fn: (item: T) => Promise<R>,
+  staggerMs: number = 0,
 ): Promise<R[]> {
   if (limit < 1) {
     throw new Error(`mapWithConcurrencyLimit needs a limit of at least 1, got ${limit}.`);
@@ -43,11 +44,27 @@ export async function mapWithConcurrencyLimit<T, R>(
 
   const results: R[] = new Array<R>(items.length);
   let nextIndex = 0;
+  
+  // Leaky bucket timer state
+  const startTime = Date.now();
+  let dispatchedCount = 0;
 
   async function worker(): Promise<void> {
     while (nextIndex < items.length) {
       const index = nextIndex;
       nextIndex += 1;
+      
+      if (staggerMs > 0) {
+        // We calculate target time using the global dispatched count, not just this worker's count
+        const targetTime = startTime + (dispatchedCount * staggerMs);
+        dispatchedCount += 1;
+        
+        const now = Date.now();
+        if (now < targetTime) {
+          await new Promise(r => setTimeout(r, targetTime - now));
+        }
+      }
+
       results[index] = await fn(items[index] as T);
     }
   }

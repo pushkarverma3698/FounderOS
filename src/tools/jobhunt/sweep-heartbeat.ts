@@ -19,7 +19,8 @@
  * without a clock, a network, or a bot.
  */
 
-import { esc } from "./telegram-format.js";
+import { cmd, esc, link } from "./telegram-format.js";
+import { dedupeKey } from "./filters.js";
 import type { IngestLine } from "./ingest-batch.js";
 import type { FreeFunnel } from "./free-ingest.js";
 
@@ -31,6 +32,73 @@ export const NEW_ROWS_NAMED = 3;
 
 /** Number of consecutive 0-pass sweeps before raising a closed-funnel alert. */
 export const ZERO_PASS_STREAK_THRESHOLD = 6;
+
+/**
+ * How recently the EMPLOYER must have published a role for it to interrupt.
+ *
+ * 24 hours, and deliberately not `APPLY_QUEUE_MAX_AGE_HOURS`. That constant is
+ * per-candidate and as wide as 14 days for the low-supply lane, because a
+ * fortnight-old Dutch finance role is still worth showing in a brief the
+ * founder chose to open. This one governs an INTERRUPTION, and the bar for
+ * taking someone's attention is not the bar for appearing on a list he asked
+ * for. Both lanes ping on the same "published since yesterday" rule.
+ */
+export const PUBLISH_FRESH_HOURS = 24;
+
+/**
+ * Split newly-stored rows into the ones worth an interrupt and the ones worth a line.
+ *
+ * `isNew` — the flag this alert used to fire on — is a fact about OUR tracker
+ * (`existing === null`, screen.ts). It agrees with "newly published" on an
+ * ordinary day, because median discovery lag is twelve minutes, and stops
+ * agreeing the moment a board joins the registry: every posting on a new board
+ * is `isNew`, including the ones published a month ago. The registry went
+ * 1,312 → 3,223 on 2026-09-08, and the sweeps after that import announced
+ * month-old roles as 🆕.
+ *
+ * A NULL PUBLICATION DATE COUNTS AS FRESH. An unknown date is not evidence of
+ * age, and demoting it would silence every source that omits the field —
+ * including `screen_job`, the founder pasting a posting he just found, which is
+ * the one row he already knows is current. The same asymmetry `brief-assemble`
+ * applies to `postedDays`: unknown is stated, never resolved against us.
+ *
+ * Pure, and takes `now`, like everything else in this file.
+ */
+export function splitByPublishFreshness(
+  rows: readonly IngestLine[],
+  now: Date,
+  windowHours: number = PUBLISH_FRESH_HOURS,
+): { readonly fresh: IngestLine[]; readonly backfill: IngestLine[] } {
+  const cutoff = now.getTime() - windowHours * 3_600_000;
+  const fresh: IngestLine[] = [];
+  const backfill: IngestLine[] = [];
+  for (const row of rows) {
+    (!row.postedAt || row.postedAt.getTime() >= cutoff ? fresh : backfill).push(row);
+  }
+  return { fresh, backfill };
+}
+
+/**
+ * The quiet half: roles we can now see that the employer published a while ago.
+ *
+ * NO EMOJI, NO "NEW", NO PER-ROW NAMES. Backfill is a fact about our coverage
+ * improving, not about the market moving, and it arrives in bursts of forty
+ * when a board is imported. Given the 🆕 treatment it would be the loudest
+ * thing in the channel on precisely the days it matters least.
+ *
+ * It is still PRINTED. Discovering forty roles and mentioning none of them is
+ * the silent drop this pipeline has paid for repeatedly — and it ends in a
+ * command, because a line the founder cannot act on is a line he will learn to
+ * skip.
+ */
+export function formatBackfillLine(count: number, candidateName?: string): string {
+  const who = candidateName ? ` to ${esc(candidateName)}'s list` : " to your list";
+  return (
+    `+ ${count} older ${count === 1 ? "role" : "roles"} added${who} ` +
+    `<i>(published more than ${PUBLISH_FRESH_HOURS}h ago, newly visible to us).</i>\n` +
+    `→ /jobs to see them ranked.`
+  );
+}
 
 export interface HeartbeatState {
   /** Sweeps that found nothing since the last message of any kind. */
@@ -223,29 +291,94 @@ export const NEXT_STEP_LINE =
 
 /**
  * The alert for rows that are BOTH new and worth acting on.
+ *
+ * TAKES FLAGS AS WELL AS PASSES, since 2026-09-08 (founder: "the roles should be
+ * alerted every time we pass them, whenever we find new roles"). The caller used
+ * to filter to `outcome === "pass"`, which for the NL-finance lane is close to
+ * nothing — her employers are largely not IND-recognised sponsors and Dutch ads
+ * routinely state no salary, so most of her rows carry a flag, land in ASK, get
+ * ranked into her brief and were never announced. Measured 2026-09-07: two roles
+ * ranked, zero messages, and the liveness ping saying "nothing new that cleared
+ * screening" directly above them.
+ *
+ * The headline no longer says "passed screening", because for a flagged row that
+ * would be false — the one thing this whole lane may not do. It says how many
+ * were found and splits them, so the count is honest and the split is the part
+ * the founder acts on: a clear row takes `/draft`, a flagged one takes a question.
  */
+export interface NewRowsAlertOptions {
+  /**
+   * Roles found in the same sweep that the employer published more than
+   * PUBLISH_FRESH_HOURS ago. Counted here rather than sent as a second message:
+   * dropping them when fresh rows exist would be a silent loss, and a separate
+   * ping for them would double the sweep's notification count.
+   */
+  readonly backfill?: number;
+  /**
+   * `dedupeKey(company, title)` → the row's persisted `brief_rank`.
+   *
+   * THE PINNED RANK, never a number invented for this message. `/jobs`,
+   * `/today` and `/fresh` all print the same one (B5), so a fourth numbering
+   * here would resolve `/draft 1` to whatever the queue has at 1 — a tailored
+   * application about the wrong company, sent from a tap.
+   *
+   * Keyed on `dedupeKey` because that is the identity the database uses; an
+   * alert row and a stored row are the same posting or they are not, and no
+   * second notion of sameness is allowed to decide it.
+   *
+   * A missing entry prints no command. Ranking runs before this and is
+   * fail-open, so "we could not number it" is a state that happens, and the
+   * honest rendering of it is a company name with nothing to tap.
+   */
+  readonly ranks?: ReadonlyMap<string, number>;
+}
+
 export function formatNewRowsAlert(
-  passes: readonly IngestLine[],
+  rows: readonly IngestLine[],
   sheetLink: string | null,
   candidateName?: string,
+  opts: NewRowsAlertOptions = {},
 ): string {
-  const named = passes.slice(0, NEW_ROWS_NAMED);
-  const rows = named.map((p) => `• ${esc(p.company)} — ${esc(p.title)}`).join("\n");
-  const rest =
-    passes.length > NEW_ROWS_NAMED
-      ? `\n<i>+ ${passes.length - NEW_ROWS_NAMED} more.</i>`
+  const named = rows.slice(0, NEW_ROWS_NAMED);
+  // The mark is the row's own status, so a flagged company is visibly a question
+  // rather than a recommendation. The title is the LINK and `/draft N` follows
+  // it, so the ping → application path is one tap instead of four steps through
+  // `/jobs` (B6).
+  const lines = named
+    .map((r) => {
+      const mark = r.outcome === "pass" ? "✅" : "❓";
+      const rank = opts.ranks?.get(dedupeKey(r.company, r.title));
+      const action = rank === undefined ? "" : ` · ${cmd(`/draft ${rank}`)}`;
+      return `${mark} <b>${esc(r.company)}</b> — ${link(r.title, r.url ?? null)}${action}`;
+    })
+    .join("\n");
+  const rest = rows.length > NEW_ROWS_NAMED ? `\n<i>+ ${rows.length - NEW_ROWS_NAMED} more.</i>` : "";
+  const backfill =
+    (opts.backfill ?? 0) > 0
+      ? `\n<i>+ ${opts.backfill} older ${opts.backfill === 1 ? "role" : "roles"} also added ` +
+        `(published earlier, newly visible to us).</i>`
       : "";
 
-  // NAMED once there is more than one candidate. Two identical "3 new roles
-  // passed screening" alerts thirty minutes apart, for two different people, is
-  // a channel the founder learns to ignore — and acting on the wrong one costs
-  // an application.
+  // NAMED once there is more than one candidate. Two identical "3 new roles"
+  // alerts thirty minutes apart, for two different people, is a channel the
+  // founder learns to ignore — and acting on the wrong one costs an application.
   const who = candidateName ? ` for ${esc(candidateName)}` : "";
 
+  const cleared = rows.filter((r) => r.outcome === "pass").length;
+  const asking = rows.length - cleared;
+  const split = [
+    cleared > 0 ? `${cleared} cleared every check` : null,
+    asking > 0 ? `${asking} need${asking === 1 ? "s" : ""} a question first` : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+
   return (
-    `🆕 <b>${passes.length} new role${passes.length === 1 ? "" : "s"} passed screening${who}</b>\n` +
-    rows +
+    `🆕 <b>${rows.length} new role${rows.length === 1 ? "" : "s"}${who}</b>\n` +
+    `<i>${split}</i>\n` +
+    lines +
     rest +
+    backfill +
     (sheetLink ? `\n\n${sheetLink}` : "") +
     `\n\n${NEXT_STEP_LINE}`
   );

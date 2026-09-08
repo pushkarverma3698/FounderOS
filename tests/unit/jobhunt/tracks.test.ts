@@ -17,6 +17,7 @@ import {
   classifyTrack,
   titlesForTracks,
 } from "../../../src/tools/jobhunt/tracks.js";
+import { getProfile } from "../../../src/tools/jobhunt/profile-config.js";
 
 describe("titlesForTracks stays byte-identical — proof this change is $0", () => {
   it("returns the exact same paid phrases as before this change", () => {
@@ -353,5 +354,53 @@ describe("REGRESSION: the qualifier pass does not swallow non-engineering roles"
     expect(classifyTrack("Embedded Systems Developer")).toBe("backend");
     expect(classifyTrack("Web Developer")).toBe("frontend");
     expect(classifyTrack("Machine Learning Researcher")).toBe("ai");
+  });
+});
+
+/**
+ * REGRESSION, measured on prod 2026-09-08: three Michael Kors shop-floor
+ * vacancies in Paris and Toulon were classified `compliance-kyc` for the
+ * NL-finance profile, and one of them —
+ * "Vendeur(se) avec expérience CDD 28h" — reached `brief_section='ask'`,
+ * `brief_rank=2` in a brief that had only three ranked rows.
+ *
+ * Cause: `"cdd"` sat in that track's `classifyTerms` as a bare acronym. In
+ * French postings CDD is *contrat à durée déterminée*, the standard fixed-term
+ * contract, and it appears in the TITLE of every such vacancy —
+ * `matchesAsWholeWord` finds it flanked by spaces every time.
+ *
+ * The same profile already makes this exact argument for `finance-ops`
+ * ("Bare 3-letter acronyms deliberately excluded — 'OTC' collides with
+ * over-the-counter trading"). It was simply never applied to this track.
+ */
+describe("REGRESSION: a bare 'CDD' in a French posting is not a KYC role", () => {
+  const wife = getProfile("wife-nl-finance");
+
+  it("does not read a French fixed-term retail vacancy as compliance-kyc", () => {
+    expect(classifyTrack("Vendeur(se) avec expérience CDD 28h", wife)).toBeNull();
+    expect(classifyTrack("Shop Manager Printemps Toulon - CDD 35h", wife)).toBeNull();
+    expect(classifyTrack("Printemps Haussmann, CDD 8h/semaine (samedis)", wife)).toBeNull();
+    expect(classifyTrack("Conseiller de vente CDD 35h", wife)).toBeNull();
+  });
+
+  it("still recognises the real due-diligence titles the acronym was there for", () => {
+    // These match through `titles` (substring on the posting's own title), which
+    // is why dropping the bare classifyTerm costs nothing.
+    expect(classifyTrack("CDD Analyst", wife)).toBe("compliance-kyc");
+    expect(classifyTrack("Senior CDD Analyst - Financial Crime", wife)).toBe("compliance-kyc");
+  });
+
+  it("pins where the spelled-out phrase lands, since two tracks both claim it", () => {
+    // "Customer Due Diligence Analyst" is listed in BOTH finance-ops' and
+    // compliance-kyc's `titles`, so `trackPriority` decides and finance-ops wins.
+    // Unchanged by this fix and pinned here so it cannot drift silently — the
+    // profile's own comment argues due diligence is transaction/credit-side
+    // rather than AML-side, which is what that ordering encodes.
+    expect(classifyTrack("Customer Due Diligence Analyst", wife)).toBe("finance-ops");
+  });
+
+  it("leaves the other acronyms in that track alone — neither is a common word", () => {
+    expect(classifyTrack("KYC Analyst", wife)).toBe("compliance-kyc");
+    expect(classifyTrack("AML Officer", wife)).toBe("compliance-kyc");
   });
 });

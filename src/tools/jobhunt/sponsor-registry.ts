@@ -111,7 +111,10 @@ export function parseSponsorCsv(csv: string): string[] {
   if (lines.length === 0) return [];
 
   // Drop the header row only if it actually is one.
-  const body = lines[0]!.startsWith("name,") ? lines.slice(1) : lines;
+  const isHeader =
+    lines[0]!.startsWith("name,") ||
+    lines[0]!.toLowerCase().startsWith("organisation name,");
+  const body = isHeader ? lines.slice(1) : lines;
   return body.map((line) => parseCsvLine(line)[0] ?? "").filter((n) => n.length > 0);
 }
 

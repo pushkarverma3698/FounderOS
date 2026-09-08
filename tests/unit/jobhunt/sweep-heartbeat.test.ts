@@ -166,7 +166,9 @@ describe("formatNewRowsAlert", () => {
   });
 
   it("says 'role' not 'roles' for a single row", () => {
-    expect(formatNewRowsAlert([pass()], LINK)).toContain("1 new role passed");
+    // "passed" left the headline on 2026-09-08 — the alert now carries flagged
+    // rows too, and claiming those passed screening would be false.
+    expect(formatNewRowsAlert([pass()], LINK)).toContain("1 new role");
   });
 
   it("escapes company names so Telegram cannot reject the whole message", () => {

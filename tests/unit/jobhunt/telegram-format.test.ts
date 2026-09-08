@@ -13,8 +13,38 @@ import {
   link,
   cmd,
   splitForTelegram,
+  truncateAtWord,
   TELEGRAM_MAX_CHARS,
 } from "../../../src/tools/jobhunt/telegram-format.js";
+
+describe("truncateAtWord", () => {
+  it("leaves anything within the limit exactly as it is", () => {
+    expect(truncateAtWord("short reason", 200)).toBe("short reason");
+  });
+
+  it("cuts at a word boundary, never mid-word", () => {
+    // PROD 2026-09-07: `/draft 1` failed and the founder's message ended
+    // `... [technology] "TD)` — a hard .slice() had bisected the word "ETL"
+    // and swallowed the rest of the fabricated-claims list with it.
+    const input = "technology: Kubernetes, Terraform, ETL, Java";
+    const out = truncateAtWord(input, 30);
+    expect(out.endsWith("…")).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(31);
+
+    // What survived is a prefix of the input that ends where a word ends: the
+    // very next character in the source is a space, so nothing was bisected.
+    const kept = out.replace(/…$/, "");
+    expect(input.startsWith(kept)).toBe(true);
+    expect(input[kept.length]).toBe(" ");
+    expect(out).not.toContain("Terrafo…");
+  });
+
+  it("falls back to a hard cut when there is no word boundary to use", () => {
+    const out = truncateAtWord("z".repeat(80), 20);
+    expect(out.length).toBeLessThanOrEqual(21);
+    expect(out.endsWith("…")).toBe(true);
+  });
+});
 
 describe("esc", () => {
   it("escapes the characters Telegram parses as entities", () => {

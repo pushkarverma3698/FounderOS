@@ -46,6 +46,7 @@ import { getFreeBoards, type FreeBoard } from "./free-boards.js";
 import {
   filterCandidates,
   applyDeferredFreshness,
+  applyDeferredMarket,
   summariseBodyless,
   FREE_LANE_MAX_AGE_HOURS,
 } from "./free-ingest-filters.js";
@@ -57,6 +58,8 @@ import {
 export {
   filterCandidates,
   applyDeferredFreshness,
+  applyDeferredMarket,
+  mergeDetailLocation,
   summariseBodyless,
   bodylessCause,
   FREE_LANE_MAX_AGE_HOURS,
@@ -198,13 +201,18 @@ export async function runFreeIngest(
   const hydrated = await hydrateDescriptions(unseen);
   const maxAgeHours = opts.maxAgeHours ?? FREE_LANE_MAX_AGE_HOURS;
   const deferred = applyDeferredFreshness(hydrated, now, maxAgeHours);
+  // The market gate, re-run now that hydration may have supplied a location the
+  // list payload withheld. See applyDeferredMarket — a Paris vacancy reached rank
+  // 2 of a Netherlands-only brief because Workday's list payload said nothing and
+  // the detail payload we then fetched said "France".
+  const placed = applyDeferredMarket(deferred.kept, profile);
 
   const postings: RawPosting[] = [];
   // The dropped CANDIDATES, not a counter. A count cannot say which platform
   // lost them, and this gate quietly ate 100% of the lane's output for thirty
   // hours on 2026-09-06 while reporting the number 7.
   const bodylessDropped: FreeCandidate[] = [];
-  for (const candidate of deferred.kept) {
+  for (const candidate of placed.kept) {
     if (candidate.description === null || candidate.description.trim().length === 0) {
       // Screening an empty body would read as "this employer stated no
       // requirements", and every gate would wave it through on that basis.
@@ -225,6 +233,13 @@ export async function runFreeIngest(
   }
   if (deferred.undated > 0) {
     notes.push(`${deferred.undated} postings had no publication date even after fetch — skipped`);
+  }
+  if (placed.offMarket > 0) {
+    const markets = profile.targetCountries.map((c) => c.code).join("/");
+    notes.push(
+      `${placed.offMarket} postings turned out to be outside ${markets} once the full posting was ` +
+        `fetched — the board's list payload had not said where they were`,
+    );
   }
   if (known > 0) notes.push(`${known} postings were already in the tracker`);
   const bodylessNote = summariseBodyless(bodylessDropped);
@@ -247,7 +262,10 @@ export async function runFreeIngest(
     undated: filtered.counts.undated + deferred.undated,
     stale: filtered.counts.stale + deferred.stale,
     offTrack: filtered.counts.offTrack,
-    offMarket: filtered.counts.offMarket,
+    // Both stages, one total — same rule as undated/stale above. A second
+    // bucket for "dropped for the same reason, just later" is the ambiguity
+    // this funnel exists to remove, wearing a new label.
+    offMarket: filtered.counts.offMarket + placed.offMarket,
     known,
     bodyless,
     screened: postings.length,

@@ -27,7 +27,7 @@ import {
   releaseScheduledTask,
   reclaimStrandedScheduledTasks,
 } from "../db/queries.js";
-import { BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
+import { enforceRunBudget } from "../infra/budget.js";
 import { assertDailyBudgetAllowsRun, DailyBudgetExceededError } from "../infra/daily-budget.js";
 import { readHalt } from "../infra/halt.js";
 import { startTurn } from "../infra/trace.js";
@@ -130,13 +130,14 @@ export async function runDueScheduledTask(task: ScheduledTask): Promise<void> {
 
     const trace = startTurn({ chatId, kind: "scheduled", promptHash: kernelPromptHash() });
     const kernel = await getKernel();
+    // enforceRunBudget, not a bare callback: a throw from a LangChain callback
+    // handler is swallowed by the framework, so the cap only stops a run when it
+    // rides the AbortSignal. See src/infra/budget.ts (prod turn 7dd021d8).
+    const budget = enforceRunBudget(process.env["AGENT_MODEL"] ?? "", kernelCostSink);
     const config = {
       configurable: { thread_id: threadIdFor(chatId) },
       recursionLimit: OFFICE_RECURSION_LIMIT,
-      callbacks: [
-        new BudgetGuardCallback(createRunBudget(), process.env["AGENT_MODEL"] ?? "", kernelCostSink),
-        new TraceCallback(trace),
-      ],
+      callbacks: [budget.callback, new TraceCallback(trace)],
     };
 
     try {
@@ -145,7 +146,7 @@ export async function runDueScheduledTask(task: ScheduledTask): Promise<void> {
 
       // On deadline the run is ABORTED, not abandoned — the signal goes only to
       // stream() so the post-timeout fold/getState still work on a clean config.
-      const abort = new AbortController();
+      const abort = budget;
       const res = await withTurnTimeout(
         collectFinalState(
           kernel.stream(
