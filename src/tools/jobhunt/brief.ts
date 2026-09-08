@@ -53,6 +53,7 @@ import {
   selectStanding,
 } from "./brief-select.js";
 import { overflowNote, renderNextActions } from "./brief-actions.js";
+import { plural, renderHeader, type SectionTotals } from "./brief-header.js";
 
 // Re-exported so the transport keeps one import site for the escape helper.
 export { toTelegramSafe, splitForTelegram, TELEGRAM_MAX_CHARS } from "./telegram-format.js";
@@ -61,13 +62,17 @@ export type { BriefRow, BriefSection } from "./brief-row.js";
 // The reject-line, trends and spend renderers moved to brief-sections.ts on
 // 2026-08-01 when this file crossed its size budget. Re-exported so every
 // existing import site — and every test — keeps resolving here.
-export { isTooSenior } from "./brief-sections.js";
+export { isTooSenior, SPEND_WINDOW_DAYS } from "./brief-sections.js";
 export type { TrendRow, SpendLine } from "./brief-sections.js";
 // The DO-THIS-NEXT block, the overflow notes and the Mac client's command line
 // moved to brief-actions.ts on 2026-08-24, when widening the apply queue from
 // 24h to 7d pushed this file past its 400-line budget. Same precedent, same
 // re-export, so every import site keeps resolving here.
 export { MAC_CLIENT_COMMAND, overflowNote, renderNextActions } from "./brief-actions.js";
+// The header moved to brief-header.ts on 2026-09-08, when the A2/A3 truth fixes
+// pushed this file past its 400-line budget. Same precedent, same re-export.
+export { renderHeader, wasCut } from "./brief-header.js";
+export type { HeaderInput, SectionTotals } from "./brief-header.js";
 // Section membership and the caps moved to brief-select.ts on 2026-08-06, when a
 // third actionable section pushed this file against the 400-line budget. Same
 // precedent as brief-sections.ts: re-exported so every import site and every
@@ -110,7 +115,16 @@ export const STALE_UNDRAFTED_DAYS = 3;
 
 export interface BriefInput {
   readonly date: Date;
-  readonly screened: number;
+  /**
+   * Postings that actually reached `screenPosting` on the run behind this brief.
+   *
+   * OPTIONAL SINCE 2026-09-08 (A3), and that is the whole fix. It used to
+   * default to `applications.length` in daily-brief.ts, so a typed `/jobs` —
+   * which runs no sweep and therefore screens nothing — printed the size of the
+   * apply queue under the word "screened". The sweep supplies the real figure;
+   * anything else supplies nothing, and the line is omitted.
+   */
+  readonly screened?: number;
   readonly perTrack: Readonly<Record<string, number>>;
   readonly rows: readonly BriefRow[];
   /**
@@ -133,8 +147,24 @@ export interface BriefInput {
    * defaults to 0 in the renderer, same as an unset `notes`.
    */
   readonly agedOut?: number;
-  /** The freshness window `rows` was filtered against, in hours. Defaults to 24. */
-  readonly maxAgeHours?: number;
+  /**
+   * The freshness window `rows` was read against, in hours; null when the read
+   * carried no age limit (`/jobs`, founder direction 2026-09-08). Defaults to 24.
+   */
+  readonly maxAgeHours?: number | null;
+  /** What this list is, in words — see HeaderInput.scopeLabel. */
+  readonly scopeLabel?: string;
+  /** Ranked rows this list's scope excluded — see HeaderInput.outsideScope. */
+  readonly outsideScope?: number;
+  /**
+   * How many rows qualified inside the window IN TOTAL, before the read limit.
+   *
+   * Optional and fail-open, the same shape as `agedOut`: an unmeasured total
+   * must render as "no cut", never as a cut of unknown size. When it exceeds
+   * `rows.length` the header says so with both numbers and drops its
+   * completeness claim — see brief-header.ts (A2).
+   */
+  readonly queued?: number;
   /**
    * WHOSE brief this is — the legend quotes this candidate's years, salary
    * criterion, permit bases and markets. Optional (defaulting to the founder,
@@ -148,20 +178,6 @@ export interface BriefInput {
 function pluralDays(n: number): string {
   return n === 1 ? "1 day" : `${n} days`;
 }
-
-/** "1 role" / "3 roles". "role(s)" is the tell of a template that never learned to count. */
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
-
-/** How many rows each actionable section HAS, before any cap is applied. */
-interface SectionTotals {
-  readonly doToday: number;
-  readonly stretch: number;
-  readonly askable: number;
-  readonly standing: number;
-}
-
 
 
 /**
@@ -201,7 +217,22 @@ export function formatDailyBrief(input: BriefInput): string {
     standing: orderStanding(input.standing ?? []).length,
   };
 
-  const sections: string[] = [renderHeader(input, totals)];
+  const sections: string[] = [
+    renderHeader(
+      {
+        date: input.date,
+        rowsLoaded: input.rows.length,
+        perTrack: input.perTrack,
+        screened: input.screened,
+        queued: input.queued,
+        agedOut: input.agedOut,
+        outsideScope: input.outsideScope,
+        maxAgeHours: input.maxAgeHours,
+        scopeLabel: input.scopeLabel,
+      },
+      totals,
+    ),
+  ];
 
   if (input.failures.length > 0) {
     // Above everything actionable. A partial run that reads like a full one is a
@@ -331,64 +362,6 @@ export function formatDailyBrief(input: BriefInput): string {
   sections.push(renderNextActions(doToday, stretch, askable, doTodayTotal, standing, stretchTotal));
 
   return sections.join(`\n\n${RULE}\n\n`);
-}
-
-/**
- * The first three lines, which are the only ones guaranteed to be read.
- *
- * They lead with the DECISION COUNT rather than the screening count. "47
- * screened" is a statement about the machine; "3 to apply to today" is a
- * statement about the founder's next hour, and it is the number that determines
- * whether the rest of the message gets opened at all.
- */
-function renderHeader(input: BriefInput, totals: SectionTotals): string {
-  const date = input.date.toISOString().slice(0, 10);
-  const trackSummary = Object.entries(input.perTrack)
-    .filter(([, n]) => n > 0)
-    .map(([track, n]) => `${esc(track)} ${n}`)
-    .join(" · ");
-
-  // The stretch/standing/askable counts are here for the same reason those
-  // sections exist: a header reading "Nothing actionable today" above roles
-  // the founder can apply to right now denies the message printed underneath
-  // it, which is the same class of defect as hiding those rows. Named
-  // `secondaryCounts`, not `standing` — that word already means something
-  // different lower in this file (the STILL OPEN, OLDER section's rows).
-  const secondaryCounts = [
-    totals.stretch > 0 ? `${totals.stretch} worth a stretch` : "",
-    totals.standing > 0 ? `${totals.standing} still open, older` : "",
-    totals.askable > 0 ? `${totals.askable} one question away` : "",
-  ].filter((part) => part.length > 0);
-
-  const counts =
-    totals.doToday > 0
-      ? [`<b>${totals.doToday} to apply to today</b>`, ...secondaryCounts].join(" · ")
-      : secondaryCounts.length > 0
-        ? [`<b>0 ready to send</b>`, ...secondaryCounts].join(" · ")
-        : `<b>Nothing actionable today</b>`;
-
-  // Printed even at 0/0 — an empty queue must read as "no fresh jobs right
-  // now", never be silently indistinguishable from a broken sweep. That
-  // ambiguity is what erased the previous screening log's credibility.
-  const maxAgeHours = input.maxAgeHours ?? 24;
-  const agedOut = input.agedOut ?? 0;
-  const freshness =
-    `<i>${plural(input.rows.length, "fresh role", "fresh roles")} in the queue ` +
-    // "&lt;", not "<". A bare "<" followed by a space is an empty start tag to
-    // Telegram, which rejects the WHOLE message rather than the character —
-    // this line alone took /jobs down on 2026-08-21. See escapeStrayAngles().
-    `(&lt; ${maxAgeHours}h old) · ${plural(agedOut, "older role", "older roles")} aged out</i>\n`;
-
-  return (
-    `<b>🎯 JOB BRIEF</b> · ${date}\n` +
-    `${counts}\n` +
-    `<i>${input.screened} screened${trackSummary.length > 0 ? ` · ${trackSummary}` : ""}</i>\n` +
-    freshness +
-    // No number promised. The part count depends on how many roles are standing,
-    // and the header is rendered before the split knows — a stated "2–3" was
-    // wrong the first time it met the real table (6 parts, 53 rows).
-    `<i>This brief spans several messages. Nothing is cut — read to the end.</i>`
-  );
 }
 
 // `toTelegramSafe` now lives in telegram-format.ts and is re-exported at the top

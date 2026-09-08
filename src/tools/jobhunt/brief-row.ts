@@ -70,8 +70,38 @@ export interface BriefRow {
   readonly gates: readonly Gate[];
   /** True when the gates were reconstructed from a pre-gate_json row. */
   readonly legacyGates: boolean;
-  /** Days since it was screened and left untouched. */
+  /** Days since WE stored it — discovery age, not the employer's publication date. */
   readonly ageDays: number;
+  /**
+   * Days since the EMPLOYER published it, or null when the source stated no date.
+   *
+   * A SEPARATE FIELD FROM `ageDays`, never a fallback to it. Until 2026-09-08
+   * the row printed `seen 3d ago` off `created_at` alone, and that is the
+   * number the founder was reading as "how old is this posting" — the one fact
+   * that decides how many applicants are already ahead of him. A board added to
+   * the registry today backfills postings published weeks ago; every one of
+   * them read as fresh.
+   *
+   * Null is printed as an admission, not resolved to `created_at`. Guessing a
+   * publication date from our own timestamp is the original defect with the
+   * fix's label on it.
+   */
+  readonly postedDays?: number | null;
+  /**
+   * The number this row is printed as, and the number `/draft` resolves.
+   *
+   * PINNED OVER THE FULL RANKED POPULATION (brief-persist.ts's
+   * `briefRankEntries`), then carried here — not derived from the row's position
+   * in whatever list is being rendered. Until `/today` and `/fresh` existed the
+   * display was always a PREFIX of the ordering, so position and rank agreed by
+   * construction and brief-select.ts could warn that "a filtered subset would
+   * renumber the message and /draft 3 would tailor for the wrong company".
+   * Those two verbs ARE filtered subsets, so the rank has to travel with the row.
+   *
+   * Undefined on a row in no actionable section — a reject has no `/draft`
+   * number, and inventing one would point the command at somebody else's row.
+   */
+  readonly rank?: number;
   /**
    * Days since the still-open check last ran, or null when it never has.
    *
@@ -100,6 +130,26 @@ export function trimToSentence(text: string, max: number = EVIDENCE_MAX): string
   if (lastStop > max / 2) return window.slice(0, lastStop + 1);
   const lastSpace = window.lastIndexOf(" ");
   return `${(lastSpace > 0 ? window.slice(0, lastSpace) : window).trimEnd()}…`;
+}
+
+/** "today" / "1d ago" / "13d ago" — one age, in the words a person uses. */
+export function formatAgeDays(days: number): string {
+  return days === 0 ? "today" : `${days}d ago`;
+}
+
+/**
+ * The two ages, side by side and each labelled with what it measures.
+ *
+ * Both, always, even when they agree. "posted today · found today" costs four
+ * words and removes the question; printing one number and leaving the reader to
+ * infer which fact it is, is what this line is a fix for.
+ */
+export function ageLine(postedDays: number | null | undefined, foundDays: number): string {
+  const posted =
+    postedDays === null || postedDays === undefined
+      ? "posted date not stated"
+      : `posted ${formatAgeDays(postedDays)}`;
+  return `${posted} · found ${formatAgeDays(foundDays)}`;
 }
 
 /**
@@ -250,7 +300,7 @@ export function renderRow(
   // to work for the 24 hours it takes them to age out.
   const meta =
     `    <i>${esc(where)} · ${esc(row.track)} track · basis: ${esc(routeLabel(row.route))} · ` +
-    `seen ${row.ageDays === 0 ? "today" : `${row.ageDays}d ago`}</i>`;
+    `${ageLine(row.postedDays, row.ageDays)}</i>`;
   // /applied shares do_today/stretch/standing's numbering (handleApplied
   // resolves against the same sections `/draft` does) — printing it next to an
   // ASK row would show a command that resolves a DIFFERENT row under the same

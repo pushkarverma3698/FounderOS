@@ -13,7 +13,7 @@
  * gap-scan-queries.ts and account-queries.ts).
  */
 
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, lte, sql, gte } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, lte, sql, gte, type SQL } from "drizzle-orm";
 import { intEnv } from "../core/config.js";
 import { getDb } from "./client.js";
 import { DEFAULT_PROFILE_ID } from "../tools/jobhunt/profile-config.js";
@@ -392,30 +392,69 @@ export async function countPassingApplications(
  * first stored the row, which for a hand-pasted posting is the same minute he
  * found it — the honest floor on its age, not a guess at its real one.
  */
-export async function listActionableApplications(
-  opts: {
-    verdicts?: readonly string[];
-    limit?: number;
-    tenantId?: string;
-    profileId?: ProfileScope;
-    maxAgeHours?: number;
-  } = {},
-): Promise<JobApplication[]> {
-  const db = getDb();
-  const maxAgeHours = opts.maxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
-  const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
-  const conditions = [
+/**
+ * Which stored date a window is measured against.
+ *
+ * Mirrors `BriefAxis` in tools/jobhunt/brief-resolver.ts, restated as a local
+ * union rather than imported so the db layer stays free of a dependency on the
+ * command surface. The two are checked against each other by the `/fresh`
+ * command tests, which pass one into the other.
+ */
+export type QueueAxis = "posted" | "found";
+
+export interface ActionableScope {
+  verdicts?: readonly string[];
+  tenantId?: string;
+  profileId?: ProfileScope;
+  /** Hours back from now. Ignored when `since` is given; unbounded when both are absent. */
+  maxAgeHours?: number | null;
+  /** An absolute cutoff — what `/fresh` uses, because a delta is not a range. */
+  since?: Date;
+  /** Which date column the cutoff applies to. Defaults to publication. */
+  axis?: QueueAxis;
+}
+
+/**
+ * The window predicate, or nothing at all.
+ *
+ * NULL IS A REAL ANSWER HERE. `/jobs` carries no age limit (founder direction,
+ * 2026-09-08), and the honest encoding of that is the absence of a condition —
+ * not a cutoff at the epoch, which would look like a window in the query plan
+ * and would quietly become one the day someone "tidied" the date.
+ */
+function windowCondition(opts: ActionableScope): SQL | null {
+  const cutoff =
+    opts.since ??
+    (opts.maxAgeHours === null || opts.maxAgeHours === undefined
+      ? null
+      : new Date(Date.now() - opts.maxAgeHours * 60 * 60 * 1000));
+  if (cutoff === null) return null;
+  return opts.axis === "found"
+    ? sql`${jobApplications.created_at} >= ${cutoff.toISOString()}::timestamptz`
+    : applyQueueFreshnessSql(cutoff);
+}
+
+export function actionableConditions(opts: ActionableScope): SQL[] {
+  const conditions: SQL[] = [
     eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
     eq(jobApplications.stage, "screened"),
     inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
-    applyQueueFreshnessSql(cutoff),
   ];
+  const window = windowCondition(opts);
+  if (window) conditions.push(window);
   const profileWhere = profileCondition(opts.profileId);
   if (profileWhere) conditions.push(profileWhere);
+  return conditions;
+}
+
+export async function listActionableApplications(
+  opts: ActionableScope & { limit?: number } = {},
+): Promise<JobApplication[]> {
+  const db = getDb();
   return db
     .select()
     .from(jobApplications)
-    .where(and(...conditions))
+    .where(and(...actionableConditions(opts)))
     .orderBy(desc(jobApplications.created_at))
     .limit(opts.limit ?? 100);
 }
@@ -449,6 +488,25 @@ export function applyQueueFreshnessSql(cutoff: Date) {
 }
 
 /**
+ * How many rows `listActionableApplications` WOULD return without its limit.
+ *
+ * The same predicate, counted rather than selected, so the brief can say
+ * "showing the newest 500 of 640" instead of quietly returning 500. Built from
+ * `actionableConditions` alongside the list itself for the reason
+ * `applyQueueFreshnessSql` gives about its own pair: two hand-written copies of
+ * one predicate drift, and the drift surfaces as a cut notice on a run that cut
+ * nothing, or silence on a run that cut sixty-six rows.
+ */
+export async function countActionableApplications(opts: ActionableScope = {}): Promise<number> {
+  const db = getDb();
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(jobApplications)
+    .where(and(...actionableConditions(opts)));
+  return Number(row?.n ?? 0);
+}
+
+/**
  * How many otherwise-actionable rows `listActionableApplications` just excluded
  * for age.
  *
@@ -457,22 +515,54 @@ export function applyQueueFreshnessSql(cutoff: Date) {
  * today" and "the lane is broken" — the exact ambiguity this pipeline has
  * already lost weeks to (see `JOB_SWEEP_CRON` in sweep-runner.ts).
  */
-export async function countAgedOutApplications(
-  opts: {
-    verdicts?: readonly string[];
-    tenantId?: string;
-    profileId?: ProfileScope;
-    maxAgeHours?: number;
-  } = {},
-): Promise<number> {
+/**
+ * The pinned `brief_rank` for a set of postings, keyed by their dedupe identity.
+ *
+ * What the sweep's new-roles alert reads so each named row can carry its own
+ * `/draft N` (B6). Keyed on `dedupe_key` because that is the identity the table
+ * itself uses — matching on company+title here would be a second notion of "the
+ * same posting", and the one thing that must never happen is two answers to
+ * that question disagreeing while a tailored application rides on it.
+ *
+ * Rows with no rank are simply absent from the map, and the alert prints them
+ * without a command. Ranking is fail-open (brief-persist.ts), so "not numbered"
+ * is a real state rather than an impossible one.
+ */
+export async function briefRanksByDedupeKey(
+  keys: readonly string[],
+  opts: { tenantId?: string; profileId?: ProfileScope } = {},
+): Promise<Map<string, number>> {
+  if (keys.length === 0) return new Map();
   const db = getDb();
-  const maxAgeHours = opts.maxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
-  const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+  const conditions = [
+    eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
+    inArray(jobApplications.dedupe_key, [...keys]),
+    isNotNull(jobApplications.brief_rank),
+  ];
+  const profileWhere = profileCondition(opts.profileId);
+  if (profileWhere) conditions.push(profileWhere);
+  const rows = await db
+    .select({ key: jobApplications.dedupe_key, rank: jobApplications.brief_rank })
+    .from(jobApplications)
+    .where(and(...conditions));
+  return new Map(
+    rows.flatMap((r) => (typeof r.rank === "number" ? [[r.key, r.rank] as [string, number]] : [])),
+  );
+}
+
+export async function countAgedOutApplications(opts: ActionableScope = {}): Promise<number> {
+  // An UNBOUNDED scope ages nothing out, and the honest answer is 0 rather than
+  // a query whose WHERE clause is `NOT (nothing)`. `/jobs` runs unbounded by
+  // design, so this is the common path, not an edge case.
+  const window = windowCondition(opts);
+  if (!window) return 0;
+
+  const db = getDb();
   const conditions = [
     eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
     eq(jobApplications.stage, "screened"),
     inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
-    sql`NOT (${applyQueueFreshnessSql(cutoff)})`,
+    sql`NOT (${window})`,
   ];
   const profileWhere = profileCondition(opts.profileId);
   if (profileWhere) conditions.push(profileWhere);

@@ -86,6 +86,13 @@ export function toBriefRow(
     gates,
     legacyGates: legacy,
     ageDays: ageInDays(row.created_at, now),
+    // `posted_at` ONLY — deliberately not `coalesce(posted_at, created_at)`, the
+    // way `applyQueueFreshnessSql` reads it. That coalesce is correct for a
+    // FILTER, where treating an unknown date as "as old as we've known about it"
+    // is the honest floor. It is wrong for a LABEL: printing our own storage
+    // timestamp under the word "posted" is a claim about the employer that we
+    // cannot make. Null renders as "posted date not stated" (ageLine).
+    postedDays: row.posted_at ? ageInDays(row.posted_at, now) : null,
     livenessAgeDays,
   };
 }

@@ -288,6 +288,13 @@
       "when": 1788819572004,
       "tag": "0040_ats_board_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789300000000,
+      "tag": "0041_fresh_viewed_at",
+      "breakpoints": true
     }
   ]
 }
