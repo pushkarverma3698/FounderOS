@@ -52,7 +52,7 @@
  * auto-removed — a transient outage must not silently shrink the registry.
  */
 
-import { readFileSync, appendFileSync } from "node:fs";
+import { readFileSync, appendFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { mapWithConcurrencyLimit } from "../src/core/concurrency.js";
@@ -71,6 +71,7 @@ import {
   boardsPathFrom,
   parseBoardRegistry,
   FREE_ATS_PLATFORMS,
+  type BoardMarket,
   type FreeAts,
   type FreeBoard,
 } from "../src/tools/jobhunt/free-boards.js";
@@ -87,6 +88,19 @@ const NL_FINANCE_EMPLOYERS_PATH = resolve(
   REPO_ROOT,
   "docs/strategy/data/nl-finance-employers.csv",
 );
+const IN_TECH_EMPLOYERS_PATH = resolve(
+  REPO_ROOT,
+  "docs/strategy/data/in-tech-employers.csv",
+);
+const DE_TECH_EMPLOYERS_PATH = resolve(
+  REPO_ROOT,
+  "docs/strategy/data/de-tech-employers.csv",
+);
+const UK_SPONSOR_REGISTER_PATH = resolve(
+  REPO_ROOT,
+  "docs/strategy/data/uk-sponsors-work.csv",
+);
+const UK_FALLBACK_PATH = "/tmp/uk-sponsors-work.csv";
 
 /**
  * The profile whose country vocabulary decides what "in the Netherlands" means
@@ -184,12 +198,12 @@ const isRateLimited = (error: string): boolean => error.includes("429");
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-async function pollOnce(board: CandidateBoard): Promise<Verified> {
+async function pollOnce(board: CandidateBoard, market: BoardMarket = "NL"): Promise<Verified> {
   const result = await fetchBoard({
     name: board.name,
     ats: board.ats,
     token: board.token,
-    markets: ["NL"],
+    markets: [market],
   });
   if (!result.ok) return { board, live: false, error: result.error, nlPostings: 0 };
 
@@ -207,7 +221,10 @@ async function pollOnce(board: CandidateBoard): Promise<Verified> {
  * A board that verifies here but 404s there would mean the two disagreed, which is
  * the one thing this step exists to rule out.
  */
-async function verifyLive(candidates: readonly CandidateBoard[]): Promise<Verified[]> {
+async function verifyLive(
+  candidates: readonly CandidateBoard[],
+  market: BoardMarket = "NL",
+): Promise<Verified[]> {
   const results = new Map<string, Verified>();
   let pending = [...candidates];
   let limit = BOARD_CONCURRENCY;
@@ -221,7 +238,7 @@ async function verifyLive(candidates: readonly CandidateBoard[]): Promise<Verifi
       await sleep(RATE_LIMIT_BACKOFF_MS);
     }
 
-    for (const verified of await mapWithConcurrencyLimit(pending, limit, pollOnce)) {
+    for (const verified of await mapWithConcurrencyLimit(pending, limit, (b) => pollOnce(b, market))) {
       results.set(`${verified.board.ats}:${verified.board.token}`, verified);
     }
 
@@ -244,21 +261,92 @@ async function verifyLive(candidates: readonly CandidateBoard[]): Promise<Verifi
  */
 interface JoinSource {
   readonly describe: string;
+  readonly market: BoardMarket;
+  readonly isEmployerMode: boolean;
   readonly join: (
     existing: readonly FreeBoard[],
     corpora: ReadonlyMap<FreeAts, readonly AtsCorpusRow[]>,
   ) => CandidateBoard[];
   /**
    * The names worth reporting as UNMATCHED afterwards. Populated for the curated
-   * list only: 118 hand-written brands that found no board is the single most
+   * list only: hand-written brands that found no board is the single most
    * useful thing this run can tell whoever maintains that file, while 12.9k
    * unmatched legal entities is the register's normal state and says nothing.
    */
   readonly reportUnmatched: readonly string[];
 }
 
-function loadJoin(employerMode: boolean): JoinSource {
-  if (employerMode) {
+function loadJoin(args: readonly string[]): JoinSource {
+  if (args.includes("--in-tech")) {
+    const brands = parseEmployerList(readFileSync(IN_TECH_EMPLOYERS_PATH, "utf8"));
+    if (brands.length === 0) {
+      throw new Error(`The employer list at ${IN_TECH_EMPLOYERS_PATH} parsed to zero entries.`);
+    }
+    return {
+      describe: `Employers: ${brands.length} curated Indian tech employers (${IN_TECH_EMPLOYERS_PATH})`,
+      market: "IN",
+      isEmployerMode: true,
+      join: (existing, corpora) => joinEmployerBoards(brands, corpora, existing),
+      reportUnmatched: brands.map((b) => b.name),
+    };
+  }
+
+  if (args.includes("--de-tech")) {
+    const brands = parseEmployerList(readFileSync(DE_TECH_EMPLOYERS_PATH, "utf8"));
+    if (brands.length === 0) {
+      throw new Error(`The employer list at ${DE_TECH_EMPLOYERS_PATH} parsed to zero entries.`);
+    }
+    return {
+      describe: `Employers: ${brands.length} curated German tech employers (${DE_TECH_EMPLOYERS_PATH})`,
+      market: "DE",
+      isEmployerMode: true,
+      join: (existing, corpora) => joinEmployerBoards(brands, corpora, existing),
+      reportUnmatched: brands.map((b) => b.name),
+    };
+  }
+
+  if (args.includes("--uk")) {
+    const filePath = existsSync(UK_SPONSOR_REGISTER_PATH)
+      ? UK_SPONSOR_REGISTER_PATH
+      : UK_FALLBACK_PATH;
+    if (!existsSync(filePath)) {
+      throw new Error(
+        `UK sponsor register not found at ${filePath}. ` +
+          `Download it with: curl -sL "https://assets.publishing.service.gov.uk/media/6a9ea0529a177a1decf97ed8/SP_-_Worker_and_Temporary_Worker_Web_Register_-_2026-09-07.csv" -o ${UK_FALLBACK_PATH}`,
+      );
+    }
+    const sponsors = parseSponsorCsv(readFileSync(filePath, "utf8"));
+    if (sponsors.length === 0) {
+      throw new Error(`The UK sponsor register at ${filePath} parsed to zero entries.`);
+    }
+    return {
+      describe: `Register: ${sponsors.length} UK Home Office licensed sponsors (${filePath})`,
+      market: "UK",
+      isEmployerMode: false,
+      join: (existing, corpora) => joinSponsorBoards(sponsors, corpora, existing),
+      reportUnmatched: [],
+    };
+  }
+
+  const employersPathIndex = args.indexOf("--employers-path");
+  if (employersPathIndex !== -1 && args[employersPathIndex + 1]) {
+    const filePath = resolve(process.cwd(), args[employersPathIndex + 1]!);
+    const brands = parseEmployerList(readFileSync(filePath, "utf8"));
+    if (brands.length === 0) {
+      throw new Error(`The employer list at ${filePath} parsed to zero entries.`);
+    }
+    const marketIndex = args.indexOf("--market");
+    const market = (marketIndex !== -1 ? args[marketIndex + 1] : "NL") as BoardMarket;
+    return {
+      describe: `Employers: ${brands.length} brands (${filePath})`,
+      market,
+      isEmployerMode: true,
+      join: (existing, corpora) => joinEmployerBoards(brands, corpora, existing),
+      reportUnmatched: brands.map((b) => b.name),
+    };
+  }
+
+  if (args.includes("--employers")) {
     const brands = parseEmployerList(readFileSync(NL_FINANCE_EMPLOYERS_PATH, "utf8"));
     if (brands.length === 0) {
       throw new Error(
@@ -268,6 +356,8 @@ function loadJoin(employerMode: boolean): JoinSource {
     }
     return {
       describe: `Employers: ${brands.length} curated NL finance brands (${NL_FINANCE_EMPLOYERS_PATH})`,
+      market: "NL",
+      isEmployerMode: true,
       join: (existing, corpora) => joinEmployerBoards(brands, corpora, existing),
       reportUnmatched: brands.map((b) => b.name),
     };
@@ -283,6 +373,8 @@ function loadJoin(employerMode: boolean): JoinSource {
   }
   return {
     describe: `Register: ${sponsors.length} recognised sponsors (${registerPath})`,
+    market: "NL",
+    isEmployerMode: false,
     join: (existing, corpora) => joinSponsorBoards(sponsors, corpora, existing),
     reportUnmatched: [],
   };
@@ -330,9 +422,9 @@ function reportBrandCoverage(
 
 async function main(): Promise<void> {
   const dryRun = process.argv.includes("--dry-run");
-  const employerMode = process.argv.includes("--employers");
+  const args = process.argv.slice(2);
 
-  const source = loadJoin(employerMode);
+  const source = loadJoin(args);
   console.log(source.describe);
 
   const registryPath = boardsPathFrom();
@@ -365,7 +457,7 @@ async function main(): Promise<void> {
   }
 
   console.log(`\nVerifying all ${candidates.length} live (concurrency ${BOARD_CONCURRENCY})…`);
-  const verified = await verifyLive(candidates);
+  const verified = await verifyLive(candidates, source.market);
   const dead = verified.filter((v) => !v.live);
 
   console.log(`  live: ${verified.length - dead.length}   dead: ${dead.length}`);
@@ -377,20 +469,25 @@ async function main(): Promise<void> {
   // cannot tell `Deloitte Netherlands` from `Deloitte Nordic`, `Deloitte AT` or
   // the `Deloitte` on SmartRecruiters that turns out to be Australia — all four
   // reduce to the same key, and all four are live. The postings themselves can:
-  // a board that answered with work in Amsterdam, Utrecht or Rotterdam is the
-  // Dutch entity's board, and one that answered with none is another country's.
+  // a board that answered with work in the target market is the right entity's
+  // board, and one that answered with none is another country's. Scoped to NL
+  // employer mode specifically: the IN/DE/UK employer lists key on national
+  // corpora (in-tech, de-tech, UK sponsor register) that don't share this
+  // cross-region brand collision the same way, and the sponsor-register mode
+  // does not apply this filter at all — its rows are legal entities in the
+  // target country by construction.
   //
   // Reported by name, never silently dropped, and NOT permanent — this import is
-  // re-runnable, so a genuinely Dutch employer that happened to be between
-  // vacancies today is picked up by the next run rather than blacklisted. The
-  // sponsor-register mode does not apply this filter: its rows are Dutch legal
-  // entities by construction, and it has 858 boards of history behind it.
-  const offMarket = employerMode ? verified.filter((v) => v.live && v.nlPostings === 0) : [];
+  // re-runnable, so a genuinely in-market employer that happened to be between
+  // vacancies today is picked up by the next run rather than blacklisted.
+  const offMarket = source.isEmployerMode && source.market === "NL"
+    ? verified.filter((v) => v.live && v.nlPostings === 0)
+    : [];
   const live = verified
-    .filter((v) => v.live && (!employerMode || v.nlPostings > 0))
+    .filter((v) => v.live && (!source.isEmployerMode || source.market !== "NL" || v.nlPostings > 0))
     .map((v) => v.board);
 
-  if (employerMode) {
+  if (source.isEmployerMode && source.market === "NL") {
     console.log(`  with NL postings: ${live.length}   live but no NL postings: ${offMarket.length}`);
     for (const v of verified.filter((x) => x.live && x.nlPostings > 0)) {
       console.log(`    keep  ${v.board.ats}/${v.board.token}  (${v.board.name}) — ${v.nlPostings} NL`);
@@ -400,7 +497,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const rows = toBoardCsvRows(live);
+  const rows = toBoardCsvRows(live, source.market);
   if (dryRun) {
     console.log(`\n--dry-run: would append ${rows.length} rows to ${registryPath}`);
     console.log(`           registry would become ${existing.length + rows.length} boards`);

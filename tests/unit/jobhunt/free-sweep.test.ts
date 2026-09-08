@@ -21,9 +21,11 @@ vi.mock("../../../src/tools/jobhunt/free-ingest.js", () => ({
 // The board poll moved OUT of runFreeIngest and into runFreeSweep on 2026-09-04
 // (poll once, screen for every profile). Unmocked it would really hit 1,297
 // boards and time this suite out.
+vi.mock("../../../src/tools/jobhunt/aggregator-source.js", () => ({ sweepAggregators: vi.fn(async () => ({ candidates: [], failures: [], boardsPolled: 0 })) }));
 vi.mock("../../../src/tools/jobhunt/free-ats-source.js", async (orig) => ({
   ...(await (orig() as Promise<Record<string, unknown>>)),
   sweepBoards: vi.fn(async () => ({ candidates: [], failures: [], boardsPolled: 0 })),
+  sweepAggregators: vi.fn(async () => ({ candidates: [], failures: [], boardsPolled: 0 })),
 }));
 vi.mock("../../../src/tools/jobhunt/free-boards.js", async (orig) => ({
   ...(await (orig() as Promise<Record<string, unknown>>)),

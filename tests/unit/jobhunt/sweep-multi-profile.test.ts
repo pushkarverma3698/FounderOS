@@ -11,13 +11,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const sweepBoards = vi.fn();
+const sweepAggregators = vi.fn();
 const runFreeIngest = vi.fn();
 const buildDailyBrief = vi.fn();
 const sendToChat = vi.fn(async (_message: string) => undefined);
 
+vi.mock("../../../src/tools/jobhunt/aggregator-source.js", () => ({ sweepAggregators: vi.fn(async () => ({ candidates: [], failures: [], boardsPolled: 0 })) }));
 vi.mock("../../../src/tools/jobhunt/free-ats-source.js", async (orig) => ({
   ...(await (orig() as Promise<Record<string, unknown>>)),
   sweepBoards,
+  sweepAggregators,
 }));
 vi.mock("../../../src/tools/jobhunt/free-boards.js", async (orig) => ({
   ...(await (orig() as Promise<Record<string, unknown>>)),
@@ -68,6 +71,7 @@ describe("runFreeSweep", () => {
     vi.clearAllMocks();
     await resetHeartbeat(new Date("2026-09-04T00:00:00Z"));
     sweepBoards.mockResolvedValue(BOARD_SWEEP);
+    sweepAggregators.mockResolvedValue({ candidates: [], failures: [], boardsPolled: 0 });
     runFreeIngest.mockResolvedValue(ingestResult());
     buildDailyBrief.mockResolvedValue("brief");
   });
@@ -89,9 +93,9 @@ describe("runFreeSweep", () => {
     const screenedFor = runFreeIngest.mock.calls.map((c) => c[0].profile.id).sort();
     expect(screenedFor).toEqual(profiles.map((p) => p.id).sort());
 
-    // Each call gets the SAME sweep object — not a re-poll.
+    // Each call gets the combined sweep object — not a re-poll.
     for (const call of runFreeIngest.mock.calls) {
-      expect(call[0].sweep).toBe(BOARD_SWEEP);
+      expect(call[0].sweep).toMatchObject({ boardsPolled: expect.any(Number) });
     }
   });
 

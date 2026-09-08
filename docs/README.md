@@ -47,7 +47,7 @@ New to the story? The **[case studies](turicks-case-studies/)** and **[blog](tur
 | [MEMORY-OPERATIONS.md](guides/MEMORY-OPERATIONS.md) | turicks-brain + personal-rag: populate, query, troubleshoot |
 | [MCP-SERVERS.md](guides/MCP-SERVERS.md) | MCP client bridge + read-only MCP server surface |
 | [../docs/JOBHUNT.md](JOBHUNT.md) | **The largest production consumer of the kernel** — board discovery, screening, CV tailoring, founder-click-to-submit apply flow |
-| [../docs/VPS-MCP-SETUP.md](VPS-MCP-SETUP.md) | Wiring MCP servers on the production VPS |
+| [../docs/VPS-MCP-SETUP.md](VPS-MCP-SETUP.md) | Connecting a local MCP client to FounderOS's own MCP server on the production VPS |
 | [FAQ.md](FAQ.md) | Recurring questions, answered plainly |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common failures and where to look (reading a typed `FailureReport`) |
 

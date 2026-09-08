@@ -1,0 +1,434 @@
+# Indian high-growth tech employers, DPIIT unicorns, and major engineering centres.
+# Curated for board discovery. Turned into board-registry rows by:
+#   pnpm jobhunt:import-boards --employers-path docs/strategy/data/in-tech-employers.csv --market IN
+name,sector
+Swiggy,consumer-tech
+Zomato,consumer-tech
+CRED,fintech
+Razorpay,fintech
+Zepto,quick-commerce
+Flipkart,e-commerce
+Meesho,e-commerce
+PhonePe,fintech
+BrowserStack,developer-tools
+Postman,developer-tools
+Zerodha,fintech
+Groww,fintech
+InMobi,ad-tech
+Zoho,enterprise-saas
+Freshworks,enterprise-saas
+Ola,mobility
+Pine Labs,fintech
+Delhivery,logistics
+Nykaa,e-commerce
+Paytm,fintech
+Lenskart,retail-tech
+Urban Company,consumer-tech
+Rebel Foods,food-tech
+Cars24,automotive
+Livspace,interior-tech
+Spinny,automotive
+Khatabook,fintech
+Slice,fintech
+BharatPe,fintech
+MPL,gaming
+Mobile Premier League,gaming
+Games24x7,gaming
+Winzo,gaming
+Dream11,gaming
+Upstox,fintech
+CoinDCX,crypto
+CoinSwitch,crypto
+CleverTap,martech
+MoEngage,martech
+Hasura,developer-tools
+Yellow.ai,ai-saas
+Gupshup,conversational-ai
+Darwinbox,hr-tech
+Leena AI,hr-tech
+Fractal,ai-analytics
+Mu Sigma,ai-analytics
+Dailyhunt,media-tech
+ShareChat,social-tech
+Glance,ad-tech
+Rapido,mobility
+Shadowfax,logistics
+Practo,health-tech
+PharmEasy,health-tech
+Tata 1mg,health-tech
+HealthifyMe,health-tech
+Cult.fit,fitness-tech
+Mamaearth,consumer-tech
+Sugar Cosmetics,consumer-tech
+Purplle,consumer-tech
+Boat,consumer-electronics
+Noise,consumer-electronics
+Ather Energy,ev-mobility
+Ola Electric,ev-mobility
+BluSmart,mobility
+Yulu,mobility
+Porter,logistics
+BlackBuck,logistics
+Shiprocket,logistics
+Moglix,b2b-commerce
+Zetwerk,manufacturing-tech
+Infra.Market,construction-tech
+OfBusiness,b2b-commerce
+Udaan,b2b-commerce
+Ninjacart,agritech
+DeHaat,agritech
+Licious,d2c-food
+FreshToHome,d2c-food
+Country Delight,d2c-dairy
+BigBasket,e-grocery
+Blinkit,quick-commerce
+Microsoft India,enterprise-tech
+Google India,internet
+Amazon India,e-commerce-cloud
+Adobe India,enterprise-software
+Salesforce India,cloud-crm
+Uber India,mobility
+Atlassian India,developer-tools
+Intuit India,fintech-software
+PayPal India,fintech
+Walmart Global Tech India,retail-tech
+Target India,retail-tech
+Goldman Sachs India,financial-services
+Morgan Stanley India,financial-services
+JPMorgan India,financial-services
+DE Shaw India,fintech-trading
+Tower Research India,fintech-trading
+Wells Fargo India,banking-tech
+American Express India,fintech
+Visa India,payments
+Mastercard India,payments
+Fidelity India,fintech
+Standard Chartered GBS,banking-tech
+Barclays India,banking-tech
+Deutsche Bank India,banking-tech
+HSBC India,banking-tech
+SAP Labs India,enterprise-software
+VMware India,cloud-infrastructure
+Nutanix India,cloud-infrastructure
+Palo Alto Networks India,cybersecurity
+CrowdStrike India,cybersecurity
+SentinelOne India,cybersecurity
+Cloudflare India,edge-infrastructure
+Databricks India,data-ai
+Snowflake India,cloud-data
+Confluent India,streaming-data
+Twilio India,communications
+Stripe India,payments
+MongoDB India,database
+Couchbase India,database
+Elasticsearch India,search-analytics
+GitHub India,developer-tools
+GitLab India,developer-tools
+Red Hat India,open-source
+Intel India,semiconductors
+AMD India,semiconductors
+Nvidia India,ai-semiconductors
+Qualcomm India,wireless-semiconductors
+Broadcom India,semiconductors
+Texas Instruments India,semiconductors
+Applied Materials India,semiconductors
+Synopsys India,eda-semiconductors
+Cadence India,eda-semiconductors
+Arm India,semiconductors
+Micron India,semiconductors
+Western Digital India,storage
+Cisco India,networking
+Oracle India,cloud-enterprise
+IBM India,enterprise-tech
+Infosys,it-services
+Tata Consultancy Services,it-services
+Wipro,it-services
+HCLTech,it-services
+Tech Mahindra,it-services
+LTIMindtree,it-services
+Persistent Systems,digital-engineering
+Coforge,it-services
+Mphasis,it-services
+Birlasoft,it-services
+Cyient,engineering-services
+Happiest Minds,digital-services
+Tata Elxsi,design-engineering
+Sonata Software,it-services
+Zensar Technologies,it-services
+Hexaware,it-services
+Cognizant India,it-services
+Capgemini India,it-services
+Accenture India,technology-consulting
+Virtusa,it-services
+Persistent,digital-engineering
+Thoughtworks India,software-consulting
+EPAM India,digital-engineering
+Publicis Sapient India,digital-transformation
+Genpact,digital-operations
+EXL Service,analytics
+WNS Global,bpm-analytics
+Mu Sigma,decision-sciences
+Tiger Analytics,ai-analytics
+Tredence,data-science
+LatentView Analytics,data-analytics
+Indium Software,digital-engineering
+Prodapt,telecom-tech
+L&T Technology Services,engineering-services
+KPIT Technologies,automotive-software
+Tata Technologies,automotive-engineering
+QuEST Global,engineering-services
+ITC Infotech,it-services
+Bosch Global Software India,automotive-software
+Continental Automotive India,automotive-software
+Mercedes-Benz R&D India,automotive-software
+BMW TechWorks India,automotive-software
+Siemens Technology India,industrial-software
+Schneider Electric India,energy-tech
+ABB India,automation-tech
+Honeywell Technology Solutions India,industrial-tech
+Philips Innovation Campus,health-tech
+GE Healthcare India,health-tech
+Siemens Healthineers India,health-tech
+Cerner India,health-tech
+Oracle Health India,health-tech
+Optum India,health-services
+CitiusTech,health-tech
+Indegene,health-commercialization
+Eka Software,commodity-management
+Icertis,contract-intelligence
+HighRadius,fintech-saas
+SirionLabs,contract-intelligence
+Chargebee,subscription-billing
+Druva,cloud-data-protection
+Rubrik India,cybersecurity-backup
+Cohesity India,data-security
+Zenoti,wellness-saas
+Birdeye,reputation-saas
+Sprinklr,cxm-saas
+Amagi,media-saas
+Innovaccer,health-cloud
+Pando,supply-chain-saas
+FarEye,logistics-saas
+LocoNav,fleet-tech
+Locus,logistics-ai
+KreditBee,fintech-lending
+Money View,fintech-lending
+Navi,fintech-financial
+Rupeek,fintech-lending
+Fi Money,fintech-neobank
+Jupiter,fintech-neobank
+Niyo,fintech-travel
+CRED,fintech-rewards
+Uni Cards,fintech-credit
+OneCard,fintech-credit
+mSwipe,fintech-pos
+BharatPe,fintech-merchant
+Ezetap,fintech-pos
+Mosambee,fintech-pos
+PayU India,payments
+BillDesk,payments
+Cashfree,payments
+CCAvenue,payments
+Instamojo,smb-payments
+Open Financial,neobanking
+Progcap,supply-chain-finance
+Aye Finance,msme-lending
+Lendingkart,msme-lending
+Kinara Capital,msme-lending
+NeoGrowth,msme-lending
+Kudos,fintech-infrastructure
+M2P Fintech,banking-api
+Setu,fintech-api
+Decentro,fintech-api
+Perfios,fintech-b2b
+Karza Technologies,verification-api
+Signzy,no-code-ai
+Bureau,fraud-detection
+IDfy,identity-verification
+Hyperverge,ai-verification
+Probe42,information-services
+Tracxn,market-intelligence
+Vakilsearch,legal-tech
+IndiaFilings,compliance-tech
+Cleartax,tax-fintech
+Quicko,tax-fintech
+Zoho Corporation,cloud-software
+Kayako,helpdesk-saas
+VWO,experimentation-saas
+Wingify,cro-software
+BrowserStack,cross-browser-testing
+LambdaTest,cloud-testing
+Testsigma,automation-testing
+Appsmith,low-code
+Tooljet,low-code
+DronaHQ,low-code
+Hasura,graphql-engine
+Knative,serverless
+MinIO India,object-storage
+Postman,api-platform
+Hoppscotch,api-development
+Apidog,api-platform
+SigNoz,observability
+HyperDX,observability
+Middleware,observability
+Devtron,kubernetes-software
+Cast AI India,cloud-cost
+Kubecost India,cloud-cost
+Infracost India,cloud-cost
+SuperTokens,auth-saas
+Ory India,identity-infrastructure
+Appwrite India,backend-as-a-service
+Nhost India,backend-as-a-service
+Supabase India,backend-as-a-service
+SurrealDB India,database
+TigerGraph India,graph-database
+Neo4j India,graph-database
+Qdrant India,vector-search
+Milvus India,vector-database
+Weaviate India,vector-search
+Chroma India,embeddings-database
+Pinecone India,vector-database
+LanceDB India,vector-database
+Langfuse India,llm-observability
+Arize AI India,ml-observability
+Fiddler AI India,ml-observability
+Arthur AI India,ml-observability
+WhyLabs India,data-observability
+Monte Carlo India,data-observability
+Great Expectations India,data-quality
+Soda India,data-quality
+dbt Labs India,data-transformation
+Airbyte India,data-integration
+Fivetran India,data-integration
+Meltano India,dataops
+Cube India,semantic-layer
+MotherDuck India,analytics-database
+ClickHouse India,olap-database
+StarRocks India,realtime-analytics
+Apache Pinot,realtime-olap
+Rockset India,search-analytics
+SingleStore India,distributed-sql
+CockroachDB India,distributed-sql
+YugabyteDB India,distributed-sql
+TiDB India,distributed-sql
+Scandit India,computer-vision
+Anyline India,ocr-mobile
+Onfido India,identity-verification
+Veriff India,identity-verification
+Sumsub India,kyc-compliance
+Jumio India,identity-verification
+ComplyAdvantage India,aml-screening
+Unit21 India,risk-operations
+Sardine India,fraud-prevention
+Sift India,fraud-detection
+Riskified India,ecommerce-fraud
+Forter India,trust-platform
+Signifyd India,commerce-protection
+Accertify India,fraud-management
+Kount India,fraud-protection
+EverC India,cyber-intelligence
+BioCatch India,behavioral-biometrics
+Socure India,identity-verification
+Persona India,identity-platform
+Trulioo India,global-identity
+Ekata India,identity-data
+LexisNexis Risk India,risk-solutions
+TransUnion India,credit-analytics
+Experian India,information-services
+Equifax India,credit-bureau
+CRIF High Mark,credit-information
+CreditVidya,lending-intelligence
+CreditMantri,credit-improvement
+BankBazaar,financial-marketplace
+Paisabazaar,fintech-marketplace
+MyMoneyMantra,loan-marketplace
+Policybazaar,insurtech
+Turtlemint,insurtech
+Digit Insurance,insurtech
+Acko,insurtech
+Coverfox,insurtech
+RenewBuy,insurtech
+InsuranceDekho,insurtech
+Zopper,embedded-insurance
+Plum,health-insurance-saas
+Loop Health,health-benefits
+Onsurity,employee-healthcare
+Kenko Health,health-financing
+Even Healthcare,managed-care
+Pristyn Care,elective-surgery
+Glamyo Health,elective-surgery
+Medfin,daycare-surgery
+Ayu Health,hospital-chain
+HexaHealth,hospital-care
+Careernet,talent-solutions
+Husys,hr-consulting
+Peoplestrong,hr-saas
+Greytip,hr-payroll
+Keka,hr-software
+ZingHR,hr-tech
+HROne,hr-automation
+Pocket HRMS,payroll-software
+Spine Technologies,hr-payroll
+FactoHR,hr-payroll
+SumoHR,hr-software
+Qandle,all-in-one-hr
+Keka HR,hr-management
+Workstatus,workforce-management
+EmpMonitor,employee-monitoring
+Desklog,time-tracking
+DeskTime India,time-tracking
+Hubstaff India,remote-workforce
+Time Doctor India,time-tracking
+Toggl India,time-tracking
+Harvest India,time-tracking
+Clockify India,time-tracking
+Paymo India,work-management
+Scoro India,work-management
+Teamwork India,project-management
+ClickUp India,productivity
+Asana India,work-management
+Monday.com India,work-os
+Wrike India,collaborative-work
+Smartsheet India,enterprise-work
+Notion India,connected-workspace
+Coda India,all-in-one-doc
+Airtable India,app-platform
+Basecamp India,project-management
+Trello India,visual-collaboration
+Miro India,visual-workspace
+Mural India,collaborative-intelligence
+Lucid India,visual-collaboration
+Canva India,visual-design
+Figma India,collaborative-interface
+InVision India,digital-product-design
+Sketch India,design-platform
+Zeplin India,design-delivery
+Abstract India,version-control-design
+Marvel App India,design-platform
+Proto.io India,prototyping
+Framer India,interactive-design
+Principle India,interaction-design
+Origami India,design-prototyping
+Webflow India,visual-development
+Bubble India,visual-programming
+FlutterFlow India,low-code-flutter
+Draftbit India,native-apps
+Bravo Studio India,app-builder
+Glide India,no-code-apps
+Adalo India,no-code-apps
+Softr India,no-code-portal
+Stacker India,customer-portals
+Internal.io India,internal-tools
+Retool India,internal-software
+Superblocks India,programmable-internal
+Airplane India,developer-platform
+Windmill India,developer-platform
+Temporal India,durable-execution
+Inngest India,event-driven-workflows
+Trigger.dev India,background-jobs
+Defer India,background-tasks
+Quirrel India,job-queuing
+BullMQ India,message-queue
+Agenda India,job-scheduler
+Bree India,nodejs-job-scheduler
+Node-cron India,cron-tasks
