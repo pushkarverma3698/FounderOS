@@ -242,19 +242,38 @@ describe("the NL/IN fallback is scoped to the profile's own markets", () => {
    * The fallback still exists — the hardcoded city lists are wider than any
    * profile's — but it may only speak for a market the profile actually targets.
    */
+  /**
+   * Driven by a purpose-built NL-only profile since 2026-09-08. It used to use
+   * `wife-nl-finance` directly, which stopped being an NL-only profile the day
+   * the founder said "Tashi will also apply in india" — and a scoping test whose
+   * fixture is a declared fact about a person silently stops testing its rule
+   * when that person's situation changes. The rule is about the FALLBACK, not
+   * about her, so the fixture no longer names her.
+   */
+  const nlOnly = {
+    ...getProfile("wife-nl-finance"),
+    targetCountries: getProfile("wife-nl-finance").targetCountries.filter((c) => c.code === "NL"),
+  };
+
   it("does not label a posting IN for a profile that does not target India", () => {
-    const nlOnly = getProfile("wife-nl-finance");
     expect(countryFromLocation("Hyderabad, India", nlOnly)).toBe("other");
     expect(countryFromLocation("Bengaluru, Karnataka, India", nlOnly)).toBe("other");
     expect(countryFromLocation("Gurugram", nlOnly)).toBe("other");
   });
 
   it("still reads the markets that profile DOES target", () => {
-    const nlOnly = getProfile("wife-nl-finance");
     expect(countryFromLocation("Amsterdam, Netherlands", nlOnly)).toBe("NL");
     // Via the hardcoded NL city list, which is wider than the profile's own.
     expect(countryFromLocation("Remote - Netherlands", nlOnly)).toBe("NL");
     expect(countryFromLocation("Berlin, Germany", nlOnly)).toBe("other");
+  });
+
+  it("reads India for the NL-finance profile now that it declares that market", () => {
+    // The other half of the same rule: the fallback speaks for a market the
+    // profile targets, and as of 2026-09-08 she targets this one.
+    const wife = getProfile("wife-nl-finance");
+    expect(countryFromLocation("Hyderabad, India", wife)).toBe("IN");
+    expect(countryFromLocation("Gurugram", wife)).toBe("IN");
   });
 
   it("leaves the dual-market profile exactly as it was", () => {

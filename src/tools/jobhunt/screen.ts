@@ -26,7 +26,7 @@ import { matchSponsor, type SponsorMatch } from "./sponsor-match.js";
 import { getSponsorRegister, registerStaleness } from "./sponsor-registry.js";
 import { extractPostingFacts, type PostingRoute } from "./extract.js";
 import { countryFromLocation, type PostingCountry } from "./country.js";
-import { screenIndianPay } from "./pay-india.js";
+import { screenIndianPay, inrFloorFor } from "./pay-india.js";
 import { basesForPosting, gateProfile, isLiveBasis, nonLiveBasisRejectGate } from "./permit-routes.js";
 import { THIN_BODY_CHARS, postingGate, basisGate, locationGate, sponsorGate } from "./screen-gates.js";
 import {
@@ -243,12 +243,12 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
     // pay gate is SELECTED by the basis rather than parameterised by it.
     const pay: Gate =
       gProfile.payReference === "inr"
-        ? { gate: "Pay", ...screenIndianPay(facts.pay, (profile.minInrLpaFloor ?? 15) * 100_000) }
+        ? { gate: "Pay", ...screenIndianPay(facts.pay, inrFloorFor(profile.minInrLpaFloor)) }
         : {
             gate: gProfile.salaryFloorApplies ? "Salary" : "Rate",
             // The CANDIDATE's date of birth, not the founder's — the IND floor
             // steps up 36% at thirty and the band is a fact about the person.
-            ...screenSalaryFacts(facts.salary, { route, dob: profile.dob, isOrientationYearSwitcher: profile.permitBases.includes("zoekjaar") }),
+            ...screenSalaryFacts(facts.salary, { route, dob: profile.dob, reducedCriterionUntil: profile.reducedCriterionUntil ?? null }),
           };
     const runSponsorGate = gProfile.sponsorRequired && targetsNetherlands;
     const gates: Gate[] = [

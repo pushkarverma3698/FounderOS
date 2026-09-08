@@ -25,12 +25,20 @@
 
 import { InputFile, type Context } from "grammy";
 import { listApplyQueue, listRecentlyScreened } from "../db/apply-queries.js";
+import { resolveProfileArg, isProfileArgMiss } from "./jobhunt-profile-arg.js";
 import {
-  resolveProfileArg,
-  isProfileArgMiss,
+  DEFAULT_PROFILE_ID,
+  getProfile,
+  type JobSearchProfile,
+} from "../tools/jobhunt/profile-config.js";
+import {
+  isProfileMiss,
+  parseBriefRequest,
   profileMissMessage,
-} from "./jobhunt-profile-arg.js";
-import { DEFAULT_PROFILE_ID, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
+  scopeFor,
+  type BriefScopePlan,
+  type BriefVerb,
+} from "../tools/jobhunt/brief-resolver.js";
 import { buildQueueTab, buildLogTab } from "../tools/jobhunt/sheet-rows.js";
 import { toCsv } from "../tools/jobhunt/csv-export.js";
 import { childLogger } from "../infra/logger.js";
@@ -134,38 +142,94 @@ export async function handleCsv(ctx: Context): Promise<void> {
 
 export interface JobsViewDeps {
   /** Rebuilds the ranking and returns the rendered brief. Injected for testing. */
-  readonly buildBrief: (profile: JobSearchProfile) => Promise<string>;
+  readonly buildBrief: (profile: JobSearchProfile, scope: BriefScopePlan) => Promise<string>;
   /** Splits an HTML brief into Telegram-sized messages. */
   readonly split: (text: string) => string[];
+  /** When the founder last ran `/fresh` for this candidate — `/fresh`'s delta marker. */
+  readonly lastFreshView: (profileId: string) => Promise<Date | null>;
+  /** Stamp "seen up to here". Called only after a `/fresh` actually rendered. */
+  readonly recordFreshView: (profileId: string, at: Date) => Promise<void>;
 }
 
+/** What the founder is told is happening, per verb, while the ranking runs. */
+const RUNNING_LINE: Record<BriefVerb, string> = {
+  jobs: "Ranking %s queue and checking the top roles are still open…",
+  today: "Finding what employers published in %s market in the last 24h…",
+  fresh: "Finding what has arrived in %s queue since you last looked…",
+};
+
 /**
- * `/jobs` — rank the queue now and print it.
+ * `/jobs`, `/today`, `/fresh` — one handler, because they are one query.
+ *
+ * THE THREE VERBS DIFFER ONLY IN WHICH SLICE THEY PRINT. They rank the same
+ * population, share one `brief_rank` numbering, and reach it through the same
+ * `parseBriefRequest` the English surface uses (brief-tool.ts). Three handlers
+ * would be three chances for `/today` and "roles posted today" to disagree —
+ * and nothing would tell the founder which of them was lying.
  *
  * The ranking is not cheap (it verifies the top rows are still open over the
  * network), so the founder is told it is running. A command that goes quiet for
  * twenty seconds is a command he assumes failed and retries, which runs the
  * whole thing twice.
  */
-export async function handleJobs(ctx: Context, deps: JobsViewDeps): Promise<void> {
-  const selected = resolveProfileArg(ctx.match?.toString() ?? "");
-  if (isProfileArgMiss(selected)) {
-    await ctx.reply(profileMissMessage(selected));
+export async function handleBriefVerb(
+  ctx: Context,
+  verb: BriefVerb,
+  deps: JobsViewDeps,
+): Promise<void> {
+  const request = parseBriefRequest(ctx.match?.toString() ?? "", verb);
+  if (isProfileMiss(request)) {
+    await ctx.reply(profileMissMessage(request));
     return;
   }
-  const whose = selected.explicit ? `${selected.profile.candidateName}'s` : "your";
-  await ctx.reply(`🔍 Ranking ${whose} queue and checking the top roles are still open…`);
+
+  const profile = getProfile(request.profileId);
+  const whose = request.explicitProfile ? `${profile.candidateName}'s` : "your";
+  await ctx.reply(`🔍 ${(RUNNING_LINE[verb] as string).replace("%s", whose)}`);
+
+  const now = new Date();
   try {
-    const brief = await deps.buildBrief(selected.profile);
+    const scope = scopeFor(request, {
+      lastFreshView: verb === "fresh" ? await deps.lastFreshView(profile.id) : null,
+    });
+    const brief = await deps.buildBrief(profile, scope);
     for (const chunk of deps.split(brief)) {
       await ctx.reply(chunk, { parse_mode: "HTML" });
     }
+    // AFTER the send, not before. A marker written ahead of a failed render
+    // would mean those rows are "seen" and never appear under `/fresh` again —
+    // a silent, permanent loss for the one command whose whole job is to show
+    // what has not been seen.
+    if (verb === "fresh") {
+      try {
+        await deps.recordFreshView(profile.id, now);
+      } catch (err) {
+        // allow-failopen: the list already reached him. A lost marker repeats
+        // these rows next time, which is visible and costs nothing.
+        log.warn({ err: (err as Error).message, profile: profile.id }, "Fresh-view marker not written");
+      }
+    }
   } catch (err) {
-    log.error({ err: (err as Error).message }, "/jobs failed");
+    log.error({ err: (err as Error).message, verb }, `/${verb} failed`);
     await ctx.reply(
       `❌ Couldn't build the shortlist: ${safeHtml((err as Error).message)}\n\n` +
         `The screening results are still recorded — try /csv for the raw queue.`,
       { parse_mode: "HTML" },
     );
   }
+}
+
+/** `/jobs [who] [range]` — everything on file, freshest first. */
+export async function handleJobs(ctx: Context, deps: JobsViewDeps): Promise<void> {
+  await handleBriefVerb(ctx, "jobs", deps);
+}
+
+/** `/today [who]` — only what an employer published in the last 24h. */
+export async function handleToday(ctx: Context, deps: JobsViewDeps): Promise<void> {
+  await handleBriefVerb(ctx, "today", deps);
+}
+
+/** `/fresh [who]` — only what we discovered since the founder last asked. */
+export async function handleFresh(ctx: Context, deps: JobsViewDeps): Promise<void> {
+  await handleBriefVerb(ctx, "fresh", deps);
 }

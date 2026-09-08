@@ -18,7 +18,16 @@
  */
 
 import type { Context } from "grammy";
-import { getProfile, listProfiles, DEFAULT_PROFILE_ID, type JobSearchProfile } from "../tools/jobhunt/profile-config.js";
+import {
+  getProfile,
+  listProfiles,
+  resolveProfileToken,
+  DEFAULT_PROFILE_ID,
+  type JobSearchProfile,
+} from "../tools/jobhunt/profile-config.js";
+
+// One wording for the refusal, shared with the English surface. See brief-resolver.ts.
+export { profileMissMessage } from "../tools/jobhunt/brief-resolver.js";
 
 export interface ProfileArg {
   readonly profile: JobSearchProfile;
@@ -34,32 +43,15 @@ export interface ProfileArgMiss {
 }
 
 /**
- * Every word that selects a profile, lowercased.
+ * The alias table lives in `profile-config.ts` (`resolveProfileToken`), not here.
  *
- * Derived from the registry rather than written out: the id (`wife-nl-finance`),
- * each dash-separated segment of it (`wife`, `finance`), and the candidate's
- * first name. A hand-maintained alias table would drift the moment a third
- * profile is added, and the failure would be a command that silently addresses
- * the wrong queue.
+ * It was a byte-identical private copy in this file until 2026-09-08 — the id,
+ * each dash-separated segment of it, and the candidate's first name, derived
+ * from the registry both times. Two copies of "which word means which
+ * candidate" is precisely the drift B1 exists to remove: the slash surface
+ * cannot resolve "tashi" differently from the English surface if there is only
+ * one function that resolves it.
  */
-function aliasesFor(profile: JobSearchProfile): string[] {
-  const first = profile.candidateName.trim().split(/\s+/)[0] ?? "";
-  return [profile.id, ...profile.id.split("-"), first]
-    .map((a) => a.toLowerCase())
-    .filter((a) => a.length > 1);
-}
-
-/** Aliases claimed by more than one profile select nothing — ambiguity is a miss. */
-function aliasIndex(): Map<string, string | null> {
-  const index = new Map<string, string | null>();
-  for (const profile of listProfiles()) {
-    for (const alias of aliasesFor(profile)) {
-      index.set(alias, index.has(alias) && index.get(alias) !== profile.id ? null : profile.id);
-    }
-  }
-  return index;
-}
-
 /**
  * Split a leading profile token off a command argument.
  *
@@ -86,7 +78,7 @@ export function resolveProfileArg(
   if (reservedWords.includes(token)) return fallback;
   if (/^[\d,\s-]+$/.test(token)) return fallback;
 
-  const resolved = aliasIndex().get(token);
+  const resolved = resolveProfileToken(token);
   if (resolved) return { profile: getProfile(resolved), rest, explicit: true };
 
   // Only one profile registered: nothing here can be a selector, so leave the
@@ -121,12 +113,4 @@ export function withForcedProfileToken(ctx: Context, token: string): Context {
   const rest = ctx.match?.toString() ?? "";
   ctx.match = rest.length > 0 ? `${token} ${rest}` : token;
   return ctx;
-}
-
-/** What the founder is told when the selector did not resolve. */
-export function profileMissMessage(miss: ProfileArgMiss): string {
-  return (
-    `I don't know whose queue "${miss.unknown}" is, so I haven't touched either one. ` +
-    `Name one of: ${miss.known.join(", ")} — or leave it off for ${DEFAULT_PROFILE_ID}.`
-  );
 }

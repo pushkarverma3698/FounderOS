@@ -8,25 +8,39 @@
  * (Tashi_CV_FP&A.pdf) and cover letter. Replaces the "Wife" placeholder that
  * reached the agent prompt and the application packet until today.
  *
- * PERMIT — confirmed by the founder, 2026-09-04: "she's on zoekjaar".
+ * PERMIT — CORRECTED by the founder, 2026-09-08. The earlier note here said
+ * "she's on zoekjaar" (2026-09-04) and that was wrong in a way that matters:
  *
- * The orientation year gives free access to the Dutch labour market: no
- * recognised sponsor, no work permit, no IND salary criterion. That is why
- * `zoekjaar` leads `permitBases` — it is what makes a role reachable TODAY, and
- * screening her under `hsm` alone (as this file did until 2026-09-04) applied the
- * recognised-sponsor register to every Dutch employer and rejected most of a
- * market she can lawfully work in.
+ *   "she will start when the offer lands, then only she will apply for her
+ *    zoekjaar, as she has 3 years of time to apply the zoekjaar."
  *
- * `hsm` stays second because the orientation year is time-boxed and
- * non-renewable. Screening under both means the verdict says which basis carried
- * the role, so a job that ends with the permit is visibly different from one an
- * employer could sponsor afterwards.
+ * So she does NOT hold an orientation-year permit today. She holds the RIGHT to
+ * apply for one, inside a three-year window, and will do so once an offer exists.
+ *
+ * `zoekjaar` still leads `permitBases`, and the reason is unchanged: it is the
+ * basis that makes a Dutch role REACHABLE, which is the question screening asks.
+ * Screening her under `hsm` alone applies the recognised-sponsor register to
+ * every Dutch employer and rejects most of a market she can lawfully enter — the
+ * defect this ordering was introduced to fix. What changes is the tense: the
+ * evidence text must read as "she will apply for the orientation year once an
+ * offer lands", never as a permit she is holding now. See permit-routes.ts.
+ *
+ * SALARY FLOOR — now dated, and it needed to be. The IND *verlaagd
+ * salariscriterium* (€3,122/month vs €4,357) is available for three years after a
+ * Dutch orientation year or qualifying degree. Graduation confirmed by the
+ * founder as 1 October 2026, so `reducedCriterionUntil` below is 2029-10-01.
+ * Until 2026-09-08 this was selected from `permitBases.includes("zoekjaar")` — a
+ * permanent flag that could never expire, in the silent-permissive direction.
+ *
+ * INDIA — confirmed by the founder, 2026-09-08: she has the right to work in
+ * India. `india-local` is therefore a held basis, not an assumption.
  *
  * NOT CONFIRMED, and therefore not asserted anywhere: she has never held a
  * partner permit, so that basis is deliberately absent.
  */
 
 import type { JobSearchProfile } from "../profile-config.js";
+import { INDIA_MARKET } from "./markets.js";
 
 const WIFE_CV_PATH = process.env["WIFE_CV_PATH"] ?? "/opt/founderos-data/cv/cv-wife-base.md";
 
@@ -53,14 +67,52 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
   maxYearsDemanded: 4,
   maxYearsStretch: 5,
 
-  permitBases: ["zoekjaar", "hsm"],
+  // `india-local` added 2026-09-08 on the founder's own words: "Tashi will also
+  // apply in india", and her right to work there CONFIRMED by him the same day.
+  // A declared fact about a person — never inferred — and it must be BOTH here
+  // and in `targetCountries`: the market decides whether an Indian posting
+  // survives `filterCandidates` at all, the basis decides whether it is
+  // screenable once it does. Her 56 existing `india-local` rows are what one
+  // without the other looks like — fetched, screened, and rejected as "not a
+  // market you have a legal basis for".
+  //
+  // Kept LAST only because the ordering is strongest-commitment-first and the
+  // relocation is the goal; it is a fully held basis, not a provisional one.
+  permitBases: ["zoekjaar", "hsm", "india-local"],
+
+  // FOURTEEN DAYS, against the global 24 hours. Her market published 9 roles in
+  // the 24h measured on 2026-09-08 (Pushkar's: 149), so a one-day window capped
+  // her brief at about nine rows before any of the screening mattered. Widening
+  // it is the single cheapest supply lever available to her lane and costs
+  // nothing anywhere else — the window is read per profile.
+  applyQueueMaxAgeHours: 14 * 24,
+
+  // She graduates 1 October 2026 (founder, 2026-09-08), which opens the
+  // three-year window for the IND reduced salary criterion. After this date the
+  // standard band applies and roles that cleared €37,464 stop clearing €52,284 —
+  // which is the whole reason this is a date rather than the permanent flag it
+  // was until today. See criteria.ts.
+  reducedCriterionUntil: new Date("2029-10-01T00:00:00Z"),
 
   // Display copies of the criteria.ts figures, for prompt text only. The binding
-  // floor is looked up by date and dob in criteria.ts, and it does not apply at
-  // all while she is on the zoekjaar basis.
+  // floor is looked up by date and dob in criteria.ts. No IND floor attaches on
+  // the zoekjaar basis at all; on `hsm` the reduced criterion applies until the
+  // date above.
   under30MonthlyEurFloor: 4357,
   over30MonthlyEurFloor: 5942,
 
+  // ₹20 LPA, stated by the founder 2026-09-08 — and it is safe to state ONLY
+  // because the alert now carries flagged rows too. The pay gate flags below this
+  // line and never rejects, so no Indian role is lost; before the same day's
+  // alert change, a flag meant silence, and setting any line here would have
+  // muted most of her India lane. His words: "this also doesn't matter, what
+  // matters is the entire jobs… salary happens in the HR rounds" — so the number
+  // travels into that conversation instead of filtering the queue.
+  minInrLpaFloor: 20,
+
+  // The note this replaces, kept because it is why the pairing matters: ₹15 LPA
+  // is the FOUNDER's line, and `screen.ts` read `minInrLpaFloor ?? 15` until
+  // 2026-09-08, so declaring nothing here meant silently inheriting his.
   targetCountries: [
     {
       code: "NL",
@@ -75,6 +127,9 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
       ],
       atsLocations: ["Netherlands"],
     },
+    // Netherlands stays FIRST: `marketOf`/`MARKET_ORDER` render the brief in
+    // this order, and the relocation is what the Dutch lane is for.
+    INDIA_MARKET,
   ],
 
   // Keyword sets researched against live Dutch/EU postings (2026-09-04) — not
@@ -163,7 +218,20 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
       // (efinancialcareers.nl, togetherabroad.nl) distinct from her existing
       // compliance-kyc CDD titles — kept here because due diligence in this
       // context is transaction/credit-side, not AML-side.
+      //
+      // "Finance Operations Specialist" / "Finance Operations Analyst" added
+      // 2026-09-07, and these two ONLY. They are not a guess about what she might
+      // also like: the track-coverage audit that day classified 4,511 real
+      // postings against this profile, and of the 174 Dutch postings the
+      // classifier dropped, exactly one was both finance-shaped and inside her
+      // 0-4-year range — "Finance Operations Specialist" in Utrecht. Every other
+      // NL miss was a CFO, a Director or a Head-of role far above 2.4 years, or a
+      // quant-risk role outside these tracks. The measurement is the whole reason
+      // nothing else was added with them; the same audit is what says her lane's
+      // problem is supply, not vocabulary.
       titles: [
+        "Finance Operations Specialist:*",
+        "Finance Operations Analyst:*",
         "RTR Analyst:*",
         "Record to Report Analyst:*",
         "OTC Analyst:*",
@@ -184,6 +252,8 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         // are common enough elsewhere to risk noise. The full phrases below are
         // unambiguous; the acronym forms still work via `titles`' substring
         // match against the posting's own title text.
+        "finance operations specialist",
+        "finance operations analyst",
         "record to report",
         "order to cash",
         "procure to pay",
@@ -213,6 +283,19 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         "Client Onboarding Specialist:*",
         "Regulatory Operations:*",
       ],
+      // "cdd" REMOVED as a bare acronym, 2026-09-08. In French postings CDD is
+      // *contrat à durée déterminée* — the standard fixed-term contract — and it
+      // appears in the TITLE of every such vacancy, so `matchesAsWholeWord` found
+      // it flanked by spaces every time. Measured on prod that day: three Michael
+      // Kors shop-floor vacancies in Paris and Toulon classified into this track,
+      // and "Vendeur(se) avec expérience CDD 28h" reached brief_rank 2 of an `ask`
+      // section that had three ranked rows in total.
+      //
+      // Costs nothing to drop: "CDD Analyst:*" stays in `titles` above, which is a
+      // substring match against the posting's own title and does not fire on the
+      // bare acronym. "kyc" and "aml" stay — neither is a common word in a
+      // European job title. This is the same rule `finance-ops` already states for
+      // OTC/PTP/RTR, applied to the track that was missed.
       classifyTerms: [
         "kyc analyst",
         "aml analyst",
@@ -223,7 +306,6 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         "client onboarding",
         "kyc",
         "aml",
-        "cdd",
       ],
     },
     auditor: {

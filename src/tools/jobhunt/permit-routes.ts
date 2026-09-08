@@ -49,6 +49,14 @@ export function isKnownPermitBasis(value: string): value is PermitBasis {
  * from documents and must not be: getting it wrong in the permissive direction
  * spends applications on roles he cannot hold, and in the restrictive direction
  * silently discards roles he can. Change it only on his say-so.
+ *
+ * ⚠ NOTHING IN `src` READS THIS. Every runtime decision goes through
+ * `profile.permitBases` (see `basesForPosting` / `isLiveBasis` below) — this
+ * constant survived the move to per-profile bases and is now referenced only by
+ * two tests, which therefore assert a rule production does not apply. Kept, not
+ * deleted, because it is also the record of what the founder declared and when;
+ * treat it as documentation, and never as the thing that decides a verdict.
+ * Flagged by the 2026-09-08 QA pass.
  */
 export const LIVE_PERMIT_BASES: readonly PermitBasis[] = [
   "hsm",
@@ -182,10 +190,17 @@ const PROFILES: Record<PermitBasis, GateProfile> = {
     payReference: "eur",
     dutchLanguageApplies: true,
     label: "orientation year (zoekjaar)",
+    // TENSE CORRECTED 2026-09-08. This read "free access … while the permit runs",
+    // which asserts a permit being held. The founder's correction that day: she
+    // applies for the orientation year once an offer lands, inside a three-year
+    // window she has not yet opened. The reachability is identical — that is why
+    // the basis still leads her profile — but the sentence the founder reads must
+    // describe a step still to take, not a status already held.
     basis:
-      "Orientation year (zoekjaar) — free access to the Dutch labour market while the permit " +
-      "runs: no recognised sponsor and no IND salary criterion apply. Time-boxed and " +
-      "non-renewable, so check whether the employer could also sponsor an HSM permit after it.",
+      "Orientation year (zoekjaar) — applied for once an offer is in hand, then free access " +
+      "to the Dutch labour market: no recognised sponsor and no IND salary criterion apply. " +
+      "Time-boxed and non-renewable, so check whether the employer could also sponsor an HSM " +
+      "permit after it.",
   },
   /**
    * The second market, live since 2026-08-01.

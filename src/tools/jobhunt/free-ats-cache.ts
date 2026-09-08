@@ -19,77 +19,59 @@
  *
  * ONLY BOARD LISTS. Per-posting body URLs are fetched once and essentially never
  * re-asked, so caching them would grow the map for no hit rate.
+ *
+ * NOT "BOUNDED" ANY MORE, and this header said it was until 2026-09-08. The cache
+ * moved to Postgres (`agents.ats_board_cache`) and the in-process LRU that the
+ * word described went with it — `DEFAULT_MAX_ENTRIES` and `CacheEntry` sat here
+ * afterwards with zero references, describing a limit nothing enforced. Measured
+ * that day: 1,770 rows / 124 MB, stable, 2 dead tuples, autovacuum keeping up on
+ * every sweep. It is stable because the URL key set is fixed, NOT because
+ * anything prunes it — if the key set ever churns, nothing here will notice.
  */
 
-/** Bounded because the registry grows: 858 boards today, and nothing prunes it. */
-const DEFAULT_MAX_ENTRIES = 2_000;
-
-interface CacheEntry {
-  readonly etag: string;
-  readonly payload: unknown;
-}
+import { getAtsCache, setAtsCache } from "../../db/ats-board-cache-queries.js";
 
 export interface EtagCache {
   /**
    * The conditional-request headers for this URL — `{}` when there is nothing
    * to revalidate against.
    */
-  headersFor(url: string): Record<string, string>;
+  headersFor(url: string): Promise<Record<string, string>>;
   /** The payload a 304 refers to, or undefined when we no longer hold it. */
-  read(url: string): unknown;
+  read(url: string): Promise<unknown>;
   /** Remember a 200. A response with no ETag is simply not stored. */
-  store(url: string, etag: string | null | undefined, payload: unknown): void;
-  readonly size: number;
+  store(url: string, etag: string | null | undefined, payload: unknown): Promise<void>;
 }
 
-/**
- * An ETag cache that never claims a revalidation it cannot honour.
- *
- * THE BUG THIS SHAPE AVOIDS. Sending `If-None-Match` for an entry whose payload
- * has been evicted earns a 304 with no body and nothing to fall back on — the
- * board silently contributes zero candidates and looks like an employer with no
- * openings. So the header and the payload come from the same entry: if the entry
- * is gone, no header is sent and the fetch is unconditional. A cache miss must
- * cost bandwidth, never correctness.
- *
- * Eviction is oldest-first insertion order, which is what `Map` already gives us.
- * Not LRU: every board is polled on the same fixed cycle, so recency carries no
- * information here that insertion order does not.
- */
-export function createEtagCache(maxEntries: number = DEFAULT_MAX_ENTRIES): EtagCache {
-  const entries = new Map<string, CacheEntry>();
-
+export function createEtagCache(): EtagCache {
   return {
-    headersFor(url: string): Record<string, string> {
-      const hit = entries.get(url);
-      return hit ? { "if-none-match": hit.etag } : {};
-    },
-
-    read(url: string): unknown {
-      return entries.get(url)?.payload;
-    },
-
-    store(url: string, etag: string | null | undefined, payload: unknown): void {
-      // No ETag means no revalidation is possible. Storing the payload anyway
-      // would build a map we can never get a 304 against.
-      if (typeof etag !== "string" || etag.length === 0) {
-        entries.delete(url);
-        return;
-      }
-      // Re-insert so a refreshed entry moves to the back of the eviction order
-      // rather than keeping its original position.
-      entries.delete(url);
-      entries.set(url, { etag, payload });
-
-      while (entries.size > maxEntries) {
-        const oldest = entries.keys().next();
-        if (oldest.done === true) break;
-        entries.delete(oldest.value);
+    async headersFor(url: string): Promise<Record<string, string>> {
+      try {
+        const hit = await getAtsCache(url);
+        return hit && hit.etag ? { "if-none-match": hit.etag } : {};
+      } catch (err) {
+        // allow-failopen: fallback to uncached request if cache DB fails
+        return {};
       }
     },
 
-    get size(): number {
-      return entries.size;
+    async read(url: string): Promise<unknown> {
+      try {
+        const hit = await getAtsCache(url);
+        return hit?.payload;
+      } catch (err) {
+        // allow-failopen: fallback to cache miss if cache DB fails
+        return undefined;
+      }
+    },
+
+    async store(url: string, etag: string | null | undefined, payload: unknown): Promise<void> {
+      try {
+        await setAtsCache(url, etag, payload);
+      } catch (err) {
+        // allow-failopen: skip caching if cache DB fails
+      }
     },
   };
 }
+

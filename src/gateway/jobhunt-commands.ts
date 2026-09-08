@@ -38,6 +38,7 @@ import {
   type ApplicationPacket,
 } from "../tools/jobhunt/apply-packet.js";
 import { MAC_CLIENT_COMMAND } from "../tools/jobhunt/brief.js";
+import { truncateAtWord } from "../tools/jobhunt/telegram-format.js";
 import { ARTIFACT_ROOT } from "../core/config.js";
 import { threadIdFor } from "./kernel-run.js";
 import { safeHtml } from "./approval-card.js";
@@ -45,6 +46,14 @@ import { childLogger } from "./../infra/logger.js";
 import type { JobApplication } from "../db/schema.js";
 
 const log = childLogger({ module: "gateway:jobhunt-commands" });
+
+/**
+ * How much of a packet-build failure reason reaches the founder.
+ *
+ * Wide enough for the claim guard's full summary (a count plus every ungrounded
+ * claim, grouped by kind) rather than the first sentence and a half of it.
+ */
+const DRAFT_FAILURE_REASON_CHARS = 400;
 
 /**
  * Parse the row number out of "/draft 2".
@@ -305,8 +314,11 @@ async function draftOneRow(
       { id: row.id, company: row.company, reason: built.reason },
       "Tailored-PDF path failed — falling back to text draft",
     );
+    // truncateAtWord, not .slice: prod 2026-09-07 clipped the claim-guard's
+    // reason mid-word (`... [technology] "TD)`), hiding the rest of the list of
+    // ungrounded claims — the only actionable content in the message.
     await ctx.reply(
-      `⚠ Couldn't build a tailored PDF for ${row.company} (${built.reason.slice(0, 200)}) — drafting a text application instead.`,
+      `⚠ Couldn't build a tailored PDF for ${row.company} (${truncateAtWord(built.reason, DRAFT_FAILURE_REASON_CHARS)}) — drafting a text application instead.`,
     );
     // profile.id — not the default. Without it this kernel turn ran under the
     // jobhunt worker's boot-time prompt, which always named the FIRST

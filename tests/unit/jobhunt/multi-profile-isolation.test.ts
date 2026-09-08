@@ -112,9 +112,18 @@ describe("profile registry", () => {
     expect(() => getProfile("no-such-profile")).toThrow(/not found/i);
   });
 
-  it("records the wife's confirmed facts (founder, 2026-09-04)", () => {
+  it("records the wife's confirmed facts (founder, 2026-09-04 and 2026-09-08)", () => {
     expect(WIFE_FINANCE_PROFILE.dob.toISOString().slice(0, 10)).toBe("2001-04-07");
-    expect(WIFE_FINANCE_PROFILE.permitBases).toEqual(["zoekjaar", "hsm"]);
+    // `india-local` added 2026-09-08: "Tashi will also apply in india". Pinned
+    // in this order because permitBases is strongest-commitment-first and the
+    // Dutch bases are the live ones today.
+    expect(WIFE_FINANCE_PROFILE.permitBases).toEqual(["zoekjaar", "hsm", "india-local"]);
+    // The market has to move with the basis — one without the other is what her
+    // 56 fetched-screened-rejected india-local rows look like.
+    expect(WIFE_FINANCE_PROFILE.targetCountries.map((c) => c.code)).toEqual(["NL", "IN"]);
+    // ₹20 LPA, stated by the founder 2026-09-08 — and distinct from his own ₹15,
+    // which she silently inherited until that day.
+    expect(WIFE_FINANCE_PROFILE.minInrLpaFloor).toBe(20);
   });
 });
 

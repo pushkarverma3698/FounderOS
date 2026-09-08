@@ -16,7 +16,11 @@ import {
   boardMatchKey,
   buildBoardMatchIndex,
   parseAtsCorpus,
+  parseEmployerList,
   joinSponsorBoards,
+  joinEmployerBoards,
+  isOffMarketToken,
+  stripSiteSuffix,
   toBoardCsvRows,
   type AtsCorpusRow,
 } from "../../../src/tools/jobhunt/board-import.js";
@@ -243,5 +247,109 @@ describe("toBoardCsvRows", () => {
       },
     ]);
     expect(rows[0]).not.toContain("Netherlands");
+  });
+});
+
+/**
+ * The curated NL finance-employer join.
+ *
+ * Its whole reason to exist is that the register join above cannot see Dutch
+ * finance: the employers who hire FP&A, audit and KYC at 0-4 years are registered
+ * under names no ATS board ever writes. These tests pin the two decisions that
+ * make the looser source safe — the key stays EXACT, and a tenant's country sites
+ * stay distinguishable.
+ */
+describe("parseEmployerList", () => {
+  it("skips the provenance comment block and the header", () => {
+    const brands = parseEmployerList(
+      "# why this file exists\n# second comment line\nname,sector\nRabobank,bank\nBDO,accountancy\n",
+    );
+    expect(brands).toEqual([
+      { name: "Rabobank", sector: "bank" },
+      { name: "BDO", sector: "accountancy" },
+    ]);
+  });
+
+  it("keeps the first employer when the file has no header at all", () => {
+    expect(parseEmployerList("Rabobank,bank\n")).toEqual([{ name: "Rabobank", sector: "bank" }]);
+  });
+
+  it("defaults a missing sector rather than dropping the brand", () => {
+    expect(parseEmployerList("name,sector\nOhpen\n")).toEqual([
+      { name: "Ohpen", sector: "unknown" },
+    ]);
+  });
+});
+
+describe("stripSiteSuffix", () => {
+  it("drops the site label Workday appends to a tenant's second board", () => {
+    // Measured 2026-09-07: `nngroup/wd3/external` answers with zero postings and
+    // `nngroup/wd3/wdexternal` — the labelled row — is NN Group's real Dutch board.
+    expect(stripSiteSuffix("Nn Group (Wdexternal)")).toBe("Nn Group");
+    expect(stripSiteSuffix("Pwc (Nonpublic Postings)")).toBe("Pwc");
+  });
+
+  it("leaves an unlabelled name alone", () => {
+    expect(stripSiteSuffix("Rabobank")).toBe("Rabobank");
+  });
+
+  it("never reduces a name to nothing", () => {
+    expect(stripSiteSuffix("(Careers)")).toBe("(Careers)");
+  });
+});
+
+describe("isOffMarketToken", () => {
+  it("rejects a country site on a shared tenant", () => {
+    expect(isOffMarketToken("pwc/wd3/us_experienced_careers")).toBe(true);
+    expect(isOffMarketToken("acme/wd3/careers-india")).toBe(true);
+  });
+
+  it("matches whole words only, so ordinary tokens survive", () => {
+    // The reason this is not a substring test: "campus" ends in "us" and
+    // "causeway" contains "aus". Both are boards we want.
+    expect(isOffMarketToken("pwc/wd3/global_campus_careers")).toBe(false);
+    expect(isOffMarketToken("causeway/wd1/careers")).toBe(false);
+    expect(isOffMarketToken("industries/wd5/jobs")).toBe(false);
+  });
+});
+
+describe("joinEmployerBoards", () => {
+  const brands = [
+    { name: "Deloitte", sector: "accountancy" },
+    { name: "Rabobank", sector: "bank" },
+  ];
+
+  it("matches a brand through the corpus's own country wording", () => {
+    const corpora = new Map<FreeAts, readonly AtsCorpusRow[]>([
+      ["smartrecruiters", corpus([["Deloitte Netherlands", "deloittenetherlands"]])],
+    ]);
+    const candidates = joinEmployerBoards(brands, corpora, []);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.token).toBe("deloittenetherlands");
+    expect(candidates[0]?.matchedSponsor).toBe("Deloitte");
+  });
+
+  it("refuses a prefix match, so another country's board cannot ride in", () => {
+    const corpora = new Map<FreeAts, readonly AtsCorpusRow[]>([
+      ["smartrecruiters", corpus([["Deloitte NZ", "deloittenz"], ["Deloitte East Africa", "dea"]])],
+    ]);
+    expect(joinEmployerBoards(brands, corpora, [])).toEqual([]);
+  });
+
+  it("writes the corpus name, never the curated brand", () => {
+    const corpora = new Map<FreeAts, readonly AtsCorpusRow[]>([
+      ["workday", [{ name: "Rabobank", slug: "rabobank/jobs", url: "https://rabobank.wd3.myworkdayjobs.com/jobs" }]],
+    ]);
+    const candidates = joinEmployerBoards(brands, corpora, []);
+    expect(candidates[0]?.name).toBe("Rabobank");
+    expect(candidates[0]?.token).toBe("rabobank/wd3/jobs");
+  });
+
+  it("skips a token the registry already polls", () => {
+    const corpora = new Map<FreeAts, readonly AtsCorpusRow[]>([
+      ["smartrecruiters", corpus([["Deloitte Netherlands", "deloittenetherlands"]])],
+    ]);
+    const existing = [board("smartrecruiters", "deloittenetherlands")];
+    expect(joinEmployerBoards(brands, corpora, existing)).toEqual([]);
   });
 });

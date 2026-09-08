@@ -140,11 +140,18 @@ export function harvestNewBoardTokens(
       name: posting.company,
       ats: extracted.ats,
       token: extracted.token,
-      // Only a POSITIVE NL/IN carries through — "other" or "unknown" writes
-      // an empty markets column rather than defaulting to NL, the exact
-      // defect that filed every unclassified company as Dutch in an earlier
-      // draft of this harvester.
-      markets: posting.country === "NL" || posting.country === "IN" ? [posting.country] : [],
+      // Only a POSITIVE country carries through — "other" or "unknown" writes
+      // an empty markets column rather than defaulting to NL, the exact defect
+      // that filed every unclassified company as Dutch in an earlier draft of
+      // this harvester. Widened to DE/UK with the multi-market registry; the
+      // rule is unchanged, only the list of countries that count as positive.
+      markets:
+        posting.country === "NL" ||
+        posting.country === "IN" ||
+        posting.country === "DE" ||
+        posting.country === "UK"
+          ? [posting.country]
+          : [],
     });
   }
 

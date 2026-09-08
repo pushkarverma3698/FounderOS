@@ -7,6 +7,8 @@
 
 import { z } from "zod";
 
+import { INDIA_MARKET } from "./profiles/markets.js";
+
 export const ProfileTrackSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -49,6 +51,29 @@ export const JobSearchProfileSchema = z.object({
    * rejected by `basesForPosting`, which falls back to the strictest gates.
    */
   permitBases: z.array(z.string()).nonempty(),
+
+  /**
+   * How far back the brief will look for this candidate, in hours.
+   *
+   * Absent = the global `APPLY_QUEUE_MAX_AGE_HOURS` (24). Set it where the lane's
+   * supply rate makes 24 hours the wrong question — see `queueWindowFor`.
+   */
+  applyQueueMaxAgeHours: z.number().optional(),
+
+  /**
+   * The last day the IND *verlaagd salariscriterium* applies to this candidate.
+   *
+   * A DATE, not a flag. The reduced criterion (€3,122/month against €4,357) is
+   * available for three years after a Dutch orientation year or qualifying
+   * degree — it is time-boxed by law. It was selected from
+   * `permitBases.includes("zoekjaar")` until 2026-09-08, which is permanent by
+   * construction and therefore could never expire, in the silent-permissive
+   * direction: roles cleared below the lawful floor with nothing said.
+   *
+   * ABSENT MEANS THE STANDARD BAND. This asserts a fact about a person's recent
+   * history, so it needs a date to be claimed at all.
+   */
+  reducedCriterionUntil: z.date().optional(),
 
   // Salary criteria. The BINDING figures live in criteria.ts (the dated IND
   // table); these are display copies for prompt text and must match it.
@@ -119,24 +144,10 @@ export const PUSHKAR_PROFILE: JobSearchProfile = {
       ],
       atsLocations: ["Netherlands"],
     },
-    {
-      code: "IN",
-      names: ["india", "bharat"],
-      cities: [
-        "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "chennai", "new delhi",
-        "delhi", "noida", "gurgaon", "gurugram", "kolkata", "ahmedabad", "jaipur", "indore",
-        "chandigarh", "kochi", "coimbatore", "thiruvananthapuram", "bhubaneswar", "lucknow",
-        "varanasi", "bareilly", "mysore", "mysuru", "nashik", "tirupati", "vadodara", "surat",
-        "nagpur", "visakhapatnam", "vizag", "trivandrum", "mohali", "bhopal", "rajkot",
-        "faridabad", "ghaziabad", "thane", "navi mumbai", "whitefield", "hinjewadi",
-        "madurai", "tiruchirappalli", "guwahati", "patna", "kanpur", "dehradun", "udaipur",
-        "vijayawada", "raipur", "ludhiana", "amritsar", "agra", "meerut", "gandhinagar",
-        "hubli", "warangal", "vellore", "jodhpur", "maharashtra", "karnataka", "tamil nadu",
-        "telangana", "uttar pradesh", "gujarat", "haryana", "west bengal", "kerala",
-        "rajasthan", "andhra pradesh", "madhya pradesh", "odisha", "delhi ncr",
-      ],
-      atsLocations: ["India"],
-    },
+    // Moved to profiles/markets.ts on 2026-09-08, unchanged, when a second
+    // profile started targeting the same market — see that file for why a
+    // country definition is not a property of the candidate.
+    INDIA_MARKET,
   ],
 
   tracks: {
@@ -253,4 +264,44 @@ export function resolveProfileToken(token: string): string | null {
     }
   }
   return index.get(normalized) ?? null;
+}
+
+/**
+ * Free text ("tashi", "all", "wife-nl-finance") to a query scope.
+ *
+ * ONE COPY, since 2026-09-08. `job-state.ts` and `jobs-csv.ts` each carried a
+ * byte-identical nine-line version of this plus its own `ALL_PROFILES_TOKENS`
+ * set — the tool that LISTS a candidate's rows and the tool that EXPORTS them,
+ * resolving "whose rows are these" independently. That is exactly the rule that
+ * must not be allowed to drift between two commands the founder uses
+ * interchangeably.
+ *
+ * Returns `{}` for absent input, so the caller's own default applies (which is
+ * `DEFAULT_PROFILE_ID` in `profileCondition`, never "every profile"), and an
+ * `error` string on an unrecognised name rather than a silent fallback — an
+ * unmatched name is a question, not a default.
+ *
+ * `ALL_PROFILES` stays a symbol owned by db/job-queries.ts; this returns it
+ * untouched. Typed loosely here only to keep tools → db a one-way import.
+ */
+export const ALL_PROFILES_TOKENS: ReadonlySet<string> = new Set([
+  "all",
+  "both",
+  "everyone",
+  "everybody",
+]);
+
+export function resolveProfileScope<A>(
+  raw: string | undefined,
+  allProfiles: A,
+): { profileId?: string | A; error?: string } {
+  if (raw === undefined) return {};
+  const normalized = raw.trim().toLowerCase();
+  if (ALL_PROFILES_TOKENS.has(normalized)) return { profileId: allProfiles };
+  const resolved = resolveProfileToken(raw);
+  if (resolved) return { profileId: resolved };
+  const known = listProfiles()
+    .map((p) => p.id)
+    .join(", ");
+  return { error: `Unknown profile "${raw}". Known profiles: ${known}, or "all".` };
 }

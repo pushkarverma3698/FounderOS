@@ -99,8 +99,12 @@ describe("selectStanding", () => {
 
 describe("formatDailyBrief", () => {
   it("leads with the screened count and the per-track split", () => {
+    // "34 screened" until 2026-09-08, when A3 established that the word means
+    // the number of postings `screenPosting` ran against — and that the figure
+    // printed there had been the apply-queue size all along. The count itself
+    // is unchanged; only the noun it is given is now the one it measures.
     const out = formatDailyBrief(input());
-    expect(out).toContain("34 screened");
+    expect(out).toContain("34 postings reached screening");
     expect(out).toContain("ai 12");
     expect(out).toContain("backend 14");
   });
@@ -143,7 +147,7 @@ describe("formatDailyBrief", () => {
     const out = formatDailyBrief(
       input({ screened: 17, rows: [row({ verdict: "reject", liveness: "live" })] }),
     );
-    expect(out).toContain("17 screened");
+    expect(out).toContain("17 postings reached screening");
     expect(out).toContain("APPLY TODAY (0)");
   });
 

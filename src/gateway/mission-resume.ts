@@ -34,7 +34,7 @@ import type { ApprovalRequest } from "../infra/hitl.js";
 import { formatApprovalCard, safeHtml } from "./approval-card.js";
 import { markdownToTelegramHtml, splitForTelegram } from "./format.js";
 import { getTodayCostUsd } from "../db/queries.js";
-import { BudgetGuardCallback, createRunBudget } from "../infra/budget.js";
+import { enforceRunBudget } from "../infra/budget.js";
 import { assertDailyBudgetAllowsRun, DailyBudgetExceededError } from "../infra/daily-budget.js";
 import { readHalt } from "../infra/halt.js";
 import { startTurn } from "../infra/trace.js";
@@ -159,13 +159,14 @@ export async function resumeInterruptedMission(chatId: string): Promise<boolean>
     }
 
     const trace = startTurn({ chatId, kind: "resume", promptHash: kernelPromptHash() });
+    // enforceRunBudget, not a bare callback: a throw from a LangChain callback
+    // handler is swallowed by the framework, so the cap only stops a run when it
+    // rides the AbortSignal. See src/infra/budget.ts (prod turn 7dd021d8).
+    const budget = enforceRunBudget(process.env["AGENT_MODEL"] ?? "", kernelCostSink);
     const config = {
       configurable: { thread_id: threadId },
       recursionLimit: OFFICE_RECURSION_LIMIT,
-      callbacks: [
-        new BudgetGuardCallback(createRunBudget(), process.env["AGENT_MODEL"] ?? "", kernelCostSink),
-        new TraceCallback(trace),
-      ],
+      callbacks: [budget.callback, new TraceCallback(trace)],
     };
     const goal = snapshot.values?.mission?.goal ?? "";
     trace.event("turn.in", { textPreview: `[mission-resume] ${goal.slice(0, 100)}` });
@@ -179,7 +180,7 @@ export async function resumeInterruptedMission(chatId: string): Promise<boolean>
       // null input = continue this thread from its last valid checkpoint.
       // On deadline the run is ABORTED, not abandoned — the signal goes only to
       // stream() so the post-timeout fold/getState still work on a clean config.
-      const abort = new AbortController();
+      const abort = budget;
       const res = await withTurnTimeout(
         collectFinalState(
           kernel.stream(null, { ...config, streamMode: "values", signal: abort.signal }) as Promise<AsyncIterable<unknown>>,

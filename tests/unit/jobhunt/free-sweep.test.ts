@@ -21,9 +21,11 @@ vi.mock("../../../src/tools/jobhunt/free-ingest.js", () => ({
 // The board poll moved OUT of runFreeIngest and into runFreeSweep on 2026-09-04
 // (poll once, screen for every profile). Unmocked it would really hit 1,297
 // boards and time this suite out.
+vi.mock("../../../src/tools/jobhunt/aggregator-source.js", () => ({ sweepAggregators: vi.fn(async () => ({ candidates: [], failures: [], boardsPolled: 0 })) }));
 vi.mock("../../../src/tools/jobhunt/free-ats-source.js", async (orig) => ({
   ...(await (orig() as Promise<Record<string, unknown>>)),
   sweepBoards: vi.fn(async () => ({ candidates: [], failures: [], boardsPolled: 0 })),
+  sweepAggregators: vi.fn(async () => ({ candidates: [], failures: [], boardsPolled: 0 })),
 }));
 vi.mock("../../../src/tools/jobhunt/free-boards.js", async (orig) => ({
   ...(await (orig() as Promise<Record<string, unknown>>)),
@@ -141,19 +143,33 @@ describe("runFreeSweep", () => {
     expect(text).toContain("Embedded Software Engineer");
   });
 
-  it("does not alert when every line is duplicate, reject, or flag", async () => {
+  it("does not alert when every line is a duplicate or a reject", async () => {
+    // A duplicate is not new and a reject is legally void — neither is an action.
+    // A FLAG used to be in this list and no longer is: founder, 2026-09-08,
+    // "alerted every time we pass them, whenever we find new roles". See the
+    // test below, and sweep-heartbeat.ts's formatNewRowsAlert.
     mockRunFreeIngest.mockResolvedValue(
       result({
         lines: [
           line({ outcome: "duplicate", isNew: false }),
           line({ outcome: "reject", isNew: true }),
-          line({ outcome: "flag", isNew: true }),
         ],
       }),
     );
     await runFreeSweep();
 
     expect(mockSendToChat).not.toHaveBeenCalled();
+  });
+
+  it("DOES alert on a new flagged role", async () => {
+    // The NL-finance lane is mostly flags — non-sponsor employers, no salary
+    // stated — so filtering to `pass` meant it ranked roles and stayed silent.
+    mockRunFreeIngest.mockResolvedValue(
+      result({ lines: [line({ outcome: "flag", isNew: true })] }),
+    );
+    await runFreeSweep();
+
+    expect(mockSendToChat).toHaveBeenCalled();
   });
 
   it("does not alert when the only passing line was already seen (isNew false)", async () => {

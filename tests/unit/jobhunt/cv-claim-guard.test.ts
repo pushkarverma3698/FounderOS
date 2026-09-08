@@ -15,7 +15,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { verifyCvClaims } from "../../../src/tools/jobhunt/cv-claim-guard.js";
+import { verifyCvClaims, type CvClaimViolation } from "../../../src/tools/jobhunt/cv-claim-guard.js";
+import { describeClaimViolations } from "../../../src/tools/jobhunt/cv-claim-summary.js";
 
 /** A base CV with a graduation year (2015) and an employment date (Jan 2020) so date checks have two distinct years to work with. */
 const BASE_CV = [
@@ -203,5 +204,44 @@ describe("verifyCvClaims — catches fabricated degrees", () => {
     expect(result.violations).toContainEqual(
       expect.objectContaining({ kind: "degree" }),
     );
+  });
+});
+
+describe("describeClaimViolations — what the founder actually reads", () => {
+  const tech = (claim: string): CvClaimViolation => ({
+    kind: "technology",
+    claim,
+    reason: `"${claim}" appears in the tailored CV but extractSkillTerms finds no mention of it anywhere in the base CV.`,
+  });
+
+  it("names every claim, grouped by kind, in one short line", () => {
+    const out = describeClaimViolations([
+      tech("ETL"),
+      tech("Java"),
+      { kind: "date", claim: "2019", reason: "The year 2019 does not appear anywhere in the base CV." },
+    ]);
+
+    expect(out).toContain("3 things");
+    expect(out).toContain("technology: ETL, Java");
+    expect(out).toContain("date: 2019");
+    // The per-violation prose is for the log, not for Telegram.
+    expect(out).not.toContain("extractSkillTerms");
+  });
+
+  it("stays short enough to survive the /draft clip even with many claims", () => {
+    // PROD 2026-09-07: joining full reasons produced a >700-char blob that the
+    // gateway cut at 200, so the founder saw `... [technology] "TD)` and none
+    // of the list. Ten claims must still fit.
+    const out = describeClaimViolations(
+      ["ETL", "Java", "Kubernetes", "Terraform", "Kafka", "Spark", "Go", "Rust", "Scala", "Hadoop"].map(tech),
+    );
+
+    expect(out.length).toBeLessThan(200);
+    expect(out).toContain("10 things");
+    expect(out).toContain("(+4 more)");
+  });
+
+  it("says '1 thing', not '1 things', for a single claim", () => {
+    expect(describeClaimViolations([tech("ETL")])).toContain("1 thing the base CV never states");
   });
 });

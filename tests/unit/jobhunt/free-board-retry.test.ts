@@ -32,15 +32,22 @@ function board(overrides: Partial<FreeBoard> = {}): FreeBoard {
 }
 
 const okResponse = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-const errorResponse = (status: number) => ({
+const errorResponse = (status: number, retryAfter?: string) => ({
   ok: false,
   status,
+  headers: { get: (name: string) => (name.toLowerCase() === "retry-after" ? (retryAfter ?? null) : null) },
   json: async () => ({}),
   body: { cancel: async () => {} },
 });
 
 /** No real waiting: the delays are asserted separately, on the pure function. */
 const noSleep = { sleep: async () => {} };
+
+/** Captures every delay it was asked to wait, without actually waiting. */
+function recordingSleep(): { sleep: (ms: number) => Promise<void>; delays: number[] } {
+  const delays: number[] = [];
+  return { sleep: async (ms: number) => void delays.push(ms), delays };
+}
 
 beforeEach(() => {
   mockFetch.mockReset();
@@ -56,6 +63,34 @@ describe("fetchBoard — retrying a rate-limited board", () => {
 
     expect(result.ok).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits at least as long as the server's Retry-After, not just the exponential guess", async () => {
+    // Wired but never exercised: HttpStatusError has carried retryAfterMs since
+    // #639, and fetchBoard's catch already does Math.max(guess, retryAfterMs) —
+    // but nothing asserted a server-stated wait actually reaches deps.sleep.
+    // Recruitee's real 429s are the reason this path exists at all (see the file
+    // header); a regression here would silently go back to guessing.
+    mockFetch
+      .mockResolvedValueOnce(errorResponse(429, "5")) // 5 seconds, far above the ~200-800ms guess
+      .mockResolvedValueOnce(okResponse({ offers: [] }));
+    const deps = recordingSleep();
+
+    const result = await fetchBoard(board(), deps);
+
+    expect(result.ok).toBe(true);
+    expect(deps.delays[0]).toBeGreaterThanOrEqual(5000);
+  });
+
+  it("gives up rather than hang the sweep on a Retry-After over 60 seconds", async () => {
+    mockFetch.mockResolvedValueOnce(errorResponse(429, "120"));
+    const deps = recordingSleep();
+
+    const result = await fetchBoard(board(), deps);
+
+    expect(result.ok).toBe(false);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(deps.delays).toHaveLength(0);
   });
 
   it("gives up after a bounded number of attempts and names the status", async () => {

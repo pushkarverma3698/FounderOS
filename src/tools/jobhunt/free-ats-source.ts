@@ -23,19 +23,14 @@
  *   3. A request that hangs is bounded. No timeout means one slow host stalls a
  *      sweep that is supposed to finish inside its 30-minute window.
  *
- * A FOURTH, ADDED 2026-08-21: a board that rate-limited us is asked again, not
- * written off. Recruitee limits the CALLER rather than the board, so 36 of 113
- * boards failed on every single sweep from the VPS and lowering the in-flight
- * limit to 1 only moved that to 15 — a third of the Dutch registry permanently
- * unreachable, and invisible, because the ledger only ever stored the first
- * three failure strings and those were always the same harmless 404s.
+ * A FOURTH, ADDED 2026-08-21: retry on rate limits (e.g., Recruitee 429s).
  */
 
 import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
-import type { FreeAts, FreeBoard } from "./free-boards.js";
+import { describeSkips, getLastRegistrySkips, type FreeAts, type FreeBoard } from "./free-boards.js";
 import { createEtagCache, type EtagCache } from "./free-ats-cache.js";
-import { HttpStatusError, fetchJson, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
+import { HttpStatusError, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
 import { getAdapter } from "./adapters/index.js";
 import { decodeJobBody, type NormalizedJob as FreeCandidate } from "./adapters/types.js";
 
@@ -66,9 +61,6 @@ const log = childLogger({ module: "jobhunt:free-ats" });
 
 /** One board's list endpoint. Whole-board payloads, so more generous than a HEAD. */
 export const BOARD_TIMEOUT_MS = 20_000;
-
-/** One Greenhouse posting's body. Small payload, so a tighter bound. */
-export const DESCRIPTION_TIMEOUT_MS = 10_000;
 
 /**
  * How many boards to poll at once.
@@ -102,24 +94,9 @@ export const PLATFORM_CONCURRENCY: Readonly<Record<FreeAts, number>> = {
   lever: BOARD_CONCURRENCY,
   ashby: BOARD_CONCURRENCY,
   recruitee: 2,
-  // Both start at the default. Recruitee's 2 was tuned against a measured 429
-  // rate; guessing a lower number for a platform we have not yet seen throttle
-  // would slow the sweep to prevent a problem nobody has observed. If either
-  // starts 429ing, the retry-with-backoff added on 2026-08-21 absorbs it and
-  // `summariseFailures` reports it by platform, which is how Recruitee's own
-  // rate limit became visible in the first place.
   smartrecruiters: BOARD_CONCURRENCY,
   workable: BOARD_CONCURRENCY,
-  // Deliberately below the default. Personio is the one platform whose board
-  // response is megabytes rather than kilobytes, so in-flight requests here cost
-  // memory as well as sockets: eight concurrent 2.26 MB bodies is ~18 MB of
-  // buffers on a box that also runs Postgres and Ollama. Most sweeps revalidate
-  // to a 0-byte 304 and never allocate, so the ceiling only binds on the sweep
-  // after a board actually changes — which is exactly when it should.
   personio: 3,
-  // Below the default because Workday is the only platform that spends MULTIPLE
-  // requests per board (limit is capped at 20, so a 100-posting board is five
-  // POSTs). At the default this would be up to 8 × 5 requests in flight against
   // hosts that all sit behind a handful of Workday datacenters. Four keeps the
   // per-origin burst in the same range as every other platform's single GET.
   workday: 4,
@@ -129,6 +106,17 @@ export const PLATFORM_CONCURRENCY: Readonly<Record<FreeAts, number>> = {
   // (dateOnlyInDetail), so its true request count per sweep is the highest of the
   // three added on 2026-08-24 despite having the fewest boards.
   bamboohr: 4,
+};
+
+/**
+ * Strict requests-per-second pacing. Even with a concurrency limit, 8 parallel workers
+ * firing at t=0 yields a burst of 8 RPS, which triggers edge CDNs like Cloudflare.
+ * These staggers enforce a minimum delay between each dispatch across a platform.
+ * 100ms = Max 10 RPS. 300ms = Max ~3.3 RPS.
+ */
+export const PLATFORM_STAGGER_MS: Readonly<Record<FreeAts, number>> = {
+  greenhouse: 100, lever: 100, ashby: 100, recruitee: 300, smartrecruiters: 100, 
+  workable: 100, personio: 200, workday: 200, teamtailor: 100, bamboohr: 200,
 };
 
 /**
@@ -236,7 +224,13 @@ export async function fetchBoard(
           break;
         } catch (err) {
           if (attempt >= BOARD_ATTEMPTS || !isRetryable(err)) throw err;
-          await deps.sleep(retryDelayMs(attempt, Math.random()));
+          
+          let delay = retryDelayMs(attempt, Math.random());
+          if (err instanceof HttpStatusError && err.retryAfterMs) {
+            if (err.retryAfterMs > 60_000) throw err; // Don't hang the worker for more than a minute
+            delay = Math.max(delay, err.retryAfterMs);
+          }
+          await deps.sleep(delay);
         }
       }
       payloads.push(payload);
@@ -324,7 +318,12 @@ export async function sweepBoards(boards: readonly FreeBoard[]): Promise<BoardSw
   const results = (
     await Promise.all(
       [...byPlatform].map(([ats, group]) =>
-        mapWithConcurrencyLimit(group, PLATFORM_CONCURRENCY[ats], fetchBoard),
+        mapWithConcurrencyLimit(
+          group,
+          PLATFORM_CONCURRENCY[ats],
+          fetchBoard,
+          PLATFORM_STAGGER_MS[ats]
+        )
       ),
     )
   ).flat();
@@ -340,6 +339,15 @@ export async function sweepBoards(boards: readonly FreeBoard[]): Promise<BoardSw
     }
   }
 
+  // The registry's own drops, alongside the sweep's. A corpus import that wrote
+  // a platform typo removes boards silently otherwise, and MIN_EXPECTED_BOARDS
+  // is a floor, not a smoke alarm — it says nothing until a third of the file is
+  // already gone.
+  const skips = getLastRegistrySkips();
+  if (skips.unknownPlatform + skips.blankToken + skips.duplicate > 0) {
+    log.warn({ ...skips }, `Board registry rows dropped at parse — ${describeSkips(skips)}`);
+  }
+
   log.info(
     { boards: boards.length, failed: failures.length, candidates: candidates.length },
     "Free board sweep complete",
@@ -348,45 +356,12 @@ export async function sweepBoards(boards: readonly FreeBoard[]): Promise<BoardSw
   return { candidates, failures, boardsPolled: boards.length };
 }
 
-/**
- * Fill in the bodies Greenhouse withheld.
- *
- * Candidates that already have a description (Lever, Ashby) pass through
- * untouched and cost nothing. A body that cannot be fetched leaves the candidate
- * with `description: null`, and the caller drops it with a reason — screening a
- * posting on an empty body would read as "this employer stated no requirements",
- * which every gate would then wave through.
- */
-export async function hydrateDescriptions(
-  candidates: readonly FreeCandidate[],
-): Promise<FreeCandidate[]> {
-  return mapWithConcurrencyLimit(candidates, BOARD_CONCURRENCY, async (candidate) => {
-    if (candidate.description !== null) return candidate;
-
-    const adapter = getAdapter(candidate.board.ats);
-    if (!adapter) return candidate;
-
-    const url = adapter.getJobUrl(candidate.board, candidate.externalId);
-    // Null means the platform inlines its bodies, so a null description here is
-    // a posting that genuinely has none — not one we failed to fetch.
-    if (url === null) return candidate;
-
-    try {
-      const payload = (await fetchJson(url, DESCRIPTION_TIMEOUT_MS)) as Record<string, unknown>;
-      // For a `dateOnlyInDetail` platform this is the FIRST point at which the
-      // posting's real publication date exists. Everything before it treated the
-      // date as unknown rather than as absent, deliberately.
-      const postedAt = adapter.postedAtFromDetail?.(payload) ?? candidate.postedAt;
-      return { ...candidate, postedAt, description: adapter.extractBody(payload) || null };
-    } catch (err) {
-      log.warn(
-        { board: candidate.board.token, id: candidate.externalId, err: (err as Error).message },
-        "Could not fetch posting body",
-      );
-      return candidate;
-    }
-  });
-}
+// hydrateDescriptions and DESCRIPTION_TIMEOUT_MS moved to free-ats-hydrate.ts
+// (2026-09-08) — merging the detail payload's LOCATION into the candidate, the
+// fix for a Paris vacancy that reached a Netherlands-only brief, pushed this file
+// past the 400-line budget. Re-exported so every existing import site and test
+// keeps resolving here, same as the transport and mapper splits before it.
+export { hydrateDescriptions, DESCRIPTION_TIMEOUT_MS } from "./free-ats-hydrate.js";
 
 // decodeJobBody moved to free-ats-mappers.ts (2026-08-20) — Recruitee's
 // mapper needs the same tag-to-space HTML decode this Greenhouse hydration

@@ -90,6 +90,16 @@ describe("Manual QA Audit — Multi-Profile Verification", () => {
     expect(classifyTrack("Treasury Analyst", wife)).toBe("finance-ops");
     expect(classifyTrack("Due Diligence Analyst", wife)).toBe("finance-ops");
 
+    // Added 2026-09-07, and ONLY these two. The track-coverage audit ran her
+    // classifier over 4,511 live postings; of the 174 Dutch ones it dropped,
+    // exactly one was finance-shaped and inside her 0-4-year range — a "Finance
+    // Operations Specialist" in Utrecht. Everything else was CFO/Director/Head-of
+    // or quant risk. The seniority prefix is not enumerated because `titles`
+    // matches as a substring.
+    expect(classifyTrack("Finance Operations Specialist", wife)).toBe("finance-ops");
+    expect(classifyTrack("Finance Operations Analyst", wife)).toBe("finance-ops");
+    expect(classifyTrack("Senior Finance Operations Specialist", wife)).toBe("finance-ops");
+
     // Junior/forensic auditor titles land in auditor, not finance-ops or
     // compliance-kyc — an easy place for a new track's keywords to collide.
     expect(classifyTrack("Junior Internal Auditor", wife)).toBe("auditor");
@@ -196,11 +206,18 @@ describe("Manual QA Audit — Multi-Profile Verification", () => {
     expect(row?.["tenant_id"]).toBe("turicks");
   });
 
-  it("Scenario 7: an India-market posting rejects for her rather than passing under a Dutch permit", async () => {
+  it("Scenario 7: an India-market posting is screened as an Indian hire, never under a Dutch permit", async () => {
     // Found live on a real VPS sim run, 2026-09-04: a Bangalore posting passed
     // under route "zoekjaar" — her Dutch orientation-year permit, evidence text
     // "free access to the Dutch labour market" — on a job that is not in the
-    // Dutch labour market. She holds zoekjaar+hsm, never india-local.
+    // Dutch labour market.
+    //
+    // UPDATED 2026-09-08 (founder: "Tashi will also apply in india"). She now
+    // holds `india-local`, so the correct outcome is no longer a reject — it is
+    // a screen under the INDIAN basis. The invariant the scenario was written to
+    // protect is untouched and still asserted below: an Indian posting is never
+    // carried under a Dutch permit. Only the consequence of holding no Indian
+    // basis has changed, because she now holds one.
     const wife = getProfile("wife-nl-finance");
 
     const description = `
@@ -219,14 +236,22 @@ describe("Manual QA Audit — Multi-Profile Verification", () => {
 
     expect(result.kind).toBe("screened");
     if (result.kind === "screened") {
-      expect(result.verdict.status).toBe("reject");
-      // Not carried under a Dutch permit basis that has nothing to do with
-      // an India-market posting.
+      // THE INVARIANT, unchanged: never carried under a Dutch permit basis that
+      // has nothing to do with an India-market posting.
+      expect(result.route).toBe("india-local");
       expect(result.route).not.toBe("zoekjaar");
       expect(result.route).not.toBe("hsm");
+
       const basisGate = result.verdict.gates.find((g) => g.gate === "Basis");
-      expect(basisGate?.status).toBe("reject");
       expect(basisGate?.evidence).not.toContain("Dutch labour market");
+      // No Dutch-language gate on an Indian posting — "✅ no Dutch requirement
+      // mentioned" on a Bangalore role is noise wearing the costume of a check.
+      expect(result.verdict.gates.map((g) => g.gate)).not.toContain("Language");
+
+      // And she is not measured against the founder's ₹15 LPA line: no figure
+      // is stated in this ad, and no line is set for her either way.
+      const payGate = result.verdict.gates.find((g) => g.gate === "Pay");
+      expect(payGate?.status).toBe("pass");
     }
   });
 });

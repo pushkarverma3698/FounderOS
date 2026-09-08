@@ -93,6 +93,26 @@ export interface AtsAdapter {
   postedAtFromDetail?(payload: Record<string, unknown>): Date | null;
 
   /**
+   * Where the job is, read from a DETAIL payload — the same deferred-resolution
+   * shape as `postedAtFromDetail` above, and added for the same class of reason.
+   *
+   * MEASURED 2026-09-08: Workday's LIST payload leaves `locationsText` empty on
+   * some tenants, so a Paris shop-floor vacancy was stored `country='unknown',
+   * location=''`. `unknown` is kept by the market filter on purpose (a genuinely
+   * remote role states no country), so it survived an NL-only lane and reached
+   * rank 2 of a brief. The detail payload we ALREADY fetch for its description
+   * carried `location: 'Paris'` and `country: {descriptor: 'France'}` the whole
+   * time.
+   *
+   * Return null when the payload says nothing — an absent answer must stay
+   * `unknown`, never become a guess. `countryFromDetail` returns the country's
+   * own NAME as the ATS writes it ("France"), not an ISO code: `country.ts` owns
+   * the name→code mapping and is the only place that should.
+   */
+  locationFromDetail?(payload: Record<string, unknown>): string | null;
+  countryFromDetail?(payload: Record<string, unknown>): string | null;
+
+  /**
    * Return the URL to fetch the full list of jobs.
    */
   getBoardUrl(board: FreeBoard): string;

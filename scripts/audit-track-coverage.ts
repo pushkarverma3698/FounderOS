@@ -135,6 +135,13 @@ async function main(): Promise<void> {
   const markets = profile.targetCountries.map((c) => c.code).join("/");
   console.log(`  (of classified, ${offMarket} were outside ${markets})`);
 
+  // The number the lane is actually judged on, printed rather than left as an
+  // arithmetic exercise. "classified 715" and "660 outside NL" are two facts that
+  // only mean something subtracted, and a metric a reader has to compute is a
+  // metric that gets quoted wrong — 2026-09-07, this lane's real figure was 55
+  // while the visible one said 715.
+  console.log(`\nIN-MARKET ON-TRACK: ${sweep.candidates.length - totalUnclassified - offMarket} postings in ${markets}`);
+
   console.log(`\n── top 120 unclassified titles ──`);
   for (const [title, n] of ranked.slice(0, 120)) {
     console.log(`${String(n).padStart(4)}  ${title}`);

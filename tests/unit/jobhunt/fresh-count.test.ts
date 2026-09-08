@@ -132,7 +132,7 @@ describe("screenBatch — carrying the count to the ledger", () => {
 
 describe("renderSpend — a sweep that bought nothing new must say so", () => {
   it("names the zero in words rather than printing a bare 0", async () => {
-    const out = renderSpend({ runs: 14, returned: 32, costUsd: 0.4682, failed: 0, fresh: 0 });
+    const out = renderSpend({ runs: 14, returned: 32, costUsd: 0.4682, runsWithErrors: 0, fresh: 0 });
 
     expect(out).toContain("$0.47");
     expect(out).toContain("32 postings");
@@ -143,14 +143,14 @@ describe("renderSpend — a sweep that bought nothing new must say so", () => {
   });
 
   it("reports a productive sweep as a plain count", async () => {
-    const out = renderSpend({ runs: 14, returned: 32, costUsd: 0.4682, failed: 0, fresh: 9 });
+    const out = renderSpend({ runs: 14, returned: 32, costUsd: 0.4682, runsWithErrors: 0, fresh: 9 });
 
     expect(out).toContain("9 new");
     expect(out.toLowerCase()).not.toContain("none of them new");
   });
 
   it("counts one new role in the singular", async () => {
-    const out = renderSpend({ runs: 14, returned: 32, costUsd: 0.4682, failed: 0, fresh: 1 });
+    const out = renderSpend({ runs: 14, returned: 32, costUsd: 0.4682, runsWithErrors: 0, fresh: 1 });
 
     expect(out).toContain("1 new");
   });

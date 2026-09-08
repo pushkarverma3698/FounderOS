@@ -19,6 +19,7 @@
 
 import type { Channel } from "./brand-validator.js";
 import { getJudgeModel, isJudgeEnabled, resolveJudgeModelId } from "./judge-model.js";
+import { recordJudgeFailure, recordJudgeSuccess } from "./judge-health.js";
 import { childLogger } from "./logger.js";
 
 // Provider wiring lives in judge-model.ts; re-exported so importers and the
@@ -129,9 +130,21 @@ export async function judgeOutbound(
     const res = await model.invoke(buildJudgePrompt(text, channel));
     const content = typeof res.content === "string" ? res.content : JSON.stringify(res.content);
     verdict = parseJudgeVerdict(content);
+    recordJudgeSuccess();
   } catch (err) {
-    // Infra failure must never block the founder — HITL still gates the send.
-    log.warn({ err: (err as Error).message, channel }, "Judge errored — failing open to pass");
+    // Still fails open — HITL gates the send, and a judge that blocks the
+    // founder on its own confusion is worse than no judge. What changed
+    // (2026-09-08) is that failing open now leaves a MARK: `error`, not `warn`,
+    // and a counter the hourly scheduler turns into one Telegram message per
+    // outage episode. Three times a withdrawn free slug turned this gate into a
+    // silent no-op for hours; each time the only evidence was a raw log grep
+    // nobody was running. See judge-health.ts.
+    const message = (err as Error).message;
+    recordJudgeFailure(message);
+    log.error(
+      { err: message, channel, event: "judge_unavailable", model: judgeModelLabel() },
+      "Judge could not produce a verdict — gate 2 failed OPEN (this draft was NOT reviewed)",
+    );
     verdict = { verdict: "pass" };
   }
 
