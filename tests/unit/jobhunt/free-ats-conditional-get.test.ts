@@ -79,6 +79,28 @@ describe("fetchPayload — conditional requests", () => {
     expect(mockFetch.mock.calls[0]?.[1]?.headers).not.toHaveProperty("if-none-match");
   });
 
+  it("pays for the body when a 304 lands on a payload the cache can no longer produce", async () => {
+    // The defect this pins, reintroduced when the cache moved to Postgres:
+    // `headersFor` and `read` are now two separate round trips, so a row that
+    // is dropped between them — or a cache DB that errors on the second read,
+    // which fails open to `undefined` — turns a 304 into "this board has no
+    // jobs". A board that silently contributes zero candidates reads exactly
+    // like an employer with no openings, and is counted as neither a failure
+    // nor a find. A cache miss must cost bandwidth, never correctness.
+    const cache = {
+      headersFor: async () => ({ "if-none-match": '"v1"' }),
+      read: async () => undefined,
+      store: async () => undefined,
+    };
+
+    mockFetch.mockResolvedValueOnce(notModified);
+    mockFetch.mockResolvedValueOnce(xmlResponse("<positions>refetched</positions>", '"v1"'));
+
+    expect(await fetchPayload(URL_, 1000, "xml", cache)).toBe("<positions>refetched</positions>");
+    // The second attempt must carry no validator, or the server answers 304 again.
+    expect(mockFetch.mock.calls[1]?.[1]?.headers).not.toHaveProperty("if-none-match");
+  });
+
   it("does not retry-or-throw on a response that carries no headers", async () => {
     // The defect this pins: reading `.headers.get` on a header-less response
     // throws inside the fetch, which `isRetryable` cannot tell apart from a
