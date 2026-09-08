@@ -34,22 +34,17 @@ import { writeArtifactFile } from "../artifact.js";
 import type { UnifiedTool, ToolResult } from "../index.js";
 import { buildQueueTab, buildLogTab } from "./sheet-rows.js";
 import { toCsv } from "./csv-export.js";
-import { listProfiles, resolveProfileToken } from "./profile-config.js";
+import { listProfiles, resolveProfileScope } from "./profile-config.js";
 
 /** Which table the file holds. Mirrors `/csv` so the two never disagree. */
 export type JobsCsvKind = "queue" | "log";
 
 /** `all` and friends — an explicit cross-candidate export, never the default. */
-const ALL_PROFILES_TOKENS = new Set(["all", "both", "everyone", "everybody"]);
 
 function resolveProfileFilter(raw: string | undefined): { profileId?: ProfileScope; error?: string } {
-  if (raw === undefined) return {};
-  const normalized = raw.trim().toLowerCase();
-  if (ALL_PROFILES_TOKENS.has(normalized)) return { profileId: ALL_PROFILES };
-  const resolved = resolveProfileToken(raw);
-  if (resolved) return { profileId: resolved };
-  const known = listProfiles().map((p) => p.id).join(", ");
-  return { error: `Unknown profile "${raw}". Known profiles: ${known}, or "all".` };
+  // One implementation, in profile-config.ts — this file and job-state.ts
+  // carried byte-identical copies until 2026-09-08.
+  return resolveProfileScope(raw, ALL_PROFILES);
 }
 
 /**

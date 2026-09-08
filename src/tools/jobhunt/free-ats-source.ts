@@ -28,7 +28,7 @@
 
 import { childLogger } from "../../infra/logger.js";
 import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
-import type { FreeAts, FreeBoard } from "./free-boards.js";
+import { describeSkips, getLastRegistrySkips, type FreeAts, type FreeBoard } from "./free-boards.js";
 import { createEtagCache, type EtagCache } from "./free-ats-cache.js";
 import { HttpStatusError, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
 import { getAdapter } from "./adapters/index.js";
@@ -337,6 +337,15 @@ export async function sweepBoards(boards: readonly FreeBoard[]): Promise<BoardSw
     } else {
       failures.push(`${result.board.ats}/${result.board.token}: ${result.error}`);
     }
+  }
+
+  // The registry's own drops, alongside the sweep's. A corpus import that wrote
+  // a platform typo removes boards silently otherwise, and MIN_EXPECTED_BOARDS
+  // is a floor, not a smoke alarm — it says nothing until a third of the file is
+  // already gone.
+  const skips = getLastRegistrySkips();
+  if (skips.unknownPlatform + skips.blankToken + skips.duplicate > 0) {
+    log.warn({ ...skips }, `Board registry rows dropped at parse — ${describeSkips(skips)}`);
   }
 
   log.info(

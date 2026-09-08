@@ -28,15 +28,24 @@ const saveLaneHeartbeat = vi.fn(async (profileId: string, state: unknown) => {
   mockHeartbeatStore.set(profileId, state);
 });
 
-vi.mock("../../../src/tools/jobhunt/aggregator-source.js", () => ({ sweepAggregators: vi.fn(async () => ({ candidates: [], failures: [], boardsPolled: 0 })) }));
+// Wired to the shared `sweepAggregators` const, not a fresh `vi.fn`. It was an
+// inline one until 2026-09-08, so `sweepAggregators.mockResolvedValue(...)` in a
+// test set a spy nothing called — `runFreeSweep` imports from THIS module, and
+// the aggregator branch was therefore never exercised by any test in this file.
+vi.mock("../../../src/tools/jobhunt/aggregator-source.js", async (orig) => ({
+  ...(await (orig() as Promise<Record<string, unknown>>)),
+  sweepAggregators,
+}));
 vi.mock("../../../src/tools/jobhunt/free-ats-source.js", async (orig) => ({
   ...(await (orig() as Promise<Record<string, unknown>>)),
   sweepBoards,
   sweepAggregators,
 }));
+const registerDiscoveredBoard = vi.fn(async () => undefined);
 vi.mock("../../../src/tools/jobhunt/free-boards.js", async (orig) => ({
   ...(await (orig() as Promise<Record<string, unknown>>)),
   getFreeBoards: () => [{ name: "acme", ats: "greenhouse", token: "acme", markets: [] }],
+  registerDiscoveredBoard,
 }));
 vi.mock("../../../src/tools/jobhunt/free-ingest.js", () => ({ runFreeIngest }));
 vi.mock("../../../src/tools/jobhunt/daily-brief.js", () => ({ buildDailyBrief }));
@@ -79,7 +88,12 @@ describe("runFreeSweep", () => {
       mockHeartbeatStore.set(profileId, state);
     });
     sweepBoards.mockResolvedValue(BOARD_SWEEP);
-    sweepAggregators.mockResolvedValue({ candidates: [], failures: [], boardsPolled: 0 });
+    sweepAggregators.mockResolvedValue({
+      candidates: [],
+      failures: [],
+      harvestedTokens: [],
+      sourceCounts: new Map(),
+    });
     runFreeIngest.mockResolvedValue(ingestResult());
     buildDailyBrief.mockResolvedValue("brief");
     // `resetHeartbeat` writes the default profile's row, so clear AFTER setup —
@@ -177,5 +191,91 @@ describe("runFreeSweep", () => {
     const messages = sendToChat.mock.calls.map((c) => String(c[0] ?? ""));
     const named = messages.filter((m) => m.includes("passed screening for "));
     expect(named.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * REGRESSION, 2026-09-08: the registry's self-growth mechanism was dead two ways.
+ *
+ * `startBoardHarvest`/`collectBoardTokens`/`flushBoardHarvest` had exactly one
+ * caller — `ingest.ts`, the metered sweep, whose `cron.schedule()` was removed on
+ * 2026-08-21. And the free lane's aggregator branch computed board tokens, logged
+ * the COUNT, and threw them away; it could not have written them anyway, because
+ * `harvestedTokens` is `{ats, token}` and `registerDiscoveredBoard` needs a name.
+ *
+ * Net: `/opt/founderos-data/free-ats-discovered.csv` did not exist on the
+ * production box, and no board had been discovered since August. The module
+ * header's claim — "one aggregator sweep discovers boards that every future ATS
+ * sweep polls directly, forever" — described a mechanism that had never fired.
+ */
+describe("runFreeSweep grows the board registry from aggregator URLs", () => {
+  beforeEach(async () => {
+    // Full reset: this block is a sibling of the suite above, not nested inside
+    // it, so it does not inherit that beforeEach — and without the clear, one
+    // test's discovery is still on the spy when the next one asserts.
+    vi.clearAllMocks();
+    await resetHeartbeat(new Date("2026-09-04T00:00:00Z"));
+    sweepBoards.mockResolvedValue(BOARD_SWEEP);
+    runFreeIngest.mockResolvedValue(ingestResult({ lines: [] }));
+    buildDailyBrief.mockResolvedValue("brief");
+    exportJobSheet.mockResolvedValue({ ok: true, url: "https://sheet" });
+    saveLaneHeartbeat.mockImplementation(async () => undefined);
+    sweepAggregators.mockResolvedValue({
+      candidates: [
+        {
+          board: { name: "Speechify", ats: "greenhouse", token: "aggregator-arbeitnow", markets: [] },
+          externalId: "arbeitnow:1",
+          title: "Financial Analyst",
+          url: "https://boards.greenhouse.io/speechify/jobs/4123",
+          location: "Amsterdam",
+          postedAt: new Date("2026-09-08T00:00:00Z"),
+          description: "A finance role.",
+        },
+      ],
+      failures: [],
+      harvestedTokens: [{ ats: "greenhouse", token: "speechify" }],
+      sourceCounts: new Map(),
+    });
+  });
+
+  it("writes a board it found on an aggregator's posting URL", async () => {
+    await runFreeSweep();
+    expect(registerDiscoveredBoard).toHaveBeenCalledWith(
+      expect.objectContaining({ ats: "greenhouse", token: "speechify", name: "Speechify" }),
+    );
+  });
+
+  it("claims no market it has not established", async () => {
+    // The aggregator's location string has not been resolved against any
+    // candidate's markets at this point, so an empty column is the honest answer —
+    // the same rule harvestNewBoardTokens already applies to `other`/`unknown`.
+    await runFreeSweep();
+    const written = registerDiscoveredBoard.mock.calls.at(0)?.at(0) as
+      | { markets: readonly string[] }
+      | undefined;
+    expect(written?.markets).toEqual([]);
+  });
+
+  it("does not write a board the registry already has", async () => {
+    // getFreeBoards is mocked to return greenhouse/acme, so a sighting of it is
+    // not a discovery.
+    sweepAggregators.mockResolvedValue({
+      candidates: [
+        {
+          board: { name: "Acme", ats: "greenhouse", token: "aggregator-arbeitnow", markets: [] },
+          externalId: "arbeitnow:2",
+          title: "Analyst",
+          url: "https://boards.greenhouse.io/acme/jobs/1",
+          location: "Amsterdam",
+          postedAt: new Date("2026-09-08T00:00:00Z"),
+          description: "x",
+        },
+      ],
+      failures: [],
+      harvestedTokens: [],
+      sourceCounts: new Map(),
+    });
+    await runFreeSweep();
+    expect(registerDiscoveredBoard).not.toHaveBeenCalled();
   });
 });

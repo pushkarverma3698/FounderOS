@@ -23,10 +23,9 @@ import { jobApplications, type JobApplication } from "../db/schema.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 import { queryJobState, ALL_PROFILES } from "../db/job-queries.js";
-import { listProfiles, resolveProfileToken } from "./jobhunt/profile-config.js";
+import { listProfiles, resolveProfileScope } from "./jobhunt/profile-config.js";
 
 /** "all" / "both" / "everyone" — the founder or the LLM asking for every candidate at once. */
-const ALL_PROFILES_TOKENS = new Set(["all", "both", "everyone", "everybody"]);
 
 // ── section vs track: two vocabularies that used to fail silently ─────────────
 
@@ -110,13 +109,9 @@ function resolveTrack(raw: string | undefined): { track?: string; error?: string
  * 2026-09-07, which is exactly the bug being fixed here.
  */
 function resolveProfileFilter(raw: string | undefined): { profileId?: string | typeof ALL_PROFILES; error?: string } {
-  if (raw === undefined) return {};
-  const normalized = raw.trim().toLowerCase();
-  if (ALL_PROFILES_TOKENS.has(normalized)) return { profileId: ALL_PROFILES };
-  const resolved = resolveProfileToken(raw);
-  if (resolved) return { profileId: resolved };
-  const known = listProfiles().map((p) => p.id).join(", ");
-  return { error: `Unknown profile "${raw}". Known profiles: ${known}, or "all".` };
+  // One implementation, in profile-config.ts — this file and job-state.ts
+  // carried byte-identical copies until 2026-09-08.
+  return resolveProfileScope(raw, ALL_PROFILES);
 }
 
 export const jobStateTool: UnifiedTool = {

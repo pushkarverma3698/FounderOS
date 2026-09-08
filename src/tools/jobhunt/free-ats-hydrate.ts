@@ -22,6 +22,7 @@ import { fetchJson } from "./free-ats-transport.js";
 import { getAdapter } from "./adapters/index.js";
 import type { AtsAdapter, NormalizedJob as FreeCandidate } from "./adapters/types.js";
 import { mergeDetailLocation } from "./free-ingest-filters.js";
+import { AGGREGATOR_TOKEN_PREFIX } from "./aggregator-source.js";
 
 const log = childLogger({ module: "jobhunt:free-ats" });
 
@@ -70,6 +71,11 @@ export async function hydrateDescriptions(
 ): Promise<FreeCandidate[]> {
   return mapWithConcurrencyLimit(candidates, HYDRATE_CONCURRENCY, async (candidate) => {
     if (candidate.description !== null) return candidate;
+    // An aggregator's synthetic board carries a placeholder `ats`, so hydrating
+    // it would fetch a Greenhouse URL built from a token no Greenhouse board has.
+    // aggregator-source.ts asserts these never need hydration; this is what makes
+    // that true rather than merely stated.
+    if (candidate.board.token.startsWith(AGGREGATOR_TOKEN_PREFIX)) return candidate;
 
     const adapter = getAdapter(candidate.board.ats);
     if (!adapter) return candidate;
