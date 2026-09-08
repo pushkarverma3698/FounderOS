@@ -1,0 +1,679 @@
+# German tech employers, DAX engineering centres, and Berlin/Munich scaleups.
+# Curated for board discovery. Turned into board-registry rows by:
+#   pnpm jobhunt:import-boards --employers-path docs/strategy/data/de-tech-employers.csv --market DE
+name,sector
+SAP,enterprise-software
+Zalando,e-commerce-fashion
+Delivery Hero,food-delivery
+HelloFresh,meal-kits
+N26,fintech-neobank
+Trade Republic,fintech-brokerage
+Celonis,process-mining
+Personio,hr-saas
+Flix,mobility-travel
+FlixBus,mobility-travel
+Tier Mobility,micro-mobility
+Auto1 Group,automotive-platform
+Solaris,banking-as-a-service
+Enpal,greentech-solar
+DeepL,ai-translation
+Wefox,insurtech
+Raisin,fintech-wealth
+Taxfix,fintech-tax
+Grover,subscription-electronics
+Pitch,presentation-software
+Contentful,headless-cms
+Omio,travel-booking
+Tourlane,travel-tech
+Forto,freight-forwarding
+Sennder,digital-road-freight
+Choco,food-supply-tech
+Scout24,real-estate-platform
+TeamViewer,remote-connectivity
+Siemens,industrial-tech
+Infineon,semiconductors
+Bosch,automotive-iot
+Continental,automotive-tech
+Cariad,automotive-software
+BMW Group,automotive-engineering
+Mercedes-Benz Group,automotive-engineering
+Volkswagen Group,automotive-engineering
+Porsche Digital,automotive-digital
+Helsing,ai-defense
+Aleph Alpha,generative-ai
+Lilium,aviation-tech
+Volocopter,aviation-tech
+Agile Robots,robotics-ai
+BRYTER,no-code-automation
+CoachHub,edtech-coaching
+Staffbase,employee-communications
+LeanIX,enterprise-architecture
+Spryker,commerce-os
+commercetools,headless-commerce
+Adjust,mobile-attribution
+Babbel,edtech-languages
+Blinkist,micro-learning
+Jimdo,website-builder
+Trivago,travel-search
+Sono Motors,solar-mobility
+Tier,micro-mobility
+Remerge,app-retargeting
+Solarisbank,banking-infrastructure
+Moss,fintech-spend
+Spendesk Germany,fintech-spend
+Moonfare,fintech-private-equity
+Scalable Capital,fintech-wealth
+Clark,insurtech
+Getsafe,insurtech
+Friday,insurtech
+Kreditech,fintech-lending
+Smava,fintech-loans
+Auxmoney,fintech-lending
+Billpay,fintech-payments
+Ratepay,fintech-payments
+Payone,fintech-payments
+SumUp,fintech-pos
+Wirecard,legacy-fintech
+Klarna Germany,fintech-bnpl
+Finleap,fintech-ecosystem
+Mambu,banking-saas
+Hypoport,fintech-credit
+Europace,fintech-platform
+Finanzcheck,fintech-portal
+Interhyp,mortgage-broker
+Check24,comparison-portal
+Verivox,comparison-portal
+Idealo,price-comparison
+Mydealz,deal-community
+Home24,furniture-ecommerce
+Westwing,home-living-ecommerce
+Wayfair Germany,furniture-ecommerce
+About You,fashion-tech
+Momox,recommerce
+Rebuy,recommerce
+Kaufland e-commerce,marketplace
+Otto Group,e-commerce
+Zalando Tech,fashion-tech
+Rocket Internet,tech-incubator
+Project A Ventures,venture-capital
+Earlybird,venture-capital
+Cherry Ventures,venture-capital
+HV Capital,venture-capital
+Lakestar,venture-capital
+Target Global,venture-capital
+Kinnevik Germany,investment
+Atlantic Labs,venture-studio
+Founders Fund Germany,venture-capital
+Techstars Berlin,accelerator
+Plug and Play Germany,accelerator
+Merantix,ai-venture-studio
+appliedAI,ai-initiative
+DFKI,ai-research
+Max Planck Institute,scientific-research
+Fraunhofer,applied-research
+Helmholtz,research-centres
+DLR,aerospace-research
+ESMT Berlin,business-school
+WHU,business-school
+TU Munich,technical-university
+TU Berlin,technical-university
+RWTH Aachen,technical-university
+KIT,technical-university
+TU Dresden,technical-university
+TU Darmstadt,technical-university
+University of Stuttgart,technical-university
+University of Freiburg,technical-university
+Heidelberg University,university-tech
+LMU Munich,university-tech
+Hasso Plattner Institute,digital-engineering
+Code University,tech-education
+42 Heilbronn,tech-education
+42 Wolfsburg,tech-education
+42 Berlin,tech-education
+Ironhack Germany,bootcamp
+Le Wagon Germany,bootcamp
+WBS Coding School,bootcamp
+Constructor University,tech-education
+IU International University,edtech
+IU Group,edtech
+Brainly Germany,edtech
+Kiron,edtech-social
+CareerFoundry,edtech
+Lingoda,language-learning
+Speexx,corporate-learning
+GoStudent Germany,edtech-tutoring
+Simpleclub,edtech-school
+Sofatutor,edtech-learning
+StudySmarter,edtech-learning
+Vaia,edtech-learning
+Unirep,edtech-legal
+Jurafuchs,edtech-legal
+Alasco,construction-saas
+Capmo,construction-software
+PlanRadar Germany,construction-tech
+Kairntech,ai-nlp
+Cortical.io,ai-nlp
+Eyeo,ad-filtering
+Adblock Plus,privacy-tech
+Cliqz,search-privacy
+Nextcloud,open-source-cloud
+ownCloud,cloud-storage
+Hetzner,cloud-infrastructure
+IONOS,web-hosting
+Strato,cloud-hosting
+1&1,telecom-tech
+United Internet,internet-provider
+Deutsche Telekom,telecom-operator
+Telefónica Germany,telecom-operator
+Vodafone Germany,telecom-operator
+1&1 Versatel,telecom-infrastructure
+EnBW,energy-digital
+E.ON,energy-tech
+RWE,renewable-energy
+Uniper,energy-trading
+Vattenfall Germany,energy-services
+SMA Solar,solar-inverters
+Kostal,solar-electronics
+Fronius Germany,solar-energy
+Viessmann,climate-solutions
+Vaillant,heating-tech
+Bosch Thermotechnology,climate-tech
+Stiebel Eltron,heat-pumps
+Wolf,heating-ventilation
+Kermi,heating-technology
+Zehnder,clean-air-solutions
+Wilo,pump-systems
+Kärcher,cleaning-technology
+Festool,power-tools
+Hilti Germany,construction-tools
+Wurth,assembly-fastening
+Stihl,outdoor-power
+Wera Tools,hand-tools
+Knipex,pliers-tools
+Hazet,automotive-tools
+Gedore,hand-tools
+Wiha,hand-tools
+Wago,electrical-interconnection
+Phoenix Contact,automation-components
+Weidmuller,industrial-connectivity
+Harting,industrial-connectors
+Beckhoff Automation,pc-based-control
+Pilz,safety-automation
+Turck,sensor-solutions
+ifm electronic,industrial-sensors
+Sick,sensor-intelligence
+Balluff,sensor-solutions
+Pepperl+Fuchs,factory-automation
+Leuze,optical-sensors
+Baumer Germany,sensor-solutions
+Wenglor,sensor-technologies
+Festo,pneumatic-electric-automation
+SMC Germany,pneumatics-automation
+Burkert,fluid-control
+Gemü,valve-systems
+Endress+Hauser Germany,process-measurement
+Krohne,measurement-instrumentation
+Wika,pressure-temperature-measurement
+Vega,level-pressure-instrumentation
+Samson,control-valves
+GEA Group,process-technology
+Krones,packaging-bottling
+Dürr,mechanical-plant-engineering
+Homag,woodworking-machinery
+Trumpf,laser-machine-tools
+DMG Mori,machine-tools
+Chiron Group,cnc-machining
+Heidenhain,precision-measurement
+Carl Zeiss,optics-optoelectronics
+Zeiss SMT,semiconductor-optics
+Jenoptik,photonics
+Leica Geosystems Germany,spatial-measurement
+Leica Microsystems,microscopy
+Leica Camera,optical-cameras
+Rodenstock,ophthalmic-lenses
+Ruprecht,precision-optics
+Qioptiq,photonics-solutions
+Excelitas Germany,photonics
+Osram,lighting-optical
+Ams Osram,semiconductor-sensors
+Signify Germany,lighting-solutions
+Trilux,lighting-systems
+BJB,lighting-technology
+Erco,architectural-lighting
+Zumtobel Germany,lighting-group
+Bega,outdoor-lighting
+Nimbus Group,led-lighting
+Glashütte Original,watchmaking
+A. Lange & Söhne,watchmaking
+Nomos Glashütte,watchmaking
+Sinn Spezialuhren,horology
+Junghans,watchmaking
+Meistersinger,watchmaking
+Montblanc Germany,writing-luxury
+Faber-Castell,stationery-art
+Staedtler,writing-instruments
+Stabilo,writing-drawing
+Pelikan,stationery
+Kaweco,pens-writing
+Lamy,writing-design
+Rotring,technical-drawing
+Marabu,creative-colors
+Schmincke,artists-colors
+Hahnemühle,fine-art-paper
+Zanders,specialty-paper
+Koehler Paper,specialty-paper
+Felix Schoeller,specialty-paper
+Schoellershammer,drawing-paper
+Gmund Paper,creative-paper
+Stora Enso Germany,renewable-materials
+UPM Germany,bio-forest-industry
+Metsä Board Germany,folding-boxboard
+Smurfit Kappa Germany,packaging
+DS Smith Germany,sustainable-packaging
+Mondi Germany,packaging-paper
+Mayr-Melnhof Germany,cartonboard
+Progroup,corrugated-board
+Klingele,corrugated-packaging
+Thimm,packaging-systems
+Boxer Germany,packaging
+Ratioform,shipping-packaging
+Rajapack Germany,packaging-supplies
+Transparix,logistics-software
+Mercurio,logistics-tech
+Logistik-Watchblog,logistics-media
+Kühne + Nagel Germany,sea-air-logistics
+DB Schenker,global-logistics
+DHL Group,express-logistics
+Deutsche Post,mail-parcels
+Dachser,road-logistics
+Hellmann Worldwide Logistics,freight-forwarding
+Rhenus Logistics,contract-logistics
+Fiege,contract-logistics
+BLG Logistics,automotive-logistics
+Hafen Hamburg,port-logistics
+Hamburger Hafen und Logistik,terminal-operations
+Bremenports,port-management
+Duisport,inland-port
+Lufthansa Cargo,air-cargo
+Frankfurt Cargo Services,cargo-handling
+Swissport Germany,airport-ground-handling
+Celebi Germany,ground-services
+Wisag,facility-services
+Dussmann,facility-management
+Apleona,real-estate-management
+Spie Germany,technical-services
+Bilfinger,industrial-services
+Voith,hydro-paper-mobility
+Andritz Germany,plant-engineering
+Kaefer,insulation-scaffolding
+Lindner Group,fit-out-facades
+Goldbeck,building-systems
+Züblin,civil-engineering
+Strabag Germany,construction-group
+Max Bögl,precast-construction
+Bauer Group,foundation-engineering
+Wayss & Freytag,tunnel-construction
+Hochtief,global-infrastructure
+Bilfinger Tebodin,consulting-engineering
+Dorsch Global,engineering-planning
+Krebs+Kiefer,civil-engineering
+Schüßler-Plan,civil-engineering
+Obermeyer,planning-consulting
+Inros Lackner,architectural-engineering
+Sweco Germany,engineering-architecture
+WSP Germany,engineering-consulting
+Arcadis Germany,design-consultancy
+Buro Happold Germany,integrated-consulting
+Arup Germany,built-environment
+Mott MacDonald Germany,engineering-management
+Gopa Consulting,international-development
+GIZ,international-cooperation
+KfW,development-banking
+DEG,private-sector-financing
+BaFin,financial-supervision
+Bundesbank,central-banking
+European Central Bank,central-banking
+Börse Frankfurt,stock-exchange
+Deutsche Börse,market-infrastructure
+Eurex,derivatives-exchange
+Clearstream,post-trade-services
+Tradegate,securities-trading
+Getquin,social-investing
+Parqet,portfolio-tracking
+Finanzfluss,financial-education
+Finanztip,consumer-finance
+Börsen-Zeitung,financial-news
+Handelsblatt,business-media
+WirtschaftsWoche,business-weekly
+Manager Magazin,business-monthly
+Capital Germany,business-magazine
+Brand Eins,business-magazine
+Gründerszene,startup-media
+Trending Topics Germany,startup-news
+Deutsche Startups,startup-platform
+T3n,digital-pioneers
+Heise Online,tech-news
+Golem.de,tech-media
+Netzwelt,consumer-tech
+ComputerBase,pc-hardware
+Chip Germany,consumer-tech
+Giga Germany,tech-culture
+WinFuture,windows-tech
+Caschys Blog,tech-blog
+Stadt-Bremerhaven,tech-news
+Deskmodder,windows-customization
+Dr. Windows,microsoft-tech
+Inside Digital,mobile-tech
+AreaDVD,home-cinema
+Notebookcheck,hardware-reviews
+Computerwoche,enterprise-it
+CIO Germany,it-strategy
+ZDNet Germany,enterprise-tech
+Silicon.de,b2b-tech
+IT-Finanzmagazin,banking-it
+Finance Forward,fintech-media
+Paymentandbanking,fintech-blog
+E-Commerce Magazin,digital-commerce
+Internet World Austria/Germany,digital-marketing
+Horizont Germany,marketing-media
+W&V,advertising-media
+Meedia,media-industry
+DWDL.de,television-industry
+Medienmagazin,media-publishing
+TextilWirtschaft,fashion-industry
+Lebensmittel Zeitung,grocery-fmcg
+Rundschau für den Lebensmittelhandel,retail-grocery
+Automobilwoche,automotive-industry
+Auto Motor und Sport,automotive-magazine
+Auto Bild,automotive-journal
+Sport Bild,sports-journal
+Kicker,sports-media
+Transfermarkt,football-data
+OneFootball,football-media
+Dazn Germany,sports-streaming
+Sky Deutschland,pay-tv-streaming
+RTL Deutschland,broadcasting-streaming
+ProSiebenSat.1,broadcasting-digital
+ZDF Digital,public-media
+WDR mediagroup,public-broadcasting
+SWR Media Services,broadcasting-services
+BR Media,public-broadcasting
+MDR Media,broadcasting-commercial
+NDR Media,broadcasting-commercial
+RBB Media,broadcasting-services
+HR Werbung,broadcasting-commercial
+SR Media,broadcasting-services
+Radio Bremen Media,broadcasting-services
+Deutsche Welle,international-broadcaster
+Axel Springer,digital-publishing
+Burda,media-tech-company
+Bertelsmann,media-services-education
+Gruner + Jahr,magazine-publishing
+Bauer Media Group,multichannel-media
+Funke Mediengruppe,regional-media
+Ippen Media,newspaper-network
+Madsack Mediengruppe,regional-publishing
+DuMont,media-group
+Südwestdeutsche Medienholding,publishing-group
+Frankfurter Allgemeine Zeitung,daily-newspaper
+Süddeutsche Zeitung,daily-newspaper
+Die Welt,daily-newspaper
+Die Zeit,weekly-newspaper
+Der Spiegel,news-magazine
+Stern,news-magazine
+Focus,news-magazine
+Cicero,political-culture
+Blätter für deutsche und internationale Politik,journal
+Osteuropa,academic-journal
+Internationale Politik,foreign-affairs
+Europäische Sicherheit & Technik,defense-journal
+Wehrtechnik,defense-technology
+Soldat und Technik,military-journal
+Behörden Spiegel,public-sector-journal
+Innovative Verwaltung,public-management
+Kommunal,local-government
+eGovernment Computing,public-it
+Polizeispiegel,security-journal
+Zoll aktuell,customs-journal
+Bundeswehr aktuell,military-newspaper
+Loyal Magazin,security-policy
+MarineForum,maritime-journal
+Flug Revue,aerospace-journal
+Aerokurier,general-aviation
+Aero International,commercial-aviation
+Cockpit Magazin,aviation-journal
+Modellflieger,rc-aviation
+Segelfliegen Magazin,gliding-journal
+Luftsport Magazin,air-sports
+Paragliding Magazin,paragliding
+Alpin Magazin,mountaineering
+Bergsteiger,alpine-climbing
+Klettern Magazin,rock-climbing
+Outdoor Magazin,hiking-trekking
+Wandermagazin,walking-journal
+Trekking Magazin,long-distance-hiking
+Camping Cars & Caravans,rv-camping
+Caravaning,rv-travel
+Promobil,motorhome-journal
+Camping Life,outdoor-lifestyle
+Boote Magazin,powerboating
+Yacht Magazin,sailing-journal
+Surf Magazin,windsurfing
+Kite Magazin,kitesurfing
+Stand Up Paddling Magazin,sup-journal
+Tauchen Magazin,scuba-diving
+Unterwasser,scuba-marine
+Fisch & Fang,angling-journal
+Blinker,fishing-magazine
+Rute & Rolle,fishing-journal
+Fliegenfischen,fly-fishing
+Karpfen Magazin,carp-angling
+Raubfisch Magazin,predator-fishing
+AngelWoche,weekly-angling
+Jäger Magazin,hunting-journal
+Wild und Hund,hunting-magazine
+Deutsche Jagdzeitung,hunting-journal
+Pirsch,hunting-forestry
+Unsere Jagd,hunting-conservation
+Reiter Revue International,equestrian
+St. Georg,equestrian-sports
+Cavallo,horse-magazine
+Pferdebörse,equestrian-classifieds
+Mein Pferd,horse-care
+Pferde Regional,equestrian-community
+Dogstoday,canine-magazine
+Partner Hund,dog-ownership
+Der Hund,dog-training
+HundeWelt,canine-journal
+Unser Rassehund,breed-dogs
+Geliebte Katze,feline-magazine
+Katzenmagazin,cat-care
+Pfotenhieb,pet-health
+Wellensittich Magazin,bird-keeping
+Gefiederte Welt,ornithology
+Aquarium Live,aquatics
+Datz,aquatics-terraria
+Caridina,shrimp-aquatics
+Amazonas Magazin,freshwater-aquatics
+Koralle Magazin,marine-aquatics
+Reptilia,herpetology
+Terraria,terrarium-keeping
+Draco,herpetology-journal
+Rodentia,small-mammals
+Kleintierpraxis,veterinary-journal
+Tierärztliche Praxis,veterinary-medicine
+Deutsches Tierärzteblatt,veterinary-association
+Der Praktische Tierarzt,clinical-veterinary
+Veterinary Focus Germany,veterinary-clinical
+Tiergesundheit Aktuell,animal-health
+Vetimpulse,veterinary-news
+Hundkatzepferd,veterinary-lifestyle
+Veterinärmedizinischer Report,animal-medicine
+EquiVet,equine-veterinary
+Tierheim Magazin,animal-welfare
+Du und das Tier,animal-protection
+Tierschutz Magazin,welfare-journal
+PETA Magazin Germany,animal-rights
+Vier Pfoten Germany,animal-rescue
+Greenpeace Magazin Germany,environmental-journal
+NABU Magazin,nature-conservation
+BUND Magazin,environmental-protection
+WWF Magazin Germany,conservation-journal
+Natur Magazin,ecological-living
+National Geographic Germany,exploration-nature
+Geo Magazin,science-geography
+Geo Wissen,science-psychology
+Geo Epoche,history-journal
+Geo Saison,travel-culture
+Geo Lino,children-science
+Wunderwelt Wissen,popular-science
+P.M. Magazin,popular-science
+P.M. History,popular-history
+P.M. Fragen & Antworten,knowledge-journal
+Spektrum der Wissenschaft,scientific-american-de
+Sterne und Weltraum,astronomy-journal
+Gehirn & Geist,neuroscience-psychology
+Psychologie Heute,psychology-magazine
+Philosophie Magazin,philosophy-journal
+Hohe Luft,philosophy-lifestyle
+Damals,historical-magazine
+G-Geschichte,history-journal
+Militär & Geschichte,military-history
+Clausewitz Magazin,military-history
+Schiff Classic,maritime-history
+Flugzeug Classic,aviation-history
+Klassiker der Luftfahrt,historical-aviation
+Traktor Classic,vintage-tractors
+Schlepper Post,tractor-heritage
+Oldtimer Markt,classic-cars
+Oldtimer Praxis,classic-car-repair
+Motor Klassik,classic-automotive
+Auto Zeitung Classic Cars,vintage-cars
+Zwischengas Germany,classic-cars
+Octane Germany,luxury-classics
+Auto Bild Klassik,classic-motoring
+Caravan Salon Germany,trade-fair
+Boot Düsseldorf,maritime-fair
+IAA Mobility,mobility-fair
+Gamescom,gaming-expo
+IFA Berlin,consumer-electronics
+Hannover Messe,industrial-expo
+Bauma Munich,construction-machinery
+Agritechnica,agricultural-machinery
+EuroTier,animal-farming
+Anuga Cologne,food-beverage-fair
+Biofach Nuremberg,organic-trade-fair
+InnoTrans Berlin,rail-transport-expo
+Automechanika Frankfurt,automotive-aftermarket
+Light + Building,lighting-building-services
+ISH Frankfurt,water-energy-building
+Security Essen,safety-security-fair
+Glasstec Düsseldorf,glass-industry-expo
+Interpack Düsseldorf,packaging-processing
+Drupa Düsseldorf,print-technologies
+K Show Düsseldorf,plastics-rubber-expo
+Achema Frankfurt,process-industries
+EMO Hannover,metalworking-fair
+Tube & Wire Düsseldorf,pipe-wire-expo
+Aluminium Essen/Düsseldorf,aluminium-industry
+CastForge Stuttgart,casting-forging
+Blechexpo Stuttgart,sheet-metal-working
+Control Stuttgart,quality-assurance
+Motek Stuttgart,assembly-handling
+Vision Stuttgart,machine-vision
+LogiMAT Stuttgart,intralogistics-fair
+SPS Smart Production Solutions,automation-fair
+Embedded World Nuremberg,embedded-systems
+PCIM Europe Nuremberg,power-electronics
+Sensor+Test Nuremberg,sensor-measurement
+Laser World of Photonics,photonics-expo
+Opti Munich,optics-optometry
+Expopharm,pharmacy-trade-fair
+Medica Düsseldorf,medical-forum
+Compamed Düsseldorf,medical-technology
+Analytica Munich,laboratory-technology
+Achema,process-engineering
+BrauBeviale Nuremberg,beverage-industry
+Drinktec Munich,beverage-liquid-food
+Fakuma Friedrichshafen,plastics-processing
+Intergastra Stuttgart,hospitality-fair
+Internorga Hamburg,foodservice-hospitality
+ITB Berlin,travel-trade-show
+IMEX Frankfurt,meetings-events
+Frankfurt Book Fair,publishing-fair
+Leipzig Book Fair,book-culture
+Didacta,education-trade-fair
+Learntec Karlsruhe,digital-learning
+CeBIT Legacy,legacy-it-fair
+Bits & Pretzels,founders-festival
+OMR Festival,digital-marketing-festival
+dmexco Cologne,digital-marketing-expo
+Hub.Berlin,digital-economy-festival
+Tech Open Air,tech-culture-festival
+Noah Conference Germany,digital-leaders
+E-Commerce Forum,digital-retail
+Internet World Expo,e-commerce-fair
+K5 Future Retail Conference,e-commerce-summit
+Spatenbräu,brewing-heritage
+Augustiner-Bräu,munich-brewing
+Paulaner,munich-brewery
+Hacker-Pschorr,munich-brewing
+Löwenbräu,munich-brewing
+Hofbräu München,state-brewery
+Erdinger Weißbräu,wheat-beer
+Schneider Weisse,wheat-beer-specialist
+Franziskaner,wheat-beer
+Weihenstephan,oldest-brewery
+Bitburger,pilsner-brewing
+Krombacher,pilsner-brewery
+Warsteiner,pilsner-brewing
+Veltins,pilsner-brewing
+Becks,international-pilsner
+Radeberger,dresden-pilsner
+Jever,friesian-pilsner
+Flensburger,swing-top-pilsner
+Rothaus,black-forest-state-brewery
+Tannenzäpfle,black-forest-beer
+Gaffel Kölsch,cologne-brewing
+Reissdorf Kölsch,cologne-brewing
+Früh Kölsch,cologne-brewing
+Diebels Alt,düsseldorf-altbier
+Frankenheim Alt,düsseldorf-altbier
+Uerige,düsseldorf-craft-altbier
+Schumacher Alt,düsseldorf-altbier
+Schlüssel Alt,düsseldorf-altbier
+Füchschen Alt,düsseldorf-altbier
+Jägermeister,herbal-liqueur
+Underberg,herbal-digestif
+Rotkäppchen-Mumm,sparkling-wine
+Henkell Freixenet,sparkling-wine-group
+Schloss Johannisberg,rheingau-wine
+Schloss Vollrads,rheingau-wine
+Dr. Loosen,mosel-riesling
+Egon Müller Scharzhof,mosel-cult-riesling
+Markus Molitor,mosel-riesling
+Robert Weil,rheingau-riesling
+Keller Dalsheim,rheinhessen-cult-wine
+Wittmann,rheinhessen-biodynamic
+Ökonomierat Rebholz,pfalz-wine
+Dr. Bürklin-Wolf,pfalz-biodynamic
+Bassermann-Jordan,pfalz-estate
+Von Winning,pfalz-riesling
+Bernhard Huber,baden-pinot-noir
+Salwey,baden-pinot
+Dr. Heger,baden-kaiserstuhl
+Rudolf Fürst,franken-pinot-noir
+Juliusspital,franken-silvaner
+Bürgerspital,franken-silvaner
+Staatlicher Hofkeller,franken-wine
+Horst Sauer,franken-silvaner
+Kühling-Gillot,rheinhessen-estate
+Battenfeld Spanier,rheinhessen-estate
+Van Volxem,saar-riesling
+Forstmeister Geltz-Zilliken,saar-riesling
+Peter Lauer,saar-riesling
+Fritz Haag,mosel-riesling
+Willi Schaefer,mosel-riesling
+Joh. Jos. Prüm,mosel-cult-riesling
+Clemens Busch,mosel-biodynamic
+Heymann-Löwenstein,terrassenmosel

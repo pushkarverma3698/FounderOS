@@ -1781,12 +1781,12 @@ export const jobLaneHeartbeats = agentsSchema.table("job_lane_heartbeats", {
 export type JobLaneHeartbeat = typeof jobLaneHeartbeats.$inferSelect;
 export type NewJobLaneHeartbeat = typeof jobLaneHeartbeats.$inferInsert;
 
+export const atsBoardCache = agentsSchema.table("ats_board_cache", {
+  url: text("url").primaryKey(),
+  etag: text("etag"),
+  payload: jsonb("payload").notNull(),
+  updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
-export const interruptRegistry = hitlApprovals;
-export const llmCosts = aiCallCosts;
-export const auditLog = actionLog;
-export const leadPipeline = outboundLeads;
-export const suppressionList = doNotContact;
-export const taskOutcomes = agentResults;
-export const deptEvents = deptSignals;

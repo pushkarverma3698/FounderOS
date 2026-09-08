@@ -163,7 +163,20 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
       // (efinancialcareers.nl, togetherabroad.nl) distinct from her existing
       // compliance-kyc CDD titles — kept here because due diligence in this
       // context is transaction/credit-side, not AML-side.
+      //
+      // "Finance Operations Specialist" / "Finance Operations Analyst" added
+      // 2026-09-07, and these two ONLY. They are not a guess about what she might
+      // also like: the track-coverage audit that day classified 4,511 real
+      // postings against this profile, and of the 174 Dutch postings the
+      // classifier dropped, exactly one was both finance-shaped and inside her
+      // 0-4-year range — "Finance Operations Specialist" in Utrecht. Every other
+      // NL miss was a CFO, a Director or a Head-of role far above 2.4 years, or a
+      // quant-risk role outside these tracks. The measurement is the whole reason
+      // nothing else was added with them; the same audit is what says her lane's
+      // problem is supply, not vocabulary.
       titles: [
+        "Finance Operations Specialist:*",
+        "Finance Operations Analyst:*",
         "RTR Analyst:*",
         "Record to Report Analyst:*",
         "OTC Analyst:*",
@@ -184,6 +197,8 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         // are common enough elsewhere to risk noise. The full phrases below are
         // unambiguous; the acronym forms still work via `titles`' substring
         // match against the posting's own title text.
+        "finance operations specialist",
+        "finance operations analyst",
         "record to report",
         "order to cash",
         "procure to pay",

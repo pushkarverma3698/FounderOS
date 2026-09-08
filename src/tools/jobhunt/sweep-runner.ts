@@ -202,27 +202,8 @@ const JOB_INGEST_DAILY_LIMIT = 80;
 export const FREE_SWEEP_CRON = "*/30 * * * *";
 
 /**
- * The lane's memory of when it last said anything — persisted in
- * `agents.job_lane_heartbeats` (job-heartbeat-queries.ts), not an in-process
- * Map.
- *
- * 2026-09-07: it USED to be a Map, on the reasoning that a restart honestly
- * resetting it was fine — the first sweep after a deploy pings within the
- * hour. That assumed restarts are rare; measured, prod restarted 18 times in
- * 3 days. `ALIVE_PING_INTERVAL_MS` (sweep-heartbeat.ts) needs 3 CONTINUOUS
- * hours without a restart to ever fire, which a high-volume profile never
- * notices — its real "new roles passed" alerts fire far more often than that
- * — but a thin-market profile can go silent indefinitely with zero signal
- * the lane is even running: Tashi's last passing role was 2026-09-04, three
- * days of restarts before this was found, with neither a real alert nor a
- * single heartbeat ping in between. See schema.ts's job_lane_heartbeats.
- */
-
-/**
- * Per profile, because the ping answers "is YOUR lane alive". One shared clock
- * would let a busy lane's alert suppress the quiet lane's heartbeat, and the
- * candidate with nothing coming through is precisely the one who needs to know
- * the difference between "no jobs" and "nothing ran".
+ * Per-profile heartbeat state, persisted in `agents.job_lane_heartbeats` so it
+ * survives restarts. See schema.ts for the migration history (2026-09-07).
  */
 async function heartbeatFor(profileId: string): Promise<HeartbeatState> {
   const existing = await loadLaneHeartbeat(profileId);
@@ -250,6 +231,7 @@ export async function runFreeSweep(): Promise<void> {
   const { sweepBoards } = await import("./free-ats-source.js");
   const { getFreeBoards } = await import("./free-boards.js");
   const { listProfiles } = await import("./profile-config.js");
+  const { sweepAggregators } = await import("./aggregator-source.js");
 
   // POLLED ONCE, SCREENED FOR EVERYONE. The board sweep is the expensive half of
   // this lane and its result says nothing about which candidate is looking, so a
@@ -264,6 +246,29 @@ export async function runFreeSweep(): Promise<void> {
   } catch (err) {
     log.error({ err: (err as Error).message }, "Free board sweep crashed before it could poll anything");
     return;
+  }
+
+  // AGGREGATOR SWEEP — runs AFTER the board sweep, merges results in. Fails
+  // open: aggregator outages must never block the 1,297-board ATS sweep that
+  // has always worked without them. Board token harvesting logged separately.
+  try {
+    const aggResult = await sweepAggregators();
+    if (aggResult.candidates.length > 0) {
+      sweep = {
+        candidates: [...sweep.candidates, ...aggResult.candidates],
+        failures: [...sweep.failures, ...aggResult.failures],
+        boardsPolled: sweep.boardsPolled,
+      };
+    }
+    if (aggResult.harvestedTokens.length > 0) {
+      log.info(
+        { tokens: aggResult.harvestedTokens.length },
+        "Board tokens harvested from aggregator URLs",
+      );
+    }
+  } catch (err) {
+    // allow-failopen: aggregator crash must not block the board sweep
+    log.warn({ err: (err as Error).message }, "Aggregator sweep failed — ATS boards unaffected");
   }
 
   for (const profile of listProfiles()) {
