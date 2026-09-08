@@ -72,9 +72,17 @@ describe("LOG_HEADER", () => {
 });
 
 describe("logRow", () => {
-  it("prints the pinned rank, never a position in this file", () => {
-    const cells = logRow(row({ brief_rank: 47 }), NOW);
-    expect(cells[LOG_HEADER.indexOf("#")]).toBe(47);
+  it("prints the command that resolves the row, not a bare number", () => {
+    const cells = logRow(row({ brief_rank: 47, brief_section: "do_today" }), NOW);
+    expect(cells[LOG_HEADER.indexOf("#")]).toBe("/draft 47");
+  });
+
+  it("prints /ask for an ask row, because 3 names two different roles", () => {
+    // Measured on prod 2026-09-09: every rank 1–12 was held by exactly two
+    // rows, one `ask` and one `do_today`. DRAFT_SECTIONS excludes `ask`, so
+    // both numbers are correct — a bare "3" is what would be wrong.
+    const cells = logRow(row({ brief_rank: 3, brief_section: "ask" }), NOW);
+    expect(cells[LOG_HEADER.indexOf("#")]).toBe("/ask 3");
   });
 
   it("leaves # empty for a row the ranking never pinned", () => {
@@ -113,6 +121,14 @@ describe("compareByRank", () => {
     expect(compareByRank(row({ brief_rank: 2 }), row({ brief_rank: 11 }))).toBeLessThan(0);
   });
 
+  it("keeps the two numbering namespaces apart instead of interleaving them", () => {
+    // /draft 9 and /ask 1 are different roles. Sorting them into one run of
+    // numbers would read as a single sequence with duplicates in it.
+    const draftable = row({ brief_rank: 9, brief_section: "do_today" });
+    const askable = row({ brief_rank: 1, brief_section: "ask" });
+    expect(compareByRank(draftable, askable)).toBeLessThan(0);
+  });
+
   it("falls back to newest-first among unranked rows", () => {
     const newer = row({ brief_rank: null, created_at: new Date("2026-09-09T10:00:00Z") });
     const older = row({ brief_rank: null, created_at: new Date("2026-09-01T10:00:00Z") });
@@ -129,7 +145,19 @@ describe("buildLogTab", () => {
       NOW,
     );
     const rankColumn = table.slice(1).map((cells) => cells[LOG_HEADER.indexOf("#")]);
-    expect(rankColumn).toEqual([1, 9, ""]);
+    expect(rankColumn).toEqual(["/draft 1", "/draft 9", ""]);
+  });
+
+  it("groups the draftable rows above the ask rows", () => {
+    const table = buildLogTab(
+      [
+        row({ id: "ask1", brief_rank: 1, brief_section: "ask" }),
+        row({ id: "do9", brief_rank: 9, brief_section: "do_today" }),
+      ],
+      NOW,
+    );
+    const rankColumn = table.slice(1).map((cells) => cells[LOG_HEADER.indexOf("#")]);
+    expect(rankColumn).toEqual(["/draft 9", "/ask 1"]);
   });
 
   it("does not mutate the array it was given", () => {

@@ -185,7 +185,7 @@ export function queueRow(row: JobApplication, now: Date): Cell[] {
  */
 export function logRow(row: JobApplication, now: Date): Cell[] {
   return [
-    row.brief_rank ?? "",
+    rankCommandCell(row),
     row.created_at ? postedCell(row.created_at, now) : "",
     row.company,
     row.title,
@@ -205,7 +205,34 @@ export function logRow(row: JobApplication, now: Date): Cell[] {
 }
 
 /**
- * Ranked rows first, in rank order; everything unranked after, newest first.
+ * Which section's namespace a row's number belongs to, low sorts first.
+ *
+ * THERE ARE TWO NUMBERINGS, NOT ONE, and this is deliberate upstream:
+ * `DRAFT_SECTIONS` is `do_today, stretch, standing` and `/ask` resolves against
+ * `ask` alone (apply-packet.ts, jobhunt-commands.ts:353). So `brief_rank` 3
+ * legitimately names two different roles — `/draft 3` and `/ask 3`.
+ *
+ * Measured on prod 2026-09-09: every rank 1–12 for pushkar-nl-tech was held by
+ * exactly two rows, one `ask` and one `do_today`. Printing a bare `3` in one
+ * column would have made the file ambiguous exactly where it is meant to be
+ * actionable, so `rankCommandCell` prints the command instead of the number.
+ */
+const SECTION_ORDER: Record<string, number> = { do_today: 0, stretch: 1, standing: 2, ask: 3 };
+
+/**
+ * The `#` cell: the command that resolves this row, not a bare number.
+ *
+ * `/draft 3` and `/ask 3` are different roles. A cell the founder can copy is
+ * worth more than one he has to decode, and it cannot be misread.
+ */
+export function rankCommandCell(row: JobApplication): string {
+  if (row.brief_rank === null || row.brief_rank === undefined) return "";
+  return row.brief_section === "ask" ? `/ask ${row.brief_rank}` : `/draft ${row.brief_rank}`;
+}
+
+/**
+ * Ranked rows first, grouped by namespace then in rank order; everything
+ * unranked after, newest first.
  *
  * WHY UNRANKED ROWS ARE NOT DROPPED OR RENUMBERED. `brief_rank` is only written
  * for rows the last brief loaded (`BRIEF_QUEUE_LIMIT`), and for rows that
@@ -216,7 +243,11 @@ export function logRow(row: JobApplication, now: Date): Cell[] {
 export function compareByRank(a: JobApplication, b: JobApplication): number {
   const aRank = a.brief_rank;
   const bRank = b.brief_rank;
-  if (aRank !== null && bRank !== null) return aRank - bRank;
+  if (aRank !== null && bRank !== null) {
+    const bySection =
+      (SECTION_ORDER[a.brief_section ?? ""] ?? 9) - (SECTION_ORDER[b.brief_section ?? ""] ?? 9);
+    return bySection !== 0 ? bySection : aRank - bRank;
+  }
   if (aRank !== null) return -1;
   if (bRank !== null) return 1;
   return (b.created_at?.getTime() ?? 0) - (a.created_at?.getTime() ?? 0);
