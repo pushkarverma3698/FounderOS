@@ -392,33 +392,63 @@ export async function countPassingApplications(
  * first stored the row, which for a hand-pasted posting is the same minute he
  * found it — the honest floor on its age, not a guess at its real one.
  */
-export function actionableConditions(opts: {
+/**
+ * Which stored date a window is measured against.
+ *
+ * Mirrors `BriefAxis` in tools/jobhunt/brief-resolver.ts, restated as a local
+ * union rather than imported so the db layer stays free of a dependency on the
+ * command surface. The two are checked against each other by the `/fresh`
+ * command tests, which pass one into the other.
+ */
+export type QueueAxis = "posted" | "found";
+
+export interface ActionableScope {
   verdicts?: readonly string[];
   tenantId?: string;
   profileId?: ProfileScope;
-  maxAgeHours?: number;
-}): SQL[] {
-  const maxAgeHours = opts.maxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
-  const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+  /** Hours back from now. Ignored when `since` is given; unbounded when both are absent. */
+  maxAgeHours?: number | null;
+  /** An absolute cutoff — what `/fresh` uses, because a delta is not a range. */
+  since?: Date;
+  /** Which date column the cutoff applies to. Defaults to publication. */
+  axis?: QueueAxis;
+}
+
+/**
+ * The window predicate, or nothing at all.
+ *
+ * NULL IS A REAL ANSWER HERE. `/jobs` carries no age limit (founder direction,
+ * 2026-09-08), and the honest encoding of that is the absence of a condition —
+ * not a cutoff at the epoch, which would look like a window in the query plan
+ * and would quietly become one the day someone "tidied" the date.
+ */
+function windowCondition(opts: ActionableScope): SQL | null {
+  const cutoff =
+    opts.since ??
+    (opts.maxAgeHours === null || opts.maxAgeHours === undefined
+      ? null
+      : new Date(Date.now() - opts.maxAgeHours * 60 * 60 * 1000));
+  if (cutoff === null) return null;
+  return opts.axis === "found"
+    ? sql`${jobApplications.created_at} >= ${cutoff.toISOString()}::timestamptz`
+    : applyQueueFreshnessSql(cutoff);
+}
+
+export function actionableConditions(opts: ActionableScope): SQL[] {
   const conditions: SQL[] = [
     eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
     eq(jobApplications.stage, "screened"),
     inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
-    applyQueueFreshnessSql(cutoff),
   ];
+  const window = windowCondition(opts);
+  if (window) conditions.push(window);
   const profileWhere = profileCondition(opts.profileId);
   if (profileWhere) conditions.push(profileWhere);
   return conditions;
 }
 
 export async function listActionableApplications(
-  opts: {
-    verdicts?: readonly string[];
-    limit?: number;
-    tenantId?: string;
-    profileId?: ProfileScope;
-    maxAgeHours?: number;
-  } = {},
+  opts: ActionableScope & { limit?: number } = {},
 ): Promise<JobApplication[]> {
   const db = getDb();
   return db
@@ -467,14 +497,7 @@ export function applyQueueFreshnessSql(cutoff: Date) {
  * one predicate drift, and the drift surfaces as a cut notice on a run that cut
  * nothing, or silence on a run that cut sixty-six rows.
  */
-export async function countActionableApplications(
-  opts: {
-    verdicts?: readonly string[];
-    tenantId?: string;
-    profileId?: ProfileScope;
-    maxAgeHours?: number;
-  } = {},
-): Promise<number> {
+export async function countActionableApplications(opts: ActionableScope = {}): Promise<number> {
   const db = getDb();
   const [row] = await db
     .select({ n: sql<number>`count(*)` })
@@ -492,22 +515,19 @@ export async function countActionableApplications(
  * today" and "the lane is broken" — the exact ambiguity this pipeline has
  * already lost weeks to (see `JOB_SWEEP_CRON` in sweep-runner.ts).
  */
-export async function countAgedOutApplications(
-  opts: {
-    verdicts?: readonly string[];
-    tenantId?: string;
-    profileId?: ProfileScope;
-    maxAgeHours?: number;
-  } = {},
-): Promise<number> {
+export async function countAgedOutApplications(opts: ActionableScope = {}): Promise<number> {
+  // An UNBOUNDED scope ages nothing out, and the honest answer is 0 rather than
+  // a query whose WHERE clause is `NOT (nothing)`. `/jobs` runs unbounded by
+  // design, so this is the common path, not an edge case.
+  const window = windowCondition(opts);
+  if (!window) return 0;
+
   const db = getDb();
-  const maxAgeHours = opts.maxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
-  const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
   const conditions = [
     eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT),
     eq(jobApplications.stage, "screened"),
     inArray(jobApplications.salary_status, [...(opts.verdicts ?? ["pass", "flag"])]),
-    sql`NOT (${applyQueueFreshnessSql(cutoff)})`,
+    sql`NOT (${window})`,
   ];
   const profileWhere = profileCondition(opts.profileId);
   if (profileWhere) conditions.push(profileWhere);

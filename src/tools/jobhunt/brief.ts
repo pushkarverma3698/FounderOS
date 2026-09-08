@@ -147,8 +147,13 @@ export interface BriefInput {
    * defaults to 0 in the renderer, same as an unset `notes`.
    */
   readonly agedOut?: number;
-  /** The freshness window `rows` was filtered against, in hours. Defaults to 24. */
-  readonly maxAgeHours?: number;
+  /**
+   * The freshness window `rows` was read against, in hours; null when the read
+   * carried no age limit (`/jobs`, founder direction 2026-09-08). Defaults to 24.
+   */
+  readonly maxAgeHours?: number | null;
+  /** What this list is, in words — see HeaderInput.scopeLabel. */
+  readonly scopeLabel?: string;
   /**
    * How many rows qualified inside the window IN TOTAL, before the read limit.
    *
@@ -220,6 +225,7 @@ export function formatDailyBrief(input: BriefInput): string {
         queued: input.queued,
         agedOut: input.agedOut,
         maxAgeHours: input.maxAgeHours,
+        scopeLabel: input.scopeLabel,
       },
       totals,
     ),

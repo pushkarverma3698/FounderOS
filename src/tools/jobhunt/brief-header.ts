@@ -49,7 +49,18 @@ export interface HeaderInput {
   /** Rows qualifying inside the window, UNCAPPED. Undefined when the count query failed. */
   readonly queued?: number | undefined;
   readonly agedOut?: number | undefined;
-  readonly maxAgeHours?: number | undefined;
+  /** The window in hours, or null when the read carried no age limit. */
+  readonly maxAgeHours?: number | null | undefined;
+  /**
+   * What this list is, in words: "posted in the last 24h", "everything on file",
+   * "found since 16:30".
+   *
+   * UX rule 2 of the fresh-first plan, and it earns its line: with three verbs
+   * over one queue, a list that does not name its own scope leaves an empty
+   * market and a narrow window looking identical. Falls back to the hour window
+   * when no verb set one.
+   */
+  readonly scopeLabel?: string | undefined;
 }
 
 /** "1 role" / "3 roles". "role(s)" is the tell of a template that never learned to count. */
@@ -118,15 +129,23 @@ export function renderHeader(input: HeaderInput, totals: SectionTotals): string 
  * on, and calling it by the machine's word for an upstream stage is A3.
  */
 function queueLine(input: HeaderInput): string {
-  const maxAgeHours = input.maxAgeHours ?? 24;
   const agedOut = input.agedOut ?? 0;
-  return (
-    `<i>${plural(input.rowsLoaded, "role", "roles")} in your queue ` +
-    // "&lt;", not "<". A bare "<" followed by a space is an empty start tag to
-    // Telegram, which rejects the WHOLE message rather than the character —
-    // this line alone took /jobs down on 2026-08-21. See escapeStrayAngles().
-    `(&lt; ${maxAgeHours}h old) · ${plural(agedOut, "older role", "older roles")} aged out</i>`
-  );
+  // "&lt;", not "<". A bare "<" followed by a space is an empty start tag to
+  // Telegram, which rejects the WHOLE message rather than the character — this
+  // line alone took /jobs down on 2026-08-21. See escapeStrayAngles().
+  const scope =
+    input.scopeLabel ??
+    (input.maxAgeHours === null
+      ? "everything on file"
+      : `&lt; ${input.maxAgeHours ?? 24}h old`);
+  // The aged-out count is meaningless under an unbounded read — nothing aged
+  // out of a window there is none of — so it is omitted rather than printed as
+  // a confident 0.
+  const excluded =
+    input.maxAgeHours === null && input.scopeLabel === undefined
+      ? ""
+      : ` · ${plural(agedOut, "older role", "older roles")} aged out`;
+  return `<i>${plural(input.rowsLoaded, "role", "roles")} in your queue (${scope})${excluded}</i>`;
 }
 
 /** The real screening count, or silence. Never the queue size wearing its name. */

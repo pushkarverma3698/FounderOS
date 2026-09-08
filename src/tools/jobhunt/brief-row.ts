@@ -88,6 +88,21 @@ export interface BriefRow {
    */
   readonly postedDays?: number | null;
   /**
+   * The number this row is printed as, and the number `/draft` resolves.
+   *
+   * PINNED OVER THE FULL RANKED POPULATION (brief-persist.ts's
+   * `briefRankEntries`), then carried here — not derived from the row's position
+   * in whatever list is being rendered. Until `/today` and `/fresh` existed the
+   * display was always a PREFIX of the ordering, so position and rank agreed by
+   * construction and brief-select.ts could warn that "a filtered subset would
+   * renumber the message and /draft 3 would tailor for the wrong company".
+   * Those two verbs ARE filtered subsets, so the rank has to travel with the row.
+   *
+   * Undefined on a row in no actionable section — a reject has no `/draft`
+   * number, and inventing one would point the command at somebody else's row.
+   */
+  readonly rank?: number;
+  /**
    * Days since the still-open check last ran, or null when it never has.
    *
    * Carried separately from `liveness` because the VALUE and its AGE are

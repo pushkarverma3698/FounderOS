@@ -87,12 +87,43 @@ export function briefRankEntries(
   ];
 }
 
+/**
+ * Stamp each row with the number that was just pinned for it.
+ *
+ * The renderer used to derive the printed number from the row's POSITION, which
+ * was safe only because every display was a prefix of the ordering. `/today` and
+ * `/fresh` are filters, so the number has to come from the same place `/draft`
+ * reads it — this function is that place.
+ *
+ * Pure, and returns new rows rather than mutating: a `BriefRow` is readonly and
+ * the same array is handed to the renderer and to `recordBriefRanks`.
+ */
+export function attachBriefRanks(
+  rows: readonly BriefRow[],
+  entries: readonly BriefRankEntry[],
+): BriefRow[] {
+  const byId = new Map(entries.map((e) => [e.id, e.rank]));
+  return rows.map((row) => {
+    const rank = byId.get(row.id);
+    // Spread-with-omit rather than `rank: undefined`: with
+    // `exactOptionalPropertyTypes`, an explicit undefined is not the same as an
+    // absent key, and the renderer's `row.rank ?? position` fallback depends on
+    // absence.
+    return rank === undefined ? row : { ...row, rank };
+  });
+}
+
 export async function persistBriefRanks(
   rows: readonly BriefRow[],
   standingRows: readonly BriefRow[] = [],
-  opts: { profileId?: string } = {},
+  opts: { profileId?: string; entries?: readonly BriefRankEntry[] } = {},
 ): Promise<void> {
-  const entries = briefRankEntries(rows, standingRows);
+  // `entries` is passed in by any caller that has ALREADY stamped the rows with
+  // `attachBriefRanks`, so the numbers written to the database are the very
+  // objects that were printed — not a second computation over the same input
+  // that happens to agree today. Two derivations of one numbering is the
+  // failure shape brief-select.ts's module comment is about.
+  const entries = opts.entries ?? briefRankEntries(rows, standingRows);
   try {
     // profileId scoping: without it, ranking Wife's queue clears Pushkar's
     // brief_section/brief_rank (and vice versa) — see recordBriefRanks in

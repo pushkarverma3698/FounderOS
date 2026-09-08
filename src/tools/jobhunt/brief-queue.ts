@@ -20,10 +20,12 @@ import {
   listActionableApplications,
   countActionableApplications,
   countAgedOutApplications,
-  queueWindowFor,
+  type QueueAxis,
 } from "../../db/job-queries.js";
 import type { JobApplication } from "../../db/schema.js";
 import type { JobSearchProfile } from "./profile-config.js";
+import { summariseSpend } from "../../db/job-run-queries.js";
+import { SPEND_WINDOW_DAYS, type SpendLine } from "./brief-sections.js";
 
 const log = childLogger({ module: "jobhunt:brief-queue" });
 
@@ -62,14 +64,54 @@ export const BRIEF_QUEUE_LIMIT = intEnv("BRIEF_QUEUE_LIMIT", 500);
  */
 export const BRIEF_VERDICTS = ["pass", "flag", "reject"] as const;
 
+/**
+ * The date a window is measured against, for ONE row.
+ *
+ * The JS twin of `windowCondition` in job-queries.ts, and the only other place
+ * that decides what "old" means. Two copies of a predicate drift — that is
+ * exactly what `applyQueueFreshnessSql`'s own comment warns about — so this one
+ * exists for a reason the SQL cannot serve: the ranking population is read ONCE,
+ * unbounded, so that every verb shares one numbering, and the per-verb display
+ * filter then has to run over rows already in memory. Re-querying per verb would
+ * rank a different population per verb, which is the defect B5 exists to close.
+ *
+ * `posted` coalesces to `created_at` exactly as the SQL does. `found` is
+ * `created_at` alone, because "when did we first see it" has no fallback.
+ */
+export function windowDateOf(
+  row: Pick<JobApplication, "posted_at" | "created_at">,
+  axis: QueueAxis,
+): Date | null {
+  return axis === "found" ? row.created_at : (row.posted_at ?? row.created_at);
+}
+
+/** Whether one row falls inside a display scope. Pure; `now` is passed. */
+export function inScope(
+  row: Pick<JobApplication, "posted_at" | "created_at">,
+  scope: { windowHours?: number | null; since?: Date | undefined; axis?: QueueAxis },
+  now: Date,
+): boolean {
+  const cutoff =
+    scope.since ??
+    (scope.windowHours === null || scope.windowHours === undefined
+      ? null
+      : new Date(now.getTime() - scope.windowHours * 3_600_000));
+  if (cutoff === null) return true;
+  const at = windowDateOf(row, scope.axis ?? "posted");
+  // A row with neither date is kept, for the same reason the SQL coalesce keeps
+  // it: an unknown timestamp is not evidence of age, and dropping it would hide
+  // a row nobody can prove is stale.
+  return at === null || at.getTime() >= cutoff.getTime();
+}
+
 export interface BriefQueue {
   readonly applications: JobApplication[];
   /** Rows qualifying inside the window, UNCAPPED. Undefined when the count failed. */
   readonly queued: number | undefined;
-  /** Otherwise-actionable rows excluded for age. 0 when the count failed. */
+  /** Otherwise-actionable rows excluded for age. 0 when the window is unbounded. */
   readonly agedOut: number;
-  /** The window this queue was read against, in hours. */
-  readonly maxAgeHours: number;
+  /** The window this queue was read against, in hours, or null when unbounded. */
+  readonly maxAgeHours: number | null;
 }
 
 /**
@@ -90,9 +132,15 @@ export interface BriefQueue {
  */
 export async function loadBriefQueue(
   profile: JobSearchProfile,
-  opts: { maxAgeHours?: number; limit?: number } = {},
+  opts: { maxAgeHours?: number | null; limit?: number } = {},
 ): Promise<BriefQueue> {
-  const maxAgeHours = opts.maxAgeHours ?? queueWindowFor(profile);
+  // UNBOUNDED BY DEFAULT, since 2026-09-08. One ranking population for every
+  // verb is what makes `/draft 3` mean the same row after `/jobs`, `/today` and
+  // `/fresh` — a per-verb population would renumber the queue on every command.
+  // The verbs are DISPLAY filters over this one read (see `inScope`), not
+  // separate queries. Fresh-first ordering (rankRows) is what makes the lifted
+  // limit safe: reach without burying today's roles.
+  const maxAgeHours = opts.maxAgeHours ?? null;
   const scope = {
     verdicts: BRIEF_VERDICTS,
     tenantId: profile.tenantId,
@@ -126,4 +174,46 @@ export async function loadBriefQueue(
   }
 
   return { applications, queued, agedOut, maxAgeHours };
+}
+
+/**
+ * Today's feed spend, or nothing.
+ *
+ * Returns undefined rather than zero when the ledger cannot be read. "$0.00
+ * spent today" is a claim, and a claim made because a query failed is the kind
+ * of quiet wrongness that gets believed for a month.
+ */
+/**
+ * TENANT-WIDE, not per candidate. `ai_call_costs`/`job_ingest_runs` carry no
+ * profile column, so this is every lane's spend on one line in every lane's
+ * brief. Harmless today — the metered sweep's cron was removed on 2026-08-21 and
+ * the free lane records $0 — and it becomes a wrong number the day that cron
+ * comes back. Recorded here rather than silently left as an implication.
+ */
+export async function todaysSpend(now: Date): Promise<SpendLine | undefined> {
+  // SPEND_WINDOW_DAYS, not a literal 3 — the heading in brief-sections.ts reads
+  // off the same constant. They were two independent numbers and the heading
+  // said "WHAT TODAY COST" over a three-day sum for weeks (A4).
+  const since = new Date(now.getTime() - SPEND_WINDOW_DAYS * 86_400_000);
+  try {
+    const window = await summariseSpend(since);
+    return window.runs === 0
+      ? undefined
+      : {
+          runs: window.runs,
+          returned: window.returned,
+          costUsd: window.costUsd,
+          // `summariseSpend.failed` counts ledger rows with a non-null `error`.
+          // Renamed at this boundary rather than in the query, because the query
+          // is honest about the column it filters on; it was the RENDERER that
+          // called those runs failed. See SpendLine.runsWithErrors.
+          runsWithErrors: window.failed,
+          fresh: window.fresh,
+        };
+  } catch (err) {
+    // allow-failopen: the cost line is context, and losing the whole brief over
+    // an unreadable ledger would trade the deliverable for a footnote.
+    log.warn({ err: (err as Error).message }, "Spend summary unavailable — cost line omitted");
+    return undefined;
+  }
 }

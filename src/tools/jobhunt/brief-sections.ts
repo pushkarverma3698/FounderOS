@@ -176,7 +176,11 @@ export function renderMarketBlocks(
 ): string {
   const blocks = MARKET_ORDER.flatMap((market) => {
     const rows = selected
-      .map((row, i) => ({ row, index: i + startIndex }))
+      // `row.rank` WINS over the position. The two agree whenever the display is
+      // a prefix of the ordering, which is every caller that predates `/today`
+      // and `/fresh`; those two render genuine subsets, where a positional index
+      // would print 1 for a row the database has pinned as 7. See BriefRow.rank.
+      .map((row, i) => ({ row, index: row.rank ?? i + startIndex }))
       .filter(({ row }) => marketOf(row.country) === market);
     if (rows.length === 0) return [];
 
