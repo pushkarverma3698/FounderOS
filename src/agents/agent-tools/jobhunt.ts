@@ -325,13 +325,29 @@ export const cvGaps = tool(
 
 // ── Job-Hunt: the ranked brief — what to apply to today (read-only) ──────────
 
+/**
+ * WHY verb/range/axis ARE HERE. `jobBriefTool` has declared all three since
+ * 2026-09-08 — and this wrapper, which is the schema the planner actually sees
+ * (capabilities.ts registers `jobBrief`, never `jobBriefTool`), declared only
+ * two fields. So "tashi's last 2 days jobs found" reached the tool as
+ * `{profile: "tashi"}`: the window and the axis were dropped silently, and the
+ * founder got the default brief with no sign that half his sentence had been
+ * discarded.
+ *
+ * Every field is forwarded verbatim to the same `brief-resolver.ts` primitives
+ * the slash commands parse with, so `/jobs wife 2d found` and the sentence
+ * cannot diverge — there is no second implementation for them to diverge in.
+ */
 export const jobBrief = tool(
-  async ({ skip_liveness, profile }) => {
+  async ({ skip_liveness, profile, verb, range, axis }) => {
     const resolved = resolveProfileArg(profile);
     if (resolved.error) return resolved.error;
     const res = await jobBriefTool.execute({
       ...(skip_liveness != null ? { skip_liveness } : {}),
       ...(resolved.profileId ? { profileId: resolved.profileId } : {}),
+      ...(verb ? { verb } : {}),
+      ...(range ? { range } : {}),
+      ...(axis ? { axis } : {}),
     });
     if (!res.success) return `Job brief failed: ${res.error}`;
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
@@ -346,6 +362,32 @@ export const jobBrief = tool(
         .nullable()
         .describe("Skip the still-open check — faster, but rows read 'couldn't confirm'"),
       profile: z.string().optional().nullable().describe(PROFILE_ARG_DESCRIPTION),
+      verb: z
+        .enum(["jobs", "today", "fresh"])
+        .optional()
+        .nullable()
+        .describe(
+          "jobs = everything on file, freshest first (the default). today = only roles the " +
+            "employer published in the last 24h. fresh = only what has arrived since he last " +
+            "asked for 'fresh'.",
+        ),
+      range: z
+        .string()
+        .optional()
+        .nullable()
+        .describe(
+          "How far back, in his own words: '2d', '48h', '2 days', 'this week'. Omit unless he " +
+            "named one. Ignored when verb='today'.",
+        ),
+      axis: z
+        .enum(["posted", "found"])
+        .optional()
+        .nullable()
+        .describe(
+          "Which date the range applies to. 'posted' = when the employer published it (the " +
+            "default). 'found' = when we first stored it — use this for 'found', 'founded' or " +
+            "'discovered', which asks about our coverage, not about the market.",
+        ),
     }),
   },
 );

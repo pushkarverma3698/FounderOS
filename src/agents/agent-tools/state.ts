@@ -89,18 +89,25 @@ export const jobState = tool(
  * payload. See jobs-csv.ts for the two prod exports that made it necessary.
  */
 export const exportJobsCsv = tool(
-  async ({ profile, kind, stage, section, track, applied, since, limit, id }, config) => {
+  async (
+    { profile, kind, verb, range, axis, stage, section, track, applied, since, limit, skip_liveness, id },
+    config,
+  ) => {
     const threadId = (config?.configurable?.thread_id as string | undefined) ?? "default";
     const res = await exportJobsCsvTool.execute(
       {
         ...(profile ? { profile } : {}),
         ...(kind ? { kind } : {}),
+        ...(verb ? { verb } : {}),
+        ...(range ? { range } : {}),
+        ...(axis ? { axis } : {}),
         ...(stage ? { stage } : {}),
         ...(section ? { section } : {}),
         ...(track ? { track } : {}),
         ...(typeof applied === "boolean" ? { applied } : {}),
         ...(since ? { since } : {}),
         ...(typeof limit === "number" ? { limit } : {}),
+        ...(typeof skip_liveness === "boolean" ? { skip_liveness } : {}),
         ...(id ? { id } : {}),
       },
       { threadId },
@@ -118,6 +125,29 @@ export const exportJobsCsv = tool(
         .optional()
         .nullable()
         .describe("'log' (default) = everything screened with links; 'queue' = ranked shortlist only."),
+      verb: z
+        .enum(["jobs", "today", "fresh"])
+        .optional()
+        .nullable()
+        .describe(
+          "jobs = everything on file (default). today = published in the last 24h. fresh = " +
+            "arrived since he last asked for 'fresh'. Prefer this over computing `since`.",
+        ),
+      range: z
+        .string()
+        .optional()
+        .nullable()
+        .describe("How far back, in his words: '2d', '48h', 'this week'. Ignored when verb='today'."),
+      axis: z
+        .enum(["posted", "found"])
+        .optional()
+        .nullable()
+        .describe("Which date `range` applies to. 'posted' (default) or 'found' (when we stored it)."),
+      skip_liveness: z
+        .boolean()
+        .optional()
+        .nullable()
+        .describe("Skip re-checking apply links. Faster; rows show their last known state."),
       stage: z.string().optional().nullable().describe("Filter by stage."),
       section: z.string().optional().nullable().describe("Brief bucket: do_today | stretch | ask | standing."),
       track: z.string().optional().nullable().describe("Role classification (e.g. 'accountant', 'fpa', 'ai')."),
