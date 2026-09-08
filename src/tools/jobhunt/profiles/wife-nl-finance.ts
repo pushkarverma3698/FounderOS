@@ -8,19 +8,35 @@
  * (Tashi_CV_FP&A.pdf) and cover letter. Replaces the "Wife" placeholder that
  * reached the agent prompt and the application packet until today.
  *
- * PERMIT — confirmed by the founder, 2026-09-04: "she's on zoekjaar".
+ * PERMIT — CORRECTED by the founder, 2026-09-08. The earlier note here said
+ * "she's on zoekjaar" (2026-09-04) and that was wrong in a way that matters:
  *
- * The orientation year gives free access to the Dutch labour market: no
- * recognised sponsor, no work permit, no IND salary criterion. That is why
- * `zoekjaar` leads `permitBases` — it is what makes a role reachable TODAY, and
- * screening her under `hsm` alone (as this file did until 2026-09-04) applied the
- * recognised-sponsor register to every Dutch employer and rejected most of a
- * market she can lawfully work in.
+ *   "she will start when the offer lands, then only she will apply for her
+ *    zoekjaar, as she has 3 years of time to apply the zoekjaar."
  *
- * `hsm` stays second because the orientation year is time-boxed and
- * non-renewable. Screening under both means the verdict says which basis carried
- * the role, so a job that ends with the permit is visibly different from one an
- * employer could sponsor afterwards.
+ * So she does NOT hold an orientation-year permit today. She holds the RIGHT to
+ * apply for one, inside a three-year window, and will do so once an offer exists.
+ *
+ * `zoekjaar` still leads `permitBases`, and the reason is unchanged: it is the
+ * basis that makes a Dutch role REACHABLE, which is the question screening asks.
+ * Screening her under `hsm` alone applies the recognised-sponsor register to
+ * every Dutch employer and rejects most of a market she can lawfully enter — the
+ * defect this ordering was introduced to fix. What changes is the tense: the
+ * evidence text must read as "she will apply for the orientation year once an
+ * offer lands", never as a permit she is holding now. See permit-routes.ts.
+ *
+ * ⚠ OPEN, AND IT DECIDES A LEGAL FLOOR. The IND *verlaagd salariscriterium*
+ * (€3,122/month, vs €4,357 standard) applies to someone switching to a highly
+ * skilled migrant permit within three years of completing a Dutch orientation
+ * year OR obtaining a qualifying degree. `screen.ts` currently selects it from
+ * `permitBases.includes("zoekjaar")` — a permanent property of the profile — so
+ * it can never expire. Making it correct needs a DATE nobody has supplied yet:
+ * when her three-year window opened. Until then the reduced figure is applied on
+ * the founder's stated plan, and the failure direction is the silent-permissive
+ * one (see docs/sessions/2026-09-08-jobhunt-supply-audit.md, fix L-1).
+ *
+ * INDIA — confirmed by the founder, 2026-09-08: she has the right to work in
+ * India. `india-local` is therefore a held basis, not an assumption.
  *
  * NOT CONFIRMED, and therefore not asserted anywhere: she has never held a
  * partner permit, so that basis is deliberately absent.
@@ -55,25 +71,22 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
   maxYearsStretch: 5,
 
   // `india-local` added 2026-09-08 on the founder's own words: "Tashi will also
-  // apply in india". A declared fact about a person, exactly like the zoekjaar
-  // above — never inferred, and it must be BOTH here and in `targetCountries`:
-  // the market decides whether an Indian posting survives `filterCandidates` at
-  // all, the basis decides whether it is screenable once it does. Her 56 existing
-  // `india-local` rows are what one without the other looks like — fetched,
-  // screened, and rejected as "not a market you have a legal basis for".
+  // apply in india", and her right to work there CONFIRMED by him the same day.
+  // A declared fact about a person — never inferred — and it must be BOTH here
+  // and in `targetCountries`: the market decides whether an Indian posting
+  // survives `filterCandidates` at all, the basis decides whether it is
+  // screenable once it does. Her 56 existing `india-local` rows are what one
+  // without the other looks like — fetched, screened, and rejected as "not a
+  // market you have a legal basis for".
   //
-  // ASSUMED — unverified: that she holds the right to work in India without a
-  // permit, which is what this basis asserts (see permit-routes.ts). The founder
-  // stated the intent to apply, not the immigration status behind it. Say so if
-  // that is wrong; it changes which gates run, not just which rows appear.
-  //
-  // Kept LAST because the ordering is strongest-commitment-first and her Dutch
-  // bases are the live ones today.
+  // Kept LAST only because the ordering is strongest-commitment-first and the
+  // relocation is the goal; it is a fully held basis, not a provisional one.
   permitBases: ["zoekjaar", "hsm", "india-local"],
 
   // Display copies of the criteria.ts figures, for prompt text only. The binding
-  // floor is looked up by date and dob in criteria.ts, and it does not apply at
-  // all while she is on the zoekjaar basis.
+  // floor is looked up by date and dob in criteria.ts. No IND floor attaches on
+  // the zoekjaar basis at all; on `hsm` the reduced criterion currently applies
+  // (see the ⚠ note in this file's header — that selection is not yet dated).
   under30MonthlyEurFloor: 4357,
   over30MonthlyEurFloor: 5942,
 

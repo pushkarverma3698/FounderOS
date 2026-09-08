@@ -190,10 +190,17 @@ const PROFILES: Record<PermitBasis, GateProfile> = {
     payReference: "eur",
     dutchLanguageApplies: true,
     label: "orientation year (zoekjaar)",
+    // TENSE CORRECTED 2026-09-08. This read "free access … while the permit runs",
+    // which asserts a permit being held. The founder's correction that day: she
+    // applies for the orientation year once an offer lands, inside a three-year
+    // window she has not yet opened. The reachability is identical — that is why
+    // the basis still leads her profile — but the sentence the founder reads must
+    // describe a step still to take, not a status already held.
     basis:
-      "Orientation year (zoekjaar) — free access to the Dutch labour market while the permit " +
-      "runs: no recognised sponsor and no IND salary criterion apply. Time-boxed and " +
-      "non-renewable, so check whether the employer could also sponsor an HSM permit after it.",
+      "Orientation year (zoekjaar) — applied for once an offer is in hand, then free access " +
+      "to the Dutch labour market: no recognised sponsor and no IND salary criterion apply. " +
+      "Time-boxed and non-renewable, so check whether the employer could also sponsor an HSM " +
+      "permit after it.",
   },
   /**
    * The second market, live since 2026-08-01.
