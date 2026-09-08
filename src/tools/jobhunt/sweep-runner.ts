@@ -15,7 +15,10 @@
  * register the cron and swallow the promise, same as every other job it runs.
  */
 
+import { randomUUID } from "node:crypto";
+
 import { childLogger } from "../../infra/logger.js";
+import { collectBoardTokens, flushBoardHarvest, startBoardHarvest } from "./board-harvest.js";
 import { sendToChat } from "../../infra/telegram-send.js";
 import { esc } from "./telegram-format.js";
 import { DEFAULT_PROFILE_ID } from "./profile-config.js";
@@ -181,6 +184,7 @@ export async function resetHeartbeat(now: Date = new Date()): Promise<void> {
  * cost this pipeline weeks (see `JOB_SWEEP_CRON` above).
  */
 export async function runFreeSweep(): Promise<void> {
+  const sweepId = randomUUID();
   const { sweepBoards } = await import("./free-ats-source.js");
   const { getFreeBoards } = await import("./free-boards.js");
   const { listProfiles } = await import("./profile-config.js");
@@ -213,10 +217,31 @@ export async function runFreeSweep(): Promise<void> {
         boardsPolled: sweep.boardsPolled,
       };
     }
-    if (aggResult.harvestedTokens.length > 0) {
+    // PERSISTED, not just counted. Until 2026-09-08 this branch logged the
+    // number and dropped it: `harvestedTokens` is `{ats, token}` and
+    // `registerDiscoveredBoard` needs a name and markets, so there was no way to
+    // write it even if someone had tried. Meanwhile the only caller of the
+    // harvest lifecycle was `ingest.ts` — the metered sweep, whose cron was
+    // removed on 2026-08-21. Net effect: the registry's self-growth mechanism had
+    // not written a board since, and `/opt/founderos-data/free-ats-discovered.csv`
+    // did not exist on the box. The monthly "run pnpm jobhunt:import-boards"
+    // reminder in scheduler.ts was the only thing still growing it.
+    //
+    // Harvested from the CANDIDATES rather than from `harvestedTokens`, because
+    // those carry the company name `harvestNewBoardTokens` needs. `country` is
+    // left off deliberately: a positive market is a finding, and the aggregator's
+    // location string has not been resolved against this candidate's markets at
+    // this point — an empty `markets` column is the honest answer.
+    const harvest = startBoardHarvest(sweepId);
+    collectBoardTokens(
+      harvest,
+      aggResult.candidates.map((c) => ({ url: c.url, company: c.board.name })),
+    );
+    const discovered = await flushBoardHarvest(harvest, sweepId);
+    if (discovered.length > 0) {
       log.info(
-        { tokens: aggResult.harvestedTokens.length },
-        "Board tokens harvested from aggregator URLs",
+        { boards: discovered.length, tokens: aggResult.harvestedTokens.length },
+        "Aggregator URLs grew the free-board registry",
       );
     }
   } catch (err) {
