@@ -209,9 +209,22 @@ export function afterQuietSweep(
   if (newStreak === ZERO_PASS_STREAK_THRESHOLD) {
     const top = funnelClosingStage(funnel ?? state.lastFunnel);
     const dropClause = top ? ` (the last ${top.count} died at: ${top.reason})` : "";
+    // Only the DIAGNOSIS varies by closing stage, never whether the alert fires.
+    //
+    // A dedup-only streak does not support "the funnel may be restricted or
+    // closed" — every posting the sweep saw was one we already had. But it is
+    // not evidence of health either: a board fetch frozen on a stale cache is
+    // indistinguishable, from inside the funnel, from a genuinely flat market.
+    // Suppressing the alert there would not defer it, it would delete it — the
+    // guard is a strict `=== THRESHOLD`, so the streak then runs 7, 8, 9… and
+    // never gets another chance until a sweep actually passes something.
+    const diagnosis =
+      top?.reason === "already known in tracker"
+        ? "No NEW postings reached screening — either the market is flat or board fetches are serving stale data."
+        : "The funnel may be restricted or closed.";
     const ping =
       `⚠ <b>Job lane funnel alert${who}</b> — 0 candidates passed for ${newStreak} consecutive sweeps` +
-      `${dropClause}. The funnel may be restricted or closed.`;
+      `${dropClause}. ${diagnosis}`;
     return {
       next: { ...pending, lastMessageAt: currentNow.getTime() },
       ping,

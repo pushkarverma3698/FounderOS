@@ -114,6 +114,69 @@ describe("markdownToTelegramHtml", () => {
     expect(out).not.toContain("**");
     expect(out).not.toMatch(/^- /m);
   });
+
+  it("converts LaTeX math expressions into readable plain text", () => {
+    const md = "Calculation: $$\\text{Duration} = \\frac{13,000}{21.2} \\approx 613\\text{ seconds}$$ fits in window.";
+    const out = markdownToTelegramHtml(md);
+    expect(out).not.toContain("$$");
+    expect(out).not.toContain("\\text");
+    expect(out).not.toContain("\\frac");
+    expect(out).toContain("Duration = (13,000 / 21.2) ≈ 613 seconds");
+  });
+
+  it("handles bracketed bare URLs cleanly without leaking closing bracket into href", () => {
+    const md = "Check repo at [https://github.com/pushkarverma3698/FounderOS]";
+    const out = markdownToTelegramHtml(md);
+    expect(out).toContain('<a href="https://github.com/pushkarverma3698/FounderOS">https://github.com/pushkarverma3698/FounderOS</a>');
+    expect(out).not.toContain("FounderOS]");
+  });
+
+  it("wraps bare filenames in code chips to prevent Telegram autolinking .md/.py as TLDs", () => {
+    const md = "Files created: README.md and primes.py in root.";
+    const out = markdownToTelegramHtml(md);
+    expect(out).toContain("<code>README.md</code>");
+    expect(out).toContain("<code>primes.py</code>");
+  });
+
+  // A filename that sits inside a URL is not prose. Chipping it injects a <code>
+  // tag into the href and produces exactly the dead link this PR exists to remove.
+  it("does not chip a filename that lives inside a URL query string", () => {
+    const out = markdownToTelegramHtml("[JD](https://jobs.example.com/apply?file=brief.pdf)");
+    expect(out).toBe('<a href="https://jobs.example.com/apply?file=brief.pdf">JD</a>');
+  });
+
+  it("does not chip a filename after '=' or '#' in a bare URL", () => {
+    const out = markdownToTelegramHtml("Grab https://x.example.com/dl?name=cv.pdf#anchor.md now");
+    expect(out).not.toContain("<code>");
+  });
+
+  // ── Regression: placeholder sentinels must be unforgeable (2026-09-08) ───────
+  // The extract/restore passes stash code blocks, inline code and tables behind
+  // a placeholder token. If that token is spellable in ordinary prose, any reply
+  // that happens to contain it is silently rewritten on the way to Telegram.
+  // Measured before the fix: "See spec IC7 for details." rendered as
+  // "See specundefinedfor details." — the founder reads the word "undefined".
+
+  it("does not substitute a code span into prose that happens to read like a placeholder", () => {
+    const out = markdownToTelegramHtml("Use `x` then note IC0 in prose.");
+    expect(out).toBe("Use <code>x</code> then note IC0 in prose.");
+  });
+
+  it("never emits 'undefined' for an out-of-range placeholder written by the model", () => {
+    for (const md of ["See spec IC7 for details.", "Row CB0 of the table.", "Item TB3 shipped."]) {
+      const out = markdownToTelegramHtml(md);
+      expect(out).not.toContain("undefined");
+      expect(out).toBe(md);
+    }
+  });
+
+  it("keeps placeholder sentinels out of the rendered output", () => {
+    const out = markdownToTelegramHtml("```\ncode\n```\nand `inline` here");
+    expect(out).not.toMatch(/\u0000/);
+    expect(out).not.toMatch(/(CB|IC|TB)\d+/);
+    expect(out).toContain("<pre>code</pre>");
+    expect(out).toContain("<code>inline</code>");
+  });
 });
 
 describe("splitForTelegram", () => {

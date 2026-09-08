@@ -181,12 +181,15 @@ export async function runDueScheduledTask(task: ScheduledTask): Promise<void> {
       trace.event("turn.out", { replyPreview: reply.slice(0, 200) });
       const html = markdownToTelegramHtml(reply);
       for (const chunk of splitForTelegram(html)) {
-        await getBot()
-          .api.sendMessage(chatId, chunk, { parse_mode: "HTML" })
-          .catch(async () => {
-            // Telegram rejected the HTML (edge-case entities) — send plain, never drop.
-            await getBot().api.sendMessage(chatId, reply.slice(0, 4000));
-          });
+        try {
+          await getBot().api.sendMessage(chatId, chunk, { parse_mode: "HTML" });
+        } catch {
+          // Telegram rejected the HTML (edge-case entities) — send this chunk plain, never drop or truncate.
+          const plain = chunk.replace(/<[^>]*>/g, "");
+          for (const sub of splitForTelegram(plain)) {
+            await getBot().api.sendMessage(chatId, sub);
+          }
+        }
       }
       await markScheduledTaskDone(task.id);
     } catch (err) {
