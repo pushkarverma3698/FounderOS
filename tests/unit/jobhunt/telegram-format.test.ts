@@ -83,6 +83,34 @@ describe("link", () => {
       '<a href="https://x.test/j">Data &amp; AI Lead</a>',
     );
   });
+
+  it("encodes parentheses in URLs to avoid Telegram parser truncation", () => {
+    expect(link("Workable Job", "https://jobs.workable.com/view/123/remote-engineer-(typescript)-in-boston")).toBe(
+      '<a href="https://jobs.workable.com/view/123/remote-engineer-%28typescript%29-in-boston">Workable Job</a>',
+    );
+  });
+
+  it("strips trailing markdown brackets and punctuation that leak into URLs", () => {
+    expect(link("FounderOS", "https://github.com/pushkarverma3698/FounderOS]")).toBe(
+      '<a href="https://github.com/pushkarverma3698/FounderOS">FounderOS</a>',
+    );
+  });
+
+  // A ")" at the end of a URL is only markdown leakage when it is UNBALANCED.
+  // Cutting a balanced one manufactures a 404 — the same dead link this whole
+  // sanitizer exists to remove. Workday and Workable both put bracketed location
+  // and stack qualifiers at the end of a path.
+  it("keeps a balanced trailing parenthesis that is part of the path", () => {
+    expect(link("Role", "https://myworkdayjobs.com/careers/job/Amsterdam-(HQ)")).toBe(
+      '<a href="https://myworkdayjobs.com/careers/job/Amsterdam-%28HQ%29">Role</a>',
+    );
+  });
+
+  it("still strips an unbalanced trailing parenthesis leaked by markdown", () => {
+    expect(link("Role", "https://jobs.example.com/view/123)")).toBe(
+      '<a href="https://jobs.example.com/view/123">Role</a>',
+    );
+  });
 });
 
 describe("cmd", () => {
