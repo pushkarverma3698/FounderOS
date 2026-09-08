@@ -69,12 +69,34 @@ export function bandOn(date: Date, dob: Date = FOUNDER_DOB): HsmBand {
  * verified window. Null means "unknown", never "zero" — a zero floor would pass
  * every posting.
  */
-export function criterionOn(date: Date, dob: Date = FOUNDER_DOB, isOrientationYearSwitcher: boolean = false): SalaryCriterion | null {
+/**
+ * `reducedUntil` is a DATE, and it used to be a boolean.
+ *
+ * The *verlaagd salariscriterium* applies to someone moving to a highly skilled
+ * migrant permit within THREE YEARS of completing a Dutch orientation year or
+ * obtaining a qualifying degree. It is time-boxed by law, and it was selected by
+ * `permitBases.includes("zoekjaar")` — a string membership test on a profile
+ * constant, permanent by construction, so it could never expire. The failure
+ * direction was silent-permissive: the pipeline would go on clearing roles at a
+ * floor 28% below the lawful one and say nothing.
+ *
+ * Absent means the standard band, never the reduced one. The reduced criterion is
+ * a claim about a person's recent history, so it requires a date to be asserted;
+ * an unset field is "we have not established this", which reads as "no".
+ */
+export function criterionOn(
+  date: Date,
+  dob: Date = FOUNDER_DOB,
+  reducedUntil?: Date | null,
+): SalaryCriterion | null {
   const iso = date.toISOString().slice(0, 10);
   const window = CRITERIA.find((w) => iso >= w.from && iso <= w.to);
   if (!window) return null;
 
-  const band = isOrientationYearSwitcher ? "reduced" : bandOn(date, dob);
+  // Inclusive of the last day: the window is stated in whole days, and a floor
+  // that lapses at an unstated hour is a floor nobody can check.
+  const reduced = reducedUntil != null && iso <= reducedUntil.toISOString().slice(0, 10);
+  const band = reduced ? "reduced" : bandOn(date, dob);
   const monthly = band === "reduced" ? window.reducedMonthly : band === "under-30" ? window.under30Monthly : window.over30Monthly;
   const annualBase = monthly * 12;
 

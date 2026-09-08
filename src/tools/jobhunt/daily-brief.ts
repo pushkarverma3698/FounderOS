@@ -17,7 +17,7 @@ import {
   listActionableApplications,
   countAgedOutApplications,
   recordLiveness,
-  APPLY_QUEUE_MAX_AGE_HOURS,
+  queueWindowFor,
 } from "../../db/job-queries.js";
 import { summariseSpend } from "../../db/job-run-queries.js";
 import { compareOverlap, overlapScore, type OverlapResult } from "./overlap.js";
@@ -177,14 +177,23 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
   // profileId scoping is what keeps Wife's brief from mixing in Pushkar's rows
   // (and vice versa) — listActionableApplications filters by tenant_id alone
   // when profileId is omitted, so multi-profile callers must always pass it.
+  // WHOSE window. A single global here capped the second candidate's brief at
+  // her market's daily publication rate — see queueWindowFor.
+  const maxAgeHours = queueWindowFor(profile);
   const applications = await listActionableApplications({
     verdicts,
     tenantId: profile.tenantId,
     profileId: profile.id,
+    maxAgeHours,
   });
   let agedOut = 0;
   try {
-    agedOut = await countAgedOutApplications({ verdicts, tenantId: profile.tenantId, profileId: profile.id });
+    agedOut = await countAgedOutApplications({
+      verdicts,
+      tenantId: profile.tenantId,
+      profileId: profile.id,
+      maxAgeHours,
+    });
   } catch (err) {
     // allow-failopen: the freshness line is context, not the deliverable. Losing
     // the whole brief over a count query would trade the shortlist for a footnote.
@@ -270,7 +279,7 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     failures: [...(opts.failures ?? []), ...cvFailure, ...untrackedNote],
     notes: opts.notes ?? [],
     agedOut,
-    maxAgeHours: APPLY_QUEUE_MAX_AGE_HOURS,
+    maxAgeHours,
     // WHOSE brief. The legend quotes this candidate's years, salary criterion,
     // permit bases and markets — and printed the founder's on everyone's until
     // 2026-09-08, because `GATE_GLOSSARY` was a module constant.

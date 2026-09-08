@@ -177,7 +177,7 @@ export function gateGlossary(
   profile: JobSearchProfile,
   now: Date = new Date(),
 ): Readonly<Record<string, string>> {
-  const criterion = criterionOn(now, profile.dob, profile.permitBases.includes("zoekjaar"));
+  const criterion = criterionOn(now, profile.dob, profile.reducedCriterionUntil ?? null);
   // Stated rather than asserted when the table has lapsed — `screenSalaryFacts`
   // flags in exactly that case, so the legend must not claim a floor it cannot
   // name (criteria.ts covers one calendar year at a time, by design).

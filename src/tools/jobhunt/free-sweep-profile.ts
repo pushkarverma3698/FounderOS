@@ -142,13 +142,20 @@ export async function runFreeSweepForProfile(
     return;
   }
 
-  const newPasses = result.lines.filter((line) => line.outcome === "pass" && line.isNew);
+  // PASS **AND** FLAG, since 2026-09-08 (founder: "alerted every time we pass
+  // them, whenever we find new roles"). A flagged row is a real role with one
+  // open question, and for the NL-finance lane it is most of them — filtering to
+  // `pass` meant her lane could rank roles into her brief and stay silent.
+  // `reject` stays out: those are legally void, not pending.
+  const newRoles = result.lines.filter(
+    (line) => line.isNew && (line.outcome === "pass" || line.outcome === "flag"),
+  );
   const now = new Date();
 
   // A sweep that found nothing does not touch the Sheet. Rewriting identical
   // rows 48 times a day spends API quota to produce no change, and it would
   // overwrite the `Applied` column between a founder's click and his next sync.
-  if (newPasses.length === 0) {
+  if (newRoles.length === 0) {
     const { next, ping } = afterQuietSweep(
       await heartbeatFor(profile.id),
       result.boardsPolled,
@@ -189,10 +196,10 @@ export async function runFreeSweepForProfile(
   // lane and broken lane look identical" failure this heartbeat exists to
   // prevent. Leaving it unspoken is honest: the next quiet roll-up still pings.
   try {
-    await sendToChat(formatNewRowsAlert(newPasses, link ?? notice, profile.candidateName));
+    await sendToChat(formatNewRowsAlert(newRoles, link ?? notice, profile.candidateName));
   } catch (err) {
     log.error(
-      { err: (err as Error).message, profile: profile.id, newPasses: newPasses.length },
+      { err: (err as Error).message, profile: profile.id, newRoles: newRoles.length },
       "New-roles alert could not be delivered — heartbeat deliberately left unspoken",
     );
     return;

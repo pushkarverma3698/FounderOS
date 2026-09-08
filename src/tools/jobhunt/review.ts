@@ -62,7 +62,7 @@ export function pipelineHealth(
     notes.push(`⚠ Sponsor register unreadable: ${(err as Error).message}`);
   }
 
-  const criterion = criterionOn(now, profile.dob, profile.permitBases.includes("zoekjaar"));
+  const criterion = criterionOn(now, profile.dob, profile.reducedCriterionUntil ?? null);
   notes.push(
     criterion
       ? `✓ Salary criterion in force for ${profile.candidateName}: ${criterion.basis} (€${criterion.annualBase}/yr base, €${criterion.hourly}/hr).`

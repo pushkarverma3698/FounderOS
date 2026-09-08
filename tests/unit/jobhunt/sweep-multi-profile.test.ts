@@ -189,7 +189,7 @@ describe("runFreeSweep", () => {
   it("names the candidate in the alert once there is more than one", async () => {
     await runFreeSweep();
     const messages = sendToChat.mock.calls.map((c) => String(c[0] ?? ""));
-    const named = messages.filter((m) => m.includes("passed screening for "));
+    const named = messages.filter((m) => m.includes("new role") && m.includes(" for "));
     expect(named.length).toBeGreaterThan(0);
   });
 });

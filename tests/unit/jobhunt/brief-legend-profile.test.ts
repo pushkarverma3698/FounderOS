@@ -88,11 +88,15 @@ describe("the legend names the markets this candidate actually targets", () => {
 });
 
 describe("the Pay line never borrows a line the candidate was not asked for", () => {
-  it("states that no personal line is set when the profile declares none", () => {
+  it("quotes HER line, never the founder's", () => {
     const line = gateGlossary(wife, NOW)["Pay"] ?? "";
-    // She now sees Indian roles, so the line renders — but with no ₹15 in it.
+    expect(line).toContain("20");
     expect(line).not.toContain("15");
-    expect(line.toLowerCase()).toMatch(/no .*line|not set/);
+  });
+
+  it("says the line is unset for a profile that declares none", () => {
+    const noLine = { ...wife, minInrLpaFloor: undefined };
+    expect((gateGlossary(noLine, NOW)["Pay"] ?? "").toLowerCase()).toMatch(/no .*line|not set/);
   });
 
   it("quotes the founder's own declared line on his brief", () => {
