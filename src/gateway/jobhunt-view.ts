@@ -41,6 +41,9 @@ import {
 } from "../tools/jobhunt/brief-resolver.js";
 import { buildQueueTab, buildLogTab } from "../tools/jobhunt/sheet-rows.js";
 import { toCsv } from "../tools/jobhunt/csv-export.js";
+import { inScope } from "../tools/jobhunt/brief-queue.js";
+import { refreshLiveness } from "../tools/jobhunt/liveness-refresh.js";
+import { lastFreshView } from "../db/job-heartbeat-queries.js";
 import { childLogger } from "../infra/logger.js";
 import { safeHtml } from "./approval-card.js";
 
@@ -48,6 +51,9 @@ const log = childLogger({ module: "gateway:jobhunt-view" });
 
 /** Which file `/csv` builds. Bare `/csv` is the queue — the thing he acts on. */
 export type CsvKind = "queue" | "log";
+
+/** The slice of the queue a file covers. Same shape `inScope` filters against. */
+export type CsvScope = Pick<BriefScopePlan, "windowHours" | "since" | "axis">;
 
 /**
  * Parse `/csv`, `/csv all`, `/csv log`.
@@ -58,6 +64,21 @@ export type CsvKind = "queue" | "log";
  */
 export function parseCsvKind(raw: string): CsvKind {
   return /^(all|log|everything|audit)$/i.test(raw.trim()) ? "log" : "queue";
+}
+
+/**
+ * Which verb `/csv <rest>` is asking for, if any.
+ *
+ * ADDED 2026-09-09. `/csv` knew two words — "queue" and "all" — while `/jobs`,
+ * `/today` and `/fresh` had a full resolver behind them. So the founder could
+ * ask for today's roles on screen and not in a file, which is backwards: the
+ * file is what he wants precisely when the screen cannot hold the answer.
+ */
+export function parseCsvVerb(raw: string): BriefVerb | null {
+  const word = raw.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+  if (word === "today") return "today";
+  if (word === "fresh" || word === "new") return "fresh";
+  return null;
 }
 
 /** `jobs-queue-2026-08-21.csv` — dated, so two downloads never collide in a file picker. */
@@ -71,15 +92,41 @@ export function csvFilename(kind: CsvKind, now: Date): string {
  * Names the row count and what the rows ARE. A file arriving with no caption
  * makes the founder open it to find out whether it was worth opening.
  */
-export function csvCaption(kind: CsvKind, rows: number): string {
+export function csvCaption(kind: CsvKind, rows: number, verification?: VerificationNote): string {
   if (rows === 0) {
     return kind === "queue"
       ? "Your apply queue is empty right now — nothing has cleared screening in the last 24 hours."
       : "Nothing screened yet.";
   }
-  return kind === "queue"
-    ? `${rows} role(s) in your apply queue. The # column is the number /draft takes.`
-    : `${rows} recently screened role(s), rejects included — the audit trail, not the shortlist.`;
+  const noun = rows === 1 ? "role" : "roles";
+  const head =
+    kind === "queue"
+      ? `${rows} ${noun} in your apply queue. The # column is the number /draft takes.`
+      : `${rows} screened ${noun}, rejects included — the audit trail, not the shortlist.`;
+  return verification ? `${head}\n${describeVerification(verification)}` : head;
+}
+
+/** What `refreshLiveness` did, reduced to the three numbers a caption needs. */
+export interface VerificationNote {
+  readonly verified: number;
+  readonly skipped: number;
+  readonly alreadyFresh: number;
+}
+
+/**
+ * One line saying which links were actually checked.
+ *
+ * NAMES THE UNCHECKED COUNT. A file that verified 150 of 1,700 links and said
+ * only "150 verified" reads as a complete file — which is the same defect as
+ * the silent 100-row brief cap, one layer down. The skipped number is the one
+ * that changes what the founder trusts, so it is never omitted when non-zero.
+ */
+export function describeVerification(note: VerificationNote): string {
+  const current = note.verified + note.alreadyFresh;
+  const base = `🔗 ${current} link(s) confirmed against the employer's site (${note.verified} re-checked just now).`;
+  return note.skipped > 0
+    ? `${base} ${note.skipped} were past this file's check budget and show their last known state.`
+    : base;
 }
 
 export interface CsvPayload {
@@ -100,33 +147,62 @@ export async function buildJobsCsv(
   kind: CsvKind,
   now: Date = new Date(),
   profileId: string = DEFAULT_PROFILE_ID,
+  opts: { scope?: CsvScope; skipLiveness?: boolean } = {},
 ): Promise<CsvPayload> {
-  const rows =
+  const all =
     kind === "queue"
       ? await listApplyQueue(undefined, profileId)
       : await listRecentlyScreened(undefined, profileId);
-  const table = kind === "queue" ? buildQueueTab(rows, now) : buildLogTab(rows, now);
+
+  // FILTERED BEFORE VERIFYING, deliberately. The check budget belongs to rows
+  // that will be in the file; spending it on rows the scope excludes is how a
+  // `/csv today` ends up with an unverified today.
+  const scoped = opts.scope ? all.filter((row) => inScope(row, opts.scope!, now)) : all;
+
+  const refreshed = opts.skipLiveness
+    ? { rows: scoped, verified: 0, skipped: 0, alreadyFresh: 0 }
+    : await refreshLiveness(scoped, { now });
+
+  const table =
+    kind === "queue" ? buildQueueTab(refreshed.rows, now) : buildLogTab(refreshed.rows, now);
   return {
     csv: toCsv(table),
     filename: csvFilename(kind, now),
-    caption: csvCaption(kind, rows.length),
-    rows: rows.length,
+    caption: csvCaption(kind, refreshed.rows.length, opts.skipLiveness ? undefined : refreshed),
+    rows: refreshed.rows.length,
   };
 }
 
-/** `/csv` — the apply queue as a file. `/csv all` — everything screened, rejects included. */
+/**
+ * `/csv` — the apply queue as a file. `/csv all` — everything screened.
+ * `/csv today`, `/csv fresh`, `/csv wife 7d` — the same slices the screen verbs show.
+ *
+ * A VERB IMPLIES THE LOG, not the queue. "Everything I found today" must include
+ * the rows the ranking did not pin, or the file answers a narrower question than
+ * the one asked and looks like an empty market.
+ */
 export async function handleCsv(ctx: Context): Promise<void> {
   // "all" is this command's own word for the log tab — reserved so it is never
   // read as a profile name.
-  const selected = resolveProfileArg(ctx.match?.toString() ?? "", ["all", "queue"]);
+  const selected = resolveProfileArg(ctx.match?.toString() ?? "", ["all", "queue", "today", "fresh", "new"]);
   if (isProfileArgMiss(selected)) {
     await ctx.reply(profileMissMessage(selected));
     return;
   }
-  const kind = parseCsvKind(selected.rest);
+  const verb = parseCsvVerb(selected.rest);
+  const kind = verb ? "log" : parseCsvKind(selected.rest);
   try {
-    const payload = await buildJobsCsv(kind, new Date(), selected.profile.id);
-    log.info({ kind, rows: payload.rows, profile: selected.profile.id }, "CSV export requested");
+    const request = parseBriefRequest(selected.rest, verb ?? "jobs");
+    const scope = isProfileMiss(request)
+      ? undefined
+      : scopeFor(request, {
+          lastFreshView: request.verb === "fresh" ? await lastFreshView(selected.profile.id) : null,
+        });
+    const payload = await buildJobsCsv(kind, new Date(), selected.profile.id, { ...(scope ? { scope } : {}) });
+    log.info(
+      { kind, verb, rows: payload.rows, profile: selected.profile.id },
+      "CSV export requested",
+    );
     await ctx.replyWithDocument(new InputFile(Buffer.from(payload.csv, "utf8"), payload.filename), {
       caption: payload.caption,
     });
