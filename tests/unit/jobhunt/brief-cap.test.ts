@@ -73,7 +73,7 @@ describe("A2 — a cut is stated with both numbers", () => {
   it("names the loaded count AND the true total when it bites", () => {
     const rows = Array.from({ length: 500 }, (_, i) => row(`r${i}`));
     const rendered = formatDailyBrief(input({ rows, queued: 640 }));
-    expect(rendered).toContain("Showing the newest 500 of 640");
+    expect(rendered).toContain("Showing the newest 500 of 640 roles");
   });
 
   it("stops promising nothing was cut on the run where something was", () => {

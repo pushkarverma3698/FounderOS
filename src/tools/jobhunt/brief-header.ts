@@ -178,8 +178,11 @@ function screenedLine(screened: number | undefined): string {
 function completenessLine(input: HeaderInput): string {
   if (wasCut(input)) {
     const cut = (input.queued ?? 0) - input.rowsLoaded;
+    // "in your queue", not "in the window": the cut notice fires hardest on
+    // `/jobs`, which HAS no window, and naming one there would invent a filter
+    // that is not being applied.
     return (
-      `<i>⚠ Showing the newest ${input.rowsLoaded} of ${input.queued} in the window — ` +
+      `<i>⚠ Showing the newest ${input.rowsLoaded} of ${input.queued} roles in your queue — ` +
       `${plural(cut, "role is", "roles are")} not in this message. ` +
       `Send /csv for the whole queue.</i>`
     );
