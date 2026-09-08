@@ -174,9 +174,16 @@ function ambiguityNotes(facts: SalaryFacts): string[] {
  * this codebase has verified. Asserting a legal threshold from a stale constant
  * is the failure this guards against.
  */
+/**
+ * BOTH date inputs belong to the CANDIDATE, and both move the floor a long way:
+ * `dob` steps it up 36% at thirty, and `reducedCriterionUntil` holds it 28% lower
+ * while the IND reduced criterion is still available. Defaulting either to the
+ * founder's own value produces a confidently wrong legal number for anyone else —
+ * `dob` did exactly that until 2026-09-04, and the reduced band until 2026-09-08.
+ */
 export function screenSalaryFacts(
   facts: SalaryFacts,
-  opts: { route?: ScreenRoute; now?: Date; dob?: Date; isOrientationYearSwitcher?: boolean } = {},
+  opts: { route?: ScreenRoute; now?: Date; dob?: Date; reducedCriterionUntil?: Date | null } = {},
 ): ScreenResult {
   const now = opts.now ?? new Date();
   const floorApplies = gateProfile(opts.route ?? "hsm").salaryFloorApplies;
@@ -184,7 +191,7 @@ export function screenSalaryFacts(
   // birthday, so reading it off the wrong person's date of birth produces a
   // confidently wrong legal floor. This defaulted to the founder's DOB for every
   // profile until 2026-09-04.
-  const criterion: SalaryCriterion | null = criterionOn(now, opts.dob, opts.isOrientationYearSwitcher);
+  const criterion: SalaryCriterion | null = criterionOn(now, opts.dob, opts.reducedCriterionUntil);
 
   // An unverified criterion only matters where the criterion is a legal condition.
   // On a partner permit or a remote contract there is no floor to be stale about,

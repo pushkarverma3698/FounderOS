@@ -71,6 +71,23 @@ export const LIVE_STAGES = ["drafted", "awaiting_approval", "applied", "replied"
 export const APPLY_QUEUE_MAX_AGE_HOURS = intEnv("APPLY_QUEUE_MAX_AGE_HOURS", 24);
 
 /**
+ * The apply-queue window for ONE candidate.
+ *
+ * It was a single global until 2026-09-08, and the two lanes have opposite
+ * problems. Measured that day: Pushkar's market publishes 149 roles a day, so 24
+ * hours is right for him and a wider window would bury today's finds under last
+ * week's — that is the reasoning behind the 2026-09-07 fresh-only decision, and
+ * it stands. Tashi's publishes 9, so the same 24 hours capped her brief at about
+ * nine rows no matter how well the sweep, the filters and the ranking worked.
+ *
+ * The global stays the default, so a profile that declares nothing behaves
+ * exactly as every profile did before this existed.
+ */
+export function queueWindowFor(profile?: { readonly applyQueueMaxAgeHours?: number }): number {
+  return profile?.applyQueueMaxAgeHours ?? APPLY_QUEUE_MAX_AGE_HOURS;
+}
+
+/**
  * Look up a previously screened role by its dedupe identity, scoped to a
  * specific profile_id so Wife and Pushkar can independently screen the same posting.
  *

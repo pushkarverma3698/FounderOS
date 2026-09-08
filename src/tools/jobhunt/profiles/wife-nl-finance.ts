@@ -25,15 +25,12 @@
  * evidence text must read as "she will apply for the orientation year once an
  * offer lands", never as a permit she is holding now. See permit-routes.ts.
  *
- * ⚠ OPEN, AND IT DECIDES A LEGAL FLOOR. The IND *verlaagd salariscriterium*
- * (€3,122/month, vs €4,357 standard) applies to someone switching to a highly
- * skilled migrant permit within three years of completing a Dutch orientation
- * year OR obtaining a qualifying degree. `screen.ts` currently selects it from
- * `permitBases.includes("zoekjaar")` — a permanent property of the profile — so
- * it can never expire. Making it correct needs a DATE nobody has supplied yet:
- * when her three-year window opened. Until then the reduced figure is applied on
- * the founder's stated plan, and the failure direction is the silent-permissive
- * one (see docs/sessions/2026-09-08-jobhunt-supply-audit.md, fix L-1).
+ * SALARY FLOOR — now dated, and it needed to be. The IND *verlaagd
+ * salariscriterium* (€3,122/month vs €4,357) is available for three years after a
+ * Dutch orientation year or qualifying degree. Graduation confirmed by the
+ * founder as 1 October 2026, so `reducedCriterionUntil` below is 2029-10-01.
+ * Until 2026-09-08 this was selected from `permitBases.includes("zoekjaar")` — a
+ * permanent flag that could never expire, in the silent-permissive direction.
  *
  * INDIA — confirmed by the founder, 2026-09-08: she has the right to work in
  * India. `india-local` is therefore a held basis, not an assumption.
@@ -83,23 +80,39 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
   // relocation is the goal; it is a fully held basis, not a provisional one.
   permitBases: ["zoekjaar", "hsm", "india-local"],
 
+  // FOURTEEN DAYS, against the global 24 hours. Her market published 9 roles in
+  // the 24h measured on 2026-09-08 (Pushkar's: 149), so a one-day window capped
+  // her brief at about nine rows before any of the screening mattered. Widening
+  // it is the single cheapest supply lever available to her lane and costs
+  // nothing anywhere else — the window is read per profile.
+  applyQueueMaxAgeHours: 14 * 24,
+
+  // She graduates 1 October 2026 (founder, 2026-09-08), which opens the
+  // three-year window for the IND reduced salary criterion. After this date the
+  // standard band applies and roles that cleared €37,464 stop clearing €52,284 —
+  // which is the whole reason this is a date rather than the permanent flag it
+  // was until today. See criteria.ts.
+  reducedCriterionUntil: new Date("2029-10-01T00:00:00Z"),
+
   // Display copies of the criteria.ts figures, for prompt text only. The binding
   // floor is looked up by date and dob in criteria.ts. No IND floor attaches on
-  // the zoekjaar basis at all; on `hsm` the reduced criterion currently applies
-  // (see the ⚠ note in this file's header — that selection is not yet dated).
+  // the zoekjaar basis at all; on `hsm` the reduced criterion applies until the
+  // date above.
   under30MonthlyEurFloor: 4357,
   over30MonthlyEurFloor: 5942,
 
-  // `minInrLpaFloor` is DELIBERATELY ABSENT, and its absence is load-bearing.
-  // The ₹15 LPA line is the founder's own preference, chosen by him from stated
-  // options on 2026-08-01 (pay-india.ts says so in as many words) and pitched at
-  // the tech market. Until 2026-09-08 `screen.ts` read it as
-  // `profile.minInrLpaFloor ?? 15`, so declaring nothing meant inheriting his —
-  // which for a finance analyst at 2.4 years would flag essentially every Indian
-  // posting she saw, and a flagged row lands in ASK, which the free lane's alert
-  // never announces. Her India lane would have been silent on a number nobody set
-  // for her. `screenIndianPay` now takes `null` and says the line is unset rather
-  // than borrowing one. Set this the day the founder states a figure.
+  // ₹20 LPA, stated by the founder 2026-09-08 — and it is safe to state ONLY
+  // because the alert now carries flagged rows too. The pay gate flags below this
+  // line and never rejects, so no Indian role is lost; before the same day's
+  // alert change, a flag meant silence, and setting any line here would have
+  // muted most of her India lane. His words: "this also doesn't matter, what
+  // matters is the entire jobs… salary happens in the HR rounds" — so the number
+  // travels into that conversation instead of filtering the queue.
+  minInrLpaFloor: 20,
+
+  // The note this replaces, kept because it is why the pairing matters: ₹15 LPA
+  // is the FOUNDER's line, and `screen.ts` read `minInrLpaFloor ?? 15` until
+  // 2026-09-08, so declaring nothing here meant silently inheriting his.
   targetCountries: [
     {
       code: "NL",
