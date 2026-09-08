@@ -177,6 +177,68 @@ export function applyDeferredFreshness(
 }
 
 /**
+ * The candidate's location string with whatever the DETAIL payload knows folded
+ * in — city, country, or both.
+ *
+ * Pure string work on purpose: `countryFromLocation` already knows how to read a
+ * place out of a location string for every platform, and teaching a second thing
+ * to map country names to codes is how the two answers drift. This just makes the
+ * string say what the employer actually said.
+ *
+ * Nothing is appended twice: a location that already names the country keeps its
+ * own wording ("Amsterdam, Netherlands" does not become
+ * "Amsterdam, Netherlands, Netherlands"), and a detail payload with nothing to
+ * add returns the original untouched — including an empty one, because an absent
+ * location must stay `unknown` rather than become a guess.
+ */
+export function mergeDetailLocation(
+  current: string,
+  detailLocation: string | null,
+  detailCountry: string | null,
+): string {
+  const has = (needle: string | null, hay: string): boolean =>
+    needle !== null && hay.toLowerCase().includes(needle.toLowerCase());
+
+  let merged = current.trim();
+  if (detailLocation !== null && !has(detailLocation, merged)) {
+    merged = merged.length > 0 ? `${merged}, ${detailLocation}` : detailLocation;
+  }
+  if (detailCountry !== null && !has(detailCountry, merged)) {
+    merged = merged.length > 0 ? `${merged}, ${detailCountry}` : detailCountry;
+  }
+  return merged;
+}
+
+/**
+ * The market check `filterCandidates` could not make, run now that hydration has
+ * supplied a location.
+ *
+ * Exactly the shape of `applyDeferredFreshness` above, for exactly the same class
+ * of reason: some platforms answer the list endpoint without the field the gate
+ * needs. MEASURED 2026-09-08 — Workday's list payload left `locationsText` empty
+ * on the Michael Kors tenant, so a Paris shop-floor vacancy was `unknown` at the
+ * first market gate, survived it (as `unknown` must, because a remote role names
+ * no country), and reached rank 2 of a Netherlands-only brief. The detail payload
+ * fetched moments later for its description said `France`.
+ *
+ * `unknown` still survives here. This gate only drops what hydration has
+ * POSITIVELY placed in a market the candidate does not target — the same rule the
+ * first market gate applies, at the first moment it can be applied.
+ */
+export function applyDeferredMarket(
+  hydrated: readonly FreeCandidate[],
+  profile: JobSearchProfile = getProfile(),
+): { kept: FreeCandidate[]; offMarket: number } {
+  let offMarket = 0;
+  const kept = hydrated.filter((candidate) => {
+    if (countryFromLocation(candidate.location, profile) !== "other") return true;
+    offMarket += 1;
+    return false;
+  });
+  return { kept, offMarket };
+}
+
+/**
  * Why a posting reached screening with no body — the distinction the funnel's
  * `bodyless` count throws away.
  *

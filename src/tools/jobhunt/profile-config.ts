@@ -7,6 +7,8 @@
 
 import { z } from "zod";
 
+import { INDIA_MARKET } from "./profiles/markets.js";
+
 export const ProfileTrackSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -119,24 +121,10 @@ export const PUSHKAR_PROFILE: JobSearchProfile = {
       ],
       atsLocations: ["Netherlands"],
     },
-    {
-      code: "IN",
-      names: ["india", "bharat"],
-      cities: [
-        "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", "chennai", "new delhi",
-        "delhi", "noida", "gurgaon", "gurugram", "kolkata", "ahmedabad", "jaipur", "indore",
-        "chandigarh", "kochi", "coimbatore", "thiruvananthapuram", "bhubaneswar", "lucknow",
-        "varanasi", "bareilly", "mysore", "mysuru", "nashik", "tirupati", "vadodara", "surat",
-        "nagpur", "visakhapatnam", "vizag", "trivandrum", "mohali", "bhopal", "rajkot",
-        "faridabad", "ghaziabad", "thane", "navi mumbai", "whitefield", "hinjewadi",
-        "madurai", "tiruchirappalli", "guwahati", "patna", "kanpur", "dehradun", "udaipur",
-        "vijayawada", "raipur", "ludhiana", "amritsar", "agra", "meerut", "gandhinagar",
-        "hubli", "warangal", "vellore", "jodhpur", "maharashtra", "karnataka", "tamil nadu",
-        "telangana", "uttar pradesh", "gujarat", "haryana", "west bengal", "kerala",
-        "rajasthan", "andhra pradesh", "madhya pradesh", "odisha", "delhi ncr",
-      ],
-      atsLocations: ["India"],
-    },
+    // Moved to profiles/markets.ts on 2026-09-08, unchanged, when a second
+    // profile started targeting the same market — see that file for why a
+    // country definition is not a property of the candidate.
+    INDIA_MARKET,
   ],
 
   tracks: {
@@ -253,4 +241,44 @@ export function resolveProfileToken(token: string): string | null {
     }
   }
   return index.get(normalized) ?? null;
+}
+
+/**
+ * Free text ("tashi", "all", "wife-nl-finance") to a query scope.
+ *
+ * ONE COPY, since 2026-09-08. `job-state.ts` and `jobs-csv.ts` each carried a
+ * byte-identical nine-line version of this plus its own `ALL_PROFILES_TOKENS`
+ * set — the tool that LISTS a candidate's rows and the tool that EXPORTS them,
+ * resolving "whose rows are these" independently. That is exactly the rule that
+ * must not be allowed to drift between two commands the founder uses
+ * interchangeably.
+ *
+ * Returns `{}` for absent input, so the caller's own default applies (which is
+ * `DEFAULT_PROFILE_ID` in `profileCondition`, never "every profile"), and an
+ * `error` string on an unrecognised name rather than a silent fallback — an
+ * unmatched name is a question, not a default.
+ *
+ * `ALL_PROFILES` stays a symbol owned by db/job-queries.ts; this returns it
+ * untouched. Typed loosely here only to keep tools → db a one-way import.
+ */
+export const ALL_PROFILES_TOKENS: ReadonlySet<string> = new Set([
+  "all",
+  "both",
+  "everyone",
+  "everybody",
+]);
+
+export function resolveProfileScope<A>(
+  raw: string | undefined,
+  allProfiles: A,
+): { profileId?: string | A; error?: string } {
+  if (raw === undefined) return {};
+  const normalized = raw.trim().toLowerCase();
+  if (ALL_PROFILES_TOKENS.has(normalized)) return { profileId: allProfiles };
+  const resolved = resolveProfileToken(raw);
+  if (resolved) return { profileId: resolved };
+  const known = listProfiles()
+    .map((p) => p.id)
+    .join(", ");
+  return { error: `Unknown profile "${raw}". Known profiles: ${known}, or "all".` };
 }

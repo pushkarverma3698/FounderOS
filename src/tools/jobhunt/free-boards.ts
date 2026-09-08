@@ -35,10 +35,19 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { appendFile, mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import { REPO_ROOT, parseCsvLine } from "./sponsor-registry.js";
+// The WRITE half of the registry — where a discovered board is appended — split
+// out 2026-09-08 for the 400-line budget. Re-exported below so every existing
+// import site keeps resolving here.
+import { discoveredBoardsPathFrom } from "./free-boards-discovered.js";
+
+export {
+  FREE_ATS_DISCOVERED_PATH,
+  discoveredBoardsPathFrom,
+  registerDiscoveredBoard,
+} from "./free-boards-discovered.js";
 
 // NO LOGGER HERE, deliberately. `scripts/verify-runtime-assets.ts` dynamic-
 // imports this module straight out of `dist/` with no guarantee of a full
@@ -178,66 +187,12 @@ export function boardsPathFrom(env: Record<string, string | undefined> = process
 }
 
 /**
- * Where boards the paid sweep discovers along the way get written.
- *
- * Deliberately NOT the curated CSV. That file lives inside the deploy's git
- * tree, and a discovery appended to it on prod would conflict with or get
- * silently wiped by the next `git pull` — the exact same class of defect as
- * writing prod secrets into a tracked file. Default matches the per-track CV
- * convention (`/opt/founderos-data/...`): real data, outside the repo.
- */
-export const FREE_ATS_DISCOVERED_PATH = "/opt/founderos-data/free-ats-discovered.csv";
-
-export function discoveredBoardsPathFrom(
-  env: Record<string, string | undefined> = process.env,
-): string {
-  return env["FREE_ATS_DISCOVERED_PATH"] ?? FREE_ATS_DISCOVERED_PATH;
-}
-
-const DISCOVERED_HEADER = "name,ats,board_token,markets\n";
-
-/**
- * Append one board the paid sweep found to the discovered registry.
- *
- * Fire-and-forget from the caller's perspective is wrong here on purpose:
- * the caller (ingest.ts) awaits this and logs a failure, because a harvest
- * that silently stops writing is indistinguishable from a market that
- * stopped producing new companies — the same ambiguity this whole registry
- * exists to avoid. What it must NEVER do is throw into a screening run: a
- * filesystem error harvesting tokens must not turn a successful screen into
- * `outcome: "error"` for the posting that happened to name it.
- */
-export async function registerDiscoveredBoard(board: {
-  readonly name: string;
-  readonly ats: FreeAts;
-  readonly token: string;
-  readonly markets: readonly BoardMarket[];
-}): Promise<void> {
-  const path = discoveredBoardsPathFrom();
-  const dir = dirname(path);
-  await mkdir(dir, { recursive: true });
-
-  const needsHeader = !existsSync(path);
-  const row =
-    `${csvField(board.name)},${board.ats},${csvField(board.token)},` +
-    `${csvField(board.markets.join("|"))}\n`;
-
-  await appendFile(path, needsHeader ? DISCOVERED_HEADER + row : row, "utf8");
-  resetFreeBoardsCache();
-}
-
-/** Quote a CSV field only when it needs it — matches parseCsvLine's own contract. */
-function csvField(value: string): string {
-  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-}
-
-/**
  * The floor below which a parsed registry is treated as broken rather than small.
  *
  * A registry that loads but yields a handful of rows is the 2026-08-02 sponsor
  * outage wearing a different mask: the lane would run, report success, and poll
  * almost nothing — and a thin registry and a quiet market produce the same number
- * at the far end. The real file holds 858 boards; anything under 700 means the
+ * at the far end. The real file holds 3,223 boards; anything under this means the
  * parse or the file is wrong, and it must fail loudly at the gate.
  *
  * Raised 200 → 500 on 2026-08-20 alongside the sponsor-board import, then
@@ -247,8 +202,13 @@ function csvField(value: string): string {
  * to 1,297. A floor that is not moved with the file stops being a floor:
  * left at 200 it would have gone on passing while two thirds of the registry
  * silently failed to parse, which is precisely the reading it exists to deny.
+ *
+ * AND THEN IT WASN'T: the multi-market expansion took the file 1,297 → 3,223 on
+ * 2026-09-08 and left this at 1100 — 34% of the real count. The rule above
+ * described the defect and the constant had it. Raised to 2,700 (~85%, the
+ * margin every previous raise used) by the QA pass that day.
  */
-export const MIN_EXPECTED_BOARDS = 1100;
+export const MIN_EXPECTED_BOARDS = 2_700;
 
 function toFreeAts(value: string): FreeAts | null {
   const normalised = value.trim().toLowerCase();
@@ -273,21 +233,57 @@ function toMarkets(value: string): BoardMarket[] {
  * sweep. Deduplicated on `(ats, token)` because the same company legitimately
  * appears under both market files, and polling a board twice would double every
  * request for nothing.
+ *
+ * SKIPPED IS NOT SILENT, since 2026-09-08. Every other drop in this pipeline
+ * returns its count; this one did not, so a corpus import writing a platform typo
+ * on 500 rows removed 500 boards with nothing said, and MIN_EXPECTED_BOARDS was
+ * the only thing that would ever have noticed. This wrapper keeps the shape every
+ * existing caller expects; `parseBoardRegistryWithSkips` returns the counts.
  */
 export function parseBoardRegistry(csv: string): FreeBoard[] {
+  return parseBoardRegistryWithSkips(csv).boards;
+}
+
+/** What a row was dropped for, so a bad import is legible rather than merely small. */
+export interface RegistrySkips {
+  /** Named a platform with no adapter — a typo, or one not built yet. */
+  readonly unknownPlatform: number;
+  /** Empty board token: nothing to poll. */
+  readonly blankToken: number;
+  /** `(ats, token)` already seen. Legitimate across market files. */
+  readonly duplicate: number;
+}
+
+export function parseBoardRegistryWithSkips(csv: string): {
+  boards: FreeBoard[];
+  skips: RegistrySkips;
+} {
   const lines = csv.split(/\r?\n/).filter((line) => line.trim().length > 0);
   const boards: FreeBoard[] = [];
   const seen = new Set<string>();
+  let unknownPlatform = 0;
+  let blankToken = 0;
+  let duplicate = 0;
 
   // Row 0 is the header (`name,ats,board_token,markets`).
   for (const line of lines.slice(1)) {
     const [name, ats, token, markets] = parseCsvLine(line);
     const platform = toFreeAts(ats ?? "");
     const slug = (token ?? "").trim();
-    if (platform === null || slug.length === 0) continue;
+    if (platform === null) {
+      unknownPlatform += 1;
+      continue;
+    }
+    if (slug.length === 0) {
+      blankToken += 1;
+      continue;
+    }
 
     const key = `${platform}:${slug}`;
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      duplicate += 1;
+      continue;
+    }
     seen.add(key);
 
     boards.push({
@@ -298,10 +294,30 @@ export function parseBoardRegistry(csv: string): FreeBoard[] {
     });
   }
 
-  return boards;
+  return { boards, skips: { unknownPlatform, blankToken, duplicate } };
 }
 
 let cache: readonly FreeBoard[] | null = null;
+
+/**
+ * What the last parse dropped. Stored rather than logged: this module is
+ * deliberately logger-free (see the header). The sweep reads it and logs.
+ */
+let lastRegistrySkips: RegistrySkips = { unknownPlatform: 0, blankToken: 0, duplicate: 0 };
+
+export function getLastRegistrySkips(): RegistrySkips {
+  return lastRegistrySkips;
+}
+
+/** The skip counts as one sentence, for an error message or a log line. */
+export function describeSkips(skips: RegistrySkips): string {
+  const parts = [
+    skips.unknownPlatform > 0 ? `${skips.unknownPlatform} named a platform with no adapter` : null,
+    skips.blankToken > 0 ? `${skips.blankToken} had no board token` : null,
+    skips.duplicate > 0 ? `${skips.duplicate} repeated an (ats, token)` : null,
+  ].filter((p): p is string => p !== null);
+  return parts.length === 0 ? "Every row parsed." : `Rows dropped: ${parts.join("; ")}.`;
+}
 
 /**
  * The registry: curated boards plus whatever the paid sweep has discovered,
@@ -321,13 +337,15 @@ export function getFreeBoards(): readonly FreeBoard[] {
   if (cache !== null) return cache;
 
   const path = boardsPathFrom();
-  const curated = parseBoardRegistry(readFileSync(path, "utf8"));
+  const parsed = parseBoardRegistryWithSkips(readFileSync(path, "utf8"));
+  const curated = parsed.boards;
+  lastRegistrySkips = parsed.skips;
 
   if (curated.length < MIN_EXPECTED_BOARDS) {
     throw new Error(
       `Free board registry at ${path} parsed only ${curated.length} boards ` +
-        `(expected at least ${MIN_EXPECTED_BOARDS}). Polling a thin registry ` +
-        `looks identical to an empty market — refusing to run on it.`,
+        `(expected at least ${MIN_EXPECTED_BOARDS}). ${describeSkips(parsed.skips)} ` +
+        `Polling a thin registry looks identical to an empty market — refusing to run on it.`,
     );
   }
 
@@ -354,4 +372,5 @@ export function getFreeBoards(): readonly FreeBoard[] {
 /** Drop the memoised registry. Tests only. */
 export function resetFreeBoardsCache(): void {
   cache = null;
+  lastRegistrySkips = { unknownPlatform: 0, blankToken: 0, duplicate: 0 };
 }

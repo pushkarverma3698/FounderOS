@@ -200,9 +200,32 @@ export function formatLpa(rupees: number): string {
  * discard reachable roles, which is the failure direction this codebase treats
  * as the expensive one.
  */
+/**
+ * The rupee reference for ONE candidate, from their declared LPA line.
+ *
+ * Undefined in, null out — never the founder's number. `screen.ts` read this as
+ * `profile.minInrLpaFloor ?? 15` until 2026-09-08, so a candidate who had never
+ * been asked for a figure was silently measured against his preference.
+ */
+export function inrFloorFor(minInrLpaFloor: number | undefined): number | null {
+  return minInrLpaFloor === undefined ? null : minInrLpaFloor * LAKH;
+}
+
+/**
+ * `referenceInr` is `number | null`, and null is not a synonym for the default.
+ *
+ * The ₹15 LPA line above is the FOUNDER'S, chosen by him from stated options.
+ * A second candidate who has never been asked for a figure has no line, and the
+ * honest rendering of that is to print what the ad pays and say no line is set —
+ * not to measure her against his. Until 2026-09-08 `screen.ts` passed
+ * `profile.minInrLpaFloor ?? 15`, so "unset" silently meant "his": for a finance
+ * analyst at 2.4 years that flags essentially every Indian posting, and a flagged
+ * row lands in ASK, which the free lane never announces. A whole market can go
+ * quiet on a preference nobody set for that person.
+ */
 export function screenIndianPay(
   facts: IndianPayFacts,
-  referenceInr: number = INDIA_PAY_REFERENCE_INR,
+  referenceInr: number | null = INDIA_PAY_REFERENCE_INR,
 ): ScreenResult {
   const stated = facts.maxAnnual ?? facts.minAnnual;
 
@@ -246,6 +269,17 @@ export function screenIndianPay(
     ? " The period was inferred from the size of the figure, not stated in the ad."
     : "";
   const shown = formatLpa(stated);
+
+  // No line declared for this candidate: report the figure, claim nothing about
+  // it. Passing here is not "good pay" — it is the absence of a bar, stated.
+  if (referenceInr === null) {
+    return {
+      status: "pass",
+      evidence:
+        `${shown} — no personal pay line is set for this candidate, so this is the ad's ` +
+        `figure and nothing more. Set one if you want roles below it flagged.${quoted}${guessed}`,
+    };
+  }
 
   if (stated >= referenceInr) {
     return {

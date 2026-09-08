@@ -25,21 +25,32 @@ import { getAllAggregatorSources, type AggregatorJob } from "./aggregators/index
 
 const log = childLogger({ module: "jobhunt:aggregator" });
 
+/** Marks a board that exists only to carry an aggregator job's company name. */
+export const AGGREGATOR_TOKEN_PREFIX = "aggregator-";
+
 /**
  * A synthetic FreeBoard for aggregator-sourced jobs.
  *
  * The downstream pipeline uses `board.name` as the company name and `board.ats`
- * to route adapter calls. Aggregator jobs have no board, but the pipeline only
- * touches `board.name` for the company name in `toRawPosting`. Using a
- * placeholder ATS that never routes to a real adapter is safe because
- * aggregator candidates ALREADY carry their full description — they never need
- * body hydration.
+ * to route adapter calls. Aggregator jobs have no board, so `ats` is a
+ * placeholder — and the comment here used to justify it with "aggregator
+ * candidates ALREADY carry their full description, they never need body
+ * hydration", which the code does not guarantee: `toFreeCandidate` below sets
+ * `description: null` whenever the aggregator returned an empty body, and
+ * `hydrateDescriptions` would then build
+ * `boards-api.greenhouse.io/v1/boards/aggregator-<source>/jobs/<id>` and fetch
+ * it — a 404 at a third party, and a `bodyless` drop labelled with a platform
+ * that had nothing to do with it.
+ *
+ * The token prefix is what makes the claim enforceable: `isSyntheticBoard` skips
+ * hydration for these, so an empty aggregator body stays an empty body instead of
+ * becoming someone else's 404.
  */
 function syntheticBoard(company: string, source: string): FreeBoard {
   return {
     name: company,
     ats: "greenhouse" as FreeAts, // placeholder — never used for fetching
-    token: `aggregator-${source}`,
+    token: `${AGGREGATOR_TOKEN_PREFIX}${source}`,
     markets: [],
   };
 }

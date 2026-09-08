@@ -29,6 +29,7 @@
 
 import { cmd, esc } from "./telegram-format.js";
 import { renderLegend, type BriefRow } from "./brief-row.js";
+import type { JobSearchProfile } from "./profile-config.js";
 import {
   isTooSenior,
   renderFilterNotes,
@@ -134,6 +135,14 @@ export interface BriefInput {
   readonly agedOut?: number;
   /** The freshness window `rows` was filtered against, in hours. Defaults to 24. */
   readonly maxAgeHours?: number;
+  /**
+   * WHOSE brief this is — the legend quotes this candidate's years, salary
+   * criterion, permit bases and markets. Optional (defaulting to the founder,
+   * like every other unqualified call here) only so the renderer tests that
+   * predate multi-profile keep working: until 2026-09-08 the legend was a module
+   * constant and printed HIS numbers on HER brief.
+   */
+  readonly profile?: JobSearchProfile;
 }
 
 function pluralDays(n: number): string {
@@ -316,7 +325,7 @@ export function formatDailyBrief(input: BriefInput): string {
 
   if (input.spend) sections.push(renderSpend(input.spend));
 
-  const legend = renderLegend([...input.rows, ...(input.standing ?? [])]);
+  const legend = renderLegend([...input.rows, ...(input.standing ?? [])], input.profile, input.date);
   if (legend.length > 0) sections.push(legend);
 
   sections.push(renderNextActions(doToday, stretch, askable, doTodayTotal, standing, stretchTotal));

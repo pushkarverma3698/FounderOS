@@ -271,6 +271,10 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     notes: opts.notes ?? [],
     agedOut,
     maxAgeHours: APPLY_QUEUE_MAX_AGE_HOURS,
+    // WHOSE brief. The legend quotes this candidate's years, salary criterion,
+    // permit bases and markets — and printed the founder's on everyone's until
+    // 2026-09-08, because `GATE_GLOSSARY` was a module constant.
+    profile,
     ...(spend ? { spend } : {}),
   };
 
@@ -290,6 +294,13 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
  * Returns undefined rather than zero when the ledger cannot be read. "$0.00
  * spent today" is a claim, and a claim made because a query failed is the kind
  * of quiet wrongness that gets believed for a month.
+ */
+/**
+ * TENANT-WIDE, not per candidate. `ai_call_costs`/`job_ingest_runs` carry no
+ * profile column, so this is every lane's spend on one line in every lane's
+ * brief. Harmless today — the metered sweep's cron was removed on 2026-08-21 and
+ * the free lane records $0 — and it becomes a wrong number the day that cron
+ * comes back. Recorded here rather than silently left as an implication.
  */
 async function todaysSpend(now: Date): Promise<SpendLine | undefined> {
   // Three days, matching the sweep cadence. A 24-hour window on a sweep that
