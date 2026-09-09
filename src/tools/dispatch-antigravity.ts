@@ -14,24 +14,25 @@
  *   - The issue must contain all required sections (Goal, Scope, Verification, etc.)
  *     so the headless executor can run with zero conversation history.
  *
- * TARGET REPO IS NOT PINNED, AND THAT IS WORTH KNOWING. `repo` is a caller-supplied
- * argument that takes precedence over ISSUE_REPO, so the model can name any
- * repository this GITHUB_TOKEN can write to — and an issue is public content.
- * Two things contain it, neither of them this file: the HITL card prints the
- * resolved slug in its summary, so the founder approves a named target rather
- * than a blank one; and the VPS `agent-dispatch` daemon is pinned by its own
- * crontab (ISSUE_REPO=pushkarverma3698/FounderOS), so an issue opened anywhere
- * else is inert rather than executed. Tighten to an allowlist here if the token's
- * scope ever widens.
+ * TARGET REPO IS PINNED TO AN ALLOWLIST (./dispatch-repos.ts). `repo` is a
+ * caller-supplied argument that takes precedence over ISSUE_REPO, so without the
+ * allowlist the model could name any repository this GITHUB_TOKEN can write to — and
+ * the token carries `repo`, `admin:org` and `delete_repo`. The two containments that
+ * existed before it (the HITL card printing the resolved slug, and the VPS crontab
+ * pinning ISSUE_REPO) both still apply, but neither is a boundary: a card is only as
+ * good as the reading of it, and the crontab pin makes a stray issue inert rather than
+ * unfiled. `assertAllowedRepo` is the boundary, and env vars pass through it too.
  */
 
 import { Octokit } from "octokit";
 import { childLogger } from "../infra/logger.js";
+import { assertAllowedRepo, DEFAULT_DISPATCH_REPO, DISPATCH_REPO_ALLOWLIST } from "./dispatch-repos.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:dispatch-antigravity" });
 
-export const DEFAULT_DISPATCH_REPO = "pushkarverma3698/FounderOS";
+/** Re-exported so existing importers keep one import site for the dispatch defaults. */
+export { DEFAULT_DISPATCH_REPO };
 export const AGENT_READY_LABEL = "agent:ready";
 export const ANTIGRAVITY_LABEL = "antigravity";
 
@@ -99,11 +100,9 @@ export function resolveDispatchRepo(repoArg?: string): { owner: string; repo: st
     process.env["SELF_IMPROVE_ISSUE_REPO"] ||
     DEFAULT_DISPATCH_REPO;
 
-  const [owner, repo] = slug.split("/");
-  if (!owner || !repo) {
-    throw new Error(`Invalid repository slug "${slug}". Expected "owner/repo".`);
-  }
-  return { owner, repo };
+  // Env vars go through the same gate as the model's argument. A misconfigured VPS
+  // should fail loudly here, not quietly file issues into a repo nobody is watching.
+  return assertAllowedRepo(slug);
 }
 
 export const dispatchAntigravityTool: UnifiedTool = {
@@ -149,7 +148,9 @@ export const dispatchAntigravityTool: UnifiedTool = {
       },
       repo: {
         type: "string",
-        description: "Target repository slug (defaults to pushkarverma3698/FounderOS).",
+        description:
+          `Target repository slug. Only these are permitted: ${DISPATCH_REPO_ALLOWLIST.join(", ")}. ` +
+          "Defaults to pushkarverma3698/FounderOS.",
       },
     },
     required: ["title", "goal", "scope", "expected", "verification"],

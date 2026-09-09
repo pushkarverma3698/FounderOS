@@ -64,11 +64,19 @@ describe("formatAntigravityIssueBody", () => {
 });
 
 describe("resolveDispatchRepo", () => {
-  it("uses provided repo argument if specified", () => {
-    expect(resolveDispatchRepo("custom-owner/custom-repo")).toEqual({
-      owner: "custom-owner",
-      repo: "custom-repo",
+  it("uses provided repo argument when it is on the allowlist", () => {
+    expect(resolveDispatchRepo("pushkarverma3698/House-of-Hulda-Website-frontend")).toEqual({
+      owner: "pushkarverma3698",
+      repo: "House-of-Hulda-Website-frontend",
     });
+  });
+
+  it("refuses a caller-supplied repo that is not on the allowlist", () => {
+    // `repo` is model-supplied and takes precedence over every env var, so this is the
+    // one path between a malformed instruction and any repo the token can write to.
+    expect(() => resolveDispatchRepo("custom-owner/custom-repo")).toThrow(
+      /not on the Antigravity dispatch allowlist/,
+    );
   });
 
   it("falls back to DEFAULT_DISPATCH_REPO when no argument or env var is set", () => {
@@ -82,6 +90,20 @@ describe("resolveDispatchRepo", () => {
       });
     } finally {
       if (orig) process.env["ISSUE_REPO"] = orig;
+    }
+  });
+
+  it("treats ISSUE_REPO as a target, not a bypass", () => {
+    // The VPS crontab sets ISSUE_REPO. If that box is ever misconfigured, dispatch must
+    // fail loudly rather than quietly file issues somewhere unwatched.
+    const orig = process.env["ISSUE_REPO"];
+    process.env["ISSUE_REPO"] = "someone-else/somewhere";
+    delete process.env["SELF_IMPROVE_ISSUE_REPO"];
+    try {
+      expect(() => resolveDispatchRepo()).toThrow(/not on the Antigravity dispatch allowlist/);
+    } finally {
+      if (orig) process.env["ISSUE_REPO"] = orig;
+      else delete process.env["ISSUE_REPO"];
     }
   });
 
