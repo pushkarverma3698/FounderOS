@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockIssuesCreate = vi.fn();
+const mockKickDispatchTick = vi.fn();
 
 vi.mock("octokit", () => {
   return {
@@ -16,6 +17,10 @@ vi.mock("octokit", () => {
     })),
   };
 });
+
+vi.mock("../../../src/tools/dispatch-tick.js", () => ({
+  kickDispatchTick: mockKickDispatchTick,
+}));
 
 const {
   dispatchAntigravityTool,
@@ -171,6 +176,52 @@ describe("dispatchAntigravityTool.execute", () => {
     expect(data.issue_number).toBe(524);
     expect(data.issue_url).toBe("https://github.com/pushkarverma3698/FounderOS/issues/524");
     expect(data.repo).toBe("pushkarverma3698/FounderOS");
+  });
+
+  it("kicks the dispatcher for the issue it just filed", async () => {
+    // Without the kick the founder waits up to 15 minutes for the next cron tick with
+    // no visible sign anything happened.
+    mockIssuesCreate.mockResolvedValueOnce({
+      data: {
+        number: 524,
+        html_url: "https://github.com/pushkarverma3698/FounderOS/issues/524",
+        title: "feat: task",
+      },
+    });
+
+    await dispatchAntigravityTool.execute({
+      title: "feat: task",
+      goal: "goal",
+      scope: "src/tools/free-ats.ts",
+      expected: "expected",
+      verification: "pnpm test",
+    });
+
+    expect(mockKickDispatchTick).toHaveBeenCalledWith(524);
+  });
+
+  it("still reports success when the kick fails — cron is the guaranteed path", async () => {
+    mockIssuesCreate.mockResolvedValueOnce({
+      data: {
+        number: 525,
+        html_url: "https://github.com/pushkarverma3698/FounderOS/issues/525",
+        title: "feat: task",
+      },
+    });
+    mockKickDispatchTick.mockImplementationOnce(() => {
+      throw new Error("spawn EACCES");
+    });
+
+    const res = await dispatchAntigravityTool.execute({
+      title: "feat: task",
+      goal: "goal",
+      scope: "src/tools/free-ats.ts",
+      expected: "expected",
+      verification: "pnpm test",
+    });
+
+    expect(res.success).toBe(true);
+    expect((res.data as { issue_number: number }).issue_number).toBe(525);
   });
 
   it("surfaces GitHub API errors cleanly without crashing", async () => {

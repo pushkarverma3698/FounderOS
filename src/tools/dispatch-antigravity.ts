@@ -27,6 +27,7 @@
 import { Octokit } from "octokit";
 import { childLogger } from "../infra/logger.js";
 import { assertAllowedRepo, DEFAULT_DISPATCH_REPO, DISPATCH_REPO_ALLOWLIST } from "./dispatch-repos.js";
+import { kickDispatchTick } from "./dispatch-tick.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:dispatch-antigravity" });
@@ -210,6 +211,16 @@ export const dispatchAntigravityTool: UnifiedTool = {
       });
 
       log.info({ owner, repo, issue_number: data.number, url: data.html_url }, "Dispatched issue to Antigravity");
+
+      // Shorten the wait from "up to 15 minutes" to "seconds". Wrapped because the
+      // issue is already filed at this point: nothing about claiming it sooner may
+      // turn a successful dispatch into a reported failure.
+      try {
+        kickDispatchTick(data.number);
+      } catch (err) {
+        // allow-failopen: cron claims the issue on its next tick regardless.
+        log.warn({ issue_number: data.number, err: (err as Error).message }, "dispatch kick failed");
+      }
 
       return {
         success: true,
