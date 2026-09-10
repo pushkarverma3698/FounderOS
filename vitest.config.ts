@@ -14,6 +14,7 @@ export default defineConfig({
       // Load suite is stub-invoker only ($0, offline) — safe in the default run.
       // It was silently orphaned before: no include, no script, never in CI.
       "tests/load/**/*.{test,spec}.ts",
+      "tests/smoke/**/*.{test,spec}.ts",
     ],
     // Determinism is enforced by the network kill-switch in tests/setup.ts
     // (re-installed before EACH file via setupFiles), NOT by Vitest's global
