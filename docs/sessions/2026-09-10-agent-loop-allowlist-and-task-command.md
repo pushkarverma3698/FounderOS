@@ -119,3 +119,101 @@ item 1 deliberately — shipping them into a dead reviewer would widen a clogged
 plaintext API keys where the Claude configs use `${VAR}`. The `founderos` MCP server fails
 from every worktree (`.mcp.json` passes a relative `--env-file=.env`; `.env` exists only in
 the main checkout).
+
+---
+
+## Second pass — command audit, new-project repos, QA
+
+### The command audit found nothing to delete
+
+The ask was "register all the commands and delete which are not usable and are stale."
+**All 29 commands are registered and none are stale** — and that is not an assumption:
+`command-menu.test.ts` already asserts the menu and the `bot.command(...)` registrations
+agree in BOTH directions, and `advertised-commands.test.ts` already blocks a `/start`
+screen that names a command which does not exist. A sweep of every slash-shaped token in
+`src/` returned only regex alternations, filesystem paths, HTTP routes, and the header
+comments in `capability-message.ts` / `command-menu.ts` that deliberately record the
+twelve commands deleted with v2. Those are history, not drift.
+
+Two real gaps, both discoverability rather than staleness:
+
+1. **`/start` never mentioned `/task`.** The command built in the first pass to close a
+   discoverability gap was itself invisible on the first screen the founder sees. Fixed.
+2. **`docs/DEVELOPER.md` § "Adding a Telegram Command" was stale in a way that actively
+   misleads.** It claimed 4 touch points in 2 files, told you to hardcode help text
+   inside `handleCommands` (not how it has worked since `command-menu.ts` became the
+   single list), imported a `handleDirectQ` that died with v2, and said a missing
+   registration is "silently ignored by Telegram" — `unknownCommandReply` has answered
+   those for weeks. Anyone following it would have failed CI and shipped an invisible
+   command. Rewritten to the real 5 touch points across 3 files, with the Forget→Error
+   table naming the test that catches each omission.
+
+### Starting a new project
+
+`github_write create_repo` already made repos and always could. The gap was that a repo
+created that way was **not dispatchable** — `DISPATCH_REPO_ALLOWLIST` is compiled in, so
+anything created after the last deploy was refused as off-list. "Start a new project and
+build me X" stopped at the second half, with the founder's own new repo locked out until
+a code change shipped.
+
+`create_project_repo` creates AND registers in one approved action. The allowlist's
+security property survives because **naming a repo is still not how one gets in**: the
+only entry is creation, which uses `createForAuthenticatedUser` (owner is always the
+founder), is HITL-gated with a card that says approving grants the unattended loop write
+access, and registers only after GitHub confirms the repo by its returned `full_name`.
+
+The registry is `action_log`, not a new table — a repo is dispatchable BECAUSE a durable
+row attests the founder approved creating it. One fact, one row, no second store that can
+disagree with the first, and **no migration** (the drizzle journal has silently no-op'd on
+prod before). `registerDispatchRepo` has exactly one caller and no model-reachable path
+can forge the action string; `assertDispatchableRepo` re-validates registry rows rather
+than trusting them, and a read failure degrades to the hardcoded list rather than taking
+dispatch down for the two provisioned repos.
+
+`/newproject <name> <what it is>` is the command surface. Note the grammar: `/newproject
+my cool thing` means a repo called `my` — the approval card prints the resolved name,
+which is where that gets caught.
+
+### QA audit of the first pass
+
+Four claims checked against reality rather than re-read:
+
+| Claim | Verdict |
+|---|---|
+| `--issue N` is a real `agent-dispatch` flag | ✅ line 197 of the VPS script, documented at line 25 |
+| `docs/rules/TOOL-STANDARDS.md` says tools never throw | ✅ exists, line 28 says exactly that |
+| The new `ISSUE_REPO` throw cannot fire on prod | ✅ crontab pins it to `pushkarverma3698/FounderOS`; `SELF_IMPROVE_ISSUE_REPO` unset |
+| `String(isPrivate)` is what `github.ts` parses | ✅ `github.ts:329` accepts `"true"` or `true` |
+
+No defects found in the first pass. Two test bugs of my own were found and fixed while
+extending them (a substring that did not appear in the fixture; an input I called invalid
+that the grammar legitimately accepts).
+
+**A finding outside this scope, logged not fixed:** `docs/DEVELOPER.md` § "Adding a
+Department" describes the **v2 LLM supervisor** — `createSupervisor` and
+`office-invoker.ts`, both of which now survive only in comments and are tombstoned in
+`verify-architecture.ts`. The section is marked with a warning; it needs a rewrite.
+
+### Metrics (second pass)
+
+| | |
+|---|---|
+| `pnpm gate` | EXIT=0 — 386 test files, **4,270 tests** |
+| New source files | `create-project-repo.ts` 197 · `project-repo.ts` 110 (budget 400) |
+| Architecture ratchet | unchanged — loc-budget 6, gateway-imports 0, kernel-purity 0 |
+| New test cases | 17 create-project-repo · 12 allowlist registry · 7 `/task`+`/newproject` |
+| Commands registered | 30 (29 + `/newproject`), menu agreement enforced both directions |
+
+### Still outstanding after this pass
+
+Unchanged and still blocking: **pr-brain's auth**. Everything above is producer-side; the
+reviewer half has now been dead 24 days.
+
+New and specific to this pass: `create_project_repo` returns the VPS provisioning
+commands but **does not run them**. `agent-dispatch` has no `git clone` anywhere — it
+fetches and resets ONE pinned workspace — so until Phase 3 (multi-repo loop) lands, an
+issue filed against a newly created repo is an issue nothing will ever claim. The tool
+says so in its own output rather than failing silently.
+
+Neither `/newproject` nor `create_project_repo` has been exercised on the live Telegram
+path. **NOT VERIFIED** per rule #24.

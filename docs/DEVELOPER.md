@@ -379,7 +379,10 @@ log.info("Office compiled: research · comms · engineering · marketing · sale
 | Agent in `createSupervisor` agents array | `RuntimeError: unknown agent "analytics"` on first route |
 | `Department` union in `types.ts` | tsc error in eval (loud) |
 | `DEPARTMENTS` Set in `office-invoker.ts` | Eval logs `null` dept; every golden task fails silently |
-| `/q` valid-depts list | `/q analytics …` returns "unknown department" |
+| `DEPARTMENT_TOOLS` entry in `capabilities.ts` | The department exists but carries no tools |
+
+> ⚠️ The four rows above this one describe the **v2 LLM supervisor** (`createSupervisor`, `office-invoker.ts`), which was replaced by the pure-code
+> dispatcher on 2026-07-08 and is tombstoned in `verify-architecture.ts`. They are kept here pending a rewrite of this section — do not follow them.
 
 ---
 
