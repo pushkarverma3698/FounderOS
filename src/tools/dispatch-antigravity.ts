@@ -26,7 +26,9 @@
 
 import { Octokit } from "octokit";
 import { childLogger } from "../infra/logger.js";
-import { assertAllowedRepo, DEFAULT_DISPATCH_REPO, DISPATCH_REPO_ALLOWLIST } from "./dispatch-repos.js";
+import { assertDispatchableRepo, DEFAULT_DISPATCH_REPO, DISPATCH_REPO_ALLOWLIST } from "./dispatch-repos.js";
+import { listRegisteredDispatchRepos } from "../db/queries.js";
+import { TENANT } from "../core/config.js";
 import { kickDispatchTick } from "./dispatch-tick.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
@@ -95,15 +97,20 @@ function getOctokit(): Octokit {
   return new Octokit({ auth: token });
 }
 
-export function resolveDispatchRepo(repoArg?: string): { owner: string; repo: string } {
+export async function resolveDispatchRepo(repoArg?: string): Promise<{ owner: string; repo: string }> {
   const slug = repoArg?.trim() ||
     process.env["ISSUE_REPO"] ||
     process.env["SELF_IMPROVE_ISSUE_REPO"] ||
     DEFAULT_DISPATCH_REPO;
 
+  // Async because the set of permitted repos is the hardcoded list PLUS the project
+  // repos this instance created (see create-project-repo.ts) — a repo made last week
+  // cannot be in a list compiled last month. A registry read failure degrades to the
+  // hardcoded list rather than throwing, so the two provisioned repos keep working.
+  //
   // Env vars go through the same gate as the model's argument. A misconfigured VPS
   // should fail loudly here, not quietly file issues into a repo nobody is watching.
-  return assertAllowedRepo(slug);
+  return assertDispatchableRepo(slug, await listRegisteredDispatchRepos(TENANT));
 }
 
 export const dispatchAntigravityTool: UnifiedTool = {
@@ -186,7 +193,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
     let owner: string;
     let repo: string;
     try {
-      ({ owner, repo } = resolveDispatchRepo(input.repo));
+      ({ owner, repo } = await resolveDispatchRepo(input.repo));
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }

@@ -83,8 +83,74 @@ export function assertAllowedRepo(slug: string): { owner: string; repo: string }
   return { owner: canonicalOwner, repo: canonicalRepo };
 }
 
+/** True for a bare, well-formed `owner/repo`. */
+function isWellFormedSlug(slug: string): boolean {
+  const parts = slug.split("/");
+  return parts.length === 2 && Boolean(parts[0]) && Boolean(parts[1]);
+}
+
 /**
- * Every allowlisted repo a short hint could mean, for the `/task repo:<hint>` selector.
+ * Every repository dispatch may target: the hardcoded list, plus repositories this
+ * instance created for the founder.
+ *
+ * Registered entries are re-validated here rather than trusted. They arrive from a
+ * database read, and a boundary that trusts its own store is not a boundary — a single
+ * corrupt row would otherwise be a way past it. Duplicates are collapsed, so a repo
+ * recorded twice is one repo rather than an "ambiguous" refusal the founder can
+ * neither see nor fix.
+ */
+function candidateRepos(registered: readonly string[]): readonly string[] {
+  const extra = registered
+    .map((entry) => normalizeRepoSlug(entry))
+    .filter((entry) => isWellFormedSlug(entry) && !canonicalize(entry));
+
+  return [...DISPATCH_REPO_ALLOWLIST, ...new Set(extra)];
+}
+
+/**
+ * Resolves a slug against the hardcoded list PLUS the project repos this instance
+ * created, or throws.
+ *
+ * WHY A SECOND ROUTE EXISTS AT ALL. A repository created last Tuesday cannot be in a
+ * list compiled before it existed, and requiring a code change + deploy to work in a
+ * brand-new project defeats the point of being able to start one from a phone. The
+ * security property is preserved because naming a repository is still not how one gets
+ * in here: the only way into `registered` is `create_project_repo`, which creates the
+ * repo under the founder's own account behind an approval card. A model that names
+ * someone else's repository is refused exactly as before — that repo was never created
+ * by this system, so it is not in the store.
+ */
+export function assertDispatchableRepo(
+  slug: string,
+  registered: readonly string[],
+): { owner: string; repo: string } {
+  const normalized = normalizeRepoSlug(slug);
+
+  if (!isWellFormedSlug(normalized)) {
+    throw new Error(`Invalid repository slug "${slug}". Expected "owner/repo".`);
+  }
+
+  const allowed = candidateRepos(registered);
+  const lowered = normalized.toLowerCase();
+  const canonical = allowed.find((entry) => entry.toLowerCase() === lowered);
+
+  if (!canonical) {
+    // The last line matters: this message reaches the model as a tool result, and
+    // without it the model retries with a rephrased slug instead of stopping.
+    throw new Error(
+      `Repository "${normalized}" is not on the Antigravity dispatch allowlist.\n` +
+        `Allowed: ${allowed.join(", ")}.\n` +
+        "Add one by creating it with create_project_repo, or by changing " +
+        "DISPATCH_REPO_ALLOWLIST in src/tools/dispatch-repos.ts — naming it here does nothing.",
+    );
+  }
+
+  const [owner, repo] = canonical.split("/") as [string, string];
+  return { owner, repo };
+}
+
+/**
+ * Every dispatchable repo a short hint could mean, for the `/task repo:<hint>` selector.
  *
  * Returns all matches rather than a best guess so the caller can refuse an ambiguous
  * hint out loud. Silently picking the first match would retarget a dispatch to a
@@ -94,16 +160,21 @@ export function assertAllowedRepo(slug: string): { owner: string; repo: string }
  * Matching is on the repo-name half only. Including the owner would make the account
  * name match every entry and read as permanently ambiguous.
  */
-export function matchAllowlistedRepos(hint: string): readonly DispatchRepo[] {
+export function matchAllowlistedRepos(
+  hint: string,
+  registered: readonly string[] = [],
+): readonly string[] {
   const normalized = normalizeRepoSlug(hint);
   if (!normalized) return [];
 
-  const exact = canonicalize(normalized);
+  const allowed = candidateRepos(registered);
+  const lowered = normalized.toLowerCase();
+
+  const exact = allowed.find((entry) => entry.toLowerCase() === lowered);
   if (exact) return [exact];
 
-  const needle = normalized.toLowerCase();
-  return DISPATCH_REPO_ALLOWLIST.filter((entry) => {
+  return allowed.filter((entry) => {
     const name = entry.split("/")[1] ?? "";
-    return name.toLowerCase().includes(needle);
+    return name.toLowerCase().includes(lowered);
   });
 }

@@ -21,6 +21,9 @@ vi.mock("../../../src/agents/agent-tools/hitl.js", async (orig) => {
 vi.mock("../../../src/db/queries.js", () => ({
   hasBeenAudited: mockHasBeenAudited,
   writeAuditEntry: mockWriteAuditEntry,
+  // Dispatch resolves against the hardcoded allowlist PLUS repos this instance
+  // created. No created repos in these cases — the hardcoded list is the subject.
+  listRegisteredDispatchRepos: async () => [],
 }));
 
 vi.mock("../../../src/tools/dispatch-antigravity.js", async (orig) => {

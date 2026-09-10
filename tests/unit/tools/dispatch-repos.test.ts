@@ -15,6 +15,7 @@ const {
   normalizeRepoSlug,
   assertAllowedRepo,
   matchAllowlistedRepos,
+  assertDispatchableRepo,
 } = await import("../../../src/tools/dispatch-repos.js");
 
 describe("DISPATCH_REPO_ALLOWLIST", () => {
@@ -142,5 +143,101 @@ describe("matchAllowlistedRepos", () => {
   it("matches on the repo name only, never the owner", () => {
     // Otherwise "pushkarverma3698" matches everything and reads as ambiguous.
     expect(matchAllowlistedRepos("pushkarverma3698")).toEqual([]);
+  });
+});
+
+// ── Repos this instance created for the founder ──────────────────────────────
+//
+// A brand-new project repo cannot be in the hardcoded list — it did not exist when
+// the code was written. It becomes dispatchable by a different route: FounderOS
+// created it, under the founder's own account, behind an approval card, and recorded
+// that fact. The security property is unchanged — the model still cannot name an
+// arbitrary repository, because naming one is not how a repo gets in here.
+
+const REGISTERED = ["pushkarverma3698/turicks-pricing-api"] as const;
+
+describe("assertDispatchableRepo — hardcoded list plus registered project repos", () => {
+  it("accepts a hardcoded repo with no registered repos at all", () => {
+    expect(assertDispatchableRepo("pushkarverma3698/FounderOS", [])).toEqual({
+      owner: "pushkarverma3698",
+      repo: "FounderOS",
+    });
+  });
+
+  it("accepts a registered repo that is not on the hardcoded list", () => {
+    expect(assertDispatchableRepo("pushkarverma3698/turicks-pricing-api", REGISTERED)).toEqual({
+      owner: "pushkarverma3698",
+      repo: "turicks-pricing-api",
+    });
+  });
+
+  it("normalizes a registered repo the same way as a hardcoded one", () => {
+    expect(
+      assertDispatchableRepo("https://github.com/pushkarverma3698/turicks-pricing-api.git", REGISTERED),
+    ).toEqual({ owner: "pushkarverma3698", repo: "turicks-pricing-api" });
+  });
+
+  it("matches a registered repo case-insensitively", () => {
+    expect(assertDispatchableRepo("pushkarverma3698/TURICKS-PRICING-API", REGISTERED).repo).toBe(
+      "turicks-pricing-api",
+    );
+  });
+
+  it("still refuses a repo that is neither hardcoded nor registered", () => {
+    expect(() => assertDispatchableRepo("someone-else/private-thing", REGISTERED)).toThrow(
+      /not on the Antigravity dispatch allowlist/,
+    );
+  });
+
+  it("refuses a registered entry that is not a well-formed slug, rather than trusting the store", () => {
+    // The registry is data read back out of the database. Treating it as pre-validated
+    // would make a corrupt row a way past the boundary.
+    expect(() => assertDispatchableRepo("not-a-slug", ["not-a-slug"])).toThrow(
+      /Expected "owner\/repo"/,
+    );
+  });
+
+  it("names the registered repos in the refusal so the founder can see what IS allowed", () => {
+    expect(() => assertDispatchableRepo("nope/nope", REGISTERED)).toThrow(
+      /turicks-pricing-api/,
+    );
+  });
+
+  it("still refuses a malformed slug with the typo message, not the policy message", () => {
+    expect(() => assertDispatchableRepo("owner/repo/extra", REGISTERED)).toThrow(
+      /Expected "owner\/repo"/,
+    );
+  });
+});
+
+describe("matchAllowlistedRepos — with registered project repos", () => {
+  it("finds a registered repo by short hint", () => {
+    expect(matchAllowlistedRepos("pricing", REGISTERED)).toEqual([
+      "pushkarverma3698/turicks-pricing-api",
+    ]);
+  });
+
+  it("reports ambiguity across the hardcoded list and the registry together", () => {
+    // Without this the founder gets a silent retarget when a new project's name
+    // happens to overlap an existing one. "r" appears in all three repo names.
+    expect(matchAllowlistedRepos("r", REGISTERED)).toEqual([
+      "pushkarverma3698/FounderOS",
+      "pushkarverma3698/House-of-Hulda-Website-frontend",
+      "pushkarverma3698/turicks-pricing-api",
+    ]);
+  });
+
+  it("ignores a duplicate registration rather than reporting it as ambiguous", () => {
+    // The same repo recorded twice is one repo. Reporting "ambiguous" here would
+    // block dispatch on a bookkeeping detail the founder cannot see or fix.
+    expect(matchAllowlistedRepos("FounderOS", ["pushkarverma3698/FounderOS"])).toEqual([
+      "pushkarverma3698/FounderOS",
+    ]);
+  });
+
+  it("behaves exactly as before when no registry is passed", () => {
+    expect(matchAllowlistedRepos("hulda")).toEqual([
+      "pushkarverma3698/House-of-Hulda-Website-frontend",
+    ]);
   });
 });

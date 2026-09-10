@@ -341,6 +341,63 @@ export async function writeAuditEntry(
 }
 
 /**
+ * `action_log.action` for a project repo FounderOS created and may now dispatch to.
+ *
+ * The registry is the audit trail, deliberately, rather than a settings table beside
+ * it. A repo is dispatchable BECAUSE there is a durable row attesting that the founder
+ * approved creating it — one fact, one row, no second store that can disagree with the
+ * first. See `assertDispatchableRepo` in src/tools/dispatch-repos.ts.
+ */
+export const DISPATCH_REPO_REGISTERED_ACTION = "dispatch_repo_registered";
+
+/** Record a newly created project repo as dispatchable. Idempotent on the slug. */
+export async function registerDispatchRepo(
+  slug: string,
+  tenantId: string,
+): Promise<{ written: boolean }> {
+  return writeAuditEntry({
+    action: DISPATCH_REPO_REGISTERED_ACTION,
+    idempotency_key: `${DISPATCH_REPO_REGISTERED_ACTION}:${slug.toLowerCase()}`,
+    payload: { slug },
+    tenant_id: tenantId,
+  });
+}
+
+/**
+ * Every project repo this instance created, for the dispatch allowlist.
+ *
+ * Returns `[]` on any read failure rather than throwing. This is a widening list: an
+ * empty result costs a refusal the founder can retry, while a throw would take down
+ * dispatch to the two hardcoded repos as well — failing closed on the larger, older
+ * capability to protect the smaller, newer one.
+ */
+export async function listRegisteredDispatchRepos(tenantId: string): Promise<string[]> {
+  try {
+    const rows = await getDb()
+      .select({ payload: actionLog.payload })
+      .from(actionLog)
+      .where(
+        and(
+          eq(actionLog.tenant_id, tenantId),
+          eq(actionLog.action, DISPATCH_REPO_REGISTERED_ACTION),
+        ),
+      );
+
+    return rows
+      .map((row) => (row.payload as { slug?: unknown } | null)?.slug)
+      .filter((slug): slug is string => typeof slug === "string" && slug.length > 0);
+  } catch (err) {
+    // allow-failopen: dispatch to the hardcoded repos must survive a registry read failure; the caller refuses unknown repos anyway.
+    const { childLogger } = await import("../infra/logger.js");
+    childLogger({ module: "queries" }).warn(
+      { err: (err as Error).message },
+      "listRegisteredDispatchRepos: read failed — falling back to the hardcoded allowlist",
+    );
+    return [];
+  }
+}
+
+/**
  * Return LinkedIn post IDs from action_log (posts published by FounderOS).
  * Used by the comment sweep scheduler and the linkedin_get_my_posts fallback.
  */

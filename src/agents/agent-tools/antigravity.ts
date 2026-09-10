@@ -30,7 +30,7 @@ export const dispatchAntigravityTask = tool(
     // (src/infra/hitl.ts).
     let repoSlug: string;
     try {
-      const resolved = resolveDispatchRepo(repo ?? undefined);
+      const resolved = await resolveDispatchRepo(repo ?? undefined);
       repoSlug = `${resolved.owner}/${resolved.repo}`;
     } catch (err) {
       return `❌ Cannot dispatch: ${(err as Error).message}`;
