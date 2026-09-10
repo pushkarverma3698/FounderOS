@@ -21,6 +21,9 @@ vi.mock("../../../src/agents/agent-tools/hitl.js", async (orig) => {
 vi.mock("../../../src/db/queries.js", () => ({
   hasBeenAudited: mockHasBeenAudited,
   writeAuditEntry: mockWriteAuditEntry,
+  // Dispatch resolves against the hardcoded allowlist PLUS repos this instance
+  // created. No created repos in these cases — the hardcoded list is the subject.
+  listRegisteredDispatchRepos: async () => [],
 }));
 
 vi.mock("../../../src/tools/dispatch-antigravity.js", async (orig) => {
@@ -134,5 +137,51 @@ describe("dispatchAntigravityTask agent tool", () => {
     });
 
     expect(result).toContain("❌ Failed to dispatch task to Antigravity: GitHub token missing");
+  });
+
+  it("refuses an off-allowlist repo BEFORE showing an approval card", async () => {
+    // The old code caught the resolve failure and fell back to FounderOS, so the card
+    // said "Open agent:ready issue on pushkarverma3698/FounderOS" for a request that
+    // named a different repo. The founder would approve a target the card misreported.
+    const result = await dispatchAntigravityTask.invoke({
+      title: "feat: task",
+      goal: "goal",
+      scope: "src/index.ts",
+      expected: "expected",
+      verification: "pnpm test",
+      repo: "someone-else/private-thing",
+    });
+
+    expect(result).toContain("not on the Antigravity dispatch allowlist");
+    expect(mockHitlGate).not.toHaveBeenCalled();
+    expect(mockDispatchExecute).not.toHaveBeenCalled();
+  });
+
+  it("names the resolved repo in the approval card for the second allowlisted repo", async () => {
+    mockDispatchExecute.mockResolvedValue({
+      success: true,
+      data: {
+        issue_number: 12,
+        issue_url: "https://github.com/pushkarverma3698/House-of-Hulda-Website-frontend/issues/12",
+        title: "fix: hero layout",
+        repo: "pushkarverma3698/House-of-Hulda-Website-frontend",
+      },
+    });
+
+    await dispatchAntigravityTask.invoke({
+      title: "fix: hero layout",
+      goal: "goal",
+      scope: "src/components/Hero.tsx",
+      expected: "expected",
+      verification: "pnpm build",
+      repo: "pushkarverma3698/House-of-Hulda-Website-frontend",
+    });
+
+    expect(mockHitlGate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        summary: expect.stringContaining("pushkarverma3698/House-of-Hulda-Website-frontend"),
+      }),
+      expect.anything(),
+    );
   });
 });

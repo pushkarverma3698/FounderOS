@@ -32,6 +32,10 @@ export function buildWelcomeMessage(firstName?: string): string {
     `📣 <b>Marketing</b> ✋ — <i>"Draft a build-in-public post about today's ship"</i>\n` +
     `📈 <b>Sales</b> ✋ — <i>"Draft outreach to Razorpay"</i>\n` +
     `💻 <b>Personal</b> ✋ — <i>"List ~/Projects" · "Read founderos.log"</i>\n\n` +
+    `🤖 <b>Build things while you are away</b>\n` +
+    `<code>/task fix the flaky CSV export</code> — hands the work to the agent loop:\n` +
+    `Antigravity implements it, Claude reviews the PR, you get the verdict\n` +
+    `<code>/newproject pricing-api usage-based pricing</code> — starts a whole new repo\n\n` +
     `⚡ <b>System</b>\n` +
     `<code>/status</code> · <code>/budget</code> · <code>/commands</code> · ` +
     `<code>/connect</code> · <code>/reset</code>\n\n` +

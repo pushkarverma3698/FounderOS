@@ -157,6 +157,16 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
   { command: "status", description: "System health and pending approvals", group: "system" },
   { command: "budget", description: "Today's spend against the daily cap", group: "system" },
   { command: "commands", description: "Show every command with what it does", group: "system" },
+  {
+    command: "task",
+    description: "Hand engineering work to the agent loop. task repo:hulda fix the hero layout",
+    group: "system",
+  },
+  {
+    command: "newproject",
+    description: "Start a new project: creates a private repo the agent loop can work in. newproject name what it is",
+    group: "system",
+  },
   { command: "connect", description: "Search and add an MCP server from the registry", group: "system" },
   { command: "start", description: "What this bot can do", group: "system" },
   { command: "reset", description: "Clear this thread's mission state", group: "system" },
