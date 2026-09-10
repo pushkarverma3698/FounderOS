@@ -29,7 +29,7 @@ import {
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
 import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
-import { handleTask } from "./task-command.js";
+import { handleTask, handleNewProject } from "./task-command.js";
 import {
   handleCsv,
   handleFresh,
@@ -66,7 +66,21 @@ export function registerHandlers(bot: Bot): void {
   bot.command("budget", (ctx: Context) => handleBudget(ctx));
   bot.command("connect", (ctx: Context) => handleConnect(ctx));
   bot.command("commands", (ctx: Context) => handleCommands(ctx));
-  bot.command("task", (ctx: Context) => handleTask(ctx, { runKernelText }));
+  // The registry read is dynamically imported so this transport file does not pull
+  // the database into the bot's startup path (same reason as jobsDeps below).
+  bot.command("task", (ctx: Context) =>
+    handleTask(ctx, {
+      runKernelText,
+      listRegisteredRepos: async () => {
+        const [{ listRegisteredDispatchRepos }, { TENANT }] = await Promise.all([
+          import("../db/queries.js"),
+          import("../core/config.js"),
+        ]);
+        return listRegisteredDispatchRepos(TENANT);
+      },
+    }),
+  );
+  bot.command("newproject", (ctx: Context) => handleNewProject(ctx, { runKernelText }));
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
   bot.command("wife_draft", (ctx: Context) => handleDraft(withForcedProfileToken(ctx, "wife"), { runKernelText }));
   bot.command("ask", (ctx: Context) => handleAsk(ctx, { runKernelText }));

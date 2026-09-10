@@ -29,6 +29,7 @@
 
 import type { Context } from "grammy";
 import { DISPATCH_REPO_ALLOWLIST, DEFAULT_DISPATCH_REPO, matchAllowlistedRepos } from "../tools/dispatch-repos.js";
+import { validateProjectRepoName } from "../tools/create-project-repo.js";
 
 const REPO_PREFIX = "repo:";
 
@@ -59,7 +60,7 @@ export type TaskParse = { readonly ok: true; readonly args: TaskArgs } | { reado
  * "mention repo:hulda in the readme" retarget the dispatch — the instruction was about
  * the string, not about where the work should land.
  */
-export function parseTaskArgs(raw: string): TaskParse {
+export function parseTaskArgs(raw: string, registered: readonly string[] = []): TaskParse {
   const trimmed = raw.trim();
   if (!trimmed) return { ok: false, message: USAGE };
 
@@ -69,15 +70,15 @@ export function parseTaskArgs(raw: string): TaskParse {
   }
 
   const hint = first.slice(REPO_PREFIX.length);
-  const matches = matchAllowlistedRepos(hint);
+  const matches = matchAllowlistedRepos(hint, registered);
 
   if (matches.length === 0) {
     return {
       ok: false,
       message:
         `"${hint}" is not a repository I can dispatch to.\n\n` +
-        `Allowed: ${DISPATCH_REPO_ALLOWLIST.join(", ")}.\n` +
-        "Adding another one is a code change, not a setting.",
+        `Allowed: ${[...DISPATCH_REPO_ALLOWLIST, ...registered].join(", ")}.\n` +
+        "Start a new one by asking me to create a project repo.",
     };
   }
 
@@ -127,14 +128,93 @@ export function buildTaskInstruction(args: TaskArgs): string {
 export interface TaskCommandDeps {
   /** The normal kernel turn — same path a typed message takes. */
   readonly runKernelText: (ctx: Context, text: string) => Promise<void>;
+  /**
+   * Project repos this instance created, which are dispatchable without a code
+   * change. Optional so every existing caller and test keeps the hardcoded-only
+   * behaviour; supplied in production by the gateway.
+   */
+  readonly listRegisteredRepos?: () => Promise<readonly string[]>;
 }
 
 export async function handleTask(ctx: Context, deps: TaskCommandDeps): Promise<void> {
-  const parsed = parseTaskArgs(ctx.match?.toString() ?? "");
+  let registered: readonly string[] = [];
+  try {
+    registered = (await deps.listRegisteredRepos?.()) ?? [];
+  } catch {
+    // allow-failopen: a registry that cannot be read must not take /task down for the two hardcoded repos.
+    registered = [];
+  }
+
+  const parsed = parseTaskArgs(ctx.match?.toString() ?? "", registered);
   if (!parsed.ok) {
     await ctx.reply(parsed.message);
     return;
   }
 
   await deps.runKernelText(ctx, buildTaskInstruction(parsed.args));
+}
+
+// ── /newproject ──────────────────────────────────────────────────────────────
+//
+// Starting a project is the one dispatch case /task cannot serve: there is nothing to
+// dispatch to yet. Without its own entry point the capability is reachable only by
+// guessing the right sentence at the bot, which is the discoverability gap this whole
+// command surface exists to close.
+
+const NEW_PROJECT_USAGE = [
+  "Usage: /newproject <name> <what it is>",
+  "",
+  "Example:",
+  "  /newproject turicks-pricing-api usage-based pricing service for Turicks",
+  "",
+  "Creates a PRIVATE repo under your account and lets the agent loop work in it.",
+  "You approve the name before anything is created.",
+].join("\n");
+
+export interface NewProjectArgs {
+  readonly name: string;
+  readonly description: string;
+}
+
+export type NewProjectParse =
+  | { readonly ok: true; readonly args: NewProjectArgs }
+  | { readonly ok: false; readonly message: string };
+
+/** Splits `<name> <description…>` and rejects a name GitHub would rewrite. */
+export function parseNewProjectArgs(raw: string): NewProjectParse {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, message: NEW_PROJECT_USAGE };
+
+  const [name, ...rest] = trimmed.split(/\s+/);
+  const invalid = validateProjectRepoName(name ?? "");
+  if (invalid) return { ok: false, message: `${invalid}\n\n${NEW_PROJECT_USAGE}` };
+
+  return { ok: true, args: { name: name as string, description: rest.join(" ").trim() } };
+}
+
+/**
+ * Routed through the kernel for the same reason as /task: the approval card belongs to
+ * the tool, and a gateway-local card would resume an unrelated paused checkpoint.
+ */
+export function buildNewProjectInstruction(args: NewProjectArgs): string {
+  return [
+    `Start a new project by calling the create_project_repo tool.`,
+    ``,
+    `Repository name: ${args.name}`,
+    `Description: ${args.description || "(none given)"}`,
+    `Visibility: private — do not pass isPrivate unless the founder asked for a public repo.`,
+    ``,
+    `Call the tool once with exactly that name. Do not create files, do not scaffold`,
+    `anything, and do not dispatch any work yet — creating the repository is the whole task.`,
+  ].join("\n");
+}
+
+export async function handleNewProject(ctx: Context, deps: TaskCommandDeps): Promise<void> {
+  const parsed = parseNewProjectArgs(ctx.match?.toString() ?? "");
+  if (!parsed.ok) {
+    await ctx.reply(parsed.message);
+    return;
+  }
+
+  await deps.runKernelText(ctx, buildNewProjectInstruction(parsed.args));
 }

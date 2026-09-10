@@ -359,15 +359,11 @@ const DEPARTMENTS = new Set<Department>([
 },
 ```
 
-#### 6. `/q` command (`src/gateway/commands.ts`)
+#### 6. Department routing
 
-```typescript
-// In handleDirectQ, add to valid dept list:
-const VALID_DEPTS = ["research","comms","engineering","marketing","sales","personal","jobhunt","analytics"];
-
-// In handleCommands help text, add:
-`analytics — run metrics queries and build dashboards`
-```
+Departments are selected by the planner, not by a `/q <dept>` command — `/q` and
+`handleDirectQ` died with the v2 orchestration layers. Add the new department to
+`DEPARTMENT_TOOLS` in `src/agents/capabilities.ts`; there is no command to update.
 
 #### 7. Startup banner (`src/index.ts`)
 
@@ -516,57 +512,78 @@ One line in MEMORY.md:
 
 | If you forget… | You get… |
 |----------------|----------|
-| `id` in registry | `/run weekly_outreach_batch` → "unknown workflow" |
+| `id` in registry | "run weekly_outreach_batch" in plain English → "unknown workflow" |
 | Param name mismatch | Step template has `{company}` but params declared as `name` → slot never filled |
 
 ---
 
 ## Adding a Telegram Command
 
-**4 touch points, 2 files.**
+**5 touch points, 3 files — and two tests fail until all of them land.**
 
-### Step 1 — Handler (`src/gateway/commands.ts`)
+`src/gateway/command-menu.ts` is the single list. Telegram's native ☰ menu, the
+`/commands` help message and the real `bot.command(...)` registrations are all derived
+from or cross-checked against it. Do not write help text anywhere else.
+
+### Step 1 — Handler (its own file under `src/gateway/`)
+
+Not `commands.ts` unless it genuinely belongs there — that file is near its LOC budget.
+Take dependencies as an injected `deps` object so the handler is testable without a bot.
 
 ```typescript
-export async function handleStats(ctx: Context): Promise<void> {
-  const stats = await getSystemStats();
-  await ctx.reply(
-    `📊 <b>System stats</b>\n\n${formatStats(stats)}`,
-    { parse_mode: "HTML" }
-  );
+// src/gateway/stats-command.ts
+export interface StatsDeps {
+  readonly getSystemStats: () => Promise<Stats>;
+}
+
+export async function handleStats(ctx: Context, deps: StatsDeps): Promise<void> {
+  const stats = await deps.getSystemStats();
+  await ctx.reply(`📊 <b>System stats</b>\n\n${formatStats(stats)}`, { parse_mode: "HTML" });
 }
 ```
 
 ### Step 2 — Import (`src/gateway/telegram.ts`)
 
 ```typescript
-import {
-  handleCommands,
-  handleDirectQ,
-  handleStats,       // ← add
-} from "./commands.js";
+import { handleStats } from "./stats-command.js";
 ```
 
 ### Step 3 — Register (`src/gateway/telegram.ts`)
 
 ```typescript
-bot.command("stats", (ctx) => handleStats(ctx));
+bot.command("stats", (ctx: Context) => handleStats(ctx, { getSystemStats }));
 ```
 
-### Step 4 — Help text (`src/gateway/commands.ts`)
+### Step 4 — Menu entry (`src/gateway/command-menu.ts`)
 
 ```typescript
-// In handleCommands:
-`/stats — show system metrics and uptime`
+{ command: "stats", description: "System metrics and uptime", group: "system" },
 ```
+
+Constraints Telegram enforces, all covered by `command-menu.test.ts`:
+`[a-z0-9_]{1,32}` for the name, ≤256 chars for the description, and **no `<`, `>` or
+`&`** — `setMyCommands` takes plain text and does not parse HTML. Write a placeholder as
+`stats n`, not `stats <n>`; the chat rendering re-escapes it.
+
+`group` must be `"jobs"` or `"system"`. A third group renders nowhere.
+
+### Step 5 — Test it like a handler, not like a bot
+
+Parse arguments in a pure exported function and test that directly. See
+`src/gateway/task-command.ts` (`parseTaskArgs`) for the shape.
 
 ### Forget → Error table
 
 | If you forget… | You get… |
 |----------------|----------|
 | Import in telegram.ts | tsc error (loud) |
-| `bot.command` registration | `/stats` is silently ignored by Telegram |
-| Help text entry | Command works but is invisible in `/commands` |
+| `bot.command` registration | `command-menu.test.ts` fails: "advertises nothing that is not registered" |
+| Menu entry | `command-menu.test.ts` fails: "advertises every command that is registered" |
+| `<` or `>` in the description | `setMyCommands` rejects the call and the founder loses the WHOLE menu |
+| Naming it in `/start` copy only | `advertised-commands.test.ts` fails — that copy may only name live commands |
+
+A command the founder cannot discover is indistinguishable from one that does not
+exist: `/draft` worked perfectly and went un-typed for seven straight days.
 
 ---
 

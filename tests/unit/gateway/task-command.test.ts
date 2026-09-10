@@ -147,3 +147,125 @@ describe("handleTask", () => {
     expect(replies.join("\n")).toContain("/task");
   });
 });
+
+// ── Repos created after this code was compiled ───────────────────────────────
+//
+// /task has to reach a project started from Telegram last Tuesday, or "start a new
+// project and build me X" stops halfway with the founder's own repo refused.
+
+describe("/task against a repo this instance created", () => {
+  const CREATED = ["pushkarverma3698/turicks-pricing-api"];
+
+  it("resolves a created repo by short hint", () => {
+    const parsed = parseTaskArgs("repo:pricing add rate limiting", CREATED);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.args.repo).toBe("pushkarverma3698/turicks-pricing-api");
+  });
+
+  it("still refuses a repo nobody created and nobody hardcoded", () => {
+    const parsed = parseTaskArgs("repo:someone-else/thing do a thing", CREATED);
+    expect(parsed.ok).toBe(false);
+  });
+
+  it("names created repos in the refusal, so the list the founder sees is the real one", () => {
+    const parsed = parseTaskArgs("repo:nope do a thing", CREATED);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.message).toContain("turicks-pricing-api");
+  });
+
+  it("passes created repos through handleTask", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = fakeCtx("repo:pricing add rate limiting");
+
+    await handleTask(ctx, {
+      runKernelText,
+      listRegisteredRepos: async () => CREATED,
+    });
+
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).toContain("pushkarverma3698/turicks-pricing-api");
+  });
+
+  it("still dispatches to the hardcoded repos when the registry read fails", async () => {
+    // A registry that cannot be read must not take /task down for FounderOS.
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = fakeCtx("fix the flaky CSV export");
+
+    await handleTask(ctx, {
+      runKernelText,
+      listRegisteredRepos: async () => {
+        throw new Error("db down");
+      },
+    });
+
+    expect(runKernelText).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── /newproject ──────────────────────────────────────────────────────────────
+
+const { parseNewProjectArgs, buildNewProjectInstruction, handleNewProject } = await import(
+  "../../../src/gateway/task-command.js"
+);
+
+describe("parseNewProjectArgs", () => {
+  it("takes the first token as the repo name and the rest as the description", () => {
+    const parsed = parseNewProjectArgs("turicks-pricing-api a pricing API for Turicks");
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.args.name).toBe("turicks-pricing-api");
+      expect(parsed.args.description).toBe("a pricing API for Turicks");
+    }
+  });
+
+  it("accepts a bare name with no description", () => {
+    const parsed = parseNewProjectArgs("scratchpad");
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.args.description).toBe("");
+  });
+
+  it("shows usage for an empty argument", () => {
+    const parsed = parseNewProjectArgs("   ");
+    expect(parsed.ok).toBe(false);
+  });
+
+  it("refuses an illegal repo name in the gateway, before any model call", () => {
+    // Same reasoning as the repo hint on /task: a name GitHub would rewrite produces a
+    // repo whose real name differs from the registered one.
+    const parsed = parseNewProjectArgs("my/project something");
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.message).toMatch(/slash/i);
+  });
+});
+
+describe("handleNewProject", () => {
+  it("asks the kernel to call create_project_repo, naming the repo", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = fakeCtx("turicks-pricing-api pricing API");
+
+    await handleNewProject(ctx, { runKernelText });
+
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).toContain("create_project_repo");
+    expect(instruction).toContain("turicks-pricing-api");
+  });
+
+  it("refuses an illegal name without spending a model call", async () => {
+    // Note the grammar: "/newproject my cool thing" is NOT an error — it means a repo
+    // called "my" described as "cool thing". The approval card prints the resolved
+    // name, which is where a misread gets caught. Only characters GitHub would reject
+    // or rewrite are refused here.
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx, replies } = fakeCtx("proj#1 a pricing thing");
+
+    await handleNewProject(ctx, { runKernelText });
+
+    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replies[0]).toBeTruthy();
+  });
+
+  it("defaults to private, and says so in the instruction", () => {
+    const instruction = buildNewProjectInstruction({ name: "x", description: "" });
+    expect(instruction).toMatch(/private/i);
+  });
+});
