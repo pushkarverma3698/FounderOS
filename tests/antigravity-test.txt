@@ -1,0 +1,5 @@
+Antigravity end-to-end pipeline verification.
+Issue: #670
+Target: test: clone repository and submit test pull request
+Workspace: isolated (/opt/agy-workspace/founderos)
+Status: verified
