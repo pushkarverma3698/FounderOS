@@ -26,7 +26,7 @@ import {
   handleConnect,
   unknownCommandReply,
 } from "./commands.js";
-import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
+import { handleAsk, handleDraft, handleApplied, handleSubmit } from "./jobhunt-commands.js";
 import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
 import {
@@ -66,7 +66,9 @@ export function registerHandlers(bot: Bot): void {
   bot.command("connect", (ctx: Context) => handleConnect(ctx));
   bot.command("commands", (ctx: Context) => handleCommands(ctx));
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
+  bot.command("submit", (ctx: Context) => handleSubmit(ctx, { runKernelText }));
   bot.command("wife_draft", (ctx: Context) => handleDraft(withForcedProfileToken(ctx, "wife"), { runKernelText }));
+  bot.command("wife_submit", (ctx: Context) => handleSubmit(withForcedProfileToken(ctx, "wife"), { runKernelText }));
   bot.command("ask", (ctx: Context) => handleAsk(ctx, { runKernelText }));
   bot.command("wife_ask", (ctx: Context) => handleAsk(withForcedProfileToken(ctx, "wife"), { runKernelText }));
   bot.command("applied", (ctx: Context) => handleApplied(ctx));

@@ -397,3 +397,77 @@ export async function handleApplied(ctx: Context): Promise<void> {
   log.info({ command: "applied", rank, company: row.company, id: row.id }, "Application marked applied");
   await ctx.reply(`✅ Marked applied — ${row.company} (${row.title}). It's off today's queue.`);
 }
+
+export async function handleSubmit(ctx: Context, deps: JobhuntCommandDeps): Promise<void> {
+  const selected = resolveProfileArg(ctx.match?.toString() ?? "", ["all"], (rest) =>
+    parseDraftArg(rest) !== null,
+  );
+  if (isProfileArgMiss(selected)) {
+    await ctx.reply(profileMissMessage(selected));
+    return;
+  }
+  const parsed = parseDraftArg(selected.rest);
+  if (parsed === null) {
+    await ctx.reply(unresolvedMessage("submit", null));
+    return;
+  }
+
+  const ranks = parsed.all ? await liveDraftRanks(selected.profile) : parsed.rows;
+  if (ranks.length === 0) {
+    await ctx.reply("Nothing is queued to apply to right now.");
+    return;
+  }
+
+  const capped = ranks.slice(0, BULK_DRAFT_CAP);
+  for (const [i, rank] of capped.entries()) {
+    await submitOneRow(ctx, rank, deps, capped.length > 1 ? `${i + 1}/${capped.length} · ` : "", selected.profile);
+  }
+}
+
+import { submitApplication } from "../tools/jobhunt/ats-submitter.js";
+
+async function submitOneRow(
+  ctx: Context,
+  rank: number,
+  deps: JobhuntCommandDeps,
+  progress: string,
+  profile: JobSearchProfile,
+): Promise<void> {
+  const row = await resolveBriefRow(rank, DRAFT_SECTIONS, profile);
+  if (!row) {
+    await ctx.reply(unresolvedMessage("submit", rank));
+    return;
+  }
+
+  await ctx.reply(`🤖 ${progress}Generating packet & running autonomous ATS submitter for ${row.company}...`);
+
+  const built = await buildApplicationPacket(row, artifactDirFor(ctx));
+  if (!built.ok) {
+    await ctx.reply(`⚠ Couldn't build packet for ${row.company}. Falling back to text draft.`);
+    await deps.runKernelText(ctx, draftInstruction(row), profile.id);
+    return;
+  }
+
+  const { packet } = built;
+  
+  await ctx.reply(`✅ Packet ready. Launching headless browser to apply...`);
+  
+  const submitResult = await submitApplication({
+    applyUrl: packet.applyUrl,
+    pdfPath: packet.pdfPath,
+    cvMarkdown: packet.cvMarkdown,
+    profileId: profile.id,
+    jobDescription: row.description || undefined
+  });
+
+  if (submitResult.ok) {
+    await ctx.reply(`✅ Autonomous submission successful for ${row.company}!`);
+    await updateApplicationStage(row.id, "applied", { appliedAt: new Date(), clearBriefRank: true });
+  } else {
+    await ctx.reply(`❌ Autonomous submission failed: ${submitResult.reason}. Please click the link to apply manually.`);
+    await ctx.reply(packetMessage(packet, rank), {
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+    });
+  }
+}
