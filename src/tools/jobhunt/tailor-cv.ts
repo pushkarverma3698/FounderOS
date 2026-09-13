@@ -78,11 +78,12 @@ Your task is to tailor a candidate's base CV specifically for a target Job Descr
 
 CRITICAL CONSTRAINTS (VIOLATING THESE WILL DISQUALIFY THE RESUME):
 1. NEVER fabricate or invent job titles, employer names, employment dates, degrees, or certifications.
-2. The PERMITTED TECHNOLOGY VOCABULARY below is the COMPLETE set of technologies you may name. Naming anything outside it — even once, even in passing, even because the job description asks for it — disqualifies the resume. A gap the candidate genuinely has is not yours to close.
-3. Re-order and re-emphasize the candidate's existing achievements, bullet points, and skills to highlight items most relevant to the JD.
-4. Mirror the JD's exact wording ONLY for terms in the permitted vocabulary (e.g. write "React.js" for "React" if the JD does). A JD term that is not in the permitted vocabulary must not appear anywhere in your output.
-5. Keep the tone natural, concise, and impact-driven (STAR method with metrics).
-6. Output ONLY the complete tailored resume in clean Markdown format with standard ATS section headers:
+2. DO NOT modify or reword existing job titles, employer names, or employment dates. They must appear EXACTLY as they do in the base CV. Do not add seniority or domain words (e.g., do not change "Software Engineer" to "Senior Backend Engineer").
+3. The PERMITTED TECHNOLOGY VOCABULARY below is the COMPLETE set of technologies you may name. Naming anything outside it — even once, even in passing, even because the job description asks for it — disqualifies the resume. A gap the candidate genuinely has is not yours to close.
+4. Re-order and re-emphasize the candidate's existing achievements, bullet points, and skills to highlight items most relevant to the JD.
+5. Mirror the JD's exact wording ONLY for terms in the permitted vocabulary (e.g. write "React.js" for "React" if the JD does). A JD term that is not in the permitted vocabulary must not appear anywhere in your output.
+6. Keep the tone natural, concise, and impact-driven (STAR method with metrics).
+7. Output ONLY the complete tailored resume in clean Markdown format with standard ATS section headers:
    # [NAME]
    [Contact Info & Links]
    ## SUMMARY
@@ -250,11 +251,12 @@ Output the corrected full Markdown CV.`;
 
       const repairPrompt = `${describeClaimViolations(claimCheck.violations)}.
 
-Remove every one of the following from the CV. Do NOT rewrite the rest — keep the same structure, ordering and wording everywhere else:
+Fix the following violations. Do NOT rewrite the rest — keep the same structure, ordering and wording everywhere else:
 
 ${claimCheck.violations.map((v) => `- ${v.kind}: "${v.claim}"`).join("\n")}
 
-Where a removal leaves a gap, close it with something the BASE CV already states. Do not substitute a different technology that is also missing from the permitted vocabulary.
+If the violation is a technology, remove it completely. Where a removal leaves a gap, close it with something the BASE CV already states. Do not substitute a different technology that is also missing from the permitted vocabulary.
+If the violation is a title, employer, date, or degree, REVERT it exactly to the wording used in the BASE CV.
 
 Output the corrected full Markdown CV.`;
 

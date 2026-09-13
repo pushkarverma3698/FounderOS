@@ -168,13 +168,36 @@ export async function buildApplicationPacket(
     track: row.track,
     profile,
   });
-  if (!tailored.success || !tailored.tailoredMarkdown) {
-    return { ok: false, reason: tailored.error ?? "CV tailoring failed" };
+
+  let cvMarkdown = tailored.tailoredMarkdown;
+  let matchedSkills = tailored.matchedSkills || [];
+  let missingSkills = tailored.missingSkills || [];
+
+  if (!tailored.success || !cvMarkdown) {
+    log.warn(
+      { id: row.id, company: row.company, reason: tailored.error },
+      "CV tailoring failed — falling back to base CV"
+    );
+    const trackConfig = row.track ? profile.tracks[row.track] : undefined;
+    const track = row.track ?? profile.trackPriority[0] ?? "ai";
+    const explicitPaths = [
+      ...(trackConfig?.cvPath ? [trackConfig.cvPath] : []),
+      ...(profile.baseCvPath ? [profile.baseCvPath] : []),
+    ];
+    // Dynamic import to avoid circular dependencies if any, but regular import is fine.
+    // wait, I need to add readFullCvText to the imports at the top of the file!
+    // I will replace it in another chunk, for now I assume it's imported.
+    const { readFullCvText } = await import("../career.js");
+    const baseCvRes = readFullCvText(track, explicitPaths.length > 0 ? explicitPaths : undefined);
+    if (!baseCvRes.ok) {
+      return { ok: false, reason: tailored.error ?? "CV tailoring failed, and base CV fallback failed too" };
+    }
+    cvMarkdown = baseCvRes.text;
   }
 
   try {
     await recordTailoringResult(row.id, { tailorStatus: "tailoring" });
-    const rendered = await renderCvToPdf(tailored.tailoredMarkdown);
+    const rendered = await renderCvToPdf(cvMarkdown);
     const pdfPath = tailoredCvPath(artifactDir, row);
     await fs.mkdir(artifactDir, { recursive: true });
     await fs.writeFile(pdfPath, rendered.pdfBuffer);
@@ -189,9 +212,9 @@ export async function buildApplicationPacket(
       packet: {
         row,
         pdfPath,
-        cvMarkdown: tailored.tailoredMarkdown,
-        matchedSkills: tailored.matchedSkills,
-        missingSkills: tailored.missingSkills,
+        cvMarkdown,
+        matchedSkills,
+        missingSkills,
         applyUrl: formUrl ?? row.url ?? "",
         opensTheForm: formUrl !== null,
       },

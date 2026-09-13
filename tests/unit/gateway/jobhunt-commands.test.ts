@@ -271,6 +271,13 @@ describe("handleDraft (resolution path)", () => {
         error: "LLM invocation failed: network blocked in tests",
       })),
     }));
+    vi.doMock("../../../src/tools/career.js", async (importOriginal) => {
+      const actual = (await importOriginal()) as any;
+      return {
+        ...actual,
+        readFullCvText: vi.fn(() => ({ ok: false, error: "Mocked failure" })),
+      };
+    });
 
     const { handleDraft } = await import("../../../src/gateway/jobhunt-commands.js");
     const runKernelText = vi.fn(async () => undefined);
@@ -292,6 +299,8 @@ describe("handleDraft (resolution path)", () => {
     expect(reply).toHaveBeenCalledTimes(2);
     const [fallbackText] = (reply.mock.calls[1] ?? []) as unknown as [string?];
     expect(fallbackText).toContain("Couldn't build a tailored PDF");
+
+    vi.doUnmock("../../../src/tools/career.js");
   });
 
   it("replies instead of drafting when the rank does not resolve", async () => {
