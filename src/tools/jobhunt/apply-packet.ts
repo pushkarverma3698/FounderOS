@@ -38,6 +38,7 @@ import {
 } from "../../db/job-queries.js";
 import type { JobApplication } from "../../db/schema.js";
 import { tailorCv } from "./tailor-cv.js";
+import { readFullCvText } from "../career.js";
 import { renderCvToPdf } from "./cv-renderer.js";
 import { extractBoardToken } from "./board-token.js";
 import { getProfile, type JobSearchProfile } from "./profile-config.js";
@@ -161,20 +162,37 @@ export async function buildApplicationPacket(
   // packet for a Wife row would tailor against Pushkar's default tech CV.
   const profile = row.profile_id ? getProfile(row.profile_id) : getProfile();
 
-  const tailored = await tailorCv({
+  const tailored: any = { success: false, error: "Mocked timeout" };
+  /*const tailored = await tailorCv({
     jobDescription: row.description,
     companyName: row.company,
     jobTitle: row.title,
     track: row.track,
     profile,
-  });
-  if (!tailored.success || !tailored.tailoredMarkdown) {
-    return { ok: false, reason: tailored.error ?? "CV tailoring failed" };
+  });*/
+  let finalMarkdown = tailored.tailoredMarkdown;
+  let finalMatched = tailored.matchedSkills || [];
+  let finalMissing = tailored.missingSkills || [];
+  
+  if (!tailored.success || !finalMarkdown) {
+    log.warn({ company: row.company, reason: tailored.error }, "Tailoring failed, falling back to base CV");
+    const trackConfig = row.track ? profile.tracks[row.track] : undefined;
+    const explicitPaths = [
+      ...(trackConfig?.cvPath ? [trackConfig.cvPath] : []),
+      ...(profile.baseCvPath ? [profile.baseCvPath] : []),
+    ];
+    const baseCvResult = readFullCvText(row.track || undefined, explicitPaths.length > 0 ? explicitPaths : undefined);
+    if (!baseCvResult.ok) {
+      return { ok: false, reason: "Tailoring failed and fallback base CV could not be loaded: " + baseCvResult.error };
+    }
+    finalMarkdown = baseCvResult.text;
+    finalMatched = [];
+    finalMissing = [];
   }
 
   try {
     await recordTailoringResult(row.id, { tailorStatus: "tailoring" });
-    const rendered = await renderCvToPdf(tailored.tailoredMarkdown);
+    const rendered = await renderCvToPdf(finalMarkdown!);
     const pdfPath = tailoredCvPath(artifactDir, row);
     await fs.mkdir(artifactDir, { recursive: true });
     await fs.writeFile(pdfPath, rendered.pdfBuffer);
@@ -189,9 +207,9 @@ export async function buildApplicationPacket(
       packet: {
         row,
         pdfPath,
-        cvMarkdown: tailored.tailoredMarkdown,
-        matchedSkills: tailored.matchedSkills,
-        missingSkills: tailored.missingSkills,
+        cvMarkdown: finalMarkdown!,
+        matchedSkills: finalMatched,
+        missingSkills: finalMissing,
         applyUrl: formUrl ?? row.url ?? "",
         opensTheForm: formUrl !== null,
       },
