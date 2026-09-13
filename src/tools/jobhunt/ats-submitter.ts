@@ -2,7 +2,7 @@ import { chromium, type Page, type Browser } from "playwright";
 import { childLogger } from "../../infra/logger.js";
 import { getProfile } from "./profile-config.js";
 import { z } from "zod";
-import { ChatAnthropic } from "@langchain/anthropic";
+import { getWorkerModel } from "../../agents/model.js";
 import { HumanMessage, SystemMessage, ToolMessage, BaseMessage } from "@langchain/core/messages";
 
 const log = childLogger({ module: "ats-submitter" });
@@ -74,10 +74,7 @@ export async function submitApplication(ctx: SubmitContext): Promise<{ ok: boole
     });
 
     // 2. Init LLM
-    const llm = new ChatAnthropic({
-      modelName: "claude-3-5-sonnet-20240620",
-      temperature: 0.1,
-    }).bindTools([FILL_FIELD_TOOL, UPLOAD_FILE_TOOL, CLICK_SUBMIT_TOOL]);
+    const llm = getWorkerModel().bindTools([FILL_FIELD_TOOL, UPLOAD_FILE_TOOL, CLICK_SUBMIT_TOOL]);
 
     const messages: BaseMessage[] = [
       new SystemMessage(`You are an autonomous ATS application submitter.
