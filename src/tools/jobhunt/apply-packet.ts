@@ -162,14 +162,13 @@ export async function buildApplicationPacket(
   // packet for a Wife row would tailor against Pushkar's default tech CV.
   const profile = row.profile_id ? getProfile(row.profile_id) : getProfile();
 
-  const tailored: any = { success: false, error: "Mocked timeout" };
-  /*const tailored = await tailorCv({
+  const tailored = await tailorCv({
     jobDescription: row.description,
     companyName: row.company,
     jobTitle: row.title,
     track: row.track,
     profile,
-  });*/
+  });
   let finalMarkdown = tailored.tailoredMarkdown;
   let finalMatched = tailored.matchedSkills || [];
   let finalMissing = tailored.missingSkills || [];
