@@ -97,7 +97,12 @@ Instructions:
 1. Call fill_field for all required fields. Improvise answers for textareas based on the CV and JD.
 2. Call upload_file for the resume/CV upload field.
 3. Call click_submit on the submit button.
-Do this efficiently in as few tool calls as possible.`),
+Do this efficiently in as few tool calls as possible.
+
+CRITICAL: Do NOT use AI slop when improvising text answers. 
+- Banned words: delve, foster, leverage, utilize, facilitate, empower, streamline, robust, cutting-edge, paradigm shift, game changer.
+- Keep it direct, concrete, and factual. Use active voice. Cut throat-clearing openers ("Here's the thing"). Do not restate the question.
+`),
       new HumanMessage("Please fill out the form.")
     ];
 
