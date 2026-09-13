@@ -42,7 +42,7 @@
 
 import type { ScreenStatus } from "./filters.js";
 import type { Gate } from "./gates.js";
-import { isEarlyCareerTitle } from "./seniority.js";
+import { isEarlyCareerTitle, isOverSeniorTitle, overSeniorReason } from "./seniority.js";
 import { getProfile, type JobSearchProfile } from "./profile-config.js";
 
 /**
@@ -183,8 +183,24 @@ export function experienceGate(
   }
 
   const demand = extractExperienceDemand(description);
+  const overSenior = isOverSeniorTitle(title, profile);
+  const seniorReason = overSeniorReason(title, profile);
 
   if (demand.minYears === null) {
+    // An executive/senior title with no stated years: FLAG so the candidate/founder sees
+    // it, but do not reject — Indian banks use "Vice President" for mid-level
+    // ICs and a startup's "Head of" may carry 3 years. Added 2026-09-13
+    // (expanded for Tashi / finance profiles to catch Manager, Lead, Controller, Principal).
+    if (overSenior) {
+      return {
+        gate: "Experience",
+        status: "flag",
+        evidence:
+          `\"${title}\" is ${seniorReason ?? "typically a senior-leadership role"}. The posting states no ` +
+          `number of years, so nothing rules you out on paper — but the title suggests ` +
+          `a level well above ~${yearsShipped} years shipped. Flagged to prevent resume screen rejection.`,
+      };
+    }
     return {
       gate: "Experience",
       status: "pass",
@@ -223,15 +239,35 @@ export function experienceGate(
     };
   }
 
+  // If the stated years are reachable, but the title is over-senior:
+  // For early-career candidates (<3 yrs) or finance profiles, a managerial/leadership
+  // title (Manager, Lead, Director, Principal) cannot be treated as an entry pass —
+  // ATS resume parsing filters out applicants lacking management/lead titles.
+  const isFinanceOrEarlyCareer = profile.skillsDictionaryName === "finance" || yearsShipped < 3;
+  if (status === "pass" && overSenior && isFinanceOrEarlyCareer) {
+    return {
+      gate: "Experience",
+      status: "flag",
+      evidence:
+        `Asks for ${demand.minYears} year(s), but \"${title}\" is ${seniorReason ?? "a senior/leadership role"} ` +
+        `above your ~${yearsShipped} years shipped. Their words: \"${demand.evidence}\". ` +
+        `Stated years often describe minimum software skills rather than true role seniority; ` +
+        `flagged to prevent automated resume rejection on managerial/lead titles.`,
+    };
+  }
+
   return {
     gate: "Experience",
     status,
     evidence:
       `Asks for ${demand.minYears} year(s) — within reach of your ~${yearsShipped} shipped. ` +
       `Their words: "${demand.evidence}".` +
-      (isSeniorTitle(title)
-        ? ` The title says senior, but the stated bar is what counts here, not the label.`
-        : ""),
+      (overSenior
+        ? ` Note: "${title}" is typically ${seniorReason ?? "a senior-leadership title"} — the stated years` +
+          ` are reachable, but the role may expect more seniority than the number implies.`
+        : isSeniorTitle(title)
+          ? ` The title says senior, but the stated bar is what counts here, not the label.`
+          : ""),
   };
 }
 

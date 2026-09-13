@@ -25,6 +25,103 @@ import { getAllAggregatorSources, type AggregatorJob } from "./aggregators/index
 
 const log = childLogger({ module: "jobhunt:aggregator" });
 
+/** Known prefixes that mistakenly end up in aggregator company name fields. */
+export const GARBAGE_PREFIXES = [
+  "job application for ",
+  "apply for ",
+] as const;
+
+/** Known ATS suffixes that mistakenly end up in aggregator company name fields. */
+export const ATS_SUFFIXES = [
+  " - greenhouse",
+  " - lever",
+] as const;
+
+/** Separators that sometimes appear when a job title and company are mashed together. */
+export const COMPANY_SEPARATORS = [
+  " @ ",
+  " at ",
+] as const;
+
+/** Words that indicate a string is likely a job title rather than a company name. */
+export const TITLE_SENIORITY_WORDS = [
+  "senior", "staff", "lead", "manager", "director", "head", "principal", "vp"
+] as const;
+
+export const TITLE_ROLE_WORDS = [
+  "engineer", "developer", "designer", "architect", "analyst", "specialist", 
+  "coordinator", "consultant", "communications", "product", "system", "full-stack"
+] as const;
+
+/**
+ * Attempts to extract a clean company name from a garbled aggregator string.
+ * Strips ATS suffixes, known job application prefixes, and extracts the text
+ * after a separator like ' @ ' or ' at '.
+ */
+export function sanitiseCompanyName(raw: string): string {
+  let cleaned = raw.trim();
+  if (!cleaned) return "";
+
+  // 1. Strip known prefixes
+  const lowerCleaned = cleaned.toLowerCase();
+  for (const prefix of GARBAGE_PREFIXES) {
+    if (lowerCleaned.startsWith(prefix)) {
+      cleaned = cleaned.slice(prefix.length).trim();
+      break;
+    }
+  }
+
+  // 2. Extract after @ or at
+  for (const sep of COMPANY_SEPARATORS) {
+    const idx = cleaned.toLowerCase().lastIndexOf(sep);
+    if (idx !== -1) {
+      cleaned = cleaned.slice(idx + sep.length).trim();
+      break; // Only extract from the last one
+    }
+  }
+
+  // 3. Strip ATS suffixes
+  for (const suffix of ATS_SUFFIXES) {
+    if (cleaned.toLowerCase().endsWith(suffix)) {
+      cleaned = cleaned.slice(0, cleaned.length - suffix.length).trim();
+      break;
+    }
+  }
+
+  return cleaned;
+}
+
+/**
+ * Detects if a company name field is likely garbled with a job title or ATS noise.
+ * Used for logging and alerting, not for blocking.
+ */
+export function isLikelyGarbledCompanyName(name: string): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+
+  // If it contains obvious separators or ATS suffixes, it's garbled
+  if (ATS_SUFFIXES.some(s => lower.includes(s))) return true;
+  if (COMPANY_SEPARATORS.some(s => lower.includes(s))) return true;
+  if (GARBAGE_PREFIXES.some(s => lower.startsWith(s))) return true;
+
+  // Check if it looks like a job title
+  const tokens = lower.split(/[^a-z0-9\-]+/);
+  
+  let hasSeniority = false;
+  let hasRole = false;
+
+  for (const token of tokens) {
+    if ((TITLE_SENIORITY_WORDS as readonly string[]).includes(token)) hasSeniority = true;
+    if ((TITLE_ROLE_WORDS as readonly string[]).includes(token)) hasRole = true;
+    if (token === "engineer") {
+      hasSeniority = true;
+      hasRole = true;
+    }
+  }
+
+  return hasSeniority && hasRole;
+}
+
 /** Marks a board that exists only to carry an aggregator job's company name. */
 export const AGGREGATOR_TOKEN_PREFIX = "aggregator-";
 
@@ -48,7 +145,7 @@ export const AGGREGATOR_TOKEN_PREFIX = "aggregator-";
  */
 function syntheticBoard(company: string, source: string): FreeBoard {
   return {
-    name: company,
+    name: sanitiseCompanyName(company),
     ats: "greenhouse" as FreeAts, // placeholder — never used for fetching
     token: `${AGGREGATOR_TOKEN_PREFIX}${source}`,
     markets: [],

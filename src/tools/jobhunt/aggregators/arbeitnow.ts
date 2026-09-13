@@ -44,9 +44,11 @@ interface ArbeitnowResponse {
   readonly meta?: { readonly current_page?: number };
 }
 
+import { sanitiseCompanyName } from "../aggregator-source.js";
+
 function toAggregatorJob(raw: ArbeitnowJob): AggregatorJob | null {
   const title = (raw.title ?? "").trim();
-  const company = (raw.company_name ?? "").trim();
+  const company = sanitiseCompanyName(raw.company_name ?? "");
   const url = (raw.url ?? "").trim();
   if (title.length === 0 || company.length === 0 || url.length === 0) return null;
 

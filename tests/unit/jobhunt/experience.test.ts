@@ -173,14 +173,12 @@ describe("experienceGate", () => {
 describe("titles never gate the decision on their own", () => {
   const BODY = "You will own services end to end and work in English. ";
 
-  it("does not flag or reject a Director/VP/Chief title with no stated years", () => {
-    // Reverted 2026-08-02 (founder correction): an earlier version of this gate
-    // flagged department-lead titles with no stated years. The founder's rule is
-    // stated years only — a title is a guess, not evidence, and the pipeline
-    // should screen on what the market actually asks, not on an inferred label.
-    expect(experienceGate(BODY, "Director of AI Engineering").status).toBe("pass");
-    expect(experienceGate(BODY, "VP of Engineering").status).toBe("pass");
-    expect(experienceGate(BODY, "Chief Technology Officer").status).toBe("pass");
+  it("flags a Director/VP/Chief title with no stated years (2026-09-13 founder directive)", () => {
+    // Updated 2026-09-13 (founder directive): roles that are very senior (VP, Director, CTO)
+    // with no stated years must be flagged so founder attention is not wasted on unreachable executive roles.
+    expect(experienceGate(BODY, "Director of AI Engineering").status).toBe("flag");
+    expect(experienceGate(BODY, "VP of Engineering").status).toBe("flag");
+    expect(experienceGate(BODY, "Chief Technology Officer").status).toBe("flag");
   });
 
   it("passes a leadership title when the stated years are reachable", () => {

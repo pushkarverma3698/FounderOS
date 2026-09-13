@@ -214,6 +214,7 @@ export async function runFreeSweep(): Promise<void> {
       sweep = {
         candidates: [...sweep.candidates, ...aggResult.candidates],
         failures: [...sweep.failures, ...aggResult.failures],
+        skippedDead: sweep.skippedDead,
         boardsPolled: sweep.boardsPolled,
       };
     }

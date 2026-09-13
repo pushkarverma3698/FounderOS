@@ -142,3 +142,110 @@ export function excludeEarlyCareer<T extends { readonly title: string }>(
 
   return { kept, dropped: droppedTitles.length, droppedTitles };
 }
+
+// ── Over-senior title detection ───────────────────────────────────────────────
+
+import type { JobSearchProfile } from "./profile-config.js";
+
+/** Executive / department-leadership title markers across all domains. */
+export const EXECUTIVE_SENIOR_PHRASES: readonly RegExp[] = [
+  /\bvice\s+president\b/i,
+  /\bvp\b/i,
+  /\b[es]vp\b/i,
+  /\bavp\b/i,
+  /\bassistant\s+vice\s+president\b/i,
+  /\bdirector\b/i,
+  /\bmanaging\s+director\b/i,
+  /\bassociate\s+director\b/i,
+  /\bhead\s+of\b/i,
+  /\bchief\b/i,
+  /\b(?:cto|cfo|coo|cio|ciso|cro|cmo)\b/i,
+  /\bdistinguished\b/i,
+  /\bfellow\b/i,
+  /\bprincipal\b/i,
+];
+
+/**
+ * Management, controller, and supervision titles.
+ *
+ * In corporate functions (finance, accounting, operations), a Manager, Controller,
+ * or Supervisor role is a people-manager / functional-owner position requiring
+ * 5-10+ years. For early-career candidates (~2-3 years, e.g. Tashi at 2.4 years),
+ * automated ATS parsing filters out resumes lacking management experience.
+ */
+export const MANAGEMENT_SENIOR_PHRASES: readonly RegExp[] = [
+  /\bmanager\b/i,
+  /\bsupervisor\b/i,
+  /\b(?:group\s+|corporate\s+|plant\s+)?financial\s+controller\b/i,
+  /\bcomptroller\b/i,
+];
+
+/** Leadership / team-lead titles (Lead, Team Lead). */
+export const LEAD_SENIOR_PHRASES: readonly RegExp[] = [
+  /\blead\b/i,
+  /\bteam\s+lead\b/i,
+];
+
+/** Senior IC titles (Senior, Sr.). */
+export const SENIOR_IC_PHRASES: readonly RegExp[] = [
+  /\bsenior\b/i,
+  /\bsr\.?\b/i,
+];
+
+/** Terms that negate over-seniority when present. */
+export const OVER_SENIOR_EXCEPTIONS: readonly RegExp[] = [
+  /\bdirector\s+of\s+(?:photography|film|video|content|marketing|sales)\b/i,
+  /\bart\s+director\b/i,
+  /\bcreative\s+director\b/i,
+];
+
+/**
+ * Explains why a title is over-senior for a candidate, or null if reachable.
+ *
+ * Domain- and experience-aware:
+ * - Executive/C-level/Director/Principal: over-senior across all profiles (< 7 yrs).
+ * - Manager/Supervisor/Controller: over-senior for early-career and finance profiles.
+ * - Lead/Team Lead: over-senior for early-career (< 3 yrs) or finance profiles.
+ * - Senior/Sr.: over-senior for early-career (< 3 yrs, e.g. Tashi at 2.4 yrs)
+ *   where resume screening automatically rejects candidates below 3-5 years.
+ */
+export function overSeniorReason(title: string, profile?: JobSearchProfile): string | null {
+  const normalised = title.trim();
+  if (OVER_SENIOR_EXCEPTIONS.some((re) => re.test(normalised))) return null;
+
+  if (EXECUTIVE_SENIOR_PHRASES.some((re) => re.test(normalised))) {
+    return "an executive/leadership title";
+  }
+
+  if (MANAGEMENT_SENIOR_PHRASES.some((re) => re.test(normalised))) {
+    return "a management/controller title";
+  }
+
+  const isFinance = profile?.skillsDictionaryName === "finance";
+  const isEarlyCareer = (profile?.experienceYears ?? 4) < 3;
+
+  // Lead / Team Lead is over-senior for early-career or finance candidates
+  if (isFinance || isEarlyCareer) {
+    if (LEAD_SENIOR_PHRASES.some((re) => re.test(normalised))) {
+      return "a team-leadership title";
+    }
+  }
+
+  // Senior IC (Senior / Sr.) is over-senior for early-career candidates (< 3 years, like Tashi at 2.4 yrs)
+  if (isEarlyCareer) {
+    if (SENIOR_IC_PHRASES.some((re) => re.test(normalised))) {
+      const yrs = profile?.experienceYears ?? "early-career";
+      return `a senior-level title for candidate with ~${yrs} years shipped`;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * True when the title signals a role that is almost certainly out of reach
+ * for the candidate given their domain and shipped years of experience.
+ */
+export function isOverSeniorTitle(title: string, profile?: JobSearchProfile): boolean {
+  return overSeniorReason(title, profile) !== null;
+}

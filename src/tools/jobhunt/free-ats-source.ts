@@ -59,6 +59,12 @@ export type { FreeCandidate };
 
 const log = childLogger({ module: "jobhunt:free-ats" });
 
+/** Skip a board after this many consecutive sweep failures. */
+export const DEAD_BOARD_CONSECUTIVE_FAILURES = 10;
+
+/** Process-lifetime failure counters, keyed by `${ats}:${token}`. */
+const defaultFailureCounters = new Map<string, number>();
+
 /** One board's list endpoint. Whole-board payloads, so more generous than a HEAD. */
 export const BOARD_TIMEOUT_MS = 20_000;
 
@@ -257,6 +263,8 @@ export interface BoardSweep {
   readonly candidates: readonly FreeCandidate[];
   /** One entry per board that failed, named so a rotated token is findable. */
   readonly failures: readonly string[];
+  /** Boards skipped because they failed DEAD_BOARD_CONSECUTIVE_FAILURES times in a row. */
+  readonly skippedDead: readonly string[];
   readonly boardsPolled: number;
 }
 
@@ -305,11 +313,29 @@ export function summariseFailures(failures: readonly string[]): string {
  * point: the caller can then say "the lane is broken" instead of "the market is
  * quiet", which are the two readings this pipeline has historically confused.
  */
-export async function sweepBoards(boards: readonly FreeBoard[]): Promise<BoardSweep> {
+export async function sweepBoards(
+  boards: readonly FreeBoard[],
+  failureCounters: Map<string, number> = defaultFailureCounters
+): Promise<BoardSweep> {
+  const activeBoards: FreeBoard[] = [];
+  const skippedDead: string[] = [];
+
+  for (const board of boards) {
+    const key = `${board.ats}:${board.token}`;
+    const failures = failureCounters.get(key) ?? 0;
+    if (failures >= DEAD_BOARD_CONSECUTIVE_FAILURES) {
+      const skipLog = `${board.ats}/${board.token}: disabled (${failures} consecutive failures)`;
+      log.warn({ ats: board.ats, token: board.token, failures }, skipLog);
+      skippedDead.push(skipLog);
+      continue;
+    }
+    activeBoards.push(board);
+  }
+
   // Grouped by platform so each is bounded at its own rate (PLATFORM_CONCURRENCY).
   // Groups run concurrently, so a slow platform never serialises behind another.
   const byPlatform = new Map<FreeAts, FreeBoard[]>();
-  for (const board of boards) {
+  for (const board of activeBoards) {
     const group = byPlatform.get(board.ats);
     if (group) group.push(board);
     else byPlatform.set(board.ats, [board]);
@@ -332,40 +358,31 @@ export async function sweepBoards(boards: readonly FreeBoard[]): Promise<BoardSw
   const failures: string[] = [];
 
   for (const result of results) {
+    const key = `${result.board.ats}:${result.board.token}`;
     if (result.ok) {
       candidates.push(...result.candidates);
+      failureCounters.set(key, 0);
     } else {
+      const fails = (failureCounters.get(key) ?? 0) + 1;
+      failureCounters.set(key, fails);
       failures.push(`${result.board.ats}/${result.board.token}: ${result.error}`);
     }
   }
 
-  // The registry's own drops, alongside the sweep's. A corpus import that wrote
-  // a platform typo removes boards silently otherwise, and MIN_EXPECTED_BOARDS
-  // is a floor, not a smoke alarm — it says nothing until a third of the file is
-  // already gone.
+  // The registry's own drops, alongside the sweep's.
   const skips = getLastRegistrySkips();
   if (skips.unknownPlatform + skips.blankToken + skips.duplicate > 0) {
     log.warn({ ...skips }, `Board registry rows dropped at parse — ${describeSkips(skips)}`);
   }
 
   log.info(
-    { boards: boards.length, failed: failures.length, candidates: candidates.length },
+    { boards: boards.length, active: activeBoards.length, failed: failures.length, skipped: skippedDead.length, candidates: candidates.length },
     "Free board sweep complete",
   );
 
-  return { candidates, failures, boardsPolled: boards.length };
+  return { candidates, failures, skippedDead, boardsPolled: activeBoards.length };
 }
 
-// hydrateDescriptions and DESCRIPTION_TIMEOUT_MS moved to free-ats-hydrate.ts
-// (2026-09-08) — merging the detail payload's LOCATION into the candidate, the
-// fix for a Paris vacancy that reached a Netherlands-only brief, pushed this file
-// past the 400-line budget. Re-exported so every existing import site and test
-// keeps resolving here, same as the transport and mapper splits before it.
+// Re-exported so existing imports and tests keep resolving unchanged.
 export { hydrateDescriptions, DESCRIPTION_TIMEOUT_MS } from "./free-ats-hydrate.js";
-
-// decodeJobBody moved to free-ats-mappers.ts (2026-08-20) — Recruitee's
-// mapper needs the same tag-to-space HTML decode this Greenhouse hydration
-// step does, and mappers has no network dependency this file could import
-// back from. Re-exported (imported above) so this module's existing public
-// surface, and its tests, keep resolving unchanged.
 export { decodeJobBody };
