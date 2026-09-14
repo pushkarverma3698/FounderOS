@@ -225,6 +225,23 @@ while IFS= read -r repo; do
   pushd "$repo" >/dev/null 2>&1 || continue
   repo_name=$(basename "$repo")
 
+  # This checkout is dedicated review scratch space, not precious work — the same
+  # invariant agent-dispatch's workspace already relies on. Without an unconditional
+  # reset here, a prior gate that crashed, timed out, or ran `git stash -u` and never
+  # dropped it (observed: /opt/review/founderos sitting on a stale PR branch with 2
+  # orphaned stashes, 2026-09-10 through 2026-09-14) leaves the tree dirty for every
+  # future sweep. `pnpm test`/`pnpm gate` then fails on files the DIRT introduced —
+  # not on anything the PR under review touched — and got excused in three past
+  # reviews as "pre-existing failures," which is a false pass: the founderos main
+  # branch itself is clean (0 failures, verified 2026-09-14). Reset before every
+  # repo's sweep, not just once at setup, since the dirt can reappear each tick.
+  if ! git reset --hard --quiet 2>/dev/null || ! git clean -fdq 2>/dev/null; then
+    log "$repo_name: could not reset review checkout to clean — skipping this sweep"
+    popd >/dev/null
+    continue
+  fi
+  git stash clear 2>/dev/null || true
+
   if [[ -n "$ONE_PR" ]]; then
     prs="$ONE_PR"
   else
@@ -298,8 +315,40 @@ while IFS= read -r repo; do
                    end) + " · " + .title' 2>/dev/null \
                 || echo "unknown — could not read PR state")
       log "$repo_name#$pr verdict: $verdict"
+
+      # The documented pipeline (src/tools/dispatch-antigravity.ts's own header
+      # comment) ends "pr-brain (Claude review, every 20 min) → Merge". That arrow
+      # never existed in code — pr-brain gated, GitHub does not allow self-approval
+      # so the pass signal is draft->ready, and nothing after that ever merged
+      # anything. Found 2026-09-14: 3 PRs sat CLEARED, all CI green, mergeable,
+      # for 4 days because of exactly this gap. Only the CLEARED case merges,
+      # never main/master (pr-adversary's own hard limit — a main merge is the
+      # founder's call). No --auto / no allow_auto_merge dependency: branch
+      # protection already requires both checks server-side, and by the time a PR
+      # reaches this line the pr-adversary gate re-ran them in-session and GitHub's
+      # own Actions run (which starts on push, long before the next 20-min sweep)
+      # has already finished — so an immediate merge attempt either succeeds
+      # because they're actually green, or fails loud because they are not.
+      merge_result="not attempted (verdict was not CLEARED)"
+      case "$verdict" in
+        "CLEARED"*)
+          base=$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null)
+          if [[ "$base" == "main" || "$base" == "master" ]]; then
+            merge_result="skipped — base is $base, a main/master merge needs the founder"
+            log "$repo_name#$pr merge skipped — base is $base"
+          elif gh pr merge "$pr" --squash >>"$LOG" 2>&1; then
+            merge_result="merged (squash) into $base"
+            log "$repo_name#$pr merge: squashed into $base"
+          else
+            merge_result="FAILED — see log ($LOG)"
+            log "$repo_name#$pr merge FAILED — see $LOG"
+          fi
+          ;;
+      esac
+
       notify "🧠 Gate done — ${repo_name}#${pr}
 ${verdict}
+Merge: ${merge_result}
 $(gh pr view "$pr" --json url --jq .url 2>/dev/null)"
     else
       log "$repo_name#$pr gate FAILED (exit $?) — see $LOG; PR left unstamped so the next sweep retries"
