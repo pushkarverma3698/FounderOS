@@ -28,6 +28,24 @@ export { isJudgeEnabled, _resetJudgeModel } from "./judge-model.js";
 
 const log = childLogger({ module: "judge" });
 
+/**
+ * A caught value → its message, without assuming it's an Error. `(err as Error).message`
+ * crashes with "Cannot read properties of undefined (reading 'message')" when the caught
+ * value isn't an Error instance — LangChain's OpenAI-compatible client can reject with a
+ * non-Error value (observed in prod 2026-09-08T07:29, 2026-09-10T12:50). That crash
+ * happens INSIDE the fail-open catch block, so it silently replaces the real judge-outage
+ * reason with a TypeError, which then got misdiagnosed as "the free slug died again."
+ */
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
 export type JudgeVerdict = { verdict: "pass" } | { verdict: "revise"; critique: string };
 
 /** Minimal model surface so tests can inject a fake (no network). */
@@ -139,7 +157,7 @@ export async function judgeOutbound(
     // outage episode. Three times a withdrawn free slug turned this gate into a
     // silent no-op for hours; each time the only evidence was a raw log grep
     // nobody was running. See judge-health.ts.
-    const message = (err as Error).message;
+    const message = errorMessage(err);
     recordJudgeFailure(message);
     log.error(
       { err: message, channel, event: "judge_unavailable", model: judgeModelLabel() },
@@ -314,7 +332,7 @@ export async function judgeAnswer(
     };
   }
 
-  const key = `answer:${hash(`${input.goal} ${input.reply}`)}`;
+  const key = `answer:${hash(`${input.goal}\0${input.reply}`)}`;
   const cached = _answerCache.get(key);
   if (cached && now() - cached.at < JUDGE_CACHE_TTL_MS) return cached.judgement;
 
@@ -325,14 +343,23 @@ export async function judgeAnswer(
     const content = typeof res.content === "string" ? res.content : JSON.stringify(res.content);
     judgement = parseAnswerJudgement(content);
   } catch (err) {
-    judgement = { status: "not_evaluated", reason: `judge model call failed — ${(err as Error).message}` };
+    judgement = { status: "not_evaluated", reason: `judge model call failed — ${errorMessage(err)}` };
   }
 
   if (judgement.status === "not_evaluated") {
+    // Same health counter judgeOutbound feeds (judge-health.ts) — this is the OTHER
+    // caller of the fail-open judge, and every real outage since 2026-09-07 came
+    // through this path, not judgeOutbound. Recording only one caller left the
+    // outage monitor blind to the failure mode it was built to catch.
+    recordJudgeFailure(judgement.reason);
     // Loud, and NOT cached: a transient outage must not pin "unscored" for the whole TTL.
-    log.warn({ reason: judgement.reason, model: judgeModelLabel() }, "Answer evaluation did not produce scores");
+    log.error(
+      { reason: judgement.reason, model: judgeModelLabel(), event: "judge_unavailable" },
+      "Answer evaluation did not produce scores — this reply was NOT scored",
+    );
     return judgement;
   }
+  recordJudgeSuccess();
   _answerCache.set(key, { judgement, at: now() });
   return judgement;
 }

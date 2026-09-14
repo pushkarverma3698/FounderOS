@@ -113,3 +113,66 @@ describe("judgeOutbound wiring", () => {
     expect(judgeHealth().consecutiveFailures).toBe(0);
   });
 });
+
+describe("judgeAnswer wiring", () => {
+  // judgeAnswer is the SECOND caller of this same fail-open judge (it scores replies
+  // the founder already received, judgeOutbound gates outbound drafts before send) and
+  // shares one model resolution path. Every real judge outage in production
+  // (2026-09-07 through 2026-09-10, 17 occurrences) came through THIS function, not
+  // judgeOutbound — so wiring only judgeOutbound to judge-health leaves the monitor
+  // blind to the failure mode that motivated building it. See judge-health.ts.
+  const baseInput = { goal: "test goal", reply: "test reply", steps: [] };
+
+  it("a model that throws is recorded as a failure, and still fails open to not_evaluated", async () => {
+    const { judgeAnswer, _resetAnswerJudgeCache } = await import("../../../src/infra/judge.js");
+    _resetAnswerJudgeCache();
+    const dead = { invoke: vi.fn(async () => { throw new Error("404 no endpoints found"); }) };
+
+    const judgement = await judgeAnswer(baseInput, { model: dead });
+
+    expect(judgement.status).toBe("not_evaluated");
+    // …but it is no longer silent.
+    expect(judgeHealth().consecutiveFailures).toBe(1);
+    expect(judgeHealth().lastError).toContain("404");
+  });
+
+  it("a working model clears the counter", async () => {
+    const { judgeAnswer, _resetAnswerJudgeCache } = await import("../../../src/infra/judge.js");
+    _resetAnswerJudgeCache();
+    recordJudgeFailure("stale");
+    const live = {
+      invoke: vi.fn(async () => ({
+        content: '{"groundedness":5,"relevance":5,"completeness":5,"critique":""}',
+      })),
+    };
+
+    await judgeAnswer({ ...baseInput, reply: "a different reply to dodge the cache" }, { model: live });
+
+    expect(judgeHealth().consecutiveFailures).toBe(0);
+  });
+
+  // Root cause of the prod "Cannot read properties of undefined (reading 'message')"
+  // incidents (2026-09-08T07:29, 2026-09-10T12:50): the catch block did
+  // `(err as Error).message`, an unsafe cast. LangChain's OpenAI-compatible client can
+  // reject with a value that isn't an Error instance (e.g. `undefined`, or a plain
+  // object from a malformed provider response) — reading `.message` off that crashes
+  // the error HANDLER itself, silently replacing the real judge-outage reason with a
+  // TypeError. This was misdiagnosed as "the free slug died again" until traced here.
+  it("a non-Error rejection is still turned into a real message, not a crash", async () => {
+    const { judgeAnswer, _resetAnswerJudgeCache } = await import("../../../src/infra/judge.js");
+    _resetAnswerJudgeCache();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- deliberately non-Error
+    const throwsUndefined = { invoke: vi.fn(async () => { throw undefined as any; }) };
+
+    const judgement = await judgeAnswer(
+      { ...baseInput, reply: "reply for the non-Error rejection case" },
+      { model: throwsUndefined },
+    );
+
+    expect(judgement.status).toBe("not_evaluated");
+    expect(judgeHealth().consecutiveFailures).toBe(1);
+    // The real assertion: judge-health recorded SOMETHING sane, not "Cannot read
+    // properties of undefined (reading 'message')" from the handler crashing.
+    expect(judgeHealth().lastError).not.toContain("Cannot read properties");
+  });
+});
