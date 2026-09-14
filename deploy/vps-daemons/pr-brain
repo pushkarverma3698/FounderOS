@@ -339,6 +339,22 @@ while IFS= read -r repo; do
           elif gh pr merge "$pr" --squash >>"$LOG" 2>&1; then
             merge_result="merged (squash) into $base"
             log "$repo_name#$pr merge: squashed into $base"
+          elif gh pr update-branch "$pr" >>"$LOG" 2>&1; then
+            # $base has a `strict` required-status-checks policy (verified
+            # 2026-09-14): a CLEARED, all-green PR can still be refused with
+            # "the head branch is not up to date with the base branch" — checks
+            # must have run on the EXACT current commit, not merely have passed
+            # on an older one (found live merging #671/#672/#673). update-branch
+            # pushes a merge-with-base commit, which changes headRefOid — the
+            # existing marker-comment mechanism then treats this PR as unguarded
+            # on the NEXT sweep, so it gets a real re-gate and a fresh merge
+            # attempt naturally, on a branch that is current by construction.
+            # Deliberately not polling for CI here: a synchronous wait inside a
+            # 20-minute cron tick either blocks the next tick or needs its own
+            # timeout/retry machinery, and the marker cycle already provides one
+            # for free at the cost of a single extra sweep.
+            merge_result="was behind $base — ran update-branch, next sweep re-gates and retries"
+            log "$repo_name#$pr merge deferred — updated branch against $base, will re-gate on next sweep"
           else
             merge_result="FAILED — see log ($LOG)"
             log "$repo_name#$pr merge FAILED — see $LOG"
