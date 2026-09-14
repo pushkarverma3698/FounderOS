@@ -27,6 +27,12 @@
 #
 # Config (env):
 #   ISSUE_REPO                  default: pushkarverma3698/FounderOS
+#   AGENT_DISPATCH_BASE_BRANCH  branch new work is cut from AND the PR targets, default: beta.
+#                               These two must always be the same ref — branching from a
+#                               different one than the PR targets makes every fresh PR start
+#                               "BEHIND" its base by construction, not just occasionally
+#                               (found 2026-09-14: hardcoded to origin/main here while the
+#                               prompt told Antigravity to open every PR against beta).
 #   AGENT_DISPATCH_WORKSPACE    default: /opt/agy-workspace/founderos (antigravity-owned)
 #   AGENT_DISPATCH_USER         default: antigravity (unprivileged Linux user running agy)
 #   AGENT_DISPATCH_MAX          new claims per tick, default: 1
@@ -46,6 +52,7 @@ LOG="$HOME/.claude/agent-dispatch.log"
 LOCK="$HOME/.claude/agent-dispatch.lock"
 OFF_SWITCH="$HOME/.claude/agent-dispatch.off"
 REPO="${ISSUE_REPO:-pushkarverma3698/FounderOS}"
+BASE_BRANCH="${AGENT_DISPATCH_BASE_BRANCH:-beta}"
 WORKSPACE="${AGENT_DISPATCH_WORKSPACE:-/opt/agy-workspace/founderos}"
 AG_USER="${AGENT_DISPATCH_USER:-antigravity}"
 MAX_CLAIMS="${AGENT_DISPATCH_MAX:-1}"
@@ -276,20 +283,26 @@ Title: ${title}
 
 ${body}
 
-You are already on branch ${branch}, checked out from origin/main, in your isolated workspace. Do
-not touch anything outside this repository checkout. Open the PR as a draft targeting beta. Stop
-once the PR is open — do not keep iterating.
+You are already on branch ${branch}, checked out from origin/${BASE_BRANCH}, in your isolated
+workspace. Do not touch anything outside this repository checkout. Open the PR as a draft
+targeting ${BASE_BRANCH}. Stop once the PR is open — do not keep iterating.
 EOF
 
-  log "checking out ${branch} in ${WORKSPACE}"
+  log "checking out ${branch} in ${WORKSPACE} (base ${BASE_BRANCH})"
   # The workspace is disposable scratch space (ADR-046, --new-project invariant) —
   # never a place with precious uncommitted work. A prior interrupted run (crash,
   # timeout, "Individual quota reached" mid-invocation) can leave it dirty on a
   # stale branch; without a reset, `checkout -B` refuses forever and every future
   # issue fails identically (observed: workspace wedged on task/issue-508 since
   # 2026-08-21, silently failing #539 and every issue after it through #667/#668).
-  if ! as_antigravity 'cd "$1" && git fetch --quiet origin && git reset --hard --quiet origin/main && git clean -fdq && git checkout -B "$2" origin/main' \
-      "$WORKSPACE" "$branch" >>"$LOG" 2>&1; then
+  #
+  # Branches from BASE_BRANCH, not main: every PR this dispatches targets
+  # BASE_BRANCH (see the prompt below), and branching from a different ref than
+  # the PR's own base makes the PR start life already "BEHIND" — pr-brain's gate
+  # then merges the base in just to get a truthful test run, on every single PR,
+  # by construction (found 2026-09-14, hardcoded to origin/main here at the time).
+  if ! as_antigravity 'cd "$1" && git fetch --quiet origin && git reset --hard --quiet "origin/$3" && git clean -fdq && git checkout -B "$2" "origin/$3"' \
+      "$WORKSPACE" "$branch" "$BASE_BRANCH" >>"$LOG" 2>&1; then
     log "#${issue} FAILED to prepare branch ${branch} — releasing claim"
     gh issue edit "$issue" --repo "$REPO" --remove-label agent:working --add-label agent:failed >/dev/null
     gh issue comment "$issue" --repo "$REPO" --body "agent-dispatch could not check out ${branch} in the workspace. See dispatcher log." >/dev/null
@@ -317,8 +330,8 @@ EOF
 
   # ---- verification: mechanical only. This checks EXISTENCE, not correctness. ----
   local new_commits pr_number
-  new_commits=$(as_antigravity 'cd "$1" && git log origin/main.."$2" --oneline 2>/dev/null | wc -l' \
-    "$WORKSPACE" "$branch" | tr -d '[:space:]')
+  new_commits=$(as_antigravity 'cd "$1" && git log "origin/$3".."$2" --oneline 2>/dev/null | wc -l' \
+    "$WORKSPACE" "$branch" "$BASE_BRANCH" | tr -d '[:space:]')
   pr_number=$(gh pr list --repo "$REPO" --head "$branch" --state open --json number --jq '.[0].number // empty')
 
   # agy's own exit code is NOT trusted as the deciding signal — it can be nonzero
