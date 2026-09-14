@@ -22,6 +22,13 @@ Tools:
     Opens a structured GitHub issue with the 'agent:ready' label on pushkarverma3698/FounderOS.
     The VPS agent-dispatch daemon claims it within 15 minutes, implements it in an isolated workspace,
     and opens a draft PR to beta. Requires title, goal, scope, expected, and verification commands. HITL-gated.
+- create_project_repo → START A NEW PROJECT. Creates a repository under the founder's own
+    GitHub account AND registers it as a repo the Antigravity loop may be dispatched to.
+    Use when the founder wants to begin a project that does not exist yet ("start a new
+    project for X", "make me a repo for Y"). Takes name only — no owner, no slashes.
+    Private by default; pass isPrivate: false ONLY if he explicitly asked for public.
+    Do NOT use it to work on an existing repo — that is dispatch_antigravity_task.
+    HITL-gated.
 - deploy_static_site → publish a built static site (index.html or directory) from ~/Projects to a
     public URL (/clients/{slug}/ or /showcase-1/). HITL-gated. Call AFTER claude_code builds.
 - github_read         → read GitHub (list_repos, get_readme, get_stats, list_issues, list_branches, list_commits). No approval needed.
