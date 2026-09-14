@@ -10,6 +10,7 @@ import {
   formatAntigravityIssueBody,
   resolveDispatchRepo,
 } from "../../tools/dispatch-antigravity.js";
+import { DISPATCH_REPO_ALLOWLIST } from "../../tools/dispatch-repos.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
@@ -19,14 +20,21 @@ const log = childLogger({ module: "agent-tools:antigravity" });
 
 export const dispatchAntigravityTask = tool(
   async ({ title, goal, scope, expected, verification, acceptance, forbidden, evidence, repo }, config) => {
-    let owner = "pushkarverma3698";
-    let targetRepo = "FounderOS";
+    // Resolve BEFORE the gate, and refuse rather than fall back.
+    //
+    // This used to swallow the failure and default to FounderOS, which meant a request
+    // naming another repo rendered a card reading "Open agent:ready issue on
+    // pushkarverma3698/FounderOS" — the founder would approve a target the card
+    // misreported, and only then would execute() fail. A refusal here is also pure and
+    // re-runnable, which the hitlGate contract requires of everything above the gate
+    // (src/infra/hitl.ts).
+    let repoSlug: string;
     try {
-      ({ owner, repo: targetRepo } = resolveDispatchRepo(repo ?? undefined));
-    } catch {
-      // Fall back to default repo on parse failure; tool execution will validate
+      const resolved = await resolveDispatchRepo(repo ?? undefined);
+      repoSlug = `${resolved.owner}/${resolved.repo}`;
+    } catch (err) {
+      return `❌ Cannot dispatch: ${(err as Error).message}`;
     }
-    const repoSlug = `${owner}/${targetRepo}`;
 
     const previewBody = formatAntigravityIssueBody({
       title,
@@ -109,7 +117,20 @@ export const dispatchAntigravityTask = tool(
       acceptance: z.string().optional().nullable().describe("Acceptance criteria for Claude pr-brain review before PASS."),
       forbidden: z.string().optional().nullable().describe("Task-specific prohibitions beyond general standards."),
       evidence: z.string().optional().nullable().describe("Error logs, observed behavior, reproduction steps, or context."),
-      repo: z.string().optional().nullable().describe("Target repository slug (defaults to pushkarverma3698/FounderOS)."),
+      // Deliberately z.string() and not z.enum(DISPATCH_REPO_ALLOWLIST): a Zod enum is
+      // validated by LangChain BEFORE this tool's body runs, so an off-list value would
+      // throw a generic schema error instead of the actionable refusal
+      // assertAllowedRepo writes. Tools in this codebase return messages, they do not
+      // throw (docs/rules/TOOL-STANDARDS.md). The allowlist is named here so the model
+      // sees the valid choices, and enforced at runtime in resolveDispatchRepo.
+      repo: z
+        .string()
+        .optional()
+        .nullable()
+        .describe(
+          `Target repository slug. Only these are permitted: ${DISPATCH_REPO_ALLOWLIST.join(", ")}. ` +
+            "Defaults to pushkarverma3698/FounderOS.",
+        ),
     }),
   },
 );

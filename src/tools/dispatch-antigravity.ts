@@ -14,24 +14,28 @@
  *   - The issue must contain all required sections (Goal, Scope, Verification, etc.)
  *     so the headless executor can run with zero conversation history.
  *
- * TARGET REPO IS NOT PINNED, AND THAT IS WORTH KNOWING. `repo` is a caller-supplied
- * argument that takes precedence over ISSUE_REPO, so the model can name any
- * repository this GITHUB_TOKEN can write to — and an issue is public content.
- * Two things contain it, neither of them this file: the HITL card prints the
- * resolved slug in its summary, so the founder approves a named target rather
- * than a blank one; and the VPS `agent-dispatch` daemon is pinned by its own
- * crontab (ISSUE_REPO=pushkarverma3698/FounderOS), so an issue opened anywhere
- * else is inert rather than executed. Tighten to an allowlist here if the token's
- * scope ever widens.
+ * TARGET REPO IS PINNED TO AN ALLOWLIST (./dispatch-repos.ts). `repo` is a
+ * caller-supplied argument that takes precedence over ISSUE_REPO, so without the
+ * allowlist the model could name any repository this GITHUB_TOKEN can write to — and
+ * the token carries `repo`, `admin:org` and `delete_repo`. The two containments that
+ * existed before it (the HITL card printing the resolved slug, and the VPS crontab
+ * pinning ISSUE_REPO) both still apply, but neither is a boundary: a card is only as
+ * good as the reading of it, and the crontab pin makes a stray issue inert rather than
+ * unfiled. `assertAllowedRepo` is the boundary, and env vars pass through it too.
  */
 
 import { Octokit } from "octokit";
 import { childLogger } from "../infra/logger.js";
+import { assertDispatchableRepo, DEFAULT_DISPATCH_REPO, DISPATCH_REPO_ALLOWLIST } from "./dispatch-repos.js";
+import { listRegisteredDispatchRepos } from "../db/queries.js";
+import { TENANT } from "../core/config.js";
+import { kickDispatchTick } from "./dispatch-tick.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:dispatch-antigravity" });
 
-export const DEFAULT_DISPATCH_REPO = "pushkarverma3698/FounderOS";
+/** Re-exported so existing importers keep one import site for the dispatch defaults. */
+export { DEFAULT_DISPATCH_REPO };
 export const AGENT_READY_LABEL = "agent:ready";
 export const ANTIGRAVITY_LABEL = "antigravity";
 
@@ -93,17 +97,20 @@ function getOctokit(): Octokit {
   return new Octokit({ auth: token });
 }
 
-export function resolveDispatchRepo(repoArg?: string): { owner: string; repo: string } {
+export async function resolveDispatchRepo(repoArg?: string): Promise<{ owner: string; repo: string }> {
   const slug = repoArg?.trim() ||
     process.env["ISSUE_REPO"] ||
     process.env["SELF_IMPROVE_ISSUE_REPO"] ||
     DEFAULT_DISPATCH_REPO;
 
-  const [owner, repo] = slug.split("/");
-  if (!owner || !repo) {
-    throw new Error(`Invalid repository slug "${slug}". Expected "owner/repo".`);
-  }
-  return { owner, repo };
+  // Async because the set of permitted repos is the hardcoded list PLUS the project
+  // repos this instance created (see create-project-repo.ts) — a repo made last week
+  // cannot be in a list compiled last month. A registry read failure degrades to the
+  // hardcoded list rather than throwing, so the two provisioned repos keep working.
+  //
+  // Env vars go through the same gate as the model's argument. A misconfigured VPS
+  // should fail loudly here, not quietly file issues into a repo nobody is watching.
+  return assertDispatchableRepo(slug, await listRegisteredDispatchRepos(TENANT));
 }
 
 export const dispatchAntigravityTool: UnifiedTool = {
@@ -149,7 +156,9 @@ export const dispatchAntigravityTool: UnifiedTool = {
       },
       repo: {
         type: "string",
-        description: "Target repository slug (defaults to pushkarverma3698/FounderOS).",
+        description:
+          `Target repository slug. Only these are permitted: ${DISPATCH_REPO_ALLOWLIST.join(", ")}. ` +
+          "Defaults to pushkarverma3698/FounderOS.",
       },
     },
     required: ["title", "goal", "scope", "expected", "verification"],
@@ -184,7 +193,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
     let owner: string;
     let repo: string;
     try {
-      ({ owner, repo } = resolveDispatchRepo(input.repo));
+      ({ owner, repo } = await resolveDispatchRepo(input.repo));
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }
@@ -209,6 +218,16 @@ export const dispatchAntigravityTool: UnifiedTool = {
       });
 
       log.info({ owner, repo, issue_number: data.number, url: data.html_url }, "Dispatched issue to Antigravity");
+
+      // Shorten the wait from "up to 15 minutes" to "seconds". Wrapped because the
+      // issue is already filed at this point: nothing about claiming it sooner may
+      // turn a successful dispatch into a reported failure.
+      try {
+        kickDispatchTick(data.number);
+      } catch (err) {
+        // allow-failopen: cron claims the issue on its next tick regardless.
+        log.warn({ issue_number: data.number, err: (err as Error).message }, "dispatch kick failed");
+      }
 
       return {
         success: true,
