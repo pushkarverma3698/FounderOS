@@ -41,15 +41,20 @@ export const FAIL_THRESHOLD = 2;
 
 // 2026-08-27: meta-llama/llama-3.3-70b-instruct:free 404d — OpenRouter retired
 // its free tier. Swapped to nvidia/nemotron-3-super-120b-a12b:free.
-// 2026-09-07: nemotron was ALSO dead (provider error), live-reconfirmed with
-// scripts/probe-openrouter-free-models.ts — same rotation, second time in two
-// weeks. Swapped to minimax/minimax-m2.7:free, live-verified (2026-09-07,
-// same day as src/infra/judge-model.ts's identical fix) to return clean JSON
-// on the real prompt below, PROVIDED maxTokens is high enough — see buildModel.
-// Free OpenRouter models rotate without notice — re-verify with
-// scripts/probe-openrouter-free-models.ts before trusting this default again.
+// 2026-09-07: swapped to minimax/minimax-m2.7:free after nemotron looked dead —
+// that diagnosis was wrong. The actual defect was an unsafe `(err as Error).message`
+// cast in src/infra/judge.ts's catch blocks: OpenRouter's client can reject with a
+// non-Error value, and reading `.message` off that crashes the handler with
+// "Cannot read properties of undefined (reading 'message')", which silently replaced
+// the real error with a TypeError and looked exactly like a dead model. Fixed
+// 2026-09-14 (see errorMessage() in judge.ts). minimax was in fact later withdrawn
+// from OpenRouter's free tier for real (confirmed absent from GET /api/v1/models,
+// 2026-09-14) — but nemotron never was, and reverting to it removes the second,
+// independent default this file had drifted onto. ONE default now: this constant
+// and src/infra/judge-model.ts's must never disagree again — re-verify both
+// together with scripts/probe-openrouter-free-models.ts before changing either.
 export const JUDGE_MODEL =
-  process.env["JUDGE_MODEL"]?.trim() || "openrouter:minimax/minimax-m2.7:free";
+  process.env["JUDGE_MODEL"]?.trim() || "openrouter:nvidia/nemotron-3-super-120b-a12b:free";
 
 const DIMENSIONS: (keyof ContentScores)[] = [
   "execution",
