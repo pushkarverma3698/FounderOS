@@ -103,12 +103,13 @@ type AnyTool = any;
  *   keep searchKnowledge for the same material.
  */
 import { synthesizeSkill } from "./agent-tools.js";
+import { uiCheck } from "./agent-tools/ui-qa.js";
 
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
-  engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead],
+  engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead, uiCheck],
   marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
   sales: [searchWeb, createSendEmailTool("sales"), searchKnowledge],
   personal: [readFile, listDir, runShell, browser, searchPersonalRag, sendFile, writeFile],
@@ -121,7 +122,7 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
 /** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops). */
 export const ENGINEERING_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
   coder: [claudeCode, dispatchAntigravityTask, githubRead, synthesizeSkill],
-  qa: [claudeCode, githubRead],
+  qa: [claudeCode, githubRead, uiCheck],
   devops: [claudeCode, projectWorkflow],
 };
 
@@ -155,6 +156,7 @@ export const HITL_GATED_TOOLS = new Set([
   "dispatch_antigravity_task",
   "vps_run",
   "deploy_static_site",
+  "ui_check",
   "project_workflow",
   "create_calendar_event",
   "record_event",

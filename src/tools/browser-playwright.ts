@@ -6,6 +6,9 @@
  *
  * A singleton browser + page is kept alive across calls so that `open_url` followed
  * by `get_page_text` reads the same page (matching Safari's stateful behaviour).
+ * That lifecycle now lives in ./browser/chromium.ts so the UI-QA checker shares
+ * ONE Chromium process with this tool instead of launching a second one. This
+ * module's exported surface is unchanged.
  *
  * Activation: BROWSER_BACKEND=playwright (auto-set when platform is "linux").
  * Setup (one-time): npx playwright install chromium
@@ -16,32 +19,7 @@
  */
 
 import type { ShellResult, BrowserAction } from "./personal.js";
-
-const MAX_CHARS = 100_000;
-
-// Lazily-imported to avoid loading Playwright in processes where it isn't needed.
-let _browser: import("playwright").Browser | null = null;
-let _page: import("playwright").Page | null = null;
-
-async function getPage(): Promise<import("playwright").Page> {
-  if (!_browser) {
-    const { chromium } = await import("playwright");
-    _browser = await chromium.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",           // Required on Ubuntu VPS (no kernel user namespace)
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage", // Prevents /dev/shm overflow in low-memory containers
-      ],
-    });
-  }
-  if (!_page || _page.isClosed()) {
-    _page = await _browser.newPage();
-    // Sensible UA so sites don't serve degraded content
-    await _page.setExtraHTTPHeaders({ "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 FounderOS/1.0" });
-  }
-  return _page;
-}
+import { getPage, closeBrowser as closeSharedBrowser, MAX_CHARS } from "./browser/chromium.js";
 
 export async function playwrightBrowserAction(
   action: BrowserAction,
@@ -73,8 +51,5 @@ export async function playwrightBrowserAction(
 
 /** Gracefully close the browser (call on process exit). */
 export async function closeBrowser(): Promise<void> {
-  if (_page && !_page.isClosed()) await _page.close().catch(() => undefined);
-  if (_browser) await _browser.close().catch(() => undefined);
-  _browser = null;
-  _page = null;
+  await closeSharedBrowser();
 }
