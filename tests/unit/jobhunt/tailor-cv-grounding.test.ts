@@ -29,9 +29,22 @@
  *      a blocked application.
  */
 
+/**
+ * UPDATED 2026-09-15, when the model stopped writing the CV. It now returns the
+ * SUMMARY PARAGRAPH and cv-compose.ts pastes the locked body underneath, so the
+ * mocks below are paragraphs rather than documents. Every property these tests
+ * protected still holds and one is now stronger: a fabrication can only enter
+ * through three lines, and `refuses to let the body drift` pins that the rest of
+ * the document is byte-identical to the base CV.
+ */
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const BASE_CV = `# Test Candidate
+
+## SUMMARY
+
+Engineer who builds agent orchestration on Postgres.
 
 ## SKILLS
 Python, Docker, PostgreSQL, LangGraph, vector databases
@@ -47,31 +60,13 @@ const JOB_DESCRIPTION = `We are hiring an AI Engineer.
 You will work with Python, Kubernetes, ETL pipelines and Terraform.
 Experience with PostgreSQL is a plus.`;
 
-/** A tailored CV that names Kubernetes — a technology the base CV never states. */
-const FABRICATED_CV = `# Test Candidate
+/** A summary that names Kubernetes — a technology the base CV never states. */
+const FABRICATED_SUMMARY =
+  "Engineer who builds agent orchestration in Python on PostgreSQL, running on Kubernetes.";
 
-## SKILLS
-Python, Docker, PostgreSQL, Kubernetes
-
-## EXPERIENCE
-
-### Turicks — Founding Engineer
-Jan 2023 — Present
-- Built agent orchestration in Python on Postgres.
-`;
-
-/** The same CV with the fabrication removed — every term grounded in BASE_CV. */
-const GROUNDED_CV = `# Test Candidate
-
-## SKILLS
-Python, Docker, PostgreSQL
-
-## EXPERIENCE
-
-### Turicks — Founding Engineer
-Jan 2023 — Present
-- Built agent orchestration in Python on Postgres.
-`;
+/** The same summary with the fabrication removed — every term grounded in BASE_CV. */
+const GROUNDED_SUMMARY =
+  "Engineer who builds agent orchestration in Python on PostgreSQL, packaged with Docker.";
 
 const invokeMock = vi.fn();
 
@@ -106,7 +101,7 @@ function promptOfCall(n: number): string {
 
 describe("tailorCv — grounded technology vocabulary", () => {
   it("gives the model the base CV's terms as the permitted vocabulary", async () => {
-    invokeMock.mockResolvedValue({ content: GROUNDED_CV });
+    invokeMock.mockResolvedValue({ content: GROUNDED_SUMMARY });
     const res = await run(await loadTailorCv());
 
     expect(res.success).toBe(true);
@@ -119,7 +114,7 @@ describe("tailorCv — grounded technology vocabulary", () => {
   });
 
   it("names the JD-only terms as forbidden instead of inviting them", async () => {
-    invokeMock.mockResolvedValue({ content: GROUNDED_CV });
+    invokeMock.mockResolvedValue({ content: GROUNDED_SUMMARY });
     await run(await loadTailorCv());
 
     const prompt = promptOfCall(0);
@@ -135,8 +130,8 @@ describe("tailorCv — grounded technology vocabulary", () => {
 
   it("repairs one ungrounded claim and succeeds on the retry", async () => {
     invokeMock
-      .mockResolvedValueOnce({ content: FABRICATED_CV })
-      .mockResolvedValueOnce({ content: GROUNDED_CV });
+      .mockResolvedValueOnce({ content: FABRICATED_SUMMARY })
+      .mockResolvedValueOnce({ content: GROUNDED_SUMMARY });
 
     const res = await run(await loadTailorCv());
 
@@ -149,7 +144,7 @@ describe("tailorCv — grounded technology vocabulary", () => {
   });
 
   it("still refuses a CV whose fabrication survives the repair round", async () => {
-    invokeMock.mockResolvedValue({ content: FABRICATED_CV });
+    invokeMock.mockResolvedValue({ content: FABRICATED_SUMMARY });
 
     const res = await run(await loadTailorCv());
 
@@ -160,8 +155,48 @@ describe("tailorCv — grounded technology vocabulary", () => {
     expect(invokeMock).toHaveBeenCalledTimes(2);
   });
 
+  it("refuses to let the body drift — everything below the summary is byte-identical", async () => {
+    // Founder direction, 2026-09-15: "the Base CV is locked." This is the
+    // assertion that makes that a mechanism rather than a wish. Before this the
+    // model regenerated the whole document, so two runs against one posting
+    // produced two different CVs and nothing compared them.
+    invokeMock.mockResolvedValue({ content: GROUNDED_SUMMARY });
+    const res = await run(await loadTailorCv());
+
+    expect(res.success).toBe(true);
+    const out = res.tailoredMarkdown ?? "";
+
+    // Every line of the base CV survives, except the one summary line replaced.
+    const dropped = BASE_CV.split("\n")
+      .filter((line) => line.trim().length > 0)
+      .filter((line) => !out.split("\n").includes(line));
+    expect(dropped).toEqual(["Engineer who builds agent orchestration on Postgres."]);
+
+    // And the model's paragraph is the only thing added.
+    expect(out).toContain(GROUNDED_SUMMARY);
+    expect(out).toContain("### Turicks — Founding Engineer");
+    expect(out).toContain("Python, Docker, PostgreSQL, LangGraph, vector databases");
+  });
+
+  it("refuses a base CV with no summary section, before spending a model call", async () => {
+    // A silent pass-through here would return a "tailored" CV identical to the
+    // base with nothing saying so — and would bill for the privilege.
+    const tailorCv = await loadTailorCv();
+    const res = await tailorCv({
+      cvText: "# Test Candidate\n\n## EXPERIENCE\n- did things\n",
+      jobDescription: JOB_DESCRIPTION,
+      companyName: "KPN",
+      jobTitle: "AI Engineer - Network",
+      track: "ai",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/summary/i);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
   it("reports the refusal compactly enough to survive the Telegram clip", async () => {
-    invokeMock.mockResolvedValue({ content: FABRICATED_CV });
+    invokeMock.mockResolvedValue({ content: FABRICATED_SUMMARY });
 
     const res = await run(await loadTailorCv());
 

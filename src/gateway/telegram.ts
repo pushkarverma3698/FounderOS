@@ -33,6 +33,7 @@ import { handleTask, handleNewProject } from "./task-command.js";
 import {
   handleCsv,
   handleFresh,
+  handleGaps,
   handleJobs,
   handleToday,
   type JobsViewDeps,
@@ -113,6 +114,11 @@ export function registerHandlers(bot: Bot): void {
   bot.command("wife_fresh", (ctx: Context) => handleFresh(withForcedProfileToken(ctx, "wife"), jobsDeps));
   bot.command("csv", (ctx: Context) => handleCsv(ctx));
   bot.command("wife_csv", (ctx: Context) => handleCsv(withForcedProfileToken(ctx, "wife")));
+  // The other half of /draft. Tailoring may only name technologies the base CV
+  // already states, so it cannot raise ATS keyword coverage — this is the ranked
+  // list of what to add to the base CV, which is the only thing that can.
+  bot.command("gaps", (ctx: Context) => handleGaps(ctx));
+  bot.command("wife_gaps", (ctx: Context) => handleGaps(withForcedProfileToken(ctx, "wife")));
 
   bot.on("message:text", async (ctx: Context) => {
     const text = ctx.message?.text ?? "";

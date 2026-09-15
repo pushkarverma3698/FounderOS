@@ -110,6 +110,18 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "jobs",
   },
   {
+    command: "gaps",
+    // Says what to DO with it. /draft can only use words already on the CV, so
+    // this list is the only thing that moves the number a recruiter searches on.
+    description: "Keywords the market asks for that your CV doesn't say. Add the true ones to your base CV",
+    group: "jobs",
+  },
+  {
+    command: "wife_gaps",
+    description: "Keywords your wife's market asks for that her CV doesn't say",
+    group: "jobs",
+  },
+  {
     command: "applied",
     description: "applied n — mark row n applied and drop it off the queue",
     group: "jobs",

@@ -37,6 +37,24 @@ export const JobSearchProfileSchema = z.object({
   maxYearsStretch: z.number(),
 
   /**
+   * The highest TITLE level that is a plain pass, and the highest that is a
+   * stretch. Values are `TITLE_LEVEL` numbers from level.ts.
+   *
+   * Two fields rather than one, mirroring `maxYearsDemanded`/`maxYearsStretch`
+   * exactly, because the two candidates need different answers to the SAME
+   * title: "Senior Reporting Analyst" is routine for a 3.5-year engineer and a
+   * real stretch for a 2.4-year analyst. A single hardcoded ladder would be
+   * wrong for one of them, silently.
+   *
+   * Defaulted to SENIOR/SENIOR so a profile that says nothing gets the
+   * conservative-but-not-restrictive behaviour: senior passes, staff and above
+   * reject. Typed as `number` rather than `TitleLevel` only to keep
+   * level.ts → profile-config.ts a one-way import.
+   */
+  maxTitlePass: z.number().default(4),
+  maxTitleStretch: z.number().default(4),
+
+  /**
    * The permit bases this candidate actually holds, strongest-commitment first.
    *
    * A DECLARED FACT about a person — never inferred. There is deliberately no
@@ -116,6 +134,14 @@ export const PUSHKAR_PROFILE: JobSearchProfile = {
   experienceYears: 3.5,
   maxYearsDemanded: 4,
   maxYearsStretch: 6,
+
+  // Senior is silent, staff and above reject. At 3.5 years a "Senior Engineer"
+  // is a role he wins routinely — measured on the live brief, senior-titled rows
+  // are 31% of his actionable queue and cutting them would halve his supply for
+  // no gain. Staff/Principal/Lead/Architect/Manager is where the seat stops
+  // being one a strong mid-level application can win.
+  maxTitlePass: 4,
+  maxTitleStretch: 4,
 
   permitBases: ["hsm", "partner-permit", "remote-contract", "india-local"],
 

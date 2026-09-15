@@ -222,6 +222,11 @@ export function gateGlossary(
     Pay: payLine,
     Language: "Does the posting require Dutch. If it does, you cannot be shortlisted.",
     Experience: `How many years the posting explicitly demands, versus your ~${profile.experienceYears} years shipped.`,
+    Level:
+      "What SEAT the title advertises, which is a different question from the years the ad " +
+      `states — and the one that decides whether a CV at ~${profile.experienceYears} years is read at all. ` +
+      "Only appears when the title sits above your level, because a title at or under it has " +
+      "nothing to report.",
     Location:
       "Where the job actually is — taken from the feed, not guessed from the ad. Only " +
       `appears when the answer is ${markets.length > 0 ? `neither ${markets}` : "outside your markets"}, or when nobody ` +
