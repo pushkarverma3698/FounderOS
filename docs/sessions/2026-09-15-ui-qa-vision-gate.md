@@ -87,6 +87,9 @@ a gate that gets switched off.
   no `.env`. The *skip* path was verified end-to-end: it prints `SKIPPED` with the reason, records
   `{"ran": false, "skipped_reason": …}` in the JSON, and exits 0 rather than rendering a clean pass.
   The Gemini call itself is covered by mocked unit tests only.
+- **`pnpm brain:sync` NOT RUN** — this environment has no `.env`/`DATABASE_URL`, and the script
+  refuses without one. Docs under `docs/` changed, so it is owed: run it once from a machine with
+  the real `DATABASE_URL` to index this session doc and `UI-QA-CONTRACT.md` into `turicks-brain`.
 - `ui-qa` must be added as a required status check in branch protection before red actually blocks.
 - **M2** — a `ui-defect` finding kind in `src/evolution/` would ride the existing
   `dispatch-findings.ts` rails to Antigravity with no new dispatch code. Deferred: a `FindingKind`
