@@ -1,0 +1,33 @@
+name: Fallback health check
+
+on:
+  schedule:
+    # Run twice a day (e.g. 8:30 and 20:30 UTC) to catch model retirements early
+    - cron: '30 8,20 * * *'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Probe OpenRouter free models
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - name: Require API key
+        if: env.OPENROUTER_API_KEY == ''
+        run: |
+          echo "OPENROUTER_API_KEY secret is not set."
+          exit 1
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: touch .env
+      - name: Run fallback health check
+        run: node --env-file=.env --import tsx/esm scripts/probe-openrouter-free-models.ts
