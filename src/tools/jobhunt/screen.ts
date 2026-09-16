@@ -28,7 +28,7 @@ import { extractPostingFacts, type PostingRoute } from "./extract.js";
 import { countryFromLocation, type PostingCountry } from "./country.js";
 import { screenIndianPay, inrFloorFor } from "./pay-india.js";
 import { basesForPosting, gateProfile, isLiveBasis, nonLiveBasisRejectGate } from "./permit-routes.js";
-import { THIN_BODY_CHARS, postingGate, basisGate, locationGate, sponsorGate } from "./screen-gates.js";
+import { THIN_BODY_CHARS, postingGate, gatesForRoute, locationGate } from "./screen-gates.js";
 import {
   dedupeKey,
   isStaleEnoughToReapply,
@@ -47,6 +47,7 @@ import { recordSignals, UNCLASSIFIED_TRACK } from "../../db/cv-signal-queries.js
 import { classifyTrack } from "./tracks.js";
 import { signalsForPosting } from "./skills.js";
 import { experienceGate } from "./experience.js";
+import { levelGate } from "./level.js";
 import { combineVerdict, serialiseGates, type Gate, type ScreenVerdict } from "./gates.js";
 import { formatScreenOutcome } from "./screen-format.js";
 import type { JobApplication } from "../../db/schema.js";
@@ -57,7 +58,6 @@ const log = childLogger({ module: "tool:screen_job" });
 // Re-exported so callers keep one import site for the screening vocabulary.
 export { combineVerdict } from "./gates.js";
 export { formatScreenOutcome } from "./screen-format.js";
-// Re-exported so every existing import of these gates keeps resolving here.
 export { THIN_BODY_CHARS, postingGate, basisGate, locationGate, sponsorGate } from "./screen-gates.js";
 export type { Gate, ScreenVerdict } from "./gates.js";
 
@@ -213,12 +213,12 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
   // Screen under every basis that could lawfully carry this posting; the best
   // outcome wins. A role rejected on one basis and reachable on another is a real
   // opportunity, and the single-basis design discarded it without a trace.
-  // Level and body-completeness do not vary by permit basis, so they are built
-  // once and shared across the routes rather than recomputed per route.
+  // These four are facts about the POSTING, not about any one basis, so they are
+  // built once and shared. `level` is null at or under the profile's ceiling —
+  // see level.ts, and locationGate, for why silence beats a passing gate line.
   const experience = experienceGate(description, title, profile);
+  const level = levelGate(title, profile);
   const posting = postingGate(description);
-  // Where the job sits is a fact about the posting, not about any one basis, so
-  // it is reported once for all of them — see locationGate in screen-gates.ts.
   const location = locationGate(country, facts.route);
 
   // The IND recognised-sponsor register is Dutch-immigration-specific. A basis
@@ -251,17 +251,16 @@ export async function screenPosting(input: PostingInput): Promise<ScreenOutcome>
             ...screenSalaryFacts(facts.salary, { route, dob: profile.dob, reducedCriterionUntil: profile.reducedCriterionUntil ?? null }),
           };
     const runSponsorGate = gProfile.sponsorRequired && targetsNetherlands;
-    const gates: Gate[] = [
-      ...(posting ? [posting] : []),
-      ...(location ? [location] : []),
-      runSponsorGate ? sponsorGate(match, stale) : basisGate(gProfile),
+    const gates = gatesForRoute({
+      gateProfile: gProfile,
       pay,
-      // Omitted entirely where it cannot apply. "✅ No Dutch-language requirement
-      // mentioned" on a Bangalore posting is a cleared check about a language
-      // nobody asked for — noise wearing the costume of information.
-      ...(gProfile.dutchLanguageApplies ? [{ gate: "Language", ...language }] : []),
       experience,
-    ];
+      posting,
+      location,
+      level,
+      language: gProfile.dutchLanguageApplies ? { gate: "Language", ...language } : null,
+      sponsor: runSponsorGate ? { match, stale } : null,
+    });
     return { route, verdict: combineVerdict(gates) };
   });
 

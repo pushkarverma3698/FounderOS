@@ -67,6 +67,15 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
   maxYearsDemanded: 4,
   maxYearsStretch: 5,
 
+  // Senior FLAGS for her where it is silent for Pushkar, and Lead/Manager and
+  // above reject. Founder direction, 2026-09-15. At 2.4 years a "Senior
+  // Financial Analyst" is a genuine stretch worth applying into, so it belongs
+  // in STRETCH rather than in DO TODAY or the reject pile; a "Manager, Financial
+  // Planning and Analysis" — which was rank 1 of her DO TODAY when this was
+  // written — is a seat filled from ~8 years and is not reachable at all.
+  maxTitlePass: 3,
+  maxTitleStretch: 4,
+
   // `india-local` added 2026-09-08 on the founder's own words: "Tashi will also
   // apply in india", and her right to work there CONFIRMED by him the same day.
   // A declared fact about a person — never inferred — and it must be BOTH here

@@ -60,6 +60,56 @@ def test_a_profile_with_no_resume_at_all_is_refused(tmp_path):
     assert "resume" in str(err.value)
 
 
+def test_an_unfilled_example_placeholder_is_refused(tmp_path):
+    """REPLACE is not a name, and the emptiness check never caught it.
+
+    THE LIVE DEFECT, 2026-09-15. ``apply.sh`` option 2 ("Tashi") copied
+    ``apply-profile-wife.example.json`` — whose first_name, last_name, email and
+    phone are all the literal string "REPLACE" — over ``apply-profile.json``,
+    because no real profile had ever been written for her. Every required field
+    was non-empty, so ``load_profile`` accepted it, and the browser queue would
+    have typed REPLACE into a real employer's application form.
+
+    Emptiness and truthfulness are different checks. This is the second one.
+    """
+    path = write(
+        tmp_path,
+        {**VALID, "first_name": "REPLACE", "email": "REPLACE", "default_resume": "/cv.pdf"},
+    )
+    with pytest.raises(ProfileError) as err:
+        load_profile(path)
+    message = str(err.value)
+    assert "first_name" in message and "email" in message
+    # Named together, like the emptiness check above: one run, one fix list.
+    assert "REPLACE" in message
+
+
+def test_placeholder_detection_is_case_insensitive_and_ignores_padding(tmp_path):
+    path = write(tmp_path, {**VALID, "phone": "  replace  ", "default_resume": "/cv.pdf"})
+    with pytest.raises(ProfileError) as err:
+        load_profile(path)
+    assert "phone" in str(err.value)
+
+
+def test_a_real_name_containing_the_word_is_not_refused(tmp_path):
+    """Over-correction guard. Only the WHOLE value is a placeholder."""
+    path = write(
+        tmp_path,
+        {**VALID, "last_name": "Replacewood", "default_resume": "/cv.pdf"},
+    )
+    assert load_profile(path).last_name == "Replacewood"
+
+
+def test_profile_id_is_carried_through_when_present(tmp_path):
+    # The queue is scoped by this. A profile that drops it silently pulls the
+    # OTHER candidate's rows and uploads this candidate's resume to them.
+    path = write(
+        tmp_path,
+        {**VALID, "profile_id": "wife-nl-finance", "default_resume": "/cv.pdf"},
+    )
+    assert load_profile(path).profile_id == "wife-nl-finance"
+
+
 def test_track_resume_wins_over_the_default(tmp_path):
     path = write(tmp_path, {**VALID, "default_resume": "/d.pdf", "resumes": {"ai": "/ai.pdf"}})
     profile = load_profile(path)

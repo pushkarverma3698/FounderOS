@@ -25,6 +25,51 @@ import type { ScreenStatus } from "./filters.js";
 import type { Gate } from "./gates.js";
 
 /**
+ * The gates one permit basis is judged on, in the order the brief prints them.
+ *
+ * ASSEMBLY ONLY — every gate here was already decided by its own function, and
+ * this puts them in a list. It lives beside the builders rather than in
+ * `screen.ts` for the same reason they do: that file crossed the 400-line budget
+ * again on 2026-09-15 when the Level gate was added, and the ratchet
+ * (`governance/architecture-baseline.json`) may only shrink.
+ *
+ * The three optional gates are optional for three different reasons, all of them
+ * "this check cannot apply here" rather than "this check passed":
+ *   · `posting`  — only when the body was too thin to judge at all.
+ *   · `location` — only when the job is outside the profile's markets, or when
+ *                  nobody recorded one. See locationGate.
+ *   · `language` — only on a basis where Dutch can be a bar. "✅ No Dutch
+ *                  requirement" on a Bangalore posting is a cleared check about
+ *                  a language nobody asked for.
+ *   · `level`    — only when the title sits above the profile's ceiling.
+ */
+export interface RouteGateInput {
+  readonly gateProfile: GateProfile;
+  readonly pay: Gate;
+  readonly experience: Gate;
+  readonly posting?: Gate | null;
+  readonly location?: Gate | null;
+  readonly language?: Gate | null;
+  readonly level?: Gate | null;
+  /** The register verdict, and how stale the register is. Read only when the basis needs a sponsor. */
+  readonly sponsor?: { readonly match: SponsorMatch; readonly stale: ReturnType<typeof registerStaleness> } | null;
+}
+
+export function gatesForRoute(input: RouteGateInput): Gate[] {
+  return [
+    ...(input.posting ? [input.posting] : []),
+    ...(input.location ? [input.location] : []),
+    input.sponsor ? sponsorGate(input.sponsor.match, input.sponsor.stale) : basisGate(input.gateProfile),
+    input.pay,
+    ...(input.language ? [input.language] : []),
+    input.experience,
+    // AFTER Experience, so the brief reads years-then-seat in the order a
+    // recruiter would.
+    ...(input.level ? [input.level] : []),
+  ];
+}
+
+/**
  * Below this many characters, the body is a teaser rather than a job ad.
  *
  * The salary, language and experience gates all read the body, so a 200-character

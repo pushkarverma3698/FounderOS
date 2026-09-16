@@ -71,13 +71,24 @@ gumroad-packs/
 # boot, never source of truth.
 .synthesized-cache/
 
-# Mac apply client: local venv, the founder's real identity/resume paths, and
-# the synced queue + outcome ledger. apply-profile.json is PERSONAL DATA and
-# .queue/ holds row ids from production — neither belongs in git.
+# Mac apply client: local venv, the real identity/resume paths of BOTH
+# candidates, and the synced queue + outcome ledger. These are PERSONAL DATA and
+# .queue/ holds row ids from production — none of it belongs in git.
+#
+# The GLOB, not the single filename, since 2026-09-15. `apply.sh` switches
+# candidates by copying `apply-profile-<name>.json` over `apply-profile.json`,
+# and only the destination was ignored — so `apply-profile-pushkar.json`, which
+# carries his real name, email, phone and LinkedIn, sat untracked-but-visible in
+# `git status` where any `git add -A` would have committed it. The negation
+# below keeps the two REPLACE-filled example files tracked, which is what new
+# machines copy from.
 mac-client/.venv*/
-mac-client/apply-profile.json
+mac-client/apply-profile*.json
+!mac-client/apply-profile.example.json
+!mac-client/apply-profile-wife.example.json
 mac-client/.queue/
 mac-client/*.pdf
+mac-client/cv/
 
 # Python bytecode from the Mac client
 __pycache__/
