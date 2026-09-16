@@ -235,4 +235,40 @@ describe("withModelFallbacks — resolution budget + per-attempt deadlines (2026
 
     await expect(composed.invoke(MSGS)).rejects.toThrow(/exceeded/);
   });
+
+  /**
+   * REGRESSION 2026-09-16 — the chain was structurally unreachable in prod.
+   *
+   * Measured on the live box (16:47–16:52, founder turn "Read founderOs logs"):
+   * gemini-flash-latest 503'd in a storm, the primary burned the FULL resolution
+   * budget, and the very first fallback was skipped:
+   *
+   *   16:50:01 "Primary model failed retriably — engaging fallback chain"
+   *            err: "Model call exceeded 120000ms (worker)"
+   *   16:50:01 "Resolution budget exhausted — skipping remaining fallbacks"
+   *            fallbackIndex: 0, budgetMs: 120000
+   *
+   * Cause: the primary was raced against the WHOLE budget, so the moment it
+   * failed by exhausting that budget, remaining() was already 0 and the loop
+   * threw at index 0 — every time. The chain could only ever run when the
+   * primary failed FAST, which is exactly the case that does not need it.
+   * The founder's turn then died on the 300s watchdog with no reply at all.
+   *
+   * So the primary must never be allowed to spend the chain's headroom.
+   */
+  it("REGRESSION 2026-09-16: a primary that exhausts the budget still leaves headroom for the chain", async () => {
+    const hungPrimary = { invoke: vi.fn(() => new Promise(() => {})) } as unknown as KernelBindableModel;
+    const healthy = okModel("fallback answered");
+
+    const model = withModelFallbacks(hungPrimary, [healthy], "worker", {
+      budgetMs: 100,
+      attemptTimeoutMs: 45,
+      primaryRetryDelayMs: 0,
+    });
+
+    const reply = await model.invoke(MSGS);
+
+    expect(healthy.invoke).toHaveBeenCalledTimes(1);
+    expect(String(reply.content)).toBe("fallback answered");
+  });
 });

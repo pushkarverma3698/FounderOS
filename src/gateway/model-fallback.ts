@@ -72,6 +72,13 @@ export function withModelFallbacks(
   const budgetMs = options.budgetMs ?? MODEL_RESOLUTION_BUDGET_MS;
   const now = options.now ?? Date.now;
 
+  // Headroom the primary may NOT spend, so at least one fallback can always be
+  // attempted. Capped at half the budget: reserving a full attempt out of a
+  // budget smaller than one attempt would starve the primary instead, trading
+  // one unreachable layer for the other.
+  const chainReserveMs = Math.min(attemptTimeoutMs, Math.floor(budgetMs / 2));
+  const primaryShareMs = budgetMs - chainReserveMs;
+
   return {
     async invoke(messages) {
       const started = now();
@@ -79,7 +86,16 @@ export function withModelFallbacks(
       try {
         // The primary is normally the retry-wrapped model with tighter internal
         // bounds; the budget race is the backstop for a bare hung primary.
-        return await raceWithDeadline(primary.invoke(messages), budgetMs, label);
+        //
+        // It is raced against its SHARE, never the whole budget. Racing it
+        // against budgetMs made the chain structurally unreachable: a primary
+        // that failed by exhausting the budget left remaining() === 0, so the
+        // loop below threw at fallbackIndex 0 and no fallback ever ran. Measured
+        // in prod 2026-09-16 16:50:01 during a gemini-flash 503 storm — the
+        // founder's turn then died on the 300s watchdog with no reply. The chain
+        // could only ever engage when the primary failed FAST, which is exactly
+        // the case that does not need it.
+        return await raceWithDeadline(primary.invoke(messages), primaryShareMs, label);
       } catch (err) {
         if (!isModelFallbackError(err)) throw err;
         log.warn(
