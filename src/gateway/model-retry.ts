@@ -33,7 +33,7 @@ export const MODEL_RETRY_BACKOFF_MS: readonly number[] = [1_000, 2_000, 4_000];
  * that; hung calls previously ran unbounded (254s observed) until the turn
  * watchdog killed the whole turn.
  */
-export const MODEL_ATTEMPT_TIMEOUT_MS = 45_000;
+export const MODEL_ATTEMPT_TIMEOUT_MS = process.env["MODEL_ATTEMPT_TIMEOUT_MS"] ? Number(process.env["MODEL_ATTEMPT_TIMEOUT_MS"]) || 45_000 : 45_000;
 
 /**
  * Total wall-clock budget for the retry loop. Once exceeded, remaining
