@@ -12,12 +12,44 @@
  */
 
 import { tool } from "@langchain/core/tools";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import { z } from "zod";
 import { readLogsTool } from "../../tools/read-logs.js";
 import { toolFailure } from "../tool-result.js";
+import { makeRepeatGuard, makeThreadScopedRegistry } from "./repeat-guard.js";
+
+/**
+ * Same loop breaker github_read carries, for the same reason: a weak model
+ * re-reads a SUCCESSFUL log window instead of answering from it. Measured
+ * 2026-09-16 on the founder's "read founderOs logs" turn — four read_logs calls
+ * in one turn, two of them after the result was already in context. Each one
+ * re-feeds a 200-line journal window to the planner, so the thrash is expensive
+ * in exactly the turns that are already close to the watchdog.
+ *
+ * Per-thread, never module-scope: the graph is compiled once and tools are bound
+ * at that time, so a shared guard would let one chat block another (rule #20).
+ */
+const _readLogsRepeatGuards = makeThreadScopedRegistry(() => makeRepeatGuard());
+
+function threadIdFrom(config: RunnableConfig | undefined): string | undefined {
+  return config?.configurable?.["thread_id"] as string | undefined;
+}
 
 export const readLogs = tool(
-  async ({ since, until, level, grep, limit, unit }) => {
+  async ({ since, until, level, grep, limit, unit }, config) => {
+    if (
+      _readLogsRepeatGuards
+        .get(threadIdFrom(config))
+        .shouldBlock("read_logs", { since, until, level, grep, limit, unit })
+    ) {
+      return (
+        `You have already called read_logs with these exact arguments and the log lines are ` +
+        `in the conversation above. Do NOT call read_logs again with the same window — either ` +
+        `answer the founder now from what you read, or change the window (different 'since', ` +
+        `'level' or 'grep') if you genuinely need different evidence.`
+      );
+    }
+
     const res = await readLogsTool.execute({
       ...(since ? { since } : {}),
       ...(until ? { until } : {}),
