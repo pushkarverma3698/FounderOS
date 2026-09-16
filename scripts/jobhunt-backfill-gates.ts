@@ -21,19 +21,37 @@
  * already engaged with are skipped by `screenPosting` itself — re-screening must
  * never disturb an application in flight.
  *
- *   set -a && . ./.env && set +a && npx tsx scripts/jobhunt-backfill-gates.ts [--dry]
+ *   set -a && . ./.env && set +a && npx tsx scripts/jobhunt-backfill-gates.ts [--dry] [--profile=<id>]
+ *
+ * --profile=<id> scopes both the read and the re-screen to one candidate
+ * (e.g. wife-nl-finance). Omitted, it touches DEFAULT_PROFILE_ID's own rows
+ * only — never every candidate's, which is what running this with no filter
+ * used to do silently before profileId existed here.
  */
 
 import { listRecentApplications } from "../src/db/job-queries.js";
 import { countryFromUrl, toPostingCountry } from "../src/tools/jobhunt/country.js";
 import { screenPosting } from "../src/tools/jobhunt/screen.js";
+import { getProfile, type JobSearchProfile } from "../src/tools/jobhunt/profile-config.js";
 
 const DRY = process.argv.includes("--dry");
 
+/** Resolve `--profile=<id>` into the id and its registered profile, if given. */
+export function resolveProfileArg(
+  argv: readonly string[],
+): { profileId?: string; profile?: JobSearchProfile } {
+  const arg = argv.find((a) => a.startsWith("--profile="));
+  if (!arg) return {};
+  const profileId = arg.slice("--profile=".length);
+  return { profileId, profile: getProfile(profileId) };
+}
+
 async function main(): Promise<void> {
-  const rows = await listRecentApplications({ limit: 1000 });
+  const { profileId, profile } = resolveProfileArg(process.argv);
+  const rows = await listRecentApplications({ limit: 1000, profileId });
   console.log(
-    `${rows.length} stored postings.${DRY ? "  DRY RUN — nothing will be written." : ""}\n`,
+    `${rows.length} stored postings${profileId ? ` for profile "${profileId}"` : ""}.` +
+      `${DRY ? "  DRY RUN — nothing will be written." : ""}\n`,
   );
 
   const tally = { pass: 0, flag: 0, reject: 0, engaged: 0, noBody: 0, error: 0 };
@@ -52,6 +70,7 @@ async function main(): Promise<void> {
       company: row.company,
       title: row.title,
       description: row.description,
+      ...(profile ? { profile } : {}),
       ...(row.url ? { url: row.url } : {}),
       ...(row.posted_at ? { postedAt: row.posted_at } : {}),
       source: row.source,
@@ -103,7 +122,9 @@ async function main(): Promise<void> {
   process.exit(0);
 }
 
-main().catch((err: unknown) => {
-  console.error("Backfill failed:", (err as Error).message);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err: unknown) => {
+    console.error("Backfill failed:", (err as Error).message);
+    process.exit(1);
+  });
+}
