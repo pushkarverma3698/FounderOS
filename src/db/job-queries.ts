@@ -671,13 +671,15 @@ export async function recordLiveness(
 
 /** Most recently screened roles, newest first — the daily-sweep read-back. */
 export async function listRecentApplications(
-  opts: { limit?: number; tenantId?: string } = {},
+  opts: { limit?: number; tenantId?: string; profileId?: ProfileScope } = {},
 ): Promise<JobApplication[]> {
   const db = getDb();
+  const tenantCondition = eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT);
+  const scope = profileCondition(opts.profileId);
   return db
     .select()
     .from(jobApplications)
-    .where(eq(jobApplications.tenant_id, opts.tenantId ?? DEFAULT_TENANT))
+    .where(scope ? and(tenantCondition, scope) : tenantCondition)
     .orderBy(desc(jobApplications.created_at))
     .limit(opts.limit ?? 20);
 }

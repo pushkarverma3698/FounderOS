@@ -110,14 +110,28 @@ fi
 # OpenRouter models rotate/deprecate without notice (this is that failure mode
 # recurring) — re-verify with `scripts/probe-openrouter-free-models.ts` before
 # trusting this list again.
-grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS)=' .env > .env.patched || true
+# 2026-09-17: gemini-flash-latest (→ gemini-3.5-flash) is STILL the 2026-07-13
+# failure — live-probed today, 2/2 calls returned 503 "high demand", not a
+# one-off. gemini-2.5-flash is fully retired (404: "no longer available to new
+# users"; Google's own error names gemini-3.6-flash as the replacement).
+# Pinned AGENT_MODEL directly to gemini-3.6-flash instead of the rolling alias —
+# live-probed 2/2 success, ~1-2s — so a future Google-side alias move can't
+# silently reintroduce the 2026-07-13 storm again. AGENT_FALLBACK_MODELS is
+# untouched: gemini-3.1-flash-lite still live-probes 200 today, so the existing
+# chain's reasoning above still holds.
+# JUDGE_MODEL added: the OpenRouter Nemotron judge crashes (undefined .message
+# read on every call). google-genai:gemini-3.1-flash-lite live-probed 200 today
+# — same slug already proven in AGENT_FALLBACK_MODELS, distinct from the
+# AGENT_MODEL pin above so the judge isn't grading its own drafter's family.
+grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS|JUDGE_MODEL)=' .env > .env.patched || true
 {
-  printf '%s\n' 'AGENT_MODEL=google-genai:gemini-flash-latest'
+  printf '%s\n' 'AGENT_MODEL=google-genai:gemini-3.6-flash'
   printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-3.1-flash-lite,google-genai:gemini-3-flash-preview,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:minimax/minimax-m2.7:free'
+  printf '%s\n' 'JUDGE_MODEL=google-genai:gemini-3.1-flash-lite'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
-echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-flash-latest"
+echo "==> Patched .env: AGENT_MODEL=google-genai:gemini-3.6-flash, JUDGE_MODEL=google-genai:gemini-3.1-flash-lite"
 
 # Pin the job-sweep spend controls. Both were unset in production until
 # 2026-08-05, and both defaulted quietly rather than loudly:
