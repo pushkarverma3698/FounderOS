@@ -6,7 +6,7 @@
  * failure, a render crash becomes a row rather than an exception), not Chromium.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { collectPageFactsMock, capturePngMock } = vi.hoisted(() => ({
   collectPageFactsMock: vi.fn(),
@@ -19,7 +19,7 @@ vi.mock("../../../../src/tools/browser/ui-facts.js", () => ({
 }));
 
 import { uiCheckTool, runUiCheck, highSeverityCount } from "../../../../src/tools/browser/ui-check.js";
-import { parseArgs, defaultTargets, PRESET_IDS } from "../../../../scripts/qa-ui.js";
+import { parseArgs, defaultTargets, PRESET_IDS, runVision } from "../../../../scripts/qa-ui.js";
 
 function factsFor(target: string, viewport: "desktop" | "mobile", over: Record<string, unknown> = {}) {
   return {
@@ -170,5 +170,36 @@ describe("qa:ui CLI contract", () => {
 
   it("ignores an unknown viewport rather than checking a bogus size", () => {
     expect(parseArgs(["--viewport", "watch"]).viewports).toEqual(["desktop", "mobile"]);
+  });
+});
+
+describe("runVision — the vision stage never takes the deterministic run down with it", () => {
+  const envBackup = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...envBackup };
+  });
+
+  it("returns a SKIPPED stage instead of throwing when a screenshot cannot be read", async () => {
+    // Historically, an exception anywhere in this stage's body — the CI
+    // incident was ui-vision.js's import chain hitting core/config's required
+    // DATABASE_URL/TELEGRAM_* — escaped runVision and crashed the whole qa:ui
+    // run, discarding the already-computed deterministic results. A real
+    // ENOENT here exercises the same escape hatch without mocking: any throw
+    // inside the stage's try block must land as a SKIPPED VisionStage, never
+    // an uncaught rejection.
+    process.env["GOOGLE_GENERATIVE_AI_API_KEY"] = "dummy-key-for-import-test";
+    const stage = await runVision([
+      { target: "neon", viewport: "desktop", path: "/tmp/does-not-exist-ui-qa-test.png" },
+    ]);
+
+    expect(stage.ran).toBe(false);
+    expect(stage.skippedReason).toContain("ENOENT");
+  });
+
+  it("still returns the no-key skip without touching the import at all", async () => {
+    delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
+    const stage = await runVision([{ target: "neon", viewport: "desktop", path: "/tmp/x.png" }]);
+    expect(stage).toEqual({ ran: false, skippedReason: "GOOGLE_GENERATIVE_AI_API_KEY is not set" });
   });
 });

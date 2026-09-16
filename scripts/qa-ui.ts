@@ -96,7 +96,7 @@ export function parseArgs(argv: readonly string[], root: string = ROOT): CliArgs
  * or the cap being hit all produce `ran: false` with a printed reason rather than
  * an empty verdict list that would read as "looked, saw nothing wrong".
  */
-async function runVision(
+export async function runVision(
   screenshots: Array<{ target: string; viewport: string; path: string }>,
 ): Promise<VisionStage> {
   if (!process.env["GOOGLE_GENERATIVE_AI_API_KEY"]) {
@@ -106,45 +106,53 @@ async function runVision(
     return { ran: false, skippedReason: "no screenshots were captured (pass --out to enable them)" };
   }
 
-  // Imported HERE, not at module scope: ui-vision reaches gemini-rest, which
-  // reaches src/core/config.ts and its required DATABASE_URL / Telegram token.
-  // Loading it eagerly would make the free, deterministic CI run demand
-  // production secrets it never uses.
-  const { judgeScreenshot, MAX_VISION_IMAGES } = await import("../src/tools/browser/ui-vision.js");
+  try {
+    // Imported HERE, not at module scope: ui-vision reaches gemini-rest, which
+    // reaches src/core/config.ts and its required DATABASE_URL / Telegram token.
+    // Loading it eagerly would make the free, deterministic CI run demand
+    // production secrets it never uses.
+    const { judgeScreenshot, MAX_VISION_IMAGES } = await import("../src/tools/browser/ui-vision.js");
 
-  const budget = Math.min(screenshots.length, MAX_VISION_IMAGES);
-  if (screenshots.length > MAX_VISION_IMAGES) {
-    console.warn(
-      `⚠️  ${screenshots.length} screenshots but the vision cap is ${MAX_VISION_IMAGES}; ` +
-        `reviewing the first ${budget}.`,
-    );
+    const budget = Math.min(screenshots.length, MAX_VISION_IMAGES);
+    if (screenshots.length > MAX_VISION_IMAGES) {
+      console.warn(
+        `⚠️  ${screenshots.length} screenshots but the vision cap is ${MAX_VISION_IMAGES}; ` +
+          `reviewing the first ${budget}.`,
+      );
+    }
+
+    const verdicts: UiVerdict[] = [];
+    const errors: Array<{ target: string; viewport: string; error: string }> = [];
+
+    for (const shot of screenshots.slice(0, budget)) {
+      const png = readFileSync(shot.path);
+      const res = await judgeScreenshot(png, {
+        target: shot.target,
+        viewport: shot.viewport,
+        purpose: "a polished, finished launch page shown to a prospective client",
+      });
+      if (res.success) verdicts.push(res.verdict);
+      else errors.push({ target: shot.target, viewport: shot.viewport, error: res.error });
+    }
+
+    // Every image failing is not a stage that ran clean — it is a stage that did
+    // not work, and the report must say so rather than print an empty pass.
+    if (verdicts.length === 0 && errors.length > 0) {
+      return {
+        ran: false,
+        skippedReason: `every vision call failed (${errors[0]?.error ?? "unknown error"})`,
+        errors,
+      };
+    }
+
+    return { ran: true, verdicts, errors };
+  } catch (err) {
+    // A stage that could not even start (its import chain hit a requirement CI
+    // never sets, a transport threw before any judgeScreenshot call, etc.) is
+    // SKIPPED — one stage failing must never take the already-computed
+    // deterministic results down with it.
+    return { ran: false, skippedReason: err instanceof Error ? err.message : String(err) };
   }
-
-  const verdicts: UiVerdict[] = [];
-  const errors: Array<{ target: string; viewport: string; error: string }> = [];
-
-  for (const shot of screenshots.slice(0, budget)) {
-    const png = readFileSync(shot.path);
-    const res = await judgeScreenshot(png, {
-      target: shot.target,
-      viewport: shot.viewport,
-      purpose: "a polished, finished launch page shown to a prospective client",
-    });
-    if (res.success) verdicts.push(res.verdict);
-    else errors.push({ target: shot.target, viewport: shot.viewport, error: res.error });
-  }
-
-  // Every image failing is not a stage that ran clean — it is a stage that did
-  // not work, and the report must say so rather than print an empty pass.
-  if (verdicts.length === 0 && errors.length > 0) {
-    return {
-      ran: false,
-      skippedReason: `every vision call failed (${errors[0]?.error ?? "unknown error"})`,
-      errors,
-    };
-  }
-
-  return { ran: true, verdicts, errors };
 }
 
 async function main(): Promise<void> {

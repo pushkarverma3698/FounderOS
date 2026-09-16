@@ -120,9 +120,17 @@ jobs:
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
 
-      # The gate. Runs last so the evidence is always published first.
-      - name: Fail when the pack found blocking defects
+      # The gate. Runs last so the evidence is always published first. A crash
+      # (report.json never written) and "the pack ran and found something
+      # blocking" are different failure classes, so the message must not
+      # claim defects were found when qa:ui never finished — that reads as
+      # the evidence pack lying about what it checked.
+      - name: Fail when the run was red
         if: steps.qa.outcome == 'failure'
         run: |
-          echo "::error::UI QA found blocking defects — see the evidence pack comment or the ui-evidence-pack artifact."
+          if [ -f .artifacts/ui-qa/report.json ]; then
+            echo "::error::UI QA found blocking defects — see the evidence pack comment or the ui-evidence-pack artifact."
+          else
+            echo "::error::qa:ui crashed before producing a report — see the 'Run UI QA' step log above, not the evidence pack (none was written)."
+          fi
           exit 1

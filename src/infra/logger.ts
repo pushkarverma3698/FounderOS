@@ -14,7 +14,14 @@
  */
 
 import pino from "pino";
-import { env } from "../core/config.js";
+
+// Reads process.env directly rather than importing the validated `env` from
+// core/config.ts: config.ts requires DATABASE_URL/TELEGRAM_* at module load,
+// and logging must not require a database. Defaults copied from config.ts's
+// own NODE_ENV/LOG_LEVEL schema entries so behaviour is unchanged for every
+// caller that already gets those via config.
+const nodeEnv = process.env["NODE_ENV"] ?? "development";
+const logLevel = process.env["LOG_LEVEL"] ?? "info";
 
 // ── PII field scrubbing ───────────────────────────────────────────────────────
 
@@ -40,7 +47,7 @@ const PII_FIELDS = [
 
 // ── Logger factory ────────────────────────────────────────────────────────────
 
-const isDev = env.NODE_ENV === "development";
+const isDev = nodeEnv === "development";
 
 // The stdio MCP server (src/mcp/index.ts, `pnpm mcp`) speaks JSON-RPC on stdout,
 // so ANY log line on stdout corrupts the protocol stream. When LOG_STDERR=1 the
@@ -52,7 +59,7 @@ const toStderr = process.env["LOG_STDERR"] === "1";
 
 export const logger = pino(
   {
-    level: env.LOG_LEVEL,
+    level: logLevel,
 
     // Redact PII — nested paths with wildcard
     redact: {
@@ -81,7 +88,7 @@ export const logger = pino(
     // Standard fields on every log line
     base: {
       app: "founderos",
-      env: env.NODE_ENV,
+      env: nodeEnv,
     },
 
     // ISO timestamp
