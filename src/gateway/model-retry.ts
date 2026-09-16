@@ -17,6 +17,8 @@
  * rng are injectable so tests run deterministic and instant.
  */
 
+import { intEnv } from "../core/config.js";
+
 import type { KernelBindableModel, KernelChatModel, KernelTool } from "../kernel/index.js";
 import { is503Error } from "../agents/model.js";
 import { raceWithDeadline } from "./model-deadline.js";
@@ -27,13 +29,14 @@ const log = childLogger({ module: "model-retry" });
 /** Backoff ceilings per attempt; actual delay is jittered in (ceiling/2, ceiling]. */
 export const MODEL_RETRY_BACKOFF_MS: readonly number[] = [1_000, 2_000, 4_000];
 
+
 /**
  * Hard deadline for ONE model.invoke attempt. 2026-07-17: storm-degraded but
  * SUCCESSFUL Gemini calls ran up to ~35s, so this must stay comfortably above
  * that; hung calls previously ran unbounded (254s observed) until the turn
  * watchdog killed the whole turn.
  */
-export const MODEL_ATTEMPT_TIMEOUT_MS = 45_000;
+export const MODEL_ATTEMPT_TIMEOUT_MS = intEnv("MODEL_ATTEMPT_TIMEOUT_MS", 45_000);
 
 /**
  * Total wall-clock budget for the retry loop. Once exceeded, remaining
@@ -41,7 +44,7 @@ export const MODEL_ATTEMPT_TIMEOUT_MS = 45_000;
  * fallback chain — bounded work per layer keeps the whole model stack inside
  * OFFICE_TURN_TIMEOUT_MS.
  */
-export const MODEL_RETRY_BUDGET_MS = 90_000;
+export const MODEL_RETRY_BUDGET_MS = intEnv("MODEL_RETRY_BUDGET_MS", 90_000);
 
 export interface ModelRetryOptions {
   /** Per-retry delay ceilings (length = max retries). Default MODEL_RETRY_BACKOFF_MS. */
