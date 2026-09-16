@@ -38,6 +38,7 @@
 
 import { Octokit } from "octokit";
 import { childLogger } from "../infra/logger.js";
+import { assertAllowedRepo, DEFAULT_DISPATCH_REPO } from "../tools/dispatch-repos.js";
 import { runSelfAudit } from "./run-audit.js";
 import { repoRoot } from "./repo-root.js";
 import {
@@ -56,9 +57,19 @@ const log = childLogger({ module: "evolution-dispatch" });
 /** How many of this loop's own past issues to read back when checking for duplicates. */
 export const FILED_HISTORY_PAGE_SIZE = 100;
 
-/** Where issues are filed. Mirrors the `ISSUE_REPO` the VPS `agent-dispatch` cron reads. */
+/**
+ * Where issues are filed. Mirrors the `ISSUE_REPO` the VPS `agent-dispatch` cron reads.
+ *
+ * Runs through the same allowlist as the founder-facing dispatch tool
+ * (src/tools/dispatch-repos.ts). This loop files unattended on a schedule, so an
+ * off-list env must fail loudly here — filing into a repo nothing watches is the
+ * failure mode that stays invisible for weeks.
+ */
 export function issueRepoSlug(): string {
-  return process.env["SELF_IMPROVE_ISSUE_REPO"] ?? "pushkarverma3698/FounderOS";
+  const { owner, repo } = assertAllowedRepo(
+    process.env["SELF_IMPROVE_ISSUE_REPO"] ?? DEFAULT_DISPATCH_REPO,
+  );
+  return `${owner}/${repo}`;
 }
 
 /**
@@ -97,8 +108,7 @@ export function octokitIssueGateway(slug: string = issueRepoSlug()): IssueGatewa
         "Set it in .env (the same token the `gh` CLI uses on the VPS is sufficient: it needs `repo` scope).",
     );
   }
-  const [owner, repo] = slug.split("/");
-  if (!owner || !repo) throw new Error(`SELF_IMPROVE_ISSUE_REPO must be "owner/repo", got "${slug}"`);
+  const { owner, repo } = assertAllowedRepo(slug);
 
   const octokit = new Octokit({ auth: token });
 
