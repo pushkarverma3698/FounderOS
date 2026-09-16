@@ -83,6 +83,18 @@ describe("configuration", () => {
     // A mismatch here files issues somewhere nothing ever claims them, silently.
     expect(issueRepoSlug()).toBe("pushkarverma3698/FounderOS");
   });
+
+  it("refuses an off-allowlist SELF_IMPROVE_ISSUE_REPO rather than filing there", () => {
+    // This loop files issues unattended on a schedule. If the env is ever wrong, failing
+    // loudly is recoverable; filing into an unwatched repo is invisible for weeks.
+    process.env["SELF_IMPROVE_ISSUE_REPO"] = "someone-else/somewhere";
+    expect(() => issueRepoSlug()).toThrow(/not on the Antigravity dispatch allowlist/);
+  });
+
+  it("accepts the second allowlisted repo", () => {
+    process.env["SELF_IMPROVE_ISSUE_REPO"] = "pushkarverma3698/House-of-Hulda-Website-frontend";
+    expect(issueRepoSlug()).toBe("pushkarverma3698/House-of-Hulda-Website-frontend");
+  });
 });
 
 describe("parseFiledFingerprints", () => {

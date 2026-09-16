@@ -110,6 +110,18 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "jobs",
   },
   {
+    command: "gaps",
+    // Says what to DO with it. /draft can only use words already on the CV, so
+    // this list is the only thing that moves the number a recruiter searches on.
+    description: "Keywords the market asks for that your CV doesn't say. Add the true ones to your base CV",
+    group: "jobs",
+  },
+  {
+    command: "wife_gaps",
+    description: "Keywords your wife's market asks for that her CV doesn't say",
+    group: "jobs",
+  },
+  {
     command: "applied",
     description: "applied n — mark row n applied and drop it off the queue",
     group: "jobs",
@@ -157,6 +169,16 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
   { command: "status", description: "System health and pending approvals", group: "system" },
   { command: "budget", description: "Today's spend against the daily cap", group: "system" },
   { command: "commands", description: "Show every command with what it does", group: "system" },
+  {
+    command: "task",
+    description: "Hand engineering work to the agent loop. task repo:hulda fix the hero layout",
+    group: "system",
+  },
+  {
+    command: "newproject",
+    description: "Start a new project: creates a private repo the agent loop can work in. newproject name what it is",
+    group: "system",
+  },
   { command: "connect", description: "Search and add an MCP server from the registry", group: "system" },
   { command: "start", description: "What this bot can do", group: "system" },
   { command: "reset", description: "Clear this thread's mission state", group: "system" },
