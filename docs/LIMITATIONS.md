@@ -21,7 +21,7 @@
 | Measure | Value | Δ since 2026-08-22 |
 |---|---|---|
 | Source files / LOC | 335 files · 58,141 LOC | +19 files · +2,631 |
-| Test suite | 332 files · **3,649 tests**, offline, $0 | +146 tests |
+| Test suite | 397 files · **4,433 tests**, offline, $0 | +146 tests |
 | Behavioural golden tasks | 41 (`src/eval/golden-tasks.ts`, `GOLDEN_TASKS`) | corrected 2026-08-28 — was miscounted as 46, conflating with the 5 opt-in `CREATIVE_GOLDEN_TASKS` `pnpm eval` never runs |
 | DB tables | 29 (`src/db/schema.ts`) | +5 |
 | Side-effecting tool modules / HITL-gated | 20 / **9** | — |

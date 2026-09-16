@@ -154,7 +154,7 @@ Explicitly *not*: porting the kernel, or a toy notebook.
 
 The README is strong but front-loads narrative. A recruiter reads the first screen and clicks
 one link. See [INTERVIEW-BRIEF.md](INTERVIEW-BRIEF.md) §1 for the numbers that should be above
-the fold: 229 production approvals (36 rejected), 80 real side effects, 3,649 tests at $0,
+the fold: 229 production approvals (36 rejected), 80 real side effects, 4,433 tests at $0,
 97.3% recall@5, $0.0014 mean cost/call, CI-enforced debt ratchet.
 
 ---
