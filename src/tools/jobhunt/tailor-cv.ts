@@ -4,11 +4,22 @@
  * Tailors a candidate's base CV to a specific job description.
  *
  * Rules:
- *  1. Zero hallucination — never invents dates, companies, titles, or education.
- *  2. Surgical alignment — reorders bullets and skills to emphasize JD terms.
+ *  1. The BASE CV IS LOCKED. Everything below the summary heading is pasted in
+ *     byte for byte by cv-compose.ts. The model writes one paragraph.
+ *  2. Zero hallucination — never invents dates, companies, titles, or education.
  *  3. ATS keyword mirroring, bounded by a CLOSED vocabulary — the model may only
  *     name technologies the base CV states (see `permittedTerms` below).
  *  4. Human voice — avoids AI buzzword cliches.
+ *
+ * WHY THE BODY IS LOCKED (founder direction, 2026-09-15: "the Base CV is
+ * locked"). Until then this asked for the complete document per posting, so two
+ * runs against one posting produced two different CVs and a single ungrounded
+ * word discarded the whole result. See cv-compose.ts for the measurements.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT DO: close the keyword gap. `overlap.missing`
+ * is reported, never written. A term the CV does not state is either a wording
+ * gap or a real one, and only the candidate can say which — `cv_gaps` ranks them
+ * for that decision, and the answer goes into the base CV, not into a prompt.
  *
  * WHY THE VOCABULARY IS CLOSED. Until 2026-09-07 this prompt handed the model
  * every skill term the JD mentioned under the heading "JD KEYWORDS TO HIGHLIGHT
@@ -32,6 +43,7 @@ import { overlapScore } from "./overlap.js";
 import { findSlop } from "./slop-rules.js";
 import { getProfile, type JobSearchProfile } from "./profile-config.js";
 import { verifyCvClaims } from "./cv-claim-guard.js";
+import { composeCv, splitCv } from "./cv-compose.js";
 import { describeClaimViolations } from "./cv-claim-summary.js";
 
 const log = childLogger({ module: "tool:tailor_cv" });
@@ -73,24 +85,32 @@ export interface TailorCvResult {
   readonly error?: string;
 }
 
-const TAILORING_SYSTEM_PROMPT = `You are an expert technical resume tailoring assistant for a senior engineer.
-Your task is to tailor a candidate's base CV specifically for a target Job Description (JD).
+/**
+ * The model writes the SUMMARY. It does not write the CV.
+ *
+ * Until 2026-09-15 this prompt asked for the complete document every time, and
+ * the base CV was only "locked" in the sense that a post-hoc guard checked its
+ * technologies and dates. Everything else — every bullet, every clause, the
+ * ordering — was regenerated per posting, and a single ungrounded word threw the
+ * whole result away (21 of 22 attempts in prod, against 2 applications sent).
+ *
+ * Asking for three lines instead makes the blast radius three lines. The body is
+ * pasted verbatim by cv-compose.ts, so an experience section cannot drift, and
+ * `verifyCvClaims` below can only ever fail on the paragraph that is cheapest to
+ * regenerate.
+ */
+const SUMMARY_SYSTEM_PROMPT = `You are rewriting ONE paragraph: the summary at the top of a candidate's CV, aimed at a specific job description.
 
-CRITICAL CONSTRAINTS (VIOLATING THESE WILL DISQUALIFY THE RESUME):
-1. NEVER fabricate or invent job titles, employer names, employment dates, degrees, or certifications.
-2. The PERMITTED TECHNOLOGY VOCABULARY below is the COMPLETE set of technologies you may name. Naming anything outside it — even once, even in passing, even because the job description asks for it — disqualifies the resume. A gap the candidate genuinely has is not yours to close.
-3. Re-order and re-emphasize the candidate's existing achievements, bullet points, and skills to highlight items most relevant to the JD.
-4. Mirror the JD's exact wording ONLY for terms in the permitted vocabulary (e.g. write "React.js" for "React" if the JD does). A JD term that is not in the permitted vocabulary must not appear anywhere in your output.
-5. Keep the tone natural, concise, and impact-driven (STAR method with metrics).
-6. Output ONLY the complete tailored resume in clean Markdown format with standard ATS section headers:
-   # [NAME]
-   [Contact Info & Links]
-   ## SUMMARY
-   ## SKILLS
-   ## EXPERIENCE
-   ## PROJECTS
-   ## EDUCATION (if present in base CV)
-`;
+You are NOT rewriting the CV. The rest of the document is fixed and will be pasted in below your paragraph unchanged. Do not output it.
+
+CRITICAL CONSTRAINTS (violating these disqualifies the application):
+1. NEVER state a job title, employer, date, degree or certification the base CV does not state.
+2. The PERMITTED TECHNOLOGY VOCABULARY is the COMPLETE set of technologies you may name. Naming anything outside it — even once, even in passing, even because the job description asks for it — disqualifies the resume. A gap the candidate genuinely has is not yours to close.
+3. Mirror the job description's exact wording ONLY for terms in the permitted vocabulary (write "React.js" for "React" if the ad does).
+4. Lead with the matched skills listed below — those are the overlap a recruiter is scanning for.
+5. Plain, specific, first-person-implied prose. No buzzwords, no "passionate", no "proven track record", no em-dash-joined clause pairs.
+
+OUTPUT: the summary paragraph only. 2-4 sentences, at most 70 words. No heading, no markdown fences, no commentary.`;
 
 export async function tailorCv(opts: TailorCvOptions): Promise<TailorCvResult> {
   const profile = opts.profile ?? getProfile();
@@ -145,6 +165,21 @@ export async function tailorCv(opts: TailorCvOptions): Promise<TailorCvResult> {
     "Tailoring CV for posting",
   );
 
+  // Split BEFORE spending a model call. A CV with no summary section is a
+  // fixable fact about a file the founder owns, and finding out after the call
+  // would bill him for the discovery.
+  const parts = splitCv(baseCvText);
+  if (!parts.ok) {
+    log.error({ company: opts.companyName, reason: parts.error }, "Base CV cannot be split");
+    return {
+      success: false,
+      matchedSkills: overlap.matched,
+      missingSkills: overlap.missing,
+      initialOverlapRatio: overlap.ratio,
+      error: `Base CV is not tailorable: ${parts.error}`,
+    };
+  }
+
   const userPrompt = `
 TARGET JOB:
 Company: ${opts.companyName}
@@ -156,16 +191,20 @@ ${opts.jobDescription.slice(0, 12_000)}
 MATCHED SKILLS ALREADY ON CV — lead with these:
 ${overlap.matched.join(", ") || "None"}
 
-PERMITTED TECHNOLOGY VOCABULARY — the ONLY technologies you may name anywhere in the output:
+PERMITTED TECHNOLOGY VOCABULARY — the ONLY technologies you may name:
 ${permittedTerms.join(", ") || "None"}
 
-ASKED FOR BY THE JD BUT NOT ON THIS CV — never write these words, in any section:
+ASKED FOR BY THE JD BUT NOT ON THIS CV — never write these words:
 ${overlap.missing.join(", ") || "None"}
 
-BASE CV:
+THE CANDIDATE'S FULL CV, for context. Everything below the summary is FIXED and
+will be pasted in unchanged. Read it so your paragraph is true; do not reproduce it:
 ${baseCvText}
 
-Generate the complete, ATS-tailored Markdown CV now.
+THE CURRENT SUMMARY YOU ARE REPLACING:
+${parts.summary.trim()}
+
+Write the replacement summary paragraph now.
 `;
 
   try {
@@ -175,7 +214,7 @@ Generate the complete, ATS-tailored Markdown CV now.
     // second. See src/agents/worker-invoke.ts.
     const response = await invokeWorkerWithFallbacks(
       [
-        { role: "system", content: TAILORING_SYSTEM_PROMPT },
+        { role: "system", content: SUMMARY_SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
       ],
       { attribution: { agent: "jobhunt", stage: "worker" } },
@@ -183,31 +222,38 @@ Generate the complete, ATS-tailored Markdown CV now.
 
     const content = textOf(response);
 
-    // Clean up markdown block tags if the LLM wrapped the output in ```markdown ... ```
-    let cleanedMarkdown = stripFences(content);
+    // The model returns a PARAGRAPH; the document is built here, in code, with
+    // the body pasted verbatim. Every check below therefore runs against the
+    // real CV the founder would send, not against the fragment.
+    let summary = stripFences(content);
+    let cleanedMarkdown = composeCv(parts, summary);
+
+    /** One more summary, given a named problem. The body is never resent. */
+    const rewriteSummary = async (instruction: string): Promise<string> => {
+      const retry = await invokeWorkerWithFallbacks(
+        [
+          { role: "system", content: SUMMARY_SYSTEM_PROMPT },
+          { role: "user", content: userPrompt },
+          { role: "assistant", content: summary },
+          { role: "user", content: instruction },
+        ],
+        { attribution: { agent: "jobhunt", stage: "worker" } },
+      );
+      return stripFences(textOf(retry));
+    };
 
     let violations = findSlop(cleanedMarkdown);
     if (violations.length > 0) {
       log.warn({ violations: violations.length, company: opts.companyName }, "Slop violations found, requesting one revision");
-      
-      const revisionPrompt = `Your previous output contained AI cliches or banned patterns.
-Please fix the following violations. Do NOT fully rewrite the CV, just fix these specific lines:
 
-${violations.map(v => `- Rule: ${v.rule}\n  Matched text: "${v.matchedText}"`).join("\n\n")}
+      summary = await rewriteSummary(
+        `Your summary contained AI cliches or banned patterns. Rewrite it, keeping the same facts:
 
-Output the corrected full Markdown CV.`;
+${violations.map((v) => `- Rule: ${v.rule}\n  Matched text: "${v.matchedText}"`).join("\n\n")}
 
-      const revisionResponse = await invokeWorkerWithFallbacks(
-        [
-          { role: "system", content: TAILORING_SYSTEM_PROMPT },
-          { role: "user", content: userPrompt },
-          { role: "assistant", content: content },
-          { role: "user", content: revisionPrompt },
-        ],
-        { attribution: { agent: "jobhunt", stage: "worker" } },
+Output the corrected summary paragraph only.`,
       );
-
-      cleanedMarkdown = stripFences(textOf(revisionResponse));
+      cleanedMarkdown = composeCv(parts, summary);
 
       violations = findSlop(cleanedMarkdown);
       if (violations.length > 0) {
@@ -234,13 +280,15 @@ Output the corrected full Markdown CV.`;
     // ONE repair round before refusing — the same shape as the slop revision
     // above, and for the same reason. PROD 2026-09-07: 21 of 22 tailoring
     // attempts ended here, each one throwing away a whole generated CV over a
-    // handful of words the model pulled out of the job description. A single
-    // targeted round that names the offending claims recovers most of those at
-    // the cost of one worker call on a path that was otherwise a total loss.
+    // handful of words the model pulled out of the job description.
     //
-    // The guard itself is NOT relaxed by this. The repaired CV is re-verified
-    // by the same function, and a fabrication that survives the round is still
-    // a terminal failure — a guard that passes a fabricated CV is worse than a
+    // Since 2026-09-15 a violation can only come from the SUMMARY — the body is
+    // pasted verbatim from the base CV, so anything it names is grounded by
+    // construction — and the repair regenerates that paragraph alone.
+    //
+    // The guard itself is NOT relaxed by this. The repaired CV is re-verified by
+    // the same function, and a fabrication that survives the round is still a
+    // terminal failure — a guard that passes a fabricated CV is worse than a
     // blocked application.
     if (!claimCheck.ok) {
       log.warn(
@@ -248,27 +296,19 @@ Output the corrected full Markdown CV.`;
         "Tailored CV makes ungrounded claims — requesting one repair round",
       );
 
-      const repairPrompt = `${describeClaimViolations(claimCheck.violations)}.
+      const repairedSummary = await rewriteSummary(
+        `${describeClaimViolations(claimCheck.violations)}.
 
-Remove every one of the following from the CV. Do NOT rewrite the rest — keep the same structure, ordering and wording everywhere else:
+Remove every one of the following from your summary:
 
 ${claimCheck.violations.map((v) => `- ${v.kind}: "${v.claim}"`).join("\n")}
 
 Where a removal leaves a gap, close it with something the BASE CV already states. Do not substitute a different technology that is also missing from the permitted vocabulary.
 
-Output the corrected full Markdown CV.`;
-
-      const repairResponse = await invokeWorkerWithFallbacks(
-        [
-          { role: "system", content: TAILORING_SYSTEM_PROMPT },
-          { role: "user", content: userPrompt },
-          { role: "assistant", content: cleanedMarkdown },
-          { role: "user", content: repairPrompt },
-        ],
-        { attribution: { agent: "jobhunt", stage: "worker" } },
+Output the corrected summary paragraph only.`,
       );
 
-      const repaired = stripFences(textOf(repairResponse));
+      const repaired = composeCv(parts, repairedSummary);
       claimCheck = verifyCvClaims(repaired, baseCvText);
 
       // Style is re-checked too: the repair rewrites prose, and the slop gate

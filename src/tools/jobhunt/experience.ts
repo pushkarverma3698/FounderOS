@@ -101,6 +101,58 @@ function sentences(text: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+/**
+ * Words that introduce a SUB-REQUIREMENT of the figure already stated, rather
+ * than an alternative to it.
+ *
+ * "8+ years of software engineering experience, WITH 2+ years hands-on building
+ * applied AI systems" is an eight-year bar. The two is a slice of the eight, not
+ * a second door into the role. Prod, 2026-09-15: that exact posting sat at rank
+ * 32 of DO TODAY carrying the verdict "Asks for 2 year(s) — within reach of your
+ * ~3.5 shipped", quoting the sentence that says otherwise. Three of 167 scored
+ * rows had a bar reported at a quarter of what the employer wrote.
+ *
+ * SCOPED TO WITHIN ONE SENTENCE, deliberately. Across sentences the minimum is
+ * still right — "3 years building APIs. 7 years with Kubernetes is a plus." is a
+ * three-year bar — and so is the floor of a range. Only a qualifier hanging off
+ * a figure in the SAME clause inverts the reading.
+ */
+const NESTED_QUALIFIER = /\b(?:with|including|incl\.?|of which|waarvan|whereof|at least)\b/i;
+
+/**
+ * The years figures in one sentence, in the order written.
+ *
+ * Returns every plausible figure so the caller can decide between "lowest wins"
+ * (separate alternatives) and "first wins" (a nested qualifier).
+ */
+function yearsIn(sentence: string): number[] {
+  const found: number[] = [];
+  // `lastIndex` is shared state on a /g regex — reset before every sentence or
+  // the second sentence starts scanning from wherever the first one stopped.
+  YEARS_RE.lastIndex = 0;
+  for (let m = YEARS_RE.exec(sentence); m !== null; m = YEARS_RE.exec(sentence)) {
+    const years = Number(m[1]);
+    if (!Number.isFinite(years) || years <= 0 || years > IMPLAUSIBLE_YEARS) continue;
+    found.push(years);
+  }
+  return found;
+}
+
+/**
+ * The bar ONE sentence sets, or null if it sets none.
+ *
+ * Two figures in a sentence joined by a qualifier word mean the first is the
+ * requirement; anything else in the sentence takes the lowest, which is what a
+ * range ("3-5 years") and a list of alternatives both need.
+ */
+function sentenceDemand(sentence: string): number | null {
+  const figures = yearsIn(sentence);
+  if (figures.length === 0) return null;
+  const [first] = figures as [number, ...number[]];
+  if (figures.length > 1 && NESTED_QUALIFIER.test(sentence)) return first;
+  return Math.min(...figures);
+}
+
 export interface ExperienceDemand {
   /** The lowest number of years the posting asks a CANDIDATE for. */
   readonly minYears: number | null;
@@ -124,16 +176,11 @@ export function extractExperienceDemand(description: string): ExperienceDemand {
     if (!EXPERIENCE_WORDS.test(sentence)) continue;
     if (COMPANY_HISTORY.test(sentence)) continue;
 
-    // `lastIndex` is shared state on a /g regex — reset before every sentence or
-    // the second sentence starts scanning from wherever the first one stopped.
-    YEARS_RE.lastIndex = 0;
-    for (let m = YEARS_RE.exec(sentence); m !== null; m = YEARS_RE.exec(sentence)) {
-      const years = Number(m[1]);
-      if (!Number.isFinite(years) || years <= 0 || years > IMPLAUSIBLE_YEARS) continue;
-      if (minYears === null || years < minYears) {
-        minYears = years;
-        evidence = sentence.slice(0, 200);
-      }
+    const demand = sentenceDemand(sentence);
+    if (demand === null) continue;
+    if (minYears === null || demand < minYears) {
+      minYears = demand;
+      evidence = sentence.slice(0, 200);
     }
   }
 

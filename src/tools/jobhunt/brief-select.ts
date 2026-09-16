@@ -79,8 +79,20 @@ export const STRETCH_CAP = 4;
  */
 export const STANDING_CAP = 6;
 
-/** The gate name the stretch band is defined against. Matched on name, never on prose. */
-const EXPERIENCE_GATE = "Experience";
+/**
+ * The gates whose flag means "apply anyway", not "ask the employer".
+ *
+ * Matched on NAME, never on prose — deriving a status or a category from
+ * evidence text is the original defect gates.ts exists to close.
+ *
+ * `Level` joined `Experience` on 2026-09-15 for the identical reason and would
+ * otherwise have repeated the identical regression: a new flag source shipped
+ * with nothing downstream adjusted to receive it, landing rows in ASK whose only
+ * command writes the employer a question. "Is the Senior in the title firm?"
+ * invites a pre-emptive rejection on the exact gate that says to apply early,
+ * and it contradicts the gate's own evidence.
+ */
+const SEAT_GATES: ReadonlySet<string> = new Set(["Experience", "Level"]);
 
 /**
  * DO TODAY: passed every gate AND confirmed still open.
@@ -117,7 +129,7 @@ export function isDoTodayRow(row: BriefRow): boolean {
 export function isStretchRow(row: BriefRow): boolean {
   if (row.verdict !== "flag" || row.liveness === "expired") return false;
   const unresolved = blockingGates({ status: "flag", gates: row.gates });
-  return unresolved.length > 0 && unresolved.every((g) => g.gate === EXPERIENCE_GATE);
+  return unresolved.length > 0 && unresolved.every((g) => SEAT_GATES.has(g.gate));
 }
 
 /**
