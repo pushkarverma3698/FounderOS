@@ -24,9 +24,17 @@ This document does not re-derive that work. It independently verifies the load-b
 | Issue #687 (`fix: resolve 6 core system anomalies`) | Open, created 17:44 UTC, `agent:failed` — Antigravity was dispatched and did not land a verifiable PR |
 | MTProto creds for a full raw chat re-pull (`scripts/dump-chat.ts`) | Present on the VPS, not re-run — see Part 2 |
 
-## Part 2 — What was deliberately not re-done, and why
+## Part 2 — Independent raw re-pull (done — update)
 
-The raw Telegram transcript was not re-pulled. The morning audit already extracted and analyzed the full 96-turn/32-day history using the same credentials this session would use; a second identical pull spends real MTProto round-trips against the founder's own account for no new signal. Independent verification instead went through GitHub, the live service, and deploy state (Part 1) — and it corroborates the morning audit rather than contradicting it (the fallback-chain session, written independently, agrees with it on the dead judge model and the `read_logs` gap). A fully independent raw re-pull is still available on request, given that trusting *any* self-report is a reasonable position to hold two days after one was fabricated.
+Originally skipped for cost reasons (see reasoning below), then run anyway on request. `scripts/dump-chat.ts` was run from the VPS against the real MTProto session: 3,000 raw messages pulled (hit the batch cap — more exist before this window), spanning **2026-08-21 → 2026-09-16**, 137 non-empty founder-authored messages.
+
+**Result: corroborates the morning audit closely, no contradictions found.** Every cited exchange in the morning audit's Part 1 table (the `/jobs` staleness complaint, the repeated "What is Tashi CV background" asks, the PR #676 merge confusion, the 09-15 fabricated-audit sequence, today's `read_logs` tests) is present in the raw transcript in the form described. Two things not previously captured:
+
+1. **A stated preference wasn't persisted.** 2026-09-16 17:02 — founder asked for a CV "for the company Centric" via `/wife_draft 1`; 17:13 — *"I needed a pdf for it. Remember this from next time also."* Whether that preference is stored anywhere (profile, `agents.conversations`, elsewhere) so it doesn't need restating is unverified — flagged in "Not yet a pattern" below rather than folded into a theme (one instance).
+2. **Issue #687's real origin, and what likely triggered its failed dispatch.** At 17:28:41 the founder re-sent *"Read founderOs logs and reason as many bugs as you can."* The very next founder message (17:43:04) is the bot's own "Mission analysis complete" text — the same 6 items that became issue #687 — relayed back by the founder with *"Create this as a GitHub issue then dispatch claude and antigravity as there contract states to fix the following."* So #687's content did come from a real log-reading pass this time (not fabricated, unlike 09-15) — it just didn't get filed autonomously; the founder relayed it manually. The **last message in the entire dump**, 17:59:40 — *"/task go over the latest and last GitHub issue and fix all those"* — is almost certainly what triggered the Antigravity dispatch attempt that #687's `agent:failed` label now shows.
+3. **A recurring command-surface inconsistency**, visible across 09-04, 09-06, and 09-07: the founder repeatedly tries `/wife_jobs`, `/jobs wife`, `/wife_draft`, and `/draft` in quick succession within the same session, suggesting the profile-scoped command surface isn't consistently named. Listed as a task in Part 5, not a bug — no evidence it silently fails, just that it's not discoverable.
+
+*(Original reasoning for skipping, before the re-pull: the morning audit already extracted and analyzed the full history using the same credentials; independent verification instead went through GitHub, the live service, and deploy state, Part 1 — which is why the re-pull above found corroboration rather than surprises.)*
 
 ---
 
@@ -72,6 +80,7 @@ A 34-task benchmark authored from source code, not run; a live MTProto test find
 ### Not yet a pattern (one data point each)
 - Issue #687 item 1 — Gmail/GCal OAuth `invalid_grant` not proactively refreshed or cleanly surfaced.
 - Issue #687 item 6 — LangSmith telemetry export blocked by safety filters; run I/O not scrubbed of PII before dispatch.
+- A stated preference ("give CVs as PDF") given in chat and explicitly asked to be remembered, with no confirmation anywhere that it persists past that turn (Part 2).
 
 ---
 
@@ -119,9 +128,11 @@ Full detail for B1–B20 lives in the morning audit; not reproduced here.
 3. Triage the 29 branches with no PR.
 4. Resolve ADR-018 — Telegram-side apply submission was deliberately retired for the Mac client. If that stands, B8/B9/B10 are the real blockers to close; if not, that reversal needs an explicit decision.
 5. Add a synthetic fallback-chain health check (a small cron hitting each configured model slug with a trivial prompt) — the arithmetic bug just fixed was invisible for ~2 months precisely because nothing exercises that path outside a real outage.
+6. Consolidate the `/wife_*` vs `/*_wife` command surface (Part 2) into one consistent pattern per profile.
+7. Confirm whether an in-chat stated preference (Part 2, CV-as-PDF) is captured anywhere durable, and if not, decide where it should live.
 
 ## Part 6 — Open questions
 
-1. Full independent raw Telegram re-pull anyway, given the 09-15 fabrication makes distrust of any self-report reasonable?
-2. Issue #687 — re-dispatch as-is, split it, or route directly?
-3. Do the Part 3 mechanism-fix recommendations become tracked tasks (docs/plans entries or GitHub issues), or stay read-only findings for now?
+1. ~~Full independent raw Telegram re-pull~~ — **done, see Part 2 update.** No contradictions found; 2 new items folded in above.
+2. Issue #687 — re-dispatch as-is, split it, or route directly? — **resolved: see the per-anomaly implementation plan filed alongside this doc.**
+3. Do the Part 3 mechanism-fix recommendations become tracked tasks (docs/plans entries or GitHub issues), or stay read-only findings for now? — **resolved: implementation plans filed for each, see companion docs.**
