@@ -23,6 +23,18 @@ DEFAULT_PROFILE_PATH = Path(__file__).resolve().parent.parent / "apply-profile.j
 #: than one per run — a founder fixing his profile wants the whole list at once.
 REQUIRED_FIELDS = ("first_name", "last_name", "email", "phone")
 
+#: Values the shipped example files use to mean "you have not filled this in".
+#:
+#: EMPTINESS AND TRUTHFULNESS ARE DIFFERENT CHECKS, and only the first existed
+#: until 2026-09-15. ``apply.sh`` option 2 copied ``apply-profile-wife.example
+#: .json`` — first_name, last_name, email and phone all the literal "REPLACE" —
+#: over ``apply-profile.json``, because no real profile had ever been written
+#: for the second candidate. Every required field was non-empty, so the loader
+#: accepted it, and the browser queue would have typed REPLACE into a real
+#: employer's form. Matched on the WHOLE value, case-insensitively, so a real
+#: surname that contains the word is untouched.
+PLACEHOLDER_VALUES = frozenset({"replace", "todo", "tbd", "xxx", "changeme", "your name"})
+
 
 class ProfileError(RuntimeError):
     """The profile is missing or unusable. Always names the path and the fix."""
@@ -118,6 +130,16 @@ def load_profile(path: Path = DEFAULT_PROFILE_PATH) -> ApplyProfile:
     missing = [f for f in REQUIRED_FIELDS if not str(raw.get(f, "")).strip()]
     if missing:
         raise ProfileError(f"{path} is missing: {', '.join(missing)}")
+
+    unfilled = [
+        f for f in REQUIRED_FIELDS if str(raw.get(f, "")).strip().lower() in PLACEHOLDER_VALUES
+    ]
+    if unfilled:
+        raise ProfileError(
+            f"{path} still has the example file's placeholder in: {', '.join(unfilled)}.\n"
+            "These would be typed into a real employer's application form. Replace every "
+            "REPLACE with the candidate's real details before running the queue."
+        )
 
     resumes = {k: str(v) for k, v in (raw.get("resumes") or {}).items()}
     default_resume = raw.get("default_resume")
