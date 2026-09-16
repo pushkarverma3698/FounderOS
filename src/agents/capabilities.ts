@@ -29,6 +29,7 @@ import {
   listScheduledPosts,
   createCalendarEvent,
   githubRead,
+  readLogs,
   readFile,
   listDir,
   sendFile,
@@ -105,10 +106,10 @@ type AnyTool = any;
 import { synthesizeSkill } from "./agent-tools.js";
 
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact],
+  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact, readLogs],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
-  engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead],
+  engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead, readLogs],
   marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
   sales: [searchWeb, createSendEmailTool("sales"), searchKnowledge],
   personal: [readFile, listDir, runShell, browser, searchPersonalRag, sendFile, writeFile],
@@ -121,8 +122,8 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
 /** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops). */
 export const ENGINEERING_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
   coder: [claudeCode, dispatchAntigravityTask, githubRead, synthesizeSkill],
-  qa: [claudeCode, githubRead],
-  devops: [claudeCode, projectWorkflow],
+  qa: [claudeCode, githubRead, readLogs],
+  devops: [claudeCode, projectWorkflow, readLogs],
 };
 
 /** Marketing sub-domain tool clusters (ADR-027 pattern). */
