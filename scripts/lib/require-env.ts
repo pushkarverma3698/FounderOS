@@ -26,7 +26,8 @@
  */
 
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** Pure — used by the exit paths below and covered directly by unit tests. */
 export function missingEnvFileMessage(envPath: string): string {
@@ -53,7 +54,8 @@ export function missingVarMessage(varName: string): string {
 // its pure helpers (tests/unit/scripts/sync-turicks-brain.test.ts) — those runs
 // already get DATABASE_URL from tests/setup.ts, not from a .env file on disk.
 if (process.argv[1]?.endsWith("sync-turicks-brain.ts")) {
-  const envPath = resolve(process.cwd(), ".env");
+  const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../");
+  const envPath = resolve(rootDir, ".env");
 
   if (!existsSync(envPath)) {
     console.error(missingEnvFileMessage(envPath));

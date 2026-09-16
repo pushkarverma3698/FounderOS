@@ -31,6 +31,8 @@
 // MUST be the first import — see scripts/lib/require-env.ts for why (it exits
 // before ../src/db/client.js's eager env parse can throw an opaque error).
 import "./lib/require-env.js";
+import * as os from "node:os";
+
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -243,7 +245,7 @@ function collectDocs(rootDir: string): DocEntry[] {
   }
 
   // Global brand guidelines (from ~/.claude)
-  const globalBrand = join(process.env["HOME"] ?? "", ".claude/brand-guidelines/TURICKS.md");
+  const globalBrand = join(process.env["HOME"] || os.homedir(), ".claude/brand-guidelines/TURICKS.md");
   if (existsSync(globalBrand)) {
     docs.push({
       entry_type: "brand",
