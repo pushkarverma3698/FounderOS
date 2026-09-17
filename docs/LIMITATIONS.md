@@ -26,7 +26,7 @@
 | DB tables | 29 (`src/db/schema.ts`) | +5 |
 | Side-effecting tool modules / HITL-gated | 20 / **9** | — |
 | Free ATS boards polled | 1,297 across 10 platforms | +374 |
-| Architecture ratchet | gateway-imports 0 · kernel-purity 0 · regex-routing 0 · orphan-subsystem 0 · fail-open-catch 11 · loc-budget 6 | unchanged |
+| Architecture ratchet | gateway-imports 0 · kernel-purity 0 · regex-routing 0 · orphan-subsystem 0 · fail-open-catch 9 · loc-budget 6 | unchanged |
 
 Counts are from `git ls-files`, a full `vitest run` and `verify-architecture.ts` in
 one session on 2026-08-28, not from the previous revision plus arithmetic. Since
@@ -53,11 +53,11 @@ Not split in this pass deliberately — `src/db/queries.ts` and `schema.ts` sit 
 kernel's hot path (every checkpoint read/write), and a mechanical split under time
 pressure is how a "simplification" becomes the next production incident.
 
-**`fail-open-catch` (11 untagged `.catch(() => …)` swallows)** — each either needs the
+**`fail-open-catch` (9 untagged `.catch(() => …)` swallows)** — each either needs the
 `allow-failopen: <reason>` tag the CI rule requires, or a real fix. Find the current
 list with `grep -rn "\.catch(() =>" src/` cross-referenced against
 `scripts/verify-architecture.ts`'s tagging check; 12 of the 23 raw matches already
-carry a reason, these 11 don't.
+carry a reason, these 9 don't.
 
 ## Review verdict
 
