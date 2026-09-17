@@ -56,12 +56,12 @@ export async function gwsReadEmails(input: ReadEmailsInput, timeoutMs = 30_000):
   );
   if (!listed.ok) {
     log.error({ err: listed.error, query: input.query }, "gws Gmail list failed");
-    if (await alertOnCredentialFailure("active_gmail", listed.error)) {
+    if (await alertOnCredentialFailure("active_gmail", listed.error, undefined, opts.accountKey)) {
       return { success: false, error: GOOGLE_REAUTH_ERROR };
     }
     return { success: false, error: `gws Gmail read failed: ${listed.error}` };
   }
-  clearCredentialAlert("active_gmail");
+  clearCredentialAlert("active_gmail", opts.accountKey);
 
   const ids = extractGwsMessageIds(listed.parsed);
   if (ids.length === 0) {
@@ -94,12 +94,12 @@ export async function gwsSendEmail(input: SendEmailInput, timeoutMs = 30_000): P
   const result = await runGws(args, timeoutMs, { gwsProfileDir: opts.gwsProfileDir });
   if (!result.ok) {
     log.error({ err: result.error, to: input.to }, "gws Gmail send failed");
-    if (await alertOnCredentialFailure("active_gmail", result.error)) {
+    if (await alertOnCredentialFailure("active_gmail", result.error, undefined, opts.accountKey)) {
       return { success: false, error: GOOGLE_REAUTH_ERROR };
     }
     return { success: false, error: `gws Gmail send failed: ${result.error}` };
   }
-  clearCredentialAlert("active_gmail");
+  clearCredentialAlert("active_gmail", opts.accountKey);
 
   const parsed = result.parsed;
   const messageId = extractGwsMessageId(parsed);
@@ -134,12 +134,12 @@ export async function gwsCreateCalendarEvent(
   const result = await runGws(args, timeoutMs, { gwsProfileDir: opts.gwsProfileDir });
   if (!result.ok) {
     log.error({ err: result.error, title: input.title }, "gws Calendar insert failed");
-    if (await alertOnCredentialFailure("active_calendar", result.error)) {
+    if (await alertOnCredentialFailure("active_calendar", result.error, undefined, opts.accountKey)) {
       return { success: false, error: GOOGLE_REAUTH_ERROR };
     }
     return { success: false, error: `gws Calendar create failed: ${result.error}` };
   }
-  clearCredentialAlert("active_calendar");
+  clearCredentialAlert("active_calendar", opts.accountKey);
 
   const eventId = extractGwsEventId(result.parsed);
   if (!eventId) {

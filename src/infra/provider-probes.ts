@@ -232,6 +232,8 @@ const CAPABILITY_LABEL: Record<string, string> = {
 export interface ProviderAuthFailure {
   readonly provider: string;
   readonly detail: string | undefined;
+  /** Which of the 3 Google accounts (src/core/accounts.ts ACCOUNT_KEYS) this is — omitted for the single-account boot probe. */
+  readonly accountKey?: string;
 }
 
 /**
@@ -243,7 +245,9 @@ export interface ProviderAuthFailure {
  */
 export function formatProviderAuthAlert(failures: readonly ProviderAuthFailure[]): string {
   if (failures.length === 0) return "";
-  const lost = failures.map((f) => `• ${CAPABILITY_LABEL[f.provider] ?? f.provider}`).join("\n");
+  const lost = failures
+    .map((f) => `• ${CAPABILITY_LABEL[f.provider] ?? f.provider}${f.accountKey ? ` (account: ${f.accountKey})` : ""}`)
+    .join("\n");
   const cause = failures[0]?.detail?.split("\n").pop()?.trim().slice(0, 300) ?? "unknown";
   return (
     `🔑 <b>Google sign-in expired — these stopped working:</b>\n${lost}\n\n` +
@@ -263,8 +267,21 @@ export function formatProviderAuthAlert(failures: readonly ProviderAuthFailure[]
 // live call classify its own failure and alert immediately, deduped per
 // capability so a burst of failed calls sends ONE message — same shape as
 // judge-health.ts's alerted/reset pattern.
+//
+// Keyed by (provider, accountKey), not provider alone: this app routes 3 real
+// Google accounts (src/core/accounts.ts ACCOUNT_KEYS — turicks/personal/naggar)
+// through this SAME function (comms/sales/jobhunt each resolve to a different
+// account via DEPARTMENT_ACCOUNT_DEFAULTS). A bare-provider key meant a second
+// account's failure silently never alerted once the first account's episode
+// was open, and one account's SUCCESS cleared the alert for a DIFFERENT
+// account that was still broken (security review finding, 2026-09-17).
 
-/** Capabilities the founder has already been told are down THIS episode. */
+/** Composite dedup key — `accountKey` omitted (undefined) collapses to one shared episode, matching the boot probe's single-account shape. */
+function episodeKey(provider: string, accountKey: string | undefined): string {
+  return accountKey ? `${provider}:${accountKey}` : provider;
+}
+
+/** (provider, accountKey) episodes the founder has already been told are down. */
 const alertedCapabilities = new Set<string>();
 
 /**
@@ -281,20 +298,22 @@ export async function alertOnCredentialFailure(
   provider: string,
   detail: string | undefined,
   notify: (html: string) => Promise<void> = defaultNotify,
+  accountKey?: string,
 ): Promise<boolean> {
   if (!isCredentialFailure(detail)) return false;
-  if (alertedCapabilities.has(provider)) return true; // already told the founder this episode
-  alertedCapabilities.add(provider);
-  await notify(formatProviderAuthAlert([{ provider, detail }])).catch((err) =>
+  const key = episodeKey(provider, accountKey);
+  if (alertedCapabilities.has(key)) return true; // already told the founder this episode
+  alertedCapabilities.add(key);
+  await notify(formatProviderAuthAlert([{ provider, detail, accountKey }])).catch((err) =>
     // allow-failopen: a Telegram blip must not throw out of the calling tool
-    log.warn({ err: (err as Error).message, provider }, "Live credential-failure alert send failed"),
+    log.warn({ err: (err as Error).message, provider, accountKey }, "Live credential-failure alert send failed"),
   );
   return true;
 }
 
-/** Call after a SUCCESSFUL live call so the next failure alerts again (new episode). */
-export function clearCredentialAlert(provider: string): void {
-  alertedCapabilities.delete(provider);
+/** Call after a SUCCESSFUL live call so the next failure for this (provider, account) alerts again (new episode). */
+export function clearCredentialAlert(provider: string, accountKey?: string): void {
+  alertedCapabilities.delete(episodeKey(provider, accountKey));
 }
 
 /** Test seam. */

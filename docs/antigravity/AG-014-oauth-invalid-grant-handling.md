@@ -143,3 +143,16 @@ confirm the new alert fires) was **NOT attempted** — that would break real Gma
 for the founder to test a code path already proven correct at the unit level against the exact
 real historical error string. Unit-level reproduction against genuine prod log lines (above) is
 the proportionate verification here.
+
+**Security review finding, fixed before merge (per repo rule: auth code requires
+`security-reviewer`).** The first version of this fix deduped/alerted by capability alone
+(`"active_gmail"`). Verified against the actual code: this app routes 3 real Google accounts
+(`src/core/accounts.ts` `ACCOUNT_KEYS` — `turicks`/`personal`/`naggar`) through this same `gws`
+backend and this same alert function — `comms`/`sales`/`jobhunt` each resolve to a different
+account via `DEPARTMENT_ACCOUNT_DEFAULTS`. A bare-capability key meant a second account's failure
+would silently never alert once the first account's episode was open, and one account's *success*
+would clear the alert for a *different* account still broken — defeating this fix's own purpose
+for the exact multi-account configuration this app runs. Fixed by keying the dedup Set (and naming
+the account in the Telegram alert text) by `(provider, accountKey)` instead of `provider` alone,
+threading the already-resolved `opts.accountKey` through from each call site. 6 new tests, `pnpm
+gate` green (401 files / 4472 tests) after the fix.

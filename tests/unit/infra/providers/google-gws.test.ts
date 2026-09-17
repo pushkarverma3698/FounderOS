@@ -16,11 +16,16 @@ vi.mock("../../../../src/infra/gws-runner.js", () => ({
   runGws: mockRunGws,
 }));
 
+/** Overridable per-test — proves accountKey actually threads through to the alert, not just a hardcoded "default". */
+let mockAccountKey = "default";
+
 vi.mock("../../../../src/infra/account-registry.js", () => ({
-  getGoogleAccount: vi.fn().mockResolvedValue({
-    ctx: { account_key: "default" },
-    credentials: { gws_profile_dir: "/tmp/gws-test-profile" },
-  }),
+  getGoogleAccount: vi.fn().mockImplementation(() =>
+    Promise.resolve({
+      ctx: { account_key: mockAccountKey },
+      credentials: { gws_profile_dir: "/tmp/gws-test-profile" },
+    }),
+  ),
 }));
 
 vi.mock("../../../../src/infra/provider-probes.js", () => ({
@@ -41,6 +46,7 @@ beforeEach(() => {
   mockRunGws.mockReset();
   mockAlertOnCredentialFailure.mockReset().mockResolvedValue(false);
   mockClearCredentialAlert.mockReset();
+  mockAccountKey = "default";
 });
 
 describe("gwsReadEmails", () => {
@@ -53,7 +59,7 @@ describe("gwsReadEmails", () => {
     expect(result.success).toBe(false);
     expect(result.error ?? "").not.toContain("keyring");
     expect((result.error ?? "").toLowerCase()).toContain("re-author");
-    expect(mockAlertOnCredentialFailure).toHaveBeenCalledWith("active_gmail", PROD_INVALID_GRANT);
+    expect(mockAlertOnCredentialFailure).toHaveBeenCalledWith("active_gmail", PROD_INVALID_GRANT, undefined, "default");
   });
 
   it("leaves a transient failure's error message unchanged — no behavior change for the common case", async () => {
@@ -71,7 +77,19 @@ describe("gwsReadEmails", () => {
 
     await gwsReadEmails({ query: "is:unread", max_results: 5 });
 
-    expect(mockClearCredentialAlert).toHaveBeenCalledWith("active_gmail");
+    expect(mockClearCredentialAlert).toHaveBeenCalledWith("active_gmail", "default");
+  });
+
+  // Security review finding (2026-09-17): this app routes 3 real Google accounts
+  // through this same function — the alert must be scoped to WHICH account, not
+  // hardcoded/collapsed to one shared episode.
+  it("threads the resolved account key through to the alert — not hardcoded", async () => {
+    mockAccountKey = "personal";
+    mockRunGws.mockResolvedValue({ ok: false, error: PROD_INVALID_GRANT });
+
+    await gwsReadEmails({ query: "is:unread", max_results: 5, account_key: "personal" });
+
+    expect(mockAlertOnCredentialFailure).toHaveBeenCalledWith("active_gmail", PROD_INVALID_GRANT, undefined, "personal");
   });
 });
 
@@ -84,7 +102,7 @@ describe("gwsSendEmail", () => {
 
     expect(result.success).toBe(false);
     expect((result.error ?? "").toLowerCase()).toContain("re-author");
-    expect(mockAlertOnCredentialFailure).toHaveBeenCalledWith("active_gmail", PROD_INVALID_GRANT);
+    expect(mockAlertOnCredentialFailure).toHaveBeenCalledWith("active_gmail", PROD_INVALID_GRANT, undefined, "default");
   });
 
   it("leaves a transient failure's error message unchanged", async () => {
@@ -114,7 +132,7 @@ describe("gwsCreateCalendarEvent", () => {
 
     expect(result.success).toBe(false);
     expect((result.error ?? "").toLowerCase()).toContain("re-author");
-    expect(mockAlertOnCredentialFailure).toHaveBeenCalledWith("active_calendar", PROD_INVALID_GRANT);
+    expect(mockAlertOnCredentialFailure).toHaveBeenCalledWith("active_calendar", PROD_INVALID_GRANT, undefined, "default");
   });
 
   it("leaves a transient failure's error message unchanged", async () => {
