@@ -387,10 +387,23 @@ export const claudeCode = tool(
       return fail;
     }
 
+    // AG-015/B5: kernel-run.ts's outer turn-timeout has no visibility into a
+    // single long tool call — this is the only signal of life it gets while
+    // claude_code is still genuinely working (own budget 15min, vs. the outer
+    // guard's default far shorter). configurable is undefined outside a real
+    // kernel turn (e.g. a direct test/script call), hence the optional chain.
+    const onTurnActivity = (config.configurable as { onTurnActivity?: () => void } | undefined)?.onTurnActivity;
     const res = await claudeCodeTool.execute({
       task,
       cwd,
-      _onProgress: (line: string) => void sendStatusText(`⏳ ${line}`),
+      _onProgress: (line: string) => {
+        onTurnActivity?.();
+        void sendStatusText(`⏳ ${line}`);
+      },
+      // AG-015/B6: LangGraph threads the run's AbortSignal into every tool's
+      // RunnableConfig — without forwarding it here, an outer turn-timeout or
+      // budget abort never reached the spawned CLI process at all.
+      _signal: config.signal,
     });
     if (!res.success) {
       return `Claude Code failed: ${res.error}`;

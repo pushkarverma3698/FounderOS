@@ -39,17 +39,32 @@ export class TurnTimeoutError extends Error {
  * AbortController.abort so the orphaned work actually stops instead of racing
  * the next turn. The timer is always cleared (success, failure, or timeout)
  * so a resolved turn never keeps the event loop alive.
+ *
+ * `onArm`, if given, is called synchronously with a `touch()` function that
+ * re-arms the deadline `ms` from NOW. Without this a single graph step that
+ * runs one long tool call (e.g. `claude_code`, own budget 15 minutes) yields
+ * no intermediate LangGraph state — nothing resets a fixed timer — so the
+ * outer guard always fires at `ms` regardless of whether the tool is still
+ * genuinely working (AG-015/B5). Callers wire `touch()` to real signs of life
+ * (a new graph state, a tool's own progress stream) so a genuinely hung run
+ * still times out at `ms` of true silence, while an actively-working one
+ * doesn't. Never call `touch()` from a fixed interval — that defeats the
+ * guard's entire purpose by masking a real hang.
  */
 export function withTurnTimeout<T>(
   promise: Promise<T>,
   ms: number,
   label = "office.invoke",
   onDeadline?: () => void,
+  onArm?: (touch: () => void) => void,
 ): Promise<T> {
   if (!Number.isFinite(ms) || ms <= 0) return promise;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_resolve, reject) => {
+  let reject!: (err: unknown) => void;
+
+  const arm = (): void => {
+    if (timer !== undefined) clearTimeout(timer);
     timer = setTimeout(() => {
       try {
         onDeadline?.();
@@ -63,7 +78,14 @@ export function withTurnTimeout<T>(
       promise.catch(() => undefined); // allow-failopen: the timeout error is already propagating to the caller
       reject(new TurnTimeoutError(ms, label));
     }, ms);
+  };
+
+  const deadline = new Promise<never>((_resolve, rejectFn) => {
+    reject = rejectFn;
+    arm();
   });
+
+  onArm?.(arm);
 
   return Promise.race([promise, deadline]).finally(() => {
     if (timer !== undefined) clearTimeout(timer);
