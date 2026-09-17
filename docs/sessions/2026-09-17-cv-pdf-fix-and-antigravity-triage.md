@@ -1,4 +1,4 @@
-# 2026-09-17 — CV/PDF slop false-positive fix, senior-role backfill, Antigravity branch triage
+# 2026-09-17 — CV/PDF fix, senior-role backfill, kernel-timeout fix, Antigravity branch triage
 
 ## What we did
 
@@ -54,6 +54,21 @@ wiring; pr-brain/agent-dispatch health) while personally root-causing the CV/PDF
   `TRANSIENT_PREFIXES` didn't include the "📝 Tailoring your CV..." progress message, so the probe
   reported success 30–80s too early on a non-answer. Found and fixed while doing the live
   verification above; without it, the CV/PDF fix could not have been genuinely verified end-to-end.
+- **AG-015 (kernel turn-timeout, B5/B6/B7) — the real fix, not Antigravity's partial attempt.**
+  [PR #702](https://github.com/pushkarverma3698/FounderOS/pull/702), merged and deployed
+  (`ActiveEnterTimestamp` moved to `2026-09-17 07:02:07 UTC`). Three defects from one incident:
+  the 300s outer turn-timeout always fired before `claude_code`'s own 15-minute budget could ever
+  matter (B5) — fixed by making the deadline touch()-able, reset by real LangGraph state
+  transitions AND by a new `configurable.onTurnActivity` channel that lets a single long tool call
+  report its own progress as activity, since one graph node can run `claude_code` for its whole
+  duration with zero intermediate state; a truly hung run with neither kind of activity still times
+  out at 300s unchanged. An outer abort never reached the spawned `claude` CLI child process at all
+  (B6) — fixed by threading `RunnableConfig.signal` through as `_signal`. The resume path's phantom
+  HITL-approval-row cleanup only ran on success, leaving timeouts orphaned forever (B7) — moved into
+  a `finally`, extracted to `resume-artifact-cleanup.ts` since `kernel-run.ts` was at the 400-line
+  budget. 9 new tests, `pnpm gate` green throughout. Live verification of the exact failure mode
+  (a real 300s+ `claude_code` run) was not run — real token/time cost — flagged honestly as
+  NOT VERIFIED live rather than claimed.
 
 ## Why
 
@@ -80,28 +95,32 @@ out to be blocked or already-fine rather than something to build:
   most relevant to this session's bug (confirmed zero file overlap with the CV/PDF or level-gate
   code). 3 newer ones (nominally AG-015/016/020) each solve a smaller or different problem than
   their actual brief — none closes what it claims to, though each is a small, harmless, honest
-  side-fix on its own. The real AG-015 (turn timeout shorter than the tools it wraps — B5/B6/B7,
-  Tier-0 in an earlier audit) is still fully open. This is concrete evidence for the founder's "we
-  are still merging AI slop" complaint, not just a feeling — and it's what PR #698's new rules
-  (#34–36) exist to catch going forward.
+  side-fix on its own. This is concrete evidence for the founder's "we are still merging AI slop"
+  complaint, not just a feeling — and it's what PR #698's new rules (#34–36) exist to catch going
+  forward. The real AG-015 (turn timeout shorter than the tools it wraps — B5/B6/B7, Tier-0 in an
+  earlier audit) was picked up and fixed directly rather than re-dispatched — see PR #702 above.
 
 ## Metrics
 
-- `pnpm gate`: green throughout every merge (399 files / 4,440–4,444 tests depending on branch).
+- `pnpm gate`: green throughout every merge (399 files / 4,440→4,453 tests as fixes landed).
 - CV/PDF fix: 4 new regression tests, all using real rejected prod text; 0 regressions in
   `cover-letter.test.ts` / `tailor-cv-grounding.test.ts`.
 - Senior-role backfill: 15/~230 Pushkar rows corrected (0 Tashi rows needed correction).
-- 3 PRs merged to `main` (#697, #698, #700), 1 real deploy watched and confirmed
-  (`ActiveEnterTimestamp` moved to `2026-09-17 05:53:49 UTC`, after the merges).
+- AG-015 (kernel timeout): 9 new tests (fake-timer + a real spawned-process abort test); fixed a
+  self-introduced LOC-budget and fail-open-catch ratchet violation before merge.
+- 5 PRs merged to `main` (#697, #698, #700, #702, plus this doc's own #701) — 2 real deploys
+  watched and confirmed (`ActiveEnterTimestamp` moved to `2026-09-17 05:53:49 UTC` then again to
+  `07:02:07 UTC`, both after their respective merges).
 - 2 live Telegram round-trips against the real production bot, both successful post-deploy.
 - 8 Antigravity branches investigated; 0 merged (5 dead, 3 partial/mis-scoped); 1 small unclaimed
   feature identified (`/tashijobs` + menu pruning) for later hand-porting.
 
 ## Outstanding
 
-1. **AG-015 (kernel timeout, B5/B6/B7) — still fully open, Tier-0.** `OFFICE_TURN_TIMEOUT_MS` (300s,
-   `src/gateway/kernel-run.ts`) still wraps `claude_code`'s 15-minute tool budget; no `AbortSignal`
-   kills the child process on timeout; HITL cleanup still runs outside `finally`. Next priority.
+1. **AG-015 live verification.** The B5/B6/B7 fix (PR #702) is merged and deployed but the exact
+   original failure mode (a real 300s+ `claude_code` run) was never reproduced live — that needs a
+   real multi-minute engineering task dispatched through Telegram, at real token/time cost. Fake-timer
+   unit tests cover the timing/threading logic; this is the one piece those can't substitute for.
 2. **5 dead Antigravity branches + their worktrees** (`fix/tashi-pipeline-parity`,
    `fix/gateway-echo-and-personio`, `fix/infra-and-path-resolution`,
    `fix/scheduler-and-funding-grower`, `fix/telegram-ux-routing`) — confirmed superseded, safe to
@@ -112,7 +131,7 @@ out to be blocked or already-fine rather than something to build:
    residual gap) is still technically undone, though the evidence gathered this session strongly
    suggests it's already fixed and just needs a closing comment on the relevant issue.
 5. **AG-014 (OAuth invalid_grant), AG-017 (judge Nemotron parsing), AG-019 (LangSmith PII
-   scrubbing)** — not started. Lower priority than AG-015; not blocking today's demo.
+   scrubbing)** — not started. Lower priority; not blocking today's demo.
 6. Founder should personally spot-check one or two of the newly-corrected "TOO SENIOR / TOO JUNIOR"
    rows in the live brief (`/jobs`) before relying on this fully — this session verified via direct
    script invocation and one live `/draft` per profile, not a full `/jobs` read-through.
