@@ -12,6 +12,7 @@ import {
   parseJudgeVerdict,
   judgeOutbound,
   isJudgeEnabled,
+  errorMessage,
   _resetJudgeCache,
   _resetJudgeModel,
   type JudgeModel,
@@ -52,6 +53,40 @@ describe("parseJudgeVerdict", () => {
   it("FAILS OPEN to pass when verdict says revise but critique is missing", () => {
     // Without an actionable critique a 'revise' is useless — degrade to pass.
     expect(parseJudgeVerdict('{"verdict":"revise"}')).toEqual({ verdict: "pass" });
+  });
+});
+
+describe("errorMessage (AG-017 — 'dead again' judge crash)", () => {
+  it("reads .message off a real Error unchanged", () => {
+    expect(errorMessage(new Error("anthropic 529 overloaded"))).toBe("anthropic 529 overloaded");
+  });
+
+  it("does NOT crash on a non-Error thrown value — the original defect", () => {
+    // (err as Error).message on a plain object is `undefined`, not a throw — but on
+    // some caught values (including what OpenRouter's client can reject with) the
+    // property access itself threw "Cannot read properties of undefined (reading
+    // 'message')" INSIDE the catch handler, replacing the real outage reason.
+    expect(errorMessage({ code: "ECONNRESET" })).toBe('{"code":"ECONNRESET"}');
+    expect(errorMessage("raw string rejection")).toBe("raw string rejection");
+    expect(errorMessage(undefined)).toBe("undefined");
+  });
+
+  it("names the real cause instead of passing through the opaque zero-completions crash text", () => {
+    // The exact string @langchain/core@1.1.49's BaseChatModel.invoke() throws when
+    // a provider response has an empty `choices` array (rate-limited, content-
+    // filtered, or a reasoning model exhausting its budget) — see judge-model.ts.
+    // Fix #1 (instanceof Error) stopped this from crashing the handler, but it
+    // still passed the raw engine string through, which reads as a parsing defect
+    // to anyone triaging the outage. This is the "again" AG-017 exists to close.
+    const zeroCompletions = new Error("Cannot read properties of undefined (reading 'message')");
+    const message = errorMessage(zeroCompletions);
+    expect(message).not.toBe("Cannot read properties of undefined (reading 'message')");
+    expect(message).toContain("zero completions");
+    expect(message.toLowerCase()).toContain("rate-limiting");
+  });
+
+  it("does not misfire on an unrelated Error that merely mentions 'message'", () => {
+    expect(errorMessage(new Error("invalid message format"))).toBe("invalid message format");
   });
 });
 

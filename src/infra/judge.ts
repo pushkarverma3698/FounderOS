@@ -29,18 +29,48 @@ export { isJudgeEnabled, _resetJudgeModel } from "./judge-model.js";
 const log = childLogger({ module: "judge" });
 
 /**
+ * The literal text @langchain/core@1.1.49's `BaseChatModel.invoke()` throws for a
+ * zero-completions response: `generatePrompt(...).generations[0][0].message` with no
+ * bounds check, when a provider's response has an empty/missing `choices` array — a
+ * real, expected shape for a free-tier model that rate-limits, content-filters, or
+ * exhausts its token budget on hidden reasoning before emitting a completion (AG-017,
+ * 2026-09-17). Matched with `.includes()`, not equality, in case the engine
+ * prefixes/suffixes it; if a future LangChain version changes this string, the check
+ * simply stops matching and errorMessage() falls back to the raw message — never worse
+ * than before, only sometimes less specific.
+ */
+const ZERO_COMPLETIONS_SIGNATURE = "Cannot read properties of undefined (reading 'message')";
+
+/** What the signature above actually means, in words a founder reading an outage alert can act on. */
+const ZERO_COMPLETIONS_REASON =
+  "judge model returned zero completions (provider response had an empty/missing choices " +
+  "array — typically rate-limiting, content filtering, or a reasoning model exhausting its " +
+  "token budget before answering, not a parsing defect)";
+
+/**
  * A caught value → its message, without assuming it's an Error. `(err as Error).message`
  * crashes with "Cannot read properties of undefined (reading 'message')" when the caught
  * value isn't an Error instance — LangChain's OpenAI-compatible client can reject with a
  * non-Error value (observed in prod 2026-09-08T07:29, 2026-09-10T12:50). That crash
  * happens INSIDE the fail-open catch block, so it silently replaces the real judge-outage
  * reason with a TypeError, which then got misdiagnosed as "the free slug died again."
+ *
+ * Exported so every judge implementation shares this ONE safe extraction — AG-017 found
+ * `scripts/lib/content-judge.ts` running an un-generalized copy of the exact unsafe cast
+ * this function exists to eliminate (fix applied here 2026-09-14 was never carried over).
  */
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
+export function errorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    if (err.message.includes(ZERO_COMPLETIONS_SIGNATURE)) return ZERO_COMPLETIONS_REASON;
+    return err.message;
+  }
   if (typeof err === "string") return err;
   try {
-    return JSON.stringify(err);
+    // JSON.stringify returns the VALUE undefined (not the string) for undefined,
+    // functions, and symbols — typed as `string` but not actually one at runtime.
+    // Fall back to String() so this function's own "never throws, always a string"
+    // contract holds for every input, not just the common ones.
+    return JSON.stringify(err) ?? String(err);
   } catch {
     return String(err);
   }
