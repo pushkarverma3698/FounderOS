@@ -92,8 +92,14 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
 
   it("still pins the production model and stable fallbacks", () => {
     const rendered = render("", SNAPSHOT_BASE + "AGENT_MODEL=something-else\n");
-    expect(valueOf(rendered, "AGENT_MODEL")).toBe("google-genai:gemini-flash-latest");
+    expect(valueOf(rendered, "AGENT_MODEL")).toBe("google-genai:gemini-3.6-flash");
     expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain("google-genai:");
+  });
+
+  it("pins the judge model, overriding any stale snapshot value", () => {
+    const rendered = render("", SNAPSHOT_BASE + "JUDGE_MODEL=something-else\n");
+    expect(valueOf(rendered, "JUDGE_MODEL")).toBe("google-genai:gemini-3.1-flash-lite");
+    expect(countOf(rendered, "JUDGE_MODEL"), "no stale duplicate survives").toBe(1);
   });
 
   it("preserves on-box MCP_BRIDGE_ENABLED absent from PROD_DOTENV", () => {
