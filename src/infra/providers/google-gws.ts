@@ -8,6 +8,7 @@
 import { childLogger } from "../logger.js";
 import { runGws } from "../gws-runner.js";
 import { getGoogleAccount } from "../account-registry.js";
+import { alertOnCredentialFailure, clearCredentialAlert } from "../provider-probes.js";
 import type { ToolResult } from "../../tools/index.js";
 import {
   extractGwsMessageIds,
@@ -21,6 +22,17 @@ import type {
 } from "./types.js";
 
 const log = childLogger({ module: "provider:gws" });
+
+/**
+ * AG-014: shown instead of the raw gws error when the failure is a dead/revoked
+ * grant. A raw `invalid_grant` string read like a parsing defect to anything
+ * downstream (the model, a retry loop) — this names what it actually is and
+ * that retrying will not help. The founder has separately been alerted by
+ * `alertOnCredentialFailure` (provider-probes.ts).
+ */
+const GOOGLE_REAUTH_ERROR =
+  "Google account needs re-authorization — the refresh token was revoked or expired. This will " +
+  "not resolve on retry; the founder has been notified and must re-authorize manually.";
 
 async function gwsOpts(input: { account_key?: string; department?: string }) {
   const { credentials, ctx } = await getGoogleAccount({
@@ -44,8 +56,12 @@ export async function gwsReadEmails(input: ReadEmailsInput, timeoutMs = 30_000):
   );
   if (!listed.ok) {
     log.error({ err: listed.error, query: input.query }, "gws Gmail list failed");
+    if (await alertOnCredentialFailure("active_gmail", listed.error)) {
+      return { success: false, error: GOOGLE_REAUTH_ERROR };
+    }
     return { success: false, error: `gws Gmail read failed: ${listed.error}` };
   }
+  clearCredentialAlert("active_gmail");
 
   const ids = extractGwsMessageIds(listed.parsed);
   if (ids.length === 0) {
@@ -78,8 +94,12 @@ export async function gwsSendEmail(input: SendEmailInput, timeoutMs = 30_000): P
   const result = await runGws(args, timeoutMs, { gwsProfileDir: opts.gwsProfileDir });
   if (!result.ok) {
     log.error({ err: result.error, to: input.to }, "gws Gmail send failed");
+    if (await alertOnCredentialFailure("active_gmail", result.error)) {
+      return { success: false, error: GOOGLE_REAUTH_ERROR };
+    }
     return { success: false, error: `gws Gmail send failed: ${result.error}` };
   }
+  clearCredentialAlert("active_gmail");
 
   const parsed = result.parsed;
   const messageId = extractGwsMessageId(parsed);
@@ -114,8 +134,12 @@ export async function gwsCreateCalendarEvent(
   const result = await runGws(args, timeoutMs, { gwsProfileDir: opts.gwsProfileDir });
   if (!result.ok) {
     log.error({ err: result.error, title: input.title }, "gws Calendar insert failed");
+    if (await alertOnCredentialFailure("active_calendar", result.error)) {
+      return { success: false, error: GOOGLE_REAUTH_ERROR };
+    }
     return { success: false, error: `gws Calendar create failed: ${result.error}` };
   }
+  clearCredentialAlert("active_calendar");
 
   const eventId = extractGwsEventId(result.parsed);
   if (!eventId) {

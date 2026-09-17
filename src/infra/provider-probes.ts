@@ -253,6 +253,55 @@ export function formatProviderAuthAlert(failures: readonly ProviderAuthFailure[]
   );
 }
 
+// ── Live-call credential-failure alerting (AG-014) ──────────────────────────
+//
+// `runProviderSmokeAtBoot` above only runs once, at process start (src/index.ts).
+// A grant that's fine at boot but revoked hours later isn't caught until the
+// next restart — which could be days, and today's live Gmail/Calendar calls
+// (src/infra/providers/google-gws.ts) have no equivalent handling: a mid-session
+// invalid_grant just returns a generic tool error, unclassified. This lets a
+// live call classify its own failure and alert immediately, deduped per
+// capability so a burst of failed calls sends ONE message — same shape as
+// judge-health.ts's alerted/reset pattern.
+
+/** Capabilities the founder has already been told are down THIS episode. */
+const alertedCapabilities = new Set<string>();
+
+/**
+ * Classify a live tool-call failure. Alerts the founder once per outage episode
+ * if it's a dead credential; no-op (returns false, never notifies) for a
+ * transient failure — those self-heal and an alert on one would train the
+ * founder to ignore the channel (same reasoning as isCredentialFailure itself).
+ *
+ * Returns whether this WAS a credential failure (regardless of whether this
+ * particular call sent the notification) so the caller can still choose the
+ * "needs re-authentication" error message on every occurrence, not just the first.
+ */
+export async function alertOnCredentialFailure(
+  provider: string,
+  detail: string | undefined,
+  notify: (html: string) => Promise<void> = defaultNotify,
+): Promise<boolean> {
+  if (!isCredentialFailure(detail)) return false;
+  if (alertedCapabilities.has(provider)) return true; // already told the founder this episode
+  alertedCapabilities.add(provider);
+  await notify(formatProviderAuthAlert([{ provider, detail }])).catch((err) =>
+    // allow-failopen: a Telegram blip must not throw out of the calling tool
+    log.warn({ err: (err as Error).message, provider }, "Live credential-failure alert send failed"),
+  );
+  return true;
+}
+
+/** Call after a SUCCESSFUL live call so the next failure alerts again (new episode). */
+export function clearCredentialAlert(provider: string): void {
+  alertedCapabilities.delete(provider);
+}
+
+/** Test seam. */
+export function _resetCredentialAlerts(): void {
+  alertedCapabilities.clear();
+}
+
 export async function runProviderSmokeAtBoot(
   notify: (html: string) => Promise<void> = defaultNotify,
 ): Promise<void> {

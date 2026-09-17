@@ -2,7 +2,7 @@
 
 **Milestone:** issue #687 item 1 (split — see `docs/plans/2026-09-16-issue-687-resolution-plan.md`)
 **Branch:** `task/issue-<N>-oauth-invalid-grant` — cut from fresh `origin/beta`. PR base: `beta`.
-**Status:** ready to dispatch pending founder go-ahead (not yet filed as a GitHub issue)
+**Status:** ✅ FIXED 2026-09-17 — see "Verification result" at the bottom.
 
 **Read [STANDARDS.md](STANDARDS.md) in full before writing any code. It is binding.**
 
@@ -87,3 +87,59 @@ crash, and — per [[docs/plans/2026-09-16-recurring-failure-patterns-and-behavi
 #36 — one real-path assertion (a `read_logs` grep showing the new clean-failure message in place of
 the old crash trace, or an explicit **NOT VERIFIED — reason** if a live reproduction isn't
 possible in this environment).
+
+---
+
+## Verification result (2026-09-17)
+
+**Which provider owns this:** confirmed via prod `.env` — `GMAIL_BACKEND=gws`,
+`CALENDAR_BACKEND=gws` — so `src/infra/providers/google-gws.ts` is the live path.
+`google-composio.ts` and `google-direct.ts` were not touched.
+
+**Reproduced — this was NOT a hypothetical.** `runProviderSmokeAtBoot` (boot-only, `src/index.ts`)
+already classified and alerted on `invalid_grant`, but grepping 60 days of prod logs for
+`"module":"provider:gws"` (the LIVE call path, not the boot probe) found real, founder-initiated
+tool calls hitting this exact error with zero classification:
+
+```
+Aug 08 06:43:40 … {"module":"provider:gws","err":"...invalid_grant: Bad Request...",
+  "query":"in:inbox","msg":"gws Gmail list failed"}
+Aug 14 04:17:42 … {"module":"provider:gws","err":"...invalid_grant: Bad Request...",
+  "query":"in:sent after:2026/06/30 before:2026/08/01","msg":"gws Gmail list failed"}
+Aug 14 08:28:07 … {"module":"provider:gws","err":"...invalid_grant: Bad Request...",
+  "query":"in:sent after:2026/06/30 before:2026/08/01","msg":"gws Gmail list failed"}
+```
+
+**Confirmed which failure mode:** neither "crashes" nor "silent" — it returned
+`{success:false, error: "gws Gmail read failed: <raw gws stderr>"}`, a normal `ToolResult` failure
+with no special classification, no founder alert, and no "this cannot be retried" signal. The
+founder would only learn about it from the NEXT process restart's boot probe — which, per the
+Aug 20 log window (10 restarts in 27 hours), can be minutes away or can be days away depending on
+uptime.
+
+**Fix:**
+- `alertOnCredentialFailure()` / `clearCredentialAlert()` added to `provider-probes.ts`: classify a
+  live failure, alert once per outage episode (deduped, same shape as `judge-health.ts`), reset on
+  the next success.
+- `google-gws.ts`'s three live call sites (`gwsReadEmails`, `gwsSendEmail`,
+  `gwsCreateCalendarEvent`) now call it on failure and return a clear
+  "needs re-authorization... will not resolve on retry" message instead of the raw gws stderr, and
+  clear the episode on success.
+- Per "explicitly forbidden": no retry-with-backoff added (not a transient error); `google-composio.ts`
+  and `google-direct.ts` untouched.
+
+**Verify:**
+```
+$ npx vitest run tests/unit/infra/providers/google-gws.test.ts tests/unit/infra/provider-credential-alert.test.ts
+ Test Files  2 passed (2)
+      Tests  14 passed (14)
+
+$ pnpm gate
+ Test Files  401 passed (401)
+      Tests  4467 passed (4467)
+```
+Live reproduction of the fix itself (deliberately revoking the real prod Gmail/Calendar grant to
+confirm the new alert fires) was **NOT attempted** — that would break real Gmail/Calendar access
+for the founder to test a code path already proven correct at the unit level against the exact
+real historical error string. Unit-level reproduction against genuine prod log lines (above) is
+the proportionate verification here.
