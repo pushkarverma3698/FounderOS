@@ -277,6 +277,15 @@ export const claudeCodeTool: UnifiedTool = {
     // module stays free of Telegram imports for tests.
     const onProgress = args["_onProgress"] as ((line: string) => void) | undefined;
 
+    // The turn-level AbortSignal (src/gateway/turn-timeout.ts), threaded down
+    // from LangChain's RunnableConfig.signal via the agent-tools wrapper.
+    // AG-015/B6: before this, an outer-guard abort never reached this function
+    // at all — the spawned `claude` CLI kept running (real repo/GitHub side
+    // effects) after the founder was told the turn had stopped. This is
+    // SEPARATE from TIMEOUT_MS below, which is this tool's own generous
+    // internal budget for a run that is still genuinely working.
+    const signal = args["_signal"] as AbortSignal | undefined;
+
     const cliArgs = binaryOverride
       ? [] // test seam: /bin/pwd, /bin/false, /bin/echo run argument-free
       : [
@@ -307,6 +316,7 @@ export const claudeCodeTool: UnifiedTool = {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
         resolvePromise(result);
       };
 
@@ -319,6 +329,21 @@ export const claudeCodeTool: UnifiedTool = {
           error: `Claude Code timed out after ${TIMEOUT_MS / 60_000} minutes. Partial progress may exist in ${cwd}. Last status: ${lastAssistantLine || "n/a"}`,
         });
       }, TIMEOUT_MS);
+
+      // AG-015/B6: the turn that dispatched this tool call was stopped
+      // (outer timeout or budget cap) — kill the real process instead of
+      // leaving it to mutate the workspace/repo unsupervised.
+      const onAbort = () => {
+        log.warn({ task: task.slice(0, 80) }, "claude_code aborted externally — killing child");
+        child.kill("SIGTERM");
+        setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
+        settle({
+          success: false,
+          error: `Claude Code was aborted (the turn stopped). Partial progress may exist in ${cwd}. Last status: ${lastAssistantLine || "n/a"}`,
+        });
+      };
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener("abort", onAbort, { once: true });
 
       const rl = createInterface({ input: child.stdout });
       rl.on("line", (line) => {

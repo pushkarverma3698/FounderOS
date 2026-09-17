@@ -29,6 +29,7 @@ import { isModelFallbackError } from "../agents/model.js";
 import { enqueueTurnAutoRetry } from "./auto-retry.js";
 import { recordFailedTurnInHistory, type FoldableKernel } from "./failed-turn-fold.js";
 import { streamKernelTurn, progressLabelFor } from "./kernel-progress.js";
+import { cleanupResumeArtifact } from "./resume-artifact-cleanup.js";
 
 // Progress streaming lives in ./kernel-progress.ts; re-exported so the gateway's
 // public surface (and its tests) keep addressing kernel-run.
@@ -164,10 +165,17 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
 
       const kernel = await getKernel();
       budget = makeRunBudget();
+      // AG-015/B5: assigned once withTurnTimeout arms below; referenced here
+      // by closure before that happens — see the ordering note on touch().
+      let touch: (() => void) | undefined;
       const config = {
         configurable: {
           thread_id: threadIdFor(chatId),
           ...(profileId ? { profile_id: profileId } : {}),
+          // Fine-grained keep-alive for a single long tool call (claude_code,
+          // own budget 15min) that yields no new LangGraph state for its whole
+          // run — src/agents/agent-tools/engineering.ts reads this.
+          onTurnActivity: () => touch?.(),
         },
         recursionLimit: OFFICE_RECURSION_LIMIT,
         callbacks: [budget.callback, new TraceCallback(trace)],
@@ -194,10 +202,20 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
             },
             { ...config, streamMode: "values", signal: abort.signal },
           ) as Promise<AsyncIterable<unknown>>,
+          () => touch?.(),
         ),
         OFFICE_TURN_TIMEOUT_MS,
         "kernel.invoke",
         () => abort.abort(),
+        // Ordering: this fires synchronously inside withTurnTimeout, which is
+        // called AFTER the two `touch?.()` closures above are already
+        // constructed (JS evaluates call arguments before invoking) but
+        // BEFORE either closure is ever actually invoked (that needs a real
+        // graph state or tool progress line, both well after this point) —
+        // so `touch` is always assigned by the time it matters.
+        (fn) => {
+          touch = fn;
+        },
       );
 
       const approval = (await getPendingKernelApproval(kernel, config)) as ApprovalRequest | null;
@@ -238,8 +256,9 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
       }
       const kernel = await getKernel();
       budget = makeRunBudget();
+      let touch: (() => void) | undefined;
       const config = {
-        configurable: { thread_id: threadId },
+        configurable: { thread_id: threadId, onTurnActivity: () => touch?.() },
         recursionLimit: OFFICE_RECURSION_LIMIT,
         callbacks: [budget.callback, new TraceCallback(trace)],
       };
@@ -247,42 +266,44 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
       trace.event("hitl.resume", { decision });
 
       const abort = budget;
-      const res = await withTurnTimeout(
-        streamKernelTurn(
-          ctx,
-          trace,
-          kernel.stream(new Command({ resume: decision }), {
-            ...config,
-            streamMode: "values",
-            signal: abort.signal,
-          }) as Promise<AsyncIterable<unknown>>,
-        ),
-        OFFICE_TURN_TIMEOUT_MS,
-        "kernel.resume",
-        () => abort.abort(),
-      );
+      let approval: ApprovalRequest | null = null;
+      try {
+        const res = await withTurnTimeout(
+          streamKernelTurn(
+            ctx,
+            trace,
+            kernel.stream(new Command({ resume: decision }), {
+              ...config,
+              streamMode: "values",
+              signal: abort.signal,
+            }) as Promise<AsyncIterable<unknown>>,
+            () => touch?.(),
+          ),
+          OFFICE_TURN_TIMEOUT_MS,
+          "kernel.resume",
+          () => abort.abort(),
+          (fn) => {
+            touch = fn;
+          },
+        );
 
-      // A multi-step plan can pause again on the NEXT gated step.
-      const approval = (await getPendingKernelApproval(kernel, config)) as ApprovalRequest | null;
-      if (approval) {
-        trace.event("hitl.interrupt", { title: approval.title });
-        await sendApprovalCard(ctx, approval);
-        return;
+        // A multi-step plan can pause again on the NEXT gated step.
+        approval = (await getPendingKernelApproval(kernel, config)) as ApprovalRequest | null;
+        if (approval) {
+          trace.event("hitl.interrupt", { title: approval.title });
+          await sendApprovalCard(ctx, approval);
+          return;
+        }
+
+        const reply = kernelReply(res as never);
+        trace.event("turn.out", { replyPreview: reply.slice(0, 200) });
+        await sendReply(ctx, reply);
+      } finally {
+        // AG-015/B7: runs on every exit above — success, re-pause, timeout,
+        // or any other error. See resume-artifact-cleanup.ts for why.
+        await cleanupResumeArtifact(kernel, config, threadId, decision, approval);
       }
-
-      // interrupt() re-execution re-inserts a pending hitl_approvals row
-      // (hitlGate cannot tell a resume re-run from a fresh gate). The graph
-      // checkpoint is the source of truth: it is NOT paused here, so any
-      // still-pending row for this thread is that artifact — resolve it with
-      // the founder's decision so no phantom card can ever be restored.
-      const orphan = await getPendingInterrupt(threadId);
-      if (orphan) {
-        await resolveInterrupt(orphan.interrupt_id, decision);
-      }
-
-      const reply = kernelReply(res as never);
-      trace.event("turn.out", { replyPreview: reply.slice(0, 200) });
-      await sendReply(ctx, reply);
+      return;
     } catch (err) {
       const failure = budget ? failureFor(err, budget) : err;
       trace.event("turn.error", {

@@ -219,6 +219,26 @@ describe("runKernelText", () => {
     expect(config.signal!.aborted).toBe(false); // a completed turn never aborts
   });
 
+  // AG-015/B5. A single graph step running one long tool call (claude_code,
+  // own budget 15min) yields no new LangGraph state for its whole duration —
+  // nothing resets a fixed outer deadline. configurable.onTurnActivity is the
+  // channel src/agents/agent-tools/engineering.ts uses to report real
+  // progress from INSIDE that one step, keeping the outer guard alive.
+  it("exposes configurable.onTurnActivity wired to the turn-timeout's touch()", async () => {
+    const { ctx } = fakeCtx();
+    await runKernelText(ctx, "hello kernel");
+
+    const [, config] = fakeKernel.stream.mock.calls[0]! as unknown as [
+      unknown,
+      { configurable: { onTurnActivity?: () => void } },
+    ];
+    expect(typeof config.configurable.onTurnActivity).toBe("function");
+    // By the time anything would actually call this (claude_code's own
+    // progress stream, well after the turn starts), withTurnTimeout has
+    // already armed and handed back touch() — calling it here must be safe.
+    expect(() => config.configurable.onTurnActivity!()).not.toThrow();
+  });
+
   it("pauses on a pending approval: sends the card with Approve/Reject, no reply", async () => {
     fakeKernel.getState.mockResolvedValue({
       tasks: [
@@ -415,6 +435,41 @@ describe("resumeKernel", () => {
 
     expect(replies.at(-1)!.text).toContain("Second approval?");
     expect(replies.at(-1)!.opts?.reply_markup).toBeDefined();
+  });
+
+  // AG-015/B7. Previously the orphan-row cleanup sat only after a SUCCESSFUL
+  // resume, so a timeout (or any other error, as simulated here) skipped it
+  // entirely, leaving interrupt()'s re-execution artifact stuck forever —
+  // recoverable only by restorePendingApproval resurfacing a stale card.
+  it("resolves interrupt()'s re-execution artifact even when the resume stream throws", async () => {
+    getPendingInterrupt
+      .mockResolvedValueOnce({ interrupt_id: "int-1", created_at: new Date().toISOString() }) // what triggered this resume
+      .mockResolvedValueOnce({ interrupt_id: "int-2", created_at: new Date().toISOString() }); // re-inserted by interrupt() re-execution
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw new Error("simulated stream failure");
+    });
+    const { ctx } = fakeCtx();
+    await resumeKernel(ctx, "approved");
+
+    expect(resolveInterrupt).toHaveBeenCalledWith("int-1", "approved");
+    expect(resolveInterrupt).toHaveBeenCalledWith("int-2", "approved");
+  });
+
+  it("does NOT touch a genuinely new pending approval when cleaning up after a throw", async () => {
+    getPendingInterrupt.mockResolvedValueOnce({ interrupt_id: "int-1", created_at: new Date().toISOString() });
+    // A genuine new pause exists per the checkpoint (getPendingKernelApproval
+    // reads this), even though the stream itself also threw.
+    fakeKernel.getState.mockResolvedValue({
+      tasks: [{ interrupts: [{ value: { kind: "approval", action: "x", title: "Real pause", summary: "s", preview: "", args: {} } }] }],
+    } as never);
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw new Error("simulated stream failure");
+    });
+    const { ctx } = fakeCtx();
+    await resumeKernel(ctx, "approved");
+
+    expect(resolveInterrupt).toHaveBeenCalledTimes(1); // only "int-1", the original trigger
+    expect(resolveInterrupt).toHaveBeenCalledWith("int-1", "approved");
   });
 });
 
