@@ -20,6 +20,8 @@ export class BrowserApplicationExecutor {
   private context: BrowserContext | null = null;
   public page: Page | null = null;
 
+  constructor(private dryRun: boolean = false) {}
+
   async init() {
     if (!this.browser) {
       // Running headless on VPS. If GUI is needed, Xvfb could wrap the node process.
@@ -105,6 +107,12 @@ export class BrowserApplicationExecutor {
     ];
 
     await stateCallback("SUBMITTING");
+    
+    if (this.dryRun) {
+      log.info("Dry run mode: skipping submission click.");
+      return;
+    }
+
     const submitted = await this._clickSubmit(this.page, submitSelectors);
     if (!submitted) {
       throw new BrowserException("Submit button not found", { url: targetUrl, html: await this.page.content() });

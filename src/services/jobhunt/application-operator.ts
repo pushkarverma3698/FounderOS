@@ -10,7 +10,10 @@ import { handleBrowserException } from "./ai-runtime-handler.js";
 const log = childLogger({ module: "jobhunt:operator" });
 
 export class JobApplicationOperator {
-  constructor(private artifactDir: string) {}
+  constructor(
+    private artifactDir: string,
+    private dryRun: boolean = false
+  ) {}
 
   /**
    * Run one iteration of the operator loop: pick one job and process it.
@@ -83,17 +86,22 @@ export class JobApplicationOperator {
     // Begin browser execution
     await this.transitionState(task.id, "OPENING");
     
-    const executor = new BrowserApplicationExecutor();
+    const executor = new BrowserApplicationExecutor(this.dryRun);
     try {
       await executor.execute(packet, task.profile_id, async (newState) => {
         await this.transitionState(task.id, newState);
       });
       
-      await this.transitionState(task.id, "APPLIED");
-      // Update main row
-      await db.update(jobApplications)
-        .set({ stage: "applied", applied_at: new Date() })
-        .where(eq(jobApplications.id, row.id));
+      if (!this.dryRun) {
+        await this.transitionState(task.id, "APPLIED");
+        // Update main row
+        await db.update(jobApplications)
+          .set({ stage: "applied", applied_at: new Date() })
+          .where(eq(jobApplications.id, row.id));
+      } else {
+        await this.transitionState(task.id, "SKIPPED", "Dry run completed successfully");
+        log.info({ taskId: task.id }, "Dry run completed, did not submit.");
+      }
 
     } catch (err: any) {
       log.error({ err }, "Browser automation exception");
