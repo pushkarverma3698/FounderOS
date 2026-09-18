@@ -1,0 +1,10 @@
+#!/usr/bin/expect -f
+set timeout 2
+spawn pnpm db:generate
+expect {
+    "Is * created or renamed" {
+        send "\r"
+        exp_continue
+    }
+    eof
+}

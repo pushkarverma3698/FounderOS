@@ -1186,6 +1186,52 @@ export const jobApplications = agentsSchema.table(
 export type JobApplication = typeof jobApplications.$inferSelect;
 export type NewJobApplication = typeof jobApplications.$inferInsert;
 
+// ── application_tasks (Autonomous Job Application Operator) ───────────────────
+
+/**
+ * Granular state machine for autonomous job application submission.
+ *
+ * Exists to queue, process, and track the browser automation state for jobs that
+ * have been cleared to apply. `job_applications` tracks the overarching pipeline,
+ * while this table tracks the exact automation progress and ensures no job is
+ * applied to twice by the VPS worker.
+ */
+export const applicationTasks = agentsSchema.table(
+  "application_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenant_id: text("tenant_id").notNull(),
+    job_id: uuid("job_id").notNull().references(() => jobApplications.id, { onDelete: "cascade" }),
+    
+    /** WHICH CANDIDATE this task is executing for (e.g., pushkar, wife) */
+    profile_id: text("profile_id").notNull(),
+
+    /**
+     * DISCOVERED | QUEUED | PREPARING | READY | OPENING | FILLING | REVIEWING | 
+     * SUBMITTING | VERIFYING | APPLIED | BLOCKED | FAILED | SKIPPED
+     */
+    state: text("state").notNull().default("QUEUED"),
+
+    /** To track versioning of the application packet if it's regenerated */
+    packet_version: integer("packet_version").notNull().default(1),
+
+    /** Serialized error details from browser executor or AI fallback */
+    error_details: text("error_details"),
+
+    created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => ({
+    /** Mandatory duplicate protection: one operator task per profile/job */
+    dedupeUniq: uniqueIndex("at_dedupe_uniq").on(t.tenant_id, t.profile_id, t.job_id),
+    /** Worker queue polling path: find QUEUED or READY jobs */
+    queueIdx: index("at_queue_idx").on(t.tenant_id, t.state),
+  }),
+);
+
+export type ApplicationTask = typeof applicationTasks.$inferSelect;
+export type NewApplicationTask = typeof applicationTasks.$inferInsert;
+
 // ── cv_signals ────────────────────────────────────────────────────────────────
 
 /**
