@@ -2,7 +2,7 @@
  * FounderOS — Capability Resolver
  * =================================
  * Maps logical capability identifiers (e.g. "career.discovery") to concrete
- * ToolDefinition IDs from the ToolRegistry. The resolver is the bridge between
+ * tool IDs from the ToolRegistry. The resolver is the bridge between
  * a worker's declared capabilities and the actual tools it may invoke.
  *
  * The ToolRegistry remains the authoritative catalog of all tools.

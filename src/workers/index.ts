@@ -43,6 +43,10 @@ export {
   type WorkerToolManifest,
   type ToolManifestEntry,
 } from "./capabilities/manifest.js";
+export {
+  validateCapabilityMappings,
+  validateWorkerCapabilities,
+} from "./capabilities/validation.js";
 
 // ── Worker context ───────────────────────────────────────────────────────────
 export {

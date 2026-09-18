@@ -2,7 +2,7 @@
  * FounderOS — Stub Runtime Adapter
  * ==================================
  * Minimal runtime adapter for testing the contract → lifecycle → runtime flow
- * without requiring any real runtime (Antigravity, Claude Code, OpenClaw).
+ * without requiring any real runtime.
  *
  * Logs lifecycle transitions. Does not execute tools or perform side effects.
  * Tests inject this adapter to verify the full bootstrap/lifecycle pipeline.

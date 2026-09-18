@@ -5,8 +5,7 @@
  *
  * A WorkerContract defines WHO the worker is, WHAT it exists to achieve, WHAT
  * responsibilities it owns, WHAT capabilities it may use, and WHICH runtime
- * currently executes it — without coupling to any specific runtime (Antigravity,
- * Claude Code, OpenClaw).
+ * currently executes it — without coupling to any specific runtime.
  *
  * Contracts are validated with Zod at load time. Runtime code receives the
  * inferred TypeScript type — never raw JSON.
@@ -90,7 +89,7 @@ const WorkerContextRefsSchema = z.object({
 });
 
 const WorkerRuntimeSchema = z.object({
-  /** Runtime provider identifier (e.g. "antigravity", "claude_code", "openclaw"). */
+  /** Runtime provider identifier (). */
   provider: z.string().min(1),
   /** Opaque reference to runtime-specific configuration. */
   configRef: z.string().optional(),

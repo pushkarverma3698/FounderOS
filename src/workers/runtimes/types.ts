@@ -4,7 +4,7 @@
  * Runtime-independent interface for executing workers. The adapter bridges
  * the gap between FounderOS control plane and the actual runtime environment.
  *
- * FounderOS → WorkerRuntimeAdapter → Runtime (Antigravity, Claude Code, OpenClaw)
+ * FounderOS → WorkerRuntimeAdapter → Runtime
  *
  * Business logic NEVER lives inside a runtime adapter. The adapter's job is:
  * - start/stop/pause/resume the runtime
@@ -74,7 +74,7 @@ export interface WorkerRuntimeStatus {
 // ── Adapter interface ────────────────────────────────────────────────────────
 
 export interface WorkerRuntimeAdapter {
-  /** Unique identifier for this runtime provider (e.g. "antigravity", "claude_code"). */
+  /** Unique identifier for this runtime provider. */
   readonly providerId: string;
 
   /** Start a worker with the given contract and bootstrap payload. */

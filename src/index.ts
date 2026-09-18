@@ -31,6 +31,8 @@ import { acquireSingleInstanceLock, releaseSingleInstanceLock, waitForProcessExi
 import { logger } from "./infra/logger.js";
 import type { Server } from "node:http";
 
+export * as workers from "./workers/index.js";
+
 const log = logger.child({ module: "main" });
 
 let healthServer: Server | undefined;
