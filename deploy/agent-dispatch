@@ -50,6 +50,7 @@ WORKSPACE_BASE="${AGENT_DISPATCH_WORKSPACE_BASE:-/opt/agy-workspace}"
 AG_USER="${AGENT_DISPATCH_USER:-antigravity}"
 MAX_CLAIMS="${AGENT_DISPATCH_MAX:-1}"
 MAX_ATTEMPTS="${AGENT_DISPATCH_MAX_ATTEMPTS:-3}"
+AGY_MODEL="${AGENT_DISPATCH_MODEL:-gemini-3.6-flash-medium}"
 LEASE_MIN="${AGENT_DISPATCH_LEASE_MIN:-45}"
 TIMEOUT_SEC="${AGENT_DISPATCH_TIMEOUT_SEC:-1800}"
 ENV_FILE="${AGENT_DISPATCH_ENV_FILE:-/opt/founderos/.env}"
@@ -160,7 +161,7 @@ progress_label_from_log() {
 # copy-pasted; this removes that failure mode going forward.
 run_agy_with_progress() {
   local label_prefix="$1" workspace="$2" prompt_file="$3" agy_log="$4"
-  as_antigravity 'cd "$1" && timeout '"${TIMEOUT_SEC}"' agy --new-project --print "$(cat "$2")" --print-timeout '"$((TIMEOUT_SEC - 120))"'s --dangerously-skip-permissions --output-format text' \
+  as_antigravity 'cd "$1" && timeout '"${TIMEOUT_SEC}"' agy --model '"${AGY_MODEL}"' --new-project --print "$(cat "$2")" --print-timeout '"$((TIMEOUT_SEC - 120))"'s --dangerously-skip-permissions --output-format text' \
     "$workspace" "$prompt_file" >"$agy_log" 2>&1 &
   local agy_pid=$!
 
