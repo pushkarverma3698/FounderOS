@@ -19,10 +19,12 @@ const {
 } = await import("../../../src/tools/dispatch-repos.js");
 
 describe("DISPATCH_REPO_ALLOWLIST", () => {
-  it("contains exactly the two repos the loop is provisioned for", () => {
+  it("contains the repos the loop is provisioned for", () => {
     expect([...DISPATCH_REPO_ALLOWLIST]).toEqual([
       "pushkarverma3698/FounderOS",
       "pushkarverma3698/House-of-Hulda-Website-frontend",
+      "OplifyMessage/oplify-messaging-app",
+      "OplifyMessage/oplify-messaging-api",
     ]);
   });
 
@@ -130,9 +132,9 @@ describe("matchAllowlistedRepos", () => {
   });
 
   it("returns every match for an ambiguous hint so the caller can refuse", () => {
-    // "o" appears in both repo names. Silently picking the first would retarget the
+    // "o" appears in all 4 repo names. Silently picking the first would retarget the
     // dispatch to a repo the founder did not name.
-    expect(matchAllowlistedRepos("o").length).toBe(2);
+    expect(matchAllowlistedRepos("o").length).toBe(4);
   });
 
   it("returns no matches for an unknown hint", () => {
