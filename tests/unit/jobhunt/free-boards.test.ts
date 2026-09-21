@@ -159,6 +159,7 @@ describe("getFreeBoards", () => {
 
   afterEach(() => {
     delete process.env["FREE_ATS_BOARDS_PATH"];
+    delete process.env["FREE_ATS_DISCOVERED_PATH"];
     resetFreeBoardsCache();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -191,6 +192,8 @@ describe("getFreeBoards", () => {
     );
     writeFileSync(okPath, [HEADER, ...rows].join("\n"));
     process.env["FREE_ATS_BOARDS_PATH"] = okPath;
+    // Isolate the discovered-boards path so VPS-local entries don't inflate the count.
+    process.env["FREE_ATS_DISCOVERED_PATH"] = join(dir, "no-discovered.csv");
 
     const boards = getFreeBoards();
 
