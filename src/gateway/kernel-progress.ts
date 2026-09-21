@@ -52,11 +52,19 @@ async function silently(op: string, fn: () => Promise<unknown>): Promise<void> {
  * Sends one placeholder message, edits it as progressLabelFor(state) changes
  * while streaming the kernel turn, and deletes it once the turn ends
  * (success, HITL pause, or error).
+ *
+ * `onActivity`, if given, fires on every yielded state — real sign of life for
+ * `withTurnTimeout`'s `touch()` (AG-015/B5). A step that emits nothing new
+ * (a single long tool call inside one graph node) gets no touch from HERE;
+ * that granularity comes from the tool's own progress channel instead (see
+ * `configurable.onTurnActivity` in kernel-run.ts) — this only covers step-to-
+ * step activity.
  */
 export async function streamKernelTurn(
   ctx: Context,
   trace: ReturnType<typeof startTurn>,
   streamPromise: Promise<AsyncIterable<unknown>>,
+  onActivity?: () => void,
 ): Promise<KernelStateType> {
   let placeholderId: number | undefined;
   await silently("send", async () => {
@@ -69,6 +77,7 @@ export async function streamKernelTurn(
   try {
     const streamIter = await streamPromise;
     for await (const state of streamIter) {
+      onActivity?.();
       lastState = state as KernelStateType;
       const label = progressLabelFor(lastState);
       if (label === null || label === lastLabel) continue;
