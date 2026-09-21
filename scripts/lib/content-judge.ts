@@ -21,6 +21,12 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOpenAI } from "@langchain/openai";
+import { errorMessage } from "../../src/infra/judge.js";
+
+/** Minimal model surface so tests can inject a fake (no network) — mirrors judge.ts's JudgeModel. */
+export interface JudgeChatModel {
+  invoke(input: string): Promise<{ content: unknown }>;
+}
 
 /** The five angles the judge scores, each 1 (broken) … 5 (excellent). */
 export interface ContentScores {
@@ -166,16 +172,26 @@ function buildModel(): BaseChatModel | null {
 /**
  * Judge a single reply. Fail-OPEN: returns a `skipped` PASS on any error so a
  * judge outage never blocks the battery (Layer A is the hard gate).
+ *
+ * `injected` is a test seam only (mirrors src/infra/judge.ts's `opts.model` pattern) —
+ * production callers never pass it, so `buildModel()` still owns real provider wiring.
  */
-export async function judgeReply(taskPrompt: string, reply: string): Promise<ContentVerdict> {
+export async function judgeReply(
+  taskPrompt: string,
+  reply: string,
+  injected?: JudgeChatModel,
+): Promise<ContentVerdict> {
   if (!reply.trim()) return { ok: true, skipped: true, reason: "empty reply (Layer A handles)" };
-  const model = buildModel();
+  const model = injected ?? buildModel();
   if (!model) return { ok: true, skipped: true, reason: "no judge API key — structural-only" };
   try {
     const res = await model.invoke(buildPrompt(taskPrompt, reply));
     const text = typeof res.content === "string" ? res.content : JSON.stringify(res.content);
     return parseContentVerdict(text);
   } catch (err) {
-    return { ok: true, skipped: true, reason: `judge error: ${(err as Error).message}` };
+    // AG-017: was `(err as Error).message` — the exact un-generalized copy of the
+    // crash src/infra/judge.ts's errorMessage() was built to stop. Shared now so
+    // this file can't drift from that fix again (see judge.ts's own header).
+    return { ok: true, skipped: true, reason: `judge error: ${errorMessage(err)}` };
   }
 }
