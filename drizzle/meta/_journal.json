@@ -302,6 +302,13 @@
       "when": 1789721881574,
       "tag": "0042_autonomous_job_operator",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1789722000000,
+      "tag": "0043_worker_runtime_persistence",
+      "breakpoints": true
     }
   ]
 }

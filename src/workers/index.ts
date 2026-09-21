@@ -75,3 +75,34 @@ export {
   type WorkerTask,
 } from "./runtimes/types.js";
 export { StubRuntimeAdapter } from "./runtimes/stub.js";
+
+// ── Milestone 3: Runtime Sessions & Orchestrator ──────────────────────────────
+export {
+  WorkerRuntimeSession,
+  WorkerSessionManager,
+  type SessionStatus,
+  type SessionOptions,
+} from "./runtime/session.js";
+export { WorkerRuntimeOrchestrator } from "./runtime/orchestrator.js";
+export {
+  recoverStrandedWorkers,
+  type RecoveryResult,
+  MAX_WORKER_RECOVERY_ATTEMPTS,
+} from "./lifecycle/crash-recovery.js";
+
+// ── Milestone 3: Database Persistence ────────────────────────────────────────
+export * from "./schema.js";
+export {
+  upsertWorkerContract,
+  getWorkerContract,
+  getWorkerState,
+  updateWorkerState,
+  createWorkerSession,
+  updateWorkerSession,
+  heartbeatWorkerSession,
+  getActiveWorkerSession,
+  recordWorkerProgress,
+  getRecentWorkerProgress,
+  reclaimStrandedWorkers,
+} from "./db/queries.js";
+

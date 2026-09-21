@@ -522,6 +522,8 @@ export type NewDeptSignal = typeof deptSignals.$inferInsert;
 export type KnowledgeEntry = typeof knowledgeEntries.$inferSelect;
 export type NewKnowledgeEntry = typeof knowledgeEntries.$inferInsert;
 
+export * from "../workers/schema.js";
+
 // ── founder_context ───────────────────────────────────────────────────────────
 
 /**
