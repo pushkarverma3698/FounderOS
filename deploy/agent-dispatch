@@ -45,7 +45,15 @@ set -uo pipefail
 LOG="$HOME/.claude/agent-dispatch.log"
 LOCK="$HOME/.claude/agent-dispatch.lock"
 OFF_SWITCH="$HOME/.claude/agent-dispatch.off"
-REPO="${ISSUE_REPO:-pushkarverma3698/FounderOS}"
+DEFAULT_REPOS=("pushkarverma3698/FounderOS" "OplifyMessage/oplify-messaging-app" "OplifyMessage/oplify-messaging-api")
+if [[ -n "${ISSUE_REPOS:-}" ]]; then
+  read -ra ISSUE_REPOS <<<"$ISSUE_REPOS"
+elif [[ -n "${ISSUE_REPO:-}" ]]; then
+  read -ra ISSUE_REPOS <<<"$ISSUE_REPO"
+else
+  ISSUE_REPOS=("${DEFAULT_REPOS[@]}")
+fi
+REPO="${ISSUE_REPOS[0]}"
 WORKSPACE="${AGENT_DISPATCH_WORKSPACE:-/opt/agy-workspace/founderos}"
 AG_USER="${AGENT_DISPATCH_USER:-antigravity}"
 MAX_CLAIMS="${AGENT_DISPATCH_MAX:-1}"
@@ -54,6 +62,17 @@ LEASE_MIN="${AGENT_DISPATCH_LEASE_MIN:-45}"
 TIMEOUT_SEC="${AGENT_DISPATCH_TIMEOUT_SEC:-1800}"
 ENV_FILE="${AGENT_DISPATCH_ENV_FILE:-/opt/founderos/.env}"
 PROGRESS_POLL_SEC="${AGENT_DISPATCH_PROGRESS_POLL_SEC:-20}"
+# Bare `agy` (no --model, no key) authenticates via OAuth and silently runs
+# against whatever default model that quota currently allows — which has
+# been exhausted before. Explicit --model + an API key sidestep OAuth
+# entirely. Read the same way TELEGRAM_* is read above: one grepped line,
+# not a full `source` of $ENV_FILE (which would also pull in every unrelated
+# var and any shell function it defines).
+AGY_MODEL="${AGENT_DISPATCH_MODEL:-gemini-3.6-flash-medium}"
+GEMINI_API_KEY=""
+if [[ -f "$ENV_FILE" ]]; then
+  GEMINI_API_KEY=$(grep -m1 '^GOOGLE_GENERATIVE_AI_API_KEY=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
+fi
 CLAIM_PREFIX="<!-- agent-claimed:"
 ATTEMPT_PREFIX="<!-- agent-attempt:"
 PR_LINK_PREFIX="<!-- agent-pr:"
@@ -155,8 +174,12 @@ progress_label_from_log() {
 # copy-pasted; this removes that failure mode going forward.
 run_agy_with_progress() {
   local label_prefix="$1" workspace="$2" prompt_file="$3" agy_log="$4"
-  as_antigravity 'cd "$1" && timeout '"${TIMEOUT_SEC}"' agy --new-project --print "$(cat "$2")" --print-timeout '"$((TIMEOUT_SEC - 120))"'s --dangerously-skip-permissions --output-format text' \
-    "$workspace" "$prompt_file" >"$agy_log" 2>&1 &
+  # GEMINI_API_KEY passed as a positional arg, not interpolated — same
+  # injection-safety discipline as $workspace/$prompt_file below. Without it
+  # agy falls back to its OAuth default, which is quota-exhausted; this bypasses
+  # that by authenticating with the API key already in $ENV_FILE instead.
+  as_antigravity 'export GEMINI_API_KEY="$3"; cd "$1" && timeout '"${TIMEOUT_SEC}"' agy --new-project --model '"${AGY_MODEL}"' --print "$(cat "$2")" --print-timeout '"$((TIMEOUT_SEC - 120))"'s --dangerously-skip-permissions --output-format text' \
+    "$workspace" "$prompt_file" "$GEMINI_API_KEY" >"$agy_log" 2>&1 &
   local agy_pid=$!
 
   local placeholder_id; placeholder_id=$(progress_send "🔧 ${label_prefix}: starting…")
@@ -190,11 +213,13 @@ as_antigravity() {
   sudo -u "$AG_USER" -- bash -lc "$script" _ "$@"
 }
 
+FORCE_REPO=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
     --list) LIST_ONLY=1; shift ;;
     --issue) FORCE_ISSUE="${2:-}"; shift 2 ;;
+    --repo) FORCE_REPO="${2:-}"; shift 2 ;;
     -h|--help) sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "agent-dispatch: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
@@ -219,9 +244,11 @@ if [[ -f "$LOG" ]] && [[ "$(wc -l <"$LOG")" -gt 20000 ]]; then
 fi
 
 if [[ "$LIST_ONLY" -eq 1 ]]; then
-  echo "agent:ready issues in $REPO:"
-  gh issue list --repo "$REPO" --label agent:ready --state open --json number,title \
-    --jq '.[] | "  #\(.number)  \(.title)"'
+  for r in "${ISSUE_REPOS[@]}"; do
+    echo "agent:ready issues in $r:"
+    gh issue list --repo "$r" --label agent:ready --state open --json number,title \
+      --jq '.[] | "  #\(.number)  \(.title)"'
+  done
   exit 0
 fi
 
@@ -267,6 +294,11 @@ claim_and_implement() {
     --body "${CLAIM_PREFIX} ${claimed_at} --> 🤖 Claimed by agent-dispatch on $(hostname -s). Branch: \`${branch}\`." >/dev/null
 
   prompt_file="$(mktemp /tmp/agent-dispatch-issue-XXXXXX.txt)"
+  local target_branch="main"
+  if git -C "$WORKSPACE" show-ref --verify --quiet refs/remotes/origin/beta 2>/dev/null; then
+    target_branch="beta"
+  fi
+
   chmod 644 "$prompt_file"
   cat >"$prompt_file" <<EOF
 Read docs/antigravity/ISSUE-DRIVEN-CONTRACT.md and docs/antigravity/STANDARDS.md in this repository
@@ -277,7 +309,7 @@ Title: ${title}
 ${body}
 
 You are already on branch ${branch}, checked out from origin/main, in your isolated workspace. Do
-not touch anything outside this repository checkout. Open the PR as a draft targeting beta. Stop
+not touch anything outside this repository checkout. Open the PR as a draft targeting ${target_branch}. Stop
 once the PR is open — do not keep iterating.
 EOF
 
@@ -364,14 +396,6 @@ pick_ready_issue() {
   gh issue list --repo "$REPO" --label agent:ready --state open --json number \
     --jq 'sort_by(.number) | .[0].number // empty'
 }
-
-claims_done=0
-if [[ "$claims_done" -lt "$MAX_CLAIMS" ]]; then
-  next_issue="$(pick_ready_issue)"
-  if [[ -n "$next_issue" ]]; then
-    claim_and_implement "$next_issue" && claims_done=$((claims_done + 1))
-  fi
-fi
 
 # ------------------------------------------------------------ Pass B: recover + re-dispatch
 
@@ -511,7 +535,39 @@ redispatch_unresolved_reviews() {
   done <<<"$issues"
 }
 
-release_stale_claims
-redispatch_unresolved_reviews
+claims_done=0
+WORKSPACE_BASE="${AGENT_DISPATCH_WORKSPACE_BASE:-/opt/agy-workspace}"
+
+for CURRENT_REPO in "${ISSUE_REPOS[@]}"; do
+  export REPO="$CURRENT_REPO"
+  
+  REPO_NAME="$(basename "$REPO")"
+  if [[ "$REPO" == *"FounderOS"* ]]; then
+    export WORKSPACE="${WORKSPACE_BASE}/founderos"
+  else
+    export WORKSPACE="${WORKSPACE_BASE}/${REPO_NAME}"
+  fi
+
+  log "Processing repo: $REPO (workspace: $WORKSPACE)"
+
+  # A forced --issue only ever belongs to one repo. pick_ready_issue() just
+  # returns $FORCE_ISSUE verbatim, blind to which $REPO is active this
+  # iteration — without this check it claims the same-numbered issue in
+  # whichever repo the loop reaches first. Confirmed live 2026-09-21:
+  # kickDispatchTick's own kick (--issue N, no --repo) claimed a FounderOS
+  # issue in place of a same-numbered Oplify one. No --repo given (the old
+  # calling convention) skips nothing, unchanged from before.
+  if [[ -n "$FORCE_ISSUE" && -n "$FORCE_REPO" && "$REPO" != "$FORCE_REPO" ]]; then
+    log "skipping $REPO — forced issue #$FORCE_ISSUE targets $FORCE_REPO"
+  elif [[ "$claims_done" -lt "$MAX_CLAIMS" ]]; then
+    next_issue="$(pick_ready_issue)"
+    if [[ -n "$next_issue" ]]; then
+      claim_and_implement "$next_issue" && claims_done=$((claims_done + 1))
+    fi
+  fi
+
+  release_stale_claims
+  redispatch_unresolved_reviews
+done
 
 log "tick complete — claims=${claims_done}/${MAX_CLAIMS}"

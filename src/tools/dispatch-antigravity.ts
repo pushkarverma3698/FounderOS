@@ -223,7 +223,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
       // issue is already filed at this point: nothing about claiming it sooner may
       // turn a successful dispatch into a reported failure.
       try {
-        kickDispatchTick(data.number);
+        kickDispatchTick(data.number, `${owner}/${repo}`);
       } catch (err) {
         // allow-failopen: cron claims the issue on its next tick regardless.
         log.warn({ issue_number: data.number, err: (err as Error).message }, "dispatch kick failed");

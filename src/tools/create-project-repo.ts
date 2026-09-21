@@ -92,7 +92,8 @@ function provisioningSteps(slug: string): string {
     `  for l in ready working review blocked failed; do gh label create "agent:$l" -R ${slug}; done`,
     `  gh label create antigravity -R ${slug}`,
     ``,
-    `Then add ${slug} to AGENT_DISPATCH_REPOS in the crontab.`,
+    `Then add ${slug} to ISSUE_REPOS in the crontab (AGENT_DISPATCH_REPOS is not read by`,
+    `deploy/agent-dispatch — following the old name here did nothing).`,
   ].join("\n");
 }
 

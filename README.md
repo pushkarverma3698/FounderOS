@@ -7,7 +7,7 @@ Everything in this repository exists because I wanted to answer one question: *h
 FounderOS is a deterministic, contract-first agent kernel that takes real business actions — email, LinkedIn, GitHub, shell — safely, with founder approval and a code-recorded receipt for every one. It runs my studio ([Turicks](https://turicks.com)) end-to-end over Telegram, and it runs my own job search — screening thousands of live postings a week and drafting applications for my approval (`src/tools/jobhunt/`, the single largest production consumer of the kernel). But the interesting part isn't what it does — it's the engineering problems I had to solve to make it reliable.
 
 [![CI](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-3%2C649%20offline%20%240-brightgreen.svg)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-4%2C433%20offline%20%240-brightgreen.svg)](https://github.com/pushkarverma3698/FounderOS/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ---
@@ -22,7 +22,7 @@ Not a demo. These are rows in a Postgres database on a live VPS, reproducible wi
 | **229 human approvals** — 131 approved, **36 rejected** | The approval gate is real, and it has blocked things |
 | **80 real side effects executed** | 24 shell runs · 13 code sessions · 11 GitHub issues · 6 LinkedIn posts · 6 emails · 1 job application · 1 site deploy |
 | **1,843 LLM calls · $2.53 · $0.0014 mean** | Per-call cost attribution across 8 models |
-| **3,649 tests · 332 files · $0 per run** | The full agent graph runs offline in CI — scripted models, no paid calls |
+| **4,433 tests · 397 files · $0 per run** | The full agent graph runs offline in CI — scripted models, no paid calls |
 | **97.3% recall@5 · 0.855 MRR** | Hybrid retrieval, measured — and reranking measured then **rejected** on the evidence |
 | **85% on a 41-task golden set** (routing 90% · tools 96% · HITL 95%) | Behaviour scored against a live model. The previous run said 42% — [the audit](docs/EVAL-AUDIT-2026-08-28.md) found the *harness* was broken, and the fix is what made the real gaps visible |
 | **`regex-routing: 0` · `kernel-purity: 0`** | A CI-enforced architecture-debt ratchet that may only shrink |
@@ -78,7 +78,7 @@ Full detail, with the tools/infra/data layers: [docs/diagrams/01-system-architec
 | **State persistence** | Postgres-checkpointed graph; approval rows written *before* `interrupt()` | Crash mid-approval → restart → pending action survives |
 | **Action claims grounded in receipts, not model output** | `ToolReceipt` required for every action claim; the synthesizer is fed only validated `StepResult`s, never raw tool output | `kernel-e2e: fabricated action` — unproven claims rejected |
 | **Crash-safe human-in-the-loop** | Durable record before interrupt; idempotency key before every send | Process crash during approval → no double-send, no lost state |
-| **Deterministic evaluation** | Temp 0, scripted models offline, pure-function routing | 3,649 tests at $0; byte-identical plans asserted in CI — [how this is evaluated](docs/EVAL.md) |
+| **Deterministic evaluation** | Temp 0, scripted models offline, pure-function routing | 4,433 tests at $0; byte-identical plans asserted in CI — [how this is evaluated](docs/EVAL.md) |
 | **Architecture-debt ratchet** | CI-enforced baseline that may only shrink | `regex-routing = 0`, `gateway-imports = 0`, `kernel-purity = 0` |
 | **Idempotent side effects** | Dedup key checked before every external send | Retry can never double-send an email |
 | **Typed failure taxonomy** | `FailureReport` = stage + component + evidence + retryable | Threads never silently wiped; founder always sees the real error |
@@ -139,7 +139,7 @@ Full detail, with the tools/infra/data layers: [docs/diagrams/01-system-architec
 
 | Tier | What | Cost | When |
 |------|------|------|------|
-| `pnpm test` | 3,649 unit/kernel tests across 332 files, scripted models | $0 | Every commit |
+| `pnpm test` | 4,433 unit/kernel tests across 397 files, scripted models | $0 | Every commit |
 | `pnpm eval` | 41 golden tasks, 3 scoring dimensions (routing · tools · HITL) | ~$0.10 | Per feature branch |
 | `pnpm qa:telegram` | 22-task MTProto founder-simulation against live bot | ~$0.50 | Pre-deploy acceptance |
 

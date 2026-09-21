@@ -28,26 +28,45 @@ describe("kickDispatchTick", () => {
     // This is what keeps every test run, CI run and laptop run inert by default:
     // only the VPS, where the dispatcher actually exists, sets this.
     const spawn = vi.fn();
-    kickDispatchTick(123, spawn);
+    kickDispatchTick(123, "pushkarverma3698/FounderOS", spawn);
     expect(spawn).not.toHaveBeenCalled();
   });
 
   it("does nothing when AGENT_DISPATCH_BIN is blank", () => {
     process.env["AGENT_DISPATCH_BIN"] = "   ";
     const spawn = vi.fn();
-    kickDispatchTick(123, spawn);
+    kickDispatchTick(123, "pushkarverma3698/FounderOS", spawn);
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it("targets the issue it just filed, not a bare tick", () => {
-    // A bare tick scans the agent:ready queue and may claim a DIFFERENT issue —
-    // the founder would watch Antigravity start work he did not just ask for.
+  it("targets the issue it just filed, in the repo it was filed in", () => {
+    // A bare `--issue` tick (no --repo) scans the multi-repo loop and may claim
+    // the same-numbered issue in the WRONG repo — confirmed live 2026-09-21.
     process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
     const spawn = vi.fn();
 
-    kickDispatchTick(670, spawn);
+    kickDispatchTick(670, "pushkarverma3698/FounderOS", spawn);
 
-    expect(spawn).toHaveBeenCalledWith("/home/founderos/bin/agent-dispatch", ["--issue", "670"]);
+    expect(spawn).toHaveBeenCalledWith("/home/founderos/bin/agent-dispatch", [
+      "--issue",
+      "670",
+      "--repo",
+      "pushkarverma3698/FounderOS",
+    ]);
+  });
+
+  it("targets an Oplify repo the same way as FounderOS", () => {
+    process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
+    const spawn = vi.fn();
+
+    kickDispatchTick(42, "OplifyMessage/oplify-messaging-api", spawn);
+
+    expect(spawn).toHaveBeenCalledWith("/home/founderos/bin/agent-dispatch", [
+      "--issue",
+      "42",
+      "--repo",
+      "OplifyMessage/oplify-messaging-api",
+    ]);
   });
 
   it("swallows a throwing spawner — the issue is already filed", () => {
@@ -56,7 +75,7 @@ describe("kickDispatchTick", () => {
       throw new Error("ENOENT");
     });
 
-    expect(() => kickDispatchTick(670, spawn)).not.toThrow();
+    expect(() => kickDispatchTick(670, "pushkarverma3698/FounderOS", spawn)).not.toThrow();
     expect(spawn).toHaveBeenCalled();
   });
 
@@ -64,9 +83,19 @@ describe("kickDispatchTick", () => {
     process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
     const spawn = vi.fn();
 
-    kickDispatchTick(0, spawn);
-    kickDispatchTick(-1, spawn);
-    kickDispatchTick(Number.NaN, spawn);
+    kickDispatchTick(0, "pushkarverma3698/FounderOS", spawn);
+    kickDispatchTick(-1, "pushkarverma3698/FounderOS", spawn);
+    kickDispatchTick(Number.NaN, "pushkarverma3698/FounderOS", spawn);
+
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("refuses a blank repo rather than letting the loop claim the wrong one", () => {
+    process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
+    const spawn = vi.fn();
+
+    kickDispatchTick(670, "", spawn);
+    kickDispatchTick(670, "   ", spawn);
 
     expect(spawn).not.toHaveBeenCalled();
   });
