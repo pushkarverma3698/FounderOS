@@ -45,12 +45,11 @@ set -uo pipefail
 LOG="$HOME/.claude/agent-dispatch.log"
 LOCK="$HOME/.claude/agent-dispatch.lock"
 OFF_SWITCH="$HOME/.claude/agent-dispatch.off"
-ISSUE_REPOS=(${ISSUE_REPOS:-pushkarverma3698/FounderOS})
-WORKSPACE_BASE="${AGENT_DISPATCH_WORKSPACE_BASE:-/opt/agy-workspace}"
+REPO="${ISSUE_REPO:-pushkarverma3698/FounderOS}"
+WORKSPACE="${AGENT_DISPATCH_WORKSPACE:-/opt/agy-workspace/founderos}"
 AG_USER="${AGENT_DISPATCH_USER:-antigravity}"
 MAX_CLAIMS="${AGENT_DISPATCH_MAX:-1}"
 MAX_ATTEMPTS="${AGENT_DISPATCH_MAX_ATTEMPTS:-3}"
-AGY_MODEL="${AGENT_DISPATCH_MODEL:-gemini-3.6-flash-medium}"
 LEASE_MIN="${AGENT_DISPATCH_LEASE_MIN:-45}"
 TIMEOUT_SEC="${AGENT_DISPATCH_TIMEOUT_SEC:-1800}"
 ENV_FILE="${AGENT_DISPATCH_ENV_FILE:-/opt/founderos/.env}"
@@ -58,11 +57,6 @@ PROGRESS_POLL_SEC="${AGENT_DISPATCH_PROGRESS_POLL_SEC:-20}"
 CLAIM_PREFIX="<!-- agent-claimed:"
 ATTEMPT_PREFIX="<!-- agent-attempt:"
 PR_LINK_PREFIX="<!-- agent-pr:"
-
-if [[ -f "$ENV_FILE" ]]; then
-  export $(grep -E '^(TELEGRAM_|GITHUB_TOKEN|OMNIROUTER_|GOOGLE_GENERATIVE_AI_API_KEY)' "$ENV_FILE" | xargs)
-  [[ -n "${GITHUB_TOKEN:-}" ]] && export GH_TOKEN="$GITHUB_TOKEN"
-fi
 
 DRY_RUN=0
 LIST_ONLY=0
@@ -161,7 +155,7 @@ progress_label_from_log() {
 # copy-pasted; this removes that failure mode going forward.
 run_agy_with_progress() {
   local label_prefix="$1" workspace="$2" prompt_file="$3" agy_log="$4"
-  as_antigravity 'cd "$1" && timeout '"${TIMEOUT_SEC}"' agy --model '"${AGY_MODEL}"' --new-project --print "$(cat "$2")" --print-timeout '"$((TIMEOUT_SEC - 120))"'s --dangerously-skip-permissions --output-format text' \
+  as_antigravity 'cd "$1" && timeout '"${TIMEOUT_SEC}"' agy --new-project --print "$(cat "$2")" --print-timeout '"$((TIMEOUT_SEC - 120))"'s --dangerously-skip-permissions --output-format text' \
     "$workspace" "$prompt_file" >"$agy_log" 2>&1 &
   local agy_pid=$!
 
@@ -193,8 +187,7 @@ run_agy_with_progress() {
 # PATH entry for it and every call fails with "command not found".
 as_antigravity() {
   local script="$1"; shift
-  local CMD="export GEMINI_API_KEY=\"\${GOOGLE_GENERATIVE_AI_API_KEY:-}\" AGY_MODEL=\"\${AGY_MODEL:-gemini-3.6-flash-medium}\"; $script"
-  sudo -u "$AG_USER" -- bash -lc "$CMD" _ "$@"
+  sudo -u "$AG_USER" -- bash -lc "$script" _ "$@"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -225,7 +218,12 @@ if [[ -f "$LOG" ]] && [[ "$(wc -l <"$LOG")" -gt 20000 ]]; then
   tail -n 5000 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
 fi
 
-
+if [[ "$LIST_ONLY" -eq 1 ]]; then
+  echo "agent:ready issues in $REPO:"
+  gh issue list --repo "$REPO" --label agent:ready --state open --json number,title \
+    --jq '.[] | "  #\(.number)  \(.title)"'
+  exit 0
+fi
 
 # ---------------------------------------------------------------------- locking
 # Same mkdir-atomic pattern as pr-brain. A single agy invocation is bounded by
@@ -269,6 +267,11 @@ claim_and_implement() {
     --body "${CLAIM_PREFIX} ${claimed_at} --> 🤖 Claimed by agent-dispatch on $(hostname -s). Branch: \`${branch}\`." >/dev/null
 
   prompt_file="$(mktemp /tmp/agent-dispatch-issue-XXXXXX.txt)"
+  local target_branch="main"
+  if git -C "$WORKSPACE" show-ref --verify --quiet refs/remotes/origin/beta 2>/dev/null; then
+    target_branch="beta"
+  fi
+
   chmod 644 "$prompt_file"
   cat >"$prompt_file" <<EOF
 Read docs/antigravity/ISSUE-DRIVEN-CONTRACT.md and docs/antigravity/STANDARDS.md in this repository
@@ -279,7 +282,7 @@ Title: ${title}
 ${body}
 
 You are already on branch ${branch}, checked out from origin/main, in your isolated workspace. Do
-not touch anything outside this repository checkout. Open the PR as a draft targeting beta. Stop
+not touch anything outside this repository checkout. Open the PR as a draft targeting ${target_branch}. Stop
 once the PR is open — do not keep iterating.
 EOF
 
@@ -368,6 +371,12 @@ pick_ready_issue() {
 }
 
 claims_done=0
+if [[ "$claims_done" -lt "$MAX_CLAIMS" ]]; then
+  next_issue="$(pick_ready_issue)"
+  if [[ -n "$next_issue" ]]; then
+    claim_and_implement "$next_issue" && claims_done=$((claims_done + 1))
+  fi
+fi
 
 # ------------------------------------------------------------ Pass B: recover + re-dispatch
 
@@ -507,36 +516,7 @@ redispatch_unresolved_reviews() {
   done <<<"$issues"
 }
 
-
-for CURRENT_REPO in "${ISSUE_REPOS[@]}"; do
-  export REPO="$CURRENT_REPO"
-  
-  REPO_NAME="$(basename "$REPO")"
-  if [[ "$REPO" == *"FounderOS"* ]]; then
-    export WORKSPACE="${WORKSPACE_BASE}/founderos"
-  else
-    export WORKSPACE="${WORKSPACE_BASE}/${REPO_NAME}"
-  fi
-
-  log "Processing repo: $REPO (workspace: $WORKSPACE)"
-  
-  if [[ "$LIST_ONLY" -eq 1 ]]; then
-    echo "agent:ready issues in $REPO:"
-    gh issue list --repo "$REPO" --label agent:ready --state open --json number,title \
-      --jq '.[] | "  #\(.number)  \(.title)"'
-    continue
-  fi
-
-  if [[ "$claims_done" -lt "$MAX_CLAIMS" ]]; then
-    next_issue="$(pick_ready_issue)"
-    if [[ -n "$next_issue" ]]; then
-      claim_and_implement "$next_issue" && claims_done=$((claims_done + 1))
-    fi
-  fi
-
-  release_stale_claims
-  redispatch_unresolved_reviews
-done
+release_stale_claims
+redispatch_unresolved_reviews
 
 log "tick complete — claims=${claims_done}/${MAX_CLAIMS}"
-

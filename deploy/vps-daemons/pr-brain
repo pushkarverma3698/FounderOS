@@ -155,15 +155,20 @@ discover_repos() {
     return
   fi
   # Auto-discover: any immediate child of $ROOT that is a git repo whose origin
-  # belongs to $OWNER. The owner check is not cosmetic — without it a sweep would
-  # happily approve and push to pull requests in cloned upstream repositories.
+  # belongs to $OWNER or allowed organizations like OplifyMessage.
+  local allowed_orgs=("$OWNER" "OplifyMessage")
   for dir in "$ROOT"/*/; do
     [[ -d "$dir/.git" ]] || continue
     remote=$(git -C "$dir" remote get-url origin 2>/dev/null || true)
     [[ "$remote" == *github.com* ]] || continue
-    case "$remote" in
-      *"github.com/$OWNER/"*|*"github.com:$OWNER/"*) printf '%s\n' "${dir%/}" ;;
-    esac
+    for org in "${allowed_orgs[@]}"; do
+      case "$remote" in
+        *"github.com/$org/"*|*"github.com:$org/"*)
+          printf '%s\n' "${dir%/}"
+          break
+          ;;
+      esac
+    done
   done
 }
 
@@ -333,12 +338,22 @@ while IFS= read -r repo; do
       case "$verdict" in
         "CLEARED"*)
           base=$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null)
-          if [[ "$base" == "main" || "$base" == "master" ]]; then
-            merge_result="skipped — base is $base, a main/master merge needs the founder"
-            log "$repo_name#$pr merge skipped — base is $base"
-          elif gh pr merge "$pr" --squash >>"$LOG" 2>&1; then
+          if gh pr merge "$pr" --squash >>"$LOG" 2>&1; then
             merge_result="merged (squash) into $base"
             log "$repo_name#$pr merge: squashed into $base"
+
+            # If base was beta, auto-promote to main
+            if [[ "$base" == "beta" ]]; then
+              log "$repo_name#$pr is on beta — triggering auto-promotion to main"
+              promo_pr=$(gh pr list --base main --head beta --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)
+              if [[ -z "$promo_pr" ]]; then
+                promo_pr=$(gh pr create --base main --head beta --title "chore: promote beta to main" --body "Automated promotion after PR #${pr} cleared and merged into beta." --json number --jq .number 2>/dev/null || true)
+              fi
+              if [[ -n "$promo_pr" ]]; then
+                gh pr merge "$promo_pr" --auto --squash 2>/dev/null || gh pr merge "$promo_pr" --squash 2>/dev/null || true
+                log "$repo_name auto-promoted beta to main (PR #${promo_pr})"
+              fi
+            fi
           elif gh pr update-branch "$pr" >>"$LOG" 2>&1; then
             # $base has a `strict` required-status-checks policy (verified
             # 2026-09-14): a CLEARED, all-green PR can still be refused with

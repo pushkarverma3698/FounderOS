@@ -15,6 +15,11 @@ export interface SemanticRoute {
 const ROUTER_PROMPT = `You are a high-speed intent classifier for a Telegram AI assistant.
 Your ONLY job is to classify the user's raw message into one of four categories, and extract a repository name if applicable.
 
+Known repositories:
+- "pushkarverma3698/FounderOS": FounderOS agent system, telegram gateway, jobs pipeline, CV tools.
+- "OplifyMessage/oplify-messaging-app": Oplify messaging app, frontend, React Native, mobile, web app, UI.
+- "OplifyMessage/oplify-messaging-api": Oplify messaging backend, Node.js API, Prisma, Redis, BullMQ, sockets.
+
 Categories:
 - "engineering": The user wants to write code, fix a bug, review a PR, deploy, or create a GitHub issue. Includes anything dispatched to Antigravity.
 - "jobhunt": The user wants to review a candidate, parse a CV, look at jobs, or do recruiting tasks.
@@ -26,7 +31,7 @@ Respond with ONLY a raw JSON object, no markdown blocks, no explanation.
 
 {
   "intent": "engineering",
-  "repo_hint": "pushkarverma3698/FounderOS" // Optional: if they mention a specific repo name or project
+  "repo_hint": "OplifyMessage/oplify-messaging-app" // Must be one of the known repository names if mentioned, else "pushkarverma3698/FounderOS"
 }`;
 
 export async function classifyIntent(text: string): Promise<SemanticRoute> {
