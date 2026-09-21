@@ -45,7 +45,15 @@ set -uo pipefail
 LOG="$HOME/.claude/agent-dispatch.log"
 LOCK="$HOME/.claude/agent-dispatch.lock"
 OFF_SWITCH="$HOME/.claude/agent-dispatch.off"
-REPO="${ISSUE_REPO:-pushkarverma3698/FounderOS}"
+DEFAULT_REPOS=("pushkarverma3698/FounderOS" "OplifyMessage/oplify-messaging-app" "OplifyMessage/oplify-messaging-api")
+if [[ -n "${ISSUE_REPOS:-}" ]]; then
+  read -ra ISSUE_REPOS <<<"$ISSUE_REPOS"
+elif [[ -n "${ISSUE_REPO:-}" ]]; then
+  read -ra ISSUE_REPOS <<<"$ISSUE_REPO"
+else
+  ISSUE_REPOS=("${DEFAULT_REPOS[@]}")
+fi
+REPO="${ISSUE_REPOS[0]}"
 WORKSPACE="${AGENT_DISPATCH_WORKSPACE:-/opt/agy-workspace/founderos}"
 AG_USER="${AGENT_DISPATCH_USER:-antigravity}"
 MAX_CLAIMS="${AGENT_DISPATCH_MAX:-1}"
@@ -219,9 +227,11 @@ if [[ -f "$LOG" ]] && [[ "$(wc -l <"$LOG")" -gt 20000 ]]; then
 fi
 
 if [[ "$LIST_ONLY" -eq 1 ]]; then
-  echo "agent:ready issues in $REPO:"
-  gh issue list --repo "$REPO" --label agent:ready --state open --json number,title \
-    --jq '.[] | "  #\(.number)  \(.title)"'
+  for r in "${ISSUE_REPOS[@]}"; do
+    echo "agent:ready issues in $r:"
+    gh issue list --repo "$r" --label agent:ready --state open --json number,title \
+      --jq '.[] | "  #\(.number)  \(.title)"'
+  done
   exit 0
 fi
 
@@ -267,6 +277,11 @@ claim_and_implement() {
     --body "${CLAIM_PREFIX} ${claimed_at} --> 🤖 Claimed by agent-dispatch on $(hostname -s). Branch: \`${branch}\`." >/dev/null
 
   prompt_file="$(mktemp /tmp/agent-dispatch-issue-XXXXXX.txt)"
+  local target_branch="main"
+  if git -C "$WORKSPACE" show-ref --verify --quiet refs/remotes/origin/beta 2>/dev/null; then
+    target_branch="beta"
+  fi
+
   chmod 644 "$prompt_file"
   cat >"$prompt_file" <<EOF
 Read docs/antigravity/ISSUE-DRIVEN-CONTRACT.md and docs/antigravity/STANDARDS.md in this repository
@@ -277,7 +292,7 @@ Title: ${title}
 ${body}
 
 You are already on branch ${branch}, checked out from origin/main, in your isolated workspace. Do
-not touch anything outside this repository checkout. Open the PR as a draft targeting beta. Stop
+not touch anything outside this repository checkout. Open the PR as a draft targeting ${target_branch}. Stop
 once the PR is open — do not keep iterating.
 EOF
 
@@ -364,14 +379,6 @@ pick_ready_issue() {
   gh issue list --repo "$REPO" --label agent:ready --state open --json number \
     --jq 'sort_by(.number) | .[0].number // empty'
 }
-
-claims_done=0
-if [[ "$claims_done" -lt "$MAX_CLAIMS" ]]; then
-  next_issue="$(pick_ready_issue)"
-  if [[ -n "$next_issue" ]]; then
-    claim_and_implement "$next_issue" && claims_done=$((claims_done + 1))
-  fi
-fi
 
 # ------------------------------------------------------------ Pass B: recover + re-dispatch
 
@@ -511,7 +518,30 @@ redispatch_unresolved_reviews() {
   done <<<"$issues"
 }
 
-release_stale_claims
-redispatch_unresolved_reviews
+claims_done=0
+WORKSPACE_BASE="${AGENT_DISPATCH_WORKSPACE_BASE:-/opt/agy-workspace}"
+
+for CURRENT_REPO in "${ISSUE_REPOS[@]}"; do
+  export REPO="$CURRENT_REPO"
+  
+  REPO_NAME="$(basename "$REPO")"
+  if [[ "$REPO" == *"FounderOS"* ]]; then
+    export WORKSPACE="${WORKSPACE_BASE}/founderos"
+  else
+    export WORKSPACE="${WORKSPACE_BASE}/${REPO_NAME}"
+  fi
+
+  log "Processing repo: $REPO (workspace: $WORKSPACE)"
+  
+  if [[ "$claims_done" -lt "$MAX_CLAIMS" ]]; then
+    next_issue="$(pick_ready_issue)"
+    if [[ -n "$next_issue" ]]; then
+      claim_and_implement "$next_issue" && claims_done=$((claims_done + 1))
+    fi
+  fi
+
+  release_stale_claims
+  redispatch_unresolved_reviews
+done
 
 log "tick complete — claims=${claims_done}/${MAX_CLAIMS}"

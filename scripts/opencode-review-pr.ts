@@ -34,6 +34,7 @@ Follow the binding instructions in CLAUDE_REVIEWER_INSTRUCTIONS:
 ${instructions}
 
 Execution Brief for PR #${prNumber}:
+0. First layer of thinking: Reason whether the work done on this branch was really required. Did it solve a real observed defect or requested user value, or was it unneeded busywork/speculative abstraction? If not required, request changes immediately.
 1. Inspect diffs: \`gh pr diff ${prNumber}\`
 2. Checkout PR branch: \`gh pr checkout ${prNumber}\`
 3. Run mandatory gates: \`pnpm gate\`

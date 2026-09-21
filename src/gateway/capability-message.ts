@@ -32,13 +32,16 @@ export function buildWelcomeMessage(firstName?: string): string {
     `📣 <b>Marketing</b> ✋ — <i>"Draft a build-in-public post about today's ship"</i>\n` +
     `📈 <b>Sales</b> ✋ — <i>"Draft outreach to Razorpay"</i>\n` +
     `💻 <b>Personal</b> ✋ — <i>"List ~/Projects" · "Read founderos.log"</i>\n\n` +
-    `🤖 <b>Build things while you are away</b>\n` +
-    `<code>/task fix the flaky CSV export</code> — hands the work to the agent loop:\n` +
-    `Antigravity implements it, Claude reviews the PR, you get the verdict\n` +
-    `<code>/newproject pricing-api usage-based pricing</code> — starts a whole new repo\n\n` +
-    `⚡ <b>System</b>\n` +
-    `<code>/status</code> · <code>/budget</code> · <code>/commands</code> · ` +
-    `<code>/connect</code> · <code>/reset</code>\n\n` +
+    `🤖 <b>Build things while you are away (Autonomous Agents)</b>\n` +
+    `• <code>/task fix the flaky CSV export</code> — hands coding to Antigravity\n` +
+    `• <code>/task repo:oplify-app fix header</code> — code on Oplify App\n` +
+    `• <code>/repos</code> — see your connected GitHub repositories\n` +
+    `• <code>/prs</code> — view active Pull Requests & Claude reviews\n` +
+    `• <code>/pipeline</code> — view live agent dispatch activity\n` +
+    `• <code>/newproject pricing-api usage-based pricing</code> — starts a whole new repo\n\n` +
+    `⚡ <b>System & Help</b>\n` +
+    `<code>/help</code> (quickstart guide) · <code>/status</code> · <code>/budget</code> · ` +
+    `<code>/commands</code> · <code>/connect</code> · <code>/reset</code>\n\n` +
     `✋ = you approve before anything leaves the building (email, LinkedIn, GitHub writes, shell).\n` +
     `🛑 <code>/halt</code> pauses all work · <code>/resume</code> lifts it.`
   );

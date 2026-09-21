@@ -36,7 +36,7 @@ export interface MenuCommand {
   /** Plain text, ≤256 chars. No HTML: the native menu does not parse it. */
   readonly description: string;
   /** Heading this command sits under in the chat rendering. */
-  readonly group: "jobs" | "system";
+  readonly group: "jobs" | "engineering" | "system";
 }
 
 export const COMMAND_MENU: readonly MenuCommand[] = [
@@ -165,22 +165,39 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     description: "What your wife's application forms get filled from. wife_profile set phone +31… changes one field",
     group: "jobs",
   },
-  // ── System ────────────────────────────────────────────────────────────────
-  { command: "status", description: "System health and pending approvals", group: "system" },
-  { command: "budget", description: "Today's spend against the daily cap", group: "system" },
-  { command: "commands", description: "Show every command with what it does", group: "system" },
+  // ── Engineering (Autonomous Agent Loop) ───────────────────────────────────
   {
     command: "task",
-    description: "Hand engineering work to the agent loop. task repo:hulda fix the hero layout",
-    group: "system",
+    description: "Hand coding work to the agent loop. /task repo:oplify-messaging-app fix socket reconnect",
+    group: "engineering",
+  },
+  {
+    command: "repos",
+    description: "List all connected repositories available for autonomous coding and PRs",
+    group: "engineering",
+  },
+  {
+    command: "prs",
+    description: "Check open pull requests and Claude review status across all repositories",
+    group: "engineering",
+  },
+  {
+    command: "pipeline",
+    description: "Live status of Antigravity (Doer) and Claude pr-brain (Reviewer)",
+    group: "engineering",
   },
   {
     command: "newproject",
-    description: "Start a new project: creates a private repo the agent loop can work in. newproject name what it is",
-    group: "system",
+    description: "Start a new project: creates a private repo the agent loop can work in",
+    group: "engineering",
   },
+  // ── System ────────────────────────────────────────────────────────────────
+  { command: "status", description: "System health and pending approvals", group: "system" },
+  { command: "budget", description: "Today's spend against the daily cap", group: "system" },
+  { command: "help", description: "Beginner-friendly quickstart and command guide", group: "system" },
+  { command: "commands", description: "Show every command with what it does", group: "system" },
   { command: "connect", description: "Search and add an MCP server from the registry", group: "system" },
-  { command: "start", description: "What this bot can do", group: "system" },
+  { command: "start", description: "Interactive overview of capabilities", group: "system" },
   { command: "reset", description: "Clear this thread's mission state", group: "system" },
   { command: "halt", description: "Emergency stop — refuse all new work", group: "system" },
   { command: "resume", description: "Lift a halt and accept work again", group: "system" },
@@ -213,6 +230,7 @@ export function buildCommandsHelp(): string[] {
     esc(entry.description).replace(new RegExp(`^${entry.command} n —`), "&lt;n&gt; —");
 
   const jobs = COMMAND_MENU.filter((e) => e.group === "jobs");
+  const engineering = COMMAND_MENU.filter((e) => e.group === "engineering");
   const system = COMMAND_MENU.filter((e) => e.group === "system");
 
   // His command and its wife_ counterpart belong in one block — they are the
@@ -232,14 +250,12 @@ export function buildCommandsHelp(): string[] {
     .map((entry) => `🔸 <b>/${entry.command}</b>\n<i>${formatDetail(entry)}</i>`);
 
   const parts: string[] = [
-    ["<b>Jobs — the daily loop</b>", ...jobLines, ...orphans].join("\n\n"),
-    ["<b>System</b>", ...system.map((e) => `⚙️ <b>/${e.command}</b>\n<i>${formatDetail(e)}</i>`)].join("\n\n"),
+    ["<b>🎯 Jobs — the daily loop</b>", ...jobLines, ...orphans].join("\n\n"),
+    ["<b>🚀 Engineering — Autonomous Agent Loop</b>", ...engineering.map((e) => `💻 <b>/${e.command}</b>\n<i>${formatDetail(e)}</i>`)].join("\n\n"),
+    ["<b>⚙️ System & Controls</b>", ...system.map((e) => `⚙️ <b>/${e.command}</b>\n<i>${formatDetail(e)}</i>`)].join("\n\n"),
     "💡 All of these are in the ☰ menu button next to the message box, so you never have to remember them.\n\n" +
-      "<b>Plain English works too, and hits the same code.</b>\n" +
-      "<i>“tashi's jobs” · “what did we find in the last 2 days” · “roles posted this week” · " +
-      "“tashi's last 2 days jobs founded”</i>\n\n" +
-      "<b>posted</b> is when the employer published it. <b>found</b> is when we first saw it. " +
-      "They differ when a new job board is added, and every row prints both.",
+      "<b>Plain English works too!</b>\n" +
+      "<i>“In oplify app, fix the socket connection” · “What are today's jobs?” · “Summarise my inbox”</i>",
   ];
 
   return parts;

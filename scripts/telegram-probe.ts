@@ -37,7 +37,7 @@ const DEFAULT_WAIT_S = 360;
  * actually took 200s, because "🤔 Working on it…" arrived and the collector
  * went quiet. A probe that exists to catch false greens must not emit one.
  */
-const TRANSIENT_PREFIXES = ["🤔", "🔧", "✍️", "🔍", "📋", "⏳"];
+const TRANSIENT_PREFIXES = ["🤔", "🔧", "✍️", "🔍", "📋", "⏳", "📝"];
 
 const isTransient = (text: string): boolean => {
   const t = text.trimStart();

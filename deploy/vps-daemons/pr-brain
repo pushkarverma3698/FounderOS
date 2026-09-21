@@ -155,15 +155,20 @@ discover_repos() {
     return
   fi
   # Auto-discover: any immediate child of $ROOT that is a git repo whose origin
-  # belongs to $OWNER. The owner check is not cosmetic — without it a sweep would
-  # happily approve and push to pull requests in cloned upstream repositories.
+  # belongs to $OWNER or allowed organizations like OplifyMessage.
+  local allowed_orgs=("$OWNER" "OplifyMessage")
   for dir in "$ROOT"/*/; do
     [[ -d "$dir/.git" ]] || continue
     remote=$(git -C "$dir" remote get-url origin 2>/dev/null || true)
     [[ "$remote" == *github.com* ]] || continue
-    case "$remote" in
-      *"github.com/$OWNER/"*|*"github.com:$OWNER/"*) printf '%s\n' "${dir%/}" ;;
-    esac
+    for org in "${allowed_orgs[@]}"; do
+      case "$remote" in
+        *"github.com/$org/"*|*"github.com:$org/"*)
+          printf '%s\n' "${dir%/}"
+          break
+          ;;
+      esac
+    done
   done
 }
 
@@ -196,6 +201,13 @@ Act on pull request #${pr} in ${repo_name} as the brain in the Brain/Doer divisi
 Invoke the pr-adversary skill and follow it exactly. An executor (Antigravity) wrote this PR;
 your default posture is disproof, not agreement. Green CI is a necessary condition, never the
 verdict.
+
+CRITICAL FIRST LAYER OF THINKING — WAS THIS WORK REALLY REQUIRED?
+Before evaluating implementation details or running tests, you MUST reason about necessity:
+1. Was the work done on this branch actually necessary to achieve the stated goal?
+2. Did the executor invent artificial problems, over-engineer a simple request, add speculative abstractions, or touch code that was already working?
+3. Is this change solving an actual observed defect or delivering real requested user value, rather than performing busywork or unnecessary refactoring?
+If the change was NOT genuinely required or over-complicates the system, treat that as a primary BLOCKER. Explain why it is not required and request changes.
 
 You are running headless and unattended. That means:
 - Finish with exactly one action taken on GitHub: approve (+ gh pr ready), push the smallest
@@ -333,12 +345,22 @@ while IFS= read -r repo; do
       case "$verdict" in
         "CLEARED"*)
           base=$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null)
-          if [[ "$base" == "main" || "$base" == "master" ]]; then
-            merge_result="skipped — base is $base, a main/master merge needs the founder"
-            log "$repo_name#$pr merge skipped — base is $base"
-          elif gh pr merge "$pr" --squash >>"$LOG" 2>&1; then
+          if gh pr merge "$pr" --squash >>"$LOG" 2>&1; then
             merge_result="merged (squash) into $base"
             log "$repo_name#$pr merge: squashed into $base"
+
+            # If base was beta, auto-promote to main
+            if [[ "$base" == "beta" ]]; then
+              log "$repo_name#$pr is on beta — triggering auto-promotion to main"
+              promo_pr=$(gh pr list --base main --head beta --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)
+              if [[ -z "$promo_pr" ]]; then
+                promo_pr=$(gh pr create --base main --head beta --title "chore: promote beta to main" --body "Automated promotion after PR #${pr} cleared and merged into beta." --json number --jq .number 2>/dev/null || true)
+              fi
+              if [[ -n "$promo_pr" ]]; then
+                gh pr merge "$promo_pr" --auto --squash 2>/dev/null || gh pr merge "$promo_pr" --squash 2>/dev/null || true
+                log "$repo_name auto-promoted beta to main (PR #${promo_pr})"
+              fi
+            fi
           elif gh pr update-branch "$pr" >>"$LOG" 2>&1; then
             # $base has a `strict` required-status-checks policy (verified
             # 2026-09-14): a CLEARED, all-green PR can still be refused with

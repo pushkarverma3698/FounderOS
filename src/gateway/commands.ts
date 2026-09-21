@@ -239,10 +239,20 @@ export async function handleConnect(ctx: Context): Promise<void> {
  * reply, no error and no log the founder could see.
  */
 export function unknownCommandReply(text: string): string {
-  const typed = text.trim().split(/\s+/)[0] ?? "/";
+  const typed = text.trim().split(/\s+/)[0]?.toLowerCase() ?? "/";
+  if (typed === "/pr" || typed === "/pulls") {
+    return "💡 Did you mean /prs? Tap /prs to view active pull requests and review statuses.";
+  }
+  if (typed === "/repo" || typed === "/repositories") {
+    return "💡 Did you mean /repos? Tap /repos to view connected repositories.";
+  }
+  if (typed === "/build" || typed === "/fix" || typed === "/code") {
+    return "💡 Did you mean /task? Tap /task <instruction> to hand coding work to the autonomous agent loop.";
+  }
   return (
     `${typed} isn't a command I know.\n\n` +
-    "Try /commands for the list, or just say what you want in plain English — " +
-    "the planner routes it."
+    "👉 Try /help for a beginner quickstart\n" +
+    "👉 Try /commands for the full command directory\n" +
+    "👉 Or just type what you want in plain English — I will route it automatically!"
   );
 }
