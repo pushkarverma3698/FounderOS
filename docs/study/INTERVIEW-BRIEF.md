@@ -14,11 +14,11 @@ Use these six. They are specific, verifiable, and each one implies a mechanism.
 | **229 human approvals in production — 131 approved, 36 rejected** | The HITL gate is real and has *blocked* things. 7.3% of AI postings ask for HITL | `agents.hitl_approvals`, 2026-06-16 → 2026-08-27 |
 | **80 real side effects executed** — 24 shell runs, 13 code sessions, 11 GitHub issues, 6 LinkedIn posts, 6 emails, 1 job application, 1 site deploy | It takes real actions, not demo actions | `agents.action_log` |
 | **1,843 LLM calls · $2.53 total · $0.001373 mean · 8 models** | Per-call cost attribution in production. 6.8% of postings ask for cost optimisation | `agents.ai_call_costs`, 2026-07-04 → 2026-08-24 |
-| **3,649 tests · 332 files · $0 per run** | The full agent graph runs offline in CI. Scripted models, no paid calls | `pnpm test` |
+| **4,433 tests · 397 files · $0 per run** | The full agent graph runs offline in CI. Scripted models, no paid calls | `pnpm test` |
 | **97.3% recall@5 / 0.855 MRR** on hybrid retrieval, beating vector-only by 33 points on the hard slice | RAG measured, not hoped for. 35.6% of postings ask for RAG | `pnpm eval:retrieval`, 1,214 chunks |
 | **`regex-routing: 0`, `kernel-purity: 0`, `gateway-imports: 0`** — CI fails if any rises | Architecture debt is ratcheted, not aspirational | `governance/architecture-baseline.json` |
 
-**Scale, if asked:** 389 TypeScript source files / 58,141 LOC, 51 tool modules, 8 workers,
+**Scale, if asked:** 390 TypeScript source files / 58,141 LOC, 51 tool modules, 8 workers,
 51 ADRs, 29 database tables, 3,223 ATS boards polled across 10 platforms, 911 job postings
 ingested in 4 weeks.
 
@@ -164,7 +164,7 @@ synthesizer never sees raw tool output. That mechanism exists because v1 shipped
 and I audited it — Story 1.
 
 **"How do you evaluate it?"**
-Four layers: 3,649 offline behavioural tests at $0 with scripted models; a determinism gate that
+Four layers: 4,433 offline behavioural tests at $0 with scripted models; a determinism gate that
 requires byte-identical plans across two threads; a 41-task golden set on a live model; and a
 retrieval ablation with recall@5/MRR. Then volunteer Story 5 — that the golden set had a bug and
 I published the audit.
@@ -220,7 +220,7 @@ than assertion, and per the market data, evaluation is asked for by 36.2% of AI-
 > LangGraph kernel that has taken 80 real actions — emails, LinkedIn posts, GitHub issues, shell
 > commands, a job application — behind 229 human approvals, 36 of which I rejected. Every action
 > claim requires a receipt, so it can't report work it didn't do. Retrieval is hybrid pgvector +
-> keyword fusion measured at 97.3% recall@5. The whole graph runs offline in 3,649 tests at $0,
+> keyword fusion measured at 97.3% recall@5. The whole graph runs offline in 4,433 tests at $0,
 > and CI enforces an architecture-debt ratchet that can only shrink. I shipped it three times
 > before I shipped it right, and the autopsies are in the repo.
 

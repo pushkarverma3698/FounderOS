@@ -36,9 +36,8 @@ message → plan → dispatch (pure) → agent ⇄ tools → collect → synthes
 ## Measured state (2026-08-28, counted not remembered)
 
 | Measure | Value |
-|---|---|
-| Test suite | 332 files · **3,649 tests**, offline, $0 |
-| Source | 389 files · 58,141 LOC |
+| Test suite | 397 files · **4,433 tests**, offline, $0 |
+| Source | 390 files · 58,141 LOC |
 | DB tables | 29 |
 | Behavioural golden tasks | 41 |
 | Golden-set score (live model) | **85%** — routing 90% · tools 96% · HITL 95% |

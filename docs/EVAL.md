@@ -11,7 +11,7 @@ Those are three different failure modes and they need three different mechanisms
 ## 1. The offline suite — behaviour, at $0
 
 ```bash
-pnpm test        # 332 files · 3,649 tests · no network, no model spend
+pnpm test        # 397 files · 4,433 tests · no network, no model spend
 ```
 
 Models are **scripted**, not mocked-away. A `ScriptedModel` returns a fixed sequence of
@@ -289,7 +289,7 @@ A doc that only lists strengths is marketing. These are the real ceilings:
 ## Reproducing any number on this page
 
 ```bash
-pnpm test                 # 3,649 offline behavioural tests, $0
+pnpm test                 # 4,433 offline behavioural tests, $0
 pnpm verify:arch          # the debt ratchet — may only shrink
 pnpm eval                 # 41 golden tasks, live model, paid
 pnpm eval:retrieval       # recall@5 and MRR over the retrieval golden set
