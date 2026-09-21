@@ -219,9 +219,11 @@ if [[ -f "$LOG" ]] && [[ "$(wc -l <"$LOG")" -gt 20000 ]]; then
 fi
 
 if [[ "$LIST_ONLY" -eq 1 ]]; then
-  echo "agent:ready issues in $REPO:"
-  gh issue list --repo "$REPO" --label agent:ready --state open --json number,title \
-    --jq '.[] | "  #\(.number)  \(.title)"'
+  for r in "${ISSUE_REPOS[@]}"; do
+    echo "agent:ready issues in $r:"
+    gh issue list --repo "$r" --label agent:ready --state open --json number,title \
+      --jq '.[] | "  #\(.number)  \(.title)"'
+  done
   exit 0
 fi
 
