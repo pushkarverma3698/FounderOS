@@ -45,7 +45,15 @@ set -uo pipefail
 LOG="$HOME/.claude/agent-dispatch.log"
 LOCK="$HOME/.claude/agent-dispatch.lock"
 OFF_SWITCH="$HOME/.claude/agent-dispatch.off"
-REPO="${ISSUE_REPO:-pushkarverma3698/FounderOS}"
+DEFAULT_REPOS=("pushkarverma3698/FounderOS" "OplifyMessage/oplify-messaging-app" "OplifyMessage/oplify-messaging-api")
+if [[ -n "${ISSUE_REPOS:-}" ]]; then
+  read -ra ISSUE_REPOS <<<"$ISSUE_REPOS"
+elif [[ -n "${ISSUE_REPO:-}" ]]; then
+  read -ra ISSUE_REPOS <<<"$ISSUE_REPO"
+else
+  ISSUE_REPOS=("${DEFAULT_REPOS[@]}")
+fi
+REPO="${ISSUE_REPOS[0]}"
 WORKSPACE="${AGENT_DISPATCH_WORKSPACE:-/opt/agy-workspace/founderos}"
 AG_USER="${AGENT_DISPATCH_USER:-antigravity}"
 MAX_CLAIMS="${AGENT_DISPATCH_MAX:-1}"
@@ -372,14 +380,6 @@ pick_ready_issue() {
     --jq 'sort_by(.number) | .[0].number // empty'
 }
 
-claims_done=0
-if [[ "$claims_done" -lt "$MAX_CLAIMS" ]]; then
-  next_issue="$(pick_ready_issue)"
-  if [[ -n "$next_issue" ]]; then
-    claim_and_implement "$next_issue" && claims_done=$((claims_done + 1))
-  fi
-fi
-
 # ------------------------------------------------------------ Pass B: recover + re-dispatch
 
 # 1. Release stale claims — an issue stuck at agent:working with an old claim
@@ -518,7 +518,30 @@ redispatch_unresolved_reviews() {
   done <<<"$issues"
 }
 
-release_stale_claims
-redispatch_unresolved_reviews
+claims_done=0
+WORKSPACE_BASE="${AGENT_DISPATCH_WORKSPACE_BASE:-/opt/agy-workspace}"
+
+for CURRENT_REPO in "${ISSUE_REPOS[@]}"; do
+  export REPO="$CURRENT_REPO"
+  
+  REPO_NAME="$(basename "$REPO")"
+  if [[ "$REPO" == *"FounderOS"* ]]; then
+    export WORKSPACE="${WORKSPACE_BASE}/founderos"
+  else
+    export WORKSPACE="${WORKSPACE_BASE}/${REPO_NAME}"
+  fi
+
+  log "Processing repo: $REPO (workspace: $WORKSPACE)"
+  
+  if [[ "$claims_done" -lt "$MAX_CLAIMS" ]]; then
+    next_issue="$(pick_ready_issue)"
+    if [[ -n "$next_issue" ]]; then
+      claim_and_implement "$next_issue" && claims_done=$((claims_done + 1))
+    fi
+  fi
+
+  release_stale_claims
+  redispatch_unresolved_reviews
+done
 
 log "tick complete — claims=${claims_done}/${MAX_CLAIMS}"
