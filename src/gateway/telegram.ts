@@ -43,6 +43,9 @@ import { COMMAND_MENU, telegramCommandPayload } from "./command-menu.js";
 import { splitForTelegram } from "../tools/jobhunt/telegram-format.js";
 import { registerMediaHandlers } from "./media.js";
 import { runKernelText, resumeKernel } from "./kernel-run.js";
+import { classifyIntent } from "./semantic-router.js";
+import { buildTaskInstruction } from "./task-command.js";
+import { DEFAULT_DISPATCH_REPO } from "../tools/dispatch-repos.js";
 import { isConflictError, conflictBackoffMs, CONFLICT_MAX_ATTEMPTS } from "./telegram-poll.js";
 
 // media.ts and tests import safeHtml from here — keep the path stable.
@@ -123,21 +126,31 @@ export function registerHandlers(bot: Bot): void {
   bot.on("message:text", async (ctx: Context) => {
     const text = ctx.message?.text ?? "";
     if (text.startsWith("/")) {
-      // Registered commands never reach here (grammy matched them first), so
-      // anything left is one the founder typed that does not exist. Returning
-      // silently is the worst available answer: he acted, and the system gave
-      // no sign it had heard him. /draft 1 read exactly like a dead bot.
       await ctx.reply(unknownCommandReply(text));
       return;
     }
-    if (!text.trim()) return; // ignore empty / whitespace-only messages
-    // Telegram `message.date` is epoch SECONDS (the send time); receivedAt is
-    // our clock. Both formatted to readable UTC so logs never show a raw epoch.
+    if (!text.trim()) return;
+    
     const sentAt = ctx.message?.date ? formatTimestamp(ctx.message.date * 1000) : undefined;
     log.info(
       { from: ctx.from?.id, text: text.slice(0, 80), sentAt, receivedAt: formatTimestamp() },
       "Message received",
     );
+
+    // [Semantic Router] Intercept all raw messages before they hit the general LangGraph
+    const route = await classifyIntent(text);
+    
+    if (route.intent === "engineering") {
+      log.info({ repo_hint: route.repo_hint }, "Semantic router caught Engineering intent. Bypassing context noise.");
+      const engineeredText = buildTaskInstruction({
+        repo: route.repo_hint || DEFAULT_DISPATCH_REPO,
+        text: text
+      });
+      await runKernelText(ctx, engineeredText);
+      return;
+    }
+
+    // Default flow: pass it to the generic planner
     await runKernelText(ctx, text);
   });
 
