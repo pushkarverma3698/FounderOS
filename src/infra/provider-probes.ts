@@ -232,6 +232,8 @@ const CAPABILITY_LABEL: Record<string, string> = {
 export interface ProviderAuthFailure {
   readonly provider: string;
   readonly detail: string | undefined;
+  /** Which of the 3 Google accounts (src/core/accounts.ts ACCOUNT_KEYS) this is — omitted for the single-account boot probe. */
+  readonly accountKey?: string;
 }
 
 /**
@@ -243,7 +245,9 @@ export interface ProviderAuthFailure {
  */
 export function formatProviderAuthAlert(failures: readonly ProviderAuthFailure[]): string {
   if (failures.length === 0) return "";
-  const lost = failures.map((f) => `• ${CAPABILITY_LABEL[f.provider] ?? f.provider}`).join("\n");
+  const lost = failures
+    .map((f) => `• ${CAPABILITY_LABEL[f.provider] ?? f.provider}${f.accountKey ? ` (account: ${f.accountKey})` : ""}`)
+    .join("\n");
   const cause = failures[0]?.detail?.split("\n").pop()?.trim().slice(0, 300) ?? "unknown";
   return (
     `🔑 <b>Google sign-in expired — these stopped working:</b>\n${lost}\n\n` +
@@ -251,6 +255,70 @@ export function formatProviderAuthAlert(failures: readonly ProviderAuthFailure[]
     `the account has to be re-authorised by you.\n` +
     `<code>${cause.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`
   );
+}
+
+// ── Live-call credential-failure alerting (AG-014) ──────────────────────────
+//
+// `runProviderSmokeAtBoot` above only runs once, at process start (src/index.ts).
+// A grant that's fine at boot but revoked hours later isn't caught until the
+// next restart — which could be days, and today's live Gmail/Calendar calls
+// (src/infra/providers/google-gws.ts) have no equivalent handling: a mid-session
+// invalid_grant just returns a generic tool error, unclassified. This lets a
+// live call classify its own failure and alert immediately, deduped per
+// capability so a burst of failed calls sends ONE message — same shape as
+// judge-health.ts's alerted/reset pattern.
+//
+// Keyed by (provider, accountKey), not provider alone: this app routes 3 real
+// Google accounts (src/core/accounts.ts ACCOUNT_KEYS — turicks/personal/naggar)
+// through this SAME function (comms/sales/jobhunt each resolve to a different
+// account via DEPARTMENT_ACCOUNT_DEFAULTS). A bare-provider key meant a second
+// account's failure silently never alerted once the first account's episode
+// was open, and one account's SUCCESS cleared the alert for a DIFFERENT
+// account that was still broken (security review finding, 2026-09-17).
+
+/** Composite dedup key — `accountKey` omitted (undefined) collapses to one shared episode, matching the boot probe's single-account shape. */
+function episodeKey(provider: string, accountKey: string | undefined): string {
+  return accountKey ? `${provider}:${accountKey}` : provider;
+}
+
+/** (provider, accountKey) episodes the founder has already been told are down. */
+const alertedCapabilities = new Set<string>();
+
+/**
+ * Classify a live tool-call failure. Alerts the founder once per outage episode
+ * if it's a dead credential; no-op (returns false, never notifies) for a
+ * transient failure — those self-heal and an alert on one would train the
+ * founder to ignore the channel (same reasoning as isCredentialFailure itself).
+ *
+ * Returns whether this WAS a credential failure (regardless of whether this
+ * particular call sent the notification) so the caller can still choose the
+ * "needs re-authentication" error message on every occurrence, not just the first.
+ */
+export async function alertOnCredentialFailure(
+  provider: string,
+  detail: string | undefined,
+  notify: (html: string) => Promise<void> = defaultNotify,
+  accountKey?: string,
+): Promise<boolean> {
+  if (!isCredentialFailure(detail)) return false;
+  const key = episodeKey(provider, accountKey);
+  if (alertedCapabilities.has(key)) return true; // already told the founder this episode
+  alertedCapabilities.add(key);
+  await notify(formatProviderAuthAlert([{ provider, detail, accountKey }])).catch((err) =>
+    // allow-failopen: a Telegram blip must not throw out of the calling tool
+    log.warn({ err: (err as Error).message, provider, accountKey }, "Live credential-failure alert send failed"),
+  );
+  return true;
+}
+
+/** Call after a SUCCESSFUL live call so the next failure for this (provider, account) alerts again (new episode). */
+export function clearCredentialAlert(provider: string, accountKey?: string): void {
+  alertedCapabilities.delete(episodeKey(provider, accountKey));
+}
+
+/** Test seam. */
+export function _resetCredentialAlerts(): void {
+  alertedCapabilities.clear();
 }
 
 export async function runProviderSmokeAtBoot(
