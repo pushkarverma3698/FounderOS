@@ -267,6 +267,11 @@ claim_and_implement() {
     --body "${CLAIM_PREFIX} ${claimed_at} --> 🤖 Claimed by agent-dispatch on $(hostname -s). Branch: \`${branch}\`." >/dev/null
 
   prompt_file="$(mktemp /tmp/agent-dispatch-issue-XXXXXX.txt)"
+  local target_branch="main"
+  if git -C "$WORKSPACE" show-ref --verify --quiet refs/remotes/origin/beta 2>/dev/null; then
+    target_branch="beta"
+  fi
+
   chmod 644 "$prompt_file"
   cat >"$prompt_file" <<EOF
 Read docs/antigravity/ISSUE-DRIVEN-CONTRACT.md and docs/antigravity/STANDARDS.md in this repository
@@ -277,7 +282,7 @@ Title: ${title}
 ${body}
 
 You are already on branch ${branch}, checked out from origin/main, in your isolated workspace. Do
-not touch anything outside this repository checkout. Open the PR as a draft targeting beta. Stop
+not touch anything outside this repository checkout. Open the PR as a draft targeting ${target_branch}. Stop
 once the PR is open — do not keep iterating.
 EOF
 
