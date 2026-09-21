@@ -202,6 +202,13 @@ Invoke the pr-adversary skill and follow it exactly. An executor (Antigravity) w
 your default posture is disproof, not agreement. Green CI is a necessary condition, never the
 verdict.
 
+CRITICAL FIRST LAYER OF THINKING — WAS THIS WORK REALLY REQUIRED?
+Before evaluating implementation details or running tests, you MUST reason about necessity:
+1. Was the work done on this branch actually necessary to achieve the stated goal?
+2. Did the executor invent artificial problems, over-engineer a simple request, add speculative abstractions, or touch code that was already working?
+3. Is this change solving an actual observed defect or delivering real requested user value, rather than performing busywork or unnecessary refactoring?
+If the change was NOT genuinely required or over-complicates the system, treat that as a primary BLOCKER. Explain why it is not required and request changes.
+
 You are running headless and unattended. That means:
 - Finish with exactly one action taken on GitHub: approve (+ gh pr ready), push the smallest
   correct fix to the PR branch and comment what you fixed, or request changes with a concrete
