@@ -11,3 +11,8 @@
    - Updated deploy/agent-dispatch and deploy/vps-daemons/pr-brain to sweep and discover all three repositories (pushkarverma3698/FounderOS, OplifyMessage/oplify-messaging-app, OplifyMessage/oplify-messaging-api).
    - Enhanced src/gateway/semantic-router.ts to detect Oplify intents and map them to the canonical OplifyMessage org slugs.
    - Compiled and deployed FounderOS to the production VPS (founderos.service active and healthy).
+4. **Claude Review First Layer of Thinking — Necessity Reasoning Gate**:
+   - Mandated that the primary, first layer of thinking for Claude Code during adversarial PR review (`pr-brain` / `pr-adversary`) is evaluating whether the work was genuinely required.
+   - Claude must check: (a) problem reality (was something broken or missing?), (b) minimal blast radius & proportionality (could it be solved with 0 code or a 3-line surgical fix?), (c) speculative abstraction & YAGNI, and (d) delivering real value vs busywork.
+   - If not required, Claude immediately treats it as a primary BLOCKER and requests changes without wasting tokens running extensive tests or auditing unnecessary code.
+   - Deployed to `/home/founderos/bin/pr-brain` and `/home/founderos/.claude/skills/pr-adversary/SKILL.md` on VPS, as well as `scripts/opencode-review-pr.ts`.
