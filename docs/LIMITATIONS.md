@@ -16,21 +16,21 @@
 > Severity: **HIGH** (fix before scaling) · **MEDIUM** (address
 > opportunistically) · **LOW** (note, no urgency).
 
-## Measured state (2026-08-28, counted not remembered)
+## Measured state (2026-09-16, counted not remembered)
 
 | Measure | Value | Δ since 2026-08-22 |
 |---|---|---|
 | Source files / LOC | 335 files · 58,141 LOC | +19 files · +2,631 |
-| Test suite | 332 files · **3,649 tests**, offline, $0 | +146 tests |
+| Test suite | 397 files · **4,433 tests**, offline, $0 | +930 tests |
 | Behavioural golden tasks | 41 (`src/eval/golden-tasks.ts`, `GOLDEN_TASKS`) | corrected 2026-08-28 — was miscounted as 46, conflating with the 5 opt-in `CREATIVE_GOLDEN_TASKS` `pnpm eval` never runs |
 | DB tables | 29 (`src/db/schema.ts`) | +5 |
 | Side-effecting tool modules / HITL-gated | 20 / **9** | — |
 | Free ATS boards polled | 1,297 across 10 platforms | +374 |
-| Architecture ratchet | gateway-imports 0 · kernel-purity 0 · regex-routing 0 · orphan-subsystem 0 · fail-open-catch 11 · loc-budget 6 | unchanged |
+| Architecture ratchet | gateway-imports 0 · kernel-purity 0 · regex-routing 0 · orphan-subsystem 0 · fail-open-catch 9 · loc-budget 6 | unchanged |
 
 Counts are from `git ls-files`, a full `vitest run` and `verify-architecture.ts` in
-one session on 2026-08-28, not from the previous revision plus arithmetic. Since
-2026-08-28 they are also **enforced**: `scripts/verify-doc-claims.ts` runs in
+one session on 2026-09-16, not from the previous revision plus arithmetic. Since
+2026-09-16 they are also **enforced**: `scripts/verify-doc-claims.ts` runs in
 `pnpm gate` and fails the build if a documented count drifts from the measured one.
 
 ## Ratchet debt, named (2026-08-27)
@@ -53,11 +53,11 @@ Not split in this pass deliberately — `src/db/queries.ts` and `schema.ts` sit 
 kernel's hot path (every checkpoint read/write), and a mechanical split under time
 pressure is how a "simplification" becomes the next production incident.
 
-**`fail-open-catch` (11 untagged `.catch(() => …)` swallows)** — each either needs the
+**`fail-open-catch` (9 untagged `.catch(() => …)` swallows)** — each either needs the
 `allow-failopen: <reason>` tag the CI rule requires, or a real fix. Find the current
 list with `grep -rn "\.catch(() =>" src/` cross-referenced against
-`scripts/verify-architecture.ts`'s tagging check; 12 of the 23 raw matches already
-carry a reason, these 11 don't.
+`scripts/verify-architecture.ts`'s tagging check; 12 of the 21 raw matches already
+carry a reason, these 9 don't.
 
 ## Review verdict
 
