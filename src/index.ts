@@ -30,6 +30,9 @@ import { buildRestartMessage } from "./gateway/capability-message.js";
 import { acquireSingleInstanceLock, releaseSingleInstanceLock, waitForProcessExit } from "./infra/single-instance.js";
 import { logger } from "./infra/logger.js";
 import type { Server } from "node:http";
+import { recoverStrandedWorkers } from "./workers/index.js";
+
+export * as workers from "./workers/index.js";
 
 const log = logger.child({ module: "main" });
 
@@ -98,6 +101,9 @@ async function main(): Promise<void> {
   });
   await recoverStrandedReminders().catch((err) => {
     log.warn({ err: (err as Error).message }, "Stranded-reminder recovery failed — non-fatal"); // allow-failopen: boot must survive a recovery blip; the rows stay visible in the DB
+  });
+  await recoverStrandedWorkers().catch((err) => {
+    log.warn({ err: (err as Error).message }, "Stranded-worker recovery failed — non-fatal"); // allow-failopen: boot must survive a recovery blip; the rows stay visible in the DB
   });
 
   // Scheduled agent tasks fire via the gateway runner — injected here so the

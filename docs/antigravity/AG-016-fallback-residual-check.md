@@ -2,7 +2,8 @@
 
 **Milestone:** issue #687 item 3
 **Branch:** `task/issue-<N>-fallback-residual-check` — cut from fresh `origin/beta`. PR base: `beta`.
-**Status:** ready to dispatch pending founder go-ahead (not yet filed as a GitHub issue)
+**Status:** ✅ CLOSED 2026-09-17 — verified already fixed by PR #683, no residual gap found. See
+"Verification result" at the bottom.
 
 **Read [STANDARDS.md](STANDARDS.md) in full before writing any code. It is binding.**
 
@@ -63,3 +64,28 @@ pnpm gate
 Per rule #36: the PR body must state, with a `read_logs` timestamp, whether item 3 is stale
 (pre-fix) or live (post-fix), before any other claim. **NOT VERIFIED — reason** is an acceptable
 and expected outcome here if no post-deploy trace exists yet.
+
+---
+
+## Verification result (2026-09-17)
+
+Ran directly against prod, per goal item 1:
+
+```
+$ ssh founderos-vps 'sudo -n journalctl -u founderos --since "2026-09-16 17:48:39" | grep -iE "503|fallback exhaust|all providers failed|chain exhaust"'
+```
+
+3 post-deploy `503 Service Unavailable` lines found, all on 2026-09-16 (18:00:01, 18:00:09,
+18:57:58 UTC), all logged by `model-retry` with `msg: "Transient provider error — backing off
+before retry"` — i.e. single-attempt transient errors that the retry/backoff already absorbed.
+Zero hits for `"all providers failed"`, `"chain exhaust"`, or any terminal failure string, in the
+full journal since the PR #683 deploy.
+
+**Verdict: (a) — this item is resolved.** PR #683's `chainReserveMs`/`primaryShareMs` budget split
+holds under real post-deploy 503 traffic; no residual chain-exhaustion event occurred. The
+"2 deep, not 4" fallback-chain gap from
+[docs/sessions/2026-09-16-fallback-chain-starvation.md](../sessions/2026-09-16-fallback-chain-starvation.md)
+remains real but narrower risk, not an active defect — tracked separately by
+[[docs/plans/2026-09-16-mechanism-fallback-health-check.md]], not reopened here per this brief's
+own scope note. No code change made, per "explicitly forbidden" — the budget-splitting logic was
+not touched.
