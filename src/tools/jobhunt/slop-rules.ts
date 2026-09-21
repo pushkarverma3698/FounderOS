@@ -4,11 +4,11 @@ export interface SlopViolation {
 }
 
 const BANNED_WORDS = [
-  "delve", "foster", "leverage", "utilize", "facilitate", "empower", "streamline", 
-  "robust", "cutting-edge", "paradigm shift", "game changer", "this is huge", 
-  "this changes everything", "tapestry", "realm", "beacon", "multifaceted", 
-  "meticulous", "intricate", "paramount", "transformative", "elevate", "embark", 
-  "supercharge", "harness", "ever-evolving"
+  "delve", "foster", "leverage", "utilize", "facilitate", "empower", "streamline",
+  "robust", "cutting-edge", "paradigm shift", "game changer", "this is huge",
+  "this changes everything", "tapestry", "realm", "beacon", "multifaceted",
+  "meticulous", "intricate", "paramount", "transformative", "elevate", "embark",
+  "supercharge", "ever-evolving"
 ];
 
 const BANNED_PHRASES = [
@@ -133,13 +133,22 @@ export function findSlop(text: string, options: SlopOptions = {}): SlopViolation
   // single line and skipped for markdown list/header lines, because those
   // carry structured CV content ("- Languages: typescript, python, go") that
   // this pattern would otherwise misfire on.
-  const colonRevealRegex = /^[^\n:]{15,}:\s+[a-z][^\n.!?]{15,}[.!?]/;
+  const colonRevealRegex = /^[^\n:]{15,}:\s+([a-z][^\n.!?]{15,}[.!?])/;
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
     if (/^([-*•]|\d+[.)]|#)/.test(trimmed)) continue;
     const match = trimmed.match(colonRevealRegex);
     if (match) {
-      violations.push({ rule: "Colon reveal", matchedText: match[0] });
+      // A genuine "reveal" is one dramatic clause. A factual sentence that
+      // enumerates ("Measures X: A, B, and C across D and E.") has the same
+      // shape but is a list, not a rhetorical device — 2+ commas in the
+      // post-colon clause tells them apart (real prod CV body, 2026-09-16:
+      // this exact pattern blocked /draft for both profiles on every attempt).
+      const revealClause = match[1] ?? "";
+      const commaCount = (revealClause.match(/,/g) ?? []).length;
+      if (commaCount < 2) {
+        violations.push({ rule: "Colon reveal", matchedText: match[0] });
+      }
     }
   }
 

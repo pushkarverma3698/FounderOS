@@ -7,8 +7,10 @@ import { describe, it, expect } from "vitest";
 import {
   parseContentVerdict,
   aggregateVerdict,
+  judgeReply,
   FAIL_THRESHOLD,
   type ContentScores,
+  type JudgeChatModel,
 } from "../../../scripts/lib/content-judge.js";
 
 const good: ContentScores = {
@@ -71,5 +73,47 @@ describe("parseContentVerdict", () => {
   it("fills missing dimensions with a neutral 3 (no false fail)", () => {
     const v = parseContentVerdict('{"execution":5,"critique":"partial json"}');
     expect(v.ok).toBe(true); // 5 + four neutral 3s → all above threshold
+  });
+});
+
+describe("judgeReply (AG-017 — the un-generalized copy of the 'dead again' crash)", () => {
+  function modelThrowing(err: unknown): JudgeChatModel {
+    return {
+      async invoke() {
+        throw err;
+      },
+    };
+  }
+
+  it("does NOT crash on a non-Error thrown value — content-judge.ts's own copy of the defect", () => {
+    // Before this fix: `(err as Error).message` on a non-Error value threw
+    // "Cannot read properties of undefined (reading 'message')" INSIDE this catch
+    // block, which is exactly the crash judge.ts's errorMessage() was built to stop —
+    // fix #1 (2026-09-14) was applied only in src/infra/judge.ts, never here.
+    return judgeReply("do the task", "a reply", modelThrowing({ code: "ECONNRESET" })).then((v) => {
+      expect(v.ok).toBe(true);
+      expect("skipped" in v && v.skipped).toBe(true);
+      if ("skipped" in v) expect(v.reason).not.toContain("undefined");
+    });
+  });
+
+  it("names the real cause instead of the opaque zero-completions crash text", async () => {
+    const zeroCompletions = new Error("Cannot read properties of undefined (reading 'message')");
+    const v = await judgeReply("do the task", "a reply", modelThrowing(zeroCompletions));
+    expect(v.ok).toBe(true);
+    if ("skipped" in v) {
+      expect(v.reason.toLowerCase()).toContain("zero completions");
+      expect(v.reason).not.toContain("Cannot read properties of undefined");
+    }
+  });
+
+  it("still judges normally when the injected model succeeds", async () => {
+    const passing: JudgeChatModel = {
+      async invoke() {
+        return { content: '{"execution":5,"grounding":5,"safety":5,"specificity":5,"honesty":5}' };
+      },
+    };
+    const v = await judgeReply("do the task", "a solid reply", passing);
+    expect(v.ok).toBe(true);
   });
 });
