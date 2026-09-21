@@ -60,7 +60,7 @@ ATTEMPT_PREFIX="<!-- agent-attempt:"
 PR_LINK_PREFIX="<!-- agent-pr:"
 
 if [[ -f "$ENV_FILE" ]]; then
-  export $(grep -E '^(TELEGRAM_|GITHUB_TOKEN|OMNIROUTER_)' "$ENV_FILE" | xargs)
+  export $(grep -E '^(TELEGRAM_|GITHUB_TOKEN|OMNIROUTER_|GOOGLE_GENERATIVE_AI_API_KEY)' "$ENV_FILE" | xargs)
   [[ -n "${GITHUB_TOKEN:-}" ]] && export GH_TOKEN="$GITHUB_TOKEN"
 fi
 
@@ -193,7 +193,7 @@ run_agy_with_progress() {
 # PATH entry for it and every call fails with "command not found".
 as_antigravity() {
   local script="$1"; shift
-  local CMD="export OPENAI_BASE_URL=\"\${OMNIROUTER_BASE_URL:-}\" OPENAI_API_KEY=\"\${OMNIROUTER_API_KEY:-}\" AGY_MODEL=\"\${AGENT_DISPATCH_MODEL:-auto/deepseek}\"; $script"
+  local CMD="export GEMINI_API_KEY=\"\${GOOGLE_GENERATIVE_AI_API_KEY:-}\" AGY_MODEL=\"\${AGY_MODEL:-gemini-3.6-flash-medium}\"; $script"
   sudo -u "$AG_USER" -- bash -lc "$CMD" _ "$@"
 }
 
