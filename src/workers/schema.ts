@@ -12,11 +12,13 @@
 import {
   index,
   jsonb,
+  pgSchema,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
-import { agentsSchema } from "../db/schema.js";
+
+const agentsSchema = pgSchema("agents");
 
 // ── worker_contracts ─────────────────────────────────────────────────────────
 
