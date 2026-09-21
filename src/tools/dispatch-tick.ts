@@ -38,10 +38,21 @@ const detachedSpawner: Spawner = (command, args) => {
 };
 
 /**
- * Ask the dispatcher to claim `issueNumber` now. Silent no-op unless
+ * Ask the dispatcher to claim `issueNumber` in `repo` now. Silent no-op unless
  * `AGENT_DISPATCH_BIN` is set, which only the VPS does.
+ *
+ * `repo` (owner/name) is required, not inferred: `--issue N` alone leaves the
+ * dispatcher's multi-repo loop to claim whichever `${ISSUE_REPOS[0]}` comes up
+ * first, independent of which repo issue N actually lives in — confirmed
+ * live 2026-09-21, a FounderOS-numbered issue silently "claimed" in place of
+ * a same-numbered Oplify one. `--repo` lets the loop skip every repo but the
+ * one the caller means.
  */
-export function kickDispatchTick(issueNumber: number, spawner: Spawner = detachedSpawner): void {
+export function kickDispatchTick(
+  issueNumber: number,
+  repo: string,
+  spawner: Spawner = detachedSpawner,
+): void {
   const bin = process.env["AGENT_DISPATCH_BIN"]?.trim();
   if (!bin) return;
 
@@ -52,11 +63,20 @@ export function kickDispatchTick(issueNumber: number, spawner: Spawner = detache
     return;
   }
 
+  const repoSlug = repo.trim();
+  if (!repoSlug) {
+    log.warn({ issueNumber }, "refusing to kick dispatch without a repo — would claim the wrong one");
+    return;
+  }
+
   try {
-    spawner(bin, ["--issue", String(issueNumber)]);
-    log.info({ bin, issueNumber }, "kicked agent-dispatch for freshly filed issue");
+    spawner(bin, ["--issue", String(issueNumber), "--repo", repoSlug]);
+    log.info({ bin, issueNumber, repo: repoSlug }, "kicked agent-dispatch for freshly filed issue");
   } catch (err) {
     // allow-failopen: the issue is already filed; cron claims it within 15 minutes.
-    log.warn({ bin, issueNumber, err: (err as Error).message }, "dispatch kick failed — cron will claim it");
+    log.warn(
+      { bin, issueNumber, repo: repoSlug, err: (err as Error).message },
+      "dispatch kick failed — cron will claim it",
+    );
   }
 }

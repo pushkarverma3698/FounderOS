@@ -197,7 +197,7 @@ describe("dispatchAntigravityTool.execute", () => {
       verification: "pnpm test",
     });
 
-    expect(mockKickDispatchTick).toHaveBeenCalledWith(524);
+    expect(mockKickDispatchTick).toHaveBeenCalledWith(524, "pushkarverma3698/FounderOS");
   });
 
   it("still reports success when the kick fails — cron is the guaranteed path", async () => {

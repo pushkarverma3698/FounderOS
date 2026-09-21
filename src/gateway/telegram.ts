@@ -58,7 +58,26 @@ export function getBot(): Bot {
   return _bot;
 }
 
+// This bot has exactly one authorized operator: the founder's own chat, the
+// same TELEGRAM_CHAT_ID sendToChat() already targets. Anyone else who finds
+// the bot (grammy has no built-in allowlist) could otherwise trip the
+// semantic router's "engineering" intent and approve their own HITL card —
+// nothing else in this file checked who was talking. Dropped silently and
+// logged, not replied to: a reply confirms to a stranger that the bot exists
+// and is listening.
+function isAuthorizedChat(ctx: Context): boolean {
+  return String(ctx.chat?.id) === env.TELEGRAM_CHAT_ID;
+}
+
 export function registerHandlers(bot: Bot): void {
+  bot.use(async (ctx, next) => {
+    if (!isAuthorizedChat(ctx)) {
+      log.warn({ chatId: ctx.chat?.id, from: ctx.from?.id }, "Ignored update from unauthorized chat");
+      return;
+    }
+    await next();
+  });
+
   bot.command("start", (ctx: Context) => handleStart(ctx));
   bot.command("reset", (ctx: Context) => handleReset(ctx));
   bot.command("halt", (ctx: Context) => handleHalt(ctx));
