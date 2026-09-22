@@ -22,6 +22,8 @@
 export const DISPATCH_REPO_ALLOWLIST = [
   "pushkarverma3698/FounderOS",
   "pushkarverma3698/House-of-Hulda-Website-frontend",
+  "OplifyMessage/oplify-messaging-app",
+  "OplifyMessage/oplify-messaging-api",
 ] as const;
 
 export type DispatchRepo = (typeof DISPATCH_REPO_ALLOWLIST)[number];
