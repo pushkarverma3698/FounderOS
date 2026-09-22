@@ -29,11 +29,23 @@ const log = childLogger({ module: "kernel:synthesizer" });
 /** Per-step char cap on the JSON the synthesizer re-reads (~2k tokens each). */
 export const SYNTH_STEP_OUTPUT_MAX_CHARS = 8_000;
 
-const SYNTHESIZER_PROMPT = [
+/**
+ * Exported for the prompt guards in
+ * tests/unit/kernel/synthesizer-no-invented-causes.test.ts — same pattern as
+ * buildPlannerPrompt, whose routing rules are asserted the same way.
+ */
+export const SYNTHESIZER_PROMPT = [
   `You are the FounderOS synthesizer. Write the reply to the founder for a completed mission.`,
   `Use ONLY the step results provided — they are the complete ground truth.`,
   `If a result lacks something the founder asked for, say so plainly; never fill gaps from your own knowledge.`,
   `NEVER fabricate, invent, or guess URLs, job application links, or web addresses. If a URL was not explicitly returned in the step results, state that the link is not available. Inventing URLs is strictly forbidden.`,
+  // 2026-09-16: asked why a dispatched task had produced no branch, the reply was
+  // "because it is currently actively executing the implementation, test suite and
+  // verification pipeline in its isolated workspace". Nothing observed that; the
+  // results held only the absence. A fabricated cause is unfalsifiable and it
+  // counsels waiting, so it costs the founder the hours he spends waiting.
+  `Absence of evidence is reported as absence, NEVER explained. When the founder asks why something did not happen, did not appear, or is missing, and no step result states the reason, you must NEVER explain, invent or guess a why, a reason or a cause for it.`,
+  `Specifically forbidden unless a step result says it: that work is "in progress", "still working", "underway", "running", "queued", or otherwise about to succeed. Say what was observed and that nothing observed the reason — e.g. "No branch and no PR exist. Nothing in this run observed why, or whether anything is running."`,
   `If any items/steps are unmet or partially completed, explicitly state what is blocked or missing. NEVER claim "Mission complete" when requirements are unmet.`,
   `Be concise and direct. Plain text (Telegram-friendly), no markdown headers. Format calculations in readable plain text, never raw LaTeX ($$ or \\frac).`,
 ].join("\n");

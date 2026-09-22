@@ -45,7 +45,14 @@ set -uo pipefail
 LOG="$HOME/.claude/agent-dispatch.log"
 LOCK="$HOME/.claude/agent-dispatch.lock"
 OFF_SWITCH="$HOME/.claude/agent-dispatch.off"
-DEFAULT_REPOS=("pushkarverma3698/FounderOS" "OplifyMessage/oplify-messaging-app" "OplifyMessage/oplify-messaging-api")
+# MUST stay in sync with DISPATCH_REPO_ALLOWLIST in src/tools/dispatch-repos.ts.
+# A repo the founder can dispatch TO but this daemon never sweeps is a silent dead
+# end: /task files the issue, the approval card says it worked, and nothing ever
+# claims it. That was live for House-of-Hulda-Website-frontend — allowlisted,
+# advertised in /task's own usage text, and absent from this list, so every issue
+# filed against it would have sat at agent:ready forever. Enforced now by
+# tests/unit/tools/dispatch-repo-serviceability.test.ts, which reads this array.
+DEFAULT_REPOS=("pushkarverma3698/FounderOS" "OplifyMessage/oplify-messaging-app" "OplifyMessage/oplify-messaging-api" "pushkarverma3698/House-of-Hulda-Website-frontend")
 if [[ -n "${ISSUE_REPOS:-}" ]]; then
   read -ra ISSUE_REPOS <<<"$ISSUE_REPOS"
 elif [[ -n "${ISSUE_REPO:-}" ]]; then

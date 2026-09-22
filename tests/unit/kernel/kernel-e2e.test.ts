@@ -13,6 +13,7 @@ import {
   getPendingKernelApproval,
   hashToolArgs,
   receiptsBlock,
+  founderReceiptsBlock,
   KERNEL_SCHEMA_VERSION,
   type KernelBindableModel,
   type KernelTool,
@@ -308,17 +309,83 @@ describe("kernel E2E (scripted models, real graph)", () => {
     expect(stripReceipts(a.results)).toBe(stripReceipts(b.results));
   });
 
-  it("planner returning garbage → typed planning failure, no execution", async () => {
-    const planner = new ScriptedModel([ai("I think we should probably do some research maybe?")]);
+  // Garbage is retried ONCE before it is terminal (planner.ts PLANNER_MAX_RETRIES,
+  // added 2026-09-23 after three production "Planner did not return JSON" failures
+  // that the founder fixed by typing "Try again"). Two garbage responses is what
+  // "the model genuinely cannot emit the schema" looks like, and it must still be
+  // a typed failure that executes nothing.
+  /**
+   * 2026-09-22, production. The founder asked "Ping claude and check what all
+   * models are available". claude_code refused; the wrapper returned the plain
+   * string "Claude Code failed: Access denied: cwd … is outside ~/Projects."
+   * It carried no ❌ and no [[TOOL_FAILURE marker, so the receipt was written
+   * ok:true and the founder's reply ended:
+   *
+   *   Mission incomplete. … Reason: Execution failed due to path access restrictions.
+   *   —
+   *   ✓ 1 action completed and verified
+   *
+   * The whole point of the receipts block is that a claim above that line is
+   * backed by a recorded execution. This runs the real graph with a tool that
+   * fails the way 58 wrappers actually fail, and asserts the line is absent.
+   */
+  it("a tool that fails in PROSE is never counted as a verified action", async () => {
+    const planner = new ScriptedModel([ai(planJson([researchStep()]))]);
+    const worker = new ScriptedModel([
+      aiTool("search_web", { query: "models" }),
+      ai(JSON.stringify({ summary: "could not search", sources: [] })),
+    ]);
+    const synth = new ScriptedModel([ai("Mission incomplete — the search could not run.")]);
+    const failingTool = searchTool(
+      async () => "Claude Code failed: Access denied: cwd /home/pushkar/Projects/agent-workspace is outside ~/Projects.",
+    );
+    const k = kernelWith(planner, worker, synth, [failingTool]);
+
+    const res = await k.invoke(turn("ping claude"), cfg("prose-failure"));
+
+    const r0 = res.results[0]!;
+    if (r0.status === "ok") {
+      expect(r0.tool_receipts).toHaveLength(1);
+      expect(r0.tool_receipts[0]!.ok).toBe(false);
+    }
+    expect(res.reply).not.toContain("action completed and verified");
+    expect(founderReceiptsBlock(res.results)).toBe("");
+  });
+
+  it("planner returning garbage twice → typed planning failure, no execution", async () => {
+    const planner = new ScriptedModel([
+      ai("I think we should probably do some research maybe?"),
+      ai("Still not JSON, sorry."),
+    ]);
     const worker = new ScriptedModel([]);
     const synth = new ScriptedModel([]);
     const k = kernelWith(planner, worker, synth, [searchTool()]);
 
     const res = await k.invoke(turn("do the thing"), cfg("garbage"));
+    expect(planner.calls).toBe(2);
     expect(res.mission.status).toBe("failed");
     expect(res.failure?.stage).toBe("planning");
     expect(worker.calls).toBe(0);
     expect(res.reply).toContain("planning failure");
+  });
+
+  it("planner garbage then a valid plan → the founder never sees the failure", async () => {
+    const planner = new ScriptedModel([
+      ai("Status of Issue #694: Closed."), // the 2026-09-16 shape: prose, not JSON
+      ai(planJson([researchStep()])),
+    ]);
+    const worker = new ScriptedModel([
+      aiTool("search_web", { query: "LangGraph news" }),
+      ai(JSON.stringify({ summary: "LangGraph 1.4 released", sources: [{ title: "LangGraph 1.4", url: "https://x.dev" }] })),
+    ]);
+    const synth = new ScriptedModel([ai("LangGraph 1.4 was released.")]);
+    const k = kernelWith(planner, worker, synth, [searchTool()]);
+
+    const res = await k.invoke(turn("research LangGraph news"), cfg("garbage-then-valid"));
+    expect(planner.calls).toBe(2);
+    expect(res.failure).toBeNull();
+    expect(res.mission.status).toBe("done");
+    expect(res.reply).not.toContain("planning failure");
   });
 });
 

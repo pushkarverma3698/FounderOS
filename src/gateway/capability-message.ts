@@ -33,9 +33,13 @@ export function buildWelcomeMessage(firstName?: string): string {
     `📈 <b>Sales</b> ✋ — <i>"Draft outreach to Razorpay"</i>\n` +
     `💻 <b>Personal</b> ✋ — <i>"List ~/Projects" · "Read founderos.log"</i>\n\n` +
     `🤖 <b>Build things while you are away</b>\n` +
-    `<code>/task fix the flaky CSV export</code> — hands the work to the agent loop:\n` +
-    `Antigravity implements it, Claude reviews the PR, you get the verdict\n` +
-    `<code>/newproject pricing-api usage-based pricing</code> — starts a whole new repo\n\n` +
+    `<code>/task repo:app fix the flaky CSV export</code>\n` +
+    `<i>brief → your approval → issue → Antigravity codes it → the app is started and\n` +
+    `photographed for you → Claude reviews it → verdict. 20–40 min, unattended.</i>\n` +
+    `<code>/tasks</code> — what the loop is doing right now\n` +
+    `<code>/newproject pricing-api usage-based pricing</code> — starts a whole new repo\n` +
+    `<i>Repos: <code>app</code> · <code>api</code> · <code>hulda</code> · omit for FounderOS. ` +
+    `On the Oplify repos you always click merge yourself.</i>\n\n` +
     `⚡ <b>System</b>\n` +
     `<code>/status</code> · <code>/budget</code> · <code>/commands</code> · ` +
     `<code>/connect</code> · <code>/reset</code>\n\n` +

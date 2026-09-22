@@ -105,7 +105,14 @@ export async function collectPageFacts(
   return withFreshPage(
     async (page: Page) => {
       page.on("console", (msg) => {
-        if (msg.type() === "error") consoleErrors.push(msg.text().slice(0, 300));
+        if (msg.type() !== "error") return;
+        // The URL matters as much as the text. Chromium's message for a failed
+        // request is the bare "Failed to load resource: net::ERR_…" with no hint
+        // of WHICH resource — unactionable on its own, and unattributable: the
+        // app gate downgrades the errors belonging to the backend it chose not to
+        // run, and with no URL it cannot tell those from a real one.
+        const where = msg.location().url;
+        consoleErrors.push(`${msg.text()}${where ? ` (${where})` : ""}`.slice(0, 300));
       });
       page.on("pageerror", (err) => pageErrors.push(err.message.slice(0, 300)));
       page.on("requestfailed", (req) => {
