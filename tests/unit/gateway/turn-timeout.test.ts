@@ -73,6 +73,52 @@ describe("withTurnTimeout", () => {
     await assertion;
   });
 
+  it("hands the caller a touch() function synchronously via onArm", async () => {
+    const onArm = vi.fn();
+    await withTurnTimeout(Promise.resolve("ok"), 1000, "kernel.invoke", undefined, onArm);
+    expect(onArm).toHaveBeenCalledTimes(1);
+    expect(typeof onArm.mock.calls[0]![0]).toBe("function");
+  });
+
+  it("touch() postpones the deadline — a turn with periodic activity never times out (AG-015/B5)", async () => {
+    // Simulates a single long-running tool call (e.g. claude_code) inside one
+    // graph step: no new LangGraph state is yielded for the whole duration, but
+    // the tool's own progress stream calls touch() every few seconds. The outer
+    // guard must not fire as long as that keeps happening, even well past the
+    // original deadline.
+    let touch!: () => void;
+    const hang = new Promise<string>(() => {});
+    const guarded = withTurnTimeout(hang, 5000, "kernel.invoke", undefined, (fn) => {
+      touch = fn;
+    });
+    let settled = false;
+    guarded.catch(() => {
+      settled = true;
+    });
+
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(4000); // would have fired at 5000 without a touch
+      touch();
+    }
+    // Still alive after 16s against a 5s deadline, purely because touch() kept firing.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+  });
+
+  it("touch() does not extend past a genuine hang once activity stops", async () => {
+    let touch!: () => void;
+    const hang = new Promise<string>(() => {});
+    const guarded = withTurnTimeout(hang, 5000, "kernel.invoke", undefined, (fn) => {
+      touch = fn;
+    });
+    const assertion = expect(guarded).rejects.toBeInstanceOf(TurnTimeoutError);
+    await vi.advanceTimersByTimeAsync(3000);
+    touch(); // one burst of activity, then silence
+    await vi.advanceTimersByTimeAsync(4999); // 3000 + 4999 = 7999ms since touch, deadline is 5000ms after it
+    await vi.advanceTimersByTimeAsync(2); // now past the re-armed deadline
+    await assertion;
+  });
+
   it("the abandoned promise's LATE rejection after a timeout is marked handled (no fatal unhandledRejection)", async () => {
     // Before this guard: the orphaned run's AbortError/provider error rejected
     // with nobody listening → src/index.ts unhandledRejection → process.exit(1),

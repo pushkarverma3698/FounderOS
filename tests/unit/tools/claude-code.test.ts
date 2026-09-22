@@ -9,6 +9,7 @@ import {
   EXECUTION_DIRECTIVE,
   founderosRepoPath,
   defaultWorkspace,
+  claudeCodeTool,
 } from "../../../src/tools/claude-code.js";
 
 describe("claude-code helper functions", () => {
@@ -36,5 +37,53 @@ describe("claude-code helper functions", () => {
     const bin = findClaudeBinary();
     // In CI or environments without claude installed it returns string or null
     expect(bin === null || typeof bin === "string").toBe(true);
+  });
+});
+
+describe("claude-code executor — external AbortSignal (AG-015/B6)", () => {
+  // Until this fix, the outer turn-timeout guard's abort() never reached the
+  // spawned `claude` CLI child process at all — execute() had no way to even
+  // receive it, so the process kept running (real repo/GitHub side effects)
+  // after the founder was told the turn had stopped.
+
+  it("settles with a clear failure and does not hang when the signal aborts mid-run", async () => {
+    const controller = new AbortController();
+    const resultPromise = claudeCodeTool.execute({
+      task: "irrelevant — binary override bypasses the CLI invocation",
+      // /usr/bin/yes runs forever with no args and ignores empty stdin — the
+      // test-seam binaries this file already documents (/bin/pwd, /bin/false,
+      // /bin/echo) all exit immediately, so a long-lived process needs its own.
+      _binaryOverride: "/usr/bin/yes",
+      _signal: controller.signal,
+    });
+
+    await new Promise((r) => setTimeout(r, 150)); // let the child actually spawn
+    controller.abort();
+
+    const result = await resultPromise;
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/abort/i);
+  });
+
+  it("kills immediately if the signal is already aborted before the child settles", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const result = await claudeCodeTool.execute({
+      task: "irrelevant",
+      _binaryOverride: "/usr/bin/yes",
+      _signal: controller.signal,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/abort/i);
+  });
+
+  it("a signal that never aborts does not affect a normal completion", async () => {
+    const controller = new AbortController();
+    const result = await claudeCodeTool.execute({
+      task: "irrelevant",
+      _binaryOverride: "/bin/echo", // exits immediately, success path
+      _signal: controller.signal,
+    });
+    expect(result.success).toBe(true);
   });
 });
