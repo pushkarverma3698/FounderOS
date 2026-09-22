@@ -78,6 +78,26 @@ notify() {
     --data "disable_web_page_preview=true" || true
 }
 
+# Send one screenshot with a caption. Text alone cannot answer "does it LOOK
+# right" — the whole reason the app gate exists is that nothing in this loop ever
+# showed the founder the running product. Bounded by its caller to two images per
+# gated head: the 2026-09-08 audit found pr-brain's unthrottled notifications had
+# taken 21% of the entire Telegram history, and a photo costs more attention than
+# a line of text, not less.
+notify_photo() {
+  [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]] || return 0
+  [[ -f "$1" ]] || return 0
+  local token chat
+  token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
+  chat=$(grep -m1 '^TELEGRAM_CHAT_ID=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
+  [[ -n "$token" && -n "$chat" ]] || return 0
+  curl -s -o /dev/null --max-time 60 \
+    "https://api.telegram.org/bot${token}/sendPhoto" \
+    -F "chat_id=${chat}" \
+    -F "photo=@$1" \
+    -F "caption=$2" || true
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
@@ -194,9 +214,18 @@ fi
 # so that a fix to the protocol reaches every future sweep. A prompt that
 # restates the rules is a second copy that will drift.
 build_prompt() {
-  local pr="$1" repo_name="$2" head="$3"
+  local pr="$1" repo_name="$2" head="$3" app_rc="${4:-3}"
+  local app_line
+  case "$app_rc" in
+    0) app_line="The browser gate ran on this branch and rendered the app's public pages with no blocking defects. Its evidence pack is a PR comment containing the marker <!-- app-evidence -->. READ IT — it names which screens were NOT covered, and those remain unverified." ;;
+    1) app_line="The browser gate ran on this branch and found BLOCKING defects, or the app did not build/start at all. Its evidence pack is a PR comment containing the marker <!-- app-evidence -->. Treat that as a BLOCKER unless you can show the finding is the gate's own fault." ;;
+    *) app_line="The browser gate did NOT run on this branch (no recipe for this repo, a diff it does not cover, or it failed to start). No page was rendered, so you may not claim any visual or runtime verification — say NOT VERIFIED and name this as the reason." ;;
+  esac
   cat <<EOF
 Act on pull request #${pr} in ${repo_name} as the brain in the Brain/Doer division.
+
+BROWSER EVIDENCE (already gathered for you, before you were dispatched):
+${app_line}
 
 Invoke the pr-adversary skill and follow it exactly. An executor (Antigravity) wrote this PR;
 your default posture is disproof, not agreement. Green CI is a necessary condition, never the
@@ -226,6 +255,99 @@ unchanged. Use exactly this value — ${head} — not the output of 'git rev-par
 reflects your local checkout and will be wrong if you merged the base in locally without pushing:
   gh pr comment ${pr} --body "${MARKER_PREFIX} ${head} -->"
 EOF
+}
+
+# ------------------------------------------------------- the app (browser) gate
+#
+# THE LAST NODE. Everything else in this loop reads code: CI compiles it, the
+# unit gate runs it in isolation, the adversarial audit reads the diff. Nothing
+# STARTED the product. On a front-end repository that produced an honest but
+# useless review body — "NOT VERIFIED: the page renders" — followed by a pass,
+# because the protocol's rule is to hand that gap back rather than pretend.
+#
+# So the gate runs BEFORE the reviewer is dispatched, and posts its evidence pack
+# on the PR. The reviewer then READS evidence instead of being told to go and
+# produce it: CLAUDE.md rule #27 measured CI-enforced rules drifting zero times
+# in a month against markdown rules drifting three times in a day. An instruction
+# in a skill file is the weaker half of this; the artifact is the strong half.
+#
+# It is bounded, skippable and never fatal. A repo with no recipe, a diff that
+# touches nothing it covers, a missing FounderOS checkout, or a timeout all leave
+# a comment saying so. What must never happen is silence, because a gate that did
+# not run and a gate that found nothing look identical from outside.
+QA_ROOT="${QA_APP_ROOT:-/opt/founderos}"
+QA_TIMEOUT="${QA_APP_TIMEOUT_SEC:-1500}"
+APP_MARKER="<!-- app-evidence -->"
+
+# Replace the previous pack in place rather than appending a new comment per
+# push: same reasoning as the UI gate's single updated comment.
+post_app_evidence() {
+  local pr="$1" body="$2" existing
+  existing=$(gh pr view "$pr" --json comments \
+               --jq "[.comments[] | select(.body | contains(\"$APP_MARKER\")) | .url] | .[-1] // empty" 2>/dev/null || true)
+  if [[ -n "$existing" ]]; then
+    local cid; cid="${existing##*-}"
+    local slug; slug=$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)
+    if [[ -n "$cid" && -n "$slug" ]] && gh api -X PATCH "repos/${slug}/issues/comments/${cid}" \
+         -f body="$body" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  gh pr comment "$pr" --body "$body" >/dev/null 2>&1 || true
+}
+
+# Echoes the gate's own exit code: 0 clean · 1 blocking · 3 not applicable.
+app_gate() {
+  local pr="$1" slug="$2" repo_dir="$3" head="$4"
+  local out="/tmp/app-qa/${slug//\//__}/${pr}"
+  local base rc report
+
+  if [[ ! -f "$QA_ROOT/scripts/qa-app.ts" ]]; then
+    post_app_evidence "$pr" "$APP_MARKER
+## App Evidence Pack — NOT RUN
+
+- ⏭️ **SKIPPED** — no FounderOS checkout at \`$QA_ROOT\`, so the browser gate could not be started.
+- ⚠️ No page on this branch was rendered. This is **not** a clean visual result; it is the absence of one."
+    return 3
+  fi
+
+  base=$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null || echo "")
+  rm -rf "$out"; mkdir -p "$out"
+
+  # Runs from $QA_ROOT so tsx and playwright resolve. READ-ONLY with respect to
+  # that tree: no checkout, no merge, no install — /opt/founderos is the live
+  # production working copy and switching its branch takes the bot down.
+  ( cd "$QA_ROOT" && timeout "$QA_TIMEOUT" node --import tsx/esm scripts/qa-app.ts \
+      --dir "$repo_dir" --repo "$slug" --out "$out" \
+      ${base:+--changed-from "origin/$base"} ) >>"$LOG" 2>&1
+  rc=$?
+
+  if [[ ! -f "$out/report.md" ]]; then
+    post_app_evidence "$pr" "$APP_MARKER
+## App Evidence Pack — DID NOT COMPLETE
+
+- ⏭️ **SKIPPED** — \`pnpm qa:app\` exited ${rc} without writing a report$([[ $rc -eq 124 ]] && echo " (timed out after ${QA_TIMEOUT}s)").
+- ⚠️ No page on this branch was rendered. Treat visual behaviour as **NOT VERIFIED**; see \`$LOG\`."
+    return 3
+  fi
+
+  report=$(cat "$out/report.md")
+  post_app_evidence "$pr" "$APP_MARKER
+$report"
+
+  # Photos only when the gate actually rendered something, only on the head being
+  # gated, and only two of them.
+  if [[ $rc -eq 0 || $rc -eq 1 ]]; then
+    local verdict; verdict=$([[ $rc -eq 0 ]] && echo "✅ no blocking defects" || echo "❌ BLOCKING defects")
+    local n=0
+    while IFS= read -r shot; do
+      [[ $n -ge 2 ]] && break
+      notify_photo "$shot" "$slug#${pr} · $(basename "$shot" .png) · ${verdict}"
+      n=$((n + 1))
+    done < <(find "$out/screenshots" -name '*.png' 2>/dev/null | sort)
+  fi
+
+  return $rc
 }
 
 acted=0
@@ -306,8 +428,19 @@ while IFS= read -r repo; do
       continue
     fi
 
+    # Browser evidence FIRST, so the reviewer finds it already on the PR. A
+    # reviewer told to go and run the app is a reviewer who reports NOT VERIFIED
+    # and clears it anyway — measured on OplifyMessage/oplify-messaging-app#33.
+    app_gate "$pr" "${repo_owner}/${repo_name}" "$repo" "$head"
+    app_rc=$?
+    case "$app_rc" in
+      0) log "$repo_name#$pr app gate: rendered, no blocking defects" ;;
+      1) log "$repo_name#$pr app gate: BLOCKING defects — evidence posted on the PR" ;;
+      *) log "$repo_name#$pr app gate: not applicable or did not run (rc=$app_rc)" ;;
+    esac
+
     log "gating $repo_name#$pr (head ${head:0:8}) model=$MODEL budget=\$$BUDGET"
-    if claude -p "$(build_prompt "$pr" "$repo_name" "$head")" \
+    if claude -p "$(build_prompt "$pr" "$repo_name" "$head" "$app_rc")" \
         --model "$MODEL" \
         --permission-mode acceptEdits \
         --allowedTools "Bash Read Write Edit Grep Glob TodoWrite Skill" \

@@ -30,6 +30,7 @@ import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
 import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
 import { handleTask, handleNewProject } from "./task-command.js";
+import { handleTasks } from "./tasks-command.js";
 import {
   handleCsv,
   handleFresh,
@@ -100,6 +101,7 @@ export function registerHandlers(bot: Bot): void {
       },
     }),
   );
+  bot.command("tasks", (ctx: Context) => handleTasks(ctx));
   bot.command("newproject", (ctx: Context) => handleNewProject(ctx, { runKernelText }));
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
   bot.command("wife_draft", (ctx: Context) => handleDraft(withForcedProfileToken(ctx, "wife"), { runKernelText }));
