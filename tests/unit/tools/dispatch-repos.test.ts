@@ -19,10 +19,12 @@ const {
 } = await import("../../../src/tools/dispatch-repos.js");
 
 describe("DISPATCH_REPO_ALLOWLIST", () => {
-  it("contains exactly the two repos the loop is provisioned for", () => {
+  it("contains exactly the four repos the loop is provisioned for", () => {
     expect([...DISPATCH_REPO_ALLOWLIST]).toEqual([
       "pushkarverma3698/FounderOS",
       "pushkarverma3698/House-of-Hulda-Website-frontend",
+      "OplifyMessage/oplify-messaging-app",
+      "OplifyMessage/oplify-messaging-api",
     ]);
   });
 
@@ -58,6 +60,14 @@ describe("assertAllowedRepo", () => {
     expect(assertAllowedRepo("pushkarverma3698/House-of-Hulda-Website-frontend")).toEqual({
       owner: "pushkarverma3698",
       repo: "House-of-Hulda-Website-frontend",
+    });
+    expect(assertAllowedRepo("OplifyMessage/oplify-messaging-app")).toEqual({
+      owner: "OplifyMessage",
+      repo: "oplify-messaging-app",
+    });
+    expect(assertAllowedRepo("OplifyMessage/oplify-messaging-api")).toEqual({
+      owner: "OplifyMessage",
+      repo: "oplify-messaging-api",
     });
   });
 
@@ -130,9 +140,18 @@ describe("matchAllowlistedRepos", () => {
   });
 
   it("returns every match for an ambiguous hint so the caller can refuse", () => {
-    // "o" appears in both repo names. Silently picking the first would retarget the
+    // "o" appears in all four repo names. Silently picking the first would retarget the
     // dispatch to a repo the founder did not name.
-    expect(matchAllowlistedRepos("o").length).toBe(2);
+    expect(matchAllowlistedRepos("o").length).toBe(4);
+  });
+
+  it("resolves an unambiguous Oplify hint to the right side", () => {
+    expect(matchAllowlistedRepos("oplify-messaging-app")).toEqual([
+      "OplifyMessage/oplify-messaging-app",
+    ]);
+    expect(matchAllowlistedRepos("oplify-messaging-api")).toEqual([
+      "OplifyMessage/oplify-messaging-api",
+    ]);
   });
 
   it("returns no matches for an unknown hint", () => {
