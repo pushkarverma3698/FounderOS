@@ -36,7 +36,7 @@ export interface MenuCommand {
   /** Plain text, ≤256 chars. No HTML: the native menu does not parse it. */
   readonly description: string;
   /** Heading this command sits under in the chat rendering. */
-  readonly group: "jobs" | "system";
+  readonly group: "jobs" | "engineering" | "system";
 }
 
 export const COMMAND_MENU: readonly MenuCommand[] = [
@@ -165,20 +165,34 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     description: "What your wife's application forms get filled from. wife_profile set phone +31… changes one field",
     group: "jobs",
   },
-  // ── System ────────────────────────────────────────────────────────────────
-  { command: "status", description: "System health and pending approvals", group: "system" },
-  { command: "budget", description: "Today's spend against the daily cap", group: "system" },
-  { command: "commands", description: "Show every command with what it does", group: "system" },
+  // ── Engineering ───────────────────────────────────────────────────────────
+  //
+  // Its own group, not a corner of "System". These three are the whole loop —
+  // start work, watch work, start a place to put work — and they sat below
+  // /connect in a list headed by uptime and spend, which is where a founder
+  // stops reading. The order is the order they are used in.
   {
     command: "task",
-    description: "Hand engineering work to the agent loop. task repo:hulda fix the hero layout",
-    group: "system",
+    // Names the repo selector in the description itself: the hint is the one
+    // thing /task cannot guess and the one thing nobody would think to type.
+    description:
+      "Build something. task repo:app fix the flaky CSV export. Repos: app, api, hulda, founderos",
+    group: "engineering",
+  },
+  {
+    command: "tasks",
+    description: "What the agent loop is doing right now — queued, building, in review, blocked",
+    group: "engineering",
   },
   {
     command: "newproject",
     description: "Start a new project: creates a private repo the agent loop can work in. newproject name what it is",
-    group: "system",
+    group: "engineering",
   },
+  // ── System ────────────────────────────────────────────────────────────────
+  { command: "status", description: "System health and pending approvals", group: "system" },
+  { command: "budget", description: "Today's spend against the daily cap", group: "system" },
+  { command: "commands", description: "Show every command with what it does", group: "system" },
   { command: "connect", description: "Search and add an MCP server from the registry", group: "system" },
   { command: "start", description: "What this bot can do", group: "system" },
   { command: "reset", description: "Clear this thread's mission state", group: "system" },
@@ -205,14 +219,16 @@ export function telegramCommandPayload(): { command: string; description: string
  * 60, two of them a bare section heading. `handleCommands` awaits them in a
  * tight loop and this bot registers no throttler or auto-retry, so a burst that
  * size is also the shape Telegram answers with 429 — a help command that
- * half-sends and then throws. Three messages keep the per-command formatting
- * and stay far inside TELEGRAM_MAX_CHARS (largest section ≈ 1.6k of 4,096).
+ * half-sends and then throws. Four messages keep the per-command formatting and
+ * stay far inside TELEGRAM_MAX_CHARS (largest section ≈ 1.6k of 4,096); the
+ * command-menu test asserts that bound rather than trusting this sentence.
  */
 export function buildCommandsHelp(): string[] {
   const formatDetail = (entry: MenuCommand): string =>
     esc(entry.description).replace(new RegExp(`^${entry.command} n —`), "&lt;n&gt; —");
 
   const jobs = COMMAND_MENU.filter((e) => e.group === "jobs");
+  const engineering = COMMAND_MENU.filter((e) => e.group === "engineering");
   const system = COMMAND_MENU.filter((e) => e.group === "system");
 
   // His command and its wife_ counterpart belong in one block — they are the
@@ -231,8 +247,32 @@ export function buildCommandsHelp(): string[] {
     .filter((e) => e.command.startsWith("wife_") && !jobs.some((b) => `wife_${b.command}` === e.command))
     .map((entry) => `🔸 <b>/${entry.command}</b>\n<i>${formatDetail(entry)}</i>`);
 
+  // The engineering block explains the LOOP, not just its three commands. The
+  // founder's question was never "which letters do I type" — it was "what
+  // happens after I type them, and how will I know". A list of three verbs
+  // answers neither, and the loop's six stages are invisible by construction:
+  // they run on a VPS over half an hour while he is elsewhere.
+  const engineeringBlock = [
+    "<b>Engineering — build things while you are away</b>",
+    ...engineering.map((e) => `🤖 <b>/${e.command}</b>\n<i>${formatDetail(e)}</i>`),
+    "<b>What happens after you send /task</b>\n" +
+      "1️⃣ I expand your line into a full brief and show you an approval card\n" +
+      "2️⃣ You approve → it is filed as a GitHub issue\n" +
+      "3️⃣ Antigravity writes the code and opens a pull request\n" +
+      "4️⃣ The app is started and photographed — you get the screenshots here\n" +
+      "5️⃣ Claude reviews it adversarially and re-dispatches anything it finds\n" +
+      "6️⃣ You get a verdict: CLEARED, or changes requested with the reason\n\n" +
+      "<i>Typical: 20–40 minutes, unattended. " +
+      "On the Oplify repos the final merge is always left to you.</i>",
+    "<b>Naming the repo</b>\n" +
+      "<code>repo:app</code> · <code>repo:api</code> · <code>repo:hulda</code> — " +
+      "leave it off and it means FounderOS.\n" +
+      "<i>Anything else is refused before a single token is spent.</i>",
+  ];
+
   const parts: string[] = [
     ["<b>Jobs — the daily loop</b>", ...jobLines, ...orphans].join("\n\n"),
+    engineeringBlock.join("\n\n"),
     ["<b>System</b>", ...system.map((e) => `⚙️ <b>/${e.command}</b>\n<i>${formatDetail(e)}</i>`)].join("\n\n"),
     "💡 All of these are in the ☰ menu button next to the message box, so you never have to remember them.\n\n" +
       "<b>Plain English works too, and hits the same code.</b>\n" +
