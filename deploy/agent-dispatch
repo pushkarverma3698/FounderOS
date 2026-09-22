@@ -397,6 +397,30 @@ pick_ready_issue() {
     --jq 'sort_by(.number) | .[0].number // empty'
 }
 
+# The open PR whose head branch is the one claim_and_implement cut for $1, or empty.
+#
+# NOT `gh pr list --search "task/issue-N- in:head"`. That reads GitHub's search
+# index, which tokenizes the query and matches on OR, so it is wrong in both
+# directions — measured live 2026-09-22 on this repo:
+#   search 'task/issue-710- in:head'              -> EMPTY  (PR #711 exists, head
+#                                                    task/issue-710-test-docs-...)
+#   search 'feat/autonomous-job-operator in:head' -> [707,708]  (#708's head is
+#                                                    feat/durable-worker-runtime)
+# A false negative silently strands the issue: #710 sat at agent:review with a
+# brain-reviewed draft PR and 0 attempts while every tick skipped it, so the
+# review->fix arrow of the loop never fired at all. A false positive is worse —
+# `.[0]` would hand an unrelated PR to Antigravity to "fix".
+#
+# claim_and_implement already uses the exact `--head "$branch"` form; this is the
+# same determinism for the two call sites that only know the issue number. The
+# prefix filter runs in real jq, not `gh --jq`, because gh does not pass `--arg`
+# through (see release_stale_claims below for the same constraint).
+pr_for_issue() {
+  gh pr list --repo "$REPO" --state open --limit 100 --json number,headRefName \
+    | jq -r --arg p "task/issue-${1}-" \
+        '[.[] | select(.headRefName | startswith($p))] | .[0].number // empty'
+}
+
 # ------------------------------------------------------------ Pass B: recover + re-dispatch
 
 # 1. Release stale claims — an issue stuck at agent:working with an old claim
@@ -424,7 +448,7 @@ release_stale_claims() {
     now_epoch=$(date -u +%s)
     age_min=$(( (now_epoch - claim_epoch) / 60 ))
     [[ "$age_min" -lt "$LEASE_MIN" ]] && continue
-    has_pr=$(gh pr list --repo "$REPO" --search "task/issue-${issue}- in:head" --state open --json number --jq '.[0].number // empty')
+    has_pr=$(pr_for_issue "$issue")
     [[ -n "$has_pr" ]] && continue
     if [[ "$DRY_RUN" -eq 1 ]]; then
       log "DRY RUN would release stale claim on #${issue} (claimed ${age_min}m ago, no PR)"
@@ -447,7 +471,7 @@ redispatch_unresolved_reviews() {
   [[ -z "$issues" ]] && return 0
   while read -r issue; do
     [[ -z "$issue" ]] && continue
-    local pr; pr=$(gh pr list --repo "$REPO" --search "task/issue-${issue}- in:head" --state open --json number --jq '.[0].number // empty')
+    local pr; pr=$(pr_for_issue "$issue")
     [[ -z "$pr" ]] && continue
 
     local is_draft head_sha
