@@ -308,7 +308,7 @@ Title: ${title}
 
 ${body}
 
-You are already on branch ${branch}, checked out from origin/main, in your isolated workspace. Do
+You are already on branch ${branch}, checked out from origin/${target_branch}, in your isolated workspace. Do
 not touch anything outside this repository checkout. Open the PR as a draft targeting ${target_branch}. Stop
 once the PR is open — do not keep iterating.
 EOF
@@ -320,8 +320,8 @@ EOF
   # stale branch; without a reset, `checkout -B` refuses forever and every future
   # issue fails identically (observed: workspace wedged on task/issue-508 since
   # 2026-08-21, silently failing #539 and every issue after it through #667/#668).
-  if ! as_antigravity 'cd "$1" && git fetch --quiet origin && git reset --hard --quiet origin/main && git clean -fdq && git checkout -B "$2" origin/main' \
-      "$WORKSPACE" "$branch" >>"$LOG" 2>&1; then
+  if ! as_antigravity 'cd "$1" && git fetch --quiet origin && git reset --hard --quiet "origin/$3" && git clean -fdq && git checkout -B "$2" "origin/$3"' \
+      "$WORKSPACE" "$branch" "$target_branch" >>"$LOG" 2>&1; then
     log "#${issue} FAILED to prepare branch ${branch} — releasing claim"
     gh issue edit "$issue" --repo "$REPO" --remove-label agent:working --add-label agent:failed >/dev/null
     gh issue comment "$issue" --repo "$REPO" --body "agent-dispatch could not check out ${branch} in the workspace. See dispatcher log." >/dev/null
@@ -349,8 +349,8 @@ EOF
 
   # ---- verification: mechanical only. This checks EXISTENCE, not correctness. ----
   local new_commits pr_number
-  new_commits=$(as_antigravity 'cd "$1" && git log origin/main.."$2" --oneline 2>/dev/null | wc -l' \
-    "$WORKSPACE" "$branch" | tr -d '[:space:]')
+  new_commits=$(as_antigravity 'cd "$1" && git log "origin/$3".."$2" --oneline 2>/dev/null | wc -l' \
+    "$WORKSPACE" "$branch" "$target_branch" | tr -d '[:space:]')
   pr_number=$(gh pr list --repo "$REPO" --head "$branch" --state open --json number --jq '.[0].number // empty')
 
   # agy's own exit code is NOT trusted as the deciding signal — it can be nonzero
@@ -535,12 +535,15 @@ redispatch_unresolved_reviews() {
   done <<<"$issues"
 }
 
-claims_done=0
+# Indexed (not associative) array — bash 3.2 on macOS has no `declare -A`,
+# and this script runs locally (--dry-run) as well as on the VPS's bash 5.
+claims_done=()
 WORKSPACE_BASE="${AGENT_DISPATCH_WORKSPACE_BASE:-/opt/agy-workspace}"
 
-for CURRENT_REPO in "${ISSUE_REPOS[@]}"; do
+for repo_idx in "${!ISSUE_REPOS[@]}"; do
+  CURRENT_REPO="${ISSUE_REPOS[$repo_idx]}"
   export REPO="$CURRENT_REPO"
-  
+
   REPO_NAME="$(basename "$REPO")"
   if [[ "$REPO" == *"FounderOS"* ]]; then
     export WORKSPACE="${WORKSPACE_BASE}/founderos"
@@ -559,10 +562,10 @@ for CURRENT_REPO in "${ISSUE_REPOS[@]}"; do
   # calling convention) skips nothing, unchanged from before.
   if [[ -n "$FORCE_ISSUE" && -n "$FORCE_REPO" && "$REPO" != "$FORCE_REPO" ]]; then
     log "skipping $REPO — forced issue #$FORCE_ISSUE targets $FORCE_REPO"
-  elif [[ "$claims_done" -lt "$MAX_CLAIMS" ]]; then
+  elif [[ "${claims_done[$repo_idx]:-0}" -lt "$MAX_CLAIMS" ]]; then
     next_issue="$(pick_ready_issue)"
     if [[ -n "$next_issue" ]]; then
-      claim_and_implement "$next_issue" && claims_done=$((claims_done + 1))
+      claim_and_implement "$next_issue" && claims_done[$repo_idx]=$(( ${claims_done[$repo_idx]:-0} + 1 ))
     fi
   fi
 
@@ -570,4 +573,6 @@ for CURRENT_REPO in "${ISSUE_REPOS[@]}"; do
   redispatch_unresolved_reviews
 done
 
-log "tick complete — claims=${claims_done}/${MAX_CLAIMS}"
+total_claims=0
+for repo_claims in "${claims_done[@]:-}"; do total_claims=$((total_claims + repo_claims)); done
+log "tick complete — claims=${total_claims} (max ${MAX_CLAIMS} per repo across ${#ISSUE_REPOS[@]} repos)"
