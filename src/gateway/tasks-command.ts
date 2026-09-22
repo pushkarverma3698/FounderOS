@@ -138,6 +138,18 @@ export function selectRenderedRows(rows: readonly TaskRow[]): {
 export function formatTasksMessage(view: TasksView): string {
   const lines: string[] = ["🤖 <b>Engineering loop</b>"];
 
+  // The shape before the list. Measured on the first live run: 15 open issues,
+  // 11 of them agent:failed and the oldest 39 days — a wall of rows in which the
+  // one thing that needed a human was indistinguishable from a graveyard. A
+  // count line is read in a second; fifteen rows are not read at all.
+  if (view.rows.length > 0) {
+    const counts = AGENT_STATES.map((state) => ({
+      state,
+      n: view.rows.filter((r) => r.state === state).length,
+    })).filter((c) => c.n > 0);
+    lines.push(counts.map((c) => `${STATE_ICON[c.state]} ${c.n} ${c.state}`).join("  ·  "));
+  }
+
   if (view.rows.length === 0) {
     lines.push(
       "",

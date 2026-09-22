@@ -82,6 +82,18 @@ describe("formatTasksMessage", () => {
     expect(msg).toContain("#42");
   });
 
+  it("leads with a count per state, so the shape lands before the list does", () => {
+    // Measured on the first live run: 15 open issues, 11 of them agent:failed and
+    // the oldest 39 days. The one row that needed a human was indistinguishable
+    // from the graveyard around it.
+    const msg = formatTasksMessage({
+      rows: [row({ state: "failed", issue: 1 }), row({ state: "failed", issue: 2 }), row({ state: "blocked", issue: 3 })],
+      unreachable: [],
+    });
+    expect(msg.split("\n")[1]).toContain("2 failed");
+    expect(msg.split("\n")[1]).toContain("1 blocked");
+  });
+
   it("PRINTS an unreachable repository instead of showing it as empty", () => {
     const msg = formatTasksMessage({
       rows: [],
