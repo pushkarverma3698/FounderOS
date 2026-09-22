@@ -129,6 +129,29 @@ function parseModule(line: string): string | null {
   }
 }
 
+/**
+ * Third-party chatter excluded from the default window.
+ *
+ * Measured 2026-09-23 on the production journal: 674 of 1,398 lines in 24 hours —
+ * 48% — were composio-core's upgrade nag, emitted every ~2 minutes by a
+ * dependency. Half the capacity of the only instrument FounderOS has for
+ * observing itself, spent on a line nobody reads, and the reason the
+ * 2026-09-22 "check production logs" excerpt contained almost no real events.
+ *
+ * Excluded by DEFAULT, never banned: an explicit `grep` opts back in, and the
+ * count is always reported. Silently deleting lines to make a window look clean
+ * is the defect this tool exists to prevent.
+ */
+const NOISE_PATTERNS: readonly RegExp[] = [
+  // "2026-09-22T20:58:02.302Z - 🚀 Upgrade available! Your composio-core version …"
+  /🚀 Upgrade available! Your \S+ version/,
+] as const;
+
+/** True when a line is known third-party chatter with no diagnostic value. */
+export function isNoiseLine(line: string): boolean {
+  return NOISE_PATTERNS.some((re) => re.test(line));
+}
+
 const MIN_LEVEL: Record<Exclude<LogLevel, "all">, number> = {
   warn: LEVEL_WARN,
   error: LEVEL_ERROR,
@@ -228,40 +251,78 @@ export async function readLogs(
   }
 
   const raw = result.stdout.split("\n").filter((l) => l.trim().length > 0);
-  const filtered = filterLogLines(raw, { level: input.level, grep: input.grep });
+  // An explicit grep opts back in — asking for the nag must still find it.
+  const signal = input.grep ? raw : raw.filter((l) => !isNoiseLine(l));
+  const noise = raw.length - signal.length;
+  const filtered = filterLogLines(signal, { level: input.level, grep: input.grep });
   const capped = filtered.slice(-clampLimit(input.limit));
   const { redacted, count } = redactSecrets(capped.join("\n"));
   const lines = redacted.length > 0 ? redacted.split("\n") : [];
 
   if (count > 0) log.warn({ count }, "read_logs redacted secret-shaped values from journal output");
 
-  const summary = summarizeLogs(lines);
+  /**
+   * Summarize `filtered` — every line that MATCHED — not `lines`, the tail that
+   * fits the caller's limit.
+   *
+   * 2026-09-22, production: the founder asked to check the logs. The 1-hour
+   * window held 66 lines with 5 warnings; the returned last-50 slice held 1.
+   * Counting the slice reported "0 errors, 1 warning" and FounderOS answered
+   * "Healthy / Fully Operational". Four warnings existed and were described as
+   * absent — the same confident false negative SCAN_CAP was introduced to kill,
+   * surviving one layer further down.
+   *
+   * The excerpt stays capped; only the arithmetic moved to the evidence.
+   */
+  const summary = summarizeLogs(filtered);
+  const withheld = filtered.length - lines.length;
 
-  // Three distinguishable states, never one ambiguous silence: found something /
-  // genuinely empty / scan ceiling hit so the window is incomplete. Collapsing
-  // the last two is how "no errors" gets reported when errors exist just outside
-  // the scanned tail.
-  const truncated = raw.length >= SCAN_CAP;
+  // Distinguishable states, never one ambiguous silence: found something /
+  // genuinely empty / incomplete window. A window is incomplete for EITHER
+  // reason — the journalctl scan ceiling, or the caller's limit withholding
+  // matched lines — and both have to reach the model, because "here is
+  // everything" and "here is the tail of it" support different conclusions.
+  const ceilingHit = raw.length >= SCAN_CAP;
+  const truncated = ceilingHit || withheld > 0;
   const where = `unit=${input.unit ?? LOG_UNIT_ALLOWLIST[0]}, since=${input.since ?? DEFAULT_SINCE}${input.grep ? `, grep=${input.grep}` : ""}`;
 
+  const noiseNote = noise > 0 ? ` ${noise} third-party upgrade-notice line(s) were excluded from this window; grep for them explicitly to see them.` : "";
+
   let note: string;
-  if (lines.length === 0 && truncated) {
+  if (filtered.length === 0 && ceilingHit) {
     note =
       `No matching log lines among the ${raw.length} scanned (${where}) — but the ${SCAN_CAP}-line scan ceiling was reached, ` +
-      `so this window is TRUNCATED and matches may exist outside it. Narrow since/until and read again before concluding anything.`;
-  } else if (lines.length === 0) {
+      `so this window is TRUNCATED and matches may exist outside it. Narrow since/until and read again before concluding anything.` + noiseNote;
+  } else if (filtered.length === 0) {
     note =
       `No matching log lines in this window (${where}). The read SUCCEEDED and the window is genuinely empty — ` +
-      `widen 'since' before concluding anything.`;
+      `widen 'since' before concluding anything.` + noiseNote;
   } else {
     note =
-      `${lines.length} line(s) read (${summary.errors} error, ${summary.warnings} warn).` +
-      (truncated ? ` Scan ceiling (${SCAN_CAP}) reached — older lines in this window were NOT examined.` : "");
+      `${filtered.length} line(s) matched in this window (${summary.errors} error, ${summary.warnings} warn) — ` +
+      `counts are for the WHOLE window, not just the excerpt below.` +
+      (withheld > 0
+        ? ` Showing the newest ${lines.length}; ${withheld} older matching line(s) were withheld by limit=${clampLimit(input.limit)} ` +
+          `and are NOT in the excerpt — raise 'limit' or narrow 'since' before quoting the excerpt as complete.`
+        : "") +
+      (ceilingHit ? ` Scan ceiling (${SCAN_CAP}) reached — older lines in this window were NOT examined.` : "") +
+      noiseNote;
   }
 
   return {
     success: true,
-    data: { lines, summary, note, scanned: raw.length, truncated, redacted: count },
+    data: {
+      lines,
+      summary,
+      note,
+      scanned: raw.length,
+      matched: filtered.length,
+      noise,
+      returned: lines.length,
+      withheld,
+      truncated,
+      redacted: count,
+    },
   };
 }
 
@@ -271,7 +332,9 @@ export const readLogsTool: UnifiedTool = {
     "Read FounderOS's OWN production logs (systemd journal for founderos.service). This is the ONLY way to observe what the running system actually did. " +
     "Use it before diagnosing ANY runtime behaviour, bug report, failure or 'why did X happen' question — never infer runtime behaviour from the filesystem, " +
     "from directory listings, or from memory. Filter with level='error' to find failures fast, or grep for a module/turnId. " +
-    "If this tool returns success:false you have NO log evidence: say so plainly and stop — do not substitute another tool and do not describe behaviour you did not observe.",
+    "If this tool returns success:false you have NO log evidence: say so plainly and stop — do not substitute another tool and do not describe behaviour you did not observe. " +
+    "State error/warning counts from `summary` and `matched`, NEVER by counting the `lines` excerpt: `lines` holds the newest `returned` of `matched`, and `withheld` older matching lines are absent from it. " +
+    "When `truncated` is true you are holding an excerpt, not the window — never call the system healthy, clean or error-free from it.",
   input_schema: {
     type: "object",
     properties: {

@@ -99,6 +99,37 @@ describe("renderEvidencePack — vision verdicts", () => {
     expect(pack.markdown).toContain("unreadable-screenshot");
   });
 
+  it("does NOT claim visual blockers are spread across measured rows", () => {
+    // Measured on CI run 35786606697: the headline read "5 blocking defect(s)
+    // across 0 of 8 page/viewport combination(s)" — five defects over zero rows
+    // — printed above eight rows each saying "No measurable defects". Every
+    // blocker was visual and the sentence had no word for that. A summary whose
+    // arithmetic disagrees with its own rows is the exact "fabricated evidence"
+    // shape the review protocol tells a gate to hunt for.
+    const stage: VisionStage = {
+      ran: true,
+      verdicts: [{
+        target: "neon", viewport: "desktop", readable: true, ok: false,
+        summary: "Scaffold filler text is still on the page.",
+        defects: [{ severity: "high", area: "hero", description: "Placeholder copy left in the hero." }],
+      }],
+    };
+    const md = renderEvidencePack([cleanRow], stage).markdown;
+    expect(md).toContain("1 visual");
+    expect(md).toContain("rendered clean");
+    expect(md).not.toContain("across 0 of");
+  });
+
+  it("labels a visual row so it cannot be read as a measured one", () => {
+    // The two headings were byte-identical, so a reader scrolling a red pack
+    // could not tell which stage had failed.
+    const stage: VisionStage = {
+      ran: true,
+      verdicts: [{ target: "neon", viewport: "desktop", readable: true, ok: false, summary: "x", defects: [] }],
+    };
+    expect(renderEvidencePack([cleanRow], stage).markdown).toContain("FAIL — Visual: `neon`");
+  });
+
   it("reports a per-image vision error without silently dropping it", () => {
     const stage: VisionStage = {
       ran: true,
