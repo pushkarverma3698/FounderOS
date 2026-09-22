@@ -30,11 +30,10 @@
  */
 
 import { spawn, execSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
-import { join, normalize, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { childLogger } from "../infra/logger.js";
-import { isProjectPath } from "./project-workflow.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:claude-code" });
@@ -103,51 +102,10 @@ export function withExecutionDirective(task: string): string {
 
 // ── Workspace policy ──────────────────────────────────────────────────────────
 
-function home(): string {
-  return process.env["HOME"] ?? "/Users/pushkarverma";
-}
-
-/** The bot's own repo — git/file mutations here from an agent are forbidden. */
-export function founderosRepoPath(): string {
-  return join(home(), "Projects/founderos");
-}
-
-/** Default isolated workspace for agent tasks. Created on demand. */
-export function defaultWorkspace(): string {
-  return join(home(), "Projects/agent-workspace");
-}
-
-/**
- * Validate and resolve the working directory for a Claude Code run.
- * Returns { ok: true, cwd } or { ok: false, error }.
- */
-export function resolveExecutorCwd(rawCwd?: string | null): { ok: true; cwd: string } | { ok: false; error: string } {
-  const target = rawCwd && rawCwd.trim().length > 0
-    ? (rawCwd.startsWith("/") ? rawCwd : rawCwd.startsWith("~") ? rawCwd.replace("~", home()) : join(home(), "Projects", rawCwd))
-    : defaultWorkspace();
-  const abs = normalize(resolve(target));
-
-  const selfRepo = founderosRepoPath();
-  if (abs === selfRepo || abs.startsWith(selfRepo + "/")) {
-    return {
-      ok: false,
-      error:
-        "Refused: Claude Code may not run inside the FounderOS repo — the bot must never modify its own " +
-        "running code (this corrupted the live process before). FounderOS changes are made by the founder " +
-        "directly. Use a different project under ~/Projects, or omit cwd for the agent workspace.",
-    };
-  }
-
-  if (!isProjectPath(abs) && abs !== join(home(), "Projects")) {
-    return { ok: false, error: `Access denied: cwd ${abs} is outside ~/Projects.` };
-  }
-
-  if (!existsSync(abs)) {
-    mkdirSync(abs, { recursive: true });
-    log.info({ cwd: abs }, "Created executor workspace directory");
-  }
-  return { ok: true, cwd: abs };
-}
+// Workspace resolution lives in its own module (LOC budget); re-exported here
+// because claude-code.ts has always been its import site.
+export { founderosRepoPath, defaultWorkspace, rehomeProjectsPath, resolveExecutorCwd } from "./claude-code-cwd.js";
+import { defaultWorkspace, resolveExecutorCwd } from "./claude-code-cwd.js";
 
 // ── stream-json parsing ───────────────────────────────────────────────────────
 

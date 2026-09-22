@@ -66,24 +66,10 @@ export interface WorkerSpec {
   tools: KernelTool[]; promptForProfile?: (profileId: string) => string; // per-turn override — see worker-protocol.ts
 }
 
-/**
- * Deterministic failure convention for tool RESULTS (produced by code, never
- * parsed from model prose): a result is a failure iff it starts with "❌",
- * carries the structured [[TOOL_FAILURE …]] marker, or is a JSON envelope with
- * success/ok === false. hitlGate's rejection string starts with "❌" and
- * contains REJECTION_MARKER.
- */
-export const TOOL_FAILURE_MARKER = "[[TOOL_FAILURE";
-export const REJECTION_MARKER = "Rejected by founder";
-
-export function isFailureResult(result: string): boolean {
-  const head = result.trimStart();
-  return (
-    head.startsWith("❌") ||
-    result.includes(TOOL_FAILURE_MARKER) ||
-    /"(?:success|ok)"\s*:\s*false/.test(head.slice(0, 200))
-  );
-}
+// Failure classification lives in its own module (LOC budget); re-exported here
+// because worker.ts has always been its import site.
+export { TOOL_FAILURE_MARKER, REJECTION_MARKER, isFailureResult } from "./tool-failure.js";
+import { isFailureResult, REJECTION_MARKER, TOOL_FAILURE_MARKER } from "./tool-failure.js";
 
 export function currentStep(state: KernelStateType): TaskEnvelope {
   const step = state.mission.plan?.steps[state.mission.cursor];

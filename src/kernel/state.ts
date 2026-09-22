@@ -140,9 +140,60 @@ export const HISTORY_MAX_TURNS = 20;
 /** Char budget across ALL retained summaries (~4k tokens) — protects the run budget on long threads. */
 export const HISTORY_MAX_CHARS = 16_000;
 
-/** Trim oldest-first to both the turn cap and the total char budget (always keeps the newest turn). */
-function trimHistory(list: TurnSummary[]): TurnSummary[] {
-  let out = list.length > HISTORY_MAX_TURNS ? list.slice(-HISTORY_MAX_TURNS) : list;
+/**
+ * Silence that ends a conversation. Turns before a gap this long are a DIFFERENT
+ * conversation and are dropped before the count and char caps apply.
+ *
+ * 2026-09-21, production: "Create a GitHub issue in FounderOS … label it
+ * agent:ready" was answered with "I have recorded your preference … FounderOS will
+ * ensure a PDF format is produced and delivered", and the founder's persistent
+ * business context was rewritten. No issue was filed. The PDF instruction was
+ * genuine but 4 days 14 hours old (2026-09-16 17:13, "I needed a pdf for it.
+ * Remember this from next time also") and still inside the 20-turn window, which
+ * that day spanned 4.5 days.
+ *
+ * A count cap cannot express "we stopped talking". On the single long-lived
+ * Telegram thread this product actually runs on, it means each new day's first
+ * message is planned against last week's.
+ *
+ * 6 hours: long enough that a working session — including the founder's 04:45 and
+ * 20:31 ends of the day — stays one conversation, short enough that an overnight
+ * or multi-day silence starts a clean one. Erring long is the silent failure
+ * (invent an action from stale context); erring short is the loud one (ask what
+ * "it" refers to).
+ */
+export const HISTORY_SESSION_GAP_MS = 6 * 60 * 60 * 1000;
+
+/** Epoch ms for a summary's `at`, or null when it is missing/unparseable. */
+function turnTime(t: TurnSummary): number | null {
+  const ms = Date.parse(t.at);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Drop every turn before the most recent silence of >= HISTORY_SESSION_GAP_MS.
+ *
+ * An unreadable timestamp carries no gap information, so it never cuts: cutting
+ * on it would silently wipe history, which is the same failure direction the
+ * bound exists to remove. The count and char caps still bound whatever survives.
+ */
+function dropPriorSessions(list: TurnSummary[]): TurnSummary[] {
+  for (let i = list.length - 1; i > 0; i--) {
+    const curr = turnTime(list[i]!);
+    const prev = turnTime(list[i - 1]!);
+    if (curr === null || prev === null) continue;
+    if (curr - prev >= HISTORY_SESSION_GAP_MS) return list.slice(i);
+  }
+  return list;
+}
+
+/**
+ * Trim to the current session, then oldest-first to the turn cap and the total
+ * char budget (always keeps the newest turn).
+ */
+export function trimHistory(list: TurnSummary[]): TurnSummary[] {
+  const session = dropPriorSessions(list);
+  let out = session.length > HISTORY_MAX_TURNS ? session.slice(-HISTORY_MAX_TURNS) : session;
   let chars = out.reduce((n, t) => n + t.user_input.length + t.reply.length, 0);
   while (out.length > 1 && chars > HISTORY_MAX_CHARS) {
     chars -= out[0]!.user_input.length + out[0]!.reply.length;

@@ -51,3 +51,36 @@ describe("buildPlannerPrompt — draft is not send (live 89188cd5)", () => {
     expect(prompt).toContain('"draft"');
   });
 });
+
+/**
+ * 2026-09-21 07:23, production. The founder sent:
+ *
+ *   "Create a GitHub issue in FounderOS to add a visible test comment to the
+ *    bottom of the README.md file, and explicitly label it agent:ready so the
+ *    VPS dispatcher picks it up"
+ *
+ * The planner produced the step "Record the founder's rule and preference into
+ * business context", called update_context, rewrote his persistent business
+ * context, and replied that a PDF preference had been saved. No issue was filed.
+ * Sixteen minutes later he wrote the dispatch brief by hand.
+ *
+ * Two failures met there. The stale-history one is fixed by the session bound in
+ * state.ts (see history-session-bound.test.ts). This is the other half: filing a
+ * GitHub issue was never named as a route, and nothing said that a memory tool is
+ * not a substitute for performing the task.
+ */
+describe("buildPlannerPrompt — issue filing is a dispatch, not a memory write", () => {
+  it("routes 'create/file a GitHub issue' to the dispatch tool", () => {
+    const prompt = buildPlannerPrompt(catalog);
+    expect(prompt).toMatch(/creat\w*|fil\w*/i);
+    expect(prompt).toMatch(/GitHub issue/i);
+    expect(prompt).toContain("dispatch_antigravity_task");
+    expect(prompt).toMatch(/agent:ready/);
+  });
+
+  it("forbids a memory/context write standing in for a task the founder asked for", () => {
+    const prompt = buildPlannerPrompt(catalog);
+    expect(prompt).toMatch(/update_context/);
+    expect(prompt).toMatch(/never.*(substitute|instead of).*(task|action|request)/i);
+  });
+});
