@@ -155,18 +155,21 @@ export function registerHandlers(bot: Bot): void {
       return;
     }
     if (!text.trim()) return; // ignore empty / whitespace-only messages
-    // A reply to "what should I build?" is a dispatch, not a chat turn. Checked
-    // before the kernel because the repository he picked lives in the message he
-    // replied to — hand it to the planner as ordinary text and that target is
-    // just a sentence the model may or may not honour.
-    if (await handleRepoReply(ctx, taskDeps)) return;
     // Telegram `message.date` is epoch SECONDS (the send time); receivedAt is
     // our clock. Both formatted to readable UTC so logs never show a raw epoch.
+    // Logged BEFORE the dispatch branch below, so every inbound message appears
+    // once regardless of which path it takes — a turn that is only visible in
+    // the logs when it went one of two ways is a turn nobody can debug.
     const sentAt = ctx.message?.date ? formatTimestamp(ctx.message.date * 1000) : undefined;
     log.info(
       { from: ctx.from?.id, text: text.slice(0, 80), sentAt, receivedAt: formatTimestamp() },
       "Message received",
     );
+    // A reply to "what should I build?" is a dispatch, not a chat turn. Checked
+    // before the kernel because the repository he picked lives in the message he
+    // replied to — hand it to the planner as ordinary text and that target is
+    // just a sentence the model may or may not honour.
+    if (await handleRepoReply(ctx, taskDeps)) return;
     await runKernelText(ctx, text);
   });
 
