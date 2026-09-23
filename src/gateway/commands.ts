@@ -15,6 +15,7 @@ import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { buildMenuSection, menuKeyboard } from "./home-menu.js";
 import { buildCommandsHelp } from "./command-menu.js";
+import { splitForTelegram } from "./format.js";
 import { safeHtml } from "./approval-card.js";
 import { TENANT, DAILY_BUDGET_USD, MCP_BRIDGE_ENABLED, MCP_BRIDGE_MANIFEST } from "../core/config.js";
 import { assessDailyBudget, formatBudgetDashboard, getRunBudgetCaps } from "../infra/daily-budget.js";
@@ -107,15 +108,13 @@ export async function handleResume(ctx: Context): Promise<void> {
  */
 export async function handleCommands(ctx: Context): Promise<void> {
   const parts = buildCommandsHelp();
-  for (let i = 0; i < parts.length; i += 1) {
-    await ctx.reply(parts[i] as string, {
+  const full = parts.join("\n\n");
+  const chunks = splitForTelegram(full);
+  for (let i = 0; i < chunks.length; i += 1) {
+    await ctx.reply(chunks[i] as string, {
       parse_mode: "HTML",
       disable_notification: i > 0,
-      // The buttons ride on the LAST message only. The full text list is still
-      // the complete answer for someone who wants to read it; the keyboard is
-      // there so the founder who reached the bottom of it has somewhere to go
-      // that is not "scroll back up and retype one of these".
-      ...(i === parts.length - 1 ? { reply_markup: menuKeyboard("home") } : {}),
+      ...(i === chunks.length - 1 ? { reply_markup: menuKeyboard("home") } : {}),
     });
   }
 }

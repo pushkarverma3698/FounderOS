@@ -247,5 +247,69 @@ export function splitForTelegram(text: string, max: number = TELEGRAM_MAX): stri
   }
   flush();
 
-  return chunks.filter((c) => c.length > 0);
+  return repairHtmlChunkBoundaries(chunks.filter((c) => c.length > 0));
+}
+
+/**
+ * The HTML tags Telegram supports. Each maps to its closing form.
+ * Only these are emitted by markdownToTelegramHtml, so only these can be split.
+ */
+const TELEGRAM_HTML_TAGS = ["b", "i", "u", "s", "code", "pre", "a", "blockquote"] as const;
+
+/**
+ * Close unclosed HTML tags at the end of a chunk and reopen them at the start
+ * of the next chunk, so every chunk is independently valid HTML.
+ *
+ * WHY. `splitForTelegram` operates on raw character positions and can split
+ * inside a `<pre>…</pre>` or `<a href="…">…</a>` block. Telegram rejects the
+ * resulting chunk with a 400 and the fallback strips ALL formatting from it.
+ * Repairing boundaries is cheaper than moving the split point (which would
+ * require re-measuring), and the fallback remains as defence-in-depth.
+ */
+export function repairHtmlChunkBoundaries(chunks: string[]): string[] {
+  if (chunks.length <= 1) return chunks;
+
+  const result: string[] = [];
+  let carryOpen: string[] = []; // tags to reopen at the start of the next chunk
+
+  for (let i = 0; i < chunks.length; i++) {
+    let chunk = carryOpen.length > 0
+      ? carryOpen.join("") + chunks[i]!
+      : chunks[i]!;
+
+    // Track which tags are open at the end of this chunk.
+    const openStack: string[] = [];
+    const tagRe = /<\/?([a-z]+)(?:\s[^>]*)?\/?>/gi;
+    let match: RegExpExecArray | null;
+    while ((match = tagRe.exec(chunk)) !== null) {
+      const full = match[0]!;
+      const tagName = match[1]!.toLowerCase();
+      if (!(TELEGRAM_HTML_TAGS as readonly string[]).includes(tagName)) continue;
+      if (full.startsWith("</")) {
+        // Closing tag: pop the matching open from the stack.
+        const idx = openStack.lastIndexOf(tagName);
+        if (idx !== -1) openStack.splice(idx, 1);
+      } else if (!full.endsWith("/>")) {
+        // Opening tag (not self-closing).
+        openStack.push(tagName);
+      }
+    }
+
+    // Close any tags still open at the end of this chunk.
+    carryOpen = [];
+    if (openStack.length > 0 && i < chunks.length - 1) {
+      // Close in reverse order (innermost first).
+      for (let j = openStack.length - 1; j >= 0; j--) {
+        chunk += `</${openStack[j]!}>`;
+      }
+      // Reopen in original order for the next chunk.
+      for (const tag of openStack) {
+        carryOpen.push(`<${tag}>`);
+      }
+    }
+
+    result.push(chunk);
+  }
+
+  return result;
 }

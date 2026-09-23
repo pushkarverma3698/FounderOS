@@ -48,7 +48,7 @@ function tapCtx(data: string, repliedTo?: string): FakeCtx {
     message: undefined,
     callbackQuery: {
       data,
-      message: { message_id: 12, text: "Which repo?", reply_to_message: repliedTo ? { text: repliedTo } : undefined },
+      message: { message_id: Math.floor(Math.random() * 1000000) + 1, text: "Which repo?", reply_to_message: repliedTo ? { text: repliedTo } : undefined },
     },
   });
 }
@@ -385,7 +385,7 @@ describe("/task against a repo this instance created", () => {
 // ── /newproject ──────────────────────────────────────────────────────────────
 
 const { parseNewProjectArgs, buildNewProjectInstruction, handleNewProject } = await import(
-  "../../../src/gateway/task-command.js"
+  "../../../src/gateway/newproject-command.js"
 );
 
 describe("parseNewProjectArgs", () => {

@@ -104,9 +104,9 @@ describe("progressLabelFor", () => {
     expect(progressLabelFor(state)).toBe("✍️ Writing your reply…");
   });
 
-  it("returns null while planning (nothing worth showing yet)", () => {
+  it("returns the planning label while planning", () => {
     const state = baseState({ status: "planning", plan: null, cursor: 0 });
-    expect(progressLabelFor(state)).toBeNull();
+    expect(progressLabelFor(state)).toBe("🧠 Planning…");
   });
 
   it("returns null when done or failed", () => {

@@ -26,6 +26,7 @@ const PROGRESS_PLACEHOLDER_TEXT = "🤔 Working on it…";
 export function progressLabelFor(state: KernelStateType): string | null {
   const { mission } = state;
   if (!mission) return null; // first streamed snapshot, before the plan node has run
+  if (mission.status === "planning") return "🧠 Planning…";
   if (mission.status === "executing") {
     const step = mission.plan?.steps[mission.cursor];
     if (!step) return null;
