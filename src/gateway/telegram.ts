@@ -29,7 +29,8 @@ import {
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
 import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
-import { handleTask, handleNewProject } from "./task-command.js";
+import { handleTask, handleNewProject, handleRepoChoice, handleRepoReply } from "./task-command.js";
+import { handleMenuCallback } from "./home-menu.js";
 import { handleTasks } from "./tasks-command.js";
 import {
   handleCsv,
@@ -89,18 +90,20 @@ export function registerHandlers(bot: Bot): void {
   bot.command("commands", (ctx: Context) => handleCommands(ctx));
   // The registry read is dynamically imported so this transport file does not pull
   // the database into the bot's startup path (same reason as jobsDeps below).
-  bot.command("task", (ctx: Context) =>
-    handleTask(ctx, {
-      runKernelText,
-      listRegisteredRepos: async () => {
-        const [{ listRegisteredDispatchRepos }, { TENANT }] = await Promise.all([
-          import("../db/queries.js"),
-          import("../core/config.js"),
-        ]);
-        return listRegisteredDispatchRepos(TENANT);
-      },
-    }),
-  );
+  // Shared by the command and by the repo buttons it puts on screen: two copies
+  // would be two answers to "which repos may I dispatch to", and the button list
+  // drifting from the parser's allowlist is a button that refuses its own label.
+  const taskDeps = {
+    runKernelText,
+    listRegisteredRepos: async () => {
+      const [{ listRegisteredDispatchRepos }, { TENANT }] = await Promise.all([
+        import("../db/queries.js"),
+        import("../core/config.js"),
+      ]);
+      return listRegisteredDispatchRepos(TENANT);
+    },
+  };
+  bot.command("task", (ctx: Context) => handleTask(ctx, taskDeps));
   bot.command("tasks", (ctx: Context) => handleTasks(ctx));
   bot.command("newproject", (ctx: Context) => handleNewProject(ctx, { runKernelText }));
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
@@ -154,11 +157,19 @@ export function registerHandlers(bot: Bot): void {
     if (!text.trim()) return; // ignore empty / whitespace-only messages
     // Telegram `message.date` is epoch SECONDS (the send time); receivedAt is
     // our clock. Both formatted to readable UTC so logs never show a raw epoch.
+    // Logged BEFORE the dispatch branch below, so every inbound message appears
+    // once regardless of which path it takes — a turn that is only visible in
+    // the logs when it went one of two ways is a turn nobody can debug.
     const sentAt = ctx.message?.date ? formatTimestamp(ctx.message.date * 1000) : undefined;
     log.info(
       { from: ctx.from?.id, text: text.slice(0, 80), sentAt, receivedAt: formatTimestamp() },
       "Message received",
     );
+    // A reply to "what should I build?" is a dispatch, not a chat turn. Checked
+    // before the kernel because the repository he picked lives in the message he
+    // replied to — hand it to the planner as ordinary text and that target is
+    // just a sentence the model may or may not honour.
+    if (await handleRepoReply(ctx, taskDeps)) return;
     await runKernelText(ctx, text);
   });
 
@@ -166,6 +177,12 @@ export function registerHandlers(bot: Bot): void {
 
   bot.on("callback_query:data", async (ctx: Context) => {
     const data = ctx.callbackQuery?.data ?? "";
+    // Ordered by how much a mistake costs. Each handler returns false for a
+    // payload that is not its own, so the HITL approve/reject path below keeps
+    // its exact previous behaviour: it is the one button where a misroute means
+    // a side effect fires, or fails to, without the founder knowing which.
+    if (await handleRepoChoice(ctx, taskDeps)) return;
+    if (await handleMenuCallback(ctx)) return;
     if (data !== "approve" && data !== "reject") {
       await ctx.answerCallbackQuery({ text: "Unknown action" });
       return;

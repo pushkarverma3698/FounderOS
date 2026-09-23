@@ -13,7 +13,7 @@ import { getSystemStatus, formatStatusMessage } from "./status.js";
 import { cancelPendingApprovals, getTodayCostUsd, getCostBreakdown } from "../db/queries.js";
 import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
-import { buildWelcomeMessage } from "./capability-message.js";
+import { buildMenuSection, menuKeyboard } from "./home-menu.js";
 import { buildCommandsHelp } from "./command-menu.js";
 import { safeHtml } from "./approval-card.js";
 import { TENANT, DAILY_BUDGET_USD, MCP_BRIDGE_ENABLED, MCP_BRIDGE_MANIFEST } from "../core/config.js";
@@ -29,8 +29,18 @@ function threadIdFor(chatId: number | string): string {
   return `${TENANT}:${chatId}`;
 }
 
+/**
+ * /start — the tappable home screen.
+ *
+ * The long-form welcome moved behind the buttons (see home-menu.ts). What used
+ * to be here was 48 lines naming 20 commands, which is a screen you read once
+ * and then cannot act on without scrolling back and retyping.
+ */
 export async function handleStart(ctx: Context): Promise<void> {
-  await ctx.reply(buildWelcomeMessage(ctx.from?.first_name), { parse_mode: "HTML" });
+  await ctx.reply(buildMenuSection("home", ctx.from?.first_name), {
+    parse_mode: "HTML",
+    reply_markup: menuKeyboard("home"),
+  });
 }
 
 /** /reset — explicit founder-initiated thread reset (the ONLY thread wipe in v3). */
@@ -101,6 +111,11 @@ export async function handleCommands(ctx: Context): Promise<void> {
     await ctx.reply(parts[i] as string, {
       parse_mode: "HTML",
       disable_notification: i > 0,
+      // The buttons ride on the LAST message only. The full text list is still
+      // the complete answer for someone who wants to read it; the keyboard is
+      // there so the founder who reached the bottom of it has somewhere to go
+      // that is not "scroll back up and retype one of these".
+      ...(i === parts.length - 1 ? { reply_markup: menuKeyboard("home") } : {}),
     });
   }
 }
