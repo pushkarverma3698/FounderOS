@@ -18,8 +18,8 @@
  * supply-chain risk for a chat gateway.
  */
 
-/** Telegram's hard per-message character limit. */
-export const TELEGRAM_MAX = 4096;
+/** Telegram's hard per-message character limit is 4096; use 4000 to leave room for closing tags during chunking. */
+export const TELEGRAM_MAX = 4000;
 
 /** Escape the characters that are significant in Telegram HTML. */
 function escapeHtml(text: string): string {
@@ -198,6 +198,25 @@ function collapseNestedTags(html: string): string {
   return cur;
 }
 
+function findSafeSplit(chunk: string, defaultCut: number): number {
+  const slice = chunk.slice(0, defaultCut);
+  let splitAt = defaultCut;
+
+  const lastTagOpen = slice.lastIndexOf("<");
+  const lastTagClose = slice.lastIndexOf(">");
+  if (lastTagOpen > lastTagClose) {
+    splitAt = lastTagOpen;
+  }
+
+  const lastAmp = slice.lastIndexOf("&", splitAt - 1);
+  const lastSemi = slice.lastIndexOf(";", splitAt - 1);
+  if (lastAmp > lastSemi && splitAt - lastAmp < 8) {
+    splitAt = lastAmp;
+  }
+
+  return splitAt > 0 ? splitAt : defaultCut;
+}
+
 /**
  * Split text into chunks no longer than `max`, preferring paragraph then line
  * then word boundaries. A single token longer than `max` is hard-split.
@@ -229,7 +248,8 @@ export function splitForTelegram(text: string, max: number = TELEGRAM_MAX): stri
         // try to break on the last space before max
         const slice = rest.slice(0, max);
         const lastSpace = slice.lastIndexOf(" ");
-        const cut = lastSpace > 0 ? lastSpace : max;
+        let cut = lastSpace > 0 ? lastSpace : max;
+        cut = findSafeSplit(rest, cut);
         chunks.push(rest.slice(0, cut).trim());
         rest = rest.slice(cut);
       }
