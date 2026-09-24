@@ -30,6 +30,7 @@ import { enqueueTurnAutoRetry } from "./auto-retry.js";
 import { recordFailedTurnInHistory, type FoldableKernel } from "./failed-turn-fold.js";
 import { streamKernelTurn, progressLabelFor } from "./kernel-progress.js";
 import { cleanupResumeArtifact } from "./resume-artifact-cleanup.js";
+import { replyForError } from "./error-reply.js";
 
 // Progress streaming lives in ./kernel-progress.ts; re-exported so the gateway's
 // public surface (and its tests) keep addressing kernel-run.
@@ -51,13 +52,14 @@ export async function withChatTurnLock<T>(chatId: string | number, fn: () => Pro
   const slot = new Promise<void>((resolve) => {
     release = resolve;
   });
-  chatTurnChains.set(key, tail.then(() => slot));
+  const next = tail.then(() => slot);
+  chatTurnChains.set(key, next);
   await tail;
   try {
     return await fn();
   } finally {
     release();
-    if (chatTurnChains.get(key) === slot) chatTurnChains.delete(key);
+    if (chatTurnChains.get(key) === next) chatTurnChains.delete(key);
   }
 }
 
@@ -128,8 +130,8 @@ async function sendReply(ctx: Context, text: string): Promise<void> {
   }
 }
 
-async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promise<void> {
-  const card = formatApprovalCard(approval);
+async function sendApprovalCard(ctx: Context, approval: ApprovalRequest, nonce?: string): Promise<void> {
+  const card = formatApprovalCard(approval, { nonce });
   await ctx.reply(card.html, { parse_mode: "HTML", reply_markup: card.keyboard });
 }
 
@@ -147,6 +149,10 @@ async function sendApprovalCard(ctx: Context, approval: ApprovalRequest): Promis
  */
 export async function runKernelText(ctx: Context, text: string, profileId?: string): Promise<void> {
   const chatId = ctx.chat?.id ?? "unknown";
+  // UX: Let the founder know the system heard him if another turn is already running.
+  if (chatTurnChains.has(String(chatId))) {
+    await ctx.reply("⏳ Got it — finishing the current request first.").catch(() => undefined); // allow-failopen: queue ack is cosmetic
+  }
   await withChatTurnLock(chatId, async () => {
     const trace = startTurn({ chatId: String(chatId), kind: "message", promptHash: kernelPromptHash() });
     let foldCtx: { kernel: FoldableKernel; config: unknown } | undefined;
@@ -221,7 +227,9 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
       const approval = (await getPendingKernelApproval(kernel, config)) as ApprovalRequest | null;
       if (approval) {
         trace.event("hitl.interrupt", { title: approval.title });
-        await sendApprovalCard(ctx, approval);
+        const pendingRecord = await getPendingInterrupt(threadIdFor(chatId));
+        const nonce = pendingRecord?.interrupt_id?.substring(0, 8);
+        await sendApprovalCard(ctx, approval, nonce);
         return;
       }
 
@@ -242,7 +250,7 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
 
 // ── Resume after an approval decision ─────────────────────────────────────────
 
-export async function resumeKernel(ctx: Context, decision: "approved" | "rejected"): Promise<void> {
+export async function resumeKernel(ctx: Context, decision: "approved" | "rejected", nonce?: string): Promise<void> {
   const chatId = ctx.chat?.id ?? "unknown";
   await withChatTurnLock(chatId, async () => {
     const threadId = threadIdFor(chatId);
@@ -251,6 +259,11 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
     let budget: ReturnType<typeof enforceRunBudget> | undefined;
     try {
       const pending = await getPendingInterrupt(threadId);
+      if (nonce && pending && !pending.interrupt_id.startsWith(nonce)) {
+        log.warn({ expected: pending.interrupt_id, received: nonce }, "Rejected stale HITL card tap");
+        await ctx.reply("⚠️ This approval card is expired or belongs to an older task.", { parse_mode: "HTML" });
+        return;
+      }
       if (pending) {
         await resolveInterrupt(pending.interrupt_id, decision);
       }
@@ -332,64 +345,3 @@ export async function restorePendingApproval(
 }
 
 // ── Typed error replies (fail loud; the thread is NEVER wiped) ────────────────
-
-/** `retry` (a live text turn, replayable verbatim) lets provider exhaustion queue ONE auto-retry; a resume omits it and keeps the manual path. */
-async function replyForError(
-  ctx: Context,
-  err: unknown,
-  retry?: { chatId: string; text: string; turnId: string },
-): Promise<void> {
-  if (err instanceof BudgetExceededError) {
-    await ctx.reply(
-      `💰 <b>Run stopped — budget limit reached</b>\n<code>${safeHtml(err.reason)}</code>`,
-      { parse_mode: "HTML" },
-    );
-    return;
-  }
-  if (err instanceof DailyBudgetExceededError) {
-    await ctx.reply(
-      `🛑 <b>Daily budget cap reached</b>\n<code>${safeHtml(err.reason)}</code>\nCheck spend: /budget`,
-      { parse_mode: "HTML" },
-    );
-    return;
-  }
-  if (err instanceof TurnTimeoutError) {
-    await ctx.reply(
-      `⏱️ <b>That took too long and I stopped it</b> (over ${Math.round(err.ms / 1000)}s). ` +
-        `The mission state is saved — try again or break the task down.`,
-      { parse_mode: "HTML" },
-    );
-    return;
-  }
-  if (err instanceof GraphRecursionError) {
-    // With the kernel's bounded steps this should be unreachable; if it fires it is a bug — say so.
-    await ctx.reply(
-      `🔁 <b>Hit the graph recursion limit</b> — this should not happen in v3; please report. State is preserved.`,
-      { parse_mode: "HTML" },
-    );
-    return;
-  }
-  if (isModelFallbackError(err)) {
-    // Provider outage/rate-limit after the whole fallback chain — a raw SDK
-    // stack here reads like a system bug to the founder (2026-07-12 68eae59d).
-    if (retry && (await enqueueTurnAutoRetry(retry.chatId, retry.text, retry.turnId))) {
-      // Auto-retry queued (2026-07-13 audit) — the founder does nothing.
-      await ctx.reply(
-        `🤖 <b>The AI provider is rate-limited right now</b> — nothing is broken on our side. ` +
-          `I'll retry automatically in ~3 minutes; you don't need to do anything.`,
-        { parse_mode: "HTML" },
-      );
-      return;
-    }
-    // No replayable input (a resume) or the queue write failed — manual fallback.
-    await ctx.reply(
-      `🤖 <b>The AI provider is overloaded or rate-limited right now</b> — nothing is broken on our side. ` +
-        `Wait a minute and send "try again"; I remember what you asked.`,
-      { parse_mode: "HTML" },
-    );
-    return;
-  }
-  const msg = err instanceof Error ? err.message : String(err);
-  log.error({ err: err instanceof Error ? (err.stack ?? msg) : msg }, "Kernel run failed");
-  await ctx.reply(`❌ <b>Error</b>\n<code>${safeHtml(msg.slice(0, 1000))}</code>`, { parse_mode: "HTML" });
-}

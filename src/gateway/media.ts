@@ -23,6 +23,7 @@ import { translateImage } from "../tools/vision.js";
 import { transcribeAudio } from "../tools/transcription.js";
 import { synthesizeSpeech } from "../tools/tts.js";
 import { safeHtml } from "./telegram.js";
+import { splitForTelegram } from "./format.js";
 
 const log = childLogger({ module: "media" });
 
@@ -93,7 +94,10 @@ async function handleImage(ctx: Context, fileId: string, mimeType: string): Prom
   const body = isEnglish
     ? safeHtml(t.englishText)
     : `${safeHtml(t.englishText)}\n\n<i>Original (${safeHtml(t.sourceLanguage)}):</i>\n<i>${safeHtml(t.originalText.slice(0, 1000))}</i>`;
-  await ctx.reply(`${header}\n\n${body}`.slice(0, 4000), { parse_mode: "HTML" });
+  const imageReply = `${header}\n\n${body}`;
+  for (const chunk of splitForTelegram(imageReply)) {
+    await ctx.reply(chunk, { parse_mode: "HTML" });
+  }
 
   if (wantsSpeech(caption)) {
     await ctx.replyWithChatAction("record_voice").catch(() => {});

@@ -37,9 +37,31 @@ import {
   buildRepoQuestion,
   repoFromCallbackData,
   repoFromPrompt,
+  labelForRepo,
 } from "./repo-picker.js";
 
 const REPO_PREFIX = "repo:";
+
+/**
+ * Repo callbacks that have already been dispatched. Prevents a stale button
+ * (editMessageReplyMarkup failed to clear it) from re-dispatching.
+ * TTL-pruned: entries older than 5 minutes are dropped on each check.
+ */
+const processedRepoCallbacks = new Map<number, number>(); // messageId → timestamp
+const REPO_CALLBACK_TTL_MS = 5 * 60 * 1000;
+
+function isRepoCallbackProcessed(messageId: number): boolean {
+  const now = Date.now();
+  // Prune stale entries
+  for (const [id, ts] of processedRepoCallbacks) {
+    if (now - ts > REPO_CALLBACK_TTL_MS) processedRepoCallbacks.delete(id);
+  }
+  return processedRepoCallbacks.has(messageId);
+}
+
+function markRepoCallbackProcessed(messageId: number): void {
+  processedRepoCallbacks.set(messageId, Date.now());
+}
 
 const USAGE = [
   "Usage: /task <what you want built>",
@@ -63,8 +85,7 @@ export type TaskParse =
   | { readonly ok: true; readonly args: TaskArgs }
   /** Work was described but no repository named — ask, with buttons. */
   | { readonly ok: false; readonly kind: "needs-repo"; readonly text: string }
-  /** Nothing to build yet — offer the repo buttons and then ask for the work. */
-  | { readonly ok: false; readonly kind: "needs-work"; readonly message: string }
+  | { readonly ok: false; readonly kind: "needs-work"; readonly message: string; readonly repo?: string }
   | { readonly ok: false; readonly kind: "refused"; readonly message: string };
 
 /**
@@ -116,7 +137,7 @@ export function parseTaskArgs(raw: string, registered: readonly string[] = []): 
   }
 
   const text = rest.join(" ").trim();
-  if (!text) return { ok: false, kind: "needs-work", message: USAGE };
+  if (!text) return { ok: false, kind: "needs-work", message: USAGE, repo: matches[0] as string };
 
   return { ok: true, args: { repo: matches[0] as string, text } };
 }
@@ -198,6 +219,16 @@ export async function handleTask(ctx: Context, deps: TaskCommandDeps): Promise<v
     return;
   }
 
+  if (parsed.kind === "needs-work" && parsed.repo) {
+    const messageId = ctx.message?.message_id;
+    await ctx.reply(`🤖 Got it — <b>${labelForRepo(parsed.repo)}</b>.\n\nWhat should I build?`, {
+      parse_mode: "HTML",
+      reply_markup: { force_reply: true },
+      ...(messageId ? { reply_parameters: { message_id: messageId } } : {}),
+    });
+    return;
+  }
+
   // Both remaining cases end in the same row of buttons. The difference is only
   // what happens after the tap, and that is decided at tap time by whether the
   // question is attached to a message that already describes the work — so the
@@ -237,6 +268,19 @@ export async function handleRepoChoice(ctx: Context, deps: TaskCommandDeps): Pro
   // handler, and making the HITL card wait on a database round trip to be told
   // "not mine" puts a query in front of the founder's approval tap.
   if (!data.startsWith(REPO_CALLBACK_PREFIX)) return false;
+
+  // Checked-and-marked SYNCHRONOUSLY, with no `await` in between: two callback
+  // deliveries for the same message (Telegram redelivery, or a fast double-tap)
+  // can both reach this line before either finishes, but only one can win a
+  // synchronous check-then-set — the other sees it marked on its very next line.
+  const callbackMsgId = ctx.callbackQuery?.message?.message_id;
+  if (callbackMsgId) {
+    if (isRepoCallbackProcessed(callbackMsgId)) {
+      await ctx.answerCallbackQuery({ text: "Already dispatched", show_alert: false });
+      return true;
+    }
+    markRepoCallbackProcessed(callbackMsgId);
+  }
 
   const repo = repoFromCallbackData(data, await registeredRepos(deps));
 
@@ -293,67 +337,3 @@ export async function handleRepoReply(ctx: Context, deps: TaskCommandDeps): Prom
   return true;
 }
 
-// ── /newproject ──────────────────────────────────────────────────────────────
-//
-// Starting a project is the one dispatch case /task cannot serve: there is nothing to
-// dispatch to yet. Without its own entry point the capability is reachable only by
-// guessing the right sentence at the bot, which is the discoverability gap this whole
-// command surface exists to close.
-
-const NEW_PROJECT_USAGE = [
-  "Usage: /newproject <name> <what it is>",
-  "",
-  "Example:",
-  "  /newproject turicks-pricing-api usage-based pricing service for Turicks",
-  "",
-  "Creates a PRIVATE repo under your account and lets the agent loop work in it.",
-  "You approve the name before anything is created.",
-].join("\n");
-
-export interface NewProjectArgs {
-  readonly name: string;
-  readonly description: string;
-}
-
-export type NewProjectParse =
-  | { readonly ok: true; readonly args: NewProjectArgs }
-  | { readonly ok: false; readonly message: string };
-
-/** Splits `<name> <description…>` and rejects a name GitHub would rewrite. */
-export function parseNewProjectArgs(raw: string): NewProjectParse {
-  const trimmed = raw.trim();
-  if (!trimmed) return { ok: false, message: NEW_PROJECT_USAGE };
-
-  const [name, ...rest] = trimmed.split(/\s+/);
-  const invalid = validateProjectRepoName(name ?? "");
-  if (invalid) return { ok: false, message: `${invalid}\n\n${NEW_PROJECT_USAGE}` };
-
-  return { ok: true, args: { name: name as string, description: rest.join(" ").trim() } };
-}
-
-/**
- * Routed through the kernel for the same reason as /task: the approval card belongs to
- * the tool, and a gateway-local card would resume an unrelated paused checkpoint.
- */
-export function buildNewProjectInstruction(args: NewProjectArgs): string {
-  return [
-    `Start a new project by calling the create_project_repo tool.`,
-    ``,
-    `Repository name: ${args.name}`,
-    `Description: ${args.description || "(none given)"}`,
-    `Visibility: private — do not pass isPrivate unless the founder asked for a public repo.`,
-    ``,
-    `Call the tool once with exactly that name. Do not create files, do not scaffold`,
-    `anything, and do not dispatch any work yet — creating the repository is the whole task.`,
-  ].join("\n");
-}
-
-export async function handleNewProject(ctx: Context, deps: TaskCommandDeps): Promise<void> {
-  const parsed = parseNewProjectArgs(ctx.match?.toString() ?? "");
-  if (!parsed.ok) {
-    await ctx.reply(parsed.message);
-    return;
-  }
-
-  await deps.runKernelText(ctx, buildNewProjectInstruction(parsed.args));
-}

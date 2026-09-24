@@ -39,7 +39,7 @@ describe("capability-message", () => {
     expect(msg).toContain("Admin");
     expect(msg).toContain("Research");
     expect(msg).toContain("Personal");
-    expect(msg).toContain("✋");
+    expect(msg).toContain("• asks first");
   });
 
   it("welcome leads with the jobs loop and its real commands", () => {

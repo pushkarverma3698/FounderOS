@@ -29,9 +29,10 @@ import {
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
 import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
-import { handleTask, handleNewProject, handleRepoChoice, handleRepoReply } from "./task-command.js";
+import { handleTask, handleRepoChoice, handleRepoReply } from "./task-command.js";
+import { handleNewProject } from "./newproject-command.js";
 import { handleMenuCallback } from "./home-menu.js";
-import { handleTasks } from "./tasks-command.js";
+import { handleTasks, fetchDispatchTasks } from "./tasks-command.js";
 import {
   handleCsv,
   handleFresh,
@@ -88,6 +89,14 @@ export function registerHandlers(bot: Bot): void {
   bot.command("budget", (ctx: Context) => handleBudget(ctx));
   bot.command("connect", (ctx: Context) => handleConnect(ctx));
   bot.command("commands", (ctx: Context) => handleCommands(ctx));
+  bot.command("remind", (ctx: Context) => {
+    const text = ctx.match?.toString().trim();
+    if (!text) {
+      void ctx.reply("Usage: /remind <what and when>\n\nExample: /remind call the landlord at 3pm");
+      return;
+    }
+    return runKernelText(ctx, `Remind me ${text}`);
+  });
   // The registry read is dynamically imported so this transport file does not pull
   // the database into the bot's startup path (same reason as jobsDeps below).
   // Shared by the command and by the repo buttons it puts on screen: two copies
@@ -104,7 +113,10 @@ export function registerHandlers(bot: Bot): void {
     },
   };
   bot.command("task", (ctx: Context) => handleTask(ctx, taskDeps));
-  bot.command("tasks", (ctx: Context) => handleTasks(ctx));
+  bot.command("tasks", (ctx: Context) => handleTasks(ctx, {
+    fetch: (repos) => fetchDispatchTasks(repos),
+    listRegisteredRepos: taskDeps.listRegisteredRepos,
+  }));
   bot.command("newproject", (ctx: Context) => handleNewProject(ctx, { runKernelText }));
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
   bot.command("wife_draft", (ctx: Context) => handleDraft(withForcedProfileToken(ctx, "wife"), { runKernelText }));
@@ -183,18 +195,20 @@ export function registerHandlers(bot: Bot): void {
     // a side effect fires, or fails to, without the founder knowing which.
     if (await handleRepoChoice(ctx, taskDeps)) return;
     if (await handleMenuCallback(ctx)) return;
-    if (data !== "approve" && data !== "reject") {
+    if (!data.startsWith("approve") && !data.startsWith("reject")) {
       await ctx.answerCallbackQuery({ text: "Unknown action" });
       return;
     }
-    const decision = data === "approve" ? "approved" : "rejected";
+    const decision = data.startsWith("approve") ? "approved" : "rejected";
+    const nonceMatch = data.match(/:(.+)$/);
+    const nonce = nonceMatch ? nonceMatch[1] : undefined;
     await ctx.answerCallbackQuery({ text: decision === "approved" ? "✅ Approved" : "❌ Rejected" });
     try {
       await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
     } catch {
       /* best-effort */
     }
-    await resumeKernel(ctx, decision);
+    await resumeKernel(ctx, decision, nonce);
   });
 
   bot.catch((err) => {
