@@ -269,10 +269,17 @@ export async function handleRepoChoice(ctx: Context, deps: TaskCommandDeps): Pro
   // "not mine" puts a query in front of the founder's approval tap.
   if (!data.startsWith(REPO_CALLBACK_PREFIX)) return false;
 
+  // Checked-and-marked SYNCHRONOUSLY, with no `await` in between: two callback
+  // deliveries for the same message (Telegram redelivery, or a fast double-tap)
+  // can both reach this line before either finishes, but only one can win a
+  // synchronous check-then-set — the other sees it marked on its very next line.
   const callbackMsgId = ctx.callbackQuery?.message?.message_id;
-  if (callbackMsgId && isRepoCallbackProcessed(callbackMsgId)) {
-    await ctx.answerCallbackQuery({ text: "Already dispatched", show_alert: false });
-    return true;
+  if (callbackMsgId) {
+    if (isRepoCallbackProcessed(callbackMsgId)) {
+      await ctx.answerCallbackQuery({ text: "Already dispatched", show_alert: false });
+      return true;
+    }
+    markRepoCallbackProcessed(callbackMsgId);
   }
 
   const repo = repoFromCallbackData(data, await registeredRepos(deps));
@@ -296,7 +303,6 @@ export async function handleRepoChoice(ctx: Context, deps: TaskCommandDeps): Pro
   );
 
   if (!work) {
-    if (callbackMsgId) markRepoCallbackProcessed(callbackMsgId);
     await ctx.reply(buildRepoPrompt(repo), {
       parse_mode: "HTML",
       reply_markup: { force_reply: true, input_field_placeholder: "what should I build?" },
@@ -304,7 +310,6 @@ export async function handleRepoChoice(ctx: Context, deps: TaskCommandDeps): Pro
     return true;
   }
 
-  if (callbackMsgId) markRepoCallbackProcessed(callbackMsgId);
   await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work }));
   return true;
 }

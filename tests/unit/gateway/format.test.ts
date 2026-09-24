@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { markdownToTelegramHtml, splitForTelegram } from "../../../src/gateway/format.js";
+import { markdownToTelegramHtml, splitForTelegram, repairHtmlChunkBoundaries } from "../../../src/gateway/format.js";
 
 describe("markdownToTelegramHtml", () => {
   it("converts **bold** to <b>", () => {
@@ -210,5 +210,51 @@ describe("splitForTelegram", () => {
   it("never emits an empty chunk", () => {
     const chunks = splitForTelegram("\n\n\nhello\n\n\n", 4096);
     for (const c of chunks) expect(c.length).toBeGreaterThan(0);
+  });
+
+  // ── Regression: chunk boundaries must not break HTML (PR #731 review) ─────────
+
+  it("does not split inside a long <a href> anchor — the whole link stays in one chunk", () => {
+    // A long link (job posting, PR) placed right at the cut point must not have
+    // its <a href="..."> torn in half: Telegram's HTML parser 400s on a partial
+    // tag, and the fallback strips ALL formatting from that message.
+    const url = "https://example.com/" + "x".repeat(60);
+    const text = "word ".repeat(795) + `<a href="${url}">click here for details</a>`;
+    const chunks = splitForTelegram(text, 4096);
+    const withLink = chunks.find((c) => c.includes("href"));
+    expect(withLink).toBeDefined();
+    expect(withLink).toContain(`<a href="${url}">click here for details</a>`);
+  });
+});
+
+describe("repairHtmlChunkBoundaries", () => {
+  it("closes an unclosed tag at the end of a chunk and reopens it in the next", () => {
+    const [first, second] = repairHtmlChunkBoundaries(["see <b>important", " text</b> here"]);
+    expect(first).toBe("see <b>important</b>");
+    expect(second).toBe("<b> text</b> here");
+  });
+
+  it("closes nested tags innermost-first and reopens them in the same order", () => {
+    const [first, second] = repairHtmlChunkBoundaries(["<b>bold <i>and italic", " still italic</i> done</b>"]);
+    expect(first).toBe("<b>bold <i>and italic</i></b>");
+    expect(second).toBe("<b><i> still italic</i> done</b>");
+  });
+
+  it("preserves the href attribute when a split re-opens an <a> tag", () => {
+    // BUG (found in review): the previous implementation reopened tags by bare
+    // name (`<a>`), dropping href entirely — Telegram rejects an <a> with no
+    // href, so the reopened half would either 400 or silently render as dead text.
+    const chunks = repairHtmlChunkBoundaries([
+      `see <a href="https://example.com/very/long/path">click`,
+      ` here</a> for details`,
+    ]);
+    expect(chunks[0]).toBe(`see <a href="https://example.com/very/long/path">click</a>`);
+    expect(chunks[1]).toContain('href="https://example.com/very/long/path"');
+    expect(chunks[1]).toBe(`<a href="https://example.com/very/long/path"> here</a> for details`);
+  });
+
+  it("leaves already-balanced chunks untouched", () => {
+    const chunks = ["<b>one</b>", "<i>two</i>"];
+    expect(repairHtmlChunkBoundaries(chunks)).toEqual(chunks);
   });
 });

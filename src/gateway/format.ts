@@ -297,8 +297,10 @@ export function repairHtmlChunkBoundaries(chunks: string[]): string[] {
       ? carryOpen.join("") + chunks[i]!
       : chunks[i]!;
 
-    // Track which tags are open at the end of this chunk.
-    const openStack: string[] = [];
+    // Track which tags are open at the end of this chunk. Keep the raw opening
+    // tag text (not just its name) so an attribute like <a href="..."> survives
+    // being reopened in the next chunk instead of degrading to a bare <a>.
+    const openStack: { name: string; raw: string }[] = [];
     const tagRe = /<\/?([a-z]+)(?:\s[^>]*)?\/?>/gi;
     let match: RegExpExecArray | null;
     while ((match = tagRe.exec(chunk)) !== null) {
@@ -307,11 +309,11 @@ export function repairHtmlChunkBoundaries(chunks: string[]): string[] {
       if (!(TELEGRAM_HTML_TAGS as readonly string[]).includes(tagName)) continue;
       if (full.startsWith("</")) {
         // Closing tag: pop the matching open from the stack.
-        const idx = openStack.lastIndexOf(tagName);
+        const idx = openStack.map((t) => t.name).lastIndexOf(tagName);
         if (idx !== -1) openStack.splice(idx, 1);
       } else if (!full.endsWith("/>")) {
         // Opening tag (not self-closing).
-        openStack.push(tagName);
+        openStack.push({ name: tagName, raw: full });
       }
     }
 
@@ -320,11 +322,11 @@ export function repairHtmlChunkBoundaries(chunks: string[]): string[] {
     if (openStack.length > 0 && i < chunks.length - 1) {
       // Close in reverse order (innermost first).
       for (let j = openStack.length - 1; j >= 0; j--) {
-        chunk += `</${openStack[j]!}>`;
+        chunk += `</${openStack[j]!.name}>`;
       }
-      // Reopen in original order for the next chunk.
+      // Reopen in original order for the next chunk, with original attributes.
       for (const tag of openStack) {
-        carryOpen.push(`<${tag}>`);
+        carryOpen.push(tag.raw);
       }
     }
 
