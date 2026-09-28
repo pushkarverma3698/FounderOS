@@ -37,7 +37,6 @@ import {
   buildRepoQuestion,
   repoFromCallbackData,
   repoFromPrompt,
-  labelForRepo,
 } from "./repo-picker.js";
 
 const REPO_PREFIX = "repo:";
@@ -221,9 +220,11 @@ export async function handleTask(ctx: Context, deps: TaskCommandDeps): Promise<v
 
   if (parsed.kind === "needs-work" && parsed.repo) {
     const messageId = ctx.message?.message_id;
-    await ctx.reply(`🤖 Got it — <b>${labelForRepo(parsed.repo)}</b>.\n\nWhat should I build?`, {
+    // buildRepoPrompt, not a bespoke line: its `Repo:` line is how handleRepoReply
+    // routes the answer. Without it the reply falls through to ordinary chat.
+    await ctx.reply(buildRepoPrompt(parsed.repo), {
       parse_mode: "HTML",
-      reply_markup: { force_reply: true },
+      reply_markup: { force_reply: true, input_field_placeholder: "what should I build?" },
       ...(messageId ? { reply_parameters: { message_id: messageId } } : {}),
     });
     return;

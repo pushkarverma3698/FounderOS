@@ -328,6 +328,30 @@ describe("handleRepoChoice", () => {
   });
 });
 
+describe("/task <repo> with nothing to build", () => {
+  it("asks for the work in a prompt whose reply is actually dispatched to that repo", async () => {
+    // PR #731 review: this path first shipped as "Got it — <repo>. What should I
+    // build?" with no `Repo:` line. handleRepoReply reads the repo from that line,
+    // so the founder's reply fell through to ordinary chat and was never dispatched.
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx, replies } = fakeCtx("repo:hulda");
+
+    await handleTask(ctx, { runKernelText });
+    expect(runKernelText).not.toHaveBeenCalled();
+
+    // Telegram hands the bot reply_to_message.text with the formatting stripped.
+    const promptAsDelivered = replies[0]!.replace(/<[^>]*>/g, "");
+    const { ctx: replyCtx } = fakeCtx("", {
+      message: { message_id: 30, text: "make the hero responsive", reply_to_message: { text: promptAsDelivered } },
+    });
+
+    expect(await handleRepoReply(replyCtx, { runKernelText })).toBe(true);
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).toContain("House-of-Hulda-Website-frontend");
+    expect(instruction).toContain("make the hero responsive");
+  });
+});
+
 describe("handleRepoReply", () => {
   const prompt = "📱 Oplify app — what should I build?\n\nRepo: OplifyMessage/oplify-messaging-app";
 

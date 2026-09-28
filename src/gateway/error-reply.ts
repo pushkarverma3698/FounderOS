@@ -17,8 +17,9 @@ function sanitizeErrorForFounder(msg: string): string {
     .replace(/\n\s+at\s+.+/g, "")
     // Strip Node/internal paths
     .replace(/\/(?:Users|home|var|opt|app)[^\s)]+/g, "[path]")
-    // Strip SQL fragments
-    .replace(/\b(?:SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN|INTO)\b[^.!?\n]*/gi, "[query]")
+    // Strip SQL statements. Case-SENSITIVE on purpose: with /i, ordinary words
+    // ("read from", "select a branch") were replaced and the error lost its meaning.
+    .replace(/\b(?:SELECT|INSERT INTO|UPDATE|DELETE FROM)\b[^\n]*/g, "[query]")
     .trim();
   // Cap at first meaningful sentence if the raw error is a wall of text.
   if (clean.length > 300) {
