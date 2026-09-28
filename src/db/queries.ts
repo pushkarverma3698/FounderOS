@@ -10,6 +10,7 @@
 import { and, count, desc, eq, gt, gte, inArray, lt, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { tokenizeQuery, rankByTerms } from "./keyword-search.js";
+import { INTERNAL_CONTEXT_KEYS, LAST_UPDATED_KEY, fillMissingContextKeys } from "./founder-context.js";
 
 /**
  * Candidate over-fetch multiple: keyword searches pull `limit * CANDIDATE_FACTOR`
@@ -902,21 +903,49 @@ export async function getFounderContext(tenantId: string): Promise<Record<string
 
 /**
  * Merge updates into the founder's context (upsert).
- * Preserves existing keys unless overwritten.
+ * Preserves existing keys unless overwritten. `last_updated` moves only when a
+ * founder-facing key is written: a budget-alert dedupe write is not "your
+ * context was updated".
  */
 export async function upsertFounderContext(
   tenantId: string,
   updates: Record<string, unknown>,
 ): Promise<void> {
-  const db = getDb();
   const current = await getFounderContext(tenantId);
-  const merged = { ...current, ...updates, last_updated: new Date().toISOString() };
-  await db
+  const touchesFounderKeys = Object.keys(updates).some((key) => !INTERNAL_CONTEXT_KEYS.includes(key));
+  const merged = {
+    ...current,
+    ...updates,
+    ...(touchesFounderKeys ? { [LAST_UPDATED_KEY]: new Date().toISOString() } : {}),
+  };
+  await writeFounderContext(tenantId, merged);
+}
+
+/**
+ * Fill-only seed (scripts/seed-founder-context.ts, run on every deploy): writes
+ * a default only for a key the stored context lacks. It never overwrites a key
+ * the founder saved through update_context and never touches `last_updated` —
+ * the old seed went through upsertFounderContext and replaced the founder's
+ * priorities with June data on every deploy. Returns the keys it filled; `[]`
+ * means nothing was written.
+ */
+export async function seedFounderContextDefaults(
+  tenantId: string,
+  defaults: Record<string, unknown>,
+): Promise<string[]> {
+  const current = await getFounderContext(tenantId);
+  const { data, filled } = fillMissingContextKeys(current, defaults);
+  if (filled.length > 0) await writeFounderContext(tenantId, data);
+  return filled;
+}
+
+async function writeFounderContext(tenantId: string, data: Record<string, unknown>): Promise<void> {
+  await getDb()
     .insert(founderContext)
-    .values({ tenant_id: tenantId, data: merged })
+    .values({ tenant_id: tenantId, data })
     .onConflictDoUpdate({
       target: founderContext.tenant_id,
-      set: { data: merged, updated_at: new Date() },
+      set: { data, updated_at: new Date() },
     });
 }
 
