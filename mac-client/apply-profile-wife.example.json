@@ -1,5 +1,5 @@
 {
-  "_note": "Copy this file to apply-profile.json (gitignored, PII) and fill in her real email/phone/linkedin. Tracks renamed 2026-09-04: fpa, compliance-kyc, auditor, accountant. No tailored per-track resumes exist yet — resumes.get(track) falls back to default_resume, so leave 'resumes' empty until they do.",
+  "_note": "Copy this file to apply-profile.json (gitignored, PII) and fill in her real email/phone/linkedin. Tracks: fpa, finance-ops, compliance-kyc, auditor, accountant. work_authorization stays 'unknown' until her permit is actually held (founder correction 2026-09-08) — every eligibility question then stops for a human. No tailored per-track resumes exist yet — resumes.get(track) falls back to default_resume, so leave 'resumes' empty until they do.",
   "profile_id": "wife-nl-finance",
   "first_name": "REPLACE",
   "last_name": "REPLACE",
@@ -12,8 +12,8 @@
   "answers": {
     "location_city": "Amsterdam",
     "location_country": "Netherlands",
-    "work_authorization": "orientation-year-permit",
-    "work_authorization_detail": "Currently holding Orientation Year (Zoekjaar) permit, requires HSM sponsorship transition",
+    "work_authorization": "unknown",
+    "work_authorization_detail": "Entitled to apply for the Dutch orientation year (zoekjaar) once an offer lands — not yet held. On that route the employer needs no IND sponsor status. Answer eligibility questions by hand.",
     "salary_floor_eur_year": 52284,
     "years_experience": 2.4,
     "notice_period_days": 0,

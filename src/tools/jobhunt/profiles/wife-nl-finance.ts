@@ -41,6 +41,7 @@
 
 import type { JobSearchProfile } from "../profile-config.js";
 import { INDIA_MARKET } from "./markets.js";
+import { TASHI_MEASURED_TERMS as MEASURED } from "./wife-nl-finance-terms.js";
 
 const WIFE_CV_PATH = process.env["WIFE_CV_PATH"] ?? "/opt/founderos-data/cv/cv-wife-base.md";
 
@@ -209,6 +210,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         "finance consultant",
         "financial consultant",
         "business development analyst",
+        ...MEASURED.fpa,
       ],
     },
     "finance-ops": {
@@ -273,6 +275,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         "treasury analyst",
         "due diligence",
         "customer due diligence",
+        ...MEASURED["finance-ops"],
       ],
     },
     "compliance-kyc": {
@@ -315,6 +318,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         "client onboarding",
         "kyc",
         "aml",
+        ...MEASURED["compliance-kyc"],
       ],
     },
     auditor: {
@@ -351,6 +355,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         "risk and controls",
         "financial risk",
         "internal controls analyst",
+        ...MEASURED.auditor,
       ],
     },
     accountant: {
@@ -374,6 +379,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         "gl accountant",
         "staff accountant",
         "junior accountant",
+        ...MEASURED.accountant,
       ],
     },
   },

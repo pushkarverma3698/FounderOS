@@ -56,6 +56,51 @@ describe("applyUrlFor", () => {
     );
   });
 
+  // The three platforms Dutch finance employers mostly run on — ING, Rabobank,
+  // NN, PwC, Baker Tilly, RSM and Vistra are all Workday boards. Until
+  // 2026-09-28 none of the three was recognised, so every one of their rows
+  // got "→ Open the posting" instead of the form, although each adapter already
+  // knew the form's address. URLs are real, from the 2026-09-28 NL sweep.
+  it("appends /apply on Workday — ING and Rabobank", () => {
+    expect(
+      applyUrlFor(
+        "https://ing.wd3.myworkdayjobs.com/icsnldgen/job/ACT-Amsterdam---Acanthus/Financial-Crime-Compliance-Specialist_REQ-10119952-2",
+        "ING",
+      ),
+    ).toBe(
+      "https://ing.wd3.myworkdayjobs.com/icsnldgen/job/ACT-Amsterdam---Acanthus/Financial-Crime-Compliance-Specialist_REQ-10119952-2/apply",
+    );
+    expect(
+      applyUrlFor("https://rabobank.wd3.myworkdayjobs.com/jobs/job/Utrecht-Beneluxlaan-31-33/Finance-Specialist_JR_00145620-1", "Rabobank"),
+    ).toBe("https://rabobank.wd3.myworkdayjobs.com/jobs/job/Utrecht-Beneluxlaan-31-33/Finance-Specialist_JR_00145620-1/apply");
+  });
+
+  it("appends /applications/new on Teamtailor", () => {
+    expect(
+      applyUrlFor("https://bearingpointnetherlands.teamtailor.com/jobs/8449394-microsoft-consultant-data-engineering", "BearingPoint"),
+    ).toBe("https://bearingpointnetherlands.teamtailor.com/jobs/8449394-microsoft-consultant-data-engineering/applications/new");
+  });
+
+  // Workable's widget API hands postings out as account-less short links, and
+  // names `<link>/apply` as the form in its own `application_url` field (see the
+  // fixture in smartrecruiters-workable.test.ts). No account in the path means
+  // no board token, so all 2,636 Workable postings in the 2026-09-28 NL sweep
+  // got the posting page instead of the form.
+  it("appends /apply to a Workable short link, the form URL Workable itself publishes", () => {
+    expect(applyUrlFor("https://apply.workable.com/j/7C893E46E3", "AND Digital")).toBe(
+      "https://apply.workable.com/j/7C893E46E3/apply",
+    );
+    expect(applyUrlFor("https://apply.workable.com/j/7C893E46E3/apply", "AND Digital")).toBe(
+      "https://apply.workable.com/j/7C893E46E3/apply",
+    );
+  });
+
+  it("leaves a BambooHR posting alone — the form is on the posting page", () => {
+    expect(applyUrlFor("https://centric.bamboohr.com/careers/137", "Centric")).toBe(
+      "https://centric.bamboohr.com/careers/137",
+    );
+  });
+
   // A company's own careers page, an aggregator, a white-labelled Recruitee
   // domain. Guessing "+/apply" on an unknown host produces a link that looks
   // authoritative and 404s, which is the failure worth refusing.

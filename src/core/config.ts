@@ -20,6 +20,8 @@ export const envSchema = z.object({
   // Telegram — required to run the bot
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_CHAT_ID: z.string().min(1),
+  TELEGRAM_ALLOWED_CHAT_IDS: z.string().transform(v => v || undefined).optional(), // group chats — gateway/chat-access.ts
+  TELEGRAM_OWNER_USER_ID: z.string().transform(v => v || undefined).optional(),
 
   // LLM providers — one key must match the selected AGENT_MODEL provider.
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().transform(v => v || undefined).optional(),
