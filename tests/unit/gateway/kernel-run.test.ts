@@ -683,7 +683,7 @@ describe("failed turns reach the founder as a card with a Retry button", () => {
     expect(retryData(replies.at(-1))).toEqual([]);
   });
 
-  it("falls back to the plain failure text if Telegram rejects the card", async () => {
+  it("falls back to the plain failure text if Telegram rejects the card, and keeps the button", async () => {
     fakeKernel.stream.mockImplementation(() => singleYield(FAILED_STATE));
     const { ctx, replies } = fakeCtx();
     const reply = ctx.reply as unknown as ReturnType<typeof vi.fn>;
@@ -693,7 +693,41 @@ describe("failed turns reach the founder as a card with a Retry button", () => {
       return original(text, opts);
     });
     await runKernelText(ctx, "list my emails");
-    expect(replies.at(-1)!.text).toContain("tool failure in comms");
+    expect(replies.at(-2)!.text).toContain("tool failure in comms");
+    expect(retryData(replies.at(-1))).toEqual([`retry:${lastTurnNonce()}`]);
+  });
+
+  it("keeps the Retry button when the card is too long for one message", async () => {
+    // A long failure message used to be dropped into the details block whole.
+    // Plain text is split across messages; the button follows in its own.
+    fakeKernel.stream.mockImplementation(() =>
+      singleYield({
+        ...FAILED_STATE,
+        reply: `⚠️ Task stopped — ${"validation detail ".repeat(400)}`,
+        failure: { ...FAILED_STATE.failure, message: "x".repeat(900), evidence: "e".repeat(2_000) },
+        results: Array.from({ length: 7 }, (_, i) => ({
+          step_id: `s${i}`,
+          status: "ok",
+          output: "o".repeat(400),
+          tool_receipts: [],
+        })),
+        mission: {
+          ...FAILED_STATE.mission,
+          plan: {
+            ...FAILED_STATE.mission.plan,
+            steps: Array.from({ length: 8 }, (_, i) => ({
+              ...FAILED_STATE.mission.plan.steps[0],
+              step_id: i === 7 ? "s1" : `s${i}`,
+              objective: `${"a long objective with many words ".repeat(8)}${i}`,
+            })),
+          },
+        },
+      }),
+    );
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "list my emails");
+    for (const r of replies) expect(r.text.length).toBeLessThanOrEqual(4096);
+    expect(retryData(replies.at(-1))).toEqual([`retry:${lastTurnNonce()}`]);
   });
 
   it("adds a Retry button to a thrown error when no auto-retry was queued", async () => {

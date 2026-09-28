@@ -29,6 +29,7 @@ import {
   type StepResult,
 } from "../kernel/index.js";
 import { safeHtml } from "./approval-card.js";
+import { TELEGRAM_MAX } from "./format.js";
 import { retryKeyboard } from "./retry-button.js";
 import { logger } from "../infra/logger.js";
 
@@ -37,7 +38,11 @@ const log = logger.child({ module: "failure-card" });
 const OBJECTIVE_MAX = 200;
 const REASON_MAX = 400;
 const STEP_SUMMARY_MAX = 150;
+const DETAIL_MESSAGE_MAX = 800;
 const EVIDENCE_MAX = 400;
+
+/** Sent after the plain text when the card itself cannot go out, so the button is never lost. */
+const RETRY_ONLY_TEXT = "⚠️ That task didn't finish. 🔁 Retry runs it again from the start — nothing is sent twice without your OK.";
 
 type CardState = Pick<KernelStateType, "failure" | "results" | "mission" | "turn">;
 
@@ -89,7 +94,7 @@ export function renderFailureCard(state: CardState, opts: { retry: boolean }): s
     }
   }
 
-  const details = [`${failure.stage} · ${failure.component}`, failure.message];
+  const details = [`${failure.stage} · ${failure.component}`, clip(failure.message, DETAIL_MESSAGE_MAX)];
   if (failure.evidence) details.push(`Evidence: ${clip(failure.evidence, EVIDENCE_MAX)}`);
   lines.push("", `<blockquote expandable>${safeHtml(details.join("\n"))}</blockquote>`);
 
@@ -117,19 +122,30 @@ export function failureCardFor(
 }
 
 /**
- * Send the card. If Telegram rejects it, send the kernel's plain failure text
- * instead — a card that fails to render must never leave him with no answer.
+ * Send the card. If it is too long for one message, or Telegram rejects it,
+ * send the kernel's plain failure text instead (split, never truncated) and then
+ * the button on its own — a card that cannot render must never cost him the
+ * answer or the Retry.
  */
 export async function replyWithFailureCard(
   ctx: Context,
   card: FailureCard,
   sendPlain: () => Promise<void>,
 ): Promise<void> {
+  const fallback = async (): Promise<void> => {
+    await sendPlain();
+    if (card.keyboard) await ctx.reply(RETRY_ONLY_TEXT, { reply_markup: card.keyboard });
+  };
+  if (card.html.length > TELEGRAM_MAX) {
+    log.warn({ chars: card.html.length }, "Failure card too long for one message — sending the plain text, then Retry");
+    await fallback();
+    return;
+  }
   try {
     await ctx.reply(card.html, { parse_mode: "HTML", ...(card.keyboard ? { reply_markup: card.keyboard } : {}) });
   } catch (err) {
-    // allow-failopen: the plain failure text is the fallback; the founder still gets the failure, only without the card.
+    // allow-failopen: the plain failure text is the fallback; the founder still gets the failure and the button.
     log.warn({ err: String(err) }, "Failure card rejected by Telegram — sending the plain failure text");
-    await sendPlain();
+    await fallback();
   }
 }
