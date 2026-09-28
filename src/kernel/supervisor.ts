@@ -217,7 +217,3 @@ export function routeAfterDispatch(state: KernelStateType): "agent" | "synthesiz
 export function routeAfterPlan(state: KernelStateType): "dispatch" | "finish" {
   return state.mission.status === "executing" ? "dispatch" : "finish";
 }
-
-export { evaluateSupervisorRoute } from "../tools/index.js";
-
-
