@@ -51,7 +51,6 @@ import {
   applyCinematicPreset,
   deployStaticSite,
   recordEvent,
-  searchPersonalRag,
   publishSignal,
   scanAiVisibility,
   getGapScans,
@@ -99,7 +98,7 @@ type AnyTool = any;
  *
  * brain_memories → marketing + research + sales
  * research_cache → research
- * personal_rag   → personal
+ * personal_rag   → none
  *
  * brain_memories: business knowledge (strategy, ADRs, brand, founder profile),
  *   read only through searchKnowledge. research also held searchTuricksBrain,
@@ -108,10 +107,14 @@ type AnyTool = any;
  *   The UnifiedTool stays in src/tools/rag.ts for scripts/probe-rag.ts and the
  *   VPS QA probes, bound to no worker.
  *
- * personal_rag: career/CV data is founder-private, not business-public
- *   (ADR-013/015). jobhunt used to carry it too; P7 removed that overlap —
- *   jobhunt reads the CV through readCv/cvGaps, which is the path its prompts
- *   actually name.
+ * personal_rag: no worker reads it. CV and career questions belong to jobhunt,
+ *   which reads the CV the founder maintains through readCv/cvGaps (P7 made it
+ *   the one CV reader). personal held searchPersonalRag until 2026-09-28 and
+ *   answered "what are my skills?" from it — 4 prod rows, last written
+ *   2026-06-15, a wiki stub. It got no CV tool in exchange: the planner routes
+ *   on each worker's tool list as well as its description, and a second CV
+ *   route is how personal won "What is Tashi's CV background?" on 2026-09-07
+ *   (tests/unit/gateway/jobhunt-department-routing.test.ts).
  */
 import { synthesizeSkill } from "./agent-tools.js";
 import { uiCheck } from "./agent-tools/ui-qa.js";
@@ -123,7 +126,7 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, createProjectRepo, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead, uiCheck, readLogs],
   marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
   sales: [searchWeb, createSendEmailTool("sales"), searchKnowledge],
-  personal: [readFile, listDir, runShell, browser, searchPersonalRag, sendFile, writeFile],
+  personal: [readFile, listDir, runShell, browser, sendFile, writeFile],
   // submitApplication (VPS-lane submit) retired 2026-08-25 — founder decision,
   // the Mac client (mac-client/mac_client/apply.py) is the one apply lane now.
   // Tombstoned in verify-architecture.ts so it cannot return by accident.

@@ -53,6 +53,21 @@ describe("DEPARTMENT_TOOLS registry", () => {
     const names = DEPARTMENT_TOOLS["personal"]!.map((t: { name: string }) => t.name);
     expect(names).toContain("browser");
   });
+
+  it("CV questions have one owner: jobhunt reads the CV, personal holds no CV reader", () => {
+    // personal answered "what are my skills?" through search_personal_rag, whose
+    // prod table held 4 rows last written 2026-06-15 — a June wiki stub the CV
+    // code already refuses to trust (src/tools/career.ts). jobhunt's read_cv reads
+    // the CV the founder maintains, and DESCRIPTIONS.jobhunt already claims every
+    // CV question. A CV tool on personal as well — even read_cv — would reopen the
+    // routing contest personal won on 2026-09-07, because the planner routes on
+    // each worker's tool list too (tests/unit/gateway/jobhunt-department-routing).
+    const personal = DEPARTMENT_TOOLS["personal"]!.map((t: { name: string }) => t.name);
+    const jobhunt = DEPARTMENT_TOOLS["jobhunt"]!.map((t: { name: string }) => t.name);
+    expect(jobhunt).toContain("read_cv");
+    expect(personal).not.toContain("search_personal_rag");
+    expect(personal).not.toContain("read_cv");
+  });
 });
 
 describe("buildCapabilityManifest", () => {

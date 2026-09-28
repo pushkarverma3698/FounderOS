@@ -59,12 +59,12 @@ Outreach grounded in real research.
 The founder's laptop operator — walled off from business workers.
 - `read_file`, `list_dir`, `write_file` 🔒, `send_file` 🔒
 - `run_shell` 🔒, `browser` 🔒
-- `search_personal_rag` — founder-private career/CV data
+- no CV tool: questions about the CV, skills or work history belong to jobhunt
 
 ### 🎯 jobhunt
 Career pipeline.
-- `read_cv`, `search_jobs`, `send_email` 🔒
-- `search_personal_rag` — CV-to-JD semantic matching
+- `read_cv` — the one CV reader, for either candidate; `cv_gaps`
+- `search_jobs`, `send_email` 🔒
 
 **This is the single largest production consumer of the kernel** — the tool set above is
 deliberately small (least privilege), but the pipeline behind it is 81 files / ~14.8k LOC:
