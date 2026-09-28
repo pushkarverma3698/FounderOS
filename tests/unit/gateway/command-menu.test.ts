@@ -18,13 +18,20 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import type { Context } from "grammy";
 import { COMMAND_MENU, buildCommandsHelp, telegramCommandPayload } from "../../../src/gateway/command-menu.js";
+import { buildWifeCommandsHelp, handleWifeCommands } from "../../../src/gateway/wife-commands.js";
 import { TELEGRAM_MAX_CHARS } from "../../../src/tools/jobhunt/telegram-format.js";
 
 /** The commands actually wired up, read from the transport file itself. */
 function registeredCommands(): string[] {
   const source = readFileSync("src/gateway/telegram.ts", "utf-8");
   return [...source.matchAll(/\.command\("([a-z_]+)"/g)].map((m) => m[1] as string);
+}
+
+/** Every `/command` a rendered HTML message names. */
+function namedCommands(html: string): Set<string> {
+  return new Set([...html.replace(/<[^>]*>/g, " ").matchAll(/\/([a-z_]+)/g)].map((m) => m[1] as string));
 }
 
 describe("COMMAND_MENU — valid for Telegram's setMyCommands", () => {
@@ -90,12 +97,32 @@ describe("COMMAND_MENU — agrees with what the bot actually answers", () => {
 });
 
 describe("telegramCommandPayload — what the ☰ button actually shows", () => {
-  it("carries every command, dropping none", () => {
-    // Reordering must not become hiding: a command missing from the native menu
-    // is a command that can only be found by already knowing it.
-    expect(telegramCommandPayload().map((e) => e.command).sort()).toEqual(
-      COMMAND_MENU.map((e) => e.command).sort(),
-    );
+  it("drops exactly the eleven wife_ aliases, and nothing else", () => {
+    // 2026-09-28: 34 rows, 11 of them near-identical wife_ twins. Every job
+    // command already takes a profile word (`/jobs tashi`), so the twins leave
+    // the menu — and stay registered, and stay listed (see /wife_commands).
+    const hidden = COMMAND_MENU.filter((e) => e.hidden).map((e) => e.command);
+    const shown = telegramCommandPayload().map((e) => e.command);
+    expect(hidden).toHaveLength(11);
+    expect(hidden.every((c) => c.startsWith("wife_"))).toBe(true);
+    expect(shown).toHaveLength(COMMAND_MENU.length - 11);
+    expect(shown.filter((c) => hidden.includes(c))).toEqual([]);
+    expect(shown.sort()).toEqual(COMMAND_MENU.filter((e) => !e.hidden).map((e) => e.command).sort());
+  });
+
+  it("keeps every registered command reachable: in the ☰ menu or listed by /wife_commands", () => {
+    // Hiding must not become losing. A command that is on no visible surface
+    // can only be found by already knowing it (the founder, 2026-09-28: "make
+    // sure … we don't lose the features").
+    const visible = new Set([
+      ...telegramCommandPayload().map((e) => e.command),
+      ...namedCommands(buildWifeCommandsHelp()),
+    ]);
+    expect(registeredCommands().filter((c) => !visible.has(c))).toEqual([]);
+  });
+
+  it("puts /wife_commands in the menu, so her commands are one tap away", () => {
+    expect(telegramCommandPayload().map((e) => e.command)).toContain("wife_commands");
   });
 
   it("puts the engineering loop above the fold instead of at number 23", () => {
@@ -107,14 +134,11 @@ describe("telegramCommandPayload — what the ☰ button actually shows", () => 
     expect(order.indexOf("tasks")).toBeLessThan(14);
   });
 
-  it("keeps the wife_ twins in the list, just below the singletons", () => {
-    const order = telegramCommandPayload().map((e) => e.command);
-    const firstTwin = order.findIndex((c) => c.startsWith("wife_"));
-    const lastSingleton = order.map((c) => !c.startsWith("wife_")).lastIndexOf(true);
-    expect(firstTwin).toBeGreaterThan(lastSingleton);
-    expect(order.filter((c) => c.startsWith("wife_")).length).toBe(
-      COMMAND_MENU.filter((e) => e.command.startsWith("wife_")).length,
-    );
+  it("names the profile word on every job command that takes one", () => {
+    // What replaces the twins in the menu: the kept row says how to reach hers.
+    for (const entry of COMMAND_MENU.filter((e) => e.group === "jobs" && !e.hidden && e.command !== "wife_commands")) {
+      expect(entry.description, entry.command).toMatch(/tashi/);
+    }
   });
 
   it("preserves read order among the founder's own commands", () => {
@@ -168,6 +192,53 @@ describe("buildCommandsHelp — the same list, rendered for chat", () => {
     const [jobsMessage] = buildCommandsHelp();
     for (const entry of COMMAND_MENU.filter((e) => e.group === "jobs")) {
       expect(jobsMessage).toContain(`/${entry.command}`);
+    }
+  });
+
+  it("covers every registered command, hidden aliases included, and names /wife_commands", () => {
+    const named = namedCommands(buildCommandsHelp().join("\n"));
+    expect(registeredCommands().filter((c) => !named.has(c))).toEqual([]);
+    expect(named.has("wife_commands")).toBe(true);
+  });
+});
+
+describe("/wife_commands — Tashi's commands, rendered from the one list", () => {
+  const help = buildWifeCommandsHelp();
+
+  it("lists exactly the hidden aliases — a new wife_ command that is not listed fails here", () => {
+    const listed = [...namedCommands(help)].filter((c) => c.startsWith("wife_") && c !== "wife_commands").sort();
+    expect(listed).toEqual(COMMAND_MENU.filter((e) => e.hidden).map((e) => e.command).sort());
+  });
+
+  it("hides every wife_ twin of a job command — a visible twin would bring the 34-row menu back", () => {
+    // Job commands only: /wife_commands is not a twin of the system /commands.
+    const base = new Set(
+      COMMAND_MENU.filter((e) => e.group === "jobs" && !e.command.startsWith("wife_")).map((e) => e.command),
+    );
+    const twins = COMMAND_MENU.filter((e) => e.command.startsWith("wife_") && base.has(e.command.slice(5)));
+    expect(twins.length).toBeGreaterThan(0);
+    expect(twins.filter((e) => !e.hidden).map((e) => e.command)).toEqual([]);
+  });
+
+  it("gives every alias its description and a usage example", () => {
+    for (const entry of COMMAND_MENU.filter((e) => e.hidden)) {
+      expect(entry.example, entry.command).toMatch(new RegExp(`^/${entry.command}\\b`));
+      expect(help).toContain(entry.example as string);
+    }
+  });
+
+  it("says the profile word works too", () => {
+    expect(help).toContain("/jobs tashi");
+  });
+
+  it("sends every part, split rather than truncated, inside Telegram's cap", async () => {
+    const sent: string[] = [];
+    const ctx = { reply: async (text: string) => void sent.push(text) } as unknown as Context;
+    await handleWifeCommands(ctx);
+    expect(sent.length).toBeGreaterThan(0);
+    for (const part of sent) expect(part.length).toBeLessThan(TELEGRAM_MAX_CHARS);
+    for (const entry of COMMAND_MENU.filter((e) => e.hidden)) {
+      expect(sent.join("\n")).toContain(`/${entry.command}`);
     }
   });
 });
