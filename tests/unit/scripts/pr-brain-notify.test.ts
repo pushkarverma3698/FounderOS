@@ -90,9 +90,12 @@ beforeEach(() => {
 
   // Preflight is the only call whose prompt asks for "ok". Every call is counted:
   // each one is a Claude session billed against the account's usage limit.
+  // Like the real CLI, it reads piped stdin into the prompt — inside the sweep's
+  // \`while read … done <<<"$prs"\` loop that would swallow the next PR's line.
   stub(
     "claude",
-    `echo call >>"$CLAUDE_CALLS"
+    `[ -t 0 ] || cat >/dev/null
+echo call >>"$CLAUDE_CALLS"
 case "$*" in
   *"reply with the single word ok"*) printf '%s\\n' "$FAKE_PREFLIGHT"; exit 0 ;;
   *) printf '%s\\n' "$FAKE_GATE"; exit "$FAKE_GATE_RC" ;;
