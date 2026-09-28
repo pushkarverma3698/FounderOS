@@ -145,6 +145,13 @@ function isWrite(server: string, tool: RemoteTool, manifest: BridgeManifest): bo
   return isWriteTool(server, tool.name, manifest, tool.annotations);
 }
 
+function refuseWrite(server: string, toolName: string): McpToolResult {
+  return formatError(
+    `"${toolName}" on ${server} sends or changes something on the founder's behalf, so it is refused ` +
+      "here. Ask FounderOS in Telegram, which asks the founder to approve.",
+  );
+}
+
 /** Runs one bridge tool. Returns null for a name that is not a bridge tool. */
 export async function callBridgeTool(
   name: string,
@@ -168,6 +175,12 @@ export async function callBridgeTool(
     return formatError(`Unknown server "${server ?? ""}". Connected servers:\n${serverList(manifest)}`);
   }
 
+  // A tool the manifest already names as a write (or a gateUnlisted server) is
+  // refused before connecting: no child process, no network call, for a request
+  // that can never run here. Annotation-only writes are caught after listing.
+  const toolName = String(args["tool"] ?? "");
+  if (name === "call_connected_tool" && isWriteTool(server, toolName, manifest)) return refuseWrite(server, toolName);
+
   let tools: RemoteTool[];
   let client: BridgeClient;
   try {
@@ -186,17 +199,11 @@ export async function callBridgeTool(
     return formatResult(lines.join("\n\n") || `"${server}" exposes no tools.`);
   }
 
-  const toolName = String(args["tool"] ?? "");
   const tool = tools.find((t) => t.name === toolName);
   if (!tool) {
     return formatError(`"${server}" has no tool "${toolName}". It has: ${tools.map((t) => t.name).join(", ")}`);
   }
-  if (isWrite(server, tool, manifest)) {
-    return formatError(
-      `"${toolName}" on ${server} sends or changes something on the founder's behalf, so it is refused ` +
-        "here. Ask FounderOS in Telegram, which asks the founder to approve.",
-    );
-  }
+  if (isWrite(server, tool, manifest)) return refuseWrite(server, toolName);
   const toolArgs = (args["arguments"] && typeof args["arguments"] === "object" ? args["arguments"] : {}) as Record<
     string,
     unknown

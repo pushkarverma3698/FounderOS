@@ -236,6 +236,12 @@ describe("hub — connected MCP servers (fake client)", () => {
     expect(calls).toEqual([]);
   });
 
+  it("refuses a manifest-listed write without even connecting to the server", async () => {
+    const r = await callBridgeTool("call_connected_tool", { server: "wiki", tool: "post" }, deps);
+    expect(isError(r)).toBe(true);
+    expect(connects).toBe(0);
+  });
+
   it("refuses every unlisted tool on a gateUnlisted server", async () => {
     manifest = manifestOf({ wiki: { transport: "http", url: "https://example.com/mcp", department: "x", gateUnlisted: true } });
     expect(isError(await callBridgeTool("call_connected_tool", { server: "wiki", tool: "search" }, deps))).toBe(true);
