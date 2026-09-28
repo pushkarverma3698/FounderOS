@@ -18,7 +18,7 @@
 
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { COMMAND_MENU, buildCommandsHelp } from "../../../src/gateway/command-menu.js";
+import { COMMAND_MENU, buildCommandsHelp, telegramCommandPayload } from "../../../src/gateway/command-menu.js";
 import { TELEGRAM_MAX_CHARS } from "../../../src/tools/jobhunt/telegram-format.js";
 
 /** The commands actually wired up, read from the transport file itself. */
@@ -86,6 +86,41 @@ describe("COMMAND_MENU — agrees with what the bot actually answers", () => {
     expect(first).toContain("jobs");
     expect(first).toContain("csv");
     expect(first).toContain("draft");
+  });
+});
+
+describe("telegramCommandPayload — what the ☰ button actually shows", () => {
+  it("carries every command, dropping none", () => {
+    // Reordering must not become hiding: a command missing from the native menu
+    // is a command that can only be found by already knowing it.
+    expect(telegramCommandPayload().map((e) => e.command).sort()).toEqual(
+      COMMAND_MENU.map((e) => e.command).sort(),
+    );
+  });
+
+  it("puts the engineering loop above the fold instead of at number 23", () => {
+    // Measured against the live bot on 2026-09-23: 33 entries, /task at 23, under
+    // 22 job commands of which 11 were near-identical wife_ twins. Telegram shows
+    // about eight rows at a time on a phone.
+    const order = telegramCommandPayload().map((e) => e.command);
+    expect(order.indexOf("task")).toBeLessThan(14);
+    expect(order.indexOf("tasks")).toBeLessThan(14);
+  });
+
+  it("keeps the wife_ twins in the list, just below the singletons", () => {
+    const order = telegramCommandPayload().map((e) => e.command);
+    const firstTwin = order.findIndex((c) => c.startsWith("wife_"));
+    const lastSingleton = order.map((c) => !c.startsWith("wife_")).lastIndexOf(true);
+    expect(firstTwin).toBeGreaterThan(lastSingleton);
+    expect(order.filter((c) => c.startsWith("wife_")).length).toBe(
+      COMMAND_MENU.filter((e) => e.command.startsWith("wife_")).length,
+    );
+  });
+
+  it("preserves read order among the founder's own commands", () => {
+    const own = (list: readonly { command: string }[]) =>
+      list.map((e) => e.command).filter((c) => !c.startsWith("wife_"));
+    expect(own(telegramCommandPayload())).toEqual(own(COMMAND_MENU));
   });
 });
 

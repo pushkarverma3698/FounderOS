@@ -28,19 +28,27 @@
  */
 
 import type { Context } from "grammy";
-import { DISPATCH_REPO_ALLOWLIST, DEFAULT_DISPATCH_REPO, matchAllowlistedRepos } from "../tools/dispatch-repos.js";
+import { DISPATCH_REPO_ALLOWLIST, matchAllowlistedRepos } from "../tools/dispatch-repos.js";
 import { validateProjectRepoName } from "../tools/create-project-repo.js";
+import {
+  REPO_CALLBACK_PREFIX,
+  buildRepoKeyboardRows,
+  buildRepoPrompt,
+  buildRepoQuestion,
+  repoFromCallbackData,
+  repoFromPrompt,
+} from "./repo-picker.js";
 
 const REPO_PREFIX = "repo:";
 
 const USAGE = [
   "Usage: /task <what you want built>",
   "",
-  "Examples:",
+  "Example:",
   "  /task fix the flaky CSV export in the jobhunt brief",
-  "  /task repo:hulda make the hero section responsive on mobile",
   "",
-  `Repos: ${DISPATCH_REPO_ALLOWLIST.join(", ")} (defaults to FounderOS).`,
+  "I ask which repo with buttons — you never have to type a repo name.",
+  "(/task repo:hulda <work> still skips the question if you prefer typing.)",
   "",
   "I expand this into a full brief, show you an approval card, then file it as an",
   "agent:ready issue. Antigravity implements it and Claude reviews the PR.",
@@ -51,7 +59,13 @@ export interface TaskArgs {
   readonly text: string;
 }
 
-export type TaskParse = { readonly ok: true; readonly args: TaskArgs } | { readonly ok: false; readonly message: string };
+export type TaskParse =
+  | { readonly ok: true; readonly args: TaskArgs }
+  /** Work was described but no repository named — ask, with buttons. */
+  | { readonly ok: false; readonly kind: "needs-repo"; readonly text: string }
+  /** Nothing to build yet — offer the repo buttons and then ask for the work. */
+  | { readonly ok: false; readonly kind: "needs-work"; readonly message: string }
+  | { readonly ok: false; readonly kind: "refused"; readonly message: string };
 
 /**
  * Splits `[repo:<hint>] <free text>`.
@@ -59,14 +73,21 @@ export type TaskParse = { readonly ok: true; readonly args: TaskArgs } | { reado
  * `repo:` is honoured ONLY as the first token. Scanning the whole string would let
  * "mention repo:hulda in the readme" retarget the dispatch — the instruction was about
  * the string, not about where the work should land.
+ *
+ * AN UNNAMED REPO IS A QUESTION, NOT A DEFAULT. This used to fall through to
+ * FounderOS, which meant `/task app fix the login` — the `repo:` prefix forgotten,
+ * which is the single easiest thing about this command to forget — filed employer
+ * work against FounderOS, with the stray word "app" still in the brief, and said
+ * nothing. A wrong target that announces itself is recoverable; this one cost a
+ * real Antigravity run to discover. Asking costs one tap.
  */
 export function parseTaskArgs(raw: string, registered: readonly string[] = []): TaskParse {
   const trimmed = raw.trim();
-  if (!trimmed) return { ok: false, message: USAGE };
+  if (!trimmed) return { ok: false, kind: "needs-work", message: USAGE };
 
   const [first, ...rest] = trimmed.split(/\s+/);
   if (!first?.toLowerCase().startsWith(REPO_PREFIX)) {
-    return { ok: true, args: { repo: DEFAULT_DISPATCH_REPO, text: trimmed } };
+    return { ok: false, kind: "needs-repo", text: trimmed };
   }
 
   const hint = first.slice(REPO_PREFIX.length);
@@ -75,6 +96,7 @@ export function parseTaskArgs(raw: string, registered: readonly string[] = []): 
   if (matches.length === 0) {
     return {
       ok: false,
+      kind: "refused",
       message:
         `"${hint}" is not a repository I can dispatch to.\n\n` +
         `Allowed: ${[...DISPATCH_REPO_ALLOWLIST, ...registered].join(", ")}.\n` +
@@ -85,6 +107,7 @@ export function parseTaskArgs(raw: string, registered: readonly string[] = []): 
   if (matches.length > 1) {
     return {
       ok: false,
+      kind: "refused",
       message:
         `"${hint}" is ambiguous — it matches more than one repository:\n` +
         matches.map((m) => `  · ${m}`).join("\n") +
@@ -93,9 +116,20 @@ export function parseTaskArgs(raw: string, registered: readonly string[] = []): 
   }
 
   const text = rest.join(" ").trim();
-  if (!text) return { ok: false, message: USAGE };
+  if (!text) return { ok: false, kind: "needs-work", message: USAGE };
 
   return { ok: true, args: { repo: matches[0] as string, text } };
+}
+
+/**
+ * `/task fix the thing` → `fix the thing`.
+ *
+ * Telegram delivers the founder's own message verbatim, including the slash and
+ * the `@BotName` suffix a group chat adds. The dispatch brief must not inherit
+ * either: "/task" in the goal line reads to an executor as part of the request.
+ */
+export function stripTaskCommand(raw: string): string {
+  return raw.replace(/^\/task(@\w+)?\s*/i, "").trim();
 }
 
 /**
@@ -136,22 +170,127 @@ export interface TaskCommandDeps {
   readonly listRegisteredRepos?: () => Promise<readonly string[]>;
 }
 
-export async function handleTask(ctx: Context, deps: TaskCommandDeps): Promise<void> {
-  let registered: readonly string[] = [];
+async function registeredRepos(deps: TaskCommandDeps): Promise<readonly string[]> {
   try {
-    registered = (await deps.listRegisteredRepos?.()) ?? [];
+    return (await deps.listRegisteredRepos?.()) ?? [];
   } catch {
-    // allow-failopen: a registry that cannot be read must not take /task down for the two hardcoded repos.
-    registered = [];
+    // allow-failopen: a registry that cannot be read must not take /task down for the hardcoded repos.
+    return [];
+  }
+}
+
+/** The repo buttons, as a grammy `reply_markup`. */
+function repoKeyboard(registered: readonly string[]): { inline_keyboard: { text: string; callback_data: string }[][] } {
+  return { inline_keyboard: buildRepoKeyboardRows(registered) };
+}
+
+export async function handleTask(ctx: Context, deps: TaskCommandDeps): Promise<void> {
+  const registered = await registeredRepos(deps);
+  const parsed = parseTaskArgs(ctx.match?.toString() ?? "", registered);
+
+  if (parsed.ok) {
+    await deps.runKernelText(ctx, buildTaskInstruction(parsed.args));
+    return;
   }
 
-  const parsed = parseTaskArgs(ctx.match?.toString() ?? "", registered);
-  if (!parsed.ok) {
+  if (parsed.kind === "refused") {
     await ctx.reply(parsed.message);
     return;
   }
 
-  await deps.runKernelText(ctx, buildTaskInstruction(parsed.args));
+  // Both remaining cases end in the same row of buttons. The difference is only
+  // what happens after the tap, and that is decided at tap time by whether the
+  // question is attached to a message that already describes the work — so the
+  // branch lives in the callback, not here.
+  //
+  // `reply_parameters` is load-bearing, not decoration: it is what carries the
+  // founder's UNTRUNCATED request across the button press. The echo in the
+  // question is capped for legibility, so recovering the brief from the question
+  // text would silently shorten it.
+  const messageId = ctx.message?.message_id;
+  await ctx.reply(
+    parsed.kind === "needs-repo"
+      ? buildRepoQuestion(parsed.text)
+      : "🤖 <b>Which repo should I build in?</b>",
+    {
+      parse_mode: "HTML",
+      reply_markup: repoKeyboard(registered),
+      ...(parsed.kind === "needs-repo" && messageId ? { reply_parameters: { message_id: messageId } } : {}),
+    },
+  );
+}
+
+/**
+ * A tapped repo button.
+ *
+ * Two outcomes, decided by whether the work is already known:
+ *   · the question was asked about a `/task <work>` message → dispatch now
+ *   · it was a bare `/task` → ask what to build, with `force_reply` so his answer
+ *     comes back attached to the message naming the repository
+ *
+ * Returns false for a payload that is not a repo choice, so the caller can fall
+ * through to its other callback handlers.
+ */
+export async function handleRepoChoice(ctx: Context, deps: TaskCommandDeps): Promise<boolean> {
+  const data = ctx.callbackQuery?.data ?? "";
+  // Checked BEFORE the registry read: approve/reject go through this same
+  // handler, and making the HITL card wait on a database round trip to be told
+  // "not mine" puts a query in front of the founder's approval tap.
+  if (!data.startsWith(REPO_CALLBACK_PREFIX)) return false;
+
+  const repo = repoFromCallbackData(data, await registeredRepos(deps));
+
+  if (!repo) {
+    // Not silence: a button that does nothing reads exactly like a dead bot, and
+    // an unresolvable payload means the allowlist changed under a stale message.
+    await ctx.answerCallbackQuery({ text: "That repo is no longer dispatchable", show_alert: true });
+    return true;
+  }
+
+  await ctx.answerCallbackQuery({ text: `→ ${repo.split("/")[1] ?? repo}` });
+  // Best-effort: the buttons are spent either way, and a failed edit (message too
+  // old, already edited) must not stop the dispatch the founder just asked for.
+  // allow-failopen: clearing a spent keyboard is cosmetic; the dispatch below is the actual work.
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
+
+  const original = ctx.callbackQuery?.message?.reply_to_message;
+  const work = stripTaskCommand(
+    (original && "text" in original ? (original.text as string | undefined) : undefined) ?? "",
+  );
+
+  if (!work) {
+    await ctx.reply(buildRepoPrompt(repo), {
+      parse_mode: "HTML",
+      reply_markup: { force_reply: true, input_field_placeholder: "what should I build?" },
+    });
+    return true;
+  }
+
+  await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work }));
+  return true;
+}
+
+/**
+ * The founder's reply to a `buildRepoPrompt` message.
+ *
+ * Returns false when this text is not an answer to one, so the caller hands it
+ * to the ordinary kernel turn untouched. The repository is read back out of the
+ * message being replied to and re-validated, so nothing about the target is held
+ * in memory between the two messages — a restart mid-flow loses nothing.
+ */
+export async function handleRepoReply(ctx: Context, deps: TaskCommandDeps): Promise<boolean> {
+  const replied = ctx.message?.reply_to_message;
+  const prompt = replied && "text" in replied ? (replied.text as string | undefined) : undefined;
+  if (!prompt) return false;
+
+  const repo = repoFromPrompt(prompt, await registeredRepos(deps));
+  if (!repo) return false;
+
+  const work = (ctx.message?.text ?? "").trim();
+  if (!work) return false;
+
+  await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work }));
+  return true;
 }
 
 // ── /newproject ──────────────────────────────────────────────────────────────

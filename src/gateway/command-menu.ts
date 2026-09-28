@@ -173,10 +173,12 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
   // stops reading. The order is the order they are used in.
   {
     command: "task",
-    // Names the repo selector in the description itself: the hint is the one
-    // thing /task cannot guess and the one thing nobody would think to type.
-    description:
-      "Build something. task repo:app fix the flaky CSV export. Repos: app, api, hulda, founderos",
+    // No longer names the `repo:` hint. It used to, because the hint was the one
+    // thing /task could not guess and nobody would think to type — but a
+    // description that has to teach a syntax is a description admitting the
+    // syntax is wrong. The repo is now a row of buttons, so the only thing left
+    // to say is what the command is for.
+    description: "Build something — describe it, I ask which repo with buttons",
     group: "engineering",
   },
   {
@@ -200,9 +202,27 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
   { command: "resume", description: "Lift a halt and accept work again", group: "system" },
 ];
 
-/** The payload Telegram wants: command + description, nothing else. */
+/**
+ * The payload Telegram wants: command + description, nothing else.
+ *
+ * THE `wife_` TWINS GO LAST. Not hidden — every one is still in the menu, and
+ * `/commands` still prints each beside the command it twins. But the native menu
+ * is a flat scroll of 33 rows, and eleven of the first twenty-two were
+ * near-identical `wife_` rows sitting above everything else. The engineering
+ * loop landed at number 23, which on a phone is below the fold twice over, and
+ * the founder's verdict on the release that added it was "I am unable to see
+ * the improved UI or UX". Moving the twins below the singletons costs nothing —
+ * `/wife_jobs` is one keystroke off `/jobs` in the same list — and pulls /task
+ * to number 12.
+ *
+ * Read order among the founder's own commands is untouched, which is the
+ * property `command-menu.test.ts` pins.
+ */
 export function telegramCommandPayload(): { command: string; description: string }[] {
-  return COMMAND_MENU.map(({ command, description }) => ({ command, description }));
+  const rank = (entry: MenuCommand): number => (entry.command.startsWith("wife_") ? 1 : 0);
+  return [...COMMAND_MENU]
+    .sort((a, b) => rank(a) - rank(b))
+    .map(({ command, description }) => ({ command, description }));
 }
 
 /**
