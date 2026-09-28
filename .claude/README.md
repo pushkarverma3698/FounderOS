@@ -24,8 +24,8 @@ the **Authoritative** column wins; the other is stale and should be fixed.
 | `graph.json` | Knowledge graph: departments→agents→tools. **Query before grepping** (~70× fewer reads). |
 | `graph-mermaid.md` | Human-readable graph render. |
 | `GRAPHIFY-INTEGRATION.md` | How the graph is generated/used. Regenerate: `pnpm graph:gen`. |
-| `graphify-hook.ts` | `preToolUse` hook (wired in `settings.json`) that enriches Read/Grep/Glob/Explore with graph context. |
-| `settings.json` | Committed hook + env config. |
+| `graphify-hook.ts` | Graph-context enricher. **Not wired**: the old `settings.json` used a `hooks.preToolUse` object that Claude Code does not recognise, so it never ran; removed 2026-09-28. Re-wiring needs the `PreToolUse` array format with a `command`. |
+| `settings.json` | Committed env config. |
 | `settings.local.json` | Local-only overrides (not the source of truth for shared rules). |
 | `brand/` | Brand guidelines (`TURICKS.md`). |
 | `skills/` | Project-scoped skills (Apify Actor toolkit). |
