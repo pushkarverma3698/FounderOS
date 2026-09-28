@@ -1,9 +1,24 @@
-# Connecting to FounderOS's MCP Server on the Production VPS
+# Connecting to the FounderOS hub (MCP) on the Production VPS
 
-This guide covers connecting a local MCP client — Claude Code, Claude Desktop —
-to the read-only knowledge tools FounderOS **exposes** (`search_web`,
-`github_read`, `read_context`, `search_memory`, `search_knowledge`, `read_cv`),
-running on the production VPS against the production data.
+Every coding tool — Claude Code, Codex, Cursor, Antigravity, Gemini CLI — connects
+to **one** MCP server, the FounderOS hub (`src/mcp/hub.ts`), running on the
+production VPS against the production data:
+
+| Tools | What they do |
+|---|---|
+| `search_memory`, `get_memory`, `remember`, `save_decision`, `save_bug` | the shared brain (`brain.brain_memories`) |
+| `gmail_search`, `calendar_events` | read the founder's Google accounts (`src/core/accounts.ts`), one or all |
+| `list_connected_tools`, `call_connected_tool` | every MCP server in `/opt/founderos/mcp-bridge.json`, read-only |
+
+**Nothing in the hub sends or changes anything on the founder's behalf.** Sending
+mail, creating events, and any tool a connected server marks as a write stay in
+Telegram, where the founder approves them (ADR-004, ADR-013). Brain writes are the
+one exception: they record decisions and bugs, not actions.
+
+**Adding a server:** one entry in `/opt/founderos/mcp-bridge.json` on the VPS (or
+`/connect` in Telegram). The hub re-reads the file on every call, so every tool
+sees the server on its next call, with no restart and no laptop edit. Its write
+tools are refused unless they go through Telegram.
 
 **VPS access:** the `founderos` user via the `founderos-vps` SSH alias only.
 Root SSH login is denied on the box. The project lives at `/opt/founderos`; the
@@ -12,7 +27,7 @@ covered in [`PRODUCTION.md`](PRODUCTION.md) — this doc is scoped to the MCP
 server only.
 
 **The simple model: launch the stdio server on the VPS over SSH.** Your MCP
-client runs `ssh founderos-vps '… node … src/mcp/index.ts'`; JSON-RPC flows over
+client runs `ssh founderos-vps '… node … src/mcp/hub.ts'`; JSON-RPC flows over
 the SSH pipe. That means:
 
 - **Your SSH key is the auth** — the same key you already use. No bearer token.
@@ -22,9 +37,13 @@ the SSH pipe. That means:
   `/opt/founderos/.env`; the tools execute on the VPS.
 
 ```
-Mac (MCP client) ──ssh founderos-vps──▶  VPS: node src/mcp/index.ts (stdio)
+Mac (MCP client) ──ssh founderos-vps──▶  VPS: node src/mcp/hub.ts (stdio)
    JSON-RPC over the SSH pipe                reads /opt/founderos/.env, runs tools
 ```
+
+On the founder's laptop every tool starts the hub through one script,
+`~/Projects/scripts/ai-tools/founderos-brain-mcp.sh`, so changing what the hub
+serves never needs a config edit in five tools.
 
 ---
 
@@ -37,7 +56,7 @@ Mac (MCP client) ──ssh founderos-vps──▶  VPS: node src/mcp/index.ts (s
    ```
 2. **MCP client config** — copy the `founderos-vps` block from
    `deploy/mcp-founderos-vps.example.json` into your client's config:
-   - **Claude Code:** `~/.mcp.json` (global) or a project `.mcp.json`.
+   - **Claude Code:** `claude mcp add -s user founderos-vps -- ssh founderos-vps '<command below>'`.
    - **Claude Desktop:** `claude_desktop_config.json`.
    ```jsonc
    {
@@ -45,15 +64,25 @@ Mac (MCP client) ──ssh founderos-vps──▶  VPS: node src/mcp/index.ts (s
        "founderos-vps": {
          "command": "ssh",
          "args": ["founderos-vps",
-                  "cd /opt/founderos && LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/index.ts"]
+                  "cd /opt/founderos && LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/hub.ts"]
        }
      }
    }
    ```
    `LOG_STDERR=1` keeps logs off stdout so the JSON-RPC stream stays clean — it's
-   already baked into `pnpm mcp`; keep it in the SSH command too.
-3. **Restart the client.** It spawns the SSH child on demand; the VPS tools
-   appear as `search_web`, `search_memory`, etc.
+   already baked into `pnpm mcp:hub`; keep it in the SSH command too.
+3. **Restart the client.** It spawns the SSH child on demand; the hub's tools
+   appear as `search_memory`, `gmail_search`, etc.
+
+## Brain-only access (`HUB_SCOPE=brain`)
+
+An agent that must not read the founder's mail gets the hub with
+`HUB_SCOPE=brain`: only the five brain tools, and a call to any other tool is
+refused, not just hidden. On the VPS the `antigravity` user runs it this way with
+its own env file, whose `DATABASE_URL` is the `brain_agent` Postgres role — that
+role can read and write `brain.brain_memories` and nothing else, so the limit is
+enforced by the database as well as by the hub. `src/mcp/turicks-brain.ts` is the
+same hub in brain scope, kept for configs that still start it.
 
 ## Giving a colleague access
 
@@ -68,8 +97,11 @@ the VPS.
 
 ## Local Claude Code (same machine as the server)
 
-Running a client on the VPS itself? Just `pnpm mcp` — same tools, stdio, no SSH
-hop. (`pnpm mcp` sets `LOG_STDERR=1` for you.)
+Running a client on the VPS itself? `pnpm mcp:hub` — same tools, stdio, no SSH
+hop (it sets `LOG_STDERR=1` for you). `src/mcp/index.ts` (`pnpm mcp`), the older
+read-only server, still works, but no tool config uses it any more; the repo's
+`.mcp.json` that started it against the laptop's own database was removed on
+2026-09-28, because it gave Claude a second, stale memory next to the real brain.
 
 ---
 
