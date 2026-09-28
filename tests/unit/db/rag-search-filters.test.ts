@@ -49,7 +49,7 @@ describe("searchRagTable — memory_type / project filters", () => {
     expect(params).toContain("oplify");
   });
 
-  it("composes memory_type + project as AND, not OR", async () => {
+  it("composes memory_type + project as AND, not OR, with valid SQL punctuation", async () => {
     await searchRagTable("brain_memories", embedding, 5, {
       filter: { memory_type: "decision", project: "oplify" },
     });
@@ -57,6 +57,10 @@ describe("searchRagTable — memory_type / project filters", () => {
     expect(sql).toMatch(/AND memory_type = /);
     expect(sql).toMatch(/AND project = /);
     expect(params).toEqual(expect.arrayContaining(["decision", "oplify"]));
+    // Regression: adjacent filter fragments concatenate with no separator of
+    // their own — a bound param glued straight onto the next "AND" (`$2AND`)
+    // compiles fine here but is invalid Postgres syntax at query time.
+    expect(sql).not.toMatch(/\$\d+[A-Za-z]/);
   });
 
   it("always selects memory_type/project for brain_memories, filter or not", async () => {
@@ -106,6 +110,17 @@ describe("keywordSearchRagTable — memory_type / project filters", () => {
     await expect(
       keywordSearchRagTable("turicks_brain", "query", 5, { filter: { memory_type: "bug" } }),
     ).rejects.toThrow(/memory_type\/project filters require table "brain_memories"/);
+  });
+
+  it("composes memory_type + project as AND with valid SQL punctuation", async () => {
+    await keywordSearchRagTable("brain_memories", "oplify billing", 5, {
+      filter: { memory_type: "decision", project: "oplify" },
+    });
+    const { sql, params } = lastQuery();
+    expect(sql).toMatch(/AND memory_type = /);
+    expect(sql).toMatch(/AND project = /);
+    expect(params).toEqual(expect.arrayContaining(["decision", "oplify"]));
+    expect(sql).not.toMatch(/\$\d+[A-Za-z]/);
   });
 
   it("surfaces memory_type/project on the returned hit for brain_memories", async () => {

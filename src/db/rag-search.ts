@@ -89,9 +89,15 @@ export async function searchRagTable(
   const entryType = opts?.filter?.entry_type;
   const memoryType = opts?.filter?.memory_type;
   const project = opts?.filter?.project;
-  const filterClause = sql`${entryType ? sql`AND metadata->>'entry_type' = ${entryType}` : sql``}${
-    memoryType ? sql`AND memory_type = ${memoryType}` : sql``
-  }${project ? sql`AND project = ${project}` : sql``}`;
+  // Leading space on every fragment: they concatenate directly with no
+  // separator, so back-to-back fragments (e.g. memory_type + project both
+  // set) would otherwise glue a bound param straight onto the next "AND"
+  // (`$2AND project`) — invalid syntax Postgres reports as "trailing junk
+  // after parameter". Caught live against real Postgres, not by the mocked
+  // unit tests (see tests/unit/db/rag-search-filters.test.ts).
+  const filterClause = sql`${entryType ? sql` AND metadata->>'entry_type' = ${entryType}` : sql``}${
+    memoryType ? sql` AND memory_type = ${memoryType}` : sql``
+  }${project ? sql` AND project = ${project}` : sql``}`;
   const isBrainMemories = table === "brain_memories";
   const extraCols = isBrainMemories ? sql`, memory_type, project` : sql``;
   // sql.identifier() safely quotes the (already allowlisted) table name.
@@ -164,9 +170,15 @@ export async function keywordSearchRagTable(
   const entryType = opts?.filter?.entry_type;
   const memoryType = opts?.filter?.memory_type;
   const project = opts?.filter?.project;
-  const filterClause = sql`${entryType ? sql`AND metadata->>'entry_type' = ${entryType}` : sql``}${
-    memoryType ? sql`AND memory_type = ${memoryType}` : sql``
-  }${project ? sql`AND project = ${project}` : sql``}`;
+  // Leading space on every fragment: they concatenate directly with no
+  // separator, so back-to-back fragments (e.g. memory_type + project both
+  // set) would otherwise glue a bound param straight onto the next "AND"
+  // (`$2AND project`) — invalid syntax Postgres reports as "trailing junk
+  // after parameter". Caught live against real Postgres, not by the mocked
+  // unit tests (see tests/unit/db/rag-search-filters.test.ts).
+  const filterClause = sql`${entryType ? sql` AND metadata->>'entry_type' = ${entryType}` : sql``}${
+    memoryType ? sql` AND memory_type = ${memoryType}` : sql``
+  }${project ? sql` AND project = ${project}` : sql``}`;
   const isBrainMemories = table === "brain_memories";
   const extraCols = isBrainMemories ? sql`, memory_type, project` : sql``;
 
