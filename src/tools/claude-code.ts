@@ -25,6 +25,8 @@
  *     "Claude Code is not logged in" failure).
  *   - Permissions: --permission-mode acceptEdits + explicit --allowedTools.
  *     The founder's upfront HITL approval is the authorization boundary.
+ *   - Product repos (the dispatch allowlist) change only through a reviewed PR:
+ *     a pre-push hook refuses main/master/beta/development (claude-code-git-guard.ts).
  *   - stream-json output parsed line-by-line; assistant progress is forwarded
  *     to Telegram via the api-only sender (no gateway import, no 409).
  */
@@ -35,6 +37,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { childLogger } from "../infra/logger.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
+import { installGitGuard, gitGuardEnv, REPO_POLICY_DIRECTIVE } from "./claude-code-git-guard.js";
 
 const log = childLogger({ module: "tool:claude-code" });
 
@@ -97,6 +100,7 @@ export const GROUNDING_MEMORY_DIRECTIVE =
 export function withExecutionDirective(task: string): string {
   let res = task.includes(EXECUTION_DIRECTIVE) ? task : task + EXECUTION_DIRECTIVE;
   if (!res.includes(GROUNDING_MEMORY_DIRECTIVE)) res += GROUNDING_MEMORY_DIRECTIVE;
+  if (!res.includes(REPO_POLICY_DIRECTIVE)) res += REPO_POLICY_DIRECTIVE;
   return res;
 }
 
@@ -189,7 +193,8 @@ export const claudeCodeTool: UnifiedTool = {
     "Execute a complete engineering task (build, code, test, git, repo creation, multi-step work) via the " +
     "Claude Code CLI agent in an isolated workspace. This is the PRIMARY way to do coding/build work — give it " +
     "the WHOLE task as one self-contained brief, not individual commands. Streams progress to the founder " +
-    "and returns the final outcome. HITL-gated (one approval per task).",
+    "and returns the final outcome. HITL-gated (one approval per task). On the product repos (FounderOS, " +
+    "Oplify, House of Hulda) it can only push a feature branch and open a draft PR, never push to main or beta.",
 
   input_schema: {
     type: "object",
@@ -254,12 +259,21 @@ export const claudeCodeTool: UnifiedTool = {
           "--allowedTools", ALLOWED_TOOLS,
         ];
 
+    // Fail closed: a run that cannot get the git guard does not run at all.
+    let childEnv: NodeJS.ProcessEnv;
+    try {
+      const baseEnv = buildExecutorEnv();
+      childEnv = { ...baseEnv, ...gitGuardEnv(installGitGuard(), baseEnv) };
+    } catch (err) {
+      return { success: false, error: `Claude Code not started: could not install the git guard (${(err as Error).message}).` };
+    }
+
     log.info({ task: task.slice(0, 120), cwd }, "claude_code executor starting");
 
     return await new Promise<ToolResult>((resolvePromise) => {
       const child = spawn(binary, cliArgs, {
         cwd,
-        env: buildExecutorEnv(),
+        env: childEnv,
         stdio: ["ignore", "pipe", "pipe"],
       });
 
