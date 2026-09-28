@@ -8,7 +8,7 @@
  * composition, not a stub of it.
  *
  * Coverage:
- *  1. Delegates to the turicks_brain table via the hybrid engine
+ *  1. Delegates to the brain_memories table via the hybrid engine
  *  2. entry_type, when given, is passed as a filter to both search legs
  *  3. No entry_type → no filter passed
  *  4. Forgiving fallback: a filtered search that returns zero hits retries
@@ -34,7 +34,7 @@ vi.mock("../../../src/lib/embed.js", () => ({
 vi.mock("../../../src/db/rag-search.js", () => ({
   searchRagTable: vi.fn(),
   keywordSearchRagTable: vi.fn(),
-  ALLOWED_RAG_TABLES: new Set(["personal_rag", "turicks_brain", "research_cache"]),
+  ALLOWED_RAG_TABLES: new Set(["personal_rag", "brain_memories", "research_cache"]),
   assertAllowedRagTable: vi.fn(),
 }));
 
@@ -107,6 +107,47 @@ describe("searchKnowledge — delegates to the hybrid engine", () => {
     await searchKnowledge.invoke({ query: "composio" });
 
     expect(mockVector.mock.calls[0]![3]).toBeUndefined();
+  });
+});
+
+// ── Result count (top_k) ───────────────────────────────────────────────────────
+
+describe("searchKnowledge — top_k", () => {
+  // A wider result count was the one reason prompts/research.ts gave for keeping
+  // search_turicks_brain next to this tool. With top_k here, research needs one
+  // brain tool, not two over the same table.
+  it("defaults to 5 results", async () => {
+    mockSuccess([makeHit()]);
+    await searchKnowledge.invoke({ query: "composio" });
+
+    expect(mockVector.mock.calls[0]![2]).toBe(5);
+  });
+
+  it("passes top_k through to the engine", async () => {
+    mockSuccess([makeHit()]);
+    await searchKnowledge.invoke({ query: "composio", top_k: 8 });
+
+    expect(mockVector.mock.calls[0]![2]).toBe(8);
+  });
+
+  it("clamps top_k to 1–10", async () => {
+    mockSuccess([makeHit()]);
+    await searchKnowledge.invoke({ query: "composio", top_k: 50 });
+    mockSuccess([makeHit()]);
+    await searchKnowledge.invoke({ query: "composio", top_k: 0 });
+
+    expect(mockVector.mock.calls.map((c) => c[2])).toEqual([10, 1]);
+  });
+
+  it("keeps the requested top_k on the forgiving unfiltered retry", async () => {
+    mockEmbed.mockResolvedValueOnce(DUMMY_VEC);
+    mockVector.mockResolvedValueOnce([]);
+    mockKeyword.mockResolvedValueOnce([]);
+    mockSuccess([makeHit()]);
+
+    await searchKnowledge.invoke({ query: "ICP", entry_type: "strategic_pillar", top_k: 8 });
+
+    expect(mockVector.mock.calls.map((c) => c[2])).toEqual([8, 8]);
   });
 });
 

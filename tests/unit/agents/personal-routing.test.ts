@@ -36,6 +36,17 @@ describe("PERSONAL_PROMPT — mandatory tool usage", () => {
   it("handles follow-up context (Attach it, Now run it)", () => {
     expect(PERSONAL_PROMPT).toMatch(/Attach it|follow.up|same thread/i);
   });
+
+  it("sends CV questions to jobhunt's read_cv instead of answering them (2026-09-28)", () => {
+    // personal lost search_personal_rag and holds no CV reader. A misrouted
+    // "what are my skills?" must be handed on, not answered from a file hunt.
+    expect(PERSONAL_PROMPT).not.toContain("search_personal_rag");
+    expect(PERSONAL_PROMPT).toMatch(/What are my skills\?[^\n]*jobhunt[^\n]*read_cv/);
+  });
+
+  it("says payslips and identity documents are not available rather than guessing them", () => {
+    expect(PERSONAL_PROMPT).toMatch(/Payslips[^\n]*identity documents are not available/);
+  });
 });
 
 describe("MARKETING_PROMPT — GitHub URL consistency", () => {

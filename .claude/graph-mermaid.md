@@ -26,6 +26,7 @@ graph TB
   tool_ops_state["ops_state"]:::tool
   tool_write_artifact["write_artifact"]:::tool
   tool_deliver_artifact["deliver_artifact"]:::tool
+  tool_read_logs["read_logs"]:::tool
   tool_search_web["search_web"]:::tool
   tool_scrape_url["scrape_url"]:::tool
   tool_deep_research["deep_research"]:::tool
@@ -34,7 +35,6 @@ graph TB
   tool_v2ex_topics["v2ex_topics"]:::tool
   tool_search_research_cache["search_research_cache"]:::tool
   tool_search_knowledge["search_knowledge"]:::tool
-  tool_search_turicks_brain["search_turicks_brain"]:::tool
   tool_publish_signal["publish_signal"]:::tool
   tool_scan_ai_visibility["scan_ai_visibility"]:::tool
   tool_get_gap_scans["get_gap_scans"]:::tool
@@ -45,10 +45,13 @@ graph TB
   tool_list_scheduled_posts["list_scheduled_posts"]:::tool
   tool_project_workflow["project_workflow"]:::tool
   tool_claude_code["claude_code"]:::tool
+  tool_dispatch_antigravity_task["dispatch_antigravity_task"]:::tool
+  tool_create_project_repo["create_project_repo"]:::tool
   tool_apply_cinematic_preset["apply_cinematic_preset"]:::tool
   tool_deploy_static_site["deploy_static_site"]:::tool
   tool_vps_run["vps_run"]:::tool
   tool_github_read["github_read"]:::tool
+  tool_ui_check["ui_check"]:::tool
   tool_linkedin_post["linkedin_post"]:::tool
   tool_linkedin_get_my_posts["linkedin_get_my_posts"]:::tool
   tool_linkedin_analytics["linkedin_analytics"]:::tool
@@ -66,7 +69,6 @@ graph TB
   tool_list_dir["list_dir"]:::tool
   tool_run_shell["run_shell"]:::tool
   tool_browser["browser"]:::tool
-  tool_search_personal_rag["search_personal_rag"]:::tool
   tool_send_file["send_file"]:::tool
   tool_write_file["write_file"]:::tool
   tool_read_cv["read_cv"]:::tool
@@ -76,6 +78,8 @@ graph TB
   tool_review_screened["review_screened"]:::tool
   tool_cv_gaps["cv_gaps"]:::tool
   tool_job_state["job_state"]:::tool
+  tool_export_jobs_csv["export_jobs_csv"]:::tool
+  tool_tailor_cv["tailor_cv"]:::tool
   tool_job_brief["job_brief"]:::tool
   service_supervisor["Supervisor"]:::service
   service_telegam["Telegram Gateway"]:::service
@@ -83,7 +87,7 @@ graph TB
   service_postgres["PostgreSQL"]:::service
   service_redis["Redis"]:::service
   service_ollama["Ollama (nomic-embed-text)"]:::service
-  store_turicks_brain["turicks_brain (pgvector)"]:::service
+  store_brain_memories["brain_memories (pgvector)"]:::service
   store_personal_rag["personal_rag (pgvector)"]:::service
   service_judge["Claude Judge"]:::service
   agent_admin_agent -->|belongs_to| dept_admin
@@ -110,6 +114,7 @@ graph TB
   tool_ops_state -->|belongs_to| dept_admin
   tool_write_artifact -->|belongs_to| dept_admin
   tool_deliver_artifact -->|belongs_to| dept_admin
+  tool_read_logs -->|belongs_to| dept_admin
   tool_search_web -->|belongs_to| dept_research
   tool_scrape_url -->|belongs_to| dept_research
   tool_deep_research -->|belongs_to| dept_research
@@ -118,7 +123,6 @@ graph TB
   tool_v2ex_topics -->|belongs_to| dept_research
   tool_search_research_cache -->|belongs_to| dept_research
   tool_search_knowledge -->|belongs_to| dept_research
-  tool_search_turicks_brain -->|belongs_to| dept_research
   tool_publish_signal -->|belongs_to| dept_research
   tool_scan_ai_visibility -->|belongs_to| dept_research
   tool_get_gap_scans -->|belongs_to| dept_research
@@ -129,11 +133,15 @@ graph TB
   tool_list_scheduled_posts -->|belongs_to| dept_comms
   tool_project_workflow -->|belongs_to| dept_engineering
   tool_claude_code -->|belongs_to| dept_engineering
+  tool_dispatch_antigravity_task -->|belongs_to| dept_engineering
+  tool_create_project_repo -->|belongs_to| dept_engineering
   tool_apply_cinematic_preset -->|belongs_to| dept_engineering
   tool_deploy_static_site -->|belongs_to| dept_engineering
   tool_vps_run -->|belongs_to| dept_engineering
   tool_synthesize_skill -->|belongs_to| dept_engineering
   tool_github_read -->|belongs_to| dept_engineering
+  tool_ui_check -->|belongs_to| dept_engineering
+  tool_read_logs -->|belongs_to| dept_engineering
   tool_linkedin_post -->|belongs_to| dept_marketing
   tool_linkedin_get_my_posts -->|belongs_to| dept_marketing
   tool_linkedin_analytics -->|belongs_to| dept_marketing
@@ -158,7 +166,6 @@ graph TB
   tool_list_dir -->|belongs_to| dept_personal
   tool_run_shell -->|belongs_to| dept_personal
   tool_browser -->|belongs_to| dept_personal
-  tool_search_personal_rag -->|belongs_to| dept_personal
   tool_send_file -->|belongs_to| dept_personal
   tool_write_file -->|belongs_to| dept_personal
   tool_read_cv -->|belongs_to| dept_jobhunt
@@ -168,6 +175,8 @@ graph TB
   tool_review_screened -->|belongs_to| dept_jobhunt
   tool_cv_gaps -->|belongs_to| dept_jobhunt
   tool_job_state -->|belongs_to| dept_jobhunt
+  tool_export_jobs_csv -->|belongs_to| dept_jobhunt
+  tool_tailor_cv -->|belongs_to| dept_jobhunt
   tool_write_artifact -->|belongs_to| dept_jobhunt
   tool_deliver_artifact -->|belongs_to| dept_jobhunt
   tool_job_brief -->|belongs_to| dept_jobhunt
@@ -191,12 +200,10 @@ graph TB
   service_supervisor -->|calls| service_hitl
   service_supervisor -->|depends_on| service_postgres
   service_supervisor -->|depends_on| service_redis
-  tool_search_turicks_brain -->|depends_on| service_ollama
-  tool_search_turicks_brain -->|depends_on| store_turicks_brain
-  tool_search_personal_rag -->|depends_on| service_ollama
-  tool_search_personal_rag -->|depends_on| store_personal_rag
-  store_turicks_brain -->|depends_on| service_ollama
-  store_turicks_brain -->|depends_on| service_postgres
+  tool_search_knowledge -->|depends_on| service_ollama
+  tool_search_knowledge -->|depends_on| store_brain_memories
+  store_brain_memories -->|depends_on| service_ollama
+  store_brain_memories -->|depends_on| service_postgres
   store_personal_rag -->|depends_on| service_postgres
   tool_publish_signal -->|depends_on| service_postgres
   service_supervisor -->|depends_on| service_judge

@@ -1002,7 +1002,7 @@ export async function getKnowledgeByType(
     .limit(limit);
 }
 
-// ── RAG Health (knowledge_entries + turicks_brain) ───────────────────────────
+// ── RAG Health (knowledge_entries + brain_memories) ──────────────────────────
 
 /**
  * Count current knowledge entries for a tenant. Used by the health endpoint
