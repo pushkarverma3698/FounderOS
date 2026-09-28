@@ -261,8 +261,10 @@ describe("gh wrapper — gh cannot go around the hook", () => {
     [["api", "--method=PATCH", "repos/OplifyMessage/oplify-messaging-api"], "api --method="],
     [["api", "repos/OplifyMessage/oplify-messaging-api/merges", "-f", "base=main", "-f", "head=x"], "api implicit POST"],
     [["api", "graphql", "-f", "query=mutation { mergePullRequest(input:{pullRequestId:\"x\"}) { clientMutationId } }"], "graphql mutation"],
-  ])("refuses %j (%s) and never reaches the real gh", (args) => {
-    git(["remote", "add", "origin", PRODUCT]);
+  ])("refuses %j (%s) and never reaches the real gh", (args, how) => {
+    // Only the cwd-origin case may lean on the clone's origin; every other case
+    // runs from an unrelated repo, so the refusal must come from the arguments.
+    git(["remote", "add", "origin", how === "cwd origin" ? PRODUCT : DEMO]);
     const r = gh(args as string[]);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("refused");
