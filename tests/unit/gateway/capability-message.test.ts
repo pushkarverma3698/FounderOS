@@ -36,10 +36,13 @@ describe("capability-message", () => {
   it("welcome greets by name and still lists every department", () => {
     const msg = buildWelcomeMessage("Pushkar");
     expect(msg).toContain("Pushkar");
-    expect(msg).toContain("Admin");
-    expect(msg).toContain("Research");
-    expect(msg).toContain("Personal");
-    expect(msg).toContain("• asks first");
+    // All eight — the hand-written list had seven and left out jobhunt.
+    for (const team of ["Admin", "Research", "Comms", "Engineering", "Marketing", "Sales", "Personal", "Jobs"]) {
+      expect(msg, team).toContain(team);
+    }
+    // Which tools ask first now comes from HITL_GATED_TOOLS on the 🧭 screen; the
+    // per-team "• asks first" markers were hand-written and wrong for Admin.
+    expect(msg).toMatch(/ask you first/);
   });
 
   it("welcome leads with the jobs loop and its real commands", () => {

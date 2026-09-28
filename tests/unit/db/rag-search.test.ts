@@ -29,10 +29,10 @@ describe("ragTableRef — schema-qualified so no shadow table can hijack retriev
 
 describe("rag-search isolation guard", () => {
   it("allows the known RAG tables", () => {
+    expect(() => assertAllowedRagTable("brain_memories")).not.toThrow();
     expect(() => assertAllowedRagTable("personal_rag")).not.toThrow();
-    expect(() => assertAllowedRagTable("turicks_brain")).not.toThrow();
     // research_cache: Apify web-findings store (business-public, same side of the
-    // ADR-013/015 firewall as turicks_brain).
+    // ADR-013/015 firewall as brain_memories).
     expect(() => assertAllowedRagTable("research_cache")).not.toThrow();
   });
 
@@ -41,7 +41,16 @@ describe("rag-search isolation guard", () => {
     expect(() => assertAllowedRagTable("personal_rag; drop table users")).toThrow();
   });
 
+  it("refuses the frozen turicks_brain table (ADR-038 moved every reader and writer off it)", () => {
+    // brain:sync stopped writing it on 2026-09-05; the table still holds 1,352
+    // rows that can never be refreshed. An allowlist that still admits it lets a
+    // new reader answer from a frozen copy with no error — the shape of the
+    // 2026-08-07 shadow-table outage above. Dropping the table is a separate,
+    // founder-approved change; refusing to read it is not.
+    expect(() => assertAllowedRagTable("turicks_brain")).toThrow(/not an allowed RAG table/i);
+  });
+
   it("exposes exactly the allowed tables", () => {
-    expect([...ALLOWED_RAG_TABLES].sort()).toEqual(["brain_memories", "personal_rag", "research_cache", "turicks_brain"]);
+    expect([...ALLOWED_RAG_TABLES].sort()).toEqual(["brain_memories", "personal_rag", "research_cache"]);
   });
 });

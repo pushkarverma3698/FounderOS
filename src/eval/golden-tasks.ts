@@ -391,7 +391,7 @@ export const CREATIVE_GOLDEN_TASKS: GoldenTask[] = [
     input: "Write a punchy LinkedIn caption for our new cinematic landing page service.",
     expectedRoute: "marketing",
     expectsHitl: false,
-    note: "Copy task → marketing. May call search_turicks_brain for brand voice. No publish here.",
+    note: "Copy task → marketing. May call search_knowledge for brand voice. No publish here.",
   },
   {
     id: "creative-brand-asset",

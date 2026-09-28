@@ -29,6 +29,7 @@ import {
   getFounderContext,
   insertEpisodicEvent,
 } from "../db/queries.js";
+import { founderFacingContext } from "../db/founder-context.js";
 import { childLogger } from "../infra/logger.js";
 import { getMem0Client } from "../infra/mem0.js";
 
@@ -88,7 +89,7 @@ export const searchMemoryTool = tool(
 
     // 4. Founder context — text-contains search across keys + values
     if (type === "all" || type === "context") {
-      const ctx = await getFounderContext(TENANT);
+      const ctx = founderFacingContext(await getFounderContext(TENANT));
       if (Object.keys(ctx).length > 0) {
         const lq = query.toLowerCase();
         const matchingLines: string[] = [];

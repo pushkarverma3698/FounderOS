@@ -227,6 +227,16 @@ describe("a group the founder allow-listed", () => {
     await tapButton(bot, { chatId: ALLOWED_GROUP, fromId: OWNER, data: "approve:n1" });
     expect(resumeKernel).toHaveBeenCalledTimes(1);
   });
+
+  it("lets only the founder tap Retry — it re-runs his turn, owner-only commands included", async () => {
+    // A failed /task (owner-only) gets a Retry button like any other turn. A
+    // guest tapping it would run the founder's /task text as the guest.
+    const bot = makeBot();
+    await tapButton(bot, { chatId: ALLOWED_GROUP, fromId: GUEST, data: "retry:3f2a9c1e" });
+    expect(runKernelText).not.toHaveBeenCalled();
+    const refusal = sent.find((c) => c.method === "answerCallbackQuery");
+    expect(String(refusal?.payload["text"])).toMatch(/only the owner/i);
+  });
 });
 
 describe("a group nobody allow-listed", () => {

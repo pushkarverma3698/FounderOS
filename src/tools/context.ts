@@ -18,6 +18,7 @@ import { tool } from "@langchain/core/tools";
 import { TENANT } from "../core/config.js";
 import { z } from "zod";
 import { getFounderContext, upsertFounderContext } from "../db/queries.js";
+import { LAST_UPDATED_KEY, founderFacingContext } from "../db/founder-context.js";
 import { sanitizeContextUpdates } from "./context-guard.js";
 import { withToolErrorBoundary } from "../agents/tool-result.js";
 import { childLogger } from "../infra/logger.js";
@@ -30,10 +31,10 @@ const log = childLogger({ module: "tool:context" });
 export const readContext = tool(
   async () =>
     withToolErrorBoundary("db", "read founder_context from Postgres", async () => {
-    const ctx = await getFounderContext(TENANT);
+    const ctx = founderFacingContext(await getFounderContext(TENANT));
     const lines: string[] = [];
     for (const [key, value] of Object.entries(ctx)) {
-      if (key === "last_updated") continue;
+      if (key === LAST_UPDATED_KEY) continue;
       const val = Array.isArray(value)
         ? value.join(", ") || "(none)"
         : String(value || "(none)");
@@ -44,7 +45,7 @@ export const readContext = tool(
     if (lines.length === 0) {
       return "No business context stored yet. Ask the founder to share their current priorities and active clients so you can remember them.";
     }
-    const updatedAt = ctx["last_updated"] ? `\n\nLast updated: ${ctx["last_updated"]}` : "";
+    const updatedAt = ctx[LAST_UPDATED_KEY] ? `\n\nLast updated: ${ctx[LAST_UPDATED_KEY]}` : "";
     return `Current business context:\n${lines.join("\n")}${updatedAt}`;
     }),
   {

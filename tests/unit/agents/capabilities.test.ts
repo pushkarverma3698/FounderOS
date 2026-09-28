@@ -14,6 +14,7 @@ import {
   ADMIN_SUBAGENT_TOOLS,
   SUPERVISOR_TOOLS,
   HITL_GATED_TOOLS,
+  RETRIEVAL_TOOL_TABLE,
   buildCapabilityManifest,
   mergeBridgedTools,
   stripBridgedTools,
@@ -51,6 +52,21 @@ describe("DEPARTMENT_TOOLS registry", () => {
   it("personal carries the browser tool (the 2026-06-09 'no browser' answer was false)", () => {
     const names = DEPARTMENT_TOOLS["personal"]!.map((t: { name: string }) => t.name);
     expect(names).toContain("browser");
+  });
+
+  it("CV questions have one owner: jobhunt reads the CV, personal holds no CV reader", () => {
+    // personal answered "what are my skills?" through search_personal_rag, whose
+    // prod table held 4 rows last written 2026-06-15 — a June wiki stub the CV
+    // code already refuses to trust (src/tools/career.ts). jobhunt's read_cv reads
+    // the CV the founder maintains, and DESCRIPTIONS.jobhunt already claims every
+    // CV question. A CV tool on personal as well — even read_cv — would reopen the
+    // routing contest personal won on 2026-09-07, because the planner routes on
+    // each worker's tool list too (tests/unit/gateway/jobhunt-department-routing).
+    const personal = DEPARTMENT_TOOLS["personal"]!.map((t: { name: string }) => t.name);
+    const jobhunt = DEPARTMENT_TOOLS["jobhunt"]!.map((t: { name: string }) => t.name);
+    expect(jobhunt).toContain("read_cv");
+    expect(personal).not.toContain("search_personal_rag");
+    expect(personal).not.toContain("read_cv");
   });
 });
 
@@ -179,29 +195,27 @@ describe("HITL Security Invariant", () => {
     expect(orphans, `imported but never registered: ${orphans.join(", ")}`).toEqual([]);
   });
 
-  it("the RAG placement docblock matches where the RAG tools actually are", () => {
+  it("the RAG placement docblock matches where each RAG table is actually read", () => {
     // The docblock claimed searchPersonalRag → personal + jobhunt and
     // searchTuricksBrain → personal + research + sales + marketing long after P7
     // (5623eff) reduced both to a single department each. A capability registry
     // whose own comment is wrong is the exact failure this file exists to prevent.
-    const toolNameOf: Record<string, string> = {
-      searchPersonalRag: "search_personal_rag",
-      searchTuricksBrain: "search_turicks_brain",
-    };
+    // Since 2026-09-28 the docblock names TABLES, read through RETRIEVAL_TOOL_TABLE,
+    // so a second tool over one table cannot hide behind a different tool name.
     const source = readFileSync(fileURLToPath(new URL("../../../src/agents/capabilities.ts", import.meta.url)), "utf8");
-    const documented = [...source.matchAll(/^\s*\*\s*(searchPersonalRag|searchTuricksBrain)\s*→\s*(.+)$/gm)];
-    expect(documented.length, "both RAG tools are documented").toBe(2);
+    const tables = [...new Set(Object.values(RETRIEVAL_TOOL_TABLE))].sort();
+    const documented = [...source.matchAll(/^\s*\*\s*([a-z_]+)\s*→\s*(.+)$/gm)].filter(([, table]) =>
+      tables.includes(table as (typeof tables)[number]),
+    );
+    expect(documented.map(([, table]) => table).sort(), "every RAG table has exactly one docblock line").toEqual(tables);
 
-    for (const [, ident, rhs] of documented) {
-      const claimed = rhs!
-        .split("+")
-        .map((s) => s.trim())
-        .sort();
+    for (const [, table, rhs] of documented) {
+      const claimed = rhs!.trim() === "none" ? [] : rhs!.split("+").map((s) => s.trim()).sort();
       const actual = Object.entries(DEPARTMENT_TOOLS)
-        .filter(([, tools]) => tools.some((t: { name: string }) => t.name === toolNameOf[ident!]))
+        .filter(([, tools]) => tools.some((t: { name: string }) => RETRIEVAL_TOOL_TABLE[t.name] === table))
         .map(([dept]) => dept)
         .sort();
-      expect(claimed, `${ident} docblock says "${rhs}" but the registry says "${actual.join(" + ")}"`).toEqual(actual);
+      expect(claimed, `${table} docblock says "${rhs}" but the registry says "${actual.join(" + ") || "none"}"`).toEqual(actual);
     }
   });
 

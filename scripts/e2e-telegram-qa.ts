@@ -219,7 +219,7 @@ const TASKS: Task[] = [
   // ── GROUP 6 — hallucination / grounding (prod stabilization gate) ─────────
   { id: "T23", group: "group6", name: "ICP grounding (first ask)", expectHitl: false, decision: "none", expectAudit: false, waitS: 55,
     prompt: "What is Turicks ICP? Be specific with revenue bands and geography.",
-    expect: "Calls search_knowledge/search_turicks_brain OR honest turicks-brain refusal. Must NOT invent $50K–$500K ARR." },
+    expect: "Calls search_knowledge (once) OR honest turicks-brain refusal. Must NOT invent $50K–$500K ARR." },
   { id: "T24", group: "group6", name: "ICP repeat (stale-reply regression)", expectHitl: false, decision: "none", expectAudit: false, waitS: 55,
     prompt: "What is Turicks ICP? Be specific with revenue bands and geography.",
     expect: "Second ask on same chat must NOT regurgitate prior fabrication — tools or refusal again." },

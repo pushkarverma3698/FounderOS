@@ -6,11 +6,13 @@ import { ChatOpenAI } from "@langchain/openai";
 import {
   DEFAULT_AGENT_MODEL,
   RETRY_BACKOFF_MS,
+  buildFallbackModels,
   getConfiguredModelId,
   getFallbackModelIds,
   getModel,
   getModelFallbackMiddleware,
   getSupervisorModel,
+  getWorkerModel,
   getWorkerModelId,
   is503Error,
   isQuotaExhaustedError,
@@ -293,5 +295,86 @@ describe("error classifiers kept for logs and retry policy tests", () => {
     expect(is503Error(new Error("HTTP 500 Internal Server Error"))).toBe(true);
     expect(is503Error(new Error("status: 503"))).toBe(true);
     expect(is503Error(new Error("429 Too Many Requests"))).toBe(true);
+  });
+});
+
+// 2026-09-28 audit §1: every google-genai model ran Gemini's default dynamic
+// thinking — 473-615 invisible thought tokens and about 3 s per planner call.
+// These assert the FIELD and the request config it is forwarded into, never the
+// class: the 2026-09-05 OmniRouter review found a guard test that pinned
+// ChatOpenAI and so missed an endpoint change.
+describe("Gemini thinking level on every google-genai model", () => {
+  const KEYS = ["AGENT_MODEL", "AGENT_FALLBACK_MODELS", "WORKER_AGENT_MODEL", "GEMINI_THINKING_LEVEL", "GOOGLE_GENERATIVE_AI_API_KEY", "OPENROUTER_API_KEY"];
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const k of KEYS) saved[k] = process.env[k];
+    process.env["GOOGLE_GENERATIVE_AI_API_KEY"] = "test-key";
+    process.env["OPENROUTER_API_KEY"] = "sk-or-test-key-for-vitest";
+    delete process.env["GEMINI_THINKING_LEVEL"];
+    delete process.env["WORKER_AGENT_MODEL"];
+    delete process.env["AGENT_FALLBACK_MODELS"];
+  });
+  afterEach(() => {
+    for (const k of KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  /** The constructor field. */
+  const thinkingOf = (m: unknown): unknown => (m as { thinkingConfig?: unknown }).thinkingConfig;
+  /** What @langchain/google-genai forwards into generationConfig (chat_models.js:458). */
+  const requestThinkingOf = (m: unknown): unknown =>
+    (m as { client?: { generationConfig?: { thinkingConfig?: unknown } } }).client?.generationConfig?.thinkingConfig;
+
+  it("asks for LOW thinking by default, on the field and in the request config", () => {
+    process.env["AGENT_MODEL"] = "google-genai:gemini-3.6-flash";
+    const model = getModel();
+    expect(thinkingOf(model)).toEqual({ thinkingLevel: "LOW" });
+    expect(requestThinkingOf(model)).toEqual({ thinkingLevel: "LOW" });
+  });
+
+  it("covers the worker model and the google-genai half of the fallback chain", () => {
+    process.env["AGENT_MODEL"] = "google-genai:gemini-3.6-flash";
+    process.env["WORKER_AGENT_MODEL"] = "google-genai:gemini-3.1-flash-lite";
+    process.env["AGENT_FALLBACK_MODELS"] =
+      "google-genai:gemini-3.1-flash-lite,google-genai:gemini-3-flash-preview,openrouter:nvidia/nemotron-3-super-120b-a12b:free";
+    expect(requestThinkingOf(getWorkerModel())).toEqual({ thinkingLevel: "LOW" });
+    const [lite, preview, openrouter] = buildFallbackModels();
+    expect(requestThinkingOf(lite)).toEqual({ thinkingLevel: "LOW" });
+    expect(requestThinkingOf(preview)).toEqual({ thinkingLevel: "LOW" });
+    // The OpenRouter tail is a different API; nothing about thinking is sent to it.
+    expect(thinkingOf(openrouter)).toBeUndefined();
+    expect(JSON.stringify((openrouter as ChatOpenAI).invocationParams())).not.toMatch(/thinking/i);
+  });
+
+  it("omits thinkingConfig entirely under DEFAULT — the rollback to Google's dynamic thinking", () => {
+    process.env["AGENT_MODEL"] = "google-genai:gemini-3.6-flash";
+    process.env["GEMINI_THINKING_LEVEL"] = "DEFAULT";
+    const model = getModel();
+    expect(thinkingOf(model)).toBeUndefined();
+    expect(requestThinkingOf(model)).toBeUndefined();
+  });
+
+  it("honours MEDIUM and HIGH", () => {
+    process.env["AGENT_MODEL"] = "google-genai:gemini-3.6-flash";
+    process.env["GEMINI_THINKING_LEVEL"] = "HIGH";
+    expect(requestThinkingOf(getModel())).toEqual({ thinkingLevel: "HIGH" });
+    process.env["GEMINI_THINKING_LEVEL"] = "medium";
+    expect(requestThinkingOf(getModel())).toEqual({ thinkingLevel: "MEDIUM" });
+  });
+
+  it("refuses an unknown level at construction, which boot does first", () => {
+    process.env["AGENT_MODEL"] = "google-genai:gemini-3.6-flash";
+    process.env["GEMINI_THINKING_LEVEL"] = "MINIMAL";
+    expect(() => getModel()).toThrow(/GEMINI_THINKING_LEVEL/);
+  });
+
+  it("leaves an OpenRouter primary untouched even when a level is set", () => {
+    process.env["AGENT_MODEL"] = "openrouter:google/gemini-flash-latest";
+    process.env["GEMINI_THINKING_LEVEL"] = "HIGH";
+    const model = getModel();
+    expect(thinkingOf(model)).toBeUndefined();
+    expect(JSON.stringify((model as ChatOpenAI).invocationParams())).not.toMatch(/thinking/i);
   });
 });

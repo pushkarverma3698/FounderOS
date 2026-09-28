@@ -3,10 +3,12 @@
  * ===================================================
  * Search over `brain_memories` — the pgvector-backed knowledge base synced via
  * `pnpm brain:sync` (ADR-038; the store was `turicks_brain` until 0038 carried
- * the corpus across). Delegates to the same hybrid (vector ⊕ keyword, RRF-fused)
- * engine as search_turicks_brain (src/db/rag-query.ts) — both tools query the
- * identical table through the identical engine; this tool adds an entry_type
- * filter, the other adds a wider top_k.
+ * the corpus across), through the shared hybrid (vector ⊕ keyword, RRF-fused)
+ * engine in src/db/rag-query.ts. This is the ONE worker tool over that table
+ * (RETRIEVAL_TOOL_TABLE, src/agents/capabilities.ts): it carries both the
+ * entry_type filter and a top_k of up to 10, the wider result count that was
+ * the only reason research also held search_turicks_brain — which reads the
+ * same rows, and on 2026-09-26 was called for the same query in the same turn.
  *
  * Content types stored:
  *   adr            — Architecture Decision Records (e.g. ADR-002: Use Composio)
@@ -31,17 +33,19 @@ import { childLogger } from "../infra/logger.js";
 
 const log = childLogger({ module: "tool:knowledge" });
 
-const TOP_K = 5;
+const DEFAULT_TOP_K = 5;
+const MAX_TOP_K = 10;
 
 export const searchKnowledge = tool(
-  async ({ query, entry_type }) =>
+  async ({ query, entry_type, top_k }) =>
     withToolErrorBoundary("db", "query brain_memories (hybrid) in Postgres", async () => {
-      log.debug({ query, entry_type }, "Knowledge search");
+      const topK = Math.min(Math.max(Math.round(top_k ?? DEFAULT_TOP_K), 1), MAX_TOP_K);
+      log.debug({ query, entry_type, topK }, "Knowledge search");
 
       let result = await runRagSearch(
         "brain_memories",
         query,
-        TOP_K,
+        topK,
         entry_type ? { filter: { entry_type } } : undefined,
       );
 
@@ -52,7 +56,7 @@ export const searchKnowledge = tool(
       // fabricated Turicks ICP). If the filtered search comes back empty, retry
       // unfiltered before reporting nothing found — real content over a false miss.
       if (entry_type && !("error" in result) && result.hits.length === 0) {
-        const unfiltered = await runRagSearch("brain_memories", query, TOP_K);
+        const unfiltered = await runRagSearch("brain_memories", query, topK);
         if (!("error" in unfiltered)) result = unfiltered;
       }
 
@@ -77,6 +81,7 @@ export const searchKnowledge = tool(
         .optional()
         .nullable()
         .describe("Optional: filter by content type"),
+      top_k: z.number().optional().nullable().describe("Number of results (1–10, default 5)"),
     }),
   },
 );
