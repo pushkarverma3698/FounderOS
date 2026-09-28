@@ -35,14 +35,14 @@ function stub(name: string, body: string): void {
 }
 
 /** One sweep. `preflight`/`gate` are what the fake claude prints for each call. */
-function sweep(opts: { preflight: string; gate?: string; gateRc?: number; head?: string }): void {
+function sweep(opts: { preflight: string; gate?: string; gateRc?: number; head?: string; appGate?: boolean }): void {
   const env = {
     PATH: `${bin}:/usr/bin:/bin:/usr/local/bin`,
     HOME: home,
     PR_BRAIN_ROOT: join(root, "repos"),
     PR_BRAIN_ENV_FILE: join(root, ".env"),
     PR_BRAIN_OWNER: "owner",
-    QA_APP_ROOT: join(root, "no-founderos"),
+    QA_APP_ROOT: opts.appGate ? join(root, "founderos") : join(root, "no-founderos"),
     FAKE_PREFLIGHT: opts.preflight,
     FAKE_GATE: opts.gate ?? "done",
     FAKE_GATE_RC: String(opts.gateRc ?? 0),
@@ -94,7 +94,24 @@ esac`,
 esac`,
   );
   // Every Telegram send lands here; nothing reaches the network.
-  stub("curl", `for a in "$@"; do case "$a" in text=*) printf '%s\\n@@\\n' "\${a#text=}" >>"$SENDS" ;; esac; done; exit 0`);
+  stub(
+    "curl",
+    `for a in "$@"; do case "$a" in
+  text=*) printf '%s\\n@@\\n' "\${a#text=}" >>"$SENDS" ;;
+  caption=*) printf 'PHOTO %s\\n@@\\n' "\${a#caption=}" >>"$SENDS" ;;
+esac; done; exit 0`,
+  );
+
+  // The app (browser) gate: pr-brain runs `timeout <sec> node … qa-app.ts … --out <dir>`.
+  // This stands in for it — writes a report and two screenshots, exits 0 (clean).
+  mkdirSync(join(root, "founderos", "scripts"), { recursive: true });
+  writeFileSync(join(root, "founderos", "scripts", "qa-app.ts"), "");
+  stub(
+    "timeout",
+    `out=""; while [ $# -gt 0 ]; do [ "$1" = "--out" ] && out="$2"; shift; done
+mkdir -p "$out/screenshots"; echo "## App Evidence Pack" >"$out/report.md"
+: >"$out/screenshots/a-login.png"; : >"$out/screenshots/b-home.png"; exit 0`,
+  );
 });
 
 afterEach(() => {
@@ -167,5 +184,20 @@ describe("pr-brain — one PR whose gate keeps failing", () => {
 
     sweep({ preflight: "ok", head: "cccc3333" });
     expect(telegramSends().at(-1)).toContain("Gate done");
+  });
+});
+
+describe("pr-brain — app-gate screenshots (issue #730)", () => {
+  it("sends a head's screenshots once, even when its gate is retried", () => {
+    for (let i = 0; i < 3; i++) {
+      sweep({ preflight: "ok", gate: "Error: something broke", gateRc: 1, appGate: true });
+    }
+    expect(telegramSends().filter((m) => m.startsWith("PHOTO"))).toHaveLength(2);
+  });
+
+  it("sends screenshots again for a new head", () => {
+    sweep({ preflight: "ok", appGate: true });
+    sweep({ preflight: "ok", appGate: true, head: "dddd4444" });
+    expect(telegramSends().filter((m) => m.startsWith("PHOTO"))).toHaveLength(4);
   });
 });
