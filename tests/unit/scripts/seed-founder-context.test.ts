@@ -83,13 +83,20 @@ describe("seed-founder-context — fill-only", () => {
     // Empty DB: the seed creates the row with every seed key.
     expect(await runSeed()).toBe(0);
     const seedKeys = Object.keys(store.row ?? {}).sort();
-    expect(seedKeys).toContain("current_priorities");
+    // current_priorities / next_actions / open_decisions / recent_wins were
+    // removed from the compile-time seed 2026-09-28 to prevent stale June data
+    // from answering "What's my focus?" on every deploy.
+    expect(seedKeys).not.toContain("current_priorities");
+    expect(seedKeys).not.toContain("next_actions");
+    expect(seedKeys).toContain("active_projects"); // a key still managed by seed
 
+    // Pre-existing dynamic value (no longer seeded) must survive a fill run.
     store.row = { current_priorities: FOUNDER_PRIORITIES };
     expect(await runSeed()).toBe(0);
-
-    expect(Object.keys(store.row ?? {}).sort()).toEqual(seedKeys);
     expect(store.row?.["current_priorities"]).toEqual(FOUNDER_PRIORITIES);
+    for (const key of seedKeys) {
+      expect(Object.keys(store.row ?? {})).toContain(key);
+    }
   });
 
   it("writes nothing when every seed key is already stored", async () => {

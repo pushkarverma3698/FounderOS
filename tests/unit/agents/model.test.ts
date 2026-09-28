@@ -87,25 +87,31 @@ describe("model id parsing", () => {
 
   it("normalizes retired preview model ids to stable names", () => {
     expect(normalizeModelId("openrouter:google/gemini-2.5-flash-preview-05-20")).toBe(
-      "openrouter:google/gemini-2.5-flash",
+      "openrouter:gemini-3.8-flash",
     );
     expect(normalizeModelId("google-genai:gemini-2.5-flash-preview-05-20")).toBe(
-      "google-genai:gemini-2.5-flash",
+      "google-genai:gemini-3.8-flash",
     );
   });
 
   it("applies normalization in getConfiguredModelId", () => {
     process.env["AGENT_MODEL"] = "openrouter:google/gemini-2.5-flash-preview-05-20";
-    expect(getConfiguredModelId()).toBe("openrouter:google/gemini-2.5-flash");
+    expect(getConfiguredModelId()).toBe("openrouter:gemini-3.8-flash");
     delete process.env["AGENT_MODEL"];
   });
 
-  it("normalizes retired gemini-2.5-flash to gemini-flash-latest (2026-07-11 retirement: 404 'no longer available to new users')", () => {
+  it("normalizes retired gemini-flash-latest and gemini-2.5-flash to gemini-3.8-flash (2026-09-28 model upgrade)", () => {
+    expect(normalizeModelId("google-genai:gemini-flash-latest")).toBe(
+      "google-genai:gemini-3.8-flash",
+    );
+    expect(normalizeModelId("openrouter:google/gemini-flash-latest")).toBe(
+      "openrouter:gemini-3.8-flash",
+    );
     expect(normalizeModelId("google-genai:gemini-2.5-flash")).toBe(
-      "google-genai:gemini-flash-latest",
+      "google-genai:gemini-3.8-flash",
     );
     expect(normalizeModelId("openrouter:google/gemini-2.5-flash")).toBe(
-      "openrouter:google/gemini-flash-latest",
+      "openrouter:gemini-3.8-flash",
     );
   });
 
@@ -126,7 +132,6 @@ describe("model id parsing", () => {
       "qwen/qwen3-next-80b-a3b-instruct",
       "nousresearch/hermes-3-llama-3.1-405b:free",
       "deepseek/deepseek-r1:free",
-      "google/gemini-2.5-flash:free",
     ];
     for (const slug of deadSlugs) {
       expect(normalizeModelId(`openrouter:${slug}`)).toBe(`openrouter:${slug}`);
@@ -136,8 +141,8 @@ describe("model id parsing", () => {
 
 describe("getModel provider selection", () => {
   beforeEach(() => {
-    // P5: key must be present for default openrouter model to initialize
-    process.env["OPENROUTER_API_KEY"] = "sk-or-test-key-for-vitest";
+    // P5: key must be present for default google-genai model to initialize
+    process.env["GOOGLE_GENERATIVE_AI_API_KEY"] = "test-google-key-for-vitest";
   });
 
   afterEach(() => {
@@ -150,9 +155,9 @@ describe("getModel provider selection", () => {
     delete process.env["GOOGLE_GENERATIVE_AI_API_KEY"];
   });
 
-  it("returns an OpenRouter-backed ChatOpenAI model by default", () => {
+  it("returns a Google GenAI model by default", () => {
     const model = getModel();
-    expect(model).toBeInstanceOf(ChatOpenAI);
+    expect(model).toBeInstanceOf(ChatGoogleGenerativeAI);
     expect((model as unknown as { temperature: number }).temperature).toBe(0);
   });
 
@@ -204,8 +209,8 @@ describe("fallback middleware config", () => {
   const savedFallbacks = process.env["AGENT_FALLBACK_MODELS"];
 
   beforeEach(() => {
-    // Ensure the default OpenRouter model can initialize (P5: key required at startup)
-    process.env["OPENROUTER_API_KEY"] ||= "sk-or-test-key-for-vitest";
+    // Ensure the default google-genai model can initialize (key required at startup)
+    process.env["GOOGLE_GENERATIVE_AI_API_KEY"] ||= "test-google-key-for-vitest";
   });
 
   afterEach(() => {
@@ -237,7 +242,7 @@ describe("fallback middleware config", () => {
     process.env["AGENT_FALLBACK_MODELS"] =
       "google-genai:gemini-2.5-flash-preview-05-20,openrouter:openai/gpt-4o-mini";
     expect(getFallbackModelIds()).toEqual([
-      "google-genai:gemini-2.5-flash",
+      "google-genai:gemini-3.8-flash",
       "openrouter:openai/gpt-4o-mini",
     ]);
   });
