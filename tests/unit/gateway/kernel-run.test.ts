@@ -104,9 +104,9 @@ describe("progressLabelFor", () => {
     expect(progressLabelFor(state)).toBe("✍️ Writing your reply…");
   });
 
-  it("returns null while planning (nothing worth showing yet)", () => {
+  it("returns the planning label while planning", () => {
     const state = baseState({ status: "planning", plan: null, cursor: 0 });
-    expect(progressLabelFor(state)).toBeNull();
+    expect(progressLabelFor(state)).toBe("🧠 Planning…");
   });
 
   it("returns null when done or failed", () => {
@@ -401,6 +401,41 @@ describe("runKernelText", () => {
   });
 });
 
+describe("withChatTurnLock queue-ack", () => {
+  // Regression for a promise-identity bug (PR #731): the per-chat lock map's
+  // cleanup used to compare `chatTurnChains.get(key) === slot`, but the map
+  // held `tail.then(() => slot)` — a DIFFERENT promise object — so the compare
+  // was always false and the entry was never deleted. That silently broke this
+  // exact queue-ack feature: once a chat had sent one message, EVERY later
+  // message — even sent hours apart, one at a time — would falsely show
+  // "finishing the current request first."
+  it("acks a message that arrives mid-turn, then cleans up so a later, sequential message is not falsely flagged", async () => {
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    fakeKernel.stream.mockImplementationOnce(async function* () {
+      await gate;
+      yield DONE_STATE;
+    });
+
+    const { ctx: ctx1 } = fakeCtx();
+    const { ctx: ctx2, replies: replies2 } = fakeCtx();
+
+    const first = runKernelText(ctx1, "first message");
+    const second = runKernelText(ctx2, "second message");
+
+    expect(replies2.some((r) => r.text.includes("finishing the current request first"))).toBe(true);
+
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    const { ctx: ctx3, replies: replies3 } = fakeCtx();
+    await runKernelText(ctx3, "third message, well after the first two finished");
+    expect(replies3.some((r) => r.text.includes("finishing the current request first"))).toBe(false);
+  });
+});
+
 describe("resumeKernel", () => {
   it("resolves the DB approval row and resumes the graph with the decision", async () => {
     getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-1", created_at: new Date().toISOString() });
@@ -470,6 +505,44 @@ describe("resumeKernel", () => {
 
     expect(resolveInterrupt).toHaveBeenCalledTimes(1); // only "int-1", the original trigger
     expect(resolveInterrupt).toHaveBeenCalledWith("int-1", "approved");
+  });
+
+  // Nonce (PR #731): the approval card embeds the first 8 chars of the interrupt
+  // id in its callback_data, so a stale card (editMessageReplyMarkup failed to
+  // clear it, or the founder scrolled back to an old one) can't resolve a
+  // DIFFERENT, newer pending interrupt just because it happens to be current.
+  it("rejects a stale HITL card whose nonce doesn't match the currently pending interrupt", async () => {
+    getPendingInterrupt.mockResolvedValue({
+      interrupt_id: "current-9f8e7d6c",
+      created_at: new Date().toISOString(),
+    });
+    const { ctx, replies } = fakeCtx();
+    await resumeKernel(ctx, "approved", "stale123");
+
+    expect(resolveInterrupt).not.toHaveBeenCalled();
+    expect(replies.at(-1)!.text).toMatch(/expired|older task/i);
+  });
+
+  it("accepts a HITL card whose nonce matches the currently pending interrupt", async () => {
+    getPendingInterrupt.mockResolvedValue({
+      interrupt_id: "current-9f8e7d6c",
+      created_at: new Date().toISOString(),
+    });
+    const { ctx } = fakeCtx();
+    await resumeKernel(ctx, "approved", "current-");
+
+    expect(resolveInterrupt).toHaveBeenCalledWith("current-9f8e7d6c", "approved");
+  });
+
+  it("omitting the nonce (older bot version, or a pre-deploy card) resumes exactly as before", async () => {
+    getPendingInterrupt.mockResolvedValue({
+      interrupt_id: "current-9f8e7d6c",
+      created_at: new Date().toISOString(),
+    });
+    const { ctx } = fakeCtx();
+    await resumeKernel(ctx, "approved");
+
+    expect(resolveInterrupt).toHaveBeenCalledWith("current-9f8e7d6c", "approved");
   });
 });
 

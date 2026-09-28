@@ -195,6 +195,7 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
   { command: "status", description: "System health and pending approvals", group: "system" },
   { command: "budget", description: "Today's spend against the daily cap", group: "system" },
   { command: "commands", description: "Show every command with what it does", group: "system" },
+  { command: "remind", description: "Set a reminder — remind call the landlord at 3pm", group: "system" },
   { command: "connect", description: "Search and add an MCP server from the registry", group: "system" },
   { command: "start", description: "What this bot can do", group: "system" },
   { command: "reset", description: "Clear this thread's mission state", group: "system" },
