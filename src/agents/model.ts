@@ -32,19 +32,18 @@ export interface ParsedModelId {
 // set AGENT_MODEL silently degraded to a model that chats instead of calling
 // tools. Dev/CI always set AGENT_MODEL explicitly; this only bites on misconfig,
 // where Gemini Flash is the far safer failure mode.
-export const DEFAULT_AGENT_MODEL = "openrouter:google/gemini-flash-latest";
+export const DEFAULT_AGENT_MODEL = "google-genai:gemini-3.8-flash";
 
 /** Retired OpenRouter / Google model ids → current stable ids. */
 const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
-  "google/gemini-2.5-flash-preview-05-20": "google/gemini-2.5-flash",
-  "google/gemini-2.5-flash-preview-05-20:free": "google/gemini-2.5-flash:free",
-  "gemini-2.5-flash-preview-05-20": "gemini-2.5-flash",
-  "gemini-2.0-flash": "gemini-2.5-flash",
-  // 2026-07-11: gemini-2.5-flash returns 404 "no longer available to new
-  // users" on newly billing-enabled Google Cloud projects (verified live).
-  // gemini-flash-latest is Google's rolling alias to the current model.
-  "google/gemini-2.5-flash": "google/gemini-flash-latest",
-  "gemini-2.5-flash": "gemini-flash-latest",
+  "google/gemini-2.5-flash-preview-05-20": "gemini-3.8-flash",
+  "google/gemini-2.5-flash-preview-05-20:free": "gemini-3.5-flash-lite",
+  "gemini-2.5-flash-preview-05-20": "gemini-3.8-flash",
+  "gemini-2.0-flash": "gemini-3.8-flash",
+  "google/gemini-2.5-flash": "gemini-3.8-flash",
+  "gemini-2.5-flash": "gemini-3.8-flash",
+  "google/gemini-flash-latest": "gemini-3.8-flash",
+  "gemini-flash-latest": "gemini-3.8-flash",
   // 2026-08-27: dropped the OpenRouter free-tier dead-slug entries that used
   // to live here (meta-llama/llama-3.3-70b-instruct:free,
   // qwen/qwen3-next-80b-a3b-instruct:free, etc.). They all pointed at
