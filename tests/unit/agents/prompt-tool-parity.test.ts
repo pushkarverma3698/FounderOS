@@ -9,6 +9,9 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildWorkerSpecs } from "../../../src/gateway/kernel-boot.js";
 import { DEPARTMENT_TOOLS } from "../../../src/agents/capabilities.js";
 
@@ -32,5 +35,29 @@ describe("worker prompts advertise only tools the worker holds", () => {
     const held = new Set((DEPARTMENT_TOOLS[id] ?? []).map((t: { name: string }) => t.name));
     const phantom = advertisedTools(spec.prompt).filter((name) => !held.has(name));
     expect(phantom, `${id}'s prompt advertises tools it does not hold`).toEqual([]);
+  });
+});
+
+/** Every src .ts file outside the prompts themselves — where a directive would have to be emitted. */
+function emitterSources(): string[] {
+  const src = fileURLToPath(new URL("../../../src", import.meta.url));
+  return readdirSync(src, { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith(".ts"))
+    .map((e) => join(e.parentPath, e.name))
+    .filter((path) => !path.includes(join("agents", "prompts")))
+    .map((path) => readFileSync(path, "utf8"));
+}
+
+describe("worker prompts branch only on directives something emits", () => {
+  // prompts/research.ts carried "ROUTING OVERRIDES (beat every other rule in this
+  // prompt)" keyed on "EXTERNAL LEAD DISCOVERY" / "INTERNAL KNOWLEDGE" directives.
+  // Their only emitter was the v2 pre-router, deleted on 2026-07-08; the worker
+  // kept reading its highest-priority rule for text that could never arrive.
+  const sources = emitterSources();
+
+  it.each(buildWorkerSpecs().map((s) => [s.id, s.prompt] as const))("%s", (_id, prompt) => {
+    const directives = [...prompt.matchAll(/directive contains "([^"]+)"/gi)].map((m) => m[1]!);
+    const orphaned = directives.filter((d) => !sources.some((text) => text.includes(d)));
+    expect(orphaned, "prompt rules keyed on directives no code emits").toEqual([]);
   });
 });

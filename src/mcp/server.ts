@@ -19,7 +19,7 @@
  *   — Memory data-source layer (ADR-016) —
  *   - search_memory   → Unified query across episodic_memory + conversations + knowledge_entries
  *   - search_knowledge → turicks-brain hybrid search (brain_memories table, ADR-038)
- *   - read_cv         → personal-rag CV/career lookup (personal-rag REST API + wiki fallback)
+ *   - read_cv         → CV/career lookup (personal-rag REST API → CV files → labelled wiki fallback)
  *
  * Transport-agnostic: buildMcpServer() only registers the tool handlers; the
  * caller connects a transport. The entry point src/mcp/index.ts (`pnpm mcp`)
@@ -144,9 +144,10 @@ export const FOUNDEROS_MCP_TOOLS = [
   {
     name: "read_cv" as const,
     description:
-      "Read Pushkar Verma's CV, career background, and skills from his personal knowledge base. " +
+      "Read Pushkar Verma's CV, career background, and skills. " +
       "Use for questions about his experience, technical skills, portfolio projects, or salary expectations. " +
-      "Queries the personal-rag API (localhost:8765) or falls back to wiki.md. Read-only.",
+      "Tries the personal-rag API, then the CV files he maintains, then a labelled wiki fallback " +
+      "(synthesized — verify before quoting). Read-only.",
     inputSchema: {
       type: "object" as const,
       properties: {
