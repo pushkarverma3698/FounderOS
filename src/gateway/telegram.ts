@@ -48,6 +48,8 @@ import { registerMediaHandlers } from "./media.js";
 import { runKernelText, resumeKernel } from "./kernel-run.js";
 import { isConflictError, conflictBackoffMs, CONFLICT_MAX_ATTEMPTS } from "./telegram-poll.js";
 import { REPO_CALLBACK_PREFIX } from "./repo-picker.js";
+import { RETRY_CALLBACK_PREFIX } from "./retry-button.js";
+import { handleRetryCallback } from "./retry-callback.js";
 import {
   OWNER_ONLY_COMMANDS,
   buildChatAccessConfig,
@@ -87,9 +89,10 @@ function defaultChatAccess(): ChatAccessConfig {
   });
 }
 
-/** Buttons whose tap causes a side effect — the founder's alone outside his own chat. */
+/** Buttons whose tap causes a side effect — the founder's alone outside his own chat. Retry re-runs his turn. */
 function isDecisionButton(data: string): boolean {
-  return data.startsWith("approve") || data.startsWith("reject") || data.startsWith(REPO_CALLBACK_PREFIX);
+  const prefixes = ["approve", "reject", REPO_CALLBACK_PREFIX, RETRY_CALLBACK_PREFIX];
+  return prefixes.some((p) => data.startsWith(p));
 }
 
 export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultChatAccess()): void {
@@ -255,6 +258,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     // a side effect fires, or fails to, without the founder knowing which.
     if (await handleRepoChoice(ctx, taskDeps)) return;
     if (await handleMenuCallback(ctx)) return;
+    if (await handleRetryCallback(ctx)) return;
     if (!data.startsWith("approve") && !data.startsWith("reject")) {
       await ctx.answerCallbackQuery({ text: "Unknown action" });
       return;

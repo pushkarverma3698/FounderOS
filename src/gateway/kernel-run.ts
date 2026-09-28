@@ -31,6 +31,7 @@ import { recordFailedTurnInHistory, type FoldableKernel } from "./failed-turn-fo
 import { streamKernelTurn, progressLabelFor } from "./kernel-progress.js";
 import { cleanupResumeArtifact } from "./resume-artifact-cleanup.js";
 import { replyForError } from "./error-reply.js";
+import { failureCardFor, replyWithFailureCard } from "./failure-card.js";
 
 // Progress streaming lives in ./kernel-progress.ts; re-exported so the gateway's
 // public surface (and its tests) keep addressing kernel-run.
@@ -235,15 +236,17 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
 
       const reply = kernelReply(res as never);
       trace.event("turn.out", { replyPreview: reply.slice(0, 200) });
-      await sendReply(ctx, reply);
+      // A failed turn goes out as the plain-words card with 🔁 Retry (failure-card.ts).
+      const card = failureCardFor(res as never, { turnId: trace.turnId, profileId });
+      await (card ? replyWithFailureCard(ctx, card, () => sendReply(ctx, reply)) : sendReply(ctx, reply));
     } catch (err) {
       const failure = budget ? failureFor(err, budget) : err;
       trace.event("turn.error", {
         message: failure instanceof Error ? failure.message.slice(0, 400) : String(failure),
       });
       if (foldCtx) await recordFailedTurnInHistory(foldCtx.kernel, foldCtx.config, failure);
-      // A live text turn can be replayed verbatim, so provider exhaustion auto-retries.
-      await replyForError(ctx, failure, { chatId: String(chatId), text, turnId: trace.turnId });
+      // A live text turn can be replayed verbatim: auto-retry on provider exhaustion, else a Retry button.
+      await replyForError(ctx, failure, { chatId: String(chatId), text, turnId: trace.turnId, profileId });
     }
   });
 }
