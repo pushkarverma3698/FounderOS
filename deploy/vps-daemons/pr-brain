@@ -195,7 +195,11 @@ leave_down() {
 if [[ "$DRY_RUN" -eq 0 && "$LIST_ONLY" -eq 0 ]]; then
   preflight=$(claude -p "reply with the single word ok" --model "$MODEL" \
                 --max-budget-usd 0.05 --output-format text 2>&1 | tail -2)
-  if ! printf '%s' "$preflight" | grep -qiw ok; then
+  # "Exceeded USD budget" is the preflight's own $0.05 cap tripping — Claude Code's
+  # context costs more than that before it answers. A billed call proves auth and
+  # quota are fine, so it counts as reachable (2026-09-28: treating it as an
+  # outage paused every gate).
+  if ! printf '%s' "$preflight" | grep -qiwE 'ok|Exceeded USD budget'; then
     cls=$(claude_outage "$preflight")
     enter_down "${cls:-unknown}" "$(printf '%s' "$preflight" | tr '\n' ' ' | cut -c1-160)"
     exit 0
