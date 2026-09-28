@@ -13,39 +13,24 @@
  * The jobs loop leads, because it is the one used daily.
  */
 
-/** Full welcome shown on /start. */
+import { buildMenuSection } from "./home-menu.js";
+
+/**
+ * Full welcome shown on /start.
+ *
+ * REDIRECTED 2026-09-23 to the tappable home screen in `home-menu.ts`. The old
+ * body was a 48-line wall naming twenty commands: complete, accurate, and still
+ * a screen the founder had to read, hold in his head and retype from. The
+ * content did not shrink — it moved behind three buttons, which is the only
+ * change that makes it reachable without remembering anything.
+ *
+ * This stays a named export because /start is not the only thing that wants the
+ * welcome, and because the ONE-COPY rule at the top of this file is the point:
+ * a second hand-maintained welcome is how the last one ended up advertising
+ * twelve dead commands.
+ */
 export function buildWelcomeMessage(firstName?: string): string {
-  const greet = firstName ? ` ${firstName}` : "";
-  return (
-    `👋 <b>FounderOS${greet}</b> — your AI chief of staff for Turicks + Naggar.\n\n` +
-    `🎯 <b>Jobs — the daily loop</b>\n` +
-    `<code>/jobs</code> — the ranked shortlist, top roles re-checked as still open\n` +
-    `<code>/csv</code> — the queue as a spreadsheet file (<code>/csv all</code> = everything screened)\n` +
-    `<code>/draft 1</code> — tailor a CV PDF for row 1 and send it to you to approve\n` +
-    `<code>/ask 1</code> — the one question that unblocks row 1\n` +
-    `<code>/applied 1</code> — mark it applied, drop it off the queue\n\n` +
-    `<b>Everything else is plain English</b> — I route it to the right team:\n\n` +
-    `🧠 <b>Admin</b> — <i>"What's my focus?" · "What did we decide about beta soak?"</i>\n` +
-    `🔍 <b>Research</b> — <i>"Research Stripe's pricing" · "What's trending in AI agents?"</i>\n` +
-    `📨 <b>Comms</b> ✋ — <i>"Summarise my inbox" · "Email alex@acme.com a short intro"</i>\n` +
-    `⚙️ <b>Engineering</b> ✋ — <i>"List open issues on FounderOS"</i>\n` +
-    `📣 <b>Marketing</b> ✋ — <i>"Draft a build-in-public post about today's ship"</i>\n` +
-    `📈 <b>Sales</b> ✋ — <i>"Draft outreach to Razorpay"</i>\n` +
-    `💻 <b>Personal</b> ✋ — <i>"List ~/Projects" · "Read founderos.log"</i>\n\n` +
-    `🤖 <b>Build things while you are away</b>\n` +
-    `<code>/task repo:app fix the flaky CSV export</code>\n` +
-    `<i>brief → your approval → issue → Antigravity codes it → the app is started and\n` +
-    `photographed for you → Claude reviews it → verdict. 20–40 min, unattended.</i>\n` +
-    `<code>/tasks</code> — what the loop is doing right now\n` +
-    `<code>/newproject pricing-api usage-based pricing</code> — starts a whole new repo\n` +
-    `<i>Repos: <code>app</code> · <code>api</code> · <code>hulda</code> · omit for FounderOS. ` +
-    `On the Oplify repos you always click merge yourself.</i>\n\n` +
-    `⚡ <b>System</b>\n` +
-    `<code>/status</code> · <code>/budget</code> · <code>/commands</code> · ` +
-    `<code>/connect</code> · <code>/reset</code>\n\n` +
-    `✋ = you approve before anything leaves the building (email, LinkedIn, GitHub writes, shell).\n` +
-    `🛑 <code>/halt</code> pauses all work · <code>/resume</code> lifts it.`
-  );
+  return buildMenuSection("home", firstName);
 }
 
 /** Compact message sent to Telegram when the process boots or restarts. */
