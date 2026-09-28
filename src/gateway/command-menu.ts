@@ -2,12 +2,15 @@
  * FounderOS — the one list of commands
  * ====================================
  * Every command the bot answers, in the order it should be read, with the
- * description the founder sees. Three surfaces consume this list and no surface
+ * description the founder sees. Four surfaces consume this list and no surface
  * is allowed its own copy:
  *
- *   1. Telegram's native menu   — `setMyCommands` on startup (the ☰ button)
+ *   1. Telegram's native menu   — `setMyCommands` on startup (the ☰ button),
+ *      without the `hidden` aliases
  *   2. `/commands`               — the same list rendered into a chat message
- *   3. `tests/unit/gateway/command-menu.test.ts` — cross-checks it against the
+ *   3. `/wife_commands`          — the hidden aliases (wife-commands.ts), also
+ *      the Jobs screen's "👩 Tashi's jobs" button
+ *   4. `tests/unit/gateway/command-menu.test.ts` — cross-checks it against the
  *      real `bot.command(...)` registrations in telegram.ts
  *
  * WHY IT EXISTS. Discovery was a memory test. The only way to learn a command
