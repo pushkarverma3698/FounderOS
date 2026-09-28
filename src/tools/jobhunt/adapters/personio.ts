@@ -34,14 +34,23 @@ function unescapeXml(raw: string): string {
 
 function sectionsToBody(subtree: string): string {
   const parts: string[] = [];
-  for (const section of subtree.matchAll(/<jobDescription>([\s\S]*?)<\/jobDescription>/g)) {
+  for (const section of subtree.matchAll(/<job(?:Description|Detail)>([\s\S]*?)<\/job(?:Description|Detail)>/g)) {
     const inner = section[1] ?? "";
     const heading = tagText(inner, "name");
     const value = tagText(inner, "value");
-    if (heading.length > 0) parts.push(heading);
-    if (value.length > 0) parts.push(value);
+    if (heading.length > 0 || value.length > 0) {
+      if (heading.length > 0) parts.push(heading);
+      if (value.length > 0) parts.push(value);
+    } else {
+      const clean = unescapeXml(inner).replace(/<[^>]+>/g, " ").trim();
+      if (clean.length > 0) parts.push(clean);
+    }
   }
-  return parts.join("\n\n").trim();
+  const result = parts.join("\n\n").trim();
+  if (result.length > 0) return result;
+
+  // Ultimate fallback: strip tags from the entire subtree
+  return unescapeXml(subtree).replace(/<[^>]+>/g, " ").trim();
 }
 
 function parsePersonioPositions(xml: string): PersonioPosition[] {
@@ -51,7 +60,7 @@ function parsePersonioPositions(xml: string): PersonioPosition[] {
 
   for (const block of blocks) {
     const raw = block[1] ?? "";
-    const descriptions = raw.match(/<jobDescriptions>([\s\S]*?)<\/jobDescriptions>/);
+    const descriptions = raw.match(/<job(?:Descriptions|Details)>([\s\S]*?)<\/job(?:Descriptions|Details)>/);
     const scalars = (descriptions ? raw.replace(descriptions[0], "") : raw).replace(
       /<additionalOffices>[\s\S]*?<\/additionalOffices>/,
       "",
