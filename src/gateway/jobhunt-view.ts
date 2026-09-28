@@ -270,8 +270,10 @@ export async function handleBriefVerb(
       lastFreshView: verb === "fresh" ? await deps.lastFreshView(profile.id) : null,
     });
     const brief = await deps.buildBrief(profile, scope);
-    for (const chunk of deps.split(brief)) {
-      await ctx.reply(chunk, { parse_mode: "HTML" });
+    const chunks = deps.split(brief);
+    for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await new Promise((r) => setTimeout(r, 1500));
+      await ctx.reply(chunks[i] as string, { parse_mode: "HTML" });
     }
     // AFTER the send, not before. A marker written ahead of a failed render
     // would mean those rows are "seen" and never appear under `/fresh` again —
