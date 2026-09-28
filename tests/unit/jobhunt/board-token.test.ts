@@ -11,6 +11,40 @@ import { describe, it, expect } from "vitest";
 import { extractBoardToken, harvestNewBoardTokens } from "../../../src/tools/jobhunt/board-token.js";
 
 describe("extractBoardToken", () => {
+  it("reads a Workday token as <tenant>/<wdN>/<site> — the registry's own format", () => {
+    expect(
+      extractBoardToken("https://ing.wd3.myworkdayjobs.com/icsnldgen/job/ACT-Amsterdam---Acanthus/Financial-Crime-Compliance-Specialist_REQ-10119952-2"),
+    ).toEqual({ ats: "workday", token: "ing/wd3/icsnldgen" });
+  });
+
+  it("skips a Workday locale segment and the cxs API prefix rather than calling them the site", () => {
+    expect(extractBoardToken("https://philips.wd3.myworkdayjobs.com/en-US/jobs-and-careers/job/Amsterdam/X_1")).toEqual({
+      ats: "workday",
+      token: "philips/wd3/jobs-and-careers",
+    });
+    expect(extractBoardToken("https://rabobank.wd3.myworkdayjobs.com/wday/cxs/rabobank/jobs/job/Utrecht/X_1")).toEqual({
+      ats: "workday",
+      token: "rabobank/wd3/jobs",
+    });
+  });
+
+  it("reads a Teamtailor token from its own subdomain", () => {
+    expect(extractBoardToken("https://bearingpointnetherlands.teamtailor.com/jobs/8449394-microsoft-consultant")).toEqual({
+      ats: "teamtailor",
+      token: "bearingpointnetherlands",
+    });
+  });
+
+  it("reads a BambooHR token from its own subdomain", () => {
+    expect(extractBoardToken("https://centric.bamboohr.com/careers/137")).toEqual({ ats: "bamboohr", token: "centric" });
+  });
+
+  it("does not register a platform's own marketing host as a board", () => {
+    expect(extractBoardToken("https://www.teamtailor.com/en/pricing")).toBeNull();
+    expect(extractBoardToken("https://www.bamboohr.com/careers/")).toBeNull();
+    expect(extractBoardToken("https://www.myworkday.com/")).toBeNull();
+  });
+
   it("reads a Greenhouse token from the plain US host", () => {
     expect(extractBoardToken("https://boards.greenhouse.io/stripe/jobs/1234567")).toEqual({
       ats: "greenhouse",
