@@ -14,6 +14,7 @@ import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
 import { modelFallbackMiddleware } from "langchain";
+import { geminiThinkingConfig } from "../core/gemini-thinking.js";
 
 export const RETRY_BACKOFF_MS = [2_000, 4_000, 8_000] as const;
 
@@ -322,6 +323,8 @@ function buildModel(
       model: parsed.model,
       temperature,
       maxRetries: 2,
+      // LOW unless GEMINI_THINKING_LEVEL says otherwise — see core/gemini-thinking.ts.
+      thinkingConfig: geminiThinkingConfig(),
     });
   }
 
