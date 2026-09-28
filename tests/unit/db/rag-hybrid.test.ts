@@ -26,7 +26,7 @@ function deps(over: Partial<HybridDeps>): HybridDeps {
 
 describe("hybridRagSearch", () => {
   it("fuses vector + keyword results when both succeed (mode: hybrid)", async () => {
-    const res = await hybridRagSearch("brain_memories","langgraph hitl", 5, deps({
+    const res = await hybridRagSearch("brain_memories", "langgraph hitl", 5, deps({
       vectorSearch: async () => [hit("A"), hit("B"), hit("C")],
       keywordSearch: async () => [hit("B"), hit("D"), hit("A")],
     }));
@@ -39,7 +39,7 @@ describe("hybridRagSearch", () => {
   });
 
   it("respects top_k on the fused output", async () => {
-    const res = await hybridRagSearch("brain_memories","q", 2, deps({
+    const res = await hybridRagSearch("brain_memories", "q", 2, deps({
       vectorSearch: async () => [hit("A"), hit("B"), hit("C")],
       keywordSearch: async () => [hit("D"), hit("E")],
     }));
@@ -60,7 +60,7 @@ describe("hybridRagSearch", () => {
   });
 
   it("falls back to LABELLED keyword-only when the embedder is down (F1)", async () => {
-    const res = await hybridRagSearch("brain_memories","q", 5, deps({
+    const res = await hybridRagSearch("brain_memories", "q", 5, deps({
       vectorSearch: async () => {
         throw new RagStageError("embed", "Ollama unreachable at http://localhost:11434");
       },
@@ -73,7 +73,7 @@ describe("hybridRagSearch", () => {
   });
 
   it("returns a typed error naming the embed stage when BOTH fail", async () => {
-    const res = await hybridRagSearch("brain_memories","q", 5, deps({
+    const res = await hybridRagSearch("brain_memories", "q", 5, deps({
       vectorSearch: async () => {
         throw new RagStageError("embed", "Ollama down");
       },
@@ -88,7 +88,7 @@ describe("hybridRagSearch", () => {
   });
 
   it("names the query stage when the vector store (not the embedder) is the failure", async () => {
-    const res = await hybridRagSearch("brain_memories","q", 5, deps({
+    const res = await hybridRagSearch("brain_memories", "q", 5, deps({
       vectorSearch: async () => {
         throw new RagStageError("query", "pgvector missing");
       },
