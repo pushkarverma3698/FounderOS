@@ -1,13 +1,21 @@
 /**
- * Seed the founder context with current Turicks business state.
- * Run once (idempotent — safe to re-run, merges rather than replaces).
+ * Seed DEFAULTS for the founder context — fill-only.
+ * deploy/deploy.sh and scripts/vps-prod-stabilize.sh run this on every deploy.
  *
- * Update this whenever business state changes significantly.
+ * A key below is written only when the stored context LACKS it. A key the
+ * founder saved through update_context (current_priorities, next_actions, …) is
+ * never overwritten, and `last_updated` is never touched. Until 2026-09-28 this
+ * script merged seed-over-stored, so every deploy replaced the founder's own
+ * priorities with this file's June values.
+ *
+ * Consequence: editing a value here does NOT change a tenant that already has
+ * that key. The founder changes stored context by telling the bot
+ * (update_context). This file only bootstraps an empty or new row.
  *
  * Run: node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts
  */
 
-import { upsertFounderContext } from "../src/db/queries.js";
+import { seedFounderContextDefaults } from "../src/db/queries.js";
 
 const TENANT = process.env["FOUNDER_TENANT"] ?? "turicks";
 
@@ -108,10 +116,17 @@ const context = {
 };
 
 async function main() {
-  console.log("Seeding founder context for tenant:", TENANT);
-  await upsertFounderContext(TENANT, context);
-  console.log("✅ Founder context seeded with", Object.keys(context).length, "keys");
-  console.log("Keys:", Object.keys(context).join(", "));
+  console.log("Seeding founder context defaults (fill-only) for tenant:", TENANT);
+  const filled = await seedFounderContextDefaults(TENANT, context);
+  const kept = Object.keys(context).filter((key) => !filled.includes(key));
+  console.log(
+    filled.length > 0
+      ? `✅ Filled ${filled.length} absent key(s): ${filled.join(", ")}`
+      : "✅ Nothing to fill — every seed key is already stored",
+  );
+  if (kept.length > 0) {
+    console.log(`   Kept the stored value (not overwritten) for ${kept.length} key(s): ${kept.join(", ")}`);
+  }
   process.exit(0);
 }
 

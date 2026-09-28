@@ -109,24 +109,10 @@ export async function runStateChecks(tenant: string): Promise<StateFinding[]> {
     });
   }
 
-  // 5. Personal career RAG (search_personal_rag / read_cv) — portfolio questions hallucinate when empty.
-  const personalRagRows = await count(`SELECT count(*)::int AS n FROM personal_rag`);
-  if (personalRagRows === null) {
-    findings.push({
-      type: "empty_store",
-      severity: "medium",
-      summary: "personal_rag count query FAILED — Postgres/pgvector error.",
-      evidence: ["count(*) FROM personal_rag threw"],
-    });
-  } else if (personalRagRows === 0) {
-    findings.push({
-      type: "empty_store",
-      severity: "medium",
-      summary:
-        "personal_rag has 0 rows — portfolio/CV questions may hallucinate. Re-ingest personal-rag.",
-      evidence: ["SELECT count(*) FROM personal_rag → 0"],
-    });
-  }
+  // personal_rag is deliberately NOT checked. Since 2026-09-28 no worker reads it
+  // (CV questions go to jobhunt's read_cv, which reads the CV files), so an empty
+  // table no longer means a CV question will hallucinate — alerting on it would
+  // send the reader to re-ingest a store nothing serves.
 
   return findings;
 }

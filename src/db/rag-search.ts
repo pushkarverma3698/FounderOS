@@ -9,15 +9,21 @@ import { db } from "./client.js";
 import { tokenizeQuery, scoreByTerms, rankByTerms } from "./keyword-search.js";
 
 // research_cache holds business-public web findings (not personal data), so it
-// sits alongside turicks_brain on the right side of the ADR-013/015 firewall.
-export const ALLOWED_RAG_TABLES = new Set(["personal_rag", "turicks_brain", "brain_memories", "research_cache"] as const);
-export type RagTable = "personal_rag" | "turicks_brain" | "brain_memories" | "research_cache";
+// sits alongside brain_memories on the right side of the ADR-013/015 firewall.
+//
+// turicks_brain is deliberately absent. ADR-038 moved brain:sync and every
+// reader onto brain_memories; the old table is frozen (no writer since
+// 2026-09-05) but still full, so admitting it here would let a new reader answer
+// from rows that can never refresh, with no error. The table itself stays until
+// the founder approves a drop — refusing to read it needs no migration.
+export const ALLOWED_RAG_TABLES = new Set(["personal_rag", "brain_memories", "research_cache"] as const);
+export type RagTable = "personal_rag" | "brain_memories" | "research_cache";
 
 export interface RagHit {
   content: string;
   metadata: Record<string, unknown>;
   score: number; // cosine similarity in [0,1], higher = closer
-  /** brain_memories only — undefined for personal_rag/turicks_brain/research_cache. */
+  /** brain_memories only — undefined for personal_rag/research_cache. */
   memory_type?: string;
   project?: string | null;
 }
@@ -31,7 +37,7 @@ export interface RagFilter {
   project?: string;
 }
 
-/** Throws if `table` is not one of the two allowed RAG tables. */
+/** Throws if `table` is not one of the allowed RAG tables. */
 export function assertAllowedRagTable(table: string): asserts table is RagTable {
   if (!ALLOWED_RAG_TABLES.has(table as RagTable)) {
     throw new Error(`"${table}" is not an allowed RAG table`);
@@ -40,7 +46,7 @@ export function assertAllowedRagTable(table: string): asserts table is RagTable 
 
 /**
  * `memory_type`/`project` are real columns on `brain_memories` only — the other
- * three RAG tables don't have them. Guard here so a misused filter fails with a
+ * RAG tables don't have them. Guard here so a misused filter fails with a
  * clear message instead of a Postgres "column does not exist" from deep in a
  * template literal.
  */
@@ -65,7 +71,9 @@ const RAG_SCHEMA = "brain";
  * caller cannot tell "nothing matched" from "you queried the wrong table".
  *
  * Qualifying the schema removes the ambiguity entirely rather than depending on
- * table ordering in a session variable set somewhere else.
+ * table ordering in a session variable set somewhere else. turicks_brain has since
+ * left the allowlist; the qualification still guards every table that remains,
+ * each of which can be shadowed by an `agents.` copy the same way.
  */
 export function ragTableRef(table: RagTable): { schema: string; table: RagTable } {
   assertAllowedRagTable(table);

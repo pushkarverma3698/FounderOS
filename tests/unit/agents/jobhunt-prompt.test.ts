@@ -56,3 +56,14 @@ describe("buildJobhuntPrompt", () => {
     expect(wife).toContain('profile: "pushkar-nl-tech"');
   });
 });
+
+describe("buildJobhuntPrompt — posted vs found", () => {
+  it("tells the worker to print each row's age label, never 'today' from the found date", () => {
+    const prompt = buildJobhuntPrompt();
+    // The label itself is computed in code (job_state `age`); the prompt only
+    // has to say "print it, don't recompute it".
+    expect(prompt).toMatch(/`age`/);
+    expect(prompt).toMatch(/posted 3d ago · found today/);
+    expect(prompt).toMatch(/never call a role "today's"/i);
+  });
+});

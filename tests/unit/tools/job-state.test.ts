@@ -176,3 +176,40 @@ describe("job_state — section is validated, track is its own filter", () => {
     expect(props).toHaveProperty("track");
   });
 });
+
+/**
+ * Posted vs found, in the brief's own words (2026-09-28 audit §2.2).
+ *
+ * The founder asked "are these of today?" four times in five minutes on
+ * 2026-09-07. The command views answer it on every row with `ageLine` ("posted
+ * 3d ago · found today"); the free-text path handed the model a bare
+ * `created_at` and let it do the date arithmetic. Each row now carries the
+ * label computed by the same functions the brief uses, so both surfaces print
+ * the same words and the model never decides what "today" means.
+ */
+describe("job_state — every row says when it was posted and when it was found", () => {
+  const DAY = 86_400_000;
+
+  it("labels each row with the brief's ageLine, computed in code", async () => {
+    const now = Date.now();
+    vi.mocked(queryJobState).mockResolvedValueOnce({
+      count: 2,
+      total: 2,
+      rows: [
+        { id: "a", company: "Adyen", posted_at: new Date(now - 3 * DAY - 60_000), created_at: new Date(now - 60_000) },
+        { id: "b", company: "Mollie", posted_at: null, created_at: new Date(now - 2 * DAY - 60_000) },
+      ],
+    } as never);
+    const res = await jobStateTool.execute({});
+    expect(res.success).toBe(true);
+    const rows = JSON.parse(res.success ? String(res.data) : "{}").rows as Array<{ age?: string }>;
+    expect(rows[0]?.age).toBe("posted 3d ago · found today");
+    expect(rows[1]?.age).toBe("posted date not stated · found 2d ago");
+  });
+
+  it("says `since` filters by when we FOUND a row, not when it was posted", () => {
+    const props = jobStateTool.input_schema?.properties as Record<string, { description?: string }>;
+    expect(props["since"]?.description).toMatch(/found/i);
+    expect(props["since"]?.description).toMatch(/not .*post/i);
+  });
+});

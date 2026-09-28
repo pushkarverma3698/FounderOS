@@ -26,6 +26,7 @@ import {
   attributionFromMetadata,
   type CostAttribution,
 } from "./budget-costs.js";
+import { tokenCountsOf } from "./token-usage.js";
 
 export * from "./budget-costs.js";
 
@@ -118,29 +119,11 @@ export class BudgetGuardCallback extends BaseCallbackHandler {
   }
 
   override async handleLLMEnd(output: LLMResult, runId?: string): Promise<void> {
-    // Extract token usage from multiple possible locations in the LangChain output.
-    // Gemini puts it in llmOutput.usage or in generation[0].generationInfo.usage_metadata.
+    // Thought tokens included — see token-usage.ts for where each provider
+    // puts its counts and which paths that reading does not cover.
     const llmOut = output.llmOutput as Record<string, unknown> | undefined;
     const genInfo = output.generations?.[0]?.[0]?.generationInfo as Record<string, unknown> | undefined;
-
-    // Try llmOutput.tokenUsage (standard OpenAI-style), then Gemini-specific paths.
-    type TokenUsage = { promptTokens?: number; completionTokens?: number; input_tokens?: number; output_tokens?: number };
-    type GeminiUsage = { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
-
-    const tokenUsage = (llmOut?.["tokenUsage"] ?? llmOut?.["usage"] ?? {}) as TokenUsage;
-    const usageMeta = (genInfo?.["usage_metadata"] ?? llmOut?.["usage_metadata"] ?? {}) as GeminiUsage;
-
-    const inputTokens =
-      tokenUsage.promptTokens ??
-      tokenUsage.input_tokens ??
-      usageMeta.promptTokenCount ??
-      0;
-
-    const outputTokens =
-      tokenUsage.completionTokens ??
-      tokenUsage.output_tokens ??
-      usageMeta.candidatesTokenCount ??
-      0;
+    const { inputTokens, outputTokens } = tokenCountsOf(output);
 
     // G6: use the actual model from the response when available — handles the
     // fallback model case where AGENT_MODEL ≠ what was actually called. The

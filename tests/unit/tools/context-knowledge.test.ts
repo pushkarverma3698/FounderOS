@@ -49,6 +49,28 @@ describe("readContext tool", () => {
     expect(result).toContain("current priorities: Close Acme deal");
     expect(result).toContain("Last updated: 2026-06-01");
   });
+
+  // budget_alerts_sent (src/infra/daily-budget-alerts.ts) shares the JSONB row
+  // and rendered to the founder as "budget alerts sent: [object Object]".
+  it("never renders internal bookkeeping keys", async () => {
+    mockGetFounderContext.mockResolvedValue({
+      current_priorities: ["Close Acme deal"],
+      budget_alerts_sent: { date: "2026-09-28", levels: [80] },
+    });
+    const result = await readContext.invoke({});
+    expect(result).toContain("current priorities: Close Acme deal");
+    expect(result).not.toContain("budget alerts sent");
+    expect(result).not.toContain("[object Object]");
+  });
+
+  it("treats a row holding only bookkeeping as empty", async () => {
+    mockGetFounderContext.mockResolvedValue({
+      budget_alerts_sent: { date: "2026-09-28", levels: [80, 100] },
+      last_updated: "2026-09-28T07:00:00.000Z",
+    });
+    const result = await readContext.invoke({});
+    expect(result).toContain("No business context stored yet");
+  });
 });
 
 describe("updateContext tool", () => {

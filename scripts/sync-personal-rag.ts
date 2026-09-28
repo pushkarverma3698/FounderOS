@@ -2,8 +2,14 @@
  * sync-personal-rag.ts
  * ====================
  * Ingests the founder's personal career docs into the personal_rag pgvector
- * table so search_personal_rag can answer questions like "what are my skills?",
- * "draft a cover letter for X", and "match my background to this JD".
+ * table, read by the search_personal_rag UnifiedTool (src/tools/rag.ts).
+ *
+ * No kernel worker reads that table since 2026-09-28: CV and career questions
+ * go to jobhunt's read_cv, which reads the CV the founder maintains. The prod
+ * table then held 4 rows, last written 2026-06-15 — the wiki.md source below is
+ * model-synthesized and has stated the wrong employer, title and dates. The
+ * table and this script stay; dropping either is a separate, founder-approved
+ * change.
  *
  * Sources:
  *   ~/Projects/personal-rag/data/wiki.md           → doc_type: resume

@@ -67,7 +67,7 @@ else
 fi
 
 echo ""
-echo "==> Seed founder context (idempotent)"
+echo "==> Seed founder context defaults (fill-only)"
 if node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts; then
   echo "    seed-founder-context OK"
 else

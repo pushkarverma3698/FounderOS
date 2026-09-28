@@ -17,6 +17,7 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatVertexAI } from "@langchain/google-vertexai";
 import { ChatOpenAI } from "@langchain/openai";
+import { geminiThinkingConfig } from "../core/gemini-thinking.js";
 
 /** Judge providers we support. Kept local so infra/ doesn't depend on agents/. */
 export type JudgeProvider = "anthropic" | "openrouter" | "openai" | "google-genai" | "google-vertexai";
@@ -123,6 +124,10 @@ export function getJudgeModel(): BaseChatModel {
         maxOutputTokens: 512,
         maxRetries: 2,
         apiKey: process.env["GOOGLE_GENERATIVE_AI_API_KEY"],
+        // Gemini 3.x counts thought tokens against maxOutputTokens, so default
+        // dynamic thinking competes with the verdict for these 512. Same level
+        // as every other google-genai model: core/gemini-thinking.ts.
+        thinkingConfig: geminiThinkingConfig(),
       });
     } else if (provider === "google-vertexai") {
       _model = new ChatVertexAI({

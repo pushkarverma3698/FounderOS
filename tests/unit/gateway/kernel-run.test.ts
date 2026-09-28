@@ -612,3 +612,174 @@ describe("progress streaming", () => {
     expect(deletedIds).toEqual([1]);
   });
 });
+
+// ── Failure card + 🔁 Retry (2026-09-28 plan §5) ─────────────────────────────
+
+describe("failed turns reach the founder as a card with a Retry button", () => {
+  const FAILED_STATE = {
+    reply: '⚠️ Task stopped at step "s1" — tool failure in comms.',
+    turn: { id: "ignored", chat_id: "777", received_at: "", raw_input: "list my emails" },
+    mission: {
+      goal: "list my emails",
+      status: "failed",
+      cursor: 0,
+      plan: {
+        schema_version: 1,
+        goal: "g",
+        steps: [
+          {
+            step_id: "s1",
+            worker: "comms",
+            objective: "Read the inbox",
+            inputs: {},
+            expected: { kind: "data", schema_ref: "x" },
+            constraints: { max_tool_calls: 3, hitl_required: false },
+          },
+        ],
+      },
+    },
+    results: [],
+    failure: { step_id: "s1", stage: "tool", component: "comms/read_emails", message: "Gmail returned 503", retryable: true },
+  };
+
+  /** The first 8 chars of the turn id runKernelText minted for the last stream() call. */
+  const lastTurnNonce = (): string =>
+    (fakeKernel.stream.mock.calls.at(-1)![0] as { turn: { id: string } }).turn.id.slice(0, 8);
+  const retryData = (reply: Reply | undefined): string[] =>
+    ((reply?.opts?.reply_markup as { inline_keyboard?: Array<Array<{ callback_data?: string }>> } | undefined)
+      ?.inline_keyboard ?? [])
+      .flat()
+      .map((b) => b.callback_data ?? "")
+      .filter((d) => d.startsWith("retry:"));
+
+  it("sends the failure card with a Retry button for the turn that failed", async () => {
+    fakeKernel.stream.mockImplementation(() => singleYield(FAILED_STATE));
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "list my emails");
+    const last = replies.at(-1)!;
+    expect(last.text).toContain("I couldn't finish:");
+    expect(last.text).toContain("Read the inbox");
+    expect(retryData(last)).toEqual([`retry:${lastTurnNonce()}`]);
+  });
+
+  it("keeps the profile on the button for a candidate's turn", async () => {
+    fakeKernel.stream.mockImplementation(() => singleYield(FAILED_STATE));
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "draft row 3", "wife-nl-finance");
+    expect(retryData(replies.at(-1))).toEqual([`retry:${lastTurnNonce()}:wife-nl-finance`]);
+  });
+
+  it("sends the plain kernel text, no button, when he rejected an approval", async () => {
+    fakeKernel.stream.mockImplementation(() =>
+      singleYield({
+        ...FAILED_STATE,
+        reply: "Nothing was sent. Re-ask if you change your mind.",
+        failure: { step_id: "s1", stage: "hitl_rejected", component: "send_email", message: "Rejected by founder.", retryable: false },
+      }),
+    );
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "email the landlord");
+    expect(replies.at(-1)!.text).toContain("Nothing was sent");
+    expect(retryData(replies.at(-1))).toEqual([]);
+  });
+
+  it("falls back to the plain failure text if Telegram rejects the card, and keeps the button", async () => {
+    fakeKernel.stream.mockImplementation(() => singleYield(FAILED_STATE));
+    const { ctx, replies } = fakeCtx();
+    const reply = ctx.reply as unknown as ReturnType<typeof vi.fn>;
+    const original = reply.getMockImplementation()!;
+    reply.mockImplementation(async (text: string, opts?: Reply["opts"]) => {
+      if (text.includes("<blockquote expandable>")) throw new Error("400: can't parse entities");
+      return original(text, opts);
+    });
+    await runKernelText(ctx, "list my emails");
+    expect(replies.at(-2)!.text).toContain("tool failure in comms");
+    expect(retryData(replies.at(-1))).toEqual([`retry:${lastTurnNonce()}`]);
+  });
+
+  it("keeps the Retry button when the card is too long for one message", async () => {
+    // A long failure message used to be dropped into the details block whole.
+    // Plain text is split across messages; the button follows in its own.
+    fakeKernel.stream.mockImplementation(() =>
+      singleYield({
+        ...FAILED_STATE,
+        reply: `⚠️ Task stopped — ${"validation detail ".repeat(400)}`,
+        failure: { ...FAILED_STATE.failure, message: "x".repeat(900), evidence: "e".repeat(2_000) },
+        results: Array.from({ length: 7 }, (_, i) => ({
+          step_id: `s${i}`,
+          status: "ok",
+          output: "o".repeat(400),
+          tool_receipts: [],
+        })),
+        mission: {
+          ...FAILED_STATE.mission,
+          plan: {
+            ...FAILED_STATE.mission.plan,
+            steps: Array.from({ length: 8 }, (_, i) => ({
+              ...FAILED_STATE.mission.plan.steps[0],
+              step_id: i === 7 ? "s1" : `s${i}`,
+              objective: `${"a long objective with many words ".repeat(8)}${i}`,
+            })),
+          },
+        },
+      }),
+    );
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "list my emails");
+    for (const r of replies) expect(r.text.length).toBeLessThanOrEqual(4096);
+    expect(retryData(replies.at(-1))).toEqual([`retry:${lastTurnNonce()}`]);
+  });
+
+  it("adds a Retry button to a thrown error when no auto-retry was queued", async () => {
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw new Error("planner exploded");
+    });
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "boom");
+    expect(replies.at(-1)!.text).toContain("❌");
+    expect(retryData(replies.at(-1))).toEqual([`retry:${lastTurnNonce()}`]);
+  });
+
+  it("never offers both: a queued auto-retry sends no button", async () => {
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw Object.assign(new Error("429 rate limit"), { status: 429 });
+    });
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "summarise my LinkedIn posts");
+    expect(insertScheduledTask).toHaveBeenCalledTimes(1);
+    expect(retryData(replies.at(-1))).toEqual([]);
+  });
+
+  it("offers the button when the auto-retry could not be queued", async () => {
+    insertScheduledTask.mockRejectedValueOnce(new Error("db unavailable"));
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw Object.assign(new Error("429 rate limit"), { status: 429 });
+    });
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "summarise my LinkedIn posts");
+    expect(retryData(replies.at(-1))).toEqual([`retry:${lastTurnNonce()}`]);
+  });
+
+  it("does not auto-retry a candidate's turn — the queue carries no profile — and offers the button instead", async () => {
+    // An auto-retry runs through scheduled_tasks, which stores only the text:
+    // a /wife_draft turn would come back drafted under the default candidate's
+    // prompt (the 2026-09-05 wrong-signature bug). The button keeps the profile.
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw Object.assign(new Error("429 rate limit"), { status: 429 });
+    });
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "draft row 3", "wife-nl-finance");
+    expect(insertScheduledTask).not.toHaveBeenCalled();
+    expect(retryData(replies.at(-1))).toEqual([`retry:${lastTurnNonce()}:wife-nl-finance`]);
+  });
+
+  it("gives a resume no button — its turn text would re-run the whole approved mission", async () => {
+    getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-1", created_at: new Date().toISOString() });
+    fakeKernel.stream.mockImplementation(async function* () {
+      throw new Error("send failed");
+    });
+    const { ctx, replies } = fakeCtx();
+    await resumeKernel(ctx, "approved");
+    expect(retryData(replies.at(-1))).toEqual([]);
+  });
+});
