@@ -42,13 +42,23 @@ function fakeCtx(match: string, over: Record<string, unknown> = {}): FakeCtx {
   return { ctx, replies, markups };
 }
 
-/** A tapped repo button; `repliedTo` is the message the question was attached to. */
-function tapCtx(data: string, repliedTo?: string): FakeCtx {
+/**
+ * A tapped repo button; `repliedTo` is the message the question was attached to.
+ *
+ * `messageId` defaults to a random id — each call is a DIFFERENT button message,
+ * matching how handleRepoChoice's per-message dedup Map is meant to be exercised.
+ * Pass a fixed id to simulate the same button firing more than once.
+ */
+function tapCtx(data: string, repliedTo?: string, messageId?: number): FakeCtx {
   return fakeCtx("", {
     message: undefined,
     callbackQuery: {
       data,
-      message: { message_id: 12, text: "Which repo?", reply_to_message: repliedTo ? { text: repliedTo } : undefined },
+      message: {
+        message_id: messageId ?? Math.floor(Math.random() * 1000000) + 1,
+        text: "Which repo?",
+        reply_to_message: repliedTo ? { text: repliedTo } : undefined,
+      },
     },
   });
 }
@@ -292,6 +302,54 @@ describe("handleRepoChoice", () => {
     expect(runKernelText).not.toHaveBeenCalled();
     expect(JSON.stringify(alerts)).toMatch(/no longer dispatchable/i);
   });
+
+  it("does not double-dispatch when the same button fires twice before the repo lookup resolves", async () => {
+    // TOCTOU regression (found in review, PR #731): the dedup check ran, THEN
+    // `await registeredRepos(deps)`, THEN the mark — leaving a window where two
+    // near-simultaneous callback deliveries for the same message (Telegram can
+    // redeliver, or a fast double-tap) both pass the check before either marks it.
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const messageId = 12345;
+    const makeCtx = () =>
+      tapCtx("task:repo:House-of-Hulda-Website-frontend", "/task make the hero responsive", messageId).ctx;
+
+    let resolveRepos!: (v: readonly string[]) => void;
+    const slowRepos = new Promise<readonly string[]>((resolve) => {
+      resolveRepos = resolve;
+    });
+    const deps = { runKernelText, listRegisteredRepos: () => slowRepos };
+
+    const first = handleRepoChoice(makeCtx(), deps);
+    const second = handleRepoChoice(makeCtx(), deps);
+    resolveRepos([]);
+    await Promise.all([first, second]);
+
+    expect(runKernelText).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("/task <repo> with nothing to build", () => {
+  it("asks for the work in a prompt whose reply is actually dispatched to that repo", async () => {
+    // PR #731 review: this path first shipped as "Got it — <repo>. What should I
+    // build?" with no `Repo:` line. handleRepoReply reads the repo from that line,
+    // so the founder's reply fell through to ordinary chat and was never dispatched.
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx, replies } = fakeCtx("repo:hulda");
+
+    await handleTask(ctx, { runKernelText });
+    expect(runKernelText).not.toHaveBeenCalled();
+
+    // Telegram hands the bot reply_to_message.text with the formatting stripped.
+    const promptAsDelivered = replies[0]!.replace(/<[^>]*>/g, "");
+    const { ctx: replyCtx } = fakeCtx("", {
+      message: { message_id: 30, text: "make the hero responsive", reply_to_message: { text: promptAsDelivered } },
+    });
+
+    expect(await handleRepoReply(replyCtx, { runKernelText })).toBe(true);
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).toContain("House-of-Hulda-Website-frontend");
+    expect(instruction).toContain("make the hero responsive");
+  });
 });
 
 describe("handleRepoReply", () => {
@@ -385,7 +443,7 @@ describe("/task against a repo this instance created", () => {
 // ── /newproject ──────────────────────────────────────────────────────────────
 
 const { parseNewProjectArgs, buildNewProjectInstruction, handleNewProject } = await import(
-  "../../../src/gateway/task-command.js"
+  "../../../src/gateway/newproject-command.js"
 );
 
 describe("parseNewProjectArgs", () => {

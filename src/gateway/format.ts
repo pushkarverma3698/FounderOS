@@ -18,8 +18,8 @@
  * supply-chain risk for a chat gateway.
  */
 
-/** Telegram's hard per-message character limit. */
-export const TELEGRAM_MAX = 4096;
+/** Telegram's hard per-message character limit is 4096; use 4000 to leave room for closing tags during chunking. */
+export const TELEGRAM_MAX = 4000;
 
 /** Escape the characters that are significant in Telegram HTML. */
 function escapeHtml(text: string): string {
@@ -198,6 +198,25 @@ function collapseNestedTags(html: string): string {
   return cur;
 }
 
+function findSafeSplit(chunk: string, defaultCut: number): number {
+  const slice = chunk.slice(0, defaultCut);
+  let splitAt = defaultCut;
+
+  const lastTagOpen = slice.lastIndexOf("<");
+  const lastTagClose = slice.lastIndexOf(">");
+  if (lastTagOpen > lastTagClose) {
+    splitAt = lastTagOpen;
+  }
+
+  const lastAmp = slice.lastIndexOf("&", splitAt - 1);
+  const lastSemi = slice.lastIndexOf(";", splitAt - 1);
+  if (lastAmp > lastSemi && splitAt - lastAmp < 8) {
+    splitAt = lastAmp;
+  }
+
+  return splitAt > 0 ? splitAt : defaultCut;
+}
+
 /**
  * Split text into chunks no longer than `max`, preferring paragraph then line
  * then word boundaries. A single token longer than `max` is hard-split.
@@ -229,7 +248,8 @@ export function splitForTelegram(text: string, max: number = TELEGRAM_MAX): stri
         // try to break on the last space before max
         const slice = rest.slice(0, max);
         const lastSpace = slice.lastIndexOf(" ");
-        const cut = lastSpace > 0 ? lastSpace : max;
+        let cut = lastSpace > 0 ? lastSpace : max;
+        cut = findSafeSplit(rest, cut);
         chunks.push(rest.slice(0, cut).trim());
         rest = rest.slice(cut);
       }
@@ -247,5 +267,71 @@ export function splitForTelegram(text: string, max: number = TELEGRAM_MAX): stri
   }
   flush();
 
-  return chunks.filter((c) => c.length > 0);
+  return repairHtmlChunkBoundaries(chunks.filter((c) => c.length > 0));
+}
+
+/**
+ * The HTML tags Telegram supports. Each maps to its closing form.
+ * Only these are emitted by markdownToTelegramHtml, so only these can be split.
+ */
+const TELEGRAM_HTML_TAGS = ["b", "i", "u", "s", "code", "pre", "a", "blockquote"] as const;
+
+/**
+ * Close unclosed HTML tags at the end of a chunk and reopen them at the start
+ * of the next chunk, so every chunk is independently valid HTML.
+ *
+ * WHY. `splitForTelegram` operates on raw character positions and can split
+ * inside a `<pre>…</pre>` or `<a href="…">…</a>` block. Telegram rejects the
+ * resulting chunk with a 400 and the fallback strips ALL formatting from it.
+ * Repairing boundaries is cheaper than moving the split point (which would
+ * require re-measuring), and the fallback remains as defence-in-depth.
+ */
+export function repairHtmlChunkBoundaries(chunks: string[]): string[] {
+  if (chunks.length <= 1) return chunks;
+
+  const result: string[] = [];
+  let carryOpen: string[] = []; // tags to reopen at the start of the next chunk
+
+  for (let i = 0; i < chunks.length; i++) {
+    let chunk = carryOpen.length > 0
+      ? carryOpen.join("") + chunks[i]!
+      : chunks[i]!;
+
+    // Track which tags are open at the end of this chunk. Keep the raw opening
+    // tag text (not just its name) so an attribute like <a href="..."> survives
+    // being reopened in the next chunk instead of degrading to a bare <a>.
+    const openStack: { name: string; raw: string }[] = [];
+    const tagRe = /<\/?([a-z]+)(?:\s[^>]*)?\/?>/gi;
+    let match: RegExpExecArray | null;
+    while ((match = tagRe.exec(chunk)) !== null) {
+      const full = match[0]!;
+      const tagName = match[1]!.toLowerCase();
+      if (!(TELEGRAM_HTML_TAGS as readonly string[]).includes(tagName)) continue;
+      if (full.startsWith("</")) {
+        // Closing tag: pop the matching open from the stack.
+        const idx = openStack.map((t) => t.name).lastIndexOf(tagName);
+        if (idx !== -1) openStack.splice(idx, 1);
+      } else if (!full.endsWith("/>")) {
+        // Opening tag (not self-closing).
+        openStack.push({ name: tagName, raw: full });
+      }
+    }
+
+    // Close any tags still open at the end of this chunk.
+    carryOpen = [];
+    if (openStack.length > 0 && i < chunks.length - 1) {
+      // Close in reverse order (innermost first).
+      for (let j = openStack.length - 1; j >= 0; j--) {
+        chunk += `</${openStack[j]!.name}>`;
+      }
+      // Reopen in original order for the next chunk, with original attributes.
+      for (const tag of openStack) {
+        carryOpen.push(tag.raw);
+      }
+    }
+
+    result.push(chunk);
+  }
+
+  return result;
 }

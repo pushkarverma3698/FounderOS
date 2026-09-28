@@ -64,10 +64,14 @@ function homeText(firstName?: string): string {
     `⚡ <b>System</b> — health, today's spend, the emergency stop\n` +
     `    <code>/status</code> · <code>/budget</code>\n\n` +
     `<b>Or just talk to me</b> — I route it to the right team:\n` +
-    `🧠 Admin · 🔍 Research · 📨 Comms ✋ · ⚙️ Engineering ✋ · ` +
-    `📣 Marketing ✋ · 📈 Sales ✋ · 💻 Personal ✋\n\n` +
-    `<i>"What's my focus?" · "Research Stripe's pricing" · "Summarise my inbox"</i>\n\n` +
-    `✋ = you approve before anything leaves the building.`
+    `🧠 Admin\n` +
+    `🔍 Research\n` +
+    `📨 Comms \u2022 asks first\n` +
+    `⚙️ Engineering \u2022 asks first\n` +
+    `📣 Marketing \u2022 asks first\n` +
+    `📈 Sales \u2022 asks first\n` +
+    `💻 Personal \u2022 asks first\n\n` +
+    `<i>"What's my focus?" · "Research Stripe's pricing" · "Summarise my inbox"</i>`
   );
 }
 

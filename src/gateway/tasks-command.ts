@@ -32,6 +32,7 @@ import type { Context } from "grammy";
 import { Octokit } from "octokit";
 import { esc } from "../tools/jobhunt/telegram-format.js";
 import { DISPATCH_REPO_ALLOWLIST } from "../tools/dispatch-repos.js";
+import { splitForTelegram } from "./format.js";
 
 /** The agent lifecycle labels, in the order work moves through them. */
 export const AGENT_STATES = ["ready", "working", "review", "blocked", "failed"] as const;
@@ -250,7 +251,8 @@ export async function fetchDispatchTasks(
 }
 
 export interface TasksCommandDeps {
-  readonly fetch: () => Promise<TasksView>;
+  readonly fetch: (repos: readonly string[]) => Promise<TasksView>;
+  readonly listRegisteredRepos?: () => Promise<readonly string[]>;
 }
 
 /**
@@ -262,19 +264,29 @@ export interface TasksCommandDeps {
  */
 export async function handleTasks(
   ctx: Context,
-  deps: TasksCommandDeps = { fetch: () => fetchDispatchTasks() },
+  deps: TasksCommandDeps = { fetch: (repos) => fetchDispatchTasks(repos) },
 ): Promise<void> {
+  let allRepos: readonly string[] = DISPATCH_REPO_ALLOWLIST;
+  try {
+    const registered = (await deps.listRegisteredRepos?.()) ?? [];
+    allRepos = [...new Set([...DISPATCH_REPO_ALLOWLIST, ...registered])];
+  } catch {
+    // allow-failopen: a registry that cannot be read must not take /tasks down for the hardcoded repos.
+  }
   let view: TasksView;
   try {
-    view = await deps.fetch();
+    view = await deps.fetch(allRepos);
   } catch (err) {
     view = {
       rows: [],
       unreachable: [{ repo: "all repositories", error: err instanceof Error ? err.message : String(err) }],
     };
   }
-  await ctx.reply(formatTasksMessage(view), {
-    parse_mode: "HTML",
-    link_preview_options: { is_disabled: true },
-  });
+  const parts = splitForTelegram(formatTasksMessage(view));
+  for (const part of parts) {
+    await ctx.reply(part, {
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+    });
+  }
 }
