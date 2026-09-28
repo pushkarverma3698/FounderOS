@@ -23,6 +23,8 @@ import {
 } from "../../../src/gateway/home-menu.js";
 import { COMMAND_MENU } from "../../../src/gateway/command-menu.js";
 import { buildWifeCommandsHelp } from "../../../src/gateway/wife-commands.js";
+import { CAPABILITIES_CALLBACK, DEPARTMENT_LABELS } from "../../../src/gateway/capabilities-screen.js";
+import { WORKERS } from "../../../src/kernel/contracts.js";
 import { TELEGRAM_MAX_CHARS } from "../../../src/tools/jobhunt/telegram-format.js";
 
 // Every section the module has — a new one is covered by every check below.
@@ -45,6 +47,37 @@ describe("/start — nothing the ☰ menu offers is missing from the screens", (
     const jobsButtons = buildMenuKeyboardRows("jobs").flat().map((b) => b.callback_data);
     expect(jobsButtons).toContain(`${MENU_CALLBACK_PREFIX}wife`);
     expect(buildMenuSection("wife")).toBe(buildWifeCommandsHelp());
+  });
+});
+
+describe("/start — everything the system can do is one tap away", () => {
+  it("offers 🧭 Everything I can do on the home screen", () => {
+    const home = buildMenuKeyboardRows("home").flat();
+    expect(home.map((b) => b.callback_data)).toContain(CAPABILITIES_CALLBACK);
+    expect(home.find((b) => b.callback_data === CAPABILITIES_CALLBACK)?.text).toMatch(/Everything I can do/);
+  });
+
+  it("names every team in the 'just talk to me' list, jobhunt included", () => {
+    // It listed seven and left out jobhunt, the lane used daily (2026-09-28).
+    // Scoped to that list: "Jobs" is also a lane name higher up the screen.
+    const home = buildMenuSection("home");
+    const teams = home.slice(home.indexOf("just talk to me"));
+    for (const w of WORKERS) expect(teams, w).toContain(DEPARTMENT_LABELS[w].label);
+  });
+
+  it("sends the whole tool list when tapped, ending on the menu", async () => {
+    const replies: Array<{ text: string; markup?: unknown }> = [];
+    const answered: unknown[] = [];
+    const ctx = {
+      callbackQuery: { data: CAPABILITIES_CALLBACK },
+      answerCallbackQuery: async (o?: unknown) => void answered.push(o ?? null),
+      reply: async (text: string, opts?: { reply_markup?: unknown }) => void replies.push({ text, markup: opts?.reply_markup }),
+    } as unknown as Context;
+    expect(await handleMenuCallback(ctx)).toBe(true);
+    expect(answered).toHaveLength(1);
+    const all = replies.map((r) => r.text).join("\n");
+    for (const w of WORKERS) expect(all, w).toContain(`<b>${DEPARTMENT_LABELS[w].label}</b>`);
+    expect(replies.at(-1)?.markup).toBeDefined();
   });
 });
 

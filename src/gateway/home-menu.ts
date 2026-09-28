@@ -32,6 +32,8 @@ import type { Context } from "grammy";
 import { DISPATCH_REPO_ALLOWLIST } from "../tools/dispatch-repos.js";
 import { labelForRepo } from "./repo-picker.js";
 import { buildWifeCommandsHelp } from "./wife-commands.js";
+import { CAPABILITIES_CALLBACK, DEPARTMENT_LABELS, sendCapabilities } from "./capabilities-screen.js";
+import { WORKERS } from "../kernel/contracts.js";
 
 export const MENU_CALLBACK_PREFIX = "menu:";
 
@@ -70,14 +72,13 @@ function homeText(firstName?: string): string {
     `    <code>/task</code> · <code>/tasks</code>\n` +
     `⚡ <b>System</b> — health, today's spend, the emergency stop\n` +
     `    <code>/status</code> · <code>/budget</code>\n\n` +
+    // Every kernel worker, named from the same table the 🧭 list uses. The old
+    // hand-written list left out jobhunt and marked "asks first" by hand (Admin
+    // was wrong: schedule_task and record_event are gated). Which tools ask
+    // first is now read from HITL_GATED_TOOLS, one tap away.
     `<b>Or just talk to me</b> — I route it to the right team:\n` +
-    `🧠 Admin\n` +
-    `🔍 Research\n` +
-    `📨 Comms \u2022 asks first\n` +
-    `⚙️ Engineering \u2022 asks first\n` +
-    `📣 Marketing \u2022 asks first\n` +
-    `📈 Sales \u2022 asks first\n` +
-    `💻 Personal \u2022 asks first\n\n` +
+    WORKERS.map((w) => `${DEPARTMENT_LABELS[w].emoji} ${DEPARTMENT_LABELS[w].label}`).join(" · ") +
+    `\n<i>🧭 Everything I can do lists every tool each team has, and which ones ask you first.</i>\n\n` +
     `<i>"What's my focus?" · "Research Stripe's pricing" · "Summarise my inbox"</i>`
   );
 }
@@ -181,7 +182,11 @@ export function buildMenuKeyboardRows(active: MenuSection): { text: string; call
   const button = (s: MenuSection) => ({ text: LABELS[s], callback_data: `${MENU_CALLBACK_PREFIX}${s}` });
 
   if (active === "home") {
-    return [[button("build")], [button("jobs"), button("system")]];
+    return [
+      [button("build")],
+      [button("jobs"), button("system")],
+      [{ text: "🧭 Everything I can do", callback_data: CAPABILITIES_CALLBACK }],
+    ];
   }
   if (active === "wife") {
     return [[button("jobs")], [button("home")]];
@@ -211,6 +216,13 @@ export function menuKeyboard(active: MenuSection): {
 export async function handleMenuCallback(ctx: Context): Promise<boolean> {
   const data = ctx.callbackQuery?.data ?? "";
   if (!data.startsWith(MENU_CALLBACK_PREFIX)) return false;
+
+  // Not a section: ~85 rows is several messages, so it is sent below, not edited in.
+  if (data === CAPABILITIES_CALLBACK) {
+    await ctx.answerCallbackQuery();
+    await sendCapabilities(ctx, menuKeyboard("home"));
+    return true;
+  }
 
   const section = data.slice(MENU_CALLBACK_PREFIX.length);
   if (!isMenuSection(section)) {
