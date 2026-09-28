@@ -158,6 +158,17 @@ describe("pr-brain — Claude outage", () => {
     expect(msgs.join("\n")).not.toContain("Gate FAILED");
   });
 
+  it("treats the preflight's own budget cap as reachable, not as an outage", () => {
+    // 2026-09-28 06:20, production: the one-word preflight costs more than its
+    // $0.05 cap (Claude Code's context loads first), so it prints this instead of
+    // "ok". A billed call proves auth and quota are fine.
+    sweep({ preflight: "Error: Exceeded USD budget (0.05)" });
+
+    const log = readFileSync(join(home, ".claude", "pr-brain.log"), "utf8");
+    expect(log).toMatch(/gating oplify-messaging-api#56/);
+    expect(telegramSends().filter((m) => /paused/i.test(m))).toHaveLength(0);
+  });
+
   it("keeps the auth-expired message actionable", () => {
     sweep({ preflight: "Invalid API key · Please run /login" });
     sweep({ preflight: "Invalid API key · Please run /login" });
