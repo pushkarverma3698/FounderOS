@@ -3,14 +3,14 @@
  * Delegates to pgvector tools in tools/rag.ts (Ollama embed + Postgres query).
  */
 
-import {
-  searchPersonalRagTool,
-  searchTuricksBrainTool,
-  searchResearchCacheTool,
-} from "../tools/rag.js";
+import { searchResearchCacheTool } from "../tools/rag.js";
 import type { UnifiedTool } from "../tools/index.js";
 
-export type RagStore = "personal" | "turicks" | "research";
+/**
+ * One store per agent-tool wrapper. "turicks" and "personal" went with their
+ * wrappers on 2026-09-28 (see src/agents/agent-tools/rag.ts).
+ */
+export type RagStore = "research";
 
 export interface RagOrchestratorInput {
   store: RagStore;
@@ -20,12 +20,10 @@ export interface RagOrchestratorInput {
 }
 
 const TOOLS: Record<RagStore, UnifiedTool> = {
-  personal: searchPersonalRagTool,
-  turicks: searchTuricksBrainTool,
   research: searchResearchCacheTool,
 };
 
-/** Run a read-only vector search against personal-rag or turicks-brain. */
+/** Run a read-only vector search against the research cache. */
 export async function orchestrateRagQuery(input: RagOrchestratorInput): Promise<string> {
   const query = input.query.trim();
   if (!query) return "ERROR: query is required";

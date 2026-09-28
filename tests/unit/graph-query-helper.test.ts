@@ -21,7 +21,9 @@ describe("graph-query-helper — findToolsByDepartment", () => {
     expect(tools.length).toBeGreaterThan(0);
     expect(tools).toContain("search_web");
     expect(tools).toContain("search_knowledge");
-    expect(tools).toContain("search_turicks_brain");
+    // One reader per RAG table (2026-09-28): search_turicks_brain read the same
+    // table as search_knowledge.
+    expect(tools).not.toContain("search_turicks_brain");
     expect(tools).toContain("publish_signal");
   });
 
@@ -88,10 +90,10 @@ describe("graph-query-helper — findDepartmentsByTool", () => {
     expect(depts.every((d: string) => d === "engineering")).toBe(true);
   });
 
-  it("finds personal for search_personal_rag", () => {
-    const depts = findDepartmentsByTool("search_personal_rag");
-    expect(depts).toContain("personal");
-    expect(depts).not.toContain("jobhunt");
+  it("finds no department for search_personal_rag, and jobhunt alone for read_cv", () => {
+    // 2026-09-28: personal lost search_personal_rag; CV questions are jobhunt's.
+    expect(findDepartmentsByTool("search_personal_rag")).toEqual([]);
+    expect(findDepartmentsByTool("read_cv")).toEqual(["jobhunt"]);
   });
 
   it("returns empty array for non-existent tool", () => {

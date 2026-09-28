@@ -28,7 +28,7 @@ vi.mock("../../../src/lib/embed.js", () => ({
 vi.mock("../../../src/db/rag-search.js", () => ({
   searchRagTable: vi.fn(),
   keywordSearchRagTable: vi.fn(),
-  ALLOWED_RAG_TABLES: new Set(["personal_rag", "turicks_brain"]),
+  ALLOWED_RAG_TABLES: new Set(["personal_rag", "brain_memories", "research_cache"]),
   assertAllowedRagTable: vi.fn(),
 }));
 

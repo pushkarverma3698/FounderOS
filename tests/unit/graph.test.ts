@@ -19,10 +19,13 @@ describe("Knowledge Graph (Graphify)", () => {
 
   it("should expose the current RAG / vector tools (2026-06-15 fix)", () => {
     const toolNames = graph.nodes.filter((n) => n.type === "tool").map((t) => t.name);
-    expect(toolNames).toContain("search_turicks_brain");
-    expect(toolNames).toContain("search_personal_rag");
     expect(toolNames).toContain("search_knowledge");
+    expect(toolNames).toContain("search_research_cache");
     expect(toolNames).toContain("publish_signal");
+    // Unbound from every worker on 2026-09-28 (one reader per RAG table; CV
+    // questions go to read_cv). The graph only models tools a worker holds.
+    expect(toolNames).not.toContain("search_turicks_brain");
+    expect(toolNames).not.toContain("search_personal_rag");
   });
 
   it("should include apply_cinematic_preset for engineering (2026-06-23 fix)", () => {
@@ -38,7 +41,8 @@ describe("Knowledge Graph (Graphify)", () => {
   it("should model the vector stores + Ollama as services", () => {
     const names = graph.nodes.filter((n) => n.type === "service").map((s) => s.name);
     expect(names.some((s) => /ollama/i.test(s))).toBe(true);
-    expect(names.some((s) => /turicks_brain/i.test(s))).toBe(true);
+    // brain_memories replaced turicks_brain as the brain store (ADR-038).
+    expect(names.some((s) => /brain_memories/i.test(s))).toBe(true);
     expect(names.some((s) => /personal_rag/i.test(s))).toBe(true);
   });
 
