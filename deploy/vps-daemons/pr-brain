@@ -177,8 +177,8 @@ enter_down() {
   printf '%s\n%s\n' "$cls" "$(date -u '+%Y-%m-%d %H:%M UTC')" >"$DOWN_FILE"
   case "$cls" in
     auth) notify "🧠 pr-brain PAUSED on $(hostname -s): Claude Code auth expired. Fix: ssh founderos-vps, run 'claude', then '/login'. One more message when it resumes — none until then." ;;
-    limit) notify "🧠 pr-brain PAUSED on $(hostname -s): Claude usage limit reached (${detail}). Retrying silently every 20 min; one more message when it resumes." ;;
-    *) notify "🧠 pr-brain PAUSED on $(hostname -s): Claude preflight failed (${detail}). Retrying silently every 20 min; one more message when it resumes." ;;
+    limit) notify "🧠 pr-brain PAUSED on $(hostname -s): Claude usage limit reached (${detail}). Retrying silently when a PR is waiting; one more message when it resumes." ;;
+    *) notify "🧠 pr-brain PAUSED on $(hostname -s): Claude preflight failed (${detail}). Retrying silently when a PR is waiting; one more message when it resumes." ;;
   esac
 }
 
@@ -192,7 +192,16 @@ leave_down() {
 
 # Preflight the model. Without this the sweep fails once per PR, twenty minutes
 # apart, forever. Anything but "ok" means no gate can run this tick.
-if [[ "$DRY_RUN" -eq 0 && "$LIST_ONLY" -eq 0 ]]; then
+#
+# Called lazily, right before the first PR that actually needs a gate — never at
+# the top of the tick. An eager preflight was itself a Claude session on every
+# 20-minute tick, 72 a day, while the PR queue sat empty most of the day
+# (2026-09-28, on an account that hit its usage limit that morning). Claude is
+# spent on demand only: no PR waiting means no Claude call at all.
+PREFLIGHT_OK=0
+preflight() {
+  [[ "$PREFLIGHT_OK" -eq 1 ]] && return 0
+  local preflight cls
   preflight=$(claude -p "reply with the single word ok" --model "$MODEL" \
                 --max-budget-usd 0.05 --output-format text 2>&1 | tail -2)
   # "Exceeded USD budget" is the preflight's own $0.05 cap tripping — Claude Code's
@@ -206,7 +215,8 @@ if [[ "$DRY_RUN" -eq 0 && "$LIST_ONLY" -eq 0 ]]; then
   fi
   # Not leave_down() yet: a one-word preflight can pass while a full gate still
   # hits the limit. "Resumed" is announced only after a sweep finishes clean.
-fi
+  PREFLIGHT_OK=1
+}
 
 fail_file() { printf '%s/%s#%s' "$FAIL_DIR" "$1" "$2"; }
 
@@ -263,7 +273,6 @@ fi
 
 if [[ "$REPO_COUNT" -eq 0 ]]; then
   log "no GitHub repositories found under $ROOT"
-  [[ "$DRY_RUN" -eq 0 ]] && leave_down
   exit 0
 fi
 
@@ -502,6 +511,10 @@ while IFS= read -r repo; do
       continue
     fi
 
+    # This PR needs a gate: the first time in this tick, prove Claude is reachable
+    # before spending the browser gate's build on a review that cannot run.
+    preflight
+
     # Browser evidence FIRST, so the reviewer finds it already on the PR. A
     # reviewer told to go and run the app is a reviewer who reports NOT VERIFIED
     # and clears it anyway — measured on OplifyMessage/oplify-messaging-app#33.
@@ -651,5 +664,7 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)"
   popd >/dev/null
 done <<<"$REPOS"
 
-[[ "$DRY_RUN" -eq 0 && "$sweep_outage" -eq 0 ]] && leave_down
+# "Resumed" needs proof: only a tick that actually reached Claude may announce it.
+# A tick with no PR waiting made no call, so it leaves the paused state as it is.
+[[ "$DRY_RUN" -eq 0 && "$sweep_outage" -eq 0 && "$PREFLIGHT_OK" -eq 1 ]] && leave_down
 log "sweep complete — $acted PR(s) acted on (max $MAX)"

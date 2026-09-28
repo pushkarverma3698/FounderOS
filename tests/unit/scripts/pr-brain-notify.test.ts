@@ -27,6 +27,7 @@ let home: string;
 let bin: string;
 let repo: string;
 let sends: string;
+let claudeCalls: string;
 
 function stub(name: string, body: string): void {
   const p = join(bin, name);
@@ -35,11 +36,23 @@ function stub(name: string, body: string): void {
 }
 
 /** One sweep. `preflight`/`gate` are what the fake claude prints for each call. */
-function sweep(opts: { preflight: string; gate?: string; gateRc?: number; head?: string; appGate?: boolean }): void {
+function sweep(opts: {
+  preflight: string;
+  gate?: string;
+  gateRc?: number;
+  head?: string;
+  appGate?: boolean;
+  /** Open PRs as `gh pr list` prints them; "" = none. Default: PR 56 at `head`. */
+  prs?: string;
+  /** PR comment bodies; include the marker for `head` to mark it already gated. */
+  comments?: string;
+  /** Sweep a root with no repositories in it. */
+  noRepos?: boolean;
+}): void {
   const env = {
     PATH: `${bin}:/usr/bin:/bin:/usr/local/bin`,
     HOME: home,
-    PR_BRAIN_ROOT: join(root, "repos"),
+    PR_BRAIN_ROOT: opts.noRepos ? join(root, "empty") : join(root, "repos"),
     PR_BRAIN_ENV_FILE: join(root, ".env"),
     PR_BRAIN_OWNER: "owner",
     QA_APP_ROOT: opts.appGate ? join(root, "founderos") : join(root, "no-founderos"),
@@ -47,6 +60,9 @@ function sweep(opts: { preflight: string; gate?: string; gateRc?: number; head?:
     FAKE_GATE: opts.gate ?? "done",
     FAKE_GATE_RC: String(opts.gateRc ?? 0),
     FAKE_HEAD: opts.head ?? "aaaa1111",
+    FAKE_PRS: opts.prs ?? `56 ${opts.head ?? "aaaa1111"}`,
+    FAKE_COMMENTS: opts.comments ?? "",
+    CLAUDE_CALLS: claudeCalls,
     SENDS: sends,
   };
   spawnSync("bash", [SCRIPT], { env, encoding: "utf8", timeout: 30_000 });
@@ -63,6 +79,7 @@ beforeEach(() => {
   bin = join(root, "bin");
   repo = join(root, "repos", "oplify-messaging-api");
   sends = join(root, "sends.log");
+  claudeCalls = join(root, "claude-calls.log");
   mkdirSync(join(home, ".claude"), { recursive: true });
   mkdirSync(bin, { recursive: true });
   mkdirSync(repo, { recursive: true });
@@ -71,10 +88,12 @@ beforeEach(() => {
   execFileSync("git", ["init", "-q"], { cwd: repo });
   execFileSync("git", ["remote", "add", "origin", "https://github.com/owner/oplify-messaging-api.git"], { cwd: repo });
 
-  // Preflight is the only call whose prompt asks for "ok".
+  // Preflight is the only call whose prompt asks for "ok". Every call is counted:
+  // each one is a Claude session billed against the account's usage limit.
   stub(
     "claude",
-    `case "$*" in
+    `echo call >>"$CLAUDE_CALLS"
+case "$*" in
   *"reply with the single word ok"*) printf '%s\\n' "$FAKE_PREFLIGHT"; exit 0 ;;
   *) printf '%s\\n' "$FAKE_GATE"; exit "$FAKE_GATE_RC" ;;
 esac`,
@@ -84,9 +103,9 @@ esac`,
     `case "$*" in
   "api user"*) echo owner ;;
   "auth status"*) exit 0 ;;
-  "pr list"*) echo "56 $FAKE_HEAD" ;;
+  "pr list"*) [ -n "$FAKE_PRS" ] && echo "$FAKE_PRS" ;;
   *"headRefOid"*) echo "$FAKE_HEAD" ;;
-  *"--json comments"*) echo "" ;;
+  *"--json comments"*) echo "$FAKE_COMMENTS" ;;
   *"reviewDecision"*) echo "CLEARED — marked ready · title" ;;
   *"baseRefName"*) echo main ;;
   *"--json url"*) echo "https://github.com/owner/oplify-messaging-api/pull/56" ;;
@@ -210,5 +229,54 @@ describe("pr-brain — app-gate screenshots (issue #730)", () => {
     sweep({ preflight: "ok", appGate: true });
     sweep({ preflight: "ok", appGate: true, head: "dddd4444" });
     expect(telegramSends().filter((m) => m.startsWith("PHOTO"))).toHaveLength(4);
+  });
+});
+
+describe("pr-brain — Claude is called on demand only", () => {
+  // 2026-09-28: the preflight ran on every 20-minute tick, before the sweep looked
+  // for work — 72 Claude sessions a day on a box whose PR queue was empty most of
+  // the day, on an account that hit its usage limit the same morning.
+  const claudeCallCount = () =>
+    existsSync(claudeCalls) ? readFileSync(claudeCalls, "utf8").split("\n").filter(Boolean).length : 0;
+
+  it("makes no Claude call when no PR is open", () => {
+    for (let i = 0; i < 3; i++) sweep({ preflight: "ok", prs: "" });
+    expect(claudeCallCount()).toBe(0);
+  });
+
+  it("makes no Claude call when every open PR is already gated at its head", () => {
+    sweep({ preflight: "ok", comments: "<!-- brain-reviewed: aaaa1111 -->" });
+    expect(claudeCallCount()).toBe(0);
+  });
+
+  it("preflights once, then gates, when a PR is waiting", () => {
+    sweep({ preflight: "ok" });
+    expect(claudeCallCount()).toBe(2);
+    const log = readFileSync(join(home, ".claude", "pr-brain.log"), "utf8");
+    expect(log).toMatch(/gating oplify-messaging-api#56/);
+  });
+
+  it("preflights once per sweep, however many PRs it gates", () => {
+    sweep({ preflight: "ok", prs: "56 aaaa1111\n57 aaaa1111" });
+    // one preflight + one gate per PR
+    expect(claudeCallCount()).toBe(3);
+  });
+
+  it("does not announce 'resumed' from a root with no repositories", () => {
+    sweep({ preflight: LIMIT_MSG });
+    mkdirSync(join(root, "empty"), { recursive: true });
+    sweep({ preflight: "ok", noRepos: true });
+    expect(telegramSends().filter((m) => /resumed/i.test(m))).toHaveLength(0);
+  });
+
+  it("does not announce 'resumed' while paused if no PR needed Claude", () => {
+    sweep({ preflight: LIMIT_MSG });
+    sweep({ preflight: "ok", prs: "" });
+    expect(telegramSends().filter((m) => /resumed/i.test(m))).toHaveLength(0);
+    expect(existsSync(join(home, ".claude", "pr-brain.down"))).toBe(true);
+
+    // The next sweep that has work checks Claude for real, and only then resumes.
+    sweep({ preflight: "ok" });
+    expect(telegramSends().filter((m) => /resumed/i.test(m))).toHaveLength(1);
   });
 });
