@@ -31,12 +31,21 @@
 import type { Context } from "grammy";
 import { DISPATCH_REPO_ALLOWLIST } from "../tools/dispatch-repos.js";
 import { labelForRepo } from "./repo-picker.js";
+import { buildWifeCommandsHelp } from "./wife-commands.js";
+import { CAPABILITIES_CALLBACK, DEPARTMENT_LABELS, sendCapabilities } from "./capabilities-screen.js";
+import { WORKERS } from "../kernel/contracts.js";
 
 export const MENU_CALLBACK_PREFIX = "menu:";
 
-export type MenuSection = "home" | "build" | "jobs" | "system";
+/** `wife` is Tashi's commands, reached from the Jobs screen — the same text as /wife_commands. */
+export type MenuSection = "home" | "build" | "jobs" | "system" | "wife";
 
-const SECTIONS: readonly MenuSection[] = ["home", "build", "jobs", "system"];
+/** Every section. Exported so the tests cover a new one without being told about it. */
+export const MENU_SECTIONS: readonly MenuSection[] = ["home", "build", "jobs", "system", "wife"];
+const SECTIONS = MENU_SECTIONS;
+
+/** The three lanes the home screen offers; `wife` hangs off `jobs`. */
+const LANES: readonly MenuSection[] = ["build", "jobs", "system"];
 
 export function isMenuSection(value: string): value is MenuSection {
   return (SECTIONS as readonly string[]).includes(value);
@@ -63,14 +72,13 @@ function homeText(firstName?: string): string {
     `    <code>/task</code> · <code>/tasks</code>\n` +
     `⚡ <b>System</b> — health, today's spend, the emergency stop\n` +
     `    <code>/status</code> · <code>/budget</code>\n\n` +
+    // Every kernel worker, named from the same table the 🧭 list uses. The old
+    // hand-written list left out jobhunt and marked "asks first" by hand (Admin
+    // was wrong: schedule_task and record_event are gated). Which tools ask
+    // first is now read from HITL_GATED_TOOLS, one tap away.
     `<b>Or just talk to me</b> — I route it to the right team:\n` +
-    `🧠 Admin\n` +
-    `🔍 Research\n` +
-    `📨 Comms \u2022 asks first\n` +
-    `⚙️ Engineering \u2022 asks first\n` +
-    `📣 Marketing \u2022 asks first\n` +
-    `📈 Sales \u2022 asks first\n` +
-    `💻 Personal \u2022 asks first\n\n` +
+    WORKERS.map((w) => `${DEPARTMENT_LABELS[w].emoji} ${DEPARTMENT_LABELS[w].label}`).join(" · ") +
+    `\n<i>🧭 Everything I can do lists every tool each team has, and which ones ask you first.</i>\n\n` +
     `<i>"What's my focus?" · "Research Stripe's pricing" · "Summarise my inbox"</i>`
   );
 }
@@ -116,10 +124,13 @@ function jobsText(): string {
     `🔹 <code>/draft 1</code> — tailor a CV + cover letter for row 1\n` +
     `🔹 <code>/ask 1</code> — the one question that unblocks row 1\n` +
     `🔹 <code>/applied 1</code> — mark it applied, drop it off the queue\n` +
+    `🔹 <code>/replied 1</code> — a live application got an answer\n` +
+    `🔹 <code>/rejected 1</code> — a live application was turned down\n` +
     `🔹 <code>/gaps</code> — keywords the market wants that your CV does not say\n` +
     `🔹 <code>/profile</code> — what every application form gets filled from\n\n` +
-    `<b>Every one of these has a <code>wife_</code> twin</b> for Tashi's queue — ` +
-    `<code>/wife_jobs</code>, <code>/wife_draft 1</code>, and so on.\n\n` +
+    `👩 <b>Tashi's queue:</b> add <code>tashi</code> to any of these — <code>/jobs tashi</code>, ` +
+    `<code>/draft tashi 1</code>. Her <code>wife_</code> commands still work: tap below, or ` +
+    `<code>/wife_commands</code>.\n\n` +
     `<b>Plain English hits the same code:</b>\n` +
     `<i>"tashi's jobs" · "what did we find in the last 2 days" · "roles posted this week"</i>\n\n` +
     `<b>posted</b> = when the employer published it. <b>found</b> = when we first saw it. ` +
@@ -132,9 +143,11 @@ function systemText(): string {
     `⚡ <b>System</b>\n\n` +
     `🔹 <code>/status</code> — health and anything waiting on your approval\n` +
     `🔹 <code>/budget</code> — today's spend against the daily cap\n` +
+    `🔹 <code>/remind call the landlord at 3pm</code> — a reminder, pinged at that time\n` +
     `🔹 <code>/connect</code> — search and add an MCP server\n` +
     `🔹 <code>/reset</code> — clear this thread's mission state\n` +
-    `🔹 <code>/commands</code> — the full list, every command, in text\n\n` +
+    `🔹 <code>/commands</code> — the full list, every command, in text\n` +
+    `🔹 <code>/start</code> — this home screen\n\n` +
     `🛑 <code>/halt</code> — emergency stop, refuse all new work\n` +
     `▶️ <code>/resume</code> — lift a halt\n\n` +
     `<i>Every command is also in the ☰ button next to the message box.</i>`
@@ -145,6 +158,7 @@ export function buildMenuSection(section: MenuSection, firstName?: string): stri
   if (section === "build") return buildText();
   if (section === "jobs") return jobsText();
   if (section === "system") return systemText();
+  if (section === "wife") return buildWifeCommandsHelp();
   return homeText(firstName);
 }
 
@@ -153,6 +167,7 @@ const LABELS: Readonly<Record<MenuSection, string>> = {
   build: "🤖 Build something",
   jobs: "🎯 Jobs",
   system: "⚡ System",
+  wife: "👩 Tashi's jobs",
 };
 
 /**
@@ -160,16 +175,25 @@ const LABELS: Readonly<Record<MenuSection, string>> = {
  *
  * The section you are already reading is never offered again — a button that
  * re-renders the identical message reads as a dead button, and Telegram rejects
- * an edit that changes nothing, so it would also throw.
+ * an edit that changes nothing, so it would also throw. Tashi's commands hang
+ * off Jobs: that is where the question "what about hers?" comes up.
  */
 export function buildMenuKeyboardRows(active: MenuSection): { text: string; callback_data: string }[][] {
   const button = (s: MenuSection) => ({ text: LABELS[s], callback_data: `${MENU_CALLBACK_PREFIX}${s}` });
 
   if (active === "home") {
-    return [[button("build")], [button("jobs"), button("system")]];
+    return [
+      [button("build")],
+      [button("jobs"), button("system")],
+      [{ text: "🧭 Everything I can do", callback_data: CAPABILITIES_CALLBACK }],
+    ];
+  }
+  if (active === "wife") {
+    return [[button("jobs")], [button("home")]];
   }
   return [
-    SECTIONS.filter((s) => s !== "home" && s !== active).map(button),
+    ...(active === "jobs" ? [[button("wife")]] : []),
+    LANES.filter((s) => s !== active).map(button),
     [button("home")],
   ];
 }
@@ -192,6 +216,13 @@ export function menuKeyboard(active: MenuSection): {
 export async function handleMenuCallback(ctx: Context): Promise<boolean> {
   const data = ctx.callbackQuery?.data ?? "";
   if (!data.startsWith(MENU_CALLBACK_PREFIX)) return false;
+
+  // Not a section: ~85 rows is several messages, so it is sent below, not edited in.
+  if (data === CAPABILITIES_CALLBACK) {
+    await ctx.answerCallbackQuery();
+    await sendCapabilities(ctx, menuKeyboard("home"));
+    return true;
+  }
 
   const section = data.slice(MENU_CALLBACK_PREFIX.length);
   if (!isMenuSection(section)) {

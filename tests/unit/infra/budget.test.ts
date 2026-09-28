@@ -9,6 +9,8 @@
 
 import { describe, it, expect } from "vitest";
 import type { LLMResult } from "@langchain/core/outputs";
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { ChatOpenAI } from "@langchain/openai";
 import {
   estimateCost,
   normalizeModelId,
@@ -16,6 +18,7 @@ import {
   BudgetExceededError,
   BudgetGuardCallback,
   MODEL_COSTS,
+  type AccruedCall,
 } from "../../../src/infra/budget.js";
 
 // ── estimateCost ──────────────────────────────────────────────────────────────
@@ -201,6 +204,104 @@ describe("BudgetGuardCallback — onAccrue sink", () => {
     );
     await expect(cb.handleLLMEnd(geminiResult(1000, 500))).rejects.toThrow(BudgetExceededError);
     expect(calls).toHaveLength(1);
+  });
+});
+
+// ── Gemini thought tokens (2026-09-28 audit §1) ───────────────────────────────
+//
+// Gemini bills thought tokens as output, but @langchain/google-genai 2.1.31
+// sets output = candidatesTokenCount and drops thoughtsTokenCount
+// (convertUsageMetadata, dist/utils/common.js:468-472). Only totalTokenCount
+// still carries them, as llmOutput.tokenUsage.totalTokens. These cases run the
+// REAL libraries' own result mapping with the HTTP call replaced by a canned
+// response, so the callback sees the library's LLMResult, not an imitation.
+
+/** A real ChatGoogleGenerativeAI whose request returns a canned Gemini response. */
+function geminiReturning(usageMetadata: Record<string, number>): ChatGoogleGenerativeAI {
+  const model = new ChatGoogleGenerativeAI({ apiKey: "test-key", model: "gemini-3.6-flash", temperature: 0, maxRetries: 0 });
+  (model as unknown as { completionWithRetry: () => Promise<unknown> }).completionWithRetry = async () => ({
+    response: {
+      candidates: [{ content: { role: "model", parts: [{ text: "ok" }] }, finishReason: "STOP", index: 0 }],
+      usageMetadata,
+    },
+  });
+  return model;
+}
+
+/** A real OpenRouter-configured ChatOpenAI whose request returns a canned completion. */
+function openRouterReturning(usage: Record<string, unknown>): ChatOpenAI {
+  const model = new ChatOpenAI({
+    model: "nvidia/nemotron-3-super-120b-a12b:free",
+    apiKey: "sk-or-test",
+    maxRetries: 0,
+    configuration: { baseURL: "https://openrouter.ai/api/v1" },
+  });
+  (model as unknown as { completions: { completionWithRetry: () => Promise<unknown> } }).completions.completionWithRetry =
+    async () => ({
+      id: "gen-1",
+      object: "chat.completion",
+      created: 0,
+      model: "nvidia/nemotron-3-super-120b-a12b:free",
+      choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop", logprobs: null }],
+      usage,
+    });
+  return model;
+}
+
+function ledger(modelId: string): { calls: AccruedCall[]; tracker: BudgetTracker; cb: BudgetGuardCallback } {
+  const calls: AccruedCall[] = [];
+  const tracker = new BudgetTracker({ maxUsd: 10, maxTokens: 1_000_000 });
+  return { calls, tracker, cb: new BudgetGuardCallback(tracker, modelId, (c) => calls.push(c)) };
+}
+
+describe("BudgetGuardCallback — thought tokens reach the ledger", () => {
+  it("records Gemini's thought tokens as output (100 in, 50 visible, 250 thoughts → 300 out)", async () => {
+    const { calls, tracker, cb } = ledger("google-genai:gemini-3.6-flash");
+    await geminiReturning({ promptTokenCount: 100, candidatesTokenCount: 50, thoughtsTokenCount: 250, totalTokenCount: 400 })
+      .invoke("hi", { callbacks: [cb] });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ inputTokens: 100, outputTokens: 300 });
+    // Priced at the output rate: Gemini bills thoughts as output.
+    expect(calls[0]!.usd).toBeCloseTo(estimateCost(100, 300, "google-genai:gemini-3.6-flash"), 12);
+    // The run cap reads the same numbers as the ledger row.
+    expect(tracker.summary.totalOutputTokens).toBe(300);
+  });
+
+  it("records the visible output unchanged when Gemini did not think", async () => {
+    const { calls, cb } = ledger("google-genai:gemini-3.6-flash");
+    await geminiReturning({ promptTokenCount: 100, candidatesTokenCount: 50, totalTokenCount: 150 })
+      .invoke("hi", { callbacks: [cb] });
+    expect(calls[0]).toMatchObject({ inputTokens: 100, outputTokens: 50 });
+  });
+
+  it("leaves an OpenRouter/OpenAI result unchanged — reasoning is already inside completion_tokens", async () => {
+    const { calls, cb } = ledger("openrouter:nvidia/nemotron-3-super-120b-a12b:free");
+    await openRouterReturning({
+      prompt_tokens: 100,
+      completion_tokens: 50,
+      total_tokens: 150,
+      completion_tokens_details: { reasoning_tokens: 30 },
+    }).invoke("hi", { callbacks: [cb] });
+    expect(calls[0]).toMatchObject({ inputTokens: 100, outputTokens: 50 });
+  });
+
+  it("prefers a raw thoughtsTokenCount over total − input when a result carries one", async () => {
+    // No installed integration hands the callback raw Gemini counts today, but
+    // this branch already reads them (generationInfo.usage_metadata). The total
+    // can include tokens that are not output (toolUsePromptTokenCount), so the
+    // explicit thought count wins when it is there.
+    const { calls, cb } = ledger("google-genai:gemini-3.6-flash");
+    const raw: LLMResult = {
+      generations: [[{
+        text: "ok",
+        generationInfo: {
+          usage_metadata: { promptTokenCount: 100, candidatesTokenCount: 50, thoughtsTokenCount: 250, toolUsePromptTokenCount: 20, totalTokenCount: 420 },
+        },
+      }]],
+      llmOutput: {},
+    };
+    await cb.handleLLMEnd(raw);
+    expect(calls[0]).toMatchObject({ inputTokens: 100, outputTokens: 300 });
   });
 });
 

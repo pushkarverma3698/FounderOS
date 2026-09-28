@@ -22,6 +22,7 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOpenAI } from "@langchain/openai";
 import { errorMessage } from "../../src/infra/judge.js";
+import { geminiThinkingConfig } from "../../src/core/gemini-thinking.js";
 
 /** Minimal model surface so tests can inject a fake (no network) — mirrors judge.ts's JudgeModel. */
 export interface JudgeChatModel {
@@ -132,7 +133,8 @@ function buildPrompt(taskPrompt: string, reply: string): string {
   ].join("\n");
 }
 
-function buildModel(): BaseChatModel | null {
+/** Exported for the thinking-level test only; `judgeReply` is the real caller. */
+export function buildModel(): BaseChatModel | null {
   const raw = JUDGE_MODEL.includes(":") ? JUDGE_MODEL : `openrouter:${JUDGE_MODEL}`;
   const sep = raw.indexOf(":");
   const provider = raw.slice(0, sep);
@@ -164,6 +166,9 @@ function buildModel(): BaseChatModel | null {
       maxOutputTokens: 256,
       maxRetries: 1,
       apiKey: process.env["GOOGLE_GENERATIVE_AI_API_KEY"],
+      // Thoughts count against the 256 on Gemini 3.x — same level as the
+      // factory and the kernel's judge (src/core/gemini-thinking.ts).
+      thinkingConfig: geminiThinkingConfig(),
     });
   }
   return null; // anthropic not wired here — fail-open

@@ -107,6 +107,13 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     expect(valueOf(rendered, "MCP_BRIDGE_ENABLED")).toBe("true");
   });
 
+  it("preserves an on-box GEMINI_THINKING_LEVEL absent from PROD_DOTENV — the rollback lever survives a deploy", () => {
+    // DEFAULT restores Google's dynamic thinking if LOW ever costs plan
+    // quality. A lever the next deploy silently wipes back to LOW is no lever.
+    const rendered = render("GEMINI_THINKING_LEVEL=DEFAULT\n", SNAPSHOT_BASE);
+    expect(valueOf(rendered, "GEMINI_THINKING_LEVEL")).toBe("DEFAULT");
+  });
+
   it("forwards LANGCHAIN_API_KEY from the GitHub secret and pins tracing on", () => {
     const rendered = render("", SNAPSHOT_BASE, { LANGCHAIN_API_KEY: "lsv2_pt_test_value" });
     expect(valueOf(rendered, "LANGCHAIN_API_KEY")).toBe("lsv2_pt_test_value");
