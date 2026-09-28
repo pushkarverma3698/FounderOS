@@ -24,7 +24,8 @@ SELECT count(*) FROM agents.checkpoints;
 SELECT count(*) runs, min(created_at)::date first, max(created_at)::date last FROM agents.job_ingest_runs;
 
 \echo '=== F. BRAIN / RAG CORPUS ==='
-SELECT count(*) chunks, count(DISTINCT source_path) docs FROM brain.turicks_brain;
+-- brain.turicks_brain is frozen since 2026-09-05 (ADR-038); brain:sync writes brain_memories.
+SELECT count(*) chunks, count(DISTINCT source) docs FROM brain.brain_memories;
 
 \echo '=== G. EVOLUTION FINDINGS (self-improvement loop) ==='
 SELECT count(*) FROM agents.evolution_findings;
