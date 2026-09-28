@@ -39,6 +39,7 @@ const TOOLS = [
         query: { type: "string", description: "The search query" },
         topK: { type: "number", description: "Number of results to return (default 5)" },
         memoryType: { type: "string", description: "Optional filter by memory type (decision, bug, note, architecture, etc.)" },
+        project: { type: "string", description: "Optional filter by project (e.g. \"oplify\") — scopes results to one project's memories." },
       },
       required: ["query"],
     },
@@ -117,21 +118,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "search_memory": {
         const query = String(args["query"]);
         const topK = Number(args["topK"] ?? 5);
-        const filters = args["memoryType"] ? { entry_type: String(args["memoryType"]) } : undefined;
-        
+        const memoryType = args["memoryType"] ? String(args["memoryType"]) : undefined;
+        const project = args["project"] ? String(args["project"]) : undefined;
+        const filters = memoryType || project ? { memory_type: memoryType, project } : undefined;
+
         const result = await searchBrain({ query, topK, filters, table: "brain_memories" });
         if ('error' in result) {
           return formatError(`Search failed at stage ${result.error.stage}: ${result.error.message}`);
         }
-        
+
         if (result.hits.length === 0) {
           return formatResult(`No relevant context found.`);
         }
-        
+
         const text = result.hits.map((h, i) => {
           const m = h.metadata;
           return `--- Result ${i + 1} (Score: ${h.score.toFixed(3)}) ---\n` +
-                 `Type: ${m.entry_type ?? "unknown"} | Source: ${m.source_path ?? "unknown"}\n\n` +
+                 `Type: ${h.memory_type ?? "unknown"} | Project: ${h.project ?? "none"} | Source: ${m.source_path ?? "unknown"}\n\n` +
                  `${h.content}`;
         }).join("\n\n");
         

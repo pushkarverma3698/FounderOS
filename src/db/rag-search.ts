@@ -17,17 +17,37 @@ export interface RagHit {
   content: string;
   metadata: Record<string, unknown>;
   score: number; // cosine similarity in [0,1], higher = closer
+  /** brain_memories only — undefined for personal_rag/turicks_brain/research_cache. */
+  memory_type?: string;
+  project?: string | null;
 }
 
 /** Metadata-column equality filter, ANDed onto a search's WHERE clause. */
 export interface RagFilter {
   entry_type?: string;
+  /** brain_memories only: the real `memory_type` column (decision/bug/note/architecture/...). */
+  memory_type?: string;
+  /** brain_memories only: the real `project` column — scopes results to one project (e.g. "oplify"). */
+  project?: string;
 }
 
 /** Throws if `table` is not one of the two allowed RAG tables. */
 export function assertAllowedRagTable(table: string): asserts table is RagTable {
   if (!ALLOWED_RAG_TABLES.has(table as RagTable)) {
     throw new Error(`"${table}" is not an allowed RAG table`);
+  }
+}
+
+/**
+ * `memory_type`/`project` are real columns on `brain_memories` only — the other
+ * three RAG tables don't have them. Guard here so a misused filter fails with a
+ * clear message instead of a Postgres "column does not exist" from deep in a
+ * template literal.
+ */
+function assertColumnFiltersSupported(table: RagTable, filter?: RagFilter): void {
+  if (table === "brain_memories") return;
+  if (filter?.memory_type || filter?.project) {
+    throw new Error(`memory_type/project filters require table "brain_memories", got "${table}"`);
   }
 }
 
@@ -63,13 +83,26 @@ export async function searchRagTable(
   opts?: { filter?: RagFilter },
 ): Promise<RagHit[]> {
   assertAllowedRagTable(table);
+  assertColumnFiltersSupported(table, opts?.filter);
   const vec = `[${queryEmbedding.join(",")}]`;
   const limit = Math.min(Math.max(topK, 1), 10);
   const entryType = opts?.filter?.entry_type;
-  const filterClause = entryType ? sql`AND metadata->>'entry_type' = ${entryType}` : sql``;
+  const memoryType = opts?.filter?.memory_type;
+  const project = opts?.filter?.project;
+  // Leading space on every fragment: they concatenate directly with no
+  // separator, so back-to-back fragments (e.g. memory_type + project both
+  // set) would otherwise glue a bound param straight onto the next "AND"
+  // (`$2AND project`) — invalid syntax Postgres reports as "trailing junk
+  // after parameter". Caught live against real Postgres, not by the mocked
+  // unit tests (see tests/unit/db/rag-search-filters.test.ts).
+  const filterClause = sql`${entryType ? sql` AND metadata->>'entry_type' = ${entryType}` : sql``}${
+    memoryType ? sql` AND memory_type = ${memoryType}` : sql``
+  }${project ? sql` AND project = ${project}` : sql``}`;
+  const isBrainMemories = table === "brain_memories";
+  const extraCols = isBrainMemories ? sql`, memory_type, project` : sql``;
   // sql.identifier() safely quotes the (already allowlisted) table name.
   const rows = await db.execute(sql`
-    SELECT content, metadata, 1 - (embedding <=> ${vec}::vector) AS score
+    SELECT content, metadata${extraCols}, 1 - (embedding <=> ${vec}::vector) AS score
     FROM ${sql.identifier(RAG_SCHEMA)}.${sql.identifier(table)}
     WHERE embedding IS NOT NULL
     ${filterClause}
@@ -83,8 +116,15 @@ export async function searchRagTable(
       content: string;
       metadata: Record<string, unknown> | null;
       score: number;
+      memory_type?: string;
+      project?: string | null;
     }>
-  ).map((r) => ({ content: r.content, metadata: r.metadata ?? {}, score: Number(r.score) }));
+  ).map((r) => ({
+    content: r.content,
+    metadata: r.metadata ?? {},
+    score: Number(r.score),
+    ...(isBrainMemories ? { memory_type: r.memory_type, project: r.project } : {}),
+  }));
 }
 
 /**
@@ -114,6 +154,7 @@ export async function keywordSearchRagTable(
   opts?: { filter?: RagFilter },
 ): Promise<RagHit[]> {
   assertAllowedRagTable(table);
+  assertColumnFiltersSupported(table, opts?.filter);
   const terms = tokenizeQuery(query);
   if (terms.length === 0) return []; // nothing significant to match on
 
@@ -127,7 +168,19 @@ export async function keywordSearchRagTable(
   for (let i = 1; i < patterns.length; i++) whereOr = sql`${whereOr} OR ${patterns[i]!}`;
 
   const entryType = opts?.filter?.entry_type;
-  const filterClause = entryType ? sql`AND metadata->>'entry_type' = ${entryType}` : sql``;
+  const memoryType = opts?.filter?.memory_type;
+  const project = opts?.filter?.project;
+  // Leading space on every fragment: they concatenate directly with no
+  // separator, so back-to-back fragments (e.g. memory_type + project both
+  // set) would otherwise glue a bound param straight onto the next "AND"
+  // (`$2AND project`) — invalid syntax Postgres reports as "trailing junk
+  // after parameter". Caught live against real Postgres, not by the mocked
+  // unit tests (see tests/unit/db/rag-search-filters.test.ts).
+  const filterClause = sql`${entryType ? sql` AND metadata->>'entry_type' = ${entryType}` : sql``}${
+    memoryType ? sql` AND memory_type = ${memoryType}` : sql``
+  }${project ? sql` AND project = ${project}` : sql``}`;
+  const isBrainMemories = table === "brain_memories";
+  const extraCols = isBrainMemories ? sql`, memory_type, project` : sql``;
 
   // The SQL mirror of scoreByTerms: one CASE arm per term, summed. Ordering by
   // it makes the LIMIT keep the highest-overlap rows instead of arbitrary ones.
@@ -136,7 +189,7 @@ export async function keywordSearchRagTable(
   for (let i = 1; i < arms.length; i++) matchCount = sql`${matchCount} + ${arms[i]!}`;
 
   const rows = await db.execute(sql`
-    SELECT content, metadata, ${matchCount} AS match_count
+    SELECT content, metadata${extraCols}, ${matchCount} AS match_count
     FROM ${sql.identifier(RAG_SCHEMA)}.${sql.identifier(table)}
     WHERE (${whereOr})
     ${filterClause}
@@ -145,13 +198,23 @@ export async function keywordSearchRagTable(
   `);
 
   const candidates = (
-    rows as unknown as Array<{ content: string; metadata: Record<string, unknown> | null }>
-  ).map((r) => ({ content: r.content, metadata: r.metadata ?? {} }));
+    rows as unknown as Array<{
+      content: string;
+      metadata: Record<string, unknown> | null;
+      memory_type?: string;
+      project?: string | null;
+    }>
+  ).map((r) => ({
+    content: r.content,
+    metadata: r.metadata ?? {},
+    ...(isBrainMemories ? { memory_type: r.memory_type, project: r.project } : {}),
+  }));
 
   return rankByTerms(candidates, terms, (c) => c.content, limit).map((c) => ({
     content: c.content,
     metadata: c.metadata,
     score: Math.min(1, scoreByTerms(c.content, terms) / terms.length),
+    ...(isBrainMemories ? { memory_type: c.memory_type, project: c.project } : {}),
   }));
 }
 
