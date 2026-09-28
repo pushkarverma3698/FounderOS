@@ -36,6 +36,7 @@ import {
 import { webSearchTool } from "../tools/web-search.js";
 import { githubTool } from "../tools/github.js";
 import { getFounderContext } from "../db/queries.js";
+import { founderFacingContext, hasFounderFacingContext } from "../db/founder-context.js";
 import { searchMemoryTool } from "../tools/memory.js";
 import { searchKnowledge } from "../tools/knowledge.js";
 import { readCvTool } from "../tools/career.js";
@@ -211,9 +212,12 @@ export async function handleMcpToolCall(
       case "read_context": {
         const tenant = process.env["FOUNDER_TENANT"] ?? "turicks";
         try {
+          // getFounderContext returns the stored JSON object itself ({} when unset).
           const ctx = await getFounderContext(tenant);
-          if (!ctx) return textResult("No context saved yet. Use FounderOS to set your business context.");
-          return textResult(JSON.stringify(ctx.context_data, null, 2));
+          if (!hasFounderFacingContext(ctx)) {
+            return textResult("No context saved yet. Use FounderOS to set your business context.");
+          }
+          return textResult(JSON.stringify(founderFacingContext(ctx), null, 2));
         } catch {
           // DB not available in some environments (e.g. Claude Code without Postgres)
           return textResult("Context unavailable — database not connected.");

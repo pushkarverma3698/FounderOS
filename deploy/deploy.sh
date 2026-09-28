@@ -193,7 +193,7 @@ else
   echo "    brain_memories embedded rows: $EMBEDDED (refreshed by .github/workflows/brain-sync.yml)"
 fi
 
-echo "==> Seeding founder context (idempotent) — best-effort, 120s cap"
+echo "==> Seeding founder context defaults (fill-only: never overwrites a stored key) — best-effort, 120s cap"
 if timeout 120 node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts; then
   echo "    seed-founder-context OK"
 else

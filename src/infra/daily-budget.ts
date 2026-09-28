@@ -177,8 +177,8 @@ export function formatBudgetStatusLine(status: DailyBudgetStatus): string {
   );
 }
 
-/** founder_context key for deduplicated threshold alerts. */
-export const BUDGET_ALERTS_KEY = "budget_alerts_sent";
+/** founder_context key for deduplicated threshold alerts — defined with the internal-key list. */
+export { BUDGET_ALERTS_KEY } from "../db/founder-context.js";
 
 export interface BudgetAlertsState {
   date: string;
