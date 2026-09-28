@@ -28,6 +28,14 @@
 #   PR_BRAIN_ENV_FILE          dotenv holding TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID.
 #                              Set it and every gate action is announced on Telegram.
 #                              Unset => silent (log only).
+#   PR_BRAIN_MAX_ATTEMPTS      failed gates on one head before it stops retrying (default 3)
+#
+# State:
+#   ~/.claude/pr-brain.down        present while Claude is unavailable (auth, usage
+#                                  limit, overload). One Telegram message when it
+#                                  appears, one when it goes — nothing per tick.
+#   ~/.claude/pr-brain.failures/   one file per PR: "<head> <failed-attempts>".
+#   ~/.claude/pr-brain.photos/     one file per PR: the head whose screenshots were sent.
 #
 # Log: ~/.claude/pr-brain.log
 
@@ -40,6 +48,10 @@ ROOT="${PR_BRAIN_ROOT:-$HOME/Projects}"
 MAX="${PR_BRAIN_MAX:-3}"
 MODEL="${PR_BRAIN_MODEL:-sonnet}"
 BUDGET="${PR_BRAIN_BUDGET_USD:-5}"
+DOWN_FILE="$HOME/.claude/pr-brain.down"
+FAIL_DIR="$HOME/.claude/pr-brain.failures"
+PHOTO_DIR="$HOME/.claude/pr-brain.photos"
+MAX_ATTEMPTS="${PR_BRAIN_MAX_ATTEMPTS:-3}"
 # Only ever act on repositories and PRs belonging to this account. Auto-approving
 # or pushing to an upstream project's PR is not a thing this may do by accident.
 OWNER="${PR_BRAIN_OWNER:-$(gh api user --jq .login 2>/dev/null || echo __none__)}"
@@ -144,21 +156,63 @@ if [[ -f "$LOG" ]] && [[ "$(wc -l <"$LOG")" -gt 20000 ]]; then
   tail -n 5000 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
 fi
 
-# Preflight the model auth. Without this the sweep fails once per PR, twenty
-# minutes apart, forever, and the only symptom is a log nobody reads. An
-# unattended loop that cannot do its job must say so in one unmistakable line.
+# "Claude is unavailable to everyone" as opposed to "this one PR's gate broke".
+# Echoes auth | limit, or nothing. Only ever fed the last lines of a FAILED run,
+# so a review that merely discusses rate limits cannot trip it.
+claude_outage() {
+  case "$1" in
+    *"authenticate"*|*401*|*"Invalid API key"*|*"/login"*) echo auth ;;
+    *"hit your"*"limit"*|*"usage limit"*|*"limit reached"*|*"rate limit"*|*"rate_limit"*|*[Oo]verloaded*|*"credit balance is too low"*) echo limit ;;
+  esac
+}
+
+# An outage is announced once going down and once coming back. 2026-09-26/27:
+# a weekly usage limit produced 72 "Gate FAILED" messages a day, one per tick,
+# because only an AUTH failure was recognised as an outage.
+enter_down() {
+  local cls="$1" detail="$2" prev=""
+  [[ -f "$DOWN_FILE" ]] && prev=$(head -1 "$DOWN_FILE")
+  log "Claude unavailable ($cls): $detail — sweep stopped, nothing dispatched"
+  [[ "$prev" == "$cls" ]] && return 0
+  printf '%s\n%s\n' "$cls" "$(date -u '+%Y-%m-%d %H:%M UTC')" >"$DOWN_FILE"
+  case "$cls" in
+    auth) notify "🧠 pr-brain PAUSED on $(hostname -s): Claude Code auth expired. Fix: ssh founderos-vps, run 'claude', then '/login'. One more message when it resumes — none until then." ;;
+    limit) notify "🧠 pr-brain PAUSED on $(hostname -s): Claude usage limit reached (${detail}). Retrying silently every 20 min; one more message when it resumes." ;;
+    *) notify "🧠 pr-brain PAUSED on $(hostname -s): Claude preflight failed (${detail}). Retrying silently every 20 min; one more message when it resumes." ;;
+  esac
+}
+
+leave_down() {
+  [[ -f "$DOWN_FILE" ]] || return 0
+  local since; since=$(sed -n 2p "$DOWN_FILE")
+  rm -f "$DOWN_FILE"
+  log "Claude reachable again (paused since $since)"
+  notify "✅ pr-brain resumed on $(hostname -s) — Claude reachable again (paused since $since). Queued PRs are being gated now."
+}
+
+# Preflight the model. Without this the sweep fails once per PR, twenty minutes
+# apart, forever. Anything but "ok" means no gate can run this tick.
 if [[ "$DRY_RUN" -eq 0 && "$LIST_ONLY" -eq 0 ]]; then
   preflight=$(claude -p "reply with the single word ok" --model "$MODEL" \
                 --max-budget-usd 0.05 --output-format text 2>&1 | tail -2)
-  case "$preflight" in
-    *"authenticate"*|*401*|*"Invalid API key"*)
-      log "FATAL: Claude Code cannot authenticate — every gate would fail silently."
-      log "       Fix: run 'claude' interactively, then '/login'. Sweep aborted, nothing dispatched."
-      notify "🧠 pr-brain STOPPED on $(hostname -s): Claude Code auth expired. No PR is being gated until someone runs 'claude' then '/login'."
-      exit 1
-      ;;
-  esac
+  if ! printf '%s' "$preflight" | grep -qiw ok; then
+    cls=$(claude_outage "$preflight")
+    enter_down "${cls:-unknown}" "$(printf '%s' "$preflight" | tr '\n' ' ' | cut -c1-160)"
+    exit 0
+  fi
+  # Not leave_down() yet: a one-word preflight can pass while a full gate still
+  # hits the limit. "Resumed" is announced only after a sweep finishes clean.
 fi
+
+fail_file() { printf '%s/%s#%s' "$FAIL_DIR" "$1" "$2"; }
+
+# Failed attempts already spent on this exact head (0 if the head moved).
+prior_failures() {
+  local f h c; f=$(fail_file "$1" "$2")
+  [[ -f "$f" ]] || { echo 0; return; }
+  read -r h c <"$f"
+  if [[ "$h" == "$3" ]]; then echo "${c:-0}"; else echo 0; fi
+}
 
 # ---------------------------------------------------------------- repositories
 
@@ -205,6 +259,7 @@ fi
 
 if [[ "$REPO_COUNT" -eq 0 ]]; then
   log "no GitHub repositories found under $ROOT"
+  [[ "$DRY_RUN" -eq 0 ]] && leave_down
   exit 0
 fi
 
@@ -336,8 +391,14 @@ app_gate() {
 $report"
 
   # Photos only when the gate actually rendered something, only on the head being
-  # gated, and only two of them.
-  if [[ $rc -eq 0 || $rc -eq 1 ]]; then
+  # gated, only two of them, and only ONCE per head: a gate that fails and is
+  # retried re-renders the same commit (2026-09-23: oplify-messaging-app#35's two
+  # screenshots arrived six times in 100 minutes — issue #730).
+  local sent_file="$PHOTO_DIR/${slug//\//__}#${pr}"
+  if [[ -f "$sent_file" && "$(cat "$sent_file")" == "$head" ]]; then
+    log "${slug}#${pr} screenshots for ${head:0:8} already sent — not resent"
+  elif [[ $rc -eq 0 || $rc -eq 1 ]]; then
+    mkdir -p "$PHOTO_DIR" && printf '%s' "$head" >"$sent_file"
     local verdict; verdict=$([[ $rc -eq 0 ]] && echo "✅ no blocking defects" || echo "❌ BLOCKING defects")
     local n=0
     while IFS= read -r shot; do
@@ -351,6 +412,7 @@ $report"
 }
 
 acted=0
+sweep_outage=0
 
 while IFS= read -r repo; do
   [[ -z "$repo" ]] && continue
@@ -422,6 +484,14 @@ while IFS= read -r repo; do
       continue
     fi
 
+    # A head whose gate failed MAX_ATTEMPTS times is left alone until a new push
+    # (or an explicit --pr run). Retrying it every tick only repeats the failure.
+    fails=$(prior_failures "$repo_name" "$pr" "$head")
+    if [[ -z "$ONE_PR" && "$fails" -ge "$MAX_ATTEMPTS" ]]; then
+      log "$repo_name#$pr gate failed $fails times at ${head:0:8} — not retried until a new push (or pr-brain --pr $pr)"
+      continue
+    fi
+
     if [[ "$DRY_RUN" -eq 1 ]]; then
       log "DRY RUN would gate $repo_name#$pr (head ${head:0:8})"
       acted=$((acted + 1))
@@ -440,12 +510,20 @@ while IFS= read -r repo; do
     esac
 
     log "gating $repo_name#$pr (head ${head:0:8}) model=$MODEL budget=\$$BUDGET"
-    if claude -p "$(build_prompt "$pr" "$repo_name" "$head" "$app_rc")" \
+    gate_out=$(mktemp "${TMPDIR:-/tmp}/pr-brain-gate.XXXXXX")
+    claude -p "$(build_prompt "$pr" "$repo_name" "$head" "$app_rc")" \
         --model "$MODEL" \
         --permission-mode acceptEdits \
         --allowedTools "Bash Read Write Edit Grep Glob TodoWrite Skill" \
         --max-budget-usd "$BUDGET" \
-        --output-format text >>"$LOG" 2>&1; then
+        --output-format text >"$gate_out" 2>&1
+    gate_rc=$?
+    cat "$gate_out" >>"$LOG"
+    gate_tail=$(tail -n 3 "$gate_out")
+    rm -f "$gate_out"
+
+    if [[ $gate_rc -eq 0 ]]; then
+      rm -f "$(fail_file "$repo_name" "$pr")"
       log "$repo_name#$pr gate finished"
       # Report the verdict GitHub actually recorded, not what the run claimed.
       #
@@ -547,8 +625,21 @@ ${verdict}
 Merge: ${merge_result}
 $(gh pr view "$pr" --json url --jq .url 2>/dev/null)"
     else
-      log "$repo_name#$pr gate FAILED (exit $?) — see $LOG; PR left unstamped so the next sweep retries"
-      notify "⚠️ Gate FAILED to complete — ${repo_name}#${pr}. Left unstamped; next sweep retries. Log: ~/.claude/pr-brain.log"
+      outage=$(claude_outage "$gate_tail")
+      if [[ -n "$outage" ]]; then
+        # Not this PR's fault, and every remaining PR would fail the same way.
+        enter_down "$outage" "$(printf '%s' "$gate_tail" | tr '\n' ' ' | cut -c1-160)"
+        sweep_outage=1
+        break 2
+      fi
+      fails=$((fails + 1))
+      mkdir -p "$FAIL_DIR" && printf '%s %s\n' "$head" "$fails" >"$(fail_file "$repo_name" "$pr")"
+      log "$repo_name#$pr gate FAILED (exit $gate_rc, attempt $fails/$MAX_ATTEMPTS) — see $LOG; PR left unstamped"
+      if [[ "$fails" -eq 1 ]]; then
+        notify "⚠️ Gate FAILED to complete — ${repo_name}#${pr}. Retrying silently (up to ${MAX_ATTEMPTS} attempts on this head); you hear again only if it gives up. Log: ~/.claude/pr-brain.log"
+      elif [[ "$fails" -ge "$MAX_ATTEMPTS" ]]; then
+        notify "🛑 Gate gave up on ${repo_name}#${pr} after ${fails} failed attempts at ${head:0:8}. A new push re-opens it, or run on the VPS: pr-brain --pr ${pr} --repo /opt/review/${repo_name}"
+      fi
     fi
     acted=$((acted + 1))
   done <<<"$prs"
@@ -556,4 +647,5 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)"
   popd >/dev/null
 done <<<"$REPOS"
 
+[[ "$DRY_RUN" -eq 0 && "$sweep_outage" -eq 0 ]] && leave_down
 log "sweep complete — $acted PR(s) acted on (max $MAX)"
