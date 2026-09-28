@@ -68,12 +68,13 @@ function tsFilesUnder(rel: string): string[] {
 
 /**
  * A value import (not `import type`) of the RAG engine, or of a module that
- * exports RAG tools. src/mcp is not scanned: its tools are never placed in
- * DEPARTMENT_TOOLS, and the brain MCP's own `search_memory` shares a name with
- * the kernel's episodic-memory tool.
+ * exports RAG tools, from any relative path (a sibling "./rag.js" counts too).
+ * src/mcp is not scanned: its tools are never placed in DEPARTMENT_TOOLS, and
+ * the brain MCP's own `search_memory` shares a name with the kernel's
+ * episodic-memory tool.
  */
 const RAG_ENGINE_MODULES =
-  /^\s*import\s+(?!type\b)[^;]*?from\s+["'][./]+(?:db\/rag-query|db\/rag-search|db\/rag-hybrid|infra\/rag-orchestrator|tools\/rag|tools\/knowledge)\.js["']/m;
+  /^\s*import\s+(?!type\b)[^;]*?from\s+["'][^"']*\/(?:rag-query|rag-search|rag-hybrid|rag-orchestrator|rag|knowledge)\.js["']/m;
 
 /** Tool names defined in any src/tools or src/agents module that reaches the RAG engine. */
 function ragReachingToolNames(): Set<string> {
