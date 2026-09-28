@@ -17,11 +17,15 @@ export function safeHtml(text: string): string {
 /** Build the HTML body + inline keyboard for an approval card. */
 export function formatApprovalCard(
   approval: ApprovalRequest,
-  opts: { afterRestart?: boolean } = {},
+  opts: { afterRestart?: boolean; nonce?: string } = {},
 ): { html: string; keyboard: InlineKeyboard } {
+  // Nonce (when provided) prefixes the callback data so a stale card from a
+  // previous mission is rejected by the handler. Without it a button that
+  // editMessageReplyMarkup failed to clear can resume the wrong checkpoint.
+  const suffix = opts.nonce ? `:${opts.nonce}` : "";
   const keyboard = new InlineKeyboard()
-    .text("✅ Approve", "approve")
-    .text("❌ Reject", "reject");
+    .text("✅ Approve", `approve${suffix}`)
+    .text("❌ Reject", `reject${suffix}`);
   const preview = approval.preview ? `\n\n<i>${safeHtml(approval.preview.slice(0, 1500))}</i>` : "";
   const prefix = opts.afterRestart
     ? `⏸️ <b>Resuming after restart</b> — still waiting on your approval:\n\n`
