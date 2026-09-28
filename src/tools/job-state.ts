@@ -24,6 +24,8 @@ import type { UnifiedTool, ToolResult } from "./index.js";
 
 import { queryJobState, ALL_PROFILES } from "../db/job-queries.js";
 import { listProfiles, resolveProfileScope } from "./jobhunt/profile-config.js";
+import { ageInDays } from "./jobhunt/brief-assemble.js";
+import { ageLine } from "./jobhunt/brief-row.js";
 
 /** "all" / "both" / "everyone" — the founder or the LLM asking for every candidate at once. */
 
@@ -114,6 +116,31 @@ function resolveProfileFilter(raw: string | undefined): { profileId?: string | t
   return resolveProfileScope(raw, ALL_PROFILES);
 }
 
+function asDate(value: unknown): Date | null {
+  if (value instanceof Date) return value;
+  if (typeof value === "string" || typeof value === "number") {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/**
+ * "posted 3d ago · found today" on every row — computed here, by the brief's own
+ * `ageInDays` + `ageLine`, not left to the model.
+ *
+ * On 2026-09-07 the founder asked "are these of today?" four times in five
+ * minutes about a free-text answer built from `created_at` alone. The command
+ * views print this exact line; handing the model a bare timestamp made it do the
+ * date arithmetic, and "found today" got read as "posted today". A null
+ * `posted_at` says "posted date not stated", never our own storage date.
+ */
+function withAgeLabel<T extends object>(row: T, now: Date): T & { age: string } {
+  const r = row as { posted_at?: unknown; created_at?: unknown };
+  const posted = asDate(r.posted_at);
+  return { ...row, age: ageLine(posted ? ageInDays(posted, now) : null, ageInDays(asDate(r.created_at), now)) };
+}
+
 export const jobStateTool: UnifiedTool = {
   name: "job_state",
   description:
@@ -163,7 +190,10 @@ export const jobStateTool: UnifiedTool = {
       },
       since: {
         type: "string",
-        description: "Filter created_at >= ISO timestamp string.",
+        description:
+          "Found since: rows WE FIRST SAW (created_at) at or after this ISO timestamp. " +
+          "It is not a posting-date filter — when the employer published a role is `posted_at` " +
+          "(null when the posting did not say). Every row's `age` states both.",
       },
       fullDetails: {
         type: "boolean",
@@ -203,9 +233,10 @@ export const jobStateTool: UnifiedTool = {
         limit: typeof args["limit"] === "number" ? (args["limit"] as number) : undefined,
       });
 
+      const now = new Date();
       return {
         success: true,
-        data: JSON.stringify(result, null, 2),
+        data: JSON.stringify({ ...result, rows: result.rows.map((row) => withAgeLabel(row, now)) }, null, 2),
         observed: {
           kind: "record",
           evidence: `count:${result.count},total:${result.total}`,

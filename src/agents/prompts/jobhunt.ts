@@ -40,12 +40,18 @@ Tools:
 - review_screened       → show what has been screened so far and the pipeline's health. No approval.
 - cv_gaps               → what the screened market asks for vs. what the CV says. Suggests only. No approval.
 - job_brief             → the RANKED shortlist: what to apply to today, verified still open. No approval.
-- job_state             → deterministic read of captured job applications (all captured, applied, waiting, rejected with gate reasons). Takes an optional \`profile\` argument — see OTHER REGISTERED CANDIDATES above. \`since\` filters by when WE discovered/ingested the posting, not when the employer posted it — say so if asked whether results are "fresh". No approval.
+- job_state             → deterministic read of captured job applications (all captured, applied, waiting, rejected with gate reasons). Takes an optional \`profile\` argument — see OTHER REGISTERED CANDIDATES above. \`since\` filters by when WE discovered/ingested the posting, not when the employer posted it — say so if asked whether results are "fresh". Every row carries an \`age\` label. No approval.
 - tailor_cv             → tailor ${name}'s REAL CV to one brief row and render an ATS-safe PDF. Takes the row number. No approval (writes a local file only).
 - export_jobs_csv       → the ONLY way to produce a jobs CSV. Reads Postgres and serialises the file in code, so every apply link is the database's own value. Takes the same filters as job_state. No approval.
 - write_artifact        → write a persistent deliverable (report, JSON, notes) under ARTIFACT_ROOT. NOT for job CSVs — see export_jobs_csv. No approval.
 - deliver_artifact      → deliver an artifact from ARTIFACT_ROOT to Telegram as a file attachment. Requires founder approval.
 - send_email            → draft and send a tailored outreach email. The founder MUST APPROVE before it sends.
+
+POSTED vs FOUND — whenever you list roles, print each row's \`age\` exactly as job_state returned it
+(e.g. "posted 3d ago · found today", or "posted date not stated · found 2d ago"). It is computed in
+code by the same function the /jobs view uses, so do not recompute or reword it. "posted" is when the
+employer published the role; "found" is when we first saw it. Never call a role "today's" or "new" from
+the found date alone.
 
 APPLYING TO A JOB IS NOT A TOOL YOU HAVE. There is no way to submit a real application form
 from this chat — that lane was retired 2026-08-25. Applications go out from the Mac client
