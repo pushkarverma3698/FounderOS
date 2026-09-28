@@ -98,10 +98,12 @@ function kernelWith(planner: ScriptedModel, worker: ScriptedModel, synth: Script
 
 function makeCtx(chatId: number) {
   const replies: string[] = [];
+  const markups: unknown[] = [];
   const ctx = {
     chat: { id: chatId },
-    reply: vi.fn(async (text: string) => {
+    reply: vi.fn(async (text: string, opts?: { reply_markup?: unknown }) => {
       replies.push(text);
+      markups.push(opts?.reply_markup);
       return { message_id: replies.length };
     }),
     api: {
@@ -109,7 +111,7 @@ function makeCtx(chatId: number) {
       deleteMessage: vi.fn(async () => true),
     },
   } as unknown as Context;
-  return { ctx, replies };
+  return { ctx, replies, markups };
 }
 
 // ── Drills ────────────────────────────────────────────────────────────────────
@@ -226,14 +228,24 @@ describe("Ironclad fire drill (Telegram gateway → real kernel graph)", () => {
     const synth = new ScriptedModel([]);
     currentKernel = kernelWith(planner, worker, synth, [dying]);
 
-    const { ctx, replies } = makeCtx(104);
+    const { ctx, replies, markups } = makeCtx(104);
     await runKernelText(ctx, "Post the pricing update");
 
     const finalReply = replies.at(-1)!;
-    // Clean exit with the typed diagnostic: stage + component + what is preserved.
-    expect(finalReply).toContain("Task stopped");
-    expect(finalReply).toContain("validation failure");
-    expect(finalReply).toContain("completed steps are preserved");
+    // Clean exit with the typed diagnostic. Since 2026-09-28 the founder reads it
+    // as the failure card (src/gateway/failure-card.ts): the objective and reason
+    // in words, stage · component in the expandable details, and a 🔁 Retry.
+    expect(finalReply).toContain("I couldn't finish:");
+    expect(finalReply).toContain("Post the pricing update to the site");
+    expect(finalReply).toMatch(/validation · \S/);
+    expect(JSON.stringify(markups.at(-1))).toContain('"retry:');
+    // The kernel's own text is unchanged: it is what the checkpoint keeps as the
+    // turn's reply, and the next planner call reads it as history.
+    const state = await currentKernel.getState({ configurable: { thread_id: threadIdFor(104) } });
+    const stored = (state.values as { reply: string }).reply;
+    expect(stored).toContain("Task stopped");
+    expect(stored).toContain("validation failure");
+    expect(stored).toContain("completed steps are preserved");
     // The synthesizer never ran — no reply was fabricated from a failed mission.
     expect(synth.calls).toBe(0);
   });
