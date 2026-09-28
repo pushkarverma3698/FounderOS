@@ -28,17 +28,9 @@ const context = {
     "Naggar Retreat — Himalayan farm homestay in Himachal Pradesh (separate brand boundary)",
   ],
 
-  current_priorities: [
-    "Ship 3 live proof showcases at proof.turicks.com (showcase-1 AgentOps first)",
-    "LinkedIn build-in-public: 3–5 posts/week via FounderOS marketing dept (HITL on every post)",
-    "Proof Drops: 2–3 custom cinematic artifacts/week to AI/dev-tool seed–Series A target list",
-    "Keep turicks-brain current: pnpm brain:sync after every strategy/ADR change",
-    "Land first $8K+ Cinematic Launch Experience client (studio retainer $5K/mo after)",
-  ],
-
   // ── Tech stack ──────────────────────────────────────────────────────────────
   tech_stack:
-    "LangGraph JS (createSupervisor + createReactAgent), Gemini 2.5 Flash via OpenRouter, TypeScript 5.5 strict, Node 22 ESM, Postgres + pgvector + Drizzle ORM, grammy (Telegram), LangSmith tracing, Ollama (nomic-embed-text for turicks-brain RAG), gws (Gmail/Calendar default), direct LinkedIn API",
+    "LangGraph JS (createSupervisor + createReactAgent), Gemini 3.8 Flash via Google AI Studio, TypeScript 5.5 strict, Node 22 ESM, Postgres + pgvector + Drizzle ORM, grammy (Telegram), LangSmith tracing, Ollama (nomic-embed-text for turicks-brain RAG), gws (Gmail/Calendar default), direct LinkedIn API",
 
   local_models:
     "Ollama on VPS: nomic-embed-text for turicks-brain vector sync. All RAG embeddings stay on-machine (ADR-013/015).",
@@ -79,32 +71,10 @@ const context = {
   portfolio_signal:
     "FounderOS: production LangGraph multi-agent OS — github.com/pushkarverma3698/FounderOS",
 
-  // ── Recent achievements ─────────────────────────────────────────────────────
-  recent_wins: [
-    "FounderOS production live on Hetzner VPS since 2026-06-14 (GitHub Actions CD)",
-    "Phases 1–6 hardening merged: context isolation, typed signals, Claude judge, execution guards",
-    "turicks-brain dual RAG live (brain:sync + pgvector, Ollama embeddings)",
-    "ICP guard fix: toolsCalled honored when dept tool messages hidden (2026-06-18)",
-    "Prod hardcore QA: 6/6 office probes PASS including ICP grounding (T23/T24)",
-    "Web design pipeline: claude_code + deploy_static_site + site_deployed signal wired",
-  ],
-
-  // ── Next actions ────────────────────────────────────────────────────────────
-  next_actions: [
-    "Deploy showcase-1 live at proof.turicks.com (vps-live-showcase.sh)",
-    "Build showcases 2–3 per 05-SHOWCASE-BRIEF.md",
-    "Compile 30-account AI/dev-tool target list for Proof Drops",
-    "First LinkedIn BUILD_LOG post with showcase URL + FounderOS metrics (HITL approve)",
-    "Configure prod LinkedIn token + gws auth (or GMAIL_BACKEND=composio rollback)",
-    "First Proof Drop email to target founder (HITL approve send)",
-  ],
-
-  // ── Open questions ──────────────────────────────────────────────────────────
-  open_decisions: [
-    "proof.turicks.com DNS vs IP-only URLs for early outreach",
-    "First paying client: project vs retainer entry point",
-    "Cinematic Cloud SaaS vs studio-first — studio-first locked until $5K+ banked (SCALE gate)",
-  ],
+  // NOTE: current_priorities, next_actions, open_decisions, and recent_wins
+  // removed 2026-09-28 — they were from June and caused "What's my focus?"
+  // to answer with stale data. The bot should use update_context / read_context
+  // (admin dept) for live priorities, not compile-time seed data.
 };
 
 async function main() {
