@@ -174,16 +174,16 @@ configs, OS updates).
 
 
 ## Brain (shared memory for Claude and Antigravity)
-- Before non-trivial work: `search_memory` (turicks-brain MCP) with `project: "founderos"`, and also
-  once without a project filter. Synced `docs/` rows are currently stored with no project tag, so a
-  scoped search alone misses them. Treat hits as leads; verify against the code.
-- After real findings: `save_decision` / `save_bug` with `project: "founderos"`. No secrets or
+- Before non-trivial work: `search_memory` (turicks-brain MCP) with `project: "founderos"`. Treat hits
+  as leads; verify against the code.
+- After real findings: `save_decision` / `save_bug` / `remember` with `project: "founderos"`. No secrets or
   personal data (UPI ids, phone numbers, keys) in brain rows — every agent reads them.
-- **Brain sync**: if you created, modified or deleted anything under `docs/`, run `pnpm brain:sync`
-  before finishing. ⚠️ Known defect (2026-09-16, unfixed): it writes to whatever `DATABASE_URL` the
-  cwd `.env` holds and prints `✅ Sync complete` even when that is laptop Postgres. Confirm the rows
-  landed on `founderos-vps` (`brain.brain_memories`), not localhost, before trusting it. Fix spec:
-  `docs/plans/2026-09-16-mechanism-env-drift-safe-default.md`.
+- **Brain sync** runs on the VPS: nightly (`.github/workflows/brain-sync.yml`) and on demand with
+  `gh workflow run brain-sync.yml`. After changing anything under `docs/`, trigger it once the change
+  is merged. `pnpm brain:sync` refuses to run on any machine but `founder-os` (the brain every agent
+  reads), because a laptop run used to print `✅ Sync complete` after writing a local database nobody
+  reads. `--local` allows it for testing and labels the output LOCAL. Every synced row carries a
+  project (`founderos`, or `turicks` for the brand guide).
 
 ## End-of-session handoff (ALWAYS)
 Close every session, and every substantive piece of work, with **"Outstanding from your end"**: the

@@ -22,6 +22,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { searchBrain } from "../db/rag-search.js";
 import { brainIngest } from "../db/brain-ingest.js";
+import { writeToolIngestOptions } from "./brain-write-args.js";
 import { db } from "../db/client.js";
 import { brainMemories } from "../db/schema.js";
 import { eq, ilike, or } from "drizzle-orm";
@@ -62,7 +63,8 @@ const TOOLS = [
       type: "object",
       properties: {
         content: { type: "string", description: "The memory content (markdown supported)." },
-        tags: { type: "string", description: "Comma-separated tags (e.g., 'concept, auth, notes')" }
+        tags: { type: "string", description: "Comma-separated tags (e.g., 'concept, auth, notes')" },
+        project: { type: "string", description: "The project this applies to (e.g. \"founderos\", \"oplify\"). Always pass it — untagged memories are invisible to project-scoped search." }
       },
       required: ["content"]
     }
@@ -159,47 +161,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return formatResult(text);
       }
       
-      case "remember": {
-        const content = String(args["content"]);
-        const tags = args["tags"] ? String(args["tags"]).split(",").map(s => s.trim()) : [];
-        
-        const res = await brainIngest({
-          memoryType: "note",
-          content,
-          metadata: { tags },
-          source: "ide_mcp"
-        });
-        return formatResult(`Memory saved (ID: ${res.id})`);
-      }
-      
-      case "save_decision": {
-        const decision = String(args["decision"]);
-        const project = args["project"] ? String(args["project"]) : undefined;
-        
-        const res = await brainIngest({
-          memoryType: "decision",
-          content: decision,
-          project,
-          importance: 0.9,
-          source: "ide_mcp"
-        });
-        return formatResult(`Decision saved (ID: ${res.id})`);
-      }
-      
+      case "remember":
+      case "save_decision":
       case "save_bug": {
-        const bug = String(args["bug"]);
-        const project = args["project"] ? String(args["project"]) : undefined;
-        
-        const res = await brainIngest({
-          memoryType: "bug",
-          content: bug,
-          project,
-          importance: 0.8,
-          source: "ide_mcp"
-        });
-        return formatResult(`Bug logged (ID: ${res.id})`);
+        const opts = writeToolIngestOptions(name, args);
+        if (!opts) return formatError(`Unknown tool: ${name}`);
+        const res = await brainIngest(opts);
+        const label = name === "remember" ? "Memory saved" : name === "save_decision" ? "Decision saved" : "Bug logged";
+        return formatResult(`${label} (ID: ${res.id})${opts.project ? ` [project: ${opts.project}]` : " [no project tag]"}`);
       }
-      
+
       default:
         return formatError(`Unknown tool: ${name}`);
     }

@@ -17,6 +17,9 @@ import {
   isPlanSyncSource,
   PLAN_SYNC_DIRS,
   isSessionLogFile,
+  projectForSource,
+  resolveSyncTarget,
+  BRAIN_HOSTNAME,
 } from "../../../scripts/sync-turicks-brain.js";
 import { missingEnvFileMessage, missingVarMessage } from "../../../scripts/lib/require-env.js";
 
@@ -240,5 +243,48 @@ describe("require-env messages", () => {
     const msg = missingVarMessage("DATABASE_URL");
     expect(msg).toContain("DATABASE_URL is not set");
     expect(msg).toContain(".env.example");
+  });
+});
+
+// ── 2026-09-28: project tags + sync target guard ─────────────────────────────
+
+describe("projectForSource", () => {
+  // Synced rows were stored with project = NULL, so search_memory(project:
+  // "founderos") never returned FounderOS's own docs.
+  it("tags this repo's docs as founderos", () => {
+    expect(projectForSource("docs/decisions/001-why-langgraph.md")).toBe("founderos");
+    expect(projectForSource("docs/sessions/2026-09-16-x.md")).toBe("founderos");
+  });
+
+  it("tags the global Turicks brand guide as turicks, not founderos", () => {
+    expect(projectForSource("~/.claude/brand-guidelines/TURICKS.md")).toBe("turicks");
+  });
+});
+
+describe("resolveSyncTarget", () => {
+  // Laptop and VPS both reach Postgres on loopback (localhost vs 127.0.0.1), so
+  // the DATABASE_URL host cannot tell them apart. The machine can.
+  it("allows the VPS brain host and names it", () => {
+    const t = resolveSyncTarget({ hostname: BRAIN_HOSTNAME, allowLocal: false });
+    expect(t.ok).toBe(true);
+    expect(t.label).toContain(BRAIN_HOSTNAME);
+  });
+
+  it("refuses any other machine by default, and says how to sync for real", () => {
+    const t = resolveSyncTarget({ hostname: "Pushkars-MacBook-Air.local", allowLocal: false });
+    expect(t.ok).toBe(false);
+    expect(t.label).toMatch(/brain-sync\.yml/);
+    expect(t.label).toMatch(/--local/);
+  });
+
+  it("allows another machine only with --local, and labels it LOCAL so the success line cannot be mistaken for the VPS", () => {
+    const t = resolveSyncTarget({ hostname: "Pushkars-MacBook-Air.local", allowLocal: true });
+    expect(t.ok).toBe(true);
+    expect(t.label).toMatch(/^LOCAL/);
+    expect(t.label).toContain("Pushkars-MacBook-Air.local");
+  });
+
+  it("honours an expected-host override for a moved brain", () => {
+    expect(resolveSyncTarget({ hostname: "new-box", allowLocal: false, expectedHost: "new-box" }).ok).toBe(true);
   });
 });
