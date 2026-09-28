@@ -121,3 +121,95 @@ spending a search just to learn who the founder is.
   question should make one brain call. Verify after deploy by reading that turn's
   `trace tool.call` lines.
 - Brain rows. The turicks-brain MCP is unreachable from cloud.
+
+## Corrections found during execution (2026-09-28)
+
+The plan was an input, not the truth. Each item below says what was wrong, the evidence, and
+what was built instead. Commits are on this branch.
+
+1. **Reference lists grepped only the snake_case name.** `git grep -E
+   "search_turicks_brain|searchTuricksBrain" origin/beta` outside `docs/` and `.claude/` finds 25
+   files; the plan listed 18 (19 with `docs/FEATURES.md`). Missing: `src/agents/capabilities.ts` (the actual worker binding),
+   `src/agents/agent-tools.ts`, `src/infra/rag-orchestrator.ts`, `scripts/probe-rag.ts`,
+   `scripts/vps-marketing-launch-gate.sh`, `scripts/vps-prod-hardcore-qa.sh`,
+   `drizzle/0038_brain_backfill.sql` (applied migration, left untouched). The two VPS QA scripts
+   call `searchTuricksBrainTool.execute(...)` directly and assert nothing about worker bindings, so
+   keeping the UnifiedTool keeps them working; its import was re-checked with
+   `node --import tsx/esm -e "import { searchTuricksBrainTool } from './src/tools/rag.js'"`. The
+   `search_personal_rag` list (15 files) was complete.
+2. **"The golden task must expect `search_knowledge` instead" had nothing to change.** No golden
+   task expects `search_turicks_brain`. Only the `note` of `creative-caption` named it, and that is
+   a marketing task: marketing has not held the tool since P7. The note was corrected.
+3. **Commit 1's mechanism needed a completeness half.** A duplicate-table test over a declared map
+   rots the day someone adds a retrieval tool and forgets the map. Built: `RETRIEVAL_TOOL_TABLE`
+   plus `tests/unit/agents/retrieval-tool-table.test.ts`, which fails on two readers of one table,
+   on a worker tool whose module imports the RAG engine but has no map entry, and on a map entry
+   the tool does not actually query (the engine is spied). Also added: a worker prompt may only
+   advertise tools the worker holds (`prompt-tool-parity.test.ts`).
+4. **Commit 1 found a live bug the plan missed.** The MCP `search_knowledge` handler passed its
+   advertised `limit` to the tool as `limit`, a key the tool's schema never had. zod stripped it
+   and every MCP client got 5 results. It now maps `limit` onto the new `top_k`.
+5. **Commit 2 as written contradicted the documented design.** The plan gave `read_cv` to the
+   personal worker. `DESCRIPTIONS.jobhunt` (`src/gateway/kernel-boot.ts`) already claims every CV
+   question for both candidates, the planner prompt renders each worker's `tools=[...]`
+   (`src/kernel/planner.ts`, `buildPlannerPrompt`) so tool names are routing signals too, and
+   `tests/unit/gateway/jobhunt-department-routing.test.ts` exists because a second CV route on
+   personal won "What is Tashi's CV background?" on 2026-09-07. Built instead: personal loses
+   `search_personal_rag` and gets no CV tool; its prompt hands CV questions to jobhunt's `read_cv`
+   and says payslips and identity documents are not available. No golden task routes a CV
+   question to personal, so no expectation changed. Strongest argument against: "what are my
+   skills?" now depends entirely on the planner choosing jobhunt, whose prompt is shaped around
+   applications, and the planner's own rule points founder/work/history questions at
+   `read_context`/`search_memory`. Only a live turn can show which wins (NOT VERIFIED below).
+6. **"answers every Telegram career question" was overstated.** Since 2026-09-07 the jobhunt
+   description claims CV questions, so the planner should already have preferred jobhunt. How
+   often personal still got them needs the prod trace (NOT VERIFIED).
+7. **"read_cv reads the prod CV directory" — the order, verified in code** (`src/tools/career.ts`):
+   the personal-rag REST API (`PERSONAL_RAG_URL`, default `http://localhost:8765`, nothing listens
+   on the VPS per the comment at the CV fallback), then `PERSONAL_CV_DIR/<track>/cv.md`, then
+   `PERSONAL_CV_PATH`, then a wiki fallback labelled as synthesized. It is read-only, and omitting
+   `profileId` reads the founder's own CV (`DEFAULT_PROFILE_ID`). The two CV variables point at
+   VPS-only files (`scripts/apply-prod-env-overrides.sh` preserves them); their values are not in
+   the repo and were not checked.
+8. **Commit 3's two targets had nothing left.** The ChromaDB wording in
+   `src/agents/agent-tools/rag.ts` sat on the two wrappers commits 1-2 deleted, and
+   `src/infra/rag-orchestrator.ts` never mentioned ChromaDB. The dead directives in
+   `prompts/research.ts` were real (0 emitters in `src/`) and are gone, now guarded by a test that
+   fails when a prompt keys a rule on a directive no `src` module emits. Stale text of the same
+   class was fixed instead: the MCP `read_cv` description and the `career.ts` header described the
+   pre-2026-08-21 fallback order.
+9. **Commit 4's compile-error list was incomplete.** Removing `turicks_brain` from `RagTable` broke
+   `tsc` in `tests/unit/db/rag-hybrid.test.ts` (5 call sites) and changed assertions in
+   `rag-search.test.ts`, `keyword-rag-ranking.test.ts`, `rag-search-filters.test.ts` and the
+   `rag.test.ts` mock. `scripts/log-review/state-checks.ts` and `src/db/queries.ts` only mention
+   the table in comments. None of the four scripts that mention it (`sync-turicks-brain`,
+   `seed-founder-context`, `ingest-external-chats`, `generate-knowledge-graph`) passes it to
+   `rag-search`; `pnpm lint` type-checks `scripts/`.
+10. **Commit 5 stopped, per its own rule: the seed data is stale, and deploy re-seeds it.**
+    - `scripts/seed-founder-context.ts` is hand-written, not founder-stored: "Phase D-Bis" focus
+      locked 2026-06-17, "FounderOS v2 … 7 departments … 1250+ tests", "createSupervisor +
+      createReactAgent, Gemini 2.5 Flash via OpenRouter", a `founderos_departments` line listing
+      `github_write` and `search_turicks_brain` on marketing/sales (both removed by P7), plus
+      personal facts (`location`, `target_salary`) the plan forbids putting in a card.
+    - `deploy/deploy.sh:197` runs that seed on every deploy, and `upsertFounderContext`
+      (`src/db/queries.ts`) merges `{...current, ...seed}`. So `current_priorities` and
+      `next_actions`, two of the five keys the founder can set through `update_context`
+      (`src/tools/context-guard.ts`), are reset to the June values each time `main` deploys.
+    - A card built today would inject June priorities and a stale architecture into every worker
+      as "FOUNDER FACTS". No card was built. What unblocks it, in order: make the deploy seed
+      insert-only for founder-authored keys (or stop seeding on deploy), retire the stale
+      architecture keys from the seed (the capability manifest is generated), then build the card
+      from the `context-guard.ts` key allowlist with the 600-char cap.
+11. **Found, not fixed (out of scope, reported):** MCP `read_context` returns
+    `JSON.stringify(ctx.context_data)` (`src/mcp/server.ts`), but `getFounderContext` returns the
+    JSONB itself, so the MCP tool returns no context at all. `read_context` also renders the
+    `budget_alerts_sent` bookkeeping key as `[object Object]`. `scripts/sql/prod-metrics.sql`
+    still counts `brain.turicks_brain`.
+12. **Graph snapshot.** `.claude/graph.json` dated from 2026-08-11 and would have kept claiming
+    both retired placements. It was regenerated offline from the live registry, with the
+    generator's RAG prose corrected (brain store = `brain_memories`, queried by
+    `search_knowledge`).
+13. **Sandbox note for whoever reruns this in a cloud session:**
+    `tests/unit/tools/claude-code-git-guard.test.ts` fails when the environment already sets
+    `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n` (this sandbox injects three). It passes with them unset.
+    Not a code defect.
