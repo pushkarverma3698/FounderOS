@@ -8,7 +8,7 @@
  * composition, not a stub of it.
  *
  * Coverage:
- *  1. Delegates to the turicks_brain table via the hybrid engine
+ *  1. Delegates to the brain_memories table via the hybrid engine
  *  2. entry_type, when given, is passed as a filter to both search legs
  *  3. No entry_type → no filter passed
  *  4. Forgiving fallback: a filtered search that returns zero hits retries
@@ -34,7 +34,7 @@ vi.mock("../../../src/lib/embed.js", () => ({
 vi.mock("../../../src/db/rag-search.js", () => ({
   searchRagTable: vi.fn(),
   keywordSearchRagTable: vi.fn(),
-  ALLOWED_RAG_TABLES: new Set(["personal_rag", "turicks_brain", "research_cache"]),
+  ALLOWED_RAG_TABLES: new Set(["personal_rag", "brain_memories", "research_cache"]),
   assertAllowedRagTable: vi.fn(),
 }));
 
