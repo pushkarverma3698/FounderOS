@@ -11,6 +11,8 @@
  */
 
 import { validateJevToolDispatch, type JevToolValidationResult } from "../services/jev-ai.js";
+export { evaluateSupervisorRoute } from "../agents/supervisor.js";
+export { validateJevToolDispatch };
 
 export interface ObservedResult {
   kind: "file" | "http" | "record" | "commit" | "message";
@@ -45,7 +47,7 @@ export function validateToolDispatch(
   tool: UnifiedTool | string,
   args: Record<string, unknown>,
 ): JevToolValidationResult {
-  const toolName = typeof tool === "string" ? tool : tool.name;
+  const toolName = typeof tool === "string" ? tool : (tool?.name || "unknown_tool");
   return validateJevToolDispatch(toolName, args);
 }
 

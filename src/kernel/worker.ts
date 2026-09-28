@@ -43,6 +43,7 @@ import { finalizeNudge, workerProtocol, resolveWorkerPrompt } from "./worker-pro
 import type { KernelStateType, KernelUpdate } from "./state.js";
 import type { KernelChatModel } from "./planner.js";
 import { messageContentText } from "./message-text.js";
+import { validateJevToolDispatch } from "../tools/index.js";
 import { verifyStepResult } from "./verify.js";
 import { describeInterceptedError, isKernelTerminalError } from "./errors.js";
 import { clampToolOutput, pruneScratchForModel } from "./tool-output-guard.js";
@@ -248,6 +249,19 @@ export function makeToolsNode(specs: Record<string, WorkerSpec>) {
         messages.push(
           new ToolMessage({
             content: `❌ ${call.name} with these exact arguments already failed in this step — do NOT repeat it. Try a different approach or finalize with what you have. ${TOOL_FAILURE_MARKER} stage=tool]]`,
+            tool_call_id: callId,
+            name: call.name,
+          }),
+        );
+        executed += 1;
+        continue;
+      }
+
+      const validation = validateJevToolDispatch(call.name, (call.args ?? {}) as Record<string, unknown>);
+      if (!validation.valid) {
+        messages.push(
+          new ToolMessage({
+            content: `❌ Tool dispatch validation failed for "${call.name}": ${validation.reason ?? "Invalid arguments"}. ${TOOL_FAILURE_MARKER} stage=validation]]`,
             tool_call_id: callId,
             name: call.name,
           }),
