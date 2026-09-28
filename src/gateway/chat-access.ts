@@ -20,8 +20,12 @@
  *
  * Outside the primary chat, two things stay the founder's alone: approving a
  * side effect (HITL cards, repo dispatch buttons) and the system commands in
- * OWNER_ONLY_COMMANDS. An allow-listed guest can ask the bot anything it can
- * read; they cannot make it act.
+ * OWNER_ONLY_COMMANDS. Everything else is open to an allow-listed guest,
+ * because the kernel does not know who is typing: every tool outside
+ * HITL_GATED_TOOLS runs for them — read_emails, read_file, search_memory,
+ * edit_scheduled (cancel or move his posts and tasks), the paid research tools.
+ * So allow-list only chats whose members the founder would hand his phone to;
+ * openGroupHint says so at the moment he decides.
  *
  * In a group the bot also answers only when ADDRESSED — a command, an
  * @mention, or a reply to one of its messages. Two people talking to each
@@ -161,6 +165,8 @@ export function openGroupHint(chatId: number | string): string {
   return (
     "I'm answering you here. Everyone else in this chat is ignored until you allow it: " +
     `add <code>TELEGRAM_ALLOWED_CHAT_IDS=${chatId}</code> to the server's env and restart. ` +
+    "Once allowed, anyone here can have me read your email, files and memory, and cancel or move " +
+    "your scheduled posts and tasks. Approvals and /halt /resume /task /newproject /connect stay yours. " +
     "Mention me or reply to my messages — I stay out of the rest of the conversation."
   );
 }

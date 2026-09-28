@@ -10,6 +10,7 @@ import {
   commandName,
   isAddressedToBot,
   mayActAsOwner,
+  openGroupHint,
   stripBotMention,
 } from "../../../src/gateway/chat-access.js";
 
@@ -118,5 +119,17 @@ describe("stripBotMention", () => {
     expect(stripBotMention("@founderos_bot show jobs", "founderos_bot")).toBe("show jobs");
     expect(stripBotMention("show @FounderOS_Bot jobs", "founderos_bot")).toBe("show jobs");
     expect(stripBotMention("mail @founderos_botanist", "founderos_bot")).toBe("mail @founderos_botanist");
+  });
+});
+
+describe("openGroupHint", () => {
+  // The hint is where the founder decides to open a group, so it has to say
+  // what opening it hands over. A guest's turn runs every tool that needs no
+  // approval: read_emails, read_file, search_memory, edit_scheduled.
+  it("says what everyone in the group could then do, not only how to allow them", () => {
+    const hint = openGroupHint(-1001234567890);
+    expect(hint).toContain("TELEGRAM_ALLOWED_CHAT_IDS=-1001234567890");
+    expect(hint).toMatch(/read your email, files and memory/);
+    expect(hint).toMatch(/cancel or move your scheduled posts and tasks/);
   });
 });
