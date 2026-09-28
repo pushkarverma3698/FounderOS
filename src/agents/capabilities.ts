@@ -52,7 +52,6 @@ import {
   deployStaticSite,
   recordEvent,
   searchPersonalRag,
-  searchTuricksBrain,
   publishSignal,
   scanAiVisibility,
   getGapScans,
@@ -79,6 +78,7 @@ import { searchKnowledge } from "../tools/knowledge.js";
 import { searchMemoryTool } from "../tools/memory.js";
 import { listPendingSignals } from "./agent-tools/pending-signals.js";
 import { MCP_BRIDGE_ENABLED, MCP_BRIDGE_MANIFEST } from "../core/config.js";
+import type { RagTable } from "../db/rag-search.js";
 import type { BridgeManifest } from "../mcp/bridge-manifest.js";
 import type { BridgedTools } from "../mcp/client.js";
 
@@ -91,25 +91,34 @@ type AnyTool = any;
 /** Department → tools. buildWorkerSpecs() builds each kernel worker from THESE
  * arrays (minus anything isUnconfiguredTool withholds).
  *
- * RAG placement, as P7 (5623eff) left it — one retrieval surface per corpus, so
- * two workers can never answer the same question from different indexes:
+ * RAG placement. P7 (5623eff) left one retrieval surface per corpus, so two
+ * workers never answer the same question from different indexes. 2026-09-28
+ * added the per-worker half: one reader per table, checked against
+ * RETRIEVAL_TOOL_TABLE below. Where each RAG table is read (pinned by
+ * tests/unit/agents/capabilities.test.ts):
  *
- * searchPersonalRag  → personal
- *   Career/CV data is founder-private, not business-public (ADR-013/015).
- *   jobhunt used to carry it too; P7 removed that overlap — jobhunt reads the CV
- *   through readCv/cvGaps, which is the path its prompts actually name.
+ * brain_memories → marketing + research + sales
+ * research_cache → research
+ * personal_rag   → personal
  *
- * searchTuricksBrain → research
- *   Business knowledge (strategy, ADRs, brand, founder profile). P7 narrowed this
- *   from personal+research+sales+marketing to research alone; sales and marketing
- *   keep searchKnowledge for the same material.
+ * brain_memories: business knowledge (strategy, ADRs, brand, founder profile),
+ *   read only through searchKnowledge. research also held searchTuricksBrain,
+ *   the same engine over the same table, and on 2026-09-26 called both for one
+ *   query; searchKnowledge took its only advantage (top_k up to 10) instead.
+ *   The UnifiedTool stays in src/tools/rag.ts for scripts/probe-rag.ts and the
+ *   VPS QA probes, bound to no worker.
+ *
+ * personal_rag: career/CV data is founder-private, not business-public
+ *   (ADR-013/015). jobhunt used to carry it too; P7 removed that overlap —
+ *   jobhunt reads the CV through readCv/cvGaps, which is the path its prompts
+ *   actually name.
  */
 import { synthesizeSkill } from "./agent-tools.js";
 import { uiCheck } from "./agent-tools/ui-qa.js";
 
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact, readLogs],
-  research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, searchTuricksBrain, publishSignal, scanAiVisibility, getGapScans],
+  research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
   engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, createProjectRepo, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead, uiCheck, readLogs],
   marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
@@ -119,6 +128,21 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   // the Mac client (mac-client/mac_client/apply.py) is the one apply lane now.
   // Tombstoned in verify-architecture.ts so it cannot return by accident.
   jobhunt: [readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobState, exportJobsCsv, tailorCvForRow, writeArtifact, deliverArtifact, jobBrief, createSendEmailTool("jobhunt")],
+};
+
+/**
+ * The RAG table each retrieval tool reads. Declared rather than inferred so the
+ * one-reader-per-table rule has something to be checked against, and listed
+ * whether or not a worker holds the tool, so re-binding a retired one is caught
+ * by name. tests/unit/agents/retrieval-tool-table.test.ts fails on a worker
+ * holding two readers of one table, on a worker tool that reaches the RAG engine
+ * with no entry here, and on an entry the tool does not actually honour.
+ */
+export const RETRIEVAL_TOOL_TABLE: Readonly<Record<string, RagTable>> = {
+  search_knowledge: "brain_memories",
+  search_turicks_brain: "brain_memories",
+  search_research_cache: "research_cache",
+  search_personal_rag: "personal_rag",
 };
 
 /** Engineering CTO subgraph — per-sub-agent tools (coder/qa/devops). */

@@ -110,6 +110,47 @@ describe("searchKnowledge — delegates to the hybrid engine", () => {
   });
 });
 
+// ── Result count (top_k) ───────────────────────────────────────────────────────
+
+describe("searchKnowledge — top_k", () => {
+  // A wider result count was the one reason prompts/research.ts gave for keeping
+  // search_turicks_brain next to this tool. With top_k here, research needs one
+  // brain tool, not two over the same table.
+  it("defaults to 5 results", async () => {
+    mockSuccess([makeHit()]);
+    await searchKnowledge.invoke({ query: "composio" });
+
+    expect(mockVector.mock.calls[0]![2]).toBe(5);
+  });
+
+  it("passes top_k through to the engine", async () => {
+    mockSuccess([makeHit()]);
+    await searchKnowledge.invoke({ query: "composio", top_k: 8 });
+
+    expect(mockVector.mock.calls[0]![2]).toBe(8);
+  });
+
+  it("clamps top_k to 1–10", async () => {
+    mockSuccess([makeHit()]);
+    await searchKnowledge.invoke({ query: "composio", top_k: 50 });
+    mockSuccess([makeHit()]);
+    await searchKnowledge.invoke({ query: "composio", top_k: 0 });
+
+    expect(mockVector.mock.calls.map((c) => c[2])).toEqual([10, 1]);
+  });
+
+  it("keeps the requested top_k on the forgiving unfiltered retry", async () => {
+    mockEmbed.mockResolvedValueOnce(DUMMY_VEC);
+    mockVector.mockResolvedValueOnce([]);
+    mockKeyword.mockResolvedValueOnce([]);
+    mockSuccess([makeHit()]);
+
+    await searchKnowledge.invoke({ query: "ICP", entry_type: "strategic_pillar", top_k: 8 });
+
+    expect(mockVector.mock.calls.map((c) => c[2])).toEqual([8, 8]);
+  });
+});
+
 // ── Forgiving post-filter (prod 2026-06-15 guard) ───────────────────────────────
 
 describe("searchKnowledge — entry_type is a forgiving post-filter", () => {

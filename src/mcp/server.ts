@@ -18,7 +18,7 @@
  *   - read_context    → Founder's current business context
  *   — Memory data-source layer (ADR-016) —
  *   - search_memory   → Unified query across episodic_memory + conversations + knowledge_entries
- *   - search_knowledge → turicks-brain keyword search (knowledge_entries table)
+ *   - search_knowledge → turicks-brain hybrid search (brain_memories table, ADR-038)
  *   - read_cv         → personal-rag CV/career lookup (personal-rag REST API + wiki fallback)
  *
  * Transport-agnostic: buildMcpServer() only registers the tool handlers; the
@@ -135,7 +135,7 @@ export const FOUNDEROS_MCP_TOOLS = [
         },
         limit: {
           type: "number",
-          description: "Max results (default 5)",
+          description: "Max results (1–10, default 5)",
         },
       },
       required: ["query"],
@@ -236,9 +236,11 @@ export async function handleMcpToolCall(
       case "search_knowledge": {
         const query = String(args["query"] ?? "");
         const limit = typeof args["limit"] === "number" ? args["limit"] : 5;
-        // searchKnowledge is a LangChain DynamicStructuredTool (.invoke not .execute)
+        // searchKnowledge is a LangChain DynamicStructuredTool (.invoke not .execute).
+        // Its count parameter is top_k: passing `limit` through by name got it
+        // stripped by the tool's schema, so every client received 5 results.
         try {
-          const text = await searchKnowledge.invoke({ query, ...(limit !== 5 ? { limit } : {}) });
+          const text = await searchKnowledge.invoke({ query, top_k: limit });
           return textResult(String(text ?? "No knowledge entries found."));
         } catch (err) {
           return errorResult(`Knowledge search failed: ${(err as Error).message}`);

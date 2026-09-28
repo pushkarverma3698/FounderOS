@@ -14,6 +14,7 @@ import {
   ADMIN_SUBAGENT_TOOLS,
   SUPERVISOR_TOOLS,
   HITL_GATED_TOOLS,
+  RETRIEVAL_TOOL_TABLE,
   buildCapabilityManifest,
   mergeBridgedTools,
   stripBridgedTools,
@@ -179,29 +180,27 @@ describe("HITL Security Invariant", () => {
     expect(orphans, `imported but never registered: ${orphans.join(", ")}`).toEqual([]);
   });
 
-  it("the RAG placement docblock matches where the RAG tools actually are", () => {
+  it("the RAG placement docblock matches where each RAG table is actually read", () => {
     // The docblock claimed searchPersonalRag → personal + jobhunt and
     // searchTuricksBrain → personal + research + sales + marketing long after P7
     // (5623eff) reduced both to a single department each. A capability registry
     // whose own comment is wrong is the exact failure this file exists to prevent.
-    const toolNameOf: Record<string, string> = {
-      searchPersonalRag: "search_personal_rag",
-      searchTuricksBrain: "search_turicks_brain",
-    };
+    // Since 2026-09-28 the docblock names TABLES, read through RETRIEVAL_TOOL_TABLE,
+    // so a second tool over one table cannot hide behind a different tool name.
     const source = readFileSync(fileURLToPath(new URL("../../../src/agents/capabilities.ts", import.meta.url)), "utf8");
-    const documented = [...source.matchAll(/^\s*\*\s*(searchPersonalRag|searchTuricksBrain)\s*→\s*(.+)$/gm)];
-    expect(documented.length, "both RAG tools are documented").toBe(2);
+    const tables = [...new Set(Object.values(RETRIEVAL_TOOL_TABLE))].sort();
+    const documented = [...source.matchAll(/^\s*\*\s*([a-z_]+)\s*→\s*(.+)$/gm)].filter(([, table]) =>
+      tables.includes(table as (typeof tables)[number]),
+    );
+    expect(documented.map(([, table]) => table).sort(), "every RAG table has exactly one docblock line").toEqual(tables);
 
-    for (const [, ident, rhs] of documented) {
-      const claimed = rhs!
-        .split("+")
-        .map((s) => s.trim())
-        .sort();
+    for (const [, table, rhs] of documented) {
+      const claimed = rhs!.trim() === "none" ? [] : rhs!.split("+").map((s) => s.trim()).sort();
       const actual = Object.entries(DEPARTMENT_TOOLS)
-        .filter(([, tools]) => tools.some((t: { name: string }) => t.name === toolNameOf[ident!]))
+        .filter(([, tools]) => tools.some((t: { name: string }) => RETRIEVAL_TOOL_TABLE[t.name] === table))
         .map(([dept]) => dept)
         .sort();
-      expect(claimed, `${ident} docblock says "${rhs}" but the registry says "${actual.join(" + ")}"`).toEqual(actual);
+      expect(claimed, `${table} docblock says "${rhs}" but the registry says "${actual.join(" + ") || "none"}"`).toEqual(actual);
     }
   });
 

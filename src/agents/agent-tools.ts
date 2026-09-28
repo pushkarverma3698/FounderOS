@@ -9,7 +9,7 @@
  * Where each tool lives:
  *   agent-tools/hitl.ts        → hitlGate, ApprovalRequest, idemKey (shared core)
  *   agent-tools/research.ts    → searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript
- *   agent-tools/rag.ts         → searchResearchCache, searchPersonalRag, searchTuricksBrain
+ *   agent-tools/rag.ts         → searchResearchCache, searchPersonalRag
  *   agent-tools/comms.ts       → sendEmail, linkedinPost, createCalendarEvent, readEmails
  *   agent-tools/engineering.ts → githubRead, githubWrite, projectWorkflow, claudeCode
  *   agent-tools/diagnostics.ts → readLogs (the kernel's own journal)
@@ -48,7 +48,7 @@ export { vpsRun } from "./agent-tools/vps-run.js";
 export { readFile, listDir, sendFile, writeFile, runShell, browser } from "./agent-tools/personal.js";
 export { readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobBrief, tailorCvForRow } from "./agent-tools/jobhunt.js";
 export { recordEvent } from "./agent-tools/memory.js";
-export { searchPersonalRag, searchTuricksBrain, searchResearchCache } from "./agent-tools/rag.js";
+export { searchPersonalRag, searchResearchCache } from "./agent-tools/rag.js";
 export { publishSignal, prepareSignal, DEFAULT_TARGET_DEPT } from "./agent-tools/signals.js";
 
 export { synthesizeSkill } from "../tools/skill-synthesizer.js";

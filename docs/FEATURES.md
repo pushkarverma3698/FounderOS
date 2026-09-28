@@ -25,7 +25,7 @@ Persistent context and orchestration bookkeeping.
 ### 🔎 research
 Read-only intelligence.
 - `search_web`, `scrape_url`, `crawl_site`, `deep_research`, `search_research_cache`
-- `search_knowledge` / `search_turicks_brain` — internal knowledge (RAG)
+- `search_knowledge` — internal knowledge (RAG over the turicks-brain)
 - `scan_ai_visibility`, `get_gap_scans` — how the brand shows up in AI answers
 - `publish_signal` — hand a typed signal to another worker
 
@@ -48,12 +48,12 @@ LinkedIn growth + creative.
 - `draft_linkedin_reply` 🔒, `draft_connection_note` 🔒
 - `generate_image`, `list_brand_assets`
 - video: `list_video_brands`, `compile_video_brief`, `compile_shotlist`, `plan_video_production`, `video_production_status`
-- `search_knowledge` / `search_turicks_brain`
+- `search_knowledge`
 
 ### 💼 sales
 Outreach grounded in real research.
 - `send_email` 🔒 · `search_web`
-- `search_knowledge` / `search_turicks_brain` — ICP + messaging
+- `search_knowledge` — ICP + messaging
 
 ### 💻 personal
 The founder's laptop operator — walled off from business workers.

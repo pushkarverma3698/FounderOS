@@ -11,7 +11,10 @@
  *   searchTuricksBrainTool    — searches brain_memories (pgvector table, ADR-038).
  *                               Business decisions, strategy, ADRs, chats, notes.
  *                               search_knowledge (src/tools/knowledge.ts) hits
- *                               the same table through the same engine.
+ *                               the same table through the same engine, and is
+ *                               the one a worker holds: this tool is bound to no
+ *                               worker since 2026-09-28. scripts/probe-rag.ts and
+ *                               the VPS QA scripts still call it directly.
  *
  *   searchResearchCacheTool   — searches research_cache (pgvector table).
  *                               Previously-scraped web pages.

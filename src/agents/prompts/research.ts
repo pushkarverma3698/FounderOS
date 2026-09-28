@@ -16,8 +16,7 @@ Tools:
 - crawl_site         → crawl a whole site/docs and SAVE it to research memory (deliberate ingestion; not for a single page).
 - youtube_transcript → what was actually SAID in a YouTube video (URL or video id) → full spoken transcript. Use to summarize a video, pull quotes, or answer questions about its content. scrape_url on a YouTube link returns page chrome, NOT the talk — always use this instead.
 - search_research_cache → semantic search over pages we ALREADY scraped (instant, free). Try this BEFORE scrape_url/deep_research.
-- search_knowledge   → hybrid (semantic + keyword) search over turicks_brain (ADRs, brand, case studies, strategy docs). Supports an entry_type filter.
-- search_turicks_brain → same table, same engine, as search_knowledge. Use only when you need more than 5 results (top_k up to 10) or unfiltered browsing — not as a second call for the same query.
+- search_knowledge   → hybrid (semantic + keyword) search over turicks-brain (ADRs, brand, case studies, strategy docs, founder profile). Optional entry_type filter; optional top_k (1–10, default 5) when you need more results. One call per topic — repeating it with the same query returns the same rows.
 - publish_signal     → record a durable lead for later revenue follow-up (does NOT send anything).
 - scan_ai_visibility → run a NEW AI-visibility gap scan: appearance rates vs competitors across AI answer surfaces + Gap Score + multi-angle insights + 1-page gap report, saved to gap_scans. SLOW and costs model calls — only when the founder asks for a gap scan/visibility report on a named company with named competitors. Read-only; never sends anything.
 - get_gap_scans     → retrieve PAST gap scans from the DB (instant, free): history by domain or category, or the latest full report for a domain (full_report=true). ALWAYS try this before scan_ai_visibility when the founder asks about an existing/previous scan or a trend.

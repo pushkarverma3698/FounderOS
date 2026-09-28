@@ -1,12 +1,17 @@
 /**
- * RAG database tool wrappers for the personal department.
+ * RAG database tool wrappers for the kernel workers.
  *
- * Exposes two read-only vector-search tools:
- *   searchPersonalRag  — personal-rag (career/personal knowledge, ChromaDB at :8765)
- *   searchTuricksBrain — turicks-brain (business/strategy knowledge, ChromaDB at :8766)
+ * Exposes read-only vector-search tools:
+ *   searchPersonalRag   — personal-rag (career/personal knowledge, ChromaDB at :8765)
+ *   searchResearchCache — research_cache (web pages the research worker scraped)
  *
  * Both are ungated (no HITL) — read-only, no side effects.
  * ADR-013/015: personal-rag ↔ turicks-brain NEVER cross-write from agent layer.
+ *
+ * searchTuricksBrain lived here until 2026-09-28. It read brain_memories, the
+ * table search_knowledge already reads, and research held both — so it was
+ * called twice for one query. Its worker binding is gone; the UnifiedTool in
+ * src/tools/rag.ts stays for the scripts that probe the brain directly.
  */
 
 import { tool } from "@langchain/core/tools";
@@ -76,47 +81,6 @@ export const searchResearchCache = tool(
         .string()
         .describe("What to search. E.g. 'Acme pricing', 'competitor positioning'. Specific queries work best."),
       top_k: z.number().optional().nullable().describe("Number of results (1–10, default 5)"),
-    }),
-  },
-);
-
-// ── search_turicks_brain ───────────────────────────────────────────────────────
-
-export const searchTuricksBrain = tool(
-  async ({ query, doc_type, top_k }) => {
-    return orchestrateRagQuery({
-      store: "turicks",
-      query,
-      doc_type,
-      top_k,
-    });
-  },
-  {
-    name: "search_turicks_brain",
-    description:
-      "Semantic search over the Turicks Brain knowledge base (vector DB). " +
-      "Contains: architectural decisions, business strategy, ADRs, conversation transcripts, " +
-      "founder notes, product plans, Turicks/Naggar context. " +
-      "Read-only, no approval needed.",
-    schema: z.object({
-      query: z
-        .string()
-        .describe(
-          "What to search. E.g. 'ICP strategy', 'why we chose LangGraph', 'Naggar pricing'. " +
-            "Specific queries work best.",
-        ),
-      doc_type: z
-        .string()
-        .optional()
-        .nullable()
-        .describe(
-          "Optional filter: decision | conversation | doc | note | wiki | website",
-        ),
-      top_k: z
-        .number()
-        .optional()
-        .nullable()
-        .describe("Number of results (1–10, default 5)"),
     }),
   },
 );
