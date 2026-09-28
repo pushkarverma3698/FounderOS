@@ -7,6 +7,7 @@ import { DailyBudgetExceededError } from "../infra/daily-budget.js";
 import { logger } from "../infra/logger.js";
 import { isModelFallbackError } from "../agents/model.js";
 import { enqueueTurnAutoRetry } from "./auto-retry.js";
+import { retryKeyboard } from "./retry-button.js";
 
 const log = logger.child({ module: "error-reply" });
 
@@ -29,12 +30,23 @@ function sanitizeErrorForFounder(msg: string): string {
   return clean;
 }
 
-/** `retry` (a live text turn, replayable verbatim) lets provider exhaustion queue ONE auto-retry; a resume omits it and keeps the manual path. */
+/**
+ * `retry` (a live text turn, replayable verbatim) lets provider exhaustion queue
+ * ONE auto-retry, and otherwise puts a 🔁 Retry button on the errors a retry can
+ * fix — never both. A resume omits it and keeps the manual path.
+ *
+ * A candidate's turn (`profileId` set, /draft and /ask) is never auto-retried:
+ * the queue stores only the text, so the retry would run under the default
+ * candidate's prompt — the 2026-09-05 wrong-signature bug. It gets the button,
+ * which carries the profile (retry-button.ts).
+ */
 export async function replyForError(
   ctx: Context,
   err: unknown,
-  retry?: { chatId: string; text: string; turnId: string },
+  retry?: { chatId: string; text: string; turnId: string; profileId?: string },
 ): Promise<void> {
+  const button = retry ? retryKeyboard(retry.turnId, retry.profileId) : undefined;
+  const withButton = button ? { reply_markup: button } : {};
   if (err instanceof BudgetExceededError) {
     await ctx.reply(
       `💰 <b>Run stopped — budget limit reached</b>\n<code>${safeHtml(err.reason)}</code>`,
@@ -52,8 +64,8 @@ export async function replyForError(
   if (err instanceof TurnTimeoutError) {
     await ctx.reply(
       `⏱️ <b>That took too long and I stopped it</b> (over ${Math.round(err.ms / 1000)}s). ` +
-        `The mission state is saved — try again or break the task down.`,
-      { parse_mode: "HTML" },
+        `The mission state is saved — ${button ? "tap 🔁 Retry" : "try again"} or break the task down.`,
+      { parse_mode: "HTML", ...withButton },
     );
     return;
   }
@@ -68,8 +80,8 @@ export async function replyForError(
   if (isModelFallbackError(err)) {
     // Provider outage/rate-limit after the whole fallback chain — a raw SDK
     // stack here reads like a system bug to the founder (2026-07-12 68eae59d).
-    if (retry && (await enqueueTurnAutoRetry(retry.chatId, retry.text, retry.turnId))) {
-      // Auto-retry queued (2026-07-13 audit) — the founder does nothing.
+    if (retry && !retry.profileId && (await enqueueTurnAutoRetry(retry.chatId, retry.text, retry.turnId))) {
+      // Auto-retry queued (2026-07-13 audit) — the founder does nothing, and gets no button.
       await ctx.reply(
         `🤖 <b>The AI provider is rate-limited right now</b> — nothing is broken on our side. ` +
           `I'll retry automatically in ~3 minutes; you don't need to do anything.`,
@@ -77,11 +89,11 @@ export async function replyForError(
       );
       return;
     }
-    // No replayable input (a resume) or the queue write failed — manual fallback.
+    // No replayable input (a resume), a candidate's turn, or the queue write failed — manual path.
     await ctx.reply(
       `🤖 <b>The AI provider is overloaded or rate-limited right now</b> — nothing is broken on our side. ` +
-        `Wait a minute and send "try again"; I remember what you asked.`,
-      { parse_mode: "HTML" },
+        `Wait a minute, then ${button ? "tap 🔁 Retry or " : ""}send "try again"; I remember what you asked.`,
+      { parse_mode: "HTML", ...withButton },
     );
     return;
   }
@@ -89,7 +101,8 @@ export async function replyForError(
   log.error({ err: err instanceof Error ? (err.stack ?? msg) : msg }, "Kernel run failed");
   const displayMsg = sanitizeErrorForFounder(msg);
   await ctx.reply(
-    `❌ <b>Error</b>\n<code>${safeHtml(displayMsg)}</code>\n\nTry again, or /reset if this keeps happening.`,
-    { parse_mode: "HTML" },
+    `❌ <b>Error</b>\n<code>${safeHtml(displayMsg)}</code>\n\n` +
+      `${button ? "Tap 🔁 Retry" : "Try again"}, or /reset if this keeps happening.`,
+    { parse_mode: "HTML", ...withButton },
   );
 }
