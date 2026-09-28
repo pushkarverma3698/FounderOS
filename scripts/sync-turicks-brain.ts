@@ -34,6 +34,7 @@ import "./lib/require-env.js";
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { hostname } from "node:os";
 import { join, basename } from "node:path";
 import { sql } from "drizzle-orm";
 import { getDb } from "../src/db/client.js";
@@ -427,6 +428,40 @@ function collectDocs(rootDir: string): DocEntry[] {
   return docs;
 }
 
+// ── Sync target + project tags (2026-09-28) ───────────────────────────────────
+
+/**
+ * The machine the real brain lives on. Laptop and VPS both reach their Postgres
+ * over loopback (localhost vs 127.0.0.1), so DATABASE_URL cannot tell them apart
+ * — and a laptop run used to print "✅ Sync complete" after writing to a
+ * laptop-only database no agent reads (docs/plans/2026-09-16-mechanism-env-drift-safe-default.md).
+ * Override with BRAIN_SYNC_HOSTNAME if the brain ever moves.
+ */
+export const BRAIN_HOSTNAME = "founder-os";
+
+/** Global Turicks docs synced from outside this repo belong to `turicks`; everything else is this repo's. */
+export function projectForSource(source: string): string {
+  return source.startsWith("~/.claude/brand-guidelines/") ? "turicks" : "founderos";
+}
+
+export function resolveSyncTarget(opts: {
+  hostname: string;
+  allowLocal: boolean;
+  expectedHost?: string;
+}): { ok: boolean; label: string } {
+  const expected = opts.expectedHost ?? BRAIN_HOSTNAME;
+  if (opts.hostname === expected) return { ok: true, label: `VPS brain (${expected})` };
+  if (opts.allowLocal) return { ok: true, label: `LOCAL database on ${opts.hostname} — NOT the VPS brain agents read` };
+  return {
+    ok: false,
+    label:
+      `brain:sync: refusing to run on ${opts.hostname}. The brain every agent reads lives on ${expected}; ` +
+      `a sync here writes a local database nobody reads.\n` +
+      `  Sync for real:  gh workflow run brain-sync.yml   (or on the VPS: pnpm brain:sync)\n` +
+      `  Local testing:  pnpm brain:sync --local`,
+  };
+}
+
 // ── Upsert logic ──────────────────────────────────────────────────────────────
 
 async function upsertEntry(
@@ -505,6 +540,15 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
   const db = getDb();
   const chunks = chunkText(entry.content);
   if (chunks.length === 0) return { chunks: 0, refreshed: false };
+  const project = projectForSource(entry.source);
+
+  // Backfill: rows synced before project tagging existed have project = NULL and
+  // are skipped below when their content is unchanged. Tag them in place — one
+  // cheap UPDATE, no re-embedding. A no-op once every row carries a project.
+  await db.execute(sql`
+    UPDATE brain.brain_memories SET project = ${project}
+    WHERE source = ${entry.source} AND project IS NULL
+  `);
 
   const sha = contentSha(entry.content);
   const counted = await db.execute(sql`
@@ -535,7 +579,7 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
       content_sha: sha,
     };
     await db.execute(sql`
-      INSERT INTO brain.brain_memories (tenant_id, memory_type, content, metadata, embedding, source, source_id, status)
+      INSERT INTO brain.brain_memories (tenant_id, memory_type, content, metadata, embedding, source, source_id, status, project)
       VALUES (
         'turicks',
         ${entry.entry_type},
@@ -544,7 +588,8 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
         ${toVector(embeddings[i]!)}::vector,
         ${entry.source},
         ${contentSha(chunks[i]!)},
-        'ACTIVE'
+        'ACTIVE',
+        ${project}
       )
     `);
   }
@@ -555,6 +600,28 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
 
 async function main() {
   const keywordOnly = process.argv.includes("--keyword-only");
+  const target = resolveSyncTarget({
+    hostname: hostname(),
+    allowLocal: process.argv.includes("--local"),
+    expectedHost: process.env["BRAIN_SYNC_HOSTNAME"] || undefined,
+  });
+  if (!target.ok) {
+    console.error(target.label);
+    process.exit(1);
+  }
+  console.log(`🎯 Target: ${target.label}`);
+
+  if (!keywordOnly) {
+    // Rows from docs an older manifest synced but this one no longer collects are
+    // never visited by the per-source backfill below; tag them too. Scoped to
+    // repo doc paths, so agent-written rows (source = ide_mcp) are untouched.
+    const tagged = await getDb().execute(sql`
+      UPDATE brain.brain_memories SET project = ${projectForSource("docs/")}
+      WHERE source LIKE 'docs/%' AND project IS NULL
+    `);
+    const n = (tagged as unknown as { count?: number }).count ?? 0;
+    if (n > 0) console.log(`🏷  Tagged ${n} untagged doc chunks with project "${projectForSource("docs/")}".`);
+  }
 
   if (keywordOnly) {
     console.log(
@@ -615,7 +682,7 @@ async function main() {
   }
 
   console.log(
-    `\n✅ Sync complete: ${inserted} inserted, ${updated} updated, ${skipped} skipped` +
+    `\n✅ Sync complete → ${target.label}: ${inserted} inserted, ${updated} updated, ${skipped} skipped` +
       (keywordOnly
         ? " (keyword-only)"
         : ` · ${totalChunks} vector chunks embedded into brain_memories` +

@@ -58,7 +58,7 @@ export async function brainIngest(opts: IngestOptions): Promise<{ id: string }> 
       .update(brainMemories)
       .set({
         content,
-        embedding: `[${embedding.join(",")}]` as any,
+        embedding, // number[]: drizzle formats vector params itself; a pre-built string gets JSON-quoted and pgvector rejects it
         metadata: opts.metadata ?? {},
         importance: opts.importance?.toString() ?? null,
         confidence: opts.confidence?.toString() ?? null,
@@ -79,7 +79,7 @@ export async function brainIngest(opts: IngestOptions): Promise<{ id: string }> 
       tenant_id: tenantId,
       memory_type: opts.memoryType,
       content,
-      embedding: `[${embedding.join(",")}]` as any,
+      embedding, // number[] (see update path above)
       source: opts.source ?? null,
       source_id: sourceId,
       project: opts.project ?? null,
