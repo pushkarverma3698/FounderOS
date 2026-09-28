@@ -48,6 +48,8 @@ export interface HarvestableSighting {
 interface TokenPattern {
   readonly ats: FreeAts;
   readonly re: RegExp;
+  /** Builds the token from the match when it is not simply capture group 1 (Workday's is three parts). */
+  readonly build?: (match: RegExpMatchArray) => string;
 }
 
 /**
@@ -79,6 +81,24 @@ const PATTERNS: readonly TokenPattern[] = [
     ats: "personio",
     re: /^https?:\/\/(?!jobs\.)([a-z0-9-]+)\.jobs\.personio\.(?:com|de)(?:\/|$|\?)/i,
   },
+  // The three platforms most Dutch finance employers run on (ING, Rabobank, NN,
+  // PwC, Baker Tilly, RSM and Vistra are all Workday). Absent until 2026-09-28,
+  // which cost every one of their rows the apply-form link `/draft` hands out —
+  // 9,453 of the 39,287 postings in that day's NL sweep — and left the harvest
+  // blind to exactly the employers Tashi's registry is missing.
+  //
+  // Workday's token is `<tenant>/<wdN>/<site>`, the same packing
+  // `workdayTokenFromUrl` writes into the registry. A locale segment
+  // (`/en-US/`) and the JSON API's `/wday/cxs/<tenant>/` prefix both sit where
+  // the site usually is, and neither is one.
+  {
+    ats: "workday",
+    re: /^https?:\/\/([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com\/(?:wday\/cxs\/[^/]+\/)?(?:[a-z]{2}-[a-z]{2}\/)?([^/?#]+)/i,
+    build: (m) => `${m[1]}/${m[2]}/${m[3]}`,
+  },
+  // `www` and `app` are the platforms' own sites, never a customer board.
+  { ats: "teamtailor", re: /^https?:\/\/(?!www\.|app\.)([a-z0-9-]+)\.teamtailor\.com(?:\/|$|\?)/i },
+  { ats: "bamboohr", re: /^https?:\/\/(?!www\.|app\.)([a-z0-9-]+)\.bamboohr\.com\/(?:careers|jobs|hiring)(?:\/|$|\?)/i },
 ];
 
 /**
@@ -93,9 +113,9 @@ const PATTERNS: readonly TokenPattern[] = [
 export function extractBoardToken(url: string): ExtractedBoardToken | null {
   if (typeof url !== "string" || url.trim().length === 0) return null;
 
-  for (const { ats, re } of PATTERNS) {
+  for (const { ats, re, build } of PATTERNS) {
     const match = url.match(re);
-    const raw = match?.[1];
+    const raw = match === null ? undefined : build ? build(match) : match[1];
     if (!raw) continue;
     try {
       const token = decodeURIComponent(raw);

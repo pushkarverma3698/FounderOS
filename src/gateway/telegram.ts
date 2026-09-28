@@ -47,6 +47,18 @@ import { splitForTelegram } from "../tools/jobhunt/telegram-format.js";
 import { registerMediaHandlers } from "./media.js";
 import { runKernelText, resumeKernel } from "./kernel-run.js";
 import { isConflictError, conflictBackoffMs, CONFLICT_MAX_ATTEMPTS } from "./telegram-poll.js";
+import { REPO_CALLBACK_PREFIX } from "./repo-picker.js";
+import {
+  OWNER_ONLY_COMMANDS,
+  buildChatAccessConfig,
+  classifyChatAccess,
+  commandName,
+  isAddressedToBot,
+  mayActAsOwner,
+  openGroupHint,
+  stripBotMention,
+  type ChatAccessConfig,
+} from "./chat-access.js";
 
 // media.ts and tests import safeHtml from here — keep the path stable.
 export { safeHtml } from "./approval-card.js";
@@ -61,21 +73,66 @@ export function getBot(): Bot {
   return _bot;
 }
 
-// This bot has exactly one authorized operator: the founder's own chat, the
-// same TELEGRAM_CHAT_ID sendToChat() already targets. Anyone else who finds
-// the bot (grammy has no built-in allowlist) could otherwise trip the
-// semantic router's "engineering" intent and approve their own HITL card —
-// nothing else in this file checked who was talking. Dropped silently and
-// logged, not replied to: a reply confirms to a stranger that the bot exists
-// and is listening.
-function isAuthorizedChat(ctx: Context): boolean {
-  return String(ctx.chat?.id) === env.TELEGRAM_CHAT_ID;
+// Who may talk to the bot, and where: chat-access.ts. The founder's own chat
+// (TELEGRAM_CHAT_ID) is unchanged. Groups used to be dropped wholesale — a
+// group has its own chat id — which is why adding the bot to one produced
+// silence. Strangers are still dropped silently and logged, not replied to: a
+// reply confirms to a stranger that the bot exists and is listening. Anyone
+// who is not the founder still cannot approve a HITL card.
+function defaultChatAccess(): ChatAccessConfig {
+  return buildChatAccessConfig({
+    primaryChatId: env.TELEGRAM_CHAT_ID,
+    allowedChatIds: env.TELEGRAM_ALLOWED_CHAT_IDS,
+    ownerUserId: env.TELEGRAM_OWNER_USER_ID,
+  });
 }
 
-export function registerHandlers(bot: Bot): void {
+/** Buttons whose tap causes a side effect — the founder's alone outside his own chat. */
+function isDecisionButton(data: string): boolean {
+  return data.startsWith("approve") || data.startsWith("reject") || data.startsWith(REPO_CALLBACK_PREFIX);
+}
+
+export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultChatAccess()): void {
+  // Per process: the "how to let the others in" hint is said once per group.
+  const hintedGroups = new Set<string>();
+
   bot.use(async (ctx, next) => {
-    if (!isAuthorizedChat(ctx)) {
-      log.warn({ chatId: ctx.chat?.id, from: ctx.from?.id }, "Ignored update from unauthorized chat");
+    const who = classifyChatAccess({ chatId: ctx.chat?.id, chatType: ctx.chat?.type, fromId: ctx.from?.id }, access);
+    if (who === "denied") {
+      log.warn({ chatId: ctx.chat?.id, chatType: ctx.chat?.type, from: ctx.from?.id }, "Ignored update from unauthorized chat");
+      return;
+    }
+    const msg = ctx.message;
+    if (msg && ctx.chat) {
+      const me = { id: ctx.me.id, username: ctx.me.username };
+      const addressed = isAddressedToBot(
+        {
+          chatType: ctx.chat.type,
+          text: msg.text,
+          entities: msg.entities,
+          caption: msg.caption,
+          captionEntities: msg.caption_entities,
+          replyToFromId: msg.reply_to_message?.from?.id,
+        },
+        me,
+      );
+      // Group conversation not meant for the bot. The primary chat is exempt even
+      // when it is a group: it always answered every message and still does.
+      if (!addressed && who !== "primary") return;
+      const command = msg.text ? commandName(msg.text, me.username) : null;
+      if (command !== null && OWNER_ONLY_COMMANDS.has(command) && !mayActAsOwner(who, ctx.from?.id, access)) {
+        await ctx.reply(`Only the owner can run /${command}.`);
+        return;
+      }
+      if (who === "owner-in-group" && !hintedGroups.has(String(ctx.chat.id))) {
+        hintedGroups.add(String(ctx.chat.id));
+        // allow-failopen: the hint is advice; failing to send it must not cost the founder the turn he asked for.
+        await ctx.reply(openGroupHint(ctx.chat.id), { parse_mode: "HTML" }).catch(() => undefined);
+      }
+    }
+    const tapped = ctx.callbackQuery?.data ?? "";
+    if (tapped && isDecisionButton(tapped) && !mayActAsOwner(who, ctx.from?.id, access)) {
+      await ctx.answerCallbackQuery({ text: "Only the owner can approve or dispatch this." });
       return;
     }
     await next();
@@ -157,7 +214,10 @@ export function registerHandlers(bot: Bot): void {
   bot.command("wife_gaps", (ctx: Context) => handleGaps(withForcedProfileToken(ctx, "wife")));
 
   bot.on("message:text", async (ctx: Context) => {
-    const text = ctx.message?.text ?? "";
+    const raw = ctx.message?.text ?? "";
+    // In a group the middleware only lets addressed messages through, and
+    // "@founderos_bot show jobs" should reach the kernel as "show jobs".
+    const text = ctx.chat?.type === "private" ? raw : stripBotMention(raw, ctx.me.username);
     if (text.startsWith("/")) {
       // Registered commands never reach here (grammy matched them first), so
       // anything left is one the founder typed that does not exist. Returning
