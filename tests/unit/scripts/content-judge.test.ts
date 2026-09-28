@@ -3,7 +3,7 @@
  * FAIL, not a rubber-stamp. These cover the PURE layer (parse + aggregate);
  * the network call is fail-open and exercised live.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   parseContentVerdict,
   aggregateVerdict,
@@ -115,5 +115,36 @@ describe("judgeReply (AG-017 — the un-generalized copy of the 'dead again' cra
     };
     const v = await judgeReply("do the task", "a solid reply", passing);
     expect(v.ok).toBe(true);
+  });
+});
+
+// The QA battery's judge is a second ChatGoogleGenerativeAI built outside the
+// model factory, with an even smaller cap (256). With JUDGE_MODEL pointed at a
+// google-genai id it must send the same thinking level as everything else.
+describe("buildModel — google-genai judge thinking level", () => {
+  const KEYS = ["JUDGE_MODEL", "GEMINI_THINKING_LEVEL", "GOOGLE_GENERATIVE_AI_API_KEY"];
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const k of KEYS) saved[k] = process.env[k];
+    process.env["GOOGLE_GENERATIVE_AI_API_KEY"] = "test-key";
+    delete process.env["GEMINI_THINKING_LEVEL"];
+    vi.resetModules();
+  });
+  afterEach(() => {
+    for (const k of KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  });
+
+  it("sends LOW thinking and keeps the 256-token cap", async () => {
+    process.env["JUDGE_MODEL"] = "google-genai:gemini-3.1-flash-lite";
+    const { buildModel } = await import("../../../scripts/lib/content-judge.js");
+    const judge = buildModel() as unknown as {
+      maxOutputTokens?: number;
+      client?: { generationConfig?: { thinkingConfig?: unknown } };
+    };
+    expect(judge.client?.generationConfig?.thinkingConfig).toEqual({ thinkingLevel: "LOW" });
+    expect(judge.maxOutputTokens).toBe(256);
   });
 });

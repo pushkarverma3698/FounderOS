@@ -3,8 +3,8 @@
  * ================================================
  * Two read-only tools for the jobhunt department:
  *
- *   readCvTool   — queries the personal-rag API (localhost:8765) for CV/background data.
- *                  Falls back to reading wiki.md directly if the API is unavailable.
+ *   readCvTool   — the personal-rag API (PERSONAL_RAG_URL) first, then the CV files the
+ *                  founder maintains, then a labelled wiki.md fallback (see execute).
  *
  *   searchJobsTool — wraps Firecrawl web search, optimised for job postings.
  *                    Appends location to query when provided.

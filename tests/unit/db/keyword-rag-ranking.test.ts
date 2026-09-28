@@ -34,7 +34,7 @@ function sqlTextOf(chunkHolder: { queryChunks: unknown[] }): string {
 
 async function capturedSql(query: string, topK = 5): Promise<string> {
   execute.mockResolvedValueOnce([]);
-  await keywordSearchRagTable("turicks_brain", query, topK);
+  await keywordSearchRagTable("brain_memories", query, topK);
   return sqlTextOf(execute.mock.calls[0]![0] as { queryChunks: unknown[] });
 }
 
@@ -74,7 +74,7 @@ describe("keywordSearchRagTable — ranks in SQL before truncating", () => {
 
   it("still short-circuits an all-stopword query without touching the database", async () => {
     execute.mockResolvedValueOnce([]);
-    const hits = await keywordSearchRagTable("turicks_brain", "what did we decide about the", 5);
+    const hits = await keywordSearchRagTable("brain_memories", "what did we decide about the", 5);
 
     expect(hits).toEqual([]);
     expect(execute).not.toHaveBeenCalled();

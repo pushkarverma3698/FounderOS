@@ -108,7 +108,7 @@ describe("keywordSearchRagTable — memory_type / project filters", () => {
 
   it("refuses a memory_type/project filter on a table that doesn't have those columns", async () => {
     await expect(
-      keywordSearchRagTable("turicks_brain", "query", 5, { filter: { memory_type: "bug" } }),
+      keywordSearchRagTable("research_cache", "query", 5, { filter: { memory_type: "bug" } }),
     ).rejects.toThrow(/memory_type\/project filters require table "brain_memories"/);
   });
 

@@ -864,7 +864,7 @@ export interface JobStateArgs {
 
 export type CuratedJobRow = Pick<
   JobApplication,
-  "id" | "company" | "title" | "stage" | "salary_status" | "applied_at" | "created_at" | "url" | "track"
+  "id" | "company" | "title" | "stage" | "salary_status" | "applied_at" | "posted_at" | "created_at" | "url" | "track"
 > & { readonly gate_json?: unknown };
 
 export async function queryJobState(
@@ -932,6 +932,10 @@ export async function queryJobState(
           stage: jobApplications.stage,
           salary_status: jobApplications.salary_status,
           applied_at: jobApplications.applied_at,
+          // When the EMPLOYER published it; created_at is when WE found it.
+          // Without it the free-text path could only say "found", and was read
+          // as "posted" (2026-09-07: "are these of today?", four times).
+          posted_at: jobApplications.posted_at,
           created_at: jobApplications.created_at,
           url: jobApplications.url,
           track: jobApplications.track,

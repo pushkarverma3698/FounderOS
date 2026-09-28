@@ -139,6 +139,20 @@ describe("searchMemoryTool", () => {
     expect(result).toContain("Acme Corp");
   });
 
+  it("never surfaces internal bookkeeping keys from founder context", async () => {
+    mockGetFounderContext.mockResolvedValue({
+      active_clients: ["TestCo"],
+      budget_alerts_sent: { date: "2026-09-28", levels: [80] },
+    });
+    // "budget" matches the bookkeeping key name; type=context with no match
+    // would also dump every key — neither path may show it.
+    for (const query of ["budget", "no-such-term"]) {
+      const result = await searchMemoryTool.invoke({ query, type: "context" });
+      expect(result).not.toContain("budget alerts sent");
+      expect(result).not.toContain("[object Object]");
+    }
+  });
+
   it("filters by type=episodic — skips knowledge and context", async () => {
     mockSearchEpisodicMemory.mockResolvedValue([
       {

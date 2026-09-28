@@ -1,6 +1,6 @@
 /**
  * Job-Hunt department tools (read-only research; send_email is shared from comms).
- *   read_cv     — read CV/background from personal-rag (read-only)
+ *   read_cv     — read CV/background: the one CV reader, either candidate (read-only)
  *   search_jobs — search job postings (read-only)
  *   ingest_jobs — pull postings from the ATS feed and screen them all (supply)
  *   screen_job  — apply the hard legal gates before any drafting (records a row)
@@ -60,7 +60,7 @@ const PROFILE_ARG_DESCRIPTION =
   "Which candidate this is about, when the question names one — a first name, 'wife', " +
   "or a profile id (e.g. wife-nl-finance). Omit for the founder's own queue.";
 
-// ── Job-Hunt: read CV from personal-rag (read-only, NO approval) ─────────────
+// ── Job-Hunt: read the CV (read-only, NO approval) ───────────────────────────
 
 export const readCv = tool(
   async ({ query, track, profile }) => {

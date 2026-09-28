@@ -83,7 +83,7 @@ function addEdge(edge: GraphEdge) {
 // from the live registry, so this map only affects prose, never structure.
 const TOOL_DESCRIPTIONS: Record<string, string> = {
   search_web: "Search the web via Gemini grounding (DuckDuckGo fallback)",
-  search_knowledge: "Keyword search over turicks-brain knowledge_entries (no LLM cost)",
+  search_knowledge: "Hybrid (vector + keyword) search over the turicks-brain store, brain_memories (no LLM cost)",
   publish_signal: "Publish a typed cross-department signal to dept_signals (Postgres, async sweep)",
   send_email: "Send email via Composio Gmail (HITL-gated)",
   read_emails: "Read the founder's Gmail inbox (read-only, no approval)",
@@ -100,9 +100,8 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   run_shell: "Run shell commands on the laptop — HITL-gated",
   send_file: "Attach a laptop file into Telegram — HITL-gated",
   browser: "Safari automation on the founder's Mac — HITL-gated",
-  search_personal_rag: "Semantic vector search over personal-rag (CV/career) via Ollama + pgvector",
-  search_turicks_brain: "Semantic vector search over turicks_brain (business/strategy) via Ollama + pgvector",
-  read_cv: "Read the founder's CV from personal-rag (read-only)",
+  search_research_cache: "Semantic search over pages the research worker already scraped (research_cache)",
+  read_cv: "Read a candidate's CV — the one CV reader, either candidate (read-only)",
   search_jobs: "Search job listings via web search (Gemini grounding / DuckDuckGo)",
   read_context: "Read durable business state (founder_context table) — supervisor only",
   update_context: "Update durable business state (founder_context table) — supervisor only",
@@ -218,15 +217,15 @@ function buildGraph() {
       file: "src/lib/embed.ts",
     },
     {
-      id: "store_turicks_brain",
-      name: "turicks_brain (pgvector)",
-      description: "Business/strategy vector store; populated by pnpm brain:sync; queried by search_turicks_brain",
+      id: "store_brain_memories",
+      name: "brain_memories (pgvector)",
+      description: "The turicks-brain store (ADR-038); populated by pnpm brain:sync; queried by search_knowledge",
       file: "src/db/rag-search.ts",
     },
     {
       id: "store_personal_rag",
       name: "personal_rag (pgvector)",
-      description: "Career/CV vector store (ADR-013/015 isolated); queried by search_personal_rag",
+      description: "Career/CV vector store (ADR-013/015 isolated); synced by pnpm personal:sync; read by no worker since 2026-09-28",
       file: "src/db/rag-search.ts",
     },
     {
@@ -311,18 +310,16 @@ function buildGraph() {
     type: "depends_on",
   });
 
-  // RAG data flow: vector tools → Ollama (embed) + their pgvector store.
-  if (nodeMap.has("tool_search_turicks_brain")) {
-    addEdge({ from: "tool_search_turicks_brain", to: "service_ollama", type: "depends_on" });
-    addEdge({ from: "tool_search_turicks_brain", to: "store_turicks_brain", type: "depends_on" });
+  // RAG data flow: vector tools → Ollama (embed) + their pgvector store. Only
+  // worker-bound tools become nodes, so personal_rag (no reader since
+  // 2026-09-28) appears as a store with no tool edge.
+  if (nodeMap.has("tool_search_knowledge")) {
+    addEdge({ from: "tool_search_knowledge", to: "service_ollama", type: "depends_on" });
+    addEdge({ from: "tool_search_knowledge", to: "store_brain_memories", type: "depends_on" });
   }
-  if (nodeMap.has("tool_search_personal_rag")) {
-    addEdge({ from: "tool_search_personal_rag", to: "service_ollama", type: "depends_on" });
-    addEdge({ from: "tool_search_personal_rag", to: "store_personal_rag", type: "depends_on" });
-  }
-  // brain:sync embeds docs → Ollama → turicks_brain.
-  addEdge({ from: "store_turicks_brain", to: "service_ollama", type: "depends_on" });
-  addEdge({ from: "store_turicks_brain", to: "service_postgres", type: "depends_on" });
+  // brain:sync embeds docs → Ollama → brain_memories.
+  addEdge({ from: "store_brain_memories", to: "service_ollama", type: "depends_on" });
+  addEdge({ from: "store_brain_memories", to: "service_postgres", type: "depends_on" });
   addEdge({ from: "store_personal_rag", to: "service_postgres", type: "depends_on" });
 
   // publish_signal → Postgres dept_signals.

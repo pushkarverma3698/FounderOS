@@ -114,7 +114,7 @@ const PROMPT_FOR_PROFILE: Partial<Record<(typeof WORKERS)[number], (profileId: s
  * VPS_RUN_HOST unset, so every vps_run attempt cost two HITL approvals then died
  * with `vps-config: vps_run is not configured`.)
  */
-function isUnconfiguredTool(toolName: string): boolean {
+export function isUnconfiguredTool(toolName: string): boolean {
   if (toolName === "vps_run") return resolveVpsRunConfig() === null;
   // synthesize_skill writes + compiles TypeScript into the running app's source
   // tree. Withheld unless explicitly enabled (2026-08-08 audit, F-07) — the same
