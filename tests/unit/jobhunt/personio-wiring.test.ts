@@ -91,6 +91,22 @@ describe("PersonioAdapter", () => {
     expect(row?.description).not.toContain("<p>");
   });
 
+  it("extracts the body when using <jobDetail> tags", () => {
+    const detailFeed = FEED.replace(/jobDescription/g, "jobDetail");
+    const [row] = adapter.listJobs(detailFeed, board);
+    expect(row?.description).toContain("5 years of experience");
+  });
+
+  it("extracts the body using the ultimate fallback if structure is broken", () => {
+    const brokenFeed = `<workzag-jobs><position>
+      <id>781759</id><office>Amsterdam</office><name>Platform Engineer 2</name>
+      <jobDescriptions><![CDATA[<p>Just some plain CDATA text</p>]]></jobDescriptions>
+      <createdAt>2026-08-11T12:53:30+00:00</createdAt>
+    </position></workzag-jobs>`;
+    const [row] = adapter.listJobs(brokenFeed, board);
+    expect(row?.description).toContain("Just some plain CDATA text");
+  });
+
   it("drops a position with no title rather than emitting an unreadable row", () => {
     expect(adapter.listJobs(FEED.replace("<name>Platform Engineer</name>", ""), board)).toHaveLength(0);
   });
