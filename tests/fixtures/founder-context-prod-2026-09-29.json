@@ -1,0 +1,33 @@
+{
+  "founder": "Pushkar Verma",
+  "companies": "Turicks (The Autonomous Studio) + Naggar Retreat (Himalayan farm homestay)",
+  "location": "Amsterdam, Netherlands (global remote delivery)",
+  "current_focus": "Phase D-Bis: 3 proof showcases on proof.turicks.com + LinkedIn build-in-public + Proof Drops to AI/dev-tool startups",
+  "active_projects": [
+    "FounderOS v2 — production LangGraph multi-agent OS (7 departments, Postgres checkpointing, HITL, 1250+ tests) — LIVE on Hetzner VPS",
+    "Cinematic Launch Experience — $8K+ DFY web design via cinematic-web presets + deploy_static_site pipeline",
+    "Turicks proof gallery — showcase-1 (AgentOps) + 2 more showcases targeting Awwwards/Godly quality bar",
+    "Naggar Retreat — Himalayan farm homestay in Himachal Pradesh (separate brand boundary)"
+  ],
+  "tech_stack": "v3 deterministic kernel: LangGraph StateGraph — planner LLM, pure-code supervisor, 8 workers with capped tools, synthesizer — with Zod-validated contracts at every boundary (src/kernel/contracts.ts). TypeScript strict, Node 22 ESM, Postgres + pgvector + Drizzle ORM, grammy (Telegram). Paid Gemini Flash at temperature 0, same-key Gemini then free OpenRouter fallbacks (live chain: scripts/apply-prod-env-overrides.sh). Ollama nomic-embed-text for RAG embeddings, gws for Gmail/Calendar, direct LinkedIn API. Engineering work goes to Antigravity via GitHub issues (agent-dispatch) and is reviewed by Claude (pr-brain).",
+  "local_models": "Ollama on VPS: nomic-embed-text for turicks-brain vector sync. All RAG embeddings stay on-machine (ADR-013/015).",
+  "founderos_departments": "8 kernel workers, each with its own capped tool set (* = founder approves in Telegram before it runs): admin (read_context, update_context, search_memory, reminders, scheduled tasks, workflows, ops_state, read_logs, deliver_artifact*), research (search_web, scrape_url, deep_research, crawl_site, search_knowledge), comms (read_emails, send_email*, create_calendar_event*, schedule_social_post*), engineering (github_read, read_logs, dispatch_antigravity_task*, claude_code*, project_workflow*, deploy_static_site*, vps_run*), marketing (linkedin_post*, LinkedIn analytics and comments, generate_image, video briefs), sales (search_web, search_knowledge, send_email*), personal (read_file, list_dir, run_shell*, browser*, send_file*, write_file*), jobhunt (read_cv, search_jobs, screen_job, job_brief, tailor_cv, export_jobs_csv, deliver_artifact*, send_email*)",
+  "founderos_key_features": "Contracts-first kernel: every step result is validated, and an action claim needs a code-recorded tool receipt, so the reply cannot claim work that did not happen. Failures name the real stage and component and are always shown. HITL: approval row written before the interrupt, side effects only after the tap, idempotency key before every external send. Crash-safe threads (Postgres checkpointing; only /reset wipes). Jobhunt lane for two candidates (daily brief, tailored CV PDFs, apply links). Hybrid RAG (pgvector + keyword, RRF) over turicks-brain. Antigravity dispatch loop with Claude PR gate. Read-only MCP hub for coding tools.",
+  "turicks_services": "The Autonomous Studio — cinematic launch experiences for AI/dev-tool startups. Governed delivery via FounderOS (HITL, eval, audit). NOT generic web design or commodity SaaS builds.",
+  "turicks_pricing": "$8K minimum project (Cinematic Launch Experience) · $5K/mo minimum retainer · $8K–$25K+ done-for-you cinematic tier. Retired: $500 starter (commodity signal).",
+  "turicks_icp": "Funded AI/dev-tool startups (Seed–Series A). Need credible launch experience (not template landing page). Budget $8K+ project or $5K/mo retainer. Global remote. Disqualified: commodity website buyers, $500 seekers, enterprise RFP cycles.",
+  "turicks_positioning": "The Autonomous Studio for AI/dev-tool startups — governed AI delivery on FounderOS + cinematic design finish. FounderOS is live proof (1250+ tests, HITL on every external action).",
+  "website_builder": "cinematic-web presets (bundled in assets/cinematic-presets + optional CINEMATIC_WEB_PRESETS_ROOT clone) + apply_cinematic_preset → claude_code → deploy_static_site → nginx at proof.turicks.com/showcase-1/ and /clients/{slug}/. Commands: /webbuild Client preset slug, /run web_build. HITL on build + deploy.",
+  "proof_gallery": "proof.turicks.com — 3 showcases planned (AgentOps fictional AI observability = showcase-1). IP fallback: http://YOUR_VPS_IP/showcase-1/",
+  "naggar_retreat": "Himalayan farm homestay in Naggar, Himachal Pradesh. Separate from Turicks GTM — booking/guest comms only.",
+  "target_roles": "AI Engineer, Agent Engineer, LangGraph Specialist — production multi-agent systems, eval harness, HITL",
+  "target_salary": "€120K–€180K EUR (Amsterdam/remote EU) or equivalent",
+  "portfolio_signal": "FounderOS: production LangGraph multi-agent OS — github.com/pushkarverma3698/FounderOS",
+  "last_updated": "2026-09-28T13:19:27Z",
+  "budget_alerts_sent": {
+    "date": "2026-09-28",
+    "levels": [
+      80
+    ]
+  }
+}

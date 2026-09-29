@@ -14,6 +14,8 @@
  * This guard enforces, as a pure function with unit tests:
  *  - only recognised keys are persisted (unknown keys are dropped, not stored);
  *  - recognised keys hold the correct type (arrays of strings / a string);
+ *  - current_focus and active_projects (written by /focus and /projects too) are
+ *    bounded, and refused with the limit named rather than silently cut;
  *  - `notes` records factual STATE, not advisory/speculative recommendations
  *    (the junk note was advisory — "would be highly effective").
  *
@@ -27,10 +29,20 @@ const RECOGNISED_ARRAY_KEYS = [
   "open_deals",
   "current_priorities",
   "next_actions",
+  "active_projects",
 ] as const;
 
 /** Recognised keys whose value must be a non-empty factual string. */
 const RECOGNISED_STRING_KEYS = ["notes"] as const;
+
+/** Longest current_focus persisted (characters): it is quoted on every chat turn, so it stays one thought. */
+export const CONTEXT_FOCUS_MAX_CHARS = 300;
+
+/** Longest single active_projects entry persisted (characters). */
+export const CONTEXT_PROJECT_MAX_CHARS = 200;
+
+/** Most entries active_projects holds. */
+export const CONTEXT_PROJECTS_MAX_ITEMS = 8;
 
 /**
  * Markers that signal an advisory/speculative recommendation rather than a
@@ -66,6 +78,22 @@ function isArrayKey(key: string): boolean {
   return (RECOGNISED_ARRAY_KEYS as readonly string[]).includes(key);
 }
 
+/** One line, trimmed: a founder-typed value must not carry a newline into the "• key: value" lines it is rendered as. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** Why active_projects is refused, or null. The founder is told the limit, never a silently cut list. */
+function projectsProblem(items: readonly string[]): string | null {
+  if (items.length > CONTEXT_PROJECTS_MAX_ITEMS) {
+    return `too many entries (${items.length}, the limit is ${CONTEXT_PROJECTS_MAX_ITEMS})`;
+  }
+  const long = items.findIndex((item) => item.length > CONTEXT_PROJECT_MAX_CHARS);
+  return long === -1
+    ? null
+    : `entry ${long + 1} is too long (${items[long]!.length} characters, the limit is ${CONTEXT_PROJECT_MAX_CHARS})`;
+}
+
 function isStringKey(key: string): boolean {
   return (RECOGNISED_STRING_KEYS as readonly string[]).includes(key);
 }
@@ -92,8 +120,33 @@ export function sanitizeContextUpdates(
       }
       const items = value
         .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
-        .map((v) => v.trim());
+        .map((v) => (key === "active_projects" ? oneLine(v) : v.trim()));
+      const problem = key === "active_projects" ? projectsProblem(items) : null;
+      if (problem !== null) {
+        rejected.push({ key, reason: problem });
+        continue;
+      }
       clean[key] = items;
+      continue;
+    }
+
+    // The founder's own words: not put through the advisory filter below, which
+    // exists for the model's free-text notes.
+    if (key === "current_focus") {
+      if (typeof value !== "string") {
+        rejected.push({ key, reason: "expected a string" });
+        continue;
+      }
+      const focus = oneLine(value);
+      if (focus.length === 0) {
+        rejected.push({ key, reason: "empty" });
+        continue;
+      }
+      if (focus.length > CONTEXT_FOCUS_MAX_CHARS) {
+        rejected.push({ key, reason: `too long (${focus.length} characters, the limit is ${CONTEXT_FOCUS_MAX_CHARS})` });
+        continue;
+      }
+      clean[key] = focus;
       continue;
     }
 

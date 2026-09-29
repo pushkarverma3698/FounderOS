@@ -25,7 +25,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { sanitizeContextUpdates } from "../../../src/tools/context-guard.js";
+import {
+  CONTEXT_FOCUS_MAX_CHARS,
+  CONTEXT_PROJECTS_MAX_ITEMS,
+  CONTEXT_PROJECT_MAX_CHARS,
+  sanitizeContextUpdates,
+} from "../../../src/tools/context-guard.js";
 
 describe("sanitizeContextUpdates", () => {
   it("passes valid structured arrays, trimming and dropping empties", () => {
@@ -110,5 +115,87 @@ describe("sanitizeContextUpdates", () => {
     expect(() => sanitizeContextUpdates(null)).not.toThrow();
     // @ts-expect-error — deliberately bad runtime input
     expect(() => sanitizeContextUpdates(undefined)).not.toThrow();
+  });
+});
+
+// current_focus / active_projects: the two keys /focus and /projects write. They
+// were not recognised at all, so update_context rejected every attempt to correct
+// June's values. Both are bounded, and an over-limit value is refused with the
+// limit named, never silently cut.
+describe("sanitizeContextUpdates — current_focus and active_projects", () => {
+  it("passes a focus, trimmed and on one line", () => {
+    const { clean, rejected } = sanitizeContextUpdates({ current_focus: "  Close the Acme pilot\n  and ship the proof page  " });
+    expect(clean["current_focus"]).toBe("Close the Acme pilot and ship the proof page");
+    expect(rejected).toEqual([]);
+  });
+
+  it("does not apply the advisory filter to the founder's own focus: 'should' and 'might' are his words", () => {
+    const text = "Finish the Acme proposal; the second demo might slip, so it should go out first";
+    const { clean, rejected } = sanitizeContextUpdates({ current_focus: text });
+    expect(clean["current_focus"]).toBe(text);
+    expect(rejected).toEqual([]);
+  });
+
+  it("keeps the advisory filter on notes", () => {
+    expect(sanitizeContextUpdates({ notes: "You should consider hiring" }).clean["notes"]).toBeUndefined();
+  });
+
+  it("accepts a focus of exactly the limit and rejects one character more, naming both numbers", () => {
+    expect(sanitizeContextUpdates({ current_focus: "x".repeat(CONTEXT_FOCUS_MAX_CHARS) }).rejected).toEqual([]);
+    const { clean, rejected } = sanitizeContextUpdates({ current_focus: "x".repeat(CONTEXT_FOCUS_MAX_CHARS + 1) });
+    expect(clean["current_focus"]).toBeUndefined();
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]!.key).toBe("current_focus");
+    expect(rejected[0]!.reason).toContain(String(CONTEXT_FOCUS_MAX_CHARS + 1));
+    expect(rejected[0]!.reason).toContain(String(CONTEXT_FOCUS_MAX_CHARS));
+  });
+
+  it("measures the focus after trimming, so padding does not count against it", () => {
+    const padded = `   ${"x".repeat(CONTEXT_FOCUS_MAX_CHARS)}   `;
+    expect(sanitizeContextUpdates({ current_focus: padded }).rejected).toEqual([]);
+  });
+
+  it("rejects an empty, whitespace-only or non-string focus", () => {
+    for (const bad of ["", "   ", "\n\t", 7, ["a"], null]) {
+      const { clean, rejected } = sanitizeContextUpdates({ current_focus: bad });
+      expect(clean["current_focus"], String(bad)).toBeUndefined();
+      expect(rejected, String(bad)).toHaveLength(1);
+    }
+  });
+
+  it("passes projects, trimmed, on one line each, empties dropped", () => {
+    const { clean, rejected } = sanitizeContextUpdates({ active_projects: ["  FounderOS ", "", "Naggar\nsite"] });
+    expect(clean["active_projects"]).toEqual(["FounderOS", "Naggar site"]);
+    expect(rejected).toEqual([]);
+  });
+
+  it("accepts the most projects allowed and rejects one more, naming both numbers", () => {
+    const items = (n: number): string[] => Array.from({ length: n }, (_, i) => `Project ${i + 1}`);
+    expect(sanitizeContextUpdates({ active_projects: items(CONTEXT_PROJECTS_MAX_ITEMS) }).rejected).toEqual([]);
+    const { clean, rejected } = sanitizeContextUpdates({ active_projects: items(CONTEXT_PROJECTS_MAX_ITEMS + 1) });
+    expect(clean["active_projects"]).toBeUndefined();
+    expect(rejected[0]!.reason).toContain(String(CONTEXT_PROJECTS_MAX_ITEMS + 1));
+    expect(rejected[0]!.reason).toContain(String(CONTEXT_PROJECTS_MAX_ITEMS));
+  });
+
+  it("names which project is too long and the limit", () => {
+    const { clean, rejected } = sanitizeContextUpdates({
+      active_projects: ["Short", "y".repeat(CONTEXT_PROJECT_MAX_CHARS + 1)],
+    });
+    expect(clean["active_projects"]).toBeUndefined();
+    expect(rejected[0]!.reason).toContain("entry 2 "); // the second one, not the first
+    expect(rejected[0]!.reason).toContain(String(CONTEXT_PROJECT_MAX_CHARS + 1));
+    expect(rejected[0]!.reason).toContain(String(CONTEXT_PROJECT_MAX_CHARS));
+  });
+
+  it("rejects projects that are not an array of strings", () => {
+    const { clean, rejected } = sanitizeContextUpdates({ active_projects: "FounderOS; Naggar" });
+    expect(clean["active_projects"]).toBeUndefined();
+    expect(rejected[0]!.reason).toContain("array");
+  });
+
+  it("leaves the limits on the older keys where they were: none", () => {
+    const long = "z".repeat(CONTEXT_PROJECT_MAX_CHARS * 5);
+    expect(sanitizeContextUpdates({ active_clients: [long] }).clean["active_clients"]).toEqual([long]);
   });
 });

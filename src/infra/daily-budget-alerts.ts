@@ -26,6 +26,6 @@ export async function recordBudgetAlertSent(
   const current = await getBudgetAlertsState(tenant);
   const levels = current.date === today ? [...new Set([...current.levels, threshold])] : [threshold];
   const next: BudgetAlertsState = { date: today, levels };
-  await upsertFounderContext(tenant, { [BUDGET_ALERTS_KEY]: next });
+  await upsertFounderContext(tenant, { [BUDGET_ALERTS_KEY]: next }, "system");
   return next;
 }
