@@ -124,6 +124,11 @@ case "$group $sub" in
     mutate --arg r "$repo" --arg n "$num" --arg b "$body" '.repos[$r].issues[$n].comments += [{body: $b}]'
     ;;
 
+  "issue close")
+    need_repo; need_issue "$num"
+    mutate --arg r "$repo" --arg n "$num" '.repos[$r].issues[$n].state = "closed"'
+    ;;
+
   "pr list")
     need_repo
     head=$(flag --head) || head=""
