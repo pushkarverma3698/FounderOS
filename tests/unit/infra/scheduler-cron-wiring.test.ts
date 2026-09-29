@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { appTimeZone } from "../../../src/core/time.js";
 
 const mockSchedule = vi.fn();
 vi.mock("node-cron", () => ({ default: { schedule: mockSchedule }, schedule: mockSchedule }));
@@ -26,6 +27,9 @@ const EXPECTED_CRONS = {
   "checkpoint TTL sweep": "30 3 * * *",
   "nightly brain sync": "0 2 * * *",
   "free board sweep": "*/30 * * * *",
+  // 2026-09-29: NOT the disabled 3-day dispatch coming back. This runs only the jobhunt analyzer
+  // (zero LLM, at most one issue a day); the code-health analyzers stay off. See jobhunt-findings-cron.ts.
+  "daily jobhunt findings check": "30 9 * * *",
 } as const;
 
 /** Disabled 2026-08-21 — must NOT be registered. */
@@ -60,6 +64,17 @@ describe("startScheduler — jobs are wired, not merely written", () => {
     const withExecutor = mockSchedule.mock.calls.filter((c) => c[0] === "* * * * *").length;
 
     expect(withExecutor).toBe(withoutExecutor + 1);
+  });
+
+  it("registers the daily jobhunt findings check exactly once, in the founder's timezone", () => {
+    startScheduler();
+
+    const calls = mockSchedule.mock.calls.filter((call) => call[0] === "30 9 * * *");
+
+    expect(calls).toHaveLength(1);
+    // The server runs on UTC: without this option 09:30 would fire at 15:00 IST.
+    expect(calls[0]![2]).toEqual({ timezone: appTimeZone() });
+    expect(typeof calls[0]![1]).toBe("function");
   });
 
   it("does not register the disabled paid/self-improvement crons", () => {
