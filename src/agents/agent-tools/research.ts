@@ -18,7 +18,6 @@ import { scrapeUrl, ragSearch, crawlSite, type ScrapeResult } from "../../tools/
 import { fetchYoutubeTranscript, fetchV2exTopics } from "../../tools/agent-reach.js";
 import { getCachedScrape, setCachedScrape, ingestResearch } from "../../infra/research-memory.js";
 import { recordEventTool } from "../../tools/memory.js";
-import { executeToolWithValidation } from "../../tools/index.js";
 import { childLogger } from "../../infra/logger.js";
 
 const log = childLogger({ module: "agent-tool:research" });
@@ -32,7 +31,7 @@ const EXCERPT_MAX = 1_500; // per-page content bound in tool output (token contr
 
 export const searchWeb = tool(
   async ({ query, limit }) => {
-    const res = await executeToolWithValidation(webSearchTool, { query, limit: limit ?? 5 });
+    const res = await webSearchTool.execute({ query, limit: limit ?? 5 });
     if (!res.success) {
       return `Web search failed: ${res.error ?? "unknown error"}. (Primary is Gemini grounding via GOOGLE_GENERATIVE_AI_API_KEY; the keyless DuckDuckGo fallback may be rate-limited — retry shortly.)`;
     }
@@ -158,7 +157,7 @@ export const deepResearch = tool(
       // Fallback: reuse search_web for top URLs, then fetch-scrape each (≤cap).
       log.warn({ query, error: rag.error }, "deep_research: Apify unavailable — search_web + fetch fallback");
       source = "search_web+fetch";
-      const search = await executeToolWithValidation(webSearchTool, { query, limit: cap });
+      const search = await webSearchTool.execute({ query, limit: cap });
       const hits = (search.success ? (search.data as Array<{ url: string }>) : []) ?? [];
       const urls = hits.map((h) => h.url).filter((u) => u && u.startsWith("http")).slice(0, cap);
       for (const url of urls) {

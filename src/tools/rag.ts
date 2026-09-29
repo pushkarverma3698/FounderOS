@@ -82,10 +82,55 @@ export const searchPersonalRagTool: UnifiedTool = {
 };
 
 // ── searchTuricksBrainTool ─────────────────────────────────────────────────────
-// Uses Jev AI context pre-filtering over brain_memories via src/tools/brain.ts: runRagSearch("brain_memories", ...)
-export { searchTuricksBrainTool, turicksBrainPreFilter } from "./brain.js";
 
+export const searchTuricksBrainTool: UnifiedTool = {
+  name: "search_turicks_brain",
+  description:
+    "Semantic search over the Turicks Brain knowledge base (vector DB). " +
+    "Contains: architectural decisions, business strategy, ADRs, conversation transcripts, " +
+    "founder notes, product plans, Turicks/Naggar context. " +
+    "Use for: 'what did we decide about X?', 'what is Turicks strategy?', business context, " +
+    "prior conversation recall, Naggar Retreat operations. " +
+    "Read-only, no approval needed. " +
+    "Optional doc_type filter: decision | conversation | doc | note | wiki | website.",
+  input_schema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description:
+          "What to search for. E.g. 'ICP strategy', 'why we chose LangGraph', 'Naggar pricing'. " +
+          "Specific queries work best.",
+      },
+      doc_type: {
+        type: "string",
+        description:
+          "Optional filter: decision | conversation | doc | note | wiki | website",
+      },
+      top_k: {
+        type: "number",
+        description: "Number of results (1–10, default 5)",
+      },
+    },
+    required: ["query"],
+  },
 
+  async execute(args: Record<string, unknown>): Promise<ToolResult> {
+    const query = ((args["query"] as string | undefined) ?? "").trim();
+    if (!query) {
+      return { success: false, error: "query is required" };
+    }
+    const topK = Math.min(Math.max(Number(args["top_k"] ?? 5), 1), 10);
+
+    const result = await runRagSearch("brain_memories", query, topK);
+
+    if ("error" in result) {
+      return { success: false, error: ragErrorMessage("turicks-brain", result.error) };
+    }
+
+    return { success: true, data: renderRagSuccess(result, query, "Turicks Brain", "source_path") };
+  },
+};
 
 // ── searchResearchCacheTool ────────────────────────────────────────────────────
 

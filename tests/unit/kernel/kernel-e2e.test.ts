@@ -103,33 +103,6 @@ describe("kernel E2E (scripted models, real graph)", () => {
     expect(synth.calls).toBe(0);
   });
 
-  it("System 1 routing: 'ping' returns 'pong' with ZERO LLM calls", async () => {
-    // ScriptedModel([]) throws "exhausted" if invoked — proves no model call happens.
-    const planner = new ScriptedModel([]);
-    const worker = new ScriptedModel([]);
-    const synth = new ScriptedModel([]);
-    const k = kernelWith(planner, worker, synth, []);
-
-    const res = await k.invoke(turn("ping"), cfg("system1-ping"));
-    expect(res.reply).toBe("pong");
-    expect(res.mission.status).toBe("done");
-    expect(planner.calls).toBe(0);
-    expect(worker.calls).toBe(0);
-    expect(synth.calls).toBe(0);
-  });
-
-  it("System 1 routing: 'status' returns operational message with ZERO LLM calls", async () => {
-    const planner = new ScriptedModel([]);
-    const worker = new ScriptedModel([]);
-    const synth = new ScriptedModel([]);
-    const k = kernelWith(planner, worker, synth, []);
-
-    const res = await k.invoke(turn("status"), cfg("system1-status"));
-    expect(res.reply).toBe("System status: operational");
-    expect(res.mission.status).toBe("done");
-    expect(planner.calls).toBe(0);
-  });
-
   it("route override builds a deterministic plan with ZERO planner LLM calls", async () => {
     const planner = new ScriptedModel([]);
     const worker = new ScriptedModel([ai(JSON.stringify({ text: "42 open issues" }))]);
@@ -565,4 +538,24 @@ describe("cross-turn memory (checkpointer-hydrated history)", () => {
     expect(history.length).toBeLessThanOrEqual(20);
     expect(history.at(-1)?.user_input).toBe("message 24"); // turn 25 itself summarizes on the NEXT turn
   });
+});
+
+// 2026-09-29: PR #763 ("Jev AI System 1") answered "stop"/"cancel" with
+// "Mission cancelled" while cancelling nothing, and "status" with a hard-coded
+// "System status: operational" while Gmail was down — action and health claims
+// with no receipt behind them. Short words are ordinary founder messages: the
+// planner decides them, like everything else.
+describe("no canned replies before the planner", () => {
+  for (const word of ["stop", "cancel", "abort", "status", "ping", "health"]) {
+    it(`"${word}" reaches the planner model instead of a fixed reply`, async () => {
+      const planner = new ScriptedModel([ai(JSON.stringify({ type: "reply", text: `planner saw ${word}` }))]);
+      const k = kernelWith(planner, new ScriptedModel([]), new ScriptedModel([]), []);
+
+      const res = await k.invoke(turn(word), cfg(`no-canned-${word}`));
+
+      expect(planner.calls).toBe(1);
+      expect(res.reply).toBe(`planner saw ${word}`);
+      expect(res.reply).not.toMatch(/Mission cancelled|System status: operational|^pong$/);
+    });
+  }
 });

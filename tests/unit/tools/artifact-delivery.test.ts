@@ -60,8 +60,7 @@ describe("Phase 3 — Artifact Delivery", () => {
 
   describe("deliver_artifact", () => {
     it("rejects file paths outside ARTIFACT_ROOT", async () => {
-      const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), "artifact-outside-"));
-      const outsideFile = path.join(outsideDir, "malicious.txt");
+      const outsideFile = path.join(os.tmpdir(), "malicious.txt");
       await fs.writeFile(outsideFile, "secret", "utf-8");
 
       await expect(

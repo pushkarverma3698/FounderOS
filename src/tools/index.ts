@@ -1,18 +1,23 @@
 /**
- * FounderOS — Tool Type Definitions & Tool Dispatch Validation
- * ==============================================================
- * Shared interfaces used by all tool implementations + Jev AI pre-execution tool dispatch validation.
+ * FounderOS — Tool Type Definitions
+ * ===================================
+ * Shared interfaces used by all tool implementations.
  *
  * ARCHITECTURE NOTE: There is NO tool registry here. Tools are wired
  * directly from src/tools/{name}.ts into src/agents/agent-tools/
  * (LangChain wrappers + HITL gates) and declared per-department in
  * src/agents/capabilities.ts (the single source of truth the kernel
- * worker reads).
+ * worker reads). The old Map-based registry was never used and has
+ * been removed to avoid misleading the next engineer.
+ *
+ * Adding a new tool: see docs/rules/TOOL-STANDARDS.md (8-point checklist).
+ * Short version:
+ *  1. Create src/tools/{name}.ts implementing UnifiedTool
+ *  2. Write tests/unit/tools/{name}.test.ts — mock the provider, test soft-failure
+ *  3. Add LangChain wrapper under src/agents/agent-tools/
+ *  4. Register it for the right department in src/agents/capabilities.ts
+ *  5. pnpm gate green (lint + build + wiring + arch + tests)
  */
-
-import { validateJevToolDispatch, type JevToolValidationResult } from "../services/jev-ai.js";
-export { evaluateSupervisorRoute } from "../agents/supervisor.js";
-export { validateJevToolDispatch };
 
 export interface ObservedResult {
   kind: "file" | "http" | "record" | "commit" | "message";
@@ -38,35 +43,4 @@ export interface UnifiedTool {
   /** JSON Schema for agent parameter validation + LangChain tool binding. */
   input_schema?: ToolInputSchema;
   execute(args: Record<string, unknown>): Promise<ToolResult>;
-}
-
-/**
- * Validates tool execution arguments using Jev AI rules before dispatch.
- */
-export function validateToolDispatch(
-  tool: UnifiedTool | string,
-  args: Record<string, unknown>,
-): JevToolValidationResult {
-  const toolName = typeof tool === "string" ? tool : (tool?.name || "unknown_tool");
-  return validateJevToolDispatch(toolName, args);
-}
-
-/**
- * Executes a tool after running Jev AI pre-execution dispatch validation checks.
- * If validation fails, short-circuits with an error result without executing the tool.
- */
-export async function executeToolWithValidation(
-  tool: UnifiedTool,
-  args: Record<string, unknown>,
-): Promise<ToolResult> {
-  const validation = validateToolDispatch(tool, args);
-  if (!validation.valid) {
-    return {
-      success: false,
-      error: validation.reason ?? "Tool dispatch validation failed",
-    };
-  }
-
-  const safeArgs = (validation.sanitizedArgs ?? args) as Record<string, unknown>;
-  return tool.execute(safeArgs);
 }

@@ -27,7 +27,6 @@ import {
 import { RESET } from "./state.js";
 import type { KernelStateType, KernelUpdate } from "./state.js";
 import { formatFailureReply } from "./supervisor.js";
-import { evaluateSupervisorRoute } from "../tools/index.js";
 import { messageContentText } from "./message-text.js";
 import { plannerNowLine, systemClock, type Clock } from "../core/time.js";
 
@@ -243,25 +242,6 @@ export function makePlanNode(model: KernelChatModel, catalog: WorkerCatalogEntry
     }
 
     const override = parseRouteOverride(input);
-    const system1Route = evaluateSupervisorRoute({ prompt: input, state });
-    if (system1Route.handled && !override) {
-      let replyText = "OK";
-      if (system1Route.decision === "SYSTEM_1_HEALTH_PONG") {
-        replyText = "pong";
-      } else if (system1Route.decision === "SYSTEM_1_STATUS_CHECK") {
-        replyText = "System status: operational";
-      } else if (system1Route.decision === "SYSTEM_1_CANCEL_MISSION") {
-        replyText = "Mission cancelled";
-      } else {
-        replyText = system1Route.decision ?? "Handled by Jev AI System 1 router";
-      }
-      return {
-        ...base,
-        mission: { goal: input, status: "done", plan: null, cursor: 0 },
-        reply: replyText,
-      };
-    }
-
     const decision: PlannerDecision | FailureReport = override
       ? overrideDecision(override.worker, override.rest || input)
       : await (async () => {
