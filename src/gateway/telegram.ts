@@ -86,6 +86,7 @@ function defaultChatAccess(): ChatAccessConfig {
   return buildChatAccessConfig({
     primaryChatId: env.TELEGRAM_CHAT_ID,
     allowedChatIds: env.TELEGRAM_ALLOWED_CHAT_IDS,
+    answerAllChatIds: env.TELEGRAM_ANSWER_ALL_CHAT_IDS,
     ownerUserId: env.TELEGRAM_OWNER_USER_ID,
   });
 }
@@ -121,8 +122,9 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
         me,
       );
       // Group conversation not meant for the bot. The primary chat is exempt even
-      // when it is a group: it always answered every message and still does.
-      if (!addressed && who !== "primary") return;
+      // when it is a group: it always answered every message and still does. So
+      // is a chat the founder listed in TELEGRAM_ANSWER_ALL_CHAT_IDS.
+      if (!addressed && who !== "primary" && !access.answerAllChatIds.has(String(ctx.chat.id))) return;
       const command = msg.text ? commandName(msg.text, me.username) : null;
       if (command !== null && OWNER_ONLY_COMMANDS.has(command) && !mayActAsOwner(who, ctx.from?.id, access)) {
         await ctx.reply(`Only the owner can run /${command}.`);

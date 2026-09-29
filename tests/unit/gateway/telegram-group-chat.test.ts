@@ -52,7 +52,7 @@ interface SentCall {
 let sent: SentCall[] = [];
 let updateId = 0;
 
-function makeBot(allowed = String(ALLOWED_GROUP), primaryChatId = String(OWNER)): Bot {
+function makeBot(allowed = String(ALLOWED_GROUP), primaryChatId = String(OWNER), answerAll = ""): Bot {
   const bot = new Bot("1:test", {
     botInfo: {
       id: BOT_ID,
@@ -76,7 +76,7 @@ function makeBot(allowed = String(ALLOWED_GROUP), primaryChatId = String(OWNER))
   });
   registerHandlers(
     bot,
-    buildChatAccessConfig({ primaryChatId, allowedChatIds: allowed }),
+    buildChatAccessConfig({ primaryChatId, allowedChatIds: allowed, answerAllChatIds: answerAll }),
   );
   return bot;
 }
@@ -265,5 +265,37 @@ describe("a group nobody allow-listed", () => {
     await sendText(bot, { chatId: GUEST, fromId: GUEST, text: "hello" });
     expect(runKernelText).not.toHaveBeenCalled();
     expect(sent).toEqual([]);
+  });
+});
+
+// 2026-09-29: the founder's wife wrote to the bot 11 times in "founderOs group"
+// (-5319642142, 3 members: the two of them and the bot) between 09-24 and 09-28
+// and got silence every time — the group was never allow-listed. Allow-listing
+// alone is still not enough: she types to the bot the way she would in a DM,
+// without an @mention, and addressed-only mode drops that silently too. A chat
+// in TELEGRAM_ANSWER_ALL_CHAT_IDS is allowed AND treats every message as meant
+// for the bot. Approvals and system commands stay the founder's.
+describe("a group whose every message is for the bot (TELEGRAM_ANSWER_ALL_CHAT_IDS)", () => {
+  const FAMILY_GROUP = -5319642;
+
+  it("answers a guest's plain message there — no @mention needed, no separate allow-list entry", async () => {
+    const bot = makeBot("", String(OWNER), String(FAMILY_GROUP));
+    await sendText(bot, { chatId: FAMILY_GROUP, fromId: GUEST, text: "show me today's finance jobs" });
+    expect(runKernelText).toHaveBeenCalledTimes(1);
+    expect(runKernelText.mock.calls[0]![1]).toBe("show me today's finance jobs");
+  });
+
+  it("still keeps approvals and /halt the founder's", async () => {
+    const bot = makeBot("", String(OWNER), String(FAMILY_GROUP));
+    await sendText(bot, { chatId: FAMILY_GROUP, fromId: GUEST, text: "/halt" });
+    expect(handleHalt).not.toHaveBeenCalled();
+    await tapButton(bot, { chatId: FAMILY_GROUP, fromId: GUEST, data: "approve:abc" });
+    expect(resumeKernel).not.toHaveBeenCalled();
+  });
+
+  it("leaves other allow-listed groups in addressed-only mode", async () => {
+    const bot = makeBot(String(ALLOWED_GROUP), String(OWNER), String(FAMILY_GROUP));
+    await sendText(bot, { chatId: ALLOWED_GROUP, fromId: GUEST, text: "did you see the KLM role?" });
+    expect(runKernelText).not.toHaveBeenCalled();
   });
 });

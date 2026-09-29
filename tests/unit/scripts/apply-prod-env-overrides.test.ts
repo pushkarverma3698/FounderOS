@@ -114,6 +114,18 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     expect(valueOf(rendered, "GEMINI_THINKING_LEVEL")).toBe("DEFAULT");
   });
 
+  it("preserves the on-box Telegram group access lists — the founder's wife is answered after every deploy", () => {
+    // 2026-09-29: chat and user ids stay out of the public repo and the snapshot;
+    // without preservation the next deploy silently locks the family group out again.
+    const rendered = render(
+      "TELEGRAM_ALLOWED_CHAT_IDS=-100111\nTELEGRAM_ANSWER_ALL_CHAT_IDS=-100111,-100222\nTELEGRAM_OWNER_USER_ID=4242\n",
+      SNAPSHOT_BASE,
+    );
+    expect(valueOf(rendered, "TELEGRAM_ALLOWED_CHAT_IDS")).toBe("-100111");
+    expect(valueOf(rendered, "TELEGRAM_ANSWER_ALL_CHAT_IDS")).toBe("-100111,-100222");
+    expect(valueOf(rendered, "TELEGRAM_OWNER_USER_ID")).toBe("4242");
+  });
+
   it("forwards LANGCHAIN_API_KEY from the GitHub secret and pins tracing on", () => {
     const rendered = render("", SNAPSHOT_BASE, { LANGCHAIN_API_KEY: "lsv2_pt_test_value" });
     expect(valueOf(rendered, "LANGCHAIN_API_KEY")).toBe("lsv2_pt_test_value");
