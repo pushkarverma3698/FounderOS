@@ -21,8 +21,8 @@ directory; only `agent-dispatch`'s documented location was wrong.
 
 | Daemon | Source in this repo | VPS path (deployed, live) | Crontab | What it does |
 |---|---|---|---|---|
-| `pr-brain` | `deploy/vps-daemons/pr-brain` | `~/bin/pr-brain` | `*/20 * * * *` | Gates every open PR authored by this account: re-runs `pnpm gate`, runs the `pr-adversary` protocol, approves / pushes a fix / requests changes, then **merges** once cleared — except in an employer/org repo (`repo_owner != $OWNER`, e.g. `OplifyMessage`), where it marks the PR ready and always leaves the merge to a human (restored 2026-09-21). |
-| `agent-dispatch` | `deploy/agent-dispatch` | `~/bin/agent-dispatch` | `*/15 * * * *` | Iterates every repo in `ISSUE_REPOS`, claims one `agent:ready` GitHub issue per tick, checks out a branch in the matching `/opt/agy-workspace/<repo>` workspace, invokes Antigravity (`agy`) to implement it, opens a draft PR. |
+| `pr-brain` | `deploy/vps-daemons/pr-brain` | `~/bin/pr-brain` | `*/20 * * * *` | Gates every open PR authored by this account: re-runs `pnpm gate`, runs the `pr-adversary` protocol, approves / pushes a fix / requests changes, then **merges** once cleared. A head whose only new commits are pr-brain's own fixes or clean merges of the base is not re-gated: the verdict is carried forward and the merge retried with no Claude session (2026-09-29) — except in an employer/org repo (`repo_owner != $OWNER`, e.g. `OplifyMessage`), where it marks the PR ready and always leaves the merge to a human (restored 2026-09-21). |
+| `agent-dispatch` | `deploy/agent-dispatch` | `~/bin/agent-dispatch` | `*/15 * * * *` | Iterates every repo in `ISSUE_REPOS`, claims one `agent:ready` GitHub issue per tick, checks out a branch in the matching `/opt/agy-workspace/<repo>` workspace, invokes Antigravity (`agy`) to implement it, opens a draft PR. On "Individual quota reached … Resets in …" it records the reset time in `~/.claude/agent-dispatch.quota-until`, puts the issue back to `agent:ready`, and starts nothing until then. |
 
 Both read config from `~/.claude/pr-brain.repos` / env vars — see each
 script's own header comment for the full list.
