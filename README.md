@@ -299,3 +299,6 @@ Built by [Pushkar Verma](https://www.linkedin.com/in/pushkarverma3698/).
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
+<!-- Antigravity dispatch verification: issue #775 -->
+
