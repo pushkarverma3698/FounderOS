@@ -48,6 +48,7 @@ ROOT="${PR_BRAIN_ROOT:-$HOME/Projects}"
 MAX="${PR_BRAIN_MAX:-3}"
 MODEL="${PR_BRAIN_MODEL:-sonnet}"
 BUDGET="${PR_BRAIN_BUDGET_USD:-5}"
+# shellcheck disable=SC2034  # read by deploy/lib/down-state.sh, which shellcheck does not follow
 DOWN_FILE="$HOME/.claude/pr-brain.down"
 FAIL_DIR="$HOME/.claude/pr-brain.failures"
 PHOTO_DIR="$HOME/.claude/pr-brain.photos"
@@ -110,6 +111,23 @@ notify_photo() {
     -F "caption=$2" || true
 }
 
+# Shared pause/resume + redaction helper (deploy/lib/down-state.sh). It is found next
+# to THIS script's own real path: ./lib on the VPS (~/bin/lib, next to ~/bin/pr-brain),
+# ../lib in the repo (deploy/lib, next to deploy/vps-daemons). deploy/sync-daemons.sh
+# ships it with the daemons; without it there is no pause state, so refuse to run.
+SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
+SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
+DOWN_STATE_LIB=""
+for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
+  [[ -f "$_lib_dir/down-state.sh" ]] && { DOWN_STATE_LIB="$_lib_dir/down-state.sh"; break; }
+done
+if [[ -z "$DOWN_STATE_LIB" ]]; then
+  log "FATAL: lib/down-state.sh not found next to $SELF_PATH (looked in $SELF_DIR/lib and $SELF_DIR/../lib). deploy/sync-daemons.sh ships it with the daemons: re-run the Deploy workflow, or copy deploy/lib/ to ~/bin/lib/."
+  exit 1
+fi
+# shellcheck source=deploy/lib/down-state.sh
+source "$DOWN_STATE_LIB"
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
@@ -168,26 +186,25 @@ claude_outage() {
 
 # An outage is announced once going down and once coming back. 2026-09-26/27:
 # a weekly usage limit produced 72 "Gate FAILED" messages a day, one per tick,
-# because only an AUTH failure was recognised as an outage.
+# because only an AUTH failure was recognised as an outage. The state machine
+# itself (one message per transition) lives in deploy/lib/down-state.sh, shared
+# with agent-dispatch; what stays here is only the wording.
 enter_down() {
-  local cls="$1" detail="$2" prev=""
-  [[ -f "$DOWN_FILE" ]] && prev=$(head -1 "$DOWN_FILE")
+  local cls="$1" detail="$2" msg
   log "Claude unavailable ($cls): $detail — sweep stopped, nothing dispatched"
-  [[ "$prev" == "$cls" ]] && return 0
-  printf '%s\n%s\n' "$cls" "$(date -u '+%Y-%m-%d %H:%M UTC')" >"$DOWN_FILE"
   case "$cls" in
-    auth) notify "🧠 pr-brain PAUSED on $(hostname -s): Claude Code auth expired. Fix: ssh founderos-vps, run 'claude', then '/login'. One more message when it resumes — none until then." ;;
-    limit) notify "🧠 pr-brain PAUSED on $(hostname -s): Claude usage limit reached (${detail}). Retrying silently when a PR is waiting; one more message when it resumes." ;;
-    *) notify "🧠 pr-brain PAUSED on $(hostname -s): Claude preflight failed (${detail}). Retrying silently when a PR is waiting; one more message when it resumes." ;;
+    auth) msg="🧠 pr-brain PAUSED on $(hostname -s): Claude Code auth expired. Fix: ssh founderos-vps, run 'claude', then '/login'. One more message when it resumes — none until then." ;;
+    limit) msg="🧠 pr-brain PAUSED on $(hostname -s): Claude usage limit reached (${detail}). Retrying silently when a PR is waiting; one more message when it resumes." ;;
+    *) msg="🧠 pr-brain PAUSED on $(hostname -s): Claude preflight failed (${detail}). Retrying silently when a PR is waiting; one more message when it resumes." ;;
   esac
+  down_enter "$cls" "$detail" "$msg"
 }
 
 leave_down() {
-  [[ -f "$DOWN_FILE" ]] || return 0
-  local since; since=$(sed -n 2p "$DOWN_FILE")
-  rm -f "$DOWN_FILE"
+  down_active || return 0
+  local since; since=$(down_since)
   log "Claude reachable again (paused since $since)"
-  notify "✅ pr-brain resumed on $(hostname -s) — Claude reachable again (paused since $since). Queued PRs are being gated now."
+  down_leave "✅ pr-brain resumed on $(hostname -s) — Claude reachable again (paused since $since). Queued PRs are being gated now."
 }
 
 # Preflight the model. Without this the sweep fails once per PR, twenty minutes
