@@ -17,12 +17,11 @@ from __future__ import annotations
 import asyncio
 import subprocess
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
 from playwright.async_api import async_playwright
 
 from . import ledger, notify
-from .adapters import ats_for_url, field_map_for, planned_fills
+from .adapters import append_path_suffix, apply_url_for, ats_for_url, field_map_for, planned_fills
 from .profile import ApplyProfile, load_profile, missing_resumes, resume_unusable
 from .sync import QueueJob, SyncError, QUEUE_DIR, load_queue, push_outcomes
 
@@ -144,17 +143,18 @@ def ashby_application_url(url: str) -> str:
     pipeline's `ashbyApplicationUrl` in apply-driver.ts (2026-08-24/25); this
     is a separate Python implementation that never got the port.
     """
-    parts = urlsplit(url)
-    path = parts.path.rstrip("/")
-    if not path.endswith("/application"):
-        path = f"{path}/application"
-    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+    return append_path_suffix(url, "/application")
 
 
 async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str) -> str:
     """Open one job, fill it, and wait for the founder. Returns the outcome."""
     is_ashby = ats_for_url(job.url) == "ashby"
-    target_url = ashby_application_url(job.url) if is_ashby else job.url
+    # The form, not the posting: every platform whose form sits at its own route
+    # or anchor (adapters.apply_url_for, the port of the TypeScript
+    # `applyUrlFor`), not only Ashby. None means "no rule for this host": open
+    # the posting itself and let the founder find the form. Ashby keeps its
+    # older, looser host match as a fallback so no URL that worked before stops.
+    target_url = apply_url_for(job.url) or (ashby_application_url(job.url) if is_ashby else job.url)
     response = await page.goto(target_url, wait_until="domcontentloaded")
 
     if is_ashby:

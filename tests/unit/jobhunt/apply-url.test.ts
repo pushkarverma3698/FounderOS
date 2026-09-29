@@ -10,8 +10,10 @@
  * production, 2026-08-21 — not an invented shape.
  */
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { getApplyUrl as applyUrlFor } from "../../../src/tools/jobhunt/apply-packet.js";
+import { ADAPTERS } from "../../../src/tools/jobhunt/adapters/index.js";
 
 describe("applyUrlFor", () => {
   it("appends the Greenhouse in-page application anchor", () => {
@@ -134,5 +136,48 @@ describe("applyUrlFor", () => {
     expect(applyUrlFor("https://job-boards.greenhouse.io/acme/jobs/1#app", "acme")).toBe(
       "https://job-boards.greenhouse.io/acme/jobs/1#app",
     );
+  });
+});
+
+/**
+ * The shared cases. The Mac apply client opens the URL its own Python
+ * `apply_url_for` computes (mac-client/mac_client/adapters.py), while `/draft`
+ * hands out the one `getApplyUrl` computes. Two implementations of one rule
+ * table is how they end up disagreeing about where the form is, so both suites
+ * read the SAME file: mac-client/tests/fixtures/apply-url-cases.json. A rule
+ * changed on one side alone fails the other side's test.
+ */
+const SHARED_CASES_PATH = new URL("../../../mac-client/tests/fixtures/apply-url-cases.json", import.meta.url);
+
+interface SharedApplyUrlCase {
+  readonly platform: string | null;
+  readonly name: string;
+  readonly posting_url: string;
+  readonly apply_url: string | null;
+}
+
+const shared = JSON.parse(readFileSync(SHARED_CASES_PATH, "utf8")) as {
+  readonly cases: readonly SharedApplyUrlCase[];
+};
+
+describe("apply URLs shared with the Mac client (mac-client/tests/fixtures/apply-url-cases.json)", () => {
+  for (const c of shared.cases) {
+    it(`${c.platform ?? "unrecognised"}: ${c.name}`, () => {
+      expect(applyUrlFor(c.posting_url, "")).toBe(c.apply_url);
+    });
+  }
+
+  // A platform added to the adapter registry without a case here would be
+  // covered on the TypeScript side only, and the Mac client would silently keep
+  // opening its posting page.
+  it("has at least one case for every platform in the adapter registry", () => {
+    const covered = new Set(shared.cases.map((c) => c.platform));
+    const missing = Object.keys(ADAPTERS).filter((ats) => !covered.has(ats));
+    expect(missing).toEqual([]);
+  });
+
+  it("names a platform for every case that yields a form URL", () => {
+    const unlabelled = shared.cases.filter((c) => c.apply_url !== null && c.platform === null);
+    expect(unlabelled.map((c) => c.name)).toEqual([]);
   });
 });
