@@ -85,6 +85,24 @@ export function metricKind(key: MetricKey): MetricKind {
   return METRICS[key].kind;
 }
 
+/** The metric in words, for the "Plan next step" prompt. Echoes an argument only when it is a plain id. */
+export function describeMetric(key: string, arg: string | null): string {
+  if (!isMetricKey(key)) return "an unknown metric";
+  const id = arg !== null && isSafeToken(arg) ? arg : "?";
+  switch (key) {
+    case "applications_7d":
+      return `applications recorded for ${id} in the last ${WINDOW_DAYS} days`;
+    case "prs_merged_7d":
+      return `pull requests merged in ${id} in the last ${WINDOW_DAYS} days`;
+    case "issues_closed_7d":
+      return `issues closed in ${id} in the last ${WINDOW_DAYS} days`;
+    case "action_count_7d":
+      return `${id} actions logged in the last ${WINDOW_DAYS} days`;
+    case "manual":
+      return "a value the founder reports by hand";
+  }
+}
+
 /** The I/O the registry needs. Real implementation: metric-deps.ts. Tests pass fakes. */
 export interface MetricDeps {
   countApplications(profileId: string, since: Date, until: Date): Promise<number>;
