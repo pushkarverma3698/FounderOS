@@ -10,7 +10,7 @@
 import { and, count, desc, eq, gt, gte, inArray, lt, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { tokenizeQuery, rankByTerms } from "./keyword-search.js";
-import { INTERNAL_CONTEXT_KEYS, LAST_UPDATED_KEY, fillMissingContextKeys } from "./founder-context.js";
+import { INTERNAL_CONTEXT_KEYS, LAST_UPDATED_KEY, reconcileSeededContext } from "./founder-context.js";
 
 /**
  * Candidate over-fetch multiple: keyword searches pull `limit * CANDIDATE_FACTOR`
@@ -932,11 +932,11 @@ export async function upsertFounderContext(
 export async function seedFounderContextDefaults(
   tenantId: string,
   defaults: Record<string, unknown>,
-): Promise<string[]> {
+): Promise<{ filled: string[]; refreshed: string[]; retired: string[] }> {
   const current = await getFounderContext(tenantId);
-  const { data, filled } = fillMissingContextKeys(current, defaults);
-  if (filled.length > 0) await writeFounderContext(tenantId, data);
-  return filled;
+  const { data, filled, refreshed, retired } = reconcileSeededContext(current, defaults);
+  if (filled.length + refreshed.length + retired.length > 0) await writeFounderContext(tenantId, data);
+  return { filled, refreshed, retired };
 }
 
 async function writeFounderContext(tenantId: string, data: Record<string, unknown>): Promise<void> {
