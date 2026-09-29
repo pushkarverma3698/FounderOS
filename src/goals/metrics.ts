@@ -120,6 +120,7 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const limit = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new MetricSourceError("timeout", "metric source timed out", ms)), ms);
+    timer.unref?.();
   });
   return Promise.race([work, limit]).finally(() => clearTimeout(timer));
 }

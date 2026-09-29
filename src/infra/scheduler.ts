@@ -80,6 +80,7 @@ import {
   runFreeSweep,
 } from "../tools/jobhunt/sweep-runner.js";
 import { runPipelineDigest, runFollowupSweep } from "../tools/jobhunt/pipeline-followup.js";
+import { scheduleGoalStandup } from "../goals/standup-schedule.js";
 
 // Re-exported so existing import sites (and tests) that read these off
 // scheduler.ts keep resolving after the move to sweep-runner.ts (2026-08-06).
@@ -290,6 +291,7 @@ export async function runFundingGrowerSweep(): Promise<void> {
 }
 
 export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }): void {
+  scheduleGoalStandup(); // daily 09:00 goal standup, zero LLM, in the app timezone (src/goals)
   cron.schedule("0 9 * * *", () => {
     sendStaleApprovalReminder().catch((err) =>
       log.error({ err: (err as Error).message }, "Stale approval check failed"),
