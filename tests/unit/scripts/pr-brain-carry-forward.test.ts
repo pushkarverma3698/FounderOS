@@ -169,6 +169,23 @@ describe("pr-brain — carrying a verdict forward over its own commits", () => {
     expect(brainLog()).not.toMatch(/carried forward/);
   });
 
+  it("still gates a clean merge of beta that carries extra edits in the merge commit", () => {
+    git(["checkout", "-q", "beta"]);
+    commit(AGY, "other.txt", "beta moved on\n", "unrelated beta commit");
+    git(["checkout", "-q", "task/issue-762"]);
+    git([...BRAIN, "merge", "-q", "--no-edit", "beta"]);
+    writeFileSync(join(repo, "feature.ts"), "export const x = 1; // slipped into the merge\n");
+    git(["add", "feature.ts"]);
+    git([...BRAIN, "commit", "-q", "--amend", "--no-edit"]);
+    const head = git(["rev-parse", "HEAD"]);
+    publish(head);
+
+    sweep(head, gated);
+
+    expect(claudeSessions().length).toBeGreaterThan(0);
+    expect(brainLog()).not.toMatch(/carried forward/);
+  });
+
   it("still gates when the gated head is no longer in the history (force-push)", () => {
     git(["reset", "-q", "--hard", "beta"]);
     const head = commit(BRAIN, "feature.ts", "export const x = 4;\n", "rewritten history");
