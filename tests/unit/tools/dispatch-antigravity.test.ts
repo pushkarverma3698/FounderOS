@@ -1,11 +1,17 @@
 /**
  * Unit tests for the Antigravity dispatch tool.
  * Mocks Octokit — runs offline at $0 cost with no live API calls or real tokens.
+ *
+ * The brief lint is NOT mocked here: FounderOS scope paths are read from this very checkout
+ * and other repos go through the fake Octokit, so these tests exercise the real gate.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 
 const mockIssuesCreate = vi.fn();
+const mockGetContent = vi.fn();
+const mockRepoGet = vi.fn();
 const mockKickDispatchTick = vi.fn();
 
 vi.mock("octokit", () => {
@@ -13,6 +19,7 @@ vi.mock("octokit", () => {
     Octokit: vi.fn().mockImplementation(() => ({
       rest: {
         issues: { create: mockIssuesCreate },
+        repos: { getContent: mockGetContent, get: mockRepoGet },
       },
     })),
   };
@@ -25,14 +32,56 @@ vi.mock("../../../src/tools/dispatch-tick.js", () => ({
 const {
   dispatchAntigravityTool,
   formatAntigravityIssueBody,
+  lintDispatchBrief,
+  describeBriefRejection,
   resolveDispatchRepo,
   DEFAULT_DISPATCH_REPO,
   AGENT_READY_LABEL,
   ANTIGRAVITY_LABEL,
+  STANDING_CONSTRAINTS,
 } = await import("../../../src/tools/dispatch-antigravity.js");
+const { AGENT_BRIEF_HEADINGS, lintAgentBrief } = await import("../../../src/tools/agent-brief-lint.js");
+const { checkoutFileExists, resetBriefCheckMemo } = await import("../../../src/tools/dispatch-brief-check.js");
+const { repoRoot } = await import("../../../src/evolution/repo-root.js");
+
+const OPLIFY = "OplifyMessage/oplify-messaging-api";
+
+/**
+ * A brief that passes the lint against this checkout. `scope` is a file that exists here, and
+ * `problem` and `evidence` are the two template sections the tool cannot invent.
+ */
+const COMPLETE = {
+  title: "feat: 13k ATS scaling with per-domain rate limiting",
+  goal: "Implement per-domain token bucket rate limiting",
+  scope: "src/tools/dispatch-antigravity.ts",
+  expected: "Replace global concurrency with domain rate limits",
+  verification: "pnpm test tests/unit/tools/dispatch-antigravity.test.ts",
+  problem: "Sweeps trip 429s on SmartRecruiters and Greenhouse.",
+  evidence: "Observed 429 rate limit triggers in the 2026-09-20 sweep log.",
+};
+
+function issueCreated(): { number: number; html_url: string; title: string } {
+  return { number: 524, html_url: "https://github.com/pushkarverma3698/FounderOS/issues/524", title: COMPLETE.title };
+}
 
 describe("formatAntigravityIssueBody", () => {
-  it("formats all required sections conforming to agent-task.md", () => {
+  it("emits all nine template headings, in the template's order", () => {
+    const body = formatAntigravityIssueBody(COMPLETE);
+
+    const template = readFileSync(new URL("../../../.github/ISSUE_TEMPLATE/agent-task.md", import.meta.url), "utf8")
+      .split("\n")
+      .filter((line) => line.startsWith("## "))
+      .map((line) => line.slice(3).trim());
+    const emitted = body
+      .split("\n")
+      .filter((line) => line.startsWith("## "))
+      .map((line) => line.slice(3).trim());
+
+    expect(emitted).toEqual(template);
+    expect(emitted).toEqual([...AGENT_BRIEF_HEADINGS]);
+  });
+
+  it("formats every section from its own input", () => {
     const body = formatAntigravityIssueBody({
       title: "feat: 13k ATS scaling",
       goal: "Scale free ATS ingestion to sweep 13,000 boards within 30 minutes.",
@@ -41,19 +90,21 @@ describe("formatAntigravityIssueBody", () => {
       verification: "pnpm test tests/unit/tools/free-ats-source.test.ts && pnpm gate",
       acceptance: "Green tests and ETag 304 responses skip re-downloading.",
       forbidden: "Do not touch metered scraping endpoints.",
+      problem: "The sweep takes 4 hours.",
       evidence: "Observed 429 rate limit triggers on SmartRecruiters and Greenhouse.",
     });
 
     expect(body).toContain("## Goal\n\nScale free ATS ingestion");
-    expect(body).toContain("## Problem / observed behavior\n\nObserved 429 rate limit triggers");
+    expect(body).toContain("## Problem / observed behavior\n\nThe sweep takes 4 hours.\n\n## Expected behavior");
     expect(body).toContain("## Expected behavior\n\nImplement per-domain token-bucket");
+    expect(body).toContain("## Evidence\n\nObserved 429 rate limit triggers on SmartRecruiters and Greenhouse.\n\n## Files");
     expect(body).toContain("## Files or subsystem in scope\n\nsrc/tools/jobhunt/free-ats-source.ts");
     expect(body).toContain("## Explicitly forbidden\n\nDo not touch metered scraping endpoints.");
     expect(body).toContain("## Verification commands\n\npnpm test tests/unit/tools/free-ats-source.test.ts && pnpm gate");
     expect(body).toContain("## Acceptance criteria\n\nGreen tests and ETag 304 responses skip re-downloading.");
   });
 
-  it("applies sensible defaults for optional fields", () => {
+  it("applies sensible defaults to forbidden and acceptance only", () => {
     const body = formatAntigravityIssueBody({
       title: "fix: token bucket",
       goal: "Fix bucket leak",
@@ -64,7 +115,73 @@ describe("formatAntigravityIssueBody", () => {
 
     expect(body).toContain("## Explicitly forbidden\n\nSee docs/antigravity/STANDARDS.md");
     expect(body).toContain("## Acceptance criteria\n\nAll verification commands pass; Claude pr-brain clears review with no BLOCKER.");
-    expect(body).toContain("## Problem / observed behavior\n\nTask dispatched by Founder via FounderOS.");
+  });
+
+  it("leaves Problem and Evidence EMPTY, with no placeholder, when the planner supplied neither", async () => {
+    // The old body filled Problem with "Task dispatched by Founder via FounderOS." That text let
+    // #762 through with an empty problem statement. An empty section makes the lint say so, and
+    // the planner asks the founder instead of the gate passing hollowly.
+    const body = formatAntigravityIssueBody({
+      title: "fix: x",
+      goal: "g",
+      scope: "src/tools/index.ts",
+      expected: "e",
+      verification: "pnpm test",
+    });
+
+    expect(body).not.toContain("Task dispatched by Founder");
+    const verdict = await lintAgentBrief(body, () => true);
+    expect(verdict.missingHeadings).toEqual(["Problem / observed behavior", "Evidence"]);
+    expect(verdict.emptyHeadings).toEqual(["Problem / observed behavior", "Evidence"]);
+  });
+
+  it("always carries the standing constraints, then appends the founder's own", () => {
+    const plain = formatAntigravityIssueBody(COMPLETE);
+    const withOwn = formatAntigravityIssueBody({ ...COMPLETE, constraints: "Keep the public retry API unchanged." });
+
+    for (const rule of STANDING_CONSTRAINTS) {
+      expect(plain).toContain(`- ${rule}`);
+      expect(withOwn).toContain(`- ${rule}`);
+    }
+    expect(plain).not.toContain("Task-specific constraints");
+    expect(withOwn).toContain("Task-specific constraints:\n\nKeep the public retry API unchanged.");
+    expect(withOwn.indexOf("Keep the public retry API")).toBeGreaterThan(withOwn.indexOf(STANDING_CONSTRAINTS[0] as string));
+    expect(withOwn.indexOf("Keep the public retry API")).toBeLessThan(withOwn.indexOf("## Explicitly forbidden"));
+  });
+
+  it("lists new files under a sub-heading of the scope section, where the lint does not look for them", async () => {
+    const body = formatAntigravityIssueBody({ ...COMPLETE, newFiles: "src/tools/rate-limiter-new.ts" });
+
+    expect(body).toContain(
+      "## Files or subsystem in scope\n\nsrc/tools/dispatch-antigravity.ts\n\n### New files to create\n\nsrc/tools/rate-limiter-new.ts\n\n## Constraints",
+    );
+    const lookups: string[] = [];
+    const verdict = await lintAgentBrief(body, (p) => (lookups.push(p), true));
+    expect(verdict.ok).toBe(true);
+    expect(lookups).toEqual(["src/tools/dispatch-antigravity.ts"]);
+  });
+
+  it("produces a body that passes the lint against this checkout (the real /task path)", async () => {
+    const verdict = await lintAgentBrief(formatAntigravityIssueBody(COMPLETE), checkoutFileExists(repoRoot()));
+
+    expect(verdict).toMatchObject({ ok: true, missing: [], warnings: [] });
+  });
+});
+
+describe("STANDING_CONSTRAINTS", () => {
+  it("holds real standing rules from STANDARDS.md and CLAUDE.md, one sentence each", () => {
+    expect(STANDING_CONSTRAINTS.length).toBeGreaterThanOrEqual(5);
+    for (const rule of STANDING_CONSTRAINTS) {
+      expect(rule.length).toBeGreaterThan(20);
+      expect(rule.length).toBeLessThanOrEqual(200);
+      expect(rule.trimEnd().endsWith(".")).toBe(true);
+    }
+    const all = STANDING_CONSTRAINTS.join("\n").toLowerCase();
+    expect(all).toContain("docs/antigravity/standards.md");
+    expect(all).toContain("files listed in scope");
+    expect(all).toContain("surrounding code's style");
+    expect(all).toContain("no npm dependency");
+    expect(all).toContain("never push to, or merge into, main");
   });
 });
 
@@ -120,7 +237,10 @@ describe("resolveDispatchRepo", () => {
 describe("dispatchAntigravityTool.execute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetBriefCheckMemo();
     process.env["GITHUB_TOKEN"] = "ghp_mock_token_for_tests";
+    mockGetContent.mockResolvedValue({ data: {} });
+    mockRepoGet.mockResolvedValue({ data: {} });
   });
 
   it("rejects if required fields are missing", async () => {
@@ -134,33 +254,15 @@ describe("dispatchAntigravityTool.execute", () => {
 
   it("returns error if GITHUB_TOKEN is missing", async () => {
     delete process.env["GITHUB_TOKEN"];
-    const res = await dispatchAntigravityTool.execute({
-      title: "feat: task",
-      goal: "goal",
-      scope: "src/tools/free-ats.ts",
-      expected: "expected",
-      verification: "pnpm test",
-    });
+    const res = await dispatchAntigravityTool.execute({ ...COMPLETE });
     expect(res.success).toBe(false);
     expect(res.error).toContain("GITHUB_TOKEN not configured");
   });
 
-  it("creates issue with agent:ready and antigravity labels", async () => {
-    mockIssuesCreate.mockResolvedValueOnce({
-      data: {
-        number: 524,
-        html_url: "https://github.com/pushkarverma3698/FounderOS/issues/524",
-        title: "feat: 13k ATS scaling with per-domain rate limiting",
-      },
-    });
+  it("creates issue with agent:ready and antigravity labels, and the full nine-section body", async () => {
+    mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
 
-    const res = await dispatchAntigravityTool.execute({
-      title: "feat: 13k ATS scaling with per-domain rate limiting",
-      goal: "Implement per-domain token bucket rate limiting",
-      scope: "src/tools/jobhunt/free-ats-source.ts",
-      expected: "Replace global concurrency with domain rate limits",
-      verification: "pnpm test tests/unit/tools/free-ats-source.test.ts",
-    });
+    const res = await dispatchAntigravityTool.execute({ ...COMPLETE });
 
     expect(res.success).toBe(true);
     expect(mockIssuesCreate).toHaveBeenCalledWith(
@@ -171,54 +273,34 @@ describe("dispatchAntigravityTool.execute", () => {
         labels: [AGENT_READY_LABEL, ANTIGRAVITY_LABEL],
       }),
     );
+    const filed = (mockIssuesCreate.mock.calls[0]?.[0] as { body: string }).body;
+    for (const heading of AGENT_BRIEF_HEADINGS) expect(filed).toContain(`## ${heading}\n`);
+    expect(filed).toContain("## Evidence\n\nObserved 429 rate limit triggers in the 2026-09-20 sweep log.");
 
-    const data = res.data as { issue_number: number; issue_url: string; repo: string };
+    const data = res.data as { issue_number: number; issue_url: string; repo: string; warnings?: string[] };
     expect(data.issue_number).toBe(524);
     expect(data.issue_url).toBe("https://github.com/pushkarverma3698/FounderOS/issues/524");
     expect(data.repo).toBe("pushkarverma3698/FounderOS");
+    expect(data.warnings).toBeUndefined();
   });
 
   it("kicks the dispatcher for the issue it just filed", async () => {
     // Without the kick the founder waits up to 15 minutes for the next cron tick with
     // no visible sign anything happened.
-    mockIssuesCreate.mockResolvedValueOnce({
-      data: {
-        number: 524,
-        html_url: "https://github.com/pushkarverma3698/FounderOS/issues/524",
-        title: "feat: task",
-      },
-    });
+    mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
 
-    await dispatchAntigravityTool.execute({
-      title: "feat: task",
-      goal: "goal",
-      scope: "src/tools/free-ats.ts",
-      expected: "expected",
-      verification: "pnpm test",
-    });
+    await dispatchAntigravityTool.execute({ ...COMPLETE });
 
     expect(mockKickDispatchTick).toHaveBeenCalledWith(524, "pushkarverma3698/FounderOS");
   });
 
   it("still reports success when the kick fails — cron is the guaranteed path", async () => {
-    mockIssuesCreate.mockResolvedValueOnce({
-      data: {
-        number: 525,
-        html_url: "https://github.com/pushkarverma3698/FounderOS/issues/525",
-        title: "feat: task",
-      },
-    });
+    mockIssuesCreate.mockResolvedValueOnce({ data: { ...issueCreated(), number: 525 } });
     mockKickDispatchTick.mockImplementationOnce(() => {
       throw new Error("spawn EACCES");
     });
 
-    const res = await dispatchAntigravityTool.execute({
-      title: "feat: task",
-      goal: "goal",
-      scope: "src/tools/free-ats.ts",
-      expected: "expected",
-      verification: "pnpm test",
-    });
+    const res = await dispatchAntigravityTool.execute({ ...COMPLETE });
 
     expect(res.success).toBe(true);
     expect((res.data as { issue_number: number }).issue_number).toBe(525);
@@ -227,15 +309,126 @@ describe("dispatchAntigravityTool.execute", () => {
   it("surfaces GitHub API errors cleanly without crashing", async () => {
     mockIssuesCreate.mockRejectedValueOnce(new Error("Resource protected by organization SAML"));
 
-    const res = await dispatchAntigravityTool.execute({
-      title: "feat: task",
-      goal: "goal",
-      scope: "src/tools/free-ats.ts",
-      expected: "expected",
-      verification: "pnpm test",
-    });
+    const res = await dispatchAntigravityTool.execute({ ...COMPLETE });
 
     expect(res.success).toBe(false);
     expect(res.error).toContain("GitHub issue creation failed: Resource protected by organization SAML");
+  });
+});
+
+describe("dispatchAntigravityTool.execute — the brief lint", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetBriefCheckMemo();
+    process.env["GITHUB_TOKEN"] = "ghp_mock_token_for_tests";
+    mockGetContent.mockResolvedValue({ data: {} });
+    mockRepoGet.mockResolvedValue({ data: {} });
+  });
+
+  it("files NOTHING for a brief with a missing section and a path that does not exist, and says what to fix", async () => {
+    const res = await dispatchAntigravityTool.execute({
+      ...COMPLETE,
+      scope: "src/agents/supervisor.ts, src/tools/index.ts",
+      evidence: "",
+    });
+
+    expect(res.success).toBe(false);
+    expect(mockIssuesCreate).not.toHaveBeenCalled();
+    expect(mockKickDispatchTick).not.toHaveBeenCalled();
+    expect(res.error).toContain("nothing was filed on pushkarverma3698/FounderOS");
+    expect(res.error).toContain('1. Section "## Evidence" is empty');
+    expect(res.error).toContain("Pass it in the `evidence` input.");
+    expect(res.error).toContain("2. `src/agents/supervisor.ts` does not exist in pushkarverma3698/FounderOS.");
+    expect(res.error).toContain("Pass them in the `new_files` input.");
+    expect(res.data).toMatchObject({
+      missing_headings: ["Evidence"],
+      missing_paths: ["src/agents/supervisor.ts"],
+    });
+  });
+
+  it("rejects issue #762 when it is filed through the tool with the same inputs", async () => {
+    // #762's own text: no problem statement, no evidence, three files that never existed.
+    const res = await dispatchAntigravityTool.execute({
+      title: "feat: Jev AI System 1 gateway",
+      goal: "Integrate Jev AI as a System 1 deterministic gateway and RAG pre-filter across FounderOS routing, memory retrieval, and tool validation systems.",
+      scope: "src/agents/supervisor.ts, src/tools/brain.ts, src/tools/index.ts, src/services/jev-ai.ts",
+      expected: "In `src/agents/supervisor.ts`: Integrate Jev AI gateway. In `src/tools/brain.ts`: Integrate Jev AI context pre-filtering.",
+      verification: "pnpm test && pnpm gate",
+      forbidden: "Do not break existing test suites.",
+    });
+
+    expect(res.success).toBe(false);
+    expect(mockIssuesCreate).not.toHaveBeenCalled();
+    expect(res.data).toMatchObject({
+      missing_headings: ["Problem / observed behavior", "Evidence"],
+      missing_paths: ["src/agents/supervisor.ts", "src/tools/brain.ts", "src/services/jev-ai.ts"],
+    });
+  });
+
+  it("accepts a file the task will create when it is passed as new_files", async () => {
+    mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
+
+    const res = await dispatchAntigravityTool.execute({ ...COMPLETE, new_files: "src/tools/rate-limiter-new.ts" });
+
+    expect(res.success).toBe(true);
+    const filed = (mockIssuesCreate.mock.calls[0]?.[0] as { body: string }).body;
+    expect(filed).toContain("### New files to create\n\nsrc/tools/rate-limiter-new.ts");
+  });
+
+  it("asks GitHub about another repo's paths, and a definite 404 files nothing", async () => {
+    mockGetContent.mockRejectedValueOnce(Object.assign(new Error("Not Found"), { status: 404 }));
+
+    const res = await dispatchAntigravityTool.execute({ ...COMPLETE, repo: OPLIFY, scope: "src/gone.ts" });
+
+    expect(res.success).toBe(false);
+    expect(mockGetContent).toHaveBeenCalledWith(expect.objectContaining({ owner: "OplifyMessage", repo: "oplify-messaging-api", path: "src/gone.ts" }));
+    expect(mockIssuesCreate).not.toHaveBeenCalled();
+    expect(res.error).toContain("`src/gone.ts` does not exist in OplifyMessage/oplify-messaging-api.");
+  });
+
+  it("files the issue, and reports what it could not check, when GitHub is down", async () => {
+    // The loop's job is not to block on its own infrastructure: only a definite 404 fails.
+    mockGetContent.mockRejectedValue(Object.assign(new Error("Service Unavailable"), { status: 503 }));
+    mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
+
+    const res = await dispatchAntigravityTool.execute({ ...COMPLETE, repo: OPLIFY, scope: "src/app.ts" });
+
+    expect(res.success).toBe(true);
+    expect(mockIssuesCreate).toHaveBeenCalledTimes(1);
+    const warnings = (res.data as { warnings: string[] }).warnings;
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Could not verify 1 of 1 path");
+    expect(warnings[0]).toContain("Service Unavailable");
+  });
+
+  it("shares one set of GitHub lookups between the pre-approval lint and execute()", async () => {
+    // agent-tools/antigravity.ts lints before the approval card; execute() lints again.
+    const input = { ...COMPLETE, repo: OPLIFY, scope: "src/app.ts, src/api.ts" };
+    const body = formatAntigravityIssueBody(input);
+    mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
+
+    const before = await lintDispatchBrief({ owner: "OplifyMessage", repo: "oplify-messaging-api" }, body);
+    expect(before.ok).toBe(true);
+    expect(mockGetContent).toHaveBeenCalledTimes(2);
+
+    await dispatchAntigravityTool.execute(input);
+    expect(mockGetContent).toHaveBeenCalledTimes(2);
+    expect(mockIssuesCreate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("describeBriefRejection", () => {
+  it("names the input that fills each section, so the model can fix the call", async () => {
+    const lint = await lintAgentBrief(formatAntigravityIssueBody({ ...COMPLETE, evidence: undefined, problem: undefined }), () => true);
+    const text = describeBriefRejection(lint, "o/r");
+
+    expect(text).toContain('Section "## Problem / observed behavior" is empty (only whitespace or an HTML comment). Pass it in the `problem` input.');
+    expect(text).toContain('Section "## Evidence" is empty (only whitespace or an HTML comment). Pass it in the `evidence` input.');
+  });
+});
+
+describe("DEFAULT_DISPATCH_REPO", () => {
+  it("is re-exported for existing importers", () => {
+    expect(DEFAULT_DISPATCH_REPO).toBe("pushkarverma3698/FounderOS");
   });
 });

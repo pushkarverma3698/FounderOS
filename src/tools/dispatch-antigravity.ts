@@ -11,8 +11,12 @@
  *
  * Architecture Invariants (ADR-046 & ISSUE-DRIVEN-CONTRACT.md):
  *   - Issues are the ONLY dispatch mechanism for Antigravity.
- *   - The issue must contain all required sections (Goal, Scope, Verification, etc.)
- *     so the headless executor can run with zero conversation history.
+ *   - The issue must contain all nine template sections, filled, and name only files that
+ *     exist, so the headless executor can run with zero conversation history. That is
+ *     enforced here, before `issues.create`, by ./agent-brief-lint.ts: a brief that fails is
+ *     never filed, and the reason goes back to the model so it asks the founder. The lint
+ *     also runs BEFORE the approval card (agents/agent-tools/antigravity.ts), so the founder
+ *     is never asked to approve a brief that would then be rejected.
  *
  * TARGET REPO IS PINNED TO AN ALLOWLIST (./dispatch-repos.ts). `repo` is a
  * caller-supplied argument that takes precedence over ISSUE_REPO, so without the
@@ -30,6 +34,8 @@ import { assertDispatchableRepo, DEFAULT_DISPATCH_REPO, DISPATCH_REPO_ALLOWLIST 
 import { listRegisteredDispatchRepos } from "../db/queries.js";
 import { TENANT } from "../core/config.js";
 import { kickDispatchTick } from "./dispatch-tick.js";
+import { formatBriefRejection, type BriefLintResult } from "./agent-brief-lint.js";
+import { checkDispatchBrief, type ContentsClient } from "./dispatch-brief-check.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:dispatch-antigravity" });
@@ -47,48 +53,69 @@ export interface AntigravityTaskInput {
   verification: string;
   acceptance?: string;
   forbidden?: string;
+  /** What is happening today. Its own section; left empty when absent so the lint says so. */
+  problem?: string;
+  /** Proof for the problem. Its own section; left empty when absent so the lint says so. */
   evidence?: string;
+  /** Task-specific constraints, appended to STANDING_CONSTRAINTS. */
+  constraints?: string;
+  /** Paths the task will create. Listed under a sub-heading of the scope section, which the lint skips. */
+  newFiles?: string;
   repo?: string;
 }
 
-/** Formats structured task inputs into the standard agent-task issue body. */
+/**
+ * Rules that hold for every task, derived from docs/antigravity/STANDARDS.md (§8 style and
+ * scope, §9 tests, §10 dependencies, §11 what needs explicit instruction) and CLAUDE.md
+ * (never commit or push to main). They are real content for the "Constraints" section, not a
+ * placeholder: the section always carries them, with the founder's own constraints appended.
+ */
+export const STANDING_CONSTRAINTS: readonly string[] = [
+  "Follow docs/antigravity/STANDARDS.md; where this brief is silent, it governs.",
+  "Change only the files listed in scope (and their tests). Every changed line must trace to this brief.",
+  "Match the surrounding code's style. Do not restyle, reformat, or delete code you were not asked to touch.",
+  "Add no npm dependency, config file, or directory unless this brief asks for it.",
+  "Tests must run offline and free: no real LLM, paid API, or network call.",
+  "Do not edit CI config, .env files, or credentials.",
+  "Work only on your task branch and open a draft PR. Never push to, or merge into, main or beta.",
+];
+
+const DEFAULT_FORBIDDEN =
+  "See docs/antigravity/STANDARDS.md — do not touch /opt/founderos, never merge to main, never force-push.";
+/** Exported so the approval card shows the acceptance criteria the issue will really carry. */
+export const DEFAULT_ACCEPTANCE = "All verification commands pass; Claude pr-brain clears review with no BLOCKER.";
+
+const section = (heading: string, content: string): string[] => [`## ${heading}`, "", content.trim(), ""];
+
+/**
+ * Formats structured task inputs into the standard agent-task issue body: all nine sections of
+ * .github/ISSUE_TEMPLATE/agent-task.md, in the template's order.
+ *
+ * Problem and Evidence have no default text. They used to (`Task dispatched by Founder via
+ * FounderOS.`), which is how #762 reached the executor with nothing in them. An empty section is
+ * reported by the lint, and the planner asks the founder.
+ */
 export function formatAntigravityIssueBody(input: AntigravityTaskInput): string {
-  const forbidden = input.forbidden?.trim() ||
-    "See docs/antigravity/STANDARDS.md — do not touch /opt/founderos, never merge to main, never force-push.";
-  const acceptance = input.acceptance?.trim() ||
-    "All verification commands pass; Claude pr-brain clears review with no BLOCKER.";
-  const evidence = input.evidence?.trim() ||
-    "Task dispatched by Founder via FounderOS.";
+  const standing = STANDING_CONSTRAINTS.map((rule) => `- ${rule}`).join("\n");
+  const own = input.constraints?.trim();
+  const newFiles = input.newFiles?.trim();
 
   return [
-    "## Goal",
-    "",
-    input.goal.trim(),
-    "",
-    "## Problem / observed behavior",
-    "",
-    evidence,
-    "",
-    "## Expected behavior",
-    "",
-    input.expected.trim(),
-    "",
-    "## Files or subsystem in scope",
-    "",
-    input.scope.trim(),
-    "",
-    "## Explicitly forbidden",
-    "",
-    forbidden,
-    "",
-    "## Verification commands",
-    "",
-    input.verification.trim(),
-    "",
-    "## Acceptance criteria",
-    "",
-    acceptance,
-  ].join("\n");
+    ...section("Goal", input.goal),
+    ...section("Problem / observed behavior", input.problem ?? ""),
+    ...section("Expected behavior", input.expected),
+    ...section("Evidence", input.evidence ?? ""),
+    ...section(
+      "Files or subsystem in scope",
+      newFiles ? `${input.scope.trim()}\n\n### New files to create\n\n${newFiles}` : input.scope,
+    ),
+    ...section("Constraints", own ? `${standing}\n\nTask-specific constraints:\n\n${own}` : standing),
+    ...section("Explicitly forbidden", input.forbidden?.trim() || DEFAULT_FORBIDDEN),
+    ...section("Verification commands", input.verification),
+    ...section("Acceptance criteria", input.acceptance?.trim() || DEFAULT_ACCEPTANCE),
+  ]
+    .join("\n")
+    .trimEnd();
 }
 
 function getOctokit(): Octokit {
@@ -113,6 +140,43 @@ export async function resolveDispatchRepo(repoArg?: string): Promise<{ owner: st
   return assertDispatchableRepo(slug, await listRegisteredDispatchRepos(TENANT));
 }
 
+/**
+ * Lints a formatted brief against the repo it will be filed on: all nine sections filled, and
+ * every cited path real (see ./agent-brief-lint.ts). READ-ONLY, so it is safe above hitlGate,
+ * which re-runs everything above it on resume. A passing verdict is remembered for the same repo
+ * and body (./dispatch-brief-check.ts), so the pre-approval call, the replay after approval and
+ * execute() share one set of GitHub lookups.
+ */
+export function lintDispatchBrief(
+  target: { owner: string; repo: string },
+  body: string,
+  getClient: () => ContentsClient = getOctokit,
+): Promise<BriefLintResult> {
+  return checkDispatchBrief({ ...target, body }, { getClient });
+}
+
+/** Which tool input fills each template section, so a rejection tells the model what to pass. */
+const SECTION_INPUT_HINTS: Readonly<Record<string, string>> = {
+  Goal: "Pass it in the `goal` input.",
+  "Problem / observed behavior": "Pass it in the `problem` input.",
+  "Expected behavior": "Pass it in the `expected` input.",
+  Evidence: "Pass it in the `evidence` input.",
+  "Files or subsystem in scope": "Pass it in the `scope` input.",
+  Constraints: "Pass it in the `constraints` input.",
+  "Explicitly forbidden": "Pass it in the `forbidden` input.",
+  "Verification commands": "Pass it in the `verification` input.",
+  "Acceptance criteria": "Pass it in the `acceptance` input.",
+};
+
+/** The rejection the model reads, and relays to the founder, when the lint fails. */
+export function describeBriefRejection(lint: BriefLintResult, target: string): string {
+  return formatBriefRejection(lint, {
+    target,
+    hints: SECTION_INPUT_HINTS,
+    newFilesHint: "Pass them in the `new_files` input.",
+  });
+}
+
 export const dispatchAntigravityTool: UnifiedTool = {
   name: "dispatch_antigravity_task",
   description:
@@ -132,7 +196,9 @@ export const dispatchAntigravityTool: UnifiedTool = {
       },
       scope: {
         type: "string",
-        description: "Exact files or subsystems in scope (e.g. 'src/tools/jobhunt/free-ats-source.ts').",
+        description:
+          "Exact files or subsystems in scope (e.g. 'src/tools/jobhunt/free-ats-source.ts'). Every path must exist " +
+          "today, or the brief is rejected; paths the task will create go in new_files.",
       },
       expected: {
         type: "string",
@@ -150,9 +216,29 @@ export const dispatchAntigravityTool: UnifiedTool = {
         type: "string",
         description: "Task-specific prohibitions beyond general standards.",
       },
+      problem: {
+        type: "string",
+        description:
+          "What is actually happening today, or what is missing: exact error text, observed behavior, or the gap " +
+          "the founder described. Ask the founder if unknown; never invent it. The brief is rejected while this is empty.",
+      },
       evidence: {
         type: "string",
-        description: "Error logs, observed behavior, reproduction steps, or context.",
+        description:
+          "Proof for the problem: log lines, file:line references, links to earlier investigation. Ask the founder " +
+          "if he gave none; never invent it. The brief is rejected while this is empty.",
+      },
+      constraints: {
+        type: "string",
+        description:
+          "Task-specific constraints that shape the fix (performance, contracts that must not change). " +
+          "The standing rules from STANDARDS.md are added automatically.",
+      },
+      new_files: {
+        type: "string",
+        description:
+          "Paths this task will CREATE (one per line). They do not exist yet, so they are not checked; " +
+          "everything in scope must exist today.",
       },
       repo: {
         type: "string",
@@ -186,7 +272,10 @@ export const dispatchAntigravityTool: UnifiedTool = {
       verification,
       acceptance: args["acceptance"] as string | undefined,
       forbidden: args["forbidden"] as string | undefined,
+      problem: args["problem"] as string | undefined,
       evidence: args["evidence"] as string | undefined,
+      constraints: args["constraints"] as string | undefined,
+      newFiles: args["new_files"] as string | undefined,
       repo: args["repo"] as string | undefined,
     };
 
@@ -207,6 +296,27 @@ export const dispatchAntigravityTool: UnifiedTool = {
 
     const body = formatAntigravityIssueBody(input);
     const labels = [AGENT_READY_LABEL, ANTIGRAVITY_LABEL];
+
+    // The gate. A brief that fails is never filed: the reason goes back to the model, which asks
+    // the founder for the missing piece, before any Antigravity tokens are spent.
+    let lint: BriefLintResult;
+    try {
+      lint = await lintDispatchBrief({ owner, repo }, body, () => octokit);
+    } catch (err) {
+      const message = (err as Error).message;
+      log.error({ owner, repo, err: message }, "Brief lint crashed; nothing was filed");
+      return {
+        success: false,
+        error: `The brief lint crashed (${message}), so nothing was filed. This is a FounderOS bug in src/tools/agent-brief-lint.ts, not a problem with the brief.`,
+      };
+    }
+    if (!lint.ok) {
+      return {
+        success: false,
+        error: describeBriefRejection(lint, `${owner}/${repo}`),
+        data: { missing: lint.missing, missing_headings: lint.missingHeadings, missing_paths: lint.missingPaths },
+      };
+    }
 
     try {
       const { data } = await octokit.rest.issues.create({
@@ -237,6 +347,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
           title: data.title,
           repo: `${owner}/${repo}`,
           labels,
+          ...(lint.warnings.length > 0 ? { warnings: lint.warnings } : {}),
         },
       };
     } catch (err) {
