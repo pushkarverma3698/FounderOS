@@ -539,3 +539,23 @@ describe("cross-turn memory (checkpointer-hydrated history)", () => {
     expect(history.at(-1)?.user_input).toBe("message 24"); // turn 25 itself summarizes on the NEXT turn
   });
 });
+
+// 2026-09-29: PR #763 ("Jev AI System 1") answered "stop"/"cancel" with
+// "Mission cancelled" while cancelling nothing, and "status" with a hard-coded
+// "System status: operational" while Gmail was down — action and health claims
+// with no receipt behind them. Short words are ordinary founder messages: the
+// planner decides them, like everything else.
+describe("no canned replies before the planner", () => {
+  for (const word of ["stop", "cancel", "abort", "status", "ping", "health"]) {
+    it(`"${word}" reaches the planner model instead of a fixed reply`, async () => {
+      const planner = new ScriptedModel([ai(JSON.stringify({ type: "reply", text: `planner saw ${word}` }))]);
+      const k = kernelWith(planner, new ScriptedModel([]), new ScriptedModel([]), []);
+
+      const res = await k.invoke(turn(word), cfg(`no-canned-${word}`));
+
+      expect(planner.calls).toBe(1);
+      expect(res.reply).toBe(`planner saw ${word}`);
+      expect(res.reply).not.toMatch(/Mission cancelled|System status: operational|^pong$/);
+    });
+  }
+});

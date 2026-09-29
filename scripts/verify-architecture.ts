@@ -40,6 +40,13 @@ export const TOMBSTONES: string[] = [
   "src/gateway/shell-hitl-fast-path.ts",
   // The LLM supervisor + flag-gated alternate topologies:
   "src/agents/office.ts",
+  // v2's supervisor file name. The dispatcher is src/kernel/supervisor.ts (pure
+  // code). A brief written from the stale v2 founder_context named this path,
+  // and #763 re-created it to satisfy the brief (reverted 2026-09-29).
+  "src/agents/supervisor.ts",
+  // #763's "Jev AI System 1": canned "Mission cancelled" / "System status:
+  // operational" replies ahead of the planner — a fast path under a new name.
+  "src/services/jev-ai.ts",
   "src/agents/engineering-domain.ts",
   "src/agents/revenue-domain.ts",
   "src/agents/creative-department.ts",
