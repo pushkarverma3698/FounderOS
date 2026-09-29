@@ -159,10 +159,14 @@ describe("handleDraft (resolution path)", () => {
     await fs.rm(artifactDir, { recursive: true, force: true }).catch(() => {});
   });
 
-  it("tailors a real PDF and hands only the SEND to a kernel turn", async () => {
-    // Tailoring and rendering happen outside the kernel (deterministic, no side
-    // effects); only deliver_artifact — which is HITL-gated — runs through a
-    // kernel turn, so the founder still taps to approve every outbound file.
+  it("tailors a real PDF and sends it straight into the chat that asked — no kernel turn, no approval card", async () => {
+    // UPDATED 2026-09-29. It used to hand the send to a kernel turn that called
+    // the HITL-gated deliver_artifact. That cost three model calls and a tap to
+    // put a file into the very chat that typed /draft; deliver_artifact always
+    // sent to the founder's DM, so /wife_draft in the family group put Tashi's
+    // CV in his private chat; and on 2026-09-17 the synthesizer told him the
+    // Hitachi CV "failed" to deliver right after the tool said it had. Nothing
+    // leaves Telegram here — applying stays his click on the employer's site.
     vi.doMock("../../../src/db/job-queries.js", () => ({
       getApplicationByBriefRank: vi.fn(async (section: string, rank: number) =>
         section === "do_today" && rank === 2 ? ROW : null,
@@ -210,16 +214,21 @@ describe("handleDraft (resolution path)", () => {
     const { handleDraft } = await import("../../../src/gateway/jobhunt-commands.js");
     const runKernelText = vi.fn(async () => undefined);
     const reply = vi.fn(async () => undefined);
+    const replyWithDocument = vi.fn(async () => undefined);
 
-    await handleDraft({ match: "2", chat: { id: chatId }, reply } as never, { runKernelText });
+    await handleDraft({ match: "2", chat: { id: chatId }, reply, replyWithDocument } as never, { runKernelText });
 
-    expect(runKernelText).toHaveBeenCalledOnce();
-    const [, callText] = (runKernelText.mock.calls[0] ?? []) as unknown as [unknown, string?];
-    expect(callText).toContain("deliver_artifact");
-    expect(callText).toContain(artifactDir);
-    expect(callText).toContain("Aquablu B.V");
-    // Never the free-text draft path on the success branch.
-    expect(callText).not.toContain("Draft a tailored application");
+    // No model turn at all on the success branch — not for the send, and never
+    // the free-text draft path.
+    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replyWithDocument).toHaveBeenCalledOnce();
+    const [doc, docOpts] = (replyWithDocument.mock.calls[0] ?? []) as unknown as [
+      { fileData?: unknown; filename?: string },
+      { caption?: string }?,
+    ];
+    expect(String(doc.fileData)).toContain(artifactDir);
+    expect(doc.filename).toMatch(/^cv-aquablu.*\.pdf$/);
+    expect(docOpts?.caption).toContain("Aquablu B.V");
 
     // THREE messages on a success run: the "tailoring…" ack, the cover letter,
     // then the packet message carrying the apply link. A failure notice never

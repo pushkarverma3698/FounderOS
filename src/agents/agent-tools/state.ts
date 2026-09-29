@@ -17,6 +17,7 @@ import { writeArtifactTool, writeArtifactFile, type ArtifactFormat } from "../..
 import { deliverArtifactTool, deliverArtifactFile } from "../../tools/deliver-artifact.js";
 import { hitlGate } from "./hitl.js";
 import { childLogger } from "../../infra/logger.js";
+import { chatIdFromThreadId } from "../../infra/telegram-send.js";
 
 const log = childLogger({ module: "agent-tools:state" });
 
@@ -237,9 +238,13 @@ export const deliverArtifact = tool(
     if (rejected) return rejected;
 
     try {
+      // The chat whose thread asked — in the family group, the group — not
+      // always the founder's DM, which is what the card's "to this chat" says.
+      const chatId = chatIdFromThreadId(config?.configurable?.["thread_id"]);
       const result = await deliverArtifactFile({
         path: filePath,
         caption: caption ?? undefined,
+        ...(chatId ? { chatId } : {}),
       });
 
       return `✅ Artifact "${result.filename}" (${result.bytes} bytes) delivered successfully to Telegram.`;

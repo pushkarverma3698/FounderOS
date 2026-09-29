@@ -30,6 +30,18 @@ export function defaultChatId(): string {
 }
 
 /**
+ * The Telegram chat a kernel thread belongs to. Thread ids are `<tenant>:<chatId>`
+ * (src/gateway/kernel-run.ts threadIdFor); anything else yields undefined, and
+ * the caller falls back to defaultChatId(). Lets a tool answer the chat that
+ * asked — a family group — instead of always the founder's DM.
+ */
+export function chatIdFromThreadId(threadId: unknown): string | undefined {
+  if (typeof threadId !== "string") return undefined;
+  const tail = threadId.slice(threadId.lastIndexOf(":") + 1);
+  return /^-?\d+$/.test(tail) ? tail : undefined;
+}
+
+/**
  * Send a short plain-text status message to a Telegram chat.
  * Used by long-running tools (claude_code) to stream progress to the founder
  * while the office run is still in flight. Best-effort: failures are logged,

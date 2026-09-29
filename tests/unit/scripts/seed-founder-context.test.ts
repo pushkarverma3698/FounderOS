@@ -119,3 +119,65 @@ describe("seed-founder-context — fill-only", () => {
     expect(store.row?.["budget_alerts_sent"]).toEqual(alerts);
   });
 });
+
+// 2026-09-29 prod audit: the stored row still described v2 ("LangGraph JS
+// (createSupervisor + createReactAgent), Gemini 2.5 Flash via OpenRouter") three
+// months after v2 was deleted, plus the June priorities #760 meant to retire.
+// Fill-only seeding can never correct a key that is already stored, so the bot
+// described the dead architecture to the founder and wrote an Antigravity brief
+// against v2's src/agents/supervisor.ts (#762 → #763, reverted).
+describe("seed-founder-context — keys the code owns, and retired June values", () => {
+  beforeEach(() => {
+    store.row = undefined;
+    store.writes = 0;
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const V2_TECH_STACK =
+    "LangGraph JS (createSupervisor + createReactAgent), Gemini 2.5 Flash via OpenRouter, TypeScript 5.5 strict, Node 22 ESM, Postgres + pgvector + Drizzle ORM, grammy (Telegram), LangSmith tracing, Ollama (nomic-embed-text for turicks-brain RAG), gws (Gmail/Calendar default), direct LinkedIn API";
+
+  it("rewrites a stored v2 system description to the current architecture", async () => {
+    store.row = {
+      tech_stack: V2_TECH_STACK,
+      founderos_departments: "7 departments: admin (read_context, update_context), research (…)",
+      last_updated: FOUNDER_UPDATED_AT,
+    };
+
+    expect(await runSeed()).toBe(0);
+
+    const stack = String(store.row?.["tech_stack"]);
+    expect(stack).not.toMatch(/createSupervisor|createReactAgent|2\.5 Flash|via OpenRouter/);
+    expect(stack).toMatch(/StateGraph/);
+    expect(String(store.row?.["founderos_departments"])).toMatch(/^8 kernel workers/);
+    expect(store.row?.["last_updated"]).toBe(FOUNDER_UPDATED_AT);
+  });
+
+  it("removes a June seed value nobody changed, and keeps a founder-written one under the same kind of key", async () => {
+    const { RETIRED_SEED_VALUES } = await import("../../../src/db/founder-context.js");
+    store.row = {
+      current_priorities: structuredClone(RETIRED_SEED_VALUES["current_priorities"]),
+      recent_wins: structuredClone(RETIRED_SEED_VALUES["recent_wins"]),
+      next_actions: ["Send the Acme SOW"],
+    };
+
+    expect(await runSeed()).toBe(0);
+
+    expect(store.row).not.toHaveProperty("current_priorities");
+    expect(store.row).not.toHaveProperty("recent_wins");
+    expect(store.row?.["next_actions"]).toEqual(["Send the Acme SOW"]);
+  });
+
+  it("a second run after the correction writes nothing", async () => {
+    store.row = { tech_stack: V2_TECH_STACK };
+    await runSeed();
+    store.writes = 0;
+
+    await runSeed();
+
+    expect(store.writes).toBe(0);
+  });
+});
