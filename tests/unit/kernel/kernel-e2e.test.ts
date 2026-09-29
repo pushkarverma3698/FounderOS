@@ -103,6 +103,33 @@ describe("kernel E2E (scripted models, real graph)", () => {
     expect(synth.calls).toBe(0);
   });
 
+  it("System 1 routing: 'ping' returns 'pong' with ZERO LLM calls", async () => {
+    // ScriptedModel([]) throws "exhausted" if invoked — proves no model call happens.
+    const planner = new ScriptedModel([]);
+    const worker = new ScriptedModel([]);
+    const synth = new ScriptedModel([]);
+    const k = kernelWith(planner, worker, synth, []);
+
+    const res = await k.invoke(turn("ping"), cfg("system1-ping"));
+    expect(res.reply).toBe("pong");
+    expect(res.mission.status).toBe("done");
+    expect(planner.calls).toBe(0);
+    expect(worker.calls).toBe(0);
+    expect(synth.calls).toBe(0);
+  });
+
+  it("System 1 routing: 'status' returns operational message with ZERO LLM calls", async () => {
+    const planner = new ScriptedModel([]);
+    const worker = new ScriptedModel([]);
+    const synth = new ScriptedModel([]);
+    const k = kernelWith(planner, worker, synth, []);
+
+    const res = await k.invoke(turn("status"), cfg("system1-status"));
+    expect(res.reply).toBe("System status: operational");
+    expect(res.mission.status).toBe("done");
+    expect(planner.calls).toBe(0);
+  });
+
   it("route override builds a deterministic plan with ZERO planner LLM calls", async () => {
     const planner = new ScriptedModel([]);
     const worker = new ScriptedModel([ai(JSON.stringify({ text: "42 open issues" }))]);

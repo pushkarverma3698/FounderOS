@@ -28,6 +28,7 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { runRagSearch } from "../db/rag-query.js";
 import { ragErrorMessage, renderRagSuccess } from "../db/retrieval-result.js";
+import { turicksBrainPreFilter } from "./brain.js";
 import { withToolErrorBoundary } from "../agents/tool-result.js";
 import { childLogger } from "../infra/logger.js";
 
@@ -67,6 +68,26 @@ export const searchKnowledge = tool(
       if (result.hits.length === 0) {
         return `No knowledge entries found for "${query}"${entry_type ? ` (type: ${entry_type})` : ""}. The turicks-brain may not have this — try \`search_web\`. Do NOT fabricate an answer; report the missing information to the founder rather than fabricate or substitute unrelated context.`;
       }
+
+      // Apply Jev AI pre-filtering
+      const rawHits = result.hits.map((h) => ({
+        text: h.content,
+        score: h.score,
+        source: h.metadata?.["source_path"] as string | undefined,
+        ...h.metadata,
+      }));
+      const preFiltered = turicksBrainPreFilter(rawHits, { topK });
+      if (preFiltered.filtered.length === 0) {
+        return `No knowledge entries found for "${query}"${entry_type ? ` (type: ${entry_type})` : ""}. The turicks-brain may not have this — try \`search_web\`. Do NOT fabricate an answer; report the missing information to the founder rather than fabricate or substitute unrelated context.`;
+      }
+      result = {
+        ...result,
+        hits: preFiltered.filtered.map((item) => ({
+          content: item.text,
+          score: item.score ?? 1.0,
+          metadata: { source_path: item.source },
+        })),
+      };
 
       return renderRagSuccess(result, query, "Turicks Brain", "source_path");
     }),

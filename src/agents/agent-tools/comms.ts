@@ -34,6 +34,7 @@ import {
 import { judgeOutbound } from "../../infra/judge.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
+import { executeToolWithValidation } from "../../tools/index.js";
 import type { RunnableConfig } from "@langchain/core/runnables";
 
 const log = childLogger({ module: "agent-tools:comms" });
@@ -161,7 +162,7 @@ export function createSendEmailTool(department: string) {
       return `BLOCKED: ${to} is on the do-not-contact list. Email not sent.`;
     }
 
-    const res = await emailTool.execute({
+    const res = await executeToolWithValidation(emailTool, {
       to,
       subject,
       body,
