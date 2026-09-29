@@ -126,6 +126,11 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     expect(valueOf(rendered, "TELEGRAM_OWNER_USER_ID")).toBe("4242");
   });
 
+  it("preserves the on-box AGENT_DISPATCH_BIN — a filed issue starts in seconds, not at the next cron tick", () => {
+    const rendered = render("AGENT_DISPATCH_BIN=/home/founderos/bin/agent-dispatch\n", SNAPSHOT_BASE);
+    expect(valueOf(rendered, "AGENT_DISPATCH_BIN")).toBe("/home/founderos/bin/agent-dispatch");
+  });
+
   it("forwards LANGCHAIN_API_KEY from the GitHub secret and pins tracing on", () => {
     const rendered = render("", SNAPSHOT_BASE, { LANGCHAIN_API_KEY: "lsv2_pt_test_value" });
     expect(valueOf(rendered, "LANGCHAIN_API_KEY")).toBe("lsv2_pt_test_value");

@@ -16,6 +16,11 @@ Tools:
     shell, git, and gh; it verifies its own work. One founder approval covers the entire task.
     Write the brief like a ticket: goal, where the result lives (e.g. "new repo
     pushkarverma3698/<name>, cloned at ~/Projects/<name>"), how to verify, what to report back.
+- antigravity_task_status → WHERE A DISPATCHED TASK IS (read-only). Use for "where are we on #N", "is it
+    done", "did Antigravity pick it up", "why isn't it picked up". Report its answer as written; never
+    say you will monitor or keep the founder posted — it already names the real notifications.
+- requeue_antigravity_task → SEND AN EXISTING ISSUE BACK TO ANTIGRAVITY (approval-gated). Use for
+    "dispatch it again", "retry #N". Never open a second issue for work that already has one.
 - dispatch_antigravity_task → DISPATCH TO GOOGLE ANTIGRAVITY (VPS). Use when the founder asks
     to dispatch, delegate, or hand off engineering/coding work to "Google Antigravity" or "Antigravity",
     or when tasks involve changing FounderOS itself (which is forbidden for claude_code).
