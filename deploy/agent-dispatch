@@ -280,6 +280,50 @@ slugify() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-40
 }
 
+# -------------------------------------------------------------- quota back-off
+# 2026-09-21 07:45–08:31: #710 was claimed and run 5 times in 46 minutes, every
+# run dying on "Individual quota reached … Resets in 57h37m44s" and every run
+# marking the issue agent:failed — as though the TASK had failed. Nothing read
+# the reset time, so every tick and every /task kick walked into the same wall.
+# A quota hit now records when it lifts; until then no claim and no re-dispatch
+# starts, and the issue goes back to agent:ready to be picked up afterwards.
+QUOTA_FILE="$HOME/.claude/agent-dispatch.quota-until"
+
+# Epoch seconds when the quota lifts, if $1 (an agy log) shows a quota wall.
+# "Resets in 57h37m44s" is parsed; a quota error with no time backs off 1 hour.
+quota_reset_epoch() {
+  grep -qE "Individual quota reached|RESOURCE_EXHAUSTED" "$1" 2>/dev/null || return 1
+  local spec h=0 m=0 sec=0
+  spec=$(grep -oE "Resets in ([0-9]+h)?([0-9]+m)?([0-9]+s)?" "$1" | head -n1 | sed 's/Resets in //')
+  [[ "$spec" =~ ([0-9]+)h ]] && h=${BASH_REMATCH[1]}
+  [[ "$spec" =~ ([0-9]+)m ]] && m=${BASH_REMATCH[1]}
+  [[ "$spec" =~ ([0-9]+)s ]] && sec=${BASH_REMATCH[1]}
+  local total=$(( 10#$h * 3600 + 10#$m * 60 + 10#$sec ))
+  [[ "$total" -gt 0 ]] || total=3600
+  echo $(( $(date -u +%s) + total ))
+}
+
+quota_until_human() {
+  date -u -d "@$1" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || date -u -r "$1" '+%Y-%m-%d %H:%M UTC'
+}
+
+# True while a recorded quota wall has not lifted yet. Clears a lifted one.
+quota_exhausted() {
+  [[ -f "$QUOTA_FILE" ]] || return 1
+  local until; until=$(tr -dc '0-9' <"$QUOTA_FILE")
+  if [[ -n "$until" && "$until" -gt "$(date -u +%s)" ]]; then
+    return 0
+  fi
+  rm -f "$QUOTA_FILE"
+  log "Antigravity quota wall lifted — dispatching again"
+  return 1
+}
+
+record_quota_wall() {
+  mkdir -p "$(dirname "$QUOTA_FILE")" && printf '%s\n' "$1" >"$QUOTA_FILE"
+  log "Antigravity quota exhausted until $(quota_until_human "$1") — no claims or re-dispatches until then"
+}
+
 # ----------------------------------------------------------------- Pass A: claim
 
 claim_and_implement() {
@@ -368,6 +412,16 @@ EOF
   # nonzero exit alongside a real PR is logged as an anomaly, not treated as failure.
   if [[ "$agy_exit" -ne 0 && ( -n "$pr_number" && "${new_commits:-0}" -gt 0 ) ]]; then
     log "#${issue} agy_exit=${agy_exit} (nonzero) but PR #${pr_number} with ${new_commits} commit(s) exists — not a dispatch failure, handing to review anyway"
+  fi
+
+  local quota_until
+  if [[ -z "$pr_number" || "${new_commits:-0}" -eq 0 ]] && quota_until=$(quota_reset_epoch "$agy_log"); then
+    record_quota_wall "$quota_until"
+    gh issue edit "$issue" --repo "$REPO" --remove-label agent:working --add-label agent:ready >/dev/null
+    gh issue comment "$issue" --repo "$REPO" --body "Antigravity's quota is exhausted until $(quota_until_human "$quota_until"). Nothing was done on this issue, and it is back at agent:ready: agent-dispatch picks it up automatically once the quota resets." >/dev/null
+    notify "⏸️ agent-dispatch: Antigravity quota exhausted until $(quota_until_human "$quota_until"). #${issue} is queued (agent:ready) and starts automatically after that — no retries before."
+    rm -f "$agy_log"
+    return 1
   fi
 
   if [[ -z "$pr_number" || "${new_commits:-0}" -eq 0 ]]; then
@@ -559,6 +613,13 @@ redispatch_unresolved_reviews() {
     local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-redispatch-agy-XXXXXX.log)"
     run_agy_with_progress "Antigravity PR #${pr}" "$WORKSPACE" "$prompt_file" "$agy_log"
     cat "$agy_log" >>"$LOG"
+    local quota_until
+    if quota_until=$(quota_reset_epoch "$agy_log"); then
+      # Antigravity did nothing, so this does not count against MAX_ATTEMPTS.
+      record_quota_wall "$quota_until"
+      rm -f "$prompt_file" "$agy_log"
+      return 0
+    fi
     rm -f "$prompt_file" "$agy_log"
 
     gh pr comment "$pr" --repo "$REPO" --body "${ATTEMPT_PREFIX} $((attempts + 1)) --> agent-dispatch re-invoked Antigravity ($([[ "$checks_state" == "ci_failed" ]] && echo "CI failure" || echo "unresolved review")). Awaiting the next pr-brain pass." >/dev/null
@@ -591,6 +652,12 @@ for repo_idx in "${!ISSUE_REPOS[@]}"; do
   # kickDispatchTick's own kick (--issue N, no --repo) claimed a FounderOS
   # issue in place of a same-numbered Oplify one. No --repo given (the old
   # calling convention) skips nothing, unchanged from before.
+  if quota_exhausted; then
+    log "Antigravity quota exhausted until $(quota_until_human "$(tr -dc '0-9' <"$QUOTA_FILE")") — no claim or re-dispatch in $REPO this tick"
+    release_stale_claims
+    continue
+  fi
+
   if [[ -n "$FORCE_ISSUE" && -n "$FORCE_REPO" && "$REPO" != "$FORCE_REPO" ]]; then
     log "skipping $REPO — forced issue #$FORCE_ISSUE targets $FORCE_REPO"
   elif [[ "${claims_done[$repo_idx]:-0}" -lt "$MAX_CLAIMS" ]]; then
