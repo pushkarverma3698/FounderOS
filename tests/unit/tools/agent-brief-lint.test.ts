@@ -22,6 +22,7 @@ import {
   type AgentBriefHeading,
   type FileExists,
 } from "../../../src/tools/agent-brief-lint.js";
+import { filledBrief as brief } from "../../helpers/agent-brief.js";
 
 const read = (repoRelative: string): string =>
   readFileSync(new URL(`../../../${repoRelative}`, import.meta.url), "utf8");
@@ -38,13 +39,6 @@ function existing(...paths: string[]): FileExists & { readonly asked: string[] }
   }) as FileExists & { asked: string[] };
   fn.asked = asked;
   return fn;
-}
-
-/** A complete brief: every template section filled, with per-section overrides. */
-function brief(sections: Partial<Record<AgentBriefHeading, string>> = {}, tail = ""): string {
-  return (
-    AGENT_BRIEF_HEADINGS.map((h) => `## ${h}\n\n${sections[h] ?? "Filled in."}\n`).join("\n") + tail
-  );
 }
 
 const SCOPE: AgentBriefHeading = "Files or subsystem in scope";
