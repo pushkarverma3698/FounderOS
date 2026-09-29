@@ -33,6 +33,12 @@ Each job: review the pre-filled form, complete anything it left blank, then
 **SUBMIT & NEXT** (presses the site's own submit, records it, moves on) or
 **SKIP** (records that you passed, moves on). Both are your click.
 
+`applied` is recorded from exactly two things: a positive sign from the page
+(it says "Thank you, application received", the form disappears, or the address
+changes), or your own **YES**. If the page says nothing either way, the bar asks
+**Did the application go through?** and writes nothing until you answer: **YES**
+records it, **NO** records nothing and gives you the buttons back.
+
 Before you submit, the overlay tells you which resume is attached — read this,
 it is not decorative:
 

@@ -10,6 +10,11 @@
  * `.submit()`, `.requestSubmit()`, `.dispatchEvent()`) sits lexically inside
  * the handler assigned to `submit.onclick`, and that there is exactly one.
  *
+ * The same parse pins the other half of ADR-018: "applied" is reported from
+ * exactly two places, a POSITIVE page signal (`if (successSignal())`) or the
+ * founder's own YES on "Did the application go through?". A page that says
+ * nothing is never defaulted to applied.
+ *
  * CI runs this; the Python suite that exercises the overlay in a real browser
  * (mac-client/tests) is not in CI.
  */
@@ -79,6 +84,48 @@ function actingCalls(source: string): ActingCall[] {
   return found;
 }
 
+/** `<name>.onclick = ...` handlers that are the founder's own explicit confirmation that it was sent. */
+const HUMAN_CONFIRMATION_BUTTONS: ReadonlySet<string> = new Set(["yes"]);
+
+/** Where each `founderosDecision("applied")` sits: the condition or button that guards it. */
+function appliedRecordingOrigins(source: string): string[] {
+  const origins: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "founderosDecision" &&
+      node.arguments[0] !== undefined &&
+      ts.isStringLiteral(node.arguments[0]) &&
+      node.arguments[0].text === "applied"
+    ) {
+      origins.push(originOf(node));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parse(source));
+  return origins;
+}
+
+function originOf(call: ts.Node): string {
+  let innermostCondition: string | null = null;
+  for (let child: ts.Node = call, current = call.parent; current; child = current, current = current.parent) {
+    if (ts.isIfStatement(current) && child === current.thenStatement) {
+      const condition = current.expression.getText();
+      if (condition === "successSignal()") return condition;
+      innermostCondition ??= condition;
+    }
+    if ((ts.isArrowFunction(current) || ts.isFunctionExpression(current)) && ts.isBinaryExpression(current.parent)) {
+      const left = current.parent.left;
+      if (ts.isPropertyAccessExpression(left) && left.name.text === "onclick" && ts.isIdentifier(left.expression)) {
+        const button = left.expression.text;
+        if (HUMAN_CONFIRMATION_BUTTONS.has(button)) return `${button}.onclick`;
+      }
+    }
+  }
+  return `UNGUARDED (under: ${innermostCondition ?? "nothing"})`;
+}
+
 const overlay = readFileSync(OVERLAY_PATH, "utf8");
 
 describe("overlay.js presses an employer's button only for the founder", () => {
@@ -106,6 +153,24 @@ describe("overlay.js presses an employer's button only for the founder", () => {
       { method: "submit", receiver: "form", insideHumanSubmitHandler: false },
       { method: "click", receiver: "target", insideHumanSubmitHandler: true },
       { method: "requestSubmit", receiver: "form", insideHumanSubmitHandler: false },
+    ]);
+  });
+
+  it("records applied only from a positive page signal or the founder's own YES", () => {
+    expect(appliedRecordingOrigins(overlay).sort()).toEqual(["successSignal()", "yes.onclick"]);
+  });
+
+  it("notices applied being written because a timer ran out", () => {
+    const bad = `(data) => {
+      const poll = () => {
+        if (successSignal()) { window.founderosDecision("applied"); return; }
+        if (Date.now() - startTime > settleMs) { window.founderosDecision("applied"); return; }
+      };
+      skip.onclick = async () => { await window.founderosDecision("skipped"); };
+    }`;
+    expect(appliedRecordingOrigins(bad).sort()).toEqual([
+      "UNGUARDED (under: Date.now() - startTime > settleMs)",
+      "successSignal()",
     ]);
   });
 

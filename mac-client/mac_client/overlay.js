@@ -53,6 +53,14 @@
   const skip = button("SKIP", "#2A2F36", "#fff");
   const submit = button("SUBMIT &amp; NEXT →", "#00A65A", "#fff");
 
+  // The confirm bar. Shown when the page gave no sign either way after SUBMIT:
+  // the founder says what she saw, and only her YES is written as "applied".
+  const confirmSummary = document.createElement("div");
+  confirmSummary.style.cssText = "flex:1;min-width:0";
+  const no = button("NO, IT DID NOT", "#2A2F36", "#fff");
+  const yes = button("YES, IT WENT THROUGH", "#00A65A", "#fff");
+  let answered = false;
+
   // A decision is final and both buttons are disabled the moment either is
   // pressed. A double-click on a slow form would otherwise submit twice.
   let decided = false;
@@ -186,15 +194,49 @@
         return;
       }
       if (Date.now() - startTime > settleMs) {
-        // No failure was seen either — the safest read of a form that gave no
-        // visible signal at all is that the employer's handler ran clean.
+        // No failure and no success either. That is NOT "applied": a handler
+        // that ran clean and one that silently did nothing look identical from
+        // here (ADR-018: never defaulted to "applied"). Ask the founder.
         restoreDialogs();
-        window.founderosDecision("applied");
+        askDidItGoThrough("The page gave no sign either way, so I cannot tell whether it was sent.");
         return;
       }
       setTimeout(poll, 100);
     };
     setTimeout(poll, 100);
+  };
+
+  function askDidItGoThrough(reason) {
+    answered = false;
+    yes.disabled = false;
+    no.disabled = false;
+    yes.innerHTML = "YES, IT WENT THROUGH";
+    confirmSummary.innerHTML =
+      `<div style="font-weight:600;margin-bottom:2px">${data.position} — ` +
+      `${escapeHtml(data.company)} · ${escapeHtml(data.title)}</div>` +
+      `<div style="font-size:13px;color:#FFCC66">${reason}</div>` +
+      `<div style="font-size:14px">Did the application go through? Press YES only if you saw the site accept it.</div>`;
+    bar.replaceChildren(confirmSummary, no, yes);
+  }
+
+  // The founder's own explicit confirmation: the only other place "applied" is written.
+  yes.onclick = async () => {
+    if (answered) return;
+    answered = true;
+    yes.disabled = true;
+    no.disabled = true;
+    yes.textContent = "Recording…";
+    await window.founderosDecision("applied");
+  };
+
+  no.onclick = () => {
+    if (answered) return;
+    answered = true;
+    giveBack(
+      "Not recorded. If it did not go through, fix the form and press SUBMIT again; " +
+        "SKIP removes this row from your list.",
+    );
+    bar.replaceChildren(summary, skip, submit);
   };
 
   function giveBack(message) {

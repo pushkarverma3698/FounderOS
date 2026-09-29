@@ -91,7 +91,10 @@ def ssh(monkeypatch) -> list[str]:
 def _job() -> QueueJob:
     return QueueJob(
         id=JOB_ID, company="Fixture BV", title="Financial Analyst", track="finance",
-        url=(FIXTURES / "greenhouse.html").as_uri(), brief_rank=1,
+        # A page that confirms in place ("Thank you, application received"), so
+        # pressing SUBMIT is a POSITIVE signal. A page that stays silent is asked
+        # about instead: tests/test_overlay_decisions.py.
+        url=(FIXTURES / "spa-success.html").as_uri(), brief_rank=1,
     )
 
 
