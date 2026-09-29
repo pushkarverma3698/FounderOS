@@ -157,7 +157,8 @@ export class DispatchSandbox {
   private readonly sudoArgv: string;
   private readonly sends: string;
 
-  constructor(repos: readonly string[] = ["owner/founderos"]) {
+  /** `provision: false` starts every repo without its review checkout and agy workspace (a fresh VPS). */
+  constructor(repos: readonly string[] = ["owner/founderos"], opts: { provision?: boolean } = {}) {
     this.repos = repos;
     this.root = mkdtempSync(join(tmpdir(), "agent-dispatch-"));
     this.home = join(this.root, "home");
@@ -190,8 +191,11 @@ export class DispatchSandbox {
     const state: GhState = { authOk: true, failIssueEdit: false, failLabelList: false, repos: {} };
     for (const r of repos) {
       state.repos[r] = { labels: [...AGENT_LABELS], issues: {}, prs: [] };
-      this.ensureWorkspace(r);
-      this.ensureReviewCheckout(r);
+      this.ensureOrigin(r);
+      if (opts.provision !== false) {
+        this.ensureWorkspace(r);
+        this.ensureReviewCheckout(r);
+      }
     }
     writeFileSync(this.ghState, JSON.stringify(state));
   }
@@ -272,30 +276,56 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
     }
   }
 
+  /** The bare repository standing in for github.com/<slug>: it has one commit on `main`. */
+  ensureOrigin(slug: string): string {
+    const bare = join(this.root, `origin-${DispatchSandbox.dirName(slug)}.git`);
+    if (existsSync(bare)) return bare;
+    const seed = join(this.root, `seed-${DispatchSandbox.dirName(slug)}`);
+    git(["init", "-q", "--bare", "-b", "main", bare]);
+    git(["init", "-q", "-b", "main", seed]);
+    writeFileSync(join(seed, "README.md"), "x\n");
+    git(["-C", seed, "add", "."]);
+    git(["-C", seed, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init"]);
+    git(["-C", seed, "push", "-q", bare, "main"]);
+    rmSync(seed, { recursive: true, force: true });
+    return bare;
+  }
+
+  /** Environment that makes `https://github.com/<slug>.git` resolve to the local bare origin (real git, no network). */
+  gitEnv(): Record<string, string> {
+    const env: Record<string, string> = { GIT_CONFIG_COUNT: String(this.repos.length) };
+    this.repos.forEach((r, i) => {
+      env[`GIT_CONFIG_KEY_${i}`] = `url.${this.ensureOrigin(r)}.insteadOf`;
+      env[`GIT_CONFIG_VALUE_${i}`] = `https://github.com/${r}.git`;
+    });
+    return env;
+  }
+
   /** A workspace the daemon can check a branch out in: a real repo whose origin has `main`. */
   ensureWorkspace(slug: string): string {
     const name = DispatchSandbox.dirName(slug);
     const ws = join(this.wsBase, name);
     if (existsSync(join(ws, ".git"))) return ws;
-    const bare = join(this.root, `origin-${name}.git`);
-    git(["init", "-q", "--bare", "-b", "main", bare]);
-    git(["init", "-q", "-b", "main", ws]);
-    git(["-C", ws, "remote", "add", "origin", bare]);
-    writeFileSync(join(ws, "README.md"), "x\n");
-    git(["-C", ws, "add", "."]);
-    git(["-C", ws, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init"]);
-    git(["-C", ws, "push", "-q", "origin", "main"]);
-    git(["-C", ws, "fetch", "-q", "origin"]);
+    const bare = this.ensureOrigin(slug);
+    git(["clone", "-q", bare, ws]);
+    git(["-C", ws, "remote", "set-url", "origin", `https://github.com/${slug}.git`]);
+    git(["-C", ws, "config", `url.${bare}.insteadOf`, `https://github.com/${slug}.git`]);
     return ws;
   }
 
   ensureReviewCheckout(slug: string): string {
     const dir = join(this.reviewBase, DispatchSandbox.dirName(slug));
     if (!existsSync(join(dir, ".git"))) {
-      mkdirSync(dir, { recursive: true });
-      git(["init", "-q", "-b", "main", dir]);
+      const bare = this.ensureOrigin(slug);
+      git(["clone", "-q", bare, dir]);
+      git(["-C", dir, "remote", "set-url", "origin", `https://github.com/${slug}.git`]);
+      git(["-C", dir, "config", `url.${bare}.insteadOf`, `https://github.com/${slug}.git`]);
     }
     return dir;
+  }
+
+  removeReviewCheckout(slug: string): void {
+    rmSync(join(this.reviewBase, DispatchSandbox.dirName(slug)), { recursive: true, force: true });
   }
 
   removeWorkspace(slug: string): void {
@@ -453,6 +483,36 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
     return { status: r.status, stdout: r.stdout, stderr: r.stderr };
   }
 
+  /** onboard-repo.sh from the deployed layout (~/bin), against the same fakes and the local bare origins. */
+  onboard(args: readonly string[], opts: { env?: Record<string, string>; stubs?: Record<string, string> } = {}): TickResult {
+    let stubsDir = this.stubs;
+    if (opts.stubs) {
+      stubsDir = join(this.root, `stubs-onboard-${Object.keys(opts.stubs).join("-")}`);
+      mkdirSync(stubsDir, { recursive: true });
+      for (const n of readdirSync(this.stubs)) if (!(n in (opts.stubs ?? {}))) symlinkSync(join(this.stubs, n), join(stubsDir, n));
+      for (const [name, body] of Object.entries(opts.stubs)) {
+        writeFileSync(join(stubsDir, name), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
+      }
+    }
+    const r = spawnSync("bash", [join(this.installDir, "onboard-repo.sh"), ...args], {
+      env: {
+        PATH: `${stubsDir}:${this.tools}`,
+        HOME: this.home,
+        ONBOARD_REVIEW_BASE: this.reviewBase,
+        AGENT_DISPATCH_WORKSPACE_BASE: this.wsBase,
+        AGENT_DISPATCH_USER: userInfo().username,
+        GH_STATE: this.ghState,
+        GH_CALLS: this.ghCalls,
+        SUDO_ARGV: this.sudoArgv,
+        ...this.gitEnv(),
+        ...opts.env,
+      },
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+  }
+
   /** The real deploy/agent-dispatch, in the repo layout (helpers in deploy/lib), with the same stubs. */
   runInPlace(args: readonly string[]): TickResult {
     const r = spawnSync("bash", [join(DEPLOY, "agent-dispatch"), ...args], {
@@ -514,6 +574,15 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
   log(): string {
     const p = join(this.home, ".claude", "agent-dispatch.log");
     return existsSync(p) ? readFileSync(p, "utf8") : "";
+  }
+  reviewDir(slug: string): string {
+    return join(this.reviewBase, DispatchSandbox.dirName(slug));
+  }
+  workspaceDir(slug: string): string {
+    return join(this.wsBase, DispatchSandbox.dirName(slug));
+  }
+  clearCallLogs(): void {
+    for (const f of [this.ghCalls, this.sudoArgv, this.sends]) rmSync(f, { force: true });
   }
   statePath(name: string): string {
     return join(this.home, ".claude", name);
