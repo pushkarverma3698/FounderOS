@@ -54,7 +54,7 @@ const schema = z.object({
   issue: z
     .number()
     .int()
-    .positive()
+    .min(1)
     .optional()
     .nullable()
     .describe("GitHub issue number, e.g. 762. Omit for the most recently dispatched Antigravity task."),
