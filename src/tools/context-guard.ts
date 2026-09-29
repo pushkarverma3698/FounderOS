@@ -14,8 +14,9 @@
  * This guard enforces, as a pure function with unit tests:
  *  - only recognised keys are persisted (unknown keys are dropped, not stored);
  *  - recognised keys hold the correct type (arrays of strings / a string);
- *  - current_focus and active_projects (written by /focus and /projects too) are
- *    bounded, and refused with the limit named rather than silently cut;
+ *  - current_focus and active_projects are written ONLY by the owner-only /focus and
+ *    /projects commands (options.founderCommand); the model-callable path refuses
+ *    them. Both are bounded, and refused with the limit named rather than silently cut;
  *  - `notes` records factual STATE, not advisory/speculative recommendations
  *    (the junk note was advisory — "would be highly effective").
  *
@@ -34,6 +35,18 @@ const RECOGNISED_ARRAY_KEYS = [
 
 /** Recognised keys whose value must be a non-empty factual string. */
 const RECOGNISED_STRING_KEYS = ["notes"] as const;
+
+/**
+ * Keys only the owner-only /focus and /projects commands may write. update_context is
+ * model-callable, and the kernel does not know who is typing: it runs for anyone in an
+ * allow-listed group. It must never be able to set what the founder is told his focus is.
+ */
+export const FOUNDER_COMMAND_KEYS = ["current_focus", "active_projects"] as const;
+
+export interface SanitizeOptions {
+  /** True only for the founder's own /focus and /projects commands; false for the model path. */
+  readonly founderCommand?: boolean;
+}
 
 /** Longest current_focus persisted (characters): it is quoted on every chat turn, so it stays one thought. */
 export const CONTEXT_FOCUS_MAX_CHARS = 300;
@@ -104,6 +117,7 @@ function isStringKey(key: string): boolean {
  */
 export function sanitizeContextUpdates(
   updates: Record<string, unknown>,
+  options: SanitizeOptions = {},
 ): SanitizeResult {
   const clean: Record<string, unknown> = {};
   const rejected: ContextRejection[] = [];
@@ -113,6 +127,11 @@ export function sanitizeContextUpdates(
   }
 
   for (const [key, value] of Object.entries(updates)) {
+    if ((FOUNDER_COMMAND_KEYS as readonly string[]).includes(key) && options.founderCommand !== true) {
+      rejected.push({ key, reason: "set only with the owner-only /focus and /projects commands, never by the model" });
+      continue;
+    }
+
     if (isArrayKey(key)) {
       if (!Array.isArray(value)) {
         rejected.push({ key, reason: "expected an array of strings" });

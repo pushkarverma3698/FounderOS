@@ -29,8 +29,13 @@ import {
   CONTEXT_FOCUS_MAX_CHARS,
   CONTEXT_PROJECTS_MAX_ITEMS,
   CONTEXT_PROJECT_MAX_CHARS,
+  FOUNDER_COMMAND_KEYS,
   sanitizeContextUpdates,
 } from "../../../src/tools/context-guard.js";
+
+/** The founder's own /focus and /projects commands: the only callers allowed to write those two keys. */
+const asFounder = (updates: Record<string, unknown>): ReturnType<typeof sanitizeContextUpdates> =>
+  sanitizeContextUpdates(updates, { founderCommand: true });
 
 describe("sanitizeContextUpdates", () => {
   it("passes valid structured arrays, trimming and dropping empties", () => {
@@ -124,14 +129,14 @@ describe("sanitizeContextUpdates", () => {
 // limit named, never silently cut.
 describe("sanitizeContextUpdates — current_focus and active_projects", () => {
   it("passes a focus, trimmed and on one line", () => {
-    const { clean, rejected } = sanitizeContextUpdates({ current_focus: "  Close the Acme pilot\n  and ship the proof page  " });
+    const { clean, rejected } = asFounder({ current_focus: "  Close the Acme pilot\n  and ship the proof page  " });
     expect(clean["current_focus"]).toBe("Close the Acme pilot and ship the proof page");
     expect(rejected).toEqual([]);
   });
 
   it("does not apply the advisory filter to the founder's own focus: 'should' and 'might' are his words", () => {
     const text = "Finish the Acme proposal; the second demo might slip, so it should go out first";
-    const { clean, rejected } = sanitizeContextUpdates({ current_focus: text });
+    const { clean, rejected } = asFounder({ current_focus: text });
     expect(clean["current_focus"]).toBe(text);
     expect(rejected).toEqual([]);
   });
@@ -141,8 +146,8 @@ describe("sanitizeContextUpdates — current_focus and active_projects", () => {
   });
 
   it("accepts a focus of exactly the limit and rejects one character more, naming both numbers", () => {
-    expect(sanitizeContextUpdates({ current_focus: "x".repeat(CONTEXT_FOCUS_MAX_CHARS) }).rejected).toEqual([]);
-    const { clean, rejected } = sanitizeContextUpdates({ current_focus: "x".repeat(CONTEXT_FOCUS_MAX_CHARS + 1) });
+    expect(asFounder({ current_focus: "x".repeat(CONTEXT_FOCUS_MAX_CHARS) }).rejected).toEqual([]);
+    const { clean, rejected } = asFounder({ current_focus: "x".repeat(CONTEXT_FOCUS_MAX_CHARS + 1) });
     expect(clean["current_focus"]).toBeUndefined();
     expect(rejected).toHaveLength(1);
     expect(rejected[0]!.key).toBe("current_focus");
@@ -152,34 +157,34 @@ describe("sanitizeContextUpdates — current_focus and active_projects", () => {
 
   it("measures the focus after trimming, so padding does not count against it", () => {
     const padded = `   ${"x".repeat(CONTEXT_FOCUS_MAX_CHARS)}   `;
-    expect(sanitizeContextUpdates({ current_focus: padded }).rejected).toEqual([]);
+    expect(asFounder({ current_focus: padded }).rejected).toEqual([]);
   });
 
   it("rejects an empty, whitespace-only or non-string focus", () => {
     for (const bad of ["", "   ", "\n\t", 7, ["a"], null]) {
-      const { clean, rejected } = sanitizeContextUpdates({ current_focus: bad });
+      const { clean, rejected } = asFounder({ current_focus: bad });
       expect(clean["current_focus"], String(bad)).toBeUndefined();
       expect(rejected, String(bad)).toHaveLength(1);
     }
   });
 
   it("passes projects, trimmed, on one line each, empties dropped", () => {
-    const { clean, rejected } = sanitizeContextUpdates({ active_projects: ["  FounderOS ", "", "Naggar\nsite"] });
+    const { clean, rejected } = asFounder({ active_projects: ["  FounderOS ", "", "Naggar\nsite"] });
     expect(clean["active_projects"]).toEqual(["FounderOS", "Naggar site"]);
     expect(rejected).toEqual([]);
   });
 
   it("accepts the most projects allowed and rejects one more, naming both numbers", () => {
     const items = (n: number): string[] => Array.from({ length: n }, (_, i) => `Project ${i + 1}`);
-    expect(sanitizeContextUpdates({ active_projects: items(CONTEXT_PROJECTS_MAX_ITEMS) }).rejected).toEqual([]);
-    const { clean, rejected } = sanitizeContextUpdates({ active_projects: items(CONTEXT_PROJECTS_MAX_ITEMS + 1) });
+    expect(asFounder({ active_projects: items(CONTEXT_PROJECTS_MAX_ITEMS) }).rejected).toEqual([]);
+    const { clean, rejected } = asFounder({ active_projects: items(CONTEXT_PROJECTS_MAX_ITEMS + 1) });
     expect(clean["active_projects"]).toBeUndefined();
     expect(rejected[0]!.reason).toContain(String(CONTEXT_PROJECTS_MAX_ITEMS + 1));
     expect(rejected[0]!.reason).toContain(String(CONTEXT_PROJECTS_MAX_ITEMS));
   });
 
   it("names which project is too long and the limit", () => {
-    const { clean, rejected } = sanitizeContextUpdates({
+    const { clean, rejected } = asFounder({
       active_projects: ["Short", "y".repeat(CONTEXT_PROJECT_MAX_CHARS + 1)],
     });
     expect(clean["active_projects"]).toBeUndefined();
@@ -189,7 +194,7 @@ describe("sanitizeContextUpdates — current_focus and active_projects", () => {
   });
 
   it("rejects projects that are not an array of strings", () => {
-    const { clean, rejected } = sanitizeContextUpdates({ active_projects: "FounderOS; Naggar" });
+    const { clean, rejected } = asFounder({ active_projects: "FounderOS; Naggar" });
     expect(clean["active_projects"]).toBeUndefined();
     expect(rejected[0]!.reason).toContain("array");
   });
@@ -197,5 +202,53 @@ describe("sanitizeContextUpdates — current_focus and active_projects", () => {
   it("leaves the limits on the older keys where they were: none", () => {
     const long = "z".repeat(CONTEXT_PROJECT_MAX_CHARS * 5);
     expect(sanitizeContextUpdates({ active_clients: [long] }).clean["active_clients"]).toEqual([long]);
+  });
+});
+
+// The model-callable path (update_context) runs for anyone in an allow-listed group, because the
+// kernel does not know who is typing. It must never be able to set what the founder is told his
+// focus and projects are: only his owner-only /focus and /projects commands may.
+describe("sanitizeContextUpdates — the model path cannot write the founder-only keys", () => {
+  it("names exactly current_focus and active_projects as founder-command keys", () => {
+    expect([...FOUNDER_COMMAND_KEYS].sort()).toEqual(["active_projects", "current_focus"]);
+  });
+
+  it("refuses current_focus by default and says which command sets it", () => {
+    const { clean, rejected } = sanitizeContextUpdates({ current_focus: "Ship the Acme proof page" });
+    expect(clean["current_focus"]).toBeUndefined();
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]!.key).toBe("current_focus");
+    expect(rejected[0]!.reason).toContain("/focus");
+  });
+
+  it("refuses active_projects by default and says which command sets it", () => {
+    const { clean, rejected } = sanitizeContextUpdates({ active_projects: ["FounderOS"] });
+    expect(clean["active_projects"]).toBeUndefined();
+    expect(rejected[0]!.reason).toContain("/projects");
+  });
+
+  it("refuses them when the option is explicitly false or absent", () => {
+    for (const options of [{}, { founderCommand: false }]) {
+      const { clean } = sanitizeContextUpdates({ current_focus: "x", active_projects: ["y"] }, options);
+      expect(clean).toEqual({});
+    }
+  });
+
+  it("still accepts the older model-writable keys on the model path (nothing else changed)", () => {
+    const { clean, rejected } = sanitizeContextUpdates({ active_clients: ["Acme"], notes: "Signed the Acme SOW" });
+    expect(clean).toEqual({ active_clients: ["Acme"], notes: "Signed the Acme SOW" });
+    expect(rejected).toEqual([]);
+  });
+
+  it("accepts both keys for the founder's commands, and keeps the other keys' handling identical", () => {
+    const { clean, rejected } = asFounder({ current_focus: "Ship the Acme proof page", active_projects: ["FounderOS"], active_clients: ["Acme"] });
+    expect(clean).toEqual({ current_focus: "Ship the Acme proof page", active_projects: ["FounderOS"], active_clients: ["Acme"] });
+    expect(rejected).toEqual([]);
+  });
+
+  it("gives a mixed model payload the good keys and reports the founder-only one", () => {
+    const { clean, rejected } = sanitizeContextUpdates({ current_focus: "x", next_actions: ["Call Acme"] });
+    expect(clean).toEqual({ next_actions: ["Call Acme"] });
+    expect(rejected.map((r) => r.key)).toEqual(["current_focus"]);
   });
 });

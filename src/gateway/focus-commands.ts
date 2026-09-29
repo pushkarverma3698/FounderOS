@@ -139,7 +139,7 @@ async function show(ctx: Context, deps: FocusDeps, spec: Spec): Promise<void> {
  * row back and answer from what is stored: the reply is the evidence, not a promise.
  */
 async function save(ctx: Context, deps: FocusDeps, spec: Spec, value: unknown): Promise<void> {
-  const { clean, rejected } = sanitizeContextUpdates({ [spec.key]: value });
+  const { clean, rejected } = sanitizeContextUpdates({ [spec.key]: value }, { founderCommand: true });
   if (clean[spec.key] === undefined) {
     const why = rejected.map((r) => r.reason).join("; ") || "nothing valid to save";
     await ctx.reply(`Not saved: ${why}. ${spec.again}`);

@@ -141,10 +141,17 @@ describe("founder_context writers — what each leaves in context_meta", () => {
 
   it("update_context (the model, for the founder): dates every key it writes as the founder's", async () => {
     const { updateContext } = await import("../../../src/tools/context.js");
-    await updateContext.invoke({ updates: { current_focus: "Close the Acme pilot", active_clients: ["Acme"] } });
-    expect(meta()["current_focus"]).toEqual({ at: NOW.toISOString(), source: "founder" });
+    await updateContext.invoke({ updates: { next_actions: ["Call Acme"], active_clients: ["Acme"] } });
+    expect(meta()["next_actions"]).toEqual({ at: NOW.toISOString(), source: "founder" });
     expect(meta()["active_clients"]).toEqual({ at: NOW.toISOString(), source: "founder" });
     expect(meta()["notes"]).toEqual({ at: JUNE_AT, source: "seed" });
+  });
+
+  it("update_context asked for the founder-only focus: writes nothing, so stamps nothing", async () => {
+    const before = structuredClone(store.row);
+    const { updateContext } = await import("../../../src/tools/context.js");
+    await updateContext.invoke({ updates: { current_focus: "Close the Acme pilot", active_projects: ["FounderOS"] } });
+    expect(store.row).toEqual(before);
   });
 
   it("update_context rejected by the guard: writes nothing, so stamps nothing", async () => {

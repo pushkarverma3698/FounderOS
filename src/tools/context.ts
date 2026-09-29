@@ -61,7 +61,7 @@ export const updateContext = tool(
       const why = rejected.map((r) => `${r.key} (${r.reason})`).join("; ");
       return `⚠️ Nothing saved to context. ${
         why || "No recognised business-state fields were provided."
-      } Recognised keys: active_clients, open_deals, current_priorities, next_actions, current_focus, active_projects, notes (factual state only).`;
+      } Recognised keys: active_clients, open_deals, current_priorities, next_actions, notes (factual state only). The founder sets current_focus and active_projects himself with /focus and /projects.`;
     }
 
     return withToolErrorBoundary("db", "write founder_context to Postgres", async () => {
@@ -79,7 +79,7 @@ export const updateContext = tool(
   {
     name: "update_context",
     description:
-      "Update the founder's business context. Pass an object with the keys to set or overwrite. Recognised keys: active_clients (array of strings), open_deals (array of strings), current_priorities (array of strings), next_actions (array of strings), current_focus (string: what he is focused on now), active_projects (array of strings), notes (string). Each key written is dated as confirmed today. Use after the founder shares new information about their business state.",
+      "Update the founder's business context. Pass an object with the keys to set or overwrite. Recognised keys: active_clients (array of strings), open_deals (array of strings), current_priorities (array of strings), next_actions (array of strings), notes (string). Each key written is dated as confirmed today. Do NOT try to set current_focus or active_projects: the founder sets those himself with /focus and /projects, and this tool refuses them. Use after the founder shares new information about their business state.",
     schema: z.object({
       updates: z.record(z.unknown()).describe(
         "Key-value pairs to merge into context. E.g. { active_clients: ['Acme'], current_priorities: ['Close Acme deal'] }",

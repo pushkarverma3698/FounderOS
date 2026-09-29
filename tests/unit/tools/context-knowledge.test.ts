@@ -13,7 +13,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { CONTEXT_META_KEY, CONTEXT_STALE_MARKER } from "../../../src/db/context-meta.js";
-import { CONTEXT_FOCUS_MAX_CHARS } from "../../../src/tools/context-guard.js";
 
 // Mock DB queries before importing tools
 const mockGetFounderContext = vi.fn(async (): Promise<Record<string, unknown>> => ({}));
@@ -131,21 +130,6 @@ describe("updateContext tool", () => {
     );
   });
 
-  // current_focus was never a recognised key, so update_context REJECTED every
-  // attempt to correct it: the June value could only be changed by editing the
-  // database. It and active_projects are recognised now (and bounded).
-  it("accepts current_focus and active_projects", async () => {
-    const result = await updateContext.invoke({
-      updates: { current_focus: "Close the Acme pilot", active_projects: ["FounderOS", "Naggar site"] },
-    });
-    expect(result).toContain("Context updated: current_focus, active_projects");
-    expect(mockUpsertFounderContext).toHaveBeenCalledWith(
-      expect.any(String),
-      { current_focus: "Close the Acme pilot", active_projects: ["FounderOS", "Naggar site"] },
-      "founder",
-    );
-  });
-
   it("writes nothing, stamps nothing, and says why when the guard rejects every key", async () => {
     mockUpsertFounderContext.mockClear();
     const result = await updateContext.invoke({ updates: { secret_plan: "delete prod" } });
@@ -155,12 +139,23 @@ describe("updateContext tool", () => {
     expect(result).toContain("Recognised keys:");
   });
 
-  it("names the limit when a focus is too long, and writes nothing", async () => {
+  it("refuses current_focus and active_projects from the model path, names the commands, and writes nothing", async () => {
     mockUpsertFounderContext.mockClear();
-    const result = await updateContext.invoke({ updates: { current_focus: "x".repeat(CONTEXT_FOCUS_MAX_CHARS + 1) } });
+    const result = await updateContext.invoke({
+      updates: { current_focus: "Close the Acme pilot", active_projects: ["FounderOS"] },
+    });
     expect(mockUpsertFounderContext).not.toHaveBeenCalled();
-    expect(result).toContain(String(CONTEXT_FOCUS_MAX_CHARS));
-    expect(result).toContain(String(CONTEXT_FOCUS_MAX_CHARS + 1));
+    expect(result).toContain("Nothing saved to context.");
+    expect(result).toContain("/focus");
+    expect(result).toContain("/projects");
+  });
+
+  it("still saves the model's other keys when it also sends a founder-only key, and reports the skipped one", async () => {
+    mockUpsertFounderContext.mockClear();
+    const result = await updateContext.invoke({ updates: { current_focus: "x", next_actions: ["Call Acme"] } });
+    expect(mockUpsertFounderContext).toHaveBeenCalledTimes(1);
+    expect(mockUpsertFounderContext.mock.calls[0]![1]).toEqual({ next_actions: ["Call Acme"] });
+    expect(result).toContain("skipped: current_focus");
   });
 
   it("returns a confirmation message listing updated keys", async () => {
