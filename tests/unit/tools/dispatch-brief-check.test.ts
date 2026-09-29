@@ -17,6 +17,7 @@ import { join } from "node:path";
 import {
   BRIEF_CHECK_MEMO_MAX_ENTRIES,
   BRIEF_CHECK_MEMO_TTL_MS,
+  EXECUTOR_BASE_BRANCH,
   GITHUB_PATH_LOOKUP_TIMEOUT_MS,
   checkDispatchBrief,
   checkoutFileExists,
@@ -109,6 +110,29 @@ describe("githubFileExists", () => {
     expect(GITHUB_PATH_LOOKUP_TIMEOUT_MS).toBeLessThanOrEqual(10_000);
   });
 
+  it("asks for the named ref when one is given", async () => {
+    const { client, getContent } = fakeGitHub();
+    await githubFileExists(client, "o", "r", "beta")("src/a.ts");
+
+    expect(getContent.mock.calls[0]?.[0]).toMatchObject({ owner: "o", repo: "r", path: "src/a.ts", ref: "beta" });
+  });
+
+  it("gives up after GITHUB_PATH_LOOKUP_TIMEOUT_MS even when the client queues the request (throttling)", async () => {
+    // The octokit throttling plugin can hold a request for a whole retry-after window before any
+    // fetch starts, and an AbortSignal only acts once the fetch does. The lookup must not wait.
+    vi.useFakeTimers();
+    try {
+      const never = { rest: { repos: { getContent: () => new Promise<never>(() => undefined), get: () => Promise.resolve({}) } } };
+      const outcome = expect(githubFileExists(never, "o", "r")("src/a.ts")).rejects.toThrow(
+        `GitHub did not answer within ${GITHUB_PATH_LOOKUP_TIMEOUT_MS} ms`,
+      );
+      await vi.advanceTimersByTimeAsync(GITHUB_PATH_LOOKUP_TIMEOUT_MS + 1);
+      await outcome;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("is false on a definite 404 when the repository itself is visible", async () => {
     const { client } = fakeGitHub(() => 404);
     expect(await githubFileExists(client, "o", "r")("src/gone.ts")).toBe(false);
@@ -137,40 +161,81 @@ describe("githubFileExists", () => {
 
 describe("checkDispatchBrief: which source answers", () => {
   const body = filledBrief({ [SCOPE]: "src/a.ts, src/gone.ts" });
-
-  it("reads FounderOS paths from the checkout and never builds a GitHub client", async () => {
+  const checkoutWith = (...files: string[]): string => {
     mkdirSync(join(tmp, "src"), { recursive: true });
-    writeFileSync(join(tmp, "src", "a.ts"), "");
+    for (const file of files) writeFileSync(join(tmp, file), "");
+    return tmp;
+  };
+
+  it("answers FounderOS paths from the checkout first: a brief whose files all exist needs no GitHub client", async () => {
+    const root = checkoutWith("src/a.ts", "src/gone.ts");
     const getClient = vi.fn();
 
-    const result = await checkDispatchBrief({ ...FOUNDEROS, body }, { getClient, checkoutRoot: () => tmp });
+    const result = await checkDispatchBrief({ ...FOUNDEROS, body }, { getClient, checkoutRoot: () => root });
+
+    expect(result.ok).toBe(true);
+    expect(getClient).not.toHaveBeenCalled();
+  });
+
+  it("asks GitHub's beta, the branch the executor works from, only about paths the checkout lacks", async () => {
+    // agent-dispatch cuts every task branch from origin/beta when it exists, and prod deploys main.
+    // A file merged to beta and not yet promoted is real to the executor and absent from the
+    // checkout: rejecting it would deadlock a legitimate brief with no way to satisfy the lint.
+    const root = checkoutWith("src/a.ts");
+    const { client, getContent } = fakeGitHub();
+
+    const result = await checkDispatchBrief({ ...FOUNDEROS, body }, { getClient: () => client, checkoutRoot: () => root });
+
+    expect(result.ok).toBe(true);
+    expect(getContent).toHaveBeenCalledTimes(1);
+    expect(getContent.mock.calls[0]?.[0]).toMatchObject({ ...FOUNDEROS, path: "src/gone.ts", ref: EXECUTOR_BASE_BRANCH });
+    expect(EXECUTOR_BASE_BRANCH).toBe("beta");
+  });
+
+  it("rejects a FounderOS path that is on neither the checkout nor beta", async () => {
+    const root = checkoutWith("src/a.ts");
+    const { client } = fakeGitHub(() => 404);
+
+    const result = await checkDispatchBrief({ ...FOUNDEROS, body }, { getClient: () => client, checkoutRoot: () => root });
 
     expect(result.missingPaths).toEqual(["src/gone.ts"]);
-    expect(getClient).not.toHaveBeenCalled();
+  });
+
+  it("cannot say, and does not reject, when the checkout lacks a path and GitHub cannot answer", async () => {
+    const root = checkoutWith("src/a.ts");
+    const { client } = fakeGitHub(() => 503);
+
+    const result = await checkDispatchBrief({ ...FOUNDEROS, body }, { getClient: () => client, checkoutRoot: () => root });
+
+    expect(result.ok).toBe(true);
+    expect(result.warnings[0]).toContain("src/gone.ts");
   });
 
   it("recognises FounderOS whatever the case of the slug", async () => {
+    const root = checkoutWith("src/a.ts", "src/gone.ts");
     const getClient = vi.fn();
-    await checkDispatchBrief({ owner: "PushkarVerma3698", repo: "founderos", body }, { getClient, checkoutRoot: () => tmp });
+    await checkDispatchBrief({ owner: "PushkarVerma3698", repo: "founderos", body }, { getClient, checkoutRoot: () => root });
 
     expect(getClient).not.toHaveBeenCalled();
   });
 
-  it("falls back to GitHub for FounderOS when the process cannot find its own checkout", async () => {
+  it("falls back to GitHub's default branch for FounderOS when the process cannot find its own checkout", async () => {
     const { client, getContent } = fakeGitHub();
     await checkDispatchBrief({ ...FOUNDEROS, body }, { getClient: () => client, checkoutRoot: () => null });
 
     expect(getContent).toHaveBeenCalledTimes(2);
+    for (const call of getContent.mock.calls) expect(call[0]).not.toHaveProperty("ref");
   });
 
-  it("asks GitHub about any other repo", async () => {
+  it("asks GitHub's default branch about any other repo", async () => {
     const { client, getContent } = fakeGitHub((path) => (path === "src/gone.ts" ? 404 : "found"));
     const result = await checkDispatchBrief({ ...OPLIFY, body }, { getClient: () => client, checkoutRoot: () => tmp });
 
-    expect(getContent.mock.calls.map((c) => (c[0] as { owner: string; repo: string; path: string }))).toEqual([
+    expect(getContent.mock.calls.map((c) => c[0] as { owner: string; repo: string; path: string })).toEqual([
       expect.objectContaining({ ...OPLIFY, path: "src/a.ts" }),
       expect.objectContaining({ ...OPLIFY, path: "src/gone.ts" }),
     ]);
+    for (const call of getContent.mock.calls) expect(call[0]).not.toHaveProperty("ref");
     expect(result.missingPaths).toEqual(["src/gone.ts"]);
   });
 });

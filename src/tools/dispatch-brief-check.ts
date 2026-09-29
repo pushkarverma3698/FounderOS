@@ -4,11 +4,15 @@
  * The I/O half of the brief lint (./agent-brief-lint.ts is pure and asks through an injected
  * `fileExists`). This module supplies the real answers:
  *
- *   FounderOS  → the checkout the process runs from. Zero API calls, instant. Located with
- *                `repoRoot()` (src/evolution/repo-root.ts), which walks up from this module to
- *                the nearest package.json + src/, so it is right from src/ under tsx, from
+ *   FounderOS  → the checkout the process runs from first: zero API calls, instant. Located
+ *                with `repoRoot()` (src/evolution/repo-root.ts), which walks up from this module
+ *                to the nearest package.json + src/, so it is right from src/ under tsx, from
  *                dist/src/ under `node dist/src/index.js`, and whatever the working directory.
  *                `process.cwd()` would only be right because systemd pins WorkingDirectory.
+ *                Only a path the checkout LACKS is then asked of GitHub's `beta`, because prod
+ *                deploys main while agent-dispatch cuts every task branch from origin/beta when
+ *                it exists. A file merged to beta and not yet promoted is real to the executor
+ *                and absent from the checkout; rejecting it would deadlock a legitimate brief.
  *   any other  → GitHub's contents API on the repo's default branch.
  *
  * THE LOOP MUST NOT BLOCK ON ITS OWN INFRASTRUCTURE. Only a definite "no" rejects a path:
@@ -17,7 +21,9 @@
  *    would look "missing" and no brief could ever get through. That is reported as "cannot say".
  *  - 5xx, 403, a network error and a timeout are all "cannot say": a warning line, not a rejection.
  *  - requests carry `retries: 0` and a timeout, because the octokit retry plugin would otherwise
- *    sleep 1s + 4s + 9s on every 5xx, per path.
+ *    sleep 1s + 4s + 9s on every 5xx, per path. The timeout is a race, not just an AbortSignal:
+ *    the throttling plugin can hold a request for a whole retry-after window before any fetch
+ *    starts, and a signal only acts once the fetch does.
  *
  * ONE SET OF LOOKUPS PER DISPATCH. hitlGate re-runs the tool from the top when the founder
  * approves, and execute() lints again as defence in depth. A passing verdict is therefore
@@ -39,6 +45,12 @@ const log = childLogger({ module: "tool:dispatch-brief-check" });
 /** Ceiling on one GitHub lookup, so a slow API cannot stall a dispatch. */
 export const GITHUB_PATH_LOOKUP_TIMEOUT_MS = 5_000;
 
+/**
+ * The branch the executor works from. agent-dispatch cuts every task branch from origin/beta when
+ * it exists, else origin/main (deploy/agent-dispatch, `target_branch`).
+ */
+export const EXECUTOR_BASE_BRANCH = "beta";
+
 /** How long a passing verdict is reused: long enough to cover the founder's approval tap. */
 export const BRIEF_CHECK_MEMO_TTL_MS = 30 * 60 * 1000;
 
@@ -53,6 +65,7 @@ export interface ContentsClient {
         owner: string;
         repo: string;
         path: string;
+        ref?: string;
         request?: { retries?: number; signal?: AbortSignal };
       }): Promise<unknown>;
       get(params: {
@@ -64,8 +77,8 @@ export interface ContentsClient {
   };
 }
 
-/** Answers from a directory on disk. Never answers for a path outside it. */
-export function checkoutFileExists(root: string): FileExists {
+/** Answers from a directory on disk, synchronously. Never answers for a path outside it. */
+export function checkoutFileExists(root: string): (path: string) => boolean {
   const base = resolve(root);
   return (path) => {
     const full = resolve(base, path);
@@ -78,16 +91,32 @@ function isNotFound(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { status?: unknown }).status === 404;
 }
 
-/** Answers from GitHub's default branch. A 404 is `false`; anything that is not an answer throws. */
-export function githubFileExists(client: ContentsClient, owner: string, repo: string): FileExists {
+/** Rejects if `work` has not settled in `ms`. The timer is cleared either way. */
+async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`GitHub did not answer within ${ms} ms`)), ms);
+  });
+  try {
+    return await Promise.race([work, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Answers from GitHub, on `ref` or on the default branch when none is named. A 404 is `false`;
+ * anything that is not an answer throws.
+ */
+export function githubFileExists(client: ContentsClient, owner: string, repo: string, ref?: string): FileExists {
   const request = () => ({ retries: 0, signal: AbortSignal.timeout(GITHUB_PATH_LOOKUP_TIMEOUT_MS) });
 
   // One reachability probe per lookup session, shared by every path that comes back 404.
   let repoVisible: Promise<boolean> | null = null;
   const isRepoVisible = (): Promise<boolean> => {
-    repoVisible ??= client.rest.repos.get({ owner, repo, request: request() }).then(
+    repoVisible ??= withTimeout(client.rest.repos.get({ owner, repo, request: request() }), GITHUB_PATH_LOOKUP_TIMEOUT_MS).then(
       () => true,
-      // allow-failopen: a failed probe (5xx, network) cannot prove the repo is hidden, so the path's own 404 stands.
+      // allow-failopen: a failed probe (5xx, network, timeout) cannot prove the repo is hidden, so the path's own 404 stands.
       (err: unknown) => !isNotFound(err),
     );
     return repoVisible;
@@ -95,7 +124,10 @@ export function githubFileExists(client: ContentsClient, owner: string, repo: st
 
   return async (path) => {
     try {
-      await client.rest.repos.getContent({ owner, repo, path, request: request() });
+      await withTimeout(
+        client.rest.repos.getContent({ owner, repo, path, ...(ref ? { ref } : {}), request: request() }),
+        GITHUB_PATH_LOOKUP_TIMEOUT_MS,
+      );
       return true;
     } catch (err) {
       if (!isNotFound(err)) throw err;
@@ -125,11 +157,24 @@ function locateCheckout(): string | null {
   }
 }
 
-/** The lookup for a target: the checkout for FounderOS, GitHub for the rest. */
+/** The lookup for a target: the checkout then beta for FounderOS, GitHub's default branch for the rest. */
 function fileExistsFor(owner: string, repo: string, deps: BriefCheckDeps): { fileExists: FileExists; source: string } {
   if (`${owner}/${repo}`.toLowerCase() === DEFAULT_DISPATCH_REPO.toLowerCase()) {
     const root = (deps.checkoutRoot ?? locateCheckout)();
-    if (root) return { fileExists: checkoutFileExists(root), source: "checkout" };
+    if (root) {
+      const inCheckout = checkoutFileExists(root);
+      let onBeta: FileExists | null = null;
+      return {
+        source: "checkout+beta",
+        // Only a path the checkout lacks costs a GitHub call, and the client (which needs a token)
+        // is built only then. A `false` here means "on neither main as deployed nor beta".
+        fileExists: (path) => {
+          if (inCheckout(path)) return true;
+          onBeta ??= githubFileExists(deps.getClient(), owner, repo, EXECUTOR_BASE_BRANCH);
+          return onBeta(path);
+        },
+      };
+    }
   }
 
   let inner: FileExists | null = null;

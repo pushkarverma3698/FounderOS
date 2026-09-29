@@ -60,6 +60,14 @@ const COMPLETE = {
   evidence: "Observed 429 rate limit triggers in the 2026-09-20 sweep log.",
 };
 
+/** GitHub knows exactly these paths; everything else is a definite 404. */
+function githubHas(...paths: string[]): void {
+  mockGetContent.mockImplementation(async (params: { path: string }) => {
+    if (paths.includes(params.path)) return { data: {} };
+    throw Object.assign(new Error("Not Found"), { status: 404 });
+  });
+}
+
 function issueCreated(): { number: number; html_url: string; title: string } {
   return { number: 524, html_url: "https://github.com/pushkarverma3698/FounderOS/issues/524", title: COMPLETE.title };
 }
@@ -326,6 +334,7 @@ describe("dispatchAntigravityTool.execute — the brief lint", () => {
   });
 
   it("files NOTHING for a brief with a missing section and a path that does not exist, and says what to fix", async () => {
+    githubHas(); // not on beta either
     const res = await dispatchAntigravityTool.execute({
       ...COMPLETE,
       scope: "src/agents/supervisor.ts, src/tools/index.ts",
@@ -348,6 +357,7 @@ describe("dispatchAntigravityTool.execute — the brief lint", () => {
 
   it("rejects issue #762 when it is filed through the tool with the same inputs", async () => {
     // #762's own text: no problem statement, no evidence, three files that never existed.
+    githubHas(); // nor on beta
     const res = await dispatchAntigravityTool.execute({
       title: "feat: Jev AI System 1 gateway",
       goal: "Integrate Jev AI as a System 1 deterministic gateway and RAG pre-filter across FounderOS routing, memory retrieval, and tool validation systems.",
@@ -373,6 +383,16 @@ describe("dispatchAntigravityTool.execute — the brief lint", () => {
     expect(res.success).toBe(true);
     const filed = (mockIssuesCreate.mock.calls[0]?.[0] as { body: string }).body;
     expect(filed).toContain("### New files to create\n\nsrc/tools/rate-limiter-new.ts");
+  });
+
+  it("accepts a FounderOS file that exists only on beta: the executor branches from beta, prod is on main", async () => {
+    githubHas("src/tools/only-on-beta.ts");
+    mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
+
+    const res = await dispatchAntigravityTool.execute({ ...COMPLETE, scope: "src/tools/only-on-beta.ts" });
+
+    expect(res.success).toBe(true);
+    expect(mockGetContent).toHaveBeenCalledWith(expect.objectContaining({ path: "src/tools/only-on-beta.ts", ref: "beta" }));
   });
 
   it("asks GitHub about another repo's paths, and a definite 404 files nothing", async () => {
