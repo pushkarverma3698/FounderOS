@@ -61,6 +61,7 @@
     "pr:create": "node --env-file=.env --import tsx/esm scripts/create-phase-pr.ts",
     "pr:review": "node --env-file=.env --import tsx/esm scripts/claude-review-pr.ts",
     "verify:branch": "bash scripts/verify-branch-name.sh",
+    "repo:add": "node --import tsx/esm scripts/repo-add.ts",
     "pr:review-opencode": "node --env-file=.env --import tsx/esm scripts/opencode-review-pr.ts"
   },
   "dependencies": {
