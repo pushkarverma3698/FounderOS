@@ -5,7 +5,8 @@
  * Run: pnpm test
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { CONTEXT_META_KEY, CONTEXT_STALE_MARKER } from "../../../src/db/context-meta.js";
 
 // ── DB query mocks ────────────────────────────────────────────────────────────
 
@@ -151,6 +152,45 @@ describe("searchMemoryTool", () => {
       expect(result).not.toContain("budget alerts sent");
       expect(result).not.toContain("[object Object]");
     }
+  });
+
+  // search_memory is the other tool the planner points at for "what is my focus?"
+  // (planner rule: read_context, search_memory). It printed the same undated
+  // values read_context did, so it dates them the same way.
+  describe("founder context lines carry the date they were confirmed", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("dates a confirmed value, and flags one with no date, in type=context results", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-30T05:30:00.000Z"));
+      mockGetFounderContext.mockResolvedValue({
+        current_focus: "Close the Acme pilot",
+        active_clients: ["Acme Corp"],
+        [CONTEXT_META_KEY]: { current_focus: { at: "2026-09-29T19:00:00.000Z", source: "founder" } },
+      });
+      const result = String(await searchMemoryTool.invoke({ query: "no-such-term", type: "context" }));
+      expect(result).toContain("• current focus: Close the Acme pilot (confirmed 2026-09-30)");
+      expect(result).toContain(`• active clients: Acme Corp ${CONTEXT_STALE_MARKER} date unknown`);
+    });
+
+    it("dates the lines a query matches under type=all too, and never prints context_meta", async () => {
+      mockGetFounderContext.mockResolvedValue({
+        active_clients: ["Acme Corp"],
+        [CONTEXT_META_KEY]: { active_clients: { at: "2026-06-01T00:00:00.000Z", source: "founder" } },
+      });
+      const result = String(await searchMemoryTool.invoke({ query: "acme" }));
+      expect(result).toContain(`• active clients: Acme Corp ${CONTEXT_STALE_MARKER} last confirmed 2026-06-01`);
+      expect(result).not.toContain("context meta");
+      expect(result).not.toContain("[object Object]");
+    });
+
+    it("still answers when the meta is corrupt: every line reads date unknown", async () => {
+      mockGetFounderContext.mockResolvedValue({ active_clients: ["Acme Corp"], [CONTEXT_META_KEY]: 42 });
+      const result = String(await searchMemoryTool.invoke({ query: "acme", type: "context" }));
+      expect(result).toContain(`Acme Corp ${CONTEXT_STALE_MARKER} date unknown`);
+    });
   });
 
   it("filters by type=episodic — skips knowledge and context", async () => {
