@@ -223,6 +223,25 @@ describe("searchKnowledge — empty results", () => {
   });
 });
 
+// ── Jev AI pre-filter drains all hits ─────────────────────────────────────────
+
+describe("searchKnowledge — Jev AI pre-filter removes all hits", () => {
+  it("returns the anti-hallucination message when pre-filtering removes all hits below min score", async () => {
+    // RAG returns hits from DB, but all fall below JEV_RAG_MIN_SCORE (0.15)
+    mockEmbed.mockResolvedValue(DUMMY_VEC);
+    mockVector.mockResolvedValue([
+      makeHit({ score: 0.05 }),
+      makeHit({ score: 0.10 }),
+    ]);
+    mockKeyword.mockResolvedValue([]);
+
+    const result = await searchKnowledge.invoke({ query: "obscure topic" });
+
+    expect(result).toContain("No knowledge entries found");
+    expect(result).toContain("Do NOT fabricate");
+  });
+});
+
 // ── Success formatting (shared renderRagSuccess) ────────────────────────────────
 
 describe("searchKnowledge — result formatting", () => {

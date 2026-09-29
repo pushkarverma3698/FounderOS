@@ -77,6 +77,9 @@ export const searchKnowledge = tool(
         ...h.metadata,
       }));
       const preFiltered = turicksBrainPreFilter(rawHits, { topK });
+      if (preFiltered.filtered.length === 0) {
+        return `No knowledge entries found for "${query}"${entry_type ? ` (type: ${entry_type})` : ""}. The turicks-brain may not have this — try \`search_web\`. Do NOT fabricate an answer; report the missing information to the founder rather than fabricate or substitute unrelated context.`;
+      }
       result = {
         ...result,
         hits: preFiltered.filtered.map((item) => ({
