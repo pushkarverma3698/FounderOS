@@ -54,7 +54,7 @@ See `docs/JOBHUNT.md` ("Known limitation: CV fabrication risk") for why.
 | `mac_client/notify.py` | one-shot Telegram POST — no polling, no bot conflict |
 | `mac_client/profile.py` | load/validate `apply-profile.json`; the tailored-vs-generic CV signal |
 | `mac_client/adapters.py` | per-ATS form field maps (Greenhouse, Lever, Ashby, Workable, Recruitee) and where each platform's application form lives (`apply_url_for`, shared cases in `tests/fixtures/apply-url-cases.json`) |
-| `mac_client/resolver.py` | heuristic DOM fallback for ATS platforms with no field map |
+| `mac_client/resolver.py` | heuristic DOM fallback that fills gaps in a field map, reading English and Dutch labels; never a cover letter |
 | `mac_client/apply.py` | the browser queue and the overlay |
 | `mac_client/ledger.py` | crash-safe local record + flow-back to Postgres |
 
