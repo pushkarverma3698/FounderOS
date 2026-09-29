@@ -186,6 +186,7 @@ export async function resetHeartbeat(now: Date = new Date()): Promise<void> {
 export async function runFreeSweep(): Promise<void> {
   const sweepId = randomUUID();
   const { sweepBoards } = await import("./free-ats-source.js");
+  const { boardHealthDeps } = await import("./board-health.js");
   const { getFreeBoards } = await import("./free-boards.js");
   const { listProfiles } = await import("./profile-config.js");
   const { sweepAggregators } = await import("./aggregator-source.js");
@@ -199,7 +200,9 @@ export async function runFreeSweep(): Promise<void> {
   // dedupe, the verdicts, the ranking and the alert.
   let sweep: Awaited<ReturnType<typeof sweepBoards>>;
   try {
-    sweep = await sweepBoards(getFreeBoards());
+    // The persisted dead-board record is passed HERE and nowhere else: this is the one caller
+    // that runs every half hour, and the only one that should skip boards on the strength of it.
+    sweep = await sweepBoards(getFreeBoards(), boardHealthDeps());
   } catch (err) {
     log.error({ err: (err as Error).message }, "Free board sweep crashed before it could poll anything");
     return;
@@ -212,9 +215,9 @@ export async function runFreeSweep(): Promise<void> {
     const aggResult = await sweepAggregators();
     if (aggResult.candidates.length > 0) {
       sweep = {
+        ...sweep,
         candidates: [...sweep.candidates, ...aggResult.candidates],
         failures: [...sweep.failures, ...aggResult.failures],
-        boardsPolled: sweep.boardsPolled,
       };
     }
     // PERSISTED, not just counted. Until 2026-09-08 this branch logged the
