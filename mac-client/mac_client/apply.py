@@ -21,7 +21,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 
 from . import ledger, notify
-from .adapters import append_path_suffix, apply_url_for, ats_for_url, field_map_for, planned_fills
+from .adapters import append_path_suffix, apply_url_for, ats_for_url, field_map_for, is_typable, planned_fills
 from .profile import ApplyProfile, load_profile, missing_resumes, resume_unusable
 from .sync import QueueJob, SyncError, QUEUE_DIR, load_queue, push_outcomes
 
@@ -68,6 +68,11 @@ async def fill_form(page, job: QueueJob, profile: ApplyProfile) -> tuple[list[st
     for label, selectors, value in plan:
         if not value.strip():
             skipped.append(f"{label} (not in your profile)")
+            continue
+        if not is_typable(value):
+            # Typing a line break presses Enter, which submits the form: only the
+            # founder's own click may do that. Reported with the fix, never typed.
+            skipped.append(f"{label} (its value has a line break or control character, not typed — fix apply-profile.json)")
             continue
         if await _fill_first(page, selectors, value):
             filled.append(label)

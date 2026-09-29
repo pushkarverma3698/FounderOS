@@ -1,0 +1,18 @@
+<!doctype html><html lang="nl"><body>
+<h1>Solliciteer op deze functie (Greenhouse-stijl, Nederlands)</h1>
+<form>
+  <label for="first_name">Voornaam</label><input id="first_name" name="job_application[first_name]">
+  <label for="last_name">Achternaam</label><input id="last_name" name="job_application[last_name]">
+  <label for="email">E-mailadres</label><input id="email" name="job_application[email]" type="email">
+  <label for="phone">Telefoonnummer</label><input id="phone" name="job_application[phone]">
+  <label for="resume">CV uploaden</label><input id="resume" type="file" name="job_application[resume]">
+  <label for="cover_letter">Motivatiebrief</label><textarea id="cover_letter" name="job_application[cover_letter]"></textarea>
+  <button type="submit" id="verzenden">Verzenden</button>
+</form>
+<script>
+  document.getElementById('verzenden').addEventListener('click', function (e) {
+    e.preventDefault();
+    window.__SUBMITTED__ = true;
+  });
+</script>
+</body></html>

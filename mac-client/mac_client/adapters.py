@@ -249,6 +249,25 @@ def apply_url_for(url: str | None) -> str | None:
     return append_path_suffix(url, _APPLY_PATH_SUFFIX.get(platform, ""))
 
 
+#: Characters `keyboard.type` turns into a KEY PRESS instead of text: "\n" and
+#: "\r" press Enter, "\t" presses Tab, and the rest of C0, DEL and the Unicode
+#: line breaks are control input no name, email or phone number contains.
+_KEY_LIKE_CHARACTERS = frozenset(map(chr, range(0x20))) | {"\x7f", "\x85", "\u2028", "\u2029"}
+
+
+def is_typable(value: str) -> bool:
+    """False when typing `value` would press a key instead of entering text.
+
+    THE INCIDENT-SHAPED HAZARD. Enter in a text field submits its form, and the
+    employer's submit handler is what sends the application. A line break in a
+    profile value (a stray newline at the end of `linkedin`, which is never
+    stripped, or in the middle of any value) therefore sent an application before
+    the founder saw the page: SUBMIT STAYS HUMAN. Such a value is never typed;
+    the overlay says so and the founder fixes apply-profile.json.
+    """
+    return not any(char in _KEY_LIKE_CHARACTERS for char in value)
+
+
 def planned_fills(field_map: FieldMap, profile) -> list[tuple[str, tuple[str, ...], str]]:
     """(label, selectors, value) for every field we intend to fill.
 
