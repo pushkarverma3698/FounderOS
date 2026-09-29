@@ -532,8 +532,9 @@ merge_cleared() {
 #
 # Succeeds only if EVERY commit between the last gated head and $head is either
 #   - authored by this checkout's git identity (pr-brain's own fix), or
-#   - a merge whose second parent is already on $base and whose tree is exactly
-#     what a clean merge produces (no hand-resolved conflict can hide in it).
+#   - a merge whose tree is exactly what a clean merge of its parents produces
+#     (no hand-resolved conflict can hide in it). Whatever it brought in that is
+#     not already on $base is listed too, and must pass the author check itself.
 # Anything else — another author, a rewrite that drops the gated head, a failed
 # fetch, a git too old for merge-tree — fails, and the PR gets a real gate.
 # Every doubt resolves to "spend the review".
@@ -555,7 +556,6 @@ only_our_commits_since() {
     if [[ -z "$p2" ]]; then
       [[ "$(git log -1 --format=%ae "$c")" == "$me" ]] || return 1
     else
-      git merge-base --is-ancestor "$p2" "refs/pr-brain/base-$base" 2>/dev/null || return 1
       tree=$(git merge-tree --write-tree "$p1" "$p2" 2>/dev/null) || return 1
       [[ "${tree%%$'\n'*}" == "$(git rev-parse "$c^{tree}")" ]] || return 1
     fi
