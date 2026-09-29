@@ -159,7 +159,7 @@ export function runBranchNew(opts: BranchNewOptions): BranchNewResult {
   const branch = verdict.branch;
 
   // Never prompt for credentials: an agent has no one to answer, and a hang is worse than a failure.
-  const env = { ...(opts.env ?? process.env), GIT_TERMINAL_PROMPT: "0" };
+  const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env), GIT_TERMINAL_PROMPT: "0" };
   const git = (args: readonly string[], timeout?: number) =>
     spawnSync("git", [...args], { cwd: opts.cwd, env, encoding: "utf8", timeout });
   const failed = (...err: string[]): BranchNewResult => ({ code: 1, out: [], err: err.map((line) => `branch:new: ${line}`) });
@@ -218,7 +218,7 @@ export function runBranchNew(opts: BranchNewOptions): BranchNewResult {
   }
 
   // The verifier reads the current branch; a stray GITHUB_HEAD_REF would make it check another name.
-  const verifyEnv = { ...env };
+  const verifyEnv: NodeJS.ProcessEnv = { ...env };
   delete verifyEnv["GITHUB_HEAD_REF"];
   const verify = spawnSync("bash", [opts.verifyScript ?? DEFAULT_VERIFY_SCRIPT], { cwd: opts.cwd, env: verifyEnv, encoding: "utf8" });
   const verdictText = `${verify.stdout ?? ""}${verify.stderr ?? ""}`.trim();
