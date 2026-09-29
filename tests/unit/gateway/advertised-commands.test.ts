@@ -18,10 +18,17 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { buildWelcomeMessage, buildRestartMessage } from "../../../src/gateway/capability-message.js";
 
-/** The commands actually wired to a handler, read from the transport file itself. */
+/** Files that call `bot.command(...)`: the transport, and the feature modules whose registration it delegates to. */
+const COMMAND_SOURCES = ["telegram.ts", "goal-commands.ts"];
+
+/** The commands actually wired to a handler, read from those files themselves. */
 function registeredCommands(): Set<string> {
-  const source = readFileSync(new URL("../../../src/gateway/telegram.ts", import.meta.url), "utf8");
-  return new Set([...source.matchAll(/\.command\("([a-z_]+)"/g)].map((m) => m[1]!));
+  return new Set(
+    COMMAND_SOURCES.flatMap((file) => {
+      const source = readFileSync(new URL(`../../../src/gateway/${file}`, import.meta.url), "utf8");
+      return [...source.matchAll(/\.command\("([a-z_]+)"/g)].map((m) => m[1]!);
+    }),
+  );
 }
 
 /** Commands mentioned in a message, ignoring HTTP paths like /api/v1/health. */

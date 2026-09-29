@@ -241,6 +241,8 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
   { command: "budget", description: "Today's spend against the daily cap", group: "system" },
   { command: "commands", description: "Show every command with what it does", group: "system" },
   { command: "remind", description: "Set a reminder — remind call the landlord at 3pm", group: "system" },
+  { command: "goals", description: "Your goals with today's value and pace, read from real events. Buttons plan the next step", group: "system" },
+  { command: "goal", description: "goal add title | metric=key target=n by=YYYY-MM-DD. goal n value, goal done n, goal drop n, goal block n reason", group: "system" },
   { command: "connect", description: "Search and add an MCP server from the registry", group: "system" },
   { command: "start", description: "What this bot can do", group: "system" },
   { command: "reset", description: "Clear this thread's mission state", group: "system" },

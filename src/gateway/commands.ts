@@ -15,6 +15,7 @@ import { clearThreadCheckpoints } from "../infra/checkpointer.js";
 import { engageHalt, releaseHalt, readHalt } from "../infra/halt.js";
 import { buildMenuSection, menuKeyboard } from "./home-menu.js";
 import { buildCommandsHelp } from "./command-menu.js";
+import { replySkippedStandups } from "./goal-resume.js";
 import { splitForTelegram } from "./format.js";
 import { safeHtml } from "./approval-card.js";
 import { TENANT, DAILY_BUDGET_USD, MCP_BRIDGE_ENABLED, MCP_BRIDGE_MANIFEST } from "../core/config.js";
@@ -96,6 +97,7 @@ export async function handleResume(ctx: Context): Promise<void> {
   }
   await releaseHalt();
   await ctx.reply("▶️ Resumed — the kernel accepts turns again.");
+  await replySkippedStandups(ctx); // "standup skipped on <dates>", once, if a halt swallowed any
 }
 
 /**

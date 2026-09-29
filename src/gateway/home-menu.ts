@@ -144,6 +144,8 @@ function systemText(): string {
     `🔹 <code>/status</code> — health and anything waiting on your approval\n` +
     `🔹 <code>/budget</code> — today's spend against the daily cap\n` +
     `🔹 <code>/remind call the landlord at 3pm</code> — a reminder, pinged at that time\n` +
+    `🔹 <code>/goals</code> — your goals, each measured from real events and reported at 09:00\n` +
+    `🔹 <code>/goal add …</code> — set a goal, report a value, finish, drop or block one (send <code>/goal</code> for the grammar)\n` +
     `🔹 <code>/connect</code> — search and add an MCP server\n` +
     `🔹 <code>/reset</code> — clear this thread's mission state\n` +
     `🔹 <code>/commands</code> — the full list, every command, in text\n` +
