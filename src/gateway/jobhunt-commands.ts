@@ -19,7 +19,7 @@
  * (ADR-018: the machine never submits an application).
  */
 
-import type { Context } from "grammy";
+import { InputFile, type Context } from "grammy";
 import * as path from "node:path";
 import { updateApplicationStage, type BriefSection } from "../db/job-queries.js";
 import { listApplyQueue } from "../db/apply-queries.js";
@@ -224,11 +224,10 @@ export function packetMessage(packet: ApplicationPacket, rank: number): string {
  * whether "5+ years" is firm invites a pre-emptive rejection on the one gate
  * written as a wish.
  *
- * Produces a real tailored CV PDF, not just drafted text. Tailoring and
- * rendering happen here, outside the kernel — deterministic-enough work with no
- * side effects — and only the actual SEND goes through a kernel turn, so
- * `deliver_artifact`'s HITL gate still fires exactly as it does for every other
- * outbound file (ADR-018: the machine never sends without a tap).
+ * Produces a real tailored CV PDF, not just drafted text. Tailoring, rendering
+ * and the send all happen here, outside the kernel: the PDF goes back into the
+ * chat that typed the command, so no approval card guards it (nothing leaves
+ * Telegram; applying stays the founder's own click — ADR-018).
  *
  * Rows are built SERIALLY. Each one is a worker-model call plus a Chromium
  * launch; running six in parallel would put six headless browsers on a 4GB VPS
@@ -331,13 +330,14 @@ async function draftOneRow(
   const { packet } = built;
   await sendCoverLetter(ctx, row, packet.cvMarkdown);
 
-  await deps.runKernelText(
-    ctx,
-    `Call the deliver_artifact tool now with path="${packet.pdfPath}" and caption="Tailored CV — ${row.company} — ${row.title}". ` +
-      `Do not do anything else — do not read the file, do not summarize it, do not compose any other message. ` +
-      `Just call that one tool with exactly those two arguments.`,
-    profile.id,
-  );
+  // Straight into the chat that typed /draft — no kernel turn, no approval card.
+  // Nothing leaves Telegram: applying is still the founder's own click on the
+  // employer's form. The kernel route cost three model calls and a tap, sent to
+  // the founder's DM even when /wife_draft came from the family group, and on
+  // 2026-09-17 its synthesizer reported a delivered CV as failed.
+  await ctx.replyWithDocument(new InputFile(packet.pdfPath, path.basename(packet.pdfPath)), {
+    caption: `Tailored CV — ${row.company} — ${row.title}`,
+  });
 
   // AFTER the delivery turn, not before: this message carries the apply link and
   // the close-out command, and it should be the last thing on screen when the

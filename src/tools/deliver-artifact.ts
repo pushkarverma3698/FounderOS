@@ -17,6 +17,8 @@ const log = childLogger({ module: "tool:deliver-artifact" });
 export interface DeliverArtifactArgs {
   readonly path: string;
   readonly caption?: string;
+  /** Chat to send to; the founder's own chat when absent. */
+  readonly chatId?: string;
 }
 
 export async function deliverArtifactFile(
@@ -38,6 +40,7 @@ export async function deliverArtifactFile(
   const filename = path.basename(normPath);
   await sendDocument(normPath, filename, {
     caption: args.caption ?? `📄 Deliverable: ${filename} (${stats.size} bytes)`,
+    ...(args.chatId ? { chatId: args.chatId } : {}),
   });
 
   log.info({ path: normPath, bytes: stats.size, filename }, "Artifact delivered to Telegram");
