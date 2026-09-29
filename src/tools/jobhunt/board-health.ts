@@ -9,9 +9,9 @@
  * changes is a line nobody reads, and it drowned the failures that do change.
  *
  * THE RULE. A board that answers HTTP 404 on DEAD_BOARD_STREAK consecutive sweeps
- * (ten: five hours at the 30-minute cadence) stops being asked. It is asked ONCE MORE every seven
- * days, so a revived board comes back without anyone editing the registry, and the
- * sweep says "skipped N dead boards" instead of listing them.
+ * (ten: five hours at the 30-minute cadence) stops being asked. It is asked ONCE MORE
+ * every seven days, so a revived board comes back without anyone editing the registry,
+ * and the sweep says "skipped N dead boards" instead of listing them.
  *
  * WHAT COUNTS. Only a 404. A 429 is a rate limit, a 5xx is a host having a bad hour,
  * a timeout is a network: none of them says the board is gone, and treating one as
@@ -79,9 +79,9 @@ export interface BoardRef {
 }
 
 /**
- * One failing board. Boards that are healthy have NO entry, so the file's length is
- * the number of boards currently failing, and `jq 'length'` on it answers "how many
- * dead boards do we have".
+ * One failing board. Healthy boards have NO entry, so `jq 'length'` on the file counts
+ * the boards currently failing; the ones with `streak >= DEAD_BOARD_STREAK` are the
+ * skipped ones.
  *
  * `last_probe_at` is the last time the board gave a DEFINITIVE 404, which is what the
  * seven-day re-probe clock runs from. An inconclusive answer (429, 5xx) leaves it alone,
