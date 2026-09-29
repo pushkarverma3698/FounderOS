@@ -72,6 +72,7 @@ import {
 import { scheduleTask, listScheduled, editScheduled } from "./agent-tools/scheduling.js";
 import { setReminder, listReminders, editReminder } from "./agent-tools/reminders.js";
 import { listWorkflows } from "./agent-tools/workflows.js";
+import { antigravityTaskStatus, requeueAntigravityTask } from "./agent-tools/antigravity-followup.js";
 import { readContext, updateContext } from "../tools/context.js";
 import { searchKnowledge } from "../tools/knowledge.js";
 import { searchMemoryTool } from "../tools/memory.js";
@@ -123,7 +124,7 @@ export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
   admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact, readLogs],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
-  engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, createProjectRepo, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead, uiCheck, readLogs],
+  engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, antigravityTaskStatus, requeueAntigravityTask, createProjectRepo, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead, uiCheck, readLogs],
   marketing: [linkedinPost, linkedinGetMyPosts, linkedinAnalytics, linkedinReadComments, draftLinkedInReply, draftConnectionNote, generateImageTool, listBrandAssetsTool, listVideoBrandsTool, compileVideoBriefTool, compileShotListTool, planVideoProductionTool, videoProductionStatusTool, listScheduledPosts, searchWeb, searchKnowledge, publishSignal],
   sales: [searchWeb, createSendEmailTool("sales"), searchKnowledge],
   personal: [readFile, listDir, runShell, browser, sendFile, writeFile],
@@ -183,6 +184,7 @@ export const HITL_GATED_TOOLS = new Set([
   "browser",
   "claude_code",
   "dispatch_antigravity_task",
+  "requeue_antigravity_task",
   "create_project_repo",
   "vps_run",
   "deploy_static_site",

@@ -30,25 +30,27 @@ const context = {
     "Phase D-Bis: 3 proof showcases on proof.turicks.com + LinkedIn build-in-public + Proof Drops to AI/dev-tool startups",
 
   active_projects: [
-    "FounderOS v2 — production LangGraph multi-agent OS (7 departments, Postgres checkpointing, HITL, 1250+ tests) — LIVE on Hetzner VPS",
+    "FounderOS — deterministic agent kernel (v3) running Turicks operations over Telegram — LIVE on Hetzner VPS",
     "Cinematic Launch Experience — $8K+ DFY web design via cinematic-web presets + deploy_static_site pipeline",
     "Turicks proof gallery — showcase-1 (AgentOps) + 2 more showcases targeting Awwwards/Godly quality bar",
     "Naggar Retreat — Himalayan farm homestay in Himachal Pradesh (separate brand boundary)",
   ],
 
   // ── Tech stack ──────────────────────────────────────────────────────────────
+  // ── FounderOS architecture — SYSTEM_CONTEXT_KEYS: the code owns these, and ──
+  // the seed rewrites a stored value that differs (src/db/founder-context.ts).
+  // Name no model slug here: scripts/apply-prod-env-overrides.sh is the source.
   tech_stack:
-    "LangGraph JS (createSupervisor + createReactAgent), Gemini 3.8 Flash via Google AI Studio, TypeScript 5.5 strict, Node 22 ESM, Postgres + pgvector + Drizzle ORM, grammy (Telegram), LangSmith tracing, Ollama (nomic-embed-text for turicks-brain RAG), gws (Gmail/Calendar default), direct LinkedIn API",
+    "v3 deterministic kernel: LangGraph StateGraph — planner LLM, pure-code supervisor, 8 workers with capped tools, synthesizer — with Zod-validated contracts at every boundary (src/kernel/contracts.ts). TypeScript strict, Node 22 ESM, Postgres + pgvector + Drizzle ORM, grammy (Telegram). Paid Gemini Flash at temperature 0, same-key Gemini then free OpenRouter fallbacks (live chain: scripts/apply-prod-env-overrides.sh). Ollama nomic-embed-text for RAG embeddings, gws for Gmail/Calendar, direct LinkedIn API. Engineering work goes to Antigravity via GitHub issues (agent-dispatch) and is reviewed by Claude (pr-brain).",
 
   local_models:
     "Ollama on VPS: nomic-embed-text for turicks-brain vector sync. All RAG embeddings stay on-machine (ADR-013/015).",
 
-  // ── FounderOS architecture ──────────────────────────────────────────────────
   founderos_departments:
-    "7 departments: admin (read_context, update_context), research (search_web, search_knowledge, search_turicks_brain), comms (send_email*, read_emails), engineering (github_read, github_write*, claude_code*, deploy_static_site*), marketing (search_web, search_knowledge, search_turicks_brain, linkedin_post*, publish_signal), sales (search_web, search_knowledge, search_turicks_brain, send_email*, publish_signal), personal (file/shell/browser*, path-guarded), jobhunt (search_jobs, read_cv, send_email*). * = HITL-gated",
+    "8 kernel workers, each with its own capped tool set (* = founder approves in Telegram before it runs): admin (read_context, update_context, search_memory, reminders, scheduled tasks, workflows, ops_state, read_logs, deliver_artifact*), research (search_web, scrape_url, deep_research, crawl_site, search_knowledge), comms (read_emails, send_email*, create_calendar_event*, schedule_social_post*), engineering (github_read, read_logs, dispatch_antigravity_task*, claude_code*, project_workflow*, deploy_static_site*, vps_run*), marketing (linkedin_post*, LinkedIn analytics and comments, generate_image, video briefs), sales (search_web, search_knowledge, send_email*), personal (read_file, list_dir, run_shell*, browser*, send_file*, write_file*), jobhunt (read_cv, search_jobs, screen_job, job_brief, tailor_cv, export_jobs_csv, deliver_artifact*, send_email*)",
 
   founderos_key_features:
-    "Dual turicks-brain (knowledge_entries keyword + brain_memories pgvector semantic, ADR-038), execution guards (ADR-032 anti-fabrication), crash-safe HITL (Postgres checkpointing), idempotency audit log, typed dept_signals (design_brief_ready, site_deployed), JARVIS web gateway on :3001, deploy_static_site for proof.turicks.com showcases",
+    "Contracts-first kernel: every step result is validated, and an action claim needs a code-recorded tool receipt, so the reply cannot claim work that did not happen. Failures name the real stage and component and are always shown. HITL: approval row written before the interrupt, side effects only after the tap, idempotency key before every external send. Crash-safe threads (Postgres checkpointing; only /reset wipes). Jobhunt lane for two candidates (daily brief, tailored CV PDFs, apply links). Hybrid RAG (pgvector + keyword, RRF) over turicks-brain. Antigravity dispatch loop with Claude PR gate. Read-only MCP hub for coding tools.",
 
   // ── Business context (ADR-033 / Phase D-Bis — locked 2026-06-17) ───────────
   turicks_services:
@@ -87,13 +89,15 @@ const context = {
 
 async function main() {
   console.log("Seeding founder context defaults (fill-only) for tenant:", TENANT);
-  const filled = await seedFounderContextDefaults(TENANT, context);
-  const kept = Object.keys(context).filter((key) => !filled.includes(key));
+  const { filled, refreshed, retired } = await seedFounderContextDefaults(TENANT, context);
+  const kept = Object.keys(context).filter((key) => !filled.includes(key) && !refreshed.includes(key));
   console.log(
     filled.length > 0
       ? `✅ Filled ${filled.length} absent key(s): ${filled.join(", ")}`
       : "✅ Nothing to fill — every seed key is already stored",
   );
+  if (refreshed.length > 0) console.log(`✅ Rewrote ${refreshed.length} system key(s) the code owns: ${refreshed.join(", ")}`);
+  if (retired.length > 0) console.log(`✅ Removed ${retired.length} retired June seed value(s) nobody had changed: ${retired.join(", ")}`);
   if (kept.length > 0) {
     console.log(`   Kept the stored value (not overwritten) for ${kept.length} key(s): ${kept.join(", ")}`);
   }

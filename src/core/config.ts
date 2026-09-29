@@ -17,10 +17,10 @@ export const envSchema = z.object({
   // Database — required for checkpointer + audit log
   DATABASE_URL: z.string().url().describe("PostgreSQL connection string"),
 
-  // Telegram — required to run the bot
-  TELEGRAM_BOT_TOKEN: z.string().min(1),
+  TELEGRAM_BOT_TOKEN: z.string().min(1), // Telegram — required to run the bot
   TELEGRAM_CHAT_ID: z.string().min(1),
   TELEGRAM_ALLOWED_CHAT_IDS: z.string().transform(v => v || undefined).optional(), // group chats — gateway/chat-access.ts
+  TELEGRAM_ANSWER_ALL_CHAT_IDS: z.string().transform(v => v || undefined).optional(), // allowed chats where every message is for the bot
   TELEGRAM_OWNER_USER_ID: z.string().transform(v => v || undefined).optional(),
 
   // LLM providers — one key must match the selected AGENT_MODEL provider.

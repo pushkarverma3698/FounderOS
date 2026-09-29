@@ -13,7 +13,10 @@
  *
  *   primary         the founder's own chat — unchanged, everything allowed
  *   allowed         a chat the founder listed in TELEGRAM_ALLOWED_CHAT_IDS —
- *                   everyone in it may talk to the bot
+ *                   everyone in it may talk to the bot. A chat listed in
+ *                   TELEGRAM_ANSWER_ALL_CHAT_IDS is allowed too, and every
+ *                   message in it counts as addressed to the bot (a family
+ *                   group of two people and the bot, 2026-09-29)
  *   owner-in-group  any other group, but the sender is the founder — he added
  *                   the bot there, so his own messages work without config
  *   denied          anyone else — dropped silently, as before
@@ -37,6 +40,8 @@
 export interface ChatAccessConfig {
   readonly primaryChatId: string;
   readonly allowedChatIds: ReadonlySet<string>;
+  /** Allowed chats where every message is for the bot — no @mention or reply needed. */
+  readonly answerAllChatIds: ReadonlySet<string>;
   /** Telegram user id of the founder, or null when it cannot be known. */
   readonly ownerUserId: string | null;
 }
@@ -52,19 +57,21 @@ const CHAT_ID = /^-?\d+$/;
 export function buildChatAccessConfig(input: {
   readonly primaryChatId: string;
   readonly allowedChatIds?: string | undefined;
+  readonly answerAllChatIds?: string | undefined;
   readonly ownerUserId?: string | undefined;
 }): ChatAccessConfig {
   const primary = input.primaryChatId.trim();
-  const allowed = new Set(
-    (input.allowedChatIds ?? "")
+  const ids = (list: string | undefined): string[] =>
+    (list ?? "")
       .split(",")
       .map((s) => s.trim())
-      .filter((s) => CHAT_ID.test(s) && s !== primary),
-  );
+      .filter((s) => CHAT_ID.test(s) && s !== primary);
+  const answerAll = new Set(ids(input.answerAllChatIds));
+  const allowed = new Set([...ids(input.allowedChatIds), ...answerAll]);
   const explicitOwner = input.ownerUserId?.trim();
   const ownerUserId =
     explicitOwner && /^\d+$/.test(explicitOwner) ? explicitOwner : /^\d+$/.test(primary) ? primary : null;
-  return { primaryChatId: primary, allowedChatIds: allowed, ownerUserId };
+  return { primaryChatId: primary, allowedChatIds: allowed, answerAllChatIds: answerAll, ownerUserId };
 }
 
 export type ChatAccess = "primary" | "allowed" | "owner-in-group" | "denied";

@@ -77,6 +77,22 @@ describe("deliverArtifact HITL gating (src/agents/agent-tools/state.ts)", () => 
     });
   });
 
+  it("sends to the chat whose thread asked, not the founder's DM (family group, 2026-09-29)", async () => {
+    mockHitlGate.mockResolvedValueOnce(null);
+    mockDeliverArtifactFile.mockResolvedValueOnce({ filename: "jobs.csv", bytes: 10 });
+
+    await deliverArtifact.invoke(
+      { path: "/data/artifacts/jobs.csv" },
+      { configurable: { thread_id: "turicks:-5319642142" } },
+    );
+
+    expect(mockDeliverArtifactFile).toHaveBeenCalledWith({
+      path: "/data/artifacts/jobs.csv",
+      caption: undefined,
+      chatId: "-5319642142",
+    });
+  });
+
   it("catches side-effect errors during deliverArtifactFile execution after approval", async () => {
     mockHitlGate.mockResolvedValueOnce(null);
     mockDeliverArtifactFile.mockRejectedValueOnce(new Error("File not found or 0 bytes"));

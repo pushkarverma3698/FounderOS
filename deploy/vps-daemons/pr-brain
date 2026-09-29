@@ -424,6 +424,148 @@ $report"
   return $rc
 }
 
+# ------------------------------------------------- verdict, merge, carry-forward
+
+# The verdict GitHub actually recorded, not what the run claimed.
+#
+# GitHub returns reviewDecision as "" (not null) when no decision exists, and it
+# ALWAYS will here: the executor opens PRs under this same account and GitHub
+# refuses self-approval ("Can not approve your own pull request"). So the real
+# signal is draft→ready, and `// "..."` cannot supply it — jq's // only catches
+# null/false, never "". Read the state in plain words or the founder gets a
+# message with a blank where the verdict should be.
+pr_verdict() {
+  gh pr view "$1" --json reviewDecision,isDraft,title --jq '
+      (if   .reviewDecision == "CHANGES_REQUESTED" then "CHANGES REQUESTED — blocked"
+       elif .reviewDecision == "APPROVED"          then "APPROVED"
+       elif .isDraft                               then "REVIEWED, left as draft — not cleared"
+       else "CLEARED — marked ready for merge (self-approval impossible; ready IS the pass)"
+       end) + " · " + .title' 2>/dev/null \
+    || echo "unknown — could not read PR state"
+}
+
+# Sets merge_result. Merges only a CLEARED PR.
+#
+# The documented pipeline (src/tools/dispatch-antigravity.ts's own header
+# comment) ends "pr-brain (Claude review, every 20 min) → Merge". That arrow
+# never existed in code — pr-brain gated, GitHub does not allow self-approval
+# so the pass signal is draft->ready, and nothing after that ever merged
+# anything. Found 2026-09-14: 3 PRs sat CLEARED, all CI green, mergeable,
+# for 4 days because of exactly this gap. Only the CLEARED case merges, and
+# even then never main/master, and never ANY branch in an employer/org repo
+# ($repo_owner != $OWNER — see the OplifyMessage carve-out below) — a main
+# merge, or any merge into a repo we don't personally own, is the founder's
+# call (restored 2026-09-21: this guard existed originally, was silently
+# dropped, and the comment above the dropped code kept claiming it still
+# ran — see docs/sessions/2026-09-21-oplify-onboarding-and-safety-fixes.md).
+# No --auto / no allow_auto_merge dependency: branch protection already
+# requires both checks server-side, and by the time a PR reaches this line
+# the pr-adversary gate re-ran them in-session and GitHub's own Actions run
+# (which starts on push, long before the next 20-min sweep) has already
+# finished — so an immediate merge attempt either succeeds because they're
+# actually green, or fails loud because they are not.
+merge_cleared() {
+  local pr="$1" verdict="$2" base promo_pr promo_url
+  merge_result="not attempted (verdict was not CLEARED)"
+  case "$verdict" in
+    "CLEARED"*) ;;
+    *) return 0 ;;
+  esac
+  base=$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null)
+  if [[ "$repo_owner" == "OplifyMessage" ]]; then
+    # Employer repo. founderOS reviews, fixes, and marks ready — a human
+    # merges from GitHub or the phone, every time, no exceptions.
+    merge_result="not attempted — $repo_owner is an employer org; a human merges"
+    gh pr ready "$pr" >>"$LOG" 2>&1 || true
+    log "$repo_name#$pr cleared — marked ready, merge withheld ($repo_owner org)"
+  elif [[ "$base" == "main" || "$base" == "master" ]]; then
+    merge_result="skipped — base is $base, a main/master merge needs the founder"
+    log "$repo_name#$pr merge skipped — base is $base"
+  elif gh pr merge "$pr" --squash >>"$LOG" 2>&1; then
+    merge_result="merged (squash) into $base"
+    log "$repo_name#$pr merge: squashed into $base"
+
+    # If base was beta, auto-promote to main
+    if [[ "$base" == "beta" ]]; then
+      log "$repo_name#$pr is on beta — triggering auto-promotion to main"
+      promo_pr=$(gh pr list --base main --head beta --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)
+      if [[ -z "$promo_pr" ]]; then
+        # `gh pr create` has no --json flag — it prints the created PR's
+        # URL on stdout. Resolving the number through `gh pr view <url>`
+        # was missing before; without it a create failure or success was
+        # indistinguishable and this promotion path never actually fired
+        # (found 2026-09-21: silently swallowed by `|| true` below).
+        promo_url=$(gh pr create --base main --head beta --title "chore: promote beta to main" --body "Automated promotion after PR #${pr} cleared and merged into beta." 2>/dev/null || true)
+        if [[ -n "$promo_url" ]]; then
+          promo_pr=$(gh pr view "$promo_url" --json number --jq .number 2>/dev/null || true)
+        fi
+      fi
+      if [[ -n "$promo_pr" ]]; then
+        gh pr merge "$promo_pr" --auto --squash 2>/dev/null || gh pr merge "$promo_pr" --squash 2>/dev/null || true
+        log "$repo_name auto-promoted beta to main (PR #${promo_pr})"
+      fi
+    fi
+  elif gh pr update-branch "$pr" >>"$LOG" 2>&1; then
+    # $base has a `strict` required-status-checks policy (verified
+    # 2026-09-14): a CLEARED, all-green PR can still be refused with
+    # "the head branch is not up to date with the base branch" — checks
+    # must have run on the EXACT current commit, not merely have passed
+    # on an older one (found live merging #671/#672/#673). update-branch
+    # pushes a clean merge-with-base commit, which changes headRefOid. The
+    # next sweep carries the verdict forward over that merge (see
+    # only_our_commits_since) and retries the merge — no second review.
+    merge_result="was behind $base — ran update-branch, next sweep retries the merge"
+    log "$repo_name#$pr merge deferred — updated branch against $base, will retry on next sweep"
+  else
+    merge_result="FAILED — see log ($LOG)"
+    log "$repo_name#$pr merge FAILED — see $LOG"
+  fi
+}
+
+# Every gate is a full Claude session on the founder's own account (2026-09-28/29
+# prod: 80–175 model calls, 4–12M cached tokens each). The marker is stamped with
+# the head the gate STARTED on, so a gate that pushed its own fix — which the
+# pr-adversary skill asks it to — moved the head, and the next sweep gated its own
+# work again: founderos#763 was gated 7 times in 6 hours, 4 of them over nothing
+# but pr-brain's own commits and a clean merge of beta, and the account sat at its
+# session limit for ~9 hours that day.
+#
+# Succeeds only if EVERY commit between the last gated head and $head is either
+#   - authored by this checkout's git identity (pr-brain's own fix), or
+#   - a merge whose tree is exactly what a clean merge of its parents produces
+#     (no hand-resolved conflict can hide in it). Whatever it brought in that is
+#     not already on $base is listed too, and must pass the author check itself.
+# Anything else — another author, a rewrite that drops the gated head, a failed
+# fetch, a git too old for merge-tree — fails, and the PR gets a real gate.
+# Every doubt resolves to "spend the review".
+last_gated_head() {
+  printf '%s\n' "$1" | grep -oE "brain-reviewed: [0-9a-f]{7,40}" | tail -n1 | awk '{print $2}'
+}
+
+only_our_commits_since() {
+  local last="$1" head="$2" base="$3" pr="$4" me c p1 p2 extra tree
+  me=$(git config user.email 2>/dev/null || true)
+  [[ -n "$me" && -n "$last" && -n "$base" && "$last" != "$head" ]] || return 1
+  git fetch -q origin "+refs/pull/$pr/head:refs/pr-brain/pr-$pr" \
+                      "+refs/heads/$base:refs/pr-brain/base-$base" 2>/dev/null || return 1
+  [[ "$(git rev-parse -q --verify "refs/pr-brain/pr-$pr^{commit}" 2>/dev/null)" == "$head" ]] || return 1
+  git merge-base --is-ancestor "$last" "$head" 2>/dev/null || return 1
+  while read -r c p1 p2 extra; do
+    [[ -z "$c" ]] && continue
+    [[ -z "$extra" ]] || return 1
+    if [[ -z "$p2" ]]; then
+      [[ "$(git log -1 --format=%ae "$c")" == "$me" ]] || return 1
+    else
+      tree=$(git merge-tree --write-tree "$p1" "$p2" 2>/dev/null) || return 1
+      [[ "${tree%%$'\n'*}" == "$(git rev-parse "$c^{tree}")" ]] || return 1
+    fi
+  # Commits already on $base arrived through a merge and are not this PR's news.
+  # A failed rev-list prints a 4-field line, which the `extra` check rejects.
+  done < <(git rev-list --parents "$head" "^$last" "^refs/pr-brain/base-$base" 2>/dev/null \
+             || echo "rev-list-failed x x x")
+  return 0
+}
+
 acted=0
 sweep_outage=0
 
@@ -474,10 +616,11 @@ while IFS= read -r repo; do
     [[ "$acted" -ge "$MAX" ]] && break
 
     # A PR is gated once per head SHA. A new push re-opens it.
+    comments=""
     if [[ -z "$ONE_PR" ]]; then
       head="${head:-$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null)}"
-      if gh pr view "$pr" --json comments \
-           --jq '[.comments[].body] | join("\n")' 2>/dev/null | grep -qF "$MARKER_PREFIX $head"; then
+      comments=$(gh pr view "$pr" --json comments --jq '[.comments[].body] | join("\n")' 2>/dev/null || true)
+      if printf '%s\n' "$comments" | grep -qF "$MARKER_PREFIX $head"; then
         log "$repo_name#$pr already gated at $head — skipped"
         continue
       fi
@@ -495,6 +638,26 @@ while IFS= read -r repo; do
     if [[ -z "$head" ]]; then
       log "$repo_name#$pr could not resolve head SHA — skipping"
       continue
+    fi
+
+    # Nothing new but pr-brain's own fix commits and clean merges of the base:
+    # re-stamp, retry the merge if it was already cleared, spend no Claude session.
+    if [[ -z "$ONE_PR" && "$DRY_RUN" -eq 0 ]]; then
+      last=$(last_gated_head "$comments")
+      pr_base=$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null || true)
+      if only_our_commits_since "$last" "$head" "$pr_base" "$pr"; then
+        log "$repo_name#$pr head ${head:0:8}: only pr-brain's own commits / clean $pr_base merges since gated ${last:0:8} — verdict carried forward, no Claude session"
+        gh pr comment "$pr" --body "${MARKER_PREFIX} ${head} -->
+Carried forward from \`${last:0:8}\`: every commit since is pr-brain's own fix or a clean merge of \`${pr_base}\`, so no second review was spent." >>"$LOG" 2>&1 || true
+        verdict=$(pr_verdict "$pr")
+        merge_cleared "$pr" "$verdict"
+        case "$merge_result" in
+          merged*|FAILED*) notify "🧠 ${repo_name}#${pr}: ${verdict}
+Merge: ${merge_result} (no new review — only pr-brain's own commits since the last one)
+$(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
+        esac
+        continue
+      fi
     fi
 
     # A head whose gate failed MAX_ATTEMPTS times is left alone until a new push
@@ -545,100 +708,9 @@ while IFS= read -r repo; do
     if [[ $gate_rc -eq 0 ]]; then
       rm -f "$(fail_file "$repo_name" "$pr")"
       log "$repo_name#$pr gate finished"
-      # Report the verdict GitHub actually recorded, not what the run claimed.
-      #
-      # GitHub returns reviewDecision as "" (not null) when no decision exists, and it
-      # ALWAYS will here: the executor opens PRs under this same account and GitHub
-      # refuses self-approval ("Can not approve your own pull request"). So the real
-      # signal is draft→ready, and `// "..."` cannot supply it — jq's // only catches
-      # null/false, never "". Read the state in plain words or the founder gets a
-      # message with a blank where the verdict should be.
-      verdict=$(gh pr view "$pr" --json reviewDecision,isDraft,title --jq '
-                  (if   .reviewDecision == "CHANGES_REQUESTED" then "CHANGES REQUESTED — blocked"
-                   elif .reviewDecision == "APPROVED"          then "APPROVED"
-                   elif .isDraft                               then "REVIEWED, left as draft — not cleared"
-                   else "CLEARED — marked ready for merge (self-approval impossible; ready IS the pass)"
-                   end) + " · " + .title' 2>/dev/null \
-                || echo "unknown — could not read PR state")
+      verdict=$(pr_verdict "$pr")
       log "$repo_name#$pr verdict: $verdict"
-
-      # The documented pipeline (src/tools/dispatch-antigravity.ts's own header
-      # comment) ends "pr-brain (Claude review, every 20 min) → Merge". That arrow
-      # never existed in code — pr-brain gated, GitHub does not allow self-approval
-      # so the pass signal is draft->ready, and nothing after that ever merged
-      # anything. Found 2026-09-14: 3 PRs sat CLEARED, all CI green, mergeable,
-      # for 4 days because of exactly this gap. Only the CLEARED case merges, and
-      # even then never main/master, and never ANY branch in an employer/org repo
-      # ($repo_owner != $OWNER — see the OplifyMessage carve-out below) — a main
-      # merge, or any merge into a repo we don't personally own, is the founder's
-      # call (restored 2026-09-21: this guard existed originally, was silently
-      # dropped, and the comment above the dropped code kept claiming it still
-      # ran — see docs/sessions/2026-09-21-oplify-onboarding-and-safety-fixes.md).
-      # No --auto / no allow_auto_merge dependency: branch protection already
-      # requires both checks server-side, and by the time a PR reaches this line
-      # the pr-adversary gate re-ran them in-session and GitHub's own Actions run
-      # (which starts on push, long before the next 20-min sweep) has already
-      # finished — so an immediate merge attempt either succeeds because they're
-      # actually green, or fails loud because they are not.
-      merge_result="not attempted (verdict was not CLEARED)"
-      case "$verdict" in
-        "CLEARED"*)
-          base=$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null)
-          if [[ "$repo_owner" == "OplifyMessage" ]]; then
-            # Employer repo. founderOS reviews, fixes, and marks ready — a human
-            # merges from GitHub or the phone, every time, no exceptions.
-            merge_result="not attempted — $repo_owner is an employer org; a human merges"
-            gh pr ready "$pr" >>"$LOG" 2>&1 || true
-            log "$repo_name#$pr cleared — marked ready, merge withheld ($repo_owner org)"
-          elif [[ "$base" == "main" || "$base" == "master" ]]; then
-            merge_result="skipped — base is $base, a main/master merge needs the founder"
-            log "$repo_name#$pr merge skipped — base is $base"
-          elif gh pr merge "$pr" --squash >>"$LOG" 2>&1; then
-            merge_result="merged (squash) into $base"
-            log "$repo_name#$pr merge: squashed into $base"
-
-            # If base was beta, auto-promote to main
-            if [[ "$base" == "beta" ]]; then
-              log "$repo_name#$pr is on beta — triggering auto-promotion to main"
-              promo_pr=$(gh pr list --base main --head beta --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)
-              if [[ -z "$promo_pr" ]]; then
-                # `gh pr create` has no --json flag — it prints the created PR's
-                # URL on stdout. Resolving the number through `gh pr view <url>`
-                # was missing before; without it a create failure or success was
-                # indistinguishable and this promotion path never actually fired
-                # (found 2026-09-21: silently swallowed by `|| true` below).
-                promo_url=$(gh pr create --base main --head beta --title "chore: promote beta to main" --body "Automated promotion after PR #${pr} cleared and merged into beta." 2>/dev/null || true)
-                if [[ -n "$promo_url" ]]; then
-                  promo_pr=$(gh pr view "$promo_url" --json number --jq .number 2>/dev/null || true)
-                fi
-              fi
-              if [[ -n "$promo_pr" ]]; then
-                gh pr merge "$promo_pr" --auto --squash 2>/dev/null || gh pr merge "$promo_pr" --squash 2>/dev/null || true
-                log "$repo_name auto-promoted beta to main (PR #${promo_pr})"
-              fi
-            fi
-          elif gh pr update-branch "$pr" >>"$LOG" 2>&1; then
-            # $base has a `strict` required-status-checks policy (verified
-            # 2026-09-14): a CLEARED, all-green PR can still be refused with
-            # "the head branch is not up to date with the base branch" — checks
-            # must have run on the EXACT current commit, not merely have passed
-            # on an older one (found live merging #671/#672/#673). update-branch
-            # pushes a merge-with-base commit, which changes headRefOid — the
-            # existing marker-comment mechanism then treats this PR as unguarded
-            # on the NEXT sweep, so it gets a real re-gate and a fresh merge
-            # attempt naturally, on a branch that is current by construction.
-            # Deliberately not polling for CI here: a synchronous wait inside a
-            # 20-minute cron tick either blocks the next tick or needs its own
-            # timeout/retry machinery, and the marker cycle already provides one
-            # for free at the cost of a single extra sweep.
-            merge_result="was behind $base — ran update-branch, next sweep re-gates and retries"
-            log "$repo_name#$pr merge deferred — updated branch against $base, will re-gate on next sweep"
-          else
-            merge_result="FAILED — see log ($LOG)"
-            log "$repo_name#$pr merge FAILED — see $LOG"
-          fi
-          ;;
-      esac
+      merge_cleared "$pr" "$verdict"
 
       notify "🧠 Gate done — ${repo_name}#${pr}
 ${verdict}
