@@ -51,7 +51,7 @@ export interface BriefLine {
 
 const BACKTICK_FENCE = /^ {0,3}(`{3,})([^`]*)$/;
 const TILDE_FENCE = /^ {0,3}(~{3,})/;
-const ATX_HEADING = /^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*$/;
+const ATX_HEADING = /^ {0,3}(#{1,6})[ \t]+(.*)$/;
 
 /** Splits a body into lines, removing HTML comments and marking fenced code. */
 export function scanLines(body: string): BriefLine[] {
@@ -101,13 +101,21 @@ interface Heading {
 
 function headingOf(text: string): Heading | null {
   const match = ATX_HEADING.exec(text);
-  if (!match?.[1] || !match[2]) return null;
-  const title = match[2].replace(/[ \t]+#+[ \t]*$/, "").trim();
+  if (!match?.[1]) return null;
+  let title = (match[2] ?? "").trim();
+  // A closing run of #s counts only when a space precedes it: `## Goal ##` yes, `## C#` no.
+  // Scanned by hand, not with a lazy regex: those backtrack quadratically on a long run of spaces.
+  let end = title.length;
+  while (end > 0 && title.charAt(end - 1) === "#") end--;
+  if (end < title.length && end > 0 && /\s/.test(title.charAt(end - 1))) title = title.slice(0, end).trimEnd();
   return title === "" ? null : { level: match[1].length, title };
 }
 
 function normalizeTitle(title: string): string {
-  return title.toLowerCase().replace(/\s+/g, " ").replace(/[:\s]+$/, "").trim();
+  const collapsed = title.toLowerCase().replace(/\s+/g, " ");
+  let end = collapsed.length;
+  while (end > 0 && (collapsed.charAt(end - 1) === ":" || collapsed.charAt(end - 1) === " ")) end--;
+  return collapsed.slice(0, end).trim();
 }
 
 // ── Template sections ─────────────────────────────────────────────────────────
@@ -159,6 +167,13 @@ const HAS_EXTENSION = /\.[A-Za-z][A-Za-z0-9]{0,7}$/;
 const LEADING_EDGE = /^[([{"']+/;
 const TRAILING_EDGE = /[)\]}"'.,;:!?]+$/;
 
+/**
+ * Longest token treated as a path. A real repo path is far shorter; anything longer is degenerate
+ * text, and bounding it keeps the regexes below linear (a 65,000-character "token" of colons or
+ * dots would otherwise cost seconds of event-loop time).
+ */
+const MAX_PATH_TOKEN_CHARS = 400;
+
 function stripEdges(token: string): string {
   return token.replace(LEADING_EDGE, "").replace(TRAILING_EDGE, "");
 }
@@ -171,6 +186,7 @@ function stripEdges(token: string): string {
  * tokens are already deliberate, so they only have to sit under one of the four roots.
  */
 function toRepoPath(raw: string, scope: boolean): string | null {
+  if (raw.length > MAX_PATH_TOKEN_CHARS) return null;
   let token = raw.trim();
   const emphasis = /^(\*{1,3})([^*]+)\1$/.exec(token);
   if (emphasis?.[2]) token = emphasis[2];
@@ -200,8 +216,8 @@ function toRepoPath(raw: string, scope: boolean): string | null {
 /** Tokens of a scope-section line. Placeholders become a marker no path can contain. */
 function scopeTokens(text: string): string[] {
   return text
-    .replace(/\[([^\]]*)\]\(([^)\s]*)\)/g, " $1 $2 ")
-    .replace(/<[^<>]*>/g, "￿")
+    .replace(/\[([^\]]{0,200})\]\(([^)\s]{0,300})\)/g, " $1 $2 ")
+    .replace(/<[^<>]*>/g, "\uFFFF")
     .replace(/`/g, " ")
     .split(/[\s,;]+/)
     .filter((token) => token !== "");

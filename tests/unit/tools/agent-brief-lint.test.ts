@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import {
   AGENT_BRIEF_HEADINGS,
   BRIEF_PATH_CHECK_CONCURRENCY,
+  MAX_BRIEF_CHARS,
   MAX_BRIEF_PATH_CHECKS,
   formatBriefRejection,
   lintAgentBrief,
@@ -100,6 +101,7 @@ describe("issue #762, verbatim", () => {
       missingHeadings: [],
       emptyHeadings: [],
       missingPaths: [],
+      otherProblems: [],
       warnings: [],
     });
     // The file the task will create is under "### New files to create": never looked up.
@@ -505,6 +507,53 @@ describe("GitHub or the network being down never blocks a dispatch", () => {
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("(+15 more)");
     expect(result.warnings[0]?.length).toBeLessThan(400);
+  });
+});
+
+describe("size: a body GitHub would refuse, and text that must not stall the bot", () => {
+  it("refuses a body over GitHub's 65,536-character limit up front, with the size, and looks nothing up", async () => {
+    // Filed anyway it fails with a 422 at issues.create, AFTER the founder approved the card.
+    const exists = existing();
+    const body = brief({ Goal: "x".repeat(MAX_BRIEF_CHARS) });
+    const result = await lintAgentBrief(body, exists);
+
+    expect(MAX_BRIEF_CHARS).toBe(65_536);
+    expect(result.ok).toBe(false);
+    expect(result.otherProblems).toHaveLength(1);
+    expect(result.otherProblems[0]).toContain(`${body.length.toLocaleString("en-US")} characters`);
+    expect(result.otherProblems[0]).toContain("65,536");
+    expect(result.missing).toEqual([...result.otherProblems]);
+    expect(exists.asked).toEqual([]);
+    expect(formatBriefRejection(result, { target: "o/r" })).toContain("1. The brief is");
+  });
+
+  it("accepts a body of exactly the limit", async () => {
+    const padded = brief();
+    const body = padded + "y".repeat(MAX_BRIEF_CHARS - padded.length);
+
+    expect(body.length).toBe(MAX_BRIEF_CHARS);
+    expect((await lintAgentBrief(body, existing())).ok).toBe(true);
+  });
+
+  // Each of these is a few dozen characters short of the limit and took 1.5 to 7 seconds of
+  // event-loop time when a regex backtracked quadratically. The bot is single-threaded: that is
+  // the whole Telegram gateway frozen, so each is held to a second (they run in milliseconds).
+  const filled = (scope: string, tail = ""): string => brief({ [SCOPE]: scope }, tail);
+  it.each([
+    ["an open bracket, 65,000 times, in the scope section", filled("[".repeat(65_000))],
+    ["one 60,000-character token of ':1' pairs ending in x", filled(":1".repeat(30_000) + "x")],
+    ["a heading made of 60,000 colons and an x", filled("src/a.ts", `\n## ${":".repeat(60_000)}x\n`)],
+    ["a heading with 60,000 spaces between two words", filled("src/a.ts", `\n## a${" ".repeat(60_000)}b\n`)],
+    ["a 60,000-character run of dots ending in x, in the scope section", filled(".".repeat(60_000) + "x")],
+    ["'[a](' 15,000 times", filled("[a](".repeat(15_000))],
+    ["65,000 backticks", filled("`".repeat(65_000))],
+    ["65,000 angle brackets", filled("<".repeat(65_000))],
+  ])("stays linear on %s", async (_label, body) => {
+    expect(body.length).toBeLessThan(MAX_BRIEF_CHARS);
+    const started = Date.now();
+    await lintAgentBrief(body, () => true);
+
+    expect(Date.now() - started).toBeLessThan(1000);
   });
 });
 

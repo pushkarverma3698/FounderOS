@@ -14,7 +14,7 @@ const mockWriteAuditEntry = vi.fn();
 const mockDispatchExecute = vi.fn();
 const mockLint = vi.fn();
 
-const LINT_OK = { ok: true, missing: [], missingHeadings: [], emptyHeadings: [], missingPaths: [], warnings: [] };
+const LINT_OK = { ok: true, missing: [], missingHeadings: [], emptyHeadings: [], missingPaths: [], otherProblems: [], warnings: [] };
 
 vi.mock("../../../src/agents/agent-tools/hitl.js", async (orig) => {
   const actual = await (orig() as Promise<Record<string, unknown>>);
@@ -223,6 +223,7 @@ describe("dispatchAntigravityTask agent tool: the brief lint runs before the app
       missingHeadings: ["Evidence"],
       emptyHeadings: [],
       missingPaths: ["src/agents/supervisor.ts"],
+      otherProblems: [],
       warnings: [],
     });
 

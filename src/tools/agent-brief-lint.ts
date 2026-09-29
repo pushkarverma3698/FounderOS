@@ -44,6 +44,13 @@ export {
   type AgentBriefHeading,
 } from "./agent-brief-parse.js";
 
+/**
+ * The longest issue body GitHub accepts. Longer fails with a 422 at issues.create, after the
+ * founder has already approved the card, so it is refused up front. It also bounds the work the
+ * lint does on model-written text.
+ */
+export const MAX_BRIEF_CHARS = 65_536;
+
 /** Most existence lookups one lint run may make, so a big brief cannot burn the GitHub rate limit. */
 export const MAX_BRIEF_PATH_CHECKS = 30;
 
@@ -72,6 +79,8 @@ export interface BriefLintResult {
   readonly emptyHeadings: readonly string[];
   /** Cited paths a lookup definitely reported as not existing, in the order they were cited. */
   readonly missingPaths: readonly string[];
+  /** Problems that are neither a section nor a path (today: a body over GitHub's size limit). */
+  readonly otherProblems: readonly string[];
   /** Things the lint could not check. They never make `ok` false. */
   readonly warnings: readonly string[];
 }
@@ -149,6 +158,12 @@ function headingSentence(heading: string, isEmpty: boolean): string {
  * round trip instead of one problem at a time.
  */
 export async function lintAgentBrief(body: string, fileExists: FileExists): Promise<BriefLintResult> {
+  if (body.length > MAX_BRIEF_CHARS) {
+    const problem =
+      `The brief is ${body.length.toLocaleString("en-US")} characters; GitHub rejects an issue body over ` +
+      `${MAX_BRIEF_CHARS.toLocaleString("en-US")}. Shorten it: keep what an executor with no context needs.`;
+    return { ok: false, missing: [problem], missingHeadings: [], emptyHeadings: [], missingPaths: [], otherProblems: [problem], warnings: [] };
+  }
   const lines = scanLines(body);
   const headings = checkHeadings(lines);
   const paths = await probePaths(collectPaths(lines), fileExists);
@@ -163,6 +178,7 @@ export async function lintAgentBrief(body: string, fileExists: FileExists): Prom
     missingHeadings: headings.missing,
     emptyHeadings: headings.empty,
     missingPaths: paths.missingPaths,
+    otherProblems: [],
     warnings: paths.warnings,
   };
 }
@@ -185,6 +201,7 @@ export function formatBriefRejection(result: BriefLintResult, opts: BriefRejecti
       return hint ? `${sentence} ${hint}` : sentence;
     }),
     ...result.missingPaths.map((path) => `\`${path}\` does not exist in ${opts.target}.`),
+    ...result.otherProblems,
   ];
 
   const lines = [

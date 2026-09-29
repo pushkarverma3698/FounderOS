@@ -375,6 +375,15 @@ describe("dispatchAntigravityTool.execute — the brief lint", () => {
     });
   });
 
+  it("files NOTHING for a brief over GitHub's size limit, and says so before any approval is spent", async () => {
+    const res = await dispatchAntigravityTool.execute({ ...COMPLETE, expected: "requirement ".repeat(7000) });
+
+    expect(res.success).toBe(false);
+    expect(mockIssuesCreate).not.toHaveBeenCalled();
+    expect(res.error).toContain("1. The brief is");
+    expect(res.error).toContain("65,536");
+  });
+
   it("accepts a file the task will create when it is passed as new_files", async () => {
     mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
 
