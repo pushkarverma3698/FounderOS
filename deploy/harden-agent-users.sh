@@ -108,11 +108,12 @@ expect_empty() {
 # Octal mode, GNU stat first and BSD stat second.
 mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null; }
 
-# The env-style files an agent could read secrets from: *.env and .env* under its home, three
-# levels deep, skipping caches and package stores (which hold token-shaped test strings).
+# The env-style files an agent could read secrets from under its home, three levels deep: *.env (find's
+# glob matches a file named just `.env` too) and .env.*, skipping caches and package stores (which hold
+# token-shaped test strings).
 agent_env_files() {
   find "$1" -maxdepth 3 \( -path '*/.cache' -o -path '*/.npm' -o -path '*/.local' -o -path '*/node_modules' \) -prune \
-       -o -type f \( -name '*.env' -o -name '.env' -o -name '.env.*' \) -print 2>/dev/null
+       -o -type f \( -name '*.env' -o -name '.env.*' \) -print 2>/dev/null
 }
 
 # Env files in the review checkouts that others can read. A checkout is a few directories deep at
@@ -288,9 +289,18 @@ install_sudoers() {
     rm -f "$tmp"
     return 1
   fi
-  install -m 0440 -o "$SUDOERS_OWNER" -g "$SUDOERS_GROUP" "$tmp" "$SUDOERS_DIR/claude-agent"
-  rm -f "$tmp"
-  echo "  installed $SUDOERS_DIR/claude-agent"
+  # Written under a name sudo ignores (it skips files with a '.' in the name), then renamed into
+  # place: sudo never reads a half-written file, and a parse error in any sudoers file breaks sudo
+  # for everyone.
+  if install -m 0440 -o "$SUDOERS_OWNER" -g "$SUDOERS_GROUP" "$tmp" "$SUDOERS_DIR/claude-agent.new" \
+     && mv -f "$SUDOERS_DIR/claude-agent.new" "$SUDOERS_DIR/claude-agent"; then
+    rm -f "$tmp"
+    echo "  installed $SUDOERS_DIR/claude-agent"
+  else
+    rm -f "$tmp" "$SUDOERS_DIR/claude-agent.new"
+    echo "could not install $SUDOERS_DIR/claude-agent" >&2
+    return 1
+  fi
 }
 
 # Created as the orchestrator, not root: the tree is the orchestrator's.

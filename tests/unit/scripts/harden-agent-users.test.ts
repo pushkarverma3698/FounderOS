@@ -26,6 +26,7 @@ import {
   chmodSync,
   statSync,
   appendFileSync,
+  readdirSync,
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
@@ -351,6 +352,10 @@ describe("harden-agent-users --check", () => {
     );
     // A role that merely starts with the brain role's name is another role.
     writeFileSync(join(homes, "antigravity", ".config", "role.env"), "DATABASE_URL=postgres://brain_agent_admin:pw2@127.0.0.1/founderos\n");
+    // Env files are found by name: `.env.production` and a bare `.env` count as much as `*.env`.
+    mkdirSync(join(homes, "antigravity", "work"), { recursive: true });
+    writeFileSync(join(homes, "antigravity", "work", ".env.production"), "STRIPE_SECRET_KEY=value-of-stripe\n");
+    writeFileSync(join(homes, "antigravity", "work", ".env"), "OPENAI_API_KEY=value-of-openai\n");
 
     const r = run(["--check"]);
 
@@ -359,6 +364,8 @@ describe("harden-agent-users --check", () => {
     expect(r.stdout).toMatch(/role\.env \(DATABASE_URL for a role other than brain_agent\)/);
     const holds = r.stdout.split("\n").find((l) => l.includes("app.env (holds a secret variable:")) ?? "";
     for (const v of secretVars) expect(holds).toMatch(new RegExp(`[ :]${v}( |\\))`));
+    expect(r.stdout).toMatch(/work\/\.env\.production \(holds a secret variable: STRIPE_SECRET_KEY /);
+    expect(r.stdout).toMatch(/work\/\.env \(holds a secret variable: OPENAI_API_KEY /);
     expect(r.stdout).not.toContain("super-secret-pw");
     expect(r.stdout).not.toContain("pw2");
     expect(r.stdout).not.toContain("value-of-");
@@ -672,6 +679,26 @@ describe("harden-agent-users --apply", () => {
       .filter((l) => l.trim() !== "" && !l.startsWith("#"));
     expect(rules).toEqual([RULE]);
     expect(mode(file)).toBe(0o440);
+    // Installed via a name sudo ignores and renamed into place, so nothing half-written or stray is left.
+    expect(readdirSync(sudoersDir)).toEqual(["claude-agent"]);
+  });
+
+  it("says so, and leaves no stray file, when it cannot install the sudoers rule", () => {
+    seedBefore();
+    chmodSync(sudoersDir, 0o555);
+    try {
+      const r = run(["--apply"]);
+
+      if (process.getuid?.() !== 0) {
+        // (root ignores directory modes, so the failure cannot be provoked from a root test run)
+        expect(r.stderr).toMatch(/could not install .*claude-agent/);
+        expect(r.stdout).not.toMatch(/installed .*claude-agent/);
+        expect(r.status).toBe(1);
+        expect(readdirSync(sudoersDir)).toEqual([]);
+      }
+    } finally {
+      chmodSync(sudoersDir, 0o755);
+    }
   });
 
   it("is idempotent: a second run changes nothing", () => {
