@@ -108,6 +108,13 @@ agent_env_files() {
        -o -type f \( -name '*.env' -o -name '.env' -o -name '.env.*' \) -print 2>/dev/null
 }
 
+# Env files in the review checkouts that others can read. A checkout is a few directories deep at
+# most (packages/api/.env); node_modules holds test fixtures, not secrets.
+world_readable_review_env() {
+  find "$REVIEW_DIR" -maxdepth 4 -name node_modules -prune \
+       -o -type f \( -name .env -o -name .env.local -o -name .env.production -o -name .env.staging \) -perm -o+r -print 2>/dev/null
+}
+
 # ------------------------------------------------------------------------- probes (names only)
 
 # The NAMES of GitHub-token variables a login shell of USER would export (never their values).
@@ -198,8 +205,7 @@ check_sudoers() {
 
 check_secrets() {
   printf '[secrets on disk]\n'
-  expect_empty "no world-readable .env under $REVIEW_DIR" \
-    find "$REVIEW_DIR" -maxdepth 2 -type f \( -name .env -o -name .env.local -o -name .env.production -o -name .env.staging \) -perm -o+r
+  expect_empty "no world-readable .env under $REVIEW_DIR" world_readable_review_env
   if [[ -d "$DATA_DIR" && "$(mode_of "$DATA_DIR")" =~ [0-7][0-7][1-7]$ ]]; then
     bad "$DATA_DIR is open to others (mode $(mode_of "$DATA_DIR"))"
   else
@@ -227,7 +233,7 @@ strip_github_access() {
   # Each may be absent, which is fine: exit 5 / 128 from git config is not a failure here.
   as "$u" git config --global --remove-section 'credential.https://github.com' 2>/dev/null
   as "$u" git config --global --remove-section 'credential.https://gist.github.com' 2>/dev/null
-  as "$u" git config --global --unset-all credential.helper 2>/dev/null
+  as "$u" git config --global --remove-section credential 2>/dev/null
   as "$u" git config --global --unset-all "url.${PUSH_BASE}.pushInsteadOf" 2>/dev/null
   for from in "${PUSH_FROM[@]}"; do
     as "$u" git config --global --add "url.${PUSH_BASE}.pushInsteadOf" "$from"
@@ -253,7 +259,7 @@ tighten_secrets() {
   if [[ -d "$DATA_DIR" ]]; then chmod o-rwx "$DATA_DIR" && echo "  closed $DATA_DIR to others"; fi
   while IFS= read -r f; do
     chmod o-rwx "$f" && echo "  closed $f to others"
-  done < <(find "$REVIEW_DIR" -maxdepth 2 -type f \( -name .env -o -name .env.local -o -name .env.production -o -name .env.staging \) -perm -o+r 2>/dev/null)
+  done < <(world_readable_review_env)
 }
 
 # Refuses (returns 1) rather than exiting: the rest of --apply has already run, and --check must

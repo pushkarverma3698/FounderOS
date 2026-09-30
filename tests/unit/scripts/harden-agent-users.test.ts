@@ -28,7 +28,7 @@ import {
   appendFileSync,
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT = process.env["HARDEN_SCRIPT_UNDER_TEST"] ?? fileURLToPath(new URL("../../../deploy/harden-agent-users.sh", import.meta.url));
@@ -208,6 +208,7 @@ describe("harden-agent-users --check", () => {
     expect(r.stdout).toMatch(/✗ git push to https:\/\/github\.com\/… would reach GitHub/);
     expect(r.stdout).toMatch(/✗ no Telegram bot token in its env files — found:\n\s+.*founderos-hub\.env/);
     expect(r.stdout).not.toContain("fake-bot-token-value");
+    expect(r.stdout).toMatch(/✗ cannot read .*founderos-data/);
     expect(r.stdout).toMatch(/✗ .*founderos-data is open to others/);
     expect(r.stdout).toMatch(/✗ no world-readable \.env under/);
     expect(r.stdout).toMatch(/✗ .*claude-agent is missing/);
@@ -228,15 +229,36 @@ describe("harden-agent-users --check", () => {
     expect(calls()).toEqual([]);
   });
 
-  it("flags a GitHub token exported in a login profile, by name and never by value", () => {
+  it("flags every GitHub token variable exported in a login profile, by name and never by value", () => {
     hardenedAndClean();
-    writeFileSync(join(homes, "antigravity", ".profile"), "export GH_TOKEN=sekrit-value-123\n");
+    const names = ["GH_TOKEN", "GITHUB_TOKEN", "GITHUB_PAT", "GH_ENTERPRISE_TOKEN"];
+    writeFileSync(join(homes, "antigravity", ".profile"), names.map((n) => `export ${n}=sekrit-value-of-${n}\n`).join(""));
 
     const r = run(["--check"]);
 
     expect(r.status).toBe(1);
-    expect(r.stdout).toMatch(/✗ no GitHub token in the login environment — found:\n\s+GH_TOKEN/);
-    expect(r.stdout).not.toContain("sekrit-value-123");
+    expect(r.stdout).toMatch(/✗ no GitHub token in the login environment — found:\n/);
+    for (const n of names) {
+      expect(r.stdout).toMatch(new RegExp(`^ {6}${n}$`, "m"));
+      expect(r.stdout).not.toContain(`sekrit-value-of-${n}`);
+    }
+  });
+
+  it("flags every place a GitHub credential can be stored, by file name", () => {
+    hardenedAndClean();
+    const h = join(homes, "antigravity");
+    mkdirSync(join(h, ".config", "gh"), { recursive: true });
+    mkdirSync(join(h, ".config", "git"), { recursive: true });
+    writeFileSync(join(h, ".config", "gh", "hosts.yml"), "github.com:\n  oauth_token: not-real\n");
+    writeFileSync(join(h, ".git-credentials"), "https://x:not-real@github.com\n");
+    writeFileSync(join(h, ".config", "git", "credentials"), "https://x:not-real@github.com\n");
+    writeFileSync(join(h, ".netrc"), "machine github.com login x password not-real\n");
+
+    const r = run(["--check"]);
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain("✗ stored credentials on disk: .config/gh/hosts.yml .git-credentials .config/git/credentials .netrc");
+    expect(r.stdout).not.toContain("not-real");
   });
 
   it("flags a credential helper configured system-wide, not only in the user's own gitconfig", () => {
@@ -250,15 +272,31 @@ describe("harden-agent-users --check", () => {
     expect(r.stdout).toMatch(/✗ no git credential helper configured — found:[\s\S]*?credential\.helper store/);
   });
 
-  it("flags a claude-agent that can sudo or sits in a privileged group", () => {
+  it("flags a claude-agent that can sudo or sits in any privileged group", () => {
     hardenedAndClean();
     writeFileSync(sudoListFile, "User claude-agent may run the following commands on this-host:\n    (ALL) NOPASSWD: ALL\n");
+    const groups = ["sudo", "admin", "wheel", "docker", "adm", "root", "lxd", "disk", "shadow", "founderos"];
 
-    const r = run(["--check"], { FAKE_CA_GROUPS: "claude-agent docker" });
+    const r = run(["--check"], { FAKE_CA_GROUPS: ["claude-agent", ...groups].join(" ") });
 
     expect(r.status).toBe(1);
     expect(r.stdout).toMatch(/✗ sudo -l says it may run nothing/);
-    expect(r.stdout).toMatch(/✗ member of privileged group\(s\): docker/);
+    const line = r.stdout.split("\n").find((l) => l.includes("member of privileged group(s)")) ?? "";
+    expect(line).toMatch(/^ {2}✗ /);
+    for (const g of groups) expect(line).toMatch(new RegExp(`[ :]${g}( |$)`));
+    expect(line).not.toContain("claude-agent");
+  });
+
+  it("flags a claude-agent whose password is not locked or whose home is open to others", () => {
+    hardenedAndClean();
+    rmSync(join(stateDir, "locked-claude-agent"));
+    chmodSync(join(homes, "claude-agent"), 0o755);
+
+    const r = run(["--check"]);
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/✗ password is not locked/);
+    expect(r.stdout).toMatch(/✗ home is not 0700 \(is 755\)/);
   });
 
   it("flags a prod .env that the agents could read", () => {
@@ -286,20 +324,57 @@ describe("harden-agent-users --check", () => {
     expect(r.stdout).toMatch(/✗ contains other rules/);
   });
 
-  it("flags a database URL for any role but the brain role, and another secret variable, by name only", () => {
+  it("flags a database URL for any role but the brain role, and every kind of secret variable, by name only", () => {
     hardenedAndClean();
+    const secretVars = [
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "GOOGLE_GENERATIVE_AI_API_KEY",
+      "AWS_SECRET_ACCESS_KEY",
+      "RAZORPAY_KEY_SECRET",
+      "STRIPE_SECRET_KEY",
+      "GH_TOKEN",
+      "GITHUB_TOKEN",
+    ];
     writeFileSync(
       join(homes, "antigravity", ".config", "app.env"),
-      "DATABASE_URL=postgres://founderos:super-secret-pw@127.0.0.1/founderos\nANTHROPIC_API_KEY=sk-ant-not-real\n",
+      ["DATABASE_URL=postgres://founderos:super-secret-pw@127.0.0.1/founderos", ...secretVars.map((v) => `${v}=value-of-${v}`), ""].join("\n"),
     );
+    // A role that merely starts with the brain role's name is another role.
+    writeFileSync(join(homes, "antigravity", ".config", "role.env"), "DATABASE_URL=postgres://brain_agent_admin:pw2@127.0.0.1/founderos\n");
 
     const r = run(["--check"]);
 
     expect(r.status).toBe(1);
-    expect(r.stdout).toMatch(/✗ no other secret or database role in its env files — found:\n\s+.*app\.env \(DATABASE_URL for a role other than brain_agent\)/);
-    expect(r.stdout).toMatch(/app\.env \(holds a secret variable: ANTHROPIC_API_KEY/);
+    expect(r.stdout).toMatch(/✗ no other secret or database role in its env files — found:\n[\s\S]*?app\.env \(DATABASE_URL for a role other than brain_agent\)/);
+    expect(r.stdout).toMatch(/role\.env \(DATABASE_URL for a role other than brain_agent\)/);
+    const holds = r.stdout.split("\n").find((l) => l.includes("app.env (holds a secret variable:")) ?? "";
+    for (const v of secretVars) expect(holds).toMatch(new RegExp(`[ :]${v}( |\\))`));
     expect(r.stdout).not.toContain("super-secret-pw");
-    expect(r.stdout).not.toContain("sk-ant-not-real");
+    expect(r.stdout).not.toContain("pw2");
+    expect(r.stdout).not.toContain("value-of-");
+  });
+
+  it("passes on a home that holds only harmless files: public keys, an ssh config, caches, empty secret values", () => {
+    hardenedAndClean();
+    const h = join(homes, "antigravity");
+    mkdirSync(join(h, ".ssh"), { recursive: true });
+    for (const f of ["known_hosts", "known_hosts.old", "id_ed25519.pub", "authorized_keys", "config"]) writeFileSync(join(h, ".ssh", f), "x\n");
+    // Caches and package stores carry token-shaped fixtures; they are not where an agent keeps a secret.
+    for (const d of [".cache/pkg", ".npm/_cacache", ".local/share", "node_modules/pkg"]) {
+      mkdirSync(join(h, d), { recursive: true });
+      writeFileSync(
+        join(h, d, "fixture.env"),
+        "TELEGRAM_BOT_TOKEN=123456:not-a-real-token\nANTHROPIC_API_KEY=sk-not-real\nDATABASE_URL=postgres://founderos:pw@127.0.0.1/x\n",
+      );
+    }
+    // A variable that is named but empty holds no secret.
+    writeFileSync(join(h, ".config", "empty.env"), "ANTHROPIC_API_KEY=\nGH_TOKEN=\n");
+
+    const r = run(["--check"]);
+
+    expect(r.stdout).toMatch(/ALL CHECKS PASSED/);
+    expect(r.status).toBe(0);
   });
 
   it("flags an SSH key however it is named", () => {
@@ -326,6 +401,46 @@ describe("harden-agent-users --check", () => {
     const shown = r.stdout.match(/^ {6}\S*\.ssh\/key\d\d$/gm) ?? [];
     expect(shown).toHaveLength(10);
     expect(r.stdout).toMatch(/^ {6}… and 2 more$/m);
+  });
+
+  it("flags a sudoers file with the wrong rule, a loose mode, or that visudo rejects", () => {
+    hardenedAndClean();
+    const file = join(sudoersDir, "claude-agent");
+    chmodSync(file, 0o640);
+    writeFileSync(file, "founderos ALL=(claude-agent) NOPASSWD: /usr/bin/bash\n");
+    chmodSync(file, 0o644);
+
+    const r = run(["--check"], { FAKE_VISUDO_FAIL: "1" });
+
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/✗ does not contain the expected rule/);
+    expect(r.stdout).toMatch(/✗ mode is 644, not 0440/);
+    expect(r.stdout).toMatch(/✗ passes visudo -c/);
+    expect(r.stdout).toMatch(/✓ contains no other rule/);
+  });
+
+  it("treats any access for others on the CV directory as open, and 0750 as closed", () => {
+    hardenedAndClean();
+
+    chmodSync(dataDir, 0o751);
+    expect(run(["--check"]).stdout).toMatch(/✗ .*founderos-data is open to others \(mode 751\)/);
+    chmodSync(dataDir, 0o701);
+    expect(run(["--check"]).stdout).toMatch(/✗ .*founderos-data is open to others \(mode 701\)/);
+    chmodSync(dataDir, 0o750);
+    expect(run(["--check"]).status).toBe(0);
+  });
+
+  it("prints its header for --help without needing root, and changes nothing", () => {
+    seedBefore();
+
+    const r = run(["--help"], {}, false);
+
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/^harden-agent-users — take GitHub write access, sudo and prod secrets away/m);
+    expect(r.stdout).toMatch(/--apply/);
+    expect(r.stdout).not.toMatch(/^usage:/m);
+    expect(existsSync(join(homes, "antigravity", ".config", "gh", "hosts.yml"))).toBe(true);
+    expect(calls()).toEqual([]);
   });
 
   it("rejects an unknown argument, and needs root unless told it is being tested", () => {
@@ -384,7 +499,60 @@ describe("harden-agent-users --apply", () => {
     const r = run(["--apply"]);
 
     expect(readFileSync(other, "utf8")).toBe(body);
+    expect(r.stdout).not.toMatch(/replaced with a placeholder in .*app\.env/);
     expect(r.status).toBe(1);
+  });
+
+  it("removes every stored GitHub credential, and an unscoped git credential section too", () => {
+    seedBefore();
+    const h = join(homes, "antigravity");
+    mkdirSync(join(h, ".config", "git"), { recursive: true });
+    writeFileSync(join(h, ".git-credentials"), "https://x:not-real@github.com\n");
+    writeFileSync(join(h, ".config", "git", "credentials"), "https://x:not-real@github.com\n");
+    writeFileSync(join(h, ".netrc"), "machine github.com login x password not-real\n");
+    appendFileSync(join(h, ".gitconfig"), "[credential]\n\thelper = store\n\tuseHttpPath = true\n");
+
+    const r = run(["--apply"]);
+
+    for (const f of [".git-credentials", ".netrc", ".config/git/credentials", ".config/gh/hosts.yml"]) {
+      expect(existsSync(join(h, f))).toBe(false);
+    }
+    expect(gitconfig("antigravity")).not.toMatch(/credential/);
+    expect(r.stdout).toMatch(/ALL CHECKS PASSED/);
+    expect(r.status).toBe(0);
+  });
+
+  it("closes every .env variant in a review checkout, however deep, and leaves other files alone", () => {
+    seedBefore();
+    const closed = [
+      join(reviewDir, "oplify-messaging-app", ".env.local"),
+      join(reviewDir, "oplify-messaging-app", ".env.production"),
+      join(reviewDir, "oplify-messaging-app", ".env.staging"),
+      join(reviewDir, "oplify-messaging-api", "packages", "api", ".env"),
+    ];
+    const untouched = [
+      join(reviewDir, "oplify-messaging-api", ".env.example"),
+      join(reviewDir, "oplify-messaging-api", "node_modules", "pkg", ".env"),
+    ];
+    for (const f of [...closed, ...untouched]) {
+      mkdirSync(dirname(f), { recursive: true });
+      writeFileSync(f, "K=v\n");
+      chmodSync(f, 0o664);
+    }
+
+    const before = run(["--check"]);
+    run(["--apply"]);
+
+    for (const f of closed) {
+      expect(before.stdout).toContain(f);
+      expect(mode(f) & 0o007).toBe(0);
+      expect(mode(f) & 0o660).toBe(0o660);
+    }
+    for (const f of untouched) {
+      expect(before.stdout).not.toContain(f);
+      expect(mode(f)).toBe(0o664);
+    }
+    expect(run(["--check"]).status).toBe(0);
   });
 
   it("closes the CV directory and the world-readable .env to others, and leaves the owner's access alone", () => {
