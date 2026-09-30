@@ -229,7 +229,10 @@ run_checks() {
 
 strip_github_access() {
   local u="$1" h="$HOMES/$1" from
-  rm -f "$h/.config/gh/hosts.yml" "$h/.git-credentials" "$h/.config/git/credentials" "$h/.netrc"
+  # As the agent, not as root: it owns this tree and could have planted a symlink in it; a root
+  # `rm` that followed one would delete a file anywhere.
+  as "$u" rm -f -- "$h/.config/gh/hosts.yml" "$h/.git-credentials" "$h/.config/git/credentials" "$h/.netrc" \
+    || echo "  $u: could not remove every credential file (--check lists what is left)" >&2
   # Each may be absent, which is fine: exit 5 / 128 from git config is not a failure here.
   as "$u" git config --global --remove-section 'credential.https://github.com' 2>/dev/null
   as "$u" git config --global --remove-section 'credential.https://gist.github.com' 2>/dev/null
@@ -241,16 +244,18 @@ strip_github_access() {
   echo "  $u: GitHub login and credentials removed, push URLs disabled"
 }
 
-# Rewrite in place (cat > keeps the inode, owner and mode; no backup copy may keep the token).
+# Rewrite in place, as the agent (see strip_github_access): `cat >` keeps the inode, owner and mode,
+# and the temp copy only ever holds the already-neutralised text, so no copy keeps the token.
 neutralise_bot_token() {
-  local u="$1" f tmp
+  local u="$1" f expr
+  expr="s#^TELEGRAM_BOT_TOKEN=.*#TELEGRAM_BOT_TOKEN=${TOKEN_PLACEHOLDER}#; s#^TELEGRAM_CHAT_ID=.*#TELEGRAM_CHAT_ID=0#"
   while IFS= read -r f; do
     grep -qE '^TELEGRAM_BOT_TOKEN=' "$f" || continue
-    tmp=$(mktemp)
-    sed -E "s#^TELEGRAM_BOT_TOKEN=.*#TELEGRAM_BOT_TOKEN=${TOKEN_PLACEHOLDER}#; s#^TELEGRAM_CHAT_ID=.*#TELEGRAM_CHAT_ID=0#" "$f" >"$tmp" \
-      && cat "$tmp" >"$f"
-    rm -f "$tmp"
-    echo "  $u: Telegram bot token replaced with a placeholder in $f"
+    if as "$u" bash -c 'tmp=$(mktemp) || exit 1; sed -E "$2" "$1" >"$tmp" && cat "$tmp" >"$1"; rc=$?; rm -f "$tmp"; exit "$rc"' _ "$f" "$expr"; then
+      echo "  $u: Telegram bot token replaced with a placeholder in $f"
+    else
+      echo "  $u: could not rewrite $f (--check below still flags it)" >&2
+    fi
   done < <(agent_env_files "$HOMES/$u")
 }
 

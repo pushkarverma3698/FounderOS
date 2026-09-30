@@ -46,6 +46,7 @@ let usersFile: string;
 let stateDir: string;
 let callsLog: string;
 let sudoListFile: string;
+let sudoLog: string;
 
 function stub(name: string, body: string): void {
   const p = join(bin, name);
@@ -71,6 +72,7 @@ function run(args: string[], extra: Record<string, string> = {}, skipRootCheck =
       FAKE_STATE: stateDir,
       FAKE_CALLS: callsLog,
       FAKE_SUDO_L: sudoListFile,
+      FAKE_SUDO_LOG: sudoLog,
       ...extra,
     },
     encoding: "utf8",
@@ -140,6 +142,7 @@ beforeEach(() => {
   stateDir = join(root, "state");
   callsLog = join(root, "calls.log");
   sudoListFile = join(root, "sudo-l.txt");
+  sudoLog = join(root, "sudo.log");
   for (const d of [bin, homes, sudoersDir, stateDir, join(root, "root-home")]) mkdirSync(d, { recursive: true });
   writeFileSync(sudoListFile, "User claude-agent is not allowed to run sudo on this-host.\n");
 
@@ -156,6 +159,7 @@ if [ "$1" = test ] && [ "$2" = -r ]; then
   m=$(stat -c %a "$3" 2>/dev/null || stat -f %Lp "$3" 2>/dev/null) || exit 1
   [ $(( 8#\${m: -1} & 4 )) -ne 0 ]; exit $?
 fi
+echo "$user $1" >>"$FAKE_SUDO_LOG"
 if [ -n "$FAKE_GIT_SYSTEM" ]; then sys="GIT_CONFIG_SYSTEM=$FAKE_GIT_SYSTEM"; else sys="GIT_CONFIG_NOSYSTEM=1"; fi
 exec env -i HOME="$FAKE_HOMES/$user" PATH="$PATH" "$sys" "$@"`,
   );
@@ -530,6 +534,41 @@ describe("harden-agent-users --apply", () => {
     expect(gitconfig("antigravity")).not.toMatch(/credential/);
     expect(r.stdout).toMatch(/ALL CHECKS PASSED/);
     expect(r.status).toBe(0);
+  });
+
+  it("touches files inside an agent's home as that agent, never as root", () => {
+    seedBefore();
+
+    run(["--apply"]);
+
+    // The agent owns its home and could have planted a symlink there; a root rm or cat that followed
+    // one would delete or overwrite a file anywhere on the box.
+    const asWho = readFileSync(sudoLog, "utf8").split("\n");
+    expect(asWho).toContain("antigravity rm");
+    expect(asWho).toContain("claude-agent rm");
+    expect(asWho).toContain("antigravity bash");
+  });
+
+  it("says so when it cannot change a file, and --check still flags what is left", () => {
+    seedBefore();
+    const gh = join(homes, "antigravity", ".config", "gh");
+    chmodSync(hubEnv(), 0o400); // its owner cannot write it now
+    chmodSync(gh, 0o555); // nor delete from this directory
+    try {
+      const r = run(["--apply"]);
+
+      if (process.getuid?.() !== 0) {
+        // (root ignores these modes, so the failure cannot be provoked from a root test run)
+        expect(r.stderr).toMatch(/could not rewrite .*founderos-hub\.env/);
+        expect(r.stderr).toMatch(/could not remove every credential file/);
+        expect(r.stdout).not.toMatch(/replaced with a placeholder in .*founderos-hub\.env/);
+        expect(r.stdout).toMatch(/✗ no Telegram bot token in its env files/);
+        expect(r.stdout).toMatch(/✗ stored credentials on disk: \.config\/gh\/hosts\.yml/);
+        expect(r.status).toBe(1);
+      }
+    } finally {
+      chmodSync(gh, 0o755);
+    }
   });
 
   it("closes every .env variant in a review checkout, however deep, and leaves other files alone", () => {
