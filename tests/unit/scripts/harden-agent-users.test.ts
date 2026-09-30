@@ -84,10 +84,12 @@ const calls = () => (existsSync(callsLog) ? readFileSync(callsLog, "utf8").split
 const gitconfig = (user: string) => readFileSync(join(homes, user, ".gitconfig"), "utf8");
 const mode = (p: string) => statSync(p).mode & 0o777;
 const hubEnv = () => join(homes, "antigravity", ".config", "founderos-hub.env");
+const dispatchOff = () => join(homes, "founderos", ".claude", "agent-dispatch.off");
 
 /** The state of the box on 2026-09-30, before hardening. */
 function seedBefore(): void {
   writeFileSync(usersFile, "founderos\nantigravity\n");
+  mkdirSync(join(homes, "founderos", ".claude"), { recursive: true }); // where the orchestrator's daemons keep their logs and kill switches
   mkdirSync(join(homes, "antigravity", ".config", "gh"), { recursive: true });
   writeFileSync(join(homes, "antigravity", ".config", "gh", "hosts.yml"), "github.com:\n    oauth_token: not-a-real-token\n");
   writeFileSync(
@@ -232,6 +234,7 @@ describe("harden-agent-users --check", () => {
     expect(mode(dataDir)).toBe(before.dataMode);
     expect(readFileSync(usersFile, "utf8")).toBe(before.users);
     expect(existsSync(join(sudoersDir, "claude-agent"))).toBe(false);
+    expect(existsSync(dispatchOff())).toBe(false);
     expect(calls()).toEqual([]);
   });
 
@@ -536,6 +539,48 @@ describe("harden-agent-users --apply", () => {
     expect(r.status).toBe(0);
   });
 
+  it("pauses agent-dispatch before it takes the builder's push access away, as the orchestrator", () => {
+    seedBefore();
+
+    const r = run(["--apply"]);
+
+    expect(existsSync(dispatchOff())).toBe(true);
+    expect(r.stdout).toMatch(/paused agent-dispatch \(.*agent-dispatch\.off\)/);
+    const asWho = readFileSync(sudoLog, "utf8").split("\n");
+    expect(asWho).toContain("founderos touch");
+    // Order matters: a build that starts after the credential is gone can never end in a PR.
+    expect(asWho.indexOf("founderos touch")).toBeLessThan(asWho.indexOf("antigravity rm"));
+  });
+
+  it("does not fail, and says so, when it cannot pause agent-dispatch", () => {
+    seedBefore();
+    rmSync(join(homes, "founderos"), { recursive: true });
+
+    const r = run(["--apply"]);
+
+    expect(r.stderr).toMatch(/could not pause agent-dispatch: .*\.claude does not exist/);
+    expect(r.stdout).toMatch(/ALL CHECKS PASSED/); // the hardening itself still went through
+    expect(r.status).toBe(0);
+  });
+
+  it("does not claim the dispatcher is paused when it could not create the kill switch", () => {
+    seedBefore();
+    const dir = join(homes, "founderos", ".claude");
+    chmodSync(dir, 0o555);
+    try {
+      const r = run(["--apply"]);
+
+      if (process.getuid?.() !== 0) {
+        // (root ignores directory modes, so the failure cannot be provoked from a root test run)
+        expect(r.stderr).toMatch(/could not create .*agent-dispatch\.off: pause agent-dispatch yourself/);
+        expect(r.stdout).not.toMatch(/paused agent-dispatch \(/);
+        expect(existsSync(dispatchOff())).toBe(false);
+      }
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+  });
+
   it("touches files inside an agent's home as that agent, never as root", () => {
     seedBefore();
 
@@ -641,6 +686,8 @@ describe("harden-agent-users --apply", () => {
     expect(gitconfig("claude-agent")).toBe(first.agent);
     expect(gitconfig("antigravity").match(/pushInsteadOf/gi)).toHaveLength(3);
     expect(calls()).toEqual(["useradd claude-agent"]);
+    expect(r.stdout).toMatch(/agent-dispatch already paused/);
+    expect(existsSync(dispatchOff())).toBe(true);
   });
 
   it("refuses to install a sudoers rule that visudo rejects, and installs nothing", () => {

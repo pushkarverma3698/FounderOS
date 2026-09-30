@@ -19,15 +19,22 @@
 # comments and merges. This makes that a fact the operating system enforces, not a prompt promise.
 #
 # --apply (root, idempotent; the important work first, and it always ends by running --check):
-#   1. creates `claude-agent`: no sudo, no supplementary groups, locked password, home 0700
-#   2. for antigravity and claude-agent: deletes the gh login, git credential helpers and stored
+#   1. pauses agent-dispatch (creates its kill switch, ~founderos/.claude/agent-dispatch.off): the old
+#      dispatcher has agy commit, push and open the PR itself, and the builder is about to lose the
+#      ability to push, so it would spend Gemini quota on builds that can never end in a PR. Delete the
+#      switch when the orchestrator pushes for the builder (plan Step 7). Until then `/task` still
+#      files issues, and nothing claims them.
+#   2. creates `claude-agent`: no sudo, no supplementary groups, locked password, home 0700
+#   3. for antigravity and claude-agent: deletes the gh login, git credential helpers and stored
 #      credentials, and rewrites every github.com push URL to an unresolvable host, so `git push`
 #      fails even inside a repository whose remote points at GitHub (fetches are untouched)
-#   3. replaces the Telegram bot token and chat id in the agents' *.env files with placeholders
+#   4. replaces the Telegram bot token and chat id in the agents' *.env files with placeholders
 #      (the brain MCP only needs them to be non-empty, verified 2026-09-30)
-#   4. removes world access from /opt/founderos-data and from `.env` files in /opt/review
-#   5. installs /etc/sudoers.d/claude-agent — the orchestrator may run the claude binary as
-#      claude-agent and nothing else — validated with visudo before it goes live
+#   5. removes world access from /opt/founderos-data and from `.env` files in /opt/review
+#   6. installs /etc/sudoers.d/claude-agent — the orchestrator may run the claude binary as
+#      claude-agent and nothing else — validated with visudo before it goes live. (`founderos` keeps
+#      its blanket passwordless sudo from /etc/sudoers.d/founderos-nopasswd: this file narrows nothing
+#      for it, it is the grant that would survive removing that one.)
 # It never deletes an SSH private key or a database URL (a key may be someone's deploy key; the
 # brain role `brain_agent` is deliberate): --check reports them and a human decides.
 #
@@ -286,9 +293,26 @@ install_sudoers() {
   echo "  installed $SUDOERS_DIR/claude-agent"
 }
 
+# Created as the orchestrator, not root: the tree is the orchestrator's.
+pause_dispatch() {
+  local dir="$HOMES/$ORCHESTRATOR/.claude" sw
+  sw="$dir/agent-dispatch.off"
+  if [[ -e "$sw" ]]; then echo "  agent-dispatch already paused ($sw)"; return 0; fi
+  if [[ ! -d "$dir" ]]; then
+    echo "  could not pause agent-dispatch: $dir does not exist (touch its kill switch yourself)" >&2
+    return 0
+  fi
+  if as "$ORCHESTRATOR" touch "$sw"; then
+    echo "  paused agent-dispatch ($sw): delete it when the orchestrator pushes for the builder"
+  else
+    echo "  could not create $sw: pause agent-dispatch yourself" >&2
+  fi
+}
+
 apply() {
   local u
   echo "Hardening the agent users…"
+  pause_dispatch
   if ! id claude-agent >/dev/null 2>&1; then
     useradd --create-home --home-dir "$HOMES/claude-agent" --shell /bin/bash \
             --comment "FounderOS Claude agent (no sudo, no GitHub)" claude-agent \
