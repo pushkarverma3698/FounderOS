@@ -112,7 +112,7 @@ function seedBefore(): void {
       "",
     ].join("\n"),
   );
-  chmodSync(hubEnv(), 0o600);
+  chmodSync(hubEnv(), 0o640); // not the mktemp default (0600): a rewrite that swaps the file for a temp copy would show
   mkdirSync(join(dataDir, "cv"), { recursive: true });
   chmodSync(dataDir, 0o755);
   mkdirSync(join(reviewDir, "oplify-messaging-api"), { recursive: true });
@@ -202,6 +202,8 @@ describe("harden-agent-users --check", () => {
 
     expect(r.status).toBe(1);
     expect(r.stdout).toMatch(/✗ account exists/);
+    // Nothing below "account exists" means anything for an account that is not there, so nothing is printed.
+    expect(r.stdout).toMatch(/\[claude-agent\]\n {2}✗ account exists\n\[claude-agent: account\]\n\[sudoers\]/);
     expect(r.stdout).toMatch(/✗ gh holds no GitHub login/);
     expect(r.stdout).toMatch(/✗ no git credential helper configured/);
     expect(r.stdout).toMatch(/✗ stored credentials on disk: \.config\/gh\/hosts\.yml/);
@@ -392,15 +394,23 @@ describe("harden-agent-users --check", () => {
 
   it("lists every finding on its own line, up to ten, and counts the rest instead of hiding them", () => {
     hardenedAndClean();
-    mkdirSync(join(homes, "antigravity", ".ssh"), { recursive: true });
-    for (let i = 1; i <= 12; i++) writeFileSync(join(homes, "antigravity", ".ssh", `key${String(i).padStart(2, "0")}`), "k\n");
+    const ssh = join(homes, "antigravity", ".ssh");
+    mkdirSync(ssh, { recursive: true });
+    const addKey = (i: number) => writeFileSync(join(ssh, `key${String(i).padStart(2, "0")}`), "k\n");
+    const shown = (out: string) => (out.match(/^ {6}\S*\.ssh\/key\d\d$/gm) ?? []).length;
 
-    const r = run(["--check"]);
+    for (let i = 1; i <= 10; i++) addKey(i);
+    let out = run(["--check"]).stdout;
+    expect(shown(out)).toBe(10);
+    expect(out).not.toMatch(/… and \d+ more/);
 
-    expect(r.status).toBe(1);
-    const shown = r.stdout.match(/^ {6}\S*\.ssh\/key\d\d$/gm) ?? [];
-    expect(shown).toHaveLength(10);
-    expect(r.stdout).toMatch(/^ {6}… and 2 more$/m);
+    addKey(11);
+    out = run(["--check"]).stdout;
+    expect(shown(out)).toBe(10);
+    expect(out).toMatch(/^ {6}… and 1 more$/m);
+
+    addKey(12);
+    expect(run(["--check"]).stdout).toMatch(/^ {6}… and 2 more$/m);
   });
 
   it("flags a sudoers file with the wrong rule, a loose mode, or that visudo rejects", () => {
@@ -422,10 +432,10 @@ describe("harden-agent-users --check", () => {
   it("treats any access for others on the CV directory as open, and 0750 as closed", () => {
     hardenedAndClean();
 
-    chmodSync(dataDir, 0o751);
-    expect(run(["--check"]).stdout).toMatch(/✗ .*founderos-data is open to others \(mode 751\)/);
-    chmodSync(dataDir, 0o701);
-    expect(run(["--check"]).stdout).toMatch(/✗ .*founderos-data is open to others \(mode 701\)/);
+    for (const others of [1, 2, 3, 4, 5, 6, 7]) {
+      chmodSync(dataDir, 0o750 | others);
+      expect(run(["--check"]).stdout, `mode 075${others}`).toMatch(new RegExp(`✗ .*founderos-data is open to others \\(mode 75${others}\\)`));
+    }
     chmodSync(dataDir, 0o750);
     expect(run(["--check"]).status).toBe(0);
   });
@@ -485,7 +495,7 @@ describe("harden-agent-users --apply", () => {
     // The brain MCP's own settings survive: its DB role and scope are deliberate.
     expect(env).toContain("DATABASE_URL=postgres://brain_agent:fake-pw@127.0.0.1:5432/founderos");
     expect(env).toContain("HUB_SCOPE=brain");
-    expect(mode(hubEnv())).toBe(0o600);
+    expect(mode(hubEnv())).toBe(0o640);
     expect(r.stdout).not.toContain("fake-bot-token-value");
     expect(r.stdout).toMatch(/ALL CHECKS PASSED/);
   });
