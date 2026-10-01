@@ -26,6 +26,7 @@ import { startHealthServer } from "./infra/health.js";
 import { runProviderSmokeAtBoot } from "./infra/provider-probes.js";
 import { shouldRunProviderSmoke } from "./infra/provider-config.js";
 import { startScheduler, recoverStrandedReminders } from "./infra/scheduler.js";
+import { runGoalStandupCatchUp } from "./goals/standup-schedule.js";
 import { buildRestartMessage } from "./gateway/capability-message.js";
 import { acquireSingleInstanceLock, releaseSingleInstanceLock, waitForProcessExit } from "./infra/single-instance.js";
 import { logger } from "./infra/logger.js";
@@ -103,6 +104,8 @@ async function main(): Promise<void> {
   // Scheduled agent tasks fire via the gateway runner — injected here so the
   // infra scheduler never imports gateway (import-direction rule R1).
   startScheduler({ taskExecutor: runDueScheduledTask });
+  // node-cron does not catch up a 09:00 a restart swallowed: run the goal standup once now if it is due. Never rejects.
+  void runGoalStandupCatchUp();
 
   if (TELEGRAM_POLLING_ENABLED) {
     await sendToChat(buildRestartMessage(), "HTML").catch((err) =>

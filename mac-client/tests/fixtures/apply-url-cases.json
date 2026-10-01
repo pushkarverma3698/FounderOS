@@ -1,0 +1,168 @@
+{
+  "_about": "ONE list of (posting URL -> apply URL) cases, read by BOTH tests/unit/jobhunt/apply-url.test.ts (TypeScript getApplyUrl, the /draft link) and mac-client/tests/test_adapters.py (Python apply_url_for, the URL the Mac client opens). The two implementations are separate code; this file is what stops them drifting. Change an expectation here and both suites must agree, or one goes red. apply_url null means 'unrecognised, do not guess': each caller then falls back to the posting URL itself.",
+  "_provenance": "Posting URLs are real ones taken from agents.job_applications on production (2026-08-21 and the 2026-09-28 NL sweep), and from SmartRecruiters' public postings API for BDO (fetched 2026-09-29). The exceptions are the placeholder accounts (acme, abc-123, A1B2C3D4E5) the existing tests already use: their SHAPE is real, their ids are not.",
+  "cases": [
+    {
+      "platform": "greenhouse",
+      "name": "job-boards host gets the in-page application anchor",
+      "posting_url": "https://job-boards.greenhouse.io/zscaler/jobs/5215314007",
+      "apply_url": "https://job-boards.greenhouse.io/zscaler/jobs/5215314007#app"
+    },
+    {
+      "platform": "greenhouse",
+      "name": "EU host",
+      "posting_url": "https://job-boards.eu.greenhouse.io/workwize/jobs/4938710101",
+      "apply_url": "https://job-boards.eu.greenhouse.io/workwize/jobs/4938710101#app"
+    },
+    {
+      "platform": "greenhouse",
+      "name": "already anchored stays as it is",
+      "posting_url": "https://job-boards.greenhouse.io/acme/jobs/1#app",
+      "apply_url": "https://job-boards.greenhouse.io/acme/jobs/1#app"
+    },
+    {
+      "platform": "greenhouse",
+      "name": "custom domain fronting Greenhouse has no board token, so no guess",
+      "posting_url": "https://databricks.com/company/careers/open-positions/job?gh_jid=8629999002",
+      "apply_url": null
+    },
+    {
+      "platform": "lever",
+      "name": "appends /apply",
+      "posting_url": "https://jobs.lever.co/extremenetworks/0100b069-56f7-4aec-96b8-c34cae660a5d",
+      "apply_url": "https://jobs.lever.co/extremenetworks/0100b069-56f7-4aec-96b8-c34cae660a5d/apply"
+    },
+    {
+      "platform": "lever",
+      "name": "already the apply page, and a trailing slash",
+      "posting_url": "https://jobs.lever.co/acme/abc-123/apply",
+      "apply_url": "https://jobs.lever.co/acme/abc-123/apply"
+    },
+    {
+      "platform": "lever",
+      "name": "a trailing slash is dropped before the suffix",
+      "posting_url": "https://jobs.lever.co/acme/abc-123/",
+      "apply_url": "https://jobs.lever.co/acme/abc-123/apply"
+    },
+    {
+      "platform": "ashby",
+      "name": "appends /application",
+      "posting_url": "https://jobs.ashbyhq.com/lemonade/250f4be5-c5e0-4973-bc12-c9682d40ed8d",
+      "apply_url": "https://jobs.ashbyhq.com/lemonade/250f4be5-c5e0-4973-bc12-c9682d40ed8d/application"
+    },
+    {
+      "platform": "ashby",
+      "name": "already the application page",
+      "posting_url": "https://jobs.ashbyhq.com/altura/d73e7e22-d03f-4b4d-886a-9ec837ab4b62/application",
+      "apply_url": "https://jobs.ashbyhq.com/altura/d73e7e22-d03f-4b4d-886a-9ec837ab4b62/application"
+    },
+    {
+      "platform": "recruitee",
+      "name": "appends /c/new",
+      "posting_url": "https://ockto.recruitee.com/o/senior-site-reliability-engineer",
+      "apply_url": "https://ockto.recruitee.com/o/senior-site-reliability-engineer/c/new"
+    },
+    {
+      "platform": "recruitee",
+      "name": "white-labelled domain has no token, so no guess",
+      "posting_url": "https://werkenbijdalsem.nl/o/software-engineer",
+      "apply_url": null
+    },
+    {
+      "platform": "smartrecruiters",
+      "name": "the adapter's own posting URL is left alone",
+      "posting_url": "https://jobs.smartrecruiters.com/servicenow/744000144691979",
+      "apply_url": "https://jobs.smartrecruiters.com/servicenow/744000144691979"
+    },
+    {
+      "platform": "smartrecruiters",
+      "name": "BDO posting, adapter shape (Deloitte NL and BDO are 30 of Tashi's 64 NL rows)",
+      "posting_url": "https://jobs.smartrecruiters.com/BDO4/744000152089315",
+      "apply_url": "https://jobs.smartrecruiters.com/BDO4/744000152089315"
+    },
+    {
+      "platform": "smartrecruiters",
+      "name": "BDO posting, the slugged postingUrl SmartRecruiters publishes",
+      "posting_url": "https://jobs.smartrecruiters.com/BDO4/744000152089315-junior-consultant-transfer-pricing",
+      "apply_url": "https://jobs.smartrecruiters.com/BDO4/744000152089315-junior-consultant-transfer-pricing"
+    },
+    {
+      "platform": "workable",
+      "name": "account URL appends /apply",
+      "posting_url": "https://apply.workable.com/acme/j/A1B2C3D4E5/",
+      "apply_url": "https://apply.workable.com/acme/j/A1B2C3D4E5/apply"
+    },
+    {
+      "platform": "workable",
+      "name": "account-less short link appends /apply",
+      "posting_url": "https://apply.workable.com/j/7C893E46E3",
+      "apply_url": "https://apply.workable.com/j/7C893E46E3/apply"
+    },
+    {
+      "platform": "workable",
+      "name": "short link that is already the form",
+      "posting_url": "https://apply.workable.com/j/7C893E46E3/apply",
+      "apply_url": "https://apply.workable.com/j/7C893E46E3/apply"
+    },
+    {
+      "platform": "workday",
+      "name": "ING appends /apply",
+      "posting_url": "https://ing.wd3.myworkdayjobs.com/icsnldgen/job/ACT-Amsterdam---Acanthus/Financial-Crime-Compliance-Specialist_REQ-10119952-2",
+      "apply_url": "https://ing.wd3.myworkdayjobs.com/icsnldgen/job/ACT-Amsterdam---Acanthus/Financial-Crime-Compliance-Specialist_REQ-10119952-2/apply"
+    },
+    {
+      "platform": "workday",
+      "name": "Rabobank appends /apply",
+      "posting_url": "https://rabobank.wd3.myworkdayjobs.com/jobs/job/Utrecht-Beneluxlaan-31-33/Finance-Specialist_JR_00145620-1",
+      "apply_url": "https://rabobank.wd3.myworkdayjobs.com/jobs/job/Utrecht-Beneluxlaan-31-33/Finance-Specialist_JR_00145620-1/apply"
+    },
+    {
+      "platform": "teamtailor",
+      "name": "appends /applications/new",
+      "posting_url": "https://bearingpointnetherlands.teamtailor.com/jobs/8449394-microsoft-consultant-data-engineering",
+      "apply_url": "https://bearingpointnetherlands.teamtailor.com/jobs/8449394-microsoft-consultant-data-engineering/applications/new"
+    },
+    {
+      "platform": "bamboohr",
+      "name": "the form is on the posting page",
+      "posting_url": "https://centric.bamboohr.com/careers/137",
+      "apply_url": "https://centric.bamboohr.com/careers/137"
+    },
+    {
+      "platform": "personio",
+      "name": "the form is on the posting page",
+      "posting_url": "https://1komma5grad.jobs.personio.com/job/781758",
+      "apply_url": "https://1komma5grad.jobs.personio.com/job/781758"
+    },
+    {
+      "platform": "personio",
+      "name": "the bare marketing host is not a board",
+      "posting_url": "https://jobs.personio.com/anything",
+      "apply_url": null
+    },
+    {
+      "platform": null,
+      "name": "a company's own careers page",
+      "posting_url": "https://careers.databricks.com/jobs/123",
+      "apply_url": null
+    },
+    {
+      "platform": null,
+      "name": "empty string",
+      "posting_url": "",
+      "apply_url": null
+    },
+    {
+      "platform": null,
+      "name": "not a URL",
+      "posting_url": "not a url",
+      "apply_url": null
+    },
+    {
+      "platform": null,
+      "name": "scheme and nothing else",
+      "posting_url": "https://",
+      "apply_url": null
+    }
+  ]
+}

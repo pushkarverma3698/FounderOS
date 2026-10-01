@@ -78,7 +78,7 @@ function offsetMinutes(when: Date, timeZone: string): number {
 }
 
 /** The Y/M/D wall-clock date of an instant in a zone. */
-function wallDate(when: Date, timeZone: string): { y: number; mo: number; d: number } {
+export function wallDate(when: Date, timeZone: string): { y: number; mo: number; d: number } {
   // en-CA renders "2026-07-23" — stable, parseable.
   const [y, mo, d] = new Intl.DateTimeFormat("en-CA", {
     timeZone,

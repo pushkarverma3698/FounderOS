@@ -1,0 +1,16 @@
+<!doctype html><html><body>
+<h1>Single-page application form (the site confirms in place)</h1>
+<form>
+  <input id="first_name" placeholder="First name">
+  <input id="email" type="email" placeholder="Email">
+  <button type="submit" id="real-submit">Submit application</button>
+</form>
+<p id="status"></p>
+<script>
+  document.getElementById('real-submit').addEventListener('click', function (e) {
+    e.preventDefault();
+    window.__SUBMITTED__ = true;
+    document.getElementById('status').textContent = 'Thank you, application received';
+  });
+</script>
+</body></html>

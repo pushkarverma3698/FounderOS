@@ -10,7 +10,9 @@
  *
  * Consequence: editing a value here does NOT change a tenant that already has
  * that key. The founder changes stored context by telling the bot
- * (update_context). This file only bootstraps an empty or new row.
+ * (update_context) or with /focus and /projects. This file only bootstraps an
+ * empty or new row, and dates what it writes (context_meta) so a value the seed
+ * wrote never reads as one the founder confirmed.
  *
  * Run: node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts
  */
@@ -24,17 +26,6 @@ const context = {
   founder: "Pushkar Verma",
   companies: "Turicks (The Autonomous Studio) + Naggar Retreat (Himalayan farm homestay)",
   location: "Amsterdam, Netherlands (global remote delivery)",
-
-  // ── Active work (Phase D-Bis — Proof & Distribution) ───────────────────────
-  current_focus:
-    "Phase D-Bis: 3 proof showcases on proof.turicks.com + LinkedIn build-in-public + Proof Drops to AI/dev-tool startups",
-
-  active_projects: [
-    "FounderOS — deterministic agent kernel (v3) running Turicks operations over Telegram — LIVE on Hetzner VPS",
-    "Cinematic Launch Experience — $8K+ DFY web design via cinematic-web presets + deploy_static_site pipeline",
-    "Turicks proof gallery — showcase-1 (AgentOps) + 2 more showcases targeting Awwwards/Godly quality bar",
-    "Naggar Retreat — Himalayan farm homestay in Himachal Pradesh (separate brand boundary)",
-  ],
 
   // ── Tech stack ──────────────────────────────────────────────────────────────
   // ── FounderOS architecture — SYSTEM_CONTEXT_KEYS: the code owns these, and ──
@@ -68,9 +59,6 @@ const context = {
   website_builder:
     "cinematic-web presets (bundled in assets/cinematic-presets + optional CINEMATIC_WEB_PRESETS_ROOT clone) + apply_cinematic_preset → claude_code → deploy_static_site → nginx at proof.turicks.com/showcase-1/ and /clients/{slug}/. Commands: /webbuild Client preset slug, /run web_build. HITL on build + deploy.",
 
-  proof_gallery:
-    "proof.turicks.com — 3 showcases planned (AgentOps fictional AI observability = showcase-1). IP fallback: http://YOUR_VPS_IP/showcase-1/",
-
   naggar_retreat:
     "Himalayan farm homestay in Naggar, Himachal Pradesh. Separate from Turicks GTM — booking/guest comms only.",
 
@@ -78,18 +66,19 @@ const context = {
   target_roles:
     "AI Engineer, Agent Engineer, LangGraph Specialist — production multi-agent systems, eval harness, HITL",
   target_salary: "€120K–€180K EUR (Amsterdam/remote EU) or equivalent",
-  portfolio_signal:
-    "FounderOS: production LangGraph multi-agent OS — github.com/pushkarverma3698/FounderOS",
 
-  // NOTE: current_priorities, next_actions, open_decisions, and recent_wins
-  // removed 2026-09-28 — they were from June and caused "What's my focus?"
-  // to answer with stale data. The bot should use update_context / read_context
-  // (admin dept) for live priorities, not compile-time seed data.
+  // NOTE: current_priorities, next_actions, open_decisions and recent_wins were
+  // removed 2026-09-28, and current_focus, active_projects, proof_gallery and
+  // portfolio_signal 2026-09-29. All eight were June values, and "What's my
+  // focus?" answered with them. What the founder is working on is HIS to say
+  // (/focus, /projects, update_context), not compile-time seed data. Do not add a
+  // key back that RETIRED_SEED_VALUES (src/db/retired-seed-values.ts) lists: the
+  // deploy would remove it again, and the seed would fill it again.
 };
 
 async function main() {
   console.log("Seeding founder context defaults (fill-only) for tenant:", TENANT);
-  const { filled, refreshed, retired } = await seedFounderContextDefaults(TENANT, context);
+  const { filled, refreshed, retired, survived, dated, metaProblems } = await seedFounderContextDefaults(TENANT, context);
   const kept = Object.keys(context).filter((key) => !filled.includes(key) && !refreshed.includes(key));
   console.log(
     filled.length > 0
@@ -98,6 +87,11 @@ async function main() {
   );
   if (refreshed.length > 0) console.log(`✅ Rewrote ${refreshed.length} system key(s) the code owns: ${refreshed.join(", ")}`);
   if (retired.length > 0) console.log(`✅ Removed ${retired.length} retired June seed value(s) nobody had changed: ${retired.join(", ")}`);
+  if (survived.length > 0) {
+    console.log(`   Kept ${survived.length} stored value(s) under keys the seed used to write (founder-confirmed, edited since, or an older seed text nobody listed): ${survived.join(", ")}`);
+  }
+  if (dated.length > 0) console.log(`✅ Dated ${dated.length} code-owned key(s) that already matched the code: ${dated.join(", ")}`);
+  for (const problem of metaProblems) console.log(`⚠️ Rebuilt the per-key dates because they were unreadable (${problem}); every founder fact reads "date unknown" until he confirms it`);
   if (kept.length > 0) {
     console.log(`   Kept the stored value (not overwritten) for ${kept.length} key(s): ${kept.join(", ")}`);
   }

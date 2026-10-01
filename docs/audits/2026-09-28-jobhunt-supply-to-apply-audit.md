@@ -223,7 +223,7 @@ A1 plus A2 is roughly one day of work and moves Tashi from ~48 hand-typed fields
 | Anyone else | dropped silently, as before |
 
 - **In a group the bot only answers when addressed:** a command, an @mention, or a reply to one of its messages. The mention is stripped before the kernel sees the text. People talking to each other never start a paid model turn.
-- **Outside your own chat, two things stay yours alone:** approving HITL cards and repo-dispatch buttons, and `/halt /resume /task /newproject /connect`. A guest in an allow-listed group can ask the bot anything it can read, but cannot make it act.
+- **Outside your own chat, two things stay yours alone:** approving HITL cards and repo-dispatch buttons, and `/halt /resume /task /newproject /connect`. Everything else is open to a guest in an allow-listed group, because the kernel does not know who is typing: every tool outside `HITL_GATED_TOOLS` runs for them, including `read_emails`, `read_file`, `search_memory` and `edit_scheduled` (which cancels or moves your scheduled posts and tasks without an approval card). Allow-list only chats whose members you would hand your phone to; the group hint says so when you open one.
 - **Owner identity:** derived from `TELEGRAM_CHAT_ID` when that is your private chat, because in a private chat Telegram makes the chat id equal to the user id. Set `TELEGRAM_OWNER_USER_ID` if `TELEGRAM_CHAT_ID` is a group.
 - Proactive alerts (sweeps, briefs) still go only to `TELEGRAM_CHAT_ID`. Routing Tashi's lane alerts to a shared group is a small follow-up if wanted.
 

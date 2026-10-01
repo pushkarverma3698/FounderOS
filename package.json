@@ -51,6 +51,7 @@
     "proof:costs": "node --env-file=.env --import tsx/esm scripts/proof-cost-ledger.ts",
     "gap:scan": "node --env-file=.env --import tsx/esm scripts/gap-scan.ts",
     "mcp:probe": "node --env-file=.env --import tsx/esm scripts/mcp-bridge-probe.ts",
+    "goals:standup": "node --env-file=.env --import tsx/esm scripts/goals-standup.ts",
     "rag:probe": "node --env-file=.env --import tsx/esm scripts/probe-rag.ts",
     "mcp": "LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/index.ts",
     "mcp:brain": "LOG_STDERR=1 node --env-file=.env --import tsx/esm src/mcp/turicks-brain.ts",
@@ -61,6 +62,8 @@
     "pr:create": "node --env-file=.env --import tsx/esm scripts/create-phase-pr.ts",
     "pr:review": "node --env-file=.env --import tsx/esm scripts/claude-review-pr.ts",
     "verify:branch": "bash scripts/verify-branch-name.sh",
+    "repo:add": "node --import tsx/esm scripts/repo-add.ts",
+    "branch:new": "node --import tsx/esm scripts/branch-new.ts",
     "pr:review-opencode": "node --env-file=.env --import tsx/esm scripts/opencode-review-pr.ts"
   },
   "dependencies": {

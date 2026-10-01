@@ -1,8 +1,9 @@
 /**
  * FounderOS — Self-Improvement Acting Loop (manual entry point)
  * =============================================================
- * `pnpm self-improve:run` — the same loop the scheduler fires every third day
- * at 09:00 (src/infra/scheduler.ts), runnable by hand.
+ * `pnpm self-improve:run` — the code-health loop the scheduler used to fire every
+ * third day at 09:00 (unregistered since 2026-08-21, see src/infra/scheduler.ts),
+ * runnable by hand. The daily jobhunt check is a separate entry point.
  *
  * ## What changed on 2026-08-13, and why
  *

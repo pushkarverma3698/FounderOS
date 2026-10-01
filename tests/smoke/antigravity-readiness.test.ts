@@ -20,6 +20,7 @@ import {
   AGENT_READY_LABEL,
   ANTIGRAVITY_LABEL,
 } from "../../src/tools/dispatch-antigravity.js";
+import { AGENT_BRIEF_HEADINGS } from "../../src/tools/agent-brief-lint.js";
 
 /** Minimum supported Node.js major version per package.json engines. */
 export const MIN_NODE_MAJOR_VERSION = 22;
@@ -37,16 +38,12 @@ export const REQUIRED_CONTRACT_DOCS: readonly string[] = [
   "docs/antigravity/BRANCHING-STRATEGY.md",
 ];
 
-/** Required sections for agent-dispatch intake issues. */
-export const REQUIRED_ISSUE_SECTIONS: readonly string[] = [
-  "## Goal",
-  "## Problem / observed behavior",
-  "## Expected behavior",
-  "## Files or subsystem in scope",
-  "## Explicitly forbidden",
-  "## Verification commands",
-  "## Acceptance criteria",
-];
+/**
+ * Required sections for agent-dispatch intake issues: all nine of the template's, derived from
+ * the lint's own list so this can never again describe a shorter layout than the one enforced
+ * (it listed seven, the exact seven the dispatch tool emitted, while the template has nine).
+ */
+export const REQUIRED_ISSUE_SECTIONS: readonly string[] = AGENT_BRIEF_HEADINGS.map((heading) => `## ${heading}`);
 
 /**
  * Pure analyzer: validates whether a Node.js version string satisfies the minimum major version.

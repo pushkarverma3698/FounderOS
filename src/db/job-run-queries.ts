@@ -17,6 +17,15 @@ import { jobIngestRuns, type JobIngestRun, type NewJobIngestRun } from "./schema
 
 const DEFAULT_TENANT = "turicks";
 
+/**
+ * A sweep's `error` that says only "skipped N dead boards" (Postgres regex). The sweep sat boards
+ * out on purpose because they 404 every time (board-health.ts writes this exact text through
+ * appendSkippedDead): nothing failed and no posting is missing, so it must not be counted as an
+ * error. A run that ALSO had real failures reads "3 board(s) failed: … | skipped N dead boards"
+ * and does not match. tests/unit/jobhunt/skip-only-error-contract.test.ts pins this against the writer.
+ */
+export const SKIP_ONLY_ERROR_PATTERN = "^skipped [0-9]+ dead boards$";
+
 /** Record one query's cost and yield. Never throws into the sweep. */
 export async function recordIngestRun(row: NewJobIngestRun): Promise<JobIngestRun | null> {
   const db = getDb();
@@ -31,7 +40,10 @@ export interface SpendWindow {
   readonly screened: number;
   readonly passed: number;
   readonly costUsd: number;
-  /** Calls that failed. Still billed a start, so still part of the cost. */
+  /**
+   * Calls that failed. Still billed a start, so still part of the cost. A call that only
+   * skipped dead boards (SKIP_ONLY_ERROR_PATTERN) did not fail and is not counted.
+   */
   readonly failed: number;
   /** Postings never seen before. `returned` is the bill; this is what it bought. */
   readonly fresh: number;
@@ -56,7 +68,7 @@ export async function summariseSpend(
       screened: sql<number>`coalesce(sum(${jobIngestRuns.screened}), 0)`,
       passed: sql<number>`coalesce(sum(${jobIngestRuns.passed}), 0)`,
       cost: sql<string>`coalesce(sum(${jobIngestRuns.estimated_cost_usd}), 0)`,
-      failed: sql<number>`count(*) filter (where ${jobIngestRuns.error} is not null)`,
+      failed: sql<number>`count(*) filter (where ${jobIngestRuns.error} is not null and ${jobIngestRuns.error} !~ ${SKIP_ONLY_ERROR_PATTERN})`,
       fresh: sql<number>`coalesce(sum(${jobIngestRuns.fresh}), 0)`,
     })
     .from(jobIngestRuns)

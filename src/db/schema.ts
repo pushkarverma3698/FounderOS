@@ -1804,5 +1804,8 @@ export const atsBoardCache = agentsSchema.table("ats_board_cache", {
   updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// goals + goal_reviews (0042). Own file: this one is over the LOC budget. Re-exported so the parity test sees them.
+export * from "./goals-schema.js";
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them

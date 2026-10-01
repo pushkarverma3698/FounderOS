@@ -41,7 +41,7 @@
 
 import type { JobSearchProfile } from "../profile-config.js";
 import { INDIA_MARKET } from "./markets.js";
-import { TASHI_MEASURED_TERMS as MEASURED } from "./wife-nl-finance-terms.js";
+import { TASHI_MEASURED_TERMS as MEASURED, TASHI_REJECT_TITLE_TERMS } from "./wife-nl-finance-terms.js";
 
 const WIFE_CV_PATH = process.env["WIFE_CV_PATH"] ?? "/opt/founderos-data/cv/cv-wife-base.md";
 
@@ -273,8 +273,8 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         "credit review",
         "tax analyst",
         "treasury analyst",
-        "due diligence",
         "customer due diligence",
+        // Bare "due diligence" removed 2026-09-29 (S6); the qualified forms are MEASURED's.
         ...MEASURED["finance-ops"],
       ],
     },
@@ -351,7 +351,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
         "statutory audit",
         "forensic audit",
         "forensic accountant",
-        "auditor",
+        // Bare "auditor" removed 2026-09-29 (S6); the qualified forms are MEASURED's.
         "risk and controls",
         "financial risk",
         "internal controls analyst",
@@ -385,6 +385,7 @@ export const WIFE_FINANCE_PROFILE: JobSearchProfile = {
   },
 
   trackPriority: ["fpa", "finance-ops", "compliance-kyc", "auditor", "accountant"],
+  rejectTitleTerms: [...TASHI_REJECT_TITLE_TERMS],
   skillsDictionaryName: "finance",
   baseCvPath: WIFE_CV_PATH,
 };

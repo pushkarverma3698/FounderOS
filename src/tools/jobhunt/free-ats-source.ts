@@ -31,6 +31,7 @@ import { mapWithConcurrencyLimit } from "../../core/concurrency.js";
 import { describeSkips, getLastRegistrySkips, type FreeAts, type FreeBoard } from "./free-boards.js";
 import { createEtagCache, type EtagCache } from "./free-ats-cache.js";
 import { HttpStatusError, fetchPayload, wireFormatFor } from "./free-ats-transport.js";
+import { planBoardPolls, recordBoardOutcomes, type BoardHealthDeps } from "./board-health.js";
 import { getAdapter } from "./adapters/index.js";
 import { decodeJobBody, type NormalizedJob as FreeCandidate } from "./adapters/types.js";
 
@@ -174,7 +175,7 @@ const boardCache: EtagCache = createEtagCache();
 
 export type BoardFetch =
   | { readonly ok: true; readonly board: FreeBoard; readonly candidates: readonly FreeCandidate[] }
-  | { readonly ok: false; readonly board: FreeBoard; readonly error: string };
+  | { readonly ok: false; readonly board: FreeBoard; readonly error: string; readonly status?: number };
 
 /**
  * Whether asking this host again could plausibly produce a different answer.
@@ -243,7 +244,8 @@ export async function fetchBoard(
       if (total === null || offset + paging.pageSize >= total) break;
     }
   } catch (err) {
-    return { ok: false, board, error: (err as Error).message };
+    const status = err instanceof HttpStatusError ? err.status : undefined;
+    return { ok: false, board, error: (err as Error).message, ...(status === undefined ? {} : { status }) };
   }
 
   try {
@@ -257,6 +259,9 @@ export interface BoardSweep {
   readonly candidates: readonly FreeCandidate[];
   /** One entry per board that failed, named so a rotated token is findable. */
   readonly failures: readonly string[];
+  /** Boards that sat out after ten straight 404s ("<ats>/<token>"), or absent when no record was kept. */
+  readonly skippedDead?: readonly string[];
+  /** Boards actually asked this sweep, not boards on file. */
   readonly boardsPolled: number;
 }
 
@@ -304,12 +309,21 @@ export function summariseFailures(failures: readonly string[]): string {
  * single board failed still returns normally with 238 failures — and that is the
  * point: the caller can then say "the lane is broken" instead of "the market is
  * quiet", which are the two readings this pipeline has historically confused.
+ *
+ * `health` is the persisted dead-board record (board-health.ts), OPT-IN: only the cron passes
+ * it, so a script or a one-off run polls everything and touches nothing. A skipped board is
+ * counted in `skippedDead`, never dropped silently (rule 1 above).
  */
-export async function sweepBoards(boards: readonly FreeBoard[]): Promise<BoardSweep> {
+export async function sweepBoards(
+  boards: readonly FreeBoard[],
+  health?: BoardHealthDeps,
+): Promise<BoardSweep> {
+  const plan = health ? await planBoardPolls(boards, health) : { poll: boards, skipped: [] };
+
   // Grouped by platform so each is bounded at its own rate (PLATFORM_CONCURRENCY).
   // Groups run concurrently, so a slow platform never serialises behind another.
   const byPlatform = new Map<FreeAts, FreeBoard[]>();
-  for (const board of boards) {
+  for (const board of plan.poll) {
     const group = byPlatform.get(board.ats);
     if (group) group.push(board);
     else byPlatform.set(board.ats, [board]);
@@ -327,6 +341,8 @@ export async function sweepBoards(boards: readonly FreeBoard[]): Promise<BoardSw
       ),
     )
   ).flat();
+
+  if (health) await recordBoardOutcomes(results, health);
 
   const candidates: FreeCandidate[] = [];
   const failures: string[] = [];
@@ -349,11 +365,16 @@ export async function sweepBoards(boards: readonly FreeBoard[]): Promise<BoardSw
   }
 
   log.info(
-    { boards: boards.length, failed: failures.length, candidates: candidates.length },
+    { boards: plan.poll.length, failed: failures.length, skippedDead: plan.skipped.length, candidates: candidates.length },
     "Free board sweep complete",
   );
 
-  return { candidates, failures, boardsPolled: boards.length };
+  return {
+    candidates,
+    failures,
+    skippedDead: plan.skipped.map((b) => `${b.ats}/${b.token}`),
+    boardsPolled: plan.poll.length,
+  };
 }
 
 // hydrateDescriptions and DESCRIPTION_TIMEOUT_MS moved to free-ats-hydrate.ts
