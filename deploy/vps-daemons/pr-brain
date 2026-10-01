@@ -128,6 +128,82 @@ fi
 # shellcheck source=deploy/lib/down-state.sh
 source "$DOWN_STATE_LIB"
 
+# ── A Claude token that outlives a login ─────────────────────────────────────────────
+# The interactive Claude login expires, and an expired login pauses every gate until
+# somebody ssh'es in and runs /login. A token made once with `claude setup-token` does
+# not need that. It lives in ~/.claude/pr-brain.token, mode 0600:
+#   line 1   the token
+#   line 2   the date it was created, YYYY-MM-DD (the age warning counts from it)
+# When the file is usable, run_claude hands the token to `claude` through the environment
+# of that one command: never an argument, never logged, never seen by gh or git. Without
+# the file nothing changes and the interactive login is used as before.
+#
+# How long such a token lasts is NOT verified here. TOKEN_WARN_DAYS is a guess at "about a
+# year, less a margin": confirm with `claude setup-token --help` on the VPS and adjust it.
+TOKEN_FILE="${PR_BRAIN_TOKEN_FILE:-$HOME/.claude/pr-brain.token}"
+TOKEN_WARN_DAYS=330
+WARNED_DIR="$HOME/.claude/pr-brain.warned"
+OAUTH_TOKEN=""
+
+# One message per distinct problem. The key carries what makes it a NEW problem (the
+# token's creation date, its mode), so a renewed token re-arms the warning. A dry run or a
+# listing logs it but neither sends nor remembers, so the real run still reports it.
+warn_once() {
+  local key="$1" msg="$2" marker
+  if [[ "$DRY_RUN" -eq 1 || "$LIST_ONLY" -eq 1 ]]; then
+    log "$msg"
+    return 0
+  fi
+  marker="$WARNED_DIR/$(printf '%s' "$key" | tr -c 'A-Za-z0-9._-' '_')"
+  [[ -e "$marker" ]] && return 0
+  mkdir -p "$WARNED_DIR" 2>/dev/null && : >"$marker"
+  log "$msg"
+  notify "🧠 pr-brain on $(hostname -s): $msg"
+  return 0
+}
+
+warn_if_token_old() {
+  local created="$1" created_epoch now_epoch age
+  if ! [[ "$created" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || ! created_epoch="$(date -u -d "$created" +%s 2>/dev/null)"; then
+    warn_once "token-no-date" "$TOKEN_FILE has no creation date on line 2 (expected YYYY-MM-DD), so the token's age cannot be watched. Fix: add the date the token was created as line 2."
+    return 0
+  fi
+  now_epoch="${PR_BRAIN_NOW_EPOCH:-$(date -u +%s)}"
+  age=$(( (now_epoch - created_epoch) / 86400 ))
+  if (( age >= TOKEN_WARN_DAYS )); then
+    warn_once "token-age-$created" "the Claude token in $TOKEN_FILE was created on $created ($age days ago). Tokens from 'claude setup-token' are meant to last long, but how long is unverified: renew it before it stops working. Fix: ssh founderos-vps, run 'claude setup-token', put the new token on line 1 and today's date (YYYY-MM-DD) on line 2 of $TOKEN_FILE."
+  fi
+  return 0
+}
+
+load_oauth_token() {
+  [[ -f "$TOKEN_FILE" ]] || return 0
+  local mode token created
+  mode="$(stat -c '%a' "$TOKEN_FILE" 2>/dev/null || stat -f '%Lp' "$TOKEN_FILE" 2>/dev/null || echo unknown)"
+  if [[ "$mode" != "600" ]]; then
+    warn_once "token-mode-$mode" "$TOKEN_FILE has mode $mode, not 600, so it is NOT being used (anyone on the box could read the token). Fix: chmod 600 $TOKEN_FILE"
+    return 0
+  fi
+  { IFS= read -r token; IFS= read -r created; } <"$TOKEN_FILE" || true
+  token="${token%$'\r'}"
+  created="${created%$'\r'}"
+  if [[ -z "$token" ]]; then
+    warn_once "token-empty" "$TOKEN_FILE is empty, so it is NOT being used. Fix: put the output of 'claude setup-token' on line 1 and today's date (YYYY-MM-DD) on line 2."
+    return 0
+  fi
+  OAUTH_TOKEN="$token"
+  warn_if_token_old "$created"
+}
+
+# Every `claude` call goes through here, so the token reaches claude's environment and no one else's.
+run_claude() {
+  if [[ -n "$OAUTH_TOKEN" ]]; then
+    CLAUDE_CODE_OAUTH_TOKEN="$OAUTH_TOKEN" claude "$@"
+  else
+    claude "$@"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
@@ -168,6 +244,7 @@ for dep in gh claude git; do
   command -v "$dep" >/dev/null 2>&1 || { log "FATAL: '$dep' not on PATH"; exit 1; }
 done
 gh auth status >/dev/null 2>&1 || { log "FATAL: gh is not authenticated"; exit 1; }
+load_oauth_token
 
 # Keep the log bounded — this runs every 20 minutes forever.
 if [[ -f "$LOG" ]] && [[ "$(wc -l <"$LOG")" -gt 20000 ]]; then
@@ -193,7 +270,12 @@ enter_down() {
   local cls="$1" detail="$2" msg
   log "Claude unavailable ($cls): $detail — sweep stopped, nothing dispatched"
   case "$cls" in
-    auth) msg="🧠 pr-brain PAUSED on $(hostname -s): Claude Code auth expired. Fix: ssh founderos-vps, run 'claude', then '/login'. One more message when it resumes — none until then." ;;
+    auth)
+      if [[ -n "$OAUTH_TOKEN" ]]; then
+        msg="🧠 pr-brain PAUSED on $(hostname -s): Claude rejected the token in $TOKEN_FILE. Fix: ssh founderos-vps, run 'claude setup-token', put the new token on line 1 and today's date (YYYY-MM-DD) on line 2 of $TOKEN_FILE. One more message when it resumes — none until then."
+      else
+        msg="🧠 pr-brain PAUSED on $(hostname -s): Claude Code auth expired. Fix: ssh founderos-vps, run 'claude', then '/login' (or run 'claude setup-token' once and keep its output in $TOKEN_FILE so this stops recurring). One more message when it resumes — none until then."
+      fi ;;
     limit) msg="🧠 pr-brain PAUSED on $(hostname -s): Claude usage limit reached (${detail}). Retrying silently when a PR is waiting; one more message when it resumes." ;;
     *) msg="🧠 pr-brain PAUSED on $(hostname -s): Claude preflight failed (${detail}). Retrying silently when a PR is waiting; one more message when it resumes." ;;
   esac
@@ -219,7 +301,7 @@ PREFLIGHT_OK=0
 preflight() {
   [[ "$PREFLIGHT_OK" -eq 1 ]] && return 0
   local preflight cls
-  preflight=$(claude -p "reply with the single word ok" --model "$MODEL" \
+  preflight=$(run_claude -p "reply with the single word ok" --model "$MODEL" \
                 --max-budget-usd 0.05 --output-format text </dev/null 2>&1 | tail -2)
   # "Exceeded USD budget" is the preflight's own $0.05 cap tripping — Claude Code's
   # context costs more than that before it answers. A billed call proves auth and
@@ -711,7 +793,7 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
     # </dev/null: this runs inside `while read … done <<<"$prs"`, and `claude -p`
     # reads piped stdin into its prompt — without it the gate swallowed every
     # remaining PR line, so one repo never had two PRs gated in one tick.
-    claude -p "$(build_prompt "$pr" "$repo_name" "$head" "$app_rc")" \
+    run_claude -p "$(build_prompt "$pr" "$repo_name" "$head" "$app_rc")" \
         --model "$MODEL" \
         --permission-mode acceptEdits \
         --allowedTools "Bash Read Write Edit Grep Glob TodoWrite Skill" \
