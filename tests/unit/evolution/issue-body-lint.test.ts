@@ -15,8 +15,10 @@ import { describe, it, expect } from "vitest";
 import { DISPATCHABLE_KINDS, renderIssueBody } from "../../../src/evolution/issue-body.js";
 import { repoRoot } from "../../../src/evolution/repo-root.js";
 import type { Finding, FindingKind } from "../../../src/evolution/types.js";
+import { findAdapterSilent, findApplyLinkUnrecognised } from "../../../src/evolution/analyzers/jobhunt.js";
 import { lintAgentBrief } from "../../../src/tools/agent-brief-lint.js";
 import { checkoutFileExists } from "../../../src/tools/dispatch-brief-check.js";
+import { NOW, healthy, postings, withSilent } from "../../helpers/jobhunt-fixtures.js";
 
 const CONTEXT = {
   fingerprint: "a".repeat(64),
@@ -24,8 +26,26 @@ const CONTEXT = {
   detectedAt: new Date("2026-09-29T09:00:00Z"),
 };
 
+/**
+ * The two jobhunt kinds come from the analyzer itself rather than a hand-written literal, so the
+ * body linted here is the one the 09:30 check would really file: ashby silent for 24h after a steady
+ * baseline, and smartrecruiters with 14 of 40 new postings (35%) lacking a form link.
+ */
+const ADAPTER_SILENT = findAdapterSilent(withSilent("ashby"), NOW)[0]!;
+const APPLY_LINK_UNRECOGNISED = findApplyLinkUnrecognised(
+  healthy({
+    newPostings: [
+      ...postings("smartrecruiters", 14, { fromHoursAgo: 150, toHoursAgo: 2 }, { hasFormLink: false }),
+      ...postings("smartrecruiters", 26, { fromHoursAgo: 150, toHoursAgo: 2 }, { hasFormLink: true }),
+    ],
+  }),
+  NOW,
+)[0]!;
+
 /** One realistic finding per dispatchable kind. `location`s are files that exist in this checkout. */
 const FINDINGS: Readonly<Partial<Record<FindingKind, Finding>>> = {
+  "adapter-silent": ADAPTER_SILENT,
+  "apply-link-unrecognised": APPLY_LINK_UNRECOGNISED,
   "unapplied-lesson": {
     kind: "unapplied-lesson",
     subject: "worker:email::ETIMEDOUT",
