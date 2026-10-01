@@ -52,6 +52,13 @@ A page change *before* you press SUBMIT & NEXT (a link, a second step) removes t
 and does not bring it back. Stop the run with Ctrl-C and start it again: what you
 already recorded is on disk and is pushed at the next start.
 
+SUBMIT & NEXT presses the form's real submit control; when there is none it looks for
+a button by its words: *Submit*, *Submit application*, *Apply now*, *Send application*,
+and in Dutch *Verzenden*, *Versturen*, *Verstuur*, *Sollicitatie versturen*,
+*Sollicitatie verzenden*, *Verstuur sollicitatie* (the whole label, so "Verstuur naar een
+vriend" is not pressed). It never presses *Solliciteer* / *Solliciteren*: that button
+opens the form.
+
 If the bar cannot find the site's submit button, submit the form yourself, then
 press **I SUBMITTED IT MYSELF** to record it. **SKIP** removes the row from your
 list for good: it does not come back tomorrow.

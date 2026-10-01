@@ -309,12 +309,21 @@
   }
 
   function findByText() {
+    // English: the phrase may run on ("Submit your application").
     const words = ["submit application", "submit", "apply now", "send application"];
+    // Dutch: only phrases that can ONLY mean "send it now", and the WHOLE label, never
+    // a prefix: "Verstuur naar een vriend" (send to a friend) begins with a submit word.
+    // Not "solliciteer" / "solliciteren": that is what the button that OPENS the form says.
+    const dutchLabels = [
+      "verzenden", "versturen", "verstuur",
+      "sollicitatie versturen", "sollicitatie verzenden", "verstuur sollicitatie",
+    ];
     const clickable = [...document.querySelectorAll("button,input[type=button],a[role=button]")];
     return clickable.find((el) => {
       if (el.disabled) return false;
-      const text = (el.innerText || el.value || "").trim().toLowerCase();
-      return words.some((w) => text === w || text.startsWith(w));
+      // \s also covers the no-break space some sites put inside a label.
+      const text = (el.innerText || el.value || "").replace(/\s+/g, " ").trim().toLowerCase();
+      return words.some((w) => text === w || text.startsWith(w)) || dutchLabels.includes(text);
     });
   }
 
