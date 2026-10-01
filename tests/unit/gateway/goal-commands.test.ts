@@ -78,7 +78,8 @@ describe("/goal add", () => {
     const buttons = reply.opts!.reply_markup!.inline_keyboard.flat();
     expect(buttons.map((b) => b.text)).toEqual(["applications_7d", "prs_merged_7d", "issues_closed_7d", "action_count_7d", "manual"]);
     // The picker is a reply to the founder's message: the conversation is the state.
-    expect(reply.opts!.reply_parameters).toEqual({ message_id: 77 });
+    // ...and survives him deleting his command: without allow_sending_without_reply Telegram would refuse it.
+    expect(reply.opts!.reply_parameters).toEqual({ message_id: 77, allow_sending_without_reply: true });
     expect(buttons.map((b) => decodeGoalCallback(b.callback_data))).toEqual(
       ["applications_7d", "prs_merged_7d", "issues_closed_7d", "action_count_7d", "manual"].map((family) => ({ kind: "metric", family })),
     );

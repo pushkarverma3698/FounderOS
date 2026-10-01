@@ -17,7 +17,7 @@ export const ALLOWED_GROUP = -100555;
 
 export interface Reply {
   text: string;
-  opts: { parse_mode?: string; reply_markup?: { inline_keyboard: { text: string; callback_data: string }[][] }; reply_parameters?: { message_id: number } } | undefined;
+  opts: { parse_mode?: string; reply_markup?: { inline_keyboard: { text: string; callback_data: string }[][] }; reply_parameters?: { message_id: number; allow_sending_without_reply?: boolean } } | undefined;
 }
 
 export interface CtxOptions {

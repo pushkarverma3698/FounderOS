@@ -192,7 +192,7 @@ describe("metric choice buttons", () => {
     const [goal] = await h.repo.listOpenGoals("t");
     expect(goal).toMatchObject({ title: "Ship a fix", metric_key: "manual", target: 1 });
     expect(c.replies[0]!.text).toContain("Goal 1 added: “Ship a fix”");
-    expect(c.replies[0]!.opts!.reply_parameters).toEqual({ message_id: 77 });
+    expect(c.replies[0]!.opts!.reply_parameters).toEqual({ message_id: 77, allow_sending_without_reply: true });
     expect(c.edits).toHaveLength(1); // the spent keyboard is cleared
   });
 
@@ -203,7 +203,7 @@ describe("metric choice buttons", () => {
     });
     expect(await h.repo.listOpenGoals("t")).toEqual([]);
     expect(c.replies[0]!.text).toContain("<b>metric</b>");
-    expect(c.replies[0]!.opts!.reply_parameters).toEqual({ message_id: 77 });
+    expect(c.replies[0]!.opts!.reply_parameters).toEqual({ message_id: 77, allow_sending_without_reply: true });
     expect(c.replies[0]!.opts!.reply_markup!.inline_keyboard.flat().map((b) => b.text)).toEqual(["pushkar-nl-tech", "wife-nl-finance"]);
   });
 

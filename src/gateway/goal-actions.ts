@@ -41,6 +41,15 @@ export async function replyHtml(ctx: Context, text: string, extra: Record<string
   await ctx.reply(text, { parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...extra });
 }
 
+/**
+ * Reply to the founder's own message. `allow_sending_without_reply` because he may delete his command right
+ * after sending it: without it Telegram refuses the reply ("message to be replied not found") AFTER the goal
+ * was already created, and he would be told a goal failed that in fact exists.
+ */
+const replyTarget = (messageId: number): { reply_parameters: { message_id: number; allow_sending_without_reply: true } } => ({
+  reply_parameters: { message_id: messageId, allow_sending_without_reply: true },
+});
+
 const errorText = (err: unknown): string => (err instanceof Error && err.message !== "" ? err.message.slice(0, 200) : "unknown error");
 const quoted = (g: GoalRow): string => `“${esc(g.title)}”`;
 const specOf = (g: Pick<GoalRow, "metric_key" | "metric_arg">): string => esc(g.metric_arg === null ? g.metric_key : `${g.metric_key}:${g.metric_arg}`);
@@ -103,7 +112,7 @@ async function replyIssues(ctx: Context, deps: GoalCommandDeps, issues: readonly
   }
   await replyHtml(ctx, lines.join("\n"), {
     ...(keyboard ? { reply_markup: keyboard } : {}),
-    ...(keyboard && replyTo !== undefined ? { reply_parameters: { message_id: replyTo } } : {}),
+    ...(keyboard && replyTo !== undefined ? replyTarget(replyTo) : {}),
   });
 }
 
@@ -131,7 +140,7 @@ async function addGoal(ctx: Context, deps: GoalCommandDeps, repo: GoalRepo, draf
       draft.metricKey === "manual" ? `Report its value with <code>/goal ${n} &lt;value&gt;</code>.` : "It is measured from real events.",
       "It is in /goals now and in the next 09:00 standup.",
     ].join("\n"),
-    replyTo !== undefined ? { reply_parameters: { message_id: replyTo } } : {},
+    replyTo !== undefined ? replyTarget(replyTo) : {},
   );
 }
 
