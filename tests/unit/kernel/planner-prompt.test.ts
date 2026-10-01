@@ -9,6 +9,8 @@
 
 import { describe, it, expect } from "vitest";
 import { buildPlannerPrompt, type WorkerCatalogEntry } from "../../../src/kernel/planner.js";
+import { CONTEXT_STALE_MARKER } from "../../../src/db/context-meta.js";
+import { renderFounderContext } from "../../../src/tools/context-render.js";
 
 const catalog: WorkerCatalogEntry[] = [
   { id: "engineering", description: "code and repo work", toolNames: ["github_read"], gatedToolNames: [] },
@@ -82,5 +84,36 @@ describe("buildPlannerPrompt — issue filing is a dispatch, not a memory write"
     const prompt = buildPlannerPrompt(catalog);
     expect(prompt).toMatch(/update_context/);
     expect(prompt).toMatch(/never.*(substitute|instead of).*(task|action|request)/i);
+  });
+});
+
+/**
+ * 2026-09-29, production: "what is my current focus?" was answered with June's
+ * "Phase D-Bis: 3 proof showcases…" as if it were current. read_context now dates
+ * every value and marks a stale or undated one with a mark produced by CODE
+ * (src/tools/context-render.ts). This rule is what the model does with that mark;
+ * it names the same constant the renderer prints, so the two cannot drift apart.
+ */
+describe("buildPlannerPrompt — a stale context line is dated or asked about, never current", () => {
+  it("tells the planner what to do with a line carrying the stale mark", () => {
+    const prompt = buildPlannerPrompt(catalog);
+    expect(prompt).toContain(`A context line marked ${CONTEXT_STALE_MARKER} must be stated with its date, or asked about.`);
+    expect(prompt).toContain("Never present it as current.");
+  });
+
+  it("names the mark the renderer really prints on a value that has no date", () => {
+    const rendered = renderFounderContext({ current_focus: "Phase D-Bis" }, new Date("2026-09-29T09:00:00Z"), {
+      timeZone: "Asia/Kolkata",
+    });
+    expect(rendered).toContain(CONTEXT_STALE_MARKER);
+    expect(buildPlannerPrompt(catalog)).toContain(`marked ${CONTEXT_STALE_MARKER}`);
+  });
+
+  it("keeps the rule next to the founder-context rule it qualifies", () => {
+    const lines = buildPlannerPrompt(catalog).split("\n");
+    const contextRule = lines.findIndex((l) => l.includes("read_context, search_memory"));
+    const staleRule = lines.findIndex((l) => l.includes(`marked ${CONTEXT_STALE_MARKER}`));
+    expect(contextRule).toBeGreaterThan(-1);
+    expect(staleRule).toBe(contextRule + 1);
   });
 });

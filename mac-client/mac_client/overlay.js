@@ -42,20 +42,53 @@
     : data.uses_tailored_cv
       ? `<div style="opacity:.75;font-size:13px;color:#8FD19E">📄 Tailored CV for this role attached</div>`
       : `<div style="font-size:13px;color:#FFCC66">📄 Generic CV — no tailored one exists for this role yet</div>`;
-  summary.innerHTML =
+  const heading =
     `<div style="font-weight:600;margin-bottom:2px">${data.position} — ` +
-    `${escapeHtml(data.company)} · ${escapeHtml(data.title)}</div>` +
-    `<div style="opacity:.75;font-size:13px">Filled: ${escapeHtml(filled)}</div>` +
-    `<div style="opacity:.75;font-size:13px;color:#FFCC66">Left for you: ${escapeHtml(skipped)}</div>` +
-    coverLetterLine +
-    resumeLine;
+    `${escapeHtml(data.company)} · ${escapeHtml(data.title)}</div>`;
+  // `data.ask` is set when the host carried this bar onto a page that REPLACED the
+  // form (a submit that navigated): what was filled is no longer on screen, so
+  // the fill report would describe a page she cannot see.
+  summary.innerHTML = data.ask
+    ? heading +
+      `<div style="opacity:.75;font-size:13px">The page changed after you pressed SUBMIT &amp; NEXT, ` +
+      `so what I filled is no longer on screen.</div>`
+    : heading +
+      `<div style="opacity:.75;font-size:13px">Filled: ${escapeHtml(filled)}</div>` +
+      `<div style="opacity:.75;font-size:13px;color:#FFCC66">Left for you: ${escapeHtml(skipped)}</div>` +
+      coverLetterLine +
+      resumeLine;
 
   const skip = button("SKIP", "#2A2F36", "#fff");
   const submit = button("SUBMIT &amp; NEXT →", "#00A65A", "#fff");
 
+  // The confirm bar. Shown when the page gave no sign either way after SUBMIT:
+  // the founder says what she saw, and only her YES is written as "applied".
+  const confirmSummary = document.createElement("div");
+  confirmSummary.style.cssText = "flex:1;min-width:0";
+  const no = button("NO, IT DID NOT", "#2A2F36", "#fff");
+  const yes = button("YES, IT WENT THROUGH", "#00A65A", "#fff");
+  let answered = false;
+
+  // The manual path. When the overlay could not press the employer's button (or
+  // the founder pressed it herself), she says so and only THEN is it recorded:
+  // an explicit human confirmation. Offered once something has gone wrong, and
+  // from the start on a bar restored after the page changed (data.manual).
+  const mine = button("I SUBMITTED IT MYSELF", "#8A6D3B", "#fff");
+  let showManual = !!data.manual;
+
   // A decision is final and both buttons are disabled the moment either is
   // pressed. A double-click on a slow form would otherwise submit twice.
   let decided = false;
+
+  mine.onclick = async () => {
+    if (decided) return;
+    decided = true;
+    mine.disabled = true;
+    skip.disabled = true;
+    submit.disabled = true;
+    mine.textContent = "Recording…";
+    await window.founderosDecision("applied");
+  };
 
   skip.onclick = async () => {
     if (decided) return;
@@ -69,6 +102,12 @@
     decided = true;
     lock("Submitting…");
 
+    // A form that navigates replaces this page, and this bar with it, before the
+    // checks below can report anything. So the host is told FIRST that she pressed
+    // SUBMIT & NEXT: if the page is replaced it asks her on the new page, instead
+    // of waiting for a decision that can no longer arrive. It only ever asks.
+    await tellHost("submit-attempted");
+
     const target =
       document.querySelector('button[type="submit"]:not([disabled])') ||
       document.querySelector('input[type="submit"]:not([disabled])') ||
@@ -78,9 +117,9 @@
       // Never record an application we could not send. The founder finishes
       // this one by hand; saying so is the only honest option.
       giveBack(
-        'Could not find this form\'s submit button — submit it yourself, then ' +
-          "press SKIP to move on (it is recorded as not-applied, so it will come " +
-          "back tomorrow).",
+        "Could not find this form's submit button. Submit it yourself, then press " +
+          "I SUBMITTED IT MYSELF to record it. SKIP removes this row from your list: " +
+          "it does not come back tomorrow.",
       );
       return;
     }
@@ -186,10 +225,11 @@
         return;
       }
       if (Date.now() - startTime > settleMs) {
-        // No failure was seen either — the safest read of a form that gave no
-        // visible signal at all is that the employer's handler ran clean.
+        // No failure and no success either. That is NOT "applied": a handler
+        // that ran clean and one that silently did nothing look identical from
+        // here (ADR-018: never defaulted to "applied"). Ask the founder.
         restoreDialogs();
-        window.founderosDecision("applied");
+        askDidItGoThrough("The page gave no sign either way, so I cannot tell whether it was sent.");
         return;
       }
       setTimeout(poll, 100);
@@ -197,12 +237,63 @@
     setTimeout(poll, 100);
   };
 
+  function askDidItGoThrough(reason) {
+    answered = false;
+    yes.disabled = false;
+    no.disabled = false;
+    yes.innerHTML = "YES, IT WENT THROUGH";
+    confirmSummary.innerHTML =
+      heading +
+      `<div style="font-size:13px;color:#FFCC66">${reason}</div>` +
+      `<div style="font-size:14px">Did the application go through? Press YES only if you saw the site accept it.</div>`;
+    bar.replaceChildren(confirmSummary, no, yes);
+  }
+
+  // The founder's own explicit confirmation: the only other place "applied" is written.
+  yes.onclick = async () => {
+    if (answered) return;
+    answered = true;
+    yes.disabled = true;
+    no.disabled = true;
+    yes.textContent = "Recording…";
+    await window.founderosDecision("applied");
+  };
+
+  no.onclick = () => {
+    if (answered) return;
+    answered = true;
+    tellHost("answered-no"); // so the terminal she ran this from says nothing was recorded
+    giveBack(
+      "Not recorded. If it did not go through, fix the form and press SUBMIT again; " +
+        "SKIP removes this row from your list.",
+    );
+  };
+
   function giveBack(message) {
     decided = false;
+    showManual = true;
+    mine.disabled = false;
     submit.disabled = false;
     skip.disabled = false;
     submit.innerHTML = "SUBMIT &amp; NEXT →";
     summary.innerHTML += `<div style="color:#FF6B6B;font-size:13px">${message}</div>`;
+    showDecisionBar();
+  }
+
+  // The decision bar: SKIP, the manual button once it applies, and SUBMIT & NEXT.
+  function showDecisionBar() {
+    bar.replaceChildren(...[summary, skip, showManual ? mine : null, submit].filter(Boolean));
+  }
+
+  // What the overlay tells the host app (apply.py), as opposed to what she DECIDES
+  // (`founderosDecision`): these only ever lead to a question or a log line, never
+  // to an outcome. Optional: the overlay works without a listener on the other end.
+  async function tellHost(kind) {
+    try {
+      if (typeof window.founderosEvent === "function") await window.founderosEvent(kind);
+    } catch (_) {
+      // The host going away must not stop her pressing the employer's button.
+    }
   }
 
   function excerptAround(text, word) {
@@ -218,12 +309,21 @@
   }
 
   function findByText() {
+    // English: the phrase may run on ("Submit your application").
     const words = ["submit application", "submit", "apply now", "send application"];
+    // Dutch: only phrases that can ONLY mean "send it now", and the WHOLE label, never
+    // a prefix: "Verstuur naar een vriend" (send to a friend) begins with a submit word.
+    // Not "solliciteer" / "solliciteren": that is what the button that OPENS the form says.
+    const dutchLabels = [
+      "verzenden", "versturen", "verstuur",
+      "sollicitatie versturen", "sollicitatie verzenden", "verstuur sollicitatie",
+    ];
     const clickable = [...document.querySelectorAll("button,input[type=button],a[role=button]")];
     return clickable.find((el) => {
       if (el.disabled) return false;
-      const text = (el.innerText || el.value || "").trim().toLowerCase();
-      return words.some((w) => text === w || text.startsWith(w));
+      // \s also covers the no-break space some sites put inside a label.
+      const text = (el.innerText || el.value || "").replace(/\s+/g, " ").trim().toLowerCase();
+      return words.some((w) => text === w || text.startsWith(w)) || dutchLabels.includes(text);
     });
   }
 
@@ -244,7 +344,10 @@
     return div.innerHTML;
   }
 
-  bar.append(summary, skip, submit);
+  // On a page the host carried the bar to after a submit navigated, the first thing
+  // she sees is the question; everywhere else, the decision buttons.
+  if (data.ask) askDidItGoThrough(escapeHtml(data.ask));
+  else showDecisionBar();
   document.body.appendChild(bar);
   // Job pages are long; the bar is fixed, but the page must not sit under it.
   // Computed from the real rendered height (not a fixed guess) so it stays

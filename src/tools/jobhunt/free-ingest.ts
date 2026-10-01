@@ -72,6 +72,7 @@ import {
   type BoardSweep,
   type FreeCandidate,
 } from "./free-ats-source.js";
+import { appendSkippedDead } from "./board-health.js";
 import { getAdapter } from "./adapters/index.js";
 import { screenBatch, type IngestLine } from "./ingest-batch.js";
 import { recordQueryCost } from "./ingest-ledger.js";
@@ -271,6 +272,8 @@ export async function runFreeIngest(
     screened: postings.length,
   };
 
+  const boardError = appendSkippedDead(summariseFailures(sweep.failures), sweep.skippedDead?.length ?? 0);
+
   // RECORDED EVEN THOUGH IT IS FREE, and recorded as zero rather than omitted. A
   // lane that writes no ledger row is indistinguishable from a lane that did not
   // run, and this one runs unattended forty-eight times a day.
@@ -302,7 +305,9 @@ export async function runFreeIngest(
     // and 36 Recruitee rate limits a sweep never reached the founder — the
     // reporting half of the defect `free-ats-source.ts` describes as its fourth
     // failure rule.
-    ...(sweep.failures.length > 0 ? { error: summariseFailures(sweep.failures) } : {}),
+    // Then the boards that sat out as dead, as their own clause: the failure text above is
+    // parsed downstream, and thirty dead boards must not read as thirty failures.
+    ...(boardError !== "" ? { error: boardError } : {}),
   });
 
   log.info(

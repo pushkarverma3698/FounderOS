@@ -13,6 +13,7 @@ legal claim on his behalf that he never read.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 #: Which ATS a posting URL belongs to. Ordered so the first match wins.
@@ -125,6 +126,148 @@ def field_map_for(url: str) -> FieldMap | None:
     return FIELD_MAPS.get(ats) if ats else None
 
 
+# ---------------------------------------------------------------------------
+# Where the application form lives.
+#
+# A posting URL is not always the form: Lever, Ashby, Workable, Recruitee,
+# Workday and Teamtailor serve the form from a route of its own, and Greenhouse
+# from an in-page anchor. Opening the posting instead costs Tashi a click on
+# every row, and on Ashby it costs the whole fill (the posting page has no
+# <input> at all, found live 2026-08-25).
+#
+# These are the rules of src/tools/jobhunt/adapters/*.ts (`applyUrlFor`, reached
+# through `getApplyUrl` in apply-packet.ts), ported. The two are separate code,
+# so tests/fixtures/apply-url-cases.json holds the (posting URL -> apply URL)
+# cases and BOTH suites read it: change a rule on one side alone and the other
+# side's test goes red. Deliberate difference: a `?query` or `#fragment` stays
+# after the path here, where the TypeScript appends its suffix after it.
+# ---------------------------------------------------------------------------
+
+#: Same recognisers, in the same order, as `PATTERNS` in
+#: src/tools/jobhunt/board-token.ts. Strict on purpose, unlike `ats_for_url`
+#: above: a custom domain that merely fronts a platform (Databricks'
+#: `?gh_jid=`) carries no board, and guessing "+/apply" on it makes a link that
+#: looks authoritative and 404s.
+_APPLY_PLATFORM_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (name, re.compile(pattern, re.IGNORECASE))
+    for name, pattern in (
+        ("greenhouse", r"^https?://(?:job-)?boards(?:\.eu)?\.greenhouse\.io/([^/?#]+)"),
+        ("lever", r"^https?://jobs(?:\.eu)?\.lever\.co/([^/?#]+)"),
+        ("ashby", r"^https?://jobs\.ashbyhq\.com/([^/?#]+)"),
+        ("recruitee", r"^https?://([a-z0-9-]+)\.recruitee\.com(?:/|$|\?)"),
+        ("smartrecruiters", r"^https?://jobs\.smartrecruiters\.com/([^/?#]+)"),
+        # `/j/` is required: without it the capture takes the literal "j".
+        ("workable", r"^https?://apply\.workable\.com/([^/?#]+)/j/"),
+        # `jobs.` is excluded: the bare marketing host is not a customer board.
+        ("personio", r"^https?://(?!jobs\.)([a-z0-9-]+)\.jobs\.personio\.(?:com|de)(?:/|$|\?)"),
+        (
+            "workday",
+            r"^https?://([a-z0-9-]+)\.(wd\d+)\.myworkdayjobs\.com/(?:wday/cxs/[^/]+/)?(?:[a-z]{2}-[a-z]{2}/)?([^/?#]+)",
+        ),
+        # `www` and `app` are the platform's own sites, never a customer board.
+        ("teamtailor", r"^https?://(?!www\.|app\.)([a-z0-9-]+)\.teamtailor\.com(?:/|$|\?)"),
+        (
+            "bamboohr",
+            r"^https?://(?!www\.|app\.)([a-z0-9-]+)\.bamboohr\.com/(?:careers|jobs|hiring)(?:/|$|\?)",
+        ),
+    )
+)
+
+#: Every platform `apply_url_for` has a rule for. The shared cases file must
+#: name each one, and every platform it names must be in here.
+APPLY_URL_PLATFORMS: tuple[str, ...] = tuple(name for name, _ in _APPLY_PLATFORM_PATTERNS)
+
+#: Workable's widget API hands postings out as account-less short links and
+#: names `<link>/apply` as the form in its own `application_url` field. There is
+#: no account in the path, so no pattern above sees them.
+_WORKABLE_SHORT_LINK = re.compile(r"^https?://apply\.workable\.com/j/[a-z0-9]+(?:/apply)?/?$", re.IGNORECASE)
+
+#: The path the form sits at, appended to the posting URL. A platform absent
+#: here and not Greenhouse serves its form on the posting page itself
+#: (SmartRecruiters, BambooHR, Personio), so the posting URL is the answer.
+_APPLY_PATH_SUFFIX = {
+    "lever": "/apply",
+    "ashby": "/application",
+    "recruitee": "/c/new",
+    "workable": "/apply",
+    "workday": "/apply",
+    "teamtailor": "/applications/new",
+}
+
+#: Greenhouse's form is on the posting page; this anchor scrolls to it.
+_GREENHOUSE_FORM_ANCHOR = "#app"
+
+
+def _split_tail(url: str) -> tuple[str, str, str]:
+    """(head, "?query" or "", "#fragment" or ""). String-level, so nothing else
+    in the URL is re-serialised: no case folding, no port or escape rewriting."""
+    head, hash_mark, fragment = url.partition("#")
+    head, question_mark, query = head.partition("?")
+    return head, question_mark + query, hash_mark + fragment
+
+
+def append_path_suffix(url: str, suffix: str) -> str:
+    """The URL with `suffix` at the end of its path, unless it is already there.
+
+    Trailing slashes on the path are dropped first, and a `?query` / `#fragment`
+    is kept after the path, so `.../abc?ref=x` becomes `.../abc/apply?ref=x`.
+    """
+    head, query, fragment = _split_tail(url)
+    head = head.rstrip("/")
+    if suffix and not head.endswith(suffix):
+        head += suffix
+    return head + query + fragment
+
+
+def _apply_platform_of(url: str) -> str | None:
+    for name, pattern in _APPLY_PLATFORM_PATTERNS:
+        if pattern.match(url):
+            return name
+    return None
+
+
+def apply_url_for(url: str | None) -> str | None:
+    """The address of this posting's application form, or None when we cannot
+    say. None is a first-class answer: the caller opens the posting URL itself,
+    and the founder finds the form by hand.
+
+    Total: never raises on junk. Idempotent: an apply URL maps to itself.
+    """
+    if not isinstance(url, str) or not url.strip():
+        return None
+    if _WORKABLE_SHORT_LINK.match(url):
+        return append_path_suffix(url, "/apply")
+
+    platform = _apply_platform_of(url)
+    if platform is None:
+        return None
+    if platform == "greenhouse":
+        head, query, fragment = _split_tail(url)
+        if fragment == _GREENHOUSE_FORM_ANCHOR:
+            return url
+        return head.rstrip("/") + query + _GREENHOUSE_FORM_ANCHOR
+    return append_path_suffix(url, _APPLY_PATH_SUFFIX.get(platform, ""))
+
+
+#: Characters `keyboard.type` turns into a KEY PRESS instead of text: "\n" and
+#: "\r" press Enter, "\t" presses Tab, and the rest of C0, DEL and the Unicode
+#: line breaks are control input no name, email or phone number contains.
+_KEY_LIKE_CHARACTERS = frozenset(map(chr, range(0x20))) | {"\x7f", "\x85", "\u2028", "\u2029"}
+
+
+def is_typable(value: str) -> bool:
+    """False when typing `value` would press a key instead of entering text.
+
+    THE INCIDENT-SHAPED HAZARD. Enter in a text field submits its form, and the
+    employer's submit handler is what sends the application. A line break in a
+    profile value (a stray newline at the end of `linkedin`, which is never
+    stripped, or in the middle of any value) therefore sent an application before
+    the founder saw the page: SUBMIT STAYS HUMAN. Such a value is never typed;
+    the overlay says so and the founder fixes apply-profile.json.
+    """
+    return not any(char in _KEY_LIKE_CHARACTERS for char in value)
+
+
 def planned_fills(field_map: FieldMap, profile) -> list[tuple[str, tuple[str, ...], str]]:
     """(label, selectors, value) for every field we intend to fill.
 
@@ -149,3 +292,4 @@ def planned_fills(field_map: FieldMap, profile) -> list[tuple[str, tuple[str, ..
     if field_map.website and getattr(profile, "website", None):
         plan.append(("website", field_map.website, profile.website))
     return plan
+

@@ -18,14 +18,26 @@ const {
   assertDispatchableRepo,
 } = await import("../../../src/tools/dispatch-repos.js");
 
+/**
+ * The repos the loop is provisioned for, in allowlist order. `pnpm repo:add <owner/repo>`
+ * (scripts/repo-add.ts) appends to this list together with DISPATCH_REPO_ALLOWLIST and
+ * DEFAULT_REPOS in deploy/agent-dispatch. Pinning it here means the allowlist can only grow
+ * as a reviewed line in a diff, never as a side effect.
+ */
+const PROVISIONED_REPOS = [
+  "pushkarverma3698/FounderOS",
+  "pushkarverma3698/House-of-Hulda-Website-frontend",
+  "OplifyMessage/oplify-messaging-app",
+  "OplifyMessage/oplify-messaging-api",
+] as const;
+
+/** True when the repo-name half of `owner/repo` contains `hint`: the rule `/task repo:<hint>` matches on. */
+const nameContains = (slug: string, hint: string): boolean =>
+  (slug.split("/")[1] ?? "").toLowerCase().includes(hint);
+
 describe("DISPATCH_REPO_ALLOWLIST", () => {
-  it("contains exactly the four repos the loop is provisioned for", () => {
-    expect([...DISPATCH_REPO_ALLOWLIST]).toEqual([
-      "pushkarverma3698/FounderOS",
-      "pushkarverma3698/House-of-Hulda-Website-frontend",
-      "OplifyMessage/oplify-messaging-app",
-      "OplifyMessage/oplify-messaging-api",
-    ]);
+  it("contains exactly the repos the loop is provisioned for", () => {
+    expect([...DISPATCH_REPO_ALLOWLIST]).toEqual([...PROVISIONED_REPOS]);
   });
 
   it("defaults to FounderOS", () => {
@@ -140,9 +152,12 @@ describe("matchAllowlistedRepos", () => {
   });
 
   it("returns every match for an ambiguous hint so the caller can refuse", () => {
-    // "o" appears in all four repo names. Silently picking the first would retarget the
-    // dispatch to a repo the founder did not name.
-    expect(matchAllowlistedRepos("o").length).toBe(4);
+    // Every allowlisted repo whose name contains "o" is a match. Silently picking the first
+    // would retarget the dispatch to a repo the founder did not name. Derived from the
+    // allowlist, not hard-coded, so `pnpm repo:add` cannot break it by adding a repo.
+    const containingO = DISPATCH_REPO_ALLOWLIST.filter((slug) => nameContains(slug, "o"));
+    expect(containingO.length).toBeGreaterThan(1);
+    expect(matchAllowlistedRepos("o")).toEqual(containingO);
   });
 
   it("resolves an unambiguous Oplify hint to the right side", () => {
@@ -238,12 +253,12 @@ describe("matchAllowlistedRepos — with registered project repos", () => {
 
   it("reports ambiguity across the hardcoded list and the registry together", () => {
     // Without this the founder gets a silent retarget when a new project's name
-    // happens to overlap an existing one. "r" appears in all three repo names.
-    expect(matchAllowlistedRepos("r", REGISTERED)).toEqual([
-      "pushkarverma3698/FounderOS",
-      "pushkarverma3698/House-of-Hulda-Website-frontend",
-      "pushkarverma3698/turicks-pricing-api",
-    ]);
+    // happens to overlap an existing one. Derived from the lists, not hard-coded, so
+    // `pnpm repo:add` cannot break it by adding a repo whose name contains an "r".
+    const containingR = [...DISPATCH_REPO_ALLOWLIST, ...REGISTERED].filter((slug) => nameContains(slug, "r"));
+    expect(containingR).toContain("pushkarverma3698/FounderOS");
+    expect(containingR).toContain("pushkarverma3698/turicks-pricing-api");
+    expect(matchAllowlistedRepos("r", REGISTERED)).toEqual(containingR);
   });
 
   it("ignores a duplicate registration rather than reporting it as ambiguous", () => {

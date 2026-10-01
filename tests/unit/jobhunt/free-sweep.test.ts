@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { IngestLine } from "../../../src/tools/jobhunt/ingest-batch.js";
 import type { FreeIngestResult } from "../../../src/tools/jobhunt/free-ingest.js";
+import type { BoardSweep } from "../../../src/tools/jobhunt/free-ats-source.js";
 
 const mockRunFreeIngest = vi.fn<() => Promise<FreeIngestResult>>();
 vi.mock("../../../src/tools/jobhunt/free-ingest.js", () => ({
@@ -325,6 +326,45 @@ describe("runFreeSweep", () => {
 
     await expect(runFreeSweep()).resolves.toBeUndefined();
     expect(mockSendToChat).not.toHaveBeenCalled();
+  });
+
+  // The dead-board record is opt-in per caller, and this is the caller that matters: the
+  // cron. If this wiring goes, every test of the skip still passes while production polls
+  // the same 30 dead boards every half hour, exactly as before.
+  it("polls with the persisted dead-board record, so a 404-ing board stays skipped across restarts", async () => {
+    mockRunFreeIngest.mockResolvedValue(result());
+    const { sweepBoards } = await import("../../../src/tools/jobhunt/free-ats-source.js");
+
+    await runFreeSweep();
+
+    expect(sweepBoards).toHaveBeenCalledTimes(1);
+    const [, health] = vi.mocked(sweepBoards).mock.calls[0]!;
+    expect(health).toMatchObject({ root: expect.any(String), now: expect.any(Function) });
+  });
+
+  it("hands every profile the dead-board skip list even after aggregator postings are merged in", async () => {
+    const { sweepBoards } = await import("../../../src/tools/jobhunt/free-ats-source.js");
+    const { sweepAggregators } = await import("../../../src/tools/jobhunt/aggregator-source.js");
+    vi.mocked(sweepBoards).mockResolvedValueOnce({
+      candidates: [],
+      failures: ["greenhouse/live: HTTP 500"],
+      boardsPolled: 5,
+      skippedDead: ["greenhouse/dead"],
+    });
+    vi.mocked(sweepAggregators).mockResolvedValueOnce({
+      candidates: [{ url: "https://example.com/jobs/1", board: { name: "Acme B.V." }, title: "Financial Analyst" }],
+      failures: ["aggregator: down"],
+      harvestedTokens: [],
+    } as never);
+    mockRunFreeIngest.mockResolvedValue(result());
+
+    await runFreeSweep();
+
+    const [{ sweep }] = (mockRunFreeIngest.mock.calls as unknown as [{ sweep: BoardSweep }][])[0]!;
+    expect(sweep.candidates).toHaveLength(1);
+    expect(sweep.failures).toEqual(["greenhouse/live: HTTP 500", "aggregator: down"]);
+    expect(sweep.skippedDead).toEqual(["greenhouse/dead"]);
+    expect(sweep.boardsPolled).toBe(5);
   });
 
   it("FREE_SWEEP_CRON is a valid 5-field cron expression firing every 30 minutes", () => {

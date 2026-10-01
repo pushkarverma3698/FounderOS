@@ -87,6 +87,8 @@ mac-client/apply-profile*.json
 !mac-client/apply-profile.example.json
 !mac-client/apply-profile-wife.example.json
 mac-client/.queue/
+# Pages saved by tools/capture_apply_form.py: someone else's site, never part of the repo.
+mac-client/captures/
 mac-client/*.pdf
 mac-client/cv/
 

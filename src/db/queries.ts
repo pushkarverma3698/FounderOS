@@ -10,7 +10,8 @@
 import { and, count, desc, eq, gt, gte, inArray, lt, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { tokenizeQuery, rankByTerms } from "./keyword-search.js";
-import { INTERNAL_CONTEXT_KEYS, LAST_UPDATED_KEY, reconcileSeededContext } from "./founder-context.js";
+import { mergeContextUpdates, reconcileSeededContext, type SeedReconciliation } from "./founder-context.js";
+import { CONTEXT_META_KEY, readContextMeta, type ContextSource } from "./context-meta.js";
 
 /**
  * Candidate over-fetch multiple: keyword searches pull `limit * CANDIDATE_FACTOR`
@@ -903,21 +904,28 @@ export async function getFounderContext(tenantId: string): Promise<Record<string
 
 /**
  * Merge updates into the founder's context (upsert).
- * Preserves existing keys unless overwritten. `last_updated` moves only when a
- * founder-facing key is written: a budget-alert dedupe write is not "your
- * context was updated".
+ * Preserves existing keys unless overwritten. Every key written is dated in
+ * `context_meta` with the caller's `source` (founder, seed or system), and
+ * `last_updated` moves, only when a founder-facing key is written: a budget-alert
+ * dedupe write is not "your context was updated" (mergeContextUpdates).
  */
 export async function upsertFounderContext(
   tenantId: string,
   updates: Record<string, unknown>,
+  source: ContextSource,
 ): Promise<void> {
   const current = await getFounderContext(tenantId);
-  const touchesFounderKeys = Object.keys(updates).some((key) => !INTERNAL_CONTEXT_KEYS.includes(key));
-  const merged = {
-    ...current,
-    ...updates,
-    ...(touchesFounderKeys ? { [LAST_UPDATED_KEY]: new Date().toISOString() } : {}),
-  };
+  const merged = mergeContextUpdates(current, updates, new Date(), source);
+  // A write over an unreadable context_meta rebuilds it from the keys it dated. Say so:
+  // otherwise the dates that were in it disappear without a trace.
+  const { problems } = readContextMeta(current);
+  if (problems.length > 0 && merged[CONTEXT_META_KEY] !== current[CONTEXT_META_KEY]) {
+    const { childLogger } = await import("../infra/logger.js");
+    childLogger({ module: "queries" }).warn(
+      { problems, tenantId },
+      "founder_context dates were unreadable — this write rebuilt context_meta; every value it did not write reads 'date unknown' until confirmed",
+    );
+  }
   await writeFounderContext(tenantId, merged);
 }
 
@@ -932,11 +940,14 @@ export async function upsertFounderContext(
 export async function seedFounderContextDefaults(
   tenantId: string,
   defaults: Record<string, unknown>,
-): Promise<{ filled: string[]; refreshed: string[]; retired: string[] }> {
+): Promise<Omit<SeedReconciliation, "data">> {
   const current = await getFounderContext(tenantId);
-  const { data, filled, refreshed, retired } = reconcileSeededContext(current, defaults);
-  if (filled.length + refreshed.length + retired.length > 0) await writeFounderContext(tenantId, data);
-  return { filled, refreshed, retired };
+  const { data, ...changes } = reconcileSeededContext(current, defaults, new Date());
+  const { filled, refreshed, retired, dated, metaProblems } = changes;
+  if (filled.length + refreshed.length + retired.length + dated.length + metaProblems.length > 0) {
+    await writeFounderContext(tenantId, data);
+  }
+  return changes;
 }
 
 async function writeFounderContext(tenantId: string, data: Record<string, unknown>): Promise<void> {

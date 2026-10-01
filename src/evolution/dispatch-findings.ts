@@ -172,6 +172,19 @@ export type DispatchOutcome =
   | { readonly state: "failed"; readonly reason: string };
 
 /**
+ * Where one dispatch run gets its ranked findings. The default is the whole
+ * code-health and telemetry audit; the daily jobhunt check passes its own so that
+ * ONLY its analyzer runs, through the same dedupe, cap, template and labels.
+ */
+export type FindingSource = () => Promise<{
+  readonly ranked: readonly Finding[];
+  readonly telemetrySkippedReason: string | null;
+}>;
+
+/** Every analyzer over the current tree. Still disabled in the scheduler (2026-08-21); the CLI uses it. */
+const codeHealthSource: FindingSource = () => runSelfAudit(repoRoot());
+
+/**
  * Run the analyzers and, if warranted, file exactly one issue.
  *
  * Deliberately does NOT persist findings. Loop A (`runSelfAuditSweep`, 08:00)
@@ -182,10 +195,11 @@ export type DispatchOutcome =
 export async function runSelfImprovementDispatch(
   gateway: IssueGateway = octokitIssueGateway(),
   now: Date = new Date(),
+  source: FindingSource = codeHealthSource,
 ): Promise<DispatchOutcome> {
   if (!isDispatchEnabled()) return { state: "disabled" };
 
-  const run = await runSelfAudit(repoRoot());
+  const run = await source();
 
   // The telemetry tier going dark is reported by Loop A's message, which fires an
   // hour earlier and names the analyzers that produced no result. Here it only

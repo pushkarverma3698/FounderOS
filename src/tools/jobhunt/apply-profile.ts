@@ -33,6 +33,7 @@
 import { z } from "zod";
 import * as fs from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { dataRoot } from "../../core/data-root.js";
 import { DEFAULT_PROFILE_ID } from "./profile-config.js";
 
 /**
@@ -102,7 +103,7 @@ export type ApplyProfile = z.infer<typeof applyProfileSchema>;
  */
 export const APPLY_PROFILE_PATH =
   process.env["APPLY_PROFILE_PATH"]?.trim() ||
-  join(process.env["FOUNDEROS_DATA_ROOT"]?.trim() || "/opt/founderos-data", "apply-profile.json");
+  join(dataRoot(), "apply-profile.json");
 
 /**
  * Where THIS candidate's apply profile lives.
