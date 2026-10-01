@@ -87,6 +87,50 @@ See `docs/JOBHUNT.md` ("Known limitation: CV fabrication risk") for why.
 | `mac_client/resolver.py` | heuristic DOM fallback that fills gaps in a field map, reading English and Dutch labels; never a cover letter |
 | `mac_client/apply.py` | the browser queue and the overlay |
 | `mac_client/ledger.py` | crash-safe local record + flow-back to Postgres |
+| `mac_client/after_submit.py` | a submit that navigates: asks you on the new page, never records by itself |
+| `tools/capture_apply_form.py` | dev tool: saves one apply page's DOM and controls, read-only (see below) |
+
+## Capture a real apply form (dev tool, read-only)
+
+**This tool has NEVER been run against SmartRecruiters**, or against any real site. It was
+tested only on a local page with an open shadow root, because the machine it was built on
+cannot reach the real page. The first real run may need a fix: send what it printed.
+
+Why it exists: a field map for a platform nobody has seen (SmartRecruiters) has to be written
+from the real page, not guessed. This saves what the page looks like and touches nothing on it.
+Run it on the Mac (its browser trusts your network), on a posting's apply page:
+
+```bash
+cd mac-client
+.venv/bin/python tools/capture_apply_form.py "https://jobs.smartrecruiters.com/<company>/<posting>" \
+    --locale nl-NL --out captures/smartrecruiters-nl
+```
+
+It opens a fresh browser (no login, no cookies), loads that ONE address, waits up to 20 s for form
+fields (`--wait 40` for a slow page, `--headed` to watch), and writes three files next to `--out`:
+
+| File | What is in it |
+|---|---|
+| `.dom.html` | the page as rendered, open shadow roots written out in place; scripts, styles, images, iframes, links and form targets removed; hidden fields keep their name and lose their value |
+| `.controls.json` | every input, textarea, select, button and custom element, with its attributes, its label and whether it is visible |
+| `.meta.json` | final address, status, redirects, title, language, what was clicked, and how many iframes and unreadable custom elements it could not see |
+
+It never types, selects, uploads or submits. It clicks nothing unless you give it
+`--click "<the button's whole text>"` (repeatable) to open a form that is hidden behind a button,
+and then it presses only that one button or link, and only if exactly one matches. It refuses,
+before it even starts, any text that looks like sending an application (submit, verzenden,
+versturen, send application, apply now, solliciteer), and at the page it refuses any control that
+would submit a form whatever its label says. If the button that opens the form is called
+"Solliciteer nu" or "Apply now", open the form in your own browser and give the tool the form's own
+address instead.
+
+Exit codes: `0` captured; `1` the page would not load; `2` a click was refused; `3` captured, but no
+form field ever appeared (the form may be behind a button, inside an iframe, or the site refused this
+browser: try `--headed`). A certificate error is explained and never bypassed: use a machine and
+network whose browser trusts it.
+
+The files go to `captures/` by default, which git ignores. They are somebody else's page: skim them,
+then send the three files for the field map. Nothing is uploaded by the tool.
 
 Full pipeline documentation (screening, ranking, tailoring, cost tracking,
 known gaps): [`docs/JOBHUNT.md`](../docs/JOBHUNT.md).
