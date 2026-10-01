@@ -1,6 +1,6 @@
 # VPS daemons — pr-brain, agent-dispatch
 
-Source of truth for the two bash daemons that run the Brain/Doer agent loop on
+Source of truth for the bash daemons that run the Brain/Doer agent loop on
 `founderos-vps`. Until 2026-09-14 these existed **only** as hand-edited files
 in `~/bin/` on the VPS — no git history, no PR review, no rollback, no diff
 between "what's running" and "what was intended." See
@@ -22,36 +22,110 @@ directory; only `agent-dispatch`'s documented location was wrong.
 | Daemon | Source in this repo | VPS path (deployed, live) | Crontab | What it does |
 |---|---|---|---|---|
 | `pr-brain` | `deploy/vps-daemons/pr-brain` | `~/bin/pr-brain` | `*/20 * * * *` | Gates every open PR authored by this account: re-runs `pnpm gate`, runs the `pr-adversary` protocol, approves / pushes a fix / requests changes, then **merges** once cleared. A head whose only new commits are pr-brain's own fixes or clean merges of the base is not re-gated: the verdict is carried forward and the merge retried with no Claude session (2026-09-29) — except in an employer/org repo (`repo_owner != $OWNER`, e.g. `OplifyMessage`), where it marks the PR ready and always leaves the merge to a human (restored 2026-09-21). |
-| `agent-dispatch` | `deploy/agent-dispatch` | `~/bin/agent-dispatch` | `*/15 * * * *` | Iterates every repo in `ISSUE_REPOS`, claims one `agent:ready` GitHub issue per tick, checks out a branch in the matching `/opt/agy-workspace/<repo>` workspace, invokes Antigravity (`agy`) to implement it, opens a draft PR. On "Individual quota reached … Resets in …" it records the reset time in `~/.claude/agent-dispatch.quota-until`, puts the issue back to `agent:ready`, and starts nothing until then. |
+| `agent-dispatch` | `deploy/agent-dispatch` | `~/bin/agent-dispatch` | `*/15 * * * *` | Sweeps every repo in its own `DEFAULT_REPOS` (the only list it reads), claims one `agent:ready` GitHub issue per repo per tick **if its brief is complete**, checks out a branch in the matching `/opt/agy-workspace/<repo>` workspace, invokes Antigravity (`agy`) to implement it, opens a draft PR. Every way a run can end without a PR is classified (see below) instead of all becoming `agent:failed`. |
+| `onboard-repo.sh` | `deploy/onboard-repo.sh` | `~/bin/onboard-repo.sh` | — (run by hand, and `--check` by every agent-dispatch tick) | Puts a repo on the loop, or reports what it is missing. See "Adding a repo". |
+| helpers | `deploy/lib/*.sh` | `~/bin/lib/*.sh` | — | Sourced by the daemons: `down-state.sh` (the pause/resume state machine and secret redaction, shared by both) and `agy-failure.sh` (the failure classifier). **A daemon refuses to start without them.** |
 
 Both read config from `~/.claude/pr-brain.repos` / env vars — see each
 script's own header comment for the full list.
 
-## Deploying a change
+## Pause states: what the founder is told
 
-The crontab invokes the file at `~/bin/<name>` directly — it does **not**
-check out this repo on the VPS and run from a checkout. A commit here has
-zero effect on prod until copied over by hand:
+A loop that stops and says nothing looks exactly like an idle one. Each way the
+loop can stop is announced **once** on Telegram with the exact fix, silent for as
+long as it lasts, and announced **once more** when it recovers.
+
+| State | File | Cleared by |
+|---|---|---|
+| Antigravity auth failed (key or login rejected) | `~/.claude/agent-dispatch.down` (`auth`) | the key file's mtime changing (the new key is tried on the next tick), or deleting the file |
+| `gh` logged out, a tool or `agy` missing | `~/.claude/agent-dispatch.down` (`gh-auth`, `missing-dep`, `agy-missing`) | recovering by itself: checked every tick |
+| Antigravity quota exhausted | `~/.claude/agent-dispatch.quota-until` | the reset time passing |
+| Claude unavailable (auth, usage limit) | `~/.claude/pr-brain.down` | the next sweep that reaches Claude |
+| Repo not set up (workspace, labels) | `~/.claude/agent-dispatch.onboard-reported` | fixing it (`onboard-repo.sh`); a change in the list sends one more message |
+
+How a failed Antigravity run is classified (`deploy/lib/agy-failure.sh`, tail of the log only,
+on lines the CLI printed about its own failure, never a transcript that merely mentions a code):
+
+| Class | What happens |
+|---|---|
+| quota | issue back to `agent:ready`; nothing starts until the reset time |
+| auth | issue back to `agent:ready`; the whole loop pauses; a re-dispatch leaves the PR open and does not count the attempt |
+| transient (timeout, 5xx, connection reset) | back to `agent:ready` with a `<!-- agent-transient: N -->` marker; the 3rd in a row is `agent:failed` with all three log tails in one comment |
+| anything else | `agent:failed`, with the last 60 lines |
+
+An issue whose description is missing any of the nine sections of
+`.github/ISSUE_TEMPLATE/agent-task.md`, or has one that says nothing, is **not claimed**:
+it gets `agent:needs-brief`, one comment listing what is missing and one Telegram message.
+`~/bin/agent-dispatch --check-brief < body.md` runs the same check on a file.
+
+Everything quoted to Telegram or a GitHub comment, and everything appended to the log, passes
+through `redact_secrets` first, and the Gemini key reaches `agy` on stdin, never on a command line.
+
+## Adding a repo
+
+A repo lives in **one** list, `DEFAULT_REPOS` in `deploy/agent-dispatch`, held equal to
+`DISPATCH_REPO_ALLOWLIST` (`src/tools/dispatch-repos.ts`) by a test. Add it with a one-line PR
+(`pnpm repo:add <owner/repo>` edits both lists and the test fixture), then on the VPS:
 
 ```bash
-# from a machine with founderos-vps SSH access, after merging to main:
-scp deploy/vps-daemons/pr-brain founderos-vps:~/bin/pr-brain
-scp deploy/agent-dispatch founderos-vps:~/bin/agent-dispatch
-ssh founderos-vps 'chmod +x ~/bin/pr-brain ~/bin/agent-dispatch'
-# verify the deployed copy matches this repo:
-shasum -a 256 deploy/vps-daemons/pr-brain deploy/agent-dispatch
-ssh founderos-vps 'sha256sum ~/bin/pr-brain ~/bin/agent-dispatch'
+ssh founderos-vps '~/bin/onboard-repo.sh owner/repo'   # clones /opt/review + /opt/agy-workspace, creates the 6 labels
+ssh founderos-vps '~/bin/onboard-repo.sh --check'      # every repo in DEFAULT_REPOS, changes nothing
 ```
 
-That manual step is a known gap, not fixed by importing these files — it
-moves the problem from "no version control" to "version controlled but not
-auto-deployed," which is strictly better and is as far as this task's scope
-goes. A future improvement would be a small systemd/cron-triggered `git pull`
-+ diff-and-copy step; not built here because it wasn't part of what broke.
+`ISSUE_REPOS` / `ISSUE_REPO` in the crontab line are **ignored** now (the daemon logs one warning per
+tick while either is set): delete them with `crontab -e`.
+
+## Deploying a change
+
+The crontab invokes the file at `~/bin/<name>` directly — it does **not** run from a checkout.
+The Deploy workflow (`.github/workflows/deploy.yml`) therefore has a step, **after** the app is
+restarted and healthy, that runs `deploy/sync-daemons.sh` on the VPS:
+
+- it copies `deploy/lib/*.sh` first, then `agent-dispatch`, `pr-brain` and `onboard-repo.sh` into
+  `~/bin`, each written to `<name>.new`, chmod'd and `mv`'d into place (atomic, so a daemon that
+  starts mid-copy never sees half a file, and a running one keeps its old inode);
+- it compares the `sha256sum` of every deployed file with the checkout's and starts each daemon
+  with `--help` from where it now lives (which proves the daemon finds its helpers);
+- any mismatch fails the job and **names the file**. That step is separate from "Deploy over SSH"
+  on purpose: a red "Sync VPS daemons" means the daemons are stale, not that production is down.
+
+To do it by hand (or re-sync after a hand edit on the box): `ssh founderos-vps 'cd /opt/founderos && bash deploy/sync-daemons.sh'`.
+To roll back: check out the previous commit's `deploy/` in `/opt/founderos` and run the same command,
+or revert the merge and let the Deploy workflow re-sync.
+
+*Assumption, not verified from a cloud session:* the deploy user's `~/bin` is the same `~/bin` the
+crontab runs from. The sync prints the destination it used.
+
+## Claude login that survives weeks (`~/.claude/pr-brain.token`)
+
+An expired Claude login used to need someone to ssh in and run `/login`. pr-brain now reads a
+long-lived token from `~/.claude/pr-brain.token` when that file exists:
+
+```bash
+ssh -t founderos-vps 'claude setup-token'        # prints a token once
+# then on the VPS: line 1 = the token, line 2 = today's date (YYYY-MM-DD)
+printf '%s\n%s\n' '<paste the token>' "$(date -u +%F)" > ~/.claude/pr-brain.token && chmod 600 ~/.claude/pr-brain.token
+```
+
+- The file is used **only if its mode is exactly 0600**; otherwise pr-brain warns once (Telegram) and
+  ignores it.
+- The token is exported as `CLAUDE_CODE_OAUTH_TOKEN` into the environment of the `claude` invocation
+  only. It is never an argument, never logged (it is masked wherever text leaves the box) and never
+  traced.
+- **The token's lifetime is UNVERIFIED** until `claude setup-token --help` on the VPS confirms it. The
+  330-day warning is a guess made before that was checked: pr-brain sends one Telegram warning when the
+  date on line 2 is 330 days old, and again only if you replace the token (a new date re-arms it).
+  Check the real lifetime the first time you create the token and adjust `TOKEN_WARN_DAYS` in
+  `pr-brain` if it is shorter.
 
 ## Keeping this copy honest
 
-This file drifts the moment someone hand-edits the VPS copy directly instead
-of going through a commit here. There is no CI check enforcing that the two
-match (rule #27: a rule with no mechanism decays) — if you suspect drift, the
-`shasum` comparison above is the fastest way to confirm it.
+A rule with no mechanism decays (rule #27). What enforces each half of "the box runs what the repo says":
+
+- **deploy time:** the sha256 comparison in `deploy/sync-daemons.sh`, run by the Deploy workflow. A
+  hand edit on the VPS is overwritten by the next deploy, so make changes here, through a PR.
+- **CI:** `tests/unit/scripts/sync-daemons.test.ts` fails if a file a daemon sources is not in the copy
+  list (the first deploy would break both daemons), and `tests/unit/scripts/deploy-workflow.test.ts`
+  fails if the sync step disappears, moves before the restart, or leaks a secret.
+- **by hand:** `ssh founderos-vps 'sha256sum ~/bin/agent-dispatch ~/bin/pr-brain ~/bin/onboard-repo.sh ~/bin/lib/*.sh'`
+  against `sha256sum` of the same files in the checkout.
