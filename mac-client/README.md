@@ -39,6 +39,19 @@ changes), or your own **YES**. If the page says nothing either way, the bar asks
 **Did the application go through?** and writes nothing until you answer: **YES**
 records it, **NO** records nothing and gives you the buttons back.
 
+If the site's form sends you to another page when you press SUBMIT & NEXT (a plain
+form that posts and shows a thank-you page), the bar is rebuilt on that page and asks
+the same question, **Did the application go through?** Only your **YES** records it:
+the page saying "Thank you" is not enough, because the page it would be compared with
+is gone. **NO** records nothing, gives you the buttons back and prints one
+`[NOT RECORDED]` line in the terminal. If the new page never finishes loading (30
+seconds), nothing is recorded, the same kind of line is printed and the queue moves on;
+the row comes back in your next queue, so check the site before you apply again.
+
+A page change *before* you press SUBMIT & NEXT (a link, a second step) removes the bar
+and does not bring it back. Stop the run with Ctrl-C and start it again: what you
+already recorded is on disk and is pushed at the next start.
+
 If the bar cannot find the site's submit button, submit the form yourself, then
 press **I SUBMITTED IT MYSELF** to record it. **SKIP** removes the row from your
 list for good: it does not come back tomorrow.

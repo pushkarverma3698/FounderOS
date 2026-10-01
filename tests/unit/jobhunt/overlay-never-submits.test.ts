@@ -15,6 +15,12 @@
  * founder's own press of YES on "Did the application go through?", or of
  * "I SUBMITTED IT MYSELF". A page that says nothing is never defaulted to applied.
  *
+ * A form that navigates destroys the bar before it can report, so the host
+ * (mac-client/mac_client/after_submit.py) puts the same question on the new page.
+ * That path may ASK, never decide: the overlay tells its host only that SUBMIT was
+ * pressed or that she answered NO, no handler is ever invoked by the overlay
+ * itself, and the Python side has no way to write an outcome of its own.
+ *
  * CI runs this; the Python suite that exercises the overlay in a real browser
  * (mac-client/tests) is not in CI.
  */
@@ -24,6 +30,8 @@ import * as ts from "typescript";
 import { describe, it, expect } from "vitest";
 
 const OVERLAY_PATH = new URL("../../../mac-client/mac_client/overlay.js", import.meta.url);
+const AFTER_SUBMIT_PATH = new URL("../../../mac-client/mac_client/after_submit.py", import.meta.url);
+const APPLY_PATH = new URL("../../../mac-client/mac_client/apply.py", import.meta.url);
 
 /** Method calls that act on a page instead of reading it. */
 const ACTING_METHODS: ReadonlySet<string> = new Set(["click", "submit", "requestSubmit", "dispatchEvent"]);
@@ -126,6 +134,73 @@ function originOf(call: ts.Node): string {
   return `UNGUARDED (under: ${innermostCondition ?? "nothing"})`;
 }
 
+/** The `<name>` of the nearest enclosing `<name>.onclick = ...` handler, if any. */
+function enclosingButton(node: ts.Node): string | null {
+  for (let current: ts.Node | undefined = node.parent; current; current = current.parent) {
+    if ((ts.isArrowFunction(current) || ts.isFunctionExpression(current)) && ts.isBinaryExpression(current.parent)) {
+      const left = current.parent.left;
+      if (ts.isPropertyAccessExpression(left) && left.name.text === "onclick" && ts.isIdentifier(left.expression)) {
+        return left.expression.text;
+      }
+    }
+  }
+  return null;
+}
+
+interface HostEvent {
+  readonly kind: string;
+  readonly from: string;
+}
+
+/** Every `tellHost("<kind>")`: what the overlay tells its host, and the button handler it does so from. */
+function hostEvents(source: string): HostEvent[] {
+  const found: HostEvent[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "tellHost" &&
+      node.arguments[0] !== undefined &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      found.push({ kind: node.arguments[0].text, from: enclosingButton(node) ?? "NOT IN A BUTTON HANDLER" });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parse(source));
+  return found;
+}
+
+/** Every `window.founderosEvent(...)` call, wherever it sits. */
+function hostChannelCalls(source: string): number {
+  let count = 0;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "founderosEvent"
+    ) {
+      count++;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parse(source));
+  return count;
+}
+
+/** Handlers the overlay calls ITSELF (`yes.onclick()`): a way to answer for her. */
+function invokedHandlers(source: string): string[] {
+  const found: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "onclick") {
+      found.push(node.expression.getText());
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parse(source));
+  return found;
+}
+
 const overlay = readFileSync(OVERLAY_PATH, "utf8");
 
 describe("overlay.js presses an employer's button only for the founder", () => {
@@ -178,5 +253,57 @@ describe("overlay.js presses an employer's button only for the founder", () => {
     // Otherwise a moved file would make every check above pass on nothing.
     expect(overlay).toContain("founderosDecision");
     expect(overlay).toContain("submit.onclick");
+  });
+});
+
+describe("a page the form navigated away from: the host may ask, never decide", () => {
+  it("tells its host only that SUBMIT was pressed and that she answered NO, each from its own button", () => {
+    expect(hostEvents(overlay)).toEqual([
+      { kind: "submit-attempted", from: "submit" },
+      { kind: "answered-no", from: "no" },
+    ]);
+  });
+
+  it("reaches the host through one helper, so no other call can smuggle an outcome through", () => {
+    expect(hostChannelCalls(overlay)).toBe(1);
+  });
+
+  it("never answers for her by invoking a button handler itself", () => {
+    expect(invokedHandlers(overlay)).toEqual([]);
+  });
+
+  // A guard that cannot fail proves nothing.
+  it("notices an outcome sent as an event, and a handler pressed by the overlay", () => {
+    const bad = `(data) => {
+      skip.onclick = async () => { await tellHost("applied"); };
+      tellHost("submit-attempted");
+      if (data.ask) yes.onclick();
+    }`;
+    expect(hostEvents(bad)).toEqual([
+      { kind: "applied", from: "skip" },
+      { kind: "submit-attempted", from: "NOT IN A BUTTON HANDLER" },
+    ]);
+    expect(invokedHandlers(bad)).toEqual(["yes.onclick"]);
+  });
+
+  it("is carried out by a Python watcher that cannot reach the outcome store", () => {
+    const watcher = readFileSync(AFTER_SUBMIT_PATH, "utf8");
+    expect(watcher).toContain("class SubmitWatch");
+    expect(watcher).not.toMatch(/\bledger\b/);
+    expect(watcher).not.toMatch(/\.record\(/);
+    expect(watcher).not.toMatch(/set_result/); // it may fail the job's future, never complete it
+  });
+
+  it("leaves apply.py writing an outcome from two places only: the expired-posting skip and the founder's decision", () => {
+    const apply = readFileSync(APPLY_PATH, "utf8");
+    const sites = [...apply.matchAll(/ledger\.record\(job\.id, ([\w.]+)/g)].map((m) => m[1]);
+    expect(sites).toEqual(["ledger.SKIPPED", "outcome"]);
+    expect(apply).not.toMatch(/ledger\.record\([^)]*(APPLIED|["']applied["'])/);
+  });
+
+  it("would notice the watcher recording a navigation as applied", () => {
+    const bad = `ledger.record(job.id, ledger.APPLIED, company=job.company)`;
+    expect(bad).toMatch(/ledger\.record\([^)]*(APPLIED|["']applied["'])/);
+    expect(`from . import ledger`).toMatch(/\bledger\b/);
   });
 });

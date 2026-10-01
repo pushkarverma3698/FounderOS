@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from mac_client import apply as apply_mod
@@ -62,3 +65,85 @@ class Overlay:
             arg=text,
             timeout=timeout,
         )
+
+
+# -- a real HTTP server, for what file:// cannot do: a form POST that navigates -------
+
+@dataclass(frozen=True)
+class Reply:
+    body: str = ""
+    status: int = 200
+    location: str | None = None
+    #: Send the first bytes of a page and never finish it (until the site closes):
+    #: the browser commits the navigation but the document never finishes loading.
+    hold: bool = False
+
+
+class _Handler(BaseHTTPRequestHandler):
+    def _serve(self, method: str) -> None:
+        site: LocalSite = self.server.site  # type: ignore[attr-defined]
+        if method == "POST":
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        path = self.path.split("?")[0]
+        site.seen.append((method, path))
+        reply = site.pages.get((method, path))
+        if reply is None:
+            self.send_error(404)
+            return
+        self.send_response(reply.status)
+        if reply.location:
+            self.send_header("Location", reply.location)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        if reply.hold:
+            self.end_headers()
+            self.wfile.write(b"<!doctype html><html><body><p>loading")
+            self.wfile.flush()
+            site.release.wait(30)
+            return
+        body = reply.body.encode()
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:  # noqa: N802 (http.server's naming)
+        self._serve("GET")
+
+    def do_POST(self) -> None:  # noqa: N802
+        self._serve("POST")
+
+    def log_message(self, *_args) -> None:
+        pass  # pytest output, not an access log
+
+
+class LocalSite:
+    """Pages over real HTTP on 127.0.0.1 (no network leaves the machine).
+
+    `pages` maps (method, path) to a `Reply`; every request is recorded in `seen`,
+    so a test can say the employer's form really was POSTed, and how often.
+    """
+
+    def __init__(self, pages: dict[tuple[str, str], Reply]):
+        self.pages = pages
+        self.seen: list[tuple[str, str]] = []
+        self.release = threading.Event()
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        self._server.daemon_threads = True
+        self._server.site = self  # type: ignore[attr-defined]
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+
+    def __enter__(self) -> "LocalSite":
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.release.set()
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(5)
+
+    def url(self, path: str) -> str:
+        return f"http://127.0.0.1:{self._server.server_address[1]}{path}"
+
+    @property
+    def posts(self) -> list[str]:
+        return [path for method, path in self.seen if method == "POST"]
