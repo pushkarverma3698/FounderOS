@@ -83,13 +83,14 @@ describe("the cron", () => {
     expect(h.sent).toHaveLength(1);
   });
 
-  it("leaves every other cron in startScheduler untouched: only the standup passes a timezone", async () => {
+  it("leaves every other cron in startScheduler untouched: only the standup and the jobhunt findings check pass a timezone", async () => {
     const { startScheduler } = await import("../../../src/infra/scheduler.js");
     startScheduler();
+    // Two crons are timezone-aware, on purpose: the 09:00 standup (this branch) and the 09:30 jobhunt
+    // findings check (the findings branch). Every OTHER cron keeps the server's own clock, as before.
     const withZone = mockSchedule.mock.calls.filter((c) => c[2] !== undefined);
-    expect(withZone).toHaveLength(1);
-    expect(withZone[0]![0]).toBe("0 9 * * *");
-    expect(withZone[0]![2]).toEqual({ timezone: appTimeZone() });
+    expect(withZone.map((c) => c[0]).sort()).toEqual(["0 9 * * *", "30 9 * * *"]);
+    for (const call of withZone) expect(call[2]).toEqual({ timezone: appTimeZone() });
     for (const call of mockSchedule.mock.calls.filter((c) => c[2] === undefined)) expect(call).toHaveLength(2);
     // The stale-approval reminder shares the 09:00 expression; it is still registered, without options.
     expect(mockSchedule.mock.calls.filter((c) => c[0] === "0 9 * * *")).toHaveLength(3);
