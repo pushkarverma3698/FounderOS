@@ -33,6 +33,16 @@ Each job: review the pre-filled form, complete anything it left blank, then
 **SUBMIT & NEXT** (presses the site's own submit, records it, moves on) or
 **SKIP** (records that you passed, moves on). Both are your click.
 
+`applied` is recorded from exactly two things: a positive sign from the page
+(it says "Thank you, application received", the form disappears, or the address
+changes), or your own **YES**. If the page says nothing either way, the bar asks
+**Did the application go through?** and writes nothing until you answer: **YES**
+records it, **NO** records nothing and gives you the buttons back.
+
+If the bar cannot find the site's submit button, submit the form yourself, then
+press **I SUBMITTED IT MYSELF** to record it. **SKIP** removes the row from your
+list for good: it does not come back tomorrow.
+
 Before you submit, the overlay tells you which resume is attached — read this,
 it is not decorative:
 
@@ -53,8 +63,8 @@ See `docs/JOBHUNT.md` ("Known limitation: CV fabrication risk") for why.
 | `mac_client/sync.py` | pull the ranked queue + CVs from the VPS over SSH |
 | `mac_client/notify.py` | one-shot Telegram POST — no polling, no bot conflict |
 | `mac_client/profile.py` | load/validate `apply-profile.json`; the tailored-vs-generic CV signal |
-| `mac_client/adapters.py` | per-ATS form field maps: Greenhouse, Lever, Ashby, Workable, Recruitee |
-| `mac_client/resolver.py` | heuristic DOM fallback for ATS platforms with no field map |
+| `mac_client/adapters.py` | per-ATS form field maps (Greenhouse, Lever, Ashby, Workable, Recruitee) and where each platform's application form lives (`apply_url_for`, shared cases in `tests/fixtures/apply-url-cases.json`) |
+| `mac_client/resolver.py` | heuristic DOM fallback that fills gaps in a field map, reading English and Dutch labels; never a cover letter |
 | `mac_client/apply.py` | the browser queue and the overlay |
 | `mac_client/ledger.py` | crash-safe local record + flow-back to Postgres |
 

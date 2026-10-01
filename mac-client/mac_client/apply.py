@@ -17,12 +17,11 @@ from __future__ import annotations
 import asyncio
 import subprocess
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
 from playwright.async_api import async_playwright
 
 from . import ledger, notify
-from .adapters import ats_for_url, field_map_for, planned_fills
+from .adapters import append_path_suffix, apply_url_for, ats_for_url, field_map_for, is_typable, planned_fills
 from .profile import ApplyProfile, load_profile, missing_resumes, resume_unusable
 from .sync import QueueJob, SyncError, QUEUE_DIR, load_queue, push_outcomes
 
@@ -69,6 +68,11 @@ async def fill_form(page, job: QueueJob, profile: ApplyProfile) -> tuple[list[st
     for label, selectors, value in plan:
         if not value.strip():
             skipped.append(f"{label} (not in your profile)")
+            continue
+        if not is_typable(value):
+            # Typing a line break presses Enter, which submits the form: only the
+            # founder's own click may do that. Reported with the fix, never typed.
+            skipped.append(f"{label} (its value has a line break or control character, not typed — fix apply-profile.json)")
             continue
         if await _fill_first(page, selectors, value):
             filled.append(label)
@@ -144,17 +148,52 @@ def ashby_application_url(url: str) -> str:
     pipeline's `ashbyApplicationUrl` in apply-driver.ts (2026-08-24/25); this
     is a separate Python implementation that never got the port.
     """
-    parts = urlsplit(url)
-    path = parts.path.rstrip("/")
-    if not path.endswith("/application"):
-        path = f"{path}/application"
-    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+    return append_path_suffix(url, "/application")
+
+
+#: The overlay's callbacks for the job currently on screen, by page.
+#:
+#: Playwright refuses to bind one name twice on a page, and `run_queue` reuses a
+#: single page for the whole queue. The old per-job `expose_binding` therefore
+#: kept pointing at the FIRST job's closure, and swallowed the refusal: from job
+#: 2 on, the founder's click was recorded against job 1's id and job 2 never
+#: resolved (found 2026-09-29; tests/test_apply_two_jobs.py). So the binding is
+#: made once per page, to a router, and each job only says who is on screen.
+_ON_SCREEN: dict = {}
+
+
+async def _route_to_job_on_screen(kind: str, source, *args) -> None:
+    callbacks = _ON_SCREEN.get(source["page"])
+    if callbacks is None or kind not in callbacks:
+        # A click on a bar left over from a job that has already ended. Never
+        # guess which job it meant.
+        print(f"  [OVERLAY] a {kind!r} arrived with no job on screen; ignored", flush=True)
+        return
+    await callbacks[kind](source, *args)
+
+
+async def _founderos_decision(source, outcome: str) -> None:
+    await _route_to_job_on_screen("decision", source, outcome)
+
+
+async def _bind_overlay(page) -> None:
+    """Expose the overlay's binding on this page, once."""
+    try:
+        await page.expose_binding("founderosDecision", _founderos_decision)
+    except Exception as err:
+        if "already" not in str(err).lower():
+            raise  # a closed page or a real failure is not "bound by an earlier job"
 
 
 async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str) -> str:
     """Open one job, fill it, and wait for the founder. Returns the outcome."""
     is_ashby = ats_for_url(job.url) == "ashby"
-    target_url = ashby_application_url(job.url) if is_ashby else job.url
+    # The form, not the posting: every platform whose form sits at its own route
+    # or anchor (adapters.apply_url_for, the port of the TypeScript
+    # `applyUrlFor`), not only Ashby. None means "no rule for this host": open
+    # the posting itself and let the founder find the form. Ashby keeps its
+    # older, looser host match as a fallback so no URL that worked before stops.
+    target_url = apply_url_for(job.url) or (ashby_application_url(job.url) if is_ashby else job.url)
     response = await page.goto(target_url, wait_until="domcontentloaded")
 
     if is_ashby:
@@ -194,36 +233,34 @@ async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str)
         if not decided.done():
             decided.set_result(outcome)
 
+    await _bind_overlay(page)
+    _ON_SCREEN[page] = {"decision": on_decision}
     try:
-        await page.expose_binding("founderosDecision", on_decision)
-    except Exception:
-        # expose_binding is per-page and raises if the name is already bound,
-        # which is the normal case on a recycled page.
-        pass
+        cover_letter_path = QUEUE_DIR / job.id / "cover_letter.txt"
+        cover_letter_copied = False
+        if cover_letter_path.is_file():
+            try:
+                cover_letter_copied = copy_to_clipboard(cover_letter_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                cover_letter_copied = False
 
-    cover_letter_path = QUEUE_DIR / job.id / "cover_letter.txt"
-    cover_letter_copied = False
-    if cover_letter_path.is_file():
-        try:
-            cover_letter_copied = copy_to_clipboard(cover_letter_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError):
-            cover_letter_copied = False
+        await page.evaluate(
+            OVERLAY_JS.read_text(),
+            {
+                "position": position,
+                "company": job.company,
+                "title": job.title,
+                "filled": filled,
+                "skipped": skipped,
+                "cover_letter_copied": cover_letter_copied,
+                "tailored_cv_missing": profile.tailored_cv_missing(job),
+                "uses_tailored_cv": profile.uses_tailored_cv(job),
+            },
+        )
 
-    await page.evaluate(
-        OVERLAY_JS.read_text(),
-        {
-            "position": position,
-            "company": job.company,
-            "title": job.title,
-            "filled": filled,
-            "skipped": skipped,
-            "cover_letter_copied": cover_letter_copied,
-            "tailored_cv_missing": profile.tailored_cv_missing(job),
-            "uses_tailored_cv": profile.uses_tailored_cv(job),
-        },
-    )
-
-    return await decided
+        return await decided
+    finally:
+        _ON_SCREEN.pop(page, None)
 
 
 async def run_queue(jobs: list[QueueJob], profile: ApplyProfile) -> dict[str, int]:

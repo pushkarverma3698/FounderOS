@@ -173,6 +173,11 @@ async def test_submit_presses_the_employers_own_button(page, monkeypatch):
     )
     # The employer's handler ran. This is the assertion the prototype failed.
     assert await page.evaluate("window.__SUBMITTED__") is True
+    # greenhouse.html's handler shows nothing either way, so nothing is written
+    # on her behalf: the overlay asks, and only her YES records the application.
+    assert decided == [] and recorded == []
+    await page.click("#founderos-bar button:has-text('YES')")
+    await page.wait_for_timeout(300)
     assert decided == ["applied"]
     assert recorded[0][1] == "applied"
 
@@ -252,10 +257,20 @@ async def test_a_second_click_cannot_submit_twice(page, monkeypatch):
         {"position": "1 of 1", "company": "X", "title": "Y", "filled": [], "skipped": []},
     )
     await page.evaluate(
+        "window.__CLICKS__ = 0;"
+        "document.getElementById('real-submit').addEventListener('click', () => window.__CLICKS__++)"
+    )
+    await page.evaluate(
         "document.querySelectorAll('#founderos-bar button')[1].click()"
     )
     await page.evaluate(
         "document.querySelectorAll('#founderos-bar button')[1].click()"
     )
     await page.wait_for_timeout(1800)
+    # The employer's button was pressed once, and a silent page is asked about
+    # rather than recorded.
+    assert await page.evaluate("window.__CLICKS__") == 1
+    assert calls == []
+    await page.click("#founderos-bar button:has-text('YES')")
+    await page.wait_for_timeout(300)
     assert calls == ["applied"]
