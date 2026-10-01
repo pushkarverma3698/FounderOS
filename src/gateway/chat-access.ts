@@ -111,6 +111,8 @@ export const OWNER_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "connect",
   "focus",
   "projects",
+  "goal",
+  "goals",
 ]);
 
 /** `/halt@this_bot now` → "halt"; a command for another bot, or no command, → null. */

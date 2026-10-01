@@ -73,6 +73,22 @@ export async function sendToChat(
 }
 
 /**
+ * `sendToChat` with an inline keyboard (the goal standup's "Plan next step" buttons). Same api-only
+ * client, so it still cannot conflict with the gateway's poll loop. No `reply_markup` is sent for an
+ * empty keyboard. A delivery failure reaches the caller: the standup decides whether to retry.
+ */
+export async function sendToChatWithKeyboard(
+  text: string,
+  keyboard: readonly (readonly { readonly text: string; readonly callback_data: string }[])[],
+  parseMode: "HTML" | "Markdown" = "HTML",
+): Promise<void> {
+  await api().sendMessage(defaultChatId(), text, {
+    parse_mode: parseMode,
+    ...(keyboard.length > 0 ? { reply_markup: { inline_keyboard: keyboard.map((row) => row.map((b) => ({ ...b }))) } } : {}),
+  });
+}
+
+/**
  * Send a file from disk to a Telegram chat as a document attachment.
  * @param chatId  target chat (defaults to the founder's chat)
  * @param absPath absolute path to the file (already path-guard-validated)

@@ -30,6 +30,7 @@ import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
 import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
 import { handleWifeCommands } from "./wife-commands.js";
+import { registerGoalCommands } from "./goal-commands.js";
 import { handleTask, handleRepoChoice, handleRepoReply } from "./task-command.js";
 import { handleFocus, handleProjects } from "./focus-commands.js";
 import { handleNewProject } from "./newproject-command.js";
@@ -222,6 +223,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
   bot.command("gaps", (ctx: Context) => handleGaps(ctx));
   bot.command("wife_gaps", (ctx: Context) => handleGaps(withForcedProfileToken(ctx, "wife")));
   bot.command("wife_commands", (ctx: Context) => handleWifeCommands(ctx)); // the wife_ aliases are out of the ☰ menu
+  registerGoalCommands(bot, access); // /goal, /goals and their buttons: owner-only; before the catch-all handlers below
 
   bot.on("message:text", async (ctx: Context) => {
     const raw = ctx.message?.text ?? "";

@@ -23,10 +23,12 @@ import { COMMAND_MENU, buildCommandsHelp, telegramCommandPayload } from "../../.
 import { buildWifeCommandsHelp, handleWifeCommands } from "../../../src/gateway/wife-commands.js";
 import { TELEGRAM_MAX_CHARS } from "../../../src/tools/jobhunt/telegram-format.js";
 
-/** The commands actually wired up, read from the transport file itself. */
+/** Files that call `bot.command(...)`: the transport, and the feature modules whose registration it delegates to. */
+const COMMAND_SOURCES = ["src/gateway/telegram.ts", "src/gateway/goal-commands.ts"];
+
+/** The commands actually wired up, read from those files themselves. */
 function registeredCommands(): string[] {
-  const source = readFileSync("src/gateway/telegram.ts", "utf-8");
-  return [...source.matchAll(/\.command\("([a-z_]+)"/g)].map((m) => m[1] as string);
+  return COMMAND_SOURCES.flatMap((file) => [...readFileSync(file, "utf-8").matchAll(/\.command\("([a-z_]+)"/g)].map((m) => m[1] as string));
 }
 
 /** Every `/command` a rendered HTML message names. */
