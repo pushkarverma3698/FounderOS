@@ -204,15 +204,24 @@ export function formatBriefRejection(result: BriefLintResult, opts: BriefRejecti
     ...result.otherProblems,
   ];
 
+  // Advice only for the problems it applies to: a size problem needs neither paragraph.
+  const advice: string[] = [];
+  if (result.missingPaths.length > 0) {
+    advice.push(
+      'Name only files that exist today. A file this task will CREATE is not an error: list it under a heading that contains "new file" ' +
+        '(for example "### New files to create") and it is not checked.' +
+        (opts.newFilesHint ? ` ${opts.newFilesHint}` : ""),
+    );
+  }
+  if (result.missingHeadings.length > 0 || result.missingPaths.length > 0) {
+    advice.push("If you do not know something, ask the founder. Never guess, and never leave a placeholder.");
+  }
+
   const lines = [
     `Brief rejected: nothing was filed on ${opts.target}. ` +
       `${problems.length} ${problems.length === 1 ? "problem" : "problems"} to fix:`,
     ...problems.map((problem, i) => `${i + 1}. ${problem}`),
-    "",
-    'Name only files that exist today. A file this task will CREATE is not an error: list it under a heading that contains "new file" ' +
-      '(for example "### New files to create") and it is not checked.' +
-      (opts.newFilesHint ? ` ${opts.newFilesHint}` : ""),
-    "If you do not know something, ask the founder. Never guess, and never leave a placeholder.",
+    ...(advice.length > 0 ? ["", ...advice] : []),
   ];
   if (result.warnings.length > 0) lines.push("", ...result.warnings.map((warning) => `Note: ${warning}`));
   return lines.join("\n");

@@ -524,7 +524,11 @@ describe("size: a body GitHub would refuse, and text that must not stall the bot
     expect(result.otherProblems[0]).toContain("65,536");
     expect(result.missing).toEqual([...result.otherProblems]);
     expect(exists.asked).toEqual([]);
-    expect(formatBriefRejection(result, { target: "o/r" })).toContain("1. The brief is");
+    const text = formatBriefRejection(result, { target: "o/r" });
+    expect(text).toContain("1. The brief is");
+    // The advice about files and asking the founder is for those problems, not for a size problem.
+    expect(text).not.toContain("New files");
+    expect(text).not.toContain("ask the founder");
   });
 
   it("accepts a body of exactly the limit", async () => {
