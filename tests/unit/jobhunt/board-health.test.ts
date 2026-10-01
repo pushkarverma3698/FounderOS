@@ -45,6 +45,7 @@ vi.mock("../../../src/infra/logger.js", async (orig) => ({
   childLogger: () => ({ warn, info: vi.fn(), debug: vi.fn(), error: vi.fn() }),
 }));
 
+import { dataRoot } from "../../../src/core/data-root.js";
 import {
   BOARD_HEALTH_FILE,
   DEAD_BOARD_REPROBE_MS,
@@ -52,7 +53,6 @@ import {
   appendSkippedDead,
   boardHealthDeps,
   boardHealthPath,
-  dataRoot,
   isSkipped,
   loadBoardHealth,
   nextBoardHealth,

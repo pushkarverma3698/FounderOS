@@ -55,6 +55,7 @@ import { dirname, join } from "node:path";
 
 import { z } from "zod";
 
+import { dataRoot } from "../../core/data-root.js";
 import { childLogger } from "../../infra/logger.js";
 
 const log = childLogger({ module: "jobhunt:board-health" });
@@ -111,16 +112,7 @@ export interface BoardHealthDeps {
   readonly now: () => Date;
 }
 
-/**
- * The data root. The same expression `APPLY_PROFILE_PATH` uses (apply-profile.ts) —
- * trimmed `FOUNDEROS_DATA_ROOT`, else `/opt/founderos-data`. That module computes it
- * inline at load time, so there was no helper to share; it is one line either way.
- */
-export function dataRoot(env: Readonly<Record<string, string | undefined>> = process.env): string {
-  return env["FOUNDEROS_DATA_ROOT"]?.trim() || "/opt/founderos-data";
-}
-
-/** The production wiring: the real data root and the real clock. Only the cron entrypoint uses this. */
+/** The production wiring: the real data root (src/core/data-root.ts) and the real clock. Only the cron entrypoint uses this. */
 export function boardHealthDeps(env: Readonly<Record<string, string | undefined>> = process.env): BoardHealthDeps {
   return { root: dataRoot(env), now: () => new Date() };
 }

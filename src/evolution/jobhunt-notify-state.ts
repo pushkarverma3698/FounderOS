@@ -26,6 +26,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
+import { dataRoot } from "../core/data-root.js";
 import { childLogger } from "../infra/logger.js";
 import { computeFingerprint } from "./fingerprint.js";
 import type { Finding } from "./types.js";
@@ -38,7 +39,6 @@ const MS_PER_DAY = 86_400_000;
 export const DECISION_RENOTIFY_DAYS = 7;
 
 const STATE_FILE_NAME = "jobhunt-findings-state.json";
-const DEFAULT_DATA_ROOT = "/opt/founderos-data";
 
 const stateSchema = z.object({
   version: z.literal(1),
@@ -57,7 +57,7 @@ export const EMPTY_NOTIFY_STATE: NotifyState = { version: 1, decisions: {} };
 
 /** `FOUNDEROS_DATA_ROOT/jobhunt-findings-state.json`, resolved at call time so a test can move it. */
 export function notifyStatePath(): string {
-  return join(process.env["FOUNDEROS_DATA_ROOT"]?.trim() || DEFAULT_DATA_ROOT, STATE_FILE_NAME);
+  return join(dataRoot(), STATE_FILE_NAME);
 }
 
 /** The state on disk, or empty (with one warning) when it is missing or cannot be trusted. Never throws. */
