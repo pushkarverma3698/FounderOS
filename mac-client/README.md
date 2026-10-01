@@ -39,6 +39,10 @@ changes), or your own **YES**. If the page says nothing either way, the bar asks
 **Did the application go through?** and writes nothing until you answer: **YES**
 records it, **NO** records nothing and gives you the buttons back.
 
+If the bar cannot find the site's submit button, submit the form yourself, then
+press **I SUBMITTED IT MYSELF** to record it. **SKIP** removes the row from your
+list for good: it does not come back tomorrow.
+
 Before you submit, the overlay tells you which resume is attached — read this,
 it is not decorative:
 

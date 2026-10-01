@@ -11,9 +11,9 @@
  * the handler assigned to `submit.onclick`, and that there is exactly one.
  *
  * The same parse pins the other half of ADR-018: "applied" is reported from
- * exactly two places, a POSITIVE page signal (`if (successSignal())`) or the
- * founder's own YES on "Did the application go through?". A page that says
- * nothing is never defaulted to applied.
+ * exactly three places: a POSITIVE page signal (`if (successSignal())`), or the
+ * founder's own press of YES on "Did the application go through?", or of
+ * "I SUBMITTED IT MYSELF". A page that says nothing is never defaulted to applied.
  *
  * CI runs this; the Python suite that exercises the overlay in a real browser
  * (mac-client/tests) is not in CI.
@@ -85,7 +85,7 @@ function actingCalls(source: string): ActingCall[] {
 }
 
 /** `<name>.onclick = ...` handlers that are the founder's own explicit confirmation that it was sent. */
-const HUMAN_CONFIRMATION_BUTTONS: ReadonlySet<string> = new Set(["yes"]);
+const HUMAN_CONFIRMATION_BUTTONS: ReadonlySet<string> = new Set(["yes", "mine"]);
 
 /** Where each `founderosDecision("applied")` sits: the condition or button that guards it. */
 function appliedRecordingOrigins(source: string): string[] {
@@ -157,7 +157,7 @@ describe("overlay.js presses an employer's button only for the founder", () => {
   });
 
   it("records applied only from a positive page signal or the founder's own YES", () => {
-    expect(appliedRecordingOrigins(overlay).sort()).toEqual(["successSignal()", "yes.onclick"]);
+    expect(appliedRecordingOrigins(overlay).sort()).toEqual(["mine.onclick", "successSignal()", "yes.onclick"]);
   });
 
   it("notices applied being written because a timer ran out", () => {

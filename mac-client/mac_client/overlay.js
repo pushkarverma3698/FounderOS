@@ -61,9 +61,26 @@
   const yes = button("YES, IT WENT THROUGH", "#00A65A", "#fff");
   let answered = false;
 
+  // The manual path. When the overlay could not press the employer's button (or
+  // the founder pressed it herself), she says so and only THEN is it recorded:
+  // an explicit human confirmation. Offered once something has gone wrong, and
+  // from the start on a bar restored after the page changed (data.manual).
+  const mine = button("I SUBMITTED IT MYSELF", "#8A6D3B", "#fff");
+  let showManual = !!data.manual;
+
   // A decision is final and both buttons are disabled the moment either is
   // pressed. A double-click on a slow form would otherwise submit twice.
   let decided = false;
+
+  mine.onclick = async () => {
+    if (decided) return;
+    decided = true;
+    mine.disabled = true;
+    skip.disabled = true;
+    submit.disabled = true;
+    mine.textContent = "Recording…";
+    await window.founderosDecision("applied");
+  };
 
   skip.onclick = async () => {
     if (decided) return;
@@ -86,9 +103,9 @@
       // Never record an application we could not send. The founder finishes
       // this one by hand; saying so is the only honest option.
       giveBack(
-        'Could not find this form\'s submit button — submit it yourself, then ' +
-          "press SKIP to move on (it is recorded as not-applied, so it will come " +
-          "back tomorrow).",
+        "Could not find this form's submit button. Submit it yourself, then press " +
+          "I SUBMITTED IT MYSELF to record it. SKIP removes this row from your list: " +
+          "it does not come back tomorrow.",
       );
       return;
     }
@@ -236,15 +253,22 @@
       "Not recorded. If it did not go through, fix the form and press SUBMIT again; " +
         "SKIP removes this row from your list.",
     );
-    bar.replaceChildren(summary, skip, submit);
   };
 
   function giveBack(message) {
     decided = false;
+    showManual = true;
+    mine.disabled = false;
     submit.disabled = false;
     skip.disabled = false;
     submit.innerHTML = "SUBMIT &amp; NEXT →";
     summary.innerHTML += `<div style="color:#FF6B6B;font-size:13px">${message}</div>`;
+    showDecisionBar();
+  }
+
+  // The decision bar: SKIP, the manual button once it applies, and SUBMIT & NEXT.
+  function showDecisionBar() {
+    bar.replaceChildren(...[summary, skip, showManual ? mine : null, submit].filter(Boolean));
   }
 
   function excerptAround(text, word) {
@@ -286,7 +310,7 @@
     return div.innerHTML;
   }
 
-  bar.append(summary, skip, submit);
+  showDecisionBar();
   document.body.appendChild(bar);
   // Job pages are long; the bar is fixed, but the page must not sit under it.
   // Computed from the real rendered height (not a fixed guess) so it stays
