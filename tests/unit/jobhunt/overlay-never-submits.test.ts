@@ -301,6 +301,32 @@ describe("a page the form navigated away from: the host may ask, never decide", 
     expect(apply).not.toMatch(/ledger\.record\([^)]*(APPLIED|["']applied["'])/);
   });
 
+  // `window.founderosEvent` is exposed to EVERY script in the employer's page, and the name it is called with
+  // picks a handler on the host. Only the names the overlay really sends may be routed, never "decision".
+  const eventHandlerOf = (source: string): string => /async def _founderos_event[\s\S]*?\n\n\n/.exec(source)?.[0] ?? "";
+
+  it("routes only the names the overlay sends: the page's own scripts can call the event binding too", () => {
+    const apply = readFileSync(APPLY_PATH, "utf8");
+    const declared = /_EVENT_KINDS = frozenset\(\{([^}]*)\}\)/.exec(apply);
+    expect(declared).not.toBeNull();
+    const allowed = [...(declared?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
+    expect(allowed).toEqual(hostEvents(overlay).map((e) => e.kind).sort());
+    expect(allowed).not.toContain("decision");
+
+    // The router has exactly two callers: the decision binding (a literal) and the event binding, after the allowlist.
+    const callers = [...apply.matchAll(/await _route_to_job_on_screen\(([^,)]+)/g)].map((m) => m[1]);
+    expect(callers.sort()).toEqual(['"decision"', "kind"]);
+    const handler = eventHandlerOf(apply);
+    const check = handler.indexOf("kind not in _EVENT_KINDS");
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(handler.indexOf("_route_to_job_on_screen"));
+  });
+
+  it("would notice an event binding that routes the name a page sent without checking it", () => {
+    const bad = `async def _founderos_event(source, kind):\n    await _route_to_job_on_screen(kind, source)\n\n\n`;
+    expect(eventHandlerOf(bad).indexOf("kind not in _EVENT_KINDS")).toBe(-1);
+  });
+
   it("would notice the watcher recording a navigation as applied", () => {
     const bad = `ledger.record(job.id, ledger.APPLIED, company=job.company)`;
     expect(bad).toMatch(/ledger\.record\([^)]*(APPLIED|["']applied["'])/);

@@ -177,10 +177,22 @@ async def _founderos_decision(source, outcome: str) -> None:
     await _route_to_job_on_screen("decision", source, outcome)
 
 
+#: The only names the overlay tells the host. `window.founderosEvent` is exposed to EVERY script in
+#: the employer's page, not only to the overlay, and the name it is called with picks a handler
+#: here: so these two are routed and nothing else, above all not "decision", the handler that
+#: records an outcome, which is reachable only through `founderosDecision` (her own button press).
+#: tests/test_page_events.py pins this set to the names overlay.js really sends.
+_EVENT_KINDS = frozenset({"submit-attempted", "answered-no"})
+
+
 async def _founderos_event(source, kind: str) -> None:
     """What the overlay TELLS us (SUBMIT & NEXT was pressed, she answered NO), as
     opposed to what she DECIDES (`founderosDecision`). Nothing sent here records an
     outcome: it leads to a question or a log line (mac_client/after_submit.py)."""
+    if not isinstance(kind, str) or kind not in _EVENT_KINDS:
+        # Cut short: the name came from the page, and a page can send a megabyte.
+        print(f"  [OVERLAY] an event {str(kind)[:40]!r} is not one the overlay sends; ignored", flush=True)
+        return
     await _route_to_job_on_screen(kind, source)
 
 
