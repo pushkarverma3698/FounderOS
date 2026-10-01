@@ -25,6 +25,12 @@ export const KIND_PRIORITY: readonly FindingKind[] = [
   "oversized-prompt",
   "loc-pressure",
   "untested-module",
+  // Jobhunt data checks, appended so every existing order is unchanged. Within one
+  // severity the fixable defect comes before the decisions for the founder.
+  "adapter-silent",
+  "apply-link-unrecognised",
+  "candidate-not-acting",
+  "lane-silent",
 ];
 
 /**

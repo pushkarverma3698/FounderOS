@@ -22,6 +22,7 @@
  */
 
 import { computeFingerprint } from "./fingerprint.js";
+import { JOBHUNT_GUIDANCE } from "./jobhunt-guidance.js";
 import type { Finding, FindingKind } from "./types.js";
 
 /**
@@ -46,20 +47,43 @@ export function findingMarker(fingerprint: string): string {
   return `${FINDING_MARKER_PREFIX} ${fingerprint} -->`;
 }
 
-interface KindGuidance {
+/** Guidance text: fixed for a kind, or written per finding when it must name the component. */
+export type GuidanceText = string | ((finding: Finding) => string);
+
+export interface KindGuidance {
   /** What "done" means, in one paragraph, to a reader with no context. */
-  readonly goal: string;
+  readonly goal: GuidanceText;
   /** What should happen instead of the observed behavior. */
-  readonly expected: string;
+  readonly expected: GuidanceText;
   /** Where to look. Never "somewhere in src/" — the contract rejects that. */
-  readonly scope: string;
+  readonly scope: GuidanceText;
   /** Task-specific prohibitions only; the general rules live in STANDARDS.md. */
-  readonly forbidden: string;
+  readonly forbidden: GuidanceText;
   /** The exact command whose raw output proves the fix. */
-  readonly verify: string;
+  readonly verify: GuidanceText;
   /** What pr-brain checks before this counts as PASS. */
-  readonly acceptance: string;
+  readonly acceptance: GuidanceText;
+  /**
+   * Where the finding came from, replacing the default "static/telemetry analyzer
+   * run" line. Needed by kinds computed from production data the executor cannot see.
+   */
+  readonly origin?: GuidanceText;
+  /** How to reproduce, replacing the default `pnpm audit:self` paragraph, which is only true for code analyzers. */
+  readonly reproduce?: GuidanceText;
 }
+
+const resolveText = (text: GuidanceText, finding: Finding): string =>
+  typeof text === "function" ? text(finding) : text;
+
+const DEFAULT_ORIGIN =
+  "> Filed automatically by the FounderOS self-audit acting loop " +
+  "(`src/evolution/dispatch-findings.ts`). Nobody wrote this by hand — the finding below came from a " +
+  "static/telemetry analyzer run, and the numbers in it are reproducible with the verification command.";
+
+const DEFAULT_REPRODUCE =
+  "Reproduce the finding itself with `pnpm audit:self` — it re-runs every analyzer over the current tree and " +
+  "prints this finding with the same numbers. If it does NOT reproduce, the finding is already fixed: say so " +
+  "and close the issue instead of inventing a change.";
 
 /**
  * The kinds an unattended executor can close correctly, and what it should do
@@ -163,6 +187,8 @@ const GUIDANCE: Partial<Record<FindingKind, KindGuidance>> = {
       "The new tests fail when a deliberate bug is introduced into the module (state in the PR body which " +
       "mutation you tried and that it failed), and `pnpm gate` is green.",
   },
+  // The two jobhunt kinds an executor can close (lane-silent and candidate-not-acting are decisions).
+  ...JOBHUNT_GUIDANCE,
 };
 
 /** Kinds this loop is willing to hand to an unattended executor, in no particular order. */
@@ -217,20 +243,27 @@ export function renderIssueBody(
         `Acting on it needs a decision, not an implementation (see src/evolution/issue-body.ts).`,
     );
   }
+  const text = (value: GuidanceText): string => resolveText(value, finding);
 
   const location = finding.location ? `\n- Location: \`${finding.location}\`` : "";
   const commit = context.commitSha ? `\n- Detected at commit: \`${context.commitSha}\`` : "";
+  // The rows the analyzer was given, for kinds computed from data the executor cannot query.
+  const rows = finding.evidenceRows?.length
+    ? [
+        "",
+        "What the analyzer measured, and the rows it read (production data; the counts are computed from those rows, nothing here is invented):",
+        ...finding.evidenceRows.map((row) => `- ${row}`),
+      ]
+    : [];
 
   return [
     findingMarker(context.fingerprint),
     "",
-    "> Filed automatically by the FounderOS self-audit acting loop " +
-      "(`src/evolution/dispatch-findings.ts`). Nobody wrote this by hand — the finding below came from a " +
-      "static/telemetry analyzer run, and the numbers in it are reproducible with the verification command.",
+    guidance.origin ? text(guidance.origin) : DEFAULT_ORIGIN,
     "",
     "## Goal",
     "",
-    guidance.goal,
+    text(guidance.goal),
     "",
     "## Problem / observed behavior",
     "",
@@ -240,7 +273,7 @@ export function renderIssueBody(
     "",
     "## Expected behavior",
     "",
-    guidance.expected,
+    text(guidance.expected),
     "",
     "## Evidence",
     "",
@@ -249,14 +282,13 @@ export function renderIssueBody(
     `- Severity: ${finding.severity}`,
     `- Detected: ${context.detectedAt.toISOString()}${commit}`,
     `- Finding fingerprint: \`${context.fingerprint}\``,
+    ...rows,
     "",
-    "Reproduce the finding itself with `pnpm audit:self` — it re-runs every analyzer over the current tree and " +
-      "prints this finding with the same numbers. If it does NOT reproduce, the finding is already fixed: say so " +
-      "and close the issue instead of inventing a change.",
+    guidance.reproduce ? text(guidance.reproduce) : DEFAULT_REPRODUCE,
     "",
     "## Files or subsystem in scope",
     "",
-    guidance.scope,
+    text(guidance.scope),
     "",
     "## Constraints",
     "",
@@ -266,17 +298,17 @@ export function renderIssueBody(
     "",
     "## Explicitly forbidden",
     "",
-    guidance.forbidden,
+    text(guidance.forbidden),
     "",
     "## Verification commands",
     "",
     "```bash",
-    guidance.verify,
+    text(guidance.verify),
     "```",
     "",
     "## Acceptance criteria",
     "",
-    guidance.acceptance,
+    text(guidance.acceptance),
     "",
     "If, after investigating, the correct action is to change nothing — the finding is a false positive, or the " +
       "fix needs a product decision — say that with evidence and stop. A PR that changes code to look productive " +

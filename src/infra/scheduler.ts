@@ -16,8 +16,8 @@
  * output): the metered job-ingest sweep (JOB_SWEEP_CRON, $0.46/run — the free
  * board sweep above already covers discovery), the self-audit sweep
  * (audit-sweep.ts — findings were never persisted, `writeTaskOutcome` had zero
- * callers), the self-improvement dispatch (dispatch-sweep.ts — blocked on
- * `resolveExecutorCwd` refusing both hosts, entirely inert), and the weekly RAG
+ * callers), the self-improvement dispatch (dispatch-sweep.ts — files a GitHub issue,
+ * never an executor; all 4 it filed were `unused-dependency`), and the weekly RAG
  * optimization sweep (rag-optimization-sweep.ts). The functions and their unit
  * tests are untouched — only the `cron.schedule()` registration was removed —
  * so re-enabling any one of them is a one-line change in `startScheduler`.
@@ -81,6 +81,7 @@ import {
 } from "../tools/jobhunt/sweep-runner.js";
 import { runPipelineDigest, runFollowupSweep } from "../tools/jobhunt/pipeline-followup.js";
 import { scheduleGoalStandup } from "../goals/standup-schedule.js";
+import { startJobhuntFindingsCron } from "../evolution/jobhunt-findings-cron.js";
 
 // Re-exported so existing import sites (and tests) that read these off
 // scheduler.ts keep resolving after the move to sweep-runner.ts (2026-08-06).
@@ -354,6 +355,7 @@ export function startScheduler(opts?: { taskExecutor?: ScheduledTaskExecutor }):
       "HTML",
     ).catch((err) => log.error({ err: (err as Error).message }, "Monthly import-boards reminder failed"));
   });
+  startJobhuntFindingsCron(); // daily 09:30, jobhunt analyzer only, zero LLM; NOT the disabled 3-day dispatch above
   const taskExecutor = opts?.taskExecutor;
   if (taskExecutor) {
     cron.schedule("* * * * *", () => {
