@@ -143,6 +143,8 @@ function systemText(): string {
     `⚡ <b>System</b>\n\n` +
     `🔹 <code>/status</code> — health and anything waiting on your approval\n` +
     `🔹 <code>/budget</code> — today's spend against the daily cap\n` +
+    `🔹 <code>/focus</code> — what you are focused on, with the date you last confirmed it. <code>/focus close the Acme pilot</code> replaces it\n` +
+    `🔹 <code>/projects</code> — your active projects. <code>/projects FounderOS; Naggar site</code> replaces the list\n` +
     `🔹 <code>/remind call the landlord at 3pm</code> — a reminder, pinged at that time\n` +
     `🔹 <code>/connect</code> — search and add an MCP server\n` +
     `🔹 <code>/reset</code> — clear this thread's mission state\n` +

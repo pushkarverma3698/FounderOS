@@ -30,6 +30,7 @@ import {
   insertEpisodicEvent,
 } from "../db/queries.js";
 import { founderFacingContext } from "../db/founder-context.js";
+import { contextLineRenderer } from "./context-render.js";
 import { childLogger } from "../infra/logger.js";
 import { getMem0Client } from "../infra/mem0.js";
 
@@ -89,7 +90,12 @@ export const searchMemoryTool = tool(
 
     // 4. Founder context — text-contains search across keys + values
     if (type === "all" || type === "context") {
-      const ctx = founderFacingContext(await getFounderContext(TENANT));
+      const stored = await getFounderContext(TENANT);
+      const ctx = founderFacingContext(stored);
+      // Each line carries the date its value was last confirmed, as read_context's do.
+      const datedLine = contextLineRenderer(stored, new Date(), {
+        warn: (problem) => log.warn({ problem }, "founder_context dates unreadable — every value is shown as 'date unknown'"),
+      });
       if (Object.keys(ctx).length > 0) {
         const lq = query.toLowerCase();
         const matchingLines: string[] = [];
@@ -100,15 +106,14 @@ export const searchMemoryTool = tool(
           const keyMatches = key.replace(/_/g, " ").includes(lq);
           const valueMatches = serialised.toLowerCase().includes(lq);
           if (keyMatches || valueMatches) {
-            matchingLines.push(`• ${key.replace(/_/g, " ")}: ${serialised}`);
+            matchingLines.push(datedLine(key, value));
           }
         }
         // For context-only type queries with no filter match, show everything
         if (matchingLines.length === 0 && type === "context") {
           for (const [key, value] of Object.entries(ctx)) {
             if (key === "last_updated") continue;
-            const serialised = Array.isArray(value) ? value.join(", ") : String(value ?? "");
-            matchingLines.push(`• ${key.replace(/_/g, " ")}: ${serialised}`);
+            matchingLines.push(datedLine(key, value));
           }
         }
         if (matchingLines.length > 0) {

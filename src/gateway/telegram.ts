@@ -31,6 +31,7 @@ import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
 import { handleWifeCommands } from "./wife-commands.js";
 import { handleTask, handleRepoChoice, handleRepoReply } from "./task-command.js";
+import { handleFocus, handleProjects } from "./focus-commands.js";
 import { handleNewProject } from "./newproject-command.js";
 import { handleMenuCallback } from "./home-menu.js";
 import { handleTasks, fetchDispatchTasks } from "./tasks-command.js";
@@ -149,6 +150,8 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
   bot.command("halt", (ctx: Context) => handleHalt(ctx));
   bot.command("resume", (ctx: Context) => handleResume(ctx));
   bot.command("status", (ctx: Context) => handleStatus(ctx));
+  bot.command("focus", (ctx: Context) => handleFocus(ctx));
+  bot.command("projects", (ctx: Context) => handleProjects(ctx));
   bot.command("budget", (ctx: Context) => handleBudget(ctx));
   bot.command("connect", (ctx: Context) => handleConnect(ctx));
   bot.command("commands", (ctx: Context) => handleCommands(ctx));
