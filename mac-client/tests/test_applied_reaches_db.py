@@ -22,16 +22,12 @@ of the two properties that make it trustworthy:
 
 Local `file://` forms only: no ATS traffic, no network, $0.
 
-KNOWN GAP, NOT COVERED HERE (measured 2026-09-29, unchanged by this file). The
-overlay is JavaScript in the page, so it dies with the page. A form that
-HARD-NAVIGATES when the founder presses SUBMIT & NEXT (a plain form POST that
-redirects to a thank-you page) sends the application, but nothing calls
-`founderosDecision`: `process_job` stays waiting, the ledger stays empty and the
-row is offered again tomorrow. Reproduced against the unchanged overlay with a
-`<form action="thanks.html">` fixture: still waiting after 8 s, nothing recorded.
-Every fixture here (and in test_apply_browser.py) calls `preventDefault`, which is
-why no test saw it. The fix is a decision in overlay.js, which this slice does not
-touch (SUBMIT STAYS HUMAN); see the branch report.
+A form that HARD-NAVIGATES when SUBMIT & NEXT is pressed (a plain POST that
+redirects to a thank-you page) destroys the overlay before it can report. That used
+to leave `process_job` waiting for ever with the ledger empty (measured 2026-09-29);
+mac_client/after_submit.py now asks her on the new page and tests/test_hard_navigation.py
+drives it. Every fixture here and in test_apply_browser.py calls `preventDefault`,
+which is why they could not see it.
 """
 
 from __future__ import annotations

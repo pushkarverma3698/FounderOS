@@ -21,6 +21,7 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 
 from . import ledger, notify
+from .after_submit import SubmitWatch
 from .adapters import append_path_suffix, apply_url_for, ats_for_url, field_map_for, is_typable, planned_fills
 from .profile import ApplyProfile, load_profile, missing_resumes, resume_unusable
 from .sync import QueueJob, SyncError, QUEUE_DIR, load_queue, push_outcomes
@@ -176,13 +177,21 @@ async def _founderos_decision(source, outcome: str) -> None:
     await _route_to_job_on_screen("decision", source, outcome)
 
 
+async def _founderos_event(source, kind: str) -> None:
+    """What the overlay TELLS us (SUBMIT & NEXT was pressed, she answered NO), as
+    opposed to what she DECIDES (`founderosDecision`). Nothing sent here records an
+    outcome: it leads to a question or a log line (mac_client/after_submit.py)."""
+    await _route_to_job_on_screen(kind, source)
+
+
 async def _bind_overlay(page) -> None:
-    """Expose the overlay's binding on this page, once."""
-    try:
-        await page.expose_binding("founderosDecision", _founderos_decision)
-    except Exception as err:
-        if "already" not in str(err).lower():
-            raise  # a closed page or a real failure is not "bound by an earlier job"
+    """Expose the overlay's bindings on this page, once."""
+    for name, handler in (("founderosDecision", _founderos_decision), ("founderosEvent", _founderos_event)):
+        try:
+            await page.expose_binding(name, handler)
+        except Exception as err:
+            if "already" not in str(err).lower():
+                raise  # a closed page or a real failure is not "bound by an earlier job"
 
 
 async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str) -> str:
@@ -233,8 +242,28 @@ async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str)
         if not decided.done():
             decided.set_result(outcome)
 
+    # A submit that navigates destroys the bar before it can report. The watcher
+    # puts the same question on the new page; it can never record anything itself.
+    overlay_data: dict = {}
+    watch = SubmitWatch(
+        page,
+        f"{job.company} — {job.title}",
+        decided,
+        lambda extra: page.evaluate(OVERLAY_JS.read_text(), {**overlay_data, **extra}),
+    )
+
+    async def on_submit_attempted(_source) -> None:
+        watch.submit_attempted()
+
+    async def on_answered_no(_source) -> None:
+        watch.answered_no()
+
     await _bind_overlay(page)
-    _ON_SCREEN[page] = {"decision": on_decision}
+    _ON_SCREEN[page] = {
+        "decision": on_decision,
+        "submit-attempted": on_submit_attempted,
+        "answered-no": on_answered_no,
+    }
     try:
         cover_letter_path = QUEUE_DIR / job.id / "cover_letter.txt"
         cover_letter_copied = False
@@ -244,8 +273,7 @@ async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str)
             except (OSError, UnicodeDecodeError):
                 cover_letter_copied = False
 
-        await page.evaluate(
-            OVERLAY_JS.read_text(),
+        overlay_data.update(
             {
                 "position": position,
                 "company": job.company,
@@ -255,11 +283,14 @@ async def process_job(page, job: QueueJob, profile: ApplyProfile, position: str)
                 "cover_letter_copied": cover_letter_copied,
                 "tailored_cv_missing": profile.tailored_cv_missing(job),
                 "uses_tailored_cv": profile.uses_tailored_cv(job),
-            },
+            }
         )
+        watch.start()
+        await page.evaluate(OVERLAY_JS.read_text(), overlay_data)
 
         return await decided
     finally:
+        watch.stop()
         _ON_SCREEN.pop(page, None)
 
 

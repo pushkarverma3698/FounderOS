@@ -42,13 +42,21 @@
     : data.uses_tailored_cv
       ? `<div style="opacity:.75;font-size:13px;color:#8FD19E">📄 Tailored CV for this role attached</div>`
       : `<div style="font-size:13px;color:#FFCC66">📄 Generic CV — no tailored one exists for this role yet</div>`;
-  summary.innerHTML =
+  const heading =
     `<div style="font-weight:600;margin-bottom:2px">${data.position} — ` +
-    `${escapeHtml(data.company)} · ${escapeHtml(data.title)}</div>` +
-    `<div style="opacity:.75;font-size:13px">Filled: ${escapeHtml(filled)}</div>` +
-    `<div style="opacity:.75;font-size:13px;color:#FFCC66">Left for you: ${escapeHtml(skipped)}</div>` +
-    coverLetterLine +
-    resumeLine;
+    `${escapeHtml(data.company)} · ${escapeHtml(data.title)}</div>`;
+  // `data.ask` is set when the host carried this bar onto a page that REPLACED the
+  // form (a submit that navigated): what was filled is no longer on screen, so
+  // the fill report would describe a page she cannot see.
+  summary.innerHTML = data.ask
+    ? heading +
+      `<div style="opacity:.75;font-size:13px">The page changed after you pressed SUBMIT &amp; NEXT, ` +
+      `so what I filled is no longer on screen.</div>`
+    : heading +
+      `<div style="opacity:.75;font-size:13px">Filled: ${escapeHtml(filled)}</div>` +
+      `<div style="opacity:.75;font-size:13px;color:#FFCC66">Left for you: ${escapeHtml(skipped)}</div>` +
+      coverLetterLine +
+      resumeLine;
 
   const skip = button("SKIP", "#2A2F36", "#fff");
   const submit = button("SUBMIT &amp; NEXT →", "#00A65A", "#fff");
@@ -93,6 +101,12 @@
     if (decided) return;
     decided = true;
     lock("Submitting…");
+
+    // A form that navigates replaces this page, and this bar with it, before the
+    // checks below can report anything. So the host is told FIRST that she pressed
+    // SUBMIT & NEXT: if the page is replaced it asks her on the new page, instead
+    // of waiting for a decision that can no longer arrive. It only ever asks.
+    await tellHost("submit-attempted");
 
     const target =
       document.querySelector('button[type="submit"]:not([disabled])') ||
@@ -229,8 +243,7 @@
     no.disabled = false;
     yes.innerHTML = "YES, IT WENT THROUGH";
     confirmSummary.innerHTML =
-      `<div style="font-weight:600;margin-bottom:2px">${data.position} — ` +
-      `${escapeHtml(data.company)} · ${escapeHtml(data.title)}</div>` +
+      heading +
       `<div style="font-size:13px;color:#FFCC66">${reason}</div>` +
       `<div style="font-size:14px">Did the application go through? Press YES only if you saw the site accept it.</div>`;
     bar.replaceChildren(confirmSummary, no, yes);
@@ -249,6 +262,7 @@
   no.onclick = () => {
     if (answered) return;
     answered = true;
+    tellHost("answered-no"); // so the terminal she ran this from says nothing was recorded
     giveBack(
       "Not recorded. If it did not go through, fix the form and press SUBMIT again; " +
         "SKIP removes this row from your list.",
@@ -271,6 +285,17 @@
     bar.replaceChildren(...[summary, skip, showManual ? mine : null, submit].filter(Boolean));
   }
 
+  // What the overlay tells the host app (apply.py), as opposed to what she DECIDES
+  // (`founderosDecision`): these only ever lead to a question or a log line, never
+  // to an outcome. Optional: the overlay works without a listener on the other end.
+  async function tellHost(kind) {
+    try {
+      if (typeof window.founderosEvent === "function") await window.founderosEvent(kind);
+    } catch (_) {
+      // The host going away must not stop her pressing the employer's button.
+    }
+  }
+
   function excerptAround(text, word) {
     const idx = text.indexOf(word);
     return text.slice(Math.max(0, idx - 10), idx + word.length + 30).trim();
@@ -284,12 +309,21 @@
   }
 
   function findByText() {
+    // English: the phrase may run on ("Submit your application").
     const words = ["submit application", "submit", "apply now", "send application"];
+    // Dutch: only phrases that can ONLY mean "send it now", and the WHOLE label, never
+    // a prefix: "Verstuur naar een vriend" (send to a friend) begins with a submit word.
+    // Not "solliciteer" / "solliciteren": that is what the button that OPENS the form says.
+    const dutchLabels = [
+      "verzenden", "versturen", "verstuur",
+      "sollicitatie versturen", "sollicitatie verzenden", "verstuur sollicitatie",
+    ];
     const clickable = [...document.querySelectorAll("button,input[type=button],a[role=button]")];
     return clickable.find((el) => {
       if (el.disabled) return false;
-      const text = (el.innerText || el.value || "").trim().toLowerCase();
-      return words.some((w) => text === w || text.startsWith(w));
+      // \s also covers the no-break space some sites put inside a label.
+      const text = (el.innerText || el.value || "").replace(/\s+/g, " ").trim().toLowerCase();
+      return words.some((w) => text === w || text.startsWith(w)) || dutchLabels.includes(text);
     });
   }
 
@@ -310,7 +344,10 @@
     return div.innerHTML;
   }
 
-  showDecisionBar();
+  // On a page the host carried the bar to after a submit navigated, the first thing
+  // she sees is the question; everywhere else, the decision buttons.
+  if (data.ask) askDidItGoThrough(escapeHtml(data.ask));
+  else showDecisionBar();
   document.body.appendChild(bar);
   // Job pages are long; the bar is fixed, but the page must not sit under it.
   // Computed from the real rendered height (not a fixed guess) so it stays
