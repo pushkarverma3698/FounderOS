@@ -162,7 +162,7 @@ if [ "$1" = test ] && [ "$2" = -r ]; then
   m=$(stat -c %a "$3" 2>/dev/null || stat -f %Lp "$3" 2>/dev/null) || exit 1
   [ $(( 8#\${m: -1} & 4 )) -ne 0 ]; exit $?
 fi
-echo "$user $1" >>"$FAKE_SUDO_LOG"
+echo "$user $*" | cut -c1-100 >>"$FAKE_SUDO_LOG"
 if [ -n "$FAKE_GIT_SYSTEM" ]; then sys="GIT_CONFIG_SYSTEM=$FAKE_GIT_SYSTEM"; else sys="GIT_CONFIG_NOSYSTEM=1"; fi
 exec env -i HOME="$FAKE_HOMES/$user" PATH="$PATH" "$sys" "$@"`,
   );
@@ -195,6 +195,8 @@ esac`,
 grep -qE '^[a-z_-]+ ALL=\\([a-z-]+\\) NOPASSWD: /[^ ]+$' "$2"`,
   );
   stub("gh", `[ "$1 $2" = "auth status" ] && grep -qs oauth_token "$HOME/.config/gh/hosts.yml"`);
+  // The script's only mv is the one that renames the staged sudoers file into place.
+  stub("mv", `if [ "$FAKE_MV_FAIL" = 1 ]; then exit 1; fi\nexec /bin/mv "$@"`);
 });
 
 afterEach(() => {
@@ -546,6 +548,19 @@ describe("harden-agent-users --apply", () => {
     expect(r.status).toBe(0);
   });
 
+  it("leaves nothing half-installed when it cannot move the staged sudoers file into place", () => {
+    seedBefore();
+
+    const r = run(["--apply"], { FAKE_MV_FAIL: "1" });
+
+    expect(r.stderr).toMatch(/could not install .*claude-agent/);
+    expect(r.stdout).not.toMatch(/installed .*claude-agent/);
+    // `install` had already written the staged copy. sudo ignores a name with a dot in it, but it
+    // must not be left lying in /etc/sudoers.d either.
+    expect(readdirSync(sudoersDir)).toEqual([]);
+    expect(r.status).toBe(1);
+  });
+
   it("pauses agent-dispatch before it takes the builder's push access away, as the orchestrator", () => {
     seedBefore();
 
@@ -553,10 +568,12 @@ describe("harden-agent-users --apply", () => {
 
     expect(existsSync(dispatchOff())).toBe(true);
     expect(r.stdout).toMatch(/paused agent-dispatch \(.*agent-dispatch\.off\)/);
-    const asWho = readFileSync(sudoLog, "utf8").split("\n");
-    expect(asWho).toContain("founderos touch");
+    const lines = readFileSync(sudoLog, "utf8").split("\n");
+    const first = (prefix: string) => lines.findIndex((l) => l.startsWith(prefix));
+    expect(first("founderos touch ")).toBeGreaterThanOrEqual(0);
+    expect(first("antigravity rm ")).toBeGreaterThanOrEqual(0);
     // Order matters: a build that starts after the credential is gone can never end in a PR.
-    expect(asWho.indexOf("founderos touch")).toBeLessThan(asWho.indexOf("antigravity rm"));
+    expect(first("founderos touch ")).toBeLessThan(first("antigravity rm "));
   });
 
   it("does not fail, and says so, when it cannot pause agent-dispatch", () => {
@@ -595,10 +612,13 @@ describe("harden-agent-users --apply", () => {
 
     // The agent owns its home and could have planted a symlink there; a root rm or cat that followed
     // one would delete or overwrite a file anywhere on the box.
-    const asWho = readFileSync(sudoLog, "utf8").split("\n");
-    expect(asWho).toContain("antigravity rm");
-    expect(asWho).toContain("claude-agent rm");
-    expect(asWho).toContain("antigravity bash");
+    const lines = readFileSync(sudoLog, "utf8").split("\n");
+    const ranAs = (user: string, command: string) => lines.some((l) => l.startsWith(`${user} ${command}`));
+    expect(ranAs("antigravity", "rm -f -- ")).toBe(true);
+    expect(ranAs("claude-agent", "rm -f -- ")).toBe(true);
+    // The bot-token rewrite specifically: --check also runs `bash -c` probes as the agent, so a bare
+    // "ran bash as the agent" would pass even if the rewrite itself ran as root.
+    expect(ranAs("antigravity", "bash -c tmp=$(mktemp)")).toBe(true);
   });
 
   it("says so when it cannot change a file, and --check still flags what is left", () => {
