@@ -93,6 +93,11 @@ PAGES = {
             ),
         )
     ),
+    # A form with no button the overlay can press: she submits it herself, and the page is replaced.
+    ("GET", "/apply-manual"): Reply(
+        _page('<form method="post" action="/manual"><input id="first_name" name="first_name"></form>')
+    ),
+    ("POST", "/manual"): Reply(_page("<h1>Fixture BV</h1><p>Done.</p>")),
     # POST, then a page whose first bytes arrive and whose end never does.
     ("GET", "/apply-hang"): Reply(_form("/hang")),
     ("POST", "/hang"): Reply(hold=True),
@@ -223,6 +228,24 @@ async def test_no_after_a_hard_navigation_records_nothing_says_so_once_and_gives
         assert await asyncio.wait_for(task, timeout=10) == ledger.SKIPPED
 
     assert [(e.job_id, e.outcome) for e in ledger.pending()] == [(JOB_ID, "skipped")]
+
+
+@pytest.mark.asyncio
+async def test_a_form_she_submits_by_hand_after_could_not_find_is_asked_about_too(page, site, ledger_file):
+    # The overlay found no button to press ("Could not find ... submit it yourself"). She submits the
+    # form herself and the page is replaced: the bar is gone, and she still has to be able to say so.
+    overlay = Overlay(page)
+    async with _job_on_screen(page, site.url("/apply-manual")) as task:
+        await overlay.press("SUBMIT")
+        await overlay.wait_for_bar_text("Could not find")
+        assert site.posts == []  # nothing was sent: there was nothing to press
+
+        await page.evaluate("document.forms[0].submit()")  # HER action, not the tool's
+        await overlay.wait_for_bar_text(QUESTION, timeout=10000)
+        assert site.posts == ["/manual"] and ledger.pending() == [] and not task.done()
+
+        await overlay.press("YES")
+        assert await asyncio.wait_for(task, timeout=10) == ledger.APPLIED
 
 
 # -- the page changed, but not because she submitted -----------------------------------

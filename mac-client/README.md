@@ -60,7 +60,9 @@ vriend" is not pressed). It never presses *Solliciteer* / *Solliciteren*: that b
 opens the form.
 
 If the bar cannot find the site's submit button, submit the form yourself, then
-press **I SUBMITTED IT MYSELF** to record it. **SKIP** removes the row from your
+press **I SUBMITTED IT MYSELF** to record it. (If your own submit replaces the page, the
+bar comes back on the new page with the same **Did the application go through?** question:
+**YES** records it.) **SKIP** removes the row from your
 list for good: it does not come back tomorrow.
 
 Before you submit, the overlay tells you which resume is attached — read this,
