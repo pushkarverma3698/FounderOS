@@ -43,8 +43,8 @@ export const JOBHUNT_GUIDANCE: Partial<Record<FindingKind, KindGuidance>> = {
     origin: ORIGIN,
     goal: (f) =>
       `The \`${platformOf(f)}\` adapter has stopped yielding postings: 0 new postings in 24 hours after a steady ` +
-      `7-day baseline, while the rest of the free lane keeps producing and ${platformOf(f)}'s boards keep answering ` +
-      `at the HTTP level. Done means the adapter's \`listJobs\` reads a CURRENT ${platformOf(f)} payload again, ` +
+      `7-day baseline, while the rest of the free lane keeps producing and no mass fetch failure was recorded for ` +
+      `${platformOf(f)}'s boards. Done means the adapter's \`listJobs\` reads a CURRENT ${platformOf(f)} payload again, ` +
       `proven by a fixture test built from a real, saved payload that fails before the fix.`,
     expected: (f) =>
       `\`listJobs\` in \`${f.location}\` returns the postings a current ${platformOf(f)} payload contains ` +
@@ -55,7 +55,9 @@ export const JOBHUNT_GUIDANCE: Partial<Record<FindingKind, KindGuidance>> = {
       `build the board URL for ${platformOf(f)} with \`getBoardUrl\` from the adapter named under Location, fetch it once ` +
       `with \`curl\` (it is a public, unauthenticated endpoint), and run the adapter's \`listJobs\` over the response. ` +
       `An empty list for a payload that visibly contains jobs is the defect. If it parses fine, the finding was a ` +
-      `lull: say so with the curl output and close the issue instead of inventing a change.`,
+      `lull: say so with the curl output and close the issue instead of inventing a change. If the fetch returns HTTP ` +
+      `404 the board itself is gone (the sweep skips dead boards on its own, and a platform whose boards are all ` +
+      `skipped reads as silent too): report that with the curl output instead of touching the parser.`,
     scope: (f) =>
       `\`${f.location}\` (its \`listJobs\` and \`getBoardUrl\`), its fixture tests (\`tests/unit/jobhunt/adapters.test.ts\`, ` +
       `\`tests/unit/jobhunt/adapters-batch2.test.ts\`, \`tests/unit/jobhunt/smartrecruiters-workable.test.ts\`), and how ` +

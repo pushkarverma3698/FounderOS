@@ -265,8 +265,8 @@ function adapterSilentFinding(a: {
     evidence:
       `${a.platform} produced 0 new postings in the last ${ADAPTER_SILENT_WINDOW_HOURS}h after ${a.baseline.length} in the ` +
       `${ADAPTER_SILENT_BASELINE_DAYS} days before, while the rest of the free lane produced ${a.laneWindow} (about ${perDay} a day ` +
-      `before). ${a.platform} was named in a failure summary in only ${a.failingRuns} of ${a.runs} sweeps, so its boards were ` +
-      `answering at the HTTP level, yet nothing was parsed out of them.`,
+      `before). ${a.platform} was named in a failure summary in only ${a.failingRuns} of ${a.runs} sweeps, so no mass fetch ` +
+      `failure was recorded for it: its postings are either not arriving or arriving and not being parsed.`,
     severity: "high",
     location: ADAPTER_SOURCE_PATHS[a.platform]!,
     evidenceRows: [
