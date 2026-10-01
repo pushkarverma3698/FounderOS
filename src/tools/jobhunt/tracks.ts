@@ -194,6 +194,11 @@ export function classifyTrack(
 ): RoleTrack | null {
   const normalised = title.toLowerCase();
 
+  // The candidate's own reject list beats every term below: a title that says it is a student
+  // job is not one of her tracks whatever finance phrase it also carries. Same matcher as the
+  // vocabulary, so "stage" cannot hit "backstage".
+  if (profile.rejectTitleTerms?.some((term) => matchesAsWholeWord(normalised, term))) return null;
+
   const trackPriority = profile.trackPriority;
   const tracks = profile.tracks;
 

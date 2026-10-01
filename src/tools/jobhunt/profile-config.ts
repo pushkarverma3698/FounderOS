@@ -105,6 +105,17 @@ export const JobSearchProfileSchema = z.object({
   // Tracks & Keywords
   tracks: z.record(z.string(), ProfileTrackSchema),
   trackPriority: z.array(z.string()),
+
+  /**
+   * Whole-word phrases that make a title unclassifiable for this candidate, whatever else
+   * it matches: `classifyTrack` returns null, so the free lane drops it as off-track (counted
+   * in the funnel). For roles that carry one of her finance phrases and are still not hers —
+   * a working-student job, a title written in a language she does not work in.
+   *
+   * Must be declared HERE, not just on the profile literal: `registerProfile` stores the
+   * schema-parsed copy, and Zod drops keys it does not know.
+   */
+  rejectTitleTerms: z.array(z.string()).optional(),
   
   // Skills & Vocabulary
   skillsDictionaryName: z.string().default("tech"), // "tech" | "finance"

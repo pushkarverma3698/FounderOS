@@ -14,6 +14,13 @@
 # those four was found by scanning the corpora for the brand as a substring and
 # then confirmed by the postings the board actually returned — none is a guess.
 #
+# Added 2026-09-29, each confirmed against the corpora: `ING` (four Workday rows; three are already
+# polled and the fourth, `jvsgblcor`, answers HTTP 403 "permission denied", so a re-run keeps finding
+# any NEW public ING site) and `US Kraft Heinz` (the corpus files both Kraft Heinz Workday sites under
+# that name, although both list Dutch vacancies: Amsterdam, Utrecht). `ASN Bank`, `Essent` and `Royal
+# FloraHolland` are deliberately ABSENT for the reason `CSC` is: no row under any name in any of the ten
+# corpora (`Flora Food Group` on Greenhouse is Upfield, not FloraHolland), so a row would join nothing.
+#
 # `CSC` is deliberately ABSENT. The trust-and-fund-administration business that
 # now owns Intertrust has no row in any of the ten corpora, and the three rows
 # that do key to `csc` are Columbia Sportswear, CSC Generation and Finland's IT
@@ -39,6 +46,7 @@ Protiviti,accountancy
 Accon avm,accountancy
 Visser & Visser,accountancy
 ABN AMRO,bank
+ING,bank
 Rabobank,bank
 NIBC,bank
 NIBC Bank,bank
@@ -90,6 +98,7 @@ KLM,shared-services
 KLM Careers,shared-services
 Air France-KLM,shared-services
 Danone,shared-services
+US Kraft Heinz,shared-services
 FrieslandCampina,shared-services
 Vopak,shared-services
 Royal Vopak,shared-services
