@@ -118,3 +118,37 @@ expected to change constantly. The freeze is on the control flow, not the payloa
 | PR → Claude review, PASS path | ✅ | `pr-brain.log` gated #486 at 04:09Z and #487 at 05:29Z, both CLEARED |
 | CI | ✅ | 2 required checks on `main`, green on every PR merged this session |
 | dispatch failure is loud, not silent | ✅ | #491 → `agent:failed` + diagnostic comment + Telegram escalation |
+
+## Amendment 2026-10-03 — the reviewer is a role, and its engine is configurable
+
+**What changed.** `pr-brain` is still the sole review authority; what runs it is now an *engine*
+(`PR_BRAIN_ENGINE`): `agy` (the default) or `claude`. On 2026-10-01 Claude's weekly usage limit paused every
+review until 10-05, and with it the whole review half of the Telegram loop. "The reviewer is Claude" had become
+a single point of failure that the model's own consequences section had already named ("the model is only as
+available as its weakest external dependency").
+
+**What did not change: "Antigravity never grades its own work."** The rule was about independence, not a
+vendor. On the agy engine it is held by construction, and a reviewer that cannot show these four things is not
+independent whatever it is called:
+
+1. **A different model.** The executor runs `gemini-3.6-flash-medium`; the reviewer runs `claude-sonnet-4-6`
+   through the same CLI, or `gemini-3.1-pro-high` when the Claude quota is gone (`PR_BRAIN_MODELS`, in order:
+   quota is per model family on the login, and on 2026-10-02 every non-Gemini model was out for 69 hours). The
+   code skips any candidate equal to the executor's model (`PR_BRAIN_EXECUTOR_MODEL`, default what
+   `agent-dispatch` runs), whatever the list says. A weaker vendor split (Gemini Pro grading Gemini Flash) is
+   still two different models; it is the fallback, not the first choice.
+2. **A fresh conversation.** `--new-project`, in its own clone (`/opt/agy-workspace/review/<repo>`) on the PR
+   head: it has never seen the executor's session or scratch state.
+3. **No write path to the PR branch.** The clone's push URL is disabled, so the reviewer cannot edit what it
+   grades. This is why verdict B ("Claude fixes") does not exist on the agy engine: a finding becomes
+   request-changes, and agent-dispatch Pass B sends the executor back. (Verdict B stays available on `claude`.)
+4. **Code, not the model, changes the PR's state.** The reviewer ends its answer with `BRAIN-VERDICT: PASS` or
+   `FAIL`; `pr-brain` makes the PR ready or draft to match and posts the reviewed marker. A run with no verdict
+   line is a failed attempt, never a pass.
+
+**How to go back:** `PR_BRAIN_ENGINE=claude` in the pr-brain crontab line. Tests for both engines live in
+`tests/unit/scripts/pr-brain-agy.test.ts` and `pr-brain-notify.test.ts`/`pr-brain-token.test.ts`.
+
+**Why this is recorded here:** an earlier attempt (PR #791) swapped the CLI in place, did not meet these four
+conditions, and was rightly stopped by the gate citing this ADR. The conditions are the answer to that review,
+not an exception to the rule.

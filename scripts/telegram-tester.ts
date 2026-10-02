@@ -14,8 +14,10 @@
  *
  * USAGE (after setup):
  *   npx tsx --env-file=.env scripts/telegram-tester.ts send "list my desktop files" [--wait 90]
+ *   npx tsx --env-file=.env scripts/telegram-tester.ts send "fix the footer" --reply-to "what should I build"
  *   npx tsx --env-file=.env scripts/telegram-tester.ts approve     # click ✅ on latest HITL card
  *   npx tsx --env-file=.env scripts/telegram-tester.ts reject      # click ❌
+ *   npx tsx --env-file=.env scripts/telegram-tester.ts click "FounderOS"   # tap the newest button with that label
  *   npx tsx --env-file=.env scripts/telegram-tester.ts read [n]    # print last n messages (default 10)
  *
  * `send` waits for the bot's replies (polling, default 90s) and prints them,
@@ -185,12 +187,20 @@ async function waitForReplies(
   if (seen.size === 0) console.log(`(no reply within ${waitS}s)`);
 }
 
-async function cmdSend(text: string, waitS: number): Promise<void> {
+async function cmdSend(text: string, waitS: number, replyToContaining?: string): Promise<void> {
   const peer = `@${await botUsername()}`;
   const client = await connect(true);
 
-  const sent = await client.sendMessage(peer, { message: text });
-  console.log(`→ sent #${sent.id}: ${text}`);
+  // `--reply-to <text>` answers the newest bot message (of the last 15) containing that text, the way the founder
+  // answers /task's "what should I build?" force-reply prompt: the target repo travels on that message's text.
+  let replyTo: number | undefined;
+  if (replyToContaining) {
+    const target = [...(await history(client, peer, 15))].reverse().find((m) => !m.out && (m.message ?? "").includes(replyToContaining));
+    if (!target) fail(`No bot message containing "${replyToContaining}" in the last 15 messages to reply to.`);
+    replyTo = target.id;
+  }
+  const sent = await client.sendMessage(peer, { message: text, ...(replyTo ? { replyTo } : {}) });
+  console.log(`→ sent #${sent.id}${replyTo ? ` (reply to #${replyTo})` : ""}: ${text}`);
   await waitForReplies(client, peer, sent.id, waitS);
   await client.disconnect();
 }
@@ -221,27 +231,9 @@ async function cmdSendMedia(
   await client.disconnect();
 }
 
-async function cmdClick(decision: "approve" | "reject"): Promise<void> {
-  const peer = `@${await botUsername()}`;
-  const client = await connect(true);
-
-  const msgs = await history(client, peer, 15);
-  const card = [...msgs].reverse().find((m) => {
-    if (m.out || !(m.replyMarkup instanceof Api.ReplyInlineMarkup)) return false;
-    return m.replyMarkup.rows.some((row) =>
-      row.buttons.some(
-        (b) => b instanceof Api.KeyboardButtonCallback && b.data.toString("utf-8") === decision,
-      ),
-    );
-  });
-  if (!card) fail(`No pending HITL card with a "${decision}" button in the last 15 messages.`);
-
-  await card.click({ data: Buffer.from(decision) });
-  console.log(`✓ clicked "${decision}" on card #${card.id} — waiting for the bot's follow-up…`);
-
-  // Watch for the post-decision reply (resume runs the actual side effect).
+/** The follow-up the bot sends after a tap, printed for up to 60 s (a tap resumes the real side effect). */
+async function printFollowUps(client: TelegramClient, peer: string, baseline: number): Promise<void> {
   const deadline = Date.now() + 60_000;
-  const baseline = msgs[msgs.length - 1]!.id;
   const seen = new Set<number>();
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
@@ -252,6 +244,56 @@ async function cmdClick(decision: "approve" | "reject"): Promise<void> {
     }
     if (seen.size > 0) break;
   }
+}
+
+/** The newest bot message in the last 15 that carries a callback button `wanted` accepts, and that button. */
+async function findButton(
+  client: TelegramClient,
+  peer: string,
+  wanted: (b: Api.KeyboardButtonCallback) => boolean,
+): Promise<{ msgs: Api.Message[]; card: Api.Message; button: Api.KeyboardButtonCallback } | null> {
+  const msgs = await history(client, peer, 15);
+  for (const m of [...msgs].reverse()) {
+    if (m.out || !(m.replyMarkup instanceof Api.ReplyInlineMarkup)) continue;
+    for (const row of m.replyMarkup.rows) {
+      for (const b of row.buttons) if (b instanceof Api.KeyboardButtonCallback && wanted(b)) return { msgs, card: m, button: b };
+    }
+  }
+  return null;
+}
+
+/**
+ * Tap ✅/❌ on the newest approval card. The card's callback data is `approve` or `approve:<nonce>` (the nonce
+ * rejects a stale card from an earlier mission), so it is matched as that prefix and the tap carries the card's
+ * own data: matching the bare word, as this did, found no button on any card the bot has sent since the nonce.
+ */
+async function cmdClick(decision: "approve" | "reject"): Promise<void> {
+  const peer = `@${await botUsername()}`;
+  const client = await connect(true);
+
+  const found = await findButton(client, peer, (b) => {
+    const data = b.data.toString("utf-8");
+    return data === decision || data.startsWith(`${decision}:`);
+  });
+  if (!found) fail(`No pending HITL card with a "${decision}" button in the last 15 messages.`);
+
+  await found.card.click({ data: found.button.data });
+  console.log(`✓ clicked "${decision}" on card #${found.card.id} — waiting for the bot's follow-up…`);
+  await printFollowUps(client, peer, found.msgs[found.msgs.length - 1]!.id);
+  await client.disconnect();
+}
+
+/** Tap the newest inline button whose label contains `label` (e.g. the repo picker's "FounderOS"). */
+async function cmdClickText(label: string): Promise<void> {
+  const peer = `@${await botUsername()}`;
+  const client = await connect(true);
+
+  const found = await findButton(client, peer, (b) => b.text.toLowerCase().includes(label.toLowerCase()));
+  if (!found) fail(`No button labelled like "${label}" in the last 15 messages.`);
+
+  await found.card.click({ data: found.button.data });
+  console.log(`✓ clicked "${found.button.text}" on message #${found.card.id} — waiting for the bot's follow-up…`);
+  await printFollowUps(client, peer, found.msgs[found.msgs.length - 1]!.id);
   await client.disconnect();
 }
 
@@ -267,9 +309,13 @@ async function main(): Promise<void> {
     case "send": {
       const waitFlag = rest.indexOf("--wait");
       const waitS = waitFlag >= 0 ? parseInt(rest[waitFlag + 1] ?? `${DEFAULT_WAIT_S}`, 10) : DEFAULT_WAIT_S;
-      const text = (waitFlag >= 0 ? rest.slice(0, waitFlag) : rest).join(" ").trim();
-      if (!text) fail('Usage: send "message" [--wait seconds]');
-      return cmdSend(text, waitS);
+      const replyFlag = rest.indexOf("--reply-to");
+      const replyTo = replyFlag >= 0 ? rest[replyFlag + 1] : undefined;
+      // The message is everything before the first flag.
+      const flagAt = [waitFlag, replyFlag].filter((i) => i >= 0).sort((a, b) => a - b)[0] ?? rest.length;
+      const text = rest.slice(0, flagAt).join(" ").trim();
+      if (!text) fail('Usage: send "message" [--wait seconds] [--reply-to "text of the bot message to answer"]');
+      return cmdSend(text, waitS, replyTo);
     }
     case "sendphoto":
     case "sendvoice": {
@@ -283,8 +329,13 @@ async function main(): Promise<void> {
     case "approve":
     case "reject":
       return cmdClick(cmd);
+    case "click": {
+      const label = rest.join(" ").trim();
+      if (!label) fail('Usage: click "<button label>"');
+      return cmdClickText(label);
+    }
     default:
-      fail("Usage: telegram-tester.ts <login|send|sendphoto|sendvoice|approve|reject|read>");
+      fail("Usage: telegram-tester.ts <login|send|sendphoto|sendvoice|approve|reject|click|read>");
   }
 }
 

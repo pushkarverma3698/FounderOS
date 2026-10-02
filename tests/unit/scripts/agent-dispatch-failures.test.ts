@@ -253,9 +253,21 @@ describe("the Gemini key never reaches a command line, a log, Telegram or GitHub
     expect(sb.agyKeysSeen()).toEqual([odd]);
   });
 
-  it("is redacted from the LIVE progress line too, which is edited into Telegram while agy runs", () => {
-    // agy stays alive for a second after printing, so the progress loop reads its last line.
-    sb.tick({ agyOut: `Error: API key not valid: ${FAKE_GEMINI_KEY}`, agySleepAfter: 1 });
+  it("is redacted from the LIVE progress message too, which is edited into Telegram while agy runs", () => {
+    // The progress message shows tool calls, and a tool call's command line can hold the key (an agent that
+    // `export`s it, or curls with it). agy stays alive for a second after printing so the loop renders it.
+    const toolCall = JSON.stringify({
+      event: "step_update",
+      step_update: {
+        conversation_id: "c",
+        step_index: 2,
+        state: "ACTIVE",
+        step_type: "tool",
+        tool_name: "run_command",
+        tool_info: { name: "run_command", parameters: { CommandLine: `curl -H "x-goog-api-key: ${FAKE_GEMINI_KEY}" https://example.test` } },
+      },
+    });
+    sb.tick({ agyOut: toolCall, agySleepAfter: 1 });
 
     const edits = sb.telegram().filter((c) => c.kind === "edit");
     expect(edits.length).toBeGreaterThan(0);

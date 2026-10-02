@@ -82,7 +82,7 @@ describe("the issue is closed while Antigravity runs", () => {
     sb.tick({ agyOut: "done", agyRc: 0, agyHook: OPEN_A_PR });
 
     const msg = sb.messages().find((m) => /PR #\d+ opened/.test(m)) ?? "";
-    expect(msg).toContain("awaiting Claude review");
+    expect(msg).toContain("awaiting pr-brain review");
     expect(msg).not.toMatch(/CLOSED/);
   });
 });

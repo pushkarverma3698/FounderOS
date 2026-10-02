@@ -100,7 +100,9 @@ describe("dispatch_antigravity_task with the real lint", () => {
     expect(mockWriteAuditEntry).not.toHaveBeenCalled();
   });
 
-  it("rejects a path GitHub says is not there, before the card, naming the repo it looked in", async () => {
+  it("files a path GitHub says is not there as an unverified hint, says so on the card, and still asks for ONE approval", async () => {
+    // 2026-10-02: every plain-English /task died here, because the planner invents paths for repos it has never
+    // seen. The path is not rejected any more; it is demoted, and the founder is told on the card.
     mockGetContent.mockImplementation(async (params: { path: string }) => {
       if (params.path === "src/api.ts") throw Object.assign(new Error("Not Found"), { status: 404 });
       return { data: {} };
@@ -108,9 +110,28 @@ describe("dispatch_antigravity_task with the real lint", () => {
 
     const reply = await dispatchAntigravityTask.invoke({ ...BRIEF });
 
-    expect(reply).toContain("`src/api.ts` does not exist in OplifyMessage/oplify-messaging-api.");
-    expect(mockHitlGate).not.toHaveBeenCalled();
-    expect(mockIssuesCreate).not.toHaveBeenCalled();
+    expect(reply).toContain("✅ Dispatched to Google Antigravity: Issue #77");
+    expect(reply).toContain("⚠️ Not found in the repository, so filed as unverified hints, not facts: src/api.ts.");
+    expect(mockHitlGate).toHaveBeenCalledTimes(1);
+    const preview = (mockHitlGate.mock.calls[0]?.[0] as { preview: string }).preview;
+    expect(preview).toContain("Not verified: Not found in the repository, so filed as unverified hints, not facts: src/api.ts.");
+    const filed = (mockIssuesCreate.mock.calls[0]?.[0] as { body: string }).body;
+    expect(filed).toContain("src/app.ts"); // the path that exists stays a fact
+    expect(filed).toContain("[unverified path 1]");
+    expect(filed).toContain("```text\n1. src/api.ts\n```");
+    // Before the card: the brief as written (2 paths, one is a 404), then the repaired brief (1 path). execute()
+    // repeats the first lookup (a failing body is never memoised: a path created since must be seen) and finds
+    // the repaired one in the memo. A demotion costs two extra lookups; no other brief pays them.
+    expect(mockGetContent).toHaveBeenCalledTimes(5);
+  });
+
+  it("files a request with NO evidence when the founder's own words come with it: they are the evidence", async () => {
+    const reply = await dispatchAntigravityTask.invoke({ ...BRIEF, evidence: undefined, founder_request: "make the login button bigger on mobile" });
+
+    expect(reply).toContain("✅ Dispatched to Google Antigravity: Issue #77");
+    const filed = (mockIssuesCreate.mock.calls[0]?.[0] as { body: string }).body;
+    expect(filed).toContain("## Evidence\n\nThe founder's request, verbatim:\n\n> make the login button bigger on mobile");
+    expect(mockHitlGate).toHaveBeenCalledTimes(1);
   });
 
   it("still dispatches, and tells the founder what it could not check, when GitHub is down", async () => {
