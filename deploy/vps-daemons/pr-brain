@@ -10,11 +10,15 @@
 #
 # THE REVIEWER IS AN ENGINE, chosen by PR_BRAIN_ENGINE:
 #   agy     (default) the Antigravity CLI, as the antigravity user, in a fresh conversation on a clean
-#           checkout of the PR head. Its model (PR_BRAIN_MODEL, default claude-sonnet-4-6) is NOT the
-#           executor's (gemini-3.6-flash-medium): the executor is never its own grader, which is the
-#           whole reason this loop has a separate reviewer. It cannot push (the checkout's push URL is
-#           disabled) and it does not stamp or decide: it ends its answer with `BRAIN-VERDICT: PASS` or
-#           `FAIL`, and this script makes the PR's state agree and posts the marker itself.
+#           checkout of the PR head. Its model is NEVER the executor's (gemini-3.6-flash-medium): the
+#           executor is never its own grader, which is the whole reason this loop has a separate reviewer.
+#           The candidates, best first, are PR_BRAIN_MODELS (default claude-sonnet-4-6, then
+#           gemini-3.1-pro-high). Quota is per model family on this account, so a wall on one moves the
+#           review to the next; the reviewer is paused only when every candidate is out (2026-10-02: the
+#           three non-Gemini models were out for 69 hours while every Gemini model still answered).
+#           It cannot push (the checkout's push URL is disabled) and it does not stamp or decide: it ends
+#           its answer with `BRAIN-VERDICT: PASS` or `FAIL`, and this script makes the PR's state agree
+#           and posts the marker itself.
 #   claude  headless Claude Code, as before (needs the Claude login; PR_BRAIN_ENGINE=claude).
 # Claude went down for a week on its usage limit (2026-10-02, resets 10-05) and the whole review half of the
 # loop stopped with it: the reviewer must not depend on one vendor's subscription.
@@ -34,7 +38,11 @@
 #   ~/.claude/pr-brain.off     kill switch. Present => exit 0 immediately.
 #   PR_BRAIN_MAX               PRs per sweep (default 3)
 #   PR_BRAIN_ENGINE            agy (default) or claude, see above
-#   PR_BRAIN_MODEL             model for the gate (default claude-sonnet-4-6 for agy, sonnet for claude)
+#   PR_BRAIN_MODELS            agy engine: reviewer models, best first, space or comma separated
+#                              (default "claude-sonnet-4-6 gemini-3.1-pro-high")
+#   PR_BRAIN_MODEL             one model: claude engine (default sonnet); on agy it means PR_BRAIN_MODELS=<it>
+#   PR_BRAIN_EXECUTOR_MODEL    the model that writes the PRs, never used as the reviewer (default: the one
+#                              agent-dispatch uses, AGENT_DISPATCH_MODEL or gemini-3.6-flash-medium)
 #   PR_BRAIN_TIMEOUT_SEC       agy engine: one review's time limit (default 1800)
 #   PR_BRAIN_BUDGET_USD        claude engine: per-PR spend cap (default 5)
 #   PR_BRAIN_ROOT              where to auto-discover repos (default ~/Projects)
@@ -64,7 +72,12 @@ ROOT="${PR_BRAIN_ROOT:-$HOME/Projects}"
 MAX="${PR_BRAIN_MAX:-3}"
 ENGINE="${PR_BRAIN_ENGINE:-agy}"
 case "$ENGINE" in
-  agy) MODEL="${PR_BRAIN_MODEL:-claude-sonnet-4-6}"; REVIEWER_NAME="the Antigravity reviewer" ;;
+  agy)
+    # MODEL is chosen lazily, from this list, by the first call that needs the reviewer (select_review_model).
+    REVIEW_MODELS="${PR_BRAIN_MODELS:-${PR_BRAIN_MODEL:-claude-sonnet-4-6 gemini-3.1-pro-high}}"
+    REVIEW_MODELS="${REVIEW_MODELS//,/ }"
+    MODEL=""
+    REVIEWER_NAME="the Antigravity reviewer" ;;
   claude) MODEL="${PR_BRAIN_MODEL:-sonnet}"; REVIEWER_NAME="Claude" ;;
   *) echo "pr-brain: PR_BRAIN_ENGINE must be agy or claude, not '$ENGINE'" >&2; exit 2 ;;
 esac
@@ -355,6 +368,37 @@ leave_down() {
   down_leave "✅ pr-brain resumed on $(hostname -s) — ${REVIEWER_NAME} reachable again (paused since $since). Queued PRs are being gated now."
 }
 
+# ---------------------------------------------------- which model reviews (agy engine)
+#
+# REVIEW_MODELS is tried in order, and the EXECUTOR's model is never used, whatever the list says: a reviewer
+# that is the model that wrote the PR is not independent (ADR-046). A model whose quota is spent is skipped for
+# the rest of this sweep; the next tick asks again, because quota comes back.
+EXECUTOR_MODEL="${PR_BRAIN_EXECUTOR_MODEL:-$AGY_EXECUTOR_MODEL}"
+SPENT_MODELS=" "
+
+# Sets MODEL to the first candidate that is neither the executor's model nor spent. Returns 1 when there is none.
+select_review_model() {
+  local m
+  for m in $REVIEW_MODELS; do
+    [[ "$m" == "$EXECUTOR_MODEL" ]] && continue
+    [[ "$SPENT_MODELS" == *" $m "* ]] && continue
+    MODEL="$m"
+    return 0
+  done
+  return 1
+}
+
+# Why select_review_model found nothing, as the line the founder reads. LAST_QUOTA_LINE is the CLI's own words.
+no_review_model_detail() { # no_review_model_detail LAST_QUOTA_LINE
+  local spent="${SPENT_MODELS# }"
+  spent="${spent% }"
+  if [[ -z "$spent" ]]; then
+    printf 'no reviewer model is configured that differs from the executor model %s (PR_BRAIN_MODELS="%s")' "$EXECUTOR_MODEL" "$REVIEW_MODELS"
+  else
+    printf 'tried %s: %s' "${spent// /, }" "$1"
+  fi
+}
+
 # Preflight the model. Without this the sweep fails once per PR, twenty minutes
 # apart, forever. Anything but "ok" means no gate can run this tick.
 #
@@ -370,20 +414,35 @@ preflight() {
   if [[ "$ENGINE" == "agy" ]]; then
     # One tiny agy turn in /tmp, in the plain text format (the answer is the word; a failure is the CLI's own error
     # line). The classifier reads the same text it reads for a real gate, so an outage is named identically.
-    local pf_log; pf_log="$(mktemp /tmp/pr-brain-preflight-XXXXXX.log)"
-    as_antigravity 'exec </dev/null; cd /tmp && timeout 150 agy --new-project --model "$1" --print "reply with the single word ok" --print-timeout 120s --output-format text' "$MODEL" >"$pf_log" 2>&1
-    preflight=$(tail -n 3 "$pf_log")
-    if ! printf '%s' "$preflight" | grep -qiwE 'ok'; then
-      local detail
+    local pf_log detail quota_line=""; pf_log="$(mktemp /tmp/pr-brain-preflight-XXXXXX.log)"
+    while :; do
+      if ! select_review_model; then
+        # Nothing left to ask: every candidate is spent, or none may be used (it is the executor's own model).
+        [[ "$SPENT_MODELS" == " " ]] && cls=unknown || cls=limit
+        enter_down "$cls" "$(no_review_model_detail "$quota_line")"
+        rm -f "$pf_log"
+        exit 0
+      fi
+      as_antigravity 'exec </dev/null; cd /tmp && timeout 150 agy --new-project --model "$1" --print "reply with the single word ok" --print-timeout 120s --output-format text' "$MODEL" >"$pf_log" 2>&1
+      preflight=$(tail -n 3 "$pf_log")
+      grep -qiwE 'ok' <<<"$preflight" && break
       cls=$(agy_outage "$pf_log")
       # The CLI's own error line when the classifier found one; otherwise whatever the run printed last.
       detail="$([[ -z "$cls" ]] || outage_line "$pf_log" "$cls")"
       [[ -n "$detail" ]] || detail="$(printf '%s' "$preflight" | tr '\n' ' ' | cut -c1-160)"
       detail="${detail#"${detail%%[![:space:]]*}"}"
+      if [[ "$cls" == limit ]]; then
+        # Quota is per model family: this model is spent, another may answer. A rejected login is not like that,
+        # every model shares it, so only quota moves on to the next candidate.
+        quota_line="$detail"
+        SPENT_MODELS+="$MODEL "
+        log "quota used up on $MODEL ($detail): trying the next reviewer model"
+        continue
+      fi
       enter_down "${cls:-unknown}" "$detail"
       rm -f "$pf_log"
       exit 0
-    fi
+    done
     rm -f "$pf_log"
     PREFLIGHT_OK=1
     return 0
@@ -394,7 +453,7 @@ preflight() {
   # context costs more than that before it answers. A billed call proves auth and
   # quota are fine, so it counts as reachable (2026-09-28: treating it as an
   # outage paused every gate).
-  if ! printf '%s' "$preflight" | grep -qiwE 'ok|Exceeded USD budget'; then
+  if ! grep -qiwE 'ok|Exceeded USD budget' <<<"$preflight"; then
     cls=$(claude_outage "$preflight")
     enter_down "${cls:-unknown}" "$(printf '%s' "$preflight" | tr '\n' ' ' | cut -c1-160)"
     exit 0
@@ -585,6 +644,16 @@ either verified or explicitly scoped as needing a real run. Anything else is FAI
 EOF
 }
 
+# Is HEAD already stamped on PR? The comments are read into a variable and THAT is searched. `gh … | grep -q` under
+# pipefail takes "grep stopped at the first hit and gh was killed by SIGPIPE" (status 141) for "no match": measured
+# at 125 of 773 tries on a loaded box (2026-10-02). It produced a second marker on a PR, and the same shape in the
+# sweep's skip check would have re-reviewed a PR whose thread outgrew the 64 KB pipe buffer, every sweep.
+head_is_stamped() { # head_is_stamped PR HEAD
+  local comments
+  comments="$(gh pr view "$1" --json comments --jq '[.comments[].body] | join("\n")' 2>/dev/null)" || return 1
+  grep -qF "$MARKER_PREFIX $2" <<<"$comments"
+}
+
 # One gate on the agy engine. Returns 0 when the reviewer reached a verdict AND the PR now agrees with it; anything
 # else is a failed attempt (the caller counts it, and the head is retried up to MAX_ATTEMPTS). OUT receives the
 # plain-text view of the run: the classifier reads it, and the daemon log keeps it.
@@ -606,7 +675,11 @@ run_agy_gate() { # run_agy_gate PR SLUG NAME HEAD APP_RC OUT
   rc=$?
   rm -f "$prompt_file"
   if [[ "$rc" -ne 0 ]]; then
-    agy_progress_outcome "⚠️ The review run failed (agy exit ${rc}). It is retried."
+    case "$(agy_outage "$out")" in
+      limit) agy_progress_outcome "⚠️ ${MODEL} has no quota left: $(outage_line "$out" limit)" ;;
+      auth) agy_progress_outcome "⚠️ The Antigravity login was rejected: $(outage_line "$out" auth)" ;;
+      *) agy_progress_outcome "⚠️ The review run failed (agy exit ${rc}). It is retried." ;;
+    esac
     return "$rc"
   fi
 
@@ -628,7 +701,7 @@ run_agy_gate() { # run_agy_gate PR SLUG NAME HEAD APP_RC OUT
   fi
   # The marker is what stops this head being gated again, and it is what agent-dispatch reads before it sends the
   # executor back to a draft. It is posted once per head, and only after the PR agrees with the verdict.
-  if ! gh pr view "$pr" --json comments --jq '[.comments[].body] | join("\n")' 2>/dev/null | grep -qF "$MARKER_PREFIX $head"; then
+  if ! head_is_stamped "$pr" "$head"; then
     gh pr comment "$pr" --body "${MARKER_PREFIX} ${head} -->" >>"$LOG" 2>&1 || log "$name#$pr could not post the reviewed marker"
   fi
   if [[ "$verdict" == "PASS" ]]; then
@@ -637,6 +710,26 @@ run_agy_gate() { # run_agy_gate PR SLUG NAME HEAD APP_RC OUT
     agy_progress_outcome "↩️ BRAIN-VERDICT: FAIL. Changes requested: the PR stays a draft and goes back to Antigravity."
   fi
   return 0
+}
+
+# run_agy_gate, moving to the next reviewer model when this one's quota runs out DURING the review. Same arguments
+# and return value. Quota is per model family, so a wall on one says nothing about the next, and a review that
+# reached the wall has not failed: the model it ran on is spent for this sweep, and the same PR is reviewed again
+# at once. When no model is left the quota failure is returned as it is and the caller pauses the reviewer.
+run_agy_gate_any_model() { # run_agy_gate_any_model PR SLUG NAME HEAD APP_RC OUT
+  local pr="$1" name="$3" out="$6" rc spent line
+  while :; do
+    run_agy_gate "$@"
+    rc=$?
+    [[ "$rc" -ne 0 && "$(agy_outage "$out")" == limit ]] || return "$rc"
+    spent="$MODEL"
+    line="$(outage_line "$out" limit)"
+    SPENT_MODELS+="$spent "
+    select_review_model || return "$rc"
+    log "$name#$pr: quota used up on $spent ($line): reviewing again with $MODEL"
+    redact_secrets <"$out" >>"$LOG"
+    agy_progress_outcome "⚠️ ${spent} has no quota left. Reviewing again with ${MODEL}."
+  done
 }
 
 # ------------------------------------------------------- the app (browser) gate
@@ -939,7 +1032,7 @@ while IFS= read -r repo; do
     if [[ -z "$ONE_PR" ]]; then
       head="${head:-$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null)}"
       comments=$(gh pr view "$pr" --json comments --jq '[.comments[].body] | join("\n")' 2>/dev/null || true)
-      if printf '%s\n' "$comments" | grep -qF "$MARKER_PREFIX $head"; then
+      if grep -qF "$MARKER_PREFIX $head" <<<"$comments"; then
         log "$repo_name#$pr already gated at $head — skipped"
         continue
       fi
@@ -1019,7 +1112,7 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
     if [[ "$ENGINE" == "agy" ]]; then
       log "gating $repo_name#$pr (head ${head:0:8}) engine=agy model=$MODEL"
       # </dev/null for the same reason as below: this runs inside `while read … done <<<"$prs"`.
-      run_agy_gate "$pr" "${repo_owner}/${repo_name}" "$repo_name" "$head" "$app_rc" "$gate_out" </dev/null
+      run_agy_gate_any_model "$pr" "${repo_owner}/${repo_name}" "$repo_name" "$head" "$app_rc" "$gate_out" </dev/null
       gate_rc=$?
     else
       log "gating $repo_name#$pr (head ${head:0:8}) model=$MODEL budget=\$$BUDGET"

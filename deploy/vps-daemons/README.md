@@ -37,13 +37,23 @@ loop stopped with it. `pr-brain` now has an engine:
 | | `agy` (default) | `claude` |
 |---|---|---|
 | Runs | the Antigravity CLI as the `antigravity` user, in its own clone `/opt/agy-workspace/review/<repo>` on the PR head | headless Claude Code in `/opt/review/<repo>` |
-| Model | `claude-sonnet-4-6` through agy (`PR_BRAIN_MODEL`), **not** the executor's `gemini-3.6-flash-medium` | `sonnet` |
+| Model | `claude-sonnet-4-6`, then `gemini-3.1-pro-high` if that one's quota is gone (`PR_BRAIN_MODELS`, best first). **Never** the executor's `gemini-3.6-flash-medium`: the code skips it | `sonnet` (`PR_BRAIN_MODEL`) |
 | Can push to the PR | **no** (the clone's push URL is disabled) | yes (verdict B) |
 | Verdict | the model ends with `BRAIN-VERDICT: PASS` or `FAIL`; **the script** makes the PR ready/draft and posts the reviewed marker. No verdict line = a failed attempt | read from the PR's state, as before |
 | Telegram | one message, edited while it runs: `Reviewing <repo>#<n>`, the last tool calls, the clock, the verdict | the gate's start and verdict |
 
 Switch back with `PR_BRAIN_ENGINE=claude` in the pr-brain crontab line. The independence conditions (and why a
 different model, a fresh conversation and no write path matter) are in the ADR-046 amendment of 2026-10-03.
+
+**Quota is per model family on the Antigravity login.** On 2026-10-02 `claude-sonnet-4-6`, `claude-opus-4-6-thinking`
+and `gpt-oss-120b-medium` all answered `RESOURCE_EXHAUSTED (code 429) … Resets in 69h26m28s` while every Gemini model
+still worked (probed on the VPS). So a wall on one reviewer model moves the review to the next candidate, at the
+preflight and in the middle of a review (the same PR is reviewed again at once, and the spent model is skipped for the
+rest of the sweep). The reviewer is paused, once, only when every candidate is out; the message names the models tried
+and the reset time. A rejected login is not retried on another model: every model shares it. Probe a model by hand:
+`sudo -u antigravity -i agy --new-project --model <name> --print "reply ok" --output-format text`; list them with
+`agy models`. If you move the executor (`AGENT_DISPATCH_MODEL`), pr-brain follows it when it sees the same variable,
+otherwise set `PR_BRAIN_EXECUTOR_MODEL` on its crontab line to the same value.
 
 ## Live progress and the kick
 

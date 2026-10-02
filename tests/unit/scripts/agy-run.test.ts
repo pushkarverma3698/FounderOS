@@ -238,6 +238,25 @@ describe("agy_text_view — the plain text the failure classifier reads", () => 
   it("is empty for an empty file, never an error", () => {
     expect(view("")).toBe("");
   });
+
+  it("ends with how the run ENDED: a long answer must not push the CLI's own error out of the classifier's window", () => {
+    // Real shape, 2026-10-02: a 28-minute review on claude-sonnet-4-6 ended on the quota wall. The final answer
+    // carried ~100 lines of narration and the view put it AFTER the error lines, so they fell outside the
+    // classifier's last-40-lines window: the run was counted as "failed attempt 1/3", not "the quota is used up".
+    const quota = "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 69h26m28s.";
+    const narration = Array.from({ length: 100 }, (_, i) => `Good. Checking file ${i}.`).join("\n");
+    const raw =
+      `error: ${quota} (response may be truncated)\n` +
+      `AGY_ERROR: {"short_error":"RESOURCE_EXHAUSTED (code 429): ${quota}","status":"RESOURCE_EXHAUSTED","error_code":429}\n` +
+      lines(init, result("ERROR", { error: quota, response: narration }));
+
+    const out = view(raw);
+
+    expect(out).toContain("Good. Checking file 99.");
+    expect(out.trimEnd().split("\n").slice(-3).join("\n")).toContain("Individual quota reached");
+    writeFileSync(join(root, "text.log"), out);
+    expect(bash(`source "${LIB_DIR}agy-failure.sh"; classify_agy_failure "${root}/text.log"`).stdout.trim()).toBe("quota");
+  });
 });
 
 describe("agy_run — one run, one Telegram message", () => {

@@ -124,13 +124,10 @@ TELEGRAM_MAX=4000
 # Portable mtime in epoch seconds (GNU stat, then BSD stat; 0 when the file is absent).
 file_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 HOST="$(hostname -s 2>/dev/null || echo unknown)"
-# Bare `agy` (no --model, no key) authenticates via OAuth and silently runs
-# against whatever default model that quota currently allows — which has
-# been exhausted before. Explicit --model + an API key sidestep OAuth
-# entirely. Read the same way TELEGRAM_* is read above: one grepped line,
-# not a full `source` of $ENV_FILE (which would also pull in every unrelated
-# var and any shell function it defines).
-AGY_MODEL="${AGENT_DISPATCH_MODEL:-gemini-3.6-flash-medium}"
+# The key is read the same way TELEGRAM_* is read above: one grepped line, not a full `source` of $ENV_FILE
+# (which would also pull in every unrelated var and any shell function it defines). The model is AGY_MODEL,
+# set below once deploy/lib/agy-run.sh is loaded: bare `agy` (no --model) runs on whatever default the quota
+# currently allows, which has been exhausted before, so the model is always explicit.
 GEMINI_API_KEY=""
 # The key file's mtime is taken BEFORE the key is read: an auth pause resumes when that mtime
 # differs from this one, so a key pasted in while a run was still failing on the old one is noticed.
@@ -212,6 +209,9 @@ for _lib in down-state.sh agy-failure.sh agy-run.sh; do
   # shellcheck source=/dev/null
   source "$_lib_path"
 done
+# The executor's model: the one definition lives in the library, because pr-brain reads the same value to keep
+# the reviewer a different model than the author.
+AGY_MODEL="$AGY_EXECUTOR_MODEL"
 # Anything the daemon knows to be secret is masked verbatim wherever text leaves the box.
 REDACT_LITERALS+=("$GEMINI_API_KEY")
 if [[ -f "$ENV_FILE" ]]; then

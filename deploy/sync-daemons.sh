@@ -135,7 +135,7 @@ ensure_kick_cron() {
     return 0
   fi
   current="$("$cron" -l 2>/dev/null)" || current=""
-  if printf '%s\n' "$current" | grep -Eq '^[^#]*agent-dispatch[[:space:]]+--kicked'; then
+  if grep -Eq '^[^#]*agent-dispatch[[:space:]]+--kicked' <<<"$current"; then
     KICK_CRON_NOTE="kick cron already installed"
     return 0
   fi
@@ -151,7 +151,7 @@ ensure_kick_cron() {
   after="$("$cron" -l 2>/dev/null)" || after=""
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    if ! printf '%s\n' "$after" | grep -qxF -- "$line"; then
+    if ! grep -qxF -- "$line" <<<"$after"; then
       printf '%s\n' "$current" | "$cron" - 2>/dev/null
       fail "the crontab does not hold the line '$line' after the kick job was added; the old crontab was restored"
     fi

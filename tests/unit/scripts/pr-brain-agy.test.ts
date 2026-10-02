@@ -172,7 +172,7 @@ case "$*" in
   "pr ready "*) echo false >"$GH_DIR/draft" ;;
   "pr comment "*) body=""; while [ $# -gt 0 ]; do [ "$1" = "--body" ] && body="$2"; shift; done; printf '%s\\n' "$body" >>"$GH_DIR/comments" ;;
   *"app-evidence"*) : ;;
-  *"--json comments"*) cat "$GH_DIR/comments" 2>/dev/null ;;
+  *"--json comments"*) cat "$GH_DIR/comments" 2>/dev/null; if [ -n "\${GH_SLOW_TAIL:-}" ]; then sleep 0.3; echo "-- a later comment --"; fi ;;
   *"headRefOid"*) echo "$FAKE_HEAD" ;;
   *"--json isDraft --jq .isDraft"*) cat "$GH_DIR/draft" ;;
   *"reviewDecision"*) if [ "$(cat "$GH_DIR/draft")" = true ]; then echo "REVIEWED, left as draft — not cleared · feat: x"; else echo "CLEARED — marked ready for merge (self-approval impossible; ready IS the pass) · feat: x"; fi ;;
@@ -185,12 +185,32 @@ esac`,
   stub("sudo", `while [ "$1" != "--" ]; do shift; done; shift; exec "$@"`);
   stub("timeout", `shift; exec "$@"`);
   // The preflight is the one agy call whose prompt asks for "ok", in text mode. A review records where it ran.
+  // AGY_PREFLIGHT_QUOTA_MODELS / AGY_REVIEW_QUOTA_MODELS: models whose quota is gone, for the preflight / for a review.
   stub(
     "agy",
-    `case "$*" in *"reply with the single word ok"*) printf '%s\\n' "$FAKE_PREFLIGHT"; exit "$FAKE_PREFLIGHT_RC" ;; esac
+    `model=""; prev=""
+for a in "$@"; do [ "$prev" = "--model" ] && model="$a"; prev="$a"; done
+# What agy printed on 2026-10-02 when a model's quota ran out: its own line on stderr and, in stream mode, a result
+# event whose answer is the whole narration so far. That length (about 100 lines) pushed the error out of the failure
+# classifier's window, and the run was counted as an ordinary failed attempt.
+quota_wall() {
+  q='Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 69h26m28s.'
+  printf 'error: %s (response may be truncated)\\n' "$q" >&2
+  case "$*" in *stream-json*)
+    narr=""; i=0; while [ "$i" -lt 100 ]; do narr="\${narr}Checking file $i.\\\\n"; i=$((i + 1)); done
+    printf '{"event":"result","result":{"status":"ERROR","error":"%s","response":"%s"}}\\n' "$q" "$narr" ;;
+  esac
+  exit 3
+}
+case "$*" in *"reply with the single word ok"*)
+  echo "$model" >>"$AGY_LOGS/pf-models"
+  case " \${AGY_PREFLIGHT_QUOTA_MODELS:-} " in *" $model "*) quota_wall "$@" ;; esac
+  printf '%s\\n' "$FAKE_PREFLIGHT"; exit "$FAKE_PREFLIGHT_RC" ;; esac
 echo review >>"$AGY_LOGS/calls"
+echo "$model" >>"$AGY_LOGS/model"
+case " \${AGY_REVIEW_QUOTA_MODELS:-} " in *" $model "*) quota_wall "$@" ;; esac
 pwd >>"$AGY_LOGS/cwd"; git rev-parse HEAD >>"$AGY_LOGS/head" 2>&1; git remote get-url --push origin >>"$AGY_LOGS/push" 2>&1
-while [ $# -gt 0 ]; do case "$1" in --print) printf '%s\\n----\\n' "$2" >>"$AGY_LOGS/prompts"; shift 2 ;; --model) echo "$2" >>"$AGY_LOGS/model"; shift 2 ;; *) shift ;; esac; done
+while [ $# -gt 0 ]; do case "$1" in --print) printf '%s\\n----\\n' "$2" >>"$AGY_LOGS/prompts"; shift 2 ;; *) shift ;; esac; done
 [ -n "\${AGY_HOOK:-}" ] && bash -c "$AGY_HOOK"
 printf '%s' "$AGY_OUT"; printf '%s' "$AGY_ERR" >&2
 exit "$AGY_RC"`,
@@ -417,6 +437,132 @@ describe("when the reviewer cannot run (an outage, announced once)", () => {
     const resumed = sent().filter((m) => m.includes("resumed"));
     expect(resumed).toHaveLength(1);
     expect(resumed[0]).toMatch(/the Antigravity reviewer reachable again/);
+  });
+});
+
+describe("a reviewer model that is out of quota (quota is per model family: the next model reviews)", () => {
+  const SPENT = "claude-sonnet-4-6";
+  const FALLBACK = "gemini-3.1-pro-high";
+
+  it("at the preflight: the first model is spent, so the review runs on the next one — no pause, no 'failed' message", () => {
+    const r = sweep({ agyOut: review("All good.\n\nBRAIN-VERDICT: PASS"), env: { AGY_PREFLIGHT_QUOTA_MODELS: SPENT } });
+
+    expect(r.status).toBe(0);
+    expect(agyLog("pf-models")).toEqual([SPENT, FALLBACK]);
+    expect(agyLog("model")).toEqual([FALLBACK]);
+    expect(ghState("draft")).toBe("false");
+    expect(sent().filter((m) => /PAUSED|FAILED/.test(m))).toHaveLength(0);
+    expect(existsSync(join(home, ".claude", "pr-brain.down"))).toBe(false);
+    expect(prBrainLog()).toMatch(/quota used up on claude-sonnet-4-6 \(.*Resets in 69h26m28s.*\): trying the next reviewer model/);
+    expect(prBrainLog()).toMatch(/engine=agy model=gemini-3\.1-pro-high/);
+  });
+
+  it("in the middle of a review (the 2026-10-02 shape): the same PR is reviewed again on the next model, in the same attempt", () => {
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), env: { AGY_REVIEW_QUOTA_MODELS: SPENT } });
+
+    expect(agyLog("model")).toEqual([SPENT, FALLBACK]);
+    expect(ghState("draft")).toBe("false");
+    expect(sent().filter((m) => /PAUSED|FAILED/.test(m))).toHaveLength(0);
+    expect(existsSync(join(home, ".claude", "pr-brain.failures"))).toBe(false);
+    expect(prBrainLog()).toMatch(/oplify-messaging-api#56: quota used up on claude-sonnet-4-6 .*: reviewing again with gemini-3\.1-pro-high/);
+    // the founder's progress message for the first run says why it stopped and what happens next
+    expect(edits().some((t) => t.includes("claude-sonnet-4-6 has no quota left. Reviewing again with gemini-3.1-pro-high."))).toBe(true);
+  });
+
+  it("a spent model stays spent for the rest of the sweep: the next PR goes straight to the fallback", () => {
+    const bare = join(root, "github", `${SLUG}.git`);
+    const seed = join(root, "seed");
+    writeFileSync(join(seed, "second.txt"), "work 2\n");
+    git(seed, "add", ".");
+    git(seed, "commit", "-q", "-m", "work 2");
+    const head2 = git(seed, "rev-parse", "HEAD");
+    git(seed, "push", "-q", bare, "task/issue-72-x");
+    git(bare, "update-ref", "refs/pull/57/head", head2);
+
+    sweep({ prs: `56 ${head}\n57 ${head2}`, agyOut: review("BRAIN-VERDICT: FAIL"), env: { AGY_REVIEW_QUOTA_MODELS: SPENT } });
+
+    expect(agyLog("pf-models")).toEqual([SPENT]);
+    expect(agyLog("model")).toEqual([SPENT, FALLBACK, FALLBACK]);
+  });
+
+  it("every model spent at the preflight: ONE pause message naming the models tried and the reset time, and no review runs", () => {
+    const env = { AGY_PREFLIGHT_QUOTA_MODELS: `${SPENT} ${FALLBACK}` };
+    sweep({ env });
+    sweep({ env });
+
+    const paused = sent().filter((m) => m.includes("PAUSED"));
+    expect(paused).toHaveLength(1);
+    expect(paused[0]).toMatch(/Antigravity reviewer's quota is used up \(tried claude-sonnet-4-6, gemini-3\.1-pro-high: .*Resets in 69h26m28s/);
+    expect(agyLog("calls")).toHaveLength(0);
+    expect(existsSync(join(home, ".claude", "pr-brain.down"))).toBe(true);
+  });
+
+  it("every model spent in the middle of a review, behind ~100 lines of narration: a PAUSE, not 'failed attempt 1/3'", () => {
+    sweep({ env: { AGY_REVIEW_QUOTA_MODELS: `${SPENT} ${FALLBACK}` } });
+
+    expect(agyLog("model")).toEqual([SPENT, FALLBACK]);
+    expect(sent().filter((m) => m.includes("PAUSED"))).toHaveLength(1);
+    expect(sent().filter((m) => m.includes("Gate FAILED"))).toHaveLength(0);
+    expect(prBrainLog()).not.toMatch(/gate FAILED/);
+    expect(existsSync(join(home, ".claude", "pr-brain.failures"))).toBe(false);
+    expect(existsSync(join(home, ".claude", "pr-brain.down"))).toBe(true);
+  });
+
+  it("a rejected login is NOT tried on the next model: every model shares the login", () => {
+    sweep({ preflight: "Error: authentication timed out.", preflightRc: 1 });
+
+    expect(agyLog("pf-models")).toEqual([SPENT]);
+    expect(sent().filter((m) => m.includes("PAUSED"))).toHaveLength(1);
+  });
+
+  it("never reviews with the executor's own model, even when the list names it first", () => {
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), env: { PR_BRAIN_MODELS: "gemini-3.6-flash-medium,gemini-3.1-pro-high" } });
+
+    expect(agyLog("pf-models")).toEqual([FALLBACK]);
+    expect(agyLog("model")).toEqual([FALLBACK]);
+  });
+
+  it("pauses, and says why, when the only configured model IS the executor's", () => {
+    sweep({ env: { PR_BRAIN_MODELS: "gemini-3.6-flash-medium" } });
+
+    const paused = sent().filter((m) => m.includes("PAUSED"));
+    expect(paused).toHaveLength(1);
+    expect(paused[0]).toMatch(/no reviewer model is configured that differs from the executor model gemini-3\.6-flash-medium/);
+    expect(agyLog("pf-models")).toHaveLength(0);
+    expect(agyLog("calls")).toHaveLength(0);
+  });
+
+  it("follows the executor when it is moved: AGENT_DISPATCH_MODEL is what agent-dispatch runs, so it is what is off limits", () => {
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), env: { AGENT_DISPATCH_MODEL: SPENT } });
+
+    expect(agyLog("model")).toEqual([FALLBACK]);
+  });
+});
+
+describe("a long comment thread must not hide the marker (`cmd | grep -q` under pipefail reads SIGPIPE as 'not found')", () => {
+  // grep -q stops at the first hit; the writer, still writing, is killed by SIGPIPE; pipefail turns that into a failed
+  // pipeline, and `if ! …` read it as "no marker". Seen on 2026-10-02 as a duplicate marker, once in six runs of the
+  // test on a loaded machine; with a real PR thread (review bodies, evidence packs) it needs no load at all.
+  const BIG = "filler line, a long review body would be here .......\n".repeat(6000);
+
+  it("an already-gated head is skipped however long the PR's thread is: no second review is spent", () => {
+    writeFileSync(join(ghDir, "comments"), `<!-- brain-reviewed: ${head} -->\n${BIG}`);
+
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS") });
+
+    expect(agyLog("calls")).toHaveLength(0);
+    expect(prBrainLog()).toMatch(/oplify-messaging-api#56 already gated at .* skipped/);
+  });
+
+  it("the runner does not post a second marker when the head is already stamped, even while gh is still writing after the marker", () => {
+    // gh prints the marker and keeps writing: grep -q stops at the marker, the writer dies of SIGPIPE (141).
+    sweep({
+      agyOut: review("ok\nBRAIN-VERDICT: PASS"),
+      agyHook: `gh pr comment 56 --body "<!-- brain-reviewed: ${head} -->"`,
+      env: { GH_SLOW_TAIL: "1" },
+    });
+
+    expect(ghState("comments").split("\n").filter((l) => l.includes(`brain-reviewed: ${head}`))).toHaveLength(1);
   });
 });
 

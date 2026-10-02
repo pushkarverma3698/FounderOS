@@ -132,7 +132,11 @@ vendor. On the agy engine it is held by construction, and a reviewer that cannot
 independent whatever it is called:
 
 1. **A different model.** The executor runs `gemini-3.6-flash-medium`; the reviewer runs `claude-sonnet-4-6`
-   through the same CLI. `PR_BRAIN_MODEL` can change it, but never to the executor's.
+   through the same CLI, or `gemini-3.1-pro-high` when the Claude quota is gone (`PR_BRAIN_MODELS`, in order:
+   quota is per model family on the login, and on 2026-10-02 every non-Gemini model was out for 69 hours). The
+   code skips any candidate equal to the executor's model (`PR_BRAIN_EXECUTOR_MODEL`, default what
+   `agent-dispatch` runs), whatever the list says. A weaker vendor split (Gemini Pro grading Gemini Flash) is
+   still two different models; it is the fallback, not the first choice.
 2. **A fresh conversation.** `--new-project`, in its own clone (`/opt/agy-workspace/review/<repo>`) on the PR
    head: it has never seen the executor's session or scratch state.
 3. **No write path to the PR branch.** The clone's push URL is disabled, so the reviewer cannot edit what it

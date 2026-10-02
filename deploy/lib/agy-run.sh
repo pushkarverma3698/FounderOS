@@ -17,9 +17,12 @@
 # THE TWO FILES A RUN LEAVES
 #   raw   the stream exactly as agy wrote it: JSON events, plus anything agy printed that is not an event.
 #         Deleted when the run ends; only the text view below goes into logs.
-#   text  a plain-text VIEW of the run for the failure classifier (agy-failure.sh): every line that is not an
-#         event (agy prints its own errors that way: "Error: authentication timed out."), the result event's
-#         error as "Error: <text>", then the final answer. Narration and tool output stay out of it.
+#   text  a plain-text VIEW of the run for the failure classifier (agy-failure.sh): the final answer, then every
+#         line that is not an event (agy prints its own errors that way: "Error: authentication timed out."),
+#         then the result event's error as "Error: <text>". HOW THE RUN ENDED COMES LAST because the classifier
+#         reads only the tail: a 28-minute review whose answer was 100 lines long, followed by a quota wall, was
+#         counted as an ordinary failed attempt (2026-10-02) when the error lines sat in front of the answer.
+#         Tool output stays out of it.
 #
 # WHAT agy ACTUALLY DOES (agy 1.2.14, observed 2026-10-02, not assumed)
 #   {"event":"init", ...} then {"event":"step_update","step_update":{step_index,state ACTIVE|DONE,step_type
@@ -35,6 +38,11 @@
 # agy IGNORES GEMINI_API_KEY (verified 2026-10-02: a bogus key still ran, a bogus HOME did not): it signs in
 # with the antigravity user's own login. The key is still handed over when the caller has one, exactly as
 # before, because agent-dispatch's tests pin that it never reaches a command line or a log.
+
+# The model the EXECUTOR writes code with. One definition for both daemons: pr-brain must never review a PR with
+# the model that wrote it (ADR-046, the first independence condition), and it can only know that by reading the
+# same setting the executor reads. Explicit --model matters: bare `agy` runs on whatever default the quota allows.
+AGY_EXECUTOR_MODEL="${AGENT_DISPATCH_MODEL:-gemini-3.6-flash-medium}"
 
 # Runs a command as $AG_USER without ever letting arbitrary content (issue bodies, review comments) pass
 # through shell interpolation: arguments after the script reach the inner bash as $1, $2, ..., never
@@ -127,13 +135,15 @@ agy_progress_render() {
     | redact_secrets
 }
 
-# agy_text_view RAW — the plain-text view of a run (see the header): what the failure classifier reads.
+# agy_text_view RAW — the plain-text view of a run (see the header): what the failure classifier reads. The answer
+# first, how the run ended last: the classifier looks only at the tail.
 agy_text_view() {
   local raw="$1"
+  jq -R -r 'fromjson? | objects | select(.event == "result") | .result
+            | ((.response // "") | rtrimstr("\n") | select(. != ""))' "$raw" 2>/dev/null
   grep -av '^{"event":' "$raw" 2>/dev/null
   jq -R -r 'fromjson? | objects | select(.event == "result") | .result
-            | ((if (.error // "") != "" then "Error: " + .error else empty end),
-               ((.response // "") | rtrimstr("\n") | select(. != "")))' "$raw" 2>/dev/null
+            | (if (.error // "") != "" then "Error: " + .error else empty end)' "$raw" 2>/dev/null
   return 0
 }
 
