@@ -31,6 +31,7 @@
  */
 
 import { esc } from "../tools/jobhunt/telegram-format.js";
+import { REVIEWER } from "../tools/dispatch-roles.js";
 
 /** One row of Telegram's `setMyCommands` payload. */
 export interface MenuCommand {
@@ -339,7 +340,7 @@ export function buildCommandsHelp(): string[] {
       "2️⃣ You approve → it is filed as a GitHub issue\n" +
       "3️⃣ Antigravity writes the code and opens a pull request\n" +
       "4️⃣ The app is started and photographed — you get the screenshots here\n" +
-      "5️⃣ A different model reviews it adversarially (pr-brain); anything it finds goes back to Antigravity\n" +
+      `5️⃣ A different model reviews it adversarially (${REVIEWER}); anything it finds goes back to Antigravity\n` +
       "6️⃣ You get a verdict: CLEARED, or changes requested with the reason\n\n" +
       "<i>Typical: 20–40 minutes, unattended. " +
       "On the Oplify repos the final merge is always left to you.</i>",

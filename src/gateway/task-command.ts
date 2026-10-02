@@ -30,6 +30,7 @@
 import type { Context } from "grammy";
 import { DISPATCH_REPO_ALLOWLIST, matchAllowlistedRepos } from "../tools/dispatch-repos.js";
 import { validateProjectRepoName } from "../tools/create-project-repo.js";
+import { REVIEWER_PHRASE } from "../tools/dispatch-roles.js";
 import {
   REPO_CALLBACK_PREFIX,
   buildRepoKeyboardRows,
@@ -72,7 +73,7 @@ const USAGE = [
   "(/task repo:hulda <work> still skips the question if you prefer typing.)",
   "",
   "I expand this into a full brief, show you an approval card, then file it as an",
-  "agent:ready issue. Antigravity implements it and an independent reviewer (pr-brain) reviews the PR.",
+  `agent:ready issue. Antigravity implements it and ${REVIEWER_PHRASE} reviews the PR.`,
 ].join("\n");
 
 export interface TaskArgs {

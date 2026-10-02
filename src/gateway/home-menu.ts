@@ -30,6 +30,7 @@
 
 import type { Context } from "grammy";
 import { DISPATCH_REPO_ALLOWLIST } from "../tools/dispatch-repos.js";
+import { REVIEWER } from "../tools/dispatch-roles.js";
 import { labelForRepo } from "./repo-picker.js";
 import { buildWifeCommandsHelp } from "./wife-commands.js";
 import { CAPABILITIES_CALLBACK, DEPARTMENT_LABELS, sendCapabilities } from "./capabilities-screen.js";
@@ -103,7 +104,7 @@ function buildText(): string {
     `3️⃣ It becomes a GitHub issue the agent loop can claim\n` +
     `4️⃣ Antigravity writes the code and opens a pull request\n` +
     `5️⃣ <b>The app is started and photographed</b> — screenshots land in this chat\n` +
-    `6️⃣ A different model, in a fresh session, reviews the PR (pr-brain) and posts a verdict\n` +
+    `6️⃣ A different model, in a fresh session, reviews the PR (${REVIEWER}) and posts a verdict\n` +
     `7️⃣ Anything unresolved goes back to step 4, by itself\n\n` +
     `<b>The other two:</b>\n` +
     `🔹 <code>/tasks</code> — what the loop is doing right now, and what needs you\n` +
