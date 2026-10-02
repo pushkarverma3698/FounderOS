@@ -14,6 +14,7 @@
  *
  * USAGE (after setup):
  *   npx tsx --env-file=.env scripts/telegram-tester.ts send "list my desktop files" [--wait 90]
+ *   npx tsx --env-file=.env scripts/telegram-tester.ts send "fix the footer" --reply-to "what should I build"
  *   npx tsx --env-file=.env scripts/telegram-tester.ts approve     # click ✅ on latest HITL card
  *   npx tsx --env-file=.env scripts/telegram-tester.ts reject      # click ❌
  *   npx tsx --env-file=.env scripts/telegram-tester.ts click "FounderOS"   # tap the newest button with that label
@@ -186,12 +187,20 @@ async function waitForReplies(
   if (seen.size === 0) console.log(`(no reply within ${waitS}s)`);
 }
 
-async function cmdSend(text: string, waitS: number): Promise<void> {
+async function cmdSend(text: string, waitS: number, replyToContaining?: string): Promise<void> {
   const peer = `@${await botUsername()}`;
   const client = await connect(true);
 
-  const sent = await client.sendMessage(peer, { message: text });
-  console.log(`→ sent #${sent.id}: ${text}`);
+  // `--reply-to <text>` answers the newest bot message (of the last 15) containing that text, the way the founder
+  // answers /task's "what should I build?" force-reply prompt: the target repo travels on that message's text.
+  let replyTo: number | undefined;
+  if (replyToContaining) {
+    const target = [...(await history(client, peer, 15))].reverse().find((m) => !m.out && (m.message ?? "").includes(replyToContaining));
+    if (!target) fail(`No bot message containing "${replyToContaining}" in the last 15 messages to reply to.`);
+    replyTo = target.id;
+  }
+  const sent = await client.sendMessage(peer, { message: text, ...(replyTo ? { replyTo } : {}) });
+  console.log(`→ sent #${sent.id}${replyTo ? ` (reply to #${replyTo})` : ""}: ${text}`);
   await waitForReplies(client, peer, sent.id, waitS);
   await client.disconnect();
 }
@@ -300,9 +309,13 @@ async function main(): Promise<void> {
     case "send": {
       const waitFlag = rest.indexOf("--wait");
       const waitS = waitFlag >= 0 ? parseInt(rest[waitFlag + 1] ?? `${DEFAULT_WAIT_S}`, 10) : DEFAULT_WAIT_S;
-      const text = (waitFlag >= 0 ? rest.slice(0, waitFlag) : rest).join(" ").trim();
-      if (!text) fail('Usage: send "message" [--wait seconds]');
-      return cmdSend(text, waitS);
+      const replyFlag = rest.indexOf("--reply-to");
+      const replyTo = replyFlag >= 0 ? rest[replyFlag + 1] : undefined;
+      // The message is everything before the first flag.
+      const flagAt = [waitFlag, replyFlag].filter((i) => i >= 0).sort((a, b) => a - b)[0] ?? rest.length;
+      const text = rest.slice(0, flagAt).join(" ").trim();
+      if (!text) fail('Usage: send "message" [--wait seconds] [--reply-to "text of the bot message to answer"]');
+      return cmdSend(text, waitS, replyTo);
     }
     case "sendphoto":
     case "sendvoice": {
