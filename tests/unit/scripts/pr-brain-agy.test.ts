@@ -17,7 +17,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -427,6 +427,30 @@ describe("configuration", () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/PR_BRAIN_ENGINE must be agy or claude/);
     expect(existsSync(join(ghDir, "calls.log"))).toBe(false);
+  });
+
+  /** A repo that is OURS (not an employer org), whose PRs target beta: the case pr-brain merges and promotes. */
+  const makeRepoOurs = (): void => {
+    execFileSync("git", ["remote", "set-url", "origin", "https://github.com/owner/oplify-messaging-api.git"], { cwd: join(root, "repos", "oplify-messaging-api") });
+    cpSync(join(root, "github", "OplifyMessage"), join(root, "github", "owner"), { recursive: true });
+  };
+
+  it("control: a cleared PR on our own repo's beta IS squash-merged (which is why the next test needs a knob)", () => {
+    makeRepoOurs();
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS") });
+
+    expect(ghCalls().some((c) => c.startsWith("pr merge 56 --squash"))).toBe(true);
+  });
+
+  it("PR_BRAIN_MERGE=0 clears the PR but never merges or promotes it (reviewing a change to this loop without deploying it)", () => {
+    makeRepoOurs();
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), env: { PR_BRAIN_MERGE: "0" } });
+
+    expect(ghState("draft")).toBe("false"); // still cleared
+    expect(ghCalls().some((c) => c.startsWith("pr merge"))).toBe(false);
+    expect(ghCalls().some((c) => c.startsWith("pr create"))).toBe(false);
+    expect(prBrainLog()).toMatch(/cleared — merge withheld \(PR_BRAIN_MERGE=0\)/);
+    expect(sent().find((m) => m.startsWith("🧠 Gate done"))).toMatch(/Merge: not attempted — PR_BRAIN_MERGE=0/);
   });
 
   it("--dry-run lists what it would gate and starts nothing", () => {

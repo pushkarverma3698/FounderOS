@@ -42,6 +42,9 @@
 #                              Set it and every gate action is announced on Telegram.
 #                              Unset => silent (log only).
 #   PR_BRAIN_MAX_ATTEMPTS      failed gates on one head before it stops retrying (default 3)
+#   PR_BRAIN_MERGE             0 = review and clear, but never merge (default 1). For a manual review of a PR you
+#                              want to merge yourself, e.g. a change to this loop: a cleared PR on beta is otherwise
+#                              squash-merged and PROMOTED to main on the spot.
 #
 # State:
 #   ~/.claude/pr-brain.down        present while the reviewer is unavailable (auth, usage
@@ -782,6 +785,11 @@ merge_cleared() {
     "CLEARED"*) ;;
     *) return 0 ;;
   esac
+  if [[ "${PR_BRAIN_MERGE:-1}" == "0" ]]; then
+    merge_result="not attempted — PR_BRAIN_MERGE=0, a human merges"
+    log "$repo_name#$pr cleared — merge withheld (PR_BRAIN_MERGE=0)"
+    return 0
+  fi
   base=$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null)
   if [[ "$repo_owner" == "OplifyMessage" ]]; then
     # Employer repo. founderOS reviews, fixes, and marks ready — a human
