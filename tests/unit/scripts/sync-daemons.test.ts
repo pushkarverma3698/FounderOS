@@ -45,7 +45,7 @@ const SOURCE_OF: Record<(typeof EXECUTABLES)[number], string> = {
 let root: string;
 let home: string;
 let bin: string;
-const libNames = readdirSync(join(DEPLOY, "lib")).filter((n) => n.endsWith(".sh"));
+const libNames = readdirSync(join(DEPLOY, "lib")).filter((n) => n.endsWith(".sh") || n.endsWith(".py"));
 
 /** A real sha256sum (the script uses the same tool). */
 function sha(file: string): string {
