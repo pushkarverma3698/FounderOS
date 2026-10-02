@@ -286,6 +286,7 @@ progress_send() {
     "https://api.telegram.org/bot${token}/sendMessage" \
     --data-urlencode "chat_id=${chat}" \
     --data-urlencode "text=$1" \
+    --data "parse_mode=HTML" \
     --data "disable_web_page_preview=true" 2>/dev/null \
     | jq -r '.result.message_id // empty' 2>/dev/null
 }
@@ -301,7 +302,8 @@ progress_edit() {
     "https://api.telegram.org/bot${token}/editMessageText" \
     --data-urlencode "chat_id=${chat}" \
     --data "message_id=${msg_id}" \
-    --data-urlencode "text=$text" || true
+    --data-urlencode "text=$text" \
+    --data "parse_mode=HTML" || true
 }
 
 progress_delete() {
@@ -322,7 +324,17 @@ progress_delete() {
 # finish."), not structured events, so this is the log equivalent of
 # kernel-progress.ts's progressLabelFor() — the current line stands in for
 # the current plan step.
+
+progress_telegram_text_from_log() {
+  local log_file="$1"
+  local last_lines
+  last_lines=$(tail -c 4000 "$log_file" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 5 | redact_secrets | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+  [[ -z "$last_lines" ]] && return 0
+  printf "<i>Antigravity is thinking/acting...</i>\n\n<b>Recent Activity:</b>\n<code>%s</code>" "$last_lines"
+}
+
 progress_label_from_log() {
+
   local log_file="$1" line
   # The label goes to Telegram and into the daemon log, and the current line of a run that is
   # failing on its key can BE the key ("API key not valid: AIza…"): mask it before it is
@@ -356,26 +368,27 @@ run_agy_with_progress() {
   # $workspace and $prompt_file stay positional: same injection-safety discipline, and they
   # are not secrets. `exec </dev/null` after the read gives agy the stdin it always had
   # (a backgrounded job's stdin is /dev/null), so it cannot wait on a pipe.
-  as_antigravity 'IFS= read -r GEMINI_API_KEY; export GEMINI_API_KEY; exec </dev/null; cd "$1" && timeout '"${TIMEOUT_SEC}"' agy --new-project --model '"${AGY_MODEL}"' --print "$(cat "$2")" --print-timeout '"$((TIMEOUT_SEC - 120))"'s --dangerously-skip-permissions --output-format text' \
+  as_antigravity 'IFS= read -r GEMINI_API_KEY; export GEMINI_API_KEY; exec </dev/null; cd "$1" && timeout '"${TIMEOUT_SEC}"' stdbuf -oL -eL agy --new-project --model '"${AGY_MODEL}"' --print "$(cat "$2")" --print-timeout '"$((TIMEOUT_SEC - 120))"'s --dangerously-skip-permissions --output-format text' \
     "$workspace" "$prompt_file" <<<"$GEMINI_API_KEY" >"$agy_log" 2>&1 &
   local agy_pid=$!
 
-  local placeholder_id; placeholder_id=$(progress_send "🔧 ${label_prefix}: starting…")
+  local placeholder_id; placeholder_id=$(progress_send "<b>🔧 ${label_prefix}</b>: starting…")
   log "progress: placeholder sent (id=${placeholder_id:-FAILED}) for ${label_prefix}"
   local last_label=""
   while kill -0 "$agy_pid" 2>/dev/null; do
     sleep "$PROGRESS_POLL_SEC"
     local label; label=$(progress_label_from_log "$agy_log")
+    local telegram_text; telegram_text=$(progress_telegram_text_from_log "$agy_log")
     if [[ -n "$label" && "$label" != "$last_label" ]]; then
-      progress_edit "$placeholder_id" "🔧 ${label_prefix}: ${label}"
+      progress_edit "$placeholder_id" "<b>🔧 ${label_prefix}</b>\n\n${telegram_text}"
       log "progress: placeholder ${placeholder_id} -> ${label}"
       last_label="$label"
     fi
   done
   wait "$agy_pid"
   local exit_code=$?
-  progress_delete "$placeholder_id"
-  log "progress: placeholder ${placeholder_id} deleted"
+  progress_edit "$placeholder_id" "<b>✅ ${label_prefix}</b>: work completed"
+  log "progress: placeholder ${placeholder_id} marked complete"
   return "$exit_code"
 }
 
@@ -747,6 +760,10 @@ claim_and_implement() {
   gh issue edit "$issue" --repo "$REPO" --remove-label agent:ready --add-label agent:working >/dev/null
   gh issue comment "$issue" --repo "$REPO" \
     --body "${CLAIM_PREFIX} ${claimed_at} --> 🤖 Claimed by agent-dispatch on $(hostname -s). Branch: \`${branch}\`." >/dev/null
+  notify "🚀 agent-dispatch: #${issue} claimed on ${REPO}
+Title: ${title}
+Branch: \`${branch}\`
+Engine: Antigravity (${AGY_MODEL})"
 
   prompt_file="$(mktemp /tmp/agent-dispatch-issue-XXXXXX.txt)"
   local target_branch="main"
@@ -876,7 +893,10 @@ EOF2
   fi
   finish_issue "$issue" agent:review
   gh issue comment "$issue" --repo "$REPO" --body "${PR_LINK_PREFIX} ${pr_number} --> PR opened: $(gh pr view "$pr_number" --repo "$REPO" --json url --jq .url). Awaiting pr-brain review.${closed_note}" >/dev/null
-  notify "🤖 agent-dispatch: #${issue} -> PR #${pr_number} opened, awaiting Claude review.${closed_note}"
+  local pr_url; pr_url="$(gh pr view "$pr_number" --repo "$REPO" --json url --jq .url 2>/dev/null)"
+  notify "📦 agent-dispatch: #${issue} -> PR #${pr_number} opened on ${REPO}!
+URL: ${pr_url}
+Awaiting Antigravity review...${closed_note}"
   rm -f "$agy_log"
   return 0
 }

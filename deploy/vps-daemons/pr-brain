@@ -46,7 +46,7 @@ OFF_SWITCH="$HOME/.claude/pr-brain.off"
 REPO_LIST="$HOME/.claude/pr-brain.repos"
 ROOT="${PR_BRAIN_ROOT:-$HOME/Projects}"
 MAX="${PR_BRAIN_MAX:-3}"
-MODEL="${PR_BRAIN_MODEL:-sonnet}"
+MODEL="${PR_BRAIN_MODEL:-gemini-3.6-flash-medium}"
 BUDGET="${PR_BRAIN_BUDGET_USD:-5}"
 # shellcheck disable=SC2034  # read by deploy/lib/down-state.sh, which shellcheck does not follow
 DOWN_FILE="$HOME/.claude/pr-brain.down"
@@ -88,6 +88,20 @@ notify() {
     "https://api.telegram.org/bot${token}/sendMessage" \
     --data-urlencode "chat_id=${chat}" \
     --data-urlencode "text=$1" \
+    --data "disable_web_page_preview=true" || true
+}
+
+notify_with_keyboard() {
+  [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]] || return 0
+  local token chat
+  token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
+  chat=$(grep -m1 '^TELEGRAM_CHAT_ID=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
+  [[ -n "$token" && -n "$chat" ]] || return 0
+  curl -s -o /dev/null --max-time 20 \
+    "https://api.telegram.org/bot${token}/sendMessage" \
+    --data-urlencode "chat_id=${chat}" \
+    --data-urlencode "text=$1" \
+    --data-urlencode "reply_markup=$2" \
     --data "disable_web_page_preview=true" || true
 }
 
@@ -134,7 +148,7 @@ source "$DOWN_STATE_LIB"
 # not need that. It lives in ~/.claude/pr-brain.token, mode 0600:
 #   line 1   the token
 #   line 2   the date it was created, YYYY-MM-DD (the age warning counts from it)
-# When the file is usable, run_claude hands the token to `claude` through the environment
+# When the file is usable, run_agy hands the token to `claude` through the environment
 # of that one command: never an argument, never logged, never seen by gh or git. Without
 # the file nothing changes and the interactive login is used as before.
 #
@@ -196,14 +210,9 @@ load_oauth_token() {
 }
 
 # Every `claude` call goes through here, so the token reaches claude's environment and no one else's.
-run_claude() {
-  if [[ -n "$OAUTH_TOKEN" ]]; then
-    CLAUDE_CODE_OAUTH_TOKEN="$OAUTH_TOKEN" claude "$@"
-  else
-    claude "$@"
-  fi
+run_agy() {
+  sudo -u antigravity -- bash -lc 'exec </dev/null; agy "$@"' _ "$@"
 }
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
@@ -301,8 +310,8 @@ PREFLIGHT_OK=0
 preflight() {
   [[ "$PREFLIGHT_OK" -eq 1 ]] && return 0
   local preflight cls
-  preflight=$(run_claude -p "reply with the single word ok" --model "$MODEL" \
-                --max-budget-usd 0.05 --output-format text </dev/null 2>&1 | tail -2)
+  preflight=$(run_agy --print "reply with the single word ok" --model "$MODEL" \
+                 --output-format text </dev/null 2>&1 | tail -2)
   # "Exceeded USD budget" is the preflight's own $0.05 cap tripping — Claude Code's
   # context costs more than that before it answers. A billed call proves auth and
   # quota are fine, so it counts as reachable (2026-09-28: treating it as an
@@ -789,15 +798,17 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
     esac
 
     log "gating $repo_name#$pr (head ${head:0:8}) model=$MODEL budget=\$$BUDGET"
+    notify "🧠 Reviewing ${repo_name}#${pr} (head ${head:0:8}) with Antigravity (${MODEL})...
+$(gh pr view "$pr" --json url --jq .url 2>/dev/null)"
     gate_out=$(mktemp "${TMPDIR:-/tmp}/pr-brain-gate.XXXXXX")
     # </dev/null: this runs inside `while read … done <<<"$prs"`, and `claude -p`
     # reads piped stdin into its prompt — without it the gate swallowed every
     # remaining PR line, so one repo never had two PRs gated in one tick.
-    run_claude -p "$(build_prompt "$pr" "$repo_name" "$head" "$app_rc")" \
+    run_agy --print "$(build_prompt "$pr" "$repo_name" "$head" "$app_rc")" \
         --model "$MODEL" \
-        --permission-mode acceptEdits \
-        --allowedTools "Bash Read Write Edit Grep Glob TodoWrite Skill" \
-        --max-budget-usd "$BUDGET" \
+        --dangerously-skip-permissions \
+         \
+         \
         --output-format text </dev/null >"$gate_out" 2>&1
     gate_rc=$?
     cat "$gate_out" >>"$LOG"
@@ -811,10 +822,16 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
       log "$repo_name#$pr verdict: $verdict"
       merge_cleared "$pr" "$verdict"
 
-      notify "🧠 Gate done — ${repo_name}#${pr}
+      local kb
+      if [[ "$verdict" == *"APPROVED"* ]]; then
+        kb='{"inline_keyboard":[[{"text":"🚀 Merge & Deploy","callback_data":"pr_merge:'"${repo_owner}/${repo_name}:${pr}"'"}]]}'
+      else
+        kb='{"inline_keyboard":[[{"text":"🔄 Trigger Auto-Fix","callback_data":"pr_fix:'"${repo_owner}/${repo_name}:${pr}"'"}]]}'
+      fi
+      notify_with_keyboard "🧠 Gate done — ${repo_name}#${pr}
 ${verdict}
 Merge: ${merge_result}
-$(gh pr view "$pr" --json url --jq .url 2>/dev/null)"
+$(gh pr view "$pr" --json url --jq .url 2>/dev/null)" "$kb"
     else
       outage=$(claude_outage "$gate_tail")
       if [[ -n "$outage" ]]; then

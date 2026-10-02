@@ -53,6 +53,7 @@ import { isConflictError, conflictBackoffMs, CONFLICT_MAX_ATTEMPTS } from "./tel
 import { REPO_CALLBACK_PREFIX } from "./repo-picker.js";
 import { RETRY_CALLBACK_PREFIX } from "./retry-button.js";
 import { handleRetryCallback } from "./retry-callback.js";
+import { handlePrCallback } from "./pr-callbacks.js";
 import {
   OWNER_ONLY_COMMANDS,
   buildChatAccessConfig,
@@ -268,6 +269,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     if (await handleRepoChoice(ctx, taskDeps)) return;
     if (await handleMenuCallback(ctx)) return;
     if (await handleRetryCallback(ctx)) return;
+    if (await handlePrCallback(ctx)) return;
     if (!data.startsWith("approve") && !data.startsWith("reject")) {
       await ctx.answerCallbackQuery({ text: "Unknown action" });
       return;

@@ -230,13 +230,14 @@ async function cmdClick(decision: "approve" | "reject"): Promise<void> {
     if (m.out || !(m.replyMarkup instanceof Api.ReplyInlineMarkup)) return false;
     return m.replyMarkup.rows.some((row) =>
       row.buttons.some(
-        (b) => b instanceof Api.KeyboardButtonCallback && b.data.toString("utf-8") === decision,
+        (b) => b instanceof Api.KeyboardButtonCallback && b.data.toString("utf-8").startsWith(decision),
       ),
     );
   });
   if (!card) fail(`No pending HITL card with a "${decision}" button in the last 15 messages.`);
 
-  await card.click({ data: Buffer.from(decision) });
+  const button = ((card.replyMarkup as any)?.rows || []).flatMap((r: any) => r.buttons).find((b: any) => b.data && b.data.toString('utf-8').startsWith(decision));
+  await card.click({ data: button.data });
   console.log(`✓ clicked "${decision}" on card #${card.id} — waiting for the bot's follow-up…`);
 
   // Watch for the post-decision reply (resume runs the actual side effect).
