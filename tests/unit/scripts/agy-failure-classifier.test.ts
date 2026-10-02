@@ -16,9 +16,9 @@
  *
  * Provenance is in every test title. "verbatim" means the plan, an existing test or a
  * source comment quotes that exact line; everything else is "synthetic": written here to
- * exercise a pattern, NOT captured from a real Antigravity run. No real auth failure has
- * been observed yet, so the auth and transient formats other than the plan's are guesses
- * until a production log confirms them (see the report's NOT VERIFIED list).
+ * exercise a pattern, NOT captured from a real Antigravity run. One real auth failure has
+ * been observed (an agy with no login, 2026-10-02); the auth and transient formats other than that one and
+ * the plan's are guesses until a production log confirms them.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -55,6 +55,8 @@ const FIXTURES: readonly Fixture[] = [
   { klass: "auth", pattern: 7, provenance: "synthetic", line: "Error: not logged in (run agy interactively)" },
   { klass: "auth", pattern: 8, provenance: "verbatim", line: "HTTP 401: Bad credentials" },
   { klass: "auth", pattern: 9, provenance: "synthetic", line: "gh: request failed with status: 403" },
+  // captured 2026-10-02 from agy 1.2.14 run with an empty HOME (no login): stderr, exit 1
+  { klass: "auth", pattern: 10, provenance: "verbatim", line: "error: authentication failed or timed out" },
   // transient
   { klass: "transient", pattern: 1, provenance: "verbatim", line: "Error: timeout waiting for response" },
   { klass: "transient", pattern: 2, provenance: "verbatim", line: "timeout: failed to execute process" },
@@ -124,6 +126,31 @@ describe("classify_agy_failure — every pattern, against a real or labelled-syn
       expect(covered.sort((a, b) => a - b)).toEqual(patterns.map((_, i) => i + 1));
     },
   );
+});
+
+describe("classify_agy_failure — the whole block a real login failure prints [verbatim, 2026-10-02]", () => {
+  // stderr of `agy --print` as a user with no login, then the text view agy-run.sh builds from the result
+  // event: the same words a second time, prefixed "Error:". Captured from agy 1.2.14 on the VPS.
+  const REAL = [
+    "Authentication required. Please visit the URL to log in:",
+    "  https://accounts.google.com/o/oauth2/auth?access_type=offline&prompt=consent",
+    "",
+    "Waiting for authentication (timeout 60s)...",
+    "Or, paste the authorization code here and press Enter:",
+    "Error: authentication timed out.",
+    "error: authentication failed or timed out",
+    "Error: authentication failed or timed out",
+  ].join("\n");
+
+  it("is auth, so the loop pauses and the issue goes back to agent:ready instead of agent:failed", () => {
+    expect(classify(`${REAL}\n`)).toBe("auth");
+  });
+
+  it("is quoted as the CLI's own line, not the URL above it", () => {
+    writeFileSync(logFile, `${REAL}\n`);
+    const r = bash(`source "${LIB}"; agy_failure_line auth "$1"`, [logFile]);
+    expect(r.stdout.trim()).toBe("Error: authentication timed out.");
+  });
 });
 
 describe("classify_agy_failure — precedence", () => {

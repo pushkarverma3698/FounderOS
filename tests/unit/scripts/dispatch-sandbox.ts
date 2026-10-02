@@ -95,6 +95,8 @@ export interface PrSpec {
   readonly headRefName: string;
   readonly headRefOid?: string;
   readonly isDraft?: boolean;
+  /** OPEN (default), MERGED or CLOSED. Only an OPEN PR is listed, as `gh pr list --state open` does. */
+  readonly state?: "OPEN" | "MERGED" | "CLOSED";
   readonly comments?: readonly string[];
 }
 
@@ -129,13 +131,24 @@ export interface TelegramCall {
 
 interface RepoState {
   labels: string[];
+  /** Branches `gh api repos/<slug>/branches/<name>` finds. Absent means just `main`. */
+  branches?: string[];
   issues: Record<string, { title: string; body: string; labels: string[]; state: string; comments: { body: string }[] }>;
-  prs: { number: number; headRefName: string; headRefOid?: string; isDraft?: boolean; comments: { body: string }[] }[];
+  prs: {
+    number: number;
+    headRefName: string;
+    headRefOid?: string;
+    isDraft?: boolean;
+    state?: string;
+    comments: { body: string }[];
+  }[];
 }
 interface GhState {
   authOk: boolean;
   failIssueEdit: boolean;
   failLabelList: boolean;
+  /** `gh api` answers 502 (an outage, as opposed to a 404). */
+  failApi?: boolean;
   repos: Record<string, RepoState>;
 }
 
@@ -154,6 +167,7 @@ export class DispatchSandbox {
   private readonly ghCalls: string;
   private readonly agyCalls: string;
   private readonly agyEnvLog: string;
+  private readonly agyPromptLog: string;
   private readonly sudoArgv: string;
   private readonly sends: string;
 
@@ -172,6 +186,7 @@ export class DispatchSandbox {
     this.ghCalls = join(this.root, "gh-calls.log");
     this.agyCalls = join(this.root, "agy-calls.log");
     this.agyEnvLog = join(this.root, "agy-env.log");
+    this.agyPromptLog = join(this.root, "agy-prompts.log");
     this.sudoArgv = join(this.root, "sudo-argv.log");
     this.sends = join(this.root, "telegram.log");
 
@@ -243,6 +258,7 @@ export class DispatchSandbox {
       "agy",
       `echo run >>"$AGY_CALLS"
 printf '%s\\n' "\${GEMINI_API_KEY-<unset>}" >>"$AGY_ENV_LOG"
+while [ $# -gt 0 ]; do case "$1" in --print) printf '%s\\n----\\n' "$2" >>"$AGY_PROMPT_LOG"; shift 2 ;; *) shift ;; esac; done
 [ -n "\${AGY_HOOK:-}" ] && bash -c "$AGY_HOOK"
 printf '%s\\n' "\${AGY_OUT:-}"
 sleep "\${AGY_SLEEP_AFTER:-0}"
@@ -391,9 +407,24 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
       headRefName: spec.headRefName,
       headRefOid: spec.headRefOid ?? "a".repeat(40),
       isDraft: spec.isDraft ?? true,
+      state: spec.state ?? "OPEN",
       comments: (spec.comments ?? []).map((body) => ({ body })),
     });
     this.writeGh(s);
+  }
+
+  /**
+   * Gives a repo a `beta` branch: GitHub reports it (`gh api …/branches/beta`) AND the bare origin really has it,
+   * so the daemon can check a task branch out from it. `["main", "beta"]` is the FounderOS shape.
+   */
+  addBetaBranch(slug: string): void {
+    const s = this.readGh();
+    this.repoState(s, slug).branches = ["main", "beta"];
+    this.writeGh(s);
+    const ws = this.ensureWorkspace(slug);
+    git(["-C", ws, "fetch", "-q", "origin"]);
+    git(["-C", ws, "push", "-q", "origin", "origin/main:refs/heads/beta"]);
+    git(["-C", ws, "fetch", "-q", "origin"]);
   }
 
   setRepoLabels(slug: string, labels: readonly string[]): void {
@@ -402,7 +433,7 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
     this.writeGh(s);
   }
 
-  patchGh(patch: Partial<Pick<GhState, "authOk" | "failIssueEdit" | "failLabelList">>): void {
+  patchGh(patch: Partial<Pick<GhState, "authOk" | "failIssueEdit" | "failLabelList" | "failApi">>): void {
     this.writeGh({ ...this.readGh(), ...patch });
   }
 
@@ -468,6 +499,7 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
         GH_CALLS: this.ghCalls,
         AGY_CALLS: this.agyCalls,
         AGY_ENV_LOG: this.agyEnvLog,
+        AGY_PROMPT_LOG: this.agyPromptLog,
         SUDO_ARGV: this.sudoArgv,
         SENDS: this.sends,
         AGY_OUT: opts.agyOut ?? "",
@@ -564,6 +596,12 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
   agyRuns(): number {
     return existsSync(this.agyCalls) ? readFileSync(this.agyCalls, "utf8").split("\n").filter(Boolean).length : 0;
   }
+  /** The prompt each fake agy run was given (its --print argument), one entry per run. */
+  agyPrompts(): string[] {
+    return existsSync(this.agyPromptLog)
+      ? readFileSync(this.agyPromptLog, "utf8").split("\n----\n").filter((p) => p.trim() !== "")
+      : [];
+  }
   /** The GEMINI_API_KEY value each fake agy run saw in its ENVIRONMENT. */
   agyKeysSeen(): string[] {
     return existsSync(this.agyEnvLog) ? readFileSync(this.agyEnvLog, "utf8").split("\n").filter(Boolean) : [];
@@ -608,5 +646,8 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
   }
   daemonPath(): string {
     return join(this.installDir, "agent-dispatch");
+  }
+  daemonText(): string {
+    return readFileSync(this.daemonPath(), "utf8");
   }
 }
