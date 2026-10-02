@@ -88,7 +88,7 @@ describe("renderCardPreview", () => {
 
   it("shows the acceptance criteria the issue will really carry when none were given", () => {
     const preview = renderCardPreview({ ...TYPICAL, acceptance: undefined }, { bodyChars: 100 });
-    expect(preview).toContain("Accept: All verification commands pass; Claude pr-brain clears review with no BLOCKER.");
+    expect(preview).toContain("Accept: All verification commands pass; the independent reviewer (pr-brain) clears the review with no BLOCKER.");
   });
 
   it("lists new files on their own line, only when there are any", () => {

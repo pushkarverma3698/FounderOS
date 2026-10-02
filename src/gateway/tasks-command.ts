@@ -32,6 +32,7 @@ import type { Context } from "grammy";
 import { Octokit } from "octokit";
 import { esc } from "../tools/jobhunt/telegram-format.js";
 import { DISPATCH_REPO_ALLOWLIST } from "../tools/dispatch-repos.js";
+import { REVIEWER } from "../tools/dispatch-roles.js";
 import { splitForTelegram } from "./format.js";
 
 /** The agent lifecycle labels, in the order work moves through them. */
@@ -47,9 +48,9 @@ const STATE_ICON: Record<AgentState, string> = {
 };
 
 const STATE_MEANING: Record<AgentState, string> = {
-  ready: "queued — a dispatch tick picks this up within 15 minutes",
+  ready: "queued — Antigravity starts within a minute of filing (the 15-minute tick is the backstop)",
   working: "Antigravity is writing the code now",
-  review: "PR open — Claude is gating it and re-dispatching anything it finds",
+  review: `PR open — ${REVIEWER} is reviewing it; anything it finds goes back to Antigravity`,
   blocked: "hit the attempt limit — this one needs you",
   failed: "the run itself broke before producing a PR",
 };

@@ -133,11 +133,11 @@ case "$group $sub" in
     need_repo
     head=$(flag --head) || head=""
     jq -c --arg r "$repo" --arg h "$head" --argjson f "$fields" '
-      [ .repos[$r].prs[] | select($h == "" or .headRefName == $h)
+      [ .repos[$r].prs[] | select((.state // "OPEN") == "OPEN") | select($h == "" or .headRefName == $h)
         | {number, headRefName, headRefOid: (.headRefOid // "0000000000000000000000000000000000000000"),
            isDraft: (.isDraft != false), baseRefName: (.baseRefName // "main"),
            comments: [(.comments // [])[] | {body: .body}],
-           url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: "OPEN"}
+           url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: (.state // "OPEN")}
         | '"$PICK"' ]' "$STATE" | emit
     ;;
 
@@ -150,7 +150,7 @@ case "$group $sub" in
       | {number, headRefName, headRefOid: (.headRefOid // "0000000000000000000000000000000000000000"),
          isDraft: (.isDraft != false), baseRefName: (.baseRefName // "main"),
          comments: [(.comments // [])[] | {body: .body}],
-         url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: "OPEN"}
+         url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: (.state // "OPEN")}
       | '"$PICK" "$STATE" | emit
     ;;
 
@@ -184,6 +184,19 @@ case "$group $sub" in
     ;;
 
   "api user") echo owner ;;
+
+  # gh api repos/<owner>/<name>/branches/<branch>: a repo has the branches in its state's `branches`
+  # list (default: just main). A missing one is gh's real 404 text, which the daemon tells apart from
+  # an API outage.
+  "api repos/"*)
+    [ "$(jq -r '.failApi // false' "$STATE")" = true ] && die "HTTP 502: Bad Gateway (https://api.github.com/repos)"
+    slug="${sub#repos/}"; slug="${slug%%/branches/*}"; branch="${sub##*/branches/}"
+    if jq -e --arg r "$slug" --arg b "$branch" '(.repos[$r].branches // ["main"]) | index($b)' "$STATE" >/dev/null 2>&1; then
+      printf '{"name":"%s"}\n' "$branch"
+    else
+      die "gh: Not Found (HTTP 404)"
+    fi
+    ;;
 
   *) : ;;   # anything else (gh repo clone, pr edit, …) succeeds silently
 esac

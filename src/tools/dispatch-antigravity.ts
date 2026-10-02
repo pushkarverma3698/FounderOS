@@ -7,7 +7,7 @@
  * This connects FounderOS to the VPS autonomous loop (ADR-046):
  *   Telegram / Founder → dispatch_antigravity_task → GitHub Issue (agent:ready)
  *     → agent-dispatch (VPS cron, every 15 min) → Antigravity CLI (`agy`) → draft PR to beta
- *     → pr-brain (Claude review, every 20 min) → Merge
+ *     → pr-brain (independent review, every 20 min) → Merge
  *
  * Architecture Invariants (ADR-046 & ISSUE-DRIVEN-CONTRACT.md):
  *   - Issues are the ONLY dispatch mechanism for Antigravity.
@@ -34,7 +34,9 @@ import { assertDispatchableRepo, DEFAULT_DISPATCH_REPO, DISPATCH_REPO_ALLOWLIST 
 import { listRegisteredDispatchRepos } from "../db/queries.js";
 import { TENANT } from "../core/config.js";
 import { kickDispatchTick } from "./dispatch-tick.js";
+import { DEFAULT_ACCEPTANCE_TEXT } from "./dispatch-roles.js";
 import { formatBriefRejection, type BriefLintResult } from "./agent-brief-lint.js";
+import { prepareDispatchBrief, type PreparedBrief } from "./dispatch-brief-repair.js";
 import { checkDispatchBrief, type ContentsClient } from "./dispatch-brief-check.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
@@ -83,7 +85,7 @@ export const STANDING_CONSTRAINTS: readonly string[] = [
 const DEFAULT_FORBIDDEN =
   "See docs/antigravity/STANDARDS.md — do not touch /opt/founderos, never merge to main, never force-push.";
 /** Exported so the approval card shows the acceptance criteria the issue will really carry. */
-export const DEFAULT_ACCEPTANCE = "All verification commands pass; Claude pr-brain clears review with no BLOCKER.";
+export const DEFAULT_ACCEPTANCE = DEFAULT_ACCEPTANCE_TEXT;
 
 const section = (heading: string, content: string): string[] => [`## ${heading}`, "", content.trim(), ""];
 
@@ -158,9 +160,11 @@ export function lintDispatchBrief(
 /** Which tool input fills each template section, so a rejection tells the model what to pass. */
 const SECTION_INPUT_HINTS: Readonly<Record<string, string>> = {
   Goal: "Pass it in the `goal` input.",
-  "Problem / observed behavior": "Pass it in the `problem` input.",
+  "Problem / observed behavior": "Pass it in the `problem` input: what the founder described, in his words.",
   "Expected behavior": "Pass it in the `expected` input.",
-  Evidence: "Pass it in the `evidence` input.",
+  Evidence:
+    "Pass it in the `evidence` input. If the founder gave no log, error or reference, pass his own words, copied verbatim, in " +
+    "`founder_request`: they are filed as the evidence.",
   "Files or subsystem in scope": "Pass it in the `scope` input.",
   Constraints: "Pass it in the `constraints` input.",
   "Explicitly forbidden": "Pass it in the `forbidden` input.",
@@ -181,8 +185,9 @@ export const dispatchAntigravityTool: UnifiedTool = {
   name: "dispatch_antigravity_task",
   description:
     "Dispatch an engineering or coding task to Google Antigravity on the VPS via GitHub issue. " +
-    "Formats the task into a structured ticket and opens an issue on pushkarverma3698/FounderOS with the 'agent:ready' label. " +
-    "The VPS agent-dispatch daemon claims it within 15 minutes, implements it in an isolated workspace, and submits a draft PR to beta.",
+    "Formats the task into a structured ticket and opens an issue with the 'agent:ready' label on an allowlisted repository. " +
+    "The VPS agent-dispatch daemon claims it within a minute, implements it in an isolated workspace, and submits a draft PR to beta; " +
+    "an independent reviewer (pr-brain) then reviews it.",
   input_schema: {
     type: "object",
     properties: {
@@ -197,8 +202,9 @@ export const dispatchAntigravityTool: UnifiedTool = {
       scope: {
         type: "string",
         description:
-          "Exact files or subsystems in scope (e.g. 'src/tools/jobhunt/free-ats-source.ts'). Every path must exist " +
-          "today, or the brief is rejected; paths the task will create go in new_files.",
+          "The files or subsystem in scope, in plain words. Cite a file path ONLY if you saw it in a tool result: " +
+          "a cited path that does not exist is not an error, it is filed as an unverified hint and Antigravity (which reads " +
+          "the whole repository) locates the real files. Never guess a path. Paths the task will create go in new_files.",
       },
       expected: {
         type: "string",
@@ -210,7 +216,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
       },
       acceptance: {
         type: "string",
-        description: "Acceptance criteria for Claude pr-brain review before PASS.",
+        description: "Acceptance criteria the independent reviewer (pr-brain) checks before it clears the PR.",
       },
       forbidden: {
         type: "string",
@@ -220,13 +226,19 @@ export const dispatchAntigravityTool: UnifiedTool = {
         type: "string",
         description:
           "What is actually happening today, or what is missing: exact error text, observed behavior, or the gap " +
-          "the founder described. Ask the founder if unknown; never invent it. The brief is rejected while this is empty.",
+          "the founder described, in his words. The brief is rejected while this is empty.",
       },
       evidence: {
         type: "string",
         description:
-          "Proof for the problem: log lines, file:line references, links to earlier investigation. Ask the founder " +
-          "if he gave none; never invent it. The brief is rejected while this is empty.",
+          "Proof for the problem: log lines, file:line references, links to earlier investigation. Never invent it. " +
+          "If the founder gave none, leave this out and pass founder_request instead.",
+      },
+      founder_request: {
+        type: "string",
+        description:
+          "The founder's own words, copied verbatim from his message. Always pass it: when no evidence was given it is " +
+          "filed as the evidence, so a request with no log or error attached is still a complete brief.",
       },
       constraints: {
         type: "string",
@@ -237,8 +249,8 @@ export const dispatchAntigravityTool: UnifiedTool = {
       new_files: {
         type: "string",
         description:
-          "Paths this task will CREATE (one per line). They do not exist yet, so they are not checked; " +
-          "everything in scope must exist today.",
+          "Paths this task will CREATE (one per line). They do not exist yet, so they are not checked. For an audit, " +
+          "explanation or research request, the deliverable is a report committed under docs/: list it here.",
       },
       repo: {
         type: "string",
@@ -278,6 +290,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
       newFiles: args["new_files"] as string | undefined,
       repo: args["repo"] as string | undefined,
     };
+    const founderRequest = args["founder_request"] as string | undefined;
 
     let owner: string;
     let repo: string;
@@ -294,14 +307,17 @@ export const dispatchAntigravityTool: UnifiedTool = {
       return { success: false, error: (err as Error).message };
     }
 
-    const body = formatAntigravityIssueBody(input);
     const labels = [AGENT_READY_LABEL, ANTIGRAVITY_LABEL];
 
-    // The gate. A brief that fails is never filed: the reason goes back to the model, which asks
-    // the founder for the missing piece, before any Antigravity tokens are spent.
-    let lint: BriefLintResult;
+    // The gate. A brief with an empty section is never filed: the reason goes back to the model, before any
+    // Antigravity tokens are spent. A cited path that does not exist is NOT such a reason (see
+    // ./dispatch-brief-repair.ts): it is demoted to an unverified hint and the brief is filed.
+    let prepared: PreparedBrief;
     try {
-      lint = await lintDispatchBrief({ owner, repo }, body, () => octokit);
+      prepared = await prepareDispatchBrief(input, founderRequest, {
+        lint: (candidate) => lintDispatchBrief({ owner, repo }, candidate, () => octokit),
+        format: formatAntigravityIssueBody,
+      });
     } catch (err) {
       const message = (err as Error).message;
       log.error({ owner, repo, err: message }, "Brief lint crashed; nothing was filed");
@@ -310,13 +326,15 @@ export const dispatchAntigravityTool: UnifiedTool = {
         error: `The brief lint crashed (${message}), so nothing was filed. This is a FounderOS bug in src/tools/agent-brief-lint.ts, not a problem with the brief.`,
       };
     }
-    if (!lint.ok) {
+    if (!prepared.ok) {
+      const { lint } = prepared;
       return {
         success: false,
         error: describeBriefRejection(lint, `${owner}/${repo}`),
         data: { missing: lint.missing, missing_headings: lint.missingHeadings, missing_paths: lint.missingPaths },
       };
     }
+    const { body, warnings } = prepared;
 
     try {
       const { data } = await octokit.rest.issues.create({
@@ -347,7 +365,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
           title: data.title,
           repo: `${owner}/${repo}`,
           labels,
-          ...(lint.warnings.length > 0 ? { warnings: lint.warnings } : {}),
+          ...(warnings.length > 0 ? { warnings } : {}),
         },
       };
     } catch (err) {
