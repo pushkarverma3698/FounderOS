@@ -822,7 +822,7 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)"
       log "$repo_name#$pr verdict: $verdict"
       merge_cleared "$pr" "$verdict"
 
-      local kb
+      kb=""
       if [[ "$verdict" == *"APPROVED"* ]]; then
         kb='{"inline_keyboard":[[{"text":"🚀 Merge & Deploy","callback_data":"pr_merge:'"${repo_owner}/${repo_name}:${pr}"'"}]]}'
       else
