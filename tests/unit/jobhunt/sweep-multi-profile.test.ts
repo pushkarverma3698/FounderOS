@@ -192,6 +192,16 @@ describe("runFreeSweep", () => {
     const named = messages.filter((m) => m.includes("new role") && m.includes(" for "));
     expect(named.length).toBeGreaterThan(0);
   });
+
+  it("prints a selector in the second candidate's commands and none in the default candidate's", async () => {
+    // Both alerts land in one group chat. A bare `/draft 2` acts on the default queue, so hers must say whose it is.
+    await runFreeSweep();
+    const alerts = sendToJobsChat.mock.calls.map((c) => String(c[0] ?? "")).filter((m) => m.includes("new role"));
+    const hers = alerts.find((m) => m.includes("Tashi Goyal"));
+    const his = alerts.find((m) => m.includes("Pushkar Verma"));
+    expect(hers).toContain("/jobs tashi for the ranked list");
+    expect(his).toContain("/jobs for the ranked list");
+  });
 });
 
 /**

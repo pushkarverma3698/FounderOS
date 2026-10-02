@@ -13,8 +13,8 @@ import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const sendToJobsChat = vi.fn(async () => {});
-vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToJobsChat }));
+const sendToChat = vi.fn(async () => {});
+vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToChat }));
 const create = vi.fn(async () => ({ data: { number: 1, html_url: "https://x/1" } }));
 const listForRepo = vi.fn(async () => ({ data: [] }));
 vi.mock("octokit", () => ({ Octokit: vi.fn(() => ({ rest: { issues: { listForRepo, create } } })) }));
@@ -53,7 +53,7 @@ describe("dry run", () => {
     expect(out).toContain("WOULD FILE");
     expect(out).toContain("adapter-silent: ashby");
     expect(create).not.toHaveBeenCalled();
-    expect(sendToJobsChat).not.toHaveBeenCalled();
+    expect(sendToChat).not.toHaveBeenCalled();
     expect(readdirSync(dataRoot)).toEqual([]);
     expect(code).toBe(0);
   });

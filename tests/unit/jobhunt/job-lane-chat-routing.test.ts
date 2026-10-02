@@ -39,13 +39,19 @@ function code(file: string): string {
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
-/** The four files that speak on their own, with no founder message to answer. */
+/** The three files that speak to the candidates on their own, with no founder message to answer. */
 const PROACTIVE_SENDERS = [
   "src/tools/jobhunt/sweep-runner.ts",
   "src/tools/jobhunt/free-sweep-profile.ts",
   "src/tools/jobhunt/pipeline-followup.ts",
-  "src/evolution/jobhunt-check.ts",
 ];
+
+/**
+ * The 09:30 check is a report to the founder, not a message to the candidates: it says how to relabel an
+ * issue, what to change in `.env`, when to `/resume`, and which database call failed, and its decisions
+ * block speaks to the founder about "the candidate". It stays in his private chat.
+ */
+const OPERATOR_REPORT = "src/evolution/jobhunt-check.ts";
 
 describe("job lane chat routing", () => {
   it("finds the files it guards, so a moved directory cannot make this pass with nothing to read", () => {
@@ -53,11 +59,22 @@ describe("job lane chat routing", () => {
     for (const file of PROACTIVE_SENDERS) expect(JOB_LANE).toContain(file);
   });
 
-  it.each(JOB_LANE)("%s does not send to the founder's chat", (file) => {
+  it.each(JOB_LANE.filter((file) => file !== OPERATOR_REPORT))("%s does not send to the founder's chat", (file) => {
     expect(code(file)).not.toMatch(/\b(sendToChat|sendToChatWithKeyboard|defaultChatId|TELEGRAM_CHAT_ID)\b/);
   });
 
   it.each(PROACTIVE_SENDERS)("%s sends through the jobs chat", (file) => {
     expect(code(file)).toMatch(/\bsendToJobsChat\b/);
+  });
+});
+
+describe("the 09:30 check stays in the founder's chat", () => {
+  it("is in the job lane, so a moved file cannot make this pass with nothing to read", () => {
+    expect(JOB_LANE).toContain(OPERATOR_REPORT);
+  });
+
+  it("sends through the system channel and never through the jobs chat", () => {
+    expect(code(OPERATOR_REPORT)).toMatch(/\bsendToChat\b/);
+    expect(code(OPERATOR_REPORT)).not.toMatch(/\bsendToJobsChat\b/);
   });
 });

@@ -23,6 +23,7 @@ import {
   incrementFollowupsSent,
 } from "../../db/job-queries.js";
 import { sendToJobsChat } from "../../infra/telegram-send.js";
+import { profileSelector } from "./profile-config.js";
 import { childLogger } from "../../infra/logger.js";
 
 const log = childLogger({ module: "tool:pipeline-followup" });
@@ -47,8 +48,10 @@ function daysSince(date: Date | null, now: Date): number {
  * ordering (stalest contact first) — see jobhunt-commands.ts for why brief_rank
  * cannot be reused here (it is cleared the moment a row is marked applied).
  */
-export function formatPipelineDigest(rows: readonly JobApplication[], now: Date = new Date(), profile?: { candidateName: string }): string {
+export function formatPipelineDigest(rows: readonly JobApplication[], now: Date = new Date(), profile?: { id: string; candidateName: string }): string {
   const nameLabel = profile ? ` (${esc(profile.candidateName)})` : "";
+  const sel = profile ? profileSelector(profile) : "";
+  const to = sel ? ` ${esc(sel)}` : "";
   if (rows.length === 0) {
     return `📭 <b>Pipeline review${nameLabel}</b>\n\nNothing live right now — every application has been marked replied, rejected, or is still in today's queue.`;
   }
@@ -57,7 +60,7 @@ export function formatPipelineDigest(rows: readonly JobApplication[], now: Date 
     const n = i + 1;
     const days = daysSince(row.last_contact_at ?? row.applied_at, now);
     const age = row.stage === "applied" ? ` — applied ${days}d ago` : ` — ${row.stage}`;
-    return `${n}. ${esc(row.company)} — ${esc(row.title)}${age}\n    <code>/replied ${n}</code> · <code>/rejected ${n}</code>`;
+    return `${n}. ${esc(row.company)} — ${esc(row.title)}${age}\n    <code>/replied${to} ${n}</code> · <code>/rejected${to} ${n}</code>`;
   });
 
   return (
@@ -98,7 +101,7 @@ export async function runPipelineDigest(): Promise<void> {
 }
 
 /** Plain templated nudge — no LLM call. `nudgeNumber` only changes the tone, not the facts. */
-export function formatFollowupNudge(row: JobApplication, nudgeNumber: 1 | 2, now: Date = new Date(), profile?: { candidateName: string }): string {
+export function formatFollowupNudge(row: JobApplication, nudgeNumber: 1 | 2, now: Date = new Date(), profile?: { id: string; candidateName: string }): string {
   const days = daysSince(row.last_contact_at ?? row.applied_at, now);
   const heading = nudgeNumber === 1 ? "🔔 Follow-up due (day 7)" : "🔔 Second follow-up due (day 14)";
   const nameLabel = profile ? ` — for ${esc(profile.candidateName)}` : "";
@@ -108,7 +111,7 @@ export function formatFollowupNudge(row: JobApplication, nudgeNumber: 1 | 2, now
   return (
     `${heading}${nameLabel} — <b>${esc(row.company)}</b> (${esc(row.title)})\n\n` +
     `Draft to send:\n<i>${esc(draft)}</i>\n\n` +
-    `Then <code>/replied</code> if they answer, or leave it — day 14 gets one more nudge, then it goes quiet.`
+    `Then <code>/replied${profile && profileSelector(profile) ? ` ${esc(profileSelector(profile))}` : ""}</code> if they answer, or leave it — day 14 gets one more nudge, then it goes quiet.`
   );
 }
 

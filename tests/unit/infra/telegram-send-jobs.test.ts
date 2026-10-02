@@ -153,6 +153,7 @@ describe("isChatUnreachable", () => {
     [400, "Bad Request: chat not found"],
     [400, "Bad Request: group chat was upgraded to a supergroup chat"],
     [400, "Bad Request: have no rights to send a message"],
+    [400, "Bad Request: Have no write access to the chat"],
   ])("%i %s: the chat cannot be reached", (code, description) => {
     expect(isChatUnreachable(refusal(code, description))).toBe(true);
   });

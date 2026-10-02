@@ -89,7 +89,7 @@ interface TelegramRefusal {
 }
 
 /** 400 refusals that say the chat itself is gone or closed to the bot, as opposed to a bad message. */
-const CHAT_GONE = /chat not found|upgraded to a supergroup|rights to send|chat_write_forbidden|chat was deactivated/i;
+const CHAT_GONE = /chat not found|upgraded to a supergroup|rights to send|no write access|chat_write_forbidden|chat was deactivated/i;
 
 /**
  * Did Telegram refuse because THE CHAT cannot be reached (the bot was removed, blocked or muted, or the

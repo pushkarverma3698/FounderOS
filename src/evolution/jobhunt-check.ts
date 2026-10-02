@@ -35,7 +35,7 @@
 import { readHalt } from "../infra/halt.js";
 import type { HaltState } from "../infra/halt.js";
 import { childLogger } from "../infra/logger.js";
-import { sendToJobsChat } from "../infra/telegram-send.js";
+import { sendToChat } from "../infra/telegram-send.js";
 import { analyzeJobhunt } from "./analyzers/jobhunt.js";
 import type { JobhuntAnalysis, JobhuntSnapshot } from "./analyzers/jobhunt.js";
 import { octokitIssueGateway, runSelfImprovementDispatch } from "./dispatch-findings.js";
@@ -90,7 +90,7 @@ function defaultDeps(): JobhuntCheckDeps {
     read: async (now) => (await import("./collect-jobhunt.js")).collectJobhuntSnapshot(now),
     gateway: () => octokitIssueGateway(),
     send: async (parts) => {
-      for (const part of parts) await sendToJobsChat(part, "HTML");
+      for (const part of parts) await sendToChat(part, "HTML");
     },
     halt: readHalt,
     state: { load: () => loadNotifyState(), save: (state) => saveNotifyState(state) },

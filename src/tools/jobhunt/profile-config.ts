@@ -304,6 +304,17 @@ export function resolveProfileToken(token: string): string | null {
 }
 
 /**
+ * The word that points a job command at this candidate, as the commands accept it (`/draft tashi 3`).
+ * Empty for the default profile: a bare command already reaches its queue. A message that goes out
+ * for any other candidate must print it, or the command it suggests acts on the default queue.
+ */
+export function profileSelector(profile: { readonly id: string; readonly candidateName: string }): string {
+  if (profile.id === DEFAULT_PROFILE_ID) return "";
+  const first = (profile.candidateName.trim().split(/\s+/)[0] ?? "").toLowerCase();
+  return resolveProfileToken(first) === profile.id ? first : profile.id;
+}
+
+/**
  * Free text ("tashi", "all", "wife-nl-finance") to a query scope.
  *
  * ONE COPY, since 2026-09-08. `job-state.ts` and `jobs-csv.ts` each carried a

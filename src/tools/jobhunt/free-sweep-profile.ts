@@ -30,7 +30,7 @@
 import { childLogger } from "../../infra/logger.js";
 import { sendToJobsChat } from "../../infra/telegram-send.js";
 import { esc } from "./telegram-format.js";
-import { DEFAULT_PROFILE_ID, type JobSearchProfile } from "./profile-config.js";
+import { DEFAULT_PROFILE_ID, profileSelector, type JobSearchProfile } from "./profile-config.js";
 import {
   afterQuietSweep,
   afterSpokenSweep,
@@ -239,8 +239,9 @@ export async function runFreeSweepForProfile(
       ? formatNewRowsAlert(newRoles, link ?? notice, profile.candidateName, {
           backfill: backfill.length,
           ranks,
+          selector: profileSelector(profile),
         })
-      : formatBackfillLine(backfill.length, profile.candidateName);
+      : formatBackfillLine(backfill.length, profile.candidateName, profileSelector(profile));
   try {
     await sendToJobsChat(message);
   } catch (err) {
