@@ -51,6 +51,7 @@ New to the story? The **[case studies](turicks-case-studies/)** and **[blog](tur
 | [../docs/VPS-MCP-SETUP.md](VPS-MCP-SETUP.md) | Connecting a local MCP client to FounderOS's own MCP server on the production VPS |
 | [FAQ.md](FAQ.md) | Recurring questions, answered plainly |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common failures and where to look (reading a typed `FailureReport`) |
+| [runbooks/task-command-manual-qa.md](runbooks/task-command-manual-qa.md) | **Manual QA test procedure** for `/task` Telegram command & agentic loop |
 
 Client-facing video engine: [VIDEO-FACTORY.md](VIDEO-FACTORY.md) · [VIDEO-PIPELINE-AUDIT.md](VIDEO-PIPELINE-AUDIT.md).
 
