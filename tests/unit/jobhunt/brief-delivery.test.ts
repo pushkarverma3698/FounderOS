@@ -1,7 +1,7 @@
 /**
  * Unit tests — the brief must survive its own content.
  *
- * `sendToChat` defaults to parse_mode "HTML". Real job titles carry "&" and "<"
+ * `sendToJobsChat` defaults to parse_mode "HTML". Real job titles carry "&" and "<"
  * ("Bloom & Wild Group" appeared in the 2026-07-31 prod run), and Telegram
  * rejects the whole message when it cannot parse the entities.
  *
