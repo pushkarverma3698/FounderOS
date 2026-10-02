@@ -14,7 +14,7 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { Octokit } from "octokit";
 import { describeTaskStatus, fetchTaskFacts, type TaskFacts } from "../../tools/antigravity-status.js";
-import { resolveDispatchRepo } from "../../tools/dispatch-antigravity.js";
+import { resolveDispatchRepo, lintDispatchBrief, describeBriefRejection } from "../../tools/dispatch-antigravity.js";
 import { kickDispatchTick } from "../../tools/dispatch-tick.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
@@ -79,6 +79,7 @@ export const antigravityTaskStatus = tool(
       "Where an Antigravity task stands — queued, working, failed (with the dispatcher's own reason), in review " +
       "(PR, CI, Claude's verdict), blocked or merged — read from GitHub and the dispatcher. Read-only, no approval. " +
       "ALWAYS use this for 'where are we on #N', 'is it done', 'did Antigravity pick it up', 'why isn't it picked up'. " +
+      "DO NOT use this tool if the user just asks for 'status' or general system health. " +
       "Never answer those from list_issues, and never promise to monitor: this answer names the real notifications.",
     schema,
   },
@@ -113,6 +114,11 @@ export const requeueAntigravityTask = tool(
 
     const refused = refusal(facts);
     if (refused) return `${refused}\n\n${status}`;
+
+    const lint = await lintDispatchBrief({ owner: t.owner, repo: t.repo }, facts.issue.body, () => t.gh);
+    if (!lint.ok) {
+      return `❌ Cannot re-queue: the existing issue does not pass the brief lint.\n\n${describeBriefRejection(lint, t.slug)}`;
+    }
 
     // Already queued: nudging the dispatcher changes nothing on GitHub, so no card.
     if (facts.issue.state === "open" && facts.issue.labels.includes("agent:ready")) {
@@ -159,7 +165,7 @@ export const requeueAntigravityTask = tool(
 
     const when = facts.quotaUntil && facts.quotaUntil > new Date()
       ? `Antigravity's quota is exhausted until ${facts.quotaUntil.toISOString().slice(0, 16).replace("T", " ")} UTC, so it starts then.`
-      : "agent-dispatch picks it up within 15 minutes, usually at once.";
+      : "agent-dispatch picks it up within 15 minutes.";
     return `✅ #${n} is back in Antigravity's queue (same issue, nothing new filed). ${when}\n${facts.issue.url}`;
   },
   {

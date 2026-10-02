@@ -50,6 +50,7 @@ export interface TaskFacts {
   readonly issue: {
     readonly number: number;
     readonly title: string;
+    readonly body: string;
     readonly state: "open" | "closed";
     readonly labels: readonly string[];
     readonly createdAt: string;
@@ -211,6 +212,7 @@ export async function fetchTaskFacts(
     issue: {
       number: issue.number,
       title: issue.title,
+      body: issue.body ?? "",
       state: issue.state === "open" ? "open" : "closed",
       labels: issue.labels.map((l) => (typeof l === "string" ? l : (l.name ?? ""))),
       createdAt: issue.created_at,

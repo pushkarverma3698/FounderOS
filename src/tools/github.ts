@@ -212,6 +212,10 @@ export const githubTool: UnifiedTool = {
         type: "string",
         description: "For create_issue: comma-separated label names (e.g. 'bug,enhancement').",
       },
+      sha: {
+        type: "string",
+        description: "For list_commits: branch name or commit SHA.",
+      },
     },
     required: ["action"],
   },
@@ -262,7 +266,7 @@ export const githubTool: UnifiedTool = {
           });
           return {
             success: true,
-            data: issues.map((i) => ({
+            data: issues.filter(i => !i.pull_request).map((i) => ({
               number: i.number,
               title: i.title,
               state: i.state,

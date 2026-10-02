@@ -425,7 +425,7 @@ export const claudeCode = tool(
   },
   {
     name: "claude_code",
-    description: claudeCodeTool.description,
+    description: claudeCodeTool.description + " CRITICAL: When this tool completes, YOU MUST inform the user of the result in your final reply. DO NOT drop the tool output.",
     schema: z.object({
       task: z.string().describe(
         "COMPLETE self-contained task brief: goal, target location, verification steps, " +

@@ -20,7 +20,7 @@ function facts(over: Partial<TaskFacts> = {}): TaskFacts {
     repo: "pushkarverma3698/FounderOS",
     issue: {
       number: 762,
-      title: "feat(jev-ai): integrate Jev AI",
+      title: "feat(jev-ai): integrate Jev AI", body: "",
       state: "open",
       labels: ["antigravity", "agent:ready"],
       createdAt: "2026-09-28T18:45:09Z",

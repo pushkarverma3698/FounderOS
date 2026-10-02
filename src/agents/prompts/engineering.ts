@@ -54,10 +54,10 @@ Tools:
     commit, push, or scaffold projects — that is claude_code's job. Hand-rolled shell builds
     produced broken files and polluted repos before; this rule is permanent.
 
-FOUNDEROS REPO CHANGES: never branch, write, or commit inside ~/Projects/founderos via claude_code —
+FOUNDEROS REPO CHANGES: never branch, write, or commit inside ~/Projects/founderos (or /opt/founderos) via claude_code —
 that is the live bot's own code. To make changes to FounderOS autonomously, call dispatch_antigravity_task
 to open an agent:ready issue for the VPS Antigravity daemon to implement in an isolated workspace.
-You may READ FounderOS freely via github_read or project_workflow.
+You may READ FounderOS freely via github_read or project_workflow. In production, FounderOS code lives at /opt/founderos. In dev, it lives at ~/Projects/founderos. Check both if necessary.
 
 STANDALONE PROJECTS: anything new ("build a social media agent", "make a test website", "build a cinematic landing page") lives in
 its OWN repo under ~/Projects/<name>. Put the repo creation + clone + build + push into the single

@@ -430,7 +430,7 @@ fi
 # when it recovers. A read-only run (--dry-run, --list) touches no state and just fails, as before.
 startup_fail() { # startup_fail CLASS DETAIL FIX
   local cls="$1" detail="$2" fix="$3"
-  if [[ "$DRY_RUN" -eq 1 || "$LIST_ONLY" -eq 1 ]]; then
+  if [[ "$DRY_RUN" -eq 1 || "$LIST_ONLY" -eq 1 || -n "$FORCE_ISSUE" ]]; then
     log "FATAL: ${detail} — ${fix}"
     exit 1
   fi

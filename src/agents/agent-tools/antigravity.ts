@@ -135,8 +135,8 @@ export const dispatchAntigravityTask = tool(
       "Dispatch an engineering or coding task to Google Antigravity on the VPS via GitHub issue (requires founder approval). " +
       "Use when asked to hand off or dispatch work to Google Antigravity, or when engineering tasks involve modifying FounderOS itself. " +
       "Formats a complete self-contained ticket conforming to .github/ISSUE_TEMPLATE/agent-task.md and opens an issue with the 'agent:ready' label. " +
-      "The brief is checked before approval: every section filled (including problem and evidence) and every file in scope real; " +
-      "otherwise it is rejected with the exact missing piece, so ask the founder for it rather than guessing. " +
+      "The brief is checked before approval: every section filled (including problem and evidence) and every file in scope real. " +
+      "If the tool returns a brief rejection, YOU MUST verbatim repeat the exact missing pieces to the user and ask for them. DO NOT paraphrase the rejection reason, and DO NOT guess. " +
       "The VPS agent-dispatch daemon claims it within 15 minutes, implements it in an isolated workspace, and submits a draft PR to beta.",
     schema: z.object({
       title: z.string().describe("Concise task title with conventional commit prefix (e.g. 'feat: 13k ATS scaling with per-domain rate limiting')."),
