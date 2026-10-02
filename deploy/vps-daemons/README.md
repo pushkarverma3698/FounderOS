@@ -21,13 +21,42 @@ directory; only `agent-dispatch`'s documented location was wrong.
 
 | Daemon | Source in this repo | VPS path (deployed, live) | Crontab | What it does |
 |---|---|---|---|---|
-| `pr-brain` | `deploy/vps-daemons/pr-brain` | `~/bin/pr-brain` | `*/20 * * * *` | Gates every open PR authored by this account: re-runs `pnpm gate`, runs the `pr-adversary` protocol, approves / pushes a fix / requests changes, then **merges** once cleared. A head whose only new commits are pr-brain's own fixes or clean merges of the base is not re-gated: the verdict is carried forward and the merge retried with no Claude session (2026-09-29) — except in an employer/org repo (`repo_owner != $OWNER`, e.g. `OplifyMessage`), where it marks the PR ready and always leaves the merge to a human (restored 2026-09-21). |
-| `agent-dispatch` | `deploy/agent-dispatch` | `~/bin/agent-dispatch` | `*/15 * * * *` | Sweeps every repo in its own `DEFAULT_REPOS` (the only list it reads), claims one `agent:ready` GitHub issue per repo per tick **if its brief is complete**, checks out a branch in the matching `/opt/agy-workspace/<repo>` workspace, invokes Antigravity (`agy`) to implement it, opens a draft PR. Every way a run can end without a PR is classified (see below) instead of all becoming `agent:failed`. |
+| `pr-brain` | `deploy/vps-daemons/pr-brain` | `~/bin/pr-brain` | `*/20 * * * *` | Gates every open PR authored by this account: re-runs `pnpm gate`, runs the `pr-adversary` protocol, clears it or requests changes (the `claude` engine may also push a fix), then **merges** once cleared. The reviewer is an engine, `PR_BRAIN_ENGINE`: **`agy` by default** (see "The reviewer" below), `claude` as before. A head whose only new commits are pr-brain's own fixes or clean merges of the base is not re-gated: the verdict is carried forward and the merge retried with no Claude session (2026-09-29) — except in an employer/org repo (`repo_owner != $OWNER`, e.g. `OplifyMessage`), where it marks the PR ready and always leaves the merge to a human (restored 2026-09-21). |
+| `agent-dispatch` | `deploy/agent-dispatch` | `~/bin/agent-dispatch` | `*/15 * * * *` and `* * * * * … --kicked` | Sweeps every repo in its own `DEFAULT_REPOS` (the only list it reads), claims one `agent:ready` GitHub issue per repo per tick **if its brief is complete**, checks out a branch in the matching `/opt/agy-workspace/<repo>` workspace, invokes Antigravity (`agy`) to implement it, opens a draft PR. Every way a run can end without a PR is classified (see below) instead of all becoming `agent:failed`. |
 | `onboard-repo.sh` | `deploy/onboard-repo.sh` | `~/bin/onboard-repo.sh` | — (run by hand, and `--check` by every agent-dispatch tick) | Puts a repo on the loop, or reports what it is missing. See "Adding a repo". |
-| helpers | `deploy/lib/*.sh` | `~/bin/lib/*.sh` | — | Sourced by the daemons: `down-state.sh` (the pause/resume state machine and secret redaction, shared by both) and `agy-failure.sh` (the failure classifier). **A daemon refuses to start without them.** |
+| helpers | `deploy/lib/*.sh` | `~/bin/lib/*.sh` | — | Sourced by the daemons: `down-state.sh` (the pause/resume state machine and secret redaction, shared by both), `agy-failure.sh` (the failure classifier) and `agy-run.sh` (one agy turn, streamed live into one Telegram message; shared by both). **A daemon refuses to start without them.** |
 
 Both read config from `~/.claude/pr-brain.repos` / env vars — see each
 script's own header comment for the full list.
+
+## The reviewer (`PR_BRAIN_ENGINE`)
+
+Claude's weekly limit paused every review for four days (2026-10-01 → 10-05), and the review half of the Telegram
+loop stopped with it. `pr-brain` now has an engine:
+
+| | `agy` (default) | `claude` |
+|---|---|---|
+| Runs | the Antigravity CLI as the `antigravity` user, in its own clone `/opt/agy-workspace/review/<repo>` on the PR head | headless Claude Code in `/opt/review/<repo>` |
+| Model | `claude-sonnet-4-6` through agy (`PR_BRAIN_MODEL`), **not** the executor's `gemini-3.6-flash-medium` | `sonnet` |
+| Can push to the PR | **no** (the clone's push URL is disabled) | yes (verdict B) |
+| Verdict | the model ends with `BRAIN-VERDICT: PASS` or `FAIL`; **the script** makes the PR ready/draft and posts the reviewed marker. No verdict line = a failed attempt | read from the PR's state, as before |
+| Telegram | one message, edited while it runs: `Reviewing <repo>#<n>`, the last tool calls, the clock, the verdict | the gate's start and verdict |
+
+Switch back with `PR_BRAIN_ENGINE=claude` in the pr-brain crontab line. The independence conditions (and why a
+different model, a fresh conversation and no write path matter) are in the ADR-046 amendment of 2026-10-03.
+
+## Live progress and the kick
+
+`deploy/lib/agy-run.sh` runs agy with `--output-format stream-json` and edits **one** Telegram message every
+20 s: `🔧 Antigravity #44 · owner/repo`, the clock and model, the last five tool calls (`✅ run npm test`,
+`⏳ read src/…`). When the run ends it is left in the chat with the outcome appended (`📦 PR #9 opened`). It
+used to show the last line agy printed: `</app_notification>`, `root agent idle; waiting…`.
+
+Approving a `/task` files the issue and the bot appends a line to `~/.claude/agent-dispatch.kick`. The bot cannot
+start the dispatcher itself (it runs under systemd with `NoNewPrivileges`, where every `sudo` fails, and `/tmp` is
+private to it): a per-minute cron line, `agent-dispatch --kicked`, turns the note into a tick within a minute.
+`deploy/sync-daemons.sh` installs that line (copied from the `agent-dispatch` line already in the crontab, so the
+same user, PATH and env file), idempotently. With no note it exits at once, silently.
 
 ## Pause states: what the founder is told
 
@@ -40,7 +69,7 @@ long as it lasts, and announced **once more** when it recovers.
 | Antigravity auth failed (key or login rejected) | `~/.claude/agent-dispatch.down` (`auth`) | the key file's mtime changing (the new key is tried on the next tick), or deleting the file |
 | `gh` logged out, a tool or `agy` missing | `~/.claude/agent-dispatch.down` (`gh-auth`, `missing-dep`, `agy-missing`) | recovering by itself: checked every tick |
 | Antigravity quota exhausted | `~/.claude/agent-dispatch.quota-until` | the reset time passing |
-| Claude unavailable (auth, usage limit) | `~/.claude/pr-brain.down` | the next sweep that reaches Claude |
+| Reviewer unavailable (login, usage limit; names which engine) | `~/.claude/pr-brain.down` | the next sweep that reaches the reviewer |
 | Repo not set up (workspace, labels) | `~/.claude/agent-dispatch.onboard-reported` | fixing it (`onboard-repo.sh`); a change in the list sends one more message |
 
 How a failed Antigravity run is classified (`deploy/lib/agy-failure.sh`, tail of the log only,

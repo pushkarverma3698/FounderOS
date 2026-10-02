@@ -1026,7 +1026,9 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
           --output-format text </dev/null >"$gate_out" 2>&1
       gate_rc=$?
     fi
-    cat "$gate_out" >>"$LOG"
+    # The review's own words go into the log, secrets masked: a reviewer that cats a config file to prove a
+    # point must not leave its contents in a file the whole box can read.
+    redact_secrets <"$gate_out" >>"$LOG"
     gate_tail=$(tail -n 3 "$gate_out")
     # Is this an outage (everything would fail the same way) or just this PR's gate breaking? Asked of the
     # run's own output, before it is deleted.
