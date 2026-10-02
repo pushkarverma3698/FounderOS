@@ -6,6 +6,11 @@ not restated here), [BRANCHING-STRATEGY.md](BRANCHING-STRATEGY.md) (one branch p
 shared, never resurrected), and [CLAUDE_REVIEWER_INSTRUCTIONS.md](CLAUDE_REVIEWER_INSTRUCTIONS.md)
 (the review side of this same loop, run by `pr-brain`).
 
+> **Who "Claude" is in this document.** Where it says Claude reviews, reads, or leaves findings, it means
+> **`pr-brain`, the independent reviewer**. Its engine is configurable (`PR_BRAIN_ENGINE`, default `agy` on a
+> different model from yours, `claude` as the alternative); the role, the GitHub-only channel, the markers and
+> the verdicts are identical. See the ADR-046 amendment of 2026-10-03.
+
 ## The state machine
 
 ```text

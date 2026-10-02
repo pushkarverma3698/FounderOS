@@ -122,7 +122,7 @@ describe("formatAntigravityIssueBody", () => {
     });
 
     expect(body).toContain("## Explicitly forbidden\n\nSee docs/antigravity/STANDARDS.md");
-    expect(body).toContain("## Acceptance criteria\n\nAll verification commands pass; Claude pr-brain clears review with no BLOCKER.");
+    expect(body).toContain("## Acceptance criteria\n\nAll verification commands pass; the independent reviewer (pr-brain) clears the review with no BLOCKER.");
   });
 
   it("leaves Problem and Evidence EMPTY, with no placeholder, when the planner supplied neither", async () => {
@@ -333,7 +333,7 @@ describe("dispatchAntigravityTool.execute — the brief lint", () => {
     mockRepoGet.mockResolvedValue({ data: {} });
   });
 
-  it("files NOTHING for a brief with a missing section and a path that does not exist, and says what to fix", async () => {
+  it("files NOTHING for a brief with a missing section, and says what to fix; a path that does not exist is not what stops it", async () => {
     githubHas(); // not on beta either
     const res = await dispatchAntigravityTool.execute({
       ...COMPLETE,
@@ -347,16 +347,15 @@ describe("dispatchAntigravityTool.execute — the brief lint", () => {
     expect(res.error).toContain("nothing was filed on pushkarverma3698/FounderOS");
     expect(res.error).toContain('1. Section "## Evidence" is empty');
     expect(res.error).toContain("Pass it in the `evidence` input.");
-    expect(res.error).toContain("2. `src/agents/supervisor.ts` does not exist in pushkarverma3698/FounderOS.");
-    expect(res.error).toContain("Pass them in the `new_files` input.");
-    expect(res.data).toMatchObject({
-      missing_headings: ["Evidence"],
-      missing_paths: ["src/agents/supervisor.ts"],
-    });
+    expect(res.error).toContain("`founder_request`");
+    // the missing path was demoted, so it is no longer a problem to fix
+    expect(res.error).not.toContain("does not exist in pushkarverma3698/FounderOS");
+    expect(res.data).toMatchObject({ missing_headings: ["Evidence"], missing_paths: [] });
   });
 
-  it("rejects issue #762 when it is filed through the tool with the same inputs", async () => {
-    // #762's own text: no problem statement, no evidence, three files that never existed.
+  it("still rejects issue #762's two empty sections, and no longer calls its three invented files a defect to fix", async () => {
+    // #762's own text: no problem statement, no evidence, three files that never existed. The sections are
+    // what a founder-facing rejection can ask for; a file only Antigravity can find is demoted to a hint.
     githubHas(); // nor on beta
     const res = await dispatchAntigravityTool.execute({
       title: "feat: Jev AI System 1 gateway",
@@ -369,10 +368,44 @@ describe("dispatchAntigravityTool.execute — the brief lint", () => {
 
     expect(res.success).toBe(false);
     expect(mockIssuesCreate).not.toHaveBeenCalled();
-    expect(res.data).toMatchObject({
-      missing_headings: ["Problem / observed behavior", "Evidence"],
-      missing_paths: ["src/agents/supervisor.ts", "src/tools/brain.ts", "src/services/jev-ai.ts"],
+    expect(res.data).toMatchObject({ missing_headings: ["Problem / observed behavior", "Evidence"], missing_paths: [] });
+  });
+
+  it("with the sections filled, #762's invented files are filed as labelled hints: the executor is told they are guesses", async () => {
+    githubHas(); // nor on beta
+    mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
+    const res = await dispatchAntigravityTool.execute({
+      title: "feat: Jev AI System 1 gateway",
+      goal: "Integrate Jev AI as a System 1 deterministic gateway across FounderOS routing.",
+      problem: "There is no gateway in front of the router.",
+      evidence: "The founder's request of 2026-09-27.",
+      scope: "src/agents/supervisor.ts, src/tools/brain.ts, src/tools/index.ts",
+      expected: "In `src/agents/supervisor.ts`: Integrate Jev AI gateway.",
+      verification: "pnpm test && pnpm gate",
     });
+
+    expect(res.success).toBe(true);
+    const filed = (mockIssuesCreate.mock.calls[0]?.[0] as { body: string }).body;
+    expect(filed).toContain("They are guesses, not facts");
+    // src/tools/index.ts exists in the checkout, so it stays a verified fact; the two invented files are hints
+    expect(filed).toContain("```text\n1. src/agents/supervisor.ts\n2. src/tools/brain.ts\n```");
+    expect(filed).toContain("src/tools/index.ts");
+    expect(filed).toContain("src/agents/supervisor.ts (unverified): Integrate Jev AI gateway.");
+    expect((res.data as { warnings: string[] }).warnings[0]).toMatch(/^Not found in the repository, so filed as unverified hints, not facts: src\/agents\/supervisor\.ts, src\/tools\/brain\.ts\./);
+    expect(mockKickDispatchTick).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns the founder's own words into the Evidence when none was given, and never overrides evidence that was", async () => {
+    mockIssuesCreate.mockResolvedValue({ data: issueCreated() });
+    await dispatchAntigravityTool.execute({ ...COMPLETE, evidence: "", founder_request: "add a footer to the login page\nwith the version" });
+    const first = (mockIssuesCreate.mock.calls[0]?.[0] as { body: string }).body;
+    expect(first).toContain("The founder's request, verbatim:\n\n> add a footer to the login page\n> with the version");
+    expect(first).toContain("Nothing else came with it");
+
+    await dispatchAntigravityTool.execute({ ...COMPLETE, evidence: "log line: 500 at 12:01", founder_request: "add a footer" });
+    const second = (mockIssuesCreate.mock.calls[1]?.[0] as { body: string }).body;
+    expect(second).toContain("log line: 500 at 12:01");
+    expect(second).not.toContain("verbatim");
   });
 
   it("files NOTHING for a brief over GitHub's size limit, and says so before any approval is spent", async () => {
@@ -404,15 +437,17 @@ describe("dispatchAntigravityTool.execute — the brief lint", () => {
     expect(mockGetContent).toHaveBeenCalledWith(expect.objectContaining({ path: "src/tools/only-on-beta.ts", ref: "beta" }));
   });
 
-  it("asks GitHub about another repo's paths, and a definite 404 files nothing", async () => {
+  it("asks GitHub about another repo's paths, and a definite 404 is demoted to a hint: the issue is still filed", async () => {
     mockGetContent.mockRejectedValueOnce(Object.assign(new Error("Not Found"), { status: 404 }));
+    mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
 
     const res = await dispatchAntigravityTool.execute({ ...COMPLETE, repo: OPLIFY, scope: "src/gone.ts" });
 
-    expect(res.success).toBe(false);
     expect(mockGetContent).toHaveBeenCalledWith(expect.objectContaining({ owner: "OplifyMessage", repo: "oplify-messaging-api", path: "src/gone.ts" }));
-    expect(mockIssuesCreate).not.toHaveBeenCalled();
-    expect(res.error).toContain("`src/gone.ts` does not exist in OplifyMessage/oplify-messaging-api.");
+    expect(res.success).toBe(true);
+    const filed = (mockIssuesCreate.mock.calls[0]?.[0] as { body: string }).body;
+    expect(filed).toContain("```text\n1. src/gone.ts\n```");
+    expect((res.data as { warnings: string[] }).warnings[0]).toContain("src/gone.ts");
   });
 
   it("files the issue, and reports what it could not check, when GitHub is down", async () => {
@@ -451,8 +486,9 @@ describe("describeBriefRejection", () => {
     const lint = await lintAgentBrief(formatAntigravityIssueBody({ ...COMPLETE, evidence: undefined, problem: undefined }), () => true);
     const text = describeBriefRejection(lint, "o/r");
 
-    expect(text).toContain('Section "## Problem / observed behavior" is empty (only whitespace or an HTML comment). Pass it in the `problem` input.');
+    expect(text).toContain('Section "## Problem / observed behavior" is empty (only whitespace or an HTML comment). Pass it in the `problem` input');
     expect(text).toContain('Section "## Evidence" is empty (only whitespace or an HTML comment). Pass it in the `evidence` input.');
+    expect(text).toContain("`founder_request`");
   });
 });
 

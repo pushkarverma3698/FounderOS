@@ -4,9 +4,24 @@
 #
 # Antigravity (the doer) opens draft PRs. This sweeps every repository on the
 # machine, finds open PRs whose current head has not been gated yet, and
-# dispatches headless Claude Code to run the `pr-adversary` protocol on each:
-# re-run the gate, try to disprove "done", then approve / push a fix /
-# request changes. No human click anywhere in that loop.
+# dispatches a headless reviewer to run the `pr-adversary` protocol on each:
+# re-run the gate, try to disprove "done", then clear it or request changes.
+# No human click anywhere in that loop.
+#
+# THE REVIEWER IS AN ENGINE, chosen by PR_BRAIN_ENGINE:
+#   agy     (default) the Antigravity CLI, as the antigravity user, in a fresh conversation on a clean
+#           checkout of the PR head. Its model is NEVER the executor's (gemini-3.6-flash-medium): the
+#           executor is never its own grader, which is the whole reason this loop has a separate reviewer.
+#           The candidates, best first, are PR_BRAIN_MODELS (default claude-sonnet-4-6, then
+#           gemini-3.1-pro-high). Quota is per model family on this account, so a wall on one moves the
+#           review to the next; the reviewer is paused only when every candidate is out (2026-10-02: the
+#           three non-Gemini models were out for 69 hours while every Gemini model still answered).
+#           It cannot push (the checkout's push URL is disabled) and it does not stamp or decide: it ends
+#           its answer with `BRAIN-VERDICT: PASS` or `FAIL`, and this script makes the PR's state agree
+#           and posts the marker itself.
+#   claude  headless Claude Code, as before (needs the Claude login; PR_BRAIN_ENGINE=claude).
+# Claude went down for a week on its usage limit (2026-10-02, resets 10-05) and the whole review half of the
+# loop stopped with it: the reviewer must not depend on one vendor's subscription.
 #
 # Idempotent: a PR is skipped once a marker comment for its exact head SHA
 # exists, so re-running costs nothing and a new push re-opens the gate.
@@ -22,16 +37,25 @@
 #   ~/.claude/pr-brain.repos   one repo path per line ('#' comments). Absent => auto-discover.
 #   ~/.claude/pr-brain.off     kill switch. Present => exit 0 immediately.
 #   PR_BRAIN_MAX               PRs per sweep (default 3)
-#   PR_BRAIN_MODEL             model for the gate (default sonnet)
-#   PR_BRAIN_BUDGET_USD        per-PR spend cap (default 5)
+#   PR_BRAIN_ENGINE            agy (default) or claude, see above
+#   PR_BRAIN_MODELS            agy engine: reviewer models, best first, space or comma separated
+#                              (default "claude-sonnet-4-6 gemini-3.1-pro-high")
+#   PR_BRAIN_MODEL             one model: claude engine (default sonnet); on agy it means PR_BRAIN_MODELS=<it>
+#   PR_BRAIN_EXECUTOR_MODEL    the model that writes the PRs, never used as the reviewer (default: the one
+#                              agent-dispatch uses, AGENT_DISPATCH_MODEL or gemini-3.6-flash-medium)
+#   PR_BRAIN_TIMEOUT_SEC       agy engine: one review's time limit (default 1800)
+#   PR_BRAIN_BUDGET_USD        claude engine: per-PR spend cap (default 5)
 #   PR_BRAIN_ROOT              where to auto-discover repos (default ~/Projects)
 #   PR_BRAIN_ENV_FILE          dotenv holding TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID.
 #                              Set it and every gate action is announced on Telegram.
 #                              Unset => silent (log only).
 #   PR_BRAIN_MAX_ATTEMPTS      failed gates on one head before it stops retrying (default 3)
+#   PR_BRAIN_MERGE             0 = review and clear, but never merge (default 1). For a manual review of a PR you
+#                              want to merge yourself, e.g. a change to this loop: a cleared PR on beta is otherwise
+#                              squash-merged and PROMOTED to main on the spot.
 #
 # State:
-#   ~/.claude/pr-brain.down        present while Claude is unavailable (auth, usage
+#   ~/.claude/pr-brain.down        present while the reviewer is unavailable (auth, usage
 #                                  limit, overload). One Telegram message when it
 #                                  appears, one when it goes — nothing per tick.
 #   ~/.claude/pr-brain.failures/   one file per PR: "<head> <failed-attempts>".
@@ -46,8 +70,26 @@ OFF_SWITCH="$HOME/.claude/pr-brain.off"
 REPO_LIST="$HOME/.claude/pr-brain.repos"
 ROOT="${PR_BRAIN_ROOT:-$HOME/Projects}"
 MAX="${PR_BRAIN_MAX:-3}"
-MODEL="${PR_BRAIN_MODEL:-sonnet}"
+ENGINE="${PR_BRAIN_ENGINE:-agy}"
+case "$ENGINE" in
+  agy)
+    # MODEL is chosen lazily, from this list, by the first call that needs the reviewer (select_review_model).
+    REVIEW_MODELS="${PR_BRAIN_MODELS:-${PR_BRAIN_MODEL:-claude-sonnet-4-6 gemini-3.1-pro-high}}"
+    REVIEW_MODELS="${REVIEW_MODELS//,/ }"
+    MODEL=""
+    REVIEWER_NAME="the Antigravity reviewer" ;;
+  claude) MODEL="${PR_BRAIN_MODEL:-sonnet}"; REVIEWER_NAME="Claude" ;;
+  *) echo "pr-brain: PR_BRAIN_ENGINE must be agy or claude, not '$ENGINE'" >&2; exit 2 ;;
+esac
 BUDGET="${PR_BRAIN_BUDGET_USD:-5}"
+# agy engine. The reviewer runs as the same Linux user as the executor (the only one with an agy login) but in
+# its OWN clone, never the executor's workspace and never /opt/review (founderos-owned, not writable for it).
+AG_USER="${PR_BRAIN_AGY_USER:-antigravity}"
+REVIEW_WS_BASE="${PR_BRAIN_REVIEW_WORKSPACES:-/opt/agy-workspace/review}"
+SKILL_FILE="${PR_BRAIN_SKILL_FILE:-/opt/agent-rules/skills/pr-adversary/SKILL.md}"
+GITHUB_URL="${PR_BRAIN_GITHUB_URL:-https://github.com}"   # where review clones come from (tests point it at a local directory)
+TIMEOUT_SEC="${PR_BRAIN_TIMEOUT_SEC:-1800}"
+PROGRESS_POLL_SEC="${PR_BRAIN_PROGRESS_POLL_SEC:-20}"
 # shellcheck disable=SC2034  # read by deploy/lib/down-state.sh, which shellcheck does not follow
 DOWN_FILE="$HOME/.claude/pr-brain.down"
 FAIL_DIR="$HOME/.claude/pr-brain.failures"
@@ -111,22 +153,27 @@ notify_photo() {
     -F "caption=$2" || true
 }
 
-# Shared pause/resume + redaction helper (deploy/lib/down-state.sh). It is found next
-# to THIS script's own real path: ./lib on the VPS (~/bin/lib, next to ~/bin/pr-brain),
-# ../lib in the repo (deploy/lib, next to deploy/vps-daemons). deploy/sync-daemons.sh
-# ships it with the daemons; without it there is no pause state, so refuse to run.
+# Shared helpers (deploy/lib/), found next to THIS script's own real path: ./lib on the VPS (~/bin/lib, next to
+# ~/bin/pr-brain), ../lib in the repo (deploy/lib, next to deploy/vps-daemons). deploy/sync-daemons.sh ships them
+# with the daemons, and tests/unit/scripts/sync-daemons.test.ts fails when a file a daemon sources is not in that
+# copy list. Without them there is no pause state, so refuse to run.
+#   down-state.sh   one Telegram message per pause/resume + redact_secrets (shared with agent-dispatch)
+#   agy-failure.sh  classify_agy_failure: quota | auth | transient | unknown
+#   agy-run.sh      as_antigravity + agy_run: one agy turn, streamed live into ONE Telegram message
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-DOWN_STATE_LIB=""
-for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
-  [[ -f "$_lib_dir/down-state.sh" ]] && { DOWN_STATE_LIB="$_lib_dir/down-state.sh"; break; }
+for _lib in down-state.sh agy-failure.sh agy-run.sh; do
+  _lib_path=""
+  for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
+    [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
+  done
+  if [[ -z "$_lib_path" ]]; then
+    log "FATAL: lib/$_lib not found next to $SELF_PATH (looked in $SELF_DIR/lib and $SELF_DIR/../lib). deploy/sync-daemons.sh ships it with the daemons: re-run the Deploy workflow, or copy deploy/lib/ to ~/bin/lib/."
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  source "$_lib_path"
 done
-if [[ -z "$DOWN_STATE_LIB" ]]; then
-  log "FATAL: lib/down-state.sh not found next to $SELF_PATH (looked in $SELF_DIR/lib and $SELF_DIR/../lib). deploy/sync-daemons.sh ships it with the daemons: re-run the Deploy workflow, or copy deploy/lib/ to ~/bin/lib/."
-  exit 1
-fi
-# shellcheck source=deploy/lib/down-state.sh
-source "$DOWN_STATE_LIB"
 
 # ── A Claude token that outlives a login ─────────────────────────────────────────────
 # The interactive Claude login expires, and an expired login pauses every gate until
@@ -240,11 +287,18 @@ if [[ "$DRY_RUN" -eq 0 && "$LIST_ONLY" -eq 0 ]]; then
   trap 'rm -rf "$LOCK"' EXIT
 fi
 
-for dep in gh claude git; do
+# What the engine needs on PATH. For agy the binary itself lives in the antigravity user's ~/.local/bin and is
+# reached through sudo, so what is checked here is sudo and jq (the live view parses agy's stream with it); a
+# missing agy shows up as a classified failure of the preflight, with the reason on the founder's phone.
+case "$ENGINE" in
+  claude) _deps="gh claude git" ;;
+  *) _deps="gh git sudo jq curl" ;;
+esac
+for dep in $_deps; do
   command -v "$dep" >/dev/null 2>&1 || { log "FATAL: '$dep' not on PATH"; exit 1; }
 done
 gh auth status >/dev/null 2>&1 || { log "FATAL: gh is not authenticated"; exit 1; }
-load_oauth_token
+[[ "$ENGINE" == "claude" ]] && load_oauth_token
 
 # Keep the log bounded — this runs every 20 minutes forever.
 if [[ -f "$LOG" ]] && [[ "$(wc -l <"$LOG")" -gt 20000 ]]; then
@@ -261,6 +315,22 @@ claude_outage() {
   esac
 }
 
+# The same question for the agy engine, asked of the PLAIN-TEXT view of the failed run (agy-run.sh), by the
+# classifier agent-dispatch already trusts: quota -> limit, auth -> auth, anything else is not an outage (that
+# PR's gate broke, not the reviewer). It reads only error lines the CLI printed about itself, so a review that
+# merely discusses quotas cannot trip it.
+agy_outage() { # agy_outage TEXT_LOG_FILE
+  case "$(classify_agy_failure "$1")" in
+    quota) echo limit ;;
+    auth) echo auth ;;
+  esac
+}
+
+# What an outage looks like in the founder's pocket: the failing class and the line the CLI printed.
+outage_line() { # outage_line TEXT_LOG_FILE CLASS
+  agy_failure_line "$([[ "$2" == limit ]] && echo quota || echo auth)" "$1" | redact_secrets | head -n1 | cut -c1-160
+}
+
 # An outage is announced once going down and once coming back. 2026-09-26/27:
 # a weekly usage limit produced 72 "Gate FAILED" messages a day, one per tick,
 # because only an AUTH failure was recognised as an outage. The state machine
@@ -268,7 +338,16 @@ claude_outage() {
 # with agent-dispatch; what stays here is only the wording.
 enter_down() {
   local cls="$1" detail="$2" msg
-  log "Claude unavailable ($cls): $detail — sweep stopped, nothing dispatched"
+  log "${REVIEWER_NAME} unavailable ($cls): $detail — sweep stopped, nothing dispatched"
+  if [[ "$ENGINE" == "agy" ]]; then
+    case "$cls" in
+      auth) msg="🧠 pr-brain PAUSED on $(hostname -s): the Antigravity reviewer's login was rejected (${detail}). Fix: ssh founderos-vps, then 'sudo -u ${AG_USER} -i', run 'agy' once and sign in. One more message when it resumes — none until then." ;;
+      limit) msg="🧠 pr-brain PAUSED on $(hostname -s): the Antigravity reviewer's quota is used up (${detail}). Retrying silently when a PR is waiting; one more message when it resumes." ;;
+      *) msg="🧠 pr-brain PAUSED on $(hostname -s): the Antigravity reviewer's preflight failed (${detail}). Retrying silently when a PR is waiting; one more message when it resumes." ;;
+    esac
+    down_enter "$cls" "$detail" "$msg"
+    return 0
+  fi
   case "$cls" in
     auth)
       if [[ -n "$OAUTH_TOKEN" ]]; then
@@ -285,8 +364,39 @@ enter_down() {
 leave_down() {
   down_active || return 0
   local since; since=$(down_since)
-  log "Claude reachable again (paused since $since)"
-  down_leave "✅ pr-brain resumed on $(hostname -s) — Claude reachable again (paused since $since). Queued PRs are being gated now."
+  log "${REVIEWER_NAME} reachable again (paused since $since)"
+  down_leave "✅ pr-brain resumed on $(hostname -s) — ${REVIEWER_NAME} reachable again (paused since $since). Queued PRs are being gated now."
+}
+
+# ---------------------------------------------------- which model reviews (agy engine)
+#
+# REVIEW_MODELS is tried in order, and the EXECUTOR's model is never used, whatever the list says: a reviewer
+# that is the model that wrote the PR is not independent (ADR-046). A model whose quota is spent is skipped for
+# the rest of this sweep; the next tick asks again, because quota comes back.
+EXECUTOR_MODEL="${PR_BRAIN_EXECUTOR_MODEL:-$AGY_EXECUTOR_MODEL}"
+SPENT_MODELS=" "
+
+# Sets MODEL to the first candidate that is neither the executor's model nor spent. Returns 1 when there is none.
+select_review_model() {
+  local m
+  for m in $REVIEW_MODELS; do
+    [[ "$m" == "$EXECUTOR_MODEL" ]] && continue
+    [[ "$SPENT_MODELS" == *" $m "* ]] && continue
+    MODEL="$m"
+    return 0
+  done
+  return 1
+}
+
+# Why select_review_model found nothing, as the line the founder reads. LAST_QUOTA_LINE is the CLI's own words.
+no_review_model_detail() { # no_review_model_detail LAST_QUOTA_LINE
+  local spent="${SPENT_MODELS# }"
+  spent="${spent% }"
+  if [[ -z "$spent" ]]; then
+    printf 'no reviewer model is configured that differs from the executor model %s (PR_BRAIN_MODELS="%s")' "$EXECUTOR_MODEL" "$REVIEW_MODELS"
+  else
+    printf 'tried %s: %s' "${spent// /, }" "$1"
+  fi
 }
 
 # Preflight the model. Without this the sweep fails once per PR, twenty minutes
@@ -301,13 +411,49 @@ PREFLIGHT_OK=0
 preflight() {
   [[ "$PREFLIGHT_OK" -eq 1 ]] && return 0
   local preflight cls
+  if [[ "$ENGINE" == "agy" ]]; then
+    # One tiny agy turn in /tmp, in the plain text format (the answer is the word; a failure is the CLI's own error
+    # line). The classifier reads the same text it reads for a real gate, so an outage is named identically.
+    local pf_log detail quota_line=""; pf_log="$(mktemp /tmp/pr-brain-preflight-XXXXXX.log)"
+    while :; do
+      if ! select_review_model; then
+        # Nothing left to ask: every candidate is spent, or none may be used (it is the executor's own model).
+        [[ "$SPENT_MODELS" == " " ]] && cls=unknown || cls=limit
+        enter_down "$cls" "$(no_review_model_detail "$quota_line")"
+        rm -f "$pf_log"
+        exit 0
+      fi
+      as_antigravity 'exec </dev/null; cd /tmp && timeout 150 agy --new-project --model "$1" --print "reply with the single word ok" --print-timeout 120s --output-format text' "$MODEL" >"$pf_log" 2>&1
+      preflight=$(tail -n 3 "$pf_log")
+      grep -qiwE 'ok' <<<"$preflight" && break
+      cls=$(agy_outage "$pf_log")
+      # The CLI's own error line when the classifier found one; otherwise whatever the run printed last.
+      detail="$([[ -z "$cls" ]] || outage_line "$pf_log" "$cls")"
+      [[ -n "$detail" ]] || detail="$(printf '%s' "$preflight" | tr '\n' ' ' | cut -c1-160)"
+      detail="${detail#"${detail%%[![:space:]]*}"}"
+      if [[ "$cls" == limit ]]; then
+        # Quota is per model family: this model is spent, another may answer. A rejected login is not like that,
+        # every model shares it, so only quota moves on to the next candidate.
+        quota_line="$detail"
+        SPENT_MODELS+="$MODEL "
+        log "quota used up on $MODEL ($detail): trying the next reviewer model"
+        continue
+      fi
+      enter_down "${cls:-unknown}" "$detail"
+      rm -f "$pf_log"
+      exit 0
+    done
+    rm -f "$pf_log"
+    PREFLIGHT_OK=1
+    return 0
+  fi
   preflight=$(run_claude -p "reply with the single word ok" --model "$MODEL" \
                 --max-budget-usd 0.05 --output-format text </dev/null 2>&1 | tail -2)
   # "Exceeded USD budget" is the preflight's own $0.05 cap tripping — Claude Code's
   # context costs more than that before it answers. A billed call proves auth and
   # quota are fine, so it counts as reachable (2026-09-28: treating it as an
   # outage paused every gate).
-  if ! printf '%s' "$preflight" | grep -qiwE 'ok|Exceeded USD budget'; then
+  if ! grep -qiwE 'ok|Exceeded USD budget' <<<"$preflight"; then
     cls=$(claude_outage "$preflight")
     enter_down "${cls:-unknown}" "$(printf '%s' "$preflight" | tr '\n' ' ' | cut -c1-160)"
     exit 0
@@ -380,14 +526,18 @@ fi
 # The prompt is deliberately thin: the protocol lives in the pr-adversary skill
 # so that a fix to the protocol reaches every future sweep. A prompt that
 # restates the rules is a second copy that will drift.
+# What the browser gate's exit code means to the reviewer, in the words both engines' prompts use.
+app_evidence_line() { # app_evidence_line APP_RC
+  case "$1" in
+    0) echo "The browser gate ran on this branch and rendered the app's public pages with no blocking defects. Its evidence pack is a PR comment containing the marker <!-- app-evidence -->. READ IT — it names which screens were NOT covered, and those remain unverified." ;;
+    1) echo "The browser gate ran on this branch and found BLOCKING defects, or the app did not build/start at all. Its evidence pack is a PR comment containing the marker <!-- app-evidence -->. Treat that as a BLOCKER unless you can show the finding is the gate's own fault." ;;
+    *) echo "The browser gate did NOT run on this branch (no recipe for this repo, a diff it does not cover, or it failed to start). No page was rendered, so you may not claim any visual or runtime verification — say NOT VERIFIED and name this as the reason." ;;
+  esac
+}
+
 build_prompt() {
   local pr="$1" repo_name="$2" head="$3" app_rc="${4:-3}"
-  local app_line
-  case "$app_rc" in
-    0) app_line="The browser gate ran on this branch and rendered the app's public pages with no blocking defects. Its evidence pack is a PR comment containing the marker <!-- app-evidence -->. READ IT — it names which screens were NOT covered, and those remain unverified." ;;
-    1) app_line="The browser gate ran on this branch and found BLOCKING defects, or the app did not build/start at all. Its evidence pack is a PR comment containing the marker <!-- app-evidence -->. Treat that as a BLOCKER unless you can show the finding is the gate's own fault." ;;
-    *) app_line="The browser gate did NOT run on this branch (no recipe for this repo, a diff it does not cover, or it failed to start). No page was rendered, so you may not claim any visual or runtime verification — say NOT VERIFIED and name this as the reason." ;;
-  esac
+  local app_line; app_line="$(app_evidence_line "$app_rc")"
   cat <<EOF
 Act on pull request #${pr} in ${repo_name} as the brain in the Brain/Doer division.
 
@@ -422,6 +572,164 @@ unchanged. Use exactly this value — ${head} — not the output of 'git rev-par
 reflects your local checkout and will be wrong if you merged the base in locally without pushing:
   gh pr comment ${pr} --body "${MARKER_PREFIX} ${head} -->"
 EOF
+}
+
+# ------------------------------------------------------------- the agy engine
+#
+# The reviewer's own clone of the repository, owned by the antigravity user: /opt/agy-workspace/review/<repo>.
+# Not the executor's workspace (a reviewer must not see the executor's scratch state) and not /opt/review/<repo>
+# (founderos-owned and not writable for the antigravity user, so nothing could be built or tested there).
+# Persistent on purpose: node_modules and package caches survive between reviews, so a review is not an install.
+# Its PUSH url is disabled: fetching works, pushing cannot, so the reviewer cannot edit what it grades whatever a
+# prompt says. (`gh` calls go through the API and are not affected; that is how it posts its review.)
+REVIEW_DIR=""
+prepare_review_workspace() { # prepare_review_workspace SLUG NAME PR  -> sets REVIEW_DIR
+  local slug="$1" name="$2" pr="$3"
+  REVIEW_DIR="$REVIEW_WS_BASE/$name"
+  as_antigravity 'set -e
+    mkdir -p "$1"
+    if [ ! -d "$1/$2/.git" ]; then git clone --quiet "$5/$3.git" "$1/$2"; fi
+    cd "$1/$2"
+    git remote set-url origin "$5/$3.git"
+    git remote set-url --push origin "https://push-disabled.invalid/"
+    git fetch --quiet origin "+refs/pull/$4/head:refs/review/pr-$4" "+refs/heads/*:refs/remotes/origin/*"
+    git reset --hard --quiet
+    git clean -fdq
+    git checkout --quiet -B "review-pr-$4" "refs/review/pr-$4"' "$REVIEW_WS_BASE" "$name" "$slug" "$pr" "$GITHUB_URL"
+}
+
+# The pr-adversary skill without its YAML front matter. It is INLINED because the antigravity user has no
+# pr-adversary skill (only production-ready is linked for it), so "invoke the pr-adversary skill" sent the
+# 2026-10-02 reviews improvising a protocol. One copy: the file the Claude engine's skill points at.
+skill_text() {
+  [[ -r "$SKILL_FILE" ]] || return 1
+  awk 'NR == 1 && $0 == "---" { fm = 1; next } fm && $0 == "---" { fm = 0; next } !fm { print }' "$SKILL_FILE"
+}
+
+build_agy_prompt() { # build_agy_prompt PR SLUG HEAD APP_RC
+  local pr="$1" slug="$2" head="$3" app_rc="${4:-3}" skill
+  skill="$(skill_text)" || skill="(the protocol file $SKILL_FILE is not readable on this machine. Apply the adversarial gate from memory: re-run the project's gate yourself, hunt for false success, fabricated evidence, unwired code and out-of-scope changes, and reach a verdict.)"
+  cat <<EOF
+You are the independent reviewer (the "brain") in the Brain/Doer division, running as ${MODEL} in a fresh conversation.
+An executor, a DIFFERENT model in a different conversation, wrote pull request #${pr} in ${slug}. You have never seen
+its work and you owe it nothing: your job is to try to DISPROVE that it is done, then give a verdict.
+
+Your current directory is a clean checkout of this PR's head (${head}). It is yours to build and test in: install
+dependencies, run the gate, write scratch files. Do not run \`gh pr checkout\`.
+
+BROWSER EVIDENCE (already gathered for you, before you were started):
+$(app_evidence_line "$app_rc")
+
+THE PROTOCOL. Follow it exactly. It is the pr-adversary skill, inlined because this CLI cannot load it.
+
+${skill}
+
+HOW THIS RUN DIFFERS FROM THE PROTOCOL ABOVE. These rules win wherever they conflict with it.
+1. Verdict B (fix and push) is DISABLED. You cannot push to the PR branch (its push URL is disabled here), and a
+   reviewer that edits what it grades is not independent. Reach verdict A (clear it) or verdict C (request changes).
+   A defect you would have fixed becomes a finding with its concrete failure scenario.
+2. Merge nothing. Do not touch main, beta or any branch other than by reading it.
+3. Pass --repo ${slug} to every gh command.
+4. Post your review as ONE pull request comment: gh pr comment ${pr} --repo ${slug} --body "...". GitHub refuses a
+   formal approve or request-changes on your own account's PR; that is expected, a comment is the record.
+   Do NOT post a "brain-reviewed" marker comment: the runner posts it.
+5. You do not set the PR's draft/ready state either: the runner makes it match your verdict. Do not run gh pr ready.
+6. You are headless and unattended. Never end without a verdict.
+
+YOUR FINAL MESSAGE must end with exactly one of these two lines, and nothing after it:
+BRAIN-VERDICT: PASS
+BRAIN-VERDICT: FAIL
+PASS only when verdict A's conditions hold: the gate green in this session, no BLOCKER finding, and the outcome claim
+either verified or explicitly scoped as needing a real run. Anything else is FAIL.
+EOF
+}
+
+# Is HEAD already stamped on PR? The comments are read into a variable and THAT is searched. `gh … | grep -q` under
+# pipefail takes "grep stopped at the first hit and gh was killed by SIGPIPE" (status 141) for "no match": measured
+# at 125 of 773 tries on a loaded box (2026-10-02). It produced a second marker on a PR, and the same shape in the
+# sweep's skip check would have re-reviewed a PR whose thread outgrew the 64 KB pipe buffer, every sweep.
+head_is_stamped() { # head_is_stamped PR HEAD
+  local comments
+  comments="$(gh pr view "$1" --json comments --jq '[.comments[].body] | join("\n")' 2>/dev/null)" || return 1
+  grep -qF "$MARKER_PREFIX $2" <<<"$comments"
+}
+
+# One gate on the agy engine. Returns 0 when the reviewer reached a verdict AND the PR now agrees with it; anything
+# else is a failed attempt (the caller counts it, and the head is retried up to MAX_ATTEMPTS). OUT receives the
+# plain-text view of the run: the classifier reads it, and the daemon log keeps it.
+#
+# The model PROPOSES the verdict; this function ACTS on it. Making the PR ready or draft is what other code reads as
+# "cleared" and what the merge step acts on, so it is done here, from one parsed line, instead of trusting that a
+# model remembered to run the right gh command. A run with no verdict line is not a pass and not a fail: it did not
+# finish (a --print-timeout returns partial output with exit 0), so nothing is changed and nothing is stamped.
+run_agy_gate() { # run_agy_gate PR SLUG NAME HEAD APP_RC OUT
+  local pr="$1" slug="$2" name="$3" head="$4" app_rc="$5" out="$6" prompt_file rc verdict is_draft
+  if ! prepare_review_workspace "$slug" "$name" "$pr" >>"$LOG" 2>&1; then
+    printf 'Error: could not prepare the review workspace %s for %s#%s (see the log above)\n' "$REVIEW_WS_BASE/$name" "$name" "$pr" >"$out"
+    return 1
+  fi
+  prompt_file="$(mktemp /tmp/pr-brain-prompt-XXXXXX.txt)"
+  chmod 644 "$prompt_file"
+  build_agy_prompt "$pr" "$slug" "$head" "$app_rc" >"$prompt_file"
+  agy_run "Reviewing ${name}#${pr}" "$REVIEW_DIR" "$prompt_file" "$MODEL" "$TIMEOUT_SEC" "$out"
+  rc=$?
+  rm -f "$prompt_file"
+  if [[ "$rc" -ne 0 ]]; then
+    case "$(agy_outage "$out")" in
+      limit) agy_progress_outcome "⚠️ ${MODEL} has no quota left: $(outage_line "$out" limit)" ;;
+      auth) agy_progress_outcome "⚠️ The Antigravity login was rejected: $(outage_line "$out" auth)" ;;
+      *) agy_progress_outcome "⚠️ The review run failed (agy exit ${rc}). It is retried." ;;
+    esac
+    return "$rc"
+  fi
+
+  verdict="$(grep -a '^BRAIN-VERDICT:' "$out" | tail -n1 | tr -d '\r' | sed -E 's/^BRAIN-VERDICT:[[:space:]]*//; s/[[:space:]]+$//')"
+  case "$verdict" in
+    PASS|FAIL) ;;
+    *)
+      printf 'Error: the reviewer ended without a BRAIN-VERDICT line (PASS or FAIL), so there is no verdict to act on\n' >>"$out"
+      agy_progress_outcome "⚠️ The reviewer ended without a verdict (cut off or confused). Nothing was changed; it is retried."
+      return 1
+      ;;
+  esac
+
+  is_draft="$(gh pr view "$pr" --json isDraft --jq .isDraft 2>/dev/null)"
+  if [[ "$verdict" == "PASS" && "$is_draft" == "true" ]]; then
+    gh pr ready "$pr" >>"$LOG" 2>&1 || log "$name#$pr verdict PASS but 'gh pr ready' failed"
+  elif [[ "$verdict" == "FAIL" && "$is_draft" == "false" ]]; then
+    gh pr ready "$pr" --undo >>"$LOG" 2>&1 || log "$name#$pr verdict FAIL but 'gh pr ready --undo' failed"
+  fi
+  # The marker is what stops this head being gated again, and it is what agent-dispatch reads before it sends the
+  # executor back to a draft. It is posted once per head, and only after the PR agrees with the verdict.
+  if ! head_is_stamped "$pr" "$head"; then
+    gh pr comment "$pr" --body "${MARKER_PREFIX} ${head} -->" >>"$LOG" 2>&1 || log "$name#$pr could not post the reviewed marker"
+  fi
+  if [[ "$verdict" == "PASS" ]]; then
+    agy_progress_outcome "✅ BRAIN-VERDICT: PASS. Cleared: ready for merge."
+  else
+    agy_progress_outcome "↩️ BRAIN-VERDICT: FAIL. Changes requested: the PR stays a draft and goes back to Antigravity."
+  fi
+  return 0
+}
+
+# run_agy_gate, moving to the next reviewer model when this one's quota runs out DURING the review. Same arguments
+# and return value. Quota is per model family, so a wall on one says nothing about the next, and a review that
+# reached the wall has not failed: the model it ran on is spent for this sweep, and the same PR is reviewed again
+# at once. When no model is left the quota failure is returned as it is and the caller pauses the reviewer.
+run_agy_gate_any_model() { # run_agy_gate_any_model PR SLUG NAME HEAD APP_RC OUT
+  local pr="$1" name="$3" out="$6" rc spent line
+  while :; do
+    run_agy_gate "$@"
+    rc=$?
+    [[ "$rc" -ne 0 && "$(agy_outage "$out")" == limit ]] || return "$rc"
+    spent="$MODEL"
+    line="$(outage_line "$out" limit)"
+    SPENT_MODELS+="$spent "
+    select_review_model || return "$rc"
+    log "$name#$pr: quota used up on $spent ($line): reviewing again with $MODEL"
+    redact_secrets <"$out" >>"$LOG"
+    agy_progress_outcome "⚠️ ${spent} has no quota left. Reviewing again with ${MODEL}."
+  done
 }
 
 # ------------------------------------------------------- the app (browser) gate
@@ -570,6 +878,11 @@ merge_cleared() {
     "CLEARED"*) ;;
     *) return 0 ;;
   esac
+  if [[ "${PR_BRAIN_MERGE:-1}" == "0" ]]; then
+    merge_result="not attempted — PR_BRAIN_MERGE=0, a human merges"
+    log "$repo_name#$pr cleared — merge withheld (PR_BRAIN_MERGE=0)"
+    return 0
+  fi
   base=$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null)
   if [[ "$repo_owner" == "OplifyMessage" ]]; then
     # Employer repo. founderOS reviews, fixes, and marks ready — a human
@@ -719,7 +1032,7 @@ while IFS= read -r repo; do
     if [[ -z "$ONE_PR" ]]; then
       head="${head:-$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null)}"
       comments=$(gh pr view "$pr" --json comments --jq '[.comments[].body] | join("\n")' 2>/dev/null || true)
-      if printf '%s\n' "$comments" | grep -qF "$MARKER_PREFIX $head"; then
+      if grep -qF "$MARKER_PREFIX $head" <<<"$comments"; then
         log "$repo_name#$pr already gated at $head — skipped"
         continue
       fi
@@ -740,12 +1053,12 @@ while IFS= read -r repo; do
     fi
 
     # Nothing new but pr-brain's own fix commits and clean merges of the base:
-    # re-stamp, retry the merge if it was already cleared, spend no Claude session.
+    # re-stamp, retry the merge if it was already cleared, spend no review session.
     if [[ -z "$ONE_PR" && "$DRY_RUN" -eq 0 ]]; then
       last=$(last_gated_head "$comments")
       pr_base=$(gh pr view "$pr" --json baseRefName --jq .baseRefName 2>/dev/null || true)
       if only_our_commits_since "$last" "$head" "$pr_base" "$pr"; then
-        log "$repo_name#$pr head ${head:0:8}: only pr-brain's own commits / clean $pr_base merges since gated ${last:0:8} — verdict carried forward, no Claude session"
+        log "$repo_name#$pr head ${head:0:8}: only pr-brain's own commits / clean $pr_base merges since gated ${last:0:8} — verdict carried forward, no review session spent"
         gh pr comment "$pr" --body "${MARKER_PREFIX} ${head} -->
 Carried forward from \`${last:0:8}\`: every commit since is pr-brain's own fix or a clean merge of \`${pr_base}\`, so no second review was spent." >>"$LOG" 2>&1 || true
         verdict=$(pr_verdict "$pr")
@@ -773,9 +1086,16 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
       continue
     fi
 
-    # This PR needs a gate: the first time in this tick, prove Claude is reachable
+    # This PR needs a gate: the first time in this tick, prove the reviewer is reachable
     # before spending the browser gate's build on a review that cannot run.
     preflight
+
+    # The browser gate renders whatever is CHECKED OUT in $repo, and nothing here ever checked the PR out: it
+    # rendered the branch the previous review happened to leave behind, so the evidence pack on PR N could show
+    # the code of PR N-1 (and `--changed-from` diffed the wrong head). The checkout is this script's job, done
+    # before the app gate and for both engines. $repo was reset clean at the top of this repository's sweep.
+    gh pr checkout "$pr" --force >>"$LOG" 2>&1 \
+      || log "$repo_name#$pr could not check the PR head out for the browser gate — its evidence may describe another branch"
 
     # Browser evidence FIRST, so the reviewer finds it already on the PR. A
     # reviewer told to go and run the app is a reviewer who reports NOT VERIFIED
@@ -788,20 +1108,41 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
       *) log "$repo_name#$pr app gate: not applicable or did not run (rc=$app_rc)" ;;
     esac
 
-    log "gating $repo_name#$pr (head ${head:0:8}) model=$MODEL budget=\$$BUDGET"
     gate_out=$(mktemp "${TMPDIR:-/tmp}/pr-brain-gate.XXXXXX")
-    # </dev/null: this runs inside `while read … done <<<"$prs"`, and `claude -p`
-    # reads piped stdin into its prompt — without it the gate swallowed every
-    # remaining PR line, so one repo never had two PRs gated in one tick.
-    run_claude -p "$(build_prompt "$pr" "$repo_name" "$head" "$app_rc")" \
-        --model "$MODEL" \
-        --permission-mode acceptEdits \
-        --allowedTools "Bash Read Write Edit Grep Glob TodoWrite Skill" \
-        --max-budget-usd "$BUDGET" \
-        --output-format text </dev/null >"$gate_out" 2>&1
-    gate_rc=$?
-    cat "$gate_out" >>"$LOG"
+    if [[ "$ENGINE" == "agy" ]]; then
+      log "gating $repo_name#$pr (head ${head:0:8}) engine=agy model=$MODEL"
+      # </dev/null for the same reason as below: this runs inside `while read … done <<<"$prs"`.
+      run_agy_gate_any_model "$pr" "${repo_owner}/${repo_name}" "$repo_name" "$head" "$app_rc" "$gate_out" </dev/null
+      gate_rc=$?
+    else
+      log "gating $repo_name#$pr (head ${head:0:8}) model=$MODEL budget=\$$BUDGET"
+      # </dev/null: this runs inside `while read … done <<<"$prs"`, and `claude -p`
+      # reads piped stdin into its prompt — without it the gate swallowed every
+      # remaining PR line, so one repo never had two PRs gated in one tick.
+      run_claude -p "$(build_prompt "$pr" "$repo_name" "$head" "$app_rc")" \
+          --model "$MODEL" \
+          --permission-mode acceptEdits \
+          --allowedTools "Bash Read Write Edit Grep Glob TodoWrite Skill" \
+          --max-budget-usd "$BUDGET" \
+          --output-format text </dev/null >"$gate_out" 2>&1
+      gate_rc=$?
+    fi
+    # The review's own words go into the log, secrets masked: a reviewer that cats a config file to prove a
+    # point must not leave its contents in a file the whole box can read.
+    redact_secrets <"$gate_out" >>"$LOG"
     gate_tail=$(tail -n 3 "$gate_out")
+    # Is this an outage (everything would fail the same way) or just this PR's gate breaking? Asked of the
+    # run's own output, before it is deleted.
+    outage=""; outage_detail=""
+    if [[ $gate_rc -ne 0 ]]; then
+      if [[ "$ENGINE" == "agy" ]]; then
+        outage=$(agy_outage "$gate_out")
+        [[ -z "$outage" ]] || outage_detail="$(outage_line "$gate_out" "$outage")"
+      else
+        outage=$(claude_outage "$gate_tail")
+        [[ -z "$outage" ]] || outage_detail="$(printf '%s' "$gate_tail" | tr '\n' ' ' | cut -c1-160)"
+      fi
+    fi
     rm -f "$gate_out"
 
     if [[ $gate_rc -eq 0 ]]; then
@@ -816,10 +1157,9 @@ ${verdict}
 Merge: ${merge_result}
 $(gh pr view "$pr" --json url --jq .url 2>/dev/null)"
     else
-      outage=$(claude_outage "$gate_tail")
       if [[ -n "$outage" ]]; then
         # Not this PR's fault, and every remaining PR would fail the same way.
-        enter_down "$outage" "$(printf '%s' "$gate_tail" | tr '\n' ' ' | cut -c1-160)"
+        enter_down "$outage" "$outage_detail"
         sweep_outage=1
         break 2
       fi
@@ -838,7 +1178,7 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)"
   popd >/dev/null
 done <<<"$REPOS"
 
-# "Resumed" needs proof: only a tick that actually reached Claude may announce it.
+# "Resumed" needs proof: only a tick that actually reached the reviewer may announce it.
 # A tick with no PR waiting made no call, so it leaves the paused state as it is.
 [[ "$DRY_RUN" -eq 0 && "$sweep_outage" -eq 0 && "$PREFLIGHT_OK" -eq 1 ]] && leave_down
 log "sweep complete — $acted PR(s) acted on (max $MAX)"

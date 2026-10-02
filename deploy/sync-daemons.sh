@@ -11,6 +11,8 @@
 #   deploy/agent-dispatch           -> ~/bin/agent-dispatch
 #   deploy/vps-daemons/pr-brain     -> ~/bin/pr-brain
 #   deploy/onboard-repo.sh          -> ~/bin/onboard-repo.sh
+#   (crontab)                       a `* * * * * … agent-dispatch --kicked` line, copied from the agent-dispatch
+#                                   line already there (see ensure_kick_cron); no other crontab line is touched
 #
 # What it guarantees:
 #   * nothing is copied unless every source exists and passes `bash -n` (a syntax error must not ship);
@@ -24,8 +26,10 @@
 # Rollback: check out the previous commit's deploy/ in /opt/founderos and run this again, or revert
 # the merge and let the Deploy workflow re-sync.
 #
-# Env: SYNC_DAEMONS_DEST  where the daemons live (default $HOME/bin)
-#      SYNC_DAEMONS_SRC   the deploy/ directory to copy from (default: the one this script is in)
+# Env: SYNC_DAEMONS_DEST     where the daemons live (default $HOME/bin)
+#      SYNC_DAEMONS_SRC      the deploy/ directory to copy from (default: the one this script is in)
+#      SYNC_DAEMONS_CRONTAB  the crontab command to edit (default: `crontab`, and only when $HOME is this
+#                            user's own home: a script run against a scratch HOME must never edit the real crontab)
 
 set -uo pipefail
 
@@ -104,5 +108,57 @@ for name in agent-dispatch pr-brain onboard-repo.sh; do
   out="$(PR_BRAIN_OWNER=sync-daemons-smoke "$DEST/$name" --help 2>&1 </dev/null)" \
     || fail "$DEST/$name --help exited non-zero, so it cannot start (a missing helper?): $(printf '%s' "$out" | tail -n1 | cut -c1-200)"
 done
+
+# 5. The per-minute kick job. The bot cannot start agent-dispatch itself (it runs under systemd with
+# NoNewPrivileges, where every sudo fails: src/tools/dispatch-tick.ts has the story), so it leaves a note and a
+# cron job outside that sandbox turns the note into a tick: `agent-dispatch --kicked` every minute, silent and
+# free unless a note is there. Without this line a merge would change nothing (the reason this script exists),
+# so it is installed here, copied from the agent-dispatch line the crontab already has: same user, PATH and env
+# file, only the schedule and the flag differ. Idempotent, and no other line is ever touched: the new crontab is
+# read back and compared before this returns, and the old one is restored if it does not match.
+KICK_CRON_NOTE=""
+ensure_kick_cron() {
+  local cron current base wanted after line
+  if [[ -n "${SYNC_DAEMONS_CRONTAB:-}" ]]; then
+    cron="$SYNC_DAEMONS_CRONTAB"
+  else
+    local real_home
+    real_home="$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f6)"
+    if [[ -z "$real_home" || "$HOME" != "$real_home" ]]; then
+      KICK_CRON_NOTE="kick cron left alone (HOME=$HOME is not this user's own home)"
+      return 0
+    fi
+    cron=crontab
+  fi
+  if ! command -v "$cron" >/dev/null 2>&1; then
+    KICK_CRON_NOTE="WARNING: no crontab command: the per-minute kick job is not installed (cron's 15-minute tick still works)"
+    return 0
+  fi
+  current="$("$cron" -l 2>/dev/null)" || current=""
+  if grep -Eq '^[^#]*agent-dispatch[[:space:]]+--kicked' <<<"$current"; then
+    KICK_CRON_NOTE="kick cron already installed"
+    return 0
+  fi
+  base="$(printf '%s\n' "$current" | grep -E '^[^#]*[/ ]agent-dispatch([[:space:]]|$)' | grep -v -e '--kicked' | head -n1)"
+  if [[ -z "$base" ]]; then
+    KICK_CRON_NOTE="WARNING: no agent-dispatch line in the crontab to copy the environment from: the per-minute kick job is not installed (cron's 15-minute tick still works)"
+    return 0
+  fi
+  wanted="$(printf '%s\n' "$base" | sed -E 's#^[[:space:]]*([^[:space:]]+[[:space:]]+){5}#* * * * * #; s#(agent-dispatch)([[:space:]]|$)#\1 --kicked\2#')"
+  if ! printf '%s\n%s\n' "$current" "$wanted" | "$cron" - 2>/dev/null; then
+    fail "could not install the kick job into the crontab"
+  fi
+  after="$("$cron" -l 2>/dev/null)" || after=""
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    if ! grep -qxF -- "$line" <<<"$after"; then
+      printf '%s\n' "$current" | "$cron" - 2>/dev/null
+      fail "the crontab does not hold the line '$line' after the kick job was added; the old crontab was restored"
+    fi
+  done < <(printf '%s\n%s\n' "$current" "$wanted")
+  KICK_CRON_NOTE="kick cron installed: $wanted"
+}
+ensure_kick_cron
+[[ -z "$KICK_CRON_NOTE" ]] || echo "sync-daemons: $KICK_CRON_NOTE"
 
 echo "sync-daemons: $((${#PAIRS[@]})) files installed into $DEST ($LIB_COUNT libs first), every sha256 matches the checkout, every daemon starts"
