@@ -14,7 +14,7 @@ import type { JobApplication } from "../../../src/db/schema.js";
 const listLiveApplications = vi.fn();
 const listFollowupCandidates = vi.fn();
 const incrementFollowupsSent = vi.fn();
-const sendToChat = vi.fn();
+const sendToJobsChat = vi.fn();
 
 vi.mock("../../../src/db/job-queries.js", () => ({
   listLiveApplications: (...args: unknown[]) => listLiveApplications(...args),
@@ -22,7 +22,7 @@ vi.mock("../../../src/db/job-queries.js", () => ({
   incrementFollowupsSent: (...args: unknown[]) => incrementFollowupsSent(...args),
 }));
 vi.mock("../../../src/infra/telegram-send.js", () => ({
-  sendToChat: (...args: unknown[]) => sendToChat(...args),
+  sendToJobsChat: (...args: unknown[]) => sendToJobsChat(...args),
 }));
 
 const { formatPipelineDigest, formatFollowupNudge, runPipelineDigest, runFollowupSweep } = await import(
@@ -49,7 +49,7 @@ beforeEach(() => {
   listLiveApplications.mockReset();
   listFollowupCandidates.mockReset();
   incrementFollowupsSent.mockReset();
-  sendToChat.mockReset();
+  sendToJobsChat.mockReset();
 });
 
 describe("formatPipelineDigest", () => {
@@ -100,8 +100,8 @@ describe("runPipelineDigest", () => {
   it("reads listLiveApplications and sends the formatted digest", async () => {
     listLiveApplications.mockResolvedValueOnce([row()]).mockResolvedValue([]);
     await runPipelineDigest();
-    expect(sendToChat).toHaveBeenCalledTimes(1);
-    const [sentText] = (sendToChat.mock.calls[0] ?? []) as [string?];
+    expect(sendToJobsChat).toHaveBeenCalledTimes(1);
+    const [sentText] = (sendToJobsChat.mock.calls[0] ?? []) as [string?];
     expect(sentText).toContain("Ockto");
   });
 
@@ -112,8 +112,8 @@ describe("runPipelineDigest", () => {
     // pipeline fifteen silent hours on 2026-08-21.
     listLiveApplications.mockResolvedValue([]);
     await runPipelineDigest();
-    expect(sendToChat).toHaveBeenCalledTimes(1);
-    const [sentText] = (sendToChat.mock.calls[0] ?? []) as [string?];
+    expect(sendToJobsChat).toHaveBeenCalledTimes(1);
+    const [sentText] = (sendToJobsChat.mock.calls[0] ?? []) as [string?];
     expect(sentText).toContain("Nothing live right now");
   });
 });
@@ -121,19 +121,19 @@ describe("runPipelineDigest", () => {
 describe("runFollowupSweep", () => {
   it("sends a nudge and increments followups_sent for each candidate", async () => {
     listFollowupCandidates.mockResolvedValueOnce([row({ followups_sent: 0 }), row({ id: "2", followups_sent: 1 })]).mockResolvedValue([]);
-    sendToChat.mockResolvedValue(undefined);
+    sendToJobsChat.mockResolvedValue(undefined);
     incrementFollowupsSent.mockResolvedValue(undefined);
 
     const outcome = await runFollowupSweep(NOW);
 
     expect(outcome).toEqual({ sent: 2, failed: 0 });
-    expect(sendToChat).toHaveBeenCalledTimes(2);
+    expect(sendToJobsChat).toHaveBeenCalledTimes(2);
     expect(incrementFollowupsSent).toHaveBeenCalledTimes(2);
   });
 
   it("one failed send does not stop the rest, and does not increment for the failed row", async () => {
     listFollowupCandidates.mockResolvedValueOnce([row({ id: "a" }), row({ id: "b" })]).mockResolvedValue([]);
-    sendToChat.mockRejectedValueOnce(new Error("Telegram down")).mockResolvedValueOnce(undefined);
+    sendToJobsChat.mockRejectedValueOnce(new Error("Telegram down")).mockResolvedValueOnce(undefined);
 
     const outcome = await runFollowupSweep(NOW);
 
@@ -146,6 +146,6 @@ describe("runFollowupSweep", () => {
     listFollowupCandidates.mockResolvedValue([]);
     const outcome = await runFollowupSweep(NOW);
     expect(outcome).toEqual({ sent: 0, failed: 0 });
-    expect(sendToChat).not.toHaveBeenCalled();
+    expect(sendToJobsChat).not.toHaveBeenCalled();
   });
 });

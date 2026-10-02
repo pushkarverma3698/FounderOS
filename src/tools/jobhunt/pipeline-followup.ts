@@ -22,7 +22,8 @@ import {
   listFollowupCandidates,
   incrementFollowupsSent,
 } from "../../db/job-queries.js";
-import { sendToChat } from "../../infra/telegram-send.js";
+import { sendToJobsChat } from "../../infra/telegram-send.js";
+import { profileSelector } from "./profile-config.js";
 import { childLogger } from "../../infra/logger.js";
 
 const log = childLogger({ module: "tool:pipeline-followup" });
@@ -47,8 +48,10 @@ function daysSince(date: Date | null, now: Date): number {
  * ordering (stalest contact first) — see jobhunt-commands.ts for why brief_rank
  * cannot be reused here (it is cleared the moment a row is marked applied).
  */
-export function formatPipelineDigest(rows: readonly JobApplication[], now: Date = new Date(), profile?: { candidateName: string }): string {
+export function formatPipelineDigest(rows: readonly JobApplication[], now: Date = new Date(), profile?: { id: string; candidateName: string }): string {
   const nameLabel = profile ? ` (${esc(profile.candidateName)})` : "";
+  const sel = profile ? profileSelector(profile) : "";
+  const to = sel ? ` ${esc(sel)}` : "";
   if (rows.length === 0) {
     return `📭 <b>Pipeline review${nameLabel}</b>\n\nNothing live right now — every application has been marked replied, rejected, or is still in today's queue.`;
   }
@@ -57,7 +60,7 @@ export function formatPipelineDigest(rows: readonly JobApplication[], now: Date 
     const n = i + 1;
     const days = daysSince(row.last_contact_at ?? row.applied_at, now);
     const age = row.stage === "applied" ? ` — applied ${days}d ago` : ` — ${row.stage}`;
-    return `${n}. ${esc(row.company)} — ${esc(row.title)}${age}\n    <code>/replied ${n}</code> · <code>/rejected ${n}</code>`;
+    return `${n}. ${esc(row.company)} — ${esc(row.title)}${age}\n    <code>/replied${to} ${n}</code> · <code>/rejected${to} ${n}</code>`;
   });
 
   return (
@@ -88,17 +91,17 @@ export async function runPipelineDigest(): Promise<void> {
   for (const profile of profiles) {
     const rows = await listLiveApplications({ limit: 50, profileId: profile.id });
     if (rows.length === 0) continue;
-    await sendToChat(formatPipelineDigest(rows, new Date(), profile), "HTML");
+    await sendToJobsChat(formatPipelineDigest(rows, new Date(), profile), "HTML");
     spoke = true;
   }
 
   if (!spoke) {
-    await sendToChat(formatPipelineDigest([], new Date()), "HTML");
+    await sendToJobsChat(formatPipelineDigest([], new Date()), "HTML");
   }
 }
 
 /** Plain templated nudge — no LLM call. `nudgeNumber` only changes the tone, not the facts. */
-export function formatFollowupNudge(row: JobApplication, nudgeNumber: 1 | 2, now: Date = new Date(), profile?: { candidateName: string }): string {
+export function formatFollowupNudge(row: JobApplication, nudgeNumber: 1 | 2, now: Date = new Date(), profile?: { id: string; candidateName: string }): string {
   const days = daysSince(row.last_contact_at ?? row.applied_at, now);
   const heading = nudgeNumber === 1 ? "🔔 Follow-up due (day 7)" : "🔔 Second follow-up due (day 14)";
   const nameLabel = profile ? ` — for ${esc(profile.candidateName)}` : "";
@@ -108,7 +111,7 @@ export function formatFollowupNudge(row: JobApplication, nudgeNumber: 1 | 2, now
   return (
     `${heading}${nameLabel} — <b>${esc(row.company)}</b> (${esc(row.title)})\n\n` +
     `Draft to send:\n<i>${esc(draft)}</i>\n\n` +
-    `Then <code>/replied</code> if they answer, or leave it — day 14 gets one more nudge, then it goes quiet.`
+    `Then <code>/replied${profile && profileSelector(profile) ? ` ${esc(profileSelector(profile))}` : ""}</code> if they answer, or leave it — day 14 gets one more nudge, then it goes quiet.`
   );
 }
 
@@ -133,7 +136,7 @@ export async function runFollowupSweep(now: Date = new Date()): Promise<Followup
     for (const row of candidates) {
       const nudgeNumber: 1 | 2 = row.followups_sent === 0 ? 1 : 2;
       try {
-        await sendToChat(formatFollowupNudge(row, nudgeNumber, now, profile), "HTML");
+        await sendToJobsChat(formatFollowupNudge(row, nudgeNumber, now, profile), "HTML");
         await incrementFollowupsSent(row.id, row.tenant_id);
         sent += 1;
       } catch (err) {

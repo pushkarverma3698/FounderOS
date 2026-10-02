@@ -20,6 +20,7 @@
  */
 
 import { cmd, esc, link } from "./telegram-format.js";
+import { profileSelector } from "./profile-config.js";
 import { dedupeKey } from "./filters.js";
 import type { IngestLine } from "./ingest-batch.js";
 import type { FreeFunnel } from "./free-ingest.js";
@@ -91,12 +92,12 @@ export function splitByPublishFreshness(
  * command, because a line the founder cannot act on is a line he will learn to
  * skip.
  */
-export function formatBackfillLine(count: number, candidateName?: string): string {
+export function formatBackfillLine(count: number, candidateName?: string, selector = ""): string {
   const who = candidateName ? ` to ${esc(candidateName)}'s list` : " to your list";
   return (
     `+ ${count} older ${count === 1 ? "role" : "roles"} added${who} ` +
     `<i>(published more than ${PUBLISH_FRESH_HOURS}h ago, newly visible to us).</i>\n` +
-    `→ /jobs to see them ranked.`
+    `→ /jobs${selector ? ` ${esc(selector)}` : ""} to see them ranked.`
   );
 }
 
@@ -174,17 +175,17 @@ export function afterQuietSweep(
   arg3?: Date | FreeFunnel | null,
   arg4?: Date | string | null,
   arg5?: string | null,
-  arg6?: { candidateName: string } | null,
+  arg6?: { candidateName: string; id?: string } | null,
 ): { readonly next: HeartbeatState; readonly ping: string | null } {
   let funnel: FreeFunnel | null = null;
   let currentNow: Date;
   let sheetLink: string | null = null;
-  let profile: { candidateName: string } | null = null;
+  let profile: { candidateName: string; id?: string } | null = null;
 
   if (arg3 instanceof Date) {
     currentNow = arg3;
     sheetLink = (arg4 as string | null) ?? null;
-    profile = (arg5 as { candidateName: string } | null) ?? null;
+    profile = (arg5 as { candidateName: string; id?: string } | null) ?? null;
   } else {
     funnel = arg3 ?? null;
     currentNow = (arg4 as Date) ?? new Date();
@@ -263,7 +264,7 @@ export function afterSpokenSweep(now: Date): HeartbeatState {
 /**
  * The quiet-period ping.
  */
-export function formatAlivePing(state: HeartbeatState, sheetLink: string | null, profile?: { candidateName: string } | null): string {
+export function formatAlivePing(state: HeartbeatState, sheetLink: string | null, profile?: { candidateName: string; id?: string } | null): string {
   const sweeps = state.quietSweeps;
   const top = funnelClosingStage(state.lastFunnel);
   const dropInfo = top ? ` The last ${top.count.toLocaleString()} died at: ${top.reason}.` : "";
@@ -272,7 +273,7 @@ export function formatAlivePing(state: HeartbeatState, sheetLink: string | null,
     `✅ <b>Job lane alive${who}</b> — ${sweeps} sweep${sweeps === 1 ? "" : "s"} since the last update, ` +
     `${state.boardsPolled.toLocaleString()} board checks, nothing new that cleared screening.${dropInfo}` +
     (sheetLink ? `\n${sheetLink}` : "") +
-    `\n${NEXT_STEP_LINE}`
+    `\n${nextStepLine(profile?.id ? profileSelector({ id: profile.id, candidateName: profile.candidateName }) : "")}`
   );
 }
 
@@ -286,8 +287,10 @@ export function formatAlivePing(state: HeartbeatState, sheetLink: string | null,
  * days of logs. An alert whose call to action is a sentence someone has to
  * rephrase is an alert that ends in nothing.
  */
-export const NEXT_STEP_LINE =
-  "→ /jobs for the ranked list · /csv for the file · /draft &lt;n&gt; to apply";
+export function nextStepLine(selector = ""): string {
+  const s = selector ? ` ${esc(selector)}` : "";
+  return `→ /jobs${s} for the ranked list · /csv${s} for the file · /draft${s} &lt;n&gt; to apply`;
+}
 
 /**
  * The alert for rows that are BOTH new and worth acting on.
@@ -314,6 +317,8 @@ export interface NewRowsAlertOptions {
    * ping for them would double the sweep's notification count.
    */
   readonly backfill?: number;
+  /** `profileSelector(profile)`: printed in every suggested command, empty for the default profile. */
+  readonly selector?: string;
   /**
    * `dedupeKey(company, title)` → the row's persisted `brief_rank`.
    *
@@ -340,6 +345,7 @@ export function formatNewRowsAlert(
   opts: NewRowsAlertOptions = {},
 ): string {
   const named = rows.slice(0, NEW_ROWS_NAMED);
+  const sel = opts.selector ? ` ${opts.selector}` : "";
   // The mark is the row's own status, so a flagged company is visibly a question
   // rather than a recommendation. The title is the LINK and `/draft N` follows
   // it, so the ping → application path is one tap instead of four steps through
@@ -348,7 +354,7 @@ export function formatNewRowsAlert(
     .map((r) => {
       const mark = r.outcome === "pass" ? "✅" : "❓";
       const rank = opts.ranks?.get(dedupeKey(r.company, r.title));
-      const action = rank === undefined ? "" : ` · ${cmd(`/draft ${rank}`)}`;
+      const action = rank === undefined ? "" : ` · ${cmd(`/draft${sel} ${rank}`)}`;
       return `${mark} <b>${esc(r.company)}</b> — ${link(r.title, r.url ?? null)}${action}`;
     })
     .join("\n");
@@ -380,7 +386,7 @@ export function formatNewRowsAlert(
     rest +
     backfill +
     (sheetLink ? `\n\n${sheetLink}` : "") +
-    `\n\n${NEXT_STEP_LINE}`
+    `\n\n${nextStepLine(opts.selector)}`
   );
 }
 

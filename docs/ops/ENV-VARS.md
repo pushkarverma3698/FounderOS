@@ -48,6 +48,7 @@ the model/runtime keys intentionally differ.
 | Key | Purpose |
 |---|---|
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | the bot + founder chat |
+| `JOBHUNT_CHAT_ID` | chat for every job-lane message (sweep alerts, digest, follow-ups, the 09:30 check); unset = the founder chat. Lives on the box, preserved across deploys by `apply-prod-env-overrides.sh`. If Telegram refuses it, job messages fall back to the founder chat with a notice |
 | `TELEGRAM_TESTER_API_ID` / `_API_HASH` / `_SESSION` | MTProto QA harness (founder-as-user) |
 
 ## Data / infra
