@@ -14,7 +14,7 @@ const sweepBoards = vi.fn();
 const sweepAggregators = vi.fn();
 const runFreeIngest = vi.fn();
 const buildDailyBrief = vi.fn();
-const sendToChat = vi.fn(async (_message: string) => undefined);
+const sendToJobsChat = vi.fn(async (_message: string) => undefined);
 // Hoisted to module scope (rather than inlined in the factories below) so a test
 // can make either of them REJECT. Both sit in `runFreeSweepForProfile` after the
 // guarded region, which is exactly where the 2026-09-08 defect lived.
@@ -49,7 +49,7 @@ vi.mock("../../../src/tools/jobhunt/free-boards.js", async (orig) => ({
 }));
 vi.mock("../../../src/tools/jobhunt/free-ingest.js", () => ({ runFreeIngest }));
 vi.mock("../../../src/tools/jobhunt/daily-brief.js", () => ({ buildDailyBrief }));
-vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToChat }));
+vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToJobsChat }));
 vi.mock("../../../src/tools/jobhunt/sheet-export.js", () => ({ exportJobSheet }));
 
 vi.mock("../../../src/db/job-heartbeat-queries.js", () => ({
@@ -142,8 +142,8 @@ describe("runFreeSweep", () => {
    * REGRESSION, 2026-09-08. The test above asserted the right property and
    * exercised the ONE failure site that was already guarded: `runFreeSweepForProfile`
    * wraps `runFreeIngest` in its own try/catch, so injecting there proved nothing
-   * about the loop. `publishSheet`, `sendToChat` and `saveLaneHeartbeat` were not
-   * guarded anywhere, and `sendToChat` rethrows by design (unlike `sendStatusText`,
+   * about the loop. `publishSheet`, `sendToJobsChat` and `saveLaneHeartbeat` were not
+   * guarded anywhere, and `sendToJobsChat` rethrows by design (unlike `sendStatusText`,
    * which logs and swallows).
    *
    * Pushkar is first in `listProfiles()`, so one Telegram failure on his alert
@@ -152,7 +152,7 @@ describe("runFreeSweep", () => {
    * into the cron's `.catch()` — one log line, whole tick gone.
    */
   it("keeps running the other profiles when the FIRST profile's Telegram send throws", async () => {
-    sendToChat.mockRejectedValueOnce(new Error("Bad Request: message is too long"));
+    sendToJobsChat.mockRejectedValueOnce(new Error("Bad Request: message is too long"));
     await expect(runFreeSweep()).resolves.toBeUndefined();
     expect(runFreeIngest).toHaveBeenCalledTimes(listProfiles().length);
   });
@@ -162,7 +162,7 @@ describe("runFreeSweep", () => {
     // after a failed send would claim a message the founder never received and
     // buy the lane another three hours of silence. The honest state is the one
     // it already had: unspoken, so the next quiet roll-up still pings.
-    sendToChat.mockRejectedValueOnce(new Error("429: Too Many Requests"));
+    sendToJobsChat.mockRejectedValueOnce(new Error("429: Too Many Requests"));
     await runFreeSweep();
 
     const [first, ...rest] = listProfiles().map((p) => p.id);
@@ -188,7 +188,7 @@ describe("runFreeSweep", () => {
 
   it("names the candidate in the alert once there is more than one", async () => {
     await runFreeSweep();
-    const messages = sendToChat.mock.calls.map((c) => String(c[0] ?? ""));
+    const messages = sendToJobsChat.mock.calls.map((c) => String(c[0] ?? ""));
     const named = messages.filter((m) => m.includes("new role") && m.includes(" for "));
     expect(named.length).toBeGreaterThan(0);
   });

@@ -19,8 +19,8 @@ import { join } from "node:path";
 const mockSchedule = vi.fn();
 vi.mock("node-cron", () => ({ default: { schedule: mockSchedule }, schedule: mockSchedule }));
 
-const sendToChat = vi.fn(async (_text: string, _mode?: string) => {});
-vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToChat }));
+const sendToJobsChat = vi.fn(async (_text: string, _mode?: string) => {});
+vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToJobsChat }));
 
 // GitHub: an Octokit whose issue list honours the `state` filter and remembers what is created.
 const filed: Array<{ title: string; body: string; labels: string[]; state: string }> = [];
@@ -66,7 +66,7 @@ async function fireOnce(): Promise<void> {
   startJobhuntFindingsCron();
   const [, callback] = mockSchedule.mock.calls[0] as [string, () => void, unknown];
   callback();
-  await vi.waitFor(() => expect(sendToChat).toHaveBeenCalled());
+  await vi.waitFor(() => expect(sendToJobsChat).toHaveBeenCalled());
 }
 
 beforeEach(() => {
@@ -115,8 +115,8 @@ describe("firing the callback, end to end", () => {
     expect(createIssue).toHaveBeenCalledTimes(1);
     expect(filed[0]!.labels).toEqual(["evolution:auto", "agent:ready"]);
     expect(filed[0]!.title).toContain("adapter-silent: ashby");
-    expect(sendToChat).toHaveBeenCalledTimes(1);
-    const [text, mode] = sendToChat.mock.calls[0]!;
+    expect(sendToJobsChat).toHaveBeenCalledTimes(1);
+    const [text, mode] = sendToJobsChat.mock.calls[0]!;
     expect(mode).toBe("HTML");
     expect(text).toContain("Jobhunt check: filed #700");
     expect(modelAccess).not.toHaveBeenCalled();
@@ -124,13 +124,13 @@ describe("firing the callback, end to end", () => {
 
   it("the next morning finds its own issue in GitHub and files nothing more (dedupe across the real gateway)", async () => {
     await fireOnce();
-    sendToChat.mockClear();
+    sendToJobsChat.mockClear();
 
     await fireOnce();
 
     expect(createIssue).toHaveBeenCalledTimes(1);
     expect(listForRepo).toHaveBeenCalledWith(expect.objectContaining({ state: "all", labels: "evolution:auto" }));
-    expect(sendToChat.mock.calls[0]![0]).toContain("Jobhunt check: nothing new");
+    expect(sendToJobsChat.mock.calls[0]![0]).toContain("Jobhunt check: nothing new");
   });
 
   it("does not run at all while FounderOS is halted, but still says so", async () => {
@@ -140,12 +140,12 @@ describe("firing the callback, end to end", () => {
     await fireOnce();
 
     expect(createIssue).not.toHaveBeenCalled();
-    expect(sendToChat.mock.calls[0]![0]).toMatch(/Jobhunt check: skipped/);
-    expect(sendToChat.mock.calls[0]![0]).toContain("deploying");
+    expect(sendToJobsChat.mock.calls[0]![0]).toMatch(/Jobhunt check: skipped/);
+    expect(sendToJobsChat.mock.calls[0]![0]).toContain("deploying");
   });
 
   it("a Telegram outage never becomes an unhandled rejection in the bot process", async () => {
-    sendToChat.mockRejectedValueOnce(new Error("429 Too Many Requests"));
+    sendToJobsChat.mockRejectedValueOnce(new Error("429 Too Many Requests"));
 
     await fireOnce();
     // Let the callback's promise chain settle; vitest fails the run on any unhandled rejection.

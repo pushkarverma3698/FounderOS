@@ -28,7 +28,7 @@
  */
 
 import { childLogger } from "../../infra/logger.js";
-import { sendToChat } from "../../infra/telegram-send.js";
+import { sendToJobsChat } from "../../infra/telegram-send.js";
 import { esc } from "./telegram-format.js";
 import { DEFAULT_PROFILE_ID, type JobSearchProfile } from "./profile-config.js";
 import {
@@ -135,7 +135,7 @@ export async function runFreeSweepForProfile(
     // outage the three that happen to sort first say nothing about the cause, and
     // "recruitee HTTP 429 ×36" says all of it in five words.
     const { summariseFailures } = await import("./free-ats-source.js");
-    await sendToChat(
+    await sendToJobsChat(
       esc(
         `⚠ Free job lane failed for ${profile.candidateName} — nothing was fetched this sweep.\n` +
           summariseFailures(result.failures),
@@ -180,7 +180,7 @@ export async function runFreeSweepForProfile(
       profile
     );
     await saveLaneHeartbeat(profile.id, next);
-    if (ping !== null) await sendToChat(ping);
+    if (ping !== null) await sendToJobsChat(ping);
     return;
   }
 
@@ -242,7 +242,7 @@ export async function runFreeSweepForProfile(
         })
       : formatBackfillLine(backfill.length, profile.candidateName);
   try {
-    await sendToChat(message);
+    await sendToJobsChat(message);
   } catch (err) {
     log.error(
       {

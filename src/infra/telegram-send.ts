@@ -73,6 +73,75 @@ export async function sendToChat(
 }
 
 /**
+ * Where job-lane messages go: the family jobs group when JOBHUNT_CHAT_ID is set, else the founder's chat.
+ * Budget alerts, approvals and dispatch notices keep using `sendToChat`, so the group carries jobs only.
+ * Read from the environment at call time, like the job lane's other optional knobs (JOBHUNT_MONTHLY_CAP_USD in
+ * spend-gate.ts): optional, with a safe default, and src/core/config.ts is at its line budget.
+ */
+export function jobsChatId(): string {
+  return process.env["JOBHUNT_CHAT_ID"]?.trim() || defaultChatId();
+}
+
+interface TelegramRefusal {
+  readonly error_code?: unknown;
+  readonly description?: unknown;
+  readonly parameters?: { readonly migrate_to_chat_id?: unknown };
+}
+
+/** 400 refusals that say the chat itself is gone or closed to the bot, as opposed to a bad message. */
+const CHAT_GONE = /chat not found|upgraded to a supergroup|rights to send|chat_write_forbidden|chat was deactivated/i;
+
+/**
+ * Did Telegram refuse because THE CHAT cannot be reached (the bot was removed, blocked or muted, or the
+ * group was upgraded to a supergroup and got a new id)? A bad message (parse error, too long), a rate
+ * limit and a network failure are not that, and are the caller's to handle.
+ */
+export function isChatUnreachable(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const { error_code: code, description } = err as TelegramRefusal;
+  if (code === 403) return true;
+  return code === 400 && typeof description === "string" && CHAT_GONE.test(description);
+}
+
+function unreachableNotice(err: unknown): string {
+  const { description, parameters } = err as TelegramRefusal;
+  const reason = typeof description === "string" ? description : err instanceof Error ? err.message : String(err);
+  const moved = parameters?.migrate_to_chat_id;
+  return (
+    `⚠ I could not post to the jobs group (${reason}). Job messages are coming here until that is fixed.` +
+    (moved !== undefined ? ` Telegram gave the group a new id: set JOBHUNT_CHAT_ID=${String(moved)} on the server and restart.` : "")
+  );
+}
+
+/**
+ * Send a job-lane message to the jobs chat (JOBHUNT_CHAT_ID), the way `sendToChat` sends to the founder.
+ *
+ * When Telegram says that chat cannot be reached, the message goes to the founder's chat instead, after a
+ * notice naming the cause. Without that, a broken group looks exactly like a quiet job market: the sweeps
+ * log the failure and nobody reads the log. Every other failure reaches the caller unchanged, so the
+ * callers' send-first, record-on-success handling is as it was.
+ */
+export async function sendToJobsChat(
+  text: string,
+  parseMode: "HTML" | "Markdown" = "HTML",
+): Promise<void> {
+  const target = jobsChatId();
+  try {
+    await api().sendMessage(target, text, { parse_mode: parseMode });
+  } catch (err) {
+    if (target === defaultChatId() || !isChatUnreachable(err)) throw err;
+    log.error(
+      { target, err: err instanceof Error ? err.message : String(err) },
+      "Jobs chat unreachable — sending this job message to the founder's chat",
+    );
+    // Two sends, the notice as plain text: the reason comes from Telegram and must not be able to break
+    // an HTML parse, and the job message keeps its own formatting.
+    await api().sendMessage(defaultChatId(), unreachableNotice(err));
+    await api().sendMessage(defaultChatId(), text, { parse_mode: parseMode });
+  }
+}
+
+/**
  * `sendToChat` with an inline keyboard (the goal standup's "Plan next step" buttons). Same api-only
  * client, so it still cannot conflict with the gateway's poll loop. No `reply_markup` is sent for an
  * empty keyboard. A delivery failure reaches the caller: the standup decides whether to retry.

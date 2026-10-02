@@ -126,6 +126,13 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     expect(valueOf(rendered, "TELEGRAM_OWNER_USER_ID")).toBe("4242");
   });
 
+  it("preserves the on-box JOBHUNT_CHAT_ID — job messages keep going to the family jobs group after every deploy", () => {
+    // 2026-10-02: a chat id stays out of the public repo and the snapshot, like the access lists above.
+    // Without preservation the next deploy silently moves every job message back to the founder's private chat.
+    const rendered = render("JOBHUNT_CHAT_ID=-100333\n", SNAPSHOT_BASE);
+    expect(valueOf(rendered, "JOBHUNT_CHAT_ID")).toBe("-100333");
+  });
+
   it("preserves the on-box AGENT_DISPATCH_BIN — a filed issue starts in seconds, not at the next cron tick", () => {
     const rendered = render("AGENT_DISPATCH_BIN=/home/founderos/bin/agent-dispatch\n", SNAPSHOT_BASE);
     expect(valueOf(rendered, "AGENT_DISPATCH_BIN")).toBe("/home/founderos/bin/agent-dispatch");

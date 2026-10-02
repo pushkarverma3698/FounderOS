@@ -22,7 +22,7 @@ import {
   listFollowupCandidates,
   incrementFollowupsSent,
 } from "../../db/job-queries.js";
-import { sendToChat } from "../../infra/telegram-send.js";
+import { sendToJobsChat } from "../../infra/telegram-send.js";
 import { childLogger } from "../../infra/logger.js";
 
 const log = childLogger({ module: "tool:pipeline-followup" });
@@ -88,12 +88,12 @@ export async function runPipelineDigest(): Promise<void> {
   for (const profile of profiles) {
     const rows = await listLiveApplications({ limit: 50, profileId: profile.id });
     if (rows.length === 0) continue;
-    await sendToChat(formatPipelineDigest(rows, new Date(), profile), "HTML");
+    await sendToJobsChat(formatPipelineDigest(rows, new Date(), profile), "HTML");
     spoke = true;
   }
 
   if (!spoke) {
-    await sendToChat(formatPipelineDigest([], new Date()), "HTML");
+    await sendToJobsChat(formatPipelineDigest([], new Date()), "HTML");
   }
 }
 
@@ -133,7 +133,7 @@ export async function runFollowupSweep(now: Date = new Date()): Promise<Followup
     for (const row of candidates) {
       const nudgeNumber: 1 | 2 = row.followups_sent === 0 ? 1 : 2;
       try {
-        await sendToChat(formatFollowupNudge(row, nudgeNumber, now, profile), "HTML");
+        await sendToJobsChat(formatFollowupNudge(row, nudgeNumber, now, profile), "HTML");
         await incrementFollowupsSent(row.id, row.tenant_id);
         sent += 1;
       } catch (err) {
