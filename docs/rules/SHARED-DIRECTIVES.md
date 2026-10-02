@@ -11,7 +11,7 @@ We are building a system designed to decisively outcompete the market. You must 
 
 ## Content Generation (No AI Slop)
 
-**Mandatory Skill Usage:** Whenever you are generating, preparing, or drafting any content intended for public platforms (e.g., comments, posts, articles, social media, emails), you MUST use and strictly follow the `no-ai-slop` skill located at `/Users/pushkarverma/Projects/githubtools/no-ai-slop/SKILL.md`. 
+**Mandatory Skill Usage:** Whenever you are generating, preparing, or drafting any content intended for public platforms (e.g., comments, posts, articles, social media, emails), use the `no-ai-slop` skill (installed on the laptop as `~/.claude/skills/no-ai-slop`, source `~/Projects/GithubTools/no-ai-slop`). 
 **Why:** Nothing we publish on our platforms should look like AI-generated content. You must ensure all outputs are highly authentic, human-like, and completely free of typical AI "slop" (e.g., overly formal tone, unnecessary emojis, generic corporate speak, predictable structures).
 
 ## Implementation Plans & Memory
