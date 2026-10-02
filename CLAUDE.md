@@ -154,7 +154,7 @@ Temperature 0; `WORKER_AGENT_MODEL` splits planner from workers. Budget caps enf
 retriable; 404 → model fallback; 401/403 → fail loud.
 
 
-## Prod VPS access (full root — for fixing prod directly)
+## Prod VPS access (full root — for operating prod directly)
 Claude Code has **full unattended root control of the production VPS** via its
 Bash tool. Use it to diagnose and fix prod (logs, service restarts, DB/containers,
 configs, OS updates).
@@ -165,6 +165,9 @@ configs, OS updates).
   prefix privileged commands with `sudo -n …`.
 - **Layout:** project at `/opt/founderos`; `founderos.service` (systemd) runs the
   bot; `founderos-ollama` + `founderos-postgres` run under docker.
+- **Code changes go through PR → deploy, never by hand.** Deploy writes `/opt/founderos`:
+  never edit files or `git checkout` there. Review checkouts go in `/opt/review/<repo>`.
+  Root access is for operating the box (logs, restarts, containers, DB, configs, OS).
 - **Prereq if unavailable:** the SSH alias + key are per-machine. If
   `ssh founderos-vps` fails from a fresh machine/account, the operator must add the
   `founderos-vps` block to `~/.ssh/config` (see `deploy/ssh-config.founderos-vps.example`
