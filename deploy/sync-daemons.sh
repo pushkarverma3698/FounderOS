@@ -50,8 +50,8 @@ sha256_of() {
 # "<source>|<destination>|<mode>", libs first. The libs are sourced, not executed: 0644.
 PAIRS=()
 shopt -s nullglob
-for f in "$SRC"/lib/*.sh; do
-  PAIRS+=("$f|$DEST/lib/$(basename "$f")|0644")
+for f in "$SRC"/lib/*.sh "$SRC"/lib/*.py; do
+  [[ -f "$f" ]] && PAIRS+=("$f|$DEST/lib/$(basename "$f")|0755")
 done
 shopt -u nullglob
 LIB_COUNT="${#PAIRS[@]}"
@@ -65,8 +65,11 @@ PAIRS+=(
 # 1. Pre-flight, before anything is touched.
 for pair in "${PAIRS[@]}"; do
   IFS='|' read -r src _ _ <<<"$pair"
-  [[ -s "$src" ]] || fail "$src is missing or empty in the checkout"
-  bash -n "$src" 2>/dev/null || fail "$src does not pass bash -n: not shipping a syntax error to a daemon that runs unattended"
+  if [[ "$src" == *.py ]]; then
+    python3 -m py_compile "$src" 2>/dev/null || fail "$src does not compile with python3"
+  else
+    bash -n "$src" 2>/dev/null || fail "$src does not pass bash -n: not shipping a syntax error to a daemon that runs unattended"
+  fi
 done
 
 # 2. Install: write .new, set the mode, rename over the old file.

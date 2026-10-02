@@ -327,10 +327,13 @@ progress_delete() {
 
 progress_telegram_text_from_log() {
   local log_file="$1"
-  local last_lines
-  last_lines=$(tail -c 4000 "$log_file" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 5 | redact_secrets | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
-  [[ -z "$last_lines" ]] && return 0
-  printf "<i>Antigravity is thinking/acting...</i>\n\n<b>Recent Activity:</b>\n<code>%s</code>" "$last_lines"
+  local py_helper=""
+  for d in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
+    [[ -f "$d/format-progress.py" ]] && { py_helper="$d/format-progress.py"; break; }
+  done
+  if [[ -n "$py_helper" ]]; then
+    python3 "$py_helper" "$log_file" 2>/dev/null
+  fi
 }
 
 progress_label_from_log() {
@@ -368,21 +371,20 @@ run_agy_with_progress() {
   # $workspace and $prompt_file stay positional: same injection-safety discipline, and they
   # are not secrets. `exec </dev/null` after the read gives agy the stdin it always had
   # (a backgrounded job's stdin is /dev/null), so it cannot wait on a pipe.
-  as_antigravity 'IFS= read -r GEMINI_API_KEY; export GEMINI_API_KEY; exec </dev/null; cd "$1" && timeout '"${TIMEOUT_SEC}"' stdbuf -oL -eL agy --new-project --model '"${AGY_MODEL}"' --print "$(cat "$2")" --print-timeout '"$((TIMEOUT_SEC - 120))"'s --dangerously-skip-permissions --output-format text' \
+  as_antigravity 'IFS= read -r GEMINI_API_KEY; export GEMINI_API_KEY; exec </dev/null; cd "$1" && timeout '"${TIMEOUT_SEC}"' stdbuf -oL -eL agy --new-project --model '"${AGY_MODEL}"' --print "$(cat "$2")" --print-timeout '"$((TIMEOUT_SEC - 120))"'s --dangerously-skip-permissions --output-format stream-json' \
     "$workspace" "$prompt_file" <<<"$GEMINI_API_KEY" >"$agy_log" 2>&1 &
   local agy_pid=$!
 
   local placeholder_id; placeholder_id=$(progress_send "<b>🔧 ${label_prefix}</b>: starting…")
   log "progress: placeholder sent (id=${placeholder_id:-FAILED}) for ${label_prefix}"
-  local last_label=""
+  local last_telegram_text=""
   while kill -0 "$agy_pid" 2>/dev/null; do
     sleep "$PROGRESS_POLL_SEC"
-    local label; label=$(progress_label_from_log "$agy_log")
     local telegram_text; telegram_text=$(progress_telegram_text_from_log "$agy_log")
-    if [[ -n "$label" && "$label" != "$last_label" ]]; then
+    if [[ -n "$telegram_text" && "$telegram_text" != "$last_telegram_text" ]]; then
       progress_edit "$placeholder_id" "<b>🔧 ${label_prefix}</b>\n\n${telegram_text}"
-      log "progress: placeholder ${placeholder_id} -> ${label}"
-      last_label="$label"
+      log "progress: placeholder ${placeholder_id} live update sent"
+      last_telegram_text="$telegram_text"
     fi
   done
   wait "$agy_pid"
