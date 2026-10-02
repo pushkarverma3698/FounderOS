@@ -1,7 +1,7 @@
 /**
  * FounderOS — /task
  * =================
- * The registered entry point to the Claude↔Antigravity loop:
+ * The registered entry point to the Antigravity loop (executor + independent reviewer):
  *
  *   /task fix the flaky CSV export
  *   /task repo:hulda fix the hero layout
@@ -72,7 +72,7 @@ const USAGE = [
   "(/task repo:hulda <work> still skips the question if you prefer typing.)",
   "",
   "I expand this into a full brief, show you an approval card, then file it as an",
-  "agent:ready issue. Antigravity implements it and Claude reviews the PR.",
+  "agent:ready issue. Antigravity implements it and an independent reviewer (pr-brain) reviews the PR.",
 ].join("\n");
 
 export interface TaskArgs {
@@ -171,9 +171,17 @@ export function buildTaskInstruction(args: TaskArgs): string {
     ``,
     `Expand it into a complete, self-contained brief conforming to the agent-task template:`,
     `a title with a conventional-commit prefix, what "done" means to an executor with no`,
-    `prior context, the exact files or subsystem in scope, the expected behaviour, and`,
-    `verification commands that are real for THAT repository.`,
+    `prior context, the subsystem in scope, the expected behaviour, and verification`,
+    `commands that are real for THAT repository.`,
     ``,
+    `You have not seen this repository, and Antigravity reads all of it: describe the scope in`,
+    `plain words and name a file path ONLY if you saw it in a tool result. A guessed path is`,
+    `worse than none. Pass the founder's request above, unchanged, as founder_request: it is`,
+    `filed as the evidence, so a request with no log or error attached is still a complete brief.`,
+    `If he asked for an audit, an explanation or research, the deliverable is a report committed`,
+    `under docs/ (list it in new_files), not code.`,
+    ``,
+    `If the tool rejects the brief, fix exactly what it names and call it again in this turn.`,
     `Do not implement the work yourself and do not edit any files — your only job here is`,
     `to file the dispatch issue. Pass repo exactly as "${args.repo}".`,
   ].join("\n");

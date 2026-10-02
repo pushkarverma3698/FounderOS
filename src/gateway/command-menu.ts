@@ -339,13 +339,13 @@ export function buildCommandsHelp(): string[] {
       "2️⃣ You approve → it is filed as a GitHub issue\n" +
       "3️⃣ Antigravity writes the code and opens a pull request\n" +
       "4️⃣ The app is started and photographed — you get the screenshots here\n" +
-      "5️⃣ Claude reviews it adversarially and re-dispatches anything it finds\n" +
+      "5️⃣ A different model reviews it adversarially (pr-brain); anything it finds goes back to Antigravity\n" +
       "6️⃣ You get a verdict: CLEARED, or changes requested with the reason\n\n" +
       "<i>Typical: 20–40 minutes, unattended. " +
       "On the Oplify repos the final merge is always left to you.</i>",
     "<b>Naming the repo</b>\n" +
       "<code>repo:app</code> · <code>repo:api</code> · <code>repo:hulda</code> — " +
-      "leave it off and it means FounderOS.\n" +
+      "leave it off and I ask which repo, with buttons.\n" +
       "<i>Anything else is refused before a single token is spent.</i>",
   ];
 

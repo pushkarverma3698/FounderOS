@@ -87,14 +87,14 @@ function checksLine(c: TaskPr["checks"]): string {
 function prLines(pr: TaskPr): string[] {
   const lines = [`PR #${pr.number} → ${pr.baseRef} · ${checksLine(pr.checks)}`];
   if (!pr.reviewedHeads.includes(pr.headSha)) {
-    lines.push("Claude's review: waiting for Claude's review of the latest commit (pr-brain runs every 20 min).");
+    lines.push("Review: waiting for pr-brain's review of the latest commit (it runs every 20 min).");
   } else if (pr.draft) {
     lines.push(
-      `Claude reviewed the current head and left it as a draft (not cleared). Antigravity is sent back to fix it ` +
+      `pr-brain reviewed the current head and left it as a draft (not cleared). Antigravity is sent back to fix it ` +
         `automatically — round ${pr.attempts}/${MAX_ATTEMPTS}.`,
     );
   } else {
-    lines.push("Claude reviewed the current head and cleared it (ready to merge).");
+    lines.push("pr-brain reviewed the current head and cleared it (ready to merge).");
   }
   lines.push(pr.url);
   return lines;
