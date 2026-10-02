@@ -18,6 +18,7 @@
     "test:regression": "vitest run tests/regression",
     "test:integration": "ALLOW_NETWORK=1 vitest run --config vitest.integration.config.ts",
     "test:smoke": "ALLOW_NETWORK=1 node --import tsx/esm scripts/smoke.ts",
+    "test:qa": "vitest run",
     "test:ci": "vitest run",
     "eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
     "eval:retrieval": "node --env-file=.env --import tsx/esm scripts/run-retrieval-eval.ts",
