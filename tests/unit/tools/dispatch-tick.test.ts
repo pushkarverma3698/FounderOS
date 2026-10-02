@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -108,11 +108,20 @@ describe("kickDispatchTick", () => {
   });
 
   it("swallows an unwritable path when the real writer is used", () => {
-    process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
-    process.env["AGENT_DISPATCH_KICK_FILE"] = "/proc/definitely/not/writable/agent-dispatch.kick";
+    const dir = mkdtempSync(join(tmpdir(), "kick-"));
+    try {
+      // A FILE where the directory should be: mkdir fails at once with ENOTDIR, for root and for anyone else.
+      // Not a path under /proc: on Linux Node's recursive mkdir never returns there (procfs answers ENOENT for
+      // a path whose parent exists, and it retries forever). That froze the CI test job for 25 minutes.
+      writeFileSync(join(dir, "blocker"), "");
+      process.env["AGENT_DISPATCH_BIN"] = "/home/founderos/bin/agent-dispatch";
+      process.env["AGENT_DISPATCH_KICK_FILE"] = join(dir, "blocker", "nested", "agent-dispatch.kick");
 
-    expect(() => kickDispatchTick(670, "pushkarverma3698/FounderOS")).not.toThrow();
-    expect(existsSync("/proc/definitely")).toBe(false);
+      expect(() => kickDispatchTick(670, "pushkarverma3698/FounderOS")).not.toThrow();
+      expect(existsSync(join(dir, "blocker", "nested"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("refuses a non-positive issue number rather than leaving a note nothing can act on", () => {
