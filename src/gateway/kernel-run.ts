@@ -32,6 +32,7 @@ import { streamKernelTurn, progressLabelFor } from "./kernel-progress.js";
 import { cleanupResumeArtifact } from "./resume-artifact-cleanup.js";
 import { replyForError } from "./error-reply.js";
 import { failureCardFor, replyWithFailureCard } from "./failure-card.js";
+import type { Engine } from "../tools/coding-engine.js";
 
 // Progress streaming lives in ./kernel-progress.ts; re-exported so the gateway's
 // public surface (and its tests) keep addressing kernel-run.
@@ -136,6 +137,29 @@ async function sendApprovalCard(ctx: Context, approval: ApprovalRequest, nonce?:
   await ctx.reply(card.html, { parse_mode: "HTML", reply_markup: card.keyboard });
 }
 
+/**
+ * A text turn must not start while an approval card is waiting on the same thread:
+ * the new run would share the old checkpoint and pending row, so one tap would
+ * resume (or silently drop) the wrong request. Re-send the card and say so. A card
+ * older than the restore window is abandoned, so expire it instead of blocking forever.
+ * Returns true when the turn was held.
+ */
+async function holdForPendingApproval(ctx: Context, chatId: string | number): Promise<boolean> {
+  const pending = await getPendingInterrupt(threadIdFor(chatId));
+  if (!pending) return false;
+  const age = Date.now() - new Date(pending.created_at ?? 0).getTime();
+  if (age > HITL_RESTORE_MAX_AGE_MS) {
+    await resolveInterrupt(pending.interrupt_id, "expired");
+    return false;
+  }
+  const payload = JSON.parse(pending.callback_data ?? "{}") as Omit<ApprovalRequest, "kind">;
+  await ctx.reply(
+    "⏸ Not started: an approval is still waiting. Approve or reject the card below, then send your message again.",
+  );
+  await sendApprovalCard(ctx, { kind: "approval", ...payload }, pending.interrupt_id.substring(0, 8));
+  return true;
+}
+
 // ── One text turn ──────────────────────────────────────────────────────────────
 
 /**
@@ -147,8 +171,12 @@ async function sendApprovalCard(ctx: Context, approval: ApprovalRequest, nonce?:
  * THIS turn without rebuilding the kernel, which is compiled once and reused
  * forever. Omitted (the general free-text path) means "no override" — the
  * worker keeps the default-profile prompt it always had.
+ *
+ * `engine` is the coding CLI the founder chose by typing /claude or /agy. It rides in `configurable.engine` and the
+ * dispatch tool trusts it over its own argument: the planner is told the engine in words, and a model may drop a
+ * word, so the choice cannot depend on the model copying it.
  */
-export async function runKernelText(ctx: Context, text: string, profileId?: string): Promise<void> {
+export async function runKernelText(ctx: Context, text: string, profileId?: string, engine?: Engine): Promise<void> {
   const chatId = ctx.chat?.id ?? "unknown";
   // UX: Let the founder know the system heard him if another turn is already running.
   if (chatTurnChains.has(String(chatId))) {
@@ -164,6 +192,7 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
         await ctx.reply(formatHaltNotice(halt), { parse_mode: "HTML" });
         return;
       }
+      if (await holdForPendingApproval(ctx, chatId)) return;
       await assertDailyBudgetAllowsRun(
         () => getTodayCostUsd(TENANT),
         DAILY_BUDGET_USD,
@@ -179,6 +208,7 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
         configurable: {
           thread_id: threadIdFor(chatId),
           ...(profileId ? { profile_id: profileId } : {}),
+          ...(engine ? { engine } : {}),
           // Fine-grained keep-alive for a single long tool call (claude_code,
           // own budget 15min) that yields no new LangGraph state for its whole
           // run — src/agents/agent-tools/engineering.ts reads this.

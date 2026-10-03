@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 #
-# agy-failure.sh — why did an Antigravity (agy) run end without a PR? SOURCED by
+# agy-failure.sh — why did a coding-CLI run (Antigravity, or Claude Code through claude-run.sh) end without a PR? SOURCED by
 # deploy/agent-dispatch; every function is a pure function of the log file, which is
 # what lets tests/unit/scripts/agy-failure-classifier.test.ts pin each pattern
 # without running the daemon.
@@ -48,6 +48,9 @@ _AGY_STATUS_CTX='(^|[^[:alnum:]_])(HTTP(/[0-9.]+)?|status([ _]?code)?|code)"?[[:
 AGY_QUOTA_PATTERNS=(
   'Individual quota reached'
   'RESOURCE_EXHAUSTED'
+  # Claude Code (claude-run.sh's text view puts "Error: " in front of the result text and of a rejected rate_limit_event)
+  'hit your .*limit'
+  'usage limit reached'
 )
 AGY_AUTH_PATTERNS=(
   'PERMISSION_DENIED'
@@ -60,6 +63,10 @@ AGY_AUTH_PATTERNS=(
   'bad credentials'
   "${_AGY_STATUS_CTX}(401|403)([^0-9]|\$)"
   'authentication (failed|timed out)'
+  # Claude Code: a made-up CLAUDE_CODE_OAUTH_TOKEN prints "Failed to authenticate. API Error: 401 ..."; no login at all
+  # prints "Not logged in", which 'not logged in' above already reads
+  'failed to authenticate'
+  'oauth token (has )?expired'
 )
 AGY_TRANSIENT_PATTERNS=(
   'timeout waiting for response'

@@ -136,7 +136,7 @@ case "$group $sub" in
       [ .repos[$r].prs[] | select((.state // "OPEN") == "OPEN") | select($h == "" or .headRefName == $h)
         | {number, headRefName, headRefOid: (.headRefOid // "0000000000000000000000000000000000000000"),
            isDraft: (.isDraft != false), baseRefName: (.baseRefName // "main"),
-           comments: [(.comments // [])[] | {body: .body}],
+           comments: [(.comments // [])[] | {body: .body}], labels: [(.labels // [])[] | {name: .}],
            url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: (.state // "OPEN")}
         | '"$PICK"' ]' "$STATE" | emit
     ;;
@@ -149,7 +149,7 @@ case "$group $sub" in
       .repos[$r].prs[] | select((.number | tostring) == $n)
       | {number, headRefName, headRefOid: (.headRefOid // "0000000000000000000000000000000000000000"),
          isDraft: (.isDraft != false), baseRefName: (.baseRefName // "main"),
-         comments: [(.comments // [])[] | {body: .body}],
+         comments: [(.comments // [])[] | {body: .body}], labels: [(.labels // [])[] | {name: .}],
          url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: (.state // "OPEN")}
       | '"$PICK" "$STATE" | emit
     ;;
@@ -192,6 +192,22 @@ case "$group $sub" in
     ;;
 
   "api user") echo owner ;;
+
+  # gh api repos/<owner>/<name>/issues/<n>/labels -f 'labels[]=x': GitHub's REST endpoint adds labels to an issue
+  # OR a pull request (a PR is an issue to it) and, unlike `gh issue edit --add-label`, CREATES a label the
+  # repository does not have yet. The fake keeps issues and PRs in separate lists, so it labels whichever has
+  # number <n> (both, if both do).
+  "api repos/"*"/issues/"*"/labels")
+    [ "$(jq -r '.failApi // false' "$STATE")" = true ] && die "HTTP 502: Bad Gateway (https://api.github.com/repos)"
+    slug="${sub#repos/}"; slug="${slug%%/issues/*}"; n="${sub##*/issues/}"; n="${n%%/*}"
+    repo="$slug"; need_repo
+    add=$(flags -f | sed -n 's/^labels\[\]=//p' | json_lines_to_array)
+    mutate --arg r "$repo" --arg n "$n" --argjson add "$add" '
+      .repos[$r].labels |= (. + ($add - .))
+      | (if .repos[$r].issues[$n] then .repos[$r].issues[$n].labels |= (. + ($add - .)) else . end)
+      | (.repos[$r].prs |= map(if (.number | tostring) == $n then .labels = ((.labels // []) as $l | $l + ($add - $l)) else . end))'
+    jq -c --argjson add "$add" '[$add[] | {name: .}]' <<<'null'
+    ;;
 
   # gh api repos/<owner>/<name>/branches/<branch>: a repo has the branches in its state's `branches`
   # list (default: just main). A missing one is gh's real 404 text, which the daemon tells apart from

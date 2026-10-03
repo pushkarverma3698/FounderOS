@@ -17,6 +17,7 @@ import {
   evidenceFromFounderRequest,
   prepareDispatchBrief,
   withFounderRequestEvidence,
+  withFounderRequestProblem,
 } from "../../../src/tools/dispatch-brief-repair.js";
 import { formatAntigravityIssueBody, type AntigravityTaskInput } from "../../../src/tools/dispatch-antigravity.js";
 import { lintAgentBrief, type BriefLintResult } from "../../../src/tools/agent-brief-lint.js";
@@ -135,6 +136,31 @@ describe("the founder's request as evidence", () => {
     expect(withFounderRequestEvidence(input, undefined)).toBe(input);
     expect(withFounderRequestEvidence(input, null)).toBe(input);
     expect(withFounderRequestEvidence(input, "   ")).toBe(input);
+  });
+});
+
+describe("the founder's request as the problem", () => {
+  // 2026-10-03: the planner left `problem` out on ~5 of 8 first dispatch calls; the lint rejected each and the
+  // model spent a turn re-calling. The founder's own words are what he described, so they fill an empty Problem.
+  it("fills an EMPTY problem with the quoted request", () => {
+    for (const empty of ["", "  ", undefined]) {
+      const filled = withFounderRequestProblem({ ...BASE, problem: empty }, "the footer is missing the version");
+      expect(filled.problem).toContain("> the footer is missing the version");
+      expect(filled.problem).toContain("The founder described it as");
+    }
+  });
+
+  it("keeps a problem the caller wrote, and does nothing without a request", () => {
+    expect(withFounderRequestProblem({ ...BASE, problem: "real error text" }, "do it").problem).toBe("real error text");
+    const input = { ...BASE, problem: "" };
+    expect(withFounderRequestProblem(input, undefined)).toBe(input);
+    expect(withFounderRequestProblem(input, "  ")).toBe(input);
+  });
+
+  it("a brief with no problem passes the lint once the request is supplied (no re-call needed)", async () => {
+    const prepared = await prepareDispatchBrief({ ...BASE, problem: undefined, evidence: undefined }, "add the version to the footer", deps);
+
+    expect(prepared.ok).toBe(true);
   });
 });
 

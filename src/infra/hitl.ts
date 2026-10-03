@@ -21,7 +21,7 @@ import { interrupt } from "@langchain/langgraph";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { createHash } from "node:crypto";
 import { TENANT } from "../core/config.js";
-import { createInterrupt, getPendingInterrupt } from "../db/queries.js";
+import { createInterrupt, getPendingInterrupt, resolveInterrupt } from "../db/queries.js";
 
 const HITL_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -118,12 +118,19 @@ export async function hitlGate(
   const threadId = threadIdFrom(config);
   if (threadId) {
     const existing = await getPendingInterrupt(threadId);
-    if (!existing) {
+    const serialized = JSON.stringify(payload);
+    // A pending row for THIS payload is the resume re-execution: keep it. A row for a
+    // different payload is an abandoned card — expire it so the new card gets its own
+    // row and nonce (otherwise one tap resolves a request the founder never approved).
+    if (existing && existing.callback_data !== serialized) {
+      await resolveInterrupt(existing.interrupt_id, "expired");
+    }
+    if (!existing || existing.callback_data !== serialized) {
       await createInterrupt({
         thread_id: threadId,
         tenant_id: TENANT,
         status: "pending",
-        callback_data: JSON.stringify(payload),
+        callback_data: serialized,
         expires_at: new Date(Date.now() + HITL_TTL_MS),
       });
     }
