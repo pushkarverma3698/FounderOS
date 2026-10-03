@@ -28,6 +28,11 @@ vi.mock("../../../../src/infra/account-registry.js", () => ({
   ),
 }));
 
+vi.mock("../../../../src/infra/google-mailboxes.js", () => ({
+  addedMailboxDir: (n: string) =>
+    n === "wife" ? { dir: "/acc/wife/gws" } : { error: `No Google account named "${n}". Known: turicks, personal, naggar, wife.` },
+}));
+
 vi.mock("../../../../src/infra/provider-probes.js", () => ({
   alertOnCredentialFailure: mockAlertOnCredentialFailure,
   clearCredentialAlert: mockClearCredentialAlert,
@@ -143,5 +148,26 @@ describe("gwsCreateCalendarEvent", () => {
 
     expect(result.success).toBe(false);
     expect(result.error ?? "").toContain("503 Service Unavailable");
+  });
+});
+
+describe("account routing", () => {
+  it("reads an account added from Telegram from its own folder", async () => {
+    mockRunGws.mockResolvedValue({ ok: true, stdout: "", parsed: { messages: [] } });
+    await gwsReadEmails({ query: "x", max_results: 5, account_key: "Wife" });
+    expect(mockRunGws.mock.calls[0]![2]).toEqual({ gwsProfileDir: "/acc/wife/gws" });
+  });
+
+  it("refuses an unknown account instead of reading turicks", async () => {
+    const r = await gwsSendEmail({ to: "a@b.c", subject: "s", body: "b", account_key: "wfe" } as never);
+    expect(r.success).toBe(false);
+    expect(r.error).toContain("Known: turicks, personal, naggar, wife");
+    expect(mockRunGws).not.toHaveBeenCalled();
+  });
+
+  it("a built-in account still goes through the registry", async () => {
+    mockRunGws.mockResolvedValue({ ok: true, stdout: "", parsed: { messages: [] } });
+    await gwsReadEmails({ query: "x", max_results: 5, account_key: "personal" });
+    expect(mockRunGws.mock.calls[0]![2]).toEqual({ gwsProfileDir: "/tmp/gws-test-profile" });
   });
 });

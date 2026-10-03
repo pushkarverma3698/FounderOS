@@ -1,13 +1,16 @@
 /**
  * `/login google <account>`: sign one Gmail/Calendar account in from the phone. Writes the
  * account's own credentials.json (the file gws reads, see gwsEnv) and proves it with a real
- * Gmail call before saying ok. Account keys and display names come from src/core/accounts.ts.
+ * Gmail call before saying ok. Built-in accounts come from src/core/accounts.ts; `add <name>` signs
+ * in any other Google account (his, a second business, someone who forwards him the link) under a
+ * name he picks, and `remove <name>` forgets it (src/infra/google-mailboxes.ts).
  */
 
 import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
-import { ACCOUNT_KEYS, ACCOUNT_SEED_SPECS, defaultGwsProfileDir, type AccountKey } from "../../../core/accounts.js";
+import { ACCOUNT_SEED_SPECS, isAccountKey } from "../../../core/accounts.js";
+import { listGoogleMailboxes, mailboxNameProblem, mailboxProfileDir } from "../../../infra/google-mailboxes.js";
 import { runGws, type GwsRunOutcome } from "../../../infra/gws-runner.js";
 import { clearCredentialAlert, isCredentialFailure } from "../../../infra/provider-probes.js";
 import { buildAuthAttempt, credentialsFileBody, exchangeCode, parseClientSecret, parsePaste, type AuthAttempt, type OAuthClient } from "../google-oauth.js";
@@ -15,19 +18,21 @@ import type { LoginAdapter, LoginFinished, LoginStarted, LoginTargetStatus } fro
 
 export interface GoogleLoginDeps {
   readClient(): Promise<OAuthClient>;
-  profileDir(account: AccountKey): string;
+  mailboxes(): string[];
+  profileDir(account: string): string;
   runGws(args: string[], dir: string): Promise<GwsRunOutcome>;
   doFetch: typeof fetch;
   fileExists(path: string): boolean;
   writeCredentials(path: string, body: string): Promise<void>;
   backup(path: string): Promise<boolean>;
   restore(path: string, hadBackup: boolean): Promise<void>;
-  clearAlerts(account: AccountKey): void;
+  clearAlerts(account: string): void;
+  /** Deletes an added mailbox's folder (credentials included). */
+  forget(account: string): Promise<void>;
 }
 
 const esc = (s: string): string => s.replace(/[<>&]/g, (c) => (c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"));
-const labelOf = (a: AccountKey): string => ACCOUNT_SEED_SPECS.find((s) => s.account_key === a)?.display_name ?? a;
-const isAccount = (t: string): t is AccountKey => (ACCOUNT_KEYS as readonly string[]).includes(t);
+const labelOf = (a: string): string => ACCOUNT_SEED_SPECS.find((s) => s.account_key === a)?.display_name ?? a;
 
 function clientSecretPath(): string {
   return process.env["GWS_CLIENT_SECRET_FILE"]?.trim() || `${process.env["HOME"] ?? "/home/founderos"}/.config/gws/client_secret.json`;
@@ -35,7 +40,8 @@ function clientSecretPath(): string {
 
 export const defaultGoogleDeps: GoogleLoginDeps = {
   readClient: async () => parseClientSecret(await readFile(clientSecretPath(), "utf8")),
-  profileDir: defaultGwsProfileDir,
+  mailboxes: () => listGoogleMailboxes(),
+  profileDir: (account) => mailboxProfileDir(account),
   runGws: (args, dir) => runGws(args, 30_000, { gwsProfileDir: dir }),
   doFetch: fetch,
   fileExists: existsSync,
@@ -55,6 +61,7 @@ export const defaultGoogleDeps: GoogleLoginDeps = {
     clearCredentialAlert("active_gmail", account);
     clearCredentialAlert("active_calendar", account);
   },
+  forget: (account) => rm(dirname(mailboxProfileDir(account)), { recursive: true, force: true }),
 };
 
 const PROFILE_ARGS = ["gmail", "users", "getProfile", "--params", JSON.stringify({ userId: "me" })];
@@ -68,15 +75,22 @@ export function createGoogleAdapter(deps: GoogleLoginDeps): LoginAdapter {
   return {
     id: "google",
     title: "Google (Gmail + Calendar)",
-    targets: ACCOUNT_KEYS,
+    get targets() {
+      return deps.mailboxes();
+    },
+    addProblem: (name) => (isAccountKey(name) ? undefined : mailboxNameProblem(name)),
 
     async start(target): Promise<LoginStarted> {
       const client = await deps.readClient();
       const attempt = buildAuthAttempt(client);
+      const isNew = !deps.mailboxes().includes(target);
       return {
         state: { client, attempt },
         html:
-          `<b>Sign in ${esc(labelOf(target as AccountKey))}</b>\n` +
+          (isNew
+            ? `<b>Add Google account "${esc(target)}"</b>\n` +
+              `Someone else's account: forward them the link, and paste here the address they send back.\n`
+            : `<b>Sign in ${esc(labelOf(target))}</b>\n`) +
           `1. Open <a href="${esc(attempt.url)}">this link</a> and choose that Google account.\n` +
           `2. If Google warns the app is unverified: Advanced → Go to the app. It is your own app.\n` +
           `3. After you approve, the page that opens will fail to load (localhost). That is expected. ` +
@@ -86,7 +100,7 @@ export function createGoogleAdapter(deps: GoogleLoginDeps): LoginAdapter {
     },
 
     async finish(target, pasted, state): Promise<LoginFinished> {
-      if (!isAccount(target)) return { ok: false, html: `Unknown account ${esc(target)}.` };
+      if (!deps.mailboxes().includes(target) && mailboxNameProblem(target)) return { ok: false, html: `Unknown account ${esc(target)}.` };
       const { client, attempt } = state as { client: OAuthClient; attempt: AuthAttempt };
       const parsed = parsePaste(pasted, attempt.state);
       if (!parsed.ok) return { ok: false, html: `${esc(parsed.reason)}\nPaste again, or /login google ${target} for a new link.` };
@@ -106,12 +120,27 @@ export function createGoogleAdapter(deps: GoogleLoginDeps): LoginAdapter {
       }
       if (hadBackup) await rm(`${file}.bak`, { force: true });
       deps.clearAlerts(target);
-      return { ok: true, html: `✅ ${esc(labelOf(target))} is signed in as <b>${esc(email)}</b>. Verified with a live Gmail call.` };
+      const use = isAccountKey(target) ? "" : `\nAsk for it by name, e.g. "read ${esc(target)} mail". Sign out: /login google remove ${esc(target)}`;
+      return { ok: true, html: `✅ ${esc(labelOf(target))} is signed in as <b>${esc(email)}</b>. Verified with a live Gmail call.${use}` };
+    },
+
+    async remove(target): Promise<LoginFinished> {
+      if (isAccountKey(target)) {
+        return { ok: false, html: `${esc(labelOf(target))} is built in and stays. Renew it with /login google ${target}.` };
+      }
+      await deps.forget(target);
+      deps.clearAlerts(target);
+      return {
+        ok: true,
+        html:
+          `Removed "${esc(target)}": FounderOS no longer has its login and the name is gone.\n` +
+          `To also cut Google's side, that account can revoke the app at myaccount.google.com/permissions.`,
+      };
     },
 
     async status(): Promise<readonly LoginTargetStatus[]> {
       return Promise.all(
-        ACCOUNT_KEYS.map(async (account): Promise<LoginTargetStatus> => {
+        deps.mailboxes().map(async (account): Promise<LoginTargetStatus> => {
           const dir = deps.profileDir(account);
           const label = labelOf(account);
           if (!deps.fileExists(`${dir}/credentials.json`)) {

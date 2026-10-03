@@ -81,4 +81,38 @@ describe("/login", () => {
     expect(await handleLoginReply(ctx({ chatId: 100, text: "late" }).c, d)).toBe(false);
     expect(dispose).toHaveBeenCalled();
   });
+
+  it("add <name> starts a login for a new target; a refused name starts nothing", async () => {
+    const start = vi.fn(async () => ({ html: "open the link", state: "S" }));
+    const a = adapter({ targets: ["one", "two"], start, addProblem: (n) => (n === "bad" ? "no good" : undefined) });
+    const d = mk(a);
+    const refused = ctx({ chatId: 100, match: "tool add bad" });
+    await handleLogin(refused.c, d);
+    expect(refused.replies[0]).toBe("no good");
+    expect(start).not.toHaveBeenCalled();
+    await handleLogin(ctx({ chatId: 100, match: "tool add wife" }).c, d);
+    expect(start).toHaveBeenCalledWith("wife");
+    expect((await d.pending.peek("100"))?.target).toBe("wife");
+  });
+
+  it("an unknown target without 'add' is not created by accident", async () => {
+    const start = vi.fn();
+    const { c, replies } = ctx({ chatId: 100, match: "tool wfe" });
+    await handleLogin(c, mk(adapter({ targets: ["one"], start, addProblem: () => undefined })));
+    expect(replies[0]).toContain("New account: /login tool add");
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("remove <name> signs a known target out; an unknown one asks which", async () => {
+    const remove = vi.fn(async () => ({ ok: true, html: "removed" }));
+    const d = mk(adapter({ targets: ["one", "wife"], remove }));
+    const unknown = ctx({ chatId: 100, match: "tool remove nobody" });
+    await handleLogin(unknown.c, d);
+    expect(unknown.replies[0]).toContain("Which one?");
+    const known = ctx({ chatId: 100, match: "tool remove wife" });
+    await handleLogin(known.c, d);
+    expect(remove).toHaveBeenCalledWith("wife");
+    expect(known.replies[0]).toBe("removed");
+  });
 });
+

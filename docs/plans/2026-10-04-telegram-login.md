@@ -18,4 +18,10 @@ gws 0.22 ignores `GWS_CONFIG_HOME`; the per-account profile dirs ADR-036 describ
 ## Open
 - An account with no `credentials.json` still falls back to the host login, which can be another mailbox. Remove the fallback once all three accounts are signed in.
 - If the Google OAuth app is in "Testing", refresh tokens die after 7 days; publish it ("In production") in Cloud Console.
-- More Gmail accounts = one entry in `ACCOUNT_KEYS` + `ACCOUNT_SEED_SPECS` (src/core/accounts.ts).
+- Calendar event creation has no account choice yet (always department routing → turicks).
+- Added accounts work on the `gws` backend only; `googleapis`/`composio` still route through the registry.
+
+## More Google accounts (2026-10-04, founder: "Telegram needs to be our workspace")
+`/login google add <name>` signs any Google account in under a name he picks (his, a second business, or someone who forwards him the link back). `/login google remove <name>` deletes it. An added account is only its folder `~/.founderos/accounts/<name>/gws/credentials.json` (`src/infra/google-mailboxes.ts`): no DB row, no deploy. Built-in accounts stay as they are and cannot be removed.
+
+Every reader takes the name: kernel `read_emails` (new `account`, incl. `all`) and `send_email` (approval card says which account sends), the MCP hub `gmail_search` / `calendar_events`. Found on the way: an unknown `account_key` silently fell through to turicks; the gws provider now refuses it and lists the valid names.

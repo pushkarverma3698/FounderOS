@@ -8,6 +8,8 @@
 import { childLogger } from "../logger.js";
 import { runGws } from "../gws-runner.js";
 import { getGoogleAccount } from "../account-registry.js";
+import { addedMailboxDir } from "../google-mailboxes.js";
+import { isAccountKey } from "../../core/accounts.js";
 import { alertOnCredentialFailure, clearCredentialAlert } from "../provider-probes.js";
 import type { ToolResult } from "../../tools/index.js";
 import {
@@ -34,7 +36,15 @@ const GOOGLE_REAUTH_ERROR =
   "Google account needs re-authorization — the refresh token was revoked or expired. This will " +
   "not resolve on retry; the founder has been notified and must re-authorize manually.";
 
-async function gwsOpts(input: { account_key?: string; department?: string }) {
+/** An added mailbox (`/login google add`) has only its folder; an unknown name is an error, not another inbox. */
+async function gwsOpts(
+  input: { account_key?: string; department?: string },
+): Promise<{ gwsProfileDir: string; accountKey: string } | { error: string }> {
+  const explicit = input.account_key?.trim().toLowerCase();
+  if (explicit && !isAccountKey(explicit)) {
+    const added = addedMailboxDir(explicit);
+    return "error" in added ? added : { gwsProfileDir: added.dir, accountKey: explicit };
+  }
   const { credentials, ctx } = await getGoogleAccount({
     platform: "google",
     account_key: input.account_key,
@@ -59,6 +69,7 @@ export async function gwsReadEmails(
   notify?: (html: string) => Promise<void>,
 ): Promise<ToolResult> {
   const opts = await gwsOpts(input);
+  if ("error" in opts) return { success: false, error: opts.error };
   const listed = await runGws(
     ["gmail", "users", "messages", "list", "--params", listParams(input.query, input.max_results)],
     timeoutMs,
@@ -89,6 +100,7 @@ export async function gwsReadEmails(
 
 export async function gwsSendEmail(input: SendEmailInput, timeoutMs = 30_000): Promise<ToolResult> {
   const opts = await gwsOpts(input);
+  if ("error" in opts) return { success: false, error: opts.error };
   const args = [
     "gmail",
     "+send",
@@ -128,6 +140,7 @@ export async function gwsCreateCalendarEvent(
   timeoutMs = 30_000,
 ): Promise<ToolResult> {
   const opts = await gwsOpts(input);
+  if ("error" in opts) return { success: false, error: opts.error };
   const args = [
     "calendar",
     "+insert",
@@ -181,6 +194,7 @@ export async function gwsListCalendarEvents(
   notify?: (html: string) => Promise<void>,
 ): Promise<ToolResult> {
   const opts = await gwsOpts(input);
+  if ("error" in opts) return { success: false, error: opts.error };
   const params = {
     calendarId: "primary",
     timeMin: input.time_min,

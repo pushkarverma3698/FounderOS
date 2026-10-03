@@ -254,7 +254,7 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
   },
   {
     command: "login",
-    description: "Sign in again: which logins work, and renew one. login google personal",
+    description: "Sign in again or add a Google account: which logins work, renew one. login google add wife",
     group: "system",
   },
   {

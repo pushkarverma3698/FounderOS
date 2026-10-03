@@ -42,8 +42,12 @@ export interface LoginAdapter {
   readonly id: string;
   /** Shown on the status screen. */
   readonly title: string;
-  /** What `/login <id> <target>` accepts. A single-target tool lists ["default"]. */
+  /** What `/login <id> <target>` accepts. A single-target tool lists ["default"]. Read fresh on every command (may be a getter). */
   readonly targets: readonly string[];
+  /** Optional: `/login <id> add <name>` signs a NEW target in under that name. Returns why the name is refused, or undefined. */
+  addProblem?(name: string): string | undefined;
+  /** Optional: `/login <id> remove <name>` signs a target out and forgets it. */
+  remove?(target: string): Promise<LoginFinished>;
   start(target: string): Promise<LoginStarted>;
   finish(target: string, pasted: string, state: unknown): Promise<LoginFinished>;
   /** One cheap live check per target; powers the `/login` screen. Must not throw. */

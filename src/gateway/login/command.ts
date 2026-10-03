@@ -3,6 +3,7 @@
  * ==================
  * `/login`                  status of every credential, and how to renew one
  * `/login <tool> [target]`  start a renewal; the next message he sends is the pasted code
+ * `/login <tool> add <name>` / `remove <name>`  for tools with several accounts (Google)
  *
  * Founder's private chat only (not a group, not an allow-listed guest): a pasted code or token
  * is a credential, and a group member must neither start a login nor have a message swallowed.
@@ -55,7 +56,10 @@ async function statusScreen(deps: LoginDeps): Promise<string> {
     }),
   );
   const usage = deps.adapters
-    .map((a) => `/login ${a.id}${a.targets.length > 1 ? ` ${a.targets.join("|")}` : ""}`)
+    .map((a) => {
+      const renew = `/login ${a.id}${a.targets.length > 1 ? ` ${a.targets.join("|")}` : ""}`;
+      return a.addProblem ? `${renew}\n/login ${a.id} add &lt;name&gt; · /login ${a.id} remove &lt;name&gt;` : renew;
+    })
     .join("\n");
   return `${blocks.join("\n\n")}\n\nRenew one:\n${usage}`;
 }
@@ -66,7 +70,7 @@ export async function handleLogin(ctx: Context, deps: LoginDeps): Promise<void> 
     return;
   }
   const chatId = String(ctx.chat!.id);
-  const [toolArg, targetArg] = (typeof ctx.match === "string" ? ctx.match : "").trim().toLowerCase().split(/\s+/);
+  const [toolArg, targetArg, nameArg] = (typeof ctx.match === "string" ? ctx.match : "").trim().toLowerCase().split(/\s+/);
   if (!toolArg) {
     await send(ctx, await statusScreen(deps));
     return;
@@ -76,9 +80,21 @@ export async function handleLogin(ctx: Context, deps: LoginDeps): Promise<void> 
     await send(ctx, `No login for "${esc(toolArg)}". Valid: ${deps.adapters.map((a) => a.id).join(", ")}`);
     return;
   }
-  const target = targetArg || (adapter.targets.length === 1 ? adapter.targets[0]! : "");
-  if (!adapter.targets.includes(target)) {
-    await send(ctx, `Which one? /login ${adapter.id} ${adapter.targets.join(" | ")}`);
+  if (targetArg === "remove" && adapter.remove) {
+    await removeTarget(ctx, adapter, nameArg ?? "");
+    return;
+  }
+  const adding = targetArg === "add" && adapter.addProblem !== undefined;
+  const target = adding ? (nameArg ?? "") : targetArg || (adapter.targets.length === 1 ? adapter.targets[0]! : "");
+  if (adding && !adapter.targets.includes(target)) {
+    const problem = target ? adapter.addProblem!(target) : `Name it: /login ${adapter.id} add &lt;name&gt; (e.g. wife, oplify).`;
+    if (problem) {
+      await send(ctx, problem);
+      return;
+    }
+  } else if (!adapter.targets.includes(target)) {
+    const add = adapter.addProblem ? `\nNew account: /login ${adapter.id} add &lt;name&gt;` : "";
+    await send(ctx, `Which one? /login ${adapter.id} ${adapter.targets.join(" | ")}${add}`);
     return;
   }
   try {
@@ -88,6 +104,19 @@ export async function handleLogin(ctx: Context, deps: LoginDeps): Promise<void> 
   } catch (err) {
     log.error({ tool: adapter.id, target, err: err instanceof Error ? err.message : String(err) }, "login start failed");
     await send(ctx, `Could not start the ${esc(adapter.title)} login: ${esc(err instanceof Error ? err.message : String(err))}`);
+  }
+}
+
+async function removeTarget(ctx: Context, adapter: LoginAdapter, name: string): Promise<void> {
+  if (!adapter.targets.includes(name)) {
+    await send(ctx, `Which one? /login ${adapter.id} remove ${adapter.targets.join(" | ")}`);
+    return;
+  }
+  try {
+    await send(ctx, (await adapter.remove!(name)).html);
+  } catch (err) {
+    log.error({ tool: adapter.id, target: name, err: err instanceof Error ? err.message : String(err) }, "login remove failed");
+    await send(ctx, `Could not remove ${esc(name)}: ${esc(err instanceof Error ? err.message : String(err))}`);
   }
 }
 
