@@ -1,0 +1,31 @@
+name: PR scope
+
+# 30-day hard freeze (plan 2026-10-02 → 11-01): every PR names the outcome it moves, and
+# frozen modules change only with a `crash-fix` or `unfreeze` label. Separate from ci.yml
+# because it must re-run when a label or the PR body changes, which ci.yml does not.
+# Delete with scripts/verify-pr-scope.ts when the freeze ends.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+
+concurrency:
+  group: pr-scope-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  scope:
+    name: PR scope (freeze + Moves)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify:pr-scope

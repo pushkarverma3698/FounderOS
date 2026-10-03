@@ -70,7 +70,7 @@ function homeText(firstName?: string): string {
     `🎯 <b>Jobs</b> — the daily shortlist and the apply queue\n` +
     `    <code>/jobs</code> · <code>/csv</code> · <code>/draft 1</code>\n` +
     `🤖 <b>Build</b> — describe a change, it ships while you are away\n` +
-    `    <code>/task</code> · <code>/tasks</code>\n` +
+    `    <code>/task</code> · <code>/tasks</code> · <code>/where</code>\n` +
     `⚡ <b>System</b> — health, today's spend, the emergency stop\n` +
     `    <code>/status</code> · <code>/budget</code>\n\n` +
     // Every kernel worker, named from the same table the 🧭 list uses. The old

@@ -233,6 +233,11 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "engineering",
   },
   {
+    command: "where",
+    description: "Where are we: done this week, in flight, left, blocked per repo. where founderos for one",
+    group: "engineering",
+  },
+  {
     command: "claude",
     description: "Same as /task, built by Claude Code instead of the default. claude fix the login button",
     group: "engineering",
