@@ -136,6 +136,29 @@ async function sendApprovalCard(ctx: Context, approval: ApprovalRequest, nonce?:
   await ctx.reply(card.html, { parse_mode: "HTML", reply_markup: card.keyboard });
 }
 
+/**
+ * A text turn must not start while an approval card is waiting on the same thread:
+ * the new run would share the old checkpoint and pending row, so one tap would
+ * resume (or silently drop) the wrong request. Re-send the card and say so. A card
+ * older than the restore window is abandoned, so expire it instead of blocking forever.
+ * Returns true when the turn was held.
+ */
+async function holdForPendingApproval(ctx: Context, chatId: string | number): Promise<boolean> {
+  const pending = await getPendingInterrupt(threadIdFor(chatId));
+  if (!pending) return false;
+  const age = Date.now() - new Date(pending.created_at ?? 0).getTime();
+  if (age > HITL_RESTORE_MAX_AGE_MS) {
+    await resolveInterrupt(pending.interrupt_id, "expired");
+    return false;
+  }
+  const payload = JSON.parse(pending.callback_data ?? "{}") as Omit<ApprovalRequest, "kind">;
+  await ctx.reply(
+    "⏸ Not started: an approval is still waiting. Approve or reject the card below, then send your message again.",
+  );
+  await sendApprovalCard(ctx, { kind: "approval", ...payload }, pending.interrupt_id.substring(0, 8));
+  return true;
+}
+
 // ── One text turn ──────────────────────────────────────────────────────────────
 
 /**
@@ -164,6 +187,7 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
         await ctx.reply(formatHaltNotice(halt), { parse_mode: "HTML" });
         return;
       }
+      if (await holdForPendingApproval(ctx, chatId)) return;
       await assertDailyBudgetAllowsRun(
         () => getTodayCostUsd(TENANT),
         DAILY_BUDGET_USD,
