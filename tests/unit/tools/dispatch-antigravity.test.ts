@@ -348,9 +348,10 @@ describe("dispatchAntigravityTool.execute", () => {
   });
 
   it("advertises the engine in its input schema, as an optional enum", () => {
-    const props = dispatchAntigravityTool.input_schema.properties as Record<string, { enum?: string[] }>;
+    const schema = dispatchAntigravityTool.input_schema;
+    const props = schema?.properties as Record<string, { enum?: string[] }>;
     expect(props["engine"]?.enum).toEqual(["agy", "claude"]);
-    expect(dispatchAntigravityTool.input_schema.required).not.toContain("engine");
+    expect(schema?.required).not.toContain("engine");
   });
 
   it("kicks the dispatcher for the issue it just filed", async () => {
