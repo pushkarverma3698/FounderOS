@@ -102,10 +102,13 @@ function buildText(): string {
     `1️⃣ I expand your line into a full engineering brief\n` +
     `2️⃣ <b>You approve it</b> — one tap, here\n` +
     `3️⃣ It becomes a GitHub issue the agent loop can claim\n` +
-    `4️⃣ Antigravity writes the code and opens a pull request\n` +
+    `4️⃣ The coding CLI (Antigravity or Claude Code) writes the code and opens a pull request\n` +
     `5️⃣ <b>The app is started and photographed</b> — screenshots land in this chat\n` +
     `6️⃣ A different model, in a fresh session, reviews the PR (${REVIEWER}) and posts a verdict\n` +
     `7️⃣ Anything unresolved goes back to step 4, by itself\n\n` +
+    `<b>Choosing who builds it:</b>\n` +
+    `🔹 <code>/claude</code> · <code>/agy</code> — like /task, with Claude Code or Antigravity doing the work\n` +
+    `🔹 <code>/engine</code> — which one plain /task uses; <code>/engine claude</code> switches it\n\n` +
     `<b>The other two:</b>\n` +
     `🔹 <code>/tasks</code> — what the loop is doing right now, and what needs you\n` +
     `🔹 <code>/newproject pricing-api usage-based pricing</code> — starts a whole new repo\n\n` +

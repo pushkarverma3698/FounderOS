@@ -238,6 +238,21 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "engineering",
   },
   {
+    command: "claude",
+    description: "Same as /task, built by Claude Code instead of the default. claude fix the login button",
+    group: "engineering",
+  },
+  {
+    command: "agy",
+    description: "Same as /task, built by Google Antigravity instead of the default. agy fix the login button",
+    group: "engineering",
+  },
+  {
+    command: "engine",
+    description: "Which coding CLI /task uses by default. engine claude or engine agy switches it",
+    group: "engineering",
+  },
+  {
     command: "newproject",
     description: "Start a new project: creates a private repo the agent loop can work in. newproject name what it is",
     group: "engineering",
@@ -343,9 +358,9 @@ export function buildCommandsHelp(): string[] {
     "<b>What happens after you send /task</b>\n" +
       "1️⃣ I expand your line into a full brief and show you an approval card\n" +
       "2️⃣ You approve → it is filed as a GitHub issue\n" +
-      "3️⃣ Antigravity writes the code and opens a pull request\n" +
+      "3️⃣ The coding CLI writes the code and opens a pull request: Antigravity or Claude Code, per /engine\n" +
       "4️⃣ The app is started and photographed — you get the screenshots here\n" +
-      `5️⃣ A different model reviews it adversarially (${REVIEWER}); anything it finds goes back to Antigravity\n` +
+      `5️⃣ A different model reviews it adversarially (${REVIEWER}); anything it finds goes back to the same CLI\n` +
       "6️⃣ You get a verdict: CLEARED, or changes requested with the reason\n\n" +
       "<i>Typical: 20–40 minutes, unattended. " +
       "On the Oplify repos the final merge is always left to you.</i>",

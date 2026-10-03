@@ -57,6 +57,9 @@ interface SweepOptions {
   readonly args?: readonly string[];
   /** Open PRs as `gh pr list` prints them. Default: PR 56 at the checked-out head. */
   readonly prs?: string;
+  /** PR 56's and PR 57's labels, one per line. Default: none. */
+  readonly labels?: string;
+  readonly labels57?: string;
 }
 
 function sweep(opts: SweepOptions = {}): { status: number | null; stdout: string; stderr: string } {
@@ -75,6 +78,8 @@ function sweep(opts: SweepOptions = {}): { status: number | null; stdout: string
       GH_DIR: ghDir,
       FAKE_HEAD: head,
       PR_LIST: opts.prs ?? `56 ${head}`,
+      PR_LABELS_56: opts.labels ?? "",
+      PR_LABELS_57: opts.labels57 ?? "",
       FAKE_PREFLIGHT: opts.preflight ?? "ok",
       FAKE_PREFLIGHT_RC: String(opts.preflightRc ?? 0),
       AGY_OUT: opts.agyOut ?? "",
@@ -175,6 +180,7 @@ case "$*" in
   *"--json comments"*) cat "$GH_DIR/comments" 2>/dev/null; if [ -n "\${GH_SLOW_TAIL:-}" ]; then sleep 0.3; echo "-- a later comment --"; fi ;;
   *"headRefOid"*) echo "$FAKE_HEAD" ;;
   *"--json isDraft --jq .isDraft"*) cat "$GH_DIR/draft" ;;
+  *"--json labels"*) [ -n "\${PR_LABELS_FAIL:-}" ] && exit 1; case "$3" in 56) printf '%s\\n' "\${PR_LABELS_56:-}" ;; 57) printf '%s\\n' "\${PR_LABELS_57:-}" ;; esac ;;
   *"reviewDecision"*) if [ "$(cat "$GH_DIR/draft")" = true ]; then echo "REVIEWED, left as draft — not cleared · feat: x"; else echo "CLEARED — marked ready for merge (self-approval impossible; ready IS the pass) · feat: x"; fi ;;
   *"baseRefName"*) echo beta ;;
   *"--json url"*) echo "https://github.com/${SLUG}/pull/56" ;;
@@ -610,6 +616,75 @@ describe("a reviewer model agy no longer has (2026-10-03: claude-sonnet-4-6 beca
 
     expect(existsSync(join(home, ".claude", "pr-brain.failures"))).toBe(false);
     expect(sent().filter((m) => m.includes("Gate FAILED"))).toHaveLength(0);
+  });
+});
+
+describe("a PR the Claude Code executor wrote (engine:claude) is not reviewed by a Claude model", () => {
+  const CLAUDE_REVIEWER = "claude-sonnet-5-5-medium";
+  const OTHER_FAMILY = "gemini-3.1-pro-high";
+
+  it("goes to the first model of another family, and a PASS clears it as usual", () => {
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), labels: "agent:review\nengine:claude" });
+
+    expect(agyLog("model")).toEqual([OTHER_FAMILY]);
+    expect(ghState("draft")).toBe("false");
+    expect(prBrainLog()).toMatch(/engine:claude/);
+  });
+
+  it("control: an engine:agy PR keeps the first model of the list", () => {
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), labels: "agent:review\nengine:agy" });
+
+    expect(agyLog("model")).toEqual([CLAUDE_REVIEWER]);
+  });
+
+  it("control: a PR with no engine label (one that predates the switch) keeps the first model of the list", () => {
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), labels: "agent:review" });
+
+    expect(agyLog("model")).toEqual([CLAUDE_REVIEWER]);
+  });
+
+  it("only the Claude PR is moved: the next PR in the same sweep goes back to the first model", () => {
+    const bare = join(root, "github", `${SLUG}.git`);
+    const seed = join(root, "seed");
+    writeFileSync(join(seed, "second.txt"), "work 2\n");
+    git(seed, "add", ".");
+    git(seed, "commit", "-q", "-m", "work 2");
+    const head2 = git(seed, "rev-parse", "HEAD");
+    git(seed, "push", "-q", bare, "task/issue-72-x");
+    git(bare, "update-ref", "refs/pull/57/head", head2);
+
+    sweep({ prs: `56 ${head}\n57 ${head2}`, agyOut: review("BRAIN-VERDICT: PASS"), labels: "engine:claude", labels57: "engine:agy" });
+
+    expect(agyLog("model")).toEqual([OTHER_FAMILY, CLAUDE_REVIEWER]);
+  });
+
+  it("with no model of another family configured, no review runs, the PR is left as it is, and the founder is told once, with the fix", () => {
+    const env = { PR_BRAIN_MODELS: "claude-sonnet-5-5-medium,claude-opus-5-5-medium" };
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), labels: "engine:claude", env });
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), labels: "engine:claude", env });
+
+    expect(agyLog("calls")).toHaveLength(0);
+    expect(ghState("draft")).toBe("true");
+    expect(existsSync(join(home, ".claude", "pr-brain.down"))).toBe(false); // the reviewer is up; this PR has no independent reviewer
+    const notes = sent().filter((m) => /engine:claude/.test(m));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatch(/PR_BRAIN_MODELS/);
+    expect(notes[0]).toMatch(/crontab -e/);
+  });
+
+  it("labels that cannot be read leave the PR for the next sweep: guessing 'not Claude' would let a Claude model grade its own work", () => {
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), env: { PR_LABELS_FAIL: "1" } });
+
+    expect(agyLog("calls")).toHaveLength(0);
+    expect(ghState("draft")).toBe("true");
+    expect(prBrainLog()).toMatch(/could not read its labels/);
+  });
+
+  it("a model of another family that is out of quota mid-review moves to the next one of another family, never to a Claude model", () => {
+    const env = { PR_BRAIN_MODELS: `${CLAUDE_REVIEWER} ${OTHER_FAMILY} gemini-3.8-flash-high`, AGY_REVIEW_QUOTA_MODELS: OTHER_FAMILY };
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), labels: "engine:claude", env });
+
+    expect(agyLog("model")).toEqual([OTHER_FAMILY, "gemini-3.8-flash-high"]);
   });
 });
 

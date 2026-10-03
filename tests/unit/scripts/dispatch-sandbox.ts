@@ -52,7 +52,7 @@ export function goodBrief(): string {
   return BRIEF_HEADINGS.map((h) => `## ${h}\n\nSomething concrete for ${h}.\n`).join("\n");
 }
 
-/** The six labels onboard-repo.sh creates and the daemon uses. */
+/** The six agent:* labels onboard-repo.sh creates and the daemon uses. */
 export const AGENT_LABELS = [
   "agent:ready",
   "agent:working",
@@ -62,9 +62,14 @@ export const AGENT_LABELS = [
   "agent:needs-brief",
 ] as const;
 
+/** The labels that name the coding CLI an issue or PR belongs to. A repo gets them from onboard-repo.sh, or lazily from the daemon. */
+export const ENGINE_LABELS = ["engine:agy", "engine:claude"] as const;
+
 /** Synthetic credentials, assembled at run time so no scanner sees a contiguous key in the source. */
 export const FAKE_GEMINI_KEY = "AI" + "za" + "Sy" + "k".repeat(33);
 export const FAKE_TELEGRAM_TOKEN = "987654321" + ":" + "T".repeat(35);
+/** A Claude Code OAuth token as `claude setup-token` prints it, assembled so no scanner sees a contiguous one. */
+export const FAKE_CLAUDE_TOKEN = "sk-ant-" + "oat01-" + "C".repeat(40);
 
 /** Real tools the daemon and its helpers need, symlinked into a hermetic PATH. */
 const TOOLS = [
@@ -111,6 +116,12 @@ export interface TickOptions {
   readonly agyHook?: string;
   /** Seconds the fake agy stays alive after printing, so the daemon's live progress loop sees its output. */
   readonly agySleepAfter?: number;
+  /** What the fake `claude` prints (stdout and stderr both land in the run log). */
+  readonly claudeOut?: string;
+  readonly claudeRc?: number;
+  /** Bash run INSIDE the fake claude, in the workspace. */
+  readonly claudeHook?: string;
+  readonly claudeSleepAfter?: number;
   /** Exit code of the fake `curl`: non-zero = "Telegram is down". */
   readonly curlRc?: number;
   readonly env?: Record<string, string>;
@@ -143,6 +154,7 @@ interface RepoState {
     isDraft?: boolean;
     state?: string;
     comments: { body: string }[];
+    labels?: string[];
     checks?: { name: string; bucket: string; state?: string; required?: boolean }[];
   }[];
 }
@@ -171,6 +183,10 @@ export class DispatchSandbox {
   private readonly agyCalls: string;
   private readonly agyEnvLog: string;
   private readonly agyPromptLog: string;
+  private readonly claudeCalls: string;
+  private readonly claudeEnvLog: string;
+  private readonly claudeArgvLog: string;
+  private readonly claudePromptLog: string;
   private readonly sudoArgv: string;
   private readonly sends: string;
 
@@ -190,6 +206,10 @@ export class DispatchSandbox {
     this.agyCalls = join(this.root, "agy-calls.log");
     this.agyEnvLog = join(this.root, "agy-env.log");
     this.agyPromptLog = join(this.root, "agy-prompts.log");
+    this.claudeCalls = join(this.root, "claude-calls.log");
+    this.claudeEnvLog = join(this.root, "claude-env.log");
+    this.claudeArgvLog = join(this.root, "claude-argv.log");
+    this.claudePromptLog = join(this.root, "claude-prompts.log");
     this.sudoArgv = join(this.root, "sudo-argv.log");
     this.sends = join(this.root, "telegram.log");
 
@@ -208,7 +228,7 @@ export class DispatchSandbox {
 
     const state: GhState = { authOk: true, failIssueEdit: false, failLabelList: false, repos: {} };
     for (const r of repos) {
-      state.repos[r] = { labels: [...AGENT_LABELS], issues: {}, prs: [] };
+      state.repos[r] = { labels: [...AGENT_LABELS, ...ENGINE_LABELS], issues: {}, prs: [] };
       this.ensureOrigin(r);
       if (opts.provision !== false) {
         this.ensureWorkspace(r);
@@ -251,6 +271,16 @@ export class DispatchSandbox {
     writeFileSync(p, `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
   }
 
+  /**
+   * The daemon starts the executor through `bash -lc`, and a login shell rebuilds PATH: on macOS /etc/profile's path_helper
+   * puts /opt/homebrew/bin ahead of the stubs, so a hook that calls `gh` ran the REAL gh and every hook that opened a PR
+   * silently did nothing (5 midrun cases failed on a Mac and passed on Linux). A stub puts its own directory first again
+   * before it runs its hook; nothing the daemon itself runs is touched.
+   */
+  private hookPath(): string {
+    return `export PATH="${this.stubs}:$PATH"\n`;
+  }
+
   private installStubs(): void {
     // gh: the stateful fake, addressed by absolute path so PATH does not matter.
     this.stub("gh", `exec bash "${FAKE_GH}" "$@"`);
@@ -259,13 +289,26 @@ export class DispatchSandbox {
     this.stub("timeout", `shift; exec "$@"`);
     this.stub(
       "agy",
-      `echo run >>"$AGY_CALLS"
+      `${this.hookPath()}echo run >>"$AGY_CALLS"
 printf '%s\\n' "\${GEMINI_API_KEY-<unset>}" >>"$AGY_ENV_LOG"
 while [ $# -gt 0 ]; do case "$1" in --print) printf '%s\\n----\\n' "$2" >>"$AGY_PROMPT_LOG"; shift 2 ;; *) shift ;; esac; done
 [ -n "\${AGY_HOOK:-}" ] && bash -c "$AGY_HOOK"
 printf '%s\\n' "\${AGY_OUT:-}"
 sleep "\${AGY_SLEEP_AFTER:-0}"
 exit "\${AGY_RC:-1}"`,
+    );
+    // claude: records the run, the token it was handed IN ITS ENVIRONMENT, its whole argv (so a test can prove the
+    // token is not there) and its -p prompt; then behaves as the test says.
+    this.stub(
+      "claude",
+      `${this.hookPath()}echo run >>"$CLAUDE_CALLS"
+printf '%s\\n' "\${CLAUDE_CODE_OAUTH_TOKEN-<unset>}" >>"$CLAUDE_ENV_LOG"
+printf '%s\\n' "$*" >>"$CLAUDE_ARGV_LOG"
+while [ $# -gt 0 ]; do case "$1" in -p) printf '%s\\n----\\n' "$2" >>"$CLAUDE_PROMPT_LOG"; shift 2 ;; *) shift ;; esac; done
+[ -n "\${CLAUDE_HOOK:-}" ] && bash -c "$CLAUDE_HOOK"
+printf '%s\\n' "\${CLAUDE_OUT:-}"
+sleep "\${CLAUDE_SLEEP_AFTER:-0}"
+exit "\${CLAUDE_RC:-1}"`,
     );
     // Every Telegram call lands in $SENDS as "<kind>\\t<text>\\n@@\\n"; nothing reaches the network.
     this.stub(
@@ -285,7 +328,8 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
 
   private installTools(): void {
     for (const t of TOOLS) {
-      for (const dir of ["/usr/bin", "/bin", "/usr/local/bin"]) {
+      // /usr/sbin: macOS keeps chown there (Linux has it in /bin), and onboard-repo.sh needs it.
+      for (const dir of ["/usr/bin", "/bin", "/usr/local/bin", "/usr/sbin", "/sbin"]) {
         const p = join(dir, t);
         if (existsSync(p) && !existsSync(join(this.tools, t))) {
           symlinkSync(p, join(this.tools, t));
@@ -508,6 +552,14 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
         SENDS: this.sends,
         AGY_OUT: opts.agyOut ?? "",
         AGY_RC: String(opts.agyRc ?? 1),
+        CLAUDE_CALLS: this.claudeCalls,
+        CLAUDE_ENV_LOG: this.claudeEnvLog,
+        CLAUDE_ARGV_LOG: this.claudeArgvLog,
+        CLAUDE_PROMPT_LOG: this.claudePromptLog,
+        CLAUDE_OUT: opts.claudeOut ?? "",
+        CLAUDE_RC: String(opts.claudeRc ?? 1),
+        CLAUDE_HOOK: opts.claudeHook ?? "",
+        CLAUDE_SLEEP_AFTER: String(opts.claudeSleepAfter ?? 0),
         AGY_HOOK: opts.agyHook ?? "",
         AGY_SLEEP_AFTER: String(opts.agySleepAfter ?? 0),
         CURL_RC: String(opts.curlRc ?? 0),
@@ -610,6 +662,40 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
   agyKeysSeen(): string[] {
     return existsSync(this.agyEnvLog) ? readFileSync(this.agyEnvLog, "utf8").split("\n").filter(Boolean) : [];
   }
+  claudeRuns(): number {
+    return existsSync(this.claudeCalls) ? readFileSync(this.claudeCalls, "utf8").split("\n").filter(Boolean).length : 0;
+  }
+  /** The prompt each fake claude run was given (its -p argument), one entry per run. */
+  claudePrompts(): string[] {
+    return existsSync(this.claudePromptLog)
+      ? readFileSync(this.claudePromptLog, "utf8").split("\n----\n").filter((p) => p.trim() !== "")
+      : [];
+  }
+  /** The CLAUDE_CODE_OAUTH_TOKEN value each fake claude run saw in its ENVIRONMENT. */
+  claudeTokensSeen(): string[] {
+    return existsSync(this.claudeEnvLog) ? readFileSync(this.claudeEnvLog, "utf8").split("\n").filter(Boolean) : [];
+  }
+  /** Every argument of every fake claude run, one line per run: the token must never be in it. */
+  claudeArgv(): string {
+    return existsSync(this.claudeArgvLog) ? readFileSync(this.claudeArgvLog, "utf8") : "";
+  }
+  /** Where the founder's Claude Code token lives (line 1), as `claude setup-token` left it. */
+  claudeTokenPath(): string {
+    return join(this.home, ".claude", "claude-code.token");
+  }
+  writeClaudeToken(token: string = FAKE_CLAUDE_TOKEN): void {
+    writeFileSync(this.claudeTokenPath(), `${token}\n`, { mode: 0o600 });
+    utimesSync(this.claudeTokenPath(), Math.floor(Date.now() / 1000) - 3600, Math.floor(Date.now() / 1000) - 3600);
+  }
+  /** Set the default coding CLI the way the bot's /engine does: one word in ~/.claude/coding-engine. */
+  setDefaultEngine(engine: string): void {
+    writeFileSync(this.statePath("coding-engine"), `${engine}\n`);
+  }
+  /** The labels on PR `number`, as the fake GitHub holds them (set by `gh api …/issues/N/labels`). */
+  prLabelsOf(number: number, slug?: string): string[] {
+    const p = this.prs(slug).find((x) => x.number === number);
+    return p?.labels ?? [];
+  }
   sudoCalls(): string[] {
     return existsSync(this.sudoArgv) ? readFileSync(this.sudoArgv, "utf8").split("\n").filter(Boolean) : [];
   }
@@ -635,10 +721,12 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
   readState(name: string): string {
     return readFileSync(this.statePath(name), "utf8");
   }
-  /** Everything the daemon wrote under ~/.claude, for "the secret is nowhere" assertions. */
+  /** Everything the daemon wrote under ~/.claude, for "the secret is nowhere" assertions. The token file is the one thing in
+   *  there the daemon only READS (the founder put the token in it), so it is the one file left out. */
   allStateText(): string {
     const dir = join(this.home, ".claude");
     return readdirSync(dir)
+      .filter((f) => f !== "claude-code.token")
       .map((f) => {
         try {
           return readFileSync(join(dir, f), "utf8");

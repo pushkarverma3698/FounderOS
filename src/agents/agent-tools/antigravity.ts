@@ -23,6 +23,7 @@ import {
 import { prepareDispatchBrief } from "../../tools/dispatch-brief-repair.js";
 import { renderCardPreview } from "../../tools/dispatch-brief-preview.js";
 import { DISPATCH_REPO_ALLOWLIST } from "../../tools/dispatch-repos.js";
+import { ENGINES, engineDisplay, engineLabel, parseEngine, readDefaultEngine } from "../../tools/coding-engine.js";
 import { childLogger } from "../../infra/logger.js";
 import { hitlGate, idemKey } from "./hitl.js";
 import { hasBeenAudited, writeAuditEntry } from "../../db/queries.js";
@@ -32,7 +33,7 @@ const log = childLogger({ module: "agent-tools:antigravity" });
 
 export const dispatchAntigravityTask = tool(
   async (
-    { title, goal, scope, expected, verification, acceptance, forbidden, problem, evidence, constraints, new_files, repo, founder_request },
+    { title, goal, scope, expected, verification, acceptance, forbidden, problem, evidence, constraints, new_files, repo, founder_request, engine },
     config,
   ) => {
     // Resolve BEFORE the gate, and refuse rather than fall back.
@@ -51,6 +52,13 @@ export const dispatchAntigravityTask = tool(
     }
     const repoSlug = `${target.owner}/${target.repo}`;
 
+    // The executor is settled HERE, before the gate, and passed to execute() by name. hitlGate re-runs this body
+    // when the founder approves, so reading the default again after the tap could file for a CLI the card
+    // did not show. An unknown word is refused for the same reason the repo is: a card must not misreport.
+    const executor = engine ? parseEngine(engine) : readDefaultEngine();
+    if (!executor) return `❌ Cannot dispatch: engine "${engine}" is not one I can run. Use ${ENGINES.join(" or ")}.`;
+    const who = engineDisplay(executor);
+
     const input: AntigravityTaskInput = {
       title,
       goal,
@@ -67,7 +75,7 @@ export const dispatchAntigravityTask = tool(
     };
 
     // Idempotency: prevent duplicate issue creation on HITL resume loop
-    const key = idemKey("dispatch_antigravity", repoSlug, title, scope);
+    const key = idemKey("dispatch_antigravity", repoSlug, title, scope, executor);
     if (await hasBeenAudited(key)) {
       return `Already dispatched: "${title}" on ${repoSlug} (skipped duplicate)`;
     }
@@ -84,14 +92,14 @@ export const dispatchAntigravityTask = tool(
     const rejected = await hitlGate(
       {
         action: "dispatch_antigravity_task",
-        title: "🤖 Dispatch task to Google Antigravity?",
-        summary: `Open agent:ready issue on ${repoSlug}: "${title}"`,
+        title: `🤖 Dispatch task to ${who}?`,
+        summary: `Open agent:ready issue on ${repoSlug} for ${who}: "${title}"`,
         // A digest, not the raw body: the card cuts its preview at 1500 characters and the raw
         // body would lose Verification and Acceptance first (see dispatch-brief-preview.ts).
         // The model's own scope is shown, not the repaired one (whose hint block would fill the field): the
         // demotion is named on the "Not verified" line instead.
         preview: renderCardPreview(input, { bodyChars: prepared.body.length, warnings: prepared.warnings }),
-        args: { title, goal, scope, expected, verification, acceptance, forbidden, problem, evidence, constraints, new_files, repo, founder_request },
+        args: { title, goal, scope, expected, verification, acceptance, forbidden, problem, evidence, constraints, new_files, repo, founder_request, engine: executor },
       },
       config,
     );
@@ -103,6 +111,7 @@ export const dispatchAntigravityTask = tool(
       scope,
       expected,
       verification,
+      engine: executor,
       ...(acceptance ? { acceptance } : {}),
       ...(forbidden ? { forbidden } : {}),
       ...(problem ? { problem } : {}),
@@ -115,7 +124,7 @@ export const dispatchAntigravityTask = tool(
 
     if (!res.success) {
       log.error({ title, repoSlug, error: res.error }, "dispatchAntigravityTask failed");
-      return `❌ Failed to dispatch task to Antigravity: ${res.error}`;
+      return `❌ Failed to dispatch task to ${who}: ${res.error}`;
     }
 
     const data = res.data as { issue_number: number; issue_url: string; title: string; repo: string; warnings?: string[] };
@@ -131,7 +140,7 @@ export const dispatchAntigravityTask = tool(
     }
 
     return (
-      `✅ Dispatched to Google Antigravity: Issue #${data.issue_number} opened on ${data.repo} with label 'agent:ready'.\n` +
+      `✅ Dispatched to ${who}: Issue #${data.issue_number} opened on ${data.repo} with labels 'agent:ready' and '${engineLabel(executor)}'.\n` +
       `URL: ${data.issue_url}\n` +
       `The VPS agent-dispatch loop will pick it up on its next tick (within 15 minutes), implement the task in an isolated workspace, and submit a draft PR to beta.` +
       (data.warnings?.length ? `\n${data.warnings.map((w) => `⚠️ ${w}`).join("\n")}` : "")
@@ -140,7 +149,7 @@ export const dispatchAntigravityTask = tool(
   {
     name: "dispatch_antigravity_task",
     description:
-      "Dispatch an engineering or coding task to Google Antigravity on the VPS via GitHub issue (requires founder approval). " +
+      "Dispatch an engineering or coding task to a coding CLI on the VPS (Google Antigravity or Claude Code, see engine) via GitHub issue (requires founder approval). " +
       "Use when asked to hand off or dispatch work to Google Antigravity, or when engineering tasks involve modifying FounderOS itself. " +
       "Formats a complete self-contained ticket conforming to .github/ISSUE_TEMPLATE/agent-task.md and opens an issue with the 'agent:ready' label. " +
       "ALWAYS pass founder_request (his own words, verbatim). Do not guess file paths: name a path only if you saw it in a tool result, " +
@@ -179,6 +188,11 @@ export const dispatchAntigravityTask = tool(
       new_files: z.string().optional().nullable().describe(
         "Paths this task will CREATE (one per line). They do not exist yet, so they are not checked. For an audit, explanation or " +
           "research request, the deliverable is a report committed under docs/: list it here.",
+      ),
+      // z.string() and not z.enum for the same reason as repo below: an unknown word gets the actionable refusal, not a schema throw.
+      engine: z.string().optional().nullable().describe(
+        `Which coding CLI implements it: ${ENGINES.join(" or ")} (agy = Antigravity, claude = Claude Code). ` +
+          "Pass it EXACTLY as the instruction says. When the instruction names none, leave it out: the founder's default applies.",
       ),
       // Deliberately z.string() and not z.enum(DISPATCH_REPO_ALLOWLIST): a Zod enum is
       // validated by LangChain BEFORE this tool's body runs, so an off-list value would

@@ -45,6 +45,10 @@ const FIXTURES: readonly Fixture[] = [
   // quota — the sample is the line agent-dispatch-quota.test.ts and the plan quote
   { klass: "quota", pattern: 1, provenance: "verbatim", line: "error: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 57h37m44s." },
   { klass: "quota", pattern: 2, provenance: "synthetic", line: "Error: 429 RESOURCE_EXHAUSTED: quota exceeded for this project" },
+  // Claude Code's weekly limit, 2026-10-03: the result's text, which claude-run.sh's text view prefixes with "Error: "
+  { klass: "quota", pattern: 3, provenance: "verbatim", line: "Error: You've hit your weekly limit · resets Oct 5, 6am (UTC)" },
+  // the line claude-run.sh writes for a rate_limit_event whose status is "rejected" (the captured event, our wording)
+  { klass: "quota", pattern: 4, provenance: "synthetic", line: "Error: usage limit reached · resetsAt=1791180000" },
   // auth
   { klass: "auth", pattern: 1, provenance: "synthetic", line: "Error: 403 PERMISSION_DENIED: The caller does not have permission" },
   { klass: "auth", pattern: 2, provenance: "synthetic", line: "error: UNAUTHENTICATED: Request had invalid authentication credentials" },
@@ -57,6 +61,10 @@ const FIXTURES: readonly Fixture[] = [
   { klass: "auth", pattern: 9, provenance: "synthetic", line: "gh: request failed with status: 403" },
   // captured 2026-10-02 from agy 1.2.14 run with an empty HOME (no login): stderr, exit 1
   { klass: "auth", pattern: 10, provenance: "verbatim", line: "error: authentication failed or timed out" },
+  // captured 2026-10-03 from claude 2.x run with a made-up CLAUDE_CODE_OAUTH_TOKEN: the result's text behind "Error: "
+  { klass: "auth", pattern: 11, provenance: "verbatim", line: "Error: Failed to authenticate. API Error: 401 OAuth access token is invalid." },
+  // the API's wording for a token that WAS good: remembered, not captured
+  { klass: "auth", pattern: 12, provenance: "synthetic", line: "Error: OAuth token has expired. Please obtain a new token or refresh your existing token." },
   // transient
   { klass: "transient", pattern: 1, provenance: "verbatim", line: "Error: timeout waiting for response" },
   { klass: "transient", pattern: 2, provenance: "verbatim", line: "timeout: failed to execute process" },
@@ -215,6 +223,9 @@ describe("classify_agy_failure — false positives (all synthetic: an agent DISC
     ["RESOURCE_EXHAUSTED in code", '    if (code === "RESOURCE_EXHAUSTED") retry();'],
     ["PERMISSION_DENIED in a comment", "// PERMISSION_DENIED means the key lacks the scope; UNAUTHENTICATED means it is missing"],
     ["timeout wording in a summary", "I raised the timeout waiting for response from 30s to 60s in the client."],
+    ["'hit your limit' in a product message it wrote", "The dashboard now says: you've hit your plan limit, upgrade to continue."],
+    ["'usage limit reached' as a log string it added", '  logger.warn("usage limit reached for tenant", { tenantId });'],
+    ["'failed to authenticate' in a test title", '  it("shows an error when we failed to authenticate", () => {'],
     ["a stack trace fragment", "    at Object.<anonymous> (/opt/agy-workspace/founderos/src/auth.ts:401:12)"],
   ];
 

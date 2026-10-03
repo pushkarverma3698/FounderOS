@@ -15,6 +15,7 @@ import {
   buildRepoKeyboardRows,
   buildRepoPrompt,
   buildRepoQuestion,
+  engineFromPrompt,
   labelForRepo,
   repoCallbackData,
   repoChoices,
@@ -150,5 +151,36 @@ describe("repoFromPrompt", () => {
 
   it("refuses a repo line naming something off the allowlist", () => {
     expect(repoFromPrompt("Repo: someone-else/private-thing")).toBeNull();
+  });
+});
+
+describe("the executor line in the force-reply prompt", () => {
+  it("is absent when no engine was chosen, so a plain /task prompt reads as it always has", () => {
+    const prompt = buildRepoPrompt(HULDA);
+    expect(prompt).not.toMatch(/Executor/);
+    expect(engineFromPrompt(prompt)).toBeUndefined();
+  });
+
+  it("names the chosen CLI, and reads back as that engine in the shape Telegram delivers", () => {
+    for (const engine of ["claude", "agy"] as const) {
+      const html = buildRepoPrompt(HULDA, engine);
+      expect(html).toMatch(/Executor: <code>/);
+      // Telegram hands the bot reply_to_message.text with the formatting stripped.
+      const delivered = html.replace(/<[^>]*>/g, "");
+      expect(engineFromPrompt(delivered)).toBe(engine);
+      expect(engineFromPrompt(html)).toBe(engine);
+    }
+  });
+
+  it("does not disturb the repo line the reply handler routes on", () => {
+    expect(repoFromPrompt(buildRepoPrompt(HULDA, "claude"))).toBe(HULDA);
+    expect(repoFromPrompt(buildRepoPrompt(HULDA, "claude").replace(/<[^>]*>/g, ""))).toBe(HULDA);
+  });
+
+  it("takes the LAST Executor line and ignores one it does not recognise", () => {
+    const quoted = "Executor: Claude Code\n\n" + buildRepoPrompt(HULDA, "agy");
+    expect(engineFromPrompt(quoted)).toBe("agy");
+    expect(engineFromPrompt("Executor: Gemini")).toBeUndefined();
+    expect(engineFromPrompt("fix the login button please")).toBeUndefined();
   });
 });
