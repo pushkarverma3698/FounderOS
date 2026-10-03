@@ -107,6 +107,19 @@ agy_failure_line() {
   return 0
 }
 
+# agy_model_unknown LOG — true when agy refused the --model it was given because its catalog has no such model.
+# 2026-10-03: claude-sonnet-4-6 was retired for claude-sonnet-5-5-*, and agy answers a retired name with exit 1 and
+#   error: invalid model selection (--model "X" --effort ""): model X is not recognized as a known model or custom model in settings
+#   Available models: (the catalog, ~20 lines)
+# That is neither an outage nor a quota wall: THAT model can never answer, another candidate may. Like the classes
+# below it looks only at error lines in the tail, so a transcript that merely mentions the phrase does not count.
+agy_model_unknown() {
+  local errs
+  errs=$(agy_error_lines "$1")
+  [[ -n "$errs" ]] || return 1
+  grep -Eaiq -- 'invalid model selection|is not recognized as a known model' <<<"$errs"
+}
+
 # classify_agy_failure LOG — echoes quota | auth | transient | unknown. Quota wins
 # over auth (it carries a reset time, and a run can print both); auth wins over
 # transient (a rejected credential explains everything and retrying would burn quota).
