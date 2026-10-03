@@ -1,4 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// fetchDispatchTasks builds its own Octokit; the tests below swap in a fake
+// that answers from fixtures, so the PR-gating logic runs offline at $0.
+const gh = vi.hoisted(() => ({ client: null as unknown }));
+vi.mock("octokit", () => ({ Octokit: vi.fn(() => gh.client) }));
 import {
   stateFromLabels,
   formatAge,
@@ -115,6 +120,20 @@ describe("isGreenCI", () => {
 
     const result = await isGreenCI(octokit, "owner", "repo", "sha123");
     expect(result).toBe(false);
+  });
+
+  it("returns false when the head has no check runs and no statuses — no CI is not green CI", async () => {
+    // House-of-Hulda-Website-frontend #7: zero checks, conflicting, and listed as ready.
+    const octokit = {
+      rest: {
+        checks: { listForRef: vi.fn().mockResolvedValue({ data: { total_count: 0, check_runs: [] } }) },
+        repos: {
+          getCombinedStatusForRef: vi.fn().mockResolvedValue({ data: { state: "pending", statuses: [] } }),
+        },
+      },
+    } as never;
+
+    expect(await isGreenCI(octokit, "owner", "repo", "sha123")).toBe(false);
   });
 });
 
@@ -239,6 +258,135 @@ describe("fetchDispatchTasks", () => {
     } finally {
       if (orig) process.env["GITHUB_TOKEN"] = orig;
     }
+  });
+});
+
+interface FakePr {
+  number: number;
+  draft?: boolean;
+  mergeable?: boolean | null;
+  mergeable_state?: string;
+  comments?: string[] | Error;
+}
+
+const SHA = "a1b2c3d4e5f67890123456789012345678901234";
+
+/** A GitHub that answers from fixtures. `paginate` walks pages the way octokit's does. */
+function fakeGitHub(prs: FakePr[]) {
+  const page = <T>(all: T[], p: { page?: number; per_page?: number }) => {
+    const size = p.per_page ?? 30;
+    const n = p.page ?? 1;
+    return all.slice((n - 1) * size, n * size);
+  };
+  const byNumber = new Map(prs.map((pr) => [pr.number, pr]));
+  return {
+    paginate: async (fn: (p: object) => Promise<{ data: unknown[] }>, params: { per_page?: number }) => {
+      const out: unknown[] = [];
+      for (let n = 1; ; n++) {
+        const { data } = await fn({ ...params, page: n });
+        out.push(...data);
+        if (data.length < (params.per_page ?? 30)) return out;
+      }
+    },
+    rest: {
+      issues: {
+        listForRepo: vi.fn().mockResolvedValue({ data: [] }),
+        listComments: vi.fn(async (p: { issue_number: number; page?: number; per_page?: number }) => {
+          const c = byNumber.get(p.issue_number)?.comments ?? [];
+          if (c instanceof Error) throw c;
+          return { data: page(c.map((body) => ({ body })), p) };
+        }),
+      },
+      pulls: {
+        list: vi.fn(async (p: { page?: number; per_page?: number }) => ({
+          data: page(
+            prs.map((pr) => ({
+              number: pr.number,
+              draft: pr.draft ?? false,
+              title: `PR ${pr.number}`,
+              html_url: `https://github.com/o/r/pull/${pr.number}`,
+              head: { sha: SHA },
+            })),
+            p,
+          ),
+        })),
+        get: vi.fn(async (p: { pull_number: number }) => {
+          const pr = byNumber.get(p.pull_number);
+          return { data: { mergeable: pr?.mergeable ?? null, mergeable_state: pr?.mergeable_state ?? "unknown" } };
+        }),
+      },
+      checks: {
+        listForRef: vi.fn().mockResolvedValue({
+          data: { total_count: 1, check_runs: [{ status: "completed", conclusion: "success" }] },
+        }),
+      },
+      repos: {
+        getCombinedStatusForRef: vi.fn().mockResolvedValue({ data: { state: "pending", statuses: [] } }),
+      },
+    },
+  };
+}
+
+const REVIEWED = [`<!-- brain-reviewed: ${SHA} -->`];
+
+describe("fetchDispatchTasks — ready to merge", () => {
+  let orig: string | undefined;
+  beforeEach(() => {
+    orig = process.env["GITHUB_TOKEN"];
+    process.env["GITHUB_TOKEN"] = "test-token";
+  });
+  afterEach(() => {
+    if (orig === undefined) delete process.env["GITHUB_TOKEN"];
+    else process.env["GITHUB_TOKEN"] = orig;
+  });
+
+  it("lists a reviewed, green, mergeable PR", async () => {
+    gh.client = fakeGitHub([{ number: 5, comments: REVIEWED, mergeable: true, mergeable_state: "clean" }]);
+    const res = await fetchDispatchTasks(["o/r"]);
+    expect(res.readyToMerge?.map((p) => p.prNumber)).toEqual([5]);
+    expect(res.unreachable).toEqual([]);
+  });
+
+  it("does NOT list a reviewed, green PR that conflicts with its base", async () => {
+    gh.client = fakeGitHub([
+      { number: 7, comments: REVIEWED, mergeable: false, mergeable_state: "dirty" },
+      { number: 8, comments: REVIEWED, mergeable: true, mergeable_state: "dirty" },
+    ]);
+    const res = await fetchDispatchTasks(["o/r"]);
+    expect(res.readyToMerge).toEqual([]);
+  });
+
+  it("does not claim ready while GitHub has not computed mergeability, and says so", async () => {
+    gh.client = fakeGitHub([{ number: 9, comments: REVIEWED, mergeable: null, mergeable_state: "unknown" }]);
+    const res = await fetchDispatchTasks(["o/r"]);
+    expect(res.readyToMerge).toEqual([]);
+    expect(res.unreachable).toHaveLength(1);
+    expect(res.unreachable[0]?.error).toContain("#9");
+    expect(res.unreachable[0]?.error).toMatch(/mergeab/i);
+  });
+
+  it("PRINTS a PR whose comments could not be read instead of dropping it", async () => {
+    gh.client = fakeGitHub([{ number: 11, comments: new Error("secondary rate limit") }]);
+    const res = await fetchDispatchTasks(["o/r"]);
+    expect(res.readyToMerge).toEqual([]);
+    expect(res.unreachable).toHaveLength(1);
+    expect(res.unreachable[0]?.error).toContain("#11");
+    expect(res.unreachable[0]?.error).toContain("secondary rate limit");
+  });
+
+  it("reads past the first page of open PRs", async () => {
+    const prs: FakePr[] = Array.from({ length: 119 }, (_, i) => ({ number: i + 1 }));
+    prs.push({ number: 120, comments: REVIEWED, mergeable: true, mergeable_state: "clean" });
+    gh.client = fakeGitHub(prs);
+    const res = await fetchDispatchTasks(["o/r"]);
+    expect(res.readyToMerge?.map((p) => p.prNumber)).toEqual([120]);
+  });
+
+  it("finds a review marker past the first page of comments", async () => {
+    const comments = [...Array.from({ length: 130 }, (_, i) => `comment ${i}`), ...REVIEWED];
+    gh.client = fakeGitHub([{ number: 12, comments, mergeable: true, mergeable_state: "clean" }]);
+    const res = await fetchDispatchTasks(["o/r"]);
+    expect(res.readyToMerge?.map((p) => p.prNumber)).toEqual([12]);
   });
 });
 

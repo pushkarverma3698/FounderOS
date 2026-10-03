@@ -2,6 +2,30 @@
  * FounderOS — /tasks
  * ==================
  * What the engineering loop is doing right now, in one message.
+ *
+ * WHY IT EXISTS. `/task` starts work that takes twenty to forty minutes and
+ * happens on a machine the founder cannot see. Between the approval card and
+ * pr-brain's verdict there was NOTHING to ask — no command, no view, no way to
+ * tell "Antigravity is building it" from "the claim was released an hour ago and
+ * nobody noticed". The only honest answer to "where is my task?" was: open
+ * GitHub on four repositories and read the labels yourself.
+ *
+ * That gap has a measured cost. Issue #710 sat at `agent:review` with a
+ * brain-reviewed draft PR and zero attempts while every dispatch tick skipped it
+ * — the review→fix arrow was dead for days and the only symptom was silence.
+ * A loop whose state is invisible cannot be noticed to have stopped.
+ *
+ * THE LABELS ARE THE STATE MACHINE. agent-dispatch owns them, this only reads:
+ *
+ *   agent:ready   → filed, waiting for the next dispatch tick (≤15 min)
+ *   agent:working → Antigravity is implementing it right now
+ *   agent:review  → a PR exists; pr-brain gates it and re-dispatches findings
+ *   agent:blocked → hit the attempt bound; needs a human
+ *   agent:failed  → the run itself broke (workspace, no PR produced)
+ *
+ * Rendering is a PURE function over rows so the message is fixture-tested, and
+ * the I/O half returns partial results rather than failing: one unreachable
+ * repository must not blank the whole view.
  */
 
 import type { Context } from "grammy";
@@ -10,6 +34,9 @@ import { esc } from "../tools/jobhunt/telegram-format.js";
 import { DISPATCH_REPO_ALLOWLIST } from "../tools/dispatch-repos.js";
 import { REVIEWER } from "../tools/dispatch-roles.js";
 import { splitForTelegram } from "./format.js";
+import { collectReadyToMerge, type ReadyMergePr } from "./tasks-ready.js";
+
+export { isPrBrainReviewed, isGreenCI, type ReadyMergePr } from "./tasks-ready.js";
 
 /** The agent lifecycle labels, in the order work moves through them. */
 export const AGENT_STATES = ["ready", "working", "review", "blocked", "failed"] as const;
@@ -41,76 +68,11 @@ export interface TaskRow {
   readonly ageMinutes: number;
 }
 
-export interface ReadyMergePr {
-  readonly repo: string;
-  readonly prNumber: number;
-  readonly title: string;
-  readonly url: string;
-}
-
 export interface TasksView {
   readonly rows: readonly TaskRow[];
   readonly readyToMerge?: readonly ReadyMergePr[];
   /** Repositories that could not be read, with the reason. Never hidden. */
   readonly unreachable: readonly { repo: string; error: string }[];
-}
-
-/** Checks if a list of comment bodies contains a pr-brain reviewed marker matching the head SHA. */
-export function isPrBrainReviewed(comments: readonly string[], headSha: string): boolean {
-  if (!headSha) return false;
-  return comments.some((body) => {
-    if (!body.includes("brain-reviewed:")) return false;
-    const matches = body.matchAll(/brain-reviewed:\s*([0-9a-f]{7,40})/gi);
-    for (const match of matches) {
-      const sha = match[1];
-      if (sha && (headSha.toLowerCase().startsWith(sha.toLowerCase()) || sha.toLowerCase().startsWith(headSha.toLowerCase()))) {
-        return true;
-      }
-    }
-    return false;
-  });
-}
-
-/**
- * Checks if the head commit SHA has passing/green CI checks.
- */
-export async function isGreenCI(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  headSha: string,
-): Promise<boolean> {
-  try {
-    const { data: checkRunsData } = await octokit.rest.checks.listForRef({
-      owner,
-      repo,
-      ref: headSha,
-      per_page: 100,
-    });
-    const runs = checkRunsData.check_runs ?? [];
-    if (runs.length > 0) {
-      const allCompletedAndPassed = runs.every(
-        (r) =>
-          r.status === "completed" &&
-          ["success", "skipped", "neutral"].includes(r.conclusion ?? ""),
-      );
-      if (!allCompletedAndPassed) return false;
-    }
-
-    const { data: combined } = await octokit.rest.repos.getCombinedStatusForRef({
-      owner,
-      repo,
-      ref: headSha,
-    });
-    if (combined.statuses && combined.statuses.length > 0) {
-      if (combined.state !== "success") return false;
-    }
-
-    return true;
-  } catch {
-    // allow-failopen: a failure reading CI status defaults to not green (fail-closed for safety).
-    return false;
-  }
 }
 
 /** First agent:* label on the issue, or null when it carries none. */
@@ -304,41 +266,9 @@ export async function fetchDispatchTasks(
           });
         }
 
-        const { data: prs } = await octokit.rest.pulls.list({
-          owner,
-          repo,
-          state: "open",
-          per_page: 50,
-        });
-
-        for (const pr of prs) {
-          if (pr.draft) continue;
-
-          let comments: string[] = [];
-          try {
-            const { data: rawComments } = await octokit.rest.issues.listComments({
-              owner,
-              repo,
-              issue_number: pr.number,
-              per_page: 100,
-            });
-            comments = rawComments.map((c) => c.body ?? "");
-          } catch {
-            // allow-failopen: if listing comments fails for a PR, skip it.
-          }
-
-          if (!isPrBrainReviewed(comments, pr.head.sha)) continue;
-
-          const green = await isGreenCI(octokit, owner, repo, pr.head.sha);
-          if (!green) continue;
-
-          readyToMerge.push({
-            repo: slug,
-            prNumber: pr.number,
-            title: pr.title,
-            url: pr.html_url,
-          });
-        }
+        const pulls = await collectReadyToMerge(octokit, owner, repo, slug);
+        readyToMerge.push(...pulls.ready);
+        unreachable.push(...pulls.unreachable);
       } catch (err) {
         unreachable.push({ repo: slug, error: err instanceof Error ? err.message : String(err) });
       }
