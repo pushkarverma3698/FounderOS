@@ -13,7 +13,8 @@
 # verify (on 2026-09-23 a repo was allowlisted while the daemon had never heard of it):
 #   review     <ONBOARD_REVIEW_BASE>/<name>                 pr-brain reviews the agent's PRs here
 #   workspace  <AGENT_DISPATCH_WORKSPACE_BASE>/<name>       Antigravity works here, owned by AGENT_DISPATCH_USER
-#   labels     the six agent:* labels on the GitHub repo    agent-dispatch moves an issue through them
+#   labels     the six agent:* and two engine:* labels      agent-dispatch moves an issue through the first, and
+#                                                            records which coding CLI wrote a PR in the second
 # <name> is the repo's name, except that FounderOS lives in "founderos": the same rule the daemon uses.
 #
 # Statuses:  ok · MISSING (definitely absent or unusable) · WARN (there, but suspicious: its origin is a
@@ -38,9 +39,11 @@ WORKSPACE_BASE="${AGENT_DISPATCH_WORKSPACE_BASE:-/opt/agy-workspace}"
 AG_USER="${AGENT_DISPATCH_USER:-antigravity}"
 
 # The six agent:* labels: the five states agent-dispatch moves an issue through, and the one it puts
-# on an issue whose brief is incomplete. tests/unit/scripts/onboard-repo.test.ts fails when this list
-# and the labels deploy/agent-dispatch uses differ.
-LABELS=(agent:ready agent:working agent:review agent:failed agent:blocked agent:needs-brief)
+# on an issue whose brief is incomplete. Then the two engine:* labels: the coding CLI a task is assigned to
+# (the bot's /claude and /agy put one on the issue) and which one wrote a PR (the daemon puts it on both).
+# tests/unit/scripts/onboard-repo.test.ts fails when this list and the labels deploy/agent-dispatch and
+# deploy/lib/engine.sh use differ.
+LABELS=(agent:ready agent:working agent:review agent:failed agent:blocked agent:needs-brief engine:agy engine:claude)
 
 label_color() {
   case "$1" in
@@ -49,6 +52,8 @@ label_color() {
     agent:review) echo 5319E7 ;;
     agent:failed) echo B60205 ;;
     agent:blocked) echo D93F0B ;;
+    engine:agy) echo 0052CC ;;
+    engine:claude) echo D97757 ;;
     *) echo FBCA04 ;;
   esac
 }
@@ -59,6 +64,8 @@ label_description() {
     agent:review) echo "A draft PR is open and pr-brain is reviewing it" ;;
     agent:failed) echo "agent-dispatch could not get a PR out of this issue" ;;
     agent:blocked) echo "Hit the re-dispatch limit: needs a human to re-open" ;;
+    engine:agy) echo "Assigned to Antigravity, or written by it" ;;
+    engine:claude) echo "Assigned to Claude Code, or written by it" ;;
     *) echo "The issue is not a complete brief; agent-dispatch will not claim it until it is" ;;
   esac
 }
@@ -237,7 +244,7 @@ render_human() {
   done
   if [[ "$ok_labels" -gt 0 || -n "$missing_labels" ]]; then
     if [[ -z "$missing_labels" ]]; then
-      printf '  %-8s  %-16s  %s\n' ok labels "${ok_labels} of ${#LABELS[@]} agent:* labels present"
+      printf '  %-8s  %-16s  %s\n' ok labels "${ok_labels} of ${#LABELS[@]} labels present"
     else
       printf '  %-8s  %-16s  %s\n' MISSING labels "${ok_labels} of ${#LABELS[@]} present; missing ${missing_labels}"
     fi

@@ -271,6 +271,16 @@ export class DispatchSandbox {
     writeFileSync(p, `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
   }
 
+  /**
+   * The daemon starts the executor through `bash -lc`, and a login shell rebuilds PATH: on macOS /etc/profile's path_helper
+   * puts /opt/homebrew/bin ahead of the stubs, so a hook that calls `gh` ran the REAL gh and every hook that opened a PR
+   * silently did nothing (5 midrun cases failed on a Mac and passed on Linux). A stub puts its own directory first again
+   * before it runs its hook; nothing the daemon itself runs is touched.
+   */
+  private hookPath(): string {
+    return `export PATH="${this.stubs}:$PATH"\n`;
+  }
+
   private installStubs(): void {
     // gh: the stateful fake, addressed by absolute path so PATH does not matter.
     this.stub("gh", `exec bash "${FAKE_GH}" "$@"`);
@@ -279,7 +289,7 @@ export class DispatchSandbox {
     this.stub("timeout", `shift; exec "$@"`);
     this.stub(
       "agy",
-      `echo run >>"$AGY_CALLS"
+      `${this.hookPath()}echo run >>"$AGY_CALLS"
 printf '%s\\n' "\${GEMINI_API_KEY-<unset>}" >>"$AGY_ENV_LOG"
 while [ $# -gt 0 ]; do case "$1" in --print) printf '%s\\n----\\n' "$2" >>"$AGY_PROMPT_LOG"; shift 2 ;; *) shift ;; esac; done
 [ -n "\${AGY_HOOK:-}" ] && bash -c "$AGY_HOOK"
@@ -291,7 +301,7 @@ exit "\${AGY_RC:-1}"`,
     // token is not there) and its -p prompt; then behaves as the test says.
     this.stub(
       "claude",
-      `echo run >>"$CLAUDE_CALLS"
+      `${this.hookPath()}echo run >>"$CLAUDE_CALLS"
 printf '%s\\n' "\${CLAUDE_CODE_OAUTH_TOKEN-<unset>}" >>"$CLAUDE_ENV_LOG"
 printf '%s\\n' "$*" >>"$CLAUDE_ARGV_LOG"
 while [ $# -gt 0 ]; do case "$1" in -p) printf '%s\\n----\\n' "$2" >>"$CLAUDE_PROMPT_LOG"; shift 2 ;; *) shift ;; esac; done
@@ -711,10 +721,12 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
   readState(name: string): string {
     return readFileSync(this.statePath(name), "utf8");
   }
-  /** Everything the daemon wrote under ~/.claude, for "the secret is nowhere" assertions. */
+  /** Everything the daemon wrote under ~/.claude, for "the secret is nowhere" assertions. The token file is the one thing in
+   *  there the daemon only READS (the founder put the token in it), so it is the one file left out. */
   allStateText(): string {
     const dir = join(this.home, ".claude");
     return readdirSync(dir)
+      .filter((f) => f !== "claude-code.token")
       .map((f) => {
         try {
           return readFileSync(join(dir, f), "utf8");
