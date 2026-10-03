@@ -12,10 +12,12 @@
 #   agy     (default) the Antigravity CLI, as the antigravity user, in a fresh conversation on a clean
 #           checkout of the PR head. Its model is NEVER the executor's (gemini-3.6-flash-medium): the
 #           executor is never its own grader, which is the whole reason this loop has a separate reviewer.
-#           The candidates, best first, are PR_BRAIN_MODELS (default claude-sonnet-4-6, then
+#           The candidates, best first, are PR_BRAIN_MODELS (default claude-sonnet-5-5-medium, then
 #           gemini-3.1-pro-high). Quota is per model family on this account, so a wall on one moves the
 #           review to the next; the reviewer is paused only when every candidate is out (2026-10-02: the
-#           three non-Gemini models were out for 69 hours while every Gemini model still answered).
+#           three non-Gemini models were out for 69 hours while every Gemini model still answered). A name agy no
+#           longer has (2026-10-03: claude-sonnet-4-6 became claude-sonnet-5-5-*, and the reviewer paused itself
+#           on it while gemini-3.1-pro-high still answered) is skipped the same way, and said so once.
 #           It cannot push (the checkout's push URL is disabled) and it does not stamp or decide: it ends
 #           its answer with `BRAIN-VERDICT: PASS` or `FAIL`, and this script makes the PR's state agree
 #           and posts the marker itself.
@@ -39,7 +41,7 @@
 #   PR_BRAIN_MAX               PRs per sweep (default 3)
 #   PR_BRAIN_ENGINE            agy (default) or claude, see above
 #   PR_BRAIN_MODELS            agy engine: reviewer models, best first, space or comma separated
-#                              (default "claude-sonnet-4-6 gemini-3.1-pro-high")
+#                              (default "claude-sonnet-5-5-medium gemini-3.1-pro-high")
 #   PR_BRAIN_MODEL             one model: claude engine (default sonnet); on agy it means PR_BRAIN_MODELS=<it>
 #   PR_BRAIN_EXECUTOR_MODEL    the model that writes the PRs, never used as the reviewer (default: the one
 #                              agent-dispatch uses, AGENT_DISPATCH_MODEL or gemini-3.6-flash-medium)
@@ -53,6 +55,17 @@
 #   PR_BRAIN_MERGE             0 = review and clear, but never merge (default 1). For a manual review of a PR you
 #                              want to merge yourself, e.g. a change to this loop: a cleared PR on beta is otherwise
 #                              squash-merged and PROMOTED to main on the spot.
+#   PR_BRAIN_DAILY_MAX         reviews started in any 24 hours before the sweep stops starting more (default 20, 0 = no
+#                              ceiling). A review is a whole agy session on the quota the executor shares.
+#   PR_BRAIN_CI_WAIT_SWEEPS    sweeps a head waits for its required CI to finish before it is reviewed anyway (default 4)
+#
+# What a sweep does NOT spend a review on (each is logged; `--pr N` is an explicit order and ignores all three):
+#   - a promotion or sync PR (head branch beta, main, master or chore/promote-*): its work already passed its own gate;
+#   - a head whose required CI is red: nothing to clear. It is not stamped either: agent-dispatch reads the same red
+#     check and sends the executor back to fix it. Someone else's PR is left alone and the founder is told once;
+#   - a head whose required CI is still running: deferred up to PR_BRAIN_CI_WAIT_SWEEPS sweeps, then reviewed;
+#   - any review past PR_BRAIN_DAILY_MAX in 24 hours.
+# When CI cannot be read (gh failing, no required checks on the branch) the review is spent as before.
 #
 # State:
 #   ~/.claude/pr-brain.down        present while the reviewer is unavailable (auth, usage
@@ -60,6 +73,9 @@
 #                                  appears, one when it goes — nothing per tick.
 #   ~/.claude/pr-brain.failures/   one file per PR: "<head> <failed-attempts>".
 #   ~/.claude/pr-brain.photos/     one file per PR: the head whose screenshots were sent.
+#   ~/.claude/pr-brain.ci/         one file per PR: "<head> <red|pending> <sweeps>", what CI said about that head.
+#   ~/.claude/pr-brain.reviews     one line per review started: "<epoch> <repo>#<pr> <head8>", the last 24 hours.
+#   ~/.claude/pr-brain.ceiling     the day (epoch/86400) the ceiling notice was last sent: one message a day.
 #
 # Log: ~/.claude/pr-brain.log
 
@@ -74,7 +90,7 @@ ENGINE="${PR_BRAIN_ENGINE:-agy}"
 case "$ENGINE" in
   agy)
     # MODEL is chosen lazily, from this list, by the first call that needs the reviewer (select_review_model).
-    REVIEW_MODELS="${PR_BRAIN_MODELS:-${PR_BRAIN_MODEL:-claude-sonnet-4-6 gemini-3.1-pro-high}}"
+    REVIEW_MODELS="${PR_BRAIN_MODELS:-${PR_BRAIN_MODEL:-claude-sonnet-5-5-medium gemini-3.1-pro-high}}"
     REVIEW_MODELS="${REVIEW_MODELS//,/ }"
     MODEL=""
     REVIEWER_NAME="the Antigravity reviewer" ;;
@@ -95,6 +111,13 @@ DOWN_FILE="$HOME/.claude/pr-brain.down"
 FAIL_DIR="$HOME/.claude/pr-brain.failures"
 PHOTO_DIR="$HOME/.claude/pr-brain.photos"
 MAX_ATTEMPTS="${PR_BRAIN_MAX_ATTEMPTS:-3}"
+CI_DIR="$HOME/.claude/pr-brain.ci"
+LEDGER="$HOME/.claude/pr-brain.reviews"
+CEILING_NOTICE="$HOME/.claude/pr-brain.ceiling"
+DAILY_MAX="${PR_BRAIN_DAILY_MAX:-20}"
+CI_WAIT_SWEEPS="${PR_BRAIN_CI_WAIT_SWEEPS:-4}"
+[[ "$DAILY_MAX" =~ ^[0-9]+$ ]] || DAILY_MAX=20
+[[ "$CI_WAIT_SWEEPS" =~ ^[0-9]+$ ]] || CI_WAIT_SWEEPS=4
 # Only ever act on repositories and PRs belonging to this account. Auto-approving
 # or pushing to an upstream project's PR is not a thing this may do by accident.
 OWNER="${PR_BRAIN_OWNER:-$(gh api user --jq .login 2>/dev/null || echo __none__)}"
@@ -160,9 +183,10 @@ notify_photo() {
 #   down-state.sh   one Telegram message per pause/resume + redact_secrets (shared with agent-dispatch)
 #   agy-failure.sh  classify_agy_failure: quota | auth | transient | unknown
 #   agy-run.sh      as_antigravity + agy_run: one agy turn, streamed live into ONE Telegram message
+#   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with agent-dispatch)
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in down-state.sh agy-failure.sh agy-run.sh; do
+for _lib in down-state.sh agy-failure.sh agy-run.sh ci-state.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -375,6 +399,8 @@ leave_down() {
 # the rest of this sweep; the next tick asks again, because quota comes back.
 EXECUTOR_MODEL="${PR_BRAIN_EXECUTOR_MODEL:-$AGY_EXECUTOR_MODEL}"
 SPENT_MODELS=" "
+RETIRED_MODELS=" "   # candidates agy does not know (a subset of SPENT_MODELS)
+QUOTA_SEEN=0         # 1 once any candidate hit a quota wall this sweep
 
 # Sets MODEL to the first candidate that is neither the executor's model nor spent. Returns 1 when there is none.
 select_review_model() {
@@ -390,10 +416,13 @@ select_review_model() {
 
 # Why select_review_model found nothing, as the line the founder reads. LAST_QUOTA_LINE is the CLI's own words.
 no_review_model_detail() { # no_review_model_detail LAST_QUOTA_LINE
-  local spent="${SPENT_MODELS# }"
+  local spent="${SPENT_MODELS# }" retired="${RETIRED_MODELS# }"
   spent="${spent% }"
+  retired="${retired% }"
   if [[ -z "$spent" ]]; then
     printf 'no reviewer model is configured that differs from the executor model %s (PR_BRAIN_MODELS="%s")' "$EXECUTOR_MODEL" "$REVIEW_MODELS"
+  elif [[ "$QUOTA_SEEN" -eq 0 ]]; then
+    printf 'no configured reviewer model is one agy knows (%s are not in its catalog; PR_BRAIN_MODELS="%s"). `agy models` lists what exists' "${retired// /, }" "$REVIEW_MODELS"
   else
     printf 'tried %s: %s' "${spent// /, }" "$1"
   fi
@@ -418,7 +447,7 @@ preflight() {
     while :; do
       if ! select_review_model; then
         # Nothing left to ask: every candidate is spent, or none may be used (it is the executor's own model).
-        [[ "$SPENT_MODELS" == " " ]] && cls=unknown || cls=limit
+        [[ "$QUOTA_SEEN" -eq 1 ]] && cls=limit || cls=unknown
         enter_down "$cls" "$(no_review_model_detail "$quota_line")"
         rm -f "$pf_log"
         exit 0
@@ -436,7 +465,18 @@ preflight() {
         # every model shares it, so only quota moves on to the next candidate.
         quota_line="$detail"
         SPENT_MODELS+="$MODEL "
+        QUOTA_SEEN=1
         log "quota used up on $MODEL ($detail): trying the next reviewer model"
+        continue
+      fi
+      if agy_model_unknown "$pf_log"; then
+        # A name agy's catalog no longer has: not an outage, and no other candidate shares the problem. Skip it, and
+        # say so once (a quiet skip would hide a configuration that is wrong for good).
+        SPENT_MODELS+="$MODEL "
+        RETIRED_MODELS+="$MODEL "
+        detail="$(grep -Eai -m1 -- 'invalid model selection|is not recognized as a known model' "$pf_log" | cut -c1-200)"
+        log "$MODEL is not a model agy knows ($detail): trying the next reviewer model"
+        warn_once "retired-model-$MODEL" "reviewer model $MODEL is not in agy's catalog (retired or renamed), so it is skipped. Fix: ssh founderos-vps, crontab -e, correct or delete PR_BRAIN_MODELS on the pr-brain line (the default is current). agy models lists what exists."
         continue
       fi
       enter_down "${cls:-unknown}" "$detail"
@@ -725,6 +765,7 @@ run_agy_gate_any_model() { # run_agy_gate_any_model PR SLUG NAME HEAD APP_RC OUT
     spent="$MODEL"
     line="$(outage_line "$out" limit)"
     SPENT_MODELS+="$spent "
+    QUOTA_SEEN=1
     select_review_model || return "$rc"
     log "$name#$pr: quota used up on $spent ($line): reviewing again with $MODEL"
     redact_secrets <"$out" >>"$LOG"
@@ -978,6 +1019,94 @@ only_our_commits_since() {
   return 0
 }
 
+# ------------------------------------------------------- what a review is not spent on
+#
+# A review is a whole agy session (3 to 10 minutes, 60+ tool calls) on a quota the executor shares. The 2026-10-03
+# audit of this log found three kinds that bought nothing: a promotion PR (Oplify api#60 and app#41, ~4 minutes each,
+# against the rule "no new review on a promotion"), a head whose required CI was red (founderos#791 was reviewed on
+# four heads while "Unit + regression tests" failed), and no bound on the total. `--pr N` is an explicit order and
+# is held back by none of them.
+
+epoch_now() { printf '%s' "${PR_BRAIN_NOW_EPOCH:-$(date -u +%s)}"; }
+
+# A PR from a long-lived branch, or from a promotion branch, moves work that was gated when it went in.
+is_promotion_pr() { # is_promotion_pr HEAD_REF
+  case "$1" in
+    beta|main|master|chore/promote-*) return 0 ;;
+  esac
+  return 1
+}
+
+ci_file() { printf '%s/%s#%s' "$CI_DIR" "$repo_name" "$1"; }
+
+reviews_in_last_day() {
+  [[ -f "$LEDGER" ]] || { echo 0; return; }
+  awk -v c="$(( $(epoch_now) - 86400 ))" '$1 + 0 > c { n++ } END { print n + 0 }' "$LEDGER"
+}
+
+# One line per review STARTED, whatever becomes of it (a review that never reaches a verdict spent the quota too).
+# The file keeps only the last 24 hours, so it never grows.
+record_review() { # record_review REPO#PR HEAD
+  local now cutoff; now="$(epoch_now)"; cutoff=$((now - 86400))
+  mkdir -p "$(dirname "$LEDGER")"
+  { [[ -f "$LEDGER" ]] && awk -v c="$cutoff" '$1 + 0 > c' "$LEDGER"; printf '%s %s %s\n' "$now" "$1" "${2:0:8}"; } >"$LEDGER.tmp" \
+    && mv "$LEDGER.tmp" "$LEDGER"
+}
+
+# Returns 0 = start a review on this head; 1 = not this one (handled here, the caller moves to the next PR);
+# 2 = the daily ceiling is reached, so no PR after this one is reviewed either. Files and messages are written only
+# when this is not a dry run: a dry run reads and says what it would do.
+spend_gate() { # spend_gate PR HEAD HEAD_REF
+  local pr="$1" head="$2" head_ref="$3" f seen_head="" seen_state="" seen_n=0 n count today
+  f="$(ci_file "$pr")"
+  if [[ -f "$f" ]]; then read -r seen_head seen_state seen_n <"$f" || true; fi
+  if [[ "$seen_head" != "$head" ]]; then seen_state=""; seen_n=0; fi
+  [[ "$seen_n" =~ ^[0-9]+$ ]] || seen_n=0   # a hand-edited or half-written state file must not abort the sweep (set -u)
+
+  required_ci_state "$pr"
+  case "$CI_STATE" in
+    red)
+      # Nothing here can clear a PR whose required CI fails, and the executor has to fix that whatever the review
+      # says. An executor's PR is picked up by agent-dispatch (it reads the same CI state and sends Antigravity back
+      # with the failing check as the brief), so this stays quiet about those: agent-dispatch speaks. Anyone else's
+      # PR has nobody acting on it, so the founder is told once per head.
+      log "$repo_name#$pr head ${head:0:8}: required CI is red ($CI_DETAIL) — no review spent"
+      if [[ "$DRY_RUN" -eq 0 && "$seen_state" != red ]]; then
+        mkdir -p "$CI_DIR" && printf '%s red 1\n' "$head" >"$f"
+        if [[ "$head_ref" != task/issue-* ]]; then
+          notify "⏭ ${repo_name}#${pr}: its required CI is red (${CI_DETAIL}). No review spent; nothing was changed.
+$(gh pr view "$pr" --json url --jq .url 2>/dev/null)"
+        fi
+      fi
+      return 1 ;;
+    pending)
+      n=$((seen_n + 1))
+      [[ "$seen_state" == pending ]] || n=1
+      if [[ "$n" -le "$CI_WAIT_SWEEPS" ]]; then
+        [[ "$DRY_RUN" -eq 1 ]] || { mkdir -p "$CI_DIR" && printf '%s pending %s\n' "$head" "$n" >"$f"; }
+        log "$repo_name#$pr head ${head:0:8}: required CI still running — review deferred ($n/$CI_WAIT_SWEEPS)"
+        return 1
+      fi
+      log "$repo_name#$pr head ${head:0:8}: required CI still running after $CI_WAIT_SWEEPS sweeps — reviewing anyway" ;;
+    *)
+      [[ "$DRY_RUN" -eq 1 ]] || rm -f "$f" ;;
+  esac
+
+  if [[ "$DAILY_MAX" -gt 0 ]]; then
+    count="$(reviews_in_last_day)"
+    if [[ "$count" -ge "$DAILY_MAX" ]]; then
+      log "daily review ceiling reached ($count in 24 h, PR_BRAIN_DAILY_MAX=$DAILY_MAX) — $repo_name#$pr waits"
+      today=$(( $(epoch_now) / 86400 ))
+      if [[ "$DRY_RUN" -eq 0 && "$(cat "$CEILING_NOTICE" 2>/dev/null)" != "$today" ]]; then
+        printf '%s\n' "$today" >"$CEILING_NOTICE"
+        notify "🧯 pr-brain: ${count} reviews in the last 24 h (PR_BRAIN_DAILY_MAX=${DAILY_MAX}). No more are started until the oldest ages out, so the executor keeps the quota. First waiting: ${repo_name}#${pr}. Review one now: pr-brain --pr ${pr} --repo /opt/review/${repo_name}. Raise the limit: PR_BRAIN_DAILY_MAX in the pr-brain crontab line."
+      fi
+      return 2
+    fi
+  fi
+  return 0
+}
+
 acted=0
 sweep_outage=0
 
@@ -1013,19 +1142,24 @@ while IFS= read -r repo; do
   else
     # Own PRs only, from a branch in this repo (never a fork), not opted out.
     prs=$(gh pr list --state open --limit 20 \
-            --json number,headRefOid,labels,updatedAt,author,isCrossRepository \
+            --json number,headRefOid,baseRefName,headRefName,labels,updatedAt,author,isCrossRepository \
             --jq "sort_by(.updatedAt) | reverse | .[]
                   | select(.isCrossRepository == false)
                   | select(.author.login == \"$OWNER\")
                   | select([.labels[].name] | index(\"no-brain\") | not)
-                  | \"\(.number) \(.headRefOid)\"" 2>/dev/null || true)
+                  | \"\(.number) \(.headRefOid) \(.baseRefName) \(.headRefName)\"" 2>/dev/null || true)
   fi
 
   [[ -z "$prs" ]] && { popd >/dev/null; continue; }
 
-  while read -r pr head; do
+  while read -r pr head base_ref head_ref; do
     [[ -z "$pr" ]] && continue
     [[ "$acted" -ge "$MAX" ]] && break
+
+    if [[ -z "$ONE_PR" ]] && is_promotion_pr "$head_ref"; then
+      log "$repo_name#$pr is a promotion/sync PR ($head_ref → $base_ref): its work already passed its own gate — not reviewed again"
+      continue
+    fi
 
     # A PR is gated once per head SHA. A new push re-opens it.
     comments=""
@@ -1080,6 +1214,14 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
       continue
     fi
 
+    if [[ -z "$ONE_PR" ]]; then
+      spend_gate "$pr" "$head" "$head_ref"
+      case $? in
+        1) continue ;;
+        2) break 2 ;;
+      esac
+    fi
+
     if [[ "$DRY_RUN" -eq 1 ]]; then
       log "DRY RUN would gate $repo_name#$pr (head ${head:0:8})"
       acted=$((acted + 1))
@@ -1108,6 +1250,7 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
       *) log "$repo_name#$pr app gate: not applicable or did not run (rc=$app_rc)" ;;
     esac
 
+    record_review "$repo_name#$pr" "$head"
     gate_out=$(mktemp "${TMPDIR:-/tmp}/pr-brain-gate.XXXXXX")
     if [[ "$ENGINE" == "agy" ]]; then
       log "gating $repo_name#$pr (head ${head:0:8}) engine=agy model=$MODEL"

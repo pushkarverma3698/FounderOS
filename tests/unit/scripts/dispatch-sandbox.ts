@@ -98,6 +98,8 @@ export interface PrSpec {
   /** OPEN (default), MERGED or CLOSED. Only an OPEN PR is listed, as `gh pr list --state open` does. */
   readonly state?: "OPEN" | "MERGED" | "CLOSED";
   readonly comments?: readonly string[];
+  /** CI as `gh pr checks` reports it. `required: false` is a check branch protection does not require. */
+  readonly checks?: readonly { readonly name: string; readonly bucket: "pass" | "fail" | "pending"; readonly state?: string; readonly required?: boolean }[];
 }
 
 export interface TickOptions {
@@ -141,6 +143,7 @@ interface RepoState {
     isDraft?: boolean;
     state?: string;
     comments: { body: string }[];
+    checks?: { name: string; bucket: string; state?: string; required?: boolean }[];
   }[];
 }
 interface GhState {
@@ -409,6 +412,7 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
       isDraft: spec.isDraft ?? true,
       state: spec.state ?? "OPEN",
       comments: (spec.comments ?? []).map((body) => ({ body })),
+      ...(spec.checks ? { checks: spec.checks.map((c) => ({ ...c })) } : {}),
     });
     this.writeGh(s);
   }

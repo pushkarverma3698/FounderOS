@@ -24,7 +24,7 @@ directory; only `agent-dispatch`'s documented location was wrong.
 | `pr-brain` | `deploy/vps-daemons/pr-brain` | `~/bin/pr-brain` | `*/20 * * * *` | Gates every open PR authored by this account: re-runs `pnpm gate`, runs the `pr-adversary` protocol, clears it or requests changes (the `claude` engine may also push a fix), then **merges** once cleared. The reviewer is an engine, `PR_BRAIN_ENGINE`: **`agy` by default** (see "The reviewer" below), `claude` as before. A head whose only new commits are pr-brain's own fixes or clean merges of the base is not re-gated: the verdict is carried forward and the merge retried with no Claude session (2026-09-29) — except in an employer/org repo (`repo_owner != $OWNER`, e.g. `OplifyMessage`), where it marks the PR ready and always leaves the merge to a human (restored 2026-09-21). |
 | `agent-dispatch` | `deploy/agent-dispatch` | `~/bin/agent-dispatch` | `*/15 * * * *` and `* * * * * … --kicked` | Sweeps every repo in its own `DEFAULT_REPOS` (the only list it reads), claims one `agent:ready` GitHub issue per repo per tick **if its brief is complete**, checks out a branch in the matching `/opt/agy-workspace/<repo>` workspace, invokes Antigravity (`agy`) to implement it, opens a draft PR. Every way a run can end without a PR is classified (see below) instead of all becoming `agent:failed`. |
 | `onboard-repo.sh` | `deploy/onboard-repo.sh` | `~/bin/onboard-repo.sh` | — (run by hand, and `--check` by every agent-dispatch tick) | Puts a repo on the loop, or reports what it is missing. See "Adding a repo". |
-| helpers | `deploy/lib/*.sh` | `~/bin/lib/*.sh` | — | Sourced by the daemons: `down-state.sh` (the pause/resume state machine and secret redaction, shared by both), `agy-failure.sh` (the failure classifier) and `agy-run.sh` (one agy turn, streamed live into one Telegram message; shared by both). **A daemon refuses to start without them.** |
+| helpers | `deploy/lib/*.sh` | `~/bin/lib/*.sh` | — | Sourced by the daemons: `down-state.sh` (the pause/resume state machine and secret redaction, shared by both), `agy-failure.sh` (the failure classifier), `agy-run.sh` (one agy turn, streamed live into one Telegram message; shared by both) and `ci-state.sh` (what a PR's required CI checks say; shared by both). **A daemon refuses to start without them.** |
 
 Both read config from `~/.claude/pr-brain.repos` / env vars — see each
 script's own header comment for the full list.
@@ -37,7 +37,7 @@ loop stopped with it. `pr-brain` now has an engine:
 | | `agy` (default) | `claude` |
 |---|---|---|
 | Runs | the Antigravity CLI as the `antigravity` user, in its own clone `/opt/agy-workspace/review/<repo>` on the PR head | headless Claude Code in `/opt/review/<repo>` |
-| Model | `claude-sonnet-4-6`, then `gemini-3.1-pro-high` if that one's quota is gone (`PR_BRAIN_MODELS`, best first). **Never** the executor's `gemini-3.6-flash-medium`: the code skips it | `sonnet` (`PR_BRAIN_MODEL`) |
+| Model | `claude-sonnet-5-5-medium`, then `gemini-3.1-pro-high` if that one's quota is gone or agy no longer has it (`PR_BRAIN_MODELS`, best first; `agy models` lists what exists). **Never** the executor's `gemini-3.6-flash-medium`: the code skips it | `sonnet` (`PR_BRAIN_MODEL`) |
 | Can push to the PR | **no** (the clone's push URL is disabled) | yes (verdict B) |
 | Verdict | the model ends with `BRAIN-VERDICT: PASS` or `FAIL`; **the script** makes the PR ready/draft and posts the reviewed marker. No verdict line = a failed attempt | read from the PR's state, as before |
 | Telegram | one message, edited while it runs: `Reviewing <repo>#<n>`, the last tool calls, the clock, the verdict | the gate's start and verdict |
@@ -49,11 +49,26 @@ different model, a fresh conversation and no write path matter) are in the ADR-0
 and `gpt-oss-120b-medium` all answered `RESOURCE_EXHAUSTED (code 429) … Resets in 69h26m28s` while every Gemini model
 still worked (probed on the VPS). So a wall on one reviewer model moves the review to the next candidate, at the
 preflight and in the middle of a review (the same PR is reviewed again at once, and the spent model is skipped for the
-rest of the sweep). The reviewer is paused, once, only when every candidate is out; the message names the models tried
+rest of the sweep). A name agy's catalog no longer has (2026-10-03: `claude-sonnet-4-6` became `claude-sonnet-5-5-*`) is skipped the same way and reported once; it used to pause the whole reviewer. The reviewer is paused, once, only when every candidate is out; the message names the models tried
 and the reset time. A rejected login is not retried on another model: every model shares it. Probe a model by hand:
 `sudo -u antigravity -i agy --new-project --model <name> --print "reply ok" --output-format text`; list them with
 `agy models`. If you move the executor (`AGENT_DISPATCH_MODEL`), pr-brain follows it when it sees the same variable,
 otherwise set `PR_BRAIN_EXECUTOR_MODEL` on its crontab line to the same value.
+
+**What a sweep does not spend a review on.** A review is a whole agy session on the quota the executor shares, so a
+sweep skips these (each is one log line; `pr-brain --pr N` is an explicit order and ignores all of them):
+
+| Skipped | Why | What happens instead |
+|---|---|---|
+| a promotion or sync PR (head branch `beta`, `main`, `master`, `chore/promote-*`) | its work already passed its own gate | nothing: no marker, no comment |
+| a head whose **required** CI is red | a review cannot clear it | pr-brain skips it. agent-dispatch (Pass B) reads the same CI state and sends Antigravity back with the failing check as the brief, counted like any re-dispatch (3, then `agent:blocked`). Someone else's PR: the founder is told once per head |
+| a head whose required CI is still running | the result decides whether a review is worth it | deferred up to `PR_BRAIN_CI_WAIT_SWEEPS` sweeps (4), then reviewed anyway |
+| any review past `PR_BRAIN_DAILY_MAX` (20, `0` = off) in 24 hours | the executor lives on the same quota | the sweep stops, one notice a day names the first PR waiting and the override |
+
+Only **required** checks count (a failing staging deploy is not a red PR). When CI cannot be read (the base branch has no
+required checks, `gh` fails) the review is spent as before: a quiet failure must not mean "never review". State:
+`~/.claude/pr-brain.ci/` (what CI said about a head), `~/.claude/pr-brain.reviews` (one line per review started, last
+24 h), `~/.claude/pr-brain.ceiling` (the day the notice was sent). Delete `pr-brain.reviews` to reset the ceiling.
 
 ## Live progress and the kick
 

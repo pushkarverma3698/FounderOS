@@ -315,3 +315,38 @@ describe("agy_patterns", () => {
     expect(r.status).not.toBe(0);
   });
 });
+
+describe("agy_model_unknown — a model name agy's catalog no longer has [verbatim, 2026-10-03]", () => {
+  const REAL = [
+    'error: invalid model selection (--model "claude-sonnet-4-6" --effort ""): model claude-sonnet-4-6 is not recognized as a known model or custom model in settings',
+    "Available models:",
+    "  Gemini 3.8 Flash (High)",
+    "  Gemini 3.1 Pro (High)",
+    "  Claude Sonnet 5.5 (Medium)",
+    "  GPT-OSS 120B (Medium)",
+  ].join("\n");
+  const unknown = (log: string): boolean => {
+    const f = join(root, "model.log");
+    writeFileSync(f, log);
+    return bash(`source "${LIB}"; agy_model_unknown "$1"`, [f]).status === 0;
+  };
+
+  it("recognises the real refusal, catalog and all", () => {
+    expect(unknown(REAL)).toBe(true);
+  });
+
+  it("is not a class of its own: the same log is 'unknown' to classify_agy_failure, so no caller pauses on it by accident", () => {
+    expect(classify(REAL)).toBe("unknown");
+  });
+
+  it("is false for the failures that ARE classified, and for a transcript that merely mentions the phrase", () => {
+    expect(unknown("error: Individual quota reached. Resets in 69h26m28s.")).toBe(false);
+    expect(unknown("Error: authentication timed out.")).toBe(false);
+    expect(unknown("I will explain why the model is not recognized as a known model in this README.\n")).toBe(false);
+  });
+
+  it("is false for an empty or missing log", () => {
+    expect(unknown("")).toBe(false);
+    expect(bash(`source "${LIB}"; agy_model_unknown "$1"`, [join(root, "nope.log")]).status).not.toBe(0);
+  });
+});
