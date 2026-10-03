@@ -6,19 +6,19 @@
  * (ADR-004, ADR-013). The descriptions say so, so a coding tool routes a send to
  * Telegram instead of retrying here.
  *
- * Accounts are the ones FounderOS already knows (src/core/accounts.ts). Omit
- * `account` to read every account at once, each result labelled.
+ * Accounts are the built-in ones plus any added with `/login google add` in Telegram
+ * (src/infra/google-mailboxes.ts), read fresh on every call. Omit `account` to read
+ * every account at once, each result labelled.
  */
 
-import { ACCOUNT_KEYS, type AccountKey } from "../core/accounts.js";
+import { listGoogleMailboxes } from "../infra/google-mailboxes.js";
 import { gwsListCalendarEvents, gwsReadEmails } from "../infra/providers/google-gws.js";
 import type { ToolResult } from "../tools/index.js";
 import { formatError, formatResult, type McpToolResult } from "./brain-tools.js";
 
 const ACCOUNT_SCHEMA = {
   type: "string",
-  enum: [...ACCOUNT_KEYS],
-  description: `One Google account (${ACCOUNT_KEYS.join(", ")}). Omit to read all of them.`,
+  description: "One Google account: turicks, personal, naggar, or a name the founder added in Telegram. Omit to read all of them.",
 };
 
 export const GOOGLE_TOOLS = [
@@ -58,6 +58,7 @@ export interface GoogleDeps {
   readEmails: typeof gwsReadEmails;
   listEvents: typeof gwsListCalendarEvents;
   now: () => Date;
+  mailboxes: () => string[];
 }
 
 /** Credential alerts are the bot's job; a hub process per session would repeat them. */
@@ -67,6 +68,7 @@ const defaultDeps: GoogleDeps = {
   readEmails: (input, timeoutMs) => gwsReadEmails(input, timeoutMs, silent),
   listEvents: (input, timeoutMs) => gwsListCalendarEvents(input, timeoutMs, silent),
   now: () => new Date(),
+  mailboxes: () => listGoogleMailboxes(),
 };
 
 function clamp(value: unknown, min: number, max: number, fallback: number): number {
@@ -75,18 +77,16 @@ function clamp(value: unknown, min: number, max: number, fallback: number): numb
 }
 
 /** The accounts a call reads, or an error naming the valid ones. */
-function accountsFor(raw: unknown): AccountKey[] | string {
-  if (raw === undefined || raw === null || raw === "" || raw === "all") return [...ACCOUNT_KEYS];
+function accountsFor(raw: unknown, known: string[]): string[] | string {
+  if (raw === undefined || raw === null || raw === "" || raw === "all") return known;
   const key = String(raw).trim().toLowerCase();
-  return (ACCOUNT_KEYS as readonly string[]).includes(key)
-    ? [key as AccountKey]
-    : `Unknown account "${String(raw)}". Use one of: ${ACCOUNT_KEYS.join(", ")} (or omit it for all).`;
+  return known.includes(key) ? [key] : `Unknown account "${String(raw)}". Use one of: ${known.join(", ")} (or omit it for all).`;
 }
 
 /** One section per account; an error only when every account failed. */
 async function perAccount(
-  accounts: AccountKey[],
-  run: (account: AccountKey) => Promise<ToolResult>,
+  accounts: string[],
+  run: (account: string) => Promise<ToolResult>,
 ): Promise<McpToolResult> {
   const results = await Promise.all(accounts.map(async (a) => [a, await run(a)] as const));
   const text = (r: ToolResult): string => (r.success ? String(r.data) : `Error: ${r.error}`);
@@ -105,7 +105,7 @@ export async function callGoogleTool(
   deps: GoogleDeps = defaultDeps,
 ): Promise<McpToolResult | null> {
   if (name !== "gmail_search" && name !== "calendar_events") return null;
-  const accounts = accountsFor(args["account"]);
+  const accounts = accountsFor(args["account"], deps.mailboxes());
   if (typeof accounts === "string") return formatError(accounts);
 
   if (name === "gmail_search") {
