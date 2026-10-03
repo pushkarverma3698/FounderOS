@@ -10,7 +10,7 @@
 import { describe, it, expect } from "vitest";
 import { OWNER_ONLY_COMMANDS } from "../../../src/gateway/chat-access.js";
 
-const SYSTEM_COMMANDS = ["halt", "resume", "task", "newproject", "connect"];
+const SYSTEM_COMMANDS = ["halt", "resume", "task", "newproject", "connect", "where"];
 /** Commands that read or write the founder's own data: his focus and projects, his goals. */
 const FOUNDER_DATA_COMMANDS = ["focus", "projects", "goal", "goals"];
 
