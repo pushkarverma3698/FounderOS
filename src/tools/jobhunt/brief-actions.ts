@@ -78,22 +78,24 @@ export function renderNextActions(
   standing: readonly BriefRow[] = [],
   /** The UNCAPPED stretch count — standing continues from do-today + stretch. */
   stretchTotal = stretch.length,
+  profileSelector = "",
 ): string {
+  const sel = profileSelector ? `${profileSelector} ` : "";
   const lines = [
-    ...doToday.map((r, i) => `${cmd(`/draft ${i + 1}`)} — apply to ${esc(r.company)}`),
+    ...doToday.map((r, i) => `${cmd(`/draft ${sel}${i + 1}`)} — apply to ${esc(r.company)}`),
     // Numbered as a CONTINUATION of do-today, because `/draft` resolves across
     // both sections as one run. Restarting at 1 would make `/draft 1` ambiguous.
     ...stretch.map(
       (r, i) =>
-        `${cmd(`/draft ${doTodayTotal + i + 1}`)} — apply to ${esc(r.company)} (a stretch on years)`,
+        `${cmd(`/draft ${sel}${doTodayTotal + i + 1}`)} — apply to ${esc(r.company)} (a stretch on years)`,
     ),
     // Continues from do-today + stretch for the same reason: one `/draft`
     // numbering across every section it resolves against.
     ...standing.map(
       (r, i) =>
-        `${cmd(`/draft ${doTodayTotal + stretchTotal + i + 1}`)} — apply to ${esc(r.company)} (older, re-confirmed open)`,
+        `${cmd(`/draft ${sel}${doTodayTotal + stretchTotal + i + 1}`)} — apply to ${esc(r.company)} (older, re-confirmed open)`,
     ),
-    ...askable.map((r, i) => `${cmd(`/ask ${i + 1}`)} — draft the question for ${esc(r.company)}`),
+    ...askable.map((r, i) => `${cmd(`/ask ${sel}${i + 1}`)} — draft the question for ${esc(r.company)}`),
   ];
 
   // ONLY REAL COMMANDS APPEAR AS COMMANDS. `/draft` and `/ask` are registered on
@@ -110,12 +112,12 @@ export function renderNextActions(
 
   const applyInstructions =
     `\n\n<b>🚀 HOW TO APPLY (2 WAYS)</b>\n` +
-    `<b>1. The Fast Way:</b> Type ${cmd(`/draft all`)} to auto-tailor CVs for all jobs above. ` +
+    `<b>1. The Fast Way:</b> Type ${cmd(`/draft ${sel}all`)} to auto-tailor CVs for all jobs above. ` +
     `Then run <code>${MAC_CLIENT_COMMAND}</code> on your Mac — it opens every queued role with ` +
     `the form already filled and waits for your click.\n` +
-    `<b>2. The Manual Way:</b> Type ${cmd(`/draft <number>`)} (e.g. ${cmd(`/draft 1`)}) to get the ` +
+    `<b>2. The Manual Way:</b> Type ${cmd(`/draft ${sel}<number>`)} (e.g. ${cmd(`/draft ${sel}1`)}) to get the ` +
     `tailored PDF and a direct application link. Apply in your browser, then type ` +
-    `${cmd(`/applied 1`)} to clear it from the queue.`;
+    `${cmd(`/applied ${sel}1`)} to clear it from the queue.`;
 
   return (
     `<b>▶️ DO THIS NEXT</b>\n` +

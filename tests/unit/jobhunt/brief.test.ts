@@ -23,6 +23,7 @@ import {
   type BriefInput,
   type BriefRow,
 } from "../../../src/tools/jobhunt/brief.js";
+import { getProfile } from "../../../src/tools/jobhunt/profile-config.js";
 
 function row(overrides: Partial<BriefRow> = {}): BriefRow {
   return {
@@ -183,32 +184,80 @@ describe("formatDailyBrief", () => {
         ],
       }),
     );
-    expect(out).toContain("NOT LAWFUL (2)");
+    expect(out).toContain("OTHER BARS (2)");
     expect(out).toContain("Alpha");
     expect(out).toContain("Beta");
     expect(out).toContain("Dutch required");
   });
 
-  it("separates a level bar from a legal one", () => {
-    // "Not lawful" is a fact about the permit system; "too senior" is a fact
-    // about this posting, and a run full of the second means the search terms
-    // are aimed above his level. Collapsing them hides that signal.
+  it("separates a level bar from a legal one and other bars", () => {
     const out = formatDailyBrief(
       input({
         rows: [
-          row({ id: "a", company: "Alpha", verdict: "reject", gates: [{ gate: "Language", status: "reject", evidence: "Dutch required" }] }),
+          row({ id: "a", company: "Alpha", verdict: "reject", gates: [{ gate: "Basis", status: "reject", evidence: "No visa support" }] }),
           row({
             id: "b",
             company: "Beta",
             verdict: "reject",
             gates: [{ gate: "Experience", status: "reject", evidence: "Asks for 8 years minimum" }],
           }),
+          row({ id: "c", company: "Gamma", verdict: "reject", gates: [{ gate: "Language", status: "reject", evidence: "Dutch required" }] }),
         ],
       }),
     );
     expect(out).toContain("NOT LAWFUL (1)");
-    expect(out).toContain("TOO SENIOR / TOO JUNIOR (1)");
+    expect(out).toContain("NOT YOUR LEVEL (1)");
+    expect(out).toContain("OTHER BARS (1)");
     expect(out).toContain("Asks for 8 years minimum");
+  });
+
+  it("renders a row rejected only by Level under NOT YOUR LEVEL, not NOT LAWFUL", () => {
+    const out = formatDailyBrief(
+      input({
+        rows: [
+          row({
+            id: "a",
+            company: "Acme",
+            verdict: "reject",
+            gates: [{ gate: "Level", status: "reject", evidence: "Principal engineer required" }],
+          }),
+        ],
+      }),
+    );
+    expect(out).toContain("NOT YOUR LEVEL (1)");
+    expect(out).not.toContain("NOT LAWFUL");
+  });
+
+  it("renders non-default profile brief with 0 matches of /(draft|ask|applied) \\d/ without profile token", () => {
+    const profile = getProfile("wife-nl-finance");
+    const out = formatDailyBrief(
+      input({
+        profile,
+        rows: [
+          row({ id: "a", company: "Alpha", verdict: "pass", country: "NL" }),
+          row({ id: "b", company: "Beta", verdict: "flag", country: "NL", gates: [{ gate: "Pay", status: "flag", evidence: "Unstated" }] }),
+        ],
+      }),
+    );
+    // Matches bare commands like "/draft 1", "/ask 1", "/applied 1"
+    const bareCommandRegex = /(draft|ask|applied) \d/;
+    expect(out).toContain("tashi");
+    expect(bareCommandRegex.test(out)).toBe(false);
+  });
+
+  it("renders default profile brief output unchanged with bare commands", () => {
+    const out = formatDailyBrief(
+      input({
+        rows: [
+          row({ id: "a", company: "Alpha", verdict: "pass", country: "NL" }),
+          row({ id: "b", company: "Beta", verdict: "flag", country: "NL", gates: [{ gate: "Pay", status: "flag", evidence: "Unstated" }] }),
+        ],
+      }),
+    );
+    expect(out).toContain("/draft 1");
+    expect(out).toContain("/ask 1");
+    expect(out).toContain("/applied 1");
+    expect(out).toContain("/draft all");
   });
 
   it("nags when PASS roles sit undrafted, and names drafting as the bottleneck", () => {
