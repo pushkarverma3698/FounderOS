@@ -52,7 +52,7 @@ The autonomous system handles quota exhaustion gracefully without crashing or lo
 
 ### B. Reviewer (`pr-brain`)
 - **Engine Configuration:** Controlled via `PR_BRAIN_ENGINE` (`agy` by default, `claude` as alternative).
-- **Model Fallback Chain (`agy` engine):** Evaluates candidate models defined in `PR_BRAIN_MODELS` (e.g., `claude-sonnet-4-6`, `gemini-3.1-pro-high`).
+- **Model Fallback Chain (`agy` engine):** Evaluates candidate models defined in `PR_BRAIN_MODELS` (e.g., `claude-sonnet-5-5-medium`, `gemini-3.1-pro-high`; a name `agy models` no longer lists is skipped and reported once).
 - **Independence Safety:** Automatically skips any model matching the executor's model (`PR_BRAIN_EXECUTOR_MODEL`, e.g. `gemini-3.6-flash-medium`) to adhere to ADR-046 independent review guidelines.
 - **Fallback Progression:** If a model hits quota exhaustion mid-preflight or mid-sweep, `pr-brain` automatically switches to the next candidate model in the chain.
 - **Full Exhaustion:** If all candidate models in `PR_BRAIN_MODELS` are exhausted:
@@ -61,6 +61,9 @@ The autonomous system handles quota exhaustion gracefully without crashing or lo
   - Pauses review sweeps until quota resets, retrying silently on future cron intervals.
 
 ---
+
+### C. Review ceiling (`pr-brain`)
+Reviews and the executor draw on one Gemini window, so `pr-brain` stops starting reviews after `PR_BRAIN_DAILY_MAX` (default 20) in 24 hours and sends one notice a day. It also spends nothing on a promotion PR or on a head whose required CI is red (`deploy/vps-daemons/README.md`, "What a sweep does not spend a review on"). Review one PR anyway with `pr-brain --pr <n> --repo /opt/review/<repo>`; reset the count by deleting `~/.claude/pr-brain.reviews`.
 
 ## 3. Required Founder Interventions
 
