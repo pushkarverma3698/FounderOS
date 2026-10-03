@@ -38,6 +38,7 @@ import { handleNewProject } from "./newproject-command.js";
 import { handleMenuCallback } from "./home-menu.js";
 import { handleTasks, fetchDispatchTasks } from "./tasks-command.js";
 import { handleWhere } from "./where-command.js";
+import { defaultLoginDeps, handleLogin, handleLoginReply } from "./login/command.js";
 import {
   handleCsv,
   handleFresh,
@@ -191,6 +192,8 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     listRegisteredRepos: taskDeps.listRegisteredRepos,
   }));
   bot.command("where", (ctx: Context) => handleWhere(ctx));
+  const loginDeps = defaultLoginDeps(access);
+  bot.command("login", (ctx: Context) => handleLogin(ctx, loginDeps));
   bot.command("newproject", (ctx: Context) => handleNewProject(ctx, { runKernelText }));
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
   bot.command("wife_draft", (ctx: Context) => handleDraft(withForcedProfileToken(ctx, "wife"), { runKernelText }));
@@ -233,6 +236,8 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
   registerGoalCommands(bot, access); // /goal, /goals and their buttons: owner-only; before the catch-all handlers below
 
   bot.on("message:text", async (ctx: Context) => {
+    // First, before anything logs or interprets the text: a pending /login is waiting for a pasted code or token.
+    if (await handleLoginReply(ctx, loginDeps)) return;
     const raw = ctx.message?.text ?? "";
     // In a group the middleware only lets addressed messages through, and
     // "@founderos_bot show jobs" should reach the kernel as "show jobs".
