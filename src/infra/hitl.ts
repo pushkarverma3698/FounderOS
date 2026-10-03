@@ -25,6 +25,33 @@ import { createInterrupt, getPendingInterrupt, resolveInterrupt } from "../db/qu
 
 const HITL_TTL_MS = 24 * 60 * 60 * 1000;
 
+/** Tools that pause for founder approval (HITL interrupt) before acting. */
+export const HITL_GATED_TOOLS = new Set([
+  "send_email",
+  "linkedin_post",
+  "schedule_social_post",
+  "schedule_task",
+  "draft_linkedin_reply",
+  "draft_connection_note",
+  "run_shell",
+  "browser",
+  "claude_code",
+  "dispatch_antigravity_task",
+  "requeue_antigravity_task",
+  "create_project_repo",
+  "vps_run",
+  "deploy_static_site",
+  "ui_check",
+  "project_workflow",
+  "create_calendar_event",
+  "record_event",
+  "deliver_artifact",
+  "synthesize_skill",
+  "write_file",
+  "send_file",
+]);
+
+
 /**
  * Deterministic idempotency key so the same action never fires twice.
  *
