@@ -107,9 +107,13 @@ export const OWNER_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "halt",
   "resume",
   "task",
+  "claude",
+  "agy",
+  "engine",
   "newproject",
   "connect",
   "where",
+  "login",
   "focus",
   "projects",
   "goal",
@@ -178,7 +182,7 @@ export function openGroupHint(chatId: number | string): string {
     "I'm answering you here. Everyone else in this chat is ignored until you allow it: " +
     `add <code>TELEGRAM_ALLOWED_CHAT_IDS=${chatId}</code> to the server's env and restart. ` +
     "Once allowed, anyone here can have me read your email, files and memory, and cancel or move " +
-    "your scheduled posts and tasks. Approvals and /halt /resume /task /newproject /connect stay yours. " +
+    "your scheduled posts and tasks. Approvals and /halt /resume /task /claude /agy /engine /newproject /connect stay yours. " +
     "Mention me or reply to my messages — I stay out of the rest of the conversation."
   );
 }

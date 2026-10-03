@@ -8,16 +8,24 @@
 # be read as if it does.
 #
 # agent-dispatch's entire job is mechanical: find an agent:ready GitHub issue, claim
-# it, invoke the headless Antigravity CLI to implement it inside an isolated
-# workspace, and confirm a PR exists afterward. "A PR exists" is a dispatch signal,
+# it, invoke the headless coding CLI (Antigravity or Claude Code, see Engines below) to
+# implement it inside an isolated workspace, and confirm a PR exists afterward. "A PR exists" is a dispatch signal,
 # not a verdict — correctness is pr-brain's call, never this script's. See
 # docs/antigravity/ISSUE-DRIVEN-CONTRACT.md in the FounderOS repo for the full
 # division of authority and the 20-step contract Antigravity follows.
 #
 # Two passes per invocation:
-#   Pass A — claim one agent:ready issue, invoke Antigravity, verify a PR landed.
-#   Pass B — release stale claims (crash recovery) and re-invoke Antigravity on PRs
+#   Pass A — claim one agent:ready issue, invoke its coding CLI, verify a PR landed.
+#   Pass B — release stale claims (crash recovery) and re-invoke the CLI that wrote each PR
 #            pr-brain reviewed and left uncleared (draft, not approved/ready).
+#
+# Engines (deploy/lib/engine.sh has the rules and the reasons):
+#   Which CLI runs an issue: its engine:agy / engine:claude label, else the default in
+#   ~/.claude/coding-engine (one word, written by the bot's /engine command), else agy. The label is put on the
+#   issue and its PR when the PR opens, so a re-dispatch goes back to the CLI that wrote it; an agent:review issue
+#   with no label predates the switch and goes to agy.
+#   Each CLI has its own wall: agy's is agent-dispatch.down (login) and agent-dispatch.quota-until; Claude Code's is
+#   agent-dispatch.claude-blocked. One CLI's wall never stops the other; the issue it stopped goes back to agent:ready.
 #
 # Usage:
 #   agent-dispatch                  # normal tick: Pass A (<=1 claim) + Pass B
@@ -42,16 +50,21 @@
 #   AGENT_DISPATCH_TIMEOUT_SEC  per-agy-invocation timeout, default: 1800
 #   AGENT_DISPATCH_ENV_FILE     dotenv with TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID for escalation, and
 #                               GOOGLE_GENERATIVE_AI_API_KEY (the "key file": its mtime is watched)
-#   AGENT_DISPATCH_PROGRESS_POLL_SEC  seconds between "what's Antigravity doing
-#                               right now" Telegram edits while agy runs, default: 20
+#   AGENT_DISPATCH_PROGRESS_POLL_SEC  seconds between "what's the CLI doing
+#                               right now" Telegram edits while it runs, default: 20
+#   AGENT_DISPATCH_CLAUDE_MODEL model Claude Code writes with, default: sonnet
+#   AGENT_DISPATCH_CLAUDE_TOKEN_FILE  the `claude setup-token` token, line 1; default ~/.claude/claude-code.token
 #
 # State (~/.claude/):
-#   agent-dispatch.down         present while the loop is paused: Antigravity auth failed, gh is logged
-#                               out, a tool or agy is missing. ONE Telegram message when it appears, one
+#   agent-dispatch.down         present while the loop is paused: Antigravity auth failed (Antigravity work waits,
+#                               Claude Code's does not), gh is logged out, a tool or agy is missing (nothing runs). ONE Telegram message when it appears, one
 #                               when it goes, none per tick. Clears by itself for a startup failure that
 #                               recovers, and for an auth failure when the key file's mtime changes;
 #                               deleting it by hand also resumes (one message).
-#   agent-dispatch.quota-until  epoch when Antigravity's quota lifts; nothing starts before then
+#   agent-dispatch.quota-until  epoch when Antigravity's quota lifts; no Antigravity run starts before then
+#   agent-dispatch.claude-blocked  Claude Code's wall, three lines: quota|auth, epoch (quota) or the token file's mtime
+#                               (auth), what the CLI said. One Telegram message when it appears. A quota block ends at
+#                               its epoch; an auth block (also a missing token) ends when the token file changes.
 #   agent-dispatch.onboard-reported  repo-setup problems already sent to Telegram (sent once, again on change)
 #   agent-dispatch.kick         written by the bot (src/tools/dispatch-tick.ts) the moment it files an issue; one
 #                               line per issue. The bot cannot start this daemon itself: it runs under systemd with
@@ -97,7 +110,7 @@ AGENT_BRIEF_HEADINGS=(
 # filed against it would have sat at agent:ready forever. Enforced now by
 # tests/unit/tools/dispatch-repo-serviceability.test.ts, which reads this array.
 # Keep it on ONE line in this format: `pnpm repo:add` edits it and that test parses it.
-DEFAULT_REPOS=("pushkarverma3698/FounderOS" "OplifyMessage/oplify-messaging-app" "OplifyMessage/oplify-messaging-api" "pushkarverma3698/House-of-Hulda-Website-frontend")
+DEFAULT_REPOS=("pushkarverma3698/FounderOS" "OplifyMessage/oplify-messaging-app" "OplifyMessage/oplify-messaging-api" "pushkarverma3698/House-of-Hulda-Website-frontend" "pushkarverma3698/fos-journey-sandbox")
 # This is the ONLY list the daemon reads. ISSUE_REPOS / ISSUE_REPO used to override it from the
 # crontab line, a registry CI cannot see: the crontab kept sweeping the repos it named after the
 # script had moved on. They are ignored now, with one warning per tick (see below).
@@ -195,10 +208,12 @@ notify_long() {
 #   down-state.sh   one Telegram message per pause/resume + redact_secrets (shared with pr-brain)
 #   agy-failure.sh  classify_agy_failure: quota | auth | transient | unknown
 #   agy-run.sh      as_antigravity + agy_run: one agy turn, streamed live into ONE Telegram message (shared with pr-brain)
+#   claude-run.sh   claude_run: one Claude Code turn the same way; the token travels on stdin
+#   engine.sh       which CLI an issue goes to, and Claude Code's wall (claude_blocked / record_claude_block)
 #   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with pr-brain)
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in down-state.sh agy-failure.sh agy-run.sh ci-state.sh; do
+for _lib in down-state.sh agy-failure.sh agy-run.sh claude-run.sh engine.sh ci-state.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -218,6 +233,9 @@ REDACT_LITERALS+=("$GEMINI_API_KEY")
 if [[ -f "$ENV_FILE" ]]; then
   REDACT_LITERALS+=("$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')")
 fi
+# Claude Code's token, when there is one: it reaches the run on stdin and must never come back out in a log or a message.
+_claude_token_now="$(claude_token 2>/dev/null || true)"
+[[ -n "$_claude_token_now" ]] && REDACT_LITERALS+=("$_claude_token_now")
 
 # check_brief_headings [FILE|-]: is an issue body a complete brief? Reads FILE (stdin for - or
 # no argument) and prints one line per problem, in template order:
@@ -291,6 +309,30 @@ check_brief_headings() {
 run_agy_with_progress() {
   local label="$1" workspace="$2" prompt_file="$3" agy_log="$4"
   agy_run "$label" "$workspace" "$prompt_file" "$AGY_MODEL" "$TIMEOUT_SEC" "$agy_log" "$GEMINI_API_KEY"
+}
+
+# The same for Claude Code (deploy/lib/claude-run.sh). The token file's mtime is taken BEFORE the run and kept in
+# CLAUDE_RUN_TOKEN_MTIME: if the run is refused, the block is recorded against that mtime, so a token the founder
+# pastes in while the run is still failing on the old one is noticed on the next tick (the Gemini key works the same
+# way, KEY_MTIME_AT_START). The token itself goes to claude_run, which puts it on stdin.
+CLAUDE_RUN_TOKEN_MTIME=0
+run_claude_with_progress() {
+  local label="$1" workspace="$2" prompt_file="$3" text_log="$4" token
+  CLAUDE_RUN_TOKEN_MTIME="$(file_mtime "$(claude_token_file)")"
+  token="$(claude_token 2>/dev/null || true)"
+  claude_run "$label" "$workspace" "$prompt_file" "$CLAUDE_EXECUTOR_MODEL" "$TIMEOUT_SEC" "$text_log" "$token"
+}
+
+# The one switch between the two CLIs: ENGINE LABEL WORKSPACE PROMPT_FILE LOG. The result is the CLI's exit code, LOG
+# gets the plain-text view of the run (what classify_agy_failure reads), and AGY_PROGRESS_* describe the run's one
+# Telegram message for agy_progress_outcome, whichever CLI it was.
+run_engine_with_progress() {
+  local engine="$1"
+  shift
+  case "$engine" in
+    claude) run_claude_with_progress "$@" ;;
+    *) run_agy_with_progress "$@" ;;
+  esac
 }
 
 FORCE_REPO=""
@@ -520,6 +562,128 @@ quoted_failure_line() {
   agy_failure_line "$1" "$2" | redact_secrets | head -n1 | cut -c1-300
 }
 
+# ------------------------------------------------------------- which CLI, and may it start work
+# The rules for choosing are in deploy/lib/engine.sh. These read GitHub and say so in the log.
+
+# issue_engine ISSUE FALLBACK — prints agy or claude: the issue's engine:* label, else FALLBACK. Read from GitHub every time
+# (the founder relabels by hand). A failed read prints nothing and fails: the caller skips the issue this tick, because a
+# guess would send a Claude Code PR to Antigravity.
+issue_engine() {
+  local names
+  names="$(gh issue view "$1" --repo "$REPO" --json labels 2>/dev/null | jq -r '.labels[].name' 2>/dev/null)" || return 1
+  engine_from_labels "$names" "$2"
+}
+
+# label_engine ISSUE PR ENGINE — put engine:<x> on the issue and on its PR, so the next pass knows who wrote it.
+# The REST endpoint, not `gh issue edit --add-label`: that one fails on a label the repository does not have yet, and
+# this is how the label comes to exist in a repo nobody ran onboard-repo.sh against since. GitHub ignores a label that is
+# already there. Two tries each; a failure is loud in the log and never undoes the hand-off to review.
+label_engine() {
+  local label n
+  label="$(engine_label "$3")"
+  for n in "$1" "$2"; do
+    gh api "repos/${REPO}/issues/${n}/labels" -f "labels[]=${label}" >/dev/null 2>&1 \
+      || gh api "repos/${REPO}/issues/${n}/labels" -f "labels[]=${label}" >/dev/null 2>&1 \
+      || log "WARNING: could not put ${label} on #${n} in ${REPO} — until it has one, a re-dispatch of PR #${2} goes to Antigravity (the CLI for a PR with no engine label). Fix: gh issue edit ${1} --repo ${REPO} --add-label ${label}; gh pr edit ${2} --repo ${REPO} --add-label ${label}"
+  done
+  return 0
+}
+
+# A wall is logged once per CLI per repo per tick, however many issues it holds up.
+WALLS_LOGGED=" "
+note_wall() { # note_wall ENGINE TEXT
+  case "$WALLS_LOGGED" in *" $1 "*) return 0 ;; esac
+  WALLS_LOGGED+="$1 "
+  log "$2"
+}
+
+claude_block_summary() {
+  case "$(claude_block_class)" in
+    quota) printf 'Claude Code blocked (quota) until %s' "$(quota_until_human "$(claude_block_extra)")" ;;
+    *) printf 'Claude Code blocked (auth) until %s changes: %s' "$(claude_token_file)" "$(claude_block_line)" ;;
+  esac
+}
+
+# The founder's cue for a Claude Code token that is missing or refused. HOW to get one, and what to do with the queue meanwhile.
+claude_token_fix() {
+  printf 'run `claude setup-token` on a machine where you are logged in to Claude, put the token on line 1 of %s on %s and chmod 600 it. Claude Code work starts by itself on the next tick after that file changes. To run queued work on Antigravity meanwhile: replace engine:claude with engine:agy on the issue (or send /engine agy to change the default).' "$(claude_token_file)" "$HOST"
+}
+
+# engine_ready ENGINE — may ENGINE start work in $REPO right now? 0 = yes. 1 = no, and why is in the log (once). Nothing is
+# touched on GitHub: an issue held up by a wall stays exactly as it is. Asked lazily, when an issue needs the CLI, so a
+# founder who never uses Claude Code is never told it has no token.
+engine_ready() {
+  local engine="$1"
+  case "$engine" in
+    claude)
+      if claude_blocked; then
+        note_wall claude "$(claude_block_summary) — Claude Code work in ${REPO} waits this tick"
+        return 1
+      fi
+      claude_token >/dev/null 2>&1 && return 0
+      # No usable token. Recorded as an auth block keyed on the token file's mtime (0 when there is no file), which gives
+      # one message now, silence while nothing changes, and a run the moment the file appears or is replaced.
+      if [[ "$DRY_RUN" -eq 1 ]]; then
+        note_wall claude "DRY RUN: Claude Code has no token in $(claude_token_file) — its work would wait"
+        return 1
+      fi
+      record_claude_block auth "$(file_mtime "$(claude_token_file)")" "no token in $(claude_token_file)"
+      log "Claude Code blocked (auth): no token in $(claude_token_file) — its work in ${REPO} waits until that file changes"
+      notify "🔑 agent-dispatch: Claude Code has no token on ${HOST}, so work for it waits at agent:ready (nothing failed). Fix: $(claude_token_fix) One message; none until that file changes."
+      return 1
+      ;;
+    *)
+      if down_active; then
+        note_wall agy "paused ($(down_class) since $(down_since)) — no Antigravity run in ${REPO} this tick"
+        return 1
+      fi
+      if quota_exhausted; then
+        note_wall agy "Antigravity quota exhausted until $(quota_until_human "$(tr -dc '0-9' <"$QUOTA_FILE")") — no Antigravity run in ${REPO} this tick"
+        return 1
+      fi
+      return 0
+      ;;
+  esac
+}
+
+# claude_wall CLASS TEXT_LOG — Claude Code's run ended on a wall (quota | auth). Records it, tells the founder ONCE, and sets
+# CLAUDE_WALL_LINE (what the CLI said, masked) and CLAUDE_WALL_UNTIL (when it clears, as prose) for the caller's own comment.
+# Nothing here pauses Antigravity: it is a different CLI with a different wall.
+CLAUDE_WALL_LINE=""
+CLAUDE_WALL_UNTIL=""
+claude_wall() {
+  local klass="$1" tlog="$2" until_epoch human
+  CLAUDE_WALL_LINE="$(claude_failure_line "$klass" "$tlog" | redact_secrets | head -n1 | cut -c1-300)"
+  [[ -n "$CLAUDE_WALL_LINE" ]] || CLAUDE_WALL_LINE="(no error line in the run)"
+  case "$klass" in
+    quota)
+      until_epoch="$(claude_quota_epoch "$tlog")" || until_epoch=$(( $(date -u +%s) + CLAUDE_QUOTA_FALLBACK_SEC ))
+      human="$(quota_until_human "$until_epoch")"
+      record_claude_block quota "$until_epoch" "$CLAUDE_WALL_LINE"
+      CLAUDE_WALL_UNTIL="until ${human}"
+      log "Claude Code blocked (quota) until ${human}: ${CLAUDE_WALL_LINE} — Antigravity keeps running"
+      notify "⏸️ agent-dispatch: Claude Code hit its usage limit. It said: ${CLAUDE_WALL_LINE}
+Claude Code work is queued (agent:ready) and starts by itself after ${human}; nothing is retried before. Antigravity keeps running. To run queued work on Antigravity now: replace engine:claude with engine:agy on the issue (or send /engine agy to change the default)."
+      ;;
+    *)
+      record_claude_block auth "$CLAUDE_RUN_TOKEN_MTIME" "$CLAUDE_WALL_LINE"
+      CLAUDE_WALL_UNTIL="until $(claude_token_file) changes"
+      log "Claude Code blocked (auth) until $(claude_token_file) changes: ${CLAUDE_WALL_LINE} — Antigravity keeps running"
+      notify "🔑 agent-dispatch: Claude Code refused its token on ${HOST}. It said: ${CLAUDE_WALL_LINE}
+Claude Code work is queued (agent:ready). Fix: $(claude_token_fix) One message; none until that file changes. Antigravity keeps running."
+      ;;
+  esac
+}
+
+# handle_claude_wall ISSUE CLASS TEXT_LOG — a claimed issue met a Claude Code wall. It did nothing wrong: back to agent:ready.
+handle_claude_wall() {
+  local issue="$1" line_md
+  claude_wall "$2" "$3"
+  line_md=$(printf '%s' "$CLAUDE_WALL_LINE" | tr '`' "'")
+  finish_issue "$issue" agent:ready
+  gh issue comment "$issue" --repo "$REPO" --body "Claude Code stopped on a wall: \`${line_md}\`. Nothing was done on this issue and it is back at agent:ready. Claude Code work waits ${CLAUDE_WALL_UNTIL} (the founder was told on Telegram), and agent-dispatch picks this issue up then. To run it on Antigravity instead: replace the \`engine:claude\` label with \`engine:agy\`." >/dev/null
+}
+
 # ------------------------------------------------------------ Antigravity auth failure
 # The loop cannot work until a human fixes a credential, and retrying only burns quota. So: stop
 # claiming, say so ONCE (down-state: one message going down, one coming back), and put the issue
@@ -564,16 +728,16 @@ transient_tails() { # transient_tails ISSUE
         | "Attempt \($n):\n```\n" + (if ($parts | length) >= 3 then ($parts[1:-1] | join("```")) else "" end | sub("^\n"; "") | sub("\n$"; "")) + "\n```\n"' 2>/dev/null
 }
 
-handle_transient_failure() { # handle_transient_failure ISSUE AGY_LOG
-  local issue="$1" agy_log="$2" prev n tail_txt earlier fence='```'
+handle_transient_failure() { # handle_transient_failure ISSUE AGY_LOG [CLI NAME]
+  local issue="$1" agy_log="$2" ename="${3:-Antigravity}" prev n tail_txt earlier fence='```'
   prev=$(transient_count "$issue")
   n=$(( ${prev:-0} + 1 ))
   tail_txt=$(tail -n 20 "$agy_log" | cut -c1-400 | redact_secrets)
   if [[ "$n" -ge "$TRANSIENT_MAX" ]]; then
     earlier=$(transient_tails "$issue")
-    log "#${issue} transient Antigravity failure ${n}/${TRANSIENT_MAX} — giving up (agent:failed)"
+    log "#${issue} transient ${ename} failure ${n}/${TRANSIENT_MAX} — giving up (agent:failed)"
     finish_issue "$issue" agent:failed
-    gh issue comment "$issue" --repo "$REPO" --body "${TRANSIENT_PREFIX} ${n} --> agent-dispatch gave up on this issue after ${n} transient Antigravity failures in a row (a timeout, a 5xx or a connection reset each time). This is a dispatch-level failure, not a review verdict: no run got as far as a PR. The last 20 lines of each run:
+    gh issue comment "$issue" --repo "$REPO" --body "${TRANSIENT_PREFIX} ${n} --> agent-dispatch gave up on this issue after ${n} transient ${ename} failures in a row (a timeout, a 5xx or a connection reset each time). This is a dispatch-level failure, not a review verdict: no run got as far as a PR. The last 20 lines of each run:
 
 ${earlier}
 Attempt ${n}:
@@ -582,11 +746,11 @@ ${tail_txt}
 ${fence}
 
 To try again, put agent:ready back on the issue." >/dev/null
-    notify "⚠️ agent-dispatch: #${issue} FAILED after ${n} transient Antigravity failures in a row (timeouts, 5xx or connection resets). All ${n} log tails are in one comment on the issue. To try again: put agent:ready back on it."
+    notify "⚠️ agent-dispatch: #${issue} FAILED after ${n} transient ${ename} failures in a row (timeouts, 5xx or connection resets). All ${n} log tails are in one comment on the issue. To try again: put agent:ready back on it."
   else
-    log "#${issue} transient Antigravity failure ${n}/${TRANSIENT_MAX} — back to agent:ready, retried next tick"
+    log "#${issue} transient ${ename} failure ${n}/${TRANSIENT_MAX} — back to agent:ready, retried next tick"
     finish_issue "$issue" agent:ready
-    gh issue comment "$issue" --repo "$REPO" --body "${TRANSIENT_PREFIX} ${n} --> Antigravity hit a transient failure (a timeout, a 5xx or a connection reset) on attempt ${n} of ${TRANSIENT_MAX}. Nothing was done on this issue and it is back at agent:ready: the next agent-dispatch tick retries it. Last 20 lines of the run:
+    gh issue comment "$issue" --repo "$REPO" --body "${TRANSIENT_PREFIX} ${n} --> ${ename} hit a transient failure (a timeout, a 5xx or a connection reset) on attempt ${n} of ${TRANSIENT_MAX}. Nothing was done on this issue and it is back at agent:ready: the next agent-dispatch tick retries it. Last 20 lines of the run:
 ${fence}
 ${tail_txt}
 ${fence}" >/dev/null
@@ -662,10 +826,17 @@ set_integration_branch() {
 }
 
 # Returns 0 = the run ended with a PR handed to review, 1 = it was claimed and ended some other
-# way (failed, retried, paused), 2 = NOT claimed at all because the brief is incomplete: the
-# caller moves on to the next candidate, since refusing a brief costs no Antigravity run.
+# way (failed, retried), 2 = NOT claimed at all because the brief is incomplete, 3 = the issue's CLI is behind a wall
+# (before the claim: untouched; or the run itself hit it: back at agent:ready). The caller moves on to the next
+# candidate on 2 and 3, since neither spent a run that can be repeated: the next issue may be for the other CLI.
 claim_and_implement() {
-  local issue="$1" title body branch prompt_file claimed_at problems
+  local issue="$1" title body branch prompt_file claimed_at problems engine ename
+
+  # Which CLI, and may it run, are settled BEFORE anything else is read or written: an issue held up by a wall is not
+  # claimed, not commented on and not relabelled.
+  engine="$(issue_engine "$issue" "$(engine_default)")" || { log "#${issue} could not read its labels — skipped this tick"; return 3; }
+  ename="$(engine_display "$engine")"
+  engine_ready "$engine" || return 3
 
   title=$(gh issue view "$issue" --repo "$REPO" --json title --jq .title)
   body=$(gh issue view "$issue" --repo "$REPO" --json body --jq .body)
@@ -680,7 +851,7 @@ claim_and_implement() {
   fi
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "DRY RUN would claim #${issue} '${title}' -> branch ${branch}"
+    log "DRY RUN would claim #${issue} '${title}' -> branch ${branch}$([[ "$engine" == agy ]] || printf ' (by %s)' "$ename")"
     return 0
   fi
 
@@ -731,11 +902,15 @@ EOF
     return 1
   fi
 
-  log "invoking agy for #${issue} (timeout ${TIMEOUT_SEC}s, --new-project pinned to ${WORKSPACE})"
+  if [[ "$engine" == claude ]]; then
+    log "invoking claude for #${issue} (model ${CLAUDE_EXECUTOR_MODEL}, timeout ${TIMEOUT_SEC}s, in ${WORKSPACE})"
+  else
+    log "invoking agy for #${issue} (timeout ${TIMEOUT_SEC}s, --new-project pinned to ${WORKSPACE})"
+  fi
   local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-agy-XXXXXX.log)"
   # The timeouts that matter (the outer `timeout`, and --print-timeout set just under it, without which every
-  # real task died at 5m05s) live with the invocation, in deploy/lib/agy-run.sh.
-  run_agy_with_progress "Antigravity #${issue} · ${REPO}" "$WORKSPACE" "$prompt_file" "$agy_log"
+  # real task died at 5m05s) live with the invocation, in deploy/lib/agy-run.sh (claude-run.sh for Claude Code).
+  run_engine_with_progress "$engine" "${ename} #${issue} · ${REPO}" "$WORKSPACE" "$prompt_file" "$agy_log"
   local agy_exit=$?
   agy_log_append "$agy_log"
   rm -f "$prompt_file"
@@ -753,15 +928,23 @@ EOF
   # dispatch state are mechanical: does a PR exist, does it carry new commits. A
   # nonzero exit alongside a real PR is logged as an anomaly, not treated as failure.
   if [[ "$agy_exit" -ne 0 && ( -n "$pr_number" && "${new_commits:-0}" -gt 0 ) ]]; then
-    log "#${issue} agy_exit=${agy_exit} (nonzero) but PR #${pr_number} with ${new_commits} commit(s) exists — not a dispatch failure, handing to review anyway"
+    log "#${issue} ${engine}_exit=${agy_exit} (nonzero) but PR #${pr_number} with ${new_commits} commit(s) exists — not a dispatch failure, handing to review anyway"
   fi
 
   # No PR (or no commits): WHY decides what happens to the issue. A PR that exists wins over
   # every line of the log. quota / auth / transient never mark the issue failed on the first
   # run, because none of them says anything about the task; only an unrecognised failure does.
+  # The log is the plain-text view of the run, from either CLI: classify_agy_failure reads both. A wall returns 3, so the
+  # tick goes on to the next issue (the other CLI is not behind it).
   local outcome="" quota_until
   if [[ -z "$pr_number" || "${new_commits:-0}" -eq 0 ]]; then
     outcome=$(classify_agy_failure "$agy_log")
+  fi
+  if [[ "$engine" == claude && ( "$outcome" == quota || "$outcome" == auth ) ]]; then
+    handle_claude_wall "$issue" "$outcome" "$agy_log"
+    agy_progress_outcome "⏸️ Claude Code is behind a wall (${outcome}): #${issue} is back at agent:ready; Claude Code work waits ${CLAUDE_WALL_UNTIL}."
+    rm -f "$agy_log"
+    return 3
   fi
   case "$outcome" in
     quota)
@@ -772,17 +955,17 @@ EOF
       notify "⏸️ agent-dispatch: Antigravity quota exhausted until $(quota_until_human "$quota_until"). #${issue} is queued (agent:ready) and starts automatically after that — no retries before."
       agy_progress_outcome "⏸️ Quota exhausted until $(quota_until_human "$quota_until"): #${issue} is back at agent:ready."
       rm -f "$agy_log"
-      return 1
+      return 3
       ;;
     auth)
       handle_auth_failure "$issue" "$agy_log"
       agy_progress_outcome "🔑 Antigravity's login was rejected: #${issue} is back at agent:ready and the loop is paused."
       rm -f "$agy_log"
-      return 1
+      return 3
       ;;
     transient)
-      handle_transient_failure "$issue" "$agy_log"
-      agy_progress_outcome "↻ A transient Antigravity failure (timeout, 5xx or connection reset): #${issue} is retried on the next tick."
+      handle_transient_failure "$issue" "$agy_log" "$ename"
+      agy_progress_outcome "↻ A transient ${ename} failure (timeout, 5xx or connection reset): #${issue} is retried on the next tick."
       rm -f "$agy_log"
       return 1
       ;;
@@ -791,35 +974,36 @@ EOF
   if [[ -z "$pr_number" || "${new_commits:-0}" -eq 0 ]]; then
     local last_line
     last_line=$(grep -v '^[[:space:]]*$' "$agy_log" 2>/dev/null | tail -n1 | redact_secrets | cut -c1-200)
-    log "#${issue} agy_exit=${agy_exit} new_commits=${new_commits:-0} pr=${pr_number:-none} — could not verify a PR landed"
+    log "#${issue} ${engine}_exit=${agy_exit} new_commits=${new_commits:-0} pr=${pr_number:-none} — could not verify a PR landed"
     finish_issue "$issue" agent:failed
     gh issue comment "$issue" --repo "$REPO" --body "$(cat <<EOF2
-agent-dispatch could not verify a PR landed after Antigravity ran (exit=${agy_exit}, commits=${new_commits:-0}, pr=${pr_number:-none}).
+agent-dispatch could not verify a PR landed after ${ename} ran (exit=${agy_exit}, commits=${new_commits:-0}, pr=${pr_number:-none}).
 This is a dispatch-level failure, not a review verdict — no correctness claim is made either way.
-Last 60 lines of the agy invocation:
+Last 60 lines of the ${engine} invocation:
 \`\`\`
 $(tail -60 "$agy_log" | redact_secrets)
 \`\`\`
 EOF2
 )" >/dev/null
-    notify "⚠️ agent-dispatch: #${issue} FAILED — no verifiable PR after Antigravity ran. Last line of the run: ${last_line:-<empty>}. See ~/.claude/agent-dispatch.log"
-    agy_progress_outcome "❌ No PR landed (agy exit ${agy_exit}, ${new_commits:-0} commit(s)). #${issue} is agent:failed. ${last_line:+Last line: ${last_line}}"
+    notify "⚠️ agent-dispatch: #${issue} FAILED — no verifiable PR after ${ename} ran. Last line of the run: ${last_line:-<empty>}. See ~/.claude/agent-dispatch.log"
+    agy_progress_outcome "❌ No PR landed (${engine} exit ${agy_exit}, ${new_commits:-0} commit(s)). #${issue} is agent:failed. ${last_line:+Last line: ${last_line}}"
     rm -f "$agy_log"
     return 1
   fi
 
   log "#${issue} -> PR #${pr_number} detected (${new_commits} commit(s)) — handing to pr-brain for review"
-  # The issue can be closed while Antigravity works. The PR is real work either way: it still goes
+  # The issue can be closed while the CLI works. The PR is real work either way: it still goes
   # to review as a draft, and both the comment and the message say the issue is closed.
   local closed_note=""
   if [[ "$(gh issue view "$issue" --repo "$REPO" --json state --jq .state 2>/dev/null)" == "CLOSED" ]]; then
-    closed_note=" NOTE: issue #${issue} was CLOSED while Antigravity worked; the PR is still a draft for review, and closing or reopening the issue is your call."
-    log "#${issue} was closed while Antigravity ran — PR #${pr_number} still goes to review as a draft"
+    closed_note=" NOTE: issue #${issue} was CLOSED while ${ename} worked; the PR is still a draft for review, and closing or reopening the issue is your call."
+    log "#${issue} was closed while ${ename} ran — PR #${pr_number} still goes to review as a draft"
   fi
   finish_issue "$issue" agent:review
+  label_engine "$issue" "$pr_number" "$engine"
   local pr_url; pr_url="$(gh pr view "$pr_number" --repo "$REPO" --json url --jq .url 2>/dev/null)"
   gh issue comment "$issue" --repo "$REPO" --body "${PR_LINK_PREFIX} ${pr_number} --> PR opened: ${pr_url}. Awaiting pr-brain review.${closed_note}" >/dev/null
-  notify "🤖 agent-dispatch: #${issue} -> PR #${pr_number} opened on ${REPO}, awaiting pr-brain review.${closed_note}
+  notify "🤖 agent-dispatch: #${issue} -> PR #${pr_number} opened on ${REPO} by ${ename}, awaiting pr-brain review.${closed_note}
 ${pr_url}"
   agy_progress_outcome "📦 PR #${pr_number} opened (${new_commits} commit(s)), draft, awaiting pr-brain review."
   rm -f "$agy_log"
@@ -987,12 +1171,20 @@ redispatch_unresolved_reviews() {
       continue
     fi
 
+    # Whose PR is it: the issue's engine:* label, else Antigravity (a PR opened before the switch has no label, and
+    # that is who wrote it). Asked only now, when a re-dispatch is really due, so a PR that needs nothing never reads a
+    # label or wakes a wall. A wall on that CLI leaves the PR exactly as it is, attempt not counted.
+    local engine ename
+    engine="$(issue_engine "$issue" agy)" || { log "#${issue} could not read its labels — PR #${pr} skipped this tick"; continue; }
+    ename="$(engine_display "$engine")"
+    engine_ready "$engine" || continue
+
     if [[ "$DRY_RUN" -eq 1 ]]; then
-      log "DRY RUN would re-dispatch Antigravity for PR #${pr} (issue #${issue}, attempt $((attempts + 1)))"
+      log "DRY RUN would re-dispatch ${ename} for PR #${pr} (issue #${issue}, attempt $((attempts + 1)))"
       continue
     fi
 
-    log "PR #${pr} ${trigger} — re-dispatching Antigravity (attempt $((attempts + 1)))"
+    log "PR #${pr} ${trigger} — re-dispatching ${ename} (attempt $((attempts + 1)))"
     local checks_state; checks_state=$(gh pr checks "$pr" --repo "$REPO" --json state --jq \
       'if any(.[]; .state=="FAILURE") then "ci_failed" else "ci_ok_or_pending" end' 2>/dev/null || echo "ci_ok_or_pending")
 
@@ -1032,35 +1224,48 @@ redispatch_unresolved_reviews() {
     fi
 
     local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-redispatch-agy-XXXXXX.log)"
-    run_agy_with_progress "Antigravity fixing PR #${pr} · ${REPO}" "$WORKSPACE" "$prompt_file" "$agy_log"
+    run_engine_with_progress "$engine" "${ename} fixing PR #${pr} · ${REPO}" "$WORKSPACE" "$prompt_file" "$agy_log"
     agy_log_append "$agy_log"
-    local quota_until
-    if quota_until=$(quota_reset_epoch "$agy_log"); then
-      # Antigravity did nothing, so this does not count against MAX_ATTEMPTS.
-      record_quota_wall "$quota_until"
-      agy_progress_outcome "⏸️ Quota exhausted until $(quota_until_human "$quota_until"): PR #${pr} waits, the attempt is not counted."
-      rm -f "$prompt_file" "$agy_log"
-      return 0
-    fi
-    if [[ "$(classify_agy_failure "$agy_log")" == "auth" ]]; then
-      # Same reasoning: a rejected credential says nothing about the PR. It stays open, the attempt
-      # is not counted, and the loop pauses until a human fixes the login (one message).
-      log "PR #${pr} (issue #${issue}) re-dispatch hit an auth failure — PR left open, attempt not counted"
-      pause_for_auth "$(quoted_failure_line auth "$agy_log")"
-      agy_progress_outcome "🔑 Antigravity's login was rejected: PR #${pr} stays open, the attempt is not counted, the loop is paused."
-      rm -f "$prompt_file" "$agy_log"
-      return 0
+    local quota_until wall
+    if [[ "$engine" == claude ]]; then
+      # Claude Code did nothing on a wall, so this does not count against MAX_ATTEMPTS either. Its wall is its own: the
+      # next PR in this pass may belong to Antigravity and still runs.
+      wall="$(classify_agy_failure "$agy_log")"
+      if [[ "$wall" == quota || "$wall" == auth ]]; then
+        log "PR #${pr} (issue #${issue}) re-dispatch hit a Claude Code ${wall} wall — PR left open, attempt not counted"
+        claude_wall "$wall" "$agy_log"
+        agy_progress_outcome "⏸️ Claude Code is behind a wall (${wall}): PR #${pr} waits ${CLAUDE_WALL_UNTIL}, the attempt is not counted."
+        rm -f "$prompt_file" "$agy_log"
+        continue
+      fi
+    else
+      if quota_until=$(quota_reset_epoch "$agy_log"); then
+        # Antigravity did nothing, so this does not count against MAX_ATTEMPTS.
+        record_quota_wall "$quota_until"
+        agy_progress_outcome "⏸️ Quota exhausted until $(quota_until_human "$quota_until"): PR #${pr} waits, the attempt is not counted."
+        rm -f "$prompt_file" "$agy_log"
+        continue
+      fi
+      if [[ "$(classify_agy_failure "$agy_log")" == "auth" ]]; then
+        # Same reasoning: a rejected credential says nothing about the PR. It stays open, the attempt
+        # is not counted, and the loop pauses until a human fixes the login (one message).
+        log "PR #${pr} (issue #${issue}) re-dispatch hit an auth failure — PR left open, attempt not counted"
+        pause_for_auth "$(quoted_failure_line auth "$agy_log")"
+        agy_progress_outcome "🔑 Antigravity's login was rejected: PR #${pr} stays open, the attempt is not counted, the loop is paused."
+        rm -f "$prompt_file" "$agy_log"
+        continue
+      fi
     fi
     rm -f "$prompt_file" "$agy_log"
 
-    gh pr comment "$pr" --repo "$REPO" --body "${ATTEMPT_PREFIX} $((attempts + 1)) --> agent-dispatch re-invoked Antigravity ($([[ "$checks_state" == "ci_failed" ]] && echo "CI failure" || echo "unresolved review")). Awaiting the next pr-brain pass." >/dev/null
+    gh pr comment "$pr" --repo "$REPO" --body "${ATTEMPT_PREFIX} $((attempts + 1)) --> agent-dispatch re-invoked ${ename} ($([[ "$checks_state" == "ci_failed" ]] && echo "CI failure" || echo "unresolved review")). Awaiting the next pr-brain pass." >/dev/null
     # What happened is read from the PR, not from agy's say-so (a run can end "done" having pushed nothing:
     # the 2026-09-22 audit found attempt 1/3 burned by a run that changed no file). The attempt still counts:
     # three runs that change nothing are a PR Antigravity cannot fix, and that is exactly when to ask a human.
     local new_head moved
     new_head=$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null)
     if [[ -n "$new_head" && "$new_head" != "$head_sha" ]]; then moved="pushed ${new_head:0:8}"; else moved="pushed NOTHING (the head is still ${head_sha:0:8})"; fi
-    notify "🤖 agent-dispatch: re-dispatched Antigravity on PR #${pr} (attempt $((attempts + 1))/${MAX_ATTEMPTS}): ${moved}."
+    notify "🤖 agent-dispatch: re-dispatched ${ename} on PR #${pr} (attempt $((attempts + 1))/${MAX_ATTEMPTS}): ${moved}."
     agy_progress_outcome "↩️ Attempt $((attempts + 1))/${MAX_ATTEMPTS} on PR #${pr}: ${moved}. Awaiting the next pr-brain pass."
   done <<<"$issues"
 }
@@ -1088,14 +1293,12 @@ run_tick() {
     fi
 
     log "Processing repo: $REPO (workspace: $WORKSPACE)"
+    WALLS_LOGGED=" "
 
-    # Paused (Antigravity auth, gh login, a missing tool): claim nothing, re-dispatch nothing. The
-    # founder was told once when it began; a per-tick message would be exactly the noise this replaced.
-    if down_active; then
-      log "paused ($(down_class) since $(down_since)) — no claim or re-dispatch in $REPO this tick"
-      release_stale_claims
-      continue
-    fi
+    # No repo-wide pause here any more. A wall belongs to one CLI (Antigravity's login or quota, Claude Code's token or
+    # limit), so each issue asks engine_ready for ITS CLI (claim_and_implement, redispatch_unresolved_reviews) and one
+    # CLI's trouble never stops the other. A startup failure (gh login, a missing tool) still ends the whole tick before
+    # this loop: the founder was told once when it began, and a per-tick message would be exactly the noise it replaced.
 
     # A forced --issue only ever belongs to one repo. pick_ready_issues() just
     # returns $FORCE_ISSUE verbatim, blind to which $REPO is active this
@@ -1104,12 +1307,6 @@ run_tick() {
     # kickDispatchTick's own kick (--issue N, no --repo) claimed a FounderOS
     # issue in place of a same-numbered Oplify one. No --repo given (the old
     # calling convention) skips nothing, unchanged from before.
-    if quota_exhausted; then
-      log "Antigravity quota exhausted until $(quota_until_human "$(tr -dc '0-9' <"$QUOTA_FILE")") — no claim or re-dispatch in $REPO this tick"
-      release_stale_claims
-      continue
-    fi
-
     if [[ -n "$FORCE_ISSUE" && -n "$FORCE_REPO" && "$REPO" != "$FORCE_REPO" ]]; then
       log "skipping $REPO — forced issue #$FORCE_ISSUE targets $FORCE_REPO"
     elif [[ "${claims_done[$repo_idx]:-0}" -lt "$MAX_CLAIMS" ]]; then
@@ -1124,17 +1321,16 @@ run_tick() {
           [[ "$brief_checks" -ge "$MAX_BRIEF_CHECKS" ]] && break
           continue
         fi
+        # Behind its CLI's wall (nothing touched, or the run hit the wall and the issue went back to agent:ready): the
+        # next candidate may be for the other CLI. Not a claim.
+        [[ "$claim_rc" -eq 3 ]] && continue
         [[ "$claim_rc" -eq 0 ]] && claims_done[$repo_idx]=$(( ${claims_done[$repo_idx]:-0} + 1 ))
         break
       done
     fi
 
     release_stale_claims
-    # The claim itself may have hit a wall (auth, quota): re-dispatching now would run Antigravity
-    # straight into it again.
-    if down_active || quota_exhausted; then
-      continue
-    fi
+    # A wall the claim just hit is already on disk, so engine_ready keeps this pass off that CLI.
     redispatch_unresolved_reviews
   done
 

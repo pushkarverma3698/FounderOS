@@ -30,12 +30,14 @@
 import type { Context } from "grammy";
 import { DISPATCH_REPO_ALLOWLIST, matchAllowlistedRepos } from "../tools/dispatch-repos.js";
 import { validateProjectRepoName } from "../tools/create-project-repo.js";
+import { engineDisplay, engineFromCommand, type Engine } from "../tools/coding-engine.js";
 import { REVIEWER_PHRASE } from "../tools/dispatch-roles.js";
 import {
   REPO_CALLBACK_PREFIX,
   buildRepoKeyboardRows,
   buildRepoPrompt,
   buildRepoQuestion,
+  engineFromPrompt,
   repoFromCallbackData,
   repoFromPrompt,
 } from "./repo-picker.js";
@@ -79,6 +81,8 @@ const USAGE = [
 export interface TaskArgs {
   readonly repo: string;
   readonly text: string;
+  /** Set by /claude or /agy. Absent for /task, where the tool resolves the default when it files. */
+  readonly engine?: Engine;
 }
 
 export type TaskParse =
@@ -143,14 +147,15 @@ export function parseTaskArgs(raw: string, registered: readonly string[] = []): 
 }
 
 /**
- * `/task fix the thing` → `fix the thing`.
+ * `/task fix the thing` → `fix the thing`. Same for `/claude` and `/agy`.
  *
  * Telegram delivers the founder's own message verbatim, including the slash and
  * the `@BotName` suffix a group chat adds. The dispatch brief must not inherit
  * either: "/task" in the goal line reads to an executor as part of the request.
+ * The whole command is matched, so `/claudex fix it` is left alone.
  */
 export function stripTaskCommand(raw: string): string {
-  return raw.replace(/^\/task(@\w+)?\s*/i, "").trim();
+  return raw.replace(/^\s*\/(?:task|claude|agy)(?:@\w+)?(?:\s+|$)/i, "").trim();
 }
 
 /**
@@ -162,8 +167,9 @@ export function stripTaskCommand(raw: string): string {
  * discipline exists to catch.
  */
 export function buildTaskInstruction(args: TaskArgs): string {
+  const executor = args.engine ? engineDisplay(args.engine) : "the coding CLI";
   return [
-    `Dispatch this engineering task to Google Antigravity by calling the dispatch_antigravity_task tool.`,
+    `Dispatch this engineering task to ${executor} by calling the dispatch_antigravity_task tool.`,
     ``,
     `Target repository: ${args.repo}`,
     ``,
@@ -185,12 +191,14 @@ export function buildTaskInstruction(args: TaskArgs): string {
     `If the tool rejects the brief, fix exactly what it names and call it again in this turn.`,
     `Do not implement the work yourself and do not edit any files — your only job here is`,
     `to file the dispatch issue. Pass repo exactly as "${args.repo}".`,
+    // Only when he named a CLI: omitting it is how a plain /task gets the default.
+    ...(args.engine ? [`Pass engine exactly as "${args.engine}".`] : []),
   ].join("\n");
 }
 
 export interface TaskCommandDeps {
   /** The normal kernel turn — same path a typed message takes. */
-  readonly runKernelText: (ctx: Context, text: string) => Promise<void>;
+  readonly runKernelText: (ctx: Context, text: string, profileId?: string, engine?: Engine) => Promise<void>;
   /**
    * Project repos this instance created, which are dispatchable without a code
    * change. Optional so every existing caller and test keeps the hardcoded-only
@@ -213,12 +221,13 @@ function repoKeyboard(registered: readonly string[]): { inline_keyboard: { text:
   return { inline_keyboard: buildRepoKeyboardRows(registered) };
 }
 
-export async function handleTask(ctx: Context, deps: TaskCommandDeps): Promise<void> {
+/** `engine` is set by the /claude and /agy registrations; /task passes none. */
+export async function handleTask(ctx: Context, deps: TaskCommandDeps, engine?: Engine): Promise<void> {
   const registered = await registeredRepos(deps);
   const parsed = parseTaskArgs(ctx.match?.toString() ?? "", registered);
 
   if (parsed.ok) {
-    await deps.runKernelText(ctx, buildTaskInstruction(parsed.args));
+    await deps.runKernelText(ctx, buildTaskInstruction({ ...parsed.args, ...(engine ? { engine } : {}) }), undefined, engine);
     return;
   }
 
@@ -231,7 +240,7 @@ export async function handleTask(ctx: Context, deps: TaskCommandDeps): Promise<v
     const messageId = ctx.message?.message_id;
     // buildRepoPrompt, not a bespoke line: its `Repo:` line is how handleRepoReply
     // routes the answer. Without it the reply falls through to ordinary chat.
-    await ctx.reply(buildRepoPrompt(parsed.repo), {
+    await ctx.reply(buildRepoPrompt(parsed.repo, engine), {
       parse_mode: "HTML",
       reply_markup: { force_reply: true, input_field_placeholder: "what should I build?" },
       ...(messageId ? { reply_parameters: { message_id: messageId } } : {}),
@@ -247,7 +256,8 @@ export async function handleTask(ctx: Context, deps: TaskCommandDeps): Promise<v
   // `reply_parameters` is load-bearing, not decoration: it is what carries the
   // founder's UNTRUNCATED request across the button press. The echo in the
   // question is capped for legibility, so recovering the brief from the question
-  // text would silently shorten it.
+  // text would silently shorten it. The same message also names the engine (`/claude …`), so a bare
+  // /claude attaches it as well: after the tap there is no other place the choice lives.
   const messageId = ctx.message?.message_id;
   await ctx.reply(
     parsed.kind === "needs-repo"
@@ -256,7 +266,7 @@ export async function handleTask(ctx: Context, deps: TaskCommandDeps): Promise<v
     {
       parse_mode: "HTML",
       reply_markup: repoKeyboard(registered),
-      ...(parsed.kind === "needs-repo" && messageId ? { reply_parameters: { message_id: messageId } } : {}),
+      ...((parsed.kind === "needs-repo" || engine) && messageId ? { reply_parameters: { message_id: messageId } } : {}),
     },
   );
 }
@@ -308,19 +318,19 @@ export async function handleRepoChoice(ctx: Context, deps: TaskCommandDeps): Pro
   await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
 
   const original = ctx.callbackQuery?.message?.reply_to_message;
-  const work = stripTaskCommand(
-    (original && "text" in original ? (original.text as string | undefined) : undefined) ?? "",
-  );
+  const originalText = (original && "text" in original ? (original.text as string | undefined) : undefined) ?? "";
+  const work = stripTaskCommand(originalText);
+  const engine = engineFromCommand(originalText);
 
   if (!work) {
-    await ctx.reply(buildRepoPrompt(repo), {
+    await ctx.reply(buildRepoPrompt(repo, engine), {
       parse_mode: "HTML",
       reply_markup: { force_reply: true, input_field_placeholder: "what should I build?" },
     });
     return true;
   }
 
-  await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work }));
+  await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work, ...(engine ? { engine } : {}) }), undefined, engine);
   return true;
 }
 
@@ -343,7 +353,8 @@ export async function handleRepoReply(ctx: Context, deps: TaskCommandDeps): Prom
   const work = (ctx.message?.text ?? "").trim();
   if (!work) return false;
 
-  await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work }));
+  const engine = engineFromPrompt(prompt);
+  await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work, ...(engine ? { engine } : {}) }), undefined, engine);
   return true;
 }
 

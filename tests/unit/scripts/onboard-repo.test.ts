@@ -20,9 +20,11 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AGENT_LABELS, DispatchSandbox } from "./dispatch-sandbox.js";
+import { AGENT_LABELS, ENGINE_LABELS, DispatchSandbox } from "./dispatch-sandbox.js";
 
 const REPO = "owner/widgets";
+/** What a fully onboarded repo carries: the six agent:* state labels and the two engine:* labels. */
+const ALL_LABELS = [...AGENT_LABELS, ...ENGINE_LABELS];
 const SCRIPT = fileURLToPath(new URL("../../../deploy/onboard-repo.sh", import.meta.url));
 const DAEMON = fileURLToPath(new URL("../../../deploy/agent-dispatch", import.meta.url));
 
@@ -126,7 +128,7 @@ describe("onboard-repo.sh — the repo name is validated before anything runs", 
 });
 
 describe("onboard-repo.sh <owner/repo> — provisioning", () => {
-  it("clones the review checkout and the agy workspace, creates the six labels, and prints what it VERIFIED", () => {
+  it("clones the review checkout and the agy workspace, creates the eight labels, and prints what it VERIFIED", () => {
     sb.setRepoLabels(REPO, []);
     const r = sb.onboard([REPO]);
 
@@ -134,11 +136,11 @@ describe("onboard-repo.sh <owner/repo> — provisioning", () => {
     expect(existsSync(join(sb.reviewDir(REPO), ".git"))).toBe(true);
     expect(existsSync(join(sb.reviewDir(REPO), "README.md"))).toBe(true);
     expect(existsSync(join(sb.workspaceDir(REPO), ".git"))).toBe(true);
-    expect([...sb.repoLabels(REPO)].sort()).toEqual([...AGENT_LABELS].sort());
+    expect([...sb.repoLabels(REPO)].sort()).toEqual([...ALL_LABELS].sort());
 
     expect(r.stdout).toMatch(/ok\s+review checkout\s+.*widgets/);
     expect(r.stdout).toMatch(/ok\s+agy workspace\s+.*widgets/);
-    expect(r.stdout).toMatch(/ok\s+labels\s+6 of 6/);
+    expect(r.stdout).toMatch(/ok\s+labels\s+8 of 8/);
     expect(r.stdout).not.toMatch(/MISSING|FAILED/);
   });
 
@@ -183,16 +185,17 @@ describe("onboard-repo.sh <owner/repo> — provisioning", () => {
     expect(labelCreates()).toEqual([]);
     expect(mutatingSudo()).toEqual([]);
     expect({ review: snapshot(sb.reviewDir(REPO)), ws: snapshot(sb.workspaceDir(REPO)), labels: [...sb.repoLabels(REPO)] }).toEqual(before);
-    expect(second.stdout).toMatch(/ok\s+labels\s+6 of 6/);
+    expect(second.stdout).toMatch(/ok\s+labels\s+8 of 8/);
   });
 
   it("creates only the labels that are missing, with --force", () => {
     sb.setRepoLabels(REPO, ["agent:ready", "agent:working", "agent:review", "agent:failed"]);
     sb.onboard([REPO]);
 
-    expect(labelCreates()).toHaveLength(2);
-    expect(labelCreates().join("\n")).toContain("agent:blocked");
-    expect(labelCreates().join("\n")).toContain("agent:needs-brief");
+    expect(labelCreates()).toHaveLength(4);
+    for (const missing of ["agent:blocked", "agent:needs-brief", "engine:agy", "engine:claude"]) {
+      expect(labelCreates().join("\n")).toContain(missing);
+    }
     for (const c of labelCreates()) expect(c).toContain("--force");
   });
 
@@ -238,7 +241,7 @@ describe("onboard-repo.sh --check — report, change nothing", () => {
     const two = new DispatchSandbox(["owner/alpha", "owner/beta"], { provision: false });
     try {
       two.ensureReviewCheckout("owner/alpha"); // alpha lacks only its workspace
-      two.setRepoLabels("owner/beta", ["agent:ready"]); // beta lacks both checkouts and five labels
+      two.setRepoLabels("owner/beta", ["agent:ready"]); // beta lacks both checkouts and seven labels
       two.clearCallLogs();
       const r = two.onboard(["--check"]);
 
@@ -249,7 +252,7 @@ describe("onboard-repo.sh --check — report, change nothing", () => {
           "owner/alpha workspace",
           "owner/beta review",
           "owner/beta workspace",
-          ...AGENT_LABELS.filter((l) => l !== "agent:ready").map((l) => `owner/beta label:${l}`),
+          ...ALL_LABELS.filter((l) => l !== "agent:ready").map((l) => `owner/beta label:${l}`),
         ].sort(),
       );
       expect(r.stdout).toContain("owner/alpha");
@@ -298,7 +301,7 @@ describe("onboard-repo.sh --check — report, change nothing", () => {
       expect(human.status, human.stdout).toBe(0);
       const listed = rows(green.onboard(["--check", "--porcelain"]).stdout);
       expect(listed.every((x) => x.status === "ok")).toBe(true);
-      expect(listed.map((x) => x.piece).sort()).toEqual(["review", "workspace", ...AGENT_LABELS.map((l) => `label:${l}`)].sort());
+      expect(listed.map((x) => x.piece).sort()).toEqual(["review", "workspace", ...ALL_LABELS.map((l) => `label:${l}`)].sort());
     } finally {
       green.destroy();
     }
@@ -383,11 +386,18 @@ describe("onboard-repo.sh — secrets", () => {
   });
 });
 
-describe("the six labels", () => {
+describe("the labels", () => {
   it("are exactly the agent:* labels the daemon uses, none invented and none left out", () => {
     const used = new Set(readFileSync(DAEMON, "utf8").match(/agent:[a-z]+(?:-[a-z]+)*/g) ?? []);
     expect([...used].sort()).toEqual([...AGENT_LABELS].sort());
     const declared = readFileSync(SCRIPT, "utf8").match(/agent:[a-z]+(?:-[a-z]+)*/g) ?? [];
     expect([...new Set(declared)].sort()).toEqual([...AGENT_LABELS].sort());
+  });
+
+  it("the engine:* labels the daemon's engine lib and this script use are the two the bot files under, and no others", () => {
+    const ENGINE = fileURLToPath(new URL("../../../deploy/lib/engine.sh", import.meta.url));
+    const found = (file: string): string[] => [...new Set(readFileSync(file, "utf8").match(/engine:[a-z]+/g) ?? [])].sort();
+    expect(found(ENGINE)).toEqual([...ENGINE_LABELS].sort());
+    expect(found(SCRIPT)).toEqual([...ENGINE_LABELS].sort());
   });
 });

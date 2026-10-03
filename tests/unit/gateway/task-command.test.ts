@@ -385,6 +385,223 @@ describe("handleRepoReply", () => {
   });
 });
 
+// ── /claude and /agy: the same flow, with the executor chosen ────────────────
+//
+// The engine travels the way the repo does: on the founder's own message (`/claude …`) and on
+// the force-reply prompt (`Executor: …`). Nothing is held in server memory between messages.
+
+describe("stripTaskCommand — engine commands", () => {
+  it("removes /claude and /agy, so the CLI's name never ends up inside the brief", () => {
+    expect(stripTaskCommand("/claude fix the login button")).toBe("fix the login button");
+    expect(stripTaskCommand("/agy fix the login button")).toBe("fix the login button");
+    expect(stripTaskCommand("/claude@FounderOSBot fix the login")).toBe("fix the login");
+    expect(stripTaskCommand("/AGY@FounderOSBot fix the login")).toBe("fix the login");
+  });
+
+  it("removes only the command, not a word that starts with it", () => {
+    expect(stripTaskCommand("/claudex fix it")).toBe("/claudex fix it");
+  });
+});
+
+describe("buildTaskInstruction — engine", () => {
+  const base = { repo: "pushkarverma3698/FounderOS", text: "fix the flaky CSV export" };
+
+  it("tells the planner the engine verbatim, the way it is told the repo", () => {
+    expect(buildTaskInstruction({ ...base, engine: "claude" })).toContain('Pass engine exactly as "claude".');
+    expect(buildTaskInstruction({ ...base, engine: "agy" })).toContain('Pass engine exactly as "agy".');
+  });
+
+  it("names no engine for a plain /task: the tool resolves the default when it files", () => {
+    const instruction = buildTaskInstruction(base);
+    expect(instruction).not.toMatch(/Pass engine/);
+    expect(instruction).toContain("dispatch_antigravity_task");
+  });
+
+  it("does not say the work goes to Antigravity when it goes to Claude Code", () => {
+    const instruction = buildTaskInstruction({ ...base, engine: "claude" });
+    expect(instruction).toContain("Claude Code");
+    expect(instruction).not.toMatch(/to Google Antigravity by calling/);
+  });
+});
+
+describe("handleTask with an engine command", () => {
+  it("forces the engine on the turn itself, so the planner cannot drop it", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = fakeCtx("repo:hulda fix the flaky CSV export");
+
+    await handleTask(ctx, { runKernelText }, "claude");
+
+    expect(runKernelText.mock.calls[0]?.[2]).toBeUndefined();
+    expect(runKernelText.mock.calls[0]?.[3]).toBe("claude");
+  });
+
+  it("forces no engine after a plain /task", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = fakeCtx("repo:hulda fix the flaky CSV export");
+
+    await handleTask(ctx, { runKernelText });
+
+    expect(runKernelText.mock.calls[0]?.[3]).toBeUndefined();
+  });
+
+  it("hands the engine to the kernel turn", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = fakeCtx("repo:hulda fix the flaky CSV export");
+
+    await handleTask(ctx, { runKernelText }, "claude");
+
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).toContain('Pass engine exactly as "claude".');
+    expect(instruction).toContain("House-of-Hulda-Website-frontend");
+  });
+
+  it("asks which repo with buttons, attached to his message so the engine and the work survive the tap", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const replyOpts: Record<string, unknown>[] = [];
+    const { ctx } = fakeCtx("fix the flaky CSV export", {
+      message: { message_id: 11, text: "/claude fix the flaky CSV export" },
+      reply: async (_t: string, opts: Record<string, unknown>) => void replyOpts.push(opts),
+    });
+
+    await handleTask(ctx, { runKernelText }, "claude");
+
+    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replyOpts[0]?.reply_parameters).toEqual({ message_id: 11 });
+  });
+
+  it("attaches the repo question to a bare /claude too, which a bare /task never needed", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const replyOpts: Record<string, unknown>[] = [];
+    const { ctx } = fakeCtx("", {
+      message: { message_id: 12, text: "/claude" },
+      reply: async (_t: string, opts: Record<string, unknown>) => void replyOpts.push(opts),
+    });
+
+    await handleTask(ctx, { runKernelText }, "claude");
+
+    expect(replyOpts[0]?.reply_parameters).toEqual({ message_id: 12 });
+  });
+
+  it("puts the executor on the force-reply prompt for /claude repo:x with no work", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx, replies } = fakeCtx("repo:hulda", { message: { message_id: 13, text: "/claude repo:hulda" } });
+
+    await handleTask(ctx, { runKernelText }, "claude");
+
+    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replies[0]).toMatch(/Executor: <code>Claude Code<\/code>/);
+  });
+
+  it("keeps a plain /task prompt free of any executor line", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx, replies } = fakeCtx("repo:hulda");
+
+    await handleTask(ctx, { runKernelText });
+
+    expect(replies[0]).not.toMatch(/Executor/);
+  });
+});
+
+describe("the repo button, after /claude or /agy", () => {
+  it("dispatches to the engine named on the original message", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = tapCtx("task:repo:House-of-Hulda-Website-frontend", "/claude make the hero responsive");
+
+    expect(await handleRepoChoice(ctx, { runKernelText })).toBe(true);
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).toContain('Pass engine exactly as "claude".');
+    expect(instruction).toContain("make the hero responsive");
+    expect(instruction).not.toContain("/claude make");
+  });
+
+  it("does the same for /agy@Bot in a group chat", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = tapCtx("task:repo:House-of-Hulda-Website-frontend", "/agy@FounderOSBot make the hero responsive");
+
+    await handleRepoChoice(ctx, { runKernelText });
+
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).toContain('Pass engine exactly as "agy".');
+  });
+
+  it("names no engine after a plain /task", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = tapCtx("task:repo:House-of-Hulda-Website-frontend", "/task make the hero responsive");
+
+    await handleRepoChoice(ctx, { runKernelText });
+
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).not.toMatch(/Pass engine/);
+  });
+
+  it("carries the engine into the prompt when the tap came from a bare /claude", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx, replies } = tapCtx("task:repo:oplify-messaging-app", "/claude");
+
+    expect(await handleRepoChoice(ctx, { runKernelText })).toBe(true);
+
+    expect(runKernelText).not.toHaveBeenCalled();
+    expect(replies[0]).toMatch(/Executor: <code>Claude Code<\/code>/);
+  });
+});
+
+describe("handleRepoReply, after /claude or /agy", () => {
+  const prompt = (engine: string) =>
+    `📱 Oplify app — what should I build?\n\nRepo: OplifyMessage/oplify-messaging-app\nExecutor: ${engine}`;
+
+  it("dispatches a reply to the executor the prompt named", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = fakeCtx("", {
+      message: { message_id: 40, text: "make the login form keyboard-accessible", reply_to_message: { text: prompt("Claude Code") } },
+    });
+
+    expect(await handleRepoReply(ctx, { runKernelText })).toBe(true);
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).toContain('Pass engine exactly as "claude".');
+    expect(instruction).toContain("keyboard-accessible");
+  });
+
+  it("reads Antigravity too", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = fakeCtx("", {
+      message: { message_id: 41, text: "make the login form keyboard-accessible", reply_to_message: { text: prompt("Google Antigravity") } },
+    });
+
+    await handleRepoReply(ctx, { runKernelText });
+
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).toContain('Pass engine exactly as "agy".');
+  });
+
+  it("ignores an Executor line it does not recognise instead of guessing", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = fakeCtx("", {
+      message: { message_id: 42, text: "make the login form keyboard-accessible", reply_to_message: { text: prompt("Gemini") } },
+    });
+
+    await handleRepoReply(ctx, { runKernelText });
+
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).not.toMatch(/Pass engine/);
+  });
+
+  it("round-trips: /claude repo:x → prompt → reply → dispatched for Claude Code", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const first = fakeCtx("repo:hulda", { message: { message_id: 50, text: "/claude repo:hulda" } });
+    await handleTask(first.ctx, { runKernelText }, "claude");
+
+    const delivered = first.replies[0]!.replace(/<[^>]*>/g, "");
+    const { ctx } = fakeCtx("", {
+      message: { message_id: 51, text: "make the hero responsive", reply_to_message: { text: delivered } },
+    });
+    expect(await handleRepoReply(ctx, { runKernelText })).toBe(true);
+
+    const [, instruction] = runKernelText.mock.calls[0] as [Context, string];
+    expect(instruction).toContain('Pass engine exactly as "claude".');
+    expect(instruction).toContain("House-of-Hulda-Website-frontend");
+  });
+});
+
 // ── Repos created after this code was compiled ───────────────────────────────
 //
 // /task has to reach a project started from Telegram last Tuesday, or "start a new

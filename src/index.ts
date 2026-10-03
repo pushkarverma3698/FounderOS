@@ -28,6 +28,8 @@ import { shouldRunProviderSmoke } from "./infra/provider-config.js";
 import { startScheduler, recoverStrandedReminders } from "./infra/scheduler.js";
 import { runGoalStandupCatchUp } from "./goals/standup-schedule.js";
 import { buildRestartMessage } from "./gateway/capability-message.js";
+import { sendBootNoticeOnce } from "./infra/boot-notice.js";
+import { sendToChat as sendInfraChat } from "./infra/telegram-send.js"; // the boot probe runs before the bot starts, as provider-probes always did
 import { acquireSingleInstanceLock, releaseSingleInstanceLock, waitForProcessExit } from "./infra/single-instance.js";
 import { logger } from "./infra/logger.js";
 import type { Server } from "node:http";
@@ -51,7 +53,9 @@ async function main(): Promise<void> {
   for (const w of bootValidation.warnings) log.warn({ module: "boot" }, `[boot] ${w}`);
 
   if (shouldRunProviderSmoke()) {
-    await runProviderSmokeAtBoot().catch((err) => {
+    await runProviderSmokeAtBoot((html) =>
+      sendBootNoticeOnce("provider-auth", html, (text) => sendInfraChat(text, "HTML")).then(() => undefined),
+    ).catch((err) => {
       log.warn({ err: (err as Error).message }, "Provider smoke failed — non-fatal");
     });
   }
@@ -108,7 +112,7 @@ async function main(): Promise<void> {
   void runGoalStandupCatchUp();
 
   if (TELEGRAM_POLLING_ENABLED) {
-    await sendToChat(buildRestartMessage(), "HTML").catch((err) =>
+    await sendBootNoticeOnce("restart", buildRestartMessage(), (text) => sendToChat(text, "HTML")).catch((err) =>
       log.warn({ err: (err as Error).message }, "Startup notification failed"),
     );
   }

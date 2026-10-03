@@ -401,17 +401,35 @@ EXECUTOR_MODEL="${PR_BRAIN_EXECUTOR_MODEL:-$AGY_EXECUTOR_MODEL}"
 SPENT_MODELS=" "
 RETIRED_MODELS=" "   # candidates agy does not know (a subset of SPENT_MODELS)
 QUOTA_SEEN=0         # 1 once any candidate hit a quota wall this sweep
+# A name prefix no candidate may have, for the PR being reviewed: "claude-" on a PR the Claude Code executor wrote
+# (engine:claude), "" otherwise. The executor there is Claude, and agy's claude-* reviewer is a Claude model too.
+REVIEW_EXCLUDE_PREFIX=""
 
-# Sets MODEL to the first candidate that is neither the executor's model nor spent. Returns 1 when there is none.
+# Sets MODEL to the first candidate that is neither the executor's model, nor spent, nor of the excluded family.
+# Returns 1 when there is none.
 select_review_model() {
   local m
   for m in $REVIEW_MODELS; do
     [[ "$m" == "$EXECUTOR_MODEL" ]] && continue
+    [[ -n "$REVIEW_EXCLUDE_PREFIX" && "$m" == "$REVIEW_EXCLUDE_PREFIX"* ]] && continue
     [[ "$SPENT_MODELS" == *" $m "* ]] && continue
     MODEL="$m"
     return 0
   done
   return 1
+}
+
+# Sets REVIEW_EXCLUDE_PREFIX from PR's labels. A PR labelled engine:claude was written by Claude Code, so no
+# claude-* model reviews it; the label is how agent-dispatch records the executor (deploy/lib/engine.sh), and a PR
+# with no engine label, or engine:agy, predates the switch or was written by Antigravity. A PR carrying both labels
+# is treated as Claude's: the stricter reading. Returns 1 when the labels could not be read: guessing "not Claude"
+# would let a Claude model grade its own work, so the caller leaves that PR for the next sweep.
+set_review_family() { # set_review_family PR
+  local labels
+  REVIEW_EXCLUDE_PREFIX=""
+  labels="$(gh pr view "$1" --json labels --jq '.labels[].name' 2>/dev/null)" || return 1
+  if grep -qxF 'engine:claude' <<<"$labels"; then REVIEW_EXCLUDE_PREFIX="claude-"; fi
+  return 0
 }
 
 # Why select_review_model found nothing, as the line the founder reads. LAST_QUOTA_LINE is the CLI's own words.
@@ -1231,6 +1249,23 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
     # This PR needs a gate: the first time in this tick, prove the reviewer is reachable
     # before spending the browser gate's build on a review that cannot run.
     preflight
+
+    # Which model reviews THIS PR: the first of the list for most, the first of another family for a PR the Claude
+    # Code executor wrote. Chosen per PR, so one Claude PR does not move the next PR's reviewer. Before the browser
+    # gate and before record_review: a PR nobody may review must not spend a build or a slot of the daily ceiling.
+    if [[ "$ENGINE" == "agy" ]]; then
+      if ! set_review_family "$pr"; then
+        log "$repo_name#$pr could not read its labels, so which model may review it is unknown — left for the next sweep"
+        continue
+      fi
+      if select_review_model; then
+        [[ -z "$REVIEW_EXCLUDE_PREFIX" ]] || log "$repo_name#$pr is engine:claude: reviewer model $MODEL, chosen outside the ${REVIEW_EXCLUDE_PREFIX}* family"
+      elif [[ -n "$REVIEW_EXCLUDE_PREFIX" ]]; then
+        log "$repo_name#$pr is engine:claude and no reviewer model outside the ${REVIEW_EXCLUDE_PREFIX}* family is left (PR_BRAIN_MODELS=\"$REVIEW_MODELS\", spent:${SPENT_MODELS% })"
+        warn_once "no-independent-reviewer" "a PR Claude Code wrote (engine:claude, e.g. ${repo_name}#${pr}) is not reviewed: PR_BRAIN_MODELS has no model outside the Claude family that is usable (\"${REVIEW_MODELS}\"). Fix: ssh founderos-vps, crontab -e, add a model of another family to PR_BRAIN_MODELS on the pr-brain line (agy models lists what exists)."
+        continue
+      fi
+    fi
 
     # The browser gate renders whatever is CHECKED OUT in $repo, and nothing here ever checked the PR out: it
     # rendered the branch the previous review happened to leave behind, so the evidence pack on PR N could show

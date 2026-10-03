@@ -51,7 +51,8 @@ describe("the founder removes agent:working while Antigravity runs", () => {
     const r = sb.tick({ agyOut: "done", agyRc: 0, agyHook: `${OPEN_A_PR} && ${REMOVE_WORKING}` });
 
     expect(r.status).toBe(0);
-    expect(sb.labelsOf(710)).toEqual(["agent:review"]);
+    // engine:agy rides along with agent:review once a PR opens: the next pass reads it to know who wrote the PR
+    expect(sb.labelsOf(710)).toEqual(["agent:review", "engine:agy"]);
     expect(sb.log()).toMatch(/no longer carries agent:working/);
     expect(sb.commentsOf(710).some((c) => c.startsWith("<!-- agent-pr:"))).toBe(true);
   });
@@ -69,7 +70,7 @@ describe("the issue is closed while Antigravity runs", () => {
     expect(sb.prs()).toHaveLength(1);
     expect(sb.prs()[0]?.isDraft).toBe(true);
     expect(sb.prs()[0]?.headRefName).toBe(BRANCH);
-    expect(sb.labelsOf(710)).toEqual(["agent:review"]);
+    expect(sb.labelsOf(710)).toEqual(["agent:review", "engine:agy"]);
     expect(sb.ghLog()).not.toMatch(/pr close|pr merge/);
 
     const msg = sb.messages().find((m) => /PR #\d+ opened/.test(m)) ?? "";
@@ -92,7 +93,7 @@ describe("Telegram is down", () => {
     const r = sb.tick({ agyOut: "done", agyRc: 0, agyHook: OPEN_A_PR, curlRc: 7 });
 
     expect(r.status).toBe(0);
-    expect(sb.labelsOf(710)).toEqual(["agent:review"]);
+    expect(sb.labelsOf(710)).toEqual(["agent:review", "engine:agy"]);
     expect(sb.commentsOf(710).some((c) => c.startsWith("<!-- agent-pr:"))).toBe(true);
     expect(sb.log()).toMatch(/tick complete/);
   });

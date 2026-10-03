@@ -210,6 +210,18 @@ describe("runKernelText", () => {
     expect("profile_id" in config.configurable).toBe(false);
   });
 
+  it("carries a command-forced engine as configurable.engine, and omits it otherwise", async () => {
+    const { ctx } = fakeCtx();
+    await runKernelText(ctx, "/claude fix the thing", undefined, "claude");
+    const [, forced] = fakeKernel.stream.mock.calls[0]! as unknown as [unknown, { configurable: Record<string, unknown> }];
+    expect(forced.configurable["engine"]).toBe("claude");
+
+    fakeKernel.stream.mockClear();
+    await runKernelText(ctx, "hello kernel");
+    const [, plain] = fakeKernel.stream.mock.calls[0]! as unknown as [unknown, { configurable: Record<string, unknown> }];
+    expect("engine" in plain.configurable).toBe(false);
+  });
+
   it("hands the kernel stream an AbortSignal so a deadline ABORTS the run instead of orphaning it", async () => {
     const { ctx } = fakeCtx();
     await runKernelText(ctx, "hello kernel");
@@ -265,6 +277,41 @@ describe("runKernelText", () => {
     expect(replies).toHaveLength(2); // progress placeholder + approval card
     expect(replies.at(-1)!.text).toContain("Send email to a@b.c?");
     expect(replies.at(-1)!.opts?.reply_markup).toBeDefined();
+  });
+
+  it("a new message while an approval card is pending is NOT run: the card is re-sent and the founder is told (2026-10-03 lost-dispatch bug)", async () => {
+    getPendingInterrupt.mockResolvedValue({
+      interrupt_id: "abcd1234-0000",
+      created_at: new Date(Date.now() - 60_000).toISOString(),
+      callback_data: JSON.stringify({
+        action: "dispatch_antigravity",
+        title: "Dispatch task to Antigravity?",
+        summary: "s",
+        preview: "p",
+        args: {},
+      }),
+    });
+    const { ctx, replies } = fakeCtx();
+    await runKernelText(ctx, "/task second thing");
+
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+    const all = replies.map((r) => r.text).join("\n");
+    expect(all).toContain("Dispatch task to Antigravity?"); // the pending card, again
+    expect(all).toMatch(/approve or reject/i);
+    expect(all).toMatch(/send (it|your message) again/i);
+  });
+
+  it("an approval pending longer than the restore window is expired, not allowed to block the chat forever", async () => {
+    getPendingInterrupt.mockResolvedValue({
+      interrupt_id: "dead0000-1111",
+      created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+      callback_data: "{}",
+    });
+    const { ctx } = fakeCtx();
+    await runKernelText(ctx, "hello");
+
+    expect(resolveInterrupt).toHaveBeenCalledWith("dead0000-1111", "expired");
+    expect(fakeKernel.stream).toHaveBeenCalledTimes(1);
   });
 
   it("kernel invoke failure → loud ❌ error reply (never silent, never a wipe)", async () => {

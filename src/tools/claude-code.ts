@@ -36,6 +36,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { childLogger } from "../infra/logger.js";
+import { readClaudeToken } from "../infra/claude-token.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 import { installGitGuard, gitGuardEnv, REPO_POLICY_DIRECTIVE } from "./claude-code-git-guard.js";
 
@@ -167,8 +168,12 @@ export function resultFromEvent(raw: string): { text: string; isError: boolean }
  * CLAUDE_* and CLAUDECODE vars are always stripped: they are SDK/session vars (e.g.
  * CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH) that make a child CLI expect host-injected
  * auth and report "Not logged in" instead of reading its own stored credentials.
+ *
+ * `oauthToken` is the long-lived token `/login claude` stores (src/infra/claude-token.ts). It is passed
+ * as CLAUDE_CODE_OAUTH_TOKEN, after the strip, so renewing it from Telegram renews the executor too.
+ * An explicit CLAUDE_EXECUTOR_API_KEY wins over it.
  */
-export function buildExecutorEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function buildExecutorEnv(base: NodeJS.ProcessEnv = process.env, oauthToken?: string): NodeJS.ProcessEnv {
   const executorApiKey = base["CLAUDE_EXECUTOR_API_KEY"];
   const executorBaseUrl = base["CLAUDE_EXECUTOR_BASE_URL"];
   const env: NodeJS.ProcessEnv = {};
@@ -178,6 +183,8 @@ export function buildExecutorEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.
   }
   if (executorApiKey) {
     env["ANTHROPIC_API_KEY"] = executorApiKey;
+  } else if (oauthToken) {
+    env["CLAUDE_CODE_OAUTH_TOKEN"] = oauthToken;
   }
   if (executorBaseUrl) {
     env["ANTHROPIC_BASE_URL"] = executorBaseUrl;
@@ -262,7 +269,7 @@ export const claudeCodeTool: UnifiedTool = {
     // Fail closed: a run that cannot get the git guard does not run at all.
     let childEnv: NodeJS.ProcessEnv;
     try {
-      const baseEnv = buildExecutorEnv();
+      const baseEnv = buildExecutorEnv(process.env, await readClaudeToken());
       childEnv = { ...baseEnv, ...gitGuardEnv(installGitGuard(), baseEnv) };
     } catch (err) {
       return { success: false, error: `Claude Code not started: could not install the git guard (${(err as Error).message}).` };
