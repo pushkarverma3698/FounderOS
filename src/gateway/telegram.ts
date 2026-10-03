@@ -36,6 +36,7 @@ import { handleFocus, handleProjects } from "./focus-commands.js";
 import { handleNewProject } from "./newproject-command.js";
 import { handleMenuCallback } from "./home-menu.js";
 import { handleTasks, fetchDispatchTasks } from "./tasks-command.js";
+import { handleWhere } from "./where-command.js";
 import {
   handleCsv,
   handleFresh,
@@ -184,6 +185,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     fetch: (repos) => fetchDispatchTasks(repos),
     listRegisteredRepos: taskDeps.listRegisteredRepos,
   }));
+  bot.command("where", (ctx: Context) => handleWhere(ctx));
   bot.command("newproject", (ctx: Context) => handleNewProject(ctx, { runKernelText }));
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
   bot.command("wife_draft", (ctx: Context) => handleDraft(withForcedProfileToken(ctx, "wife"), { runKernelText }));

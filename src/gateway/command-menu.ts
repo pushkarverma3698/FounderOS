@@ -233,6 +233,11 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
     group: "engineering",
   },
   {
+    command: "where",
+    description: "Where are we: done this week, in flight, left, blocked per repo. where founderos for one",
+    group: "engineering",
+  },
+  {
     command: "newproject",
     description: "Start a new project: creates a private repo the agent loop can work in. newproject name what it is",
     group: "engineering",
