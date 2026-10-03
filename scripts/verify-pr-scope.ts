@@ -9,7 +9,7 @@
  *
  * A frozen path passes only with a label a reviewer can see: `crash-fix` (it is broken in
  * prod) or `unfreeze` (the change is named in the approved plan). Sync/promotion PRs
- * (head `main` or `beta`) are exempt — their content passed this check on the way in.
+ * (head `main`, `beta`, `chore/promote-*` or `chore/sync-*`) are exempt — their content passed this check on the way in.
  *
  * Runs from .github/workflows/pr-scope.yml, which also fires on label and body edits.
  * Delete this file and that workflow when the freeze ends (2026-11-01).
@@ -45,6 +45,8 @@ export const FROZEN_PREFIXES: readonly string[] = [
 
 export const PASS_LABELS: readonly string[] = ["crash-fix", "unfreeze"];
 const EXEMPT_HEADS: readonly string[] = ["main", "beta"];
+// Promotions are built as origin/main + beta on chore/promote-* (AGENTS.md, 2026-10-02); pr-brain skips the same heads.
+const EXEMPT_HEAD_PREFIXES: readonly string[] = ["chore/promote-", "chore/sync-"];
 
 /** Outcomes named on a `Moves:` line. HTML comments are stripped first so the template placeholder never counts. */
 export function parseMoves(body: string): Move[] {
@@ -73,7 +75,7 @@ export interface PrScopeInput {
 }
 
 export function evaluatePrScope(input: PrScopeInput): { ok: boolean; problems: string[] } {
-  if (EXEMPT_HEADS.includes(input.headRef)) return { ok: true, problems: [] };
+  if (EXEMPT_HEADS.includes(input.headRef) || EXEMPT_HEAD_PREFIXES.some((p) => input.headRef.startsWith(p))) return { ok: true, problems: [] };
   const problems: string[] = [];
   if (parseMoves(input.body).length === 0) {
     problems.push(

@@ -52,8 +52,14 @@ describe("evaluatePrScope", () => {
   });
 
   it("exempts sync and promotion PRs, whose content was gated on the way in", () => {
-    for (const headRef of ["main", "beta"]) {
+    for (const headRef of ["main", "beta", "chore/promote-where-status", "chore/sync-beta"]) {
       expect(evaluatePrScope({ files: ["src/tools/video-brief.ts"], body: "", labels: [], headRef }).ok).toBe(true);
     }
+  });
+});
+
+describe("promotion-branch exemption is narrow", () => {
+  it("does not exempt an ordinary chore/ branch", () => {
+    expect(evaluatePrScope({ files: ["src/tools/video-brief.ts"], body: "", labels: [], headRef: "chore/tidy" }).ok).toBe(false);
   });
 });
