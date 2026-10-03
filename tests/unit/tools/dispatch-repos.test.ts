@@ -29,6 +29,7 @@ const PROVISIONED_REPOS = [
   "pushkarverma3698/House-of-Hulda-Website-frontend",
   "OplifyMessage/oplify-messaging-app",
   "OplifyMessage/oplify-messaging-api",
+  "pushkarverma3698/fos-journey-sandbox",
 ] as const;
 
 /** True when the repo-name half of `owner/repo` contains `hint`: the rule `/task repo:<hint>` matches on. */

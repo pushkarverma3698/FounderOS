@@ -110,7 +110,7 @@ AGENT_BRIEF_HEADINGS=(
 # filed against it would have sat at agent:ready forever. Enforced now by
 # tests/unit/tools/dispatch-repo-serviceability.test.ts, which reads this array.
 # Keep it on ONE line in this format: `pnpm repo:add` edits it and that test parses it.
-DEFAULT_REPOS=("pushkarverma3698/FounderOS" "OplifyMessage/oplify-messaging-app" "OplifyMessage/oplify-messaging-api" "pushkarverma3698/House-of-Hulda-Website-frontend")
+DEFAULT_REPOS=("pushkarverma3698/FounderOS" "OplifyMessage/oplify-messaging-app" "OplifyMessage/oplify-messaging-api" "pushkarverma3698/House-of-Hulda-Website-frontend" "pushkarverma3698/fos-journey-sandbox")
 # This is the ONLY list the daemon reads. ISSUE_REPOS / ISSUE_REPO used to override it from the
 # crontab line, a registry CI cannot see: the crontab kept sweeping the repos it named after the
 # script had moved on. They are ignored now, with one warning per tick (see below).
