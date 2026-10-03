@@ -1138,6 +1138,8 @@ $(gh pr view "$pr" --json url --jq .url 2>/dev/null)" ;;
       if [[ "$ENGINE" == "agy" ]]; then
         outage=$(agy_outage "$gate_out")
         [[ -z "$outage" ]] || outage_detail="$(outage_line "$gate_out" "$outage")"
+        # run_agy_gate_any_model returns a quota failure only when no model was left to try: say which were.
+        if [[ "$outage" == limit && "$SPENT_MODELS" != " " ]]; then outage_detail="$(no_review_model_detail "$outage_detail")"; fi
       else
         outage=$(claude_outage "$gate_tail")
         [[ -z "$outage" ]] || outage_detail="$(printf '%s' "$gate_tail" | tr '\n' ' ' | cut -c1-160)"
