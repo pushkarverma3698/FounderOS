@@ -119,6 +119,21 @@ export function withFounderRequestEvidence(input: AntigravityTaskInput, founderR
   return { ...input, evidence: evidenceFromFounderRequest(request) };
 }
 
+/**
+ * Fills an empty Problem section from the founder's request. The planner omitted `problem` on most first calls
+ * (2026-10-03, ~5 of 8): the lint rejected the brief and a model turn went on re-calling. What the founder asked for
+ * is what he described, so his words are the Problem, labelled as such; anything the caller supplied is kept.
+ */
+export function withFounderRequestProblem(input: AntigravityTaskInput, founderRequest: string | undefined | null): AntigravityTaskInput {
+  const request = founderRequest?.trim();
+  if (!request || input.problem?.trim()) return input;
+  const quoted = request
+    .split(/\r?\n/)
+    .map((line) => `> ${line}`)
+    .join("\n");
+  return { ...input, problem: `The founder described it as:\n\n${quoted}` };
+}
+
 export type PreparedBrief =
   | {
       readonly ok: true;
@@ -157,7 +172,7 @@ export async function prepareDispatchBrief(
   founderRequest: string | undefined | null,
   deps: PrepareDeps,
 ): Promise<PreparedBrief> {
-  const withEvidence = withFounderRequestEvidence(input, founderRequest);
+  const withEvidence = withFounderRequestEvidence(withFounderRequestProblem(input, founderRequest), founderRequest);
   return prepare(withEvidence, deps.format(withEvidence), deps);
 }
 
