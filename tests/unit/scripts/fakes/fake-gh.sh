@@ -154,7 +154,15 @@ case "$group $sub" in
       | '"$PICK" "$STATE" | emit
     ;;
 
-  "pr checks") echo '[]' | emit ;;
+  "pr checks")
+    # The PR's `checks` (name, bucket, state, and `required: false` for one branch protection does not require).
+    # `--required` keeps only the required ones, as gh does. A PR with no `checks` reports an empty list.
+    need_repo
+    req=0; for a in "${ARGS[@]}"; do [ "$a" = "--required" ] && req=1; done
+    jq -c --arg r "$repo" --arg n "$num" --argjson req "$req" '
+      [ ((.repos[$r].prs[] | select((.number | tostring) == $n) | .checks) // [])[]
+        | select($req == 0 or .required != false) ]' "$STATE" | emit
+    ;;
 
   "pr comment")
     need_repo
