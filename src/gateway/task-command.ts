@@ -198,7 +198,7 @@ export function buildTaskInstruction(args: TaskArgs): string {
 
 export interface TaskCommandDeps {
   /** The normal kernel turn — same path a typed message takes. */
-  readonly runKernelText: (ctx: Context, text: string) => Promise<void>;
+  readonly runKernelText: (ctx: Context, text: string, profileId?: string, engine?: Engine) => Promise<void>;
   /**
    * Project repos this instance created, which are dispatchable without a code
    * change. Optional so every existing caller and test keeps the hardcoded-only
@@ -227,7 +227,7 @@ export async function handleTask(ctx: Context, deps: TaskCommandDeps, engine?: E
   const parsed = parseTaskArgs(ctx.match?.toString() ?? "", registered);
 
   if (parsed.ok) {
-    await deps.runKernelText(ctx, buildTaskInstruction({ ...parsed.args, ...(engine ? { engine } : {}) }));
+    await deps.runKernelText(ctx, buildTaskInstruction({ ...parsed.args, ...(engine ? { engine } : {}) }), undefined, engine);
     return;
   }
 
@@ -330,7 +330,7 @@ export async function handleRepoChoice(ctx: Context, deps: TaskCommandDeps): Pro
     return true;
   }
 
-  await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work, ...(engine ? { engine } : {}) }));
+  await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work, ...(engine ? { engine } : {}) }), undefined, engine);
   return true;
 }
 
@@ -354,7 +354,7 @@ export async function handleRepoReply(ctx: Context, deps: TaskCommandDeps): Prom
   if (!work) return false;
 
   const engine = engineFromPrompt(prompt);
-  await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work, ...(engine ? { engine } : {}) }));
+  await deps.runKernelText(ctx, buildTaskInstruction({ repo, text: work, ...(engine ? { engine } : {}) }), undefined, engine);
   return true;
 }
 

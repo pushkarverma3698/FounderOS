@@ -425,6 +425,25 @@ describe("buildTaskInstruction — engine", () => {
 });
 
 describe("handleTask with an engine command", () => {
+  it("forces the engine on the turn itself, so the planner cannot drop it", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = fakeCtx("repo:hulda fix the flaky CSV export");
+
+    await handleTask(ctx, { runKernelText }, "claude");
+
+    expect(runKernelText.mock.calls[0]?.[2]).toBeUndefined();
+    expect(runKernelText.mock.calls[0]?.[3]).toBe("claude");
+  });
+
+  it("forces no engine after a plain /task", async () => {
+    const runKernelText = vi.fn().mockResolvedValue(undefined);
+    const { ctx } = fakeCtx("repo:hulda fix the flaky CSV export");
+
+    await handleTask(ctx, { runKernelText });
+
+    expect(runKernelText.mock.calls[0]?.[3]).toBeUndefined();
+  });
+
   it("hands the engine to the kernel turn", async () => {
     const runKernelText = vi.fn().mockResolvedValue(undefined);
     const { ctx } = fakeCtx("repo:hulda fix the flaky CSV export");

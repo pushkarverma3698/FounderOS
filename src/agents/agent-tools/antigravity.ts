@@ -55,7 +55,10 @@ export const dispatchAntigravityTask = tool(
     // The executor is settled HERE, before the gate, and passed to execute() by name. hitlGate re-runs this body
     // when the founder approves, so reading the default again after the tap could file for a CLI the card
     // did not show. An unknown word is refused for the same reason the repo is: a card must not misreport.
-    const executor = engine ? parseEngine(engine) : readDefaultEngine();
+    // An engine the founder forced by typing /claude or /agy (gateway: configurable.engine) outranks the argument: the
+    // planner is told it in words and may drop it.
+    const forced = parseEngine(config?.configurable?.["engine"] as string | undefined);
+    const executor = forced ?? (engine ? parseEngine(engine) : readDefaultEngine());
     if (!executor) return `❌ Cannot dispatch: engine "${engine}" is not one I can run. Use ${ENGINES.join(" or ")}.`;
     const who = engineDisplay(executor);
 
