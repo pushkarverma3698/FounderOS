@@ -285,6 +285,31 @@ describe("dispatchAntigravityTask agent tool: the coding engine", () => {
     expect(card.args["engine"]).toBe("claude");
   });
 
+  // The founder typed /claude or /agy: the engine is a fact about his message, not something the planner may
+  // forget to copy. The gateway puts it in configurable.engine and the tool trusts that over its own argument.
+  it("uses the engine the founder's command forced, even when the planner passed none", async () => {
+    mockDispatchExecute.mockResolvedValue(FILED("claude"));
+
+    await dispatchAntigravityTask.invoke({ ...TASK }, { configurable: { engine: "claude" } });
+
+    expect(mockHitlGate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "🤖 Dispatch task to Claude Code?" }),
+      expect.anything(),
+    );
+    const card = mockHitlGate.mock.calls[0]?.[0] as { args: Record<string, unknown> };
+    expect(card.args["engine"]).toBe("claude");
+    expect(mockDispatchExecute).toHaveBeenCalledWith(expect.objectContaining({ engine: "claude" }));
+    expect(mockReadDefaultEngine).not.toHaveBeenCalled();
+  });
+
+  it("uses the forced engine over a different one the planner passed", async () => {
+    mockDispatchExecute.mockResolvedValue(FILED("agy"));
+
+    await dispatchAntigravityTask.invoke({ ...TASK, engine: "claude" }, { configurable: { engine: "agy" } });
+
+    expect(mockDispatchExecute).toHaveBeenCalledWith(expect.objectContaining({ engine: "agy" }));
+  });
+
   it("refuses an engine it does not know BEFORE the card: no approval, no filing", async () => {
     const result = await dispatchAntigravityTask.invoke({ ...TASK, engine: "gemini" });
 

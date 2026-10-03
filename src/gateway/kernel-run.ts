@@ -32,6 +32,7 @@ import { streamKernelTurn, progressLabelFor } from "./kernel-progress.js";
 import { cleanupResumeArtifact } from "./resume-artifact-cleanup.js";
 import { replyForError } from "./error-reply.js";
 import { failureCardFor, replyWithFailureCard } from "./failure-card.js";
+import type { Engine } from "../tools/coding-engine.js";
 
 // Progress streaming lives in ./kernel-progress.ts; re-exported so the gateway's
 // public surface (and its tests) keep addressing kernel-run.
@@ -170,8 +171,12 @@ async function holdForPendingApproval(ctx: Context, chatId: string | number): Pr
  * THIS turn without rebuilding the kernel, which is compiled once and reused
  * forever. Omitted (the general free-text path) means "no override" — the
  * worker keeps the default-profile prompt it always had.
+ *
+ * `engine` is the coding CLI the founder chose by typing /claude or /agy. It rides in `configurable.engine` and the
+ * dispatch tool trusts it over its own argument: the planner is told the engine in words, and a model may drop a
+ * word, so the choice cannot depend on the model copying it.
  */
-export async function runKernelText(ctx: Context, text: string, profileId?: string): Promise<void> {
+export async function runKernelText(ctx: Context, text: string, profileId?: string, engine?: Engine): Promise<void> {
   const chatId = ctx.chat?.id ?? "unknown";
   // UX: Let the founder know the system heard him if another turn is already running.
   if (chatTurnChains.has(String(chatId))) {
@@ -203,6 +208,7 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
         configurable: {
           thread_id: threadIdFor(chatId),
           ...(profileId ? { profile_id: profileId } : {}),
+          ...(engine ? { engine } : {}),
           // Fine-grained keep-alive for a single long tool call (claude_code,
           // own budget 15min) that yields no new LangGraph state for its whole
           // run — src/agents/agent-tools/engineering.ts reads this.

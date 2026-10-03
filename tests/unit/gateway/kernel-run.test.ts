@@ -210,6 +210,18 @@ describe("runKernelText", () => {
     expect("profile_id" in config.configurable).toBe(false);
   });
 
+  it("carries a command-forced engine as configurable.engine, and omits it otherwise", async () => {
+    const { ctx } = fakeCtx();
+    await runKernelText(ctx, "/claude fix the thing", undefined, "claude");
+    const [, forced] = fakeKernel.stream.mock.calls[0]! as unknown as [unknown, { configurable: Record<string, unknown> }];
+    expect(forced.configurable["engine"]).toBe("claude");
+
+    fakeKernel.stream.mockClear();
+    await runKernelText(ctx, "hello kernel");
+    const [, plain] = fakeKernel.stream.mock.calls[0]! as unknown as [unknown, { configurable: Record<string, unknown> }];
+    expect("engine" in plain.configurable).toBe(false);
+  });
+
   it("hands the kernel stream an AbortSignal so a deadline ABORTS the run instead of orphaning it", async () => {
     const { ctx } = fakeCtx();
     await runKernelText(ctx, "hello kernel");
