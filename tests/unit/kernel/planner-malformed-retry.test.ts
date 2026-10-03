@@ -70,6 +70,7 @@ function stateFor(input: string): KernelStateType {
     reply: "",
     history: [],
     last_turn: null,
+    command: null,
     lesson_candidate: null,
   } as unknown as KernelStateType;
 }
