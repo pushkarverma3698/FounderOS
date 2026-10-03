@@ -146,7 +146,7 @@ export function createSendEmailTool(department: string) {
 
     const rejected = await hitlGate({
       action: "send_email",
-      title: `📧 Send email to ${to}?`,
+      title: `📧 Send email to ${to}${account_key ? ` from ${account_key}` : ""}?`,
       summary: brand.warning ?? `Subject: ${subject}`,
       preview: body,
       args: { to, subject, body },
@@ -189,7 +189,7 @@ export function createSendEmailTool(department: string) {
         .string()
         .optional()
         .nullable()
-        .describe("Override sending identity: turicks | personal | naggar. Default: department routing."),
+        .describe("Sending identity: turicks | personal | naggar | a name added with /login google add. Default: department routing."),
     }),
   },
   );
@@ -645,12 +645,8 @@ export const draftConnectionNote = tool(
 // ── Comms: read emails (read-only, NO approval) ────────────────────────────────
 
 export const readEmails = tool(
-  async ({ query, limit }) => {
-    const res = await readEmailsTool.execute({
-      query,
-      max_results: limit ?? 10,
-      department: "comms",
-    });
+  async ({ query, limit, account }) => {
+    const res = await readEmailsTool.execute({ query, max_results: limit ?? 10, department: "comms", account_key: account ?? undefined });
     if (!res.success) {
       return `Email read failed: ${res.error ?? "unknown error"}. (Check gws auth or GMAIL_BACKEND=composio rollback.)`;
     }
@@ -663,6 +659,7 @@ export const readEmails = tool(
     schema: z.object({
       query: z.string().optional().nullable().describe("Gmail search query (default: 'in:inbox')"),
       limit: z.number().optional().nullable().describe("Max emails to return (default 10)"),
+      account: z.string().optional().nullable().describe("Google account: turicks | personal | naggar | a name added with /login google add | all. Default: turicks."),
     }),
   },
 );
