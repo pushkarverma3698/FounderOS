@@ -74,7 +74,7 @@ describe("hub — scope", () => {
 
   it("enforces scope on calls, not only on the list", async () => {
     const readEmails = vi.fn();
-    const client = await connected("brain", { readEmails, listEvents: vi.fn(), now: () => new Date() });
+    const client = await connected("brain", { readEmails, listEvents: vi.fn(), now: () => new Date(), mailboxes: () => ["turicks"] });
     const r = await client.callTool({ name: "gmail_search", arguments: { query: "x" } });
     expect(isError(r)).toBe(true);
     expect(text(r)).toContain("not available in this hub (scope: brain)");
@@ -96,6 +96,7 @@ describe("hub — Google reads", () => {
       readEmails: vi.fn((i) => ok(`mail for ${i.account_key}: ${i.query}`)),
       listEvents: vi.fn((i) => ok(`events for ${i.account_key}`)),
       now: () => new Date("2026-09-28T10:00:00.000Z"),
+      mailboxes: () => ["turicks", "personal", "naggar"],
     };
   });
 
@@ -127,6 +128,12 @@ describe("hub — Google reads", () => {
     expect(isError(r)).toBe(true);
     expect(text(r)).toContain("turicks, personal, naggar");
     expect(deps.readEmails).not.toHaveBeenCalled();
+  });
+
+  it("reads an account added in Telegram, by name and in 'all'", async () => {
+    deps.mailboxes = () => ["turicks", "personal", "naggar", "wife"];
+    expect(text(await callGoogleTool("gmail_search", { query: "x", account: "wife" }, deps))).toBe("mail for wife: x");
+    expect(text(await callGoogleTool("gmail_search", { query: "x" }, deps))).toContain("## wife\nmail for wife: x");
   });
 
   it("needs a query, and clamps max_results", async () => {

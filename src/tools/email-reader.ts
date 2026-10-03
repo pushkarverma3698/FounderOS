@@ -9,6 +9,7 @@
 import { childLogger } from "../infra/logger.js";
 import { getGmailBackend } from "../infra/provider-config.js";
 import { providerReadEmails } from "../infra/providers/index.js";
+import { listGoogleMailboxes } from "../infra/google-mailboxes.js";
 import type { UnifiedTool, ToolResult } from "./index.js";
 
 const log = childLogger({ module: "tool:email-reader" });
@@ -37,6 +38,10 @@ export const readEmailsTool: UnifiedTool = {
         type: "number",
         description: "Maximum number of emails to return. Default: 10.",
       },
+      account_key: {
+        type: "string",
+        description: "Which Google account: turicks, personal, naggar, a name added with /login google add, or 'all'.",
+      },
     },
     required: [],
   },
@@ -50,6 +55,17 @@ export const readEmailsTool: UnifiedTool = {
     } = input as ReadEmailsArgs;
     const backend = getGmailBackend();
     log.debug({ backend, query, department, account_key }, "read_emails dispatch");
-    return providerReadEmails({ query, max_results, account_key, department });
+    if (account_key?.trim().toLowerCase() !== "all") {
+      return providerReadEmails({ query, max_results, account_key, department });
+    }
+    // Every mailbox, one labelled section each; an error only when every one failed.
+    const names = listGoogleMailboxes();
+    const results = await Promise.all(
+      names.map(async (n) => [n, await providerReadEmails({ query, max_results, account_key: n, department })] as const),
+    );
+    const body = results
+      .map(([n, r]) => `## ${n}\n${r.success ? (typeof r.data === "string" ? r.data : JSON.stringify(r.data)) : `Error: ${r.error}`}`)
+      .join("\n\n");
+    return results.some(([, r]) => r.success) ? { success: true, data: body } : { success: false, error: body };
   },
 };
