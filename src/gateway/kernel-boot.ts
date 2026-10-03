@@ -245,7 +245,9 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
   // 2026-07-11: wrap every kernel model with the AGENT_FALLBACK_MODELS chain.
   // Without this the configured free OpenRouter fallbacks never engaged — a
   // Gemini quota/retirement error surfaced raw at the founder on every turn.
-  const fallbacks = buildFallbackModels() as unknown as KernelBindableModel[];
+  // Per-role pools (PLANNER_/WORKER_FALLBACK_MODELS) fall back to the shared chain.
+  const plannerFallbacks = buildFallbackModels("planner") as unknown as KernelBindableModel[];
+  const workerFallbacks = buildFallbackModels("worker") as unknown as KernelBindableModel[];
   // LLM response cache (opt-in, off by default). Only the side-effect-free
   // planner + synthesizer calls are cached; worker tool-calling is excluded by
   // construction (withLlmCache.bindTools bypasses the cache). Layered OUTSIDE
@@ -286,13 +288,13 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
     plannerModel: cachePlanner(
       withModelFallbacks(
         withModelRetry(asPlanner(getModel() as unknown as KernelBindableModel), { label: "planner" }),
-        fallbacks.map((m) => asPlanner(m)),
+        plannerFallbacks.map((m) => asPlanner(m)),
         "planner",
       ),
     ),
     workerModel: withModelFallbacks(
       withModelRetry(asWorker(getWorkerModel() as unknown as KernelBindableModel), { label: "worker" }),
-      fallbacks.map((m) => asWorker(m)),
+      workerFallbacks.map((m) => asWorker(m)),
       "worker",
     ),
     synthesizerModel: cacheSynth(
@@ -300,7 +302,7 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
         withModelRetry(asSynthesizer(getWorkerModel() as unknown as KernelBindableModel), {
           label: "synthesizer",
         }),
-        fallbacks.map((m) => asSynthesizer(m)),
+        workerFallbacks.map((m) => asSynthesizer(m)),
         "synthesizer",
       ),
     ),
