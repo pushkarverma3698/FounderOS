@@ -109,6 +109,7 @@ export const OWNER_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "task",
   "newproject",
   "connect",
+  "where",
   "focus",
   "projects",
   "goal",
