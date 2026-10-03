@@ -34,6 +34,9 @@ import { esc } from "../tools/jobhunt/telegram-format.js";
 import { DISPATCH_REPO_ALLOWLIST } from "../tools/dispatch-repos.js";
 import { REVIEWER } from "../tools/dispatch-roles.js";
 import { splitForTelegram } from "./format.js";
+import { collectReadyToMerge, type ReadyMergePr } from "./tasks-ready.js";
+
+export { isPrBrainReviewed, isGreenCI, type ReadyMergePr } from "./tasks-ready.js";
 
 /** The agent lifecycle labels, in the order work moves through them. */
 export const AGENT_STATES = ["ready", "working", "review", "blocked", "failed"] as const;
@@ -67,6 +70,7 @@ export interface TaskRow {
 
 export interface TasksView {
   readonly rows: readonly TaskRow[];
+  readonly readyToMerge?: readonly ReadyMergePr[];
   /** Repositories that could not be read, with the reason. Never hidden. */
   readonly unreachable: readonly { repo: string; error: string }[];
 }
@@ -139,27 +143,46 @@ export function selectRenderedRows(rows: readonly TaskRow[]): {
  */
 export function formatTasksMessage(view: TasksView): string {
   const lines: string[] = ["🤖 <b>Engineering loop</b>"];
+  const ready = view.readyToMerge ?? [];
 
   // The shape before the list. Measured on the first live run: 15 open issues,
   // 11 of them agent:failed and the oldest 39 days — a wall of rows in which the
   // one thing that needed a human was indistinguishable from a graveyard. A
   // count line is read in a second; fifteen rows are not read at all.
-  if (view.rows.length > 0) {
+  if (view.rows.length > 0 || ready.length > 0) {
+    const summaryParts: string[] = [];
+    if (ready.length > 0) {
+      summaryParts.push(`🔀 ${ready.length} ready to merge`);
+    }
     const counts = AGENT_STATES.map((state) => ({
       state,
       n: view.rows.filter((r) => r.state === state).length,
     })).filter((c) => c.n > 0);
-    lines.push(counts.map((c) => `${STATE_ICON[c.state]} ${c.n} ${c.state}`).join("  ·  "));
+    for (const c of counts) {
+      summaryParts.push(`${STATE_ICON[c.state]} ${c.n} ${c.state}`);
+    }
+    if (summaryParts.length > 0) {
+      lines.push(summaryParts.join("  ·  "));
+    }
   }
 
-  if (view.rows.length === 0) {
+  if (ready.length > 0) {
+    lines.push("", "🔀 <b>Ready for you to merge</b>");
+    for (const pr of ready) {
+      lines.push(
+        `<a href="${pr.url}">#${pr.prNumber}</a> <b>${esc(shortRepo(pr.repo))}</b> · ${esc(pr.title)}`,
+      );
+    }
+  }
+
+  if (view.rows.length === 0 && ready.length === 0) {
     lines.push(
       "",
       "Nothing in flight. Every dispatched task is finished or closed.",
       "",
       "Start one: <code>/task repo:app fix the flaky CSV export</code>",
     );
-  } else {
+  } else if (view.rows.length > 0) {
     const { shown, hidden } = selectRenderedRows(view.rows);
     for (const state of AGENT_STATES) {
       const inState = shown.filter((r) => r.state === state);
@@ -193,7 +216,7 @@ export function formatTasksMessage(view: TasksView): string {
 }
 
 /**
- * Read every dispatchable repository's open agent issues.
+ * Read every dispatchable repository's open agent issues and ready-to-merge PRs.
  *
  * Partial by design: a repository that throws is recorded in `unreachable` and
  * the rest still render. Failing the whole command on one bad repo would make
@@ -206,11 +229,12 @@ export async function fetchDispatchTasks(
 ): Promise<TasksView> {
   const token = process.env["GITHUB_TOKEN"];
   if (!token) {
-    return { rows: [], unreachable: repos.map((repo) => ({ repo, error: "GITHUB_TOKEN is not set" })) };
+    return { rows: [], readyToMerge: [], unreachable: repos.map((repo) => ({ repo, error: "GITHUB_TOKEN is not set" })) };
   }
 
   const octokit = new Octokit({ auth: token });
   const rows: TaskRow[] = [];
+  const readyToMerge: ReadyMergePr[] = [];
   const unreachable: { repo: string; error: string }[] = [];
 
   await Promise.all(
@@ -221,13 +245,13 @@ export async function fetchDispatchTasks(
         return;
       }
       try {
-        const { data } = await octokit.rest.issues.listForRepo({
+        const { data: issues } = await octokit.rest.issues.listForRepo({
           owner,
           repo,
           state: "open",
           per_page: 50,
         });
-        for (const issue of data) {
+        for (const issue of issues) {
           if (issue.pull_request) continue; // a PR is not a task; it is a task's output
           const labels = issue.labels.map((l) => (typeof l === "string" ? l : (l.name ?? "")));
           const state = stateFromLabels(labels);
@@ -241,6 +265,10 @@ export async function fetchDispatchTasks(
             ageMinutes: (now() - new Date(issue.updated_at).getTime()) / 60_000,
           });
         }
+
+        const pulls = await collectReadyToMerge(octokit, owner, repo, slug);
+        readyToMerge.push(...pulls.ready);
+        unreachable.push(...pulls.unreachable);
       } catch (err) {
         unreachable.push({ repo: slug, error: err instanceof Error ? err.message : String(err) });
       }
@@ -248,7 +276,8 @@ export async function fetchDispatchTasks(
   );
 
   rows.sort((a, b) => a.ageMinutes - b.ageMinutes);
-  return { rows, unreachable };
+  readyToMerge.sort((a, b) => a.repo.localeCompare(b.repo) || a.prNumber - b.prNumber);
+  return { rows, readyToMerge, unreachable };
 }
 
 export interface TasksCommandDeps {
