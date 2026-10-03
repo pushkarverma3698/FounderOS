@@ -13,6 +13,7 @@ const mockHasBeenAudited = vi.fn();
 const mockWriteAuditEntry = vi.fn();
 const mockDispatchExecute = vi.fn();
 const mockLint = vi.fn();
+const mockReadDefaultEngine = vi.fn();
 
 const LINT_OK = { ok: true, missing: [], missingHeadings: [], emptyHeadings: [], missingPaths: [], otherProblems: [], warnings: [] };
 
@@ -43,6 +44,13 @@ vi.mock("../../../src/tools/dispatch-antigravity.js", async (orig) => {
   };
 });
 
+// The default engine is a file under the real home directory: read here, a test would pass or fail with
+// whatever the developer last typed into /engine.
+vi.mock("../../../src/tools/coding-engine.js", async (orig) => ({
+  ...(await (orig() as Promise<Record<string, unknown>>)),
+  readDefaultEngine: mockReadDefaultEngine,
+}));
+
 const { dispatchAntigravityTask } = await import(
   "../../../src/agents/agent-tools/antigravity.js"
 );
@@ -56,6 +64,7 @@ describe("dispatchAntigravityTask agent tool", () => {
     mockWriteAuditEntry.mockResolvedValue({ written: true });
     mockHitlGate.mockResolvedValue(null); // approved
     mockLint.mockResolvedValue(LINT_OK);
+    mockReadDefaultEngine.mockReturnValue("agy");
   });
 
   it("skips execution if already audited (idempotency)", async () => {
@@ -146,7 +155,7 @@ describe("dispatchAntigravityTask agent tool", () => {
       verification: "pnpm test",
     });
 
-    expect(result).toContain("❌ Failed to dispatch task to Antigravity: GitHub token missing");
+    expect(result).toContain("❌ Failed to dispatch task to Google Antigravity: GitHub token missing");
   });
 
   it("refuses an off-allowlist repo BEFORE showing an approval card", async () => {
@@ -197,6 +206,144 @@ describe("dispatchAntigravityTask agent tool", () => {
   });
 });
 
+describe("dispatchAntigravityTask agent tool: the coding engine", () => {
+  const TASK = {
+    title: "fix: hero layout",
+    goal: "goal",
+    scope: "src/components/Hero.tsx",
+    expected: "expected",
+    verification: "pnpm build",
+  };
+  const FILED = (engine: string) => ({
+    success: true,
+    data: {
+      issue_number: 31,
+      issue_url: "https://github.com/pushkarverma3698/FounderOS/issues/31",
+      title: TASK.title,
+      repo: "pushkarverma3698/FounderOS",
+      engine,
+    },
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockHasBeenAudited.mockResolvedValue(false);
+    mockWriteAuditEntry.mockResolvedValue({ written: true });
+    mockHitlGate.mockResolvedValue(null);
+    mockLint.mockResolvedValue(LINT_OK);
+    mockReadDefaultEngine.mockReturnValue("agy");
+  });
+
+  it("names Claude Code on the approval card when the founder chose it", async () => {
+    mockDispatchExecute.mockResolvedValue(FILED("claude"));
+
+    await dispatchAntigravityTask.invoke({ ...TASK, engine: "claude" });
+
+    expect(mockHitlGate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "🤖 Dispatch task to Claude Code?",
+        summary: expect.stringContaining("for Claude Code"),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("names the DEFAULT engine on the card when none was chosen, and files for that same engine", async () => {
+    // The card and the filing must agree. hitlGate re-runs this body on approval, so the engine is
+    // settled before the gate and handed to execute() by name: a /engine switch between the card and
+    // the tap cannot file for a CLI the card did not show.
+    mockReadDefaultEngine.mockReturnValue("claude");
+    mockDispatchExecute.mockResolvedValue(FILED("claude"));
+
+    await dispatchAntigravityTask.invoke({ ...TASK });
+
+    expect(mockHitlGate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "🤖 Dispatch task to Claude Code?" }),
+      expect.anything(),
+    );
+    expect(mockDispatchExecute).toHaveBeenCalledWith(expect.objectContaining({ engine: "claude" }));
+  });
+
+  it("keeps the card the founder already knows when the executor is Antigravity", async () => {
+    mockDispatchExecute.mockResolvedValue(FILED("agy"));
+
+    await dispatchAntigravityTask.invoke({ ...TASK, engine: "agy" });
+
+    expect(mockHitlGate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "🤖 Dispatch task to Google Antigravity?" }),
+      expect.anything(),
+    );
+    expect(mockDispatchExecute).toHaveBeenCalledWith(expect.objectContaining({ engine: "agy" }));
+  });
+
+  it("puts the engine in the gated args, so the approved card and the replayed body carry the same one", async () => {
+    mockDispatchExecute.mockResolvedValue(FILED("claude"));
+
+    await dispatchAntigravityTask.invoke({ ...TASK, engine: "claude" });
+
+    const card = mockHitlGate.mock.calls[0]?.[0] as { args: Record<string, unknown> };
+    expect(card.args["engine"]).toBe("claude");
+  });
+
+  // The founder typed /claude or /agy: the engine is a fact about his message, not something the planner may
+  // forget to copy. The gateway puts it in configurable.engine and the tool trusts that over its own argument.
+  it("uses the engine the founder's command forced, even when the planner passed none", async () => {
+    mockDispatchExecute.mockResolvedValue(FILED("claude"));
+
+    await dispatchAntigravityTask.invoke({ ...TASK }, { configurable: { engine: "claude" } });
+
+    expect(mockHitlGate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "🤖 Dispatch task to Claude Code?" }),
+      expect.anything(),
+    );
+    const card = mockHitlGate.mock.calls[0]?.[0] as { args: Record<string, unknown> };
+    expect(card.args["engine"]).toBe("claude");
+    expect(mockDispatchExecute).toHaveBeenCalledWith(expect.objectContaining({ engine: "claude" }));
+    expect(mockReadDefaultEngine).not.toHaveBeenCalled();
+  });
+
+  it("uses the forced engine over a different one the planner passed", async () => {
+    mockDispatchExecute.mockResolvedValue(FILED("agy"));
+
+    await dispatchAntigravityTask.invoke({ ...TASK, engine: "claude" }, { configurable: { engine: "agy" } });
+
+    expect(mockDispatchExecute).toHaveBeenCalledWith(expect.objectContaining({ engine: "agy" }));
+  });
+
+  it("refuses an engine it does not know BEFORE the card: no approval, no filing", async () => {
+    const result = await dispatchAntigravityTask.invoke({ ...TASK, engine: "gemini" });
+
+    expect(result).toMatch(/Cannot dispatch/);
+    expect(result).toMatch(/gemini/);
+    expect(result).toMatch(/agy/);
+    expect(result).toMatch(/claude/);
+    expect(mockHitlGate).not.toHaveBeenCalled();
+    expect(mockDispatchExecute).not.toHaveBeenCalled();
+    expect(mockReadDefaultEngine).not.toHaveBeenCalled();
+  });
+
+  it("tells the founder which CLI got the task", async () => {
+    mockDispatchExecute.mockResolvedValue(FILED("claude"));
+
+    const result = await dispatchAntigravityTask.invoke({ ...TASK, engine: "claude" });
+
+    expect(result).toContain("✅ Dispatched to Claude Code: Issue #31");
+    expect(result).toContain("engine:claude");
+  });
+
+  it("treats the same brief for a different engine as a different dispatch", async () => {
+    // Re-sending a task to the other CLI is a decision, not a duplicate of the first.
+    mockDispatchExecute.mockResolvedValue(FILED("agy"));
+    await dispatchAntigravityTask.invoke({ ...TASK, engine: "agy" });
+    mockDispatchExecute.mockResolvedValue(FILED("claude"));
+    await dispatchAntigravityTask.invoke({ ...TASK, engine: "claude" });
+
+    const keys = mockWriteAuditEntry.mock.calls.map((c) => (c[0] as { idempotency_key: string }).idempotency_key);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+});
+
 describe("dispatchAntigravityTask agent tool: the brief lint runs before the approval card", () => {
   const BRIEF = {
     title: "fix: retry budget is spent on 4xx",
@@ -214,6 +361,7 @@ describe("dispatchAntigravityTask agent tool: the brief lint runs before the app
     mockWriteAuditEntry.mockResolvedValue({ written: true });
     mockHitlGate.mockResolvedValue(null);
     mockLint.mockResolvedValue(LINT_OK);
+    mockReadDefaultEngine.mockReturnValue("agy");
   });
 
   it("never shows a card for a brief that will be rejected: no approval, no filing, no audit row", async () => {

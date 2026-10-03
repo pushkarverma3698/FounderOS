@@ -136,6 +136,27 @@ describe("telegramCommandPayload — what the ☰ button actually shows", () => 
     expect(order.indexOf("tasks")).toBeLessThan(14);
   });
 
+  it("puts /claude, /agy and /engine in the engineering group, right after the loop they steer", () => {
+    const engineering = COMMAND_MENU.filter((e) => e.group === "engineering").map((e) => e.command);
+    expect(engineering).toEqual(expect.arrayContaining(["task", "tasks", "claude", "agy", "engine", "newproject"]));
+    const order = telegramCommandPayload().map((e) => e.command);
+    expect(order.indexOf("claude")).toBeGreaterThan(order.indexOf("tasks"));
+    expect(order.indexOf("claude")).toBeLessThan(order.indexOf("newproject"));
+  });
+
+  it("says in the menu which CLI each command picks, in plain text", () => {
+    const byName = new Map(COMMAND_MENU.map((e) => [e.command, e.description]));
+    expect(byName.get("claude")).toMatch(/Claude Code/);
+    expect(byName.get("agy")).toMatch(/Antigravity/);
+    expect(byName.get("engine")).toMatch(/default/i);
+  });
+
+  it("describes the loop in /commands without claiming Antigravity writes every task", () => {
+    const help = buildCommandsHelp().join("\n");
+    expect(help).not.toContain("3️⃣ Antigravity writes the code");
+    expect(help).toMatch(/Claude Code/);
+  });
+
   it("names the profile word on every job command that takes one", () => {
     // What replaces the twins in the menu: the kept row says how to reach hers.
     for (const entry of COMMAND_MENU.filter((e) => e.group === "jobs" && !e.hidden && e.command !== "wife_commands")) {

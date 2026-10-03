@@ -34,6 +34,7 @@ import { assertDispatchableRepo, DEFAULT_DISPATCH_REPO, DISPATCH_REPO_ALLOWLIST 
 import { listRegisteredDispatchRepos } from "../db/queries.js";
 import { TENANT } from "../core/config.js";
 import { kickDispatchTick } from "./dispatch-tick.js";
+import { ENGINES, engineLabel, parseEngine, readDefaultEngine } from "./coding-engine.js";
 import { DEFAULT_ACCEPTANCE_TEXT } from "./dispatch-roles.js";
 import { formatBriefRejection, type BriefLintResult } from "./agent-brief-lint.js";
 import { prepareDispatchBrief, type PreparedBrief } from "./dispatch-brief-repair.js";
@@ -258,6 +259,13 @@ export const dispatchAntigravityTool: UnifiedTool = {
           `Target repository slug. Only these are permitted: ${DISPATCH_REPO_ALLOWLIST.join(", ")}. ` +
           "Defaults to pushkarverma3698/FounderOS.",
       },
+      engine: {
+        type: "string",
+        enum: [...ENGINES],
+        description:
+          "Which coding CLI implements it: 'agy' (Antigravity) or 'claude' (Claude Code). " +
+          "Omit it to use the founder's current default (/engine).",
+      },
     },
     required: ["title", "goal", "scope", "expected", "verification"],
   },
@@ -292,6 +300,13 @@ export const dispatchAntigravityTool: UnifiedTool = {
     };
     const founderRequest = args["founder_request"] as string | undefined;
 
+    // Refused, not defaulted: a word that is not an engine must not send work to a CLI nobody picked.
+    const named = args["engine"];
+    const engine = named === undefined || named === null || named === "" ? readDefaultEngine() : parseEngine(named);
+    if (!engine) {
+      return { success: false, error: `engine "${String(named)}" is not one I can run. Use ${ENGINES.join(" or ")}.` };
+    }
+
     let owner: string;
     let repo: string;
     try {
@@ -307,7 +322,8 @@ export const dispatchAntigravityTool: UnifiedTool = {
       return { success: false, error: (err as Error).message };
     }
 
-    const labels = [AGENT_READY_LABEL, ANTIGRAVITY_LABEL];
+    // Exactly one engine label: an issue carrying both is ambiguous to the daemon, which then falls back to the default.
+    const labels = [AGENT_READY_LABEL, ANTIGRAVITY_LABEL, engineLabel(engine)];
 
     // The gate. A brief with an empty section is never filed: the reason goes back to the model, before any
     // Antigravity tokens are spent. A cited path that does not exist is NOT such a reason (see
@@ -364,6 +380,7 @@ export const dispatchAntigravityTool: UnifiedTool = {
           issue_url: data.html_url,
           title: data.title,
           repo: `${owner}/${repo}`,
+          engine,
           labels,
           ...(warnings.length > 0 ? { warnings } : {}),
         },
