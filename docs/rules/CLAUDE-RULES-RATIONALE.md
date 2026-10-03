@@ -149,6 +149,12 @@ unenforced, and is expected to decay.
 - **#36 — Real-path verification is a required field, not a best practice.** `scripts/telegram-probe.ts` (built 2026-09-16) makes one-shot real-path verification cheap and it already caught a live bug on first use — but nothing requires anyone to run it. Issue #687, dispatched the same day the tool shipped, specified `pnpm test && pnpm typecheck` as its only acceptance criteria — the exact gap this rule exists to close, in the same session that built the fix for it. *(Recurring-behavior audit: Theme 8, 9 independent instances — the best-evidenced pattern in the corpus.)* Every PR body and every Antigravity dispatch brief must name one real-path assertion (the actual seam: Telegram → kernel → tool → reply → DB row, or the equivalent for non-Telegram work) or say **NOT VERIFIED — reason**, explicitly, in the same place the rest of the evidence goes.
   **Enforced by:** nothing yet. `pr-brain`'s gate already reads PR bodies; extending it to require this field, and extending the Antigravity brief template (`docs/antigravity/README.md` § "Before you dispatch") to include a verification-command field, is specified in `docs/plans/2026-09-16-mechanism-realpath-verification.md`, not yet built.
 
+## Git: why Claude may merge to `main` (founder directive, 2026-08-01)
+The earlier "founder merges only" rule and its CI ladder (`.github/workflows/branch-policy.yml`, deleted) were removed. Finished
+work sat undeployed for days waiting on a human click, and prod ran stale code while its fix was already green on `beta`. Waiting
+was the larger risk. What still gates a merge: branch protection on `main` requires both CI checks ("Type check + lint + wiring",
+"Unit + regression tests"). After the merge, watch the deploy: CD once failed silently and prod stayed on `a966e9a` for a full day.
+
 ## History
 The v2 system (LLM supervisor + regex pre-router + regex execution guards) was
 audited and replaced 2026-07-08 — see `ZERO-BASE-AUDIT.md` (4 live failure
