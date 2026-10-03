@@ -72,7 +72,7 @@ function homeText(firstName?: string): string {
     `🤖 <b>Build</b> — describe a change, it ships while you are away\n` +
     `    <code>/task</code> · <code>/tasks</code> · <code>/where</code>\n` +
     `⚡ <b>System</b> — health, today's spend, the emergency stop\n` +
-    `    <code>/status</code> · <code>/budget</code>\n\n` +
+    `    <code>/status</code> · <code>/budget</code> · <code>/login</code>\n\n` +
     // Every kernel worker, named from the same table the 🧭 list uses. The old
     // hand-written list left out jobhunt and marked "asks first" by hand (Admin
     // was wrong: schedule_task and record_event are gated). Which tools ask
