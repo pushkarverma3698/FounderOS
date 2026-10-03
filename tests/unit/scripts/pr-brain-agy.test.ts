@@ -225,7 +225,8 @@ echo "$model" >>"$AGY_LOGS/model"
 case " \${AGY_REVIEW_QUOTA_MODELS:-} " in *" $model "*) quota_wall "$@" ;; esac
 pwd >>"$AGY_LOGS/cwd"; git rev-parse HEAD >>"$AGY_LOGS/head" 2>&1; git remote get-url --push origin >>"$AGY_LOGS/push" 2>&1
 while [ $# -gt 0 ]; do case "$1" in --print) printf '%s\\n----\\n' "$2" >>"$AGY_LOGS/prompts"; shift 2 ;; *) shift ;; esac; done
-[ -n "\${AGY_HOOK:-}" ] && bash -c "$AGY_HOOK"
+# A macOS login shell (bash -l) rebuilds PATH and drops the stub dir, so the hook would reach the real gh.
+[ -n "\${AGY_HOOK:-}" ] && PATH="$(dirname "$0"):$PATH" bash -c "$AGY_HOOK"
 printf '%s' "$AGY_OUT"; printf '%s' "$AGY_ERR" >&2
 exit "$AGY_RC"`,
   );
