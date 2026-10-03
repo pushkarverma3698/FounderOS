@@ -23,12 +23,17 @@ sudo -u antigravity -i agy --new-project --model <model-name> --print "reply ok"
 When quota is exhausted, system daemons record pause timestamps on disk:
 
 ```bash
-# Check executor pause status and reset timestamp
-cat ~/.claude/agent-dispatch.quota-until
+# Executor pause: the file holds the reset time as epoch seconds (absent = not paused)
+date -u -d @"$(cat ~/.claude/agent-dispatch.quota-until)"
 
 # Check reviewer down state (if all candidate models are exhausted)
 cat ~/.claude/pr-brain.down
 ```
+
+### What it looked like on 2026-10-02 (measured on the VPS)
+- `claude-sonnet-4-6`, `claude-opus-4-6-thinking` and `gpt-oss-120b-medium` all answered `RESOURCE_EXHAUSTED (code 429) ... Resets in 69h26m28s`.
+- The Gemini models shared one window: from about 20:05 to 20:57 UTC both `gemini-3.1-pro-high` (reviewer) and `gemini-3.6-flash-medium` (executor) were out, then both worked again.
+- A one-word probe can succeed while a real review is refused: a quota can be too small for a long prompt and still answer a short one.
 
 ### Log Classification Mechanism
 `deploy/lib/agy-failure.sh` automatically detects quota errors by matching patterns in CLI failure logs (such as `RESOURCE_EXHAUSTED (code 429)` or `Individual quota reached... Resets in <duration>`).
@@ -42,7 +47,7 @@ The autonomous system handles quota exhaustion gracefully without crashing or lo
 ### A. Executor (`agent-dispatch`)
 - **Issue Handling:** Reverts the current issue back to `agent:ready` state so no attempt count is consumed.
 - **Pause & Lock:** Writes the reset epoch to `~/.claude/agent-dispatch.quota-until` and pauses dispatching new tasks.
-- **Notification:** Sends exactly **one** Telegram notification stating that execution is paused and providing the reset time.
+- **Notification:** The run's own Telegram message ends with `Quota exhausted until <time>`, and one separate notice says the same. Nothing more is sent until it resumes.
 - **Recovery:** Automatically resumes dispatching tasks on subsequent cron ticks once the reset timestamp passes.
 
 ### B. Reviewer (`pr-brain`)
@@ -62,13 +67,14 @@ The autonomous system handles quota exhaustion gracefully without crashing or lo
 ### Option A: Wait for Reset (Zero Intervention)
 - No manual action is required. The system will automatically resume operations when the quota reset timestamp expires.
 
-### Option B: Re-authenticate with a Fresh Account
-If immediate restoration is required:
-1. Log into VPS and authenticate Antigravity with an account having active quota:
+### Option B: Sign in with an account that has quota
+If immediate restoration is required (`agy` has no login subcommand; it asks to sign in when started):
+1. On the VPS, open the antigravity user's shell, run `agy` once, sign in with the other Google account, then quit it:
    ```bash
-   sudo -u antigravity -i agy auth login
+   sudo -u antigravity -i
+   agy
    ```
-2. Clear active pause state files to trigger immediate retry:
+2. Clear the pause files so the next cron tick retries at once:
    ```bash
    rm -f ~/.claude/agent-dispatch.quota-until ~/.claude/pr-brain.down
    ```

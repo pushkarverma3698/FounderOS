@@ -501,7 +501,9 @@ describe("a reviewer model that is out of quota (quota is per model family: the 
     sweep({ env: { AGY_REVIEW_QUOTA_MODELS: `${SPENT} ${FALLBACK}` } });
 
     expect(agyLog("model")).toEqual([SPENT, FALLBACK]);
-    expect(sent().filter((m) => m.includes("PAUSED"))).toHaveLength(1);
+    const paused = sent().filter((m) => m.includes("PAUSED"));
+    expect(paused).toHaveLength(1);
+    expect(paused[0]).toMatch(/quota is used up \(tried claude-sonnet-4-6, gemini-3\.1-pro-high: .*Resets in 69h26m28s/);
     expect(sent().filter((m) => m.includes("Gate FAILED"))).toHaveLength(0);
     expect(prBrainLog()).not.toMatch(/gate FAILED/);
     expect(existsSync(join(home, ".claude", "pr-brain.failures"))).toBe(false);
