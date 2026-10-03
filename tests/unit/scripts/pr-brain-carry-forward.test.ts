@@ -59,6 +59,8 @@ function sweep(head: string, gatedAt: string): void {
       PATH: `${bin}:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin`,
       HOME: home,
       PR_BRAIN_OWNER: "owner",
+    // These pin the Claude engine; the default engine is agy (pr-brain-agy.test.ts).
+    PR_BRAIN_ENGINE: "claude",
       QA_APP_ROOT: join(root, "no-founderos"),
       FAKE_HEAD: head,
       FAKE_COMMENTS: `<!-- brain-reviewed: ${gatedAt} -->`,

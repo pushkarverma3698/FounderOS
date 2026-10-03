@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 
 import { childLogger } from "../../infra/logger.js";
 import { collectBoardTokens, flushBoardHarvest, startBoardHarvest } from "./board-harvest.js";
-import { sendToChat } from "../../infra/telegram-send.js";
+import { sendToJobsChat } from "../../infra/telegram-send.js";
 import { esc } from "./telegram-format.js";
 import { DEFAULT_PROFILE_ID } from "./profile-config.js";
 import type { DiscoveredBoard } from "./board-token.js";
@@ -85,11 +85,11 @@ export async function runJobIngestSweep(): Promise<void> {
 
   if (result.fetched === 0 && result.failures.length > 0) {
     log.warn({ failures: result.failures }, "Daily job ingest failed on every source");
-    // Escaped, not raw: sendToChat defaults to parse_mode "HTML", and real job
+    // Escaped, not raw: sendToJobsChat defaults to parse_mode "HTML", and real job
     // titles carry "&" and "<" ("Bloom & Wild Group", prod 2026-07-31). Telegram
     // rejects the WHOLE message on an unparseable entity — the alert must not
     // fail on the alert's own content.
-    await sendToChat(
+    await sendToJobsChat(
       toTelegramSafe(`⚠ Job sweep failed — nothing was screened today.\n${result.failures.join("\n")}`),
     );
     return;
@@ -119,7 +119,7 @@ export async function runJobIngestSweep(): Promise<void> {
     setLastSheetLink(link);
     // The metered sweep has no alert of its own to carry the line — it runs
     // every third day and the founder should hear from it either way.
-    await sendToChat(
+    await sendToJobsChat(
       (notice ??
         `📊 <b>Screened ${result.fetched} posting(s)</b> — the job sheet is up to date.\n${link}`) +
         newBoardsLine(result.newBoards),
@@ -130,7 +130,7 @@ export async function runJobIngestSweep(): Promise<void> {
     log.error({ err: (err as Error).message }, "Brief ranking failed");
     // Escaped: this is the path that runs BECAUSE the ranking failed, so an
     // unescaped error message here would lose the founder the fallback as well.
-    await sendToChat(
+    await sendToJobsChat(
       toTelegramSafe(
         `⚠ Screened ${result.fetched} posting(s), but the ranking could not be built: ` +
           `${(err as Error).message}\nThe screening results are recorded — ask for the job brief to read them.`,
@@ -255,7 +255,7 @@ export async function runFreeSweep(): Promise<void> {
   for (const profile of listProfiles()) {
     // THIS TRY/CATCH IS THE POINT, and until 2026-09-08 the comment here claimed
     // it while the code did not have it. `runFreeSweepForProfile` guards its own
-    // ingest and ranking calls; `publishSheet`, `sendToChat` (which rethrows by
+    // ingest and ranking calls; `publishSheet`, `sendToJobsChat` (which rethrows by
     // design) and `saveLaneHeartbeat` were unguarded. The default profile runs
     // first, so one Telegram failure on his alert meant the second candidate was
     // never screened and `runFreeSweep` rejected into the cron's `.catch()`: one

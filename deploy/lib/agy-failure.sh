@@ -21,12 +21,14 @@
 #      while it implements a login page is not an error line;
 #   3. a bare status code counts only in an HTTP / status / code context.
 #
-# NOT VERIFIED against a real failure: the log carries verbatim only the quota line,
-# "Error: timeout waiting for response", "timeout: failed to execute process" and
-# "HTTP 401: Bad credentials". The other formats below are what Google's APIs and
-# gRPC print, not something observed from agy. When the first real auth failure lands
-# in ~/.claude/agent-dispatch.log, add its line to FIXTURES in the test and its shape
-# to AGY_AUTH_PATTERNS. Until then an unrecognised auth failure degrades to agent:failed.
+# VERIFIED against a real failure, one: an agy with no login (2026-10-02, agy 1.2.14, run with an empty
+# HOME) prints "Error: authentication timed out." and "error: authentication failed or timed out" on
+# stderr and exits 1. Before that line was added here, an expired login classified as "unknown": the issue
+# went agent:failed and the loop never paused. The log also carries verbatim the quota line,
+# "Error: timeout waiting for response", "timeout: failed to execute process" and "HTTP 401: Bad
+# credentials". The other formats below are what Google's APIs and gRPC print, not something observed from
+# agy. When a real failure of another shape lands in ~/.claude/agent-dispatch.log, add its line to FIXTURES
+# in the test and its shape to the patterns. Until then it degrades to agent:failed.
 
 # How many trailing lines of the log are examined (constant, not a magic number).
 AGY_FAILURE_TAIL_LINES=40
@@ -57,6 +59,7 @@ AGY_AUTH_PATTERNS=(
   'not logged in'
   'bad credentials'
   "${_AGY_STATUS_CTX}(401|403)([^0-9]|\$)"
+  'authentication (failed|timed out)'
 )
 AGY_TRANSIENT_PATTERNS=(
   'timeout waiting for response'
@@ -102,6 +105,19 @@ agy_failure_line() {
   [[ -n "$errs" ]] || return 0
   grep -Eai -m1 -- "$re" <<<"$errs"
   return 0
+}
+
+# agy_model_unknown LOG — true when agy refused the --model it was given because its catalog has no such model.
+# 2026-10-03: claude-sonnet-4-6 was retired for claude-sonnet-5-5-*, and agy answers a retired name with exit 1 and
+#   error: invalid model selection (--model "X" --effort ""): model X is not recognized as a known model or custom model in settings
+#   Available models: (the catalog, ~20 lines)
+# That is neither an outage nor a quota wall: THAT model can never answer, another candidate may. Like the classes
+# below it looks only at error lines in the tail, so a transcript that merely mentions the phrase does not count.
+agy_model_unknown() {
+  local errs
+  errs=$(agy_error_lines "$1")
+  [[ -n "$errs" ]] || return 1
+  grep -Eaiq -- 'invalid model selection|is not recognized as a known model' <<<"$errs"
 }
 
 # classify_agy_failure LOG — echoes quota | auth | transient | unknown. Quota wins

@@ -55,6 +55,8 @@ function sweep(opts: {
     PR_BRAIN_ROOT: opts.noRepos ? join(root, "empty") : join(root, "repos"),
     PR_BRAIN_ENV_FILE: join(root, ".env"),
     PR_BRAIN_OWNER: "owner",
+    // These pin the Claude engine; the default engine is agy (pr-brain-agy.test.ts).
+    PR_BRAIN_ENGINE: "claude",
     QA_APP_ROOT: opts.appGate ? join(root, "founderos") : join(root, "no-founderos"),
     FAKE_PREFLIGHT: opts.preflight,
     FAKE_GATE: opts.gate ?? "done",

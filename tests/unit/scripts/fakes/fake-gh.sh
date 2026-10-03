@@ -133,11 +133,11 @@ case "$group $sub" in
     need_repo
     head=$(flag --head) || head=""
     jq -c --arg r "$repo" --arg h "$head" --argjson f "$fields" '
-      [ .repos[$r].prs[] | select($h == "" or .headRefName == $h)
+      [ .repos[$r].prs[] | select((.state // "OPEN") == "OPEN") | select($h == "" or .headRefName == $h)
         | {number, headRefName, headRefOid: (.headRefOid // "0000000000000000000000000000000000000000"),
            isDraft: (.isDraft != false), baseRefName: (.baseRefName // "main"),
            comments: [(.comments // [])[] | {body: .body}],
-           url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: "OPEN"}
+           url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: (.state // "OPEN")}
         | '"$PICK"' ]' "$STATE" | emit
     ;;
 
@@ -150,11 +150,19 @@ case "$group $sub" in
       | {number, headRefName, headRefOid: (.headRefOid // "0000000000000000000000000000000000000000"),
          isDraft: (.isDraft != false), baseRefName: (.baseRefName // "main"),
          comments: [(.comments // [])[] | {body: .body}],
-         url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: "OPEN"}
+         url: ("https://github.com/" + $r + "/pull/" + (.number | tostring)), state: (.state // "OPEN")}
       | '"$PICK" "$STATE" | emit
     ;;
 
-  "pr checks") echo '[]' | emit ;;
+  "pr checks")
+    # The PR's `checks` (name, bucket, state, and `required: false` for one branch protection does not require).
+    # `--required` keeps only the required ones, as gh does. A PR with no `checks` reports an empty list.
+    need_repo
+    req=0; for a in "${ARGS[@]}"; do [ "$a" = "--required" ] && req=1; done
+    jq -c --arg r "$repo" --arg n "$num" --argjson req "$req" '
+      [ ((.repos[$r].prs[] | select((.number | tostring) == $n) | .checks) // [])[]
+        | select($req == 0 or .required != false) ]' "$STATE" | emit
+    ;;
 
   "pr comment")
     need_repo
@@ -184,6 +192,19 @@ case "$group $sub" in
     ;;
 
   "api user") echo owner ;;
+
+  # gh api repos/<owner>/<name>/branches/<branch>: a repo has the branches in its state's `branches`
+  # list (default: just main). A missing one is gh's real 404 text, which the daemon tells apart from
+  # an API outage.
+  "api repos/"*)
+    [ "$(jq -r '.failApi // false' "$STATE")" = true ] && die "HTTP 502: Bad Gateway (https://api.github.com/repos)"
+    slug="${sub#repos/}"; slug="${slug%%/branches/*}"; branch="${sub##*/branches/}"
+    if jq -e --arg r "$slug" --arg b "$branch" '(.repos[$r].branches // ["main"]) | index($b)' "$STATE" >/dev/null 2>&1; then
+      printf '{"name":"%s"}\n' "$branch"
+    else
+      die "gh: Not Found (HTTP 404)"
+    fi
+    ;;
 
   *) : ;;   # anything else (gh repo clone, pr edit, …) succeeds silently
 esac

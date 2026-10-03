@@ -16,9 +16,9 @@
  *
  * Provenance is in every test title. "verbatim" means the plan, an existing test or a
  * source comment quotes that exact line; everything else is "synthetic": written here to
- * exercise a pattern, NOT captured from a real Antigravity run. No real auth failure has
- * been observed yet, so the auth and transient formats other than the plan's are guesses
- * until a production log confirms them (see the report's NOT VERIFIED list).
+ * exercise a pattern, NOT captured from a real Antigravity run. One real auth failure has
+ * been observed (an agy with no login, 2026-10-02); the auth and transient formats other than that one and
+ * the plan's are guesses until a production log confirms them.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -55,6 +55,8 @@ const FIXTURES: readonly Fixture[] = [
   { klass: "auth", pattern: 7, provenance: "synthetic", line: "Error: not logged in (run agy interactively)" },
   { klass: "auth", pattern: 8, provenance: "verbatim", line: "HTTP 401: Bad credentials" },
   { klass: "auth", pattern: 9, provenance: "synthetic", line: "gh: request failed with status: 403" },
+  // captured 2026-10-02 from agy 1.2.14 run with an empty HOME (no login): stderr, exit 1
+  { klass: "auth", pattern: 10, provenance: "verbatim", line: "error: authentication failed or timed out" },
   // transient
   { klass: "transient", pattern: 1, provenance: "verbatim", line: "Error: timeout waiting for response" },
   { klass: "transient", pattern: 2, provenance: "verbatim", line: "timeout: failed to execute process" },
@@ -124,6 +126,31 @@ describe("classify_agy_failure — every pattern, against a real or labelled-syn
       expect(covered.sort((a, b) => a - b)).toEqual(patterns.map((_, i) => i + 1));
     },
   );
+});
+
+describe("classify_agy_failure — the whole block a real login failure prints [verbatim, 2026-10-02]", () => {
+  // stderr of `agy --print` as a user with no login, then the text view agy-run.sh builds from the result
+  // event: the same words a second time, prefixed "Error:". Captured from agy 1.2.14 on the VPS.
+  const REAL = [
+    "Authentication required. Please visit the URL to log in:",
+    "  https://accounts.google.com/o/oauth2/auth?access_type=offline&prompt=consent",
+    "",
+    "Waiting for authentication (timeout 60s)...",
+    "Or, paste the authorization code here and press Enter:",
+    "Error: authentication timed out.",
+    "error: authentication failed or timed out",
+    "Error: authentication failed or timed out",
+  ].join("\n");
+
+  it("is auth, so the loop pauses and the issue goes back to agent:ready instead of agent:failed", () => {
+    expect(classify(`${REAL}\n`)).toBe("auth");
+  });
+
+  it("is quoted as the CLI's own line, not the URL above it", () => {
+    writeFileSync(logFile, `${REAL}\n`);
+    const r = bash(`source "${LIB}"; agy_failure_line auth "$1"`, [logFile]);
+    expect(r.stdout.trim()).toBe("Error: authentication timed out.");
+  });
 });
 
 describe("classify_agy_failure — precedence", () => {
@@ -286,5 +313,40 @@ describe("agy_patterns", () => {
   it("an unknown class name is an error, not an empty list that would classify nothing silently", () => {
     const r = bash(`source "${LIB}"; agy_patterns nonsense`);
     expect(r.status).not.toBe(0);
+  });
+});
+
+describe("agy_model_unknown — a model name agy's catalog no longer has [verbatim, 2026-10-03]", () => {
+  const REAL = [
+    'error: invalid model selection (--model "claude-sonnet-4-6" --effort ""): model claude-sonnet-4-6 is not recognized as a known model or custom model in settings',
+    "Available models:",
+    "  Gemini 3.8 Flash (High)",
+    "  Gemini 3.1 Pro (High)",
+    "  Claude Sonnet 5.5 (Medium)",
+    "  GPT-OSS 120B (Medium)",
+  ].join("\n");
+  const unknown = (log: string): boolean => {
+    const f = join(root, "model.log");
+    writeFileSync(f, log);
+    return bash(`source "${LIB}"; agy_model_unknown "$1"`, [f]).status === 0;
+  };
+
+  it("recognises the real refusal, catalog and all", () => {
+    expect(unknown(REAL)).toBe(true);
+  });
+
+  it("is not a class of its own: the same log is 'unknown' to classify_agy_failure, so no caller pauses on it by accident", () => {
+    expect(classify(REAL)).toBe("unknown");
+  });
+
+  it("is false for the failures that ARE classified, and for a transcript that merely mentions the phrase", () => {
+    expect(unknown("error: Individual quota reached. Resets in 69h26m28s.")).toBe(false);
+    expect(unknown("Error: authentication timed out.")).toBe(false);
+    expect(unknown("I will explain why the model is not recognized as a known model in this README.\n")).toBe(false);
+  });
+
+  it("is false for an empty or missing log", () => {
+    expect(unknown("")).toBe(false);
+    expect(bash(`source "${LIB}"; agy_model_unknown "$1"`, [join(root, "nope.log")]).status).not.toBe(0);
   });
 });

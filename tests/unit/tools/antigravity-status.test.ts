@@ -103,7 +103,7 @@ describe("describeTaskStatus", () => {
     );
     expect(text).toContain("PR #763");
     expect(text).toMatch(/CI: 6\/6 passed/);
-    expect(text).toMatch(/Claude reviewed the current head.*cleared/i);
+    expect(text).toMatch(/pr-brain reviewed the current head.*cleared/i);
   });
 
   it("in review, not yet reviewed at this head: says the review is pending", () => {
@@ -125,7 +125,7 @@ describe("describeTaskStatus", () => {
       }),
       NOW,
     );
-    expect(text).toMatch(/waiting for Claude's review/i);
+    expect(text).toMatch(/waiting for pr-brain's review/i);
     expect(text).toMatch(/CI: 1 failing/);
   });
 

@@ -353,3 +353,122 @@ describe("every file a deployed daemon sources is in the deploy copy list", () =
     expect(text).toMatch(/lib\/\*\.sh/);
   });
 });
+
+describe("sync-daemons.sh — the per-minute kick cron", () => {
+  // What the box really has (crontab -l on founderos-vps, 2026-10-02), the lines that matter.
+  const AGENT_LINE =
+    "*/15 * * * * PATH=/usr/local/bin:/usr/bin:/bin AGENT_DISPATCH_ENV_FILE=/opt/founderos/.env $HOME/bin/agent-dispatch >/dev/null 2>>$HOME/.claude/agent-dispatch.log";
+  const OTHER_LINES = [
+    "*/2 * * * * $HOME/bin/founderos-watchdog.sh >> /tmp/founderos-watchdog.log 2>&1",
+    "17 3 * * * BACKUP_DIR=$HOME/backups /opt/founderos/deploy/backup-db.sh >> $HOME/backups/backup.log 2>&1",
+    "*/20 * * * * PATH=/usr/local/bin:/usr/bin:/bin PR_BRAIN_ROOT=/opt/review PR_BRAIN_ENV_FILE=/opt/founderos/.env $HOME/bin/pr-brain >/dev/null 2>>$HOME/.claude/pr-brain.log",
+  ];
+  const KICK_LINE =
+    "* * * * * PATH=/usr/local/bin:/usr/bin:/bin AGENT_DISPATCH_ENV_FILE=/opt/founderos/.env $HOME/bin/agent-dispatch --kicked >/dev/null 2>>$HOME/.claude/agent-dispatch.log";
+
+  let state: string;
+  let crontab: string;
+
+  /** A crontab command backed by a file, with `crontab -l` and `crontab -` as the real one has them. */
+  function fakeCrontab(initial: string | null, dropKicked = false): void {
+    state = join(root, "crontab.state");
+    crontab = join(root, "crontab-stub");
+    if (initial !== null) writeFileSync(state, initial);
+    writeFileSync(
+      crontab,
+      `#!/usr/bin/env bash
+if [ "$1" = "-l" ]; then [ -f "${state}" ] && { cat "${state}"; exit 0; }; echo "no crontab for tester" >&2; exit 1; fi
+if [ "$1" = "-" ]; then ${dropKicked ? `grep -v -e '--kicked' >"${state}"` : `cat >"${state}"`}; exit 0; fi
+exit 2
+`,
+      { mode: 0o755 },
+    );
+  }
+  const stateLines = (): string[] => readFileSync(state, "utf8").split("\n").filter(Boolean);
+
+  it("adds one kick line, copied from the agent-dispatch line (same PATH and env file), and keeps every other line", () => {
+    fakeCrontab([...OTHER_LINES, "", AGENT_LINE, ""].join("\n"));
+
+    const r = sync({ SYNC_DAEMONS_CRONTAB: crontab });
+
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toContain("sync-daemons: kick cron installed:");
+    const lines = stateLines();
+    expect(lines).toContain(KICK_LINE);
+    for (const line of [...OTHER_LINES, AGENT_LINE]) expect(lines, line).toContain(line);
+    expect(lines).toHaveLength(OTHER_LINES.length + 2);
+  });
+
+  it("is idempotent: a second deploy changes nothing and says so", () => {
+    fakeCrontab([...OTHER_LINES, AGENT_LINE].join("\n") + "\n");
+    sync({ SYNC_DAEMONS_CRONTAB: crontab });
+    const once = readFileSync(state, "utf8");
+
+    const second = sync({ SYNC_DAEMONS_CRONTAB: crontab });
+
+    expect(second.status, second.err).toBe(0);
+    expect(readFileSync(state, "utf8")).toBe(once);
+    expect(second.out).toContain("kick cron already installed");
+    expect(stateLines().filter((l) => l.includes("--kicked"))).toHaveLength(1);
+  });
+
+  it("does not take a commented-out agent-dispatch line as the one to copy, or as already installed", () => {
+    fakeCrontab(`# ${AGENT_LINE}\n# ${KICK_LINE}\n${OTHER_LINES[0]}\n`);
+
+    const r = sync({ SYNC_DAEMONS_CRONTAB: crontab });
+
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toContain("WARNING: no agent-dispatch line in the crontab");
+    expect(stateLines().some((l) => !l.startsWith("#") && l.includes("--kicked"))).toBe(false);
+  });
+
+  it("warns and installs nothing when there is no agent-dispatch line to copy the environment from", () => {
+    fakeCrontab(OTHER_LINES.join("\n") + "\n");
+
+    const r = sync({ SYNC_DAEMONS_CRONTAB: crontab });
+
+    expect(r.status, r.err).toBe(0);
+    expect(r.out).toContain("WARNING: no agent-dispatch line in the crontab");
+    expect(stateLines()).toEqual(OTHER_LINES);
+  });
+
+  it("copes with a user who has no crontab at all", () => {
+    fakeCrontab(null);
+
+    const r = sync({ SYNC_DAEMONS_CRONTAB: crontab });
+
+    expect(r.status, r.err).toBe(0);
+    expect(existsSync(state)).toBe(false);
+    expect(r.out).toContain("WARNING: no agent-dispatch line");
+  });
+
+  it("fails loudly, and puts the old crontab back, when the new line does not stick", () => {
+    fakeCrontab([...OTHER_LINES, AGENT_LINE].join("\n") + "\n", true);
+
+    const r = sync({ SYNC_DAEMONS_CRONTAB: crontab });
+
+    expect(r.status).toBe(1);
+    expect(r.err).toMatch(/the crontab does not hold the line/);
+    expect(stateLines()).toEqual([...OTHER_LINES, AGENT_LINE]);
+  });
+
+  it("never edits the real crontab when HOME is a scratch directory (every other test here runs that way)", () => {
+    // A `crontab` on PATH that records any call. Under a scratch HOME the script must not reach it.
+    const calls = join(root, "real-crontab-calls");
+    const shimDir = join(root, "crontab-shim");
+    mkdirSync(shimDir, { recursive: true });
+    writeFileSync(join(shimDir, "crontab"), `#!/bin/bash\necho "$*" >>"${calls}"\nexit 0\n`, { mode: 0o755 });
+
+    const r = sync({}, `${shimDir}:/usr/bin:/bin`);
+
+    expect(r.status, r.err).toBe(0);
+    expect(existsSync(calls)).toBe(false);
+    expect(r.out).toContain("kick cron left alone");
+  });
+
+  it("the transformation is exactly: five schedule fields -> every minute, and `--kicked` after agent-dispatch", () => {
+    fakeCrontab(AGENT_LINE + "\n");
+    sync({ SYNC_DAEMONS_CRONTAB: crontab });
+    expect(stateLines()[1]).toBe(KICK_LINE);
+  });
+});

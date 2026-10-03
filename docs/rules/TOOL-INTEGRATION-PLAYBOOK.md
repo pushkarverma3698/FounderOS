@@ -22,7 +22,7 @@ Every step below maps to preventing one of these.
 
 ## The Iron Rules (non-negotiable)
 
-1. **TDD always.** No production code without a failing test first (RED → GREEN → REFACTOR). See `superpowers:test-driven-development`. This is already mandated in CLAUDE.md §11.
+1. **TDD always.** No production code without a failing test first (RED → GREEN → REFACTOR). This is already mandated in CLAUDE.md §11.
 2. **A tool is not "done" until it is wired in all FIVE layers** (see checklist).
 3. **Verify the external contract live** before writing the tool body. Discover the real action slug + response shape; don't trust memory or docs alone.
 4. **Read-only by default; writes are HITL-gated.** Any tool that sends/posts/pushes/deletes calls `interrupt()` and executes the side-effect only AFTER approval.
@@ -139,7 +139,7 @@ The v1 codebase grew to ~17k LOC and was deleted. These rules keep v2 lean:
 ---
 
 ## Related
-- TDD discipline: `superpowers:test-driven-development`
-- Debugging discipline: `superpowers:systematic-debugging` (find root cause before fixing)
+- TDD discipline: failing test first, per `~/.agents/AGENTS.md` (Lite step 2)
+- Debugging discipline: the `systematic-debugging` skill (find root cause before fixing)
 - Dropped-v1-feature backlog: `docs/study/V1-FEATURE-INVENTORY.md`
 - Project rules: `/CLAUDE.md` (esp. §§11–15)

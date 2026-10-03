@@ -43,8 +43,8 @@ vi.mock("../../../src/tools/jobhunt/profile-config.js", async (orig) => {
   return { ...actual, listProfiles: () => [pushkar] };
 });
 
-const mockSendToChat = vi.fn(async () => {});
-vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToChat: mockSendToChat }));
+const mockSendToJobsChat = vi.fn(async () => {});
+vi.mock("../../../src/infra/telegram-send.js", () => ({ sendToJobsChat: mockSendToJobsChat }));
 
 // Heartbeat state moved from an in-process Map to job_lane_heartbeats
 // (2026-09-07 — see sweep-runner.ts's doc comment). Faked here the same
@@ -138,8 +138,8 @@ describe("runFreeSweep", () => {
     mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
     await runFreeSweep();
 
-    expect(mockSendToChat).toHaveBeenCalledOnce();
-    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
+    expect(mockSendToJobsChat).toHaveBeenCalledOnce();
+    const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("Aquablu B.V.");
     expect(text).toContain("Embedded Software Engineer");
   });
@@ -159,7 +159,7 @@ describe("runFreeSweep", () => {
     );
     await runFreeSweep();
 
-    expect(mockSendToChat).not.toHaveBeenCalled();
+    expect(mockSendToJobsChat).not.toHaveBeenCalled();
   });
 
   it("DOES alert on a new flagged role", async () => {
@@ -170,14 +170,14 @@ describe("runFreeSweep", () => {
     );
     await runFreeSweep();
 
-    expect(mockSendToChat).toHaveBeenCalled();
+    expect(mockSendToJobsChat).toHaveBeenCalled();
   });
 
   it("does not alert when the only passing line was already seen (isNew false)", async () => {
     mockRunFreeIngest.mockResolvedValue(result({ lines: [line({ isNew: false })] }));
     await runFreeSweep();
 
-    expect(mockSendToChat).not.toHaveBeenCalled();
+    expect(mockSendToJobsChat).not.toHaveBeenCalled();
   });
 
   it("names at most 3 passing roles and states the true total when more exist", async () => {
@@ -187,7 +187,7 @@ describe("runFreeSweep", () => {
     mockRunFreeIngest.mockResolvedValue(result({ lines }));
     await runFreeSweep();
 
-    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
+    const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("8 new role");
     expect(text).toContain("Company 0");
     expect(text).toContain("Company 2");
@@ -202,7 +202,7 @@ describe("runFreeSweep", () => {
     mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
     await runFreeSweep();
 
-    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
+    const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
     expect(text).not.toMatch(/\/draft \d/);
     expect(text).toContain("docs.google.com/spreadsheets");
   });
@@ -233,8 +233,8 @@ describe("runFreeSweep", () => {
 
     await runFreeSweep();
 
-    expect(mockSendToChat).toHaveBeenCalledOnce();
-    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
+    expect(mockSendToJobsChat).toHaveBeenCalledOnce();
+    const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("Aquablu B.V.");
   });
 
@@ -250,8 +250,8 @@ describe("runFreeSweep", () => {
 
     await runFreeSweep();
 
-    expect(mockSendToChat).toHaveBeenCalledOnce();
-    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
+    expect(mockSendToJobsChat).toHaveBeenCalledOnce();
+    const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("Aquablu B.V.");
     expect(text).toContain("not set up yet");
   });
@@ -275,8 +275,8 @@ describe("runFreeSweep", () => {
 
     await runFreeSweep();
 
-    expect(mockSendToChat).toHaveBeenCalledOnce();
-    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
+    expect(mockSendToJobsChat).toHaveBeenCalledOnce();
+    const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("alive");
     expect(text).toContain("285");
     vi.useRealTimers();
@@ -292,8 +292,8 @@ describe("runFreeSweep", () => {
     );
     await runFreeSweep();
 
-    expect(mockSendToChat).toHaveBeenCalledOnce();
-    const [text] = (mockSendToChat.mock.calls as unknown as [string][])[0]!;
+    expect(mockSendToJobsChat).toHaveBeenCalledOnce();
+    const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
     // Counts per (platform, reason), and EVERY failure counted — the old version
     // named the first three boards and silently dropped the fourth, which is how
     // 36 Recruitee rate limits a sweep stayed invisible for a day.
@@ -309,7 +309,7 @@ describe("runFreeSweep", () => {
     );
     await runFreeSweep();
 
-    expect(mockSendToChat).not.toHaveBeenCalled();
+    expect(mockSendToJobsChat).not.toHaveBeenCalled();
   });
 
   it("does not fire the outage alert when a board failed and seen > 0 but nothing was screened (the false positive fix)", async () => {
@@ -318,14 +318,14 @@ describe("runFreeSweep", () => {
     );
     await runFreeSweep();
 
-    expect(mockSendToChat).not.toHaveBeenCalled();
+    expect(mockSendToJobsChat).not.toHaveBeenCalled();
   });
 
   it("does not reject when the underlying ingest throws", async () => {
     mockRunFreeIngest.mockRejectedValue(new Error("network down"));
 
     await expect(runFreeSweep()).resolves.toBeUndefined();
-    expect(mockSendToChat).not.toHaveBeenCalled();
+    expect(mockSendToJobsChat).not.toHaveBeenCalled();
   });
 
   // The dead-board record is opt-in per caller, and this is the caller that matters: the

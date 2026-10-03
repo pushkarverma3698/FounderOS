@@ -26,6 +26,8 @@
 #   agent-dispatch --list           # show eligible issues and exit
 #   agent-dispatch --check-brief [FILE]  # is this issue body a complete brief? (stdin without FILE)
 #                                   # prints "missing: <heading>" / "empty: <heading>", exit 0 = complete
+#   agent-dispatch --kicked         # cron, every minute: run a tick ONLY if the bot left a kick file (see State).
+#                                   # Silent and free when there is none, which is almost always.
 #
 # Repos: DEFAULT_REPOS below is the ONLY list this daemon reads. ISSUE_REPOS / ISSUE_REPO in the
 # environment are ignored, with one warning per tick: a list living in the crontab is invisible to CI.
@@ -51,6 +53,12 @@
 #                               deleting it by hand also resumes (one message).
 #   agent-dispatch.quota-until  epoch when Antigravity's quota lifts; nothing starts before then
 #   agent-dispatch.onboard-reported  repo-setup problems already sent to Telegram (sent once, again on change)
+#   agent-dispatch.kick         written by the bot (src/tools/dispatch-tick.ts) the moment it files an issue; one
+#                               line per issue. The bot cannot start this daemon itself: it runs under systemd with
+#                               NoNewPrivileges, so every `sudo` in a child it spawns fails ("no new privileges
+#                               flag is set"), the startup check below read that as "agy is not installed", and
+#                               every approved /task paused the loop with a false alarm. A per-minute cron job
+#                               (`--kicked`, outside that sandbox) turns the file into a tick within a minute.
 #
 # Kill switch: touch ~/.claude/agent-dispatch.off (mirrors pr-brain.off)
 # Log: ~/.claude/agent-dispatch.log
@@ -60,6 +68,7 @@ set -uo pipefail
 LOG="$HOME/.claude/agent-dispatch.log"
 LOCK="$HOME/.claude/agent-dispatch.lock"
 OFF_SWITCH="$HOME/.claude/agent-dispatch.off"
+KICK_FILE="${AGENT_DISPATCH_KICK_FILE:-$HOME/.claude/agent-dispatch.kick}"
 # shellcheck disable=SC2034  # read by deploy/lib/down-state.sh, which shellcheck does not follow
 DOWN_FILE="$HOME/.claude/agent-dispatch.down"
 
@@ -115,13 +124,10 @@ TELEGRAM_MAX=4000
 # Portable mtime in epoch seconds (GNU stat, then BSD stat; 0 when the file is absent).
 file_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 HOST="$(hostname -s 2>/dev/null || echo unknown)"
-# Bare `agy` (no --model, no key) authenticates via OAuth and silently runs
-# against whatever default model that quota currently allows — which has
-# been exhausted before. Explicit --model + an API key sidestep OAuth
-# entirely. Read the same way TELEGRAM_* is read above: one grepped line,
-# not a full `source` of $ENV_FILE (which would also pull in every unrelated
-# var and any shell function it defines).
-AGY_MODEL="${AGENT_DISPATCH_MODEL:-gemini-3.6-flash-medium}"
+# The key is read the same way TELEGRAM_* is read above: one grepped line, not a full `source` of $ENV_FILE
+# (which would also pull in every unrelated var and any shell function it defines). The model is AGY_MODEL,
+# set below once deploy/lib/agy-run.sh is loaded: bare `agy` (no --model) runs on whatever default the quota
+# currently allows, which has been exhausted before, so the model is always explicit.
 GEMINI_API_KEY=""
 # The key file's mtime is taken BEFORE the key is read: an auth pause resumes when that mtime
 # differs from this one, so a key pasted in while a run was still failing on the old one is noticed.
@@ -188,9 +194,11 @@ notify_long() {
 # state and no failure classifier, so refuse to run rather than fall back to the old silence.
 #   down-state.sh   one Telegram message per pause/resume + redact_secrets (shared with pr-brain)
 #   agy-failure.sh  classify_agy_failure: quota | auth | transient | unknown
+#   agy-run.sh      as_antigravity + agy_run: one agy turn, streamed live into ONE Telegram message (shared with pr-brain)
+#   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with pr-brain)
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in down-state.sh agy-failure.sh; do
+for _lib in down-state.sh agy-failure.sh agy-run.sh ci-state.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -202,6 +210,9 @@ for _lib in down-state.sh agy-failure.sh; do
   # shellcheck source=/dev/null
   source "$_lib_path"
 done
+# The executor's model: the one definition lives in the library, because pr-brain reads the same value to keep
+# the reviewer a different model than the author.
+AGY_MODEL="$AGY_EXECUTOR_MODEL"
 # Anything the daemon knows to be secret is masked verbatim wherever text leaves the box.
 REDACT_LITERALS+=("$GEMINI_API_KEY")
 if [[ -f "$ENV_FILE" ]]; then
@@ -271,137 +282,30 @@ check_brief_headings() {
     }'
 }
 
-# Telegram "what's Antigravity doing right now" progress — mirrors
-# src/gateway/kernel-progress.ts (streamKernelTurn): ONE placeholder message,
-# sent once, edited only when the label changes, deleted when the run ends.
-# Same env lookup and silent-if-unset behavior as notify() above — a progress
-# ping is cosmetic and must never fail or block the actual dispatch tick.
-progress_send() {
-  [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]] || return 0
-  local token chat id
-  token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
-  chat=$(grep -m1 '^TELEGRAM_CHAT_ID=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
-  [[ -n "$token" && -n "$chat" ]] || return 0
-  curl -s --max-time 20 \
-    "https://api.telegram.org/bot${token}/sendMessage" \
-    --data-urlencode "chat_id=${chat}" \
-    --data-urlencode "text=$1" \
-    --data "disable_web_page_preview=true" 2>/dev/null \
-    | jq -r '.result.message_id // empty' 2>/dev/null
-}
-
-progress_edit() {
-  local msg_id="$1" text="$2"
-  [[ -n "$msg_id" && -n "$ENV_FILE" && -f "$ENV_FILE" ]] || return 0
-  local token chat
-  token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
-  chat=$(grep -m1 '^TELEGRAM_CHAT_ID=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
-  [[ -n "$token" && -n "$chat" ]] || return 0
-  curl -s -o /dev/null --max-time 20 \
-    "https://api.telegram.org/bot${token}/editMessageText" \
-    --data-urlencode "chat_id=${chat}" \
-    --data "message_id=${msg_id}" \
-    --data-urlencode "text=$text" || true
-}
-
-progress_delete() {
-  local msg_id="$1"
-  [[ -n "$msg_id" && -n "$ENV_FILE" && -f "$ENV_FILE" ]] || return 0
-  local token chat
-  token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
-  chat=$(grep -m1 '^TELEGRAM_CHAT_ID=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
-  [[ -n "$token" && -n "$chat" ]] || return 0
-  curl -s -o /dev/null --max-time 20 \
-    "https://api.telegram.org/bot${token}/deleteMessage" \
-    --data-urlencode "chat_id=${chat}" \
-    --data "message_id=${msg_id}" || true
-}
-
-# Last distinct non-blank line of the growing agy log, truncated. agy's
-# --output-format text is narration ("I am waiting for the test suite to
-# finish."), not structured events, so this is the log equivalent of
-# kernel-progress.ts's progressLabelFor() — the current line stands in for
-# the current plan step.
-progress_label_from_log() {
-  local log_file="$1" line
-  # The label goes to Telegram and into the daemon log, and the current line of a run that is
-  # failing on its key can BE the key ("API key not valid: AIza…"): mask it before it is
-  # truncated, or a cut in the middle of a key would leave a prefix nothing recognises.
-  line=$(tail -c 4000 "$log_file" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -1 | redact_secrets)
-  [[ -z "$line" ]] && return 0
-  line="${line//$'\t'/ }"
-  if [[ "${#line}" -gt 80 ]]; then
-    printf '%s…' "${line:0:79}"
-  else
-    printf '%s' "$line"
-  fi
-}
-
-# Backgrounds an agy invocation, live-updates the ONE progress placeholder
-# while it runs, deletes the placeholder when it exits, and returns agy's own
-# exit code. Both call sites below (fresh claim, re-dispatch after review)
-# share this instead of duplicating the invocation — the last two bugs found
-# in this script (the missing checkout reset, the --print-timeout default)
-# each had to be fixed at two separate call sites because the invocation was
-# copy-pasted; this removes that failure mode going forward.
+# One agy turn, shown live. The invocation, the stream-json parsing, the ONE Telegram message that is edited
+# while it runs and the text view the failure classifier reads all live in deploy/lib/agy-run.sh, shared with
+# pr-brain: the invocation used to be pasted at every call site, and each bug found in it (the missing
+# checkout reset, the --print-timeout default) had to be fixed at two of them. This is the executor's call:
+# the Gemini key travels on stdin when we have one (agy_run), the result is the exit code, and agy_log gets the
+# plain-text view of the run.
 run_agy_with_progress() {
-  local label_prefix="$1" workspace="$2" prompt_file="$3" agy_log="$4"
-  # GEMINI_API_KEY travels on STDIN, never on the command line. It used to be a positional
-  # argument ("$3"), which put the key in /proc/<pid>/cmdline, readable by any local user
-  # through `ps`, for the whole length of every Antigravity run (up to TIMEOUT_SEC) — the
-  # same defect class .github/workflows/deploy.yml fixed for its secrets on 2026-08-12.
-  # A here-string is set up by this shell, not by a program, so no argv ever holds it.
-  # Without the key agy falls back to its OAuth default, which is quota-exhausted; this
-  # bypasses that by authenticating with the API key already in $ENV_FILE instead.
-  # $workspace and $prompt_file stay positional: same injection-safety discipline, and they
-  # are not secrets. `exec </dev/null` after the read gives agy the stdin it always had
-  # (a backgrounded job's stdin is /dev/null), so it cannot wait on a pipe.
-  as_antigravity 'IFS= read -r GEMINI_API_KEY; export GEMINI_API_KEY; exec </dev/null; cd "$1" && timeout '"${TIMEOUT_SEC}"' agy --new-project --model '"${AGY_MODEL}"' --print "$(cat "$2")" --print-timeout '"$((TIMEOUT_SEC - 120))"'s --dangerously-skip-permissions --output-format text' \
-    "$workspace" "$prompt_file" <<<"$GEMINI_API_KEY" >"$agy_log" 2>&1 &
-  local agy_pid=$!
-
-  local placeholder_id; placeholder_id=$(progress_send "🔧 ${label_prefix}: starting…")
-  log "progress: placeholder sent (id=${placeholder_id:-FAILED}) for ${label_prefix}"
-  local last_label=""
-  while kill -0 "$agy_pid" 2>/dev/null; do
-    sleep "$PROGRESS_POLL_SEC"
-    local label; label=$(progress_label_from_log "$agy_log")
-    if [[ -n "$label" && "$label" != "$last_label" ]]; then
-      progress_edit "$placeholder_id" "🔧 ${label_prefix}: ${label}"
-      log "progress: placeholder ${placeholder_id} -> ${label}"
-      last_label="$label"
-    fi
-  done
-  wait "$agy_pid"
-  local exit_code=$?
-  progress_delete "$placeholder_id"
-  log "progress: placeholder ${placeholder_id} deleted"
-  return "$exit_code"
-}
-
-# Runs a command as $AG_USER without ever letting arbitrary content (issue bodies,
-# review comments) pass through shell interpolation. Positional args after the
-# script are handed to the inner bash as $1, $2, ... — never string-substituted
-# into the script text itself.
-# -l (login shell) is required, not cosmetic: agy lives in ~/.local/bin, only put on
-# PATH by antigravity's profile/bashrc. A plain non-login `bash -c` silently has no
-# PATH entry for it and every call fails with "command not found".
-as_antigravity() {
-  local script="$1"; shift
-  sudo -u "$AG_USER" -- bash -lc "$script" _ "$@"
+  local label="$1" workspace="$2" prompt_file="$3" agy_log="$4"
+  agy_run "$label" "$workspace" "$prompt_file" "$AGY_MODEL" "$TIMEOUT_SEC" "$agy_log" "$GEMINI_API_KEY"
 }
 
 FORCE_REPO=""
 CHECK_BRIEF=0
+KICKED=0
 BRIEF_FILE="-"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
     --list) LIST_ONLY=1; shift ;;
+    --kicked) KICKED=1; shift ;;
     --issue) FORCE_ISSUE="${2:-}"; shift 2 ;;
     --repo) FORCE_REPO="${2:-}"; shift 2 ;;
     --check-brief) CHECK_BRIEF=1; shift; if [[ $# -gt 0 && "$1" != --* ]]; then BRIEF_FILE="$1"; shift; fi ;;
-    -h|--help) sed -n '3,56p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '3,/^set -uo pipefail$/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "agent-dispatch: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -412,6 +316,15 @@ if [[ "$CHECK_BRIEF" -eq 1 ]]; then
   exit $?
 fi
 
+# --kicked: cron runs this every minute, so "nothing to do" is the normal case and must cost nothing and say
+# nothing: no log line, no gh call, no startup check. The kick file is the bot's note that it just filed an
+# issue (src/tools/dispatch-tick.ts). A tick that is already running leaves it where it is: the kick is only
+# consumed by a tick that actually runs, so a kick that arrives during a 30-minute Antigravity run is not lost.
+if [[ "$KICKED" -eq 1 ]]; then
+  [[ -s "$KICK_FILE" ]] || exit 0
+  [[ ! -d "$LOCK" ]] || exit 0
+fi
+
 if [[ -n "$LEGACY_REPO_VARS" ]]; then
   _verb="is"; [[ "$LEGACY_REPO_VARS" == *" and "* ]] && _verb="are"
   log "WARNING: ${LEGACY_REPO_VARS} ${_verb} set in this environment and IGNORED: agent-dispatch sweeps DEFAULT_REPOS only (a list in the crontab is invisible to CI). Fix: ssh founderos-vps 'crontab -e' and delete the ${LEGACY_REPO_VARS%% *}=\"…\" part of the agent-dispatch line."
@@ -419,6 +332,7 @@ fi
 
 if [[ -f "$OFF_SWITCH" && "$LIST_ONLY" -eq 0 ]]; then
   log "kill switch present ($OFF_SWITCH) — nothing dispatched"
+  [[ "$KICKED" -eq 1 ]] && rm -f "$KICK_FILE"   # spent, or this repeats (and logs) every minute
   exit 0
 fi
 
@@ -436,6 +350,9 @@ startup_fail() { # startup_fail CLASS DETAIL FIX
   fi
   log "startup check failed (${cls}): ${detail}"
   down_enter "$cls" "$detail" "🛑 agent-dispatch PAUSED on ${HOST}: ${detail}. Fix: ${fix}. Nothing is claimed until then; one more message when it resumes — none until then."
+  # A kick is only a shortcut past the 15-minute cron. While the loop is down it is spent, or this check
+  # would run, and log, once a minute until somebody fixes the box.
+  [[ "$KICKED" -eq 1 ]] && rm -f "$KICK_FILE"
   exit 0
 }
 
@@ -488,6 +405,16 @@ if [[ "$DRY_RUN" -eq 0 ]]; then
     fi
   fi
   trap 'rm -rf "$LOCK"' EXIT
+fi
+
+# The lock is ours, so this tick is real and is about to read the whole queue: any kick note is spent, whether
+# this is the per-minute job or the 15-minute cron (which would otherwise leave a note that starts a second,
+# pointless tick a minute later). Taken before the pause check on purpose: a paused loop was announced when it
+# paused, and the issue waits at agent:ready for the resume either way. A note written AFTER this line is for an
+# issue filed after it, and the next minute's --kicked finds it.
+if [[ -s "$KICK_FILE" && "$DRY_RUN" -eq 0 ]]; then
+  log "kicked by the bot for: $(tr '\n' ' ' <"$KICK_FILE" | cut -c1-200)"
+  rm -f "$KICK_FILE"
 fi
 
 # ------------------------------------------------------------- pause bookkeeping
@@ -713,6 +640,27 @@ Fix: edit the issue so each section has real content (template: \`.github/ISSUE_
 
 # ----------------------------------------------------------------- Pass A: claim
 
+# The branch every task branch is cut from and every PR targets: beta when the repository has one, else main.
+# Asked of GitHub, not of the workspace. $WORKSPACE belongs to $AG_USER (mode 750), so a `git -C` from this user
+# fails with "Permission denied", reads as "this repo has no beta", and every task was cut from main with a brief
+# saying "open the PR targeting main" (PR #789 did; measured 2026-10-02 against /opt/agy-workspace/founderos).
+# Only a definite 404 means "no beta": any other failure is logged and falls back to main, which is what the old
+# code did silently every time.
+# Sets INTEGRATION_BRANCH rather than printing it: log() writes to stdout too, and a command substitution
+# would swallow the log line into the branch name.
+set_integration_branch() {
+  local out
+  INTEGRATION_BRANCH=main
+  if out="$(gh api "repos/${REPO}/branches/beta" 2>&1)"; then
+    INTEGRATION_BRANCH=beta
+    return 0
+  fi
+  case "$out" in
+    *"HTTP 404"*|*"Not Found"*) ;;
+    *) log "could not tell whether ${REPO} has a beta branch (${out:0:120}) — using main" ;;
+  esac
+}
+
 # Returns 0 = the run ended with a PR handed to review, 1 = it was claimed and ended some other
 # way (failed, retried, paused), 2 = NOT claimed at all because the brief is incomplete: the
 # caller moves on to the next candidate, since refusing a brief costs no Antigravity run.
@@ -749,10 +697,8 @@ claim_and_implement() {
     --body "${CLAIM_PREFIX} ${claimed_at} --> 🤖 Claimed by agent-dispatch on $(hostname -s). Branch: \`${branch}\`." >/dev/null
 
   prompt_file="$(mktemp /tmp/agent-dispatch-issue-XXXXXX.txt)"
-  local target_branch="main"
-  if git -C "$WORKSPACE" show-ref --verify --quiet refs/remotes/origin/beta 2>/dev/null; then
-    target_branch="beta"
-  fi
+  set_integration_branch
+  local target_branch="$INTEGRATION_BRANCH"
 
   chmod 644 "$prompt_file"
   cat >"$prompt_file" <<EOF
@@ -787,17 +733,9 @@ EOF
 
   log "invoking agy for #${issue} (timeout ${TIMEOUT_SEC}s, --new-project pinned to ${WORKSPACE})"
   local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-agy-XXXXXX.log)"
-  # timeout must wrap the actual `agy` executable inside the sudo'd script — it
-  # cannot wrap the as_antigravity *shell function* itself (that's not a program
-  # `timeout` can exec; doing so fails immediately with exit 127).
-  # --print-timeout is REQUIRED: agy's own internal wait-for-response timeout
-  # defaults to 5m0s regardless of the outer `timeout` wrapper above. Every real
-  # task (pnpm install + lint alone can exceed 5 minutes) was dying with "Error:
-  # timeout waiting for response" at 5m5-6s — observed identically on #452
-  # (2026-08-12), #508 (2026-08-18), and #670 (2026-09-09) — never reaching the
-  # 30-minute outer bound at all. Set it just under TIMEOUT_SEC so the outer
-  # `timeout` remains the true backstop for a genuinely hung process.
-  run_agy_with_progress "Antigravity #${issue}" "$WORKSPACE" "$prompt_file" "$agy_log"
+  # The timeouts that matter (the outer `timeout`, and --print-timeout set just under it, without which every
+  # real task died at 5m05s) live with the invocation, in deploy/lib/agy-run.sh.
+  run_agy_with_progress "Antigravity #${issue} · ${REPO}" "$WORKSPACE" "$prompt_file" "$agy_log"
   local agy_exit=$?
   agy_log_append "$agy_log"
   rm -f "$prompt_file"
@@ -832,16 +770,19 @@ EOF
       finish_issue "$issue" agent:ready
       gh issue comment "$issue" --repo "$REPO" --body "Antigravity's quota is exhausted until $(quota_until_human "$quota_until"). Nothing was done on this issue, and it is back at agent:ready: agent-dispatch picks it up automatically once the quota resets." >/dev/null
       notify "⏸️ agent-dispatch: Antigravity quota exhausted until $(quota_until_human "$quota_until"). #${issue} is queued (agent:ready) and starts automatically after that — no retries before."
+      agy_progress_outcome "⏸️ Quota exhausted until $(quota_until_human "$quota_until"): #${issue} is back at agent:ready."
       rm -f "$agy_log"
       return 1
       ;;
     auth)
       handle_auth_failure "$issue" "$agy_log"
+      agy_progress_outcome "🔑 Antigravity's login was rejected: #${issue} is back at agent:ready and the loop is paused."
       rm -f "$agy_log"
       return 1
       ;;
     transient)
       handle_transient_failure "$issue" "$agy_log"
+      agy_progress_outcome "↻ A transient Antigravity failure (timeout, 5xx or connection reset): #${issue} is retried on the next tick."
       rm -f "$agy_log"
       return 1
       ;;
@@ -862,6 +803,7 @@ $(tail -60 "$agy_log" | redact_secrets)
 EOF2
 )" >/dev/null
     notify "⚠️ agent-dispatch: #${issue} FAILED — no verifiable PR after Antigravity ran. Last line of the run: ${last_line:-<empty>}. See ~/.claude/agent-dispatch.log"
+    agy_progress_outcome "❌ No PR landed (agy exit ${agy_exit}, ${new_commits:-0} commit(s)). #${issue} is agent:failed. ${last_line:+Last line: ${last_line}}"
     rm -f "$agy_log"
     return 1
   fi
@@ -875,8 +817,11 @@ EOF2
     log "#${issue} was closed while Antigravity ran — PR #${pr_number} still goes to review as a draft"
   fi
   finish_issue "$issue" agent:review
-  gh issue comment "$issue" --repo "$REPO" --body "${PR_LINK_PREFIX} ${pr_number} --> PR opened: $(gh pr view "$pr_number" --repo "$REPO" --json url --jq .url). Awaiting pr-brain review.${closed_note}" >/dev/null
-  notify "🤖 agent-dispatch: #${issue} -> PR #${pr_number} opened, awaiting Claude review.${closed_note}"
+  local pr_url; pr_url="$(gh pr view "$pr_number" --repo "$REPO" --json url --jq .url 2>/dev/null)"
+  gh issue comment "$issue" --repo "$REPO" --body "${PR_LINK_PREFIX} ${pr_number} --> PR opened: ${pr_url}. Awaiting pr-brain review.${closed_note}" >/dev/null
+  notify "🤖 agent-dispatch: #${issue} -> PR #${pr_number} opened on ${REPO}, awaiting pr-brain review.${closed_note}
+${pr_url}"
+  agy_progress_outcome "📦 PR #${pr_number} opened (${new_commits} commit(s)), draft, awaiting pr-brain review."
   rm -f "$agy_log"
   return 0
 }
@@ -956,6 +901,36 @@ release_stale_claims() {
   done <<<"$issues"
 }
 
+# 1b. An issue still labelled agent:review whose PR is no longer open has nothing waiting on a review. Nothing
+#     ever took the label off: #669 and #670 sat at agent:review for weeks behind MERGED PRs, so every board
+#     built from labels (/tasks) listed finished work as "in review". The PR is found through the
+#     "<!-- agent-pr: N -->" comment claim_and_implement wrote when it opened it.
+#       MERGED  -> the work shipped: label off, issue closed as completed, one comment.
+#       CLOSED  -> the founder closed it unmerged: label off, one comment, the issue stays open (his call).
+#     Quiet by design (no Telegram): a one-time sweep of old issues must not become a burst of messages.
+close_out_finished_review() {
+  local issue="$1" pr state
+  pr=$(gh issue view "$issue" --repo "$REPO" --json comments 2>/dev/null \
+    | jq -r --arg p "$PR_LINK_PREFIX" '[.comments[].body | select(startswith($p)) | ltrimstr($p) | ltrimstr(" ") | split(" ")[0] | tonumber] | last // empty' 2>/dev/null)
+  [[ -n "$pr" ]] || return 0
+  state=$(gh pr view "$pr" --repo "$REPO" --json state --jq .state 2>/dev/null) || return 0
+  case "$state" in
+    MERGED)
+      if [[ "$DRY_RUN" -eq 1 ]]; then log "DRY RUN would close #${issue}: PR #${pr} is merged"; return 0; fi
+      log "#${issue}: PR #${pr} is merged — removing agent:review and closing the issue"
+      gh issue edit "$issue" --repo "$REPO" --remove-label agent:review >/dev/null 2>&1 || true
+      gh issue comment "$issue" --repo "$REPO" --body "PR #${pr} is merged, so this issue is done. agent-dispatch removed agent:review and closed it." >/dev/null 2>&1 || true
+      gh issue close "$issue" --repo "$REPO" >/dev/null 2>&1 || true
+      ;;
+    CLOSED)
+      if [[ "$DRY_RUN" -eq 1 ]]; then log "DRY RUN would take agent:review off #${issue}: PR #${pr} was closed unmerged"; return 0; fi
+      log "#${issue}: PR #${pr} was closed without merging — removing agent:review (the issue stays open)"
+      gh issue edit "$issue" --repo "$REPO" --remove-label agent:review >/dev/null 2>&1 || true
+      gh issue comment "$issue" --repo "$REPO" --body "PR #${pr} was closed without merging, so nothing is waiting on a review. agent-dispatch removed agent:review. The issue is still open: put agent:ready back to try again." >/dev/null 2>&1 || true
+      ;;
+  esac
+}
+
 # 2. Re-dispatch: find PRs pr-brain reviewed and left uncleared (still draft after
 #    a brain-reviewed marker for the CURRENT head SHA — pr-brain's own vocabulary
 #    for "REVIEWED, left as draft — not cleared"). This is reading pr-brain's
@@ -968,7 +943,10 @@ redispatch_unresolved_reviews() {
   while read -r issue; do
     [[ -z "$issue" ]] && continue
     local pr; pr=$(pr_for_issue "$issue")
-    [[ -z "$pr" ]] && continue
+    if [[ -z "$pr" ]]; then
+      close_out_finished_review "$issue"
+      continue
+    fi
 
     local is_draft head_sha
     is_draft=$(gh pr view "$pr" --repo "$REPO" --json isDraft --jq .isDraft)
@@ -982,7 +960,15 @@ redispatch_unresolved_reviews() {
     # `continue`d past every PR without ever re-dispatching a reviewed-and-draft one.
     reviewed_this_head=$(gh pr view "$pr" --repo "$REPO" --json comments \
       | jq -r --arg m "<!-- brain-reviewed: ${head_sha}" '[.comments[].body | select(contains($m))] | length')
-    [[ "${reviewed_this_head:-0}" -eq 0 ]] && continue
+    local trigger="reviewed at ${head_sha:0:8} and left draft"
+    if [[ "${reviewed_this_head:-0}" -eq 0 ]]; then
+      # Not reviewed at this head. pr-brain spends no review on a head whose REQUIRED CI is red (a review cannot
+      # clear it), so nothing will ever stamp it, and without this the executor would never hear that its PR fails
+      # its own checks. The red check is the signal; the brief is the failing check (see checks_state below).
+      required_ci_state "$pr" "$REPO"
+      [[ "$CI_STATE" == red ]] || continue
+      trigger="required CI is red at ${head_sha:0:8} (${CI_DETAIL}), so pr-brain spends no review on it"
+    fi
 
     local attempts
     attempts=$(gh pr view "$pr" --repo "$REPO" --json comments \
@@ -1006,7 +992,7 @@ redispatch_unresolved_reviews() {
       continue
     fi
 
-    log "PR #${pr} reviewed at ${head_sha:0:8} and left draft — re-dispatching Antigravity (attempt $((attempts + 1)))"
+    log "PR #${pr} ${trigger} — re-dispatching Antigravity (attempt $((attempts + 1)))"
     local checks_state; checks_state=$(gh pr checks "$pr" --repo "$REPO" --json state --jq \
       'if any(.[]; .state=="FAILURE") then "ci_failed" else "ci_ok_or_pending" end' 2>/dev/null || echo "ci_ok_or_pending")
 
@@ -1023,7 +1009,7 @@ redispatch_unresolved_reviews() {
       } >"$prompt_file"
     else
       {
-        echo "PR #${pr} in ${REPO} was reviewed by Claude (pr-brain) and left as a draft, not cleared. Read the"
+        echo "PR #${pr} in ${REPO} was reviewed by pr-brain (the independent reviewer) and left as a draft, not cleared. Read the"
         echo "review comments via 'gh pr view ${pr} --json comments' yourself — do not assume what they say."
         echo "Address any BLOCKER finding, re-run the verify commands from the original issue, then push to the"
         echo "existing branch ${branch}. Do not open a new PR. Do not merge."
@@ -1046,12 +1032,13 @@ redispatch_unresolved_reviews() {
     fi
 
     local agy_log; agy_log="$(mktemp /tmp/agent-dispatch-redispatch-agy-XXXXXX.log)"
-    run_agy_with_progress "Antigravity PR #${pr}" "$WORKSPACE" "$prompt_file" "$agy_log"
+    run_agy_with_progress "Antigravity fixing PR #${pr} · ${REPO}" "$WORKSPACE" "$prompt_file" "$agy_log"
     agy_log_append "$agy_log"
     local quota_until
     if quota_until=$(quota_reset_epoch "$agy_log"); then
       # Antigravity did nothing, so this does not count against MAX_ATTEMPTS.
       record_quota_wall "$quota_until"
+      agy_progress_outcome "⏸️ Quota exhausted until $(quota_until_human "$quota_until"): PR #${pr} waits, the attempt is not counted."
       rm -f "$prompt_file" "$agy_log"
       return 0
     fi
@@ -1060,13 +1047,21 @@ redispatch_unresolved_reviews() {
       # is not counted, and the loop pauses until a human fixes the login (one message).
       log "PR #${pr} (issue #${issue}) re-dispatch hit an auth failure — PR left open, attempt not counted"
       pause_for_auth "$(quoted_failure_line auth "$agy_log")"
+      agy_progress_outcome "🔑 Antigravity's login was rejected: PR #${pr} stays open, the attempt is not counted, the loop is paused."
       rm -f "$prompt_file" "$agy_log"
       return 0
     fi
     rm -f "$prompt_file" "$agy_log"
 
     gh pr comment "$pr" --repo "$REPO" --body "${ATTEMPT_PREFIX} $((attempts + 1)) --> agent-dispatch re-invoked Antigravity ($([[ "$checks_state" == "ci_failed" ]] && echo "CI failure" || echo "unresolved review")). Awaiting the next pr-brain pass." >/dev/null
-    notify "🤖 agent-dispatch: re-dispatched Antigravity on PR #${pr} (attempt $((attempts + 1))/${MAX_ATTEMPTS})."
+    # What happened is read from the PR, not from agy's say-so (a run can end "done" having pushed nothing:
+    # the 2026-09-22 audit found attempt 1/3 burned by a run that changed no file). The attempt still counts:
+    # three runs that change nothing are a PR Antigravity cannot fix, and that is exactly when to ask a human.
+    local new_head moved
+    new_head=$(gh pr view "$pr" --repo "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null)
+    if [[ -n "$new_head" && "$new_head" != "$head_sha" ]]; then moved="pushed ${new_head:0:8}"; else moved="pushed NOTHING (the head is still ${head_sha:0:8})"; fi
+    notify "🤖 agent-dispatch: re-dispatched Antigravity on PR #${pr} (attempt $((attempts + 1))/${MAX_ATTEMPTS}): ${moved}."
+    agy_progress_outcome "↩️ Attempt $((attempts + 1))/${MAX_ATTEMPTS} on PR #${pr}: ${moved}. Awaiting the next pr-brain pass."
   done <<<"$issues"
 }
 
@@ -1075,68 +1070,77 @@ redispatch_unresolved_reviews() {
 claims_done=()
 WORKSPACE_BASE="${AGENT_DISPATCH_WORKSPACE_BASE:-/opt/agy-workspace}"
 
-for repo_idx in "${!DISPATCH_REPOS[@]}"; do
-  CURRENT_REPO="${DISPATCH_REPOS[$repo_idx]}"
-  export REPO="$CURRENT_REPO"
+# The sweep is one function and the script's last line is a single call, so bash has parsed everything it will
+# ever run before the first claim. A running bash script reads its file as it goes, by byte offset: replacing
+# the file under a tick that is mid-run (scp, `cat >`, an in-place patch; the deploy's rename is safe) made
+# the 2026-10-02 16:39 tick die with "d_reviews: command not found" and a syntax error near `done`, halfway
+# through the tail of the old file. Everything below the last function is the call, on ONE line.
+run_tick() {
+  for repo_idx in "${!DISPATCH_REPOS[@]}"; do
+    CURRENT_REPO="${DISPATCH_REPOS[$repo_idx]}"
+    export REPO="$CURRENT_REPO"
 
-  REPO_NAME="$(basename "$REPO")"
-  if [[ "$REPO" == *"FounderOS"* ]]; then
-    export WORKSPACE="${WORKSPACE_BASE}/founderos"
-  else
-    export WORKSPACE="${WORKSPACE_BASE}/${REPO_NAME}"
-  fi
+    REPO_NAME="$(basename "$REPO")"
+    if [[ "$REPO" == *"FounderOS"* ]]; then
+      export WORKSPACE="${WORKSPACE_BASE}/founderos"
+    else
+      export WORKSPACE="${WORKSPACE_BASE}/${REPO_NAME}"
+    fi
 
-  log "Processing repo: $REPO (workspace: $WORKSPACE)"
+    log "Processing repo: $REPO (workspace: $WORKSPACE)"
 
-  # Paused (Antigravity auth, gh login, a missing tool): claim nothing, re-dispatch nothing. The
-  # founder was told once when it began; a per-tick message would be exactly the noise this replaced.
-  if down_active; then
-    log "paused ($(down_class) since $(down_since)) — no claim or re-dispatch in $REPO this tick"
+    # Paused (Antigravity auth, gh login, a missing tool): claim nothing, re-dispatch nothing. The
+    # founder was told once when it began; a per-tick message would be exactly the noise this replaced.
+    if down_active; then
+      log "paused ($(down_class) since $(down_since)) — no claim or re-dispatch in $REPO this tick"
+      release_stale_claims
+      continue
+    fi
+
+    # A forced --issue only ever belongs to one repo. pick_ready_issues() just
+    # returns $FORCE_ISSUE verbatim, blind to which $REPO is active this
+    # iteration — without this check it claims the same-numbered issue in
+    # whichever repo the loop reaches first. Confirmed live 2026-09-21:
+    # kickDispatchTick's own kick (--issue N, no --repo) claimed a FounderOS
+    # issue in place of a same-numbered Oplify one. No --repo given (the old
+    # calling convention) skips nothing, unchanged from before.
+    if quota_exhausted; then
+      log "Antigravity quota exhausted until $(quota_until_human "$(tr -dc '0-9' <"$QUOTA_FILE")") — no claim or re-dispatch in $REPO this tick"
+      release_stale_claims
+      continue
+    fi
+
+    if [[ -n "$FORCE_ISSUE" && -n "$FORCE_REPO" && "$REPO" != "$FORCE_REPO" ]]; then
+      log "skipping $REPO — forced issue #$FORCE_ISSUE targets $FORCE_REPO"
+    elif [[ "${claims_done[$repo_idx]:-0}" -lt "$MAX_CLAIMS" ]]; then
+      brief_checks=0
+      candidates="$(pick_ready_issues)"
+      for next_issue in $candidates; do
+        claim_and_implement "$next_issue"
+        claim_rc=$?
+        if [[ "$claim_rc" -eq 2 ]]; then
+          # Refused for an incomplete brief (nothing spent): look at the next candidate.
+          brief_checks=$((brief_checks + 1))
+          [[ "$brief_checks" -ge "$MAX_BRIEF_CHECKS" ]] && break
+          continue
+        fi
+        [[ "$claim_rc" -eq 0 ]] && claims_done[$repo_idx]=$(( ${claims_done[$repo_idx]:-0} + 1 ))
+        break
+      done
+    fi
+
     release_stale_claims
-    continue
-  fi
+    # The claim itself may have hit a wall (auth, quota): re-dispatching now would run Antigravity
+    # straight into it again.
+    if down_active || quota_exhausted; then
+      continue
+    fi
+    redispatch_unresolved_reviews
+  done
 
-  # A forced --issue only ever belongs to one repo. pick_ready_issues() just
-  # returns $FORCE_ISSUE verbatim, blind to which $REPO is active this
-  # iteration — without this check it claims the same-numbered issue in
-  # whichever repo the loop reaches first. Confirmed live 2026-09-21:
-  # kickDispatchTick's own kick (--issue N, no --repo) claimed a FounderOS
-  # issue in place of a same-numbered Oplify one. No --repo given (the old
-  # calling convention) skips nothing, unchanged from before.
-  if quota_exhausted; then
-    log "Antigravity quota exhausted until $(quota_until_human "$(tr -dc '0-9' <"$QUOTA_FILE")") — no claim or re-dispatch in $REPO this tick"
-    release_stale_claims
-    continue
-  fi
+  total_claims=0
+  for repo_claims in "${claims_done[@]:-}"; do total_claims=$((total_claims + repo_claims)); done
+  log "tick complete — claims=${total_claims} (max ${MAX_CLAIMS} per repo across ${#DISPATCH_REPOS[@]} repos)"
+}
 
-  if [[ -n "$FORCE_ISSUE" && -n "$FORCE_REPO" && "$REPO" != "$FORCE_REPO" ]]; then
-    log "skipping $REPO — forced issue #$FORCE_ISSUE targets $FORCE_REPO"
-  elif [[ "${claims_done[$repo_idx]:-0}" -lt "$MAX_CLAIMS" ]]; then
-    brief_checks=0
-    candidates="$(pick_ready_issues)"
-    for next_issue in $candidates; do
-      claim_and_implement "$next_issue"
-      claim_rc=$?
-      if [[ "$claim_rc" -eq 2 ]]; then
-        # Refused for an incomplete brief (nothing spent): look at the next candidate.
-        brief_checks=$((brief_checks + 1))
-        [[ "$brief_checks" -ge "$MAX_BRIEF_CHECKS" ]] && break
-        continue
-      fi
-      [[ "$claim_rc" -eq 0 ]] && claims_done[$repo_idx]=$(( ${claims_done[$repo_idx]:-0} + 1 ))
-      break
-    done
-  fi
-
-  release_stale_claims
-  # The claim itself may have hit a wall (auth, quota): re-dispatching now would run Antigravity
-  # straight into it again.
-  if down_active || quota_exhausted; then
-    continue
-  fi
-  redispatch_unresolved_reviews
-done
-
-total_claims=0
-for repo_claims in "${claims_done[@]:-}"; do total_claims=$((total_claims + repo_claims)); done
-log "tick complete — claims=${total_claims} (max ${MAX_CLAIMS} per repo across ${#DISPATCH_REPOS[@]} repos)"
+run_tick; exit $?
