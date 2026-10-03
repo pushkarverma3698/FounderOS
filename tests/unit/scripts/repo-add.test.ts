@@ -126,6 +126,7 @@ describe("validateRepoSlug: strict owner/repo, nothing that could reach a shell,
 describe("planRepoAdd + applyRepoAdd", () => {
   it("adds the repo to all three files, each with the same one-line insertion and nothing else changed", () => {
     const before = Object.fromEntries(FILES.map((rel) => [rel, read(rel)]));
+    const lengthBefore = Object.fromEntries(FILES.map((rel) => [rel, listsIn(rel).length]));
     const plan = planRepoAdd(root, NEW_REPO);
     applyRepoAdd(root, plan);
 
@@ -138,7 +139,7 @@ describe("planRepoAdd + applyRepoAdd", () => {
     for (const rel of FILES) {
       const list = listsIn(rel);
       expect(list.at(-1)).toBe(NEW_REPO);
-      expect(list).toHaveLength(5);
+      expect(list).toHaveLength((lengthBefore[rel] ?? 0) + 1);
     }
     // Removing the inserted text gives back the original bytes: nothing else moved or reformatted.
     expect(read(REPO_ADD_TARGETS.daemon).replace(` "${NEW_REPO}")`, ")")).toBe(before[REPO_ADD_TARGETS.daemon]);

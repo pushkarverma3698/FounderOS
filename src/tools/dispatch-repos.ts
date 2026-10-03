@@ -24,6 +24,7 @@ export const DISPATCH_REPO_ALLOWLIST = [
   "pushkarverma3698/House-of-Hulda-Website-frontend",
   "OplifyMessage/oplify-messaging-app",
   "OplifyMessage/oplify-messaging-api",
+  "pushkarverma3698/fos-journey-sandbox",
 ] as const;
 
 export type DispatchRepo = (typeof DISPATCH_REPO_ALLOWLIST)[number];
