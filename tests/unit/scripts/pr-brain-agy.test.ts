@@ -202,6 +202,14 @@ quota_wall() {
   esac
   exit 3
 }
+# What agy printed on 2026-10-03 for a model its catalog no longer has (claude-sonnet-4-6 had become
+# claude-sonnet-5-5-*): one error line and then the catalog, exit 1. AGY_UNKNOWN_MODELS lists the names it refuses.
+unknown_model() {
+  printf 'error: invalid model selection (--model "%s" --effort ""): model %s is not recognized as a known model or custom model in settings\n' "$model" "$model" >&2
+  printf 'Available models:\n  Gemini 3.8 Flash (High)\n  Gemini 3.1 Pro (High)\n  Claude Opus 5.5 (Medium)\n  Claude Sonnet 5.5 (Medium)\n  GPT-OSS 120B (Medium)\n' >&2
+  exit 1
+}
+case " \${AGY_UNKNOWN_MODELS:-} " in *" $model "*) echo "$model" >>"$AGY_LOGS/unknown-models"; unknown_model ;; esac
 case "$*" in *"reply with the single word ok"*)
   echo "$model" >>"$AGY_LOGS/pf-models"
   case " \${AGY_PREFLIGHT_QUOTA_MODELS:-} " in *" $model "*) quota_wall "$@" ;; esac
@@ -244,7 +252,7 @@ describe("a PASS verdict", () => {
     expect(ghState("comments")).toContain(`<!-- brain-reviewed: ${head} -->`);
     expect(sent().find((m) => m.startsWith("🧠 Gate done"))).toMatch(/CLEARED/);
     expect(claudeCalls()).toBe(0);
-    expect(prBrainLog()).toMatch(/gating oplify-messaging-api#56 .*engine=agy model=claude-sonnet-4-6/);
+    expect(prBrainLog()).toMatch(/gating oplify-messaging-api#56 .*engine=agy model=claude-sonnet-5-5-medium/);
   });
 
   it("does not post a second marker when the model stamped the head itself", () => {
@@ -324,7 +332,7 @@ describe("where and how the reviewer runs", () => {
   it("with a model that is NOT the executor's, as `agy --model` (the executor runs gemini-3.6-flash-medium)", () => {
     sweep({ agyOut: review("BRAIN-VERDICT: PASS") });
 
-    expect(agyLog("model")).toEqual(["claude-sonnet-4-6"]);
+    expect(agyLog("model")).toEqual(["claude-sonnet-5-5-medium"]);
     expect(agyLog("model")[0]).not.toMatch(/gemini/);
   });
 
@@ -381,7 +389,7 @@ describe("what the founder watches in Telegram", () => {
     expect(progress).toHaveLength(1);
     expect(telegram().filter((c) => c.kind === "delete")).toHaveLength(0);
     const last = edits().at(-1) ?? "";
-    expect(last).toMatch(/^✅ Reviewing oplify-messaging-api#56\n⏱ .* · claude-sonnet-4-6 · 2 tool calls/);
+    expect(last).toMatch(/^✅ Reviewing oplify-messaging-api#56\n⏱ .* · claude-sonnet-5-5-medium · 2 tool calls/);
     expect(last).toContain("✅ run npm test");
     expect(last).toContain("BRAIN-VERDICT: PASS");
   });
@@ -441,7 +449,7 @@ describe("when the reviewer cannot run (an outage, announced once)", () => {
 });
 
 describe("a reviewer model that is out of quota (quota is per model family: the next model reviews)", () => {
-  const SPENT = "claude-sonnet-4-6";
+  const SPENT = "claude-sonnet-5-5-medium";
   const FALLBACK = "gemini-3.1-pro-high";
 
   it("at the preflight: the first model is spent, so the review runs on the next one — no pause, no 'failed' message", () => {
@@ -453,7 +461,7 @@ describe("a reviewer model that is out of quota (quota is per model family: the 
     expect(ghState("draft")).toBe("false");
     expect(sent().filter((m) => /PAUSED|FAILED/.test(m))).toHaveLength(0);
     expect(existsSync(join(home, ".claude", "pr-brain.down"))).toBe(false);
-    expect(prBrainLog()).toMatch(/quota used up on claude-sonnet-4-6 \(.*Resets in 69h26m28s.*\): trying the next reviewer model/);
+    expect(prBrainLog()).toMatch(/quota used up on claude-sonnet-5-5-medium \(.*Resets in 69h26m28s.*\): trying the next reviewer model/);
     expect(prBrainLog()).toMatch(/engine=agy model=gemini-3\.1-pro-high/);
   });
 
@@ -464,9 +472,9 @@ describe("a reviewer model that is out of quota (quota is per model family: the 
     expect(ghState("draft")).toBe("false");
     expect(sent().filter((m) => /PAUSED|FAILED/.test(m))).toHaveLength(0);
     expect(existsSync(join(home, ".claude", "pr-brain.failures"))).toBe(false);
-    expect(prBrainLog()).toMatch(/oplify-messaging-api#56: quota used up on claude-sonnet-4-6 .*: reviewing again with gemini-3\.1-pro-high/);
+    expect(prBrainLog()).toMatch(/oplify-messaging-api#56: quota used up on claude-sonnet-5-5-medium .*: reviewing again with gemini-3\.1-pro-high/);
     // the founder's progress message for the first run says why it stopped and what happens next
-    expect(edits().some((t) => t.includes("claude-sonnet-4-6 has no quota left. Reviewing again with gemini-3.1-pro-high."))).toBe(true);
+    expect(edits().some((t) => t.includes("claude-sonnet-5-5-medium has no quota left. Reviewing again with gemini-3.1-pro-high."))).toBe(true);
   });
 
   it("a spent model stays spent for the rest of the sweep: the next PR goes straight to the fallback", () => {
@@ -492,7 +500,7 @@ describe("a reviewer model that is out of quota (quota is per model family: the 
 
     const paused = sent().filter((m) => m.includes("PAUSED"));
     expect(paused).toHaveLength(1);
-    expect(paused[0]).toMatch(/Antigravity reviewer's quota is used up \(tried claude-sonnet-4-6, gemini-3\.1-pro-high: .*Resets in 69h26m28s/);
+    expect(paused[0]).toMatch(/Antigravity reviewer's quota is used up \(tried claude-sonnet-5-5-medium, gemini-3\.1-pro-high: .*Resets in 69h26m28s/);
     expect(agyLog("calls")).toHaveLength(0);
     expect(existsSync(join(home, ".claude", "pr-brain.down"))).toBe(true);
   });
@@ -503,7 +511,7 @@ describe("a reviewer model that is out of quota (quota is per model family: the 
     expect(agyLog("model")).toEqual([SPENT, FALLBACK]);
     const paused = sent().filter((m) => m.includes("PAUSED"));
     expect(paused).toHaveLength(1);
-    expect(paused[0]).toMatch(/quota is used up \(tried claude-sonnet-4-6, gemini-3\.1-pro-high: .*Resets in 69h26m28s/);
+    expect(paused[0]).toMatch(/quota is used up \(tried claude-sonnet-5-5-medium, gemini-3\.1-pro-high: .*Resets in 69h26m28s/);
     expect(sent().filter((m) => m.includes("Gate FAILED"))).toHaveLength(0);
     expect(prBrainLog()).not.toMatch(/gate FAILED/);
     expect(existsSync(join(home, ".claude", "pr-brain.failures"))).toBe(false);
@@ -538,6 +546,70 @@ describe("a reviewer model that is out of quota (quota is per model family: the 
     sweep({ agyOut: review("BRAIN-VERDICT: PASS"), env: { AGENT_DISPATCH_MODEL: SPENT } });
 
     expect(agyLog("model")).toEqual([FALLBACK]);
+  });
+});
+
+describe("a reviewer model agy no longer has (2026-10-03: claude-sonnet-4-6 became claude-sonnet-5-5-*, and the reviewer paused itself on it)", () => {
+  const RETIRED = "claude-sonnet-4-6";
+  const FALLBACK = "gemini-3.1-pro-high";
+  const OLD_CONFIG = { PR_BRAIN_MODELS: `${RETIRED} ${FALLBACK}`, AGY_UNKNOWN_MODELS: RETIRED };
+
+  it("is skipped like a spent model: the review runs on the next candidate, with no pause and no 'failed' message", () => {
+    const r = sweep({ agyOut: review("All good.\n\nBRAIN-VERDICT: PASS"), env: OLD_CONFIG });
+
+    expect(r.status).toBe(0);
+    expect(agyLog("pf-models")).toEqual([FALLBACK]); // the refused name never got as far as the preflight prompt
+    expect(agyLog("unknown-models")).toEqual([RETIRED]);
+    expect(agyLog("model")).toEqual([FALLBACK]);
+    expect(ghState("draft")).toBe("false");
+    expect(sent().filter((m) => /PAUSED|FAILED/.test(m))).toHaveLength(0);
+    expect(existsSync(join(home, ".claude", "pr-brain.down"))).toBe(false);
+    expect(prBrainLog()).toMatch(/claude-sonnet-4-6 is not a model agy knows \(error: invalid model selection .*\): trying the next reviewer model/);
+  });
+
+  it("is said ONCE, with the fix, because a quiet skip would hide a configuration that is wrong for good", () => {
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), env: OLD_CONFIG });
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), env: OLD_CONFIG, args: ["--pr", "56", "--repo", join(root, "repos", "oplify-messaging-api")] });
+
+    const notes = sent().filter((m) => m.includes("not in agy's catalog"));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain(RETIRED);
+    expect(notes[0]).toMatch(/crontab -e/);
+    expect(notes[0]).toMatch(/agy models/);
+  });
+
+  it("the shipped default names models agy has today, so a bare crontab line reviews on the first one", () => {
+    sweep({ agyOut: review("BRAIN-VERDICT: PASS"), env: { AGY_UNKNOWN_MODELS: RETIRED } });
+
+    expect(agyLog("unknown-models")).toEqual([]);
+    expect(agyLog("model")).toEqual(["claude-sonnet-5-5-medium"]);
+  });
+
+  it("every configured model unknown: ONE pause that says so (not 'quota used up'), and no review runs", () => {
+    const env = { PR_BRAIN_MODELS: `${RETIRED} claude-opus-4-6-thinking`, AGY_UNKNOWN_MODELS: `${RETIRED} claude-opus-4-6-thinking` };
+    sweep({ env });
+    sweep({ env });
+
+    const paused = sent().filter((m) => m.includes("PAUSED"));
+    expect(paused).toHaveLength(1);
+    expect(paused[0]).toMatch(/no configured reviewer model is one agy knows \(claude-sonnet-4-6, claude-opus-4-6-thinking are not in its catalog/);
+    expect(paused[0]).not.toMatch(/quota is used up/);
+    expect(agyLog("calls")).toHaveLength(0);
+  });
+
+  it("one unknown and one out of quota: the pause is a quota pause, naming both models", () => {
+    sweep({ env: { ...OLD_CONFIG, AGY_PREFLIGHT_QUOTA_MODELS: FALLBACK } });
+
+    const paused = sent().filter((m) => m.includes("PAUSED"));
+    expect(paused).toHaveLength(1);
+    expect(paused[0]).toMatch(/quota is used up \(tried claude-sonnet-4-6, gemini-3\.1-pro-high: .*Resets in 69h26m28s/);
+  });
+
+  it("every candidate unknown leaves no failed-attempt record: the review never started, so nothing counts against the PR", () => {
+    sweep({ env: { ...OLD_CONFIG, AGY_UNKNOWN_MODELS: `${RETIRED} ${FALLBACK}` } });
+
+    expect(existsSync(join(home, ".claude", "pr-brain.failures"))).toBe(false);
+    expect(sent().filter((m) => m.includes("Gate FAILED"))).toHaveLength(0);
   });
 });
 

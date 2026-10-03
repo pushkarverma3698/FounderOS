@@ -195,9 +195,10 @@ notify_long() {
 #   down-state.sh   one Telegram message per pause/resume + redact_secrets (shared with pr-brain)
 #   agy-failure.sh  classify_agy_failure: quota | auth | transient | unknown
 #   agy-run.sh      as_antigravity + agy_run: one agy turn, streamed live into ONE Telegram message (shared with pr-brain)
+#   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with pr-brain)
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in down-state.sh agy-failure.sh agy-run.sh; do
+for _lib in down-state.sh agy-failure.sh agy-run.sh ci-state.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -959,7 +960,15 @@ redispatch_unresolved_reviews() {
     # `continue`d past every PR without ever re-dispatching a reviewed-and-draft one.
     reviewed_this_head=$(gh pr view "$pr" --repo "$REPO" --json comments \
       | jq -r --arg m "<!-- brain-reviewed: ${head_sha}" '[.comments[].body | select(contains($m))] | length')
-    [[ "${reviewed_this_head:-0}" -eq 0 ]] && continue
+    local trigger="reviewed at ${head_sha:0:8} and left draft"
+    if [[ "${reviewed_this_head:-0}" -eq 0 ]]; then
+      # Not reviewed at this head. pr-brain spends no review on a head whose REQUIRED CI is red (a review cannot
+      # clear it), so nothing will ever stamp it, and without this the executor would never hear that its PR fails
+      # its own checks. The red check is the signal; the brief is the failing check (see checks_state below).
+      required_ci_state "$pr" "$REPO"
+      [[ "$CI_STATE" == red ]] || continue
+      trigger="required CI is red at ${head_sha:0:8} (${CI_DETAIL}), so pr-brain spends no review on it"
+    fi
 
     local attempts
     attempts=$(gh pr view "$pr" --repo "$REPO" --json comments \
@@ -983,7 +992,7 @@ redispatch_unresolved_reviews() {
       continue
     fi
 
-    log "PR #${pr} reviewed at ${head_sha:0:8} and left draft — re-dispatching Antigravity (attempt $((attempts + 1)))"
+    log "PR #${pr} ${trigger} — re-dispatching Antigravity (attempt $((attempts + 1)))"
     local checks_state; checks_state=$(gh pr checks "$pr" --repo "$REPO" --json state --jq \
       'if any(.[]; .state=="FAILURE") then "ci_failed" else "ci_ok_or_pending" end' 2>/dev/null || echo "ci_ok_or_pending")
 
