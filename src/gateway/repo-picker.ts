@@ -36,6 +36,7 @@
  */
 
 import { DISPATCH_REPO_ALLOWLIST, matchAllowlistedRepos } from "../tools/dispatch-repos.js";
+import { engineDisplay, parseEngine, type Engine } from "../tools/coding-engine.js";
 
 /** Telegram rejects `callback_data` over 64 bytes — the whole keyboard, not just the button. */
 export const MAX_CALLBACK_BYTES = 64;
@@ -142,12 +143,26 @@ export function buildRepoQuestion(text: string): string {
  * message is how the chosen repository gets back to the handler, so the target
  * is on screen at the moment he describes the work.
  */
-export function buildRepoPrompt(slug: string): string {
+export function buildRepoPrompt(slug: string, engine?: Engine): string {
   return (
     `${labelForRepo(slug)} — <b>what should I build?</b>\n\n` +
     `<i>Reply to this message with it in plain English. One line is enough.</i>\n\n` +
-    `${REPO_PROMPT_LABEL} <code>${escapeHtml(slug)}</code>`
+    `${REPO_PROMPT_LABEL} <code>${escapeHtml(slug)}</code>` +
+    // Only when he chose a CLI with /claude or /agy: a plain /task prompt reads as it always has.
+    (engine ? `\n${EXECUTOR_PROMPT_LABEL} <code>${engineDisplay(engine)}</code>` : "")
   );
+}
+
+const EXECUTOR_PROMPT_LABEL = "Executor:";
+
+/**
+ * The engine a prompt named, read back the way the repo is: the LAST `Executor:` line, tags stripped. A name
+ * that is not an engine reads as none, so the default applies rather than a guess.
+ */
+export function engineFromPrompt(text: string): Engine | undefined {
+  const plain = text.replace(/<[^>]*>/g, "");
+  const matches = [...plain.matchAll(new RegExp(`${EXECUTOR_PROMPT_LABEL}[ \\t]*([^\\n]+)`, "g"))];
+  return parseEngine(matches.at(-1)?.[1]);
 }
 
 /**

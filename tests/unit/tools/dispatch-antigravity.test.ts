@@ -13,6 +13,7 @@ const mockIssuesCreate = vi.fn();
 const mockGetContent = vi.fn();
 const mockRepoGet = vi.fn();
 const mockKickDispatchTick = vi.fn();
+const mockReadDefaultEngine = vi.fn();
 
 vi.mock("octokit", () => {
   return {
@@ -27,6 +28,13 @@ vi.mock("octokit", () => {
 
 vi.mock("../../../src/tools/dispatch-tick.js", () => ({
   kickDispatchTick: mockKickDispatchTick,
+}));
+
+// The default engine is a file under the real home directory. A test that read it would
+// pass or fail with whatever the developer last typed into /engine.
+vi.mock("../../../src/tools/coding-engine.js", async (orig) => ({
+  ...(await (orig() as Promise<Record<string, unknown>>)),
+  readDefaultEngine: mockReadDefaultEngine,
 }));
 
 const {
@@ -245,6 +253,7 @@ describe("resolveDispatchRepo", () => {
 describe("dispatchAntigravityTool.execute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReadDefaultEngine.mockReturnValue("agy");
     resetBriefCheckMemo();
     process.env["GITHUB_TOKEN"] = "ghp_mock_token_for_tests";
     mockGetContent.mockResolvedValue({ data: {} });
@@ -267,7 +276,7 @@ describe("dispatchAntigravityTool.execute", () => {
     expect(res.error).toContain("GITHUB_TOKEN not configured");
   });
 
-  it("creates issue with agent:ready and antigravity labels, and the full nine-section body", async () => {
+  it("creates issue with agent:ready, antigravity and engine labels, and the full nine-section body", async () => {
     mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
 
     const res = await dispatchAntigravityTool.execute({ ...COMPLETE });
@@ -278,7 +287,7 @@ describe("dispatchAntigravityTool.execute", () => {
         owner: "pushkarverma3698",
         repo: "FounderOS",
         title: "feat: 13k ATS scaling with per-domain rate limiting",
-        labels: [AGENT_READY_LABEL, ANTIGRAVITY_LABEL],
+        labels: [AGENT_READY_LABEL, ANTIGRAVITY_LABEL, "engine:agy"],
       }),
     );
     const filed = (mockIssuesCreate.mock.calls[0]?.[0] as { body: string }).body;
@@ -290,6 +299,59 @@ describe("dispatchAntigravityTool.execute", () => {
     expect(data.issue_url).toBe("https://github.com/pushkarverma3698/FounderOS/issues/524");
     expect(data.repo).toBe("pushkarverma3698/FounderOS");
     expect(data.warnings).toBeUndefined();
+  });
+
+  it("labels the issue for the engine the caller named, and does not read the default", async () => {
+    mockReadDefaultEngine.mockReturnValue("agy");
+    mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
+
+    const res = await dispatchAntigravityTool.execute({ ...COMPLETE, engine: "claude" });
+
+    expect(res.success).toBe(true);
+    expect(mockIssuesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ labels: [AGENT_READY_LABEL, ANTIGRAVITY_LABEL, "engine:claude"] }),
+    );
+    expect(mockReadDefaultEngine).not.toHaveBeenCalled();
+    expect((res.data as { engine: string }).engine).toBe("claude");
+  });
+
+  it("falls back to the default engine at filing time when none is named", async () => {
+    mockReadDefaultEngine.mockReturnValue("claude");
+    mockIssuesCreate.mockResolvedValueOnce({ data: issueCreated() });
+
+    const res = await dispatchAntigravityTool.execute({ ...COMPLETE });
+
+    expect(mockIssuesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ labels: [AGENT_READY_LABEL, ANTIGRAVITY_LABEL, "engine:claude"] }),
+    );
+    expect((res.data as { engine: string }).engine).toBe("claude");
+  });
+
+  it("always files exactly one engine label, so the daemon never meets an ambiguous issue", async () => {
+    mockIssuesCreate.mockResolvedValue({ data: issueCreated() });
+    for (const engine of ["agy", "claude", undefined]) {
+      mockIssuesCreate.mockClear();
+      await dispatchAntigravityTool.execute({ ...COMPLETE, ...(engine ? { engine } : {}) });
+      const labels = (mockIssuesCreate.mock.calls[0]?.[0] as { labels: string[] }).labels;
+      expect(labels.filter((l) => l.startsWith("engine:"))).toHaveLength(1);
+    }
+  });
+
+  it("refuses an engine it does not know and files NOTHING, rather than falling back to a CLI nobody picked", async () => {
+    const res = await dispatchAntigravityTool.execute({ ...COMPLETE, engine: "gemini" });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/gemini/);
+    expect(res.error).toMatch(/claude/);
+    expect(res.error).toMatch(/agy/);
+    expect(mockIssuesCreate).not.toHaveBeenCalled();
+  });
+
+  it("advertises the engine in its input schema, as an optional enum", () => {
+    const schema = dispatchAntigravityTool.input_schema;
+    const props = schema?.properties as Record<string, { enum?: string[] }>;
+    expect(props["engine"]?.enum).toEqual(["agy", "claude"]);
+    expect(schema?.required).not.toContain("engine");
   });
 
   it("kicks the dispatcher for the issue it just filed", async () => {
@@ -327,6 +389,7 @@ describe("dispatchAntigravityTool.execute", () => {
 describe("dispatchAntigravityTool.execute — the brief lint", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReadDefaultEngine.mockReturnValue("agy");
     resetBriefCheckMemo();
     process.env["GITHUB_TOKEN"] = "ghp_mock_token_for_tests";
     mockGetContent.mockResolvedValue({ data: {} });
