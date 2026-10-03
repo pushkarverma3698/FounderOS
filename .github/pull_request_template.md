@@ -3,6 +3,8 @@ FounderOS PR template. Keep it honest — tick a box only with evidence.
 Full checklist: docs/rules/CODE-REVIEW-CHECKLIST.md
 -->
 
+Moves: <!-- A (coding PRs) | B (status) | C (jobs) | D (model switch) | crash-fix — required during the 30-day freeze, see scripts/verify-pr-scope.ts -->
+
 ## What & why
 
 <!-- One or two lines: what this changes and the problem it solves. -->
