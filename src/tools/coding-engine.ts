@@ -56,6 +56,21 @@ export function engineFromCommand(text: string): Engine | undefined {
   return match ? parseEngine(match[1]) : undefined;
 }
 
+/**
+ * The engine an approval card was rendered for (`args.engine` in the stored HITL payload). The resume after the tap
+ * passes it back as `configurable.engine`, because the gated tool body re-runs and would otherwise re-read the default
+ * or lose a /claude or /agy the planner dropped, and file for a CLI the card never showed.
+ */
+export function engineFromApprovalCard(callbackData: string | null | undefined): Engine | undefined {
+  if (!callbackData) return undefined;
+  try {
+    return parseEngine((JSON.parse(callbackData) as { args?: { engine?: unknown } }).args?.engine);
+  } catch {
+    // allow-failopen: a payload that is not JSON names no engine; the tool then refuses or uses its own argument.
+    return undefined;
+  }
+}
+
 /** The default engine. Same answer as `engine_default` in deploy/lib/engine.sh for every file content. */
 export function readDefaultEngine(file: string = codingEngineFile()): Engine {
   let content: string;

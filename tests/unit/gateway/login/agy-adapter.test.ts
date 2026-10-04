@@ -205,6 +205,7 @@ describe("agy login adapter: status", () => {
     const a = createAgyAdapter(base);
     const [r] = await a.status();
     expect(r).toMatchObject({ ok: true });
+    expect(r!.unverified).toBeUndefined();
     await a.status();
     expect(m.run).toHaveBeenCalledTimes(1);
     now += 11 * 60_000;
@@ -227,8 +228,10 @@ describe("agy login adapter: status", () => {
     expect(flagged[0]!.detail).toContain("ssh -t founderos-vps");
     const clear = await createAgyAdapter(deps(m).base).status();
     expect(clear[0]!.detail).toContain("not verified live");
+    expect(clear[0]).toMatchObject({ ok: true, unverified: true }); // ❔ on the screen, never ✅
     const limit = await createAgyAdapter(deps(m, { readDownFlag: async () => ({ cls: "limit", since: "2026-10-03" }) }).base).status();
     expect(limit[0]!.detail).toContain("not for the login");
+    expect(limit[0]).toMatchObject({ unverified: true });
   });
 
   it("never throws", async () => {
