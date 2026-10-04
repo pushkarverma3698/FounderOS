@@ -63,12 +63,12 @@ export const recallConversationTool = tool(
     name: "recall_conversation",
     description:
       "Find what the founder said or asked in PAST conversations with you, older than the current chat. Use for " +
-      "'what did I ask you yesterday', 'what did I say about the visa last week', 'did I mention X'. Pass `when` in the " +
-      "founder's own words (yesterday, last week, monday, 3 days ago, past 5 days, 2026-09-30) and/or `about` with the " +
+      "'what did I ask you yesterday', 'what did I just ask you', 'what did I say about the visa last week', 'did I mention X'. Pass `when` in the " +
+      "founder's own words (just now, an hour ago, earlier today, yesterday, last week, monday, 3 days ago, past 5 days, 2026-09-30) and/or `about` with the " +
       "topic words. Returns his own messages with the day, five at a time; set `more` when he asks to see more. " +
       "Relay the result as written. Not for events you recorded or knowledge-base facts: that is search_memory.",
     schema: z.object({
-      when: z.string().optional().nullable().describe("The time, exactly as the founder said it: 'yesterday', 'last week', 'monday', '3 days ago'"),
+      when: z.string().optional().nullable().describe("The time, exactly as the founder said it: 'just now', 'an hour ago', 'yesterday', 'last week', 'monday', '3 days ago'"),
       about: z.string().optional().nullable().describe("Topic words to look for in what was said, e.g. 'visa paperwork'"),
       more: z.boolean().optional().nullable().describe("true when the founder asked to see more than the first five"),
     }),
