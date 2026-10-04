@@ -17,6 +17,7 @@ import { recordLiveness, type QueueAxis } from "../../db/job-queries.js";
 import { inScope, loadBriefQueue, scopeMayBeIncomplete, todaysSpend } from "./brief-queue.js";
 import { compareOverlap, overlapScore, type OverlapResult } from "./overlap.js";
 import { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
+import { loadWeekProgress } from "./brief-progress.js";
 import { buildTrends } from "./brief-trends.js";
 import { verifyLiveness, type Liveness } from "./liveness.js";
 import { toBriefRow, toLiveness } from "./brief-assemble.js";
@@ -37,8 +38,7 @@ import { getProfile, type JobSearchProfile } from "./profile-config.js";
 
 const log = childLogger({ module: "jobhunt:daily-brief" });
 
-// Re-exported so the brief keeps one import site, and so the existing CV tests
-// (cv-missing-loud, cv-track) keep pointing at the same module surface.
+// Re-exported so the brief keeps one import site and the CV tests keep resolving.
 export { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
 
 /**
@@ -189,6 +189,8 @@ export function verificationTargets<T extends { row: { salary_status: string }; 
 
 export interface BriefOptions {
   readonly screened?: number;
+  /** Open `applications_7d` goal target; the gateway reads it (tools may not import goals). */
+  readonly weeklyGoal?: number | null;
   readonly failures?: readonly string[];
   /** Rows the feeds filtered on purpose. Reported separately from failures. */
   readonly notes?: readonly string[];
@@ -334,7 +336,7 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
         ]
       : [];
 
-  const spend = await todaysSpend(now);
+  const [spend, progress] = [await todaysSpend(now), await loadWeekProgress(profile, now, opts.weeklyGoal ?? null)];
 
   const input: BriefInput = {
     date: now,
@@ -368,6 +370,7 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
     // 2026-09-08, because `GATE_GLOSSARY` was a module constant.
     profile,
     ...(spend ? { spend } : {}),
+    ...(progress ? { progress } : {}),
   };
 
   // Pin the numbering BEFORE returning the text, and pin it over `allRows` —
