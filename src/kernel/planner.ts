@@ -20,6 +20,7 @@ import {
   validatePlannerDecision,
   WORKERS,
   type FailureReport,
+  type PlannedCommand,
   type PlannerDecision,
   type TurnSummary,
   type WorkerId,
@@ -44,6 +45,35 @@ export interface WorkerCatalogEntry {
   gatedToolNames: string[];
 }
 
+/** One slash command the planner may choose — built from the gateway's COMMAND_MENU, never hand-typed here. */
+export interface CommandCatalogEntry {
+  /** Registered name, no slash. */
+  name: string;
+  /** Plain-text usage line the founder sees in the menu. */
+  description: string;
+  /** Changes something (files work, marks a row, spends money): the gateway asks for a tap before running it. */
+  mutating: boolean;
+}
+
+/**
+ * Pure gate on a `command` decision: the name must be in the catalog. A model that invents
+ * `/deploy` gets the correction retry, not a silently dropped message.
+ */
+export function checkCommandDecision(
+  decision: PlannerDecision,
+  commands: readonly CommandCatalogEntry[],
+): string | null {
+  if (decision.type !== "command") return null;
+  const name = decision.name.replace(/^\//, "").toLowerCase();
+  if (commands.some((c) => c.name === name)) return null;
+  return `/${name} is not a command. Choose one of: ${commands.map((c) => c.name).join(", ")} — or plan or reply instead.`;
+}
+
+/** Normalize a validated command decision: lowercase name without the slash, single-spaced trimmed args. */
+export function plannedCommandOf(decision: PlannerDecision & { type: "command" }): PlannedCommand {
+  return { name: decision.name.replace(/^\//, "").toLowerCase(), args: decision.args.trim() };
+}
+
 /** Deterministic developer override: `[route directly to research] …` builds a 1-step plan without asking the model. */
 export const ROUTE_OVERRIDE_RE = /^\s*\[route directly to (\w+)(?: department)?\]:?\s*/i;
 
@@ -55,12 +85,23 @@ export function parseRouteOverride(input: string): { worker: WorkerId; rest: str
   return { worker, rest: input.slice(m[0]!.length).trim() };
 }
 
-export function buildPlannerPrompt(catalog: WorkerCatalogEntry[]): string {
+export function buildPlannerPrompt(catalog: WorkerCatalogEntry[], commands: readonly CommandCatalogEntry[] = []): string {
   const workerLines = catalog
     .map((w) => `- ${w.id}: ${w.description} tools=[${w.toolNames.join(", ")}]` +
       (w.gatedToolNames.length ? ` gated=[${w.gatedToolNames.join(", ")}]` : ""))
     .join("\n");
   const refs = Object.keys(OUTPUT_CONTRACTS).join(", ");
+  const commandBlock = commands.length
+    ? [
+        ``,
+        `Command (the message is a plain-words way of running one of the founder's slash commands — name it, do not re-implement it):`,
+        `{"type":"command","name":"<command without the slash>","args":"<argument text exactly as the command takes it>"}`,
+        `Commands:\n${commands.map((c) => `- ${c.name}: ${c.description}${c.mutating ? " [changes things: the founder taps to confirm]" : ""}`).join("\n")}`,
+        `- Choose "command" when the message asks for exactly what one command does ("where are we on oplify" → where, "what is the agent loop doing" → tasks, "build X" / "fix X in oplify" → task with the description as args). It beats a plan: the command is the tested path.`,
+        `- args carry only what the command's usage line shows (a repo name, a row number, "tashi", a window like 2d). Never invent an argument; if a required one (which row, which text) is missing, reply asking for it instead.`,
+        `- A message that needs several commands, or a command plus reasoning over its output, is a plan, not a command.`,
+      ]
+    : [];
   return [
     `You are the FounderOS planner. Turn the founder's message into EITHER a direct reply OR an execution plan. Respond with ONE JSON object and nothing else.`,
     ``,
@@ -69,6 +110,8 @@ export function buildPlannerPrompt(catalog: WorkerCatalogEntry[]): string {
     ``,
     `Plan (any task needing tools):`,
     `{"type":"plan","plan":{"schema_version":${KERNEL_SCHEMA_VERSION},"goal":"<normalized task>","steps":[{"step_id":"s1","worker":"<id>","objective":"<explicit instruction>","inputs":{},"expected":{"kind":"data|draft|action_receipt","schema_ref":"<ref>"},"constraints":{"max_tool_calls":<1-${MAX_TOOL_CALLS_PER_STEP}>,"hitl_required":<bool>}}]}}`,
+    ``,
+    ...commandBlock,
     ``,
     `Workers:\n${workerLines}`,
     ``,
@@ -218,8 +261,13 @@ export function historyMessages(history: TurnSummary[]): BaseMessage[] {
  * reply, synthesis, typed failure) are remembered without instrumenting
  * each node.
  */
-export function makePlanNode(model: KernelChatModel, catalog: WorkerCatalogEntry[], clock: Clock = systemClock) {
-  const systemPrompt = buildPlannerPrompt(catalog);
+export function makePlanNode(
+  model: KernelChatModel,
+  catalog: WorkerCatalogEntry[],
+  clock: Clock = systemClock,
+  commands: readonly CommandCatalogEntry[] = [],
+) {
+  const systemPrompt = buildPlannerPrompt(catalog, commands);
 
   return async function plan(state: KernelStateType): Promise<KernelUpdate> {
     const input = state.turn.raw_input.trim();
@@ -232,6 +280,7 @@ export function makePlanNode(model: KernelChatModel, catalog: WorkerCatalogEntry
       step_receipts: RESET,
       failure: null,
       reply: "",
+      command: null,
       lesson_candidate: null,
       last_turn: state.turn,
       ...(previous ? { history: [previous] } : {}),
@@ -267,8 +316,9 @@ export function makePlanNode(model: KernelChatModel, catalog: WorkerCatalogEntry
             const parsed = tryParseJson(text);
             if (parsed !== null) {
               const validated = validatePlannerDecision(parsed);
-              if (validated.ok) return validated.value;
-              last = planningFailure(validated.error, text.slice(0, 400));
+              const unknown = validated.ok ? checkCommandDecision(validated.value, commands) : null;
+              if (validated.ok && !unknown) return validated.value;
+              last = planningFailure(validated.ok ? unknown! : validated.error, text.slice(0, 400));
             } else {
               last = planningFailure("Planner did not return JSON.", text.slice(0, 400));
             }
@@ -303,6 +353,16 @@ export function makePlanNode(model: KernelChatModel, catalog: WorkerCatalogEntry
         ...base,
         mission: { goal: input, status: "done", plan: null, cursor: 0 },
         reply: decision.text,
+      };
+    }
+    if (decision.type === "command") {
+      const command = plannedCommandOf(decision);
+      return {
+        ...base,
+        mission: { goal: input, status: "done", plan: null, cursor: 0 },
+        command,
+        // History keeps what ran; the command's own output goes to the founder from the gateway.
+        reply: `Ran /${command.name}${command.args ? ` ${command.args}` : ""}`,
       };
     }
     return {
