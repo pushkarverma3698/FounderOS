@@ -20,11 +20,11 @@ export const NEVER_FROM_PLAIN_WORDS: ReadonlySet<string> = new Set(["reset", "st
 /** Commands that only read: they run the moment the planner picks them. */
 export const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "where", "tasks", "jobs", "today", "fresh", "csv", "gaps", "status", "budget", "goals", "commands",
-  "focus", "projects", "profile",
+  "focus", "projects", "profile", "review",
 ]);
 
 /** Read-only with no argument, a write with one: `/focus` shows it, `/focus close the pilot` replaces it. */
-const WRITES_WITH_ARGS: ReadonlySet<string> = new Set(["focus", "projects", "profile"]);
+const WRITES_WITH_ARGS: ReadonlySet<string> = new Set(["focus", "projects", "profile", "review"]);
 
 /** True when running this command (with these args) changes something, so it needs a tap. */
 export function needsConfirmation(name: string, args: string): boolean {

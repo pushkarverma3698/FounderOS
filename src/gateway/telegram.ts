@@ -35,6 +35,7 @@ import { handleWifeCommands } from "./wife-commands.js";
 import { registerGoalCommands } from "./goal-commands.js";
 import { handleTask, handleRepoChoice, handleRepoReply } from "./task-command.js";
 import { handleEngine } from "./engine-command.js";
+import { handleReview } from "./review-command.js";
 import { handleFocus, handleProjects } from "./focus-commands.js";
 import { handleNewProject } from "./newproject-command.js";
 import { handleMenuCallback } from "./home-menu.js";
@@ -191,6 +192,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
   bot.command("claude", (ctx: Context) => handleTask(ctx, taskDeps, "claude"));
   bot.command("agy", (ctx: Context) => handleTask(ctx, taskDeps, "agy"));
   bot.command("engine", (ctx: Context) => handleEngine(ctx));
+  bot.command("review", (ctx: Context) => handleReview(ctx));
   bot.command("tasks", (ctx: Context) => handleTasks(ctx, {
     fetch: (repos) => fetchDispatchTasks(repos),
     listRegisteredRepos: taskDeps.listRegisteredRepos,

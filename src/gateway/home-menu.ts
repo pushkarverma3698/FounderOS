@@ -108,7 +108,8 @@ function buildText(): string {
     `7️⃣ Anything unresolved goes back to step 4, by itself\n\n` +
     `<b>Choosing who builds it:</b>\n` +
     `🔹 <code>/claude</code> · <code>/agy</code> — like /task, with Claude Code or Antigravity doing the work\n` +
-    `🔹 <code>/engine</code> — which one plain /task uses; <code>/engine claude</code> switches it\n\n` +
+    `🔹 <code>/engine</code> — which one plain /task uses; <code>/engine claude</code> switches it\n` +
+    `🔹 <code>/review</code> — step 6 on or off, and which models review and write; <code>/review off</code> pauses it\n\n` +
     `<b>The other two:</b>\n` +
     `🔹 <code>/tasks</code> — what the loop is doing right now, and what needs you\n` +
     `🔹 <code>/newproject pricing-api usage-based pricing</code> — starts a whole new repo\n\n` +
