@@ -216,6 +216,10 @@ if [ -n "${GCP_PROJECT_ID:-}" ]; then
   echo "==> Patched .env: GOOGLE_CLOUD_PROJECT=$GCP_PROJECT_ID, GOOGLE_CLOUD_LOCATION=us-central1"
 fi
 
+# 2026-10-04: a key copied from the OpenRouter page carried a trailing U+2028 into the secret and
+# every call returned 401 ("characters that cannot be sent in an HTTP header"). Keys are
+# [A-Za-z0-9_-] only, so anything else is paste debris.
+OPENROUTER_API_KEY="$(printf '%s' "${OPENROUTER_API_KEY:-}" | LC_ALL=C tr -cd 'A-Za-z0-9_-')"
 if [ -n "${OPENROUTER_API_KEY:-}" ]; then
   grep -v -E '^OPENROUTER_API_KEY=' .env > .env.patched || true
   printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" >> .env.patched
