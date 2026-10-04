@@ -50,7 +50,9 @@ export interface LoginAdapter {
   addProblem?(name: string): string | undefined;
   /** Optional: `/login <id> remove <name>` signs a target out and forgets it. */
   remove?(target: string): Promise<LoginFinished>;
-  start(target: string): Promise<LoginStarted>;
+  /** Optional: `/login <id> <email>` is accepted and handed to `start` as `hint`, to pre-select that account on the sign-in page. */
+  readonly acceptsEmailHint?: boolean;
+  start(target: string, hint?: string): Promise<LoginStarted>;
   finish(target: string, pasted: string, state: unknown): Promise<LoginFinished>;
   /** One cheap live check per target; powers the `/login` screen. Must not throw. */
   status(): Promise<readonly LoginTargetStatus[]>;

@@ -15,6 +15,7 @@
  * tested at $0; the real wiring lives in src/tools/rag.ts.
  */
 
+import { orderWithRecency, rankScored } from "./rag-recency.js";
 import type { RagHit, RagTable } from "./rag-search.js";
 import { reciprocalRankFusion } from "./rrf.js";
 
@@ -54,6 +55,8 @@ export interface HybridDeps {
   vectorSearch: (table: RagTable, query: string, topK: number) => Promise<RagHit[]>;
   /** Keyword (ILIKE term-overlap) over the same table. Throws on DB failure. */
   keywordSearch: (table: RagTable, query: string, topK: number) => Promise<RagHit[]>;
+  /** Clock for the recency weighting; tests pin it. Defaults to `Date.now`. */
+  now?: () => number;
 }
 
 /**
@@ -78,6 +81,9 @@ export function errText(reason: unknown): string {
 /**
  * Retrieve `topK` hits for `query` from `table`, fusing vector + keyword.
  * Never throws — every outcome is a typed result the tool can render.
+ *
+ * brain_memories only: the ranking is weighted toward recently dated documents (src/db/rag-recency.ts) in every mode,
+ * so the degraded paths do not quietly go back to ranking a replaced plan like a current one.
  */
 export async function hybridRagSearch(
   table: RagTable,
@@ -90,23 +96,28 @@ export async function hybridRagSearch(
     deps.keywordSearch(table, query, topK),
   ]);
 
+  const recent = table === "brain_memories";
+  const nowMs = (deps.now ?? Date.now)();
+  const top = (hits: RagHit[]): RagHit[] =>
+    (recent ? orderWithRecency(rankScored(hits), nowMs) : hits).slice(0, topK);
+
   // Both signals available → fuse. (An empty corpus fuses to [] — not an error.)
   if (vec.status === "fulfilled" && kw.status === "fulfilled") {
-    const fused = reciprocalRankFusion([vec.value, kw.value], (h) => h.content)
-      .slice(0, topK)
-      .map((f) => f.item);
-    return { hits: fused, mode: "hybrid" };
+    const fused = reciprocalRankFusion([vec.value, kw.value], (h) => h.content);
+    // Weigh before cutting to topK, so a near-tied recent document can displace an old one at the boundary.
+    const hits = recent ? orderWithRecency(fused, nowMs) : fused.map((f) => f.item);
+    return { hits: hits.slice(0, topK), mode: "hybrid" };
   }
 
   // Keyword is an accelerant — its failure must never reduce recall below vector.
   if (vec.status === "fulfilled") {
-    return { hits: vec.value.slice(0, topK), mode: "vector" };
+    return { hits: top(vec.value), mode: "vector" };
   }
 
   // Embedder/vector down but keyword alive → labelled keyword fallback (F1).
   if (kw.status === "fulfilled") {
     return {
-      hits: kw.value.slice(0, topK),
+      hits: top(kw.value),
       mode: "keyword-fallback",
       degradedReason: errText(vec.reason),
     };
