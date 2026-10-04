@@ -51,6 +51,15 @@ describe("evaluatePrScope", () => {
     }
   });
 
+  it("accepts `Moves: unfreeze` for work the founder approved outside A–D, only with the unfreeze label", () => {
+    const body = "Moves: unfreeze — founder approved";
+    expect(parseMoves(body)).toEqual(["unfreeze"]);
+    expect(evaluatePrScope({ files: ["src/tools/github.ts"], body, labels: ["unfreeze"], headRef: "feat/x" }).ok).toBe(true);
+    const r = evaluatePrScope({ files: ["src/tools/github.ts"], body, labels: [], headRef: "feat/x" });
+    expect(r.ok).toBe(false);
+    expect(r.problems.join("\n")).toMatch(/unfreeze.*label/);
+  });
+
   it("exempts sync and promotion PRs, whose content was gated on the way in", () => {
     for (const headRef of ["main", "beta", "chore/promote-where-status", "chore/sync-beta"]) {
       expect(evaluatePrScope({ files: ["src/tools/video-brief.ts"], body: "", labels: [], headRef }).ok).toBe(true);
