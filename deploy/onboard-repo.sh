@@ -102,6 +102,12 @@ first_line() { scrub | head -n1 | cut -c1-200; }
 
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
+# Is the line $2 in the newline-separated list $1? The list goes to grep as a here-string, never through a pipe: under
+# pipefail, `printf … | grep -q` takes printf's SIGPIPE (status 141) for "no match" whenever grep quits on its first
+# hit before printf has finished writing, and a label that was there was reported MISSING in CI (2026-10-04, bash 5.2
+# on a loaded runner). The same trap, and the same fix, as head_is_stamped in vps-daemons/pr-brain.
+has_line() { grep -qxF -- "$2" <<<"$1"; }
+
 # owner/repo out of a remote URL: https://[user[:pw]@]host/o/r(.git), ssh://git@host/o/r, git@host:o/r.
 norm_origin() {
   local u="$1"
@@ -163,7 +169,7 @@ check_repo() {
     row "$slug" labels UNKNOWN "could not list the labels: $(printf '%s' "$names" | first_line)"
   else
     for l in "${LABELS[@]}"; do
-      if printf '%s\n' "$names" | grep -qxF -- "$l"; then
+      if has_line "$names" "$l"; then
         row "$slug" "label:$l" ok present
       else
         row "$slug" "label:$l" MISSING "the label $l does not exist in $slug"
@@ -216,7 +222,7 @@ provision_repo() {
   # 3. labels: only the missing ones, so a run that has nothing to do makes no API write at all
   if names="$(gh label list --repo "$slug" --limit 200 --json name --jq '.[].name' 2>&1)"; then
     for l in "${LABELS[@]}"; do
-      printf '%s\n' "$names" | grep -qxF -- "$l" && continue
+      has_line "$names" "$l" && continue
       out="$(gh label create "$l" --repo "$slug" --color "$(label_color "$l")" --description "$(label_description "$l")" --force 2>&1)" \
         || problem "labels: could not create $l: $(printf '%s' "$out" | first_line)"
     done

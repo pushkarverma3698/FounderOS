@@ -199,6 +199,20 @@ describe("onboard-repo.sh <owner/repo> — provisioning", () => {
     for (const c of labelCreates()) expect(c).toContain("--force");
   });
 
+  it("finds a label that is there however long the list is: grep stopping at its first hit is not 'absent'", () => {
+    // `printf … | grep -q` under pipefail reads printf's SIGPIPE (status 141) as "no match" whenever grep quits on the
+    // first hit before printf has finished writing. CI hit that once with eight labels on a loaded bash 5.2 box
+    // (agent:failed "missing"); a list past the 64 KB pipe buffer makes it certain, so it is the deterministic stand-in.
+    // The eight come first so that grep always has a hit in its first read.
+    const filler = Array.from({ length: 3000 }, (_, i) => `filler-${i}-${"x".repeat(80)}`);
+    sb.setRepoLabels(REPO, [...ALL_LABELS, ...filler]);
+    const r = sb.onboard([REPO]);
+
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/ok\s+labels\s+8 of 8/);
+    expect(labelCreates()).toEqual([]);
+  });
+
   it("adopts a review checkout that is already there: updates it rather than re-cloning", () => {
     sb.ensureReviewCheckout(REPO);
     const before = snapshot(sb.reviewDir(REPO));
