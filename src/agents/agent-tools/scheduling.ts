@@ -12,6 +12,7 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { TENANT, env } from "../../core/config.js";
 import { scheduleTaskTool } from "../../tools/scheduled-task.js";
+import { describeRecurrence, parseRecurrence } from "../../core/time.js";
 import {
   listUpcomingScheduledTasks,
   listUpcomingScheduledPosts,
@@ -29,6 +30,12 @@ function fmtWhen(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : String(value);
 }
 
+/** " (repeats every day at 08:00)" for a recurring row, "" for a one-shot. */
+function repeatLabel(spec: string | null): string {
+  const rule = spec ? parseRecurrence(spec) : null;
+  return rule ? ` (repeats ${describeRecurrence(rule)}; cancel this run to stop it)` : "";
+}
+
 /** Parse an ISO datetime that must be in the future; returns null with no throw. */
 function parseFutureTime(raw: string): Date | null {
   const when = new Date(raw);
@@ -38,14 +45,15 @@ function parseFutureTime(raw: string): Date | null {
 
 /** Schedule a future agent task — founder approves once, at schedule time. */
 export const scheduleTask = tool(
-  async ({ prompt, scheduled_at }, config) => {
+  async ({ prompt, scheduled_at, recurrence }, config) => {
+    const rule = recurrence ? parseRecurrence(recurrence) : null;
     const rejected = await hitlGate(
       {
         action: "schedule_task",
-        title: "⏰ Schedule this task?",
-        summary: `Runs at ${scheduled_at}`,
+        title: rule ? "🔁 Schedule this repeating task?" : "⏰ Schedule this task?",
+        summary: rule ? `Runs ${describeRecurrence(rule)}, until you cancel it` : `Runs at ${scheduled_at}`,
         preview: prompt,
-        args: { prompt, scheduled_at },
+        args: { prompt, scheduled_at, recurrence },
       },
       config,
     );
@@ -54,28 +62,40 @@ export const scheduleTask = tool(
     const res = await scheduleTaskTool.execute({
       prompt,
       scheduled_at,
+      recurrence,
       chat_id: env.TELEGRAM_CHAT_ID,
       // Deterministic key so an interrupt() resume never schedules twice.
-      idempotency_key: idemKey("schedtask", prompt, scheduled_at),
+      idempotency_key: idemKey("schedtask", prompt, scheduled_at ?? `every:${recurrence ?? ""}`),
       tenant_id: TENANT,
     });
 
     if (!res.success) return `Task scheduling failed: ${res.error}`;
-    const data = res.data as { scheduled_task_id: string; scheduled_at: string };
-    log.info({ id: data.scheduled_task_id, at: data.scheduled_at }, "Task scheduled via agent");
-    return `✅ Task scheduled for ${data.scheduled_at} (id: ${data.scheduled_task_id}). It will run automatically and report back here.`;
+    const data = res.data as { scheduled_task_id: string; scheduled_at: string; recurrence: string | null };
+    log.info({ id: data.scheduled_task_id, at: data.scheduled_at, recurrence: data.recurrence }, "Task scheduled via agent");
+    return data.recurrence
+      ? `✅ Repeating task set: ${data.recurrence}. First run ${data.scheduled_at} (id: ${data.scheduled_task_id}). Each run reports back here; cancel the upcoming run to stop it.`
+      : `✅ Task scheduled for ${data.scheduled_at} (id: ${data.scheduled_task_id}). It will run automatically and report back here.`;
   },
   {
     name: "schedule_task",
     description:
-      "Schedule an agent task to run automatically at a future time. The founder APPROVES once now; " +
-      "at fire time the task runs as a normal turn (any external action inside it still asks for approval). " +
-      "Provide the full task instruction and an ISO 8601 datetime.",
+      "Schedule an agent task to run automatically, once (scheduled_at) or repeating (recurrence). The founder " +
+      "APPROVES once now; at each fire time the task runs as a normal turn (any external action inside it still asks " +
+      "for approval). Provide the full task instruction and exactly one of scheduled_at or recurrence.",
     schema: z.object({
       prompt: z.string().describe("The full task instruction to execute when the time arrives"),
       scheduled_at: z
         .string()
-        .describe("ISO 8601 datetime to run at, e.g. 2026-07-13T09:00:00+02:00 (must be future)"),
+        .optional()
+        .nullable()
+        .describe("One run: ISO 8601 datetime, e.g. 2026-07-13T09:00:00+02:00 (must be future)"),
+      recurrence: z
+        .string()
+        .optional()
+        .nullable()
+        .describe(
+          "Repeating: daily@08:00 | weekdays@09:00 | weekly@mon:09:00 | monthly@01:09:00 (24h, founder's timezone)",
+        ),
     }),
   },
 );
@@ -91,7 +111,7 @@ export const listScheduled = tool(
     const taskLines = tasks.length
       ? tasks.map(
           (t, i) =>
-            `${i + 1}. ${fmtWhen(t.scheduled_at)} — "${t.prompt.slice(0, 80)}${t.prompt.length > 80 ? "…" : ""}" (task id: ${t.id})`,
+            `${i + 1}. ${fmtWhen(t.scheduled_at)}${repeatLabel(t.recurrence)} — "${t.prompt.slice(0, 80)}${t.prompt.length > 80 ? "…" : ""}" (task id: ${t.id})`,
         )
       : ["(none)"];
     const postLines = posts.length
