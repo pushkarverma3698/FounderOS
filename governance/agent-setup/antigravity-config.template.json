@@ -1,0 +1,50 @@
+{
+  "_comment": "Sanitized template. ~ stands for the home directory; Antigravity wants absolute paths, so expand it when applying. autoExecutionPolicy (Request Review) and nonWorkspaceFileAccessPolicy (off) are set in the Antigravity settings UI: their config.json enum names are not documented.",
+  "plugins": {
+    "chrome-devtools-plugin": {
+      "enabled": true
+    },
+    "google-antigravity-sdk": {
+      "enabled": true
+    }
+  },
+  "userSettings": {
+    "enableTerminalSandbox": true,
+    "globalPermissionGrants": {
+      "allow": [
+        "read_file(~/Projects)",
+        "write_file(~/Projects)",
+        "read_file(~/Oplify.in)",
+        "write_file(~/Oplify.in)",
+        "mcp(chrome_devtools/*)",
+        "read_url(raw.githubusercontent.com)",
+        "read_url(github.com)",
+        "read_url(developers.google.com)",
+        "read_url(code.claude.com)",
+        "read_url(docs.anthropic.com)",
+        "command(ls)",
+        "command(cat)",
+        "command(head)",
+        "command(tail)",
+        "command(wc)",
+        "command(sort)",
+        "command(uniq)",
+        "command(grep)",
+        "command(find)",
+        "command(diff)",
+        "command(which)",
+        "command(basename)",
+        "command(git status)",
+        "command(git diff)",
+        "command(git log)",
+        "command(git branch)",
+        "command(git remote)",
+        "command(git add)",
+        "command(git commit)"
+      ]
+    },
+    "sandboxEnabledAtV2Migration": true,
+    "permissionGrantsV2Migrated": true,
+    "queuedMessageDeliveryStrategy": "MESSAGE_DELIVERY_STRATEGY_WHEN_IDLE"
+  }
+}
