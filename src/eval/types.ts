@@ -37,6 +37,12 @@ export interface GoldenTask {
    */
   expectedRoute: Department | null;
   /**
+   * The slash command the planner should pick instead of a plan (plain words →
+   * command). Set together with `expectedRoute: null`; only the command name is
+   * scored, args are the command's own business.
+   */
+  expectedCommand?: string;
+  /**
    * Tools the department is expected to use. Subset match: the task passes if
    * every listed tool appears in the observed tool calls. Omit when routing is
    * the only thing under test.
@@ -77,6 +83,8 @@ export interface Observation {
    * whether the call succeeded — see `toolCalls` for per-call outcomes.
    */
   tools: string[];
+  /** The command the planner chose in place of a plan, or null/undefined when it chose a plan or a reply. */
+  command?: { name: string; args: string } | null;
   /** Whether the run paused on a HITL `interrupt()`. */
   hadInterrupt: boolean;
   /** Optional error captured while running the task. */

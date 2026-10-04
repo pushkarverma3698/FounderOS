@@ -35,6 +35,10 @@ import type {
  * first-step `route` for older/stubbed observations that never set `steps`.
  */
 export function scoreRouting(task: GoldenTask, obs: Observation): boolean {
+  // A command answer is its own outcome: the right one passes, anything else (a plan, a reply,
+  // a different command) fails, and a command where a reply or plan was expected fails below.
+  if (task.expectedCommand !== undefined) return obs.command?.name === task.expectedCommand;
+  if (obs.command) return false;
   if (task.expectedRoute === null) {
     return obs.route === null && (obs.steps === undefined || obs.steps.length === 0);
   }

@@ -38,6 +38,7 @@ import { handleNewProject } from "./newproject-command.js";
 import { handleMenuCallback } from "./home-menu.js";
 import { handleTasks, fetchDispatchTasks } from "./tasks-command.js";
 import { handleWhere } from "./where-command.js";
+import { defaultLoginDeps, handleLogin, handleLoginReply } from "./login/command.js";
 import {
   handleCsv,
   handleFresh,
@@ -54,6 +55,7 @@ import { runKernelText, resumeKernel } from "./kernel-run.js";
 import { isConflictError, conflictBackoffMs, CONFLICT_MAX_ATTEMPTS } from "./telegram-poll.js";
 import { REPO_CALLBACK_PREFIX } from "./repo-picker.js";
 import { RETRY_CALLBACK_PREFIX } from "./retry-button.js";
+import { COMMAND_CALLBACK_PREFIX, handleCommandCallback, registerCommandDispatch } from "./command-dispatch.js";
 import { handleRetryCallback } from "./retry-callback.js";
 import {
   OWNER_ONLY_COMMANDS,
@@ -97,7 +99,7 @@ function defaultChatAccess(): ChatAccessConfig {
 
 /** Buttons whose tap causes a side effect — the founder's alone outside his own chat. Retry re-runs his turn. */
 function isDecisionButton(data: string): boolean {
-  const prefixes = ["approve", "reject", REPO_CALLBACK_PREFIX, RETRY_CALLBACK_PREFIX];
+  const prefixes = ["approve", "reject", REPO_CALLBACK_PREFIX, RETRY_CALLBACK_PREFIX, COMMAND_CALLBACK_PREFIX];
   return prefixes.some((p) => data.startsWith(p));
 }
 
@@ -148,6 +150,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     await next();
   });
 
+  registerCommandDispatch(bot);
   bot.command("start", (ctx: Context) => handleStart(ctx));
   bot.command("reset", (ctx: Context) => handleReset(ctx));
   bot.command("halt", (ctx: Context) => handleHalt(ctx));
@@ -191,6 +194,8 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     listRegisteredRepos: taskDeps.listRegisteredRepos,
   }));
   bot.command("where", (ctx: Context) => handleWhere(ctx));
+  const loginDeps = defaultLoginDeps(access);
+  bot.command("login", (ctx: Context) => handleLogin(ctx, loginDeps));
   bot.command("newproject", (ctx: Context) => handleNewProject(ctx, { runKernelText }));
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
   bot.command("wife_draft", (ctx: Context) => handleDraft(withForcedProfileToken(ctx, "wife"), { runKernelText }));
@@ -233,6 +238,8 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
   registerGoalCommands(bot, access); // /goal, /goals and their buttons: owner-only; before the catch-all handlers below
 
   bot.on("message:text", async (ctx: Context) => {
+    // First, before anything logs or interprets the text: a pending /login is waiting for a pasted code or token.
+    if (await handleLoginReply(ctx, loginDeps)) return;
     const raw = ctx.message?.text ?? "";
     // In a group the middleware only lets addressed messages through, and
     // "@founderos_bot show jobs" should reach the kernel as "show jobs".
@@ -275,6 +282,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     if (await handleRepoChoice(ctx, taskDeps)) return;
     if (await handleMenuCallback(ctx)) return;
     if (await handleRetryCallback(ctx)) return;
+    if (await handleCommandCallback(ctx)) return;
     if (!data.startsWith("approve") && !data.startsWith("reject")) {
       await ctx.answerCallbackQuery({ text: "Unknown action" });
       return;

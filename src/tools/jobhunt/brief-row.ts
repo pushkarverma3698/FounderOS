@@ -305,10 +305,13 @@ export function renderRow(
   // resolves against the same sections `/draft` does) — printing it next to an
   // ASK row would show a command that resolves a DIFFERENT row under the same
   // number, since ASK numbers its own section independently.
+  const appliedCmd = command?.startsWith("/draft")
+    ? command.replace("/draft", "/applied")
+    : "/applied";
   const action = command
     ? `\n    ▸ ${cmd(`${command} ${index}`)}` +
       (section === "do_today" || section === "stretch" || section === "standing"
-        ? ` · ${cmd(`/applied ${index}`)}`
+        ? ` · ${cmd(`${appliedCmd} ${index}`)}`
         : "")
     : "";
 
