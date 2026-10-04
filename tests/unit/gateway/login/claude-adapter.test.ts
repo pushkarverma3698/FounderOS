@@ -43,6 +43,7 @@ function deps(over: Partial<ClaudeLoginDeps> = {}) {
     env: { PATH: "/usr/bin", SECRET_BOT_KEY: "must-not-reach-the-child" },
     lookupOrg: async () => ({ org: ORG_NEW }),
     hostLogin: async () => undefined,
+    readLogin: async () => undefined,
     ...over,
   };
   return { base, written, home, verify };
@@ -313,15 +314,28 @@ describe("readHostLogin", () => {
 });
 
 describe("which account", () => {
-  it("finish: says the new token is a DIFFERENT account from the server's saved login, with that login's email", async () => {
-    const { base } = deps({ hostLogin: async () => HOST });
+  it("finish: a token in a DIFFERENT account from the server's saved login saves the token and offers step 2", async () => {
+    const { base, written } = deps({ hostLogin: async () => HOST });
     const r = await createClaudeAdapter(base).finish("default", TOKEN, undefined);
     expect(r.ok).toBe(true);
+    expect(written).toHaveLength(1);
+    expect(r.html).toContain("Step 1 of 2 done");
+    expect(r.html).toContain('href="https://claude.com/cai/oauth/authorize');
+    expect(r.html).toContain("same private tab");
+    expect(r.html).not.toContain(TOKEN);
+    expect(r.next).toBeDefined();
+  });
+  it("finish: when step 2 cannot start, the token still counts and the reply names the account and the problem", async () => {
+    const { base } = deps({ hostLogin: async () => HOST, spawnPty: () => fakePty("no link").child });
+    const r = await createClaudeAdapter(base).finish("default", TOKEN, undefined);
+    expect(r.ok).toBe(true);
+    expect(r.next).toBeUndefined();
     expect(r.html).toContain("different account");
     expect(r.html).toContain("pushkarai3698@gmail.com");
     expect(r.html).toContain(ORG_NEW.slice(0, 8));
     expect(r.html).not.toContain(ORG_NEW);
     expect(r.html).toContain("plain claude run over SSH");
+    expect(r.html).toContain("could not start the step");
   });
   it("finish: asks Anthropic and the host login once, not once per wording", async () => {
     const lookupOrg = vi.fn(async () => ({ org: ORG_NEW }));
@@ -334,11 +348,11 @@ describe("which account", () => {
     const { base } = deps({ hostLogin: async () => HOST, lookupOrg: async () => ({ org: ORG_HOST }) });
     const r = await createClaudeAdapter(base).finish("default", TOKEN, undefined);
     expect(r.html).toMatch(/same account/i);
+    expect(r.next).toBeUndefined();
   });
-  it("finish: with no host login it still shows the org and says there is nothing to compare with", async () => {
+  it("finish: with no host login, step 2 is offered too (it gives the server a login in the token's account)", async () => {
     const r = await createClaudeAdapter(deps().base).finish("default", TOKEN, undefined);
-    expect(r.html).toContain(ORG_NEW.slice(0, 8));
-    expect(r.html).toMatch(/no saved Claude login/);
+    expect(r.next).toBeDefined();
   });
   it("finish: when the lookup fails the login still succeeds and says it could not tell which account", async () => {
     const { base, written } = deps({ lookupOrg: async () => ({ reason: "HTTP 500" }), hostLogin: async () => HOST });
@@ -346,6 +360,7 @@ describe("which account", () => {
     expect(r.ok).toBe(true);
     expect(written).toHaveLength(1);
     expect(r.html).toMatch(/could not tell which account/);
+    expect(r.next).toBeUndefined();
   });
   it("finish: a lookup or host read that THROWS cannot fail a verified login", async () => {
     const { base, written } = deps({
@@ -369,6 +384,7 @@ describe("which account", () => {
     expect(r1!.detail).toContain("different account");
     expect(r1!.detail).toContain("pushkarai3698@gmail.com");
     expect(r1!.detail).not.toContain("plain claude run");
+    expect(r1!.detail).toContain("/login claude <email> moves both");
     await a.status();
     expect(verify).toHaveBeenCalledTimes(1);
     expect(lookupOrg).toHaveBeenCalledTimes(1);

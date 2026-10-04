@@ -12,7 +12,8 @@ import { CONTEXT_META_KEY, CONTEXT_STALE_MARKER } from "../../../src/db/context-
 
 const mockSearchEpisodicMemory = vi.fn(async (): Promise<any[]> => []);
 const mockSearchKnowledgeEntries = vi.fn(async (): Promise<any[]> => []);
-const mockSearchConversations = vi.fn(async (): Promise<any[]> => []);
+const mockFindTurns = vi.fn(async (_q: any): Promise<any> => ({ turns: [], total: 0 }));
+const mockEarliestTurn = vi.fn(async (_t: string): Promise<Date | null> => null);
 const mockGetFounderContext = vi.fn(async () => ({}));
 const mockInsertEpisodicEvent = vi.fn(async () => "test-id-1");
 
@@ -22,11 +23,15 @@ vi.mock("../../../src/db/queries.js", async (orig) => {
     ...actual,
     searchEpisodicMemory: mockSearchEpisodicMemory,
     searchKnowledgeEntries: mockSearchKnowledgeEntries,
-    searchConversations: mockSearchConversations,
     getFounderContext: mockGetFounderContext,
     insertEpisodicEvent: mockInsertEpisodicEvent,
   };
 });
+
+vi.mock("../../../src/db/conversation-turns.js", () => ({
+  findConversationTurns: mockFindTurns,
+  earliestConversationTurn: mockEarliestTurn,
+}));
 
 const { searchMemoryTool, recordEventTool } = await import("../../../src/tools/memory.js");
 
@@ -36,63 +41,105 @@ describe("searchMemoryTool", () => {
   beforeEach(() => {
     mockSearchEpisodicMemory.mockClear();
     mockSearchKnowledgeEntries.mockClear();
-    mockSearchConversations.mockClear();
+    mockFindTurns.mockReset();
+    mockEarliestTurn.mockReset();
     mockGetFounderContext.mockClear();
     mockSearchEpisodicMemory.mockResolvedValue([]);
     mockSearchKnowledgeEntries.mockResolvedValue([]);
-    mockSearchConversations.mockResolvedValue([]);
+    mockFindTurns.mockResolvedValue({ turns: [], total: 0 });
+    mockEarliestTurn.mockResolvedValue(null);
     mockGetFounderContext.mockResolvedValue({});
   });
 
   // ── conversations tier ─────────────────────────────────────────────────────
-  // The enum advertised `conversations` in both the Zod schema and the MCP
-  // inputSchema, and no branch implemented it. Nine rows sat in
-  // agents.conversations and every one of them was unreachable — a live call
-  // with type:"conversations" answered "No memory found" for a query that
-  // matched a stored summary verbatim.
+  // `conversations` used to read the `conversations` table, which nothing writes to, so it could only ever
+  // return stale rows. It now reads the turn log (conversation_turns), which every finished turn is saved to,
+  // and only for the chat the call runs in: the thread id comes from the run's config, never from an argument.
 
-  const CONVERSATION_ROW = {
-    thread_id: "turicks:jarvis-cinematic",
-    summary: "I'm FounderOS — Pushkar's AI chief of staff, built on Turicks infrastructure.",
-    topics: ["founderos", "identity"],
-    message_count: 5,
-    last_message_at: new Date("2026-06-22T12:00:00Z"),
+  const THREAD = { configurable: { thread_id: "turicks:123" } };
+  const TURN = {
+    turn_id: "t1",
+    occurred_at: new Date("2026-10-02T09:30:00Z"),
+    user_input: "remind me to renew the visa paperwork before November",
+    goal: "set a reminder",
+    outcome: "done" as const,
+    reply: "Done: I'll remind you on 28 October.",
   };
 
-  it("returns conversation history when type=conversations", async () => {
-    mockSearchConversations.mockResolvedValue([CONVERSATION_ROW]);
+  it("type=conversations searches this chat's turn log and answers with the founder's own words", async () => {
+    mockFindTurns.mockResolvedValue({ turns: [TURN], total: 1 });
 
-    const result = await searchMemoryTool.invoke({ query: "founderos", type: "conversations" });
+    const result = await searchMemoryTool.invoke({ query: "visa paperwork", type: "conversations" }, THREAD);
 
+    expect(mockFindTurns).toHaveBeenCalledWith(expect.objectContaining({ threadId: "turicks:123", terms: ["visa", "paperwork"] }));
+    expect(result).toContain('You: "remind me to renew the visa paperwork before November"');
     expect(result).not.toContain("No memory found");
-    expect(result).toContain("chief of staff");
-    expect(result).toContain("turicks:jarvis-cinematic");
   });
 
-  it("searches conversations under type=all", async () => {
-    mockSearchConversations.mockResolvedValue([CONVERSATION_ROW]);
+  it("type=conversations skips episodic and knowledge", async () => {
+    mockFindTurns.mockResolvedValue({ turns: [TURN], total: 1 });
 
-    const result = await searchMemoryTool.invoke({ query: "founderos" });
-
-    expect(mockSearchConversations).toHaveBeenCalled();
-    expect(result).toContain("chief of staff");
-  });
-
-  it("filters by type=conversations — skips episodic and knowledge", async () => {
-    mockSearchConversations.mockResolvedValue([CONVERSATION_ROW]);
-
-    await searchMemoryTool.invoke({ query: "founderos", type: "conversations" });
+    await searchMemoryTool.invoke({ query: "visa", type: "conversations" }, THREAD);
 
     expect(mockSearchEpisodicMemory).not.toHaveBeenCalled();
     expect(mockSearchKnowledgeEntries).not.toHaveBeenCalled();
   });
 
-  it("shows the message count so an empty thread is distinguishable from a full one", async () => {
-    mockSearchConversations.mockResolvedValue([CONVERSATION_ROW]);
+  it("type=conversations with nothing found says what was searched, not 'record an event'", async () => {
+    mockEarliestTurn.mockResolvedValue(new Date("2026-10-04T08:00:00Z"));
 
-    const result = await searchMemoryTool.invoke({ query: "founderos", type: "conversations" });
+    const result = await searchMemoryTool.invoke({ query: "visa", type: "conversations" }, THREAD);
 
-    expect(result).toContain("5 message");
+    expect(result).toContain("I found nothing");
+    expect(result).not.toContain("record_event");
+  });
+
+  it("type=all adds a Conversations section when this chat mentioned the topic", async () => {
+    mockFindTurns.mockResolvedValue({ turns: [TURN], total: 1 });
+
+    const result = await searchMemoryTool.invoke({ query: "visa" }, THREAD);
+
+    expect(result).toContain("**Conversations:**");
+    expect(result).toContain("visa paperwork");
+  });
+
+  it("type=all stays quiet about conversations when none match", async () => {
+    const result = await searchMemoryTool.invoke({ query: "nonexistent" }, THREAD);
+
+    expect(result).toContain("No memory found");
+    expect(result).not.toContain("Conversations");
+  });
+
+  it("says how many more matched instead of hiding them", async () => {
+    mockFindTurns.mockResolvedValue({ turns: [TURN], total: 9 });
+
+    const result = await searchMemoryTool.invoke({ query: "visa" }, THREAD);
+
+    expect(result).toContain("8 more");
+  });
+
+  it("without a thread id (the IDE MCP): type=all skips conversations, type=conversations refuses and says why", async () => {
+    mockFindTurns.mockResolvedValue({ turns: [TURN], total: 1 });
+
+    const all = await searchMemoryTool.invoke({ query: "visa" });
+    const only = await searchMemoryTool.invoke({ query: "visa", type: "conversations" });
+
+    expect(mockFindTurns).not.toHaveBeenCalled();
+    expect(all).not.toContain("visa paperwork");
+    expect(only).toContain("can't tell which chat");
+  });
+
+  it("takes no thread argument: the chat to read cannot be named by the caller", () => {
+    const shape = (searchMemoryTool.schema as { shape: Record<string, unknown> }).shape;
+    expect(Object.keys(shape).sort()).toEqual(["query", "type"]);
+  });
+
+  it("reads another chat's log only if the run itself is in that chat", async () => {
+    mockFindTurns.mockResolvedValue({ turns: [TURN], total: 1 });
+
+    await searchMemoryTool.invoke({ query: "visa" }, { configurable: { thread_id: "turicks:group-9" } });
+
+    expect(mockFindTurns).toHaveBeenCalledWith(expect.objectContaining({ threadId: "turicks:group-9" }));
   });
 
   it("returns a no-results message when all sources are empty", async () => {

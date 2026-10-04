@@ -17,6 +17,7 @@
  * Run: node --env-file=.env --import tsx/esm scripts/seed-founder-context.ts
  */
 
+import { buildDepartmentsSummary } from "../src/agents/capabilities.js";
 import { seedFounderContextDefaults } from "../src/db/queries.js";
 
 const TENANT = process.env["FOUNDER_TENANT"] ?? "turicks";
@@ -37,8 +38,8 @@ const context = {
   local_models:
     "Ollama on VPS: nomic-embed-text for turicks-brain vector sync. All RAG embeddings stay on-machine (ADR-013/015).",
 
-  founderos_departments:
-    "8 kernel workers, each with its own capped tool set (* = founder approves in Telegram before it runs): admin (read_context, update_context, search_memory, reminders, scheduled tasks, workflows, ops_state, read_logs, deliver_artifact*), research (search_web, scrape_url, deep_research, crawl_site, search_knowledge), comms (read_emails, send_email*, create_calendar_event*, schedule_social_post*), engineering (github_read, read_logs, dispatch_antigravity_task*, claude_code*, project_workflow*, deploy_static_site*, vps_run*), marketing (linkedin_post*, LinkedIn analytics and comments, generate_image, video briefs), sales (search_web, search_knowledge, send_email*), personal (read_file, list_dir, run_shell*, browser*, send_file*, write_file*), jobhunt (read_cv, search_jobs, screen_job, job_brief, tailor_cv, export_jobs_csv, deliver_artifact*, send_email*)",
+  // Generated from the live tool registry (src/agents/capabilities.ts), so it cannot drift from the code.
+  founderos_departments: buildDepartmentsSummary(),
 
   founderos_key_features:
     "Contracts-first kernel: every step result is validated, and an action claim needs a code-recorded tool receipt, so the reply cannot claim work that did not happen. Failures name the real stage and component and are always shown. HITL: approval row written before the interrupt, side effects only after the tap, idempotency key before every external send. Crash-safe threads (Postgres checkpointing; only /reset wipes). Jobhunt lane for two candidates (daily brief, tailored CV PDFs, apply links). Hybrid RAG (pgvector + keyword, RRF) over turicks-brain. Antigravity dispatch loop with Claude PR gate. Read-only MCP hub for coding tools.",

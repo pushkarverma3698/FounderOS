@@ -14,6 +14,7 @@ import {
   STALE_SECTIONS,
   contentSha,
   needsChunkRefresh,
+  declaredDocStatus,
   isPlanSyncSource,
   PLAN_SYNC_DIRS,
   isSessionLogFile,
@@ -286,5 +287,42 @@ describe("resolveSyncTarget", () => {
 
   it("honours an expected-host override for a moved brain", () => {
     expect(resolveSyncTarget({ hostname: "new-box", allowLocal: false, expectedHost: "new-box" }).ok).toBe(true);
+  });
+});
+
+describe("declaredDocStatus", () => {
+  // A plan is marked replaced by its own Status line, so the mark travels with the file and survives every re-sync
+  // (brain:sync deletes and re-inserts a source's chunks, so a status set only in the database would be lost).
+  it.each([
+    ["**Status:** Superseded by docs/plans/2026-10-04-x.md", "SUPERSEDED"],
+    ["**Status**: superseded", "SUPERSEDED"],
+    ["Status: SUPERSEDED", "SUPERSEDED"],
+    ["**Status:** **Superseded** — see the newer plan", "SUPERSEDED"],
+    ["_Date: 2026-07-29 · Status: superseded_", "SUPERSEDED"],
+    ["Date: 2026-08-20 · Status: **Archived**", "ARCHIVED"],
+    ["> **Status:** archived", "ARCHIVED"],
+  ])("%s → %s", (line, expected) => {
+    expect(declaredDocStatus(`# A plan\n\n${line}\n\nBody.`)).toBe(expected);
+  });
+
+  it.each([
+    ["a plan that supersedes another is itself current", "**Status:** DRAFT — plan for review (supersedes the deferred parts of ADR-009)"],
+    ["an ordinary status", "**Status:** Approved (design), pending plan"],
+    ["shipped", "Date: 2026-08-20 · Status: **SHIPPED**, gate green, live-verified"],
+    ["the word in prose, not in a Status field", "This work was superseded in part by the later audit."],
+    ["a table cell", "| Adapter | Status |\n| --- | superseded |"],
+    ["a different field", "**Supersedes:** docs/plans/2026-07-01-old.md"],
+    ["no status at all", "Just a paragraph."],
+  ])("%s → ACTIVE", (_name, text) => {
+    expect(declaredDocStatus(`# A plan\n\n${text}\n\nBody.`)).toBe("ACTIVE");
+  });
+
+  it("only reads the header: a Status line deep in the body is quoted text, not a declaration", () => {
+    const body = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
+    expect(declaredDocStatus(`# A plan\n${body}\n**Status:** superseded\n`)).toBe("ACTIVE");
+  });
+
+  it("is ACTIVE for empty content", () => {
+    expect(declaredDocStatus("")).toBe("ACTIVE");
   });
 });

@@ -113,6 +113,9 @@ export interface LessonStore {
   recordOccurrence(occurrence: FailureOccurrence): Promise<void>;
 }
 
+/** Same objective up to case and whitespace. */
+const sameObjective = (a: string, b: string): boolean => a.trim().replace(/\s+/g, " ").toLowerCase() === b.trim().replace(/\s+/g, " ").toLowerCase();
+
 /** The one deterministic sentence injected into a retry envelope on a lesson hit. */
 export function lessonMessage(lesson: FailureLesson): string {
   const tools =
@@ -218,7 +221,9 @@ export function makeLessonDispatch(lessons?: LessonStore) {
         } catch {
           /* allow-failopen: occurrence persistence is an accelerant; a store blip must never break the turn */
         }
-        if (lesson && out.scratch && typeof out.scratch === "object" && !Array.isArray(out.scratch)) {
+        // A signature says how a step failed, not what it was for ("did not finalize with JSON" fits every step), so a
+        // lesson learned for another objective is not injected: live 2026-10-04 a recall step obeyed an MRR lesson.
+        if (lesson && sameObjective(lesson.objective, step.objective) && out.scratch && typeof out.scratch === "object" && !Array.isArray(out.scratch)) {
           const stepScratch = (out.scratch as Record<string, any>)[step.step_id];
           if (stepScratch && "set" in stepScratch) {
             (out.scratch as Record<string, any>)[step.step_id] = {
