@@ -11,38 +11,50 @@
  * so the switch is that file. Like /engine, a switch is confirmed by reading the file back, never by
  * trusting that the write returned.
  *
- * The models are read from the live crontab lines, because that is where they are set. When a line sets
- * nothing, the defaults below are the scripts' own (pr-brain REVIEW_MODELS, deploy/lib/agy-run.sh,
- * deploy/lib/claude-run.sh); change them together.
+ * The models are what the daemons REPORT: each sweep, pr-brain and agent-dispatch write the settings they are
+ * actually running with to ~/.claude/pr-brain.effective and agent-dispatch.effective, and this reads them. It
+ * used to run `crontab -l`, which the bot cannot do: it runs under NoNewPrivileges=true, where crontab is denied,
+ * so /review said ON and could not name a model (2026-10-04). Reporting from the daemon also means the answer
+ * includes the scripts' own defaults and can never disagree with them.
  */
 
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Context } from "grammy";
 import { engineDisplay, readDefaultEngine, type Engine } from "../tools/coding-engine.js";
 
-const DEFAULT_REVIEWERS = "claude-sonnet-5-5-medium gemini-3.1-pro-high";
-const DEFAULT_AGY_MODEL = "gemini-3.6-flash-medium";
-const DEFAULT_CLAUDE_MODEL = "sonnet";
+/** A cron run every 20 minutes (pr-brain) or 15 (agent-dispatch): a report older than this means the cron stopped. */
+const STALE_AFTER_MS = 2 * 3_600_000;
+
+export type ReportName = "pr-brain" | "agent-dispatch";
 
 export interface ReviewSetup {
-  readonly reviewers: readonly string[];
-  readonly merges: boolean;
-  readonly agyModel: string;
-  readonly claudeModel: string;
+  /** null = the daemon has not reported (file missing, empty or unreadable as a report). */
+  readonly reviewers: readonly string[] | null;
+  readonly merges: boolean | null;
+  readonly agyModel: string | null;
+  readonly claudeModel: string | null;
+  /** When the daemon wrote the report, ms since epoch; null when unknown. */
+  readonly reviewerReportedAt: number | null;
+  readonly writerReportedAt: number | null;
 }
 
 export interface ReviewCommandDeps {
   readonly isOff: () => boolean;
   readonly setOff: (off: boolean) => void;
-  readonly crontab: () => string;
+  /** The text of a daemon's report, null when it has not written one, throws when it cannot be read. */
+  readonly effective: (name: ReportName) => string | null;
+  readonly now: () => number;
   readonly engine: () => Engine;
 }
 
 export function reviewOffFile(): string {
   return join(homedir(), ".claude", "pr-brain.off");
+}
+
+export function effectiveFile(name: ReportName): string {
+  return join(homedir(), ".claude", `${name}.effective`);
 }
 
 const REAL_DEPS: ReviewCommandDeps = {
@@ -53,50 +65,89 @@ const REAL_DEPS: ReviewCommandDeps = {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `switched off from Telegram /review at ${new Date().toISOString()}\n`);
   },
-  crontab: () => execFileSync("crontab", ["-l"], { encoding: "utf8", timeout: 5_000 }),
+  effective: (name) => {
+    try {
+      return readFileSync(effectiveFile(name), "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
+    }
+  },
+  now: () => Date.now(),
   engine: () => readDefaultEngine(),
 };
 
-/** KEY=value assignments on the first uncommented crontab line that runs `bin/<script>`. */
-function cronEnv(crontab: string, script: string): Map<string, string> {
-  const line = crontab.split("\n").find((l) => !l.trimStart().startsWith("#") && new RegExp(`bin/${script}(\\s|$)`).test(l));
-  const env = new Map<string, string>();
-  for (const m of (line ?? "").matchAll(/(?:^|\s)([A-Z_][A-Z0-9_]*)=(?:"([^"]*)"|'([^']*)'|(\S*))/g)) {
-    env.set(m[1]!, m[2] ?? m[3] ?? m[4] ?? "");
+/** `key=value` lines. Anything else (comments, blanks, a line with no key) is skipped. */
+function parseReport(text: string | null): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const line of (text ?? "").split("\n")) {
+    const eq = line.indexOf("=");
+    if (eq > 0) out.set(line.slice(0, eq).trim(), line.slice(eq + 1).trim());
   }
-  return env;
+  return out;
 }
 
-export function readReviewSetup(crontab: string): ReviewSetup {
-  const brain = cronEnv(crontab, "pr-brain");
-  const dispatch = cronEnv(crontab, "agent-dispatch");
-  const reviewers = brain.get("PR_BRAIN_MODELS") || brain.get("PR_BRAIN_MODEL") || DEFAULT_REVIEWERS;
+function reportedAt(report: Map<string, string>): number | null {
+  const sec = Number(report.get("written"));
+  return Number.isFinite(sec) && sec > 0 ? sec * 1000 : null;
+}
+
+export function readReviewSetup(prBrain: string | null, dispatch: string | null): ReviewSetup {
+  const brain = parseReport(prBrain);
+  const writer = parseReport(dispatch);
+  const reviewers = (brain.get("reviewers") ?? "").split(/[\s,]+/).filter(Boolean);
   return {
-    reviewers: reviewers.split(/[\s,]+/).filter(Boolean),
-    merges: (brain.get("PR_BRAIN_MERGE") ?? "1") !== "0",
-    agyModel: dispatch.get("AGENT_DISPATCH_MODEL") || DEFAULT_AGY_MODEL,
-    claudeModel: dispatch.get("AGENT_DISPATCH_CLAUDE_MODEL") || DEFAULT_CLAUDE_MODEL,
+    reviewers: reviewers.length > 0 ? reviewers : null,
+    merges: brain.has("merge") || reviewers.length > 0 ? brain.get("merge") !== "0" : null,
+    agyModel: writer.get("agy_model") || null,
+    claudeModel: writer.get("claude_model") || null,
+    reviewerReportedAt: reviewers.length > 0 ? reportedAt(brain) : null,
+    writerReportedAt: writer.get("agy_model") || writer.get("claude_model") ? reportedAt(writer) : null,
   };
+}
+
+/** "5 h ago", "2 days ago": coarse on purpose, the founder needs "is this old?", not a timestamp. */
+function ago(ms: number): string {
+  const hours = Math.floor(ms / 3_600_000);
+  return hours >= 48 ? `${Math.floor(hours / 24)} days ago` : `${hours} h ago`;
+}
+
+/** Appended only when a report is stale: a fresh one needs no comment. */
+function staleNote(at: number | null, now: number): string {
+  return at !== null && now - at > STALE_AFTER_MS ? ` (last reported ${ago(now - at)})` : "";
 }
 
 const state = (off: boolean): string => (off ? "OFF" : "ON");
 
-function describeSetup(deps: ReviewCommandDeps): string {
-  let setup: ReviewSetup;
+function readReport(deps: ReviewCommandDeps, name: ReportName): { text: string | null; problem?: string } {
   try {
-    setup = readReviewSetup(deps.crontab());
+    return { text: deps.effective(name) };
   } catch (err) {
-    // Not swallowed: the reason is printed, and on/off is still answered from the file.
-    return `Could not read the models from the crontab: ${err instanceof Error ? err.message : String(err)}`;
+    // Not swallowed: the file and the reason are printed, and on/off is still answered from its own file.
+    return { text: null, problem: `Could not read ~/.claude/${name}.effective: ${err instanceof Error ? err.message : String(err)}` };
   }
+}
+
+function describeSetup(deps: ReviewCommandDeps): string {
+  const brain = readReport(deps, "pr-brain");
+  const dispatch = readReport(deps, "agent-dispatch");
+  const setup = readReviewSetup(brain.text, dispatch.text);
+  const now = deps.now();
   const engine = deps.engine();
   const writerModel = engine === "claude" ? setup.claudeModel : setup.agyModel;
-  return [
-    `Reviewer: ${setup.reviewers.join(", then ")}`,
-    setup.merges ? "A PR it clears is merged automatically." : "It reviews and clears PRs but never merges: you merge.",
-    `Writer for /task: ${engineDisplay(engine)} on ${writerModel} (/engine switches it)`,
-    "Models are set on the pr-brain and agent-dispatch lines of the founderos crontab on the VPS.",
-  ].join("\n");
+
+  const lines: string[] = [];
+  if (brain.problem) lines.push(brain.problem);
+  else if (setup.reviewers) lines.push(`Reviewer: ${setup.reviewers.join(", then ")}${staleNote(setup.reviewerReportedAt, now)}`);
+  else lines.push("Reviewer models: not reported yet. pr-brain reports them on its next run (every 20 minutes).");
+  if (setup.merges !== null) {
+    lines.push(setup.merges ? "A PR it clears is merged automatically." : "It reviews and clears PRs but never merges: you merge.");
+  }
+  if (dispatch.problem) lines.push(dispatch.problem);
+  else if (writerModel) lines.push(`Writer for /task: ${engineDisplay(engine)} on ${writerModel}${staleNote(setup.writerReportedAt, now)} (/engine switches it)`);
+  else lines.push("Writer model: not reported yet. agent-dispatch reports it on its next run (every 15 minutes).");
+  lines.push("Models are set on the pr-brain and agent-dispatch lines of the founderos crontab on the VPS.");
+  return lines.join("\n");
 }
 
 export async function handleReview(ctx: Context, deps: ReviewCommandDeps = REAL_DEPS): Promise<void> {

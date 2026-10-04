@@ -72,6 +72,10 @@
 #                               flag is set"), the startup check below read that as "agy is not installed", and
 #                               every approved /task paused the loop with a false alarm. A per-minute cron job
 #                               (`--kicked`, outside that sandbox) turns the file into a tick within a minute.
+#   agent-dispatch.effective    the writer models this daemon is running with, defaults included (written=<epoch>,
+#                               agy_model=, claude_model=), rewritten by every plain tick, kill switch or not. The bot
+#                               reads it for /review: it cannot run `crontab -l` under NoNewPrivileges, so it could not
+#                               name the models. A hand run (--dry-run, --list, --issue, --repo) never writes it.
 #
 # Kill switch: touch ~/.claude/agent-dispatch.off (mirrors pr-brain.off)
 # Log: ~/.claude/agent-dispatch.log
@@ -164,6 +168,21 @@ log() {
   line="$(date -u '+%Y-%m-%dT%H:%M:%SZ')  $*"
   printf '%s\n' "$line" >>"$LOG"
   printf '%s\n' "$line"
+}
+
+# What this tick is running with, for the bot's /review. The bot runs under systemd NoNewPrivileges, where
+# `crontab -l` is denied, so it cannot read the cron line that sets the writer models (2026-10-04: /review said
+# ON and could not name one). It reads this file instead: the settings as this process resolved them, defaults
+# included, one key=value per line. Written by every plain tick, even when the kill switch is on, and never by
+# a hand run (--dry-run, --list, --issue, --repo: those lack the cron line's variables and would report the
+# wrong models) nor by an idle --kicked minute. A failed write is logged and never stops the tick.
+write_effective() {
+  local file="$1"; shift
+  local tmp="$file.tmp.$$"
+  mkdir -p "$(dirname "$file")" 2>/dev/null
+  { printf 'written=%s\n' "$(date +%s)"; local kv; for kv in "$@"; do printf '%s\n' "${kv//$'\n'/ }"; done; } >"$tmp" 2>/dev/null \
+    && mv -f "$tmp" "$file" 2>/dev/null \
+    || { rm -f "$tmp" 2>/dev/null; log "could not write $file"; }
 }
 
 # Mirrors pr-brain's notify() exactly — same env file, same silent-if-unset behavior.
@@ -370,6 +389,10 @@ fi
 if [[ -n "$LEGACY_REPO_VARS" ]]; then
   _verb="is"; [[ "$LEGACY_REPO_VARS" == *" and "* ]] && _verb="are"
   log "WARNING: ${LEGACY_REPO_VARS} ${_verb} set in this environment and IGNORED: agent-dispatch sweeps DEFAULT_REPOS only (a list in the crontab is invisible to CI). Fix: ssh founderos-vps 'crontab -e' and delete the ${LEGACY_REPO_VARS%% *}=\"…\" part of the agent-dispatch line."
+fi
+
+if [[ "$DRY_RUN" -eq 0 && "$LIST_ONLY" -eq 0 && -z "$FORCE_ISSUE" && -z "$FORCE_REPO" ]]; then
+  write_effective "$HOME/.claude/agent-dispatch.effective" "agy_model=$AGY_MODEL" "claude_model=$CLAUDE_EXECUTOR_MODEL"
 fi
 
 if [[ -f "$OFF_SWITCH" && "$LIST_ONLY" -eq 0 ]]; then
