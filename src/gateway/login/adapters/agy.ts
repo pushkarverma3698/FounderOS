@@ -188,7 +188,9 @@ export function createAgyAdapter(overrides: Partial<AgyLoginDeps> = {}): LoginAd
       }
       if (!url) {
         await dispose();
-        log.warn({ sawMenu: Boolean(seen) }, "agy printed no sign-in link");
+        const missing = !seen && /No such file or directory|command not found/.test(stripAnsi(child.raw()));
+        log.warn({ sawMenu: Boolean(seen), missing }, "agy printed no sign-in link");
+        if (missing) throw new Error(`agy is not installed for the bot's user (set AGY_BIN, or AGY_LOGIN_USER where sudo is allowed). ${SSH_HINT}`);
         throw new Error(`agy did not show a sign-in link (${seen ? "the menu appeared but no link followed" : "no menu appeared"}). ${SSH_HINT}`);
       }
       log.info({}, "agy sign-in link ready");
