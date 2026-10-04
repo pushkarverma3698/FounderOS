@@ -27,6 +27,7 @@ import {
   unknownCommandReply,
 } from "./commands.js";
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
+import { handleJobCallback } from "./jobhunt-callbacks.js";
 import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
 import { handleWifeCommands } from "./wife-commands.js";
@@ -283,6 +284,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     if (await handleMenuCallback(ctx)) return;
     if (await handleRetryCallback(ctx)) return;
     if (await handleCommandCallback(ctx)) return;
+    if (await handleJobCallback(ctx, { runKernelText })) return;
     if (!data.startsWith("approve") && !data.startsWith("reject")) {
       await ctx.answerCallbackQuery({ text: "Unknown action" });
       return;

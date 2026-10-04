@@ -79,16 +79,17 @@ function packet(overrides: Partial<ApplicationPacket> = {}): ApplicationPacket {
 }
 
 describe("packetMessage", () => {
-  it("carries the apply link, the overlap, and the close-out command", () => {
+  it("carries the overlap and tells the phone user what to tap, with no shell command", () => {
     const out = packetMessage(packet(), 2);
     expect(out).toContain("Ockto");
     expect(out).toContain("Senior Site Reliability Engineer");
-    expect(out).toContain("/c/new");
-    expect(out).toContain("Open the application form");
+    expect(out).toContain("Open the form");
+    expect(out).toContain("I applied");
+    expect(out).not.toContain("mac_client");
+    expect(out).not.toContain("/applied");
     // 3 matched of 4 asked — the one number that changes whether he reads the
     // packet before sending it or sends it first.
     expect(out).toContain("3/4");
-    expect(out).toContain("/applied 2");
   });
 
   // A link the founder taps once, finds nothing, and stops trusting is worse
@@ -98,15 +99,13 @@ describe("packetMessage", () => {
       packet({ opensTheForm: false, applyUrl: "https://jobs.smartrecruiters.com/x/1" }),
       1,
     );
-    expect(out).toContain("Open the posting");
     expect(out).toContain("hides the form");
-    expect(out).not.toContain("Open the application form");
   });
 
   it("never renders a bare empty link when no URL is on file", () => {
     const out = packetMessage(packet({ applyUrl: "", opensTheForm: false }), 1);
     expect(out).toContain("No URL on file");
-    expect(out).not.toContain("href=\"\"");
+    expect(out).not.toContain("Tap <b>Open the form</b>");
   });
 
   // Real job titles carry "&" and "<" (prod: "Bloom & Wild Group"). Telegram

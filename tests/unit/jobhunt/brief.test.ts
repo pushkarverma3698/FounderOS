@@ -274,8 +274,10 @@ describe("formatDailyBrief", () => {
     );
     expect(out).toContain("/draft 1");
     expect(out).toContain("/ask 1");
-    expect(out).toContain("/applied 1");
-    expect(out).toContain("/draft all");
+    // The apply path is two button taps, not a shell command or a typed /applied.
+    expect(out).toContain("📝 Draft");
+    expect(out).toContain("I applied");
+    expect(out).not.toContain("mac_client");
   });
 
   it("nags when PASS roles sit undrafted, and names drafting as the bottleneck", () => {
