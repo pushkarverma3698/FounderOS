@@ -159,8 +159,38 @@ Every limit names what enforces it. If nothing does, it says "nothing", followin
 ## 6. The strongest argument against this plan
 
 "Fix use before adding power" assumes the founder *wants* to delegate email, posts and applications.
-The 30-day data can't tell "doesn't know it can" from "doesn't want it to". C-P1-4 tests that cheaply
+The 7-day data can't tell "doesn't know it can" from "doesn't want it to". C-P1-4 tests that cheaply
 before anything is built for those lanes. Ask before building.
+
+### 6.1 Decision: email and posts (2026-10-04)
+
+Question: should FounderOS send email and posts for the founder, or do coding work only?
+
+**Decision: coding work only until 2026-11-01. The email and LinkedIn tools stay as they are:
+built, approval-gated, not extended and not promoted.** Revisit on 11-01 with the re-measure in §7.
+
+Why, from the all-time `agents.action_log` (111 rows, read on the prod DB 2026-10-04):
+
+| Action | Count | First | Last |
+|---|---|---|---|
+| `send_email` | 6 | 2026-06-13 | 2026-06-16 |
+| `linkedin_post` | 6 | 2026-06-16 | 2026-08-11 |
+| `dispatch_antigravity_task` + `claude_code` + `run_shell` | 63 | 2026-06-13 | 2026-10-03 |
+
+1. He tried both lanes early and stopped: email ran 6 times in 4 days and never again; posts ran 6
+   times and none in the 54 days since 08-11. That reads as "tried it, didn't keep it", not "didn't
+   know it existed". Surfacing hints (C-P1-4) would push a lane he already walked away from.
+2. The 10-02 freeze, which the founder approved, limits work to outcomes A to D until 11-01. Email and
+   posts are none of them, so any new work on those lanes needs an explicit `unfreeze`.
+3. Both tools already carry a per-action approval card, so nothing is sent without a tap. No
+   safety change is needed to leave them as they are.
+
+What this changes in the task list: C-P1-4 stays, but its hint pool excludes `send_email`,
+`linkedin_post` and `schedule_social_post` until the founder reverses this decision. Nothing in
+§5 builds for those lanes.
+
+**Reversible by one line from the founder** ("enable email and posts"): then email and posts get a
+brief of their own, scoped to one lane at a time, with an `unfreeze` label.
 
 ## 7. How we'll know it worked (re-measure 2026-11-01)
 
