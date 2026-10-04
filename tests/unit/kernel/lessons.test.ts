@@ -100,6 +100,7 @@ function stateWith(over: Partial<KernelStateType>): KernelStateType {
     scratch: {},
     step_receipts: {},
     reply: "",
+    command: null,
     lesson_candidate: null,
     last_turn: null,
     history: [],

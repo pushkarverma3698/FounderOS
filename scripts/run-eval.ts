@@ -7,6 +7,7 @@ import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MemorySaver } from "@langchain/langgraph";
 import { GOLDEN_TASKS } from "../src/eval/golden-tasks.js";
+import { COMMAND_GOLDEN_TASKS } from "../src/eval/command-golden.js";
 import { runEval } from "../src/eval/runner.js";
 import { renderReport } from "../src/eval/report.js";
 import { makeKernelInvoker } from "../src/eval/kernel-invoker.js";
@@ -16,7 +17,9 @@ import { closeDatabaseConnections } from "../src/db/client.js";
 async function main(): Promise<void> {
   // MemorySaver: eval threads are throwaway; no Postgres checkpoint pollution.
   const kernel = buildProductionKernel(new MemorySaver());
-  const report = await runEval(GOLDEN_TASKS, makeKernelInvoker(kernel), { taskDelayMs: 500 });
+  // `pnpm eval -- --commands` runs only the plain-words → slash-command slice (model-pool gate).
+  const tasks = process.argv.includes("--commands") ? COMMAND_GOLDEN_TASKS : GOLDEN_TASKS;
+  const report = await runEval(tasks, makeKernelInvoker(kernel), { taskDelayMs: 500 });
   const rendered = renderReport(report);
   console.log(rendered);
   const out = resolve("eval-report.md");
