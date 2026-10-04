@@ -17,6 +17,7 @@ import {
   type KernelBindableModel,
   type KernelChatModel,
   type KernelTool,
+  type TurnLog,
   type WorkerSpec,
   WORKERS,
 } from "../kernel/index.js";
@@ -30,6 +31,7 @@ import {
   getWorkerModelId,
   resolveTemperature,
 } from "../agents/model.js";
+import { recordConversationTurn } from "../db/conversation-turns.js";
 import { plannableCommands } from "./command-catalog.js";
 import { withModelFallbacks } from "./model-fallback.js";
 import { withModelRetry } from "./model-retry.js";
@@ -194,6 +196,11 @@ export function buildWorkerSpecs(): WorkerSpec[] {
   });
 }
 
+/** Postgres-backed turn log. Failures are contained by the kernel's recordTurnSafely, not here. */
+export function buildTurnLog(): TurnLog {
+  return { record: (turn, threadId) => recordConversationTurn(threadId, turn) };
+}
+
 /**
  * Postgres-backed LessonStore (the Hermes learning seam). Failure-tolerant on
  * every edge: lessons are an accelerant — a DB blip must degrade to "no
@@ -312,6 +319,7 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
     commands: plannableCommands(),
     checkpointer,
     lessons: buildLessonStore(),
+    turnLog: buildTurnLog(),
   });
 }
 

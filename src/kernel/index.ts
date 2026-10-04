@@ -69,6 +69,7 @@ export {
   SCRATCH_MAX_CHARS,
   SCRATCH_KEEP_RECENT_TOOL_RESULTS,
 } from "./tool-output-guard.js";
+export { recordTurnSafely, type TurnLog } from "./turn-log.js";
 export {
   normalizeFailureSignature,
   lessonMessage,

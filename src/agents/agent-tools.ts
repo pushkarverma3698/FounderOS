@@ -15,7 +15,7 @@
  *   agent-tools/diagnostics.ts → readLogs (the kernel's own journal)
  *   agent-tools/personal.ts    → readFile, listDir, sendFile, writeFile, runShell, browser
  *   agent-tools/jobhunt.ts     → readCv, searchJobs
- *   agent-tools/memory.ts      → recordEvent
+ *   agent-tools/memory.ts      → recordEvent, recallConversationTool
  *
  * HITL contract (read by the Telegram gateway):
  *   interrupt({ kind: "approval", action, title, summary, preview, args })
@@ -47,7 +47,7 @@ export { createProjectRepo } from "./agent-tools/project-repo.js";
 export { vpsRun } from "./agent-tools/vps-run.js";
 export { readFile, listDir, sendFile, writeFile, runShell, browser } from "./agent-tools/personal.js";
 export { readCv, searchJobs, ingestJobs, screenJob, reviewScreened, cvGaps, jobBrief, tailorCvForRow } from "./agent-tools/jobhunt.js";
-export { recordEvent } from "./agent-tools/memory.js";
+export { recordEvent, recallConversationTool } from "./agent-tools/memory.js";
 export { searchResearchCache } from "./agent-tools/rag.js";
 export { publishSignal, prepareSignal, DEFAULT_TARGET_DEPT } from "./agent-tools/signals.js";
 

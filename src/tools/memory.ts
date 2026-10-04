@@ -6,7 +6,8 @@
  *   search_memory  — read-only, no HITL. Routes a query across:
  *                    1. episodic_memory  (time-ordered events)
  *                    2. knowledge_entries (turicks-brain)
- *                    3. founder_context  (JSONB business state)
+ *                    3. conversation_turns (what the founder said in THIS chat)
+ *                    4. founder_context  (JSONB business state)
  *                    Results ranked by recency and formatted for Telegram.
  *
  *   record_event   — raw write tool (no interrupt here). The HITL gate is
@@ -25,7 +26,6 @@ import { z } from "zod";
 import {
   searchEpisodicMemory,
   searchKnowledgeEntries,
-  searchConversations,
   getFounderContext,
   insertEpisodicEvent,
 } from "../db/queries.js";
@@ -33,8 +33,17 @@ import { founderFacingContext } from "../db/founder-context.js";
 import { contextLineRenderer } from "./context-render.js";
 import { childLogger } from "../infra/logger.js";
 import { getMem0Client } from "../infra/mem0.js";
+import { appTimeZone, systemClock } from "../core/time.js";
+import { earliestConversationTurn, findConversationTurns } from "../db/conversation-turns.js";
+import { recallConversation, searchTurnLog, type RecallDeps } from "./recall-conversation.js";
 
 const log = childLogger({ module: "tool:memory" });
+
+const turnLogDeps = (): RecallDeps => ({
+  reader: { find: findConversationTurns, earliest: earliestConversationTurn },
+  clock: systemClock,
+  timeZone: appTimeZone(),
+});
 
 
 // ── search_memory ─────────────────────────────────────────────────────────────
@@ -42,8 +51,14 @@ const log = childLogger({ module: "tool:memory" });
 type SearchType = "all" | "episodic" | "knowledge" | "context" | "conversations";
 
 export const searchMemoryTool = tool(
-  async ({ query, type = "all" }: { query: string; type?: SearchType }) => {
+  async ({ query, type = "all" }: { query: string; type?: SearchType }, config) => {
     log.debug({ query, type }, "search_memory");
+    // The chat to read comes from the run, never from an argument: a guest in an allow-listed group chat can call
+    // every non-HITL tool and must not be able to name the founder's private chat. No config (the IDE MCP) = no chat.
+    const threadId = String(config?.configurable?.["thread_id"] ?? "");
+
+    // An explicit conversations search answers in full, including why it found nothing.
+    if (type === "conversations") return recallConversation({ threadId, about: query }, turnLogDeps());
 
     const sections: string[] = [];
 
@@ -74,18 +89,10 @@ export const searchMemoryTool = tool(
       }
     }
 
-    // 3. Conversation threads (what was actually discussed, and when)
-    if (type === "all" || type === "conversations") {
-      const threads = await searchConversations(TENANT, query, 4);
-      if (threads.length > 0) {
-        const formatted = threads.map((t) => {
-          const date = t.last_message_at ? t.last_message_at.toISOString().slice(0, 10) : "undated";
-          const topics = (t.topics ?? []).join(", ");
-          const summary = t.summary ? `\n   ${t.summary.slice(0, 250)}` : "\n   (no summary recorded)";
-          return `[${t.thread_id}] ${t.message_count} message(s) _(${date})_${summary}${topics ? `\n   Topics: ${topics}` : ""}`;
-        });
-        sections.push(`**Conversations:**\n${formatted.join("\n\n")}`);
-      }
+    // 3. What the founder said in this chat (the turn log), in his own words
+    if (type === "all") {
+      const said = await searchTurnLog(threadId, query, turnLogDeps());
+      if (said) sections.push(`**Conversations:**\n${said}`);
     }
 
     // 4. Founder context — text-contains search across keys + values
@@ -160,7 +167,7 @@ export const searchMemoryTool = tool(
             "'all' (default) searches everything. " +
             "'episodic' = past events + decisions. " +
             "'knowledge' = turicks-brain ADRs + brand + case studies. " +
-            "'conversations' = recorded Telegram threads (summary + topics). " +
+            "'conversations' = what the founder said in this chat before, in his own words. " +
             "'context' = current business state (clients, priorities).",
         ),
     }),

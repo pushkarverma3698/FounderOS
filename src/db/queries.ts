@@ -1106,58 +1106,6 @@ export async function upsertConversation(
     });
 }
 
-/**
- * Keyword search over conversation summaries + topics.
- * Returns most-recent conversations first.
- */
-export async function searchConversations(
-  tenantId: string,
-  query: string,
-  limit = 5,
-): Promise<Array<{
-  thread_id: string;
-  summary: string | null;
-  topics: string[] | null;
-  last_message_at: Date | null;
-  message_count: number;
-}>> {
-  const db = getDb();
-  const terms = tokenizeQuery(query);
-
-  const matchAnyTerm: SQL | undefined =
-    terms.length > 0
-      ? or(
-          ...terms.flatMap((t) => {
-            const p = `%${t}%`;
-            return [
-              sql`${conversations.summary} ILIKE ${p}`,
-              sql`${conversations.topics}::text ILIKE ${p}`,
-            ];
-          }),
-        )
-      : undefined;
-
-  const candidates = await db
-    .select({
-      thread_id: conversations.thread_id,
-      summary: conversations.summary,
-      topics: conversations.topics,
-      last_message_at: conversations.last_message_at,
-      message_count: conversations.message_count,
-    })
-    .from(conversations)
-    .where(and(eq(conversations.tenant_id, tenantId), matchAnyTerm))
-    .orderBy(desc(conversations.last_message_at))
-    .limit(Math.min(limit * CANDIDATE_FACTOR, MAX_CANDIDATES));
-
-  return rankByTerms(
-    candidates,
-    terms,
-    (r) => `${r.summary ?? ""} ${(r.topics ?? []).join(" ")}`,
-    limit,
-  );
-}
-
 // ── Episodic Memory (episodic_memory) ─────────────────────────────────────────
 
 /**
