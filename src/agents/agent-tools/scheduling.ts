@@ -11,7 +11,7 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { TENANT, env } from "../../core/config.js";
-import { scheduleTaskTool } from "../../tools/scheduled-task.js";
+import { resolveTiming, scheduleTaskTool } from "../../tools/scheduled-task.js";
 import { describeRecurrence, parseRecurrence } from "../../core/time.js";
 import {
   listUpcomingScheduledTasks,
@@ -46,7 +46,10 @@ function parseFutureTime(raw: string): Date | null {
 /** Schedule a future agent task — founder approves once, at schedule time. */
 export const scheduleTask = tool(
   async ({ prompt, scheduled_at, recurrence }, config) => {
-    const rule = recurrence ? parseRecurrence(recurrence) : null;
+    // Before the card: a timing the tool cannot run must never reach the founder as an approval ("Runs at undefined").
+    const timing = resolveTiming(scheduled_at, recurrence);
+    if ("error" in timing) return `Task scheduling failed: ${timing.error}`;
+    const rule = timing.spec ? parseRecurrence(timing.spec) : null;
     const rejected = await hitlGate(
       {
         action: "schedule_task",
@@ -94,7 +97,8 @@ export const scheduleTask = tool(
         .optional()
         .nullable()
         .describe(
-          "Repeating: daily@08:00 | weekdays@09:00 | weekly@mon:09:00 | monthly@01:09:00 (24h, founder's timezone)",
+          "Repeating: daily@08:00 | weekdays@09:00 | weekly@mon:09:00 | monthly@01:09:00 (24h, founder's timezone). " +
+            "Never cron or RRULE text.",
         ),
     }),
   },
