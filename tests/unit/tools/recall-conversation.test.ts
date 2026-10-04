@@ -101,6 +101,49 @@ describe("resolveRecallWindow — time said the way people say it", () => {
     expect(win("  On YESTERDAY ")!.since).toEqual(istMidnight("2026-10-03"));
   });
 
+  describe("minutes and hours (\"what did I just ask you?\")", () => {
+    const MIN = 60_000;
+    const back = (minutes: number): Date => new Date(NOW.getTime() - minutes * MIN);
+
+    it("'just now', 'a minute ago' and 'N minutes ago' look back at least half an hour and end now", () => {
+      for (const phrase of ["just now", "a moment ago", "moments ago", "a minute ago", "5 minutes ago", "a few minutes ago", "about 10 minutes ago"]) {
+        const w = win(phrase);
+        expect(w, phrase).not.toBeNull();
+        expect(w!.since, phrase).toEqual(back(30));
+        expect(w!.until, phrase).toEqual(NOW);
+      }
+    });
+
+    it("'an hour ago' and 'N hours ago' look back twice that far, so a loose guess still lands, and the label says so", () => {
+      expect(win("an hour ago")!.since).toEqual(back(120));
+      expect(win("an hour ago")!.label).toBe("the last 2 hours");
+      expect(win("3 hours ago")!.since).toEqual(back(360));
+      expect(win("a couple of hours ago")!.since).toEqual(back(240));
+      expect(win("45 minutes ago")!.since).toEqual(back(90));
+      expect(win("45 minutes ago")!.label).toBe("the last 90 minutes");
+    });
+
+    it("'past hour' and 'last 20 minutes' are exact spans up to now", () => {
+      expect(win("in the last hour")!.since).toEqual(back(60));
+      expect(win("past 2 hours")!.since).toEqual(back(120));
+      expect(win("last 20 minutes")!.since).toEqual(back(20));
+      expect(win("last 20 minutes")!.label).toBe("the last 20 minutes");
+    });
+
+    it("'earlier' and 'earlier today' are today", () => {
+      for (const phrase of ["earlier", "earlier today"]) expect(win(phrase)!.since).toEqual(istMidnight("2026-10-04"));
+    });
+
+    it("'a couple of days ago' is two days ago", () => {
+      expect(win("a couple of days ago")!.since).toEqual(istMidnight("2026-10-02"));
+    });
+
+    it("refuses an absurd span instead of guessing", () => {
+      expect(win("500 hours ago")).toBeNull();
+      expect(win("9999 minutes ago")).toBeNull();
+    });
+  });
+
   it("returns null for a phrase it cannot read, instead of guessing", () => {
     expect(win("sometime in the spring")).toBeNull();
     expect(win("2026-13-45")).toBeNull();
@@ -163,6 +206,15 @@ describe("recallConversation — the answer", () => {
     expect(out).toContain("latest 5 of 14");
     expect(out).toContain("9 more");
     expect(out).toContain("show more");
+  });
+
+  it("'what did I just ask you?' reads the last half hour and says so, instead of refusing to parse the time", async () => {
+    const { deps, queries } = fakeReader([turn({ at: "2026-10-04T09:50:00Z", user_input: "what's running" })], new Date("2026-10-04T08:00:00Z"));
+    const out = await recallConversation({ threadId: "t", when: "a minute ago" }, deps);
+    expect(queries[0]).toMatchObject({ since: new Date("2026-10-04T09:30:00Z"), until: NOW });
+    expect(out).toContain("the last 30 minutes");
+    expect(out).toContain('You: "what\'s running"');
+    expect(out).not.toContain("couldn't read the time");
   });
 
   it("'show more' raises the cap to 12", async () => {
