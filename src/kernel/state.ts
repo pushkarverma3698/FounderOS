@@ -12,6 +12,7 @@ import type { BaseMessage } from "@langchain/core/messages";
 import type {
   FailureReport,
   Mission,
+  PlannedCommand,
   StepResult,
   ToolReceipt,
   TurnRecord,
@@ -98,6 +99,15 @@ export const KernelState = Annotation.Root({
   reply: Annotation<string>({
     reducer: (_curr, update) => update,
     default: () => "",
+  }),
+
+  /**
+   * The slash command the planner chose this turn (null otherwise). The kernel only NAMES it;
+   * the gateway runs the real handler after the turn (src/gateway/command-dispatch.ts).
+   */
+  command: Annotation<PlannedCommand | null>({
+    reducer: (_curr, update) => update,
+    default: () => null,
   }),
 
   /**

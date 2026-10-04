@@ -73,6 +73,7 @@ describe("Phase 5 — Recovery and Objective Ownership", () => {
       scratch: {},
       step_receipts: {},
       reply: "",
+      command: null,
       lesson_candidate: null,
       last_turn: null,
       history: [],
