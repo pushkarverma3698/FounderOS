@@ -56,6 +56,7 @@ ${body}
 `;
   const r = spawnSync("bash", ["-c", script], {
     env: {
+      TG_QUIET_NOW: "12", // daytime: notify must not depend on when CI runs
       PATH: "/usr/bin:/bin:/usr/local/bin",
       HOME: home,
       TEST_LOG: join(root, "log.txt"),

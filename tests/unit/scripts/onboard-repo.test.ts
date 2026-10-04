@@ -294,6 +294,7 @@ describe("onboard-repo.sh --check — report, change nothing", () => {
 
     const r = spawnSync("bash", [SCRIPT, "--check", "--porcelain"], {
       env: {
+        TG_QUIET_NOW: "12", // daytime: notify must not depend on when CI runs
         PATH: `${sb.stubs}:${sb.tools}`,
         HOME: sb.home,
         ONBOARD_REVIEW_BASE: sb.reviewBase,
