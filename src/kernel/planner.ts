@@ -31,6 +31,8 @@ import { formatFailureReply } from "./supervisor.js";
 import { messageContentText } from "./message-text.js";
 import { plannerNowLine, systemClock, type Clock } from "../core/time.js";
 import { CONTEXT_STALE_MARKER } from "../db/context-meta.js";
+import type { RunnableConfig } from "@langchain/core/runnables";
+import type { TurnLog } from "./turn-log.js";
 
 /** Minimal chat-model surface the kernel depends on (BaseChatModel satisfies it). */
 export interface KernelChatModel {
@@ -209,7 +211,10 @@ export function overrideDecision(worker: WorkerId, task: string): PlannerDecisio
 }
 
 /** Truncation bounds for history entries — keep checkpoints and prompts small. */
-export const HISTORY_INPUT_MAX_CHARS = 600;
+// 2,000, not 600: a pasted brief or a long instruction lost its tail on the very next turn
+// ("as I said above, use the second option" had no second option to read). The total stays
+// bounded by HISTORY_MAX_CHARS, which drops the oldest turns first.
+export const HISTORY_INPUT_MAX_CHARS = 2000;
 export const HISTORY_REPLY_MAX_CHARS = 1500;
 
 /**
@@ -266,12 +271,15 @@ export function makePlanNode(
   catalog: WorkerCatalogEntry[],
   clock: Clock = systemClock,
   commands: readonly CommandCatalogEntry[] = [],
+  turnLog?: TurnLog,
 ) {
   const systemPrompt = buildPlannerPrompt(catalog, commands);
 
-  return async function plan(state: KernelStateType): Promise<KernelUpdate> {
+  return async function plan(state: KernelStateType, config?: RunnableConfig): Promise<KernelUpdate> {
     const input = state.turn.raw_input.trim();
     const previous = summarizePreviousTurn(state);
+    // Durable copy for recall_conversation; `history` below forgets it after a 6-hour silence.
+    if (previous && turnLog) await turnLog.record(previous, String(config?.configurable?.thread_id ?? "default"));
     const conversation = previous ? [...state.history, previous] : state.history;
     const base: KernelUpdate = {
       results: RESET,
