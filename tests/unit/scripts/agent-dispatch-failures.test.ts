@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { DispatchSandbox, FAKE_GEMINI_KEY } from "./dispatch-sandbox.js";
 
@@ -479,15 +479,9 @@ describe("the real file, in the repo layout (helpers in deploy/lib)", () => {
 });
 
 describe("agent-dispatch — Telegram quiet hours", () => {
-  it("holds notifications into queue during quiet hours and delivers digest after 08:00", () => {
+  it("a login failure is urgent: it is sent at 02:00 and nothing is queued for the digest", () => {
     sb.tick({ agyOut: `${"I am working on it.\n".repeat(5)}${AUTH_LINE}`, env: { TG_QUIET_NOW: "02" } });
-    expect(sb.messages()).toHaveLength(0);
-    const queueFile = sb.home + "/.claude/tg-digest.queue";
-    expect(readFileSync(queueFile, "utf8")).toContain("agent-dispatch");
-
-    sb.tick({ agyOut: "ok", env: { TG_QUIET_NOW: "09" } });
-    const msgs = sb.messages();
-    expect(msgs.length).toBeGreaterThanOrEqual(1);
-    expect(msgs[0]).toContain("🌅 Overnight digest");
+    expect(paused()).toHaveLength(1);
+    expect(existsSync(sb.home + "/.claude/tg-digest.queue")).toBe(false);
   });
 });
