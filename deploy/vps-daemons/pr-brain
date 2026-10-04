@@ -749,7 +749,7 @@ head_is_stamped() { # head_is_stamped PR HEAD
 # model remembered to run the right gh command. A run with no verdict line is not a pass and not a fail: it did not
 # finish (a --print-timeout returns partial output with exit 0), so nothing is changed and nothing is stamped.
 run_agy_gate() { # run_agy_gate PR SLUG NAME HEAD APP_RC OUT
-  local pr="$1" slug="$2" name="$3" head="$4" app_rc="$5" out="$6" prompt_file rc verdict is_draft
+  local pr="$1" slug="$2" name="$3" head="$4" app_rc="$5" out="$6" prompt_file rc verdict is_draft now_head
   if ! prepare_review_workspace "$slug" "$name" "$pr" >>"$LOG" 2>&1; then
     printf 'Error: could not prepare the review workspace %s for %s#%s (see the log above)\n' "$REVIEW_WS_BASE/$name" "$name" "$pr" >"$out"
     return 1
@@ -778,6 +778,16 @@ run_agy_gate() { # run_agy_gate PR SLUG NAME HEAD APP_RC OUT
       return 1
       ;;
   esac
+
+  # A review takes up to 30 minutes. If the author pushed meanwhile, this verdict is about a commit that is no longer
+  # the PR's head: acting on it would ready, undo or stamp the NEW head, which nobody reviewed. Retry on the next sweep.
+  now_head="$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null)"
+  if [[ -n "$now_head" && "$now_head" != "$head" ]]; then
+    printf 'Error: the PR head moved during the review (%s -> %s), so the verdict is stale and nothing was changed\n' "${head:0:10}" "${now_head:0:10}" >>"$out"
+    log "$name#$pr head moved during the review (${head:0:10} -> ${now_head:0:10}) — verdict discarded, retried next sweep"
+    agy_progress_outcome "⚠️ The author pushed while this was being reviewed. The verdict is discarded and the new commit is reviewed next sweep."
+    return 1
+  fi
 
   is_draft="$(gh pr view "$pr" --json isDraft --jq .isDraft 2>/dev/null)"
   if [[ "$verdict" == "PASS" && "$is_draft" == "true" ]]; then
@@ -980,7 +990,7 @@ merge_cleared() {
   elif [[ "$base" == "main" || "$base" == "master" ]]; then
     merge_result="skipped — base is $base, a main/master merge needs the founder"
     log "$repo_name#$pr merge skipped — base is $base"
-  elif gh pr merge "$pr" --squash >>"$LOG" 2>&1; then
+  elif gh pr merge "$pr" --squash ${head:+--match-head-commit "$head"} >>"$LOG" 2>&1; then
     merge_result="merged (squash) into $base"
     log "$repo_name#$pr merge: squashed into $base"
 
