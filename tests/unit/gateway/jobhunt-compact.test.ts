@@ -95,7 +95,7 @@ describe("isPlainRequest", () => {
 describe("sendCompactBrief", () => {
   const profile = { id: "pushkar-nl-tech", candidateName: "Pushkar", tenantId: "t" } as never;
   const ctx = () => {
-    const reply = vi.fn(async () => undefined);
+    const reply = vi.fn(async (..._a: unknown[]) => undefined);
     return { ctx: { reply } as unknown as Context, reply };
   };
 
