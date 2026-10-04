@@ -57,6 +57,14 @@ function assertColumnFiltersSupported(table: RagTable, filter?: RagFilter): void
   }
 }
 
+/**
+ * brain_memories only (the other tables have no `status` column): rows marked SUPERSEDED or ARCHIVED are not returned.
+ * STALE stays searchable. Leading space, like the filter fragments it is appended to.
+ */
+function liveRowsClause(table: RagTable) {
+  return table === "brain_memories" ? sql` AND status NOT IN ('SUPERSEDED', 'ARCHIVED')` : sql``;
+}
+
 /** The schema these stores actually live in — see {@link ragTableRef}. */
 const RAG_SCHEMA = "brain";
 
@@ -105,7 +113,7 @@ export async function searchRagTable(
   // unit tests (see tests/unit/db/rag-search-filters.test.ts).
   const filterClause = sql`${entryType ? sql` AND metadata->>'entry_type' = ${entryType}` : sql``}${
     memoryType ? sql` AND memory_type = ${memoryType}` : sql``
-  }${project ? sql` AND project = ${project}` : sql``}`;
+  }${project ? sql` AND project = ${project}` : sql``}${liveRowsClause(table)}`;
   const isBrainMemories = table === "brain_memories";
   const extraCols = isBrainMemories ? sql`, memory_type, project` : sql``;
   // sql.identifier() safely quotes the (already allowlisted) table name.
@@ -186,7 +194,7 @@ export async function keywordSearchRagTable(
   // unit tests (see tests/unit/db/rag-search-filters.test.ts).
   const filterClause = sql`${entryType ? sql` AND metadata->>'entry_type' = ${entryType}` : sql``}${
     memoryType ? sql` AND memory_type = ${memoryType}` : sql``
-  }${project ? sql` AND project = ${project}` : sql``}`;
+  }${project ? sql` AND project = ${project}` : sql``}${liveRowsClause(table)}`;
   const isBrainMemories = table === "brain_memories";
   const extraCols = isBrainMemories ? sql`, memory_type, project` : sql``;
 
