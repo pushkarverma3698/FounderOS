@@ -26,6 +26,8 @@ export interface LoginFinished {
   readonly ok: boolean;
   /** Telegram HTML: what was stored and verified, or exactly what failed and what to do. */
   readonly html: string;
+  /** A follow-up step (another link): it replaces the finished attempt, and the next paste goes to it. Only with ok. */
+  readonly next?: LoginStarted;
 }
 
 export interface LoginTargetStatus {

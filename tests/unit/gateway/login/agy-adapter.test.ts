@@ -106,6 +106,15 @@ describe("agy login adapter: start", () => {
     expect(pty.kill).toHaveBeenCalled();
   });
 
+  it("no agy binary for the bot's user (what the VPS printed 2026-10-04) says so, not 'no menu appeared'", async () => {
+    const pty = fakePty("env: 'agy': No such file or directory\r\n");
+    const m = machine();
+    const { base } = deps(m, { spawnPty: () => pty.child });
+    const err = createAgyAdapter(base).start("default");
+    await expect(err).rejects.toThrow(/agy is not installed for the bot's user/);
+    await expect(err).rejects.toThrow(/ssh -t founderos-vps/);
+  });
+
   it("a mktemp path with shell metacharacters is refused", async () => {
     const m = machine({ mktemp: { code: 0, out: "/tmp/x'; rm -rf /; '\n" } });
     const { base, spawned } = deps(m);
