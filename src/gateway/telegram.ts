@@ -27,6 +27,7 @@ import {
   unknownCommandReply,
 } from "./commands.js";
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
+import { weeklyApplicationGoal } from "./jobhunt-goal.js";
 import { handleJobCallback } from "./jobhunt-callbacks.js";
 import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
@@ -215,7 +216,11 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
   // `splitForTelegram` is pure formatting and imported normally.
   const jobsDeps: JobsViewDeps = {
     buildBrief: async (profile, scope) =>
-      (await import("../tools/jobhunt/daily-brief.js")).buildDailyBrief({ profile, scope }),
+      (await import("../tools/jobhunt/daily-brief.js")).buildDailyBrief({
+        profile,
+        scope,
+        weeklyGoal: await weeklyApplicationGoal(profile.id),
+      }),
     split: splitForTelegram,
     lastFreshView: async (profileId) =>
       (await import("../db/job-heartbeat-queries.js")).lastFreshView(profileId),
