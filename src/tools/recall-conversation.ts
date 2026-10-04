@@ -56,6 +56,8 @@ export interface RecallWindow {
   readonly until: Date;
   /** The range as a person would write it: "Sat 3 Oct", "Mon 21 Sep – now". */
   readonly label: string;
+  /** Set on "just now" / "an hour ago" style windows (minutes or hours back from now), which an empty log can answer from its latest message. */
+  readonly lookBack?: true;
 }
 
 const SHOWN_FIRST = 5;
@@ -155,6 +157,7 @@ export function resolveRecallWindow(phrase: string, now: Date, tz: string): Reca
     since: new Date(now.getTime() - minutes * 60_000),
     until: now,
     label: `the last ${minutes === 60 ? "hour" : minutes % 60 === 0 ? `${minutes / 60} hours` : `${minutes} minutes`}`,
+    lookBack: true,
   });
   const span = (word: string | undefined, unit: string, exact: boolean): RecallWindow | null => {
     const n = word === undefined ? 1 : /^\d+$/.test(word) ? Number(word) : LOOSE_AMOUNTS[word] ?? NUMBER_WORDS[word];
@@ -335,6 +338,11 @@ export async function recallConversation(input: RecallInput, deps: RecallDeps): 
 
   const topic = terms.length > 0 ? ` mentioning "${terms.join(" ")}"` : "";
   const windowText = window ? ` from ${whenText.toLowerCase()} (${window.label})` : "";
+  if (page.total === 0 && window?.lookBack && terms.length === 0) {
+    // "What did I just ask?" in a quiet half hour: the latest saved message answers it better than "nothing found".
+    const [latest] = (await reader.find({ threadId: input.threadId, terms, limit: 1 })).turns;
+    if (latest) return `Nothing in ${window.label}. The latest message I have:\n\n${renderTurn(latest, clock(), tz)}`;
+  }
   if (page.total === 0) return emptyAnswer(topic, windowText.replace(" from ", " for "), window, earliest, tz);
 
   const shown = page.turns.length;
