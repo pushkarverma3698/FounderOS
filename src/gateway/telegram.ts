@@ -27,6 +27,7 @@ import {
   unknownCommandReply,
 } from "./commands.js";
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
+import { injectSenderProfile, parseSenderProfiles } from "./jobhunt-sender-profile.js";
 import { weeklyApplicationGoal } from "./jobhunt-goal.js";
 import { handleJobCallback } from "./jobhunt-callbacks.js";
 import { handleReplied, handleRejected } from "./live-application-commands.js";
@@ -108,6 +109,7 @@ function isDecisionButton(data: string): boolean {
 export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultChatAccess()): void {
   // Per process: the "how to let the others in" hint is said once per group.
   const hintedGroups = new Set<string>();
+  const senderProfiles = parseSenderProfiles(env.JOBHUNT_SENDER_PROFILES);
 
   bot.use(async (ctx, next) => {
     const who = classifyChatAccess({ chatId: ctx.chat?.id, chatType: ctx.chat?.type, fromId: ctx.from?.id }, access);
@@ -116,6 +118,8 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
       return;
     }
     const msg = ctx.message;
+    const senderProfile = ctx.from ? senderProfiles.get(ctx.from.id) : undefined;
+    if (msg?.text && senderProfile) msg.text = injectSenderProfile(msg.text, senderProfile);
     if (msg && ctx.chat) {
       const me = { id: ctx.me.id, username: ctx.me.username };
       const addressed = isAddressedToBot(
