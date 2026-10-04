@@ -38,8 +38,7 @@ import { getProfile, type JobSearchProfile } from "./profile-config.js";
 
 const log = childLogger({ module: "jobhunt:daily-brief" });
 
-// Re-exported so the brief keeps one import site, and so the existing CV tests
-// (cv-missing-loud, cv-track) keep pointing at the same module surface.
+// Re-exported so the brief keeps one import site and the CV tests keep resolving.
 export { loadTrackCvs, UNCLASSIFIED_TRACK } from "./brief-cv.js";
 
 /**
@@ -337,8 +336,7 @@ export async function buildDailyBrief(opts: BriefOptions = {}): Promise<string> 
         ]
       : [];
 
-  const spend = await todaysSpend(now);
-  const progress = await loadWeekProgress(profile, now, opts.weeklyGoal ?? null);
+  const [spend, progress] = [await todaysSpend(now), await loadWeekProgress(profile, now, opts.weeklyGoal ?? null)];
 
   const input: BriefInput = {
     date: now,
