@@ -33,7 +33,7 @@ import { streamKernelTurn, progressLabelFor } from "./kernel-progress.js";
 import { cleanupResumeArtifact } from "./resume-artifact-cleanup.js";
 import { replyForError } from "./error-reply.js";
 import { failureCardFor, replyWithFailureCard } from "./failure-card.js";
-import type { Engine } from "../tools/coding-engine.js";
+import { engineFromApprovalCard, type Engine } from "../tools/coding-engine.js";
 
 // Progress streaming lives in ./kernel-progress.ts; re-exported so the gateway's
 // public surface (and its tests) keep addressing kernel-run.
@@ -298,6 +298,7 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
 
 // ── Resume after an approval decision ─────────────────────────────────────────
 
+const cardEngine = (data: string | null | undefined) => { const engine = engineFromApprovalCard(data); return engine ? { engine } : {}; };
 export async function resumeKernel(ctx: Context, decision: "approved" | "rejected", nonce?: string): Promise<void> {
   const chatId = ctx.chat?.id ?? "unknown";
   await withChatTurnLock(chatId, async () => {
@@ -319,7 +320,7 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
       budget = makeRunBudget();
       let touch: (() => void) | undefined;
       const config = {
-        configurable: { thread_id: threadId, onTurnActivity: () => touch?.() },
+        configurable: { thread_id: threadId, onTurnActivity: () => touch?.(), ...cardEngine(pending?.callback_data) },
         recursionLimit: OFFICE_RECURSION_LIMIT,
         callbacks: [budget.callback, new TraceCallback(trace)],
       };
@@ -358,7 +359,9 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
 
         const reply = kernelReply(res as never);
         trace.event("turn.out", { replyPreview: reply.slice(0, 200) });
-        await sendReply(ctx, reply);
+        const card = failureCardFor(res as never, { turnId: trace.turnId });
+        await (card ? replyWithFailureCard(ctx, card, () => sendReply(ctx, reply)) : sendReply(ctx, reply));
+
       } finally {
         // AG-015/B7: runs on every exit above — success, re-pause, timeout,
         // or any other error. See resume-artifact-cleanup.ts for why.

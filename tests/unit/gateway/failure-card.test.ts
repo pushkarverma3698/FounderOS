@@ -102,11 +102,28 @@ describe("failureCardFor — when the Retry button is offered", () => {
     expect(failureCardFor(failedState({ failure: null } as never), { turnId: TURN_ID })).toBeNull();
   });
 
-  it("returns nothing for a rejected approval — he said no, there is nothing to retry", () => {
+  it("renders 👍 Dropped. Nothing was sent. for a rejected approval — he said no, there is nothing to retry", () => {
     const rejected = failedState({
+      results: [],
       failure: { step_id: "s2", stage: "hitl_rejected", component: "send_email", message: "Rejected by founder.", retryable: false },
     } as never);
-    expect(failureCardFor(rejected, { turnId: TURN_ID })).toBeNull();
+    const card = failureCardFor(rejected, { turnId: TURN_ID });
+    expect(card).not.toBeNull();
+    expect(card?.html).toBe("👍 Dropped. Nothing was sent.");
+    expect(card?.keyboard).toBeUndefined();
+  });
+
+  it("a rejection after an earlier step finished keeps that step on screen and never says nothing was sent", () => {
+    const rejected = failedState({
+      results: [{ step_id: "s1", status: "ok", output: "email sent to x@y", receipts: [] }],
+      failure: { step_id: "s2", stage: "hitl_rejected", component: "linkedin_post", message: "Rejected by founder.", retryable: false },
+    } as never);
+    const card = failureCardFor(rejected, { turnId: TURN_ID });
+    expect(card?.html).not.toContain("Nothing was sent");
+    expect(card?.html).toContain("👍 Dropped the rest. Nothing more was sent.");
+    expect(card?.html).toContain("Already done:");
+    expect(card?.html).toContain("— email sent to x@y");
+    expect(card?.keyboard).toBeUndefined();
   });
 
   it("attaches a Retry button naming the failed turn", () => {

@@ -40,6 +40,13 @@ describe("/login", () => {
     expect(replies.join("\n")).toContain("✅ Tool — fine");
   });
 
+  it("a row nobody could check live shows ❔, not ✅", async () => {
+    const { c, replies } = ctx({ chatId: 100 });
+    await handleLogin(c, mk(adapter({ status: async () => [{ target: "default", label: "Tool", ok: true, unverified: true, detail: "exited 127" }] })));
+    expect(replies.join("\n")).toContain("❔ Tool — exited 127");
+    expect(replies.join("\n")).not.toContain("✅");
+  });
+
   it("refuses an allow-listed group and a stranger", async () => {
     for (const id of [-5, 7]) {
       const { c, replies } = ctx({ chatId: id, type: id < 0 ? "group" : "private", match: "tool" });
@@ -54,10 +61,10 @@ describe("/login", () => {
     const a = adapter();
     const d = mk(a);
     await handleLogin(ctx({ chatId: 100, match: "tool" }).c, d);
-    const paste = ctx({ chatId: 100, text: "SECRET-CODE" });
+    const paste = ctx({ chatId: 100, text: "4/0SECRET-CODE" });
     expect(await handleLoginReply(paste.c, d)).toBe(true);
     expect(paste.c.deleteMessage).toHaveBeenCalled();
-    expect(a.finish).toHaveBeenCalledWith("default", "SECRET-CODE", "S");
+    expect(a.finish).toHaveBeenCalledWith("default", "4/0SECRET-CODE", "S");
     expect(paste.replies).toEqual(["done"]);
     expect(await handleLoginReply(ctx({ chatId: 100, text: "hi" }).c, d)).toBe(false); // attempt closed
   });
@@ -66,9 +73,36 @@ describe("/login", () => {
     const a = adapter({ finish: vi.fn(async () => ({ ok: false, html: "bad paste" })) });
     const d = mk(a);
     await handleLogin(ctx({ chatId: 100, match: "tool" }).c, d);
-    expect(await handleLoginReply(ctx({ chatId: 100, text: "x" }).c, d)).toBe(true);
+    expect(await handleLoginReply(ctx({ chatId: 100, text: "typo4code" }).c, d)).toBe(true);
     expect(await d.pending.peek("100")).toBeDefined();
     expect(await handleLoginReply(ctx({ chatId: 100, text: "/status" }).c, d)).toBe(false);
+  });
+
+  it("a sentence typed while a login waits reaches the kernel, untouched; the attempt stays open", async () => {
+    const a = adapter();
+    const d = mk(a);
+    await handleLogin(ctx({ chatId: 100, match: "tool" }).c, d);
+    for (const text of ["what's on today", "yesterday", "where are we on 3 tasks"]) {
+      const m = ctx({ chatId: 100, text });
+      expect(await handleLoginReply(m.c, d)).toBe(false);
+      expect(m.c.deleteMessage).not.toHaveBeenCalled();
+    }
+    expect(a.finish).not.toHaveBeenCalled();
+    expect(await d.pending.peek("100")).toBeDefined();
+  });
+
+  it("/login cancel ends a waiting attempt and disposes it", async () => {
+    const dispose = vi.fn();
+    const d = mk(adapter({ start: async () => ({ html: "h", dispose }) }));
+    await handleLogin(ctx({ chatId: 100, match: "tool" }).c, d);
+    const cancel = ctx({ chatId: 100, match: "cancel" });
+    await handleLogin(cancel.c, d);
+    expect(dispose).toHaveBeenCalled();
+    expect(await d.pending.peek("100")).toBeUndefined();
+    expect(cancel.replies[0]).toContain("Cancelled the Tool login");
+    const none = ctx({ chatId: 100, match: "cancel" });
+    await handleLogin(none.c, d);
+    expect(none.replies[0]).toContain("No login is waiting");
   });
 
   it("expires an attempt after the TTL and disposes it", async () => {

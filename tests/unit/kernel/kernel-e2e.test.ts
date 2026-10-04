@@ -118,11 +118,16 @@ describe("kernel E2E (scripted models, real graph)", () => {
   it("single-step tool task: executes, records a code-side receipt, synthesizes with receipt block", async () => {
     const planner = new ScriptedModel([ai(planJson([researchStep()]))]);
     const worker = new ScriptedModel([
-      aiTool("search_web", { query: "LangGraph news" }),
+      aiTool("run_shell", { command: "echo hello" }),
       ai(JSON.stringify({ summary: "LangGraph 1.4 released", sources: [{ title: "LangGraph 1.4", url: "https://x.dev" }] })),
     ]);
     const synth = new ScriptedModel([ai("LangGraph 1.4 was released.")]);
-    const k = kernelWith(planner, worker, synth, [searchTool()]);
+    const shellTool: KernelTool = {
+      name: "run_shell",
+      description: "run shell command",
+      invoke: async () => JSON.stringify({ success: true }),
+    };
+    const k = kernelWith(planner, worker, synth, [shellTool]);
 
     const res = await k.invoke(turn("research LangGraph news"), cfg("single"));
     expect(res.mission.status).toBe("done");
@@ -131,14 +136,14 @@ describe("kernel E2E (scripted models, real graph)", () => {
     if (r0.status === "ok") {
       expect(r0.tool_receipts).toHaveLength(1);
       expect(r0.tool_receipts[0]!.ok).toBe(true);
-      expect(r0.tool_receipts[0]!.args_hash).toBe(hashToolArgs({ query: "LangGraph news" }));
+      expect(r0.tool_receipts[0]!.args_hash).toBe(hashToolArgs({ command: "echo hello" }));
     }
     // Founder sees the verification claim, never the tool inventory.
     expect(res.reply).toContain("1 action completed and verified");
-    expect(res.reply).not.toContain("search_web");
+    expect(res.reply).not.toContain("run_shell");
     expect(res.reply).not.toContain("Action receipts");
     // The internal record is untouched and still names the tool.
-    expect(receiptsBlock(res.results)).toContain("search_web");
+    expect(receiptsBlock(res.results)).toContain("run_shell");
     // 1 planner + 2 worker + 1 synth — bounded, measured.
     expect(planner.calls + worker.calls + synth.calls).toBe(4);
   });

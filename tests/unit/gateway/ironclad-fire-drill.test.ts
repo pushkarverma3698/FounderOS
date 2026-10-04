@@ -122,13 +122,13 @@ describe("Ironclad fire drill (Telegram gateway → real kernel graph)", () => {
     expect(hugePayload.length).toBeGreaterThan(200_000);
 
     const scraper: KernelTool = {
-      name: "scrape_site",
-      description: "scrape a website",
+      name: "run_shell",
+      description: "run shell command",
       invoke: async () => hugePayload,
     };
     const planner = new ScriptedModel([ai(planJson([researchStep()]))]);
     const worker = new ScriptedModel([
-      aiTool("scrape_site", { url: "https://competitor.example" }),
+      aiTool("run_shell", { command: "curl https://competitor.example" }),
       ai(JSON.stringify({ summary: "Competitor charges $99/mo", sources: [] })),
     ]);
     const synth = new ScriptedModel([ai("Competitor pricing: $99/mo.")]);
@@ -149,7 +149,7 @@ describe("Ironclad fire drill (Telegram gateway → real kernel graph)", () => {
     const finalReply = replies.at(-1)!;
     expect(finalReply).toContain("Competitor pricing: $99/mo.");
     expect(finalReply).toContain("completed and verified");
-    expect(finalReply).not.toContain("scrape_site");
+    expect(finalReply).not.toContain("run_shell");
     expect(finalReply).not.toContain(digestToolResult(hugePayload).slice(0, 8));
 
     const state = await currentKernel.getState({ configurable: { thread_id: threadIdFor(101) } });
@@ -158,8 +158,8 @@ describe("Ironclad fire drill (Telegram gateway → real kernel graph)", () => {
 
   it("recovers from a HALLUCINATED tool call — rejected in-band, model self-corrects, turn completes", async () => {
     const real: KernelTool = {
-      name: "search_web",
-      description: "search the web",
+      name: "send_email",
+      description: "send email",
       invoke: async () => JSON.stringify({ success: true, data: "3 competitors found" }),
     };
     const planner = new ScriptedModel([ai(planJson([researchStep()]))]);
@@ -169,7 +169,7 @@ describe("Ironclad fire drill (Telegram gateway → real kernel graph)", () => {
         // The graph must have told the model, in-band, that the tool is unknown.
         const lastTool = [...msgs].reverse().find((m) => isToolMessage(m))!;
         expect(String(lastTool.content)).toContain('Unknown tool "make_coffee"');
-        return aiTool("search_web", { q: "competitors" }, "c2");
+        return aiTool("send_email", { q: "competitors" }, "c2");
       },
       ai(JSON.stringify({ summary: "Found 3 competitors", sources: [] })),
     ]);
@@ -187,7 +187,7 @@ describe("Ironclad fire drill (Telegram gateway → real kernel graph)", () => {
     // which is where tool identity lives now.
     const state = await currentKernel.getState({ configurable: { thread_id: threadIdFor(102) } });
     const internal = receiptsBlock(state.values.results);
-    expect(internal).toContain("search_web");
+    expect(internal).toContain("send_email");
     expect(internal).not.toContain("make_coffee");
   });
 

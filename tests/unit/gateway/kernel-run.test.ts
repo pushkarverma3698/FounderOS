@@ -495,6 +495,20 @@ describe("resumeKernel", () => {
     expect(replies.at(-1)!.text).toContain("All done.");
   });
 
+  it("resumes with the engine the approved card showed, so the tap cannot file for a different CLI", async () => {
+    const card = { action: "dispatch_antigravity_task", args: { title: "t", engine: "claude" } };
+    getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-1", created_at: new Date().toISOString(), callback_data: JSON.stringify(card) });
+    await resumeKernel(fakeCtx().ctx, "approved");
+    const [, withEngine] = fakeKernel.stream.mock.calls[0]! as unknown as [unknown, { configurable: Record<string, unknown> }];
+    expect(withEngine.configurable["engine"]).toBe("claude");
+
+    fakeKernel.stream.mockClear();
+    getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-2", created_at: new Date().toISOString(), callback_data: '{"action":"send_email","args":{"to":"x"}}' });
+    await resumeKernel(fakeCtx().ctx, "approved");
+    const [, plain] = fakeKernel.stream.mock.calls[0]! as unknown as [unknown, { configurable: Record<string, unknown> }];
+    expect("engine" in plain.configurable).toBe(false);
+  });
+
   it("model exhaustion on a resume does NOT auto-retry (no raw input to replay) — manual message", async () => {
     getPendingInterrupt.mockResolvedValue({ interrupt_id: "int-1", created_at: new Date().toISOString() });
     fakeKernel.stream.mockImplementation(async function* () {
