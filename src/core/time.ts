@@ -93,13 +93,13 @@ export function wallDate(when: Date, timeZone: string): { y: number; mo: number;
 }
 
 /** Weekday of an instant in a zone: 0=Sun..6=Sat. */
-function zoneWeekday(when: Date, timeZone: string): number {
+export function zoneWeekday(when: Date, timeZone: string): number {
   const wd = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short" }).format(when);
   return WEEKDAY_NAMES.indexOf(wd as (typeof WEEKDAY_NAMES)[number]);
 }
 
 /** Build the UTC instant for a target wall-clock time (Y-M-D H:M) in a zone. */
-function zonedTimeToUtc(y: number, mo: number, d: number, h: number, mi: number, timeZone: string): Date {
+export function zonedTimeToUtc(y: number, mo: number, d: number, h: number, mi: number, timeZone: string): Date {
   // Treat the wall time as if it were UTC, then subtract the zone's offset at
   // that instant. Date.UTC folds day/month overflow (d + N) correctly.
   const guess = new Date(Date.UTC(y, mo - 1, d, h, mi, 0, 0));

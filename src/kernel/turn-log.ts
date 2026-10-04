@@ -12,11 +12,29 @@
  */
 
 import type { TurnSummary } from "./contracts.js";
+import { childLogger } from "../infra/logger.js";
+
+const log = childLogger({ module: "kernel:turn-log" });
 
 export interface TurnLog {
   /**
-   * Store one finished turn. Recording the same turn_id twice stores it once. Must not throw
-   * upward: a lost log row costs a later recall, a thrown one would cost the founder this reply.
+   * Store one finished turn. Recording the same (thread, turn_id) twice stores it once. May throw:
+   * the plan node calls it through recordTurnSafely, which contains the failure, because a lost log
+   * row costs a later recall and a thrown one would cost the founder this reply.
    */
   record(turn: TurnSummary, threadId: string): Promise<void>;
+}
+
+/**
+ * The plan node's one call into the log. Skips a turn that has no thread id (recall is scoped to a
+ * thread, so a row filed under none could never be read back), and swallows a failing log: the
+ * founder's reply never waits on, or fails because of, a history write.
+ */
+export async function recordTurnSafely(turnLog: TurnLog, turn: TurnSummary, threadId: unknown): Promise<void> {
+  if (typeof threadId !== "string" || threadId === "") return;
+  try {
+    await turnLog.record(turn, threadId);
+  } catch (err) {
+    log.warn({ err: String(err), turn_id: turn.turn_id }, "Turn log write failed — this turn will not be recallable"); // allow-failopen: a lost history row costs a later recall; failing here would cost the founder this reply
+  }
 }

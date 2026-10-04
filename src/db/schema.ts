@@ -1807,5 +1807,8 @@ export const atsBoardCache = agentsSchema.table("ats_board_cache", {
 // goals + goal_reviews (0042). Own file: this one is over the LOC budget. Re-exported so the parity test sees them.
 export * from "./goals-schema.js";
 
+// conversation_turns (0043). Own file for the same reason; re-exported so the parity test sees it.
+export * from "./conversation-turns-schema.js";
+
 // ── Backwards-compatible aliases (remove after Phase 3 migration) ─────────────
 // Keep old names in case any external scripts reference them
