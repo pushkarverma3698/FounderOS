@@ -23,7 +23,8 @@
  * seconds it costs to rank again.
  */
 
-import { InputFile, type Context } from "grammy";
+import { InputFile, type Context, type InlineKeyboard } from "grammy";
+import { draftKeyboard } from "./jobhunt-buttons.js";
 import { cvGapsTool, DEFAULT_GAP_TRACK } from "../tools/jobhunt/gaps.js";
 import { listApplyQueue, listRecentlyScreened } from "../db/apply-queries.js";
 import { resolveProfileArg, isProfileArgMiss } from "./jobhunt-profile-arg.js";
@@ -228,6 +229,22 @@ export interface JobsViewDeps {
   readonly recordFreshView: (profileId: string, at: Date) => Promise<void>;
 }
 
+/** How many 📝 Draft buttons a brief carries. */
+export const DRAFT_BUTTON_COUNT = 3;
+
+/** Top queued roles that appear in the rendered brief, as a keyboard; null when none do. */
+export async function draftButtonsFor(profile: JobSearchProfile, brief: string): Promise<InlineKeyboard | null> {
+  try {
+    const queue = await listApplyQueue(profile.tenantId, profile.id);
+    const shown = queue.filter((r) => brief.includes(safeHtml(r.company))).slice(0, DRAFT_BUTTON_COUNT);
+    return shown.length > 0 ? draftKeyboard(shown) : null;
+  } catch (err) {
+    // allow-failopen: buttons are a convenience on top of a brief that already rendered.
+    log.warn({ err: (err as Error).message }, "Draft buttons not built");
+    return null;
+  }
+}
+
 /** What the founder is told is happening, per verb, while the ranking runs. */
 const RUNNING_LINE: Record<BriefVerb, string> = {
   jobs: "Ranking %s queue and checking the top roles are still open…",
@@ -271,9 +288,14 @@ export async function handleBriefVerb(
     });
     const brief = await deps.buildBrief(profile, scope);
     const chunks = deps.split(brief);
+    // 📝 Draft buttons on the LAST message, so the apply loop starts with a tap.
+    // Only roles the brief actually printed: a /today slice must not offer a company
+    // the founder cannot see above it.
+    const buttons = await draftButtonsFor(profile, brief);
     for (let i = 0; i < chunks.length; i++) {
       if (i > 0) await new Promise((r) => setTimeout(r, 1500));
-      await ctx.reply(chunks[i] as string, { parse_mode: "HTML" });
+      const last = i === chunks.length - 1 && buttons !== null;
+      await ctx.reply(chunks[i] as string, { parse_mode: "HTML", ...(last ? { reply_markup: buttons } : {}) });
     }
     // AFTER the send, not before. A marker written ahead of a failed render
     // would mean those rows are "seen" and never appear under `/fresh` again —
