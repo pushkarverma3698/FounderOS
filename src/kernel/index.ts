@@ -12,6 +12,7 @@ export {
   buildKernel,
   getPendingKernelApproval,
   kernelReply,
+  kernelCommand,
   type KernelConfig,
   type CompiledKernel,
 } from "./graph.js";
@@ -24,6 +25,8 @@ export {
   historyMessages,
   ROUTE_OVERRIDE_RE,
   type KernelChatModel,
+  checkCommandDecision,
+  type CommandCatalogEntry,
   type WorkerCatalogEntry,
 } from "./planner.js";
 export {

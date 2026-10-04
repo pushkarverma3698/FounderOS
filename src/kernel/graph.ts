@@ -20,7 +20,8 @@
 import { StateGraph, START, END, type BaseCheckpointSaver } from "@langchain/langgraph";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { KernelState, type KernelStateType } from "./state.js";
-import { makePlanNode, type KernelChatModel, type WorkerCatalogEntry } from "./planner.js";
+import type { PlannedCommand } from "./contracts.js";
+import { makePlanNode, type CommandCatalogEntry, type KernelChatModel, type WorkerCatalogEntry } from "./planner.js";
 import type { Clock } from "../core/time.js";
 import { routeAfterDispatch, routeAfterPlan } from "./supervisor.js";
 import { makeLessonDispatch, type LessonStore } from "./lessons.js";
@@ -36,6 +37,8 @@ export interface KernelConfig {
   checkpointer?: BaseCheckpointSaver;
   /** Failure-lesson memory (Postgres in prod, fakes/absent in tests) — optional accelerant. */
   lessons?: LessonStore;
+  /** Slash commands the planner may route to (gateway COMMAND_MENU). Absent = plan/reply only. */
+  commands?: CommandCatalogEntry[];
   /** Injected "now" for the planner's time-awareness — frozen in tests for determinism. */
   clock?: Clock;
 }
@@ -52,7 +55,7 @@ export function buildKernel(config: KernelConfig) {
   }));
 
   const graph = new StateGraph(KernelState)
-    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock))
+    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands))
     .addNode("dispatch", makeLessonDispatch(config.lessons))
     .addNode("agent", makeAgentNode(config.workerModel, specs))
     .addNode("tools", makeToolsNode(specs))
@@ -91,4 +94,9 @@ export async function getPendingKernelApproval(
 /** The founder-facing reply for a completed turn. */
 export function kernelReply(state: KernelStateType): string {
   return state.reply || "⚠️ No reply produced — mission state: " + state.mission.status;
+}
+
+/** The slash command the planner chose this turn, or null — the gateway runs it after the turn. */
+export function kernelCommand(state: KernelStateType): PlannedCommand | null {
+  return state.command ?? null;
 }
