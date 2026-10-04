@@ -336,3 +336,27 @@ export async function recallConversation(input: RecallInput, deps: RecallDeps): 
   }
   return out.join("\n");
 }
+
+/**
+ * For search_memory's "all" search: this chat's saved messages that mention `query`, or null when nothing does, so a
+ * search across every source stays quiet about a source with no hits. A bare `about` search with the explicit answers
+ * (empty-log explanation, filler-word refusal) is `recallConversation`; this is its short form.
+ */
+export async function searchTurnLog(
+  threadId: string,
+  query: string,
+  deps: RecallDeps,
+  limit = 4,
+): Promise<string | null> {
+  const terms = topicTerms(query);
+  if (threadId.trim() === "" || terms.length === 0) return null;
+  const page = await deps.reader.find({ threadId, terms, limit });
+  if (page.total === 0) return null;
+
+  const now = deps.clock();
+  const chronological = [...page.turns].sort((a, b) => a.occurred_at.getTime() - b.occurred_at.getTime());
+  const out = chronological.map((t) => renderTurn(t, now, deps.timeZone));
+  const left = page.total - page.turns.length;
+  if (left > 0) out.push(`${left} more. Ask me to recall "${terms.join(" ")}" to see them.`);
+  return out.join("\n\n");
+}
