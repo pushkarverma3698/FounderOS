@@ -18,27 +18,11 @@
  * includes the scripts' own defaults and can never disagree with them.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { Context } from "grammy";
+import { STALE_AFTER_MS, ago, effectiveFile, readIfPresent, readReviewSetup, reviewOffFile, type ReportName } from "../infra/daemon-settings.js";
 import { engineDisplay, readDefaultEngine, type Engine } from "../tools/coding-engine.js";
-
-/** A cron run every 20 minutes (pr-brain) or 15 (agent-dispatch): a report older than this means the cron stopped. */
-const STALE_AFTER_MS = 2 * 3_600_000;
-
-export type ReportName = "pr-brain" | "agent-dispatch";
-
-export interface ReviewSetup {
-  /** null = the daemon has not reported (file missing, empty or unreadable as a report). */
-  readonly reviewers: readonly string[] | null;
-  readonly merges: boolean | null;
-  readonly agyModel: string | null;
-  readonly claudeModel: string | null;
-  /** When the daemon wrote the report, ms since epoch; null when unknown. */
-  readonly reviewerReportedAt: number | null;
-  readonly writerReportedAt: number | null;
-}
 
 export interface ReviewCommandDeps {
   readonly isOff: () => boolean;
@@ -49,14 +33,6 @@ export interface ReviewCommandDeps {
   readonly engine: () => Engine;
 }
 
-export function reviewOffFile(): string {
-  return join(homedir(), ".claude", "pr-brain.off");
-}
-
-export function effectiveFile(name: ReportName): string {
-  return join(homedir(), ".claude", `${name}.effective`);
-}
-
 const REAL_DEPS: ReviewCommandDeps = {
   isOff: () => existsSync(reviewOffFile()),
   setOff: (off) => {
@@ -65,52 +41,10 @@ const REAL_DEPS: ReviewCommandDeps = {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `switched off from Telegram /review at ${new Date().toISOString()}\n`);
   },
-  effective: (name) => {
-    try {
-      return readFileSync(effectiveFile(name), "utf8");
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw err;
-    }
-  },
+  effective: (name) => readIfPresent(effectiveFile(name)),
   now: () => Date.now(),
   engine: () => readDefaultEngine(),
 };
-
-/** `key=value` lines. Anything else (comments, blanks, a line with no key) is skipped. */
-function parseReport(text: string | null): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const line of (text ?? "").split("\n")) {
-    const eq = line.indexOf("=");
-    if (eq > 0) out.set(line.slice(0, eq).trim(), line.slice(eq + 1).trim());
-  }
-  return out;
-}
-
-function reportedAt(report: Map<string, string>): number | null {
-  const sec = Number(report.get("written"));
-  return Number.isFinite(sec) && sec > 0 ? sec * 1000 : null;
-}
-
-export function readReviewSetup(prBrain: string | null, dispatch: string | null): ReviewSetup {
-  const brain = parseReport(prBrain);
-  const writer = parseReport(dispatch);
-  const reviewers = (brain.get("reviewers") ?? "").split(/[\s,]+/).filter(Boolean);
-  return {
-    reviewers: reviewers.length > 0 ? reviewers : null,
-    merges: brain.has("merge") || reviewers.length > 0 ? brain.get("merge") !== "0" : null,
-    agyModel: writer.get("agy_model") || null,
-    claudeModel: writer.get("claude_model") || null,
-    reviewerReportedAt: reviewers.length > 0 ? reportedAt(brain) : null,
-    writerReportedAt: writer.get("agy_model") || writer.get("claude_model") ? reportedAt(writer) : null,
-  };
-}
-
-/** "5 h ago", "2 days ago": coarse on purpose, the founder needs "is this old?", not a timestamp. */
-function ago(ms: number): string {
-  const hours = Math.floor(ms / 3_600_000);
-  return hours >= 48 ? `${Math.floor(hours / 24)} days ago` : `${hours} h ago`;
-}
 
 /** Appended only when a report is stale: a fresh one needs no comment. */
 function staleNote(at: number | null, now: number): string {
