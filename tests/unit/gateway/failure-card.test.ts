@@ -102,11 +102,14 @@ describe("failureCardFor — when the Retry button is offered", () => {
     expect(failureCardFor(failedState({ failure: null } as never), { turnId: TURN_ID })).toBeNull();
   });
 
-  it("returns nothing for a rejected approval — he said no, there is nothing to retry", () => {
+  it("renders 👍 Dropped. Nothing was sent. for a rejected approval — he said no, there is nothing to retry", () => {
     const rejected = failedState({
       failure: { step_id: "s2", stage: "hitl_rejected", component: "send_email", message: "Rejected by founder.", retryable: false },
     } as never);
-    expect(failureCardFor(rejected, { turnId: TURN_ID })).toBeNull();
+    const card = failureCardFor(rejected, { turnId: TURN_ID });
+    expect(card).not.toBeNull();
+    expect(card?.html).toBe("👍 Dropped. Nothing was sent.");
+    expect(card?.keyboard).toBeUndefined();
   });
 
   it("attaches a Retry button naming the failed turn", () => {

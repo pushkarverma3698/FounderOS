@@ -358,7 +358,9 @@ export async function resumeKernel(ctx: Context, decision: "approved" | "rejecte
 
         const reply = kernelReply(res as never);
         trace.event("turn.out", { replyPreview: reply.slice(0, 200) });
-        await sendReply(ctx, reply);
+        const card = failureCardFor(res as never, { turnId: trace.turnId });
+        await (card ? replyWithFailureCard(ctx, card, () => sendReply(ctx, reply)) : sendReply(ctx, reply));
+
       } finally {
         // AG-015/B7: runs on every exit above — success, re-pause, timeout,
         // or any other error. See resume-artifact-cleanup.ts for why.
