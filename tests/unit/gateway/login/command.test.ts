@@ -91,6 +91,27 @@ describe("/login", () => {
     expect(await handleLoginReply(ctx({ chatId: 100, text: "hi" }).c, d)).toBe(false); // attempt closed
   });
 
+  it("a finish with a next step hands over: step 1 is disposed, the next paste goes to step 2 with its state", async () => {
+    const dispose1 = vi.fn();
+    const dispose2 = vi.fn();
+    const finish = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, html: "step 1 done", next: { html: "link 2", state: "S2", dispose: dispose2 } })
+      .mockResolvedValueOnce({ ok: true, html: "all done" });
+    const d = mk(adapter({ start: async () => ({ html: "link 1", state: "S1", dispose: dispose1 }), finish }));
+    await handleLogin(ctx({ chatId: 100, match: "tool" }).c, d);
+    const p1 = ctx({ chatId: 100, text: "code1code" });
+    expect(await handleLoginReply(p1.c, d)).toBe(true);
+    expect(dispose1).toHaveBeenCalled();
+    expect(p1.replies[0]).toContain("step 1 done");
+    expect(p1.replies[0]).toContain("/login cancel");
+    const p2 = ctx({ chatId: 100, text: "code2code" });
+    expect(await handleLoginReply(p2.c, d)).toBe(true);
+    expect(finish).toHaveBeenLastCalledWith("default", "code2code", "S2");
+    expect(dispose2).toHaveBeenCalled();
+    expect(await d.pending.peek("100")).toBeUndefined();
+  });
+
   it("a failed paste keeps the attempt open for a retry; a command is not swallowed", async () => {
     const a = adapter({ finish: vi.fn(async () => ({ ok: false, html: "bad paste" })) });
     const d = mk(a);
