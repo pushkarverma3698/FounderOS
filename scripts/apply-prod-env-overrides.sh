@@ -132,11 +132,20 @@ fi
 # read on every call). google-genai:gemini-3.1-flash-lite live-probed 200 today
 # — same slug already proven in AGENT_FALLBACK_MODELS, distinct from the
 # AGENT_MODEL pin above so the judge isn't grading its own drafter's family.
-grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS|JUDGE_MODEL)=' .env > .env.patched || true
+# 2026-10-04: minimax/minimax-m2.7:free is no longer in OpenRouter's model list
+# (checked against /api/v1/models) — dropped from the chain. Per-role pools and the
+# worker primary come from the measured bench in docs/sessions/2026-10-04-model-pools.md:
+# workers + synthesizer on ling-3.0-flash (30x cheaper per call, same valid-args score),
+# planner primary UNCHANGED (gemini-3.6-flash is the only 36/36 model). Free models are
+# fallbacks only. Planner primary review is due about 2026-10-11 (deepseek-v4.1-flash).
+grep -v -E '^(AGENT_MODEL|AGENT_FALLBACK_MODELS|JUDGE_MODEL|WORKER_AGENT_MODEL|WORKER_FALLBACK_MODELS|PLANNER_FALLBACK_MODELS)=' .env > .env.patched || true
 {
   printf '%s\n' 'AGENT_MODEL=google-genai:gemini-3.6-flash'
-  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-3.1-flash-lite,google-genai:gemini-3-flash-preview,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:minimax/minimax-m2.7:free'
+  printf '%s\n' 'AGENT_FALLBACK_MODELS=google-genai:gemini-3.1-flash-lite,google-genai:gemini-3-flash-preview,openrouter:nvidia/nemotron-3-super-120b-a12b:free'
   printf '%s\n' 'JUDGE_MODEL=google-genai:gemini-3.1-flash-lite'
+  printf '%s\n' 'WORKER_AGENT_MODEL=openrouter:inclusionai/ling-3.0-flash'
+  printf '%s\n' 'WORKER_FALLBACK_MODELS=openrouter:deepseek/deepseek-v4-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:google/gemini-3.6-flash'
+  printf '%s\n' 'PLANNER_FALLBACK_MODELS=openrouter:deepseek/deepseek-v4.1-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:xiaomi/mimo-v2.6-flash,openrouter:typesafe/jev-router'
 } >> .env.patched
 mv .env.patched .env
 chmod 600 .env
