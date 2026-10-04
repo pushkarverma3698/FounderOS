@@ -536,6 +536,7 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
     const path = `${stubsDir}:${opts.withoutTools?.length ? this.filteredTools(opts) : this.tools}`;
     const r = spawnSync("bash", [join(this.installDir, "agent-dispatch"), ...(opts.args ?? [])], {
       env: {
+        TG_QUIET_NOW: "12", // daytime: notify must not depend on when CI runs
         PATH: path,
         HOME: this.home,
         AGENT_DISPATCH_WORKSPACE_BASE: this.wsBase,
@@ -584,6 +585,7 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
     }
     const r = spawnSync("bash", [join(this.installDir, "onboard-repo.sh"), ...args], {
       env: {
+        TG_QUIET_NOW: "12", // daytime: notify must not depend on when CI runs
         PATH: `${stubsDir}:${this.tools}`,
         HOME: this.home,
         ONBOARD_REVIEW_BASE: this.reviewBase,
@@ -605,6 +607,7 @@ printf '{"ok":true,"result":{"message_id":7}}\\n'`,
   runInPlace(args: readonly string[]): TickResult {
     const r = spawnSync("bash", [join(DEPLOY, "agent-dispatch"), ...args], {
       env: {
+        TG_QUIET_NOW: "12", // daytime: notify must not depend on when CI runs
         PATH: `${this.stubs}:${this.tools}`,
         HOME: this.home,
         AGENT_DISPATCH_WORKSPACE_BASE: this.wsBase,

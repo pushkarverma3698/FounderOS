@@ -67,7 +67,7 @@ function sweep(opts: {
     FAKE_COMMENTS: opts.comments ?? "",
     CLAUDE_CALLS: claudeCalls,
     SENDS: sends,
-    ...(opts.quietNow ? { TG_QUIET_NOW: opts.quietNow } : {}),
+    TG_QUIET_NOW: opts.quietNow ?? "12", // daytime unless the test picks an hour
   };
   spawnSync("bash", [SCRIPT], { env, encoding: "utf8", timeout: 30_000 });
 }
