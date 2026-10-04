@@ -74,6 +74,10 @@ function outputSummary(result: StepResult & { status: "ok" }): string {
 /** The card's HTML. `retry` says whether a button will be attached, so the text never promises one that is not there. */
 export function renderFailureCard(state: CardState, opts: { retry: boolean }): string {
   const failure = state.failure as FailureReport;
+  if (failure?.stage === "hitl_rejected") {
+    return "👍 Dropped. Nothing was sent.";
+  }
+
   const request = state.turn?.raw_input || state.mission?.goal || "";
   const objective =
     words(objectiveOf(state, failure.step_id) ?? "") || words(request) || "your request";
@@ -106,20 +110,25 @@ export function renderFailureCard(state: CardState, opts: { retry: boolean }): s
 
 /**
  * The card for a turn that ended with `state.failure`, or null when there is
- * nothing to retry: no failure, or the founder himself rejected an approval
- * (`hitl_rejected` — the kernel's own "Nothing was sent" text is the answer).
+ * no failure. `hitl_rejected` renders "👍 Dropped. Nothing was sent." with no retry button.
  */
 export function failureCardFor(
   state: CardState,
   opts: { turnId: string; profileId?: string },
 ): FailureCard | null {
-  if (!state.failure || state.failure.stage === "hitl_rejected") return null;
+  if (!state.failure) return null;
+  if (state.failure.stage === "hitl_rejected") {
+    return {
+      html: renderFailureCard(state, { retry: false }),
+    };
+  }
   const keyboard = retryKeyboard(opts.turnId, opts.profileId);
   return {
     html: renderFailureCard(state, { retry: keyboard !== undefined }),
     ...(keyboard ? { keyboard } : {}),
   };
 }
+
 
 /**
  * Send the card. If it is too long for one message, or Telegram rejects it,

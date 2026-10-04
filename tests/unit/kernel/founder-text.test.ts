@@ -90,25 +90,29 @@ describe("redactInternalIdentifiers", () => {
 
 describe("founderReceiptsBlock", () => {
   it("states the verification count without naming any tool", () => {
-    const results = [okStep("s1", [receipt("job_state"), receipt("write_artifact")])];
+    const results = [okStep("s1", [receipt("send_email"), receipt("write_file")])];
     const block = founderReceiptsBlock(results);
 
     expect(block).toContain("2 actions completed and verified");
-    expect(block).not.toContain("job_state");
-    expect(block).not.toContain("write_artifact");
+    expect(block).not.toContain("send_email");
+    expect(block).not.toContain("write_file");
     expect(block).not.toContain("a".repeat(8));
   });
 
   it("uses the singular for exactly one action", () => {
-    expect(founderReceiptsBlock([okStep("s1", [receipt("ops_state")])])).toContain("1 action completed");
+    expect(founderReceiptsBlock([okStep("s1", [receipt("send_email")])])).toContain("1 action completed");
   });
 
   it("renders nothing when no action succeeded", () => {
     expect(founderReceiptsBlock([okStep("s1", [])])).toBe("");
   });
 
+  it("renders nothing for read-only non-gated tools", () => {
+    expect(founderReceiptsBlock([okStep("s1", [receipt("job_state")])])).toBe("");
+  });
+
   it("counts receipts across every step, not just the first", () => {
-    const results = [okStep("s1", [receipt("job_state")]), okStep("s2", [receipt("write_artifact")])];
+    const results = [okStep("s1", [receipt("send_email")]), okStep("s2", [receipt("write_file")])];
     expect(founderReceiptsBlock(results)).toContain("2 actions");
   });
 
@@ -122,3 +126,5 @@ describe("founderReceiptsBlock", () => {
     expect(founderReceiptsBlock(results)).not.toContain("job_state");
   });
 });
+
+

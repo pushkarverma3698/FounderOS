@@ -23,6 +23,7 @@ import { missionSatisfied } from "./mission-satisfaction.js";
 import { redactInternalPaths } from "./founder-text.js";
 import { writeTaskOutcome } from "../db/queries.js";
 import { childLogger } from "../infra/logger.js";
+import { HITL_GATED_TOOLS } from "../infra/hitl.js";
 
 const log = childLogger({ module: "kernel:synthesizer" });
 
@@ -101,21 +102,18 @@ export function receiptsBlock(results: StepResult[]): string {
 /**
  * FOUNDER-FACING receipts block.
  *
- * Same guarantee as the internal one — every claim above this line is backed by
- * a recorded execution — carried by a count instead of a tool inventory. Tool
- * names, hashes and timestamps-per-call are internal detail: they cost the
- * founder attention, tell them nothing they can act on, and are the single
- * largest scorer against the product in the reality benchmark (22 of 24 replies
- * failed the leakage dimension on this block alone, 2026-08-14).
- *
- * The mechanism is untouched. Only the audience changed.
+ * Appends "✓ N action(s) completed and verified" only when:
+ * 1. No step in the mission failed.
+ * 2. At least one side-effecting (HITL-gated) tool call succeeded.
  */
 export function founderReceiptsBlock(results: StepResult[]): string {
-  const count = okReceipts(results).length;
+  if (results.some((r) => r.status === "failed")) return "";
+  const count = okReceipts(results).filter((t) => HITL_GATED_TOOLS.has(t.tool)).length;
   if (count === 0) return "";
   const noun = count === 1 ? "action" : "actions";
   return `\n\n—\n✓ ${count} ${noun} completed and verified`;
 }
+
 
 /** Per-step char cap in the deterministic fallback reply (Telegram-friendly). */
 const FALLBACK_OUTPUT_MAX_CHARS = 600;
