@@ -17,17 +17,9 @@ import { cmd, esc } from "./telegram-format.js";
 import type { BriefRow } from "./brief-row.js";
 
 /**
- * The exact command that runs the Mac apply client.
- *
- * DECLARED ONCE, here, and imported by both the brief's HOW TO APPLY block and
- * the gateway's `/draft` packet message. Both used to spell it themselves — one
- * of them as the bare phrase "run the Mac Client", which names a thing without
- * saying how to start it, on a phone where `mac-client/README.md` is not open.
- * Two hand-written copies of a path drift, and the direction they drift in is
- * "the command printed in Telegram no longer exists on disk".
- *
- * It lives on this side of the import boundary because the direction only runs
- * one way (contracts ← kernel ← gateway) and the gateway is what imports it.
+ * The exact command that runs the Mac apply client. No longer printed in the
+ * brief or the `/draft` packet (a shell command is unusable on a phone); kept
+ * as the one declared copy for anything that documents the Mac lane.
  */
 export const MAC_CLIENT_COMMAND =
   "cd ~/Projects/founderos/mac-client && .venv/bin/python -m mac_client.apply";
@@ -111,14 +103,13 @@ export function renderNextActions(
     );
   }
 
+  // No shell command and no typed /applied: the 📝 Draft buttons under the brief
+  // tailor the CV, and the ✅ I applied button under the CV closes the row. Both
+  // work from a phone. The Mac client still exists; it is just not the apply path.
   const applyInstructions =
-    `\n\n<b>🚀 HOW TO APPLY (2 WAYS)</b>\n` +
-    `<b>1. The Fast Way:</b> Type ${cmd(`/draft ${sel}all`)} to auto-tailor CVs for all jobs above. ` +
-    `Then run <code>${MAC_CLIENT_COMMAND}</code> on your Mac — it opens every queued role with ` +
-    `the form already filled and waits for your click.\n` +
-    `<b>2. The Manual Way:</b> Type ${cmd(`/draft ${sel}<number>`)} (e.g. ${cmd(`/draft ${sel}1`)}) to get the ` +
-    `tailored PDF and a direct application link. Apply in your browser, then type ` +
-    `${cmd(`/applied ${sel}1`)} to clear it from the queue.`;
+    `\n\n<b>🚀 HOW TO APPLY</b>\n` +
+    `Tap <b>📝 Draft</b> under this message. You get the tailored CV and the form link; ` +
+    `after you apply, tap <b>✅ I applied</b>. Or type ${cmd(`/draft ${sel}<number>`)}.`;
 
   return (
     `<b>▶️ DO THIS NEXT</b>\n` +

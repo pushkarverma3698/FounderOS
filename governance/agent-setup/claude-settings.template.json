@@ -1,0 +1,143 @@
+{
+  "env": {
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1"
+  },
+  "model": "sonnet",
+  "fallbackModel": [
+    "sonnet"
+  ],
+  "effortLevel": "medium",
+  "modelSettings": {
+    "opus": {
+      "effortLevel": "medium"
+    },
+    "sonnet": {
+      "effortLevel": "medium"
+    }
+  },
+  "autoCompactEnabled": true,
+  "awaySummaryEnabled": true,
+  "tui": "fullscreen",
+  "permissions": {
+    "allow": [
+      "Bash(npm *)",
+      "Bash(pnpm *)",
+      "Bash(bun *)",
+      "Bash(git diff *)",
+      "Bash(git status)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git pull *)",
+      "Bash(git fetch *)",
+      "Bash(git merge *)",
+      "Bash(git stash *)",
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(grep *)",
+      "Bash(sed *)",
+      "Bash(awk *)",
+      "Bash(curl *)",
+      "Bash(jq *)",
+      "Bash(uv *)",
+      "Bash(pip *)",
+      "Bash(python3 *)",
+      "Bash(node *)",
+      "Bash(npx *)",
+      "Bash(docker ps *)",
+      "Bash(docker start *)",
+      "Bash(docker exec *)",
+      "Bash(which *)",
+      "Bash(ssh founderos-vps *)",
+      "Bash(gh *)",
+      "Bash(tsc *)",
+      "Bash(vitest *)",
+      "Bash(pytest *)",
+      "Bash(graphify *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(chmod *)",
+      "Bash(touch *)",
+      "Bash(mkdir *)",
+      "Edit",
+      "Read",
+      "Write",
+      "Glob",
+      "Grep",
+      "Agent",
+      "Skill",
+      "Skill(*)",
+      "mcp__personal-rag__search_personal_knowledge",
+      "mcp__personal-rag__get_career_overview",
+      "mcp__personal-rag__search_by_doc_type",
+      "mcp__personal-rag__search_wiki",
+      "mcp__turicks-brain__*",
+      "mcp__ollama__generate",
+      "mcp__ollama__embed",
+      "mcp__ollama__classify",
+      "mcp__ollama__health"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
+      "Bash(rm -fr *)",
+      "Bash(git push --force*)",
+      "Bash(git push *--force*)",
+      "Bash(git reset --hard*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.git-credentials)",
+      "Read(~/.npmrc)",
+      "Read(~/Library/Keychains/**)",
+      "Edit(~/.ssh/**)",
+      "Edit(~/.zshrc)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(~/.config/founderos-hub.env)",
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.production)",
+      "Edit(~/.claude/.credentials.json)",
+      "Edit(~/.config/gh/**)",
+      "Edit(~/.aws/**)",
+      "Bash(cat ~/.ssh/*)",
+      "Bash(cat ~/.aws/*)",
+      "Bash(cat ~/.config/gh/*)",
+      "Bash(cat ~/.git-credentials)",
+      "Bash(cat ~/.claude/.credentials.json)"
+    ],
+    "defaultMode": "acceptEdits"
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": false
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/guard-bash.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "autoCompactWindow": 200000,
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh"
+  }
+}

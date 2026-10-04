@@ -21,7 +21,8 @@
 
 import { InputFile, type Context } from "grammy";
 import * as path from "node:path";
-import { updateApplicationStage, type BriefSection } from "../db/job-queries.js";
+import type { BriefSection } from "../db/job-queries.js";
+import { markRowApplied, packetKeyboard } from "./jobhunt-buttons.js";
 import { listApplyQueue } from "../db/apply-queries.js";
 import {
   resolveProfileArg,
@@ -37,7 +38,6 @@ import {
   DRAFT_SECTIONS,
   type ApplicationPacket,
 } from "../tools/jobhunt/apply-packet.js";
-import { MAC_CLIENT_COMMAND } from "../tools/jobhunt/brief.js";
 import { truncateAtWord } from "../tools/jobhunt/telegram-format.js";
 import { ARTIFACT_ROOT } from "../core/config.js";
 import { threadIdFor } from "./kernel-run.js";
@@ -71,7 +71,6 @@ export function parseRowArg(raw: string): number | null {
 
 /** How many rows one `/draft all` will tailor before it stops. */
 export const BULK_DRAFT_CAP = 6;
-
 
 /**
  * Parse the argument of `/draft` into the list of rows to build.
@@ -182,17 +181,16 @@ function artifactDirFor(ctx: Context): string {
 /**
  * The message that turns a delivered PDF into an application.
  *
- * SENT AS ITS OWN MESSAGE, with the apply URL as a tappable link. Everything
- * needed to finish is on one screen: where the form is, what to lead with, and
- * the command that closes the row out. Before this existed `/draft` ended with a
- * PDF and no next step, and prod bears out what that produced — 543 screened
- * rows, 2 applications, and not one `deliver_artifact` in the action log.
+ * SENT AS ITS OWN MESSAGE with two buttons (see `packetKeyboard`): open the form,
+ * then ✅ I applied. No shell command and no typed `/applied N`: both were
+ * unusable on a phone, and prod bears out what that produced: 543 screened rows,
+ * 2 applications, not one `deliver_artifact` in the action log.
  *
  * The matched-skill count is printed because it is the one number that changes
  * a decision: a packet with 3 of 21 matched is worth reading before sending,
  * and one with 17 of 21 is worth sending first.
  */
-export function packetMessage(packet: ApplicationPacket, rank: number): string {
+export function packetMessage(packet: ApplicationPacket, rank?: number): string {
   const { row } = packet;
   const asked = packet.matchedSkills.length + packet.missingSkills.length;
   const overlap =
@@ -201,18 +199,16 @@ export function packetMessage(packet: ApplicationPacket, rank: number): string {
   const linkLine = packet.applyUrl.length === 0
     ? "⚠ No URL on file for this posting — search the company's careers page."
     : packet.opensTheForm
-      ? `<a href="${safeHtml(packet.applyUrl)}">→ Open the application form</a>`
-      : `<a href="${safeHtml(packet.applyUrl)}">→ Open the posting</a> <i>(this ATS hides the form behind its own button)</i>`;
+      ? "Tap <b>Open the form</b>, send the CV above, then tap <b>I applied</b>."
+      : "Tap <b>Open the form</b> <i>(this ATS hides the form behind its own button)</i>, send the CV above, then tap <b>I applied</b>.";
 
   const top = packet.matchedSkills.slice(0, 6).join(", ");
 
   return (
-    `<b>${rank}. ${safeHtml(row.company)} — ${safeHtml(row.title)}</b>\n` +
+    `<b>${rank === undefined ? "" : `${rank}. `}${safeHtml(row.company)} — ${safeHtml(row.title)}</b>\n` +
     `Permit basis: ${safeHtml(row.route)} · matches ${overlap}\n` +
     (top.length > 0 ? `Lead with: ${safeHtml(top)}\n` : "") +
-    `\n${linkLine}\n\n` +
-    `<i>Apply in the browser, then send</i> <code>/applied ${rank}</code><i> to clear it.</i>\n` +
-    `<i>Or leave it queued and run</i> <code>${MAC_CLIENT_COMMAND}</code><i> on your Mac — it opens each queued role with the form already filled and waits for your click.</i>`
+    `\n${linkLine}`
   );
 }
 
@@ -300,7 +296,18 @@ async function draftOneRow(
     await ctx.reply(unresolvedMessage("draft", rank));
     return;
   }
+  await draftRow(ctx, row, deps, progress, profile, rank);
+}
 
+/** Build the application for a resolved row; shared by `/draft N` and the 📝 Draft button. */
+export async function draftRow(
+  ctx: Context,
+  row: JobApplication,
+  deps: JobhuntCommandDeps,
+  progress: string,
+  profile: JobSearchProfile,
+  rank?: number,
+): Promise<void> {
   log.info(
     { command: "draft", rank, company: row.company, id: row.id, profile: profile.id },
     "Brief row command resolved",
@@ -345,6 +352,7 @@ async function draftOneRow(
   await ctx.reply(packetMessage(packet, rank), {
     parse_mode: "HTML",
     link_preview_options: { is_disabled: true },
+    reply_markup: packetKeyboard(row.id, packet.applyUrl),
   });
 }
 
@@ -380,16 +388,8 @@ export async function handleApplied(ctx: Context): Promise<void> {
     return;
   }
 
-  const now = new Date();
-  const updated = await updateApplicationStage(row.id, "applied", {
-    appliedAt: now,
-    // Starts the follow-up clock (T3, 2026-08-25): listFollowupCandidates
-    // measures "days since last_contact_at" to decide when a day-7/day-14
-    // nudge is due, and the day WE applied is the natural day zero for that.
-    lastContactAt: now,
-    clearBriefRank: true,
-  });
-  if (!updated) {
+  const result = await markRowApplied(row);
+  if (!result.ok) {
     await ctx.reply(`Couldn't update ${row.company} — no row with id ${row.id} found. Nothing changed.`);
     return;
   }
