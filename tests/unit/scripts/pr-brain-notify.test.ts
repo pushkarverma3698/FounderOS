@@ -48,6 +48,7 @@ function sweep(opts: {
   comments?: string;
   /** Sweep a root with no repositories in it. */
   noRepos?: boolean;
+  quietNow?: string;
 }): void {
   const env = {
     PATH: `${bin}:/usr/bin:/bin:/usr/local/bin`,
@@ -66,6 +67,7 @@ function sweep(opts: {
     FAKE_COMMENTS: opts.comments ?? "",
     CLAUDE_CALLS: claudeCalls,
     SENDS: sends,
+    ...(opts.quietNow ? { TG_QUIET_NOW: opts.quietNow } : {}),
   };
   spawnSync("bash", [SCRIPT], { env, encoding: "utf8", timeout: 30_000 });
 }
@@ -283,5 +285,25 @@ describe("pr-brain — Claude is called on demand only", () => {
     // The next sweep that has work checks Claude for real, and only then resumes.
     sweep({ preflight: "ok" });
     expect(telegramSends().filter((m) => /resumed/i.test(m))).toHaveLength(1);
+  });
+});
+
+describe("pr-brain — quiet hours and digest", () => {
+  it("holds notifications into queue during quiet hours and flushes as digest after 08:00", () => {
+    // During quiet hours (02:00 IST), sweep produces zero direct curl sends and holds 1 line in queue
+    sweep({ preflight: "ok", quietNow: "02" });
+    expect(telegramSends()).toHaveLength(0);
+    const queueFile = join(home, ".claude", "tg-digest.queue");
+    expect(existsSync(queueFile)).toBe(true);
+    expect(readFileSync(queueFile, "utf8")).toContain("Gate done — oplify-messaging-api#56");
+
+    // On next sweep after 08:00 IST (09:00 IST), flush digest precedes normal send
+    sweep({ preflight: "ok", head: "bbbb2222", quietNow: "09" });
+    const msgs = telegramSends();
+    expect(msgs.length).toBeGreaterThanOrEqual(2);
+    expect(msgs[0]).toContain("🌅 Overnight digest (1 events)");
+    expect(msgs[0]).toContain("Gate done — oplify-messaging-api#56");
+    expect(msgs[1]).toContain("Gate done — oplify-messaging-api#56");
+    expect(existsSync(queueFile)).toBe(false);
   });
 });

@@ -53,6 +53,14 @@ as_antigravity() {
   sudo -u "$AG_USER" -- bash -lc "$script" _ "$@"
 }
 
+_agy_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+if ! declare -f tg_is_quiet >/dev/null 2>&1; then
+  if [[ -f "$_agy_lib_dir/tg-quiet.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "$_agy_lib_dir/tg-quiet.sh"
+  fi
+fi
+
 # ------------------------------------------------------------------ Telegram
 _agy_tg_creds() {
   [[ -n "${ENV_FILE:-}" && -f "$ENV_FILE" ]] || return 1
@@ -64,6 +72,7 @@ _agy_tg_creds() {
 # agy_tg_send TEXT -> the new message's id on stdout (nothing when Telegram refused or is unset).
 # A progress ping is cosmetic: it must never fail or block the tick it describes.
 agy_tg_send() {
+  tg_is_quiet 2>/dev/null && return 0
   _agy_tg_creds || return 0
   curl -s --max-time 20 \
     "https://api.telegram.org/bot${AGY_TG_TOKEN}/sendMessage" \
@@ -76,6 +85,7 @@ agy_tg_send() {
 
 # agy_tg_edit ID TEXT — replaces the text of message ID. Silent when there is no ID (the send failed).
 agy_tg_edit() {
+  tg_is_quiet 2>/dev/null && return 0
   [[ -n "${1:-}" ]] || return 0
   _agy_tg_creds || return 0
   curl -s -o /dev/null --max-time 20 \

@@ -473,7 +473,21 @@ describe("the real file, in the repo layout (helpers in deploy/lib)", () => {
     const r = sb.tick({ args: ["--help"] });
 
     expect(r.status).toBe(1);
-    expect(sb.log()).toMatch(/FATAL: lib\/down-state\.sh not found/);
+    expect(sb.log()).toMatch(/FATAL: lib\/.*\.sh not found/);
     expect(sb.log()).toMatch(/sync-daemons/);
+  });
+});
+
+describe("agent-dispatch — Telegram quiet hours", () => {
+  it("holds notifications into queue during quiet hours and delivers digest after 08:00", () => {
+    sb.tick({ agyOut: `${"I am working on it.\n".repeat(5)}${AUTH_LINE}`, env: { TG_QUIET_NOW: "02" } });
+    expect(sb.messages()).toHaveLength(0);
+    const queueFile = sb.home + "/.claude/tg-digest.queue";
+    expect(readFileSync(queueFile, "utf8")).toContain("agent-dispatch");
+
+    sb.tick({ agyOut: "ok", env: { TG_QUIET_NOW: "09" } });
+    const msgs = sb.messages();
+    expect(msgs.length).toBeGreaterThanOrEqual(1);
+    expect(msgs[0]).toContain("🌅 Overnight digest");
   });
 });

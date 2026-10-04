@@ -83,6 +83,15 @@ private to it): a per-minute cron line, `agent-dispatch --kicked`, turns the not
 `deploy/sync-daemons.sh` installs that line (copied from the `agent-dispatch` line already in the crontab, so the
 same user, PATH and env file), idempotently. With no note it exits at once, silently.
 
+## Telegram quiet hours
+
+The VPS daemons continue running 24/7, but Telegram notifications are held during quiet hours (23:00–08:00 IST by default).
+
+- **Quiet window:** Current time in `Asia/Kolkata` is `>= 23:00` or `< 08:00`. Override with `TG_QUIET_HOURS` (e.g. `23-08`). For unit tests, `TG_QUIET_NOW=HH` forces the current IST hour.
+- **Queue path:** Held notifications are saved to `$HOME/.claude/tg-digest.queue`.
+- **Cosmetic progress:** Live progress updates (`agy_tg_send` / `agy_tg_edit`) are suppressed during quiet hours and not held.
+- **Flushing digest:** On the first run after 08:00 IST (or whenever not quiet), `tg_flush_digest` atomically moves the queue file, groups identical events with `×count` and the IST time `HH:MM`, and delivers a single morning digest headed `🌅 Overnight digest (N events)`. If delivery fails, the held events are restored to the queue.
+
 ## Pause states: what the founder is told
 
 A loop that stops and says nothing looks exactly like an idle one. Each way the
