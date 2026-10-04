@@ -217,6 +217,56 @@ describe("recallConversation — the answer", () => {
     expect(out).not.toContain("couldn't read the time");
   });
 
+  describe("a quiet window for 'what did I just ask you?'", () => {
+    /** Serves rows only to queries with no time window, like a log whose last message is older than the window. */
+    function quietLog(rows: RecalledTurn[], earliest: Date) {
+      const queries: TurnQuery[] = [];
+      const deps: RecallDeps = {
+        clock: () => NOW,
+        timeZone: TZ,
+        reader: {
+          async find(q) {
+            queries.push(q);
+            const hits = q.since ? [] : rows.slice(0, q.limit);
+            return { turns: hits, total: hits.length };
+          },
+          async earliest() {
+            return earliest;
+          },
+        },
+      };
+      return { deps, queries };
+    }
+    const OLD = turn({ at: "2026-10-04T08:50:00Z", user_input: "what is running right now?", reply: "Ran /tasks" });
+
+    it("shows the latest saved message instead of 'nothing found', and says how old it is", async () => {
+      const { deps, queries } = quietLog([OLD], new Date("2026-10-04T08:00:00Z"));
+      const out = await recallConversation({ threadId: "t", when: "just now" }, deps);
+      expect(queries).toHaveLength(2); // the window, then the one-message fallback
+      expect(queries[1]).toMatchObject({ limit: 1, terms: [] });
+      expect(queries[1]!.since).toBeUndefined();
+      expect(out).toContain("Nothing in the last 30 minutes");
+      expect(out).toContain('You: "what is running right now?"');
+      expect(out).toContain("Today, 2:20 PM");
+      expect(out).not.toContain("Try a wider time range");
+    });
+
+    it("stays honest when the log is empty, for a topic, and for windows that are not a short look-back", async () => {
+      const empty = quietLog([], new Date("2026-10-04T08:00:00Z"));
+      expect(await recallConversation({ threadId: "t", when: "just now" }, empty.deps)).toContain("I found nothing");
+
+      const topic = quietLog([OLD], new Date("2026-10-04T08:00:00Z"));
+      const withTopic = await recallConversation({ threadId: "t", when: "just now", about: "visa" }, topic.deps);
+      expect(withTopic).toContain("I found nothing");
+      expect(withTopic).not.toContain('You: "what is running right now?"');
+
+      const day = quietLog([OLD], new Date("2026-10-01T00:00:00Z"));
+      const yesterday = await recallConversation({ threadId: "t", when: "yesterday" }, day.deps);
+      expect(yesterday).toContain("I found nothing");
+      expect(yesterday).not.toContain('You: "what is running right now?"');
+    });
+  });
+
   it("'show more' raises the cap to 12", async () => {
     const { deps, queries } = fakeReader([turn({ at: "2026-10-03T08:00:00Z" })], new Date("2026-10-01T00:00:00Z"));
     await recallConversation({ threadId: "t", when: "yesterday", more: true }, deps);
