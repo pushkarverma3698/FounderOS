@@ -59,6 +59,7 @@ import {
   reclaimStrandedReminders,
 } from "../db/queries.js";
 import { nextRecurrence } from "../core/time.js";
+import { bookNextOccurrence } from "./task-recurrence.js";
 import { providerLinkedInPost } from "./providers/index.js";
 import { sendToChat } from "./telegram-send.js";
 import { childLogger } from "./logger.js";
@@ -224,6 +225,15 @@ export async function runScheduledTaskSweep(executor: ScheduledTaskExecutor): Pr
   // Atomic claim ('scheduled' → 'running') — overlap-safe, same as the post sweep.
   const due = await claimDueScheduledTasks(TENANT, new Date());
   for (const task of due) {
+    // A recurring task books its next run before this one starts (task-recurrence.ts).
+    // A booking failure does not stop this run; it is reported, never swallowed.
+    await bookNextOccurrence(task).catch((err) =>
+      sendToChat(
+        `⚠️ <b>Repeating task: next run not booked</b> (${escapeHtml((err as Error).message)}). ` +
+          `This run goes ahead; schedule it again to keep it repeating.\n<code>${escapeHtml(task.prompt.slice(0, 200))}</code>`,
+        "HTML",
+      ).catch((sendErr) => log.error({ id: task.id, err: String(sendErr) }, "Could not report an unbooked repeat")), // allow-failopen: logged; a Telegram blip must not stop the due tasks from firing
+    );
     try {
       await executor(task);
     } catch (err) {

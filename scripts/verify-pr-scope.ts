@@ -19,7 +19,8 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 export const OUTCOMES = ["A", "B", "C", "D"] as const;
-export type Move = (typeof OUTCOMES)[number] | "crash-fix";
+// `unfreeze` is founder-approved work outside A–D; it counts only with the `unfreeze` label (evaluatePrScope).
+export type Move = (typeof OUTCOMES)[number] | "crash-fix" | "unfreeze";
 
 /** Path prefixes under the freeze. Prefix match, so `src/tools/video-` covers every video-* tool. */
 export const FROZEN_PREFIXES: readonly string[] = [
@@ -58,6 +59,7 @@ export function parseMoves(body: string): Move[] {
     const tok = raw.trim();
     if (!tok) continue;
     if (tok.toLowerCase() === "crash-fix") out.push("crash-fix");
+    else if (tok.toLowerCase() === "unfreeze") out.push("unfreeze");
     else if ((OUTCOMES as readonly string[]).includes(tok.toUpperCase())) out.push(tok.toUpperCase() as Move);
   }
   return [...new Set(out)];
@@ -82,6 +84,8 @@ export function evaluatePrScope(input: PrScopeInput): { ok: boolean; problems: s
       "The PR body has no `Moves:` line. Add one naming the outcome this PR moves: " +
         "`Moves: A` (coding PRs), `B` (status), `C` (jobs), `D` (model switch), or `Moves: crash-fix`.",
     );
+  } else if (parseMoves(input.body).includes("unfreeze") && !input.labels.includes("unfreeze")) {
+    problems.push("`Moves: unfreeze` needs the `unfreeze` label: only the founder approves work outside outcomes A–D.");
   }
   const frozen = frozenTouches(input.files);
   if (frozen.length > 0 && !input.labels.some((l) => PASS_LABELS.includes(l))) {

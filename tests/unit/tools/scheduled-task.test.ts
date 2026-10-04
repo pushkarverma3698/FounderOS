@@ -80,4 +80,41 @@ describe("scheduleTaskTool", () => {
     expect(res.error).toMatch(/prompt/);
     expect(mockInsert).not.toHaveBeenCalled();
   });
+
+  it("persists a recurring task with its spec and the first occurrence as scheduled_at", async () => {
+    const before = Date.now();
+    const res = await scheduleTaskTool.execute({
+      prompt: "Summarise yesterday's PRs",
+      recurrence: "daily@08:00",
+      chat_id: "1",
+      idempotency_key: "k5",
+      tenant_id: "turicks",
+    });
+    expect(res.success).toBe(true);
+    const row = mockInsert.mock.calls[0]![0] as { scheduled_at: Date; recurrence: string };
+    expect(row.recurrence).toBe("daily@08:00");
+    expect(row.scheduled_at.getTime()).toBeGreaterThan(before);
+    expect(row.scheduled_at.getTime()).toBeLessThanOrEqual(before + 24 * 3_600_000 + 60_000);
+    expect((res.data as { recurrence: string }).recurrence).toBe("every day at 08:00");
+  });
+
+  it("stores no recurrence for a one-shot task", async () => {
+    await scheduleTaskTool.execute({ prompt: "x", scheduled_at: FUTURE, chat_id: "1", idempotency_key: "k6", tenant_id: "turicks" });
+    expect((mockInsert.mock.calls[0]![0] as { recurrence?: unknown }).recurrence ?? null).toBeNull();
+  });
+
+  it("rejects a repeat rule it cannot parse, naming the accepted forms", async () => {
+    const res = await scheduleTaskTool.execute({ prompt: "x", recurrence: "every morning", chat_id: "1", idempotency_key: "k7", tenant_id: "turicks" });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/daily@08:00/);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects both a time and a repeat rule, and neither", async () => {
+    const both = await scheduleTaskTool.execute({ prompt: "x", scheduled_at: FUTURE, recurrence: "daily@08:00", chat_id: "1", idempotency_key: "k8", tenant_id: "turicks" });
+    const neither = await scheduleTaskTool.execute({ prompt: "x", chat_id: "1", idempotency_key: "k9", tenant_id: "turicks" });
+    expect(both.success).toBe(false);
+    expect(neither.success).toBe(false);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
 });
