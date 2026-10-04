@@ -320,7 +320,7 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
 
       const child = (state as ClaudeState | undefined)?.child;
       if (!child || child.exited) {
-        return { ok: false, html: "That sign-in attempt has ended. Send /login claude for a fresh link." };
+        return { ok: false, ended: true, html: "That sign-in attempt has ended. Send /login claude for a fresh link." };
       }
       if (!looksLikeCode(text)) {
         return { ok: false, html: "That does not look like the code from the sign-in page (one string, no spaces). Paste it again, or /login claude for a fresh link." };
@@ -339,6 +339,7 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
         log.warn({ timedOut: !got }, "claude setup-token gave no token for the pasted code");
         return {
           ok: false,
+          ended: true,
           html: got
             ? "Claude refused that code (a code works once). Send /login claude for a fresh link."
             : "No token came back within 45 seconds. Send /login claude to try again.",
