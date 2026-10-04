@@ -27,6 +27,9 @@ import {
   unknownCommandReply,
 } from "./commands.js";
 import { handleAsk, handleDraft, handleApplied } from "./jobhunt-commands.js";
+import { injectSenderProfile, parseSenderProfiles } from "./jobhunt-sender-profile.js";
+import { weeklyApplicationGoal } from "./jobhunt-goal.js";
+import { handleJobCallback } from "./jobhunt-callbacks.js";
 import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
 import { handleWifeCommands } from "./wife-commands.js";
@@ -106,6 +109,7 @@ function isDecisionButton(data: string): boolean {
 export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultChatAccess()): void {
   // Per process: the "how to let the others in" hint is said once per group.
   const hintedGroups = new Set<string>();
+  const senderProfiles = parseSenderProfiles(env.JOBHUNT_SENDER_PROFILES);
 
   bot.use(async (ctx, next) => {
     const who = classifyChatAccess({ chatId: ctx.chat?.id, chatType: ctx.chat?.type, fromId: ctx.from?.id }, access);
@@ -114,6 +118,8 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
       return;
     }
     const msg = ctx.message;
+    const senderProfile = ctx.from ? senderProfiles.get(ctx.from.id) : undefined;
+    if (msg?.text && senderProfile) msg.text = injectSenderProfile(msg.text, senderProfile);
     if (msg && ctx.chat) {
       const me = { id: ctx.me.id, username: ctx.me.username };
       const addressed = isAddressedToBot(
@@ -214,8 +220,13 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
   // `splitForTelegram` is pure formatting and imported normally.
   const jobsDeps: JobsViewDeps = {
     buildBrief: async (profile, scope) =>
-      (await import("../tools/jobhunt/daily-brief.js")).buildDailyBrief({ profile, scope }),
+      (await import("../tools/jobhunt/daily-brief.js")).buildDailyBrief({
+        profile,
+        scope,
+        weeklyGoal: await weeklyApplicationGoal(profile.id),
+      }),
     split: splitForTelegram,
+    topRoles: async (profile) => (await import("./jobhunt-compact.js")).topRolesFor(profile),
     lastFreshView: async (profileId) =>
       (await import("../db/job-heartbeat-queries.js")).lastFreshView(profileId),
     recordFreshView: async (profileId, at) =>
@@ -283,6 +294,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     if (await handleMenuCallback(ctx)) return;
     if (await handleRetryCallback(ctx)) return;
     if (await handleCommandCallback(ctx)) return;
+    if (await handleJobCallback(ctx, { runKernelText }, jobsDeps)) return;
     if (!data.startsWith("approve") && !data.startsWith("reject")) {
       await ctx.answerCallbackQuery({ text: "Unknown action" });
       return;

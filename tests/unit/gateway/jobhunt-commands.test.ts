@@ -249,12 +249,16 @@ describe("handleDraft (resolution path)", () => {
     expect(letterText).toContain("<pre>");
     expect(letterText).not.toMatch(/⚠/);
 
-    // The packet message: where the form is, and how to close the row out. The
-    // rank in `/applied 2` must be the rank the founder typed, not the row's
-    // database id or its position in some other list.
-    const [packetText] = (reply.mock.calls[2] ?? []) as unknown as [string?];
+    // The packet message: what to tap. The ✅ button must carry the ROW's id (stable),
+    // not the brief number, which is re-pinned on every rebuild.
+    const [packetText, packetOpts] = (reply.mock.calls[2] ?? []) as unknown as [
+      string?,
+      { reply_markup?: { inline_keyboard: { callback_data?: string }[][] } }?,
+    ];
     expect(packetText).toContain("Aquablu");
-    expect(packetText).toContain("/applied 2");
+    expect(packetText).toContain("I applied");
+    const buttons = packetOpts?.reply_markup?.inline_keyboard.flat() ?? [];
+    expect(buttons.some((b) => b.callback_data === `jh:a:${ROW.id}`)).toBe(true);
 
     const written = await fs.readdir(artifactDir);
     expect(written.length).toBe(1);

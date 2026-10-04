@@ -72,6 +72,24 @@ export async function listApplyQueue(
 }
 
 /**
+ * One row by its id, scoped to a tenant. The id is the STABLE handle: a button
+ * on a three-day-old message still names the same company, where a brief number
+ * is re-pinned on every rebuild.
+ */
+export async function getApplicationById(
+  id: string,
+  tenantId: string = DEFAULT_TENANT,
+): Promise<JobApplication | null> {
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(jobApplications)
+    .where(and(eq(jobApplications.id, id), eq(jobApplications.tenant_id, tenantId)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
  * The audit trail: everything screened recently, rejects included.
  *
  * Rejects are the point. A row that was screened and thrown away is the only
