@@ -23,9 +23,8 @@
  * seconds it costs to rank again.
  */
 
-import { InputFile, type Context, type InlineKeyboard } from "grammy";
-import { draftKeyboard } from "./jobhunt-buttons.js";
-import { cvGapsTool, DEFAULT_GAP_TRACK } from "../tools/jobhunt/gaps.js";
+import { InputFile, type Context } from "grammy";
+import { DRAFT_BUTTON_COUNT, draftButtonsFor, isPlainRequest, sendCompactBrief, type CompactLookup } from "./jobhunt-compact.js";
 import { listApplyQueue, listRecentlyScreened } from "../db/apply-queries.js";
 import { resolveProfileArg, isProfileArgMiss } from "./jobhunt-profile-arg.js";
 import {
@@ -227,23 +226,11 @@ export interface JobsViewDeps {
   readonly lastFreshView: (profileId: string) => Promise<Date | null>;
   /** Stamp "seen up to here". Called only after a `/fresh` actually rendered. */
   readonly recordFreshView: (profileId: string, at: Date) => Promise<void>;
+  /** Ready-to-apply roles for the one-message brief. Absent = always send the full brief. */
+  readonly topRoles?: (profile: JobSearchProfile) => Promise<CompactLookup>;
 }
 
-/** How many 📝 Draft buttons a brief carries. */
-export const DRAFT_BUTTON_COUNT = 3;
-
-/** Top queued roles that appear in the rendered brief, as a keyboard; null when none do. */
-export async function draftButtonsFor(profile: JobSearchProfile, brief: string): Promise<InlineKeyboard | null> {
-  try {
-    const queue = await listApplyQueue(profile.tenantId, profile.id);
-    const shown = queue.filter((r) => brief.includes(safeHtml(r.company))).slice(0, DRAFT_BUTTON_COUNT);
-    return shown.length > 0 ? draftKeyboard(shown) : null;
-  } catch (err) {
-    // allow-failopen: buttons are a convenience on top of a brief that already rendered.
-    log.warn({ err: (err as Error).message }, "Draft buttons not built");
-    return null;
-  }
-}
+export { draftButtonsFor, DRAFT_BUTTON_COUNT };
 
 /** What the founder is told is happening, per verb, while the ranking runs. */
 const RUNNING_LINE: Record<BriefVerb, string> = {
@@ -287,6 +274,14 @@ export async function handleBriefVerb(
       lastFreshView: verb === "fresh" ? await deps.lastFreshView(profile.id) : null,
     });
     const brief = await deps.buildBrief(profile, scope);
+    // The ranking above pins brief_rank, so the roles the card shows are the ones /draft resolves.
+    if (
+      deps.topRoles &&
+      verb !== "fresh" &&
+      isPlainRequest(ctx.match?.toString() ?? "", verb) &&
+      (await sendCompactBrief(ctx, profile, verb, request.explicitProfile, deps.topRoles))
+    )
+      return;
     const chunks = deps.split(brief);
     // 📝 Draft buttons on the LAST message, so the apply loop starts with a tap.
     // Only roles the brief actually printed: a /today slice must not offer a company
@@ -335,64 +330,4 @@ export async function handleFresh(ctx: Context, deps: JobsViewDeps): Promise<voi
   await handleBriefVerb(ctx, "fresh", deps);
 }
 
-/**
- * Which track a `/gaps` report is about.
- *
- * READ OFF THE PROFILE, never off `DEFAULT_GAP_TRACK`. That constant is the
- * string "ai" — one of Pushkar's four tracks and none of Tashi's. Passing it for
- * her would measure the TECH market's vocabulary against her finance CV, and
- * `buildGapReport` would dutifully report every finance term as a gap and every
- * tech term as missing: confidently wrong in both directions at once.
- *
- * An unrecognised track falls back to the profile's own first track rather than
- * erroring. The founder typing `/gaps ai` at the wrong profile means "show me
- * the gaps", and the honest answer is her real market, labelled — `formatGapReport`
- * always prints the track it reported on.
- */
-export function gapsTrackFor(profile: JobSearchProfile, rest: string): string {
-  const asked = rest.trim().toLowerCase();
-  const fallback = profile.trackPriority[0] ?? DEFAULT_GAP_TRACK;
-  return asked.length > 0 && profile.tracks[asked] ? asked : fallback;
-}
-
-/**
- * `/gaps [who] [track]` — what the screened market asks for that the CV does not say.
- *
- * THE MISSING HALF OF `/draft`. Tailoring is bounded by a closed vocabulary: it
- * may only name technologies the base CV already states, so it CANNOT raise the
- * keyword coverage a recruiter's search runs against — by construction, not by
- * accident (see tailor-cv.ts). The only thing that moves that number is the
- * founder adding a term to his base CV, and this is the ranked list of which
- * terms are worth the decision.
- *
- * SUGGESTS ONLY. The report never edits a CV, and it must not: a term the CV
- * omits is either a wording gap or a real one, and the difference is a fact
- * about a person that nobody but that person can supply.
- */
-export async function handleGaps(ctx: Context): Promise<void> {
-  const selected = resolveProfileArg(ctx.match?.toString() ?? "", []);
-  if (isProfileArgMiss(selected)) {
-    await ctx.reply(profileMissMessage(selected));
-    return;
-  }
-
-  const track = gapsTrackFor(selected.profile, selected.rest);
-  try {
-    const result = await cvGapsTool.execute({ track, profile: selected.profile.id });
-    if (!result.success) {
-      await ctx.reply(`❌ Couldn't build the gap report: ${safeHtml(result.error ?? "unknown")}`, {
-        parse_mode: "HTML",
-      });
-      return;
-    }
-    log.info({ track, profile: selected.profile.id }, "CV gap report requested");
-    await ctx.reply(String(result.data));
-  } catch (err) {
-    // Never silent — the whole reason this command exists is that the engine
-    // behind it ran for a month with no way to reach it.
-    log.error({ track, err: (err as Error).message }, "/gaps failed");
-    await ctx.reply(`❌ Couldn't build the gap report: ${safeHtml((err as Error).message)}`, {
-      parse_mode: "HTML",
-    });
-  }
-}
+export { gapsTrackFor, handleGaps } from "./jobhunt-gaps-view.js";

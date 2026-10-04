@@ -52,6 +52,12 @@ export interface SignalRow {
   readonly seen_count: number;
 }
 
+export interface CoveredTerm {
+  readonly term: string;
+  readonly by: string;
+  readonly seen_count: number;
+}
+
 export interface GapReport {
   readonly sampleSize: number;
   /** Frequent in the market, absent from the CV. */
@@ -62,7 +68,21 @@ export interface GapReport {
   readonly rising: readonly SignalRow[];
   /** Recognisable skill terms found in the CV — the report's other denominator. */
   readonly cvTermCount: number;
+  /** Market terms the CV covers by implication, with the CV term that covers them. */
+  readonly covered: readonly CoveredTerm[];
 }
+
+/**
+ * Market term → CV terms that already imply it. DIRECTIONAL on purpose: a
+ * TypeScript CV states JavaScript, but a JavaScript-only CV does not state
+ * TypeScript, and calling that a non-gap would hide a real one. Kept short and
+ * defensible; every entry is a claim that holding the right-hand skill means
+ * holding the left-hand one.
+ */
+export const IMPLIED_BY: Readonly<Record<string, readonly string[]>> = {
+  JavaScript: ["TypeScript"],
+  SQL: ["PostgreSQL", "MySQL"],
+};
 
 /**
  * A CV yielding fewer recognisable terms than this cannot support a claim about
@@ -95,13 +115,18 @@ export function buildGapReport(
   const floor = Math.max(1, Math.ceil(sampleSize * MIN_SHARE_TO_REPORT));
 
   const known = signals.filter((s) => s.category !== "unknown");
-  const missing = known.filter((s) => !cvTerms.has(s.term) && s.seen_count >= floor);
+  const coveredBy = (term: string): string | undefined => IMPLIED_BY[term]?.find((t) => cvTerms.has(t));
+  const missing = known.filter((s) => !cvTerms.has(s.term) && !coveredBy(s.term) && s.seen_count >= floor);
+  const covered = known.flatMap((s) => {
+    const by = !cvTerms.has(s.term) && s.seen_count >= floor ? coveredBy(s.term) : undefined;
+    return by ? [{ term: s.term, by, seen_count: s.seen_count }] : [];
+  });
   const confirmed = known.filter((s) => cvTerms.has(s.term));
   const rising = signals.filter(
     (s) => s.category === "unknown" && s.seen_count >= UNKNOWN_REPORT_THRESHOLD,
   );
 
-  return { sampleSize, missing, confirmed, rising, cvTermCount: cvTerms.size };
+  return { sampleSize, missing, confirmed, rising, cvTermCount: cvTerms.size, covered };
 }
 
 function pct(count: number, sample: number): string {
@@ -168,6 +193,13 @@ export function formatGapReport(
           "name — check those first; a wording fix costs nothing.",
   );
 
+  if (report.covered.length > 0) {
+    sections.push(
+      "COVERED — not a gap, your CV already implies it:\n" +
+        report.covered.map((c) => `  · ${c.term.padEnd(22)} via ${c.by}  ${pct(c.seen_count, sampleSize)}`).join("\n"),
+    );
+  }
+
   if (confirmed.length > 0) {
     sections.push(
       "CONFIRMED — in your CV and in demand:\n" +
@@ -232,50 +264,62 @@ export const cvGapsTool: UnifiedTool = {
   },
 
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
-    const category = args["category"];
-    const rawTrack = args["track"];
-    const track =
-      typeof rawTrack === "string" && (TRACK_PRIORITY as readonly string[]).includes(rawTrack)
-        ? rawTrack
-        : DEFAULT_GAP_TRACK;
-
-    let signals: SignalRow[];
-    let sampleSize: number;
-    try {
-      const rows = await listSignals({
-        track,
-        ...(typeof category === "string" && category.length > 0 ? { category } : {}),
-      });
-      signals = rows.map((r) => ({
-        term: r.term,
-        category: r.category,
-        seen_count: r.seen_count,
-      }));
-      // Same population on both sides. An all-track denominator under a
-      // single-track numerator understates every percentage in the report.
-      sampleSize = await countPassingApplications({ track });
-    } catch (err) {
-      return { success: false, error: `Signal store unreachable: ${(err as Error).message}` };
-    }
-
-    // The WHOLE CV, not a search result. read_cv answers a query and returns
-    // matching excerpts; a gap report is a claim about what the CV does NOT say,
-    // and absence can only be read off the complete document. An unreadable or
-    // implausibly short CV fails loudly rather than making every term look missing.
-    const profile = getProfile((args["profile"] as string | undefined) ?? DEFAULT_PROFILE_ID);
-    const trackCvPath = track ? profile.tracks[track]?.cvPath : undefined;
-    const explicitPaths = [
-      ...(trackCvPath ? [trackCvPath] : []),
-      ...(profile.baseCvPath ? [profile.baseCvPath] : []),
-    ];
-    const cv = readFullCvText(track, explicitPaths.length > 0 ? explicitPaths : undefined);
-    if (!cv.ok) return { success: false, error: cv.error };
-
-    const report = buildGapReport(signals, cv.text, sampleSize, profile);
-    log.info(
-      { track, sampleSize, missing: report.missing.length, confirmed: report.confirmed.length },
-      "CV gap report built",
-    );
-    return { success: true, data: formatGapReport(report, { track, cvPath: cv.path }) };
+    const out = await computeGaps(args);
+    return out.ok
+      ? { success: true, data: formatGapReport(out.report, { track: out.track, cvPath: out.cvPath }) }
+      : { success: false, error: out.error };
   },
 };
+
+export type GapsComputed =
+  | { readonly ok: true; readonly report: GapReport; readonly track: string; readonly cvPath: string }
+  | { readonly ok: false; readonly error: string };
+
+/** The structured half of `cv_gaps`, so the Telegram view can build buttons from the same report it prints. */
+export async function computeGaps(args: Record<string, unknown>): Promise<GapsComputed> {
+  const category = args["category"];
+  const rawTrack = args["track"];
+  const track =
+    typeof rawTrack === "string" && (TRACK_PRIORITY as readonly string[]).includes(rawTrack)
+      ? rawTrack
+      : DEFAULT_GAP_TRACK;
+
+  let signals: SignalRow[];
+  let sampleSize: number;
+  try {
+    const rows = await listSignals({
+      track,
+      ...(typeof category === "string" && category.length > 0 ? { category } : {}),
+    });
+    signals = rows.map((r) => ({
+      term: r.term,
+      category: r.category,
+      seen_count: r.seen_count,
+    }));
+    // Same population on both sides. An all-track denominator under a
+    // single-track numerator understates every percentage in the report.
+    sampleSize = await countPassingApplications({ track });
+  } catch (err) {
+    return { ok: false, error: `Signal store unreachable: ${(err as Error).message}` };
+  }
+
+  // The WHOLE CV, not a search result. read_cv answers a query and returns
+  // matching excerpts; a gap report is a claim about what the CV does NOT say,
+  // and absence can only be read off the complete document. An unreadable or
+  // implausibly short CV fails loudly rather than making every term look missing.
+  const profile = getProfile((args["profile"] as string | undefined) ?? DEFAULT_PROFILE_ID);
+  const trackCvPath = track ? profile.tracks[track]?.cvPath : undefined;
+  const explicitPaths = [
+    ...(trackCvPath ? [trackCvPath] : []),
+    ...(profile.baseCvPath ? [profile.baseCvPath] : []),
+  ];
+  const cv = readFullCvText(track, explicitPaths.length > 0 ? explicitPaths : undefined);
+  if (!cv.ok) return { ok: false, error: cv.error };
+
+  const report = buildGapReport(signals, cv.text, sampleSize, profile);
+  log.info(
+    { track, sampleSize, missing: report.missing.length, confirmed: report.confirmed.length },
+    "CV gap report built",
+  );
+  return { ok: true, report, track, cvPath: cv.path };
+}
