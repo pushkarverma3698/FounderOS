@@ -222,12 +222,17 @@ export function getConfiguredModelId(): string {
   return normalizeModelId(raw);
 }
 
-export function getFallbackModelIds(): string[] {
-  // normalizeModelId() applies here too — previously only getConfiguredModelId()
-  // and getWorkerModelId() normalized, so AGENT_FALLBACK_MODELS (the one place
-  // a retired slug actually lived in prod) got zero protection from the alias
-  // table above.
-  return (process.env["AGENT_FALLBACK_MODELS"] ?? "")
+export type ModelRole = "planner" | "worker";
+
+/**
+ * Fallback chain for a role. PLANNER_/WORKER_FALLBACK_MODELS override the shared
+ * AGENT_FALLBACK_MODELS when SET (empty = no fallbacks for that role); unset keeps
+ * the shared chain. Planning wants reasoning models, worker tool-calls fast ones.
+ */
+export function getFallbackModelIds(role?: ModelRole): string[] {
+  const roleVar = role === "planner" ? "PLANNER_FALLBACK_MODELS" : role === "worker" ? "WORKER_FALLBACK_MODELS" : null;
+  const raw = (roleVar ? process.env[roleVar] : undefined) ?? process.env["AGENT_FALLBACK_MODELS"] ?? "";
+  return raw
     .split(",")
     .map((m) => m.trim())
     .filter((m) => m.length > 0)
@@ -379,8 +384,8 @@ function buildModel(
   });
 }
 
-export function buildFallbackModels(): BaseChatModel[] {
-  return getFallbackModelIds()
+export function buildFallbackModels(role?: ModelRole): BaseChatModel[] {
+  return getFallbackModelIds(role)
     .map((id) => buildModel(parseModelId(id), resolveTemperature(), { optional: true }))
     .filter((m): m is BaseChatModel => m !== null);
 }
