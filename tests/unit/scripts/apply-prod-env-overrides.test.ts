@@ -168,6 +168,13 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     expect(valueOf(rendered, "LANGCHAIN_TRACING_V2")).toBe("true");
   });
 
+  it("forwards OPENROUTER_API_KEY with stray invisible characters stripped (2026-10-04: a pasted U+2028 made every call 401)", () => {
+    const key = "sk-or-v1-" + "ab12".repeat(16);
+    const rendered = render("", SNAPSHOT_BASE, { OPENROUTER_API_KEY: `${key}\u2028 \r` });
+    expect(valueOf(rendered, "OPENROUTER_API_KEY")).toBe(key);
+    expect(countOf(rendered, "OPENROUTER_API_KEY")).toBe(1);
+  });
+
   it("does not touch LangSmith vars when LANGCHAIN_API_KEY secret is absent", () => {
     const rendered = render("", SNAPSHOT_BASE);
     expect(valueOf(rendered, "LANGCHAIN_API_KEY")).toBeUndefined();
