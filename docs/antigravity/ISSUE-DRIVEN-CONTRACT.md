@@ -64,19 +64,20 @@ Antigravity through dispatcher Pass B). Silence is not an outcome.
 7. Implement the smallest correct fix.
 8. Add regression coverage (a bug fix starts with a failing test — STANDARDS.md §9).
 9. Run the verification commands named in the issue.
-10. Create a task-specific branch (`task/issue-<N>-<slug>`) in `/opt/agy-workspace/founderos` only.
+10. Stay on the branch the dispatch prompt names; the dispatcher already created it. Do not create,
+    rename or switch branches: the dispatcher finds your PR by that exact branch name.
 11. Commit the implementation.
-12. Push the branch.
-13. Open the PR as **draft**, targeting `beta`.
+12. Push the branch with `git push -u origin HEAD`.
+13. Open the PR as **draft**, targeting the base branch the dispatch prompt names.
 14. Stop. Do not keep iterating once the PR is open and ready for review.
-15. Consume Claude's findings **only through GitHub** (`gh pr view <n> --json comments`,
+15. (Steps 15–18 apply only when the dispatch prompt says this is a re-dispatch.) Consume Claude's findings **only through GitHub** (`gh pr view <n> --json comments`,
     `gh pr checks <n>`) — never through anything relayed by the founder.
 16. If a finding is a BLOCKER: fix it.
 17. Re-run verification.
 18. Push the update; do not open a second PR.
 19. **Never merge.** Not to `beta`, not to `main`.
-20. **Never touch `/opt/founderos` or `/opt/review/founderos`.** The isolated workspace is the only
-    tree Antigravity may write to.
+20. **Never touch `/opt/founderos` or `/opt/review/<repo>`.** The workspace the dispatcher started you
+    in is the only tree Antigravity may write to.
 
 Every completion report must contain evidence — the actual verify command output, not "fixed" on
 its own. This is the same rule STANDARDS.md §12 already states; it applies here too.

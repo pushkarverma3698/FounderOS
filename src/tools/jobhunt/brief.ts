@@ -29,14 +29,18 @@
 
 import { cmd, esc } from "./telegram-format.js";
 import { renderLegend, type BriefRow } from "./brief-row.js";
-import type { JobSearchProfile } from "./profile-config.js";
+import { profileSelector, type JobSearchProfile } from "./profile-config.js";
 import {
+  isNotYourLevel,
   isTooSenior,
+  isUnlawful,
   renderFilterNotes,
   renderMarketBlocks,
   renderRejectLine,
+  renderRejectSections,
   renderSpend,
   renderTrends,
+  REJECT_CAP,
   type SpendLine,
   type TrendRow,
 } from "./brief-sections.js";
@@ -62,7 +66,7 @@ export type { BriefRow, BriefSection } from "./brief-row.js";
 // The reject-line, trends and spend renderers moved to brief-sections.ts on
 // 2026-08-01 when this file crossed its size budget. Re-exported so every
 // existing import site — and every test — keeps resolving here.
-export { isTooSenior, SPEND_WINDOW_DAYS } from "./brief-sections.js";
+export { isNotYourLevel, isTooSenior, isUnlawful, renderRejectSections, SPEND_WINDOW_DAYS, REJECT_CAP } from "./brief-sections.js";
 export type { TrendRow, SpendLine } from "./brief-sections.js";
 // The DO-THIS-NEXT block, the overflow notes and the Mac client's command line
 // moved to brief-actions.ts on 2026-08-24, when widening the apply queue from
@@ -98,17 +102,6 @@ export {
 /** A horizontal rule. Telegram has no <hr>, and a run of box characters reads as one. */
 const RULE = "━━━━━━━━━━━━━━━━━━━━━";
 
-
-/**
- * How many rejected rows are NAMED. The rest are counted.
- *
- * Every reject is stored in `job_applications` regardless — that is the founder's
- * instruction and it is a property of the database, not of this message. What the
- * brief owes him is enough of the list to audit the filter ("is it throwing away
- * things it shouldn't?") without the audit trail outweighing the ten roles he can
- * actually act on.
- */
-export const REJECT_CAP = 10;
 
 /** Below this many days undrafted, the nag would be noise rather than a signal. */
 export const STALE_UNDRAFTED_DAYS = 3;
@@ -188,6 +181,8 @@ function pluralDays(n: number): string {
  * different findings, and collapsing them is how a broken feed hides for a week.
  */
 export function formatDailyBrief(input: BriefInput): string {
+  const sel = input.profile ? profileSelector(input.profile) : "";
+  const withSel = (command: string): string => (sel ? `${command} ${sel}` : command);
   const doToday = selectDoToday(input.rows);
   const stretch = selectStretch(input.rows);
   const askable = selectAskable(input.rows);
@@ -250,8 +245,8 @@ export function formatDailyBrief(input: BriefInput): string {
       ? `<b>✅ APPLY TODAY (0)</b>\nNothing cleared every check <i>and</i> verified still open.`
       : `<b>✅ APPLY TODAY (${totals.doToday})</b>\n` +
           `<i>Every check below cleared. The only thing left is writing it.</i>\n\n` +
-          renderMarketBlocks(doToday, "/draft", "do_today") +
-          overflowNote(totals.doToday, doToday.length, "ready to apply to"),
+          renderMarketBlocks(doToday, "/draft", "do_today", 1, sel) +
+          overflowNote(totals.doToday, doToday.length, "ready to apply to", 1, withSel("/draft")),
   );
 
   // Between APPLY TODAY and ONE QUESTION AWAY, and carrying `/draft` rather than
@@ -265,8 +260,8 @@ export function formatDailyBrief(input: BriefInput): string {
         `<i>Every check cleared except the years — they ask for more than your ~3.5 ` +
         `shipped. That is a wish, not a wall, and applying early is what makes it ` +
         `land. Nothing here needs a question first.</i>\n\n` +
-        renderMarketBlocks(stretch, "/draft", "stretch", doTodayTotal + 1) +
-        overflowNote(totals.stretch, stretch.length, "stretch roles", doTodayTotal + 1),
+        renderMarketBlocks(stretch, "/draft", "stretch", doTodayTotal + 1, sel) +
+        overflowNote(totals.stretch, stretch.length, "stretch roles", doTodayTotal + 1, withSel("/draft")),
     );
   }
 
@@ -281,12 +276,13 @@ export function formatDailyBrief(input: BriefInput): string {
       `<b>📌 STILL OPEN, OLDER THAN TODAY (${totals.standing})</b>\n` +
         `<i>Cleared every check same as APPLY TODAY. These aged out of the ${input.maxAgeHours ?? 24}h ` +
         `window, so we checked again — still accepting applications as of the last check.</i>\n\n` +
-        renderMarketBlocks(standing, "/draft", "standing", doTodayTotal + stretchTotal + 1) +
+        renderMarketBlocks(standing, "/draft", "standing", doTodayTotal + stretchTotal + 1, sel) +
         overflowNote(
           totals.standing,
           standing.length,
           "older roles still open",
           doTodayTotal + stretchTotal + 1,
+          withSel("/draft"),
         ),
     );
   }
@@ -296,36 +292,13 @@ export function formatDailyBrief(input: BriefInput): string {
       `<b>❓ ONE QUESTION AWAY (${totals.askable})</b>\n` +
         `<i>Each has exactly one check we could not settle from the ad. ` +
         `Asking the employer settles it.</i>\n\n` +
-        renderMarketBlocks(askable, "/ask", "ask") +
-        overflowNote(totals.askable, askable.length, "roles one question away"),
+        renderMarketBlocks(askable, "/ask", "ask", 1, sel) +
+        overflowNote(totals.askable, askable.length, "roles one question away", 1, withSel("/ask")),
     );
   }
 
   const rejected = input.rows.filter((r) => r.verdict === "reject");
-  const tooSenior = rejected.filter(isTooSenior);
-  const unlawful = rejected.filter((r) => !isTooSenior(r));
-
-  // Split, because they are different findings and the founder acts on them
-  // differently. "Not lawful" is a fact about the permit system; "too senior" is
-  // a fact about this posting, and a run full of them means the search terms are
-  // aimed above his level.
-  if (tooSenior.length > 0) {
-    sections.push(
-      `<b>🚫 TOO SENIOR / TOO JUNIOR (${tooSenior.length})</b>\n` +
-        `<i>Kept on record, not applied to. Every one names the years it asked for.</i>\n` +
-        tooSenior.slice(0, REJECT_CAP).map(renderRejectLine).join("\n") +
-        overflowNote(tooSenior.length, Math.min(tooSenior.length, REJECT_CAP), "level-barred roles"),
-    );
-  }
-
-  if (unlawful.length > 0) {
-    sections.push(
-      `<b>⛔ NOT LAWFUL (${unlawful.length})</b>\n` +
-        `<i>A legal bar, not a preference. Nothing you write changes these.</i>\n` +
-        unlawful.slice(0, REJECT_CAP).map(renderRejectLine).join("\n") +
-        overflowNote(unlawful.length, Math.min(unlawful.length, REJECT_CAP), "barred roles"),
-    );
-  }
+  sections.push(...renderRejectSections(rejected));
 
   const expired = input.rows.filter((r) => r.liveness === "expired");
   if (expired.length > 0) {
@@ -359,7 +332,7 @@ export function formatDailyBrief(input: BriefInput): string {
   const legend = renderLegend([...input.rows, ...(input.standing ?? [])], input.profile, input.date);
   if (legend.length > 0) sections.push(legend);
 
-  sections.push(renderNextActions(doToday, stretch, askable, doTodayTotal, standing, stretchTotal));
+  sections.push(renderNextActions(doToday, stretch, askable, doTodayTotal, standing, stretchTotal, sel));
 
   return sections.join(`\n\n${RULE}\n\n`);
 }

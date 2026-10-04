@@ -27,6 +27,7 @@
 import { esc } from "./telegram-format.js";
 import { renderRow, trimToSentence, type BriefRow, type BriefSection } from "./brief-row.js";
 import type { PostingCountry } from "./country.js";
+import { overflowNote } from "./brief-actions.js";
 
 /** What the market asked for, accumulated across passing screens. */
 export interface TrendRow {
@@ -173,7 +174,9 @@ export function renderMarketBlocks(
   command: string,
   section: BriefSection,
   startIndex = 1,
+  profileSelector = "",
 ): string {
+  const fullCommand = profileSelector ? `${command} ${profileSelector}` : command;
   const blocks = MARKET_ORDER.flatMap((market) => {
     const rows = selected
       // `row.rank` WINS over the position. The two agree whenever the display is
@@ -187,7 +190,7 @@ export function renderMarketBlocks(
     return [
       `<b>${MARKET_HEADING[market]} (${rows.length})</b>\n` +
         `<i>${esc(MARKET_NOTE[market])}</i>\n\n` +
-        rows.map(({ row, index }) => renderRow(row, index, command, section)).join("\n\n"),
+        rows.map(({ row, index }) => renderRow(row, index, fullCommand, section)).join("\n\n"),
     ];
   });
 
@@ -213,9 +216,88 @@ export function renderFilterNotes(notes: readonly string[]): string {
   );
 }
 
+/** True when the row was rejected on experience or level grounds. */
+export function isNotYourLevel(row: BriefRow): boolean {
+  return row.gates.some(
+    (g) => (g.gate === "Experience" || g.gate === "Level") && g.status === "reject",
+  );
+}
+
 /** True when the row was rejected on the level bar rather than on a legal one. */
 export function isTooSenior(row: BriefRow): boolean {
-  return row.gates.some((g) => g.gate === "Experience" && g.status === "reject");
+  return isNotYourLevel(row);
+}
+
+/** True when the row was rejected on legal permit grounds (Basis or Sponsor). */
+export function isUnlawful(row: BriefRow): boolean {
+  return row.gates.some(
+    (g) => (g.gate === "Basis" || g.gate === "Sponsor") && g.status === "reject",
+  );
+}
+
+/**
+ * How many rejected rows are NAMED. The rest are counted.
+ */
+export const REJECT_CAP = 10;
+
+/**
+ * Render the rejected sections split by their rejecting gate.
+ */
+export function renderRejectSections(rejected: readonly BriefRow[]): string[] {
+  if (rejected.length === 0) return [];
+
+  const notYourLevel = rejected.filter(isNotYourLevel);
+  const unlawful = rejected.filter((r) => !isNotYourLevel(r) && isUnlawful(r));
+  const otherBars = rejected.filter((r) => !isNotYourLevel(r) && !isUnlawful(r));
+
+  const sections: string[] = [];
+
+  if (notYourLevel.length > 0) {
+    sections.push(
+      `<b>🚫 NOT YOUR LEVEL (${notYourLevel.length})</b>\n` +
+        `<i>Kept on record, not applied to. Every one names the years it asked for.</i>\n` +
+        notYourLevel.slice(0, REJECT_CAP).map(renderRejectLine).join("\n") +
+        overflowNote(
+          notYourLevel.length,
+          Math.min(notYourLevel.length, REJECT_CAP),
+          "level-barred roles",
+          1,
+          null,
+        ),
+    );
+  }
+
+  if (unlawful.length > 0) {
+    sections.push(
+      `<b>⛔ NOT LAWFUL (${unlawful.length})</b>\n` +
+        `<i>A legal bar, not a preference. Nothing you write changes these.</i>\n` +
+        unlawful.slice(0, REJECT_CAP).map(renderRejectLine).join("\n") +
+        overflowNote(
+          unlawful.length,
+          Math.min(unlawful.length, REJECT_CAP),
+          "barred roles",
+          1,
+          null,
+        ),
+    );
+  }
+
+  if (otherBars.length > 0) {
+    sections.push(
+      `<b>➖ OTHER BARS (${otherBars.length})</b>\n` +
+        `<i>Filtered on pay, language, location or posting criteria.</i>\n` +
+        otherBars.slice(0, REJECT_CAP).map(renderRejectLine).join("\n") +
+        overflowNote(
+          otherBars.length,
+          Math.min(otherBars.length, REJECT_CAP),
+          "other-barred roles",
+          1,
+          null,
+        ),
+    );
+  }
+
+  return sections;
 }
 
 

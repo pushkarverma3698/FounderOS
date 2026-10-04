@@ -256,15 +256,17 @@ export function createAgyAdapter(overrides: Partial<AgyLoginDeps> = {}): LoginAd
     },
 
     async status(): Promise<readonly LoginTargetStatus[]> {
-      const row = (ok: boolean, detail: string): readonly LoginTargetStatus[] => [{ target: "default", label: "Antigravity (agy)", ok, detail }];
+      const row = (ok: boolean, detail: string, unverified = false): readonly LoginTargetStatus[] => [
+        { target: "default", label: "Antigravity (agy)", ok, detail, ...(unverified ? { unverified } : {}) },
+      ];
       try {
         const probe = await probeLive();
         if (probe.kind === "ok") return row(true, "agy models answers: login works");
         if (probe.kind === "rejected") return row(false, "agy says sign in: /login agy");
         const flag = await d.readDownFlag();
         if (flag?.cls === "auth") return row(false, `agent-dispatch flagged the agy login rejected since ${flag.since}; ${SSH_HINT}`);
-        if (flag) return row(true, `agent-dispatch is paused (${flag.cls}) since ${flag.since}, not for the login; live check unavailable from the bot (${probe.reason})`);
-        return row(true, `no login failure flagged by agent-dispatch; not verified live from the bot (${probe.reason})`);
+        if (flag) return row(true, `agent-dispatch is paused (${flag.cls}) since ${flag.since}, not for the login; live check unavailable from the bot (${probe.reason})`, true);
+        return row(true, `no login failure flagged by agent-dispatch; not verified live from the bot (${probe.reason})`, true);
       } catch (err) {
         // allow-failopen: the status screen must show the other tools even when this one breaks.
         return row(false, `status check failed (${(err as NodeJS.ErrnoException).code ?? "error"})`);

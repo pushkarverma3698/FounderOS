@@ -74,6 +74,18 @@ function outputSummary(result: StepResult & { status: "ok" }): string {
 /** The card's HTML. `retry` says whether a button will be attached, so the text never promises one that is not there. */
 export function renderFailureCard(state: CardState, opts: { retry: boolean }): string {
   const failure = state.failure as FailureReport;
+  const done = (state.results ?? []).filter((r): r is StepResult & { status: "ok" } => r.status === "ok");
+  const doneLines = done.map((r) => {
+    const label = words(objectiveOf(state, r.step_id) ?? "") || `Step ${r.step_id}`;
+    const summary = outputSummary(r);
+    return `• ${safeHtml(clip(label, OBJECTIVE_MAX))}${summary ? ` — ${safeHtml(summary)}` : ""}`;
+  });
+  if (failure?.stage === "hitl_rejected") {
+    // An earlier approved step may already have sent something: name it instead of claiming nothing went out.
+    if (done.length === 0) return "👍 Dropped. Nothing was sent.";
+    return ["👍 Dropped the rest. Nothing more was sent.", "", "✅ <b>Already done:</b>", ...doneLines].join("\n");
+  }
+
   const request = state.turn?.raw_input || state.mission?.goal || "";
   const objective =
     words(objectiveOf(state, failure.step_id) ?? "") || words(request) || "your request";
@@ -84,15 +96,7 @@ export function renderFailureCard(state: CardState, opts: { retry: boolean }): s
     `<b>Why:</b> ${safeHtml(clip(reason, REASON_MAX))}`,
   ];
 
-  const done = (state.results ?? []).filter((r): r is StepResult & { status: "ok" } => r.status === "ok");
-  if (done.length > 0) {
-    lines.push("", "✅ <b>Done before it stopped:</b>");
-    for (const r of done) {
-      const label = words(objectiveOf(state, r.step_id) ?? "") || `Step ${r.step_id}`;
-      const summary = outputSummary(r);
-      lines.push(`• ${safeHtml(clip(label, OBJECTIVE_MAX))}${summary ? ` — ${safeHtml(summary)}` : ""}`);
-    }
-  }
+  if (done.length > 0) lines.push("", "✅ <b>Done before it stopped:</b>", ...doneLines);
 
   const details = [`${failure.stage} · ${failure.component}`, clip(failure.message, DETAIL_MESSAGE_MAX)];
   if (failure.evidence) details.push(`Evidence: ${clip(failure.evidence, EVIDENCE_MAX)}`);
@@ -106,20 +110,25 @@ export function renderFailureCard(state: CardState, opts: { retry: boolean }): s
 
 /**
  * The card for a turn that ended with `state.failure`, or null when there is
- * nothing to retry: no failure, or the founder himself rejected an approval
- * (`hitl_rejected` — the kernel's own "Nothing was sent" text is the answer).
+ * no failure. `hitl_rejected` renders "👍 Dropped. Nothing was sent." with no retry button.
  */
 export function failureCardFor(
   state: CardState,
   opts: { turnId: string; profileId?: string },
 ): FailureCard | null {
-  if (!state.failure || state.failure.stage === "hitl_rejected") return null;
+  if (!state.failure) return null;
+  if (state.failure.stage === "hitl_rejected") {
+    return {
+      html: renderFailureCard(state, { retry: false }),
+    };
+  }
   const keyboard = retryKeyboard(opts.turnId, opts.profileId);
   return {
     html: renderFailureCard(state, { retry: keyboard !== undefined }),
     ...(keyboard ? { keyboard } : {}),
   };
 }
+
 
 /**
  * Send the card. If it is too long for one message, or Telegram rejects it,
