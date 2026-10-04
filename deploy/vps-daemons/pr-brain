@@ -73,6 +73,11 @@
 #                                  appears, one when it goes — nothing per tick.
 #   ~/.claude/pr-brain.failures/   one file per PR: "<head> <failed-attempts>".
 #   ~/.claude/pr-brain.photos/     one file per PR: the head whose screenshots were sent.
+#   ~/.claude/pr-brain.effective   the reviewers this sweep is running with, defaults included (written=<epoch>,
+#                                  engine=, reviewers=, merge=), rewritten by every plain sweep, kill switch or not.
+#                                  The bot reads it for /review: it cannot run `crontab -l` under NoNewPrivileges, so
+#                                  it could not name the models. A hand run (--dry-run, --list, --repo, --pr) never
+#                                  writes it.
 #   ~/.claude/pr-brain.ci/         one file per PR: "<head> <red|pending> <sweeps>", what CI said about that head.
 #   ~/.claude/pr-brain.reviews     one line per review started: "<epoch> <repo>#<pr> <head8>", the last 24 hours.
 #   ~/.claude/pr-brain.ceiling     the day (epoch/86400) the ceiling notice was last sent: one message a day.
@@ -138,6 +143,21 @@ log() {
   line="$(date -u '+%Y-%m-%dT%H:%M:%SZ')  $*"
   printf '%s\n' "$line" >>"$LOG"
   printf '%s\n' "$line"
+}
+
+# What this sweep is running with, for the bot's /review. The bot runs under systemd NoNewPrivileges, where
+# `crontab -l` is denied, so it cannot read the cron line that sets the models (2026-10-04: /review said ON and
+# could not name one). It reads this file instead: the settings as this process resolved them, defaults
+# included, one key=value per line. Written by every plain sweep, even when the kill switch is on, and never by
+# a hand run (--dry-run, --list, --repo, --pr: those lack the cron line's variables and would report the wrong
+# models). A failed write is logged and never stops the sweep.
+write_effective() {
+  local file="$1"; shift
+  local tmp="$file.tmp.$$"
+  mkdir -p "$(dirname "$file")" 2>/dev/null
+  { printf 'written=%s\n' "$(date +%s)"; local kv; for kv in "$@"; do printf '%s\n' "${kv//$'\n'/ }"; done; } >"$tmp" 2>/dev/null \
+    && mv -f "$tmp" "$file" 2>/dev/null \
+    || { rm -f "$tmp" 2>/dev/null; log "could not write $file"; }
 }
 
 # A gate that runs unattended and tells nobody is indistinguishable from a gate
@@ -296,6 +316,14 @@ while [[ $# -gt 0 ]]; do
     *) echo "pr-brain: unknown argument '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
+
+if [[ "$DRY_RUN" -eq 0 && "$LIST_ONLY" -eq 0 && -z "$ONE_REPO" && -z "$ONE_PR" ]]; then
+  case "$ENGINE" in
+    agy) _reviewers="$REVIEW_MODELS" ;;
+    *) _reviewers="$MODEL" ;;
+  esac
+  write_effective "$HOME/.claude/pr-brain.effective" "engine=$ENGINE" "reviewers=$_reviewers" "merge=${PR_BRAIN_MERGE:-1}"
+fi
 
 if [[ -f "$OFF_SWITCH" ]]; then
   log "kill switch present ($OFF_SWITCH) — nothing dispatched"

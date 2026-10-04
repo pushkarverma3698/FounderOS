@@ -47,6 +47,28 @@ describe("/login", () => {
     expect(replies.join("\n")).not.toContain("✅");
   });
 
+  it("an adapter that accepts an email hint gets it as the second argument, and a single-target tool needs no target word", async () => {
+    const start = vi.fn(async (_target: string, _hint?: string) => ({ html: "open the link", state: "S" }));
+    const { c, replies } = ctx({ chatId: 100, match: "tool Me@Example.com" });
+    await handleLogin(c, mk(adapter({ acceptsEmailHint: true, start })));
+    expect(start).toHaveBeenCalledWith("default", "me@example.com");
+    expect(replies.join("\n")).toContain("open the link");
+  });
+
+  it("an adapter that does not accept a hint still treats an email as an unknown target", async () => {
+    const start = vi.fn(async () => ({ html: "open the link" }));
+    const { c, replies } = ctx({ chatId: 100, match: "tool me@example.com" });
+    await handleLogin(c, mk(adapter({ start })));
+    expect(start).not.toHaveBeenCalled();
+    expect(replies.join("\n")).toContain("Which one?");
+  });
+
+  it("the usage line advertises the optional email only for adapters that take one", async () => {
+    const { c, replies } = ctx({ chatId: 100 });
+    await handleLogin(c, mk(adapter({ acceptsEmailHint: true })));
+    expect(replies.join("\n")).toContain("/login tool [email]");
+  });
+
   it("refuses an allow-listed group and a stranger", async () => {
     for (const id of [-5, 7]) {
       const { c, replies } = ctx({ chatId: id, type: id < 0 ? "group" : "private", match: "tool" });
@@ -67,6 +89,27 @@ describe("/login", () => {
     expect(a.finish).toHaveBeenCalledWith("default", "4/0SECRET-CODE", "S");
     expect(paste.replies).toEqual(["done"]);
     expect(await handleLoginReply(ctx({ chatId: 100, text: "hi" }).c, d)).toBe(false); // attempt closed
+  });
+
+  it("a finish with a next step hands over: step 1 is disposed, the next paste goes to step 2 with its state", async () => {
+    const dispose1 = vi.fn();
+    const dispose2 = vi.fn();
+    const finish = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, html: "step 1 done", next: { html: "link 2", state: "S2", dispose: dispose2 } })
+      .mockResolvedValueOnce({ ok: true, html: "all done" });
+    const d = mk(adapter({ start: async () => ({ html: "link 1", state: "S1", dispose: dispose1 }), finish }));
+    await handleLogin(ctx({ chatId: 100, match: "tool" }).c, d);
+    const p1 = ctx({ chatId: 100, text: "code1code" });
+    expect(await handleLoginReply(p1.c, d)).toBe(true);
+    expect(dispose1).toHaveBeenCalled();
+    expect(p1.replies[0]).toContain("step 1 done");
+    expect(p1.replies[0]).toContain("/login cancel");
+    const p2 = ctx({ chatId: 100, text: "code2code" });
+    expect(await handleLoginReply(p2.c, d)).toBe(true);
+    expect(finish).toHaveBeenLastCalledWith("default", "code2code", "S2");
+    expect(dispose2).toHaveBeenCalled();
+    expect(await d.pending.peek("100")).toBeUndefined();
   });
 
   it("a failed paste keeps the attempt open for a retry; a command is not swallowed", async () => {

@@ -29,6 +29,8 @@ export function defaultLoginDeps(access: ChatAccessConfig): LoginDeps {
   return { adapters: LOGIN_ADAPTERS, pending: new PendingLogins(), access };
 }
 
+const EMAIL_RE = /^[^\s@<>&"]+@[^\s@<>&"]+\.[^\s@<>&"]+$/;
+
 const esc = (s: string): string => s.replace(/[<>&]/g, (c) => (c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"));
 
 function isFounderDm(ctx: Context, deps: LoginDeps): boolean {
@@ -57,7 +59,7 @@ async function statusScreen(deps: LoginDeps): Promise<string> {
   );
   const usage = deps.adapters
     .map((a) => {
-      const renew = `/login ${a.id}${a.targets.length > 1 ? ` ${a.targets.join("|")}` : ""}`;
+      const renew = `/login ${a.id}${a.targets.length > 1 ? ` ${a.targets.join("|")}` : ""}${a.acceptsEmailHint ? " [email]" : ""}`;
       return a.addProblem ? `${renew}\n/login ${a.id} add &lt;name&gt; · /login ${a.id} remove &lt;name&gt;` : renew;
     })
     .join("\n");
@@ -90,8 +92,10 @@ export async function handleLogin(ctx: Context, deps: LoginDeps): Promise<void> 
     await removeTarget(ctx, adapter, nameArg ?? "");
     return;
   }
-  const adding = targetArg === "add" && adapter.addProblem !== undefined;
-  const target = adding ? (nameArg ?? "") : targetArg || (adapter.targets.length === 1 ? adapter.targets[0]! : "");
+  const hint = adapter.acceptsEmailHint && targetArg !== undefined && EMAIL_RE.test(targetArg) ? targetArg : undefined;
+  const word = hint ? undefined : targetArg;
+  const adding = word === "add" && adapter.addProblem !== undefined;
+  const target = adding ? (nameArg ?? "") : word || (adapter.targets.length === 1 ? adapter.targets[0]! : "");
   if (adding && !adapter.targets.includes(target)) {
     const problem = target ? adapter.addProblem!(target) : `Name it: /login ${adapter.id} add &lt;name&gt; (e.g. wife, oplify).`;
     if (problem) {
@@ -104,7 +108,7 @@ export async function handleLogin(ctx: Context, deps: LoginDeps): Promise<void> 
     return;
   }
   try {
-    const started = await adapter.start(target);
+    const started = hint ? await adapter.start(target, hint) : await adapter.start(target);
     await deps.pending.begin(chatId, adapter, target, started);
     await send(ctx, `${started.html}\n\nChanged your mind? /login cancel`);
   } catch (err) {
@@ -152,8 +156,9 @@ export async function handleLoginReply(ctx: Context, deps: LoginDeps): Promise<b
     log.error({ tool: pending.adapter.id, target: pending.target, err: err instanceof Error ? err.message : String(err) }, "login finish failed");
     result = { ok: false, html: `The ${esc(pending.adapter.title)} login failed: ${esc(err instanceof Error ? err.message : String(err))}` };
   }
-  // A failed paste keeps the attempt open (a typo should not cost a new link); success closes it.
-  if (result.ok) await deps.pending.drop(chatId);
-  await send(ctx, result.html);
+  // A failed paste keeps the attempt open (a typo should not cost a new link); success closes it, or hands over to its next step.
+  if (result.ok && result.next) await deps.pending.begin(chatId, pending.adapter, pending.target, result.next);
+  else if (result.ok) await deps.pending.drop(chatId);
+  await send(ctx, result.next ? `${result.html}\n\nChanged your mind? /login cancel` : result.html);
   return true;
 }

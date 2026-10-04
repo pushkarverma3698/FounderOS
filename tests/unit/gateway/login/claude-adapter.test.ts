@@ -6,7 +6,15 @@ vi.mock("../../../../src/infra/logger.js", () => {
   return { childLogger: () => ({ info: rec, warn: rec, error: rec, debug: rec }) };
 });
 
-import { createClaudeAdapter, type ClaudeLoginDeps, type TokenCheck } from "../../../../src/gateway/login/adapters/claude.js";
+import {
+  createClaudeAdapter,
+  lookupOrgId,
+  readHostLogin,
+  withLoginHint,
+  type ClaudeLoginDeps,
+  type HostLogin,
+  type TokenCheck,
+} from "../../../../src/gateway/login/adapters/claude.js";
 import type { TokenFileRead } from "../../../../src/infra/claude-token.js";
 import { fakePty, osc8 } from "./fake-pty.js";
 
@@ -15,6 +23,9 @@ const CODE = "4/0AX4XfWhSECRETCODE123#statepart";
 const URL = "https://claude.com/cai/oauth/authorize?code=true&client_id=abc&state=S1";
 const PATHS = { primary: "/h/.claude/pr-brain.token", dispatch: "/h/.claude/claude-code.token" };
 const NOW = Date.UTC(2026, 9, 4, 12);
+const ORG_NEW = "1c2fa9ef-a5be-445f-b662-15c073270325";
+const ORG_HOST = "942d106e-e724-49f9-a8d6-9b0cc4eaec9c";
+const HOST: HostLogin = { email: "pushkarai3698@gmail.com", org: ORG_HOST };
 
 function deps(over: Partial<ClaudeLoginDeps> = {}) {
   const written: Array<{ token: string; today: string }> = [];
@@ -30,6 +41,9 @@ function deps(over: Partial<ClaudeLoginDeps> = {}) {
     now: () => NOW,
     sleep: async () => undefined,
     env: { PATH: "/usr/bin", SECRET_BOT_KEY: "must-not-reach-the-child" },
+    lookupOrg: async () => ({ org: ORG_NEW }),
+    hostLogin: async () => undefined,
+    readLogin: async () => undefined,
     ...over,
   };
   return { base, written, home, verify };
@@ -212,5 +226,167 @@ describe("claude login adapter", () => {
       const [r] = await createClaudeAdapter(base).status();
       expect(r!.ok).toBe(false);
     });
+  });
+});
+
+describe("login hint", () => {
+  it("withLoginHint appends the email the way `claude auth login --email` does and leaves every other parameter alone", () => {
+    const url = "https://claude.com/cai/oauth/authorize?code=true&client_id=abc&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=Ab-_9&state=S1";
+    const out = new globalThis.URL(withLoginHint(url, "pushkar@oplify.in"));
+    expect(out.searchParams.get("login_hint")).toBe("pushkar@oplify.in");
+    expect(withLoginHint(url, "pushkar@oplify.in")).toContain("login_hint=pushkar%40oplify.in");
+    for (const k of ["code", "client_id", "redirect_uri", "scope", "code_challenge", "state"]) {
+      expect(out.searchParams.get(k)).toBe(new globalThis.URL(url).searchParams.get(k));
+    }
+    expect(withLoginHint(url, undefined)).toBe(url);
+  });
+
+  it("start: puts the hint in the link, names the account, and says to open it in a private tab", async () => {
+    const { base } = deps();
+    const s = await createClaudeAdapter(base).start("default", "pushkar@oplify.in");
+    expect(s.html).toContain("login_hint=pushkar%40oplify.in");
+    expect(s.html).toContain("Sign in to Claude as pushkar@oplify.in");
+    expect(s.html).toMatch(/private tab/i);
+  });
+
+  it("start without a hint still tells him which browser session decides", async () => {
+    const s = await createClaudeAdapter(deps().base).start("default");
+    expect(s.html).not.toContain("login_hint");
+    expect(s.html).toMatch(/private tab/i);
+  });
+});
+
+describe("lookupOrgId", () => {
+  const ok = (headers: Record<string, string>, status = 200) => vi.fn(async () => new Response("{}", { status, headers }));
+  it("sends the token only to api.anthropic.com's free count_tokens endpoint and reads the organization header", async () => {
+    const f = ok({ "anthropic-organization-id": ORG_NEW });
+    expect(await lookupOrgId(TOKEN, f as unknown as typeof fetch)).toEqual({ org: ORG_NEW });
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://api.anthropic.com/v1/messages/count_tokens");
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe(`Bearer ${TOKEN}`);
+    expect((init.headers as Record<string, string>)["anthropic-beta"]).toContain("oauth-2025-04-20");
+  });
+  it("a response with no header, an HTTP error, or a thrown fetch is a reason, never a guess, and never carries the token", async () => {
+    const cases = [ok({}), ok({}, 401), vi.fn(async () => Promise.reject(new Error(`boom ${TOKEN}`)))];
+    for (const f of cases) {
+      const r = await lookupOrgId(TOKEN, f as unknown as typeof fetch);
+      expect("reason" in r).toBe(true);
+      expect(JSON.stringify(r)).not.toContain(TOKEN);
+    }
+  });
+});
+
+describe("readHostLogin", () => {
+  const run = (stdout: string, code = 0) => {
+    const calls: Array<{ args: readonly string[]; env: Record<string, string> }> = [];
+    const spawnFn = ((_cmd: string, args: readonly string[], opts: { env: Record<string, string> }) => {
+      calls.push({ args, env: opts.env });
+      const child = new (require("node:events").EventEmitter)();
+      child.stdout = new (require("node:events").EventEmitter)();
+      child.kill = () => true;
+      setImmediate(() => {
+        child.stdout.emit("data", Buffer.from(stdout));
+        child.emit("close", code);
+      });
+      return child;
+    }) as never;
+    return { spawnFn, calls };
+  };
+  const base = { PATH: "/usr/bin", HOME: "/home/founderos", CLAUDE_CODE_OAUTH_TOKEN: TOKEN, ANTHROPIC_API_KEY: "k", SECRET_BOT_KEY: "x" };
+
+  it("reads the server's own saved login with the token and API keys removed from its environment", async () => {
+    const { spawnFn, calls } = run(JSON.stringify({ loggedIn: true, authMethod: "claude.ai", email: HOST.email, orgId: ORG_HOST }));
+    expect(await readHostLogin(spawnFn, base)).toEqual(HOST);
+    expect(calls[0]!.args).toEqual(["auth", "status", "--json"]);
+    expect(calls[0]!.env["HOME"]).toBe("/home/founderos");
+    expect(Object.keys(calls[0]!.env).sort()).toEqual(["HOME", "PATH", "TERM"]);
+  });
+  it("not logged in, a token login, bad JSON or a non-zero exit all mean: no host login to compare with", async () => {
+    for (const out of [
+      JSON.stringify({ loggedIn: false }),
+      JSON.stringify({ loggedIn: true, authMethod: "oauth_token" }),
+      "not json",
+    ]) {
+      expect(await readHostLogin(run(out).spawnFn, base)).toBeUndefined();
+    }
+    expect(await readHostLogin(run("{}", 1).spawnFn, base)).toBeUndefined();
+  });
+});
+
+describe("which account", () => {
+  it("finish: a token in a DIFFERENT account from the server's saved login saves the token and offers step 2", async () => {
+    const { base, written } = deps({ hostLogin: async () => HOST });
+    const r = await createClaudeAdapter(base).finish("default", TOKEN, undefined);
+    expect(r.ok).toBe(true);
+    expect(written).toHaveLength(1);
+    expect(r.html).toContain("Step 1 of 2 done");
+    expect(r.html).toContain('href="https://claude.com/cai/oauth/authorize');
+    expect(r.html).toContain("same private tab");
+    expect(r.html).not.toContain(TOKEN);
+    expect(r.next).toBeDefined();
+  });
+  it("finish: when step 2 cannot start, the token still counts and the reply names the account and the problem", async () => {
+    const { base } = deps({ hostLogin: async () => HOST, spawnPty: () => fakePty("no link").child });
+    const r = await createClaudeAdapter(base).finish("default", TOKEN, undefined);
+    expect(r.ok).toBe(true);
+    expect(r.next).toBeUndefined();
+    expect(r.html).toContain("different account");
+    expect(r.html).toContain("pushkarai3698@gmail.com");
+    expect(r.html).toContain(ORG_NEW.slice(0, 8));
+    expect(r.html).not.toContain(ORG_NEW);
+    expect(r.html).toContain("plain claude run over SSH");
+    expect(r.html).toContain("could not start the step");
+  });
+  it("finish: asks Anthropic and the host login once, not once per wording", async () => {
+    const lookupOrg = vi.fn(async () => ({ org: ORG_NEW }));
+    const hostLogin = vi.fn(async () => HOST);
+    await createClaudeAdapter(deps({ lookupOrg, hostLogin }).base).finish("default", TOKEN, undefined);
+    expect(lookupOrg).toHaveBeenCalledTimes(1);
+    expect(hostLogin).toHaveBeenCalledTimes(1);
+  });
+  it("finish: says SAME account when the organizations match", async () => {
+    const { base } = deps({ hostLogin: async () => HOST, lookupOrg: async () => ({ org: ORG_HOST }) });
+    const r = await createClaudeAdapter(base).finish("default", TOKEN, undefined);
+    expect(r.html).toMatch(/same account/i);
+    expect(r.next).toBeUndefined();
+  });
+  it("finish: with no host login, step 2 is offered too (it gives the server a login in the token's account)", async () => {
+    const r = await createClaudeAdapter(deps().base).finish("default", TOKEN, undefined);
+    expect(r.next).toBeDefined();
+  });
+  it("finish: when the lookup fails the login still succeeds and says it could not tell which account", async () => {
+    const { base, written } = deps({ lookupOrg: async () => ({ reason: "HTTP 500" }), hostLogin: async () => HOST });
+    const r = await createClaudeAdapter(base).finish("default", TOKEN, undefined);
+    expect(r.ok).toBe(true);
+    expect(written).toHaveLength(1);
+    expect(r.html).toMatch(/could not tell which account/);
+    expect(r.next).toBeUndefined();
+  });
+  it("finish: a lookup or host read that THROWS cannot fail a verified login", async () => {
+    const { base, written } = deps({
+      lookupOrg: async () => {
+        throw new Error("x");
+      },
+      hostLogin: async () => {
+        throw new Error("y");
+      },
+    });
+    const r = await createClaudeAdapter(base).finish("default", TOKEN, undefined);
+    expect(r.ok).toBe(true);
+    expect(written).toHaveLength(1);
+  });
+  it("status: the Claude row names the account relation, and the lookups are cached with the live check", async () => {
+    const lookupOrg = vi.fn(async () => ({ org: ORG_NEW }));
+    const { base, verify } = deps({ readFile: async () => ({ state: "ok", token: TOKEN, created: "2026-10-04" }), lookupOrg, hostLogin: async () => HOST });
+    const a = createClaudeAdapter(base);
+    const [r1] = await a.status();
+    expect(r1!.ok).toBe(true);
+    expect(r1!.detail).toContain("different account");
+    expect(r1!.detail).toContain("pushkarai3698@gmail.com");
+    expect(r1!.detail).not.toContain("plain claude run");
+    expect(r1!.detail).toContain("/login claude <email> moves both");
+    await a.status();
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(lookupOrg).toHaveBeenCalledTimes(1);
   });
 });

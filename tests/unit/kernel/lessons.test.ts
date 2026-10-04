@@ -199,6 +199,30 @@ describe("makeLessonDispatch", () => {
     expect(update.lesson_candidate).toMatchObject({ step_id: "s1", worker: "research", signature: LESSON.signature });
   });
 
+  it("does NOT inject a lesson that was learned for a different objective, but still records the occurrence", async () => {
+    // Live 2026-10-04: "worker did not finalize with JSON" is a generic signature. A lesson from an MRR question was
+    // injected into a recall step; the model obeyed it, researched MRR, and the founder got an answer to a question
+    // they never asked. The signature says how it failed, not what the step was for.
+    const store = fakeStore({ ...LESSON, objective: "Search the business context for Turicks' monthly recurring revenue" });
+    const node = makeLessonDispatch(store);
+
+    const update = await node(stateWith({ results: [FAILED_RESULT] }));
+
+    expect(store.lookup).toHaveBeenCalledWith("research", LESSON.signature);
+    const scratch = (update.scratch as Record<string, { set: HumanMessage[] }>)["s1"]!.set;
+    expect(scratch).toHaveLength(2); // envelope + RETRY, no lesson
+    expect(scratch.map((m) => String(m.content)).join("\n")).not.toContain("KNOWN FAILURE PATTERN");
+    expect(store.recordOccurrence).toHaveBeenCalledTimes(1);
+    expect(update.lesson_candidate).toMatchObject({ step_id: "s1", signature: LESSON.signature });
+  });
+
+  it("treats the same objective written with different case or spacing as the same objective", async () => {
+    const store = fakeStore({ ...LESSON, objective: `  ${LESSON.objective.toUpperCase()}\n` });
+    const update = await makeLessonDispatch(store)(stateWith({ results: [FAILED_RESULT] }));
+    const scratch = (update.scratch as Record<string, { set: HumanMessage[] }>)["s1"]!.set;
+    expect(scratch).toHaveLength(3);
+  });
+
   it("on a retry with NO lesson: scratch stays envelope + retry only, candidate still stashed", async () => {
     const store = fakeStore(null);
     const node = makeLessonDispatch(store);

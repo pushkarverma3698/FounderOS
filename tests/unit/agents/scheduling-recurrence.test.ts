@@ -60,6 +60,26 @@ describe("schedule_task with recurrence", () => {
   });
 });
 
+describe("schedule_task refuses a timing it cannot run BEFORE asking the founder", () => {
+  // Live 2026-10-04: the model sent an RRULE, the card read "Runs at undefined", and the founder would have approved
+  // it only to be told afterwards that the rule could not be read.
+  const bad: Array<[string, Record<string, unknown>, RegExp]> = [
+    ["an RRULE", { recurrence: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0" }, /not a rule I can read.*daily@08:00/],
+    ["a cron string", { recurrence: "0 9 * * *" }, /not a rule I can read/],
+    ["neither a time nor a rule", {}, /Give scheduled_at/],
+    ["both a time and a rule", { scheduled_at: "2099-01-01T09:00:00Z", recurrence: "daily@09:00" }, /not both/],
+    ["a time in the past", { scheduled_at: "2020-01-01T09:00:00Z" }, /in the future/],
+  ];
+
+  it.each(bad)("%s: no approval card, nothing stored, the reason goes back to the model", async (_label, timing, reason) => {
+    const out = (await scheduleTask.invoke({ prompt: "Send a one-line motivation", ...timing })) as string;
+    expect(mockHitlGate).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
+    expect(out).toMatch(/^Task scheduling failed: /);
+    expect(out).toMatch(reason);
+  });
+});
+
 describe("list_scheduled", () => {
   it("marks the repeating task and says how to stop it", async () => {
     mockListTasks.mockResolvedValue([
