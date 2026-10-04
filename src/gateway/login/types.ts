@@ -33,6 +33,8 @@ export interface LoginTargetStatus {
   /** Short human label, e.g. "Pushkar (personal)". */
   readonly label: string;
   readonly ok: boolean;
+  /** Nothing failed, but no live check ran either: shown as ❔, never ✅. */
+  readonly unverified?: boolean;
   /** One line: "signed in as x@y" / "refresh token revoked" / "never signed in". */
   readonly detail: string;
 }

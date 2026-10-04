@@ -356,6 +356,19 @@ describe("fetchDispatchTasks — ready to merge", () => {
     expect(res.readyToMerge).toEqual([]);
   });
 
+  it("a PR GitHub will not merge yet (behind its base, blocked by protection) is not ready, and the reason is printed", async () => {
+    gh.client = fakeGitHub([
+      { number: 12, comments: REVIEWED, mergeable: true, mergeable_state: "behind" },
+      { number: 13, comments: REVIEWED, mergeable: true, mergeable_state: "blocked" },
+    ]);
+    const res = await fetchDispatchTasks(["o/r"]);
+    expect(res.readyToMerge).toEqual([]);
+    expect(res.unreachable.map((u) => u.error)).toEqual([
+      expect.stringMatching(/#12.*behind its base/),
+      expect.stringMatching(/#13.*branch protection/),
+    ]);
+  });
+
   it("does not claim ready while GitHub has not computed mergeability, and says so", async () => {
     gh.client = fakeGitHub([{ number: 9, comments: REVIEWED, mergeable: null, mergeable_state: "unknown" }]);
     const res = await fetchDispatchTasks(["o/r"]);

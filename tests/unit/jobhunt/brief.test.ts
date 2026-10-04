@@ -245,6 +245,24 @@ describe("formatDailyBrief", () => {
     expect(bareCommandRegex.test(out)).toBe(false);
   });
 
+  it("overflow notes name the profile and the section's own command; reject overflows offer no command", () => {
+    const profile = getProfile("wife-nl-finance");
+    const pass = Array.from({ length: DO_TODAY_CAP + 2 }, (_, i) => row({ id: `p${i}`, company: `Pass${i}`, url: `https://example.com/p${i}` }));
+    const ask = Array.from({ length: 6 }, (_, i) =>
+      row({ id: `f${i}`, company: `Flag${i}`, url: `https://example.com/f${i}`, verdict: "flag", gates: [{ gate: "Pay", status: "flag", evidence: "Unstated" }] }),
+    );
+    const rej = Array.from({ length: 12 }, (_, i) =>
+      row({ id: `r${i}`, company: `Rej${i}`, url: `https://example.com/r${i}`, verdict: "reject", gates: [{ gate: "Salary", status: "reject", evidence: "Below the criterion." }] }),
+    );
+    const out = formatDailyBrief(input({ profile, rows: [...pass, ...ask, ...rej] }));
+    expect(/(draft|ask|applied) \d/.test(out)).toBe(false);
+    expect(out).toContain(`/draft tashi ${DO_TODAY_CAP + 1}</code> works on any of them`);
+    expect(out).toMatch(/\/ask tashi \d+<\/code> works on any of them/);
+    const rejectBlock = out.slice(out.indexOf("OTHER BARS"));
+    expect(rejectBlock).toContain("more other-barred roles");
+    expect(rejectBlock.slice(0, rejectBlock.indexOf("</i>"))).not.toContain("/draft");
+  });
+
   it("renders default profile brief output unchanged with bare commands", () => {
     const out = formatDailyBrief(
       input({

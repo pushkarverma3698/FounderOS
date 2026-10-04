@@ -182,6 +182,7 @@ function pluralDays(n: number): string {
  */
 export function formatDailyBrief(input: BriefInput): string {
   const sel = input.profile ? profileSelector(input.profile) : "";
+  const withSel = (command: string): string => (sel ? `${command} ${sel}` : command);
   const doToday = selectDoToday(input.rows);
   const stretch = selectStretch(input.rows);
   const askable = selectAskable(input.rows);
@@ -245,7 +246,7 @@ export function formatDailyBrief(input: BriefInput): string {
       : `<b>✅ APPLY TODAY (${totals.doToday})</b>\n` +
           `<i>Every check below cleared. The only thing left is writing it.</i>\n\n` +
           renderMarketBlocks(doToday, "/draft", "do_today", 1, sel) +
-          overflowNote(totals.doToday, doToday.length, "ready to apply to"),
+          overflowNote(totals.doToday, doToday.length, "ready to apply to", 1, withSel("/draft")),
   );
 
   // Between APPLY TODAY and ONE QUESTION AWAY, and carrying `/draft` rather than
@@ -260,7 +261,7 @@ export function formatDailyBrief(input: BriefInput): string {
         `shipped. That is a wish, not a wall, and applying early is what makes it ` +
         `land. Nothing here needs a question first.</i>\n\n` +
         renderMarketBlocks(stretch, "/draft", "stretch", doTodayTotal + 1, sel) +
-        overflowNote(totals.stretch, stretch.length, "stretch roles", doTodayTotal + 1),
+        overflowNote(totals.stretch, stretch.length, "stretch roles", doTodayTotal + 1, withSel("/draft")),
     );
   }
 
@@ -281,6 +282,7 @@ export function formatDailyBrief(input: BriefInput): string {
           standing.length,
           "older roles still open",
           doTodayTotal + stretchTotal + 1,
+          withSel("/draft"),
         ),
     );
   }
@@ -291,7 +293,7 @@ export function formatDailyBrief(input: BriefInput): string {
         `<i>Each has exactly one check we could not settle from the ad. ` +
         `Asking the employer settles it.</i>\n\n` +
         renderMarketBlocks(askable, "/ask", "ask", 1, sel) +
-        overflowNote(totals.askable, askable.length, "roles one question away"),
+        overflowNote(totals.askable, askable.length, "roles one question away", 1, withSel("/ask")),
     );
   }
 
