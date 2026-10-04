@@ -3,7 +3,11 @@
  *
  * pr-brain is a cron job on the VPS that stops while ~/.claude/pr-brain.off exists. The bot runs as
  * the same user, so /review writes or removes that file. What the founder is told must be what the
- * file now says, so every switch is read back, and the models shown come from the live crontab line.
+ * file now says, so every switch is read back.
+ *
+ * The models come from files the daemons write each run (~/.claude/pr-brain.effective and
+ * agent-dispatch.effective), not from `crontab -l`: the bot runs under NoNewPrivileges=true, where
+ * crontab is denied ("Permission denied"), so on 2026-10-04 /review said ON and could not show a model.
  */
 
 import { describe, it, expect } from "vitest";
@@ -11,18 +15,26 @@ import type { Context } from "grammy";
 import { OWNER_ONLY_COMMANDS } from "../../../src/gateway/chat-access.js";
 import { needsConfirmation } from "../../../src/gateway/command-catalog.js";
 import { COMMAND_MENU } from "../../../src/gateway/command-menu.js";
+import { readReviewSetup } from "../../../src/infra/daemon-settings.js";
 
-const { handleReview, readReviewSetup } = await import("../../../src/gateway/review-command.js");
+const { handleReview } = await import("../../../src/gateway/review-command.js");
 
-const LIVE_CRONTAB = [
-  "# pr-brain — asynchronous adversarial PR gate",
-  "# Disable with: touch $HOME/.claude/pr-brain.off",
-  '*/20 * * * * PATH=/usr/local/bin:/usr/bin:/bin PR_BRAIN_MERGE=0 PR_BRAIN_MODELS="claude-sonnet-5-5-medium gemini-3.1-pro-high" PR_BRAIN_ROOT=/opt/review $HOME/bin/pr-brain >/dev/null 2>>$HOME/.claude/pr-brain.log',
-  "*/15 * * * * PATH=/usr/local/bin:/usr/bin:/bin AGENT_DISPATCH_ENV_FILE=/opt/founderos/.env $HOME/bin/agent-dispatch >/dev/null",
-].join("\n");
+const WRITTEN = 1791118800; // epoch seconds the daemons last wrote their files
+const FIVE_MIN_LATER = (WRITTEN + 300) * 1000;
+
+const PR_BRAIN_FILE = [`written=${WRITTEN}`, "engine=agy", "reviewers=claude-sonnet-5-5-medium gemini-3.1-pro-high", "merge=0"].join("\n");
+const DISPATCH_FILE = [`written=${WRITTEN}`, "agy_model=gemini-3.6-flash-medium", "claude_model=sonnet"].join("\n");
+
+type Files = { "pr-brain"?: string | null | Error; "agent-dispatch"?: string | null | Error };
+const LIVE_FILES: Files = { "pr-brain": PR_BRAIN_FILE, "agent-dispatch": DISPATCH_FILE };
 
 /** The off-switch file in memory. `failWrite` throws; `dropWrite` accepts the call and changes nothing. */
-function fakeSwitch(off: boolean, mode: "ok" | "failWrite" | "dropWrite" = "ok", crontab: string | Error = LIVE_CRONTAB) {
+function fakeSwitch(
+  off: boolean,
+  mode: "ok" | "failWrite" | "dropWrite" = "ok",
+  files: Files = LIVE_FILES,
+  opts: { now?: number; engine?: "agy" | "claude" } = {},
+) {
   const state = { off, writes: [] as boolean[] };
   return {
     state,
@@ -33,11 +45,13 @@ function fakeSwitch(off: boolean, mode: "ok" | "failWrite" | "dropWrite" = "ok",
         if (mode === "failWrite") throw new Error("EACCES: permission denied");
         if (mode === "ok") state.off = value;
       },
-      crontab: () => {
-        if (crontab instanceof Error) throw crontab;
-        return crontab;
+      effective: (name: "pr-brain" | "agent-dispatch") => {
+        const f = files[name] ?? null;
+        if (f instanceof Error) throw f;
+        return f;
       },
-      engine: () => "agy" as const,
+      now: () => opts.now ?? FIVE_MIN_LATER,
+      engine: () => opts.engine ?? ("agy" as const),
     },
   };
 }
@@ -52,33 +66,39 @@ function fakeCtx(match: string): { ctx: Context; replies: string[] } {
   return { ctx, replies };
 }
 
-describe("readReviewSetup — the models come from the live cron lines", () => {
-  it("reads the reviewer list and the merge flag off the pr-brain line, and the script defaults for the writer", () => {
-    expect(readReviewSetup(LIVE_CRONTAB)).toEqual({
+describe("readReviewSetup — the models are what the daemons reported, not a guess", () => {
+  it("reads the reviewer list, the merge flag and both writer models, and when each daemon last reported", () => {
+    expect(readReviewSetup(PR_BRAIN_FILE, DISPATCH_FILE)).toEqual({
       reviewers: ["claude-sonnet-5-5-medium", "gemini-3.1-pro-high"],
       merges: false,
       agyModel: "gemini-3.6-flash-medium",
       claudeModel: "sonnet",
+      reviewerReportedAt: WRITTEN * 1000,
+      writerReportedAt: WRITTEN * 1000,
     });
   });
 
-  it("uses the script defaults when the cron lines set nothing, and the dispatcher's model overrides", () => {
-    const tab = "*/20 * * * * $HOME/bin/pr-brain\n* * * * * AGENT_DISPATCH_MODEL=gemini-3.1-pro-high AGENT_DISPATCH_CLAUDE_MODEL=opus $HOME/bin/agent-dispatch --kicked";
-    expect(readReviewSetup(tab)).toEqual({
-      reviewers: ["claude-sonnet-5-5-medium", "gemini-3.1-pro-high"],
-      merges: true,
-      agyModel: "gemini-3.1-pro-high",
-      claudeModel: "opus",
-    });
+  it("merges unless the daemon reports merge=0", () => {
+    expect(readReviewSetup("written=1\nreviewers=a\nmerge=1", null).merges).toBe(true);
+    expect(readReviewSetup("written=1\nreviewers=a", null).merges).toBe(true);
   });
 
-  it("ignores a commented-out pr-brain line", () => {
-    const tab = '# */20 * * * * PR_BRAIN_MODELS="old-model" $HOME/bin/pr-brain\n*/20 * * * * PR_BRAIN_MODELS=new-model $HOME/bin/pr-brain';
-    expect(readReviewSetup(tab).reviewers).toEqual(["new-model"]);
+  it("splits a comma- or space-separated model list, as the script does", () => {
+    expect(readReviewSetup("written=1\nreviewers=a,b  c", null).reviewers).toEqual(["a", "b", "c"]);
   });
 
-  it("reads PR_BRAIN_MODEL when PR_BRAIN_MODELS is absent, as the script does", () => {
-    expect(readReviewSetup("*/20 * * * * PR_BRAIN_MODEL=gemini-3.1-pro-high $HOME/bin/pr-brain").reviewers).toEqual(["gemini-3.1-pro-high"]);
+  it("knows nothing when a file is missing, empty or not a report, rather than inventing defaults", () => {
+    for (const bad of [null, "", "garbage without keys", "written=1\nreviewers="]) {
+      const r = readReviewSetup(bad, bad);
+      expect(r.reviewers).toBeNull();
+      expect(r.merges).toBeNull();
+      expect(r.agyModel).toBeNull();
+      expect(r.claudeModel).toBeNull();
+    }
+  });
+
+  it("ignores a line it does not understand and a value with no key", () => {
+    expect(readReviewSetup("written=1\n# note\n=x\nreviewers=only-this", null).reviewers).toEqual(["only-this"]);
   });
 });
 
@@ -105,11 +125,65 @@ describe("/review with no argument", () => {
     expect(replies[0]).toContain("/review on");
   });
 
-  it("still answers on/off when the crontab cannot be read, and says why the models are missing", async () => {
+  it("shows the claude writer model when the engine is claude", async () => {
     const { ctx, replies } = fakeCtx("");
-    await handleReview(ctx, fakeSwitch(false, "ok", new Error("crontab: command not found")).deps);
+    await handleReview(ctx, fakeSwitch(false, "ok", LIVE_FILES, { engine: "claude" }).deps);
+    expect(replies[0]).toContain("Writer for /task: Claude Code on sonnet");
+  });
+
+  it("says nothing about how old the report is while it is fresh (no noise when nothing is wrong)", async () => {
+    const { ctx, replies } = fakeCtx("");
+    await handleReview(ctx, fakeSwitch(false).deps);
+    expect(replies[0]).not.toMatch(/reported|ago/i);
+  });
+
+  it("says how old the report is once it is stale, because a stopped cron would otherwise show old models as current", async () => {
+    const { ctx, replies } = fakeCtx("");
+    const fiveHoursLater = (WRITTEN + 5 * 3600) * 1000;
+    await handleReview(ctx, fakeSwitch(false, "ok", LIVE_FILES, { now: fiveHoursLater }).deps);
+    expect(replies[0]).toContain("Reviewer: claude-sonnet-5-5-medium, then gemini-3.1-pro-high (last reported 5 h ago)");
+    expect(replies[0]).toContain("(last reported 5 h ago)");
+  });
+
+  it("still answers on/off when the daemons have not reported yet, and says what to expect instead of an error", async () => {
+    const { ctx, replies } = fakeCtx("");
+    await handleReview(ctx, fakeSwitch(false, "ok", {}).deps);
     expect(replies[0]).toContain("Automatic PR review is ON");
-    expect(replies[0]).toContain("Could not read the models from the crontab: crontab: command not found");
+    expect(replies[0]).toContain("Reviewer models: not reported yet");
+    expect(replies[0]).toContain("Writer model: not reported yet");
+    expect(replies[0]).not.toMatch(/crontab: |permission denied/i);
+  });
+
+  it("names the file and the reason when a report cannot be read, and still shows the other one", async () => {
+    const { ctx, replies } = fakeCtx("");
+    await handleReview(ctx, fakeSwitch(false, "ok", { "pr-brain": new Error("EACCES: permission denied"), "agent-dispatch": DISPATCH_FILE }).deps);
+    expect(replies[0]).toContain("Automatic PR review is ON");
+    expect(replies[0]).toContain("Could not read ~/.claude/pr-brain.effective: EACCES: permission denied");
+    expect(replies[0]).toContain("Writer for /task: Google Antigravity on gemini-3.6-flash-medium");
+  });
+});
+
+describe("/review reads the real files the daemons write (the path the bot takes in production)", () => {
+  it("shows the reviewers from ~/.claude/pr-brain.effective under a home with no crontab at all", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const home = mkdtempSync(join(tmpdir(), "review-home-"));
+    const oldHome = process.env["HOME"];
+    try {
+      mkdirSync(join(home, ".claude"), { recursive: true });
+      writeFileSync(join(home, ".claude", "pr-brain.effective"), `written=${Math.floor(Date.now() / 1000)}\nreviewers=model-a model-b\nmerge=1\n`);
+      process.env["HOME"] = home;
+      const { ctx, replies } = fakeCtx("");
+      await handleReview(ctx);
+      expect(replies[0]).toContain("Automatic PR review is ON");
+      expect(replies[0]).toContain("Reviewer: model-a, then model-b");
+      expect(replies[0]).toContain("Writer model: not reported yet"); // agent-dispatch.effective was not written
+    } finally {
+      if (oldHome === undefined) delete process.env["HOME"];
+      else process.env["HOME"] = oldHome;
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 

@@ -16,6 +16,7 @@ import {
   HITL_GATED_TOOLS,
   RETRIEVAL_TOOL_TABLE,
   buildCapabilityManifest,
+  buildDepartmentsSummary,
   mergeBridgedTools,
   stripBridgedTools,
 } from "../../../src/agents/capabilities.js";
@@ -67,6 +68,41 @@ describe("DEPARTMENT_TOOLS registry", () => {
     expect(jobhunt).toContain("read_cv");
     expect(personal).not.toContain("search_personal_rag");
     expect(personal).not.toContain("read_cv");
+  });
+});
+
+describe("buildDepartmentsSummary (the stored founderos_departments is generated, not hand-written)", () => {
+  const summary = buildDepartmentsSummary();
+
+  it("opens with the real worker count", () => {
+    expect(summary).toMatch(new RegExp(`^${Object.keys(DEPARTMENT_TOOLS).length} kernel workers`));
+  });
+
+  it("lists every department and every one of its tools, starring the gated ones", () => {
+    for (const [dept, tools] of Object.entries(DEPARTMENT_TOOLS)) {
+      expect(summary).toContain(`${dept} (`);
+      for (const t of tools as { name: string }[]) {
+        const label = HITL_GATED_TOOLS.has(t.name) ? `${t.name}*` : t.name;
+        expect(summary, `${dept}/${t.name}`).toContain(label);
+      }
+    }
+    expect(summary).toContain("send_email*");
+    expect(summary).not.toMatch(/\bsend_email(?!\*)/);
+  });
+
+  it("sends 'what is running right now' to the live source instead of describing it", () => {
+    expect(summary).toContain("ops_state");
+    expect(summary).toContain("background_jobs");
+  });
+
+  it("does not drift when a tool is added: it is computed from the same registry as the manifest", () => {
+    const fake = { name: "zz_new_tool" } as unknown as (typeof DEPARTMENT_TOOLS)["admin"][number];
+    DEPARTMENT_TOOLS["admin"]!.push(fake);
+    try {
+      expect(buildDepartmentsSummary()).toContain("zz_new_tool");
+    } finally {
+      DEPARTMENT_TOOLS["admin"]!.pop();
+    }
   });
 });
 
