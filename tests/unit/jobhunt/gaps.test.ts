@@ -100,7 +100,7 @@ describe("formatGapReport", () => {
   });
 
   it("refuses to invent a market from zero postings", () => {
-    const out = formatGapReport({ sampleSize: 0, missing: [], confirmed: [], rising: [], cvTermCount: 8 });
+    const out = formatGapReport({ sampleSize: 0, missing: [], confirmed: [], rising: [], covered: [], cvTermCount: 8 });
     expect(out).toMatch(/no data yet/i);
     expect(out).toMatch(/ingest_jobs/);
   });

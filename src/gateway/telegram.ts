@@ -226,6 +226,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
         weeklyGoal: await weeklyApplicationGoal(profile.id),
       }),
     split: splitForTelegram,
+    topRoles: async (profile) => (await import("./jobhunt-compact.js")).topRolesFor(profile),
     lastFreshView: async (profileId) =>
       (await import("../db/job-heartbeat-queries.js")).lastFreshView(profileId),
     recordFreshView: async (profileId, at) =>
@@ -293,7 +294,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     if (await handleMenuCallback(ctx)) return;
     if (await handleRetryCallback(ctx)) return;
     if (await handleCommandCallback(ctx)) return;
-    if (await handleJobCallback(ctx, { runKernelText })) return;
+    if (await handleJobCallback(ctx, { runKernelText }, jobsDeps)) return;
     if (!data.startsWith("approve") && !data.startsWith("reject")) {
       await ctx.answerCallbackQuery({ text: "Unknown action" });
       return;
