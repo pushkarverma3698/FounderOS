@@ -961,10 +961,10 @@ export const scheduledTasks = agentsSchema.table(
 
     /**
      * Recurrence spec (`daily@08:07` | `weekdays@09:00` | `weekly@mon:09:12` |
-     * `monthly@01:06:07`), NULL for a one-shot task. On completion the sweep
-     * parses this and inserts a FRESH row for the next occurrence rather than
-     * mutating this one, so fired history stays immutable and a checkpoint replay
-     * can never re-arm twice. Parsed by `parseRecurrence` / `nextRecurrence` in
+     * `monthly@01:06:07`), NULL for a one-shot task. When the sweep claims a row it
+     * inserts a FRESH row for the next occurrence (src/infra/task-recurrence.ts),
+     * keyed `recur:<this id>`, rather than mutating this one, so fired history stays
+     * immutable and a re-claim can never book twice. Parsed by `parseRecurrence` / `nextRecurrence` in
      * src/core/time.ts, which resolve against APP_TIMEZONE.
      */
     recurrence: text("recurrence"),
