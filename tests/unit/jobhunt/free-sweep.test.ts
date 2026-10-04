@@ -80,8 +80,17 @@ const mockExportJobSheet = vi.fn(async () => ({
 vi.mock("../../../src/tools/jobhunt/sheet-export.js", () => ({
   exportJobSheet: mockExportJobSheet,
 }));
+const mockRunPooledIngest = vi.fn(async () => ({
+  fetched: 5,
+  failures: [],
+  notes: [],
+  newBoards: [],
+}));
+vi.mock("../../../src/tools/jobhunt/ingest.js", () => ({
+  runPooledIngest: mockRunPooledIngest,
+}));
 
-const { runFreeSweep, FREE_SWEEP_CRON, resetHeartbeat } = await import(
+const { runFreeSweep, runJobIngestSweep, FREE_SWEEP_CRON, resetHeartbeat } = await import(
   "../../../src/tools/jobhunt/sweep-runner.js"
 );
 
@@ -238,10 +247,8 @@ describe("runFreeSweep", () => {
     expect(text).toContain("Aquablu B.V.");
   });
 
-  it("folds an export failure into the alert rather than sending a second message", async () => {
-    // Two notifications for one event is how a channel becomes noise — and the
-    // unconfigured case would otherwise nag twice per sweep until setup.
-    mockExportJobSheet.mockResolvedValue({
+  it("omits the sheet notice from the alert when sheet export is skipped (unconfigured)", async () => {
+    mockExportJobSheet.mockResolvedValueOnce({
       ok: false,
       skipped: true,
       reason: "JOBHUNT_SHEET_ID is not set",
@@ -253,7 +260,40 @@ describe("runFreeSweep", () => {
     expect(mockSendToJobsChat).toHaveBeenCalledOnce();
     const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
     expect(text).toContain("Aquablu B.V.");
-    expect(text).toContain("not set up yet");
+    expect(text).not.toContain("not set up");
+    expect(text).not.toContain("null");
+  });
+
+  it("still shows real export failures in the alert when skipped is false", async () => {
+    mockExportJobSheet.mockResolvedValueOnce({
+      ok: false,
+      skipped: false,
+      reason: "quota exceeded",
+    } as any);
+    mockRunFreeIngest.mockResolvedValue(result({ lines: [line()] }));
+
+    await runFreeSweep();
+
+    expect(mockSendToJobsChat).toHaveBeenCalledOnce();
+    const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
+    expect(text).toContain("Aquablu B.V.");
+    expect(text).toContain("could not be updated");
+  });
+
+  it("sends metered sweep summary without null or link when export is skipped", async () => {
+    mockExportJobSheet.mockResolvedValueOnce({
+      ok: false,
+      skipped: true,
+      reason: "JOBHUNT_SHEET_ID is not set",
+    } as any);
+
+    await runJobIngestSweep();
+
+    expect(mockSendToJobsChat).toHaveBeenCalledOnce();
+    const [text] = (mockSendToJobsChat.mock.calls as unknown as [string][])[0]!;
+    expect(text).toContain("Screened");
+    expect(text).not.toContain("null");
+    expect(text).not.toContain("not set up");
   });
 
   it("does not rewrite the sheet on a sweep that found nothing", async () => {
