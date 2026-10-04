@@ -220,8 +220,20 @@ export type Plan = z.infer<typeof PlanSchema>;
 export const PlannerDecisionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("reply"), text: z.string().min(1) }),
   z.object({ type: z.literal("plan"), plan: PlanSchema }),
+  /** Run one of the founder's slash commands. The planner NAMES it; the gateway runs the real handler. */
+  z.object({
+    type: z.literal("command"),
+    name: z.string().min(1).max(32),
+    args: z.string().max(2000).default(""),
+  }),
 ]);
 export type PlannerDecision = z.infer<typeof PlannerDecisionSchema>;
+
+/** A slash command the planner chose: the registered name (no slash) and its argument text. */
+export interface PlannedCommand {
+  name: string;
+  args: string;
+}
 
 export function validatePlannerDecision(input: unknown): Validation<PlannerDecision> {
   const res = PlannerDecisionSchema.safeParse(input);

@@ -13,7 +13,8 @@ import { Command, GraphRecursionError } from "@langchain/langgraph";
 import { TENANT, DAILY_BUDGET_USD, OFFICE_TURN_TIMEOUT_MS, OFFICE_RECURSION_LIMIT } from "../core/config.js";
 import { withTurnTimeout, TurnTimeoutError } from "./turn-timeout.js";
 import { getKernel } from "./kernel-boot.js";
-import { kernelReply, getPendingKernelApproval } from "../kernel/index.js";
+import { kernelReply, kernelCommand, getPendingKernelApproval, type PlannedCommand } from "../kernel/index.js";
+import { runPlannedCommand } from "./command-dispatch.js";
 import type { ApprovalRequest } from "../infra/hitl.js";
 import { formatApprovalCard, safeHtml } from "./approval-card.js";
 import { markdownToTelegramHtml, splitForTelegram } from "./format.js";
@@ -182,6 +183,8 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
   if (chatTurnChains.has(String(chatId))) {
     await ctx.reply("⏳ Got it — finishing the current request first.").catch(() => undefined); // allow-failopen: queue ack is cosmetic
   }
+  // Set inside the turn, run after its lock is released: a command such as /task starts turns of its own.
+  let planned = null as PlannedCommand | null;
   await withChatTurnLock(chatId, async () => {
     const trace = startTurn({ chatId: String(chatId), kind: "message", promptHash: kernelPromptHash() });
     let foldCtx: { kernel: FoldableKernel; config: unknown } | undefined;
@@ -264,6 +267,11 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
         return;
       }
 
+      planned = kernelCommand(res as never);
+      if (planned) {
+        trace.event("turn.out", { replyPreview: `command /${planned.name} ${planned.args}`.slice(0, 200) });
+        return;
+      }
       const reply = kernelReply(res as never);
       trace.event("turn.out", { replyPreview: reply.slice(0, 200) });
       // A failed turn goes out as the plain-words card with 🔁 Retry (failure-card.ts).
@@ -279,6 +287,13 @@ export async function runKernelText(ctx: Context, text: string, profileId?: stri
       await replyForError(ctx, failure, { chatId: String(chatId), text, turnId: trace.turnId, profileId });
     }
   });
+  if (planned) {
+    const name = planned.name;
+    await runPlannedCommand(ctx, planned).catch(async (err: unknown) => {
+      log.error({ err: String(err), command: name }, "Planned command failed");
+      await ctx.reply(`⚠️ I understood that as /${name}, but running it failed. Type /${name} yourself to see why.`).catch(() => undefined); // allow-failopen: the failure is logged above; this reply is courtesy
+    });
+  }
 }
 
 // ── Resume after an approval decision ─────────────────────────────────────────
