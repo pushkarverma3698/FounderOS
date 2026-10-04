@@ -86,6 +86,10 @@ F. **Founder experience.**
    - Count Telegram messages per task.
    - Every failure needs a reason and a next action (#26).
    - `/tasks` must show the true state.
+   - **Logins:** the founder can add, renew or remove any account from Telegram whenever he wants, not only the ones set up today.
+     Gmail/Calendar already has `/login google add <name>`; `/login claude` and `/login agy` hold one login each, and a new
+     sign-in replaces it. On 10-04 all three Google accounts were revoked (`invalid_grant`, recurring every 6–7 days since
+     09-16, which points at an OAuth app in Testing mode), Claude hit its weekly limit and agy hit its quota, all at once.
 G. **Safety.**
    - Tokens and scopes held by the VPS users.
    - `--dangerously-skip-permissions`.
@@ -109,7 +113,10 @@ Paid (one run each, after the free tests). Check quota first and run only while 
    - pr-brain must approve the first and reject the other two.
    - Close all three afterwards.
 6. **One real end-to-end task through Telegram** (`scripts/telegram-probe.ts`): request → issue → PR → review → founder merge → deploy → prod check, with a timestamp at every hop.
-7. **Fault injection, one run each:** quota 429 (stub agy with exit 3), agy timeout, PR pushed under a different head name, dirty workspace.
+7. **Login test, every account through Telegram:** `/login` lists every account with a live check; add a new Gmail account,
+   a second Claude account and a second agy account; renew one; remove one; then confirm each is used (read mail, a pr-brain
+   review, an agy run). Unit-test the account registry and switching logic first ($0).
+8. **Fault injection, one run each:** quota 429 (stub agy with exit 3), agy timeout, PR pushed under a different head name, dirty workspace.
 
 ## 6. Improvement ideas, ranked by impact on the founder
 
@@ -127,7 +134,14 @@ Paid (one run each, after the free tests). Check quota first and run only while 
    - Move STANDARDS.md to `.agents/rules/*.md` with `trigger: glob` on `src/**`.
    - Remove the off-topic Apify skills.
 8. **Goal decomposition:** one high-level request files several linked issues, each small enough to finish in one run.
-9. **Faster merge:** when the founder opts in, pr-brain merges low-risk PRs (Lite depth, docs or test-only) to `beta` on green. Full-depth PRs stay founder-merged.
+9. **Any number of accounts per tool:**
+   - `/login claude add <name>` and `/login agy add <name>`, like Google today, built on the existing `addProblem`/`remove`
+     hooks in `src/gateway/login/command.ts`.
+   - On a 429 or weekly limit, pr-brain and agent-dispatch switch to the next account with quota and tell the founder once
+     which account is in use and when the exhausted one resets.
+   - `/login` shows every account with status (working / expired / out of quota until HH:MM) and the one command to fix it.
+   - A login that expires sends one Telegram message with the renew command, before work stalls.
+10. **Faster merge:** when the founder opts in, pr-brain merges low-risk PRs (Lite depth, docs or test-only) to `beta` on green. Full-depth PRs stay founder-merged.
 
 ## 7. Deliverables
 
