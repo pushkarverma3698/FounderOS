@@ -30,6 +30,7 @@ import {
   getWorkerModelId,
   resolveTemperature,
 } from "../agents/model.js";
+import { plannableCommands } from "./command-catalog.js";
 import { withModelFallbacks } from "./model-fallback.js";
 import { withModelRetry } from "./model-retry.js";
 import { withLlmCache } from "./model-cache.js";
@@ -305,6 +306,7 @@ export function buildProductionKernel(checkpointer: BaseCheckpointSaver): Compil
       ),
     ),
     workers: buildWorkerSpecs(),
+    commands: plannableCommands(),
     checkpointer,
     lessons: buildLessonStore(),
   });

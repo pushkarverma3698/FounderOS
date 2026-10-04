@@ -25,7 +25,7 @@
  */
 
 import { OFFICE_RECURSION_LIMIT } from "../core/config.js";
-import type { CompiledKernel } from "../kernel/index.js";
+import { kernelCommand, type CompiledKernel } from "../kernel/index.js";
 import type { Department, GoldenTask, Observation, PlanStepObservation, ToolCallObservation } from "./types.js";
 import type { Invoker } from "./runner.js";
 
@@ -100,7 +100,7 @@ export function makeKernelInvoker(kernel: CompiledKernel): Invoker {
       ];
       const tools = [...new Set(toolCalls.map((t) => t.tool))];
 
-      return { route, tools, hadInterrupt, steps, toolCalls };
+      return { route, tools, hadInterrupt, steps, toolCalls, command: kernelCommand(res as never) };
     } catch (err) {
       return { route: null, tools: [], hadInterrupt: false, error: (err as Error).message };
     }
