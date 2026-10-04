@@ -187,6 +187,7 @@ export function buildWorkerSpecs(): WorkerSpec[] {
       id,
       description: DESCRIPTIONS[id],
       prompt: typeof prompt === "function" ? prompt() : prompt,
+      dynamicPrompt: typeof prompt === "function" ? prompt : undefined,
       promptForProfile: PROMPT_FOR_PROFILE[id],
       tools: tools as unknown as KernelTool[],
     };

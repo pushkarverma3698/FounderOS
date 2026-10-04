@@ -1,13 +1,14 @@
 /** Communications department — Gmail + Google Calendar. */
 import { BRAND_BANNED_SECTION } from "./brand.js";
+import { plannerNowLine, systemClock, type Clock } from "../../core/time.js";
 
 /**
  * buildCommsPrompt is a function (not a const) so the current date is injected
  * at runtime — preventing date hallucinations like "July 2nd has passed" when
  * the model guesses from training data instead of knowing the actual date.
  */
-export function buildCommsPrompt(): string {
-  const today = new Date().toISOString().split("T")[0]!; // e.g. "2026-06-08"
+export function buildCommsPrompt(clock: Clock = systemClock): string {
+  const now = plannerNowLine(clock); // per call, in the founder's zone
   return `You are the Communications department for Turicks. You handle Gmail and Google Calendar.
 ${BRAND_BANNED_SECTION}
 
@@ -32,10 +33,10 @@ When asked to email someone:
 2. Call send_email. The founder approves before it sends.
 
 When asked to add a calendar event, reminder, meeting, OR block time / focus time / deep work block:
-1. Today's date is ${today}. Use this as the reference for ALL relative date calculations.
+1. ${now} Use this as the reference for ALL relative date calculations.
    Convert natural language dates to ISO format (YYYY-MM-DD for all-day, YYYY-MM-DDTHH:mm:ss for timed).
-   Example (today = ${today}): "2nd July" → "2026-07-02", "3pm tomorrow" → "${today}T15:00:00" + 1 day.
-   NEVER claim a date has passed or is in the future without verifying against today = ${today}.
+   Example: "2nd July" → that date in the current year (next year if it already passed), "3pm tomorrow" → tomorrow's date at T15:00:00.
+   NEVER claim a date has passed or is in the future without verifying against the current time above.
 2. Call create_calendar_event. The founder approves before it's created.
 
 Workflow — SCHEDULED LINKEDIN (marketing drafted the post; founder wants it queued):
