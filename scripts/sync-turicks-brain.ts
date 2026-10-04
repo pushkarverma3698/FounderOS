@@ -73,6 +73,28 @@ export function needsChunkRefresh(matchingChunks: number, expectedChunks: number
   return matchingChunks !== expectedChunks;
 }
 
+/** Lines at the top of a doc that may carry its Status field. A Status line quoted further down is not a declaration. */
+const STATUS_HEADER_LINES = 20;
+/** A Status field whose value starts with superseded/archived: `**Status:** Superseded by …`, `Date: … · Status: archived`. */
+const REPLACED_STATUS =
+  /^[\s>_*]*(?:Date:[^\n]*?·\s*)?[_*]*Status[_*]*\s*:[\s_*]*(superseded|archived)(?![a-z])/im;
+
+/**
+ * The brain_memories status a doc declares for itself. Every chunk used to be inserted as ACTIVE, so a plan the founder
+ * had replaced ranked like a current one. The mark lives in the file (not in the database) because this script deletes
+ * and re-inserts a source's chunks on every content change: a status set only in the database would be lost.
+ *
+ * Editing the header changes the content sha, so the next sync re-inserts the chunks with the new status. Search skips
+ * SUPERSEDED and ARCHIVED rows (src/db/rag-search.ts). "supersedes" does not count: a plan that replaces another is current.
+ */
+export function declaredDocStatus(content: string): "ACTIVE" | "SUPERSEDED" | "ARCHIVED" {
+  const header = content.split("\n", STATUS_HEADER_LINES).join("\n");
+  const word = REPLACED_STATUS.exec(header)?.[1]?.toLowerCase();
+  if (word === "superseded") return "SUPERSEDED";
+  if (word === "archived") return "ARCHIVED";
+  return "ACTIVE";
+}
+
 interface DocEntry {
   entry_type: string;
   title: string;
@@ -568,6 +590,7 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
     sql`DELETE FROM brain.brain_memories WHERE source = ${entry.source}`,
   );
 
+  const status = declaredDocStatus(entry.content);
   for (let i = 0; i < chunks.length; i++) {
     const metadata = {
       source_path: entry.source,
@@ -588,7 +611,7 @@ async function syncVectorChunks(entry: DocEntry): Promise<{ chunks: number; refr
         ${toVector(embeddings[i]!)}::vector,
         ${entry.source},
         ${contentSha(chunks[i]!)},
-        'ACTIVE',
+        ${status},
         ${project}
       )
     `);

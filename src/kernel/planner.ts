@@ -31,6 +31,8 @@ import { formatFailureReply } from "./supervisor.js";
 import { messageContentText } from "./message-text.js";
 import { plannerNowLine, systemClock, type Clock } from "../core/time.js";
 import { CONTEXT_STALE_MARKER } from "../db/context-meta.js";
+import type { RunnableConfig } from "@langchain/core/runnables";
+import { recordTurnSafely, type TurnLog } from "./turn-log.js";
 
 /** Minimal chat-model surface the kernel depends on (BaseChatModel satisfies it). */
 export interface KernelChatModel {
@@ -121,7 +123,7 @@ export function buildPlannerPrompt(catalog: WorkerCatalogEntry[], commands: read
     `- 1 step for single-department tasks; up to 8 for multi-step. Reference earlier outputs via inputs, e.g. {"summary_from":"s1"}.`,
     `- expected.kind is "action_receipt" whenever the step SENDS/POSTS/WRITES anything external; those steps also set hitl_required=true when using a gated tool.`,
     `- NEVER invent required data (emails, URLs, amounts). Missing required data → {"type":"reply"} asking for it.`,
-    `- Questions about the founder, their business, work, or history are NOT direct replies: plan a step for the worker with context/memory tools (read_context, search_memory). Read first, then answer — never answer from priors or ask permission to check.`,
+    `- Questions about the founder, their business, work, or history are NOT direct replies: plan a step for the worker with context/memory tools (read_context, search_memory, recall_conversation for what the founder said in past chats). Read first, then answer — never answer from priors or ask permission to check.`,
     // 2026-09-29: "what is my current focus?" was answered with June's plan as if it were
     // current. read_context now dates every value and marks a stale or undated one with this
     // mark (src/tools/context-render.ts), so this rule has a real input to act on.
@@ -209,7 +211,10 @@ export function overrideDecision(worker: WorkerId, task: string): PlannerDecisio
 }
 
 /** Truncation bounds for history entries — keep checkpoints and prompts small. */
-export const HISTORY_INPUT_MAX_CHARS = 600;
+// 2,000, not 600: a pasted brief or a long instruction lost its tail on the very next turn
+// ("as I said above, use the second option" had no second option to read). The total stays
+// bounded by HISTORY_MAX_CHARS, which drops the oldest turns first.
+export const HISTORY_INPUT_MAX_CHARS = 2000;
 export const HISTORY_REPLY_MAX_CHARS = 1500;
 
 /**
@@ -266,12 +271,15 @@ export function makePlanNode(
   catalog: WorkerCatalogEntry[],
   clock: Clock = systemClock,
   commands: readonly CommandCatalogEntry[] = [],
+  turnLog?: TurnLog,
 ) {
   const systemPrompt = buildPlannerPrompt(catalog, commands);
 
-  return async function plan(state: KernelStateType): Promise<KernelUpdate> {
+  return async function plan(state: KernelStateType, config?: RunnableConfig): Promise<KernelUpdate> {
     const input = state.turn.raw_input.trim();
     const previous = summarizePreviousTurn(state);
+    // Durable copy for recall_conversation; `history` below forgets it after a 6-hour silence.
+    if (previous && turnLog) await recordTurnSafely(turnLog, previous, config?.configurable?.["thread_id"]);
     const conversation = previous ? [...state.history, previous] : state.history;
     const base: KernelUpdate = {
       results: RESET,

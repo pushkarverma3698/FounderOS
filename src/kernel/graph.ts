@@ -23,6 +23,7 @@ import { KernelState, type KernelStateType } from "./state.js";
 import type { PlannedCommand } from "./contracts.js";
 import { makePlanNode, type CommandCatalogEntry, type KernelChatModel, type WorkerCatalogEntry } from "./planner.js";
 import type { Clock } from "../core/time.js";
+import type { TurnLog } from "./turn-log.js";
 import { routeAfterDispatch, routeAfterPlan } from "./supervisor.js";
 import { makeLessonDispatch, type LessonStore } from "./lessons.js";
 import { makeAgentNode, makeToolsNode, routeAfterAgent, collect, type KernelBindableModel, type WorkerSpec } from "./worker.js";
@@ -41,6 +42,8 @@ export interface KernelConfig {
   commands?: CommandCatalogEntry[];
   /** Injected "now" for the planner's time-awareness — frozen in tests for determinism. */
   clock?: Clock;
+  /** Durable log of finished turns, read by recall_conversation (Postgres in prod, absent in tests). */
+  turnLog?: TurnLog;
 }
 
 export function buildKernel(config: KernelConfig) {
@@ -55,7 +58,7 @@ export function buildKernel(config: KernelConfig) {
   }));
 
   const graph = new StateGraph(KernelState)
-    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands))
+    .addNode("plan", makePlanNode(config.plannerModel, catalog, config.clock, config.commands, config.turnLog))
     .addNode("dispatch", makeLessonDispatch(config.lessons))
     .addNode("agent", makeAgentNode(config.workerModel, specs))
     .addNode("tools", makeToolsNode(specs))

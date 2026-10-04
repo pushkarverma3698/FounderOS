@@ -81,10 +81,9 @@ describe("0042_goals — the goals migration", () => {
     expect(entry?.idx).toBe(42);
   });
 
-  it("is the newest entry, with a `when` above the largest of all 42 earlier entries", () => {
+  it("has a `when` above the largest of all 42 earlier entries", () => {
     expect(entry).toBeDefined();
     expect(entry!.when).toBeGreaterThan(maxWhenBefore(42));
-    expect(entries.at(-1)?.tag).toBe("0042_goals");
   });
 
   it("has a `when` that is a real millisecond epoch, not a placeholder", () => {
@@ -139,6 +138,47 @@ describe("goals tables are visible to the schema ⇄ migration parity guard", ()
     expect(cols, "agents.goal_reviews is not exported from src/db/schema.ts").toBeDefined();
     for (const c of ["goal_id", "review_date", "value", "evidence", "pace", "error", "claimed_at", "sent_at", "attempts"]) {
       expect(cols!.has(c), `agents.goal_reviews.${c}`).toBe(true);
+    }
+  });
+});
+
+describe("0043_conversation_turns — the conversation log migration", () => {
+  const entry = entries.find((e) => e.tag === "0043_conversation_turns");
+  const sqlPath = `${DRIZZLE_DIR}0043_conversation_turns.sql`;
+
+  it("is registered in the journal as index 43, newer than every earlier entry", () => {
+    expect(entry, "0043_conversation_turns is missing from drizzle/meta/_journal.json").toBeDefined();
+    expect(entry?.idx).toBe(43);
+    expect(entry!.when).toBeGreaterThan(maxWhenBefore(43));
+    expect(Number.isInteger(entry!.when)).toBe(true);
+  });
+
+  it("creates the table idempotently, with the unique key that makes the write safe to repeat", () => {
+    const text = readFileSync(sqlPath, "utf8").toLowerCase();
+    expect(text).toMatch(/create table if not exists "agents"\."conversation_turns"/);
+    expect(text).toMatch(/unique \("thread_id", "turn_id"\)/);
+    expect(text).toMatch(/create index if not exists "conversation_turns_thread_time_idx"/);
+    // Additive only: the rollback lives in a comment, never in the statements.
+    const statements = text
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("--"))
+      .join("\n");
+    expect(statements).not.toMatch(/\bdrop\b/);
+  });
+
+  it("does not ship a .down.sql", () => {
+    expect(existsSync(`${DRIZZLE_DIR}0043_conversation_turns.down.sql`)).toBe(false);
+  });
+
+  it("is visible to the schema ⇄ migration parity guard, with every column the migration creates", () => {
+    const cfgs = Object.values(schemaModule)
+      .filter((v) => is(v, PgTable))
+      .map((v) => getTableConfig(v as PgTable))
+      .filter((c) => c.schema === "agents" && c.name === "conversation_turns");
+    expect(cfgs, "agents.conversation_turns is not exported from src/db/schema.ts").toHaveLength(1);
+    const cols = new Set(cfgs[0]!.columns.map((c) => c.name));
+    for (const c of ["id", "thread_id", "turn_id", "occurred_at", "user_input", "goal", "outcome", "reply", "recorded_at"]) {
+      expect(cols.has(c), `agents.conversation_turns.${c}`).toBe(true);
     }
   });
 });
