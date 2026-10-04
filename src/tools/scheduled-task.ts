@@ -26,7 +26,7 @@ const log = childLogger({ module: "tool:scheduled-task" });
 const RECURRENCE_FORMS = "daily@08:00 · weekdays@09:00 · weekly@mon:09:00 · monthly@01:09:00 (24h, founder's timezone)";
 
 /** One run at a future instant, or a repeat rule whose next occurrence is the first run. Never both. */
-function resolveTiming(
+export function resolveTiming(
   scheduledAt: string | null | undefined,
   recurrence: string | null | undefined,
 ): { when: Date; spec: string | null } | { error: string } {
