@@ -77,6 +77,13 @@ const FULL_MONTHS = ["january", "february", "march", "april", "may", "june", "ju
 const NUMBER_WORDS: Record<string, number> = {
   a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
 };
+/** Said for minutes and hours: "a couple of hours ago", "a few minutes ago". */
+const LOOSE_AMOUNTS: Record<string, number> = { "a couple of": 2, "a couple": 2, "a few": 3 };
+/** A look-back never reaches less than this far: "a minute ago" is a loose guess, not an exact one. */
+const MIN_LOOKBACK_MINUTES = 30;
+const MAX_MINUTES_BACK = 720;
+const MAX_HOURS_BACK = 72;
+const JUST_NOW = new Set(["just now", "a moment ago", "moments ago", "a second ago", "seconds ago"]);
 /** Parts of a day: [start hour, end hour] on the 24 h clock; "night" runs past midnight to 06:00. */
 const DAY_PARTS: Record<string, readonly [number, number]> = {
   morning: [0, 12], afternoon: [12, 18], evening: [18, 24], night: [18, 30],
@@ -127,7 +134,7 @@ export function resolveRecallWindow(phrase: string, now: Date, tz: string): Reca
     .toLowerCase()
     .trim()
     .replace(/[.,!?]+$/g, "")
-    .replace(/^(?:(?:on|in|during|from|the)\s+)+/, "")
+    .replace(/^(?:(?:on|in|during|from|the|about|around|roughly)\s+)+/, "")
     .replace(/\s+/g, " ")
     .trim();
   if (text === "") return null;
@@ -139,8 +146,27 @@ export function resolveRecallWindow(phrase: string, now: Date, tz: string): Reca
   const oneDay = (daysBack: number): RecallWindow => window(at(-daysBack), at(-daysBack + 1));
   const toNow = (daysBack: number): RecallWindow => window(at(-daysBack), at(1));
 
-  if (text === "today") return oneDay(0);
+  if (text === "today" || text === "earlier" || text === "earlier today") return oneDay(0);
   if (text === "yesterday") return oneDay(1);
+
+  // "just now", "a minute ago", "an hour ago": a window ending now. "N units ago" looks back twice N (never under half
+  // an hour) so a loose guess still lands; "past hour" / "last 20 minutes" are exact. The label states the span.
+  const lookBack = (minutes: number): RecallWindow => ({
+    since: new Date(now.getTime() - minutes * 60_000),
+    until: now,
+    label: `the last ${minutes === 60 ? "hour" : minutes % 60 === 0 ? `${minutes / 60} hours` : `${minutes} minutes`}`,
+  });
+  const span = (word: string | undefined, unit: string, exact: boolean): RecallWindow | null => {
+    const n = word === undefined ? 1 : /^\d+$/.test(word) ? Number(word) : LOOSE_AMOUNTS[word] ?? NUMBER_WORDS[word];
+    const minutes = (n ?? 0) * (unit === "hour" ? 60 : 1);
+    if (minutes < 1 || minutes > (unit === "hour" ? MAX_HOURS_BACK * 60 : MAX_MINUTES_BACK)) return null;
+    return lookBack(exact ? minutes : Math.max(MIN_LOOKBACK_MINUTES, 2 * minutes));
+  };
+  if (JUST_NOW.has(text)) return lookBack(MIN_LOOKBACK_MINUTES);
+  const small = /^(\d{1,4}|a couple of|a couple|a few|[a-z]+) (minute|hour)s? ago$/.exec(text);
+  if (small) return span(small[1], small[2]!, false);
+  const recent = /^(?:past|last) (?:(\d{1,4}|[a-z]+) )?(minute|hour)s?$/.exec(text);
+  if (recent) return span(recent[1], recent[2]!, true);
 
   // "this morning", "yesterday evening", "last night", "tonight"
   const part = /^(this|today|yesterday|last)\s+(morning|afternoon|evening|night)$/.exec(text === "tonight" ? "this night" : text);
@@ -160,9 +186,9 @@ export function resolveRecallWindow(phrase: string, now: Date, tz: string): Reca
   }
 
   // "3 days ago" is that one day; "past 5 days" / "last two weeks" run up to now.
-  const ago = /^(\d{1,4}|[a-z]+) days? ago$/.exec(text);
+  const ago = /^(\d{1,4}|[a-z]+|a couple of|a couple) days? ago$/.exec(text);
   const past = /^(?:past|last|previous) (\d{1,4}|[a-z]+) (day|week)s?$/.exec(text);
-  const amount = (word: string): number | null => (/^\d+$/.test(word) ? Number(word) : NUMBER_WORDS[word] ?? null);
+  const amount = (word: string): number | null => (/^\d+$/.test(word) ? Number(word) : LOOSE_AMOUNTS[word] ?? NUMBER_WORDS[word] ?? null);
   if (ago) {
     const n = amount(ago[1]!);
     return n !== null && n >= 1 && n <= MAX_DAYS_BACK ? oneDay(n) : null;
@@ -259,7 +285,7 @@ function renderTurn(turn: RecalledTurn, now: Date, tz: string): string {
   return lines.join("\n");
 }
 
-const READABLE_TIMES = `yesterday, last week, monday, 3 days ago, past 5 days, or a date like 2026-09-30`;
+const READABLE_TIMES = `just now, an hour ago, earlier today, yesterday, last week, monday, 3 days ago, past 5 days, or a date like 2026-09-30`;
 
 function emptyAnswer(topic: string, windowText: string, window: RecallWindow | null, earliest: Date | null, tz: string): string {
   if (earliest === null) {
