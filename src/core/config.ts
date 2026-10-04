@@ -12,7 +12,6 @@ import { z } from "zod";
 import { join } from "node:path";
 
 // ── Environment Schema ────────────────────────────────────────────────────────
-
 export const envSchema = z.object({
   // Database — required for checkpointer + audit log
   DATABASE_URL: z.string().url().describe("PostgreSQL connection string"),
@@ -21,6 +20,7 @@ export const envSchema = z.object({
   TELEGRAM_CHAT_ID: z.string().min(1),
   TELEGRAM_ALLOWED_CHAT_IDS: z.string().transform(v => v || undefined).optional(), // group chats — gateway/chat-access.ts
   TELEGRAM_ANSWER_ALL_CHAT_IDS: z.string().transform(v => v || undefined).optional(), // allowed chats where every message is for the bot
+  JOBHUNT_SENDER_PROFILES: z.string().transform(v => v || undefined).optional(), // "<telegram user id>=<profile>,…" — gateway/jobhunt-sender-profile.ts
   TELEGRAM_OWNER_USER_ID: z.string().transform(v => v || undefined).optional(),
 
   // LLM providers — one key must match the selected AGENT_MODEL provider.

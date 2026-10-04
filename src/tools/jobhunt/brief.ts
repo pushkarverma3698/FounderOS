@@ -56,6 +56,7 @@ import {
   selectStretch,
   selectStanding,
 } from "./brief-select.js";
+import { renderProgress, type WeekProgress } from "./brief-progress.js";
 import { overflowNote, renderNextActions } from "./brief-actions.js";
 import { plural, renderHeader, type SectionTotals } from "./brief-header.js";
 
@@ -134,6 +135,8 @@ export interface BriefInput {
   readonly notes?: readonly string[];
   /** Today's feed spend. Omitted when the ledger is unavailable, never faked. */
   readonly spend?: SpendLine;
+  /** This week's applications vs the `/goal`, when readable. Replaces the undrafted-nag line. */
+  readonly progress?: WeekProgress;
   /**
    * Otherwise-actionable rows excluded from `rows` for being past `maxAgeHours`.
    * Optional so the many tests unrelated to freshness don't all need updating;
@@ -313,7 +316,9 @@ export function formatDailyBrief(input: BriefInput): string {
   if (input.trends.length > 0) sections.push(renderTrends(input.trends));
 
   const stale = input.rows.filter((r) => r.verdict === "pass" && r.ageDays >= STALE_UNDRAFTED_DAYS);
-  if (stale.length > 0) {
+  if (input.progress) {
+    sections.push(renderProgress(input.progress));
+  } else if (stale.length > 0) {
     const oldest = Math.max(...stale.map((r) => r.ageDays));
     // The line that makes ignoring the brief cost something. Without it, a
     // pipeline that produces nothing looks exactly like one that is working.
