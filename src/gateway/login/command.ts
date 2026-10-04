@@ -156,8 +156,9 @@ export async function handleLoginReply(ctx: Context, deps: LoginDeps): Promise<b
     log.error({ tool: pending.adapter.id, target: pending.target, err: err instanceof Error ? err.message : String(err) }, "login finish failed");
     result = { ok: false, html: `The ${esc(pending.adapter.title)} login failed: ${esc(err instanceof Error ? err.message : String(err))}` };
   }
-  // A failed paste keeps the attempt open (a typo should not cost a new link); success closes it.
-  if (result.ok) await deps.pending.drop(chatId);
-  await send(ctx, result.html);
+  // A failed paste keeps the attempt open (a typo should not cost a new link); success closes it, or hands over to its next step.
+  if (result.ok && result.next) await deps.pending.begin(chatId, pending.adapter, pending.target, result.next);
+  else if (result.ok) await deps.pending.drop(chatId);
+  await send(ctx, result.next ? `${result.html}\n\nChanged your mind? /login cancel` : result.html);
   return true;
 }

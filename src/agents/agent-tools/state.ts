@@ -176,10 +176,11 @@ export const opsState = tool(
     description: opsStateTool.description,
     schema: z.object({
       scope: z
-        .enum(["scheduled_tasks", "reminders", "hitl_approvals", "action_log", "costs", "job_runs"])
+        .enum(["scheduled_tasks", "reminders", "hitl_approvals", "action_log", "costs", "job_runs", "background_jobs"])
         .describe(
           "Operational scope. 'costs' = money spent on AI calls (dollar totals + per-model breakdown) — " +
-            "use it for any spend/budget/cost question. 'job_runs' = job sweep throughput counts.",
+            "use it for any spend/budget/cost question. 'job_runs' = job sweep throughput counts. " +
+            "'background_jobs' = what runs without being asked (PR review, coding dispatch, built-in routines): state, models, what needs attention.",
         ),
       status: z.string().optional().nullable().describe("Filter by status."),
       since: z.string().optional().nullable().describe("Filter timestamp >= ISO string."),
