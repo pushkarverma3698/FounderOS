@@ -169,7 +169,7 @@ log() {
 
 # Mirrors pr-brain's notify() exactly — same env file, same silent-if-unset behavior.
 notify() {
-  if tg_is_quiet; then
+  if tg_should_hold "$1"; then
     tg_hold "$1"
     return 0
   fi

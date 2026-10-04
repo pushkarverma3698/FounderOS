@@ -145,7 +145,7 @@ log() {
 TG_DAEMON_NAME="${TG_DAEMON_NAME:-pr-brain}"
 ENV_FILE="${PR_BRAIN_ENV_FILE:-}"
 notify() {
-  if tg_is_quiet; then
+  if tg_should_hold "$1"; then
     tg_hold "$1"
     return 0
   fi

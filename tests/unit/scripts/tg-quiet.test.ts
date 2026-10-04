@@ -99,6 +99,31 @@ describe("tg_is_quiet — window edges", () => {
   });
 });
 
+describe("tg_is_quiet — bad config never kills the daemon", () => {
+  it("treats a malformed TG_QUIET_HOURS as not quiet, without an arithmetic error", () => {
+    const r = run("tg_is_quiet; echo rc=$?", { TG_QUIET_HOURS: "abc", TG_QUIET_NOW: "02" });
+    expect(r.stdout).toContain("rc=1");
+    expect(r.stderr).toBe("");
+  });
+});
+
+describe("tg_should_hold — urgent alerts are never held", () => {
+  const held = (msg: string) => run(`tg_should_hold "${msg}"`, { TG_QUIET_NOW: "02" }).status === 0;
+  it("holds routine events at night", () => {
+    expect(held("🧠 Gate done — oplify#56")).toBe(true);
+  });
+  it("sends failures, pauses and give-ups at night", () => {
+    expect(held("🛑 Gate gave up on oplify#56")).toBe(false);
+    expect(held("⚠️ Gate FAILED to complete — oplify#56")).toBe(false);
+    expect(held("❌ merge failed")).toBe(false);
+    expect(held("⏸ pr-brain paused: Antigravity auth")).toBe(false);
+    expect(held("agent-dispatch paused (usage limit)")).toBe(false);
+  });
+  it("never holds during the day", () => {
+    expect(run(`tg_should_hold "🧠 Gate done"`, { TG_QUIET_NOW: "12" }).status).toBe(1);
+  });
+});
+
 describe("tg_hold — queueing messages", () => {
   it("appends formatted entry to tg-digest.queue", () => {
     run(`TG_DAEMON_NAME=pr-brain tg_hold "Gate done — oplify#56\nsecond line"`);
@@ -109,16 +134,22 @@ describe("tg_hold — queueing messages", () => {
     expect(parts).toHaveLength(3);
     expect(parts[0]).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
     expect(parts[1]).toBe("pr-brain");
-    expect(parts[2]).toBe("Gate done — oplify#56");
+    expect(parts[2]).toBe("Gate done — oplify#56 · second line");
   });
 
-  it("collapses whitespace and limits text length to 300 characters", () => {
+  it("keeps the verdict and URL of a multi-line event (first 3 lines)", () => {
+    run(`tg_hold "🧠 Gate done — oplify#56\n❌ BLOCKING defects\nhttps://github.com/o/r/pull/56\nextra"`);
+    const text = readFileSync(queueFile(), "utf8").trim().split("\t")[2] ?? "";
+    expect(text).toBe("🧠 Gate done — oplify#56 · ❌ BLOCKING defects · https://github.com/o/r/pull/56");
+  });
+
+  it("collapses whitespace and limits text length to 500 characters", () => {
     const longText = "a ".repeat(200);
     run(`TG_DAEMON_NAME=agent-dispatch tg_hold "  ${longText}  "`);
 
     const content = readFileSync(queueFile(), "utf8").trim();
     const text = content.split("\t")[2] ?? "";
-    expect(text.length).toBeLessThanOrEqual(300);
+    expect(text.length).toBeLessThanOrEqual(500);
     expect(text).not.toMatch(/\s{2,}/);
   });
 });

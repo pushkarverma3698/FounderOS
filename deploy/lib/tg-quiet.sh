@@ -3,6 +3,8 @@
 
 tg_is_quiet() {
   local range="${TG_QUIET_HOURS:-23-08}"
+  # A malformed value must never abort the daemon with an arithmetic error: treat it as "not quiet".
+  [[ "$range" =~ ^[0-9]{1,2}-[0-9]{1,2}$ ]] || return 1
   local start_str="${range%%-*}"
   local end_str="${range##*-}"
   local start=$(( 10#${start_str:-23} ))
@@ -30,6 +32,21 @@ tg_is_quiet() {
   fi
 }
 
+# Failures, pauses and give-ups are sent at any hour: holding them overnight hides the
+# reason the loop stopped until morning. Only routine progress waits for the digest.
+tg_is_urgent() {
+  local first
+  first="$(printf '%s' "${1:-}" | head -n1)"
+  [[ "$first" == "🛑"* || "$first" == "⚠️"* || "$first" == "❌"* || "$first" == "⏸"* ]] && return 0
+  printf '%s' "$first" | grep -qiE 'failed|paused|gave up|down\b' && return 0
+  return 1
+}
+
+# True (0) when this message should go to the digest instead of being sent now.
+tg_should_hold() {
+  tg_is_quiet && ! tg_is_urgent "${1:-}"
+}
+
 tg_hold() {
   local text="${1:-}"
   local queue_dir="${HOME}/.claude"
@@ -41,9 +58,11 @@ tg_hold() {
 
   local daemon_name="${TG_DAEMON_NAME:-$(basename "$0" 2>/dev/null || echo "daemon")}"
 
+  # First three non-empty lines: an event's verdict and URL sit on lines 2-3 and the digest
+  # must still say what happened (a reason is printed with its result).
   local first_line
-  first_line="$(printf '%s' "$text" | head -n1 | tr -s '[:space:]' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-  first_line="${first_line:0:300}"
+  first_line="$(printf '%s' "$text" | awk 'NF { gsub(/^[ \t]+|[ \t]+$/, ""); gsub(/[ \t]+/, " "); out = out (n++ ? " · " : "") $0; if (n == 3) exit } END { print out }')"
+  first_line="${first_line:0:500}"
 
   printf '%s\t%s\t%s\n' "$utc_time" "$daemon_name" "$first_line" >>"$queue_file"
 }
@@ -61,7 +80,8 @@ _tg_send_raw() {
   chat=$(grep -m1 '^TELEGRAM_CHAT_ID=' "$env_file" | cut -d= -f2- | tr -d '"'"'"'\r')
   [[ -n "$token" && -n "$chat" ]] || return 1
 
-  curl -s -o /dev/null --max-time 20 \
+  # -f: an HTTP 4xx/429 is a failed send, so the queue is kept instead of deleted.
+  curl -sf -o /dev/null --max-time 20 \
     "https://api.telegram.org/bot${token}/sendMessage" \
     --data-urlencode "chat_id=${chat}" \
     --data-urlencode "text=$1" \
