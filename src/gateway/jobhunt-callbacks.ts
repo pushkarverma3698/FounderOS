@@ -16,6 +16,7 @@ import { childLogger } from "../infra/logger.js";
 import { draftRow, type JobhuntCommandDeps } from "./jobhunt-commands.js";
 import { markRowApplied, parseJobCallback, JOB_CALLBACK_PREFIX } from "./jobhunt-buttons.js";
 import { draftButtonsFor, parseViewCallback, type ViewCallback } from "./jobhunt-compact.js";
+import { gapAddReply, parseGapCallback } from "./jobhunt-gap-buttons.js";
 import { buildJobsCsv, type JobsViewDeps } from "./jobhunt-view.js";
 import { parseBriefRequest, scopeFor } from "../tools/jobhunt/brief-resolver.js";
 import { InputFile } from "grammy";
@@ -30,6 +31,13 @@ export async function handleJobCallback(
 ): Promise<boolean> {
   const data = ctx.callbackQuery?.data ?? "";
   if (!data.startsWith(JOB_CALLBACK_PREFIX)) return false;
+
+  const gap = parseGapCallback(data);
+  if (gap) {
+    await ctx.answerCallbackQuery();
+    await ctx.reply(gapAddReply(gap.term), { parse_mode: "HTML" });
+    return true;
+  }
 
   const view = parseViewCallback(data);
   if (view) return handleViewTap(ctx, view, jobs);

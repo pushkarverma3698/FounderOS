@@ -5,7 +5,8 @@
  */
 
 import type { Context } from "grammy";
-import { cvGapsTool, DEFAULT_GAP_TRACK } from "../tools/jobhunt/gaps.js";
+import { computeGaps, DEFAULT_GAP_TRACK, formatGapReport } from "../tools/jobhunt/gaps.js";
+import { gapKeyboard } from "./jobhunt-gap-buttons.js";
 import { resolveProfileArg, isProfileArgMiss } from "./jobhunt-profile-arg.js";
 import { profileMissMessage } from "../tools/jobhunt/brief-resolver.js";
 import type { JobSearchProfile } from "../tools/jobhunt/profile-config.js";
@@ -57,15 +58,16 @@ export async function handleGaps(ctx: Context): Promise<void> {
 
   const track = gapsTrackFor(selected.profile, selected.rest);
   try {
-    const result = await cvGapsTool.execute({ track, profile: selected.profile.id });
-    if (!result.success) {
-      await ctx.reply(`❌ Couldn't build the gap report: ${safeHtml(result.error ?? "unknown")}`, {
-        parse_mode: "HTML",
-      });
+    const result = await computeGaps({ track, profile: selected.profile.id });
+    if (!result.ok) {
+      await ctx.reply(`❌ Couldn't build the gap report: ${safeHtml(result.error)}`, { parse_mode: "HTML" });
       return;
     }
     log.info({ track, profile: selected.profile.id }, "CV gap report requested");
-    await ctx.reply(String(result.data));
+    const keyboard = gapKeyboard(selected.profile.id, result.report.missing);
+    await ctx.reply(formatGapReport(result.report, { track: result.track, cvPath: result.cvPath }), {
+      ...(keyboard ? { reply_markup: keyboard } : {}),
+    });
   } catch (err) {
     // Never silent — the whole reason this command exists is that the engine
     // behind it ran for a month with no way to reach it.
