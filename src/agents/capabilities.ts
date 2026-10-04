@@ -51,6 +51,7 @@ import {
   applyCinematicPreset,
   deployStaticSite,
   recordEvent,
+  recallConversationTool,
   publishSignal,
   scanAiVisibility,
   getGapScans,
@@ -121,7 +122,7 @@ import { synthesizeSkill } from "./agent-tools.js";
 import { uiCheck } from "./agent-tools/ui-qa.js";
 
 export const DEPARTMENT_TOOLS: Record<string, AnyTool[]> = {
-  admin: [readContext, updateContext, searchMemoryTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact, readLogs],
+  admin: [readContext, updateContext, searchMemoryTool, recallConversationTool, recordEvent, listPendingSignals, scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder, listWorkflows, synthesizeSkill, opsState, writeArtifact, deliverArtifact, readLogs],
   research: [searchWeb, scrapeUrlTool, deepResearch, crawlSiteTool, youtubeTranscript, v2exTopics, searchResearchCache, searchKnowledge, publishSignal, scanAiVisibility, getGapScans],
   comms: [createSendEmailTool("comms"), readEmails, createCalendarEvent, scheduleSocialPost, listScheduledPosts],
   engineering: [projectWorkflow, claudeCode, dispatchAntigravityTask, antigravityTaskStatus, requeueAntigravityTask, createProjectRepo, applyCinematicPreset, deployStaticSite, vpsRun, synthesizeSkill, githubRead, uiCheck, readLogs],
@@ -166,7 +167,7 @@ export const MARKETING_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
 /** Admin sub-domain tool clusters (ADR-027 pattern). */
 export const ADMIN_SUBAGENT_TOOLS: Record<string, AnyTool[]> = {
   scheduling: [scheduleTask, listScheduled, editScheduled, setReminder, listReminders, editReminder],
-  memory_context: [readContext, updateContext, searchMemoryTool, recordEvent, writeArtifact, synthesizeSkill],
+  memory_context: [readContext, updateContext, searchMemoryTool, recallConversationTool, recordEvent, writeArtifact, synthesizeSkill],
 };
 
 /** Supervisors route via handoffs only — no business tools (ADR-028). */
