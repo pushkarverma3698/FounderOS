@@ -8,6 +8,11 @@
  *   fallback  if he pastes a token itself (made with `claude setup-token` on another machine), skip the child
  *           and run the same verification.
  * The token is verified BEFORE it replaces anything on disk. It never reaches a log, a thrown message or `html`.
+ *
+ * Which account? `setup-token` tokens carry no email (scope user:inference only), so the page cannot be steered and
+ * the CLI cannot say whose token it is. Two things cover that: `/login claude <email>` adds `login_hint` to the link
+ * (what `claude auth login --email` does), and after login the token's organization id (the `anthropic-organization-id`
+ * header of the free count_tokens call, captured 2026-10-04) is compared with the server's own saved login.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -39,6 +44,101 @@ const TOKEN_ONLY_RE = /^sk-ant-[A-Za-z0-9_-]{40,}$/;
 const CLAUDE_HOST_RE = /^https:\/\/claude\.(?:com|ai)\//;
 /** What `claude setup-token` prints when the pasted code is refused (captured with a bogus code, 2026-10-04). */
 const EXCHANGE_FAILED_RE = /OAuth error|Invalid code|Token exchange failed|Press Enter to retry/;
+const HOST_LOGIN_TIMEOUT_MS = 15_000;
+const ORG_LOOKUP_TIMEOUT_MS = 15_000;
+
+/** `claude auth login --email` puts the address in the same authorize URL as `login_hint`; setup-token cannot take the flag, so add it here. */
+export function withLoginHint(url: string, email: string | undefined): string {
+  if (!email) return url;
+  const u = new URL(url);
+  u.searchParams.set("login_hint", email);
+  return u.toString();
+}
+
+// ── which account is this token? ─────────────────────────────────────────────
+
+export type OrgLookup = { readonly org: string } | { readonly reason: string };
+
+/**
+ * The token's organization id, from the response header of the free count_tokens call. The header is present on any
+ * authenticated response (even a 404 for an unknown model, captured 2026-10-04) and absent on a 401. The token goes
+ * only to api.anthropic.com, where every `claude` call sends it anyway. The result never carries the token.
+ */
+export async function lookupOrgId(token: string, fetchFn: typeof fetch = fetch): Promise<OrgLookup> {
+  try {
+    const res = await fetchFn("https://api.anthropic.com/v1/messages/count_tokens", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "oauth-2025-04-20",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ model: "claude-haiku-4-5-20251001", messages: [{ role: "user", content: "hi" }] }),
+      signal: AbortSignal.timeout(ORG_LOOKUP_TIMEOUT_MS),
+    });
+    const org = res.headers.get("anthropic-organization-id");
+    return org ? { org } : { reason: `no organization in the reply (HTTP ${res.status})` };
+  } catch {
+    // allow-failopen: identity is advisory; the caller says "could not tell which account" and the verified login stands.
+    return { reason: "the lookup could not reach Anthropic" };
+  }
+}
+
+export interface HostLogin {
+  readonly email: string;
+  readonly org: string;
+}
+
+/**
+ * The login saved in this server user's own ~/.claude (what a plain `claude` run, or anything without the token, uses).
+ * Run with the token and API keys removed so the CLI cannot answer from them. Undefined when there is none.
+ */
+export async function readHostLogin(spawnFn: SpawnLike = spawn as SpawnLike, base: NodeJS.ProcessEnv = process.env): Promise<HostLogin | undefined> {
+  const env = { PATH: base["PATH"] ?? "/usr/local/bin:/usr/bin:/bin", HOME: base["HOME"] ?? "", TERM: "xterm-256color" };
+  return new Promise<HostLogin | undefined>((resolve) => {
+    const child = spawnFn("claude", ["auth", "status", "--json"], { env, cwd: env.HOME || "/", stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    let settled = false;
+    const settle = (r: HostLogin | undefined): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      settle(undefined);
+    }, HOST_LOGIN_TIMEOUT_MS);
+    child.stdout?.on("data", (d: Buffer) => {
+      out += d.toString("utf8");
+    });
+    child.on("error", () => settle(undefined));
+    child.on("close", (code) => {
+      if (code !== 0) return settle(undefined);
+      try {
+        const j = JSON.parse(out) as { loggedIn?: boolean; authMethod?: string; email?: unknown; orgId?: unknown };
+        const ok = j.loggedIn === true && j.authMethod === "claude.ai" && typeof j.email === "string" && typeof j.orgId === "string";
+        settle(ok ? { email: j.email as string, org: j.orgId as string } : undefined);
+      } catch {
+        // allow-failopen: unparseable output means no host login to compare with, never a pass or a fail of the token.
+        settle(undefined);
+      }
+    });
+  });
+}
+
+/** One line for the founder: which organization the token is in, and how that relates to the server's own saved login. `effect` adds what each choice means, for the moment right after login. */
+export function describeAccount(org: OrgLookup, host: HostLogin | undefined, effect = false): string {
+  if ("reason" in org) return `I could not tell which account this is (${org.reason}).`;
+  const id = `org ${org.org.slice(0, 8)}`;
+  if (!host) return `Account: ${id}. This server has no saved Claude login to compare with.`;
+  if (host.org === org.org) return `Account: ${id}, the same account as this server's saved login (${host.email}).`;
+  const line = `Account: ${id}, a different account from this server's saved login (${host.email}).`;
+  return effect
+    ? `${line} pr-brain, the dispatch engine and the bot's executor use the new one; a plain claude run over SSH, or anything run without the token, still uses ${host.email}.`
+    : line;
+}
 
 // ── the cheap real call ──────────────────────────────────────────────────────
 
@@ -120,6 +220,8 @@ export interface ClaudeLoginDeps {
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
   readonly env: NodeJS.ProcessEnv;
+  readonly lookupOrg: (token: string) => Promise<OrgLookup>;
+  readonly hostLogin: () => Promise<HostLogin | undefined>;
 }
 
 interface ClaudeState {
@@ -144,9 +246,24 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
     now: Date.now,
     sleep,
     env: process.env,
+    lookupOrg: (t) => lookupOrgId(t),
+    hostLogin: () => readHostLogin(undefined, process.env),
     ...overrides,
   };
-  let cache: { token: string; at: number; check: TokenCheck } | undefined;
+  let cache: { token: string; at: number; check: TokenCheck; account?: string } | undefined;
+
+  /** One lookup, two wordings. Never throws and never fails a login: a broken lookup becomes "could not tell". */
+  async function accountLines(token: string): Promise<{ short: string; long: string }> {
+    try {
+      const org = await d.lookupOrg(token);
+      const host = await d.hostLogin();
+      return { short: describeAccount(org, host), long: describeAccount(org, host, true) };
+    } catch {
+      // allow-failopen: identity is advisory; the verified token result stands.
+      const m = "I could not tell which account this is.";
+      return { short: m, long: m };
+    }
+  }
 
   async function complete(token: string): Promise<LoginFinished> {
     const check = await d.verify(token);
@@ -165,12 +282,13 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
       log.error({ code }, "claude token verified but could not be written");
       return { ok: false, html: `The token works but writing it failed (${escHtml(String(code))}). Nothing was changed.` };
     }
-    cache = { token, at: d.now(), check };
+    const account = await accountLines(token);
+    cache = { token, at: d.now(), check, account: account.short };
     log.info({ note: check.note }, "claude token verified and stored");
     const dispatch = d.paths.dispatch === d.paths.primary ? "" : `, <code>${escHtml(d.paths.dispatch)}</code>`;
     return {
       ok: true,
-      html: `Claude token verified with a real call and saved to <code>${escHtml(d.paths.primary)}</code>${dispatch}${check.note ? ` (${escHtml(check.note)})` : ""}. pr-brain and the Claude dispatch engine read it on their next run; the bot's own Claude executor reads it on its next task.`,
+      html: `Claude token verified with a real call and saved to <code>${escHtml(d.paths.primary)}</code>${dispatch}${check.note ? ` (${escHtml(check.note)})` : ""}. ${escHtml(account.long)}\n\npr-brain and the Claude dispatch engine read it on their next run; the bot's own Claude executor reads it on its next task.`,
     };
   }
 
@@ -179,7 +297,9 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
     title: "Claude Code (long-lived token)",
     targets: ["default"],
 
-    async start(): Promise<LoginStarted> {
+    acceptsEmailHint: true,
+
+    async start(_target, hint): Promise<LoginStarted> {
       const home = await d.makeHome();
       const child = d.spawnPty(["claude", "setup-token"], loginEnv(home.dir, d.env));
       const dispose = async (): Promise<void> => {
@@ -192,10 +312,11 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
         log.warn({ exited: child.exited }, "claude setup-token printed no sign-in link");
         throw new Error("`claude setup-token` did not print a sign-in link within 30 seconds (is `claude` installed for the bot's user?)");
       }
-      log.info({}, "claude sign-in link ready");
+      log.info({ hinted: hint !== undefined }, "claude sign-in link ready");
       return {
         html:
-          `Sign in to Claude: ${htmlLink(url, "open the sign-in page")}\n\n` +
+          `Sign in to Claude${hint ? ` as ${escHtml(hint)}` : ""}: ${htmlLink(withLoginHint(url, hint), "open the sign-in page")}\n\n` +
+          "Open it in a private tab: the page signs in whichever Claude account that browser already has, and I cannot change that from here.\n" +
           "Approve it, copy the code the page shows, and paste it here as your next message (valid 10 minutes). I delete your message after reading it.\n" +
           "Alternative: run <code>claude setup-token</code> on your laptop and paste the token it prints.",
         state: { child } satisfies ClaudeState,
@@ -245,15 +366,18 @@ export function createClaudeAdapter(overrides: Partial<ClaudeLoginDeps> = {}): L
         if (f.state === "bad-mode") return row(false, `${d.paths.primary} has mode ${f.mode}, not 600: ignored`);
         const when = f.created ? `token from ${f.created}` : "token with no date";
         let check: TokenCheck;
+        let account: string | undefined;
         if (cache && cache.token === f.token && d.now() - cache.at < STATUS_CACHE_MS) {
           check = cache.check;
+          account = cache.account;
         } else {
           check = await d.verify(f.token);
-          if (check.kind !== "unknown") cache = { token: f.token, at: d.now(), check };
+          if (check.kind === "ok") account = (await accountLines(f.token)).short;
+          if (check.kind !== "unknown") cache = { token: f.token, at: d.now(), check, account };
         }
         const dispatch = await d.readFile(d.paths.dispatch);
         const dispatchNote = dispatch.state === "ok" && dispatch.token === f.token ? "" : "; the dispatch token file is missing or different: /login claude fixes it";
-        if (check.kind === "ok") return row(true, `${when}, works${check.note ? ` (${check.note})` : ""}${dispatchNote}`);
+        if (check.kind === "ok") return row(true, `${when}, works${check.note ? ` (${check.note})` : ""}${account ? `. ${account}` : ""}${dispatchNote}`);
         if (check.kind === "rejected") return row(false, `${when}, rejected: /login claude`);
         return row(false, `${when}, could not be checked (${check.reason})`);
       } catch (err) {
