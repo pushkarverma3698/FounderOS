@@ -47,6 +47,28 @@ describe("/login", () => {
     expect(replies.join("\n")).not.toContain("✅");
   });
 
+  it("an adapter that accepts an email hint gets it as the second argument, and a single-target tool needs no target word", async () => {
+    const start = vi.fn(async (_target: string, _hint?: string) => ({ html: "open the link", state: "S" }));
+    const { c, replies } = ctx({ chatId: 100, match: "tool Me@Example.com" });
+    await handleLogin(c, mk(adapter({ acceptsEmailHint: true, start })));
+    expect(start).toHaveBeenCalledWith("default", "me@example.com");
+    expect(replies.join("\n")).toContain("open the link");
+  });
+
+  it("an adapter that does not accept a hint still treats an email as an unknown target", async () => {
+    const start = vi.fn(async () => ({ html: "open the link" }));
+    const { c, replies } = ctx({ chatId: 100, match: "tool me@example.com" });
+    await handleLogin(c, mk(adapter({ start })));
+    expect(start).not.toHaveBeenCalled();
+    expect(replies.join("\n")).toContain("Which one?");
+  });
+
+  it("the usage line advertises the optional email only for adapters that take one", async () => {
+    const { c, replies } = ctx({ chatId: 100 });
+    await handleLogin(c, mk(adapter({ acceptsEmailHint: true })));
+    expect(replies.join("\n")).toContain("/login tool [email]");
+  });
+
   it("refuses an allow-listed group and a stranger", async () => {
     for (const id of [-5, 7]) {
       const { c, replies } = ctx({ chatId: id, type: id < 0 ? "group" : "private", match: "tool" });
