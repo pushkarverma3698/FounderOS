@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { CONTEXT_META_KEY } from "../../../src/db/context-meta.js";
 import { RETIRED_SEED_VALUES, SYSTEM_CONTEXT_KEYS, isRetiredSeedValue } from "../../../src/db/founder-context.js";
+import { DEPARTMENT_TOOLS, buildDepartmentsSummary } from "../../../src/agents/capabilities.js";
 
 const PROD_ROW = JSON.parse(
   readFileSync(new URL("../../fixtures/founder-context-prod-2026-09-29.json", import.meta.url), "utf8"),
@@ -168,7 +169,9 @@ describe("seed-founder-context — keys the code owns, and retired June values",
     const stack = String(store.row?.["tech_stack"]);
     expect(stack).not.toMatch(/createSupervisor|createReactAgent|2\.5 Flash|via OpenRouter/);
     expect(stack).toMatch(/StateGraph/);
-    expect(String(store.row?.["founderos_departments"])).toMatch(/^8 kernel workers/);
+    const departments = String(store.row?.["founderos_departments"]);
+    expect(departments).toMatch(/^8 kernel workers/);
+    for (const dept of Object.keys(DEPARTMENT_TOOLS)) expect(departments).toContain(`${dept} (`);
     expect(store.row?.["last_updated"]).toBe(FOUNDER_UPDATED_AT);
   });
 
@@ -234,9 +237,19 @@ describe("seed-founder-context — the 2026-09-29 prod row", () => {
   it("keeps every other value, last_updated and the budget state exactly as they were", async () => {
     await runSeed();
 
-    const kept = Object.keys(PROD_ROW).filter((k) => !(JUNE_KEYS as readonly string[]).includes(k));
+    const kept = Object.keys(PROD_ROW).filter((k) => !(JUNE_KEYS as readonly string[]).includes(k) && k !== "founderos_departments");
     for (const key of kept) expect(store.row?.[key], key).toEqual(PROD_ROW[key]);
     expect(store.row?.["last_updated"]).toBe("2026-09-28T13:19:27Z");
+  });
+
+  // founderos_departments was a hand-written paragraph; it is now generated from the tool registry, so the first deploy
+  // after that change rewrites the stored copy once, and says so.
+  it("rewrites the hand-written departments paragraph with the generated one, once", async () => {
+    await runSeed();
+
+    expect(store.row?.["founderos_departments"]).toBe(buildDepartmentsSummary());
+    expect(store.row?.["founderos_departments"]).not.toEqual(PROD_ROW["founderos_departments"]);
+    expect(logs()).toContain("Rewrote 1 system key(s) the code owns: founderos_departments");
   });
 
   it("gives the three code-owned keys their first date and leaves every founder fact undated", async () => {
@@ -244,7 +257,7 @@ describe("seed-founder-context — the 2026-09-29 prod row", () => {
 
     expect(Object.keys(meta()).sort()).toEqual([...SYSTEM_CONTEXT_KEYS].sort());
     for (const key of SYSTEM_CONTEXT_KEYS) expect(meta()[key]).toEqual({ at: DEPLOY_AT.toISOString(), source: "system" });
-    expect(logs()).toMatch(/Dated 3 code-owned key\(s\)/);
+    expect(logs()).toMatch(/Dated 2 code-owned key\(s\) that already matched the code: tech_stack, founderos_key_features/);
   });
 
   it("second run reports 0 filled and 0 retired, writes nothing, and does not bring a retired key back", async () => {

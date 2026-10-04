@@ -15,8 +15,9 @@ import type { Context } from "grammy";
 import { OWNER_ONLY_COMMANDS } from "../../../src/gateway/chat-access.js";
 import { needsConfirmation } from "../../../src/gateway/command-catalog.js";
 import { COMMAND_MENU } from "../../../src/gateway/command-menu.js";
+import { readReviewSetup } from "../../../src/infra/daemon-settings.js";
 
-const { handleReview, readReviewSetup } = await import("../../../src/gateway/review-command.js");
+const { handleReview } = await import("../../../src/gateway/review-command.js");
 
 const WRITTEN = 1791118800; // epoch seconds the daemons last wrote their files
 const FIVE_MIN_LATER = (WRITTEN + 300) * 1000;

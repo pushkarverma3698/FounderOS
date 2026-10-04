@@ -244,18 +244,32 @@ export async function applyMcpBridge(deps?: McpBridgeDeps): Promise<void> {
   mergeBridgedTools(DEPARTMENT_TOOLS, HITL_GATED_TOOLS, byDept, gatedNames);
 }
 
+/** Tool names for display; * marks the ones that pause for the founder's approval. */
+function toolLabels(tools: readonly { name: string }[]): string {
+  return tools.map((t) => (HITL_GATED_TOOLS.has(t.name) ? `${t.name}*` : t.name)).join(", ");
+}
+
+/**
+ * The stored `founderos_departments` (a code-owned founder-context key, rewritten by the deploy seed): the same
+ * registry the manifest reads, as one line. It used to be hand-written and drifted. What runs in the background is
+ * not listed here: that is live state, so it points at ops_state instead of describing it.
+ */
+export function buildDepartmentsSummary(): string {
+  const departments = Object.entries(DEPARTMENT_TOOLS).map(([dept, tools]) => `${dept} (${toolLabels(tools)})`);
+  return (
+    `${departments.length} kernel workers, each with its own capped tool set (* = founder approves in Telegram before it runs): ` +
+    `${departments.join(", ")}. ` +
+    "What is running in the background (automatic PR review, coding dispatch, built-in routines) and which models they use: ask ops_state with scope background_jobs."
+  );
+}
+
 /**
  * Render the truthful capability manifest injected into the supervisor prompt.
  * Generated from the same arrays the graph is built from — never hand-edit
  * capability claims into prompt prose.
  */
 export function buildCapabilityManifest(): string {
-  const lines = Object.entries(DEPARTMENT_TOOLS).map(([dept, tools]) => {
-    const names = tools
-      .map((t) => (HITL_GATED_TOOLS.has(t.name) ? `${t.name}*` : t.name))
-      .join(", ");
-    return `- ${dept}: ${names}`;
-  });
+  const lines = Object.entries(DEPARTMENT_TOOLS).map(([dept, tools]) => `- ${dept}: ${toolLabels(tools)}`);
   return [
     "CAPABILITIES (auto-generated from the live tool registry — this list IS the truth; never claim a listed tool is missing, never claim an unlisted tool exists; * = pauses for founder approval):",
     ...lines,
