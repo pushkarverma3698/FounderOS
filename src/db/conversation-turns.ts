@@ -92,10 +92,15 @@ export async function findConversationTurns(q: TurnQuery): Promise<TurnPage> {
   if (anyTerm) conds.push(anyTerm);
   const where = and(...conds);
 
-  const matched = termHits.length > 0 ? sql.join(termHits.map((h) => sql`(CASE WHEN ${h} THEN 1 ELSE 0 END)`), sql` + `) : sql`0`;
+  // No topic = no ranking by matches. A constant here would become `ORDER BY 0`, which Postgres reads as a column
+  // position and rejects: every time-window-only recall ("what did I ask yesterday?") failed on real Postgres.
+  const byMatches =
+    termHits.length > 0
+      ? [desc(sql.join(termHits.map((h) => sql`(CASE WHEN ${h} THEN 1 ELSE 0 END)`), sql` + `))]
+      : [];
 
   const [rows, totals] = await Promise.all([
-    db.select().from(t).where(where).orderBy(desc(matched), desc(t.occurred_at)).limit(q.limit),
+    db.select().from(t).where(where).orderBy(...byMatches, desc(t.occurred_at)).limit(q.limit),
     db.select({ n: count() }).from(t).where(where),
   ]);
   return {
