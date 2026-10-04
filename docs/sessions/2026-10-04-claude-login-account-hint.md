@@ -13,7 +13,11 @@ The login had worked. The token's org (`1c2fa9ef…`) differs from the host logi
 ## Metrics
 `pnpm vitest run tests/unit/gateway/login`: 7 files, 86 passed, 1 skipped. `pnpm lint` exit 0. `pnpm verify:arch` green. `pnpm gate` fails in 13 `tests/unit/scripts/*` files (82 tests); the same 13 files fail on `origin/main` ec8858db (87 tests), so it is not this change.
 
+## Verified afterwards (same day)
+- `login_hint` with a signed-in claude.ai session: Safari was signed in as a third, free account. The authorize link carrying `login_hint=pushkar@oplify.in` ignored the hint and showed that account's "Max or Pro is required" page. The hint only helps when the browser is signed out, so the private-tab instruction is required, not a courtesy. Nothing was authorized.
+- Executor mechanism, traced on the VPS: with `CLAUDE_CODE_OAUTH_TOKEN` set, `claude auth status` reports `authMethod: oauth_token` and no email. Inside `claude -p` run with that token, the Bash tool's subprocess saw an empty `CLAUDE_CODE_OAUTH_TOKEN` (`printenv … | wc -c` printed 0) and its `claude auth status` answered from the host login (pushkarai3698, `942d106e…`). That is why the executor named the old account.
+- Host login unchanged: still pushkarai3698, org `942d106e…`, pro. The prod token files kept their 13:37:04 mtime through every probe.
+
 ## Outstanding
-- NOT VERIFIED: `login_hint` when claude.ai already has a signed-in session in that browser; the Telegram paste-back with `/login claude <email>` (needs deploy).
+- The Telegram paste-back with a real approved code needs the founder: the OAuth consent is theirs, and the founder's account sign-in cannot be done for them.
 - Decision for the founder: `claude auth logout` on the VPS host so the old login stops answering. Not run.
-- Mechanism of why the executor's nested `claude auth status` lacks the token env is inferred, not traced.
