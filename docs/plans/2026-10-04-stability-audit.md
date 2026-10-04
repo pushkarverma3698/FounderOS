@@ -179,6 +179,66 @@ Checked correct (A):
   - From the agent-setup audit: the PR lookup fallback, a post-merge check, and goal → several issues.
 - **Live checks still NOT VERIFIED:** `/review off` then `/review on` from Telegram; a recurring task row firing on its second occurrence; `/login claude` step 2 end to end (needs the founder's two taps).
 
+## Founder-requested work (2026-10-05)
+
+### T1. Login and logout for every account: verify end to end
+Done means each row below is run once from Telegram, with the evidence kept: the reply, plus a real read through that account afterwards.
+
+| Account | Sign in today | Sign out today | Must prove |
+|---|---|---|---|
+| Google built-ins (`src/core/accounts.ts`) | `/login google <acct>` (PKCE) | **none** | Signed-in email matches the target (L10). Gmail and Calendar read through the bot. A revoked refresh token shows as DOWN, not "ok". |
+| Google added accounts | `/login google add <name>` | `/login google remove <name>` | Remove deletes the credential, and the next read says "not signed in". |
+| Claude token (`pr-brain.token`, `claude-code.token`) | `/login claude` | **none** | Both files hold the same token (L9). The executor and pr-brain each make one real call. The status screen costs nothing (ops P2). |
+| Claude host login (`~/.claude.json` / `.credentials.json`, step 2) | `/login claude` step 2 | **none** | The org matches the token. Old backups are cleaned up (ops P2). |
+| agy (`antigravity` user) | `/login agy` (broken: no link) | **none** | A link appears. `agy models` passes after install. A stale `.bak` is never restored (L-ops P2). |
+| GitHub `gh` (`antigravity` and `founderos`) | ssh only | ssh only | `/login` shows it at least read-only, so an expired gh token is visible before a dispatch fails. |
+| Telegram MTProto session (journeys B/C, `qa:telegram`) | script only | n/a | An expired session turns a journey red with a DM, not a silent cron error. |
+
+Missing behavior to build in the same PR series:
+- A `/login <tool> logout` for Claude, agy and the built-in Google accounts. It deletes the credential, keeps no backup, and confirms with a real failed call.
+- Paste safety (L5).
+- Delete-failure notice (L8).
+- A refused paste keeps the attempt open (L11).
+- Tests for every row above.
+
+### T2. Natural language on par with Claude Code
+Target: any slash command or tool can be reached by plain words. A request that needs several steps is planned and run as one mission, with one approval where something writes. Nothing makes him know the command name.
+1. **Coverage matrix:** every command in `COMMAND_MENU` and every agent tool, with one or more plain-English phrasings, in `src/eval/command-golden.ts` and run by CI's offline golden set. Today the golden set covers a subset. List the gaps, then close them.
+2. **Multi-step orchestration:** golden tasks that need 2–3 tools in one turn. Examples: "check my open PRs and remind me at 6 to merge the green ones", and "draft Tashi's top job and tell me the gaps". Assert the plan, the receipts and a single card.
+3. **Clarify, don't guess:** a missing repo (L3), profile or time leads to one question with buttons, never a silent default.
+4. **Context:** L1, L2, #14, #23–#25 and L4. Recall must quote what he actually typed.
+5. **Friction:** #26 ("stop everything" needs no tap), stable job ids (UX P0-2), empty states with an example (UX P2-3), and one-line model errors (UX P2-6).
+6. **Proof:** one `pnpm qa:telegram` run after the series lands. The pass bar: 22/22 tasks answered without a slash command.
+
+### T3. Coding pipeline ships production-ready PRs
+Setup audit, 2026-10-05 (read-only on `founderos-vps`, **C**):
+
+| # | Finding | Fix |
+|---|---|---|
+| S1 | **Automatic review is OFF.** `~/.claude/pr-brain.off` was "switched off from Telegram /review at 2026-10-04T18:32Z". Every sweep since logs "kill switch present — nothing dispatched", so agent PRs currently get no gate. | Founder: `/review on` if the off was not deliberate. Code: `/review` and `/where` show "review OFF since X" (pairs with L6). |
+| S2 | The Claude executor runs as `antigravity` with no `~/.claude/CLAUDE.md`. agy gets the shared rules through `~/.gemini/GEMINI.md → /opt/agent-rules/AGENTS.md`, but Claude gets only the repo's own CLAUDE.md. The two engines follow different rules. | Symlink `/home/antigravity/.claude/CLAUDE.md → /opt/agent-rules/AGENTS.md` in `deploy/sync-daemons.sh` (or a CLAUDE.vps.md import). |
+| S3 | Executor skills differ. agy has `production-ready`, `systematic-debugging` and `karpathy-guidelines`; Claude-as-antigravity has only `production-ready`. | Sync the same set from `/opt/agent-rules/skills` for both engines. |
+| S4 | Both engines run with `--dangerously-skip-permissions`. The `deny` list blocks the `Read` tool, but nothing blocks `Bash(cat …)`. `.env` is 600 to `founderos`, so the executor cannot read it today (checked). The real exposure is the founder's `gh` login (`pushkarverma3698`, full scope) in `/home/antigravity/.config/gh`. "Agents never merge or approve" is enforced only by the prompt and branch protection. | A fine-grained token or GitHub App for the executor (PR create + push to `task/*` only), and a `deny` for `Bash(gh pr merge*)`, `Bash(gh pr review*)` and `Bash(gh api*merge*)`. |
+| S5 | Models in use: executor `gemini-3.6-flash-medium` (agy) / `sonnet` (Claude); reviewers `claude-sonnet-5-5-medium` then `gemini-3.1-pro-high`; `PR_BRAIN_MERGE=0`. CLI versions: agy 1.2.16, claude 2.1.287. The flash executor is the A/B noted 10-04, and no result is recorded. | Record the A/B outcome (PR pass rate per executor) before keeping flash. |
+| S6 | Journey crons exist (A every 3 days, B/C nightly), so the L16 "no cron" hypothesis is wrong. There is still no heartbeat. Journey B logged GREEN and then an unhandled gramJS `TIMEOUT` in the same run. | Disconnect the MTProto client before exit; add the heartbeat (L16). |
+| S7 | Rules are in sync: `/opt/agent-rules/AGENTS.md` md5 equals the laptop's `~/.agents/AGENTS.md`. | — |
+
+Quality work, in order:
+- Pipeline fixes:
+  - L12 (stale-head merge) and L13 (reviewed commit ≠ stamped commit).
+  - #21 (dispatch lock).
+  - L14 (freeze exemption by branch name).
+  - L15 (journey alert can reach nobody).
+  - #20 (crash loop silent).
+- UX P1-6 dispatch dedupe by issue, not by title.
+- From the agent-setup audit: the PR lookup fallback, a post-merge check (deploy moved + smoke test), and goal → several issues.
+- A PR is "production-ready" only when:
+  - CI is green on the head that was reviewed;
+  - the body has What changed / How verified / NOT VERIFIED;
+  - a reviewer of a different model family passed that exact head;
+  - for a bug fix, the failing test is in the diff.
+  pr-brain must check all four mechanically before stamping, not by prompt.
+
 ## Not audited
 Video factory, web gateway, MCP server, eval harness, Oplify repos. Out of scope for "daily friction" unless a fix touches them.
 
