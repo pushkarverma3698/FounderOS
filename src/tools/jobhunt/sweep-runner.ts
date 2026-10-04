@@ -119,11 +119,12 @@ export async function runJobIngestSweep(): Promise<void> {
     setLastSheetLink(link);
     // The metered sweep has no alert of its own to carry the line — it runs
     // every third day and the founder should hear from it either way.
-    await sendToJobsChat(
-      (notice ??
-        `📊 <b>Screened ${result.fetched} posting(s)</b> — the job sheet is up to date.\n${link}`) +
-        newBoardsLine(result.newBoards),
-    );
+    const summary = notice
+      ? notice
+      : link
+        ? `📊 <b>Screened ${result.fetched} posting(s)</b> — the job sheet is up to date.\n${link}`
+        : `📊 <b>Screened ${result.fetched} posting(s)</b>`;
+    await sendToJobsChat(summary + newBoardsLine(result.newBoards));
   } catch (err) {
     // The postings ARE screened and recorded by this point. Losing the ranking
     // must not read as losing the sweep, so say which one actually failed.

@@ -63,6 +63,8 @@ export interface WorkerSpec {
   id: WorkerId;
   description: string;
   prompt: string;
+  /** Rebuilt on every worker turn (prompts that embed the current time); `prompt` is the boot-time fallback. */
+  dynamicPrompt?: () => string;
   tools: KernelTool[]; promptForProfile?: (profileId: string) => string; // per-turn override — see worker-protocol.ts
 }
 

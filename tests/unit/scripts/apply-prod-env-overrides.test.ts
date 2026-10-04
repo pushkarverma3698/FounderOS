@@ -96,6 +96,30 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain("google-genai:");
   });
 
+  it("pins the measured worker and per-role pools (docs/sessions/2026-10-04-model-pools.md), replacing stale copies", () => {
+    const rendered = render(
+      "WORKER_AGENT_MODEL=\n",
+      SNAPSHOT_BASE + "WORKER_AGENT_MODEL=\nPLANNER_FALLBACK_MODELS=stale\n",
+    );
+    expect(valueOf(rendered, "WORKER_AGENT_MODEL")).toBe("openrouter:inclusionai/ling-3.0-flash");
+    expect(valueOf(rendered, "WORKER_FALLBACK_MODELS")).toBe(
+      "openrouter:deepseek/deepseek-v4-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:google/gemini-3.6-flash",
+    );
+    expect(valueOf(rendered, "PLANNER_FALLBACK_MODELS")).toBe(
+      "openrouter:deepseek/deepseek-v4.1-flash,openrouter:nvidia/nemotron-3-super-120b-a12b:free,openrouter:xiaomi/mimo-v2.6-flash,openrouter:typesafe/jev-router",
+    );
+    for (const k of ["WORKER_AGENT_MODEL", "WORKER_FALLBACK_MODELS", "PLANNER_FALLBACK_MODELS"]) {
+      expect(countOf(rendered, k), `${k} has no stale duplicate`).toBe(1);
+    }
+    expect(valueOf(rendered, "AGENT_MODEL"), "planner primary is unchanged").toBe("google-genai:gemini-3.6-flash");
+  });
+
+  it("drops the withdrawn minimax slug from the shared fallback chain", () => {
+    const rendered = render("", SNAPSHOT_BASE);
+    expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).not.toContain("minimax");
+    expect(valueOf(rendered, "AGENT_FALLBACK_MODELS")).toContain("openrouter:nvidia/nemotron-3-super-120b-a12b:free");
+  });
+
   it("pins the judge model, overriding any stale snapshot value", () => {
     const rendered = render("", SNAPSHOT_BASE + "JUDGE_MODEL=something-else\n");
     expect(valueOf(rendered, "JUDGE_MODEL")).toBe("google-genai:gemini-3.1-flash-lite");
@@ -142,6 +166,13 @@ describe("apply-prod-env-overrides.sh — on-box provisioning survives a render"
     const rendered = render("", SNAPSHOT_BASE, { LANGCHAIN_API_KEY: "lsv2_pt_test_value" });
     expect(valueOf(rendered, "LANGCHAIN_API_KEY")).toBe("lsv2_pt_test_value");
     expect(valueOf(rendered, "LANGCHAIN_TRACING_V2")).toBe("true");
+  });
+
+  it("forwards OPENROUTER_API_KEY with stray invisible characters stripped (2026-10-04: a pasted U+2028 made every call 401)", () => {
+    const key = "sk-or-v1-" + "ab12".repeat(16);
+    const rendered = render("", SNAPSHOT_BASE, { OPENROUTER_API_KEY: `${key}\u2028 \r` });
+    expect(valueOf(rendered, "OPENROUTER_API_KEY")).toBe(key);
+    expect(countOf(rendered, "OPENROUTER_API_KEY")).toBe(1);
   });
 
   it("does not touch LangSmith vars when LANGCHAIN_API_KEY secret is absent", () => {

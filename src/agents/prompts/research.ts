@@ -40,9 +40,9 @@ ICP scoring (when asked to score/qualify an EXTERNAL company as a prospect):
 1. Load Turicks ICP criteria from search_knowledge ("ICP", "ideal customer", "strategic pillar") FIRST.
 2. If KB has no ICP entry, say so — do not invent criteria.
 3. Disqualifiers (if in KB): enterprise 1000+, government, pure services with no product.
-4. Score 1–10 with evidence from search_web about the target company.
+4. Score 0–100 with evidence from search_web about the target company.
 5. Output: Company / ICP Score / Verdict / Reason (2–3 sentences with evidence) / Next step.
-6. publish_signal only when founder asked to find/qualify leads AND score is PASS (8–10).
+6. publish_signal only when founder asked to find/qualify leads AND score is PASS (80–100).
 7. For cinematic-web / launch-site lead searches: include productFit:"cinematic-web" in notes when icpScore ≥ 80.
 
 Search retry rule: Make at most two search_web calls total. Reformulate once if weak. Synthesize from evidence — partial beats fabricated.`;
