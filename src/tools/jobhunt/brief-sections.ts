@@ -261,6 +261,8 @@ export function renderRejectSections(rejected: readonly BriefRow[]): string[] {
           notYourLevel.length,
           Math.min(notYourLevel.length, REJECT_CAP),
           "level-barred roles",
+          1,
+          null,
         ),
     );
   }
@@ -274,6 +276,8 @@ export function renderRejectSections(rejected: readonly BriefRow[]): string[] {
           unlawful.length,
           Math.min(unlawful.length, REJECT_CAP),
           "barred roles",
+          1,
+          null,
         ),
     );
   }
@@ -287,6 +291,8 @@ export function renderRejectSections(rejected: readonly BriefRow[]): string[] {
           otherBars.length,
           Math.min(otherBars.length, REJECT_CAP),
           "other-barred roles",
+          1,
+          null,
         ),
     );
   }

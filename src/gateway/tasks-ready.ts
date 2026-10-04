@@ -86,6 +86,11 @@ export async function isGreenCI(
   }
 }
 
+const NOT_MERGEABLE_YET: Readonly<Record<string, string>> = {
+  behind: "it is behind its base and must be updated first (Update branch on GitHub)",
+  blocked: "branch protection blocks the merge (a required check or review is missing for its current head)",
+};
+
 /**
  * Ready PRs for one repository, plus every PR that could not be judged.
  *
@@ -126,6 +131,12 @@ export async function collectReadyToMerge(
         continue;
       }
       if (!full.mergeable || full.mergeable_state === "dirty") continue; // conflicts with its base
+      // Reviewed and green, but the merge button would still refuse: say why instead of listing it as one click.
+      const notYet = NOT_MERGEABLE_YET[full.mergeable_state ?? ""];
+      if (notYet) {
+        unreachable.push({ repo: slug, error: `PR #${pr.number} is reviewed and green, but ${notYet}` });
+        continue;
+      }
 
       ready.push({ repo: slug, prNumber: pr.number, title: pr.title, url: pr.html_url });
     } catch (err) {

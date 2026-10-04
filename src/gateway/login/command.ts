@@ -15,7 +15,7 @@ import { splitForTelegram } from "../format.js";
 import { childLogger } from "../../infra/logger.js";
 import { PendingLogins } from "./pending.js";
 import { LOGIN_ADAPTERS } from "./registry.js";
-import type { LoginAdapter } from "./types.js";
+import type { LoginAdapter, LoginTargetStatus } from "./types.js";
 
 const log = childLogger({ module: "gateway:login" });
 
@@ -48,10 +48,10 @@ async function statusScreen(deps: LoginDeps): Promise<string> {
   const blocks = await Promise.all(
     deps.adapters.map(async (a) => {
       // allow-failopen: one broken adapter must not blank the whole screen; its row says so.
-      const rows = await a.status().catch((err: unknown) => [
+      const rows = await a.status().catch((err: unknown): readonly LoginTargetStatus[] => [
         { target: "-", label: a.title, ok: false, detail: `status check failed: ${err instanceof Error ? err.message : String(err)}` },
       ]);
-      const lines = rows.map((r) => `${r.ok ? "✅" : "❌"} ${esc(r.label)} — ${esc(r.detail)}`);
+      const lines = rows.map((r) => `${!r.ok ? "❌" : r.unverified ? "❔" : "✅"} ${esc(r.label)} — ${esc(r.detail)}`);
       return `<b>${esc(a.title)}</b>\n${lines.join("\n") || "no targets configured"}`;
     }),
   );
@@ -73,6 +73,12 @@ export async function handleLogin(ctx: Context, deps: LoginDeps): Promise<void> 
   const [toolArg, targetArg, nameArg] = (typeof ctx.match === "string" ? ctx.match : "").trim().toLowerCase().split(/\s+/);
   if (!toolArg) {
     await send(ctx, await statusScreen(deps));
+    return;
+  }
+  if (toolArg === "cancel") {
+    const waiting = await deps.pending.peek(chatId);
+    await deps.pending.drop(chatId);
+    await send(ctx, waiting ? `Cancelled the ${esc(waiting.adapter.title)} login. Nothing was changed.` : "No login is waiting.");
     return;
   }
   const adapter = deps.adapters.find((a) => a.id === toolArg);
@@ -100,7 +106,7 @@ export async function handleLogin(ctx: Context, deps: LoginDeps): Promise<void> 
   try {
     const started = await adapter.start(target);
     await deps.pending.begin(chatId, adapter, target, started);
-    await send(ctx, started.html);
+    await send(ctx, `${started.html}\n\nChanged your mind? /login cancel`);
   } catch (err) {
     log.error({ tool: adapter.id, target, err: err instanceof Error ? err.message : String(err) }, "login start failed");
     await send(ctx, `Could not start the ${esc(adapter.title)} login: ${esc(err instanceof Error ? err.message : String(err))}`);
@@ -121,6 +127,12 @@ async function removeTarget(ctx: Context, adapter: LoginAdapter, name: string): 
 }
 
 /**
+ * Codes, callback URLs and tokens are one run of characters with at least one digit. Anything else
+ * ("what's on today", "yesterday") is a normal message and goes to the kernel; the attempt stays open.
+ */
+const looksLikePaste = (text: string): boolean => !/\s/.test(text) && /\d/.test(text);
+
+/**
  * Called before the kernel sees a text message. Returns true when the message was the pasted
  * reply to a pending login (consumed: never reaches the kernel, never logged, deleted from the chat).
  */
@@ -129,7 +141,7 @@ export async function handleLoginReply(ctx: Context, deps: LoginDeps): Promise<b
   const chatId = String(ctx.chat!.id);
   const pending = await deps.pending.peek(chatId);
   const text = ctx.message?.text?.trim() ?? "";
-  if (!pending || !text || text.startsWith("/")) return false;
+  if (!pending || !text || text.startsWith("/") || !looksLikePaste(text)) return false;
 
   // allow-failopen: the paste is a credential; if Telegram refuses the delete, finishing the login still matters more.
   await ctx.deleteMessage().catch(() => undefined);
