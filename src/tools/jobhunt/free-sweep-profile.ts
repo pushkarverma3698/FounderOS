@@ -75,13 +75,14 @@ export async function publishSheet(): Promise<{ link: string | null; notice: str
   const exported = await exportJobSheet();
   if (exported.ok) return { link: sheetLine(exported.url), notice: null };
 
+  if (exported.skipped) {
+    log.warn({ reason: exported.reason }, "Job sheet export skipped");
+    return { link: null, notice: null };
+  }
+
   return {
     link: null,
-    notice: esc(
-      exported.skipped
-        ? `⚠ The job sheet is not set up yet (${exported.reason}) — results are recorded, ask for the job brief to read them.`
-        : `⚠ The job sheet could not be updated: ${exported.reason}`,
-    ),
+    notice: esc(`⚠ The job sheet could not be updated: ${exported.reason}`),
   };
 }
 
