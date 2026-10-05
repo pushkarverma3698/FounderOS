@@ -1,6 +1,6 @@
 # Agent factory: FounderOS makes and supervises agents
 
-> **Status (2026-10-06):** PROPOSED. Nothing is built. Three founder decisions are needed (§ 10).
+> **Status (2026-10-06):** PROPOSED. Nothing is built. Two founder decisions are needed (§ 10).
 > **Depth:** Full. It touches a schedule, a DB schema, and turns that can act on the founder's behalf.
 > **Brief:** [AG-023](../antigravity/AG-023-named-routines.md) builds Option 1.
 
@@ -8,8 +8,8 @@
 
 1. **The coding pipeline audit is already done** (10-05, approved:
    [2026-10-05-coding-pipeline-thin-slice.md](2026-10-05-coding-pipeline-thin-slice.md)). A clean system means
-   finishing that work, not starting a new audit: merge #920, clear the founder blockers, build wave 3, then get the
-   first verified Telegram → merge.
+   finishing that work, not starting a new audit. #920 took waves 1–2 to `main` on 10-06. Next: clear the founder
+   blockers, build wave 3, then get the first verified Telegram → merge.
 2. **FounderOS can already make simple agents, but they fail.** `schedule_task` runs a prompt on a schedule as a
    normal turn. Of the 21 ever created, 16 failed (07-13 to 07-21), each on its first attempt, and none has been
    created since 07-21. Option 1 (about 2 days) adds retries, a name and a run history, and lists everything under
@@ -52,7 +52,7 @@ Anything a routine does that acts (send, post, merge) still raises its own appro
 
 | Question | Answer |
 |---|---|
-| Did we already audit the coding pipeline? | Yes, on 10-05. Waves 1–2 are merged to `beta`, #920 promotes them (green, mergeable), and wave 3 (Telegram wiring) has not started. |
+| Did we already audit the coding pipeline? | Yes, on 10-05. Waves 1–2 reached `main` on 10-06 (#920), and wave 3 (Telegram wiring) has not started. |
 | Does each agent get its own folder with current best practice that Claude, agy and Cursor can use? | Workspace agents do (§ 5.4). Routine agents don't need a folder: a routine is a row and a prompt. |
 | Does each agent get its own DB table or vector knowledge base? | No. One `brain.brain_memories` table with one `project` namespace per agent, plus a run history keyed by agent name (§ 5.3). |
 | Are more scripts like pr-brain a good idea? | No. Each one carries its own loop, kill switch, state files and quota pauses in bash: 3,858 lines today, counting the shared `deploy/lib`. Replace them with definitions plus one runner, once a third workspace agent is actually needed. |
@@ -219,9 +219,8 @@ Option 2 waits for evidence: a verified merge and a named third workspace agent.
 
 ## 8. What this displaces
 
-1. **#920**, the promotion of waves 1–2. It is green and mergeable and needs only the founder's go-ahead.
-2. **Wave 3 (H/I/J)**, which wires the Telegram coding flow and produces the first verified Telegram → merge.
-3. **The founder's five blockers**, listed at the end of the PR.
+1. **Wave 3 (H/I/J)**, which wires the Telegram coding flow and produces the first verified Telegram → merge.
+2. **The founder's five blockers**, listed at the end of the PR.
 
 Antigravity can build Option 1 alongside wave 3 because the files don't overlap, with one exception: the
 registration line in `src/gateway/telegram.ts`. Whichever PR lands second rebases. Antigravity can only push once
@@ -229,7 +228,7 @@ the fine-grained GitHub token is installed.
 
 ## 9. Order
 
-1. Today: merge #920; the founder clears the blockers (about 20 minutes).
+1. Today: the founder clears the blockers (about 20 minutes).
 2. Wave 3: the first verified Telegram → merge.
 3. Option 1 (AG-023): in parallel with step 2 if `unfreeze` is approved now, otherwise from 11-01.
 4. Run routines for two weeks. If 3 or more are in use and one needs a shell, name it, and that starts Option 2.
@@ -240,7 +239,6 @@ the fine-grained GitHub token is installed.
 1. Unfreeze Option 1 now (`unfreeze` label on the AG-023 PR), or wait until 11-01?
 2. Which 2–3 agents do you want first? One line each: what it does and how often. The answer decides whether
    Option 1 is enough.
-3. Merge #920 now?
 
 ## 11. NOT VERIFIED
 
