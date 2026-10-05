@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildReviewerPrompt,
   caseHead,
+  EvalCaseSchema,
   loadCases,
   parseArgs,
   renderTable,
@@ -149,11 +150,96 @@ describe("runEval", () => {
   });
 });
 
+const CLEAN: EvalCase = {
+  id: "clean-case",
+  source: "historical",
+  expect: "APPROVE",
+  diff: "diff --git a/src/a.ts b/src/a.ts\n+export const ok = 1;\n",
+  planted_defects: [],
+};
+
+describe("clean cases (false-block measurement)", () => {
+  const head = caseHead(CLEAN.id);
+
+  it("schema: no defects is allowed only with expect APPROVE", () => {
+    expect(EvalCaseSchema.safeParse(CLEAN).success).toBe(true);
+    expect(EvalCaseSchema.safeParse({ ...CLEAN, expect: undefined }).success).toBe(false);
+    expect(EvalCaseSchema.safeParse({ ...CASE, expect: "APPROVE" }).success).toBe(false);
+  });
+
+  it("passes only on APPROVE", () => {
+    const ok = scoreCase(CLEAN, output(head, "APPROVE", []));
+    expect(ok).toMatchObject({ clean: true, falseBlock: false, total: 0 });
+  });
+
+  it("REQUEST_CHANGES on a clean case is a false block, even with findings", () => {
+    const s = scoreCase(CLEAN, output(head, "REQUEST_CHANGES", [finding("src/a.ts", "looks wrong")]));
+    expect(s).toMatchObject({ clean: true, falseBlock: true });
+  });
+
+  it("UNKNOWN (no verdict, wrong head, thrown runner) is a false block", async () => {
+    expect(scoreCase(CLEAN, "no json").falseBlock).toBe(true);
+    expect(scoreCase(CLEAN, output("0".repeat(40), "APPROVE", [])).falseBlock).toBe(true);
+    const report = await runEval([CLEAN], async () => {
+      throw new Error("model down");
+    });
+    expect(report.cases[0]).toMatchObject({ falseBlock: true, error: expect.stringContaining("model down") });
+  });
+
+  it("a defect case is never counted as a false block", () => {
+    expect(scoreCase(CASE, output(caseHead(CASE.id), "REQUEST_CHANGES", [])).falseBlock).toBe(false);
+  });
+
+  it("the report counts false blocks apart from the catch rate and prints them under it", async () => {
+    const report = await runEval([CASE, CLEAN], async (prompt) =>
+      prompt.includes(head) ? output(head, "REQUEST_CHANGES", []) : output(caseHead(CASE.id), "APPROVE", []),
+    );
+    expect(report).toMatchObject({ cleanCases: 1, falseBlocks: 1, totalDefects: 2 });
+    const lines = renderTable(report).split("\n");
+    const rate = lines.findIndex((l) => l.startsWith("Catch rate:"));
+    expect(lines[rate + 1]).toBe("False blocks: 1/1");
+  });
+});
+
 describe("fixtures", () => {
   const cases = loadCases(FIXTURES);
+  const clean = cases.filter((c) => c.expect === "APPROVE");
 
-  it("has about ten cases, historical and planted, with unique ids", () => {
-    expect(cases.length).toBeGreaterThanOrEqual(10);
+  it("has two clean cases from real merged PRs with no follow-up fix", () => {
+    expect(clean.length).toBeGreaterThanOrEqual(2);
+    for (const c of clean) {
+      expect(c.source, c.id).toBe("historical");
+      expect(c.pr, c.id).toBeGreaterThan(0);
+      expect(c.planted_defects, c.id).toEqual([]);
+    }
+  });
+
+  it("an always-REQUEST_CHANGES reviewer that dumps every keyword scores 100% catch but 2/2 false blocks", async () => {
+    const defects = cases.flatMap((c) => c.planted_defects);
+    const report = await runEval(cases, async (prompt) => {
+      const c = cases.find((x) => prompt.includes(caseHead(x.id)))!;
+      const findings = defects.map((d) => ({
+        severity: "blocker",
+        file: d.file.split("|")[0],
+        claim: `problem in ${d.file}`,
+        evidence: d.keyword.split("|").join(" "),
+      }));
+      return output(caseHead(c.id), "REQUEST_CHANGES", findings);
+    });
+    expect(report.catchRate).toBe(1);
+    expect(report.cleanCases).toBe(2);
+    expect(report.falseBlocks).toBe(2);
+    expect(renderTable(report)).toContain("False blocks: 2/2");
+  });
+
+  it("the dry run answers clean cases with APPROVE: zero false blocks", async () => {
+    const report = await runEval(cases, scriptedRunner(cases));
+    expect(report.falseBlocks).toBe(0);
+    for (const c of report.cases.filter((x) => x.clean)) expect(c.decision, c.id).toBe("APPROVE");
+  });
+
+  it("has about ten defect cases, historical and planted, with unique ids", () => {
+    expect(cases.length).toBeGreaterThanOrEqual(12);
     expect(new Set(cases.map((c) => c.id)).size).toBe(cases.length);
     expect(cases.filter((c) => c.source === "historical").length).toBeGreaterThanOrEqual(4);
     expect(cases.filter((c) => c.source === "planted").length).toBeGreaterThanOrEqual(6);
@@ -176,7 +262,7 @@ describe("fixtures", () => {
   });
 
   it("the diff is small enough to read in one prompt", () => {
-    for (const c of cases) expect(c.diff.split("\n").length, c.id).toBeLessThanOrEqual(130);
+    for (const c of cases) expect(c.diff.split("\n").length, c.id).toBeLessThanOrEqual(c.expect === "APPROVE" ? 200 : 130);
   });
 
   it("dry run with the scripted runner catches every defect (wiring check, not a model measurement)", async () => {
