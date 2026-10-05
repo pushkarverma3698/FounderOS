@@ -1,10 +1,10 @@
 /**
  * A job message that goes to the shared jobs group must suggest commands that act on the right queue.
  *
- * Unqualified `/draft 3`, `/jobs`, `/csv`, `/replied 2` and `/rejected 2` resolve to the default profile
+ * Unqualified `/draft j3a9f2c1`, `/jobs`, `/csv`, `/replied 2` and `/rejected 2` resolve to the default profile
  * (resolveProfileArg, jobhunt-profile-arg.ts). Before JOBHUNT_CHAT_ID the second candidate's alerts went to
  * the founder's private chat and he knew whose they were. In the group, she taps what the alert prints, so
- * the alert has to name her: `/draft tashi 3`. The check below runs every printed command through the real
+ * the alert has to name her: `/draft tashi j3a9f2c1`. The check below runs every printed command through the real
  * command parser and asks which profile it resolves to.
  */
 
@@ -35,7 +35,7 @@ const roleLine: IngestLine = {
   postedAt: new Date("2026-09-08T10:00:00Z"),
   url: "https://example.com/role",
 };
-const ranks = new Map([[dedupeKey(roleLine.company, roleLine.title), 3]]);
+const ids = new Map([[dedupeKey(roleLine.company, roleLine.title), "j3a9f2c1"]]);
 
 const application = {
   id: "11111111-1111-1111-1111-111111111111",
@@ -51,7 +51,7 @@ const application = {
 /** Every `/command args` the message prints, as typed: tags stripped, entities decoded, placeholders dropped. */
 function printedCommands(html: string): string[] {
   const text = html.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-  return [...text.matchAll(/(\/(?:draft|jobs|csv|replied|rejected))((?:\s+[a-z][\w-]*)?(?:\s+\d+)?)/g)].map((m) => m[0].trim());
+  return [...text.matchAll(/(\/(?:draft|jobs|csv|replied|rejected))((?:\s+(?!j[0-9a-f]{7}\b)[a-z][\w-]*)?(?:\s+(?:\d+|j[0-9a-f]{7}))?)/g)].map((m) => m[0].trim());
 }
 
 /** The profile a printed command would act on, through the same resolver the Telegram handlers call. */
@@ -79,7 +79,7 @@ describe("profileSelector", () => {
 describe("the second candidate's pushed messages name her in every command", () => {
   const second = profileSelector(SECOND);
   const messages: Array<[string, string]> = [
-    ["new-roles alert", formatNewRowsAlert([roleLine], null, SECOND.candidateName, { ranks, selector: second })],
+    ["new-roles alert", formatNewRowsAlert([roleLine], null, SECOND.candidateName, { ids, selector: second })],
     ["backfill line", formatBackfillLine(4, SECOND.candidateName, second)],
     [
       "alive ping",
@@ -98,8 +98,8 @@ describe("the second candidate's pushed messages name her in every command", () 
 
 describe("the default candidate's messages are unchanged: bare commands", () => {
   it("prints no selector", () => {
-    const alert = formatNewRowsAlert([roleLine], null, DEFAULT.candidateName, { ranks, selector: profileSelector(DEFAULT) });
-    expect(alert).toContain("<code>/draft 3</code>");
+    const alert = formatNewRowsAlert([roleLine], null, DEFAULT.candidateName, { ids, selector: profileSelector(DEFAULT) });
+    expect(alert).toContain("<code>/draft j3a9f2c1</code>");
     expect(alert).toContain("→ /jobs for the ranked list · /csv for the file · /draft &lt;n&gt; to apply");
     const digest = formatPipelineDigest([application], new Date("2026-08-25T12:00:00Z"), DEFAULT);
     expect(printedCommands(digest)).toEqual(["/replied 1", "/rejected 1"]);

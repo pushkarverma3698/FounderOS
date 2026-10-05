@@ -25,6 +25,7 @@ import {
   DEFAULT_PROFILE_ID,
   type JobSearchProfile,
 } from "../tools/jobhunt/profile-config.js";
+import { parseJobId } from "../tools/jobhunt/job-ref.js";
 
 // One wording for the refusal, shared with the English surface. See brief-resolver.ts.
 export { profileMissMessage } from "../tools/jobhunt/brief-resolver.js";
@@ -77,6 +78,8 @@ export function resolveProfileArg(
   // profile called "all", and a number is always a row.
   if (reservedWords.includes(token)) return fallback;
   if (/^[\d,\s-]+$/.test(token)) return fallback;
+  // An id an alert printed is a row, not a selector: `/draft j3a9f2c1`.
+  if (parseJobId(token) !== null) return fallback;
 
   const resolved = resolveProfileToken(token);
   if (resolved) return { profile: getProfile(resolved), rest, explicit: true };

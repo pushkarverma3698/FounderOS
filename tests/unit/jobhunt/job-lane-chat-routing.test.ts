@@ -42,7 +42,7 @@ function code(file: string): string {
 /** The three files that speak to the candidates on their own, with no founder message to answer. */
 const PROACTIVE_SENDERS = [
   "src/tools/jobhunt/sweep-runner.ts",
-  "src/tools/jobhunt/free-sweep-profile.ts",
+  "src/tools/jobhunt/alert-digest.ts",
   "src/tools/jobhunt/pipeline-followup.ts",
 ];
 
@@ -53,13 +53,20 @@ const PROACTIVE_SENDERS = [
  */
 const OPERATOR_REPORT = "src/evolution/jobhunt-check.ts";
 
+/**
+ * Lane-health notices (alive ping, funnel alert, outage, sheet export failure) are for the founder, not the
+ * candidates: they go to his DM through this one file, and free-sweep-profile.ts reaches them only through it.
+ */
+const LANE_OPS = "src/tools/jobhunt/lane-ops-notice.ts";
+const SWEEP_PROFILE = "src/tools/jobhunt/free-sweep-profile.ts";
+
 describe("job lane chat routing", () => {
   it("finds the files it guards, so a moved directory cannot make this pass with nothing to read", () => {
     expect(JOB_LANE.length).toBeGreaterThan(30);
     for (const file of PROACTIVE_SENDERS) expect(JOB_LANE).toContain(file);
   });
 
-  it.each(JOB_LANE.filter((file) => file !== OPERATOR_REPORT))("%s does not send to the founder's chat", (file) => {
+  it.each(JOB_LANE.filter((file) => file !== OPERATOR_REPORT && file !== LANE_OPS))("%s does not send to the founder's chat", (file) => {
     expect(code(file)).not.toMatch(/\b(sendToChat|sendToChatWithKeyboard|defaultChatId|TELEGRAM_CHAT_ID)\b/);
   });
 
@@ -76,5 +83,22 @@ describe("the 09:30 check stays in the founder's chat", () => {
   it("sends through the system channel and never through the jobs chat", () => {
     expect(code(OPERATOR_REPORT)).toMatch(/\bsendToChat\b/);
     expect(code(OPERATOR_REPORT)).not.toMatch(/\bsendToJobsChat\b/);
+  });
+});
+
+describe("lane-health notices stay in the founder's DM", () => {
+  it("has the lane-ops file in the job lane, so a rename cannot make this pass with nothing to read", () => {
+    expect(JOB_LANE).toContain(LANE_OPS);
+  });
+
+  it("sends through the system channel and never through the jobs chat", () => {
+    expect(code(LANE_OPS)).toMatch(/\bsendToChat\b/);
+    expect(code(LANE_OPS)).not.toMatch(/\bsendToJobsChat\b/);
+  });
+
+  it("keeps the per-sweep file out of the group entirely: it buffers for the digest and DMs the founder", () => {
+    expect(code(SWEEP_PROFILE)).not.toMatch(/\bsendToJobsChat\b/);
+    expect(code(SWEEP_PROFILE)).toMatch(/\bsendLaneOps\b/);
+    expect(code(SWEEP_PROFILE)).toMatch(/\bbufferAlerts\b/);
   });
 });

@@ -19,23 +19,22 @@
  * TWO FAILURE RULES, both about not lying at the far end:
  *
  *   1. A LANE THAT SPOKE AND A LANE THAT FAILED TO SPEAK ARE DIFFERENT STATES.
- *      The heartbeat is written only after a send actually succeeds, because
- *      `afterSpokenSweep` resets the alive-ping clock — recording it on a failed
- *      send buys three more hours of silence on a message nobody received.
+ *      The heartbeat is written only after the roles are safely buffered for the next batched message
+ *      (alert-digest.ts), because `afterSpokenSweep` resets the alive-ping clock. Since 2026-10-05 this file sends
+ *      nothing to the jobs group: lane-health notices go to the founder DM (lane-ops-notice.ts).
  *   2. ONE CANDIDATE'S FAILURE IS NOT ANOTHER'S. The caller wraps every call
  *      here in its own try/catch; nothing in this file may assume it is the only
  *      profile in the loop.
  */
 
 import { childLogger } from "../../infra/logger.js";
-import { sendToJobsChat } from "../../infra/telegram-send.js";
+import { sendLaneOps } from "./lane-ops-notice.js";
+import { bufferAlerts } from "./alert-digest.js";
 import { esc } from "./telegram-format.js";
-import { DEFAULT_PROFILE_ID, profileSelector, type JobSearchProfile } from "./profile-config.js";
+import { DEFAULT_PROFILE_ID, type JobSearchProfile } from "./profile-config.js";
 import {
   afterQuietSweep,
   afterSpokenSweep,
-  formatBackfillLine,
-  formatNewRowsAlert,
   initialHeartbeat,
   splitByPublishFreshness,
   type HeartbeatState,
@@ -136,11 +135,12 @@ export async function runFreeSweepForProfile(
     // outage the three that happen to sort first say nothing about the cause, and
     // "recruitee HTTP 429 ×36" says all of it in five words.
     const { summariseFailures } = await import("./free-ats-source.js");
-    await sendToJobsChat(
+    await sendLaneOps(
       esc(
         `⚠ Free job lane failed for ${profile.candidateName} — nothing was fetched this sweep.\n` +
           summariseFailures(result.failures),
       ),
+      { repeatKey: `fetched-nothing:${profile.id}` },
     );
     return;
   }
@@ -181,7 +181,7 @@ export async function runFreeSweepForProfile(
       profile
     );
     await saveLaneHeartbeat(profile.id, next);
-    if (ping !== null) await sendToJobsChat(ping);
+    if (ping !== null) await sendLaneOps(ping);
     return;
   }
 
@@ -206,57 +206,28 @@ export async function runFreeSweepForProfile(
     profile.id === DEFAULT_PROFILE_ID ? await publishSheet() : { link: lastSheetLink, notice: null };
   if (profile.id === DEFAULT_PROFILE_ID) lastSheetLink = link;
 
-  // SEND FIRST, RECORD ONLY ON SUCCESS. `afterSpokenSweep` resets the alive-ping
-  // clock, so writing it after a send that threw would claim a message the
-  // founder never received and buy another three hours of silence — the "quiet
-  // lane and broken lane look identical" failure this heartbeat exists to
-  // prevent. Leaving it unspoken is honest: the next quiet roll-up still pings.
-  //
-  // WHICH message depends on which half the sweep produced. Backfill alone gets
-  // the quiet line — no 🆕, no per-row names, no interrupt — because it is news
-  // about our coverage, not about the market. Both halves get one message, with
-  // the backfill count folded into it.
-  // READ BACK AFTER RANKING, so each named row carries the number `/draft`
-  // actually resolves. Fail-open: a lookup that throws costs the commands on
-  // the alert, not the alert — the founder still learns the roles exist, and
-  // `/jobs` still numbers them. Printing a guessed number instead would be the
-  // one outcome worse than printing none.
-  let ranks: Map<string, number> = new Map();
-  try {
-    const { briefRanksByDedupeKey } = await import("../../db/job-queries.js");
-    const { dedupeKey } = await import("./filters.js");
-    ranks = await briefRanksByDedupeKey(
-      newRoles.map((r) => dedupeKey(r.company, r.title)),
-      { tenantId: profile.tenantId, profileId: profile.id },
-    );
-  } catch (err) {
-    // allow-failopen: see above — the alert is the deliverable, `/draft N` is
-    // the shortcut, and a missing shortcut is visible while a wrong one is not.
-    log.warn({ err: (err as Error).message, profile: profile.id }, "Brief ranks unavailable for alert");
+  // A SHEET PROBLEM IS AN OPERATOR FACT. It used to be appended to the group alert, so a sweep that found a role
+  // also told the candidate that a spreadsheet export had failed. It goes to the founder DM now,
+  // and the group message never carries a sheet line at all (the link is on the founder-facing pings).
+  if (notice !== null) {
+    try {
+      await sendLaneOps(notice, { repeatKey: `sheet-notice:${profile.id}` });
+    } catch (err) {
+      // allow-failopen: the notice is a courtesy about the export; the roles and the heartbeat matter more.
+      log.warn({ err: (err as Error).message, profile: profile.id }, "Sheet notice could not be delivered");
+    }
   }
 
-  const message =
-    newRoles.length > 0
-      ? formatNewRowsAlert(newRoles, link ?? notice, profile.candidateName, {
-          backfill: backfill.length,
-          ranks,
-          selector: profileSelector(profile),
-        })
-      : formatBackfillLine(backfill.length, profile.candidateName, profileSelector(profile));
-  try {
-    await sendToJobsChat(message);
-  } catch (err) {
-    log.error(
-      {
-        err: (err as Error).message,
-        profile: profile.id,
-        newRoles: newRoles.length,
-        backfill: backfill.length,
-      },
-      "New-roles alert could not be delivered — heartbeat deliberately left unspoken",
-    );
-    return;
-  }
+  // BUFFER, THEN RECORD. Nothing is sent to the group here: the roles wait in job_digest_state and one batched
+  // message goes out at the next of three daily slots (alert-digest.ts, called from runFreeSweep after every
+  // profile has run). If the buffer write throws, the sweep is NOT recorded as announced: the heartbeat is left
+  // alone, so the next quiet roll-up still tells the founder the lane is alive, and the rows stay visible in
+  // /jobs and /fresh.
+  //
+  // The heartbeat is reset here, not at send time: its job is "the lane is alive and doing work", and a sweep
+  // that stored roles did work. The batch has its own marker (last_digest_at).
+  // WHICH roles: `newRoles` interrupt, `backfill` is only counted (see splitByPublishFreshness).
+  await bufferAlerts(profile.id, newRoles, backfill.length);
   await saveLaneHeartbeat(profile.id, afterSpokenSweep(now));
 }
 
