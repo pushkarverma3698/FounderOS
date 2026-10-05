@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { SCHEDULED_ROUTINES, describeCron } from "../../../src/infra/scheduler-registry.js";
 import { FREE_SWEEP_CRON } from "../../../src/tools/jobhunt/sweep-runner.js";
 import { STANDUP_CRON } from "../../../src/goals/standup-schedule.js";
+import { MERGE_DIGEST_CRON } from "../../../src/gateway/merge-digest-run.js";
 import { JOBHUNT_FINDINGS_CRON } from "../../../src/evolution/jobhunt-findings-cron.js";
 
 const SCHEDULER = readFileSync(fileURLToPath(new URL("../../../src/infra/scheduler.ts", import.meta.url)), "utf8");
@@ -44,6 +45,7 @@ describe("scheduler registry", () => {
     expect(own("goal-standup")).toBe(STANDUP_CRON);
     expect(own("jobhunt-findings")).toBe(JOBHUNT_FINDINGS_CRON);
     expect(own("free-board-sweep")).toBe(FREE_SWEEP_CRON);
+    expect(own("merge-digest")).toBe(MERGE_DIGEST_CRON);
   });
 
   it("scheduler.ts still starts the two routines that register themselves", () => {
