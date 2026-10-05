@@ -484,12 +484,57 @@ export function resolveSyncTarget(opts: {
   };
 }
 
+// ── Doc-level embedding (knowledge_entries.embedding, VECTOR(768)) ────────────
+
+/** An existing row needs a (back)filled embedding when none is stored. */
+export function needsEntryEmbedding(row: { embedding?: number[] | null }): boolean {
+  return !row.embedding || row.embedding.length === 0;
+}
+
+/** Text embedded for a doc: title + first chunk (1800 chars), so it stays inside the model's context. */
+export function entryEmbeddingText(title: string, content: string): string {
+  return `${title}\n\n${chunkText(content)[0] ?? ""}`;
+}
+
+export type EntryEmbedResult = { ok: true; vector: number[] } | { ok: false; error: string };
+
+/** Embeds one entry via the injected embedder; never throws, so one bad embed cannot abort the sync. */
+export async function tryEmbedEntry(
+  title: string,
+  content: string,
+  embed: (text: string) => Promise<number[]>,
+): Promise<EntryEmbedResult> {
+  try {
+    return { ok: true, vector: await embed(entryEmbeddingText(title, content)) };
+  } catch (err) {
+    // allow-failopen: reported to the caller, counted in the sync summary and logged per doc; the keyword row is still written
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 // ── Upsert logic ──────────────────────────────────────────────────────────────
+
+type EmbedFn = (text: string) => Promise<number[]>;
+/** How the doc-level embedding went: written, failed (row still saved), or not attempted. */
+type EmbedOutcome = "embedded" | "failed" | "none";
 
 async function upsertEntry(
   entry: DocEntry,
-): Promise<{ action: "inserted" | "updated" | "skipped"; id: string }> {
+  embed: EmbedFn | null,
+): Promise<{ action: "inserted" | "updated" | "skipped"; id: string; embedded: EmbedOutcome }> {
   const db = getDb();
+  let embedded: EmbedOutcome = "none";
+  const embedFor = async (): Promise<number[] | undefined> => {
+    if (!embed) return undefined;
+    const r = await tryEmbedEntry(entry.title, entry.content, embed);
+    if (r.ok) {
+      embedded = "embedded";
+      return r.vector;
+    }
+    embedded = "failed";
+    console.error(`⚠️  Doc embedding failed for "${entry.title}": ${r.error}`);
+    return undefined;
+  };
   const existing = await db
     .select()
     .from(knowledgeEntries)
@@ -515,14 +560,22 @@ async function upsertEntry(
         metadata: entry.metadata,
         version: 1,
         is_current: true,
+        embedding: await embedFor(),
       })
       .returning({ id: knowledgeEntries.id });
-    return { action: "inserted", id: row!.id };
+    return { action: "inserted", id: row!.id, embedded };
   }
 
   const current = existing[0]!;
   if (current.content === entry.content) {
-    return { action: "skipped", id: current.id };
+    // Unchanged content: backfill the embedding if an earlier sync left it NULL.
+    if (embed && needsEntryEmbedding(current)) {
+      const vector = await embedFor();
+      if (vector) {
+        await db.update(knowledgeEntries).set({ embedding: vector }).where(eq(knowledgeEntries.id, current.id));
+      }
+    }
+    return { action: "skipped", id: current.id, embedded };
   }
 
   // Content changed — mark old as non-current, insert new version
@@ -543,10 +596,11 @@ async function upsertEntry(
       metadata: entry.metadata,
       version: (current.version ?? 1) + 1,
       is_current: true,
+      embedding: await embedFor(),
     })
     .returning({ id: knowledgeEntries.id });
 
-  return { action: "updated", id: row!.id };
+  return { action: "updated", id: row!.id, embedded };
 }
 
 /**
@@ -677,10 +731,14 @@ async function main() {
   let totalChunks = 0;
   let currentDocs = 0;
   let failures = 0;
+  let entriesEmbedded = 0;
+  let entryEmbedFailures = 0;
 
   for (const doc of docs) {
     try {
-      const { action } = await upsertEntry(doc);
+      const { action, embedded } = await upsertEntry(doc, keywordOnly ? null : embedText);
+      if (embedded === "embedded") entriesEmbedded++;
+      else if (embedded === "failed") entryEmbedFailures++;
 
       let chunks = 0;
       let refreshed = false;
@@ -709,7 +767,9 @@ async function main() {
       (keywordOnly
         ? " (keyword-only)"
         : ` · ${totalChunks} vector chunks embedded into brain_memories` +
-          ` · ${currentDocs} docs already current (no embedding needed)`) +
+          ` · ${currentDocs} docs already current (no embedding needed)` +
+          ` · ${entriesEmbedded} doc embeddings written to knowledge_entries`) +
+      (entryEmbedFailures > 0 ? ` · ${entryEmbedFailures} doc embeddings FAILED (rows saved, will backfill next sync)` : "") +
       (failures > 0 ? ` · ${failures} FAILED` : ""),
   );
   process.exit(failures > 0 ? 1 : 0);
