@@ -9,6 +9,7 @@
  *   node --import tsx/esm --env-file=.env scripts/journey-coding.ts
  */
 import { judgeCoding, sandboxBrief, type JourneyAVerdict } from "./lib/journey-coding.js";
+import { appendScreenEntry } from "../src/infra/screen-log.js";
 
 const REPO = process.env["JOURNEY_CODING_REPO"] ?? "pushkarverma3698/fos-journey-sandbox";
 const LIMIT_MIN = Number(process.env["JOURNEY_CODING_LIMIT_MIN"] ?? 45);
@@ -18,11 +19,13 @@ async function notifyFounder(text: string): Promise<void> {
   const token = process.env["TELEGRAM_BOT_TOKEN"];
   const chat = process.env["TELEGRAM_CHAT_ID"];
   if (!token || !chat) return;
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ chat_id: chat, text }),
   });
+  // The bot's planner reads the screen log, so a follow-up question about this alert gets an answer.
+  if (res.ok) await appendScreenEntry({ chat, src: "journey-coding", text });
 }
 
 async function gh<T>(method: string, path: string, body?: unknown): Promise<T> {

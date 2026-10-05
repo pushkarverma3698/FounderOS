@@ -307,3 +307,37 @@ describe("pr-brain — quiet hours and digest", () => {
     expect(existsSync(queueFile)).toBe(false);
   });
 });
+
+// 2026-10-04: agent-dispatch said "#76/PR #79 … blocked" and a minute later the bot guessed which
+// repo "these" PRs were on. Every message a daemon puts on the founder's screen is now also a line in
+// ~/.claude/screen.jsonl, which the planner reads (src/infra/screen-log.ts).
+describe("pr-brain — screen log", () => {
+  const screen = () => {
+    const f = join(home, ".claude", "screen.jsonl");
+    return existsSync(f)
+      ? readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>)
+      : [];
+  };
+
+  it("logs every message it sends, with the chat and its own name", () => {
+    sweep({ preflight: "ok" });
+    const sent = telegramSends();
+    expect(sent.length).toBeGreaterThan(0);
+    expect(screen().map((e) => e["text"])).toEqual(sent.map((s) => s.replace(/\n$/, "")));
+    expect(screen().every((e) => e["chat"] === "1" && e["src"] === "pr-brain")).toBe(true);
+  });
+
+  it("logs a screenshot by its caption", () => {
+    sweep({ preflight: "ok", appGate: true });
+    const captions = telegramSends().filter((m) => m.startsWith("PHOTO")).map((m) => m.slice("PHOTO ".length).replace(/\n$/, ""));
+    expect(captions).toHaveLength(2);
+    for (const c of captions) expect(screen().map((e) => e["text"])).toContain(c);
+  });
+
+  it("logs nothing for a message held for the digest, then logs the digest when it goes out", () => {
+    sweep({ preflight: "ok", quietNow: "02" });
+    expect(screen()).toHaveLength(0);
+    sweep({ preflight: "ok", head: "bbbb2222", quietNow: "09" });
+    expect(String(screen()[0]?.["text"])).toContain("🌅 Overnight digest (1 events)");
+  });
+});

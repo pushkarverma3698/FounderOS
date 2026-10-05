@@ -198,11 +198,15 @@ notify() {
   token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
   chat=$(grep -m1 '^TELEGRAM_CHAT_ID=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
   [[ -n "$token" && -n "$chat" ]] || return 0
-  curl -s -o /dev/null --max-time 20 \
+  # -f: a refused send (HTTP 4xx) put nothing on the screen, so it is not logged as seen.
+  if curl -sf -o /dev/null --max-time 20 \
     "https://api.telegram.org/bot${token}/sendMessage" \
     --data-urlencode "chat_id=${chat}" \
     --data-urlencode "text=$1" \
-    --data "disable_web_page_preview=true" || true
+    --data "disable_web_page_preview=true"; then
+    tg_screen_log "$1" "$chat"
+  fi
+  return 0
 }
 
 # notify() for text that can outgrow one message (a report per repo): split at line
