@@ -333,6 +333,10 @@ export interface NewRowsAlertOptions {
    * that could not be found.
    */
   readonly ids?: ReadonlyMap<string, string>;
+  /** How many rows to name before summarising the rest. Defaults to NEW_ROWS_NAMED; a batched message names more. */
+  readonly named?: number;
+  /** Roles that exist but are not in `rows` (a batch buffer past its cap): counted in the heading and the "+ N more" line. */
+  readonly extra?: number;
 }
 
 export function formatNewRowsAlert(
@@ -341,7 +345,8 @@ export function formatNewRowsAlert(
   candidateName?: string,
   opts: NewRowsAlertOptions = {},
 ): string {
-  const named = rows.slice(0, NEW_ROWS_NAMED);
+  const named = rows.slice(0, opts.named ?? NEW_ROWS_NAMED);
+  const total = rows.length + (opts.extra ?? 0);
   const sel = opts.selector ? ` ${opts.selector}` : "";
   // The mark is the row's own status, so a flagged company is visibly a question
   // rather than a recommendation. The title is the LINK and `/draft N` follows
@@ -355,7 +360,7 @@ export function formatNewRowsAlert(
       return `${mark} <b>${esc(r.company)}</b> — ${link(r.title, r.url ?? null)}${action}`;
     })
     .join("\n");
-  const rest = rows.length > NEW_ROWS_NAMED ? `\n<i>+ ${rows.length - NEW_ROWS_NAMED} more.</i>` : "";
+  const rest = total > named.length ? `\n<i>+ ${total - named.length} more.</i>` : "";
   const backfill =
     (opts.backfill ?? 0) > 0
       ? `\n<i>+ ${opts.backfill} older ${opts.backfill === 1 ? "role" : "roles"} also added ` +
@@ -377,7 +382,7 @@ export function formatNewRowsAlert(
     .join(" · ");
 
   return (
-    `🆕 <b>${rows.length} new role${rows.length === 1 ? "" : "s"}${who}</b>\n` +
+    `🆕 <b>${total} new role${total === 1 ? "" : "s"}${who}</b>\n` +
     `<i>${split}</i>\n` +
     lines +
     rest +

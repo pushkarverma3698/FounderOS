@@ -271,4 +271,13 @@ export async function runFreeSweep(): Promise<void> {
       );
     }
   }
+
+  // THE BATCH, AFTER EVERY PROFILE HAS BUFFERED. At most three jobs-group messages a day, one for both candidates
+  // (alert-digest.ts). Its own try/catch: a Telegram failure leaves the buffers intact and the next sweep retries.
+  try {
+    const { sendDueDigest } = await import("./alert-digest.js");
+    await sendDueDigest(new Date());
+  } catch (err) {
+    log.error({ err: (err as Error).message }, "Batched new-role alert could not be delivered - buffers kept for the next sweep");
+  }
 }
