@@ -18,9 +18,13 @@ import type { StepResult } from "./contracts.js";
 /** Tools whose success means something WILL notify the founder later. */
 export const WATCHER_TOOLS: ReadonlySet<string> = new Set(["schedule_task", "set_reminder"]);
 
-/** What the reply says when the promise was all it said. */
+/**
+ * What the reply says when the promise was all it said. It claims only what this
+ * turn did: a dispatched task still posts its own progress once an agent claims it,
+ * so "nothing is watching" would be a new false statement.
+ */
 export const NO_WATCHER_NOTICE =
-  "Nothing is watching this: no reminder or scheduled task was set. Ask me for an update, or send /where.";
+  "I didn't set a reminder or scheduled check for this. Ask me for an update, or send /where.";
 
 /** Fewest words a clause before the promise needs in order to stand as a sentence on its own. */
 const MIN_KEPT_PREFIX_WORDS = 3;
