@@ -18,25 +18,40 @@ const PROGRESS_OBJECTIVE_MAX = 60;
 
 const PROGRESS_PLACEHOLDER_TEXT = "🤔 Working on it…";
 
+/** Planner prose is scrubbed of worker ids and tool names (rationale in kernel/founder-text.ts) and clipped. */
+function cleanProse(text: string): string {
+  const clean = redactInternalIdentifiers(redactInternalPaths(text));
+  return clean.length > PROGRESS_OBJECTIVE_MAX ? `${clean.slice(0, PROGRESS_OBJECTIVE_MAX - 1)}…` : clean;
+}
+
+const stepsOf = (n: number): string => `${n} step${n === 1 ? "" : "s"}`;
+
 /**
  * Step-level progress label for the CURRENT state, or null when nothing is
- * worth showing (planning/failed/done, or a malformed cursor — mirrors
- * dispatch's own bounds check rather than throwing).
+ * worth showing (failed/done, or a malformed cursor — mirrors dispatch's own
+ * bounds check rather than throwing). Once the plan exists the founder sees,
+ * in this order: "On it: <goal>, N steps" with the first step under it,
+ * "Step k of N: <objective>" for each later step, "All N steps done" while
+ * the reply is written.
  */
 export function progressLabelFor(state: KernelStateType): string | null {
   const { mission } = state;
   if (!mission) return null; // first streamed snapshot, before the plan node has run
   if (mission.status === "planning") return "🧠 Planning…";
+  const plan = mission.plan;
   if (mission.status === "executing") {
-    const step = mission.plan?.steps[mission.cursor];
-    if (!step) return null;
-    // Worker id is internal routing; the objective is planner prose that names
-    // tools. Both are scrubbed — rationale in kernel/founder-text.ts.
-    const clean = redactInternalIdentifiers(redactInternalPaths(step.objective));
-    if (!clean) return PROGRESS_PLACEHOLDER_TEXT;
-    return `🔧 ${clean.length > PROGRESS_OBJECTIVE_MAX ? `${clean.slice(0, PROGRESS_OBJECTIVE_MAX - 1)}…` : clean}`;
+    const step = plan?.steps[mission.cursor];
+    if (!plan || !step) return null;
+    const objective = cleanProse(step.objective);
+    if (!objective) return PROGRESS_PLACEHOLDER_TEXT;
+    const line = `Step ${mission.cursor + 1} of ${plan.steps.length}: ${objective}`;
+    if (mission.cursor > 0) return line;
+    const goal = cleanProse(plan.goal);
+    return `On it: ${goal || "your request"}, ${stepsOf(plan.steps.length)}\n${line}`;
   }
-  if (mission.status === "synthesizing") return "✍️ Writing your reply…";
+  if (mission.status === "synthesizing") {
+    return plan ? `All ${stepsOf(plan.steps.length)} done` : "✍️ Writing your reply…";
+  }
   return null;
 }
 

@@ -23,22 +23,25 @@ vi.mock("../../../src/gateway/kernel-boot.js", () => ({
 
 const resolveInterrupt = vi.fn(async () => ({}));
 const getPendingInterrupt = vi.fn(async (): Promise<unknown> => null);
+const getTodayCostUsd = vi.fn(async (): Promise<number> => 0);
 const insertScheduledTask = vi.fn(async (data: Record<string, unknown>) => ({ id: "task-1", ...data }));
 vi.mock("../../../src/db/queries.js", () => ({
   getPendingInterrupt: (...a: unknown[]) => getPendingInterrupt(...(a as [])),
   resolveInterrupt: (...a: unknown[]) => resolveInterrupt(...(a as [])),
-  getTodayCostUsd: vi.fn(async () => 0),
+  getTodayCostUsd: (...a: unknown[]) => getTodayCostUsd(...(a as [])),
   insertScheduledTask: (...a: unknown[]) => insertScheduledTask(...(a as [Record<string, unknown>])),
 }));
 
+const readHalt = vi.fn(async (): Promise<unknown> => null);
 vi.mock("../../../src/infra/halt.js", () => ({
-  readHalt: vi.fn(async () => null),
+  readHalt: (...a: unknown[]) => readHalt(...(a as [])),
   formatHaltNotice: vi.fn(() => "halted"),
 }));
 
 const { runKernelText, resumeKernel, progressLabelFor } = await import("../../../src/gateway/kernel-run.js");
 import { Command } from "@langchain/langgraph";
 import type { KernelStateType } from "../../../src/kernel/index.js";
+import { setTraceSink, type TraceEvent } from "../../../src/infra/trace.js";
 
 function baseState(overrides: Partial<KernelStateType["mission"]>): KernelStateType {
   return {
@@ -75,11 +78,34 @@ function makePlan(objective: string) {
 const PLAN = makePlan("Find the founder's five most recent LinkedIn posts and summarize engagement");
 
 describe("progressLabelFor", () => {
-  it("returns a truncated objective while executing, without the internal worker id", () => {
+  it("names the goal and the step count on step 1, then the truncated objective, without the internal worker id", () => {
     const state = baseState({ status: "executing", plan: PLAN as never, cursor: 0 });
     expect(progressLabelFor(state)).toBe(
-      "🔧 Find the founder's five most recent LinkedIn posts and summ…",
+      "On it: g, 1 step\nStep 1 of 1: Find the founder's five most recent LinkedIn posts and summ…",
     );
+  });
+
+  it("says 'Step k of N' on later steps, and does not repeat the goal line", () => {
+    const plan = {
+      ...makePlan("first"),
+      goal: "Ship the report",
+      steps: [makePlan("first").steps[0], { ...makePlan("second").steps[0], step_id: "s2" }, { ...makePlan("third").steps[0], step_id: "s3" }],
+    };
+    expect(progressLabelFor(baseState({ status: "executing", plan: plan as never, cursor: 0 }))).toBe(
+      "On it: Ship the report, 3 steps\nStep 1 of 3: first",
+    );
+    expect(progressLabelFor(baseState({ status: "executing", plan: plan as never, cursor: 1 }))).toBe("Step 2 of 3: second");
+    expect(progressLabelFor(baseState({ status: "executing", plan: plan as never, cursor: 2 }))).toBe("Step 3 of 3: third");
+  });
+
+  it("scrubs and clips the goal the same way as the objective", () => {
+    const plan = { ...makePlan("do it"), goal: `Use job_state to export every captured job and then ${"x".repeat(80)}` };
+    const label = progressLabelFor(baseState({ status: "executing", plan: plan as never, cursor: 0 }))!;
+    const goalLine = label.split("\n")[0]!;
+    expect(goalLine).not.toContain("job_state");
+    expect(goalLine.startsWith("On it: ")).toBe(true);
+    expect(goalLine.endsWith(", 1 step")).toBe(true);
+    expect(goalLine.length).toBeLessThanOrEqual("On it: ".length + 60 + ", 1 step".length);
   });
 
   it("strips tool names the planner wrote into the objective", () => {
@@ -89,7 +115,7 @@ describe("progressLabelFor", () => {
 
     expect(label).not.toContain("job_state");
     expect(label).not.toContain("jobhunt:");
-    expect(label).toContain("Retrieve the full set of captured jobs");
+    expect(label).toContain("Step 1 of 1: Retrieve the full set of captured jobs");
   });
 
   it("falls back to the generic placeholder when scrubbing empties the objective", () => {
@@ -99,9 +125,15 @@ describe("progressLabelFor", () => {
     );
   });
 
-  it("returns the writing label while synthesizing", () => {
+  it("says all N steps are done while synthesizing", () => {
     const state = baseState({ status: "synthesizing", plan: PLAN as never, cursor: 1 });
-    expect(progressLabelFor(state)).toBe("✍️ Writing your reply…");
+    expect(progressLabelFor(state)).toBe("All 1 step done");
+    const three = { ...makePlan("a"), steps: [1, 2, 3].map((n) => ({ ...makePlan("a").steps[0], step_id: `s${n}` })) };
+    expect(progressLabelFor(baseState({ status: "synthesizing", plan: three as never, cursor: 3 }))).toBe("All 3 steps done");
+  });
+
+  it("falls back to the writing label when synthesizing without a plan", () => {
+    expect(progressLabelFor(baseState({ status: "synthesizing", plan: null, cursor: 0 }))).toBe("✍️ Writing your reply…");
   });
 
   it("returns the planning label while planning", () => {
@@ -163,6 +195,8 @@ beforeEach(() => {
   fakeKernel.stream.mockImplementation(() => singleYield(DONE_STATE));
   fakeKernel.getState.mockResolvedValue({ tasks: [] } as never);
   getPendingInterrupt.mockResolvedValue(null);
+  readHalt.mockResolvedValue(null);
+  getTodayCostUsd.mockResolvedValue(0);
 });
 
 describe("runKernelText", () => {
@@ -628,7 +662,7 @@ describe("progress streaming", () => {
     const { ctx, replies, edits, deletedIds } = fakeCtx();
     await runKernelText(ctx, "do the thing");
 
-    expect(edits).toEqual(["🔧 Look up recent posts", "✍️ Writing your reply…"]);
+    expect(edits).toEqual(["On it: g, 1 step\nStep 1 of 1: Look up recent posts", "All 1 step done"]);
     expect(deletedIds).toEqual([1]); // placeholder was message_id 1
     expect(replies.at(-1)!.text).toContain("Here you go.");
   });
@@ -643,7 +677,7 @@ describe("progress streaming", () => {
     const { ctx, edits } = fakeCtx();
     await runKernelText(ctx, "do the thing");
 
-    expect(edits).toEqual(["🔧 Look up recent posts"]);
+    expect(edits).toEqual(["On it: g, 1 step\nStep 1 of 1: Look up recent posts"]);
   });
 
   it("deletes the placeholder even when the stream throws", async () => {
@@ -669,7 +703,7 @@ describe("progress streaming", () => {
     const { ctx, edits, deletedIds } = fakeCtx();
     await resumeKernel(ctx, "approved");
 
-    expect(edits).toEqual(["✍️ Writing your reply…"]);
+    expect(edits).toEqual(["All 1 step done"]);
     expect(deletedIds).toEqual([1]);
   });
 });
@@ -844,3 +878,4 @@ describe("failed turns reach the founder as a card with a Retry button", () => {
     expect(retryData(replies.at(-1))).toEqual([]);
   });
 });
+
