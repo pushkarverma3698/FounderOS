@@ -67,7 +67,7 @@ jobs:
           if command -v gws >/dev/null 2>&1; then
             gws --version 2>&1 | head -3 || true
           else
-            echo "!! gws install failed — will try composio rollback if configured"
+            echo "!! gws install failed"
           fi
 
           echo ""
@@ -77,20 +77,7 @@ jobs:
             echo "    gws auth OK"
             GWS_AUTH_OK=1
           else
-            echo "!! gws auth NOT configured"
-            if grep -q '^COMPOSIO_API_KEY=' .env 2>/dev/null; then
-              echo "==> Enabling GMAIL_BACKEND=composio rollback (COMPOSIO_API_KEY present)"
-              grep -v '^GMAIL_BACKEND=' .env > .env.patched || true
-              grep -v '^CALENDAR_BACKEND=' .env.patched > .env.patched2 || true
-              mv .env.patched2 .env.patched
-              printf '%s\n' 'GMAIL_BACKEND=composio' 'CALENDAR_BACKEND=composio' >> .env.patched
-              mv .env.patched .env
-              chmod 600 .env
-              sudo systemctl restart founderos
-              sleep 8
-            else
-              echo "    No COMPOSIO_API_KEY — founder must run: gws auth login"
-            fi
+            echo "!! gws auth NOT configured — founder must run: gws auth login"
           fi
 
           echo ""

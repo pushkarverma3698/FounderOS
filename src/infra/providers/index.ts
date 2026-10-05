@@ -1,7 +1,7 @@
 /**
  * FounderOS — Provider dispatch layer
  * ====================================
- * Tools call these functions — never Composio or gws directly.
+ * Tools call these functions — never gws directly.
  * Backend selection is env-driven (ADR-029). Swap providers without
  * touching department tools, prompts, or HITL wrappers.
  */
@@ -9,25 +9,13 @@
 import {
   getCalendarBackend,
   getGmailBackend,
-  getLinkedInBackend,
 } from "../provider-config.js";
-import { getLinkedInAuthorUrn as getComposioAuthorUrn } from "../composio.js";
-import {
-  composioCreateCalendarEvent,
-  composioReadEmails,
-  composioSendEmail,
-} from "./google-composio.js";
 import { gwsCreateCalendarEvent, gwsReadEmails, gwsSendEmail } from "./google-gws.js";
 import {
   directCreateCalendarEvent,
   directReadEmails,
   directSendEmail,
 } from "./google-direct.js";
-import {
-  composioLinkedInAnalytics,
-  composioLinkedInConnect,
-  composioLinkedInPost,
-} from "./linkedin-composio.js";
 import {
   directLinkedInAnalytics,
   directLinkedInPost,
@@ -45,7 +33,7 @@ import type { ToolResult } from "../../tools/index.js";
 
 /** Author URN for the active LinkedIn backend. */
 export function getLinkedInAuthorUrn(): string | undefined {
-  return getLinkedInBackend() === "direct" ? getDirectAuthorUrn() : getComposioAuthorUrn();
+  return getDirectAuthorUrn();
 }
 export type {
   CreateCalendarEventInput,
@@ -56,38 +44,31 @@ export type {
 
 export async function providerReadEmails(input: ReadEmailsInput): Promise<ToolResult> {
   const backend = getGmailBackend();
-  if (backend === "gws") return gwsReadEmails(input);
   if (backend === "googleapis") return directReadEmails(input);
-  return composioReadEmails(input);
+  return gwsReadEmails(input);
 }
 
 export async function providerSendEmail(input: SendEmailInput): Promise<ToolResult> {
   const backend = getGmailBackend();
-  if (backend === "gws") return gwsSendEmail(input);
   if (backend === "googleapis") return directSendEmail(input);
-  return composioSendEmail(input);
+  return gwsSendEmail(input);
 }
 
 export async function providerCreateCalendarEvent(input: CreateCalendarEventInput): Promise<ToolResult> {
   const backend = getCalendarBackend();
-  if (backend === "gws") return gwsCreateCalendarEvent(input);
   if (backend === "googleapis") return directCreateCalendarEvent(input);
-  return composioCreateCalendarEvent(input);
+  return gwsCreateCalendarEvent(input);
 }
 
 export async function providerLinkedInPost(input: LinkedInPostInput): Promise<ToolResult> {
-  return getLinkedInBackend() === "direct"
-    ? directLinkedInPost(input)
-    : composioLinkedInPost(input);
+  return directLinkedInPost(input);
 }
 
 export async function providerLinkedInAnalytics(
   postId: string,
   opts?: { account_key?: string; department?: string },
 ): Promise<ToolResult> {
-  return getLinkedInBackend() === "direct"
-    ? directLinkedInAnalytics(postId, opts)
-    : composioLinkedInAnalytics(postId);
+  return directLinkedInAnalytics(postId, opts);
 }
 
 /** Fetch the author's own recent posts. Direct API only — falls back to action_log in the tool wrapper. */
@@ -97,7 +78,7 @@ export async function providerLinkedInGetMyPosts(
   return directLinkedInGetMyPosts(opts);
 }
 
-/** Read comments on a LinkedIn post. Direct API only — Composio doesn't expose comments endpoint. */
+/** Read comments on a LinkedIn post. Direct API only. */
 export async function providerLinkedInReadComments(
   postId: string,
   opts?: { limit?: number; account_key?: string; department?: string },
@@ -106,15 +87,12 @@ export async function providerLinkedInReadComments(
 }
 
 export async function providerLinkedInConnect(
-  profileUrn: string,
-  message: string | undefined,
+  _profileUrn: string,
+  _message: string | undefined,
 ): Promise<ToolResult> {
-  if (getLinkedInBackend() === "direct") {
-    return {
-      success: false,
-      error:
-        "LinkedIn connection requests are blocked (ADR-009 ban risk). Not available via direct API.",
-    };
-  }
-  return composioLinkedInConnect(profileUrn, message);
+  return {
+    success: false,
+    error:
+      "LinkedIn connection requests are blocked (ADR-009 ban risk). Not available via direct API.",
+  };
 }

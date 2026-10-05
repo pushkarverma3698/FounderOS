@@ -50,7 +50,7 @@ export const RETIRED_SEED_VALUES: Readonly<Record<string, readonly unknown[]>> =
       "Build showcases 2–3 per 05-SHOWCASE-BRIEF.md",
       "Compile 30-account AI/dev-tool target list for Proof Drops",
       "First LinkedIn BUILD_LOG post with showcase URL + FounderOS metrics (HITL approve)",
-      "Configure prod LinkedIn token + gws auth (or GMAIL_BACKEND=composio rollback)",
+      "Configure prod LinkedIn token + gws auth",
       "First Proof Drop email to target founder (HITL approve send)",
     ],
   ],

@@ -1,6 +1,6 @@
 # ADR-029: Direct Platform Integrations (Provider Abstraction Layer)
 
-**Status:** Accepted · **Implemented** 2026-06-17  
+**Status:** Accepted · **Implemented** 2026-06-17 · **Rollback path removed** 2026-10-05 (Composio deleted; the `*_BACKEND=composio` flags below no longer exist)  
 **Supersedes:** ADR-028 phase-2/3 (gws + LinkedIn direct as defaults)  
 **Context:** FounderOS used Composio as a unified OAuth middleware for Gmail, Calendar, and LinkedIn. For a single-tenant, admin-owned deployment, Composio adds cost, SDK drift risk, and response-shape surprises without proportional value. The founder directive: build for long-term stability — don't rewrite tools when a vendor changes.
 

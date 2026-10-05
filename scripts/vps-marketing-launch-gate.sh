@@ -98,10 +98,8 @@ fi
 
 if command -v gws >/dev/null 2>&1 && gws auth status 2>&1 | grep -qi 'authenticated\|logged in\|valid'; then
   echo "✅ gws Gmail backend authenticated"
-elif grep -q '^GMAIL_BACKEND=composio' .env 2>/dev/null && grep -q '^COMPOSIO_API_KEY=.\+' .env 2>/dev/null; then
-  echo "✅ Gmail via Composio rollback configured"
 else
-  warn "Gmail not ready — gws not authed and Composio rollback not configured (Proof Drop email blocked)"
+  warn "Gmail not ready — gws not authed (Proof Drop email blocked)"
 fi
 
 # ── 5. Website builder tools (preset + no-LLM deploy path) ─────────────────

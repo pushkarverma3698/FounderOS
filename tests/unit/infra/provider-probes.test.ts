@@ -1,68 +1,22 @@
 /**
- * Unit tests — provider probes (mocked Composio + gws)
+ * Unit tests — provider probes (mocked gws)
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockRunGws = vi.fn();
-const mockGetComposioApiKey = vi.fn(() => "ck_test");
-const mockGetGmailConnectionId = vi.fn(() => "ca_test");
-const mockGetLinkedInConnectionId = vi.fn(() => "ca_li_test");
-/** Overridable per-test: what the mocked Composio client returns for connectedAccounts.get(). */
-let mockConnectedAccountStatus: Record<string, unknown> = { status: "ACTIVE" };
-
 vi.mock("../../../src/infra/gws-runner.js", () => ({
   runGws: mockRunGws,
 }));
 
-vi.mock("../../../src/infra/composio.js", async (orig) => {
-  const actual = await (orig() as Promise<Record<string, unknown>>);
-  return {
-    ...actual,
-    getComposioApiKey: mockGetComposioApiKey,
-    getGmailConnectionId: mockGetGmailConnectionId,
-    getLinkedInConnectionId: mockGetLinkedInConnectionId,
-  };
-});
-
-/** Overridable per-test: make connectedAccounts.get() reject (revoked-key class). */
-let mockConnectedAccountError: Error | null = null;
-
-// Instance-level resource surface — matches the installed @composio/core ≥0.10.
-// getClient() exposes a DIFFERENT generated client; mocking that wrong shape is
-// how the 2026-07-12 "connectedAccounts.get is not a function" prod crash stayed
-// CI-green (composio-sdk-surface.test.ts pins the real SDK against drift).
-vi.mock("@composio/core", () => ({
-  Composio: class {
-    connectedAccounts = {
-      get: vi.fn().mockImplementation(() =>
-        mockConnectedAccountError
-          ? Promise.reject(mockConnectedAccountError)
-          : Promise.resolve(mockConnectedAccountStatus),
-      ),
-    };
-  },
+vi.mock("../../../src/infra/providers/google-direct.js", () => ({
+  googleapisConfigured: vi.fn(async () => false),
+  directReadEmails: vi.fn(),
 }));
 
 describe("provider-probes", () => {
   beforeEach(() => {
     mockRunGws.mockReset();
-    mockGetComposioApiKey.mockReturnValue("ck_test");
-    mockConnectedAccountStatus = { status: "ACTIVE" };
-    mockConnectedAccountError = null;
-  });
-
-  it("probeComposioGmail returns up when connection ACTIVE", async () => {
-    const { probeComposioGmail } = await import("../../../src/infra/provider-probes.js");
-    const r = await probeComposioGmail(5_000);
-    expect(r.status).toBe("up");
-  });
-
-  it("probeComposioGmail returns unconfigured without API key", async () => {
-    mockGetComposioApiKey.mockReturnValue(undefined as unknown as string);
-    const { probeComposioGmail } = await import("../../../src/infra/provider-probes.js");
-    const r = await probeComposioGmail(5_000);
-    expect(r.status).toBe("unconfigured");
   });
 
   it("probeGwsGmail returns up when list succeeds", async () => {
@@ -78,52 +32,29 @@ describe("provider-probes", () => {
     mockRunGws.mockResolvedValue({
       ok: false,
       error:
-        "Gmail is not connected on this host (gws CLI not installed). Install googleworkspace/cli, run gws auth login, or set GMAIL_BACKEND=composio.",
+        "Gmail is not connected on this host (gws CLI not installed). Install googleworkspace/cli, or run gws auth login.",
     });
     const { probeGwsGmail } = await import("../../../src/infra/provider-probes.js");
     const r = await probeGwsGmail(5_000);
     expect(r.status).toBe("unconfigured");
   });
 
-  // ── probeLinkedInComposio (2026-07-01 fix) ──────────────────────────────────
-  //
-  // Gap: probeComposioGmail does a REAL reachability check (connectedAccounts.get,
-  // status === ACTIVE). probeLinkedInComposio only checked composioLinkedInConfigured()
-  // — i.e. "is COMPOSIO_API_KEY present" — and reported "up" regardless of whether the
-  // actual LinkedIn connection was revoked/inactive. This is exactly the shallow check
-  // that let the documented Composio LinkedIn outage (LIMITATIONS.md §7 — "Composio key
-  // was invalid in both dev and prod: email/linkedin/calendar down") go undetected by
-  // /status's 🟢/🔴 indicator, which would have shown a false 🟢.
-
-  it("probeLinkedInComposio returns up when the connection is ACTIVE (real reachability check)", async () => {
-    mockConnectedAccountStatus = { status: "ACTIVE" };
-    const { probeLinkedInComposio } = await import("../../../src/infra/provider-probes.js");
-    const r = await probeLinkedInComposio(5_000);
-    expect(r.status).toBe("up");
-  });
-
-  it("probeLinkedInComposio returns down when the connection is INACTIVE — the actual outage class", async () => {
-    mockConnectedAccountStatus = { status: "INACTIVE" };
-    const { probeLinkedInComposio } = await import("../../../src/infra/provider-probes.js");
-    const r = await probeLinkedInComposio(5_000);
-    expect(r.status).toBe("down");
-    expect(r.detail).toMatch(/inactive/i);
-  });
-
-  it("probeLinkedInComposio returns down when the Composio API call itself fails (revoked key)", async () => {
-    mockGetComposioApiKey.mockReturnValue("ck_test"); // configured, but the call below rejects
-    mockConnectedAccountError = new Error("401 Unauthorized");
-    const { probeLinkedInComposio } = await import("../../../src/infra/provider-probes.js");
-    const r = await probeLinkedInComposio(5_000);
-    expect(r.status).toBe("down");
-    expect(r.detail).toMatch(/401|unauthorized/i);
-  });
-
-  it("probeLinkedInComposio returns unconfigured without an API key (unchanged behavior)", async () => {
-    mockGetComposioApiKey.mockReturnValue(undefined as unknown as string);
-    const { probeLinkedInComposio } = await import("../../../src/infra/provider-probes.js");
-    const r = await probeLinkedInComposio(5_000);
-    expect(r.status).toBe("unconfigured");
+  it("runProviderProbes reports gws + googleapis + the active capabilities, with no Composio entry", async () => {
+    mockRunGws.mockResolvedValue({ ok: true, stdout: "{}", parsed: {} });
+    const { runProviderProbes } = await import("../../../src/infra/provider-probes.js");
+    const report = await runProviderProbes();
+    expect(report.linkedin_backend).toBe("direct");
+    expect(Object.keys(report).sort()).toEqual([
+      "active_calendar",
+      "active_gmail",
+      "active_linkedin",
+      "calendar_backend",
+      "checked_at",
+      "gmail_backend",
+      "googleapis_gmail",
+      "gws_gmail",
+      "linkedin_backend",
+    ]);
   });
 
   it("formatProviderStatusLine includes backend names", async () => {
@@ -143,7 +74,6 @@ describe("provider-probes", () => {
       gmail_backend: "gws",
       calendar_backend: "gws",
       linkedin_backend: "direct",
-      composio_gmail: { status: "unconfigured", detail: "skip" },
       googleapis_gmail: { status: "unconfigured", detail: "skip" },
       gws_gmail: { status: "up", detail: "gws ok" },
       active_gmail: { status: "up", detail: "gws ok" },
