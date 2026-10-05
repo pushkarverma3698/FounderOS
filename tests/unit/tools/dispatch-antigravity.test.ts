@@ -266,7 +266,7 @@ describe("dispatchAntigravityTool.execute", () => {
       goal: "Only goal provided",
     });
     expect(res.success).toBe(false);
-    expect(res.error).toContain("dispatch_antigravity_task requires title, goal, scope, expected, and verification");
+    expect(res.error).toContain("dispatch_antigravity_task requires title, goal, expected, and verification");
   });
 
   it("returns error if GITHUB_TOKEN is missing", async () => {

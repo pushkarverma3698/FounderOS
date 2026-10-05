@@ -306,6 +306,7 @@ function fakeGitHub(prs: FakePr[]) {
               title: `PR ${pr.number}`,
               html_url: `https://github.com/o/r/pull/${pr.number}`,
               head: { sha: SHA },
+              base: { ref: "beta" },
             })),
             p,
           ),
@@ -344,6 +345,8 @@ describe("fetchDispatchTasks — ready to merge", () => {
     gh.client = fakeGitHub([{ number: 5, comments: REVIEWED, mergeable: true, mergeable_state: "clean" }]);
     const res = await fetchDispatchTasks(["o/r"]);
     expect(res.readyToMerge?.map((p) => p.prNumber)).toEqual([5]);
+    // The merge buttons pin to this head and say which branch the merge lands on.
+    expect(res.readyToMerge?.[0]).toMatchObject({ headSha: SHA, base: "beta" });
     expect(res.unreachable).toEqual([]);
   });
 

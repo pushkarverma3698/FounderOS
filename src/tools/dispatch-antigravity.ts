@@ -203,7 +203,8 @@ export const dispatchAntigravityTool: UnifiedTool = {
       scope: {
         type: "string",
         description:
-          "The files or subsystem in scope, in plain words. Cite a file path ONLY if you saw it in a tool result: " +
+          "The files or subsystem in scope, in plain words. Leave it out when you saw no file: it is filed as " +
+          "'paths: agent to locate'. Cite a file path ONLY if you saw it in a tool result: " +
           "a cited path that does not exist is not an error, it is filed as an unverified hint and Antigravity (which reads " +
           "the whole repository) locates the real files. Never guess a path. Paths the task will create go in new_files.",
       },
@@ -267,20 +268,22 @@ export const dispatchAntigravityTool: UnifiedTool = {
           "Omit it to use the founder's current default (/engine).",
       },
     },
-    required: ["title", "goal", "scope", "expected", "verification"],
+    // scope is not required: a one-line request has no file to name, and an empty scope is filed as
+    // "paths: agent to locate" (./dispatch-brief-repair.ts) instead of bouncing the founder.
+    required: ["title", "goal", "expected", "verification"],
   },
 
   async execute(args: Record<string, unknown>): Promise<ToolResult> {
     const title = args["title"] as string | undefined;
     const goal = args["goal"] as string | undefined;
-    const scope = args["scope"] as string | undefined;
+    const scope = (args["scope"] as string | undefined) ?? "";
     const expected = args["expected"] as string | undefined;
     const verification = args["verification"] as string | undefined;
 
-    if (!title || !goal || !scope || !expected || !verification) {
+    if (!title || !goal || !expected || !verification) {
       return {
         success: false,
-        error: "dispatch_antigravity_task requires title, goal, scope, expected, and verification commands.",
+        error: "dispatch_antigravity_task requires title, goal, expected, and verification commands.",
       };
     }
 

@@ -78,3 +78,64 @@ export async function writeClaudeTokenFiles(token: string, today: string, paths:
   await writeSecret(paths.primary, `${token}\n${today}\n`);
   await writeSecret(paths.dispatch, `${token}\n`);
 }
+
+// ── the server's own saved login: when its refresh token stops working ─────────
+
+export type HostExpiryRead =
+  | { readonly state: "ok"; readonly expiresAtMs: number }
+  | { readonly state: "no-file" }
+  | { readonly state: "unreadable" }
+  | { readonly state: "no-expiry" }
+  | { readonly state: "garbage" };
+
+/**
+ * An expiry as epoch milliseconds. Accepts epoch ms, epoch seconds (a number below 1e11 is seconds: as ms it would
+ * be before 1973), a string of digits, or an ISO date. Anything else is undefined, never a guess.
+ */
+export function parseExpiry(raw: unknown): number | undefined {
+  if (typeof raw === "string" && /^\d+(?:\.\d+)?$/.test(raw.trim())) raw = Number(raw.trim());
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw) || raw <= 0) return undefined;
+    return raw < 1e11 ? Math.round(raw * 1000) : Math.round(raw);
+  }
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const ms = Date.parse(raw);
+    return Number.isNaN(ms) ? undefined : ms;
+  }
+  return undefined;
+}
+
+/**
+ * When the refresh token of the server's saved Claude login (`claudeAiOauth` in ~/.claude/.credentials.json, the file
+ * /login claude step 2 writes) stops working. Reads ONLY `claudeAiOauth.refreshTokenExpiresAt`: the access and refresh
+ * tokens beside it are never copied out, and the result names a state, not file content, so nothing here can leak one.
+ */
+export async function readHostRefreshExpiry(home: string = homedir()): Promise<HostExpiryRead> {
+  let text: string;
+  try {
+    text = await readFile(join(home, ".claude", ".credentials.json"), "utf8");
+  } catch {
+    // allow-failopen: no readable file is the "no-file" answer; the caller sends nothing.
+    return { state: "no-file" };
+  }
+  let raw: unknown;
+  try {
+    const oauth = (JSON.parse(text) as { claudeAiOauth?: { refreshTokenExpiresAt?: unknown } } | null)?.claudeAiOauth;
+    raw = oauth?.refreshTokenExpiresAt;
+  } catch {
+    // allow-failopen: a corrupt file is the "unreadable" answer; the caller sends nothing.
+    return { state: "unreadable" };
+  }
+  if (raw === undefined || raw === null) return { state: "no-expiry" };
+  const expiresAtMs = parseExpiry(raw);
+  return expiresAtMs === undefined ? { state: "garbage" } : { state: "ok", expiresAtMs };
+}
+
+export const DAY_MS = 24 * 60 * 60 * 1000;
+/** Warn, and offer a renewal, from this far ahead of the expiry. */
+export const WARN_AHEAD_MS = 3 * DAY_MS;
+
+/** True when the server's saved login is inside the warning window or already past it. An unreadable expiry is not "needs renewal": nothing is claimed. */
+export function hostLoginNeedsRenewal(read: HostExpiryRead, now: number): boolean {
+  return read.state === "ok" && read.expiresAtMs - now <= WARN_AHEAD_MS;
+}
