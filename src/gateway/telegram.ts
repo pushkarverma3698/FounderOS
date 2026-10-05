@@ -34,7 +34,7 @@ import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
 import { handleWifeCommands } from "./wife-commands.js";
 import { registerGoalCommands } from "./goal-commands.js";
-import { handleTask, handleRepoChoice, handleRepoReply } from "./task-command.js";
+import { handleTask, handleRepoChoice, handleRepoReply, lookupQueuedDuplicate } from "./task-command.js";
 import { handleEngine } from "./engine-command.js";
 import { handleReview } from "./review-command.js";
 import { handleFocus, handleProjects } from "./focus-commands.js";
@@ -60,6 +60,7 @@ import { isConflictError, conflictBackoffMs, CONFLICT_MAX_ATTEMPTS } from "./tel
 import { REPO_CALLBACK_PREFIX } from "./repo-picker.js";
 import { RETRY_CALLBACK_PREFIX } from "./retry-button.js";
 import { COMMAND_CALLBACK_PREFIX, handleCommandCallback, registerCommandDispatch } from "./command-dispatch.js";
+import { MERGE_CALLBACK_PREFIX, handleMergeCallback } from "./merge-digest-callback.js";
 import { handleRetryCallback } from "./retry-callback.js";
 import {
   OWNER_ONLY_COMMANDS,
@@ -103,7 +104,7 @@ function defaultChatAccess(): ChatAccessConfig {
 
 /** Buttons whose tap causes a side effect — the founder's alone outside his own chat. Retry re-runs his turn. */
 function isDecisionButton(data: string): boolean {
-  const prefixes = ["approve", "reject", REPO_CALLBACK_PREFIX, RETRY_CALLBACK_PREFIX, COMMAND_CALLBACK_PREFIX];
+  const prefixes = ["approve", "reject", REPO_CALLBACK_PREFIX, RETRY_CALLBACK_PREFIX, COMMAND_CALLBACK_PREFIX, MERGE_CALLBACK_PREFIX];
   return prefixes.some((p) => data.startsWith(p));
 }
 
@@ -176,13 +177,12 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     }
     return runKernelText(ctx, `Remind me ${text}`);
   });
-  // The registry read is dynamically imported so this transport file does not pull
-  // the database into the bot's startup path (same reason as jobsDeps below).
-  // Shared by the command and by the repo buttons it puts on screen: two copies
-  // would be two answers to "which repos may I dispatch to", and the button list
-  // drifting from the parser's allowlist is a button that refuses its own label.
+  // The registry read is dynamically imported so this transport file does not pull the database into the
+  // bot's startup path (same reason as jobsDeps below). Shared by the command and by the repo buttons it
+  // puts on screen: two copies would be two answers to "which repos may I dispatch to".
   const taskDeps = {
     runKernelText,
+    findQueuedDuplicate: lookupQueuedDuplicate,
     listRegisteredRepos: async () => {
       const [{ listRegisteredDispatchRepos }, { TENANT }] = await Promise.all([
         import("../db/queries.js"),
@@ -288,11 +288,10 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
 
   bot.on("callback_query:data", async (ctx: Context) => {
     const data = ctx.callbackQuery?.data ?? "";
-    // Ordered by how much a mistake costs. Each handler returns false for a
-    // payload that is not its own, so the HITL approve/reject path below keeps
-    // its exact previous behaviour: it is the one button where a misroute means
-    // a side effect fires, or fails to, without the founder knowing which.
+    // Ordered by how much a mistake costs. Each handler returns false for a payload that is not its
+    // own, so the HITL approve/reject path below keeps its exact behaviour: a misroute there fires, or drops, a side effect.
     if (await handleRepoChoice(ctx, taskDeps)) return;
+    if (await handleMergeCallback(ctx)) return;
     if (await handleMenuCallback(ctx)) return;
     if (await handleRetryCallback(ctx)) return;
     if (await handleCommandCallback(ctx)) return;

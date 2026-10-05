@@ -134,6 +134,27 @@ export function withFounderRequestProblem(input: AntigravityTaskInput, founderRe
   return { ...input, problem: `The founder described it as:\n\n${quoted}` };
 }
 
+/**
+ * What an empty scope is filed as. The first line is the label the founder sees on the card ("Files: paths: agent to
+ * locate"). No path-like token: plain text in the scope section is scanned by the lint.
+ */
+export const SCOPE_UNKNOWN =
+  "paths: agent to locate\n\n" +
+  "The request named no files. Locate the code this touches first: list the directories, grep for the names. " +
+  "Record what you found in the PR description. If you cannot tell where this belongs, stop and say so on the " +
+  "issue instead of inventing a location.";
+
+/** The card's Files line when the scope was left blank (the card shows the model's own input, not the repaired one). */
+export const SCOPE_UNKNOWN_LABEL = "paths: agent to locate";
+
+const SCOPE_UNKNOWN_WARNING =
+  "No file paths were given, so the scope is filed as 'paths: agent to locate'. Antigravity finds the files itself.";
+
+/** True when a scope says nothing: absent, whitespace, or only an HTML comment (the template's placeholder). */
+export function isBlankScope(scope: string | undefined | null): boolean {
+  return !scope || scope.replace(/<!--[\s\S]*?-->/g, "").trim() === "";
+}
+
 export type PreparedBrief =
   | {
       readonly ok: true;
@@ -172,8 +193,12 @@ export async function prepareDispatchBrief(
   founderRequest: string | undefined | null,
   deps: PrepareDeps,
 ): Promise<PreparedBrief> {
-  const withEvidence = withFounderRequestEvidence(withFounderRequestProblem(input, founderRequest), founderRequest);
-  return prepare(withEvidence, deps.format(withEvidence), deps);
+  const scopeUnknown = isBlankScope(input.scope);
+  const withScope = scopeUnknown ? { ...input, scope: SCOPE_UNKNOWN } : input;
+  const withEvidence = withFounderRequestEvidence(withFounderRequestProblem(withScope, founderRequest), founderRequest);
+  const prepared = await prepare(withEvidence, deps.format(withEvidence), deps);
+  // First, so it is the line the approval card quotes: it is the one thing the founder has not seen in the brief.
+  return scopeUnknown && prepared.ok ? { ...prepared, warnings: [SCOPE_UNKNOWN_WARNING, ...prepared.warnings] } : prepared;
 }
 
 async function prepare(withEvidence: AntigravityTaskInput, body: string, deps: PrepareDeps): Promise<PreparedBrief> {

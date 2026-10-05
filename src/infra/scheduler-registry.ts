@@ -35,6 +35,7 @@ export const SCHEDULED_ROUTINES: readonly ScheduledRoutine[] = [
   { id: "jobhunt-findings", title: "Job-hunt health check", cron: "30 9 * * *", source: "jobhunt-findings", what: "Checks how the job hunt is going and flags a problem at most once a day." },
   { id: "claude-login-expiry", title: "Claude login expiry warning", cron: "15 10 * * *", source: "claude-login-expiry", what: "Warns you 3 days before the Claude login saved on the server stops renewing, once per expiry." },
   { id: "pipeline-digest", title: "Weekly applications review", cron: "0 9 * * 1", source: "scheduler.ts", what: "Sends a weekly review of your job applications." },
+  { id: "merge-digest", title: "Evening merge list", cron: "0 19 * * *", source: "merge-digest-run", what: "Sends one message listing the pull requests that are reviewed and ready for you to merge, each with a Merge button." },
   { id: "import-boards-reminder", title: "Board-list refresh reminder", cron: "0 10 1 * *", source: "scheduler.ts", what: "Reminds you on the 1st of the month to refresh the sponsor job-board list." },
 ];
 

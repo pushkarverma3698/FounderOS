@@ -181,3 +181,36 @@ export function matchAllowlistedRepos(
     return name.toLowerCase().includes(lowered);
   });
 }
+
+/**
+ * Short names the founder types, beyond the repo's own name. They are the same words the repo buttons
+ * use, so what he reads on a button is what he can type. Deliberately NOT derived by substring: "app",
+ * "api" and "frontend" are ordinary words in a task, and reading one as a repo retargets the dispatch.
+ */
+const REPO_ALIASES: Readonly<Record<string, DispatchRepo>> = {
+  hulda: "pushkarverma3698/House-of-Hulda-Website-frontend",
+  "oplify-app": "OplifyMessage/oplify-messaging-app",
+  "oplify-api": "OplifyMessage/oplify-messaging-api",
+  sandbox: "pushkarverma3698/fos-journey-sandbox",
+};
+
+/**
+ * The one repo a first word of `/task` names, or null.
+ *
+ * EXACT matches only: a short alias, the repo's own name, or the full slug, case-insensitively. A word
+ * that fits no repo, or fits two (same name under different owners), is null, so the caller asks with
+ * buttons instead of guessing. `matchAllowlistedRepos` is the looser, substring matcher behind `repo:`.
+ */
+export function resolveRepoAlias(word: string, registered: readonly string[] = []): string | null {
+  const lowered = normalizeRepoSlug(word).toLowerCase();
+  if (!lowered) return null;
+
+  const aliased = REPO_ALIASES[lowered];
+  if (aliased) return aliased;
+
+  const exact = candidateRepos(registered).filter((entry) => {
+    const entryLower = entry.toLowerCase();
+    return entryLower === lowered || entryLower.split("/")[1] === lowered;
+  });
+  return exact.length === 1 ? (exact[0] as string) : null;
+}

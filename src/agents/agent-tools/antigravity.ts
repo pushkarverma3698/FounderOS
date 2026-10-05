@@ -33,9 +33,11 @@ const log = childLogger({ module: "agent-tools:antigravity" });
 
 export const dispatchAntigravityTask = tool(
   async (
-    { title, goal, scope, expected, verification, acceptance, forbidden, problem, evidence, constraints, new_files, repo, founder_request, engine },
+    { title, goal, scope: givenScope, expected, verification, acceptance, forbidden, problem, evidence, constraints, new_files, repo, founder_request, engine },
     config,
   ) => {
+    // No file named is normal for a one-line request: the brief files it as "paths: agent to locate" (dispatch-brief-repair.ts).
+    const scope = givenScope ?? "";
     // Resolve BEFORE the gate, and refuse rather than fall back.
     //
     // This used to swallow the failure and default to FounderOS, which meant a request
@@ -163,8 +165,8 @@ export const dispatchAntigravityTask = tool(
     schema: z.object({
       title: z.string().describe("Concise task title with conventional commit prefix (e.g. 'feat: 13k ATS scaling with per-domain rate limiting')."),
       goal: z.string().describe("What 'done' means in 1-2 paragraphs to an executor with no prior context."),
-      scope: z.string().describe(
-        "The files or subsystem in scope, in plain words. Cite a file path ONLY if you saw it in a tool result: a cited path that does " +
+      scope: z.string().optional().nullable().describe(
+        "The files or subsystem in scope, in plain words. Leave it out when you saw no file: it is filed as 'paths: agent to locate'. Cite a file path ONLY if you saw it in a tool result: a cited path that does " +
           "not exist is filed as an unverified hint, not an error, and Antigravity locates the real files. Never guess a path. " +
           "Paths the task will create go in new_files.",
       ),

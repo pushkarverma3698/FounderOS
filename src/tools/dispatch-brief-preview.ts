@@ -20,6 +20,7 @@
  */
 
 import { DEFAULT_ACCEPTANCE, type AntigravityTaskInput } from "./dispatch-antigravity.js";
+import { SCOPE_UNKNOWN_LABEL, isBlankScope } from "./dispatch-brief-repair.js";
 
 /** Stay under approval-card.ts's 1500-character cut so nothing is cut without a marker. */
 export const CARD_PREVIEW_MAX_CHARS = 1400;
@@ -63,7 +64,7 @@ export function renderCardPreview(
   return [
     `Goal: ${clipForCard(input.goal, budget.goal)}`,
     `Expected: ${clipForCard(input.expected, budget.expected)}`,
-    `Files: ${clipForCard(input.scope, budget.scope)}`,
+    `Files: ${isBlankScope(input.scope) ? SCOPE_UNKNOWN_LABEL : clipForCard(input.scope, budget.scope)}`,
     ...(newFiles ? [`New files: ${clipForCard(newFiles, budget.newFiles)}`] : []),
     `Verify: ${clipForCard(input.verification, budget.verification)}`,
     `Accept: ${clipForCard(input.acceptance?.trim() || DEFAULT_ACCEPTANCE, budget.acceptance)}`,
