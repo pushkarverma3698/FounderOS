@@ -23,7 +23,7 @@ import { DEFAULT_ACCEPTANCE, type AntigravityTaskInput } from "./dispatch-antigr
 import { SCOPE_UNKNOWN_LABEL, isBlankScope } from "./dispatch-brief-repair.js";
 
 /** Stay under approval-card.ts's 1500-character cut so nothing is cut without a marker. */
-export const CARD_PREVIEW_MAX_CHARS = 1400;
+export const CARD_PREVIEW_MAX_CHARS = 1460;
 
 /** Characters each field may take, before its clipping marker. */
 export const CARD_FIELD_BUDGETS = {
@@ -51,17 +51,20 @@ export function clipForCard(text: string, max: number): string {
 
 /**
  * The card preview for a dispatch: the five fields the founder approves on, then a line naming
- * the rest, then (only when some paths could not be checked) what was not verified.
+ * the rest, then (only when some paths could not be checked) what was not verified. When the planner left Goal,
+ * Expected or Verification blank and they were filled from the founder's sentence, the first line says which.
  */
 export function renderCardPreview(
   input: AntigravityTaskInput,
-  opts: { readonly bodyChars: number; readonly warnings?: readonly string[] },
+  opts: { readonly bodyChars: number; readonly warnings?: readonly string[]; readonly filled?: readonly string[] },
 ): string {
   const budget = CARD_FIELD_BUDGETS;
   const newFiles = input.newFiles?.trim();
   const firstWarning = opts.warnings?.[0];
 
   return [
+    // First: the one thing the founder did not write and is about to approve. The fields below then show what was filled.
+    ...(opts.filled?.length ? [`Filled from your sentence: ${opts.filled.join(", ")}.`] : []),
     `Goal: ${clipForCard(input.goal, budget.goal)}`,
     `Expected: ${clipForCard(input.expected, budget.expected)}`,
     `Files: ${isBlankScope(input.scope) ? SCOPE_UNKNOWN_LABEL : clipForCard(input.scope, budget.scope)}`,

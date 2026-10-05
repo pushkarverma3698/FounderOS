@@ -23,22 +23,25 @@ vi.mock("../../../src/gateway/kernel-boot.js", () => ({
 
 const resolveInterrupt = vi.fn(async () => ({}));
 const getPendingInterrupt = vi.fn(async (): Promise<unknown> => null);
+const getTodayCostUsd = vi.fn(async (): Promise<number> => 0);
 const insertScheduledTask = vi.fn(async (data: Record<string, unknown>) => ({ id: "task-1", ...data }));
 vi.mock("../../../src/db/queries.js", () => ({
   getPendingInterrupt: (...a: unknown[]) => getPendingInterrupt(...(a as [])),
   resolveInterrupt: (...a: unknown[]) => resolveInterrupt(...(a as [])),
-  getTodayCostUsd: vi.fn(async () => 0),
+  getTodayCostUsd: (...a: unknown[]) => getTodayCostUsd(...(a as [])),
   insertScheduledTask: (...a: unknown[]) => insertScheduledTask(...(a as [Record<string, unknown>])),
 }));
 
+const readHalt = vi.fn(async (): Promise<unknown> => null);
 vi.mock("../../../src/infra/halt.js", () => ({
-  readHalt: vi.fn(async () => null),
+  readHalt: (...a: unknown[]) => readHalt(...(a as [])),
   formatHaltNotice: vi.fn(() => "halted"),
 }));
 
 const { runKernelText, resumeKernel, progressLabelFor } = await import("../../../src/gateway/kernel-run.js");
 import { Command } from "@langchain/langgraph";
 import type { KernelStateType } from "../../../src/kernel/index.js";
+import { setTraceSink, type TraceEvent } from "../../../src/infra/trace.js";
 
 function baseState(overrides: Partial<KernelStateType["mission"]>): KernelStateType {
   return {
@@ -75,11 +78,34 @@ function makePlan(objective: string) {
 const PLAN = makePlan("Find the founder's five most recent LinkedIn posts and summarize engagement");
 
 describe("progressLabelFor", () => {
-  it("returns a truncated objective while executing, without the internal worker id", () => {
+  it("names the goal and the step count on step 1, then the truncated objective, without the internal worker id", () => {
     const state = baseState({ status: "executing", plan: PLAN as never, cursor: 0 });
     expect(progressLabelFor(state)).toBe(
-      "🔧 Find the founder's five most recent LinkedIn posts and summ…",
+      "On it: g, 1 step\nStep 1 of 1: Find the founder's five most recent LinkedIn posts and summ…",
     );
+  });
+
+  it("says 'Step k of N' on later steps, and does not repeat the goal line", () => {
+    const plan = {
+      ...makePlan("first"),
+      goal: "Ship the report",
+      steps: [makePlan("first").steps[0], { ...makePlan("second").steps[0], step_id: "s2" }, { ...makePlan("third").steps[0], step_id: "s3" }],
+    };
+    expect(progressLabelFor(baseState({ status: "executing", plan: plan as never, cursor: 0 }))).toBe(
+      "On it: Ship the report, 3 steps\nStep 1 of 3: first",
+    );
+    expect(progressLabelFor(baseState({ status: "executing", plan: plan as never, cursor: 1 }))).toBe("Step 2 of 3: second");
+    expect(progressLabelFor(baseState({ status: "executing", plan: plan as never, cursor: 2 }))).toBe("Step 3 of 3: third");
+  });
+
+  it("scrubs and clips the goal the same way as the objective", () => {
+    const plan = { ...makePlan("do it"), goal: `Use job_state to export every captured job and then ${"x".repeat(80)}` };
+    const label = progressLabelFor(baseState({ status: "executing", plan: plan as never, cursor: 0 }))!;
+    const goalLine = label.split("\n")[0]!;
+    expect(goalLine).not.toContain("job_state");
+    expect(goalLine.startsWith("On it: ")).toBe(true);
+    expect(goalLine.endsWith(", 1 step")).toBe(true);
+    expect(goalLine.length).toBeLessThanOrEqual("On it: ".length + 60 + ", 1 step".length);
   });
 
   it("strips tool names the planner wrote into the objective", () => {
@@ -89,7 +115,7 @@ describe("progressLabelFor", () => {
 
     expect(label).not.toContain("job_state");
     expect(label).not.toContain("jobhunt:");
-    expect(label).toContain("Retrieve the full set of captured jobs");
+    expect(label).toContain("Step 1 of 1: Retrieve the full set of captured jobs");
   });
 
   it("falls back to the generic placeholder when scrubbing empties the objective", () => {
@@ -99,9 +125,15 @@ describe("progressLabelFor", () => {
     );
   });
 
-  it("returns the writing label while synthesizing", () => {
+  it("says all N steps are done while synthesizing", () => {
     const state = baseState({ status: "synthesizing", plan: PLAN as never, cursor: 1 });
-    expect(progressLabelFor(state)).toBe("✍️ Writing your reply…");
+    expect(progressLabelFor(state)).toBe("All 1 step done");
+    const three = { ...makePlan("a"), steps: [1, 2, 3].map((n) => ({ ...makePlan("a").steps[0], step_id: `s${n}` })) };
+    expect(progressLabelFor(baseState({ status: "synthesizing", plan: three as never, cursor: 3 }))).toBe("All 3 steps done");
+  });
+
+  it("falls back to the writing label when synthesizing without a plan", () => {
+    expect(progressLabelFor(baseState({ status: "synthesizing", plan: null, cursor: 0 }))).toBe("✍️ Writing your reply…");
   });
 
   it("returns the planning label while planning", () => {
@@ -163,6 +195,8 @@ beforeEach(() => {
   fakeKernel.stream.mockImplementation(() => singleYield(DONE_STATE));
   fakeKernel.getState.mockResolvedValue({ tasks: [] } as never);
   getPendingInterrupt.mockResolvedValue(null);
+  readHalt.mockResolvedValue(null);
+  getTodayCostUsd.mockResolvedValue(0);
 });
 
 describe("runKernelText", () => {
@@ -628,7 +662,7 @@ describe("progress streaming", () => {
     const { ctx, replies, edits, deletedIds } = fakeCtx();
     await runKernelText(ctx, "do the thing");
 
-    expect(edits).toEqual(["🔧 Look up recent posts", "✍️ Writing your reply…"]);
+    expect(edits).toEqual(["On it: g, 1 step\nStep 1 of 1: Look up recent posts", "All 1 step done"]);
     expect(deletedIds).toEqual([1]); // placeholder was message_id 1
     expect(replies.at(-1)!.text).toContain("Here you go.");
   });
@@ -643,7 +677,7 @@ describe("progress streaming", () => {
     const { ctx, edits } = fakeCtx();
     await runKernelText(ctx, "do the thing");
 
-    expect(edits).toEqual(["🔧 Look up recent posts"]);
+    expect(edits).toEqual(["On it: g, 1 step\nStep 1 of 1: Look up recent posts"]);
   });
 
   it("deletes the placeholder even when the stream throws", async () => {
@@ -669,7 +703,7 @@ describe("progress streaming", () => {
     const { ctx, edits, deletedIds } = fakeCtx();
     await resumeKernel(ctx, "approved");
 
-    expect(edits).toEqual(["✍️ Writing your reply…"]);
+    expect(edits).toEqual(["All 1 step done"]);
     expect(deletedIds).toEqual([1]);
   });
 });
@@ -842,5 +876,208 @@ describe("failed turns reach the founder as a card with a Retry button", () => {
     const { ctx, replies } = fakeCtx();
     await resumeKernel(ctx, "approved");
     expect(retryData(replies.at(-1))).toEqual([]);
+  });
+});
+
+// 2026-10-05: the "Working on it" ack went out only after readHalt, the pending-approval lookup, two
+// daily-budget reads and the first-boot kernel compile, so it routinely missed the 2 s budget. The ack now
+// goes first and the gates run behind it; a gate that refuses must take the ack away so nothing is orphaned.
+describe("runKernelText: the ack goes out before the gates", () => {
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it("sends the placeholder while readHalt is still pending, then runs the kernel once the gates pass", async () => {
+    const gate = deferred<unknown>();
+    readHalt.mockReturnValue(gate.promise);
+    const { ctx, replies } = fakeCtx();
+    const run = runKernelText(ctx, "hello");
+    await tick();
+
+    expect(replies.map((r) => r.text)).toEqual(["🤔 Working on it…"]);
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+
+    gate.resolve(null);
+    await run;
+    expect(fakeKernel.stream).toHaveBeenCalledTimes(1);
+    expect(replies.map((r) => r.text)).toEqual(["🤔 Working on it…", "All done."]);
+  });
+
+  it("sends the placeholder while the pending-approval lookup and the budget read are pending", async () => {
+    const pending = deferred<unknown>();
+    getPendingInterrupt.mockReturnValue(pending.promise);
+    const { ctx, replies } = fakeCtx();
+    const run = runKernelText(ctx, "hello");
+    await tick();
+    expect(replies).toHaveLength(1);
+    expect(getTodayCostUsd).not.toHaveBeenCalled();
+    pending.resolve(null);
+    await run;
+    expect(getTodayCostUsd).toHaveBeenCalledTimes(1);
+  });
+
+  it("records turn.ack with the milliseconds since the message arrived, before any gate resolves", async () => {
+    const events: TraceEvent[] = [];
+    setTraceSink((e) => events.push(e));
+    try {
+      const gate = deferred<unknown>();
+      readHalt.mockReturnValue(gate.promise);
+      const { ctx } = fakeCtx();
+      const run = runKernelText(ctx, "hello");
+      await tick();
+      const ack = events.find((e) => e.seam === "turn.ack");
+      expect(ack).toBeDefined();
+      expect(typeof ack!.data?.["ms"]).toBe("number");
+      expect(ack!.data!["ms"] as number).toBeLessThan(2000);
+      expect(events.some((e) => e.seam === "turn.in")).toBe(false); // the gates have not finished
+      gate.resolve(null);
+      await run;
+    } finally {
+      setTraceSink(null);
+    }
+  });
+
+  it("halted: the ack is deleted, the halt notice is shown, and the kernel never runs", async () => {
+    readHalt.mockResolvedValue({ reason: "stop" });
+    const { ctx, replies, deletedIds } = fakeCtx();
+    await runKernelText(ctx, "hello");
+
+    expect(replies.map((r) => r.text)).toEqual(["🤔 Working on it…", "halted"]);
+    expect(deletedIds).toEqual([1]); // exactly the ack, exactly once
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+    expect(getPendingInterrupt).not.toHaveBeenCalled();
+  });
+
+  it("an approval is pending: the ack is deleted before the hold notice, and the kernel never runs", async () => {
+    getPendingInterrupt.mockResolvedValue({
+      interrupt_id: "abcd1234-0000",
+      created_at: new Date(Date.now() - 60_000).toISOString(),
+      callback_data: JSON.stringify({ action: "dispatch_antigravity", title: "Dispatch?", summary: "s", preview: "p", args: {} }),
+    });
+    const { ctx, replies, deletedIds } = fakeCtx();
+    await runKernelText(ctx, "/task another");
+
+    expect(deletedIds).toEqual([1]);
+    expect(replies[0]!.text).toBe("🤔 Working on it…");
+    expect(replies[1]!.text).toMatch(/approve or reject/i);
+    expect(replies).toHaveLength(3); // ack, hold notice, the pending card again: no second ack
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+    expect(getTodayCostUsd).not.toHaveBeenCalled();
+  });
+
+  it("daily budget exhausted: the ack is deleted, the refusal is shown, and the kernel never runs", async () => {
+    getTodayCostUsd.mockResolvedValue(1_000_000);
+    const { ctx, replies, deletedIds } = fakeCtx();
+    await runKernelText(ctx, "hello");
+
+    expect(deletedIds).toEqual([1]);
+    expect(replies).toHaveLength(2);
+    expect(replies[1]!.text).toMatch(/budget/i);
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+  });
+
+  it("a failing gate read is a loud error with the ack removed, not a stuck ack", async () => {
+    readHalt.mockRejectedValue(new Error("halt table unreachable"));
+    const { ctx, replies, deletedIds } = fakeCtx();
+    await runKernelText(ctx, "hello");
+
+    expect(deletedIds).toEqual([1]);
+    expect(replies.at(-1)!.text).toContain("❌");
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+  });
+
+  it("a slow ack send does not let a refusal overtake it: the refusal waits, then the ack is deleted", async () => {
+    readHalt.mockResolvedValue({ reason: "stop" });
+    const send = deferred<{ message_id: number }>();
+    const { ctx, replies, deletedIds } = fakeCtx();
+    let first = true;
+    (ctx.reply as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (text: string) => {
+      replies.push({ text });
+      if (first) {
+        first = false;
+        return send.promise;
+      }
+      return { message_id: 99 };
+    });
+    const run = runKernelText(ctx, "hello");
+    await tick();
+    expect(replies.map((r) => r.text)).toEqual(["🤔 Working on it…"]); // refusal not sent yet
+    send.resolve({ message_id: 41 });
+    await run;
+    expect(deletedIds).toEqual([41]);
+    expect(replies.at(-1)!.text).toBe("halted");
+  });
+
+  it("a normal turn still deletes the ack exactly once, after the reply path ends", async () => {
+    const { ctx, deletedIds } = fakeCtx();
+    await runKernelText(ctx, "hello");
+    expect(deletedIds).toEqual([1]);
+  });
+
+  it("a queued turn shows the queue ack and then its own placeholder", async () => {
+    let release!: () => void;
+    fakeKernel.stream.mockImplementationOnce(async function* () {
+      await new Promise<void>((r) => (release = r));
+      yield DONE_STATE;
+    } as never);
+    const first = fakeCtx();
+    const second = fakeCtx();
+    const a = runKernelText(first.ctx, "one");
+    await tick();
+    const b = runKernelText(second.ctx, "two");
+    await tick();
+    expect(second.replies.map((r) => r.text)).toEqual(["⏳ Got it — finishing the current request first."]);
+    release();
+    await Promise.all([a, b]);
+    expect(second.replies.map((r) => r.text)).toEqual([
+      "⏳ Got it — finishing the current request first.",
+      "🤔 Working on it…",
+      "All done.",
+    ]);
+  });
+});
+
+// Same rule for the Approve/Reject tap: the ack goes out before the pending-interrupt lookup and the
+// first-boot kernel compile, and anything that stops the resume before the stream takes the ack away.
+describe("resumeKernel: the ack goes out before the pending lookup", () => {
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it("sends the placeholder while getPendingInterrupt is still pending", async () => {
+    let release!: (v: unknown) => void;
+    getPendingInterrupt.mockReturnValue(new Promise((r) => (release = r)));
+    const { ctx, replies } = fakeCtx();
+    const run = resumeKernel(ctx, "approved");
+    await tick();
+
+    expect(replies.map((r) => r.text)).toEqual(["🤔 Working on it…"]);
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+
+    release(null);
+    await run;
+    expect(fakeKernel.stream).toHaveBeenCalledTimes(1);
+  });
+
+  it("a stale card tap deletes the ack before it says the card is expired", async () => {
+    getPendingInterrupt.mockResolvedValue({ interrupt_id: "current-9f8e7d6c", created_at: new Date().toISOString() });
+    const { ctx, replies, deletedIds } = fakeCtx();
+    await resumeKernel(ctx, "approved", "stale123");
+
+    expect(deletedIds).toEqual([1]);
+    expect(replies.at(-1)!.text).toMatch(/expired|older task/i);
+    expect(fakeKernel.stream).not.toHaveBeenCalled();
+  });
+
+  it("a failure before the stream starts deletes the ack, then shows the error", async () => {
+    getPendingInterrupt.mockRejectedValue(new Error("db down"));
+    const { ctx, replies, deletedIds } = fakeCtx();
+    await resumeKernel(ctx, "approved");
+
+    expect(deletedIds).toEqual([1]);
+    expect(replies.at(-1)!.text).toContain("❌");
   });
 });

@@ -18,25 +18,40 @@ const PROGRESS_OBJECTIVE_MAX = 60;
 
 const PROGRESS_PLACEHOLDER_TEXT = "🤔 Working on it…";
 
+/** Planner prose is scrubbed of worker ids and tool names (rationale in kernel/founder-text.ts) and clipped. */
+function cleanProse(text: string): string {
+  const clean = redactInternalIdentifiers(redactInternalPaths(text));
+  return clean.length > PROGRESS_OBJECTIVE_MAX ? `${clean.slice(0, PROGRESS_OBJECTIVE_MAX - 1)}…` : clean;
+}
+
+const stepsOf = (n: number): string => `${n} step${n === 1 ? "" : "s"}`;
+
 /**
  * Step-level progress label for the CURRENT state, or null when nothing is
- * worth showing (planning/failed/done, or a malformed cursor — mirrors
- * dispatch's own bounds check rather than throwing).
+ * worth showing (failed/done, or a malformed cursor — mirrors dispatch's own
+ * bounds check rather than throwing). Once the plan exists the founder sees,
+ * in this order: "On it: <goal>, N steps" with the first step under it,
+ * "Step k of N: <objective>" for each later step, "All N steps done" while
+ * the reply is written.
  */
 export function progressLabelFor(state: KernelStateType): string | null {
   const { mission } = state;
   if (!mission) return null; // first streamed snapshot, before the plan node has run
   if (mission.status === "planning") return "🧠 Planning…";
+  const plan = mission.plan;
   if (mission.status === "executing") {
-    const step = mission.plan?.steps[mission.cursor];
-    if (!step) return null;
-    // Worker id is internal routing; the objective is planner prose that names
-    // tools. Both are scrubbed — rationale in kernel/founder-text.ts.
-    const clean = redactInternalIdentifiers(redactInternalPaths(step.objective));
-    if (!clean) return PROGRESS_PLACEHOLDER_TEXT;
-    return `🔧 ${clean.length > PROGRESS_OBJECTIVE_MAX ? `${clean.slice(0, PROGRESS_OBJECTIVE_MAX - 1)}…` : clean}`;
+    const step = plan?.steps[mission.cursor];
+    if (!plan || !step) return null;
+    const objective = cleanProse(step.objective);
+    if (!objective) return PROGRESS_PLACEHOLDER_TEXT;
+    const line = `Step ${mission.cursor + 1} of ${plan.steps.length}: ${objective}`;
+    if (mission.cursor > 0) return line;
+    const goal = cleanProse(plan.goal);
+    return `On it: ${goal || "your request"}, ${stepsOf(plan.steps.length)}\n${line}`;
   }
-  if (mission.status === "synthesizing") return "✍️ Writing your reply…";
+  if (mission.status === "synthesizing") {
+    return plan ? `All ${stepsOf(plan.steps.length)} done` : "✍️ Writing your reply…";
+  }
   return null;
 }
 
@@ -49,10 +64,52 @@ async function silently(op: string, fn: () => Promise<unknown>): Promise<void> {
   }
 }
 
+/** The placeholder message of one turn: sent at once, edited as the graph advances, removed when the turn ends or is refused. */
+export interface TurnAck {
+  edit(label: string): Promise<void>;
+  /** Idempotent. Waits for an in-flight send, so a refusal posted after it can never be overtaken by the ack. */
+  remove(): Promise<void>;
+}
+
 /**
- * Sends one placeholder message, edits it as progressLabelFor(state) changes
- * while streaming the kernel turn, and deletes it once the turn ends
- * (success, HITL pause, or error).
+ * Sends the placeholder NOW (ctx.reply is called before this function returns) and does not wait for it, so the
+ * gates and the first-boot kernel compile run behind it instead of eating the 2 s ack budget. `arrivedAt` is when
+ * the message reached the handler; the `turn.ack` event carries the ms from then until Telegram accepted the send.
+ */
+export function sendTurnAck(
+  ctx: Context,
+  trace: ReturnType<typeof startTurn>,
+  arrivedAt: number,
+  extra: Record<string, unknown> = {},
+): TurnAck {
+  let placeholderId: number | undefined;
+  const sent = silently("send", async () => {
+    placeholderId = (await ctx.reply(PROGRESS_PLACEHOLDER_TEXT)).message_id;
+    trace.event("turn.ack", { ms: Date.now() - arrivedAt, ...extra });
+  });
+  let removed = false;
+  return {
+    async edit(label) {
+      await sent;
+      const id = placeholderId;
+      if (removed || id === undefined || !ctx.chat) return;
+      const chatId = ctx.chat.id;
+      await silently("edit", () => ctx.api.editMessageText(chatId, id, label));
+    },
+    async remove() {
+      await sent;
+      const id = placeholderId;
+      if (removed || id === undefined || !ctx.chat) return;
+      removed = true;
+      const chatId = ctx.chat.id;
+      await silently("delete", () => ctx.api.deleteMessage(chatId, id));
+    },
+  };
+}
+
+/**
+ * Edits the turn's placeholder as progressLabelFor(state) changes while streaming the kernel turn, and
+ * removes it once the turn ends (success, HITL pause, or error). Without `ack` (a resume) it sends its own.
  *
  * `onActivity`, if given, fires on every yielded state — real sign of life for
  * `withTurnTimeout`'s `touch()` (AG-015/B5). A step that emits nothing new
@@ -66,12 +123,8 @@ export async function streamKernelTurn(
   trace: ReturnType<typeof startTurn>,
   streamPromise: Promise<AsyncIterable<unknown>>,
   onActivity?: () => void,
+  ack: TurnAck = sendTurnAck(ctx, trace, Date.now()),
 ): Promise<KernelStateType> {
-  let placeholderId: number | undefined;
-  await silently("send", async () => {
-    placeholderId = (await ctx.reply(PROGRESS_PLACEHOLDER_TEXT)).message_id;
-  });
-
   let lastLabel: string | null = null;
   let lastState: KernelStateType | undefined;
 
@@ -84,18 +137,10 @@ export async function streamKernelTurn(
       if (label === null || label === lastLabel) continue;
       lastLabel = label;
       trace.event("turn.progress", { label });
-      const id = placeholderId;
-      if (id !== undefined && ctx.chat) {
-        const chatId = ctx.chat.id;
-        await silently("edit", () => ctx.api.editMessageText(chatId, id, label));
-      }
+      await ack.edit(label);
     }
   } finally {
-    const id = placeholderId;
-    if (id !== undefined && ctx.chat) {
-      const chatId = ctx.chat.id;
-      await silently("delete", () => ctx.api.deleteMessage(chatId, id));
-    }
+    await ack.remove();
   }
 
   if (!lastState) {
