@@ -255,7 +255,7 @@ export const COMMAND_MENU: readonly MenuCommand[] = [
   { command: "review", description: "Automatic PR review on or off, and which models review and write. review off pauses it", group: "engineering" },
   {
     command: "login",
-    description: "Sign in again or add a Google account: which logins work, renew one. login google add wife",
+    description: "Sign in, sign out or add a Google account: which logins work, renew or delete one, history. login agy logout",
     group: "system",
   },
   {

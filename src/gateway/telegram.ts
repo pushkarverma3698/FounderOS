@@ -42,7 +42,7 @@ import { handleNewProject } from "./newproject-command.js";
 import { handleMenuCallback } from "./home-menu.js";
 import { handleTasks, fetchDispatchTasks } from "./tasks-command.js";
 import { handleWhere } from "./where-command.js";
-import { defaultLoginDeps, handleLogin, handleLoginReply } from "./login/command.js";
+import { handleLogin, handleLoginReply, productionLoginDeps } from "./login/wired.js";
 import {
   handleCsv,
   handleFresh,
@@ -202,7 +202,7 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     listRegisteredRepos: taskDeps.listRegisteredRepos,
   }));
   bot.command("where", (ctx: Context) => handleWhere(ctx));
-  const loginDeps = defaultLoginDeps(access);
+  const loginDeps = productionLoginDeps(access);
   bot.command("login", (ctx: Context) => handleLogin(ctx, loginDeps));
   bot.command("newproject", (ctx: Context) => handleNewProject(ctx, { runKernelText }));
   bot.command("draft", (ctx: Context) => handleDraft(ctx, { runKernelText }));
