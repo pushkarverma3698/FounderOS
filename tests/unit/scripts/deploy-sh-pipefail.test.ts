@@ -186,9 +186,10 @@ describe("deploy.sh — JARVIS UI check on GET /", () => {
 describe("deploy.sh: built app readable by the agy-login helper", () => {
   it("makes dist world-readable right after the build, before anything restarts", () => {
     const build = DEPLOY_SH.indexOf("pnpm build:all");
-    const chmod = DEPLOY_SH.indexOf("chmod -R a+rX dist");
+    const chmod = DEPLOY_SH.indexOf("find dist -user");
     expect(build).toBeGreaterThan(-1);
     expect(chmod).toBeGreaterThan(build);
+    expect(DEPLOY_SH).toContain("-exec chmod a+rX {} +");
     expect(chmod).toBeLessThan(DEPLOY_SH.indexOf("docker compose -f deploy/stack.compose.yml up -d"));
   });
 });
