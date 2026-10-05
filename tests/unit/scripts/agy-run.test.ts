@@ -70,6 +70,7 @@ ${script}`,
         SENDS: join(root, "telegram.log"),
         SUDO_ARGV: join(root, "sudo-argv.log"),
         AGY_ENV_LOG: join(root, "agy-env.log"),
+        TG_QUIET_NOW: "12", // daytime: notify must not depend on when CI runs
         ...env,
       },
       encoding: "utf8",

@@ -55,6 +55,7 @@ function writeToken(content: string, mode = 0o600): void {
 /** One sweep over one open PR: a preflight call, then a gate call. */
 function sweep(opts: { preflight?: string; nowEpoch?: string; args?: string[] } = {}): void {
   const env: Record<string, string> = {
+    TG_QUIET_NOW: "12", // daytime: notify must not depend on when CI runs
     PATH: `${bin}:/usr/bin:/bin:/usr/local/bin`,
     HOME: home,
     PR_BRAIN_ROOT: join(root, "repos"),

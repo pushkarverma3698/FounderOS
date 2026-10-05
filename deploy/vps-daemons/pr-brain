@@ -162,8 +162,14 @@ write_effective() {
 
 # A gate that runs unattended and tells nobody is indistinguishable from a gate
 # that never ran. Every action this script takes on GitHub is announced.
+TG_DAEMON_NAME="${TG_DAEMON_NAME:-pr-brain}"
 ENV_FILE="${PR_BRAIN_ENV_FILE:-}"
 notify() {
+  if tg_should_hold "$1"; then
+    tg_hold "$1"
+    return 0
+  fi
+  tg_flush_digest
   [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]] || return 0
   local token chat
   token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"'"'"'\r')
@@ -183,6 +189,10 @@ notify() {
 # taken 21% of the entire Telegram history, and a photo costs more attention than
 # a line of text, not less.
 notify_photo() {
+  if tg_is_quiet; then
+    tg_hold "Screenshot taken: $2"
+    return 0
+  fi
   [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]] || return 0
   [[ -f "$1" ]] || return 0
   local token chat
@@ -200,13 +210,14 @@ notify_photo() {
 # ~/bin/pr-brain), ../lib in the repo (deploy/lib, next to deploy/vps-daemons). deploy/sync-daemons.sh ships them
 # with the daemons, and tests/unit/scripts/sync-daemons.test.ts fails when a file a daemon sources is not in that
 # copy list. Without them there is no pause state, so refuse to run.
+#   tg-quiet.sh     Telegram quiet hours helper
 #   down-state.sh   one Telegram message per pause/resume + redact_secrets (shared with agent-dispatch)
 #   agy-failure.sh  classify_agy_failure: quota | auth | transient | unknown
 #   agy-run.sh      as_antigravity + agy_run: one agy turn, streamed live into ONE Telegram message
 #   ci-state.sh     required_ci_state: what a PR's required CI checks say (shared with agent-dispatch)
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || printf '%s' "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd)"
-for _lib in down-state.sh agy-failure.sh agy-run.sh ci-state.sh; do
+for _lib in tg-quiet.sh down-state.sh agy-failure.sh agy-run.sh ci-state.sh; do
   _lib_path=""
   for _lib_dir in "$SELF_DIR/lib" "$SELF_DIR/../lib"; do
     [[ -f "$_lib_dir/$_lib" ]] && { _lib_path="$_lib_dir/$_lib"; break; }
@@ -337,6 +348,7 @@ if [[ "$DRY_RUN" -eq 0 && "$LIST_ONLY" -eq 0 ]]; then
     fi
   fi
   trap 'rm -rf "$LOCK"' EXIT
+  tg_flush_digest
 fi
 
 # What the engine needs on PATH. For agy the binary itself lives in the antigravity user's ~/.local/bin and is
