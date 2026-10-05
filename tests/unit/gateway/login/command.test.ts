@@ -4,6 +4,7 @@ import { buildChatAccessConfig } from "../../../../src/gateway/chat-access.js";
 import { handleLogin, handleLoginReply, type LoginDeps } from "../../../../src/gateway/login/command.js";
 import { PendingLogins } from "../../../../src/gateway/login/pending.js";
 import type { LoginAdapter } from "../../../../src/gateway/login/types.js";
+import type { LoginAudit, LoginEvent, LoginEventRow } from "../../../../src/gateway/login/login-audit.js";
 
 const access = buildChatAccessConfig({ primaryChatId: "100", allowedChatIds: "-5" });
 
@@ -223,3 +224,130 @@ describe("/login", () => {
   });
 });
 
+
+function memoryAudit(rows: LoginEventRow[] = []): LoginAudit & { events: LoginEvent[] } {
+  const events: LoginEvent[] = [];
+  return {
+    events,
+    record: async (e) => void events.push(e),
+    recent: async (n) => rows.slice(0, n),
+  };
+}
+
+describe("/login <tool> logout and the audit trail", () => {
+  it("logout signs the target out, answers with the adapter's proof, and records one ok row without a detail", async () => {
+    const logout = vi.fn(async () => ({ ok: true, html: "signed out, a call now fails" }));
+    const audit = memoryAudit();
+    const d = { ...mk(adapter({ logout })), audit };
+    const { c, replies } = ctx({ chatId: 100, match: "tool logout" });
+    await handleLogin(c, d);
+    expect(logout).toHaveBeenCalledWith("default");
+    expect(replies[0]).toBe("signed out, a call now fails");
+    expect(audit.events).toEqual([{ tool: "tool", target: "default", kind: "logout", ok: true, detail: undefined }]);
+  });
+
+  it("a logout that did not take records ok:false with the reason, and says so to the founder", async () => {
+    const audit = memoryAudit();
+    const d = { ...mk(adapter({ logout: async () => ({ ok: false, html: "still <b>signed in</b>" }) })), audit };
+    const { c, replies } = ctx({ chatId: 100, match: "tool logout" });
+    await handleLogin(c, d);
+    expect(replies[0]).toContain("still");
+    expect(audit.events[0]).toMatchObject({ kind: "logout", ok: false });
+  });
+
+  it("a throwing logout is reported and recorded as a failure, never as a success", async () => {
+    const audit = memoryAudit();
+    const d = { ...mk(adapter({ logout: async () => { throw new Error("boom"); } })), audit };
+    const { c, replies } = ctx({ chatId: 100, match: "tool logout" });
+    await handleLogin(c, d);
+    expect(replies[0]).toContain("boom");
+    expect(audit.events[0]).toMatchObject({ kind: "logout", ok: false, detail: "boom" });
+  });
+
+  it("a tool with no sign-out says so, and records nothing", async () => {
+    const audit = memoryAudit();
+    const { c, replies } = ctx({ chatId: 100, match: "tool logout" });
+    await handleLogin(c, { ...mk(adapter()), audit });
+    expect(replies[0]).toContain("no sign-out");
+    expect(audit.events).toEqual([]);
+  });
+
+  it("a multi-target tool asks which one, and signs out nothing", async () => {
+    const logout = vi.fn(async () => ({ ok: true, html: "x" }));
+    const { c, replies } = ctx({ chatId: 100, match: "tool logout" });
+    await handleLogin(c, mk(adapter({ targets: ["one", "two"], logout })));
+    expect(replies[0]).toContain("Which one?");
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it("logout drops a login that is waiting for a code, so the old link cannot sign back in", async () => {
+    const dispose = vi.fn();
+    const a = adapter({ start: async () => ({ html: "link", state: "S", dispose }), logout: async () => ({ ok: true, html: "out" }) });
+    const d = mk(a);
+    await handleLogin(ctx({ chatId: 100, match: "tool" }).c, d);
+    await handleLogin(ctx({ chatId: 100, match: "tool logout" }).c, d);
+    expect(dispose).toHaveBeenCalled();
+    expect(await d.pending.peek("100")).toBeUndefined();
+  });
+
+  it("a finished login (ok or not) and a refused start are recorded; the pasted code never is", async () => {
+    const audit = memoryAudit();
+    const d = { ...mk(adapter({ finish: async () => ({ ok: false, html: "code was rejected" }) })), audit };
+    await handleLogin(ctx({ chatId: 100, match: "tool" }).c, d);
+    await handleLoginReply(ctx({ chatId: 100, text: "4/0SECRET-CODE" }).c, d);
+    expect(audit.events).toEqual([{ tool: "tool", target: "default", kind: "login", ok: false, detail: "code was rejected" }]);
+    expect(JSON.stringify(audit.events)).not.toContain("SECRET");
+
+    const failing = memoryAudit();
+    await handleLogin(ctx({ chatId: 100, match: "tool" }).c, { ...mk(adapter({ start: async () => { throw new Error("no agy"); } })), audit: failing });
+    expect(failing.events[0]).toMatchObject({ kind: "login", ok: false });
+  });
+
+  it("an audit write that fails never changes what the founder is told", async () => {
+    const audit: LoginAudit = { record: async () => { throw new Error("db down"); }, recent: async () => [] };
+    const d = { ...mk(adapter({ logout: async () => ({ ok: true, html: "signed out" }) })), audit };
+    const { c, replies } = ctx({ chatId: 100, match: "tool logout" });
+    await handleLogin(c, d);
+    expect(replies).toEqual(["signed out"]);
+  });
+
+  it("remove records a remove event", async () => {
+    const audit = memoryAudit();
+    const d = { ...mk(adapter({ targets: ["wife"], remove: async () => ({ ok: true, html: "gone" }) })), audit };
+    await handleLogin(ctx({ chatId: 100, match: "tool remove wife" }).c, d);
+    expect(audit.events[0]).toMatchObject({ tool: "tool", target: "wife", kind: "remove", ok: true });
+  });
+
+  it("/login history lists the newest events; empty and a database failure each say so", async () => {
+    const rows: LoginEventRow[] = [
+      { tool: "agy", target: "default", kind: "logout", ok: true, at: new Date(Date.UTC(2026, 9, 5, 14, 2)) },
+      { tool: "google", target: "wife", kind: "login", ok: false, detail: "Google refused", at: new Date(Date.UTC(2026, 9, 5, 13, 0)) },
+    ];
+    const full = ctx({ chatId: 100, match: "history" });
+    await handleLogin(full.c, { ...mk(adapter()), audit: memoryAudit(rows) });
+    expect(full.replies[0]).toContain("✅ 2026-10-05 14:02 UTC — agy: signed out");
+    expect(full.replies[0]).toContain("❌ 2026-10-05 13:00 UTC — google wife: sign-in failed (Google refused)");
+
+    const none = ctx({ chatId: 100, match: "history" });
+    await handleLogin(none.c, { ...mk(adapter()), audit: memoryAudit() });
+    expect(none.replies[0]).toContain("No login or logout has been recorded yet.");
+
+    const down = ctx({ chatId: 100, match: "history" });
+    await handleLogin(down.c, { ...mk(adapter()), audit: { record: async () => undefined, recent: async () => { throw new Error("x"); } } });
+    expect(down.replies[0]).toContain("Could not read the login history");
+  });
+
+  it("the status screen lists the sign-out commands and /login history", async () => {
+    const { c, replies } = ctx({ chatId: 100 });
+    await handleLogin(c, mk(adapter({ logout: async () => ({ ok: true, html: "x" }) })));
+    expect(replies.join("\n")).toContain("/login tool logout");
+    expect(replies.join("\n")).toContain("/login history");
+  });
+
+  it("history and logout are founder-DM only, like every /login command", async () => {
+    const audit = memoryAudit([{ tool: "agy", target: "default", kind: "login", ok: true, at: new Date() }]);
+    const { c, replies } = ctx({ chatId: -5, type: "group", match: "history" });
+    await handleLogin(c, { ...mk(adapter()), audit });
+    expect(replies[0]).toContain("only in your private chat");
+  });
+});

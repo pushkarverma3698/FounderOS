@@ -1,0 +1,25 @@
+[Unit]
+Description=FounderOS agy login helper (runs agy sign-in as the antigravity user)
+Requires=agy-login.socket
+After=agy-login.socket
+
+[Service]
+Type=simple
+User=antigravity
+Group=antigravity
+WorkingDirectory=/opt/founderos
+# agy is installed under antigravity's own home; the token it writes stays there and is never sent to the bot.
+Environment=HOME=/home/antigravity
+Environment=PATH=/home/antigravity/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
+# Reads the built app and nothing else of founderos' (no .env, no secrets): /opt/founderos/dist and node_modules are world-readable.
+ExecStart=/usr/bin/node /opt/founderos/dist/src/gateway/login/agy-helper.js
+# Exits on its own after 20 idle minutes; the socket starts it again on the next /login agy.
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agy-login

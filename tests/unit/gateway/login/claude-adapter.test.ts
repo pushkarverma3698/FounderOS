@@ -44,6 +44,8 @@ function deps(over: Partial<ClaudeLoginDeps> = {}) {
     lookupOrg: async () => ({ org: ORG_NEW }),
     hostLogin: async () => undefined,
     readLogin: async () => undefined,
+    signOut: async () => ({ hostLogout: "ok" }),
+    probeStored: async () => ({ kind: "rejected" }),
     ...over,
   };
   return { base, written, home, verify };
