@@ -238,6 +238,12 @@ describe("runSpecGate: risk is only ever raised", () => {
     expect(runSpecGate(contract((c) => (c.risk = "medium")), deps()).effectiveRisk).toBe("medium");
   });
 
+  it("resolves an unrecognised model risk to high, never lower", () => {
+    const c = contract();
+    (c as { risk: string }).risk = "negligible";
+    expect(runSpecGate(c, deps()).effectiveRisk).toBe("high");
+  });
+
   it("does not raise for a non-overlapping scope, and tolerates an empty riskPaths", () => {
     expect(runSpecGate(contract(), deps()).effectiveRisk).toBe("low");
     expect(runSpecGate(contract(), deps({ riskPaths: [] })).effectiveRisk).toBe("low");
