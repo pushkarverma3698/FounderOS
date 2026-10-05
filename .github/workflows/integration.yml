@@ -1,0 +1,68 @@
+name: Integration (real Postgres)
+
+# Runs tests/integration against a throwaway pgvector database. These suites skip themselves when
+# Postgres is unreachable, so scripts/check-integration-report.ts fails the job on an empty or
+# skipped run. A separate workflow (not in ci.yml) so the two required checks keep their names.
+# No ALLOW_NETWORK: any stray live model call fails loudly instead of spending money.
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/integration/**"
+      - "tests/setup.ts"
+      - "drizzle/**"
+      - "scripts/setup-db.ts"
+      - "scripts/check-integration-report.ts"
+      - "vitest.integration.config.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/integration.yml"
+  push:
+    branches: [main, beta]
+  workflow_dispatch:
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Integration tests (pgvector)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test # throwaway CI database, not a secret
+          POSTGRES_DB: founderos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d founderos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/founderos_test
+      # config.ts validates these on import; the values are never sent anywhere.
+      TELEGRAM_BOT_TOKEN: ci-placeholder
+      TELEGRAM_CHAT_ID: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - name: Apply migrations
+        run: node --import tsx/esm scripts/setup-db.ts
+      - name: Run integration suites
+        run: pnpm test:integration:ci
