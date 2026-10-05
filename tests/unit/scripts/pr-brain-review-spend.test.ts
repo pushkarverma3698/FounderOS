@@ -14,6 +14,10 @@
  *
  * Each rule is pinned from the outside: no agy call at all, no preflight, and what the founder is told.
  * `--pr N` is an explicit order and is never held back by any of them.
+ *
+ * A fourth rule is the founder's decision of 2026-10-05: a sweep reviews only PIPELINE PRs, the ones from the issue
+ * queue (head branch task/issue-*) and any PR carrying the label claude-review. Everything else is skipped before a
+ * single review is spent, with one log line.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -57,7 +61,7 @@ function stub(name: string, body: string): void {
 interface SweepOptions {
   readonly env?: Record<string, string>;
   readonly args?: readonly string[];
-  /** The open PRs as the gh stub lists them: "<number> <head sha> <base branch> <head branch>". */
+  /** The open PRs as the gh stub lists them: "<number> <head sha> <base branch> <head branch> <labels, comma-joined>". */
   readonly prs?: string;
 }
 
@@ -249,6 +253,65 @@ describe("a promotion PR is not reviewed again", () => {
   });
 });
 
+describe("only pipeline PRs are reviewed", () => {
+  it("a task/issue-* branch is a pipeline PR: reviewed", () => {
+    sweep({ prs: `56 ${head} beta task/issue-12-x` });
+
+    expect(reviews()).toBe(1);
+    expect(ghState("comments")).toContain(`brain-reviewed: ${head}`);
+  });
+
+  it("any other branch is skipped silently before any review spend, with one log line", () => {
+    const r = sweep({ prs: `70 ${head} beta feat/foo` });
+
+    expect(r.status).toBe(0);
+    expect(reviews()).toBe(0);
+    expect(agyLog("pf-models")).toEqual([]);
+    expect(ghState("comments")).toBe("");
+    expect(sent()).toEqual([]);
+    expect(ghCalls().filter((c) => c.startsWith("pr merge") || c.startsWith("pr ready"))).toEqual([]);
+    expect(prBrainLog().match(/FounderOS#70 is not a pipeline PR/g)).toHaveLength(1);
+  });
+
+  it("the same branch carrying the label claude-review is reviewed", () => {
+    sweep({ prs: `56 ${head} beta feat/foo bug,claude-review` });
+
+    expect(reviews()).toBe(1);
+    expect(ghState("comments")).toContain(`brain-reviewed: ${head}`);
+  });
+
+  it("a different label does not opt a PR in, and a label that merely contains the word does not either", () => {
+    sweep({ prs: `70 ${head} beta feat/foo engine:claude,not-claude-review` });
+
+    expect(reviews()).toBe(0);
+    expect(prBrainLog()).toMatch(/FounderOS#70 is not a pipeline PR/);
+  });
+
+  it("--pr is an explicit order: it reviews a non-pipeline branch", () => {
+    sweep({ args: ["--pr", "56", "--repo", join(root, "repos", "FounderOS")], prs: `56 ${head} beta feat/foo` });
+
+    expect(reviews()).toBe(1);
+    expect(prBrainLog()).not.toMatch(/not a pipeline PR/);
+  });
+
+  it("the promotion skip still comes first and keeps its own reason, even with the label", () => {
+    sweep({ prs: `60 ${head} main chore/promote-x claude-review` });
+
+    expect(reviews()).toBe(0);
+    expect(prBrainLog()).toMatch(/#60 is a promotion\/sync PR/);
+    expect(prBrainLog()).not.toMatch(/not a pipeline PR/);
+  });
+
+  it("the sweep asks gh for the labels in the same list call", () => {
+    sweep({ prs: `56 ${head} beta task/issue-12-x` });
+
+    const list = ghCalls().find((c) => c.startsWith("pr list")) ?? "";
+    expect(list).toMatch(/--json [^ ]*labels/);
+    // the jq program spans several lines of the call log: the label names are joined into the one printed row
+    expect(ghCalls().some((c) => c.includes("[.labels[].name] | join("))).toBe(true);
+  });
+});
+
 describe("a PR whose required CI is red is not reviewed", () => {
   it("the executor's draft: no agy call, no marker (agent-dispatch acts on the red check itself), nothing sent: agent-dispatch speaks", () => {
     setChecks(RED);
@@ -299,7 +362,7 @@ describe("a PR whose required CI is red is not reviewed", () => {
 
   it("anyone else's PR has nobody acting on it, so the founder is told, once per head, and nothing is changed", () => {
     setChecks(RED);
-    const prs = `70 ${head} beta feat/mine`;
+    const prs = `70 ${head} beta feat/mine claude-review`;
 
     sweep({ prs });
     sweep({ prs });
@@ -315,7 +378,7 @@ describe("a PR whose required CI is red is not reviewed", () => {
     writeFileSync(join(ghDir, "draft"), "false\n");
     setChecks(RED);
 
-    sweep({ prs: `70 ${head} beta feat/mine` });
+    sweep({ prs: `70 ${head} beta task/issue-70-x` });
 
     expect(reviews()).toBe(0);
     expect(ghState("draft")).toBe("false");
@@ -324,10 +387,10 @@ describe("a PR whose required CI is red is not reviewed", () => {
 
   it("a new head on that PR is told about again (the notice is per head)", () => {
     setChecks(RED);
-    sweep({ prs: `70 ${head} beta feat/mine` });
+    sweep({ prs: `70 ${head} beta feat/mine claude-review` });
     const next = pushNewHead("again");
 
-    sweep({ prs: `70 ${next} beta feat/mine`, env: { FAKE_HEAD: next } });
+    sweep({ prs: `70 ${next} beta feat/mine claude-review`, env: { FAKE_HEAD: next } });
 
     expect(notices("⏭")).toHaveLength(2);
   });
