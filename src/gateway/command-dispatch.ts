@@ -109,6 +109,12 @@ export async function handleCommandCallback(ctx: Context): Promise<boolean> {
   if (!data.startsWith(COMMAND_CALLBACK_PREFIX)) return false;
   const [verb, id] = data.slice(COMMAND_CALLBACK_PREFIX.length).split(":");
   const entry = id ? pending.get(id) : undefined;
+  // The card replays the command with the asker's identity, so only the asker may tap it.
+  // Checked before the card is spent: a stranger's tap must not use up the owner's button.
+  if (entry && ctx.from?.id !== entry.origin.from.id) {
+    await ctx.answerCallbackQuery({ text: "Only the person who asked can do that." });
+    return true;
+  }
   if (id) pending.delete(id); // one tap, one run: a double tap finds nothing
   await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => undefined); // allow-failopen: cosmetic — the buttons are already spent
   if (!entry || entry.expires <= Date.now()) {

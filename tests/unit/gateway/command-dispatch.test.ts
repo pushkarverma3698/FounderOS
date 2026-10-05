@@ -45,8 +45,9 @@ function fakeCtx(replies: Array<{ text: string; opts: any }>): Context {
   } as unknown as Context;
 }
 
-function tapCtx(data: string, answers: string[], edits: unknown[]): Context {
+function tapCtx(data: string, answers: string[], edits: unknown[], tapper: { id: number } = from): Context {
   return {
+    from: tapper,
     callbackQuery: { data },
     answerCallbackQuery: vi.fn(async (o: { text: string }) => { answers.push(o.text); }),
     editMessageReplyMarkup: vi.fn(async (o: unknown) => { edits.push(o); }),
@@ -127,6 +128,22 @@ describe("runPlannedCommand", () => {
     await handleCommandCallback(tapCtx(run, again, []));
     expect(again).toEqual(["Expired — say it again."]);
     expect(h.seen).toHaveLength(1);
+  });
+
+  it("a stranger's tap in the group runs nothing and leaves the owner's card usable", async () => {
+    const replies: any[] = [];
+    await runPlannedCommand(fakeCtx(replies), { name: "task", args: "fix it" });
+    const run = replies[0].opts.reply_markup.inline_keyboard.flat().find((b: any) => b.text.includes("Run")).callback_data as string;
+
+    const answers: string[] = []; const edits: unknown[] = [];
+    await handleCommandCallback(tapCtx(run, answers, edits, { id: 999 }));
+    expect(answers).toEqual(["Only the person who asked can do that."]);
+    expect(edits).toHaveLength(0); // the buttons stay
+    expect(h.seen).toHaveLength(0);
+
+    // The owner's own tap still works afterwards.
+    await handleCommandCallback(tapCtx(run, [], []));
+    expect(h.seen).toEqual([{ cmd: "task", match: "fix it", fromId: 7, chatId: 42 }]);
   });
 
   it("Cancel runs nothing", async () => {
