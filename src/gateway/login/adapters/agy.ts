@@ -206,7 +206,7 @@ export function createAgyAdapter(overrides: Partial<AgyLoginDeps> = {}): LoginAd
 
     async finish(_target, pasted, state): Promise<LoginFinished> {
       const st = state as AgyState | undefined;
-      if (!st || st.child.exited) return { ok: false, html: "That sign-in attempt has ended. Send /login agy for a fresh link." };
+      if (!st || st.child.exited) return { ok: false, ended: true, html: "That sign-in attempt has ended. Send /login agy for a fresh link." };
       const code = pasted.trim();
       if (!looksLikeCode(code)) {
         return { ok: false, html: "That does not look like the authorization code (one string, no spaces, not the whole URL). Paste just the code, or /login agy for a fresh link." };
@@ -226,26 +226,26 @@ export function createAgyAdapter(overrides: Partial<AgyLoginDeps> = {}): LoginAd
       st.child.kill();
       if (!landed) {
         log.warn({}, "agy wrote no login after the pasted code");
-        return { ok: false, html: "agy did not produce a login after that code (expired, used already, or wrong account?). Your current agy login is untouched. Send /login agy for a fresh link." };
+        return { ok: false, ended: true, html: "agy did not produce a login after that code (expired, used already, or wrong account?). Your current agy login is untouched. Send /login agy for a fresh link." };
       }
 
       const proof = classifyAgyModels(await agyModelsIn(st.dir), Boolean(d.user));
       if (proof.kind !== "ok") {
         log.warn({ kind: proof.kind }, "new agy login failed its check in the scratch HOME");
-        return { ok: false, html: "agy wrote a login but `agy models` did not accept it. Nothing was replaced; your current agy login is untouched." };
+        return { ok: false, ended: true, html: "agy wrote a login but `agy models` did not accept it. Nothing was replaced; your current agy login is untouched." };
       }
       const put = await install(st.dir);
       if (!put.ok) {
         log.error({ reason: put.reason }, "agy login verified but could not be installed");
         await restore();
-        return { ok: false, html: `The new login works but installing it failed (${escHtml(put.reason ?? "unknown")}). The previous one was kept.` };
+        return { ok: false, ended: true, html: `The new login works but installing it failed (${escHtml(put.reason ?? "unknown")}). The previous one was kept.` };
       }
       cache = undefined;
       const live = await probeLive();
       if (live.kind === "rejected") {
         await restore();
         cache = undefined;
-        return { ok: false, html: "The new login passed in a scratch HOME but was rejected once installed. The previous login was restored." };
+        return { ok: false, ended: true, html: "The new login passed in a scratch HOME but was rejected once installed. The previous login was restored." };
       }
       log.info({ liveCheck: live.kind }, "agy login installed");
       return {
