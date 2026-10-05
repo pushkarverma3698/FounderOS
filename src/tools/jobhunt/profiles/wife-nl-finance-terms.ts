@@ -64,18 +64,24 @@ export const TASHI_MEASURED_TERMS = {
     "finance controller", "financial control", "financial planning", "finance specialist",
     "finance officer", "finance strategy", "strategic finance", "consultant finance",
     "finance & data analyst", "finance data analyst",
+    // 2026-10-05 audit: Flexport "Operations Controller", BDO "Senior Consultant Corporate Finance".
+    "operations controller", "corporate finance",
   ],
   "finance-ops": [
     "accounts payable", "accounts receivable", "finance administrator", "tax specialist",
     "tax consultant", "consultant tax", "analyst tax", "tax associate", "tax filing",
     "indirect tax", "direct tax", "transfer pricing",
     "financial due diligence", "client due diligence", "enhanced due diligence",
+    "finance support", // Adyen "Finance Support Specialist"
   ],
   "compliance-kyc": ["compliance officer", "financial crime", "transaction monitoring", "fraud analyst"],
   auditor: [
     "internal audit", "it audit", "audit & assurance", "audit and assurance", "audit trainee",
     "trainee audit", "assurance associate", "risk analyst", "analyst risk", "risk specialist",
     "risk officer", "it auditor", "junior auditor", "financial auditor",
+    // 2026-10-05 audit: Adyen "Internal Control Specialist", Deloitte "Analyst Regulatory Risk & Compliance",
+    // Rabobank "Risk Consultant Verzekeren".
+    "internal control", "regulatory risk", "risk consultant",
   ],
   accountant: ["accounting analyst", "accounting officer"],
 } as const satisfies Record<string, readonly string[]>;

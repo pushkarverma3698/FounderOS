@@ -17,6 +17,7 @@
     "test:unit": "vitest run tests/unit",
     "test:regression": "vitest run tests/regression",
     "test:integration": "ALLOW_NETWORK=1 vitest run --config vitest.integration.config.ts",
+    "test:integration:ci": "vitest run --config vitest.integration.config.ts --reporter=default --reporter=json --outputFile.json=integration-report.json && node --import tsx/esm scripts/check-integration-report.ts integration-report.json",
     "test:smoke": "ALLOW_NETWORK=1 node --import tsx/esm scripts/smoke.ts",
     "test:ci": "vitest run",
     "eval": "node --env-file=.env --import tsx/esm scripts/run-eval.ts",
