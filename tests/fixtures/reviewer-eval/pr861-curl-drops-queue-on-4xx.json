@@ -1,0 +1,15 @@
+{
+  "id": "pr861-curl-drops-queue-on-4xx",
+  "source": "historical",
+  "pr": 861,
+  "context": "PR #861: feat(deploy): Telegram quiet hours 23:00-08:00 IST with a morning digest for the VPS daemons. Executor: Antigravity.",
+  "diff": "diff --git a/deploy/lib/tg-quiet.sh b/deploy/lib/tg-quiet.sh\nnew file mode 100644\n--- /dev/null\n+++ b/deploy/lib/tg-quiet.sh\n@@ -0,0 +51,22 @@\n+_tg_send_raw() {\n+  if declare -f notify_raw >/dev/null 2>&1; then\n+    notify_raw \"$1\"\n+    return $?\n+  fi\n+\n+  local env_file=\"${ENV_FILE:-${PR_BRAIN_ENV_FILE:-${AGENT_DISPATCH_ENV_FILE:-}}}\"\n+  [[ -n \"$env_file\" && -f \"$env_file\" ]] || return 1\n+  local token chat\n+  token=$(grep -m1 '^TELEGRAM_BOT_TOKEN=' \"$env_file\" | cut -d= -f2- | tr -d '\"'\"'\"'\\r')\n+  chat=$(grep -m1 '^TELEGRAM_CHAT_ID=' \"$env_file\" | cut -d= -f2- | tr -d '\"'\"'\"'\\r')\n+  [[ -n \"$token\" && -n \"$chat\" ]] || return 1\n+\n+  curl -s -o /dev/null --max-time 20 \\\n+    \"https://api.telegram.org/bot${token}/sendMessage\" \\\n+    --data-urlencode \"chat_id=${chat}\" \\\n+    --data-urlencode \"text=$1\" \\\n+    --data \"disable_web_page_preview=true\"\n+}\n+\n+tg_flush_digest() {\n+  tg_is_quiet && return 0\n@@ -0,0 +126,32 @@\n+  for (( i=0; i<num_keys; i++ )); do\n+    local entry=\"${ist_times[i]} ${msgs[i]}\"\n+    if (( counts[i] > 1 )); then\n+      entry+=\" ×${counts[i]}\"\n+    fi\n+\n+    if [[ -n \"$digest_body\" && $(( ${#digest_body} + ${#entry} + 1 )) -gt \"$max_len\" ]]; then\n+      if ! _tg_send_raw \"$digest_body\"; then\n+        send_err=1\n+        break\n+      fi\n+      digest_body=\"$entry\"\n+    else\n+      digest_body+=$'\\n'\"$entry\"\n+    fi\n+  done\n+\n+  if [[ \"$send_err\" -eq 0 && -n \"$digest_body\" ]]; then\n+    if ! _tg_send_raw \"$digest_body\"; then\n+      send_err=1\n+    fi\n+  fi\n+\n+  if [[ \"$send_err\" -ne 0 ]]; then\n+    cat \"$tmp_file\" >>\"$queue_file\"\n+    rm -f \"$tmp_file\"\n+    return 1\n+  fi\n+\n+  rm -f \"$tmp_file\"\n+  return 0\n+}\n",
+  "planted_defects": [
+    {
+      "file": "deploy/lib/tg-quiet.sh",
+      "line": 64,
+      "description": "_tg_send_raw uses curl -s, which exits 0 on an HTTP 4xx/429. tg_flush_digest therefore believes the send worked and deletes the queued overnight events. Fixed later with curl -sf.",
+      "keyword": "curl|4xx|429|http status|--fail|-sf|exit code"
+    }
+  ]
+}

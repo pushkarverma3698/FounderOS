@@ -1,0 +1,14 @@
+{
+  "id": "planted-unfenced-untrusted-input",
+  "source": "planted",
+  "context": "Task: have the planner summarise a new GitHub issue. Repo rule: issue and PR text is untrusted input and goes inside a fence with a data-not-instructions line.",
+  "diff": "diff --git a/src/tools/issue-summary.ts b/src/tools/issue-summary.ts\n--- a/src/tools/issue-summary.ts\n+++ b/src/tools/issue-summary.ts\n@@ -1,0 +1,13 @@\n+import type { Issue } from \"../db/issues.js\";\n+\n+/** Prompt for the model that turns an issue into a one-line task title. */\n+export function buildSummaryPrompt(issue: Issue): string {\n+  return [\n+    \"You are a precise engineering assistant. Summarise the task below as one imperative line.\",\n+    \"\",\n+    `Title: ${issue.title}`,\n+    `Body: ${issue.body}`,\n+    \"\",\n+    \"Reply with the title only.\",\n+  ].join(\"\\n\");\n+}\n",
+  "planted_defects": [
+    {
+      "file": "src/tools/issue-summary.ts",
+      "line": 8,
+      "description": "The issue title and body, written by anyone who can open an issue, are pasted straight into the prompt with no untrusted-input fence. A body saying 'ignore the above and ...' becomes an instruction.",
+      "keyword": "untrusted|fence|injection|prompt injection|instructions|sanitiz"
+    }
+  ]
+}
