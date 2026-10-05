@@ -251,7 +251,7 @@ describe("verifyImplementationGreen", () => {
 
   it("FAILs when limits are exceeded, and PASSes exactly at the limit", () => {
     const many = Array.from({ length: 6 }, (_, i) => file("src/core/f" + i + ".ts", { additions: 1, deletions: 0 }));
-    const w = (a: number, d: number) => { diff: [file("src/tools/widget.ts", { additions: a, deletions: d })] };
+    const w = (a: number, d: number) => ({ diff: [file("src/tools/widget.ts", { additions: a, deletions: d })] });
     expect(green({ diff: many }).status).toBe("FAIL");
     expect(green({ diff: many.slice(0, 5) }).status).toBe("PASS");
     expect(green(w(101, 0)).status).toBe("FAIL");
