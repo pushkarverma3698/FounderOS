@@ -103,7 +103,7 @@ describe("capability questions", () => {
   });
 
   it("says plainly when the capability does not exist", () => {
-    const reply = ask("can you send tweets")!;
+    const reply = ask("do you have a tool for tweets")!;
     expect(reply).toMatch(/^No/);
     expect(reply).toContain("tweets");
     expect(reply).not.toContain("`");
@@ -123,6 +123,18 @@ describe("capability questions", () => {
     "can you help me",
     "do you have time",
     "can you summarize this",
+    // A request about one particular thing is an instruction to act, never a capability question.
+    "can you send it",
+    "can you schedule this",
+    "can you send the email",
+    "can you read my email",
+    "can you call me",
+    // A noun after a verb may be a person or a thing; "no tool for tashi" would be false.
+    "can you message tashi",
+    "can you send tweets",
+    // A bare noun or an unmatched verb is not proof that a tool covers it.
+    "can you apply",
+    "can you upload cv",
   ])("passes the request %j to the planner", (text) => {
     expect(ask(text)).toBeNull();
   });

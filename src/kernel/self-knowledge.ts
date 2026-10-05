@@ -75,6 +75,13 @@ const EXTERNAL_VERBS: ReadonlySet<string> = new Set([
   "send", "post", "publish", "schedule", "tweet", "text", "call", "message", "book", "pay", "buy", "order", "deploy", "upload", "delete",
 ]);
 const EXPLICIT_TOOL_WORDS: ReadonlySet<string> = new Set(["tool", "tools", "integration", "integrations"]);
+/**
+ * Words that point at one particular thing. "can you send it" / "can you tailor my cv" is a request
+ * to act, not a question about ability, so it goes to the planner.
+ */
+const SPECIFIC_REFERENCE: ReadonlySet<string> = new Set([
+  "it", "this", "that", "these", "those", "the", "my", "our", "his", "her", "their", "him", "them", "me", "us", "now",
+]);
 
 /** Lowercase alphanumeric words; every other character separates. */
 export function wordsOf(text: string): string[] {
@@ -152,6 +159,7 @@ function answerCapability(words: readonly string[], departments: readonly SelfKn
   const opener = OPENERS.find((o) => startsWith(words, o));
   if (!opener) return null;
   const rest = words.slice(opener.length);
+  if (rest.some((w) => SPECIFIC_REFERENCE.has(w))) return null;
   const content = rest.filter((w) => !FILLER.has(w));
   if (content.length === 0 || content.length > CAPABILITY_MAX_CONTENT_WORDS) return null;
 
@@ -173,6 +181,8 @@ function answerCapability(words: readonly string[], departments: readonly SelfKn
     const wanted = new Set(matched.map(stem));
     let tools = [...toolTokens].filter(([, tokens]) => [...wanted].some((w) => tokens.has(w))).map(([name]) => name);
     const narrowed = tools.filter((n) => verbs.some((v) => toolTokens.get(n)?.has(stem(v))));
+    // A bare noun ("can you apply") or a verb no matching tool performs ("can you upload cv") is not proof of coverage.
+    if (verbs.length === 0 ? !explicit : narrowed.length === 0) return null;
     if (narrowed.length > 0) tools = narrowed;
     const shown = tools.slice(0, CAPABILITY_MAX_TOOLS_LISTED).map((n) => {
       const where = (byTool.get(n) ?? []).join(", ");
@@ -183,7 +193,9 @@ function answerCapability(words: readonly string[], departments: readonly SelfKn
   }
 
   // Nothing in the registry matches. A firm "no" only where the question is plainly about a tool or an outside action.
-  const externalAsk = verbs.some((v) => EXTERNAL_VERBS.has(v));
+  // A bare outside-world verb ("can you tweet") or an explicit tool question; a noun after a verb may be a
+  // person or a thing ("can you message tashi"), and "no tool for tashi" would be a false answer.
+  const externalAsk = nouns.length === 0 && verbs.some((v) => EXTERNAL_VERBS.has(v));
   if (!explicit && !externalAsk) return null;
   const asked = nouns.length > 0 ? nouns : verbs;
   if (nouns.length === 0 && verbs.every((v) => [...toolTokens.values()].some((t) => t.has(stem(v))))) return null;
