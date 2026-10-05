@@ -16,6 +16,10 @@ export interface ReadyMergePr {
   readonly prNumber: number;
   readonly title: string;
   readonly url: string;
+  /** The head the review and CI were read for. A merge button pins to it. Absent on rows built by hand. */
+  readonly headSha?: string;
+  /** The branch it merges into. */
+  readonly base?: string;
 }
 
 export interface Unreachable {
@@ -138,7 +142,14 @@ export async function collectReadyToMerge(
         continue;
       }
 
-      ready.push({ repo: slug, prNumber: pr.number, title: pr.title, url: pr.html_url });
+      ready.push({
+        repo: slug,
+        prNumber: pr.number,
+        title: pr.title,
+        url: pr.html_url,
+        headSha: pr.head.sha,
+        base: pr.base.ref,
+      });
     } catch (err) {
       unreachable.push({
         repo: slug,
