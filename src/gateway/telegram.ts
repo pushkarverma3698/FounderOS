@@ -34,7 +34,7 @@ import { handleReplied, handleRejected } from "./live-application-commands.js";
 import { handleProfile } from "./profile-commands.js";
 import { handleWifeCommands } from "./wife-commands.js";
 import { registerGoalCommands } from "./goal-commands.js";
-import { handleTask, handleRepoChoice, handleRepoReply } from "./task-command.js";
+import { handleTask, handleRepoChoice, handleRepoReply, lookupQueuedDuplicate } from "./task-command.js";
 import { handleEngine } from "./engine-command.js";
 import { handleReview } from "./review-command.js";
 import { handleFocus, handleProjects } from "./focus-commands.js";
@@ -177,13 +177,12 @@ export function registerHandlers(bot: Bot, access: ChatAccessConfig = defaultCha
     }
     return runKernelText(ctx, `Remind me ${text}`);
   });
-  // The registry read is dynamically imported so this transport file does not pull
-  // the database into the bot's startup path (same reason as jobsDeps below).
-  // Shared by the command and by the repo buttons it puts on screen: two copies
-  // would be two answers to "which repos may I dispatch to", and the button list
-  // drifting from the parser's allowlist is a button that refuses its own label.
+  // The registry read is dynamically imported so this transport file does not pull the database into the
+  // bot's startup path (same reason as jobsDeps below). Shared by the command and by the repo buttons it
+  // puts on screen: two copies would be two answers to "which repos may I dispatch to".
   const taskDeps = {
     runKernelText,
+    findQueuedDuplicate: lookupQueuedDuplicate,
     listRegisteredRepos: async () => {
       const [{ listRegisteredDispatchRepos }, { TENANT }] = await Promise.all([
         import("../db/queries.js"),
